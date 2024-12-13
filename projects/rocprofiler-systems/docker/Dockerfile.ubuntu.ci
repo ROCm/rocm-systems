@@ -31,9 +31,9 @@ RUN apt-get update && \
         python3-pip texinfo unzip wget zip zlib1g-dev && \
     apt-get autoclean && \
     if [ "${OS_VERSION}" == "24.04" ]; then \
-        python3 -m pip install --break-system-packages 'cmake==3.18.4' \
+        python3 -m pip install --break-system-packages 'cmake==3.21' \
     else \
-        python3 -m pip install 'cmake==3.18.4'; \
+        python3 -m pip install 'cmake==3.21'; \
     fi
 
 COPY ./dyninst-source /tmp/dyninst

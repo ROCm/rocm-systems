@@ -14,6 +14,7 @@ set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/mproc.cpp
     ${CMAKE_CURRENT_LIST_DIR}/perf.cpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.cpp
     ${CMAKE_CURRENT_LIST_DIR}/state.cpp
     ${CMAKE_CURRENT_LIST_DIR}/timemory.cpp
     ${CMAKE_CURRENT_LIST_DIR}/utility.cpp)
@@ -29,13 +30,13 @@ set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/dynamic_library.hpp
     ${CMAKE_CURRENT_LIST_DIR}/exception.hpp
     ${CMAKE_CURRENT_LIST_DIR}/gpu.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/hip_runtime.hpp
     ${CMAKE_CURRENT_LIST_DIR}/locking.hpp
     ${CMAKE_CURRENT_LIST_DIR}/mproc.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perf.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rccl.hpp
     ${CMAKE_CURRENT_LIST_DIR}/redirect.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.hpp
     ${CMAKE_CURRENT_LIST_DIR}/state.hpp
     ${CMAKE_CURRENT_LIST_DIR}/timemory.hpp
     ${CMAKE_CURRENT_LIST_DIR}/utility.hpp)
@@ -54,6 +55,10 @@ add_subdirectory(containers)
 target_include_directories(rocprofiler-systems-core-library BEFORE
                            PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 
+target_include_directories(
+    rocprofiler-systems-core-library
+    PRIVATE ${PROJECT_SOURCE_DIR}/external/timemory/source/timemory/tpls/cereal)
+
 target_link_libraries(rocprofiler-systems-core-library
                       PRIVATE rocprofiler-systems::rocprofiler-systems-interface-library)
 target_link_libraries(
@@ -67,8 +72,7 @@ target_link_libraries(
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-perfetto>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-timemory>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-mpi>
-        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-hip>
-        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-rocm-smi>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-rocm>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-static-libgcc-optional>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-static-libstdcxx-optional>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-sanitizer>

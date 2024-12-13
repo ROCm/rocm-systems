@@ -228,7 +228,7 @@ Generating a default configuration file
    ROCPROFSYS_PROFILE                                  = false
    ROCPROFSYS_USE_SAMPLING                             = false
    ROCPROFSYS_USE_PROCESS_SAMPLING                     = true
-   ROCPROFSYS_USE_ROCTRACER                            = true
+   ROCPROFSYS_USE_ROCM                                 = true
    ROCPROFSYS_USE_ROCM_SMI                             = true
    ROCPROFSYS_USE_KOKKOSP                              = false
    ROCPROFSYS_USE_CODE_COVERAGE                        = false
@@ -248,9 +248,6 @@ Generating a default configuration file
    ROCPROFSYS_PERFETTO_FILE                            = perfetto-trace.proto
    ROCPROFSYS_PERFETTO_FILL_POLICY                     = discard
    ROCPROFSYS_PERFETTO_SHMEM_SIZE_HINT_KB              = 4096
-   ROCPROFSYS_ROCTRACER_HSA_ACTIVITY                   = false
-   ROCPROFSYS_ROCTRACER_HSA_API                        = false
-   ROCPROFSYS_ROCTRACER_HSA_API_TYPES                  =
    ROCPROFSYS_SAMPLING_CPUS                            =
    ROCPROFSYS_SAMPLING_DELAY                           = 0.5
    ROCPROFSYS_SAMPLING_FREQ                            = 10
@@ -363,13 +360,10 @@ Viewing the setting descriptions
    | ROCPROFSYS_PERFETTO_FILL_POLICY          | Behavior when perfetto buffer is ful... |
    | ROCPROFSYS_PERFETTO_SHMEM_SIZE_HINT_KB   | Hint for shared-memory buffer size i... |
    | ROCPROFSYS_PRECISION                     | Set the global output precision for ... |
-   | ROCPROFSYS_ROCTRACER_HSA_ACTIVITY        | Enable HSA activity tracing support     |
-   | ROCPROFSYS_ROCTRACER_HSA_API             | Enable HSA API tracing support          |
-   | ROCPROFSYS_ROCTRACER_HSA_API_TYPES       | HSA API type to collect                 |
    | ROCPROFSYS_SAMPLING_CPUS                 | CPUs to collect frequency informatio... |
    | ROCPROFSYS_SAMPLING_DELAY                | Number of seconds to wait before the... |
    | ROCPROFSYS_SAMPLING_FREQ                 | Number of software interrupts per se... |
-   | ROCPROFSYS_SAMPLING_GPUS                 | Devices to query when ROCPROFSYS_USE_... |
+   | ROCPROFSYS_SAMPLING_GPUS                 | Devices to query when ROCPROFSYS_USE... |
    | ROCPROFSYS_SCIENTIFIC                    | Set the global numerical reporting t... |
    | ROCPROFSYS_STRICT_CONFIG                 | Throw errors for unknown setting nam... |
    | ROCPROFSYS_SUPPRESS_CONFIG               | Disable processing of setting config... |
@@ -391,13 +385,13 @@ Viewing the setting descriptions
    | ROCPROFSYS_TRACE                         | Enable perfetto backend                 |
    | ROCPROFSYS_USE_PID                       | Enable tagging filenames with proces... |
    | ROCPROFSYS_USE_ROCM_SMI                  | Enable sampling GPU power, temp, uti... |
-   | ROCPROFSYS_USE_ROCTRACER                 | Enable ROCM tracing                     |
+   | ROCPROFSYS_USE_ROCM                      | Enable ROCM tracing                     |
    | ROCPROFSYS_USE_SAMPLING                  | Enable statistical sampling of call-... |
    | ROCPROFSYS_USE_PROCESS_SAMPLING          | Enable a background thread which sam... |
    | ROCPROFSYS_PROFILE                       | Enable timemory backend                 |
    | ROCPROFSYS_VERBOSE                       | Verbosity level                         |
    | ROCPROFSYS_WIDTH                         | Set the global output width for comp... |
-   |-----------------------------------------|-----------------------------------------|
+   |------------------------------------------|-----------------------------------------|
 
 Viewing components
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

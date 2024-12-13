@@ -22,6 +22,7 @@
 
 #include "config.hpp"
 #include "common/defines.h"
+#include "common/static_object.hpp"
 #include "constraint.hpp"
 #include "debug.hpp"
 #include "defines.hpp"
@@ -29,9 +30,9 @@
 #include "mproc.hpp"
 #include "perf.hpp"
 #include "perfetto.hpp"
+#include "rocprofiler-sdk.hpp"
 #include "utility.hpp"
 
-#include <asm-generic/errno-base.h>
 #include <timemory/backends/capability.hpp>
 #include <timemory/backends/dmp.hpp>
 #include <timemory/backends/mpi.hpp>
@@ -52,6 +53,7 @@
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/join.hpp>
 #include <timemory/utility/signals.hpp>
+#include <timemory/utility/types.hpp>
 
 #include <algorithm>
 #include <array>
@@ -60,6 +62,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
 #include <fstream>
 #include <limits>
 #include <linux/capability.h>
@@ -67,6 +70,7 @@
 #include <ostream>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <unistd.h>
 #include <utility>
 
@@ -76,10 +80,23 @@ using settings = tim::settings;
 
 namespace
 {
+int  verbose_value  = tim::get_env<int>("ROCPROFSYS_VERBOSE", 0, false);
+bool debug_value    = tim::get_env<bool>("ROCPROFSYS_DEBUG", false, false);
+bool is_ci_value    = tim::get_env<bool>("ROCPROFSYS_CI", false, false);
+auto configure_once = std::once_flag{};
+
 TIMEMORY_NOINLINE bool&
 _settings_are_configured()
 {
     static bool _v = false;
+    return _v;
+}
+
+auto*&
+get_config_impl()
+{
+    static auto*& _v = common::static_object<std::shared_ptr<settings>>::construct(
+        common::do_not_destroy{}, settings::shared_instance());
     return _v;
 }
 
@@ -97,7 +114,7 @@ get_config()
 std::string
 get_setting_name(std::string _v)
 {
-    static const auto _prefix = tim::string_view_t{ "rocprofsys_" };
+    constexpr auto _prefix = tim::string_view_t{ "rocprofsys_" };
     for(auto& itr : _v)
         itr = tolower(itr);
     auto _pos = _v.find(_prefix);
@@ -195,7 +212,7 @@ configure_settings(bool _init)
 
     if(settings_are_configured()) return;
 
-    if(get_is_continuous_integration() && get_state() < State::Init)
+    if(is_ci_value && get_state() < State::Init)
     {
         timemory_print_demangled_backtrace<64>();
         ROCPROFSYS_THROW("config::configure_settings() called before "
@@ -220,17 +237,17 @@ configure_settings(bool _init)
     tim::manager::add_metadata("ROCPROFSYS_COMPILER_VERSION",
                                ROCPROFSYS_COMPILER_VERSION);
 
-#if ROCPROFSYS_HIP_VERSION > 0
-    tim::manager::add_metadata("ROCPROFSYS_HIP_VERSION", ROCPROFSYS_HIP_VERSION_STRING);
-    tim::manager::add_metadata("ROCPROFSYS_HIP_VERSION_MAJOR",
-                               ROCPROFSYS_HIP_VERSION_MAJOR);
-    tim::manager::add_metadata("ROCPROFSYS_HIP_VERSION_MINOR",
-                               ROCPROFSYS_HIP_VERSION_MINOR);
-    tim::manager::add_metadata("ROCPROFSYS_HIP_VERSION_PATCH",
-                               ROCPROFSYS_HIP_VERSION_PATCH);
+#if ROCPROFSYS_ROCM_VERSION > 0
+    tim::manager::add_metadata("ROCPROFSYS_ROCM_VERSION", ROCPROFSYS_ROCM_VERSION_STRING);
+    tim::manager::add_metadata("ROCPROFSYS_ROCM_VERSION_MAJOR",
+                               ROCPROFSYS_ROCM_VERSION_MAJOR);
+    tim::manager::add_metadata("ROCPROFSYS_ROCM_VERSION_MINOR",
+                               ROCPROFSYS_ROCM_VERSION_MINOR);
+    tim::manager::add_metadata("ROCPROFSYS_ROCM_VERSION_PATCH",
+                               ROCPROFSYS_ROCM_VERSION_PATCH);
 #endif
 
-    auto _config = settings::shared_instance();
+    auto _config = *get_config_impl();
 
     // if using timemory, default to perfetto being off
     auto _default_perfetto_v = !tim::get_env<bool>("ROCPROFSYS_PROFILE", false, false);
@@ -294,23 +311,14 @@ configure_settings(bool _init)
                               "Enable causal profiling analysis", false, "backend",
                               "causal", "analysis");
 
-    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_ROCTRACER",
+    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_ROCM",
                               "Enable ROCm API and kernel tracing", true, "backend",
-                              "roctracer", "rocm");
-
-    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_ROCPROFILER",
-                              "Enable ROCm hardware counters", true, "backend",
-                              "rocprofiler", "rocm");
+                              "rocm");
 
     ROCPROFSYS_CONFIG_SETTING(
         bool, "ROCPROFSYS_USE_ROCM_SMI",
         "Enable sampling GPU power, temp, utilization, and memory usage", true, "backend",
         "rocm_smi", "rocm", "process_sampling");
-
-    ROCPROFSYS_CONFIG_SETTING(
-        bool, "ROCPROFSYS_USE_ROCTX",
-        "Enable ROCtx API. Warning! Out-of-order ranges may corrupt perfetto flamegraph",
-        false, "backend", "roctracer", "rocm", "roctx");
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_SAMPLING",
                               "Enable statistical sampling of call-stack", false,
@@ -616,41 +624,7 @@ configure_settings(bool _init)
                               "sampling", "hardware_counters")
         ->set_choices(perf::get_config_choices());
 
-    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_ROCTRACER_HIP_API",
-                              "Enable HIP API tracing support", true, "roctracer", "rocm",
-                              "advanced");
-
-    ROCPROFSYS_CONFIG_SETTING(
-        bool, "ROCPROFSYS_ROCTRACER_HIP_API_BACKTRACE",
-        "Enable annotating the perfetto debug annotation with backtraces", false,
-        "roctracer", "rocm", "perfetto", "advanced");
-
-    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_ROCTRACER_HIP_ACTIVITY",
-                              "Enable HIP activity tracing support", true, "roctracer",
-                              "rocm", "advanced");
-
-    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_ROCTRACER_HSA_ACTIVITY",
-                              "Enable HSA activity tracing support", false, "roctracer",
-                              "rocm", "advanced");
-
-    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_ROCTRACER_HSA_API",
-                              "Enable HSA API tracing support", false, "roctracer",
-                              "rocm", "advanced");
-
-    ROCPROFSYS_CONFIG_SETTING(std::string, "ROCPROFSYS_ROCTRACER_HSA_API_TYPES",
-                              "HSA API type to collect", "", "roctracer", "rocm",
-                              "advanced");
-
-    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_ROCTRACER_DISCARD_BARRIERS",
-                              "Skip barrier marker events in traces", false, "roctracer",
-                              "rocm", "advanced");
-
-    ROCPROFSYS_CONFIG_SETTING(
-        std::string, "ROCPROFSYS_ROCM_EVENTS",
-        "ROCm hardware counters. Use ':device=N' syntax to specify collection on device "
-        "number N, e.g. ':device=0'. If no device specification is provided, the event "
-        "is collected on every available device",
-        "", "rocprofiler", "rocm", "hardware_counters");
+    rocprofiler_sdk::config_settings(_config);
 
     ROCPROFSYS_CONFIG_SETTING(std::string, "ROCPROFSYS_ROCM_SMI_METRICS",
                               "rocm-smi metrics to collect: busy, temp, power, mem_usage",
@@ -669,12 +643,6 @@ configure_settings(bool _init)
                               "Combine Perfetto traces. If not explicitly set, it will "
                               "default to the value of ROCPROFSYS_COLLAPSE_PROCESSES",
                               false, "perfetto", "data", "advanced");
-
-    ROCPROFSYS_CONFIG_SETTING(
-        bool, "ROCPROFSYS_PERFETTO_ROCTRACER_PER_STREAM",
-        "Separate roctracer GPU side traces (copies, kernels) into separate "
-        "tracks based on the stream they're enqueued into",
-        true, "perfetto", "roctracer", "rocm", "advanced");
 
     ROCPROFSYS_CONFIG_SETTING(
         std::string, "ROCPROFSYS_PERFETTO_FILL_POLICY",
@@ -703,18 +671,6 @@ configure_settings(bool _init)
         "the function arguments (when available). Disabling this "
         "feature may dramatically reduce the size of the trace",
         true, "perfetto", "data", "debugging", "advanced");
-
-    ROCPROFSYS_CONFIG_SETTING(
-        bool, "ROCPROFSYS_PERFETTO_COMPACT_ROCTRACER_ANNOTATIONS",
-        "When PERFETTO_ANNOTATIONS, USE_ROCTRACER, and ROCTRACER_HIP_API are all "
-        "enabled, enabling this option will result in the arg information for HIP API "
-        "calls to all be within one annotation (e.g., args=\"stream=0x0, dst=0x1F, "
-        "sizeBytes=64, src=0x08, kind=1\"). When disabled, each parameter will be an "
-        "individual annotation (e.g. stream, dst, sizeBytes, etc.). The benefit of the "
-        "former is that it is faster to serialize and consumes less file space; the "
-        "benefit of the latter is that it becomes much easier to find slices in the "
-        "trace with the same value",
-        false, "perfetto", "data", "debugging", "roctracer", "rocm", "advanced");
 
     ROCPROFSYS_CONFIG_SETTING(
         uint64_t, "ROCPROFSYS_THREAD_POOL_SIZE",
@@ -1045,6 +1001,10 @@ configure_settings(bool _init)
 
     settings::suppress_config() = true;
 
+    if(auto opt = get_setting_value<int>("ROCPROFSYS_VERBOSE"); opt) verbose_value = *opt;
+    if(auto opt = get_setting_value<bool>("ROCPROFSYS_DEBUG"); opt) debug_value = *opt;
+    if(auto opt = get_setting_value<bool>("ROCPROFSYS_CI"); opt) is_ci_value = *opt;
+
     if(get_env("ROCPROFSYS_MONOCHROME", _config->get<bool>("ROCPROFSYS_MONOCHROME")))
         tim::log::monochrome() = true;
 
@@ -1106,6 +1066,10 @@ configure_settings(bool _init)
 
     ROCPROFSYS_BASIC_VERBOSE(2, "configuration complete\n");
 
+    if(auto opt = get_setting_value<int>("ROCPROFSYS_VERBOSE"); opt) verbose_value = *opt;
+    if(auto opt = get_setting_value<bool>("ROCPROFSYS_DEBUG"); opt) debug_value = *opt;
+    if(auto opt = get_setting_value<bool>("ROCPROFSYS_CI"); opt) is_ci_value = *opt;
+
     _settings_are_configured() = true;
 }
 
@@ -1140,8 +1104,6 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         _set("ROCPROFSYS_PROFILE", false);
         _set("ROCPROFSYS_USE_CAUSAL", false);
         _set("ROCPROFSYS_USE_ROCM_SMI", false);
-        _set("ROCPROFSYS_USE_ROCTRACER", false);
-        _set("ROCPROFSYS_USE_ROCPROFILER", false);
         _set("ROCPROFSYS_USE_KOKKOSP", false);
         _set("ROCPROFSYS_USE_RCCLP", false);
         _set("ROCPROFSYS_USE_OMPT", false);
@@ -1164,12 +1126,11 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
 
     if(gpu::device_count() == 0)
     {
-#if ROCPROFSYS_HIP_VERSION > 0
-        ROCPROFSYS_BASIC_VERBOSE(1, "No HIP devices were found: disabling roctracer, "
-                                    "rocprofiler, and rocm_smi...\n");
+#if ROCPROFSYS_ROCM_VERSION > 0
+        ROCPROFSYS_BASIC_VERBOSE(
+            1, "No ROCm devices were found: disabling rocm and rocm_smi...\n");
 #endif
-        _set("ROCPROFSYS_USE_ROCPROFILER", false);
-        _set("ROCPROFSYS_USE_ROCTRACER", false);
+        _set("ROCPROFSYS_USE_ROCM", false);
         _set("ROCPROFSYS_USE_ROCM_SMI", false);
     }
 
@@ -1202,9 +1163,8 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         _set("ROCPROFSYS_USE_TRACE", false);
         _set("ROCPROFSYS_PROFILE", false);
         _set("ROCPROFSYS_USE_CAUSAL", false);
+        _set("ROCPROFSYS_USE_ROCM", false);
         _set("ROCPROFSYS_USE_ROCM_SMI", false);
-        _set("ROCPROFSYS_USE_ROCTRACER", false);
-        _set("ROCPROFSYS_USE_ROCPROFILER", false);
         _set("ROCPROFSYS_USE_KOKKOSP", false);
         _set("ROCPROFSYS_USE_RCCLP", false);
         _set("ROCPROFSYS_USE_OMPT", false);
@@ -1389,22 +1349,9 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
     _handle_use_option("ROCPROFSYS_USE_OMPT", "ompt");
     _handle_use_option("ROCPROFSYS_USE_RCCLP", "rcclp");
     _handle_use_option("ROCPROFSYS_USE_ROCM_SMI", "rocm_smi");
-    _handle_use_option("ROCPROFSYS_USE_ROCTRACER", "roctracer");
-    _handle_use_option("ROCPROFSYS_USE_ROCPROFILER", "rocprofiler");
+    _handle_use_option("ROCPROFSYS_USE_ROCM", "rocm");
 
-#if !defined(ROCPROFSYS_USE_ROCTRACER) || ROCPROFSYS_USE_ROCTRACER == 0
-    _config->find("ROCPROFSYS_USE_ROCTRACER")->second->set_hidden(true);
-    for(const auto& itr : _config->disable_category("roctracer"))
-        _config->find(itr)->second->set_hidden(true);
-#endif
-
-#if !defined(ROCPROFSYS_USE_ROCPROFILER) || ROCPROFSYS_USE_ROCPROFILER == 0
-    _config->find("ROCPROFSYS_USE_ROCPROFILER")->second->set_hidden(true);
-    for(const auto& itr : _config->disable_category("rocprofiler"))
-        _config->find(itr)->second->set_hidden(true);
-#endif
-
-#if !defined(ROCPROFSYS_USE_ROCM_SMI) || ROCPROFSYS_USE_ROCM_SMI == 0
+#if !defined(ROCPROFSYS_USE_ROCM) || ROCPROFSYS_USE_ROCM == 0
     _config->find("ROCPROFSYS_USE_ROCM_SMI")->second->set_hidden(true);
     for(const auto& itr : _config->disable_category("rocm_smi"))
         _config->find(itr)->second->set_hidden(true);
@@ -1567,7 +1514,7 @@ print_banner(std::ostream& _os)
                                { "tag", ROCPROFSYS_GIT_DESCRIBE },
                                { "", ROCPROFSYS_LIBRARY_ARCH },
                                { "compiler", ROCPROFSYS_COMPILER_STRING },
-                               { "rocm", ROCPROFSYS_HIP_VERSION_COMPAT_STRING } });
+                               { "rocm", ROCPROFSYS_ROCM_VERSION_COMPAT_STRING } });
 
     // <NAME> <VERSION> (<PROPERTIES>)
     if(!_properties.empty())
@@ -1797,10 +1744,7 @@ get_debug_env()
 bool
 get_is_continuous_integration()
 {
-    if(!settings_are_configured())
-        return tim::get_env<bool>("ROCPROFSYS_CI", false, false);
-    static auto _v = get_config()->find("ROCPROFSYS_CI");
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+    return is_ci_value;
 }
 
 bool
@@ -1818,8 +1762,8 @@ get_debug_finalize()
 bool
 get_debug()
 {
-    static auto _v = get_config()->find("ROCPROFSYS_DEBUG");
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+    std::call_once(configure_once, []() { (void) get_config(); });
+    return debug_value;
 }
 
 bool
@@ -1842,15 +1786,15 @@ get_verbose_env()
 int
 get_verbose()
 {
-    static auto _v = get_config()->find("ROCPROFSYS_VERBOSE");
-    return static_cast<tim::tsettings<int>&>(*_v->second).get();
+    std::call_once(configure_once, []() { (void) get_config(); });
+    return verbose_value;
 }
 
 bool&
 get_use_perfetto()
 {
-    static auto _v = get_config()->find("ROCPROFSYS_TRACE");
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+    static auto _v = get_config()->at("ROCPROFSYS_TRACE");
+    return static_cast<tim::tsettings<bool>&>(*_v).get();
 }
 
 bool&
@@ -1868,54 +1812,10 @@ get_use_causal()
 }
 
 bool
-get_use_roctracer()
-{
-#if defined(ROCPROFSYS_USE_ROCTRACER) && ROCPROFSYS_USE_ROCTRACER > 0
-    static auto _v = get_config()->find("ROCPROFSYS_USE_ROCTRACER");
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-#else
-    return false;
-#endif
-}
-
-bool
-get_perfetto_roctracer_per_stream()
-{
-#if defined(ROCPROFSYS_USE_ROCTRACER) && ROCPROFSYS_USE_ROCTRACER > 0
-    static auto _v = get_config()->find("ROCPROFSYS_PERFETTO_ROCTRACER_PER_STREAM");
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-#else
-    return false;
-#endif
-}
-
-bool
-get_use_rocprofiler()
-{
-#if defined(ROCPROFSYS_USE_ROCPROFILER) && ROCPROFSYS_USE_ROCPROFILER > 0
-    static auto _v = get_config()->find("ROCPROFSYS_USE_ROCPROFILER");
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-#else
-    return false;
-#endif
-}
-
-bool
 get_use_rocm_smi()
 {
-#if defined(ROCPROFSYS_USE_ROCM_SMI) && ROCPROFSYS_USE_ROCM_SMI > 0
+#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
     static auto _v = get_config()->find("ROCPROFSYS_USE_ROCM_SMI");
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-#else
-    return false;
-#endif
-}
-
-bool
-get_use_roctx()
-{
-#if defined(ROCPROFSYS_USE_ROCTRACER) && ROCPROFSYS_USE_ROCTRACER > 0
-    static auto _v = get_config()->find("ROCPROFSYS_USE_ROCTX");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 #else
     return false;
@@ -2029,34 +1929,6 @@ get_sampling_cputime_signal()
 {
     static auto _v = get_config()->find("ROCPROFSYS_SAMPLING_CPUTIME_SIGNAL");
     return static_cast<tim::tsettings<int>&>(*_v->second).get();
-}
-
-bool
-get_trace_hip_api()
-{
-    static auto _v = get_config()->find("ROCPROFSYS_ROCTRACER_HIP_API");
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-}
-
-bool
-get_trace_hip_activity()
-{
-    static auto _v = get_config()->find("ROCPROFSYS_ROCTRACER_HIP_ACTIVITY");
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-}
-
-bool
-get_trace_hsa_api()
-{
-    static auto _v = get_config()->find("ROCPROFSYS_ROCTRACER_HSA_API");
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-}
-
-bool
-get_trace_hsa_activity()
-{
-    static auto _v = get_config()->find("ROCPROFSYS_ROCTRACER_HSA_ACTIVITY");
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
 size_t
@@ -2173,14 +2045,6 @@ uint64_t
 get_thread_pool_size()
 {
     static uint64_t _v = get_config()->get<uint64_t>("ROCPROFSYS_THREAD_POOL_SIZE");
-    return _v;
-}
-
-std::string
-get_trace_hsa_api_types()
-{
-    static std::string _v =
-        get_config()->get<std::string>("ROCPROFSYS_ROCTRACER_HSA_API_TYPES");
     return _v;
 }
 
@@ -2360,7 +2224,7 @@ get_process_sampling_duration()
 std::string
 get_sampling_gpus()
 {
-#if defined(ROCPROFSYS_USE_ROCM_SMI) && ROCPROFSYS_USE_ROCM_SMI > 0
+#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
     static auto _v = get_config()->find("ROCPROFSYS_SAMPLING_GPUS");
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 #else
@@ -2373,13 +2237,6 @@ get_trace_thread_locks()
 {
     static auto _v = get_config()->find("ROCPROFSYS_TRACE_THREAD_LOCKS");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-}
-
-std::string
-get_rocm_events()
-{
-    static auto _v = get_config()->find("ROCPROFSYS_ROCM_EVENTS");
-    return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 
 bool

@@ -35,6 +35,8 @@ target_link_libraries(
             timemory::timemory-extensions
             timemory::timemory-core)
 
+add_target_flag_if_avail(rocprofiler-systems-instrument "-Wno-deprecated-declarations")
+
 set_target_properties(
     rocprofiler-systems-instrument
     PROPERTIES BUILD_RPATH "\$ORIGIN:\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"

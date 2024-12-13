@@ -15,14 +15,12 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-threading
 rocprofiler_systems_add_interface_library(
     rocprofiler-systems-dyninst
     "Provides flags and libraries for Dyninst (dynamic instrumentation)")
-rocprofiler_systems_add_interface_library(rocprofiler-systems-hip
-                                          "Provides flags and libraries for HIP")
+rocprofiler_systems_add_interface_library(rocprofiler-systems-rocm
+                                          "Provides flags and libraries for ROCm")
 rocprofiler_systems_add_interface_library(rocprofiler-systems-roctracer
                                           "Provides flags and libraries for roctracer")
 rocprofiler_systems_add_interface_library(rocprofiler-systems-rocprofiler
                                           "Provides flags and libraries for rocprofiler")
-rocprofiler_systems_add_interface_library(rocprofiler-systems-rocm-smi
-                                          "Provides flags and libraries for rocm-smi")
 rocprofiler_systems_add_interface_library(
     rocprofiler-systems-rccl
     "Provides flags for ROCm Communication Collectives Library (RCCL)")
@@ -50,10 +48,7 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-compile-definition
 
 # libraries with relevant compile definitions
 set(ROCPROFSYS_EXTENSION_LIBRARIES
-    rocprofiler-systems::rocprofiler-systems-hip
-    rocprofiler-systems::rocprofiler-systems-roctracer
-    rocprofiler-systems::rocprofiler-systems-rocprofiler
-    rocprofiler-systems::rocprofiler-systems-rocm-smi
+    rocprofiler-systems::rocprofiler-systems-rocm
     rocprofiler-systems::rocprofiler-systems-rccl
     rocprofiler-systems::rocprofiler-systems-bfd
     rocprofiler-systems::rocprofiler-systems-mpi
@@ -127,14 +122,11 @@ endforeach()
 
 # ----------------------------------------------------------------------------------------#
 #
-# hip version
+# ROCm Version
 #
 # ----------------------------------------------------------------------------------------#
 
-if(ROCPROFSYS_USE_HIP
-   OR ROCPROFSYS_USE_ROCTRACER
-   OR ROCPROFSYS_USE_ROCPROFILER
-   OR ROCPROFSYS_USE_ROCM_SMI)
+if(ROCPROFSYS_USE_ROCM)
     find_package(ROCmVersion)
 
     if(NOT ROCmVersion_FOUND)
@@ -164,13 +156,13 @@ if(ROCPROFSYS_USE_HIP
     endif()
 
     set(ROCPROFSYS_ROCM_VERSION ${ROCmVersion_FULL_VERSION})
-    set(ROCPROFSYS_HIP_VERSION_MAJOR ${ROCmVersion_MAJOR_VERSION})
-    set(ROCPROFSYS_HIP_VERSION_MINOR ${ROCmVersion_MINOR_VERSION})
-    set(ROCPROFSYS_HIP_VERSION_PATCH ${ROCmVersion_PATCH_VERSION})
-    set(ROCPROFSYS_HIP_VERSION ${ROCmVersion_TRIPLE_VERSION})
+    set(ROCPROFSYS_ROCM_VERSION_MAJOR ${ROCmVersion_MAJOR_VERSION})
+    set(ROCPROFSYS_ROCM_VERSION_MINOR ${ROCmVersion_MINOR_VERSION})
+    set(ROCPROFSYS_ROCM_VERSION_PATCH ${ROCmVersion_PATCH_VERSION})
+    set(ROCPROFSYS_ROCM_VERSION ${ROCmVersion_TRIPLE_VERSION})
 
-    if(ROCPROFSYS_HIP_VERSION_MAJOR GREATER_EQUAL 4 AND ROCPROFSYS_HIP_VERSION_MINOR
-                                                        GREATER 3)
+    if(ROCPROFSYS_ROCM_VERSION_MAJOR GREATER_EQUAL 4 AND ROCPROFSYS_ROCM_VERSION_MINOR
+                                                         GREATER 3)
         set(roctracer_kfdwrapper_LIBRARY)
     endif()
 
@@ -181,64 +173,30 @@ if(ROCPROFSYS_USE_HIP
     rocprofiler_systems_add_feature(ROCPROFSYS_ROCM_VERSION
                                     "ROCm version used by rocprofiler-systems")
 else()
-    set(ROCPROFSYS_HIP_VERSION "0.0.0")
-    set(ROCPROFSYS_HIP_VERSION_MAJOR 0)
-    set(ROCPROFSYS_HIP_VERSION_MINOR 0)
-    set(ROCPROFSYS_HIP_VERSION_PATCH 0)
+    set(ROCPROFSYS_ROCM_VERSION "0.0.0")
+    set(ROCPROFSYS_ROCM_VERSION_MAJOR 0)
+    set(ROCPROFSYS_ROCM_VERSION_MINOR 0)
+    set(ROCPROFSYS_ROCM_VERSION_PATCH 0)
 endif()
 
 # ----------------------------------------------------------------------------------------#
 #
-# HIP
+# ROCm
 #
 # ----------------------------------------------------------------------------------------#
 
-if(ROCPROFSYS_USE_HIP)
-    find_package(hip ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
-    rocprofiler_systems_target_compile_definitions(rocprofiler-systems-hip
-                                                   INTERFACE ROCPROFSYS_USE_HIP)
-    target_link_libraries(rocprofiler-systems-hip INTERFACE hip::host)
-endif()
+if(ROCPROFSYS_USE_ROCM)
+    find_package(rocprofiler-sdk ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
+    rocprofiler_systems_target_compile_definitions(rocprofiler-systems-rocm
+                                                   INTERFACE ROCPROFSYS_USE_ROCM)
+    target_link_libraries(rocprofiler-systems-rocm
+                          INTERFACE rocprofiler-sdk::rocprofiler-sdk)
 
-# ----------------------------------------------------------------------------------------#
-#
-# roctracer
-#
-# ----------------------------------------------------------------------------------------#
-
-if(ROCPROFSYS_USE_ROCTRACER)
-    find_package(roctracer ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
-    rocprofiler_systems_target_compile_definitions(rocprofiler-systems-roctracer
-                                                   INTERFACE ROCPROFSYS_USE_ROCTRACER)
-    target_link_libraries(
-        rocprofiler-systems-roctracer
-        INTERFACE roctracer::roctracer rocprofiler-systems::rocprofiler-systems-hip)
-endif()
-
-# ----------------------------------------------------------------------------------------#
-#
-# rocprofiler
-#
-# ----------------------------------------------------------------------------------------#
-if(ROCPROFSYS_USE_ROCPROFILER)
-    find_package(rocprofiler ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
-    rocprofiler_systems_target_compile_definitions(rocprofiler-systems-rocprofiler
-                                                   INTERFACE ROCPROFSYS_USE_ROCPROFILER)
-    target_link_libraries(rocprofiler-systems-rocprofiler
-                          INTERFACE rocprofiler::rocprofiler)
-endif()
-
-# ----------------------------------------------------------------------------------------#
-#
-# rocm-smi
-#
-# ----------------------------------------------------------------------------------------#
-
-if(ROCPROFSYS_USE_ROCM_SMI)
     find_package(rocm-smi ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
-    rocprofiler_systems_target_compile_definitions(rocprofiler-systems-rocm-smi
-                                                   INTERFACE ROCPROFSYS_USE_ROCM_SMI)
-    target_link_libraries(rocprofiler-systems-rocm-smi INTERFACE rocm-smi::rocm-smi)
+    target_link_libraries(rocprofiler-systems-rocm INTERFACE rocm-smi::rocm-smi)
+
+    # find_package(amd-smi ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
+    # target_link_libraries(rocprofiler-systems-rocm INTERFACE amd-smi::amd-smi)
 endif()
 
 # ----------------------------------------------------------------------------------------#

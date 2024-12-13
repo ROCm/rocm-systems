@@ -91,19 +91,21 @@ ROCPROFSYS_DEFINE_CATEGORY(project, rocprofsys, ROCPROFSYS_CATEGORY_NONE, "rocpr
 ROCPROFSYS_DEFINE_CATEGORY(category, host, ROCPROFSYS_CATEGORY_HOST, "host", "Host-side function tracing")
 ROCPROFSYS_DEFINE_CATEGORY(category, user, ROCPROFSYS_CATEGORY_USER, "user", "User-defined regions")
 ROCPROFSYS_DEFINE_CATEGORY(category, python, ROCPROFSYS_CATEGORY_PYTHON, "python", "Python regions")
-ROCPROFSYS_DEFINE_CATEGORY(category, device_hip, ROCPROFSYS_CATEGORY_DEVICE_HIP, "device_hip", "Device-side functions submitted via HIP API")
-ROCPROFSYS_DEFINE_CATEGORY(category, device_hsa, ROCPROFSYS_CATEGORY_DEVICE_HSA, "device_hsa", "Device-side functions submitted via HSA API")
-ROCPROFSYS_DEFINE_CATEGORY(category, rocm_hip, ROCPROFSYS_CATEGORY_ROCM_HIP, "rocm_hip", "Host-side HIP functions")
-ROCPROFSYS_DEFINE_CATEGORY(category, rocm_hsa, ROCPROFSYS_CATEGORY_ROCM_HSA, "rocm_hsa", "Host-side HSA functions")
-ROCPROFSYS_DEFINE_CATEGORY(category, rocm_roctx, ROCPROFSYS_CATEGORY_ROCM_ROCTX, "rocm_roctx", "ROCTx labels")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm, ROCPROFSYS_CATEGORY_ROCM, "rocm", "General ROCm tracing")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_hip_api, ROCPROFSYS_CATEGORY_ROCM_HIP_API, "rocm_hip_api", "ROCm HIP functions")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_hsa_api, ROCPROFSYS_CATEGORY_ROCM_HSA_API, "rocm_hsa_api", "ROCm HSA functions")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_kernel_dispatch, ROCPROFSYS_CATEGORY_ROCM_KERNEL_DISPATCH, "rocm_kernel_dispatch", "ROCm Kernel dispatch")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_memory_copy, ROCPROFSYS_CATEGORY_ROCM_MEMORY_COPY, "rocm_memory_copy", "ROCm Async Memory Copy")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_scratch_memory, ROCPROFSYS_CATEGORY_ROCM_SCRATCH_MEMORY, "rocm_scratch_memory", "ROCm kernel scratch memory reallocations")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_page_migration, ROCPROFSYS_CATEGORY_ROCM_PAGE_MIGRATION, "rocm_page_migration", "ROCm memory page migration")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_counter_collection, ROCPROFSYS_CATEGORY_ROCM_COUNTER_COLLECTION, "rocm_counter_collection", "ROCm device counter collection")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_marker_api, ROCPROFSYS_CATEGORY_ROCM_MARKER_API, "rocm_marker_api", "ROCTx labels")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_smi, ROCPROFSYS_CATEGORY_ROCM_SMI, "rocm_smi", "rocm-smi data")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_smi_busy, ROCPROFSYS_CATEGORY_ROCM_SMI_BUSY, "device_busy", "Busy percentage of a GPU device")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_smi_temp, ROCPROFSYS_CATEGORY_ROCM_SMI_TEMP, "device_temp",   "Temperature of a GPU device")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_smi_power, ROCPROFSYS_CATEGORY_ROCM_SMI_POWER, "device_power", "Power consumption of a GPU device")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_smi_memory_usage, ROCPROFSYS_CATEGORY_ROCM_SMI_MEMORY_USAGE, "device_memory_usage", "Memory usage of a GPU device")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rccl, ROCPROFSYS_CATEGORY_ROCM_RCCL, "rccl", "ROCm Communication Collectives Library (RCCL) regions")
-ROCPROFSYS_DEFINE_CATEGORY(category, roctracer, ROCPROFSYS_CATEGORY_ROCTRACER, "roctracer", "Kernel tracing provided by roctracer")
-ROCPROFSYS_DEFINE_CATEGORY(category, rocprofiler, ROCPROFSYS_CATEGORY_ROCPROFILER, "rocprofiler", "HW counter data provided by rocprofiler")
 ROCPROFSYS_DEFINE_CATEGORY(category, pthread, ROCPROFSYS_CATEGORY_PTHREAD, "pthread", "POSIX threading functions")
 ROCPROFSYS_DEFINE_CATEGORY(category, kokkos, ROCPROFSYS_CATEGORY_KOKKOS, "kokkos", "KokkosTools regions")
 ROCPROFSYS_DEFINE_CATEGORY(category, mpi, ROCPROFSYS_CATEGORY_MPI, "mpi", "MPI regions")
@@ -151,19 +153,21 @@ using name = perfetto_category<Tp...>;
         ROCPROFSYS_PERFETTO_CATEGORY(category::user),                                    \
         ROCPROFSYS_PERFETTO_CATEGORY(category::python),                                  \
         ROCPROFSYS_PERFETTO_CATEGORY(category::sampling),                                \
-        ROCPROFSYS_PERFETTO_CATEGORY(category::device_hip),                              \
-        ROCPROFSYS_PERFETTO_CATEGORY(category::device_hsa),                              \
-        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_hip),                                \
-        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_hsa),                                \
-        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_roctx),                              \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm),                                    \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_hip_api),                            \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_hsa_api),                            \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_kernel_dispatch),                    \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_memory_copy),                        \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_scratch_memory),                     \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_page_migration),                     \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_counter_collection),                 \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_marker_api),                         \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_smi),                                \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_smi_busy),                           \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_smi_temp),                           \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_smi_power),                          \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_smi_memory_usage),                   \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_rccl),                               \
-        ROCPROFSYS_PERFETTO_CATEGORY(category::roctracer),                               \
-        ROCPROFSYS_PERFETTO_CATEGORY(category::rocprofiler),                             \
         ROCPROFSYS_PERFETTO_CATEGORY(category::pthread),                                 \
         ROCPROFSYS_PERFETTO_CATEGORY(category::kokkos),                                  \
         ROCPROFSYS_PERFETTO_CATEGORY(category::mpi),                                     \

@@ -109,13 +109,6 @@ set(_ROCPROFSYS_PAPI_COMPONENTS
     )
 
 if(ROCPROFSYS_PAPI_AUTO_COMPONENTS)
-    # rocm
-    if(ROCPROFSYS_USE_HIP
-       OR ROCPROFSYS_USE_ROCTRACER
-       OR ROCPROFSYS_USE_ROCM_SMI)
-        list(APPEND _ROCPROFSYS_PAPI_COMPONENTS rocm)
-    endif()
-
     # lmsensors
     find_path(ROCPROFSYS_PAPI_LMSENSORS_ROOT_DIR NAMES include/sensors/sensors.h
                                                        include/sensors.h)
@@ -209,28 +202,35 @@ externalproject_add(
     BUILD_IN_SOURCE 1
     PATCH_COMMAND
         ${CMAKE_COMMAND} -E env CC=${PAPI_C_COMPILER}
-        CFLAGS=-fPIC\ -O3\ -Wno-stringop-truncation LIBS=-lrt LDFLAGS=-lrt
-        ${ROCPROFSYS_PAPI_EXTRA_ENV} <SOURCE_DIR>/configure --quiet
+        CFLAGS=-fPIC\ -O3\ -Wno-stringop-truncation\ -Wno-use-after-free LIBS=-lrt
+        LDFLAGS=-lrt ${ROCPROFSYS_PAPI_EXTRA_ENV} <SOURCE_DIR>/configure --quiet
         --prefix=${ROCPROFSYS_PAPI_INSTALL_DIR} --with-static-lib=yes --with-shared-lib=no
         --with-perf-events --with-tests=no
         --with-components=${_ROCPROFSYS_PAPI_COMPONENTS}
         --libdir=${ROCPROFSYS_PAPI_INSTALL_DIR}/lib
     CONFIGURE_COMMAND
-        ${CMAKE_COMMAND} -E env CFLAGS=-fPIC\ -O3\ -Wno-stringop-truncation
+        ${CMAKE_COMMAND} -E env
+        CFLAGS=-fPIC\ -O3\ -Wno-stringop-truncation\ -Wno-use-after-free
         ${ROCPROFSYS_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} static install -s -j
         ${ROCPROFSYS_PAPI_CONFIGURE_JOBS}
-    BUILD_COMMAND ${CMAKE_COMMAND} -E env CFLAGS=-fPIC\ -O3\ -Wno-stringop-truncation
-                  ${ROCPROFSYS_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} utils install-utils -s
+    BUILD_COMMAND
+        ${CMAKE_COMMAND} -E env
+        CFLAGS=-fPIC\ -O3\ -Wno-stringop-truncation\ -Wno-use-after-free
+        ${ROCPROFSYS_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} utils install-utils -s
     INSTALL_COMMAND ""
     BUILD_BYPRODUCTS "${_ROCPROFSYS_PAPI_BUILD_BYPRODUCTS}")
 
 # target for re-executing the installation
 add_custom_target(
     rocprofiler-systems-papi-install
-    COMMAND ${CMAKE_COMMAND} -E env CFLAGS=-fPIC\ -O3\ -Wno-stringop-truncation
-            ${ROCPROFSYS_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} static install -s
-    COMMAND ${CMAKE_COMMAND} -E env CFLAGS=-fPIC\ -O3\ -Wno-stringop-truncation
-            ${ROCPROFSYS_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} utils install-utils -s
+    COMMAND
+        ${CMAKE_COMMAND} -E env
+        CFLAGS=-fPIC\ -O3\ -Wno-stringop-truncation\ -Wno-use-after-free
+        ${ROCPROFSYS_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} static install -s
+    COMMAND
+        ${CMAKE_COMMAND} -E env
+        CFLAGS=-fPIC\ -O3\ -Wno-stringop-truncation\ -Wno-use-after-free
+        ${ROCPROFSYS_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} utils install-utils -s
     WORKING_DIRECTORY ${ROCPROFSYS_PAPI_SOURCE_DIR}/src
     COMMENT "Installing PAPI...")
 

@@ -31,7 +31,7 @@ RUN zypper --non-interactive update -y && \
         gcc-c++ git libnuma-devel openmpi3-devel papi-devel python3-pip \
         rpm-build wget && \
     zypper --non-interactive clean --all && \
-    python3 -m pip install 'cmake==3.18.4'
+    python3 -m pip install 'cmake==3.21'
 
 COPY ./dyninst-source /tmp/dyninst
 

@@ -12,15 +12,7 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.20)
     cmake_policy(SET CMP0115 NEW)
 endif()
 
-if(ROCPROFSYS_USE_ROCPROFILER
-   AND rocprofiler_LIBRARY_DIR
-   AND ROCmVersion_TRIPLE_VERSION VERSION_LESS 5.2.0
-   AND NOT CMAKE_INSTALL_RPATH_USE_LINK_PATH)
-    set(ROCPROFSYS_LIB_INSTALL_RPATH
-        "\$ORIGIN:\$ORIGIN/${PROJECT_NAME}:${rocprofiler_LIBRARY_DIR}")
-else()
-    set(ROCPROFSYS_LIB_INSTALL_RPATH "\$ORIGIN:\$ORIGIN/${PROJECT_NAME}")
-endif()
+set(ROCPROFSYS_LIB_INSTALL_RPATH "\$ORIGIN:\$ORIGIN/${PROJECT_NAME}")
 
 # ------------------------------------------------------------------------------#
 #
@@ -50,10 +42,7 @@ target_link_libraries(
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-bfd>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-mpi>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-ptl>
-        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-hip>
-        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-roctracer>
-        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-rocprofiler>
-        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-rocm-smi>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-rocm>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-rccl>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-static-libgcc-optional>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-static-libstdcxx-optional>

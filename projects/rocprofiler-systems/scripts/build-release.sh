@@ -372,7 +372,7 @@ if [ "${IS_DOCKER}" -ne 0 ]; then git config --global --add safe.directory ${PWD
 
 verbose-run echo "Build rocprofiler-systems installers with generators: ${GENERATORS}"
 
-build-and-package ${WITH_CORE} ${DISTRO}-core -DROCPROFSYS_USE_HIP=OFF -DROCPROFSYS_USE_MPI=OFF
-build-and-package ${WITH_MPI} ${DISTRO}-${MPI_IMPL} -DROCPROFSYS_USE_HIP=OFF -DROCPROFSYS_USE_MPI=ON
-build-and-package ${WITH_ROCM} ${DISTRO}-rocm-${ROCM_VERSION} -DROCPROFSYS_USE_HIP=ON -DROCPROFSYS_USE_MPI=OFF
-build-and-package ${WITH_ROCM_MPI} ${DISTRO}-rocm-${ROCM_VERSION}-${MPI_IMPL} -DROCPROFSYS_USE_HIP=ON -DROCPROFSYS_USE_MPI=ON
+build-and-package ${WITH_CORE} ${DISTRO}-core -DROCPROFSYS_USE_ROCM=OFF -DROCPROFSYS_USE_MPI=OFF
+build-and-package ${WITH_MPI} ${DISTRO}-${MPI_IMPL} -DROCPROFSYS_USE_ROCM=OFF -DROCPROFSYS_USE_MPI=ON
+build-and-package ${WITH_ROCM} ${DISTRO}-rocm-${ROCM_VERSION} -DROCPROFSYS_USE_ROCM=ON -DROCPROFSYS_USE_MPI=OFF
+build-and-package ${WITH_ROCM_MPI} ${DISTRO}-rocm-${ROCM_VERSION}-${MPI_IMPL} -DROCPROFSYS_USE_ROCM=ON -DROCPROFSYS_USE_MPI=ON

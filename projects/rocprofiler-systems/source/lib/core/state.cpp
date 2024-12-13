@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "state.hpp"
+#include "common/static_object.hpp"
 #include "config.hpp"
 #include "debug.hpp"
 #include "utility.hpp"
@@ -35,8 +36,9 @@ namespace
 auto&
 get_state_value()
 {
-    static auto _v = std::atomic<State>{ State::PreInit };
-    return _v;
+    static auto*& _v = common::static_object<std::atomic<State>>::construct(
+        common::do_not_destroy{}, State::PreInit);
+    return *_v;
 }
 
 ThreadState&

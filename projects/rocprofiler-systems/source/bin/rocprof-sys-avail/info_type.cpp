@@ -29,8 +29,6 @@
 #include "library/components/fork_gotcha.hpp"
 #include "library/components/mpi_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
-#include "library/components/rocprofiler.hpp"
-#include "library/components/roctracer.hpp"
 
 #include <timemory/components/definition.hpp>
 #include <timemory/enum.h>
