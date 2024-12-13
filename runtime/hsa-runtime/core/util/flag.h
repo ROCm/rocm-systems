@@ -284,6 +284,12 @@ class Flag {
 
     var = os::GetEnvVar("HSA_IMAGE_ENABLE_3D_SWIZZLE_DEBUG");
     enable_3d_swizzle_ = (var == "1") ? true : false;
+
+    // This allows convient usage in scripting for enabling dtif.
+    // IE the user should set HSA_DTIF_ENABLED = 1 to enable DTIF.
+    // HSA_DTIF_ENABLED = 0 will disable DTIF backend.
+    var = os::GetEnvVar("HSA_ENABLE_DTIF");
+    enable_dtif_ = (var == "1") ? true : false;
   }
 
   void parse_masks(uint32_t maxGpu, uint32_t maxCU) {
@@ -404,6 +410,7 @@ class Flag {
 
   bool enable_3d_swizzle() const { return enable_3d_swizzle_; }
 
+  bool enable_dtif() const { return enable_dtif_; }
  private:
   bool check_flat_scratch_;
   bool enable_vm_fault_message_;
@@ -437,6 +444,7 @@ class Flag {
   uint32_t signal_abort_timeout_;
   int  async_events_thread_priority_;
   bool enable_3d_swizzle_ = false;
+  bool enable_dtif_;
 
   SDMA_OVERRIDE enable_sdma_;
   SDMA_OVERRIDE enable_peer_sdma_;
