@@ -15,13 +15,6 @@ subtrees:
     - file: install/install.rst
       title: ROCm Systems Profiler installation guide
 
-  - caption: Tutorials
-    entries:
-    - url: https://github.com/ROCm/rocprofiler-systems/tree/amd-mainline/examples
-      title: GitHub examples
-    - file: tutorials/video-tutorials.rst
-      title: Video tutorials
-
   - caption: How to
     entries:
     - file: how-to/configuring-validating-environment.rst
@@ -45,17 +38,17 @@ subtrees:
 
   - caption: Conceptual
     entries:
+    - file: conceptual/rocprof-sys-feature-set.rst
+      title: Features and use cases
     - file: conceptual/data-collection-modes.rst
       title: Data collection modes
-    - file: conceptual/rocprof-sys-feature-set.rst
-      title: The ROCm Systems Profiler feature set and use cases
 
   - caption: Reference
     entries:
     - file: reference/development-guide.rst
       title: Development guide
     - file: reference/rocprof-sys-glossary.rst
-      title: ROCm Systems Profiler glossary
+      title: Glossary
     - file: doxygen/html/files
       title: API library
     - file: doxygen/html/functions
@@ -65,6 +58,13 @@ subtrees:
     - file: doxygen/html/annotated
       title: Classes, structures, and interfaces
 
+  - caption: Tutorials
+    entries:
+    - url: https://github.com/ROCm/rocprofiler-systems/tree/amd-mainline/examples
+      title: GitHub examples
+    - file: tutorials/video-tutorials.rst
+      title: Video tutorials
+
   - caption: About
     entries:
-    - file: license.md
+    - file: license.rst

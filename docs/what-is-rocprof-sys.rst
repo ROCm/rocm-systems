@@ -2,9 +2,9 @@
    :description: ROCm Systems Profiler introduction, explanation, and reference
    :keywords: rocprof-sys, rocprofiler-systems, Omnitrace, ROCm, profiler, explanation, introduction, what is, tracking, visualization, tool, Instinct, accelerator, AMD
 
-******************
+******************************
 What is ROCm Systems Profiler?
-******************
+******************************
 
 ROCm Systems Profiler is designed for the high-level profiling and comprehensive tracing
 of applications running on the CPU or the CPU and GPU. It supports dynamic binary
