@@ -173,7 +173,7 @@ PAPI components from different namespaces:
    about the PAPI library used by ROCm Systems Profiler
    (because ROCm Systems Profiler statically links to ``libpapi``). However, all of these tools are
    installed with the prefix ``rocprof-sys-`` with
-   underscores replaced with hypens, for example ``papi_avail`` becomes ``rocprof-sys-papi-avail``.
+   underscores replaced with hyphens, for example ``papi_avail`` becomes ``rocprof-sys-papi-avail``.
 
 ROCPROFSYS_ROCM_EVENTS
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

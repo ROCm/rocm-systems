@@ -238,7 +238,7 @@ Metadata JSON Sample
    }
 
 Configuring the ROCm Systems Profiler output
-========================================
+============================================
 
 ROCm Systems Profiler includes a core set of options for controlling the format
 and contents of the output files. For additional information, see the guide on

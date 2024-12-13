@@ -28,7 +28,7 @@ be the same size.
    ``OS`` is the operating system, and ``ABI`` is the application binary interface,
    for example, ``libpyrocprofsys.cpython-38-x86_64-linux-gnu.so``.
 
-Getting Started
+Getting started
 ========================================
 
 The ROCm Systems Profiler Python package is installed in ``lib/pythonX.Y/site-packages/rocprofsys``.
@@ -44,7 +44,7 @@ Both the ``share/rocprofiler-systems/setup-env.sh`` script and the module file i
 environment variable.
 
 Running ROCm Systems Profiler on a Python script
-========================================
+================================================
 
 ROCm Systems Profiler provides an ``rocprof-sys-python`` helper bash script which
 ensures ``PYTHONPATH`` is properly set and the correct Python interpreter is used.
@@ -200,7 +200,7 @@ And then run using the command ``rocprof-sys-python -b -- ./example.py``, ROCm S
    |-----------------------------------------------------------|
 
 ROCm Systems Profiler Python source instrumentation
-========================================
+===================================================
 
 Starting with the unmodified ``example.py`` script above, import the ``rocprofsys`` module:
 
@@ -268,7 +268,7 @@ original ``rocprofsys-python ./example.py`` results:
    numerous functions called when more complex modules are imported, such as ``import numpy``.
 
 ROCm Systems Profiler Python source instrumentation configuration
--------------------------------------------------------------
+-----------------------------------------------------------------
 
 Within the Python source code, the profiler can be configured by directly
 modifying the ``rocprof-sys.profiler.config`` data fields.
