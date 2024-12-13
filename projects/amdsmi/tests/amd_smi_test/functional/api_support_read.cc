@@ -63,8 +63,6 @@ void TestAPISupportRead::Close() {
 }
 
 void TestAPISupportRead::Run(void) {
-  amdsmi_status_t err;
-
   TestBase::Run();
   if (setup_failed_) {
     IF_VERB(STANDARD) {

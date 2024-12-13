@@ -41,6 +41,8 @@ namespace smi {
 std::string AMDSmiDrm::find_file_in_folder(const std::string& folder,
                const std::string& regex) {
     std::string file_name;
+    // TODO: The closedir function has some non-standard attributes that are being ignored here
+    //       which is causing a warning to be thrown
     using dir_ptr = std::unique_ptr<DIR, decltype(&closedir)>;
 
     struct dirent *dir = nullptr;
@@ -64,7 +66,6 @@ amdsmi_status_t AMDSmiDrm::init() {
     // using drm_device_ptr = std::unique_ptr(drmDevicePtr,
     //         decltype(&drmFreeDevice));
 
-    struct dirent *dir = nullptr;
     int fd = -1;
 
 
@@ -162,7 +163,7 @@ amdsmi_status_t AMDSmiDrm::init() {
            << "bdf_rocm | Received bdf: "
            << "\nWhole BDF: " << amd::smi::print_unsigned_hex_and_int(bdf_rocm)
            << "\nDomain = "
-           << amd::smi::print_unsigned_hex_and_int((bdf_rocm & 0xFFFFFFFF00000000) >> 32)
+           << amd::smi::print_unsigned_hex_and_int((bdf_rocm & static_cast<uint64_t>(0xFFFFFFFF00000000)) >> 32)
            << "; \nBus# = " << amd::smi::print_unsigned_hex_and_int((bdf_rocm & 0xFF00) >> 8)
            << "; \nDevice# = "<< amd::smi::print_unsigned_hex_and_int((bdf_rocm & 0xF8) >> 3)
            << "; \nFunction# = " << amd::smi::print_unsigned_hex_and_int((bdf_rocm & 0x7));
@@ -170,6 +171,8 @@ amdsmi_status_t AMDSmiDrm::init() {
         bdf.function_number = ((bdf_rocm & 0x7));
         bdf.device_number = ((bdf_rocm & 0xF8) >> 3);
         bdf.bus_number = ((bdf_rocm & 0xFF00) >> 8);
+        // TODO: This is throwing a compiler warning since bdf.domain_number is part of a struct
+        //       and is 48 bits long and throws a conversion warning
         bdf.domain_number = ((bdf_rocm & 0xFFFFFFFF00000000) >> 32);
         ss << __PRETTY_FUNCTION__ << " | " << "Received bdf: Domain = " << bdf.domain_number
            << "; Bus# = " << bdf.bus_number << "; Device# = "<< bdf.device_number

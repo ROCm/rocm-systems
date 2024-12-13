@@ -38,7 +38,7 @@ rsmi_test_refcount(uint64_t refcnt_type);
 
 static void rand_sleep_mod(int msec) {
   assert(msec > 10);
-  unsigned int seed = time(NULL);
+  uint64_t seed = static_cast<uint64_t>(time(NULL));
   std::mt19937_64 eng{seed};
   std::uniform_int_distribution<> dist{10, msec};
   std::this_thread::sleep_for(std::chrono::milliseconds{dist(eng)});

@@ -1474,7 +1474,6 @@ rsmi_status_t Device::restartAMDGpuDriver(void) {
   bool success = false;
   std::string out;
   bool wasGdmServiceActive = false;
-  bool restartInProgress = true;
   bool isRestartInProgress = true;
   bool isAMDGPUModuleLive = false;
   bool restartGDM = false;
@@ -1560,7 +1559,6 @@ rsmi_status_t Device::isRestartInProgress(bool *isRestartInProgress,
                                           bool *isAMDGPUModuleLive) {
   REQUIRE_ROOT_ACCESS
   std::ostringstream ss;
-  bool restartSuccessful = true;
   bool success = false;
   std::string out;
   bool deviceRestartInProgress = true;    // Assume in progress, we intend to disprove

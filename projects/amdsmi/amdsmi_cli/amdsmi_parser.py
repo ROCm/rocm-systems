@@ -203,6 +203,37 @@ class AMDSMIParser(argparse.ArgumentParser):
         return AMDSMILimitArgs
 
 
+    def _level_select(self):
+        """Custom action for setting clock frequencies to particular performance level"""
+        output_format = self.helpers.get_output_format()
+
+        class AMDSMIFreqArgs(argparse.Action):
+            def __call__(self, parser: AMDSMIParser, namespace: argparse.Namespace,
+                         values: list, option_string: Optional[str] = None) -> None:
+                # valid values
+                valid_clk_types = ('sclk', 'mclk', 'pcie', 'fclk', 'socclk')
+                clk_type = values[0]
+                perf_levels_str = values[1:]
+
+                # Check if the sclk and mclk parameters are valid
+                if clk_type not in valid_clk_types:
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(clk_type, output_format)
+
+                perf_levels = []
+                # Check if every item in perf level is valid
+                for level in perf_levels_str:
+                    if not level.isdigit():
+                        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(level, output_format)
+                    level = int(level)
+                    if level < 0:
+                        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(level, output_format)
+                    perf_levels.append(level)
+
+                clk_level_args = collections.namedtuple('clk_level_args', ['clk_type', 'perf_levels'])
+                setattr(namespace, self.dest, clk_level_args(clk_type, perf_levels))
+        return AMDSMIFreqArgs
+
+
     def _check_output_file_path(self):
         """ Argument action validator:
             Returns a path to a file from the output file path provided.
@@ -607,6 +638,10 @@ class AMDSMIParser(argparse.ArgumentParser):
         soc_pstate_help = "The available soc pstate policy"
         xgmi_plpd_help = "The available XGMI per-link power down policy"
         process_isolation_help = "The process isolation status"
+        clk_options = self.helpers.get_clock_types()[0]
+        clk_options.remove('PCIE')
+        clk_option_str = ", ".join(clk_options) + ", ALL"
+        clock_help = f"Show one or more valid clock frequency levels. Available options:\n\t{clk_option_str}"
 
         # Options arguments help text for Hypervisors and Baremetal
         ras_help = "Displays RAS features information"
@@ -642,6 +677,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             static_parser.add_argument('-B', '--board', action='store_true', required=False, help=board_help)
             static_parser.add_argument('-R', '--process-isolation', action='store_true', required=False, help=process_isolation_help)
             static_parser.add_argument('-r', '--ras', action='store_true', required=False, help=ras_help)
+            static_parser.add_argument('-C', '--clock', default=False, nargs='*', type=str, required=False, help=clock_help)
 
             # Options to display on Hypervisors and Baremetal
             if self.helpers.is_hypervisor() or self.helpers.is_baremetal():
@@ -1047,6 +1083,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         set_soc_pstate_help = "Set the GPU soc pstate policy using policy id\n"
         set_xgmi_plpd_help = "Set the GPU XGMI per-link power down policy using policy id\n"
         set_clk_limit_help = "Sets the sclk (aka gfxclk) or mclk minimum and maximum frequencies:\n\tamd-smi set -L (sclk | mclk) (min | max) value"
+        set_clock_freq_help = "Set the sclk (aka gfxclk), mclk, fclk, pcie, or socclk frequency performance level.\nCan take range of acceptable levels."
         set_process_isolation_help = "Enable or disable the GPU process isolation on a per partition basis:\n\t0 for disable and 1 for enable.\n"
 
         # Help text for CPU set options
@@ -1086,6 +1123,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 set_value_parser.add_argument('-o', '--power-cap', action='store', type=self._positive_int, required=False, help=set_power_cap_help, metavar='WATTS')
                 set_value_parser.add_argument('-p', '--soc-pstate', action='store', required=False, type=self._not_negative_int, help=set_soc_pstate_help, metavar='POLICY_ID')
                 set_value_parser.add_argument('-x', '--xgmi-plpd', action='store', required=False, type=self._not_negative_int, help=set_xgmi_plpd_help, metavar='POLICY_ID')
+                set_value_parser.add_argument('-c', '--clk-level', action=self._level_select(), nargs='+', required=False, help=set_clock_freq_help, metavar=('CLK_TYPE', 'PERF_LEVELS'))
 
             set_value_parser.add_argument('-L', '--clk-limit', action=self._limit_select(), nargs=3, required=False, help=set_clk_limit_help, metavar=('CLK_TYPE', 'LIM_TYPE', 'VALUE'))
             set_value_parser.add_argument('-R', '--process-isolation', action='store', choices=[0,1], type=self._not_negative_int, required=False, help=set_process_isolation_help, metavar='STATUS')

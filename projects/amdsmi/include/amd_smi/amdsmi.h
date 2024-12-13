@@ -961,7 +961,8 @@ typedef enum {
 #define AMDSMI_EVENT_MASK_FROM_INDEX(i) (1ULL << ((i) - 1))
 
 //! Maximum number of characters an event notification message will be
-#define MAX_EVENT_NOTIFICATION_MSG_SIZE 64
+// matches kfd message max size
+#define MAX_EVENT_NOTIFICATION_MSG_SIZE 96
 
 /**
  * Event notification data returned from event notification API
@@ -1415,7 +1416,7 @@ typedef struct {
 /**
  * @brief The following structures hold the gpu statistics for a device.
  */
-struct amdsmi_gpu_xcp_metrics_t {
+typedef struct {
   /* Utilization Instantaneous (%) */
   uint32_t gfx_busy_inst[AMDSMI_MAX_NUM_XCC];
   uint16_t jpeg_busy[AMDSMI_MAX_NUM_JPEG];
@@ -1423,7 +1424,7 @@ struct amdsmi_gpu_xcp_metrics_t {
 
   /* Utilization Accumulated (%) */
   uint64_t gfx_busy_acc[AMDSMI_MAX_NUM_XCC];
-};
+} amdsmi_gpu_xcp_metrics_t;
 
 
 typedef struct {
@@ -1622,7 +1623,7 @@ typedef struct {
   uint16_t num_partition;
 
   /* XCP (Graphic Cluster Partitions) metrics stats */
-  struct amdsmi_gpu_xcp_metrics_t xcp_stats[AMDSMI_MAX_NUM_XCP];
+  amdsmi_gpu_xcp_metrics_t xcp_stats[AMDSMI_MAX_NUM_XCP];
 
   /* PCIE other end recovery counter */
   uint32_t pcie_lc_perf_other_end_recovery;

@@ -63,7 +63,7 @@ namespace amd::smi
 
 constexpr uint16_t join_metrics_version(uint8_t format_rev, uint8_t content_rev)
 {
-  return (format_rev << 8 | content_rev);
+  return static_cast<uint16_t>((format_rev << 8 | content_rev));
 }
 
 constexpr uint16_t join_metrics_version(const AMDGpuMetricsHeader_v1_t& metrics_header)
@@ -473,8 +473,8 @@ AMDGpuDynamicMetricTblValues_t format_metric_row(const T& metric, const std::str
 void GpuMetricsBase_v16_t::dump_internal_metrics_table()
 {
   std::ostringstream ss;
-  auto idx = uint64_t(0);
-  auto idy = uint64_t(0);
+  auto idx = int64_t(0);
+  auto idy = int64_t(0);
   std::cout << __PRETTY_FUNCTION__ << " | ======= start ======= \n";
   ss << __PRETTY_FUNCTION__
      << " | ======= DEBUG ======= "
@@ -570,9 +570,16 @@ void GpuMetricsBase_v16_t::dump_internal_metrics_table()
     }
     for (auto& col : row.gfx_busy_inst) {
       ss << "\t [" << idx << "] [" << idy << "]: " << col;
+#if 1 // TODO: Refactor this code using make_ostream_joiner
+      //       Do for all occurences in this file
       if (idy + 1 != (std::end(row.gfx_busy_inst) - std::end(row.gfx_busy_inst) - 1)) {
         ss << ", ";
       }
+#else
+      std::copy(std::begin(row.gfx_busy_inst),
+                std::end(row.gfx_busy_inst),
+                amd::smi::make_ostream_joiner(&ss, ", "));
+#endif
       if (idx + 1 !=
           (std::end(m_gpu_metrics_tbl.m_xcp_stats) - std::end(m_gpu_metrics_tbl.m_xcp_stats) - 1)) {
         ss << "\n";
@@ -4024,7 +4031,7 @@ rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind, rsmi_gpu_metrics_t* smu) {
 
   dev->set_smi_device_id(dv_ind);
   uint32_t partition_id = 0;
-  auto ret = rsmi_dev_partition_id_get(dv_ind, &partition_id);
+  rsmi_dev_partition_id_get(dv_ind, &partition_id);
   dev->set_smi_partition_id(partition_id);
   dev->dev_log_gpu_metrics(ostrstream);
   const auto [error_code, external_metrics] = dev->dev_copy_internal_to_external_metrics();

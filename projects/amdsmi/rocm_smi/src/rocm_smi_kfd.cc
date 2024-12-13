@@ -879,7 +879,7 @@ int KFDNode::get_used_memory(uint64_t* used) {
       return 1;
   }
   struct kfd_ioctl_get_available_memory_args mem = {0, 0, 0};
-  mem.gpu_id = gpu_id_;
+  mem.gpu_id = static_cast<uint32_t>(gpu_id_);
   if (ioctl(kfd_fd, AMDKFD_IOC_AVAILABLE_MEMORY , &mem) != 0) {
     close(kfd_fd);
     return 1;
@@ -925,8 +925,7 @@ int KFDNode::get_cache_info(rsmi_gpu_cache_info_t *info) {
       // num_cu_shared – this can be fetched by counting the number of 1’s in the sibling_map.
       std::string sibling_map =
               get_properties_from_file(prop_file, "sibling_map ");
-      uint32_t num_cu_shared =
-              std::count(sibling_map.begin(), sibling_map.end(), '1');
+      uint32_t num_cu_shared = static_cast<uint32_t>(std::count(sibling_map.begin(), sibling_map.end(), '1'));
 
       // known cache type
       bool is_count_already = false;

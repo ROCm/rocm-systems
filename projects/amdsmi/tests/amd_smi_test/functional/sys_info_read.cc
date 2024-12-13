@@ -69,9 +69,7 @@ void TestSysInfoRead::Close() {
 void TestSysInfoRead::Run(void) {
   amdsmi_status_t err;
   uint64_t val_ui64;
-  uint32_t val_ui32;
   int32_t val_i32;
-  char buffer[80];
   amdsmi_version_t ver = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, nullptr};
 
   TestBase::Run();

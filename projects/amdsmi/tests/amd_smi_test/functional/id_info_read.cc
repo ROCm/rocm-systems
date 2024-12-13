@@ -67,7 +67,6 @@ void TestIdInfoRead::Run(void) {
   amdsmi_status_t err;
   uint16_t id;
   uint64_t val_ui64;
-  uint32_t drm_render_minor;
 
   char buffer[kBufferLen];
 

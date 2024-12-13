@@ -155,7 +155,6 @@ void TestMutualExclusion::Run(void) {
     // Set dummy values should to working, deterministic values.
     uint16_t dmy_ui16 = 0;
     uint32_t dmy_ui32 = 1;
-    uint32_t dmy_i32 = 0;
     uint64_t dmy_ui64 = 0;
     int64_t dmy_i64 = 0;
     char dmy_str[10];

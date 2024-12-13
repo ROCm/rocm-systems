@@ -695,7 +695,7 @@ static rsmi_status_t test_set_memory_partition(uint32_t dv_ind) {
 }
 
 template<typename T> constexpr float convert_mw_to_w(T mw) {
-    return static_cast<float>(mw / 1000.0);
+    return static_cast<float>(static_cast<double>(mw) / 1000.0);
 }
 
 
@@ -1112,7 +1112,7 @@ int main() {
     if (ret == RSMI_STATUS_SUCCESS) {
       ret = rsmi_dev_fan_speed_max_get(i, 0, &val_ui64);
       CHK_AND_PRINT_RSMI_ERR_RET(ret)
-      std::cout << (static_cast<float>(val_i64)/val_ui64) * 100;
+      std::cout << (static_cast<float>(val_i64)/static_cast<float>(val_ui64)) * 100;
       std::cout << "% (" << std::dec << val_i64 << "/"
                 << std::dec << val_ui64 << ")" << "\n";
     }

@@ -1020,8 +1020,9 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
 
     // If vendor name is empty and the vendor id is 0x1002, set vendor name to AMD vendor string
     if ((info->vendor_name != NULL && info->vendor_name[0] == '\0') && info->vendor_id == 0x1002) {
-        memset(info->vendor_name, 0, 38);
-        strncpy(info->vendor_name, "Advanced Micro Devices Inc. [AMD/ATI]", 37);
+        std::string amd_name = "Advanced Micro Devices Inc. [AMD/ATI]";
+        memset(info->vendor_name, 0, amd_name.size()+1);
+        strncpy(info->vendor_name, amd_name.c_str(), amd_name.size()+1);
     }
 
     // default to 0xffff as not supported
@@ -1506,7 +1507,6 @@ amdsmi_get_gpu_accelerator_partition_profile(amdsmi_processor_handle processor_h
 
     // TODO(amdsmi_team): add resources here ^
     auto tmp_partition_id = uint32_t(0);
-    auto tmp_xcd_count = uint16_t(0);
     amdsmi_status_t status = AMDSMI_STATUS_NOT_SUPPORTED;
 
     status = rsmi_wrapper(rsmi_dev_partition_id_get, processor_handle, &tmp_partition_id);
@@ -2196,7 +2196,7 @@ amdsmi_get_clock_info(amdsmi_processor_handle processor_handle, amdsmi_clk_type_
     }
     info->max_clk = max_freq;
     info->min_clk = min_freq;
-    info->clk_deep_sleep = sleep_state_freq;
+    info->clk_deep_sleep = static_cast<uint8_t>(sleep_state_freq);
 
     switch (clk_type) {
     case AMDSMI_CLK_TYPE_GFX:
@@ -2216,6 +2216,13 @@ amdsmi_get_clock_info(amdsmi_processor_handle processor_handle, amdsmi_clk_type_
       break;
     case AMDSMI_CLK_TYPE_DCLK1:
         info->clk = metrics.current_dclk1;
+        break;
+    case AMDSMI_CLK_TYPE_SOC:
+        info->clk = metrics.current_socclk;
+        break;
+    // fclk/df not supported by gpu metrics so providing default value which cannot be contrued to be valid
+    case AMDSMI_CLK_TYPE_DF:
+        info->clk = UINT32_MAX;
         break;
     default:
         return AMDSMI_STATUS_INVAL;
@@ -2486,7 +2493,6 @@ amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_handle, unsigned in
     amdsmi_status_t status = AMDSMI_STATUS_SUCCESS;
     SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
 
-    size_t len = AMDSMI_GPU_UUID_SIZE;
     amdsmi_asic_info_t asic_info = {};
     const uint8_t fcn = 0xff;
 
@@ -2549,7 +2555,7 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle, a
     }
 
     // pcie speed in sysfs returns in GT/s
-    info->pcie_static.max_pcie_speed = pcie_speed * 1000;
+    info->pcie_static.max_pcie_speed = static_cast<uint32_t>(pcie_speed * 1000);
 
     switch (info->pcie_static.max_pcie_speed) {
       case 2500:
@@ -2715,8 +2721,6 @@ amdsmi_get_link_topology_nearest(amdsmi_processor_handle processor_handle,
 
 
     auto status(amdsmi_status_t::AMDSMI_STATUS_SUCCESS);
-    constexpr auto kKFD_CRAT_INTRA_SOCKET_WEIGHT = uint32_t(13);
-    constexpr auto kKFD_CRAT_XGMI_WEIGHT = uint32_t(15);
 
     /*
      *  Note: This will need to be eventually consolidated within a unique link type.
@@ -2759,7 +2763,6 @@ amdsmi_get_link_topology_nearest(amdsmi_processor_handle processor_handle,
         uint64_t link_weight;
     };
 
-    using LinkTopogyOrderPair_t = std::pair<uint64_t, uint64_t>;
     /*
      *  Note: The link topology table is sorted by the number of hops and link weight.
      */
@@ -2815,7 +2818,6 @@ amdsmi_get_link_topology_nearest(amdsmi_processor_handle processor_handle,
 
                 // Link type matches what we are searching for?
                 auto io_link_type = translated_link_type(link_type);
-                auto io_link_type_bck(io_link_type);
                 auto num_hops = uint64_t(0);
                 if (auto api_status = amdsmi_topo_get_link_type(processor_handle, device_list[device_idx], &num_hops, &io_link_type);
                     (api_status != amdsmi_status_t::AMDSMI_STATUS_SUCCESS) || (translated_io_link_type(io_link_type) != link_type)) {
@@ -2846,7 +2848,7 @@ amdsmi_get_link_topology_nearest(amdsmi_processor_handle processor_handle,
      *  Note: The link topology table is sorted by the number of hops and link weight.
      */
     topology_nearest_info->processor_list[AMDSMI_MAX_DEVICES] = {nullptr};
-    topology_nearest_info->count = link_topology_order.size();
+    topology_nearest_info->count = static_cast<uint32_t>(link_topology_order.size());
     auto topology_nearest_counter = uint32_t(0);
     while (!link_topology_order.empty()) {
         auto link_info = link_topology_order.top();
@@ -3952,13 +3954,15 @@ amdsmi_status_t amdsmi_get_cpu_handles(uint32_t *cpu_count,
     }
 
     // Get the cpu count
-    *cpu_count = cpu_handles.size();
-    if (processor_handles == nullptr)
+    *cpu_count = static_cast<uint32_t>(cpu_handles.size());
+    if (processor_handles == nullptr) {
         return AMDSMI_STATUS_SUCCESS;
+    }
 
     // Copy the cpu socket handles
-    for (uint32_t i = 0; i < *cpu_count; i++)
+    for (uint32_t i = 0; i < *cpu_count; i++) {
         processor_handles[i] = reinterpret_cast<amdsmi_processor_handle>(cpu_handles[i]);
+    }
 
     return status;
 }
@@ -4001,28 +4005,32 @@ amdsmi_status_t amdsmi_get_cpucore_handles(uint32_t *cores_count,
         // Get the coress for each socket
         status = amdsmi_get_processor_handles_by_type(sockets[index], processor_type,
                                                       &plist[0], &cores_per_soc);
-        if (status != AMDSMI_STATUS_SUCCESS)
+        if (status != AMDSMI_STATUS_SUCCESS) {
             return status;
+        }
 
         core_handles.insert(core_handles.end(), plist.begin(), plist.end());
     }
 
     // Get the cores count
-    *cores_count = core_handles.size();
-    if (processor_handles == nullptr)
+    *cores_count = static_cast<uint32_t>(core_handles.size());
+    if (processor_handles == nullptr) {
         return AMDSMI_STATUS_SUCCESS;
+    }
 
     // Copy the core handles
-    for (uint32_t i = 0; i < *cores_count; i++)
+    for (uint32_t i = 0; i < *cores_count; i++) {
         processor_handles[i] = reinterpret_cast<amdsmi_processor_handle>(core_handles[i]);
+    }
 
     return status;
 }
 
 amdsmi_status_t amdsmi_get_esmi_err_msg(amdsmi_status_t status, const char **status_string)
 {
-    for (auto& iter : amd::smi::esmi_status_map) {
-        if (iter.first == status) {
+    for (const auto& iter : amd::smi::esmi_status_map) {
+        const amdsmi_status_t _status = status;
+        if (static_cast<int>(iter.first) == static_cast<int>(_status)) {
             *status_string = esmi_get_err_msg(static_cast<esmi_status_t>(iter.first));
             return iter.second;
         }

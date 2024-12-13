@@ -190,12 +190,11 @@ amdsmi_status_t smi_amdgpu_get_board_info(amd::smi::AMDSmiGPUDevice* device, amd
     std::string manufacturer_name_path = "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/manufacturer");
     std::string product_name_path = "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/product_name");
 
-    openFileAndModifyBuffer(model_number_path, info->model_number, AMDSMI_256_LENGTH);
-    openFileAndModifyBuffer(product_serial_path, info->product_serial, AMDSMI_NORMAL_STRING_LENGTH);
-    openFileAndModifyBuffer(fru_id_path, info->fru_id, AMDSMI_NORMAL_STRING_LENGTH);
-    openFileAndModifyBuffer(manufacturer_name_path, info->manufacturer_name,
-                            AMDSMI_MAX_STRING_LENGTH);
-    openFileAndModifyBuffer(product_name_path, info->product_name, AMDSMI_256_LENGTH);
+    openFileAndModifyBuffer(model_number_path, info->model_number, AMDSMI_MAX_STRING_LENGTH);
+    openFileAndModifyBuffer(product_serial_path, info->product_serial, AMDSMI_MAX_STRING_LENGTH);
+    openFileAndModifyBuffer(fru_id_path, info->fru_id, AMDSMI_MAX_STRING_LENGTH);
+    openFileAndModifyBuffer(manufacturer_name_path, info->manufacturer_name, AMDSMI_MAX_STRING_LENGTH);
+    openFileAndModifyBuffer(product_name_path, info->product_name, AMDSMI_MAX_STRING_LENGTH);
 
     std::ostringstream ss;
     ss << __PRETTY_FUNCTION__ << "[Before correction] "
@@ -275,6 +274,12 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
             break;
         case AMDSMI_CLK_TYPE_DCLK1:
             fullpath += "/pp_dpm_dclk1";
+            break;
+        case AMDSMI_CLK_TYPE_SOC:
+            fullpath += "/pp_dpm_socclk";
+            break;
+        case AMDSMI_CLK_TYPE_DF:
+            fullpath += "/pp_dpm_fclk";
             break;
         default:
             return AMDSMI_STATUS_INVAL;
@@ -522,7 +527,7 @@ amdsmi_status_t smi_amdgpu_get_driver_version(amd::smi::AMDSmiGPUDevice* device,
 
         fclose(fp);
         if (length) {
-            *length = version[len-1] == '\n' ? len - 1 : len;
+            *length = version[len-1] == '\n' ? static_cast<int>(len - 1) : static_cast<int>(len);
         }
         version[len-1] = version[len-1] == '\n' ? '\0' : version[len-1];
     }
@@ -584,6 +589,9 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(uint32_t device_id, char 
         case 0x74b6:
             strcpy(market_name, "MI308X");
             break;
+        case 0x74a5:
+            strcpy(market_name, "AMD Instinct MI325X");
+            break;
         case 0x74a9:
         case 0x74bd:
             strcpy(market_name, "AMD Instinct MI300X HF");
@@ -639,6 +647,7 @@ std::string smi_amdgpu_split_string(std::string str, char delim) {
     tokens.push_back(token);
     return token;  // return 1st match
   }
+  return "";
 }
 
 // wrapper to return string expression of a rsmi_status_t return

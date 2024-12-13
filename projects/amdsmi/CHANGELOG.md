@@ -3,6 +3,308 @@
 Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/projects/amdsmi](https://rocm.docs.amd.com/projects/amdsmi/en/latest/).
 
 ***All information listed below is for reference and subject to change.***
+## amd_smi_lib for ROCm 6.4.0
+
+### Added
+
+- **Added fclk and socclk info to `amd-smi metric -c/--clock`**.  
+  fclk and socclk information such as min and max clock have been added to the metric command, in line with all the other clocks.  
+
+  ```shell
+  amd-smi metric -c -g 1
+  ...
+          FCLK_0:
+            CLK: 2301 MHz
+            MIN_CLK: 601 MHz
+            MAX_CLK: 2301 MHz
+            CLK_LOCKED: N/A
+            DEEP_SLEEP: DISABLED
+        SOCCLK_0:
+            CLK: 1500 MHz
+            MIN_CLK: 500 MHz
+            MAX_CLK: 1500 MHz
+            CLK_LOCKED: N/A
+            DEEP_SLEEP: DISABLED
+  ```
+
+- **Added new command `amd-smi set -c/--clock-level`**.  
+  This new command sets the performance level of the selected clock on the desired GPUs. The command can accept a range of acceptable levels, but will not set the level when a level is beyond the number of frequency levels as show in `amd-smi static -C/--clock`.  
+
+```shell
+sudo amd-smi set -c sclk 5 6
+GPU: 0
+    CLK_LEVEL: Successfully changed sclk perf level(s) to 5, 6
+
+GPU: 1
+    CLK_LEVEL: level(s) 5, 6 is/are greater than performance levels supported for device
+```
+
+- **Added new command `amd-smi static -C/--clock`**.  
+  This new command displays the clock frequency performance levels for the selected GPUs and clocks.
+
+```shell
+amd-smi static --clock all -g 0
+GPU: 0
+    CLOCK:
+        SYS:
+            CURRENT LEVEL: 2
+            FREQUENCY_LEVELS:
+                0: 300 MHz
+                1: 904 MHz
+                2: 1165 MHz
+                3: 1360 MHz
+                4: 1440 MHz
+                5: 1544 MHz
+                6: 1627 MHz
+                7: 1720 MHz
+                8: 1800 MHz
+        MEM:
+            CURRENT LEVEL: 0
+            FREQUENCY_LEVELS:
+                0: 167 MHz
+        DF:
+            CURRENT LEVEL: 0
+            FREQUENCY_LEVELS:
+                0: 1400 MHz
+        SOC:
+            CURRENT LEVEL: 0
+            FREQUENCY_LEVELS:
+                0: 302 MHz
+        DCEF: N/A
+        VCLK0: N/A
+        VCLK1: N/A
+        DCLK0: N/A
+        DCLK1: N/A
+```
+
+## amd_smi_lib for ROCm 6.4.0
+
+### Added
+
+### Changed
+
+### Removed
+
+- **Removed `GFX_BUSY_ACC` from `amd-smi metric --usage`**.  
+  Displaying `GFX_BUSY_ACC` does not provide helpful outputs for users.  
+
+  Old output:  
+  ```shell
+  $ amd-smi metric --usage
+    GPU: 0
+        USAGE:
+            GFX_ACTIVITY: 0 %
+            UMC_ACTIVITY: 0 %
+            MM_ACTIVITY: N/A
+            VCN_ACTIVITY: [0 %, 0 %, 0 %, 0 %]
+            JPEG_ACTIVITY: [0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %]
+            GFX_BUSY_INST:
+                XCP_0: [0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %]
+            JPEG_BUSY:
+                XCP_0: [0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %]
+            VCN_BUSY:
+                XCP_0: [0 %, 0 %, 0 %, 0 %]
+            GFX_BUSY_ACC:
+                XCP_0: [N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+  ...
+  ```
+
+  New Output:  
+  ```shell
+  $ amd-smi metric --usage
+  GPU: 0
+      USAGE:
+          GFX_ACTIVITY: 0 %
+          UMC_ACTIVITY: 0 %
+          MM_ACTIVITY: N/A
+          VCN_ACTIVITY: [0 %, 0 %, 0 %, 0 %]
+          JPEG_ACTIVITY: [0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %]
+          GFX_BUSY_INST:
+              XCP_0: [0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %]
+          JPEG_BUSY:
+              XCP_0: [0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %]
+          VCN_BUSY:
+              XCP_0: [0 %, 0 %, 0 %, 0 %]
+  ...
+  ```
+
+
+### Optimized
+
+- **Modified `amd-smi` CLI to allow case insensitive arguments if the argument does not begin with a single dash**.  
+  - With this change `amd-smi version` and `amd-smi VERSION` will now yield the same output.
+  - `amd-smi static --bus` and `amd-smi STATIC --BUS` will produce identical results.
+  - `amd-smi static -b` and `amd-smi static -B` will still return different results (-b for bus and -B for board).
+
+- **Converted xgmi read and write from KB's to readable units**.  
+  - With this change `amd-smi xgmi` will now display the statistics in dynamically selected readable units.
+  - Example output is shown below.
+
+```shell
+$ amd-smi xgmi
+LINK METRIC TABLE:
+       bdf          bit_rate max_bandwidth link_type 0000:05:00.0 0000:26:00.0 0000:46:00.0 0000:65:00.0 0000:85:00.0 0000:a6:00.0 0000:c6:00.0 0000:e5:00.0
+GPU0   0000:05:00.0 32 Gb/s  512 Gb/s      XGMI
+ Read                                               N/A          1.123 PB     1.123 PB     1.123 PB     1.123 PB     1.123 PB     1.123 PB     1.123 PB
+ Write                                              N/A          229.1 MB     229.1 MB     229.1 MB     229.1 MB     229.1 MB     229.1 MB     229.1 MB
+GPU1   0000:26:00.0 32 Gb/s  512 Gb/s      XGMI
+ Read                                               1.123 PB     N/A          1.123 PB     1.123 PB     1.123 PB     1.123 PB     1.123 PB     1.123 PB
+ Write                                              229.1 MB     N/A          229.1 MB     229.1 MB     229.1 MB     229.1 MB     229.1 MB     229.1 MB
+GPU2   0000:46:00.0 32 Gb/s  512 Gb/s      XGMI
+ Read                                               1.123 PB     1.123 PB     N/A          1.123 PB     1.123 PB     1.123 PB     1.123 PB     1.123 PB
+ Write                                              229.1 MB     229.1 MB     N/A          229.1 MB     229.1 MB     229.1 MB     229.1 MB     229.1 MB
+...
+```
+
+### Resolved issues
+
+### Upcoming changes
+
+### Known issues
+
+- **AMD SMI only reports 63 GPU devices when setting CPX on all 8 GPUs**  
+    When setting CPX as a partition mode, there is a DRM node limitation of 64.  
+
+    This is a known limitation of the Linux kernel, not the driver. Other drivers, such as those using PCIe space (e.g., ast), may be occupying the necessary DRM nodes.   
+
+    The number of DRM nodes used can be checked via `ls /sys/class/drm`  
+
+    Options are as follows:
+    1) ***Workaround - removing other devices using DRM nodes***  
+
+        Recommended steps for removing unnecessary drivers:  
+        a. Unload amdgpu - `sudo rmmod amdgpu`  
+        b. Remove unnecessary driver(s) - ex. `sudo rmmod ast`  
+        c. Reload amgpu - `sudo modprobe amdgpu`  
+        d. Confirm `amd-smi list` reports all nodes (this can vary per MI ASIC)
+
+    2) ***Update your OS' kernel***  
+        Typically you can find examples online by searching "`Update kernel <your OS version> command line`"
+
+        Ex. "Update kernel Ubuntu 22.04 command line" should provide some good examples.  
+        https://phoenixnap.com/kb/how-to-update-kernel-ubuntu
+
+    3) ***Building and installing your own kernel***  
+        *This option is helpful for users on OS distributions that have not yet merged the necessary changes.*  
+        https://phoenixnap.com/kb/build-linux-kernel
+    
+        All changes are in the mainline kernel if users need to build their own.
+    
+        References to kernel changes:
+        ```text
+        for libdrm :
+        Author: James Zhu <James.Zhu@amd.com>
+    
+        Date:   Mon Aug 7 10:14:18 2023 -0400
+        
+            xf86drm: use drm device name to identify drm node type
+    
+            Currently drm node's minor range is used to identify node's type.
+    
+            Since kernel drm uses node type name and minor to generate drm
+    
+            device name, It will be more general to use drm device name to
+    
+            identify drm node type.
+    
+            Signed-off-by: James Zhu <James.Zhu@amd.com>
+    
+            Reviewed-by: Simon Ser <contact@emersion.fr>
+        
+        commit 1080273c2b31db6f031a7f889f3104f53ab4502c
+    
+        Author: James Zhu <James.Zhu@amd.com>
+    
+        Date:   Mon Aug 7 10:06:32 2023 -0400
+        
+            xf86drm: update DRM_NODE_NAME_MAX supporting more nodes
+    
+            Current DRM_NODE_NAME_MAX only can support up to 999 nodes,
+    
+            Update to support up to 2^MINORBITS nodes.
+    
+            Signed-off-by: James Zhu <James.Zhu@amd.com>
+    
+            Reviewed-by: Simon Ser <contact@emersion.fr>
+        ```
+
+## amd_smi_lib for ROCm 6.3.1
+
+### Added
+
+### Changed
+
+- **Changed `amd-smi monitor`: No longer display `ENC_CLOCK`/`DEC_CLOCK` but `VCLOCK` and `DCLOCK`**.  
+  Due to fix mentioned in `Resolved Issues`, this change was needed.  
+  Reason: Navi products use vclk and dclk for both encode and decode. On MI products, only decode is supported.  
+  Before:
+  ```shell
+  $ amd-smi monitor -n -d
+  GPU  ENC_UTIL  ENC_CLOCK  DEC_UTIL  DEC_CLOCK
+    0     0.0 %     29 MHz       N/A     22 MHz
+    1     0.0 %     29 MHz       N/A     22 MHz
+    2     0.0 %     29 MHz       N/A     22 MHz
+    3     0.0 %     29 MHz       N/A     22 MHz
+    4     0.0 %     29 MHz       N/A     22 MHz
+    5     0.0 %     29 MHz       N/A     22 MHz
+    6     0.0 %     29 MHz       N/A     22 MHz
+    7     0.0 %     29 MHz       N/A     22 MHz
+  ```
+  After:
+  ```shell
+  $ amd-smi monitor -n -d
+  GPU  ENC_UTIL  DEC_UTIL  VCLOCK  DCLOCK
+    0       N/A     0.0 %  29 MHz  22 MHz
+    1       N/A     0.0 %  29 MHz  22 MHz
+    2       N/A     0.0 %  29 MHz  22 MHz
+    3       N/A     0.0 %  29 MHz  22 MHz
+    4       N/A     0.0 %  29 MHz  22 MHz
+    5       N/A     0.0 %  29 MHz  22 MHz
+    6       N/A     0.0 %  29 MHz  22 MHz
+    7       N/A     0.0 %  29 MHz  22 MHz
+  ```
+
+### Removed
+
+### Optimized
+
+### Resolved issues
+
+- **Fixed `amd-smi monitor`'s encode/decode: `ENC_UTIL`, `DEC_UTIL`, and now associate `VCLOCK`/`DCLOCK` with both**.  
+  Navi products use vclk and dclk for both encode and decode. On MI products, only decode is supported. 
+
+  Navi products cannot support displaying ENC_UTIL % at this time.  
+
+  Before:
+  ```shell
+  $ amd-smi monitor -n -d
+  GPU  ENC_UTIL  ENC_CLOCK  DEC_UTIL  DEC_CLOCK
+    0     0.0 %     29 MHz       N/A     22 MHz
+    1     0.0 %     29 MHz       N/A     22 MHz
+    2     0.0 %     29 MHz       N/A     22 MHz
+    3     0.0 %     29 MHz       N/A     22 MHz
+    4     0.0 %     29 MHz       N/A     22 MHz
+    5     0.0 %     29 MHz       N/A     22 MHz
+    6     0.0 %     29 MHz       N/A     22 MHz
+    7     0.0 %     29 MHz       N/A     22 MHz
+  ```
+  After:
+  ```shell
+  $ amd-smi monitor -n -d
+  GPU  ENC_UTIL  DEC_UTIL  VCLOCK  DCLOCK
+    0       N/A     0.0 %  29 MHz  22 MHz
+    1       N/A     0.0 %  29 MHz  22 MHz
+    2       N/A     0.0 %  29 MHz  22 MHz
+    3       N/A     0.0 %  29 MHz  22 MHz
+    4       N/A     0.0 %  29 MHz  22 MHz
+    5       N/A     0.0 %  29 MHz  22 MHz
+    6       N/A     0.0 %  29 MHz  22 MHz
+    7       N/A     0.0 %  29 MHz  22 MHz
+  ```
+
+### Upcoming changes
+
+### Known issues
 
 ## amd_smi_lib for ROCm 6.3.0
 

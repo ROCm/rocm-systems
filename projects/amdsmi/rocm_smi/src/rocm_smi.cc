@@ -186,39 +186,6 @@ static uint64_t freq_string_to_int(const std::vector<std::string> &freq_lines,
   return static_cast<uint64_t>(freq*multiplier);
 }
 
-static void freq_volt_string_to_point(std::string in_line,
-                                                     rsmi_od_vddc_point_t *pt) {
-  std::istringstream fs_vlt(in_line);
-
-  assert(pt != nullptr);
-  THROW_IF_NULLPTR_DEREF(pt)
-
-  uint32_t ind;
-  float freq;
-  float volts;
-  std::string junk;
-  std::string freq_units_str;
-  std::string volts_units_str;
-
-  fs_vlt >> ind;
-  fs_vlt >> junk;  // colon
-  fs_vlt >> freq;
-  fs_vlt >> freq_units_str;
-  fs_vlt >> volts;
-  fs_vlt >> volts_units_str;
-
-  if (freq < 0) {
-    throw amd::smi::rsmi_exception(RSMI_STATUS_UNEXPECTED_SIZE, __FUNCTION__);
-  }
-
-  long double multiplier = get_multiplier_from_str(freq_units_str[0]);
-
-  pt->frequency = static_cast<uint64_t>(freq*multiplier);
-
-  multiplier = get_multiplier_from_str(volts_units_str[0]);
-  pt->voltage = static_cast<uint64_t>(volts*multiplier);
-}
-
 static void od_value_pair_str_to_range(std::string in_line, rsmi_range_t *rg) {
   std::istringstream fs_rng(in_line);
 
@@ -898,7 +865,7 @@ rsmi_status_t rsmi_ras_feature_info_get(
     auto eeprom_version = strtoul(
       feature_line.substr(strlen(version_key)).c_str(), nullptr, 16);
     if (errno == 0) {
-      ras_feature->ras_eeprom_version = eeprom_version;
+      ras_feature->ras_eeprom_version = static_cast<uint32_t>(eeprom_version);
     } else {
       return RSMI_STATUS_NOT_SUPPORTED;
     }
@@ -922,7 +889,7 @@ rsmi_status_t rsmi_ras_feature_info_get(
     auto schema = strtoul(
       feature_line.substr(strlen(schema_key)).c_str(), nullptr, 16);
     if (errno == 0) {
-      ras_feature->ecc_correction_schema_flag = schema;
+      ras_feature->ecc_correction_schema_flag = static_cast<uint32_t>(schema);
     } else {
       return RSMI_STATUS_NOT_SUPPORTED;
     }
@@ -2044,7 +2011,7 @@ rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
   // will have read-only perms, and the OS will deny access, before the request hits the driver level
   if (status == RSMI_STATUS_PERMISSION){
     bool read_only = false;
-    int perms = amd::smi::isReadOnlyForAll(dev->path(), &read_only);
+    amd::smi::isReadOnlyForAll(dev->path(), &read_only);
     if(read_only){
       return RSMI_STATUS_NOT_SUPPORTED;
     }
@@ -2113,8 +2080,6 @@ rsmi_status_t rsmi_dev_process_isolation_get(uint32_t dv_ind,
 
 rsmi_status_t rsmi_dev_process_isolation_set(uint32_t dv_ind,
                              uint32_t pisolate) {
-  rsmi_status_t ret;
-
   TRY
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
@@ -2178,8 +2143,6 @@ rsmi_status_t rsmi_dev_process_isolation_set(uint32_t dv_ind,
 }
 
 rsmi_status_t rsmi_dev_gpu_run_cleaner_shader(uint32_t dv_ind) {
-  rsmi_status_t ret;
-
   TRY
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
@@ -2294,8 +2257,6 @@ rsmi_dev_xgmi_plpd_get(uint32_t dv_ind,
 rsmi_status_t
 rsmi_dev_xgmi_plpd_set(uint32_t dv_ind,
                       uint32_t plpd_id) {
-  rsmi_status_t ret;
-
   TRY
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
@@ -2408,8 +2369,6 @@ rsmi_dev_soc_pstate_get(uint32_t dv_ind,
 rsmi_status_t
 rsmi_dev_soc_pstate_set(uint32_t dv_ind,
                       uint32_t policy_id) {
-  rsmi_status_t ret;
-
   TRY
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
@@ -2977,25 +2936,25 @@ rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t *b) {
     return ret;
   }
 
-  // Hardcode based on PCIe specification: Search PCI_Express on wikipedia
+  // Hardcode based on PCIe specification: search PCI_Express on wikipedia
   const uint32_t link_width[] = {1, 2, 4, 8, 12, 16};
   const uint32_t link_speed[] = {25, 50, 80, 160};  // 0.1 Ghz
   const uint32_t WIDTH_DATA_LENGTH = sizeof(link_width)/sizeof(uint32_t);
   const uint32_t SPEED_DATA_LENGTH = sizeof(link_speed)/sizeof(uint32_t);
 
   // Calculate the index
-  uint32_t width_index = -1;
-  uint32_t speed_index = -1;
+  int32_t width_index = -1;
+  int32_t speed_index = -1;
   uint32_t cur_index = 0;
   for (cur_index = 0; cur_index < WIDTH_DATA_LENGTH; cur_index++) {
     if (link_width[cur_index] == gpu_metrics.pcie_link_width) {
-      width_index = cur_index;
+      width_index = static_cast<int32_t>(cur_index);
       break;
     }
   }
   for (cur_index = 0; cur_index < SPEED_DATA_LENGTH; cur_index++) {
     if (link_speed[cur_index] == gpu_metrics.pcie_link_speed) {
-      speed_index = cur_index;
+      speed_index = static_cast<int32_t>(cur_index);
       break;
     }
   }
@@ -3004,7 +2963,7 @@ rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t *b) {
   }
   // Set possible lanes and frequencies
   b->transfer_rate.num_supported = WIDTH_DATA_LENGTH * SPEED_DATA_LENGTH;
-  b->transfer_rate.current = speed_index*WIDTH_DATA_LENGTH + width_index;
+  b->transfer_rate.current = static_cast<uint32_t>(speed_index)*WIDTH_DATA_LENGTH + static_cast<uint32_t>(width_index);
   for (cur_index = 0; cur_index < WIDTH_DATA_LENGTH * SPEED_DATA_LENGTH; cur_index++) {
     b->transfer_rate.frequency[cur_index] =
       static_cast<long>(link_speed[cur_index/WIDTH_DATA_LENGTH]) * 100 * 1000000L;
@@ -3930,7 +3889,6 @@ rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
 rsmi_status_t rsmi_dev_cache_info_get(
       uint32_t dv_ind, rsmi_gpu_cache_info_t *info) {
   TRY
-  rsmi_status_t ret;
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
@@ -4214,7 +4172,6 @@ rsmi_utilization_count_get(uint32_t dv_ind,
 
   rsmi_status_t ret;
   rsmi_gpu_metrics_t gpu_metrics;
-  uint32_t val_ui32;
   uint16_t val_counter(0);
 
   ret = rsmi_dev_gpu_metrics_info_get(dv_ind, &gpu_metrics);
@@ -5704,10 +5661,6 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
   REQUIRE_ROOT_ACCESS
   DEVICE_MUTEX
   const int k1000_MS_WAIT = 1000;
-  const uint32_t kMaxBoardLength = 128;
-  bool isCorrectDevice = false;
-  char boardName[kMaxBoardLength];
-  boardName[0] = '\0';
 
   const uint32_t kMaxMemoryCapabilitiesSize = 30;
   char available_memory_capabilities[kMaxMemoryCapabilitiesSize];
@@ -6618,15 +6571,229 @@ rsmi_event_notification_get(int timeout_ms,
            reinterpret_cast<rsmi_evt_notification_data_t *>(&data[*num_elem]);
 
       uint32_t event;
-      while (fscanf(anon_fp, "%x %63s\n", &event,
-                          reinterpret_cast<char *>(&data_item->message)) == 2) {
-        /* Output is in format as "event information\n"
+      char event_in[MAX_EVENT_NOTIFICATION_MSG_SIZE];
+      memcpy(reinterpret_cast<char *>(event_in), "\0", MAX_EVENT_NOTIFICATION_MSG_SIZE);
+      while (fgets(event_in, MAX_EVENT_NOTIFICATION_MSG_SIZE, anon_fp)) {
+        /* Output is in format as "event_number message_information\n"
          * Both event are expressed in hex.
          * information is a string
          */
+        char message[MAX_EVENT_NOTIFICATION_MSG_SIZE];
+        // parse the line here for event_number and rest of message_information
+        sscanf(event_in, "%x %[^\n]\n", &event, message);
+
+        // parse message based on event received
+        switch (event){
+          case RSMI_EVT_NOTIF_NONE:
+            strcpy(reinterpret_cast<char *>(&data_item->message), "Event type None received");
+            break;
+          case RSMI_EVT_NOTIF_VMFAULT:
+          {
+            uint32_t pid;
+            char task_name[MAX_EVENT_NOTIFICATION_MSG_SIZE];
+            memcpy(reinterpret_cast<char *>(task_name), "\0", MAX_EVENT_NOTIFICATION_MSG_SIZE);
+
+            sscanf(message, "%x:%s\n", &pid, task_name);
+            std::stringstream final_message;
+            final_message << "PID: " << std::to_string(pid).c_str()
+                          << "  task name: " << task_name;
+
+            strcpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str());
+          }
+          break;
+          case RSMI_EVT_NOTIF_THERMAL_THROTTLE:
+          {
+            uint64_t bitmask;
+            uint64_t counter;
+
+            sscanf(message, "%llx:%llx\n", &bitmask, &counter);
+            std::stringstream final_message;
+            final_message << "bitmask: 0x" << std::hex << bitmask
+                          << "  counter: 0x" << std::hex << counter;
+
+            strcpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str());
+          }
+          break;
+          case RSMI_EVT_NOTIF_GPU_PRE_RESET:
+          {
+            uint32_t reset_seq_num;
+            char reset_cause[MAX_EVENT_NOTIFICATION_MSG_SIZE];
+            memcpy(reinterpret_cast<char *>(reset_cause), "\0", MAX_EVENT_NOTIFICATION_MSG_SIZE);
+
+            sscanf(message, "%x %[^\n]\n", &reset_seq_num, reset_cause);
+            std::stringstream final_message;
+            final_message << "reset sequence number: " << std::to_string(reset_seq_num).c_str()
+                          << "  reset cause: " << reset_cause;
+
+            strcpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str());
+          }
+          break;
+          case RSMI_EVT_NOTIF_GPU_POST_RESET:
+          {
+            uint32_t reset_seq_num;
+
+            sscanf(message, "%x %[^\n]\n", &reset_seq_num);
+            std::stringstream final_message;
+            final_message << "reset sequence number: " << std::to_string(reset_seq_num).c_str();
+
+            strcpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str());
+          }
+          break;
+          case RSMI_EVT_NOTIF_EVENT_MIGRATE_START:
+          {
+            int64_t ns;
+            int32_t pid;
+            uint32_t start;
+            uint32_t size;
+            uint16_t from;
+            uint16_t to;
+            uint16_t prefetch_loc;
+            uint16_t preferred_loc;
+            int32_t migrate_trigger;
+
+            sscanf(message, "%lld -%d @%lx(%lx) %x->%x %x:%x %d\n", &ns, &pid, &start, &size, &from, &to, &prefetch_loc, &preferred_loc, &migrate_trigger);
+            std::stringstream final_message;
+            final_message << "nd: " << std::to_string(ns).c_str() 
+                          << "  pid: " << std::to_string(pid).c_str()
+                          << "  start: 0x" << std::hex << start
+                          << "  size: 0x" << std::hex << size
+                          << "  from: 0x" << std::hex << from
+                          << "  to: 0x" << std::hex << to
+                          << "  prefetch_loc: 0x" << std::hex << prefetch_loc
+                          << "  preferred_loc: 0x" << std::hex << preferred_loc
+                          << "  migrate_trigger: " << std::to_string(migrate_trigger).c_str();
+
+            strcpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str());
+          }
+          break;
+          case RSMI_EVT_NOTIF_EVENT_MIGRATE_END:
+          {
+            int64_t ns;
+            int32_t pid;
+            uint32_t start;
+            uint32_t size;
+            uint32_t from;
+            uint32_t to;
+            uint32_t migrate_trigger;
+            uint32_t error_code;
+
+            sscanf(message, "%lld -%d @%lx(%lx) %x->%x %d %d\n", &ns, &pid, &start, &size, &from, &to, &migrate_trigger, &error_code);
+            std::stringstream final_message;
+            final_message << "nd: " << std::to_string(ns).c_str() 
+                          << "  pid: " << std::to_string(pid).c_str()
+                          << "  start: 0x" << std::hex << start
+                          << "  size: 0x" << std::hex << size
+                          << "  from: 0x" << std::hex << from
+                          << "  to: 0x" << std::hex << to
+                          << "  migrate_trigger: " << std::to_string(migrate_trigger).c_str()
+                          << "  error_code: " << std::to_string(error_code).c_str();
+
+            strcpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str());
+          }
+          break;
+          case RSMI_EVT_NOTIF_EVENT_PAGE_FAULT_START:
+          {
+            int64_t ns;
+            int32_t pid;
+            uint32_t addr;
+            uint32_t node;
+            char *rw;
+
+            sscanf(message, "%lld -%d @%lx(%x) %c\n", &ns, &pid, &addr, &node, rw);
+            std::stringstream final_message;
+            final_message << "ns: " << std::to_string(ns).c_str()
+                          << "  pid: " << std::to_string(pid).c_str()
+                          << "  addr: 0x" << std::hex << addr
+                          << "  node: 0x" << std::hex << node
+                          << "  rw: " << rw;
+
+            strcpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str());
+          }
+          break;
+          case RSMI_EVT_NOTIF_EVENT_PAGE_FAULT_END:
+          {
+            int64_t ns;
+            int32_t pid;
+            uint32_t addr;
+            uint32_t node;
+            char *migrate_update;
+
+            sscanf(message, "%lld -%d @%lx(%x) %c\n", &ns, &pid, &addr, &node, migrate_update);
+            std::stringstream final_message;
+            final_message << "ns: " << std::to_string(ns).c_str()
+                          << "  pid: " << std::to_string(pid).c_str()
+                          << "  addr: 0x" << std::hex << addr
+                          << "  node: 0x" << std::hex << node
+                          << "  migrate_udpate: " << migrate_update;
+
+            strcpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str());
+          }
+          break;
+          case RSMI_EVT_NOTIF_EVENT_QUEUE_EVICTION:
+          {
+            int64_t ns;
+            int32_t pid;
+            uint32_t node;
+            uint32_t evict_trigger;
+
+            sscanf(message, "%lld -%d %x %d\n", &ns, &pid, &node, &evict_trigger);
+            std::stringstream final_message;
+            final_message << "ns: " << std::to_string(ns).c_str()
+                          << "  pid: " << std::to_string(pid).c_str()
+                          << "  node: 0x" << std::hex << node
+                          << "  evict_trigger: " << std::to_string(evict_trigger).c_str();
+
+            strcpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str());
+          }
+          break;
+          case RSMI_EVT_NOTIF_EVENT_QUEUE_RESTORE:
+          {
+            int64_t ns;
+            int32_t pid;
+            uint32_t node;
+            char *rescheduled;
+
+            sscanf(message, "%lld -%d %x %c\n", &ns, &pid, &node, rescheduled);
+            std::stringstream final_message;
+            final_message << "ns: " << std::to_string(ns).c_str()
+                          << "  pid: " << std::to_string(pid).c_str()
+                          << "  node: 0x" << std::hex << node
+                          << "  rescheduled: " << rescheduled;
+
+            strcpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str());
+          }
+          break;
+          case RSMI_EVT_NOTIF_EVENT_UNMAP_FROM_GPU:
+          {
+            int64_t ns;
+            int32_t pid;
+            uint32_t addr;
+            uint32_t size;
+            uint32_t node;
+            uint32_t unmap_trigger;
+
+            sscanf(message, "%lld -%d @%lx(%lx) %x %d\n", &ns, &pid, &addr, &size, &node, &unmap_trigger);
+            std::stringstream final_message;
+            final_message << "ns: " << std::to_string(ns).c_str()
+                          << "  pid: " << std::to_string(pid).c_str()
+                          << "  addr: 0x" <<std::hex << addr
+                          << "  size: 0x" <<std::hex << size
+                          << "  node: 0x" << std::hex << node
+                          << "  unmap_trigger: " << std::to_string(unmap_trigger).c_str();
+
+            strcpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str());
+          }
+          break;
+          default:
+            strcpy(reinterpret_cast<char *>(&data_item->message), "Unknown event received");
+            break;
+        }
         data_item->event = (rsmi_evt_notification_type_t)event;
         data_item->dv_ind = fd_indx_to_dev_id[i];
         ++(*num_elem);
+
+        // zero out event_in after each use
+        memcpy(reinterpret_cast<char *>(event_in), "\0", MAX_EVENT_NOTIFICATION_MSG_SIZE);
 
         if (*num_elem >= buffer_size) {
           break;

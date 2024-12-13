@@ -779,10 +779,20 @@ class AMDSMIHelpers():
             return False, profile_presets.values()
 
 
-    def convert_bytes_to_readable(self, bytes_input):
+    def convert_bytes_to_readable(self, bytes_input, format_length=None):
         for unit in ["B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB"]:
             if abs(bytes_input) < 1024:
-                return f"{bytes_input:3.1f} {unit}"
+                if format_length is not None:
+                    if bytes_input < 10:
+                        return f"{bytes_input:4.3f} {unit}"
+                    elif bytes_input < 100:
+                        return f"{bytes_input:4.2f} {unit}"
+                    elif bytes_input < 1000:
+                        return f"{bytes_input:4.1f} {unit}"
+                    else:
+                        return f"{bytes_input:4.0f} {unit}"
+                else:
+                    return f"{bytes_input:3.1f} {unit}"
             bytes_input /= 1024
         return f"{bytes_input:.1f} YB"
 

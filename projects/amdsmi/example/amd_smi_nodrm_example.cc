@@ -21,6 +21,7 @@
  */
 
 #include <pwd.h>
+#include <inttypes.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -114,11 +115,11 @@ int main() {
             ret = amdsmi_get_gpu_device_bdf(processor_handles[j], &bdf);
             CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_gpu_device_bdf:\n");
-            printf("\tDevice[%d] BDF %04lx:%02x:%02x.%d\n\n", i,
-                   bdf.domain_number,
-                   bdf.bus_number,
-                   bdf.device_number,
-                   bdf.function_number);
+            printf("\tDevice[%d] BDF %04" PRIx64 ":%02" PRIx32 ":%02" PRIx32 ".%" PRIu32 "\n\n", i,
+                   static_cast<uint64_t>(bdf.domain_number),
+                   static_cast<uint32_t>(bdf.bus_number),
+                   static_cast<uint32_t>(bdf.device_number),
+                   static_cast<uint32_t>(bdf.function_number));
 
             amdsmi_asic_info_t asic_info = {};
             ret = amdsmi_get_gpu_asic_info(processor_handles[j], &asic_info);
@@ -319,7 +320,7 @@ int main() {
                 CHK_AMDSMI_RET(ret)
                 std::cout << "\t amdsmi_get_soc_pstate total:" << policy.num_supported
                         <<" current:" << policy.current << "\n";
-                for (int x=0; x < policy.num_supported; x++) {
+                for (uint32_t x=0; x < policy.num_supported; x++) {
                     std::cout << x <<": (" << policy.policies[x].policy_id
                     <<"," << policy.policies[x].policy_description << ")\n";
                 }
@@ -349,8 +350,11 @@ int main() {
                     amdsmi_bdf_t bdf = {};
                     ret = amdsmi_get_gpu_device_bdf(topology_nearest_info.processor_list[k], &bdf);
                     CHK_AMDSMI_RET(ret)
-                    printf("\tGPU BDF %04lx:%02x:%02x.%d\n", bdf.domain_number,
-                        bdf.bus_number, bdf.device_number, bdf.function_number);
+                    printf("\tGPU BDF %04" PRIx64 ":%02" PRIx32 ":%02" PRIx32 ".%" PRIu32 "\n",
+                        static_cast<uint64_t>(bdf.domain_number),
+                        static_cast<uint32_t>(bdf.bus_number),
+                        static_cast<uint32_t>(bdf.device_number),
+                        static_cast<uint32_t>(bdf.function_number));
                 }
             }
         }

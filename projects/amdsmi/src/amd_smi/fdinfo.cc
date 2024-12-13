@@ -22,6 +22,7 @@
 
 #include <sys/types.h>
 #include <dirent.h>
+#include <inttypes.h>
 #include <unistd.h>
 #include <memory>
 #include <vector>
@@ -75,11 +76,11 @@ amdsmi_status_t gpuvsmi_get_pids(const amdsmi_bdf_t &bdf, std::vector<long int> 
 	struct dirent *dir;
 
 	/* 0000:00:00.0 */
-	snprintf(bdf_str, 13, "%04x:%02x:%02x.%d",
-            bdf.domain_number & 0xffff,
-			bdf.bus_number & 0xff,
-			bdf.device_number & 0x1f,
-			bdf.function_number & 0x7);
+	snprintf(bdf_str, 13, "%04" PRIx32 ":%02" PRIx32 ":%02" PRIx32 ".%" PRIu32,
+            static_cast<uint32_t>(bdf.domain_number & 0xffff),
+			static_cast<uint32_t>(bdf.bus_number & 0xff),
+			static_cast<uint32_t>(bdf.device_number & 0x1f),
+			static_cast<uint32_t>(bdf.function_number & 0x7));
 
 	d = opendir("/proc");
 	if (!d)
@@ -124,12 +125,11 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t &bdf, long int pid,
 	struct dirent *dir;
 
 	/* 0000:00:00.0 */
-	snprintf(bdf_str, 13, "%04x:%02x:%02x.%d",
-            bdf.domain_number & 0xffff,
-			bdf.bus_number & 0xff,
-			bdf.device_number & 0x1f,
-			bdf.function_number & 0x7);
-
+	snprintf(bdf_str, 13, "%04" PRIx32 ":%02" PRIx32 ":%02" PRIx32 ".%" PRIu32,
+            static_cast<uint32_t>(bdf.domain_number & 0xffff),
+			static_cast<uint32_t>(bdf.bus_number & 0xff),
+			static_cast<uint32_t>(bdf.device_number & 0x1f),
+			static_cast<uint32_t>(bdf.function_number & 0x7));
 
 	std::string path = "/proc/" + std::to_string(pid) + "/fdinfo/";
 	std::string name_path = "/proc/" + std::to_string(pid) + "/comm";
@@ -158,7 +158,7 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t &bdf, long int pid,
 				char fd_bdf_str[13];
 
 				/* Only check against fdinfo files that contain a bdf */
-				if (sscanf(bdfline.c_str(), "drm-pdev:       %s", &fd_bdf_str) != 1)
+				if (sscanf(bdfline.c_str(), "drm-pdev:       %s", &fd_bdf_str[0]) != 1)
 					continue;
 
 				/* Populate amdsmi_proc_info_t struct only if the bdf in

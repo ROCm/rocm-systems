@@ -64,8 +64,6 @@ void TestPowerRead::Close() {
 
 void TestPowerRead::Run(void) {
   amdsmi_status_t err;
-  uint64_t val_ui64, val2_ui64;
-  amdsmi_power_type_t type = AMDSMI_INVALID_POWER;
 
   TestBase::Run();
   if (setup_failed_) {

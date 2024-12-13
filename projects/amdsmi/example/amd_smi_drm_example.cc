@@ -29,6 +29,7 @@
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <inttypes.h>
 #include <vector>
 #include <sstream>
 
@@ -262,11 +263,11 @@ int main() {
             ret = amdsmi_get_gpu_device_bdf(processor_handles[j], &bdf);
             CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_gpu_device_bdf:\n");
-            printf("\tDevice[%d] BDF %04lx:%02x:%02x.%d\n\n", i,
-                   bdf.domain_number,
-                   bdf.bus_number,
-                   bdf.device_number,
-                   bdf.function_number);
+            printf("\tDevice[%d] BDF %04" PRIx64 ":%02" PRIx32 ":%02" PRIx32 ".%" PRIu32 "\n\n", i,
+                   static_cast<uint64_t>(bdf.domain_number),
+                   static_cast<uint32_t>(bdf.bus_number),
+                   static_cast<uint32_t>(bdf.device_number),
+                   static_cast<uint32_t>(bdf.function_number));
 
             // Get handle from BDF
             amdsmi_processor_handle dev_handle;
@@ -408,12 +409,12 @@ int main() {
             printf("\tPCIe max speed: %d\n", pcie_info.pcie_static.max_pcie_speed);
 
             // additional pcie related metrics
-            printf("\tPCIe bandwidth: %d\n", pcie_info.pcie_metric.pcie_bandwidth);
-            printf("\tPCIe replay count: %d\n", pcie_info.pcie_metric.pcie_replay_count);
-            printf("\tPCIe L0 recovery count: %d\n", pcie_info.pcie_metric.pcie_l0_to_recovery_count);
-            printf("\tPCIe rollover count: %d\n", pcie_info.pcie_metric.pcie_replay_roll_over_count);
-            printf("\tPCIe nak received count: %d\n", pcie_info.pcie_metric.pcie_nak_received_count);
-            printf("\tPCIe nak sent count: %d\n", pcie_info.pcie_metric.pcie_nak_sent_count);
+            printf("\tPCIe bandwidth: %u\n", pcie_info.pcie_metric.pcie_bandwidth);
+            printf("\tPCIe replay count: %" PRIu64 "\n", pcie_info.pcie_metric.pcie_replay_count);
+            printf("\tPCIe L0 recovery count: %" PRIu64 "\n", pcie_info.pcie_metric.pcie_l0_to_recovery_count);
+            printf("\tPCIe rollover count: %" PRIu64 "\n", pcie_info.pcie_metric.pcie_replay_roll_over_count);
+            printf("\tPCIe nak received count: %" PRIu64 "\n", pcie_info.pcie_metric.pcie_nak_received_count);
+            printf("\tPCIe nak sent count: %" PRIu64 "\n", pcie_info.pcie_metric.pcie_nak_sent_count);
 
             // Get VRAM temperature limit
             int64_t temperature = 0;
@@ -522,13 +523,6 @@ int main() {
             printf("\tCorrectable errors: %lu\n", err_cnt_info.correctable_count);
             printf("\tUncorrectable errors: %lu\n\n",
                    err_cnt_info.uncorrectable_count);
-            // Get process list
-            auto compare = [](const void *a, const void *b) -> int {
-                return (*(amdsmi_proc_info_t *)a).pid >
-                               (*(amdsmi_proc_info_t *)b).pid
-                           ? 1
-                           : -1;
-            };
 
             uint32_t num_process = 0;
             ret = amdsmi_get_gpu_process_list(processor_handles[j], &num_process, nullptr);
@@ -542,18 +536,17 @@ int main() {
                 uint64_t mem = 0, gtt_mem = 0, cpu_mem = 0, vram_mem = 0;
                 uint64_t gfx = 0, enc = 0;
                 char bdf_str[20];
-                sprintf(bdf_str, "%04lx:%02x:%02x.%d",
-                        bdf.domain_number,
-                        bdf.bus_number,
-                        bdf.device_number,
-                        bdf.function_number);
-                int num = 0;
+                sprintf(bdf_str, "%04" PRIx64 ":%02" PRIx32 ":%02" PRIx32 ".%" PRIu32,
+                   static_cast<uint64_t>(bdf.domain_number),
+                   static_cast<uint32_t>(bdf.bus_number),
+                   static_cast<uint32_t>(bdf.device_number),
+                   static_cast<uint32_t>(bdf.function_number));
                 ret = amdsmi_get_gpu_process_list(processor_handles[j], &num_process, process_info_list);
                 std::cout << "Allocation size for process list: " << num_process << "\n";
                 CHK_AMDSMI_RET(ret);
                 for (auto idx = uint32_t(0); idx < num_process; ++idx) {
                     process = static_cast<amdsmi_proc_info_t>(process_info_list[idx]);
-                    printf("\t *Process id: %ld / Name: %s / VRAM: %lld \n", process.pid, process.name, process.memory_usage.vram_mem);
+                    printf("\t *Process id: %d / Name: %s / VRAM: %ld \n", process.pid, process.name, process.memory_usage.vram_mem);
                 }
 
                 printf("+=======+==================+============+=============="
@@ -569,7 +562,7 @@ int main() {
                 printf("+=======+"
                        "+=============+=============+=============+============"
                        "==+=========================================+\n");
-                for (int it = 0; it < num_process; it++) {
+                for (int it = 0; it < static_cast<int>(num_process); it++) {
                     char command[30];
                     struct passwd *pwd = nullptr;
                     struct stat st;
@@ -609,11 +602,13 @@ int main() {
                         "-+-------------+-------------+-------------+----------"
                         "----+-----------------------------------------+\n");
                 }
+                // TODO: To remove compiler warning, the last 3 values in this printf were
+                //       set to 0L.  Need to find out what these values need to be.
                 printf("|                                 TOTAL:| %s | %7ld "
                        "KiB | %7ld KiB | %7ld KiB | %7ld KiB | %lu  %lu  "
                        "%lu  %lu  %lu   |\n",
                        bdf_str, mem, gtt_mem, cpu_mem, vram_mem, gfx,
-                       enc);
+                       enc, 0L, 0L, 0L);
                 printf("+=======+==================+============+=============="
                        "+=============+=============+=============+============"
                        "=+==========================================+\n");
@@ -674,11 +669,11 @@ int main() {
             ret = amdsmi_get_gpu_metrics_info(processor_handles[j], &smu);
             CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_gpu_metrics_info:\n");
-            printf("\tDevice[%d] BDF %04lx:%02x:%02x.%d\n\n", i,
-                   bdf.domain_number,
-                   bdf.bus_number,
-                   bdf.device_number,
-                   bdf.function_number);
+            printf("\tDevice[%d] BDF %04" PRIx64 ":%02" PRIx32 ":%02" PRIx32 ".%" PRIu32 "\n\n", i,
+                   static_cast<uint64_t>(bdf.domain_number),
+                   static_cast<uint32_t>(bdf.bus_number),
+                   static_cast<uint32_t>(bdf.device_number),
+                   static_cast<uint32_t>(bdf.function_number));
 
             std::cout << "METRIC TABLE HEADER:\n";
             std::cout << "structure_size=" << std::dec
@@ -706,7 +701,7 @@ int main() {
             auto idx = 0;
             for (const auto& temp : smu.temperature_hbm) {
               std::cout << temp;
-              if ((idx + 1) != std::size(smu.temperature_hbm)) {
+              if ((idx + 1) != static_cast<int>(std::size(smu.temperature_hbm))) {
                 std::cout << ", ";
               } else {
                 std::cout << "]\n";
@@ -723,7 +718,7 @@ int main() {
             idx = 0;
             for (const auto& temp : smu.vcn_activity) {
               std::cout << temp;
-              if ((idx + 1) != std::size(smu.vcn_activity)) {
+              if ((idx + 1) != static_cast<int>(std::size(smu.vcn_activity))) {
                 std::cout << ", ";
               } else {
                 std::cout << "]\n";
@@ -736,7 +731,7 @@ int main() {
             idx = 0;
             for (const auto& temp : smu.jpeg_activity) {
               std::cout << temp;
-              if ((idx + 1) != std::size(smu.jpeg_activity)) {
+              if ((idx + 1) != static_cast<int>(std::size(smu.jpeg_activity))) {
                 std::cout << ", ";
               } else {
                 std::cout << "]\n";
@@ -773,7 +768,7 @@ int main() {
             idx = 0;
             for (const auto& temp : smu.current_gfxclks) {
               std::cout << temp;
-              if ((idx + 1) != std::size(smu.current_gfxclks)) {
+              if ((idx + 1) != static_cast<int>(std::size(smu.current_gfxclks))) {
                 std::cout << ", ";
               } else {
                 std::cout << "]\n";
@@ -786,7 +781,7 @@ int main() {
             idx = 0;
             for (const auto& temp : smu.current_socclks) {
               std::cout << temp;
-              if ((idx + 1) != std::size(smu.current_socclks)) {
+              if ((idx + 1) != static_cast<int>(std::size(smu.current_socclks))) {
                 std::cout << ", ";
               } else {
                 std::cout << "]\n";
@@ -800,7 +795,7 @@ int main() {
             idx = 0;
             for (const auto& temp : smu.current_vclk0s) {
               std::cout << temp;
-              if ((idx + 1) != std::size(smu.current_vclk0s)) {
+              if ((idx + 1) != static_cast<int>(std::size(smu.current_vclk0s))) {
                 std::cout << ", ";
               } else {
                 std::cout << "]\n";
@@ -813,7 +808,7 @@ int main() {
             idx = 0;
             for (const auto& temp : smu.current_dclk0s) {
               std::cout << temp;
-              if ((idx + 1) != std::size(smu.current_dclk0s)) {
+              if ((idx + 1) != static_cast<int>(std::size(smu.current_dclk0s))) {
                 std::cout << ", ";
               } else {
                 std::cout << "]\n";
@@ -850,7 +845,7 @@ int main() {
             idx = 0;
             for (const auto& temp : smu.xgmi_read_data_acc) {
               std::cout << temp;
-              if ((idx + 1) != std::size(smu.xgmi_read_data_acc)) {
+              if ((idx + 1) != static_cast<int>(std::size(smu.xgmi_read_data_acc))) {
                 std::cout << ", ";
               } else {
                 std::cout << "]\n";
@@ -862,7 +857,7 @@ int main() {
             idx = 0;
             for (const auto& temp : smu.xgmi_write_data_acc) {
               std::cout << temp;
-              if ((idx + 1) != std::size(smu.xgmi_write_data_acc)) {
+              if ((idx + 1) != static_cast<int>(std::size(smu.xgmi_write_data_acc))) {
                 std::cout << ", ";
               } else {
                 std::cout << "]\n";
@@ -922,7 +917,7 @@ int main() {
             for (auto& row : smu.xcp_stats) {
               std::cout << "\t XCP [" << idx << "] : [";
               for (auto& col : row.gfx_busy_inst) {
-                if ((idy + 1) != std::size(row.gfx_busy_inst)) {
+                if ((idy + 1) != static_cast<int>(std::size(row.gfx_busy_inst))) {
                     std::cout << col << ", ";
                 } else {
                     std::cout << col;
@@ -940,7 +935,7 @@ int main() {
             for (auto& row : smu.xcp_stats) {
               std::cout << "\t XCP [" << idx << "] : [";
               for (auto& col : row.vcn_busy) {
-                if ((idy + 1) != std::size(row.vcn_busy)) {
+                if ((idy + 1) != static_cast<int>(std::size(row.vcn_busy))) {
                     std::cout << col << ", ";
                 } else {
                     std::cout << col;
@@ -958,7 +953,7 @@ int main() {
             for (auto& row : smu.xcp_stats) {
               std::cout << "\t XCP [" << idx << "] : [";
               for (auto& col : row.jpeg_busy) {
-                if ((idy + 1) != std::size(row.jpeg_busy)) {
+                if ((idy + 1) != static_cast<int>(std::size(row.jpeg_busy))) {
                     std::cout << col << ", ";
                 } else {
                     std::cout << col;
@@ -976,7 +971,7 @@ int main() {
             for (auto& row : smu.xcp_stats) {
               std::cout << "\t XCP [" << idx << "] : [";
               for (auto& col : row.gfx_busy_acc) {
-                if ((idy + 1) != std::size(row.gfx_busy_acc)) {
+                if ((idy + 1) != static_cast<int>(std::size(row.gfx_busy_acc))) {
                     std::cout << col << ", ";
                 } else {
                     std::cout << col;
@@ -1040,8 +1035,11 @@ int main() {
                     amdsmi_bdf_t bdf = {};
                     ret = amdsmi_get_gpu_device_bdf(topology_nearest_info.processor_list[k], &bdf);
                     CHK_AMDSMI_RET(ret)
-                    printf("\t\tGPU BDF %04lx:%02x:%02x.%d\n", bdf.domain_number,
-                        bdf.bus_number, bdf.device_number, bdf.function_number);
+                    printf("\t\tGPU BDF %04" PRIx64 ":%02" PRIx32 ":%02" PRIx32 ".%" PRIu32 "\n",
+                        static_cast<uint64_t>(bdf.domain_number),
+                        static_cast<uint32_t>(bdf.bus_number),
+                        static_cast<uint32_t>(bdf.device_number),
+                        static_cast<uint32_t>(bdf.function_number));
                 }
             }
       }

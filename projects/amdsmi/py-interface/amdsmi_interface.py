@@ -69,7 +69,7 @@ AMDSMI_MAX_CACHE_TYPES = 10
 AMDSMI_MAX_NUM_XGMI_PHYSICAL_LINK = 64
 AMDSMI_GPU_UUID_SIZE = 38
 MAX_AMDSMI_NAME_LENGTH = 64
-MAX_EVENT_NOTIFICATION_MSG_SIZE = 64
+MAX_EVENT_NOTIFICATION_MSG_SIZE = 96
 
 
 class AmdSmiInitFlags(IntEnum):
@@ -1653,7 +1653,7 @@ def amdsmi_get_gpu_asic_info(
 
     market_name = _pad_hex_value(asic_info_struct.market_name.decode("utf-8"), 4)
     target_graphics_version = str(asic_info_struct.target_graphics_version)
-    if len(target_graphics_version) == 4 and ("Instinct MI2" in market_name):
+    if target_graphics_version == "9010":
         hex_part = str(hex(int(str(asic_info_struct.target_graphics_version)[2:]))).replace("0x", "")
         target_graphics_version = str(asic_info_struct.target_graphics_version)[:2] + hex_part
     asic_info = {
@@ -2956,21 +2956,31 @@ def amdsmi_reset_gpu_fan(
 
 def amdsmi_set_clk_freq(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
-    clk_type: AmdSmiClkType,
+    clk_type: str,
     freq_bitmask: int,
 ):
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
-    if not isinstance(clk_type, AmdSmiClkType):
-        raise AmdSmiParameterException(clk_type, AmdSmiParameterException)
+    if clk_type.lower() == "sclk":
+        clk_type_conversion = AmdSmiClkType.SYS
+    elif clk_type.lower() == "mclk":
+        clk_type_conversion = AmdSmiClkType.MEM
+    elif clk_type.lower() == "fclk":
+        clk_type_conversion = AmdSmiClkType.DF
+    elif clk_type.lower() == "socclk":
+        clk_type_conversion = AmdSmiClkType.SOC
+    else:
+        clk_type_conversion = "N/A"
+    if not isinstance(clk_type_conversion, AmdSmiClkType):
+        raise AmdSmiParameterException(clk_type_conversion, AmdSmiClkType)
     if not isinstance(freq_bitmask, int):
         raise AmdSmiParameterException(freq_bitmask, int)
     freq_bitmask = ctypes.c_uint64(freq_bitmask)
     _check_res(
         amdsmi_wrapper.amdsmi_set_clk_freq(
-            processor_handle, clk_type, freq_bitmask
+            processor_handle, clk_type_conversion, freq_bitmask
         )
     )
 

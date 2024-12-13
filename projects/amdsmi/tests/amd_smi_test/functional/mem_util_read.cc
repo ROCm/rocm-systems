@@ -117,7 +117,7 @@ void TestMemUtilRead::Run(void) {
           std::cout << "\t**" <<
            kDevMemoryTypeNameMap.at(static_cast<amdsmi_memory_type_t>(mem_type))
             << " Calculated Utilization: " <<
-              (static_cast<float>(usage)*100)/total << "% ("<< usage <<
+              (static_cast<float>(usage)*100)/static_cast<float>(total) << "% ("<< usage <<
                                               "/" << total << ")" << std::endl;
         }
       }

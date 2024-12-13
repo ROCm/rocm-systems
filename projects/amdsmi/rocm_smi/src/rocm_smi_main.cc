@@ -755,10 +755,9 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
     int ret_unique_id = read_node_properties(node_id, "unique_id", &unique_id);
     int ret_loc_id =
       read_node_properties(node_id, "location_id", &location_id);
-    int ret_domain =
-      read_node_properties(node_id, "domain", &domain);
+    read_node_properties(node_id, "domain", &domain);
     if (ret_gpu_id == 0 &&
-      ~(ret_unique_id != 0 || ret_loc_id != 0 || ret_unique_id != 0)) {
+      !(ret_unique_id != 0 || ret_loc_id != 0 || ret_unique_id != 0)) {
         // Do not try to build a node if one of these fields
         // do not exist in KFD (0 as values okay)
       systemNode myNode;
@@ -804,7 +803,7 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
 
   uint32_t cardAdded = 0;
   // Discover all root cards & gpu partitions associated with each
-  for (uint32_t cardId = 0; cardId <= max_cardId; cardId++) {
+  for (int32_t cardId = 0; cardId <= max_cardId; cardId++) {
     std::string path = kPathDRMRoot;
     path += "/card";
     path += std::to_string(cardId);
@@ -917,7 +916,6 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
       LOG_DEBUG(ss);
 
       uint64_t temp_primary_unique_id = 0;
-      uint64_t primary_location_id = 0;
       if (allSystemNodes.empty()) {
         cardAdded++;
         ss << __PRETTY_FUNCTION__
@@ -966,7 +964,7 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
       } else {
         cardAdded++;
         // remove already added nodes associated with current card
-        auto erasedNodes = allSystemNodes.erase(0);
+        allSystemNodes.erase(0);
         continue;
       }
 
@@ -988,7 +986,6 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
           auto removalLocId = it->second.s_location_id;
           auto removaldomain = it->second.s_domain;
           auto nodesErased = 1;
-          primary_location_id = removalLocId;
           allSystemNodes.erase(it++);
           ss << __PRETTY_FUNCTION__
              << "\nPRIMARY --> num_nodes == temp_numb_nodes; ERASING "

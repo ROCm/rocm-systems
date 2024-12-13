@@ -99,7 +99,7 @@ void TestMetricsCounterRead::Run(void) {
           std::cout << std::dec << "energy_accumulator counter="
           << energy_accumulator << '\n';
           std::cout << "energy_accumulator in uJ="
-          << (double)(energy_accumulator * counter_resolution) << '\n';
+          << static_cast<double>((static_cast<double>(energy_accumulator) * counter_resolution)) << '\n';
           std::cout << std::dec << "timestamp="
           << timestamp << '\n';
       }

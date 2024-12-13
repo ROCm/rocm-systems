@@ -15,9 +15,6 @@ license = {file = "amdsmi/LICENSE"}
 readme = {file = "amdsmi/README.md", content-type = "text/markdown"}
 description = "AMDSMI Python LIB - AMD GPU Monitoring Library"
 requires-python = ">=3.6"
-dependencies = [
-    "PyYAML >= 3.0",
-]
 classifiers = [
     "Programming Language :: Python :: 3"
 ]

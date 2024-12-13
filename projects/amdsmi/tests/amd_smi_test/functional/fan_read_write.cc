@@ -100,7 +100,7 @@ void TestFanReadWrite::Run(void) {
     ret = amdsmi_get_gpu_fan_speed_max(processor_handles_[dv_ind], 0, &max_speed);
     CHK_ERR_ASRT(ret)
 
-    new_speed = 1.1 * orig_speed;
+    new_speed = static_cast<int64_t>(1.1F * static_cast<float>(orig_speed));
 
     if (new_speed > static_cast<int64_t>(max_speed)) {
       std::cout <<
@@ -135,8 +135,9 @@ void TestFanReadWrite::Run(void) {
     //                cur_speed < 1.1 * new_speed) ||
     //                    cur_speed > 0.95 * AMDSMI_MAX_FAN_SPEED);
     IF_VERB(STANDARD) {
-      if (!((cur_speed > 0.95 * new_speed && cur_speed < 1.1 * new_speed) ||
-                                (cur_speed > 0.95 * AMDSMI_MAX_FAN_SPEED))) {
+      if (!((cur_speed > static_cast<int64_t>(0.95 * static_cast<double>(new_speed)) &&
+             cur_speed < static_cast<int64_t>(1.10 * static_cast<double>(new_speed))) ||
+            (cur_speed > static_cast<int64_t>(0.95 * AMDSMI_MAX_FAN_SPEED)))) {
         std::cout << "WARNING: Fan speed is not within the expected range!" <<
                                                                       std::endl;
       }

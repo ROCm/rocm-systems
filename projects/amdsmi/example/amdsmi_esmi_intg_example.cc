@@ -54,7 +54,7 @@ using std::fixed;
 using std::setprecision;
 using std::vector;
 
-int main(int argc, char **argv) {
+int main([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
   amdsmi_status_t ret;
   uint32_t proto_ver;
   amdsmi_smu_fw_version_t smu_fw = {};
@@ -157,7 +157,7 @@ int main(int argc, char **argv) {
       retVal = snprintf(str, SHOWLINESZ, "\n| mclk (Mhz)\t\t\t |");
 
       len = strlen(str);
-      uint32_t fclk, mclk, cclk;
+      uint32_t fclk, mclk;
       err_bits = 0;
 
       ret = amdsmi_get_cpu_fclk_mclk(plist[index], &fclk, &mclk);
@@ -265,7 +265,6 @@ int main(int argc, char **argv) {
 
       double fraction_q10 = 1/pow(2,10);
       double fraction_uq10 = fraction_q10;
-      const char* err_str1;
 
       amdsmi_hsmp_metrics_table_t mtbl = {};
       ret = amdsmi_get_hsmp_metrics_table(plist[index], &mtbl);

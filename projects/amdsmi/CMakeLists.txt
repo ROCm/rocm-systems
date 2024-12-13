@@ -28,7 +28,7 @@ find_program(GIT NAMES git)
 
 ## Setup the package version based on git tags.
 set(PKG_VERSION_GIT_TAG_PREFIX "amdsmi_pkg_ver")
-get_package_version_number("24.7.1" ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
+get_package_version_number("24.7.0" ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
 message("Package version: ${PKG_VERSION_STR}")
 set(${AMD_SMI_LIBS_TARGET}_VERSION_MAJOR "${CPACK_PACKAGE_VERSION_MAJOR}")
 set(${AMD_SMI_LIBS_TARGET}_VERSION_MINOR "${CPACK_PACKAGE_VERSION_MINOR}")
@@ -107,13 +107,6 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wformat=2 -fno-common -Wstrict-overflow
 # Intentionally leave out -Wsign-promo. It causes spurious warnings.
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Woverloaded-virtual -Wreorder")
 
-# Add CMAKE debug flags
-if ("${CMAKE_BUILD_TYPE}" STREQUAL Release)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2")
-else ()
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ggdb -O0 -DDEBUG")
-endif ()
-
 set(COMMON_SRC_DIR "${PROJECT_SOURCE_DIR}/src")
 set(ROCM_SRC_DIR "${PROJECT_SOURCE_DIR}/rocm_smi/src")
 set(AMDSMI_SRC_DIR "${PROJECT_SOURCE_DIR}/src/amd_smi")
@@ -128,9 +121,8 @@ if(ENABLE_ESMI_LIB)
         execute_process(COMMAND git clone --depth=1 -b esmi_pkg_ver-3.0.3 https://github.com/amd/esmi_ib_library.git ${PROJECT_SOURCE_DIR}/esmi_ib_library)
     endif()
     if(NOT EXISTS ${PROJECT_SOURCE_DIR}/esmi_ib_library/include/asm/amd_hsmp.h)
-        file(DOWNLOAD
-            https://git.kernel.org/pub/scm/linux/kernel/git/pdx86/platform-drivers-x86.git/plain/arch/x86/include/uapi/asm/amd_hsmp.h?h=review-ilpo
-            ${PROJECT_SOURCE_DIR}/esmi_ib_library/include/asm/amd_hsmp.h)
+       file(COPY "${PROJECT_SOURCE_DIR}/include/amd_smi/impl/amd_hsmp.h"
+            DESTINATION "${PROJECT_SOURCE_DIR}/esmi_ib_library/include/asm")
     endif()
     add_definitions("-DENABLE_ESMI_LIB=1")
     set(ESMI_INC_DIR "${PROJECT_SOURCE_DIR}/esmi_ib_library/include")
@@ -261,10 +253,10 @@ install(
 add_subdirectory(goamdsmi_shim)
 
 #Debian package specific variables
-set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "python3-argcomplete, libdrm-dev, python3-yaml")
+set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "python3-argcomplete, libdrm-dev")
 set(CPACK_DEBIAN_ASAN_PACKAGE_RECOMMENDS ${CPACK_DEBIAN_PACKAGE_RECOMMENDS})
 set(CPACK_DEBIAN_DEV_PACKAGE_RECOMMENDS ${CPACK_DEBIAN_PACKAGE_RECOMMENDS})
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "sudo, python3 (>= 3.6.8), python3-pip")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "sudo, python3 (>= 3.6.8), python3-pip, python3-setuptools, python3-wheel")
 set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
 set(CPACK_DEBIAN_DEV_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
 
@@ -285,7 +277,7 @@ set(CPACK_RPM_PACKAGE_SUGGESTS "python3-argcomplete")
 set(CPACK_RPM_DEV_PACKAGE_SUGGESTS ${CPACK_RPM_PACKAGE_SUGGESTS})
 set(CPACK_RPM_ASAN_PACKAGE_SUGGESTS ${CPACK_RPM_PACKAGE_SUGGESTS})
 # python version gated by rhel8 :(
-set(CPACK_RPM_PACKAGE_REQUIRES "sudo, python3 >= 3.6.8, python3-pip, python3-PyYAML")
+set(CPACK_RPM_PACKAGE_REQUIRES "sudo, python3 >= 3.6.8, python3-pip, python3-setuptools, python3-wheel")
 set(CPACK_RPM_DEV_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
 set(CPACK_RPM_ASAN_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
 

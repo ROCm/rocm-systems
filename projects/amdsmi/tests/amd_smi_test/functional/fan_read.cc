@@ -100,7 +100,7 @@ void TestFanRead::Run(void) {
       err = amdsmi_get_gpu_fan_speed_max(processor_handles_[i], 0, &val_ui64);
       CHK_ERR_ASRT(err)
       IF_VERB(STANDARD) {
-        std::cout << val_i64/static_cast<float>(val_ui64)*100;
+        std::cout << static_cast<float>(val_i64)/static_cast<float>(val_ui64)*100;
         std::cout << "% ("<< val_i64 << "/" << val_ui64 << ")" << std::endl;
       }
       // Verify api support checking functionality is working

@@ -1090,6 +1090,7 @@ std::string splitString(std::string str, char delim) {
     tokens.push_back(token);
     return token;  // return 1st match
   }
+    return "";
 }
 
 static std::string pt_rng_Mhz(std::string title, rsmi_range *r) {
@@ -1115,26 +1116,6 @@ static std::string pt_rng_mV(std::string title, rsmi_range *r) {
   ss << title;
   ss << r->lower_bound << " to " << r->upper_bound
      << " mV" << "\n";
-  return ss.str();
-}
-
-static std::string print_pnt(rsmi_od_vddc_point_t *pt) {
-  std::ostringstream ss;
-  ss << "\t\t** Frequency: " << pt->frequency/1000000 << " MHz\n";
-  ss << "\t\t** Voltage: " << pt->voltage << " mV\n";
-  return ss.str();
-}
-
-static std::string pt_vddc_curve(rsmi_od_volt_curve *c) {
-  std::ostringstream ss;
-  if (c == nullptr) {
-    ss << "pt_vddc_curve | rsmi_od_volt_curve c = nullptr\n";
-    return ss.str();
-  }
-
-  for (uint32_t i = 0; i < RSMI_NUM_VOLTAGE_CURVE_POINTS; ++i) {
-    ss << print_pnt(&c->vc_points[i]);
-  }
   return ss.str();
 }
 
@@ -1242,7 +1223,7 @@ rsmi_status_t rsmi_dev_number_of_computes_get(uint32_t dv_ind, uint32_t* num_com
     return rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED;
   }
 
-  *num_computes = (tmp_simd_count / tmp_simd_per_cu);
+  *num_computes = static_cast<uint32_t>((tmp_simd_count / tmp_simd_per_cu));
   return rsmi_status_t::RSMI_STATUS_SUCCESS;
 }
 
@@ -1296,7 +1277,7 @@ void system_wait(int milli_seconds) {
 }
 
 int countDigit(uint64_t n) {
-  return static_cast<int>(std::floor(log10(n) + 1));
+  return static_cast<int>(std::floor(log10(static_cast<double>(n)) + 1));
 }
 
 }  // namespace smi

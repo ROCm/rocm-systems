@@ -100,6 +100,8 @@ if __name__ == "__main__":
         except NameError:
             logging.debug("argcomplete module not found. Autocomplete will not work.")
 
+        sys.argv = [arg.lower() if arg.startswith('--') or not arg.startswith('-')
+                    else arg for arg in sys.argv]
         args = amd_smi_parser.parse_args(args=None if sys.argv[1:] else ['--help'])
 
         # Handle command modifiers before subcommand execution

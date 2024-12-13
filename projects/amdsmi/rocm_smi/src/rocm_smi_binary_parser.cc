@@ -30,6 +30,7 @@
 #include "rocm_smi/rocm_smi_logger.h"
 
 #include <dirent.h>
+#include <inttypes.h>
 #include <pthread.h>
 
 #include <algorithm>
@@ -134,7 +135,7 @@ int present_pmmetrics(const char* fname,
     }
 
     table = NULL;
-    len = fread(buf1, 1, 65536, infile);
+    len = static_cast<int32_t>(fread(buf1, 1, 65536, infile));
     fseek(infile, 0, SEEK_SET);
     memcpy(&pmmetrics_version, &buf1[12], 4);
 
@@ -156,11 +157,11 @@ int present_pmmetrics(const char* fname,
 static int parse_reg_state_table(uint8_t *buf, int32_t buflen,
             struct metric_field *table,
             rsmi_name_value_t **kv, uint32_t *kvnum) {
-    int skip_smn, x, y, cur_instance, cur_smn,
-              num_instance, num_smn, instance_start, smn_start;
+    uint64_t skip_smn, x, y, cur_instance, cur_smn,
+             num_instance, num_smn, instance_start, smn_start;
     uint64_t v;
     uint8_t *obuf, *origbuf;
-    int kvsize = 64;
+    uint32_t kvsize = 64;
 
     *kv = reinterpret_cast<rsmi_name_value_t*>(calloc(kvsize, sizeof **kv));
     *kvnum = 0;
@@ -171,7 +172,7 @@ static int parse_reg_state_table(uint8_t *buf, int32_t buflen,
     origbuf = buf;
 top:
     while (table[x].field_name != NULL) {
-        for (y = 0; y < table[x].field_arr_size; y++) {
+        for (y = 0; y < static_cast<uint64_t>(table[x].field_arr_size); y++) {
             obuf = buf;
             v = get_value(&buf, &table[x]);
             if ((intptr_t)(buf - origbuf) > buflen) {
@@ -203,10 +204,10 @@ top:
                     }
                     break;
                 case FIELD_FLAG_NUM_INSTANCE:
-                    num_instance = v;
+                    num_instance = static_cast<int64_t>(v);
                     break;
                 case FIELD_FLAG_NUM_SMN:
-                    num_smn = v;
+                    num_smn = static_cast<int64_t>(v);
                     if (v)
                         skip_smn = 0;
                     else
@@ -220,12 +221,12 @@ top:
             }
             sprintf((*kv)[*kvnum].name, "%s", table[x].field_name);
             if (table[x].field_arr_size > 1) {
-                sprintf((*kv)[*kvnum].name + strlen((*kv)[*kvnum].name), "[%d]", y);
+                sprintf((*kv)[*kvnum].name + strlen((*kv)[*kvnum].name), "[%" PRId64 "]", y);
             }
             if (x >= instance_start)
-                sprintf((*kv)[*kvnum].name + strlen((*kv)[*kvnum].name), ".instance[%d]", cur_instance);
+                sprintf((*kv)[*kvnum].name + strlen((*kv)[*kvnum].name), ".instance[%" PRId64 "]", cur_instance);
             if (x >= smn_start)
-                sprintf((*kv)[*kvnum].name + strlen((*kv)[*kvnum].name), ".smn[%d]", cur_smn);
+                sprintf((*kv)[*kvnum].name + strlen((*kv)[*kvnum].name), ".smn[%" PRId64 "]", cur_smn);
             (*kv)[*kvnum].value = v;
             ++(*kvnum);
         }
@@ -290,7 +291,7 @@ int present_reg_state(const char* fname,
         return -2;
     }
 
-    len = fread(buf, 1, sizeof buf, infile);
+    len = static_cast<int32_t>(fread(buf, 1, sizeof buf, infile));
     fclose(infile);
     return parse_reg_state_table(buf, len, tab, kv, kvnum);
 }

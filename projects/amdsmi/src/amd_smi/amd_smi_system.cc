@@ -229,11 +229,15 @@ amdsmi_status_t AMDSmiSystem::get_gpu_socket_id(uint32_t index,
 */
 
     uint64_t domain = (bdfid >> 32) & 0xffffffff;
+    /* May need later
     // may need to identify with partition_id in the future as well... TBD
     uint64_t partition_id = (bdfid >> 28) & 0xf;
+    */
     uint64_t bus = (bdfid >> 8) & 0xff;
     uint64_t device_id = (bdfid >> 3) & 0x1f;
+    /* May need later
     uint64_t function = bdfid & 0x7;
+    */
 
     // The BD part of the BDF is used as the socket id as it
     // represents a physical device.

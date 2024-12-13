@@ -158,6 +158,8 @@ Static Arguments:
   -B, --board              All board information
   -R, --process-isolation  The process isolation status
   -r, --ras                Displays RAS features information
+  -C, --clock [CLOCK ...]  Show one or more valid clock frequency levels. Available options:
+                                SYS, DF, DCEF, SOC, MEM, VCLK0, VCLK1, DCLK0, DCLK1, ALL
   -p, --partition          Partition information
   -l, --limit              All limit metric values (i.e. power and thermal limits)
   -P, --policy             The available DPM policy
@@ -538,6 +540,8 @@ Set Arguments:
   -o, --power-cap WATTS                        Set power capacity limit
   -p, --soc-pstate POLICY_ID                   Set the GPU soc pstate policy using policy id
   -x, --xgmi-plpd POLICY_ID                    Set the GPU XGMI per-link power down policy using policy id
+  -c, --clk-level CLK_TYPE [PERF_LEVELS ...]   Set the sclk (aka gfxclk), mclk, fclk, pcie, or socclk frequency performance level.
+                                               Can take range of acceptable levels.
   -L, --clk-limit CLK_TYPE LIM_TYPE VALUE      Sets the sclk (aka gfxclk) or mclk minimum and maximum frequencies
                                                 amd-smi set -L (sclk | mclk) (min | max) value
   -R, --process-isolation STATUS               Enable or disable the GPU process isolation:
@@ -855,5 +859,35 @@ GPU: 0
             CACHE_LEVEL: 3
             MAX_NUM_CU_SHARED: 228
             NUM_CACHE_INSTANCE: 1
+    CLOCK:
+        SYS:
+            CURRENT LEVEL: 2
+            FREQUENCY_LEVELS:
+                0: 300 MHz
+                1: 904 MHz
+                2: 1165 MHz
+                3: 1360 MHz
+                4: 1440 MHz
+                5: 1544 MHz
+                6: 1627 MHz
+                7: 1720 MHz
+                8: 1800 MHz
+        DF:
+            CURRENT LEVEL: 0
+            FREQUENCY_LEVELS:
+                0: 1400 MHz
+        DCEF: N/A
+        SOC:
+            CURRENT LEVEL: 0
+            FREQUENCY_LEVELS:
+                0: 302 MHz
+        MEM:
+            CURRENT LEVEL: 0
+            FREQUENCY_LEVELS:
+                0: 167 MHz
+        VCLK0: N/A
+        VCLK1: N/A
+        DCLK1: N/A
+        DCLK0: N/A
 ...
 ```

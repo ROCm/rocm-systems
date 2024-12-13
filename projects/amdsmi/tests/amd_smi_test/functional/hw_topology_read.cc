@@ -20,6 +20,7 @@
  * THE SOFTWARE.
  */
 
+#include <inttypes.h>
 #include <stdint.h>
 #include <stddef.h>
 
@@ -477,8 +478,11 @@ void TestHWTopologyRead::Run(void) {
             continue;
           }
 
-          printf("\tGPU BDF %04lx:%02x:%02x.%d\n", bdf.domain_number,
-                bdf.bus_number, bdf.device_number, bdf.function_number);
+          printf("\tGPU BDF %04" PRIx64 ":%02" PRIx32 ":%02" PRIx32 ".%" PRIu32 "\n",
+            static_cast<uint64_t>(bdf.domain_number),
+            static_cast<uint32_t>(bdf.bus_number),
+            static_cast<uint32_t>(bdf.device_number),
+            static_cast<uint32_t>(bdf.function_number));
         }
       }
       else {
