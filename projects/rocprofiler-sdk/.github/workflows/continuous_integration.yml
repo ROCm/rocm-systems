@@ -27,10 +27,14 @@ env:
   vega20_EXCLUDE_TESTS_REGEX: "^(test-page-migration-(execute|validate))$"
   mi200_EXCLUDE_TESTS_REGEX: "^(test-page-migration-(execute|validate))$"
   mi300_EXCLUDE_TESTS_REGEX: "^(test-page-migration-(execute|validate))$"
-  navi3_EXCLUDE_LABEL_REGEX: "^(pc-sampling|openmp-target)$"
-  vega20_EXCLUDE_LABEL_REGEX: "^(pc-sampling|openmp-target)$"
+  mi300a_EXCLUDE_TESTS_REGEX: "^(test-page-migration-(execute|validate))$"
+  mi325_EXCLUDE_TESTS_REGEX: "^(test-page-migration-(execute|validate))$"
+  navi3_EXCLUDE_LABEL_REGEX: "^(pc-sampling|pc_sampling|openmp-target)$"
+  vega20_EXCLUDE_LABEL_REGEX: "^(pc-sampling|pc_sampling|openmp-target)$"
   mi200_EXCLUDE_LABEL_REGEX: "^(openmp-target)$"
-  mi300_EXCLUDE_LABEL_REGEX: "^(pc-sampling)$"
+  mi300_EXCLUDE_LABEL_REGEX: "^(pc-sampling|pc_sampling)$"
+  mi300a_EXCLUDE_LABEL_REGEX: ""
+  mi325_EXCLUDE_LABEL_REGEX: "^(pc-sampling|pc_sampling)$"
 
 jobs:
   core-deb:
@@ -38,7 +42,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['vega20', 'mi300']
+        runner: ['vega20', 'mi300a']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
         ci-flags: ['--linter clang-tidy']
@@ -165,7 +169,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['mi300']
+        runner: ['mi325']
         os: ['rhel-emu', 'sles-emu']
         build-type: ['RelWithDebInfo']
         ci-flags: ['--linter clang-tidy']
