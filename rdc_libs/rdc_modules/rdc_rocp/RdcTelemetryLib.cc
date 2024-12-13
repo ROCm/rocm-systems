@@ -52,7 +52,7 @@ bool is_rocp_disabled() {
                      [&value_str](const char* val) { return value_str == val; });
 }
 
-rdc_status_t rdc_module_init(uint64_t  /*flags*/) {
+rdc_status_t rdc_module_init(uint64_t /*flags*/) {
   if (is_rocp_disabled()) {
     // rocprofiler does NOT work in gtest.
     // GTest starts up multiple instances of the progam under test,

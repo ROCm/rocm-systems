@@ -72,6 +72,12 @@ jobs:
           rocm-smi-lib \
           rocm-validation-suite \
           rocprofiler-dev \
+          rocprofiler-plugins \
+          rocprofiler-register \
+          rocprofiler-sdk \
+          hip-dev \
+          hip-runtime-amd \
+          hipcc \
           build-essential \
           ccache \
           cmake \

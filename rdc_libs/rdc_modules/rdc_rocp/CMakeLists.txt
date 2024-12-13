@@ -9,30 +9,31 @@ set(RDC_ROCP_LIB_COMPONENT "lib${RDC_ROCP_LIB}")
 set(RDC_ROCP_LIB_SRC_LIST
     "${BOOTSTRAP_LIB_SRC_DIR}/RdcLogger.cc"
     "${SRC_DIR}/RdcTelemetryLib.cc"
+    "${SRC_DIR}/RdcRocpCounterSampler.cc"
     "${SRC_DIR}/RdcRocpBase.cc")
 set(RDC_ROCP_LIB_INC_LIST
     "${PROJECT_SOURCE_DIR}/include/rdc/rdc.h"
     "${RDC_LIB_INC_DIR}/RdcDiagnosticLibInterface.h"
     "${RDC_LIB_INC_DIR}/rdc_common.h"
     "${RDC_LIB_INC_DIR}/RdcLogger.h"
-    "${INC_DIR}/RdcRocpBase.h")
+    "${INC_DIR}/RdcRocpBase.h"
+    "${INC_DIR}/RdcRocpCounterSampler.h")
 
 if(BUILD_PROFILER)
     message("Build librdc_rocp.so is enabled, make sure ROCmTools is installed.")
 
     message("RDC_ROCP_LIB_INC_LIST=${RDC_ROCP_LIB_INC_LIST}")
 
-    set(ROCPROFILER_LIB rocprofiler::rocprofiler)
-    # below provides rocprofiler::rocprofiler package
-    include(Findrocprofiler)
-
+    find_package(rocprofiler-sdk
+        HINTS ${ROCM_DIR}/lib/cmake
+        CONFIGURE REQUIRED)
     find_package(hsa-runtime64
         NAMES hsa-runtime64
         HINTS ${ROCM_DIR}/lib/cmake
         CONFIGURE REQUIRED)
     set(RDC_LIB_MODULES ${RDC_LIB_MODULES} ${RDC_ROCP_LIB} PARENT_SCOPE)
     add_library(${RDC_ROCP_LIB} SHARED ${RDC_ROCP_LIB_SRC_LIST} ${RDC_ROCP_LIB_INC_LIST})
-    target_link_libraries(${RDC_ROCP_LIB} PRIVATE ${RDC_LIB} ${BOOTSTRAP_LIB} hsa-runtime64::hsa-runtime64 rocprofiler::rocprofiler pthread dl)
+    target_link_libraries(${RDC_ROCP_LIB} PRIVATE ${RDC_LIB} ${BOOTSTRAP_LIB} hsa-runtime64::hsa-runtime64 rocprofiler-sdk::rocprofiler-sdk pthread dl)
     target_include_directories(${RDC_ROCP_LIB} PRIVATE
         "${PROJECT_SOURCE_DIR}"
         "${PROJECT_SOURCE_DIR}/include"

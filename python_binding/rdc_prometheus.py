@@ -13,6 +13,7 @@ default_field_ids = [
         rdc_field_t.RDC_FI_GPU_TEMP,
         rdc_field_t.RDC_FI_PROF_ACTIVE_CYCLES,
         rdc_field_t.RDC_FI_PROF_ACTIVE_WAVES,
+        rdc_field_t.RDC_FI_PROF_OCCUPANCY_PERCENT,
 ]
 
 class PrometheusReader(RdcReader):
