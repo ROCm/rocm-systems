@@ -69,6 +69,7 @@
 #include "core/inc/memory_region.h"
 #include "core/inc/signal.h"
 #include "core/inc/svm_profiler.h"
+#include "core/inc/thunk_loader.h"
 #include "core/util/flag.h"
 #include "core/util/locks.h"
 #include "core/util/os.h"
@@ -453,6 +454,8 @@ class Runtime {
 
   const Flag& flag() const { return flag_; }
 
+  const ThunkLoader* thunkLoader() const { return thunkLoader_; }
+
   ExtensionEntryPoints extensions_;
 
   hsa_status_t SetCustomSystemEventHandler(hsa_amd_system_event_callback_t callback,
@@ -767,6 +770,8 @@ class Runtime {
 
   // Track environment variables.
   Flag flag_;
+
+  ThunkLoader* thunkLoader_;
 
   // Pools memory for SharedSignal (Signal ABI blocks)
   SharedSignalPool_t SharedSignalPool;

@@ -2040,6 +2040,10 @@ hsa_status_t Runtime::Load() {
   }
 
   flag_.Refresh();
+
+  thunkLoader_ = new ThunkLoader();
+  thunkLoader_->LoadThunkApiTable();
+
   g_use_interrupt_wait = flag_.enable_interrupt();
   g_use_mwaitx = flag_.check_mwaitx(cpuinfo.mwaitx);
 
@@ -2135,6 +2139,8 @@ void Runtime::Unload() {
   AMD::Unload();
 
   DestroyDrivers();
+
+  delete thunkLoader_;
 }
 
 void Runtime::LoadExtensions() {
