@@ -207,11 +207,7 @@ class InterruptSignal : private LocalSignal, public Signal {
     return rtti_id_;
   }
 
-  /// @brief Notify driver of signal value change if necessary.
-  __forceinline void SetEvent() {
-    std::atomic_signal_fence(std::memory_order_seq_cst);
-    if (InWaiting()) hsaKmtSetEvent(event_);
-  }
+  void SetEvent();
 
   DISALLOW_COPY_AND_ASSIGN(InterruptSignal);
 };

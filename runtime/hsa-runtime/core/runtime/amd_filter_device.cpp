@@ -95,7 +95,7 @@ void RvdFilter::BuildDeviceUuidList(uint32_t numNodes) {
   HsaNodeProperties props = {0};
   for (HSAuint32 idx = 0; idx < numNodes; idx++) {
     // Query for node properties and ignore Cpu devices
-    status = hsaKmtGetNodeProperties(idx, &props);
+    status = HSAKMT_CALL(hsaKmtGetNodeProperties(idx, &props));
     if (status != HSAKMT_STATUS_SUCCESS) {
       continue;
     }

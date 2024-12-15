@@ -320,7 +320,7 @@ uint32_t Signal::WaitMultiple(uint32_t signal_count, const hsa_signal_t* hsa_sig
     uint64_t ct=timer::duration_cast<std::chrono::milliseconds>(
       time_remaining).count();
     wait_ms = (ct>0xFFFFFFFEu) ? 0xFFFFFFFEu : ct;
-    hsaKmtWaitOnMultipleEvents_Ext(evts, unique_evts, wait_on_all, wait_ms, event_age);
+    HSAKMT_CALL(hsaKmtWaitOnMultipleEvents_Ext(evts, unique_evts, wait_on_all, wait_ms, event_age));
   }
 }
 
@@ -425,7 +425,7 @@ uint32_t Signal::WaitAnyExceptions(uint32_t signal_count, const hsa_signal_t* hs
       }
     }
 
-    hsaKmtWaitOnMultipleEvents_Ext(evts, unique_evts, false, wait_ms, event_age);
+    HSAKMT_CALL(hsaKmtWaitOnMultipleEvents_Ext(evts, unique_evts, false, wait_ms, event_age));
   } //while
 }
 

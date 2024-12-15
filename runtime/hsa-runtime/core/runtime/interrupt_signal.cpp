@@ -77,7 +77,7 @@ HsaEvent* InterruptSignal::CreateEvent(HSA_EVENTTYPE type, bool manual_reset) {
 
   HsaEvent* ret = NULL;
   if (HSAKMT_STATUS_SUCCESS ==
-      hsaKmtCreateEvent(&event_descriptor, manual_reset, false, &ret)) {
+      HSAKMT_CALL(hsaKmtCreateEvent(&event_descriptor, manual_reset, false, &ret))) {
     if (type == HSA_EVENTTYPE_MEMORY) {
       memset(&ret->EventData.EventData.MemoryAccessFault.Failure, 0,
              sizeof(HsaAccessAttributeFailure));
@@ -89,7 +89,7 @@ HsaEvent* InterruptSignal::CreateEvent(HSA_EVENTTYPE type, bool manual_reset) {
   return ret;
 }
 
-void InterruptSignal::DestroyEvent(HsaEvent* evt) { hsaKmtDestroyEvent(evt); }
+void InterruptSignal::DestroyEvent(HsaEvent* evt) { HSAKMT_CALL(hsaKmtDestroyEvent(evt)); }
 
 InterruptSignal::InterruptSignal(hsa_signal_value_t initial_value, HsaEvent* use_event)
     : LocalSignal(initial_value, false), Signal(signal()) {
@@ -194,7 +194,7 @@ hsa_signal_value_t InterruptSignal::WaitRelaxed(hsa_signal_condition_t condition
       static_cast<uint32_t>(signal_abort_timeout ? signal_abort_timeout * 1000 : 0xFFFFFFFFUL)
     );
 
-    hsaKmtWaitOnEvent_Ext(event_, wait_ms, &event_age);
+    HSAKMT_CALL(hsaKmtWaitOnEvent_Ext(event_, wait_ms, &event_age));
   }
 }
 
@@ -370,6 +370,11 @@ hsa_signal_value_t InterruptSignal::CasAcqRel(hsa_signal_value_t expected,
   SetEvent();
   return ret;
 }
+  /// @brief Notify driver of signal value change if necessary.
+  void InterruptSignal::SetEvent() {
+    std::atomic_signal_fence(std::memory_order_seq_cst);
+    if (InWaiting()) HSAKMT_CALL(hsaKmtSetEvent(event_));
+  }
 
 }  // namespace core
 }  // namespace rocr

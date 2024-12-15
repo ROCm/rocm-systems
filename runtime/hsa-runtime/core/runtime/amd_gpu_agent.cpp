@@ -122,7 +122,7 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   const bool is_apu_node = (properties_.NumCPUCores > 0);
   profile_ = (is_apu_node) ? HSA_PROFILE_FULL : HSA_PROFILE_BASE;
 
-  HSAKMT_STATUS err = hsaKmtGetClockCounters(node_id(), &t0_);
+  HSAKMT_STATUS err = HSAKMT_CALL(hsaKmtGetClockCounters(node_id(), &t0_));
   t1_ = t0_;
   historical_clock_ratio_ = 0.0;
   assert(err == HSAKMT_STATUS_SUCCESS && "hsaGetClockCounters error");
@@ -440,8 +440,8 @@ void GpuAgent::InitRegionList() {
 
   std::vector<HsaMemoryProperties> mem_props(properties_.NumMemoryBanks);
   if (HSAKMT_STATUS_SUCCESS ==
-      hsaKmtGetNodeMemoryProperties(node_id(), properties_.NumMemoryBanks,
-                                    &mem_props[0])) {
+      HSAKMT_CALL(hsaKmtGetNodeMemoryProperties(node_id(), properties_.NumMemoryBanks,
+                                    &mem_props[0]))) {
     for (uint32_t mem_idx = 0; mem_idx < properties_.NumMemoryBanks;
          ++mem_idx) {
       // Ignore the one(s) with unknown size.
@@ -525,7 +525,7 @@ void GpuAgent::InitScratchPool() {
 
   void* scratch_base = nullptr;
   HSAKMT_STATUS err =
-      hsaKmtAllocMemory(node_id(), max_scratch_len, flags, &scratch_base);
+      HSAKMT_CALL(hsaKmtAllocMemory(node_id(), max_scratch_len, flags, &scratch_base));
   assert(err == HSAKMT_STATUS_SUCCESS && "hsaKmtAllocMemory(Scratch) failed");
   assert(IsMultipleOf(scratch_base, 0x1000) &&
          "Scratch base is not page aligned!");
@@ -562,7 +562,7 @@ void GpuAgent::ReserveScratch()
   }
 
   size_t available;
-  HSAKMT_STATUS err = hsaKmtAvailableMemory(node_id(), &available);
+  HSAKMT_STATUS err = HSAKMT_CALL(hsaKmtAvailableMemory(node_id(), &available));
   assert(err == HSAKMT_STATUS_SUCCESS && "hsaKmtAvailableMemory failed");
   ScopedAcquire<KernelMutex> lock(&scratch_lock_);
   if (!scratch_cache_.reserved_bytes() && reserved_sz && available > 8 * reserved_sz) {
@@ -570,7 +570,7 @@ void GpuAgent::ReserveScratch()
     void* reserved_base = scratch_pool_.alloc(reserved_sz);
     assert(reserved_base && "Could not allocate reserved memory");
 
-    if (hsaKmtMapMemoryToGPU(reserved_base, reserved_sz, &alt_va) == HSAKMT_STATUS_SUCCESS)
+    if (HSAKMT_CALL(hsaKmtMapMemoryToGPU(reserved_base, reserved_sz, &alt_va)) == HSAKMT_STATUS_SUCCESS)
       scratch_cache_.reserve(reserved_sz, reserved_base);
     else
       throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES, "Reserve scratch memory failed.");
@@ -582,8 +582,8 @@ void GpuAgent::InitCacheList() {
   // Similar to getting CPU cache but here we use FComputeIdLo.
   cache_props_.resize(properties_.NumCaches);
   if (HSAKMT_STATUS_SUCCESS !=
-      hsaKmtGetNodeCacheProperties(node_id(), properties_.FComputeIdLo,
-                                   properties_.NumCaches, &cache_props_[0])) {
+      HSAKMT_CALL(hsaKmtGetNodeCacheProperties(node_id(), properties_.FComputeIdLo,
+                                   properties_.NumCaches, &cache_props_[0]))) {
     cache_props_.clear();
   } else {
     // Only store GPU D-cache.
@@ -611,7 +611,7 @@ void GpuAgent::InitLibDrm() {
   HSAKMT_STATUS status;
 
   HsaAMDGPUDeviceHandle device_handle;
-  status = hsaKmtGetAMDGPUDeviceHandle(node_id(), &device_handle);
+  status = HSAKMT_CALL(hsaKmtGetAMDGPUDeviceHandle(node_id(), &device_handle));
   if (status != HSAKMT_STATUS_SUCCESS)
     throw AMD::hsa_exception(HSA_STATUS_ERROR,
                              "Agent creation failed.\nlibdrm get device handle failed.\n");
@@ -941,7 +941,7 @@ void GpuAgent::ReleaseResources() {
     scratch_cache_.free_reserve();
 
     if (scratch_pool_.base() != NULL) {
-      hsaKmtFreeMemory(scratch_pool_.base(), scratch_pool_.size());
+      HSAKMT_CALL(hsaKmtFreeMemory(scratch_pool_.base(), scratch_pool_.size()));
     }
 
     for (int i = 0; i < QueueCount; i++)
@@ -1613,7 +1613,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       HSAuint64 availableBytes;
       HSAKMT_STATUS status;
 
-      status = hsaKmtAvailableMemory(node_id(), &availableBytes);
+      status = HSAKMT_CALL(hsaKmtAvailableMemory(node_id(), &availableBytes));
 
       if (status != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
@@ -1878,7 +1878,7 @@ void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
       if (scratch.main_queue_base != nullptr) {
         HSAuint64 alternate_va;
         if ((profile_ == HSA_PROFILE_FULL) ||
-            (hsaKmtMapMemoryToGPU(scratch.main_queue_base, scratch.main_size, &alternate_va) ==
+            (HSAKMT_CALL(hsaKmtMapMemoryToGPU(scratch.main_queue_base, scratch.main_size, &alternate_va)) ==
              HSAKMT_STATUS_SUCCESS)) {
           if (scratch.large) scratch_used_large_ += scratch.main_size;
           scratch_cache_.insertMain(scratch);
@@ -1931,7 +1931,7 @@ void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
       HSAuint64 alternate_va;
       if ((base != nullptr) &&
           ((profile_ == HSA_PROFILE_FULL) ||
-           (hsaKmtMapMemoryToGPU(base, size, &alternate_va) == HSAKMT_STATUS_SUCCESS))) {
+           (HSAKMT_CALL(hsaKmtMapMemoryToGPU(base, size, &alternate_va)) == HSAKMT_STATUS_SUCCESS))) {
         // Scratch allocated and either full profile or map succeeded.
         scratch.main_queue_base = base;
         scratch.main_size = size;
@@ -2011,7 +2011,7 @@ void GpuAgent::AcquireQueueAltScratch(ScratchInfo& scratch) {
       if (scratch.alt_queue_base != nullptr) {
         HSAuint64 alternate_va;
         if ((profile_ == HSA_PROFILE_FULL) ||
-            (hsaKmtMapMemoryToGPU(scratch.alt_queue_base, scratch.alt_size, &alternate_va) ==
+            (HSAKMT_CALL(hsaKmtMapMemoryToGPU(scratch.alt_queue_base, scratch.alt_size, &alternate_va)) ==
              HSAKMT_STATUS_SUCCESS)) {
           scratch_cache_.insertAlt(scratch);
           return;
@@ -2052,7 +2052,7 @@ void GpuAgent::ReleaseQueueAltScratch(ScratchInfo& scratch) {
 
 void GpuAgent::ReleaseScratch(void* base, size_t size, bool large) {
   if (profile_ == HSA_PROFILE_BASE) {
-    if (HSAKMT_STATUS_SUCCESS != hsaKmtUnmapMemoryToGPU(base)) {
+    if (HSAKMT_STATUS_SUCCESS != HSAKMT_CALL(hsaKmtUnmapMemoryToGPU(base))) {
       assert(false && "Unmap scratch subrange failed!");
     }
   }
@@ -2195,9 +2195,9 @@ bool GpuAgent::current_coherency_type(hsa_amd_coherency_type_t type) {
     type1 = HSA_CACHING_CACHED;
   }
 
-  if (hsaKmtSetMemoryPolicy(node_id(), type0, type1,
+  if (HSAKMT_CALL(hsaKmtSetMemoryPolicy(node_id(), type0, type1,
                             reinterpret_cast<void*>(ape1_base_),
-                            ape1_size_) != HSAKMT_STATUS_SUCCESS) {
+                            ape1_size_)) != HSAKMT_STATUS_SUCCESS) {
     return false;
   }
   current_coherency_type_ = type;
@@ -2213,7 +2213,7 @@ uint16_t GpuAgent::GetSdmaMicrocodeVersion() const {
 }
 
 void GpuAgent::SyncClocks() {
-  HSAKMT_STATUS err = hsaKmtGetClockCounters(node_id(), &t1_);
+  HSAKMT_STATUS err = HSAKMT_CALL(hsaKmtGetClockCounters(node_id(), &t1_));
   assert(err == HSAKMT_STATUS_SUCCESS && "hsaGetClockCounters error");
 }
 
@@ -2264,7 +2264,7 @@ hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttra
 
   // Bind the trap handler to this node.
   HSAKMT_STATUS retKmt =
-      hsaKmtSetTrapHandler(node_id(), trap_code_buf_, trap_code_buf_size_, tma_addr, tma_size);
+      HSAKMT_CALL(hsaKmtSetTrapHandler(node_id(), trap_code_buf_, trap_code_buf_size_, tma_addr, tma_size));
 
   return (retKmt != HSAKMT_STATUS_SUCCESS) ? HSA_STATUS_ERROR : HSA_STATUS_SUCCESS;
 }
@@ -2306,8 +2306,8 @@ void GpuAgent::BindTrapHandler() {
   }
 
   // Bind the trap handler to this node.
-  HSAKMT_STATUS err = hsaKmtSetTrapHandler(node_id(), trap_code_buf_, trap_code_buf_size_,
-                                           tma_addr, tma_size);
+  HSAKMT_STATUS err = HSAKMT_CALL(hsaKmtSetTrapHandler(node_id(), trap_code_buf_, trap_code_buf_size_,
+                                           tma_addr, tma_size));
   assert(err == HSAKMT_STATUS_SUCCESS && "hsaKmtSetTrapHandler() failed");
 }
 
@@ -2571,12 +2571,12 @@ hsa_status_t GpuAgent::PcSamplingIterateConfig(hsa_ven_amd_pcs_iterate_configura
     return HSA_STATUS_ERROR;
 
   // First query to get size of list needed
-  HSAKMT_STATUS ret = hsaKmtPcSamplingQueryCapabilities(node_id(), NULL, 0, &size);
+  HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtPcSamplingQueryCapabilities(node_id(), NULL, 0, &size));
   if (ret != HSAKMT_STATUS_SUCCESS || size == 0) return HSA_STATUS_ERROR;
 
   std::vector<HsaPcSamplingInfo> sampleInfoList(size);
-  ret = hsaKmtPcSamplingQueryCapabilities(node_id(), sampleInfoList.data(), sampleInfoList.size(),
-                                          &size);
+  ret = HSAKMT_CALL(hsaKmtPcSamplingQueryCapabilities(node_id(), sampleInfoList.data(), sampleInfoList.size(),
+                                          &size));
 
   if (ret != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
@@ -2604,7 +2604,7 @@ hsa_status_t GpuAgent::PcSamplingCreate(pcs::PcsRuntime::PcSamplingSession& sess
 
   // Pass the sampling information to the kernel driver to create PC
   // sampling session.
-  HSAKMT_STATUS retkmt = hsaKmtPcSamplingCreate(node_id(), &sampleInfo, &thunkId);
+  HSAKMT_STATUS retkmt = HSAKMT_CALL(hsaKmtPcSamplingCreate(node_id(), &sampleInfo, &thunkId));
   if (retkmt != HSAKMT_STATUS_SUCCESS) {
     return (retkmt == HSAKMT_STATUS_KERNEL_ALREADY_OPENED) ? (hsa_status_t)HSA_STATUS_ERROR_RESOURCE_BUSY
             : HSA_STATUS_ERROR;
@@ -2813,7 +2813,7 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
 hsa_status_t GpuAgent::PcSamplingDestroy(pcs::PcsRuntime::PcSamplingSession& session) {
   if (PcSamplingStop(session) != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
-  HSAKMT_STATUS retKmt = hsaKmtPcSamplingDestroy(node_id(), session.ThunkId());
+  HSAKMT_STATUS retKmt = HSAKMT_CALL(hsaKmtPcSamplingDestroy(node_id(), session.ThunkId()));
   hsa_ven_amd_pcs_method_kind_t sampling_method = session.method();
 
   pcs_data_t* pcs_data = nullptr;
@@ -2912,7 +2912,7 @@ hsa_status_t GpuAgent::PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& sessi
   }
 
   // Start the sampling session in the kernel driver
-  if (hsaKmtPcSamplingStart(node_id(), session.ThunkId()) == HSAKMT_STATUS_SUCCESS)
+  if (HSAKMT_CALL(hsaKmtPcSamplingStart(node_id(), session.ThunkId())) == HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_SUCCESS;
 
   debug_print("Failed to start PC sampling session with thunkId:%d\n", session.ThunkId());
@@ -2933,7 +2933,7 @@ hsa_status_t GpuAgent::PcSamplingStop(pcs::PcsRuntime::PcSamplingSession& sessio
   session.stop();
 
   // Stop PC sampling in the kernel driver
-  HSAKMT_STATUS retKmt = hsaKmtPcSamplingStop(node_id(), session.ThunkId());
+  HSAKMT_STATUS retKmt = HSAKMT_CALL(hsaKmtPcSamplingStop(node_id(), session.ThunkId()));
   if (retKmt != HSAKMT_STATUS_SUCCESS)
     throw AMD::hsa_exception(HSA_STATUS_ERROR, "Failed to stop PC Sampling session.");
 

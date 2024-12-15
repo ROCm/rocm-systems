@@ -195,10 +195,10 @@ hsa_status_t BlitSdma<RingIndexTy, HwIndexMonotonic, SizeToCountOffset, useGCR>:
   // boolean flag
   const HSA_QUEUE_TYPE kQueueType_ = rec_eng >= 0 ? HSA_QUEUE_SDMA_BY_ENG_ID :
                                      (use_xgmi ? HSA_QUEUE_SDMA_XGMI : HSA_QUEUE_SDMA);
-  if (HSAKMT_STATUS_SUCCESS != hsaKmtCreateQueueExt(agent_->node_id(), kQueueType_, 100,
+  if (HSAKMT_STATUS_SUCCESS != HSAKMT_CALL(hsaKmtCreateQueueExt(agent_->node_id(), kQueueType_, 100,
                                                     HSA_QUEUE_PRIORITY_MAXIMUM, rec_eng,
                                                     queue_start_addr_, kQueueSize, NULL,
-                                                    &queue_resource_)) {
+                                                    &queue_resource_))) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
@@ -226,7 +226,7 @@ hsa_status_t BlitSdma<RingIndexTy, HwIndexMonotonic, SizeToCountOffset, useGCR>:
 
   if (queue_resource_.QueueId != 0) {
     // Release queue resources from the kernel
-    auto err = hsaKmtDestroyQueue(queue_resource_.QueueId);
+    auto err = HSAKMT_CALL(hsaKmtDestroyQueue(queue_resource_.QueueId));
     assert(err == HSAKMT_STATUS_SUCCESS);
     memset(&queue_resource_, 0, sizeof(queue_resource_));
   }

@@ -62,11 +62,11 @@ bool MemoryRegion::RegisterMemory(void* ptr, size_t size, const HsaMemFlags& Mem
   assert(ptr != NULL);
   assert(size != 0);
 
-  const HSAKMT_STATUS status = hsaKmtRegisterMemoryWithFlags(ptr, size, MemFlags);
+  const HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtRegisterMemoryWithFlags(ptr, size, MemFlags));
   return (status == HSAKMT_STATUS_SUCCESS);
 }
 
-void MemoryRegion::DeregisterMemory(void* ptr) { hsaKmtDeregisterMemory(ptr); }
+void MemoryRegion::DeregisterMemory(void* ptr) { HSAKMT_CALL(hsaKmtDeregisterMemory(ptr)); }
 
 bool MemoryRegion::MakeKfdMemoryResident(size_t num_node, const uint32_t* nodes, const void* ptr,
                                          size_t size, uint64_t* alternate_va,
@@ -75,14 +75,14 @@ bool MemoryRegion::MakeKfdMemoryResident(size_t num_node, const uint32_t* nodes,
   assert(nodes != NULL);
 
   *alternate_va = 0;
-  const HSAKMT_STATUS status = hsaKmtMapMemoryToGPUNodes(
-      const_cast<void*>(ptr), size, alternate_va, map_flag, num_node, const_cast<uint32_t*>(nodes));
+  const HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(
+      const_cast<void*>(ptr), size, alternate_va, map_flag, num_node, const_cast<uint32_t*>(nodes)));
 
   return (status == HSAKMT_STATUS_SUCCESS);
 }
 
 bool MemoryRegion::MakeKfdMemoryUnresident(const void* ptr) {
-  const HSAKMT_STATUS status = hsaKmtUnmapMemoryToGPU(const_cast<void*>(ptr));
+  const HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtUnmapMemoryToGPU(const_cast<void*>(ptr)));
   return (status == HSAKMT_STATUS_SUCCESS);
 }
 

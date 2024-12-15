@@ -143,8 +143,8 @@ void SvmProfileControl::PollSmi() {
       HSA_SMI_EVENT_MASK_FROM_INDEX(HSA_SMI_EVENT_UNMAP_FROM_GPU);
 
   for (int i = 0; i < core::Runtime::runtime_singleton_->gpu_agents().size(); i++) {
-    auto err = hsaKmtOpenSMI(core::Runtime::runtime_singleton_->gpu_agents()[i]->node_id(),
-                             &files[i + 1].fd);
+    auto err = HSAKMT_CALL(hsaKmtOpenSMI(core::Runtime::runtime_singleton_->gpu_agents()[i]->node_id(),
+                             &files[i + 1].fd));
     assert(err == HSAKMT_STATUS_SUCCESS);
     files[i + 1].events = POLLIN;
     files[i + 1].revents = 0;

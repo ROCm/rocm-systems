@@ -50,6 +50,7 @@
 #include <fstream>
 #include <memory>
 #include "core/util/utils.h"
+#include "core/inc/runtime.h"
 #include "./amd_hsa_code_util.hpp"
 #include "core/inc/amd_core_dump.hpp"
 #include "hsakmt/hsakmt.h"
@@ -118,14 +119,14 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     uint32_t runtime_size, agents_size, queue_size, n_entries, entry_size;
     HsaVersionInfo versionInfo = {0};
 
-    if (hsaKmtDbgEnable(&runtime_ptr, &runtime_size)) {
+    if (HSAKMT_CALL(hsaKmtDbgEnable(&runtime_ptr, &runtime_size))) {
       fprintf(stderr, "Failed to enable debug interface, "
               "debugger might be already attached.\n");
       return HSA_STATUS_ERROR;
     }
     std::unique_ptr<void, decltype(std::free) *> runtime_info(runtime_ptr, std::free);
 
-    if (hsaKmtGetVersion(&versionInfo)) {
+    if (HSAKMT_CALL(hsaKmtGetVersion(&versionInfo))) {
       fprintf(stderr, "Failed to fetch driver ABI version.\n");
       return HSA_STATUS_ERROR;
     }
@@ -138,7 +139,7 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     /* Store runtime_info_size in PT_NOTE package */
     note_package_builder_.Write<uint64_t>(runtime_size);
 
-    if (hsaKmtDbgGetDeviceData(&agents_ptr, &n_entries, &entry_size)) {
+    if (HSAKMT_CALL(hsaKmtDbgGetDeviceData(&agents_ptr, &n_entries, &entry_size))) {
        fprintf(stderr, "Failed to fetch agents snapshot.\n");
        return HSA_STATUS_ERROR;
     }
@@ -149,7 +150,7 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     /* Store agent_info_entry_size in PT_NOTE package */
     note_package_builder_.Write<uint32_t>(entry_size);
 
-    if (hsaKmtDbgGetQueueData(&queues_ptr, &n_entries, &entry_size, true)) {
+    if (HSAKMT_CALL(hsaKmtDbgGetQueueData(&queues_ptr, &n_entries, &entry_size, true))) {
        fprintf(stderr, "Failed to fetch queues snapshot.\n");
        return HSA_STATUS_ERROR;
     }
@@ -163,7 +164,7 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     PushInfo(runtime_info.get(), runtime_size);
     PushInfo(agents_info.get(), agents_size);
     PushInfo(queues_info.get(), queue_size);
-    if (hsaKmtDbgDisable()) {
+    if (HSAKMT_CALL(hsaKmtDbgDisable())) {
       fprintf(stderr, "Failed to disable debug interface.\n");
       return HSA_STATUS_ERROR;
     }

@@ -53,6 +53,7 @@
 #include "inc/hsa_ext_amd.h"
 #include "core/inc/hsa_internal.h"
 #include "core/inc/hsa_ext_amd_impl.h"
+#include "core/inc/runtime.h"
 #include "addrlib/inc/addrinterface.h"
 #include "addrlib/src/core/addrlib.h"
 #include "image_runtime.h"
@@ -109,7 +110,7 @@ hsa_status_t ImageManagerKv::Initialize(hsa_agent_t agent_handle) {
   status = HSA::hsa_agent_get_info(
       agent_, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID), &node_id);
   assert(status == HSA_STATUS_SUCCESS);
-  HSAKMT_STATUS stat = hsaKmtGetTileConfig(node_id, &tileConfig);
+  HSAKMT_STATUS stat = HSAKMT_CALL(hsaKmtGetTileConfig(node_id, &tileConfig));
   assert(stat == HSAKMT_STATUS_SUCCESS);
 
   // Initialize address library.

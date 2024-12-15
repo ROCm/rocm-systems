@@ -370,7 +370,7 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
   }
 
   if (alloc_flags & core::MemoryRegion::AllocateAsan)
-    assert(hsaKmtReturnAsanHeaderPage(ptr) == HSAKMT_STATUS_SUCCESS);
+    assert(HSAKMT_CALL(hsaKmtReturnAsanHeaderPage(ptr)) == HSAKMT_STATUS_SUCCESS);
 
   const hsa_status_t err = region->Free(ptr, size);
   if (err != HSA_STATUS_SUCCESS) {
@@ -886,21 +886,21 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents,
     agents[i]->GetInfo((hsa_agent_info_t)HSA_AMD_AGENT_INFO_DRIVER_NODE_ID,
                        &nodes[i]);
 
-  if (hsaKmtRegisterGraphicsHandleToNodes(interop_handle, &info, num_agents,
-                                          nodes) != HSAKMT_STATUS_SUCCESS)
+  if (HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodes(interop_handle, &info, num_agents,
+                                          nodes)) != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
 
   HSAuint64 altAddress;
   HsaMemMapFlags map_flags;
   map_flags.Value = 0;
   map_flags.ui32.PageSize = HSA_PAGE_SIZE_64KB;
-  if (hsaKmtMapMemoryToGPUNodes(info.MemoryAddress, info.SizeInBytes,
+  if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(info.MemoryAddress, info.SizeInBytes,
                                 &altAddress, map_flags, num_agents,
-                                nodes) != HSAKMT_STATUS_SUCCESS) {
+                                nodes)) != HSAKMT_STATUS_SUCCESS) {
     map_flags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
-    if (hsaKmtMapMemoryToGPUNodes(info.MemoryAddress, info.SizeInBytes, &altAddress, map_flags,
-                                  num_agents, nodes) != HSAKMT_STATUS_SUCCESS) {
-      hsaKmtDeregisterMemory(info.MemoryAddress);
+    if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(info.MemoryAddress, info.SizeInBytes, &altAddress, map_flags,
+                                  num_agents, nodes)) != HSAKMT_STATUS_SUCCESS) {
+      HSAKMT_CALL(hsaKmtDeregisterMemory(info.MemoryAddress));
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     }
   }
@@ -919,9 +919,9 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents,
 }
 
 hsa_status_t Runtime::InteropUnmap(void* ptr) {
-  if(hsaKmtUnmapMemoryToGPU(ptr)!=HSAKMT_STATUS_SUCCESS)
+  if(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU(ptr))!=HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  if(hsaKmtDeregisterMemory(ptr)!=HSAKMT_STATUS_SUCCESS)
+  if(HSAKMT_CALL(hsaKmtDeregisterMemory(ptr))!=HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   return HSA_STATUS_SUCCESS;
 }
@@ -959,7 +959,7 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
 
     // We don't care if this returns an error code.
     // The type will be HSA_EXT_POINTER_TYPE_UNKNOWN if so.
-    auto err = hsaKmtQueryPointerInfo(ptr, &thunkInfo);
+    auto err = HSAKMT_CALL(hsaKmtQueryPointerInfo(ptr, &thunkInfo));
     if (err != HSAKMT_STATUS_SUCCESS || thunkInfo.Type == HSA_POINTER_UNKNOWN) {
       retInfo.type = HSA_EXT_POINTER_TYPE_UNKNOWN;
       memcpy(info, &retInfo, retInfo.size);
@@ -1080,7 +1080,7 @@ hsa_status_t Runtime::SetPtrInfoData(const void* ptr, void* userptr) {
     }
   }
   // Cover entries not in the allocation map (graphics, lock,...)
-  if (hsaKmtSetMemoryUserData(ptr, userptr) == HSAKMT_STATUS_SUCCESS)
+  if (HSAKMT_CALL(hsaKmtSetMemoryUserData(ptr, userptr)) == HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_SUCCESS;
   return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 }
@@ -1185,7 +1185,7 @@ void Runtime::AsyncIPCSockServerConnLoop(void*) {
      if (!ptr) continue;
 
      // Export DMA Buf FD and wait for client import
-     int err = hsaKmtExportDMABufHandle(ptr, len, &dmabuf_fd, &fragOffset);
+     int err = HSAKMT_CALL(hsaKmtExportDMABufHandle(ptr, len, &dmabuf_fd, &fragOffset));
      if (err != HSAKMT_STATUS_SUCCESS) continue;
      SendDmaBufFd(connection_fd, dmabuf_fd);
      err = read(connection_fd, buf, sizeof(buf));
@@ -1236,7 +1236,7 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
 
   if (!ipc_dmabuf_supported_) {
     HsaSharedMemoryHandle *sHandle = reinterpret_cast<HsaSharedMemoryHandle*>(handle);
-    if (hsaKmtShareMemory(block.base, block.length, sHandle) != HSAKMT_STATUS_SUCCESS)
+    if (HSAKMT_CALL(hsaKmtShareMemory(block.base, block.length, sHandle)) != HSAKMT_STATUS_SUCCESS)
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
     hsa_status_t err = HSA_STATUS_SUCCESS;
@@ -1271,7 +1271,7 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   // deferred export will not run into this problem.
   int dmabuf_fd;
   uint64_t dmabufOffset;
-  HSAKMT_STATUS err = hsaKmtExportDMABufHandle(ptr, len, &dmabuf_fd, &dmabufOffset);
+  HSAKMT_STATUS err = HSAKMT_CALL(hsaKmtExportDMABufHandle(ptr, len, &dmabuf_fd, &dmabufOffset));
   assert(dmabufOffset/pageSize == fragOffset && "DMA Buf inconsistent with pointer offset.");
   if (err != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
   close(dmabuf_fd);
@@ -1366,12 +1366,12 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
     HsaGraphicsResourceInfo info;
     HSA_REGISTER_MEM_FLAGS regFlags;
     regFlags.ui32.requiresVAddr = !!res ? 0 : 1;
-    int err = hsaKmtRegisterGraphicsHandleToNodesExt(dmabuf_fd, &info, numNodes, nodes, regFlags);
+    int err = HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodesExt(dmabuf_fd, &info, numNodes, nodes, regFlags));
     if (err == HSAKMT_STATUS_SUCCESS) {
       *importAddress = info.MemoryAddress;
       *importSize = info.SizeInBytes;
       if (res) {
-        hsaKmtDeregisterMemory(*importAddress);
+        HSAKMT_CALL(hsaKmtDeregisterMemory(*importAddress));
 
         // Manually libDRM import and GPU map system memory
         AMD::GpuAgent* agent = reinterpret_cast<AMD::GpuAgent*>(agents_by_node_[info.NodeId][0]);
@@ -1414,8 +1414,8 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
     int ret = ipc_dmabuf_supported_ ?
           IPCClientImport(importHandle.handle[2], dmaBufFDHandle, res,
                           numNodes, nodes, &importAddress, &importSize) :
-          hsaKmtRegisterSharedHandle(reinterpret_cast<const HsaSharedMemoryHandle*>(&importHandle),
-                                     &importAddress, &importSize);
+          HSAKMT_CALL(hsaKmtRegisterSharedHandle(reinterpret_cast<const HsaSharedMemoryHandle*>(&importHandle),
+                                     &importAddress, &importSize));
     if (ret != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
     return HSA_STATUS_SUCCESS;
@@ -1424,20 +1424,20 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
   auto mapMemoryToNodes = [&](unsigned int numNodes, HSAuint32 *nodes) {
     HSAuint64 altAddress;
     if (!numNodes) {
-      if (hsaKmtMapMemoryToGPU(importAddress, importSize, &altAddress) != HSAKMT_STATUS_SUCCESS) {
-        hsaKmtDeregisterMemory(importAddress);
+      if (HSAKMT_CALL(hsaKmtMapMemoryToGPU(importAddress, importSize, &altAddress)) != HSAKMT_STATUS_SUCCESS) {
+        HSAKMT_CALL(hsaKmtDeregisterMemory(importAddress));
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
       }
     } else {
       HsaMemMapFlags map_flags;
       map_flags.Value = 0;
       map_flags.ui32.PageSize = HSA_PAGE_SIZE_64KB;
-      if (hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, map_flags, numNodes,
-                                    nodes) != HSAKMT_STATUS_SUCCESS) {
+      if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, map_flags, numNodes,
+                                    nodes)) != HSAKMT_STATUS_SUCCESS) {
         map_flags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
-        if (hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, map_flags, numNodes,
-                                      nodes) != HSAKMT_STATUS_SUCCESS) {
-          hsaKmtDeregisterMemory(importAddress);
+        if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, map_flags, numNodes,
+                                      nodes)) != HSAKMT_STATUS_SUCCESS) {
+          HSAKMT_CALL(hsaKmtDeregisterMemory(importAddress));
           return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
         }
       }
@@ -1537,9 +1537,9 @@ hsa_status_t Runtime::IPCDetach(void* ptr) {
   }
 
   if (!ldrmImportCleaned) {
-    if (hsaKmtUnmapMemoryToGPU(ptr) != HSAKMT_STATUS_SUCCESS)
+    if (HSAKMT_CALL(hsaKmtUnmapMemoryToGPU(ptr)) != HSAKMT_STATUS_SUCCESS)
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    if (hsaKmtDeregisterMemory(ptr) != HSAKMT_STATUS_SUCCESS)
+    if (HSAKMT_CALL(hsaKmtDeregisterMemory(ptr)) != HSAKMT_STATUS_SUCCESS)
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
   return HSA_STATUS_SUCCESS;
@@ -1599,7 +1599,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
     constexpr uint32_t wait_ms = 0xFFFFFFFEu;
     HsaEvent** end = std::unique(&hsa_events[0], &hsa_events[0] + unique_evts);
     unique_evts = uint32_t(end - &hsa_events[0]);
-    hsaKmtWaitOnMultipleEvents_Ext(&hsa_events[0], unique_evts, false, wait_ms, &event_age[0]);
+    HSAKMT_CALL(hsaKmtWaitOnMultipleEvents_Ext(&hsa_events[0], unique_evts, false, wait_ms, &event_age[0]));
   };
 
   while (!async_events_control_.exit) {
@@ -2718,7 +2718,7 @@ hsa_status_t Runtime::SetSvmAttrib(void* ptr, size_t size,
   uint8_t* base = AlignDown((uint8_t*)ptr, 4096);
   uint8_t* end = AlignUp((uint8_t*)ptr + size, 4096);
   size_t len = end - base;
-  HSAKMT_STATUS error = hsaKmtSVMSetAttr(base, len, attribs.size(), &attribs[0]);
+  HSAKMT_STATUS error = HSAKMT_CALL(hsaKmtSVMSetAttr(base, len, attribs.size(), &attribs[0]));
   if (error != HSAKMT_STATUS_SUCCESS)
     throw AMD::hsa_exception(HSA_STATUS_ERROR, "hsaKmtSVMSetAttr failed.");
 
@@ -2804,7 +2804,7 @@ hsa_status_t Runtime::GetSvmAttrib(void* ptr, size_t size,
   uint8_t* end = AlignUp((uint8_t*)ptr + size, 4096);
   size_t len = end - base;
   if (attribs.size() != 0) {
-    HSAKMT_STATUS error = hsaKmtSVMGetAttr(base, len, attribs.size(), &attribs[0]);
+    HSAKMT_STATUS error = HSAKMT_CALL(hsaKmtSVMGetAttr(base, len, attribs.size(), &attribs[0]));
     if (error != HSAKMT_STATUS_SUCCESS)
       throw AMD::hsa_exception(HSA_STATUS_ERROR, "hsaKmtSVMGetAttr failed.");
   }
@@ -2994,7 +2994,7 @@ hsa_status_t Runtime::SvmPrefetch(void* ptr, size_t size, hsa_agent_t agent,
     HSA_SVM_ATTRIBUTE attrib;
     attrib.type = HSA_SVM_ATTR_PREFETCH_LOC;
     attrib.value = op->node_id;
-    HSAKMT_STATUS error = hsaKmtSVMSetAttr(op->base, op->size, 1, &attrib);
+    HSAKMT_STATUS error = HSAKMT_CALL(hsaKmtSVMSetAttr(op->base, op->size, 1, &attrib));
     assert(error == HSAKMT_STATUS_SUCCESS && "KFD Prefetch failed.");
 
     removePrefetchRanges(op);
@@ -3064,7 +3064,7 @@ Agent* Runtime::GetSVMPrefetchAgent(void* ptr, size_t size) {
   attrib.type = HSA_SVM_ATTR_PREFETCH_LOC;
   for (auto& range : holes) {
     HSAKMT_STATUS error =
-        hsaKmtSVMGetAttr(reinterpret_cast<void*>(range.first), range.second, 1, &attrib);
+        HSAKMT_CALL(hsaKmtSVMGetAttr(reinterpret_cast<void*>(range.first), range.second, 1, &attrib));
     assert(error == HSAKMT_STATUS_SUCCESS && "KFD prefetch query failed.");
 
     if (attrib.value == -1) return nullptr;
@@ -3094,7 +3094,7 @@ hsa_status_t Runtime::DmaBufExport(const void* ptr, size_t size, int* dmabuf, ui
 
         int fd;
         uint64_t off;
-        HSAKMT_STATUS err = hsaKmtExportDMABufHandle(const_cast<void*>(ptr), size, &fd, &off);
+        HSAKMT_STATUS err = HSAKMT_CALL(hsaKmtExportDMABufHandle(const_cast<void*>(ptr), size, &fd, &off));
         if (err == HSAKMT_STATUS_SUCCESS) {
           *dmabuf = fd;
           *offset = off;
@@ -3138,10 +3138,10 @@ hsa_status_t Runtime::VMemoryAddressReserve(void** va, size_t size, uint64_t add
   memFlags.ui32.FixedAddress = 1;
 
   /* Try to reserving the VA requested by user */
-  if (hsaKmtAllocMemoryAlign(0, size, alignment, memFlags, &addr) != HSAKMT_STATUS_SUCCESS) {
+  if (HSAKMT_CALL(hsaKmtAllocMemoryAlign(0, size, alignment, memFlags, &addr)) != HSAKMT_STATUS_SUCCESS) {
     memFlags.ui32.FixedAddress = 0;
     /* Could not reserved VA requested, allocate alternate VA */
-    if (hsaKmtAllocMemoryAlign(0, size, alignment, memFlags, &addr) != HSAKMT_STATUS_SUCCESS)
+    if (HSAKMT_CALL(hsaKmtAllocMemoryAlign(0, size, alignment, memFlags, &addr)) != HSAKMT_STATUS_SUCCESS)
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
@@ -3163,7 +3163,7 @@ hsa_status_t Runtime::VMemoryAddressFree(void* va, size_t size) {
 
   if (it->second.use_count > 0) return HSA_STATUS_ERROR_RESOURCE_FREE;
 
-  if (hsaKmtFreeMemory(va, size) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  if (HSAKMT_CALL(hsaKmtFreeMemory(va, size)) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
   reserved_address_map_.erase(it);
   return HSA_STATUS_SUCCESS;
@@ -3603,8 +3603,8 @@ hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
 
   uint64_t offset, ret;
 
-  ret = hsaKmtExportDMABufHandle(memoryHandle->second.thunk_handle, memoryHandle->second.size,
-                                 dmabuf_fd, &offset);
+  ret = HSAKMT_CALL(hsaKmtExportDMABufHandle(memoryHandle->second.thunk_handle, memoryHandle->second.size,
+                                 dmabuf_fd, &offset));
   if (ret != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
   return HSA_STATUS_SUCCESS;
@@ -3640,7 +3640,7 @@ hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
   };
 
   HsaGraphicsResourceInfo info;
-  int ret = hsaKmtRegisterGraphicsHandleToNodes(dmabuf_fd, &info, 0, NULL);
+  int ret = HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodes(dmabuf_fd, &info, 0, NULL));
   if (ret) return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
 
   ThunkHandle thunk_handle = info.MemoryAddress;
@@ -3661,7 +3661,7 @@ hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
   if (!region) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
   HsaPointerInfo ptrInfo;
-  ret = hsaKmtQueryPointerInfo(info.MemoryAddress, &ptrInfo);
+  ret = HSAKMT_CALL(hsaKmtQueryPointerInfo(info.MemoryAddress, &ptrInfo));
   if (ret != HSA_STATUS_SUCCESS || ptrInfo.Type == HSA_POINTER_UNKNOWN)
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
