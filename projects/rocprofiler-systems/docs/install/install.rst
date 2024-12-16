@@ -70,7 +70,7 @@ Other modes of use, such as sampling and causal profiling, are not dependent on 
 might be more portable.
 
 Installing ROCm Systems Profiler from binary distributions
-================================================
+==========================================================
 
 Every ROCm Systems Profiler release provides binary installer scripts of the form:
 
@@ -112,11 +112,11 @@ To install ROCm Systems Profiler using a binary installer script, follow these s
 
       ./rocprofiler-systems-1.0.0-ubuntu-18.04-ROCm-405000-OMPT-PAPI.sh --prefix=/opt/rocprofiler-systems --exclude-subdir
 
-Installing ROCm Systems Profiler from source
-========================================
+Building ROCm Systems Profiler from source
+==========================================
 
 ROCm Systems Profiler needs a GCC compiler with full support for C++17 and CMake v3.16 or higher.
-The Clang compiler may be used in lieu of the GCC compiler if `Dyninst <https://github.com/dyninst/dyninst>`_
+The Clang compiler may be used instead of the GCC compiler if `Dyninst <https://github.com/dyninst/dyninst>`_
 is already installed.
 
 Build requirements
@@ -160,7 +160,6 @@ while Dyninst requires TBB), and the CMake option to build the package alongside
 
 .. csv-table::
    :header: "Third-Party Library", "Minimum Version", "Required By", "CMake Option"
-   :widths: 15, 10, 12, 40
 
    "Dyninst", "12.0", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_DYNINST`` (default: OFF)"
    "Libunwind", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_LIBUNWIND`` (default: ON)"
@@ -176,9 +175,8 @@ Optional third-party packages
 * `ROCm <https://rocm.docs.amd.com/projects/install-on-linux/en/latest>`_
 
   * HIP
-  * Roctracer for HIP API and kernel tracing
-  * ROCM-SMI for GPU monitoring
-  * Rocprofiler for GPU hardware counters
+  * ROCm SMI Lib for GPU monitoring
+  * ROCprofiler SDK for GPU hardware counters and ROCm tracing
 
 * `PAPI <https://icl.utk.edu/papi/>`_
 * MPI
@@ -237,8 +235,10 @@ Installing Dyninst via Spack
    spack install --reuse dyninst
    spack load -r dyninst
 
-Installing ROCm Systems Profiler
------------------------------------
+.. _cmake-options:
+
+Building and installing ROCm Systems Profiler
+---------------------------------------------
 
 ROCm Systems Profiler has CMake configuration options for MPI support (``ROCPROFSYS_USE_MPI`` or
 ``ROCPROFSYS_USE_MPI_HEADERS``),
@@ -275,6 +275,37 @@ in `the Perfetto UI <https://ui.perfetto.dev>`_.
    cmake --build rocprof-sys-build --target install
    source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
 
+.. _build-script:
+
+Using the build script
+^^^^^^^^^^^^^^^^^^^^^^
+
+This method automates the CMake process with a script that wraps the CMake
+commands and handles build logic, environment variables, and packaging. Run
+``./scripts/build-release.sh`` with your desired options to generate packages.
+
+Use ``./scripts/build-release.sh --help`` for more information.
+
+.. code-block:: shell-session
+
+   ./scripts/build-release.sh --help
+   Options:
+       --core       [+nopython] [+python]                    Core (Use '+nopython' to build w/o python, use '+python' to python build with python)
+       --mpi        [+nopython] [+python]                    MPI (Use '+nopython' to build w/o python, use '+python' to python build with python)
+       --rocm       [+nopython] [+python]                    ROCm (Use '+nopython' to build w/o python, use '+python' to python build with python)
+       --rocm-mpi   [+nopython] [+python]                    ROCm + MPI (Use '+nopython' to build w/o python, use '+python' to python build with python)
+       --mpi-impl   [openmpi|mpich]                          MPI implementation
+
+       --lto                  [on|off]                       Enable LTO (default: off)
+       --strip                [on|off]                       Strip libraries (default: off)
+       --perfetto-tools       [on|off]                       Install perfetto tools (default: on)
+       --static-libgcc        [on|off]                       Build with static libgcc (default: on)
+       --static-libstdcxx     [on|off]                       Build with static libstdc++ (default: on)
+       --hidden-visibility    [on|off]                       Build with hidden visibility (default: on)
+       --max-threads          N                              Max number of threads supported (default: 2048)
+       --parallel             N                              Number of parallel build jobs (default: 12)
+       --generators           [STGZ][DEB][RPM][+others]      CPack generators (default: stgz deb rpm)
+
 .. _mpi-support-rocprof-sys:
 
 MPI support within ROCm Systems Profiler
@@ -303,6 +334,20 @@ and the MPICH headers and then using
 ROCm Systems Profiler on an application built against OpenMPI causes a segmentation fault.
 This happens because the value of the ``MPI_COMM_WORLD`` is truncated
 during the function wrapping before being passed along to the underlying MPI function.
+
+ROCm Systems Profiler without ROCm
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+To build ROCm Systems Profiler for use on systems without a GPU or the ROCm runtime, disable ROCm
+support using the CMake configuration option ``ROCPROFSYS_USE_ROCM=OFF``. See :ref:`cmake-options`
+for more information.
+
+Alternatively, use the provided build script with the appropriate options. See :ref:`build-script`.
+For example, to build without ROCm support and create a STGZ installer, use the following command:
+
+.. code-block:: shell
+
+   ./scripts/build-release.sh --core +python --generators STGZ
 
 .. _post-installation-steps:
 
@@ -409,3 +454,4 @@ Configuring PAPI to collect hardware counters
 To use PAPI to collect the majority of hardware counters, ensure
 the ``/proc/sys/kernel/perf_event_paranoid`` setting has a value less than or equal to ``2``.
 For more information, see the :ref:`rocprof-sys_papi_events` section.
+
