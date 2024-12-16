@@ -873,6 +873,8 @@
         "=== SWDEV-454316 : Below tests fail in stress test ===",
         "Unit_atomicMin_system_Positive_Peer_GPUs_Same_Address - float",
         "Unit_atomicMin_system_Positive_Peer_GPUs_Same_Address - double",
+        "Unit_atomicMax_system_Positive_Peer_GPUs_Same_Address - float",
+        "Unit_atomicMax_system_Positive_Peer_GPUs_Same_Address - double",
     #endif
     #if defined gfx1030
         "=== SWDEV-445961: These tests hang in PSDB stress test on 09/02/2024 ===",

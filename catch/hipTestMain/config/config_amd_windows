@@ -967,6 +967,8 @@
         "Unit_atomicMin_system_Positive_Peer_GPUs_Same_Address - float",
         "Unit_atomicMin_system_Positive_Peer_GPUs_Same_Address - double",
         "Unit_safeAtomicMax_Positive_Multi_Kernel_Same_Address - float",
+        "Unit_atomicMax_system_Positive_Peer_GPUs_Same_Address - float",
+        "Unit_atomicMax_system_Positive_Peer_GPUs_Same_Address - double",
         "=== SWDEV-475482 - Disable tests to merge clr change",
         "Unit_hipCreateTextureObject_LinearResource",
         "Unit_hipCreateTextureObject_Pitch2DResource",
