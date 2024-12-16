@@ -130,6 +130,7 @@
 
   <gfx90a>
     <metric name="MeanOccupancyPerCU" expr="SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES/GRBM_GUI_ACTIVE/CU_NUM" descr="Mean occupancy per compute unit."></metric>
+    <metric name="SIMD_UTILIZATION" expr="SQ_BUSY_CU_CYCLES*XCC_NUM/CU_NUM/GRBM_COUNT" descr="Percent of time at least one warp was active on a multiprocessor, averaged over all multiprocessors."></metric>
     <metric name="MeanOccupancyPerActiveCU" expr="SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES*4/SQ_BUSY_CYCLES/CU_NUM" descr="Mean occupancy per active compute unit."></metric>
 
     <metric name="GPUBusy" expr="100*GRBM_GUI_ACTIVE/GRBM_COUNT" descr="The percentage of time GPU was busy."></metric>
@@ -269,6 +270,7 @@
 
   <gfx940>
     <metric name="MeanOccupancyPerCU" expr="SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES*XCC_NUM/GRBM_GUI_ACTIVE/CU_NUM" descr="Mean occupancy per compute unit."></metric>
+    <metric name="SIMD_UTILIZATION" expr="SQ_BUSY_CU_CYCLES*XCC_NUM/CU_NUM/GRBM_COUNT" descr="Percent of time at least one warp was active on a multiprocessor, averaged over all multiprocessors."></metric>
     <metric name="MeanOccupancyPerActiveCU" expr="SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES*4*XCC_NUM/SQ_BUSY_CYCLES/CU_NUM" descr="Mean occupancy per active compute unit."></metric>
 
     <metric name="GPUBusy" expr="100*GRBM_GUI_ACTIVE/GRBM_COUNT" descr="The percentage of time GPU was busy."></metric>
