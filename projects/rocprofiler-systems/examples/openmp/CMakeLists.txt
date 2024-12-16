@@ -2,6 +2,15 @@ cmake_minimum_required(VERSION 3.18.4 FATAL_ERROR)
 
 project(rocprofiler-systems-openmp LANGUAGES CXX)
 
+if(ROCPROFSYS_DISABLE_EXAMPLES)
+    get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
+
+    if(${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES OR ${_DIR} IN_LIST
+                                                              ROCPROFSYS_DISABLE_EXAMPLES)
+        return()
+    endif()
+endif()
+
 file(GLOB common_source ${CMAKE_CURRENT_SOURCE_DIR}/common/*.cpp)
 add_library(openmp-common OBJECT ${common_source})
 target_include_directories(openmp-common PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/common)
@@ -57,4 +66,10 @@ if(ROCPROFSYS_INSTALL_EXAMPLES)
         COMPONENT rocprofiler-systems-examples)
 endif()
 
-add_subdirectory(target)
+if(ROCPROFSYS_DISABLE_EXAMPLES)
+    if(NOT "openmp-target" IN_LIST ROCPROFSYS_DISABLE_EXAMPLES)
+        add_subdirectory(target)
+    endif()
+else()
+    add_subdirectory(target)
+endif()
