@@ -102,6 +102,7 @@
 
 <gfx90a_expr base="gfx9_expr">
   <metric name="MeanOccupancyPerCU" expr=SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES/GRBM_GUI_ACTIVE/CU_NUM descr="Mean occupancy per compute unit."></metric>
+  <metric name="SIMD_UTILIZATION" expr="SQ_BUSY_CU_CYCLES*XCC_NUM/CU_NUM/GRBM_COUNT" descr="Percent of time at least one warp was active on a multiprocessor, averaged over all multiprocessors."></metric>
   <metric name="MeanOccupancyPerActiveCU" expr=SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES*4/SQ_BUSY_CYCLES/CU_NUM descr="Mean occupancy per active compute unit."></metric>
 
   <metric name="TA_TA_BUSY_sum"                                         expr=sum(TA_TA_BUSY,16) descr="TA block is busy. Perf_Windowing not supported for this counter. Sum over TA instances."></metric>
@@ -215,7 +216,6 @@
   <metric name="TCC_EA_WRREQ_DRAM_sum"                                  expr=sum(TCC_EA_WRREQ_DRAM,32) descr="Number of TCC/EA write requests (either 32-byte of 64-byte) destined for DRAM (MC). Sum over TCC instances."></metric>
   <metric name="FETCH_SIZE"                                             expr=(TCC_EA_RDREQ_32B_sum*32+(TCC_EA_RDREQ_sum-TCC_EA_RDREQ_32B_sum)*64)/1024 descr="The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
   <metric name="WRITE_SIZE"                                             expr=((TCC_EA_WRREQ_sum-TCC_EA_WRREQ_64B_sum)*32+TCC_EA_WRREQ_64B_sum*64)/1024 descr="The total kilobytes written to the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
-  <metric name="CU_UTILIZATION"                                         expr=GRBM_GUI_ACTIVE/GRBM_COUNT descr="The total number of active cycles divided by total number of elapsed cycles"></metric>
   <metric name="TOTAL_16_OPS"                                           expr=(SQ_INSTS_VALU_FMA_F16*2+SQ_INSTS_VALU_ADD_F16+SQ_INSTS_VALU_MUL_F16+SQ_INSTS_VALU_TRANS_F16)*64+((SQ_INSTS_VALU_MFMA_MOPS_F16+SQ_INSTS_VALU_MFMA_MOPS_BF16)*512) descr="The number of 16 bits OPS executed"></metric>
   <metric name="TOTAL_32_OPS"                                           expr=(SQ_INSTS_VALU_FMA_F32*2+SQ_INSTS_VALU_INT32+SQ_INSTS_VALU_ADD_F32+SQ_INSTS_VALU_MUL_F32+SQ_INSTS_VALU_TRANS_F32)*64+(SQ_INSTS_VALU_MFMA_MOPS_F32*512) descr="The number of 32 bits OPS executed"></metric>
   <metric name="TOTAL_64_OPS"                                           expr=(SQ_INSTS_VALU_FMA_F64*2+SQ_INSTS_VALU_INT64+SQ_INSTS_VALU_ADD_F64+SQ_INSTS_VALU_MUL_F64)*64+(SQ_INSTS_VALU_MFMA_MOPS_F64*512) descr="The number of 64 bits OPS executed"></metric>
@@ -229,6 +229,7 @@
 
 <gfx940_expr>
   <metric name="MeanOccupancyPerCU" expr=SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES*XCC_NUM/GRBM_GUI_ACTIVE/CU_NUM descr="Mean occupancy per compute unit."></metric>
+  <metric name="SIMD_UTILIZATION" expr="SQ_BUSY_CU_CYCLES*XCC_NUM/CU_NUM/GRBM_COUNT" descr="Percent of time at least one warp was active on a multiprocessor, averaged over all multiprocessors."></metric>
   <metric name="MeanOccupancyPerActiveCU" expr=SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES*4*XCC_NUM/SQ_BUSY_CYCLES/CU_NUM descr="Mean occupancy per active compute unit."></metric>
 
   <metric name="TCP_TCP_TA_DATA_STALL_CYCLES_sum" expr=sum(TCP_TCP_TA_DATA_STALL_CYCLES,16) descr="Total number of TCP stalls TA data interface."></metric>
@@ -353,8 +354,6 @@
   <metric name="FETCH_SIZE"                                             expr=(TCC_EA0_RDREQ_32B_sum*32+(TCC_EA0_RDREQ_sum-TCC_EA0_RDREQ_32B_sum)*128)/1024 descr="The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
   <metric name="WRITE_SIZE"                                             expr=((TCC_EA0_WRREQ_sum-TCC_EA0_WRREQ_64B_sum)*32+TCC_EA0_WRREQ_64B_sum*64)/1024 descr="The total kilobytes written to the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
   <metric name="WRITE_REQ_32B"                                          expr=TCC_EA0_WRREQ_64B_sum*2+(TCC_EA0_WRREQ_sum-TCC_EA0_WRREQ_64B_sum) descr="The total number of 32-byte effective memory writes."></metric>
-  <metric name="CU_OCCUPANCY"                                           expr=(SQ_CYCLES/(SQ_WAVE_CYCLES*4))/MAX_WAVE_SIZE descr="The ratio of active waves on a CU to the maximum number of active waves supported by the CU"></metric>
-  <metric name="CU_UTILIZATION"                                         expr=GRBM_GUI_ACTIVE/GRBM_COUNT descr="The total number of active cycles divided by total number of elapsed cycles"></metric>
   <metric name="TOTAL_16_OPS"                                           expr=(SQ_INSTS_VALU_FMA_F16*2+SQ_INSTS_VALU_ADD_F16+SQ_INSTS_VALU_MUL_F16+SQ_INSTS_VALU_TRANS_F16)*64+((SQ_INSTS_VALU_MFMA_MOPS_F16+SQ_INSTS_VALU_MFMA_MOPS_BF16)*512) descr="The number of 16 bits OPS executed"></metric>
   <metric name="TOTAL_32_OPS"                                           expr=(SQ_INSTS_VALU_FMA_F32*2+SQ_INSTS_VALU_INT32+SQ_INSTS_VALU_ADD_F32+SQ_INSTS_VALU_MUL_F32+SQ_INSTS_VALU_TRANS_F32)*64+(SQ_INSTS_VALU_MFMA_MOPS_F32*512) descr="The number of 32 bits OPS executed"></metric>
   <metric name="TOTAL_64_OPS"                                           expr=(SQ_INSTS_VALU_FMA_F64*2+SQ_INSTS_VALU_INT64+SQ_INSTS_VALU_ADD_F64+SQ_INSTS_VALU_MUL_F64)*64+(SQ_INSTS_VALU_MFMA_MOPS_F64*512) descr="The number of 64 bits OPS executed"></metric>
