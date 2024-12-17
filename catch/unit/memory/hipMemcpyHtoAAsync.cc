@@ -109,6 +109,7 @@ TEST_CASE("Unit_hipMemcpyHtoAAsync_BasicTstsWithDiffStreams") {
   HipTest::HIP_SKIP_TEST("API currently unsupported on nvidia, skipping...");
   return;
   #else
+  CHECK_IMAGE_SUPPORT
   HIP_CHECK(hipSetDevice(0));
   int row, col;
   row = 1;
@@ -174,6 +175,7 @@ TEST_CASE("Unit_hipMemcpyHtoAAsync_MultiDevice") {
   HipTest::HIP_SKIP_TEST("API currently unsupported on nvidia, skipping...");
   return;
 #else
+  CHECK_IMAGE_SUPPORT
   int devCount = 0;
   HIP_CHECK(hipGetDeviceCount(&devCount));
   for (int i=0; i < devCount; i++) {
