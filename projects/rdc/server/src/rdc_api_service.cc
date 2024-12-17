@@ -1106,5 +1106,38 @@ int RdcAPIServiceImpl::PolicyCallback(rdc_policy_callback_response_t* userData) 
   return ::grpc::Status::OK;
 }
 
+::grpc::Status RdcAPIServiceImpl::GetLinkStatus(::grpc::ServerContext* context,
+                                                const ::rdc::Empty* request,
+                                                ::rdc::GetLinkStatusResponse* reply) {
+  (void)(context);
+  if (!reply || !request) {
+    return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
+  }
+
+  rdc_link_status_t link_status_results;
+  // call RDC link status API
+  rdc_status_t result = rdc_link_status_get(rdc_handle_, &link_status_results);
+  reply->set_status(result);
+  if (result != RDC_ST_OK) {
+    return ::grpc::Status::OK;
+  }
+
+  ::rdc::LinkStatus* linkstatus = reply->mutable_linkstatus();
+  linkstatus->set_num_of_gpus(link_status_results.num_of_gpus);
+  for (int32_t i = 0; i < link_status_results.num_of_gpus; ++i) {
+    ::rdc::GpuLinkStatus* gpulinkstatus = linkstatus->add_gpus();
+    gpulinkstatus->set_gpu_index(link_status_results.gpus[i].gpu_index);
+    gpulinkstatus->set_num_of_links(link_status_results.gpus[i].num_of_links);
+    gpulinkstatus->set_link_types(
+        static_cast<::rdc::GpuLinkStatus_LinkTypes>(link_status_results.gpus[i].link_types));
+    for (uint32_t n = 0; n < link_status_results.gpus[i].num_of_links; n++) {
+      gpulinkstatus->add_link_states(static_cast<::rdc::GpuLinkStatus_LinkState>(
+                                            link_status_results.gpus[i].link_states[n]));
+    }
+  }
+
+  return ::grpc::Status::OK;
+}
+
 }  // namespace rdc
 }  // namespace amd

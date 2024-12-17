@@ -16,8 +16,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#ifndef RDCI_INCLUDE_RDCITOPOLOGYLINKSYSTEM_H_
-#define RDCI_INCLUDE_RDCITOPOLOGYLINKSYSTEM_H_
+#ifndef RDCI_INCLUDE_RDCIXMGILINKSTATUSSYSTEM_H_
+#define RDCI_INCLUDE_RDCIXMGILINKSTATUSSYSTEM_H_
 #include <signal.h>
 
 #include <string>
@@ -25,21 +25,19 @@ THE SOFTWARE.
 #include "RdciSubSystem.h"
 namespace amd {
 namespace rdc {
-class RdciTopologyLinkSubSystem : public RdciSubSystem {
+class RdciXgmiLinkStatusSubSystem : public RdciSubSystem {
  public:
-  RdciTopologyLinkSubSystem();
+  RdciXgmiLinkStatusSubSystem();
   void parse_cmd_opts(int argc, char** argv) override;
   void process() override;
 
  private:
   void show_help() const;
   enum OPERATIONS {
-    TOPOLOGY_UNKNOWN = 0,
-    TOPOLOGY_INDEX,
-  } topology_ops_;
-  uint32_t group_index_;
-  bool is_group_index_set;
+    XMGI_LINK_UNKNOWN = 0,
+    XMGI_LINK_STATUS,
+  } link_status_ops_;
 };
 }  // namespace rdc
 }  // namespace amd
-#endif  // RDCI_INCLUDE_RDCITOPOLOGYLINKSYSTEM_H_
+#endif  // RDCI_INCLUDE_RDCIXMGILINKSTATUSSYSTEM_H_
