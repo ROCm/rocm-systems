@@ -89,6 +89,13 @@ def check_amd_ionic_driver():
             return True
     return False
 
+def check_amd_dxg_driver():
+    """ Returns true if dxgkrnl is found in the list of initialized modules """
+    amd_dxg_status_file = Path("/sys/module/dxgkrnl")
+    if amd_dxg_status_file.exists():
+        return True
+    return False
+
 def amdsmi_cli_init():
     """ Initializes AMDSMI Library for the CLI
 
@@ -111,6 +118,9 @@ def amdsmi_cli_init():
     if check_amd_ionic_driver():
         logging.debug("ionic driver's initstate is live")
         init_flag |= amdsmi_interface.AmdSmiInitFlags.INIT_AMD_NICS
+    if check_amd_dxg_driver():
+        logging.debug("dxgkrnl driver's initstate is live")
+        init_flag |= amdsmi_interface.AmdSmiInitFlags.INIT_AMD_GPUS
 
     try:
         amdsmi_interface.amdsmi_init(init_flag)
