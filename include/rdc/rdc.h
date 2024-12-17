@@ -654,7 +654,7 @@ typedef enum {
 #define RDC_MAX_NUM_OF_LINKS 16
 
 typedef struct {
-  int32_t gpu_index;
+  uint32_t gpu_index;
   uint32_t num_of_links;                              // The size of the array link_states
   rdc_topology_link_type_t link_types;                // XGMI, PCIe, and so on
   rdc_link_state_t link_states[RDC_MAX_NUM_OF_LINKS];

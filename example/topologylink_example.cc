@@ -119,8 +119,16 @@ int main() {
               << "max_bandwidth: " << std::to_string(topo.link_infos[i].max_bandwidth) << "\n"
               << "hops: " << std::to_string(topo.link_infos[i].hops) << "\n"
               << "link_type: " << topology_link_type_to_str(topo.link_infos[i].link_type) << "\n"
-              << "is_p2p_accessible: " << std::to_string(topo.link_infos[i].is_p2p_accessible) << "\n"
+              << "is_p2p_accessible: " << std::to_string(topo.link_infos[i].is_p2p_accessible)
+              << "\n"
               << std::endl;
+  }
+
+  rdc_link_status_t link_status;
+  result = rdc_link_status_get(rdc_handle, &link_status);
+  if (result != RDC_ST_OK) {
+    std::cout << "Error clear topology, Return: " << rdc_status_string(result) << std::endl;
+    goto cleanup;
   }
 
   //... clean up

@@ -25,6 +25,7 @@ THE SOFTWARE.
 #include <sys/time.h>
 #include <unistd.h>
 
+#include <assert.h>
 #include <algorithm>
 #include <ctime>
 #include <map>
@@ -75,6 +76,7 @@ rdc_status_t RdcTopologyLinkImpl::rdc_device_topology_get(uint32_t gpu_index,
 
   // Assign the index to the index list
   count = device_count.value.l_int;
+  assert(count <= RDC_MAX_NUM_DEVICES);
   for (uint32_t i = 0; i < count; i++) {
     gpu_index_list[i] = i;
   }
@@ -134,6 +136,46 @@ rdc_status_t RdcTopologyLinkImpl::rdc_device_topology_get(uint32_t gpu_index,
 
 rdc_status_t RdcTopologyLinkImpl::rdc_link_status_get(rdc_link_status_t* results) {
   rdc_status_t status = RDC_ST_NOT_FOUND;
+  amdsmi_status_t err = AMDSMI_STATUS_SUCCESS;
+  uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES];
+
+  uint32_t count = 0;
+  rdc_field_value device_count;
+  status = metric_fetcher_->fetch_smi_field(0, RDC_FI_GPU_COUNT, &device_count);
+  if (status != RDC_ST_OK) {
+    return status;
+  }
+
+  // Assign the index to the index list
+  count = device_count.value.l_int;
+  assert(count <= RDC_MAX_NUM_DEVICES);
+  for (uint32_t i = 0; i < count; i++) {
+    gpu_index_list[i] = i;
+  }
+  results->num_of_gpus = count;
+
+  for (uint32_t i = 0; i < count; i++) {
+    amdsmi_processor_handle processor_handle;
+    err = get_processor_handle_from_id(gpu_index_list[i], &processor_handle);
+    if (err != AMDSMI_STATUS_SUCCESS) {
+      RDC_LOG(RDC_INFO, "Fail to get process GPUs processor handle information: " << err);
+      return status;
+    }
+
+    amdsmi_xgmi_link_status_t link_status;
+    err = amdsmi_get_gpu_xgmi_link_status(processor_handle, &link_status);
+    if (err != AMDSMI_STATUS_SUCCESS) {
+      RDC_LOG(RDC_INFO, "Fail to get process GPUs xgmi link information: " << err);
+    }
+    results->gpus[i].gpu_index = gpu_index_list[i];
+    results->gpus[i].num_of_links = link_status.total_links;
+    for (uint32_t n = 0; n < link_status.total_links; n++) {
+      results->gpus[i].link_states[n] = static_cast<rdc_link_state_t>(link_status.status[n]);
+    }
+
+    results->gpus[i].link_types = RDC_IOLINK_TYPE_XGMI;
+  }
+
   return status;
 }
 
