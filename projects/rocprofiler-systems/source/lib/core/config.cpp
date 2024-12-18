@@ -317,8 +317,8 @@ configure_settings(bool _init)
 
     ROCPROFSYS_CONFIG_SETTING(
         bool, "ROCPROFSYS_USE_ROCM_SMI",
-        "Enable sampling GPU power, temp, utilization, and memory usage", true, "backend",
-        "rocm_smi", "rocm", "process_sampling");
+        "Enable sampling GPU power, temp, utilization, vcn_activity and memory usage",
+        true, "backend", "rocm_smi", "rocm", "process_sampling");
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_SAMPLING",
                               "Enable statistical sampling of call-stack", false,
@@ -626,10 +626,11 @@ configure_settings(bool _init)
 
     rocprofiler_sdk::config_settings(_config);
 
-    ROCPROFSYS_CONFIG_SETTING(std::string, "ROCPROFSYS_ROCM_SMI_METRICS",
-                              "rocm-smi metrics to collect: busy, temp, power, mem_usage",
-                              "busy,temp,power,mem_usage", "backend", "rocm_smi", "rocm",
-                              "process_sampling", "advanced");
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, "ROCPROFSYS_ROCM_SMI_METRICS",
+        "rocm-smi metrics to collect: busy, temp, power, vcn_activity, mem_usage",
+        "busy,temp,power,vcn_activity,mem_usage", "backend", "rocm_smi", "rocm",
+        "process_sampling", "advanced");
 
     ROCPROFSYS_CONFIG_SETTING(size_t, "ROCPROFSYS_PERFETTO_SHMEM_SIZE_HINT_KB",
                               "Hint for shared-memory buffer size in perfetto (in KB)",

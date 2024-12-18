@@ -105,6 +105,7 @@ ROCPROFSYS_DEFINE_CATEGORY(category, rocm_smi_busy, ROCPROFSYS_CATEGORY_ROCM_SMI
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_smi_temp, ROCPROFSYS_CATEGORY_ROCM_SMI_TEMP, "device_temp",   "Temperature of a GPU device")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_smi_power, ROCPROFSYS_CATEGORY_ROCM_SMI_POWER, "device_power", "Power consumption of a GPU device")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_smi_memory_usage, ROCPROFSYS_CATEGORY_ROCM_SMI_MEMORY_USAGE, "device_memory_usage", "Memory usage of a GPU device")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_smi_vcn_activity, ROCPROFSYS_CATEGORY_ROCM_SMI_VCN_ACTIVITY, "device_vcn_activity", "VCN Activity of a GPU device")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rccl, ROCPROFSYS_CATEGORY_ROCM_RCCL, "rccl", "ROCm Communication Collectives Library (RCCL) regions")
 ROCPROFSYS_DEFINE_CATEGORY(category, pthread, ROCPROFSYS_CATEGORY_PTHREAD, "pthread", "POSIX threading functions")
 ROCPROFSYS_DEFINE_CATEGORY(category, kokkos, ROCPROFSYS_CATEGORY_KOKKOS, "kokkos", "KokkosTools regions")
@@ -167,6 +168,7 @@ using name = perfetto_category<Tp...>;
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_smi_temp),                           \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_smi_power),                          \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_smi_memory_usage),                   \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_smi_vcn_activity),                   \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_rccl),                               \
         ROCPROFSYS_PERFETTO_CATEGORY(category::pthread),                                 \
         ROCPROFSYS_PERFETTO_CATEGORY(category::kokkos),                                  \

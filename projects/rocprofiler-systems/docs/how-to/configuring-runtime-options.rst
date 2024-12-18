@@ -464,6 +464,7 @@ Viewing components
    | sampling_gpu_power                | GPU Power Usage via ROCm-SMI. Derived fro... |
    | sampling_gpu_temp                 | GPU Temperature via ROCm-SMI. Derived fro... |
    | sampling_gpu_busy                 | GPU Utilization (% busy) via ROCm-SMI. De... |
+   | sampling_vcn_busy                 | GPU VCN Utilization (% activity) via ROCm... |
    | sampling_gpu_memory_usage         | GPU Memory Usage via ROCm-SMI. Derived fr... |
    |-----------------------------------|----------------------------------------------|
 

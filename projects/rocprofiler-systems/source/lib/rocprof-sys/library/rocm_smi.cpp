@@ -127,6 +127,7 @@ data::sample(uint32_t _dev_id)
 {
     auto _ts = tim::get_clock_real_now<size_t, std::nano>();
     assert(_ts < std::numeric_limits<int64_t>::max());
+    rsmi_gpu_metrics_t _gpu_metrics;
 
     auto _state = get_state().load();
 
@@ -159,6 +160,13 @@ data::sample(uint32_t _dev_id)
                         &m_power, &power_type)
     ROCPROFSYS_RSMI_GET(get_settings(m_dev_id).mem_usage, rsmi_dev_memory_usage_get,
                         _dev_id, RSMI_MEM_TYPE_VRAM, &m_mem_usage);
+    ROCPROFSYS_RSMI_GET(get_settings(m_dev_id).vcn_activity,
+                        rsmi_dev_gpu_metrics_info_get, _dev_id, &_gpu_metrics);
+
+    for(const auto& activity : _gpu_metrics.vcn_activity)
+    {
+        if(activity != UINT16_MAX) m_vcn_metrics.push_back(activity);
+    }
 
 #undef ROCPROFSYS_RSMI_GET
 }
@@ -257,6 +265,7 @@ data::post_process(uint32_t _dev_id)
     using component::sampling_gpu_memory;
     using component::sampling_gpu_power;
     using component::sampling_gpu_temp;
+    using component::sampling_gpu_vcn;
 
     if(device_count < _dev_id) return;
 
@@ -273,7 +282,7 @@ data::post_process(uint32_t _dev_id)
     auto _settings = get_settings(_dev_id);
 
     auto _process_perfetto = [&]() {
-        auto _idx = std::array<uint64_t, 4>{};
+        auto _idx = std::array<uint64_t, 5>{};
         {
             _idx.fill(_idx.size());
             uint64_t nidx = 0;
@@ -281,6 +290,7 @@ data::post_process(uint32_t _dev_id)
             if(_settings.temp) _idx.at(1) = nidx++;
             if(_settings.power) _idx.at(2) = nidx++;
             if(_settings.mem_usage) _idx.at(3) = nidx++;
+            if(_settings.vcn_activity) _idx.at(4) = nidx++;
         }
 
         for(auto& itr : _rocm_smi)
@@ -301,6 +311,14 @@ data::post_process(uint32_t _dev_id)
                 if(_settings.mem_usage)
                     counter_track::emplace(_dev_id, addendum("Memory Usage"),
                                            "megabytes");
+                if(_settings.vcn_activity)
+                {
+                    for(std::size_t i = 0; i < std::size(itr.m_vcn_metrics); ++i)
+                        counter_track::emplace(
+                            _dev_id,
+                            addendum(("VCN Activity on " + std::to_string(i)).c_str()),
+                            "%");
+                }
             }
             uint64_t _ts = itr.m_ts;
             if(!_thread_info->is_valid_time(_ts)) continue;
@@ -322,6 +340,16 @@ data::post_process(uint32_t _dev_id)
             if(_settings.mem_usage)
                 TRACE_COUNTER("device_memory_usage",
                               counter_track::at(_dev_id, _idx.at(3)), _ts, _usage);
+            if(_settings.vcn_activity)
+            {
+                uint64_t idx = _idx.at(4);
+                for(const auto& temp : itr.m_vcn_metrics)
+                {
+                    TRACE_COUNTER("device_vcn_activity", counter_track::at(_dev_id, idx),
+                                  _ts, temp);
+                    ++idx;
+                }
+            }
         }
     };
 
@@ -411,6 +439,7 @@ setup()
                     key_pair_t{ "temp", get_settings(dev_id).temp },
                     key_pair_t{ "power", get_settings(dev_id).power },
                     key_pair_t{ "mem_usage", get_settings(dev_id).mem_usage },
+                    key_pair_t{ "vcn_activity", get_settings(dev_id).vcn_activity },
                 };
 
                 get_settings(dev_id) = { false, false, false, false };
@@ -490,4 +519,8 @@ ROCPROFSYS_INSTANTIATE_EXTERN_COMPONENT(
 
 ROCPROFSYS_INSTANTIATE_EXTERN_COMPONENT(
     TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_gpu_memory>), true,
+    double)
+
+ROCPROFSYS_INSTANTIATE_EXTERN_COMPONENT(
+    TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_gpu_vcn>), true,
     double)
