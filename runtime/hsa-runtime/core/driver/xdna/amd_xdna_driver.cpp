@@ -198,7 +198,8 @@ XdnaDriver::AllocateMemory(const core::MemoryRegion &mem_region,
     return HSA_STATUS_ERROR_INVALID_REGION;
   }
 
-  if (m_region.kernarg()) {
+  const bool use_bo_shmem = m_region.kernarg() || m_region.IsSystemButNotSVM();
+  if (use_bo_shmem) {
     create_bo_args.type = AMDXDNA_BO_SHMEM;
   } else {
     create_bo_args.type = AMDXDNA_BO_DEV;
@@ -222,7 +223,7 @@ XdnaDriver::AllocateMemory(const core::MemoryRegion &mem_region,
   /// TODO: For now we always map the memory and keep a mapping from handles
   /// to VA memory addresses. Once we can support the separate VMEM call to
   /// map handles we can fix this.
-  if (m_region.kernarg()) {
+  if (use_bo_shmem) {
     mapped_mem = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd_,
                       get_bo_info_args.map_offset);
     if (mapped_mem == MAP_FAILED) {
