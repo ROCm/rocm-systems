@@ -18,5 +18,5 @@ jobs:
       input_pr_url: ${{ github.event_name == 'pull_request' && github.event.pull_request.html_url || '' }}  
       input_pr_title: ${{ github.event_name == 'pull_request' && github.event.pull_request.title || '' }}  
       repository_name: ${{ github.repository }}  
-      base_ref: ${{ github.ref }}  
+      base_ref: ${{ github.event_name == 'pull_request' && github.base_ref || github.ref }}  
       trigger_event_type: ${{ github.event_name }}  
