@@ -119,6 +119,7 @@ RdcRocpBase::RdcRocpBase() {
       {RDC_FI_PROF_EVAL_FLOPS_32, "TOTAL_32_OPS"},
       {RDC_FI_PROF_EVAL_FLOPS_64, "TOTAL_64_OPS"},
       {RDC_FI_PROF_VALU_PIPE_ISSUE_UTIL, "ValuPipeIssueUtil"},
+      {RDC_FI_PROF_SM_ACTIVE, "VALUBusy"},
   };
 
   hsa_status_t status = hsa_init();
