@@ -12,7 +12,9 @@ set(CMAKE_BUILD_RPATH
 # applications used by integration tests which DO link to rocprofiler-sdk-roctx
 add_subdirectory(reproducible-runtime)
 add_subdirectory(transpose)
-add_subdirectory(openmp)
+if(ROCPROFILER_BUILD_OPENMP_TESTS)
+    add_subdirectory(openmp)
+endif()
 
 set(CMAKE_BUILD_RPATH "\$ORIGIN:\$ORIGIN/../lib")
 

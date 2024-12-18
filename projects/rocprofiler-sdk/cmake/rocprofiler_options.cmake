@@ -53,6 +53,8 @@ rocprofiler_add_option(
 rocprofiler_add_option(ROCPROFILER_BUILD_FMT "Enable building fmt library internally" ON)
 rocprofiler_add_option(ROCPROFILER_BUILD_GLOG
                        "Enable building glog (Google logging) library internally" ON)
+rocprofiler_add_option(ROCPROFILER_BUILD_OPENMP_TESTS
+                       "Enable building openmp tests and samples" OFF ADVANCED)
 if(ROCPROFILER_BUILD_TESTS)
     rocprofiler_add_option(
         ROCPROFILER_BUILD_GTEST
