@@ -370,6 +370,11 @@ configure_file(
     ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/modulefiles/${PROJECT_NAME}/${ROCPROFSYS_VERSION}
     @ONLY)
 
+configure_file(
+    ${PROJECT_SOURCE_DIR}/scripts/merge-multiprocess-output.sh
+    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/bin/merge-multiprocess-output.sh
+    COPYONLY)
+
 install(
     FILES ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/setup-env.sh
           ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/perfetto.cfg
@@ -385,6 +390,12 @@ install(
 install(
     FILES ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}/LICENSE
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}
+    COMPONENT setup)
+
+install(
+    PROGRAMS
+        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/bin/merge-multiprocess-output.sh
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/bin/
     COMPONENT setup)
 
 # ------------------------------------------------------------------------------#
