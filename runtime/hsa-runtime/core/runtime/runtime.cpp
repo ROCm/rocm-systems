@@ -2044,6 +2044,10 @@ hsa_status_t Runtime::Load() {
   thunkLoader_ = new ThunkLoader();
   thunkLoader_->LoadThunkApiTable();
 
+  if (!thunkLoader_->CreateThunkInstance()) {
+    return HSA_STATUS_ERROR_NOT_INITIALIZED;
+  }
+
   g_use_interrupt_wait = flag_.enable_interrupt();
   g_use_mwaitx = flag_.check_mwaitx(cpuinfo.mwaitx);
 
@@ -2139,6 +2143,8 @@ void Runtime::Unload() {
   AMD::Unload();
 
   DestroyDrivers();
+
+  thunkLoader_->DestroyThunkInstance();
 
   delete thunkLoader_;
 }

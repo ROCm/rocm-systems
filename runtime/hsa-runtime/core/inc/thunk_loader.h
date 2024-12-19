@@ -46,6 +46,10 @@
 #include <amdgpu.h>
 #include "hsakmt/hsakmttypes.h"
 
+class DtifPlatform;
+typedef DtifPlatform* (DtifCreateFunc)(const char*);
+typedef void (DtifDestroyFunc)();
+
 namespace rocr {
 namespace core {
 
@@ -356,6 +360,8 @@ class ThunkLoader {
     ~ThunkLoader();
 
     void LoadThunkApiTable();
+    bool CreateThunkInstance();
+    bool DestroyThunkInstance();
 
     HSAKMT_DEF(hsaKmtOpenKFD)* HSAKMT_PFN(hsaKmtOpenKFD);
     HSAKMT_DEF(hsaKmtCloseKFD)* HSAKMT_PFN(hsaKmtCloseKFD);

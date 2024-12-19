@@ -485,5 +485,37 @@ ERROR:
     }
   }
 
+  bool ThunkLoader::CreateThunkInstance() {
+    if (!core::Runtime::runtime_singleton_->flag().enable_dtif())
+      return true;
+
+    DtifCreateFunc* pfnDtifCreate = (DtifCreateFunc*)dlsym(dtif_handle, "DtifCreate");
+    if (pfnDtifCreate != NULL) {
+      if (pfnDtifCreate("HSA") != NULL) {
+        debug_print("DtifCreate OK!\n");
+        return true;
+      } else {
+        debug_print("DtifCreate failed!\n");
+        return false;
+      }
+    }
+    return false;
+  }
+
+  bool ThunkLoader::DestroyThunkInstance() {
+    if (!core::Runtime::runtime_singleton_->flag().enable_dtif())
+      return true;
+
+    if (dtif_handle == NULL)
+      return false;
+
+    DtifDestroyFunc* pfnDtifDestroy = (DtifDestroyFunc*)dlsym(dtif_handle, "DtifDestroy");
+    if (pfnDtifDestroy != NULL) {
+      pfnDtifDestroy();
+      debug_print("DtifDestroy OK!\n");
+      return true;
+    }
+    return false;
+  }
 }   //  namespace core
 }   //  namespace rocr
