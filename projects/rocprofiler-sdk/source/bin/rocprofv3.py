@@ -4,7 +4,6 @@ import os
 import sys
 import argparse
 import subprocess
-import numpy
 
 
 class dotdict(dict):
@@ -196,7 +195,7 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         "--pc-sampling-interval",
         help="",
         default=None,
-        type=numpy.uint64,
+        type=int,
     )
     basic_tracing_options = parser.add_argument_group("Basic tracing options")
 
@@ -1009,6 +1008,9 @@ def run(app_args, args, **kwargs):
             and args.pc_sampling_interval
         ):
             fatal_error("All three PC sampling configurations need to be set")
+
+        if args.pc_sampling_interval <= 0:
+            fatal_error("PC sampling interval must be a positive number.")
 
         update_env("ROCPROF_PC_SAMPLING_UNIT", args.pc_sampling_unit)
         update_env("ROCPROF_PC_SAMPLING_METHOD", args.pc_sampling_method)
