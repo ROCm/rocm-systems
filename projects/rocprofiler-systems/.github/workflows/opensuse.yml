@@ -66,7 +66,7 @@ jobs:
           fi
           python3 -m pip install --upgrade pip &&
           python3 -m pip install --upgrade numpy perfetto dataclasses &&
-          python3 -m pip install 'cmake==3.18.4' &&
+          python3 -m pip install 'cmake==3.21' &&
           for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install --upgrade numpy perfetto dataclasses; done
 
     - name: Configure Env
@@ -93,7 +93,7 @@ jobs:
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems
           -DROCPROFSYS_BUILD_TESTING=ON
           -DROCPROFSYS_USE_MPI=OFF
-          -DROCPROFSYS_USE_HIP=OFF
+          -DROCPROFSYS_USE_ROCM=OFF
           -DROCPROFSYS_USE_OMPT=OFF
           -DROCPROFSYS_USE_PYTHON=ON
           -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF

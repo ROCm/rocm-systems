@@ -19,7 +19,9 @@ target_sources(
               ${CMAKE_CURRENT_SOURCE_DIR}/environment.hpp
               ${CMAKE_CURRENT_SOURCE_DIR}/invoke.hpp
               ${CMAKE_CURRENT_SOURCE_DIR}/join.hpp
-              ${CMAKE_CURRENT_SOURCE_DIR}/setup.hpp)
+              ${CMAKE_CURRENT_SOURCE_DIR}/setup.hpp
+              ${CMAKE_CURRENT_SOURCE_DIR}/static_object.hpp
+              ${CMAKE_CURRENT_SOURCE_DIR}/synchronized.hpp)
 
 get_filename_component(COMMON_SOURCE_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}" DIRECTORY)
 get_filename_component(COMMON_BINARY_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}" DIRECTORY)

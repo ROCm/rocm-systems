@@ -30,12 +30,12 @@ int
 device_count();
 
 int
-hip_device_count();
+rocm_device_count();
 
 int
 rsmi_device_count();
 
 void
-add_hip_device_metadata();
+add_device_metadata();
 }  // namespace gpu
 }  // namespace rocprofsys

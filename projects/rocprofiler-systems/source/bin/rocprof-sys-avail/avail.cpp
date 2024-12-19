@@ -33,8 +33,7 @@
 #include "api.hpp"
 #include "core/config.hpp"
 #include "core/gpu.hpp"
-#include "core/hip_runtime.hpp"
-#include "library/rocprofiler.hpp"
+#include "library/rocm.hpp"
 
 #include <timemory/components.hpp>
 #include <timemory/components/definition.hpp>
@@ -119,7 +118,7 @@ write_hw_counter_info(std::ostream&, const array_t<bool, N>& = {},
 namespace
 {
 // initialize HIP before main so that librocprof-sys is not HSA_TOOLS_LIB
-int gpu_count = rocprofsys::gpu::hip_device_count();
+int gpu_count = rocprofsys::gpu::device_count();
 
 // statically allocated shared_ptrs to prevent use after free errors
 auto timemory_manager      = tim::manager::master_instance();
@@ -508,15 +507,15 @@ main(int argc, char** argv)
         return EXIT_FAILURE;
     }
 
-#if ROCPROFSYS_USE_HIP > 0
+#if ROCPROFSYS_USE_ROCM > 0
     if(gpu_count > 0)
     {
         size_t _num_metrics = 0;
         try
         {
-            // call to rocm_metrics() will add choices to ROCPROFSYS_ROCM_EVENTS setting
+            // call to rocm_events() will add choices to ROCPROFSYS_ROCM_EVENTS setting
             // so always perform this call even if list of HW counters is not requested
-            _num_metrics = rocprofsys::rocprofiler::rocm_metrics().size();
+            _num_metrics = rocprofsys::rocm::rocm_events().size();
         } catch(std::runtime_error& _e)
         {
             verbprintf(0, "Retrieving the GPU HW counters failed: %s", _e.what());
@@ -615,9 +614,9 @@ main(int argc, char** argv)
         }
     }
 
-    signal(SIGABRT, &dump_log_abort);
-    signal(SIGSEGV, &dump_log_abort);
-    signal(SIGQUIT, &dump_log_abort);
+    // signal(SIGABRT, &dump_log_abort);
+    // signal(SIGSEGV, &dump_log_abort);
+    // signal(SIGQUIT, &dump_log_abort);
 
     if(!os) os = &std::cout;
 
@@ -640,6 +639,8 @@ main(int argc, char** argv)
                                      !force_brief && !options[DESC], options[DESC] });
     }
     dump_log();
+
+    const_cast<std::shared_ptr<tim::settings>&>(tim::settings::shared_instance()).reset();
 
     return 0;
 }
@@ -1076,7 +1077,7 @@ write_hw_counter_info(std::ostream& os, const array_t<bool, N>& options,
 
     auto _papi_events = tim::papi::available_events_info();
     auto _rocm_events =
-        (gpu_count > 0) ? rocprofsys::rocprofiler::rocm_metrics() : hwcounter_info_t{};
+        (gpu_count > 0) ? rocprofsys::rocm::rocm_events() : hwcounter_info_t{};
 
     if(alphabetical)
     {

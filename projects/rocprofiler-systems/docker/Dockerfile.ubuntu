@@ -30,9 +30,9 @@ RUN apt-get update && \
         python3-pip rpm texinfo wget && \
     OS_VERSION=$(cat /etc/os-release | grep VERSION_ID | sed 's/=/ /'1 | awk '{print $NF}' | sed 's/"//g') && \
     if [ "${OS_VERSION}" == "24.04" ]; then \
-        python3 -m pip install --break-system-packages 'cmake==3.18.4'; \
+        python3 -m pip install --break-system-packages 'cmake==3.21'; \
     else \
-        python3 -m pip install 'cmake==3.18.4'; \
+        python3 -m pip install 'cmake==3.21'; \
     fi
 
 RUN if [ "${ROCM_VERSION}" != "0.0" ]; then \

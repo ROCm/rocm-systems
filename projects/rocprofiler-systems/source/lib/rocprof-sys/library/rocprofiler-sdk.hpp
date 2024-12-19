@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,67 +22,39 @@
 
 #pragma once
 
-#include "core/defines.hpp"
 #include "core/timemory.hpp"
-#include "library/components/rocprofiler.hpp"
 
-#include <timemory/backends/hardware_counters.hpp>
-#include <timemory/macros.hpp>
-#include <timemory/mpl/concepts.hpp>
-#include <timemory/mpl/macros.hpp>
-
-#include <array>
-#include <atomic>
-#include <cstring>
-#include <dlfcn.h>
-#include <iostream>
-#include <list>
-#include <map>
-#include <string>
-#include <string_view>
-#include <tuple>
-#include <unistd.h>
-#include <utility>
-#include <variant>
+#include <memory>
 #include <vector>
 
 namespace rocprofsys
 {
-namespace rocprofiler
+namespace rocprofiler_sdk
 {
-std::map<uint32_t, std::vector<std::string_view>>
-get_data_labels();
+using hardware_counter_info = ::tim::hardware_counters::info;
 
 void
-rocm_initialize();
+setup();
 
 void
-rocm_cleanup();
+shutdown();
 
-bool&
-is_setup();
+void
+config();
 
 void
 post_process();
 
-std::vector<component::rocm_info_entry>
-rocm_metrics();
+void
+sample();
 
-#if !defined(ROCPROFSYS_USE_ROCPROFILER) || ROCPROFSYS_USE_ROCPROFILER == 0
-inline void
-post_process()
-{}
+void
+start();
 
-inline void
-rocm_cleanup()
-{}
+void
+stop();
 
-inline std::vector<component::rocm_info_entry>
-rocm_metrics()
-{
-    return std::vector<component::rocm_info_entry>{};
-}
-#endif
-
-}  // namespace rocprofiler
+std::vector<hardware_counter_info>
+get_rocm_events_info();
+}  // namespace rocprofiler_sdk
 }  // namespace rocprofsys

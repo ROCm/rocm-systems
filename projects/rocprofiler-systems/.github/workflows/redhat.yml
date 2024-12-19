@@ -46,8 +46,8 @@ jobs:
       fail-fast: false
       matrix:
         compiler: ['g++']
-        os-release: [ '8.10', '9.2', '9.4' ]
-        rocm-version: [ '0.0', '6.2', '6.3' ]
+        os-release: [ '8.10', '9.3', '9.4' ]
+        rocm-version: [ '0.0', '6.3' ]
         build-type: ['Release']
 
     steps:
@@ -70,7 +70,7 @@ jobs:
           fi
           python3 -m pip install --upgrade pip &&
           python3 -m pip install --upgrade numpy perfetto dataclasses &&
-          python3 -m pip install 'cmake==3.18.4' &&
+          python3 -m pip install 'cmake==3.21' &&
           for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install --upgrade numpy perfetto dataclasses; done
 
     - name: Install ROCm Packages
@@ -108,7 +108,7 @@ jobs:
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems
           -DROCPROFSYS_BUILD_TESTING=ON
           -DROCPROFSYS_USE_MPI=OFF
-          -DROCPROFSYS_USE_HIP=${USE_HIP}
+          -DROCPROFSYS_USE_ROCM=${USE_HIP}
           -DROCPROFSYS_USE_OMPT=OFF
           -DROCPROFSYS_USE_PYTHON=ON
           -DROCPROFSYS_USE_MPI_HEADERS=ON

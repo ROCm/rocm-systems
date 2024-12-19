@@ -263,6 +263,25 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
                 _timemory_manager->add_file_output("protobuf", "perfetto", _filename);
         }
         ofs.close();
+
+        if(dmp::rank() == 0)
+        {
+            const char* file_path   = _filename.c_str();
+            auto        folder_path = [](std::string_view _v) {
+                return tim::filepath::dirname(std::string(_v));
+            };
+            // Execute the merge script
+            std::string command =
+                "merge-multiprocess-output.sh '" + folder_path(file_path) + "'";
+            int result = system(command.c_str());
+            if(result != 0)
+            {
+                ROCPROFSYS_VERBOSE(0,
+                                   "Failed to execute merge-multiprocess-output.sh with "
+                                   "folder path: %s\n",
+                                   folder_path(file_path).c_str());
+            }
+        }
     }
     else if(dmp::rank() == 0)
     {
