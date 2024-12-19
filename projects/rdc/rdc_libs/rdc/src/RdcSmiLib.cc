@@ -24,6 +24,7 @@ THE SOFTWARE.
 #include <stdlib.h>
 #include <strings.h>
 
+#include "rdc/rdc.h"
 #include "rdc_lib/RdcLogger.h"
 
 namespace amd {
@@ -179,6 +180,9 @@ rdc_status_t RdcSmiLib::rdc_telemetry_fields_query(uint32_t field_ids[MAX_NUM_FI
       RDC_EVNT_XGMI_1_THRPUT,   RDC_EVNT_XGMI_2_THRPUT,   RDC_EVNT_XGMI_3_THRPUT,
       RDC_EVNT_XGMI_4_THRPUT,   RDC_EVNT_XGMI_5_THRPUT,   RDC_FI_OAM_ID,
       RDC_FI_GPU_MM_ENC_UTIL,   RDC_FI_GPU_MM_DEC_UTIL,   RDC_FI_GPU_MEMORY_ACTIVITY,
+      RDC_HEALTH_XGMI_ERROR,          RDC_HEALTH_PCIE_REPLAY_COUNT,   RDC_HEALTH_RETIRED_PAGE_NUM,
+      RDC_HEALTH_PENDING_PAGE_NUM,    RDC_HEALTH_RETIRED_PAGE_LIMIT,  RDC_HEALTH_UNCORRECTABLE_PAGE_LIMIT,
+      RDC_HEALTH_POWER_THROTTLE_TIME, RDC_HEALTH_THERMAL_THROTTLE_TIME,
   };
   std::copy(fields.begin(), fields.end(), field_ids);
   *field_count = fields.size();
@@ -203,7 +207,8 @@ rdc_status_t RdcSmiLib::rdc_diag_test_cases_query(rdc_diag_test_cases_t test_cas
 rdc_status_t RdcSmiLib::rdc_test_case_run(rdc_diag_test_cases_t test_case,
                                           uint32_t gpu_index[RDC_MAX_NUM_DEVICES],
                                           uint32_t gpu_count, const char* /*config*/,
-                                          size_t /*config_size*/, rdc_diag_test_result_t* result) {
+                                          size_t /*config_size*/, rdc_diag_test_result_t* result,
+                                          rdc_diag_callback_t* callback) {
   if (result == nullptr) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -220,7 +225,7 @@ rdc_status_t RdcSmiLib::rdc_test_case_run(rdc_diag_test_cases_t test_case,
 }
 
 rdc_status_t RdcSmiLib::rdc_diagnostic_run(const rdc_group_info_t&, rdc_diag_level_t, const char*,
-                                           size_t, rdc_diag_response_t*) {
+                                           size_t, rdc_diag_response_t*, rdc_diag_callback_t*) {
   return RDC_ST_NOT_SUPPORTED;
 }
 

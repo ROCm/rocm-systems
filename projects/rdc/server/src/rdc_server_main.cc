@@ -271,6 +271,8 @@ static int FileOwner(const char* fn, std::string* owner) {
 }
 
 void RDCServer::ShutDown(void) {
+  api_service_->Shutdown();
+
   server_->Shutdown();
 
   if (rdc_admin_service_) {

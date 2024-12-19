@@ -25,20 +25,16 @@ if(BUILD_RVS)
 
     message("RDC_RVS_LIB_INC_LIST=${RDC_RVS_LIB_INC_LIST}")
 
+    # below provides rvs::rvs package
+    include(Findrvs)
+
     # needed to find extra packages
     list(APPEND CMAKE_PREFIX_PATH ${ROCM_DIR})
-    find_package(yaml-cpp REQUIRED)
-    find_package(hip REQUIRED)
-    find_package(hsa-runtime64 REQUIRED)
-    find_package(rvs REQUIRED
-        HINTS ${ROCM_DIR}/lib/cmake)
-
-    ## additional libraries
-    set(COMBINED_LIBS rocblas hsakmt hsa-runtime64 hip::amdhip64 yaml-cpp)
+    find_package(rvs REQUIRED)
 
     set(RDC_LIB_MODULES ${RDC_LIB_MODULES} ${RDC_RVS_LIB} PARENT_SCOPE)
     add_library(${RDC_RVS_LIB} SHARED ${RDC_RVS_LIB_SRC_LIST} ${RDC_RVS_LIB_INC_LIST})
-    target_link_libraries(${RDC_RVS_LIB} PRIVATE ${RDC_LIB} ${BOOTSTRAP_LIB} ${rvs} pthread dl ${COMBINED_LIBS})
+    target_link_libraries(${RDC_RVS_LIB} PRIVATE ${RDC_LIB} ${BOOTSTRAP_LIB} rvs::rvs pthread dl)
     target_include_directories(${RDC_RVS_LIB} PRIVATE
         "${PROJECT_SOURCE_DIR}"
         "${PROJECT_SOURCE_DIR}/include"
@@ -47,6 +43,11 @@ if(BUILD_RVS)
         "${ROCM_DIR}/include"
         "${ROCM_DIR}/include/hsa"
         "${ROCM_VALIDATION_SUITE_INCLUDE_DIR}")
+
+    # let bootstrap find this module at build time
+    # at install-time the directory structure is a lot simpler
+    set_property(TARGET ${BOOTSTRAP_LIB} APPEND PROPERTY
+        BUILD_RPATH "\$ORIGIN/../rdc_modules/${RDC_RVS_LIB}")
 
     # Set the VERSION and SOVERSION values
     set_property(TARGET ${RDC_RVS_LIB} PROPERTY

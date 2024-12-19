@@ -20,10 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-#include <string.h>
-
-#include <memory>
-#include <stdexcept>
+#include <string>
 
 #include "rdc_lib/RdcDiagnosticLibInterface.h"
 #include "rdc_lib/rdc_common.h"
@@ -152,7 +149,7 @@ static rdc_status_t run_compute_queue_test(uint32_t gpu_index, rdc_diag_test_res
 rdc_status_t rdc_diag_test_case_run(rdc_diag_test_cases_t test_case,
                                     uint32_t gpu_index[RDC_MAX_NUM_DEVICES], uint32_t gpu_count,
                                     const char* /*config*/, size_t /*config_size*/,
-                                    rdc_diag_test_result_t* result) {
+                                    rdc_diag_test_result_t* result, rdc_diag_callback_t* callback) {
   if (result == nullptr || gpu_count == 0) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -170,6 +167,10 @@ rdc_status_t rdc_diag_test_case_run(rdc_diag_test_cases_t test_case,
   // Run test for each GPU. It will continue even
   // if one GPU test is fail.
   for (uint32_t i = 0; i < gpu_count; i++) {
+    if (callback != nullptr && callback->callback != nullptr && callback->cookie != nullptr) {
+      std::string str = "ROCR test on GPU " + std::to_string(i);
+      callback->callback(callback->cookie, str.data());
+    }
     switch (test_case) {
       case RDC_DIAG_SYS_MEM_CHECK:
         run_memory_test(gpu_index[i], result);

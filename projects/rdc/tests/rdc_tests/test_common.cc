@@ -67,9 +67,8 @@ static const char* kRasErrStateStrings[] = {
     "Error Unknown",            // AMDSMI_RAS_ERR_STATE_PARITY
     "Single, Correctable",      // AMDSMI_RAS_ERR_STATE_SING_C
     "Multiple, Uncorrectable",  // AMDSMI_RAS_ERR_STATE_MULT_UC
-    "Poison"                    // AMDSMI_RAS_ERR_STATE_POISON
-    "Off",                      // AMDSMI_RAS_ERR_STATE_DISABLED
-    "On",                       // AMDSMI_RAS_ERR_STATE_ENABLED
+    "Poison",                   // AMDSMI_RAS_ERR_STATE_POISON
+    "Enabled",                  // AMDSMI_RAS_ERR_STATE_ENABLED
 };
 static_assert(sizeof(kRasErrStateStrings) / sizeof(char*) == (AMDSMI_RAS_ERR_STATE_LAST + 1),
               "kErrStateNameMap needs to be updated");
