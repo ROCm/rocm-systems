@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023 ROCm Developer Tools
+// Copyright (c) 2024 ROCm Developer Tools
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -72,13 +72,6 @@ kfd_open()
     }
 
     return fd;
-}
-
-int
-get_kfd_fd()
-{
-    static auto _v = kfd_open();
-    return _v;
 }
 
 /** Call ioctl, restarting if it is interrupted
@@ -283,7 +276,7 @@ ioctl_query_pc_sampling_capabilities(uint32_t  kfd_gpu_id,
             // which is not supported.
             return ROCPROFILER_IOCTL_STATUS_UNAVAILABLE;
         }
-        ROCP_ERROR << "IOCTL failed to query PC sampling configs: " << ret << "\n";
+        ROCP_WARNING << "IOCTL failed to query PC sampling configs: " << ret << "\n";
     }
     *size = args.num_sample_info;
 
@@ -352,6 +345,13 @@ convert_ioctl_pcs_config_to_rocp(const rocprofiler_ioctl_pc_sampling_info_t& ioc
 }
 }  // namespace
 
+int
+get_kfd_fd()
+{
+    static auto _v = kfd_open();
+    return _v;
+}
+
 rocprofiler_status_t
 ioctl_query_pcs_configs(const rocprofiler_agent_t* agent, rocp_pcs_cfgs_vec_t& rocp_configs)
 {
@@ -381,7 +381,7 @@ ioctl_query_pcs_configs(const rocprofiler_agent_t* agent, rocp_pcs_cfgs_vec_t& r
     }
     else if(ret != ROCPROFILER_IOCTL_STATUS_SUCCESS)
     {
-        ROCP_ERROR << "......... Failed while iterating over PC sampling configurations\n";
+        ROCP_WARNING << "......... Failed while iterating over PC sampling configurations\n";
         return ROCPROFILER_STATUS_ERROR;
     }
 

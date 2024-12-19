@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,6 +29,7 @@
 
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/counters/ioctl.hpp"
 
 namespace rocprofiler
 {
@@ -95,6 +96,18 @@ CounterController::configure_agent_collection(rocprofiler_context_id_t context_i
     if(ctx.device_counter_collection->conf_agents.emplace(agent_id.handle).second == false)
     {
         return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    if(counters::counter_collection_has_device_lock())
+    {
+        /**
+         * Note: This should retrun if the lock fails to aquire in the future. However, this
+         * is a change in the required permissions for rocprofiler and needs to be communicated
+         * with partners before strict enforcement. If the required permissions are not obtained,
+         * those profilers will function as they currently do (without any of the benefits of the
+         * IOCTL).
+         */
+        counters::counter_collection_device_lock(rocprofiler::agent::get_agent(agent_id), true);
     }
 
     ctx.device_counter_collection->agent_data.emplace_back();

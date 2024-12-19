@@ -106,9 +106,9 @@ rocprofiler_configure_device_counting_service(rocprofiler_context_id_t context_i
  * @param [in] context_id context id
  * @param [in] user_data User supplied data, included in records outputted to buffer.
  * @param [in] flags Flags to specify how the counter data should be collected (defaults to sync).
- * @param [in/out] output_records Output records collected via sampling (output is also written to
+ * @param [in] output_records Output records collected via sampling (output is also written to
  * buffer). Must be allocated by caller.
- * @param [in/out] rec_count On entry, this is the maximum number of records rocprof can store in
+ * @param [in] rec_count On entry, this is the maximum number of records rocprof can store in
  * output_records. On exit, contains the number of actual records.
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID Returned if the context does not exist or

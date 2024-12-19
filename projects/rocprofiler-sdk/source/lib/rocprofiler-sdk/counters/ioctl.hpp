@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 ROCm Developer Tools
+// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -19,34 +19,19 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+#pragma once
 
-#include <rocprofiler-sdk/fwd.h>
-
-#include "lib/rocprofiler-sdk/context/context.hpp"
-#include "lib/rocprofiler-sdk/pc_sampling/types.hpp"
-
-#include <vector>
+#include <rocprofiler-sdk/rocprofiler.h>
 
 namespace rocprofiler
 {
-namespace pc_sampling
+namespace counters
 {
-namespace ioctl
-{
-using rocp_pcs_cfgs_vec_t = std::vector<rocprofiler_pc_sampling_configuration_t>;
+bool
+counter_collection_has_device_lock();
 
 rocprofiler_status_t
-ioctl_query_pcs_configs(const rocprofiler_agent_t* agent, rocp_pcs_cfgs_vec_t& rocp_configs);
+counter_collection_device_lock(const rocprofiler_agent_t* agent, bool all_queues);
 
-rocprofiler_status_t
-ioctl_pcs_create(const rocprofiler_agent_t*       agent,
-                 rocprofiler_pc_sampling_method_t method,
-                 rocprofiler_pc_sampling_unit_t   unit,
-                 uint64_t                         interval,
-                 uint32_t*                        ioctl_pcs_id);
-
-int
-get_kfd_fd();
-}  // namespace ioctl
-}  // namespace pc_sampling
+}  // namespace counters
 }  // namespace rocprofiler

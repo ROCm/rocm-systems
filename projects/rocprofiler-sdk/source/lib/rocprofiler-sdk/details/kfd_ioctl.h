@@ -23,8 +23,8 @@
 #ifndef KFD_IOCTL_H_INCLUDED
 #define KFD_IOCTL_H_INCLUDED
 
-#include <drm.h>
 #include <linux/ioctl.h>
+#include <linux/types.h>
 
 /*
  * - 1.1 - initial version
@@ -1789,6 +1789,35 @@ struct kfd_ioctl_pc_sample_args
     __u32 version;
 };
 
+#define KFD_IOC_PROFILER_VERSION_NUM 1
+enum kfd_profiler_ops
+{
+    KFD_IOC_PROFILER_PMC       = 0,
+    KFD_IOC_PROFILER_PC_SAMPLE = 1,
+    KFD_IOC_PROFILER_VERSION   = 2,
+};
+
+/**
+ * Enables/Disables GPU Specific profiler settings
+ */
+struct kfd_ioctl_pmc_settings
+{
+    __u32 gpu_id;           /* This is the user_gpu_id */
+    __u32 lock;             /* Lock GPU for Profiling */
+    __u32 perfcount_enable; /* Force Perfcount Enable for queues on GPU */
+};
+
+struct kfd_ioctl_profiler_args
+{
+    __u32 op; /* kfd_profiler_op */
+    union
+    {
+        struct kfd_ioctl_pc_sample_args pc_sample;
+        struct kfd_ioctl_pmc_settings   pmc;
+        __u32                           version; /* KFD_IOC_PROFILER_VERSION_NUM */
+    };
+};
+
 #define AMDKFD_IOCTL_BASE     'K'
 #define AMDKFD_IO(nr)         _IO(AMDKFD_IOCTL_BASE, nr)
 #define AMDKFD_IOR(nr, type)  _IOR(AMDKFD_IOCTL_BASE, nr, type)
@@ -1895,7 +1924,9 @@ struct kfd_ioctl_pc_sample_args
 
 #define AMDKFD_IOC_PC_SAMPLE AMDKFD_IOWR(0x85, struct kfd_ioctl_pc_sample_args)
 
+#define AMDKFD_IOC_PROFILER AMDKFD_IOWR(0x86, struct kfd_ioctl_profiler_args)
+
 #define AMDKFD_COMMAND_START_2 0x80
-#define AMDKFD_COMMAND_END_2   0x86
+#define AMDKFD_COMMAND_END_2   0x87
 
 #endif

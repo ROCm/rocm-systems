@@ -7,7 +7,8 @@ set(ROCPROFILER_LIB_COUNTERS_SOURCES
     dispatch_handlers.cpp
     sample_processing.cpp
     controller.cpp
-    device_counting.cpp)
+    device_counting.cpp
+    ioctl.cpp)
 set(ROCPROFILER_LIB_COUNTERS_HEADERS
     metrics.hpp
     dimensions.hpp
@@ -18,10 +19,10 @@ set(ROCPROFILER_LIB_COUNTERS_HEADERS
     sample_processing.hpp
     controller.hpp
     device_counting.hpp
-    sample_consumer.hpp)
+    sample_consumer.hpp
+    ioctl.hpp)
 target_sources(rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_COUNTERS_SOURCES}
                                                       ${ROCPROFILER_LIB_COUNTERS_HEADERS})
-
 add_subdirectory(xml)
 add_subdirectory(parser)
 add_subdirectory(yaml)

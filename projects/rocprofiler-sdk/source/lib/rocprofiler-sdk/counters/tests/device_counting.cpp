@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -77,11 +77,11 @@ findDeviceMetrics(const hsa::AgentCache& agent, const std::unordered_set<std::st
     std::vector<counters::Metric> ret;
     const auto*                   all_counters = counters::getMetricMap();
 
-    ROCP_ERROR << "Looking up counters for " << std::string(agent.name());
+    ROCP_WARNING << "Looking up counters for " << std::string(agent.name());
     const auto* gfx_metrics = common::get_val(*all_counters, std::string(agent.name()));
     if(!gfx_metrics)
     {
-        ROCP_ERROR << "No counters found for " << std::string(agent.name());
+        ROCP_WARNING << "No counters found for " << std::string(agent.name());
         return ret;
     }
 
@@ -145,7 +145,7 @@ check_output_created(rocprofiler_context_id_t,
                 break;
             }
             found_value = record->user_data.value;
-            // ROCP_ERROR << fmt::format("Found counter value: {}", record->counter_value);
+            // ROCP_WARNING << fmt::format("Found counter value: {}", record->counter_value);
             global_recs().wlock([&](auto& data) { data.push_back(*record); });
         }
     }
@@ -202,7 +202,7 @@ gen_kernel_pkt(uint64_t obj)
     packet.kernel_dispatch.kernel_object    = obj;
     packet.kernel_dispatch.kernarg_address  = nullptr;
     packet.kernel_dispatch.completion_signal.handle = 0;
-    ROCP_ERROR << fmt::format("{:x}", packet.kernel_dispatch.kernel_object);
+    ROCP_WARNING << fmt::format("{:x}", packet.kernel_dispatch.kernel_object);
     return packet;
 }
 
@@ -247,8 +247,9 @@ protected:
     device_counting_service_test() {}
 
     static void test_run(rocprofiler_counter_flag_t flags = ROCPROFILER_COUNTER_FLAG_NONE,
-                         const std::unordered_set<std::string>& test_metrics = {},
-                         size_t                                 delay        = 1)
+                         const std::unordered_set<std::string>& test_metrics  = {},
+                         size_t                                 delay         = 1,
+                         bool                                   non_intercept = false)
     {
         hsa_init();
         registration::init_logging();
@@ -282,9 +283,6 @@ protected:
                                       &queue),
                      HSA_STATUS_SUCCESS);
 
-            // We don't use the queue interceptor, need to enabling profiling manually
-            hsa_amd_profiling_set_profiler_enabled(queue, 1);
-
             hsa_signal_t completion_signal;
             hsa_signal_create(1, 0, nullptr, &completion_signal);
 
@@ -292,21 +290,35 @@ protected:
             CHECK(agent.get_hsa_agent().handle != 0);
             // Set state of the queue to allow profiling (may not be needed since AQL
             // may do this in the future).
-            aql::set_profiler_active_on_queue(
-                agent.cpu_pool(), agent.get_hsa_agent(), [&](hsa::rocprofiler_packet pkt) {
-                    pkt.ext_amd_aql_pm4.completion_signal = completion_signal;
-                    submitPacket(queue, (const void*) &pkt);
+            if(!non_intercept)
+            {
+                // This simulates the presence of us intercepting queues on queue creation.
+                // This is identical to the standard device counting use case where only a single
+                // process is being profiled.
+                hsa_amd_profiling_set_profiler_enabled(queue, 1);
+                aql::set_profiler_active_on_queue(
+                    agent.cpu_pool(), agent.get_hsa_agent(), [&](hsa::rocprofiler_packet pkt) {
+                        pkt.ext_amd_aql_pm4.completion_signal = completion_signal;
+                        submitPacket(queue, (const void*) &pkt);
 
-                    if(hsa_signal_wait_relaxed(completion_signal,
-                                               HSA_SIGNAL_CONDITION_EQ,
-                                               0,
-                                               20000000,
-                                               HSA_WAIT_STATE_BLOCKED) != 0)
-                    {
-                        ROCP_FATAL << "Failed to set profiling mode on queue";
-                    }
-                    hsa_signal_store_relaxed(completion_signal, 1);
-                });
+                        if(hsa_signal_wait_relaxed(completion_signal,
+                                                   HSA_SIGNAL_CONDITION_EQ,
+                                                   0,
+                                                   20000000,
+                                                   HSA_WAIT_STATE_BLOCKED) != 0)
+                        {
+                            ROCP_FATAL << "Failed to set profiling mode on queue";
+                        }
+                        hsa_signal_store_relaxed(completion_signal, 1);
+                    });
+            }
+            else
+            {
+                // In the non_intercept case, we are simulating queues that are created without
+                // interception on the system. This case is used to test the device counting service
+                // in modes where a system profiler would be present (and we would not have the
+                // ability to intercept queues in order to do the above operations).
+            }
 
             rocprofiler::hsa::rocprofiler_packet barrier{};
 
@@ -322,7 +334,7 @@ protected:
                 std::vector<rocprofiler_record_counter_t> output_records(10000);
                 // global_recs().clear();
                 track_metric++;
-                ROCP_ERROR << "Testing metric " << metric.name();
+                ROCP_WARNING << "Testing metric " << metric.name();
                 rocprofiler_context_id_t ctx = {.handle = 0};
                 ROCPROFILER_CALL(rocprofiler_create_context(&ctx), "context creation failed");
                 rocprofiler_buffer_id_t opt_buff_id = {.handle = 0};
@@ -375,8 +387,8 @@ protected:
                 auto status = rocprofiler_start_context(ctx);
                 if(status == ROCPROFILER_STATUS_ERROR_NO_HARDWARE_COUNTERS)
                 {
-                    ROCP_ERROR << fmt::format("No hardware counters for {}, skipping",
-                                              metric.name());
+                    ROCP_WARNING << fmt::format("No hardware counters for {}, skipping",
+                                                metric.name());
                     continue;
                 }
                 else if(status != ROCPROFILER_STATUS_SUCCESS)
@@ -504,8 +516,8 @@ protected:
             test_kernels kernel_loader(gpu_agent);
             auto         kernel_handle = kernel_loader.load_kernel(gpu_agent, "null_kernel");
 
-            ROCP_ERROR << fmt::format("Running test on agent {:x}",
-                                      gpu_agent.get_hsa_agent().handle);
+            ROCP_WARNING << fmt::format("Running test on agent {:x}",
+                                        gpu_agent.get_hsa_agent().handle);
 
             const auto* agent_map = rocprofiler::common::get_val(counters::get_ast_map(),
                                                                  std::string(gpu_agent.name()));
@@ -584,19 +596,19 @@ protected:
                                         UINT32_MAX,
                                         HSA_WAIT_STATE_ACTIVE);
 
-                ROCP_ERROR << "Processing Next...";
+                ROCP_WARNING << "Processing Next...";
                 auto decoded_pkt = counters::EvaluateAST::read_pkt(&pkt_constructor, *inst_pkts);
                 CHECK(!decoded_pkt.empty());
-                ROCP_ERROR << "Decoded Packet:";
+                ROCP_WARNING << "Decoded Packet:";
                 for(const auto& [id, data_vec] : decoded_pkt)
                 {
-                    ROCP_ERROR << fmt::format("\t[{} = {}]", id, fmt::join(data_vec, ","));
+                    ROCP_WARNING << fmt::format("\t[{} = {}]", id, fmt::join(data_vec, ","));
                 }
 
                 std::vector<std::unique_ptr<std::vector<rocprofiler_record_counter_t>>> cache;
                 auto* ret = counter_ast.evaluate(decoded_pkt, cache);
                 CHECK(!ret->empty());
-                ROCP_ERROR << fmt::format(
+                ROCP_WARNING << fmt::format(
                     "Final Decoded Counter Values: {} (iter={})", fmt::join(*ret, ","), i);
 
                 CHECK_EQ(ret->size(), expected_values.size());
@@ -636,7 +648,7 @@ TEST_F(device_counting_service_test, sync_grbm_verify)
 {
     test_run(ROCPROFILER_COUNTER_FLAG_NONE, {"GRBM_COUNT"}, 50000);
     auto local_recs = global_recs().rlock([](const auto& data) { return data; });
-    ROCP_ERROR << local_recs.size();
+    ROCP_WARNING << local_recs.size();
 
     for(const auto& val : local_recs)
     {
@@ -644,7 +656,7 @@ TEST_F(device_counting_service_test, sync_grbm_verify)
         rocprofiler_query_record_counter_id(val.id, &id);
         rocprofiler_counter_info_v0_t info;
         rocprofiler_query_counter_info(id, ROCPROFILER_COUNTER_INFO_VERSION_0, &info);
-        ROCP_ERROR << fmt::format("Name: {} Counter value: {}", info.name, val.counter_value);
+        ROCP_WARNING << fmt::format("Name: {} Counter value: {}", info.name, val.counter_value);
         EXPECT_GT(val.counter_value, 0.0);
     }
 }
@@ -653,7 +665,7 @@ TEST_F(device_counting_service_test, sync_gpu_util_verify)
 {
     test_run(ROCPROFILER_COUNTER_FLAG_NONE, {"GPU_UTIL"}, 50000);
     auto local_recs = global_recs().rlock([](const auto& data) { return data; });
-    ROCP_ERROR << local_recs.size();
+    ROCP_WARNING << local_recs.size();
 
     for(const auto& val : local_recs)
     {
@@ -661,7 +673,7 @@ TEST_F(device_counting_service_test, sync_gpu_util_verify)
         rocprofiler_query_record_counter_id(val.id, &id);
         rocprofiler_counter_info_v0_t info;
         rocprofiler_query_counter_info(id, ROCPROFILER_COUNTER_INFO_VERSION_0, &info);
-        ROCP_ERROR << fmt::format("Name: {} Counter value: {}", info.name, val.counter_value);
+        ROCP_WARNING << fmt::format("Name: {} Counter value: {}", info.name, val.counter_value);
         EXPECT_GT(val.counter_value, 0.0);
     }
 }
@@ -670,7 +682,7 @@ TEST_F(device_counting_service_test, sync_sq_waves_verify)
 {
     test_run(ROCPROFILER_COUNTER_FLAG_NONE, {"SQ_WAVES_sum"}, 50000);
     auto local_recs = global_recs().rlock([](const auto& data) { return data; });
-    ROCP_ERROR << local_recs.size();
+    ROCP_WARNING << local_recs.size();
 
     for(const auto& val : local_recs)
     {
@@ -678,7 +690,32 @@ TEST_F(device_counting_service_test, sync_sq_waves_verify)
         rocprofiler_query_record_counter_id(val.id, &id);
         rocprofiler_counter_info_v0_t info;
         rocprofiler_query_counter_info(id, ROCPROFILER_COUNTER_INFO_VERSION_0, &info);
-        ROCP_ERROR << fmt::format("Name: {} Counter value: {}", info.name, val.counter_value);
+        ROCP_WARNING << fmt::format("Name: {} Counter value: {}", info.name, val.counter_value);
+        EXPECT_GT(val.counter_value, 0.0);
+    }
+}
+
+TEST_F(device_counting_service_test, sync_sq_waves_verify_non_intercept)
+{
+    // If this test fails, device counters will not be read correctly by a system-wide profiler
+    // deamon.
+    if(!counters::counter_collection_has_device_lock())
+    {
+        ROCP_WARNING << "Unsupported kernel driver version, skipping test";
+        GTEST_SKIP();
+    }
+
+    test_run(ROCPROFILER_COUNTER_FLAG_NONE, {"SQ_WAVES_sum"}, 50000, true);
+    auto local_recs = global_recs().rlock([](const auto& data) { return data; });
+    ROCP_WARNING << local_recs.size();
+
+    for(const auto& val : local_recs)
+    {
+        rocprofiler_counter_id_t id;
+        rocprofiler_query_record_counter_id(val.id, &id);
+        rocprofiler_counter_info_v0_t info;
+        rocprofiler_query_counter_info(id, ROCPROFILER_COUNTER_INFO_VERSION_0, &info);
+        ROCP_WARNING << fmt::format("Name: {} Counter value: {}", info.name, val.counter_value);
         EXPECT_GT(val.counter_value, 0.0);
     }
 }

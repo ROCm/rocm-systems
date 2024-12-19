@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -116,6 +116,8 @@ ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_EXCEEDS_HW_LIMIT,
                           "Request exceeds the capabilities of the hardware to collect")
 ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED,
                           "Agent HW architecture is not supported, no counter metrics found.")
+ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_PERMISSION_DENIED,
+                          "Required permission (CAP_PERFMON) is not set, permission denied")
 
 template <size_t Idx, size_t... Tail>
 const char*

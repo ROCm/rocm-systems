@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -106,6 +106,7 @@ typedef enum  // NOLINT(performance-enum-size)
                                              ///< status code for more information.
     ROCPROFILER_STATUS_ERROR_EXCEEDS_HW_LIMIT,          ///< Exceeds hardware limits for collection.
     ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED,  ///< Agent HW architecture not supported.
+    ROCPROFILER_STATUS_ERROR_PERMISSION_DENIED,         ///< Permission denied.
     ROCPROFILER_STATUS_LAST,
 } rocprofiler_status_t;
 
