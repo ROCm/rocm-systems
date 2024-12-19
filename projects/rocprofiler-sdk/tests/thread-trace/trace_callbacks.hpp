@@ -22,38 +22,26 @@
 
 #pragma once
 
+#include <rocprofiler-sdk/amd_detail/thread_trace.h>
+#include <rocprofiler-sdk/buffer.h>
+#include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
-#include <map>
+#include <iostream>
 #include <mutex>
-#include <set>
+#include <sstream>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #define ROCPROFILER_VAR_NAME_COMBINE(X, Y) X##Y
 #define ROCPROFILER_VARIABLE(X, Y)         ROCPROFILER_VAR_NAME_COMBINE(X, Y)
-
-#define ROCPROFILER_CALL(result, msg)                                                              \
-    {                                                                                              \
-        rocprofiler_status_t ROCPROFILER_VARIABLE(CHECKSTATUS, __LINE__) = result;                 \
-        if(ROCPROFILER_VARIABLE(CHECKSTATUS, __LINE__) != ROCPROFILER_STATUS_SUCCESS)              \
-        {                                                                                          \
-            std::string status_msg =                                                               \
-                rocprofiler_get_status_string(ROCPROFILER_VARIABLE(CHECKSTATUS, __LINE__));        \
-            std::cerr << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] " << msg            \
-                      << " failed with error code " << ROCPROFILER_VARIABLE(CHECKSTATUS, __LINE__) \
-                      << ": " << status_msg << std::endl;                                          \
-            std::stringstream errmsg{};                                                            \
-            errmsg << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] " << msg " failure ("  \
-                   << status_msg << ")";                                                           \
-            throw std::runtime_error(errmsg.str());                                                \
-        }                                                                                          \
-    }
 
 #define C_API_BEGIN                                                                                \
     try                                                                                            \
@@ -66,60 +54,59 @@
     }                                                                                              \
     catch(...) { std::cerr << "Error in " << __FILE__ << ':' << __LINE__ << std::endl; }
 
-namespace ATTTest
-{
-struct TrackedIsa
-{
-    std::atomic<size_t> hitcount{0};
-    std::atomic<size_t> latency{0};
-    std::string         inst{};
-};
-
-struct pcInfo
-{
-    size_t addr;
-    size_t marker_id;
-
-    bool operator==(const pcInfo& other) const
-    {
-        return addr == other.addr && marker_id == other.marker_id;
+#define ROCPROFILER_CALL(result, msg)                                                              \
+    {                                                                                              \
+        rocprofiler_status_t CHECKSTATUS = result;                                                 \
+        if(CHECKSTATUS != ROCPROFILER_STATUS_SUCCESS)                                              \
+        {                                                                                          \
+            std::string status_msg = rocprofiler_get_status_string(CHECKSTATUS);                   \
+            std::cerr << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] " << msg            \
+                      << " failed with error code " << CHECKSTATUS << ": " << status_msg           \
+                      << std::endl;                                                                \
+            std::stringstream errmsg{};                                                            \
+            errmsg << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] " << msg " failure ("  \
+                   << status_msg << ")";                                                           \
+            throw std::runtime_error(errmsg.str());                                                \
+        }                                                                                          \
     }
-    bool operator<(const pcInfo& other) const
-    {
-        if(marker_id == other.marker_id) return addr < other.addr;
-        return marker_id < other.marker_id;
-    }
+
+namespace Callbacks
+{
+struct CodeobjInfo
+{
+    int64_t     addr = 0;
+    size_t      size = 0;
+    size_t      id   = 0;
+    std::string filename{};
+    std::string uri{};
 };
 
 struct ToolData
 {
-    std::unordered_map<uint64_t, std::string>     kernel_id_to_kernel_name = {};
-    std::map<pcInfo, std::unique_ptr<TrackedIsa>> isa_map;
+    ToolData(const char* out)
+    : out_dir(out){};
 
-    std::atomic<int> waves_started = 0;
-    std::atomic<int> waves_ended   = 0;
-    std::mutex       isa_map_mut;
-    std::set<pcInfo> wave_start_locations{};
+    std::string              out_dir{};
+    std::mutex               mut{};
+    std::vector<CodeobjInfo> codeobjs{};
+    std::vector<std::string> att_files{};
+
+    std::unordered_map<uint64_t, std::string> kernel_id_to_kernel_name = {};
 };
 
-namespace Callbacks
-{
 void
 tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
                               rocprofiler_user_data_t*,
                               void* callback_data);
 
 void
-shader_data_callback(int64_t                 se_id,
+shader_data_callback(rocprofiler_agent_id_t  agent,
+                     int64_t                 se_id,
                      void*                   se_data,
                      size_t                  data_size,
                      rocprofiler_user_data_t userdata);
 
 void
-callbacks_init();
-
-void
-callbacks_fini();
+finalize_json(void* userdata);
 
 }  // namespace Callbacks
-}  // namespace ATTTest

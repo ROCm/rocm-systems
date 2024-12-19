@@ -147,14 +147,14 @@ TEST(thread_trace, configure_test)
         ctx,
         params.data(),
         params.size(),
-        [](rocprofiler_queue_id_t,
-           const rocprofiler_agent_t*,
+        [](rocprofiler_agent_id_t,
+           rocprofiler_queue_id_t,
            rocprofiler_correlation_id_t,
            rocprofiler_kernel_id_t,
            rocprofiler_dispatch_id_t,
-           rocprofiler_user_data_t*,
-           void*) { return ROCPROFILER_ATT_CONTROL_NONE; },
-        [](int64_t, void*, size_t, rocprofiler_user_data_t) {},
+           void*,
+           rocprofiler_user_data_t*) { return ROCPROFILER_ATT_CONTROL_NONE; },
+        [](rocprofiler_agent_id_t, int64_t, void*, size_t, rocprofiler_user_data_t) {},
         nullptr);
 
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
@@ -198,14 +198,14 @@ TEST(thread_trace, perfcounters_configure_test)
         ctx,
         params.data(),
         params.size(),
-        [](rocprofiler_queue_id_t,
-           const rocprofiler_agent_t*,
+        [](rocprofiler_agent_id_t,
+           rocprofiler_queue_id_t,
            rocprofiler_correlation_id_t,
            rocprofiler_kernel_id_t,
            rocprofiler_dispatch_id_t,
-           rocprofiler_user_data_t*,
-           void*) { return ROCPROFILER_ATT_CONTROL_NONE; },
-        [](int64_t, void*, size_t, rocprofiler_user_data_t) {},
+           void*,
+           rocprofiler_user_data_t*) { return ROCPROFILER_ATT_CONTROL_NONE; },
+        [](rocprofiler_agent_id_t, int64_t, void*, size_t, rocprofiler_user_data_t) {},
         nullptr);
 
     auto* context = rocprofiler::context::get_mutable_registered_context(ctx);
@@ -286,8 +286,8 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
             params.data(),
             params.size(),
             agent->id,
-            [](int64_t, void*, size_t, rocprofiler_user_data_t) {},
-            nullptr);
+            [](rocprofiler_agent_id_t, int64_t, void*, size_t, rocprofiler_user_data_t) {},
+            rocprofiler_user_data_t{});
     }
     return ROCPROFILER_STATUS_SUCCESS;
 }

@@ -25,23 +25,7 @@
 #    undef NDEBUG
 #endif
 
-#include <rocprofiler-sdk/amd_detail/thread_trace.h>
-#include <rocprofiler-sdk/registration.h>
-#include <rocprofiler-sdk/rocprofiler.h>
-#include "common.hpp"
-
-#include <atomic>
-#include <cassert>
-#include <cstdint>
-#include <cstdlib>
-#include <iostream>
-#include <map>
-#include <mutex>
-#include <sstream>
-#include <string>
-#include <string_view>
-#include <unordered_map>
-#include <vector>
+#include "trace_callbacks.hpp"
 
 constexpr double WAVE_RATIO_TOLERANCE = 0.05;
 
@@ -52,17 +36,17 @@ namespace Single
 rocprofiler_client_id_t* client_id = nullptr;
 
 rocprofiler_att_control_flags_t
-dispatch_callback(rocprofiler_queue_id_t /* queue_id  */,
-                  const rocprofiler_agent_t* /* agent  */,
-                  rocprofiler_correlation_id_t /* correlation_id  */,
+dispatch_callback(rocprofiler_agent_id_t /* agent */,
+                  rocprofiler_queue_id_t /* queue_id */,
+                  rocprofiler_correlation_id_t /* correlation_id */,
                   rocprofiler_kernel_id_t kernel_id,
                   rocprofiler_dispatch_id_t /* dispatch_id */,
-                  rocprofiler_user_data_t* dispatch_userdata,
-                  void*                    userdata)
+                  void*                    userdata,
+                  rocprofiler_user_data_t* dispatch_userdata)
 {
     C_API_BEGIN
     assert(userdata && "Dispatch callback passed null!");
-    ToolData& tool         = *reinterpret_cast<ToolData*>(userdata);
+    auto& tool             = *reinterpret_cast<Callbacks::ToolData*>(userdata);
     dispatch_userdata->ptr = userdata;
 
     static std::string_view desired_func_name = "branching_kernel";
@@ -86,7 +70,6 @@ dispatch_callback(rocprofiler_queue_id_t /* queue_id  */,
 int
 tool_init(rocprofiler_client_finalize_t /* fini_func */, void* tool_data)
 {
-    Callbacks::callbacks_init();
     static rocprofiler_context_id_t client_ctx = {0};
 
     ROCPROFILER_CALL(rocprofiler_create_context(&client_ctx), "context creation");
@@ -125,34 +108,8 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* tool_data)
 void
 tool_fini(void* tool_data)
 {
-    assert(tool_data && "tool_fini callback passed null!");
-    ToolData& tool = *reinterpret_cast<ToolData*>(tool_data);
-
-    std::unique_lock<std::mutex> isa_lk(tool.isa_map_mut);
-
-    // Find largest instruction
-    size_t max_inst_size = 0;
-    for(auto& [addr, lines] : tool.isa_map)
-        max_inst_size = std::max(max_inst_size, lines->inst.size());
-
-    size_t total_hit    = 0;
-    size_t total_cycles = 0;
-
-    for(auto& [addr, line] : tool.isa_map)
-    {
-        total_hit += line->hitcount.load(std::memory_order_relaxed);
-        total_cycles += line->latency.load(std::memory_order_relaxed);
-    }
-
-    assert(total_cycles > 0);
-    assert(total_hit > 0);
-
-    double wave_started     = (double) tool.waves_started.load();
-    double wave_event_ratio = wave_started / (wave_started + (double) tool.waves_ended.load());
-    assert(wave_event_ratio > 0.5 - WAVE_RATIO_TOLERANCE);
-    assert(wave_event_ratio < 0.5 + WAVE_RATIO_TOLERANCE);
-
-    Callbacks::callbacks_fini();
+    Callbacks::finalize_json(tool_data);
+    delete static_cast<Callbacks::ToolData*>(tool_data);
 }
 
 }  // namespace Single
@@ -173,14 +130,12 @@ rocprofiler_configure(uint32_t /* version */,
     // store client info
     ATTTest::Single::client_id = id;
 
-    auto* data = new ATTTest::ToolData{};
-
     // create configure data
-    static auto cfg =
-        rocprofiler_tool_configure_result_t{sizeof(rocprofiler_tool_configure_result_t),
-                                            &ATTTest::Single::tool_init,
-                                            &ATTTest::Single::tool_fini,
-                                            reinterpret_cast<void*>(data)};
+    static auto cfg = rocprofiler_tool_configure_result_t{
+        sizeof(rocprofiler_tool_configure_result_t),
+        &ATTTest::Single::tool_init,
+        &ATTTest::Single::tool_fini,
+        reinterpret_cast<void*>(new Callbacks::ToolData{"att_single_test/"})};
 
     // return pointer to configure data
     return &cfg;

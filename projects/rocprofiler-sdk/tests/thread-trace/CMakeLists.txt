@@ -108,7 +108,6 @@ set_source_files_properties(kernel_branch.cpp PROPERTIES COMPILE_FLAGS "-g -O2")
 set_source_files_properties(kernel_branch.cpp PROPERTIES LANGUAGE HIP)
 set_source_files_properties(kernel_lds.cpp PROPERTIES COMPILE_FLAGS "-g -O2")
 set_source_files_properties(kernel_lds.cpp PROPERTIES LANGUAGE HIP)
-set_source_files_properties(agent_test.cpp PROPERTIES LANGUAGE HIP)
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 
 # Single dispatch test
@@ -117,7 +116,7 @@ target_sources(
     thread-trace-api-single-test PRIVATE main.cpp trace_callbacks.cpp single_dispatch.cpp
                                          kernel_branch.cpp kernel_lds.cpp)
 target_link_libraries(thread-trace-api-single-test
-                      PRIVATE rocprofiler-sdk::rocprofiler-sdk amd_comgr dw)
+                      PRIVATE rocprofiler-sdk::rocprofiler-sdk)
 
 add_test(NAME thread-trace-api-single-test
          COMMAND $<TARGET_FILE:thread-trace-api-single-test>)
@@ -133,8 +132,8 @@ add_executable(thread-trace-api-multi-test)
 target_sources(
     thread-trace-api-multi-test PRIVATE main.cpp trace_callbacks.cpp multi_dispatch.cpp
                                         kernel_branch.cpp kernel_lds.cpp)
-target_link_libraries(thread-trace-api-multi-test PRIVATE rocprofiler-sdk::rocprofiler-sdk
-                                                          amd_comgr dw)
+target_link_libraries(thread-trace-api-multi-test
+                      PRIVATE rocprofiler-sdk::rocprofiler-sdk)
 
 add_test(NAME thread-trace-api-multi-test
          COMMAND $<TARGET_FILE:thread-trace-api-multi-test>)
@@ -147,8 +146,8 @@ set_tests_properties(
 
 # Agent profiling test
 add_executable(thread-trace-api-agent-test)
-target_sources(thread-trace-api-agent-test PRIVATE agent_test.cpp)
-
+target_sources(thread-trace-api-agent-test PRIVATE main.cpp trace_callbacks.cpp agent.cpp
+                                                   kernel_branch.cpp kernel_lds.cpp)
 target_link_libraries(thread-trace-api-agent-test
                       PRIVATE rocprofiler-sdk::rocprofiler-sdk)
 

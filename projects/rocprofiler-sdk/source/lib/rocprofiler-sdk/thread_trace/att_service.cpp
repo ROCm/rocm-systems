@@ -47,16 +47,16 @@ rocprofiler_configure_dispatch_thread_trace_service(
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
 
     auto* ctx = rocprofiler::context::get_mutable_registered_context(context_id);
-    if(!ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED;
+    if(!ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
     if(ctx->dispatch_thread_trace) return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED;
     if(ctx->agent_thread_trace) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
 
     auto pack = rocprofiler::thread_trace::thread_trace_parameter_pack{};
 
-    pack.context_id        = context_id;
-    pack.dispatch_cb_fn    = dispatch_callback;
-    pack.shader_cb_fn      = shader_callback;
-    pack.callback_userdata = callback_userdata;
+    pack.context_id            = context_id;
+    pack.dispatch_cb_fn        = dispatch_callback;
+    pack.shader_cb_fn          = shader_callback;
+    pack.callback_userdata.ptr = callback_userdata;
 
     if(pack.dispatch_cb_fn == nullptr) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
@@ -102,13 +102,13 @@ rocprofiler_configure_agent_thread_trace_service(
     size_t                                 num_parameters,
     rocprofiler_agent_id_t                 agent,
     rocprofiler_att_shader_data_callback_t shader_callback,
-    void*                                  callback_userdata)
+    rocprofiler_user_data_t                userdata)
 {
     if(rocprofiler::registration::get_init_status() > -1)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
 
     auto* ctx = rocprofiler::context::get_mutable_registered_context(context_id);
-    if(!ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED;
+    if(!ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
     if(ctx->dispatch_thread_trace) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
 
     if(!ctx->agent_thread_trace) ctx->agent_thread_trace = std::make_unique<AgentThreadTracer>();
@@ -117,7 +117,7 @@ rocprofiler_configure_agent_thread_trace_service(
 
     pack.context_id        = context_id;
     pack.shader_cb_fn      = shader_callback;
-    pack.callback_userdata = callback_userdata;
+    pack.callback_userdata = userdata;
 
     auto id_map = rocprofiler::counters::getPerfCountersIdMap();
     for(size_t p = 0; p < num_parameters; p++)

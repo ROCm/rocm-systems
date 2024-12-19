@@ -28,3 +28,6 @@
 [submodule "external/yaml-cpp"]
 	path = external/yaml-cpp
 	url = https://github.com/jbeder/yaml-cpp.git
+[submodule "external/json"]
+	path = external/json
+	url = https://github.com/nlohmann/json.git

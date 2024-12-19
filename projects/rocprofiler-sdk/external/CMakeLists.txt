@@ -209,3 +209,17 @@ endif()
 
 # OTF2
 add_subdirectory(otf2)
+
+rocprofiler_checkout_git_submodule(
+    RECURSIVE
+    RELATIVE_PATH external/json
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    REPO_URL https://github.com/nlohmann/json.git
+    REPO_BRANCH "develop")
+
+add_subdirectory(json)
+
+# target_link_libraries(rocprofiler-sdk-json INTERFACE $<BUILD_INTERFACE:json::json>)
+target_include_directories(
+    rocprofiler-sdk-json SYSTEM
+    INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/json/include>)

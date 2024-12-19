@@ -45,15 +45,23 @@ typedef enum
 
 /**
  * @brief Callback to be triggered every kernel dispatch, indicating to start and/or stop ATT
+ * @param [in] agent_id agent_id.
+ * @param [in] queue_id queue_id.
+ * @param [in] correlation_id internal correlation id.
+ * @param [in] kernel_id kernel_id.
+ * @param [in] dispatch_id dispatch_id.
+ * @param [in] userdata_config Userdata passed back from
+ * rocprofiler_configure_dispatch_thread_trace_service.
+ * @param [out] userdata_shader Userdata to be passed in shader_callback
  */
 typedef rocprofiler_att_control_flags_t (*rocprofiler_att_dispatch_callback_t)(
+    rocprofiler_agent_id_t       agent_id,
     rocprofiler_queue_id_t       queue_id,
-    const rocprofiler_agent_t*   agent,
     rocprofiler_correlation_id_t correlation_id,
     rocprofiler_kernel_id_t      kernel_id,
     rocprofiler_dispatch_id_t    dispatch_id,
-    rocprofiler_user_data_t*     userdata_shader,
-    void*                        userdata_config);
+    void*                        userdata_config,
+    rocprofiler_user_data_t*     userdata_shader);
 
 /**
  * @brief Enables the advanced thread trace service for dispatch-based tracing.
@@ -64,7 +72,14 @@ typedef rocprofiler_att_control_flags_t (*rocprofiler_att_dispatch_callback_t)(
  * @param [in] num_parameters Number of parameters. Zero is allowed.
  * @param [in] dispatch_callback Control fn which decides when ATT starts/stop collecting.
  * @param [in] shader_callback Callback fn where the collected data will be sent to.
- * @param [in] callback_userdata Passed back to user.
+ * @param [in] callback_userdata Passed back to user in dispatch_callback.
+ * @return ::rocprofiler_status_t
+ * @retval ROCPROFILER_STATUS_SUCCESS on success
+ * @retval ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED for configuration locked
+ * @retval ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID for conflicting configurations in the same ctx
+ * @retval ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND for invalid context id
+ * @retval ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT for invalid rocprofiler_att_parameter_t
+ * @retval ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED if already configured
  */
 rocprofiler_status_t
 rocprofiler_configure_dispatch_thread_trace_service(

@@ -48,7 +48,13 @@ ROCPROFILER_EXTERN_C_INIT
  * @param [in] num_parameters Number of parameters. Zero is allowed.
  * @param [in] agent_id agent to configure profiling on.
  * @param [in] shader_callback Callback fn where the collected data will be sent to.
- * @param [in] callback_userdata Passed back to user.
+ * @param [in] callback_userdata Passed back to user in shader_callback.
+ * @return ::rocprofiler_status_t
+ * @retval ROCPROFILER_STATUS_SUCCESS on success
+ * @retval ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED for configuration locked
+ * @retval ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID for conflicting configurations in the same ctx
+ * @retval ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND for invalid context id
+ * @retval ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT for invalid rocprofiler_att_parameter_t
  */
 rocprofiler_status_t
 rocprofiler_configure_agent_thread_trace_service(
@@ -57,7 +63,7 @@ rocprofiler_configure_agent_thread_trace_service(
     size_t                                 num_parameters,
     rocprofiler_agent_id_t                 agent_id,
     rocprofiler_att_shader_data_callback_t shader_callback,
-    void*                                  callback_userdata) ROCPROFILER_API;
+    rocprofiler_user_data_t                callback_userdata) ROCPROFILER_API;
 
 /** @} */
 

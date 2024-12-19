@@ -61,8 +61,9 @@ constexpr uint64_t MAX_BUFFER_SIZE = std::numeric_limits<int32_t>::max();  // aq
 
 struct cbdata_t
 {
+    rocprofiler_agent_id_t                 agent;
     rocprofiler_att_shader_data_callback_t cb_fn;
-    const rocprofiler_user_data_t*         dispatch_userdata;
+    const rocprofiler_user_data_t*         userdata;
 };
 
 common::Synchronized<std::optional<int64_t>> client;
@@ -238,7 +239,7 @@ thread_trace_callback(uint32_t shader, void* buffer, uint64_t size, void* callba
 {
     auto& cb_data = *static_cast<cbdata_t*>(callback_data);
 
-    cb_data.cb_fn(shader, buffer, size, *cb_data.dispatch_userdata);
+    cb_data.cb_fn(cb_data.agent, shader, buffer, size, *cb_data.userdata);
     return HSA_STATUS_SUCCESS;
 }
 
@@ -247,8 +248,9 @@ ThreadTracerQueue::iterate_data(aqlprofile_handle_t handle, rocprofiler_user_dat
 {
     cbdata_t cb_dt{};
 
-    cb_dt.cb_fn             = params.shader_cb_fn;
-    cb_dt.dispatch_userdata = &data;
+    cb_dt.agent    = agent_id;
+    cb_dt.cb_fn    = params.shader_cb_fn;
+    cb_dt.userdata = &data;
 
     auto status = aqlprofile_att_iterate_data(handle, thread_trace_callback, &cb_dt);
     CHECK_HSA(status, "Failed to iterate ATT data");
@@ -342,13 +344,13 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
             });
     };
 
-    auto control_flags = params.dispatch_cb_fn(queue.get_id(),
-                                               queue.get_agent().get_rocp_agent(),
+    auto control_flags = params.dispatch_cb_fn(queue.get_agent().get_rocp_agent()->id,
+                                               queue.get_id(),
                                                rocprof_corr_id,
                                                kernel_id,
                                                dispatch_id,
-                                               user_data,
-                                               params.callback_userdata);
+                                               params.callback_userdata.ptr,
+                                               user_data);
 
     if(control_flags == ROCPROFILER_ATT_CONTROL_NONE)
     {
@@ -514,6 +516,7 @@ AgentThreadTracer::start_context()
 void
 AgentThreadTracer::stop_context()
 {
+    using wait_t = std::tuple<ThreadTracerQueue*, aqlprofile_handle_t, std::unique_ptr<Signal>>;
     std::unique_lock<std::mutex> lk(agent_mut);
 
     if(tracers.empty())
@@ -522,10 +525,9 @@ AgentThreadTracer::stop_context()
         return;
     }
 
-    std::vector<std::tuple<ThreadTracerQueue*, aqlprofile_handle_t, std::unique_ptr<Signal>>>
-        wait_list{};
+    std::vector<wait_t> wait_list{};
 
-    for(auto& [id, tracer] : tracers)
+    for(auto& [_, tracer] : tracers)
     {
         auto packet = tracer->get_control(false);
         packet->populate_after();
@@ -537,8 +539,7 @@ AgentThreadTracer::stop_context()
     for(auto& [tracer, handle, signal] : wait_list)
     {
         signal->WaitOn();
-        rocprofiler_user_data_t userdata{.ptr = tracer->params.callback_userdata};
-        tracer->iterate_data(handle, userdata);
+        tracer->iterate_data(handle, tracer->params.callback_userdata);
     }
 }
 

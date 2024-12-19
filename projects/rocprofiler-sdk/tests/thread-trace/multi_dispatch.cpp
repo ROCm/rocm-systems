@@ -25,22 +25,7 @@
 #    undef NDEBUG
 #endif
 
-#include <rocprofiler-sdk/amd_detail/thread_trace.h>
-#include <rocprofiler-sdk/registration.h>
-#include <rocprofiler-sdk/rocprofiler.h>
-#include "common.hpp"
-
-#include <atomic>
-#include <cassert>
-#include <cstdint>
-#include <cstdlib>
-#include <iostream>
-#include <map>
-#include <mutex>
-#include <sstream>
-#include <string>
-#include <string_view>
-#include <vector>
+#include "trace_callbacks.hpp"
 
 constexpr double WAVE_RATIO_TOLERANCE = 0.05;
 constexpr size_t NUM_KERNELS          = 5;
@@ -52,13 +37,13 @@ namespace Multi
 rocprofiler_client_id_t* client_id = nullptr;
 
 rocprofiler_att_control_flags_t
-dispatch_callback(rocprofiler_queue_id_t /* queue_id  */,
-                  const rocprofiler_agent_t* /* agent  */,
+dispatch_callback(rocprofiler_agent_id_t /* agent */,
+                  rocprofiler_queue_id_t /* queue_id  */,
                   rocprofiler_correlation_id_t /* correlation_id  */,
                   rocprofiler_kernel_id_t /* kernel_id */,
                   rocprofiler_dispatch_id_t /* dispatch_id */,
-                  rocprofiler_user_data_t* dispatch_userdata,
-                  void*                    userdata)
+                  void*                    userdata,
+                  rocprofiler_user_data_t* dispatch_userdata)
 {
     static std::atomic<size_t> count{0};
     if(count.fetch_add(1) > NUM_KERNELS) return ROCPROFILER_ATT_CONTROL_NONE;
@@ -72,7 +57,6 @@ dispatch_callback(rocprofiler_queue_id_t /* queue_id  */,
 int
 tool_init(rocprofiler_client_finalize_t /* fini_func */, void* tool_data)
 {
-    Callbacks::callbacks_init();
     static rocprofiler_context_id_t client_ctx = {0};
 
     ROCPROFILER_CALL(rocprofiler_create_context(&client_ctx), "context creation");
@@ -117,25 +101,8 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* tool_data)
 void
 tool_fini(void* tool_data)
 {
-    assert(tool_data && "tool_fini callback passed null!");
-    ToolData& tool = *reinterpret_cast<ToolData*>(tool_data);
-
-    double wave_started     = (double) tool.waves_started.load();
-    double wave_event_ratio = wave_started / (wave_started + (double) tool.waves_ended.load());
-    assert(wave_event_ratio > 0.5 - WAVE_RATIO_TOLERANCE);
-    assert(wave_event_ratio < 0.5 + WAVE_RATIO_TOLERANCE);
-
-    // Expected: Two kernels in  kernel_run.cpp
-    assert(tool.wave_start_locations.size() >= 2);
-
-    // Expected at least one known code object ID
-    bool bHasMarkerId = false;
-    for(auto& pc : tool.wave_start_locations)
-        bHasMarkerId |= pc.marker_id != 0;
-
-    assert(bHasMarkerId);
-
-    Callbacks::callbacks_fini();
+    Callbacks::finalize_json(tool_data);
+    delete static_cast<Callbacks::ToolData*>(tool_data);
 }
 
 }  // namespace Multi
@@ -156,14 +123,12 @@ rocprofiler_configure(uint32_t /* version */,
     // store client info
     ATTTest::Multi::client_id = id;
 
-    auto* data = new ATTTest::ToolData{};
-
     // create configure data
-    static auto cfg =
-        rocprofiler_tool_configure_result_t{sizeof(rocprofiler_tool_configure_result_t),
-                                            &ATTTest::Multi::tool_init,
-                                            &ATTTest::Multi::tool_fini,
-                                            reinterpret_cast<void*>(data)};
+    static auto cfg = rocprofiler_tool_configure_result_t{
+        sizeof(rocprofiler_tool_configure_result_t),
+        &ATTTest::Multi::tool_init,
+        &ATTTest::Multi::tool_fini,
+        reinterpret_cast<void*>(new Callbacks::ToolData{"att_multi_test/"})};
 
     // return pointer to configure data
     return &cfg;
