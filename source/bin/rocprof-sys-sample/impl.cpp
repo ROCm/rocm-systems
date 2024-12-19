@@ -44,14 +44,6 @@
 #include <unistd.h>
 #include <vector>
 
-#if !defined(ROCPROFSYS_USE_ROCTRACER)
-#    define ROCPROFSYS_USE_ROCTRACER 0
-#endif
-
-#if !defined(ROCPROFSYS_USE_ROCPROFILER)
-#    define ROCPROFSYS_USE_ROCPROFILER 0
-#endif
-
 namespace color = tim::log::color;
 using namespace timemory::join;
 using tim::get_env;
@@ -139,17 +131,6 @@ get_initial_environment()
     auto _mode = get_env<std::string>("ROCPROFSYS_MODE", "sampling", false);
 
     update_env(_env, "ROCPROFSYS_USE_SAMPLING", (_mode != "causal"));
-
-#if defined(ROCPROFSYS_USE_ROCTRACER) || defined(ROCPROFSYS_USE_ROCPROFILER)
-    update_env(_env, "HSA_TOOLS_LIB", _dl_libpath);
-    if(!getenv("HSA_TOOLS_REPORT_LOAD_FAILURE"))
-        update_env(_env, "HSA_TOOLS_REPORT_LOAD_FAILURE", "1");
-#endif
-
-#if defined(ROCPROFSYS_USE_ROCPROFILER)
-    update_env(_env, "ROCP_TOOL_LIB", _omni_libpath);
-    if(!getenv("ROCP_HSA_INTERCEPT")) update_env(_env, "ROCP_HSA_INTERCEPT", "1");
-#endif
 
 #if defined(ROCPROFSYS_USE_OMPT)
     if(!getenv("OMP_TOOL_LIBRARIES"))
@@ -356,14 +337,6 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
 %{INDENT}%  Values:
 %{INDENT}%    0     avoid triggering the bug, potentially at the cost of reduced performance
 %{INDENT}%    1     do not modify how ROCm is notified about kernel completion)";
-
-    auto _realtime_reqs = (get_env("HSA_ENABLE_INTERRUPT", std::string{}, false).empty())
-                              ? std::vector<std::string>{ "hsa-interrupt" }
-                              : std::vector<std::string>{};
-
-#if ROCPROFSYS_USE_ROCTRACER == 0 && ROCPROFSYS_USE_ROCPROFILER == 0
-    _realtime_reqs.clear();
-#endif
 
     const auto* _trace_policy_desc =
         R"(Policy for new data when the buffer size limit is reached:
@@ -720,7 +693,6 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
 
     parser.add_argument({ "--realtime" }, _realtime_desc)
         .min_count(0)
-        .required(std::move(_realtime_reqs))
         .action([&](parser_t& p) {
             auto _v = p.get<std::deque<std::string>>("realtime");
             update_env(_env, "ROCPROFSYS_SAMPLING_REALTIME", true);
@@ -741,10 +713,20 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             }
         });
 
-    std::set<std::string> _backend_choices = { "all",         "kokkosp",     "mpip",
-                                               "ompt",        "rcclp",       "rocm-smi",
-                                               "roctracer",   "rocprofiler", "roctx",
-                                               "mutex-locks", "spin-locks",  "rw-locks" };
+    std::set<std::string> _backend_choices = { "all",
+                                               "kokkosp",
+                                               "mpip",
+                                               "ompt",
+                                               "rcclp",
+                                               "rocm-smi",
+                                               "roctracer",
+                                               "rocprofiler",
+                                               "roctx",
+                                               "mutex-locks",
+                                               "spin-locks",
+                                               "rw-locks",
+                                               "rocprofiler-sdk",
+                                               "rocm" };
 
 #if !defined(ROCPROFSYS_USE_MPI) && !defined(ROCPROFSYS_USE_MPI_HEADERS)
     _backend_choices.erase("mpip");
@@ -758,17 +740,10 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
     _backend_choices.erase("rcclp");
 #endif
 
-#if !defined(ROCPROFSYS_USE_ROCM_SMI)
+#if !defined(ROCPROFSYS_USE_ROCM)
+    _backend_choices.erase("rocm");
     _backend_choices.erase("rocm-smi");
-#endif
-
-#if !defined(ROCPROFSYS_USE_ROCTRACER)
-    _backend_choices.erase("roctracer");
-    _backend_choices.erase("roctx");
-#endif
-
-#if !defined(ROCPROFSYS_USE_ROCPROFILER)
-    _backend_choices.erase("rocprofiler");
+    _backend_choices.erase("rocprofiler-sdk");
 #endif
 
     parser.start_group("BACKEND OPTIONS",
@@ -784,11 +759,9 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             _update("ROCPROFSYS_USE_KOKKOSP", _v.count("kokkosp") > 0);
             _update("ROCPROFSYS_USE_MPIP", _v.count("mpip") > 0);
             _update("ROCPROFSYS_USE_OMPT", _v.count("ompt") > 0);
+            _update("ROCPROFSYS_USE_ROCM", _v.count("rocm") > 0);
             _update("ROCPROFSYS_USE_RCCLP", _v.count("rcclp") > 0);
-            _update("ROCPROFSYS_USE_ROCTX", _v.count("roctx") > 0);
             _update("ROCPROFSYS_USE_ROCM_SMI", _v.count("rocm-smi") > 0);
-            _update("ROCPROFSYS_USE_ROCTRACER", _v.count("roctracer") > 0);
-            _update("ROCPROFSYS_USE_ROCPROFILER", _v.count("rocprofiler") > 0);
             _update("ROCPROFSYS_TRACE_THREAD_LOCKS", _v.count("mutex-locks") > 0);
             _update("ROCPROFSYS_TRACE_THREAD_RW_LOCKS", _v.count("rw-locks") > 0);
             _update("ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS", _v.count("spin-locks") > 0);
@@ -810,27 +783,18 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             _update("ROCPROFSYS_USE_KOKKOSP", _v.count("kokkosp") > 0);
             _update("ROCPROFSYS_USE_MPIP", _v.count("mpip") > 0);
             _update("ROCPROFSYS_USE_OMPT", _v.count("ompt") > 0);
+            _update("ROCPROFSYS_USE_ROCM", _v.count("rocm") > 0);
             _update("ROCPROFSYS_USE_RCCLP", _v.count("rcclp") > 0);
-            _update("ROCPROFSYS_USE_ROCTX", _v.count("roctx") > 0);
             _update("ROCPROFSYS_USE_ROCM_SMI", _v.count("rocm-smi") > 0);
-            _update("ROCPROFSYS_USE_ROCTRACER", _v.count("roctracer") > 0);
-            _update("ROCPROFSYS_USE_ROCPROFILER", _v.count("rocprofiler") > 0);
             _update("ROCPROFSYS_TRACE_THREAD_LOCKS", _v.count("mutex-locks") > 0);
             _update("ROCPROFSYS_TRACE_THREAD_RW_LOCKS", _v.count("rw-locks") > 0);
             _update("ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS", _v.count("spin-locks") > 0);
 
-            if(_v.count("all") > 0 ||
-               (_v.count("roctracer") > 0 && _v.count("rocprofiler") > 0))
-            {
-                remove_env(_env, "HSA_TOOLS_LIB");
-                remove_env(_env, "HSA_TOOLS_REPORT_LOAD_FAILURE");
-            }
-
-            if(_v.count("all") > 0 || _v.count("rocprofiler") > 0)
-            {
-                remove_env(_env, "ROCP_TOOL_LIB");
-                remove_env(_env, "ROCP_HSA_INTERCEPT");
-            }
+            // if(_v.count("all") > 0 || _v.count("rocprofiler") > 0)
+            // {
+            //     remove_env(_env, "ROCP_TOOL_LIB");
+            //     remove_env(_env, "ROCP_HSA_INTERCEPT");
+            // }
 
             if(_v.count("all") > 0 || _v.count("ompt") > 0)
                 remove_env(_env, "OMP_TOOL_LIBRARIES");
@@ -849,18 +813,6 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
                 join(array_config{ "," }, p.get<std::vector<std::string>>("cpu-events"));
             update_env(_env, "ROCPROFSYS_PAPI_EVENTS", _events);
         });
-
-#if defined(ROCPROFSYS_USE_ROCPROFILER)
-    parser
-        .add_argument({ "-G", "--gpu-events" },
-                      "Set the GPU hardware counter events to record (ref: "
-                      "`rocprof-sys-avail -H -c GPU`)")
-        .action([&](parser_t& p) {
-            auto _events =
-                join(array_config{ "," }, p.get<std::vector<std::string>>("gpu-events"));
-            update_env(_env, "ROCPROFSYS_ROCM_EVENTS", _events);
-        });
-#endif
 
     parser.start_group("MISCELLANEOUS OPTIONS", "");
     parser

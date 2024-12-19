@@ -33,7 +33,6 @@
 #include "library/components/mpi_gotcha.hpp"
 #include "library/components/numa_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
-#include "library/components/roctracer.hpp"
 #include "library/thread_data.hpp"
 
 #include <timemory/backends/threading.hpp>

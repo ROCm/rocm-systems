@@ -100,7 +100,7 @@ jobs:
           chmod +x /opt/trace_processor/bin/trace_processor_shell &&
           python3 -m pip install --upgrade pip &&
           python3 -m pip install --upgrade numpy perfetto dataclasses &&
-          python3 -m pip install 'cmake==3.18.4' &&
+          python3 -m pip install 'cmake==3.21' &&
           for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install --upgrade numpy perfetto dataclasses; done &&
           apt-get -y --purge autoremove &&
           apt-get -y clean &&
@@ -145,7 +145,7 @@ jobs:
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems
           -DROCPROFSYS_BUILD_TESTING=ON
           -DROCPROFSYS_USE_MPI=OFF
-          -DROCPROFSYS_USE_HIP=OFF
+          -DROCPROFSYS_USE_ROCM=OFF
           -DROCPROFSYS_USE_OMPT=OFF
           -DROCPROFSYS_USE_PAPI=OFF
           -DROCPROFSYS_USE_PYTHON=${{ matrix.python }}
@@ -245,16 +245,10 @@ jobs:
       fail-fast: false
       matrix:
         compiler: ['g++']
-        rocm-version: ['6.2']
+        rocm-version: ['6.3']
         mpi-headers: ['OFF']
         build-jobs: ['3']
-        ctest-exclude: ['-LE "mpi-example|transpose"']
-        include:
-          - compiler: 'g++'
-            rocm-version: 'latest'
-            mpi-headers: 'ON'
-            build-jobs: '2'
-            ctest-exclude: '-LE transpose'
+        ctest-exclude: ['-LE "transpose"']
 
     env:
       BUILD_TYPE: MinSizeRel
@@ -282,7 +276,7 @@ jobs:
           chmod +x /opt/trace_processor/bin/trace_processor_shell &&
           python3 -m pip install --upgrade pip &&
           python3 -m pip install --upgrade numpy perfetto dataclasses &&
-          python3 -m pip install 'cmake==3.18.4' &&
+          python3 -m pip install 'cmake==3.21' &&
           for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install --upgrade numpy perfetto dataclasses; done &&
           apt-get -y --purge autoremove &&
           apt-get -y clean &&
@@ -336,7 +330,7 @@ jobs:
           -DROCPROFSYS_BUILD_EXTRA_OPTIMIZATIONS=OFF
           -DROCPROFSYS_BUILD_LTO=OFF
           -DROCPROFSYS_USE_MPI=OFF
-          -DROCPROFSYS_USE_HIP=ON
+          -DROCPROFSYS_USE_ROCM=ON
           -DROCPROFSYS_MAX_THREADS=64
           -DROCPROFSYS_USE_PAPI=OFF
           -DROCPROFSYS_USE_OMPT=OFF
@@ -440,7 +434,7 @@ jobs:
           chmod +x /opt/trace_processor/bin/trace_processor_shell &&
           python3 -m pip install --upgrade pip &&
           python3 -m pip install --upgrade numpy perfetto dataclasses &&
-          python3 -m pip install 'cmake==3.18.4' &&
+          python3 -m pip install 'cmake==3.21' &&
           sudo apt-get -y --purge autoremove &&
           sudo apt-get -y clean
 
@@ -477,7 +471,7 @@ jobs:
           -DROCPROFSYS_BUILD_TESTING=ON
           -DROCPROFSYS_BUILD_DYNINST=ON
           -DROCPROFSYS_USE_MPI=${USE_MPI}
-          -DROCPROFSYS_USE_HIP=OFF
+          -DROCPROFSYS_USE_ROCM=OFF
           -DROCPROFSYS_USE_PYTHON=${{ matrix.python }}
           -DROCPROFSYS_USE_OMPT=${{ matrix.ompt }}
           -DROCPROFSYS_USE_PAPI=${{ matrix.papi }}
@@ -593,7 +587,7 @@ jobs:
           chmod +x /opt/trace_processor/bin/trace_processor_shell &&
           python3 -m pip install --upgrade pip &&
           python3 -m pip install --upgrade numpy perfetto dataclasses &&
-          python3 -m pip install 'cmake==3.18.4' &&
+          python3 -m pip install 'cmake==3.21' &&
           for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install --upgrade numpy perfetto dataclasses; done &&
           apt-get -y --purge autoremove &&
           apt-get -y clean &&
@@ -625,7 +619,7 @@ jobs:
           -DROCPROFSYS_USE_PYTHON=ON
           -DROCPROFSYS_USE_OMPT=ON
           -DROCPROFSYS_USE_PAPI=ON
-          -DROCPROFSYS_USE_HIP=OFF
+          -DROCPROFSYS_USE_ROCM=OFF
           -DROCPROFSYS_USE_RCCL=OFF
           -DROCPROFSYS_MAX_THREADS=64
           -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl"

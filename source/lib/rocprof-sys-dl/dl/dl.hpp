@@ -53,12 +53,8 @@
 #    define ROCPROFSYS_USE_OMPT 0
 #endif
 
-#if !defined(ROCPROFSYS_USE_ROCTRACER)
-#    define ROCPROFSYS_USE_ROCTRACER 0
-#endif
-
-#if !defined(ROCPROFSYS_USE_ROCPROFILER)
-#    define ROCPROFSYS_USE_ROCPROFILER 0
+#if !defined(ROCPROFSYS_USE_ROCM)
+#    define ROCPROFSYS_USE_ROCM 0
 #endif
 
 //--------------------------------------------------------------------------------------//
@@ -177,20 +173,12 @@ extern "C"
                                               const char*) ROCPROFSYS_PUBLIC_API;
 #    endif
 
-#    if ROCPROFSYS_USE_ROCTRACER > 0
-    // HSA
-    struct HsaApiTable;
-    bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
-                const char* const* failed_tool_names) ROCPROFSYS_PUBLIC_API;
-    void OnUnload() ROCPROFSYS_PUBLIC_API;
+#    if ROCPROFSYS_USE_ROCM > 0
+    struct rocprofiler_tool_configure_result_t;
+    struct rocprofiler_client_id_t;
 #    endif
 
-#    if ROCPROFSYS_USE_ROCPROFILER > 0
-    // ROCP
-    void OnLoadToolProp(void* settings) ROCPROFSYS_PUBLIC_API;
-    void OnUnloadTool() ROCPROFSYS_PUBLIC_API;
-#    endif
-#endif
+#endif  // ROCPROFSYS_DL_SOURCE
 }
 
 namespace rocprofsys

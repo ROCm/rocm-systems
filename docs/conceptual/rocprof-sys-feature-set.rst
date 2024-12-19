@@ -58,6 +58,7 @@ GPU metrics
   * Power usage
   * Temperature
   * Utilization
+  * VCN activity
 
 CPU metrics
 ========================================

@@ -23,8 +23,7 @@ set(library_headers
     ${CMAKE_CURRENT_LIST_DIR}/rcclp.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocm.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocm_smi.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/rocprofiler.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/roctracer.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.hpp
     ${CMAKE_CURRENT_LIST_DIR}/runtime.hpp
     ${CMAKE_CURRENT_LIST_DIR}/sampling.hpp
     ${CMAKE_CURRENT_LIST_DIR}/thread_data.hpp
@@ -35,37 +34,23 @@ set(library_headers
 target_sources(rocprofiler-systems-object-library PRIVATE ${library_sources}
                                                           ${library_headers})
 
-if(ROCPROFSYS_USE_ROCTRACER OR ROCPROFSYS_USE_ROCPROFILER)
-    target_sources(rocprofiler-systems-object-library
-                   PRIVATE ${CMAKE_CURRENT_LIST_DIR}/rocm.cpp)
-endif()
-
-if(ROCPROFSYS_USE_ROCTRACER)
-    target_sources(rocprofiler-systems-object-library
-                   PRIVATE ${CMAKE_CURRENT_LIST_DIR}/roctracer.cpp)
-endif()
-
 if(ROCPROFSYS_USE_RCCL)
     target_sources(rocprofiler-systems-object-library
                    PRIVATE ${CMAKE_CURRENT_LIST_DIR}/rcclp.cpp)
 endif()
 
-if(ROCPROFSYS_USE_ROCPROFILER)
+if(ROCPROFSYS_USE_ROCM)
     target_sources(
         rocprofiler-systems-object-library
-        PRIVATE ${CMAKE_CURRENT_LIST_DIR}/rocprofiler.cpp
-                ${CMAKE_CURRENT_LIST_DIR}/rocprofiler.hpp)
-endif()
-
-if(ROCPROFSYS_USE_ROCM_SMI)
-    target_sources(rocprofiler-systems-object-library
-                   PRIVATE ${CMAKE_CURRENT_LIST_DIR}/rocm_smi.cpp)
+        PRIVATE ${CMAKE_CURRENT_LIST_DIR}/rocm.cpp
+                ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.cpp
+                ${CMAKE_CURRENT_LIST_DIR}/rocm_smi.cpp)
+    add_subdirectory(rocprofiler-sdk)
 endif()
 
 add_subdirectory(causal)
 add_subdirectory(components)
 add_subdirectory(coverage)
-add_subdirectory(rocm)
 add_subdirectory(tracing)
 
 set(ndebug_sources

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,49 +22,49 @@
 
 #pragma once
 
-#include "core/defines.hpp"
 #include "core/timemory.hpp"
 
-#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
-#    include <rocprofiler-sdk/registration.h>
+#if defined(ROCPROFSYS_USE_ROCM)
+#    include <rocprofiler-sdk/fwd.h>
 #    include <rocprofiler-sdk/rocprofiler.h>
 #endif
 
 #include <cstdint>
-#include <mutex>
+#include <memory>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace rocprofsys
 {
-namespace rocm
+namespace rocprofiler_sdk
 {
-using hardware_counter_info = ::tim::hardware_counters::info;
+void
+config_settings(const std::shared_ptr<settings>&);
 
-std::vector<hardware_counter_info>
-rocm_events();
+#if defined(ROCPROFSYS_USE_ROCM)
 
-#if !defined(ROCPROFSYS_USE_ROCM) || ROCPROFSYS_USE_ROCM == 0
-inline std::vector<hardware_counter_info>
-rocm_events()
-{
-    return std::vector<hardware_counter_info>();
-}
+std::unordered_set<rocprofiler_callback_tracing_kind_t>
+get_callback_domains();
+
+std::unordered_set<rocprofiler_buffer_tracing_kind_t>
+get_buffered_domains();
+
+std::vector<int32_t>
+get_operations(rocprofiler_callback_tracing_kind_t kindv);
+
+std::vector<int32_t>
+get_operations(rocprofiler_buffer_tracing_kind_t kindv);
+
+std::vector<std::string>
+get_rocm_events();
+
+std::unordered_set<int32_t>
+get_backtrace_operations(rocprofiler_callback_tracing_kind_t kindv);
+
+std::unordered_set<int32_t>
+get_backtrace_operations(rocprofiler_buffer_tracing_kind_t kindv);
+
 #endif
-}  // namespace rocm
+}  // namespace rocprofiler_sdk
 }  // namespace rocprofsys
-
-extern "C"
-{
-    struct rocprofiler_tool_configure_result_t;
-    struct rocprofiler_client_id_t;
-
-    using rocprofiler_configure_t =
-        rocprofiler_tool_configure_result_t* (*) (uint32_t    version,
-                                                  const char* runtime_version,
-                                                  uint32_t    priority,
-                                                  rocprofiler_client_id_t* client_id);
-
-    rocprofiler_tool_configure_result_t* rocprofiler_configure(
-        uint32_t version, const char* runtime_version, uint32_t priority,
-        rocprofiler_client_id_t* client_id) ROCPROFSYS_PUBLIC_API;
-}

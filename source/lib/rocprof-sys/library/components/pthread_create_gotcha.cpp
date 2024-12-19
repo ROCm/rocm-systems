@@ -28,7 +28,6 @@
 #include "core/utility.hpp"
 #include "library/causal/delay.hpp"
 #include "library/components/category_region.hpp"
-#include "library/components/roctracer.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
@@ -61,7 +60,7 @@ shutdown();
 
 namespace component
 {
-using bundle_t          = tim::lightweight_tuple<comp::wall_clock, comp::roctracer_data>;
+using bundle_t          = tim::lightweight_tuple<comp::wall_clock>;
 using category_region_t = tim::lightweight_tuple<category_region<category::pthread>>;
 
 namespace
@@ -82,7 +81,6 @@ inline void
 start_bundle(bundle_t& _bundle, int64_t _tid, Args&&... _args)
 {
     if(!get_use_timemory() && !get_use_perfetto()) return;
-    trait::runtime_enabled<comp::roctracer_data>::set(get_use_roctracer());
     ROCPROFSYS_BASIC_VERBOSE_F(3, "starting bundle '%s' in thread %li...\n",
                                _bundle.key().c_str(), _tid);
     if constexpr(sizeof...(Args) > 0)
@@ -619,5 +617,3 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
 }
 }  // namespace component
 }  // namespace rocprofsys
-
-TIMEMORY_INITIALIZE_STORAGE(component::roctracer_data)

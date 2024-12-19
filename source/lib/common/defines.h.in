@@ -42,10 +42,10 @@
 #define ROCPROFSYS_COMPILER_STRING  ROCPROFSYS_COMPILER_ID " v" ROCPROFSYS_COMPILER_VERSION
 
 #define ROCPROFSYS_DEFAULT_ROCM_PATH "@ROCmVersion_DIR@"
-#define ROCPROFSYS_HIP_VERSION_STRING "@ROCPROFSYS_HIP_VERSION@"
-#define ROCPROFSYS_HIP_VERSION_MAJOR @ROCPROFSYS_HIP_VERSION_MAJOR@
-#define ROCPROFSYS_HIP_VERSION_MINOR @ROCPROFSYS_HIP_VERSION_MINOR@
-#define ROCPROFSYS_HIP_VERSION_PATCH @ROCPROFSYS_HIP_VERSION_PATCH@
+#define ROCPROFSYS_ROCM_VERSION_STRING "@ROCPROFSYS_ROCM_VERSION@"
+#define ROCPROFSYS_ROCM_VERSION_MAJOR @ROCPROFSYS_ROCM_VERSION_MAJOR@
+#define ROCPROFSYS_ROCM_VERSION_MINOR @ROCPROFSYS_ROCM_VERSION_MINOR@
+#define ROCPROFSYS_ROCM_VERSION_PATCH @ROCPROFSYS_ROCM_VERSION_PATCH@
 
 // these can be set via defining the variable in CMake, e.g.:
 //      cmake -D ROCPROFSYS_CACHELINE_SIZE=N /path/to/source
@@ -63,15 +63,15 @@
     ((10000 * ROCPROFSYS_VERSION_MAJOR) + (100 * ROCPROFSYS_VERSION_MINOR) +             \
      ROCPROFSYS_VERSION_PATCH)
 
-#define ROCPROFSYS_HIP_VERSION                                                           \
-    ((10000 * ROCPROFSYS_HIP_VERSION_MAJOR) + (100 * ROCPROFSYS_HIP_VERSION_MINOR) +     \
-     ROCPROFSYS_HIP_VERSION_PATCH)
+#define ROCPROFSYS_ROCM_VERSION                                                          \
+    ((10000 * ROCPROFSYS_ROCM_VERSION_MAJOR) + (100 * ROCPROFSYS_ROCM_VERSION_MINOR) +   \
+     ROCPROFSYS_ROCM_VERSION_PATCH)
 
-#if ROCPROFSYS_HIP_VERSION_MAJOR > 0
-#    define ROCPROFSYS_HIP_VERSION_COMPAT_STRING                                         \
-        "v@ROCPROFSYS_HIP_VERSION_MAJOR@.@ROCPROFSYS_HIP_VERSION_MINOR@.x"
+#if ROCPROFSYS_ROCM_VERSION_MAJOR > 0
+#    define ROCPROFSYS_ROCM_VERSION_COMPAT_STRING                                        \
+        "v@ROCPROFSYS_ROCM_VERSION_MAJOR@.@ROCPROFSYS_ROCM_VERSION_MINOR@.x"
 #else
-#    define ROCPROFSYS_HIP_VERSION_COMPAT_STRING ""
+#    define ROCPROFSYS_ROCM_VERSION_COMPAT_STRING ""
 #endif
 
 // this should be passed to argparse::argument_parser::enable_version
@@ -83,7 +83,7 @@
         {                                                                                \
             { "", ROCPROFSYS_LIBRARY_ARCH }, { "compiler", ROCPROFSYS_COMPILER_STRING }, \
             {                                                                            \
-                "rocm", ROCPROFSYS_HIP_VERSION_COMPAT_STRING                             \
+                "rocm", ROCPROFSYS_ROCM_VERSION_COMPAT_STRING                            \
             }                                                                            \
         }
 #endif

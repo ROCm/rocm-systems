@@ -209,7 +209,7 @@ public:
     void push_back(Tp&& t);
 
     template <typename... Args>
-    void emplace_back(Args&&... args);
+    decltype(auto) emplace_back(Args&&... args);
 
     reference operator[](size_type i);
 
@@ -228,6 +228,14 @@ private:
 
     storage_type m_chunks;
 };
+
+template <typename Tp, size_t ChunkSizeV, size_t AlignN>
+template <typename... Args>
+decltype(auto)
+stable_vector<Tp, ChunkSizeV, AlignN>::emplace_back(Args&&... args)
+{
+    return last_chunk().emplace_back(std::forward<Args>(args)...);
+}
 
 template <typename Tp, size_t ChunkSizeV, size_t AlignN>
 stable_vector<Tp, ChunkSizeV, AlignN>::stable_vector(size_type count, const Tp& value)
@@ -330,14 +338,6 @@ void
 stable_vector<Tp, ChunkSizeV, AlignN>::push_back(Tp&& t)
 {
     last_chunk().push_back(std::move(t));
-}
-
-template <typename Tp, size_t ChunkSizeV, size_t AlignN>
-template <typename... Args>
-void
-stable_vector<Tp, ChunkSizeV, AlignN>::emplace_back(Args&&... args)
-{
-    last_chunk().emplace_back(std::forward<Args>(args)...);
 }
 
 template <typename Tp, size_t ChunkSizeV, size_t AlignN>

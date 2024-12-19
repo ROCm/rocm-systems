@@ -74,6 +74,15 @@ get_reserved_vector(size_t _n)
     return _v;
 }
 
+/// returns a vector with a preallocated buffer
+template <typename... Tp>
+inline decltype(auto)
+get_reserved_vector(std::vector<Tp...>&& _v, size_t _n)
+{
+    _v.reserve(_n);
+    return std::forward<std::vector<Tp...>>(_v);
+}
+
 template <typename Tp, size_t Offset>
 struct offset_index_sequence;
 

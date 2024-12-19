@@ -26,6 +26,7 @@
 //
 #include "api.hpp"
 #include "common/setup.hpp"
+#include "common/static_object.hpp"
 #include "core/categories.hpp"
 #include "core/components/fwd.hpp"
 #include "core/concepts.hpp"
@@ -46,13 +47,12 @@
 #include "library/components/mpi_gotcha.hpp"
 #include "library/components/numa_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
-#include "library/components/rocprofiler.hpp"
 #include "library/coverage.hpp"
 #include "library/ompt.hpp"
 #include "library/process_sampler.hpp"
 #include "library/ptl.hpp"
 #include "library/rcclp.hpp"
-#include "library/rocprofiler.hpp"
+#include "library/rocprofiler-sdk.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
@@ -399,10 +399,6 @@ rocprofsys_init_library_hidden()
         if(_debug_init) config::set_setting_value("ROCPROFSYS_DEBUG", _debug_value);
     } };
 
-    tim::trait::runtime_enabled<comp::roctracer>::set(get_use_roctracer());
-    tim::trait::runtime_enabled<comp::roctracer_data>::set(get_use_roctracer() &&
-                                                           get_use_timemory());
-
     ROCPROFSYS_CONDITIONAL_BASIC_PRINT_F(_debug_init, "\n");
 }
 
@@ -718,13 +714,6 @@ rocprofsys_finalize_hidden(void)
         }
     }
 
-    if(get_use_roctracer())
-    {
-        ROCPROFSYS_VERBOSE_F(1, "Flushing roctracer...\n");
-        // ensure that roctracer is flushed before setting the state to finalized
-        comp::roctracer::flush();
-    }
-
     set_state(State::Finalized);
 
     push_enable_sampling_on_child_threads(false);
@@ -785,6 +774,14 @@ rocprofsys_finalize_hidden(void)
         ompt::shutdown();
     }
 
+#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
+    // TODO: option for rocm
+    {
+        ROCPROFSYS_VERBOSE_F(1, "Shutting down ROCm...\n");
+        rocprofiler_sdk::shutdown();
+    }
+#endif
+
     ROCPROFSYS_DEBUG_F("Stopping and destroying instrumentation bundles...\n");
     for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
     {
@@ -833,24 +830,6 @@ rocprofsys_finalize_hidden(void)
     {
         ROCPROFSYS_VERBOSE_F(1, "Shutting down background sampler...\n");
         process_sampler::shutdown();
-    }
-
-    if(get_use_roctracer())
-    {
-        ROCPROFSYS_VERBOSE_F(1, "Shutting down roctracer...\n");
-        // ensure that threads running roctracer callbacks shutdown
-        comp::roctracer::shutdown();
-
-        // join extra thread(s) used by roctracer
-        ROCPROFSYS_VERBOSE_F(2, "Waiting on roctracer tasks...\n");
-        tasking::join();
-    }
-
-    if(get_use_rocprofiler())
-    {
-        ROCPROFSYS_VERBOSE_F(1, "Shutting down rocprofiler...\n");
-        rocprofiler::post_process();
-        rocprofiler::rocm_cleanup();
     }
 
     if(get_use_causal())
@@ -919,7 +898,7 @@ rocprofsys_finalize_hidden(void)
         process_sampler::post_process();
     }
 
-    // shutdown tasking before timemory is finalized, especially the roctracer thread-pool
+    // shutdown tasking before timemory is finalized
     ROCPROFSYS_VERBOSE_F(1, "Shutting down thread-pools...\n");
     tasking::shutdown();
 
@@ -991,6 +970,8 @@ rocprofsys_finalize_hidden(void)
     tim::signals::enable_signal_detection(
         { tim::signals::sys_signal::SegFault, tim::signals::sys_signal::Stop },
         [](int) {});
+
+    common::destroy_static_objects();
 }
 
 //======================================================================================//

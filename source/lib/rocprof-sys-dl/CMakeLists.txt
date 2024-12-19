@@ -25,7 +25,8 @@ target_include_directories(
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../rocprof-sys-user>
            $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../rocprof-sys>
-           $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+           $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    PRIVATE ${rocprofiler-sdk_INCLUDE_DIR})
 target_link_libraries(
     rocprofiler-systems-dl-library
     PUBLIC $<BUILD_INTERFACE:${dl_LIBRARY}>

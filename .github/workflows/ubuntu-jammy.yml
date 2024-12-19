@@ -75,22 +75,7 @@ jobs:
             static-libgcc: 'OFF'
             static-libstdcxx: 'OFF'
             build-dyninst: 'OFF'
-            rocm-version: '6.2'
-          - compiler: 'g++'
-            hip: 'ON'
-            mpi: 'OFF'
-            ompt: 'OFF'
-            papi: 'OFF'
-            python: 'ON'
-            lto: 'OFF'
-            strip: 'OFF'
-            hidden: 'ON'
-            build-type: 'Release'
-            mpi-headers: 'OFF'
-            static-libgcc: 'OFF'
-            static-libstdcxx: 'OFF'
-            build-dyninst: 'OFF'
-            rocm-version: 'latest'
+            rocm-version: '6.3'
 
     env:
       OMPI_ALLOW_RUN_AS_ROOT: 1
@@ -116,7 +101,7 @@ jobs:
             openmpi-bin python3-pip texinfo ${{ matrix.compiler }} &&
           python3 -m pip install --upgrade pip &&
           python3 -m pip install --upgrade numpy perfetto dataclasses &&
-          python3 -m pip install 'cmake==3.18.4' &&
+          python3 -m pip install 'cmake==3.21' &&
           for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install --upgrade numpy perfetto dataclasses; done
 
     - name: Install ROCm Packages
@@ -183,7 +168,7 @@ jobs:
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev
           -DROCPROFSYS_BUILD_TESTING=ON
           -DROCPROFSYS_USE_MPI=${{ matrix.mpi }}
-          -DROCPROFSYS_USE_HIP=${{ matrix.hip }}
+          -DROCPROFSYS_USE_ROCM=${{ matrix.hip }}
           -DROCPROFSYS_USE_OMPT=${{ matrix.ompt }}
           -DROCPROFSYS_USE_PAPI=${{ matrix.papi }}
           -DROCPROFSYS_USE_PYTHON=${{ matrix.python }}

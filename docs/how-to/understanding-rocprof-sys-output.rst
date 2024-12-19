@@ -325,15 +325,23 @@ this file.
 
 .. image:: ../data/rocprof-sys-perfetto.png
    :alt: Visualization of a performance graph in Perfetto
+   :width: 800
 
 .. image:: ../data/rocprof-sys-rocm.png
    :alt: Visualization of ROCm data in Perfetto
+   :width: 800
 
 .. image:: ../data/rocprof-sys-rocm-flow.png
    :alt: Visualization of ROCm flow data in Perfetto
+   :width: 800
 
 .. image:: ../data/rocprof-sys-user-api.png
    :alt: Visualization of ROCm API calls in Perfetto
+   :width: 800
+
+.. image:: ../data/rocprof-sys-gpu-metrics.png
+   :alt: Visualization of ROCm GPU metrics in Perfetto
+   :width: 800
 
 Timemory output
 ========================================

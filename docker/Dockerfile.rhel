@@ -18,7 +18,7 @@ RUN yum groupinstall -y "Development Tools" && \
     yum install -y --allowerasing cmake curl dpkg-devel numactl-devel openmpi-devel \
         papi-devel python3-pip texinfo wget which zlib-devel && \
     yum clean all && \
-    python3 -m pip install 'cmake==3.18.4'
+    python3 -m pip install 'cmake==3.21'
 
 ARG ROCM_VERSION=0.0
 ARG AMDGPU_RPM=6.2/rhel/9.4/amdgpu-install-6.2.60202-1.el9.noarch.rpm

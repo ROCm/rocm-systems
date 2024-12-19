@@ -226,7 +226,7 @@ endif()
 # -------------------------------------------------------------------------------------- #
 
 set(_VALID_GPU OFF)
-if(ROCPROFSYS_USE_HIP AND (NOT DEFINED ROCPROFSYS_CI_GPU OR ROCPROFSYS_CI_GPU))
+if(ROCPROFSYS_USE_ROCM AND (NOT DEFINED ROCPROFSYS_CI_GPU OR ROCPROFSYS_CI_GPU))
     set(_VALID_GPU ON)
     find_program(
         ROCPROFSYS_ROCM_SMI_EXE
@@ -254,7 +254,7 @@ if(ROCPROFSYS_USE_HIP AND (NOT DEFINED ROCPROFSYS_CI_GPU OR ROCPROFSYS_CI_GPU))
     endif()
 endif()
 
-set(LULESH_USE_GPU ${LULESH_USE_HIP})
+set(LULESH_USE_GPU ${LULESH_USE_ROCM})
 if(LULESH_USE_CUDA)
     set(LULESH_USE_GPU ON)
 endif()
@@ -314,8 +314,6 @@ ROCPROFSYS_SAMPLING_FREQ          = 300
 ROCPROFSYS_SAMPLING_DELAY         = 0.05
 ROCPROFSYS_SAMPLING_CPUS          = 0-${NUM_SAMPLING_PROCS}
 ROCPROFSYS_SAMPLING_GPUS          = $env:HIP_VISIBLE_DEVICES
-ROCPROFSYS_ROCTRACER_HSA_API      = ON
-ROCPROFSYS_ROCTRACER_HSA_ACTIVITY = ON
 
 # test-specific values
 ${_FILE_CONTENTS}
@@ -430,28 +428,23 @@ function(ROCPROFILER_SYSTEMS_ADD_TEST)
     if(TEST_GPU)
         list(APPEND TEST_LABELS "gpu")
 
-        if(NOT "ROCPROFSYS_USE_ROCTRACER=OFF" IN_LIST TEST_ENVIRONMENT)
-            list(APPEND TEST_LABELS "roctracer")
+        if(NOT "ROCPROFSYS_USE_ROCM=OFF" IN_LIST TEST_ENVIRONMENT)
+            list(APPEND TEST_LABELS "rocm")
         endif()
 
-        if(NOT "ROCPROFSYS_USE_ROCM_SMI=OFF" IN_LIST TEST_ENVIRONMENT)
+        if(NOT "ROCPROFSYS_USE_ROCM=OFF" IN_LIST TEST_ENVIRONMENT)
             list(APPEND TEST_LABELS "rocm-smi")
         endif()
     endif()
 
-    if("ROCPROFSYS_USE_ROCTRACER=ON" IN_LIST TEST_ENVIRONMENT AND NOT "roctracer" IN_LIST
-                                                                  TEST_ENVIRONMENT)
-        list(APPEND TEST_LABELS "roctracer")
+    if("ROCPROFSYS_USE_ROCM=ON" IN_LIST TEST_ENVIRONMENT AND NOT "rocm" IN_LIST
+                                                             TEST_ENVIRONMENT)
+        list(APPEND TEST_LABELS "rocm")
     endif()
 
     if("ROCPROFSYS_USE_ROCM_SMI=ON" IN_LIST TEST_ENVIRONMENT AND NOT "rocm-smi" IN_LIST
                                                                  TEST_ENVIRONMENT)
         list(APPEND TEST_LABELS "rocm-smi")
-    endif()
-
-    if("ROCPROFSYS_USE_ROCPROFILER=ON" IN_LIST TEST_ENVIRONMENT
-       AND NOT "rocprofiler" IN_LIST TEST_ENVIRONMENT)
-        list(APPEND TEST_LABELS "rocprofiler")
     endif()
 
     if(TARGET ${TEST_TARGET})
