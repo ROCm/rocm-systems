@@ -348,6 +348,33 @@ namespace core {
       HSAKMT_PFN(hsaKmtModelEnabled) = (HSAKMT_DEF(hsaKmtModelEnabled)*)dlsym(dtif_handle, "hsaKmtModelEnabled");
       if (HSAKMT_PFN(hsaKmtModelEnabled) == NULL) goto ERROR;
 
+      DRM_PFN(amdgpu_device_initialize) = (DRM_DEF(amdgpu_device_initialize)*)dlsym(dtif_handle, "amdgpu_device_initialize");
+      if (DRM_PFN(amdgpu_device_initialize) == NULL) goto ERROR;
+
+      DRM_PFN(amdgpu_device_deinitialize) = (DRM_DEF(amdgpu_device_deinitialize)*)dlsym(dtif_handle, "amdgpu_device_deinitialize");
+      if (DRM_PFN(amdgpu_device_deinitialize) == NULL) goto ERROR;
+
+      DRM_PFN(amdgpu_query_gpu_info) = (DRM_DEF(amdgpu_query_gpu_info)*)dlsym(dtif_handle, "amdgpu_query_gpu_info");
+      if (DRM_PFN(amdgpu_query_gpu_info) == NULL) goto ERROR;
+
+      DRM_PFN(amdgpu_bo_cpu_map) = (DRM_DEF(amdgpu_bo_cpu_map)*)dlsym(dtif_handle, "amdgpu_bo_cpu_map");
+      if (DRM_PFN(amdgpu_bo_cpu_map) == NULL) goto ERROR;
+
+      DRM_PFN(amdgpu_bo_free) = (DRM_DEF(amdgpu_bo_free)*)dlsym(dtif_handle, "amdgpu_bo_free");
+      if (DRM_PFN(amdgpu_bo_free) == NULL) goto ERROR;
+
+      DRM_PFN(amdgpu_bo_export) = (DRM_DEF(amdgpu_bo_export)*)dlsym(dtif_handle, "amdgpu_bo_export");
+      if (DRM_PFN(amdgpu_bo_export) == NULL) goto ERROR;
+
+      DRM_PFN(amdgpu_bo_import) = (DRM_DEF(amdgpu_bo_import)*)dlsym(dtif_handle, "amdgpu_bo_import");
+      if (DRM_PFN(amdgpu_bo_import) == NULL) goto ERROR;
+
+      DRM_PFN(amdgpu_bo_va_op) = (DRM_DEF(amdgpu_bo_va_op)*)dlsym(dtif_handle, "amdgpu_bo_va_op");
+      if (DRM_PFN(amdgpu_bo_va_op) == NULL) goto ERROR;
+
+      DRM_PFN(drmCommandWriteRead) = (DRM_DEF(drmCommandWriteRead)*)dlsym(dtif_handle, "drmCommandWriteRead");
+      if (DRM_PFN(drmCommandWriteRead) == NULL) goto ERROR;
+
       debug_print("Load all DTIF APIs OK!\n");
       return;
 
@@ -445,7 +472,18 @@ ERROR:
       HSAKMT_PFN(hsaKmtPcSamplingStop) = (HSAKMT_DEF(hsaKmtPcSamplingStop)*)(&hsaKmtPcSamplingStop);
       HSAKMT_PFN(hsaKmtPcSamplingSupport) = (HSAKMT_DEF(hsaKmtPcSamplingSupport)*)(&hsaKmtPcSamplingSupport);
       HSAKMT_PFN(hsaKmtModelEnabled) = (HSAKMT_DEF(hsaKmtModelEnabled)*)(&hsaKmtModelEnabled);
+
+      DRM_PFN(amdgpu_device_initialize) = (DRM_DEF(amdgpu_device_initialize)*)(&amdgpu_device_initialize);
+      DRM_PFN(amdgpu_device_deinitialize) = (DRM_DEF(amdgpu_device_deinitialize)*)(&amdgpu_device_deinitialize);
+      DRM_PFN(amdgpu_query_gpu_info) = (DRM_DEF(amdgpu_query_gpu_info)*)(&amdgpu_query_gpu_info);
+      DRM_PFN(amdgpu_bo_cpu_map) = (DRM_DEF(amdgpu_bo_cpu_map)*)(&amdgpu_bo_cpu_map);
+      DRM_PFN(amdgpu_bo_free) = (DRM_DEF(amdgpu_bo_free)*)(&amdgpu_bo_free);
+      DRM_PFN(amdgpu_bo_export) = (DRM_DEF(amdgpu_bo_export)*)(&amdgpu_bo_export);
+      DRM_PFN(amdgpu_bo_import) = (DRM_DEF(amdgpu_bo_import)*)(&amdgpu_bo_import);
+      DRM_PFN(amdgpu_bo_va_op) = (DRM_DEF(amdgpu_bo_va_op)*)(&amdgpu_bo_va_op);
+      DRM_PFN(drmCommandWriteRead) = (DRM_DEF(drmCommandWriteRead)*)(&drmCommandWriteRead);
     }
   }
+
 }   //  namespace core
 }   //  namespace rocr

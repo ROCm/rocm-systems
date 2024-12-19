@@ -223,13 +223,12 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   } else {
     // Get wallclock freq from libdrm.
     amdgpu_gpu_info info;
-    if (amdgpu_query_gpu_info(ldrm_dev_, &info) < 0)
+    if (DRM_CALL(amdgpu_query_gpu_info(ldrm_dev_, &info)) < 0)
       throw AMD::hsa_exception(HSA_STATUS_ERROR, "Agent creation failed.\nlibdrm query failed.\n");
 
     // Reported by libdrm in KHz.
     wallclock_frequency_ = uint64_t(info.gpu_counter_freq) * 1000ull;
   }
-
 #endif
 
   auto& first_cpu = core::Runtime::runtime_singleton_->cpu_agents()[0];

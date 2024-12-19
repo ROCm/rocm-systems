@@ -1375,8 +1375,8 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
 
         // Manually libDRM import and GPU map system memory
         AMD::GpuAgent* agent = reinterpret_cast<AMD::GpuAgent*>(agents_by_node_[info.NodeId][0]);
-        err = amdgpu_bo_import(agent->libDrmDev(), amdgpu_bo_handle_type_dma_buf_fd,
-                               dmabuf_fd, res);
+        err = DRM_CALL(amdgpu_bo_import(agent->libDrmDev(), amdgpu_bo_handle_type_dma_buf_fd,
+                               dmabuf_fd, res));
       }
       close(dmabuf_fd);
     }
@@ -1470,19 +1470,19 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
     // System memory DMA Buf import
     auto errCleanup = [&](amdgpu_bo_handle bo)
     {
-      amdgpu_bo_free(bo); // auto frees cpu map
+      DRM_CALL(amdgpu_bo_free(bo)); // auto frees cpu map
       return HSA_STATUS_ERROR;
     };
 
     // Create a shared cpu access pointer for user
     void *cpuPtr;
     amdgpu_bo_handle bo = res.buf_handle;
-    int ret = amdgpu_bo_cpu_map(bo, &cpuPtr);
+    int ret = DRM_CALL(amdgpu_bo_cpu_map(bo, &cpuPtr));
     if (ret) return errCleanup(bo);
 
     // Note VA ops will always override flags to allow read/write/exec permissions.
-    ret = amdgpu_bo_va_op(bo, 0, importSize,
-                          reinterpret_cast<uint64_t>(cpuPtr), 0, AMDGPU_VA_OP_MAP);
+    ret = DRM_CALL(amdgpu_bo_va_op(bo, 0, importSize,
+                          reinterpret_cast<uint64_t>(cpuPtr), 0, AMDGPU_VA_OP_MAP));
     if (ret) return errCleanup(bo);
     importAddress = cpuPtr;
     fixFragment(bo);
@@ -1517,10 +1517,10 @@ hsa_status_t Runtime::IPCDetach(void* ptr) {
     if (it != allocation_map_.end()) {
       if (it->second.region != nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       if (it->second.ldrm_bo) {
-         if (amdgpu_bo_va_op(it->second.ldrm_bo, 0, it->second.size,
-                             reinterpret_cast<uint64_t>(ptr), 0, AMDGPU_VA_OP_UNMAP))
+         if (DRM_CALL(amdgpu_bo_va_op(it->second.ldrm_bo, 0, it->second.size,
+                             reinterpret_cast<uint64_t>(ptr), 0, AMDGPU_VA_OP_UNMAP)))
            return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-         if (amdgpu_bo_free(it->second.ldrm_bo)) // auto unmaps from cpu
+         if (DRM_CALL(amdgpu_bo_free(it->second.ldrm_bo))) // auto unmaps from cpu
            return HSA_STATUS_ERROR_INVALID_ARGUMENT;
          ldrmImportCleaned = true;
       }
@@ -2237,8 +2237,8 @@ int Runtime::GetAmdgpuDeviceArgs(Agent *agent, ShareableHandle handle,
   if (renderFd < 0) return HSA_STATUS_ERROR;
 
   uint32_t gem_handle = 0;
-  if (amdgpu_bo_export(reinterpret_cast<amdgpu_bo_handle>(handle.handle),
-                       amdgpu_bo_handle_type_kms, &gem_handle))
+  if (DRM_CALL(amdgpu_bo_export(reinterpret_cast<amdgpu_bo_handle>(handle.handle),
+                       amdgpu_bo_handle_type_kms, &gem_handle)))
     return HSA_STATUS_ERROR;
 
   union drm_amdgpu_gem_mmap args;
@@ -2246,7 +2246,7 @@ int Runtime::GetAmdgpuDeviceArgs(Agent *agent, ShareableHandle handle,
   /* Query the buffer address (args.addr_ptr).
    * The kernel driver ignores the offset and size parameters. */
   args.in.handle = gem_handle;
-  if (drmCommandWriteRead(renderFd, DRM_AMDGPU_GEM_MMAP, &args, sizeof(args)))
+  if (DRM_CALL(drmCommandWriteRead(renderFd, DRM_AMDGPU_GEM_MMAP, &args, sizeof(args))))
     return HSA_STATUS_ERROR;
 
   *drm_fd = renderFd;
@@ -3368,8 +3368,6 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
   assert(status == HSA_STATUS_SUCCESS);
   if (status != HSA_STATUS_SUCCESS)
     return;
-
-  close(dmabuf_fd);
 }
 
 Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {

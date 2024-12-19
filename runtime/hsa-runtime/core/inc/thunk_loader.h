@@ -43,14 +43,19 @@
 #ifndef HSA_RUNTIME_CORE_INC_THUNK_LOADER_H
 #define HSA_RUNTIME_CORE_INC_THUNK_LOADER_H
 
+#include <amdgpu.h>
 #include "hsakmt/hsakmttypes.h"
 
 namespace rocr {
 namespace core {
 
-#define HSAKMT_DEF(functiom_name)   PFN##functiom_name
-#define HSAKMT_PFN(functiom_name)   pfn_##functiom_name
-#define HSAKMT_CALL(functiom_name)   core::Runtime::runtime_singleton_->thunkLoader()->pfn_##functiom_name
+#define HSAKMT_DEF(function_name)   PFN##function_name
+#define HSAKMT_PFN(function_name)   pfn_##function_name
+#define HSAKMT_CALL(function_name)   core::Runtime::runtime_singleton_->thunkLoader()->pfn_##function_name
+
+#define DRM_DEF(function_name)   PFN##function_name
+#define DRM_PFN(function_name)   pfn_##function_name
+#define DRM_CALL(function_name)   core::Runtime::runtime_singleton_->thunkLoader()->pfn_##function_name
 
 class ThunkLoader {
   public:
@@ -310,6 +315,43 @@ class ThunkLoader {
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtPcSamplingSupport))(void);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtModelEnabled))(bool* enable);
 
+    /* drm API */
+    typedef int (DRM_DEF(amdgpu_device_initialize))(int fd, \
+                                      uint32_t *major_version, \
+                                      uint32_t *minor_version, \
+                                      amdgpu_device_handle *device_handle);
+
+    typedef int (DRM_DEF(amdgpu_device_deinitialize))(amdgpu_device_handle device_handle);
+
+    typedef int (DRM_DEF(amdgpu_query_gpu_info))(amdgpu_device_handle dev, \
+                                      struct amdgpu_gpu_info *info);
+
+    typedef int (DRM_DEF(amdgpu_bo_cpu_map))(amdgpu_bo_handle bo, \
+                                      void **cpu);
+
+    typedef int (DRM_DEF(amdgpu_bo_free))(amdgpu_bo_handle buf_handle);
+
+    typedef int (DRM_DEF(amdgpu_bo_export))(amdgpu_bo_handle bo, \
+                                      enum amdgpu_bo_handle_type type, \
+                                      uint32_t *shared_handle);
+
+    typedef int (DRM_DEF(amdgpu_bo_import))(amdgpu_device_handle dev, \
+                                      enum amdgpu_bo_handle_type type, \
+                                      uint32_t shared_handle, \
+                                      struct amdgpu_bo_import_result *output);
+
+    typedef int (DRM_DEF(amdgpu_bo_va_op))(amdgpu_bo_handle bo, \
+                                      uint64_t offset, \
+                                      uint64_t size, \
+                                      uint64_t addr, \
+                                      uint64_t flags, \
+                                      uint32_t op);
+
+    typedef int (DRM_DEF(drmCommandWriteRead))(int fd, \
+                                      unsigned long drmCommandIndex, \
+                                      void *data, \
+                                      unsigned long size);
+
     ThunkLoader();
     ~ThunkLoader();
 
@@ -406,6 +448,16 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtPcSamplingStop)* HSAKMT_PFN(hsaKmtPcSamplingStop);
     HSAKMT_DEF(hsaKmtPcSamplingSupport)* HSAKMT_PFN(hsaKmtPcSamplingSupport);
     HSAKMT_DEF(hsaKmtModelEnabled)* HSAKMT_PFN(hsaKmtModelEnabled);
+
+    DRM_DEF(amdgpu_device_initialize)* DRM_PFN(amdgpu_device_initialize);
+    DRM_DEF(amdgpu_device_deinitialize)* DRM_PFN(amdgpu_device_deinitialize);
+    DRM_DEF(amdgpu_query_gpu_info)* DRM_PFN(amdgpu_query_gpu_info);
+    DRM_DEF(amdgpu_bo_cpu_map)* DRM_PFN(amdgpu_bo_cpu_map);
+    DRM_DEF(amdgpu_bo_free)* DRM_PFN(amdgpu_bo_free);
+    DRM_DEF(amdgpu_bo_export)* DRM_PFN(amdgpu_bo_export);
+    DRM_DEF(amdgpu_bo_import)* DRM_PFN(amdgpu_bo_import);
+    DRM_DEF(amdgpu_bo_va_op)* DRM_PFN(amdgpu_bo_va_op);
+    DRM_DEF(drmCommandWriteRead)* DRM_PFN(drmCommandWriteRead);
 
   private:
     void *dtif_handle;

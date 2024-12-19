@@ -381,8 +381,8 @@ hsa_status_t KfdDriver::ImportDMABuf(int dmabuf_fd, core::Agent &agent,
                                      core::ShareableHandle &handle) {
   auto &gpu_agent = static_cast<GpuAgent &>(agent);
   amdgpu_bo_import_result res;
-  auto ret = amdgpu_bo_import(
-      gpu_agent.libDrmDev(), amdgpu_bo_handle_type_dma_buf_fd, dmabuf_fd, &res);
+  auto ret = DRM_CALL(amdgpu_bo_import(
+      gpu_agent.libDrmDev(), amdgpu_bo_handle_type_dma_buf_fd, dmabuf_fd, &res));
   if (ret)
     return HSA_STATUS_ERROR;
 
@@ -397,8 +397,8 @@ hsa_status_t KfdDriver::Map(core::ShareableHandle handle, void *mem,
   if (!ldrm_bo)
     return HSA_STATUS_ERROR;
 
-  if (amdgpu_bo_va_op(ldrm_bo, offset, size, reinterpret_cast<uint64_t>(mem),
-                      drm_perm(perms), AMDGPU_VA_OP_MAP) != 0)
+  if (DRM_CALL(amdgpu_bo_va_op(ldrm_bo, offset, size, reinterpret_cast<uint64_t>(mem),
+                      drm_perm(perms), AMDGPU_VA_OP_MAP)) != 0)
     return HSA_STATUS_ERROR;
 
   return HSA_STATUS_SUCCESS;
@@ -410,8 +410,8 @@ hsa_status_t KfdDriver::Unmap(core::ShareableHandle handle, void *mem,
   if (!ldrm_bo)
     return HSA_STATUS_ERROR;
 
-  if (amdgpu_bo_va_op(ldrm_bo, offset, size, reinterpret_cast<uint64_t>(mem), 0,
-                      AMDGPU_VA_OP_UNMAP) != 0)
+  if (DRM_CALL(amdgpu_bo_va_op(ldrm_bo, offset, size, reinterpret_cast<uint64_t>(mem), 0,
+                      AMDGPU_VA_OP_UNMAP)) != 0)
     return HSA_STATUS_ERROR;
 
   return HSA_STATUS_SUCCESS;
@@ -422,7 +422,7 @@ hsa_status_t KfdDriver::ReleaseShareableHandle(core::ShareableHandle &handle) {
   if (!ldrm_bo)
     return HSA_STATUS_ERROR;
 
-  const auto ret = amdgpu_bo_free(ldrm_bo);
+  const auto ret = DRM_CALL(amdgpu_bo_free(ldrm_bo));
   if (ret)
     return HSA_STATUS_ERROR;
 
