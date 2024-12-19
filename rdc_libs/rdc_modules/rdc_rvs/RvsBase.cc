@@ -23,21 +23,26 @@ THE SOFTWARE.
 
 #include <string.h>
 
+#include "rdc/rdc.h"
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/rdc_common.h"
+#include "rdc_modules/rdc_rvs/RvsBase.h"
 #include "rvs/rvs.h"
 
 // TODO: Make generic test
 // TODO: Allow for user to override defaults with a custom string
 static constexpr size_t MAX_CONFIG_LENGTH = 1024;
 
-volatile rvs_session_state_t state = RVS_SESSION_STATE_IDLE;
+amd::rdc::RdcRVSBase* amd::rdc::RdcRVSBase::s_instance = nullptr;
 
-rvs_status_t amd::rdc::run_rvs_app(const char* config, const size_t config_size) {
+rvs_status_t amd::rdc::RdcRVSBase::run_rvs_app(const char* config, const size_t config_size,
+                                               rdc_diag_callback_t* callback) {
   char active_config[MAX_CONFIG_LENGTH];
   rvs_session_property_t session_property = {RVS_SESSION_TYPE_DEFAULT_CONF, {{RVS_MODULE_GST}}};
   rvs_session_id_t session_id;
   rvs_status_t status;
+  // NOTE: device_index is NOT set by RDC unless a custom config is provided.
+  // Meaning RDC index has no impact on RVS index.
   const char mem_config[MAX_CONFIG_LENGTH] =
       "{actions: [{name: action_1, device: all, module: mem, parallel: true, "
       "count: 1, wait: 100, mapped_memory: false, mem_blocks: 128, "
@@ -70,11 +75,12 @@ rvs_status_t amd::rdc::run_rvs_app(const char* config, const size_t config_size)
 
   /*******************************/
 
-  state = RVS_SESSION_STATE_IDLE;
+  _state = RVS_SESSION_STATE_IDLE;
 
   /* Using custom gst configuration in string format */
 
-  status = rvs_session_create(&session_id, amd::rdc::session_callback);
+  _callback = callback;
+  status = rvs_session_create(&session_id, &RdcRVSBase::static_callback);
 
   session_property.type = RVS_SESSION_TYPE_CUSTOM_ACTION;
   session_property.custom_action.config = active_config;
@@ -89,8 +95,10 @@ rvs_status_t amd::rdc::run_rvs_app(const char* config, const size_t config_size)
     return status;
   }
 
-  while (state != RVS_SESSION_STATE_COMPLETED) {
+  while (_state != RVS_SESSION_STATE_COMPLETED) {
   };
+
+  _callback = nullptr;
 
   status = rvs_session_destroy(session_id);
   if (status != RVS_STATUS_SUCCESS) {
@@ -98,21 +106,4 @@ rvs_status_t amd::rdc::run_rvs_app(const char* config, const size_t config_size)
   }
 
   return status;
-}
-
-void amd::rdc::session_callback(rvs_session_id_t session_id, const rvs_results_t* results) {
-  // NOTE: This is a placeholder!
-  // TODO: Use GRPC to send message back to client periodically
-  printf(
-      "/*******************************************************************/"
-      "\n");
-  printf("session id -> %d state -> %d\n", session_id, results->state);
-  printf("session id -> %d status -> %d\n", session_id, results->status);
-  printf("session id -> %d output -> %s\n", session_id, results->output_log);
-  printf(
-      "/*******************************************************************/"
-      "\n");
-
-  state = results->state;
-  printf("state -> %d\n", state);
 }

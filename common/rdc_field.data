@@ -44,7 +44,7 @@ FLD_DESC_ENT(RDC_FI_GPU_TEMP,            "GPU temperature in millidegrees Celsiu
 FLD_DESC_ENT(RDC_FI_POWER_USAGE,         "Power usage in microwatts",                   "POWER_USAGE",      true)
 FLD_DESC_ENT(RDC_FI_PCIE_TX,             "PCIe Tx utilization in bytes/second",         "PCIE_TX",          true)
 FLD_DESC_ENT(RDC_FI_PCIE_RX,             "PCIe Rx utilization in bytes/second",         "PCIE_RX",          true)
-FLD_DESC_ENT(RDC_FI_PCIE_BANDWIDTH,      "PCIe bandwidth in GB/sec",                    "PCIE_BANDWIDTH",   true)
+FLD_DESC_ENT(RDC_FI_PCIE_BANDWIDTH,      "PCIe bandwidth in Mbps",                      "PCIE_BANDWIDTH",   true)
 
 FLD_DESC_ENT(RDC_FI_GPU_UTIL,            "GPU busy percentage",                         "GPU_UTIL",         true)
 FLD_DESC_ENT(RDC_FI_GPU_MEMORY_USAGE,    "Memory usage of the GPU instance in bytes",   "GPU_MEMORY_USAGE", true)
@@ -52,6 +52,8 @@ FLD_DESC_ENT(RDC_FI_GPU_MEMORY_TOTAL,    "Total memory of the GPU instance",    
 FLD_DESC_ENT(RDC_FI_GPU_MM_ENC_UTIL,     "Mutilmedia encoder busy percentage",          "GPU_MM_ENC_UTIL",  true)
 FLD_DESC_ENT(RDC_FI_GPU_MM_DEC_UTIL,     "Mutilmedia decoder busy percentage",          "GPU_MM_DEC_UTIL",  true)
 FLD_DESC_ENT(RDC_FI_GPU_MEMORY_ACTIVITY, "Memory busy percentage",                      "GPU_MEM_UTIL",     true)
+
+FLD_DESC_ENT(RDC_FI_GPU_PAGE_RETRIED,    "Retried page of the GPU instance",            "GPU_PAGE_RETRIED", true)
 
 // ECC totals
 FLD_DESC_ENT(RDC_FI_ECC_CORRECT_TOTAL,   "Accumulated Single Error Correction",         "ECC_CORRECT",      true)
@@ -135,6 +137,7 @@ FLD_DESC_ENT(RDC_FI_PROF_EVAL_MEM_W_BW,         "Written to video memory kb / ms
 FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_16,         "Number of fp16 OPS / ms",               "FLOPS_16",          false)
 FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_32,         "Number of fp32 OPS / ms",               "FLOPS_32",          false)
 FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_64,         "Number of fp64 OPS / ms",               "FLOPS_64",          false)
+FLD_DESC_ENT(RDC_FI_PROF_VALU_PIPE_ISSUE_UTIL,  "Percent of Active Pipe VALU",           "VALU_UTILIZATION",  false)
 
 // Events
 FLD_DESC_ENT(RDC_EVNT_XGMI_0_NOP_TX,     "NOPs sent to neighbor 0",                     "XGMI_NOP_0",       false)
@@ -159,3 +162,12 @@ FLD_DESC_ENT(RDC_EVNT_NOTIF_THERMAL_THROTTLE, "Clk freq decrease due to temp",  
 FLD_DESC_ENT(RDC_EVNT_NOTIF_PRE_RESET,   "GPU reset is about to occur",                 "GPU_PRE_RESET",    false)
 FLD_DESC_ENT(RDC_EVNT_NOTIF_POST_RESET,  "GPU reset just occurred",                     "GPU_POST_RESET",   false)
 FLD_DESC_ENT(RDC_EVNT_NOTIF_RING_HANG,   "GPU ring hang just occured",                  "RING_HANG",        false)
+
+// RDC health related fields
+FLD_DESC_ENT(RDC_HEALTH_XGMI_ERROR,               "XGMI one or more errors detected",           "XGMI_ERROR",               true)
+FLD_DESC_ENT(RDC_HEALTH_PCIE_REPLAY_COUNT,        "Total PCIE replay count",                    "PCIE_REPLAY_COUNT",        true)
+FLD_DESC_ENT(RDC_HEALTH_PENDING_PAGE_NUM,         "Pending page number",                        "PENDING_PAGE_NUM",         true)
+FLD_DESC_ENT(RDC_HEALTH_RETIRED_PAGE_LIMIT,       "Retired page limit",                         "RETIRED_PAGE_LIMIT",       false)
+FLD_DESC_ENT(RDC_HEALTH_UNCORRECTABLE_PAGE_LIMIT, "Uncorrectable page limit",                   "UNCORRECTABLE_PAGE_LIMIT", false)
+FLD_DESC_ENT(RDC_HEALTH_POWER_THROTTLE_TIME,      "Power throttle status counter",              "POWER_THROTTLE_TIME",      false)
+FLD_DESC_ENT(RDC_HEALTH_THERMAL_THROTTLE_TIME,    "Total time(ms) in thermal throttle status",  "THERMAL_THROTTLE_TIME",    false)

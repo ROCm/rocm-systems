@@ -2,6 +2,15 @@
 
 Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](https://rocm.docs.amd.com/projects/rdc/en/latest/).
 
+## RDC for ROCm 6.3.0
+
+### Added
+
+- [RVS](https://github.com/ROCm/ROCmValidationSuite) integration
+- Real time logging for diagnostic command
+- `--version` command
+- `XGMI_TOTAL_READ_KB` and `XGMI_TOTAL_WRITE_KB` monitoring metrics
+
 ## RDC for ROCm 6.2.0
 
 - Added [rocprofiler](https://github.com/ROCm/rocprofiler) dmon metrics

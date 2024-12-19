@@ -23,6 +23,7 @@ THE SOFTWARE.
 
 #include <functional>
 
+#include "rdc/rdc.h"
 #include "rdc_lib/RdcException.h"
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/rdc_common.h"
@@ -94,7 +95,7 @@ rdc_status_t RdcRocrLib::rdc_diag_test_cases_query(rdc_diag_test_cases_t test_ca
 rdc_status_t RdcRocrLib::rdc_test_case_run(rdc_diag_test_cases_t test_case,
                                            uint32_t gpu_index[RDC_MAX_NUM_DEVICES],
                                            uint32_t gpu_count, const char* config,
-                                           size_t config_size, rdc_diag_test_result_t* result) {
+                                           size_t config_size, rdc_diag_test_result_t* result, rdc_diag_callback_t* callback) {
   if (result == nullptr) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -103,19 +104,20 @@ rdc_status_t RdcRocrLib::rdc_test_case_run(rdc_diag_test_cases_t test_case,
   }
 
   rdc_status_t status =
-      test_case_run_(test_case, gpu_index, gpu_count, config, config_size, result);
+      test_case_run_(test_case, gpu_index, gpu_count, config, config_size, result, callback);
   RDC_LOG(RDC_DEBUG, "Run " << test_case << " test case from Rocr: " << rdc_status_string(status));
   return status;
 }
 
 rdc_status_t RdcRocrLib::rdc_diagnostic_run(const rdc_group_info_t& gpus, rdc_diag_level_t level,
                                             const char* config, size_t config_size,
-                                            rdc_diag_response_t* response) {
+                                            rdc_diag_response_t* response, rdc_diag_callback_t* callback) {
   (void)gpus;
   (void)level;
   (void)config;
   (void)config_size;
   (void)response;
+  (void)callback;
   return RDC_ST_NOT_SUPPORTED;
 }
 

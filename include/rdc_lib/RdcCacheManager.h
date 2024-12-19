@@ -59,6 +59,21 @@ class RdcCacheManager {
   virtual rdc_status_t rdc_job_remove(const char job_id[64]) = 0;
   virtual rdc_status_t rdc_job_remove_all() = 0;
 
+  virtual rdc_status_t rdc_health_set(rdc_gpu_group_t group_id,
+                                      uint32_t gpu_index,
+                                      const rdc_field_value& value) = 0;
+  virtual rdc_status_t rdc_health_get_values(rdc_gpu_group_t group_id,
+                                             uint32_t gpu_index,
+                                             rdc_field_t field_id,
+                                             uint64_t start_timestamp,
+                                             uint64_t end_timestamp,
+                                             rdc_field_value* start_value,
+                                             rdc_field_value* end_value) = 0;
+  virtual rdc_status_t rdc_health_clear(rdc_gpu_group_t group_id) = 0;
+  virtual rdc_status_t rdc_update_health_stats(rdc_gpu_group_t group_id,
+                                               uint32_t gpu_index,
+                                               const rdc_field_value& value) = 0;
+
   virtual ~RdcCacheManager() {}
 };
 

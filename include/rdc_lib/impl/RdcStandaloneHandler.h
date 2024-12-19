@@ -24,8 +24,11 @@ THE SOFTWARE.
 #include <grpcpp/grpcpp.h>
 
 #include <memory>
+#include <future>
+#include <thread>
 
 #include "rdc.grpc.pb.h"  // NOLINT
+#include "rdc/rdc.h"
 #include "rdc_lib/RdcHandler.h"
 
 namespace amd {
@@ -46,7 +49,8 @@ class RdcStandaloneHandler : public RdcHandler {
                                   uint32_t* count) override;
   rdc_status_t rdc_device_get_attributes(uint32_t gpu_index,
                                          rdc_device_attributes_t* p_rdc_attr) override;
-  rdc_status_t rdc_device_get_component_version(rdc_component_t component, rdc_component_version_t* p_rdc_compv) override;
+  rdc_status_t rdc_device_get_component_version(rdc_component_t component,
+                                                rdc_component_version_t* p_rdc_compv) override;
 
   // Group RdcAPI
   rdc_status_t rdc_group_gpu_create(rdc_group_type_t type, const char* group_name,
@@ -78,10 +82,10 @@ class RdcStandaloneHandler : public RdcHandler {
   // Diagnostic API
   rdc_status_t rdc_diagnostic_run(rdc_gpu_group_t group_id, rdc_diag_level_t level,
                                   const char* config, size_t config_size,
-                                  rdc_diag_response_t* response) override;
+                                  rdc_diag_response_t* response, rdc_diag_callback_t* callback) override;
   rdc_status_t rdc_test_case_run(rdc_gpu_group_t group_id, rdc_diag_test_cases_t test_case,
                                  const char* config, size_t config_size,
-                                 rdc_diag_test_result_t* result) override;
+                                 rdc_diag_test_result_t* result, rdc_diag_callback_t* callback) override;
 
   // Control RdcAPI
   rdc_status_t rdc_field_update_all(uint32_t wait_for_update) override;
@@ -89,6 +93,27 @@ class RdcStandaloneHandler : public RdcHandler {
   // It is just a client interface under the GRPC framework and is not used as an RDC API.
   // Pure virtual functions need to be overridden
   rdc_status_t get_mixed_component_version(mixed_component_t component, mixed_component_version_t* p_mixed_compv) override;
+  // Policy API
+  rdc_status_t rdc_policy_set(rdc_gpu_group_t group_id, rdc_policy_t policy) override;
+
+  rdc_status_t rdc_policy_get(rdc_gpu_group_t group_id, uint32_t* count, rdc_policy_t policies[RDC_MAX_POLICY_SETTINGS]) override;
+
+  rdc_status_t rdc_policy_delete(rdc_gpu_group_t group_id,
+                                 rdc_policy_condition_type_t condition_type) override;
+
+  rdc_status_t rdc_policy_register(rdc_gpu_group_t group_id,
+                                   rdc_policy_register_callback callback) override;
+
+  rdc_status_t rdc_policy_unregister(rdc_gpu_group_t group_id) override;
+
+  // Health API
+  rdc_status_t rdc_health_set(rdc_gpu_group_t group_id, unsigned int components) override;
+  rdc_status_t rdc_health_get(rdc_gpu_group_t group_id, unsigned int* components) override;
+  rdc_status_t rdc_health_check(rdc_gpu_group_t group_id, rdc_health_response_t *response) override;
+  rdc_status_t rdc_health_clear(rdc_gpu_group_t group_id) override;
+  rdc_status_t rdc_device_topology_get(uint32_t gpu_index, rdc_device_topology_t* results) override;
+  
+  rdc_status_t rdc_link_status_get(rdc_link_status_t* results) override;
 
   explicit RdcStandaloneHandler(const char* ip_and_port, const char* root_ca,
                                 const char* client_cert, const char* client_key);
@@ -100,6 +125,15 @@ class RdcStandaloneHandler : public RdcHandler {
   bool copy_gpu_usage_info(const ::rdc::GpuUsageInfo& src, rdc_gpu_usage_info_t* target);
 
   std::unique_ptr<::rdc::RdcAPI::Stub> stub_;
+  // thread for policy callback
+
+  struct policy_thread_context {
+    bool start;
+    std::thread *t;
+  };
+
+  std::map<uint32_t, struct policy_thread_context> policy_threads_;
+
 };
 
 }  // namespace rdc

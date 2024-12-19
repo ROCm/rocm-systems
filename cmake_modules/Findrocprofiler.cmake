@@ -6,11 +6,12 @@ set(NAME rocprofiler)
 if(NOT DEFINED ROCM_DIR)
     set(ROCM_DIR "/opt/rocm")
 endif()
+list(APPEND CMAKE_PREFIX_PATH ${ROCM_DIR})
 
 find_library(
     ${NAME}_LIBRARY
     NAMES ${NAME} ${NAME}64
-    HINTS "${ROCM_DIR}"
+    REQUIRED
     REGISTRY_VIEW BOTH
     PATH_SUFFIXES lib)
 

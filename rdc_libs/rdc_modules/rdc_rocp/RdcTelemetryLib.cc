@@ -52,7 +52,7 @@ bool is_rocp_disabled() {
                      [&value_str](const char* val) { return value_str == val; });
 }
 
-rdc_status_t rdc_module_init(uint64_t flags) {
+rdc_status_t rdc_module_init(uint64_t  /*flags*/) {
   if (is_rocp_disabled()) {
     // rocprofiler does NOT work in gtest.
     // GTest starts up multiple instances of the progam under test,
@@ -156,9 +156,6 @@ rdc_status_t rdc_telemetry_fields_unwatch(rdc_gpu_field_t* fields, uint32_t fiel
   rdc_status_t status = RDC_ST_OK;
   for (uint32_t i = 0; i < fields_count; i++) {
     RDC_LOG(RDC_DEBUG, "UNWATCH: " << fields[i].field_id);
-    if (rocp_p != nullptr) {
-      rocp_p->reset_average(fields[i]);
-    }
     const rdc_status_t temp_status = RDC_ST_OK;
     // return last non-ok status
     if (temp_status != RDC_ST_OK) {

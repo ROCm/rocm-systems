@@ -23,7 +23,12 @@ THE SOFTWARE.
 
 #include <grpcpp/grpcpp.h>
 
+#include <future>
+
 #include "rdc.grpc.pb.h"  // NOLINT
+#include "rdc.pb.h"
+#include "rdc/rdc.h"
+#include "rdc_lib/RdcLogger.h"
 
 amd::rdc::RdcHandler* make_handler(const char* ip_and_port, const char* root_ca,
                                    const char* client_cert, const char* client_key) {
@@ -243,8 +248,8 @@ rdc_status_t RdcStandaloneHandler::rdc_device_get_attributes(uint32_t gpu_index,
   return RDC_ST_OK;
 }
 
-rdc_status_t RdcStandaloneHandler::rdc_device_get_component_version(rdc_component_t component, rdc_component_version_t* p_rdc_compv) {
-
+rdc_status_t RdcStandaloneHandler::rdc_device_get_component_version(
+    rdc_component_t component, rdc_component_version_t* p_rdc_compv) {
   if (!p_rdc_compv) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -551,7 +556,8 @@ rdc_status_t RdcStandaloneHandler::rdc_field_unwatch(rdc_gpu_group_t group_id,
 rdc_status_t RdcStandaloneHandler::rdc_diagnostic_run(rdc_gpu_group_t group_id,
                                                       rdc_diag_level_t level, const char* config,
                                                       size_t config_size,
-                                                      rdc_diag_response_t* response) {
+                                                      rdc_diag_response_t* response,
+                                                      rdc_diag_callback_t* /*callback*/) {
   if (!response) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -564,40 +570,61 @@ rdc_status_t RdcStandaloneHandler::rdc_diagnostic_run(rdc_gpu_group_t group_id,
   request.set_config(config);
   request.set_config_size(config_size);
 
-  ::grpc::Status status = stub_->DiagnosticRun(&context, request, &reply);
-  rdc_status_t err_status = error_handle(status, reply.status());
-  if (err_status != RDC_ST_OK) return err_status;
-  auto res = reply.response();
-  response->results_count = res.results_count();
+  auto reader = stub_->DiagnosticRun(&context, request);
+  // for the duration of the DiagnosticRun (multiple tests) - we're stuck in this loop
+  //
+  // there are 2 optional reply fields:
+  // * log - reports messages back during the diagnostic run
+  // * response - delivered when the diagnostic run completes
+  while (reader->Read(&reply)) {
+    if (reply.has_log()) {
+      // TODO: Add different logging levels
+      std::cout << "LOG: " << reply.log() << std::endl;
+      continue;
+    }
+    if (reply.has_response()) {
+      RDC_LOG(RDC_DEBUG, "HAS RESPONSE!");
+      auto res = reply.response();
+      response->results_count = res.results_count();
 
-  if (res.diag_info_size() > static_cast<int>(MAX_TEST_CASES)) {
-    return RDC_ST_BAD_PARAMETER;
+      if (res.diag_info_size() > static_cast<int>(MAX_TEST_CASES)) {
+        return RDC_ST_BAD_PARAMETER;
+      }
+      for (int i = 0; i < res.diag_info_size(); i++) {
+        const ::rdc::DiagnosticTestResult& result = res.diag_info(i);
+        rdc_diag_test_result_t& to_result = response->diag_info[i];
+        to_result.status = static_cast<rdc_diag_result_t>(result.status());
+
+        // Set details
+        to_result.details.code = result.details().code();
+        strncpy_with_null(to_result.details.msg, result.details().msg().c_str(),
+                          MAX_DIAG_MSG_LENGTH);
+
+        to_result.test_case = static_cast<rdc_diag_test_cases_t>(result.test_case());
+        to_result.per_gpu_result_count = result.per_gpu_result_count();
+
+        // Set Result details
+        if (result.gpu_results_size() > RDC_MAX_NUM_DEVICES) {
+          return RDC_ST_BAD_PARAMETER;
+        }
+        for (int j = 0; j < result.gpu_results_size(); j++) {
+          auto per_gpu_result = result.gpu_results(j);
+          rdc_diag_per_gpu_result_t& to_per_gpu = to_result.gpu_results[j];
+          to_per_gpu.gpu_index = per_gpu_result.gpu_index();
+          to_per_gpu.gpu_result.code = per_gpu_result.gpu_result().code();
+          strncpy_with_null(to_per_gpu.gpu_result.msg, per_gpu_result.gpu_result().msg().c_str(),
+                            MAX_DIAG_MSG_LENGTH);
+        }
+        strncpy_with_null(to_result.info, result.info().c_str(), MAX_DIAG_MSG_LENGTH);
+      }
+    }
   }
-  for (int i = 0; i < res.diag_info_size(); i++) {
-    const ::rdc::DiagnosticTestResult& result = res.diag_info(i);
-    rdc_diag_test_result_t& to_result = response->diag_info[i];
-    to_result.status = static_cast<rdc_diag_result_t>(result.status());
 
-    // Set details
-    to_result.details.code = result.details().code();
-    strncpy_with_null(to_result.details.msg, result.details().msg().c_str(), MAX_DIAG_MSG_LENGTH);
-
-    to_result.test_case = static_cast<rdc_diag_test_cases_t>(result.test_case());
-    to_result.per_gpu_result_count = result.per_gpu_result_count();
-
-    // Set Result details
-    if (result.gpu_results_size() > RDC_MAX_NUM_DEVICES) {
-      return RDC_ST_BAD_PARAMETER;
-    }
-    for (int j = 0; j < result.gpu_results_size(); j++) {
-      auto per_gpu_result = result.gpu_results(j);
-      rdc_diag_per_gpu_result_t& to_per_gpu = to_result.gpu_results[j];
-      to_per_gpu.gpu_index = per_gpu_result.gpu_index();
-      to_per_gpu.gpu_result.code = per_gpu_result.gpu_result().code();
-      strncpy_with_null(to_per_gpu.gpu_result.msg, per_gpu_result.gpu_result().msg().c_str(),
-                        MAX_DIAG_MSG_LENGTH);
-    }
-    strncpy_with_null(to_result.info, result.info().c_str(), MAX_DIAG_MSG_LENGTH);
+  auto status = reader->Finish();
+  if (status.ok()) {
+    RDC_LOG(RDC_DEBUG, "reader status: success!");
+  } else {
+    RDC_LOG(RDC_ERROR, "reader status: failure!");
   }
 
   return RDC_ST_OK;
@@ -606,7 +633,8 @@ rdc_status_t RdcStandaloneHandler::rdc_diagnostic_run(rdc_gpu_group_t group_id,
 rdc_status_t RdcStandaloneHandler::rdc_test_case_run(rdc_gpu_group_t group_id,
                                                      rdc_diag_test_cases_t test_case,
                                                      const char* config, size_t config_size,
-                                                     rdc_diag_test_result_t* to_result) {
+                                                     rdc_diag_test_result_t* to_result,
+                                                     rdc_diag_callback_t* /*callback*/) {
   if (!to_result) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -619,33 +647,45 @@ rdc_status_t RdcStandaloneHandler::rdc_test_case_run(rdc_gpu_group_t group_id,
   request.set_config_size(config_size);
   request.set_test_case(static_cast<::rdc::DiagnosticTestCaseRunRequest_TestCaseType>(test_case));
 
-  ::grpc::Status status = stub_->DiagnosticTestCaseRun(&context, request, &reply);
-  rdc_status_t err_status = error_handle(status, reply.status());
-  if (err_status != RDC_ST_OK) return err_status;
-  auto result = reply.result();
+  auto reader = stub_->DiagnosticTestCaseRun(&context, request);
+  while (reader->Read(&reply)) {
+    if (!reply.has_result()) {
+      RDC_LOG(RDC_ERROR, "NO TEST_RUN RESULT!");
+      continue;
+    }
 
-  to_result->status = static_cast<rdc_diag_result_t>(result.status());
+    auto result = reply.result();
 
-  // Set details
-  to_result->details.code = result.details().code();
-  strncpy_with_null(to_result->details.msg, result.details().msg().c_str(), MAX_DIAG_MSG_LENGTH);
+    to_result->status = static_cast<rdc_diag_result_t>(result.status());
 
-  to_result->test_case = static_cast<rdc_diag_test_cases_t>(result.test_case());
-  to_result->per_gpu_result_count = result.per_gpu_result_count();
+    // Set details
+    to_result->details.code = result.details().code();
+    strncpy_with_null(to_result->details.msg, result.details().msg().c_str(), MAX_DIAG_MSG_LENGTH);
 
-  // Set Result details
-  if (result.gpu_results_size() > RDC_MAX_NUM_DEVICES) {
-    return RDC_ST_BAD_PARAMETER;
+    to_result->test_case = static_cast<rdc_diag_test_cases_t>(result.test_case());
+    to_result->per_gpu_result_count = result.per_gpu_result_count();
+
+    // Set Result details
+    if (result.gpu_results_size() > RDC_MAX_NUM_DEVICES) {
+      return RDC_ST_BAD_PARAMETER;
+    }
+    for (int j = 0; j < result.gpu_results_size(); j++) {
+      auto per_gpu_result = result.gpu_results(j);
+      rdc_diag_per_gpu_result_t& to_per_gpu = to_result->gpu_results[j];
+      to_per_gpu.gpu_index = per_gpu_result.gpu_index();
+      to_per_gpu.gpu_result.code = per_gpu_result.gpu_result().code();
+      strncpy_with_null(to_per_gpu.gpu_result.msg, per_gpu_result.gpu_result().msg().c_str(),
+                        MAX_DIAG_MSG_LENGTH);
+    }
+    strncpy_with_null(to_result->info, result.info().c_str(), MAX_DIAG_MSG_LENGTH);
   }
-  for (int j = 0; j < result.gpu_results_size(); j++) {
-    auto per_gpu_result = result.gpu_results(j);
-    rdc_diag_per_gpu_result_t& to_per_gpu = to_result->gpu_results[j];
-    to_per_gpu.gpu_index = per_gpu_result.gpu_index();
-    to_per_gpu.gpu_result.code = per_gpu_result.gpu_result().code();
-    strncpy_with_null(to_per_gpu.gpu_result.msg, per_gpu_result.gpu_result().msg().c_str(),
-                      MAX_DIAG_MSG_LENGTH);
+
+  auto status = reader->Finish();
+  if (status.ok()) {
+    RDC_LOG(RDC_DEBUG, "reader status: success!");
+  } else {
+    RDC_LOG(RDC_ERROR, "reader status: failure!");
   }
-  strncpy_with_null(to_result->info, result.info().c_str(), MAX_DIAG_MSG_LENGTH);
 
   return RDC_ST_OK;
 }
@@ -663,8 +703,8 @@ rdc_status_t RdcStandaloneHandler::rdc_field_update_all(uint32_t wait_for_update
 }
 
 // It is only an interface for the client under the GRPC framework and is not used as an RDC API.
-rdc_status_t RdcStandaloneHandler::get_mixed_component_version(mixed_component_t component, mixed_component_version_t* p_mixed_compv) {
-
+rdc_status_t RdcStandaloneHandler::get_mixed_component_version(
+    mixed_component_t component, mixed_component_version_t* p_mixed_compv) {
   if (!p_mixed_compv) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -681,7 +721,270 @@ rdc_status_t RdcStandaloneHandler::get_mixed_component_version(mixed_component_t
 
   strncpy_with_null(p_mixed_compv->version, reply.version().c_str(), USR_MAX_VERSION_STR_LENGTH);
   return RDC_ST_OK;
+}
 
+// Policy RdcAPI
+rdc_status_t RdcStandaloneHandler::rdc_policy_set(rdc_gpu_group_t group_id, rdc_policy_t policy) {
+  ::rdc::SetPolicyRequest request;
+  ::rdc::SetPolicyResponse reply;
+  ::grpc::ClientContext context;
+
+  request.set_group_id(group_id);
+  auto to_policy = request.mutable_policy();
+  to_policy->set_action(static_cast<::rdc::Policy_Action>(policy.action));
+
+  auto to_condition = to_policy->mutable_condition();
+
+  to_condition->set_type(static_cast<::rdc::PolicyCondition_Type>(policy.condition.type));
+  to_condition->set_value(policy.condition.value);
+
+  // call gRPC
+  ::grpc::Status status = stub_->SetPolicy(&context, request, &reply);
+
+  return error_handle(status, reply.status());
+}
+
+rdc_status_t RdcStandaloneHandler::rdc_policy_get(rdc_gpu_group_t group_id, uint32_t* count,
+                                                  rdc_policy_t policies[RDC_MAX_POLICY_SETTINGS]) {
+  ::rdc::GetPolicyRequest request;
+  ::rdc::GetPolicyResponse reply;
+  ::grpc::ClientContext context;
+
+  if (count == nullptr) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+
+  request.set_group_id(group_id);
+
+  // call gRPC
+  ::grpc::Status status = stub_->GetPolicy(&context, request, &reply);
+  rdc_status_t err_status = error_handle(status, reply.status());
+  if (err_status != RDC_ST_OK) return err_status;
+
+  auto response = reply.response();
+  uint32_t policy_count = response.count();
+
+  for (uint32_t i = 0; i < policy_count; ++i) {
+    const ::rdc::Policy& policy = response.policies(i);
+
+    ::rdc::PolicyCondition cond = policy.condition();
+    policies[i].condition.type = static_cast<rdc_policy_condition_type_t>(cond.type());
+    policies[i].condition.value = cond.value();
+    policies[i].action = static_cast<rdc_policy_action_t>(policy.action());
+  }
+
+  *count = policy_count;
+
+  return RDC_ST_OK;
+}
+
+rdc_status_t RdcStandaloneHandler::rdc_policy_delete(rdc_gpu_group_t group_id,
+                                                     rdc_policy_condition_type_t condition_type) {
+  ::rdc::DeletePolicyRequest request;
+  ::rdc::DeletePolicyResponse reply;
+  ::grpc::ClientContext context;
+
+  request.set_group_id(group_id);
+
+  request.set_condition_type(
+      static_cast<::rdc::DeletePolicyRequest_PolicyConditionType>(condition_type));
+
+  // call gRPC
+  ::grpc::Status status = stub_->DeletePolicy(&context, request, &reply);
+
+  return error_handle(status, reply.status());
+}
+
+rdc_status_t RdcStandaloneHandler::rdc_policy_register(rdc_gpu_group_t group_id,
+                                                       rdc_policy_register_callback callback) {
+  // check if a thread for a group is already registered
+  auto it = policy_threads_.find(group_id);
+  if (it != policy_threads_.end()) {
+    return RDC_ST_CONFLICT;
+  }
+
+  // no registered callback, start the thread to read the stream from rdcd
+  struct policy_thread_context ctx = {true,nullptr};
+
+  ctx.t = new std::thread([this, group_id, callback]() {
+    // call rdcd
+    ::rdc::RegisterPolicyRequest request;
+    ::rdc::RegisterPolicyResponse reply;
+    ::grpc::ClientContext context;
+
+    request.set_group_id(group_id);
+
+    // call to gRPC
+    std::unique_ptr<grpc::ClientReader<::rdc::RegisterPolicyResponse>> reader(
+        stub_->RegisterPolicy(&context, request));
+
+    bool start = true;
+    while (start) {
+      auto it = policy_threads_.find(group_id);
+      if (it != policy_threads_.end()) {
+        if (it->second.start == false) start = false;
+      } else {
+        start = false;
+      }
+
+      if (reader->Read(&reply)) {
+        reply.status();
+        ::rdc::PolicyCondition cond = reply.condition();
+
+        rdc_policy_callback_response_t response;
+        response.version = reply.version();
+        response.condition.type = static_cast<rdc_policy_condition_type_t>(cond.type());
+        response.condition.value = cond.value();
+        response.group_id = reply.group_id();
+        response.value = reply.value();
+
+        callback(&response);
+      }
+    }
+
+    reader->Finish();
+  });
+
+  policy_threads_.insert(std::make_pair(group_id, ctx));
+
+  return RDC_ST_OK;
+}
+
+rdc_status_t RdcStandaloneHandler::rdc_policy_unregister(rdc_gpu_group_t group_id) {
+  ::rdc::UnRegisterPolicyRequest request;
+  ::rdc::UnRegisterPolicyResponse reply;
+  ::grpc::ClientContext context;
+
+  // stop the assocaticted thread of a group
+  auto it = policy_threads_.find(group_id);
+  if (it != policy_threads_.end()) {
+    struct policy_thread_context& ctx = it->second;
+    ctx.start = false;
+  }
+
+  // construcut the request
+  request.set_group_id(group_id);
+
+  // call gRPC
+  ::grpc::Status status = stub_->UnRegisterPolicy(&context, request, &reply);
+  return error_handle(status, reply.status());
+}
+
+// Health RdcAPI
+rdc_status_t RdcStandaloneHandler::rdc_health_set(rdc_gpu_group_t group_id,
+                                                  unsigned int components) {
+  ::rdc::SetHealthRequest request;
+  ::rdc::SetHealthResponse reply;
+  ::grpc::ClientContext context;
+
+  request.set_group_id(group_id);
+  request.set_components(components);
+  ::grpc::Status status = stub_->SetHealth(&context, request, &reply);
+  rdc_status_t err_status = error_handle(status, reply.status());
+
+  return err_status;
+}
+
+rdc_status_t RdcStandaloneHandler::rdc_health_get(rdc_gpu_group_t group_id,
+                                                  unsigned int* components) {
+  if (!components) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+
+  ::rdc::GetHealthRequest request;
+  ::rdc::GetHealthResponse reply;
+  ::grpc::ClientContext context;
+
+  request.set_group_id(group_id);
+  ::grpc::Status status = stub_->GetHealth(&context, request, &reply);
+  rdc_status_t err_status = error_handle(status, reply.status());
+  if (err_status != RDC_ST_OK) return err_status;
+
+  *components = reply.components();
+  return RDC_ST_OK;
+}
+
+rdc_status_t RdcStandaloneHandler::rdc_health_check(rdc_gpu_group_t group_id,
+                                                    rdc_health_response_t *response) {
+  if (!response) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+
+  ::rdc::CheckHealthRequest request;
+  ::rdc::CheckHealthResponse reply;
+  ::grpc::ClientContext context;
+
+  request.set_group_id(group_id);
+  ::grpc::Status status = stub_->CheckHealth(&context, request, &reply);
+  rdc_status_t err_status = error_handle(status, reply.status());
+  if (err_status != RDC_ST_OK) return err_status;
+
+  auto res = reply.response();
+  response->overall_health = static_cast<rdc_health_result_t>(res.overall_health());
+  response->incidents_count = res.incidents_count();
+
+  for (int i = 0; i < res.incidents_size(); i++) {
+    const ::rdc::HealthIncidents& result = res.incidents(i);
+    rdc_health_incidents_t& to_result = response->incidents[i];
+
+    to_result.gpu_index = result.gpu_index();
+    to_result.component = static_cast<rdc_health_system_t>(result.component());
+    to_result.health = static_cast<rdc_health_result_t>(result.health());
+
+    //set error
+    to_result.error.code = result.error().code();
+    strncpy_with_null(to_result.error.msg, result.error().msg().c_str(), MAX_HEALTH_MSG_LENGTH);
+  }
+
+  return RDC_ST_OK;
+}
+
+rdc_status_t RdcStandaloneHandler::rdc_health_clear(rdc_gpu_group_t group_id) {
+  ::rdc::ClearHealthRequest request;
+  ::rdc::ClearHealthResponse reply;
+  ::grpc::ClientContext context;
+
+  request.set_group_id(group_id);
+  ::grpc::Status status = stub_->ClearHealth(&context, request, &reply);
+  rdc_status_t err_status = error_handle(status, reply.status());
+  if (err_status != RDC_ST_OK) return err_status;
+
+  return RDC_ST_OK;
+}
+
+rdc_status_t RdcStandaloneHandler::rdc_device_topology_get(uint32_t gpu_index,
+                                                           rdc_device_topology_t* results) {
+  ::rdc::GetTopologyRequest request;
+  ::rdc::GetTopologyResponse reply;
+  ::grpc::ClientContext context;
+
+  request.set_gpu_index(gpu_index);
+  ::grpc::Status status = stub_->GetTopology(&context, request, &reply);
+  rdc_status_t err_status = error_handle(status, reply.status());
+  if (err_status != RDC_ST_OK) return err_status;
+
+  ::rdc::Topology Topology = reply.toppology();
+  results->num_of_gpus= Topology.num_of_gpus();
+  results->numa_node= Topology.numa_node();
+
+  for (uint32_t i = 0; i < Topology.num_of_gpus(); ++i) {
+  ::rdc::TopologyLinkInfo linkinfo = Topology.link_infos(i);
+  results->link_infos[i].gpu_index=linkinfo.gpu_index();
+  results->link_infos[i].weight=linkinfo.weight();
+  results->link_infos[i].min_bandwidth=linkinfo.min_bandwidth();
+  results->link_infos[i].max_bandwidth=linkinfo.max_bandwidth();
+  results->link_infos[i].hops=linkinfo.hops();
+  results->link_infos[i].link_type=static_cast<rdc_topology_link_type_t>(linkinfo.link_type());
+  results->link_infos[i].is_p2p_accessible=linkinfo.p2p_accessible();
+  }
+
+  return RDC_ST_OK;
+}
+
+rdc_status_t RdcStandaloneHandler::rdc_link_status_get(rdc_link_status_t* results) {
+  ::rdc::UpdateAllFieldsResponse reply;
+  ::grpc::Status status = grpc::Status::OK;
+  return error_handle(status, reply.status());
 }
 
 }  // namespace rdc

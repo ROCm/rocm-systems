@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2020 - present Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2024 - present Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,30 +19,30 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#ifndef INCLUDE_RDC_LIB_RDCDIAGNOSTICLIBINTERFACE_H_
-#define INCLUDE_RDC_LIB_RDCDIAGNOSTICLIBINTERFACE_H_
+#ifndef INCLUDE_RDC_LIB_RDCTOPOLOGYLINK_H_
+#define INCLUDE_RDC_LIB_RDCTOPOLOGYLINK_H_
 
-// The telemetry interface for libraries, for example, AMD-SMI.
-#include <rdc/rdc.h>
+#include <memory>
+#include <vector>
 
-extern "C" {
+#include "rdc/rdc.h"
+#include "rdc_lib/rdc_common.h"
 
-// The library will implement below function
+namespace amd {
+namespace rdc {
 
-// Which test cases are supported in the library
-rdc_status_t rdc_diag_test_cases_query(rdc_diag_test_cases_t test_cases[MAX_TEST_CASES],
-                                       uint32_t* test_case_count);
+class RdcTopologyLink {
+ public:
+  virtual rdc_status_t rdc_device_topology_get(uint32_t gpu_index,
+                                               rdc_device_topology_t* results) = 0;
+  virtual rdc_status_t rdc_link_status_get(rdc_link_status_t* results) = 0;
 
-// Run a specific test case
+  virtual ~RdcTopologyLink() {}
+};
 
-rdc_status_t rdc_diag_test_case_run(rdc_diag_test_cases_t test_case,
-                                    uint32_t gpu_index[RDC_MAX_NUM_DEVICES], uint32_t gpu_count,
-                                    const char* config, size_t config_size,
-                                    rdc_diag_test_result_t* result, rdc_diag_callback_t* callback);
+typedef std::shared_ptr<RdcTopologyLink> RdcTopologyLinkPtr;
 
-rdc_status_t rdc_diag_init(uint64_t flags);
+}  // namespace rdc
+}  // namespace amd
 
-rdc_status_t rdc_diag_destroy();
-}
-
-#endif  // INCLUDE_RDC_LIB_RDCDIAGNOSTICLIBINTERFACE_H_
+#endif  // INCLUDE_RDC_LIB_RDCTOPOLOGYLINK_H_

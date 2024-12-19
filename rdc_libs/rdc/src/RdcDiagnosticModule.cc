@@ -25,6 +25,7 @@ THE SOFTWARE.
 #include <vector>
 
 #include "rdc/rdc.h"
+#include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/rdc_common.h"
 
 namespace amd {
@@ -48,11 +49,9 @@ rdc_status_t RdcDiagnosticModule::rdc_diag_test_cases_query(
   return RDC_ST_OK;
 }
 
-rdc_status_t RdcDiagnosticModule::rdc_test_case_run(rdc_diag_test_cases_t test_case,
-                                                    uint32_t gpu_index[RDC_MAX_NUM_DEVICES],
-                                                    uint32_t gpu_count, const char* config,
-                                                    size_t config_size,
-                                                    rdc_diag_test_result_t* result) {
+rdc_status_t RdcDiagnosticModule::rdc_test_case_run(
+    rdc_diag_test_cases_t test_case, uint32_t gpu_index[RDC_MAX_NUM_DEVICES], uint32_t gpu_count,
+    const char* config, size_t config_size, rdc_diag_test_result_t* result, rdc_diag_callback_t* callback) {
   if (result == nullptr) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -64,14 +63,17 @@ rdc_status_t RdcDiagnosticModule::rdc_test_case_run(rdc_diag_test_cases_t test_c
     strncpy_with_null(result->info, "Not implemented", MAX_DIAG_MSG_LENGTH);
     return RDC_ST_NOT_SUPPORTED;
   }
-  return ite->second->rdc_test_case_run(test_case, gpu_index, gpu_count, config, config_size,
-                                        result);
+
+  rdc_status_t status = ite->second->rdc_test_case_run(test_case, gpu_index, gpu_count, config,
+                                                       config_size, result, callback);
+  return status;
 }
 
 rdc_status_t RdcDiagnosticModule::rdc_diagnostic_run(const rdc_group_info_t& gpus,
                                                      rdc_diag_level_t level, const char* config,
                                                      size_t config_size,
-                                                     rdc_diag_response_t* response) {
+                                                     rdc_diag_response_t* response,
+                                                     rdc_diag_callback_t* callback) {
   if (response == nullptr) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -89,12 +91,27 @@ rdc_status_t RdcDiagnosticModule::rdc_diagnostic_run(const rdc_group_info_t& gpu
     rdc_runs.push_back(RDC_DIAG_RVS_TEST);
   }
 
+  if (callback != nullptr && callback->callback != nullptr && callback->cookie != nullptr) {
+    std::string log = "DiagnosticRun started";
+    callback->callback(callback->cookie, log.data());
+  }
+
   response->results_count = 0;
   for (unsigned int i = 0; i < rdc_runs.size(); i++) {
+    if (callback != nullptr && callback->callback != nullptr && callback->cookie != nullptr) {
+      std::string log = "Test " + std::to_string(i) + " / " + std::to_string(rdc_runs.size());
+      callback->callback(callback->cookie, log.data());
+    }
     response->diag_info[i].test_case = rdc_runs[i];
+    // NOTE: rdc_test_case_run reuses the diagnostic_run callback
     rdc_test_case_run(rdc_runs[i], const_cast<uint32_t*>(gpus.entity_ids), gpus.count, config,
-                      config_size, &(response->diag_info[i]));
+                      config_size, &(response->diag_info[i]), callback);
     response->results_count++;
+  }
+
+  if (callback != nullptr && callback->callback != nullptr && callback->cookie != nullptr) {
+    std::string log = "DiagnosticRun finished";
+    callback->callback(callback->cookie, log.data());
   }
 
   return RDC_ST_OK;

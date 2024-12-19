@@ -25,6 +25,7 @@ THE SOFTWARE.
 
 #include "amd_smi/amdsmi.h"
 #include "common/rdc_fields_supported.h"
+#include "rdc/rdc.h"
 #include "rdc_lib/RdcException.h"
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/RdcNotification.h"
@@ -34,6 +35,8 @@ THE SOFTWARE.
 #include "rdc_lib/impl/RdcMetricsUpdaterImpl.h"
 #include "rdc_lib/impl/RdcModuleMgrImpl.h"
 #include "rdc_lib/impl/RdcNotificationImpl.h"
+#include "rdc_lib/impl/RdcPolicyImpl.h"
+#include "rdc_lib/impl/RdcTopologyLinkImpl.h"
 #include "rdc_lib/impl/RdcWatchTableImpl.h"
 #include "rdc_lib/rdc_common.h"
 
@@ -77,8 +80,10 @@ RdcEmbeddedHandler::RdcEmbeddedHandler(rdc_operation_mode_t mode)
       metric_fetcher_(new RdcMetricFetcherImpl()),
       rdc_module_mgr_(new RdcModuleMgrImpl(metric_fetcher_)),
       rdc_notif_(new RdcNotificationImpl()),
-      watch_table_(new RdcWatchTableImpl(group_settings_, cache_mgr_, rdc_module_mgr_, rdc_notif_)),
-      metrics_updater_(new RdcMetricsUpdaterImpl(watch_table_, METIC_UPDATE_FREQUENCY)) {
+      watch_table_(new RdcWatchTableImpl(group_settings_, cache_mgr_, metric_fetcher_, rdc_module_mgr_, rdc_notif_)),
+      metrics_updater_(new RdcMetricsUpdaterImpl(watch_table_, METIC_UPDATE_FREQUENCY)),
+      policy_(new RdcPolicyImpl(group_settings_,metric_fetcher_)),
+      topologylink_(new RdcTopologyLinkImpl(group_settings_, metric_fetcher_)) {
   if (mode == RDC_OPERATION_MODE_AUTO) {
     RDC_LOG(RDC_DEBUG, "Run RDC with RDC_OPERATION_MODE_AUTO");
     metrics_updater_->start();
@@ -378,7 +383,7 @@ rdc_status_t RdcEmbeddedHandler::rdc_field_unwatch(rdc_gpu_group_t group_id,
 rdc_status_t RdcEmbeddedHandler::rdc_diagnostic_run(rdc_gpu_group_t group_id,
                                                     rdc_diag_level_t level, const char* config,
                                                     size_t config_size,
-                                                    rdc_diag_response_t* response) {
+                                                    rdc_diag_response_t* response, rdc_diag_callback_t* callback) {
   if (!response) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -389,13 +394,13 @@ rdc_status_t RdcEmbeddedHandler::rdc_diagnostic_run(rdc_gpu_group_t group_id,
   if (status != RDC_ST_OK) return status;
 
   auto diag = rdc_module_mgr_->get_diagnostic_module();
-  return diag->rdc_diagnostic_run(rdc_group_info, level, config, config_size, response);
+  return diag->rdc_diagnostic_run(rdc_group_info, level, config, config_size, response, callback);
 }
 
 rdc_status_t RdcEmbeddedHandler::rdc_test_case_run(rdc_gpu_group_t group_id,
                                                    rdc_diag_test_cases_t test_case,
                                                    const char* config, size_t config_size,
-                                                   rdc_diag_test_result_t* result) {
+                                                   rdc_diag_test_result_t* result, rdc_diag_callback_t* callback) {
   if (!result) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -406,7 +411,7 @@ rdc_status_t RdcEmbeddedHandler::rdc_test_case_run(rdc_gpu_group_t group_id,
 
   auto diag = rdc_module_mgr_->get_diagnostic_module();
   return diag->rdc_test_case_run(test_case, rdc_group_info.entity_ids, rdc_group_info.count, config,
-                                 config_size, result);
+                                 config_size, result, callback);
 }
 
 // Control API
@@ -427,6 +432,76 @@ rdc_status_t RdcEmbeddedHandler::get_mixed_component_version(mixed_component_t c
   (void)(component);
   (void)(p_mixed_compv);
   return RDC_ST_OK;
+}
+
+// Policy API
+rdc_status_t RdcEmbeddedHandler::rdc_policy_set(rdc_gpu_group_t group_id, rdc_policy_t policy) {
+  return policy_->rdc_policy_set(group_id, policy);
+}
+
+rdc_status_t RdcEmbeddedHandler::rdc_policy_get(rdc_gpu_group_t group_id, uint32_t* count,
+                                                rdc_policy_t policies[RDC_MAX_POLICY_SETTINGS]) {
+  if (count == nullptr) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+
+  return policy_->rdc_policy_get(group_id, count, policies);
+}
+
+rdc_status_t RdcEmbeddedHandler::rdc_policy_delete(rdc_gpu_group_t group_id,
+                                                   rdc_policy_condition_type_t condition_type) {
+  return policy_->rdc_policy_delete(group_id, condition_type);
+}
+
+rdc_status_t RdcEmbeddedHandler::rdc_policy_register(rdc_gpu_group_t group_id,
+                                                     rdc_policy_register_callback callback) {
+  return policy_->rdc_policy_register(group_id, callback);
+}
+
+rdc_status_t RdcEmbeddedHandler::rdc_policy_unregister(rdc_gpu_group_t group_id) {
+  return policy_->rdc_policy_unregister(group_id);
+}
+
+// Health API
+rdc_status_t RdcEmbeddedHandler::rdc_health_set(rdc_gpu_group_t group_id,
+                                                unsigned int components) {
+  if (0 == components) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+
+  return watch_table_->rdc_health_set(group_id, components);
+}
+
+rdc_status_t RdcEmbeddedHandler::rdc_health_get(rdc_gpu_group_t group_id,
+                                                unsigned int *components) {
+  if (components == nullptr) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+
+  return watch_table_->rdc_health_get(group_id, components);
+}
+
+rdc_status_t RdcEmbeddedHandler::rdc_health_check(rdc_gpu_group_t group_id,
+                                                  rdc_health_response_t *response) {
+  if (response == nullptr) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+
+  return watch_table_->rdc_health_check(group_id, response);
+}
+
+rdc_status_t RdcEmbeddedHandler::rdc_health_clear(rdc_gpu_group_t group_id) {
+
+  return watch_table_->rdc_health_clear(group_id);
+}
+
+rdc_status_t RdcEmbeddedHandler::rdc_device_topology_get(uint32_t gpu_index,
+                                                         rdc_device_topology_t* results) {
+  return topologylink_->rdc_device_topology_get(gpu_index, results);
+}
+
+rdc_status_t RdcEmbeddedHandler::rdc_link_status_get(rdc_link_status_t* results) {
+  return topologylink_->rdc_link_status_get(results);
 }
 
 }  // namespace rdc

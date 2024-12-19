@@ -32,6 +32,8 @@ THE SOFTWARE.
 #include "rdc_lib/RdcCacheManager.h"
 #include "rdc_lib/rdc_common.h"
 
+#define HEALTH_MAX_KEEP_SAMPLES 300
+
 namespace amd {
 namespace rdc {
 
@@ -81,6 +83,9 @@ struct RdcJobStatsCacheEntry {
 // <job_id, job_stats>
 typedef std::map<std::string, RdcJobStatsCacheEntry> RdcJobStatsCache;
 
+// <group_id, health_samples>
+typedef std::map<rdc_gpu_group_t, RdcCacheSamples> RdcHealthStatsCache;
+
 class RdcCacheManagerImpl : public RdcCacheManager {
  public:
   rdc_status_t rdc_field_get_latest_value(uint32_t gpu_index, rdc_field_t field,
@@ -105,6 +110,21 @@ class RdcCacheManagerImpl : public RdcCacheManager {
   rdc_status_t rdc_job_remove(const char job_id[64]) override;
   rdc_status_t rdc_job_remove_all() override;
 
+  rdc_status_t rdc_health_set(rdc_gpu_group_t group_id,
+                              uint32_t gpu_index,
+                              const rdc_field_value& value) override;
+  rdc_status_t rdc_health_get_values(rdc_gpu_group_t group_id,
+                                     uint32_t gpu_index,
+                                     rdc_field_t field_id,
+                                     uint64_t start_timestamp,
+                                     uint64_t end_timestamp,
+                                     rdc_field_value* start_value,
+                                     rdc_field_value* end_value) override;
+  rdc_status_t rdc_health_clear(rdc_gpu_group_t group_id) override;
+  rdc_status_t rdc_update_health_stats(rdc_gpu_group_t group_id,
+                                       uint32_t gpu_index,
+                                       const rdc_field_value& value) override;
+
  private:
   void set_summary(const FieldSummaryStats& stats, rdc_stats_summary_t& gpu,
                    rdc_stats_summary_t& summary,  // NOLINT
@@ -113,6 +133,7 @@ class RdcCacheManagerImpl : public RdcCacheManager {
                            uint32_t num_gpus);  // NOLINT
   RdcCacheSamples cache_samples_;
   RdcJobStatsCache cache_jobs_;
+  RdcHealthStatsCache cache_health_;
   std::mutex cache_mutex_;
 };
 

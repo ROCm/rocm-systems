@@ -22,6 +22,10 @@ THE SOFTWARE.
 #ifndef SERVER_INCLUDE_RDC_RDC_API_SERVICE_H_
 #define SERVER_INCLUDE_RDC_RDC_API_SERVICE_H_
 
+#include <thread>
+
+#include <grpcpp/server_context.h>
+
 #include "rdc.grpc.pb.h"  // NOLINT
 #include "rdc/rdc.h"
 
@@ -34,6 +38,7 @@ class RdcAPIServiceImpl final : public ::rdc::RdcAPI::Service {
   ~RdcAPIServiceImpl();
 
   rdc_status_t Initialize(uint64_t rdcd_init_flags = 0);
+  void Shutdown();
 
   ::grpc::Status GetAllDevices(::grpc::ServerContext* context, const ::rdc::Empty* request,
                                ::rdc::GetAllDevicesResponse* reply) override;
@@ -42,8 +47,9 @@ class RdcAPIServiceImpl final : public ::rdc::RdcAPI::Service {
                                      const ::rdc::GetDeviceAttributesRequest* request,
                                      ::rdc::GetDeviceAttributesResponse* reply) override;
 
-  ::grpc::Status GetComponentVersion(::grpc::ServerContext* context,  const ::rdc::GetComponentVersionRequest* request,
-                               ::rdc::GetComponentVersionResponse* reply) override;
+  ::grpc::Status GetComponentVersion(::grpc::ServerContext* context,
+                                     const ::rdc::GetComponentVersionRequest* request,
+                                     ::rdc::GetComponentVersionResponse* reply) override;
 
   ::grpc::Status CreateGpuGroup(::grpc::ServerContext* context,
                                 const ::rdc::CreateGpuGroupRequest* request,
@@ -117,19 +123,69 @@ class RdcAPIServiceImpl final : public ::rdc::RdcAPI::Service {
   ::grpc::Status RemoveAllJob(::grpc::ServerContext* context, const ::rdc::Empty* request,
                               ::rdc::RemoveAllJobResponse* reply) override;
 
-  ::grpc::Status DiagnosticRun(::grpc::ServerContext* context,
-                               const ::rdc::DiagnosticRunRequest* request,
-                               ::rdc::DiagnosticRunResponse* reply) override;
+  ::grpc::Status DiagnosticRun(
+      ::grpc::ServerContext* context, const ::rdc::DiagnosticRunRequest* request,
+      ::grpc::ServerWriter< ::rdc::DiagnosticRunResponse>* writer) override;
 
-  ::grpc::Status DiagnosticTestCaseRun(::grpc::ServerContext* context,
-                                       const ::rdc::DiagnosticTestCaseRunRequest* request,
-                                       ::rdc::DiagnosticTestCaseRunResponse* reply) override;
+  ::grpc::Status DiagnosticTestCaseRun(
+      ::grpc::ServerContext* context, const ::rdc::DiagnosticTestCaseRunRequest* request,
+      ::grpc::ServerWriter< ::rdc::DiagnosticTestCaseRunResponse>* writer) override;
 
-  ::grpc::Status GetMixedComponentVersion(::grpc::ServerContext* context, const ::rdc::GetMixedComponentVersionRequest* request,
-                               ::rdc::GetMixedComponentVersionResponse* reply) override;
+  ::grpc::Status GetMixedComponentVersion(::grpc::ServerContext* context,
+                                          const ::rdc::GetMixedComponentVersionRequest* request,
+                                          ::rdc::GetMixedComponentVersionResponse* reply) override;
+
+  ::grpc::Status SetPolicy(::grpc::ServerContext* context, const ::rdc::SetPolicyRequest* request,
+                           ::rdc::SetPolicyResponse* reply) override;
+
+  ::grpc::Status GetPolicy(::grpc::ServerContext* context, const ::rdc::GetPolicyRequest* request,
+                           ::rdc::GetPolicyResponse* reply) override;
+
+  ::grpc::Status DeletePolicy(::grpc::ServerContext* context,
+                              const ::rdc::DeletePolicyRequest* request,
+                              ::rdc::DeletePolicyResponse* reply) override;
+
+  ::grpc::Status RegisterPolicy(
+      ::grpc::ServerContext* context, const ::rdc::RegisterPolicyRequest* request,
+      ::grpc::ServerWriter< ::rdc::RegisterPolicyResponse>* stream) override;
+
+  ::grpc::Status UnRegisterPolicy(::grpc::ServerContext* context,
+                                  const ::rdc::UnRegisterPolicyRequest* request,
+                                  ::rdc::UnRegisterPolicyResponse* reply) override;
+                                  
+  ::grpc::Status GetTopology(::grpc::ServerContext* context,
+                             const ::rdc::GetTopologyRequest* request,
+                             ::rdc::GetTopologyResponse* reply) override;
+
+  ::grpc::Status SetHealth(::grpc::ServerContext* context,
+                           const ::rdc::SetHealthRequest* request,
+                           ::rdc::SetHealthResponse* reply) override;
+
+  ::grpc::Status GetHealth(::grpc::ServerContext* context,
+                           const ::rdc::GetHealthRequest* request,
+                           ::rdc::GetHealthResponse* reply) override;
+
+  ::grpc::Status CheckHealth(::grpc::ServerContext* context,
+                             const ::rdc::CheckHealthRequest* request,
+                             ::rdc::CheckHealthResponse* reply) override;
+
+  ::grpc::Status ClearHealth(::grpc::ServerContext* context,
+                             const ::rdc::ClearHealthRequest* request,
+                             ::rdc::ClearHealthResponse* reply) override;
+
  private:
   bool copy_gpu_usage_info(const rdc_gpu_usage_info_t& src, ::rdc::GpuUsageInfo* target);
   rdc_handle_t rdc_handle_;
+
+  struct policy_thread_context {
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    rdc_policy_callback_response_t response;
+    bool start;
+  };
+  // map for group_id and thread context
+  static std::map<uint32_t, struct policy_thread_context*> policy_threads_;
+  static int PolicyCallback(rdc_policy_callback_response_t* userData);
 };
 
 }  // namespace rdc
