@@ -780,6 +780,8 @@ class AMDSMIHelpers():
 
 
     def convert_bytes_to_readable(self, bytes_input, format_length=None):
+        if isinstance(bytes_input, str):
+            return "N/A"
         for unit in ["B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB"]:
             if abs(bytes_input) < 1024:
                 if format_length is not None:

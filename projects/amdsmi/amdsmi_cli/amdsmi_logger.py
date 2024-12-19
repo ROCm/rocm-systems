@@ -132,15 +132,18 @@ class AMDSMILogger():
             elif key == "gpu#":
                 table_values += string_value.ljust(7)
             elif key == "bdf":
-                table_values += string_value.ljust(13)
+                table_values += string_value.ljust(14)
             elif "bdf_" in key:
                 table_values += string_value.ljust(13)
             elif key == "bit_rate":
-                table_values += string_value.ljust(9)
-            elif key == "max_bandwidth":
-                table_values += string_value.ljust(14)
-            elif key == "link_type":
                 table_values += string_value.ljust(10)
+            elif key == "max_bandwidth":
+                table_values += string_value.ljust(15)
+            elif key == "link_type":
+                table_values += string_value.ljust(11)
+            elif key == "link_status":
+                for i in value:
+                    table_values += str(i).ljust(3)
             elif key == "memory":
                 table_values += string_value.ljust(8)
             elif key == "accelerator_type":
@@ -166,7 +169,7 @@ class AMDSMILogger():
             elif key == "resources_shared":
                 table_values += string_value.ljust(18)
             elif key == "RW":
-                table_values += string_value.ljust(53)
+                table_values += string_value.ljust(57)
             elif key == "process_list":
                 #Add an additional padding between the first instance of GPU and NAME
                 table_values += '  '

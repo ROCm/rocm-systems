@@ -1044,7 +1044,8 @@ struct_amdsmi_vram_info_t._fields_ = [
     ('vram_size', ctypes.c_uint64),
     ('vram_bit_width', ctypes.c_uint32),
     ('PADDING_0', ctypes.c_ubyte * 4),
-    ('reserved', ctypes.c_uint64 * 5),
+    ('vram_max_bandwidth', ctypes.c_uint64),
+    ('reserved', ctypes.c_uint64 * 4),
 ]
 
 amdsmi_vram_info_t = struct_amdsmi_vram_info_t
@@ -1119,6 +1120,16 @@ amdsmi_process_handle_t = ctypes.c_uint32
 class struct_amdsmi_proc_info_t(Structure):
     pass
 
+class struct_engine_usage_(Structure):
+    pass
+
+struct_engine_usage_._pack_ = 1 # source:False
+struct_engine_usage_._fields_ = [
+    ('gfx', ctypes.c_uint64),
+    ('enc', ctypes.c_uint64),
+    ('reserved', ctypes.c_uint32 * 12),
+]
+
 class struct_memory_usage_(Structure):
     pass
 
@@ -1128,16 +1139,6 @@ struct_memory_usage_._fields_ = [
     ('cpu_mem', ctypes.c_uint64),
     ('vram_mem', ctypes.c_uint64),
     ('reserved', ctypes.c_uint32 * 10),
-]
-
-class struct_engine_usage_(Structure):
-    pass
-
-struct_engine_usage_._pack_ = 1 # source:False
-struct_engine_usage_._fields_ = [
-    ('gfx', ctypes.c_uint64),
-    ('enc', ctypes.c_uint64),
-    ('reserved', ctypes.c_uint32 * 12),
 ]
 
 struct_amdsmi_proc_info_t._pack_ = 1 # source:False
@@ -1739,6 +1740,7 @@ struct_amdsmi_gpu_xcp_metrics_t._fields_ = [
     ('jpeg_busy', ctypes.c_uint16 * 32),
     ('vcn_busy', ctypes.c_uint16 * 4),
     ('gfx_busy_acc', ctypes.c_uint64 * 8),
+    ('gfx_below_host_limit_acc', ctypes.c_uint64 * 8),
 ]
 
 amdsmi_gpu_xcp_metrics_t = struct_amdsmi_gpu_xcp_metrics_t
@@ -1820,9 +1822,34 @@ struct_amdsmi_gpu_metrics_t._fields_ = [
     ('xcp_stats', struct_amdsmi_gpu_xcp_metrics_t * 8),
     ('pcie_lc_perf_other_end_recovery', ctypes.c_uint32),
     ('PADDING_5', ctypes.c_ubyte * 4),
+    ('vram_max_bandwidth', ctypes.c_uint64),
+    ('xgmi_link_status', ctypes.c_uint16 * 8),
 ]
 
 amdsmi_gpu_metrics_t = struct_amdsmi_gpu_metrics_t
+
+# values for enumeration 'amdsmi_xgmi_link_status_type_t'
+amdsmi_xgmi_link_status_type_t__enumvalues = {
+    0: 'AMDSMI_XGMI_LINK_DOWN',
+    1: 'AMDSMI_XGMI_LINK_UP',
+    2: 'AMDSMI_XGMI_LINK_DISABLE',
+}
+AMDSMI_XGMI_LINK_DOWN = 0
+AMDSMI_XGMI_LINK_UP = 1
+AMDSMI_XGMI_LINK_DISABLE = 2
+amdsmi_xgmi_link_status_type_t = ctypes.c_uint32 # enum
+class struct_amdsmi_xgmi_link_status_t(Structure):
+    pass
+
+struct_amdsmi_xgmi_link_status_t._pack_ = 1 # source:False
+struct_amdsmi_xgmi_link_status_t._fields_ = [
+    ('total_links', ctypes.c_uint32),
+    ('status', amdsmi_xgmi_link_status_type_t * 8),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('reserved', ctypes.c_uint64 * 7),
+]
+
+amdsmi_xgmi_link_status_t = struct_amdsmi_xgmi_link_status_t
 class struct_amdsmi_name_value_t(Structure):
     pass
 
@@ -2397,6 +2424,9 @@ amdsmi_get_pcie_info.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_
 amdsmi_get_xgmi_info = _libraries['libamd_smi.so'].amdsmi_get_xgmi_info
 amdsmi_get_xgmi_info.restype = amdsmi_status_t
 amdsmi_get_xgmi_info.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_xgmi_info_t)]
+amdsmi_get_gpu_xgmi_link_status = _libraries['libamd_smi.so'].amdsmi_get_gpu_xgmi_link_status
+amdsmi_get_gpu_xgmi_link_status.restype = amdsmi_status_t
+amdsmi_get_gpu_xgmi_link_status.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_xgmi_link_status_t)]
 amdsmi_get_fw_info = _libraries['libamd_smi.so'].amdsmi_get_fw_info
 amdsmi_get_fw_info.restype = amdsmi_status_t
 amdsmi_get_fw_info.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_fw_info_t)]
@@ -2763,8 +2793,9 @@ __all__ = \
     'AMDSMI_VRAM_VENDOR__PLACEHOLDER3',
     'AMDSMI_VRAM_VENDOR__PLACEHOLDER4',
     'AMDSMI_VRAM_VENDOR__PLACEHOLDER5', 'AMDSMI_VRAM_VENDOR__SAMSUNG',
-    'AMDSMI_VRAM_VENDOR__WINBOND', 'AMDSMI_XGMI_STATUS_ERROR',
-    'AMDSMI_XGMI_STATUS_MULTIPLE_ERRORS',
+    'AMDSMI_VRAM_VENDOR__WINBOND', 'AMDSMI_XGMI_LINK_DISABLE',
+    'AMDSMI_XGMI_LINK_DOWN', 'AMDSMI_XGMI_LINK_UP',
+    'AMDSMI_XGMI_STATUS_ERROR', 'AMDSMI_XGMI_STATUS_MULTIPLE_ERRORS',
     'AMDSMI_XGMI_STATUS_NO_ERRORS', 'CLK_LIMIT_MAX', 'CLK_LIMIT_MIN',
     'RD_BW0', 'WR_BW0', 'amd_metrics_table_header_t',
     'amdsmi_accelerator_partition_profile_t',
@@ -2851,7 +2882,8 @@ __all__ = \
     'amdsmi_get_gpu_total_ecc_count', 'amdsmi_get_gpu_vbios_info',
     'amdsmi_get_gpu_vendor_name', 'amdsmi_get_gpu_volt_metric',
     'amdsmi_get_gpu_vram_info', 'amdsmi_get_gpu_vram_usage',
-    'amdsmi_get_gpu_vram_vendor', 'amdsmi_get_hsmp_metrics_table',
+    'amdsmi_get_gpu_vram_vendor', 'amdsmi_get_gpu_xgmi_link_status',
+    'amdsmi_get_hsmp_metrics_table',
     'amdsmi_get_hsmp_metrics_table_version', 'amdsmi_get_lib_version',
     'amdsmi_get_link_metrics', 'amdsmi_get_link_topology_nearest',
     'amdsmi_get_minmax_bandwidth_between_processors',
@@ -2924,6 +2956,7 @@ __all__ = \
     'amdsmi_voltage_metric_t', 'amdsmi_voltage_type_t',
     'amdsmi_vram_info_t', 'amdsmi_vram_type_t', 'amdsmi_vram_usage_t',
     'amdsmi_vram_vendor_type_t', 'amdsmi_xgmi_info_t',
+    'amdsmi_xgmi_link_status_t', 'amdsmi_xgmi_link_status_type_t',
     'amdsmi_xgmi_status_t', 'processor_type_t', 'size_t',
     'struct__links', 'struct_amd_metrics_table_header_t',
     'struct_amdsmi_accelerator_partition_profile_t',
@@ -2958,7 +2991,8 @@ __all__ = \
     'struct_amdsmi_vbios_info_t', 'struct_amdsmi_version_t',
     'struct_amdsmi_violation_status_t', 'struct_amdsmi_vram_info_t',
     'struct_amdsmi_vram_usage_t', 'struct_amdsmi_xgmi_info_t',
-    'struct_cache_', 'struct_engine_usage_', 'struct_fw_info_list_',
+    'struct_amdsmi_xgmi_link_status_t', 'struct_cache_',
+    'struct_engine_usage_', 'struct_fw_info_list_',
     'struct_memory_usage_', 'struct_nps_flags_',
     'struct_pcie_metric_', 'struct_pcie_static_',
     'struct_amdsmi_bdf_t', 'uint32_t', 'uint64_t', 'uint8_t',

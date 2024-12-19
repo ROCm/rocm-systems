@@ -1818,13 +1818,48 @@ def amdsmi_get_gpu_vram_info(
         amdsmi_wrapper.amdsmi_get_gpu_vram_info(
             processor_handle, ctypes.byref(vram_info))
     )
-
     return {
         "vram_type": vram_info.vram_type,
         "vram_vendor": vram_info.vram_vendor,
         "vram_size": vram_info.vram_size,
-        "vram_bit_width": vram_info.vram_bit_width
+        "vram_bit_width": _validate_if_max_uint(vram_info.vram_bit_width, MaxUIntegerTypes.UINT32_T),
+        "vram_max_bandwidth": _validate_if_max_uint(vram_info.vram_max_bandwidth, MaxUIntegerTypes.UINT64_T),
     }
+
+
+def amdsmi_get_gpu_xgmi_link_status(
+    processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
+    ) -> Dict[str, Any]:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+    status_info = amdsmi_wrapper.amdsmi_xgmi_link_status_t()
+    _check_res(
+    amdsmi_wrapper.amdsmi_get_gpu_xgmi_link_status(
+        processor_handle, ctypes.byref(status_info))
+    )
+
+    link_status = []
+    count = 0
+    for link in status_info.status:
+        if count == status_info.total_links:
+            break
+        if amdsmi_wrapper.amdsmi_xgmi_link_status_type_t__enumvalues[link] == 'AMDSMI_XGMI_LINK_DISABLE': # XGMI link is disabled
+            link_status.append("X")
+        elif amdsmi_wrapper.amdsmi_xgmi_link_status_type_t__enumvalues[link] == 'AMDSMI_XGMI_LINK_UP': # XGMI Link is up
+            link_status.append("U")
+        elif amdsmi_wrapper.amdsmi_xgmi_link_status_type_t__enumvalues[link] == 'AMDSMI_XGMI_LINK_DOWN': # XGMI Link is down
+            link_status.append("D")
+        else:
+            link_status.append("N/A")
+        count += 1
+
+    return_dict = {
+    "status"     : link_status,
+    "total_links": status_info.total_links,
+    }
+    return return_dict
 
 
 def amdsmi_get_gpu_cache_info(
@@ -3863,7 +3898,10 @@ def amdsmi_get_gpu_metrics_info(
         "xcp_stats.jpeg_busy": list(gpu_metrics.xcp_stats),
         "xcp_stats.vcn_busy": list(gpu_metrics.xcp_stats),
         "xcp_stats.gfx_busy_acc": list(gpu_metrics.xcp_stats),
+        "xcp_stats.gfx_below_host_limit_acc": list(gpu_metrics.xcp_stats),
         "pcie_lc_perf_other_end_recovery": _validate_if_max_uint(gpu_metrics.pcie_lc_perf_other_end_recovery, MaxUIntegerTypes.UINT32_T),
+        "vram_max_bandwidth": _validate_if_max_uint(gpu_metrics.vram_max_bandwidth, MaxUIntegerTypes.UINT64_T),
+        "xgmi_link_status": _validate_if_max_uint(list(gpu_metrics.xgmi_link_status), MaxUIntegerTypes.UINT16_T),
     }
 
     # Create 2d array with each XCD's stats
@@ -3891,6 +3929,12 @@ def amdsmi_get_gpu_metrics_info(
                 for curr_xcp, item in enumerate(v):
                     print_xcp_detail = []
                     for val in item.gfx_busy_acc:
+                        print_xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T, isActivity=True))
+                    gpu_metrics_output[k][curr_xcp] = print_xcp_detail
+            if 'xcp_stats.gfx_below_host_limit_acc' in k:
+                for curr_xcp, item in enumerate(v):
+                    print_xcp_detail = []
+                    for val in item.gfx_below_host_limit_acc:
                         print_xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T, isActivity=True))
                     gpu_metrics_output[k][curr_xcp] = print_xcp_detail
     return gpu_metrics_output

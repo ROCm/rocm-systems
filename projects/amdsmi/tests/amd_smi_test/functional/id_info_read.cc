@@ -129,17 +129,19 @@ void TestIdInfoRead::Run(void) {
     CHK_ERR_ASRT(err)
     IF_VERB(STANDARD) {
       std::cout << "\t**Device Vram type id: "
-          << vram_info.vram_type << std::endl;
+                << vram_info.vram_type << std::endl;
       std::cout << "\t**Device Vram vendor id: "
-          << vram_info.vram_vendor << std::endl;
+                << vram_info.vram_vendor << std::endl;
       std::cout << "\t**Device Vram size: 0x"
-          << std::hex << vram_info.vram_size
-          << " (" << std::dec << vram_info.vram_size << ")"
-          << std::endl;
+                << std::hex << vram_info.vram_size
+                << " (" << std::dec << vram_info.vram_size << ")"
+                << std::endl;
       std::cout << "\t**Device Bit Width: 0x"
-          << std::hex << vram_info.vram_bit_width
-          << " (" << std::dec << vram_info.vram_bit_width << ")"
-          << std::endl;
+                << std::hex << vram_info.vram_bit_width
+                << " (" << std::dec << vram_info.vram_bit_width << ")"
+                << std::endl;
+      std::cout << "\t**Device Vram Max Bandwidth: "
+                << vram_info.vram_max_bandwidth << " GB/s" << std::endl;
     }
 
     err = amdsmi_get_gpu_vendor_name(processor_handles_[i], buffer, kBufferLen);

@@ -7,6 +7,42 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added support for GPU metrics 1.7 to `amdsmi_get_gpu_metrics_info()`**  
+Updated `amdsmi_get_gpu_metrics_info()` and structure `amdsmi_gpu_metrics_t` to include new fields for XGMI Link Status, graphics clocks below host limit (per XCP), and VRAM max bandwidth:  
+  - `uint64_t vram_max_bandwidth` - VRAM max bandwidth at max memory clock (GB/s)
+  - `uint16_t xgmi_link_status[MAX_NUM_XGMI_LINKS]` - XGMI link statis, 1=Up 0=Down
+  - `uint64_t gfx_below_host_limit_acc[MAX_NUM_XCC]` - graphics clocks below host limit (per XCP) accumulators. Used for graphic clk below host limit violation status.
+
+- **Added new API `amdsmi_get_gpu_xgmi_link_status()` and CLI `amd-smi xgmi --link-status`**  
+New API is defined as: 
+```C
+typedef enum {
+  AMDSMI_XGMI_LINK_DOWN,     //!< The XGMI Link is down
+  AMDSMI_XGMI_LINK_UP,       //!< The XGMI Link is up
+  AMDSMI_XGMI_LINK_DISABLE,  //!< The XGMI Link is disabled
+} amdsmi_xgmi_link_status_type_t;
+
+typedef struct {
+  uint32_t total_links;     //!< The total links in the status array
+  amdsmi_xgmi_link_status_type_t status[AMDSMI_MAX_NUM_XGMI_LINKS];
+  uint64_t reserved[7];
+} amdsmi_xgmi_link_status_t;
+
+amdsmi_status_t amdsmi_get_gpu_xgmi_link_status(amdsmi_processor_handle processor_handle, amdsmi_xgmi_link_status_t *link_status)
+```
+Example CLI output:
+```shell
+$ amd-smi xgmi --link-status
+
+XGMI LINK STATUS:
+       bdf           link_status
+GPU0   0000:08:00.0  U  U  U  U  D  U  D  X
+GPU1   0000:44:00.0  U  U  U  U  D  U  D  X
+...
+
+* U:Up D:Down X:Disabled
+```
+
 - **Added fclk and socclk info to `amd-smi metric -c/--clock`**.  
   fclk and socclk information such as min and max clock have been added to the metric command, in line with all the other clocks.  
 
@@ -77,11 +113,42 @@ GPU: 0
         DCLK1: N/A
 ```
 
-## amd_smi_lib for ROCm 6.4.0
-
-### Added
-
 ### Changed
+
+- **Updated API `amdsmi_get_gpu_vram_info()` structure and CLI `amd-smi static --vram`**  
+Updated structure `amdsmi_vram_info_t`: 
+```C
+typedef struct {
+  amdsmi_vram_type_t vram_type;
+  amdsmi_vram_vendor_type_t vram_vendor;
+  uint64_t vram_size;
+  uint32_t vram_bit_width;
+  uint64_t vram_max_bandwidth;   //!< The VRAM max bandwidth at current memory clock (GB/s)
+  uint64_t reserved[4];
+} amdsmi_vram_info_t;
+
+amdsmi_status_t amdsmi_get_gpu_vram_info(amdsmi_processor_handle processor_handle, amdsmi_vram_info_t *info)
+```
+Example CLI output:
+```shell
+$ amd-smi static --vram
+GPU: 0
+    VRAM:
+        TYPE: GDDR6
+        VENDOR: N/A
+        SIZE: 16368 MB
+        BIT_WIDTH: 256
+        MAX_BANDWIDTH: 1555 GB/s
+GPU: 1
+    VRAM:
+        TYPE: GDDR6
+        VENDOR: N/A
+        SIZE: 30704 MB
+        BIT_WIDTH: 256
+        MAX_BANDWIDTH: 1555 GB/s
+...
+
+```
 
 ### Removed
 

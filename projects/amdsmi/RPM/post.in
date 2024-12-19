@@ -167,7 +167,9 @@ do_install_amdsmi_python_lib() {
     echo "[WARNING] Setuptools version is less than 28.5. AMD-SMI will not be installed."
   elif [[ "$(printf '%s\n' "$setuptools_version" "41.0.1" | sort -V | head -n1)" != "41.0.1" ]]; then
     echo "Using setup.py for installation due to setuptools version $setuptools_version"
-    python3 "$amdsmi_setup_py_path" install
+    cd $amdsmi_python_lib_path
+    python3 setup.py install
+    cd -
   else
     echo "Using pyproject.toml for installation due to setuptools version $setuptools_version"
     python3 -m pip install "$amdsmi_python_lib_path" --quiet --disable-pip-version-check --no-build-isolation --no-index

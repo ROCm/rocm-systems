@@ -1085,6 +1085,9 @@ typedef struct metrics_table_header_t metrics_table_header_t;
  * @brief The following structures hold the gpu statistics for a device.
  */
 struct amdgpu_xcp_metrics_t {
+  /*
+  * v1.6 additions
+  */
   /* Utilization Instantaneous (%) */
   uint32_t gfx_busy_inst[RSMI_MAX_NUM_XCC];
   uint16_t jpeg_busy[RSMI_MAX_NUM_JPEG_ENGS];
@@ -1092,6 +1095,12 @@ struct amdgpu_xcp_metrics_t {
 
   /* Utilization Accumulated (%) */
   uint64_t gfx_busy_acc[RSMI_MAX_NUM_XCC];
+
+  /*
+  * v1.7 additions
+  */
+  /* Total App Clock Counter Accumulated */
+  uint64_t gfx_below_host_limit_acc[RSMI_MAX_NUM_XCC];
 };
 
 typedef struct {
@@ -1294,6 +1303,15 @@ typedef struct {
 
   /* PCIE other end recovery counter */
   uint32_t pcie_lc_perf_other_end_recovery;
+
+  /*
+  * v1.7 additions
+  */
+  /* VRAM max bandwidth at max memory clock */
+  uint64_t vram_max_bandwidth;
+
+  /* XGMI link status(up/down) */
+  uint16_t xgmi_link_status[RSMI_MAX_NUM_XGMI_LINKS];
 
   /// \endcond
 } rsmi_gpu_metrics_t;

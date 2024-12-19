@@ -293,9 +293,11 @@ int main() {
                 CHK_AMDSMI_RET(ret)
                 printf("    Output of amdsmi_get_gpu_vram_info:\n");
                 printf("\tVRAM Size: 0x%lx (%ld) \n", vram_info.vram_size, vram_info.vram_size);
-                printf("\tBIT Width: 0x%x (%d) \n\n", vram_info.vram_bit_width, vram_info.vram_bit_width);
-            }
-            else {
+                printf("\tBIT Width: 0x%x (%d) \n\n", vram_info.vram_bit_width,
+                        vram_info.vram_bit_width);
+                printf("\tVRAM max bandwidth: 0x%lx (%lu) \n\n", vram_info.vram_max_bandwidth,
+                        vram_info.vram_max_bandwidth);
+            } else {
                 printf("\t**amdsmi_get_gpu_vram_info() not supported on this system.\n");
             }
 
@@ -865,6 +867,18 @@ int main() {
               ++idx;
             }
 
+            std::cout << std::dec << "\txgmi_link_status= [";
+            idx = 0;
+            for (const auto& temp : smu.xgmi_link_status) {
+              std::cout << temp;
+              if ((idx + 1) != std::size(smu.xgmi_link_status)) {
+                std::cout << ", ";
+              } else {
+                std::cout << "]\n";
+              }
+              ++idx;
+            }
+
             // Voltage (mV)
             std::cout << "\tvoltage_soc = " << std::dec << smu.voltage_soc << "\n";
             std::cout << "\tvoltage_gfx = " << std::dec << smu.voltage_gfx << "\n";
@@ -879,6 +893,9 @@ int main() {
             // Bandwidth (GB/sec)
             std::cout << "\tpcie_bandwidth_acc=" << std::dec << smu.pcie_bandwidth_acc << "\n";
             std::cout << "\tpcie_bandwidth_inst=" << std::dec << smu.pcie_bandwidth_inst << "\n";
+
+            // VRAM max bandwidth at max memory clock
+            std::cout << "\tvram_max_bandwidth=" << std::dec << smu.vram_max_bandwidth << "\n";
 
             // Counts
             std::cout << "\tpcie_l0_to_recov_count_acc= " << std::dec << smu.pcie_l0_to_recov_count_acc
@@ -972,6 +989,24 @@ int main() {
               std::cout << "\t XCP [" << idx << "] : [";
               for (auto& col : row.gfx_busy_acc) {
                 if ((idy + 1) != static_cast<int>(std::size(row.gfx_busy_acc))) {
+                    std::cout << col << ", ";
+                } else {
+                    std::cout << col;
+                }
+                idy++;
+              }
+              std::cout << "]\n";
+              idy = 0;
+              idx++;
+            }
+
+            idx = 0;
+            idy = 0;
+            std::cout  << "\txcp_stats.gfx_below_host_limit_acc: " << "\n";
+            for (auto& row : smu.xcp_stats) {
+              std::cout << "\t XCP [" << idx << "] : [";
+              for (auto& col : row.gfx_below_host_limit_acc) {
+                if ((idy + 1) != static_cast<int>(std::size(row.gfx_below_host_limit_acc))) {
                     std::cout << col << ", ";
                 } else {
                     std::cout << col;

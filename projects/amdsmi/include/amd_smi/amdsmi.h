@@ -20,8 +20,8 @@
  * THE SOFTWARE.
  */
 
-#ifndef INCLUDE_AMDSMI_H_
-#define INCLUDE_AMDSMI_H_
+#ifndef __AMDSMI_H__
+#define __AMDSMI_H__
 
 /**
  * @file amdsmi.h
@@ -30,16 +30,16 @@
 
 #include <stdlib.h>
 #include <stdbool.h>
+
 #ifdef __cplusplus
 extern "C" {
 #include <cstdint>
 #ifdef ENABLE_ESMI_LIB
     #include <e_smi/e_smi.h>
 #endif
-
-#else
+#else  // __cplusplus
 #include <stdint.h>
-#endif  // __cplusplus
+#endif // __cplusplus
 
 /**
  * @brief Initialization flags
@@ -47,25 +47,25 @@ extern "C" {
  * Initialization flags may be OR'd together and passed to ::amdsmi_init().
  */
 typedef enum {
-  AMDSMI_INIT_ALL_PROCESSORS = 0xFFFFFFFF,  //!< Initialize all processors
-  AMDSMI_INIT_AMD_CPUS = (1 << 0),
-  AMDSMI_INIT_AMD_GPUS = (1 << 1),
-  AMDSMI_INIT_NON_AMD_CPUS = (1 << 2),
-  AMDSMI_INIT_NON_AMD_GPUS = (1 << 3),
-  AMDSMI_INIT_AMD_APUS = (AMDSMI_INIT_AMD_CPUS | AMDSMI_INIT_AMD_GPUS) // Default option
+    AMDSMI_INIT_ALL_PROCESSORS = 0xFFFFFFFF,  //!< Initialize all processors
+    AMDSMI_INIT_AMD_CPUS = (1 << 0),
+    AMDSMI_INIT_AMD_GPUS = (1 << 1),
+    AMDSMI_INIT_NON_AMD_CPUS = (1 << 2),
+    AMDSMI_INIT_NON_AMD_GPUS = (1 << 3),
+    AMDSMI_INIT_AMD_APUS = (AMDSMI_INIT_AMD_CPUS | AMDSMI_INIT_AMD_GPUS) // Default option
 } amdsmi_init_flags_t;
 
 /* Maximum size definitions AMDSMI */
-#define AMDSMI_MAX_MM_IP_COUNT        8
-#define AMDSMI_MAX_DATE_LENGTH        32 /**< YYYY-MM-DD:HH:MM:SS.MSC */
-#define AMDSMI_MAX_STRING_LENGTH      256
-#define AMDSMI_NORMAL_STRING_LENGTH   AMDSMI_MAX_STRING_LENGTH  // Deprecated
-#define AMDSMI_256_LENGTH             AMDSMI_MAX_STRING_LENGTH  // Deprecated
-#define AMDSMI_MAX_DEVICES            32
-#define AMDSMI_MAX_NAME               32
+#define AMDSMI_MAX_MM_IP_COUNT       8
+#define AMDSMI_MAX_DATE_LENGTH       32 /**< YYYY-MM-DD:HH:MM:SS.MSC */
+#define AMDSMI_MAX_STRING_LENGTH     256
+#define AMDSMI_NORMAL_STRING_LENGTH  AMDSMI_MAX_STRING_LENGTH  // Deprecated
+#define AMDSMI_256_LENGTH            AMDSMI_MAX_STRING_LENGTH  // Deprecated
+#define AMDSMI_MAX_DEVICES           32
+#define AMDSMI_MAX_NAME              32
 #define AMDSMI_MAX_DRIVER_VERSION_LENGTH 80
 #define AMDSMI_MAX_CONTAINER_TYPE    2
-#define AMDSMI_MAX_CACHE_TYPES 10
+#define AMDSMI_MAX_CACHE_TYPES       10
 #define AMDSMI_MAX_NUM_XGMI_PHYSICAL_LINK 64
 #define AMDSMI_MAX_ACCELERATOR_PROFILE    32
 #define AMDSMI_MAX_CP_PROFILE_RESOURCES   32
@@ -169,19 +169,24 @@ typedef enum {
 #define AMDSMI_LIB_VERSION_EXPAND_PARTS(YEAR_STR, MAJOR_STR, MINOR_STR, RELEASE_STR) AMDSMI_LIB_VERSION_CREATE_STRING(YEAR_STR, MAJOR_STR, MINOR_STR, RELEASE_STR)
 #define AMDSMI_LIB_VERSION_STRING AMDSMI_LIB_VERSION_EXPAND_PARTS(AMDSMI_LIB_VERSION_YEAR, AMDSMI_LIB_VERSION_MAJOR, AMDSMI_LIB_VERSION_MINOR, AMDSMI_LIB_VERSION_RELEASE)
 
+/**
+ * @brief GPU Capability info
+ */
 typedef enum {
-  AMDSMI_MM_UVD,
-  AMDSMI_MM_VCE,
-  AMDSMI_MM_VCN,
-  AMDSMI_MM__MAX
+    AMDSMI_MM_UVD,
+    AMDSMI_MM_VCE,
+    AMDSMI_MM_VCN,
+    AMDSMI_MM__MAX
 } amdsmi_mm_ip_t;
 
 typedef enum {
-  AMDSMI_CONTAINER_LXC,
-  AMDSMI_CONTAINER_DOCKER,
+    AMDSMI_CONTAINER_LXC,
+    AMDSMI_CONTAINER_DOCKER,
 } amdsmi_container_types_t;
 
-//! opaque handler point to underlying implementation
+/**
+ * @brief Opaque handler point to underlying implementation
+ */
 typedef void *amdsmi_processor_handle;
 typedef void *amdsmi_socket_handle;
 #ifdef ENABLE_ESMI_LIB
@@ -195,13 +200,13 @@ typedef void *amdsmi_cpusocket_handle;
  * AMDSMI_PROCESSOR_TYPE_AMD_APU      - Combination of AMDSMI_PROCESSOR_TYPE_AMD_CPU and integrated GPU on single die
  */
 typedef enum {
-  AMDSMI_PROCESSOR_TYPE_UNKNOWN = 0,
-  AMDSMI_PROCESSOR_TYPE_AMD_GPU,
-  AMDSMI_PROCESSOR_TYPE_AMD_CPU,
-  AMDSMI_PROCESSOR_TYPE_NON_AMD_GPU,
-  AMDSMI_PROCESSOR_TYPE_NON_AMD_CPU,
-  AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE,
-  AMDSMI_PROCESSOR_TYPE_AMD_APU
+    AMDSMI_PROCESSOR_TYPE_UNKNOWN = 0,
+    AMDSMI_PROCESSOR_TYPE_AMD_GPU,
+    AMDSMI_PROCESSOR_TYPE_AMD_CPU,
+    AMDSMI_PROCESSOR_TYPE_NON_AMD_GPU,
+    AMDSMI_PROCESSOR_TYPE_NON_AMD_CPU,
+    AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE,
+    AMDSMI_PROCESSOR_TYPE_AMD_APU
 } processor_type_t;
 
 /**
@@ -210,75 +215,74 @@ typedef enum {
 // Please avoid status codes that are multiples of 256 (256, 512, etc..)
 // Return values in the shell get modulo 256 applied, meaning any multiple of 256 ends up as 0
 typedef enum {
-    AMDSMI_STATUS_SUCCESS = 0,  //!< Call succeeded
+    AMDSMI_STATUS_SUCCESS = 0,              //!< Call succeeded
     // Library usage errors
-    AMDSMI_STATUS_INVAL = 1,  //!< Invalid parameters
-    AMDSMI_STATUS_NOT_SUPPORTED = 2,  //!< Command not supported
+    AMDSMI_STATUS_INVAL = 1,                //!< Invalid parameters
+    AMDSMI_STATUS_NOT_SUPPORTED = 2,        //!< Command not supported
     AMDSMI_STATUS_NOT_YET_IMPLEMENTED = 3,  //!< Not implemented yet
-    AMDSMI_STATUS_FAIL_LOAD_MODULE = 4,  //!< Fail to load lib
-    AMDSMI_STATUS_FAIL_LOAD_SYMBOL = 5,  //!< Fail to load symbol
-    AMDSMI_STATUS_DRM_ERROR = 6,  //!< Error when call libdrm
-    AMDSMI_STATUS_API_FAILED = 7,  //!< API call failed
-    AMDSMI_STATUS_TIMEOUT = 8,  //!< Timeout in API call
-    AMDSMI_STATUS_RETRY = 9,  //!< Retry operation
-    AMDSMI_STATUS_NO_PERM = 10,  //!< Permission Denied
-    AMDSMI_STATUS_INTERRUPT = 11,  //!< An interrupt occurred during execution of function
-    AMDSMI_STATUS_IO = 12,  //!< I/O Error
-    AMDSMI_STATUS_ADDRESS_FAULT = 13,  //!< Bad address
-    AMDSMI_STATUS_FILE_ERROR = 14,  //!< Problem accessing a file
-    AMDSMI_STATUS_OUT_OF_RESOURCES = 15,  //!< Not enough memory
+    AMDSMI_STATUS_FAIL_LOAD_MODULE = 4,     //!< Fail to load lib
+    AMDSMI_STATUS_FAIL_LOAD_SYMBOL = 5,     //!< Fail to load symbol
+    AMDSMI_STATUS_DRM_ERROR = 6,            //!< Error when call libdrm
+    AMDSMI_STATUS_API_FAILED = 7,           //!< API call failed
+    AMDSMI_STATUS_TIMEOUT = 8,              //!< Timeout in API call
+    AMDSMI_STATUS_RETRY = 9,                //!< Retry operation
+    AMDSMI_STATUS_NO_PERM = 10,             //!< Permission Denied
+    AMDSMI_STATUS_INTERRUPT = 11,           //!< An interrupt occurred during execution of function
+    AMDSMI_STATUS_IO = 12,                  //!< I/O Error
+    AMDSMI_STATUS_ADDRESS_FAULT = 13,       //!< Bad address
+    AMDSMI_STATUS_FILE_ERROR = 14,          //!< Problem accessing a file
+    AMDSMI_STATUS_OUT_OF_RESOURCES = 15,    //!< Not enough memory
     AMDSMI_STATUS_INTERNAL_EXCEPTION = 16,  //!< An internal exception was caught
-    AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS = 17,  //!< The provided input is out of allowable or safe range
-    AMDSMI_STATUS_INIT_ERROR = 18,  //!< An error occurred when initializing internal data structures
-    AMDSMI_STATUS_REFCOUNT_OVERFLOW = 19,  //!< An internal reference counter exceeded INT32_MAX
-    // Device related errors
-    AMDSMI_STATUS_BUSY = 30,  //!< Device busy
-    AMDSMI_STATUS_NOT_FOUND = 31,  //!< Device Not found
-    AMDSMI_STATUS_NOT_INIT = 32,  //!< Device not initialized
-    AMDSMI_STATUS_NO_SLOT = 33,  //!< No more free slot
-    AMDSMI_STATUS_DRIVER_NOT_LOADED = 34,  //!< Processor driver not loaded
+    AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS = 17, //!< The provided input is out of allowable or safe range
+    AMDSMI_STATUS_INIT_ERROR = 18,          //!< An error occurred when initializing internal data structures
+    AMDSMI_STATUS_REFCOUNT_OVERFLOW = 19,   //!< An internal reference counter exceeded INT32_MAX
+    // Processor related errors
+    AMDSMI_STATUS_BUSY = 30,                //!< Processor busy
+    AMDSMI_STATUS_NOT_FOUND = 31,           //!< Processor Not found
+    AMDSMI_STATUS_NOT_INIT = 32,            //!< Processor not initialized
+    AMDSMI_STATUS_NO_SLOT = 33,             //!< No more free slot
+    AMDSMI_STATUS_DRIVER_NOT_LOADED = 34,   //!< Processor driver not loaded
     // Data and size errors
-    AMDSMI_STATUS_NO_DATA = 40,  //!< No data was found for a given input
-    AMDSMI_STATUS_INSUFFICIENT_SIZE = 41,  //!< Not enough resources were available for the operation
-    AMDSMI_STATUS_UNEXPECTED_SIZE = 42,  //!< An unexpected amount of data was read
-    AMDSMI_STATUS_UNEXPECTED_DATA = 43,  //!< The data read or provided to function is not what was expected
+    AMDSMI_STATUS_NO_DATA = 40,             //!< No data was found for a given input
+    AMDSMI_STATUS_INSUFFICIENT_SIZE = 41,   //!< Not enough resources were available for the operation
+    AMDSMI_STATUS_UNEXPECTED_SIZE = 42,     //!< An unexpected amount of data was read
+    AMDSMI_STATUS_UNEXPECTED_DATA = 43,     //!< The data read or provided to function is not what was expected
     //esmi errors
-    AMDSMI_STATUS_NON_AMD_CPU = 44, //!< System has different cpu than AMD
-    AMDSMI_STATUS_NO_ENERGY_DRV = 45, //!< Energy driver not found
-    AMDSMI_STATUS_NO_MSR_DRV = 46, //!< MSR driver not found
-    AMDSMI_STATUS_NO_HSMP_DRV = 47, //!< HSMP driver not found
-    AMDSMI_STATUS_NO_HSMP_SUP = 48, //!< HSMP not supported
-    AMDSMI_STATUS_NO_HSMP_MSG_SUP = 49, //!< HSMP message/feature not supported
-    AMDSMI_STATUS_HSMP_TIMEOUT = 50,  //!< HSMP message timed out
-    AMDSMI_STATUS_NO_DRV = 51,  //!< No Energy and HSMP driver present
-    AMDSMI_STATUS_FILE_NOT_FOUND = 52, //!< file or directory not found
-    AMDSMI_STATUS_ARG_PTR_NULL = 53,   //!< Parsed argument is invalid
-    AMDSMI_STATUS_AMDGPU_RESTART_ERR = 54, //!< AMDGPU restart failed
+    AMDSMI_STATUS_NON_AMD_CPU = 44,         //!< System has different cpu than AMD
+    AMDSMI_STATUS_NO_ENERGY_DRV = 45,       //!< Energy driver not found
+    AMDSMI_STATUS_NO_MSR_DRV = 46,          //!< MSR driver not found
+    AMDSMI_STATUS_NO_HSMP_DRV = 47,         //!< HSMP driver not found
+    AMDSMI_STATUS_NO_HSMP_SUP = 48,         //!< HSMP not supported
+    AMDSMI_STATUS_NO_HSMP_MSG_SUP = 49,     //!< HSMP message/feature not supported
+    AMDSMI_STATUS_HSMP_TIMEOUT = 50,        //!< HSMP message timed out
+    AMDSMI_STATUS_NO_DRV = 51,              //!< No Energy and HSMP driver present
+    AMDSMI_STATUS_FILE_NOT_FOUND = 52,      //!< file or directory not found
+    AMDSMI_STATUS_ARG_PTR_NULL = 53,        //!< Parsed argument is invalid
+    AMDSMI_STATUS_AMDGPU_RESTART_ERR = 54,  //!< AMDGPU restart failed
     AMDSMI_STATUS_SETTING_UNAVAILABLE = 55, //!< Setting is not available
-
     // General errors
-    AMDSMI_STATUS_MAP_ERROR = 0xFFFFFFFE,  //!< The internal library error did not map to a status code
-    AMDSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF,  //!< An unknown error occurred
+    AMDSMI_STATUS_MAP_ERROR = 0xFFFFFFFE,     //!< The internal library error did not map to a status code
+    AMDSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF, //!< An unknown error occurred
 } amdsmi_status_t;
 
 /**
  * @brief Clock types
  */
 typedef enum {
-  AMDSMI_CLK_TYPE_SYS = 0x0,   //!< System clock
-  AMDSMI_CLK_TYPE_FIRST = AMDSMI_CLK_TYPE_SYS,
-  AMDSMI_CLK_TYPE_GFX = AMDSMI_CLK_TYPE_SYS,
-  AMDSMI_CLK_TYPE_DF,    //!< Data Fabric clock (for ASICs
-        //!< running on a separate clock)
-  AMDSMI_CLK_TYPE_DCEF,  //!< Display Controller Engine clock
-  AMDSMI_CLK_TYPE_SOC,
-  AMDSMI_CLK_TYPE_MEM,
-  AMDSMI_CLK_TYPE_PCIE,
-  AMDSMI_CLK_TYPE_VCLK0,
-  AMDSMI_CLK_TYPE_VCLK1,
-  AMDSMI_CLK_TYPE_DCLK0,
-  AMDSMI_CLK_TYPE_DCLK1,
-  AMDSMI_CLK_TYPE__MAX = AMDSMI_CLK_TYPE_DCLK1
+    AMDSMI_CLK_TYPE_SYS = 0x0,   //!< System clock
+    AMDSMI_CLK_TYPE_FIRST = AMDSMI_CLK_TYPE_SYS,
+    AMDSMI_CLK_TYPE_GFX = AMDSMI_CLK_TYPE_SYS,
+    AMDSMI_CLK_TYPE_DF,    //!< Data Fabric clock (for ASICs
+                           //!< running on a separate clock)
+    AMDSMI_CLK_TYPE_DCEF,  //!< Display Controller Engine clock
+    AMDSMI_CLK_TYPE_SOC,
+    AMDSMI_CLK_TYPE_MEM,
+    AMDSMI_CLK_TYPE_PCIE,
+    AMDSMI_CLK_TYPE_VCLK0,
+    AMDSMI_CLK_TYPE_VCLK1,
+    AMDSMI_CLK_TYPE_DCLK0,
+    AMDSMI_CLK_TYPE_DCLK1,
+    AMDSMI_CLK_TYPE__MAX = AMDSMI_CLK_TYPE_DCLK1
 } amdsmi_clk_type_t;
 
 /**
@@ -286,16 +290,16 @@ typedef enum {
  * various accelerator partitioning settings.
  */
 typedef enum {
-  AMDSMI_ACCELERATOR_PARTITION_INVALID = 0,
-  AMDSMI_ACCELERATOR_PARTITION_SPX,        //!< Single GPU mode (SPX)- All XCCs work
+    AMDSMI_ACCELERATOR_PARTITION_INVALID = 0,
+    AMDSMI_ACCELERATOR_PARTITION_SPX,  //!< Single GPU mode (SPX)- All XCCs work
                                        //!< together with shared memory
-  AMDSMI_ACCELERATOR_PARTITION_DPX,        //!< Dual GPU mode (DPX)- Half XCCs work
+    AMDSMI_ACCELERATOR_PARTITION_DPX,  //!< Dual GPU mode (DPX)- Half XCCs work
                                        //!< together with shared memory
-  AMDSMI_ACCELERATOR_PARTITION_TPX,        //!< Triple GPU mode (TPX)- One-third XCCs
+    AMDSMI_ACCELERATOR_PARTITION_TPX,  //!< Triple GPU mode (TPX)- One-third XCCs
                                        //!< work together with shared memory
-  AMDSMI_ACCELERATOR_PARTITION_QPX,        //!< Quad GPU mode (QPX)- Quarter XCCs
+    AMDSMI_ACCELERATOR_PARTITION_QPX,  //!< Quad GPU mode (QPX)- Quarter XCCs
                                        //!< work together with shared memory
-  AMDSMI_ACCELERATOR_PARTITION_CPX,        //!< Core mode (CPX)- Per-chip XCC with
+    AMDSMI_ACCELERATOR_PARTITION_CPX,  //!< Core mode (CPX)- Per-chip XCC with
                                        //!< shared memory
 } amdsmi_accelerator_partition_type_t;
 
@@ -304,17 +308,17 @@ typedef enum {
  * various compute partitioning settings.
  */
 typedef enum {
-  AMDSMI_COMPUTE_PARTITION_INVALID = 0,
-  AMDSMI_COMPUTE_PARTITION_SPX,  //!< Single GPU mode (SPX)- All XCCs work
-                                 //!< together with shared memory
-  AMDSMI_COMPUTE_PARTITION_DPX,  //!< Dual GPU mode (DPX)- Half XCCs work
-                                 //!< together with shared memory
-  AMDSMI_COMPUTE_PARTITION_TPX,  //!< Triple GPU mode (TPX)- One-third XCCs
-                                 //!< work together with shared memory
-  AMDSMI_COMPUTE_PARTITION_QPX,   //!< Quad GPU mode (QPX)- Quarter XCCs
-                                 //!< work together with shared memory
-  AMDSMI_COMPUTE_PARTITION_CPX,  //!< Core mode (CPX)- Per-chip XCC with
-                                 //!< shared memory
+    AMDSMI_COMPUTE_PARTITION_INVALID = 0,
+    AMDSMI_COMPUTE_PARTITION_SPX,  //!< Single GPU mode (SPX)- All XCCs work
+                                   //!< together with shared memory
+    AMDSMI_COMPUTE_PARTITION_DPX,  //!< Dual GPU mode (DPX)- Half XCCs work
+                                   //!< together with shared memory
+    AMDSMI_COMPUTE_PARTITION_TPX,  //!< Triple GPU mode (TPX)- One-third XCCs
+                                   //!< work together with shared memory
+    AMDSMI_COMPUTE_PARTITION_QPX,   //!< Quad GPU mode (QPX)- Quarter XCCs
+                                   //!< work together with shared memory
+    AMDSMI_COMPUTE_PARTITION_CPX,  //!< Core mode (CPX)- Per-chip XCC with
+                                   //!< shared memory
 } amdsmi_compute_partition_type_t;
 
 /**
@@ -322,38 +326,38 @@ typedef enum {
  * memory partition types.
  */
 typedef enum {
-  AMDSMI_MEMORY_PARTITION_UNKNOWN = 0,
-  AMDSMI_MEMORY_PARTITION_NPS1,  //!< NPS1 - All CCD & XCD data is interleaved
-                          //!< accross all 8 HBM stacks (all stacks/1).
-  AMDSMI_MEMORY_PARTITION_NPS2,  //!< NPS2 - 2 sets of CCDs or 4 XCD interleaved
-                          //!< accross the 4 HBM stacks per AID pair
-                          //!< (8 stacks/2).
-  AMDSMI_MEMORY_PARTITION_NPS4,  //!< NPS4 - Each XCD data is interleaved accross
-                          //!< accross 2 (or single) HBM stacks
-                          //!< (8 stacks/8 or 8 stacks/4).
-  AMDSMI_MEMORY_PARTITION_NPS8,  //!< NPS8 - Each XCD uses a single HBM stack
-                          //!< (8 stacks/8). Or each XCD uses a single
-                          //!< HBM stack & CCDs share 2 non-interleaved
-                          //!< HBM stacks on its AID
-                          //!< (AID[1,2,3] = 6 stacks/6).
+    AMDSMI_MEMORY_PARTITION_UNKNOWN = 0,
+    AMDSMI_MEMORY_PARTITION_NPS1,  //!< NPS1 - All CCD & XCD data is interleaved
+                                   //!< accross all 8 HBM stacks (all stacks/1).
+    AMDSMI_MEMORY_PARTITION_NPS2,  //!< NPS2 - 2 sets of CCDs or 4 XCD interleaved
+                                   //!< accross the 4 HBM stacks per AID pair
+                                   //!< (8 stacks/2).
+    AMDSMI_MEMORY_PARTITION_NPS4,  //!< NPS4 - Each XCD data is interleaved accross
+                                   //!< accross 2 (or single) HBM stacks
+                                   //!< (8 stacks/8 or 8 stacks/4).
+    AMDSMI_MEMORY_PARTITION_NPS8,  //!< NPS8 - Each XCD uses a single HBM stack
+                                   //!< (8 stacks/8). Or each XCD uses a single
+                                   //!< HBM stack & CCDs share 2 non-interleaved
+                                   //!< HBM stacks on its AID
+                                   //!< (AID[1,2,3] = 6 stacks/6).
 } amdsmi_memory_partition_type_t;
 
 /**
- * @brief This enumeration is used to indicate from which part of the device a
+ * @brief This enumeration is used to indicate from which part of the processor a
  * temperature reading should be obtained.
  */
 typedef enum {
-  AMDSMI_TEMPERATURE_TYPE_EDGE,
-  AMDSMI_TEMPERATURE_TYPE_FIRST = AMDSMI_TEMPERATURE_TYPE_EDGE,
-  AMDSMI_TEMPERATURE_TYPE_HOTSPOT,
-  AMDSMI_TEMPERATURE_TYPE_JUNCTION = AMDSMI_TEMPERATURE_TYPE_HOTSPOT,
-  AMDSMI_TEMPERATURE_TYPE_VRAM,
-  AMDSMI_TEMPERATURE_TYPE_HBM_0,
-  AMDSMI_TEMPERATURE_TYPE_HBM_1,
-  AMDSMI_TEMPERATURE_TYPE_HBM_2,
-  AMDSMI_TEMPERATURE_TYPE_HBM_3,
-  AMDSMI_TEMPERATURE_TYPE_PLX,
-  AMDSMI_TEMPERATURE_TYPE__MAX = AMDSMI_TEMPERATURE_TYPE_PLX
+    AMDSMI_TEMPERATURE_TYPE_EDGE,
+    AMDSMI_TEMPERATURE_TYPE_FIRST = AMDSMI_TEMPERATURE_TYPE_EDGE,
+    AMDSMI_TEMPERATURE_TYPE_HOTSPOT,
+    AMDSMI_TEMPERATURE_TYPE_JUNCTION = AMDSMI_TEMPERATURE_TYPE_HOTSPOT,
+    AMDSMI_TEMPERATURE_TYPE_VRAM,
+    AMDSMI_TEMPERATURE_TYPE_HBM_0,
+    AMDSMI_TEMPERATURE_TYPE_HBM_1,
+    AMDSMI_TEMPERATURE_TYPE_HBM_2,
+    AMDSMI_TEMPERATURE_TYPE_HBM_3,
+    AMDSMI_TEMPERATURE_TYPE_PLX,
+    AMDSMI_TEMPERATURE_TYPE__MAX = AMDSMI_TEMPERATURE_TYPE_PLX
 } amdsmi_temperature_type_t;
 
 /**
@@ -361,108 +365,108 @@ typedef enum {
  * blocks.
  */
 typedef enum {
-  AMDSMI_FW_ID_SMU = 1,
-  AMDSMI_FW_ID_FIRST = AMDSMI_FW_ID_SMU,
-  AMDSMI_FW_ID_CP_CE,
-  AMDSMI_FW_ID_CP_PFP,
-  AMDSMI_FW_ID_CP_ME,
-  AMDSMI_FW_ID_CP_MEC_JT1,
-  AMDSMI_FW_ID_CP_MEC_JT2,
-  AMDSMI_FW_ID_CP_MEC1,
-  AMDSMI_FW_ID_CP_MEC2,
-  AMDSMI_FW_ID_RLC,
-  AMDSMI_FW_ID_SDMA0,
-  AMDSMI_FW_ID_SDMA1,
-  AMDSMI_FW_ID_SDMA2,
-  AMDSMI_FW_ID_SDMA3,
-  AMDSMI_FW_ID_SDMA4,
-  AMDSMI_FW_ID_SDMA5,
-  AMDSMI_FW_ID_SDMA6,
-  AMDSMI_FW_ID_SDMA7,
-  AMDSMI_FW_ID_VCN,
-  AMDSMI_FW_ID_UVD,
-  AMDSMI_FW_ID_VCE,
-  AMDSMI_FW_ID_ISP,
-  AMDSMI_FW_ID_DMCU_ERAM, /*eRAM*/
-  AMDSMI_FW_ID_DMCU_ISR,  /*ISR*/
-  AMDSMI_FW_ID_RLC_RESTORE_LIST_GPM_MEM,
-  AMDSMI_FW_ID_RLC_RESTORE_LIST_SRM_MEM,
-  AMDSMI_FW_ID_RLC_RESTORE_LIST_CNTL,
-  AMDSMI_FW_ID_RLC_V,
-  AMDSMI_FW_ID_MMSCH,
-  AMDSMI_FW_ID_PSP_SYSDRV,
-  AMDSMI_FW_ID_PSP_SOSDRV,
-  AMDSMI_FW_ID_PSP_TOC,
-  AMDSMI_FW_ID_PSP_KEYDB,
-  AMDSMI_FW_ID_DFC,
-  AMDSMI_FW_ID_PSP_SPL,
-  AMDSMI_FW_ID_DRV_CAP,
-  AMDSMI_FW_ID_MC,
-  AMDSMI_FW_ID_PSP_BL,
-  AMDSMI_FW_ID_CP_PM4,
-  AMDSMI_FW_ID_RLC_P,
-  AMDSMI_FW_ID_SEC_POLICY_STAGE2,
-  AMDSMI_FW_ID_REG_ACCESS_WHITELIST,
-  AMDSMI_FW_ID_IMU_DRAM,
-  AMDSMI_FW_ID_IMU_IRAM,
-  AMDSMI_FW_ID_SDMA_TH0,
-  AMDSMI_FW_ID_SDMA_TH1,
-  AMDSMI_FW_ID_CP_MES,
-  AMDSMI_FW_ID_MES_KIQ,
-  AMDSMI_FW_ID_MES_STACK,
-  AMDSMI_FW_ID_MES_THREAD1,
-  AMDSMI_FW_ID_MES_THREAD1_STACK,
-  AMDSMI_FW_ID_RLX6,
-  AMDSMI_FW_ID_RLX6_DRAM_BOOT,
-  AMDSMI_FW_ID_RS64_ME,
-  AMDSMI_FW_ID_RS64_ME_P0_DATA,
-  AMDSMI_FW_ID_RS64_ME_P1_DATA,
-  AMDSMI_FW_ID_RS64_PFP,
-  AMDSMI_FW_ID_RS64_PFP_P0_DATA,
-  AMDSMI_FW_ID_RS64_PFP_P1_DATA,
-  AMDSMI_FW_ID_RS64_MEC,
-  AMDSMI_FW_ID_RS64_MEC_P0_DATA,
-  AMDSMI_FW_ID_RS64_MEC_P1_DATA,
-  AMDSMI_FW_ID_RS64_MEC_P2_DATA,
-  AMDSMI_FW_ID_RS64_MEC_P3_DATA,
-  AMDSMI_FW_ID_PPTABLE,
-  AMDSMI_FW_ID_PSP_SOC,
-  AMDSMI_FW_ID_PSP_DBG,
-  AMDSMI_FW_ID_PSP_INTF,
-  AMDSMI_FW_ID_RLX6_CORE1,
-  AMDSMI_FW_ID_RLX6_DRAM_BOOT_CORE1,
-  AMDSMI_FW_ID_RLCV_LX7,
-  AMDSMI_FW_ID_RLC_SAVE_RESTORE_LIST,
-  AMDSMI_FW_ID_ASD,
-  AMDSMI_FW_ID_TA_RAS,
-  AMDSMI_FW_ID_TA_XGMI,
-  AMDSMI_FW_ID_RLC_SRLG,
-  AMDSMI_FW_ID_RLC_SRLS,
-  AMDSMI_FW_ID_PM,
-  AMDSMI_FW_ID_DMCU,
-  AMDSMI_FW_ID__MAX
+    AMDSMI_FW_ID_SMU = 1,
+    AMDSMI_FW_ID_FIRST = AMDSMI_FW_ID_SMU,
+    AMDSMI_FW_ID_CP_CE,
+    AMDSMI_FW_ID_CP_PFP,
+    AMDSMI_FW_ID_CP_ME,
+    AMDSMI_FW_ID_CP_MEC_JT1,
+    AMDSMI_FW_ID_CP_MEC_JT2,
+    AMDSMI_FW_ID_CP_MEC1,
+    AMDSMI_FW_ID_CP_MEC2,
+    AMDSMI_FW_ID_RLC,
+    AMDSMI_FW_ID_SDMA0,
+    AMDSMI_FW_ID_SDMA1,
+    AMDSMI_FW_ID_SDMA2,
+    AMDSMI_FW_ID_SDMA3,
+    AMDSMI_FW_ID_SDMA4,
+    AMDSMI_FW_ID_SDMA5,
+    AMDSMI_FW_ID_SDMA6,
+    AMDSMI_FW_ID_SDMA7,
+    AMDSMI_FW_ID_VCN,
+    AMDSMI_FW_ID_UVD,
+    AMDSMI_FW_ID_VCE,
+    AMDSMI_FW_ID_ISP,
+    AMDSMI_FW_ID_DMCU_ERAM, /*eRAM*/
+    AMDSMI_FW_ID_DMCU_ISR,  /*ISR*/
+    AMDSMI_FW_ID_RLC_RESTORE_LIST_GPM_MEM,
+    AMDSMI_FW_ID_RLC_RESTORE_LIST_SRM_MEM,
+    AMDSMI_FW_ID_RLC_RESTORE_LIST_CNTL,
+    AMDSMI_FW_ID_RLC_V,
+    AMDSMI_FW_ID_MMSCH,
+    AMDSMI_FW_ID_PSP_SYSDRV,
+    AMDSMI_FW_ID_PSP_SOSDRV,
+    AMDSMI_FW_ID_PSP_TOC,
+    AMDSMI_FW_ID_PSP_KEYDB,
+    AMDSMI_FW_ID_DFC,
+    AMDSMI_FW_ID_PSP_SPL,
+    AMDSMI_FW_ID_DRV_CAP,
+    AMDSMI_FW_ID_MC,
+    AMDSMI_FW_ID_PSP_BL,
+    AMDSMI_FW_ID_CP_PM4,
+    AMDSMI_FW_ID_RLC_P,
+    AMDSMI_FW_ID_SEC_POLICY_STAGE2,
+    AMDSMI_FW_ID_REG_ACCESS_WHITELIST,
+    AMDSMI_FW_ID_IMU_DRAM,
+    AMDSMI_FW_ID_IMU_IRAM,
+    AMDSMI_FW_ID_SDMA_TH0,
+    AMDSMI_FW_ID_SDMA_TH1,
+    AMDSMI_FW_ID_CP_MES,
+    AMDSMI_FW_ID_MES_KIQ,
+    AMDSMI_FW_ID_MES_STACK,
+    AMDSMI_FW_ID_MES_THREAD1,
+    AMDSMI_FW_ID_MES_THREAD1_STACK,
+    AMDSMI_FW_ID_RLX6,
+    AMDSMI_FW_ID_RLX6_DRAM_BOOT,
+    AMDSMI_FW_ID_RS64_ME,
+    AMDSMI_FW_ID_RS64_ME_P0_DATA,
+    AMDSMI_FW_ID_RS64_ME_P1_DATA,
+    AMDSMI_FW_ID_RS64_PFP,
+    AMDSMI_FW_ID_RS64_PFP_P0_DATA,
+    AMDSMI_FW_ID_RS64_PFP_P1_DATA,
+    AMDSMI_FW_ID_RS64_MEC,
+    AMDSMI_FW_ID_RS64_MEC_P0_DATA,
+    AMDSMI_FW_ID_RS64_MEC_P1_DATA,
+    AMDSMI_FW_ID_RS64_MEC_P2_DATA,
+    AMDSMI_FW_ID_RS64_MEC_P3_DATA,
+    AMDSMI_FW_ID_PPTABLE,
+    AMDSMI_FW_ID_PSP_SOC,
+    AMDSMI_FW_ID_PSP_DBG,
+    AMDSMI_FW_ID_PSP_INTF,
+    AMDSMI_FW_ID_RLX6_CORE1,
+    AMDSMI_FW_ID_RLX6_DRAM_BOOT_CORE1,
+    AMDSMI_FW_ID_RLCV_LX7,
+    AMDSMI_FW_ID_RLC_SAVE_RESTORE_LIST,
+    AMDSMI_FW_ID_ASD,
+    AMDSMI_FW_ID_TA_RAS,
+    AMDSMI_FW_ID_TA_XGMI,
+    AMDSMI_FW_ID_RLC_SRLG,
+    AMDSMI_FW_ID_RLC_SRLS,
+    AMDSMI_FW_ID_PM,
+    AMDSMI_FW_ID_DMCU,
+    AMDSMI_FW_ID__MAX
 } amdsmi_fw_block_t;
 
 typedef enum {
-  AMDSMI_VRAM_TYPE_UNKNOWN = 0,
-  // HBM
-  AMDSMI_VRAM_TYPE_HBM = 1,
-  AMDSMI_VRAM_TYPE_HBM2 = 2,
-  AMDSMI_VRAM_TYPE_HBM2E = 3,
-  AMDSMI_VRAM_TYPE_HBM3 = 4,
-  // DDR
-  AMDSMI_VRAM_TYPE_DDR2 = 10,
-  AMDSMI_VRAM_TYPE_DDR3 = 11,
-  AMDSMI_VRAM_TYPE_DDR4 = 12,
-  // GDDR
-  AMDSMI_VRAM_TYPE_GDDR1 = 17,
-  AMDSMI_VRAM_TYPE_GDDR2 = 18,
-  AMDSMI_VRAM_TYPE_GDDR3 = 19,
-  AMDSMI_VRAM_TYPE_GDDR4 = 20,
-  AMDSMI_VRAM_TYPE_GDDR5 = 21,
-  AMDSMI_VRAM_TYPE_GDDR6 = 22,
-  AMDSMI_VRAM_TYPE_GDDR7 = 23,
-  AMDSMI_VRAM_TYPE__MAX = AMDSMI_VRAM_TYPE_GDDR7
+    AMDSMI_VRAM_TYPE_UNKNOWN = 0,
+    // HBM
+    AMDSMI_VRAM_TYPE_HBM = 1,
+    AMDSMI_VRAM_TYPE_HBM2 = 2,
+    AMDSMI_VRAM_TYPE_HBM2E = 3,
+    AMDSMI_VRAM_TYPE_HBM3 = 4,
+    // DDR
+    AMDSMI_VRAM_TYPE_DDR2 = 10,
+    AMDSMI_VRAM_TYPE_DDR3 = 11,
+    AMDSMI_VRAM_TYPE_DDR4 = 12,
+    // GDDR
+    AMDSMI_VRAM_TYPE_GDDR1 = 17,
+    AMDSMI_VRAM_TYPE_GDDR2 = 18,
+    AMDSMI_VRAM_TYPE_GDDR3 = 19,
+    AMDSMI_VRAM_TYPE_GDDR4 = 20,
+    AMDSMI_VRAM_TYPE_GDDR5 = 21,
+    AMDSMI_VRAM_TYPE_GDDR6 = 22,
+    AMDSMI_VRAM_TYPE_GDDR7 = 23,
+    AMDSMI_VRAM_TYPE__MAX = AMDSMI_VRAM_TYPE_GDDR7
 } amdsmi_vram_type_t;
 
 typedef enum {
@@ -488,164 +492,166 @@ typedef enum {
  * @brief This structure represents a range (e.g., frequencies or voltages).
  */
 typedef struct {
-    uint64_t lower_bound;      //!< Lower bound of range
-    uint64_t upper_bound;      //!< Upper bound of range
+    uint64_t lower_bound;  //!< Lower bound of range
+    uint64_t upper_bound;  //!< Upper bound of range
     uint64_t reserved[2];
 } amdsmi_range_t;
 
 typedef struct {
-  uint8_t xgmi_lanes;
-  uint64_t xgmi_hive_id;
-  uint64_t xgmi_node_id;
-  uint32_t index;
-  uint32_t reserved[9];
+    uint8_t xgmi_lanes;
+    uint64_t xgmi_hive_id;
+    uint64_t xgmi_node_id;
+    uint32_t index;
+    uint32_t reserved[9];
 } amdsmi_xgmi_info_t;
 
 typedef struct {
-  uint32_t vram_total;
-  uint32_t vram_used;
-  uint32_t reserved[2];
+    uint32_t vram_total;
+    uint32_t vram_used;
+    uint32_t reserved[2];
 } amdsmi_vram_usage_t;
+
 /**
  * @brief This structure hold violation status information.
+ *        Note: for MI3x asics and higher, older ASICs will show unsupported.
  */
 typedef struct {
-  uint64_t reference_timestamp;  //!< Represents CPU timestamp in microseconds (uS)
-  uint64_t violation_timestamp;  //!< Violation time in milliseconds (ms)
-  uint64_t acc_counter;          //!< Current accumulated counter; Max uint64 means unsupported
-  uint64_t acc_prochot_thrm;     //!< Current accumulated processor hot violation count; Max uint64 means unsupported
-  uint64_t acc_ppt_pwr;          //!< PVIOL; Current accumulated Package Power Tracking (PPT) count; Max uint64 means unsupported
-  uint64_t acc_socket_thrm;      //!< TVIOL; Current accumulated Socket thermal count; Max uint64 means unsupported
-  uint64_t acc_vr_thrm;          //!< Current accumulated voltage regulator count; Max uint64 means unsupported
-  uint64_t acc_hbm_thrm;         //!< Current accumulated High Bandwidth Memory (HBM) thermal count; Max uint64 means unsupported
-  uint64_t per_prochot_thrm;     //!< Processor hot violation % (greater than 0% is a violation); Max uint64 means unsupported
-  uint64_t per_ppt_pwr;          //!< PVIOL; Package Power Tracking (PPT) violation % (greater than 0% is a violation); Max uint64 means unsupported
-  uint64_t per_socket_thrm;      //!< TVIOL; Socket thermal violation % (greater than 0% is a violation); Max uint64 means unsupported
-  uint64_t per_vr_thrm;          //!< Voltage regulator violation % (greater than 0% is a violation); Max uint64 means unsupported
-  uint64_t per_hbm_thrm;         //!< High Bandwidth Memory (HBM) thermal violation % (greater than 0% is a violation); Max uint64 means unsupported
-  uint8_t active_prochot_thrm;   //!< Processor hot violation; 1 = active 0 = not active; Max uint8 means unsupported
-  uint8_t active_ppt_pwr;        //!< Package Power Tracking (PPT) violation; 1 = active 0 = not active; Max uint8 means unsupported
-  uint8_t active_socket_thrm;    //!< Socket thermal violation; 1 = active 0 = not active; Max uint8 means unsupported
-  uint8_t active_vr_thrm;        //!< Voltage regulator violation; 1 = active 0 = not active; Max uint8 means unsupported
-  uint8_t active_hbm_thrm;       //!< High Bandwidth Memory (HBM) thermal violation; 1 = active 0 = not active; Max uint8 means unsupported
-  uint64_t reserved[30];         // Reserved for new violation info
+    uint64_t reference_timestamp;  //!< Represents CPU timestamp in microseconds (uS)
+    uint64_t violation_timestamp;  //!< Violation time in milliseconds (ms)
+    uint64_t acc_counter;          //!< Current accumulated counter; Max uint64 means unsupported
+    uint64_t acc_prochot_thrm;     //!< Current accumulated processor hot violation count; Max uint64 means unsupported
+    uint64_t acc_ppt_pwr;          //!< PVIOL; Current accumulated Package Power Tracking (PPT) count; Max uint64 means unsupported
+    uint64_t acc_socket_thrm;      //!< TVIOL; Current accumulated Socket thermal count; Max uint64 means unsupported
+    uint64_t acc_vr_thrm;          //!< Current accumulated voltage regulator count; Max uint64 means unsupported
+    uint64_t acc_hbm_thrm;         //!< Current accumulated High Bandwidth Memory (HBM) thermal count; Max uint64 means unsupported
+    uint64_t per_prochot_thrm;     //!< Processor hot violation % (greater than 0% is a violation); Max uint64 means unsupported
+    uint64_t per_ppt_pwr;          //!< PVIOL; Package Power Tracking (PPT) violation % (greater than 0% is a violation); Max uint64 means unsupported
+    uint64_t per_socket_thrm;      //!< TVIOL; Socket thermal violation % (greater than 0% is a violation); Max uint64 means unsupported
+    uint64_t per_vr_thrm;          //!< Voltage regulator violation % (greater than 0% is a violation); Max uint64 means unsupported
+    uint64_t per_hbm_thrm;         //!< High Bandwidth Memory (HBM) thermal violation % (greater than 0% is a violation); Max uint64 means unsupported
+    uint8_t active_prochot_thrm;   //!< Processor hot violation; 1 = active 0 = not active; Max uint8 means unsupported
+    uint8_t active_ppt_pwr;        //!< Package Power Tracking (PPT) violation; 1 = active 0 = not active; Max uint8 means unsupported
+    uint8_t active_socket_thrm;    //!< Socket thermal violation; 1 = active 0 = not active; Max uint8 means unsupported
+    uint8_t active_vr_thrm;        //!< Voltage regulator violation; 1 = active 0 = not active; Max uint8 means unsupported
+    uint8_t active_hbm_thrm;       //!< High Bandwidth Memory (HBM) thermal violation; 1 = active 0 = not active; Max uint8 means unsupported
+    uint64_t reserved[30];         // Reserved for new violation info
 } amdsmi_violation_status_t;
 typedef struct {
-  amdsmi_range_t supported_freq_range;
-  amdsmi_range_t current_freq_range;
-  uint32_t reserved[8];
+    amdsmi_range_t supported_freq_range;
+    amdsmi_range_t current_freq_range;
+    uint32_t reserved[8];
 } amdsmi_frequency_range_t;
 
 typedef union {
-  struct {
-    uint64_t function_number : 3;
-    uint64_t device_number : 5;
-    uint64_t bus_number : 8;
-    uint64_t domain_number : 48;
-  };
-  uint64_t as_uint;
+    struct {
+        uint64_t function_number : 3;
+        uint64_t device_number : 5;
+        uint64_t bus_number : 8;
+        uint64_t domain_number : 48;
+    };
+    uint64_t as_uint;
 } amdsmi_bdf_t;
 
 typedef enum {
-  AMDSMI_CARD_FORM_FACTOR_PCIE,
-  AMDSMI_CARD_FORM_FACTOR_OAM,
-  AMDSMI_CARD_FORM_FACTOR_CEM,
-  AMDSMI_CARD_FORM_FACTOR_UNKNOWN
+    AMDSMI_CARD_FORM_FACTOR_PCIE,
+    AMDSMI_CARD_FORM_FACTOR_OAM,
+    AMDSMI_CARD_FORM_FACTOR_CEM,
+    AMDSMI_CARD_FORM_FACTOR_UNKNOWN
 } amdsmi_card_form_factor_t;
 
 typedef struct {
-  struct pcie_static_ {
-    uint16_t max_pcie_width;              //!< maximum number of PCIe lanes
-    uint32_t max_pcie_speed;              //!< maximum PCIe speed
-    uint32_t pcie_interface_version;      //!< PCIe interface version
-    amdsmi_card_form_factor_t slot_type;  //!< card form factor
-    uint64_t reserved[10];
-  } pcie_static;
-  struct pcie_metric_ {
-    uint16_t pcie_width;                  //!< current PCIe width
-    uint32_t pcie_speed;                  //!< current PCIe speed in MT/s
-    uint32_t pcie_bandwidth;              //!< current instantaneous PCIe bandwidth in Mb/s
-    uint64_t pcie_replay_count;           //!< total number of the replays issued on the PCIe link
-    uint64_t pcie_l0_to_recovery_count;   //!< total number of times the PCIe link transitioned from L0 to the recovery state
-    uint64_t pcie_replay_roll_over_count; //!< total number of replay rollovers issued on the PCIe link
-    uint64_t pcie_nak_sent_count;         //!< total number of NAKs issued on the PCIe link by the device
-    uint64_t pcie_nak_received_count;     //!< total number of NAKs issued on the PCIe link by the receiver
-    uint32_t pcie_lc_perf_other_end_recovery_count;  //!< PCIe other end recovery counter
-    uint64_t reserved[12];
-  } pcie_metric;
-  uint64_t reserved[32];
+    struct pcie_static_ {
+        uint16_t max_pcie_width;              //!< maximum number of PCIe lanes
+        uint32_t max_pcie_speed;              //!< maximum PCIe speed
+        uint32_t pcie_interface_version;      //!< PCIe interface version
+        amdsmi_card_form_factor_t slot_type;  //!< card form factor
+        uint64_t reserved[10];
+    } pcie_static;
+    struct pcie_metric_ {
+        uint16_t pcie_width;                  //!< current PCIe width
+        uint32_t pcie_speed;                  //!< current PCIe speed in MT/s
+        uint32_t pcie_bandwidth;              //!< current instantaneous PCIe bandwidth in Mb/s
+        uint64_t pcie_replay_count;           //!< total number of the replays issued on the PCIe link
+        uint64_t pcie_l0_to_recovery_count;   //!< total number of times the PCIe link transitioned from L0 to the recovery state
+        uint64_t pcie_replay_roll_over_count; //!< total number of replay rollovers issued on the PCIe link
+        uint64_t pcie_nak_sent_count;         //!< total number of NAKs issued on the PCIe link by the device
+        uint64_t pcie_nak_received_count;     //!< total number of NAKs issued on the PCIe link by the receiver
+        uint32_t pcie_lc_perf_other_end_recovery_count;  //!< PCIe other end recovery counter
+        uint64_t reserved[12];
+    } pcie_metric;
+    uint64_t reserved[32];
 } amdsmi_pcie_info_t;
 
 typedef struct {
-  uint64_t power_cap;           //!< current power cap (uW)
-  uint64_t default_power_cap;   //!< default power cap (uW)
-  uint64_t dpm_cap;             //!< dpm power cap (MHz)
-  uint64_t min_power_cap;       //!< minimum power cap (uW)
-  uint64_t max_power_cap;       //!< maximum power cap (uW)
-  uint64_t reserved[3];
+    uint64_t power_cap;          //!< current power cap Units uW {@linux_bm} or W {@host}
+    uint64_t default_power_cap;  //!< default power cap Units uW {@linux_bm} or W {@host}
+    uint64_t dpm_cap;            //!< dpm power cap Units MHz {@linux_bm} or Hz {@host}
+    uint64_t min_power_cap;      //!< minimum power cap Units uW {@linux_bm} or W {@host}
+    uint64_t max_power_cap;      //!< maximum power cap Units uW {@linux_bm} or W {@host}
+    uint64_t reserved[3];
 } amdsmi_power_cap_info_t;
 
 typedef struct {
-  char    name[AMDSMI_MAX_STRING_LENGTH];
-  char    build_date[AMDSMI_MAX_DATE_LENGTH];
-  char    part_number[AMDSMI_MAX_STRING_LENGTH];
-  char    version[AMDSMI_MAX_STRING_LENGTH];
-  uint64_t reserved[32];
+    char name[AMDSMI_MAX_STRING_LENGTH];
+    char build_date[AMDSMI_MAX_DATE_LENGTH];
+    char part_number[AMDSMI_MAX_STRING_LENGTH];
+    char version[AMDSMI_MAX_STRING_LENGTH];
+    uint64_t reserved[32];
 } amdsmi_vbios_info_t;
 
 /**
  * @brief cache properties
  */
 typedef enum {
-  AMDSMI_CACHE_PROPERTY_ENABLED = 0x00000001,
-  AMDSMI_CACHE_PROPERTY_DATA_CACHE = 0x00000002,
-  AMDSMI_CACHE_PROPERTY_INST_CACHE = 0x00000004,
-  AMDSMI_CACHE_PROPERTY_CPU_CACHE = 0x00000008,
-  AMDSMI_CACHE_PROPERTY_SIMD_CACHE = 0x00000010,
+    AMDSMI_CACHE_PROPERTY_ENABLED = 0x00000001,
+    AMDSMI_CACHE_PROPERTY_DATA_CACHE = 0x00000002,
+    AMDSMI_CACHE_PROPERTY_INST_CACHE = 0x00000004,
+    AMDSMI_CACHE_PROPERTY_CPU_CACHE = 0x00000008,
+    AMDSMI_CACHE_PROPERTY_SIMD_CACHE = 0x00000010,
 } amdsmi_cache_property_type_t;
 
 typedef struct {
-  uint32_t num_cache_types;
-  struct cache_ {
-    uint32_t cache_properties;  // amdsmi_cache_property_type_t which is a bitmask
-    uint32_t cache_size; /* In KB */
-    uint32_t cache_level;
-    uint32_t max_num_cu_shared;  /* Indicates how many Compute Units share this cache instance */
-    uint32_t num_cache_instance;  /* total number of instance of this cache type */
-    uint32_t reserved[3];
-  } cache[AMDSMI_MAX_CACHE_TYPES];
-  uint32_t reserved[15];
+    uint32_t num_cache_types;
+    struct cache_ {
+        uint32_t cache_properties;    //!< amdsmi_cache_property_type_t which is a bitmask
+        uint32_t cache_size;          //!< In KB
+        uint32_t cache_level;
+        uint32_t max_num_cu_shared;   //!< Indicates how many Compute Units share this cache instance
+        uint32_t num_cache_instance;  //!< total number of instance of this cache type
+        uint32_t reserved[3];
+    } cache[AMDSMI_MAX_CACHE_TYPES];
+    uint32_t reserved[15];
 } amdsmi_gpu_cache_info_t;
 
 typedef struct {
-  uint8_t num_fw_info;
-  struct fw_info_list_ {
-    amdsmi_fw_block_t fw_id;
-    uint64_t fw_version;
-    uint64_t reserved[2];
-  } fw_info_list[AMDSMI_FW_ID__MAX];
-  uint32_t reserved[7];
+    uint8_t num_fw_info;
+    struct fw_info_list_ {
+        amdsmi_fw_block_t fw_id;
+        uint64_t fw_version;
+        uint64_t reserved[2];
+    } fw_info_list[AMDSMI_FW_ID__MAX];
+    uint32_t reserved[7];
 } amdsmi_fw_info_t;
 
 typedef struct {
-  char  market_name[AMDSMI_MAX_STRING_LENGTH];
-  uint32_t vendor_id;   //< Use 32 bit to be compatible with other platform.
-  char vendor_name[AMDSMI_MAX_STRING_LENGTH];
-  uint32_t subvendor_id;   //< The subsystem vendor id
-  uint64_t device_id;   //< The device id of a GPU
-  uint32_t rev_id;
-  char asic_serial[AMDSMI_MAX_STRING_LENGTH];
-  uint32_t oam_id;   //< 0xFFFF if not supported
-  uint32_t num_of_compute_units;   //< 0xFFFFFFFF if not supported
-  uint64_t target_graphics_version;  //< 0xFFFFFFFFFFFFFFFF if not supported
-  uint32_t reserved[22];
+    char  market_name[AMDSMI_MAX_STRING_LENGTH];
+    uint32_t vendor_id;
+    char vendor_name[AMDSMI_MAX_STRING_LENGTH];
+    uint32_t subvendor_id; //< The subsystem vendor id
+    uint64_t device_id;    //< The device id of a GPU
+    uint32_t rev_id;
+    char asic_serial[AMDSMI_MAX_STRING_LENGTH];
+    uint32_t oam_id;       //< 0xFFFF if not supported
+    uint32_t num_of_compute_units;     //< 0xFFFFFFFF if not supported
+    uint64_t target_graphics_version;  //< 0xFFFFFFFFFFFFFFFF if not supported
+    uint32_t reserved[22];
 } amdsmi_asic_info_t;
 
 typedef struct {
-  uint64_t kfd_id;  //< 0xFFFFFFFFFFFFFFFF if not supported
-  uint32_t node_id;  //< 0xFFFFFFFF if not supported
-  uint32_t current_partition_id;  //< 0xFFFFFFFF if not supported
-  uint32_t reserved[12];
+    uint64_t kfd_id;   //< 0xFFFFFFFFFFFFFFFF if not supported
+    uint32_t node_id;  //< 0xFFFFFFFF if not supported
+    uint32_t current_partition_id;  //< 0xFFFFFFFF if not supported
+    uint32_t reserved[12];
 } amdsmi_kfd_info_t;
 
 /**
@@ -653,15 +659,14 @@ typedef struct {
  * This union is used to identify various memory partitioning settings.
  */
 typedef union {
-  struct nps_flags_ {
-    uint32_t nps1_cap :1;  // bool 1 = true; 0 = false; Max uint32 means unsupported
-    uint32_t nps2_cap :1;  // bool 1 = true; 0 = false; Max uint32 means unsupported
-    uint32_t nps4_cap :1;  // bool 1 = true; 0 = false; Max uint32 means unsupported
-    uint32_t nps8_cap :1;  // bool 1 = true; 0 = false; Max uint32 means unsupported
-    uint32_t reserved :28;
-  } amdsmi_nps_flags_t;
-
-  uint32_t nps_cap_mask;
+    struct nps_flags_ {
+        uint32_t nps1_cap :1;  // bool 1 = true; 0 = false; Max uint32 means unsupported
+        uint32_t nps2_cap :1;  // bool 1 = true; 0 = false; Max uint32 means unsupported
+        uint32_t nps4_cap :1;  // bool 1 = true; 0 = false; Max uint32 means unsupported
+        uint32_t nps8_cap :1;  // bool 1 = true; 0 = false; Max uint32 means unsupported
+        uint32_t reserved :28;
+    } amdsmi_nps_flags_t;
+    uint32_t nps_cap_mask;
 } amdsmi_nps_caps_t;
 
 /**
@@ -669,125 +674,123 @@ typedef union {
  * This union is used to identify various memory partitioning settings.
  */
 typedef struct {
-  amdsmi_accelerator_partition_type_t  profile_type;   // SPX, DPX, QPX, CPX and so on
-  uint32_t num_partitions;  // On MI300X, SPX: 1, DPX: 2, QPX: 4, CPX: 8, length of resources array
-  amdsmi_nps_caps_t memory_caps;             // Possible memory partition capabilities
-  uint32_t profile_index;
-  uint32_t num_resources;                    // length of index_of_resources_profile
-  uint32_t resources[AMDSMI_MAX_ACCELERATOR_PARTITIONS][AMDSMI_MAX_CP_PROFILE_RESOURCES];
-  uint64_t reserved[13];
+    amdsmi_accelerator_partition_type_t  profile_type;   // SPX, DPX, QPX, CPX and so on
+    uint32_t num_partitions;        // On MI300X, SPX: 1, DPX: 2, QPX: 4, CPX: 8, length of resources array
+    amdsmi_nps_caps_t memory_caps;  // Possible memory partition capabilities
+    uint32_t profile_index;
+    uint32_t num_resources;         // length of index_of_resources_profile
+    uint32_t resources[AMDSMI_MAX_ACCELERATOR_PARTITIONS][AMDSMI_MAX_CP_PROFILE_RESOURCES];
+    uint64_t reserved[13];
 } amdsmi_accelerator_partition_profile_t;
 
 typedef enum {
-  AMDSMI_LINK_TYPE_INTERNAL,
-  AMDSMI_LINK_TYPE_XGMI,
-  AMDSMI_LINK_TYPE_PCIE,
-  AMDSMI_LINK_TYPE_NOT_APPLICABLE,
-  AMDSMI_LINK_TYPE_UNKNOWN
+    AMDSMI_LINK_TYPE_INTERNAL,
+    AMDSMI_LINK_TYPE_XGMI,
+    AMDSMI_LINK_TYPE_PCIE,
+    AMDSMI_LINK_TYPE_NOT_APPLICABLE,
+    AMDSMI_LINK_TYPE_UNKNOWN
 } amdsmi_link_type_t;
 
 typedef struct {
-  uint32_t num_links;   //!< number of links
-  struct _links {
-    amdsmi_bdf_t bdf;
-    uint32_t bit_rate;  //!< current link speed in Gb/s
-    uint32_t max_bandwidth;   //!< max bandwidth of the link
-    amdsmi_link_type_t link_type;   //!< type of the link
-    uint64_t read;  //!< total data received for each link in KB
-    uint64_t write;   //!< total data transfered for each link in KB
-    uint64_t reserved[2];
-  } links[AMDSMI_MAX_NUM_XGMI_PHYSICAL_LINK];
-  uint64_t reserved[7];
+    uint32_t num_links;  //!< number of links
+    struct _links {
+        amdsmi_bdf_t bdf;
+        uint32_t bit_rate;       //!< current link speed in Gb/s
+        uint32_t max_bandwidth;  //!< max bandwidth of the link
+        amdsmi_link_type_t link_type;  //!< type of the link
+        uint64_t read;           //!< total data received for each link in KB
+        uint64_t write;          //!< total data transfered for each link in KB
+        uint64_t reserved[2];
+    } links[AMDSMI_MAX_NUM_XGMI_PHYSICAL_LINK];
+    uint64_t reserved[7];
 } amdsmi_link_metrics_t;
 
 typedef struct {
-  amdsmi_vram_type_t vram_type;
-  amdsmi_vram_vendor_type_t vram_vendor;
-  uint64_t vram_size;
-  uint32_t vram_bit_width;
-  uint64_t reserved[5];
+    amdsmi_vram_type_t vram_type;
+    amdsmi_vram_vendor_type_t vram_vendor;
+    uint64_t vram_size;
+    uint32_t vram_bit_width;
+    uint64_t vram_max_bandwidth;   //!< The VRAM max bandwidth at current memory clock (GB/s)
+  uint64_t reserved[4];
 } amdsmi_vram_info_t;
 
-
 typedef struct {
-  char  driver_version[AMDSMI_MAX_STRING_LENGTH];
-  char  driver_date[AMDSMI_MAX_STRING_LENGTH];
-  char  driver_name[AMDSMI_MAX_STRING_LENGTH];
+    char  driver_version[AMDSMI_MAX_STRING_LENGTH];
+    char  driver_date[AMDSMI_MAX_STRING_LENGTH];
+    char  driver_name[AMDSMI_MAX_STRING_LENGTH];
 } amdsmi_driver_info_t;
 
 typedef struct {
-  char  model_number[AMDSMI_MAX_STRING_LENGTH];
-  char  product_serial[AMDSMI_MAX_STRING_LENGTH];
-  char  fru_id[AMDSMI_MAX_STRING_LENGTH];
-  char  product_name[AMDSMI_MAX_STRING_LENGTH];
-  char  manufacturer_name[AMDSMI_MAX_STRING_LENGTH];
-  uint64_t reserved[32];
+    char  model_number[AMDSMI_MAX_STRING_LENGTH];
+    char  product_serial[AMDSMI_MAX_STRING_LENGTH];
+    char  fru_id[AMDSMI_MAX_STRING_LENGTH];
+    char  product_name[AMDSMI_MAX_STRING_LENGTH];
+    char  manufacturer_name[AMDSMI_MAX_STRING_LENGTH];
+    uint64_t reserved[32];
 } amdsmi_board_info_t;
 
 typedef struct {
-  uint32_t current_socket_power;
-  uint32_t average_socket_power;
-  uint32_t gfx_voltage;   // GFX voltage measurement in mV
-  uint32_t soc_voltage;  // SOC voltage measurement in mV
-  uint32_t mem_voltage;  // MEM voltage measurement in mV
-  uint32_t power_limit;  // The power limit;
-  uint32_t reserved[11];
+    uint32_t current_socket_power;
+    uint32_t average_socket_power;
+    uint32_t gfx_voltage;  // GFX voltage measurement in mV
+    uint32_t soc_voltage;  // SOC voltage measurement in mV
+    uint32_t mem_voltage;  // MEM voltage measurement in mV
+    uint32_t power_limit;  // The power limit;
+    uint32_t reserved[11];
 } amdsmi_power_info_t;
 
 typedef struct {
-  uint32_t clk;
-  uint32_t min_clk;
-  uint32_t max_clk;
-  uint8_t clk_locked;
-  uint8_t clk_deep_sleep;
-  uint32_t reserved[4];
+    uint32_t clk;
+    uint32_t min_clk;
+    uint32_t max_clk;
+    uint8_t clk_locked;
+    uint8_t clk_deep_sleep;
+    uint32_t reserved[4];
 } amdsmi_clk_info_t;
 
 /**
- * amdsmi_engine_usage_t:
+ * @brief amdsmi_engine_usage_t:
  * This structure holds common
  * GPU activity values seen in both BM or
  * SRIOV
  **/
 typedef struct {
-  uint32_t gfx_activity;
-  uint32_t umc_activity;
-  uint32_t mm_activity;
-  uint32_t reserved[13];
+    uint32_t gfx_activity;
+    uint32_t umc_activity;
+    uint32_t mm_activity;
+    uint32_t reserved[13];
 } amdsmi_engine_usage_t;
 typedef uint32_t amdsmi_process_handle_t;
 
-
 typedef struct {
-  char name[AMDSMI_MAX_STRING_LENGTH];
-  amdsmi_process_handle_t pid;
-  uint64_t mem; /** in bytes */
-  struct engine_usage_ {
-    uint64_t gfx;
-    uint64_t enc;
+    char name[AMDSMI_MAX_STRING_LENGTH];
+    amdsmi_process_handle_t pid;
+    uint64_t mem;  /** in bytes */
+    struct engine_usage_ {
+        uint64_t gfx;
+        uint64_t enc;
+        uint32_t reserved[12];
+    } engine_usage;  /** How much time the process spend using these engines in ns */
+    struct memory_usage_ {
+        uint64_t gtt_mem;
+        uint64_t cpu_mem;
+        uint64_t vram_mem;
+        uint32_t reserved[10];
+    } memory_usage;  /** in bytes */
+    char container_name[AMDSMI_MAX_STRING_LENGTH];
     uint32_t reserved[12];
-  } engine_usage; /** How much time the process spend using these engines in ns */
-  struct memory_usage_ {
-    uint64_t gtt_mem;
-    uint64_t cpu_mem;
-    uint64_t vram_mem;
-    uint32_t reserved[10];
-  } memory_usage; /** in bytes */
-  char container_name[AMDSMI_MAX_STRING_LENGTH];
-  uint32_t reserved[12];
 } amdsmi_proc_info_t;
 
 /**
  * @brief IO Link P2P Capability
  */
 typedef struct {
-  uint8_t is_iolink_coherent;    // 1 = true, 0 = false, UINT8_MAX = Not defined.
-  uint8_t is_iolink_atomics_32bit;
-  uint8_t is_iolink_atomics_64bit;
-  uint8_t is_iolink_dma;
-  uint8_t is_iolink_bi_directional;
+    uint8_t is_iolink_coherent;  //!< 1 = true, 0 = false, UINT8_MAX = Not defined.
+    uint8_t is_iolink_atomics_32bit;
+    uint8_t is_iolink_atomics_64bit;
+    uint8_t is_iolink_dma;
+    uint8_t is_iolink_bi_directional;
 } amdsmi_p2p_capability_t;
-
 
 //! Guaranteed maximum possible number of supported frequencies
 #define AMDSMI_MAX_NUM_FREQUENCIES 33
@@ -802,37 +805,20 @@ typedef struct {
  * @brief PowerPlay performance levels
  */
 typedef enum {
-  AMDSMI_DEV_PERF_LEVEL_AUTO = 0,       //!< Performance level is "auto"
-  AMDSMI_DEV_PERF_LEVEL_FIRST = AMDSMI_DEV_PERF_LEVEL_AUTO,
-
-  AMDSMI_DEV_PERF_LEVEL_LOW,              //!< Keep PowerPlay levels "low",
-                                        //!< regardless of workload
-  AMDSMI_DEV_PERF_LEVEL_HIGH,             //!< Keep PowerPlay levels "high",
-                                        //!< regardless of workload
-  AMDSMI_DEV_PERF_LEVEL_MANUAL,           //!< Only use values defined by manually
-                                        //!< setting the AMDSMI_CLK_TYPE_SYS speed
-  AMDSMI_DEV_PERF_LEVEL_STABLE_STD,       //!< Stable power state with profiling
-                                        //!< clocks
-  AMDSMI_DEV_PERF_LEVEL_STABLE_PEAK,      //!< Stable power state with peak clocks
-  AMDSMI_DEV_PERF_LEVEL_STABLE_MIN_MCLK,  //!< Stable power state with minimum
-                                        //!< memory clock
-  AMDSMI_DEV_PERF_LEVEL_STABLE_MIN_SCLK,  //!< Stable power state with minimum
-                                        //!< system clock
-  AMDSMI_DEV_PERF_LEVEL_DETERMINISM,      //!< Performance determinism state
-
-  AMDSMI_DEV_PERF_LEVEL_LAST = AMDSMI_DEV_PERF_LEVEL_DETERMINISM,
-
-  AMDSMI_DEV_PERF_LEVEL_UNKNOWN = 0x100   //!< Unknown performance level
+    AMDSMI_DEV_PERF_LEVEL_AUTO = 0,         //!< Performance level is "auto"
+    AMDSMI_DEV_PERF_LEVEL_FIRST = AMDSMI_DEV_PERF_LEVEL_AUTO,
+    AMDSMI_DEV_PERF_LEVEL_LOW,              //!< Keep PowerPlay levels "low", regardless of workload
+    AMDSMI_DEV_PERF_LEVEL_HIGH,             //!< Keep PowerPlay levels "high", regardless of workload
+    AMDSMI_DEV_PERF_LEVEL_MANUAL,           //!< Only use values defined by manually
+                                            //!< setting the AMDSMI_CLK_TYPE_SYS speed
+    AMDSMI_DEV_PERF_LEVEL_STABLE_STD,       //!< Stable power state with profiling clocks
+    AMDSMI_DEV_PERF_LEVEL_STABLE_PEAK,      //!< Stable power state with peak clocks
+    AMDSMI_DEV_PERF_LEVEL_STABLE_MIN_MCLK,  //!< Stable power state with minimum memory clock
+    AMDSMI_DEV_PERF_LEVEL_STABLE_MIN_SCLK,  //!< Stable power state with minimum system clock
+    AMDSMI_DEV_PERF_LEVEL_DETERMINISM,      //!< Performance determinism state
+    AMDSMI_DEV_PERF_LEVEL_LAST = AMDSMI_DEV_PERF_LEVEL_DETERMINISM,
+    AMDSMI_DEV_PERF_LEVEL_UNKNOWN = 0x100   //!< Unknown performance level
 } amdsmi_dev_perf_level_t;
-
-/**
- * @brief Available clock types.
- */
-
-
-/**
- * Event counter types
- */
 
 /**
  * @brief Handle to performance event counter
@@ -840,200 +826,182 @@ typedef enum {
 typedef uintptr_t amdsmi_event_handle_t;
 
 /**
- * Event Groups
- *
- * @brief Enum denoting an event group. The value of the enum is the
+ * @brief Event Groups
+ * Enum denoting an event group. The value of the enum is the
  * base value for all the event enums in the group.
  */
 typedef enum {
-  AMDSMI_EVNT_GRP_XGMI = 0,         //!< Data Fabric (XGMI) related events
-  AMDSMI_EVNT_GRP_XGMI_DATA_OUT = 10,  //!< XGMI Outbound data
-  AMDSMI_EVNT_GRP_INVALID = 0xFFFFFFFF
+    AMDSMI_EVNT_GRP_XGMI = 0,         //!< Data Fabric (XGMI) related events
+    AMDSMI_EVNT_GRP_XGMI_DATA_OUT = 10,  //!< XGMI Outbound data
+    AMDSMI_EVNT_GRP_INVALID = 0xFFFFFFFF
 } amdsmi_event_group_t;
 
 /**
- * Event types
- * @brief Event type enum. Events belonging to a particular event group
+ * @brief Event types
+ * Event type enum. Events belonging to a particular event group
  * ::amdsmi_event_group_t should begin enumerating at the ::amdsmi_event_group_t
  * value for that group.
+ *
+ * Data beats sent to neighbor 0; Each beat represents 32 bytes.<br><br>
+ *
+ * XGMI throughput can be calculated by multiplying a BEATs event
+ * such as ::AMDSMI_EVNT_XGMI_0_BEATS_TX by 32 and dividing by
+ * the time for which event collection occurred,
+ * ::amdsmi_counter_value_t.time_running (which is in nanoseconds). To get
+ * bytes per second, multiply this value by 10<sup>9</sup>.<br>
+ * <br>
+ * Throughput = BEATS/time_running * 10<sup>9</sup>  (bytes/second)<br>
+ *
+ * Events in the AMDSMI_EVNT_GRP_XGMI_DATA_OUT group measure
+ * the number of beats sent on an XGMI link. Each beat represents
+ * 32 bytes. AMDSMI_EVNT_XGMI_DATA_OUT_n represents the number of
+ * outbound beats (each representing 32 bytes) on link n.<br><br>
+ *
+ * XGMI throughput can be calculated by multiplying a event
+ * such as ::AMDSMI_EVNT_XGMI_DATA_OUT_n by 32 and dividing by
+ * the time for which event collection occurred,
+ * ::amdsmi_counter_value_t.time_running (which is in nanoseconds). To get
+ * bytes per second, multiply this value by 10<sup>9</sup>.<br>
+ * <br>
  */
 typedef enum {
-  AMDSMI_EVNT_FIRST = AMDSMI_EVNT_GRP_XGMI,
+    AMDSMI_EVNT_FIRST = AMDSMI_EVNT_GRP_XGMI,
 
-  AMDSMI_EVNT_XGMI_FIRST = AMDSMI_EVNT_GRP_XGMI,
-  AMDSMI_EVNT_XGMI_0_NOP_TX = AMDSMI_EVNT_XGMI_FIRST,  //!< NOPs sent to neighbor 0
-  AMDSMI_EVNT_XGMI_0_REQUEST_TX,                    //!< Outgoing requests to
-                                                  //!< neighbor 0
-  AMDSMI_EVNT_XGMI_0_RESPONSE_TX,                   //!< Outgoing responses to
-                                                  //!< neighbor 0
-  /**
-   * @brief
-   *
-   * Data beats sent to neighbor 0; Each beat represents 32 bytes.<br><br>
-   *
-   * XGMI throughput can be calculated by multiplying a BEATs event
-   * such as ::AMDSMI_EVNT_XGMI_0_BEATS_TX by 32 and dividing by
-   * the time for which event collection occurred,
-   * ::amdsmi_counter_value_t.time_running (which is in nanoseconds). To get
-   * bytes per second, multiply this value by 10<sup>9</sup>.<br>
-   * <br>
-   * Throughput = BEATS/time_running * 10<sup>9</sup>  (bytes/second)<br>
-   */
-  // ie, Throughput = BEATS/time_running 10^9  bytes/sec
-  AMDSMI_EVNT_XGMI_0_BEATS_TX,
-  AMDSMI_EVNT_XGMI_1_NOP_TX,                        //!< NOPs sent to neighbor 1
-  AMDSMI_EVNT_XGMI_1_REQUEST_TX,                        //!< Outgoing requests to
-                                                  //!< neighbor 1
-  AMDSMI_EVNT_XGMI_1_RESPONSE_TX,                   //!< Outgoing responses to
-                                                  //!< neighbor 1
-  AMDSMI_EVNT_XGMI_1_BEATS_TX,                      //!< Data beats sent to
-                                                  //!< neighbor 1; Each beat
-                                                  //!< represents 32 bytes
-
-  AMDSMI_EVNT_XGMI_LAST = AMDSMI_EVNT_XGMI_1_BEATS_TX,   // 5
-
-  AMDSMI_EVNT_XGMI_DATA_OUT_FIRST = AMDSMI_EVNT_GRP_XGMI_DATA_OUT,  // 10
-
-  /*
-   * @brief Events in the AMDSMI_EVNT_GRP_XGMI_DATA_OUT group measure
-   * the number of beats sent on an XGMI link. Each beat represents
-   * 32 bytes. AMDSMI_EVNT_XGMI_DATA_OUT_n represents the number of
-   * outbound beats (each representing 32 bytes) on link n.<br><br>
-   *
-   * XGMI throughput can be calculated by multiplying a event
-   * such as ::AMDSMI_EVNT_XGMI_DATA_OUT_n by 32 and dividing by
-   * the time for which event collection occurred,
-   * ::amdsmi_counter_value_t.time_running (which is in nanoseconds). To get
-   * bytes per second, multiply this value by 10<sup>9</sup>.<br>
-   * <br>
-   * Throughput = BEATS/time_running * 10<sup>9</sup>  (bytes/second)<br>
-   */
-  // ie, Throughput = BEATS/time_running 10^9  bytes/sec
-  AMDSMI_EVNT_XGMI_DATA_OUT_0 = AMDSMI_EVNT_XGMI_DATA_OUT_FIRST,
-  AMDSMI_EVNT_XGMI_DATA_OUT_1,   //!< Outbound beats to neighbor 1
-  AMDSMI_EVNT_XGMI_DATA_OUT_2,   //!< Outbound beats to neighbor 2
-  AMDSMI_EVNT_XGMI_DATA_OUT_3,   //!< Outbound beats to neighbor 3
-  AMDSMI_EVNT_XGMI_DATA_OUT_4,   //!< Outbound beats to neighbor 4
-  AMDSMI_EVNT_XGMI_DATA_OUT_5,   //!< Outbound beats to neighbor 5
-  AMDSMI_EVNT_XGMI_DATA_OUT_LAST = AMDSMI_EVNT_XGMI_DATA_OUT_5,
-
-  AMDSMI_EVNT_LAST = AMDSMI_EVNT_XGMI_DATA_OUT_LAST,
+    AMDSMI_EVNT_XGMI_FIRST = AMDSMI_EVNT_GRP_XGMI,
+    AMDSMI_EVNT_XGMI_0_NOP_TX = AMDSMI_EVNT_XGMI_FIRST,  //!< NOPs sent to neighbor 0
+    AMDSMI_EVNT_XGMI_0_REQUEST_TX,  //!< Outgoing requests to neighbor 0
+    AMDSMI_EVNT_XGMI_0_RESPONSE_TX, //!< Outgoing responses to neighbor 0
+    AMDSMI_EVNT_XGMI_0_BEATS_TX,    //!< Throughput = BEATS/time_running 10^9 bytes/sec
+    AMDSMI_EVNT_XGMI_1_NOP_TX,      //!< NOPs sent to neighbor 1
+    AMDSMI_EVNT_XGMI_1_REQUEST_TX,  //!< Outgoing requests to neighbor 1
+    AMDSMI_EVNT_XGMI_1_RESPONSE_TX, //!< Outgoing responses to neighbor 1
+    AMDSMI_EVNT_XGMI_1_BEATS_TX,    //!< Data beats sent to neighbor 1; Each beat represents 32 bytes
+    AMDSMI_EVNT_XGMI_LAST = AMDSMI_EVNT_XGMI_1_BEATS_TX,
+    AMDSMI_EVNT_XGMI_DATA_OUT_FIRST = AMDSMI_EVNT_GRP_XGMI_DATA_OUT,
+    AMDSMI_EVNT_XGMI_DATA_OUT_0 = AMDSMI_EVNT_XGMI_DATA_OUT_FIRST,
+    AMDSMI_EVNT_XGMI_DATA_OUT_1,   //!< Outbound beats to neighbor 1
+    AMDSMI_EVNT_XGMI_DATA_OUT_2,   //!< Outbound beats to neighbor 2
+    AMDSMI_EVNT_XGMI_DATA_OUT_3,   //!< Outbound beats to neighbor 3
+    AMDSMI_EVNT_XGMI_DATA_OUT_4,   //!< Outbound beats to neighbor 4
+    AMDSMI_EVNT_XGMI_DATA_OUT_5,   //!< Outbound beats to neighbor 5
+    AMDSMI_EVNT_XGMI_DATA_OUT_LAST = AMDSMI_EVNT_XGMI_DATA_OUT_5,
+    AMDSMI_EVNT_LAST = AMDSMI_EVNT_XGMI_DATA_OUT_LAST,
 } amdsmi_event_type_t;
 
 /**
- * Event counter commands
+ * @brief Event counter commands
  */
 typedef enum {
-  AMDSMI_CNTR_CMD_START = 0,  //!< Start the counter
-  AMDSMI_CNTR_CMD_STOP,       //!< Stop the counter; note that this should not
-                            //!< be used before reading.
+    AMDSMI_CNTR_CMD_START = 0,  //!< Start the counter
+    AMDSMI_CNTR_CMD_STOP,       //!< Stop the counter; note that this should not
+                                //!< be used before reading.
 } amdsmi_counter_command_t;
 
 /**
- * Counter value
+ * @brief Counter value
  */
 typedef struct {
-  uint64_t value;            //!< Counter value
-  uint64_t time_enabled;     //!< Time that the counter was enabled
-                             //!< (in nanoseconds)
-  uint64_t time_running;     //!< Time that the counter was running
-                             //!< (in nanoseconds)
+    uint64_t value;         //!< Counter value
+    uint64_t time_enabled;  //!< Time that the counter was enabled in nanoseconds
+    uint64_t time_running;  //!< Time that the counter was running in nanoseconds
 } amdsmi_counter_value_t;
 
 /**
- * Event notification event types
+ * @brief Event notification event types
  */
 typedef enum {
-  AMDSMI_EVT_NOTIF_NONE = 0,     //!< Not used
-  AMDSMI_EVT_NOTIF_VMFAULT = 1,  //!< VM page fault
-  AMDSMI_EVT_NOTIF_FIRST = AMDSMI_EVT_NOTIF_VMFAULT,
-  AMDSMI_EVT_NOTIF_THERMAL_THROTTLE = 2,
-  AMDSMI_EVT_NOTIF_GPU_PRE_RESET = 3,
-  AMDSMI_EVT_NOTIF_GPU_POST_RESET = 4,
-  AMDSMI_EVT_NOTIF_RING_HANG = 5,
+    AMDSMI_EVT_NOTIF_NONE = 0,     //!< Not used
+    AMDSMI_EVT_NOTIF_VMFAULT = 1,  //!< VM page fault
+    AMDSMI_EVT_NOTIF_FIRST = AMDSMI_EVT_NOTIF_VMFAULT,
+    AMDSMI_EVT_NOTIF_THERMAL_THROTTLE = 2,
+    AMDSMI_EVT_NOTIF_GPU_PRE_RESET = 3,
+    AMDSMI_EVT_NOTIF_GPU_POST_RESET = 4,
+    AMDSMI_EVT_NOTIF_RING_HANG = 5,
 
-  AMDSMI_EVT_NOTIF_LAST = AMDSMI_EVT_NOTIF_RING_HANG
+    AMDSMI_EVT_NOTIF_LAST = AMDSMI_EVT_NOTIF_RING_HANG
 } amdsmi_evt_notification_type_t;
 
 /**
- * Macro to generate event bitmask from event id
+ * @brief Macro to generate event bitmask from event id
  */
 #define AMDSMI_EVENT_MASK_FROM_INDEX(i) (1ULL << ((i) - 1))
 
-//! Maximum number of characters an event notification message will be
-// matches kfd message max size
+/**
+ * @brief 
+ * Maximum number of characters an event notification message will be
+ * matches kfd message max size
+ */
 #define MAX_EVENT_NOTIFICATION_MSG_SIZE 96
 
 /**
- * Event notification data returned from event notification API
+ * @brief Event notification data returned from event notification API
  */
 typedef struct {
-    amdsmi_processor_handle processor_handle;        //!< Handler of device that corresponds to the event
-    amdsmi_evt_notification_type_t event;     //!< Event type
+    amdsmi_processor_handle processor_handle;       //!< Handler of device that corresponds to the event
+    amdsmi_evt_notification_type_t event;           //!< Event type
     char message[MAX_EVENT_NOTIFICATION_MSG_SIZE];  //!< Event message
 } amdsmi_evt_notification_data_t;
 
 /**
  * @brief Temperature Metrics.  This enum is used to identify various
  * temperature metrics. Corresponding values will be in millidegress
- * Celcius.
+ * Celcius {@linux_bm} or Celcius {@host}
  */
 typedef enum {
-  AMDSMI_TEMP_CURRENT = 0x0,   //!< Temperature current value.
-  AMDSMI_TEMP_FIRST = AMDSMI_TEMP_CURRENT,
+    AMDSMI_TEMP_CURRENT = 0x0,   //!< Temperature current value.
+    AMDSMI_TEMP_FIRST = AMDSMI_TEMP_CURRENT,
 
-  AMDSMI_TEMP_MAX,             //!< Temperature max value.
-  AMDSMI_TEMP_MIN,             //!< Temperature min value.
-  AMDSMI_TEMP_MAX_HYST,        //!< Temperature hysteresis value for max limit.
-                             //!< (This is an absolute temperature, not a
-                             //!< delta).
-  AMDSMI_TEMP_MIN_HYST,        //!< Temperature hysteresis value for min limit.
-                             //!< (This is an absolute temperature,
-                             //!<  not a delta).
-  AMDSMI_TEMP_CRITICAL,        //!< Temperature critical max value, typically
-                             //!<  greater than corresponding temp_max values.
-  AMDSMI_TEMP_CRITICAL_HYST,   //!< Temperature hysteresis value for critical
-                             //!<  limit. (This is an absolute temperature,
-                             //!<  not a delta).
-  AMDSMI_TEMP_EMERGENCY,       //!< Temperature emergency max value, for chips
-                             //!<  supporting more than two upper temperature
-                             //!<  limits. Must be equal or greater than
-                             //!<  corresponding temp_crit values.
-  AMDSMI_TEMP_EMERGENCY_HYST,  //!< Temperature hysteresis value for emergency
-                             //!<  limit. (This is an absolute temperature,
-                             //!<  not a delta).
-  AMDSMI_TEMP_CRIT_MIN,        //!< Temperature critical min value, typically
-                             //!<  lower than corresponding temperature
-                             //!<  minimum values.
-  AMDSMI_TEMP_CRIT_MIN_HYST,   //!< Temperature hysteresis value for critical
-                             //!< minimum limit. (This is an absolute
-                             //!< temperature, not a delta).
-  AMDSMI_TEMP_OFFSET,          //!< Temperature offset which is added to the
-                             //!  temperature reading by the chip.
-  AMDSMI_TEMP_LOWEST,          //!< Historical minimum temperature.
-  AMDSMI_TEMP_HIGHEST,         //!< Historical maximum temperature.
+    AMDSMI_TEMP_MAX,             //!< Temperature max value.
+    AMDSMI_TEMP_MIN,             //!< Temperature min value.
+    AMDSMI_TEMP_MAX_HYST,        //!< Temperature hysteresis value for max limit.
+                                 //!< (This is an absolute temperature, not a
+                                 //!< delta).
+    AMDSMI_TEMP_MIN_HYST,        //!< Temperature hysteresis value for min limit.
+                                 //!< (This is an absolute temperature,
+                                 //!<  not a delta).
+    AMDSMI_TEMP_CRITICAL,        //!< Temperature critical max value, typically
+                                 //!<  greater than corresponding temp_max values.
+    AMDSMI_TEMP_CRITICAL_HYST,   //!< Temperature hysteresis value for critical
+                                 //!<  limit. (This is an absolute temperature,
+                                 //!<  not a delta).
+    AMDSMI_TEMP_EMERGENCY,       //!< Temperature emergency max value, for chips
+                                 //!<  supporting more than two upper temperature
+                                 //!<  limits. Must be equal or greater than
+                                 //!<  corresponding temp_crit values.
+    AMDSMI_TEMP_EMERGENCY_HYST,  //!< Temperature hysteresis value for emergency
+                                 //!<  limit. (This is an absolute temperature,
+                                 //!<  not a delta).
+    AMDSMI_TEMP_CRIT_MIN,        //!< Temperature critical min value, typically
+                                 //!<  lower than corresponding temperature
+                                 //!<  minimum values.
+    AMDSMI_TEMP_CRIT_MIN_HYST,   //!< Temperature hysteresis value for critical
+                                 //!< minimum limit. (This is an absolute
+                                 //!< temperature, not a delta).
+    AMDSMI_TEMP_OFFSET,          //!< Temperature offset which is added to the
+                                 //!  temperature reading by the chip.
+    AMDSMI_TEMP_LOWEST,          //!< Historical minimum temperature.
+    AMDSMI_TEMP_HIGHEST,         //!< Historical maximum temperature.
 
-  AMDSMI_TEMP_LAST = AMDSMI_TEMP_HIGHEST
+    AMDSMI_TEMP_LAST = AMDSMI_TEMP_HIGHEST
 } amdsmi_temperature_metric_t;
 
 /**
  * @brief Voltage Metrics.  This enum is used to identify various
  * Volatge metrics. Corresponding values will be in millivolt.
- *
  */
 typedef enum {
-  AMDSMI_VOLT_CURRENT = 0x0,               //!< Voltage current value.
+    AMDSMI_VOLT_CURRENT = 0x0,               //!< Voltage current value.
 
-  AMDSMI_VOLT_FIRST = AMDSMI_VOLT_CURRENT,
-  AMDSMI_VOLT_MAX,                         //!< Voltage max value.
-  AMDSMI_VOLT_MIN_CRIT,                    //!< Voltage critical min value.
-  AMDSMI_VOLT_MIN,                         //!< Voltage min value.
-  AMDSMI_VOLT_MAX_CRIT,                    //!< Voltage critical max value.
-  AMDSMI_VOLT_AVERAGE,                     //!< Average voltage.
-  AMDSMI_VOLT_LOWEST,                      //!< Historical minimum voltage.
-  AMDSMI_VOLT_HIGHEST,                     //!< Historical maximum voltage.
+    AMDSMI_VOLT_FIRST = AMDSMI_VOLT_CURRENT,
+    AMDSMI_VOLT_MAX,                         //!< Voltage max value.
+    AMDSMI_VOLT_MIN_CRIT,                    //!< Voltage critical min value.
+    AMDSMI_VOLT_MIN,                         //!< Voltage min value.
+    AMDSMI_VOLT_MAX_CRIT,                    //!< Voltage critical max value.
+    AMDSMI_VOLT_AVERAGE,                     //!< Average voltage.
+    AMDSMI_VOLT_LOWEST,                      //!< Historical minimum voltage.
+    AMDSMI_VOLT_HIGHEST,                     //!< Historical maximum voltage.
 
-  AMDSMI_VOLT_LAST = AMDSMI_VOLT_HIGHEST
+    AMDSMI_VOLT_LAST = AMDSMI_VOLT_HIGHEST
 } amdsmi_voltage_metric_t;
 
 /**
@@ -1041,12 +1009,11 @@ typedef enum {
  * voltage reading should be obtained.
  */
 typedef enum {
-  AMDSMI_VOLT_TYPE_FIRST = 0,
+    AMDSMI_VOLT_TYPE_FIRST = 0,
 
-  AMDSMI_VOLT_TYPE_VDDGFX = AMDSMI_VOLT_TYPE_FIRST,  //!< Vddgfx GPU
-                                                 //!< voltage
-  AMDSMI_VOLT_TYPE_LAST = AMDSMI_VOLT_TYPE_VDDGFX,
-  AMDSMI_VOLT_TYPE_INVALID = 0xFFFFFFFF            //!< Invalid type
+    AMDSMI_VOLT_TYPE_VDDGFX = AMDSMI_VOLT_TYPE_FIRST,  //!< Vddgfx GPU voltage
+    AMDSMI_VOLT_TYPE_LAST = AMDSMI_VOLT_TYPE_VDDGFX,
+    AMDSMI_VOLT_TYPE_INVALID = 0xFFFFFFFF              //!< Invalid type
 } amdsmi_voltage_type_t;
 
 /**
@@ -1056,109 +1023,106 @@ typedef enum {
  * are supported by the system.
  */
 typedef enum {
-  AMDSMI_PWR_PROF_PRST_CUSTOM_MASK = 0x1,        //!< Custom Power Profile
-  AMDSMI_PWR_PROF_PRST_VIDEO_MASK = 0x2,         //!< Video Power Profile
-  AMDSMI_PWR_PROF_PRST_POWER_SAVING_MASK = 0x4,  //!< Power Saving Profile
-  AMDSMI_PWR_PROF_PRST_COMPUTE_MASK = 0x8,       //!< Compute Saving Profile
-  AMDSMI_PWR_PROF_PRST_VR_MASK = 0x10,           //!< VR Power Profile
+    AMDSMI_PWR_PROF_PRST_CUSTOM_MASK = 0x1,        //!< Custom Power Profile
+    AMDSMI_PWR_PROF_PRST_VIDEO_MASK = 0x2,         //!< Video Power Profile
+    AMDSMI_PWR_PROF_PRST_POWER_SAVING_MASK = 0x4,  //!< Power Saving Profile
+    AMDSMI_PWR_PROF_PRST_COMPUTE_MASK = 0x8,       //!< Compute Saving Profile
+    AMDSMI_PWR_PROF_PRST_VR_MASK = 0x10,           //!< VR Power Profile
 
-  //!< 3D Full Screen Power Profile
-  AMDSMI_PWR_PROF_PRST_3D_FULL_SCR_MASK = 0x20,
-  AMDSMI_PWR_PROF_PRST_BOOTUP_DEFAULT = 0x40,    //!< Default Boot Up Profile
-  AMDSMI_PWR_PROF_PRST_LAST = AMDSMI_PWR_PROF_PRST_BOOTUP_DEFAULT,
+    //!< 3D Full Screen Power Profile
+    AMDSMI_PWR_PROF_PRST_3D_FULL_SCR_MASK = 0x20,
+    AMDSMI_PWR_PROF_PRST_BOOTUP_DEFAULT = 0x40,    //!< Default Boot Up Profile
+    AMDSMI_PWR_PROF_PRST_LAST = AMDSMI_PWR_PROF_PRST_BOOTUP_DEFAULT,
 
-  //!< Invalid power profile
-  AMDSMI_PWR_PROF_PRST_INVALID = 0xFFFFFFFFFFFFFFFF
+    //!< Invalid power profile
+    AMDSMI_PWR_PROF_PRST_INVALID = 0xFFFFFFFFFFFFFFFF
 } amdsmi_power_profile_preset_masks_t;
 
 /**
  * @brief This enum is used to identify different GPU blocks.
  */
 typedef enum {
-  AMDSMI_GPU_BLOCK_INVALID =   0x0000000000000000,  //!< Used to indicate an
-                                                    //!< invalid block
-  AMDSMI_GPU_BLOCK_FIRST =     0x0000000000000001,
+    AMDSMI_GPU_BLOCK_INVALID =   0x0000000000000000,  //!< Used to indicate an invalid block
+    AMDSMI_GPU_BLOCK_FIRST =     0x0000000000000001,
 
-  AMDSMI_GPU_BLOCK_UMC = AMDSMI_GPU_BLOCK_FIRST,    //!< UMC block
-  AMDSMI_GPU_BLOCK_SDMA =      0x0000000000000002,  //!< SDMA block
-  AMDSMI_GPU_BLOCK_GFX =       0x0000000000000004,  //!< GFX block
-  AMDSMI_GPU_BLOCK_MMHUB =     0x0000000000000008,  //!< MMHUB block
-  AMDSMI_GPU_BLOCK_ATHUB =     0x0000000000000010,  //!< ATHUB block
-  AMDSMI_GPU_BLOCK_PCIE_BIF =  0x0000000000000020,  //!< PCIE_BIF block
-  AMDSMI_GPU_BLOCK_HDP =       0x0000000000000040,  //!< HDP block
-  AMDSMI_GPU_BLOCK_XGMI_WAFL = 0x0000000000000080,  //!< XGMI block
-  AMDSMI_GPU_BLOCK_DF =        0x0000000000000100,  //!< DF block
-  AMDSMI_GPU_BLOCK_SMN =       0x0000000000000200,  //!< SMN block
-  AMDSMI_GPU_BLOCK_SEM =       0x0000000000000400,  //!< SEM block
-  AMDSMI_GPU_BLOCK_MP0 =       0x0000000000000800,  //!< MP0 block
-  AMDSMI_GPU_BLOCK_MP1 =       0x0000000000001000,  //!< MP1 block
-  AMDSMI_GPU_BLOCK_FUSE =      0x0000000000002000,  //!< Fuse block
-  AMDSMI_GPU_BLOCK_MCA =       0x0000000000004000,  //!< MCA block
-  AMDSMI_GPU_BLOCK_VCN =       0x0000000000008000,  //!< VCN block
-  AMDSMI_GPU_BLOCK_JPEG =      0x0000000000010000,  //!< JPEG block
-  AMDSMI_GPU_BLOCK_IH =        0x0000000000020000,  //!< IH block
-  AMDSMI_GPU_BLOCK_MPIO =      0x0000000000040000,  //!< MPIO block
+    AMDSMI_GPU_BLOCK_UMC = AMDSMI_GPU_BLOCK_FIRST,    //!< UMC block
+    AMDSMI_GPU_BLOCK_SDMA =      0x0000000000000002,  //!< SDMA block
+    AMDSMI_GPU_BLOCK_GFX =       0x0000000000000004,  //!< GFX block
+    AMDSMI_GPU_BLOCK_MMHUB =     0x0000000000000008,  //!< MMHUB block
+    AMDSMI_GPU_BLOCK_ATHUB =     0x0000000000000010,  //!< ATHUB block
+    AMDSMI_GPU_BLOCK_PCIE_BIF =  0x0000000000000020,  //!< PCIE_BIF block
+    AMDSMI_GPU_BLOCK_HDP =       0x0000000000000040,  //!< HDP block
+    AMDSMI_GPU_BLOCK_XGMI_WAFL = 0x0000000000000080,  //!< XGMI block
+    AMDSMI_GPU_BLOCK_DF =        0x0000000000000100,  //!< DF block
+    AMDSMI_GPU_BLOCK_SMN =       0x0000000000000200,  //!< SMN block
+    AMDSMI_GPU_BLOCK_SEM =       0x0000000000000400,  //!< SEM block
+    AMDSMI_GPU_BLOCK_MP0 =       0x0000000000000800,  //!< MP0 block
+    AMDSMI_GPU_BLOCK_MP1 =       0x0000000000001000,  //!< MP1 block
+    AMDSMI_GPU_BLOCK_FUSE =      0x0000000000002000,  //!< Fuse block
+    AMDSMI_GPU_BLOCK_MCA =       0x0000000000004000,  //!< MCA block
+    AMDSMI_GPU_BLOCK_VCN =       0x0000000000008000,  //!< VCN block
+    AMDSMI_GPU_BLOCK_JPEG =      0x0000000000010000,  //!< JPEG block
+    AMDSMI_GPU_BLOCK_IH =        0x0000000000020000,  //!< IH block
+    AMDSMI_GPU_BLOCK_MPIO =      0x0000000000040000,  //!< MPIO block
 
-  AMDSMI_GPU_BLOCK_LAST = AMDSMI_GPU_BLOCK_MPIO,    //!< The highest bit position
-                                                    //!< for supported blocks
-  AMDSMI_GPU_BLOCK_RESERVED =  0x8000000000000000
+    AMDSMI_GPU_BLOCK_LAST = AMDSMI_GPU_BLOCK_MPIO,    //!< The highest bit position for supported blocks
+    AMDSMI_GPU_BLOCK_RESERVED =  0x8000000000000000
 } amdsmi_gpu_block_t;
-
 
 /**
  * @brief The clk limit type
  */
 typedef enum  {
-           CLK_LIMIT_MIN,
-           CLK_LIMIT_MAX
+    CLK_LIMIT_MIN,
+    CLK_LIMIT_MAX
 } amdsmi_clk_limit_type_t;
 
 /**
  * @brief The current ECC state
  */
 typedef enum {
-  AMDSMI_RAS_ERR_STATE_NONE = 0,   //!< No current errors
-  AMDSMI_RAS_ERR_STATE_DISABLED,   //!< ECC is disabled
-  AMDSMI_RAS_ERR_STATE_PARITY,     //!< ECC errors present, but type unknown
-  AMDSMI_RAS_ERR_STATE_SING_C,     //!< Single correctable error
-  AMDSMI_RAS_ERR_STATE_MULT_UC,    //!< Multiple uncorrectable errors
-  AMDSMI_RAS_ERR_STATE_POISON,     //!< Firmware detected error and isolated
-                                 //!< page. Treat as uncorrectable.
-  AMDSMI_RAS_ERR_STATE_ENABLED,    //!< ECC is enabled
+    AMDSMI_RAS_ERR_STATE_NONE = 0,   //!< No current errors
+    AMDSMI_RAS_ERR_STATE_DISABLED,   //!< ECC is disabled
+    AMDSMI_RAS_ERR_STATE_PARITY,     //!< ECC errors present, but type unknown
+    AMDSMI_RAS_ERR_STATE_SING_C,     //!< Single correctable error
+    AMDSMI_RAS_ERR_STATE_MULT_UC,    //!< Multiple uncorrectable errors
+    AMDSMI_RAS_ERR_STATE_POISON,     //!< Firmware detected error and isolated
+                                     //!< page. Treat as uncorrectable.
+    AMDSMI_RAS_ERR_STATE_ENABLED,    //!< ECC is enabled
 
-  AMDSMI_RAS_ERR_STATE_LAST = AMDSMI_RAS_ERR_STATE_ENABLED,
-  AMDSMI_RAS_ERR_STATE_INVALID = 0xFFFFFFFF
+    AMDSMI_RAS_ERR_STATE_LAST = AMDSMI_RAS_ERR_STATE_ENABLED,
+    AMDSMI_RAS_ERR_STATE_INVALID = 0xFFFFFFFF
 } amdsmi_ras_err_state_t;
 
 /**
  * @brief Types of memory
  */
 typedef enum {
-  AMDSMI_MEM_TYPE_FIRST = 0,
+    AMDSMI_MEM_TYPE_FIRST = 0,
 
-  AMDSMI_MEM_TYPE_VRAM = AMDSMI_MEM_TYPE_FIRST,  //!< VRAM memory
-  AMDSMI_MEM_TYPE_VIS_VRAM,                    //!< VRAM memory that is visible
-  AMDSMI_MEM_TYPE_GTT,                         //!< GTT memory
+    AMDSMI_MEM_TYPE_VRAM = AMDSMI_MEM_TYPE_FIRST,  //!< VRAM memory
+    AMDSMI_MEM_TYPE_VIS_VRAM,                      //!< VRAM memory that is visible
+    AMDSMI_MEM_TYPE_GTT,                           //!< GTT memory
 
-  AMDSMI_MEM_TYPE_LAST = AMDSMI_MEM_TYPE_GTT
+    AMDSMI_MEM_TYPE_LAST = AMDSMI_MEM_TYPE_GTT
 } amdsmi_memory_type_t;
 
 /**
  * @brief The values of this enum are used as frequency identifiers.
  */
 typedef enum {
-  AMDSMI_FREQ_IND_MIN = 0,  //!< Index used for the minimum frequency value
-  AMDSMI_FREQ_IND_MAX = 1,  //!< Index used for the maximum frequency value
-  AMDSMI_FREQ_IND_INVALID = 0xFFFFFFFF  //!< An invalid frequency index
+    AMDSMI_FREQ_IND_MIN = 0,  //!< Index used for the minimum frequency value
+    AMDSMI_FREQ_IND_MAX = 1,  //!< Index used for the maximum frequency value
+    AMDSMI_FREQ_IND_INVALID = 0xFFFFFFFF  //!< An invalid frequency index
 } amdsmi_freq_ind_t;
 
 /**
  * @brief XGMI Status
  */
 typedef enum {
-  AMDSMI_XGMI_STATUS_NO_ERRORS = 0,
-  AMDSMI_XGMI_STATUS_ERROR,
-  AMDSMI_XGMI_STATUS_MULTIPLE_ERRORS,
+    AMDSMI_XGMI_STATUS_NO_ERRORS = 0,
+    AMDSMI_XGMI_STATUS_ERROR,
+    AMDSMI_XGMI_STATUS_MULTIPLE_ERRORS,
 } amdsmi_xgmi_status_t;
 
 /**
@@ -1170,70 +1134,67 @@ typedef uint64_t amdsmi_bit_field_t;
  * @brief Reserved Memory Page States
  */
 typedef enum {
-  AMDSMI_MEM_PAGE_STATUS_RESERVED = 0,  //!< Reserved. This gpu page is reserved
-                                      //!<  and not available for use
-  AMDSMI_MEM_PAGE_STATUS_PENDING,       //!< Pending. This gpu page is marked
-                                      //!<  as bad and will be marked reserved
-                                      //!<  at the next window.
-  AMDSMI_MEM_PAGE_STATUS_UNRESERVABLE   //!< Unable to reserve this page
+    AMDSMI_MEM_PAGE_STATUS_RESERVED = 0,  //!< Reserved. This gpu page is reserved and not available for use
+    AMDSMI_MEM_PAGE_STATUS_PENDING,       //!< Pending. This gpu page is marked as bad and will be marked
+                                          //!< reserved at the next window.
+    AMDSMI_MEM_PAGE_STATUS_UNRESERVABLE   //!< Unable to reserve this page
 } amdsmi_memory_page_status_t;
 
 /**
  * @brief Types for IO Link
  */
 typedef enum {
-  AMDSMI_IOLINK_TYPE_UNDEFINED      = 0,          //!< unknown type.
-  AMDSMI_IOLINK_TYPE_PCIEXPRESS     = 1,          //!< PCI Express
-  AMDSMI_IOLINK_TYPE_XGMI           = 2,          //!< XGMI
-  AMDSMI_IOLINK_TYPE_NUMIOLINKTYPES,              //!< Number of IO Link types
-  AMDSMI_IOLINK_TYPE_SIZE           = 0xFFFFFFFF  //!< Max of IO Link types
+    AMDSMI_IOLINK_TYPE_UNDEFINED  = 0,  //!< unknown type.
+    AMDSMI_IOLINK_TYPE_PCIEXPRESS = 1,  //!< PCI Express
+    AMDSMI_IOLINK_TYPE_XGMI       = 2,  //!< XGMI
+    AMDSMI_IOLINK_TYPE_NUMIOLINKTYPES,  //!< Number of IO Link types
+    AMDSMI_IOLINK_TYPE_SIZE       = 0xFFFFFFFF  //!< Max of IO Link types
 } amdsmi_io_link_type_t;
 
 /**
  * @brief The utilization counter type
  */
 typedef enum {
-  AMDSMI_UTILIZATION_COUNTER_FIRST = 0,
+    AMDSMI_UTILIZATION_COUNTER_FIRST = 0,
   //!< Corse grain activity counters
-  AMDSMI_COARSE_GRAIN_GFX_ACTIVITY  = AMDSMI_UTILIZATION_COUNTER_FIRST,
-  AMDSMI_COARSE_GRAIN_MEM_ACTIVITY,    //!< Memory Activity
-  AMDSMI_COARSE_DECODER_ACTIVITY,      //!< Decoder Activity
+    AMDSMI_COARSE_GRAIN_GFX_ACTIVITY  = AMDSMI_UTILIZATION_COUNTER_FIRST,
+    AMDSMI_COARSE_GRAIN_MEM_ACTIVITY,  //!< Memory Activity
+    AMDSMI_COARSE_DECODER_ACTIVITY,    //!< Decoder Activity
   //!< Fine grain activity counters
-  AMDSMI_FINE_GRAIN_GFX_ACTIVITY = 100,
-  AMDSMI_FINE_GRAIN_MEM_ACTIVITY = 101,
-  AMDSMI_FINE_DECODER_ACTIVITY   = 102,
-  AMDSMI_UTILIZATION_COUNTER_LAST = AMDSMI_FINE_DECODER_ACTIVITY
+    AMDSMI_FINE_GRAIN_GFX_ACTIVITY = 100,
+    AMDSMI_FINE_GRAIN_MEM_ACTIVITY = 101,
+    AMDSMI_FINE_DECODER_ACTIVITY   = 102,
+    AMDSMI_UTILIZATION_COUNTER_LAST = AMDSMI_FINE_DECODER_ACTIVITY
 } amdsmi_utilization_counter_type_t;
 
 /**
  * @brief Power types
  */
 typedef enum {
-  AMDSMI_AVERAGE_POWER = 0,            //!< Average Power
-  AMDSMI_CURRENT_POWER,                //!< Current / Instant Power
-  AMDSMI_INVALID_POWER = 0xFFFFFFFF    //!< Invalid / Undetected Power
+    AMDSMI_AVERAGE_POWER = 0,            //!< Average Power
+    AMDSMI_CURRENT_POWER,                //!< Current / Instant Power
+    AMDSMI_INVALID_POWER = 0xFFFFFFFF    //!< Invalid / Undetected Power
 } amdsmi_power_type_t;
 
 /**
  * @brief The utilization counter data
  */
 //! The max number of values per counter type
-#define AMDSMI_MAX_UTILIZATION_VALUES 4
+#define AMDSMI_MAX_UTILIZATION_VALUES 4  //!< The max number of values per counter type
 typedef struct {
-  amdsmi_utilization_counter_type_t type;              //!< Utilization counter type
-  uint64_t value;                                      //!< Coarse grain activity counter value (average)
-  uint64_t fine_value[AMDSMI_MAX_UTILIZATION_VALUES];  //!< Utilization counter value
-  uint16_t fine_value_count;
+    amdsmi_utilization_counter_type_t type;              //!< Utilization counter type
+    uint64_t value;                                      //!< Coarse grain activity counter value (average)
+    uint64_t fine_value[AMDSMI_MAX_UTILIZATION_VALUES];  //!< Utilization counter value
+    uint16_t fine_value_count;
 } amdsmi_utilization_counter_t;
-
 
 /**
  * @brief Reserved Memory Page Record
  */
 typedef struct {
-  uint64_t page_address;                  //!< Start address of page
-  uint64_t page_size;                     //!< Page size
-  amdsmi_memory_page_status_t status;       //!< Page "reserved" status
+    uint64_t page_address;               //!< Start address of page
+    uint64_t page_size;                  //!< Page size
+    amdsmi_memory_page_status_t status;  //!< Page "reserved" status
 } amdsmi_retired_page_record_t;
 
 /**
@@ -1247,95 +1208,52 @@ typedef struct {
  * currently active.
  */
 typedef struct {
-    /**
-    * Which profiles are supported by this system
-    */
-    amdsmi_bit_field_t available_profiles;
-
-    /**
-    * Which power profile is currently active
-    */
-    amdsmi_power_profile_preset_masks_t current;
-
-    /**
-    * How many power profiles are available
-    */
-    uint32_t num_profiles;
+    amdsmi_bit_field_t available_profiles;        // Which profiles are supported by this system
+    amdsmi_power_profile_preset_masks_t current;  // Which power profile is currently active
+    uint32_t num_profiles;                        // How many power profiles are available
 } amdsmi_power_profile_status_t;
 
 /**
  * @brief This structure holds information about clock frequencies.
  */
 typedef struct {
-    /**
-     * Deep Sleep frequency is only supported by some GPUs
-     */
-    bool has_deep_sleep;
-
-    /**
-     * The number of supported frequencies
-     */
-    uint32_t num_supported;
-
-    /**
-     * The current frequency index
-     */
-    uint32_t current;
-
-    /**
-     * List of frequencies.
-     * Only the first num_supported frequencies are valid.
-     */
-    uint64_t frequency[AMDSMI_MAX_NUM_FREQUENCIES];
+    bool has_deep_sleep;     // Deep Sleep frequency is only supported by some GPUs
+    uint32_t num_supported;  // The number of supported frequencies
+    uint32_t current;        // The current frequency index
+    uint64_t frequency[AMDSMI_MAX_NUM_FREQUENCIES]; // List of frequencies.
+                                                    // Only the first num_supported frequencies are valid.
 } amdsmi_frequencies_t;
 
 /**
  * @brief The dpm policy.
  */
 typedef struct {
-  uint32_t policy_id;
-  char policy_description[AMDSMI_MAX_NAME];
+    uint32_t policy_id;
+    char policy_description[AMDSMI_MAX_NAME];
 } amdsmi_dpm_policy_entry_t;
 
 #define AMDSMI_MAX_NUM_PM_POLICIES 32
 
 /**
  * @brief This structure holds information about dpm policies.
+ * Only the first num_supported policies are valid.
  */
 typedef struct {
-    /**
-     * The number of supported policies
-     */
-    uint32_t num_supported;
-
-    /**
-     * The current policy index
-     */
-    uint32_t current;
-
-    /**
-     * List of policies.
-     * Only the first num_supported policies are valid.
-     */
-    amdsmi_dpm_policy_entry_t policies[AMDSMI_MAX_NUM_PM_POLICIES];
+    uint32_t num_supported;  // The number of supported policies
+    uint32_t current;        // The current policy index
+    amdsmi_dpm_policy_entry_t policies[AMDSMI_MAX_NUM_PM_POLICIES]; // List of policies.
 } amdsmi_dpm_policy_t;
 
 /**
  * @brief This structure holds information about the possible PCIe
  * bandwidths. Specifically, the possible transfer rates and their
  * associated numbers of lanes are stored here.
+ * 
+ * Only the first num_supported bandwidths are valid.
  */
 typedef struct {
-    /**
-     * Transfer rates (T/s) that are possible
-     */
-    amdsmi_frequencies_t transfer_rate;
-
-    /**
-     * List of lanes for corresponding transfer rate.
-     * Only the first num_supported bandwidths are valid.
-     */
-    uint32_t lanes[AMDSMI_MAX_NUM_FREQUENCIES];
+    amdsmi_frequencies_t transfer_rate;  // Transfer rates (T/s) that are possible
+    uint32_t lanes[AMDSMI_MAX_NUM_FREQUENCIES];  // List of lanes for corresponding transfer rate.
 } amdsmi_pcie_bandwidth_t;
 
 /**
@@ -1368,31 +1286,23 @@ typedef struct {
 } amdsmi_freq_volt_region_t;
 
 /**
+ * @brief
  * ::AMDSMI_NUM_VOLTAGE_CURVE_POINTS number of ::amdsmi_od_vddc_point_t's
  */
 typedef struct {
-    /**
-     * Array of ::AMDSMI_NUM_VOLTAGE_CURVE_POINTS ::amdsmi_od_vddc_point_t's that
-     * make up the voltage frequency curve points.
-     */
-    amdsmi_od_vddc_point_t vc_points[AMDSMI_NUM_VOLTAGE_CURVE_POINTS];
+    amdsmi_od_vddc_point_t vc_points[AMDSMI_NUM_VOLTAGE_CURVE_POINTS]; //!< make up the voltage frequency curve points.
 } amdsmi_od_volt_curve_t;
 
 /**
  * @brief This structure holds the frequency-voltage values for a device.
  */
 typedef struct {
-  amdsmi_range_t curr_sclk_range;          //!< The current SCLK frequency range
-  amdsmi_range_t curr_mclk_range;          //!< The current MCLK frequency range;
-                                           //!< (upper bound only)
-  amdsmi_range_t sclk_freq_limits;         //!< The range possible of SCLK values
-  amdsmi_range_t mclk_freq_limits;         //!< The range possible of MCLK values
-
-  /**
-   * @brief The current voltage curve
-   */
-  amdsmi_od_volt_curve_t curve;
-  uint32_t num_regions;                //!< The number of voltage curve regions
+    amdsmi_range_t curr_sclk_range;   //!< The current SCLK frequency range
+    amdsmi_range_t curr_mclk_range;   //!< The current MCLK frequency range, upper bound only
+    amdsmi_range_t sclk_freq_limits;  //!< The range possible of SCLK values
+    amdsmi_range_t mclk_freq_limits;  //!< The range possible of MCLK values
+    amdsmi_od_volt_curve_t curve;     //!< The current voltage curve
+    uint32_t num_regions;             //!< The number of voltage curve regions
 } amdsmi_od_volt_freq_data_t;
 
 /**
@@ -1403,234 +1313,259 @@ typedef struct {
  * @brief Size and version information of metrics data
  */
 typedef struct {
-  // TODO(amd) Doxygen documents
-  // Note: This should match: AMDGpuMetricsHeader_v1_t
-  /// \cond Ignore in docs.
-  uint16_t      structure_size;
-  uint8_t       format_revision;
-  uint8_t       content_revision;
-  /// \endcond
+    // TODO(amd) Doxygen documents
+    // Note: This should match: AMDGpuMetricsHeader_v1_t
+    /// \cond Ignore in docs.
+    uint16_t      structure_size;
+    uint8_t       format_revision;
+    uint8_t       content_revision;
+    /// \endcond
 } amd_metrics_table_header_t;
-
 
 /**
  * @brief The following structures hold the gpu statistics for a device.
  */
 typedef struct {
+    /*
+  * v1.6 additions
+  */
   /* Utilization Instantaneous (%) */
-  uint32_t gfx_busy_inst[AMDSMI_MAX_NUM_XCC];
-  uint16_t jpeg_busy[AMDSMI_MAX_NUM_JPEG];
-  uint16_t vcn_busy[AMDSMI_MAX_NUM_VCN];
+    uint32_t gfx_busy_inst[AMDSMI_MAX_NUM_XCC];
+    uint16_t jpeg_busy[AMDSMI_MAX_NUM_JPEG];
+    uint16_t vcn_busy[AMDSMI_MAX_NUM_VCN];
 
-  /* Utilization Accumulated (%) */
-  uint64_t gfx_busy_acc[AMDSMI_MAX_NUM_XCC];
+    /* Utilization Accumulated (%) */
+    uint64_t gfx_busy_acc[AMDSMI_MAX_NUM_XCC];
+
+  /*
+  * v1.7 additions
+  */
+  /* Total App Clock Counter Accumulated */
+  uint64_t gfx_below_host_limit_acc[AMDSMI_MAX_NUM_XCC];
 } amdsmi_gpu_xcp_metrics_t;
 
-
 typedef struct {
-  // TODO(amd) Doxygen documents
-  // Note:  This structure is extended to fit the needs of different GPU metric
-  //        versions when exposing data through the structure.
-  //        Depending on the version, some data members will hold data, and
-  //        some will not. A good example is the set of 'current clocks':
-  //          - current_gfxclk, current_socclk, current_vclk0, current_dclk0
-  //        These are single-valued data members, up to version 1.3.
-  //        For version 1.4 and up these are multi-valued data members (arrays)
-  //        and their counterparts;
-  //          - current_gfxclks[], current_socclks[], current_vclk0s[],
-  //            current_dclk0s[]
-  //        will hold the data
-  /// \cond Ignore in docs.
-  amd_metrics_table_header_t common_header;
+    // TODO(amd) Doxygen documents
+    // Note:  This structure is extended to fit the needs of different GPU metric
+    //        versions when exposing data through the structure.
+    //        Depending on the version, some data members will hold data, and
+    //        some will not. A good example is the set of 'current clocks':
+    //          - current_gfxclk, current_socclk, current_vclk0, current_dclk0
+    //        These are single-valued data members, up to version 1.3.
+    //        For version 1.4 and up these are multi-valued data members (arrays)
+    //        and their counterparts;
+    //          - current_gfxclks[], current_socclks[], current_vclk0s[],
+    //            current_dclk0s[]
+    //        will hold the data
+    /// \cond Ignore in docs.
+    amd_metrics_table_header_t common_header;
+
+    /*
+     * v1.0 Base
+     */
+
+    // Temperature (C)
+    uint16_t temperature_edge;
+    uint16_t temperature_hotspot;
+    uint16_t temperature_mem;
+    uint16_t temperature_vrgfx;
+    uint16_t temperature_vrsoc;
+    uint16_t temperature_vrmem;
+
+    // Utilization (%)
+    uint16_t average_gfx_activity;
+    uint16_t average_umc_activity;    // memory controller
+    uint16_t average_mm_activity;     // UVD or VCN
+
+    // Power (W) /Energy (15.259uJ per 1ns)
+    uint16_t average_socket_power;
+    uint64_t energy_accumulator;      // v1 mod. (32->64)
+
+    // Driver attached timestamp (in ns)
+    uint64_t system_clock_counter;    // v1 mod. (moved from top of struct)
+
+    // Average clocks (MHz)
+    uint16_t average_gfxclk_frequency;
+    uint16_t average_socclk_frequency;
+    uint16_t average_uclk_frequency;
+    uint16_t average_vclk0_frequency;
+    uint16_t average_dclk0_frequency;
+    uint16_t average_vclk1_frequency;
+    uint16_t average_dclk1_frequency;
+
+    // Current clocks (MHz)
+    uint16_t current_gfxclk;
+    uint16_t current_socclk;
+    uint16_t current_uclk;
+    uint16_t current_vclk0;
+    uint16_t current_dclk0;
+    uint16_t current_vclk1;
+    uint16_t current_dclk1;
+
+    // Throttle status
+    uint32_t throttle_status;
+
+    // Fans (RPM)
+    uint16_t current_fan_speed;
+
+    // Link width (number of lanes) /speed (0.1 GT/s)
+    uint16_t pcie_link_width;         // v1 mod.(8->16)
+    uint16_t pcie_link_speed;         // in 0.1 GT/s; v1 mod. (8->16)
+
+    /*
+     * v1.1 additions
+     */
+    uint32_t gfx_activity_acc;        // new in v1
+    uint32_t mem_activity_acc;        // new in v1
+    uint16_t temperature_hbm[AMDSMI_NUM_HBM_INSTANCES];  // new in v1
+
+    /*
+     * v1.2 additions
+     */
+    // PMFW attached timestamp (10ns resolution)
+    uint64_t firmware_timestamp;
+
+    /*
+     * v1.3 additions
+     */
+    // Voltage (mV)
+    uint16_t voltage_soc;
+    uint16_t voltage_gfx;
+    uint16_t voltage_mem;
+
+    // Throttle status
+    uint64_t indep_throttle_status;
+
+    /*
+     * v1.4 additions
+     */
+    // Power (Watts)
+    uint16_t current_socket_power;
+
+    // Utilization (%)
+    uint16_t vcn_activity[AMDSMI_MAX_NUM_VCN];
+
+    // Clock Lock Status. Each bit corresponds to clock instance
+    uint32_t gfxclk_lock_status;
+
+    // XGMI bus width and bitrate (in GB/s)
+    uint16_t xgmi_link_width;
+    uint16_t xgmi_link_speed;
+
+    // PCIE accumulated bandwidth (GB/sec)
+    uint64_t pcie_bandwidth_acc;
+
+    // PCIE instantaneous bandwidth (GB/sec)
+    uint64_t pcie_bandwidth_inst;
+
+    // PCIE L0 to recovery state transition accumulated count
+    uint64_t pcie_l0_to_recov_count_acc;
+
+    // PCIE replay accumulated count
+    uint64_t pcie_replay_count_acc;
+
+    // PCIE replay rollover accumulated count
+    uint64_t pcie_replay_rover_count_acc;
+
+    // XGMI accumulated data transfer size(KiloBytes)
+    uint64_t xgmi_read_data_acc[AMDSMI_MAX_NUM_XGMI_LINKS];
+    uint64_t xgmi_write_data_acc[AMDSMI_MAX_NUM_XGMI_LINKS];
+
+    // XGMI accumulated data transfer size(KiloBytes)
+    uint16_t current_gfxclks[AMDSMI_MAX_NUM_GFX_CLKS];
+    uint16_t current_socclks[AMDSMI_MAX_NUM_CLKS];
+    uint16_t current_vclk0s[AMDSMI_MAX_NUM_CLKS];
+    uint16_t current_dclk0s[AMDSMI_MAX_NUM_CLKS];
+
+    /*
+     * v1.5 additions
+     */
+    // JPEG activity percent (encode/decode)
+    uint16_t jpeg_activity[AMDSMI_MAX_NUM_JPEG];
+
+    // PCIE NAK sent accumulated count
+    uint32_t pcie_nak_sent_count_acc;
+
+    // PCIE NAK received accumulated count
+    uint32_t pcie_nak_rcvd_count_acc;
+
+    /*
+     * v1.6 additions
+     */
+    /* Accumulation cycle counter */
+    uint64_t accumulation_counter;
+
+    /**
+     * Accumulated throttler residencies
+     */
+    uint64_t prochot_residency_acc;
+
+    /**
+     * Accumulated throttler residencies
+     *
+     * Prochot (thermal) - PPT (power)
+     * Package Power Tracking (PPT) violation % (greater than 0% is a violation);
+     * aka PVIOL
+     *
+     * Ex. PVIOL/TVIOL calculations
+     * Where A and B are measurments recorded at prior points in time.
+     * Typically A is the earlier measured value and B is the latest measured value.
+     *
+     * PVIOL % = (PptResidencyAcc (B) - PptResidencyAcc (A)) * 100/ (AccumulationCounter (B) - AccumulationCounter (A))
+     * TVIOL % = (SocketThmResidencyAcc (B) -  SocketThmResidencyAcc (A)) * 100 / (AccumulationCounter (B) - AccumulationCounter (A))
+    */
+    uint64_t ppt_residency_acc;
+
+    /**
+     * Accumulated throttler residencies
+     *
+     * Socket (thermal)	-
+     * Socket thermal violation % (greater than 0% is a violation);
+     * aka TVIOL
+     *
+     * Ex. PVIOL/TVIOL calculations
+     * Where A and B are measurments recorded at prior points in time.
+     * Typically A is the earlier measured value and B is the latest measured value.
+     *
+     * PVIOL % = (PptResidencyAcc (B) - PptResidencyAcc (A)) * 100/ (AccumulationCounter (B) - AccumulationCounter (A))
+     * TVIOL % = (SocketThmResidencyAcc (B) -  SocketThmResidencyAcc (A)) * 100 / (AccumulationCounter (B) - AccumulationCounter (A))
+    */
+    uint64_t socket_thm_residency_acc;
+    uint64_t vr_thm_residency_acc;
+    uint64_t hbm_thm_residency_acc;
+
+    /* Number of current partition */
+    uint16_t num_partition;
+
+    /* XCP (Graphic Cluster Partitions) metrics stats */
+    amdsmi_gpu_xcp_metrics_t xcp_stats[AMDSMI_MAX_NUM_XCP];
+
+    /* PCIE other end recovery counter */
+    uint32_t pcie_lc_perf_other_end_recovery;
 
   /*
-   * v1.0 Base
-   */
-
-  // Temperature (C)
-  uint16_t temperature_edge;
-  uint16_t temperature_hotspot;
-  uint16_t temperature_mem;
-  uint16_t temperature_vrgfx;
-  uint16_t temperature_vrsoc;
-  uint16_t temperature_vrmem;
-
-  // Utilization (%)
-  uint16_t average_gfx_activity;
-  uint16_t average_umc_activity;    // memory controller
-  uint16_t average_mm_activity;     // UVD or VCN
-
-  // Power (W) /Energy (15.259uJ per 1ns)
-  uint16_t average_socket_power;
-  uint64_t energy_accumulator;      // v1 mod. (32->64)
-
-  // Driver attached timestamp (in ns)
-  uint64_t system_clock_counter;    // v1 mod. (moved from top of struct)
-
-  // Average clocks (MHz)
-  uint16_t average_gfxclk_frequency;
-  uint16_t average_socclk_frequency;
-  uint16_t average_uclk_frequency;
-  uint16_t average_vclk0_frequency;
-  uint16_t average_dclk0_frequency;
-  uint16_t average_vclk1_frequency;
-  uint16_t average_dclk1_frequency;
-
-  // Current clocks (MHz)
-  uint16_t current_gfxclk;
-  uint16_t current_socclk;
-  uint16_t current_uclk;
-  uint16_t current_vclk0;
-  uint16_t current_dclk0;
-  uint16_t current_vclk1;
-  uint16_t current_dclk1;
-
-  // Throttle status
-  uint32_t throttle_status;
-
-  // Fans (RPM)
-  uint16_t current_fan_speed;
-
-  // Link width (number of lanes) /speed (0.1 GT/s)
-  uint16_t pcie_link_width;         // v1 mod.(8->16)
-  uint16_t pcie_link_speed;         // in 0.1 GT/s; v1 mod. (8->16)
-
-
-  /*
-   * v1.1 additions
-   */
-  uint32_t gfx_activity_acc;        // new in v1
-  uint32_t mem_activity_acc;        // new in v1
-  uint16_t temperature_hbm[AMDSMI_NUM_HBM_INSTANCES];  // new in v1
-
-
-  /*
-   * v1.2 additions
-   */
-  // PMFW attached timestamp (10ns resolution)
-  uint64_t firmware_timestamp;
-
-
-  /*
-   * v1.3 additions
-   */
-  // Voltage (mV)
-  uint16_t voltage_soc;
-  uint16_t voltage_gfx;
-  uint16_t voltage_mem;
-
-  // Throttle status
-  uint64_t indep_throttle_status;
-
-
-  /*
-   * v1.4 additions
-   */
-  // Power (Watts)
-  uint16_t current_socket_power;
-
-  // Utilization (%)
-  uint16_t vcn_activity[AMDSMI_MAX_NUM_VCN];
-
-  // Clock Lock Status. Each bit corresponds to clock instance
-  uint32_t gfxclk_lock_status;
-
-  // XGMI bus width and bitrate (in GB/s)
-  uint16_t xgmi_link_width;
-  uint16_t xgmi_link_speed;
-
-  // PCIE accumulated bandwidth (GB/sec)
-  uint64_t pcie_bandwidth_acc;
-
-  // PCIE instantaneous bandwidth (GB/sec)
-  uint64_t pcie_bandwidth_inst;
-
-  // PCIE L0 to recovery state transition accumulated count
-  uint64_t pcie_l0_to_recov_count_acc;
-
-  // PCIE replay accumulated count
-  uint64_t pcie_replay_count_acc;
-
-  // PCIE replay rollover accumulated count
-  uint64_t pcie_replay_rover_count_acc;
-
-  // XGMI accumulated data transfer size(KiloBytes)
-  uint64_t xgmi_read_data_acc[AMDSMI_MAX_NUM_XGMI_LINKS];
-  uint64_t xgmi_write_data_acc[AMDSMI_MAX_NUM_XGMI_LINKS];
-
-  // XGMI accumulated data transfer size(KiloBytes)
-  uint16_t current_gfxclks[AMDSMI_MAX_NUM_GFX_CLKS];
-  uint16_t current_socclks[AMDSMI_MAX_NUM_CLKS];
-  uint16_t current_vclk0s[AMDSMI_MAX_NUM_CLKS];
-  uint16_t current_dclk0s[AMDSMI_MAX_NUM_CLKS];
-
-  /*
-   * v1.5 additions
-   */
-  // JPEG activity percent (encode/decode)
-  uint16_t jpeg_activity[AMDSMI_MAX_NUM_JPEG];
-
-  // PCIE NAK sent accumulated count
-  uint32_t pcie_nak_sent_count_acc;
-
-  // PCIE NAK received accumulated count
-  uint32_t pcie_nak_rcvd_count_acc;
-
-  /*
-   * v1.6 additions
-   */
-  /* Accumulation cycle counter */
-  uint64_t accumulation_counter;
-
-  /**
-   * Accumulated throttler residencies
-   */
-  uint64_t prochot_residency_acc;
-  /**
-   * Accumulated throttler residencies
-   *
-   * Prochot (thermal) - PPT (power)
-   * Package Power Tracking (PPT) violation % (greater than 0% is a violation);
-   * aka PVIOL
-   *
-   * Ex. PVIOL/TVIOL calculations
-   * Where A and B are measurments recorded at prior points in time.
-   * Typically A is the earlier measured value and B is the latest measured value.
-   *
-   * PVIOL % = (PptResidencyAcc (B) - PptResidencyAcc (A)) * 100/ (AccumulationCounter (B) - AccumulationCounter (A))
-   * TVIOL % = (SocketThmResidencyAcc (B) -  SocketThmResidencyAcc (A)) * 100 / (AccumulationCounter (B) - AccumulationCounter (A))
+  * v1.7 additions
   */
-  uint64_t ppt_residency_acc;
-  /**
-   * Accumulated throttler residencies
-   *
-   * Socket (thermal)	-
-   * Socket thermal violation % (greater than 0% is a violation);
-   * aka TVIOL
-   *
-   * Ex. PVIOL/TVIOL calculations
-   * Where A and B are measurments recorded at prior points in time.
-   * Typically A is the earlier measured value and B is the latest measured value.
-   *
-   * PVIOL % = (PptResidencyAcc (B) - PptResidencyAcc (A)) * 100/ (AccumulationCounter (B) - AccumulationCounter (A))
-   * TVIOL % = (SocketThmResidencyAcc (B) -  SocketThmResidencyAcc (A)) * 100 / (AccumulationCounter (B) - AccumulationCounter (A))
-  */
-  uint64_t socket_thm_residency_acc;
-  uint64_t vr_thm_residency_acc;
-  uint64_t hbm_thm_residency_acc;
+  /* VRAM max bandwidth at max memory clock (GB/s) */
+  uint64_t vram_max_bandwidth;
 
-  /* Number of current partition */
-  uint16_t num_partition;
+  /* XGMI link status(up/down) */
+  uint16_t xgmi_link_status[AMDSMI_MAX_NUM_XGMI_LINKS];
 
-  /* XCP (Graphic Cluster Partitions) metrics stats */
-  amdsmi_gpu_xcp_metrics_t xcp_stats[AMDSMI_MAX_NUM_XCP];
-
-  /* PCIE other end recovery counter */
-  uint32_t pcie_lc_perf_other_end_recovery;
-
-  /// \endcond
+    /// \endcond
 } amdsmi_gpu_metrics_t;
 
+typedef enum {
+  AMDSMI_XGMI_LINK_DOWN,            //!< The XGMI Link is down
+  AMDSMI_XGMI_LINK_UP,              //!< The XGMI Link is up
+  AMDSMI_XGMI_LINK_DISABLE,         //!< The XGMI Link is disabled
+} amdsmi_xgmi_link_status_type_t;
+
+typedef struct {
+  uint32_t total_links;   //!< The total links in the status array
+  amdsmi_xgmi_link_status_type_t status[AMDSMI_MAX_NUM_XGMI_LINKS];
+  uint64_t reserved[7];
+} amdsmi_xgmi_link_status_t;
 
 #define  MAX_AMDSMI_NAME_LENGTH 64
 
@@ -1638,59 +1573,57 @@ typedef struct {
  * @brief This structure holds the name value pairs
  */
 typedef struct {
-    char name[MAX_AMDSMI_NAME_LENGTH];     //!< Name
-    uint64_t value;   //!< Use uint64_t to make it universal
+    char name[MAX_AMDSMI_NAME_LENGTH];  //!< Name
+    uint64_t value;                     //!< Use uint64_t to make it universal
 } amdsmi_name_value_t;
 
 /**
  * @brief This register type for register table
  */
 typedef enum {
-  AMDSMI_REG_XGMI,
-  AMDSMI_REG_WAFL,
-  AMDSMI_REG_PCIE,
-  AMDSMI_REG_USR,
-  AMDSMI_REG_USR1,
+    AMDSMI_REG_XGMI,
+    AMDSMI_REG_WAFL,
+    AMDSMI_REG_PCIE,
+    AMDSMI_REG_USR,
+    AMDSMI_REG_USR1,
 } amdsmi_reg_type_t;
 
 /**
  * @brief This structure holds ras feature
  */
 typedef struct {
-  uint32_t ras_eeprom_version;
-  // PARITY error(bit 0), Single Bit correctable (bit1),
-  // Double bit error detection (bit2), Poison (bit 3).
-  uint32_t ecc_correction_schema_flag;    //!< ecc_correction_schema mask
+    uint32_t ras_eeprom_version;
+    // PARITY error(bit 0), Single Bit correctable (bit1),
+    // Double bit error detection (bit2), Poison (bit 3).
+    uint32_t ecc_correction_schema_flag;    //!< ecc_correction_schema mask
 } amdsmi_ras_feature_t;
 
 /**
  * @brief This structure holds error counts.
  */
 typedef struct {
-  uint64_t correctable_count;   //!< Accumulated correctable errors
-  uint64_t uncorrectable_count;  //!< Accumulated uncorrectable errors
-  uint64_t deferred_count;  //!< Accumulated deferred errors
-  uint64_t reserved[5];
+    uint64_t correctable_count;    //!< Accumulated correctable errors
+    uint64_t uncorrectable_count;  //!< Accumulated uncorrectable errors
+    uint64_t deferred_count;       //!< Accumulated deferred errors
+    uint64_t reserved[5];
 } amdsmi_error_count_t;
 
 /**
  * @brief This structure contains information specific to a process.
  */
 typedef struct {
-    uint32_t process_id;      //!< Process ID
-    uint32_t pasid;           //!< PASID
-    uint64_t vram_usage;      //!< VRAM usage
-    uint64_t sdma_usage;      //!< SDMA usage in microseconds
-    uint32_t cu_occupancy;    //!< Compute Unit usage in percent
+    uint32_t process_id;    //!< Process ID
+    uint32_t pasid;         //!< PASID
+    uint64_t vram_usage;    //!< VRAM usage
+    uint64_t sdma_usage;    //!< SDMA usage in microseconds
+    uint32_t cu_occupancy;  //!< Compute Unit usage in percent
 } amdsmi_process_info_t;
-
 
 typedef struct {
     uint32_t count;
     amdsmi_processor_handle processor_list[AMDSMI_MAX_DEVICES];
     uint64_t reserved[15];
 } amdsmi_topology_nearest_t;
-
 
 //! Place-holder "variant" for functions that have don't have any variants,
 //! but do have monitors or sensors.
@@ -1701,17 +1634,17 @@ typedef struct {
  * @brief This structure holds SMU Firmware version information.
  */
 typedef struct {
-        uint8_t debug;      //!< SMU fw Debug version number
-        uint8_t minor;      //!< SMU fw Minor version number
-        uint8_t major;      //!< SMU fw Major version number
-        uint8_t unused;     //!< reserved fields
+        uint8_t debug;   //!< SMU fw Debug version number
+        uint8_t minor;   //!< SMU fw Minor version number
+        uint8_t major;   //!< SMU fw Major version number
+        uint8_t unused;  //!< reserved fields
 } amdsmi_smu_fw_version_t;
 
 /**
  * @brief DDR bandwidth metrics.
  */
 typedef struct {
-        uint32_t max_bw;    //!< DDR Maximum theoritical bandwidth in GB/s
+        uint32_t max_bw;        //!< DDR Maximum theoritical bandwidth in GB/s
         uint32_t utilized_bw;   //!< DDR bandwidth utilization in GB/s
         uint32_t utilized_pct;  //!< DDR bandwidth utilization in % of theoritical max
 } amdsmi_ddr_bw_metrics_t;
@@ -1720,36 +1653,36 @@ typedef struct {
  * @brief temperature range and refresh rate metrics of a DIMM
  */
 typedef struct {
-    uint8_t range : 3;  //!< temp range[2:0](3 bit data)
-    uint8_t ref_rate : 1;   //!< DDR refresh rate mode[3](1 bit data)
+    uint8_t range : 3;     //!< temp range[2:0](3 bit data)
+    uint8_t ref_rate : 1;  //!< DDR refresh rate mode[3](1 bit data)
 } amdsmi_temp_range_refresh_rate_t;
 
 /**
  * @brief DIMM Power(mW), power update rate(ms) and dimm address
  */
 typedef struct {
-    uint16_t power : 15;            //!< Dimm power consumption[31:17](15 bits data)
-    uint16_t update_rate : 9;       //!< Time since last update[16:8](9 bit data)
-    uint8_t dimm_addr;              //!< Dimm address[7:0](8 bit data)
+    uint16_t power : 15;       //!< Dimm power consumption[31:17](15 bits data)
+    uint16_t update_rate : 9;  //!< Time since last update[16:8](9 bit data)
+    uint8_t dimm_addr;         //!< Dimm address[7:0](8 bit data)
 } amdsmi_dimm_power_t;
 
 /**
  * @brief DIMM temperature(°C) and update rate(ms) and dimm address
  */
 typedef struct {
-    uint16_t sensor : 11;           //!< Dimm thermal sensor[31:21](11 bit data)
-    uint16_t update_rate : 9;       //!< Time since last update[16:8](9 bit data)
-    uint8_t dimm_addr;              //!< Dimm address[7:0](8 bit data)
-    float temp;         //!< temperature in degree celcius
+    uint16_t sensor : 11;      //!< Dimm thermal sensor[31:21](11 bit data)
+    uint16_t update_rate : 9;  //!< Time since last update[16:8](9 bit data)
+    uint8_t dimm_addr;         //!< Dimm address[7:0](8 bit data)
+    float temp;                //!< temperature in degree celcius
 } amdsmi_dimm_thermal_t;
 
 /**
  * @brief xGMI Bandwidth Encoding types
  */
 typedef enum {
-    AGG_BW0 = 1, //!< Aggregate Bandwidth
-    RD_BW0 = 2,      //!< Read Bandwidth
-    WR_BW0 = 4       //!< Write Bandwdith
+    AGG_BW0 = 1,  //!< Aggregate Bandwidth
+    RD_BW0 = 2,   //!< Read Bandwidth
+    WR_BW0 = 4    //!< Write Bandwdith
 } amdsmi_io_bw_encoding_t;
 
 /**
@@ -1760,8 +1693,8 @@ typedef enum {
  * Valid bandwidth types 1(Aggregate_BW), 2 (Read BW), 4 (Write BW).
  */
 typedef struct {
-    amdsmi_io_bw_encoding_t bw_type;         //!< Bandwidth Type Information [1, 2, 4]
-    char *link_name;            //!< Link name [P0, P1, G0, G1 etc]
+    amdsmi_io_bw_encoding_t bw_type;  //!< Bandwidth Type Information [1, 2, 4]
+    char *link_name;                  //!< Link name [P0, P1, G0, G1 etc]
 } amdsmi_link_id_bw_type_t;
 
 /**
@@ -1769,14 +1702,14 @@ typedef struct {
  * Valid max and min DPM level values are 0 - 1.
  */
 typedef struct {
-    uint8_t max_dpm_level;          //!< Max LCLK DPM level[15:8](8 bit data)
-    uint8_t min_dpm_level;          //!< Min LCLK DPM level[7:0](8 bit data)
+    uint8_t max_dpm_level;  //!< Max LCLK DPM level[15:8](8 bit data)
+    uint8_t min_dpm_level;  //!< Min LCLK DPM level[7:0](8 bit data)
 } amdsmi_dpm_level_t;
 
 /**
  * @brief HSMP Metrics table (supported only with hsmp proto version 6).
  */
-typedef struct __attribute__((__packed__)){
+typedef struct __attribute__((__packed__)) {
     uint32_t accumulation_counter;
 
     /* TEMPERATURE */
@@ -1949,8 +1882,7 @@ amdsmi_status_t amdsmi_shut_down(void);
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_socket_handles(uint32_t *socket_count,
-                amdsmi_socket_handle* socket_handles);
+amdsmi_status_t amdsmi_get_socket_handles(uint32_t *socket_count, amdsmi_socket_handle* socket_handles);
 
 #ifdef ENABLE_ESMI_LIB
 /**
@@ -1999,9 +1931,7 @@ amdsmi_status_t amdsmi_get_cpu_handles(uint32_t *cpu_count,
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_socket_info(
-                amdsmi_socket_handle socket_handle,
-                size_t len, char *name);
+amdsmi_status_t amdsmi_get_socket_info(amdsmi_socket_handle socket_handle, size_t len, char *name);
 
 #ifdef ENABLE_ESMI_LIB
 /**
@@ -2020,9 +1950,7 @@ amdsmi_status_t amdsmi_get_socket_info(
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_processor_info(
-                amdsmi_processor_handle processor_handle,
-                size_t len, char *name);
+amdsmi_status_t amdsmi_get_processor_info(amdsmi_processor_handle processor_handle, size_t len, char *name);
 
 /**
  *  @brief Get respective processor counts from the processor handles
@@ -2157,8 +2085,7 @@ amdsmi_status_t amdsmi_get_cpucore_handles(uint32_t *cores_count,
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_processor_type(amdsmi_processor_handle processor_handle,
-              processor_type_t* processor_type);
+amdsmi_status_t amdsmi_get_processor_type(amdsmi_processor_handle processor_handle, processor_type_t* processor_type);
 
 /**
  *  @brief Get processor handle with the matching bdf.
@@ -2175,8 +2102,7 @@ amdsmi_status_t amdsmi_get_processor_type(amdsmi_processor_handle processor_hand
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_processor_handle_from_bdf(amdsmi_bdf_t bdf,
-              amdsmi_processor_handle* processor_handle);
+amdsmi_status_t amdsmi_get_processor_handle_from_bdf(amdsmi_bdf_t bdf, amdsmi_processor_handle* processor_handle);
 
 /** @} End DiscQueries */
 
@@ -2290,8 +2216,7 @@ amdsmi_status_t amdsmi_get_gpu_vendor_name(amdsmi_processor_handle processor_han
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_vram_vendor(amdsmi_processor_handle processor_handle, char *brand,
-                                                                uint32_t len);
+amdsmi_status_t amdsmi_get_gpu_vram_vendor(amdsmi_processor_handle processor_handle, char *brand, uint32_t len);
 
 /**
  *  @brief Get the subsystem device id associated with the device with
@@ -2381,7 +2306,7 @@ amdsmi_get_gpu_subsystem_name(amdsmi_processor_handle processor_handle, char *na
  */
 amdsmi_status_t
 amdsmi_get_gpu_pci_bandwidth(amdsmi_processor_handle processor_handle,
-                              amdsmi_pcie_bandwidth_t *bandwidth);
+                             amdsmi_pcie_bandwidth_t *bandwidth);
 
 /**
  *  @brief Get the unique PCI device identifier associated for a device
@@ -2442,8 +2367,7 @@ amdsmi_status_t amdsmi_get_gpu_bdf_id(amdsmi_processor_handle processor_handle, 
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_topo_numa_affinity(amdsmi_processor_handle processor_handle,
-                                                    int32_t *numa_node);
+amdsmi_status_t amdsmi_get_gpu_topo_numa_affinity(amdsmi_processor_handle processor_handle, int32_t *numa_node);
 
 /**
  *  @brief Get PCIe traffic information. It is not supported on virtual machine guest
@@ -2470,7 +2394,7 @@ amdsmi_status_t amdsmi_get_gpu_topo_numa_affinity(amdsmi_processor_handle proces
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_gpu_pci_throughput(amdsmi_processor_handle processor_handle, uint64_t *sent,
-                                    uint64_t *received, uint64_t *max_pkt_sz);
+                                              uint64_t *received, uint64_t *max_pkt_sz);
 
 /**
  *  @brief Get PCIe replay counter
@@ -2493,8 +2417,7 @@ amdsmi_status_t amdsmi_get_gpu_pci_throughput(amdsmi_processor_handle processor_
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_pci_replay_counter(amdsmi_processor_handle processor_handle,
-                                                           uint64_t *counter);
+amdsmi_status_t amdsmi_get_gpu_pci_replay_counter(amdsmi_processor_handle processor_handle, uint64_t *counter);
 
 /** @} End PCIeQuer */
 
@@ -2536,8 +2459,7 @@ amdsmi_status_t amdsmi_get_gpu_pci_replay_counter(amdsmi_processor_handle proces
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_set_gpu_pci_bandwidth(amdsmi_processor_handle processor_handle,
-                                              uint64_t bw_bitmask);
+amdsmi_status_t amdsmi_set_gpu_pci_bandwidth(amdsmi_processor_handle processor_handle, uint64_t bw_bitmask);
 
 /** @} End PCIeCont */
 
@@ -2578,7 +2500,7 @@ amdsmi_status_t amdsmi_set_gpu_pci_bandwidth(amdsmi_processor_handle processor_h
  */
 amdsmi_status_t
 amdsmi_get_energy_count(amdsmi_processor_handle processor_handle, uint64_t *energy_accumulator,
-                          float *counter_resolution, uint64_t *timestamp);
+                        float *counter_resolution, uint64_t *timestamp);
 
 /** @} End PowerQuer */
 
@@ -2587,6 +2509,7 @@ amdsmi_get_energy_count(amdsmi_processor_handle processor_handle, uint64_t *ener
  *  These functions provide ways to control power usage.
  *  @{
  */
+
 /**
  *  @brief Set the maximum gpu power cap value. It is not supported on virtual
  *  machine guest
@@ -2631,7 +2554,7 @@ amdsmi_status_t
  */
 amdsmi_status_t
  amdsmi_set_gpu_power_profile(amdsmi_processor_handle processor_handle, uint32_t reserved,
-                                   amdsmi_power_profile_preset_masks_t profile);
+                              amdsmi_power_profile_preset_masks_t profile);
 
 /** @} End PowerCont*/
 
@@ -2666,7 +2589,7 @@ amdsmi_status_t
  */
 amdsmi_status_t
 amdsmi_get_gpu_memory_total(amdsmi_processor_handle processor_handle, amdsmi_memory_type_t mem_type,
-                                                             uint64_t *total);
+                            uint64_t *total);
 
 /**
  *  @brief Get the current memory usage
@@ -2692,7 +2615,7 @@ amdsmi_get_gpu_memory_total(amdsmi_processor_handle processor_handle, amdsmi_mem
  */
 amdsmi_status_t
 amdsmi_get_gpu_memory_usage(amdsmi_processor_handle processor_handle, amdsmi_memory_type_t mem_type,
-                                                              uint64_t *used);
+                            uint64_t *used);
 
 /**
  * @brief Get the bad pages of a processor. It is not supported on virtual
@@ -2715,7 +2638,7 @@ amdsmi_get_gpu_memory_usage(amdsmi_processor_handle processor_handle, amdsmi_mem
  */
 amdsmi_status_t
 amdsmi_get_gpu_bad_page_info(amdsmi_processor_handle processor_handle, uint32_t *num_pages,
-                              amdsmi_retired_page_record_t *info);
+                             amdsmi_retired_page_record_t *info);
 
 /**
  *  @brief Returns RAS features info.
@@ -2729,9 +2652,7 @@ amdsmi_get_gpu_bad_page_info(amdsmi_processor_handle processor_handle, uint32_t 
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_ras_feature_info(
-  amdsmi_processor_handle processor_handle, amdsmi_ras_feature_t *ras_feature);
-
+amdsmi_status_t amdsmi_get_gpu_ras_feature_info(amdsmi_processor_handle processor_handle, amdsmi_ras_feature_t *ras_feature);
 
 /**
  * @brief Returns if RAS features are enabled or disabled for given block. It is not
@@ -2758,8 +2679,8 @@ amdsmi_status_t amdsmi_get_gpu_ras_feature_info(
  */
 amdsmi_status_t
 amdsmi_get_gpu_ras_block_features_enabled(amdsmi_processor_handle processor_handle,
-                                            amdsmi_gpu_block_t block,
-                                            amdsmi_ras_err_state_t *state);
+                                          amdsmi_gpu_block_t block,
+                                          amdsmi_ras_err_state_t *state);
 
 /**
  *  @brief Get information about reserved ("retired") memory pages. It is not supported on
@@ -2832,7 +2753,7 @@ amdsmi_get_gpu_memory_reserved_pages(amdsmi_processor_handle processor_handle,
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_gpu_fan_rpms(amdsmi_processor_handle processor_handle,
-                                          uint32_t sensor_ind, int64_t *speed);
+                                        uint32_t sensor_ind, int64_t *speed);
 
 /**
  *  @brief Get the fan speed for the specified device as a value relative to
@@ -2860,7 +2781,7 @@ amdsmi_status_t amdsmi_get_gpu_fan_rpms(amdsmi_processor_handle processor_handle
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_gpu_fan_speed(amdsmi_processor_handle processor_handle,
-                                        uint32_t sensor_ind, int64_t *speed);
+                                         uint32_t sensor_ind, int64_t *speed);
 
 /**
  *  @brief Get the max. fan speed of the device with provided processor handle. It is
@@ -2887,7 +2808,7 @@ amdsmi_status_t amdsmi_get_gpu_fan_speed(amdsmi_processor_handle processor_handl
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_gpu_fan_speed_max(amdsmi_processor_handle processor_handle,
-                                    uint32_t sensor_ind, uint64_t *max_speed);
+                                             uint32_t sensor_ind, uint64_t *max_speed);
 
 /**
  *  @brief Get the temperature metric value for the specified metric, from the
@@ -2919,8 +2840,8 @@ amdsmi_status_t amdsmi_get_gpu_fan_speed_max(amdsmi_processor_handle processor_h
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_temp_metric(amdsmi_processor_handle processor_handle,
-                      amdsmi_temperature_type_t sensor_type,
-                      amdsmi_temperature_metric_t metric, int64_t *temperature);
+                                       amdsmi_temperature_type_t sensor_type,
+                                       amdsmi_temperature_metric_t metric, int64_t *temperature);
 
 /**
  *  @brief Returns gpu cache info.
@@ -2934,8 +2855,7 @@ amdsmi_status_t amdsmi_get_temp_metric(amdsmi_processor_handle processor_handle,
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_cache_info(
-      amdsmi_processor_handle processor_handle, amdsmi_gpu_cache_info_t *info);
+amdsmi_status_t amdsmi_get_gpu_cache_info(amdsmi_processor_handle processor_handle, amdsmi_gpu_cache_info_t *info);
 
 /**
  *  @brief Get the voltage metric value for the specified metric, from the
@@ -2967,8 +2887,8 @@ amdsmi_status_t amdsmi_get_gpu_cache_info(
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_gpu_volt_metric(amdsmi_processor_handle processor_handle,
-                               amdsmi_voltage_type_t sensor_type,
-                              amdsmi_voltage_metric_t metric, int64_t *voltage);
+                                           amdsmi_voltage_type_t sensor_type,
+                                           amdsmi_voltage_metric_t metric, int64_t *voltage);
 
 /** @} End PhysQuer */
 
@@ -3052,14 +2972,16 @@ amdsmi_status_t amdsmi_set_gpu_fan_speed(amdsmi_processor_handle processor_handl
  *  the amdsmi_utilization_counter_t.
  *
  *  @param[in] count The size of @p utilization_counters array.
+ * 
+ *  @param[in,out] timestamp The timestamp when the counter is retrieved. Resolution: 1 ns.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t
 amdsmi_get_utilization_count(amdsmi_processor_handle processor_handle,
-                amdsmi_utilization_counter_t utilization_counters[],
-                uint32_t count,
-                uint64_t *timestamp);
+                             amdsmi_utilization_counter_t utilization_counters[],
+                             uint32_t count,
+                             uint64_t *timestamp);
 
 /**
  *  @brief Get the performance level of the device. It is not supported on virtual
@@ -3083,7 +3005,7 @@ amdsmi_get_utilization_count(amdsmi_processor_handle processor_handle,
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_gpu_perf_level(amdsmi_processor_handle processor_handle,
-                                                 amdsmi_dev_perf_level_t *perf);
+                                          amdsmi_dev_perf_level_t *perf);
 
 /**
  *  @brief Enter performance determinism mode with provided processor handle. It is
@@ -3154,8 +3076,7 @@ amdsmi_status_t amdsmi_get_gpu_overdrive_level(amdsmi_processor_handle processor
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_mem_overdrive_level(amdsmi_processor_handle processor_handle,
-                                                uint32_t *od);
+amdsmi_status_t amdsmi_get_gpu_mem_overdrive_level(amdsmi_processor_handle processor_handle, uint32_t *od);
 
 /**
  *  @brief Get the list of possible system clock speeds of device for a
@@ -3217,7 +3138,7 @@ amdsmi_status_t amdsmi_reset_gpu(amdsmi_processor_handle processor_handle);
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_gpu_od_volt_info(amdsmi_processor_handle processor_handle,
-                                               amdsmi_od_volt_freq_data_t *odv);
+                                            amdsmi_od_volt_freq_data_t *odv);
 
 /**
  *  @brief Get the 'metrics_header_info' from the GPU metrics associated with the device
@@ -3294,10 +3215,9 @@ amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_ha
  *  @retval ::AMDSMI_STATUS_INVAL the provided arguments are not valid
  *
  */
-amdsmi_status_t amdsmi_get_gpu_pm_metrics_info(
-                      amdsmi_processor_handle processor_handle,
-                      amdsmi_name_value_t** pm_metrics,
-                      uint32_t *num_of_metrics);
+amdsmi_status_t amdsmi_get_gpu_pm_metrics_info(amdsmi_processor_handle processor_handle,
+                                               amdsmi_name_value_t** pm_metrics,
+                                               uint32_t *num_of_metrics);
 
 /**
  *  @brief Get the register metrics table with provided device index and register type.
@@ -3332,11 +3252,10 @@ amdsmi_status_t amdsmi_get_gpu_pm_metrics_info(
  *  @retval ::AMDSMI_STATUS_INVAL the provided arguments are not valid
  *
  */
-amdsmi_status_t amdsmi_get_gpu_reg_table_info(
-                      amdsmi_processor_handle processor_handle,
-                      amdsmi_reg_type_t reg_type,
-                      amdsmi_name_value_t** reg_metrics,
-                      uint32_t *num_of_metrics);
+amdsmi_status_t amdsmi_get_gpu_reg_table_info(amdsmi_processor_handle processor_handle,
+                                              amdsmi_reg_type_t reg_type,
+                                              amdsmi_name_value_t** reg_metrics,
+                                              uint32_t *num_of_metrics);
 
 /**
  *  @brief This function sets the clock range information. It is not supported on virtual
@@ -3364,9 +3283,9 @@ amdsmi_status_t amdsmi_get_gpu_reg_table_info(
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_set_gpu_clk_range(amdsmi_processor_handle processor_handle,
-                                          uint64_t minclkvalue,
-                                          uint64_t maxclkvalue,
-                                          amdsmi_clk_type_t clkType);
+                                         uint64_t minclkvalue,
+                                         uint64_t maxclkvalue,
+                                         amdsmi_clk_type_t clkType);
 
 /**
  *  @brief This function sets the clock sets the clock min/max level
@@ -3454,9 +3373,7 @@ amdsmi_status_t amdsmi_set_gpu_od_clk_info(amdsmi_processor_handle processor_han
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_set_gpu_od_volt_info(amdsmi_processor_handle processor_handle,
-                                              uint32_t vpoint,
-                                              uint64_t clkvalue,
-                                              uint64_t voltvalue);
+                                            uint32_t vpoint, uint64_t clkvalue, uint64_t voltvalue);
 
 /**
  *  @brief This function will retrieve the current valid regions in the
@@ -3496,7 +3413,7 @@ amdsmi_status_t amdsmi_set_gpu_od_volt_info(amdsmi_processor_handle processor_ha
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_gpu_od_volt_curve_regions(amdsmi_processor_handle processor_handle,
-                      uint32_t *num_regions, amdsmi_freq_volt_region_t *buffer);
+                                                     uint32_t *num_regions, amdsmi_freq_volt_region_t *buffer);
 
 /**
  *  @brief Get the list of available preset power profiles and an indication of
@@ -3564,7 +3481,7 @@ amdsmi_status_t
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t
- amdsmi_set_gpu_perf_level(amdsmi_processor_handle processor_handle, amdsmi_dev_perf_level_t perf_lvl);
+amdsmi_set_gpu_perf_level(amdsmi_processor_handle processor_handle, amdsmi_dev_perf_level_t perf_lvl);
 
 /**
  *  @brief Set the overdrive percent associated with the device with provided
@@ -3641,7 +3558,7 @@ amdsmi_status_t amdsmi_set_gpu_overdrive_level(amdsmi_processor_handle processor
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_set_clk_freq(amdsmi_processor_handle processor_handle,
-                             amdsmi_clk_type_t clk_type, uint64_t freq_bitmask);
+                                    amdsmi_clk_type_t clk_type, uint64_t freq_bitmask);
 
 /**
  * @brief Get the soc pstate policy for the processor
@@ -3661,7 +3578,7 @@ amdsmi_status_t amdsmi_set_clk_freq(amdsmi_processor_handle processor_handle,
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_soc_pstate(amdsmi_processor_handle processor_handle,
-                             amdsmi_dpm_policy_t* policy);
+                                      amdsmi_dpm_policy_t* policy);
 
 /**
  * @brief Set the soc pstate  policy for the processor
@@ -3683,7 +3600,7 @@ amdsmi_status_t amdsmi_get_soc_pstate(amdsmi_processor_handle processor_handle,
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_set_soc_pstate(amdsmi_processor_handle processor_handle,
-                             uint32_t policy_id);
+                                      uint32_t policy_id);
 
 /**
  * @brief Get the xgmi per-link power down policy parameter for the processor
@@ -3703,7 +3620,7 @@ amdsmi_status_t amdsmi_set_soc_pstate(amdsmi_processor_handle processor_handle,
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_xgmi_plpd(amdsmi_processor_handle processor_handle,
-                             amdsmi_dpm_policy_t* xgmi_plpd);
+                                     amdsmi_dpm_policy_t* xgmi_plpd);
 
 /**
  * @brief Set the xgmi per-link power down policy parameter for the processor
@@ -3724,9 +3641,7 @@ amdsmi_status_t amdsmi_get_xgmi_plpd(amdsmi_processor_handle processor_handle,
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_set_xgmi_plpd(amdsmi_processor_handle processor_handle,
-                             uint32_t plpd_id);
-
+amdsmi_status_t amdsmi_set_xgmi_plpd(amdsmi_processor_handle processor_handle, uint32_t plpd_id);
 
 /**
  * @brief Get the status of the Process Isolation
@@ -3746,7 +3661,7 @@ amdsmi_status_t amdsmi_set_xgmi_plpd(amdsmi_processor_handle processor_handle,
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_gpu_process_isolation(amdsmi_processor_handle processor_handle,
-                             uint32_t* pisolate);
+                                                 uint32_t* pisolate);
 
 /**
  * @brief Enable/disable the system Process Isolation
@@ -3766,7 +3681,7 @@ amdsmi_status_t amdsmi_get_gpu_process_isolation(amdsmi_processor_handle process
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_set_gpu_process_isolation(amdsmi_processor_handle processor_handle,
-                             uint32_t pisolate);
+                                                 uint32_t pisolate);
 
 /**
  * @brief Clean up local data in LDS/GPRs
@@ -3845,7 +3760,7 @@ amdsmi_get_lib_version(amdsmi_version_t *version);
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_gpu_ecc_count(amdsmi_processor_handle processor_handle,
-                              amdsmi_gpu_block_t block, amdsmi_error_count_t *ec);
+                                         amdsmi_gpu_block_t block, amdsmi_error_count_t *ec);
 
 /**
  *  @brief Retrieve the enabled ECC bit-mask. It is not supported on virtual machine guest
@@ -3874,7 +3789,7 @@ amdsmi_status_t amdsmi_get_gpu_ecc_count(amdsmi_processor_handle processor_handl
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_gpu_ecc_enabled(amdsmi_processor_handle processor_handle,
-                                                    uint64_t *enabled_blocks);
+                                           uint64_t *enabled_blocks);
 
 /**
  *  @brief Retrieve the ECC status for a GPU block. It is not supported on virtual machine
@@ -3901,8 +3816,8 @@ amdsmi_status_t amdsmi_get_gpu_ecc_enabled(amdsmi_processor_handle processor_han
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_gpu_ecc_status(amdsmi_processor_handle processor_handle,
-                                                  amdsmi_gpu_block_t block,
-                                                  amdsmi_ras_err_state_t *state);
+                                          amdsmi_gpu_block_t block,
+                                          amdsmi_ras_err_state_t *state);
 
 /**
  *  @brief Get a description of a provided AMDSMI error status
@@ -4114,7 +4029,7 @@ amdsmi_gpu_destroy_counter(amdsmi_event_handle_t evnt_handle);
  */
 amdsmi_status_t
 amdsmi_gpu_control_counter(amdsmi_event_handle_t evt_handle,
-                                  amdsmi_counter_command_t cmd, void *cmd_args);
+                           amdsmi_counter_command_t cmd, void *cmd_args);
 
 /**
  *  @brief Read the current value of a performance counter
@@ -4136,7 +4051,7 @@ amdsmi_gpu_control_counter(amdsmi_event_handle_t evt_handle,
  */
 amdsmi_status_t
 amdsmi_gpu_read_counter(amdsmi_event_handle_t evt_handle,
-                    amdsmi_counter_value_t *value);
+                        amdsmi_counter_value_t *value);
 
 /**
  *  @brief Get the number of currently available counters. It is not supported on
@@ -4160,7 +4075,7 @@ amdsmi_gpu_read_counter(amdsmi_event_handle_t evt_handle,
  */
 amdsmi_status_t
  amdsmi_get_gpu_available_counters(amdsmi_processor_handle processor_handle,
-                                 amdsmi_event_group_t grp, uint32_t *available);
+                                   amdsmi_event_group_t grp, uint32_t *available);
 
 /** @} End PerfCntr */
 
@@ -4256,8 +4171,7 @@ amdsmi_get_gpu_compute_process_info_by_pid(uint32_t pid, amdsmi_process_info_t *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t
-amdsmi_get_gpu_compute_process_gpus(uint32_t pid, uint32_t *dv_indices,
-                                                       uint32_t *num_devices);
+amdsmi_get_gpu_compute_process_gpus(uint32_t pid, uint32_t *dv_indices, uint32_t *num_devices);
 
 /** @} End SysInfo */
 
@@ -4330,7 +4244,7 @@ amdsmi_reset_gpu_xgmi_error(amdsmi_processor_handle processor_handle);
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_link_metrics(amdsmi_processor_handle processor_handle,
-          amdsmi_link_metrics_t *link_metrics);
+                                        amdsmi_link_metrics_t *link_metrics);
 
 /**
  *  @brief Retrieve the NUMA CPU node number for a device
@@ -4374,7 +4288,7 @@ amdsmi_topo_get_numa_node_number(amdsmi_processor_handle processor_handle, uint3
  */
 amdsmi_status_t
 amdsmi_topo_get_link_weight(amdsmi_processor_handle processor_handle_src, amdsmi_processor_handle processor_handle_dst,
-                          uint64_t *weight);
+                            uint64_t *weight);
 
 /**
  *  @brief Retreive minimal and maximal io link bandwidth between 2 GPUs
@@ -4401,9 +4315,9 @@ amdsmi_topo_get_link_weight(amdsmi_processor_handle processor_handle_src, amdsmi
  */
 amdsmi_status_t
  amdsmi_get_minmax_bandwidth_between_processors(amdsmi_processor_handle processor_handle_src,
-                                                  amdsmi_processor_handle processor_handle_dst,
-                                                  uint64_t *min_bandwidth,
-                                                  uint64_t *max_bandwidth);
+                                                amdsmi_processor_handle processor_handle_dst,
+                                                uint64_t *min_bandwidth,
+                                                uint64_t *max_bandwidth);
 
 /**
  *  @brief Retrieve the hops and the connection type between 2 GPUs
@@ -4431,8 +4345,8 @@ amdsmi_status_t
  */
 amdsmi_status_t
 amdsmi_topo_get_link_type(amdsmi_processor_handle processor_handle_src,
-                        amdsmi_processor_handle processor_handle_dst,
-                        uint64_t *hops, amdsmi_io_link_type_t *type);
+                          amdsmi_processor_handle processor_handle_dst,
+                          uint64_t *hops, amdsmi_io_link_type_t *type);
 
 /**
  *  @brief Return P2P availability status between 2 GPUs
@@ -4456,9 +4370,8 @@ amdsmi_topo_get_link_type(amdsmi_processor_handle processor_handle_src,
  */
 amdsmi_status_t
 amdsmi_is_P2P_accessible(amdsmi_processor_handle processor_handle_src,
-                          amdsmi_processor_handle processor_handle_dst,
-                          bool *accessible);
-
+                         amdsmi_processor_handle processor_handle_dst,
+                         bool *accessible);
 
 /**
  *  @brief Retrieve connection type and P2P capabilities between 2 GPUs
@@ -4530,7 +4443,7 @@ amdsmi_topo_get_p2p_status(amdsmi_processor_handle processor_handle_src,
  */
 amdsmi_status_t
 amdsmi_get_gpu_compute_partition(amdsmi_processor_handle processor_handle,
-                                  char *compute_partition, uint32_t len);
+                                 char *compute_partition, uint32_t len);
 
 /**
  *  @brief Modifies a selected device's compute partition setting.
@@ -4558,7 +4471,7 @@ amdsmi_get_gpu_compute_partition(amdsmi_processor_handle processor_handle,
  */
 amdsmi_status_t
 amdsmi_set_gpu_compute_partition(amdsmi_processor_handle processor_handle,
-                                  amdsmi_compute_partition_type_t compute_partition);
+                                 amdsmi_compute_partition_type_t compute_partition);
 
 /** @} */  // end of compute_partition
 
@@ -4600,8 +4513,7 @@ amdsmi_set_gpu_compute_partition(amdsmi_processor_handle processor_handle,
  *
  */
 amdsmi_status_t
-amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processor_handle,
-                                  char *memory_partition, uint32_t len);
+amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processor_handle, char *memory_partition, uint32_t len);
 
 /**
  *  @brief Modifies a selected device's current memory partition setting.
@@ -4627,8 +4539,7 @@ amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processor_handle,
  *
  */
 amdsmi_status_t
-amdsmi_set_gpu_memory_partition(amdsmi_processor_handle processor_handle,
-                                  amdsmi_memory_partition_type_t memory_partition);
+amdsmi_set_gpu_memory_partition(amdsmi_processor_handle processor_handle, amdsmi_memory_partition_type_t memory_partition);
 
 /** @} */  // end of memory_partition
 
@@ -4743,8 +4654,7 @@ amdsmi_status_t
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t
- amdsmi_get_gpu_event_notification(int timeout_ms,
-                     uint32_t *num_elem, amdsmi_evt_notification_data_t *data);
+ amdsmi_get_gpu_event_notification(int timeout_ms, uint32_t *num_elem, amdsmi_evt_notification_data_t *data);
 
 /**
  * @brief Close any file handles and free any resources used by event
@@ -4883,8 +4793,7 @@ amdsmi_get_gpu_kfd_info(amdsmi_processor_handle processor_handle, amdsmi_kfd_inf
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_vram_info(
-          amdsmi_processor_handle processor_handle, amdsmi_vram_info_t *info);
+amdsmi_status_t amdsmi_get_gpu_vram_info(amdsmi_processor_handle processor_handle, amdsmi_vram_info_t *info);
 
 /**
  *  @brief          Returns the board part number and board information for the requested device
@@ -4918,7 +4827,7 @@ amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_handle, amdsmi_board
  */
 amdsmi_status_t
 amdsmi_get_power_cap_info(amdsmi_processor_handle processor_handle, uint32_t sensor_ind,
-          amdsmi_power_cap_info_t *info);
+                          amdsmi_power_cap_info_t *info);
 
 /**
  *  @brief Returns the PCIe info for the GPU.
@@ -4932,8 +4841,7 @@ amdsmi_get_power_cap_info(amdsmi_processor_handle processor_handle, uint32_t sen
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle,
-          amdsmi_pcie_info_t *info);
+amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle, amdsmi_pcie_info_t *info);
 
 /**
  *  @brief          Returns XGMI information for the GPU.
@@ -4950,6 +4858,25 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle,
  */
 amdsmi_status_t
 amdsmi_get_xgmi_info(amdsmi_processor_handle processor_handle, amdsmi_xgmi_info_t *info);
+
+/**
+ *  @brief Get the XGMI link status
+ *
+ *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @details Given a processor handle @p processor_handle,  this function
+ *  will return the link status for each XGMI link connect to this processor.
+ *  If the processor link type is not XGMI, it should return AMDSMI_STATUS_NOT_SUPPORTED.
+ *
+ *  @param[in] processor_handle a processor handle
+ *
+ *  @param[out] link_status The link status of the XGMI connect to this processor.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t
+amdsmi_get_gpu_xgmi_link_status(amdsmi_processor_handle processor_handle,
+              amdsmi_xgmi_link_status_t* link_status);
 
 /** @} End asicinfo */
 
@@ -5099,7 +5026,6 @@ amdsmi_status_t
 amdsmi_get_violation_status(amdsmi_processor_handle processor_handle,
                             amdsmi_violation_status_t *info);
 
-
 /** @} End gpumon */
 
 /*****************************************************************************/
@@ -5211,7 +5137,6 @@ amdsmi_status_t
 amdsmi_get_link_topology_nearest(amdsmi_processor_handle processor_handle,
                                  amdsmi_link_type_t link_type,
                                  amdsmi_topology_nearest_t* topology_nearest_info);
-
 
 #ifdef ENABLE_ESMI_LIB
 /*****************************************************************************/
@@ -5811,7 +5736,7 @@ amdsmi_status_t amdsmi_get_cpu_current_xgmi_bw(amdsmi_processor_handle processor
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_hsmp_metrics_table_version(amdsmi_processor_handle processor_handle,
-                                                 uint32_t *metrics_version);
+                                                      uint32_t *metrics_version);
 
 /**
  *  @brief Get HSMP metrics table
@@ -5824,7 +5749,7 @@ amdsmi_status_t amdsmi_get_hsmp_metrics_table_version(amdsmi_processor_handle pr
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_hsmp_metrics_table(amdsmi_processor_handle processor_handle,
-                                         amdsmi_hsmp_metrics_table_t *metrics_table);
+                                              amdsmi_hsmp_metrics_table_t *metrics_table);
 
 /** @} MetQuer */
 
@@ -5881,9 +5806,13 @@ amdsmi_status_t amdsmi_get_cpu_model(uint32_t *cpu_model);
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_esmi_err_msg(amdsmi_status_t status, const char **status_string);
+
 #endif
+
 /** @} auxiquer */
+
 #ifdef __cplusplus
 }
 #endif  // __cplusplus
-#endif  // INCLUDE_AMDSMI_H_
+
+#endif  // __AMDSMI_H__

@@ -751,7 +751,8 @@ class AMDSMICommands():
             vram_info_dict = {"type" : "N/A",
                               "vendor" : "N/A",
                               "size" : "N/A",
-                              "bit_width" : "N/A"}
+                              "bit_width" : "N/A",
+                              "max_bandwidth" : "N/A"}
             try:
                 vram_info = amdsmi_interface.amdsmi_get_gpu_vram_info(args.gpu)
 
@@ -789,6 +790,15 @@ class AMDSMICommands():
 
                 # Populate bit width
                 vram_info_dict['bit_width'] = vram_info['vram_bit_width']
+
+                # Populate vram_max_bandwidth
+                vram_max_bw = vram_info['vram_max_bandwidth']
+                vram_max_bw_unit = 'GB/s'
+                if self.logger.is_human_readable_format():
+                    vram_info_dict["max_bandwidth"] = f"{vram_max_bw} {vram_max_bw_unit if vram_max_bw != 'N/A' else ''}"
+                if self.logger.is_json_format():
+                    vram_info_dict["max_bandwidth"] = {"value" : vram_max_bw,
+                                                     "unit" : vram_max_bw_unit}
 
             except amdsmi_exception.AmdSmiLibraryException as e:
                 logging.debug("Failed to get vram info for gpu %s | %s", gpu_id, e.get_error_info())
@@ -1242,7 +1252,8 @@ class AMDSMICommands():
                 clock=None, temperature=None, ecc=None, ecc_blocks=None, pcie=None,
                 fan=None, voltage_curve=None, overdrive=None, perf_level=None,
                 xgmi_err=None, energy=None, mem_usage=None, schedule=None,
-                guard=None, guest_data=None, fb_usage=None, xgmi=None, throttle=None):
+                guard=None, guest_data=None, fb_usage=None, xgmi=None, throttle=None,
+                ):
         """Get Metric information for target gpu
 
         Args:
@@ -1338,7 +1349,8 @@ class AMDSMICommands():
             current_platform_args += ["fan", "voltage_curve", "overdrive", "perf_level",
                                       "xgmi_err", "energy", "throttle"]
             current_platform_values += [args.fan, args.voltage_curve, args.overdrive,
-                                        args.perf_level, args.xgmi_err, args.energy, args.throttle]
+                                        args.perf_level, args.xgmi_err, args.energy, args.throttle,
+                                        ]
 
         if self.helpers.is_hypervisor():
             if schedule:
@@ -2221,6 +2233,7 @@ class AMDSMICommands():
                     'socket_thermal_accumulated': "N/A",
                     'vr_thermal_accumulated': "N/A",
                     'hbm_thermal_accumulated': "N/A",
+                    'gfx_below_host_limit_acc': "N/A",
 
                     # violation status values - active/not active
                     'prochot_violation_status': "N/A",
@@ -2311,7 +2324,7 @@ class AMDSMICommands():
 
     def metric_cpu(self, args, multiple_devices=False, cpu=None, cpu_power_metrics=None, cpu_prochot=None,
                    cpu_freq_metrics=None, cpu_c0_res=None, cpu_lclk_dpm_level=None,
-                   cpu_pwr_svi_telemtry_rails=None, cpu_io_bandwidth=None, cpu_xgmi_bandwidth=None,
+                  cpu_pwr_svi_telemetry_rails=None, cpu_io_bandwidth=None, cpu_xgmi_bandwidth=None,
                    cpu_metrics_ver=None, cpu_metrics_table=None, cpu_socket_energy=None,
                    cpu_ddr_bandwidth=None, cpu_temp=None, cpu_dimm_temp_range_rate=None,
                    cpu_dimm_pow_consumption=None, cpu_dimm_thermal_sensor=None):
@@ -2354,8 +2367,8 @@ class AMDSMICommands():
             args.cpu_c0_res = cpu_c0_res
         if cpu_lclk_dpm_level:
             args.cpu_lclk_dpm_level = cpu_lclk_dpm_level
-        if cpu_pwr_svi_telemtry_rails:
-            args.cpu_pwr_svi_telemtry_rails = cpu_pwr_svi_telemtry_rails
+        if cpu_pwr_svi_telemetry_rails:
+            args.cpu_pwr_svi_telemtry_rails = cpu_pwr_svi_telemetry_rails
         if cpu_io_bandwidth:
             args.cpu_io_bandwidth = cpu_io_bandwidth
         if cpu_xgmi_bandwidth:
@@ -2488,7 +2501,7 @@ class AMDSMICommands():
             except amdsmi_exception.AmdSmiLibraryException as e:
                 static_dict["socket_dpm"]["dpml_level_range"] = "N/A"
                 logging.debug("Failed to get socket dpm level range for cpu %s | %s", cpu_id, e.get_error_info())
-        if args.cpu_pwr_svi_telemtry_rails:
+        if args.cpu_pwr_svi_telemetry_rails:
             static_dict["svi_telemetry_all_rails"] = {}
             try:
                 power = amdsmi_interface.amdsmi_get_cpu_pwr_svi_telemetry_all_rails(args.cpu)
@@ -2756,8 +2769,7 @@ class AMDSMICommands():
             None: Print output via AMDSMILogger to destination
         """
         # TODO Move watch logic into here and make it driver agnostic or enable it for CPU arguments
-
-        # Mutually exculsive args
+        # Mutually exclusive args
         if gpu:
             args.gpu = gpu
         if cpu:
@@ -2832,7 +2844,7 @@ class AMDSMICommands():
                                 cpu_dimm_pow_consumption, cpu_dimm_thermal_sensor)
             if args.core:
                 self.logger.output = {}
-                self.logger.clear_multiple_devices_ouput()
+                self.logger.clear_multiple_devices_output()
                 self.metric_core(args, multiple_devices, core, core_boost_limit,
                                      core_curr_active_freq_core_limit, core_energy)
             if args.gpu:
@@ -2843,7 +2855,8 @@ class AMDSMICommands():
                                 clock, temperature, ecc, ecc_blocks, pcie,
                                 fan, voltage_curve, overdrive, perf_level,
                                 xgmi_err, energy, mem_usage, schedule,
-                                guard, guest_data, fb_usage, xgmi, throttle)
+                                guard, guest_data, fb_usage, xgmi, throttle,
+                                )
         elif self.helpers.is_amd_hsmp_initialized(): # Only CPU is initialized
             if args.cpu == None and args.core == None:
                 # If no args are set, print out all CPU and Core metrics info
@@ -2877,7 +2890,8 @@ class AMDSMICommands():
                                 usage, watch, watch_time, iterations, power,
                                 clock, temperature, ecc, ecc_blocks, pcie,
                                 fan, voltage_curve, overdrive, perf_level,
-                                xgmi_err, energy, mem_usage, schedule, throttle)
+                                xgmi_err, energy, mem_usage, schedule, throttle,
+                                )
 
 
     def process(self, args, multiple_devices=False, watching_output=False,
@@ -5350,13 +5364,14 @@ class AMDSMICommands():
         print("Placeholder for rocm-smi legacy commands")
 
 
-    def xgmi(self, args, multiple_devices=False, gpu=None, metric=None):
+    def xgmi(self, args, multiple_devices=False, gpu=None, metric=None, xgmi_link_status=None):
         """ Get topology information for target gpus
             params:
                 args - argparser args to pass to subcommand
                 multiple_devices (bool) - True if checking for multiple devices
                 gpu (device_handle) - device_handle for target device
                 metric (bool) - Value override for args.metric
+                xgmi_link_status (bool) - Value override for args.xgmi_link_status
 
             return:
                 Nothing
@@ -5368,6 +5383,8 @@ class AMDSMICommands():
             args.gpu = gpu
         if metric:
             args.metric = metric
+        if xgmi_link_status:
+            args.link_status = xgmi_link_status
 
         # Handle No GPU passed
         if args.gpu == None:
@@ -5377,8 +5394,9 @@ class AMDSMICommands():
             args.gpu = [args.gpu]
 
         # Handle all args being false
-        if not any([args.metric]):
+        if not any([args.metric, args.link_status]):
             args.metric = True
+            args.link_status = True
 
         # Clear the table header
         self.logger.table_header = ''.rjust(7)
@@ -5396,9 +5414,9 @@ class AMDSMICommands():
 
         if args.metric:
             # prepend link metrics header to the table header
-            link_metrics_header = "       " + "bdf".ljust(13) + \
-                  "bit_rate".ljust(9) + "max_bandwidth".ljust(14) + \
-                  "link_type".ljust(10)
+            link_metrics_header = "       " + "bdf".ljust(14) + \
+                  "bit_rate".ljust(10) + "max_bandwidth".ljust(15) + \
+                  "link_type".ljust(11)
             self.logger.table_header = link_metrics_header + self.logger.table_header.strip()
 
             # Populate dictionary according to format
@@ -5544,7 +5562,7 @@ class AMDSMICommands():
 
                 # Print out the tabular output
                 self.logger.multiple_device_output = tabular_output
-                self.logger.table_title = "LINK METRIC TABLE"
+                self.logger.table_title = "\nLINK METRIC TABLE"
                 self.logger.print_output(multiple_device_enabled=True, tabular=True)
 
         self.logger.multiple_device_output = xgmi_values
@@ -5557,6 +5575,48 @@ class AMDSMICommands():
 
         if not self.logger.is_human_readable_format():
             self.logger.print_output(multiple_device_enabled=True)
+
+        if args.link_status:
+            # Header modification
+            self.logger.table_header = ''.rjust(7)
+            current_header = "     ".ljust(7) + \
+                             "bdf".ljust(14) + \
+                             "link_status".ljust(20)
+            self.logger.table_header = current_header + self.logger.table_header.strip()
+            # Process each GPU
+            tabular_output = []
+            for xgmi_dict in xgmi_values:
+                src_gpu_id = xgmi_dict['gpu']
+                src_gpu_bdf = xgmi_dict['bdf']
+                src_gpu = amdsmi_interface.amdsmi_get_processor_handle_from_bdf(src_gpu_bdf)
+
+                # Populate link statuses
+                status_row = []
+                tabular_output_dict = {"gpu#": f"GPU{src_gpu_id}",
+                                       "gpu": src_gpu_id,
+                                       "bdf": src_gpu_bdf,
+                                       "link_status": "N/A"}
+                try:
+                    link_status = amdsmi_interface.amdsmi_get_gpu_xgmi_link_status(src_gpu)
+                    tabular_output_dict['link_status'] = link_status['status']
+                    if self.logger.is_human_readable_format():
+                        del tabular_output_dict['gpu']
+                    else:
+                        del tabular_output_dict['gpu#']
+                    tabular_output.append(tabular_output_dict)
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    xgmi_dict['link_metrics']['link_status']={"status": "failed"}
+                    logging.debug("Failed to get XGMI link status for GPU %s | %s", src_gpu_id, e.get_error_info())
+
+                #populate link status data for output
+                if self.logger.is_human_readable_format():
+                    xgmi_dict['link_status'] = tabular_output
+            self.logger.multiple_device_output= tabular_output
+            self.logger.table_title = "\nXGMI LINK STATUS"
+            self.logger.print_output(multiple_device_enabled=True, tabular=True)
+            self.logger.clear_multiple_devices_ouput()
+            if self.logger.is_human_readable_format():
+                print("\n* U:Up D:Down X:Disabled".ljust(13))
 
 
     def partition(self, args, multiple_devices=False, gpu=None, current=None, memory=None, accelerator=None):

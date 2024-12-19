@@ -1313,6 +1313,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Help text for Arguments only on Guest and BM platforms
         metrics_help = "Metric XGMI information"
+        xgmi_link_status_help = "XGMI Link Status information"
 
         # Create xgmi subparser
         xgmi_parser = subparsers.add_parser('xgmi', help=xgmi_help, description=xgmi_subcommand_help)
@@ -1326,6 +1327,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Optional Args
         xgmi_parser.add_argument('-m', '--metric', action='store_true', required=False, help=metrics_help)
+        xgmi_parser.add_argument('-l', '--link-status', action='store_true', required=False, help=xgmi_link_status_help)
 
 
     def _add_partition_parser(self, subparsers, func):

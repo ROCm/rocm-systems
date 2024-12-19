@@ -52,6 +52,7 @@
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/amd_smi_processor.h"
 #include "rocm_smi/rocm_smi_logger.h"
+#include "rocm_smi/rocm_smi.h"
 
 // a global instance of std::mutex to protect data passed during threads
 std::mutex myMutex;
@@ -80,7 +81,7 @@ static amdsmi_status_t get_gpu_device_from_handle(amdsmi_processor_handle proces
     if (r != AMDSMI_STATUS_SUCCESS) return r;
 
     if (device->get_processor_type() == AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
-        *gpudevice = static_cast<amd::smi::AMDSmiGPUDevice*>(processor_handle);
+        *gpudevice = static_cast<amd::smi::AMDSmiGPUDevice*>(device);
         return AMDSMI_STATUS_SUCCESS;
     }
 
@@ -665,8 +666,11 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
 
     amdsmi_gpu_metrics_t metric_info_a = {};
     amdsmi_status_t status =  amdsmi_get_gpu_metrics_info(
-            processor_handle, &metric_info_a);
+                    processor_handle, &metric_info_a);
     if (status != AMDSMI_STATUS_SUCCESS) {
+        std::ostringstream ss;
+        ss << __PRETTY_FUNCTION__ << " | amdsmi_get_gpu_metrics_info failed with status = " << smi_amdgpu_get_status_string(status, false);
+        LOG_ERROR(ss);
         return status;
     }
 
@@ -1053,6 +1057,43 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
     return AMDSMI_STATUS_SUCCESS;
 }
 
+amdsmi_status_t
+amdsmi_get_gpu_xgmi_link_status(amdsmi_processor_handle processor_handle,
+                                amdsmi_xgmi_link_status_t *link_status) {
+    AMDSMI_CHECK_INIT();
+
+    if (link_status == nullptr) {
+        return AMDSMI_STATUS_INVAL;
+    }
+
+    amdsmi_gpu_metrics_t metric_info = {};
+    amdsmi_status_t status =  amdsmi_get_gpu_metrics_info(
+            processor_handle, &metric_info);
+    if (status != AMDSMI_STATUS_SUCCESS) {
+        return status;
+    }
+
+    uint32_t dev_num = 0;
+    auto r = rsmi_num_monitor_devices(&dev_num);
+    link_status->total_links = AMDSMI_MAX_NUM_XGMI_LINKS;
+    if (dev_num <= link_status->total_links) {
+        link_status->total_links = dev_num;
+    }
+    // get the status values from the metric info
+    for (unsigned int i = 0; i < link_status->total_links; i++) {
+        if (metric_info.xgmi_link_status[i] == std::numeric_limits<uint16_t>::max()) {
+            link_status->status[i] = AMDSMI_XGMI_LINK_DISABLE;
+        } else if (metric_info.xgmi_link_status[i] == 0) {
+            link_status->status[i] = AMDSMI_XGMI_LINK_DOWN;
+        } else if (metric_info.xgmi_link_status[i] == 1) {
+            link_status->status[i] = AMDSMI_XGMI_LINK_UP;
+        } else {
+            return AMDSMI_STATUS_UNEXPECTED_DATA;
+        }
+    }
+    return AMDSMI_STATUS_SUCCESS;
+}
+
 amdsmi_status_t amdsmi_get_gpu_kfd_info(amdsmi_processor_handle processor_handle,
                                     amdsmi_kfd_info_t *info) {
     AMDSMI_CHECK_INIT();
@@ -1135,6 +1176,7 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(
     info->vram_size = 0;
     info->vram_vendor = AMDSMI_VRAM_VENDOR__PLACEHOLDER0;
     info->vram_bit_width = std::numeric_limits<decltype(info->vram_bit_width)>::max();
+    info->vram_max_bandwidth = std::numeric_limits<decltype(info->vram_max_bandwidth)>::max();
 
     // Only can read vram type from libdrm
     if (gpu_device->check_if_drm_is_supported()) {
@@ -1146,6 +1188,13 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(
             info->vram_type = amd::smi::vram_type_value(dev_info.vram_type);
             info->vram_bit_width = dev_info.vram_bit_width;
         }
+    }
+
+    // set info->vram_max_bandwidth to gpu_metrics vram_max_bandwidth if it is not set
+    amdsmi_gpu_metrics_t metric_info = {};
+    r = amdsmi_get_gpu_metrics_info(processor_handle, &metric_info);
+    if (r == AMDSMI_STATUS_SUCCESS) {
+        info->vram_max_bandwidth = metric_info.vram_max_bandwidth;
     }
 
     // if vram type is greater than the max enum set it to unknown
