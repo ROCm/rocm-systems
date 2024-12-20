@@ -215,6 +215,54 @@ static void runTestMatchAll_3() {
   }
 }
 
+__global__ void matchAll_4(int *Input, int *Output) {
+  int tid = threadIdx.x;
+  unsigned long long masks[2] = { Every5thBut9th, Every9thBit };
+
+  Output[tid] = -1;
+  if (tid % 5 == 0 || tid % 9 == 0) {
+    Output[tid] = !!__match_all_sync(masks[tid % 9 == 0], Input[tid], &Input[tid]);
+  }
+}
+
+static void runTestMatchAll_4() {
+  size_t warpSize = getWarpSize();
+
+  auto Input = std::vector<int>(warpSize);
+
+  for (size_t i = 0; i < Input.size(); i++) {
+    if (i % 9 == 0 || i % 5 == 0) {
+      Input[i] = 0x55;
+    } else {
+      Input[i] = i;
+    }
+  }
+
+  auto Output = std::vector<int>(warpSize);
+  auto Expected = std::vector<int>(warpSize);
+
+  for (size_t i = 0; i < Expected.size(); i++) {
+    if (i % 9 == 0 || i % 5 == 0) {
+      Expected[i] = 1;
+    } else {
+      Expected[i] = -1;
+    }
+  }
+
+  int* d_Input;
+  int* d_Output;
+  HIP_CHECK(hipMalloc(&d_Input, Input.size() * sizeof(Input[0])));
+  HIP_CHECK(hipMalloc(&d_Output, Output.size() * sizeof(Output[0])));
+
+  HIP_CHECK(hipMemcpy(d_Input, Input.data(), Input.size() * sizeof(Input[0]), hipMemcpyDefault));
+  hipLaunchKernelGGL(matchAll_4, 1, warpSize, 0, 0, d_Input, d_Output);
+
+  HIP_CHECK(hipMemcpy(Output.data(), d_Output, Output.size() * sizeof(Output[0]), hipMemcpyDefault));
+  for (size_t i = 0; i < Output.size(); i++) {
+    REQUIRE(Output[i] == Expected[i]);
+  }
+}
+
 /**
  * @addtogroup __match_sync
  * @{
@@ -238,6 +286,8 @@ static void runTestMatchAll_3() {
  */
 
 TEST_CASE("Unit_hipMatchSync_All") {
+  CHECK_WARP_MATCH_FUNCTIONS_SUPPORT
+
   SECTION("run test for int") {
     runTestMatchAll_1<int>();
     runTestMatchAll_2<int>();
@@ -277,5 +327,8 @@ TEST_CASE("Unit_hipMatchSync_All") {
     runTestMatchAll_1<double>();
     runTestMatchAll_2<double>();
     runTestMatchAll_3<double>();
+  }
+  SECTION("run divergent execution tests") {
+    runTestMatchAll_4();
   }
 }

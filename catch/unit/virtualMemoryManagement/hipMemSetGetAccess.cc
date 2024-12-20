@@ -1494,6 +1494,7 @@ TEST_CASE("Unit_hipMemSetAccess_negative") {
     hipDeviceptr_t ptrB;
     HIP_CHECK(hipMemAddressReserve(&ptrB, size_mem, 0, 0, 0));
     REQUIRE(hipMemSetAccess(&ptrB, size_mem, &accessDesc, 1) == hipErrorInvalidValue);
+    HIP_CHECK(hipMemAddressFree(ptrB, size_mem));
   }
 
   HIP_CHECK(hipMemUnmap(ptrA, size_mem));

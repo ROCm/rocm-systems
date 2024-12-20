@@ -100,6 +100,7 @@ TEST_CASE("Unit_cg_binary_part") {
     REQUIRE(even_output == 1);
   }
 
+  HIP_CHECK(hipFree(data));
   HIP_CHECK(hipFree(odd_res));
   HIP_CHECK(hipFree(even_res));
 }

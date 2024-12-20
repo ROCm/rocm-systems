@@ -158,6 +158,7 @@ void validateStreamCaptureInfoV2(hipStream_t mstream) {
 
   HIP_CHECK(hipStreamSynchronize(streamForLaunch));
 
+  HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipStreamDestroy(streamForLaunch));
   HIP_CHECK(hipStreamDestroy(stream1));

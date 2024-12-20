@@ -374,6 +374,7 @@ static void test_cg_multi_grid_group_type(F kernel_func, int num_devices, int bl
     HIP_CHECK(hipHostFree(size_host[i]));
     HIP_CHECK(hipHostFree(thd_rank_host[i]));
     HIP_CHECK(hipHostFree(is_valid_host[i]));
+    HIP_CHECK(hipStreamDestroy(stream[i]));
   }
 }
 

@@ -119,6 +119,9 @@ static void LaunchKrnl2(int* Hmm, size_t NumElms, int InitVal, int HmmMem) {
     INFO("Data Mismatch observed at line: " << __LINE__);
     REQUIRE(false);
   }
+
+  HIP_CHECK(hipFree(ptr));
+  HIP_CHECK(hipStreamDestroy(strm));
 }
 
 static void LaunchKrnl3(int* Dptr, size_t NumElms, int InitVal) {
@@ -143,6 +146,9 @@ static void LaunchKrnl3(int* Dptr, size_t NumElms, int InitVal) {
     INFO("Data Mismatch observed at line: " << __LINE__);
     REQUIRE(false);
   }
+
+  HIP_CHECK(hipFree(Hmm));
+  HIP_CHECK(hipStreamDestroy(strm));
 }
 
 
@@ -180,6 +186,9 @@ static void LaunchKrnl5(int* Hmm1, size_t NumElms, int InitVal, int KerneltoLaun
     INFO("Data Mismatch observed at line: " << __LINE__);
     REQUIRE(false);
   }
+
+  HIP_CHECK(hipFree(Hmm2));
+  HIP_CHECK(hipStreamDestroy(strm));
 }
 
 

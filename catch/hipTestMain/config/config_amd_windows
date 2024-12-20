@@ -105,7 +105,6 @@
         "Note: intermittent Seg fault failure ",
         "Unit_hipGraphAddEventRecordNode_Functional_WithoutFlags",
         "Unit_hipGraphAddChildGraphNode_MultGraphsAsSingleGraph",
-        "Unit_hipDeviceSetCacheConfig_Negative_Parameters",
         "Unit_hipFuncSetCacheConfig_Positive_Basic",
         "Unit_hipFuncSetCacheConfig_Negative_Parameters",
         "Unit_hipFuncSetSharedMemConfig_Positive_Basic",

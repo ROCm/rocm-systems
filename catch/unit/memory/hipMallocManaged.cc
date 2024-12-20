@@ -138,6 +138,9 @@ TEST_CASE("Unit_hipMallocManaged_Advanced") {
   }
   HIP_CHECK(hipFree(A));
   HIP_CHECK(hipFree(B));
+  HIP_CHECK(hipFree(C));
+  HIP_CHECK(hipEventDestroy(event0));
+  HIP_CHECK(hipEventDestroy(event1));
   REQUIRE(maxError != 0.0f);
 }
 

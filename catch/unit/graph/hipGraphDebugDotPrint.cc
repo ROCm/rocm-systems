@@ -226,7 +226,7 @@ static void hipGraphDebugDotPrint_Functional(const char* fName,
   HIP_CHECK(hipGraphAddMemcpyNodeFromSymbol(&memcpyFromSymbolNode, childGraph,
                                      nullptr, 0, B_h, HIP_SYMBOL(globalIn),
                                      Nbytes, 0, hipMemcpyDeviceToHost));
-
+  HIP_CHECK(hipGraphAddDependencies(childGraph, &memcpyToSymbolNode, &memcpyFromSymbolNode, 1));
   // Add memset node to graph & validate its DebugDotPrint descriptions
   hipMemsetParams memsetParams{};
   memset(&memsetParams, 0, sizeof(memsetParams));
@@ -244,7 +244,7 @@ static void hipGraphDebugDotPrint_Functional(const char* fName,
                                       nullptr, 0, childGraph));
 
   std::map<std::string, unsigned> graphData;
-  graphData["->"] = 3;       //  number of edges
+  graphData["->"] = 4;       //  number of edges
   graphData["MEMCPY"] = 6;
   graphData["HtoA"] = 1;
   graphData["HtoD"] = 3;
@@ -284,6 +284,7 @@ static void hipGraphDebugDotPrint_Functional(const char* fName,
   free(mem_h);
   HIP_CHECK(hipFree(mem_d));
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
+  HIP_CHECK(hipEventDestroy(event));
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipGraphDestroy(childGraph));

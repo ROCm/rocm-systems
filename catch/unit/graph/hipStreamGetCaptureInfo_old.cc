@@ -149,6 +149,7 @@ void validateStreamCaptureInfo(hipStream_t mstream) {
 
   HIP_CHECK(hipStreamSynchronize(streamForLaunch));
 
+  HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipStreamDestroy(streamForLaunch));
   HIP_CHECK(hipStreamDestroy(stream1));
@@ -610,6 +611,7 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_Nullstream_CaptureInfo") {
     REQUIRE(C_h[i] == D_h[i]);
   }
 
+  HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipStreamDestroy(streamForGraph));

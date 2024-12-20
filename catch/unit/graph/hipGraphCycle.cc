@@ -56,6 +56,7 @@ TEST_CASE("Unit_hipGraph_BasicCyclic1") {
   HIP_CHECK(hipStreamCreate(&streamForGraph));
   REQUIRE(hipErrorInvalidValue == hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
   HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HIP_CHECK(hipGraphDestroy(graph));
 }
 
 /**
@@ -83,13 +84,15 @@ TEST_CASE("Unit_hipGraph_BasicCyclic2") {
   HIP_CHECK(hipGraphRemoveDependencies(graph, &emptyNode3, &emptyNode1, 1));
   HIP_CHECK(hipStreamCreate(&streamForGraph));
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphExecDestroy(graphExec));
+  HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipStreamDestroy(streamForGraph));
 }
 
 /**
  * Tests basic functionality of cycle detection in hipGraph APIs by
  * Adding manual empty nodes
- * Cyclic graph, cycle formation first, Remove edge causes disconnected graph which is still 
+ * Cyclic graph, cycle formation first, Remove edge causes disconnected graph which is still
  * cyclic
  */
 TEST_CASE("Unit_hipGraph_BasicCyclic3") {
@@ -115,6 +118,7 @@ TEST_CASE("Unit_hipGraph_BasicCyclic3") {
   HIP_CHECK(hipStreamCreate(&streamForGraph));
   REQUIRE(hipErrorInvalidValue == hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
   HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HIP_CHECK(hipGraphDestroy(graph));
 }
 
 /**

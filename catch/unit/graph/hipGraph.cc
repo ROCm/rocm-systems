@@ -105,6 +105,9 @@ static void hipWithoutGraphs(float* inputVec_h, float* inputVec_d,
   INFO("Time taken for hipWithoutGraphs : "
       << std::chrono::duration_cast<std::chrono::milliseconds>(result).count()
       << " millisecs ");
+  HIP_CHECK(hipEventDestroy(forkStreamEvent));
+  HIP_CHECK(hipEventDestroy(memsetEvent1));
+  HIP_CHECK(hipEventDestroy(memsetEvent2));
   HIP_CHECK(hipStreamDestroy(stream1));
   HIP_CHECK(hipStreamDestroy(stream2));
   HIP_CHECK(hipStreamDestroy(stream3));

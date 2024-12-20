@@ -278,4 +278,7 @@ TEST_CASE("Unit_hipMemset_2AsyncOperations") {
 
   REQUIRE(v[0] == 0);
   REQUIRE(v[1024] == 1.75f);
+
+  HIP_CHECK(hipFree(p2));
+  HIP_CHECK(hipStreamDestroy(s));
 }

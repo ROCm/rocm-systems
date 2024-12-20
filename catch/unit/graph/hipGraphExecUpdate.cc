@@ -108,7 +108,6 @@ TEST_CASE("Unit_hipGraphExecUpdate_Negative_TypeChange") {
   dependencies.push_back(memsetNode);
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
   HIP_CHECK(hipGraphCreate(&graph2, 0));
-  HIP_CHECK(hipStreamCreate(&streamForGraph));
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_A, graph2, nullptr, 0, A_d, A_h, Nbytes,
                                     hipMemcpyHostToDevice));
   // graphExec was created before memcpyTemp was added to graph.
@@ -488,6 +487,7 @@ TEST_CASE("Unit_hipGraphExecUpdate_Negative_Functional_CountDiffer_2") {
 #else
     REQUIRE(hipSuccess == ret);
 #endif
+    HIP_CHECK(hipGraphExecDestroy(graphExec2));
     HIP_CHECK(hipGraphDestroy(graph2));
   }
   SECTION("When A node is deleted in GraphExec but not its pair from Graph") {
@@ -506,6 +506,7 @@ TEST_CASE("Unit_hipGraphExecUpdate_Negative_Functional_CountDiffer_2") {
 #endif
     REQUIRE(NULL == hErrorNode_out);
 
+    HIP_CHECK(hipGraphExecDestroy(graphExec3));
     HIP_CHECK(hipGraphDestroy(graph3));
   }
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);

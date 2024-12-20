@@ -23,6 +23,7 @@ TEST_CASE("Unit_hipStreamPerThread_EventRecord") {
   hipEvent_t event;
   HIP_CHECK(hipEventCreate(&event));
   HIP_CHECK(hipEventRecord(event, hipStreamPerThread));
+  HIP_CHECK(hipEventDestroy(event));
 }
 
 __global__ void update_even_odd(unsigned int N, int* out) {
@@ -61,4 +62,9 @@ TEST_CASE("Unit_hipStreamPerThread_EventSynchronize") {
       REQUIRE(false);
     }
   }
+
+  HIP_CHECK(hipHostFree(A_h));
+  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipEventDestroy(start));
+  HIP_CHECK(hipEventDestroy(end));
 }

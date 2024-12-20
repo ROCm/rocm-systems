@@ -418,6 +418,7 @@ TEST_CASE("Unit_hipMemcpy2DAsync_SizeCheck") {
 
   // DeAllocating the memory
   HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipStreamDestroy(stream));
   free(A_h);
 }
 

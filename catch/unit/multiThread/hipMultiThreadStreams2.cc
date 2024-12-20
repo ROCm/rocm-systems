@@ -51,7 +51,7 @@ void run1(size_t size, hipStream_t stream) {
     HIPCHECK(hipMemcpyAsync(Bh, Ah, size, hipMemcpyHostToHost, stream));
     HIPCHECK(hipMemcpyAsync(Cd, Bh, size, hipMemcpyHostToDevice, stream));
     hipLaunchKernelGGL(HIP_KERNEL_NAME(Inc), dim3(N / 500), dim3(500), 0, stream, Cd);
-    HIP_CHECK(hipGetLastError()); 
+    HIP_CHECK(hipGetLastError());
     HIPCHECK(hipMemcpyAsync(Dd, Cd, size, hipMemcpyDeviceToDevice, stream));
     HIPCHECK(hipMemcpyAsync(Eh, Dd, size, hipMemcpyDeviceToHost, stream));
     HIPCHECK(hipDeviceSynchronize());
@@ -93,9 +93,9 @@ void run(size_t size, hipStream_t stream1, hipStream_t stream2) {
     HIPCHECK(hipMemcpyAsync(Cd, Bh, size, hipMemcpyHostToDevice, stream1));
     HIPCHECK(hipMemcpyAsync(Cdd, Bhh, size, hipMemcpyHostToDevice, stream2));
     hipLaunchKernelGGL(HIP_KERNEL_NAME(Inc), dim3(N / 500), dim3(500), 0, stream1, Cd);
-    HIP_CHECK(hipGetLastError()); 
+    HIP_CHECK(hipGetLastError());
     hipLaunchKernelGGL(HIP_KERNEL_NAME(Inc), dim3(N / 500), dim3(500), 0, stream2, Cdd);
-    HIP_CHECK(hipGetLastError()); 
+    HIP_CHECK(hipGetLastError());
     HIPCHECK(hipMemcpyAsync(Dd, Cd, size, hipMemcpyDeviceToDevice, stream1));
     HIPCHECK(hipMemcpyAsync(Ddd, Cdd, size, hipMemcpyDeviceToDevice, stream2));
     HIPCHECK(hipMemcpyAsync(Eh, Dd, size, hipMemcpyDeviceToHost, stream1));
@@ -139,5 +139,9 @@ TEST_CASE("Unit_hipMultiThreadStreams2") {
         t1.join();
         t2.join();
         t3.join();
+    }
+
+    for (int i = 0; i < 3; i++) {
+        HIPCHECK(hipStreamDestroy(stream[i]));
     }
 }

@@ -19,8 +19,9 @@ THE SOFTWARE.
 
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
+
 #include <hip_test_kernels.hh>
- 
+
 
 #include "graph_dependency_common.hh"
 
@@ -307,6 +308,7 @@ TEST_CASE("Unit_hipGraphRemoveDependencies_Positive_ChangeComputeFunc") {
   REQUIRE(false == bMismatch);
   // Destroy
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
+  HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipStreamDestroy(streamForGraph));
 }

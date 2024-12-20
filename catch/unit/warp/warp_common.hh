@@ -167,3 +167,12 @@ inline bool compareMaskEqual(unsigned long long *Actual, unsigned long long *Exp
     return (unsigned)Actual[i] == (unsigned)Expected[i];
   return Actual[i] == Expected[i];
 }
+
+template <typename T>
+inline T alignUp(T num, size_t n) {
+  if (num % n == 0) {
+    return num;
+  }
+
+  return ((num + n - 1) / n) * n;
+}

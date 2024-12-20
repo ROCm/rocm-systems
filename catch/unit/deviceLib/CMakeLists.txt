@@ -58,6 +58,7 @@ set(TEST_SRC
     hipTestDeviceLimit.cc
     hipTestDeviceDouble.cc
     hipTestHost.cc
+    hadd.cc
 )
 if(HIP_PLATFORM MATCHES "nvidia")
   set_source_files_properties(hipTestHost.cc PROPERTIES COMPILE_OPTIONS "--expt-relaxed-constexpr")

@@ -3,6 +3,13 @@ set(TEST_SRC
   warp_ballot.cc
   warp_any.cc
   warp_all.cc
+  hipMatchSyncAllTests.cc
+  hipMatchSyncAnyTests.cc
+  hipShflSyncDownTests.cc
+  hipShflSyncUpTests.cc
+  hipShflSyncXorTests.cc
+  hipShflSyncTests.cc
+  hipVoteSyncTests.cc
 )
 
 if(HIP_PLATFORM MATCHES "amd")
@@ -13,18 +20,18 @@ if(HIP_PLATFORM MATCHES "amd")
     warp_shfl_down.cc
     hipShflUpDownTest.cc
     hipShflTests.cc
-    # FIXME: The tests for sync intrinsics are temporarily disabled on CUDA
-    # because they depend on __match_any_sync, which is not available on older
-    # NVIDIA devices. (SWDEV-453145)
-    hipMatchSyncAllTests.cc
-    hipMatchSyncAnyTests.cc
-    hipShflSyncDownTests.cc
-    hipShflSyncUpTests.cc
-    hipShflSyncXorTests.cc
-    hipShflSyncTests.cc
-    hipVoteSyncTests.cc
   )
 endif()
+
+ if(HIP_PLATFORM MATCHES "nvidia")
+  set_source_files_properties(hipMatchSyncAllTests.cc PROPERTIES COMPILE_FLAGS "-arch=sm_70")
+  set_source_files_properties(hipMatchSyncAnyTests.cc PROPERTIES COMPILE_FLAGS "-arch=sm_70")
+  set_source_files_properties(hipShflSyncDownTests.cc PROPERTIES COMPILE_FLAGS "-arch=sm_70")
+  set_source_files_properties(hipShflSyncUpTests.cc PROPERTIES COMPILE_FLAGS "-arch=sm_70")
+  set_source_files_properties(hipShflSyncXorTests.cc PROPERTIES COMPILE_FLAGS "-arch=sm_70")
+  set_source_files_properties(hipShflSyncTests.cc PROPERTIES COMPILE_FLAGS "-arch=sm_70")
+  set_source_files_properties(hipVoteSyncTests.cc PROPERTIES COMPILE_FLAGS "-arch=sm_70")
+ endif()
 
 hip_add_exe_to_target(NAME WarpTest
                       TEST_SRC ${TEST_SRC}

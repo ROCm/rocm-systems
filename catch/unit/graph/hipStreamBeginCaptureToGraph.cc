@@ -969,7 +969,6 @@ TEST_CASE("Unit_hipStreamBeginCaptureToGraph_StateTesting") {
   HIP_CHECK(hipStreamCreate(&stream2));
   HIP_CHECK(hipEventCreate(&e));
   hipStreamCaptureStatus captureStatus = hipStreamCaptureStatusNone;
-  HIP_CHECK(hipStreamCreate(&stream1));
   HIP_CHECK(hipGraphCreate(&graph, 0));
   HIP_CHECK(hipStreamIsCapturing(stream1, &captureStatus));
   REQUIRE(captureStatus == hipStreamCaptureStatusNone);
@@ -1279,17 +1278,10 @@ static std::atomic<int> retValG(1);
 void threadCaptureExec(int *A_d, int *B_d, int *C_d,
                        int *A_h, int *B_h, int *C_h,
                        hipStream_t *stream1, hipStream_t *stream2,
-                       hipGraph_t *graph) {
+                       hipGraph_t *graph, bool verifyStreamSync) {
   bool ret = false;
-  SECTION("Verify after hipGraphExecDestroy()") {
-    ret = CaptureStreamAndLaunchGraph(A_d, B_d, C_d, A_h, B_h, C_h, hipStreamCaptureModeRelaxed,
-          *stream1, *stream2, *graph, false);
-  }
-  SECTION("Verify after hipStreamSynchronize()") {
-    ret = CaptureStreamAndLaunchGraph(A_d, B_d, C_d, A_h, B_h, C_h, hipStreamCaptureModeRelaxed,
-          *stream1, *stream2, *graph, true);
-  }
-
+  ret = CaptureStreamAndLaunchGraph(A_d, B_d, C_d, A_h, B_h, C_h, hipStreamCaptureModeRelaxed,
+          *stream1, *stream2, *graph, verifyStreamSync);
   int val = 0;
   if (ret) {
     val = 1;
@@ -1329,15 +1321,26 @@ TEST_CASE("Unit_hipStreamBeginCaptureToGraph_IndepGraphsThreads") {
   HIP_CHECK(hipMalloc(&C2_d, Nbytes));
 
   // Capture an independent graph from stream
+  bool verifyStreamSync = false;
+
+  SECTION("Verify after hipGraphExecDestroy()") {
+    verifyStreamSync = false;
+  }
+
+  SECTION("Verify after hipStreamSynchronize()") {
+    verifyStreamSync = true;
+  }
+
   std::thread thread1(threadCaptureExec, A1_d, B1_d, C1_d,
                       A1_h.data(), B1_h.data(), C1_h.data(),
-                      &stream1, &stream2, &graph1);
+                      &stream1, &stream2, &graph1, verifyStreamSync);
 
   std::thread thread2(threadCaptureExec, A2_d, B2_d, C2_d,
                       A2_h.data(), B2_h.data(), C2_h.data(),
-                      &stream3, &stream4, &graph2);
+                      &stream3, &stream4, &graph2, verifyStreamSync);
   thread1.join();
   thread2.join();
+
   REQUIRE(retValG.load() == 1);
   HIP_CHECK(hipStreamDestroy(stream1));
   HIP_CHECK(hipStreamDestroy(stream2));

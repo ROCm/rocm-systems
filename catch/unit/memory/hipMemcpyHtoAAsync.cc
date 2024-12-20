@@ -18,7 +18,8 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
-
+#include <hip_test_checkers.hh>
+#include <hip_test_defgroups.hh>
 #include <numeric>
 
 #define N 32
@@ -81,3 +82,130 @@ TEST_CASE("Unit_hipMemcpyHtoAAsync_Negative") {
 
   HIP_CHECK(hipFreeArray(dst_array));
 }
+/**
+* @addtogroup hipMemcpyHtoAAsync hipMemcpyHtoAAsync
+* @{
+* @ingroup MemoryTest
+* `hipError_t hipMemcpyHtoAAsync(hipArray_t dstArray, size_t dstOffset,
+*                                const void* srcHost,
+                                 size_t ByteCount, hipStream_t stream)` -
+* Copies from host memory to a 1D array.
+*/
+
+/**
+ * Test Description
+ * ------------------------
+ *  - This testcase is to verify the basic functionality of hipMemcpyHtoAAsync API
+ *  with different streams.
+ * Test source
+ * ------------------------
+ *  - unit/memory/hipMemcpyHtoAAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.2
+ */
+TEST_CASE("Unit_hipMemcpyHtoAAsync_BasicTstsWithDiffStreams") {
+  #if HT_NVIDIA
+  HipTest::HIP_SKIP_TEST("API currently unsupported on nvidia, skipping...");
+  return;
+  #else
+  HIP_CHECK(hipSetDevice(0));
+  int row, col;
+  row = 1;
+  col = GENERATE(3, 4, 100);
+  int *A_h = reinterpret_cast<int*>(malloc(sizeof(int) * row * col));
+  int *B_h = reinterpret_cast<int*>(malloc(sizeof(int) * row * col));
+  for (int i = 0; i < (row * col); i++) {
+    B_h[i] = i;
+  }
+  hipArray_t A_a;
+  hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
+  HIP_CHECK(hipMallocArray(&A_a, &desc, col, row, hipArrayDefault));
+  SECTION("With Default Stream") {
+    HIP_CHECK(hipMemcpyHtoAAsync(A_a, 0, B_h, sizeof(int) * col * row, 0));
+    HIP_CHECK(hipMemcpyAtoHAsync(A_h, A_a, 0, sizeof(int) * col * row, 0));
+    HIP_CHECK(hipStreamSynchronize(0));
+  }
+  SECTION("With User Stream") {
+    hipStream_t stream;
+    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipMemcpyHtoAAsync(A_a, 0, B_h, sizeof(int) * col * row, stream));
+    HIP_CHECK(hipMemcpyAtoHAsync(A_h, A_a, 0, sizeof(int) * col * row, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipStreamDestroy(stream));
+  }
+  SECTION("With Stream per thread") {
+    HIP_CHECK(hipMemcpyHtoAAsync(A_a, 0, B_h, sizeof(int) * col * row,
+                                 hipStreamPerThread));
+    HIP_CHECK(hipMemcpyAtoHAsync(A_h, A_a, 0, sizeof(int) * col * row,
+                                hipStreamPerThread));
+    HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+  }
+  SECTION("With Legacy Stream") {
+    HIP_CHECK(hipMemcpyHtoAAsync(A_a, 0, B_h, sizeof(int) * col * row,
+                                 hipStreamLegacy));
+    HIP_CHECK(hipMemcpyAtoHAsync(A_h, A_a, 0, sizeof(int) * col * row,
+                                hipStreamLegacy));
+    HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
+  }
+
+  for (int i = 0; i < (row * col); i++) {
+    REQUIRE(A_h[i] == B_h[i]);
+  }
+  HIP_CHECK(hipFreeArray(A_a));
+  free(A_h);
+  free(B_h);
+#endif
+}
+/**
+ * Test Description
+ * ------------------------
+ *  - This testcase is to verify the basic functionality of hipMemcpyHtoAAsync API
+ *  with different streams on multiple devices.
+ * Test source
+ * ------------------------
+ *  - unit/memory/hipMemcpyHtoAAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.2
+ */
+TEST_CASE("Unit_hipMemcpyHtoAAsync_MultiDevice") {
+#if HT_NVIDIA
+  HipTest::HIP_SKIP_TEST("API currently unsupported on nvidia, skipping...");
+  return;
+#else
+  int devCount = 0;
+  HIP_CHECK(hipGetDeviceCount(&devCount));
+  for (int i=0; i < devCount; i++) {
+    HIP_CHECK(hipSetDevice(i));
+    int row, col;
+    row = 1;
+    col = GENERATE(3, 4, 100);
+    int *A_h = reinterpret_cast<int*>(malloc(sizeof(int) * row * col));
+    int *B_h = reinterpret_cast<int*>(malloc(sizeof(int) * row * col));
+    for (int i = 0; i < (row * col); i++) {
+      B_h[i] = i;
+    }
+    hipArray_t A_a;
+    hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
+    HIP_CHECK(hipMallocArray(&A_a, &desc, col, row, hipArrayDefault));
+    hipStream_t stream;
+    HIP_CHECK(hipStreamCreate(&stream));
+    HIP_CHECK(hipMemcpyHtoAAsync(A_a, 0, B_h, sizeof(int) * col * row, stream));
+    HIP_CHECK(hipMemcpyAtoHAsync(A_h, A_a, 0, sizeof(int) * col * row, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+
+    for (int i = 0; i < (row * col); i++) {
+      REQUIRE(A_h[i] == B_h[i]);
+    }
+    HIP_CHECK(hipFreeArray(A_a));
+    HIP_CHECK(hipStreamDestroy(stream));
+    free(A_h);
+    free(B_h);
+  }
+#endif
+}
+/**
+* End doxygen group MemoryTest.
+* @}
+*/

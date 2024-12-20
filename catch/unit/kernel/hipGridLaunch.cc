@@ -58,6 +58,7 @@ int test_gl2(size_t N) {
   HIP_CHECK(hipDeviceSynchronize());
   // verify
   HipTest::checkVectorADD(A_h, B_h, C_h, N);
+  HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
   return 0;
 }
 
@@ -77,6 +78,7 @@ int test_triple_chevron(size_t N) {
   HIP_CHECK(hipDeviceSynchronize());
   // verify
   HipTest::checkVectorADD(A_h, B_h, C_h, N);
+  HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
   return 0;
 }
 #endif

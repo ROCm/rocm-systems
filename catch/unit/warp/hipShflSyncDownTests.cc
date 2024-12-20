@@ -165,6 +165,61 @@ static void runTestShflDown_3() {
   }
 }
 
+__global__ void shflDown_4(int *Input, int *Output) {
+  auto tid = threadIdx.x;
+  unsigned long long masks[2] = { Every5thBut9th, Every9thBit };
+
+  Output[tid] = -1;
+  if (tid % 5 == 0 || tid % 9 == 0)
+    Output[tid] = __shfl_down_sync(masks[tid % 9 == 0], Input[tid], tid);
+}
+
+static void runTestShflDown_4() {
+  size_t warpSize = getWarpSize();
+
+  auto Input = std::vector<int>(warpSize);
+
+  for (size_t i = 0; i < Input.size(); i++) {
+    Input[i] = 0x55 * i;
+  }
+
+  auto Output = std::vector<int>(warpSize);
+  auto Expected = std::vector<int>(warpSize);
+
+  for (size_t i = 0; i < Expected.size() / 2; i++) {
+    if (i % 5 == 0) {
+      Expected[i] = 0x55 * (alignUp(i, 5) * 2);
+    } else if (i % 9 == 0) {
+      Expected[i] = 0x55 * (alignUp(i, 9) * 2);
+    } else {
+      Expected[i] = -1;
+    }
+  }
+
+  for (size_t i =  Expected.size() / 2; i < Expected.size(); i++) {
+    if (i % 5 == 0) {
+      Expected[i] = 0x55 * alignUp(i, 5);
+    } else if (i % 9 == 0) {
+      Expected[i] = 0x55 * alignUp(i, 9);
+    } else {
+      Expected[i] = -1;
+    }
+  }
+
+  int* d_Input;
+  int* d_Output;
+  HIP_CHECK(hipMalloc(&d_Input, Input.size() * sizeof(Input[0])));
+  HIP_CHECK(hipMalloc(&d_Output, Output.size() * sizeof(Output[0])));
+
+  HIP_CHECK(hipMemcpy(d_Input, Input.data(), Input.size() * sizeof(Input[0]), hipMemcpyDefault));
+  hipLaunchKernelGGL(shflDown_4, 1, warpSize, 0, 0, d_Input, d_Output);
+
+  HIP_CHECK(hipMemcpy(Output.data(), d_Output, Output.size() * sizeof(Output[0]), hipMemcpyDefault));
+  for (size_t i = 0; i < Output.size(); i++) {
+    REQUIRE(Output[i] == Expected[i]);
+  }
+}
+
 /**
  * @addtogroup __shfl_sync
  * @{
@@ -188,6 +243,8 @@ static void runTestShflDown_3() {
  */
 
 TEST_CASE("Unit_hipShflSync_Down") {
+  CHECK_WARP_MATCH_FUNCTIONS_SUPPORT
+
   SECTION("run test for short") {
     runTestShflDown_1<short>();
     runTestShflDown_2<short>();
@@ -247,5 +304,8 @@ TEST_CASE("Unit_hipShflSync_Down") {
     runTestShflDown_1<__half2>();
     runTestShflDown_2<__half2>();
     runTestShflDown_3<__half2>();
+  }
+  SECTION("run divergent execution tests") {
+    runTestShflDown_4();
   }
 }

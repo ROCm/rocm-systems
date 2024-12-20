@@ -123,6 +123,7 @@ TEST_CASE("Unit_hipStreamCaptureRtc") {
   HIPCHECK(hipGraphLaunch(graph_exec, stream));
 
   HIPCHECK(hipStreamSynchronize(stream));
+  HIPCHECK(hipGraphExecDestroy(graph_exec));
   HIPCHECK(hipStreamDestroy(stream));
 
   // Check that the work was done

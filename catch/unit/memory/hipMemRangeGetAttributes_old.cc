@@ -156,6 +156,7 @@ TEST_CASE("Unit_hipMemRangeGetAttributes_TstFlgs") {
     }
 
     HIP_CHECK(hipFree(Hmm));
+    HIP_CHECK(hipStreamDestroy(strm));
     delete[] AcsdBy;
     for (int i = 0; i < 4; ++i) {
       delete Outpt[i];

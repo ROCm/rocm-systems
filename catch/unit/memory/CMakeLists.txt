@@ -1,4 +1,4 @@
-# Copyright (c) 2023 Advanced Micro Devices, Inc. All Rights Reserved.
+# Copyright (c) 2024 Advanced Micro Devices, Inc. All Rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -186,6 +186,7 @@ set(TEST_SRC
     hipMemAdvise.cc
     hipMemRangeGetAttributes.cc
     hipFreeAsync.cc
+    hipFreeHost.cc
     hipMallocAsync.cc
     hipStreamAttachMemAsync.cc
     hipMemRangeGetAttributes_old.cc
@@ -209,15 +210,22 @@ set(NOT_FOR_gfx90a_AND_ABOVE_TEST hipMallocArray.cc hipArrayCreate.cc) # tests n
 set(gfx90a_AND_ABOVE_TARGETS gfx90a gfx940 gfx941 gfx942)
 function(CheckRejectedArchs OFFLOAD_ARCH_STR_LOCAL)
   set(ARCH_CHECK -1 PARENT_SCOPE)
+  set(NOT_GFX90a -1)
+  set(GFX90a -1)
   string(REGEX MATCHALL "--offload-arch=gfx[0-9a-z]+" OFFLOAD_ARCH_LIST ${OFFLOAD_ARCH_STR_LOCAL})
   foreach(OFFLOAD_ARCH IN LISTS OFFLOAD_ARCH_LIST)
     string(REGEX MATCHALL "--offload-arch=(gfx[0-9a-z]+)" matches ${OFFLOAD_ARCH})
     if (CMAKE_MATCH_COUNT EQUAL 1)
       if (CMAKE_MATCH_1 IN_LIST gfx90a_AND_ABOVE_TARGETS)
-        set(ARCH_CHECK 1 PARENT_SCOPE)
+        set(GFX90a 1)
+      else()
+        set(NOT_GFX90a 1)
       endif()         # CMAKE_MATCH_1
     endif()        # CMAKE_MATCH_COUNT
   endforeach()   # OFFLOAD_ARCH_LIST
+  if (${NOT_GFX90a} EQUAL -1 AND ${GFX90a} EQUAL 1)
+    set(ARCH_CHECK 1 PARENT_SCOPE)
+  endif()
 endfunction()  # CheckAcceptedArchs
 if(HIP_PLATFORM MATCHES "amd")
   if (DEFINED OFFLOAD_ARCH_STR)

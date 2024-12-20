@@ -452,10 +452,11 @@ constexpr int kW = 60;
 }  // anonymous namespace
 
 template <size_t n> void printAttributes(const AttributeToStringMap<n>& attributes, const int device) {
-  int attribute_value;
   hipError_t ret_val;
   for (const auto& attribute : attributes) {
-    ret_val = hipDeviceGetAttribute(&attribute_value, attribute.first, device);
+    int64_t attribute_value = 0;
+    ret_val = hipDeviceGetAttribute(reinterpret_cast<int *>(&attribute_value),
+                                    attribute.first, device);
     std::cout << std::setw(kW) << std::string(attribute.second).append(": ");
     if (ret_val == hipSuccess)
       std::cout << attribute_value << "\n";

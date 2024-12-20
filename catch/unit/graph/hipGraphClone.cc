@@ -208,6 +208,7 @@ void hipGraphClone_Func(bool ModifyOrigGraph = false) {
     HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
     HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
     HIP_CHECK(hipStreamSynchronize(streamForGraph));
+    HIP_CHECK(hipGraphExecDestroy(graphExec));
 
     for (size_t i= 0; i < NElem; i++) {
       if (C_h[i] != B_h[i]) {

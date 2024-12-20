@@ -307,8 +307,10 @@ class StreamGuard {
         break;
       case Streams::withFlags:
         HIP_CHECK(hipStreamCreateWithFlags(&stream_, flags_));
+        break;
       case Streams::withPriority:
         HIP_CHECK(hipStreamCreateWithPriority(&stream_, flags_, priority_));
+        break;
     }
   }
 
@@ -318,7 +320,7 @@ class StreamGuard {
 
   StreamGuard& operator=(StreamGuard&& o) {
     if (this != &o) {
-      if (stream_type_ == Streams::created) {
+      if (stream_type_ >= Streams::created) {
         static_cast<void>(hipStreamDestroy(stream_));
       }
 
@@ -337,7 +339,7 @@ class StreamGuard {
   }
 
   ~StreamGuard() {
-    if (stream_type_ == Streams::created && stream_ != nullptr) {
+    if (stream_type_ >= Streams::created && stream_ != nullptr) {
       static_cast<void>(hipStreamDestroy(stream_));
     }
   }
@@ -361,7 +363,9 @@ class EventsGuard {
   EventsGuard(EventsGuard&&) = delete;
 
   ~EventsGuard() {
-    for (auto& e : events_) static_cast<void>(hipEventDestroy(e));
+    for (auto& e : events_) {
+      static_cast<void>(hipEventDestroy(e));
+    }
   }
 
   hipEvent_t& operator[](int index) { return events_[index]; }

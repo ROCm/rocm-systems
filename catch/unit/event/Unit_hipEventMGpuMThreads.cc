@@ -170,6 +170,9 @@ void thread_run(const int iThread) {
   } else {
     fprintf(stderr, "[%d] PASSED\n", iThread);
   }
+  HIP_CHECK(hipEventDestroy(start));
+  HIP_CHECK(hipEventDestroy(stop));
+
   // free the resources on device side
   HIP_CHECK(hipFree(gpuMatrix));
   HIP_CHECK(hipFree(gpuTransposeMatrix));

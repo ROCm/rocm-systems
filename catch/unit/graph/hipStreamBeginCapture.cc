@@ -19,7 +19,7 @@ THE SOFTWARE.
 
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
- 
+
 #include "stream_capture_common.hh" // NOLINT
 
 #pragma clang diagnostic ignored "-Wunused-variable"
@@ -218,7 +218,6 @@ static void interStrmEventSyncCapture(const hipStream_t& stream1, const hipStrea
   EventsGuard events_guard(1);
   hipEvent_t event = events_guard[0];
 
-  HIP_CHECK(hipEventCreate(&event));
   HIP_CHECK(hipStreamBeginCapture(stream1, hipStreamCaptureModeGlobal));
   HIP_CHECK(hipEventRecord(event, stream1));
   HIP_CHECK(hipStreamWaitEvent(stream2, event, 0));

@@ -386,6 +386,8 @@ static void checkGraphEventcontinuousKernelCall(const unsigned int kNumNode) {
   HipTest::checkVectorADD(A_h, B_h, C_h, N);
 
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
+  HIP_CHECK(hipEventDestroy(eventstart));
+  HIP_CHECK(hipEventDestroy(eventend));
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipStreamDestroy(stream));
@@ -483,6 +485,9 @@ static void checkGraphEventcontinuousKernelCallIn2Blocks(
   HipTest::checkVectorSUB(A_h, B_h, C_h, N);
 
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
+  HIP_CHECK(hipEventDestroy(eventstart));
+  HIP_CHECK(hipEventDestroy(eventmid));
+  HIP_CHECK(hipEventDestroy(eventend));
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipStreamDestroy(stream));
@@ -582,6 +587,7 @@ static void hipGraph_PerfCheck_hipGraphExecKernelNodeSetParams(
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0));
   HIP_CHECK(hipGraphLaunch(graphExec, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipGraphExecDestroy(graphExec));
 
   // Verify graph execution result
   HipTest::checkVectorADD<int>(A_h, B_h, C_h, N);
@@ -2519,7 +2525,7 @@ static void hipGraph_PerfCheck_hipGraphExecUpdate(const hipStream_t& stream) {
  * ------------------------
  *  - Validate hipGraph performance with doorbell set.
  *  - DEBUG_CLR_GRAPH_PACKET_CAPTURE
- *  1) Added 2 nodes of MemCpy & a Kernel node and copy back result using memcpy 
+ *  1) Added 2 nodes of MemCpy & a Kernel node and copy back result using memcpy
        and Instantiate graph & update new graph with similar node structure with
        api hipGraphExecUpdate and verify the result, the updated node should reflect.
     i)   Check with Multi device case.
@@ -2667,7 +2673,7 @@ static void hipGraph_PerfCheck_hipGraphExecUpdate_kernel_inLoop(
  * ------------------------
  *  - Validate hipGraph performance with doorbell set.
  *  - DEBUG_CLR_GRAPH_PACKET_CAPTURE
- *  1) Added 2 nodes of MemCpy & a Kernel node in sequence and copy back result using memcpy 
+ *  1) Added 2 nodes of MemCpy & a Kernel node in sequence and copy back result using memcpy
        and Instantiate graph & update new graph with similar node structure with
        api hipGraphExecUpdate and verify the result, the updated node should reflect.
     i)   Check with Multi device case.

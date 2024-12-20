@@ -181,14 +181,14 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Negative_Parameters") {
   SECTION("Changing src allocation device") {
     if (HipTest::getDeviceCount() < 2) {
       HipTest::HIP_SKIP_TEST("Test requires two connected GPUs");
-      return;
+    } else {
+      HIP_CHECK(hipSetDevice(1));
+      LinearAllocGuard<int> new_var(LinearAllocs::hipMalloc, sizeof(int));
+      HIP_CHECK_ERROR(hipGraphExecMemcpyNodeSetParamsToSymbol(
+                          graph_exec, node, SYMBOL(int_device_var), new_var.ptr(),
+                          sizeof(*new_var.ptr()), 0, static_cast<hipMemcpyKind>(-1)),
+                      hipErrorInvalidValue);
     }
-    HIP_CHECK(hipSetDevice(1));
-    LinearAllocGuard<int> new_var(LinearAllocs::hipMalloc, sizeof(int));
-    HIP_CHECK_ERROR(hipGraphExecMemcpyNodeSetParamsToSymbol(
-                        graph_exec, node, SYMBOL(int_device_var), new_var.ptr(),
-                        sizeof(*new_var.ptr()), 0, static_cast<hipMemcpyKind>(-1)),
-                    hipErrorInvalidValue);
   }
 
   HIP_CHECK(hipGraphExecDestroy(graph_exec));

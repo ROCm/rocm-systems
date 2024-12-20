@@ -116,11 +116,13 @@ TEST_CASE("Unit_hipEventIpc") {
     #endif
     HIP_CHECK(hipEventDestroy(start));
     HIP_CHECK(hipEventDestroy(stop));
-
+    #if HT_AMD
+    HIP_CHECK(hipEventDestroy(ipc_event));
+    #endif
     HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
 
     HipTest::checkVectorADD(A_h, B_h, C_h, N, true);
-
+    HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
 }
 
 /**

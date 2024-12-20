@@ -573,6 +573,8 @@ static void runTestBallot_3() {
  */
 
 TEST_CASE("Unit_hipVoteSync_Any") {
+  CHECK_WARP_MATCH_FUNCTIONS_SUPPORT
+
   runTestAny_1();
   runTestAny_2_w64();
   runTestAny_2_w32();
@@ -581,6 +583,8 @@ TEST_CASE("Unit_hipVoteSync_Any") {
 }
 
 TEST_CASE("Unit_hipVoteSync_All") {
+  CHECK_WARP_MATCH_FUNCTIONS_SUPPORT
+
   runTestAll_1_w64();
   runTestAll_1_w32();
   runTestAll_2();
@@ -589,6 +593,8 @@ TEST_CASE("Unit_hipVoteSync_All") {
 }
 
 TEST_CASE("Unit_hipVoteSync_Ballot") {
+  CHECK_WARP_MATCH_FUNCTIONS_SUPPORT
+
   runTestBallot_1();
   runTestBallot_2();
   runTestBallot_3();

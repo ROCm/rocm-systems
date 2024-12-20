@@ -182,6 +182,7 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Negative") {
   }
   HipTest::freeArrays<int>(A_d, B_d, nullptr,
                            A_h, B_h, nullptr, false);
+  HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
 }
 

@@ -157,6 +157,49 @@ static void runTestShflUp_3() {
   }
 }
 
+__global__ void shflUp_4(int *Input, int *Output) {
+  auto tid = threadIdx.x;
+  unsigned long long masks[2] = { Every5thBut9th, Every9thBit };
+
+  Output[tid] = -1;
+  if (tid % 5 == 0 || tid % 9 == 0)
+    Output[tid] = __shfl_up_sync(masks[tid % 9 == 0], Input[tid], tid);
+}
+
+static void runTestShflUp_4() {
+  size_t warpSize = getWarpSize();
+
+  auto Input = std::vector<int>(warpSize);
+
+  for (size_t i = 0; i < Input.size(); i++) {
+    Input[i] = 0x55 * (i + 1);
+  }
+
+  auto Output = std::vector<int>(warpSize);
+  auto Expected = std::vector<int>(warpSize);
+
+  for (size_t i = 0; i < Expected.size(); i++) {
+    if (i % 9 == 0 || i % 5 == 0) {
+      Expected[i] = 0x55;
+    } else {
+      Expected[i] = -1;
+    }
+  }
+
+  int* d_Input;
+  int* d_Output;
+  HIP_CHECK(hipMalloc(&d_Input, Input.size() * sizeof(Input[0])));
+  HIP_CHECK(hipMalloc(&d_Output, Output.size() * sizeof(Output[0])));
+
+  HIP_CHECK(hipMemcpy(d_Input, Input.data(), Input.size() * sizeof(Input[0]), hipMemcpyDefault));
+  hipLaunchKernelGGL(shflUp_4, 1, warpSize, 0, 0, d_Input, d_Output);
+
+  HIP_CHECK(hipMemcpy(Output.data(), d_Output, Output.size() * sizeof(Output[0]), hipMemcpyDefault));
+  for (size_t i = 0; i < Output.size(); i++) {
+    REQUIRE(Output[i] == Expected[i]);
+  }
+}
+
 /**
  * @addtogroup __shfl_sync
  * @{
@@ -180,6 +223,8 @@ static void runTestShflUp_3() {
  */
 
 TEST_CASE("Unit_hipShflSync_Up") {
+  CHECK_WARP_MATCH_FUNCTIONS_SUPPORT
+
   SECTION("run test for short") {
     runTestShflUp_1<short>();
     runTestShflUp_2<short>();
@@ -239,5 +284,8 @@ TEST_CASE("Unit_hipShflSync_Up") {
     runTestShflUp_1<__half2>();
     runTestShflUp_2<__half2>();
     runTestShflUp_3<__half2>();
+  }
+  SECTION("run divergent execution test") {
+    runTestShflUp_4();
   }
 }

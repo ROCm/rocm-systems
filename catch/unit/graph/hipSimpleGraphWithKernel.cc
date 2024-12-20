@@ -94,6 +94,8 @@ static void hipTestWithGraph() {
   delete[] out_h;
   HIP_CHECK(hipFree(in_d));
   HIP_CHECK(hipFree(out_d));
+  HIP_CHECK(hipGraphExecDestroy(instance));
+  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 static void hipTestWithoutGraph() {
@@ -143,6 +145,7 @@ static void hipTestWithoutGraph() {
   delete[] out_h;
   HIP_CHECK(hipFree(in_d));
   HIP_CHECK(hipFree(out_d));
+  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 /**

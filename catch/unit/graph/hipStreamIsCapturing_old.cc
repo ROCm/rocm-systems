@@ -425,6 +425,7 @@ TEST_CASE("Unit_hipStreamIsCapturing_ChkNullStrmStatus") {
     D_h[i] = A_h[i] * A_h[i];
     REQUIRE(C_h[i]  == D_h[i]);
   }
+  HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipStreamDestroy(streamForGraph));

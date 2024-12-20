@@ -167,13 +167,13 @@ TEST_CASE("Unit_hipGraphExecMemsetNodeSetParams_Negative_Parameters") {
   SECTION("Changing dst allocation device") {
     if (HipTest::getDeviceCount() < 2) {
       HipTest::HIP_SKIP_TEST("Test requires two connected GPUs");
-      return;
+    } else {
+      HIP_CHECK(hipSetDevice(1));
+      LinearAllocGuard<int> new_alloc(LinearAllocs::hipMalloc, 4 * sizeof(int));
+      params.dst = new_alloc.ptr();
+      HIP_CHECK_ERROR(hipGraphExecMemsetNodeSetParams(graph_exec, node, &params),
+                      hipErrorInvalidValue);
     }
-    HIP_CHECK(hipSetDevice(1));
-    LinearAllocGuard<int> new_alloc(LinearAllocs::hipMalloc, 4 * sizeof(int));
-    params.dst = new_alloc.ptr();
-    HIP_CHECK_ERROR(hipGraphExecMemsetNodeSetParams(graph_exec, node, &params),
-                    hipErrorInvalidValue);
   }
 
   HIP_CHECK(hipGraphExecDestroy(graph_exec));

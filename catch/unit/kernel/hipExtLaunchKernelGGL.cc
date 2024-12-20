@@ -88,6 +88,7 @@ void test(size_t N) {
   HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
   HIP_CHECK(hipDeviceSynchronize());
   HipTest::checkVectorADD(A_h, B_h, C_h, N);
+  HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
 }
 
 /**

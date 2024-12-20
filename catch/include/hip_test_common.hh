@@ -313,6 +313,20 @@ inline bool isImageSupported() {
   return imageSupport != 0;
 }
 
+inline bool areWarpMatchFunctionsSupported() {
+  int matchFunctionsSupported = 1;
+#if HT_NVIDIA
+  int device;
+  hipDeviceProp_t prop;
+  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDeviceProperties(&prop, device));
+  if (prop.major < 7) {
+    matchFunctionsSupported = 0;
+  }
+#endif
+  return matchFunctionsSupported != 0;
+}
+
 /**
  * Causes the test to stop and be skipped at runtime.
  * reason: Message describing the reason the test has been skipped.
@@ -482,6 +496,14 @@ class BlockingContext {
 #define CHECK_IMAGE_SUPPORT                                                                        \
   if (!HipTest::isImageSupported()) {                                                              \
     INFO("Texture is not support on the device. Skipped.");                                        \
+    return;                                                                                        \
+  }
+
+// This must be called in the beginning of warp test app's main() to indicate warp match functions
+// are supported.
+#define CHECK_WARP_MATCH_FUNCTIONS_SUPPORT                                                         \
+  if (!HipTest::areWarpMatchFunctionsSupported()) {                                                \
+    INFO("Warp Match Functions are not support on the device. Skipped.");                          \
     return;                                                                                        \
   }
 

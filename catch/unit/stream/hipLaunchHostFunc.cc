@@ -542,6 +542,9 @@ TEST_CASE("Unit_hipLaunchHostFunc_Graph") {
 
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipEventDestroy(forkStreamEvent));
+  HIP_CHECK(hipEventDestroy(memsetEvent1));
+  HIP_CHECK(hipEventDestroy(memsetEvent2));
   HIP_CHECK(hipStreamDestroy(stream1));
   HIP_CHECK(hipStreamDestroy(stream2));
   HIP_CHECK(hipStreamDestroy(stream3));
@@ -554,4 +557,5 @@ TEST_CASE("Unit_hipLaunchHostFunc_Graph") {
   HIP_CHECK(hipFree(inputVec_d));
   HIP_CHECK(hipFree(outputVec_d));
   HIP_CHECK(hipFree(result_d));
+  free(inputVec_h);
 }
