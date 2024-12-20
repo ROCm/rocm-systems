@@ -20,6 +20,7 @@
  * THE SOFTWARE.
  */
 
+#include <amdgpu.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
@@ -562,47 +563,41 @@ amdsmi_status_t smi_amdgpu_get_pcie_speed_from_pcie_type(uint16_t pcie_type, uin
     return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(uint32_t device_id, char *market_name)
-{
-    switch (device_id) {
-        case 0x73c8:
-        case 0x73c4:
-        case 0x73c5:
-        case 0x7460:
-        case 0x7461:
-            strcpy(market_name, "NAVI32");
-            break;
-        case 0x73a1:
-        case 0x73ae:
-        case 0x73bf:
-            strcpy(market_name, "NAVI21");
-            break;
-        case 0x74b4:
-        case 0x74a0:
-            strcpy(market_name, "MI300A");
-            break;
-        case 0x74a1:
-        case 0x74b5:
-            strcpy(market_name, "AMD Instinct MI300X");
-            break;
-        case 0x74a2:
-        case 0x74b6:
-            strcpy(market_name, "MI308X");
-            break;
-        case 0x74a5:
-            strcpy(market_name, "AMD Instinct MI325X");
-            break;
-        case 0x74a9:
-        case 0x74bd:
-            strcpy(market_name, "AMD Instinct MI300X HF");
-            break;
-        default:
-            return AMDSMI_STATUS_API_FAILED;
+amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice* device, char *market_name) {
+    if (market_name == nullptr || device == nullptr) {
+        return AMDSMI_STATUS_ARG_PTR_NULL;
     }
-    return AMDSMI_STATUS_SUCCESS;
+
+    if (!device->check_if_drm_is_supported()) {
+        return AMDSMI_STATUS_NOT_SUPPORTED;
+    }
+
+    uint32_t major_version, minor_version;
+    amdgpu_device_handle device_handle = nullptr;
+
+    uint32_t gpu_fd = device->get_gpu_fd();
+
+    char drm_path[32];
+
+    int ret = amdgpu_device_initialize(gpu_fd, &major_version, &minor_version, &device_handle);
+    if (ret != 0) {
+        return AMDSMI_STATUS_DRM_ERROR;
+    }
+
+    // Get the marketing name using libdrm's API
+    const char *name = amdgpu_get_marketing_name(device_handle);
+    if (name != nullptr) {
+        std::strncpy(market_name, name, AMDSMI_256_LENGTH - 1);
+        market_name[AMDSMI_256_LENGTH - 1] = '\0';
+        amdgpu_device_deinitialize(device_handle);
+        return AMDSMI_STATUS_SUCCESS;
+    }
+
+    amdgpu_device_deinitialize(device_handle);
+    return AMDSMI_STATUS_DRM_ERROR;
 }
 
-amdsmi_status_t smi_amdgpu_is_gpu_power_management_enabled(amd::smi::AMDSmiGPUDevice *device,
+amdsmi_status_t smi_amdgpu_is_gpu_power_management_enabled(amd::smi::AMDSmiGPUDevice* device,
         bool *enabled) {
     if (!device->check_if_drm_is_supported()) {
         return AMDSMI_STATUS_NOT_SUPPORTED;

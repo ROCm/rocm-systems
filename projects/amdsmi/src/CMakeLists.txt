@@ -81,7 +81,7 @@ configure_file("${AMD_SMI_TARGET}Config.in" "${PROJECT_SOURCE_DIR}/include/amd_s
 add_executable(amd_smi_ex "../example/amd_smi_drm_example.cc")
 target_link_libraries(amd_smi_ex ${AMD_SMI_TARGET})
 add_library(${AMD_SMI_TARGET} ${SRC_LIST} ${INC_LIST})
-target_link_libraries(${AMD_SMI_TARGET} pthread rt dl)
+target_link_libraries(${AMD_SMI_TARGET} pthread rt dl ${DRM_AMDGPU_LIB} ${AMDGPU_DRM_LIBRARIES})
 target_include_directories(${AMD_SMI_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/rocm_smi/include
                                                      ${PROJECT_SOURCE_DIR}/common/shared_mutex)
 

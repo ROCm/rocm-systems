@@ -992,7 +992,7 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
             fclose(fp);
         }
 
-        status = smi_amdgpu_get_market_name_from_dev_id(dev_info.device_id, info->market_name);
+        status = smi_amdgpu_get_market_name_from_dev_id(gpu_device, info->market_name);
         if (status != AMDSMI_STATUS_SUCCESS) {
             rsmi_wrapper(rsmi_dev_brand_get, processor_handle,
                 info->market_name, AMDSMI_256_LENGTH);
