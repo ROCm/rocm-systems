@@ -198,6 +198,15 @@ GPU: 1
 
 ### Optimized
 
+- **Added additional help information to `amd-smi set --help` command**.  
+  - sub commands now detail what values are acceptable as input. These include:
+    - `amd-smi set --perf-level` with performance levels
+    - `amd-smi set --profile` with power profiles
+    - `amd-smi set --perf-determinism` with preset GPU frequency limits
+    - `amd-smi set --power-cap` with valid power cap values
+    - `amd-smi set --soc-pstate` with soc pstate policy ids
+    - `amd-smi set --xgmi-plpd` with xgmi per link power down policy ids
+
 - **Modified `amd-smi` CLI to allow case insensitive arguments if the argument does not begin with a single dash**.  
   - With this change `amd-smi version` and `amd-smi VERSION` will now yield the same output.
   - `amd-smi static --bus` and `amd-smi STATIC --BUS` will produce identical results.

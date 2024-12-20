@@ -701,6 +701,67 @@ class AMDSMIHelpers():
         return clock_types_str, clock_types_int
 
 
+    def get_power_profiles(self):
+        power_profiles_str = [profile.name for profile in amdsmi_interface.AmdSmiPowerProfilePresetMasks]
+        if 'UNKNOWN' in power_profiles_str:
+            power_profiles_str.remove('UNKNOWN')
+        return power_profiles_str
+
+
+    def get_perf_det_levels(self):
+        perf_det_level_str = [level.name for level in amdsmi_interface.AmdSmiDevPerfLevel]
+        if 'UNKNOWN' in perf_det_level_str:
+            perf_det_level_str.remove('UNKNOWN')
+        return perf_det_level_str
+
+
+    def get_power_caps(self):
+        device_handles = amdsmi_interface.amdsmi_get_processor_handles()
+        power_cap_min = amdsmi_interface.MaxUIntegerTypes.UINT64_T # start out at max and min and then find real min and max
+        power_cap_max = 0
+        for dev in device_handles:
+            power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(dev)
+            if power_cap_info['max_power_cap'] > power_cap_max:
+                power_cap_max = power_cap_info['max_power_cap']
+            if power_cap_info['min_power_cap'] < power_cap_max:
+                power_cap_min = power_cap_info['min_power_cap']
+        return (power_cap_min, power_cap_max)
+
+
+    def get_soc_pstates(self):
+        device_handles = amdsmi_interface.amdsmi_get_processor_handles()
+        soc_pstate_profile_list = []
+        for dev in device_handles:
+            try:
+                soc_pstate_info = amdsmi_interface.amdsmi_get_soc_pstate(dev)
+            except amdsmi_interface.AmdSmiLibraryException as e:
+                continue
+            for policy in soc_pstate_info['policies']:
+                policy_string = f"{policy['policy_id']}: {policy['policy_description']}"
+                if not policy_string in soc_pstate_profile_list:
+                    soc_pstate_profile_list.append(policy_string)
+        if len(soc_pstate_profile_list) == 0:
+            soc_pstate_profile_list.append("N/A")
+        return soc_pstate_profile_list
+
+
+    def get_xgmi_plpd_policies(self):
+        device_handles = amdsmi_interface.amdsmi_get_processor_handles()
+        xgmi_plpd_profile_list = []
+        for dev in device_handles:
+            try:
+                xgmi_plpd_info = amdsmi_interface.amdsmi_get_xgmi_plpd(dev)
+            except amdsmi_interface.AmdSmiLibraryException as e:
+                continue
+            for policy in xgmi_plpd_info['plpds']:
+                policy_string = f"{policy['policy_id']}: {policy['policy_description']}"
+                if not policy_string in xgmi_plpd_profile_list:
+                    xgmi_plpd_profile_list.append(policy_string)
+        if len(xgmi_plpd_profile_list) == 0:
+            xgmi_plpd_profile_list.append("N/A")
+        return xgmi_plpd_profile_list
+
+
     def validate_clock_type(self, input_clock_type):
         valid_clock_types_str, valid_clock_types_int = self.get_clock_types()
 
