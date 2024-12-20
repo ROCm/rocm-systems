@@ -62,7 +62,8 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicCAS_Positive", "", int, unsigned int, unsigned long long TYPES) {
+TEMPLATE_TEST_CASE("Unit_atomicCAS_Positive", "", int, unsigned int, unsigned long long,
+                                                  unsigned short int TYPES) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
@@ -107,7 +108,7 @@ TEMPLATE_TEST_CASE("Unit_atomicCAS_Positive", "", int, unsigned int, unsigned lo
  *    - HIP_VERSION >= 5.2
  */
 TEMPLATE_TEST_CASE("Unit_atomicCAS_Positive_Multi_Kernel", "", int, unsigned int,
-                   unsigned long long TYPES) {
+                   unsigned long long, unsigned short int TYPES) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
