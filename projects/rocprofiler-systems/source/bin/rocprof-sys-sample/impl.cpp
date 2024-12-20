@@ -770,7 +770,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
                 update_env(_env, "OMP_TOOL_LIBRARIES", _dl_libpath, UPD_APPEND);
 
             if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
-                update_env(_env, "KOKKOS_PROFILE_LIBRARY", _omni_libpath, UPD_APPEND);
+                update_env(_env, "KOKKOS_TOOLS_LIBS", _omni_libpath, UPD_APPEND);
         });
 
     parser.add_argument({ "-E", "--exclude" }, "Exclude data from these backends")
@@ -800,7 +800,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
                 remove_env(_env, "OMP_TOOL_LIBRARIES");
 
             if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
-                remove_env(_env, "KOKKOS_PROFILE_LIBRARY");
+                remove_env(_env, "KOKKOS_TOOLS_LIBS");
         });
 
     parser.start_group("HARDWARE COUNTER OPTIONS", "See also: rocprof-sys-avail -H");

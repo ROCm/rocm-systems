@@ -1137,7 +1137,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
 
     if(_config->get<bool>("ROCPROFSYS_USE_KOKKOSP"))
     {
-        auto _current_kokkosp_lib = tim::get_env<std::string>("KOKKOS_PROFILE_LIBRARY");
+        auto _current_kokkosp_lib = tim::get_env<std::string>("KOKKOS_TOOLS_LIBS");
         if(_current_kokkosp_lib.find("librocprof-sys-dl.so") == std::string::npos &&
            _current_kokkosp_lib.find("librocprof-sys.so") == std::string::npos)
         {
@@ -1149,9 +1149,9 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
                 _message =
                     JOIN("", " (forced. Previous value: '", _current_kokkosp_lib, "')");
             }
-            ROCPROFSYS_BASIC_VERBOSE_F(1, "Setting KOKKOS_PROFILE_LIBRARY=%s%s\n",
+            ROCPROFSYS_BASIC_VERBOSE_F(1, "Setting KOKKOS_TOOLS_LIBS=%s%s\n",
                                        "librocprof-sys.so", _message.c_str());
-            tim::set_env("KOKKOS_PROFILE_LIBRARY", "librocprof-sys.so", _force);
+            tim::set_env("KOKKOS_TOOLS_LIBS", "librocprof-sys.so", _force);
         }
     }
 

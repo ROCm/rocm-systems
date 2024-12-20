@@ -616,7 +616,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                                UPD_PREPEND);
 
                 if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
-                    update_env(_data, "KOKKOS_PROFILE_LIBRARY", _data.omni_libpath,
+                    update_env(_data, "KOKKOS_TOOLS_LIBS", _data.omni_libpath,
                                UPD_PREPEND);
             });
 
@@ -649,7 +649,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                     remove_env(_data, "OMP_TOOL_LIBRARIES");
 
                 if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
-                    remove_env(_data, "KOKKOS_PROFILE_LIBRARY");
+                    remove_env(_data, "KOKKOS_TOOLS_LIBS");
             });
 
         _data.processed_environs.emplace("exclude");

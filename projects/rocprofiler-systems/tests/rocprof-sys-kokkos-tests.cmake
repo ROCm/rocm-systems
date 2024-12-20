@@ -26,7 +26,7 @@ rocprofiler_systems_add_test(
     LABELS "kokkos;kokkos-profile-library"
     RUN_ARGS -i 25 -s 20 -p
     ENVIRONMENT
-        "${_base_environment};ROCPROFSYS_USE_KOKKOSP=ON;ROCPROFSYS_COUT_OUTPUT=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_KOKKOSP_PREFIX=[kokkos];KOKKOS_PROFILE_LIBRARY=librocprof-sys-dl.so"
+        "${_base_environment};ROCPROFSYS_USE_KOKKOSP=ON;ROCPROFSYS_COUT_OUTPUT=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_KOKKOSP_PREFIX=[kokkos];KOKKOS_TOOLS_LIBS=librocprof-sys-dl.so"
     REWRITE_RUN_PASS_REGEX "\\|_\\[kokkos\\] [a-zA-Z]"
     RUNTIME_PASS_REGEX "\\|_\\[kokkos\\] [a-zA-Z]")
 
@@ -40,7 +40,7 @@ rocprofiler_systems_add_test(
     LABELS "kokkos;kokkos-profile-library"
     RUN_ARGS -i 10 -s 20 -p
     ENVIRONMENT
-        "${_base_environment};ROCPROFSYS_USE_KOKKOSP=ON;ROCPROFSYS_COUT_OUTPUT=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_KOKKOSP_PREFIX=[kokkos];KOKKOS_PROFILE_LIBRARY=librocprof-sys.so"
+        "${_base_environment};ROCPROFSYS_USE_KOKKOSP=ON;ROCPROFSYS_COUT_OUTPUT=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_KOKKOSP_PREFIX=[kokkos];KOKKOS_TOOLS_LIBS=librocprof-sys.so"
     BASELINE_PASS_REGEX "\\|_\\[kokkos\\] [a-zA-Z]")
 
 rocprofiler_systems_add_test(
@@ -53,7 +53,7 @@ rocprofiler_systems_add_test(
     LABELS "kokkos;kokkos-profile-library"
     RUN_ARGS -i 10 -s 20 -p
     ENVIRONMENT
-        "${_base_environment};ROCPROFSYS_USE_KOKKOSP=ON;ROCPROFSYS_COUT_OUTPUT=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_KOKKOSP_PREFIX=[kokkos];KOKKOS_PROFILE_LIBRARY=librocprof-sys-dl.so"
+        "${_base_environment};ROCPROFSYS_USE_KOKKOSP=ON;ROCPROFSYS_COUT_OUTPUT=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_KOKKOSP_PREFIX=[kokkos];KOKKOS_TOOLS_LIBS=librocprof-sys-dl.so"
     BASELINE_PASS_REGEX "\\|_\\[kokkos\\] [a-zA-Z]")
 
 rocprofiler_systems_add_test(
