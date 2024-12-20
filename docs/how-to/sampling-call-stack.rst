@@ -281,7 +281,7 @@ The following snippets show how ``rocprof-sys-sample`` runs with various environ
 
       $ rocprof-sys-sample -PTDH -I all -- ./parallel-overhead-locks 30 4 100
 
-      KOKKOS_PROFILE_LIBRARY=/opt/rocprofiler-systems/lib/librocprof-sys.so.1.7.1
+      KOKKOS_TOOLS_LIBS=/opt/rocprofiler-systems/lib/librocprof-sys.so.1.7.1
       LD_PRELOAD=/opt/rocprofiler-systems/lib/librocprof-sys-dl.so.1.7.1
       ROCPROFSYS_CPU_FREQ_ENABLED=true
       ROCPROFSYS_TRACE_THREAD_LOCKS=true

@@ -216,8 +216,7 @@ extern "C"
            (!rocprofsys::config::settings_are_configured() &&
             rocprofsys::get_state() < rocprofsys::State::Active))
         {
-            auto _kokkos_profile_lib =
-                tim::get_env<std::string>("KOKKOS_PROFILE_LIBRARY");
+            auto _kokkos_profile_lib = tim::get_env<std::string>("KOKKOS_TOOLS_LIBS");
             if(_kokkos_profile_lib.find("librocprof-sys.so") != std::string::npos)
             {
                 auto _maps = tim::procfs::read_maps(tim::process::get_id());
@@ -238,10 +237,10 @@ extern "C"
                             _libs_str << "    " << litr << "\n";
                         ROCPROFSYS_ABORT(
                             "%s was invoked with librocprof-sys.so as the "
-                            "KOKKOS_PROFILE_LIBRARY.\n"
+                            "KOKKOS_TOOLS_LIBS.\n"
                             "However, librocprof-sys-dl.so has already been loaded by "
                             "the process.\nTo avoid duplicate collections culminating "
-                            "is an error, please set KOKKOS_PROFILE_LIBRARY=%s.\nLoaded "
+                            "is an error, please set KOKKOS_TOOLS_LIBS=%s.\nLoaded "
                             "libraries:\n%s",
                             __FUNCTION__, itr.c_str(), _libs_str.str().c_str());
                     }
