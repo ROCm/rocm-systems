@@ -848,8 +848,7 @@ class AMDSMICommands():
             static_dict['cache_info'] = cache_info_list
 
         # default to printing all clocks, if in current_platform_args; otherwise print specific clocks
-        if ((args.clock == True or isinstance(args.clock, list))
-            and 'clock' in current_platform_args):
+        if 'clock' in current_platform_args and (args.clock == True or isinstance(args.clock, list)):
             original_clock_args = args.clock  #save original args.clock value, so we can reset for multiple devices
             if isinstance(args.clock, bool):
                 args.clock = ['sys', 'mem', 'df', 'soc', 'dcef', 'vclk0', 'vclk1', 'dclk0', 'dclk1']
@@ -860,7 +859,21 @@ class AMDSMICommands():
                 # check that clock is valid option
                 if "all" in args.clock or len(args.clock) == 0:
                     args.clock = ['sys', 'mem', 'df', 'soc', 'dcef', 'vclk0', 'vclk1', 'dclk0', 'dclk1']
-                clk_dict = {}
+
+                clk_dict = {
+                    'sys': "N/A",
+                    'mem': "N/A",
+                    'df': "N/A",
+                    'soc': "N/A",
+                    'dcef': "N/A",
+                    'vclk0': "N/A",
+                    'vclk1': "N/A",
+                    'dclk0': "N/A",
+                    'dclk1': "N/A",
+                }
+                for clk in list(clk_dict.keys()):
+                    if clk not in args.clock:
+                        del clk_dict[clk]
 
                 for clk in args.clock:
                     clk_type = clk.lower()
@@ -904,7 +917,7 @@ class AMDSMICommands():
                             freq_dict = "N/A"
                     except amdsmi_exception.AmdSmiLibraryException as e:
                         freq_dict = "N/A"
-                    clk_dict.update({clk:freq_dict})
+                    clk_dict[clk] = freq_dict
 
                 static_dict['clock'] = clk_dict
             else:
@@ -1692,7 +1705,10 @@ class AMDSMICommands():
                                    "clk_locked" : "N/A",
                                    "deep_sleep" : "N/A"}
 
-                kMAX_NUM_VCLKS = 2
+                kMAX_NUM_VCLKS = 0
+                for clk_type in amdsmi_interface.AmdSmiClkType:
+                    if 'VCLK' in clk_type.name:
+                        kMAX_NUM_VCLKS += 1
                 for clock_index in range(kMAX_NUM_VCLKS):
                     vclk_index = f"vclk_{clock_index}"
                     clocks[vclk_index] = {"clk" : "N/A",
@@ -1701,7 +1717,10 @@ class AMDSMICommands():
                                           "clk_locked" : "N/A",
                                           "deep_sleep" : "N/A"}
 
-                kMAX_NUM_DCLKS = 2
+                kMAX_NUM_DCLKS = 0
+                for clk_type in amdsmi_interface.AmdSmiClkType:
+                    if 'DCLK' in clk_type.name:
+                        kMAX_NUM_DCLKS += 1
                 for clock_index in range(kMAX_NUM_DCLKS):
                     dclk_index = f"dclk_{clock_index}"
                     clocks[dclk_index] = {"clk" : "N/A",

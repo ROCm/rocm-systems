@@ -96,7 +96,7 @@ int present_reg_state(const char* fname, rsmi_reg_type_t reg_type,
         rsmi_name_value_t **kv, uint32_t *kvnum);
 }
 
-static uint64_t get_multiplier_from_str(char units_char) {
+static uint64_t get_multiplier_from_char(char units_char) {
   uint32_t multiplier = 0;
 
   switch (units_char) {
@@ -170,7 +170,7 @@ static uint64_t freq_string_to_int(const std::vector<std::string> &freq_lines,
       *is_curr = false;
     }
   }
-  long double multiplier = get_multiplier_from_str(units_str[0]);
+  long double multiplier = get_multiplier_from_char(units_str[0]);
 
   if (star_str[0] == 'x') {
     assert(lanes != nullptr && "Lanes are provided but null lanes pointer");
@@ -204,11 +204,11 @@ static void od_value_pair_str_to_range(std::string in_line, rsmi_range_t *rg) {
   fs_rng >> hi;
   fs_rng >> hi_units_str;
 
-  long double multiplier = get_multiplier_from_str(lo_units_str[0]);
+  long double multiplier = get_multiplier_from_char(lo_units_str[0]);
 
   rg->lower_bound = static_cast<uint64_t>(lo*multiplier);
 
-  multiplier = get_multiplier_from_str(hi_units_str[0]);
+  multiplier = get_multiplier_from_char(hi_units_str[0]);
   rg->upper_bound = static_cast<uint64_t>(hi*multiplier);
 }
 

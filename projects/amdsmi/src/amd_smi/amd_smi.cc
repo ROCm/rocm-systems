@@ -1891,7 +1891,7 @@ amdsmi_status_t  amdsmi_get_clk_freq(amdsmi_processor_handle processor_handle,
             f->frequency[0] = std::numeric_limits<uint64_t>::max();
             if (metric_info_p->current_vclk0 != std::numeric_limits<uint16_t>::max()) {
                 f->frequency[0] = static_cast<uint64_t>(metric_info_p->current_vclk0)
-                    * amd::smi::get_multiplier_from_str(unit);  // match MHz ROCm SMI provides
+                    * amd::smi::get_multiplier_from_char(unit);  // match MHz ROCm SMI provides
                 f->num_supported = 1;
             }
         }
@@ -1900,7 +1900,7 @@ amdsmi_status_t  amdsmi_get_clk_freq(amdsmi_processor_handle processor_handle,
             f->frequency[0] = std::numeric_limits<uint64_t>::max();
             if (metric_info_p->current_vclk1 != std::numeric_limits<uint16_t>::max()) {
                 f->frequency[0] = static_cast<uint64_t>(metric_info_p->current_vclk1)
-                    * amd::smi::get_multiplier_from_str(unit);  // match MHz ROCm SMI provides
+                    * amd::smi::get_multiplier_from_char(unit);  // match MHz ROCm SMI provides
                 f->num_supported = 1;
             }
         }
@@ -1909,7 +1909,7 @@ amdsmi_status_t  amdsmi_get_clk_freq(amdsmi_processor_handle processor_handle,
             f->frequency[0] = std::numeric_limits<uint64_t>::max();
             if (metric_info_p->current_dclk0 != std::numeric_limits<uint16_t>::max()) {
                 f->frequency[0] = static_cast<uint64_t>(metric_info_p->current_dclk0)
-                    * amd::smi::get_multiplier_from_str(unit);  // match MHz ROCm SMI provides
+                    * amd::smi::get_multiplier_from_char(unit);  // match MHz ROCm SMI provides
                 f->num_supported = 1;
             }
         }
@@ -1918,7 +1918,7 @@ amdsmi_status_t  amdsmi_get_clk_freq(amdsmi_processor_handle processor_handle,
             f->frequency[0] = std::numeric_limits<uint64_t>::max();
             if (metric_info_p->current_dclk1 != std::numeric_limits<uint16_t>::max()) {
                 f->frequency[0] = static_cast<uint64_t>(metric_info_p->current_dclk1)
-                    * amd::smi::get_multiplier_from_str(unit);  // match MHz ROCm SMI provides
+                    * amd::smi::get_multiplier_from_char(unit);  // match MHz ROCm SMI provides
                 f->num_supported = 1;
             }
         }

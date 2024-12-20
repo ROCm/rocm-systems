@@ -677,7 +677,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             static_parser.add_argument('-B', '--board', action='store_true', required=False, help=board_help)
             static_parser.add_argument('-R', '--process-isolation', action='store_true', required=False, help=process_isolation_help)
             static_parser.add_argument('-r', '--ras', action='store_true', required=False, help=ras_help)
-            static_parser.add_argument('-C', '--clock', default=False, nargs='*', type=str, required=False, help=clock_help)
+            static_parser.add_argument('-C', '--clock', action='store', default=False, nargs='*', type=str, required=False, help=clock_help)
 
             # Options to display on Hypervisors and Baremetal
             if self.helpers.is_hypervisor() or self.helpers.is_baremetal():

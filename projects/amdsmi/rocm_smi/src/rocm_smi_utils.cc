@@ -1280,7 +1280,7 @@ int countDigit(uint64_t n) {
   return static_cast<int>(std::floor(log10(static_cast<double>(n)) + 1));
 }
 
-uint64_t get_multiplier_from_str(char units_char) {
+uint64_t get_multiplier_from_char(char units_char) {
   uint32_t multiplier = 0;
 
   switch (units_char) {
