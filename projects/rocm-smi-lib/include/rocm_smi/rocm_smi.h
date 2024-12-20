@@ -1826,7 +1826,8 @@ rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t *bandwidth);
  *      BDFID = ((DOMAIN & 0xFFFFFFFF) << 32) | ((Partition & 0xF) << 28)
  *              | ((BUS & 0xFF) << 8) | ((DEVICE & 0x1F) <<3 )
  *              | (FUNCTION & 0x7)
- *
+ * 
+ *  \code{.unparsed}
  *  | Name         | Field   | KFD property       KFD -> PCIe ID (uint64_t)
  *  -------------- | ------- | ---------------- | ---------------------------- |
  *  | Domain       | [63:32] | "domain"         | (DOMAIN & 0xFFFFFFFF) << 32  |
@@ -1835,7 +1836,16 @@ rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t *bandwidth);
  *  | Bus          | [15: 8] | "location id"    | (LOCATION & 0xFF00)          |
  *  | Device       | [ 7: 3] | "location id"    | (LOCATION & 0xF8)            |
  *  | Function     | [ 2: 0] | "location id"    | (LOCATION & 0x7)             |
- *
+ *  \endcode
+ * 
+ *  Note: In some devices, the partition ID may be stored in the function bits
+ *  BDFID[2:0] instead of BDFID[31:28].
+ *  
+ *  Note: For MI series devices, the function bits are only used to store the 
+ *  partition ID, but this modified BDF is internal to the ROCm stack. 
+ *  To the OS, partitions share the same BDF as the unpartitioned device and  
+ *  have function bits = 0, which can be verified through lspci.
+ * 
  *  @param[in] dv_ind a device index
  *
  *  @param[inout] bdfid a pointer to uint64_t to which the device bdfid value
