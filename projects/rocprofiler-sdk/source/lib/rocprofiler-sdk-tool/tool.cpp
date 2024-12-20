@@ -1334,7 +1334,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             }
         }
         if(!config_match_found)
-            ROCP_ERROR << "Given PC sampling configuration is not supported on any of the agents";
+            ROCP_FATAL << "Given PC sampling configuration is not supported on any of the agents";
     }
 
     for(auto itr : get_buffers().as_array())
