@@ -588,7 +588,7 @@ MfmaFlopsF64:
 MfmaUtil:
   architectures:
     gfx90a/gfx942/gfx941/gfx940:
-      expression: 100*reduce(SQ_VALU_MFMA_BUSY_CYCLES,sum)/(reduce(GRBM_GUI_ACTIVE,max)*CU_NUM)
+      expression: reduce(SQ_VALU_MFMA_BUSY_CYCLES,sum)/(reduce(GRBM_GUI_ACTIVE,max)*SIMD_NUM)*100
   description: 'Unit: percent'
 RDATA1_SIZE:
   architectures:
@@ -3929,6 +3929,11 @@ VALUUtilization:
   description: 'The percentage of active vector ALU threads in a wave. A lower number can mean either
     more thread divergence in a wave or that the work-group size is not a multiple of 64. Value range:
     0% (bad), 100% (ideal - no thread divergence).'
+SIMD_UTILIZATION:
+  architectures:
+    gfx942/gfx941/gfx940/gfx90a:
+      expression: reduce(SQ_BUSY_CU_CYCLES,sum)/reduce(GRBM_COUNT,max)/CU_NUM
+  description: 'Fraction of time the SIMDs are being utilized [0,1].'
 VFetchInsts:
   architectures:
     gfx942/gfx941/gfx906/gfx940/gfx908/gfx90a/gfx9/gfx900:
