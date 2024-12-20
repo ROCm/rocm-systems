@@ -159,7 +159,7 @@ def get_counters(node_id):
 
             dimensions_stream.write(dim_name)
             dimensions_stream.write("[0:")
-            dimensions_stream.write(str(dim_instance - 1))
+            dimensions_stream.write(str(dim_instance))
             dimensions_stream.write("]")
             if dim != no_of_dimensions - 1:
                 dimensions_stream.write("\t")
@@ -323,12 +323,12 @@ def generate_output(agent_ids):
     else:
 
         for node_id in agent_ids:
-            print(f"gpu-agent:{node_id}\n")
             if node_id in agent_basic_counter_map.keys():
                 basic_counters_stream = io.StringIO()
                 counters = agent_basic_counter_map[node_id]
                 for counter in counters:
                     if counter.block:
+                        basic_counters_stream.write(f"gpu-agent:{node_id}\n")
                         basic_counters_stream.write("Name:")
                         basic_counters_stream.write("\t")
                         basic_counters_stream.write(str(counter.name))
@@ -344,17 +344,16 @@ def generate_output(agent_ids):
                         basic_counters_stream.write("Dimensions:")
                         basic_counters_stream.write("\t")
                         basic_counters_stream.write(str(counter.dimensions))
-                        basic_counters_stream.write("\n")
+                        basic_counters_stream.write("\n\n")
                 basic_counters = basic_counters_stream.getvalue()
-                print("List Metrics Basic\n")
                 print(basic_counters)
-                print("\n")
                 basic_counters_stream.close()
 
             if node_id in agent_derived_counter_map.keys():
                 derived_counters_stream = io.StringIO()
                 counters = agent_derived_counter_map[node_id]
                 for counter in counters:
+                    derived_counters_stream.write(f"gpu-agent:{node_id}\n")
                     derived_counters_stream.write("Name:")
                     derived_counters_stream.write("\t")
                     derived_counters_stream.write(str(counter.name))
@@ -370,11 +369,9 @@ def generate_output(agent_ids):
                     derived_counters_stream.write("Dimensions:")
                     derived_counters_stream.write("\t")
                     derived_counters_stream.write(str(counter.dimensions))
-                    derived_counters_stream.write("\n")
+                    derived_counters_stream.write("\n\n")
                 derived_counters = derived_counters_stream.getvalue()
-                print("List Metrics Derived\n")
                 print(derived_counters)
-                print("\n")
                 derived_counters_stream.close()
 
             if node_id in agent_pc_sample_config_map.keys():

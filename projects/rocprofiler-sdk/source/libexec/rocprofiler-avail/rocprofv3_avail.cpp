@@ -198,11 +198,11 @@ iterate_agent_counters_callback(rocprofiler_agent_id_t,
                                 size_t                    num_counters,
                                 void*                     user_data)
 {
-    auto* _counters_info  = reinterpret_cast<std::vector<std::vector<std::string>>*>(user_data);
-    auto  dimensions_data = std::vector<rocprofiler_record_dimension_info_t>{};
+    auto* _counters_info = static_cast<std::vector<std::vector<std::string>>*>(user_data);
     for(size_t i = 0; i < num_counters; i++)
     {
         rocprofiler_counter_info_v0_t _info;
+        auto dimensions_data = std::vector<rocprofiler_record_dimension_info_t>{};
         ROCPROFILER_CALL(
             rocprofiler_iterate_counter_dimensions(
                 counters[i], dimensions_info_callback, static_cast<void*>(&dimensions_data)),
