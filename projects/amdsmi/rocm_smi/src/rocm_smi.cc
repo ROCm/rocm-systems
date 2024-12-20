@@ -1212,7 +1212,7 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type, rsmi_clk_type_
     return RSMI_STATUS_INVALID_ARGS;
   }
   memset(f, 0, sizeof(rsmi_frequencies_t));
-  f->current=0;
+  f->current = 0;
 
   ret = GetDevValueVec(type, dv_ind, &val_vec);
   if (ret != RSMI_STATUS_SUCCESS) {

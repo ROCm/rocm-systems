@@ -120,7 +120,7 @@ class AMDSMILogger():
             elif key in ('gfx_clock', 'mem_clock', 'vram_used'):
                 table_values += string_value.rjust(11)
             elif key in ('vclock', 'dclock'):
-                table_values += string_value.rjust(8)
+                table_values += string_value.rjust(10)
             elif key == 'vram_total' or 'ecc' in key or key == 'pcie_bw':
                 table_values += string_value.rjust(12)
             elif key in ['pcie_replay']:

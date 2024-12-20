@@ -1280,5 +1280,35 @@ int countDigit(uint64_t n) {
   return static_cast<int>(std::floor(log10(static_cast<double>(n)) + 1));
 }
 
+uint64_t get_multiplier_from_str(char units_char) {
+  uint32_t multiplier = 0;
+
+  switch (units_char) {
+    case 'G':   // GT or GHz
+      multiplier = 1000000000;
+      break;
+
+    case 'M':   // MT or MHz
+      multiplier = 1000000;
+      break;
+
+    case 'K':   // KT or KHz
+    case 'V':   // default unit for voltage is mV
+      multiplier = 1000;
+      break;
+
+    case 'T':   // Transactions
+    case 'H':   // Hertz
+    case 'm':   // mV (we will make mV the default unit for voltage)
+      multiplier = 1;
+      break;
+
+    default:
+      assert(false);  // Unexpected units for frequency
+      throw amd::smi::rsmi_exception(RSMI_STATUS_UNEXPECTED_DATA, __FUNCTION__);
+  }
+  return multiplier;
+}
+
 }  // namespace smi
 }  // namespace amd

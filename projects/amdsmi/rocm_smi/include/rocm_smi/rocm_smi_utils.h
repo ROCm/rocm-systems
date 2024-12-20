@@ -124,6 +124,7 @@ std::string removeString(const std::string origStr,
                         const std::string &removeMe);
 void system_wait(int milli_seconds);
 int countDigit(uint64_t n);
+uint64_t get_multiplier_from_str(char units_char);
 template <typename T>
   std::string print_int_as_hex(T i, bool showHexNotation = true,
   int overloadBitSize = 0) {
