@@ -1,0 +1,167 @@
+name: Build and Install AMDSMI
+
+on:
+  pull_request:
+    branches:
+      - amd-staging
+  push:
+    branches:
+      - amd-staging
+
+jobs:
+  build-and-install-deb:
+    name: Build and Install on Debian-based Systems
+    runs-on:
+      - self-hosted
+      - ${{ vars.RUNNER_TYPE }}
+    strategy:
+      matrix:
+        os:
+          - Ubuntu20
+          - Ubuntu22
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          clean: false
+
+      - name: Set Docker Image for Ubuntu20
+        if: matrix.os == 'Ubuntu20'
+        run: echo "DOCKER_IMAGE=${{ secrets.UBUNTU20_DOCKER_IMAGE }}" >> $GITHUB_ENV
+
+      - name: Set Docker Image for Ubuntu22
+        if: matrix.os == 'Ubuntu22'
+        run: echo "DOCKER_IMAGE=${{ secrets.UBUNTU22_DOCKER_IMAGE }}" >> $GITHUB_ENV
+
+      - name: Build and Install on ${{ matrix.os }}
+        run: |
+          docker run --privileged -v ${{ github.workspace }}:/src:rw $DOCKER_IMAGE /bin/bash -c "
+            set -e
+            cd /src
+            echo 'Inside Docker Container on ${{ matrix.os }}'
+
+            # Build AMD-SMI
+            BUILD_FOLDER=/src/build
+            DEB_BUILD='amd-smi-lib*99999-local_amd64.deb'
+            DEB_BUILD_TEST='amd-smi-lib-tests*99999-local_amd64.deb'
+            sudo rm -rf \$BUILD_FOLDER
+            mkdir -p \$BUILD_FOLDER
+            cd \$BUILD_FOLDER
+            cmake .. -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON
+            make -j \$(nproc)
+            make package
+
+            # Install AMD-SMI
+            sudo apt install -y \$BUILD_FOLDER/\$DEB_BUILD
+            sudo ln -s /opt/rocm/bin/amd-smi /usr/local/bin
+
+            # Check If Installed
+            echo 'Listing installed packages:'
+            python3 -m pip list | grep amd
+            python3 -m pip list | grep pip
+            python3 -m pip list | grep setuptools
+            echo 'Completed build and installation on ${{ matrix.os }}'
+          "
+
+  build-and-install-rpm:
+    name: Build and Install on RPM-based Systems
+    runs-on:
+      - self-hosted
+      - ${{ vars.RUNNER_TYPE }}
+    strategy:
+      matrix:
+        os:
+          - SLES
+          - RHEL8
+          - RHEL9
+          - Mariner2
+          - AzureLinux3
+          - AlmaLinux8
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          clean: false
+
+      - name: Set Docker Image and Package Manager for SLES
+        if: matrix.os == 'SLES'
+        run: |
+          echo "DOCKER_IMAGE=${{ secrets.SLES_DOCKER_IMAGE }}" >> $GITHUB_ENV
+          echo "PACKAGE_MANAGER=zypper" >> $GITHUB_ENV
+
+      - name: Set Docker Image and Package Manager for RHEL8
+        if: matrix.os == 'RHEL8'
+        run: |
+          echo "DOCKER_IMAGE=${{ secrets.RHEL8_DOCKER_IMAGE }}" >> $GITHUB_ENV
+          echo "PACKAGE_MANAGER=dnf" >> $GITHUB_ENV
+
+      - name: Set Docker Image and Package Manager for RHEL9
+        if: matrix.os == 'RHEL9'
+        run: |
+          echo "DOCKER_IMAGE=${{ secrets.RHEL9_DOCKER_IMAGE }}" >> $GITHUB_ENV
+          echo "PACKAGE_MANAGER=dnf" >> $GITHUB_ENV
+
+      - name: Set Docker Image and Package Manager for Mariner2
+        if: matrix.os == 'Mariner2'
+        run: |
+          echo "DOCKER_IMAGE=${{ secrets.MARINER2_DOCKER_IMAGE }}" >> $GITHUB_ENV
+          echo "PACKAGE_MANAGER=dnf" >> $GITHUB_ENV
+
+      - name: Set Docker Image and Package Manager for AzureLinux3
+        if: matrix.os == 'AzureLinux3'
+        run: |
+          echo "DOCKER_IMAGE=${{ secrets.AZURELINUX3_DOCKER_IMAGE }}" >> $GITHUB_ENV
+          echo "PACKAGE_MANAGER=dnf" >> $GITHUB_ENV
+
+      - name: Set Docker Image and Package Manager for AlmaLinux8
+        if: matrix.os == 'AlmaLinux8'
+        run: |
+          echo "DOCKER_IMAGE=${{ secrets.ALMALINUX8_DOCKER_IMAGE }}" >> $GITHUB_ENV
+          echo "PACKAGE_MANAGER=dnf" >> $GITHUB_ENV
+
+      - name: Build and Install on ${{ matrix.os }}
+        run: |
+          docker run --privileged -v ${{ github.workspace }}:/src:rw $DOCKER_IMAGE /bin/bash -c "
+            set -ex
+            cd /src
+            echo 'Inside Docker Container on ${{ matrix.os }}'
+
+            # Build AMD-SMI
+            BUILD_FOLDER=/src/build
+            RPM_BUILD='amd-smi-lib-*99999-local*.rpm'
+
+            rm -rf \$BUILD_FOLDER
+            mkdir -p \$BUILD_FOLDER
+            cd \$BUILD_FOLDER
+            cmake .. -DCPACK_RPM_PACKAGE_RELOCATABLE=ON -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON
+            make -j \$(nproc)
+            make package
+
+            # Adjust permissions of the build directory
+            chmod -R a+rw \$BUILD_FOLDER
+
+            # Install AMD-SMI
+            case '$PACKAGE_MANAGER' in
+              zypper)
+                timeout 10m sudo zypper --no-refresh --no-gpg-checks install -y \$BUILD_FOLDER/\$RPM_BUILD
+                ;;
+              dnf)
+                timeout 10m dnf install -y --skip-broken \$BUILD_FOLDER/\$RPM_BUILD
+                ;;
+              *)
+                echo 'Unsupported package manager: $PACKAGE_MANAGER'
+                exit 1
+                ;;
+            esac
+
+            ln -s /opt/rocm/bin/amd-smi /usr/local/bin
+
+            # Check If Installed
+            echo 'Listing installed packages:'
+            python3 -m pip list | grep amd
+            python3 -m pip list | grep pip
+            python3 -m pip list | grep setuptools
+            echo 'Completed build and installation on ${{ matrix.os }}'
+          "
