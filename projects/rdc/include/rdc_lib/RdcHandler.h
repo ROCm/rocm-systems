@@ -81,18 +81,21 @@ class RdcHandler {
   // Diagnostic API
   virtual rdc_status_t rdc_diagnostic_run(rdc_gpu_group_t group_id, rdc_diag_level_t level,
                                           const char* config, size_t config_size,
-                                          rdc_diag_response_t* response, rdc_diag_callback_t* callback) = 0;
+                                          rdc_diag_response_t* response,
+                                          rdc_diag_callback_t* callback) = 0;
 
   virtual rdc_status_t rdc_test_case_run(rdc_gpu_group_t group_id, rdc_diag_test_cases_t test_case,
                                          const char* config, size_t config_size,
-                                         rdc_diag_test_result_t* result, rdc_diag_callback_t* callback) = 0;
+                                         rdc_diag_test_result_t* result,
+                                         rdc_diag_callback_t* callback) = 0;
 
   // Control API
   virtual rdc_status_t rdc_field_update_all(uint32_t wait_for_update) = 0;
 
   // It is just a client interface under the GRPC framework and is not used as an RDC API.
   // The reason is that RdcEmbeddedHandler::get_mixed_component_version does not need to be called.
-  virtual rdc_status_t get_mixed_component_version(mixed_component_t component, mixed_component_version_t* p_mixed_compv) = 0;
+  virtual rdc_status_t get_mixed_component_version(mixed_component_t component,
+                                                   mixed_component_version_t* p_mixed_compv) = 0;
   // Policy API
   virtual rdc_status_t rdc_policy_set(rdc_gpu_group_t group_id, rdc_policy_t policy) = 0;
 
@@ -110,12 +113,23 @@ class RdcHandler {
   // Health API
   virtual rdc_status_t rdc_health_set(rdc_gpu_group_t group_id, unsigned int components) = 0;
   virtual rdc_status_t rdc_health_get(rdc_gpu_group_t group_id, unsigned int* components) = 0;
-  virtual rdc_status_t rdc_health_check(rdc_gpu_group_t group_id, rdc_health_response_t *response) = 0;
+  virtual rdc_status_t rdc_health_check(rdc_gpu_group_t group_id,
+                                        rdc_health_response_t* response) = 0;
   virtual rdc_status_t rdc_health_clear(rdc_gpu_group_t group_id) = 0;
     // topology API
   virtual rdc_status_t rdc_device_topology_get(uint32_t gpu_index,
                                                rdc_device_topology_t* results) = 0;
   virtual rdc_status_t rdc_link_status_get(rdc_link_status_t* results) = 0;
+
+  // Set one configure
+  virtual rdc_status_t rdc_config_set(rdc_gpu_group_t group_id, rdc_config_setting_t setting) = 0;
+
+  // Get the setting
+  virtual rdc_status_t rdc_config_get(rdc_gpu_group_t group_id,
+                                      rdc_config_setting_list_t* settings) = 0;
+
+  // Clear the setting
+  virtual rdc_status_t rdc_config_clear(rdc_gpu_group_t group_id) = 0;
 
   virtual ~RdcHandler() {}
 };

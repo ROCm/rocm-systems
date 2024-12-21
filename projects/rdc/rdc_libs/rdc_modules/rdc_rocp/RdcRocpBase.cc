@@ -22,7 +22,9 @@ THE SOFTWARE.
 
 #include "rdc_modules/rdc_rocp/RdcRocpBase.h"
 
-#include <rocprofiler/rocprofiler.h>
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/registration.h>
+#include <rocprofiler-sdk/rocprofiler.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -33,199 +35,63 @@ THE SOFTWARE.
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <numeric>
-#include <utility>
+#include <stdexcept>
 #include <vector>
 
 // #include "hsa.h"
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/RdcTelemetryLibInterface.h"
+#include "rdc_modules/rdc_rocp/RdcRocpCounterSampler.h"
 
 namespace amd {
 namespace rdc {
 
-static hsa_status_t get_agent_handle_cb(hsa_agent_t agent, void* agent_arr) {
-  hsa_device_type_t type;
-
-  assert(agent_arr != nullptr);
-
-  hsa_agent_arr_t* agent_arr_ = (hsa_agent_arr_t*)agent_arr;
-
-  hsa_status_t status = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type);
-  if (status != HSA_STATUS_SUCCESS) {
-    return status;
-  }
-
-  if (type == HSA_DEVICE_TYPE_GPU) {
-    if (agent_arr_->count >= agent_arr_->capacity) {
-      agent_arr_->capacity *= 2;
-      agent_arr_->agents =
-          (hsa_agent_t*)realloc(agent_arr_->agents, agent_arr_->capacity * sizeof(hsa_agent_t));
-      // realloc might set agents to nullptr upon failure
-      assert(agent_arr_->agents != nullptr);
-    }
-    agent_arr_->agents[agent_arr_->count] = agent;
-    ++agent_arr_->count;
-  }
-
-  return HSA_STATUS_SUCCESS;
-}
-
-double RdcRocpBase::read_feature(rocprofiler_t* context, uint32_t gpu_index) {
-  hsa_status_t status = rocprofiler_read(context, 0);
-  assert(status == HSA_STATUS_SUCCESS);
-  status = rocprofiler_get_data(context, 0);
-  assert(status == HSA_STATUS_SUCCESS);
-  status = rocprofiler_get_metrics(context);
-  assert(status == HSA_STATUS_SUCCESS);
-  switch (gpuid_to_feature[gpu_index].data.kind) {
-    case ROCPROFILER_DATA_KIND_DOUBLE:
-      return gpuid_to_feature[gpu_index].data.result_double;
-      break;
-    case ROCPROFILER_DATA_KIND_INT32:
-      return static_cast<double>(gpuid_to_feature[gpu_index].data.result_int32);
-      break;
-    case ROCPROFILER_DATA_KIND_INT64:
-      return static_cast<double>(gpuid_to_feature[gpu_index].data.result_int64);
-      break;
-    case ROCPROFILER_DATA_KIND_FLOAT:
-      return static_cast<double>(gpuid_to_feature[gpu_index].data.result_float);
-      break;
-    default:
-      RDC_LOG(RDC_ERROR,
-              "ERROR: Unexpected feature kind: " << gpuid_to_feature[gpu_index].data.kind);
-  }
-  return 0.0;
-}
-
-static int get_agents(hsa_agent_arr_t* agent_arr) {
-  int errcode = 0;
-  hsa_status_t status = HSA_STATUS_SUCCESS;
-
-  agent_arr->capacity = 1;
-  agent_arr->count = 0;
-  agent_arr->agents = (hsa_agent_t*)calloc(agent_arr->capacity, sizeof(hsa_agent_t));
-  assert(agent_arr->agents);
-
-  status = hsa_iterate_agents(get_agent_handle_cb, agent_arr);
-  if (status != HSA_STATUS_SUCCESS) {
-    errcode = -1;
-
-    agent_arr->capacity = 0;
-    agent_arr->count = 0;
-    free(agent_arr->agents);
-  }
-
-  return errcode;
-}
-
-bool createHsaQueue(hsa_queue_t** queue, hsa_agent_t gpu_agent) {
-  // create a single-producer queue
-  hsa_status_t status = hsa_queue_create(gpu_agent, 64, HSA_QUEUE_TYPE_SINGLE, NULL, NULL,
-                                         UINT32_MAX, UINT32_MAX, queue);
-  if (status != HSA_STATUS_SUCCESS) {
-    RDC_LOG(RDC_ERROR, "Queue creation failed");
-  }
-
-  status = hsa_amd_queue_set_priority(*queue, HSA_AMD_QUEUE_PRIORITY_HIGH);
-  if (status != HSA_STATUS_SUCCESS) {
-    RDC_LOG(RDC_ERROR, "HSA Queue Priority Set Failed");
-  }
-
-  return (status == HSA_STATUS_SUCCESS);
-}
-
 double RdcRocpBase::run_profiler(uint32_t gpu_index, rdc_field_t field) {
+  thread_local std::vector<rocprofiler_record_counter_t> records;
+
   // initialize hsa. hsa_init() will also load the profiler libs under the hood
   hsa_status_t status = HSA_STATUS_SUCCESS;
 
-  gpuid_to_feature[gpu_index].kind = (rocprofiler_feature_kind_t)ROCPROFILER_FEATURE_KIND_METRIC;
-  gpuid_to_feature[gpu_index].name = field_to_metric[field];
-
-  // rocprofiler_t* contexts[agent_arr.count] = {0};
-  std::vector<rocprofiler_t*> contexts;
-  contexts.reserve(agent_arr.count);
-  rocprofiler_properties_t properties = {
-      queues[gpu_index],
-      64,
-      NULL,
-      NULL,
-  };
-  int mode = (ROCPROFILER_MODE_STANDALONE | ROCPROFILER_MODE_SINGLEGROUP);
-  status = rocprofiler_open(agent_arr.agents[gpu_index], &gpuid_to_feature[gpu_index], 1,
-                            &contexts[gpu_index], mode, &properties);
-  const char* error_string = nullptr;
-  rocprofiler_error_string(&error_string);
-  if (error_string != nullptr) {
-    if (error_string[0] != '\0') {
-      RDC_LOG(RDC_ERROR, error_string);
-    }
+  auto counter_sampler = CounterSampler::get_samplers()[gpu_index];
+  if (!counter_sampler) {
+    RDC_LOG(RDC_ERROR, "Error: Counter sampler not found for GPU index " << gpu_index << std::endl);
+    throw std::runtime_error("Counter sampler not found");
   }
-  assert(status == HSA_STATUS_SUCCESS);
 
-  status = rocprofiler_start(contexts[gpu_index], 0);
-  assert(status == HSA_STATUS_SUCCESS);
+  auto field_it = field_to_metric.find(field);
+  if (field_it == field_to_metric.end()) {
+    RDC_LOG(RDC_ERROR,
+            "Error: Field " << field << " not found in field_to_metric map." << std::endl);
+    throw std::out_of_range("Field not found in field_to_metric map");
+  }
+  const std::string& metric_id = field_it->second;
 
-  // this is the duration for which the counter increments from zero.
-  // TODO: Return error if sampling interval is lower than this value
-  usleep(collection_duration_us_k);
+  try {
+    counter_sampler->sample_counter_values({metric_id}, records, collection_duration_us_k);
+  } catch (const std::exception& e) {
+    RDC_LOG(RDC_ERROR, "Error while sampling counter values: " << e.what() << std::endl);
+    throw;
+  }
 
-  status = rocprofiler_stop(contexts[gpu_index], 0);
-  assert(status == HSA_STATUS_SUCCESS);
-
-  double value = read_feature(contexts[gpu_index], gpu_index);
-
-  usleep(100);
-
-  status = rocprofiler_close(contexts[gpu_index]);
-  assert(status == HSA_STATUS_SUCCESS);
+  // Aggregate counter values. Rocprof v1/v2 summed values across dimensions.
+  double value = 0.0;
+  for (auto& record : records) {
+    value += record.counter_value;  // Summing up values from all dimensions.
+  }
 
   return value;
 }
 
 const char* RdcRocpBase::get_field_id_from_name(rdc_field_t field) {
-  return field_to_metric.at(field);
-}
-
-// TODO - map RDC gpu_index to node_id
-// use rocprofiler to check which metrics are supported
-void check_metrics_supported(uint32_t node_id, std::vector<std::string>& metrics_all,
-                             std::vector<std::string>& metrics_good) {
-  typedef struct {
-    std::vector<std::string>* metrics_all_;
-    std::vector<std::string>* metrics_good_;
-    uint32_t driver_node_id;
-  } payload_t;
-  // callback for rocprofiler to check which metrics are supported
-  auto info_callback = [](const rocprofiler_info_data_t info, void* data) {
-    payload_t* payload = reinterpret_cast<payload_t*>(data);
-    if (info.agent_index == payload->driver_node_id) {
-      auto it =
-          std::find(payload->metrics_all_->begin(), payload->metrics_all_->end(), info.metric.name);
-      if (it != payload->metrics_all_->end()) {
-        payload->metrics_good_->push_back(info.metric.name);
-        RDC_LOG(RDC_DEBUG, "  gpu-agent" << info.agent_index << " : " << info.metric.name << " : "
-                                         << info.metric.description);
-        if (info.metric.expr != NULL)  // if it's a derived metric, print it's formula
-          RDC_LOG(RDC_DEBUG, "        " << info.metric.name << " = " << info.metric.expr);
-      }
-    }
-    return HSA_STATUS_SUCCESS;
-  };
-
-  payload_t payload = {&metrics_all, &metrics_good, node_id};
-  hsa_status_t status =
-      rocprofiler_iterate_info(NULL, ROCPROFILER_INFO_KIND_METRIC, info_callback, &payload);
-  if (status != HSA_STATUS_SUCCESS) {
-    const char* errstr = nullptr;
-    hsa_status_string(status, &errstr);
-    RDC_LOG(RDC_ERROR, "hsa error: " << std::to_string(status) << " " << errstr);
-  } else {
-    for (auto& iter : *(payload.metrics_good_)) {
-      RDC_LOG(RDC_DEBUG, iter << " : exists");
-    }
+  auto it = field_to_metric.find(field);
+  if (it == field_to_metric.end()) {
+    RDC_LOG(RDC_ERROR,
+            "Error: Field ID " << field << " not found in field_to_metric map." << std::endl);
+    throw std::out_of_range("Field ID not found in field_to_metric map");
   }
+
+  return field_to_metric.at(field);
 }
 
 const std::vector<rdc_field_t> RdcRocpBase::get_field_ids() {
@@ -237,20 +103,14 @@ const std::vector<rdc_field_t> RdcRocpBase::get_field_ids() {
 }
 
 RdcRocpBase::RdcRocpBase() {
-  hsa_status_t status = hsa_init();
-  if (status != HSA_STATUS_SUCCESS) {
-    const char* errstr = nullptr;
-    hsa_status_string(status, &errstr);
-    throw std::runtime_error("hsa error code: " + std::to_string(status) + " " + errstr);
-  }
-
   // all fields
   static const std::map<rdc_field_t, const char*> temp_field_map_k = {
       {RDC_FI_PROF_OCCUPANCY_PERCENT, "OccupancyPercent"},
       {RDC_FI_PROF_ACTIVE_CYCLES, "GRBM_GUI_ACTIVE"},
       {RDC_FI_PROF_ACTIVE_WAVES, "SQ_WAVES"},
       {RDC_FI_PROF_ELAPSED_CYCLES, "GRBM_COUNT"},
-      {RDC_FI_PROF_TENSOR_ACTIVE_PERCENT, "MfmaUtil"}, // same as TENSOR_ACTIVE but available for more GPUs
+      {RDC_FI_PROF_TENSOR_ACTIVE_PERCENT,
+       "MfmaUtil"},  // same as TENSOR_ACTIVE but available for more GPUs
       {RDC_FI_PROF_GPU_UTIL_PERCENT, "GPU_UTIL"},
       // metrics below are divided by time passed
       {RDC_FI_PROF_EVAL_MEM_R_BW, "FETCH_SIZE"},
@@ -259,35 +119,44 @@ RdcRocpBase::RdcRocpBase() {
       {RDC_FI_PROF_EVAL_FLOPS_32, "TOTAL_32_OPS"},
       {RDC_FI_PROF_EVAL_FLOPS_64, "TOTAL_64_OPS"},
       {RDC_FI_PROF_VALU_PIPE_ISSUE_UTIL, "ValuPipeIssueUtil"},
+      {RDC_FI_PROF_SM_ACTIVE, "VALUBusy"},
   };
+
+  hsa_status_t status = hsa_init();
+  if (status != HSA_STATUS_SUCCESS) {
+    const char* errstr = nullptr;
+    hsa_status_string(status, &errstr);
+    throw std::runtime_error("hsa error code: " + std::to_string(status) + " " + errstr);
+  }
+
+  // check rocprofiler
+  if (int rocp_status = 0;
+      rocprofiler_is_initialized(&rocp_status) == ROCPROFILER_STATUS_SUCCESS && rocp_status != 1) {
+    throw std::runtime_error("Rocprofiler is not initialized. status: " +
+                             std::to_string(rocp_status));
+  }
 
   std::vector<std::string> all_fields;
   std::vector<std::string> checked_fields;
 
+  // populate list of agents
+  agents = CounterSampler::get_available_agents();
+  RDC_LOG(RDC_DEBUG, "Agent count: " << agents.size());
+  samplers = CounterSampler::get_samplers();
+
+  // populate fields
   for (auto& [k, v] : temp_field_map_k) {
     all_fields.push_back(v);
   }
 
-  // populate list of agents
-  int errcode = get_agents(&agent_arr);
-  if (errcode != 0) {
-    return;
-  }
-  RDC_LOG(RDC_DEBUG, "Agent count: " << agent_arr.count);
-
-  uint32_t driver_node_id = 0;
-  for (uint32_t gpu_index = 0; gpu_index < agent_arr.count; gpu_index++) {
-    status = hsa_agent_get_info(agent_arr.agents[gpu_index],
-                                static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID),
-                                &driver_node_id);
-    if (status != HSA_STATUS_SUCCESS) {
-      const char* errstr = nullptr;
-      hsa_status_string(status, &errstr);
-      RDC_LOG(RDC_ERROR, "hsa error: " << std::to_string(status) << " " << errstr);
-    } else {
-      RDC_LOG(RDC_DEBUG, "gpu_index[" << gpu_index << "] = node_id[" << driver_node_id << "]");
+  // find intersection of supported and requested fields
+  for (uint32_t gpu_index = 0; gpu_index < agents.size(); gpu_index++) {
+    auto& cs = *samplers[gpu_index];
+    RDC_LOG(RDC_DEBUG,
+            "gpu_index[" << gpu_index << "] = node_id[" << agents[gpu_index].node_id << "]");
+    for (auto& [str, id] : cs.get_supported_counters(cs.get_agent())) {
+      checked_fields.emplace_back(str);
     }
-    check_metrics_supported(driver_node_id, all_fields, checked_fields);
 
     for (auto& [k, v] : temp_field_map_k) {
       auto found = std::find(checked_fields.begin(), checked_fields.end(), v);
@@ -298,22 +167,6 @@ RdcRocpBase::RdcRocpBase() {
   }
 
   RDC_LOG(RDC_DEBUG, "Rocprofiler supports " << field_to_metric.size() << " fields");
-
-  for (uint32_t gpu_index = 0; gpu_index < agent_arr.count; gpu_index++) {
-    for (const auto& [k, v] : field_to_metric) {
-      rocprofiler_feature_t temp_feature;
-      temp_feature.kind = (rocprofiler_feature_kind_t)ROCPROFILER_FEATURE_KIND_METRIC;
-      temp_feature.name = v;
-      gpuid_to_feature.insert({gpu_index, temp_feature});
-    }
-  }
-
-  for (uint32_t gpu_index = 0; gpu_index < agent_arr.count; gpu_index++) {
-    queues.push_back(nullptr);
-    if (!createHsaQueue(&queues[gpu_index], agent_arr.agents[gpu_index])) {
-      RDC_LOG(RDC_ERROR, "can't create queues[" << gpu_index << "]\n");
-    }
-  }
 }
 
 RdcRocpBase::~RdcRocpBase() {
@@ -332,10 +185,6 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, double* value) 
     return RDC_ST_BAD_PARAMETER;
   }
 
-  hsa_status_t status = HSA_STATUS_SUCCESS;
-  if (status != HSA_STATUS_SUCCESS) {
-    return Rocp2RdcError(status);
-  }
   const auto start_time = std::chrono::high_resolution_clock::now();
   *value = run_profiler(gpu_index, field);
   const auto stop_time = std::chrono::high_resolution_clock::now();
@@ -343,8 +192,6 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, double* value) 
   if (eval_fields.find(field) != eval_fields.end()) {
     const auto elapsed =
         std::chrono::duration_cast<std::chrono::milliseconds>(stop_time - start_time).count();
-    // RDC_LOG(RDC_DEBUG, "INDEX: " << gpu_index << " before[" << *value << "] after["
-    //                              << (*value / elapsed) << "]");
     *value = *value / elapsed;
   }
   // GPU_UTIL metric is available on more GPUs than ENGINE_ACTIVE.
@@ -352,16 +199,7 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, double* value) 
   if (field == RDC_FI_PROF_GPU_UTIL_PERCENT) {
     *value = *value / 100.0F;
   }
-  return Rocp2RdcError(status);
-}
-
-rdc_status_t RdcRocpBase::Rocp2RdcError(hsa_status_t status) {
-  switch (status) {
-    case HSA_STATUS_SUCCESS:
-      return RDC_ST_OK;
-    default:
-      return RDC_ST_UNKNOWN_ERROR;
-  }
+  return RDC_ST_OK;
 }
 
 }  // namespace rdc

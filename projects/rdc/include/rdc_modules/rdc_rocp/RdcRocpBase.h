@@ -22,7 +22,7 @@ THE SOFTWARE.
 
 #ifndef RDC_MODULES_RDC_ROCP_RDCROCPBASE_H_
 #define RDC_MODULES_RDC_ROCP_RDCROCPBASE_H_
-#include <rocprofiler/rocprofiler.h>
+#include <rocprofiler-sdk/agent.h>
 
 #include <cstdint>
 #include <map>
@@ -32,15 +32,10 @@ THE SOFTWARE.
 
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcTelemetryLibInterface.h"
+#include "rdc_modules/rdc_rocp/RdcRocpCounterSampler.h"
 
 namespace amd {
 namespace rdc {
-
-typedef struct {
-  hsa_agent_t* agents;
-  unsigned count;
-  unsigned capacity;
-} hsa_agent_arr_t;
 
 /// Common interface for RocP tests and samples
 class RdcRocpBase {
@@ -68,18 +63,16 @@ class RdcRocpBase {
  protected:
  private:
   typedef std::pair<uint32_t, rdc_field_t> rdc_field_pair_t;
-  static const size_t buffer_length_k = 5;
   /**
    * @brief Tweak this to change for how long each metric is collected
    */
   static const uint32_t collection_duration_us_k = 10000;
 
-  double read_feature(rocprofiler_t* context, uint32_t gpu_index);
+  double read_feature(rocprofiler_record_counter_t* record, uint32_t gpu_index);
   double run_profiler(uint32_t gpu_index, rdc_field_t field);
 
-  hsa_agent_arr_t agent_arr = {};
-  std::vector<hsa_queue_t*> queues;
-  std::map<uint32_t, rocprofiler_feature_t> gpuid_to_feature;
+  std::vector<rocprofiler_agent_v0_t> agents = {};
+  std::vector<std::shared_ptr<CounterSampler>> samplers = {};
   std::map<rdc_field_t, const char*> field_to_metric = {};
 
   // these fields must be divided by time passed
@@ -89,9 +82,9 @@ class RdcRocpBase {
   };
 
   /**
-   * @brief Convert from rocmtools status into RDC status
+   * @brief Convert from profiler status into RDC status
    */
-  rdc_status_t Rocp2RdcError(hsa_status_t status);
+  rdc_status_t Rocp2RdcError(rocprofiler_status_t status);
 };
 
 }  // namespace rdc
