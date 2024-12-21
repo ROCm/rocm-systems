@@ -148,6 +148,11 @@ typedef enum { INTEGER = 0, DOUBLE, STRING, BLOB } rdc_field_type_t;
 #define RDC_MAX_VERSION_STR_LENGTH 60
 
 /**
+ * @brief Max configuration can be collected using the configuration get
+ */
+#define RDC_MAX_CONFIG_SETTINGS 32
+
+/**
  * These enums are used to specify a particular field to be retrieved.
  */
 typedef enum {
@@ -182,11 +187,11 @@ typedef enum {
   /**
    * @brief GPU usage related fields
    */
-  RDC_FI_GPU_UTIL = 500,    //!< GPU Utilization
-  RDC_FI_GPU_MEMORY_USAGE,  //!< Memory usage of the GPU instance
-  RDC_FI_GPU_MEMORY_TOTAL,  //!< Total memory of the GPU instance
-  RDC_FI_GPU_MM_ENC_UTIL,  //!< Multimedia encoder busy percentage
-  RDC_FI_GPU_MM_DEC_UTIL,  //!< Multimedia decoder busy percentage
+  RDC_FI_GPU_UTIL = 500,       //!< GPU Utilization
+  RDC_FI_GPU_MEMORY_USAGE,     //!< Memory usage of the GPU instance
+  RDC_FI_GPU_MEMORY_TOTAL,     //!< Total memory of the GPU instance
+  RDC_FI_GPU_MM_ENC_UTIL,      //!< Multimedia encoder busy percentage
+  RDC_FI_GPU_MM_DEC_UTIL,      //!< Multimedia decoder busy percentage
   RDC_FI_GPU_MEMORY_ACTIVITY,  //!< Memory busy percentage
 
   /**
@@ -251,16 +256,16 @@ typedef enum {
   RDC_FI_XGMI_6_READ_KB,        //!< XGMI_6 accumulated data read size (KB)
   RDC_FI_XGMI_7_READ_KB,        //!< XGMI_7 accumulated data read size (KB)
 
-  RDC_FI_XGMI_0_WRITE_KB,  //!< XGMI_0 accumulated data write size (KB)
-  RDC_FI_XGMI_1_WRITE_KB,  //!< XGMI_1 accumulated data write size (KB)
-  RDC_FI_XGMI_2_WRITE_KB,  //!< XGMI_2 accumulated data write size (KB)
-  RDC_FI_XGMI_3_WRITE_KB,  //!< XGMI_3 accumulated data write size (KB)
-  RDC_FI_XGMI_4_WRITE_KB,  //!< XGMI_4 accumulated data write size (KB)
-  RDC_FI_XGMI_5_WRITE_KB,  //!< XGMI_5 accumulated data write size (KB)
-  RDC_FI_XGMI_6_WRITE_KB,  //!< XGMI_6 accumulated data write size (KB)
-  RDC_FI_XGMI_7_WRITE_KB,  //!< XGMI_7 accumulated data write size (KB)
-  RDC_FI_XGMI_TOTAL_READ_KB,      //!< XGMI_SUM accumulated data read size (KB)
-  RDC_FI_XGMI_TOTAL_WRITE_KB,      //!< XGMI_SUM accumulated data write size (KB)
+  RDC_FI_XGMI_0_WRITE_KB,      //!< XGMI_0 accumulated data write size (KB)
+  RDC_FI_XGMI_1_WRITE_KB,      //!< XGMI_1 accumulated data write size (KB)
+  RDC_FI_XGMI_2_WRITE_KB,      //!< XGMI_2 accumulated data write size (KB)
+  RDC_FI_XGMI_3_WRITE_KB,      //!< XGMI_3 accumulated data write size (KB)
+  RDC_FI_XGMI_4_WRITE_KB,      //!< XGMI_4 accumulated data write size (KB)
+  RDC_FI_XGMI_5_WRITE_KB,      //!< XGMI_5 accumulated data write size (KB)
+  RDC_FI_XGMI_6_WRITE_KB,      //!< XGMI_6 accumulated data write size (KB)
+  RDC_FI_XGMI_7_WRITE_KB,      //!< XGMI_7 accumulated data write size (KB)
+  RDC_FI_XGMI_TOTAL_READ_KB,   //!< XGMI_SUM accumulated data read size (KB)
+  RDC_FI_XGMI_TOTAL_WRITE_KB,  //!< XGMI_SUM accumulated data write size (KB)
 
   /**
    * @brief ROC-profiler related fields
@@ -278,6 +283,7 @@ typedef enum {
   RDC_FI_PROF_EVAL_FLOPS_32,
   RDC_FI_PROF_EVAL_FLOPS_64,
   RDC_FI_PROF_VALU_PIPE_ISSUE_UTIL,
+  RDC_FI_PROF_SM_ACTIVE,
 
   /**
    * @brief Raw XGMI counter events
@@ -340,14 +346,14 @@ typedef enum {
   /**
    * @brief RDC health related fields
    */
-  RDC_HEALTH_XGMI_ERROR = 3000,       //!< XGMI one or more errors detected
-  RDC_HEALTH_PCIE_REPLAY_COUNT,       //!< Total PCIE replay count
-  RDC_HEALTH_RETIRED_PAGE_NUM,        //!< Retired page number
-  RDC_HEALTH_PENDING_PAGE_NUM,        //!< Pending page number
-  RDC_HEALTH_RETIRED_PAGE_LIMIT,      //!< The threshold of retired page
-  RDC_HEALTH_UNCORRECTABLE_PAGE_LIMIT,//!< The threshold of uncorrectable page
-  RDC_HEALTH_POWER_THROTTLE_TIME,     //!< Power throttle status counter
-  RDC_HEALTH_THERMAL_THROTTLE_TIME,   //!< Total time in thermal throttle status (microseconds)
+  RDC_HEALTH_XGMI_ERROR = 3000,         //!< XGMI one or more errors detected
+  RDC_HEALTH_PCIE_REPLAY_COUNT,         //!< Total PCIE replay count
+  RDC_HEALTH_RETIRED_PAGE_NUM,          //!< Retired page number
+  RDC_HEALTH_PENDING_PAGE_NUM,          //!< Pending page number
+  RDC_HEALTH_RETIRED_PAGE_LIMIT,        //!< The threshold of retired page
+  RDC_HEALTH_UNCORRECTABLE_PAGE_LIMIT,  //!< The threshold of uncorrectable page
+  RDC_HEALTH_POWER_THROTTLE_TIME,       //!< Power throttle status counter
+  RDC_HEALTH_THERMAL_THROTTLE_TIME,     //!< Total time in thermal throttle status (microseconds)
 } rdc_field_t;
 
 // even and odd numbers are used for correctable and uncorrectable errors
@@ -517,7 +523,7 @@ typedef enum {
  */
 typedef enum {
   RDC_AMDMSI_COMPONENT
-  //If needed later, add them one by one
+  // If needed later, add them one by one
 } rdc_component_t;
 
 /**
@@ -571,8 +577,8 @@ typedef struct {
 
 typedef void (*rdc_callback_t)(void*, void*);
 typedef struct {
-  rdc_callback_t callback; //!< Callback sends logs for running diagnostics
-  void* cookie;            //!< Cookie is used to identify different callbacks and supply them with data
+  rdc_callback_t callback;  //!< Callback sends logs for running diagnostics
+  void* cookie;  //!< Cookie is used to identify different callbacks and supply them with data
 } rdc_diag_callback_t;
 
 /**
@@ -599,7 +605,7 @@ typedef enum { RDC_POLICY_ACTION_NONE, RDC_POLICY_ACTION_GPU_RESET } rdc_policy_
  */
 typedef struct {
   rdc_policy_condition_t condition;  //!< condition to meet
-  rdc_policy_action_t action; //!< Action to take
+  rdc_policy_action_t action;        //!< Action to take
 } rdc_policy_t;
 
 typedef enum {
@@ -663,12 +669,12 @@ typedef struct {
  * @brief type of health watches
  */
 typedef enum {
-    RDC_HEALTH_WATCH_PCIE       = 0x1,   //!< PCIe system watches
-    RDC_HEALTH_WATCH_XGMI       = 0x2,   //!< XGMI system watches
-    RDC_HEALTH_WATCH_MEM        = 0x4,   //!< Memory watches
-    RDC_HEALTH_WATCH_INFOROM    = 0x8,   //!< Inforom watches
-    RDC_HEALTH_WATCH_THERMAL    = 0x10,  //!< Temperature watches
-    RDC_HEALTH_WATCH_POWER      = 0x20,  //!< Power watches
+  RDC_HEALTH_WATCH_PCIE = 0x1,      //!< PCIe system watches
+  RDC_HEALTH_WATCH_XGMI = 0x2,      //!< XGMI system watches
+  RDC_HEALTH_WATCH_MEM = 0x4,       //!< Memory watches
+  RDC_HEALTH_WATCH_INFOROM = 0x8,   //!< Inforom watches
+  RDC_HEALTH_WATCH_THERMAL = 0x10,  //!< Temperature watches
+  RDC_HEALTH_WATCH_POWER = 0x20,    //!< Power watches
 } rdc_health_system_t;
 
 /**
@@ -708,20 +714,19 @@ typedef enum {
  * @brief details of the health errors
  */
 typedef struct {
-  char      msg[MAX_HEALTH_MSG_LENGTH];  //!< The test result details
-  uint32_t  code;                        //!< The low level error code
+  char msg[MAX_HEALTH_MSG_LENGTH];  //!< The test result details
+  uint32_t code;                    //!< The low level error code
 } rdc_health_detail_t;
 
 /**
  * @brief details of the per health incidents
  */
 typedef struct {
-    uint32_t              gpu_index;  //!< which GPU in this group have the issue
-    rdc_health_system_t   component;  //!< which components have the issue
-    rdc_health_result_t   health;     //!< health diagnosis of this incident
-    rdc_health_detail_t   error;      //!< The details of the error, rdc_health_error_code_t
+  uint32_t gpu_index;             //!< which GPU in this group have the issue
+  rdc_health_system_t component;  //!< which components have the issue
+  rdc_health_result_t health;     //!< health diagnosis of this incident
+  rdc_health_detail_t error;      //!< The details of the error, rdc_health_error_code_t
 } rdc_health_incidents_t;
-
 
 #define HEALTH_MAX_ERROR_ITEMS 64
 
@@ -729,10 +734,35 @@ typedef struct {
  * @brief The health responses for test cases
  */
 typedef struct {
-    rdc_health_result_t       overall_health;                     //!< The overall health of this entire host
-    unsigned int              incidents_count;                    //!< The number of health incidents reported in this struct
-    rdc_health_incidents_t    incidents[HEALTH_MAX_ERROR_ITEMS];  //!< Report of the errors detected
+  rdc_health_result_t overall_health;  //!< The overall health of this entire host
+  unsigned int incidents_count;        //!< The number of health incidents reported in this struct
+  rdc_health_incidents_t incidents[HEALTH_MAX_ERROR_ITEMS];  //!< Report of the errors detected
 } rdc_health_response_t;
+
+/**
+ * @brief property id's for the configuration set/get
+ */
+typedef enum {
+  RDC_CFG_GFX_CLOCK_LIMIT,
+  RDC_CFG_MEMORY_CLOCK_LIMIT,
+  RDC_CFG_POWER_LIMIT
+} rdc_config_type_t;
+
+/**
+ * @brief Value mapped to rdc_config_type_t property id for the configuration set/get
+ */
+typedef struct {
+  rdc_config_type_t type;
+  uint64_t target_value;
+} rdc_config_setting_t;
+
+/**
+ * @brief Array of properties collected using the configuration get
+ */
+typedef struct {
+  uint32_t total_settings;
+  rdc_config_setting_t settings[RDC_MAX_CONFIG_SETTINGS];
+} rdc_config_setting_list_t;
 
 /**
  *  @brief Initialize ROCm RDC.
@@ -972,7 +1002,8 @@ rdc_status_t rdc_device_get_attributes(rdc_handle_t p_rdc_handle, uint32_t gpu_i
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_device_get_component_version(rdc_handle_t p_rdc_handle, rdc_component_t component, rdc_component_version_t* p_rdc_compv);
+rdc_status_t rdc_device_get_component_version(rdc_handle_t p_rdc_handle, rdc_component_t component,
+                                              rdc_component_version_t* p_rdc_compv);
 
 /**
  *  @brief Create a group contains multiple GPUs
@@ -1382,7 +1413,7 @@ typedef struct {
   unsigned int version;
   rdc_policy_condition_t condition;  //!< the condition that is meet
   rdc_gpu_group_t group_id;          //!< The group id trigger this callback
-  int64_t value;          //!< The current value that meet the condition
+  int64_t value;                     //!< The current value that meet the condition
 } rdc_policy_callback_response_t;
 
 /**
@@ -1514,6 +1545,50 @@ rdc_status_t rdc_device_topology_get(rdc_handle_t p_rdc_handle, uint32_t gpu_ind
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
 rdc_status_t rdc_link_status_get(rdc_handle_t p_rdc_handle, rdc_link_status_t* results);
+/**
+ *  @brief Set one configuration
+ *
+ *  @details Set the given configuration to all nodes belong to the given group
+ *
+ *  @param[in] p_rdc_handle Node handle
+ *
+ *  @param[in] group_id Group id to which node belongs
+ *
+ *  @param[in] setting Configuration to be set for the nodes
+ *
+ *  @retval RDC_ST_OK is returned upon successful call.
+ */
+rdc_status_t rdc_config_set(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
+                            rdc_config_setting_t setting);
+
+/**
+ *  @brief Get the configrations
+ *
+ *  @details Get all the configurations for all nodes belong to the given group
+ *
+ *  @param[in] p_rdc_handle Node handle
+ *
+ *  @param[in] group_id Group id to which nodes belong
+ *
+ *  @param[out] settings List of configurations returned.
+ *
+ *  @retval RDC_ST_OK is returned upon successful call.
+ */
+rdc_status_t rdc_config_get(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
+                            rdc_config_setting_list_t* settings);
+
+/**
+ *  @brief Clear the setting
+ *
+ *  @details Clear all the configurations for the nodes belongs to the given group
+ *
+ *  @param[in] p_rdc_handle Node handle
+ *
+ *  @param[in] group_id Group id to which nodes belong
+ *
+ *  @retval RDC_ST_OK is returned upon successful call.
+ */
+rdc_status_t rdc_config_clear(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id);
 
 #ifdef __cplusplus
 }

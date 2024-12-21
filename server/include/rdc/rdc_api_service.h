@@ -22,9 +22,9 @@ THE SOFTWARE.
 #ifndef SERVER_INCLUDE_RDC_RDC_API_SERVICE_H_
 #define SERVER_INCLUDE_RDC_RDC_API_SERVICE_H_
 
-#include <thread>
-
 #include <grpcpp/server_context.h>
+
+#include <thread>
 
 #include "rdc.grpc.pb.h"  // NOLINT
 #include "rdc/rdc.h"
@@ -157,12 +157,10 @@ class RdcAPIServiceImpl final : public ::rdc::RdcAPI::Service {
                              const ::rdc::GetTopologyRequest* request,
                              ::rdc::GetTopologyResponse* reply) override;
 
-  ::grpc::Status SetHealth(::grpc::ServerContext* context,
-                           const ::rdc::SetHealthRequest* request,
+  ::grpc::Status SetHealth(::grpc::ServerContext* context, const ::rdc::SetHealthRequest* request,
                            ::rdc::SetHealthResponse* reply) override;
 
-  ::grpc::Status GetHealth(::grpc::ServerContext* context,
-                           const ::rdc::GetHealthRequest* request,
+  ::grpc::Status GetHealth(::grpc::ServerContext* context, const ::rdc::GetHealthRequest* request,
                            ::rdc::GetHealthResponse* reply) override;
 
   ::grpc::Status CheckHealth(::grpc::ServerContext* context,
@@ -172,6 +170,16 @@ class RdcAPIServiceImpl final : public ::rdc::RdcAPI::Service {
   ::grpc::Status ClearHealth(::grpc::ServerContext* context,
                              const ::rdc::ClearHealthRequest* request,
                              ::rdc::ClearHealthResponse* reply) override;
+
+  ::grpc::Status SetConfig(::grpc::ServerContext* context, const ::rdc::SetConfigRequest* request,
+                           ::rdc::SetConfigResponse* reply) override;
+
+  ::grpc::Status GetConfig(::grpc::ServerContext* context, const ::rdc::GetConfigRequest* request,
+                           ::rdc::GetConfigResponse* reply) override;
+
+  ::grpc::Status ClearConfig(::grpc::ServerContext* context,
+                             const ::rdc::ClearConfigRequest* request,
+                             ::rdc::ClearConfigResponse* reply) override;
 
  private:
   bool copy_gpu_usage_info(const rdc_gpu_usage_info_t& src, ::rdc::GpuUsageInfo* target);

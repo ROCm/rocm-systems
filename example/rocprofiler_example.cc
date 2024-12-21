@@ -139,6 +139,7 @@ int run() {
   field_ids.push_back(RDC_FI_PROF_EVAL_FLOPS_16);
   field_ids.push_back(RDC_FI_PROF_EVAL_FLOPS_32);
   field_ids.push_back(RDC_FI_PROF_EVAL_FLOPS_64);
+  field_ids.push_back(RDC_FI_PROF_SM_ACTIVE);
   result = rdc_group_field_create(rdc_handle, field_ids.size(), field_ids.data(), field_group_name,
                                   &field_group_id);
   if (result != RDC_ST_OK) {

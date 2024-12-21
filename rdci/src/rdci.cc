@@ -20,19 +20,21 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-#include <iostream>
-#include <string>
 #include <string.h>
 
+#include <iostream>
+#include <string>
+
+#include "RdciConfigSubSystem.h"
 #include "RdciDiagSubSystem.h"
 #include "RdciDiscoverySubSystem.h"
 #include "RdciDmonSubSystem.h"
 #include "RdciFieldGroupSubSystem.h"
 #include "RdciGroupSubSystem.h"
-#include "RdciStatsSubSystem.h"
-#include "RdciPolicySubSystem.h"
 #include "RdciHealthSubSystem.h"
 #include "RdciTopologyLinkSubSystem.h"
+#include "RdciPolicySubSystem.h"
+#include "RdciStatsSubSystem.h"
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcException.h"
 #include "rdc_lib/rdc_common.h"
@@ -42,8 +44,11 @@ THE SOFTWARE.
 #define RDC_CLIENT_VERSION_RELEASE 0
 
 #define RDC_CLIENT_VERSION_CREATE_STRING(MAJOR, MINOR, RELEASE) (#MAJOR "." #MINOR "." #RELEASE)
-#define RDC_CLIENT_VERSION_EXPAND_PARTS(MAJOR_STR, MINOR_STR, RELEASE_STR) RDC_CLIENT_VERSION_CREATE_STRING(MAJOR_STR, MINOR_STR, RELEASE_STR)
-#define RDC_CLIENT_VERSION_STRING RDC_CLIENT_VERSION_EXPAND_PARTS(RDC_CLIENT_VERSION_MAJOR, RDC_CLIENT_VERSION_MINOR, RDC_CLIENT_VERSION_RELEASE)
+#define RDC_CLIENT_VERSION_EXPAND_PARTS(MAJOR_STR, MINOR_STR, RELEASE_STR) \
+  RDC_CLIENT_VERSION_CREATE_STRING(MAJOR_STR, MINOR_STR, RELEASE_STR)
+#define RDC_CLIENT_VERSION_STRING                                                     \
+  RDC_CLIENT_VERSION_EXPAND_PARTS(RDC_CLIENT_VERSION_MAJOR, RDC_CLIENT_VERSION_MINOR, \
+                                  RDC_CLIENT_VERSION_RELEASE)
 
 #define Q(x) #x
 #define QUOTE(x) Q(x)
@@ -52,7 +57,7 @@ int main(int argc, char** argv) {
   const std::string usage_help =
       "Usage:\trdci <subsystem>|<options>\n"
       "subsystem: \n"
-      "          discovery, dmon, group, fieldgroup, stats, diag, policy, health, topo\n"
+      "          discovery, dmon, group, fieldgroup, stats, diag, config, policy, health, topo\n"
       "options: \n"
       "        -v(--version) : Print client version information only\n";
 
@@ -63,11 +68,12 @@ int main(int argc, char** argv) {
 
   if (strcmp(argv[1], "-v") == 0 || strcmp(argv[1], "--version") == 0) {
 #ifdef CURRENT_GIT_HASH
-      std::cout << "RDCI : " << RDC_CLIENT_VERSION_STRING << "+" << QUOTE(CURRENT_GIT_HASH) << std::endl;
+    std::cout << "RDCI : " << RDC_CLIENT_VERSION_STRING << "+" << QUOTE(CURRENT_GIT_HASH)
+              << std::endl;
 #else
-      std::cout << "RDCI : " << RDC_CLIENT_VERSION_STRING << std::endl;
+    std::cout << "RDCI : " << RDC_CLIENT_VERSION_STRING << std::endl;
 #endif
-      exit(0);
+    exit(0);
   }
 
   amd::rdc::RdciSubSystemPtr subsystem;
@@ -91,6 +97,8 @@ int main(int argc, char** argv) {
       subsystem.reset(new amd::rdc::RdciStatsSubSystem());
     } else if (subsystem_name == "policy") {
       subsystem.reset(new amd::rdc::RdciPolicySubSystem());
+    } else if (subsystem_name == "config") {
+      subsystem.reset(new amd::rdc::RdciConfigSubSystem());
     } else {
       std::cout << usage_help;
       exit(0);

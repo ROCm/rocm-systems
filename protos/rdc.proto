@@ -207,6 +207,16 @@ service RdcAPI {
   //  rdc_gpu_group_t group_id,
   //  rdc_policy_condition_t condition);
   rpc GetTopology(GetTopologyRequest) returns (GetTopologyResponse) {}
+
+  //Set one configure
+  rpc SetConfig(SetConfigRequest) returns (SetConfigResponse) {}
+
+  //Get the setting
+  rpc GetConfig(GetConfigRequest) returns (GetConfigResponse) {}
+
+  //Clear the setting
+  rpc ClearConfig(ClearConfigRequest) returns (ClearConfigResponse) {}
+
 }
 
 message Empty {
@@ -720,3 +730,42 @@ message GetTopologyResponse {
   Topology toppology = 2;
 }
 
+
+
+enum rdc_config_type {
+  RDC_CFG_GFX_CLOCK_LIMIT = 0;
+  RDC_CFG_MEMORY_CLOCK_LIMIT = 1;
+  RDC_CFG_POWER_LIMIT = 2;
+}
+
+message rdc_config_setting {
+  rdc_config_type type = 1;
+  uint64 target_value = 2;
+}
+
+message SetConfigRequest {
+  uint32 group_id = 1;
+  rdc_config_setting setting = 2;
+}
+
+message SetConfigResponse {
+  uint32 status = 1;
+}
+
+message GetConfigRequest {
+  uint32 group_id = 1;
+  uint32 num_of_settings = 2;
+}
+
+message GetConfigResponse {
+  uint32 status = 1;
+  repeated rdc_config_setting settings = 2;
+}
+
+message ClearConfigRequest {
+  uint32 group_id = 1;
+}
+
+message ClearConfigResponse {
+  uint32 status = 1;
+}
