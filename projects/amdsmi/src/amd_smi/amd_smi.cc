@@ -992,7 +992,7 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
             fclose(fp);
         }
 
-        status = smi_amdgpu_get_market_name_from_dev_id(dev_info.device_id, info->market_name);
+        status = smi_amdgpu_get_market_name_from_dev_id(gpu_device, info->market_name);
         if (status != AMDSMI_STATUS_SUCCESS) {
             rsmi_wrapper(rsmi_dev_brand_get, processor_handle,
                 info->market_name, AMDSMI_256_LENGTH);
@@ -1868,6 +1868,9 @@ amdsmi_status_t  amdsmi_get_clk_freq(amdsmi_processor_handle processor_handle,
         clk_type == AMDSMI_CLK_TYPE_VCLK1 ||
         clk_type == AMDSMI_CLK_TYPE_DCLK0 ||
         clk_type == AMDSMI_CLK_TYPE_DCLK1 ) {
+        // Default unit is MHz
+        char unit = 'M';
+
         // when f == nullptr -> check if metrics are supported
         amdsmi_gpu_metrics_t metric_info;
         amdsmi_gpu_metrics_t * metric_info_p = nullptr;
@@ -1882,22 +1885,42 @@ amdsmi_status_t  amdsmi_get_clk_freq(amdsmi_processor_handle processor_handle,
         if (r_status != AMDSMI_STATUS_SUCCESS)
             return r_status;
 
-        f->num_supported = 1;
+        f->num_supported = 0;
         if (clk_type == AMDSMI_CLK_TYPE_VCLK0) {
-            f->current = metric_info_p->current_vclk0;
-            f->frequency[0] = metric_info_p->average_vclk0_frequency;
+            f->current = 0;
+            f->frequency[0] = std::numeric_limits<uint64_t>::max();
+            if (metric_info_p->current_vclk0 != std::numeric_limits<uint16_t>::max()) {
+                f->frequency[0] = static_cast<uint64_t>(metric_info_p->current_vclk0)
+                    * amd::smi::get_multiplier_from_char(unit);  // match MHz ROCm SMI provides
+                f->num_supported = 1;
+            }
         }
         if (clk_type == AMDSMI_CLK_TYPE_VCLK1) {
-            f->current = metric_info_p->current_vclk1;
-            f->frequency[0] = metric_info_p->average_vclk1_frequency;
+            f->current = 0;
+            f->frequency[0] = std::numeric_limits<uint64_t>::max();
+            if (metric_info_p->current_vclk1 != std::numeric_limits<uint16_t>::max()) {
+                f->frequency[0] = static_cast<uint64_t>(metric_info_p->current_vclk1)
+                    * amd::smi::get_multiplier_from_char(unit);  // match MHz ROCm SMI provides
+                f->num_supported = 1;
+            }
         }
         if (clk_type == AMDSMI_CLK_TYPE_DCLK0) {
-            f->current = metric_info_p->current_dclk0;
-            f->frequency[0] = metric_info_p->average_dclk0_frequency;
+            f->current = 0;
+            f->frequency[0] = std::numeric_limits<uint64_t>::max();
+            if (metric_info_p->current_dclk0 != std::numeric_limits<uint16_t>::max()) {
+                f->frequency[0] = static_cast<uint64_t>(metric_info_p->current_dclk0)
+                    * amd::smi::get_multiplier_from_char(unit);  // match MHz ROCm SMI provides
+                f->num_supported = 1;
+            }
         }
         if (clk_type == AMDSMI_CLK_TYPE_DCLK1) {
-            f->current = metric_info_p->current_dclk1;
-            f->frequency[0] = metric_info_p->average_dclk1_frequency;
+            f->current = 0;
+            f->frequency[0] = std::numeric_limits<uint64_t>::max();
+            if (metric_info_p->current_dclk1 != std::numeric_limits<uint16_t>::max()) {
+                f->frequency[0] = static_cast<uint64_t>(metric_info_p->current_dclk1)
+                    * amd::smi::get_multiplier_from_char(unit);  // match MHz ROCm SMI provides
+                f->num_supported = 1;
+            }
         }
 
         return r_status;

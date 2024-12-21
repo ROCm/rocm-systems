@@ -3688,11 +3688,12 @@ def amdsmi_get_clk_freq(
         )
     )
 
-    return {
+    dict_ret = {
         "num_supported": freq.num_supported,
         "current": freq.current,
         "frequency": list(freq.frequency)[: freq.num_supported],
     }
+    return dict_ret
 
 
 def amdsmi_get_soc_pstate(

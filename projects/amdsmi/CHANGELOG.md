@@ -198,6 +198,15 @@ GPU: 1
 
 ### Optimized
 
+- **Added additional help information to `amd-smi set --help` command**.  
+  - sub commands now detail what values are acceptable as input. These include:
+    - `amd-smi set --perf-level` with performance levels
+    - `amd-smi set --profile` with power profiles
+    - `amd-smi set --perf-determinism` with preset GPU frequency limits
+    - `amd-smi set --power-cap` with valid power cap values
+    - `amd-smi set --soc-pstate` with soc pstate policy ids
+    - `amd-smi set --xgmi-plpd` with xgmi per link power down policy ids
+
 - **Modified `amd-smi` CLI to allow case insensitive arguments if the argument does not begin with a single dash**.  
   - With this change `amd-smi version` and `amd-smi VERSION` will now yield the same output.
   - `amd-smi static --bus` and `amd-smi STATIC --BUS` will produce identical results.
@@ -212,14 +221,14 @@ $ amd-smi xgmi
 LINK METRIC TABLE:
        bdf          bit_rate max_bandwidth link_type 0000:05:00.0 0000:26:00.0 0000:46:00.0 0000:65:00.0 0000:85:00.0 0000:a6:00.0 0000:c6:00.0 0000:e5:00.0
 GPU0   0000:05:00.0 32 Gb/s  512 Gb/s      XGMI
- Read                                               N/A          1.123 PB     1.123 PB     1.123 PB     1.123 PB     1.123 PB     1.123 PB     1.123 PB
- Write                                              N/A          229.1 MB     229.1 MB     229.1 MB     229.1 MB     229.1 MB     229.1 MB     229.1 MB
+ Read                                                N/A          1.123 PB     1.123 PB     1.123 PB     1.123 PB     1.123 PB     1.123 PB     1.123 PB
+ Write                                               N/A          229.1 MB     229.1 MB     229.1 MB     229.1 MB     229.1 MB     229.1 MB     229.1 MB
 GPU1   0000:26:00.0 32 Gb/s  512 Gb/s      XGMI
- Read                                               1.123 PB     N/A          1.123 PB     1.123 PB     1.123 PB     1.123 PB     1.123 PB     1.123 PB
- Write                                              229.1 MB     N/A          229.1 MB     229.1 MB     229.1 MB     229.1 MB     229.1 MB     229.1 MB
+ Read                                                1.123 PB     N/A          1.123 PB     1.123 PB     1.123 PB     1.123 PB     1.123 PB     1.123 PB
+ Write                                               229.1 MB     N/A          229.1 MB     229.1 MB     229.1 MB     229.1 MB     229.1 MB     229.1 MB
 GPU2   0000:46:00.0 32 Gb/s  512 Gb/s      XGMI
- Read                                               1.123 PB     1.123 PB     N/A          1.123 PB     1.123 PB     1.123 PB     1.123 PB     1.123 PB
- Write                                              229.1 MB     229.1 MB     N/A          229.1 MB     229.1 MB     229.1 MB     229.1 MB     229.1 MB
+ Read                                                1.123 PB     1.123 PB     N/A          1.123 PB     1.123 PB     1.123 PB     1.123 PB     1.123 PB
+ Write                                               229.1 MB     229.1 MB     N/A          229.1 MB     229.1 MB     229.1 MB     229.1 MB     229.1 MB
 ...
 ```
 
@@ -231,10 +240,12 @@ GPU2   0000:46:00.0 32 Gb/s  512 Gb/s      XGMI
 
 - **AMD SMI only reports 63 GPU devices when setting CPX on all 8 GPUs**  
     When setting CPX as a partition mode, there is a DRM node limitation of 64.  
-
     This is a known limitation of the Linux kernel, not the driver. Other drivers, such as those using PCIe space (e.g., ast), may be occupying the necessary DRM nodes.   
-
     The number of DRM nodes used can be checked via `ls /sys/class/drm`  
+
+    - References to kernel changes:  
+      - [Updates to number of node](https://cgit.freedesktop.org/drm/libdrm/commit/?id=7130cb163eb860d4a965c6708b64fe87cee881d6)  
+      - [Identification of node type](https://cgit.freedesktop.org/drm/libdrm/commit/?id=3bc3cca230c5a064b2f554f26fdec27db0f5ead8)  
 
     Options are as follows:
     1) ***Workaround - removing other devices using DRM nodes***  
@@ -246,54 +257,7 @@ GPU2   0000:46:00.0 32 Gb/s  512 Gb/s      XGMI
         d. Confirm `amd-smi list` reports all nodes (this can vary per MI ASIC)
 
     2) ***Update your OS' kernel***  
-        Typically you can find examples online by searching "`Update kernel <your OS version> command line`"
-
-        Ex. "Update kernel Ubuntu 22.04 command line" should provide some good examples.  
-        https://phoenixnap.com/kb/how-to-update-kernel-ubuntu
-
     3) ***Building and installing your own kernel***  
-        *This option is helpful for users on OS distributions that have not yet merged the necessary changes.*  
-        https://phoenixnap.com/kb/build-linux-kernel
-    
-        All changes are in the mainline kernel if users need to build their own.
-    
-        References to kernel changes:
-        ```text
-        for libdrm :
-        Author: James Zhu <James.Zhu@amd.com>
-    
-        Date:   Mon Aug 7 10:14:18 2023 -0400
-        
-            xf86drm: use drm device name to identify drm node type
-    
-            Currently drm node's minor range is used to identify node's type.
-    
-            Since kernel drm uses node type name and minor to generate drm
-    
-            device name, It will be more general to use drm device name to
-    
-            identify drm node type.
-    
-            Signed-off-by: James Zhu <James.Zhu@amd.com>
-    
-            Reviewed-by: Simon Ser <contact@emersion.fr>
-        
-        commit 1080273c2b31db6f031a7f889f3104f53ab4502c
-    
-        Author: James Zhu <James.Zhu@amd.com>
-    
-        Date:   Mon Aug 7 10:06:32 2023 -0400
-        
-            xf86drm: update DRM_NODE_NAME_MAX supporting more nodes
-    
-            Current DRM_NODE_NAME_MAX only can support up to 999 nodes,
-    
-            Update to support up to 2^MINORBITS nodes.
-    
-            Signed-off-by: James Zhu <James.Zhu@amd.com>
-    
-            Reviewed-by: Simon Ser <contact@emersion.fr>
-        ```
 
 ## amd_smi_lib for ROCm 6.3.1
 

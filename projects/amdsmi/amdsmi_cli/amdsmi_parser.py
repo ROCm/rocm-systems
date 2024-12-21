@@ -25,6 +25,7 @@ import os
 import sys
 import time
 import collections
+from amdsmi import amdsmi_interface
 from typing import Optional
 from typing import Union
 
@@ -677,7 +678,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             static_parser.add_argument('-B', '--board', action='store_true', required=False, help=board_help)
             static_parser.add_argument('-R', '--process-isolation', action='store_true', required=False, help=process_isolation_help)
             static_parser.add_argument('-r', '--ras', action='store_true', required=False, help=ras_help)
-            static_parser.add_argument('-C', '--clock', default=False, nargs='*', type=str, required=False, help=clock_help)
+            static_parser.add_argument('-C', '--clock', action='store', default=False, nargs='*', type=str, required=False, help=clock_help)
 
             # Options to display on Hypervisors and Baremetal
             if self.helpers.is_hypervisor() or self.helpers.is_baremetal():
@@ -1072,19 +1073,27 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Help text for Arguments only on BM platforms
         set_fan_help = "Set GPU fan speed (0-255 or 0-100%%)"
-        set_perf_level_help = "Set performance level"
-        set_profile_help = "Set power profile level (#) or a quoted string of custom profile attributes"
-        set_perf_det_help = "Set GPU clock frequency limit and performance level to determinism\n to get minimal performance variation"
+        perf_level_help_choices_str = ", ".join(self.helpers.get_perf_levels()[0][0:-1])
+        set_perf_level_help = f"Set one of the following performance levels:\n\t{perf_level_help_choices_str}"
+        power_profile_choices_str = ", ".join(self.helpers.get_power_profiles()[0:-1])
+        set_profile_help = f"Set power profile level (#) or choose one of available profiles:\n\t{power_profile_choices_str}"
+        perf_det_choices_str = ", ".join(self.helpers.get_perf_det_levels())
+        set_perf_det_help = f"Set performance determinism and select one of the corresponding performance levels:\n\t{perf_det_choices_str}"
         compute_partition_choices_str = ", ".join(self.helpers.get_compute_partition_types())
         memory_partition_choices_str = ", ".join(self.helpers.get_memory_partition_types())
         set_compute_partition_help = f"Set one of the following the compute partition modes:\n\t{compute_partition_choices_str}"
         set_memory_partition_help = f"Set one of the following the memory partition modes:\n\t{memory_partition_choices_str}"
-        set_power_cap_help = "Set power capacity limit"
-        set_soc_pstate_help = "Set the GPU soc pstate policy using policy id\n"
-        set_xgmi_plpd_help = "Set the GPU XGMI per-link power down policy using policy id\n"
-        set_clk_limit_help = "Sets the sclk (aka gfxclk) or mclk minimum and maximum frequencies:\n\tamd-smi set -L (sclk | mclk) (min | max) value"
-        set_clock_freq_help = "Set the sclk (aka gfxclk), mclk, fclk, pcie, or socclk frequency performance level.\nCan take range of acceptable levels."
-        set_process_isolation_help = "Enable or disable the GPU process isolation on a per partition basis:\n\t0 for disable and 1 for enable.\n"
+        power_cap_min, power_cap_max = self.helpers.get_power_caps()
+        power_cap_max = self.helpers.convert_SI_unit(power_cap_max, AMDSMIHelpers.SI_Unit.MICRO)
+        power_cap_min = self.helpers.convert_SI_unit(power_cap_min, AMDSMIHelpers.SI_Unit.MICRO)
+        set_power_cap_help = f"Set power capacity limit:\n\tmin cap: {power_cap_min} W, max cap: {power_cap_max} W"
+        soc_pstate_help_info = ", ".join(self.helpers.get_soc_pstates())
+        set_soc_pstate_help = f"Set the GPU soc pstate policy using policy id, an integer. Valid id's include:\n\t{soc_pstate_help_info}"
+        xgmi_plpd_help_info = ", ".join(self.helpers.get_xgmi_plpd_policies())
+        set_xgmi_plpd_help = f"Set the GPU XGMI per-link power down policy using policy id, an integer. Valid id's include:\n\t{xgmi_plpd_help_info}"
+        set_clk_limit_help = "Sets the sclk (aka gfxclk) or mclk minimum and maximum frequencies. \n\tex: amd-smi set -L (sclk | mclk) (min | max) value"
+        set_clock_freq_help = "Set a number of sclk (aka gfxclk), mclk, fclk, pcie, or socclk frequency performance levels.\n\tUse `amd-smi static --clock` to find acceptable levels."
+        set_process_isolation_help = "Enable or disable the GPU process isolation on a per partition basis: 0 for disable and 1 for enable.\n"
 
         # Help text for CPU set options
         set_cpu_pwr_limit_help = "Set power limit for the given socket. Input parameter is power limit value."
