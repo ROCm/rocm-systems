@@ -1617,7 +1617,7 @@ rocprofv3_error_signal_handler(int signo)
 
     finalize_rocprofv3(__FUNCTION__);
     // below is for testing purposes. re-raising the signal causes CTest to ignore WILL_FAIL ON
-    if(signal_handler_exit) ::exit(signo);
+    if(signal_handler_exit) ::quick_exit(signo);
     ::raise(signo);
 }
 
