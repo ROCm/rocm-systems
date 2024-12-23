@@ -573,6 +573,32 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
       }
       break;
     }
+    case RDC_FI_GPU_MEMORY_MAX_BANDWIDTH: {
+      amdsmi_vram_info_t vram_info;
+
+      value->status = amdsmi_get_gpu_vram_info(processor_handle, &vram_info);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = vram_info.vram_max_bandwidth;
+      }
+      break;
+    }
+    case RDC_FI_GPU_MEMORY_CUR_BANDWIDTH: {
+      amdsmi_engine_usage_t engine_usage;
+      amdsmi_vram_info_t vram_info;
+
+      value->status = amdsmi_get_gpu_activity(processor_handle, &engine_usage);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(engine_usage.umc_activity);
+      }
+
+      value->status = amdsmi_get_gpu_vram_info(processor_handle, &vram_info);
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = value->value.l_int / 100 * vram_info.vram_max_bandwidth;
+      }
+      break;
+    }
     case RDC_FI_GPU_COUNT: {
       uint32_t processor_count = 0;
       // amdsmi is initialized in AMDSMI_INIT_AMD_GPUS mode -> returned sockets are GPUs

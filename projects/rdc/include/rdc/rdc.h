@@ -193,6 +193,8 @@ typedef enum {
   RDC_FI_GPU_MM_ENC_UTIL,      //!< Multimedia encoder busy percentage
   RDC_FI_GPU_MM_DEC_UTIL,      //!< Multimedia decoder busy percentage
   RDC_FI_GPU_MEMORY_ACTIVITY,  //!< Memory busy percentage
+  RDC_FI_GPU_MEMORY_MAX_BANDWIDTH,  //<! The Memory max bandwidth at current memory clock in Mb/Second
+  RDC_FI_GPU_MEMORY_CUR_BANDWIDTH,  //<! The Memory current bandwidth in Mb/Second
 
   /**
    * @brief GPU page related fields
