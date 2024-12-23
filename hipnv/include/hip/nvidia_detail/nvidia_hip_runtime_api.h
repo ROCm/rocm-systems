@@ -2844,11 +2844,14 @@ inline static CUmemLocation hipMemLocationToCUmemLocation(const hipMemLocation* 
     cuLoc.type = (CUmemLocationType)loc->type;
     return cuLoc;
 }
-inline static CUmemAccessDesc hipMemAccessDescToCUmemAccessDesc(const hipMemAccessDesc* desc) {
-    CUmemAccessDesc cuDesc;
-    cuDesc.flags = (CUmemAccess_flags)desc->flags;
-    cuDesc.location.id = (desc->location).id;
-    cuDesc.location.type = (CUmemLocationType)((desc->location).type);
+inline static CUmemAccessDesc* hipMemAccessDescToCUmemAccessDesc(const hipMemAccessDesc* desc,
+                                                                size_t count) {
+    CUmemAccessDesc* cuDesc = (CUmemAccessDesc*)malloc(sizeof(CUmemAccessDesc) * count);
+    for (int i = 0; i < count; i++) {
+        cuDesc[i].flags = (CUmemAccess_flags)desc[i].flags;
+        cuDesc[i].location.id = (desc[i].location).id;
+        cuDesc[i].location.type = (CUmemLocationType)((desc[i].location).type);
+    }
     return cuDesc;
 }
 inline static hipError_t hipMemGetAllocationGranularity(size_t* granularity,
@@ -2925,8 +2928,14 @@ inline static hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHan
 inline static hipError_t hipMemSetAccess(hipDeviceptr_t ptr, size_t size,
                                          const hipMemAccessDesc* desc,
                                          size_t count) {
-    CUmemAccessDesc cuDesc = hipMemAccessDescToCUmemAccessDesc(desc);
-    return hipCUResultTohipError(cuMemSetAccess(ptr, size, &cuDesc, count));
+    if (desc == NULL) {
+      return hipCUResultTohipError(cuMemSetAccess(ptr, size, NULL, count));
+    } else {
+      CUmemAccessDesc* cuDesc = hipMemAccessDescToCUmemAccessDesc(desc, count);
+      auto status = hipCUResultTohipError(cuMemSetAccess(ptr, size, cuDesc, count));
+      free(cuDesc);
+      return status;
+    }
 }
 inline static hipError_t hipMemUnmap(hipDeviceptr_t ptr, size_t size) {
     return hipCUResultTohipError(cuMemUnmap(ptr, size));
