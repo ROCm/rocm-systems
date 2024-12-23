@@ -14,7 +14,7 @@ rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.p
                                                           input.json input.yml)
 
 add_test(
-    NAME rocprofv3-test-cc-pc-sampling-exec-mask-manipulation-input-cmd-execute
+    NAME rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-cmd-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pc-sampling-unit time
         --pc-sampling-method host_trap --pc-sampling-interval 1 -d
@@ -24,23 +24,23 @@ add_test(
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-set(cc-env-pc-sampling "${PRELOAD_ENV}")
+set(pc-sampling-env-host-trap-exec-mask-manipulation "${PRELOAD_ENV}")
 
 set_tests_properties(
-    rocprofv3-test-cc-pc-sampling-exec-mask-manipulation-input-cmd-execute
+    rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-cmd-execute
     PROPERTIES TIMEOUT
                45
                LABELS
                "integration-tests;pc-sampling"
                ENVIRONMENT
-               "${cc-env-pc-sampling}"
+               "${pc-sampling-env-host-trap-exec-mask-manipulation}"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                SKIP_REGULAR_EXPRESSION
                "PC sampling unavailable")
 
 add_test(
-    NAME rocprofv3-test-cc-pc-sampling-exec-mask-manipulation-input-json-execute
+    NAME rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-json-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
         ${CMAKE_CURRENT_BINARY_DIR}/input.json -d
@@ -48,20 +48,20 @@ add_test(
         $<TARGET_FILE:exec-mask-manipulation>)
 
 set_tests_properties(
-    rocprofv3-test-cc-pc-sampling-exec-mask-manipulation-input-json-execute
+    rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-json-execute
     PROPERTIES TIMEOUT
                45
                LABELS
                "integration-tests;pc-sampling"
                ENVIRONMENT
-               "${cc-env-pc-sampling}"
+               "${pc-sampling-env-host-trap-exec-mask-manipulation}"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                SKIP_REGULAR_EXPRESSION
                "PC sampling unavailable")
 
 add_test(
-    NAME rocprofv3-test-cc-pc-sampling-exec-mask-manipulation-input-yaml-execute
+    NAME rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-yaml-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
         ${CMAKE_CURRENT_BINARY_DIR}/input.yml -d
@@ -69,13 +69,13 @@ add_test(
         json -- $<TARGET_FILE:exec-mask-manipulation>)
 
 set_tests_properties(
-    rocprofv3-test-cc-pc-sampling-exec-mask-manipulation-input-yaml-execute
+    rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-yaml-execute
     PROPERTIES TIMEOUT
                45
                LABELS
                "integration-tests;pc-sampling"
                ENVIRONMENT
-               "${cc-env-pc-sampling}"
+               "${pc-sampling-env-host-trap-exec-mask-manipulation}"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                SKIP_REGULAR_EXPRESSION
@@ -84,7 +84,7 @@ set_tests_properties(
 # ========================= Validation tests
 
 add_test(
-    NAME rocprofv3-test-cc-pc-sampling-exec-mask-manipulation-input-cmd-validate
+    NAME rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-cmd-validate
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py -k
         test_validate_pc_sampling_exec_mask_manipulation_ --input-csv
@@ -93,20 +93,21 @@ add_test(
         --all-sampled False)
 
 set_tests_properties(
-    rocprofv3-test-cc-pc-sampling-exec-mask-manipulation-input-cmd-validate
-    PROPERTIES TIMEOUT
-               60
-               LABELS
-               "integration-tests;pc-sampling"
-               DEPENDS
-               "rocprofv3-test-cc-pc-sampling-exec-mask-manipulation-input-cmd-execute"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               SKIP_REGULAR_EXPRESSION
-               "PC sampling unavailable")
+    rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-cmd-validate
+    PROPERTIES
+        TIMEOUT
+        60
+        LABELS
+        "integration-tests;pc-sampling"
+        DEPENDS
+        "rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-cmd-execute"
+        FAIL_REGULAR_EXPRESSION
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+        SKIP_REGULAR_EXPRESSION
+        "PC sampling unavailable")
 
 add_test(
-    NAME rocprofv3-test-cc-pc-sampling-exec-mask-manipulation-input-json-validate
+    NAME rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-json-validate
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py -k
         test_validate_pc_sampling_exec_mask_manipulation_ --input-csv
@@ -115,20 +116,21 @@ add_test(
         --all-sampled False)
 
 set_tests_properties(
-    rocprofv3-test-cc-pc-sampling-exec-mask-manipulation-input-json-validate
-    PROPERTIES TIMEOUT
-               60
-               LABELS
-               "integration-tests;pc-sampling"
-               DEPENDS
-               "rocprofv3-test-cc-pc-sampling-exec-mask-manipulation-input-json-execute"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               SKIP_REGULAR_EXPRESSION
-               "PC sampling unavailable")
+    rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-json-validate
+    PROPERTIES
+        TIMEOUT
+        60
+        LABELS
+        "integration-tests;pc-sampling"
+        DEPENDS
+        "rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-json-execute"
+        FAIL_REGULAR_EXPRESSION
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+        SKIP_REGULAR_EXPRESSION
+        "PC sampling unavailable")
 
 add_test(
-    NAME rocprofv3-test-cc-pc-sampling-exec-mask-manipulation-input-yaml-validate
+    NAME rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-yaml-validate
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py -k
         test_validate_pc_sampling_exec_mask_manipulation_ --input-csv
@@ -137,14 +139,15 @@ add_test(
         --all-sampled False)
 
 set_tests_properties(
-    rocprofv3-test-cc-pc-sampling-exec-mask-manipulation-input-yaml-validate
-    PROPERTIES TIMEOUT
-               60
-               LABELS
-               "integration-tests;pc-sampling"
-               DEPENDS
-               "rocprofv3-test-cc-pc-sampling-exec-mask-manipulation-input-yaml-execute"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               SKIP_REGULAR_EXPRESSION
-               "PC sampling unavailable")
+    rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-yaml-validate
+    PROPERTIES
+        TIMEOUT
+        60
+        LABELS
+        "integration-tests;pc-sampling"
+        DEPENDS
+        "rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-yaml-execute"
+        FAIL_REGULAR_EXPRESSION
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+        SKIP_REGULAR_EXPRESSION
+        "PC sampling unavailable")
