@@ -277,8 +277,8 @@ TEST(att_decoder_waitcnt_test, gfx12)
 
     // ds vs exp vs bvh
     append_isa(31, "ds_store");
-    append_isa(32, "bvh_");
-    append_isa(33, "bvh_");
+    append_isa(32, "_bvh_");
+    append_isa(33, "_bvh_");
     append_isa(34, "ds_param_load");
     append_isa(35, "ds_direct");
     append_isa(36, "ds_load");

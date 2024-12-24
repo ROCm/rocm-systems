@@ -109,7 +109,11 @@ classify(const std::string& inst)
         return MemoryInstType::TYPE_NOT_MEM;
     }
 
-    if(inst.find("ds_") <= 1)
+    if(inst.find("_bvh") != npos)
+    {
+        return MemoryInstType::TYPE_BVH;
+    }
+    else if(inst.find("ds_") <= 1)
     {
         if(inst.find("param_load") != npos || inst.find("ds_direct") != npos)
             return MemoryInstType::TYPE_LDS_DIRECT;
@@ -123,8 +127,6 @@ classify(const std::string& inst)
         return bStore ? MemoryInstType::TYPE_GLOBAL_STOR : MemoryInstType::TYPE_GLOBAL_LOAD;
     else if(inst.find("flat_") == 0)
         return bStore ? MemoryInstType::TYPE_FLAT_STOR : MemoryInstType::TYPE_FLAT_LOAD;
-    else if(inst.find("bvh_") != npos)
-        return MemoryInstType::TYPE_BVH;
     else
         return MemoryInstType::TYPE_NOT_MEM;
 }

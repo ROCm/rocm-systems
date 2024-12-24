@@ -102,7 +102,7 @@ typedef enum
 typedef enum
 {
     ATT_INST_NONE = 0,
-    ATT_INST_LAST = 11,
+    ATT_INST_LAST = 15,
 } att_wave_inst_category_t;
 
 typedef struct
