@@ -117,6 +117,20 @@ typedef union _LARGE_INTEGER {
 
 typedef LARGE_INTEGER *PLARGE_INTEGER;
 
+typedef union _ULARGE_INTEGER {
+    struct {
+        ULONG LowPart;
+        ULONG HighPart;
+    } DUMMYSTRUCTNAME;
+    struct {
+        ULONG LowPart;
+        ULONG HighPart;
+    } u;
+    ULONGLONG QuadPart;
+} ULARGE_INTEGER;
+
+typedef ULARGE_INTEGER *PULARGE_INTEGER;
+
 typedef struct _LUID {
     ULONG LowPart;
     LONG HighPart;
