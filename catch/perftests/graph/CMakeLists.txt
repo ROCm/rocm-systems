@@ -1,4 +1,4 @@
-# Copyright (c) 2023 Advanced Micro Devices, Inc. All Rights Reserved.
+# Copyright (c) 2024 Advanced Micro Devices, Inc. All Rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -18,11 +18,11 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-add_custom_target(perf_test COMMAND "${CMAKE_CTEST_COMMAND}" -R "Perf_"
-                            COMMENT "Build complete, now executing the performnce test ...")
+# Common Tests - Test independent of all platforms
+set(TEST_SRC
+    hipPerfGraphLaunch.cc
+)
 
-add_subdirectory(memory)
-add_subdirectory(stream)
-add_subdirectory(dispatch)
-add_subdirectory(compute)
-add_subdirectory(graph)
+hip_add_exe_to_target(NAME perfGraphTest
+                      TEST_SRC ${TEST_SRC}
+                      TEST_TARGET_NAME perf_test)
