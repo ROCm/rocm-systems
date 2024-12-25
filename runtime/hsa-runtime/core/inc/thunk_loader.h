@@ -318,6 +318,7 @@ class ThunkLoader {
                                       HsaPcSamplingTraceId traceId);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtPcSamplingSupport))(void);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtModelEnabled))(bool* enable);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtQueueRingDoorbell))(HSA_QUEUEID QueueId);
 
     /* drm API */
     typedef int (DRM_DEF(amdgpu_device_initialize))(int fd, \
@@ -454,6 +455,7 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtPcSamplingStop)* HSAKMT_PFN(hsaKmtPcSamplingStop);
     HSAKMT_DEF(hsaKmtPcSamplingSupport)* HSAKMT_PFN(hsaKmtPcSamplingSupport);
     HSAKMT_DEF(hsaKmtModelEnabled)* HSAKMT_PFN(hsaKmtModelEnabled);
+    HSAKMT_DEF(hsaKmtQueueRingDoorbell)* HSAKMT_PFN(hsaKmtQueueRingDoorbell);
 
     DRM_DEF(amdgpu_device_initialize)* DRM_PFN(amdgpu_device_initialize);
     DRM_DEF(amdgpu_device_deinitialize)* DRM_PFN(amdgpu_device_deinitialize);

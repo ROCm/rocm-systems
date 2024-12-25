@@ -348,6 +348,9 @@ namespace core {
       HSAKMT_PFN(hsaKmtModelEnabled) = (HSAKMT_DEF(hsaKmtModelEnabled)*)dlsym(dtif_handle, "hsaKmtModelEnabled");
       if (HSAKMT_PFN(hsaKmtModelEnabled) == NULL) goto ERROR;
 
+      HSAKMT_PFN(hsaKmtQueueRingDoorbell) = (HSAKMT_DEF(hsaKmtQueueRingDoorbell)*)dlsym(dtif_handle, "hsaKmtQueueRingDoorbell");
+      if (HSAKMT_PFN(hsaKmtQueueRingDoorbell) == NULL) goto ERROR;
+
       DRM_PFN(amdgpu_device_initialize) = (DRM_DEF(amdgpu_device_initialize)*)dlsym(dtif_handle, "amdgpu_device_initialize");
       if (DRM_PFN(amdgpu_device_initialize) == NULL) goto ERROR;
 
