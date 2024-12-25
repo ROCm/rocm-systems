@@ -79,7 +79,7 @@ jobs:
         ls -la
 
     - name: Enable PC Sampling
-      if: ${{ contains(matrix.runner, 'mi200') }}
+      if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
       shell: bash
       run: |
           echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
@@ -202,7 +202,7 @@ jobs:
         ls -la
 
     - name: Enable PC Sampling
-      if: ${{ contains(matrix.runner, 'mi200') }}
+      if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
       shell: bash
       run: |
           echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
@@ -366,7 +366,7 @@ jobs:
         ls -la
 
     - name: Enable PC Sampling
-      if: ${{ contains(matrix.runner, 'mi200') }}
+      if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
       shell: bash
       run: |
           echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
@@ -614,7 +614,7 @@ jobs:
         ls -la
 
     - name: Enable PC Sampling
-      if: ${{ contains(matrix.runner, 'mi200') }}
+      if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
       shell: bash
       run: |
           echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
