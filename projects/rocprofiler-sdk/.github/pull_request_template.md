@@ -10,6 +10,7 @@
 - [ ] Bug Fix
 - [ ] Optimization
 - [ ] Documentation Update
+- [ ] Continuous Integration
 
 ## Technical details
 
