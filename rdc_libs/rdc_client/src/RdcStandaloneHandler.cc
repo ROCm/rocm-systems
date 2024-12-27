@@ -129,6 +129,12 @@ bool RdcStandaloneHandler::copy_gpu_usage_info(const ::rdc::GpuUsageInfo& src,
   target->pcie_rx.average = rxstats.average();
   target->pcie_rx.standard_deviation = rxstats.standard_deviation();
 
+  const ::rdc::JobStatsSummary& pcietotalstats = src.pcie_total();
+  target->pcie_total.max_value = pcietotalstats.max_value();
+  target->pcie_total.min_value = pcietotalstats.min_value();
+  target->pcie_total.average = pcietotalstats.average();
+  target->pcie_total.standard_deviation = pcietotalstats.standard_deviation();
+
   const ::rdc::JobStatsSummary& mcstats = src.memory_clock();
   target->memory_clock.max_value = mcstats.max_value();
   target->memory_clock.min_value = mcstats.min_value();

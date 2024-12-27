@@ -33,7 +33,7 @@ RdcGroupSettingsImpl::RdcGroupSettingsImpl() {
   // Add the default job stats fields
   rdc_field_t job_fields[] = {RDC_FI_GPU_MEMORY_USAGE, RDC_FI_POWER_USAGE, RDC_FI_GPU_CLOCK,
                               RDC_FI_GPU_UTIL,         RDC_FI_PCIE_TX,     RDC_FI_PCIE_RX,
-                              RDC_FI_MEM_CLOCK,        RDC_FI_GPU_TEMP};
+                              RDC_FI_PCIE_BANDWIDTH,   RDC_FI_MEM_CLOCK,   RDC_FI_GPU_TEMP};
   char job_field_group[] = "JobStatsFields";
   rdc_field_grp_t fgid = JOB_FIELD_ID;
 

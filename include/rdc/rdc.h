@@ -422,6 +422,9 @@ typedef struct {
   uint64_t ecc_uncorrect;               //!< Uncorrectable errors
   rdc_stats_summary_t pcie_tx;          //!< Bytes sent over PCIe stats
   rdc_stats_summary_t pcie_rx;          //!< Bytes received over PCIe stats
+  rdc_stats_summary_t pcie_total;       //!< Total PCIe bandwidth stats
+                                        //!< pcie_tx/pcie_rx are not available on mi300, max integer
+                                        //!< returned, so use pcie_total
   rdc_stats_summary_t power_usage;      //!< GPU Power usage stats
   rdc_stats_summary_t gpu_clock;        //!< GPU Clock speed stats
   rdc_stats_summary_t memory_clock;     //!< Mem. Clock speed stats
