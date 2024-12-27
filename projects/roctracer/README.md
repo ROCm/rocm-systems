@@ -1,5 +1,8 @@
 # ROC-tracer
 
+> [!NOTE]
+> The published documentation is available at [ROCTracer](https://rocm.docs.amd.com/projects/roctracer/en/latest/index.html) in an organized, easy-to-read format, with search and a table of contents.
+
 - **ROC-tracer library: Runtimes Generic Callback/Activity APIs**
 
   The goal of the implementation is to provide a generic independent from specific runtime profiler to trace API and asynchronous activity.
