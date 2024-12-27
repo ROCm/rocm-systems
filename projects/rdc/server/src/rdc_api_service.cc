@@ -523,6 +523,12 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
   stats->set_average(src.pcie_rx.average);
   stats->set_standard_deviation(src.pcie_rx.standard_deviation);
 
+  stats = target->mutable_pcie_total();
+  stats->set_max_value(src.pcie_total.max_value);
+  stats->set_min_value(src.pcie_total.min_value);
+  stats->set_average(src.pcie_total.average);
+  stats->set_standard_deviation(src.pcie_total.standard_deviation);
+
   stats = target->mutable_memory_clock();
   stats->set_max_value(src.memory_clock.max_value);
   stats->set_min_value(src.memory_clock.min_value);

@@ -210,6 +210,7 @@ class rdc_gpu_usage_info_t(Structure):
             ,("ecc_uncorrect", c_uint64)
             ,("pcie_tx", rdc_stats_summary_t)
             ,("pcie_rx", rdc_stats_summary_t)
+            ,("pcie_total", rdc_stats_summary_t)
             ,("power_usage", rdc_stats_summary_t)
             ,("gpu_clock", rdc_stats_summary_t)
             ,("memory_clock", rdc_stats_summary_t)

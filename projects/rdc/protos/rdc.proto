@@ -447,6 +447,7 @@ message GpuUsageInfo {
   JobStatsSummary pcie_rx = 13;
   JobStatsSummary memory_clock = 14;
   JobStatsSummary gpu_temperature = 15;
+  JobStatsSummary pcie_total = 16;
 }
 message GetJobStatsResponse {
   uint32 status = 1;

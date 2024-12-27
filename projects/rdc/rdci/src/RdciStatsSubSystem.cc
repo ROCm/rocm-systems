@@ -203,6 +203,12 @@ void RdciStatsSubSystem::show_job_stats_json(const rdc_gpu_usage_info_t& gpu_inf
   std::cout << "\"pcie_tx_avg\": " << gpu_info.pcie_tx.average << ",";
   std::cout << "\"pcie_tx_stanard_deviation\": " << gpu_info.pcie_tx.standard_deviation << ",";
 
+  std::cout << "\"pcie_total_max\": " << gpu_info.pcie_total.max_value << ",";
+  std::cout << "\"pcie_total_min\": " << gpu_info.pcie_total.min_value << ",";
+  std::cout << "\"pcie_total_avg\": " << gpu_info.pcie_total.average << ",";
+  std::cout << "\"pcie_total_stanard_deviation\": " << gpu_info.pcie_total.standard_deviation
+            << ",";
+
   std::cout << "\"ecc_correct\": " << gpu_info.ecc_correct << ",";
   std::cout << "\"ecc_uncorrect\": " << gpu_info.ecc_uncorrect;
 }
@@ -254,13 +260,45 @@ void RdciStatsSubSystem::show_job_stats(const rdc_gpu_usage_info_t& gpu_info) co
             << " Avg: " << gpu_info.gpu_temperature.average << " SD: " << std::fixed
             << std::setprecision(2) << gpu_info.gpu_temperature.standard_deviation << "\n";
   std::cout << "| PCIe Rx Bandwidth (megabytes)    | "
-            << "Max: " << gpu_info.pcie_rx.max_value << " Min: " << gpu_info.pcie_rx.min_value
-            << " Avg: " << gpu_info.pcie_rx.average << " SD: " << std::fixed << std::setprecision(2)
-            << gpu_info.pcie_rx.standard_deviation << "\n";
+            << "Max: "
+            << (gpu_info.pcie_rx.max_value == std::numeric_limits<int>::max()
+                    ? "N/A"
+                    : std::to_string(gpu_info.pcie_rx.max_value))
+            << " Min: "
+            << (gpu_info.pcie_rx.min_value == std::numeric_limits<int>::max()
+                    ? "N/A"
+                    : std::to_string(gpu_info.pcie_rx.min_value))
+            << " Avg: "
+            << (gpu_info.pcie_rx.average == std::numeric_limits<int>::max()
+                    ? "N/A"
+                    : std::to_string(gpu_info.pcie_rx.average))
+            << " SD: " << std::fixed << std::setprecision(2)
+            << (gpu_info.pcie_rx.standard_deviation == std::numeric_limits<float>::max()
+                    ? "N/A"
+                    : std::to_string(gpu_info.pcie_rx.standard_deviation))
+            << "\n";
   std::cout << "| PCIe Tx Bandwidth (megabytes)    | "
-            << "Max: " << gpu_info.pcie_tx.max_value << " Min: " << gpu_info.pcie_tx.min_value
-            << " Avg: " << gpu_info.pcie_tx.average << " SD: " << std::fixed << std::setprecision(2)
-            << gpu_info.pcie_tx.standard_deviation << "\n";
+            << "Max: "
+            << (gpu_info.pcie_tx.max_value == std::numeric_limits<int>::max()
+                    ? "N/A"
+                    : std::to_string(gpu_info.pcie_tx.max_value))
+            << " Min: "
+            << (gpu_info.pcie_tx.min_value == std::numeric_limits<int>::max()
+                    ? "N/A"
+                    : std::to_string(gpu_info.pcie_tx.min_value))
+            << " Avg: "
+            << (gpu_info.pcie_tx.average == std::numeric_limits<int>::max()
+                    ? "N/A"
+                    : std::to_string(gpu_info.pcie_tx.average))
+            << " SD: " << std::fixed << std::setprecision(2)
+            << (gpu_info.pcie_tx.standard_deviation == std::numeric_limits<float>::max()
+                    ? "N/A"
+                    : std::to_string(gpu_info.pcie_tx.standard_deviation))
+            << "\n";
+  std::cout << "| PCIe Total Bandwidth (megabytes)    | "
+            << "Max: " << gpu_info.pcie_total.max_value << " Min: " << gpu_info.pcie_total.min_value
+            << " Avg: " << gpu_info.pcie_total.average << " SD: " << std::fixed
+            << std::setprecision(2) << gpu_info.pcie_total.standard_deviation << "\n";
   std::cout << "| Correctable ECC Errors           | " << gpu_info.ecc_correct << "\n";
   std::cout << "| Uncorrectable ECC Errors         | " << gpu_info.ecc_uncorrect << "\n";
   std::cout << "+----------------------------------"
