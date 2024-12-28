@@ -129,6 +129,12 @@ bool RdcStandaloneHandler::copy_gpu_usage_info(const ::rdc::GpuUsageInfo& src,
   target->pcie_rx.average = rxstats.average();
   target->pcie_rx.standard_deviation = rxstats.standard_deviation();
 
+  const ::rdc::JobStatsSummary& pcietotalstats = src.pcie_total();
+  target->pcie_total.max_value = pcietotalstats.max_value();
+  target->pcie_total.min_value = pcietotalstats.min_value();
+  target->pcie_total.average = pcietotalstats.average();
+  target->pcie_total.standard_deviation = pcietotalstats.standard_deviation();
+
   const ::rdc::JobStatsSummary& mcstats = src.memory_clock();
   target->memory_clock.max_value = mcstats.max_value();
   target->memory_clock.min_value = mcstats.min_value();
@@ -1027,27 +1033,46 @@ rdc_status_t RdcStandaloneHandler::rdc_device_topology_get(uint32_t gpu_index,
   if (err_status != RDC_ST_OK) return err_status;
 
   ::rdc::Topology Topology = reply.toppology();
-  results->num_of_gpus= Topology.num_of_gpus();
-  results->numa_node= Topology.numa_node();
+  results->num_of_gpus = Topology.num_of_gpus();
+  results->numa_node = Topology.numa_node();
 
   for (uint32_t i = 0; i < Topology.num_of_gpus(); ++i) {
-  ::rdc::TopologyLinkInfo linkinfo = Topology.link_infos(i);
-  results->link_infos[i].gpu_index=linkinfo.gpu_index();
-  results->link_infos[i].weight=linkinfo.weight();
-  results->link_infos[i].min_bandwidth=linkinfo.min_bandwidth();
-  results->link_infos[i].max_bandwidth=linkinfo.max_bandwidth();
-  results->link_infos[i].hops=linkinfo.hops();
-  results->link_infos[i].link_type=static_cast<rdc_topology_link_type_t>(linkinfo.link_type());
-  results->link_infos[i].is_p2p_accessible=linkinfo.p2p_accessible();
+    ::rdc::TopologyLinkInfo linkinfo = Topology.link_infos(i);
+    results->link_infos[i].gpu_index = linkinfo.gpu_index();
+    results->link_infos[i].weight = linkinfo.weight();
+    results->link_infos[i].min_bandwidth = linkinfo.min_bandwidth();
+    results->link_infos[i].max_bandwidth = linkinfo.max_bandwidth();
+    results->link_infos[i].hops = linkinfo.hops();
+    results->link_infos[i].link_type = static_cast<rdc_topology_link_type_t>(linkinfo.link_type());
+    results->link_infos[i].is_p2p_accessible = linkinfo.p2p_accessible();
   }
 
   return RDC_ST_OK;
 }
 
 rdc_status_t RdcStandaloneHandler::rdc_link_status_get(rdc_link_status_t* results) {
-  ::rdc::UpdateAllFieldsResponse reply;
-  ::grpc::Status status = grpc::Status::OK;
-  return error_handle(status, reply.status());
+  ::rdc::Empty request;
+  ::rdc::GetLinkStatusResponse reply;
+  ::grpc::ClientContext context;
+
+  ::grpc::Status status = stub_->GetLinkStatus(&context, request, &reply);
+  rdc_status_t err_status = error_handle(status, reply.status());
+  if (err_status != RDC_ST_OK) return err_status;
+
+  ::rdc::LinkStatus LinkStatus = reply.linkstatus();
+  results->num_of_gpus = LinkStatus.num_of_gpus();
+
+  for (uint32_t i = 0; i < LinkStatus.num_of_gpus(); ++i) {
+    ::rdc::GpuLinkStatus gpulinkstatus = LinkStatus.gpus(i);
+    results->gpus[i].gpu_index = gpulinkstatus.gpu_index();
+    results->gpus[i].num_of_links = gpulinkstatus.num_of_links();
+    results->gpus[i].link_types = static_cast<rdc_topology_link_type_t>(gpulinkstatus.link_types());
+    for (uint32_t n = 0; n < gpulinkstatus.num_of_links(); n++) {
+      results->gpus[i].link_states[n] = static_cast<rdc_link_state_t>(gpulinkstatus.link_states(n));
+    }
+  }
+
+  return RDC_ST_OK;
 }
 
 }  // namespace rdc

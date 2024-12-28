@@ -90,6 +90,8 @@ class rdc_field_t(c_int):
      RDC_FI_GPU_MM_ENC_UTIL = 503
      RDC_FI_GPU_MM_DEC_UTIL = 504
      RDC_FI_GPU_MEMORY_ACTIVITY = 505
+     RDC_FI_GPU_MEMORY_MAX_BANDWIDTH = 506
+     RDC_FI_GPU_MEMORY_CUR_BANDWIDTH = 507
      RDC_FI_ECC_CORRECT_TOTAL = 600
      RDC_FI_ECC_UNCORRECT_TOTAL = 601
      RDC_FI_ECC_SDMA_SEC = 602
@@ -208,6 +210,7 @@ class rdc_gpu_usage_info_t(Structure):
             ,("ecc_uncorrect", c_uint64)
             ,("pcie_tx", rdc_stats_summary_t)
             ,("pcie_rx", rdc_stats_summary_t)
+            ,("pcie_total", rdc_stats_summary_t)
             ,("power_usage", rdc_stats_summary_t)
             ,("gpu_clock", rdc_stats_summary_t)
             ,("memory_clock", rdc_stats_summary_t)

@@ -183,6 +183,7 @@ rdc_status_t RdcSmiLib::rdc_telemetry_fields_query(uint32_t field_ids[MAX_NUM_FI
       RDC_HEALTH_XGMI_ERROR,          RDC_HEALTH_PCIE_REPLAY_COUNT,   RDC_HEALTH_RETIRED_PAGE_NUM,
       RDC_HEALTH_PENDING_PAGE_NUM,    RDC_HEALTH_RETIRED_PAGE_LIMIT,  RDC_HEALTH_UNCORRECTABLE_PAGE_LIMIT,
       RDC_HEALTH_POWER_THROTTLE_TIME, RDC_HEALTH_THERMAL_THROTTLE_TIME,
+      RDC_FI_GPU_MEMORY_MAX_BANDWIDTH,  RDC_FI_GPU_MEMORY_CUR_BANDWIDTH,
   };
   std::copy(fields.begin(), fields.end(), field_ids);
   *field_count = fields.size();

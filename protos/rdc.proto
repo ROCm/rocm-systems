@@ -217,6 +217,8 @@ service RdcAPI {
   //Clear the setting
   rpc ClearConfig(ClearConfigRequest) returns (ClearConfigResponse) {}
 
+  // rdc_status_t GetLinkStatus()
+  rpc GetLinkStatus(Empty) returns (GetLinkStatusResponse) {}
 }
 
 message Empty {
@@ -445,6 +447,7 @@ message GpuUsageInfo {
   JobStatsSummary pcie_rx = 13;
   JobStatsSummary memory_clock = 14;
   JobStatsSummary gpu_temperature = 15;
+  JobStatsSummary pcie_total = 16;
 }
 message GetJobStatsResponse {
   uint32 status = 1;
@@ -728,6 +731,32 @@ message GetTopologyRequest {
 message GetTopologyResponse {
   uint32 status = 1;
   Topology toppology = 2;
+}
+message GpuLinkStatus{
+  uint32 gpu_index = 1;
+  uint32 num_of_links = 2;
+  enum LinkTypes {
+    RDC_IOLINK_TYPE_UNDEFINED = 0;
+    RDC_IOLINK_TYPE_PCIEXPRESS = 1;
+    RDC_IOLINK_TYPE_XGMI = 2;
+    RDCI_IOLINK_TYPE_NUMIOLINKTYPES = 3;
+  };
+  LinkTypes link_types = 3;
+  enum LinkState{
+    RDC_LINK_STATE_NOT_SUPPORTED = 0;
+    RDC_LINK_STATE_DISABLED = 1;
+    RDC_LINK_STATE_DOWN = 2;
+    RDC_LINK_STATE_UP = 3;
+  };
+  repeated LinkState link_states = 4;
+}
+message LinkStatus{
+  uint32 num_of_gpus = 1;
+  repeated GpuLinkStatus gpus = 2;
+}
+message GetLinkStatusResponse{
+  uint32 status = 1;
+  LinkStatus linkstatus = 2;
 }
 
 

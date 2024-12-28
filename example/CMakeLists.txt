@@ -132,6 +132,12 @@ set(CONFIG_EXAMPLE_EXE "config")
 add_executable(${CONFIG_EXAMPLE_EXE} "${CONFIG_EXAMPLE_SRC_LIST}")
 target_link_libraries(${CONFIG_EXAMPLE_EXE} pthread dl rdc_bootstrap)
 
+set(TOPOLOGYLINK_EXAMPLE_SRC_LIST "topologylink_example.cc")
+cmake_print_variables(TOPOLOGYLINK_EXAMPLE_SRC_LIST)
+set(TOPOLOGYLINK_EXAMPLE_EXE "topologylink")
+add_executable(${TOPOLOGYLINK_EXAMPLE_EXE} "${TOPOLOGYLINK_EXAMPLE_SRC_LIST}")
+target_link_libraries(${TOPOLOGYLINK_EXAMPLE_EXE} pthread dl rdc_bootstrap)
+
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                    Finished Cmake Example                          ")
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
