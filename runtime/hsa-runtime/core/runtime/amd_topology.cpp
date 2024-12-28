@@ -267,6 +267,10 @@ void SurfaceGpuList(std::vector<int32_t>& gpu_list, bool xnack_mode, bool enable
     hsa_status_t ret = gpu_driver.GetNodeProperties(node_prop, gpu_list[idx]);
     assert(ret == HSA_STATUS_SUCCESS && "Error in getting Node Properties");
 
+    // disable interrupt signal for DTIF platform
+    if (core::Runtime::runtime_singleton_->flag().enable_dtif())
+      core::g_use_interrupt_wait = false;
+
     // Instantiate a Gpu device. The IO links
     // of this node have already been registered
     assert((node_prop.NumFComputeCores != 0) && "Improper node used for GPU device discovery.");
