@@ -147,9 +147,10 @@ class RdcEmbeddedHandler final : public RdcHandler {
   RdcWatchTablePtr watch_table_;
   RdcMetricsUpdaterPtr metrics_updater_;
   RdcPolicyPtr policy_;
+  RdcTopologyLinkPtr topologylink_;
   RdcConfigSettingsPtr config_handler_;
   std::future<void> updater_;
-  RdcTopologyLinkPtr topologylink_;
+  
 };
 
 }  // namespace rdc

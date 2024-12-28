@@ -193,6 +193,8 @@ typedef enum {
   RDC_FI_GPU_MM_ENC_UTIL,      //!< Multimedia encoder busy percentage
   RDC_FI_GPU_MM_DEC_UTIL,      //!< Multimedia decoder busy percentage
   RDC_FI_GPU_MEMORY_ACTIVITY,  //!< Memory busy percentage
+  RDC_FI_GPU_MEMORY_MAX_BANDWIDTH,  //<! The Memory max bandwidth at current memory clock in Mb/Second
+  RDC_FI_GPU_MEMORY_CUR_BANDWIDTH,  //<! The Memory current bandwidth in Mb/Second
 
   /**
    * @brief GPU page related fields
@@ -420,6 +422,9 @@ typedef struct {
   uint64_t ecc_uncorrect;               //!< Uncorrectable errors
   rdc_stats_summary_t pcie_tx;          //!< Bytes sent over PCIe stats
   rdc_stats_summary_t pcie_rx;          //!< Bytes received over PCIe stats
+  rdc_stats_summary_t pcie_total;       //!< Total PCIe bandwidth stats
+                                        //!< pcie_tx/pcie_rx are not available on mi300, max integer
+                                        //!< returned, so use pcie_total
   rdc_stats_summary_t power_usage;      //!< GPU Power usage stats
   rdc_stats_summary_t gpu_clock;        //!< GPU Clock speed stats
   rdc_stats_summary_t memory_clock;     //!< Mem. Clock speed stats
@@ -654,7 +659,7 @@ typedef enum {
 #define RDC_MAX_NUM_OF_LINKS 16
 
 typedef struct {
-  int32_t gpu_index;
+  uint32_t gpu_index;
   uint32_t num_of_links;                              // The size of the array link_states
   rdc_topology_link_type_t link_types;                // XGMI, PCIe, and so on
   rdc_link_state_t link_states[RDC_MAX_NUM_OF_LINKS];

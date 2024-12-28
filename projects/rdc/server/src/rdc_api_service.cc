@@ -523,6 +523,12 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
   stats->set_average(src.pcie_rx.average);
   stats->set_standard_deviation(src.pcie_rx.standard_deviation);
 
+  stats = target->mutable_pcie_total();
+  stats->set_max_value(src.pcie_total.max_value);
+  stats->set_min_value(src.pcie_total.min_value);
+  stats->set_average(src.pcie_total.average);
+  stats->set_standard_deviation(src.pcie_total.standard_deviation);
+
   stats = target->mutable_memory_clock();
   stats->set_max_value(src.memory_clock.max_value);
   stats->set_min_value(src.memory_clock.min_value);
@@ -1103,6 +1109,39 @@ int RdcAPIServiceImpl::PolicyCallback(rdc_policy_callback_response_t* userData) 
   (void)(context);
   rdc_status_t status = rdc_config_clear(rdc_handle_, request->group_id());
   reply->set_status(status);
+  return ::grpc::Status::OK;
+}
+
+::grpc::Status RdcAPIServiceImpl::GetLinkStatus(::grpc::ServerContext* context,
+                                                const ::rdc::Empty* request,
+                                                ::rdc::GetLinkStatusResponse* reply) {
+  (void)(context);
+  if (!reply || !request) {
+    return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
+  }
+
+  rdc_link_status_t link_status_results;
+  // call RDC link status API
+  rdc_status_t result = rdc_link_status_get(rdc_handle_, &link_status_results);
+  reply->set_status(result);
+  if (result != RDC_ST_OK) {
+    return ::grpc::Status::OK;
+  }
+
+  ::rdc::LinkStatus* linkstatus = reply->mutable_linkstatus();
+  linkstatus->set_num_of_gpus(link_status_results.num_of_gpus);
+  for (int32_t i = 0; i < link_status_results.num_of_gpus; ++i) {
+    ::rdc::GpuLinkStatus* gpulinkstatus = linkstatus->add_gpus();
+    gpulinkstatus->set_gpu_index(link_status_results.gpus[i].gpu_index);
+    gpulinkstatus->set_num_of_links(link_status_results.gpus[i].num_of_links);
+    gpulinkstatus->set_link_types(
+        static_cast<::rdc::GpuLinkStatus_LinkTypes>(link_status_results.gpus[i].link_types));
+    for (uint32_t n = 0; n < link_status_results.gpus[i].num_of_links; n++) {
+      gpulinkstatus->add_link_states(static_cast<::rdc::GpuLinkStatus_LinkState>(
+                                            link_status_results.gpus[i].link_states[n]));
+    }
+  }
+
   return ::grpc::Status::OK;
 }
 

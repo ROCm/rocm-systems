@@ -28,7 +28,7 @@ THE SOFTWARE.
 #include "rdc_lib/rdc_common.h"
 namespace amd {
 namespace rdc {
-RdciTopologyLinkSubSystem::RdciTopologyLinkSubSystem() {}
+RdciTopologyLinkSubSystem::RdciTopologyLinkSubSystem() : topology_ops_(TOPOLOGY_UNKNOWN) {}
 
 void RdciTopologyLinkSubSystem::parse_cmd_opts(int argc, char** argv) {
   const int HOST_OPTIONS = 1000;
@@ -109,8 +109,7 @@ void RdciTopologyLinkSubSystem::process() {
                   << "------------------+\n";
         for (uint32_t i = 0; i < topology.num_of_gpus; i++) {
           std::cout << "| To GPU " << i + 1 << "\t\t"
-                    << "| " << topology_link_type_to_str(RDC_IOLINK_TYPE_XGMI)
-                    << "\t\t\t|\n";
+                    << "| " << topology_link_type_to_str(RDC_IOLINK_TYPE_XGMI) << "\t\t\t|\n";
         }
         std::cout << "+-----------------------+"
                   << "-----------------------------"
@@ -118,6 +117,9 @@ void RdciTopologyLinkSubSystem::process() {
       }
       break;
     }
+    default:
+      throw RdcException(RDC_ST_BAD_PARAMETER, "Unknown command");
+      break;
   }
 }
 }  // namespace rdc
