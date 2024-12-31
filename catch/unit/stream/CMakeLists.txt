@@ -55,3 +55,4 @@ hip_add_exe_to_target(
 
 add_executable(hipStreamLegacy_exe EXCLUDE_FROM_ALL hipStreamLegacy_exe.cc)
 add_dependencies(StreamTest hipStreamLegacy_exe)
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipStreamLegacy_exe)
