@@ -492,6 +492,9 @@
   <metric name="FP64_ACTIVE"                                            expr=TOTAL_64_OPS/GRBM_GUI_ACTIVE descr="The ratio of total floating point 64 bit ops / total number of cycles across all XCCs."></metric>
   <metric name="ENGINE_ACTIVE"                                          expr=GPU_UTIL/100 descr="Ratio between 0-1 of the time the GPU is active"></metric>
   <metric name="TENSOR_ACTIVE"                                          expr=MfmaUtil descr="Tensor core active in percent, identical to MfmaUtil"></metric>
+  <metric name="RDC_OPS_16_PER_SIMDCYCLE"                               expr=TOTAL_16_OPS*XCC_NUM/(GRBM_COUNT*SIMD_NUM) descr="The number of 16 bits OPS executed"></metric>
+  <metric name="RDC_OPS_32_PER_SIMDCYCLE"                               expr=TOTAL_32_OPS*XCC_NUM/(GRBM_COUNT*SIMD_NUM) descr="The number of 32 bits OPS executed"></metric>
+  <metric name="RDC_OPS_64_PER_SIMDCYCLE"                               expr=TOTAL_64_OPS*XCC_NUM/(GRBM_COUNT*SIMD_NUM) descr="The number of 64 bits OPS executed"></metric>
 </gfx940_expr>
 
 <gfx10_expr>
