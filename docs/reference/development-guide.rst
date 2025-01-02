@@ -356,15 +356,15 @@ lowers the sampling frequency for the real-time sampler
 to 10 interrupts per second of real-time.
 
 The ROCm Systems Profiler-specific implementation can be found in
-`source/lib/rocprof-sys/library/sampling.cpp <https://github.com/ROCm/rocprofiler-systems/blob/main/source/lib/rocprof-sys/library/sampling.cpp>`_.
-Within `sampling.cpp <https://github.com/ROCm/rocprofiler-systems/blob/main/source/lib/rocprof-sys/library/sampling.cpp>`_,
+`source/lib/rocprof-sys/library/sampling.cpp <https://github.com/ROCm/rocprofiler-systems/blob/amd-mainline/source/lib/rocprof-sys/library/sampling.cpp>`_.
+Within `sampling.cpp <https://github.com/ROCm/rocprofiler-systems/blob/amd-mainline/source/lib/rocprof-sys/library/sampling.cpp>`_,
 there is a bundle of three sampling components:
 
-* `backtrace_timestamp <https://github.com/ROCm/rocprofiler-systems/blob/main/source/lib/rocprof-sys/library/components/backtrace_timestamp.hpp>`_ simply
+* `backtrace_timestamp <https://github.com/ROCm/rocprofiler-systems/blob/amd-mainline/source/lib/rocprof-sys/library/components/backtrace_timestamp.hpp>`_ simply
   records the wall-clock time of the sample.
-* `backtrace <https://github.com/ROCm/rocprofiler-systems/blob/main/source/lib/rocprof-sys/library/components/backtrace.hpp>`_
+* `backtrace <https://github.com/ROCm/rocprofiler-systems/blob/amd-mainline/source/lib/rocprof-sys/library/components/backtrace.hpp>`_
   records the call-stack via libunwind.
-* `backtrace_metrics <https://github.com/ROCm/rocprofiler-systems/blob/main/source/lib/rocprof-sys/library/components/backtrace_metrics.hpp>`_
+* `backtrace_metrics <https://github.com/ROCm/rocprofiler-systems/blob/amd-mainline/source/lib/rocprof-sys/library/components/backtrace_metrics.hpp>`_
   records the sample metrics, such as peak RSS and the hardware counters.
 
 These three components are bundled together in
@@ -387,7 +387,7 @@ Time-window constraint model
 ========================================
 
 With the recent introduction of tracing delay and duration, the
-`constraint namespace <https://github.com/ROCm/rocprofiler-systems/blob/main/source/lib/core/constraint.hpp>`_
+`constraint namespace <https://github.com/ROCm/rocprofiler-systems/blob/amd-mainline/source/lib/core/constraint.hpp>`_
 was introduced to improve the management of delays and duration limits for
 data collection. The ``spec`` class accepts a clock identifier, a delay value, a duration value, and an
 integer indicating how many times to repeat the delay and duration cycle. It is therefore
