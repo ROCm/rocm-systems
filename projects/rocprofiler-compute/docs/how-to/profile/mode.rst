@@ -1,27 +1,27 @@
 .. meta::
-   :description: How to use Omniperf's profile mode
-   :keywords: Omniperf, ROCm, profiler, tool, Instinct, accelerator, AMD,
+   :description: How to use ROCm Compute Profiler's profile mode
+   :keywords: ROCm Compute Profiler, ROCm, profiler, tool, Instinct, accelerator, AMD,
               profiling, profile mode
 
 ************
 Profile mode
 ************
 
-The following chapter walks you through Omniperf's core profiling features by
+The following chapter walks you through ROCm Compute Profiler's core profiling features by
 example.
 
-Learn about analysis with Omniperf in :doc:`../analyze/mode`. For an overview of
-Omniperf's other modes, see :ref:`modes`.
+Learn about analysis with ROCm Compute Profiler in :doc:`../analyze/mode`. For an overview of
+ROCm Compute Profiler's other modes, see :ref:`modes`.
 
 Profiling
 =========
 
-Use the ``omniperf`` executable to acquire all necessary performance monitoring
+Use the ``rocprof-compute`` executable to acquire all necessary performance monitoring
 data through analysis of compute workloads.
 
-Profiling with Omniperf yields the following benefits.
+Profiling with ROCm Compute Profiler yields the following benefits.
 
-* :ref:`Automate counter collection <profiling-routine>`: Omniperf handles all
+* :ref:`Automate counter collection <profiling-routine>`: ROCm Compute Profiler handles all
   of your profiling via pre-configured input files.
 
 * :ref:`Filtering <filtering>`: Apply runtime filters to speed up the profiling
@@ -30,7 +30,7 @@ Profiling with Omniperf yields the following benefits.
 * :ref:`Standalone roofline <standalone-roofline>`: Isolate a subset of built-in
   metrics or build your own profiling configuration.
 
-Run ``omniperf profile -h`` for more details. See
+Run ``rocprof-compute profile -h`` for more details. See
 :ref:`Basic usage <modes-profile>`.
 
 .. _profile-example:
@@ -38,14 +38,14 @@ Run ``omniperf profile -h`` for more details. See
 Profiling example
 -----------------
 
-The `<https://github.com/ROCm/omniperf/blob/amd-mainline/sample/vcopy.cpp>`__ repository
+The `<https://github.com/ROCm/rocprofiler-compute/blob/amd-mainline/sample/vcopy.cpp>`__ repository
 includes source code for a sample GPU compute workload, ``vcopy.cpp``. A copy of
 this file is available in the ``share/sample`` subdirectory after a normal
-Omniperf installation, or via the ``$OMNIPERF_SHARE/sample`` directory when
+ROCm Compute Profiler installation, or via the ``$ROCPROFCOMPUTE_SHARE/sample`` directory when
 using the supplied modulefile.
 
 The examples in this section use a compiled version of the ``vcopy`` workload to
-demonstrate the use of Omniperf in MI accelerator performance analysis. Unless
+demonstrate the use of ROCm Compute Profiler in MI accelerator performance analysis. Unless
 otherwise noted, the performance analysis is done on the
 :ref:`MI200 platform <def-soc>`.
 
@@ -54,7 +54,7 @@ Workload compilation
 
 The following example demonstrates compilation of ``vcopy``.
 
-.. code-block:: shell
+.. code-block:: shell-session
 
    $ hipcc vcopy.cpp -o vcopy
    $ ls
@@ -74,20 +74,20 @@ The following example demonstrates compilation of ``vcopy``.
 
 The following sample command profiles the ``vcopy`` workload.
 
-.. code-block:: shell
+.. code-block:: shell-session
 
-   $ omniperf profile --name vcopy -- ./vcopy -n 1048576 -b 256
+   $ rocprof-compute profile --name vcopy -- ./vcopy -n 1048576 -b 256
 
-     ___                  _                  __ 
-    / _ \ _ __ ___  _ __ (_)_ __   ___ _ __ / _|
-   | | | | '_ ` _ \| '_ \| | '_ \ / _ \ '__| |_ 
-   | |_| | | | | | | | | | | |_) |  __/ |  |  _|
-    \___/|_| |_| |_|_| |_|_| .__/ \___|_|  |_|  
-                           |_|                  
+                                    __                                       _
+    _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
+   | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
+   | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
+   |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
+                  |_|                                           |_|
 
-   Omniperf version: 2.0.0
+   rocprofiler-compute version: 2.0.0
    Profiler choice: rocprofv1
-   Path: /home/auser/repos/omniperf/sample/workloads/vcopy/MI200
+   Path: /home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200
    Target: MI200
    Command: ./vcopy -n 1048576 -b 256
    Kernel Selection: None
@@ -98,10 +98,10 @@ The following sample command profiles the ``vcopy`` workload.
    Collecting Performance Counters
    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-   [profiling] Current input file: /home/auser/repos/omniperf/sample/workloads/vcopy/MI200/perfmon/SQ_IFETCH_LEVEL.txt
-      |-> [rocprof] RPL: on '240312_174329' from '/opt/rocm-5.2.1' in '/home/auser/repos/omniperf/src/omniperf'
+   [profiling] Current input file: /home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200/perfmon/SQ_IFETCH_LEVEL.txt
+      |-> [rocprof] RPL: on '240312_174329' from '/opt/rocm-5.2.1' in '/home/auser/repos/rocprofiler-compute/src/rocprof-compute'
       |-> [rocprof] RPL: profiling '""./vcopy -n 1048576 -b 256""'
-      |-> [rocprof] RPL: input file '/home/auser/repos/omniperf/sample/workloads/vcopy/MI200/perfmon/SQ_IFETCH_LEVEL.txt'
+      |-> [rocprof] RPL: input file '/home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200/perfmon/SQ_IFETCH_LEVEL.txt'
       |-> [rocprof] RPL: output dir '/tmp/rpl_data_240312_174329_692890'
       |-> [rocprof] RPL: result dir '/tmp/rpl_data_240312_174329_692890/input0_results_240312_174329'
       |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_240312_174329_692890/input0.xml"
@@ -121,15 +121,15 @@ The following sample command profiles the ``vcopy`` workload.
       |-> [rocprof] Finished copying the output vector from the GPU to the CPU
       |-> [rocprof] Releasing GPU memory
       |-> [rocprof] Releasing CPU memory
-      |-> [rocprof] 
+      |-> [rocprof]
      |-> [rocprof] ROCPRofiler: 1 contexts collected, output directory /tmp/rpl_data_240312_174329_692890/input0_results_240312_174329
-       |-> [rocprof] File '/home/auser/repos/omniperf/sample/workloads/vcopy/MI200/SQ_IFETCH_LEVEL.csv' is generating
-      |-> [rocprof] 
-   [profiling] Current input file: /home/auser/repos/omniperf/sample/workloads/vcopy/MI200/perfmon/SQ_INST_LEVEL_LDS.txt
+       |-> [rocprof] File '/home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200/SQ_IFETCH_LEVEL.csv' is generating
+      |-> [rocprof]
+   [profiling] Current input file: /home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200/perfmon/SQ_INST_LEVEL_LDS.txt
 
    ...
 
-   [roofline] Checking for roofline.csv in /home/auser/repos/omniperf/sample/workloads/vcopy/MI200
+   [roofline] Checking for roofline.csv in /home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200
    [roofline] No roofline data found. Generating...
    Empirical Roofline Calculation
    Copyright © 2022  Advanced Micro Devices, Inc. All rights reserved.
@@ -171,9 +171,9 @@ The following sample command profiles the ``vcopy`` workload.
 
 .. _profiling-routine:
 
-Notice the two main stages in Omniperf's *default* profiling routine.
+Notice the two main stages in ROCm Compute Profiler's *default* profiling routine.
 
-1. The first stage collects all the counters needed for Omniperf analysis
+1. The first stage collects all the counters needed for ROCm Compute Profiler analysis
    (omitting any filters you have provided).
 
 2. The second stage collects data for the roofline analysis (this stage can be
@@ -187,18 +187,18 @@ example:
 * "MI200" for the AMD Instinct MI200 family of accelerators
 * "MI100" for the AMD Instinct MI100 family of accelerators
 
-The SoC names are generated as a part of Omniperf, and do not *always*
+The SoC names are generated as a part of ROCm Compute Profiler, and do not *always*
 distinguish between different accelerators in the same family; for instance,
 an Instinct MI210 vs an Instinct MI250.
 
 .. note::
 
-   Additionally, you will notice a few extra files. An SoC parameters file, 
+   Additionally, you will notice a few extra files. An SoC parameters file,
    ``sysinfo.csv``, is created to reflect the target device settings. All
    profiling output is stored in ``log.txt``. Roofline-specific benchmark
    results are stored in ``roofline.csv``.
 
-.. code-block:: shell
+.. code-block:: shell-session
 
    $ ls workloads/vcopy/MI200/
    total 112
@@ -222,8 +222,8 @@ Filtering
 
 To reduce profiling time and the counters collected, you should use profiling
 filters. Profiling filters and their functionality depend on the underlying
-profiler being used. While Omniperf is profiler-agnostic, this following is a
-detailed description of profiling filters available when using Omniperf with
+profiler being used. While ROCm Compute Profiler is profiler-agnostic, this following is a
+detailed description of profiling filters available when using ROCm Compute Profiler with
 :doc:`ROCProfiler <rocprofiler:index>`.
 
 Filtering options
@@ -255,7 +255,7 @@ Hardware component filtering
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 You can profile specific hardware components to speed up the profiling process.
-In Omniperf, the term hardware block to refers to a hardware component or a
+In ROCm Compute Profiler, the term hardware block to refers to a hardware component or a
 group of hardware components. All profiling results are accumulated in the same
 target directory without overwriting those for other hardware components. This
 enables incremental profiling and analysis.
@@ -263,16 +263,16 @@ enables incremental profiling and analysis.
 The following example only gathers hardware counters for the shader sequencer
 (SQ) and L2 cache (TCC) components, skipping all other hardware components.
 
-.. code-block:: shell
+.. code-block:: shell-session
 
-   $ omniperf profile --name vcopy -b SQ TCC -- ./vcopy -n 1048576 -b 256
+   $ rocprof-compute profile --name vcopy -b SQ TCC -- ./vcopy -n 1048576 -b 256
 
-     ___                  _                  __ 
-    / _ \ _ __ ___  _ __ (_)_ __   ___ _ __ / _|
-   | | | | '_ ` _ \| '_ \| | '_ \ / _ \ '__| |_ 
-   | |_| | | | | | | | | | | |_) |  __/ |  |  _|
-    \___/|_| |_| |_|_| |_|_| .__/ \___|_|  |_|  
-                           |_|                  
+                                    __                                       _
+    _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
+   | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
+   | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
+   |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
+                  |_|                                           |_|
 
    fname: pmc_cpc_perf: Skipped
    fname: pmc_spi_perf: Skipped
@@ -289,9 +289,9 @@ The following example only gathers hardware counters for the shader sequencer
    fname: pmc_sqc_perf1: Skipped
    fname: pmc_sq_perf6: Added
    fname: pmc_sq_perf2: Added
-   Omniperf version: 2.0.0
+   rocprofiler-compute version: 2.0.0
    Profiler choice: rocprofv1
-   Path: /home/auser/repos/omniperf/sample/workloads/vcopy/MI200
+   Path: /home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200
    Target: MI200
    Command: ./vcopy -n 1048576 -b 256
    Kernel Selection: None
@@ -314,20 +314,20 @@ kernel name substring list to isolate desired kernels.
 The following example demonstrates profiling isolating the kernel matching
 substring ``vecCopy``.
 
-.. code-block:: shell
+.. code-block:: shell-session
 
-   $ omniperf profile --name vcopy -k vecCopy -- ./vcopy -n 1048576 -b 256
+   $ rocprof-compute profile --name vcopy -k vecCopy -- ./vcopy -n 1048576 -b 256
 
-     ___                  _                  __ 
-    / _ \ _ __ ___  _ __ (_)_ __   ___ _ __ / _|
-   | | | | '_ ` _ \| '_ \| | '_ \ / _ \ '__| |_ 
-   | |_| | | | | | | | | | | |_) |  __/ |  |  _|
-    \___/|_| |_| |_|_| |_|_| .__/ \___|_|  |_|  
-                           |_|                  
+                                    __                                       _
+    _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
+   | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
+   | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
+   |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
+                  |_|                                           |_|
 
-   Omniperf version: 2.0.0
+   rocprofiler-compute version: 2.0.0
    Profiler choice: rocprofv1
-   Path: /home/auser/repos/omniperf/sample/workloads/vcopy/MI200
+   Path: /home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200
    Target: MI200
    Command: ./vcopy -n 1048576 -b 256
    Kernel Selection: ['vecCopy']
@@ -344,25 +344,25 @@ substring ``vecCopy``.
 Dispatch filtering
 ^^^^^^^^^^^^^^^^^^
 
-Dispatch filtering is based on the *global* dispatch index of kernels in a run. 
+Dispatch filtering is based on the *global* dispatch index of kernels in a run.
 
 The following example profiles only the first kernel dispatch in the execution
 of the application (note zero-based indexing).
 
-.. code-block:: shell
+.. code-block:: shell-session
 
-   $ omniperf profile --name vcopy -d 0 -- ./vcopy -n 1048576 -b 256
+   $ rocprof-compute profile --name vcopy -d 0 -- ./vcopy -n 1048576 -b 256
 
-     ___                  _                  __ 
-    / _ \ _ __ ___  _ __ (_)_ __   ___ _ __ / _|
-   | | | | '_ ` _ \| '_ \| | '_ \ / _ \ '__| |_ 
-   | |_| | | | | | | | | | | |_) |  __/ |  |  _|
-    \___/|_| |_| |_|_| |_|_| .__/ \___|_|  |_|  
-                           |_|                  
+                                    __                                       _
+    _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
+   | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
+   | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
+   |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
+                  |_|                                           |_|
 
-   Omniperf version: 2.0.0
+   rocprofiler-compute version: 2.0.0
    Profiler choice: rocprofv1
-   Path: /home/auser/repos/omniperf/sample/workloads/vcopy/MI200
+   Path: /home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200
    Target: MI200
    Command: ./vcopy -n 1048576 -b 256
    Kernel Selection: None
@@ -381,7 +381,7 @@ Standalone roofline
 
 If you are only interested in generating roofline analysis data try using
 ``--roof-only``. This will only collect counters relevant to roofline, as well
-as generate a standalone ``.pdf`` output of your roofline plot. 
+as generate a standalone ``.pdf`` output of your roofline plot.
 
 Roofline options
 ----------------
@@ -408,14 +408,14 @@ Roofline only
 
 The following example demonstrates profiling roofline data only:
 
-.. code-block:: shell
+.. code-block:: shell-session
 
-   $ omniperf profile --name vcopy --roof-only -- ./vcopy -n 1048576 -b 256
+   $ rocprof-compute profile --name vcopy --roof-only -- ./vcopy -n 1048576 -b 256
 
    ...
-   [roofline] Checking for roofline.csv in /home/auser/repos/omniperf/sample/workloads/vcopy/MI200
+   [roofline] Checking for roofline.csv in /home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200
    [roofline] No roofline data found. Generating...
-   Checking for roofline.csv in /home/auser/repos/omniperf/sample/workloads/vcopy/MI200
+   Checking for roofline.csv in /home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200
    Empirical Roofline Calculation
    Copyright © 2022  Advanced Micro Devices, Inc. All rights reserved.
    Total detected GPU devices: 4
@@ -427,7 +427,7 @@ The following example demonstrates profiling roofline data only:
 An inspection of our workload output folder shows ``.pdf`` plots were generated
 successfully.
 
-.. code-block:: shell
+.. code-block:: shell-session
 
    $ ls workloads/vcopy/MI200/
    total 48
@@ -441,15 +441,14 @@ successfully.
 
 .. note::
 
-   Omniperf generates two roofline outputs to organize results and reduce
+   ROCm Compute Profiler generates two roofline outputs to organize results and reduce
    clutter. One chart plots FP32/FP64 performance while the other plots I8/FP16
    performance.
 
-The following image is a sample ``empirRoof_gpu-ALL_fp32_fp64.pdf`` roofline
+The following image is a sample ``empirRoof_gpu-0_int8_fp16.pdf`` roofline
 plot.
 
-.. image:: ../../data/profile/sample-roof-plot.png
+.. image:: ../../data/profile/sample-roof-plot.jpg
    :align: center
-   :alt: Sample Omniperf roofline output
+   :alt: Sample ROCm Compute Profiler roofline output
    :width: 800
-

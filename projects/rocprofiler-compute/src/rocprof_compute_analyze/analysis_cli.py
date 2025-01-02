@@ -23,9 +23,9 @@
 ##############################################################################el
 
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
-from utils.utils import demarcate, console_error
 from utils import file_io, parser, tty
 from utils.kernel_name_shortener import kernel_name_shortener
+from utils.utils import console_error, demarcate
 
 
 class cli_analysis(OmniAnalyze_Base):
@@ -39,18 +39,26 @@ class cli_analysis(OmniAnalyze_Base):
         if self.get_args().random_port:
             console_error("--gui flag is required to enable --random-port")
         for d in self.get_args().path:
+
+            # create 'mega dataframe'
+            self._runs[d[0]].raw_pmc = file_io.create_df_pmc(
+                d[0],
+                self.get_args().nodes,
+                self.get_args().kernel_verbose,
+                self.get_args().verbose,
+            )
+
             file_io.create_df_kernel_top_stats(
+                df_in=self._runs[d[0]].raw_pmc,
                 raw_data_dir=d[0],
                 filter_gpu_ids=self._runs[d[0]].filter_gpu_ids,
                 filter_dispatch_ids=self._runs[d[0]].filter_dispatch_ids,
+                filter_nodes=self._runs[d[0]].filter_nodes,
                 time_unit=self.get_args().time_unit,
                 max_stat_num=self.get_args().max_stat_num,
                 kernel_verbose=self.get_args().kernel_verbose,
             )
-            # create 'mega dataframe'
-            self._runs[d[0]].raw_pmc = file_io.create_df_pmc(
-                d[0], self.get_args().kernel_verbose, self.get_args().verbose
-            )
+
             # demangle and overwrite original 'Kernel_Name'
             kernel_name_shortener(
                 self._runs[d[0]].raw_pmc, self.get_args().kernel_verbose

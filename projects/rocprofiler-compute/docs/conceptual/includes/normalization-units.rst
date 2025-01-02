@@ -34,7 +34,7 @@ include:
        that is, the total runtime of the kernel in seconds, as measured by the
        :doc:`command processor <command-processor>`.
 
-By default, Omniperf uses the ``per_wave`` normalization.
+By default, ROCm Compute Profiler uses the ``per_wave`` normalization.
 
 .. tip::
 
@@ -44,4 +44,3 @@ By default, Omniperf uses the ``per_wave`` normalization.
    (and what types) of instructions are used per wavefront. A ``per_kernel``
    normalization can be useful to get the total aggregate values of metrics for
    comparison between different configurations.
-

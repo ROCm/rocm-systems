@@ -22,26 +22,31 @@
 # SOFTWARE.
 ##############################################################################el
 
-from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
-from utils.utils import demarcate, console_debug, console_error
-from utils import file_io, parser
-from utils.gui import build_bar_chart, build_table_chart
-
+import copy
 import os
 import random
-import copy
+from pathlib import Path
+
 import dash
 import dash_bootstrap_components as dbc
-from dash import html
-from dash import dcc
+from dash import dcc, html
 from dash.dependencies import Input, Output, State
+
+from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
+from utils import file_io, parser
+from utils.gui import build_bar_chart, build_table_chart
+from utils.utils import console_debug, console_error, demarcate
+
+PROJECT_NAME = "rocprofiler-compute"
 
 
 class webui_analysis(OmniAnalyze_Base):
     def __init__(self, args, supported_archs):
         super().__init__(args, supported_archs)
-        self.app = dash.Dash(__name__, external_stylesheets=[dbc.themes.CYBORG])
-        self.dest_dir = os.path.abspath(args.path[0][0])
+        self.app = dash.Dash(
+            __name__, title=PROJECT_NAME, external_stylesheets=[dbc.themes.CYBORG]
+        )
+        self.dest_dir = str(Path(args.path[0][0]).absolute().resolve())
         self.arch = None
 
         self.__hidden_sections = ["Memory Chart", "Roofline"]
@@ -106,7 +111,10 @@ class webui_analysis(OmniAnalyze_Base):
             panel_configs = copy.deepcopy(arch_configs.panel_configs)
             # Generate original raw df
             base_data[base_run].raw_pmc = file_io.create_df_pmc(
-                self.dest_dir, self.get_args().kernel_verbose, self.get_args().verbose
+                self.dest_dir,
+                self.get_args().nodes,
+                self.get_args().kernel_verbose,
+                self.get_args().verbose,
             )
             console_debug("analysis", "gui dispatch filter is %s" % disp_filt)
             console_debug("analysis", "gui kernel filter is %s" % kernel_filter)
@@ -119,9 +127,11 @@ class webui_analysis(OmniAnalyze_Base):
 
             # Reload the pmc_kernel_top.csv for Top Stats panel
             file_io.create_df_kernel_top_stats(
+                df_in=base_data[base_run].raw_pmc,
                 raw_data_dir=str(self.dest_dir),
                 filter_gpu_ids=base_data[base_run].filter_gpu_ids,
                 filter_dispatch_ids=base_data[base_run].filter_dispatch_ids,
+                filter_nodes=self._runs[d[0]].filter_nodes,
                 time_unit=self.get_args().time_unit,
                 max_stat_num=base_data[base_run].filter_top_n,
                 kernel_verbose=self.get_args().kernel_verbose,
@@ -159,7 +169,7 @@ class webui_analysis(OmniAnalyze_Base):
             div_children.append(
                 get_memchart(panel_configs[300]["data source"], base_data[base_run])
             )
-            has_roofline = os.path.isfile(os.path.join(self.dest_dir, "roofline.csv"))
+            has_roofline = Path(self.dest_dir).joinpath("roofline.csv").is_file()
             if has_roofline and hasattr(self.get_socs()[self.arch], "roofline_obj"):
                 # update roofline for visualization in GUI
                 self.get_socs()[self.arch].analysis_setup(
@@ -272,17 +282,23 @@ class webui_analysis(OmniAnalyze_Base):
         super().pre_processing()
         if len(self._runs) == 1:
             args = self.get_args()
+
+            # create 'mega dataframe'
+            self._runs[self.dest_dir].raw_pmc = file_io.create_df_pmc(
+                self.dest_dir,
+                self.get_args().nodes,
+                self.get_args().kernel_verbose,
+                args.verbose,
+            )
             file_io.create_df_kernel_top_stats(
+                df_in=self._runs[self.dest_dir].raw_pmc,
                 raw_data_dir=self.dest_dir,
                 filter_gpu_ids=self._runs[self.dest_dir].filter_gpu_ids,
                 filter_dispatch_ids=self._runs[self.dest_dir].filter_dispatch_ids,
+                filter_nodes=self._runs[self.dest_dir].filter_nodes,
                 time_unit=args.time_unit,
                 max_stat_num=args.max_stat_num,
                 kernel_verbose=self.get_args().kernel_verbose,
-            )
-            # create 'mega dataframe'
-            self._runs[self.dest_dir].raw_pmc = file_io.create_df_pmc(
-                self.dest_dir, self.get_args().kernel_verbose, args.verbose
             )
             # create the loaded kernel stats
             parser.load_kernel_top(self._runs[self.dest_dir], self.dest_dir)

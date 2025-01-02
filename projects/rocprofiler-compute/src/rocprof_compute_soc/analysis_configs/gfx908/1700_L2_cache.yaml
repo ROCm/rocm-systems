@@ -24,7 +24,7 @@ Panel Config:
           Bandwidth:
             value: ((100 * AVG(((TCC_REQ_sum * 64) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk / 1000) * 64) * TO_INT($total_l2_chan)))
             unit: pct
-            tips: 
+            tips:
           Hit Rate:
             value: AVG((((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum)) if ((TCC_HIT_sum
               + TCC_MISS_sum) != 0) else 0))
@@ -168,7 +168,7 @@ Panel Config:
             min: MIN((TCC_REQ_sum * 64) / $denom)
             max: MAX((TCC_REQ_sum * 64) / $denom)
             unit: (Bytes + $normUnit)
-            tips: 
+            tips:
           Req:
             avg: AVG((TCC_REQ_sum / $denom))
             min: MIN((TCC_REQ_sum / $denom))

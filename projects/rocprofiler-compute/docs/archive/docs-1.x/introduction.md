@@ -15,8 +15,8 @@ MI Performance Profiler ([Omniperf](https://github.com/ROCm/omniperf)) is a syst
 ## Features
 
 The Omniperf tool performs system profiling based on all available hardware counters for the target accelerator. It provides high level performance analysis features including System Speed-of-Light, IP block Speed-of-Light, Memory Chart Analysis, Roofline Analysis, Baseline Comparisons, and more...
-  
-Both command line analysis and GUI analysis are supported. 
+
+Both command line analysis and GUI analysis are supported.
 
 Detailed Feature List:
 - MI100 support
@@ -54,4 +54,3 @@ Detailed Feature List:
 | MI100    | Supported      |
 | MI200    | Supported      |
 | MI300    | In development |
-

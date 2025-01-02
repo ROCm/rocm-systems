@@ -3,11 +3,10 @@ pmc: GRBM_COUNT GRBM_GUI_ACTIVE SQ_CYCLES SQ_BUSY_CYCLES SQ_BUSY_CU_CYCLES SQ_WA
 pmc: TD_TD_BUSY_sum                          TD_TC_STALL_sum
 pmc: TD_SPI_STALL_sum                        TD_LOAD_WAVEFRONT_sum
 pmc: TD_ATOMIC_WAVEFRONT_sum                 TD_STORE_WAVEFRONT_sum
-pmc: TD_COALESCABLE_WAVEFRONT_sum 
+pmc: TD_COALESCABLE_WAVEFRONT_sum
 
 
 
 gpu:
-range: 
-kernel: 
-
+range:
+kernel:

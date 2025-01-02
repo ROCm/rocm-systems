@@ -62,4 +62,3 @@ jobs:
           files: |
             build/rocprofiler-compute-${{github.ref_name}}.tar.gz
           name: ${{ env.RELEASE_NAME }}
-

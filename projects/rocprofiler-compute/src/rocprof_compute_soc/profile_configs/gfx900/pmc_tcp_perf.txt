@@ -13,6 +13,6 @@ pmc:       				                								  	     TCP_PENDING_STALL_CYCLES_sum
 
 #pmc: TCA_CYCLE_sum                           TCA_BUSY_sum
 
-gpu: 
-kernel: 
-range: 
+gpu:
+kernel:
+range:

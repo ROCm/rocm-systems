@@ -22,11 +22,12 @@
 # SOFTWARE.
 ##############################################################################el
 
-import os
+from pathlib import Path
+
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils.utils import demarcate, mibench, console_log
 from roofline import Roofline
+from utils.utils import console_log, demarcate, mibench
 
 
 class gfx90a_soc(OmniSoC_Base):
@@ -35,21 +36,23 @@ class gfx90a_soc(OmniSoC_Base):
         self.set_arch("gfx90a")
         if hasattr(self.get_args(), "roof_only") and self.get_args().roof_only:
             self.set_perfmon_dir(
-                os.path.join(
-                    str(config.rocprof_compute_home),
-                    "rocprof_compute_soc",
-                    "profile_configs",
-                    self.get_arch(),
-                    "roofline",
+                str(
+                    Path(str(config.rocprof_compute_home)).joinpath(
+                        "rocprof_compute_soc",
+                        "profile_configs",
+                        self.get_arch(),
+                        "roofline",
+                    )
                 )
             )
         else:
             self.set_perfmon_dir(
-                os.path.join(
-                    str(config.rocprof_compute_home),
-                    "rocprof_compute_soc",
-                    "profile_configs",
-                    self.get_arch(),
+                str(
+                    Path(str(config.rocprof_compute_home)).joinpath(
+                        "rocprof_compute_soc",
+                        "profile_configs",
+                        self.get_arch(),
+                    )
                 )
             )
         self.set_compatible_profilers(["rocprofv1", "rocscope", "rocprofv2"])
@@ -95,7 +98,7 @@ class gfx90a_soc(OmniSoC_Base):
             console_log(
                 "roofline", "Checking for roofline.csv in " + str(self.get_args().path)
             )
-            if not os.path.isfile(os.path.join(self.get_args().path, "roofline.csv")):
+            if not Path(self.get_args().path).joinpath("roofline.csv").is_file():
                 mibench(self.get_args(), self._mspec)
             self.roofline_obj.post_processing()
         else:

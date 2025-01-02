@@ -28,7 +28,7 @@ Panel Config:
             unit: Pct of Peak
             tips:
           L1I-L2 Bandwidth:
-            value: AVG(((SQC_TC_INST_REQ * 100000) / (2 * ($max_sclk * $sqc_per_gpu) 
+            value: AVG(((SQC_TC_INST_REQ * 100000) / (2 * ($max_sclk * $sqc_per_gpu)
               * (End_Timestamp - Start_Timestamp))))
             unit: Pct of Peak
             tips:

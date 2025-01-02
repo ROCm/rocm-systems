@@ -1,13 +1,13 @@
 .. meta::
-   :description: Omniperf performance model: Pipeline metrics
-   :keywords: Omniperf, ROCm, profiler, tool, Instinct, accelerator, pipeline, wavefront, metrics, launch, runtime
+   :description: ROCm Compute Profiler performance model: Pipeline metrics
+   :keywords: Omniperf, ROCm Compute Profiler, ROCm, profiler, tool, Instinct, accelerator, pipeline, wavefront, metrics, launch, runtime
               VALU, MFMA, instruction mix, FLOPs, arithmetic, operations
 
 ****************
 Pipeline metrics
 ****************
 
-In this section, we describe the metrics available in Omniperf to analyze the
+In this section, we describe the metrics available in ROCm Compute Profiler to analyze the
 pipelines discussed in the :doc:`pipeline-descriptions`.
 
 .. _wavefront:
@@ -233,7 +233,7 @@ Instruction mix
 
 The instruction mix panel shows a breakdown of the various types of instructions
 executed by the user’s kernel, and which pipelines on the
-:doc:`CU <compute-unit>` they were executed on. In addition, Omniperf reports
+:doc:`CU <compute-unit>` they were executed on. In addition, ROCm Compute Profiler reports
 further information about the breakdown of operation types for the
 :ref:`VALU <desc-valu>`, vector-memory, and :ref:`MFMA <desc-mfma>`
 instructions.
@@ -555,7 +555,7 @@ Compute pipeline
 FLOP counting conventions
 -------------------------
 
-Omniperf’s conventions for VALU FLOP counting are as follows:
+ROCm Compute Profiler’s conventions for VALU FLOP counting are as follows:
 
 * Addition or multiplication: 1 operation
 
@@ -906,4 +906,3 @@ not. For more detail on how operations are counted see the
        accelerators, the VALU has no native INT8 instructions.
 
      - IOPs per :ref:`normalization unit <normalization-units>`
-

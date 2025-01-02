@@ -70,7 +70,7 @@ Panel Config:
             max: MAX(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0) else None))
             unit: Cycles
             coll_level: SQ_INST_LEVEL_LDS
-            tips: 
+            tips:
           Bank Conflicts/Access:
             avg: AVG(((SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
               if ((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) != 0) else None))

@@ -24,26 +24,27 @@
 # SOFTWARE.
 ##############################################################################el
 
+import importlib
 import os
 import re
 import socket
 import subprocess
-import importlib
-import config
-import pandas as pd
-
+from dataclasses import dataclass, field, fields
 from datetime import datetime
 from math import ceil
-from dataclasses import dataclass, field, fields
 from pathlib import Path as path
-from utils.utils import (
-    total_xcds,
-    get_version,
-    console_error,
-    console_warning,
-    console_log,
-)
+
+import pandas as pd
+
+import config
 from utils.tty import get_table_string
+from utils.utils import (
+    console_error,
+    console_log,
+    console_warning,
+    get_version,
+    total_xcds,
+)
 
 VERSION_LOC = [
     "version",
@@ -336,6 +337,13 @@ class MachineSpecs:
     ##########################################
     ## B. SoC Specs
     ##########################################
+    gpu_series: str = field(
+        default=None,
+        metadata={
+            "doc": "The series of the accelerators/GPUs in the system.",
+            "name": "GPU Series",
+        },
+    )
     gpu_model: str = field(
         default=None,
         metadata={
@@ -407,7 +415,7 @@ class MachineSpecs:
     chip_id: str = field(
         default=None,
         metadata={
-            "doc": "<>",
+            "doc": "The Chip ID of the accelerators/GPUs in the system.",
             "name": "Chip ID",
         },
     )
@@ -586,8 +594,8 @@ class MachineSpecs:
 def get_rocm_ver():
     rocm_found = False
     for itr in VERSION_LOC:
-        _path = os.path.join(os.getenv("ROCM_PATH", "/opt/rocm"), ".info", itr)
-        if os.path.exists(_path):
+        _path = str(path(os.getenv("ROCM_PATH", "/opt/rocm")).joinpath(".info", itr))
+        if path(_path).exists():
             rocm_ver = path(_path).read_text()
             rocm_found = True
         break

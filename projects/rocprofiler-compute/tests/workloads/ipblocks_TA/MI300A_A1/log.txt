@@ -45,7 +45,7 @@ Collecting Performance Counters
    |-> [/opt/rocm/bin/rocprofv2] Releasing GPU memory
    |-> [/opt/rocm/bin/rocprofv2] Releasing CPU memory
    |-> [/opt/rocm/bin/rocprofv2] Results File: "tests/workloads/ipblocks_TA/MI300A_A1/out/pmc_1/results_pmc_perf_1.csv"
-   |-> [/opt/rocm/bin/rocprofv2] 
+   |-> [/opt/rocm/bin/rocprofv2]
    |-> [/opt/rocm/bin/rocprofv2] The output path for the following counters: tests/workloads/ipblocks_TA/MI300A_A1/out/pmc_1
 [profiling] Current input file: tests/workloads/ipblocks_TA/MI300A_A1/perfmon/pmc_perf_2.txt
    |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:

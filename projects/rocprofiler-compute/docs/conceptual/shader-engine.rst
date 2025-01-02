@@ -1,6 +1,6 @@
 .. meta::
-   :description: Omniperf performance model: Shader engine (SE)
-   :keywords: Omniperf, ROCm, profiler, tool, Instinct, accelerator, shader, engine, sL1D, L1I, workgroup manager, SPI
+   :description: ROCm Compute Profiler performance model: Shader engine (SE)
+   :keywords: Omniperf, ROCm Compute Profiler, ROCm, profiler, tool, Instinct, accelerator, shader, engine, sL1D, L1I, workgroup manager, SPI
 
 ******************
 Shader engine (SE)
@@ -21,7 +21,7 @@ The number of CUs on a SE varies from chip to chip -- see for example
 :hip-training-pdf:`20`. In addition, newer accelerators such as the AMD
 Instinct™ MI 250X have 8 SEs per accelerator.
 
-For the purposes of Omniperf, we consider resources that are shared between
+For the purposes of ROCm Compute Profiler, we consider resources that are shared between
 multiple CUs on a single SE as part of the SE's metrics.
 
 These include:
@@ -487,7 +487,7 @@ issuing concurrently).
 
 .. note::
 
-   Current versions of the profiling libraries underlying Omniperf attempt to
+   Current versions of the profiling libraries underlying ROCm Compute Profiler attempt to
    serialize concurrent kernels running on the accelerator, as the performance
    counters on the device are global (that is, shared between concurrent
    kernels). This means that these scheduler-pipe utilization metrics are
@@ -704,4 +704,3 @@ such that improving occupancy further may not improve performance. See
        accelerators).
 
      - Percent
-

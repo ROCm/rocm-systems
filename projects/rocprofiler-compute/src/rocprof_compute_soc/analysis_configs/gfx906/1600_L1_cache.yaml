@@ -23,22 +23,22 @@ Panel Config:
               / TCP_TOTAL_CACHE_ACCESSES_sum)) if (TCP_TOTAL_CACHE_ACCESSES_sum != 0) else
               None))
             unit: Pct of Peak
-            tips: 
+            tips:
           Bandwidth:
             value: ((100 * AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (End_Timestamp - Start_Timestamp))))
               / ((($max_sclk / 1000) * 64) * $cu_per_gpu))
             unit: Pct of Peak
-            tips: 
+            tips:
           Utilization:
             value: AVG((((TCP_GATE_EN2_sum * 100) / TCP_GATE_EN1_sum) if (TCP_GATE_EN1_sum
               != 0) else None))
             unit: Pct of Peak
-            tips: 
+            tips:
           Coalescing:
             value: AVG(((((TA_TOTAL_WAVEFRONTS_sum * 64) * 100) / (TCP_TOTAL_ACCESSES_sum
               * 4)) if (TCP_TOTAL_ACCESSES_sum != 0) else None))
             unit: Pct of Peak
-            tips: 
+            tips:
         comparable: false # for now
         cli_style: simple_bar
 
@@ -93,19 +93,19 @@ Panel Config:
             min: MIN((TCP_TOTAL_ACCESSES_sum / $denom))
             max: MAX((TCP_TOTAL_ACCESSES_sum / $denom))
             unit: (Req  + $normUnit)
-            tips: 
+            tips:
           Read Req:
             avg: AVG((TCP_TOTAL_READ_sum / $denom))
             min: MIN((TCP_TOTAL_READ_sum / $denom))
             max: MAX((TCP_TOTAL_READ_sum / $denom))
             unit: (Req  + $normUnit)
-            tips: 
+            tips:
           Write Req:
             avg: AVG((TCP_TOTAL_WRITE_sum / $denom))
             min: MIN((TCP_TOTAL_WRITE_sum / $denom))
             max: MAX((TCP_TOTAL_WRITE_sum / $denom))
             unit: (Req  + $normUnit)
-            tips: 
+            tips:
           Atomic Req:
             avg: AVG(((TCP_TOTAL_ATOMIC_WITH_RET_sum + TCP_TOTAL_ATOMIC_WITHOUT_RET_sum)
               / $denom))
@@ -114,7 +114,7 @@ Panel Config:
             max: MAX(((TCP_TOTAL_ATOMIC_WITH_RET_sum + TCP_TOTAL_ATOMIC_WITHOUT_RET_sum)
               / $denom))
             unit: (Req  + $normUnit)
-            tips: 
+            tips:
           Cache BW:
             avg: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / $denom))
             min: MIN(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / $denom))
@@ -135,13 +135,13 @@ Panel Config:
               TCP_TOTAL_CACHE_ACCESSES_sum)) if (TCP_TOTAL_CACHE_ACCESSES_sum != 0) else
               None))
             unit: pct
-            tips: 
+            tips:
           Cache Accesses:
             avg: AVG((TCP_TOTAL_CACHE_ACCESSES_sum / $denom))
             min: MIN((TCP_TOTAL_CACHE_ACCESSES_sum / $denom))
             max: MAX((TCP_TOTAL_CACHE_ACCESSES_sum / $denom))
             unit: (Req  + $normUnit)
-            tips: 
+            tips:
           Cache Hits:
             avg: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum - (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)
               + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
@@ -153,13 +153,13 @@ Panel Config:
               + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
               / $denom))
             unit: (Req  + $normUnit)
-            tips: 
+            tips:
           Invalidations:
             avg: AVG((TCP_TOTAL_WRITEBACK_INVALIDATES_sum / $denom))
             min: MIN((TCP_TOTAL_WRITEBACK_INVALIDATES_sum / $denom))
             max: MAX((TCP_TOTAL_WRITEBACK_INVALIDATES_sum / $denom))
             unit: (Req + $normUnit)
-            tips: 
+            tips:
           L1-L2 BW:
             avg: AVG(((64 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum) + TCP_TCC_ATOMIC_WITH_RET_REQ_sum)
               + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom))
@@ -174,13 +174,13 @@ Panel Config:
             min: MIN((TCP_TCC_READ_REQ_sum / $denom))
             max: MAX((TCP_TCC_READ_REQ_sum / $denom))
             unit: (Req  + $normUnit)
-            tips: 
+            tips:
           L1-L2 Write:
             avg: AVG((TCP_TCC_WRITE_REQ_sum / $denom))
             min: MIN((TCP_TCC_WRITE_REQ_sum / $denom))
             max: MAX((TCP_TCC_WRITE_REQ_sum / $denom))
             unit: (Req  + $normUnit)
-            tips: 
+            tips:
           L1-L2 Atomic:
             avg: AVG(((TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)
               / $denom))
@@ -189,7 +189,7 @@ Panel Config:
             max: MAX(((TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)
               / $denom))
             unit: (Req  + $normUnit)
-            tips: 
+            tips:
           L1 Access Latency:
             avg: AVG(((TCP_TCP_LATENCY_sum / TCP_TA_TCP_STATE_READ_sum) if (TCP_TA_TCP_STATE_READ_sum
               != 0) else None))
@@ -198,7 +198,7 @@ Panel Config:
             max: MAX(((TCP_TCP_LATENCY_sum / TCP_TA_TCP_STATE_READ_sum) if (TCP_TA_TCP_STATE_READ_sum
               != 0) else None))
             unit: Cycles
-            tips: 
+            tips:
           L1-L2 Read Latency:
             avg: AVG(((TCP_TCC_READ_REQ_LATENCY_sum / (TCP_TCC_READ_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum))
               if ((TCP_TCC_READ_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) != 0) else None))
@@ -207,7 +207,7 @@ Panel Config:
             max: MAX(((TCP_TCC_READ_REQ_LATENCY_sum / (TCP_TCC_READ_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum))
               if ((TCP_TCC_READ_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) != 0) else None))
             unit: Cycles
-            tips: 
+            tips:
           L1-L2 Write Latency:
             avg: AVG(((TCP_TCC_WRITE_REQ_LATENCY_sum / (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
               if ((TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) != 0) else
@@ -219,7 +219,7 @@ Panel Config:
               if ((TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) != 0) else
               None))
             unit: Cycles
-            tips: 
+            tips:
 
     - metric_table:
         id: 1604
@@ -289,7 +289,7 @@ Panel Config:
             min: MIN((TCP_TCC_UC_WRITE_REQ_sum / $denom))
             max: MAX((TCP_TCC_UC_WRITE_REQ_sum / $denom))
             unit: (Req  + $normUnit)
-            tips:          
+            tips:
           CC - Write:
             xfer: Write
             coherency: CC
@@ -297,7 +297,7 @@ Panel Config:
             min: MIN((TCP_TCC_CC_WRITE_REQ_sum / $denom))
             max: MAX((TCP_TCC_CC_WRITE_REQ_sum / $denom))
             unit: (Req  + $normUnit)
-            tips: 
+            tips:
           NC - Atomic:
             xfer: Atomic
             coherency: NC
@@ -347,7 +347,7 @@ Panel Config:
             min: MIN((TCP_UTCL1_REQUEST_sum / $denom))
             max: MAX((TCP_UTCL1_REQUEST_sum / $denom))
             units: (Req + $normUnit)
-            tips: 
+            tips:
           Hit Ratio:
             avg: AVG((((100 * TCP_UTCL1_TRANSLATION_HIT_sum) / TCP_UTCL1_REQUEST_sum) if
               (TCP_UTCL1_REQUEST_sum != 0) else None))
@@ -356,22 +356,22 @@ Panel Config:
             max: MAX((((100 * TCP_UTCL1_TRANSLATION_HIT_sum) / TCP_UTCL1_REQUEST_sum) if
               (TCP_UTCL1_REQUEST_sum != 0) else None))
             units: pct
-            tips: 
+            tips:
           Hits:
             avg: AVG((TCP_UTCL1_TRANSLATION_HIT_sum / $denom))
             min: MIN((TCP_UTCL1_TRANSLATION_HIT_sum / $denom))
             max: MAX((TCP_UTCL1_TRANSLATION_HIT_sum / $denom))
             units: (Req + $normUnit)
-            tips: 
+            tips:
           Translation Misses:
             avg: AVG((TCP_UTCL1_TRANSLATION_MISS_sum / $denom))
             min: MIN((TCP_UTCL1_TRANSLATION_MISS_sum / $denom))
             max: MAX((TCP_UTCL1_TRANSLATION_MISS_sum / $denom))
             units: (Req + $normUnit)
-            tips: 
+            tips:
           Permission Misses:
             avg: AVG((TCP_UTCL1_PERMISSION_MISS_sum / $denom))
             min: MIN((TCP_UTCL1_PERMISSION_MISS_sum / $denom))
             max: MAX((TCP_UTCL1_PERMISSION_MISS_sum / $denom))
             units: (Req + $normUnit)
-            tips: 
+            tips:

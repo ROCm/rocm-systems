@@ -153,7 +153,7 @@ Collecting Performance Counters
    |-> [/opt/rocm/bin/rocprofv2] Releasing GPU memory
    |-> [/opt/rocm/bin/rocprofv2] Releasing CPU memory
    |-> [/opt/rocm/bin/rocprofv2] Results File: "tests/workloads/ipblocks_SQ_SPI/MI300A_A1/out/pmc_1/results_pmc_perf_10.csv"
-   |-> [/opt/rocm/bin/rocprofv2] 
+   |-> [/opt/rocm/bin/rocprofv2]
 [profiling] Current input file: tests/workloads/ipblocks_SQ_SPI/MI300A_A1/perfmon/pmc_perf_11.txt
    |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
    |-> [/opt/rocm/bin/rocprofv2] - SQC_DCACHE_INPUT_VALID_READYB

@@ -1,7 +1,7 @@
 # -----------------------------------------------------------------------
 # NOTE:
 # Dependencies are not included as part of ROCm Compute Profiler.
-# It's the user's responsibility to accept any licensing implications 
+# It's the user's responsibility to accept any licensing implications
 # before building the project
 # -----------------------------------------------------------------------
 

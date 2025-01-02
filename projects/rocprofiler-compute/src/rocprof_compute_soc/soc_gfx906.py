@@ -22,10 +22,11 @@
 # SOFTWARE.
 ##############################################################################el
 
-import os
+from pathlib import Path
+
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils.utils import demarcate, console_error
+from utils.utils import console_error, demarcate
 
 
 class gfx906_soc(OmniSoC_Base):
@@ -33,11 +34,12 @@ class gfx906_soc(OmniSoC_Base):
         super().__init__(args, mspec)
         self.set_arch("gfx906")
         self.set_perfmon_dir(
-            os.path.join(
-                str(config.rocprof_compute_home),
-                "rocprof_compute_soc",
-                "profile_configs",
-                self.get_arch(),
+            str(
+                Path(str(config.rocprof_compute_home)).joinpath(
+                    "rocprof_compute_soc",
+                    "profile_configs",
+                    self.get_arch(),
+                )
             )
         )
         self.set_compatible_profilers(["rocprofv1", "rocscope"])
@@ -73,7 +75,7 @@ class gfx906_soc(OmniSoC_Base):
         if self.get_args().roof_only:
             console_error("%s does not support roofline analysis" % self.get_arch())
         # Perfmon filtering
-        self.perfmon_filter()
+        self.perfmon_filter(self.get_args().roof_only)
 
     @demarcate
     def post_profiling(self):

@@ -27,10 +27,11 @@
 # predifned dict and global functions.
 #
 
-import pandas as pd
-from typing import Dict, List, Mapping, Generator
-from dataclasses import dataclass, field
 from collections import OrderedDict
+from dataclasses import dataclass, field
+from typing import Dict, Generator, List, Mapping
+
+import pandas as pd
 
 
 @dataclass
@@ -65,6 +66,7 @@ class Workload:
     filter_kernel_ids: List[int] = field(default_factory=list)
     filter_gpu_ids: List[int] = field(default_factory=list)
     filter_dispatch_ids: List[int] = field(default_factory=list)
+    filter_nodes: List[str] = field(default_factory=list)
     avail_ips: List[int] = field(default_factory=list)
 
 

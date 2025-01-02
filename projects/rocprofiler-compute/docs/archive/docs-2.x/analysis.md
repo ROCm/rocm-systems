@@ -28,17 +28,17 @@ Run `omniperf analyze -h` for more details.
 
 ### Demo
 
-1) To begin, generate a high-level analysis report utilizing Omniperf's `-b` (a.k.a. `--block`) flag. 
+1) To begin, generate a high-level analysis report utilizing Omniperf's `-b` (a.k.a. `--block`) flag.
 ```shell-session
 $ omniperf analyze -p workloads/vcopy/MI200/ -b 2
 
 
-  ___                  _                  __ 
+  ___                  _                  __
  / _ \ _ __ ___  _ __ (_)_ __   ___ _ __ / _|
-| | | | '_ ` _ \| '_ \| | '_ \ / _ \ '__| |_ 
+| | | | '_ ` _ \| '_ \| | '_ \ / _ \ '__| |_
 | |_| | | | | | | | | | | |_) |  __/ |  |  _|
- \___/|_| |_| |_|_| |_|_| .__/ \___|_|  |_|  
-                        |_|                  
+ \___/|_| |_| |_|_| |_|_| .__/ \___|_|  |_|
+                        |_|
 
 Analysis mode = cli
 [analysis] deriving Omniperf metrics...
@@ -135,12 +135,12 @@ Analysis mode = cli
 ```shell-session
 $ omniperf analyze -p workloads/vcopy/MI200/ --list-metrics gfx90a
 
-  ___                  _                  __ 
+  ___                  _                  __
 / _ \ _ __ ___  _ __ (_)_ __   ___ _ __ / _|
-| | | | '_ ` _ \| '_ \| | '_ \ / _ \ '__| |_ 
+| | | | '_ ` _ \| '_ \| | '_ \ / _ \ '__| |_
 | |_| | | | | | | | | | | |_) |  __/ |  |  _|
-\___/|_| |_| |_|_| |_|_| .__/ \___|_|  |_|  
-                        |_|                  
+\___/|_| |_| |_|_| |_|_| .__/ \___|_|  |_|
+                        |_|
 
 Analysis mode = cli
 [analysis] deriving Omniperf metrics...
@@ -289,7 +289,7 @@ Some cells may be blank indicating a missing/unavailable hardware counter or NUL
   ```
 
 - __Show "System Speed-of-Light" and "CS_Busy" blocks only__
-  
+
   ```shell
   $ omniperf analyze -p workloads/vcopy/MI200/  -b 2  5.1.0
   ```
@@ -303,7 +303,7 @@ Some cells may be blank indicating a missing/unavailable hardware counter or NUL
   First, list the top kernels in your application using `--list-stats`.
   ```shell-session
   $ omniperf analyze -p workloads/vcopy/MI200/ --list-stats
-  
+
   Analysis mode = cli
   [analysis] deriving Omniperf metrics...
 
@@ -329,7 +329,7 @@ Some cells may be blank indicating a missing/unavailable hardware counter or NUL
 
   ```shell-session
   $ omniperf analyze -p workloads/vcopy/MI200/ -k 0
-  
+
   Analysis mode = cli
   [analysis] deriving Omniperf metrics...
 
@@ -344,14 +344,14 @@ Some cells may be blank indicating a missing/unavailable hardware counter or NUL
   ╘════╧══════════════════════════════════════════╧═════════╧═══════════╧════════════╧══════════════╧════════╧═════╛
   ... ...
   ```
-  
+
   ```{note}
   You will see your filtered kernel(s) indicated by an asterisk in the Top Stats table
   ```
 
 
 - __Baseline comparison__
-  
+
   ```shell
   omniperf analyze -p workload1/path/  -p workload2/path/
   ```
@@ -396,12 +396,12 @@ To launch the standalone GUI, include the `--gui` flag with your desired analysi
 ```shell-session
 $ omniperf analyze -p workloads/vcopy/MI200/ --gui
 
-  ___                  _                  __ 
+  ___                  _                  __
  / _ \ _ __ ___  _ __ (_)_ __   ___ _ __ / _|
-| | | | '_ ` _ \| '_ \| | '_ \ / _ \ '__| |_ 
+| | | | '_ ` _ \| '_ \| | '_ \ / _ \ '__| |_
 | |_| | | | | | | | | | | |_) |  __/ |  |  _|
- \___/|_| |_| |_|_| |_|_| .__/ \___|_|  |_|  
-                        |_|                  
+ \___/|_| |_| |_|_| |_|_| .__/ \___|_|  |_|
+                        |_|
 
 Analysis mode = web_ui
 [analysis] deriving Omniperf metrics...
@@ -426,7 +426,7 @@ go to http://localhost:8050/ to see an analysis page.
 ![Standalone GUI Homepage](images/standalone_gui.png)
 
 ```{tip}
-To launch the web application on a port other than 8050, include an optional port argument:  
+To launch the web application on a port other than 8050, include an optional port argument:
 `--gui <desired port>`
 ```
 
@@ -455,7 +455,7 @@ The Omniperf Grafana GUI Analyzer supports the following features to facilitate 
 
 - System and Hardware Component (Hardware Block) Speed-of-Light (SOL)
 - Multiple normalization options, including per-cycle, per-wave, per-kernel and per-second.
-- Baseline comparisons 
+- Baseline comparisons
 - Regex based Dispatch ID filtering
 - Roofline Analysis
 - Detailed performance counters and metrics per hardware component, e.g.,
@@ -482,7 +482,7 @@ Multiple performance number normalizations are provided to allow performance ins
 Omniperf enables baseline comparison to allow checking A/B effect. Currently baseline comparison is limited to the same SoC. Cross comparison between SoCs is in development.
 
 For both the Current Workload and the Baseline Workload, one can independently setup the following filters to allow fine grained comparisons:
-- Workload Name 
+- Workload Name
 - GPU ID filtering (multi-selection)
 - Kernel Name filtering (multi-selection)
 - Dispatch ID filtering (Regex filtering)
@@ -498,7 +498,7 @@ Omniperf supports incremental profiling to significantly speed up performance an
 
 > Refer to [*Hardware Component Filtering*](profiling.md#hardware-component-filtering) section for this command.
 
-By default, the entire application is profiled to collect performance counters for all hardware blocks, giving a complete view of where the workload stands in terms of performance optimization opportunities and bottlenecks. 
+By default, the entire application is profiled to collect performance counters for all hardware blocks, giving a complete view of where the workload stands in terms of performance optimization opportunities and bottlenecks.
 
 After that one may focus on only a few hardware components, (e.g., L1 Cache or LDS) to closely check the effect of software optimizations, without performing application replay for all other hardware components. This saves lots of compute time. In addition, the prior profiling results for other hardware components are not overwritten. Instead, they can be merged during the import to piece together the system view.
 
@@ -510,7 +510,7 @@ The uniform color coding is applied to most visualizations (bars, table, diagram
 ![Grafana GUI Global Variables](images/global_variables.png)
 
 #### Grafana GUI Import
-The omniperf database `--import` option imports the raw profiling data to Grafana's backend MongoDB database. This step is only required for Grafana GUI based performance analysis. 
+The omniperf database `--import` option imports the raw profiling data to Grafana's backend MongoDB database. This step is only required for Grafana GUI based performance analysis.
 
 Default username and password for MongoDB (to be used in database mode) are as follows:
 
@@ -527,23 +527,23 @@ When using database mode, be sure to tailor the connection options to the machin
 
 ```shell-session
 $ omniperf database --help
-usage: 
-            
+usage:
+
 omniperf database <interaction type> [connection options]
 
-            
+
 
 -------------------------------------------------------------------------------
-            
+
 Examples:
-            
+
         omniperf database --import -H pavii1 -u temp -t asw -w workloads/vcopy/mi200/
-            
+
         omniperf database --remove -H pavii1 -u temp -w omniperf_asw_sample_mi200
-            
+
 -------------------------------------------------------------------------------
 
-        
+
 
 Help:
   -h, --help         show this help message and exit
@@ -571,14 +571,14 @@ Connection Options:
 ```shell-session
 $ omniperf database --import -H dummybox -u temp -t asw -w workloads/vcopy/mi200/
 
-  ___                  _                  __ 
+  ___                  _                  __
  / _ \ _ __ ___  _ __ (_)_ __   ___ _ __ / _|
-| | | | '_ ` _ \| '_ \| | '_ \ / _ \ '__| |_ 
+| | | | '_ ` _ \| '_ \| | '_ \ / _ \ '__| |_
 | |_| | | | | | | | | | | |_) |  __/ |  |  _|
- \___/|_| |_| |_|_| |_|_| .__/ \___|_|  |_|  
-                        |_|                  
+ \___/|_| |_| |_|_| |_|_| .__/ \___|_|  |_|
+                        |_|
 
- 
+
 Pulling data from  /home/auser/repos/omniperf/sample/workloads/vcopy/MI200
 The directory exists
 Found sysinfo file

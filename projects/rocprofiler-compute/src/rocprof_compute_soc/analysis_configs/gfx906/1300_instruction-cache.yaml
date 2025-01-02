@@ -21,14 +21,14 @@ Panel Config:
             value: AVG(((SQC_ICACHE_REQ * 100000) / (($max_sclk * $sqc_per_gpu)
               * (End_Timestamp - Start_Timestamp))))
             unit: Pct of Peak
-            tips: 
+            tips:
           Cache Hit Rate:
             value: AVG(((SQC_ICACHE_HITS * 100) / ((SQC_ICACHE_HITS + SQC_ICACHE_MISSES)
               + SQC_ICACHE_MISSES_DUPLICATE)))
             unit: Pct of Peak
-            tips: 
+            tips:
           L1I-L2 Bandwidth:
-            value: AVG(((SQC_TC_INST_REQ * 100000) / (2 * ($max_sclk * $sqc_per_gpu) 
+            value: AVG(((SQC_TC_INST_REQ * 100000) / (2 * ($max_sclk * $sqc_per_gpu)
               * (End_Timestamp - Start_Timestamp))))
             unit: Pct of Peak
             tips:
@@ -51,25 +51,25 @@ Panel Config:
             min: MIN((SQC_ICACHE_REQ / $denom))
             max: MAX((SQC_ICACHE_REQ / $denom))
             unit: (Req  + $normUnit)
-            tips: 
+            tips:
           Hits:
             avg: AVG((SQC_ICACHE_HITS / $denom))
             min: MIN((SQC_ICACHE_HITS / $denom))
             max: MAX((SQC_ICACHE_HITS / $denom))
             unit: (Hits  + $normUnit)
-            tips: 
+            tips:
           Misses - Non Duplicated:
             avg: AVG((SQC_ICACHE_MISSES / $denom))
             min: MIN((SQC_ICACHE_MISSES / $denom))
             max: MAX((SQC_ICACHE_MISSES / $denom))
             unit: (Misses  + $normUnit)
-            tips: 
+            tips:
           Misses - Duplicated:
             avg: AVG((SQC_ICACHE_MISSES_DUPLICATE / $denom))
             min: MIN((SQC_ICACHE_MISSES_DUPLICATE / $denom))
             max: MAX((SQC_ICACHE_MISSES_DUPLICATE / $denom))
             unit: (Misses  + $normUnit)
-            tips: 
+            tips:
           Cache Hit Rate:
             avg: AVG(((100 * SQC_ICACHE_HITS) / ((SQC_ICACHE_HITS + SQC_ICACHE_MISSES)
               + SQC_ICACHE_MISSES_DUPLICATE)))
@@ -78,7 +78,7 @@ Panel Config:
             max: MAX(((100 * SQC_ICACHE_HITS) / ((SQC_ICACHE_HITS + SQC_ICACHE_MISSES)
               + SQC_ICACHE_MISSES_DUPLICATE)))
             unit: pct
-            tips: 
+            tips:
           Instruction Fetch Latency:
             avg: AVG((SQ_ACCUM_PREV_HIRES / SQ_IFETCH))
             min: MIN((SQ_ACCUM_PREV_HIRES / SQ_IFETCH))

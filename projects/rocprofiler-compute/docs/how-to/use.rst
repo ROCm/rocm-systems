@@ -1,13 +1,13 @@
 .. meta::
-   :description: Omniperf basic usage
-   :keywords: Omniperf, ROCm, profiler, tool, Instinct, accelerator, AMD,
+   :description: ROCm Compute Profiler basic usage
+   :keywords: ROCm Compute Profiler, ROCm, profiler, tool, Instinct, accelerator, AMD,
               basics, usage, operations
 
 ***********
 Basic usage
 ***********
 
-The following section outlines basic Omniperf workflows, modes, options, and
+The following section outlines basic ROCm Compute Profiler workflows, modes, options, and
 operations.
 
 Command line profiler
@@ -18,7 +18,7 @@ Launch and profile the target application using the command line profiler.
 The command line profiler launches the target application, calls the
 ROCProfiler API via the ``rocprof`` binary, and collects profile results for
 the specified kernels, dispatches, and hardware components. If not
-specified, Omniperf defaults to collecting all available counters for all
+specified, ROCm Compute Profiler defaults to collecting all available counters for all
 kernels and dispatches launched by the your executable.
 
 To collect the default set of data for all kernels in the target
@@ -26,7 +26,7 @@ application, launch, for example:
 
 .. code-block:: shell
 
-   $ omniperf profile -n vcopy_data -- ./vcopy -n 1048576 -b 256
+   $ rocprof-compute profile -n vcopy_data -- ./vcopy -n 1048576 -b 256
 
 This runs the app, launches each kernel, and generates profiling results. By
 default, results are written to a subdirectory with your accelerator's name;
@@ -35,7 +35,7 @@ via the ``-n`` argument.
 
 .. note::
 
-   To collect all requested profile information, Omniperf might replay kernels
+   To collect all requested profile information, ROCm Compute Profiler might replay kernels
    multiple times.
 
 .. _basic-filter-data-collection:
@@ -67,7 +67,7 @@ argument:
 
 .. code-block:: shell
 
-   $ omniperf analyze --list-metrics <sys_arch>
+   $ rocprof-compute analyze --list-metrics <sys_arch>
 
 .. _basic-analyze-cli:
 
@@ -87,7 +87,7 @@ To interact with profiling results from a different session, provide the
 workload path.
 
 ``-p``, ``--path``
-   Enables you to analyze existing profiling data in the Omniperf CLI.
+   Enables you to analyze existing profiling data in the ROCm Compute Profiler CLI.
 
 See :doc:`analyze/cli` for more detailed information.
 
@@ -97,16 +97,16 @@ Analyze in the Grafana GUI
 --------------------------
 
 To conduct a more in-depth analysis of profiling results, it's suggested to use
-a Grafana GUI with Omniperf. To interact with profiling results, import your
-data to the MongoDB instance included in the Omniperf Dockerfile. See
+a Grafana GUI with ROCm Compute Profiler. To interact with profiling results, import your
+data to the MongoDB instance included in the ROCm Compute Profiler Dockerfile. See
 :doc:`/install/grafana-setup`.
 
-To interact with Grafana data, stored in the Omniperf database, enter
+To interact with Grafana data, stored in the ROCm Compute Profiler database, enter
 ``database`` :ref:`mode <modes-database>`; for example:
 
 .. code-block:: shell
 
-   $ omniperf database --import [CONNECTION OPTIONS]
+   $ rocprof-compute database --import [CONNECTION OPTIONS]
 
 See :doc:`/how-to/analyze/grafana-gui` for more detailed information.
 
@@ -115,7 +115,7 @@ See :doc:`/how-to/analyze/grafana-gui` for more detailed information.
 Modes
 =====
 
-Modes change the fundamental behavior of the Omniperf command line tool.
+Modes change the fundamental behavior of the ROCm Compute Profiler command line tool.
 Depending on which mode you choose, different command line options become
 available.
 
@@ -133,10 +133,10 @@ Profile mode
 
    .. code-block:: shell
 
-      $ omniperf profile --help
+      $ rocprof-compute profile --help
 
 See :doc:`profile/mode` to learn about this mode in depth and to get started
-profiling with Omniperf.
+profiling with ROCm Compute Profiler.
 
 .. _modes-analyze:
 
@@ -144,24 +144,24 @@ Analyze mode
 ------------
 
 ``analyze``
-   Loads profiling data from the ``--path`` (``-p``) directory into the Omniperf
+   Loads profiling data from the ``--path`` (``-p``) directory into the ROCm Compute Profiler
    CLI analyzer where you have immediate access to profiling results and
    generated metrics. It generates metrics from the entirety of your profiled
-   application or a subset identified through the Omniperf CLI analysis filters.
+   application or a subset identified through the ROCm Compute Profiler CLI analysis filters.
 
    To generate a lightweight GUI interface, you can add the ``--gui`` flag to your
    analysis command.
 
-   This mode is a middle ground to the highly detailed Omniperf Grafana GUI and
+   This mode is a middle ground to the highly detailed ROCm Compute Profiler Grafana GUI and
    is great if you want immediate access to a hardware component you’re already
    familiar with.
 
    .. code-block:: shell
 
-      $ omniperf analyze --help
+      $ rocprof-compute analyze --help
 
 See :doc:`analyze/mode` to learn about this mode in depth and to get started
-with analysis using Omniperf.
+with analysis using ROCm Compute Profiler.
 
 .. _modes-database:
 
@@ -178,7 +178,7 @@ Database mode
 
    .. code-block:: shell
 
-      $ omniperf database --help
+      $ rocprof-compute database --help
 
 See :doc:`/install/grafana-setup` to learn about setting up a Grafana server and
 database instance to make your profiling data more digestible and shareable.
@@ -188,11 +188,11 @@ database instance to make your profiling data more digestible and shareable.
 Global options
 ==============
 
-The Omniperf command line tool has a set of *global* utility options that are
-available across all modes. 
+The ROCm Compute Profiler command line tool has a set of *global* utility options that are
+available across all modes.
 
 ``-v``, ``--version``
-   Prints the Omniperf version and exits.
+   Prints the ROCm Compute Profiler version and exits.
 
 ``-V``, ``--verbose``
    Increases output verbosity. Use multiple times for higher levels of
@@ -206,7 +206,7 @@ available across all modes.
 
 .. note::
 
-   Omniperf also recognizes the project variable, ``OMNIPERF_COLOR`` should you
+   ROCm Compute Profiler also recognizes the project variable, ``ROCPROFCOMPUTE_COLOR`` should you
    choose to disable colorful output. To disable default colorful behavior, set
    this variable to ``0``.
 
@@ -215,7 +215,7 @@ available across all modes.
 Basic operations
 ================
 
-The following table lists Omniperf's basic operations, their
+The following table lists ROCm Compute Profiler's basic operations, their
 :ref:`modes <modes>`, and required arguments.
 
 .. list-table::
@@ -248,4 +248,3 @@ The following table lists Omniperf's basic operations, their
    * - :doc:`Interact with profiling results from CLI </how-to/analyze/cli>`
      - ``analyze``
      - ``--path``
-

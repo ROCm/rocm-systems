@@ -1,6 +1,6 @@
 .. meta::
-   :description: Omniperf performance model: Command processor (CP)
-   :keywords: Omniperf, ROCm, profiler, tool, Instinct, accelerator, command, processor, fetcher, packet processor, CPF, CPC
+   :description: ROCm Compute Profiler performance model: Command processor (CP)
+   :keywords: Omniperf, ROCm Compute Profiler, ROCm, profiler, tool, Instinct, accelerator, command, processor, fetcher, packet processor, CPF, CPC
 
 **********************
 Command processor (CP)
@@ -9,7 +9,7 @@ Command processor (CP)
 The command processor (CP) is responsible for interacting with the AMDGPU kernel
 driver -- the Linux kernel -- on the CPU and for interacting with user-space
 HSA clients when they submit commands to HSA queues. Basic tasks of the CP
-include reading commands (such as, corresponding to a kernel launch) out of 
+include reading commands (such as, corresponding to a kernel launch) out of
 :hsa-runtime-pdf:`HSA queues <68>`, scheduling work to subsequent parts of the
 scheduler pipeline, and marking kernels complete for synchronization events on
 the host.
@@ -25,7 +25,7 @@ The command processor consists of two sub-components:
   scheduling.
 
 Before scheduling work to the accelerator, the command processor can
-first acquire a memory fence to ensure system consistency 
+first acquire a memory fence to ensure system consistency
 (:hsa-runtime-pdf:`Section 2.6.4 <91>`). After the work is complete, the
 command processor can apply a memory-release fence. Depending on the AMD CDNA™
 accelerator under question, either of these operations *might* initiate a cache
@@ -86,7 +86,7 @@ Command processor fetcher (CPF)
    * - CPF-UTCL1 Stall
 
      - Percent of CPF busy cycles where the CPF was stalled by address
-       translation. 
+       translation.
 
      - Percent
 
@@ -151,4 +151,3 @@ Command processor packet processor (CPC)
        work.
 
      - Percent
-

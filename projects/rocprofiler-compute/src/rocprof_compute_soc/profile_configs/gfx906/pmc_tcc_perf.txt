@@ -1,7 +1,7 @@
-pmc: GRBM_COUNT GRBM_GUI_ACTIVE SQ_CYCLES SQ_BUSY_CYCLES SQ_WAVES 
+pmc: GRBM_COUNT GRBM_GUI_ACTIVE SQ_CYCLES SQ_BUSY_CYCLES SQ_WAVES
 
-pmc: TCC_CYCLE_sum                          TCC_BUSY_sum                          TCC_PROBE_sum                          TCC_PROBE_ALL_sum 
-pmc: TCC_NC_REQ_sum                         TCC_UC_REQ_sum                        TCC_CC_REQ_sum                         
+pmc: TCC_CYCLE_sum                          TCC_BUSY_sum                          TCC_PROBE_sum                          TCC_PROBE_ALL_sum
+pmc: TCC_NC_REQ_sum                         TCC_UC_REQ_sum                        TCC_CC_REQ_sum
 pmc: TCC_REQ_sum                            TCC_STREAMING_REQ_sum                 TCC_HIT_sum                            TCC_MISS_sum
 pmc: TCC_READ_sum                           TCC_WRITE_sum                         TCC_ATOMIC_sum                         TCC_WRITEBACK_sum
 pmc: TCC_EA_WRREQ_sum                       TCC_EA_WRREQ_64B_sum                  TCC_EA_WR_UNCACHED_32B_sum             TCC_EA_WRREQ_DRAM_sum
@@ -12,8 +12,7 @@ pmc:                                        TCC_NORMAL_WRITEBACK_sum            
 pmc: TCC_ALL_TC_OP_INV_EVICT_sum            TCC_TOO_MANY_EA_WRREQS_STALL_sum      TCC_EA_ATOMIC_sum
 pmc: TCC_EA_RDREQ_LEVEL_sum                 TCC_EA_WRREQ_LEVEL_sum                TCC_EA_ATOMIC_LEVEL_sum
 
-gpu: 
-kernel: 
+gpu:
+kernel:
 
-range: 
-
+range:

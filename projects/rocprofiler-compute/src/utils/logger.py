@@ -25,6 +25,8 @@
 import logging
 import os
 import sys
+from pathlib import Path
+
 from utils.utils import trace_logger
 
 # Define the colors
@@ -110,7 +112,7 @@ def setup_console_handler():
 
 # Setup file handler - enabled in profile mode
 def setup_file_handler(loglevel, workload_dir):
-    filename = os.path.join(workload_dir, "log.txt")
+    filename = str(Path(workload_dir).joinpath("log.txt"))
     file_handler = logging.FileHandler(filename, "w")
     file_loglevel = min([loglevel, logging.INFO])
     file_handler.setLevel(file_loglevel)

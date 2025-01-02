@@ -43,4 +43,4 @@ pr:
   drafts: false
 
 jobs:
-  - template: ${{ variables.CI_COMPONENT_PATH }}/omniperf.yml@pipelines_repo
+  - template: ${{ variables.CI_COMPONENT_PATH }}/rocprofiler-compute.yml@pipelines_repo

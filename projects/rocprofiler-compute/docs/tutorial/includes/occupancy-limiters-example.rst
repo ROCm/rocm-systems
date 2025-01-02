@@ -4,15 +4,15 @@ Occupancy limiters example
 ==========================
 
 For this example, consider the
-:dev-sample:`occupancy <occupancy.hip>` included with Omniperf. We will
+:dev-sample:`occupancy <occupancy.hip>` included with ROCm Compute Profiler. We will
 investigate the use of the resource allocation panel in the
 :ref:`Workgroup Manager <desc-spi>`’s metrics section to determine occupancy
 limiters. This code contains several kernels to explore how both various
 kernel resources impact achieved occupancy, and how this is reported in
-Omniperf.
+ROCm Compute Profiler.
 
 This example was compiled and run on a MI250 accelerator using ROCm
-v5.6.0, and Omniperf v2.0.0:
+v5.6.0, and ROCm Compute Profiler v2.0.0:
 
 .. code-block:: shell
 
@@ -21,11 +21,11 @@ v5.6.0, and Omniperf v2.0.0:
 We have again included the ``--save-temps`` flag to get the
 corresponding assembly.
 
-Finally, we generate our Omniperf profile as:
+Finally, we generate our ROCm Compute Profiler profile as:
 
 .. code-block:: shell
 
-   $ omniperf profile -n occupancy --no-roof -- ./occupancy
+   $ rocprof-compute profile -n occupancy --no-roof -- ./occupancy
 
 .. _occupancy-experiment-design:
 
@@ -88,7 +88,7 @@ depend on the exact ROCm/compiler version.
 
 We will use various permutations of this kernel to limit occupancy, and
 more importantly for the purposes of this example, demonstrate how this
-is reported in Omniperf.
+is reported in ROCm Compute Profiler.
 
 .. _vgpr-occupancy:
 
@@ -101,7 +101,7 @@ the analyze step on this kernel:
 
 .. code-block:: shell
 
-   $ omniperf analyze -p workloads/occupancy/mi200/ -b 2.1.15 6.2 7.1.5 7.1.6 7.1.7 --dispatch 1
+   $ rocprof-compute analyze -p workloads/occupancy/mi200/ -b 2.1.15 6.2 7.1.5 7.1.6 7.1.7 --dispatch 1
    <...>
    --------------------------------------------------------------------------------
    0. Top Stat
@@ -226,7 +226,7 @@ Analyzing this:
 
 .. code-block:: shell
 
-   $ omniperf analyze -p workloads/occupancy/mi200/ -b 2.1.15 6.2 7.1.5 7.1.6 7.1.7 7.1.8 --dispatch 3
+   $ rocprof-compute analyze -p workloads/occupancy/mi200/ -b 2.1.15 6.2 7.1.5 7.1.6 7.1.7 7.1.8 --dispatch 3
    <...>
    --------------------------------------------------------------------------------
    2. System Speed-of-Light
@@ -351,7 +351,7 @@ Analyzing this workload yields:
 
 .. code-block:: shell-session
 
-   $ omniperf analyze -p workloads/occupancy/mi200/ -b 2.1.15 6.2 7.1.5 7.1.6 7.1.7 7.1.8 7.1.9 --dispatch 5
+   $ rocprof-compute analyze -p workloads/occupancy/mi200/ -b 2.1.15 6.2 7.1.5 7.1.6 7.1.7 7.1.8 7.1.9 --dispatch 5
    <...>
    --------------------------------------------------------------------------------
    0. Top Stat

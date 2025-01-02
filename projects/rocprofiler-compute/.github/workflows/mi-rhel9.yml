@@ -30,7 +30,7 @@ jobs:
     runs-on: [mi100, rhel9]
 
     env:
-       PYTHONPATH: /home1/ciuser/omniperf_deps
+       PYTHONPATH: /home1/ciuser/rocprofiler-compute_deps
        CI_VISIBLE_DEVICES: 1
     name: ROCm v${{ matrix.version }} / ${{ matrix.hardware }} / ${{ matrix.profiler }}
     steps:

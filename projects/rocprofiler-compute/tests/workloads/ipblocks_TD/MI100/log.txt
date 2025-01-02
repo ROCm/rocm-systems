@@ -36,10 +36,10 @@ Collecting Performance Counters
    |-> [rocprof] Finished copying the output vector from the GPU to the CPU
    |-> [rocprof] Releasing GPU memory
    |-> [rocprof] Releasing CPU memory
-   |-> [rocprof] 
+   |-> [rocprof]
    |-> [rocprof] ROCPRofiler: 3 contexts collected, output directory /tmp/rpl_data_240321_155455_1279280/input0_results_240321_155455
    |-> [rocprof] File 'tests/workloads/ipblocks_TD/MI100/pmc_perf_0.csv' is generating
-   |-> [rocprof] 
+   |-> [rocprof]
 [profiling] Current input file: tests/workloads/ipblocks_TD/MI100/perfmon/pmc_perf_1.txt
    |-> [rocprof] RPL: on '240321_155455' from '/opt/rocm-6.0.2' in '/home1/josantos/omniperf'
    |-> [rocprof] RPL: profiling '""./tests/vcopy -n 1048576 -b 256 -i 3""'
@@ -65,10 +65,10 @@ Collecting Performance Counters
    |-> [rocprof] Finished copying the output vector from the GPU to the CPU
    |-> [rocprof] Releasing GPU memory
    |-> [rocprof] Releasing CPU memory
-   |-> [rocprof] 
+   |-> [rocprof]
    |-> [rocprof] ROCPRofiler: 3 contexts collected, output directory /tmp/rpl_data_240321_155455_1279465/input0_results_240321_155455
    |-> [rocprof] File 'tests/workloads/ipblocks_TD/MI100/pmc_perf_1.csv' is generating
-   |-> [rocprof] 
+   |-> [rocprof]
 [profiling] Current input file: tests/workloads/ipblocks_TD/MI100/perfmon/pmc_perf_2.txt
    |-> [rocprof] RPL: on '240321_155455' from '/opt/rocm-6.0.2' in '/home1/josantos/omniperf'
    |-> [rocprof] RPL: profiling '""./tests/vcopy -n 1048576 -b 256 -i 3""'
@@ -94,10 +94,10 @@ Collecting Performance Counters
    |-> [rocprof] Finished copying the output vector from the GPU to the CPU
    |-> [rocprof] Releasing GPU memory
    |-> [rocprof] Releasing CPU memory
-   |-> [rocprof] 
+   |-> [rocprof]
    |-> [rocprof] ROCPRofiler: 3 contexts collected, output directory /tmp/rpl_data_240321_155455_1279648/input0_results_240321_155455
    |-> [rocprof] File 'tests/workloads/ipblocks_TD/MI100/pmc_perf_2.csv' is generating
-   |-> [rocprof] 
+   |-> [rocprof]
 [profiling] Current input file: tests/workloads/ipblocks_TD/MI100/perfmon/timestamps.txt
    |-> [rocprof] RPL: on '240321_155456' from '/opt/rocm-6.0.2' in '/home1/josantos/omniperf'
    |-> [rocprof] RPL: profiling '""./tests/vcopy -n 1048576 -b 256 -i 3""'
@@ -122,7 +122,7 @@ Collecting Performance Counters
    |-> [rocprof] Finished copying the output vector from the GPU to the CPU
    |-> [rocprof] Releasing GPU memory
    |-> [rocprof] Releasing CPU memory
-   |-> [rocprof] 
+   |-> [rocprof]
    |-> [rocprof] ROCPRofiler: 3 contexts collected, output directory /tmp/rpl_data_240321_155456_1279835/input0_results_240321_155456
    |-> [rocprof] File 'tests/workloads/ipblocks_TD/MI100/timestamps.csv' is generating
-   |-> [rocprof] 
+   |-> [rocprof]

@@ -18,7 +18,7 @@ body:
       placeholder: e.g. I found the following error when trying to...
     validations:
       required: true
-  
+
   - type: markdown
     attributes:
       value: |

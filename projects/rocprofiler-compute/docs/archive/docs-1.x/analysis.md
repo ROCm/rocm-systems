@@ -276,7 +276,7 @@ Analyze
   ```
 
 - Customized profiling "System Speed-of-Light" and "CS_Busy" only
-  
+
   ```shell
   $ omniperf analyze -p workloads/vcopy/mi200/  -b 2  5.1.0
   ```
@@ -288,7 +288,7 @@ Analyze
   First, list the top kernels in your application using `--list-kernels`.
   ```shell-session
   $ omniperf analyze -p workloads/vcopy/mi200/ --list-kernels
-  
+
   --------
   Analyze
   --------
@@ -308,7 +308,7 @@ Analyze
 
   ```shell-session
   $ omniperf -p workloads/vcopy/mi200/ -k 0
-  
+
   --------
   Analyze
   --------
@@ -324,17 +324,17 @@ Analyze
   ╘════╧══════════════════════════════════════════╧═════════╧═══════════╧════════════╧══════════════╧════════╧═════╛
   ... ...
   ```
-  
+
   > Note: You'll see your filtered kernel(s) indicated by a asterisk in the Top Stats table
 
 
 - Baseline comparison
-  
+
   ```shell
   omniperf analyze -p workload1/path/  -p workload2/path/
   ```
   > Note: You can also apply diffrent filters to each workload.
-  
+
   OR
   ```shell
   omniperf analyze -p workload1/path/ -k 0  -p workload2/path/ -k 1
@@ -400,7 +400,7 @@ go to http://localhost:8050/ to see an analysis page.
 ![Standalone GUI Homepage](images/standalone_gui.png)
 
 ```{tip}
-To launch the web application on a port other than 8050, include an optional port argument:  
+To launch the web application on a port other than 8050, include an optional port argument:
 `--gui <desired port>`
 ```
 
@@ -429,7 +429,7 @@ The Omniperf Grafana GUI Analyzer supports the following features to facilitate 
 
 - System and IP-Block Speed-of-Light (SOL)
 - Multiple normalization options, including per-cycle, per-wave, per-kernel and per-second.
-- Baseline comparisons 
+- Baseline comparisons
 - Regex based Dispatch ID filtering
 - Roofline Analysis
 - Detailed per IP Block performance counters and metrics
@@ -456,25 +456,25 @@ Multiple performance number normalizations are provided to allow performance ins
 Omniperf enables baseline comparison to allow checking A/B effect. The current release limits the baseline comparison to the same SoC. Cross comparison between SoCs is in development.
 
 For both the Current Workload and the Baseline Workload, one can independently setup the following filters to allow fine grained comparions:
-- Workload Name 
+- Workload Name
 - GPU ID filtering (multi selection)
 - Kernel Name filtering (multi selection)
 - Dispatch ID filtering (Regex filtering)
 - Omniperf Panels (multi selection)
 
 ##### Regex based Dispatch ID filtering
-This release enables regex based dispatch ID filtering to flexibly choose the kernel invocations. One may refer to [Regex Numeric Range Generator](https://3widgets.com/), to generate typical number ranges. 
+This release enables regex based dispatch ID filtering to flexibly choose the kernel invocations. One may refer to [Regex Numeric Range Generator](https://3widgets.com/), to generate typical number ranges.
 
 For example, if one wants to inspect Dispatch Range from 17 to 48, inclusive, the corresponding regex is : **(1[7-9]|[23]\d|4[0-8])**. The generated express can be copied over for filtering.
 
 ##### Incremental Profiling
 Omniperf supports incremental profiling to significantly speed up performance analysis.
 
-> Refer to [*IP Block profiling*](https://rocm.github.io/omniperf/profiling.html#ip-block-profiling) section for this command. 
+> Refer to [*IP Block profiling*](https://rocm.github.io/omniperf/profiling.html#ip-block-profiling) section for this command.
 
-By default, the entire application is profiled to collect perfmon counter for all IP blocks, giving a system level view of where the workload stands in terms of performance optimization opportunities and bottlenecks. 
+By default, the entire application is profiled to collect perfmon counter for all IP blocks, giving a system level view of where the workload stands in terms of performance optimization opportunities and bottlenecks.
 
-After that one may focus on only a few IP blocks, (e.g., L1 Cache or LDS) to closely check the effect of software optimizations, without performing application replay for all other IP Blocks. This saves lots of compute time. In addition, the prior profiling results for other IP blocks are not overwritten. Instead, they can be merged during the import to piece together the system view. 
+After that one may focus on only a few IP blocks, (e.g., L1 Cache or LDS) to closely check the effect of software optimizations, without performing application replay for all other IP Blocks. This saves lots of compute time. In addition, the prior profiling results for other IP blocks are not overwritten. Instead, they can be merged during the import to piece together the system view.
 
 ##### Color Coding
 The uniform color coding is applied to most visualizations (bars, table, diagrams etc). Typically, Yellow color means over 50%, while Red color mean over 90% percent, for easy inspection.
@@ -484,7 +484,7 @@ The uniform color coding is applied to most visualizations (bars, table, diagram
 ![Grafana GUI Global Variables](images/global_variables.png)
 
 #### Grafana GUI Import
-The omniperf database `--import` option imports the raw profiling data to Grafana's backend MongoDB database. This step is only required for Grafana GUI based performance analysis. 
+The omniperf database `--import` option imports the raw profiling data to Grafana's backend MongoDB database. This step is only required for Grafana GUI based performance analysis.
 
 Default username and password for MongoDB (to be used in database mode) are as follows:
 
@@ -503,23 +503,23 @@ When using database mode, be sure to tailor the connection options to the machin
 $ omniperf database --help
 ROC Profiler:  /usr/bin/rocprof
 
-usage: 
-                                        
+usage:
+
 omniperf database <interaction type> [connection options]
 
-                                        
+
 
 -------------------------------------------------------------------------------
-                                        
+
 Examples:
-                                        
+
         omniperf database --import -H pavii1 -u temp -t asw -w workloads/vcopy/mi200/
-                                        
+
         omniperf database --remove -H pavii1 -u temp -w omniperf_asw_sample_mi200
-                                        
+
 -------------------------------------------------------------------------------
 
-                                        
+
 
 Help:
   -h, --help             show this help message and exit
@@ -539,7 +539,7 @@ Connection Options:
   -p , --password                                       The user's password. (will be requested later if it's not set)
   -t , --team                                           Specify Team prefix.
   -w , --workload                                       Specify name of workload (to remove) or path to workload (to import)
-  -k , --kernelVerbose                                  Specify Kernel Name verbose level 1-5. 
+  -k , --kernelVerbose                                  Specify Kernel Name verbose level 1-5.
                                                         Lower the level, shorter the kernel name. (DEFAULT: 2) (DISABLE: 5)
 ```
 
@@ -547,11 +547,11 @@ Connection Options:
 ```shell-session
 $ omniperf database --import -H dummybox -u temp -t asw -w workloads/vcopy/mi200/
 ROC Profiler:  /usr/bin/rocprof
- 
+
 --------
 Import Profiling Results
 --------
- 
+
 Pulling data from  /home/amd/xlu/test/workloads/vcopy/mi200
 The directory exists
 Found sysinfo file

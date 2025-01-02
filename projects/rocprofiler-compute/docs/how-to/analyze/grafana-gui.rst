@@ -1,6 +1,7 @@
 .. meta::
-   :description: Omniperf analysis: Grafana GUI
-   :keywords: Omniperf, ROCm, profiler, tool, Instinct, accelerator, Grafana, panels, GUI, import
+   :description: ROCm Compute Profiler analysis: Grafana GUI
+   :keywords: Omniperf, ROCm Compute Profiler, ROCm, profiler, tool,
+              Instinct, accelerator, Grafana, panels, GUI, import
 
 ********************
 Grafana GUI analysis
@@ -8,7 +9,7 @@ Grafana GUI analysis
 
 Find setup instructions in :doc:`../../install/grafana-setup`.
 
-The Omniperf Grafana analysis dashboard GUI supports the following features to
+The ROCm Compute Profiler Grafana analysis dashboard GUI supports the following features to
 facilitate MI accelerator performance profiling and analysis:
 
 * System and hardware component (hardware block)
@@ -40,7 +41,7 @@ facilitate MI accelerator performance profiling and analysis:
 
   * L2 Cache (TCC) (both aggregated and per-channel perf info)
 
-See the full list of :ref:`Omniperf's analysis panels <panels>`.
+See the full list of :ref:`ROCm Compute Profiler's analysis panels <panels>`.
 
 .. _analysis-sol:
 
@@ -70,14 +71,14 @@ normalizations are available.
 
 * ``per_second``
 
-See :ref:`normalization-units` to learn more about Omniperf normalizations.
+See :ref:`normalization-units` to learn more about ROCm Compute Profiler normalizations.
 
 .. _analysis-baseline-comparison:
 
 Baseline comparison
 -------------------
 
-Omniperf enables baseline comparison to allow checking A/B effect. Currently
+ROCm Compute Profiler enables baseline comparison to allow checking A/B effect. Currently
 baseline comparison is limited to the same :ref:`SoC <def-soc>`. Cross
 comparison between SoCs is in development.
 
@@ -92,14 +93,14 @@ setup the following filters to allow fine grained comparisons:
 
 * Dispatch ID filtering (regex filtering)
 
-* Omniperf Panels (multi-selection)
+* ROCm Compute Profiler Panels (multi-selection)
 
 .. _analysis-regex-dispatch-id:
 
 Regex-based dispatch ID filtering
 ---------------------------------
 
-Omniperf allows filtering via Regular Expressions (regex), a standard Linux
+ROCm Compute Profiler allows filtering via Regular Expressions (regex), a standard Linux
 string matching syntax, based dispatch ID filtering to flexibly choose the
 kernel invocations.
 
@@ -116,7 +117,7 @@ corresponding regex is : ``(1[7-9]|[23]\d|4[0-8])``.
 Incremental profiling
 ---------------------
 
-Omniperf supports incremental profiling to speed up performance analysis.
+ROCm Compute Profiler supports incremental profiling to speed up performance analysis.
 
 Refer to the :ref:`profiling-hw-component-filtering` section for this command.
 
@@ -145,7 +146,7 @@ Global variables and configurations
 
 .. image:: ../../data/analyze/global_variables.png
    :align: center
-   :alt: Omniperf global variables and configurations
+   :alt: ROCm Compute Profiler global variables and configurations
    :width: 800
 
 .. _grafana-gui-import:
@@ -153,7 +154,7 @@ Global variables and configurations
 Grafana GUI import
 ------------------
 
-The Omniperf database ``--import`` option imports the raw profiling data to
+The ROCm Compute Profiler database ``--import`` option imports the raw profiling data to
 Grafana's backend MongoDB database. This step is only required for Grafana
 GUI-based performance analysis.
 
@@ -169,13 +170,13 @@ convention:
 
 .. code-block:: shell
 
-    omniperf_<team>_<database>_<soc>
+   rocprofiler-compute_<team>_<database>_<soc>
 
 For example:
 
 .. code-block:: shell
 
-   omniperf_asw_vcopy_mi200
+   rocprofiler-compute_asw_vcopy_mi200
 
 When using :ref:`database mode <modes-database>`, be sure to tailor the
 connection options to the machine hosting your
@@ -187,10 +188,10 @@ called ``dummybox``.
 
 .. code-block:: shell-session
 
-   $ omniperf database --help
+   $ rocprof-compute database --help
    usage:
 
-   omniperf database <interaction type> [connection options]
+   rocprof-compute database <interaction type> [connection options]
 
 
 
@@ -198,9 +199,9 @@ called ``dummybox``.
 
    Examples:
 
-           omniperf database --import -H pavii1 -u temp -t asw -w workloads/vcopy/mi200/
+           rocprof-compute database --import -H pavii1 -u temp -t asw -w workloads/vcopy/mi200/
 
-           omniperf database --remove -H pavii1 -u temp -w omniperf_asw_sample_mi200
+           rocprof-compute database --remove -H pavii1 -u temp -w rocprofiler-compute_asw_sample_mi200
 
    -------------------------------------------------------------------------------
 
@@ -215,8 +216,8 @@ called ``dummybox``.
      -s, --specs        Print system specs.
 
    Interaction Type:
-     -i, --import                                  Import workload to Omniperf DB
-     -r, --remove                                  Remove a workload from Omniperf DB
+     -i, --import                                  Import workload to ROCm Compute Profiler DB
+     -r, --remove                                  Remove a workload from ROCm Compute Profiler DB
 
    Connection Options:
      -H , --host                                   Name or IP address of the server host.
@@ -228,22 +229,22 @@ called ``dummybox``.
      --kernel-verbose              Specify Kernel Name verbose level 1-5. Lower the level, shorter the kernel name. (DEFAULT: 5) (DISABLE: 5)
 
 
-Omniperf import for vcopy:
-^^^^^^^^^^^^^^^^^^^^^^^^^^
+ROCm Compute Profiler import for vcopy:
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. code-block:: shell
+.. code-block:: shell-session
 
-   $ omniperf database --import -H dummybox -u temp -t asw -w workloads/vcopy/mi200/
+   $ rocprof-compute database --import -H dummybox -u temp -t asw -w workloads/vcopy/mi200/
 
-     ___                  _                  __
-    / _ \ _ __ ___  _ __ (_)_ __   ___ _ __ / _|
-   | | | | '_ ` _ \| '_ \| | '_ \ / _ \ '__| |_
-   | |_| | | | | | | | | | | |_) |  __/ |  |  _|
-    \___/|_| |_| |_|_| |_|_| .__/ \___|_|  |_|
-                           |_|
+                                    __                                       _
+    _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
+   | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
+   | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
+   |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
+                  |_|                                           |_|
 
 
-   Pulling data from  /home/auser/repos/omniperf/sample/workloads/vcopy/MI200
+   Pulling data from  /home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200
    The directory exists
    Found sysinfo file
    KernelName shortening enabled
@@ -251,15 +252,15 @@ Omniperf import for vcopy:
    Password:
    Password received
    -- Conversion & Upload in Progress --
-     0%|                                                                                                                                                                                                             | 0/11 [00:00<?, ?it/s]/home/auser/repos/omniperf/sample/workloads/vcopy/MI200/SQ_IFETCH_LEVEL.csv
-     9%|█████████████████▉                                                                                                                                                                                   | 1/11 [00:00<00:01,  8.53it/s]/home/auser/repos/omniperf/sample/workloads/vcopy/MI200/pmc_perf.csv
-    18%|███████████████████████████████████▊                                                                                                                                                                 | 2/11 [00:00<00:01,  6.99it/s]/home/auser/repos/omniperf/sample/workloads/vcopy/MI200/SQ_INST_LEVEL_SMEM.csv
-    27%|█████████████████████████████████████████████████████▋                                                                                                                                               | 3/11 [00:00<00:01,  7.90it/s]/home/auser/repos/omniperf/sample/workloads/vcopy/MI200/SQ_LEVEL_WAVES.csv
-    36%|███████████████████████████████████████████████████████████████████████▋                                                                                                                             | 4/11 [00:00<00:00,  8.56it/s]/home/auser/repos/omniperf/sample/workloads/vcopy/MI200/SQ_INST_LEVEL_LDS.csv
-    45%|█████████████████████████████████████████████████████████████████████████████████████████▌                                                                                                           | 5/11 [00:00<00:00,  9.00it/s]/home/auser/repos/omniperf/sample/workloads/vcopy/MI200/SQ_INST_LEVEL_VMEM.csv
-    55%|███████████████████████████████████████████████████████████████████████████████████████████████████████████▍                                                                                         | 6/11 [00:00<00:00,  9.24it/s]/home/auser/repos/omniperf/sample/workloads/vcopy/MI200/sysinfo.csv
-    64%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████▎                                                                       | 7/11 [00:00<00:00,  9.37it/s]/home/auser/repos/omniperf/sample/workloads/vcopy/MI200/roofline.csv
-    82%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████▏                                   | 9/11 [00:00<00:00, 12.60it/s]/home/auser/repos/omniperf/sample/workloads/vcopy/MI200/timestamps.csv
+     0%|                                                                                                                                                                                                             | 0/11 [00:00<?, ?it/s]/home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200/SQ_IFETCH_LEVEL.csv
+     9%|█████████████████▉                                                                                                                                                                                   | 1/11 [00:00<00:01,  8.53it/s]/home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200/pmc_perf.csv
+    18%|███████████████████████████████████▊                                                                                                                                                                 | 2/11 [00:00<00:01,  6.99it/s]/home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200/SQ_INST_LEVEL_SMEM.csv
+    27%|█████████████████████████████████████████████████████▋                                                                                                                                               | 3/11 [00:00<00:01,  7.90it/s]/home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200/SQ_LEVEL_WAVES.csv
+    36%|███████████████████████████████████████████████████████████████████████▋                                                                                                                             | 4/11 [00:00<00:00,  8.56it/s]/home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200/SQ_INST_LEVEL_LDS.csv
+    45%|█████████████████████████████████████████████████████████████████████████████████████████▌                                                                                                           | 5/11 [00:00<00:00,  9.00it/s]/home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200/SQ_INST_LEVEL_VMEM.csv
+    55%|███████████████████████████████████████████████████████████████████████████████████████████████████████████▍                                                                                         | 6/11 [00:00<00:00,  9.24it/s]/home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200/sysinfo.csv
+    64%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████▎                                                                       | 7/11 [00:00<00:00,  9.37it/s]/home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200/roofline.csv
+    82%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████▏                                   | 9/11 [00:00<00:00, 12.60it/s]/home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200/timestamps.csv
    100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 11/11 [00:00<00:00, 11.05it/s]
    9 collections added.
    Workload name uploaded
@@ -267,8 +268,8 @@ Omniperf import for vcopy:
 
 .. _panels:
 
-Omniperf panels
----------------
+ROCm Compute Profiler panels
+----------------------------
 
 There are currently 18 main panel categories available for analyzing the compute
 workload performance. Each category contains several panels for close inspection
@@ -446,7 +447,7 @@ Kernel Time Histogram
 
 .. figure:: ../../data/analyze/grafana/Kernel_time_histogram.png
    :align: center
-   :alt: Kernel time histogram panel in Omniperf Grafana
+   :alt: Kernel time histogram panel in ROCm Compute Profiler Grafana
    :width: 800
 
    Mapping application kernel launches to execution duration.
@@ -456,7 +457,7 @@ Top Bottleneck Kernels
 
 .. figure:: ../../data/analyze/grafana/top-stat_panel.png
    :align: center
-   :alt: Top bottleneck kernels panel in Omniperf Grafana
+   :alt: Top bottleneck kernels panel in ROCm Compute Profiler Grafana
    :width: 800
 
    Top N kernels and relevant statistics. Sorted by total duration.
@@ -466,7 +467,7 @@ Top Bottleneck Dispatches
 
 .. figure:: ../../data/analyze/grafana/Top_bottleneck_dispatches.png
    :align: center
-   :alt: Top bottleneck dispatches panel in Omniperf Grafana
+   :alt: Top bottleneck dispatches panel in ROCm Compute Profiler Grafana
    :width: 800
 
    Top N kernel dispatches and relevant statistics. Sorted by total duration.
@@ -476,7 +477,7 @@ Current and Baseline Dispatch IDs (Filtered)
 
 .. figure:: ../../data/analyze/grafana/Current_and_baseline_dispatch_ids.png
    :align: center
-   :alt: Current and baseline dispatch IDs panel in Omniperf Grafana
+   :alt: Current and baseline dispatch IDs panel in ROCm Compute Profiler Grafana
    :width: 800
 
    List of all kernel dispatches.
@@ -488,10 +489,10 @@ System Speed-of-Light
 
 .. figure:: ../../data/analyze/grafana/sol_panel.png
    :align: center
-   :alt: System Speed-of-Light panel in Omniperf Grafana
+   :alt: System Speed-of-Light panel in ROCm Compute Profiler Grafana
    :width: 800
 
-   Key metrics from various sections of Omniperf’s profiling report.
+   Key metrics from various sections of ROCm Compute Profiler’s profiling report.
 
 .. tip::
 
@@ -510,7 +511,7 @@ Memory Chart Analysis
 
 .. figure:: ../../data/analyze/grafana/memory-chart_panel.png
    :align: center
-   :alt: Memory Chart Analysis panel in Omniperf Grafana
+   :alt: Memory Chart Analysis panel in ROCm Compute Profiler Grafana
    :width: 800
 
    A graphical representation of performance data for memory blocks on the GPU.
@@ -523,7 +524,7 @@ Empirical Roofline Analysis
 
 .. figure:: ../../data/analyze/grafana/roofline_panel.png
    :align: center
-   :alt: Roofline Analysis panel in Omniperf Grafana
+   :alt: Roofline Analysis panel in ROCm Compute Profiler Grafana
    :width: 800
 
    Visualize achieved performance relative to a benchmarked peak performance.
@@ -543,7 +544,7 @@ Command Processor Fetcher
 
 .. figure:: ../../data/analyze/grafana/cpc_panel.png
    :align: center
-   :alt: Command Processor Fetcher panel in Omniperf Grafana
+   :alt: Command Processor Fetcher panel in ROCm Compute Profiler Grafana
    :width: 800
 
    Fetches commands out of memory to hand them over to the Command Processor
@@ -554,7 +555,7 @@ Command Processor Compute
 
 .. figure:: ../../data/analyze/grafana/cpf_panel.png
    :align: center
-   :alt: Command Processor Compute panel in Omniperf Grafana
+   :alt: Command Processor Compute panel in ROCm Compute Profiler Grafana
    :width: 800
 
    The micro-controller running the command processing firmware that decodes the
@@ -575,7 +576,7 @@ SPI Stats
 
 .. figure:: ../../data/analyze/grafana/spi-stats_panel.png
    :align: center
-   :alt: SPI Stats panel in Omniperf Grafana
+   :alt: SPI Stats panel in ROCm Compute Profiler Grafana
    :width: 800
 
 ..
@@ -586,7 +587,7 @@ SPI Resource Allocation
 
 .. figure:: ../../data/analyze/grafana/spi-resource-allocation_panel.png
    :align: center
-   :alt: SPI Resource Allocation panel in Omniperf Grafana
+   :alt: SPI Resource Allocation panel in ROCm Compute Profiler Grafana
    :width: 800
 
 ..
@@ -602,7 +603,7 @@ Wavefront Launch Stats
 
 .. figure:: ../../data/analyze/grafana/wavefront-launch-stats_panel.png
    :align: center
-   :alt: Wavefront Launch Stats panel in Omniperf Grafana
+   :alt: Wavefront Launch Stats panel in ROCm Compute Profiler Grafana
    :width: 800
 
    General information about the kernel launch.
@@ -616,7 +617,7 @@ Wavefront Runtime Stats
 
 .. figure:: ../../data/analyze/grafana/wavefront-runtime-stats_panel.png
    :align: center
-   :alt: Wavefront Runtime Stats panel in Omniperf Grafana.
+   :alt: Wavefront Runtime Stats panel in ROCm Compute Profiler Grafana.
    :width: 800
 
    High-level overview of the execution of wavefronts in a kernel.
@@ -635,7 +636,7 @@ Instruction Mix
 
 .. figure:: ../../data/analyze/grafana/cu-inst-mix_panel.png
    :align: center
-   :alt: Instruction Mix panel in Omniperf Grafana
+   :alt: Instruction Mix panel in ROCm Compute Profiler Grafana
    :width: 800
 
    Breakdown of the various types of instructions executed by the user’s kernel,
@@ -650,7 +651,7 @@ VALU Arithmetic Instruction Mix
 
 .. figure:: ../../data/analyze/grafana/cu-value-arith-instr-mix_panel.png
    :align: center
-   :alt: VALU Arithmetic Instruction Mix panel in Omniperf Grafana
+   :alt: VALU Arithmetic Instruction Mix panel in ROCm Compute Profiler Grafana
    :width: 800
 
    The various types of vector instructions that were issued to the vector
@@ -665,7 +666,7 @@ MFMA Arithmetic Instruction Mix
 
 .. figure:: ../../data/analyze/grafana/cu-mafma-arith-instr-mix_panel.png
    :align: center
-   :alt: MFMA Arithmetic Instruction Mix panel in Omniperf Grafana
+   :alt: MFMA Arithmetic Instruction Mix panel in ROCm Compute Profiler Grafana
    :width: 800
 
    The types of Matrix Fused Multiply-Add (MFMA) instructions that were issued.
@@ -679,7 +680,7 @@ VMEM Arithmetic Instruction Mix
 
 .. figure:: ../../data/analyze/grafana/cu-vmem-instr-mix_panel.png
    :align: center
-   :alt: VMEM Arithmetic Instruction Mix panel in Omniperf Grafana
+   :alt: VMEM Arithmetic Instruction Mix panel in ROCm Compute Profiler Grafana
    :width: 800
 
    The types of vector memory (VMEM) instructions that were issued.
@@ -698,7 +699,7 @@ Speed-of-Light
 
 .. figure:: ../../data/analyze/grafana/cu-sol_panel.png
    :align: center
-   :alt: Speed-of-Light (CU) panel in Omniperf Grafana
+   :alt: Speed-of-Light (CU) panel in ROCm Compute Profiler Grafana
    :width: 800
 
    The number of floating-point and integer operations executed on the vector
@@ -714,7 +715,7 @@ Pipeline Stats
 
 .. figure:: ../../data/analyze/grafana/cu-pipeline-stats_panel.png
    :align: center
-   :alt: Pipeline Stats panel in Omniperf Grafana
+   :alt: Pipeline Stats panel in ROCm Compute Profiler Grafana
    :width: 800
 
    More detailed metrics to analyze the several independent pipelines found in
@@ -729,7 +730,7 @@ Arithmetic Operations
 
 .. figure:: ../../data/analyze/grafana/cu-arith-ops_panel.png
    :align: center
-   :alt: Arithmetic Operations panel in Omniperf Grafana
+   :alt: Arithmetic Operations panel in ROCm Compute Profiler Grafana
    :width: 800
 
    The total number of floating-point and integer operations executed in various
@@ -749,7 +750,7 @@ Speed-of-Light
 
 .. figure:: ../../data/analyze/grafana/lds-sol_panel.png
    :align: center
-   :alt: Speed-of-Light (LDS) panel in Omniperf Grafana
+   :alt: Speed-of-Light (LDS) panel in ROCm Compute Profiler Grafana
    :width: 800
 
    Key metrics for the Local Data Share (LDS) as a comparison with the peak
@@ -764,7 +765,7 @@ LDS Stats
 
 .. figure:: ../../data/analyze/grafana/lds-stats_panel.png
    :align: center
-   :alt: LDS Stats panel in Omniperf Grafana
+   :alt: LDS Stats panel in ROCm Compute Profiler Grafana
    :width: 800
 
    More detailed view of the Local Data Share (LDS) performance.
@@ -783,7 +784,7 @@ Speed-of-Light
 
 .. figure:: ../../data/analyze/grafana/instr-cache-sol_panel.png
    :align: center
-   :alt: Speed-of-Light (instruction cache) panel in Omniperf Grafana
+   :alt: Speed-of-Light (instruction cache) panel in ROCm Compute Profiler Grafana
    :width: 800
 
    Key metrics of the L1 Instruction (L1I) cache as a comparison with the peak
@@ -798,7 +799,7 @@ Instruction Cache Stats
 
 .. figure:: ../../data/analyze/grafana/instr-cache-accesses_panel.png
    :align: center
-   :alt: Instruction Cache Stats panel in Omniperf Grafana
+   :alt: Instruction Cache Stats panel in ROCm Compute Profiler Grafana
    :width: 800
 
    More detail on the hit/miss statistics of the L1 Instruction (L1I) cache.
@@ -821,7 +822,7 @@ Speed-of-Light
 
 .. figure:: ../../data/analyze/grafana/sl1d-sol_panel.png
    :align: center
-   :alt: Speed-of-Light (SL1D) panel in Omniperf Grafana
+   :alt: Speed-of-Light (SL1D) panel in ROCm Compute Profiler Grafana
    :width: 800
 
    Key metrics of the Scalar L1 Data (sL1D) cache as a comparison with the peak
@@ -836,7 +837,7 @@ Scalar L1D Cache Accesses
 
 .. figure:: ../../data/analyze/grafana/sl1d-cache-accesses_panel.png
    :align: center
-   :alt: Scalar L1D Cache Accesses panel in Omniperf Grafana
+   :alt: Scalar L1D Cache Accesses panel in ROCm Compute Profiler Grafana
    :width: 800
 
    More detail on the types of accesses made to the Scalar L1 Data (sL1D) cache,
@@ -851,7 +852,7 @@ Scalar L1D Cache - L2 Interface
 
 .. figure:: ../../data/analyze/grafana/sl1d-l12-interface_panel.png
    :align: center
-   :alt: Scalar L1D Cache - L2 Interface panel in Omniperf Grafana
+   :alt: Scalar L1D Cache - L2 Interface panel in ROCm Compute Profiler Grafana
    :width: 800
 
    More detail on the data requested across the Scalar L1 Data (sL1D) cache <->
@@ -871,7 +872,7 @@ Texture Addresser
 
 .. figure:: ../../data/analyze/grafana/ta_panel.png
    :align: center
-   :alt: Texture Addresser in Omniperf Grafana
+   :alt: Texture Addresser in ROCm Compute Profiler Grafana
    :width: 800
 
    Metric specific to texture addresser (TA) which receives commands (e.g.,
@@ -889,7 +890,7 @@ Texture Data
 
 .. figure:: ../../data/analyze/grafana/td_panel.png
    :align: center
-   :alt: Texture Data panel in Omniperf Grafana
+   :alt: Texture Data panel in ROCm Compute Profiler Grafana
    :width: 800
 
    Metrics specific to texture data (TD) which routes data back to the
@@ -909,7 +910,7 @@ Speed-of-Light
 
 .. figure:: ../../data/analyze/grafana/vl1d-sol_panel.png
    :align: center
-   :alt: Speed-of-Light (VL1D) panel in Omniperf Grafana
+   :alt: Speed-of-Light (VL1D) panel in ROCm Compute Profiler Grafana
    :width: 800
 
    Key metrics of the vector L1 data (vL1D) cache as a comparison with the peak
@@ -924,7 +925,7 @@ L1D Cache Stalls
 
 .. figure:: ../../data/analyze/grafana/vl1d-cache-stalls_panel.png
    :align: center
-   :alt: L1D Cache Stalls panel in Omniperf Grafana
+   :alt: L1D Cache Stalls panel in ROCm Compute Profiler Grafana
    :width: 800
 
    More detail on where vector L1 data (vL1D) cache is stalled in the pipeline,
@@ -955,7 +956,7 @@ L1D - L2 Transactions
 
 .. figure:: ../../data/analyze/grafana/vl1d-l2-transactions_panel.png
    :align: center
-   :alt: L1D - L2 Transactions in Omniperf Grafana
+   :alt: L1D - L2 Transactions in ROCm Compute Profiler Grafana
    :width: 800
 
    A more granular look at the types of requests made to the L2 cache.
@@ -969,7 +970,7 @@ L1D Addr Translation
 
 .. figure:: ../../data/analyze/grafana/vl1d-addr-translation_panel.png
    :align: center
-   :alt: L1D Addr Translation panel in Omniperf Grafana
+   :alt: L1D Addr Translation panel in ROCm Compute Profiler Grafana
    :width: 800
 
    After a vector memory instruction has been processed/coalesced by the address
@@ -995,7 +996,7 @@ Speed-of-Light
 
 .. figure:: ../../data/analyze/grafana/l2-sol_panel.png
    :align: center
-   :alt: Speed-of-Light (L2 cache) panel in Omniperf Grafana
+   :alt: Speed-of-Light (L2 cache) panel in ROCm Compute Profiler Grafana
    :width: 800
 
    Key metrics about the performance of the L2 cache, aggregated over all the
@@ -1011,7 +1012,7 @@ L2 Cache Accesses
 
 .. figure:: ../../data/analyze/grafana/l2-accesses_panel.png
    :align: center
-   :alt: L2 Cache Accesses panel in Omniperf Grafana
+   :alt: L2 Cache Accesses panel in ROCm Compute Profiler Grafana
    :width: 800
 
    Incoming requests to the L2 cache from the vector L1 data (vL1D) cache and
@@ -1026,7 +1027,7 @@ L2 - Fabric Transactions
 
 .. figure:: ../../data/analyze/grafana/l2-fabric-transactions_panel.png
    :align: center
-   :alt: L2 - Fabric Transactions panel in Omniperf Grafana
+   :alt: L2 - Fabric Transactions panel in ROCm Compute Profiler Grafana
    :width: 800
 
    More detail on the flow of requests through Infinity Fabric™.
@@ -1040,7 +1041,7 @@ L2 - Fabric Interface Stalls
 
 .. figure:: ../../data/analyze/grafana/l2-fabric-interface-stalls_panel.png
    :align: center
-   :alt: L2 - Fabric Interface Stalls panel in Omniperf Grafana
+   :alt: L2 - Fabric Interface Stalls panel in ROCm Compute Profiler Grafana
    :width: 800
 
    A breakdown of what types of requests in a kernel caused a stall
@@ -1065,7 +1066,7 @@ Aggregate Stats
 
 .. figure:: ../../data/analyze/grafana/l2-per-channel-agg-stats_panel.png
    :align: center
-   :alt: Aggregate Stats (L2 cache per channel) panel in Omniperf Grafana
+   :alt: Aggregate Stats (L2 cache per channel) panel in ROCm Compute Profiler Grafana
    :width: 800
 
    L2 Cache per channel performance at a glance. Metrics are aggregated over all available channels.

@@ -1,6 +1,6 @@
 .. meta::
-   :description: Omniperf performance model: Local data share (LDS)
-   :keywords: Omniperf, ROCm, profiler, tool, Instinct, accelerator, local, data, share, LDS
+   :description: ROCm Compute Profiler performance model: Local data share (LDS)
+   :keywords: Omniperf, ROCm Compute Profiler, ROCm, profiler, tool, Instinct, accelerator, local, data, share, LDS
 
 **********************
 Local data share (LDS)
@@ -180,4 +180,3 @@ The LDS statistics panel gives a more detailed view of the hardware:
        expected to be zero in most configurations for modern CDNA™ accelerators.
 
      - Accesses per :ref:`normalization unit <normalization-units>`
-

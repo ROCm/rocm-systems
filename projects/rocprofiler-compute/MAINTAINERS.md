@@ -8,7 +8,7 @@ Before publishing a new ROCm Compute Profiler release, please review this checkl
 2) **Sync `amd-mainline` with `amd-staging`**. A rebase may be required to pull all the desired patches from the development branch to our stable mainline. Click [here](https://github.com/ROCm/rocprofiler-compute/compare/amd-mainline...amd-staging) to begin that process.
 3) **Update [CHANGES](CHANGES)** to reflect all major modifications to the codebase since the last release. When modifying [CHANGES](CHANGES) please ensure formatting is consistent with the rest of the ROCm software stack. See [this template](https://github.com/ROCm/hipTensor/blob/develop/CHANGELOG.md) for reference.
 4) **Confirm all CI tests are passing**. You can easily confirm this by peeking the passing status of all GitHub continuous integration tests.
-5) **Create a tag from `amd-mainline`**. More information on tagging can be found at [Git Docs - Tagging](https://git-scm.com/book/en/v2/Git-Basics-Tagging). 
+5) **Create a tag from `amd-mainline`**. More information on tagging can be found at [Git Docs - Tagging](https://git-scm.com/book/en/v2/Git-Basics-Tagging).
 
 > [!NOTE]
 Note: A successful tag should trigger the [packaging action](.github/workflows/packaging.yml) which will produce a tarball artifact. **This artifact needs to be included as an asset in your release**. Please find that the [packaging action](.github/workflows/packaging.yml) will automatically create a draft release with your tarball attached.

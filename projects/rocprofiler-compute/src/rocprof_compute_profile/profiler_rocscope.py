@@ -23,7 +23,7 @@
 ##############################################################################el
 
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
-from utils.utils import demarcate, console_log
+from utils.utils import console_log, demarcate
 
 
 class rocscope_profiler(RocProfCompute_Base):

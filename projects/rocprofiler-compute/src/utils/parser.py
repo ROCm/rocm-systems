@@ -23,15 +23,16 @@
 ##############################################################################el
 
 import ast
-import astunparse
 import re
-import os
 import warnings
-import pandas as pd
-import numpy as np
-from utils import schema
-from utils.utils import console_warning, console_error, demarcate
 from pathlib import Path
+
+import astunparse
+import numpy as np
+import pandas as pd
+
+from utils import schema
+from utils.utils import console_error, console_warning, demarcate
 
 # ------------------------------------------------------------------------------
 # Internal global definitions
@@ -844,6 +845,15 @@ def apply_filters(workload, dir, is_gui, debug):
     # TODO: error out properly if filters out of bound
     ret_df = workload.raw_pmc
 
+    if workload.filter_nodes:
+        ret_df = ret_df.loc[
+            ret_df[schema.pmc_perf_file_prefix]["Node"]
+            .astype(str)
+            .isin([workload.filter_gpu_ids])
+        ]
+        if ret_df.empty:
+            console_error("analysis", "{} is invalid".format(workload.filter_nodes))
+
     if workload.filter_gpu_ids:
         ret_df = ret_df.loc[
             ret_df[schema.pmc_perf_file_prefix]["GPU_ID"]
@@ -862,7 +872,7 @@ def apply_filters(workload, dir, is_gui, debug):
     if workload.filter_kernel_ids:
         if all(type(kid) == int for kid in workload.filter_kernel_ids):
             # Verify valid kernel filter
-            kernels_df = pd.read_csv(os.path.join(dir, "pmc_kernel_top.csv"))
+            kernels_df = pd.read_csv(str(Path(dir).joinpath("pmc_kernel_top.csv")))
             for kernel_id in workload.filter_kernel_ids:
                 if kernel_id >= len(kernels_df["Kernel_Name"]):
                     console_error(

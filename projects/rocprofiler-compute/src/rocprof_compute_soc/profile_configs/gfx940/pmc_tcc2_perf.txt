@@ -17,6 +17,6 @@ pmc: TCC_TAG_STALL[0]  TCC_BUBBLE[0]  TCC_TOO_MANY_EA_WRREQS_STALL[0]  TCC_TAG_S
 
 
 
-gpu: 
-kernel: 
-range: 
+gpu:
+kernel:
+range:

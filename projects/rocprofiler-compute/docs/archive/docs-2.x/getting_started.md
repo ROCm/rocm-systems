@@ -17,7 +17,7 @@
     $ omniperf profile -n vcopy_data -- ./vcopy -n 1048576 -b 256
     ```
     The app runs, each kernel is launched, and profiling results are generated. By default, results are written to a subdirectory with your accelerator's name e.g., ./workloads/vcopy_data/MI200/ (where name is configurable via the `-n` argument).
-    
+
     ```{note}
     To collect all requested profile information, it may be required to replay kernels multiple times.
     ```
@@ -86,7 +86,7 @@ Modes change the fundamental behavior of the Omniperf command line tool. Dependi
     $ omniperf database --help
     ```
 ### Global Options
-The Omniperf command line tool has a set of 'global' options that are available across all modes. 
+The Omniperf command line tool has a set of 'global' options that are available across all modes.
 
 | Argument           | Description                                                       |
 | :----------------- | :---------------------------------------------------------------- |

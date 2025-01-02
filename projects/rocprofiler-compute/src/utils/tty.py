@@ -22,13 +22,14 @@
 # SOFTWARE.
 ##############################################################################el
 
-import pandas as pd
-from pathlib import Path
-from tabulate import tabulate
 import copy
+from pathlib import Path
+
+import pandas as pd
+from tabulate import tabulate
 
 from utils import parser
-from utils.utils import console_warning, console_log
+from utils.utils import console_log, console_warning
 
 hidden_columns = ["Tips", "coll_level"]
 hidden_sections = [1900, 2000]

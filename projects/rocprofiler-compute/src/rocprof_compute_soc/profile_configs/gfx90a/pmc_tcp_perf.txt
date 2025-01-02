@@ -13,6 +13,6 @@ pmc: TCP_TCC_RW_READ_REQ_sum                 TCP_TCC_RW_WRITE_REQ_sum           
 
 #pmc: TCA_CYCLE_sum                           TCA_BUSY_sum
 
-gpu: 
-kernel: 
-range: 
+gpu:
+kernel:
+range:

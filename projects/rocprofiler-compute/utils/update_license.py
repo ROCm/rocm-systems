@@ -4,13 +4,14 @@
 # -------------------------------------------------------------------------------
 
 import argparse
-import logging
-import glob
-import os
-import sys
-import re
 import filecmp
+import glob
+import logging
+import os
+import re
 import shutil
+import sys
+from pathlib import Path
 
 begDelim = "######bl$"
 endDelim = "######el$"
@@ -18,7 +19,7 @@ maxHeaderLines = 200
 
 
 def cacheLicenseFile(infile, comment="#"):
-    if not os.path.isfile(infile):
+    if not Path(infile).is_file():
         logging.error("Unable to access license file - >%s" % infile)
         sys.exit(1)
 
@@ -66,7 +67,7 @@ license = cacheLicenseFile(args.license)
 # Scan files in provided source directory...
 for filename in glob.iglob(srcDir + "/**", recursive=True):
     # skip directories
-    if os.path.isdir(filename):
+    if Path(filename).is_dir():
         continue
 
     # File matching options:
@@ -80,7 +81,7 @@ for filename in glob.iglob(srcDir + "/**", recursive=True):
     if specificFiles:
         found = False
         for file in specificFiles:
-            fullPath = os.path.join(srcDir, file)
+            fullPath = str(Path(srcDir).joinpath(file))
             if fullPath == filename:
                 found = True
                 break
@@ -91,8 +92,8 @@ for filename in glob.iglob(srcDir + "/**", recursive=True):
 
     # Update license header contents if delimiters are found
     with open(filename, "r") as file_in:
-        baseName = os.path.basename(filename)
-        dirName = os.path.dirname(filename)
+        baseName = Path(filename).name
+        dirName = str(Path(filename).parent)
         tmpFile = dirName + "/." + baseName + ".tmp"
 
         file_out = open(tmpFile, "w")

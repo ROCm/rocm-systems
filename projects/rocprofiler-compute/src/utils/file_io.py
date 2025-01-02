@@ -22,20 +22,21 @@
 # SOFTWARE.
 ##############################################################################el
 
-import os
-import sys
-import pandas as pd
-import re
-import yaml
-
-import glob
 import collections
+import glob
+import os
+import re
+import sys
 from collections import OrderedDict
 from pathlib import Path
-from utils import schema
-from utils.utils import console_debug, console_error, demarcate
-from utils.kernel_name_shortener import kernel_name_shortener
+
+import pandas as pd
+import yaml
+
 import config
+from utils import schema
+from utils.kernel_name_shortener import kernel_name_shortener
+from utils.utils import console_debug, console_error, demarcate
 
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd
@@ -72,7 +73,7 @@ def load_panel_configs(dir):
     for root, dirs, files in os.walk(dir):
         for f in files:
             if f.endswith(".yaml"):
-                with open(os.path.join(root, f)) as file:
+                with open(str(Path(root).joinpath(f))) as file:
                     config = yaml.safe_load(file)
                     d[config["Panel Config"]["id"]] = config["Panel Config"]
 
@@ -86,9 +87,11 @@ def load_panel_configs(dir):
 
 @demarcate
 def create_df_kernel_top_stats(
+    df_in,
     raw_data_dir,
     filter_gpu_ids,
     filter_dispatch_ids,
+    filter_nodes,
     time_unit,
     max_stat_num,
     kernel_verbose,
@@ -97,14 +100,17 @@ def create_df_kernel_top_stats(
     """
     Create top stats info by grouping kernels with user's filters.
     """
-    # NB:
-    #   We even don't have to create pmc_kernel_top.csv explictly
-    df = pd.read_csv(os.path.join(raw_data_dir, schema.pmc_perf_file_prefix + ".csv"))
+
+    df = df_in["pmc_perf"]
     # Demangle original KernelNames
     kernel_name_shortener(df, kernel_verbose)
 
     # The logic below for filters are the same as in parser.apply_filters(),
     # which can be merged together if need it.
+
+    if filter_nodes:
+        df = df.loc[df["Node"].astype(str).isin([filter_nodes])]
+
     if filter_gpu_ids:
         df = df.loc[df["GPU_ID"].astype(str).isin([filter_gpu_ids])]
 
@@ -118,8 +124,14 @@ def create_df_kernel_top_stats(
             df = df.loc[df["Dispatch_ID"].astype(str).isin(filter_dispatch_ids)]
 
     # First, create a dispatches file used to populate global vars
-    dispatch_info = df.loc[:, ["Dispatch_ID", "Kernel_Name", "GPU_ID"]]
-    dispatch_info.to_csv(os.path.join(raw_data_dir, "pmc_dispatch_info.csv"), index=False)
+    dispatch_info = (
+        df.loc[:, ["Node", "Dispatch_ID", "Kernel_Name", "GPU_ID"]]
+        if "Node" in df.columns
+        else df.loc[:, ["Dispatch_ID", "Kernel_Name", "GPU_ID"]]
+    )
+    dispatch_info.to_csv(
+        str(Path(raw_data_dir).joinpath("pmc_dispatch_info.csv")), index=False
+    )
 
     time_stats = pd.concat(
         [df["Kernel_Name"], (df["End_Timestamp"] - df["Start_Timestamp"])],
@@ -153,37 +165,80 @@ def create_df_kernel_top_stats(
     #   Sort by total time as default.
     if sortby == "sum":
         grouped = grouped.sort_values(by=("Sum" + time_unit_str), ascending=False)
-        grouped.to_csv(os.path.join(raw_data_dir, "pmc_kernel_top.csv"), index=False)
+        grouped.to_csv(
+            str(Path(raw_data_dir).joinpath("pmc_kernel_top.csv")), index=False
+        )
     elif sortby == "kernel":
         grouped = grouped.sort_values("Kernel_Name")
-        grouped.to_csv(os.path.join(raw_data_dir, "pmc_kernel_top.csv"), index=False)
+        grouped.to_csv(
+            str(Path(raw_data_dir).joinpath("pmc_kernel_top.csv")), index=False
+        )
 
 
 @demarcate
-def create_df_pmc(raw_data_dir, kernel_verbose, verbose):
+def create_df_pmc(raw_data_root_dir, nodes, kernel_verbose, verbose):
     """
     Load all raw pmc counters and join into one df.
     """
-    dfs = []
-    coll_levels = []
 
-    df = pd.DataFrame()
-    new_df = pd.DataFrame()
-    for root, dirs, files in os.walk(raw_data_dir):
-        for f in files:
-            # print("file ", f)
-            if (f.endswith(".csv") and f.startswith("SQ")) or (
-                f == schema.pmc_perf_file_prefix + ".csv"
-            ):
-                tmp_df = pd.read_csv(os.path.join(root, f))
-                # Demangle original KernelNames
-                kernel_name_shortener(tmp_df, kernel_verbose)
-                dfs.append(tmp_df)
-                coll_levels.append(f[:-4])
-    final_df = pd.concat(dfs, keys=coll_levels, axis=1, copy=False)
-    if verbose >= 2:
-        console_debug("pmc_raw_data final_df %s" % final_df.info)
-    return final_df
+    def create_single_df_pmc(raw_data_dir, node_name, kernel_verbose, verbose):
+        dfs = []
+        coll_levels = []
+
+        df = pd.DataFrame()
+        new_df = pd.DataFrame()
+        for root, dirs, files in os.walk(raw_data_dir):
+            for f in files:
+                # print("file ", f)
+                if (f.endswith(".csv") and f.startswith("SQ")) or (
+                    f == schema.pmc_perf_file_prefix + ".csv"
+                ):
+                    tmp_df = pd.read_csv(str(Path(root).joinpath(f)))
+                    # Demangle original KernelNames
+                    kernel_name_shortener(tmp_df, kernel_verbose)
+
+                    # NB:
+                    #   Idealy, the Node column should be added out of
+                    #   multiindexing level. Here, we add it into pmc_perf
+                    #   as it is the main sub-df which can be handled easily
+                    #   later.
+                    if f == "pmc_perf.csv" and node_name != None:
+                        tmp_df.insert(0, "Node", node_name)
+                    dfs.append(tmp_df)
+                    coll_levels.append(f[:-4])
+
+        final_df = pd.concat(dfs, keys=coll_levels, axis=1, copy=False)
+        if verbose >= 2:
+            console_debug("pmc_raw_data final_single_df %s" % final_df.info)
+        return final_df
+
+    # regular single node case
+    if nodes is None:
+        return create_single_df_pmc(raw_data_root_dir, None, kernel_verbose, verbose)
+
+    # "empty list" means all nodes
+    elif not nodes:
+        df = pd.DataFrame()
+        # todo: more err check
+        for subdir in Path(raw_data_root_dir).iterdir():
+            if subdir.is_dir():
+                new_df = create_single_df_pmc(
+                    subdir, str(subdir.name), kernel_verbose, verbose
+                )
+                df = pd.concat([df, new_df])
+        return df
+
+    # specified node list
+    else:
+        df = pd.DataFrame()
+        # todo: more err check
+        for subdir in nodes:
+            p = Path(raw_data_root_dir)
+            new_df = create_single_df_pmc(
+                p.joinpath(subdir), subdir, kernel_verbose, verbose
+            )
+            df = pd.concat([df, new_df])
+        return df
 
 
 def collect_wave_occu_per_cu(in_dir, out_dir, numSE):
@@ -239,3 +294,18 @@ def is_single_panel_config(root_dir, supported_archs):
         return False
     else:
         console_error("Found multiple panel config sets but incomplete for all archs.")
+
+
+def find_1st_sub_dir(directory):
+    """
+    Find the first sub dir in a directory
+    """
+    dir_path = Path(directory)
+    try:
+        # Iterate over entries in the directory
+        for entry in dir_path.iterdir():
+            if entry.is_dir():  # Check if it's a directory
+                return entry
+    except FileNotFoundError:
+        print(f"The directory '{directory}' does not exist.")
+    return None

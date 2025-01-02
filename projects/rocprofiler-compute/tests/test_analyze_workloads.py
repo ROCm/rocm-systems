@@ -1,17 +1,14 @@
-import os.path
-from pathlib import Path
-from unittest.mock import patch
-import pytest
-from importlib.machinery import SourceFileLoader
-import pandas as pd
-import subprocess
+import inspect
 import re
 import shutil
-import inspect
+import subprocess
 import sys
-import test_utils
-from unittest.mock import patch
 from importlib.machinery import SourceFileLoader
+from unittest.mock import patch
+
+import pandas as pd
+import pytest
+import test_utils
 
 rocprof_compute = SourceFileLoader("rocprof-compute", "src/rocprof-compute").load_module()
 

@@ -1,6 +1,6 @@
 .. meta::
-   :description: Omniperf performance model: Shader engine (SE)
-   :keywords: Omniperf, ROCm, profiler, tool, Instinct, accelerator, pipeline, VALU, SALU, VMEM, SMEM, LDS, branch,
+   :description: ROCm Compute Profiler performance model: Shader engine (SE)
+   :keywords: Omniperf, ROCm Compute Profiler, ROCm, profiler, tool, Instinct, accelerator, pipeline, VALU, SALU, VMEM, SMEM, LDS, branch,
               scheduler, MFMA, AGPRs
 
 *********************
@@ -101,7 +101,7 @@ coordinate between wavefronts in a workgroup.
    Performance model of the local data share (LDS) on AMD Instinct MI-series
    accelerators.
 
-Above is Omniperf's performance model of the LDS on CDNA accelerators (adapted
+Above is ROCm Compute Profiler's performance model of the LDS on CDNA accelerators (adapted
 from  :mantor-gcn-pdf:`20`). The SIMDs in the :ref:`VALU <desc-valu>` are
 connected to the LDS in pairs (see above). Only one SIMD per pair may issue an
 LDS instruction at a time, but both pairs may issue concurrently.
@@ -186,7 +186,7 @@ shadow (see the :ref:`MFMA <desc-mfma>` section for more detail).
 
 .. note::
 
-   The IPC model used by Omniperf omits the following two complications for
+   The IPC model used by ROCm Compute Profiler omits the following two complications for
    clarity. First, CDNA accelerators contain other execution units on the CU
    that are unused for compute applications. Second, so-called "internal"
    instructions (see :gcn-crash-course:`29`) are not issued to a functional
@@ -237,7 +237,7 @@ various AMD accelerators (including the CDNA line), we recommend the
             GPRs required for D: 4
             GPR alignment requirement: 8 bytes
 
-For the purposes of Omniperf, the MFMA unit is typically treated as a separate
+For the purposes of ROCm Compute Profiler, the MFMA unit is typically treated as a separate
 pipeline from the :ref:`VALU <desc-valu>`, as other VALU instructions (along
 with other execution pipelines such as the :ref:`SALU <desc-salu>`) typically can be
 issued during a portion of the total duration of an MFMA operation.
@@ -296,4 +296,3 @@ math accumulation VGPRs (AGPRs). The AMD Instinct :ref:`MI2XX <mixxx-note>`
 (CDNA2) has a 512 KiB VGPR file per CU, where each wave can dynamically request
 up to 256 KiB of VGPRs and an additional 256 KiB of AGPRs. For more information,
 refer to `this comment <https://github.com/ROCm/ROCm/issues/1689#issuecomment-1553751913>`_.
-

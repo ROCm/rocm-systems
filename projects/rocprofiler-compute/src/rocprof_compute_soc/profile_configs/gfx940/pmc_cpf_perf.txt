@@ -1,13 +1,11 @@
-pmc: GRBM_COUNT                 GRBM_GUI_ACTIVE                 SQ_CYCLES                       SQ_BUSY_CYCLES                  SQ_WAVES         
+pmc: GRBM_COUNT                 GRBM_GUI_ACTIVE                 SQ_CYCLES                       SQ_BUSY_CYCLES                  SQ_WAVES
 
 pmc: CPF_CPF_STAT_BUSY                          CPF_CPF_STAT_STALL
 pmc: CPF_CPF_TCIU_BUSY                          CPF_CPF_TCIU_STALL
 pmc: CPF_CPF_STAT_IDLE                          CPF_CPF_TCIU_IDLE
-pmc: CPF_CMP_UTCL1_STALL_ON_TRANSLATION          
+pmc: CPF_CMP_UTCL1_STALL_ON_TRANSLATION
 
-range: 
-gpu: 
+range:
+gpu:
 
-kernel: 
-
-
+kernel:

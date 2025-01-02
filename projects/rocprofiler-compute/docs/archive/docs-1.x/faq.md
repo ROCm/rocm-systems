@@ -12,7 +12,7 @@ In order to interact with the Grafana GUI you must sync data with the MongoDB ba
 
 Simply pass the directory of your desired workload like so,
 ```shell
-$ omniperf database --import -w <path-to-results> -H <hostname> -u <username> -t <team-name> 
+$ omniperf database --import -w <path-to-results> -H <hostname> -u <username> -t <team-name>
 ```
 **2. python ast error: 'Constant' object has no attribute 'kind'**
 
@@ -44,11 +44,11 @@ This pop up will appear
 
    Local clients
    - Forwarded Port: [PORT]
-   
+
    Remote Server
    - Remote Server: localhost
    - Remote Port: [PORT]
-   
+
    SSH Server
    - SSH server: Name of the server one is connecting to
    - SSH login: Username to login to the server

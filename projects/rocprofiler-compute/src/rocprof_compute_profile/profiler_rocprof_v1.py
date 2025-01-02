@@ -23,9 +23,10 @@
 ##############################################################################el
 
 import os
+from pathlib import Path
 
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
-from utils.utils import demarcate, replace_timestamps, console_log
+from utils.utils import console_log, demarcate, replace_timestamps, store_app_cmd
 
 
 class rocprof_v1_profiler(RocProfCompute_Base):
@@ -33,12 +34,12 @@ class rocprof_v1_profiler(RocProfCompute_Base):
         super().__init__(profiling_args, profiler_mode, soc)
         self.ready_to_profile = (
             self.get_args().roof_only
-            and not os.path.isfile(os.path.join(self.get_args().path, "pmc_perf.csv"))
+            and not Path(self.get_args().path).joinpath("pmc_perf.csv").is_file()
             or not self.get_args().roof_only
         )
 
     def get_profiler_options(self, fname):
-        fbase = os.path.splitext(os.path.basename(fname))[0]
+        fbase = Path(fname).stem
         app_cmd = self.get_args().remaining
         args = [
             # v1 requires request for timestamps
@@ -50,6 +51,16 @@ class rocprof_v1_profiler(RocProfCompute_Base):
             # v1 does require quotes on app cmd
             '"' + app_cmd + '"',
         ]
+        # store original args for debug message
+        store_app_cmd(
+            [
+                "--timestamp",
+                "on",
+                "-o",
+                self.get_args().path + "/" + fbase + ".csv",
+                app_cmd,
+            ]
+        )
         return args
 
     # -----------------------

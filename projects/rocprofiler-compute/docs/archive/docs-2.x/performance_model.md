@@ -96,7 +96,7 @@ The SIMDs in the [VALU](valu) are connected to the LDS in pairs (see above).
 Only one SIMD per pair may issue an LDS instruction at a time, but both pairs may issue concurrently.
 
 On CDNA accelerators, the LDS contains 32 banks and each bank is 4B wide.
-The LDS is designed such that each bank can be read from/written to/atomically updated every cycle, for a total throughput of 128B/clock ([GCN Crash Course](https://www.slideshare.net/DevCentralAMD/gs4106-the-amd-gcn-architecture-a-crash-course-by-layla-mah), slide 40). 
+The LDS is designed such that each bank can be read from/written to/atomically updated every cycle, for a total throughput of 128B/clock ([GCN Crash Course](https://www.slideshare.net/DevCentralAMD/gs4106-the-amd-gcn-architecture-a-crash-course-by-layla-mah), slide 40).
 
 On each of the two ports to the SIMDs, 64B can be sent in each direction per cycle. So, a single wavefront, coming from one of the 2 SIMDs in a pair, can only get back 64B/cycle (16 lanes per cycle). The input port is shared between data and address and this can affect achieved bandwidth for different data sizes. For example, a 64-wide store where each lane is sending a 4B value takes 8 cycles (50% peak bandwidth) while a 64-wide store where each lane is sending a 16B value takes 20 cycles (80% peak bandwidth).
 
@@ -270,7 +270,7 @@ The wavefront runtime statistics gives a high-level overview of the execution of
 
 ```{list-table}
 :header-rows: 1
-:widths: 18 65 17 
+:widths: 18 65 17
 :class: noscroll-table
 * - Metric
   - Description
@@ -1481,7 +1481,7 @@ The Scalar L1D speed-of-light chart shows some key metrics of the sL1D cache as 
   - Description
   - Unit
 * - Bandwidth
-  - The number of bytes looked up in the sL1D cache, as a percent of the peak theoretical bandwidth. Calculated as the ratio of sL1D requests over the [total sL1D cycles](TotalSL1DCycles). 
+  - The number of bytes looked up in the sL1D cache, as a percent of the peak theoretical bandwidth. Calculated as the ratio of sL1D requests over the [total sL1D cycles](TotalSL1DCycles).
   - Percent
 * - Cache Hit Rate
   - The percent of sL1D requests that hit{sup}`1` on a previously loaded line in the cache. Calculated as the ratio of the number of sL1D requests that hit over the number of all sL1D requests.
@@ -1601,7 +1601,7 @@ The L1 Instruction Cache speed-of-light chart shows some key metrics of the L1I 
   - Description
   - Unit
 * - Bandwidth
-  - The number of bytes looked up in the L1I cache, as a percent of the peak theoretical bandwidth. Calculated as the ratio of L1I requests over the [total L1I cycles](TotalL1ICycles). 
+  - The number of bytes looked up in the L1I cache, as a percent of the peak theoretical bandwidth. Calculated as the ratio of L1I requests over the [total L1I cycles](TotalL1ICycles).
   - Percent
 * - Cache Hit Rate
   - The percent of L1I requests that hit on a previously loaded line the cache. Calculated as the ratio of the number of L1I requests that hit{sup}`1` over the number of all L1I requests.
@@ -1822,10 +1822,10 @@ The command processor's metrics therefore are focused on reporting, e.g.:
   - Percent of total cycles counted by the CPF-[L2](L2) interface where the CPF-L2 interface was active doing any work.  The ratio of CPF-L2 busy cycles over total cycles counted by the CPF-L2.
   - Percent
 * - CPF-L2 Stall
-  - Percent of CPF-L2 busy cycles where the CPF-[L2](L2) interface was stalled for any reason. 
+  - Percent of CPF-L2 busy cycles where the CPF-[L2](L2) interface was stalled for any reason.
   - Percent
 * - CPF-UTCL1 Stall
-  - Percent of CPF busy cycles where the CPF was stalled by address translation. 
+  - Percent of CPF busy cycles where the CPF was stalled by address translation.
   - Percent
 ```
 
@@ -1958,10 +1958,10 @@ Finally, the system speed-of-light summarizes some of the key metrics from vario
   - The percent of sL1D requests that hit on a previously loaded line the cache. Calculated as the ratio of the number of sL1D requests that hit over the number of all sL1D requests.
   - Percent
 * - [sL1D](sL1D) Bandwidth
-  - The number of bytes looked up in the sL1D cache per unit time. This is also presented as a percent of the peak theoretical bandwidth achievable on the specific accelerator. 
+  - The number of bytes looked up in the sL1D cache per unit time. This is also presented as a percent of the peak theoretical bandwidth achievable on the specific accelerator.
   - GB/s
 * - [L1I](L1I) Bandwidth
-  - The number of bytes looked up in the L1I cache per unit time. This is also presented as a percent of the peak theoretical bandwidth achievable on the specific accelerator. 
+  - The number of bytes looked up in the L1I cache per unit time. This is also presented as a percent of the peak theoretical bandwidth achievable on the specific accelerator.
   - GB/s
 * - [L1I](L1I) Cache Hit Rate
   - The percent of L1I requests that hit on a previously loaded line the cache. Calculated as the ratio of the number of L1I requests that hit over the number of all L1I requests.
@@ -2170,7 +2170,7 @@ These memory types include:
     - Memory that will be cached by the accelerator, but may be invalidated by writes from remote devices at kernel boundaries / after software-driven synchronization events. On [MI2XX](2xxnote) accelerators, this corresponds to "coarse-grained" memory allocated locally to the accelerator, using e.g., the default `hipMalloc` allocator.
 ```
 
-A good discussion of coarse and fine grained memory allocations and what type of memory is returned by various combinations of memory allocators, flags and arguments can be found in the [Crusher Quick-Start Guide](https://docs.olcf.ornl.gov/systems/crusher_quick_start_guide.html#floating-point-fp-atomic-operations-and-coarse-fine-grained-memory-allocations). 
+A good discussion of coarse and fine grained memory allocations and what type of memory is returned by various combinations of memory allocators, flags and arguments can be found in the [Crusher Quick-Start Guide](https://docs.olcf.ornl.gov/systems/crusher_quick_start_guide.html#floating-point-fp-atomic-operations-and-coarse-fine-grained-memory-allocations).
 
 (profiling-with-omniperf)=
 # Profiling with Omniperf by Example
@@ -2719,7 +2719,7 @@ $ omniperf analyze -p workloads/fine_grained_host_writes/mi200 -b 17.2.4 17.2.5 
 ```
 
 Here we notice a few changes in our request pattern:
-  - As expected, the requests have changed from 64B Reads to 64B Write requests (17.5.7), 
+  - As expected, the requests have changed from 64B Reads to 64B Write requests (17.5.7),
   - these requests are homed in on a "remote" destination (17.2.6, 17.5.9), as expected, and,
   - these are also counted as a single Uncached Write request (17.5.6).
 
@@ -2978,7 +2978,7 @@ As discussed [previously](Flat_design), our `generic_write` kernel uses an addre
 
 We also note that the `filter` parameter passed in as a kernel argument (see [example](https://github.com/ROCm/omniperf/blob/amd-mainline/sample/vmem.hip), or [design note](Flat_design)) is set to zero on the host, such that we always write to the 'local' (LDS) memory allocation `lds`.
 
-Examining this kernel in the VMEM Instruction Mix table yields: 
+Examining this kernel in the VMEM Instruction Mix table yields:
 
 ```shell-session
 $ omniperf analyze -p workloads/vmem/mi200/ --dispatch 2 -b 10.3 -n per_kernel
@@ -3749,7 +3749,7 @@ $ omniperf analyze -p workloads/ipc/mi200/ --dispatch 10 -b 11.2
 ```
 
 Here we see that:
-  - both our IPC (11.2.0) and Issued IPC (11.2.1) are $\sim1.0$ as expected, and, 
+  - both our IPC (11.2.0) and Issued IPC (11.2.1) are $\sim1.0$ as expected, and,
   - the SALU Utilization (11.2.2) was nearly 100% as it was active for almost the entire kernel.
 
 (VALU_Active_Threads)=
@@ -4034,7 +4034,7 @@ The bank conflict rate linearly increases with the number of work-items within a
 
 
 (Occupancy_example)=
-## Occupancy Limiters Example 
+## Occupancy Limiters Example
 
 
 In this [example](https://github.com/ROCm/omniperf/blob/amd-mainline/sample/occupancy.hip), we will investigate the use of the resource allocation panel in the [Workgroup Manager](SPI)'s metrics section to determine occupancy limiters.
@@ -4180,7 +4180,7 @@ denotes the divide between `VGPRs` and `AGPRs`.
 Next, we examine our wavefront occupancy (2.1.15), and see that we are reaching only $\sim50\%$ of peak occupancy.
 As a result, we see that:
   - We are not scheduling workgroups $\sim25\%$ of [total scheduler-pipe cycles](TotalPipeCycles) (6.2.1); recall from the discussion of the [Workgroup manager](SPI), 25\% is the maximum.
-  - The scheduler-pipe is stalled (6.2.2) from scheduling workgroups due to resource constraints for the same $\sim25\%$ of the time. 
+  - The scheduler-pipe is stalled (6.2.2) from scheduling workgroups due to resource constraints for the same $\sim25\%$ of the time.
   - And finally, $\sim91\%$ of those stalls are due to a lack of SIMDs with the appropriate number of VGPRs available (6.2.5).
 
 That is, the reason we can't reach full occupancy is due to our VGPR usage, as expected!
@@ -4407,4 +4407,3 @@ Finally, we inspect the occupancy limiter metrics and see a roughly even split b
 
 This is yet another reminder to view occupancy holistically.
 While these metrics tell you why a workgroup cannot be scheduled, they do _not_ tell you what your occupancy was (consult wavefront occupancy) _nor_ whether increasing occupancy will be beneficial to performance.
-

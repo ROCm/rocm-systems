@@ -1,23 +1,23 @@
 {
     "creators": [
         {
-            "affiliation": "AMD", 
+            "affiliation": "AMD",
             "name": "Xiaomin Lu"
-        }, 	
+        },
         {
-            "affiliation": "AMD Research", 
+            "affiliation": "AMD Research",
             "name": "Cole Ramos"
         },
         {
-            "affiliation": "AMD", 
+            "affiliation": "AMD",
             "name": "Fei Zheng"
         },
         {
-            "affiliation": "AMD Research", 
+            "affiliation": "AMD Research",
             "name": "Karl W. Schulz"
         },
         {
-            "affiliation": "AMD Research", 	    
+            "affiliation": "AMD Research",
             "name": "Jose Santos"
         }
     ]

@@ -23,8 +23,9 @@
 ##############################################################################el
 
 import argparse
-import shutil
 import os
+import shutil
+from pathlib import Path
 
 
 def print_avail_arch(avail_arch: list):
@@ -123,11 +124,20 @@ Examples:
         metavar="",
         type=str,
         dest="path",
-        default=os.path.join(os.getcwd(), "workloads"),
+        default=str(Path(os.getcwd()).joinpath("workloads")),
         required=False,
         help="\t\t\tSpecify path to save workload.\n\t\t\t(DEFAULT: {}/workloads/<name>)".format(
             os.getcwd()
         ),
+    )
+    profile_group.add_argument(
+        "--subpath",
+        metavar="",
+        type=str,
+        dest="subpath",
+        default="gpu",
+        required=False,
+        help="\t\t\tSpecify the type of subpath to save workload: node_name, gpu_model.",
     )
     profile_group.add_argument(
         "-k",
@@ -225,6 +235,25 @@ Examples:
         default=None,
         nargs=argparse.REMAINDER,
         help="\t\t\tProvide command for profiling after double dash.",
+    )
+    profile_group.add_argument(
+        "--spatial-multiplexing",
+        type=int,
+        metavar="",
+        nargs="+",
+        dest="spatial_multiplexing",
+        required=False,
+        default=None,
+        help="\t\t\tProvide Node ID and GPU number per node.",
+    )
+    profile_group.add_argument(
+        "--format-rocprof-output",
+        required=False,
+        metavar="",
+        dest="format_rocprof_output",
+        choices=["json", "csv"],
+        default="csv",
+        help="\t\t\tSet the format of output file of rocprof.",
     )
 
     ## Roofline Command Line Options
@@ -547,4 +576,17 @@ Examples:
         type=str,
         metavar="",
         help="\t\tSpecify the specs to correct.",
+    )
+    analyze_advanced_group.add_argument(
+        "--list-nodes",
+        action="store_true",
+        help="\t\tMulti-node option: list all node names.",
+    )
+    analyze_advanced_group.add_argument(
+        "--nodes",
+        metavar="",
+        type=str,
+        dest="nodes",
+        nargs="*",
+        help="\t\tMulti-node option: filter with node names. Enable it without node names means ALL.",
     )

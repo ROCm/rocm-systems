@@ -5,7 +5,7 @@ Instructions-per-cycle and utilizations example
 
 For this example, consider the
 :dev-sample:`instructions-per-cycle (IPC) example <ipc.hip>` included with
-Omniperf.
+ROCm Compute Profiler.
 
 This example is compiled using ``c++17`` support:
 
@@ -17,7 +17,7 @@ and was run on an MI250 CDNA2 accelerator:
 
 .. code-block:: shell
 
-   $ omniperf profile -n ipc --no-roof -- ./ipc
+   $ rocprof-compute profile -n ipc --no-roof -- ./ipc
 
 The results shown in this section are *generally* applicable to CDNA
 accelerators, but may vary between generations and specific products.
@@ -64,11 +64,11 @@ operation, i.e., a ``v_mov_b32`` instruction, e.g.:
 
 This instruction simply copies the contents from the source register
 (``v1``) to the destination register (``v0``). Investigating this kernel
-with Omniperf, we see:
+with ROCm Compute Profiler, we see:
 
 .. code-block:: shell-session
 
-   $ omniperf analyze -p workloads/ipc/mi200/ --dispatch 7 -b 11.2
+   $ rocprof-compute analyze -p workloads/ipc/mi200/ --dispatch 7 -b 11.2
    <...>
    --------------------------------------------------------------------------------
    0. Top Stat
@@ -172,7 +172,7 @@ in the IPC example:
 
 .. code-block:: shell
 
-   $ omniperf analyze -p workloads/ipc/mi200/ --dispatch 8 -b 11.2 --decimal 4
+   $ rocprof-compute analyze -p workloads/ipc/mi200/ --dispatch 8 -b 11.2 --decimal 4
    <...>
    --------------------------------------------------------------------------------
    0. Top Stat
@@ -240,7 +240,7 @@ instructions executed over the total
    There are further complications of the Issued IPC metric (**11.2.1**) that make
    its use more complicated. We will be explore that in the
    :ref:`following section <ipc-internal-instructions>`. For these reasons,
-   Omniperf typically promotes use of the regular IPC metric (**11.2.0**), e.g., in
+   ROCm Compute Profiler typically promotes use of the regular IPC metric (**11.2.0**), e.g., in
    the top-level Speed-of-Light chart.
 
 .. _ipc-internal-instructions:
@@ -261,11 +261,11 @@ Here we choose to use the following no-op to make our point:
 
    s_nop 0x0
 
-Running this kernel through Omniperf yields:
+Running this kernel through ROCm Compute Profiler yields:
 
 .. code-block:: shell-session
 
-   $ omniperf analyze -p workloads/ipc/mi200/ --dispatch 9 -b 11.2
+   $ rocprof-compute analyze -p workloads/ipc/mi200/ --dispatch 9 -b 11.2
    <...>
    --------------------------------------------------------------------------------
    0. Top Stat
@@ -362,11 +362,11 @@ operation, for instance:
 
 which, in analogue to our :ref:`v_mov <ipc-valu-utilization>` example, copies the
 contents of the source scalar register (``s1``) to the destination
-scalar register (``s0``). Running this kernel through Omniperf yields:
+scalar register (``s0``). Running this kernel through ROCm Compute Profiler yields:
 
 .. code-block:: shell-session
 
-   $ omniperf analyze -p workloads/ipc/mi200/ --dispatch 10 -b 11.2
+   $ rocprof-compute analyze -p workloads/ipc/mi200/ --dispatch 10 -b 11.2
    <...>
    --------------------------------------------------------------------------------
    0. Top Stat
@@ -426,11 +426,11 @@ of our :ref:`v_mov <ipc-valu-utilization>` example:
 
 That is, we wrap our :ref:`VALU <desc-valu>` operation inside a conditional
 where only one lane in our wavefront is active. Running this kernel
-through Omniperf yields:
+through ROCm Compute Profiler yields:
 
 .. code-block:: shell-session
 
-   $ omniperf analyze -p workloads/ipc/mi200/ --dispatch 11 -b 11.2
+   $ rocprof-compute analyze -p workloads/ipc/mi200/ --dispatch 11 -b 11.2
    <...>
    --------------------------------------------------------------------------------
    0. Top Stat

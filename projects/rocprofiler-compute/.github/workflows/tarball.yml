@@ -105,4 +105,3 @@ jobs:
           module load rocprofiler-compute
           module list
           rocprof-compute --version
-

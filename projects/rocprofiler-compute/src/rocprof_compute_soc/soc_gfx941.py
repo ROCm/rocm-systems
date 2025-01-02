@@ -22,11 +22,12 @@
 # SOFTWARE.
 ##############################################################################el
 
-import os
+from pathlib import Path
+
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils.utils import demarcate, mibench, console_log, console_error
 from roofline import Roofline
+from utils.utils import console_error, console_log, demarcate, mibench
 
 
 class gfx941_soc(OmniSoC_Base):
@@ -35,22 +36,24 @@ class gfx941_soc(OmniSoC_Base):
         self.set_arch("gfx941")
         if hasattr(self.get_args(), "roof_only") and self.get_args().roof_only:
             self.set_perfmon_dir(
-                os.path.join(
-                    str(config.rocprof_compute_home),
-                    "rocprof_compute_soc",
-                    "profile_configs",
-                    "gfx940",
-                    "roofline",
+                str(
+                    Path(str(config.rocprof_compute_home)).joinpath(
+                        "rocprof_compute_soc",
+                        "profile_configs",
+                        "gfx940",
+                        "roofline",
+                    )
                 )
             )
         else:
             # NB: We're using generalized Mi300 perfmon configs
             self.set_perfmon_dir(
-                os.path.join(
-                    str(config.rocprof_compute_home),
-                    "rocprof_compute_soc",
-                    "profile_configs",
-                    "gfx940",
+                str(
+                    Path(str(config.rocprof_compute_home)).joinpath(
+                        "rocprof_compute_soc",
+                        "profile_configs",
+                        "gfx940",
+                    )
                 )
             )
         self.set_compatible_profilers(["rocprofv1", "rocprofv2"])
@@ -70,7 +73,7 @@ class gfx941_soc(OmniSoC_Base):
                 "TCC_channels": 32,
             }
         )
-        # self.roofline_obj = Roofline(args, self._mspec)
+        self.roofline_obj = Roofline(args, self._mspec)
 
         # Set arch specific specs
         self._mspec._l2_banks = 16
@@ -84,8 +87,6 @@ class gfx941_soc(OmniSoC_Base):
     def profiling_setup(self):
         """Perform any SoC-specific setup prior to profiling."""
         super().profiling_setup()
-        if self.get_args().roof_only:
-            console_error("Roofline temporarily disabled in MI300")
         # Performance counter filtering
         self.perfmon_filter(self.get_args().roof_only)
 
@@ -94,20 +95,22 @@ class gfx941_soc(OmniSoC_Base):
         """Perform any SoC-specific post profiling activities."""
         super().post_profiling()
 
-        console_log("roofline", "Roofline temporarily disabled in MI300")
-        # if not self.get_args().no_roof:
-        #     logging.info("[roofline] Checking for roofline.csv in " + str(self.get_args().path))
-        #     if not os.path.isfile(os.path.join(self.get_args().path, "roofline.csv")):
-        #         mibench(self.get_args())
-        #     self.roofline_obj.post_processing()
-        # else:
-        #     logging.info("[roofline] Skipping roofline")
+        if not self.get_args().no_roof:
+            console_log(
+                "roofline", "Checking for roofline.csv in " + str(self.get_args().path)
+            )
+            if not Path(self.get_args().path).joinpath("roofline.csv").is_file():
+                mibench(self.get_args(), self._mspec)
+            self.roofline_obj.post_processing()
+        else:
+            console_log("roofline", "Skipping roofline")
 
     @demarcate
     def analysis_setup(self, roofline_parameters=None):
         """Perform any SoC-specific setup prior to analysis."""
         super().analysis_setup()
-        console_log("roofline", "Roofline temporarily disabled in Mi300")
         # configure roofline for analysis
-        # if roofline_parameters:
-        #     self.roofline_obj = Roofline(self.get_args(), roofline_parameters)
+        if roofline_parameters:
+            self.roofline_obj = Roofline(
+                self.get_args(), self._mspec, roofline_parameters
+            )

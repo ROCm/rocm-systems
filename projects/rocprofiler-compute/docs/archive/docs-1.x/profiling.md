@@ -138,21 +138,21 @@ RPL: output dir '/tmp/rpl_data_230411_165021_26406'
 RPL: result dir '/tmp/rpl_data_230411_165021_26406/input0_results_230411_165021'
 Finished allocating vectors on the CPU
 ROCProfiler: input from "/tmp/rpl_data_230411_165021_26406/input0.xml"
-  gpu_index = 
-  kernel = 
-  range = 
+  gpu_index =
+  kernel =
+  range =
   3 metrics
     SQ_INSTS_SMEM, SQ_INST_LEVEL_SMEM, SQ_ACCUM_PREV_HIRES
 Finished allocating vectors on the GPU
 Finished copying vectors to the GPU
-sw thinks it moved 1.000000 KB per wave 
+sw thinks it moved 1.000000 KB per wave
 Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
 Launching the  kernel on the GPU
 Finished executing kernel
 Finished copying the output vector from the GPU to the CPU
 Releasing GPU memory
 Releasing CPU memory
- 
+
 ... ...
 ROCPRofiler: 1 contexts collected, output directory /tmp/rpl_data_220527_130317_1787038/input_results_220527_130317
 File 'workloads/vcopy/mi200/timestamps.csv' is generating
@@ -321,14 +321,14 @@ RPL: output dir '/tmp/rpl_data_230411_170300_29696'
 RPL: result dir '/tmp/rpl_data_230411_170300_29696/input0_results_230411_170300'
 Finished allocating vectors on the CPU
 ROCProfiler: input from "/tmp/rpl_data_230411_170300_29696/input0.xml"
-  gpu_index = 
+  gpu_index =
   kernel = vecCopy
- 
+
 ... ...
 ```
 
 #### Dispatch Filtering
-Dispatch filtering is based on the *global* dispatch index of kernels in a run. 
+Dispatch filtering is based on the *global* dispatch index of kernels in a run.
 
 The following example profiles only the 0th dispatched kernel in execution of the application:
 ```shell-session
@@ -358,8 +358,8 @@ RPL: output dir '/tmp/rpl_data_230411_170356_30314'
 RPL: result dir '/tmp/rpl_data_230411_170356_30314/input0_results_230411_170356'
 Finished allocating vectors on the CPU
 ROCProfiler: input from "/tmp/rpl_data_230411_170356_30314/input0.xml"
-  gpu_index = 
-  kernel = 
+  gpu_index =
+  kernel =
   range = 0
 ...
 ```
@@ -367,7 +367,7 @@ ROCProfiler: input from "/tmp/rpl_data_230411_170356_30314/input0.xml"
 
 
 ### Standalone Roofline
-If you're only interested in generating roofline analysis data try using `--roof-only`. This will only collect counters relevent to roofline, as well as generate a standalone .pdf output of your roofline plot. 
+If you're only interested in generating roofline analysis data try using `--roof-only`. This will only collect counters relevent to roofline, as well as generate a standalone .pdf output of your roofline plot.
 
 Standalone Roofline Options:
 

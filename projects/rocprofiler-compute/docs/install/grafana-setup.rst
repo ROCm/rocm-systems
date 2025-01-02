@@ -1,26 +1,26 @@
 .. meta::
-   :description: Omniperf Grafana server installation and deployment
-   :keywords: Omniperf, ROCm, profiler, tool, Instinct, accelerator, AMD,
+   :description: ROCm Compute Profiler Grafana server installation and deployment
+   :keywords: ROCm Compute Profiler, ROCm, profiler, tool, Instinct, accelerator, AMD,
               install, deploy, Grafana, server, configuration, GUI
 
-****************************************
-Setting up a Grafana server for Omniperf
-****************************************
+***************************************************
+Setting up Grafana server for ROCm Compute Profiler
+***************************************************
 
 A Grafana server is *not required* to profile or analyze performance data
 from the CLI. It's a supplementary mechanism to help you import performance
 data and examine it in a detailed
 `Grafana <https://github.com/grafana/grafana>`_ dashboard GUI.
 
-Learn about installing and configuring the main Omniperf tool in
+Learn about installing and configuring the main ROCm Compute Profiler tool in
 :ref:`core-install`.
 
-Setting up a Grafana instance for Omniperf requires the following basic software
+Setting up a Grafana instance for ROCm Compute Profiler requires the following basic software
 dependencies.
 
 * `Docker Engine <https://docs.docker.com/engine/install/>`_
 
-The recommended process for enabling the server-side of Omniperf is to use the
+The recommended process for enabling the server-side of ROCm Compute Profiler is to use the
 provided ``Dockerfile`` to build the Grafana and MongoDB instance.
 
 .. _grafana-mongodb-setup:
@@ -34,7 +34,7 @@ the following setup instructions.
 Install MongoDB utilities
 -------------------------
 
-Omniperf uses the
+ROCm Compute Profiler uses the
 `mongoimport <https://www.mongodb.com/docs/database-tools/mongoimport/>`_
 utility to upload data to your Grafana instance's backend database.
 
@@ -70,7 +70,7 @@ crash or reset. This is called *creating a persistent volume*.
 Build and launch the Docker container
 -------------------------------------
 
-You're now ready to build your ``Dockerfile``. Navigate to your Omniperf install
+You're now ready to build your ``Dockerfile``. Navigate to your ROCm Compute Profiler install
 directory to begin.
 
 .. code-block:: bash
@@ -78,6 +78,13 @@ directory to begin.
    $ cd grafana
    $ sudo docker-compose build
    $ sudo docker-compose up -d
+
+.. note::
+
+   To troubleshoot Docker container build failures related to certificate verification, try
+   disabling any network proxy services on the host system. These proxy services can interfere
+   with OpenSSL's ability to retrieve a correct certificate chain when the container accesses
+   external websites.
 
 The TCP ports for Grafana (``4000``) and MongoDB (``27017``) in the Docker
 container are mapped to ``14000`` and ``27018``, respectively, on the host side.
@@ -158,12 +165,12 @@ connection is successful.
 
 .. _grafana-import-dashboard-file:
 
-Import the Omniperf dashboard file
-----------------------------------
+Import the ROCm Compute Profiler dashboard file
+-----------------------------------------------
 
 From the **Create** → **Import** page, upload the dashboard file,
 ``/dashboards/Omniperf_v{__VERSION__}_pub.json`` from the
-:doc:`Omniperf tarball <core-install>`.
+:doc:`ROCm Compute Profiler tarball <core-install>`.
 
 Edit both the dashboard **Name** and the **Unique identifier (UID)** fields to
 uniquely identify the dashboard. Click **Import** to complete the process.
@@ -177,21 +184,21 @@ uniquely identify the dashboard. Click **Import** to complete the process.
 
 .. _grafana-select-workload:
 
-Select and load the Omniperf workload
--------------------------------------
+Select and load the ROCm Compute Profiler workload
+--------------------------------------------------
 
 Once you have imported a dashboard you're ready to begin. Start by browsing
 available dashboards and selecting the dashboard you have just imported.
 
 .. figure:: ../data/install/opening_dashboard.png
    :align: center
-   :alt: Opening your Omniperf dashboard in Grafana
+   :alt: Opening your ROCm Compute Profiler dashboard in Grafana
    :width: 800
 
-   Opening your Omniperf profiling dashboard in Grafana.
+   Opening your ROCm Compute Profiler profiling dashboard in Grafana.
 
 Remember that you need to upload workload data to the MongoDB backend before
-analyzing in your Grafana interface. See a detailed example of this in 
+analyzing in your Grafana interface. See a detailed example of this in
 :ref:`grafana-gui-import`.
 
 After a workload has been successfully uploaded, you should be able to select it
@@ -199,11 +206,10 @@ from the workload dropdown located at the top of your Grafana dashboard.
 
 .. figure:: ../data/install/grafana_workload_selection.png
    :align: center
-   :alt: Omniperf workload selection in Grafana
+   :alt: ROCm Compute Profiler workload selection in Grafana
    :width: 800
 
-   Selecting your Omniperf workload in Grafana.
+   Selecting your ROCm Compute Profiler workload in Grafana.
 
 For more information on how to use the Grafana interface for analysis see
 :doc:`/how-to/analyze/grafana-gui`.
-

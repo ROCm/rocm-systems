@@ -87,7 +87,7 @@ Collecting Performance Counters
    |-> [/opt/rocm/bin/rocprofv2] Releasing GPU memory
    |-> [/opt/rocm/bin/rocprofv2] Releasing CPU memory
    |-> [/opt/rocm/bin/rocprofv2] Results File: "tests/workloads/ipblocks_TCP/MI300A_A1/out/pmc_1/results_pmc_perf_4.csv"
-   |-> [/opt/rocm/bin/rocprofv2] 
+   |-> [/opt/rocm/bin/rocprofv2]
    |-> [/opt/rocm/bin/rocprofv2] The output path for the following counters: tests/workloads/ipblocks_TCP/MI300A_A1/out/pmc_1
 [profiling] Current input file: tests/workloads/ipblocks_TCP/MI300A_A1/perfmon/pmc_perf_5.txt
    |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
@@ -110,7 +110,7 @@ Collecting Performance Counters
    |-> [/opt/rocm/bin/rocprofv2] Releasing GPU memory
    |-> [/opt/rocm/bin/rocprofv2] Releasing CPU memory
    |-> [/opt/rocm/bin/rocprofv2] Results File: "tests/workloads/ipblocks_TCP/MI300A_A1/out/pmc_1/results_pmc_perf_5.csv"
-   |-> [/opt/rocm/bin/rocprofv2] 
+   |-> [/opt/rocm/bin/rocprofv2]
 [profiling] Current input file: tests/workloads/ipblocks_TCP/MI300A_A1/perfmon/pmc_perf_6.txt
    |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
    |-> [/opt/rocm/bin/rocprofv2] - TCP_TCC_NC_READ_REQ_sum
@@ -132,7 +132,7 @@ Collecting Performance Counters
    |-> [/opt/rocm/bin/rocprofv2] Releasing GPU memory
    |-> [/opt/rocm/bin/rocprofv2] Releasing CPU memory
    |-> [/opt/rocm/bin/rocprofv2] Results File: "tests/workloads/ipblocks_TCP/MI300A_A1/out/pmc_1/results_pmc_perf_6.csv"
-   |-> [/opt/rocm/bin/rocprofv2] 
+   |-> [/opt/rocm/bin/rocprofv2]
    |-> [/opt/rocm/bin/rocprofv2] The output path for the following counters: tests/workloads/ipblocks_TCP/MI300A_A1/out/pmc_1
 [profiling] Current input file: tests/workloads/ipblocks_TCP/MI300A_A1/perfmon/pmc_perf_7.txt
    |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
@@ -155,7 +155,7 @@ Collecting Performance Counters
    |-> [/opt/rocm/bin/rocprofv2] Releasing GPU memory
    |-> [/opt/rocm/bin/rocprofv2] Releasing CPU memory
    |-> [/opt/rocm/bin/rocprofv2] Results File: "tests/workloads/ipblocks_TCP/MI300A_A1/out/pmc_1/results_pmc_perf_7.csv"
-   |-> [/opt/rocm/bin/rocprofv2] 
+   |-> [/opt/rocm/bin/rocprofv2]
    |-> [/opt/rocm/bin/rocprofv2] The output path for the following counters: tests/workloads/ipblocks_TCP/MI300A_A1/out/pmc_1
 [profiling] Current input file: tests/workloads/ipblocks_TCP/MI300A_A1/perfmon/pmc_perf_8.txt
    |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
@@ -178,7 +178,7 @@ Collecting Performance Counters
    |-> [/opt/rocm/bin/rocprofv2] Releasing GPU memory
    |-> [/opt/rocm/bin/rocprofv2] Releasing CPU memory
    |-> [/opt/rocm/bin/rocprofv2] Results File: "tests/workloads/ipblocks_TCP/MI300A_A1/out/pmc_1/results_pmc_perf_8.csv"
-   |-> [/opt/rocm/bin/rocprofv2] 
+   |-> [/opt/rocm/bin/rocprofv2]
    |-> [/opt/rocm/bin/rocprofv2] The output path for the following counters: tests/workloads/ipblocks_TCP/MI300A_A1/out/pmc_1
 [profiling] Current input file: tests/workloads/ipblocks_TCP/MI300A_A1/perfmon/pmc_perf_9.txt
    |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
@@ -198,7 +198,7 @@ Collecting Performance Counters
    |-> [/opt/rocm/bin/rocprofv2] Releasing GPU memory
    |-> [/opt/rocm/bin/rocprofv2] Releasing CPU memory
    |-> [/opt/rocm/bin/rocprofv2] Results File: "tests/workloads/ipblocks_TCP/MI300A_A1/out/pmc_1/results_pmc_perf_9.csv"
-   |-> [/opt/rocm/bin/rocprofv2] 
+   |-> [/opt/rocm/bin/rocprofv2]
    |-> [/opt/rocm/bin/rocprofv2] The output path for the following counters: tests/workloads/ipblocks_TCP/MI300A_A1/out/pmc_1
 [profiling] Current input file: tests/workloads/ipblocks_TCP/MI300A_A1/perfmon/timestamps.txt
    |-> [/opt/rocm/bin/rocprofv2] vcopy testing on GCD 0
@@ -215,5 +215,5 @@ Collecting Performance Counters
    |-> [/opt/rocm/bin/rocprofv2] Releasing GPU memory
    |-> [/opt/rocm/bin/rocprofv2] Releasing CPU memory
    |-> [/opt/rocm/bin/rocprofv2] Results File: "tests/workloads/ipblocks_TCP/MI300A_A1/out/pmc_1/results_timestamps.csv"
-   |-> [/opt/rocm/bin/rocprofv2] 
+   |-> [/opt/rocm/bin/rocprofv2]
 [roofline] Roofline temporarily disabled in MI300

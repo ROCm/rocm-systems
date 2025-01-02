@@ -33,12 +33,12 @@ Panel Config:
             value: AVG((((TCP_GATE_EN2_sum * 100) / TCP_GATE_EN1_sum) if (TCP_GATE_EN1_sum
               != 0) else None))
             unit: Pct of Peak
-            tips: 
+            tips:
           Coalescing:
             value: AVG(((((TA_TOTAL_WAVEFRONTS_sum * 64) * 100) / (TCP_TOTAL_ACCESSES_sum
               * 4)) if (TCP_TOTAL_ACCESSES_sum != 0) else None))
             unit: Pct of Peak
-            tips: 
+            tips:
         comparable: false # for now
         cli_style: simple_bar
 
@@ -135,7 +135,7 @@ Panel Config:
               TCP_TOTAL_CACHE_ACCESSES_sum)) if (TCP_TOTAL_CACHE_ACCESSES_sum != 0) else
                None))
             unit: pct
-            tips: 
+            tips:
           Cache Accesses:
             avg: AVG((TCP_TOTAL_CACHE_ACCESSES_sum / $denom))
             min: MIN((TCP_TOTAL_CACHE_ACCESSES_sum / $denom))

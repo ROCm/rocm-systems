@@ -67,13 +67,13 @@ Panel Config:
             unit: CUs
             peak: $cu_per_gpu
             pop: ((100 * $numActiveCUs) / $cu_per_gpu)
-            tips: 
+            tips:
           SALU Utilization:
             value: AVG(((100 * SQ_ACTIVE_INST_SCA) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             unit: pct
             peak: 100
             pop: AVG(((100 * SQ_ACTIVE_INST_SCA) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
-            tips: 
+            tips:
           VALU Utilization:
             value: AVG(((100 * SQ_ACTIVE_INST_VALU) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             unit: pct
@@ -91,26 +91,26 @@ Panel Config:
             unit: pct
             peak: 100
             pop: None # No HW module
-            tips: 
+            tips:
           Branch Utilization:
             value: None # No HW module
             unit: pct
             peak: 100
             pop: None # No HW module
-            tips: 
+            tips:
           VALU Active Threads:
             value: AVG(((SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU) if (SQ_ACTIVE_INST_VALU
               != 0) else None))
             unit: Threads
             peak: $wave_size
             pop: (100 * AVG((SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU / $wave_size) if (SQ_ACTIVE_INST_VALU != 0) else None))
-            tips: 
+            tips:
           IPC:
             value: AVG((SQ_INSTS / SQ_BUSY_CU_CYCLES))
             unit: Instr/cycle
             peak: 5
             pop: ((100 * AVG((SQ_INSTS / SQ_BUSY_CU_CYCLES))) / 5)
-            tips: 
+            tips:
           Wavefront Occupancy:
             value: AVG((SQ_ACCUM_PREV_HIRES / $GRBM_GUI_ACTIVE_PER_XCD))
             unit: Wavefronts
@@ -118,7 +118,7 @@ Panel Config:
             pop: (100 * AVG(((SQ_ACCUM_PREV_HIRES / $GRBM_GUI_ACTIVE_PER_XCD) / ($max_waves_per_cu
               * $cu_per_gpu))))
             coll_level: SQ_LEVEL_WAVES
-            tips: 
+            tips:
           Theoretical LDS Bandwidth:
             value: AVG(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
               / (End_Timestamp - Start_Timestamp)))
@@ -126,7 +126,7 @@ Panel Config:
             peak: (($max_sclk * $cu_per_gpu) * 0.128)
             pop: AVG((((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
               / (End_Timestamp - Start_Timestamp)) / (($max_sclk * $cu_per_gpu) * 0.00128)))
-            tips: 
+            tips:
           LDS Bank Conflicts/Access:
             value: AVG(((SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
               if ((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) != 0) else None))
@@ -134,7 +134,7 @@ Panel Config:
             peak: 32
             pop: ((100 * AVG(((SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
               if ((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) != 0) else None))) / 32)
-            tips: 
+            tips:
           vL1D Cache Hit Rate:
             value: AVG(((100 - ((100 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)
               + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
@@ -146,14 +146,14 @@ Panel Config:
               TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) /
               TCP_TOTAL_CACHE_ACCESSES_sum)) if (TCP_TOTAL_CACHE_ACCESSES_sum != 0) else
               None))
-            tips: 
+            tips:
           vL1D Cache BW:
             value: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (End_Timestamp - Start_Timestamp)))
             unit: GB/s
             peak: ((($max_sclk / 1000) * 64) * $cu_per_gpu)
             pop: ((100 * AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (End_Timestamp - Start_Timestamp))))
               / ((($max_sclk / 1000) * 64) * $cu_per_gpu))
-            tips: 
+            tips:
           L2 Cache Hit Rate:
             value: AVG((((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum)) if ((TCC_HIT_sum
               + TCC_MISS_sum) != 0) else None))
@@ -161,14 +161,14 @@ Panel Config:
             peak: 100
             pop: AVG((((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum)) if ((TCC_HIT_sum
               + TCC_MISS_sum) != 0) else None))
-            tips: 
+            tips:
           L2 Cache BW:
             value: AVG(((TCC_REQ_sum * 64) / (End_Timestamp - Start_Timestamp)))
             unit: GB/s
             peak: ((($max_sclk / 1000) * 64) * TO_INT($total_l2_chan))
             pop: ((100 * AVG(((TCC_REQ_sum * 64) / (End_Timestamp - Start_Timestamp))))
               / ((($max_sclk / 1000) * 64) * TO_INT($total_l2_chan)))
-            tips: 
+            tips:
           L2-Fabric Read BW:
             value: AVG((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
               * 64)) / (End_Timestamp - Start_Timestamp)))
@@ -176,7 +176,7 @@ Panel Config:
             peak: $hbm_bw
             pop: ((100 * AVG((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
               * 64)) / (End_Timestamp - Start_Timestamp)))) / $hbm_bw)
-            tips: 
+            tips:
           L2-Fabric Write BW:
             value: AVG((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
               * 32)) / (End_Timestamp - Start_Timestamp)))
@@ -184,21 +184,21 @@ Panel Config:
             peak: $hbm_bw
             pop: ((100 * AVG((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
               * 32)) / (End_Timestamp - Start_Timestamp)))) / $hbm_bw)
-            tips: 
+            tips:
           L2-Fabric Read Latency:
             value: AVG(((TCC_EA_RDREQ_LEVEL_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
               != 0) else None))
             unit: Cycles
             peak: None
             pop: None
-            tips: 
+            tips:
           L2-Fabric Write Latency:
             value: AVG(((TCC_EA_WRREQ_LEVEL_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
               != 0) else None))
             unit: Cycles
             peak: None
             pop: None
-            tips: 
+            tips:
           sL1D Cache Hit Rate:
             value: AVG((((100 * SQC_DCACHE_HITS) / (SQC_DCACHE_HITS + SQC_DCACHE_MISSES))
               if ((SQC_DCACHE_HITS + SQC_DCACHE_MISSES) != 0) else None))
@@ -206,27 +206,27 @@ Panel Config:
             peak: 100
             pop: AVG((((100 * SQC_DCACHE_HITS) / (SQC_DCACHE_HITS + SQC_DCACHE_MISSES))
               if ((SQC_DCACHE_HITS + SQC_DCACHE_MISSES) != 0) else None))
-            tips: 
+            tips:
           sL1D Cache BW:
             value: AVG(((SQC_DCACHE_REQ / (End_Timestamp - Start_Timestamp)) * 64))
             unit: GB/s
             peak: ((($max_sclk / 1000) * 64) * $sqc_per_gpu)
             pop: ((100 * AVG(((SQC_DCACHE_REQ / (End_Timestamp - Start_Timestamp)) * 64))) / ((($max_sclk
               / 1000) * 64) * $sqc_per_gpu))
-            tips: 
+            tips:
           L1I Hit Rate:
             value: AVG(((100 * SQC_ICACHE_HITS) / (SQC_ICACHE_HITS + SQC_ICACHE_MISSES)))
             unit: pct
             peak: 100
             pop: AVG(((100 * SQC_ICACHE_HITS) / (SQC_ICACHE_HITS + SQC_ICACHE_MISSES)))
-            tips: 
+            tips:
           L1I BW:
             value: AVG(((SQC_ICACHE_REQ / (End_Timestamp - Start_Timestamp)) * 32))
             unit: GB/s
             peak: ((($max_sclk / 1000) * 64) * $sqc_per_gpu)
             pop: ((100 * AVG(((SQC_ICACHE_REQ / (End_Timestamp - Start_Timestamp)) * 32))) / ((($max_sclk
               / 1000) * 32) * $sqc_per_gpu))
-            tips: 
+            tips:
           L1I Fetch Latency:
             value: AVG((SQ_ACCUM_PREV_HIRES / SQ_IFETCH))
             unit: Cycles

@@ -1,13 +1,13 @@
 .. meta::
-   :description: Omniperf performance model: System Speed-of-Light
-   :keywords: Omniperf, ROCm, profiler, tool, Instinct, accelerator, AMD, system, speed of light
+   :description: ROCm Compute Profiler performance model: System Speed-of-Light
+   :keywords: Omniperf, ROCm Compute Profiler, ROCm, profiler, tool, Instinct, accelerator, AMD, system, speed of light
 
 *********************
 System Speed-of-Light
 *********************
 
 System Speed-of-Light summarizes some of the key metrics from various sections
-of Omniperf’s profiling report.
+of ROCm Compute Profiler’s profiling report.
 
 .. warning::
 
@@ -315,4 +315,3 @@ of Omniperf’s profiling report.
        :doc:`CU <compute-unit>`.
 
      - Cycles
-

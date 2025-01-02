@@ -23,8 +23,9 @@
 ###############################################################################el
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Mapping, Generator
 from types import SimpleNamespace as NS
+from typing import Dict, Generator, List, Mapping
+
 from plotille import Canvas
 
 

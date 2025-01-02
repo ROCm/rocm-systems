@@ -38,7 +38,7 @@ __global__ void vecCopy(double *a, double *b, double *c, int n, int stride) {
     // Get our global thread ID
     int id = blockIdx.x*blockDim.x+threadIdx.x;
     if (id < n)
-      c[id] = a[id];   
+      c[id] = a[id];
 }
 
 // Duplicate of vecCopy kernel. Included for testing purposes
@@ -46,7 +46,7 @@ __global__ void vecCopy_2(double *a, double *b, double *c, int n, int stride) {
     // Get our global thread ID
     int id = blockIdx.x*blockDim.x+threadIdx.x;
     if (id < n)
-      c[id] = a[id];   
+      c[id] = a[id];
 }
 
 void usage() {
@@ -61,7 +61,7 @@ void usage() {
   exit(1);
   return;
 }
- 
+
 int main(int argc, char* argv[]) {
   // Size of vectors
   int n; //64 MB
@@ -94,29 +94,29 @@ int main(int argc, char* argv[]) {
     std::string arg = argv[i];
     if ((arg == "--blockSize" || arg == "-b") && i+1 < argc)
       blockSize = std::atoi(argv[i+1]);
-    
+
     else if ((arg == "--vec" || arg == "-n") && i+1 < argc)
       n = std::atoi(argv[i+1]);
-    
+
     else if ((arg == "--device" || arg == "-d") && i+1 < argc)
       devId = std::atoi(argv[i+1]);
-    
+
     else if ((arg == "--iter" || arg == "-i") && i+1 < argc)
       numIter = std::atoi(argv[i+1]);
-    
+
     else if (arg == "--multikernel")
       multiKernel = true;
 
-    else if (arg == "--help" || arg == "-h") 
-      usage(); 
+    else if (arg == "--help" || arg == "-h")
+      usage();
   }
 
-  if (blockSize == 0) 
+  if (blockSize == 0)
     usage();
-  
-  if (n == 0) 
+
+  if (n == 0)
     usage();
-  
+
 
   int numGpuDevices;
   HIP_ASSERT(hipGetDeviceCount(&numGpuDevices));
@@ -138,8 +138,8 @@ int main(int argc, char* argv[]) {
   h_c = (double*)malloc(bytes);
   h_verify_c = (double*)malloc(bytes);
 
-  printf("Finished allocating vectors on the CPU\n");     
-  
+  printf("Finished allocating vectors on the CPU\n");
+
   // Allocate memory for each vector on GPU
   HIP_ASSERT(hipMalloc(&d_a, bytes));
   HIP_ASSERT(hipMalloc(&d_b, bytes));
@@ -165,10 +165,10 @@ int main(int argc, char* argv[]) {
   float num_bytes_kb = ((sizeof(double))*n)/(1024);
   float num_bytes_wave = (1.0*num_bytes_kb)/(1.0*tot_waves);
 
-  printf("sw thinks it moved %f KB per wave \n", (2.0*num_bytes_wave)); 
-  printf("Total threads: %d, Grid Size: %d block Size:%d, Wavefronts:%d:\n", n, gridSize, blockSize, tot_waves); 
+  printf("sw thinks it moved %f KB per wave \n", (2.0*num_bytes_wave));
+  printf("Total threads: %d, Grid Size: %d block Size:%d, Wavefronts:%d:\n", n, gridSize, blockSize, tot_waves);
   printf("Launching the  kernel on the GPU\n");
-  
+
   // Execute the kernel
   for(int i = 0; i < numIter; i++){
     hipLaunchKernelGGL(vecCopy, dim3(gridSize), dim3(blockSize), 0, 0, d_a, d_b, d_c, n, stride);
@@ -181,12 +181,12 @@ int main(int argc, char* argv[]) {
       printf("Finished executing kernel\n");
     }
   }
-  
+
   // Copy array back to host
   HIP_ASSERT(hipMemcpy( h_c, d_c, bytes, hipMemcpyDeviceToHost));
   printf("Finished copying the output vector from the GPU to the CPU\n");
 
-  // Compute for CPU 
+  // Compute for CPU
   for(int i=0; i<n; i++) {
     // h_verify_c[i*stride] = h_a[i*stride] + h_b[i*stride];
     h_verify_c[i*stride] = h_a[i*stride] ;
@@ -196,14 +196,14 @@ int main(int argc, char* argv[]) {
   for(int i = 0; i < n; i++) {
     if (abs(h_verify_c[i*stride] - h_c[i*stride]) > 1e-5)
       printf("Error at position i %d, Expected: %f, Found: %f \n", i, h_c[i], d_c[i]);
-  }	
+  }
   //printf("Printing few elements from the output vector\n");
   for(int i = 0; i < 20; i++) {
-    //printf("Output[%d]:%f\n",i, h_c[i]);	    
+    //printf("Output[%d]:%f\n",i, h_c[i]);
   }
 
   printf("Releasing GPU memory\n");
-    
+
   // Release device memory
   HIP_ASSERT(hipFree(d_a));
   HIP_ASSERT(hipFree(d_b));

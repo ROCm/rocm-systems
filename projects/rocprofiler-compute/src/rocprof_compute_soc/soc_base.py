@@ -22,19 +22,19 @@
 # SOFTWARE.
 ##############################################################################el
 
-from abc import ABC, abstractmethod
-import os
-import math
-import shutil
 import glob
+import math
+import os
 import re
-import numpy as np
-from utils.utils import demarcate, console_debug, console_log, console_error
-from pathlib import Path
+import shutil
+from abc import ABC, abstractmethod
 from collections import OrderedDict
+from pathlib import Path
 
-from rocprof_compute_base import SUPPORTED_ARCHS
-from rocprof_compute_base import MI300_CHIP_IDS
+import numpy as np
+
+from rocprof_compute_base import MI300_CHIP_IDS, SUPPORTED_ARCHS
+from utils.utils import console_debug, console_error, console_log, demarcate
 
 
 class OmniSoC_Base:
@@ -53,9 +53,11 @@ class OmniSoC_Base:
         self.populate_mspec()
         # In some cases (i.e. --specs) path will not be given
         if hasattr(self.__args, "path"):
-            if self.__args.path == os.path.join(os.getcwd(), "workloads"):
-                self.__workload_dir = os.path.join(
-                    self.__args.path, self.__args.name, self._mspec.gpu_model
+            if self.__args.path == str(Path(os.getcwd()).joinpath("workloads")):
+                self.__workload_dir = str(
+                    Path(self.__args.path).joinpath(
+                        self.__args.name, self._mspec.gpu_model
+                    )
                 )
             else:
                 self.__workload_dir = self.__args.path
@@ -103,7 +105,7 @@ class OmniSoC_Base:
 
     @demarcate
     def populate_mspec(self):
-        from utils.specs import search, run, total_sqc, total_xcds
+        from utils.specs import run, search, total_sqc, total_xcds
 
         if not hasattr(self._mspec, "_rocminfo") or self._mspec._rocminfo is None:
             return
@@ -177,6 +179,9 @@ class OmniSoC_Base:
         self._mspec.cur_sclk = self._mspec.max_sclk
         self._mspec.cur_mclk = self._mspec.max_mclk
 
+        self._mspec.gpu_series = list(SUPPORTED_ARCHS[self._mspec.gpu_arch].keys())[
+            0
+        ].upper()
         # specify gpu name for gfx942 hardware
         self._mspec.gpu_model = list(SUPPORTED_ARCHS[self._mspec.gpu_arch].keys())[
             0
@@ -184,25 +189,26 @@ class OmniSoC_Base:
         if self._mspec.gpu_model == "MI300":
             # Use Chip ID to distinguish MI300 gpu model using the built-in dictionary
             if self._mspec.chip_id in MI300_CHIP_IDS:
-                self._mspec.chip_id = MI300_CHIP_IDS[self._mspec.chip_id]
+                self._mspec.gpu_model = MI300_CHIP_IDS[self._mspec.chip_id]
 
         self._mspec.num_xcd = str(
-            total_xcds(self._mspec.chip_id, self._mspec.compute_partition)
+            total_xcds(self._mspec.gpu_model, self._mspec.compute_partition)
         )
 
     @demarcate
     def perfmon_filter(self, roofline_perfmon_only: bool):
         """Filter default performance counter set based on user arguments"""
-        if roofline_perfmon_only and os.path.isfile(
-            os.path.join(self.get_args().path, "pmc_perf.csv")
+        if (
+            roofline_perfmon_only
+            and Path(self.get_args().path).joinpath("pmc_perf.csv").is_file()
         ):
             return
         workload_perfmon_dir = self.__workload_dir + "/perfmon"
 
         # Initialize directories
-        if not os.path.isdir(self.__workload_dir):
+        if not Path(self.__workload_dir).is_dir():
             os.makedirs(self.__workload_dir)
-        elif not os.path.islink(self.__workload_dir):
+        elif not Path(self.__workload_dir).is_symlink():
             shutil.rmtree(self.__workload_dir)
         else:
             os.unlink(self.__workload_dir)
@@ -223,7 +229,7 @@ class OmniSoC_Base:
 
                 pmc_files_list = []
                 for fname in ref_pmc_files_list:
-                    fbase = os.path.splitext(os.path.basename(fname))[0]
+                    fbase = Path(fname).stem
                     ip = re.match(mpattern, fbase).group(1)
                     if ip in self.__args.ipblocks:
                         pmc_files_list.append(fname)
@@ -239,7 +245,12 @@ class OmniSoC_Base:
             pmc_files_list = ref_pmc_files_list
 
         # Coalesce and writeback workload specific perfmon
-        perfmon_coalesce(pmc_files_list, self.__perfmon_config, self.__workload_dir)
+        perfmon_coalesce(
+            pmc_files_list,
+            self.__perfmon_config,
+            self.__workload_dir,
+            self.get_args().spatial_multiplexing,
+        )
 
     # ----------------------------------------------------
     # Required methods to be implemented by child classes
@@ -299,8 +310,13 @@ class CounterFile:
         return self.blocks[block].add(counter)
 
 
+# TODO: This is a HACK
+def using_v3():
+    return "ROCPROF" in os.environ.keys() and os.environ["ROCPROF"] == "rocprofv3"
+
+
 @demarcate
-def perfmon_coalesce(pmc_files_list, perfmon_config, workload_dir):
+def perfmon_coalesce(pmc_files_list, perfmon_config, workload_dir, spatial_multiplexing):
     """Sort and bucket all related performance counters to minimize required application passes"""
     workload_perfmon_dir = workload_dir + "/perfmon"
 
@@ -334,14 +350,26 @@ def perfmon_coalesce(pmc_files_list, perfmon_config, workload_dir):
                 # Normal counters
                 for ctr in counters:
 
+                    # v3 doesn't seem to support this counter
+                    if using_v3():
+                        if ctr.startswith("TCC_BUBBLE"):
+                            continue
+
                     # Channel counter e.g. TCC_ATOMIC[0]
                     if "[" in ctr:
 
-                        # Remove channel number, append "_expand" so we know
-                        # add the channel numbers back later
+                        # FIXME:
+                        # Remove channel number, append "_sum" so rocprof will
+                        # sum the counters for us instead of specifying every
+                        # channel.
                         channel = int(ctr.split("[")[1].split("]")[0])
                         if channel == 0:
-                            counter_name = ctr.split("[")[0] + "_expand"
+                            counter_name = (
+                                ctr.split("[")[0] + "_sum"
+                                if using_v3()
+                                else ctr.split("[")[0] + "_expand"
+                            )
+
                             try:
                                 normal_counters[counter_name] += 1
                             except:
@@ -360,14 +388,27 @@ def perfmon_coalesce(pmc_files_list, perfmon_config, workload_dir):
 
     output_files = []
 
+    accu_file_count = 0
     # Each accumulate counter is in a different file
     for ctrs in accumulate_counters:
 
-        # Get name of the counter and use it as file name
         ctr_name = ctrs[ctrs.index("SQ_ACCUM_PREV_HIRES") - 1]
+
+        if using_v3():
+            # v3 does not support SQ_ACCUM_PREV_HIRES. Instead we defined our own
+            # counters in counter_defs.yaml that use the accumulate() function. These
+            # use the name of the accumulate counter with _ACCUM appended to them.
+            ctrs.remove("SQ_ACCUM_PREV_HIRES")
+
+            accum_name = ctr_name + "_ACCUM"
+
+            ctrs.append(accum_name)
+
+        # Use the name of the accumulate counter as the file name
         output_files.append(CounterFile(ctr_name + ".txt", perfmon_config))
         for ctr in ctrs:
             output_files[-1].add(ctr)
+        accu_file_count += 1
 
     file_count = 0
     for ctr in normal_counters.keys():
@@ -387,47 +428,114 @@ def perfmon_coalesce(pmc_files_list, perfmon_config, workload_dir):
             file_count += 1
             output_files[-1].add(ctr)
 
-    # Output to files
-    for f in output_files:
-        file_name = os.path.join(workload_perfmon_dir, f.file_name)
+    console_debug("profiling", "perfmon_coalesce file_count %s" % file_count)
 
-        pmc = []
-        for block_name in f.blocks.keys():
-            if block_name == "TCC":
+    # TODO: rewrite the above logic for spatial_multiplexing later
+    if spatial_multiplexing:
 
-                # Expand and interleve the TCC channel counters
-                # e.g.  TCC_HIT[0] TCC_ATOMIC[0] ... TCC_HIT[1] TCC_ATOMIC[1] ...
-                channel_counters = []
-                for ctr in f.blocks[block_name].elements:
-                    if "_expand" in ctr:
-                        channel_counters.append(ctr.split("_expand")[0])
+        # TODO: more error checking
+        if len(spatial_multiplexing) != 3:
+            console_error(
+                "profiling", "multiplexing need provide node_idx node_count and gpu_count"
+            )
 
-                for i in range(0, perfmon_config["TCC_channels"]):
-                    for c in channel_counters:
-                        pmc.append("{}[{}]".format(c, i))
+        node_idx = int(spatial_multiplexing[0])
+        node_count = int(spatial_multiplexing[1])
+        gpu_count = int(spatial_multiplexing[2])
 
-                # Handle the rest of the TCC counters
-                for ctr in f.blocks[block_name].elements:
-                    if "_expand" not in ctr:
+        old_group_num = file_count + accu_file_count
+        new_bucket_count = node_count * gpu_count
+        groups_per_bucket = math.ceil(
+            old_group_num / new_bucket_count
+        )  # It equals to file num per node
+        max_groups_per_node = groups_per_bucket * gpu_count
+
+        group_start = node_idx * max_groups_per_node
+        group_end = min((node_idx + 1) * max_groups_per_node, old_group_num)
+
+        console_debug(
+            "profiling",
+            "spatial_multiplexing node_idx %s, node_count %s, gpu_count: %s, old_group_num %s, "
+            "new_bucket_count %s, groups_per_bucket %s, max_groups_per_node %s, "
+            "group_start %s, group_end %s"
+            % (
+                node_idx,
+                node_count,
+                gpu_count,
+                old_group_num,
+                new_bucket_count,
+                groups_per_bucket,
+                max_groups_per_node,
+                group_start,
+                group_end,
+            ),
+        )
+
+        for f_idx in range(groups_per_bucket):
+            file_name = str(
+                Path(workload_perfmon_dir).joinpath(
+                    "pmc_perf_" + "node_" + str(node_idx) + "_" + str(f_idx) + ".txt"
+                )
+            )
+
+            pmc = []
+            for g_idx in range(
+                group_start + f_idx * gpu_count,
+                min(group_end, group_start + (f_idx + 1) * gpu_count),
+            ):
+                gpu_idx = g_idx % gpu_count
+                for block_name in output_files[g_idx].blocks.keys():
+                    for ctr in output_files[g_idx].blocks[block_name].elements:
+                        pmc.append(ctr + ":device=" + str(gpu_idx))
+
+            stext = "pmc: " + " ".join(pmc)
+
+            # Write counters to file
+            fd = open(file_name, "w")
+            fd.write(stext + "\n\n")
+            fd.close()
+
+    else:
+        # Output to files
+        for f in output_files:
+            file_name = str(Path(workload_perfmon_dir).joinpath(f.file_name))
+
+            pmc = []
+            for block_name in f.blocks.keys():
+                if not using_v3() and block_name == "TCC":
+                    # Expand and interleve the TCC channel counters
+                    # e.g.  TCC_HIT[0] TCC_ATOMIC[0] ... TCC_HIT[1] TCC_ATOMIC[1] ...
+                    channel_counters = []
+                    for ctr in f.blocks[block_name].elements:
+                        if "_expand" in ctr:
+                            channel_counters.append(ctr.split("_expand")[0])
+                    for i in range(0, perfmon_config["TCC_channels"]):
+                        for c in channel_counters:
+                            pmc.append("{}[{}]".format(c, i))
+                    # Handle the rest of the TCC counters
+                    for ctr in f.blocks[block_name].elements:
+                        if "_expand" not in ctr:
+                            pmc.append(ctr)
+                else:
+                    for ctr in f.blocks[block_name].elements:
                         pmc.append(ctr)
-            else:
-                for ctr in f.blocks[block_name].elements:
-                    pmc.append(ctr)
 
-        stext = "pmc: " + " ".join(pmc)
+            stext = "pmc: " + " ".join(pmc)
 
-        # Write counters to file
-        fd = open(file_name, "w")
-        fd.write(stext + "\n\n")
+            # Write counters to file
+            fd = open(file_name, "w")
+            fd.write(stext + "\n\n")
+            fd.write("gpu:\n")
+            fd.write("range:\n")
+            fd.write("kernel:\n")
+            fd.close()
+
+    # Add a timestamp file
+    # TODO: Does v3 need this?
+    if not using_v3():
+        fd = open(str(Path(workload_perfmon_dir).joinpath("timestamps.txt")), "w")
+        fd.write("pmc:\n\n")
         fd.write("gpu:\n")
         fd.write("range:\n")
         fd.write("kernel:\n")
         fd.close()
-
-    # Add a timestamp file
-    fd = open(os.path.join(workload_perfmon_dir, "timestamps.txt"), "w")
-    fd.write("pmc:\n\n")
-    fd.write("gpu:\n")
-    fd.write("range:\n")
-    fd.write("kernel:\n")
-    fd.close()

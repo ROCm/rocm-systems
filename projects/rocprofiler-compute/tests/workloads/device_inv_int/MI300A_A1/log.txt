@@ -64,7 +64,7 @@ Collecting Performance Counters
    |-> [/opt/rocm/bin/rocprofv2] Releasing GPU memory
    |-> [/opt/rocm/bin/rocprofv2] Releasing CPU memory
    |-> [/opt/rocm/bin/rocprofv2] Results File: "tests/workloads/device_inv_int/MI300A_A1/out/pmc_1/results_SQ_INST_LEVEL_SMEM.csv"
-   |-> [/opt/rocm/bin/rocprofv2] 
+   |-> [/opt/rocm/bin/rocprofv2]
    |-> [/opt/rocm/bin/rocprofv2] The output path for the following counters: tests/workloads/device_inv_int/MI300A_A1/out/pmc_1
 [profiling] Current input file: tests/workloads/device_inv_int/MI300A_A1/perfmon/SQ_INST_LEVEL_VMEM.txt
    |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
@@ -103,7 +103,7 @@ Collecting Performance Counters
    |-> [/opt/rocm/bin/rocprofv2] Releasing GPU memory
    |-> [/opt/rocm/bin/rocprofv2] Releasing CPU memory
    |-> [/opt/rocm/bin/rocprofv2] Results File: "tests/workloads/device_inv_int/MI300A_A1/out/pmc_1/results_SQ_LEVEL_WAVES.csv"
-   |-> [/opt/rocm/bin/rocprofv2] 
+   |-> [/opt/rocm/bin/rocprofv2]
    |-> [/opt/rocm/bin/rocprofv2] The output path for the following counters: tests/workloads/device_inv_int/MI300A_A1/out/pmc_1
 [profiling] Current input file: tests/workloads/device_inv_int/MI300A_A1/perfmon/pmc_perf_0.txt
    |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:

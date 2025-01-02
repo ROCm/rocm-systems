@@ -1,6 +1,6 @@
 .. meta::
-   :description: Omniperf performance model: Vector L1 cache (vL1D)
-   :keywords: Omniperf, ROCm, profiler, tool, Instinct, accelerator, AMD, vector, l1, cache, vl1d
+   :description: ROCm Compute Profiler performance model: Vector L1 cache (vL1D)
+   :keywords: Omniperf, ROCm Compute Profiler, ROCm, profiler, tool, Instinct, accelerator, AMD, vector, l1, cache, vl1d
 
 **********************
 Vector L1 cache (vL1D)
@@ -124,7 +124,7 @@ passes information about the commands (coalescing state, destination SIMD,
 etc.) to the :ref:`data processing unit <desc-td>` for use after the requested
 data has been retrieved.
 
-Omniperf reports several metrics to indicate performance bottlenecks in
+ROCm Compute Profiler reports several metrics to indicate performance bottlenecks in
 the address processing unit, which are broken down into a few
 categories:
 
@@ -378,7 +378,7 @@ Translation Cache (UTCL1). This cache contains a L1 Translation
 Lookaside Buffer (TLB) which stores recently translated addresses to
 reduce the cost of subsequent re-translations.
 
-Omniperf reports the following L1 TLB metrics:
+ROCm Compute Profiler reports the following L1 TLB metrics:
 
 .. list-table::
    :header-rows: 1
@@ -656,7 +656,7 @@ latencies of read/write memory operations to the :doc:`L2 cache <l2-cache>`.
    :ref:`Cache access metrics <vl1d-cache-stall-metrics>` section when
    evaluating the vL1D hit rate.
 
-.. [#vl1d-activity] Omniperf considers the vL1D to be active when any part of
+.. [#vl1d-activity] ROCm Compute Profiler considers the vL1D to be active when any part of
    the vL1D (excluding the :ref:`address processor <desc-ta>` and
    :ref:`data return <desc-td>` units) are active, for example, when performing
    a translation, waiting for data, accessing the Tag or Cache RAMs, etc.
@@ -685,7 +685,7 @@ from the :ref:`VALU <desc-valu>`. When data is returned from the
 :ref:`vL1D cache RAM <desc-tc>`, it is matched to this previously stored request
 data, and returned to the appropriate SIMD.
 
-Omniperf reports the following vL1D data-return path metrics:
+ROCm Compute Profiler reports the following vL1D data-return path metrics:
 
 .. list-table::
    :header-rows: 1
@@ -764,4 +764,3 @@ Omniperf reports the following vL1D data-return path metrics:
        :ref:`address processor <desc-ta>`.
 
      - Instructions per :ref:`normalization unit <normalization-units>`
-

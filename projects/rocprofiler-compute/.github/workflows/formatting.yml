@@ -14,25 +14,25 @@ concurrency:
 jobs:
   python:
     runs-on: ubuntu-20.04
-    strategy:
-      matrix:
-        python-version: [3.8, 3.9]
 
     steps:
     - name: Checkout
       uses: actions/checkout@v4
-    - name: Set up Python ${{ matrix.python-version }}
+    - name: Set up Python '3.x'
       uses: actions/setup-python@v5
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: '3.x'
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        python -m pip install black
+        python -m pip install black isort
         if [ -f requirements.txt ]; then python -m pip install -r requirements.txt; fi
-    - name: black format
-      run: |
-        black --diff --check .
+    - name: Run black formatter
+      uses: psf/black@stable
+      with:
+        use_pyproject: true
+    - name: Run isort formatter
+      uses: isort/isort-action@master
 
   cmake:
     runs-on: ubuntu-20.04

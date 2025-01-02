@@ -4,10 +4,8 @@
 pmc: SQ_INSTS_SMEM  SQ_INST_LEVEL_SMEM SQ_ACCUM_PREV_HIRES
 
 
-range: 
-gpu: 
+range:
+gpu:
 
 
-kernel: 
-
-
+kernel:

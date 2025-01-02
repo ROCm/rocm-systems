@@ -22,10 +22,10 @@
 # SOFTWARE.
 ##############################################################################el
 
-import pandas as pd
-from dash import html, dash_table
-import plotly.express as px
 import colorlover
+import pandas as pd
+import plotly.express as px
+from dash import dash_table, html
 
 from utils import schema
 from utils.utils import console_error

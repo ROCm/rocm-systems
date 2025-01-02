@@ -26,14 +26,15 @@
 # SOFTWARE.
 ##############################################################################el
 
-# import logging
-import os
-import sys
 import re
+import sys
+
+# import logging
+from pathlib import Path
 
 try:
-    from pathlib import Path
     from importlib import metadata
+
     from rocprof_compute_base import RocProfCompute
     from utils.utils import console_error
 except ImportError as e:
@@ -66,16 +67,18 @@ def verify_deps():
 
     # Check which version of python is being used
     if sys.version_info[0] < 3 or (sys.version_info[0] == 3 and sys.version_info[1] < 8):
-        print("[ERROR] Python 3.8 or higher is required to run rocprofiler-compute."
-              f" The current version is {sys.version_info[0]}.{sys.version_info[1]}.")
+        print(
+            "[ERROR] Python 3.8 or higher is required to run rocprofiler-compute."
+            f" The current version is {sys.version_info[0]}.{sys.version_info[1]}."
+        )
         sys.exit(1)
 
-    bindir = Path(__file__).resolve().parent
+    bindir = str(Path(__file__).resolve().parent)
     depsLocation = ["requirements.txt", "../requirements.txt"]
 
     for location in depsLocation:
-        checkFile = os.path.join(bindir, location)
-        if os.path.exists(checkFile):
+        checkFile = str(Path(bindir).joinpath(location))
+        if Path(checkFile).exists():
             with open(checkFile, "r", encoding="utf-8") as file_in:
                 dependencies = file_in.read().splitlines()
 
@@ -127,7 +130,7 @@ def verify_deps():
 
 
 def main():
-    '''Main function for omniperf'''
+    '''Main function for rocprofiler-compute'''
 
     # verify required python dependencies
     verify_deps()

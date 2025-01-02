@@ -1,13 +1,13 @@
 .. meta::
-   :description: Omniperf terminology and definitions
-   :keywords: Omniperf, ROCm, glossary, definitions, terms, profiler, tool,
+   :description: ROCm Compute Profiler terminology and definitions
+   :keywords: Omniperf, ROCm Compute Profiler, ROCm, glossary, definitions, terms, profiler, tool,
               Instinct, accelerator, AMD
 
 ***********
 Definitions
 ***********
 
-The following table briefly defines some terminology used in Omniperf interfaces
+The following table briefly defines some terminology used in ROCm Compute Profiler interfaces
 and in this documentation.
 
 .. include:: ./includes/terms.rst

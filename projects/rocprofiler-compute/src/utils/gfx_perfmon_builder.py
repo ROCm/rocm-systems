@@ -22,24 +22,23 @@
 # SOFTWARE.
 ##############################################################################el
 
+import sys
+
+from lxml import html
+from PyQt5.QtGui import QStandardItem, QStandardItemModel
 from PyQt5.QtWidgets import (
-    QMainWindow,
+    QAbstractItemView,
+    QAction,
     QApplication,
-    QTreeView,
+    QFileDialog,
+    QHBoxLayout,
+    QMainWindow,
     QTableWidget,
     QTableWidgetItem,
-)
-from PyQt5.QtWidgets import (
-    QHBoxLayout,
+    QTreeView,
     QWidget,
-    QAction,
-    QFileDialog,
-    QAbstractItemView,
     qApp,
 )
-from PyQt5.QtGui import QStandardItemModel, QStandardItem
-from lxml import html
-import sys
 
 
 # class view(QWidget):

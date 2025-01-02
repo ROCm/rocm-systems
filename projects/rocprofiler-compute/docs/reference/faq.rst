@@ -1,6 +1,6 @@
 .. meta::
-    :description: Omniperf FAQ and troubleshooting
-    :keywords: Omniperf, FAQ, troubleshooting, ROCm, profiler, tool, Instinct,
+    :description: ROCm Compute Profiler FAQ and troubleshooting
+    :keywords: ROCm Compute Profiler, FAQ, troubleshooting, ROCm, profiler, tool, Instinct,
                accelerator, AMD, SSH, error, version, workaround, help
 
 ***
@@ -9,8 +9,8 @@ FAQ
 
 Frequently asked questions and troubleshooting tips.
 
-How do I export profiling data I have already generated using Omniperf?
-=======================================================================
+How do I export profiling data I have already generated using ROCm Compute Profiler?
+====================================================================================
 
 To interact with the Grafana GUI, you must sync data with the MongoDB
 backend. You can do this using :ref:`database <modes-database>` mode.
@@ -19,7 +19,7 @@ Pass in the directory of your desired workload as follows.
 
 .. code-block:: shell
 
-    $ omniperf database --import -w <path-to-results> -H <hostname> -u <username> -t <team-name>
+    $ rocprof-compute database --import -w <path-to-results> -H <hostname> -u <username> -t <team-name>
 
 python ast error: 'Constant' object has no attribute 'kind'
 ===========================================================

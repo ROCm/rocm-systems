@@ -24,91 +24,91 @@ Panel Config:
             min: MIN(((100 * TA_TA_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             max: MAX(((100 * TA_TA_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             unit: pct
-            tips: 
+            tips:
           Address Stall:
             avg: AVG(((100 * TA_ADDR_STALLED_BY_TC_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             min: MIN(((100 * TA_ADDR_STALLED_BY_TC_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             max: MAX(((100 * TA_ADDR_STALLED_BY_TC_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             unit: pct
-            tips: 
+            tips:
           Data Stall:
             avg: AVG(((100 * TA_DATA_STALLED_BY_TC_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             min: MIN(((100 * TA_DATA_STALLED_BY_TC_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             max: MAX(((100 * TA_DATA_STALLED_BY_TC_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             unit: pct
-            tips: 
+            tips:
           Data-Processor → Address Stall:
             avg: AVG(((100 * TA_ADDR_STALLED_BY_TD_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             min: MIN(((100 * TA_ADDR_STALLED_BY_TD_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             max: MAX(((100 * TA_ADDR_STALLED_BY_TD_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             unit: pct
-            tips: 
+            tips:
           Total Instructions:
             avg: AVG((TA_TOTAL_WAVEFRONTS_sum / $denom))
             min: MIN((TA_TOTAL_WAVEFRONTS_sum / $denom))
             max: MAX((TA_TOTAL_WAVEFRONTS_sum / $denom))
             unit: (Instructions  + $normUnit)
-            tips: 
+            tips:
           Global/Generic Instructions:
             avg: AVG((TA_FLAT_WAVEFRONTS_sum / $denom))
             min: MIN((TA_FLAT_WAVEFRONTS_sum / $denom))
             max: MAX((TA_FLAT_WAVEFRONTS_sum / $denom))
             unit: (Instructions  + $normUnit)
-            tips: 
+            tips:
           Global/Generic Read Instructions:
             avg: AVG((TA_FLAT_READ_WAVEFRONTS_sum / $denom))
             min: MIN((TA_FLAT_READ_WAVEFRONTS_sum / $denom))
             max: MAX((TA_FLAT_READ_WAVEFRONTS_sum / $denom))
             unit: (Instructions  + $normUnit)
-            tips: 
+            tips:
           Global/Generic Write Instructions:
             avg: AVG((TA_FLAT_WRITE_WAVEFRONTS_sum / $denom))
             min: MIN((TA_FLAT_WRITE_WAVEFRONTS_sum / $denom))
             max: MAX((TA_FLAT_WRITE_WAVEFRONTS_sum / $denom))
             unit: (Instructions  + $normUnit)
-            tips: 
+            tips:
           Global/Generic Atomic Instructions:
             avg: AVG((TA_FLAT_ATOMIC_WAVEFRONTS_sum / $denom))
             min: MIN((TA_FLAT_ATOMIC_WAVEFRONTS_sum / $denom))
             max: MAX((TA_FLAT_ATOMIC_WAVEFRONTS_sum / $denom))
             unit: (Instructions  + $normUnit)
-            tips: 
+            tips:
           Spill/Stack Instructions:
             avg: AVG((TA_BUFFER_WAVEFRONTS_sum / $denom))
             min: MIN((TA_BUFFER_WAVEFRONTS_sum / $denom))
             max: MAX((TA_BUFFER_WAVEFRONTS_sum / $denom))
             unit: (Instructions  + $normUnit)
-            tips: 
+            tips:
           Spill/Stack Read Instructions:
             avg: AVG((TA_BUFFER_READ_WAVEFRONTS_sum / $denom))
             min: MIN((TA_BUFFER_READ_WAVEFRONTS_sum / $denom))
             max: MAX((TA_BUFFER_READ_WAVEFRONTS_sum / $denom))
             unit: (Instructions  + $normUnit)
-            tips: 
+            tips:
           Spill/Stack Write Instructions:
             avg: AVG((TA_BUFFER_WRITE_WAVEFRONTS_sum / $denom))
             min: MIN((TA_BUFFER_WRITE_WAVEFRONTS_sum / $denom))
             max: MAX((TA_BUFFER_WRITE_WAVEFRONTS_sum / $denom))
             unit: (Instructions  + $normUnit)
-            tips: 
+            tips:
           Spill/Stack Atomic Instructions:
             avg: AVG((TA_BUFFER_ATOMIC_WAVEFRONTS_sum / $denom))
             min: MIN((TA_BUFFER_ATOMIC_WAVEFRONTS_sum / $denom))
             max: MAX((TA_BUFFER_ATOMIC_WAVEFRONTS_sum / $denom))
             unit: (Instructions  + $normUnit)
-            tips: 
+            tips:
           Spill/Stack Total Cycles:
             avg: AVG((TA_BUFFER_TOTAL_CYCLES_sum / $denom))
             min: MIN((TA_BUFFER_TOTAL_CYCLES_sum / $denom))
             max: MAX((TA_BUFFER_TOTAL_CYCLES_sum / $denom))
             unit: (Cycles  + $normUnit)
-            tips: 
+            tips:
           Spill/Stack Coalesced Read:
             avg: AVG((TA_BUFFER_COALESCED_READ_CYCLES_sum / $denom))
             min: MIN((TA_BUFFER_COALESCED_READ_CYCLES_sum / $denom))
             max: MAX((TA_BUFFER_COALESCED_READ_CYCLES_sum / $denom))
             unit: (Cycles  + $normUnit)
-            tips: 
+            tips:
           Spill/Stack Coalesced Write:
             avg: AVG((TA_BUFFER_COALESCED_WRITE_CYCLES_sum / $denom))
             min: MIN((TA_BUFFER_COALESCED_WRITE_CYCLES_sum / $denom))
@@ -132,25 +132,25 @@ Panel Config:
             min: MIN(((100 * TD_TD_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             max: MAX(((100 * TD_TD_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             unit: pct
-            tips: 
+            tips:
           Cache RAM → Data-Return Stall:
             avg: AVG(((100 * TD_TC_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             min: MIN(((100 * TD_TC_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             max: MAX(((100 * TD_TC_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             unit: pct
-            tips: 
+            tips:
           Workgroup manager → Data-Return Stall:
             avg: AVG(((100 * TD_SPI_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             min: MIN(((100 * TD_SPI_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             max: MAX(((100 * TD_SPI_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             unit: pct
-            tips: 
+            tips:
           Coalescable Instructions:
             avg: AVG((TD_COALESCABLE_WAVEFRONT_sum / $denom))
             min: MIN((TD_COALESCABLE_WAVEFRONT_sum / $denom))
             max: MAX((TD_COALESCABLE_WAVEFRONT_sum / $denom))
             unit: (Instructions  + $normUnit)
-            tips: 
+            tips:
           Read Instructions:
             avg: AVG((((TD_LOAD_WAVEFRONT_sum - TD_STORE_WAVEFRONT_sum) - TD_ATOMIC_WAVEFRONT_sum)
               / $denom))
@@ -159,16 +159,16 @@ Panel Config:
             max: MAX((((TD_LOAD_WAVEFRONT_sum - TD_STORE_WAVEFRONT_sum) - TD_ATOMIC_WAVEFRONT_sum)
               / $denom))
             unit: (Instructions  + $normUnit)
-            tips: 
+            tips:
           Write Instructions:
             avg: AVG((TD_STORE_WAVEFRONT_sum / $denom))
             min: MIN((TD_STORE_WAVEFRONT_sum / $denom))
             max: MAX((TD_STORE_WAVEFRONT_sum / $denom))
             unit: (Instructions  + $normUnit)
-            tips: 
+            tips:
           Atomic Instructions:
             avg: AVG((TD_ATOMIC_WAVEFRONT_sum / $denom))
             min: MIN((TD_ATOMIC_WAVEFRONT_sum / $denom))
             max: MAX((TD_ATOMIC_WAVEFRONT_sum / $denom))
             unit: (Instructions  + $normUnit)
-            tips: 
+            tips:

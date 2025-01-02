@@ -22,20 +22,21 @@
 # SOFTWARE.
 ##############################################################################el
 
-from abc import ABC, abstractmethod
+import copy
 import os
 import sys
-import copy
+from abc import ABC, abstractmethod
 from collections import OrderedDict
 from pathlib import Path
+
+from utils import file_io, parser, schema
 from utils.utils import (
-    demarcate,
-    is_workload_empty,
-    console_log,
     console_debug,
     console_error,
+    console_log,
+    demarcate,
+    is_workload_empty,
 )
-from utils import schema, file_io, parser
 
 
 class OmniAnalyze_Base:
@@ -138,7 +139,12 @@ class OmniAnalyze_Base:
 
         # load required configs
         for d in self.__args.path:
-            sys_info = file_io.load_sys_info(Path(d[0], "sysinfo.csv"))
+            sysinfo_path = (
+                Path(d[0])
+                if self.__args.nodes is None
+                else file_io.find_1st_sub_dir(d[0])
+            )
+            sys_info = file_io.load_sys_info(sysinfo_path.joinpath("sysinfo.csv"))
             arch = sys_info.iloc[0]["gpu_arch"]
             args = self.__args
             self.generate_configs(
@@ -153,7 +159,16 @@ class OmniAnalyze_Base:
 
         for d in self.__args.path:
             w = schema.Workload()
-            w.sys_info = file_io.load_sys_info(Path(d[0], "sysinfo.csv"))
+            # FIXME:
+            #    For regular single node case, load sysinfo.csv directly
+            #    For multi-node, either the default "all", or specified some,
+            #    pick up the one in the 1st sub_dir. We could fix it properly later.
+            sysinfo_path = (
+                Path(d[0])
+                if self.__args.nodes is None
+                else file_io.find_1st_sub_dir(d[0])
+            )
+            w.sys_info = file_io.load_sys_info(sysinfo_path.joinpath("sysinfo.csv"))
             arch = w.sys_info.iloc[0]["gpu_arch"]
             mspec = self.get_socs()[arch]._mspec
             if self.__args.specs_correction:
@@ -177,12 +192,16 @@ class OmniAnalyze_Base:
             )
         # ensure absolute path
         for dir in self.__args.path:
-            full_path = os.path.abspath(dir[0])
+            full_path = str(Path(dir[0]).absolute().resolve())
             dir[0] = full_path
-            if not os.path.isdir(dir[0]):
+            if not Path(dir[0]).is_dir():
                 console_error("Invalid directory {}\nPlease try again.".format(dir[0]))
             # validate profiling data
-            is_workload_empty(dir[0])
+
+            # Todo: more err check
+            if not (self.__args.nodes != None or self.__args.list_nodes):
+                is_workload_empty(dir[0])
+            # else:
 
         # no using same paths
         occurances = set()
@@ -192,6 +211,24 @@ class OmniAnalyze_Base:
                 console_error("You cannot provide the same path twice.")
             else:
                 occurances.add(dir)
+
+        # FIXME:
+        #   The proper location of this func should be in pre_processing().
+        #   However, because of reading soc depends on sys spec, and sys
+        #   spec depends on sys_info. And we read sys_info too early so we
+        # . can not do it now. There should be a way to make it simpler.
+        if self.__args.list_nodes:
+            nodes = []
+            # NB:
+            #   There are 2 ways to do it: one is doing like the below, checking
+            #   sub dirs only as we assume the profiling stage generate sub dirs
+            #   with node name. The 2nd way would be checkign host name in each
+            #   sub dir and very those.
+            for subdir in Path(self.__args.path[0][0]).iterdir():
+                if subdir.is_dir():
+                    nodes.append(str(subdir.name))
+            print("Node list:", "  ".join(nodes))
+            sys.exit(0)
 
     # ----------------------------------------------------
     # Required methods to be implemented by child classes
@@ -225,6 +262,12 @@ class OmniAnalyze_Base:
                     self.__args.gpu_dispatch_id.extend(self.__args.gpu_dispatch_id)
             for d, gd in zip(self.__args.path, self.__args.gpu_dispatch_id):
                 self._runs[d[0]].filter_dispatch_ids = gd
+        if self.__args.nodes:
+            if len(self.__args.nodes) == 1 and len(self.__args.path) != 1:
+                for i in range(len(self.__args.path) - 1):
+                    self.__args.nodes.extend(self.__args.nodes)
+            for d, gd in zip(self.__args.path, self.__args.nodes):
+                self._runs[d[0]].nodes = gd
 
     @abstractmethod
     def run_analysis(self):

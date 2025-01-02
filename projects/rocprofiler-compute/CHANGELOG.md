@@ -21,7 +21,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Optimized
 
-* reduced running time of Omniperf when profiling (#384) 
+* reduced running time of Omniperf when profiling (#384)
 * console logging improvements
 
 ## Omniperf 2.0.1 for ROCm 6.2.0
@@ -42,7 +42,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * overhauled CI/CD that spans all modes (#179)
   * extensible SoC classes to better support adding new hardware configs (#180)
   * --kernel-verbose no longer overwrites kernel names (#193)
-  * general cleanup and improved organization of source code (#200) (#210) 
+  * general cleanup and improved organization of source code (#200) (#210)
   * separate requirement files for docs and testing dependencies (#205) (#262) (#358)
   * add support for MI300 hardware (#231)
   * upgrade Grafana assets and build script to latest release (#235)
@@ -89,14 +89,14 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * roofline support for sles15 sp4 and future service packs (#109)
   * adding dockerfiles for all supported Linux distros
   * new examples for `--roof-only` and `--kernel` options added to documentation
-  
+
   * enable cli analysis in Windows (#110)
   * optional random port number in standalone GUI (#111)
   * limit length of visible kernelName in `--kernel-names` option (#115)
   * adjust metric definitions (#117, #130)
   * manually merge rocprof runs, overriding default rocprofiler implementation (#125)
   * fixed compatibility issues with Python 3.11 (#131)
-  
+
 ## Omniperf 1.0.8-PR2 (17 Apr 2023)
 
   * ux improvements in standalone GUI (#101)
@@ -112,7 +112,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * remove unused python modules (#96)
   * fix empirical roofline calculation for single dispatch workloads (#97)
   * match color of arithmetic intensity points to corresponding bw lines
-  
+
 ## Omniperf 1.0.7 (21 Feb 2023)
 
   * update documentation (#52, #64)
@@ -126,7 +126,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * add MI100 configs to override rocprofiler's incomplete default (#75)
   * improve error message when no GPU(s) detected (#85)
   * separate CI tests by Linux distro and add status badges
-  
+
 ## Omniperf 1.0.6 (21 Dec 2022)
 
   * CI update: documentation now published via github action (#22)
@@ -148,8 +148,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * update python requirements.txt with minimum versions for numpy and pandas
   * addition of progress bar indicator in web-based GUI (#8)
   * reduced default content for web-based GUI to reduce load times (#9)
-  * minor packaging and CI updates 
-  * variety of documentation updates  
+  * minor packaging and CI updates
+  * variety of documentation updates
   * added an optional argument to vcopy.cpp workload example to specify device id
 
 ## Omniperf 1.0.3 (07 Nov 2022)

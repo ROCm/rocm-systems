@@ -1,15 +1,15 @@
 .. meta::
-   :description: Omniperf analysis: Standalone GUI
+   :description: ROCm Compute Profiler analysis: Standalone GUI
    :keywords: Omniperf, ROCm, profiler, tool, Instinct, accelerator, GUI, standalone, filter
 
 ***********************
 Standalone GUI analysis
 ***********************
 
-Omniperf's standalone analysis GUI is a lightweight web page that you can
+ROCm Compute Profiler's standalone analysis GUI is a lightweight web page that you can
 generate straight from the command line. The standalone analysis GUI is an
 alternative to the CLI if you want to explore profiling results visually, but
-without the additional setup requirements or server-side overhead of Omniperf's
+without the additional setup requirements or server-side overhead of ROCm Compute Profiler's
 detailed :doc:`Grafana interface <grafana-gui>` option. This analysis
 option is implemented as a simple `Flask <https://flask.palletsprojects.com>`_
 application that lets you view results from your preferred web browser.
@@ -29,22 +29,22 @@ application that lets you view results from your preferred web browser.
 Launch the standalone GUI analyzer
 ----------------------------------
 
-To launch the Omniperf GUI analyzer, include the ``--gui`` flag with your
+To launch the ROCm Compute Profiler GUI analyzer, include the ``--gui`` flag with your
 desired analysis command. For example:
 
-.. code-block:: shell
+.. code-block:: shell-session
 
-   $ omniperf analyze -p workloads/vcopy/MI200/ --gui
+   $ rocprof-compute analyze -p workloads/vcopy/MI200/ --gui
 
-     ___                  _                  __ 
-    / _ \ _ __ ___  _ __ (_)_ __   ___ _ __ / _|
-   | | | | '_ ` _ \| '_ \| | '_ \ / _ \ '__| |_ 
-   | |_| | | | | | | | | | | |_) |  __/ |  |  _|
-    \___/|_| |_| |_|_| |_|_| .__/ \___|_|  |_|  
-                           |_|                  
+                                    __                                       _
+    _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
+   | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
+   | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
+   |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
+                  |_|                                           |_|
 
    Analysis mode = web_ui
-   [analysis] deriving Omniperf metrics...
+   [analysis] deriving rocprofiler-compute metrics...
    Dash is running on http://0.0.0.0:8050/
 
     * Serving Flask app 'rocprof_compute_analyze.analysis_webui' (lazy loading)
@@ -62,7 +62,7 @@ At this point, you can launch your web browser of choice and navigate to
 
 .. image:: ../../data/analyze/standalone_gui.png
    :align: center
-   :alt: Omniperf standalone GUI home screen
+   :alt: ROCm Compute Profiler standalone GUI home screen
    :width: 800
 
 .. tip::
@@ -85,5 +85,5 @@ metrics specific to your selected filters.
 
 Once a filter is applied, you'll see several additional sections become
 available with detailed metrics specific to that area of AMD hardware. These
-detailed sections mirror the data displayed in Omniperf's
+detailed sections mirror the data displayed in ROCm Compute Profiler's
 :doc:`Grafana interface <grafana-gui>`.

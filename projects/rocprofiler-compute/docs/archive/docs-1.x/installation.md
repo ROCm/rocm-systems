@@ -33,7 +33,7 @@ Omniperf client-side requires the following basic software dependencies prior to
 
 In addition, Omniperf leverages a number of Python packages that are
 documented in the top-level `requirements.txt` file.  These must be
-installed prior to Omniperf configuration.  
+installed prior to Omniperf configuration.
 
 The recommended procedure for Omniperf usage is to install into a shared file system so that multiple users can access the final installation.  The following steps illustrate how to install the necessary python dependencies using [pip](https://packaging.python.org/en/latest/) and Omniperf into a shared location controlled by the `INSTALL_DIR` environment variable.
 
@@ -167,7 +167,7 @@ Once you've decided which machine you'd like to use to host the Grafana and Mong
 ### 1) Install MongoDB Utils
 Omniperf uses [mongoimport](https://www.mongodb.com/docs/database-tools/mongoimport/) to upload data to Grafana's backend database. Install for Ubuntu 20.04 is as follows:
 
-```bash 
+```bash
 $ wget https://fastdl.mongodb.org/tools/db/mongodb-database-tools-ubuntu2004-x86_64-100.6.1.deb
 $ sudo apt install ./mongodb-database-tools-ubuntu2004-x86_64-100.6.1.deb
 ```
@@ -240,4 +240,3 @@ After a workload has been successfully uploaded, you should be able to select it
 ![Selecting Grafana workload](images/grafana_workload_selection.png)
 
 For more information on how to use the Grafana interface for anlysis please see the [Grafana section](./analysis.md#grafana-based-gui) in the Analyze Mode tab.
-

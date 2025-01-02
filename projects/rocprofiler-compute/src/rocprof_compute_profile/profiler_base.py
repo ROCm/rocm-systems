@@ -22,27 +22,31 @@
 # SOFTWARE.
 ##############################################################################el
 
-from abc import ABC, abstractmethod
-from tqdm import tqdm
 import glob
 import logging
-import sys
 import os
 import re
+import sys
+import time
+from abc import ABC, abstractmethod
+from pathlib import Path
+
+import pandas as pd
+from tqdm import tqdm
+
+import config
 from utils.utils import (
     capture_subprocess_output,
-    run_prof,
-    gen_sysinfo,
-    run_rocscope,
-    demarcate,
-    console_log,
     console_debug,
     console_error,
+    console_log,
     console_warning,
+    demarcate,
+    gen_sysinfo,
     print_status,
+    run_prof,
+    run_rocscope,
 )
-import config
-import pandas as pd
 
 
 class RocProfCompute_Base:
@@ -50,8 +54,10 @@ class RocProfCompute_Base:
         self.__args = args
         self.__profiler = profiler_mode
         self._soc = soc  # OmniSoC obj
-        self.__perfmon_dir = os.path.join(
-            str(config.rocprof_compute_home), "rocprof_compute_soc", "profile_configs"
+        self.__perfmon_dir = str(
+            Path(str(config.rocprof_compute_home)).joinpath(
+                "rocprof_compute_soc", "profile_configs"
+            )
         )
 
     def get_args(self):
@@ -167,6 +173,8 @@ class RocProfCompute_Base:
                         "TID",
                         "SIG",
                         "OBJ",
+                        "Correlation_ID_",
+                        "Wave_Size_",
                         # rocscope specific merged counters, keep original
                         "dispatch_",
                         # extras
@@ -258,7 +266,7 @@ class RocProfCompute_Base:
         # verify correct formatting for application binary
         self.__args.remaining = self.__args.remaining[1:]
         if self.__args.remaining:
-            if not os.path.isfile(self.__args.remaining[0]):
+            if not Path(self.__args.remaining[0]).is_file():
                 console_error(
                     "Your command %s doesn't point to a executable. Please verify."
                     % self.__args.remaining[0]
@@ -285,7 +293,7 @@ class RocProfCompute_Base:
         # log basic info
         console_log(str(prog).title() + " version: " + str(version))
         console_log("Profiler choice: %s" % self.__profiler)
-        console_log("Path: " + str(os.path.abspath(self.__args.path)))
+        console_log("Path: " + str(Path(self.__args.path).absolute().resolve()))
         console_log("Target: " + str(self._soc._mspec.gpu_model))
         console_log("Command: " + str(self.__args.remaining))
         console_log("Kernel Selection: " + str(self.__args.kernel))
@@ -356,13 +364,27 @@ class RocProfCompute_Base:
             # Fetch any SoC/profiler specific profiling options
             options = self._soc.get_profiler_options()
             options += self.get_profiler_options(fname)
-            if self.__profiler == "rocprofv1" or self.__profiler == "rocprofv2":
+            if (
+                self.__profiler == "rocprofv1"
+                or self.__profiler == "rocprofv2"
+                or self.__profiler == "rocprofv3"
+            ):
+                start_run_prof = time.time()
                 run_prof(
                     fname=fname,
                     profiler_options=options,
                     workload_dir=self.get_args().path,
                     mspec=self._soc._mspec,
                     loglevel=self.get_args().loglevel,
+                    format_rocprof_output=self.get_args().format_rocprof_output,
+                )
+                end_run_prof = time.time()
+                console_debug(
+                    "The time of run_prof of {} is {} m {} sec".format(
+                        fname,
+                        int((end_run_prof - start_run_prof) / 60),
+                        str((end_run_prof - start_run_prof) % 60),
+                    )
                 )
 
             elif self.__profiler == "rocscope":

@@ -4,14 +4,13 @@
 # release pipeline.
 
 import argparse
-import os
-
+from pathlib import Path
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--tag", type=str, required=True, help="tagname to check")
 args = parser.parse_args()
 
-execPath = os.path.dirname(__file__)
+execPath = str(Path(__file__).parent)
 with open(execPath + "/../VERSION") as f:
     repoVer = f.readline().strip()
 

@@ -28,7 +28,7 @@ vcopy testing on GCD 0
 Finished allocating vectors on the CPU
 Finished allocating vectors on the GPU
 Finished copying vectors to the GPU
-sw thinks it moved 1.000000 KB per wave 
+sw thinks it moved 1.000000 KB per wave
 Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
 Launching the  kernel on the GPU
 Finished executing kernel
@@ -56,12 +56,12 @@ The following sample command profiles the *vcopy* workload.
 ```shell-session
 $ omniperf profile --name vcopy -- ./vcopy -n 1048576 -b 256
 
-  ___                  _                  __ 
+  ___                  _                  __
  / _ \ _ __ ___  _ __ (_)_ __   ___ _ __ / _|
-| | | | '_ ` _ \| '_ \| | '_ \ / _ \ '__| |_ 
+| | | | '_ ` _ \| '_ \| | '_ \ / _ \ '__| |_
 | |_| | | | | | | | | | | |_) |  __/ |  |  _|
- \___/|_| |_| |_|_| |_|_| .__/ \___|_|  |_|  
-                        |_|                  
+ \___/|_| |_| |_|_| |_|_| .__/ \___|_|  |_|
+                        |_|
 
 Omniperf version: 2.0.0
 Profiler choice: rocprofv1
@@ -99,13 +99,13 @@ Collecting Performance Counters
    |-> [rocprof] Finished copying the output vector from the GPU to the CPU
    |-> [rocprof] Releasing GPU memory
    |-> [rocprof] Releasing CPU memory
-   |-> [rocprof] 
+   |-> [rocprof]
    |-> [rocprof] ROCPRofiler: 1 contexts collected, output directory /tmp/rpl_data_240312_174329_692890/input0_results_240312_174329
    |-> [rocprof] File '/home/auser/repos/omniperf/sample/workloads/vcopy/MI200/SQ_IFETCH_LEVEL.csv' is generating
-   |-> [rocprof] 
+   |-> [rocprof]
 [profiling] Current input file: /home/auser/repos/omniperf/sample/workloads/vcopy/MI200/perfmon/SQ_INST_LEVEL_LDS.txt
 
-... 
+...
 
 [roofline] Checking for roofline.csv in /home/auser/repos/omniperf/sample/workloads/vcopy/MI200
 [roofline] No roofline data found. Generating...
@@ -147,7 +147,7 @@ GPU Device 3: Profiling...
 To reduce verbosity of profiling output try the `--quiet` flag which will hide rocprofiler output and activate a progress bar.
 ```
 
-You will notice two main stages in *default* Omniperf profiling. 
+You will notice two main stages in *default* Omniperf profiling.
 
 1. The first stage collects all the counters needed for Omniperf analysis (omitting any filters you have provided).
 
@@ -158,7 +158,7 @@ In this document, we use the term System on Chip (SoC) to refer to a particular 
   - "MI200" for the AMD Instinct (tm) MI200 family of accelerators
   - "MI100" for the AMD Instinct (tm) MI100 family of accelerators
   - etc.
-  
+
   The SoC names are generated as a part of Omniperf, and do not _always_ distinguish between different accelerators in the same family (e.g., an AMD Instinct (tm) MI210 vs an MI250)
 
 ```{note}
@@ -208,12 +208,12 @@ The following example only gathers hardware counters for the Shader Sequencer (S
 ```shell-session
 $ omniperf profile --name vcopy -b SQ TCC -- ./vcopy -n 1048576 -b 256
 
-  ___                  _                  __ 
+  ___                  _                  __
  / _ \ _ __ ___  _ __ (_)_ __   ___ _ __ / _|
-| | | | '_ ` _ \| '_ \| | '_ \ / _ \ '__| |_ 
+| | | | '_ ` _ \| '_ \| | '_ \ / _ \ '__| |_
 | |_| | | | | | | | | | | |_) |  __/ |  |  _|
- \___/|_| |_| |_|_| |_|_| .__/ \___|_|  |_|  
-                        |_|                  
+ \___/|_| |_| |_|_| |_|_| .__/ \___|_|  |_|
+                        |_|
 
 fname: pmc_cpc_perf: Skipped
 fname: pmc_spi_perf: Skipped
@@ -252,12 +252,12 @@ The following example demonstrates profiling isolating the kernel matching subst
 ```shell-session
 $ omniperf profile --name vcopy -k vecCopy -- ./vcopy -n 1048576 -b 256
 
-  ___                  _                  __ 
+  ___                  _                  __
  / _ \ _ __ ___  _ __ (_)_ __   ___ _ __ / _|
-| | | | '_ ` _ \| '_ \| | '_ \ / _ \ '__| |_ 
+| | | | '_ ` _ \| '_ \| | '_ \ / _ \ '__| |_
 | |_| | | | | | | | | | | |_) |  __/ |  |  _|
- \___/|_| |_| |_|_| |_|_| .__/ \___|_|  |_|  
-                        |_|                  
+ \___/|_| |_| |_|_| |_|_| .__/ \___|_|  |_|
+                        |_|
 
 Omniperf version: 2.0.0
 Profiler choice: rocprofv1
@@ -275,18 +275,18 @@ Collecting Performance Counters
 ```
 
 #### Dispatch Filtering
-Dispatch filtering is based on the *global* dispatch index of kernels in a run. 
+Dispatch filtering is based on the *global* dispatch index of kernels in a run.
 
 The following example profiles only the first kernel dispatch in execution of the application (please note zero-based indexing):
 ```shell-session
 $ omniperf profile --name vcopy -d 0 -- ./vcopy -n 1048576 -b 256
 
-  ___                  _                  __ 
+  ___                  _                  __
  / _ \ _ __ ___  _ __ (_)_ __   ___ _ __ / _|
-| | | | '_ ` _ \| '_ \| | '_ \ / _ \ '__| |_ 
+| | | | '_ ` _ \| '_ \| | '_ \ / _ \ '__| |_
 | |_| | | | | | | | | | | |_) |  __/ |  |  _|
- \___/|_| |_| |_|_| |_|_| .__/ \___|_|  |_|  
-                        |_|                  
+ \___/|_| |_| |_|_| |_|_| .__/ \___|_|  |_|
+                        |_|
 
 Omniperf version: 2.0.0
 Profiler choice: rocprofv1
@@ -305,7 +305,7 @@ Collecting Performance Counters
 
 
 ### Standalone Roofline
-If you are only interested in generating roofline analysis data try using `--roof-only`. This will only collect counters relevant to roofline, as well as generate a standalone .pdf output of your roofline plot. 
+If you are only interested in generating roofline analysis data try using `--roof-only`. This will only collect counters relevant to roofline, as well as generate a standalone .pdf output of your roofline plot.
 
 Standalone Roofline Options:
 

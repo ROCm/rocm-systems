@@ -78,43 +78,43 @@ Panel Config:
             min: MIN((SQ_INSTS / SQ_BUSY_CU_CYCLES))
             max: MAX((SQ_INSTS / SQ_BUSY_CU_CYCLES))
             unit: Instr/cycle
-            tips: 
+            tips:
           IPC (Issued):
-            avg: AVG(((((((((SQ_INSTS_VALU + SQ_INSTS_VMEM) + SQ_INSTS_SALU) + SQ_INSTS_SMEM)) 
+            avg: AVG(((((((((SQ_INSTS_VALU + SQ_INSTS_VMEM) + SQ_INSTS_SALU) + SQ_INSTS_SMEM))
               + SQ_INSTS_BRANCH) + SQ_INSTS_SENDMSG) + SQ_INSTS_VSKIPPED  + SQ_INSTS_LDS)
               / SQ_ACTIVE_INST_ANY))
-            min: MIN(((((((((SQ_INSTS_VALU + SQ_INSTS_VMEM) + SQ_INSTS_SALU) + SQ_INSTS_SMEM)) 
+            min: MIN(((((((((SQ_INSTS_VALU + SQ_INSTS_VMEM) + SQ_INSTS_SALU) + SQ_INSTS_SMEM))
               + SQ_INSTS_BRANCH) + SQ_INSTS_SENDMSG) + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS)
               / SQ_ACTIVE_INST_ANY))
-            max: MAX(((((((((SQ_INSTS_VALU + SQ_INSTS_VMEM) + SQ_INSTS_SALU) + SQ_INSTS_SMEM)) 
+            max: MAX(((((((((SQ_INSTS_VALU + SQ_INSTS_VMEM) + SQ_INSTS_SALU) + SQ_INSTS_SMEM))
               + SQ_INSTS_BRANCH) + SQ_INSTS_SENDMSG) + SQ_INSTS_VSKIPPED  + SQ_INSTS_LDS)
               / SQ_ACTIVE_INST_ANY))
             unit: Instr/cycle
-            tips: 
+            tips:
           SALU Utilization:
             avg: AVG((((100 * SQ_ACTIVE_INST_SCA) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
             min: MIN((((100 * SQ_ACTIVE_INST_SCA) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
             max: MAX((((100 * SQ_ACTIVE_INST_SCA) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
             unit: pct
-            tips: 
+            tips:
           VALU Utilization:
             avg: AVG((((100 * SQ_ACTIVE_INST_VALU) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
             min: MIN((((100 * SQ_ACTIVE_INST_VALU) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
             max: MAX((((100 * SQ_ACTIVE_INST_VALU) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
             unit: pct
-            tips: 
+            tips:
           VMEM Utilization:
             avg: None # No HW module
             min: None # No HW module
             max: None # No HW module
             unit: pct
-            tips: 
+            tips:
           Branch Utilization:
             avg: None # No HW module
             min: None # No HW module
             max: None # No HW module
             unit: pct
-            tips: 
+            tips:
           VALU Active Threads:
             avg: AVG(((SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU) if (SQ_ACTIVE_INST_VALU
               != 0) else None))
@@ -123,7 +123,7 @@ Panel Config:
             max: MAX(((SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU) if (SQ_ACTIVE_INST_VALU
               != 0) else None))
             unit: Threads
-            tips: 
+            tips:
           MFMA Utilization:
             avg: None # No HW module
             min: None # No HW module
@@ -204,5 +204,3 @@ Panel Config:
             max: None # No perf counter
             unit: (OPs  + $normUnit)
             tips:
-
-    

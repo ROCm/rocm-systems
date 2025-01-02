@@ -1,0 +1,25 @@
+SQ_IFETCH_LEVEL_ACCUM:
+  architectures:
+    gfx942/gfx941/gfx940/gfx90a:
+      expression: accumulate(SQ_IFETCH_LEVEL, HIGH_RES)
+  description: 'SQ_IFETCH_LEVEL accumulation'
+SQ_INST_LEVEL_LDS_ACCUM:
+  architectures:
+    gfx942/gfx941/gfx940/gfx90a:
+      expression: accumulate(SQ_INST_LEVEL_LDS, HIGH_RES)
+  description: 'SQ_INST_LEVEL_LDS accumulation'
+SQ_INST_LEVEL_SMEM_ACCUM:
+  architectures:
+    gfx942/gfx941/gfx940/gfx90a:
+      expression: accumulate(SQ_INST_LEVEL_SMEM, HIGH_RES)
+  description: 'SQ_INST_LEVEL_SMEM accumulation'
+SQ_INST_LEVEL_VMEM_ACCUM:
+  architectures:
+    gfx942/gfx941/gfx940/gfx90a:
+      expression: accumulate(SQ_INST_LEVEL_VMEM, HIGH_RES)
+  description: 'SQ_INST_LEVEL_VMEM accumulation'
+SQ_LEVEL_WAVES_ACCUM:
+  architectures:
+    gfx942/gfx941/gfx940/gfx90a:
+      expression: accumulate(SQ_LEVEL_WAVES, HIGH_RES)
+  description: 'SQ_LEVEL_WAVES accumulation'

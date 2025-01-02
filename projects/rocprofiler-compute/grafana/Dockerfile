@@ -1,7 +1,7 @@
 # -----------------------------------------------------------------------
 # NOTE:
 # Dependencies are not included as part of ROCm Compute Profiler.
-# It's the user's responsibility to accept any licensing implications 
+# It's the user's responsibility to accept any licensing implications
 # before building the project
 # -----------------------------------------------------------------------
 
@@ -38,10 +38,10 @@ RUN mkdir /usr/local/nvm && \
 
 ENV NODE_PATH $NVM_DIR/v$NODE_VERSION/lib/node_modules
 ENV PATH $NVM_DIR/versions/node/v$NODE_VERSION/bin:$PATH
-    
+
 RUN npm --version && \
     node --version
-    
+
 # Install Grafana plugins
 RUN apt-get install -y tzdata systemd apt-utils npm vim net-tools && \
     /usr/sbin/grafana-cli plugins install michaeldmoore-multistat-panel && \
@@ -58,7 +58,7 @@ RUN apt-get install -y tzdata systemd apt-utils npm vim net-tools && \
     sed -i "s/  bindIp.*/  bindIp: 0.0.0.0/" /etc/mongod.conf && \
     mkdir -p /var/lib/grafana && \
     touch /var/lib/grafana/grafana.lib && \
-    chown grafana:grafana /var/lib/grafana/grafana.lib 
+    chown grafana:grafana /var/lib/grafana/grafana.lib
 
 # Overwrite grafana ini file
 COPY grafana.ini /etc/grafana

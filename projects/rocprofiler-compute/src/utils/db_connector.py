@@ -22,22 +22,24 @@
 # SOFTWARE.
 ##############################################################################el
 
+import getpass
+import os
 from abc import ABC, abstractmethod
+from pathlib import Path
+
+import pandas as pd
+from pymongo import MongoClient
+from tqdm import tqdm
+
+from utils.kernel_name_shortener import kernel_name_shortener
 from utils.utils import (
-    is_workload_empty,
-    demarcate,
+    console_debug,
     console_error,
     console_log,
     console_warning,
-    console_debug,
+    demarcate,
+    is_workload_empty,
 )
-from pymongo import MongoClient
-from tqdm import tqdm
-from utils.kernel_name_shortener import kernel_name_shortener
-
-import os
-import getpass
-import pandas as pd
 
 MAX_SERVER_SEL_DELAY = 5000  # 5 sec connection timeout
 
@@ -63,8 +65,8 @@ class DatabaseConnector:
     @demarcate
     def prep_import(self):
         # Extract SoC and workload name from sysinfo.csv
-        sys_info = os.path.join(self.connection_info["workload"], "sysinfo.csv")
-        if os.path.isfile(sys_info):
+        sys_info = str(Path(self.connection_info["workload"]).joinpath("sysinfo.csv"))
+        if Path(sys_info).is_file():
             sys_info = pd.read_csv(sys_info)
             try:
                 soc = sys_info["gpu_model"][0].strip()
@@ -192,7 +194,7 @@ class DatabaseConnector:
                     % self.interaction_type
                 )
 
-            if os.path.isdir(os.path.abspath(self.connection_info["workload"])):
+            if Path(self.connection_info["workload"]).absolute().is_dir():
                 is_workload_empty(self.connection_info["workload"])
             else:
                 console_error(
@@ -203,8 +205,8 @@ class DatabaseConnector:
                 console_error("--team exceeds 13 character limit. Try again.")
 
             # format path properly
-            self.connection_info["workload"] = os.path.abspath(
-                self.connection_info["workload"]
+            self.connection_info["workload"] = str(
+                Path(self.connection_info["workload"]).absolute().resolve()
             )
 
         # Detect password

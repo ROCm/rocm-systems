@@ -34,7 +34,7 @@ done
 echo "distpath=$distpath"
 
 echo "(build.sh) Checking for submodules"
-# Check to se if submodules are available 
+# Check to se if submodules are available
 if [ -d "src/waveparser/" ] && [ -d "src/multevent/" ]
 then
     echo "Found submodules"

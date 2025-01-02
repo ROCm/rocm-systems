@@ -1,6 +1,6 @@
 .. meta::
-   :description: Omniperf performance model: Compute unit (CU)
-   :keywords: Omniperf, ROCm, profiler, tool, Instinct, accelerator, GCN, compute, unit, pipeline, workgroup, wavefront,
+   :description: ROCm Compute Profiler performance model: Compute unit (CU)
+   :keywords: Omniperf, ROCm Compute Profiler, ROCm, profiler, tool, Instinct, accelerator, GCN, compute, unit, pipeline, workgroup, wavefront,
               CDNA
 
 *****************
@@ -14,12 +14,12 @@ CDNA™-based accelerators. All :ref:`wavefronts <desc-wavefront>` of a
 .. image:: ../data/performance-model/gcn_compute_unit.png
    :align: center
    :alt: AMD CDNA accelerator compute unit diagram
-   :width: 800 
+   :width: 800
 
 The CU consists of several independent execution pipelines and functional units.
 The :doc:`/conceptual/pipeline-descriptions` section details the various
 execution pipelines -- VALU, SALU, LDS, scheduler, and so forth. The metrics
-presented by Omniperf for these pipelines are described in
+presented by ROCm Compute Profiler for these pipelines are described in
 :doc:`pipeline-metrics`. The :doc:`vL1D <vector-l1-cache>` cache and
 :doc:`LDS <local-data-share>` are described in their own sections.
 
@@ -57,4 +57,3 @@ presented by Omniperf for these pipelines are described in
 
 For a more in-depth description of a compute unit on a CDNA accelerator, see
 :hip-training-pdf:`22` and :gcn-crash-course:`27`.
-

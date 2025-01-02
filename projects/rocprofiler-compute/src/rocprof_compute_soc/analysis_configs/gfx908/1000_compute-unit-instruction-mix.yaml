@@ -24,43 +24,43 @@ Panel Config:
             min: None # No HW module
             max: None # No HW module
             unit: (instr + $normUnit)
-            tips: 
+            tips:
           VMEM:
             avg: None # No HW module
             min: None # No HW module
             max: None # No HW module
             unit: (instr + $normUnit)
-            tips: 
+            tips:
           LDS:
             avg: AVG((SQ_INSTS_LDS / $denom))
             min: MIN((SQ_INSTS_LDS / $denom))
             max: MAX((SQ_INSTS_LDS / $denom))
             unit: (instr + $normUnit)
-            tips: 
+            tips:
           MFMA:
             avg: None # No HW module
             min: None # No HW module
             max: None # No HW module
             unit: (instr + $normUnit)
-            tips: 
+            tips:
           SALU:
             avg: AVG((SQ_INSTS_SALU / $denom))
             min: MIN((SQ_INSTS_SALU / $denom))
             max: MAX((SQ_INSTS_SALU / $denom))
             unit: (instr + $normUnit)
-            tips: 
+            tips:
           SMEM:
             avg: AVG((SQ_INSTS_SMEM / $denom))
             min: MIN((SQ_INSTS_SMEM / $denom))
             max: MAX((SQ_INSTS_SMEM / $denom))
             unit: (instr + $normUnit)
-            tips: 
+            tips:
           Branch:
             avg: AVG((SQ_INSTS_BRANCH / $denom))
             min: MIN((SQ_INSTS_BRANCH / $denom))
             max: MAX((SQ_INSTS_BRANCH / $denom))
             unit: (instr + $normUnit)
-            tips: 
+            tips:
 
     - metric_table:
         id: 1002
@@ -240,19 +240,19 @@ Panel Config:
             min: None # No HW module
             max: None # No HW module
             unit: (instr + $normUnit)
-            tips: 
+            tips:
           MFMA-F16:
             avg: None # No HW module
             min: None # No HW module
             max: None # No HW module
             unit: (instr + $normUnit)
-            tips: 
+            tips:
           MFMA-BF16:
             avg: None # No HW module
             min: None # No HW module
             max: None # No HW module
             unit: (instr + $normUnit)
-            tips: 
+            tips:
           MFMA-F32:
             avg: None # No HW module
             min: None # No HW module

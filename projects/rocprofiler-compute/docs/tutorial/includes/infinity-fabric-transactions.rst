@@ -5,7 +5,7 @@ Infinity Fabric transactions
 
  For this example, consider the
  :dev-sample:`Infinity Fabric™ sample <fabric.hip>` distributed as a part of
- Omniperf.
+ ROCm Compute Profiler.
 
 This following code snippet launches a simple read-only kernel.
 
@@ -36,7 +36,7 @@ is identically false -- and thus we expect no writes.
 
 .. note::
 
-   The actual sample included with Omniperf also includes the ability to select
+   The actual sample included with ROCm Compute Profiler also includes the ability to select
    different operation types (such as atomics, writes). This abbreviated version
    is presented here for reference only.
 
@@ -44,13 +44,13 @@ Finally, this sample code lets the user control the
 :ref:`granularity of an allocation <memory-type>`, the owner of an allocation
 (local HBM, CPU DRAM or remote HBM), and the size of an allocation (the default
 is :math:`\sim4`\ GiB) via command line arguments. In doing so, we can explore
-the impact of these parameters on the L2-Fabric metrics reported by Omniperf to
+the impact of these parameters on the L2-Fabric metrics reported by ROCm Compute Profiler to
 further understand their meaning.
 
 .. note::
 
    All results in this section were generated an a node of Infinity
-   Fabric connected MI250 accelerators using ROCm version 5.6.0, and Omniperf
+   Fabric connected MI250 accelerators using ROCm version 5.6.0, and ROCm Compute Profiler
    version 2.0.0. Although results may vary with ROCm versions and accelerator
    connectivity, we expect the lessons learned here to be broadly applicable.
 
@@ -64,7 +64,7 @@ In our first experiment, we consider the simplest possible case, a
 
 .. code-block:: shell-session
 
-   $ omniperf profile -n coarse_grained_local --no-roof -- ./fabric -t 1 -o 0
+   $ rocprof-compute profile -n coarse_grained_local --no-roof -- ./fabric -t 1 -o 0
    Using:
      mtype:CoarseGrained
      mowner:Device
@@ -73,7 +73,7 @@ In our first experiment, we consider the simplest possible case, a
      mdata:Unsigned
      remoteId:-1
    <...>
-   $ omniperf analyze -p workloads/coarse_grained_local/mi200 -b 17.2.0 17.2.1 17.2.2 17.4.0 17.4.1 17.4.2 17.5.0 17.5.1 17.5.2 17.5.3 17.5.4 -n per_kernel --dispatch 2
+   $ rocprof-compute analyze -p workloads/coarse_grained_local/mi200 -b 17.2.0 17.2.1 17.2.2 17.4.0 17.4.1 17.4.2 17.5.0 17.5.1 17.5.2 17.5.3 17.5.4 -n per_kernel --dispatch 2
    <...>
    17. L2 Cache
    17.2 L2 - Fabric Transactions
@@ -163,7 +163,7 @@ accelerator. Our code uses the ``hipExtMallocWithFlag`` API with the
 
 .. code-block:: shell-session
 
-   $ omniperf profile -n fine_grained_local --no-roof -- ./fabric -t 0 -o 0
+   $ rocprof-compute profile -n fine_grained_local --no-roof -- ./fabric -t 0 -o 0
    Using:
      mtype:FineGrained
      mowner:Device
@@ -172,7 +172,7 @@ accelerator. Our code uses the ``hipExtMallocWithFlag`` API with the
      mdata:Unsigned
      remoteId:-1
    <...>
-   $ omniperf analyze -p workloads/fine_grained_local/mi200 -b 17.2.0 17.2.1 17.2.2 17.2.3 17.4.0 17.4.1 17.4.2 17.5.0 17.5.1 17.5.2 17.5.3 17.5.4  -n per_kernel --dispatch 2
+   $ rocprof-compute analyze -p workloads/fine_grained_local/mi200 -b 17.2.0 17.2.1 17.2.2 17.2.3 17.4.0 17.4.1 17.4.2 17.5.0 17.5.1 17.5.2 17.5.3 17.5.4  -n per_kernel --dispatch 2
    <...>
    17. L2 Cache
    17.2 L2 - Fabric Transactions
@@ -245,7 +245,7 @@ substantial change in the L2-Fabric metrics:
 
 .. code-block:: shell-session
 
-   $ omniperf profile -n fine_grained_remote --no-roof -- ./fabric -t 0 -o 2
+   $ rocprof-compute profile -n fine_grained_remote --no-roof -- ./fabric -t 0 -o 2
    Using:
      mtype:FineGrained
      mowner:Remote
@@ -254,7 +254,7 @@ substantial change in the L2-Fabric metrics:
      mdata:Unsigned
      remoteId:-1
    <...>
-   $ omniperf analyze -p workloads/fine_grained_remote/mi200 -b 17.2.0 17.2.1 17.2.2 17.2.3 17.4.0 17.4.1 17.4.2 17.5.0 17.5.1 17.5.2 17.5.3 17.5.4  -n per_kernel --dispatch 2
+   $ rocprof-compute analyze -p workloads/fine_grained_remote/mi200 -b 17.2.0 17.2.1 17.2.2 17.2.3 17.4.0 17.4.1 17.4.2 17.5.0 17.5.1 17.5.2 17.5.3 17.5.4  -n per_kernel --dispatch 2
    <...>
    17. L2 Cache
    17.2 L2 - Fabric Transactions
@@ -339,7 +339,7 @@ fine-grained memory using the ``hipHostMalloc`` API:
 
 .. code-block:: shell-session
 
-   $ omniperf profile -n fine_grained_host --no-roof -- ./fabric -t 0 -o 1
+   $ rocprof-compute profile -n fine_grained_host --no-roof -- ./fabric -t 0 -o 1
    Using:
      mtype:FineGrained
      mowner:Host
@@ -348,7 +348,7 @@ fine-grained memory using the ``hipHostMalloc`` API:
      mdata:Unsigned
      remoteId:-1
    <...>
-   $ omniperf analyze -p workloads/fine_grained_host/mi200 -b 17.2.0 17.2.1 17.2.2 17.2.3 17.4.0 17.4.1 17.4.2 17.5.0 17.5.1 17.5.2 17.5.3 17.5.4  -n per_kernel --dispatch 2
+   $ rocprof-compute analyze -p workloads/fine_grained_host/mi200 -b 17.2.0 17.2.1 17.2.2 17.2.3 17.4.0 17.4.1 17.4.2 17.5.0 17.5.1 17.5.2 17.5.3 17.5.4  -n per_kernel --dispatch 2
    <...>
    17. L2 Cache
    17.2 L2 - Fabric Transactions
@@ -416,7 +416,7 @@ allocation as coarse-grained:
 
 .. code-block:: shell-session
 
-   $ omniperf profile -n coarse_grained_host --no-roof -- ./fabric -t 1 -o 1
+   $ rocprof-compute profile -n coarse_grained_host --no-roof -- ./fabric -t 1 -o 1
    Using:
      mtype:CoarseGrained
      mowner:Host
@@ -425,7 +425,7 @@ allocation as coarse-grained:
      mdata:Unsigned
      remoteId:-1
    <...>
-   $ omniperf analyze -p workloads/coarse_grained_host/mi200 -b 17.2.0 17.2.1 17.2.2 17.2.3 17.4.0 17.4.1 17.4.2 17.5.0 17.5.1 17.5.2 17.5.3 17.5.4  -n per_kernel --dispatch 2
+   $ rocprof-compute analyze -p workloads/coarse_grained_host/mi200 -b 17.2.0 17.2.1 17.2.2 17.2.3 17.4.0 17.4.1 17.4.2 17.5.0 17.5.1 17.5.2 17.5.3 17.5.4  -n per_kernel --dispatch 2
    <...>
    17. L2 Cache
    17.2 L2 - Fabric Transactions
@@ -484,7 +484,7 @@ operations to fine-grained memory allocated on the host:
 
 .. code-block:: shell-session
 
-   $ omniperf profile -n fine_grained_host_write --no-roof -- ./fabric -t 0 -o 1 -p 1
+   $ rocprof-compute profile -n fine_grained_host_write --no-roof -- ./fabric -t 0 -o 1 -p 1
    Using:
      mtype:FineGrained
      mowner:Host
@@ -493,7 +493,7 @@ operations to fine-grained memory allocated on the host:
      mdata:Unsigned
      remoteId:-1
    <...>
-   $ omniperf analyze -p workloads/fine_grained_host_writes/mi200 -b 17.2.4 17.2.5 17.2.6 17.2.7 17.2.8 17.4.3 17.4.4 17.4.5 17.4.6 17.5.5 17.5.6 17.5.7 17.5.8 17.5.9 17.5.10 -n per_kernel --dispatch 2
+   $ rocprof-compute analyze -p workloads/fine_grained_host_writes/mi200 -b 17.2.4 17.2.5 17.2.6 17.2.7 17.2.8 17.4.3 17.4.4 17.4.5 17.4.6 17.5.5 17.5.6 17.5.7 17.5.8 17.5.9 17.5.10 -n per_kernel --dispatch 2
    <...>
    17. L2 Cache
    17.2 L2 - Fabric Transactions
@@ -576,7 +576,7 @@ operations to the CPU’s DRAM.
 
 .. code-block:: shell-session
 
-   $ omniperf profile -n fine_grained_host_add --no-roof -- ./fabric -t 0 -o 1 -p 2
+   $ rocprof-compute profile -n fine_grained_host_add --no-roof -- ./fabric -t 0 -o 1 -p 2
    Using:
      mtype:FineGrained
      mowner:Host
@@ -585,7 +585,7 @@ operations to the CPU’s DRAM.
      mdata:Unsigned
      remoteId:-1
    <...>
-   $ omniperf analyze -p workloads/fine_grained_host_add/mi200 -b 17.2.4 17.2.5 17.2.6 17.2.7 17.2.8 17.4.3 17.4.4 17.4.5 17.4.6 17.5.5 17.5.6 17.5.7 17.5.8 17.5.9 17.5.10 -n per_kernel --dispatch 2
+   $ rocprof-compute analyze -p workloads/fine_grained_host_add/mi200 -b 17.2.4 17.2.5 17.2.6 17.2.7 17.2.8 17.4.3 17.4.4 17.4.5 17.4.6 17.5.5 17.5.6 17.5.7 17.5.8 17.5.9 17.5.10 -n per_kernel --dispatch 2
    <...>
    17. L2 Cache
    17.2 L2 - Fabric Transactions

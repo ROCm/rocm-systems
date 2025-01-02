@@ -1,6 +1,6 @@
 .. meta::
-   :description: Omniperf license
-   :keywords: Omniperf, ROCm, profiler, tool, Instinct, accelerator, AMD,
+   :description: ROCm Compute Profiler license
+   :keywords: ROCm Compute Profiler, ROCm, profiler, tool, Instinct, accelerator, AMD,
               license
 
 *******

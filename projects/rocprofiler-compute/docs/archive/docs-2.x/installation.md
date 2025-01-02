@@ -181,7 +181,7 @@ Once you have decided which machine you would like to use to host the Grafana an
 #### Install MongoDB Utils
 Omniperf uses [mongoimport](https://www.mongodb.com/docs/database-tools/mongoimport/) to upload data to Grafana's backend database. Install for Ubuntu 20.04 is as follows:
 
-```bash 
+```bash
 $ wget https://fastdl.mongodb.org/tools/db/mongodb-database-tools-ubuntu2004-x86_64-100.6.1.deb
 $ sudo apt install ./mongodb-database-tools-ubuntu2004-x86_64-100.6.1.deb
 ```
@@ -265,4 +265,3 @@ After a workload has been successfully uploaded, you should be able to select it
 ![Selecting Grafana workload](images/grafana_workload_selection.png)
 
 For more information on how to use the Grafana interface for analysis please see the [Grafana section](./analysis.md#grafana-based-gui) in the Analyze Mode tab.
-

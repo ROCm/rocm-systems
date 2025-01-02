@@ -1,8 +1,7 @@
 import argparse
-
+import glob
 import os
 import sys
-import glob
 
 if __name__ == "__main__":
     my_parser = argparse.ArgumentParser(description="create test_analyze_workloads.py")

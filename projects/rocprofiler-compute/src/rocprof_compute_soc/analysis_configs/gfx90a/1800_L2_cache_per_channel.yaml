@@ -166,7 +166,7 @@ Panel Config:
               + (TCC_MISS[28] + TCC_HIT[28])) + (TCC_MISS[28] + TCC_HIT[29])) + (TCC_MISS[30]
               + TCC_HIT[30])) + (TCC_MISS[31] + TCC_HIT[31])) != 0) else None))
             unit: pct
-            tips: 
+            tips:
         # FIXME: other arggr metrics!!
 
     - metric_table:

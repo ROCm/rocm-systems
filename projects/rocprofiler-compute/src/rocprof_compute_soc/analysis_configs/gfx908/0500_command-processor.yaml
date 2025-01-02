@@ -27,7 +27,7 @@ Panel Config:
             max: MAX((((100 * CPF_CPF_STAT_BUSY) / (CPF_CPF_STAT_BUSY + CPF_CPF_STAT_IDLE))
               if ((CPF_CPF_STAT_BUSY + CPF_CPF_STAT_IDLE) != 0) else None))
             unit: pct
-            tips: 
+            tips:
           CPF Stall:
             avg: AVG((((100 * CPF_CPF_STAT_STALL) / CPF_CPF_STAT_BUSY) if (CPF_CPF_STAT_BUSY
               != 0) else None))
@@ -36,7 +36,7 @@ Panel Config:
             max: MAX((((100 * CPF_CPF_STAT_STALL) / CPF_CPF_STAT_BUSY) if (CPF_CPF_STAT_BUSY
               != 0) else None))
             unit: pct
-            tips: 
+            tips:
           CPF-L2 Utilization:
             avg: AVG((((100 * CPF_CPF_TCIU_BUSY) / (CPF_CPF_TCIU_BUSY + CPF_CPF_TCIU_IDLE))
               if ((CPF_CPF_TCIU_BUSY + CPF_CPF_TCIU_IDLE) != 0) else None))
@@ -45,7 +45,7 @@ Panel Config:
             max: MAX((((100 * CPF_CPF_TCIU_BUSY) / (CPF_CPF_TCIU_BUSY + CPF_CPF_TCIU_IDLE))
               if ((CPF_CPF_TCIU_BUSY + CPF_CPF_TCIU_IDLE) != 0) else None))
             unit: pct
-            tips: 
+            tips:
           CPF-L2 Stall:
             avg: AVG((((100 * CPF_CPF_TCIU_STALL) / CPF_CPF_TCIU_BUSY) if (CPF_CPF_TCIU_BUSY
               != 0) else None))
@@ -54,7 +54,7 @@ Panel Config:
             max: MAX((((100 * CPF_CPF_TCIU_STALL) / CPF_CPF_TCIU_BUSY) if (CPF_CPF_TCIU_BUSY
               != 0) else None))
             unit: pct
-            tips: 
+            tips:
           CPF-UTCL1 Stall:
             avg: AVG(((100 * CPF_CMP_UTCL1_STALL_ON_TRANSLATION) / CPF_CPF_STAT_BUSY) if (CPF_CPF_STAT_BUSY
               != 0) else None)
@@ -84,7 +84,7 @@ Panel Config:
             max: MAX((((100 * CPC_CPC_STAT_BUSY) / (CPC_CPC_STAT_BUSY + CPC_CPC_STAT_IDLE))
               if ((CPC_CPC_STAT_BUSY + CPC_CPC_STAT_IDLE) != 0) else None))
             unit: pct
-            tips: 
+            tips:
           CPC Stall Rate:
             avg: AVG((((100 * CPC_CPC_STAT_STALL) / CPC_CPC_STAT_BUSY) if (CPC_CPC_STAT_BUSY
               != 0) else None))
@@ -93,19 +93,19 @@ Panel Config:
             max: MAX((((100 * CPC_CPC_STAT_STALL) / CPC_CPC_STAT_BUSY) if (CPC_CPC_STAT_BUSY
               != 0) else None))
             unit: pct
-            tips: 
+            tips:
           CPC Packet Decoding Utilization:
             avg: AVG((100 * CPC_ME1_BUSY_FOR_PACKET_DECODE) / CPC_CPC_STAT_BUSY if (CPC_CPC_STAT_BUSY != 0) else None)
             min: MIN((100 * CPC_ME1_BUSY_FOR_PACKET_DECODE) / CPC_CPC_STAT_BUSY if (CPC_CPC_STAT_BUSY != 0) else None)
             max: MAX((100 * CPC_ME1_BUSY_FOR_PACKET_DECODE) / CPC_CPC_STAT_BUSY if (CPC_CPC_STAT_BUSY != 0) else None)
             unit: pct
-            tips: 
+            tips:
           CPC-Workgroup Manager Utilization:
             avg: AVG((100 * CPC_ME1_DC0_SPI_BUSY) / CPC_CPC_STAT_BUSY if (CPC_CPC_STAT_BUSY != 0) else None)
             min: MIN((100 * CPC_ME1_DC0_SPI_BUSY) / CPC_CPC_STAT_BUSY if (CPC_CPC_STAT_BUSY != 0) else None)
             max: MAX((100 * CPC_ME1_DC0_SPI_BUSY) / CPC_CPC_STAT_BUSY if (CPC_CPC_STAT_BUSY != 0) else None)
             unit: Pct
-            tips: 
+            tips:
           CPC-L2 Utilization:
             avg: AVG((((100 * CPC_CPC_TCIU_BUSY) / (CPC_CPC_TCIU_BUSY + CPC_CPC_TCIU_IDLE))
               if ((CPC_CPC_TCIU_BUSY + CPC_CPC_TCIU_IDLE) != 0) else None))
@@ -114,7 +114,7 @@ Panel Config:
             max: MAX((((100 * CPC_CPC_TCIU_BUSY) / (CPC_CPC_TCIU_BUSY + CPC_CPC_TCIU_IDLE))
               if ((CPC_CPC_TCIU_BUSY + CPC_CPC_TCIU_IDLE) != 0) else None))
             unit: pct
-            tips: 
+            tips:
           CPC-UTCL1 Stall:
             avg: AVG(((100 * CPC_UTCL1_STALL_ON_TRANSLATION) / CPC_CPC_STAT_BUSY) if (CPC_CPC_STAT_BUSY
               != 0) else None)
@@ -123,7 +123,7 @@ Panel Config:
             max: MAX(((100 * CPC_UTCL1_STALL_ON_TRANSLATION) / CPC_CPC_STAT_BUSY) if (CPC_CPC_STAT_BUSY
               != 0) else None)
             unit: pct
-            tips: 
+            tips:
           CPC-UTCL2 Utilization:
             avg: AVG((((100 * CPC_CPC_UTCL2IU_BUSY) / (CPC_CPC_UTCL2IU_BUSY + CPC_CPC_UTCL2IU_IDLE))
               if ((CPC_CPC_UTCL2IU_BUSY + CPC_CPC_UTCL2IU_IDLE) != 0) else None))
@@ -132,4 +132,4 @@ Panel Config:
             max: MAX((((100 * CPC_CPC_UTCL2IU_BUSY) / (CPC_CPC_UTCL2IU_BUSY + CPC_CPC_UTCL2IU_IDLE))
               if ((CPC_CPC_UTCL2IU_BUSY + CPC_CPC_UTCL2IU_IDLE) != 0) else None))
             unit: pct
-            tips: 
+            tips:

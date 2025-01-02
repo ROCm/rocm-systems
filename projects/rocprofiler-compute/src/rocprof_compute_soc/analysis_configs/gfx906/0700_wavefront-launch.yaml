@@ -24,55 +24,55 @@ Panel Config:
             min: MIN(Grid_Size)
             max: MAX(Grid_Size)
             unit: Work Items
-            tips: 
+            tips:
           Workgroup Size:
             avg: AVG(Workgroup_Size)
             min: MIN(Workgroup_Size)
             max: MAX(Workgroup_Size)
             unit: Work Items
-            tips: 
+            tips:
           Total Wavefronts:
             avg: AVG(SPI_CSN_WAVE)
             min: MIN(SPI_CSN_WAVE)
             max: MAX(SPI_CSN_WAVE)
             unit: Wavefronts
-            tips: 
+            tips:
           Saved Wavefronts:
             avg: AVG(SQ_WAVES_SAVED)
             min: MIN(SQ_WAVES_SAVED)
             max: MAX(SQ_WAVES_SAVED)
             unit: Wavefronts
-            tips: 
+            tips:
           Restored Wavefronts:
             avg: AVG(SQ_WAVES_RESTORED)
             min: MIN(SQ_WAVES_RESTORED)
             max: MAX(SQ_WAVES_RESTORED)
             unit: Wavefronts
-            tips: 
+            tips:
           VGPRs:
             avg: AVG(Arch_VGPR)
             min: MIN(Arch_VGPR)
             max: MAX(Arch_VGPR)
             unit: Registers
-            tips: 
+            tips:
           AGPRs:
             avg: AVG(Accum_VGPR)
             min: MIN(Accum_VGPR)
             max: MAX(Accum_VGPR)
             unit: Registers
-            tips: 
+            tips:
           SGPRs:
             avg: AVG(SGPR)
             min: MIN(SGPR)
             max: MAX(SGPR)
             unit: Registers
-            tips: 
+            tips:
           LDS Allocation:
             avg: AVG(LDS_Per_Workgroup)
             min: MIN(LDS_Per_Workgroup)
             max: MAX(LDS_Per_Workgroup)
             unit: Bytes
-            tips: 
+            tips:
           Scratch Allocation:
             avg: AVG(Scratch_Per_Workitem)
             min: MIN(Scratch_Per_Workitem)
@@ -96,47 +96,47 @@ Panel Config:
             min: MIN((End_Timestamp - Start_Timestamp))
             max: MAX((End_Timestamp - Start_Timestamp))
             unit: ns
-            tips: 
+            tips:
           Kernel Time (Cycles):
             avg: AVG($GRBM_GUI_ACTIVE_PER_XCD)
             min: MIN($GRBM_GUI_ACTIVE_PER_XCD)
             max: MAX($GRBM_GUI_ACTIVE_PER_XCD)
             unit: Cycle
-            tips: 
+            tips:
           Instructions per wavefront:
             avg: AVG((SQ_INSTS / SQ_WAVES))
             min: MIN((SQ_INSTS / SQ_WAVES))
             max: MAX((SQ_INSTS / SQ_WAVES))
             unit: Instr/wavefront
-            tips: 
+            tips:
           Wave Cycles:
             avg: AVG(((4 * SQ_WAVE_CYCLES) / $denom))
             min: MIN(((4 * SQ_WAVE_CYCLES) / $denom))
             max: MAX(((4 * SQ_WAVE_CYCLES) / $denom))
             unit: (Cycles + $normUnit)
-            tips: 
+            tips:
           Dependency Wait Cycles:
             avg: AVG(((4 * SQ_WAIT_ANY) / $denom))
             min: MIN(((4 * SQ_WAIT_ANY) / $denom))
             max: MAX(((4 * SQ_WAIT_ANY) / $denom))
             unit: (Cycles + $normUnit)
-            tips: 
+            tips:
           Issue Wait Cycles:
             avg: AVG(((4 * SQ_WAIT_INST_ANY) / $denom))
             min: MIN(((4 * SQ_WAIT_INST_ANY) / $denom))
             max: MAX(((4 * SQ_WAIT_INST_ANY) / $denom))
             unit: (Cycles + $normUnit)
-            tips: 
+            tips:
           Active Cycles:
             avg: AVG(((4 * SQ_ACTIVE_INST_ANY) / $denom))
             min: MIN(((4 * SQ_ACTIVE_INST_ANY) / $denom))
             max: MAX(((4 * SQ_ACTIVE_INST_ANY) / $denom))
             unit: (Cycles + $normUnit)
-            tips: 
+            tips:
           Wavefront Occupancy:
             avg: AVG((SQ_ACCUM_PREV_HIRES / $GRBM_GUI_ACTIVE_PER_XCD))
             min: MIN((SQ_ACCUM_PREV_HIRES / $GRBM_GUI_ACTIVE_PER_XCD))
             max: MAX((SQ_ACCUM_PREV_HIRES / $GRBM_GUI_ACTIVE_PER_XCD))
             unit: Wavefronts
             coll_level: SQ_LEVEL_WAVES
-            tips: 
+            tips:

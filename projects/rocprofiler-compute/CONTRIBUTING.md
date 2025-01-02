@@ -33,27 +33,27 @@ and apply your changes there.
 
 - Ensure the PR is based on the `amd-staging` branch of the ROCm Compute Profiler GitHub repository.
 
-- ROCm Compute Profiler requires new commits to include a "Signed-off-by" token in the commit message (typically enabled via the `git commit -s` option), indicating your agreement to the projects's [Developer's Certificate of Origin](https://developercertificate.org/) and compatability with the project [LICENSE](LICENSE):
+> [!TIP]
+> To ensure you meet all formatting requirements before publishing, we recommend you utilize our included [*pre-commit hooks*](https://pre-commit.com/#introduction). For more information on how to use pre-commit hooks please see the [section below](#using-pre-commit-hooks).
 
+## Using pre-commit hooks
 
-> (a) The contribution was created in whole or in part by me and I
-> have the right to submit it under the open source license
-> indicated in the file; or
->
-> (b) The contribution is based upon previous work that, to the best
-> of my knowledge, is covered under an appropriate open source
-> license and I have the right under that license to submit that
-> work with modifications, whether created in whole or in part
-> by me, under the same open source license (unless I am
-> permitted to submit under a different license), as indicated
-> in the file; or
->
-> (c) The contribution was provided directly to me by some other
-> person who certified (a), (b) or (c) and I have not modified
-> it.
->
-> (d) I understand and agree that this project and the contribution
-> are public and that a record of the contribution (including all
-> personal information I submit with it, including my sign-off) is
-> maintained indefinitely and may be redistributed consistent with
-> this project or the open source license(s) involved.
+Our project supports optional [*pre-commit hooks*](https://pre-commit.com/#introduction) which developers can leverage to verify formatting before publishing their code. Once enabled, any commits you propose to the repository will be automatically checked for formatting. Initial setup is as follows:
+
+```console
+python3 -m pip install pre-commit
+cd rocprofiler-compute
+pre-commit install
+```
+
+Now, when you commit code to the repository you should see something like this:
+
+![A screen capture showing terminal output from a pre-commit hook](docs/data/contributing/pre-commit-hook.png)
+
+Please see the [pre-commit documentation](https://pre-commit.com/#quick-start) for additional information.
+
+## Coding guidelines
+
+Below are some repository specific guidelines which are followed througout the repository.
+Any future contributions should adhere to these guidelines:
+* Use pathlib library functions instead of os.path for manipulating file paths
