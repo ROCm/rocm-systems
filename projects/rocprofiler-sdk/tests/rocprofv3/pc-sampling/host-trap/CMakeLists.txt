@@ -3,3 +3,4 @@
 #
 
 add_subdirectory(exec-mask-manipulation)
+add_subdirectory(transpose-multiple-agents)
