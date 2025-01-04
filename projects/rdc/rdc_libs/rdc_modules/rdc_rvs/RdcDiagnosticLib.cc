@@ -27,6 +27,11 @@ THE SOFTWARE.
 #include "rdc_lib/rdc_common.h"
 #include "rdc_modules/rdc_rvs/RvsBase.h"
 
+  static const char babel_config[MAX_CONFIG_LENGTH] =
+      "{actions: [{name: babel-float-256MiB, device: all, module: babel, "
+      "parallel: false, count: 1, num_iter: 5000, array_size: 268435456, "
+      "test_type: 1, mibibytes: true, o/p_csv: false, subtest: 5}]}";
+
 rdc_status_t rdc_diag_init(uint64_t) { return RDC_ST_OK; }
 
 rdc_status_t rdc_diag_destroy() { return RDC_ST_OK; }
@@ -37,8 +42,9 @@ rdc_status_t rdc_diag_test_cases_query(rdc_diag_test_cases_t test_cases[MAX_TEST
     return RDC_ST_BAD_PARAMETER;
   }
 
-  *test_case_count = 1;
+  *test_case_count = 2;
   test_cases[0] = RDC_DIAG_RVS_TEST;
+  test_cases[1] = RDC_DIAG_RVS_MEMBW_TEST;
 
   return RDC_ST_OK;
 }
@@ -50,10 +56,6 @@ rdc_status_t rdc_diag_test_case_run(rdc_diag_test_cases_t test_case,
                                     rdc_diag_test_result_t* result, rdc_diag_callback_t* callback) {
   rvs_status_t rvs_status = RVS_STATUS_SUCCESS;
   if (result == nullptr || gpu_count == 0) {
-    return RDC_ST_BAD_PARAMETER;
-  }
-
-  if (test_case != RDC_DIAG_RVS_TEST) {
     return RDC_ST_BAD_PARAMETER;
   }
 
@@ -74,9 +76,14 @@ rdc_status_t rdc_diag_test_case_run(rdc_diag_test_cases_t test_case,
       strncpy_with_null(result->info, "Finished running RDC_DIAG_RVS_TEST", MAX_DIAG_MSG_LENGTH);
       rvs_status = rvs_base.run_rvs_app(config, config_size, callback);
       break;
+    case RDC_DIAG_RVS_MEMBW_TEST:
+      strncpy_with_null(result->info, "Finished running RDC_DIAG_RVS_MEMBW_TEST", MAX_DIAG_MSG_LENGTH);
+      rvs_status = rvs_base.run_rvs_app(babel_config, MAX_CONFIG_LENGTH, callback);
+      break;
     default:
       result->status = RDC_DIAG_RESULT_SKIP;
       strncpy_with_null(result->info, "Not supported yet", MAX_DIAG_MSG_LENGTH);
+      return RDC_ST_BAD_PARAMETER;
   }
 
   if (rvs_status != RVS_STATUS_SUCCESS) {

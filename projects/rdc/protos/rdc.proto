@@ -504,7 +504,8 @@ message DiagnosticTestResult {
     SYS_MEM_CHECK = 4;
     NODE_TOPOLOGY = 5;
     RVS_TEST = 6;
-    GPU_PARAMETERS = 7;
+    RVS_MEMBW_TEST = 7;
+    GPU_PARAMETERS = 8;
   };
   DiagnosticTestCase test_case = 3;
   uint32 per_gpu_result_count = 4;
@@ -533,7 +534,8 @@ message DiagnosticTestCaseRunRequest {
       SYS_MEM_CHECK = 4;
       NODE_TOPOLOGY = 5;
       RVS_TEST = 6;
-      GPU_PARAMETERS = 7;
+      RVS_MEMBW_TEST = 7;
+      GPU_PARAMETERS = 8;
     };
     TestCaseType test_case = 2;
     string config = 3;
