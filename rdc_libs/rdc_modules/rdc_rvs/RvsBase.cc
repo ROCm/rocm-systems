@@ -31,7 +31,6 @@ THE SOFTWARE.
 
 // TODO: Make generic test
 // TODO: Allow for user to override defaults with a custom string
-static constexpr size_t MAX_CONFIG_LENGTH = 1024;
 
 amd::rdc::RdcRVSBase* amd::rdc::RdcRVSBase::s_instance = nullptr;
 

@@ -519,6 +519,7 @@ typedef enum {
   RDC_DIAG_SYS_MEM_CHECK,   //!< Check System memory
   RDC_DIAG_NODE_TOPOLOGY,   //!< Report node topology
   RDC_DIAG_RVS_TEST,        //!< TODO: Replace with real RVS tests
+  RDC_DIAG_RVS_MEMBW_TEST,  //!< RVS memory bandwidth test
   RDC_DIAG_GPU_PARAMETERS,  //!< GPU parameters in range
   RDC_DIAG_TEST_LAST = RDC_DIAG_GPU_PARAMETERS
 } rdc_diag_test_cases_t;

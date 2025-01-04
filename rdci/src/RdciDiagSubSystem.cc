@@ -137,6 +137,7 @@ std::string RdciDiagSubSystem::get_test_name(rdc_diag_test_cases_t test_case) co
       {RDC_DIAG_SYS_MEM_CHECK, "System memory check"},
       {RDC_DIAG_NODE_TOPOLOGY, "Node topology check"},
       {RDC_DIAG_RVS_TEST, "Pre-defined config RVS check"},
+      {RDC_DIAG_RVS_MEMBW_TEST, "Pre-defined memory bandwidth RVS check"},
       {RDC_DIAG_GPU_PARAMETERS, "GPU parameters check"},
       {RDC_DIAG_TEST_LAST, "Unknown"}};
 

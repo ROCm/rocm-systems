@@ -29,6 +29,8 @@ THE SOFTWARE.
 #include "rdc/rdc.h"
 #include "rvs/rvs.h"
 
+static constexpr size_t MAX_CONFIG_LENGTH = 1024;
+
 namespace amd {
 namespace rdc {
 
