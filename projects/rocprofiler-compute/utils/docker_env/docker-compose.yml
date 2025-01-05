@@ -1,0 +1,10 @@
+services:
+  app:
+    build:
+      context: ../../
+      dockerfile: utils/docker_env/Dockerfile
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    security_opt:
+      - seccomp:unconfined

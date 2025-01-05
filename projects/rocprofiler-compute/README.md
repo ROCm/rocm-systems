@@ -34,6 +34,28 @@ from the `amd-mainline` branch, while new features are developed in our
 
 Users may checkout `amd-staging` to preview upcoming features.
 
+## Testing
+
+To quickly get the environment (bash shell) for building and testing, run the following commands:
+* `cd utils/docker_env`
+* `docker compose run app`
+
+Inside the docker container, clean, build and install the project with tests enabled:
+```
+rm -rf build install && cmake -B build -D CMAKE_INSTALL_PREFIX=install -D ENABLE_TESTS=ON -D INSTALL_TESTS=ON -DENABLE_COVERAGE=ON -S . && cmake --build build --target install --parallel 8
+```
+
+Note that per the above command, build assets will be stored under `build` directory and installed assets will be stored under `install` directory.
+
+Then, to run the automated test suite, run the following command:
+```
+ctest
+```
+
+For manual testing, you can find the executable at `install/bin/rocprof-compute`
+
+NOTE: This Dockerfile uses `rocm/dev-ubuntu-22.04` as the base image
+
 ## How to Cite
 
 This software can be cited using a Zenodo
