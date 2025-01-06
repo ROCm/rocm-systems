@@ -886,11 +886,13 @@ int RdcAPIServiceImpl::PolicyCallback(rdc_policy_callback_response_t* userData) 
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
 
-  policy_thread_context* data = new policy_thread_context;
-  data->mutex = PTHREAD_MUTEX_INITIALIZER;
-  data->cond = PTHREAD_COND_INITIALIZER;
-  data->start = true;
-  policy_threads_.insert(std::make_pair(request->group_id(), data));
+  if (policy_threads_.size() == 0) {
+    policy_thread_context* data = new policy_thread_context;
+    data->mutex = PTHREAD_MUTEX_INITIALIZER;
+    data->cond = PTHREAD_COND_INITIALIZER;
+    data->start = true;
+    policy_threads_.insert(std::make_pair(request->group_id(), data));
+  }
 
   auto updater = std::async(std::launch::async, [this, request, writer]() {
     rdc_status_t result = rdc_policy_register(rdc_handle_, request->group_id(), PolicyCallback);
@@ -898,6 +900,7 @@ int RdcAPIServiceImpl::PolicyCallback(rdc_policy_callback_response_t* userData) 
       auto it = policy_threads_.find(request->group_id());
       if (it != policy_threads_.end()) {
         policy_thread_context* ctx = it->second;
+        ctx->start = true;
         while (ctx->start) {
           struct timespec ts;
           clock_gettime(CLOCK_REALTIME, &ts);
