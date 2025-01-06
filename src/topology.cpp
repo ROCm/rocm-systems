@@ -573,7 +573,7 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id,
    */
   props.Integrated = 0;
   props.Domain = device->Domain();
-  props.UniqueID = atol(device->Uuid()); // TODO
+  props.UniqueID = device->Uuid();
   props.NumXcc = 1;
   props.KFDGpuID = device->DeviceId(); // TODO
   props.FamilyID = device->GfxFamily();

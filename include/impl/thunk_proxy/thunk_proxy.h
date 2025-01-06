@@ -55,7 +55,7 @@ typedef struct {
   int stepping;
   bool is_dgpu;
   char product_name[MAX_PATH];
-  const char *uuid;
+  uint64_t uuid;
   AsicFamilyType family;
   uint32_t device_id;
   uint32_t wavefront_size;

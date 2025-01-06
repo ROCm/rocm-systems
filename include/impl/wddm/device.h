@@ -83,7 +83,7 @@ public:
   int Stepping() { return device_info_.stepping; }
   bool IsDgpu() { return device_info_.is_dgpu; }
   const char *ProductName() { return device_info_.product_name; }
-  const char *Uuid() { return device_info_.uuid; }
+  uint64_t Uuid() { return device_info_.uuid; }
   thunk_proxy::AsicFamilyType GfxFamily() { return device_info_.family; }
   uint32_t DeviceId() { return device_info_.device_id; }
   uint32_t WavefrontSize() { return device_info_.wavefront_size; }
