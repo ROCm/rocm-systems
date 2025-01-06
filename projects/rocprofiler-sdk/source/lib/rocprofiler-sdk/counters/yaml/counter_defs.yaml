@@ -3900,6 +3900,21 @@ TOTAL_64_OPS:
     gfx942/gfx941/gfx940/gfx90a:
       expression: (SQ_INSTS_VALU_FMA_F64*2+SQ_INSTS_VALU_INT64+SQ_INSTS_VALU_ADD_F64+SQ_INSTS_VALU_MUL_F64)*64+(SQ_INSTS_VALU_MFMA_MOPS_F64*512)
   description: The number of 64 bits OPS executed
+RDC_OPS_16_PER_SIMDCYCLE:
+  architectures:
+    gfx942/gfx941/gfx940/gfx90a:
+      expression: TOTAL_16_OPS/SIMD_NUM/reduce(GRBM_COUNT,max)
+  description: The number of 16 bits OPS executed per simd-cycle
+RDC_OPS_32_PER_SIMDCYCLE:
+  architectures:
+    gfx942/gfx941/gfx940/gfx90a:
+      expression: TOTAL_32_OPS/SIMD_NUM/reduce(GRBM_COUNT,max)
+  description: The number of 32 bits OPS executed per simd-cycle
+RDC_OPS_64_PER_SIMDCYCLE:
+  architectures:
+    gfx942/gfx941/gfx940/gfx90a:
+      expression: TOTAL_64_OPS/SIMD_NUM/reduce(GRBM_COUNT,max)
+  description: The number of 64 bits OPS executed per simd-cycle
 TaUtil:
   architectures:
     gfx90a:
