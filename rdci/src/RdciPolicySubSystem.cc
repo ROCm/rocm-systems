@@ -185,8 +185,18 @@ int rdc_policy_callback(rdc_policy_callback_response_t* userData) {
     return 0;
   }
 
+  int64_t value = userData->value;
+  int64_t threshold = userData->condition.value;
+  if (userData->condition.type == RDC_POLICY_COND_THERMAL) {
+    value /= 1000;
+    threshold /= 1000;
+  } else if (userData->condition.type == RDC_POLICY_COND_POWER) {
+    value /= 1000000;
+    threshold /= 1000000;
+  }
+
   std::cout << "A " << condition_type_to_str(userData->condition.type) << " exceeds the threshold "
-            << userData->condition.value << " with the value " << userData->value << std::endl;
+            << threshold << " with the value " << value << std::endl;
   last_time = now;  // update the last time
   return 0;
 }
@@ -216,10 +226,10 @@ void RdciPolicySubSystem::process() {
             policy.condition = {RDC_POLICY_COND_MAX_PAGE_RETRIED, option.second};
             break;
           case POLICY_OPT_TEMP:
-            policy.condition = {RDC_POLICY_COND_THERMAL, option.second};
+            policy.condition = {RDC_POLICY_COND_THERMAL, option.second * 1000};
             break;
           case POLICY_OPT_POWER:
-            policy.condition = {RDC_POLICY_COND_POWER, option.second};
+            policy.condition = {RDC_POLICY_COND_POWER, option.second * 1000000};
             break;
           case POLICY_OPT_ACTION:
             if (option.second == 0) {
@@ -264,15 +274,21 @@ void RdciPolicySubSystem::process() {
           if (policies[i].condition.type == RDC_POLICY_COND_MAX_PAGE_RETRIED) {
             std::cout << "| Page Retirement\t "
                       << "|   " << policies[i].condition.value;
+            if (policies[i].condition.value < 100) {
+              std::cout << "\t";
+            }
           } else if (policies[i].condition.type == RDC_POLICY_COND_THERMAL) {
             std::cout << "| Temperature Limit\t "
-                      << "|   " << policies[i].condition.value;
+                      << "|   " << policies[i].condition.value / 1000;
+            if (policies[i].condition.value / 1000 < 100) {
+              std::cout << "\t";
+            }
           } else if (policies[i].condition.type == RDC_POLICY_COND_POWER) {
             std::cout << "| Power Limit     \t "
-                      << "|   " << policies[i].condition.value;
-          }
-          if (policies[i].condition.value < 100) {
-            std::cout << "\t";
+                      << "|   " << policies[i].condition.value / 1000000;
+            if (policies[i].condition.value / 1000000 < 100) {
+              std::cout << "\t";
+            }
           }
           if (policies[i].action == 0) {
             std::cout << "\t\t| Notify\t\t|\n";
