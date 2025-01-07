@@ -1121,21 +1121,23 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_device_arguments(set_value_parser, required=False)
 
         if self.helpers.is_amdgpu_initialized():
+            # set value should only take one of these at a time so args below will be mutually exclusive
+            set_value_exclusive_group = set_value_parser.add_mutually_exclusive_group()
             if self.helpers.is_baremetal():
                 # Optional GPU Args
-                set_value_parser.add_argument('-f', '--fan', action=self._validate_fan_speed(), required=False, help=set_fan_help, metavar='%')
-                set_value_parser.add_argument('-l', '--perf-level', action='store', choices=self.helpers.get_perf_levels()[0], type=str.upper, required=False, help=set_perf_level_help, metavar='LEVEL')
-                set_value_parser.add_argument('-P', '--profile', action='store', required=False, help=set_profile_help, metavar='SETPROFILE')
-                set_value_parser.add_argument('-d', '--perf-determinism', action='store', type=self._not_negative_int, required=False, help=set_perf_det_help, metavar='SCLKMAX')
-                set_value_parser.add_argument('-C', '--compute-partition', action='store', choices=self.helpers.get_compute_partition_types(), type=str.upper, required=False, help=set_compute_partition_help, metavar='PARTITION')
-                set_value_parser.add_argument('-M', '--memory-partition', action='store', choices=self.helpers.get_memory_partition_types(), type=str.upper, required=False, help=set_memory_partition_help, metavar='PARTITION')
-                set_value_parser.add_argument('-o', '--power-cap', action='store', type=self._positive_int, required=False, help=set_power_cap_help, metavar='WATTS')
-                set_value_parser.add_argument('-p', '--soc-pstate', action='store', required=False, type=self._not_negative_int, help=set_soc_pstate_help, metavar='POLICY_ID')
-                set_value_parser.add_argument('-x', '--xgmi-plpd', action='store', required=False, type=self._not_negative_int, help=set_xgmi_plpd_help, metavar='POLICY_ID')
-                set_value_parser.add_argument('-c', '--clk-level', action=self._level_select(), nargs='+', required=False, help=set_clock_freq_help, metavar=('CLK_TYPE', 'PERF_LEVELS'))
+                set_value_exclusive_group.add_argument('-f', '--fan', action=self._validate_fan_speed(), required=False, help=set_fan_help, metavar='%')
+                set_value_exclusive_group.add_argument('-l', '--perf-level', action='store', choices=self.helpers.get_perf_levels()[0], type=str.upper, required=False, help=set_perf_level_help, metavar='LEVEL')
+                set_value_exclusive_group.add_argument('-P', '--profile', action='store', required=False, help=set_profile_help, metavar='SETPROFILE')
+                set_value_exclusive_group.add_argument('-d', '--perf-determinism', action='store', type=self._not_negative_int, required=False, help=set_perf_det_help, metavar='SCLKMAX')
+                set_value_exclusive_group.add_argument('-C', '--compute-partition', action='store', choices=self.helpers.get_compute_partition_types(), type=str.upper, required=False, help=set_compute_partition_help, metavar='PARTITION')
+                set_value_exclusive_group.add_argument('-M', '--memory-partition', action='store', choices=self.helpers.get_memory_partition_types(), type=str.upper, required=False, help=set_memory_partition_help, metavar='PARTITION')
+                set_value_exclusive_group.add_argument('-o', '--power-cap', action='store', type=self._positive_int, required=False, help=set_power_cap_help, metavar='WATTS')
+                set_value_exclusive_group.add_argument('-p', '--soc-pstate', action='store', required=False, type=self._not_negative_int, help=set_soc_pstate_help, metavar='POLICY_ID')
+                set_value_exclusive_group.add_argument('-x', '--xgmi-plpd', action='store', required=False, type=self._not_negative_int, help=set_xgmi_plpd_help, metavar='POLICY_ID')
+                set_value_exclusive_group.add_argument('-c', '--clk-level', action=self._level_select(), nargs='+', required=False, help=set_clock_freq_help, metavar=('CLK_TYPE', 'PERF_LEVELS'))
 
-            set_value_parser.add_argument('-L', '--clk-limit', action=self._limit_select(), nargs=3, required=False, help=set_clk_limit_help, metavar=('CLK_TYPE', 'LIM_TYPE', 'VALUE'))
-            set_value_parser.add_argument('-R', '--process-isolation', action='store', choices=[0,1], type=self._not_negative_int, required=False, help=set_process_isolation_help, metavar='STATUS')
+            set_value_exclusive_group.add_argument('-L', '--clk-limit', action=self._limit_select(), nargs=3, required=False, help=set_clk_limit_help, metavar=('CLK_TYPE', 'LIM_TYPE', 'VALUE'))
+            set_value_exclusive_group.add_argument('-R', '--process-isolation', action='store', choices=[0,1], type=self._not_negative_int, required=False, help=set_process_isolation_help, metavar='STATUS')
 
         if self.helpers.is_amd_hsmp_initialized():
             if self.helpers.is_baremetal():

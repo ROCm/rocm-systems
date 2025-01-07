@@ -115,6 +115,9 @@ GPU: 0
 
 ### Changed
 
+-  **All `amd-smi set` options are now mutually exclusive**.  
+    - Users can only use one set option at a time now.  
+
 - **Python API for `amdsmi_get_energy_count()` will change the name for the `power` field to `energy_accumulator`**.  
 
 - **Updated API `amdsmi_get_gpu_vram_info()` structure and CLI `amd-smi static --vram`**  
