@@ -131,7 +131,7 @@ class webui_analysis(OmniAnalyze_Base):
                 raw_data_dir=str(self.dest_dir),
                 filter_gpu_ids=base_data[base_run].filter_gpu_ids,
                 filter_dispatch_ids=base_data[base_run].filter_dispatch_ids,
-                filter_nodes=self._runs[d[0]].filter_nodes,
+                filter_nodes=self._runs[self.dest_dir].filter_nodes,
                 time_unit=self.get_args().time_unit,
                 max_stat_num=base_data[base_run].filter_top_n,
                 kernel_verbose=self.get_args().kernel_verbose,
