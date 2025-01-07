@@ -3272,7 +3272,6 @@ def amdsmi_get_energy_count(processor_handle: amdsmi_wrapper.amdsmi_processor_ha
     )
 
     return {
-        'power': energy_accumulator.value, # deprecating in 6.4
         'energy_accumulator': energy_accumulator.value,
         'counter_resolution': counter_resolution.value,
         'timestamp': timestamp.value,

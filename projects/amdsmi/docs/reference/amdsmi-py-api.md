@@ -1528,7 +1528,7 @@ Output: Dictionary with fields
 
 Field | Content
 ---|---
-`power` |  counter for energy accumulation since last restart/gpu rest (Deprecating in 6.4)
+`power` |  counter for energy accumulation since last restart/gpu rest (Deprecated in ROCm 6.4)
 `energy_accumulator` |  counter for energy accumulation since last restart/gpu rest
 `counter_resolution` |  counter resolution
 `timestamp` |  timestamp

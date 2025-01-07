@@ -115,6 +115,8 @@ GPU: 0
 
 ### Changed
 
+- **Python API for `amdsmi_get_energy_count()` will change the name for the `power` field to `energy_accumulator`**.  
+
 - **Updated API `amdsmi_get_gpu_vram_info()` structure and CLI `amd-smi static --vram`**  
 Updated structure `amdsmi_vram_info_t`: 
 ```C
