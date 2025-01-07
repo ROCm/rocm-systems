@@ -885,8 +885,8 @@ int RdcAPIServiceImpl::PolicyCallback(rdc_policy_callback_response_t* userData) 
   if (!writer || !request) {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
-
-  if (policy_threads_.size() == 0) {
+  auto it = policy_threads_.find(request->group_id());
+  if (it == policy_threads_.end()) {
     policy_thread_context* data = new policy_thread_context;
     data->mutex = PTHREAD_MUTEX_INITIALIZER;
     data->cond = PTHREAD_COND_INITIALIZER;
