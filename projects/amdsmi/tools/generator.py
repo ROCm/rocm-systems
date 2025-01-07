@@ -143,6 +143,13 @@ def find_line_num(search_str, line):
 
 
 def main():
+    open_bracket = '['
+    close_bracket = ']'
+    open_parenthesis = '('
+    close_parenthesis = ')'
+    open_curly_brace = '{'
+    close_curly_brace = '}'
+
     output_file, input_file, library, clang_extra_args =  parseArgument()
 
     # make args string easy to append
@@ -245,11 +252,11 @@ except OSError as error:
                     struct_name = ''
                     for i in range(1, 50):
                         input_line = input_file_array[line_num + i]
-                        # { matches close curly brackets on next line
-                        if '}' in input_line:
-                            struct_name = input_line.strip()[1:-1].strip()
+                        if close_curly_brace in input_line:
+                            struct_name = find_replacement(close_curly_brace, ';', input_line)
+                            struct_name = struct_name[1:-1].strip()
                             if len(struct_name):
-                                struct_name = struct_name.split('[')[0] # ]
+                                struct_name = struct_name.split(open_bracket)[0]
                                 break
                     if not len(struct_name):
                         print(f'Error: {index+1}: Could not find struct name using line number {line_num}, skipping replacement')
@@ -260,7 +267,7 @@ except OSError as error:
                     #     class struct_struct (unnamed at amdsmi.h:782:9)(Structure):
                     # becomes
                     #     class struct_engine_usage(Structure):
-                    str_replace = find_replacement('struct_struct', ')', line)
+                    str_replace = find_replacement('struct_struct', close_parenthesis, line)
                     if len(str_replace) > 0:
                         str_with = f'struct_{struct_name}'
                     else:
@@ -268,7 +275,7 @@ except OSError as error:
                         #     (unnamed at amdsmi.h:787:9)', 'uint32_t', 'uint64_t', 'uint8_t',
                         # becomes
                         #     'struct_memory_usage', 'uint32_t', 'uint64_t', 'uint8_t',
-                        str_replace = find_replacement(f'({search_name}', ')', line)
+                        str_replace = find_replacement(f'({search_name}', close_parenthesis, line)
                         if len(str_replace) == 0:
                             print(f'Error: {index+1}: Could not find structure name in {line}, skipping replacement')
                             continue
