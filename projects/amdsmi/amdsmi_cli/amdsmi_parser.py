@@ -137,19 +137,18 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_partition_parser(self.subparsers, partition)
 
 
-    def _not_negative_int(self, int_value):
+    def _not_negative_int(self, int_value, sub_arg=None):
         # Argument type validator
         if int_value.isdigit():  # Is digit doesn't work on negative numbers
             return int(int_value)
 
         outputformat = self.helpers.get_output_format()
         if int_value == "":
-            raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(int_value, outputformat)
+            raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(sub_arg, outputformat)
         else:
             raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(int_value, outputformat)
 
-
-    def _positive_int(self, int_value):
+    def _positive_int(self, int_value, sub_arg=None):
         # Argument type validator
         if int_value.isdigit():  # Is digit doesn't work on negative numbers
             if int(int_value) > 0:
@@ -157,12 +156,12 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         outputformat = self.helpers.get_output_format()
         if int_value == "":
-            raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(int_value, outputformat)
+            raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(sub_arg, outputformat)
         else:
             raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(int_value, outputformat)
 
 
-    def _is_valid_string(self, string_value):
+    def _is_valid_string(self, string_value, sub_arg=None):
         # Argument type validator
         # This is for triggering a cli exception if an empty string is detected
         if string_value:
@@ -170,7 +169,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         outputformat = self.helpers.get_output_format()
         if string_value == "":
-            raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(string_value, outputformat)
+            raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(sub_arg, outputformat)
         else:
             raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(string_value, outputformat)
 
@@ -431,11 +430,11 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Mutually Exclusive Args within the subparser
         subcommand_parser.add_argument('-w', '--watch', action='store', metavar='INTERVAL',
-             type=self._positive_int, required=False, help=watch_help)
+             type=lambda value: self._positive_int(value, '--watch'), required=False, help=watch_help)
         subcommand_parser.add_argument('-W', '--watch_time', action=self._check_watch_selected(), metavar='TIME',
-            type=self._positive_int, required=False, help=watch_time_help)
+            type=lambda value: self._positive_int(value, '--watch_time'), required=False, help=watch_time_help)
         subcommand_parser.add_argument('-i', '--iterations', action=self._check_watch_selected(), metavar='ITERATIONS',
-            type=self._positive_int, required=False, help=iterations_help)
+            type=lambda value: self._positive_int(value, '--iterations'), required=False, help=iterations_help)
 
 
     def _validate_cpu_core(self, value):
@@ -966,8 +965,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Optional Args
         process_parser.add_argument('-G', '--general', action='store_true', required=False, help=general_help)
         process_parser.add_argument('-e', '--engine', action='store_true', required=False, help=engine_help)
-        process_parser.add_argument('-p', '--pid', action='store', type=self._not_negative_int, required=False, help=pid_help)
-        process_parser.add_argument('-n', '--name', action='store', type=self._is_valid_string, required=False, help=name_help)
+        process_parser.add_argument('-p', '--pid', action='store', type=lambda value: self._not_negative_int(value, '--pid'), required=False, help=pid_help)
+        process_parser.add_argument('-n', '--name', action='store', type=lambda value: self._is_valid_string(value, '--name'), required=False, help=name_help)
 
 
     def _add_profile_parser(self, subparsers, func):
@@ -1128,16 +1127,16 @@ class AMDSMIParser(argparse.ArgumentParser):
                 set_value_exclusive_group.add_argument('-f', '--fan', action=self._validate_fan_speed(), required=False, help=set_fan_help, metavar='%')
                 set_value_exclusive_group.add_argument('-l', '--perf-level', action='store', choices=self.helpers.get_perf_levels()[0], type=str.upper, required=False, help=set_perf_level_help, metavar='LEVEL')
                 set_value_exclusive_group.add_argument('-P', '--profile', action='store', required=False, help=set_profile_help, metavar='SETPROFILE')
-                set_value_exclusive_group.add_argument('-d', '--perf-determinism', action='store', type=self._not_negative_int, required=False, help=set_perf_det_help, metavar='SCLKMAX')
+                set_value_exclusive_group.add_argument('-d', '--perf-determinism', action='store', type=lambda value: self._not_negative_int(value, '--perf-determinism'), required=False, help=set_perf_det_help, metavar='SCLKMAX')
                 set_value_exclusive_group.add_argument('-C', '--compute-partition', action='store', choices=self.helpers.get_compute_partition_types(), type=str.upper, required=False, help=set_compute_partition_help, metavar='PARTITION')
                 set_value_exclusive_group.add_argument('-M', '--memory-partition', action='store', choices=self.helpers.get_memory_partition_types(), type=str.upper, required=False, help=set_memory_partition_help, metavar='PARTITION')
-                set_value_exclusive_group.add_argument('-o', '--power-cap', action='store', type=self._positive_int, required=False, help=set_power_cap_help, metavar='WATTS')
-                set_value_exclusive_group.add_argument('-p', '--soc-pstate', action='store', required=False, type=self._not_negative_int, help=set_soc_pstate_help, metavar='POLICY_ID')
-                set_value_exclusive_group.add_argument('-x', '--xgmi-plpd', action='store', required=False, type=self._not_negative_int, help=set_xgmi_plpd_help, metavar='POLICY_ID')
+                set_value_exclusive_group.add_argument('-o', '--power-cap', action='store', type=lambda value: self._positive_int(value, '--power-cap'), required=False, help=set_power_cap_help, metavar='WATTS')
+                set_value_exclusive_group.add_argument('-p', '--soc-pstate', action='store', required=False, type=lambda value: self._not_negative_int(value, '--soc-pstate'), help=set_soc_pstate_help, metavar='POLICY_ID')
+                set_value_exclusive_group.add_argument('-x', '--xgmi-plpd', action='store', required=False, type=lambda value: self._not_negative_int(value, '--xgmi-plpd'), help=set_xgmi_plpd_help, metavar='POLICY_ID')
                 set_value_exclusive_group.add_argument('-c', '--clk-level', action=self._level_select(), nargs='+', required=False, help=set_clock_freq_help, metavar=('CLK_TYPE', 'PERF_LEVELS'))
 
             set_value_exclusive_group.add_argument('-L', '--clk-limit', action=self._limit_select(), nargs=3, required=False, help=set_clk_limit_help, metavar=('CLK_TYPE', 'LIM_TYPE', 'VALUE'))
-            set_value_exclusive_group.add_argument('-R', '--process-isolation', action='store', choices=[0,1], type=self._not_negative_int, required=False, help=set_process_isolation_help, metavar='STATUS')
+            set_value_exclusive_group.add_argument('-R', '--process-isolation', action='store', choices=[0,1], type=lambda value: self._not_negative_int(value, '--process-isolation'), required=False, help=set_process_isolation_help, metavar='STATUS')
 
         if self.helpers.is_amd_hsmp_initialized():
             if self.helpers.is_baremetal():
