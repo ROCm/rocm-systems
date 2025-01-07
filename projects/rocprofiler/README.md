@@ -6,6 +6,9 @@ The information presented in this document is for informational purposes only an
 
 © 2022 Advanced Micro Devices, Inc. All Rights Reserved.
 
+> [!IMPORTANT]
+We are phasing out development and support for roctracer/rocprofiler/rocprof/rocprofv2 in favor of rocprofiler-sdk/rocprofv3 in upcoming ROCm releases. Going forward, only critical defect fixes will be addressed for older versions of profiling tools and libraries. We encourage all users to upgrade to the latest version, rocprofiler-sdk library and rocprofv3 tool, to ensure continued support and access to new features.
+
 [![Build Status](
 https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/status%2Frocprofiler?repoName=ROCm%2Frocprofiler&branchName=amd-staging)](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/latest?definitionId=143&repoName=ROCm%2Frocprofiler&branchName=amd-staging)
 
@@ -514,6 +517,34 @@ A device profiling session allows the user to profile the GPU device for counter
 ### Session Support
 
   A session is a unique identifier for a profiling/tracing/pc-sampling task. A ROCProfilerV2 Session has enough information about what needs to be collected or traced and it allows the user to start/stop profiling/tracing whenever required. More details on the API can be found in the API specification documentation that can be installed using rocprofiler-doc package. Samples also can be found for how to use the API in samples directory.
+
+### Kernel Filtration
+
+rocprofv2 supports the ``kernel`` attribute in input files for only ``csv`` output format.
+To enable kernel filtration with input file, the row beginning with the ``kernel:`` keyword should specify the names of kernels to be profiled.Filtering can also be enabled by the flag ``ROCPROFILER_KERNEL_FILTER``.
+
+For a sample ``vecCopy`` kernel:
+
+```CPP
+__global__ void vecCopy(double *a, double *b, double *c, int n, int stride) {
+    // Get our global thread ID
+    int id = blockIdx.x*blockDim.x+threadIdx.x;
+    if (id < n)
+      c[id] = a[id];
+}
+```
+
+To filter vecCopy kernel:
+
+```bash
+$ cat input.txt
+pmc: SQ_WAVES
+kernel: vecCopy
+```
+
+```bash
+rocprofv2 -i input.txt -d out <application_path>
+```
 
 ## Tests
 
