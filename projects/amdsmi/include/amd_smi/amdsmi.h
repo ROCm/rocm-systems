@@ -2324,7 +2324,7 @@ amdsmi_get_gpu_pci_bandwidth(amdsmi_processor_handle processor_handle,
  *              | ((BUS & 0xFF) << 8) | ((DEVICE & 0x1F) <<3 )
  *              | (FUNCTION & 0x7)
  *
- *  | Name         | Field   | KFD property       KFD -> PCIe ID (uint64_t)
+ *  | Name         | Field   | KFD property     | KFD -> PCIe ID (uint64_t)    |
  *  -------------- | ------- | ---------------- | ---------------------------- |
  *  | Domain       | [63:32] | "domain"         | (DOMAIN & 0xFFFFFFFF) << 32  |
  *  | Partition id | [31:28] | "location id"    | (LOCATION & 0xF0000000)      |
@@ -4763,7 +4763,7 @@ amdsmi_status_t
 amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_info_t *info);
 
 /**
- *  @brief          Returns the KFD (Kernel Fusion Driver) information for the device
+ *  @brief          Returns the KFD (kernel driver) information for the device
  *
  *  @platform{gpu_bm_linux}  @platform{guest_1vf}  @platform{guest_mvf}
  *
