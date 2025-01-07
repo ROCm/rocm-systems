@@ -42,21 +42,11 @@ rvs_status_t amd::rdc::RdcRVSBase::run_rvs_app(const char* config, const size_t 
   rvs_status_t status;
   // NOTE: device_index is NOT set by RDC unless a custom config is provided.
   // Meaning RDC index has no impact on RVS index.
-  const char mem_config[MAX_CONFIG_LENGTH] =
-      "{actions: [{name: action_1, device: all, module: mem, parallel: true, "
-      "count: 1, wait: 100, mapped_memory: false, mem_blocks: 128, "
-      "num_passes: 500, thrds_per_blk: 64, stress: true, num_iter: 50000, "
-      "exclude: '5 6 7 8 9 10 11'}]}";
-  const char gst_config[MAX_CONFIG_LENGTH] =
-      "{actions: [{name: gpustress-9000-sgemm-false, device: all, "
-      "device_index: '0', module: gst, parallel: false, count: 1, duration: "
-      "10000, copy_matrix: false, target_stress: 9000, matrix_size_a: 8640, "
-      "matrix_size_b: 8640, matrix_size_c: 8640, ops_type: sgemm, lda: 8640, "
-      "ldb: 8640, ldc: 8640}]}";
 
   if ((config == nullptr) || (config_size == 0)) {
     RDC_LOG(RDC_INFO, "given config is NULL! Using predefined gst_config");
-    strncpy_with_null(active_config, gst_config, MAX_CONFIG_LENGTH);
+    strncpy_with_null(active_config, test_to_conf.at(RDC_DIAG_RVS_GST_TEST).c_str(),
+                      test_to_conf.at(RDC_DIAG_RVS_GST_TEST).length()+1);
   } else if (config_size > MAX_CONFIG_LENGTH) {
     RDC_LOG(RDC_ERROR, "given config size is too large! Expected at most "
                            << MAX_CONFIG_LENGTH << ", got " << config_size << " instead.");
