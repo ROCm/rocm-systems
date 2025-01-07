@@ -98,8 +98,10 @@ void hipModuleLaunchKernel_enqueue_rate(const std::vector<char>& buffer, std::at
         auto stop = std::chrono::high_resolution_clock::now();
         results[i] = std::chrono::duration<double, std::milli>(stop - start).count();
     }
+
     checkHipErrors(hipModuleUnload(module));
     print_timing("Thread ID : " + std::to_string(tid) + " , " + "hipModuleLaunchKernel enqueue rate", results);
+    checkHipErrors(hipStreamSynchronize(stream));
     checkHipErrors(hipStreamDestroy(stream));
 }
 
@@ -122,6 +124,7 @@ void hipLaunchKernelGGL_enqueue_rate(const std::vector<char>& buffer, std::atomi
         results[i] = std::chrono::duration<double, std::milli>(stop - start).count();
     }
     print_timing("Thread ID : " + std::to_string(tid) + " , " + "hipLaunchKernelGGL enqueue rate", results);
+    checkHipErrors(hipStreamSynchronize(stream));
     checkHipErrors(hipStreamDestroy(stream));
 }
 
@@ -183,5 +186,7 @@ int main(int argc, char* argv[])
         task.start(hipLaunchKernelGGL_enqueue_rate);
         task.finish();
     }
+
+
     return 0;
 }
