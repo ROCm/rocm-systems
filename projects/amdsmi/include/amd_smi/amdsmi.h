@@ -260,6 +260,8 @@ typedef enum {
     AMDSMI_STATUS_ARG_PTR_NULL = 53,        //!< Parsed argument is invalid
     AMDSMI_STATUS_AMDGPU_RESTART_ERR = 54,  //!< AMDGPU restart failed
     AMDSMI_STATUS_SETTING_UNAVAILABLE = 55, //!< Setting is not available
+    AMDSMI_STATUS_CORRUPTED_EEPROM = 56, //!< EEPROM is corrupted
+
     // General errors
     AMDSMI_STATUS_MAP_ERROR = 0xFFFFFFFE,     //!< The internal library error did not map to a status code
     AMDSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF, //!< An unknown error occurred
@@ -2639,6 +2641,44 @@ amdsmi_get_gpu_memory_usage(amdsmi_processor_handle processor_handle, amdsmi_mem
 amdsmi_status_t
 amdsmi_get_gpu_bad_page_info(amdsmi_processor_handle processor_handle, uint32_t *num_pages,
                              amdsmi_retired_page_record_t *info);
+
+
+/**
+ * @brief Get the bad pages threshold of a processor. It is not supported on virtual
+ * machine guest
+ *
+ * @platform{gpu_bm_linux} @platform{host}
+ *
+ * @details This call will query the device @p processor_handle for the
+ * threshold of bad pages (written to @p threshold address).
+ * @param[in] processor_handle a processor handle
+ * @param[out] threshold of bad page count.
+ *
+ * @note This function requires root access
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t
+amdsmi_get_gpu_bad_page_threshold(amdsmi_processor_handle processor_handle, uint32_t *threshold);
+
+/**
+ * @brief Verify the checksum of RAS EEPROM. It is not supported on virtual
+ * machine guest
+ *
+ * @platform{gpu_bm_linux} @platform{host}
+ *
+ * @details This call will verify the device @p processor_handle for the
+ * checksum of RAS EEPROM.
+ * @param[in] processor_handle a processor handle
+ *
+ * @note This function requires root access
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success
+ *          AMDSMI_STATUS_CORRUPTED_EEPROM on the device's EEPROM corruption
+ *          others on fail
+ */
+amdsmi_status_t
+amdsmi_gpu_validate_ras_eeprom(amdsmi_processor_handle processor_handle);
 
 /**
  *  @brief Returns RAS features info.
