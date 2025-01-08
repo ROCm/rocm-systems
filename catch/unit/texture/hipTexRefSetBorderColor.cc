@@ -47,6 +47,7 @@ TEST_CASE("Unit_hipTexRefSetBorderColor_Positive") {
 #endif
 
 TEST_CASE("Unit_hipTexRefSetBorderColor_Negative") {
+  CHECK_IMAGE_SUPPORT
   float border_color[3] = {0, 0, 0};
   hipModule_t module = nullptr;
   hipTexRef tex_ref = nullptr;
