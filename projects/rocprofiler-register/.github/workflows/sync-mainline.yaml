@@ -9,10 +9,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: git-sync
-        uses: wei/git-sync@v3
+        uses: AMD-ROCm-Internal/rocprofiler-github-actions@git-sync-v3
         with:
-          source_repo: "git@github.com:ROCm/rocprofiler-register-internal.git"
+          source_repo: "https://${{ secrets.TOKEN }}@github.com/AMD-ROCm-Internal/rocprofiler-register-internal.git"
           source_branch: "amd-mainline"
-          destination_repo: "git@github.com:ROCm/rocprofiler-register.git"
+          destination_repo: "https://${{ secrets.EXT_TOKEN }}@github.com/ROCm/rocprofiler-register.git"
           destination_branch: "amd-mainline"
-          ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
