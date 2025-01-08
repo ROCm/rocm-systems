@@ -764,6 +764,9 @@
         "====================================================",
         "Test Unit_hipGraphUserObj_ClonedGraph disabled due to SWDEV-483112",
         "Unit_hipGraphUserObj_ClonedGraph",
+        "====================================================",
+        "=== SWDEV-508023 Below tests are temporarily disabled - windows PSDB failed",
+        "Unit_hipDeviceGetGraphMemAttribute_Positive_DoubleMemory",
     #endif
         "End of json"
     ]
