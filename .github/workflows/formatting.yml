@@ -46,16 +46,6 @@ jobs:
           exit 1
         fi
 
-    - name: Create pull request
-      if: failure()
-      uses: peter-evans/create-pull-request@v5
-      with:
-        commit-message: "cmake formatting (cmake-format)"
-        branch: ${{ steps.extract_branch.outputs.branch }}-cmake-format
-        delete-branch: true
-        title: "Format cmake code (via cmake-format) on ${{ steps.extract_branch.outputs.branch }}"
-        base: ${{ steps.extract_branch.outputs.branch }}
-
   source:
     runs-on: ubuntu-22.04
 
@@ -87,16 +77,6 @@ jobs:
           git diff
           exit 1
         fi
-
-    - name: Create pull request
-      if: failure()
-      uses: peter-evans/create-pull-request@v5
-      with:
-        commit-message: "source formatting (clang-format v11)"
-        branch: ${{ steps.extract_branch.outputs.branch }}-clang-format
-        delete-branch: true
-        title: "Format source code (via clang-format v11) on ${{ steps.extract_branch.outputs.branch }}"
-        base: ${{ steps.extract_branch.outputs.branch }}
 
   python:
     runs-on: ubuntu-22.04
@@ -134,13 +114,3 @@ jobs:
           git diff
           exit 1
         fi
-
-    - name: Create pull request
-      if: failure()
-      uses: peter-evans/create-pull-request@v5
-      with:
-        commit-message: "python formatting (black)"
-        branch: ${{ steps.extract_branch.outputs.branch }}-python-format
-        delete-branch: true
-        title: "Format python code (via black) on ${{ steps.extract_branch.outputs.branch }}"
-        base: ${{ steps.extract_branch.outputs.branch }}
