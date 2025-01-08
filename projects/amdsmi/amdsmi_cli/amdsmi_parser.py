@@ -1138,6 +1138,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             set_value_exclusive_group.add_argument('-L', '--clk-limit', action=self._limit_select(), nargs=3, required=False, help=set_clk_limit_help, metavar=('CLK_TYPE', 'LIM_TYPE', 'VALUE'))
             set_value_exclusive_group.add_argument('-R', '--process-isolation', action='store', choices=[0,1], type=lambda value: self._not_negative_int(value, '--process-isolation'), required=False, help=set_process_isolation_help, metavar='STATUS')
 
+
         if self.helpers.is_amd_hsmp_initialized():
             if self.helpers.is_baremetal():
                 # Optional CPU Args
@@ -1197,18 +1198,21 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Providing no -g 0 or -g all, is not required
         self._add_device_arguments(reset_parser, required=False)
 
+        # make reset args mutually exclusive
+        reset_exclusive_group = reset_parser.add_mutually_exclusive_group()
+
         if self.helpers.is_baremetal():
             # Add Baremetal reset arguments
-            reset_parser.add_argument('-G', '--gpureset', action='store_true', required=False, help=gpureset_help)
-            reset_parser.add_argument('-c', '--clocks', action='store_true', required=False, help=reset_clocks_help)
-            reset_parser.add_argument('-f', '--fans', action='store_true', required=False, help=reset_fans_help)
-            reset_parser.add_argument('-p', '--profile', action='store_true', required=False, help=reset_profile_help)
-            reset_parser.add_argument('-x', '--xgmierr', action='store_true', required=False, help=reset_xgmierr_help)
-            reset_parser.add_argument('-d', '--perf-determinism', action='store_true', required=False, help=reset_perf_det_help)
-            reset_parser.add_argument('-o', '--power-cap', action='store_true', required=False, help=reset_power_cap_help)
+            reset_exclusive_group.add_argument('-G', '--gpureset', action='store_true', required=False, help=gpureset_help)
+            reset_exclusive_group.add_argument('-c', '--clocks', action='store_true', required=False, help=reset_clocks_help)
+            reset_exclusive_group.add_argument('-f', '--fans', action='store_true', required=False, help=reset_fans_help)
+            reset_exclusive_group.add_argument('-p', '--profile', action='store_true', required=False, help=reset_profile_help)
+            reset_exclusive_group.add_argument('-x', '--xgmierr', action='store_true', required=False, help=reset_xgmierr_help)
+            reset_exclusive_group.add_argument('-d', '--perf-determinism', action='store_true', required=False, help=reset_perf_det_help)
+            reset_exclusive_group.add_argument('-o', '--power-cap', action='store_true', required=False, help=reset_power_cap_help)
 
         # Add Baremetal and Virtual OS reset arguments
-        reset_parser.add_argument('-l', '--clean-local-data', action='store_true', required=False, help=reset_gpu_clean_local_data_help)
+        reset_exclusive_group.add_argument('-l', '--clean-local-data', action='store_true', required=False, help=reset_gpu_clean_local_data_help)
 
 
     def _add_monitor_parser(self, subparsers, func):
