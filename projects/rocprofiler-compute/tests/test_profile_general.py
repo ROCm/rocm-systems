@@ -712,7 +712,7 @@ def test_block_SQC():
         "sysinfo.csv",
         "timestamps.csv",
     ]
-    if soc != ("MI50" or "MI60" or "MI100"):
+    if soc not in ["MI50", "MI60", "MI100"]:
         expected_csvs.append("roofline.csv")
 
     assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
@@ -746,7 +746,7 @@ def test_block_TA():
         "sysinfo.csv",
         "timestamps.csv",
     ]
-    if soc != ("MI50" or "MI60" or "MI100"):
+    if soc not in ["MI50", "MI60", "MI100"]:
         expected_csvs.append("roofline.csv")
 
     assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
@@ -820,7 +820,7 @@ def test_block_TCP():
         "sysinfo.csv",
         "timestamps.csv",
     ]
-    if soc != ("MI50" or "MI60" or "MI100"):
+    if soc not in ["MI50", "MI60", "MI100"]:
         expected_csvs.append("roofline.csv")
 
     assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
@@ -906,7 +906,7 @@ def test_block_SPI():
         "sysinfo.csv",
         "timestamps.csv",
     ]
-    if soc != ("MI50" or "MI60" or "MI100"):
+    if soc not in ["MI50", "MI60", "MI100"]:
         expected_csvs.append("roofline.csv")
 
     assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
@@ -938,7 +938,7 @@ def test_block_CPC():
         "sysinfo.csv",
         "timestamps.csv",
     ]
-    if soc != ("MI50" or "MI60" or "MI100"):
+    if soc not in ["MI50", "MI60", "MI100"]:
         expected_csvs.append("roofline.csv")
 
     assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
@@ -964,7 +964,7 @@ def test_block_CPF():
         "sysinfo.csv",
         "timestamps.csv",
     ]
-    if soc != ("MI50" or "MI60" or "MI100"):
+    if soc not in ["MI50", "MI60", "MI100"]:
         expected_csvs.append("roofline.csv")
 
     assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
