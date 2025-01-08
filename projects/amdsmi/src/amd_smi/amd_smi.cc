@@ -794,7 +794,7 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
         ss << __PRETTY_FUNCTION__ << " | "
            << "ENTERED socket_thm_residency_acc | per_socket_thrm: " << std::dec
            << violation_status->per_socket_thrm
-           << "%; active_ppt_pwr = " << std::dec
+           << "%; active_socket_thrm = " << std::dec
            << violation_status->active_socket_thrm << "\n";
         LOG_DEBUG(ss);
     }

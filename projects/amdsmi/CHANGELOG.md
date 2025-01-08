@@ -7,6 +7,26 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added TVIOL_ACTIVE to `amd-smi monitor`**.  
+Added temperature violation active or not status to `amd-smi monitor`. TVIOL_ACTIVE will be displayed as below:
+ - True if active
+ - False if not active
+ - N/A if not supported.
+
+ Example CLI output:
+```shell
+$ amd-smi monitor --viol
+GPU  PVIOL  TVIOL  TVIOL_ACTIVE  PHOT_TVIOL  VR_TVIOL  HBM_TVIOL
+  0  100 %    1 %          True         0 %       0 %        0 %
+  1  100 %    0 %         False         0 %       0 %        0 %
+  2  100 %    0 %         False         0 %       0 %        0 %
+  3  100 %    0 %         False         0 %       0 %        0 %
+  4  100 %    0 %         False         0 %       0 %        0 %
+  5  100 %    3 %          True         0 %       0 %        0 %
+  6  100 %    0 %         False         0 %       0 %        0 %
+  7  100 %    0 %         False         0 %       0 %        0 %
+```
+
 - **Added support for GPU metrics 1.7 to `amdsmi_get_gpu_metrics_info()`**  
 Updated `amdsmi_get_gpu_metrics_info()` and structure `amdsmi_gpu_metrics_t` to include new fields for XGMI Link Status, graphics clocks below host limit (per XCP), and VRAM max bandwidth:  
   - `uint64_t vram_max_bandwidth` - VRAM max bandwidth at max memory clock (GB/s)
