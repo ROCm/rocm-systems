@@ -180,6 +180,8 @@ class AMDSMILogger():
                 table_values += string_value.rjust(10)
             elif key == "hbm_tviol":
                 table_values += string_value.rjust(11)
+            elif key == "gfx_clkviol":
+                table_values += string_value.rjust(13)
             elif key == "process_list":
                 #Add an additional padding between the first instance of GPU and NAME
                 table_values += '  '

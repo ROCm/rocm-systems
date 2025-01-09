@@ -135,46 +135,124 @@ GPU: 0
 
 ### Changed
 
-
--  **All `amd-smi set` and `amd-smi reset` options are now mutually exclusive**.  
-    - Users can only use one set option at a time now.  
+- **All `amd-smi set` and `amd-smi reset` options are now mutually exclusive**.  
+  - Users can only use one set option at a time now.  
 
 - **Python API for `amdsmi_get_energy_count()` will change the name for the `power` field to `energy_accumulator`**.  
 
+- **Added violation status output for Graphics Clock Below Host Limit to our CLI: `amdsmi_get_violation_status()`, `amd-smi metric  --throttle`, and `amd-smi monitor --violation`.**  
+  ***Only available for MI300+ ASICs.***  
+  Users can retrieve violation status' through either our Python or C++ APIs.  
+  Additionally, we have added capability to view these outputs conviently through `amd-smi metric --throttle` and `amd-smi monitor --violation`.  
+  Example outputs are listed below (below is for reference, output is subject to change):
+
+    ```shell
+    $ amd-smi monitor --violation
+    GPU  PVIOL  TVIOL  TVIOL_ACTIVE PHOT_TVIOL  VR_TVIOL  HBM_TVIOL  GFX_CLKVIOL
+    0    0 %    0 %           False        0 %       0 %        0 %          0 %
+    1    0 %    0 %           False        0 %       0 %        0 %          0 %
+    ...
+    ```
+
+    ```shell
+    $ amd-smi metric --throttle
+    GPU: 0
+        THROTTLE:
+            ACCUMULATION_COUNTER: 11240028
+            PROCHOT_ACCUMULATED: 0
+            PPT_ACCUMULATED: 0
+            SOCKET_THERMAL_ACCUMULATED: 0
+            VR_THERMAL_ACCUMULATED: 0
+            HBM_THERMAL_ACCUMULATED: 0
+            GFX_CLK_BELOW_HOST_LIMIT_ACCUMULATED: N/A
+            PROCHOT_VIOLATION_STATUS: NOT ACTIVE
+            PPT_VIOLATION_STATUS: NOT ACTIVE
+            SOCKET_THERMAL_VIOLATION_STATUS: NOT ACTIVE
+            VR_THERMAL_VIOLATION_STATUS: NOT ACTIVE
+            HBM_THERMAL_VIOLATION_STATUS: NOT ACTIVE
+            GFX_CLK_BELOW_HOST_LIMIT_VIOLATION_STATUS: N/A
+            PROCHOT_VIOLATION_ACTIVITY: 0 %
+            PPT_VIOLATION_ACTIVITY: 0 %
+            SOCKET_THERMAL_VIOLATION_ACTIVITY: 0 %
+            VR_THERMAL_VIOLATION_ACTIVITY: 0 %
+            HBM_THERMAL_VIOLATION_ACTIVITY: 0 %
+            GFX_CLK_BELOW_HOST_LIMIT_VIOLATION_ACTIVITY: 0 %
+
+    GPU: 1
+        THROTTLE:
+            ACCUMULATION_COUNTER: 11238232
+            PROCHOT_ACCUMULATED: 0
+            PPT_ACCUMULATED: 0
+            SOCKET_THERMAL_ACCUMULATED: 0
+            VR_THERMAL_ACCUMULATED: 0
+            HBM_THERMAL_ACCUMULATED: 0
+            GFX_CLK_BELOW_HOST_LIMIT_ACCUMULATED: 0
+            PROCHOT_VIOLATION_STATUS: NOT ACTIVE
+            PPT_VIOLATION_STATUS: NOT ACTIVE
+            SOCKET_THERMAL_VIOLATION_STATUS: NOT ACTIVE
+            VR_THERMAL_VIOLATION_STATUS: NOT ACTIVE
+            HBM_THERMAL_VIOLATION_STATUS: NOT ACTIVE
+            GFX_CLK_BELOW_HOST_LIMIT_VIOLATION_STATUS: NOT ACTIVE
+            PROCHOT_VIOLATION_ACTIVITY: 0 %
+            PPT_VIOLATION_ACTIVITY: 0 %
+            SOCKET_THERMAL_VIOLATION_ACTIVITY: 0 %
+            VR_THERMAL_VIOLATION_ACTIVITY: 0 %
+            HBM_THERMAL_VIOLATION_ACTIVITY: 0 %
+            GFX_CLK_BELOW_HOST_LIMIT_VIOLATION_ACTIVITY: 0 %
+    ...
+    ```
+
+- **Updated API `amdsmi_get_violation_status()` structure and CLI `amdsmi_violation_status_t` to include GFX Clk below host limit**  
+Updated structure `amdsmi_violation_status_t`:  
+
+    ```C
+    typedef struct {
+        ...
+        uint64_t acc_gfx_clk_below_host_limit;  //!< Current graphic clock below host limit count; Max uint64 means unsupported
+        ...
+        uint64_t per_gfx_clk_below_host_limit;  //!< Graphics clock below host limit violation % (greater than 0% is a violation); Max uint64 means unsupported
+        ...
+        uint8_t active_gfx_clk_below_host_limit;  //!< Graphics clock below host limit violation; 1 = active 0 = not active; Max uint8 means unsupported
+        ...
+    } amdsmi_violation_status_t;
+    ```
+
 - **Updated API `amdsmi_get_gpu_vram_info()` structure and CLI `amd-smi static --vram`**  
-Updated structure `amdsmi_vram_info_t`: 
-```C
-typedef struct {
-  amdsmi_vram_type_t vram_type;
-  amdsmi_vram_vendor_type_t vram_vendor;
-  uint64_t vram_size;
-  uint32_t vram_bit_width;
-  uint64_t vram_max_bandwidth;   //!< The VRAM max bandwidth at current memory clock (GB/s)
-  uint64_t reserved[4];
-} amdsmi_vram_info_t;
+Updated structure `amdsmi_vram_info_t`:  
 
-amdsmi_status_t amdsmi_get_gpu_vram_info(amdsmi_processor_handle processor_handle, amdsmi_vram_info_t *info)
-```
-Example CLI output:
-```shell
-$ amd-smi static --vram
-GPU: 0
-    VRAM:
-        TYPE: GDDR6
-        VENDOR: N/A
-        SIZE: 16368 MB
-        BIT_WIDTH: 256
-        MAX_BANDWIDTH: 1555 GB/s
-GPU: 1
-    VRAM:
-        TYPE: GDDR6
-        VENDOR: N/A
-        SIZE: 30704 MB
-        BIT_WIDTH: 256
-        MAX_BANDWIDTH: 1555 GB/s
-...
+    ```C
+    typedef struct {
+    amdsmi_vram_type_t vram_type;
+    amdsmi_vram_vendor_type_t vram_vendor;
+    uint64_t vram_size;
+    uint32_t vram_bit_width;
+    uint64_t vram_max_bandwidth;   //!< The VRAM max bandwidth at current memory clock (GB/s)
+    uint64_t reserved[4];
+    } amdsmi_vram_info_t;
 
-```
+    amdsmi_status_t amdsmi_get_gpu_vram_info(amdsmi_processor_handle processor_handle, amdsmi_vram_info_t *info)
+    ```
+
+  Example CLI output:
+
+    ```shell
+    $ amd-smi static --vram
+    GPU: 0
+        VRAM:
+            TYPE: GDDR6
+            VENDOR: N/A
+            SIZE: 16368 MB
+            BIT_WIDTH: 256
+            MAX_BANDWIDTH: 1555 GB/s
+    GPU: 1
+        VRAM:
+            TYPE: GDDR6
+            VENDOR: N/A
+            SIZE: 30704 MB
+            BIT_WIDTH: 256
+            MAX_BANDWIDTH: 1555 GB/s
+    ...
+    ```
 
 ### Removed
 

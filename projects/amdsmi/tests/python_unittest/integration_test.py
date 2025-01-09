@@ -893,6 +893,8 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
                 violation_status['acc_vr_thrm']))
             print(" Current HBM Thrm Accumulated (Count): {}".format(
                 violation_status['acc_hbm_thrm']))
+            print(" Current GFX CLK Below Host Limit Accumulated (Count): {}".format(
+                violation_status['acc_gfx_clk_below_host_limit']))
 
             print(" Prochot Thrm Violation (%): {}".format(
                 violation_status['per_prochot_thrm']))
@@ -904,6 +906,8 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
                 violation_status['per_vr_thrm']))
             print(" HBM Thrm Violation (%): {}".format(
                 violation_status['per_hbm_thrm']))
+            print(" GFX CLK Below Host Limit Violation (%): {}".format(
+                violation_status['per_gfx_clk_below_host_limit']))
 
             print(" Prochot Thrm Violation (bool): {}".format(
                 violation_status['active_prochot_thrm']))
@@ -915,6 +919,8 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
                 violation_status['active_vr_thrm']))
             print(" HBM Thrm Violation (bool): {}".format(
                 violation_status['active_hbm_thrm']))
+            print(" GFX CLK Below Host Limit Violation (bool): {}".format(
+                violation_status['active_gfx_clk_below_host_limit']))
         print()
         self.tearDown()
 
