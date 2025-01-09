@@ -436,11 +436,13 @@
     <metric name="SQ_INSTS_VALU_INT32" block="SQ" event="39" descr="Number of VALU 32-bit integer (signed or unsigned) instructions. (per-simd, emulated)"></metric>
     <metric name="SQ_INSTS_VALU_INT64" block="SQ" event="40" descr="Number of VALU 64-bit integer (signed or unsigned) instructions. (per-simd, emulated)"></metric>
     <metric name="SQ_INSTS_VALU_CVT" block="SQ" event="41" descr="Number of VALU data conversion instructions. (per-simd, emulated)"></metric>
+    <metric name="SQ_INSTS_VALU_MFMA_F8" block="SQ" event="48" descr="Number of VALU V_MFMA_*_F8 instructions. (per-simd, emulated)"></metric>
     <metric name="SQ_INSTS_VALU_MFMA_I8" block="SQ" event="42" descr="Number of VALU V_MFMA_*_I8 instructions. (per-simd, emulated)"></metric>
     <metric name="SQ_INSTS_VALU_MFMA_F16" block="SQ" event="43" descr="Number of VALU V_MFMA_*_F16 instructions. (per-simd, emulated)"></metric>
     <metric name="SQ_INSTS_VALU_MFMA_BF16" block="SQ" event="44" descr="Number of VALU V_MFMA_*_BF16 instructions. (per-simd, emulated)"></metric>
     <metric name="SQ_INSTS_VALU_MFMA_F32" block="SQ" event="45" descr="Number of VALU V_MFMA_*_F32 instructions. (per-simd, emulated)"></metric>
     <metric name="SQ_INSTS_VALU_MFMA_F64" block="SQ" event="46" descr="Number of VALU V_MFMA_*_F64 instructions. (per-simd, emulated)"></metric>
+    <metric name="SQ_INSTS_VALU_MFMA_MOPS_F8" block="SQ" event="55" descr="Number of VALU matrix math operations (add or mul) performed dividied by 512, assuming a full EXEC mask, of data type F8. (per-simd, emulated)"></metric>
     <metric name="SQ_INSTS_VALU_MFMA_MOPS_I8" block="SQ" event="49" descr="Number of VALU matrix math operations (add or mul) performed dividied by 512, assuming a full EXEC mask, of data type I8. (per-simd, emulated)"></metric>
     <metric name="SQ_INSTS_VALU_MFMA_MOPS_F16" block="SQ" event="50" descr="Number of VALU matrix math operations (add or mul) performed dividied by 512, assuming a full EXEC mask, of data type F16. (per-simd, emulated)"></metric>
     <metric name="SQ_INSTS_VALU_MFMA_MOPS_BF16" block="SQ" event="51" descr="Number of VALU matrix math operations (add or mul) performed dividied by 512, assuming a full EXEC mask, of data type BF16. (per-simd, emulated)"></metric>
