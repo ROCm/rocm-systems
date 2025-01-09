@@ -433,6 +433,54 @@ amdsmi_status_t smi_amdgpu_get_bad_page_info(amd::smi::AMDSmiGPUDevice* device,
     return AMDSMI_STATUS_SUCCESS;
 }
 
+static uint32_t GetDeviceIndex(const std::string s) {
+  std::string t = s;
+  size_t tmp = t.find_last_not_of("0123456789");
+  t.erase(0, tmp+1);
+
+  assert(stoi(t) >= 0);
+  return static_cast<uint32_t>(stoi(t));
+}
+
+amdsmi_status_t smi_amdgpu_get_bad_page_threshold(amd::smi::AMDSmiGPUDevice* device,
+        uint32_t *threshold) {
+    if (!device->check_if_drm_is_supported()) {
+        return AMDSMI_STATUS_NOT_SUPPORTED;
+    }
+    SMIGPUDEVICE_MUTEX(device->get_mutex())
+
+    //TODO: Accessing the node requires root privileges, and its interface may need to be exposed in another path
+    uint32_t index = GetDeviceIndex(device->get_gpu_path());
+    std::string fullpath = "/sys/kernel/debug/dri/" + std::to_string(index) + std::string("/ras/bad_page_cnt_threshold");
+    std::ifstream fs(fullpath.c_str());
+
+    if (fs.fail()) {
+        return AMDSMI_STATUS_NOT_SUPPORTED;
+    }
+
+    std::string line;
+    getline(fs, line);
+    if (sscanf(line.c_str(), "%d", threshold) < 0) {
+        return AMDSMI_STATUS_API_FAILED;
+    }
+
+    fs.close();
+
+    return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t smi_amdgpu_validate_ras_eeprom(amd::smi::AMDSmiGPUDevice* device) {
+    if (!device->check_if_drm_is_supported()) {
+        return AMDSMI_STATUS_NOT_SUPPORTED;
+    }
+    SMIGPUDEVICE_MUTEX(device->get_mutex())
+
+    uint32_t index = GetDeviceIndex(device->get_gpu_path());
+    //TODO: need to expose the corresponding interface to validate the checksum of ras eeprom table.
+    //verify fail: return AMDSMI_STATUS_CORRUPTED_EEPROM
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+}
+
 amdsmi_status_t smi_amdgpu_get_ecc_error_count(amd::smi::AMDSmiGPUDevice* device, amdsmi_error_count_t *err_cnt) {
     if (!device->check_if_drm_is_supported()) {
         return AMDSMI_STATUS_NOT_SUPPORTED;

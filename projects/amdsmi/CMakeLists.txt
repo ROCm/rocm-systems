@@ -76,6 +76,7 @@ include(CMakeDependentOption)
 # these options don't work without BUILD_SHARED_LIBS
 cmake_dependent_option(BUILD_WRAPPER "Rebuild AMDSMI-wrapper" OFF "BUILD_SHARED_LIBS" OFF)
 cmake_dependent_option(BUILD_CLI "Build AMDSMI-CLI and install" ON "BUILD_SHARED_LIBS" OFF)
+cmake_dependent_option(BUILD_RUST_WRAPPER "Build rust wrapper and install" OFF "BUILD_SHARED_LIBS" OFF)
 cmake_dependent_option(ENABLE_LDCONFIG "Set library links and caches using ldconfig." ON "BUILD_SHARED_LIBS" OFF)
 
 # Set share path here because project name != amd_smi
@@ -192,6 +193,9 @@ if(BUILD_SHARED_LIBS)
     add_subdirectory("py-interface")
     if(BUILD_CLI)
         add_subdirectory("amdsmi_cli")
+    endif()
+    if(BUILD_RUST_WRAPPER)
+        add_subdirectory("rust-interface")
     endif()
 endif()
 

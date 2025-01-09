@@ -629,18 +629,21 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
     violation_status->acc_socket_thrm = std::numeric_limits<uint64_t>::max();
     violation_status->acc_vr_thrm = std::numeric_limits<uint64_t>::max();
     violation_status->acc_hbm_thrm = std::numeric_limits<uint64_t>::max();
+    violation_status->acc_gfx_clk_below_host_limit = std::numeric_limits<uint64_t>::max();
 
     violation_status->per_prochot_thrm = std::numeric_limits<uint64_t>::max();
     violation_status->per_ppt_pwr = std::numeric_limits<uint64_t>::max();
     violation_status->per_socket_thrm = std::numeric_limits<uint64_t>::max();
     violation_status->per_vr_thrm = std::numeric_limits<uint64_t>::max();
     violation_status->per_hbm_thrm = std::numeric_limits<uint64_t>::max();
+    violation_status->per_gfx_clk_below_host_limit = std::numeric_limits<uint64_t>::max();
 
     violation_status->active_prochot_thrm = std::numeric_limits<uint8_t>::max();
     violation_status->active_ppt_pwr = std::numeric_limits<uint8_t>::max();
     violation_status->active_socket_thrm = std::numeric_limits<uint8_t>::max();
     violation_status->active_vr_thrm = std::numeric_limits<uint8_t>::max();
     violation_status->active_hbm_thrm = std::numeric_limits<uint8_t>::max();
+    violation_status->active_gfx_clk_below_host_limit = std::numeric_limits<uint8_t>::max();
 
     const auto p1 = std::chrono::system_clock::now();
     auto current_time = std::chrono::duration_cast<std::chrono::microseconds>(
@@ -664,8 +667,18 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
         return r;
     }
 
+    // default to 0xffffffff as not supported
+    uint32_t partitition_id = std::numeric_limits<uint32_t>::max();
+    auto tmp_partition_id = uint32_t(0);
+    amdsmi_status_t status = rsmi_wrapper(rsmi_dev_partition_id_get, processor_handle, &(tmp_partition_id));
+    // Do not return early if this value fails
+    // continue to try getting all info
+    if (status == AMDSMI_STATUS_SUCCESS) {
+        partitition_id = tmp_partition_id;
+    }
+
     amdsmi_gpu_metrics_t metric_info_a = {};
-    amdsmi_status_t status =  amdsmi_get_gpu_metrics_info(
+    status =  amdsmi_get_gpu_metrics_info(
                     processor_handle, &metric_info_a);
     if (status != AMDSMI_STATUS_SUCCESS) {
         std::ostringstream ss;
@@ -680,7 +693,9 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
         && metric_info_a.ppt_residency_acc == std::numeric_limits<uint64_t>::max()
         && metric_info_a.socket_thm_residency_acc == std::numeric_limits<uint64_t>::max()
         && metric_info_a.vr_thm_residency_acc == std::numeric_limits<uint64_t>::max()
-        && metric_info_a.hbm_thm_residency_acc == std::numeric_limits<uint64_t>::max()) {
+        && metric_info_a.hbm_thm_residency_acc == std::numeric_limits<uint64_t>::max()
+        && (metric_info_a.xcp_stats->gfx_below_host_limit_acc[partitition_id]
+        == std::numeric_limits<uint64_t>::max())) {
         ss << __PRETTY_FUNCTION__
            << " | ASIC does not support throttle violations!, "
            << "returning AMDSMI_STATUS_NOT_SUPPORTED";
@@ -705,33 +720,38 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
     violation_status->acc_socket_thrm = metric_info_b.socket_thm_residency_acc;
     violation_status->acc_vr_thrm = metric_info_b.vr_thm_residency_acc;
     violation_status->acc_hbm_thrm = metric_info_b.hbm_thm_residency_acc;
+    violation_status->acc_gfx_clk_below_host_limit
+        = metric_info_b.xcp_stats->gfx_below_host_limit_acc[partitition_id];
 
     ss << __PRETTY_FUNCTION__ << " | "
        << "[gpu_metrics A] metric_info_a.accumulation_counter: " << std::dec
-       << metric_info_a.accumulation_counter
+       << metric_info_a.accumulation_counter << "\n"
        << "; metric_info_a.prochot_residency_acc: " << std::dec
-       << metric_info_a.prochot_residency_acc
+       << metric_info_a.prochot_residency_acc << "\n"
        << "; metric_info_a.ppt_residency_acc (pviol): " << std::dec
-       << metric_info_a.ppt_residency_acc
+       << metric_info_a.ppt_residency_acc << "\n"
        << "; metric_info_a.socket_thm_residency_acc (tviol): " << std::dec
-       << metric_info_a.socket_thm_residency_acc
+       << metric_info_a.socket_thm_residency_acc << "\n"
        << "; metric_info_a.vr_thm_residency_acc: " << std::dec
-       << metric_info_a.vr_thm_residency_acc
+       << metric_info_a.vr_thm_residency_acc << "\n"
        << "; metric_info_a.hbm_thm_residency_acc: " << std::dec
        << metric_info_a.hbm_thm_residency_acc << "\n"
+       << "; metric_info_b.xcp_stats->gfx_below_host_limit_acc[" << partitition_id << "]: "
+       << std::dec << metric_info_a.xcp_stats->gfx_below_host_limit_acc[partitition_id] << "\n"
        << " [gpu_metrics B] metric_info_b.accumulation_counter: " << std::dec
-       << metric_info_b.accumulation_counter
+       << metric_info_b.accumulation_counter << "\n"
        << "; metric_info_b.prochot_residency_acc: " << std::dec
-       << metric_info_b.prochot_residency_acc
+       << metric_info_b.prochot_residency_acc << "\n"
        << "; metric_info_b.ppt_residency_acc (pviol): " << std::dec
-       << metric_info_b.ppt_residency_acc
+       << metric_info_b.ppt_residency_acc << "\n"
        << "; metric_info_b.socket_thm_residency_acc (tviol): " << std::dec
-       << metric_info_b.socket_thm_residency_acc
+       << metric_info_b.socket_thm_residency_acc << "\n"
        << "; metric_info_b.vr_thm_residency_acc: " << std::dec
-       << metric_info_b.vr_thm_residency_acc
+       << metric_info_b.vr_thm_residency_acc << "\n"
        << "; metric_info_b.hbm_thm_residency_acc: " << std::dec
-       << metric_info_b.hbm_thm_residency_acc
-       << "\n";
+       << metric_info_b.hbm_thm_residency_acc << "\n"
+       << "; metric_info_b.xcp_stats->gfx_below_host_limit_acc[" << partitition_id << "]: "
+       << std::dec << metric_info_b.xcp_stats->gfx_below_host_limit_acc[partitition_id] << "\n";
     LOG_DEBUG(ss);
 
     if ( (metric_info_b.prochot_residency_acc != std::numeric_limits<uint64_t>::max()
@@ -794,7 +814,7 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
         ss << __PRETTY_FUNCTION__ << " | "
            << "ENTERED socket_thm_residency_acc | per_socket_thrm: " << std::dec
            << violation_status->per_socket_thrm
-           << "%; active_ppt_pwr = " << std::dec
+           << "%; active_socket_thrm = " << std::dec
            << violation_status->active_socket_thrm << "\n";
         LOG_DEBUG(ss);
     }
@@ -842,6 +862,28 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
            << violation_status->active_hbm_thrm << "\n";
         LOG_DEBUG(ss);
     }
+    if ( (metric_info_b.xcp_stats->gfx_below_host_limit_acc[partitition_id] != std::numeric_limits<uint64_t>::max()
+        || metric_info_a.xcp_stats->gfx_below_host_limit_acc[partitition_id] != std::numeric_limits<uint64_t>::max())
+        && (metric_info_b.xcp_stats->gfx_below_host_limit_acc[partitition_id] >= metric_info_a.xcp_stats->gfx_below_host_limit_acc[partitition_id])
+        && ((metric_info_b.accumulation_counter - metric_info_a.accumulation_counter) > 0) ) {
+        violation_status->per_gfx_clk_below_host_limit =
+            (((metric_info_b.xcp_stats->gfx_below_host_limit_acc[partitition_id] -
+                metric_info_a.xcp_stats->gfx_below_host_limit_acc[partitition_id]) * 100) /
+            (metric_info_b.accumulation_counter - metric_info_a.accumulation_counter));
+
+        if (violation_status->per_gfx_clk_below_host_limit > 0) {
+            violation_status->active_gfx_clk_below_host_limit = 1;
+            violation_status->violation_timestamp = kFASTEST_POLL_TIME_MS;
+        } else {
+            violation_status->active_gfx_clk_below_host_limit = 0;
+        }
+        ss << __PRETTY_FUNCTION__ << " | "
+           << "ENTERED gfx_clk_below_host_residency_acc | per_gfx_clk_below_host_limit: " << std::dec
+           << violation_status->per_gfx_clk_below_host_limit
+           << "%; active_ppt_pwr = " << std::dec
+           << violation_status->active_gfx_clk_below_host_limit << "\n";
+        LOG_DEBUG(ss);
+    }
 
     ss << __PRETTY_FUNCTION__ << " | "
        << "RETURNING AMDSMI_STATUS_SUCCESS | "
@@ -859,6 +901,8 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
        << violation_status->per_vr_thrm
        << "; violation_status->per_hbm_thrm (%): " << std::dec
        << violation_status->per_hbm_thrm
+       << "; violation_status->per_gfx_clk_below_host_limit (%): " << std::dec
+       << violation_status->per_gfx_clk_below_host_limit
        << "; violation_status->active_prochot_thrm (bool): " << std::dec
        << static_cast<int>(violation_status->active_prochot_thrm)
        << "; violation_status->active_ppt_pwr (bool): " << std::dec
@@ -869,6 +913,8 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
        << static_cast<int>(violation_status->active_vr_thrm)
        << "; violation_status->active_hbm_thrm (bool): " << std::dec
        << static_cast<int>(violation_status->active_hbm_thrm)
+       << "; violation_status->active_gfx_clk_below_host_limit (bool): " << std::dec
+       << static_cast<int>(violation_status->active_gfx_clk_below_host_limit)
        << "\n";
     LOG_INFO(ss);
 
@@ -2352,6 +2398,40 @@ amdsmi_get_gpu_bad_page_info(amdsmi_processor_handle processor_handle, uint32_t 
     }
 
     return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t
+amdsmi_get_gpu_bad_page_threshold(amdsmi_processor_handle processor_handle, uint32_t *threshold) {
+    AMDSMI_CHECK_INIT();
+
+    if (threshold == nullptr) {
+        return AMDSMI_STATUS_INVAL;
+    }
+
+    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+    amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
+    if (r != AMDSMI_STATUS_SUCCESS)
+        return r;
+
+    amdsmi_status_t status;
+    status = smi_amdgpu_get_bad_page_threshold(gpu_device, threshold);
+    if (status != AMDSMI_STATUS_SUCCESS) {
+        return status;
+    }
+
+    return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t
+amdsmi_gpu_validate_ras_eeprom(amdsmi_processor_handle processor_handle) {
+    AMDSMI_CHECK_INIT();
+
+    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+    amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
+    if (r != AMDSMI_STATUS_SUCCESS)
+        return r;
+
+    return smi_amdgpu_validate_ras_eeprom(gpu_device);
 }
 
 amdsmi_status_t amdsmi_get_gpu_ras_feature_info(

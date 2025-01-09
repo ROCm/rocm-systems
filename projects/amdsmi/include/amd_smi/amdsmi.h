@@ -260,6 +260,8 @@ typedef enum {
     AMDSMI_STATUS_ARG_PTR_NULL = 53,        //!< Parsed argument is invalid
     AMDSMI_STATUS_AMDGPU_RESTART_ERR = 54,  //!< AMDGPU restart failed
     AMDSMI_STATUS_SETTING_UNAVAILABLE = 55, //!< Setting is not available
+    AMDSMI_STATUS_CORRUPTED_EEPROM = 56, //!< EEPROM is corrupted
+
     // General errors
     AMDSMI_STATUS_MAP_ERROR = 0xFFFFFFFE,     //!< The internal library error did not map to a status code
     AMDSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF, //!< An unknown error occurred
@@ -524,18 +526,22 @@ typedef struct {
     uint64_t acc_socket_thrm;      //!< TVIOL; Current accumulated Socket thermal count; Max uint64 means unsupported
     uint64_t acc_vr_thrm;          //!< Current accumulated voltage regulator count; Max uint64 means unsupported
     uint64_t acc_hbm_thrm;         //!< Current accumulated High Bandwidth Memory (HBM) thermal count; Max uint64 means unsupported
+    uint64_t acc_gfx_clk_below_host_limit;  //!< Current graphic clock below host limit count; Max uint64 means unsupported
     uint64_t per_prochot_thrm;     //!< Processor hot violation % (greater than 0% is a violation); Max uint64 means unsupported
     uint64_t per_ppt_pwr;          //!< PVIOL; Package Power Tracking (PPT) violation % (greater than 0% is a violation); Max uint64 means unsupported
     uint64_t per_socket_thrm;      //!< TVIOL; Socket thermal violation % (greater than 0% is a violation); Max uint64 means unsupported
     uint64_t per_vr_thrm;          //!< Voltage regulator violation % (greater than 0% is a violation); Max uint64 means unsupported
     uint64_t per_hbm_thrm;         //!< High Bandwidth Memory (HBM) thermal violation % (greater than 0% is a violation); Max uint64 means unsupported
+    uint64_t per_gfx_clk_below_host_limit;  //!< Graphics clock below host limit violation % (greater than 0% is a violation); Max uint64 means unsupported
     uint8_t active_prochot_thrm;   //!< Processor hot violation; 1 = active 0 = not active; Max uint8 means unsupported
     uint8_t active_ppt_pwr;        //!< Package Power Tracking (PPT) violation; 1 = active 0 = not active; Max uint8 means unsupported
     uint8_t active_socket_thrm;    //!< Socket thermal violation; 1 = active 0 = not active; Max uint8 means unsupported
     uint8_t active_vr_thrm;        //!< Voltage regulator violation; 1 = active 0 = not active; Max uint8 means unsupported
     uint8_t active_hbm_thrm;       //!< High Bandwidth Memory (HBM) thermal violation; 1 = active 0 = not active; Max uint8 means unsupported
-    uint64_t reserved[30];         // Reserved for new violation info
+    uint8_t active_gfx_clk_below_host_limit;  //!< Graphics clock below host limit violation; 1 = active 0 = not active; Max uint8 means unsupported
+    uint64_t reserved[3];          // Reserved for new violation info
 } amdsmi_violation_status_t;
+
 typedef struct {
     amdsmi_range_t supported_freq_range;
     amdsmi_range_t current_freq_range;
@@ -1543,28 +1549,28 @@ typedef struct {
     /* PCIE other end recovery counter */
     uint32_t pcie_lc_perf_other_end_recovery;
 
-  /*
-  * v1.7 additions
-  */
-  /* VRAM max bandwidth at max memory clock (GB/s) */
-  uint64_t vram_max_bandwidth;
+    /*
+    * v1.7 additions
+    */
+    /* VRAM max bandwidth at max memory clock (GB/s) */
+    uint64_t vram_max_bandwidth;
 
-  /* XGMI link status(up/down) */
-  uint16_t xgmi_link_status[AMDSMI_MAX_NUM_XGMI_LINKS];
+    /* XGMI link status(up/down) */
+    uint16_t xgmi_link_status[AMDSMI_MAX_NUM_XGMI_LINKS];
 
     /// \endcond
 } amdsmi_gpu_metrics_t;
 
 typedef enum {
-  AMDSMI_XGMI_LINK_DOWN,            //!< The XGMI Link is down
-  AMDSMI_XGMI_LINK_UP,              //!< The XGMI Link is up
-  AMDSMI_XGMI_LINK_DISABLE,         //!< The XGMI Link is disabled
+    AMDSMI_XGMI_LINK_DOWN,            //!< The XGMI Link is down
+    AMDSMI_XGMI_LINK_UP,              //!< The XGMI Link is up
+    AMDSMI_XGMI_LINK_DISABLE,         //!< The XGMI Link is disabled
 } amdsmi_xgmi_link_status_type_t;
 
 typedef struct {
-  uint32_t total_links;   //!< The total links in the status array
-  amdsmi_xgmi_link_status_type_t status[AMDSMI_MAX_NUM_XGMI_LINKS];
-  uint64_t reserved[7];
+    uint32_t total_links;   //!< The total links in the status array
+    amdsmi_xgmi_link_status_type_t status[AMDSMI_MAX_NUM_XGMI_LINKS];
+    uint64_t reserved[7];
 } amdsmi_xgmi_link_status_t;
 
 #define  MAX_AMDSMI_NAME_LENGTH 64
@@ -1634,19 +1640,19 @@ typedef struct {
  * @brief This structure holds SMU Firmware version information.
  */
 typedef struct {
-        uint8_t debug;   //!< SMU fw Debug version number
-        uint8_t minor;   //!< SMU fw Minor version number
-        uint8_t major;   //!< SMU fw Major version number
-        uint8_t unused;  //!< reserved fields
+    uint8_t debug;   //!< SMU fw Debug version number
+    uint8_t minor;   //!< SMU fw Minor version number
+    uint8_t major;   //!< SMU fw Major version number
+    uint8_t unused;  //!< reserved fields
 } amdsmi_smu_fw_version_t;
 
 /**
  * @brief DDR bandwidth metrics.
  */
 typedef struct {
-        uint32_t max_bw;        //!< DDR Maximum theoritical bandwidth in GB/s
-        uint32_t utilized_bw;   //!< DDR bandwidth utilization in GB/s
-        uint32_t utilized_pct;  //!< DDR bandwidth utilization in % of theoritical max
+    uint32_t max_bw;        //!< DDR Maximum theoritical bandwidth in GB/s
+    uint32_t utilized_bw;   //!< DDR bandwidth utilization in GB/s
+    uint32_t utilized_pct;  //!< DDR bandwidth utilization in % of theoritical max
 } amdsmi_ddr_bw_metrics_t;
 
 /**
@@ -1792,14 +1798,14 @@ typedef struct __attribute__((__packed__)) {
  * @brief hsmp frequency limit source names
  */
 static char* const amdsmi_hsmp_freqlimit_src_names[] = {
-        "cHTC-Active",
-        "PROCHOT",
-        "TDC limit",
-        "PPT Limit",
-        "OPN Max",
-        "Reliability Limit",
-        "APML Agent",
-        "HSMP Agent"
+    "cHTC-Active",
+    "PROCHOT",
+    "TDC limit",
+    "PPT Limit",
+    "OPN Max",
+    "Reliability Limit",
+    "APML Agent",
+    "HSMP Agent"
 };
 #endif
 
@@ -2324,7 +2330,7 @@ amdsmi_get_gpu_pci_bandwidth(amdsmi_processor_handle processor_handle,
  *              | ((BUS & 0xFF) << 8) | ((DEVICE & 0x1F) <<3 )
  *              | (FUNCTION & 0x7)
  *
- *  | Name         | Field   | KFD property       KFD -> PCIe ID (uint64_t)
+ *  | Name         | Field   | KFD property     | KFD -> PCIe ID (uint64_t)    |
  *  -------------- | ------- | ---------------- | ---------------------------- |
  *  | Domain       | [63:32] | "domain"         | (DOMAIN & 0xFFFFFFFF) << 32  |
  *  | Partition id | [31:28] | "location id"    | (LOCATION & 0xF0000000)      |
@@ -2639,6 +2645,44 @@ amdsmi_get_gpu_memory_usage(amdsmi_processor_handle processor_handle, amdsmi_mem
 amdsmi_status_t
 amdsmi_get_gpu_bad_page_info(amdsmi_processor_handle processor_handle, uint32_t *num_pages,
                              amdsmi_retired_page_record_t *info);
+
+
+/**
+ * @brief Get the bad pages threshold of a processor. It is not supported on virtual
+ * machine guest
+ *
+ * @platform{gpu_bm_linux} @platform{host}
+ *
+ * @details This call will query the device @p processor_handle for the
+ * threshold of bad pages (written to @p threshold address).
+ * @param[in] processor_handle a processor handle
+ * @param[out] threshold of bad page count.
+ *
+ * @note This function requires root access
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t
+amdsmi_get_gpu_bad_page_threshold(amdsmi_processor_handle processor_handle, uint32_t *threshold);
+
+/**
+ * @brief Verify the checksum of RAS EEPROM. It is not supported on virtual
+ * machine guest
+ *
+ * @platform{gpu_bm_linux} @platform{host}
+ *
+ * @details This call will verify the device @p processor_handle for the
+ * checksum of RAS EEPROM.
+ * @param[in] processor_handle a processor handle
+ *
+ * @note This function requires root access
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success
+ *          AMDSMI_STATUS_CORRUPTED_EEPROM on the device's EEPROM corruption
+ *          others on fail
+ */
+amdsmi_status_t
+amdsmi_gpu_validate_ras_eeprom(amdsmi_processor_handle processor_handle);
 
 /**
  *  @brief Returns RAS features info.
@@ -4763,7 +4807,7 @@ amdsmi_status_t
 amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_info_t *info);
 
 /**
- *  @brief          Returns the KFD (Kernel Fusion Driver) information for the device
+ *  @brief          Returns the KFD (kernel driver) information for the device
  *
  *  @platform{gpu_bm_linux}  @platform{guest_1vf}  @platform{guest_mvf}
  *

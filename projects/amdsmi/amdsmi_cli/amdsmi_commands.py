@@ -2277,7 +2277,7 @@ class AMDSMICommands():
                     'socket_thermal_accumulated': "N/A",
                     'vr_thermal_accumulated': "N/A",
                     'hbm_thermal_accumulated': "N/A",
-                    'gfx_below_host_limit_acc': "N/A",
+                    'gfx_clk_below_host_limit_accumulated': "N/A",
 
                     # violation status values - active/not active
                     'prochot_violation_status': "N/A",
@@ -2285,13 +2285,15 @@ class AMDSMICommands():
                     'socket_thermal_violation_status': "N/A",
                     'vr_thermal_violation_status': "N/A",
                     'hbm_thermal_violation_status': "N/A",
+                    'gfx_clk_below_host_limit_violation_status': "N/A",
 
                     # violation activity values - percent
                     'prochot_violation_activity': "N/A",
                     'ppt_violation_activity': "N/A",
                     'socket_thermal_violation_activity': "N/A",
                     'vr_thermal_violation_activity': "N/A",
-                    'hbm_thermal_violation_activity': "N/A"
+                    'hbm_thermal_violation_activity': "N/A",
+                    'gfx_clk_below_host_limit_violation_activity': "N/A",
                     }
 
                 try:
@@ -2302,18 +2304,21 @@ class AMDSMICommands():
                     throttle_status['socket_thermal_accumulated'] = violation_status['acc_socket_thrm']
                     throttle_status['vr_thermal_accumulated'] = violation_status['acc_vr_thrm']
                     throttle_status['hbm_thermal_accumulated'] = violation_status['acc_hbm_thrm']
+                    throttle_status['gfx_clk_below_host_limit_accumulated'] = violation_status['acc_gfx_clk_below_host_limit']
 
                     throttle_status['prochot_violation_status'] = violation_status['active_prochot_thrm']
                     throttle_status['ppt_violation_status'] = violation_status['active_ppt_pwr']
                     throttle_status['socket_thermal_violation_status'] = violation_status['active_socket_thrm']
                     throttle_status['vr_thermal_violation_status'] = violation_status['active_vr_thrm']
                     throttle_status['hbm_thermal_violation_status'] = violation_status['active_hbm_thrm']
+                    throttle_status['gfx_clk_below_host_limit_violation_status'] = violation_status['active_gfx_clk_below_host_limit']
 
                     throttle_status['prochot_violation_activity'] = violation_status['per_prochot_thrm']
                     throttle_status['ppt_violation_activity'] = violation_status['per_ppt_pwr']
                     throttle_status['socket_thermal_violation_activity'] = violation_status['per_socket_thrm']
                     throttle_status['vr_thermal_violation_activity'] = violation_status['per_vr_thrm']
                     throttle_status['hbm_thermal_violation_activity'] = violation_status['per_hbm_thrm']
+                    throttle_status['gfx_clk_below_host_limit_violation_activity'] = violation_status['per_gfx_clk_below_host_limit']
 
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     values_dict['throttle'] = throttle_status
@@ -5270,33 +5275,47 @@ class AMDSMICommands():
             violation_status = {
                 "pviol": "N/A",
                 "tviol": "N/A",
+                "tviol_active": "N/A",
                 "phot_tviol": "N/A",
                 "vr_tviol": "N/A",
                 "hbm_tviol": "N/A",
+                "gfx_clkviol": "N/A",
             }
             try:
                 violations = amdsmi_interface.amdsmi_get_violation_status(args.gpu)
                 violation_status['pviol'] = violations['per_ppt_pwr']
                 violation_status['tviol'] = violations['per_socket_thrm']
+                violation_status['tviol_active'] = violations['active_socket_thrm']
                 violation_status['phot_tviol'] = violations['per_prochot_thrm']
                 violation_status['vr_tviol'] = violations['per_vr_thrm']
                 violation_status['hbm_tviol'] = violations['per_hbm_thrm']
+                violation_status['gfx_clkviol'] = violations['per_gfx_clk_below_host_limit']
             except amdsmi_exception.AmdSmiLibraryException as e:
                 monitor_values['pviol'] = violation_status['pviol']
                 monitor_values['tviol'] = violation_status['tviol']
+                monitor_values['tviol_active'] = violation_status['tviol_active']
                 monitor_values['phot_tviol'] = violation_status['phot_tviol']
                 monitor_values['vr_tviol'] = violation_status['vr_tviol']
                 monitor_values['hbm_tviol'] = violation_status['hbm_tviol']
+                monitor_values['gfx_clkviol'] = violation_status['gfx_clkviol']
                 logging.debug("Failed to get violation status on gpu %s | %s", gpu_id, e.get_error_info())
             violation_status_unit = "%"
-            kTVIOL_MAX_WIDTH = 10
-            kPVIOL_MAX_WIDTH = 10
+            kPVIOL_MAX_WIDTH = 7
+            kTVIOL_MAX_WIDTH = 7
+            kTVIOL_ACTIVE_MAX_WIDTH = 14
             kPHOT_MAX_WIDTH = 12
             kVR_MAX_WIDTH = 10
             kHBM_MAX_WIDTH = 11
+            kGFXC_MAX_WIDTH = 13
 
             for key, value in violation_status.items():
-                monitor_values[key] = self.helpers.unit_format(self.logger, violation_status[key], violation_status_unit)
+                if value != "N/A":
+                    if key == "tviol_active":
+                        monitor_values[key] = value
+                    else:
+                        monitor_values[key] = self.helpers.unit_format(self.logger, violation_status[key], violation_status_unit)
+                else:
+                    monitor_values[key] = violation_status[key]
 
             if self.logger.is_human_readable_format():
                 monitor_values['pviol'] = monitor_values['pviol'].rjust(kPVIOL_MAX_WIDTH, ' ')
@@ -5304,11 +5323,14 @@ class AMDSMICommands():
                 monitor_values['phot_tviol'] = monitor_values['phot_tviol'].rjust(kPHOT_MAX_WIDTH, ' ')
                 monitor_values['vr_tviol'] = monitor_values['vr_tviol'].rjust(kVR_MAX_WIDTH, ' ')
                 monitor_values['hbm_tviol'] = monitor_values['hbm_tviol'].rjust(kHBM_MAX_WIDTH, ' ')
+                monitor_values['gfx_clkviol'] = monitor_values['gfx_clkviol'].rjust(kGFXC_MAX_WIDTH, ' ')
             self.logger.table_header += 'PVIOL'.rjust(kPVIOL_MAX_WIDTH, ' ')
             self.logger.table_header += 'TVIOL'.rjust(kTVIOL_MAX_WIDTH, ' ')
+            self.logger.table_header += 'TVIOL_ACTIVE'.rjust(kTVIOL_ACTIVE_MAX_WIDTH, ' ')
             self.logger.table_header += 'PHOT_TVIOL'.rjust(kPHOT_MAX_WIDTH, ' ')
             self.logger.table_header += 'VR_TVIOL'.rjust(kVR_MAX_WIDTH, ' ')
             self.logger.table_header += 'HBM_TVIOL'.rjust(kHBM_MAX_WIDTH, ' ')
+            self.logger.table_header += 'GFX_CLKVIOL'.rjust(kGFXC_MAX_WIDTH, ' ')
 
         self.logger.store_output(args.gpu, 'values', monitor_values)
 

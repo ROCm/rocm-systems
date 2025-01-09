@@ -350,7 +350,7 @@ except AmdSmiException as e:
 
 ### amdsmi_get_gpu_kfd_info
 
-Description: Returns KFD(kernel fusion driver) information for the given GPU
+Description: Returns KFD (kernel driver) information for the given GPU
 This correlates to GUID in rocm-smi
 
 Input parameters:
@@ -1528,7 +1528,7 @@ Output: Dictionary with fields
 
 Field | Content
 ---|---
-`power` |  counter for energy accumulation since last restart/gpu rest (Deprecating in 6.4)
+`power` |  counter for energy accumulation since last restart/gpu rest (Deprecated in ROCm 6.4)
 `energy_accumulator` |  counter for energy accumulation since last restart/gpu rest
 `counter_resolution` |  counter resolution
 `timestamp` |  timestamp

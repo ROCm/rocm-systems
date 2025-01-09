@@ -727,18 +727,21 @@ struct_amdsmi_violation_status_t._fields_ = [
     ('acc_socket_thrm', ctypes.c_uint64),
     ('acc_vr_thrm', ctypes.c_uint64),
     ('acc_hbm_thrm', ctypes.c_uint64),
+    ('acc_gfx_clk_below_host_limit', ctypes.c_uint64),
     ('per_prochot_thrm', ctypes.c_uint64),
     ('per_ppt_pwr', ctypes.c_uint64),
     ('per_socket_thrm', ctypes.c_uint64),
     ('per_vr_thrm', ctypes.c_uint64),
     ('per_hbm_thrm', ctypes.c_uint64),
+    ('per_gfx_clk_below_host_limit', ctypes.c_uint64),
     ('active_prochot_thrm', ctypes.c_ubyte),
     ('active_ppt_pwr', ctypes.c_ubyte),
     ('active_socket_thrm', ctypes.c_ubyte),
     ('active_vr_thrm', ctypes.c_ubyte),
     ('active_hbm_thrm', ctypes.c_ubyte),
-    ('PADDING_0', ctypes.c_ubyte * 3),
-    ('reserved', ctypes.c_uint64 * 30),
+    ('active_gfx_clk_below_host_limit', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('reserved', ctypes.c_uint64 * 3),
 ]
 
 amdsmi_violation_status_t = struct_amdsmi_violation_status_t
@@ -791,6 +794,19 @@ amdsmi_card_form_factor_t = ctypes.c_uint32 # enum
 class struct_amdsmi_pcie_info_t(Structure):
     pass
 
+class struct_pcie_static_(Structure):
+    pass
+
+struct_pcie_static_._pack_ = 1 # source:False
+struct_pcie_static_._fields_ = [
+    ('max_pcie_width', ctypes.c_uint16),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('max_pcie_speed', ctypes.c_uint32),
+    ('pcie_interface_version', ctypes.c_uint32),
+    ('slot_type', amdsmi_card_form_factor_t),
+    ('reserved', ctypes.c_uint64 * 10),
+]
+
 class struct_pcie_metric_(Structure):
     pass
 
@@ -809,19 +825,6 @@ struct_pcie_metric_._fields_ = [
     ('pcie_lc_perf_other_end_recovery_count', ctypes.c_uint32),
     ('PADDING_2', ctypes.c_ubyte * 4),
     ('reserved', ctypes.c_uint64 * 12),
-]
-
-class struct_pcie_static_(Structure):
-    pass
-
-struct_pcie_static_._pack_ = 1 # source:False
-struct_pcie_static_._fields_ = [
-    ('max_pcie_width', ctypes.c_uint16),
-    ('PADDING_0', ctypes.c_ubyte * 2),
-    ('max_pcie_speed', ctypes.c_uint32),
-    ('pcie_interface_version', ctypes.c_uint32),
-    ('slot_type', amdsmi_card_form_factor_t),
-    ('reserved', ctypes.c_uint64 * 10),
 ]
 
 struct_amdsmi_pcie_info_t._pack_ = 1 # source:False
@@ -1120,16 +1123,6 @@ amdsmi_process_handle_t = ctypes.c_uint32
 class struct_amdsmi_proc_info_t(Structure):
     pass
 
-class struct_engine_usage_(Structure):
-    pass
-
-struct_engine_usage_._pack_ = 1 # source:False
-struct_engine_usage_._fields_ = [
-    ('gfx', ctypes.c_uint64),
-    ('enc', ctypes.c_uint64),
-    ('reserved', ctypes.c_uint32 * 12),
-]
-
 class struct_memory_usage_(Structure):
     pass
 
@@ -1139,6 +1132,16 @@ struct_memory_usage_._fields_ = [
     ('cpu_mem', ctypes.c_uint64),
     ('vram_mem', ctypes.c_uint64),
     ('reserved', ctypes.c_uint32 * 10),
+]
+
+class struct_engine_usage_(Structure):
+    pass
+
+struct_engine_usage_._pack_ = 1 # source:False
+struct_engine_usage_._fields_ = [
+    ('gfx', ctypes.c_uint64),
+    ('enc', ctypes.c_uint64),
+    ('reserved', ctypes.c_uint32 * 12),
 ]
 
 struct_amdsmi_proc_info_t._pack_ = 1 # source:False

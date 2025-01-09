@@ -28,6 +28,7 @@ from .amdsmi_exception import *
 import sys
 import math
 from time import localtime, asctime, time
+import json
 
 MAX_NUM_PROCESSES = 1024
 
@@ -1559,7 +1560,9 @@ def amdsmi_get_hsmp_metrics_table(
         "mtbl_ppt_residency_acc": mtbl.ppt_residency_acc,
         "mtbl_socket_thm_residency_acc": mtbl.socket_thm_residency_acc,
         "mtbl_vr_thm_residency_acc": mtbl.vr_thm_residency_acc,
-        "mtbl_hbm_thm_residency_acc": mtbl.hbm_thm_residency_acc
+        "mtbl_hbm_thm_residency_acc": mtbl.hbm_thm_residency_acc,
+        "mtbl_gfx_clk_below_host_residency_acc": mtbl.gfx_clk_below_host_residency_acc,
+        "mtbl_low_utilization_residency_acc": mtbl.low_utilization_residency_acc
     }
 
 def amdsmi_first_online_core_on_cpu_socket(
@@ -2035,7 +2038,7 @@ def amdsmi_get_violation_status(
             processor_handle, ctypes.byref(violation_status))
     )
 
-    return {
+    dict_return = {
         "reference_timestamp": _validate_if_max_uint(violation_status.reference_timestamp, MaxUIntegerTypes.UINT64_T),
         "violation_timestamp": _validate_if_max_uint(violation_status.violation_timestamp, MaxUIntegerTypes.UINT64_T),
         "acc_counter": _validate_if_max_uint(violation_status.acc_counter, MaxUIntegerTypes.UINT64_T),
@@ -2044,17 +2047,21 @@ def amdsmi_get_violation_status(
         "acc_socket_thrm": _validate_if_max_uint(violation_status.acc_socket_thrm, MaxUIntegerTypes.UINT64_T),                   #TVIOL
         "acc_vr_thrm": _validate_if_max_uint(violation_status.acc_vr_thrm, MaxUIntegerTypes.UINT64_T),
         "acc_hbm_thrm": _validate_if_max_uint(violation_status.acc_hbm_thrm, MaxUIntegerTypes.UINT64_T),
+        "acc_gfx_clk_below_host_limit": _validate_if_max_uint(violation_status.acc_gfx_clk_below_host_limit, MaxUIntegerTypes.UINT64_T),
         "per_prochot_thrm": _validate_if_max_uint(violation_status.per_prochot_thrm, MaxUIntegerTypes.UINT64_T, isActivity=True),
         "per_ppt_pwr": _validate_if_max_uint(violation_status.per_ppt_pwr, MaxUIntegerTypes.UINT64_T, isActivity=True),          #PVIOL
         "per_socket_thrm": _validate_if_max_uint(violation_status.per_socket_thrm, MaxUIntegerTypes.UINT64_T, isActivity=True),  #TVIOL
         "per_vr_thrm": _validate_if_max_uint(violation_status.per_vr_thrm, MaxUIntegerTypes.UINT64_T, isActivity=True),
         "per_hbm_thrm": _validate_if_max_uint(violation_status.per_hbm_thrm, MaxUIntegerTypes.UINT64_T, isActivity=True),
+        "per_gfx_clk_below_host_limit": _validate_if_max_uint(violation_status.per_gfx_clk_below_host_limit, MaxUIntegerTypes.UINT64_T, isActivity=True),
         "active_prochot_thrm": _validate_if_max_uint(violation_status.active_prochot_thrm, MaxUIntegerTypes.UINT8_T, isBool=True),
         "active_ppt_pwr": _validate_if_max_uint(violation_status.active_ppt_pwr, MaxUIntegerTypes.UINT8_T, isBool=True),         #PVIOL
         "active_socket_thrm": _validate_if_max_uint(violation_status.active_socket_thrm, MaxUIntegerTypes.UINT8_T, isBool=True), #TVIOL
         "active_vr_thrm": _validate_if_max_uint(violation_status.active_vr_thrm, MaxUIntegerTypes.UINT8_T, isBool=True),
-        "active_hbm_thrm": _validate_if_max_uint(violation_status.active_hbm_thrm, MaxUIntegerTypes.UINT8_T, isBool=True)
+        "active_hbm_thrm": _validate_if_max_uint(violation_status.active_hbm_thrm, MaxUIntegerTypes.UINT8_T, isBool=True),
+        "active_gfx_clk_below_host_limit": _validate_if_max_uint(violation_status.active_gfx_clk_below_host_limit, MaxUIntegerTypes.UINT8_T, isBool=True),
     }
+    return dict_return
 
 def amdsmi_get_gpu_total_ecc_count(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
@@ -3272,7 +3279,6 @@ def amdsmi_get_energy_count(processor_handle: amdsmi_wrapper.amdsmi_processor_ha
     )
 
     return {
-        'power': energy_accumulator.value, # deprecating in 6.4
         'energy_accumulator': energy_accumulator.value,
         'counter_resolution': counter_resolution.value,
         'timestamp': timestamp.value,
@@ -3906,38 +3912,40 @@ def amdsmi_get_gpu_metrics_info(
     }
 
     # Create 2d array with each XCD's stats
-    for k,v in gpu_metrics_output.items():
-        if 'xcp_stats' in k:
-            if 'xcp_stats.gfx_busy_inst' in k:
-                for curr_xcp, item in enumerate(v):
-                    print_xcp_detail = []
-                    for val in item.gfx_busy_inst:
-                        print_xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT32_T, isActivity=True))
-                    gpu_metrics_output[k][curr_xcp] = print_xcp_detail
-            if 'xcp_stats.jpeg_busy' in k:
-                for curr_xcp, item in enumerate(v):
-                    print_xcp_detail = []
-                    for val in item.jpeg_busy:
-                        print_xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T, isActivity=True))
-                    gpu_metrics_output[k][curr_xcp] = print_xcp_detail
-            if 'xcp_stats.vcn_busy' in k:
-                for curr_xcp, item in enumerate(v):
-                    print_xcp_detail = []
-                    for val in item.vcn_busy:
-                        print_xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T, isActivity=True))
-                    gpu_metrics_output[k][curr_xcp] = print_xcp_detail
-            if 'xcp_stats.gfx_busy_acc' in k:
-                for curr_xcp, item in enumerate(v):
-                    print_xcp_detail = []
-                    for val in item.gfx_busy_acc:
-                        print_xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T, isActivity=True))
-                    gpu_metrics_output[k][curr_xcp] = print_xcp_detail
-            if 'xcp_stats.gfx_below_host_limit_acc' in k:
-                for curr_xcp, item in enumerate(v):
-                    print_xcp_detail = []
-                    for val in item.gfx_below_host_limit_acc:
-                        print_xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T, isActivity=True))
-                    gpu_metrics_output[k][curr_xcp] = print_xcp_detail
+    if 'xcp_stats.gfx_busy_inst' in gpu_metrics_output:
+        for xcp_index, xcp_metrics in enumerate(gpu_metrics_output['xcp_stats.gfx_busy_inst']):
+            xcp_detail = []
+            for val in xcp_metrics.gfx_busy_inst:
+                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT32_T, isActivity=True))
+            gpu_metrics_output['xcp_stats.gfx_busy_inst'][xcp_index] = xcp_detail
+
+    if 'xcp_stats.jpeg_busy' in gpu_metrics_output:
+        for xcp_index, xcp_metrics in enumerate(gpu_metrics_output['xcp_stats.jpeg_busy']):
+            xcp_detail = []
+            for val in xcp_metrics.jpeg_busy:
+                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T, isActivity=True))
+            gpu_metrics_output['xcp_stats.jpeg_busy'][xcp_index] = xcp_detail
+
+    if 'xcp_stats.vcn_busy' in gpu_metrics_output:
+        for xcp_index, xcp_metrics in enumerate(gpu_metrics_output['xcp_stats.vcn_busy']):
+            xcp_detail = []
+            for val in xcp_metrics.vcn_busy:
+                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T, isActivity=True))
+            gpu_metrics_output["xcp_stats.vcn_busy"][xcp_index] = xcp_detail
+
+    if 'xcp_stats.gfx_busy_acc' in gpu_metrics_output:
+        for xcp_index, xcp_metrics in enumerate(gpu_metrics_output['xcp_stats.gfx_busy_acc']):
+            xcp_detail = []
+            for val in xcp_metrics.gfx_busy_acc:
+                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T, isActivity=True))
+            gpu_metrics_output["xcp_stats.gfx_busy_acc"][xcp_index] = xcp_detail
+
+    if 'xcp_stats.gfx_below_host_limit_acc' in gpu_metrics_output:
+        for xcp_index, xcp_metrics in enumerate(gpu_metrics_output['xcp_stats.gfx_below_host_limit_acc']):
+            xcp_detail = []
+            for val in xcp_metrics.gfx_below_host_limit_acc:
+                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T, isActivity=True))
+            gpu_metrics_output['xcp_stats.gfx_below_host_limit_acc'][xcp_index] = xcp_detail
     return gpu_metrics_output
 
 
