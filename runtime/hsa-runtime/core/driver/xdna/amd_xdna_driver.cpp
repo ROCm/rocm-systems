@@ -198,7 +198,7 @@ XdnaDriver::AllocateMemory(const core::MemoryRegion &mem_region,
     return HSA_STATUS_ERROR_INVALID_REGION;
   }
 
-  const bool use_bo_shmem = m_region.kernarg() || m_region.IsSystemButNotSVM();
+  const bool use_bo_shmem = !m_region.IsDeviceSVM();
   if (use_bo_shmem) {
     create_bo_args.type = AMDXDNA_BO_SHMEM;
   } else {

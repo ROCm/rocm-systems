@@ -147,8 +147,8 @@ class MemoryRegion : public core::MemoryRegion {
             (mem_props_.HeapType == HSA_HEAPTYPE_DEVICE_SVM));
   }
 
-  __forceinline bool IsSystemButNotSVM() const {
-    return (mem_props_.HeapType == HSA_HEAPTYPE_SYSTEM);
+  __forceinline bool IsDeviceSVM() const {
+    return (mem_props_.HeapType == HSA_HEAPTYPE_DEVICE_SVM);
   }
 
   __forceinline bool IsLDS() const {
