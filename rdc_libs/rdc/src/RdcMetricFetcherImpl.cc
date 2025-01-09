@@ -886,10 +886,38 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
       break;
     }
 
-    case RDC_HEALTH_RETIRED_PAGE_LIMIT:
-    case RDC_HEALTH_UNCORRECTABLE_PAGE_LIMIT:
-    case RDC_HEALTH_POWER_THROTTLE_TIME: //gpu_metrics 1.6
-    case RDC_HEALTH_THERMAL_THROTTLE_TIME: //gpu_metrics 1.6
+    case RDC_HEALTH_RETIRED_PAGE_LIMIT: {
+      uint32_t retired_page_threshold = 0;
+      ret = amdsmi_get_gpu_bad_page_threshold(processor_handle, &retired_page_threshold);
+      value->status = Smi2RdcError(ret);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(retired_page_threshold);
+      }
+      break;
+    }
+
+    case RDC_HEALTH_EEPROM_CONFIG_VALID: {
+      ret = amdsmi_gpu_validate_ras_eeprom(processor_handle);
+      value->status = Smi2RdcError(ret);
+      break;
+    }
+
+    case RDC_HEALTH_POWER_THROTTLE_TIME:
+    case RDC_HEALTH_THERMAL_THROTTLE_TIME: {
+      amdsmi_violation_status_t violation_status;
+      ret = amdsmi_get_violation_status(processor_handle, &violation_status);
+      value->status = Smi2RdcError(ret);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        if (RDC_HEALTH_POWER_THROTTLE_TIME == field_id)
+          value->value.l_int = static_cast<int64_t>(violation_status.acc_ppt_pwr);
+        if (RDC_HEALTH_THERMAL_THROTTLE_TIME == field_id)
+          value->value.l_int = static_cast<int64_t>(violation_status.acc_socket_thrm);
+      }
+      break;
+    }
+
     default:
       break;
   }
