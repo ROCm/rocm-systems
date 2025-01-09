@@ -36,10 +36,13 @@ fetchcontent_makeavailable(otf2-source)
 
 set(_otf2_root ${ROCPROFILER_BINARY_DIR}/external/otf2)
 set(_otf2_inc_dirs $<BUILD_INTERFACE:${_otf2_root}/include>)
-set(_otf2_lib_dirs $<BUILD_INTERFACE:${_otf2_root}/lib>)
-set(_otf2_libs $<BUILD_INTERFACE:${_otf2_root}/lib/libotf2${CMAKE_STATIC_LIBRARY_SUFFIX}>)
-set(_otf2_build_byproducts "${_otf2_root}/include/otf2/otf2.h"
-                           "${_otf2_root}/lib/libotf2${CMAKE_STATIC_LIBRARY_SUFFIX}")
+set(_otf2_lib_dirs $<BUILD_INTERFACE:${_otf2_root}/${CMAKE_INSTALL_LIBDIR}>)
+set(_otf2_libs
+    $<BUILD_INTERFACE:${_otf2_root}/${CMAKE_INSTALL_LIBDIR}/libotf2${CMAKE_STATIC_LIBRARY_SUFFIX}>
+    )
+set(_otf2_build_byproducts
+    "${_otf2_root}/include/otf2/otf2.h"
+    "${_otf2_root}/${CMAKE_INSTALL_LIBDIR}/libotf2${CMAKE_STATIC_LIBRARY_SUFFIX}")
 
 find_program(
     MAKE_COMMAND
@@ -56,7 +59,8 @@ externalproject_add(
     CONFIGURE_COMMAND
         ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER}
         <SOURCE_DIR>/configure -q --enable-silent-rules --prefix=${_otf2_root}
-        CFLAGS=-fPIC\ -O3\ -g CXXFLAGS=-fPIC\ -O3\ -g LDFLAGS= PYTHON=: SPHINX=:
+        --libdir=${_otf2_root}/${CMAKE_INSTALL_LIBDIR} CFLAGS=-fPIC\ -O3\ -g
+        CXXFLAGS=-fPIC\ -O3\ -g LDFLAGS= PYTHON=: SPHINX=:
     BUILD_COMMAND ${MAKE_COMMAND} install -s
     BUILD_BYPRODUCTS "${_otf2_build_byproducts}"
     INSTALL_COMMAND "")
