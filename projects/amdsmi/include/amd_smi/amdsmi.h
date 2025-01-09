@@ -1545,28 +1545,28 @@ typedef struct {
     /* PCIE other end recovery counter */
     uint32_t pcie_lc_perf_other_end_recovery;
 
-  /*
-  * v1.7 additions
-  */
-  /* VRAM max bandwidth at max memory clock (GB/s) */
-  uint64_t vram_max_bandwidth;
+    /*
+    * v1.7 additions
+    */
+    /* VRAM max bandwidth at max memory clock (GB/s) */
+    uint64_t vram_max_bandwidth;
 
-  /* XGMI link status(up/down) */
-  uint16_t xgmi_link_status[AMDSMI_MAX_NUM_XGMI_LINKS];
+    /* XGMI link status(up/down) */
+    uint16_t xgmi_link_status[AMDSMI_MAX_NUM_XGMI_LINKS];
 
     /// \endcond
 } amdsmi_gpu_metrics_t;
 
 typedef enum {
-  AMDSMI_XGMI_LINK_DOWN,            //!< The XGMI Link is down
-  AMDSMI_XGMI_LINK_UP,              //!< The XGMI Link is up
-  AMDSMI_XGMI_LINK_DISABLE,         //!< The XGMI Link is disabled
+    AMDSMI_XGMI_LINK_DOWN,            //!< The XGMI Link is down
+    AMDSMI_XGMI_LINK_UP,              //!< The XGMI Link is up
+    AMDSMI_XGMI_LINK_DISABLE,         //!< The XGMI Link is disabled
 } amdsmi_xgmi_link_status_type_t;
 
 typedef struct {
-  uint32_t total_links;   //!< The total links in the status array
-  amdsmi_xgmi_link_status_type_t status[AMDSMI_MAX_NUM_XGMI_LINKS];
-  uint64_t reserved[7];
+    uint32_t total_links;   //!< The total links in the status array
+    amdsmi_xgmi_link_status_type_t status[AMDSMI_MAX_NUM_XGMI_LINKS];
+    uint64_t reserved[7];
 } amdsmi_xgmi_link_status_t;
 
 #define  MAX_AMDSMI_NAME_LENGTH 64
@@ -1636,19 +1636,19 @@ typedef struct {
  * @brief This structure holds SMU Firmware version information.
  */
 typedef struct {
-        uint8_t debug;   //!< SMU fw Debug version number
-        uint8_t minor;   //!< SMU fw Minor version number
-        uint8_t major;   //!< SMU fw Major version number
-        uint8_t unused;  //!< reserved fields
+    uint8_t debug;   //!< SMU fw Debug version number
+    uint8_t minor;   //!< SMU fw Minor version number
+    uint8_t major;   //!< SMU fw Major version number
+    uint8_t unused;  //!< reserved fields
 } amdsmi_smu_fw_version_t;
 
 /**
  * @brief DDR bandwidth metrics.
  */
 typedef struct {
-        uint32_t max_bw;        //!< DDR Maximum theoritical bandwidth in GB/s
-        uint32_t utilized_bw;   //!< DDR bandwidth utilization in GB/s
-        uint32_t utilized_pct;  //!< DDR bandwidth utilization in % of theoritical max
+    uint32_t max_bw;        //!< DDR Maximum theoritical bandwidth in GB/s
+    uint32_t utilized_bw;   //!< DDR bandwidth utilization in GB/s
+    uint32_t utilized_pct;  //!< DDR bandwidth utilization in % of theoritical max
 } amdsmi_ddr_bw_metrics_t;
 
 /**
@@ -1794,14 +1794,14 @@ typedef struct __attribute__((__packed__)) {
  * @brief hsmp frequency limit source names
  */
 static char* const amdsmi_hsmp_freqlimit_src_names[] = {
-        "cHTC-Active",
-        "PROCHOT",
-        "TDC limit",
-        "PPT Limit",
-        "OPN Max",
-        "Reliability Limit",
-        "APML Agent",
-        "HSMP Agent"
+    "cHTC-Active",
+    "PROCHOT",
+    "TDC limit",
+    "PPT Limit",
+    "OPN Max",
+    "Reliability Limit",
+    "APML Agent",
+    "HSMP Agent"
 };
 #endif
 

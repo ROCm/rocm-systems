@@ -3905,38 +3905,40 @@ def amdsmi_get_gpu_metrics_info(
     }
 
     # Create 2d array with each XCD's stats
-    for k,v in gpu_metrics_output.items():
-        if 'xcp_stats' in k:
-            if 'xcp_stats.gfx_busy_inst' in k:
-                for curr_xcp, item in enumerate(v):
-                    print_xcp_detail = []
-                    for val in item.gfx_busy_inst:
-                        print_xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT32_T, isActivity=True))
-                    gpu_metrics_output[k][curr_xcp] = print_xcp_detail
-            if 'xcp_stats.jpeg_busy' in k:
-                for curr_xcp, item in enumerate(v):
-                    print_xcp_detail = []
-                    for val in item.jpeg_busy:
-                        print_xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T, isActivity=True))
-                    gpu_metrics_output[k][curr_xcp] = print_xcp_detail
-            if 'xcp_stats.vcn_busy' in k:
-                for curr_xcp, item in enumerate(v):
-                    print_xcp_detail = []
-                    for val in item.vcn_busy:
-                        print_xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T, isActivity=True))
-                    gpu_metrics_output[k][curr_xcp] = print_xcp_detail
-            if 'xcp_stats.gfx_busy_acc' in k:
-                for curr_xcp, item in enumerate(v):
-                    print_xcp_detail = []
-                    for val in item.gfx_busy_acc:
-                        print_xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T, isActivity=True))
-                    gpu_metrics_output[k][curr_xcp] = print_xcp_detail
-            if 'xcp_stats.gfx_below_host_limit_acc' in k:
-                for curr_xcp, item in enumerate(v):
-                    print_xcp_detail = []
-                    for val in item.gfx_below_host_limit_acc:
-                        print_xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T, isActivity=True))
-                    gpu_metrics_output[k][curr_xcp] = print_xcp_detail
+    if 'xcp_stats.gfx_busy_inst' in gpu_metrics_output:
+        for xcp_index, xcp_metrics in enumerate(gpu_metrics_output['xcp_stats.gfx_busy_inst']):
+            xcp_detail = []
+            for val in xcp_metrics.gfx_busy_inst:
+                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT32_T, isActivity=True))
+            gpu_metrics_output['xcp_stats.gfx_busy_inst'][xcp_index] = xcp_detail
+
+    if 'xcp_stats.jpeg_busy' in gpu_metrics_output:
+        for xcp_index, xcp_metrics in enumerate(gpu_metrics_output['xcp_stats.jpeg_busy']):
+            xcp_detail = []
+            for val in xcp_metrics.jpeg_busy:
+                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T, isActivity=True))
+            gpu_metrics_output['xcp_stats.jpeg_busy'][xcp_index] = xcp_detail
+
+    if 'xcp_stats.vcn_busy' in gpu_metrics_output:
+        for xcp_index, xcp_metrics in enumerate(gpu_metrics_output['xcp_stats.vcn_busy']):
+            xcp_detail = []
+            for val in xcp_metrics.vcn_busy:
+                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT16_T, isActivity=True))
+            gpu_metrics_output["xcp_stats.vcn_busy"][xcp_index] = xcp_detail
+
+    if 'xcp_stats.gfx_busy_acc' in gpu_metrics_output:
+        for xcp_index, xcp_metrics in enumerate(gpu_metrics_output['xcp_stats.gfx_busy_acc']):
+            xcp_detail = []
+            for val in xcp_metrics.gfx_busy_acc:
+                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T, isActivity=True))
+            gpu_metrics_output["xcp_stats.gfx_busy_acc"][xcp_index] = xcp_detail
+
+    if 'xcp_stats.gfx_below_host_limit_acc' in gpu_metrics_output:
+        for xcp_index, xcp_metrics in enumerate(gpu_metrics_output['xcp_stats.gfx_below_host_limit_acc']):
+            xcp_detail = []
+            for val in xcp_metrics.gfx_below_host_limit_acc:
+                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T, isActivity=True))
+            gpu_metrics_output['xcp_stats.gfx_below_host_limit_acc'][xcp_index] = xcp_detail
     return gpu_metrics_output
 
 
