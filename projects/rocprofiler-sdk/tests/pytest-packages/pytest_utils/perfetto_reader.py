@@ -22,6 +22,7 @@
 
 from __future__ import absolute_import
 
+import os
 import re
 import sys
 import time
@@ -29,6 +30,11 @@ import pandas as pd
 
 from collections import OrderedDict
 from perfetto.trace_processor import TraceProcessor, TraceProcessorConfig
+
+
+PerfettoTraceProcessorShellPath = os.path.join(
+    os.path.dirname(__file__), "trace_processor_shell"
+)
 
 
 class PerfettoReader:
@@ -168,6 +174,10 @@ class PerfettoReader:
                     cfg = TraceProcessorConfig(verbose=verbosity)
                     if hasattr(cfg, "load_timeout"):
                         cfg.load_timeout = timeout_v + i
+                    if hasattr(cfg, "bin_path") and os.path.exists(
+                        PerfettoTraceProcessorShellPath
+                    ):
+                        cfg.bin_path = PerfettoTraceProcessorShellPath
                     return TraceProcessor(trace=(trace_v), config=cfg)
                 except Exception as e:
                     nwait = i + 1

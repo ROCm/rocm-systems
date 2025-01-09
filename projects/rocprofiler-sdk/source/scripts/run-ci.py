@@ -57,7 +57,7 @@ def generate_custom(args, cmake_args, ctest_args):
     SOURCE_DIR = os.path.realpath(args.source_dir)
     BINARY_DIR = os.path.realpath(args.binary_dir)
     CMAKE_ARGS = " ".join(cmake_args)
-    CTEST_ARGS = " ".join(ctest_args)
+    CTEST_ARGS = " ".join(['"{}"'.format(x.replace('"', '\\"')) for x in ctest_args])
 
     GIT_CMD = which("git", require=True)
     GCOV_CMD = which("gcov", require=False)
@@ -199,7 +199,7 @@ def generate_custom(args, cmake_args, ctest_args):
 
         set(CTEST_OUTPUT_ON_FAILURE TRUE)
         set(CTEST_USE_LAUNCHERS TRUE)
-        set(CMAKE_CTEST_ARGUMENTS --output-on-failure {CTEST_ARGS})
+        set(CMAKE_CTEST_ARGUMENTS "--output-on-failure" {CTEST_ARGS})
 
         set(CTEST_CUSTOM_MAXIMUM_NUMBER_OF_ERRORS "100")
         set(CTEST_CUSTOM_MAXIMUM_NUMBER_OF_WARNINGS "100")
