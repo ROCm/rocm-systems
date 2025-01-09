@@ -163,7 +163,7 @@ struct kfd_ioctl_set_memory_policy_args {
 	__u32 gpu_id;			/* to KFD */
 	__u32 default_policy;		/* to KFD */
 	__u32 alternate_policy;		/* to KFD */
-	__u32 pad;
+	__u32 misc_process_flag;        /* to KFD */
 };
 
 /*
@@ -362,6 +362,9 @@ enum kfd_dbg_trap_exception_code {
 			(!!(KFD_EC_MASK(ecode) & KFD_EC_MASK_DEVICE))
 #define KFD_DBG_EC_TYPE_IS_PROCESS(ecode)				\
 			(!!(KFD_EC_MASK(ecode) & KFD_EC_MASK_PROCESS))
+
+/* Misc. per process flags */
+#define ENABLE_MFMA_HIGH_PRECISION              (1 << 0)
 
 enum kfd_dbg_runtime_state {
 	DEBUG_RUNTIME_STATE_DISABLED = 0,

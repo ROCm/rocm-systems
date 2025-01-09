@@ -2004,7 +2004,8 @@ HSAKMT_STATUS hsakmt_fmm_release(void *address)
 }
 
 static int fmm_set_memory_policy(uint32_t gpu_id, int default_policy, int alt_policy,
-				 uintptr_t alt_base, uint64_t alt_size)
+				 uintptr_t alt_base, uint64_t alt_size,
+				 uint32_t misc_process_flags)
 {
 	struct kfd_ioctl_set_memory_policy_args args = {0};
 
@@ -2013,6 +2014,7 @@ static int fmm_set_memory_policy(uint32_t gpu_id, int default_policy, int alt_po
 	args.alternate_policy = alt_policy;
 	args.alternate_aperture_base = alt_base;
 	args.alternate_aperture_size = alt_size;
+	args.misc_process_flag = misc_process_flags;
 
 	return hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_SET_MEMORY_POLICY, &args);
 }
@@ -2517,10 +2519,10 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(unsigned int NumNodes)
 	uint32_t num_of_sysfs_nodes;
 	HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
 	char *disableCache, *pagedUserptr, *checkUserptr, *guardPagesStr, *reserveSvm;
-	char *maxVaAlignStr;
+	char *maxVaAlignStr, *mfmaHighPrecisionModeStr;
 	unsigned int guardPages = 1;
 	uint64_t svm_base = 0, svm_limit = 0;
-	uint32_t svm_alignment = 0;
+	uint32_t svm_alignment = 0, mfma_high_precision_mode = 0;
 
 	/* If HSA_DISABLE_CACHE is set to a non-0 value, disable caching */
 	disableCache = getenv("HSA_DISABLE_CACHE");
@@ -2549,6 +2551,9 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(unsigned int NumNodes)
 	if (!guardPagesStr || sscanf(guardPagesStr, "%u", &guardPages) != 1)
 		guardPages = 1;
 
+	mfmaHighPrecisionModeStr = getenv("HSA_HIGH_PRECISION_MODE");
+	mfma_high_precision_mode = (mfmaHighPrecisionModeStr &&
+				    strcmp(mfmaHighPrecisionModeStr, "0"));
 	/* Sets the max VA alignment order size during mapping. By default the order
 	 * size is set to 18(1G) for GFX950 to reduce TLB hits. If any non-gfx950
 	 * ASIC is found in the system, set back to 9(2MB).
@@ -2800,7 +2805,9 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(unsigned int NumNodes)
 						    KFD_IOC_CACHE_POLICY_COHERENT :
 						    KFD_IOC_CACHE_POLICY_NONCOHERENT,
 						    KFD_IOC_CACHE_POLICY_COHERENT,
-						    alt_base, alt_size);
+						    alt_base, alt_size,
+						    hsakmt_get_gfxv_by_node_id(i) == GFX_VERSION_GFX950 ?
+						    mfma_high_precision_mode : 0);
 			if (err) {
 				pr_err("Failed to set mem policy for GPU [0x%x]\n",
 				       process_apertures[i].gpu_id);
