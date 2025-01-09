@@ -106,10 +106,9 @@ void RdciHealthSubSystem::parse_cmd_opts(int argc, char** argv) {
               components |= RDC_HEALTH_WATCH_PCIE;
               components |= RDC_HEALTH_WATCH_XGMI;
               components |= RDC_HEALTH_WATCH_MEM;
-              //To do:
-              //components |= RDC_HEALTH_WATCH_INFOROM;
-              //components |= RDC_HEALTH_WATCH_THERMAL;
-              //components |= RDC_HEALTH_WATCH_POWER;
+              components |= RDC_HEALTH_WATCH_EEPROM;
+              components |= RDC_HEALTH_WATCH_THERMAL;
+              components |= RDC_HEALTH_WATCH_POWER;
               break;
 
             case 'p':
@@ -120,17 +119,13 @@ void RdciHealthSubSystem::parse_cmd_opts(int argc, char** argv) {
               components |= RDC_HEALTH_WATCH_MEM;
               break;
 
-            case 'i':
-              //To do:
-              //components |= RDC_HEALTH_WATCH_INFOROM;
-              throw RdcException(RDC_ST_NOT_SUPPORTED, "Not supported");
+            case 'e':
+              components |= RDC_HEALTH_WATCH_EEPROM;
               break;
 
             case 't':
-              //To do:
-              //components |= RDC_HEALTH_WATCH_THERMAL;
-              //components |= RDC_HEALTH_WATCH_POWER;
-              throw RdcException(RDC_ST_NOT_SUPPORTED, "Not supported");
+              components |= RDC_HEALTH_WATCH_THERMAL;
+              components |= RDC_HEALTH_WATCH_POWER;
               break;
 
             case 'x':
@@ -187,8 +182,8 @@ void RdciHealthSubSystem::show_help() const {
   std::cout << "                                  a - watch all components\n";
   std::cout << "                                  p - watch PCIe\n";
   std::cout << "                                  m - watch Memory\n";
-  //std::cout << "                                  i - watch infoROM\n";
-  //std::cout << "                                  t - watch power and thermal\n";
+  std::cout << "                                  e - watch EEPROM\n";
+  std::cout << "                                  t - watch power and thermal\n";
   std::cout << "                                  x - watch XGMI\n";
   std::cout << "  -c  --check                    Check to see if any errors or warnings have "
             << "occurred in the currently monitored watches.\n";
@@ -215,9 +210,9 @@ void RdciHealthSubSystem::get_watches() const {
     std::cout << "{\"Component\" : \"PCIe\", \"Status\" : \"" << ((components & RDC_HEALTH_WATCH_PCIE) ? on : off).c_str() << "\"},";
     std::cout << "{\"Component\" : \"XGMI\", \"Status\" : \"" << ((components & RDC_HEALTH_WATCH_XGMI) ? on : off).c_str() << "\"},";
     std::cout << "{\"Component\" : \"Memory\", \"Status\" : \"" << ((components & RDC_HEALTH_WATCH_MEM) ? on : off).c_str() << "\"},";
-    /*std::cout << "{\"Component\" : \"InfoROM\", \"Status\" : \"" << ((components & RDC_HEALTH_WATCH_INFOROM) ? on : off).c_str() << "\"},";
+    std::cout << "{\"Component\" : \"EEPROM\", \"Status\" : \"" << ((components & RDC_HEALTH_WATCH_EEPROM) ? on : off).c_str() << "\"},";
     std::cout << "{\"Component\" : \"Thermal\", \"Status\" : \"" << ((components & RDC_HEALTH_WATCH_THERMAL) ? on : off).c_str() << "\"},";
-    std::cout << "{\"Component\" : \"Power\", \"Status\" : \"" << ((components & RDC_HEALTH_WATCH_POWER) ? on : off).c_str() << "\"}";*/
+    std::cout << "{\"Component\" : \"Power\", \"Status\" : \"" << ((components & RDC_HEALTH_WATCH_POWER) ? on : off).c_str() << "\"}";
     std::cout << "]";
   } else {
     std::cout << "Health monitor systems status:" << std::endl;
@@ -229,12 +224,12 @@ void RdciHealthSubSystem::get_watches() const {
               << std::setw(50) << std::left << ((components & RDC_HEALTH_WATCH_XGMI) ? on : off).c_str() << "|\n";
     std::cout << "|" << std::setw(20) << std::left << " Memory"  << "| "
               << std::setw(50) << std::left << ((components & RDC_HEALTH_WATCH_MEM) ? on : off).c_str() << "|\n";
-    /*std::cout << "|" << std::setw(20) << std::left << " InfoROM" << "| "
-              << std::setw(50) << std::left << ((components & RDC_HEALTH_WATCH_INFOROM) ? on : off).c_str() << "|\n";
+    std::cout << "|" << std::setw(20) << std::left << " EEPROM" << "| "
+              << std::setw(50) << std::left << ((components & RDC_HEALTH_WATCH_EEPROM) ? on : off).c_str() << "|\n";
     std::cout << "|" << std::setw(20) << std::left << " Thermal" << "| "
               << std::setw(50) << std::left << ((components & RDC_HEALTH_WATCH_THERMAL) ? on : off).c_str() << "|\n";
     std::cout << "|" << std::setw(20) << std::left << " Power"   << "| "
-              << std::setw(50) << std::left << ((components & RDC_HEALTH_WATCH_POWER) ? on : off).c_str() << "|\n";*/
+              << std::setw(50) << std::left << ((components & RDC_HEALTH_WATCH_POWER) ? on : off).c_str() << "|\n";
     std::cout << "+--------------------+" //"-" width :20
               << "---------------------------------------------------+\n"; //-" width :51
   }
@@ -282,8 +277,8 @@ std::string RdciHealthSubSystem::component_string(rdc_health_system_t component)
       case RDC_HEALTH_WATCH_MEM:
         return "Memory system: ";
 
-      case RDC_HEALTH_WATCH_INFOROM:
-        return "Inforom system: ";
+      case RDC_HEALTH_WATCH_EEPROM:
+        return "EEPROM system: ";
 
       case RDC_HEALTH_WATCH_THERMAL:
         return "Thermal system:";

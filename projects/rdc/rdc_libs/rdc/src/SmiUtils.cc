@@ -58,6 +58,9 @@ rdc_status_t Smi2RdcError(amdsmi_status_t rsmi) {
     case AMDSMI_STATUS_NO_PERM:
       return RDC_ST_PERM_ERROR;
 
+    case AMDSMI_STATUS_CORRUPTED_EEPROM:
+      return RDC_ST_CORRUPTED_EEPROM;
+
     case AMDSMI_STATUS_BUSY:
     case AMDSMI_STATUS_UNKNOWN_ERROR:
     case AMDSMI_STATUS_INTERNAL_EXCEPTION:

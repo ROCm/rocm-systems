@@ -45,6 +45,12 @@ rdc_status_t get_watches(rdc_handle_t rdc_handle, rdc_gpu_group_t group_id) {
               << std::setw(50) << std::left << ((components & RDC_HEALTH_WATCH_XGMI) ? on : off).c_str() << "|\n";
     std::cout << "|" << std::setw(20) << std::left << " Memory"  << "| "
               << std::setw(50) << std::left << ((components & RDC_HEALTH_WATCH_MEM) ? on : off).c_str() << "|\n";
+    std::cout << "|" << std::setw(20) << std::left << " EEPROM"  << "| "
+              << std::setw(50) << std::left << ((components & RDC_HEALTH_WATCH_EEPROM) ? on : off).c_str() << "|\n";
+    std::cout << "|" << std::setw(20) << std::left << " Thermal" << "| "
+              << std::setw(50) << std::left << ((components & RDC_HEALTH_WATCH_THERMAL) ? on : off).c_str() << "|\n";
+    std::cout << "|" << std::setw(20) << std::left << " Power"   << "| "
+              << std::setw(50) << std::left << ((components & RDC_HEALTH_WATCH_POWER) ? on : off).c_str() << "|\n";
     std::cout << "+--------------------+" //"-" width :20
               << "---------------------------------------------------+\n"; //-" width :51
   }
@@ -79,8 +85,8 @@ std::string component_string(rdc_health_system_t component) {
       case RDC_HEALTH_WATCH_MEM:
         return "Memory system: ";
 
-      case RDC_HEALTH_WATCH_INFOROM:
-        return "Inforom system: ";
+      case RDC_HEALTH_WATCH_EEPROM:
+        return "EEPROM system: ";
 
       case RDC_HEALTH_WATCH_THERMAL:
         return "Thermal system:";
@@ -280,7 +286,9 @@ int main(int, char**) {
 
   // (3) set health watches.
   unsigned int components;
-  components = RDC_HEALTH_WATCH_PCIE | RDC_HEALTH_WATCH_XGMI | RDC_HEALTH_WATCH_MEM;
+  components = RDC_HEALTH_WATCH_PCIE | RDC_HEALTH_WATCH_XGMI | RDC_HEALTH_WATCH_MEM
+                          | RDC_HEALTH_WATCH_EEPROM | RDC_HEALTH_WATCH_THERMAL
+                          | RDC_HEALTH_WATCH_POWER;
   result = rdc_health_set(rdc_handle, group_id, components);
   if (result != RDC_ST_OK) {
     std::cout << "Error setting health watches. Return: " << rdc_status_string(result)
