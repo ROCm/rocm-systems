@@ -187,12 +187,12 @@ typedef enum {
   /**
    * @brief GPU usage related fields
    */
-  RDC_FI_GPU_UTIL = 500,       //!< GPU Utilization
-  RDC_FI_GPU_MEMORY_USAGE,     //!< Memory usage of the GPU instance
-  RDC_FI_GPU_MEMORY_TOTAL,     //!< Total memory of the GPU instance
-  RDC_FI_GPU_MM_ENC_UTIL,      //!< Multimedia encoder busy percentage
-  RDC_FI_GPU_MM_DEC_UTIL,      //!< Multimedia decoder busy percentage
-  RDC_FI_GPU_MEMORY_ACTIVITY,  //!< Memory busy percentage
+  RDC_FI_GPU_UTIL = 500,            //!< GPU Utilization
+  RDC_FI_GPU_MEMORY_USAGE,          //!< Memory usage of the GPU instance
+  RDC_FI_GPU_MEMORY_TOTAL,          //!< Total memory of the GPU instance
+  RDC_FI_GPU_MM_ENC_UTIL,           //!< Multimedia encoder busy percentage
+  RDC_FI_GPU_MM_DEC_UTIL,           //!< Multimedia decoder busy percentage
+  RDC_FI_GPU_MEMORY_ACTIVITY,       //!< Memory busy percentage
   RDC_FI_GPU_MEMORY_MAX_BANDWIDTH,  //<! The Memory max bandwidth at current memory clock in Mb/Second
   RDC_FI_GPU_MEMORY_CUR_BANDWIDTH,  //<! The Memory current bandwidth in Mb/Second
 
@@ -515,12 +515,15 @@ typedef enum {
   RDC_DIAG_TEST_FIRST = 0,
   //!< The diagnostic test pass
   RDC_DIAG_COMPUTE_PROCESS = RDC_DIAG_TEST_FIRST,
-  RDC_DIAG_COMPUTE_QUEUE,   //!< The Compute Queue is ready
-  RDC_DIAG_SYS_MEM_CHECK,   //!< Check System memory
-  RDC_DIAG_NODE_TOPOLOGY,   //!< Report node topology
-  RDC_DIAG_RVS_TEST,        //!< TODO: Replace with real RVS tests
-  RDC_DIAG_GPU_PARAMETERS,  //!< GPU parameters in range
-  RDC_DIAG_TEST_LAST = RDC_DIAG_GPU_PARAMETERS
+  RDC_DIAG_COMPUTE_QUEUE,    //!< The Compute Queue is ready
+  RDC_DIAG_SYS_MEM_CHECK,    //!< Check System memory
+  RDC_DIAG_NODE_TOPOLOGY,    //!< Report node topology
+  RDC_DIAG_GPU_PARAMETERS,   //!< GPU parameters in range
+  RDC_DIAG_RVS_GST_TEST,     //!< RVS GST test
+  RDC_DIAG_RVS_MEMBW_TEST,   //!< RVS bandwidth test
+  RDC_DIAG_RVS_H2DD2H_TEST,  //!< RVS Host<->Device transfer speed test
+  RDC_DIAG_RVS_IET_TEST,     //!< RVS IET test
+  RDC_DIAG_TEST_LAST = RDC_DIAG_RVS_IET_TEST
 } rdc_diag_test_cases_t;
 
 /**
@@ -593,7 +596,7 @@ typedef enum {
   RDC_POLICY_COND_FIRST = 0,
   RDC_POLICY_COND_MAX_PAGE_RETRIED = RDC_POLICY_COND_FIRST,  //!< Max number of page retired
   RDC_POLICY_COND_THERMAL,  //!< Temperature threshold, millidegree Celsius
-  RDC_POLICY_COND_POWER,    //!< Power threshold, unit milliwatt
+  RDC_POLICY_COND_POWER,    //!< Power threshold, unit microwatt
   RDC_POLICY_COND_LAST = RDC_POLICY_COND_POWER,
   RDC_POLICY_COND_MAX
 } rdc_policy_condition_type_t;
@@ -660,13 +663,13 @@ typedef enum {
 
 typedef struct {
   uint32_t gpu_index;
-  uint32_t num_of_links;                              // The size of the array link_states
-  rdc_topology_link_type_t link_types;                // XGMI, PCIe, and so on
+  uint32_t num_of_links;                // The size of the array link_states
+  rdc_topology_link_type_t link_types;  // XGMI, PCIe, and so on
   rdc_link_state_t link_states[RDC_MAX_NUM_OF_LINKS];
 } rdc_gpu_link_status_t;
 
 typedef struct {
-  int32_t num_of_gpus;                                // The size of gpus array
+  int32_t num_of_gpus;  // The size of gpus array
   rdc_gpu_link_status_t gpus[RDC_MAX_NUM_DEVICES];
 } rdc_link_status_t;
 
@@ -1521,7 +1524,7 @@ rdc_status_t rdc_health_check(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_i
  */
 rdc_status_t rdc_health_clear(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id);
 
- /**
+/**
  *  @brief Get the topology of the device
  *
  *  @details topology of the device

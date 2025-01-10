@@ -37,8 +37,11 @@ rdc_status_t rdc_diag_test_cases_query(rdc_diag_test_cases_t test_cases[MAX_TEST
     return RDC_ST_BAD_PARAMETER;
   }
 
-  *test_case_count = 1;
-  test_cases[0] = RDC_DIAG_RVS_TEST;
+  *test_case_count = 4;
+  test_cases[0] = RDC_DIAG_RVS_GST_TEST;
+  test_cases[1] = RDC_DIAG_RVS_MEMBW_TEST;
+  test_cases[2] = RDC_DIAG_RVS_H2DD2H_TEST;
+  test_cases[3] = RDC_DIAG_RVS_IET_TEST;
 
   return RDC_ST_OK;
 }
@@ -53,10 +56,6 @@ rdc_status_t rdc_diag_test_case_run(rdc_diag_test_cases_t test_case,
     return RDC_ST_BAD_PARAMETER;
   }
 
-  if (test_case != RDC_DIAG_RVS_TEST) {
-    return RDC_ST_BAD_PARAMETER;
-  }
-
   amd::rdc::RdcRVSBase rvs_base;
 
   // init the return data
@@ -66,17 +65,30 @@ rdc_status_t rdc_diag_test_case_run(rdc_diag_test_cases_t test_case,
   result->per_gpu_result_count = 0;
 
   if (callback != nullptr && callback->callback != nullptr && callback->cookie != nullptr) {
-    std::string str = "RVS test";
+    std::string str = "RVS test [" + test_to_name.at(test_case) + "]";
     callback->callback(callback->cookie, str.data());
   }
   switch (test_case) {
-    case RDC_DIAG_RVS_TEST:
-      strncpy_with_null(result->info, "Finished running RDC_DIAG_RVS_TEST", MAX_DIAG_MSG_LENGTH);
-      rvs_status = rvs_base.run_rvs_app(config, config_size, callback);
+    case RDC_DIAG_RVS_GST_TEST:
+    case RDC_DIAG_RVS_MEMBW_TEST:
+    case RDC_DIAG_RVS_H2DD2H_TEST:
+    case RDC_DIAG_RVS_IET_TEST: {
+      const std::string test_name = "Finished running " + test_to_name.at(test_case);
+      const std::string predefined_config = test_to_conf.at(test_case);
+      // +1 to copy null
+      strncpy_with_null(result->info, test_name.c_str(), test_name.length() + 1);
+      if (config == nullptr || config_size == 0) {
+        rvs_status = rvs_base.run_rvs_app(predefined_config.c_str(), predefined_config.length() + 1,
+                                          callback);
+      } else {
+        rvs_status = rvs_base.run_rvs_app(config, config_size, callback);
+      }
       break;
+    }
     default:
       result->status = RDC_DIAG_RESULT_SKIP;
       strncpy_with_null(result->info, "Not supported yet", MAX_DIAG_MSG_LENGTH);
+      return RDC_ST_BAD_PARAMETER;
   }
 
   if (rvs_status != RVS_STATUS_SUCCESS) {
