@@ -41,6 +41,7 @@ extern "C" {
 #else
 #include <stddef.h>
 #include <stdint.h>
+#include <assert.h>
 #endif  // __cplusplus
 
 /** \file rdc.h
