@@ -437,4 +437,4 @@ TEST_CASE("Unit_hipIpcEventHandle_ParameterValidation") {
  * @}
  */
 
-#endif
+#endif // __linux__

@@ -255,4 +255,4 @@ TEST_CASE("Unit_hipDeviceGetPCIBusId_CheckPciBusIDWithLspci") {
 
   REQUIRE(deviceMatchCount == deviceCount);
 }
-#endif
+#endif //__linux__

@@ -26,9 +26,19 @@ THE SOFTWARE.
 #ifdef __linux__
 #include <unistd.h>
 #include <sys/wait.h>
+#endif // __linux__
 
 #define MAX_SIZE 30
 #define VISIBLE_DEVICE 0
+
+#ifdef _WIN32
+static int setenv(const char* name, const char* value, int overwrite) {
+  REQUIRE(overwrite == 1);
+  return _putenv_s(name, value);
+}
+
+static int unsetenv(const char* name) { return _putenv_s(name, ""); }
+#endif // _WIN32
 
 /**
  * Validate behavior of hipGetDeviceCount for masked devices.
@@ -51,4 +61,3 @@ TEST_CASE("Unit_hipGetDeviceCount_MaskedDevices") {
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   REQUIRE(numDevices == 1);
 }
-#endif
