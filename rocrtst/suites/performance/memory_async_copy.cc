@@ -69,6 +69,9 @@
     }                                                                                              \
   }
 
+/* PCIE BDF ID: 0xC81407 is specific to DTIF platform */
+static const uint32_t kDtifBdfId = 0xC81407;
+
 constexpr const size_t MemoryAsyncCopy::Size[kNumGranularity];
 constexpr const char* MemoryAsyncCopy::Str[kNumGranularity];
 constexpr const int MemoryAsyncCopy::kMaxCopySize;
@@ -689,16 +692,19 @@ static hsa_status_t GetGPUAgents(hsa_agent_t agent, void* data) {
   err = hsa_agent_get_info(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_DOMAIN, &pci_domain_id);
   RET_IF_HSA_ERR(err);
 
-  hwloc_obj_t gpu_hwl_dev;
-  gpu_hwl_dev = hwloc_get_pcidev_by_busid(ptr->topology(), pci_domain_id, bus, device,
-                                                                    function);
+  hwloc_obj_t gpu_numa_node = nullptr;
+  if (agent_bdf_id != kDtifBdfId) {
+    hwloc_obj_t gpu_hwl_dev;
+    gpu_hwl_dev = hwloc_get_pcidev_by_busid(ptr->topology(), pci_domain_id, bus, device,
+                                                                      function);
 
-  if (gpu_hwl_dev == nullptr) {
-    return HSA_STATUS_ERROR;
+    if (gpu_hwl_dev == nullptr) {
+      return HSA_STATUS_ERROR;
+    }
+
+    gpu_numa_node = hwloc_get_ancestor_obj_by_type(ptr->topology(),
+                                              HWLOC_OBJ_NUMANODE, gpu_hwl_dev);
   }
-
-  hwloc_obj_t gpu_numa_node = hwloc_get_ancestor_obj_by_type(ptr->topology(),
-                                             HWLOC_OBJ_NUMANODE, gpu_hwl_dev);
 
   if (gpu_numa_node != nullptr) {
     char s1[256], s2[256];
