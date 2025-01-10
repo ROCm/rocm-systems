@@ -101,6 +101,13 @@ if __name__ == "__main__":
         default=[],
         nargs="*",
     )
+    parser.add_argument(
+        "--counter-names",
+        type=str,
+        help="Require counter name in the traces",
+        default=[],
+        nargs="*",
+    )
 
     args = parser.parse_args()
 
@@ -173,6 +180,18 @@ if __name__ == "__main__":
                     print(f"  - {key:20} :: {val}")
         print(f"Number of entries with {key_name} = {count} (expected: {key_count})")
         if key_count != count:
+            ret = 1
+
+    for counter_name in args.counter_names:
+        sum_counter_values = tp.query(
+            f"""SELECT SUM(counter.value) AS total_value FROM counter_track JOIN counter ON
+              counter.track_id = counter_track.id WHERE counter_track.name LIKE
+              '{counter_name}%'"""
+        )
+        total_value = 0
+        for row in sum_counter_values:
+            total_value = row.total_value if row.total_value is not None else -1
+        if total_value < 0:
             ret = 1
 
     if ret == 0:

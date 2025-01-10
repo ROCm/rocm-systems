@@ -157,7 +157,7 @@ jobs:
           -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
           -DROCPROFSYS_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10;py3.11"
           -DROCPROFSYS_MAX_THREADS=64
-          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl"
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;videodecode"
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
           -DMPI_HEADERS_ALLOW_MPICH=OFF
 
@@ -248,7 +248,7 @@ jobs:
         rocm-version: ['6.3']
         mpi-headers: ['OFF']
         build-jobs: ['3']
-        ctest-exclude: ['-LE "transpose"']
+        ctest-exclude: ['-LE "transpose|videodecode"']
 
     env:
       BUILD_TYPE: MinSizeRel
@@ -268,10 +268,16 @@ jobs:
         command: |
           apt-get update &&
           apt-get install -y software-properties-common wget gnupg2 &&
-          wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add - &&
-          echo "deb [arch=amd64] https://repo.radeon.com/rocm/apt/${{ matrix.rocm-version }}/ ubuntu main" | tee /etc/apt/sources.list.d/rocm.list &&
+          ROCM_VERSION=${{ matrix.rocm-version }} &&
+          ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}') &&
+          ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}') &&
+          ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) )) &&
+          echo "ROCM_MAJOR=${ROCM_MAJOR} ROCM_MINOR=${ROCM_MINOR} ROCM_VERSN=${ROCM_VERSN}" &&
+          wget -q https://repo.radeon.com/amdgpu-install/${{ matrix.rocm-version }}/ubuntu/focal/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb &&
+          apt-get install -y ./amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb &&
           apt-get update &&
           apt-get install -y autoconf bison build-essential clang curl gettext libfabric-dev libnuma1 libomp-dev libopenmpi-dev libpapi-dev libtool libudev1 m4 openmpi-bin python3-pip rocm-dev texinfo &&
+          apt-get install -y rocdecode-dev libavformat-dev libavcodec-dev &&
           wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v47.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
           chmod +x /opt/trace_processor/bin/trace_processor_shell &&
           python3 -m pip install --upgrade pip &&
@@ -483,7 +489,7 @@ jobs:
           -DDYNINST_BUILD_STATIC_LIBS=OFF
           -DDYNINST_ELFUTILS_DOWNLOAD_VERSION=${{ env.ELFUTILS_DOWNLOAD_VERSION }}
           -DROCPROFSYS_MAX_THREADS=64
-          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl"
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;videodecode"
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
           -DMPI_HEADERS_ALLOW_MPICH=ON
 
@@ -622,5 +628,5 @@ jobs:
           -DROCPROFSYS_USE_ROCM=OFF
           -DROCPROFSYS_USE_RCCL=OFF
           -DROCPROFSYS_MAX_THREADS=64
-          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl"
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;videodecode"
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}

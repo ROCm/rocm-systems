@@ -102,7 +102,7 @@ jobs:
           -DROCPROFSYS_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10;py3.11"
           -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON
           -DROCPROFSYS_MAX_THREADS=64
-          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl"
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;videodecode"
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
 
     - name: Install
