@@ -136,8 +136,11 @@ std::string RdciDiagSubSystem::get_test_name(rdc_diag_test_cases_t test_case) co
       {RDC_DIAG_COMPUTE_QUEUE, "Compute Queue ready"},
       {RDC_DIAG_SYS_MEM_CHECK, "System memory check"},
       {RDC_DIAG_NODE_TOPOLOGY, "Node topology check"},
-      {RDC_DIAG_RVS_TEST, "Pre-defined config RVS check"},
       {RDC_DIAG_GPU_PARAMETERS, "GPU parameters check"},
+      {RDC_DIAG_RVS_GST_TEST, "RVS GST test"},
+      {RDC_DIAG_RVS_MEMBW_TEST, "RVS babel memory bandwidth test"},
+      {RDC_DIAG_RVS_H2DD2H_TEST, "RVS Host<->Device transfer speed test"},
+      {RDC_DIAG_RVS_IET_TEST, "RVS IET test"},
       {RDC_DIAG_TEST_LAST, "Unknown"}};
 
   auto test_name = test_desc.find(test_case);

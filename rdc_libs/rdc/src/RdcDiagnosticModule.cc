@@ -88,7 +88,10 @@ rdc_status_t RdcDiagnosticModule::rdc_diagnostic_run(const rdc_group_info_t& gpu
   }
 
   if (level >= RDC_DIAG_LVL_MED) {  // Medium run and above
-    rdc_runs.push_back(RDC_DIAG_RVS_TEST);
+    rdc_runs.push_back(RDC_DIAG_RVS_GST_TEST);
+    rdc_runs.push_back(RDC_DIAG_RVS_MEMBW_TEST);
+    rdc_runs.push_back(RDC_DIAG_RVS_H2DD2H_TEST);
+    rdc_runs.push_back(RDC_DIAG_RVS_IET_TEST);
   }
 
   if (callback != nullptr && callback->callback != nullptr && callback->cookie != nullptr) {
