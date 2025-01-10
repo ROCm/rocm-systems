@@ -27,12 +27,26 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <unordered_set>
 
 namespace rocprofiler
 {
 namespace att_wrapper
 {
 #define ATT_CSV_NAME "att_output.csv"
+
+// Builds a json filetree by recursively inserting "path" into the json object.
+void
+navigate(nlohmann::json& json, std::vector<std::string>& path, const std::string& filename)
+{
+    if(path.size() == 1) json[path.at(0)] = filename;
+
+    if(path.size() <= 1) return;
+
+    auto& j = json[path.at(0)];
+    path.erase(path.begin());
+    navigate(j, path, filename);
+}
 
 CodeFile::CodeFile(const Fspath& _dir, std::shared_ptr<AddressTable> _table)
 : dir(_dir)
@@ -90,6 +104,8 @@ CodeFile::~CodeFile()
 
     nlohmann::json jcode;
 
+    std::unordered_set<std::string> snapshots{};
+
     for(auto& line : vec)
     {
         auto& isa = *line.second;
@@ -110,6 +126,14 @@ CodeFile::~CodeFile()
              << ", " << isa.hitcount << ", " << isa.latency << "]";
 
         jcode.push_back(nlohmann::json::parse(code.str()));
+
+        size_t lineref = isa.code_line->comment.rfind(':');
+        if(lineref == 0 || lineref == std::string::npos) continue;
+
+        auto source_ref = isa.code_line->comment.substr(0, lineref);
+
+        if(!source_ref.empty() && snapshots.find(source_ref) == snapshots.end())
+            snapshots.insert(std::move(source_ref));
     }
 
     nlohmann::json json;
@@ -117,6 +141,25 @@ CodeFile::~CodeFile()
     json["version"] = TOOL_VERSION;
 
     OutputFile(filename) << json;
+
+    nlohmann::json jsnapfiletree;
+    size_t         num_snap = 0;
+
+    for(auto& source_ref : snapshots)
+    {
+        if(rocprofiler::common::filesystem::exists(source_ref))
+        {
+            Fspath            filepath(source_ref);
+            std::stringstream newfile;
+            newfile << "source_" << (num_snap++) << '_' << filepath.filename().string();
+
+            std::vector<std::string> path_elements(filepath.begin(), filepath.end());
+            navigate(jsnapfiletree, path_elements, newfile.str());
+            rocprofiler::common::filesystem::copy(filepath, dir / newfile.str());
+        }
+    }
+
+    if(num_snap != 0) OutputFile(dir / "snapshots.json") << jsnapfiletree;
 }
 
 }  // namespace att_wrapper

@@ -85,6 +85,7 @@ rocprofiler_configure_dispatch_thread_trace_service(
             case ROCPROFILER_ATT_PARAMETER_PERFCOUNTERS_CTRL:
                 pack.perfcounter_ctrl = param.value;
                 break;
+            case ROCPROFILER_ATT_PARAMETER_SERIALIZE_ALL: pack.bSerialize = param.value != 0; break;
             case ROCPROFILER_ATT_PARAMETER_LAST: return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
         }
     }
@@ -143,6 +144,9 @@ rocprofiler_configure_agent_thread_trace_service(
             break;
             case ROCPROFILER_ATT_PARAMETER_PERFCOUNTERS_CTRL:
                 pack.perfcounter_ctrl = param.value;
+                break;
+            case ROCPROFILER_ATT_PARAMETER_SERIALIZE_ALL:
+                if(param.value != 0) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
                 break;
             case ROCPROFILER_ATT_PARAMETER_LAST: return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
         }

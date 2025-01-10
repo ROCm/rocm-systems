@@ -71,6 +71,7 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* tool_data)
         "code object tracing service configure");
 
     std::vector<rocprofiler_att_parameter_t> params{};
+    params.push_back({ROCPROFILER_ATT_PARAMETER_SERIALIZE_ALL, 1});
 
     ROCPROFILER_CALL(
         rocprofiler_configure_dispatch_thread_trace_service(client_ctx,

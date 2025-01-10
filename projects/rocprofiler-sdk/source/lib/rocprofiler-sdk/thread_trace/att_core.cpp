@@ -355,7 +355,7 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
     if(control_flags == ROCPROFILER_ATT_CONTROL_NONE)
     {
         auto empty = std::make_unique<hsa::EmptyAQLPacket>();
-        maybe_add_serialization(empty);
+        if(params.bSerialize) maybe_add_serialization(empty);
         return empty;
     }
 
@@ -396,7 +396,8 @@ void
 DispatchThreadTracer::post_kernel_call(DispatchThreadTracer::inst_pkt_t&       aql,
                                        const hsa::Queue::queue_info_session_t& session)
 {
-    SignalSerializerExit signal(session);
+    std::unique_ptr<SignalSerializerExit> signal{nullptr};
+    if(params.bSerialize) signal = std::make_unique<SignalSerializerExit>(session);
 
     if(post_move_data.load() < 1) return;
 
@@ -413,6 +414,8 @@ DispatchThreadTracer::post_kernel_call(DispatchThreadTracer::inst_pkt_t&       a
         auto it = agents.find(pkt->GetAgent());
         if(it != agents.end() && it->second != nullptr)
             it->second->iterate_data(pkt->GetHandle(), session.user_data);
+
+        if(!signal) std::make_unique<SignalSerializerExit>(session);
     }
 }
 
@@ -420,28 +423,33 @@ void
 DispatchThreadTracer::start_context()
 {
     using corr_id_map_t = hsa::Queue::queue_info_session_t::external_corr_id_map_t;
+
     CHECK_NOTNULL(hsa::get_queue_controller())->enable_serialization();
 
     // Only one thread should be attempting to enable/disable this context
     client.wlock([&](auto& client_id) {
         if(client_id) return;
 
-        client_id = hsa::get_queue_controller()->add_callback(
-            std::nullopt,
-            [=](const hsa::Queue& q,
-                const hsa::rocprofiler_packet& /* kern_pkt */,
-                rocprofiler_kernel_id_t   kernel_id,
-                rocprofiler_dispatch_id_t dispatch_id,
-                rocprofiler_user_data_t*  user_data,
-                const corr_id_map_t& /* extern_corr_ids */,
-                const context::correlation_id* corr_id) {
-                return this->pre_kernel_call(q, kernel_id, dispatch_id, user_data, corr_id);
-            },
-            [=](const hsa::Queue& /* q */,
-                hsa::rocprofiler_packet /* kern_pkt */,
-                std::shared_ptr<hsa::Queue::queue_info_session_t>& session,
-                inst_pkt_t&                                        aql,
-                kernel_dispatch::profiling_time) { this->post_kernel_call(aql, *session); });
+        client_id =
+            CHECK_NOTNULL(hsa::get_queue_controller())
+                ->add_callback(
+                    std::nullopt,
+                    [=](const hsa::Queue& q,
+                        const hsa::rocprofiler_packet& /* kern_pkt */,
+                        rocprofiler_kernel_id_t   kernel_id,
+                        rocprofiler_dispatch_id_t dispatch_id,
+                        rocprofiler_user_data_t*  user_data,
+                        const corr_id_map_t& /* extern_corr_ids */,
+                        const context::correlation_id* corr_id) {
+                        return this->pre_kernel_call(q, kernel_id, dispatch_id, user_data, corr_id);
+                    },
+                    [=](const hsa::Queue& /* q */,
+                        hsa::rocprofiler_packet /* kern_pkt */,
+                        std::shared_ptr<hsa::Queue::queue_info_session_t>& session,
+                        inst_pkt_t&                                        aql,
+                        kernel_dispatch::profiling_time) {
+                        this->post_kernel_call(aql, *session);
+                    });
     });
 }
 
@@ -452,12 +460,11 @@ DispatchThreadTracer::stop_context()  // NOLINT(readability-convert-member-funct
         if(!client_id) return;
 
         // Remove our callbacks from HSA's queue controller
-        hsa::get_queue_controller()->remove_callback(*client_id);
+        CHECK_NOTNULL(hsa::get_queue_controller())->remove_callback(*client_id);
         client_id = std::nullopt;
     });
 
-    auto* controller = hsa::get_queue_controller();
-    if(controller) controller->disable_serialization();
+    CHECK_NOTNULL(hsa::get_queue_controller())->disable_serialization();
 }
 
 void

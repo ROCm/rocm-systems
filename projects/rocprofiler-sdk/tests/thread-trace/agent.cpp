@@ -120,6 +120,7 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
         parameters.push_back({ROCPROFILER_ATT_PARAMETER_SIMD_SELECT, 0xF});
         parameters.push_back({ROCPROFILER_ATT_PARAMETER_BUFFER_SIZE, 0x6000000});
         parameters.push_back({ROCPROFILER_ATT_PARAMETER_SHADER_ENGINE_MASK, 0x11});
+        parameters.push_back({ROCPROFILER_ATT_PARAMETER_SERIALIZE_ALL, 0});
 
         ROCPROFILER_CALL(
             rocprofiler_configure_agent_thread_trace_service(agent_ctx,

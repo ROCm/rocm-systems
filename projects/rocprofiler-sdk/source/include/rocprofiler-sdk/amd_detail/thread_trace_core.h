@@ -42,8 +42,9 @@ typedef enum
     ROCPROFILER_ATT_PARAMETER_SHADER_ENGINE_MASK,  ///< Bitmask of shader engines.
     ROCPROFILER_ATT_PARAMETER_BUFFER_SIZE,         ///< Size of combined GPU buffer for ATT
     ROCPROFILER_ATT_PARAMETER_SIMD_SELECT,         ///< Bitmask (GFX9) or ID (Navi) of SIMDs
-    ROCPROFILER_ATT_PARAMETER_PERFCOUNTERS_CTRL,
-    ROCPROFILER_ATT_PARAMETER_PERFCOUNTER,
+    ROCPROFILER_ATT_PARAMETER_PERFCOUNTERS_CTRL,   ///< Period [1,32] or disable (0) perfmon
+    ROCPROFILER_ATT_PARAMETER_PERFCOUNTER,         ///< Perfmon ID and SIMD mask
+    ROCPROFILER_ATT_PARAMETER_SERIALIZE_ALL,       ///< Serializes kernels not under thread trace
     ROCPROFILER_ATT_PARAMETER_LAST
 } rocprofiler_att_parameter_type_t;
 
