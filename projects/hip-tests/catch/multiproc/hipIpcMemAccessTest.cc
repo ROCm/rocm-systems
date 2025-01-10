@@ -177,6 +177,8 @@ TEST_CASE("Unit_hipIpcMemAccess_Semaphores") {
   HipTest::freeArrays<int>(nullptr, nullptr, nullptr, A_h, nullptr, C_h, false);
 }
 
+#endif // __linux__
+
 /**
  * Test Description
  * ------------------------
@@ -271,4 +273,3 @@ TEST_CASE("Unit_hipIpcMemAccess_ParameterValidation") {
  * @}
  */
 
-#endif

@@ -172,4 +172,4 @@ TEST_CASE("Unit_hipDeviceTotalMem_MaskedDevices") {
  * @}
  */
 
-#endif
+#endif //__linux__

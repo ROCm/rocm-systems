@@ -509,4 +509,4 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv1Flg3") {
   }
 }
 #endif
-#endif
+#endif // __linux__
