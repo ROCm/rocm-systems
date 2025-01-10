@@ -23,5 +23,6 @@ include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-overflow-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-annotate-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-causal-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-python-tests.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-videodecode-tests.cmake)
 
 add_subdirectory(source)
