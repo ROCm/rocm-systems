@@ -761,7 +761,7 @@
         "=== SWDEV-443630 - Below tests failed in stress test on 19/01/23 ===",
         "Unit_hipGetSetDevice_MultiThreaded",
     #endif
-    #if defined gfx90a || defined  gfx940 || defined gfx941 || defined gfx942
+    #if defined gfx90a || defined  gfx940 || defined gfx941 || defined gfx942 || defined gfx950
         "Unit_hipStreamPerThread_DeviceReset_1",
         "Unit_hipDeviceGetPCIBusId_Negative_PartialFill",
         "Unit_hipInit_Negative",
