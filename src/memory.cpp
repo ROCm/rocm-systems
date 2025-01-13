@@ -355,6 +355,16 @@ bool queue_release_buffer(void *MemoryAddress) {
   return true;
 }
 
+wsl::thunk::GpuMemory *get_gpu_mem(void *MemoryAddress) {
+  std::lock_guard<std::mutex> gard(*allocation_map_lock_);
+  auto it = allocation_map_.find(MemoryAddress);
+  if (it == allocation_map_.end()) {
+    return nullptr;
+  }
+
+  return wsl::thunk::GpuMemory::Convert(it->second.handle);
+}
+
 HSAKMT_STATUS HSAKMTAPI hsaKmtAvailableMemory(HSAuint32 Node,
                                               HSAuint64 *AvailableBytes) {
   CHECK_DXG_OPEN();
