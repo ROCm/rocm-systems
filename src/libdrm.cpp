@@ -110,7 +110,6 @@ HSAKMTAPI int amdgpu_bo_import(amdgpu_device_handle dev,
   }
 }
 
-
 HSAKMTAPI int amdgpu_bo_va_op(amdgpu_bo_handle bo,
                               uint64_t offset,
                               uint64_t size,
@@ -120,7 +119,7 @@ HSAKMTAPI int amdgpu_bo_va_op(amdgpu_bo_handle bo,
   switch(ops) {
     case AMDGPU_VA_OP_MAP:
       {
-        wsl::thunk::GpuMemory *gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory *>(bo);
+        wsl::thunk::GpuMemory *gpu_mem = get_gpu_mem(bo);
         assert(gpu_mem != nullptr);
         auto code = gpu_mem->MapGpuVirtualAddress(reinterpret_cast<gpusize>(addr), size, offset);
         if (code != ErrorCode::Success)
@@ -133,7 +132,7 @@ HSAKMTAPI int amdgpu_bo_va_op(amdgpu_bo_handle bo,
       break;
     case AMDGPU_VA_OP_UNMAP:
       {
-        wsl::thunk::GpuMemory *gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory *>(bo);
+        wsl::thunk::GpuMemory *gpu_mem = get_gpu_mem(bo);
         assert(gpu_mem != nullptr);
         auto code = gpu_mem->UnmapGpuVirtualAddress(reinterpret_cast<gpusize>(addr), size, offset);
         if (code != ErrorCode::Success)
