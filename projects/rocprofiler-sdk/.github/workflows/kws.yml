@@ -25,10 +25,5 @@ jobs:
     if: ${{ github.event_name == 'pull_request' }}
     uses: AMD-ROCm-Internal/rocm_ci_infra/.github/workflows/kws.yml@kws-test
     secrets: inherit
-
-  # Add your repo specific workflows (if any) below this line, edit nothing above this line.
-  other-job:
-    runs-on: ubuntu-latest
-    steps:
-      - name: KWS SCAN check
-        run: echo "End of repo specific workflow"
+    with:
+      pr_number: ${{github.event.pull_request.number}}
