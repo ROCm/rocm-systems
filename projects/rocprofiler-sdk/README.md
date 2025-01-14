@@ -1,7 +1,7 @@
 # ROCprofiler-SDK:  Application Profiling, Tracing, and Performance Analysis
 
-> [!NOTE]
-rocprofiler-sdk is currently considered a beta version and is subject to change in future releases
+> [!IMPORTANT]
+We are phasing out development and support for ``roctracer/rocprofiler/rocprof/rocprofv2`` in favor of ``rocprofiler-sdk/rocprofv3`` in upcoming ROCm releases. Going forward, only critical defect fixes will be addressed for older versions of profiling tools and libraries. We encourage all users to upgrade to the latest version, rocprofiler-sdk library and rocprofv3 tool, to ensure continued support and access to new features.
 
 ## Overview
 
@@ -19,6 +19,8 @@ ROCProfiler-SDK is AMD’s new and improved tooling infrastructure, providing a 
 - HSA operation tracing
 - Marker(ROCTx) tracing
 - PC Sampling (Beta)
+- RCCL tracing
+- Kokkoks tracing
 
 ## Tool Support
 

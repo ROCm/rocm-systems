@@ -151,6 +151,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Added reduce operation for counter expression wrt dimension.
 - `--collection-period` feature added in rocprofv3, to enable filtering using time.
 - `--collection-period-unit` feature added in rocprofv3, to allow the user to control time units used in collection period option.
+- Added deprecation notice for rocprofiler(v1) and rocprofiler(v2).
 
 ### Changed
 

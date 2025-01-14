@@ -86,7 +86,14 @@ ROCprofiler-SDK introduces a new command-line tool, `rocprofv3`, which is a more
      - Part of HIP and HSA Traces
      - `--memory-copy-trace`
      - Provides granularity for memory move operations
-     - 
+     -
+   * - Basic tracing options
+     - Memory allocation Trace
+     - *Not Available*
+     - *Not Available*
+     - `--memory-allocation-trace`
+     - New option for collecting Memory Allocation Traces. Displays starting address, allocation size, and agent where allocation occurred.
+     -  
    * - Basic tracing options
      - Kernel Trace
      - `--kernel-trace`
@@ -135,6 +142,20 @@ ROCprofiler-SDK introduces a new command-line tool, `rocprofv3`, which is a more
      - Part of `--hsa-trace` option
      - `--hsa-finalizer-trace`
      - New option for collecting HSA API Traces (Finalizer-extension API), e.g. HSA functions prefixed with only `hsa_ext_program_` (i.e. hsa_ext_program_create)
+     - 
+   * - Advanced tracing options
+     - Kokkos trace
+     - *Not Available*
+     - *Not Available*
+     - `--kokkos-trace`
+     - New option to enable built-in Kokkos Tools support (implies --marker-trace and --kernel-rename)
+     -
+   * - Advanced tracing options
+     - RCCL trace
+     - *Not Available*
+     - *Not Available*
+     - `--rccl-trace`
+     - For collecting RCCL(ROCm Communication Collectives Library. Also pronounced as 'Rickle' ) Traces
      - 
    * - Aggregate tracing options
      - Sys Trace
@@ -300,6 +321,13 @@ ROCprofiler-SDK introduces a new command-line tool, `rocprofv3`, which is a more
        | # YAML and JSON formats are more readable and easy to maintain.
        | # Allows flexibility to add more features for the tool input
      -
+   * - I/O options
+     - Command-line Counter Collection
+     - *Not Available*
+     - *Not Available*
+     - `--pmc`
+     - New option to collect performance counters from command line. Counters should be comma OR space separated in case of more than 1 counters
+     -
    * - I/O options   
      - Providing Custom metrics file
      - `-m`  <metric file>
@@ -318,9 +346,9 @@ ROCprofiler-SDK introduces a new command-line tool, `rocprofv3`, which is a more
      - Trace Period
      - `--trace-period`
      - `-tp | --trace-period`
-     - *Not available*
-     - Not yet in rocprofv3
-     - 
+     - `-p  |--collection-period`,`--collection-period-unit`
+     - Users can specify multiple configurations, each defined by a triplet in the format `start_delay:collection_time:repeat`, with the ability to change the unit of time in the given configurations.
+     -
    * - Trace Control options
      - Trace start
      -  `--trace-start <on|off>`
@@ -341,6 +369,13 @@ ROCprofiler-SDK introduces a new command-line tool, `rocprofv3`, which is a more
      - *Not available*
      - *Not available*
      - Not yet in rocprofv3
+     -
+   * - PC Sampling options
+     - PC Sampling`
+     - *Not available*
+     - *Not available*
+     - `--pc-sampling-beta-enabled`
+     - Enable pc sampling support; beta version.
      - 
    * - Legacy options
      - Timestamp On/Off

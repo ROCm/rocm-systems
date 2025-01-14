@@ -520,6 +520,17 @@ For the description of the fields in the output file, see :ref:`output-file-fiel
 Memory allocation trace
 +++++++++++++++++++++++++
 
+Memory allocation traces track the HSA functions ``hsa_memory_allocate``,
+``hsa_amd_memory_pool_allocate``, and ``hsa_amd_vmem_handle_create```. The function
+``hipMalloc`` calls these underlying HSA functions allowing memory allocations to be
+tracked.
+
+In addition to the HSA memory allocation functions listed above, the corresponding HSA
+free functions ``hsa_memory_free``, ``hsa_amd_memory_pool_free``, and ``hsa_amd_vmem_handle_release``
+are also tracked. Unlike the allocation functions, however, only the address of the freed memory
+is recorded. As such, the agent id and size of the freed memory are recorded as 0 in the CSV and
+JSON outputs.
+
 To trace memory allocations during the application run, use:
 
 .. code-block:: shell
