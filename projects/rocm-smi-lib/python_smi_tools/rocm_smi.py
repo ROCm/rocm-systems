@@ -1980,22 +1980,28 @@ def showAllConcise(deviceList):
                              + getComputePartition(device, silent)
                              + ", " + getPartitionId(device, silent))
         sclk = showCurrentClocks([device], 'sclk', concise=silent)
+        if not sclk:
+            sclk = 'N/A'
         mclk = showCurrentClocks([device], 'mclk', concise=silent)
+        if not mclk:
+            mclk = 'N/A'
         (retCode, fanLevel, fanSpeed) = getFanSpeed(device, silent)
         fan = str(fanSpeed) + '%'
         if getPerfLevel(device, silent) != -1:
             perf = getPerfLevel(device, silent)
         else:
-            perf = 'Unsupported'
+            perf = 'N/A'
         if getMaxPower(device, silent) != -1:
             pwrCap = str(getMaxPower(device, silent)) + 'W'
         else:
-            pwrCap = 'Unsupported'
+            pwrCap = 'N/A'
         if getGpuUse(device, silent) != -1:
             gpu_busy = str(getGpuUse(device, silent)) + '%'
         else:
-            gpu_busy = 'Unsupported'
+            gpu_busy = 'N/A'
         allocated_mem_percent = getAllocatedMemoryPercent(device)
+        if allocated_mem_percent['ret'] != rsmi_status_t.RSMI_STATUS_SUCCESS:
+            allocated_mem_percent['combined'] = 'N/A'
 
         # Top Row - per device data
         values['card%s' % (str(device))] = [device, getNodeId(device),
