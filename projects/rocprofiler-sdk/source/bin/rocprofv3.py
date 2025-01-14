@@ -392,7 +392,7 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         "--collection-period-unit",
         help="To change the unit used in `--collection-period` or `-p`, you can specify the desired unit using the `--collection-period-unit` or `-pu` option. The available units are `hour` for hours, `min` for minutes, `sec` for seconds, `msec` for milliseconds, `usec` for microseconds, and `nsec` for nanoseconds",
         nargs=1,
-        default="sec",
+        default=["sec"],
         type=str,
         choices=("hour", "min", "sec", "msec", "usec", "nsec"),
     )
