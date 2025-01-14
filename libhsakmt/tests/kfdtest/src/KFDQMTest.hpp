@@ -82,8 +82,6 @@ class KFDQMTest : public KFDBaseComponentTest {
     HSAint64 GetAverageTimeConsumedwithCUMask(int node, uint32_t *mask, uint32_t mask_count, int iterations);
     friend void testQueuePriority(KFDTEST_PARAMETERS* pTestParamters, bool isSamePipe);
 
-    bool testCUMask(int gpuNode, uint32_t *pMask, mask_config_t maskConfig, HsaMemoryBuffer &programBuffer, uint32_t numWorkItems, out_data_t *pOutput);
-
  protected:  // Members
     /* Acceptable performance for CU Masking should be within 5% of linearly-predicted performance */
     const double CuVariance = 0.15;

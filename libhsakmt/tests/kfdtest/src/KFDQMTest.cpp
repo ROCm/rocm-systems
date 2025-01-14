@@ -24,6 +24,8 @@
 #include <sys/time.h>
 #include <vector>
 #include <utility>
+#include <mutex>
+
 #include "KFDQMTest.hpp"
 #include "PM4Queue.hpp"
 #include "PM4Packet.hpp"
@@ -1011,7 +1013,7 @@ static bool validateTest(uint32_t *pMask, mask_config_t maskConfig, uint32_t num
  * pOutput:       A non-NULL pointer to the output buffer used by the shader.
  *
  */
-bool KFDQMTest::testCUMask(int gpuNode, uint32_t *pMask, mask_config_t maskConfig, HsaMemoryBuffer &programBuffer, uint32_t numWorkItems, out_data_t *pOutput) {
+static bool testCUMask(int gpuNode, uint32_t *pMask, mask_config_t maskConfig, HsaMemoryBuffer &programBuffer, uint32_t numWorkItems, out_data_t *pOutput) {
 
     PM4Queue queue;
 
@@ -1019,11 +1021,11 @@ bool KFDQMTest::testCUMask(int gpuNode, uint32_t *pMask, mask_config_t maskConfi
     dispatch.SetArgs(NULL, pOutput);
     dispatch.SetDim(numWorkItems, 1, 1);
 
-    EXPECT_SUCCESS(queue.Create(gpuNode));
-    EXPECT_SUCCESS(queue.SetCUMask(pMask, maskConfig.numBits));
+    EXPECT_SUCCESS_GPU(queue.Create(gpuNode), gpuNode);
+    EXPECT_SUCCESS_GPU(queue.SetCUMask(pMask, maskConfig.numBits), gpuNode);
     dispatch.Submit(queue);
     dispatch.Sync();
-    EXPECT_SUCCESS(queue.Destroy());
+    EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 
     return validateTest(pMask, maskConfig, numWorkItems, pOutput);
 }
@@ -1058,28 +1060,38 @@ bool KFDQMTest::testCUMask(int gpuNode, uint32_t *pMask, mask_config_t maskConfi
  * 3) Changes to validation code.
  *
  */
-TEST_F(KFDQMTest, ExtendedCuMasking) {
-    TEST_START(TESTPROFILE_RUNALL);
+static void extendedCuMasking(KFDTEST_PARAMETERS* pTestParameters) {
 
-    int defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
-    ASSERT_GE(defaultGPUNode, 0) << "Failed to get default GPU node!";
+    int gpuNode = pTestParameters->gpuNode;
+    KFDQMTest* pKFDQMTest = (KFDQMTest*)pTestParameters->pTestObject;
+    const HSAuint32 m_FamilyId = pKFDQMTest->GetFamilyIdFromNodeId(gpuNode);
 
     if (m_FamilyId >= FAMILY_GFX12) {  // Supporting GFX12 and up for now
-        const HsaNodeProperties *pProps = m_NodeInfo.GetNodeProperties(defaultGPUNode);
+
+        // Lock to prevent interleave of logging on multigpu (multithreaded) testing
+        static std::mutex logMutex;
+
+        const HsaNodeProperties *pProps = pKFDQMTest->Get_NodeInfo()->GetNodeProperties(gpuNode);
         const uint32_t activeCU = (pProps->NumFComputeCores / pProps->NumSIMDPerCU);
         const uint32_t numSEs = pProps->NumShaderBanks;
         const uint32_t numSAperSE = pProps->NumArrays;
         const uint32_t numWGPperSA = pProps->NumCUPerArray / 2;
 
+        std::ostringstream nodeStr;
+        nodeStr << "(Node " << gpuNode << ")";
+        const char *pNodeStr = nodeStr.str().c_str();
+
+        logMutex.lock();
         LOG() << std::endl;
-        LOG() << std::dec << "****** GFX Configuration ******" << std::endl;
+        LOG() << std::dec << "****** GFX Configuration " << pNodeStr << " ******" << std::endl;
         LOG() << std::dec << "  Compute Cores (SIMD): " << std::setw(3) << pProps->NumFComputeCores << std::endl;
         LOG() << std::dec << "          SIMDs per CU: " << std::setw(3) << pProps->NumSIMDPerCU << std::endl;
         LOG() << std::dec << "            Active CUs: " << std::setw(3) << activeCU << std::endl;
         LOG() << std::dec << "        Shader Engines: " << std::setw(3) << numSEs << std::endl;
         LOG() << std::dec << "            SAs per SE: " << std::setw(3) << numSAperSE << std::endl;
         LOG() << std::dec << "           WGPs per SA: " << std::setw(3) << numWGPperSA << std::endl;
-        LOG() << std::dec << "*******************************" << std::endl;
+        LOG() << std::dec << "****************************************" << std::endl;
+        logMutex.unlock();
 
         const uint32_t maskNumDwords = (activeCU + 31) / 32; /* Round up to the nearest multiple of 32 */
         const uint32_t maskNumBits = maskNumDwords * 32;
@@ -1124,12 +1136,14 @@ TEST_F(KFDQMTest, ExtendedCuMasking) {
         const uint32_t numWorkItems = 16 * numSEs * numSAperSE * numWGPperSA;
 
         // Allocate buffers for program and output
-        HsaMemoryBuffer programBuffer(PAGE_SIZE, defaultGPUNode, true, false, true);
-        HsaMemoryBuffer outputBuffer(((sizeof(out_data_t) * numWorkItems) + (PAGE_SIZE - 1)) & ~(PAGE_SIZE - 1), defaultGPUNode, true, false, false);
+        HsaMemoryBuffer programBuffer(PAGE_SIZE, gpuNode, true, false, true);
+        HsaMemoryBuffer outputBuffer(((sizeof(out_data_t) * numWorkItems) + (PAGE_SIZE - 1)) & ~(PAGE_SIZE - 1), gpuNode, true, false, false);
         out_data_t *pOutput = outputBuffer.As<out_data_t *>();
 
         // Assemble shader
-        ASSERT_SUCCESS(m_pAsm->RunAssembleBuf(CheckCuMaskIsa, programBuffer.As<char*>()));
+        Assembler *pAsm = pKFDQMTest->GetAssemblerFromNodeId(gpuNode);
+        ASSERT_NOTNULL_GPU(pAsm, gpuNode);
+        ASSERT_SUCCESS_GPU(pAsm->RunAssembleBuf(CheckCuMaskIsa, programBuffer.As<char*>()), gpuNode);
 
         /*
          * Generate symmetric test configuration for all (SE, SA, WGP) combinations, one level at a time.
@@ -1143,35 +1157,34 @@ TEST_F(KFDQMTest, ExtendedCuMasking) {
         uint32_t totalConfigTested = 0;
 
         // All SE combination (0 not allowed, need at least one enabled)
-        LOG() << "=== Testing SE mask (" << ((1 << numSEs) - 1) << " configs)\n";
+        LOG() << pNodeStr << " === Testing SE mask (" << ((1 << numSEs) - 1) << " configs)\n";
         for (int i = 1; i < (1 << numSEs); i++) {
             memset(mask, 0, sizeof(mask));
-
             DBG_PRINT("SE mask: 0x%x\n", i);
             setCUMask(mask, maskConfig, i, -1, -1);
-            ASSERT_TRUE(testCUMask(defaultGPUNode, mask, maskConfig, programBuffer, numWorkItems, pOutput));
+            EXPECT_TRUE_GPU(testCUMask(gpuNode, mask, maskConfig, programBuffer, numWorkItems, pOutput), gpuNode);
             totalConfigTested++;
         }
 
         // All SA combinations (0 not allowed, need at least one enabled)
-        LOG() << "=== Testing SA mask (" << ((1 << numSAperSE) - 1) << " configs)\n";
+        LOG() << pNodeStr << " === Testing SA mask (" << ((1 << numSAperSE) - 1) << " configs)\n";
         for (uint32_t i = 1; i < (1 << numSAperSE); i++) {
             memset(mask, 0, sizeof(mask));
 
             DBG_PRINT("SA mask: 0x%x\n", i);
             setCUMask(mask, maskConfig, -1, i, -1);
-            ASSERT_TRUE(testCUMask(defaultGPUNode, mask, maskConfig, programBuffer, numWorkItems, pOutput));
+            EXPECT_TRUE_GPU(testCUMask(gpuNode, mask, maskConfig, programBuffer, numWorkItems, pOutput), gpuNode);
             totalConfigTested++;
         }
 
         // All WGP combinations (0 not allowed, need at least one enabled)
-        LOG() << "=== Testing WGP mask (" << ((1 << numWGPperSA) - 1) << " configs)\n"; 
+        LOG() << pNodeStr << " === Testing WGP mask (" << ((1 << numWGPperSA) - 1) << " configs)\n";
         for (uint32_t i = 1; i < (1 << numWGPperSA); i++) {
             memset(mask, 0, sizeof(mask));
 
             DBG_PRINT("WGP mask: 0x%x\n", i);
             setCUMask(mask, maskConfig, -1, -1, i);
-            ASSERT_TRUE(testCUMask(defaultGPUNode, mask, maskConfig, programBuffer, numWorkItems, pOutput));
+            EXPECT_TRUE_GPU(testCUMask(gpuNode, mask, maskConfig, programBuffer, numWorkItems, pOutput), gpuNode);
             totalConfigTested++;
         }
 
@@ -1184,7 +1197,7 @@ TEST_F(KFDQMTest, ExtendedCuMasking) {
         {
             uint32_t totalWGPs = numSEs * numSAperSE * numWGPperSA;
 
-            LOG() << "=== Testing linear mask (" << totalWGPs << " configs)\n";
+            LOG() << pNodeStr << " === Testing linear mask (" << totalWGPs << " configs)\n";
 
             memset(mask, 0, sizeof(mask));
 
@@ -1199,7 +1212,7 @@ TEST_F(KFDQMTest, ExtendedCuMasking) {
                 printf("\n");
 #endif //CUMASK_DEBUG
 
-                ASSERT_TRUE(testCUMask(defaultGPUNode, mask, maskConfig, programBuffer, numWorkItems, pOutput));
+                EXPECT_TRUE_GPU(testCUMask(gpuNode, mask, maskConfig, programBuffer, numWorkItems, pOutput), gpuNode);
                 totalConfigTested++;
             }
         }
@@ -1216,7 +1229,7 @@ TEST_F(KFDQMTest, ExtendedCuMasking) {
 
             srand(seed);
 
-            LOG() << "=== Testing " << randomCount << " random mask config...\n";
+            LOG() << pNodeStr << " === Testing " << randomCount << " random mask config...\n";
 
             for (uint32_t i = 0; i < randomCount; i++) {
 
@@ -1249,18 +1262,24 @@ TEST_F(KFDQMTest, ExtendedCuMasking) {
                     mask[maskIndex++] = expandToCUMask;
                 }
 
-                ASSERT_TRUE(testCUMask(defaultGPUNode, mask, maskConfig, programBuffer, numWorkItems, pOutput));
+                EXPECT_TRUE_GPU(testCUMask(gpuNode, mask, maskConfig, programBuffer, numWorkItems, pOutput), gpuNode);
                 totalConfigTested++;
             }
         }
 
         LOG() << std::endl;
-        LOG() << "Total config tested: " << totalConfigTested << std::endl;
+        LOG() << pNodeStr << " Total config tested: " << totalConfigTested << std::endl;
         LOG() << std::endl;
 
     } else {
         LOG() << "Skipping test: Test not supported for family ID 0x" << m_FamilyId << "." << std::endl;
     }
+}
+
+TEST_F(KFDQMTest, ExtendedCuMasking) {
+    TEST_START(TESTPROFILE_RUNALL);
+
+    ASSERT_SUCCESS(KFDTest_Launch(extendedCuMasking));
 
     TEST_END
 }
