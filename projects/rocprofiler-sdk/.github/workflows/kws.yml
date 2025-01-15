@@ -23,7 +23,7 @@ jobs:
     # - KEYWORD_SCAN_USER : your username in keywordsearch.amd.com to access the above project
     # - KEYWORD_SCAN_PASSWORD : your password in keywordsearch.amd.com to access the above project
     if: ${{ github.event_name == 'pull_request' }}
-    uses: AMD-ROCm-Internal/rocm_ci_infra/.github/workflows/kws.yml@kws-test
+    uses: AMD-ROCm-Internal/rocm_ci_infra/.github/workflows/kws.yml@mainline
     secrets: inherit
     with:
       pr_number: ${{github.event.pull_request.number}}
