@@ -1,5 +1,8 @@
 # ROC-tracer
 
+> [!IMPORTANT]
+We are phasing out development and support for roctracer/rocprofiler/rocprof/rocprofv2 in favor of rocprofiler-sdk/rocprofv3 in upcoming ROCm releases. Going forward, only critical defect fixes will be addressed for older versions of profiling tools and libraries. We encourage all users to upgrade to the latest version, rocprofiler-sdk library and rocprofv3 tool, to ensure continued support and access to new features.
+
 > [!NOTE]
 > The published documentation is available at [ROCTracer](https://rocm.docs.amd.com/projects/roctracer/en/latest/index.html) in an organized, easy-to-read format, with search and a table of contents.
 
