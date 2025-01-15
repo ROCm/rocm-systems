@@ -1,6 +1,6 @@
 # MIT License
 
-# Copyright (c) 2023 - 2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2023 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -40,7 +40,7 @@ external_projects_current_project = "rocprofiler-systems"
 
 project = "rocprofiler-systems"
 author = "Advanced Micro Devices, Inc."
-copyright = "Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved."
+copyright = "Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved."
 version = version_number
 release = version_number
 html_title = f"ROCm Systems Profiler {version} documentation"
