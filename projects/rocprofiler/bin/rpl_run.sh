@@ -36,6 +36,23 @@ TTLIB_PATH=$ROOT_DIR/lib/roctracer
 ROCM_LIB_PATH=$ROOT_DIR/lib
 PROF_BIN_DIR=$ROOT_DIR/libexec/rocprofiler
 
+# Define color code
+GREEN='\033[0;32m'
+GREY='\033[0;90m'
+RED='\033[0;31m'
+RESET='\033[0m'
+
+# Function to display deprecation warning message
+display_warning() {
+  echo -e "\n${RED}WARNING: We are phasing out development and support for roctracer/rocprofiler/rocprof/rocprofv2 in favor of \
+rocprofiler-sdk/rocprofv3 in upcoming ROCm releases. Going forward, only critical defect fixes will be addressed for \
+older versions of profiling tools and libraries. We encourage all users to upgrade to the latest version, \
+rocprofiler-sdk library and rocprofv3 tool, to ensure continued support and access to new features.${RESET}\n"
+}
+
+# Display the warning message
+display_warning
+
 # check if rocprof is supportd on this gpu arch
 V1_SUPPORTED_GPU_ARCHS=("gfx80x","gfx90x","gfx94x")
 IS_SUPPORTED="false"
