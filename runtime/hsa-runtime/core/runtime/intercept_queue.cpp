@@ -256,7 +256,7 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
       // Submit barrier which will wake async queue processing.
       ring[barrier & mask].packet.body = {};
       ring[barrier & mask].barrier_and.completion_signal = Signal::Convert(async_doorbell_);
-      if (Runtime::runtime_singleton_->flag().dev_mem_queue() && !needsPcieOrdering()) {
+      if (wrapped->IsDeviceMemRingBuf() && needsPcieOrdering()) {
         // Ensure the packet body is written as header may get reordered when writing over PCIE
         _mm_sfence();
       }
@@ -303,7 +303,7 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
         ++packets_index;
       }
       if (write_index != 0) {
-        if (Runtime::runtime_singleton_->flag().dev_mem_queue() && !needsPcieOrdering()) {
+        if (wrapped->IsDeviceMemRingBuf() && needsPcieOrdering()) {
           // Ensure the packet body is written as header may get reordered when writing over PCIE
           _mm_sfence();
         }
@@ -372,7 +372,7 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
     Cursor.pkt_index = i;
     auto& handler = interceptors[Cursor.interceptor_index];
     handler.first(&ring[i & mask], 1, i, handler.second, PacketWriter);
-    if (Runtime::runtime_singleton_->flag().dev_mem_queue() && !needsPcieOrdering()) {
+    if (IsDeviceMemRingBuf() && needsPcieOrdering()) {
       // Ensure the packet body is written as header may get reordered when writing over PCIE
       _mm_sfence();
     }

@@ -255,29 +255,29 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
   virtual hsa_status_t IterateCache(hsa_status_t (*callback)(hsa_cache_t cache, void* data),
                                     void* data) const = 0;
 
-  // @brief Create queue.
-  //
-  // @param [in] size Number of packets the queue is expected to hold. Must be a
-  // power of 2 greater than 0.
-  // @param [in] queue_type Queue type.
-  // @param [in] event_callback Callback invoked for every
-  // asynchronous event related to the newly created queue. May be NULL.The HSA
-  // runtime passes three arguments to the callback : a code identifying the
-  // event that triggered the invocation, a pointer to the queue where the event
-  // originated, and the application data.
-  // @param [in] data Application data that is passed to @p callback.
-  // @param [in] private_segment_size A hint to indicate the maximum expected
-  // private segment usage per work-item, in bytes.
-  // @param [in] group_segment_size A hint to indicate the maximum expected
-  // group segment usage per work-group, in bytes.
-  // @param[out] queue Memory location where the HSA runtime stores a pointer
-  // to the newly created queue.
-  //
-  // @retval HSA_STATUS_SUCCESS The queue has been created successfully.
-  virtual hsa_status_t QueueCreate(size_t size, hsa_queue_type32_t queue_type,
+  /// @brief Create queue.
+  ///
+  /// @param [in] size Number of packets the queue is expected to hold. Must be a
+  /// power of 2 greater than 0.
+  /// @param [in] queue_type Queue type.
+  /// @param [in] flags Flags to specify queue attributes on creation.
+  /// @param [in] event_callback Callback invoked for every
+  /// asynchronous event related to the newly created queue. May be NULL.The HSA
+  /// runtime passes three arguments to the callback : a code identifying the
+  /// event that triggered the invocation, a pointer to the queue where the event
+  /// originated, and the application data.
+  /// @param [in] data Application data that is passed to @p callback.
+  /// @param [in] private_segment_size A hint to indicate the maximum expected
+  /// private segment usage per work-item, in bytes.
+  /// @param [in] group_segment_size A hint to indicate the maximum expected
+  /// group segment usage per work-group, in bytes.
+  /// @param[out] queue Memory location where the HSA runtime stores a pointer
+  /// to the newly created queue.
+  ///
+  /// @retval HSA_STATUS_SUCCESS The queue has been created successfully.
+  virtual hsa_status_t QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
                                    HsaEventCallback event_callback, void* data,
-                                   uint32_t private_segment_size,
-                                   uint32_t group_segment_size,
+                                   uint32_t private_segment_size, uint32_t group_segment_size,
                                    Queue** queue) = 0;
 
   // @brief Query the value of an attribute.

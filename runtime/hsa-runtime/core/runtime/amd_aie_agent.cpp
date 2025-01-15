@@ -261,11 +261,16 @@ hsa_status_t AieAgent::GetInfo(hsa_agent_info_t attribute, void *value) const {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t AieAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type,
-                                   core::HsaEventCallback event_callback,
-                                   void *data, uint32_t private_segment_size,
-                                   uint32_t group_segment_size,
-                                   core::Queue **queue) {
+hsa_status_t AieAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
+                                   core::HsaEventCallback event_callback, void* data,
+                                   uint32_t private_segment_size, uint32_t group_segment_size,
+                                   core::Queue** queue) {
+  if ((flags & HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF) != 0 ||
+      (flags & HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR) != 0) {
+    // AIE agents do not currently support queue creation in device memory.
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
   if (!IsPowerOfTwo(size)) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
@@ -274,7 +279,18 @@ hsa_status_t AieAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type,
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  auto aql_queue(new AieAqlQueue(this, size, node_id()));
+  core::SharedQueue* shared_queue =
+      static_cast<core::SharedQueue*>(core::Runtime::runtime_singleton_->system_allocator()(
+          sizeof(core::SharedQueue), MemoryRegion::GetPageSize(), 0, node_id()));
+
+  if (!shared_queue) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+  auto aql_queue(new AieAqlQueue(shared_queue, this, size, node_id(), flags));
+  if (aql_queue == nullptr) {
+    core::Runtime::runtime_singleton_->system_deallocator()(shared_queue);
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
   *queue = aql_queue;
 
   return HSA_STATUS_SUCCESS;

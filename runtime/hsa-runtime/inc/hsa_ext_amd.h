@@ -2805,6 +2805,32 @@ typedef enum hsa_amd_queue_priority_s {
 hsa_status_t HSA_API hsa_amd_queue_set_priority(hsa_queue_t* queue,
                                                 hsa_amd_queue_priority_t priority);
 
+/**
+ * @brief Queue creation attributes.
+ */
+typedef enum {
+  /**
+   * The queue's packet buffer and queue descriptor struct should be
+   * allocated in system memory (default). Mutually exclusive with
+   * HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF and
+   * HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR.
+   */
+  HSA_AMD_QUEUE_CREATE_SYSTEM_MEM = 0,
+  /**
+   * The queue's packet buffer should be allocated in the agent's
+   * fine-grain device memory region.
+   */
+  HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF = (1 << 0),
+  /**
+   * The queue desciptor struct should be allocated in the agent's
+   * fine-grain device memory region. Not supported for devices
+   * connected via PCIe because the CPU's atomic read-modify-write
+   * operations cannot be promoted to PCIe atomic read-modify-write
+   * operations.
+   */
+  HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR = (1 << 1),
+} hsa_amd_queue_create_flag_t;
+
 /** @} */
 
 /** \addtogroup memory Memory

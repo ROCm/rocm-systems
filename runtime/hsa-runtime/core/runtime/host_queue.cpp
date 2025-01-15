@@ -48,9 +48,9 @@
 namespace rocr {
 namespace core {
 
-HostQueue::HostQueue(hsa_region_t region, uint32_t ring_size, hsa_queue_type32_t type,
-                     uint32_t features, hsa_signal_t doorbell_signal)
-    : Queue(), size_(ring_size) {
+HostQueue::HostQueue(core::SharedQueue* shared_queue, hsa_region_t region, uint32_t ring_size,
+                     hsa_queue_type32_t type, uint32_t features, hsa_signal_t doorbell_signal)
+    : Queue(shared_queue, 0), size_(ring_size) {
   HSA::hsa_memory_register(this, sizeof(HostQueue));
   MAKE_NAMED_SCOPE_GUARD(registerGuard,
                          [&]() { HSA::hsa_memory_deregister(this, sizeof(HostQueue)); });
@@ -93,6 +93,7 @@ HostQueue::HostQueue(hsa_region_t region, uint32_t ring_size, hsa_queue_type32_t
 }
 
 HostQueue::~HostQueue() {
+  HSA::hsa_memory_free(shared_queue_);
   HSA::hsa_memory_free(ring_);
   HSA::hsa_memory_deregister(this, sizeof(HostQueue));
 }

@@ -54,8 +54,8 @@ class HostQueue : public Queue {
  public:
   static __forceinline bool IsType(core::Queue* queue) { return queue->IsType(&rtti_id()); }
 
-  HostQueue(hsa_region_t region, uint32_t ring_size, hsa_queue_type32_t type,
-            uint32_t features, hsa_signal_t doorbell_signal);
+  HostQueue(core::SharedQueue* shared_queue, hsa_region_t region, uint32_t ring_size,
+            hsa_queue_type32_t type, uint32_t features, hsa_signal_t doorbell_signal);
 
   ~HostQueue();
 

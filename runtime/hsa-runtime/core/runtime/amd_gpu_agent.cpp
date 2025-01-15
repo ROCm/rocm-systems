@@ -706,7 +706,8 @@ core::Queue* GpuAgent::CreateInterceptibleQueue(void (*callback)(hsa_status_t st
   uint32_t size = std::max(in_size, minAqlSize_);
   size = std::min(size, maxAqlSize_);
 
-  QueueCreate(size, HSA_QUEUE_TYPE_MULTI, callback, data, 0, 0, &queue);
+  QueueCreate(size, HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_CREATE_SYSTEM_MEM, callback, data, 0, 0,
+              &queue);
   if (queue != nullptr)
     core::Runtime::runtime_singleton_->InternalQueueCreateNotify(core::Queue::Convert(queue),
                                                                  this->public_handle());
@@ -1666,10 +1667,9 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type,
-                                   core::HsaEventCallback event_callback,
-                                   void* data, uint32_t private_segment_size,
-                                   uint32_t group_segment_size,
+hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
+                                   core::HsaEventCallback event_callback, void* data,
+                                   uint32_t private_segment_size, uint32_t group_segment_size,
                                    core::Queue** queue) {
   // Handle GWS queues.
   if (queue_type == HSA_QUEUE_TYPE_COOPERATIVE) {
@@ -1739,9 +1739,26 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type,
   // ensured.
   queues_[QueueUtility].touch();
 
+  bool dev_mem_queue_descriptor = (flags & HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR) != 0;
+
   // Create an HW AQL queue
-  auto aql_queue =
-      new AqlQueue(this, size, node_id(), scratch, event_callback, data, is_kv_device_);
+  core::SharedQueue* shared_queue = nullptr;
+
+  if (dev_mem_queue_descriptor) {
+    shared_queue = static_cast<core::SharedQueue*>(
+        finegrain_allocator()(sizeof(core::SharedQueue), core::MemoryRegion::AllocateUncached));
+  } else {
+    shared_queue =
+        static_cast<core::SharedQueue*>(core::Runtime::runtime_singleton_->system_allocator()(
+            sizeof(core::SharedQueue), MemoryRegion::GetPageSize(),
+            isMES() ? (MemoryRegion::AllocateGTTAccess | MemoryRegion::AllocateNonPaged) : 0,
+            node_id()));
+  }
+
+  if (!shared_queue) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+  auto aql_queue = new AqlQueue(shared_queue, this, size, node_id(), scratch, event_callback, data,
+                                flags, is_kv_device_);
   *queue = aql_queue;
   aql_queues_.push_back(aql_queue);
 

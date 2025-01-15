@@ -742,8 +742,13 @@ hsa_status_t hsa_queue_create(
 
   if (callback == nullptr) callback = core::Queue::DefaultErrorHandler;
 
+  uint64_t queue_create_flags = 0;
+
+  if (core::Runtime::runtime_singleton_->flag().dev_mem_queue_buf())
+    queue_create_flags = HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF;
+
   core::Queue* cmd_queue = nullptr;
-  status = agent->QueueCreate(size, type, callback, data, private_segment_size,
+  status = agent->QueueCreate(size, type, queue_create_flags, callback, data, private_segment_size,
                               group_segment_size, &cmd_queue);
   if (status != HSA_STATUS_SUCCESS) return status;
 
@@ -774,7 +779,13 @@ hsa_status_t hsa_soft_queue_create(hsa_region_t region, uint32_t size,
   const core::Signal* signal = core::Signal::Convert(doorbell_signal);
   IS_VALID(signal);
 
-  core::HostQueue* host_queue = new core::HostQueue(region, size, type, features, doorbell_signal);
+  void* shared_queue = nullptr;
+  hsa_status_t err = HSA::hsa_memory_allocate(region, sizeof(core::SharedQueue), &shared_queue);
+  if (err != HSA_STATUS_SUCCESS) return err;
+  assert(shared_queue && "Queue struct is NULL when creating host queue.");
+
+  core::HostQueue* host_queue = new core::HostQueue(static_cast<core::SharedQueue*>(shared_queue),
+                                                    region, size, type, features, doorbell_signal);
 
   *queue = core::Queue::Convert(host_queue);
 

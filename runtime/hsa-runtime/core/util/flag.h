@@ -257,7 +257,7 @@ class Flag {
     override_cpu_affinity_ = (var == "0") ? false : true;
 
     var = os::GetEnvVar("HSA_ALLOCATE_QUEUE_DEV_MEM");
-    dev_mem_queue_ = (var == "1") ? true : false;
+    dev_mem_queue_buf_ = (var == "1") ? true : false;
 
     var = os::GetEnvVar("HSA_WAIT_ANY_DEBUG");
     wait_any_ = (var == "1") ? true : false;
@@ -396,7 +396,7 @@ class Flag {
 
   size_t pc_sampling_max_device_buffer_size() const { return pc_sampling_max_device_buffer_size_; }
 
-  bool dev_mem_queue() const { return dev_mem_queue_; }
+  bool dev_mem_queue_buf() const { return dev_mem_queue_buf_; }
 
   uint32_t signal_abort_timeout() const { return signal_abort_timeout_; }
 
@@ -433,7 +433,7 @@ class Flag {
   bool enable_mwaitx_;
   bool enable_ipc_mode_legacy_;
   bool wait_any_;
-  bool dev_mem_queue_;
+  bool dev_mem_queue_buf_;
   uint32_t signal_abort_timeout_;
   int  async_events_thread_priority_;
   bool enable_3d_swizzle_ = false;

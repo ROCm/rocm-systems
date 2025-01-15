@@ -328,10 +328,9 @@ class GpuAgent : public GpuAgentInt {
   hsa_status_t GetInfo(hsa_agent_info_t attribute, void* value) const override;
 
   // @brief Override from core::Agent.
-  hsa_status_t QueueCreate(size_t size, hsa_queue_type32_t queue_type,
+  hsa_status_t QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
                            core::HsaEventCallback event_callback, void* data,
-                           uint32_t private_segment_size,
-                           uint32_t group_segment_size,
+                           uint32_t private_segment_size, uint32_t group_segment_size,
                            core::Queue** queue) override;
 
   // @brief Decrement GWS ref count.
@@ -436,7 +435,7 @@ class GpuAgent : public GpuAgentInt {
     if (t0_.GPUClockCounter == t1_.GPUClockCounter) SyncClocks();
   }
 
-  // @brief Override from AMD::GpuAgentInt.
+  /// @brief Override from AMD::GpuAgentInt.
   __forceinline bool is_xgmi_cpu_gpu() const { return xgmi_cpu_gpu_; }
 
   const size_t MAX_SCRATCH_APERTURE_PER_XCC = (1ULL << 32);
@@ -830,8 +829,8 @@ class GpuAgent : public GpuAgentInt {
   // structure for stochastic sampling
   pcs_data_t pcs_stochastic_data_;
 
-  // @bried XGMI CPU<->GPU
-  bool xgmi_cpu_gpu_;
+  /// @brief XGMI CPU<->GPU
+  bool xgmi_cpu_gpu_ = false;
 };
 
 }  // namespace amd
