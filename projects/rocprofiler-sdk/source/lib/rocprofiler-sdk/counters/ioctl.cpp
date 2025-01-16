@@ -68,7 +68,8 @@ counter_collection_device_lock(const rocprofiler_agent_t* agent, bool all_queues
                 ROCP_WARNING << fmt::format(
                     "Device {} could not be locked for profiling due to lack of permissions "
                     "(capability SYS_PERFMON). PMC Counters may be inaccurate and System Counter "
-                    "Collection will be degraded.");
+                    "Collection will be degraded.",
+                    agent->id.handle);
                 return ROCPROFILER_STATUS_ERROR_PERMISSION_DENIED;
             case -EINVAL:
                 ROCP_WARNING << fmt::format(
