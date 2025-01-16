@@ -118,8 +118,11 @@ RdcRocpBase::RdcRocpBase() {
       {RDC_FI_PROF_EVAL_FLOPS_16, "TOTAL_16_OPS"},
       {RDC_FI_PROF_EVAL_FLOPS_32, "TOTAL_32_OPS"},
       {RDC_FI_PROF_EVAL_FLOPS_64, "TOTAL_64_OPS"},
+      // metrics below are not divided by time passed
       {RDC_FI_PROF_VALU_PIPE_ISSUE_UTIL, "ValuPipeIssueUtil"},
       {RDC_FI_PROF_SM_ACTIVE, "VALUBusy"},
+      {RDC_FI_PROF_OCC_PER_ACTIVE_CU, "MeanOccupancyPerActiveCU"},
+      // RDC_FI_PROF_OCC_ELAPSED is derived from OCC_PER_ACTIVE_CU and ACTIVE_CYCLES
   };
 
   hsa_status_t status = hsa_init();
@@ -183,6 +186,18 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, double* value) 
 
   if (value == nullptr) {
     return RDC_ST_BAD_PARAMETER;
+  }
+
+  if (field == RDC_FI_PROF_OCC_ELAPSED) {
+    double occupancy_val = run_profiler(gpu_index, RDC_FI_PROF_OCC_PER_ACTIVE_CU);
+    double active_cycles_val = run_profiler(gpu_index, RDC_FI_PROF_ACTIVE_CYCLES);
+
+    if (active_cycles_val != 0.0) {
+      *value = occupancy_val / active_cycles_val;
+      return RDC_ST_OK;
+    } else {
+      return RDC_ST_BAD_PARAMETER;
+    }
   }
 
   const auto start_time = std::chrono::high_resolution_clock::now();
