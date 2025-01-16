@@ -747,6 +747,7 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
   //                                     location_id, bdf, domain, bus, device,
   //                                     partition_id}
   std::multimap<uint64_t, systemNode> allSystemNodes;
+  std::set<uint32_t> gpuNodeIdsFound;
   uint32_t node_id = 0;
   static const int BYTE = 8;
   while (true) {
@@ -755,9 +756,24 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
     int ret_unique_id = read_node_properties(node_id, "unique_id", &unique_id);
     int ret_loc_id =
       read_node_properties(node_id, "location_id", &location_id);
-    read_node_properties(node_id, "domain", &domain);
-    if (ret_gpu_id == 0 &&
-      !(ret_unique_id != 0 || ret_loc_id != 0 || ret_unique_id != 0)) {
+    int ret_domain = read_node_properties(node_id, "domain", &domain);
+    bool isANode = (ret_gpu_id == 0 &&
+      (ret_domain == 0 && ret_loc_id == 0));
+    ss << __PRETTY_FUNCTION__ << " | isAGpuNode: "
+       << (isANode ? "TRUE" : "FALSE") << "; is_vm_guest(): "
+       << (is_vm_guest() ? "TRUE" : "FALSE")
+       << "\nret_gpu_id: " << ret_gpu_id
+       << "; ret_domain: " << ret_domain
+       << "; ret_loc_id: " << ret_loc_id
+       << "; ret_unique_id: " << ret_unique_id
+       << "\n[node_id = " << print_unsigned_hex_and_int(node_id) << "\n"
+       << "; gpu_id = " << print_unsigned_hex_and_int(gpu_id) << "\n"
+       << "; unique_id = " << print_unsigned_hex_and_int(unique_id) << "\n"
+       << "; location_id = " << print_unsigned_hex_and_int(location_id) << "\n"
+       << "; domain = " << print_unsigned_hex_and_int(domain)
+       << "]\n";
+    LOG_DEBUG(ss);
+    if (isANode || (is_vm_guest() && ret_gpu_id == 0)) {
         // Do not try to build a node if one of these fields
         // do not exist in KFD (0 as values okay)
       systemNode myNode;
@@ -776,6 +792,24 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
       myNode.s_function = myNode.s_location_id & 0x7;
       myNode.s_partition_id = ((myNode.s_location_id >> 28) & 0xF);
       if (gpu_id != 0) {  // only add gpu nodes, 0 = CPU
+        auto ret = gpuNodeIdsFound.insert(node_id);
+        if (ret.second != false) {
+          // only print out nodes which do not already exist
+          ss << __PRETTY_FUNCTION__ << " | isAGpuNode: "
+             << (isANode ? "TRUE" : "FALSE") << "; is_vm_guest(): "
+             << (is_vm_guest() ? "TRUE" : "FALSE")
+             << "\nret_gpu_id: " << ret_gpu_id
+             << "; ret_domain: " << ret_domain
+             << "; ret_loc_id: " << ret_loc_id
+             << "; ret_unique_id: " << ret_unique_id
+             << "\n[node_id = " << print_unsigned_hex_and_int(node_id) << "\n"
+             << "; gpu_id = " << print_unsigned_hex_and_int(gpu_id) << "\n"
+             << "; unique_id = " << print_unsigned_hex_and_int(unique_id) << "\n"
+             << "; location_id = " << print_unsigned_hex_and_int(location_id) << "\n"
+             << "; domain = " << print_unsigned_hex_and_int(domain) << "\n"
+             << "]\n";
+          LOG_DEBUG(ss);
+        }
         allSystemNodes.emplace(unique_id, myNode);
       }
     } else {
@@ -866,7 +900,9 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
            << "; partition_id = " << std::to_string(i->second.s_partition_id)
            << "], ";
         LOG_DEBUG(ss);
-        AddToDeviceList(d_name, primaryBdfId);
+        ss << __PRETTY_FUNCTION__ << " | AddToDeviceList #1 (secondary node) \n"
+           << "; bdf: " << print_unsigned_hex_and_int(primaryBdfId) << "\n";
+        LOG_DEBUG(ss);
       } else {
         ss << __PRETTY_FUNCTION__ << " | primary node add ; "
            << " BDF = " << std::to_string(UINT64_MAX);
@@ -893,6 +929,9 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
            << "; function = " << std::to_string(i->second.s_function)
            << "; partition_id = " << std::to_string(i->second.s_partition_id)
            << "], ";
+        LOG_DEBUG(ss);
+        ss << __PRETTY_FUNCTION__ << " | AddToDeviceList #2 (primary node) \n"
+           << "; bdf: " << print_unsigned_hex_and_int(UINT64_MAX) << "\n";
         LOG_DEBUG(ss);
         AddToDeviceList(d_name, UINT64_MAX);
       }
@@ -1028,6 +1067,9 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
            << "; function = " << std::to_string(it->second.s_function)
            << "; partition_id = " << std::to_string(it->second.s_partition_id)
            << "], ";
+        LOG_DEBUG(ss);
+        ss << __PRETTY_FUNCTION__ << " | AddToDeviceList #3 (secondary node add #2) \n"
+           << "; bdf: " << print_unsigned_hex_and_int(myBdfId) << "\n";
         LOG_DEBUG(ss);
         AddToDeviceList(secNode, myBdfId);
         allSystemNodes.erase(it++);

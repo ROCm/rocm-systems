@@ -441,6 +441,31 @@ typedef rsmi_memory_partition_type_t rsmi_memory_partition_type;
 /// \endcond
 
 /**
+ * @brief XCP resources.
+ * This enum is used to identify
+ * various accelerator resource types.
+ */
+typedef enum {
+  RSMI_ACCELERATOR_XCC,
+  RSMI_ACCELERATOR_ENCODER,
+  RSMI_ACCELERATOR_DECODER,
+  RSMI_ACCELERATOR_DMA,
+  RSMI_ACCELERATOR_JPEG,
+  RSMI_ACCELERATOR_MAX
+} rsmi_accelerator_partition_resource_type_t;
+
+/**
+ * @brief  Accelerator Partition Resources.
+ * This struct is used to identify various partition resource profiles.
+ */
+typedef struct {
+  rsmi_accelerator_partition_resource_type_t resource_type;
+  uint32_t partition_resource;             //!< Resources a partition can use, which may be shared
+  uint32_t num_partitions_share_resource;  //!< If it is greater than 1, then resource is shared.
+  uint64_t reserved[6];
+} rsmi_accelerator_partition_resource_profile_t;
+
+/**
  * @brief Temperature Metrics.  This enum is used to identify various
  * temperature metrics. Corresponding values will be in millidegress
  * Celcius.
@@ -4624,6 +4649,192 @@ rsmi_dev_compute_partition_set(uint32_t dv_ind,
  *
  */
 rsmi_status_t rsmi_dev_partition_id_get(uint32_t dv_ind, uint32_t *partition_id);
+
+/**
+ *  @brief Retrieves the available compute partition capabilities
+ *  for a desired device
+ *
+ *  @details
+ *  Given a device index @p dv_ind and a string @p compute_partition_caps ,
+ *  and uint32 @p len , this function will attempt to obtain the device's
+ *  available compute partition capabilities string. Upon successful
+ *  retreival, the obtained device's available compute partition capablilities
+ *  string shall be stored in the passed @p compute_partition_caps
+ *  char string variable.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] compute_partition_caps a pointer to a char string variable,
+ *  which the device's available compute partition capabilities will be written to.
+ *
+ *  @param[in] len the length of the caller provided buffer @p len ,
+ *  suggested length is 30 or greater.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *  @retval ::RSMI_STATUS_UNEXPECTED_DATA data provided to function is not valid
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function
+ *  @retval ::RSMI_STATUS_INSUFFICIENT_SIZE is returned if @p len bytes is not
+ *  large enough to hold the entire memory partition value. In this case,
+ *  only @p len bytes will be written.
+ *
+ */
+rsmi_status_t
+rsmi_dev_compute_partition_capabilities_get(uint32_t dv_ind, char *compute_partition_caps,
+                                            uint32_t len);
+
+/**
+ *  @brief Retrieves the compute partition supported xcp configs
+ *  for a desired device
+ *
+ *  @details
+ *  Given a device index @p dv_ind and a string @p supported_configs ,
+ *  and uint32 @p len , this function will attempt to obtain the device's
+ *  compute partition supported xcp configs string. Upon successful
+ *  retreival, the obtained device's available compute partition supported xcp configs
+ *  string shall be stored in the passed @p supported_configs
+ *  char string variable.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] supported_configs a pointer to a char string variable,
+ *  which the device's compute partition supported xcp configs will be written to.
+ *
+ *  @param[in] len the length of the caller provided buffer @p len ,
+ *  suggested length is 30 or greater.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *  @retval ::RSMI_STATUS_UNEXPECTED_DATA data provided to function is not valid
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function
+ *  @retval ::RSMI_STATUS_INSUFFICIENT_SIZE is returned if @p len bytes is not
+ *  large enough to hold the entire memory partition value. In this case,
+ *  only @p len bytes will be written.
+ *
+ */
+rsmi_status_t
+rsmi_dev_compute_partition_supported_xcp_configs_get(uint32_t dv_ind, char *supported_configs,
+                                                     uint32_t len);
+
+/**
+ *  @brief Retrieves the compute partition supported NPS configs
+ *  for a desired device
+ *
+ *  @details
+ *  Given a device index @p dv_ind and a string @p supported_configs ,
+ *  and uint32 @p len , this function will attempt to obtain the device's
+ *  compute partition supported NPS configs string. Upon successful
+ *  retreival, the obtained device's available compute partition supported NPS configs
+ *  string shall be stored in the passed @p supported_configs
+ *  char string variable.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] supported_configs a pointer to a char string variable,
+ *  which the device's compute partition supported NPS configs will be written to.
+ *
+ *  @param[in] len the length of the caller provided buffer @p len ,
+ *  suggested length is 30 or greater.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *  @retval ::RSMI_STATUS_UNEXPECTED_DATA data provided to function is not valid
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function
+ *  @retval ::RSMI_STATUS_INSUFFICIENT_SIZE is returned if @p len bytes is not
+ *  large enough to hold the entire memory partition value. In this case,
+ *  only @p len bytes will be written.
+ *
+ */
+rsmi_status_t
+rsmi_dev_compute_partition_supported_nps_configs_get(uint32_t dv_ind, char *supported_configs,
+                                                     uint32_t len);
+
+/**
+ *  @brief Retrieves the current compute partition xcp config
+ *  for a desired device
+ *
+ *  @details
+ *  Given a device index @p dv_ind and a string @p current_xcp_config ,
+ *  and uint32 @p len , this function will attempt to obtain the device's
+ *  curren tcompute partition xcp config string. Upon successful
+ *  retreival, the obtained device's current compute partition xcp config
+ *  string shall be stored in the passed @p current_xcp_config
+ *  char string variable.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] supported_configs a pointer to a char string variable,
+ *  which the device's current compute partition xcp config will be written to.
+ *
+ *  @param[in] len the length of the caller provided buffer @p len ,
+ *  suggested length is 30 or greater.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *  @retval ::RSMI_STATUS_UNEXPECTED_DATA data provided to function is not valid
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function
+ *  @retval ::RSMI_STATUS_INSUFFICIENT_SIZE is returned if @p len bytes is not
+ *  large enough to hold the entire memory partition value. In this case,
+ *  only @p len bytes will be written.
+ *
+ */
+rsmi_status_t rsmi_dev_current_compute_xcp_config_get(uint32_t dv_ind, char *current_xcp_config,
+                                                      uint32_t len);
+
+/**
+ *  @brief Modifies a selected device's compute partition XCP config setting.
+ *
+ *  @details Given a device index @p dv_ind, a type of compute partition
+ *  @p xcp_config, this function will attempt to update the selected
+ *  device's compute partition XCP config.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[in] xcp_config using enum ::rsmi_compute_partition_type_t,
+ *  define what the selected device's compute partition XCP config should be
+ *  updated to.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_PERMISSION function requires root access
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *  @retval ::RSMI_STATUS_SETTING_UNAVAILABLE the provided setting is
+ *  unavailable for current device
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function
+ *  @retval ::RSMI_STATUS_BUSY A resource or mutex could not be acquired
+ *  because it is already being used - device is busy
+ *
+ */
+rsmi_status_t
+rsmi_dev_compute_partition_xcp_config_set(uint32_t dv_ind,
+                                          rsmi_compute_partition_type_t xcp_config);
+
+/**
+ *  @brief Retrieves a selected device's compute partition resource profile.
+ *
+ *  @details Given a device index @p dv_ind, a pointer to a requested resorce of
+ *  rsmi_accelerator_partition_resource_type_t @p type, and a rsmi_accelerator_partition_resource_profile_t
+ *  @p profile this function will write the current XCP config's
+ *  resource profile to its @p profile.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[in] type a pointer to a requested resource using enum ::rsmi_accelerator_partition_resource_type_t
+ * 
+ *  @param[inout] profile a pointer to the requested rsmi_accelerator_partition_resource_profile_t details
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ */
+rsmi_status_t rsmi_dev_compute_partition_resource_profile_get(uint32_t dv_ind,
+                                  rsmi_accelerator_partition_resource_type_t *type,
+                                  rsmi_accelerator_partition_resource_profile_t *profile);
 
 /** @} */  // end of ComputePartition
 

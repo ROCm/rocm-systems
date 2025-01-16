@@ -383,11 +383,29 @@ std::string removeNewLines(const std::string &s) {
   return s;
 }
 
+// Trims white space from both ends of string
 std::string trim(const std::string &s) {
   if (!s.empty()) {
     // remove new lines -> trim white space at ends
     std::string noNewLines = removeNewLines(s);
     return leftTrim(rightTrim(noNewLines));
+  }
+  return s;
+}
+
+// Trims white space from both ends of string and removes all white space
+std::string trimAllWhiteSpace(const std::string &s) {
+  if (!s.empty()) {
+    // remove new lines -> trim white space at ends
+    std::string noNewLines = trim(s);
+    return removeWhitespace(noNewLines);
+  }
+  return s;
+}
+
+std::string removeWhitespace(const std::string &s) {
+  if (!s.empty()) {
+    return std::regex_replace(s, std::regex("\\s+"), "");
   }
   return s;
 }
@@ -908,18 +926,18 @@ std::string getBuildType() {
 }
 
 const char *my_fname(void) {
-std::string emptyRet="";
 #ifdef _GNU_SOURCE
   Dl_info dl_info;
-  dladdr((void *)my_fname, &dl_info);
+  dladdr(reinterpret_cast<void *>(my_fname), &dl_info);
   return (dl_info.dli_fname);
 #else
+  std::string emptyRet = "";
   return emptyRet.c_str();
 #endif
 }
 
 std::string getMyLibPath(void) {
-  std::string libName = "rocm-smi-lib";
+  std::string libName = "amd-smi-lib";
   std::string path = std::string(my_fname());
   if (path.empty()) {
     path = "Could not find library path for " + libName;

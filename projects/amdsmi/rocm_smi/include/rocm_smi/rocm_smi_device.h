@@ -163,6 +163,26 @@ enum DevInfoTypes {
   kDevComputePartition,
   kDevMemoryPartition,
   kDevAvailableMemoryPartition,
+  kDevSupportedXcpConfigs,
+  kDevSupportedNpsConfigs,
+  kDevXcpConfig,
+
+  /**
+   * Possible xcp config resources start
+   */
+  kDevDecoderInst,
+  kDevDecoderShared,
+  kDevEncoderInst,
+  kDevEncoderShared,
+  kDevDmaInst,
+  kDevDmaShared,
+  kDevJpegInst,
+  kDevJpegShared,
+  kDevXccInst,
+  kDevXccShared,
+  /**
+   * Possible xcp config resources end
+   */
 
   // The information read from pci core sysfs
   kDevPCieTypeStart = 1000,

@@ -5618,6 +5618,524 @@ rsmi_dev_compute_partition_set(uint32_t dv_ind,
   CATCH
 }
 
+rsmi_status_t rsmi_dev_compute_partition_capabilities_get(
+      uint32_t dv_ind, char *compute_partition_caps, uint32_t len) {
+  TRY
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
+  LOG_TRACE(ss);
+  DEVICE_MUTEX
+  std::string availableComputePartitions;
+  rsmi_status_t ret =
+      get_dev_value_line(amd::smi::kDevAvailableComputePartition,
+                         dv_ind, &availableComputePartitions);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | FAIL "
+       << " | Device #: " << dv_ind
+       << " | Type: "
+       << amd::smi::Device::get_type_string(amd::smi::kDevAvailableComputePartition)
+       << " | Data: could not retrieve requested data"
+       << " | Returning = "
+       << getRSMIStatusString(ret) << " |";
+    LOG_ERROR(ss);
+    return ret;
+  }
+
+  std::size_t length = availableComputePartitions.copy(compute_partition_caps, len-1);
+  compute_partition_caps[length]='\0';
+
+  if (len < (availableComputePartitions.size() + 1)) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Fail "
+       << " | Device #: " << dv_ind
+       << " | Type: "
+       << amd::smi::Device::get_type_string(amd::smi::kDevAvailableComputePartition)
+       << " | Cause: requested size was insufficient"
+       << " | Returning = "
+       << getRSMIStatusString(RSMI_STATUS_INSUFFICIENT_SIZE) << " |";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INSUFFICIENT_SIZE;
+  }
+  ss << __PRETTY_FUNCTION__
+     << " | ======= end ======= "
+     << " | Success "
+     << " | Device #: " << dv_ind
+     << " | Type: "
+     << amd::smi::Device::get_type_string(amd::smi::kDevAvailableComputePartition)
+     << " | Data: " << compute_partition_caps
+     << " | Returning = "
+     << getRSMIStatusString(ret) << " |";
+  LOG_TRACE(ss);
+  return ret;
+  CATCH
+}
+
+rsmi_status_t rsmi_dev_compute_partition_supported_xcp_configs_get(uint32_t dv_ind,
+                    char *supported_configs, uint32_t len) {
+  TRY
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
+  LOG_TRACE(ss);
+  DEVICE_MUTEX
+  std::string supported_xcp_configs;
+  rsmi_status_t ret =
+      get_dev_value_line(amd::smi::kDevSupportedXcpConfigs,
+                         dv_ind, &supported_xcp_configs);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | FAIL "
+       << " | Device #: " << dv_ind
+       << " | Type: "
+       << amd::smi::Device::get_type_string(amd::smi::kDevSupportedXcpConfigs)
+       << " | Data: could not retrieve requested data"
+       << " | Returning = "
+       << getRSMIStatusString(ret) << " |";
+    LOG_ERROR(ss);
+    return ret;
+  }
+
+  std::size_t length = supported_xcp_configs.copy(supported_configs, len-1);
+  supported_configs[length]='\0';
+
+  if (len < (supported_xcp_configs.size() + 1)) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Fail "
+       << " | Device #: " << dv_ind
+       << " | Type: "
+       << amd::smi::Device::get_type_string(amd::smi::kDevSupportedXcpConfigs)
+       << " | Cause: requested size was insufficient"
+       << " | Returning = "
+       << getRSMIStatusString(RSMI_STATUS_INSUFFICIENT_SIZE) << " |";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INSUFFICIENT_SIZE;
+  }
+  ss << __PRETTY_FUNCTION__
+     << " | ======= end ======= "
+     << " | Success "
+     << " | Device #: " << dv_ind
+     << " | Type: "
+     << amd::smi::Device::get_type_string(amd::smi::kDevSupportedXcpConfigs)
+     << " | Data: " << supported_configs
+     << " | Returning = "
+     << getRSMIStatusString(ret) << " |";
+  LOG_TRACE(ss);
+  return ret;
+  CATCH
+}
+
+rsmi_status_t rsmi_dev_compute_partition_supported_nps_configs_get(uint32_t dv_ind,
+                    char *supported_configs, uint32_t len) {
+  TRY
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
+  LOG_TRACE(ss);
+  DEVICE_MUTEX
+  std::string supported_nps_configs;
+  rsmi_status_t ret =
+      get_dev_value_line(amd::smi::kDevSupportedNpsConfigs,
+                         dv_ind, &supported_nps_configs);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | FAIL "
+       << " | Device #: " << dv_ind
+       << " | Type: "
+       << amd::smi::Device::get_type_string(amd::smi::kDevSupportedNpsConfigs)
+       << " | Data: could not retrieve requested data"
+       << " | Returning = "
+       << getRSMIStatusString(ret) << " |";
+    LOG_ERROR(ss);
+    return ret;
+  }
+
+  std::size_t length = supported_nps_configs.copy(supported_configs, len-1);
+  supported_configs[length]='\0';
+
+  if (len < (supported_nps_configs.size() + 1)) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Fail "
+       << " | Device #: " << dv_ind
+       << " | Type: "
+       << amd::smi::Device::get_type_string(amd::smi::kDevSupportedNpsConfigs)
+       << " | Cause: requested size was insufficient"
+       << " | Returning = "
+       << getRSMIStatusString(RSMI_STATUS_INSUFFICIENT_SIZE) << " |";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INSUFFICIENT_SIZE;
+  }
+  ss << __PRETTY_FUNCTION__
+     << " | ======= end ======= "
+     << " | Success "
+     << " | Device #: " << dv_ind
+     << " | Type: "
+     << amd::smi::Device::get_type_string(amd::smi::kDevSupportedNpsConfigs)
+     << " | Data: " << supported_configs
+     << " | Returning = "
+     << getRSMIStatusString(ret) << " |";
+  LOG_TRACE(ss);
+  return ret;
+  CATCH
+}
+
+rsmi_status_t rsmi_dev_current_compute_xcp_config_get(
+      uint32_t dv_ind, char *current_xcp_config, uint32_t len) {
+  TRY
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
+  LOG_TRACE(ss);
+  DEVICE_MUTEX
+  std::string currentXcpConfigStr;
+  rsmi_status_t ret =
+      get_dev_value_line(amd::smi::kDevXcpConfig,
+                         dv_ind, &currentXcpConfigStr);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | FAIL "
+       << " | Device #: " << dv_ind
+       << " | Type: "
+       << amd::smi::Device::get_type_string(amd::smi::kDevXcpConfig)
+       << " | Data: could not retrieve requested data"
+       << " | Returning = "
+       << getRSMIStatusString(ret) << " |";
+    LOG_ERROR(ss);
+    return ret;
+  }
+
+  std::size_t length = currentXcpConfigStr.copy(current_xcp_config, len-1);
+  current_xcp_config[length]='\0';
+
+  if (len < (currentXcpConfigStr.size() + 1)) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Fail "
+       << " | Device #: " << dv_ind
+       << " | Type: "
+       << amd::smi::Device::get_type_string(amd::smi::kDevXcpConfig)
+       << " | Cause: requested size was insufficient"
+       << " | Returning = "
+       << getRSMIStatusString(RSMI_STATUS_INSUFFICIENT_SIZE) << " |";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INSUFFICIENT_SIZE;
+  }
+  ss << __PRETTY_FUNCTION__
+     << " | ======= end ======= "
+     << " | Success "
+     << " | Device #: " << dv_ind
+     << " | Type: "
+     << amd::smi::Device::get_type_string(amd::smi::kDevXcpConfig)
+     << " | Data: " << currentXcpConfigStr
+     << " | Returning = "
+     << getRSMIStatusString(ret) << " |";
+  LOG_TRACE(ss);
+  return ret;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_compute_partition_xcp_config_set(uint32_t dv_ind,
+                                          rsmi_compute_partition_type_t xcp_config) {
+  TRY
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
+  LOG_TRACE(ss);
+  REQUIRE_ROOT_ACCESS
+  if (!amd::smi::is_sudo_user()) {
+    return RSMI_STATUS_PERMISSION;
+  }
+  std::string currentXcpConfig = "";
+  std::string newXcpConfigStr = "";
+  std::string availableXcpConfigsStr = "";
+  const int kLen30 = 30;
+  char available_xcp_configs[kLen30];
+  available_xcp_configs[0] = '\0';
+  const int kLen5 = 5;
+  char current_xcp_config[kLen5];
+  current_xcp_config[0] = '\0';
+
+  switch (xcp_config) {
+    case RSMI_COMPUTE_PARTITION_CPX:
+    case RSMI_COMPUTE_PARTITION_SPX:
+    case RSMI_COMPUTE_PARTITION_DPX:
+    case RSMI_COMPUTE_PARTITION_TPX:
+    case RSMI_COMPUTE_PARTITION_QPX:
+      newXcpConfigStr =
+        mapRSMIToStringComputePartitionTypes.at(xcp_config);
+      break;
+    case RSMI_COMPUTE_PARTITION_INVALID:
+    default:
+      newXcpConfigStr =
+        mapRSMIToStringComputePartitionTypes.at(RSMI_COMPUTE_PARTITION_INVALID);
+      ss << __PRETTY_FUNCTION__
+         << " | ======= end ======= "
+         << " | Fail "
+         << " | Device #: " << dv_ind
+         << " | Type: "
+         << amd::smi::Device::get_type_string(amd::smi::kDevXcpConfig)
+         << " | Data: " << newXcpConfigStr
+         << " | Cause: requested setting was invalid"
+         << " | Returning = "
+         << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
+      LOG_ERROR(ss);
+      return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  // Confirm what we are trying to set is available, otherwise provide
+  // RSMI_STATUS_INVALID_ARGS
+  rsmi_status_t available_ret =
+      rsmi_dev_compute_partition_supported_xcp_configs_get(dv_ind, available_xcp_configs, kLen30);
+  if (available_ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Fail "
+       << " | Device #: " << dv_ind
+       << " | Type: "
+       << amd::smi::Device::get_type_string(amd::smi::kDevSupportedXcpConfigs)
+       << " | Data: " << newXcpConfigStr
+       << " | Cause: could not find an available xcp configs file"
+       << " | Returning = "
+       << getRSMIStatusString(available_ret) << " |";
+    LOG_ERROR(ss);
+    return available_ret;
+  } else {
+    availableXcpConfigsStr = available_xcp_configs;
+  }
+
+  bool isXcpConfigAvailable =
+      amd::smi::containsString(availableXcpConfigsStr,
+                               newXcpConfigStr);
+  if (!isXcpConfigAvailable) {
+    ss << __PRETTY_FUNCTION__
+       << " | Fail  - Detected that the requested xcp config is not available"
+       << " | Device #: " << dv_ind
+       << " | Type: "
+       << amd::smi::Device::get_type_string(amd::smi::kDevXcpConfig)
+       << " | Data (newXcpConfigStr): " << newXcpConfigStr
+       << " | Data (availableXcpConfigsStr): " << availableXcpConfigsStr;
+    LOG_ERROR(ss);
+    // We do not return RSMI_STATUS_INVALID_ARGS
+    // Instead we try setting anyways as requested
+    // write will provide the correct error code
+  }
+
+  ss <<  __PRETTY_FUNCTION__ << " | about to try writing |"
+     << newXcpConfigStr
+     << "| size of string = " << newXcpConfigStr.size()
+     << "| size of c-string = "<< std::dec
+     << sizeof(newXcpConfigStr.c_str())/sizeof(newXcpConfigStr[0])
+     << "| sizeof string = " << std::dec
+     << sizeof(newXcpConfigStr);
+  LOG_DEBUG(ss);
+  GET_DEV_FROM_INDX
+  DEVICE_MUTEX
+  int ret = dev->writeDevInfo(amd::smi::kDevXcpConfig,
+                              newXcpConfigStr);
+  rsmi_status_t returnResponse = amd::smi::ErrnoToRsmiStatus(ret);
+  ss << __PRETTY_FUNCTION__
+     << " | ======= end ======= "
+     << " | Success "
+     << " | Device #: " << dv_ind
+     << " | Type: "
+     << amd::smi::Device::get_type_string(amd::smi::kDevXcpConfig)
+     << " | Data: " << newXcpConfigStr
+     << " | Returning = "
+     << getRSMIStatusString(returnResponse) << " |";
+  LOG_TRACE(ss);
+
+  return returnResponse;
+  CATCH
+}
+
+rsmi_status_t rsmi_dev_compute_partition_resource_profile_get(uint32_t dv_ind,
+                                  rsmi_accelerator_partition_resource_type_t *type,
+                                  rsmi_accelerator_partition_resource_profile_t *profile) {
+  TRY
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
+  LOG_TRACE(ss);
+  if (type == nullptr) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Fail "
+       << " | Device #: " << dv_ind
+       << " | Type: "
+       << amd::smi::Device::get_type_string(amd::smi::kDevXcpConfig)
+       << " | Cause: user sent invalid arguments, type was a null ptr"
+       << " | Returning = "
+       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS, false);
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  // initialize the profile
+  profile->partition_resource = std::numeric_limits<uint32_t>::max();
+  profile->num_partitions_share_resource = std::numeric_limits<uint32_t>::max();
+
+  DEVICE_MUTEX
+  rsmi_status_t ret = RSMI_STATUS_NOT_SUPPORTED;
+  // check if user provided supported resource types
+  // Note: RSMI_ACCELERATOR_MAX is == largest enum value
+  bool isAcceleratorTypeValid = false;
+  for (int i = 0; i <= RSMI_ACCELERATOR_MAX; i++) {
+    if (*type == i) {
+      isAcceleratorTypeValid = true;
+      break;
+    }
+  }
+  if (isAcceleratorTypeValid == false) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Fail "
+       << " | Device #: " << dv_ind
+       << " | Type: "
+       << amd::smi::Device::get_type_string(amd::smi::kDevXcpConfig)
+       << " | Cause: user sent invalid arguments, type was out of range"
+       << " | Returning = "
+       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS, false);
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  amd::smi::DevInfoTypes dev_info_type_inst;
+  amd::smi::DevInfoTypes dev_info_type_shared;
+  if (*type == RSMI_ACCELERATOR_XCC) {
+    profile->resource_type = RSMI_ACCELERATOR_XCC;
+    dev_info_type_inst = amd::smi::kDevXccInst;
+    dev_info_type_shared = amd::smi::kDevXccShared;
+    std::string val_str;
+    ret = get_dev_value_str(amd::smi::kDevXccInst, dv_ind, &val_str);
+    if (ret == RSMI_STATUS_SUCCESS) {
+      uint64_t val_ul = strtoul(val_str.c_str(), nullptr, 10);
+      if (val_ul <= std::numeric_limits<uint32_t>::max()) {
+        profile->partition_resource = static_cast<uint32_t>(val_ul);
+      }
+    }
+
+    val_str.clear();
+    ret = get_dev_value_str(amd::smi::kDevXccShared, dv_ind, &val_str);
+    if (ret == RSMI_STATUS_SUCCESS) {
+      uint64_t val_ul = strtoul(val_str.c_str(), nullptr, 10);
+      if (val_ul <= std::numeric_limits<uint32_t>::max()) {
+        profile->num_partitions_share_resource = static_cast<uint32_t>(val_ul);
+      }
+    }
+  }
+
+  if (*type == RSMI_ACCELERATOR_ENCODER) {
+    profile->resource_type = RSMI_ACCELERATOR_ENCODER;
+    dev_info_type_inst = amd::smi::kDevEncoderInst;
+    dev_info_type_shared = amd::smi::kDevEncoderShared;
+    std::string val_str;
+    ret = get_dev_value_str(amd::smi::kDevEncoderInst, dv_ind, &val_str);
+    if (ret == RSMI_STATUS_SUCCESS) {
+      uint64_t val_ul = strtoul(val_str.c_str(), nullptr, 10);
+      if (val_ul <= std::numeric_limits<uint32_t>::max()) {
+        profile->partition_resource = static_cast<uint32_t>(val_ul);
+      }
+    }
+
+    val_str.clear();
+    ret = get_dev_value_str(amd::smi::kDevEncoderShared, dv_ind, &val_str);
+    if (ret == RSMI_STATUS_SUCCESS) {
+      uint64_t val_ul = strtoul(val_str.c_str(), nullptr, 10);
+      if (val_ul <= std::numeric_limits<uint32_t>::max()) {
+        profile->num_partitions_share_resource = static_cast<uint32_t>(val_ul);
+      }
+    }
+  }
+
+  if (*type == RSMI_ACCELERATOR_DECODER) {
+    profile->resource_type = RSMI_ACCELERATOR_DECODER;
+    dev_info_type_inst = amd::smi::kDevDecoderInst;
+    dev_info_type_shared = amd::smi::kDevDecoderShared;
+    std::string val_str;
+    ret = get_dev_value_str(amd::smi::kDevDecoderInst, dv_ind, &val_str);
+    if (ret == RSMI_STATUS_SUCCESS) {
+      uint64_t val_ul = strtoul(val_str.c_str(), nullptr, 10);
+      if (val_ul <= std::numeric_limits<uint32_t>::max()) {
+        profile->partition_resource = static_cast<uint32_t>(val_ul);
+      }
+    }
+
+    val_str.clear();
+    ret = get_dev_value_str(amd::smi::kDevDecoderShared, dv_ind, &val_str);
+    if (ret == RSMI_STATUS_SUCCESS) {
+      uint64_t val_ul = strtoul(val_str.c_str(), nullptr, 10);
+      if (val_ul <= std::numeric_limits<uint32_t>::max()) {
+        profile->num_partitions_share_resource = static_cast<uint32_t>(val_ul);
+      }
+    }
+  }
+
+  if (*type == RSMI_ACCELERATOR_DMA) {
+    profile->resource_type = RSMI_ACCELERATOR_DMA;
+    dev_info_type_inst = amd::smi::kDevDmaInst;
+    dev_info_type_shared = amd::smi::kDevDmaShared;
+    std::string val_str;
+    ret = get_dev_value_str(amd::smi::kDevDmaInst, dv_ind, &val_str);
+    if (ret == RSMI_STATUS_SUCCESS) {
+      uint64_t val_ul = strtoul(val_str.c_str(), nullptr, 10);
+      if (val_ul <= std::numeric_limits<uint32_t>::max()) {
+        profile->partition_resource = static_cast<uint32_t>(val_ul);
+      }
+    }
+
+    val_str.clear();
+    ret = get_dev_value_str(amd::smi::kDevDmaShared, dv_ind, &val_str);
+    if (ret == RSMI_STATUS_SUCCESS) {
+      uint64_t val_ul = strtoul(val_str.c_str(), nullptr, 10);
+      if (val_ul <= std::numeric_limits<uint32_t>::max()) {
+        profile->num_partitions_share_resource = static_cast<uint32_t>(val_ul);
+      }
+    }
+  }
+
+  // RSMI_ACCELERATOR_MAX == RSMI_ACCELERATOR_JPEG
+  if (*type == RSMI_ACCELERATOR_JPEG) {
+    profile->resource_type = RSMI_ACCELERATOR_JPEG;
+    dev_info_type_inst = amd::smi::kDevJpegInst;
+    dev_info_type_shared = amd::smi::kDevJpegShared;
+    std::string val_str;
+    ret = get_dev_value_str(amd::smi::kDevJpegInst, dv_ind, &val_str);
+    if (ret == RSMI_STATUS_SUCCESS) {
+      uint64_t val_ul = strtoul(val_str.c_str(), nullptr, 10);
+      if (val_ul <= std::numeric_limits<uint32_t>::max()) {
+        profile->partition_resource = static_cast<uint32_t>(val_ul);
+      }
+    }
+
+    val_str.clear();
+    ret = get_dev_value_str(amd::smi::kDevJpegShared, dv_ind, &val_str);
+    if (ret == RSMI_STATUS_SUCCESS) {
+      uint64_t val_ul = strtoul(val_str.c_str(), nullptr, 10);
+      if (val_ul <= std::numeric_limits<uint32_t>::max()) {
+        profile->num_partitions_share_resource = static_cast<uint32_t>(val_ul);
+      }
+    }
+  }
+
+  ss << __PRETTY_FUNCTION__
+     << " | ======= end ======= "
+     << " | Success "
+     << " | Device #: " << dv_ind
+     << " | Type (partition_resource): "
+     << amd::smi::Device::get_type_string(dev_info_type_inst)
+     << " | Data: " << profile->partition_resource
+     << " | Type (num_partitions_share_resource): "
+     << amd::smi::Device::get_type_string(dev_info_type_shared)
+     << " | Data: " << profile->num_partitions_share_resource
+     << " | Returning = "
+     << getRSMIStatusString(ret, false) << " |";
+  LOG_TRACE(ss);
+
+  return ret;
+  CATCH
+}
+
 static rsmi_status_t get_memory_partition(uint32_t dv_ind,
                                           std::string &memory_partition) {
   TRY

@@ -102,14 +102,24 @@ class AMDSMILogger():
         return output_dict
 
 
-    def _convert_json_to_tabular(self, json_object: Dict[str, any]):
-        # TODO make dynamic
+    def _convert_json_to_tabular(self, json_object: Dict[str, any], dynamic=False):
+        # TODO make dynamic - convert other python CLI outputs to use (as needed)
+        # Update: using dynamic=true provides dynamic re-sizing based on key name length
+
         table_values = ''
         stored_gpu = ''
         stored_timestamp = ''
         for key, value in json_object.items():
             string_value = str(value)
-            if key == 'gpu':
+            if key == 'partition_id':
+                # Special case for partition_id: 8 partitions + 7 comma + 2 spaces = 17
+                table_values += string_value.ljust(17)
+                continue
+            key_length = len(key) + 2
+            if dynamic and len(key) > 0:
+                stored_gpu = string_value
+                table_values += string_value.ljust(key_length)
+            elif key == 'gpu':
                 stored_gpu = string_value
                 table_values += string_value.rjust(3)
             elif key == 'timestamp':
@@ -144,30 +154,6 @@ class AMDSMILogger():
             elif key == "link_status":
                 for i in value:
                     table_values += str(i).ljust(3)
-            elif key == "memory":
-                table_values += string_value.ljust(8)
-            elif key == "accelerator_type":
-                table_values += string_value.ljust(18)
-            elif key == "partition_id":
-                table_values += string_value.ljust(14)
-            elif key == "accelerator_profile_index":
-                table_values += string_value.ljust(27)
-            elif key == "profile_index":
-                table_values += string_value.ljust(15)
-            elif key == "memory_partition_caps":
-                table_values += string_value.ljust(23)
-            elif key == "num_partitions":
-                table_values += string_value.ljust(16)
-            elif key == "num_resources":
-                table_values += string_value.ljust(15)
-            elif key == "resource_index":
-                table_values += string_value.ljust(16)
-            elif key == "resource_type":
-                table_values += string_value.ljust(15)
-            elif key == "resource_instances":
-                table_values += string_value.ljust(20)
-            elif key == "resources_shared":
-                table_values += string_value.ljust(18)
             elif key == "RW":
                 table_values += string_value.ljust(57)
             elif key in ('pviol', 'tviol'):
@@ -494,12 +480,14 @@ class AMDSMILogger():
             self.output = {}
 
 
-    def print_output(self, multiple_device_enabled=False, watching_output=False, tabular=False, dual_csv_output=False):
+    def print_output(self, multiple_device_enabled=False, watching_output=False, tabular=False, dual_csv_output=False, dynamic=False):
         """ Print current output acording to format and then destination
             params:
                 multiple_device_enabled (bool) - True if printing output from
                     multiple devices
                 watching_output (bool) - True if printing watch output
+                dynamic (bool) - Defaults to False. True turns on dynamic resizing for
+                    left justified table output
             return:
                 Nothing
         """
@@ -516,7 +504,7 @@ class AMDSMILogger():
         elif self.is_human_readable_format():
             # If tabular output is enabled, redirect to _print_tabular_output
             if tabular:
-                self._print_tabular_output(multiple_device_enabled=multiple_device_enabled, watching_output=watching_output)
+                self._print_tabular_output(multiple_device_enabled=multiple_device_enabled, watching_output=watching_output, dynamic=dynamic)
             else:
                 self._print_human_readable_output(multiple_device_enabled=multiple_device_enabled,
                                                    watching_output=watching_output)
@@ -788,7 +776,7 @@ class AMDSMILogger():
                     output_file.write(human_readable_output + '\n')
 
 
-    def _print_tabular_output(self, multiple_device_enabled=False, watching_output=False):
+    def _print_tabular_output(self, multiple_device_enabled=False, watching_output=False, dynamic=False):
         primary_table = ''
         secondary_table = ''
 
@@ -808,7 +796,7 @@ class AMDSMILogger():
                 for key, value in device_output.items():
                     if key != 'process_list':
                         primary_table_output[key] = value
-                primary_table += self._convert_json_to_tabular(primary_table_output) + '\n'
+                primary_table += self._convert_json_to_tabular(primary_table_output, dynamic=dynamic) + '\n'
         else: # Single device output
             if 'process_list' in self.output:
                 process_table_dict = {}
@@ -822,7 +810,7 @@ class AMDSMILogger():
             for key, value in self.output.items():
                 if key != 'process_list':
                     primary_table_output[key] = value
-            primary_table += self._convert_json_to_tabular(primary_table_output) + '\n'
+            primary_table += self._convert_json_to_tabular(primary_table_output, dynamic=dynamic) + '\n'
         primary_table = primary_table.rstrip()
         secondary_table = secondary_table.rstrip()
 
@@ -879,7 +867,7 @@ class AMDSMILogger():
                         for key, value in device_output.items():
                             if key != 'process_list':
                                 primary_table_output[key] = value
-                        primary_table += self._convert_json_to_tabular(primary_table_output) + '\n'
+                        primary_table += self._convert_json_to_tabular(primary_table_output, dynamic=dynamic) + '\n'
                     primary_table = primary_table.rstrip() # Remove trailing new line
                     secondary_table = secondary_table.rstrip()
 
