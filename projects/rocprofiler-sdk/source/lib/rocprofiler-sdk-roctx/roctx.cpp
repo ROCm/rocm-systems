@@ -41,59 +41,15 @@
 
 ROCPROFILER_REGISTER_DEFINE_IMPORT(roctx, ROCP_REG_VERSION)
 
+namespace rocprofiler
+{
 namespace roctx
 {
 namespace
 {
 namespace common = ::rocprofiler::common;
 
-constexpr size_t
-compute_table_offset(size_t n)
-{
-    return (sizeof(uint64_t) + (n * sizeof(void*)));
-}
-
-constexpr size_t
-compute_table_size(size_t nmembers)
-{
-    return (sizeof(uint64_t) + (nmembers * sizeof(void*)));
-}
-
-#define ROCTX_ASSERT_OFFSET(TABLE, MEMBER, IDX)                                                    \
-    static_assert(offsetof(TABLE, MEMBER) == compute_table_offset(IDX),                            \
-                  "Do not re-arrange the table members")
-
-// core
-ROCTX_ASSERT_OFFSET(roctxCoreApiTable_t, roctxMarkA_fn, 0);
-ROCTX_ASSERT_OFFSET(roctxCoreApiTable_t, roctxRangePushA_fn, 1);
-ROCTX_ASSERT_OFFSET(roctxCoreApiTable_t, roctxRangePop_fn, 2);
-ROCTX_ASSERT_OFFSET(roctxCoreApiTable_t, roctxRangeStartA_fn, 3);
-ROCTX_ASSERT_OFFSET(roctxCoreApiTable_t, roctxRangeStop_fn, 4);
-ROCTX_ASSERT_OFFSET(roctxCoreApiTable_t, roctxGetThreadId_fn, 5);
-// control
-ROCTX_ASSERT_OFFSET(roctxControlApiTable_t, roctxProfilerPause_fn, 0);
-ROCTX_ASSERT_OFFSET(roctxControlApiTable_t, roctxProfilerResume_fn, 1);
-// name
-ROCTX_ASSERT_OFFSET(roctxNameApiTable_t, roctxNameOsThread_fn, 0);
-ROCTX_ASSERT_OFFSET(roctxNameApiTable_t, roctxNameHsaAgent_fn, 1);
-ROCTX_ASSERT_OFFSET(roctxNameApiTable_t, roctxNameHipDevice_fn, 2);
-ROCTX_ASSERT_OFFSET(roctxNameApiTable_t, roctxNameHipStream_fn, 3);
-
-#undef ROCTX_ASSERT_OFFSET
-
-static_assert(
-    sizeof(roctxCoreApiTable_t) == compute_table_size(6),
-    "Update table major/step version and add a new offset assertion if this fails to compile");
-
-static_assert(
-    sizeof(roctxControlApiTable_t) == compute_table_size(2),
-    "Update table major/step version and add a new offset assertion if this fails to compile");
-
-static_assert(
-    sizeof(roctxNameApiTable_t) == compute_table_size(4),
-    "Update table major/step version and add a new offset assertion if this fails to compile");
-
-using ::rocprofiler::common::static_buffer_size;
+using common::static_buffer_size;
 using atomic_roctx_range_id_t = std::atomic<roctx_range_id_t>;
 
 constexpr auto    atomic_range_id_size_v     = static_buffer_size<atomic_roctx_range_id_t>();
@@ -117,16 +73,16 @@ get_start_stop_range_id()
 int
 roctxGetThreadId(roctx_thread_id_t* tid)
 {
-    *tid = rocprofiler::common::get_tid();
+    *tid = common::get_tid();
     return 0;
 }
 
 void
-roctxMarkA(const char*)
+roctxMarkA(const char* /*msg*/)
 {}
 
 int
-roctxRangePushA(const char*)
+roctxRangePushA(const char* /*msg*/)
 {
     return get_nested_range_level()++;
 }
@@ -145,32 +101,32 @@ roctxRangeStartA(const char*)
     return range_id;
 }
 
-void roctxRangeStop(roctx_range_id_t) {}
+void roctxRangeStop(roctx_range_id_t /*id*/) {}
 
 int roctxProfilerPause(roctx_thread_id_t /*tid*/) { return 0; }
 
 int roctxProfilerResume(roctx_thread_id_t /*tid*/) { return 0; }
 
 int
-roctxNameOsThread(const char*)
+roctxNameOsThread(const char* /*name*/)
 {
     return 0;
 }
 
 int
-roctxNameHsaAgent(const char*, const struct hsa_agent_s*)
+roctxNameHsaAgent(const char* /*name*/, const struct hsa_agent_s* /*agent*/)
 {
     return 0;
 }
 
 int
-roctxNameHipDevice(const char*, int)
+roctxNameHipDevice(const char* /*name*/, int /*devid*/)
 {
     return 0;
 }
 
 int
-roctxNameHipStream(const char*, const struct ihipStream_t*)
+roctxNameHipStream(const char* /*name*/, const struct ihipStream_t* /*stream*/)
 {
     return 0;
 }
@@ -190,22 +146,22 @@ get_table_impl()
     auto*& tbl = rocprofiler::common::static_object<roctx_api_table>::construct();
 
     tbl->core = roctxCoreApiTable_t{sizeof(roctxCoreApiTable_t),
-                                    &::roctx::roctxMarkA,
-                                    &::roctx::roctxRangePushA,
-                                    &::roctx::roctxRangePop,
-                                    &::roctx::roctxRangeStartA,
-                                    &::roctx::roctxRangeStop,
-                                    &::roctx::roctxGetThreadId};
+                                    &::rocprofiler::roctx::roctxMarkA,
+                                    &::rocprofiler::roctx::roctxRangePushA,
+                                    &::rocprofiler::roctx::roctxRangePop,
+                                    &::rocprofiler::roctx::roctxRangeStartA,
+                                    &::rocprofiler::roctx::roctxRangeStop,
+                                    &::rocprofiler::roctx::roctxGetThreadId};
 
     tbl->control = roctxControlApiTable_t{sizeof(roctxControlApiTable_t),
-                                          &::roctx::roctxProfilerPause,
-                                          &::roctx::roctxProfilerResume};
+                                          &::rocprofiler::roctx::roctxProfilerPause,
+                                          &::rocprofiler::roctx::roctxProfilerResume};
 
     tbl->name = roctxNameApiTable_t{sizeof(roctxNameApiTable_t),
-                                    &::roctx::roctxNameOsThread,
-                                    &::roctx::roctxNameHsaAgent,
-                                    &::roctx::roctxNameHipDevice,
-                                    &::roctx::roctxNameHipStream};
+                                    &::rocprofiler::roctx::roctxNameOsThread,
+                                    &::rocprofiler::roctx::roctxNameHsaAgent,
+                                    &::rocprofiler::roctx::roctxNameHipDevice,
+                                    &::rocprofiler::roctx::roctxNameHipStream};
 
     auto table_array = std::array<void*, 3>{&tbl->core, &tbl->control, &tbl->name};
     auto lib_id      = rocprofiler_register_library_indentifier_t{};
@@ -236,79 +192,80 @@ get_table()
 }
 }  // namespace
 }  // namespace roctx
+}  // namespace rocprofiler
 
 ROCTX_EXTERN_C_INIT
 
 void
 roctxMarkA(const char* message)
 {
-    ::roctx::get_table()->core.roctxMarkA_fn(message);
+    ::rocprofiler::roctx::get_table()->core.roctxMarkA_fn(message);
 }
 
 int
 roctxRangePushA(const char* message)
 {
-    return ::roctx::get_table()->core.roctxRangePushA_fn(message);
+    return ::rocprofiler::roctx::get_table()->core.roctxRangePushA_fn(message);
 }
 
 int
 roctxRangePop()
 {
-    return ::roctx::get_table()->core.roctxRangePop_fn();
+    return ::rocprofiler::roctx::get_table()->core.roctxRangePop_fn();
 }
 
 roctx_range_id_t
 roctxRangeStartA(const char* message)
 {
-    return ::roctx::get_table()->core.roctxRangeStartA_fn(message);
+    return ::rocprofiler::roctx::get_table()->core.roctxRangeStartA_fn(message);
 }
 
 void
 roctxRangeStop(roctx_range_id_t id)
 {
-    return ::roctx::get_table()->core.roctxRangeStop_fn(id);
+    return ::rocprofiler::roctx::get_table()->core.roctxRangeStop_fn(id);
 }
 
 int
 roctxGetThreadId(roctx_thread_id_t* tid)
 {
-    return ::roctx::get_table()->core.roctxGetThreadId_fn(tid);
+    return ::rocprofiler::roctx::get_table()->core.roctxGetThreadId_fn(tid);
 }
 
 int
 roctxProfilerPause(roctx_thread_id_t tid)
 {
-    return ::roctx::get_table()->control.roctxProfilerPause_fn(tid);
+    return ::rocprofiler::roctx::get_table()->control.roctxProfilerPause_fn(tid);
 }
 
 int
 roctxProfilerResume(roctx_thread_id_t tid)
 {
-    return ::roctx::get_table()->control.roctxProfilerResume_fn(tid);
+    return ::rocprofiler::roctx::get_table()->control.roctxProfilerResume_fn(tid);
 }
 
 int
 roctxNameOsThread(const char* name)
 {
-    return ::roctx::get_table()->name.roctxNameOsThread_fn(name);
+    return ::rocprofiler::roctx::get_table()->name.roctxNameOsThread_fn(name);
 }
 
 int
 roctxNameHsaAgent(const char* name, const struct hsa_agent_s* agent)
 {
-    return ::roctx::get_table()->name.roctxNameHsaAgent_fn(name, agent);
+    return ::rocprofiler::roctx::get_table()->name.roctxNameHsaAgent_fn(name, agent);
 }
 
 int
 roctxNameHipDevice(const char* name, int device_id)
 {
-    return ::roctx::get_table()->name.roctxNameHipDevice_fn(name, device_id);
+    return ::rocprofiler::roctx::get_table()->name.roctxNameHipDevice_fn(name, device_id);
 }
 
 int
 roctxNameHipStream(const char* name, const struct ihipStream_t* stream)
 {
-    return ::roctx::get_table()->name.roctxNameHipStream_fn(name, stream);
+    return ::rocprofiler::roctx::get_table()->name.roctxNameHipStream_fn(name, stream);
 }
 
 ROCTX_EXTERN_C_FINI

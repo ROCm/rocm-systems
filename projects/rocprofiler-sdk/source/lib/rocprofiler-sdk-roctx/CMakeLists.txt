@@ -11,7 +11,7 @@ add_library(rocprofiler-sdk::rocprofiler-sdk-roctx-shared-library ALIAS
 add_library(rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library ALIAS
             rocprofiler-sdk-roctx-shared-library)
 
-target_sources(rocprofiler-sdk-roctx-shared-library PRIVATE roctx.cpp)
+target_sources(rocprofiler-sdk-roctx-shared-library PRIVATE abi.cpp roctx.cpp)
 target_include_directories(
     rocprofiler-sdk-roctx-shared-library
     INTERFACE $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/source/include>
