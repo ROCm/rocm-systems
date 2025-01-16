@@ -705,6 +705,7 @@ TEST_F(device_counting_service_test, sync_sq_waves_verify_non_intercept)
         GTEST_SKIP();
     }
 
+    ROCP_WARNING << "Running non-intercept test";
     test_run(ROCPROFILER_COUNTER_FLAG_NONE, {"SQ_WAVES_sum"}, 50000, true);
     auto local_recs = global_recs().rlock([](const auto& data) { return data; });
     ROCP_WARNING << local_recs.size();

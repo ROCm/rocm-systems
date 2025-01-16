@@ -83,7 +83,16 @@ gtest_add_tests(
     TEST_LIST counter-tests_TESTS
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
-set_tests_properties(${counter-tests_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests")
+set_tests_properties(
+    ${counter-tests_TESTS}
+    PROPERTIES
+        TIMEOUT
+        45
+        LABELS
+        "unittests"
+        SKIP_REGULAR_EXPRESSION
+        "Running non-intercept test(.*)could not be locked for profiling due to lack of permissions.*"
+    )
 
 set(ROCPROFILER_LIB_CONSUMER_TEST_SOURCES consumer_test.cpp)
 
