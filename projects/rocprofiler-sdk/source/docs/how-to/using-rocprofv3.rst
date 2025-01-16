@@ -789,22 +789,23 @@ Properties
     $ cat input.json
 
     {
-        "jobs": [
-        {
+      "jobs": [
+         {
             "pmc": ["SQ_WAVES", "GRBM_COUNT", "GRBM_GUI_ACTIVE"]
-        },
-        {
+         },
+         {
             "pmc": ["FETCH_SIZE", "WRITE_SIZE"],
             "kernel_include_regex": ".*_kernel",
             "kernel_exclude_regex": "multiply",
-            "kernel_iteration_range": "[1-2]","[3-4]"
+            "kernel_iteration_range": "[1-2],[3-4]",
             "output_file": "out",
             "output_format": [
-                    "csv",
-                    "json"
+               "csv",
+               "json"
             ],
             "truncate_kernels": true
-        ]
+         }
+      ]
     }
 
 .. code-block:: shell
@@ -816,8 +817,6 @@ Properties
         - SQ_WAVES
         - GRBM_COUNT
         - GRBM_GUI_ACTIVE
-        - 'TCC_HIT[1]'
-        - 'TCC_HIT[2]'
     - pmc:
         - FETCH_SIZE
         - WRITE_SIZE

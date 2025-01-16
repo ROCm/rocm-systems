@@ -838,9 +838,9 @@ get_device_counting_service(rocprofiler_agent_id_t agent_id)
                                                                 ", "));
                 auto found_counters =
                     fmt::format("{}", fmt::join(found_v.begin(), found_v.end(), ", "));
-                LOG(FATAL) << "Unable to find all counters for agent " << agent_v->node_id
-                           << " (gpu-" << agent_v->gpu_index << ", " << agent_v->name << ") in ["
-                           << requested_counters << "]. Found: [" << found_counters << "]";
+                ROCP_WARNING << "Unable to find all counters for agent " << agent_v->node_id
+                             << " (gpu-" << agent_v->gpu_index << ", " << agent_v->name << ") in ["
+                             << requested_counters << "]. Found: [" << found_counters << "]";
             }
 
             if(!counters_v.empty())
