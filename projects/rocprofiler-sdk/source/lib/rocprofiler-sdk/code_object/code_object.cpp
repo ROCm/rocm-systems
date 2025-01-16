@@ -765,7 +765,7 @@ initialize_hip_binary_data()
 {
     static bool is_initialized =
         CHECK_NOTNULL(get_hip_register_data())->wlock([](hip::hip_register_data& data) {
-            ROCP_WARNING_IF(!data.fat_binary) << "No binary registered for HIP";
+            ROCP_INFO_IF(!data.fat_binary) << "No binary registered for HIP";
             if(!data.fat_binary) return false;
             std::vector<const rocprofiler_agent_t*> rocp_agents = rocprofiler::agent::get_agents();
             for(const auto* rocp_agent : rocp_agents)
@@ -797,7 +797,7 @@ executable_freeze(hsa_executable_t executable, const char* options)
 
     // before iterating code-object populate the host function map from registered binary
     bool is_initialized = initialize_hip_binary_data();
-    ROCP_ERROR_IF(!is_initialized) << "hip mapping data not initialized";
+    ROCP_INFO_IF(!is_initialized) << "hip mapping data not initialized";
 
     ROCP_INFO << "running " << __FUNCTION__ << " (executable=" << executable.handle << ")...";
     CHECK_NOTNULL(get_executables())->wlock([executable](executable_array_t& data) {
