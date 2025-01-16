@@ -173,6 +173,14 @@ class AMDSMIParser(argparse.ArgumentParser):
         else:
             raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(string_value, outputformat)
 
+    def _is_command_supported(self, user_input, acceptable_values, command_name):
+        if acceptable_values == "N/A":
+            raise amdsmi_cli_exceptions.AmdSmiCommandNotSupportedException(command_name, self.helpers.get_output_format())
+        elif str(user_input).upper() not in acceptable_values:
+            print(f"Valid inputs are {acceptable_values}")
+            raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(str(user_input).upper(), self.helpers.get_output_format())
+        else:
+            return str(user_input).upper()
 
     def _limit_select(self):
         """Custom action for setting clock limits"""
@@ -401,7 +409,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         return _CoreSelectAction
 
 
-    def _add_command_modifiers(self, subcommand_parser):
+    def _add_command_modifiers(self, subcommand_parser: argparse.ArgumentParser):
         json_help = "Displays output in JSON format (human readable by default)."
         csv_help = "Displays output in CSV format (human readable by default)."
         file_help = "Saves output into a file on the provided path (stdout by default)."
@@ -460,7 +468,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         return value
 
 
-    def _add_device_arguments(self, subcommand_parser, required=False):
+    def _add_device_arguments(self, subcommand_parser: argparse.ArgumentParser, required=False):
         # Device arguments help text
         gpu_help = f"Select a GPU ID, BDF, or UUID from the possible choices:\n{self.gpu_choices_str}"
         vf_help = "Gets general information about the specified VF (timeslice, fb info, …).\
@@ -583,7 +591,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         return _ValidateOverdrivePercent
 
 
-    def _add_version_parser(self, subparsers, func):
+    def _add_version_parser(self, subparsers: argparse._SubParsersAction, func):
         # Subparser help text
         version_help = "Display version information"
 
@@ -597,7 +605,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_command_modifiers(version_parser)
 
 
-    def _add_list_parser(self, subparsers, func):
+    def _add_list_parser(self, subparsers: argparse._SubParsersAction, func):
         if not self.helpers.is_amdgpu_initialized():
             # The list subcommand is only applicable to systems with amdgpu initialized
             return
@@ -619,7 +627,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_device_arguments(list_parser, required=False)
 
 
-    def _add_static_parser(self, subparsers, func):
+    def _add_static_parser(self, subparsers: argparse._SubParsersAction, func):
         # Subparser help text
         static_help = "Gets static information about the specified GPU"
         static_subcommand_help = "If no GPU is specified, returns static information for all GPUs on the system.\
@@ -925,7 +933,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_command_modifiers(metric_parser)
 
 
-    def _add_process_parser(self, subparsers, func):
+    def _add_process_parser(self, subparsers: argparse._SubParsersAction, func):
         if self.helpers.is_hypervisor():
             # Don't add this subparser on Hypervisors
             # This subparser is only available to Guest and Baremetal systems
@@ -969,7 +977,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         process_parser.add_argument('-n', '--name', action='store', type=lambda value: self._is_valid_string(value, '--name'), required=False, help=name_help)
 
 
-    def _add_profile_parser(self, subparsers, func):
+    def _add_profile_parser(self, subparsers: argparse._SubParsersAction, func):
         if not (self.helpers.is_windows() and self.helpers.is_hypervisor()):
             # This subparser only applies to Hypervisors
             return
@@ -990,7 +998,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_device_arguments(profile_parser, required=False)
 
 
-    def _add_event_parser(self, subparsers, func):
+    def _add_event_parser(self, subparsers: argparse._SubParsersAction, func):
         if not self.helpers.is_amdgpu_initialized():
             # The event subcommand is only applicable to systems with amdgpu initialized
             return
@@ -1011,7 +1019,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_device_arguments(event_parser, required=False)
 
 
-    def _add_topology_parser(self, subparsers, func):
+    def _add_topology_parser(self, subparsers: argparse._SubParsersAction, func):
         if not(self.helpers.is_baremetal() and self.helpers.is_linux()):
             # This subparser is only applicable to Baremetal Linux
             return
@@ -1059,7 +1067,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         topology_parser.add_argument('-z', '--bi-dir', action='store_true', required=False, help=bi_dir_help)
 
 
-    def _add_set_value_parser(self, subparsers, func):
+    def _add_set_value_parser(self, subparsers: argparse._SubParsersAction, func):
         if not self.helpers.is_linux():
             # This subparser is only applicable to Linux
             return
@@ -1078,9 +1086,9 @@ class AMDSMIParser(argparse.ArgumentParser):
         set_profile_help = f"Set power profile level (#) or choose one of available profiles:\n\t{power_profile_choices_str}"
         perf_det_choices_str = ", ".join(self.helpers.get_perf_det_levels())
         set_perf_det_help = f"Set performance determinism and select one of the corresponding performance levels:\n\t{perf_det_choices_str}"
-        compute_partition_choices_str = ", ".join(self.helpers.get_compute_partition_types())
+        (accelerator_set_choices, _) = self.helpers.get_accelerator_choices_types_indices()
         memory_partition_choices_str = ", ".join(self.helpers.get_memory_partition_types())
-        set_compute_partition_help = f"Set one of the following the compute partition modes:\n\t{compute_partition_choices_str}"
+        set_compute_partition_help = f"Set one of the following the accelerator type or profile index:\n\t{accelerator_set_choices}.\n\tUse `sudo amd-smi partition --accelerator` to find acceptable values."
         set_memory_partition_help = f"Set one of the following the memory partition modes:\n\t{memory_partition_choices_str}"
         power_cap_min, power_cap_max = self.helpers.get_power_caps()
         power_cap_max = self.helpers.convert_SI_unit(power_cap_max, AMDSMIHelpers.SI_Unit.MICRO)
@@ -1128,7 +1136,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 set_value_exclusive_group.add_argument('-l', '--perf-level', action='store', choices=self.helpers.get_perf_levels()[0], type=str.upper, required=False, help=set_perf_level_help, metavar='LEVEL')
                 set_value_exclusive_group.add_argument('-P', '--profile', action='store', required=False, help=set_profile_help, metavar='SETPROFILE')
                 set_value_exclusive_group.add_argument('-d', '--perf-determinism', action='store', type=lambda value: self._not_negative_int(value, '--perf-determinism'), required=False, help=set_perf_det_help, metavar='SCLKMAX')
-                set_value_exclusive_group.add_argument('-C', '--compute-partition', action='store', choices=self.helpers.get_compute_partition_types(), type=str.upper, required=False, help=set_compute_partition_help, metavar='PARTITION')
+                set_value_exclusive_group.add_argument('-C', '--compute-partition', action='store', choices=accelerator_set_choices, type=lambda value: self._is_command_supported(value, accelerator_set_choices, '--compute-partition'), required=False, help=set_compute_partition_help, metavar='<ACCELERATOR_TYPE> or <PROFILE_INDEX>')
                 set_value_exclusive_group.add_argument('-M', '--memory-partition', action='store', choices=self.helpers.get_memory_partition_types(), type=str.upper, required=False, help=set_memory_partition_help, metavar='PARTITION')
                 set_value_exclusive_group.add_argument('-o', '--power-cap', action='store', type=lambda value: self._positive_int(value, '--power-cap'), required=False, help=set_power_cap_help, metavar='WATTS')
                 set_value_exclusive_group.add_argument('-p', '--soc-pstate', action='store', required=False, type=lambda value: self._not_negative_int(value, '--soc-pstate'), help=set_soc_pstate_help, metavar='POLICY_ID')
@@ -1162,7 +1170,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_command_modifiers(set_value_parser)
 
 
-    def _add_reset_parser(self, subparsers, func):
+    def _add_reset_parser(self, subparsers: argparse._SubParsersAction, func):
         if not self.helpers.is_linux():
             # This subparser is only applicable to Linux
             return
@@ -1215,7 +1223,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         reset_exclusive_group.add_argument('-l', '--clean-local-data', action='store_true', required=False, help=reset_gpu_clean_local_data_help)
 
 
-    def _add_monitor_parser(self, subparsers, func):
+    def _add_monitor_parser(self, subparsers: argparse._SubParsersAction, func):
         if not self.helpers.is_linux():
             # This subparser is only applicable to Linux
             return
@@ -1314,7 +1322,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         rocm_smi_parser.add_argument('-f', '--showclkfrq', action='store_true', required=False, help=showclkfrq_help)
 
 
-    def _add_xgmi_parser(self, subparsers, func):
+    def _add_xgmi_parser(self, subparsers: argparse._SubParsersAction, func):
         if not self.helpers.is_amdgpu_initialized():
             # The xgmi subcommand is only applicable to systems with amdgpu initialized
             return
@@ -1344,7 +1352,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         xgmi_parser.add_argument('-l', '--link-status', action='store_true', required=False, help=xgmi_link_status_help)
 
 
-    def _add_partition_parser(self, subparsers, func):
+    def _add_partition_parser(self, subparsers: argparse._SubParsersAction, func):
         if not self.helpers.is_amdgpu_initialized():
             # The partition subcommand is only applicable to systems with amdgpu initialized
             return

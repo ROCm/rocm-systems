@@ -19,6 +19,8 @@
 
 import ctypes
 import re
+import json
+import logging
 from typing import Union, Any, Dict, List
 from enum import IntEnum
 from collections.abc import Iterable
@@ -288,13 +290,30 @@ class AmdSmiVoltageType(IntEnum):
     VDDGFX = amdsmi_wrapper.AMDSMI_VOLT_TYPE_VDDGFX
     INVALID = amdsmi_wrapper.AMDSMI_VOLT_TYPE_INVALID
 
+class AmdSmiAcceleratorPartitionResourceType(IntEnum):
+    XCC = amdsmi_wrapper.AMDSMI_ACCELERATOR_XCC
+    ENCODER = amdsmi_wrapper.AMDSMI_ACCELERATOR_ENCODER
+    DECODER = amdsmi_wrapper.AMDSMI_ACCELERATOR_DECODER
+    DMA = amdsmi_wrapper.AMDSMI_ACCELERATOR_DMA
+    JPEG = amdsmi_wrapper.AMDSMI_ACCELERATOR_JPEG
+    MAX = amdsmi_wrapper.AMDSMI_ACCELERATOR_MAX
+
+
+class AmdSmiAcceleratorPartitionType(IntEnum):
+    SPX = amdsmi_wrapper.AMDSMI_ACCELERATOR_PARTITION_SPX
+    DPX = amdsmi_wrapper.AMDSMI_ACCELERATOR_PARTITION_DPX
+    TPX = amdsmi_wrapper.AMDSMI_ACCELERATOR_PARTITION_TPX
+    QPX = amdsmi_wrapper.AMDSMI_ACCELERATOR_PARTITION_QPX
+    CPX = amdsmi_wrapper.AMDSMI_ACCELERATOR_PARTITION_CPX
+    INVALID = amdsmi_wrapper.AMDSMI_ACCELERATOR_PARTITION_INVALID
+
 
 class AmdSmiComputePartitionType(IntEnum):
-    CPX = amdsmi_wrapper.AMDSMI_COMPUTE_PARTITION_CPX
     SPX = amdsmi_wrapper.AMDSMI_COMPUTE_PARTITION_SPX
     DPX = amdsmi_wrapper.AMDSMI_COMPUTE_PARTITION_DPX
     TPX = amdsmi_wrapper.AMDSMI_COMPUTE_PARTITION_TPX
     QPX = amdsmi_wrapper.AMDSMI_COMPUTE_PARTITION_QPX
+    CPX = amdsmi_wrapper.AMDSMI_COMPUTE_PARTITION_CPX
     INVALID = amdsmi_wrapper.AMDSMI_COMPUTE_PARTITION_INVALID
 
 
@@ -2729,6 +2748,7 @@ def amdsmi_get_gpu_compute_partition(processor_handle: amdsmi_wrapper.amdsmi_pro
 
 def amdsmi_set_gpu_compute_partition(processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
                                      compute_partition: AmdSmiComputePartitionType):
+
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
@@ -2743,6 +2763,21 @@ def amdsmi_set_gpu_compute_partition(processor_handle: amdsmi_wrapper.amdsmi_pro
         )
     )
 
+def amdsmi_set_gpu_accelerator_partition_profile(processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
+                                                 profile_index: int):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    if not isinstance(profile_index, int):
+        raise AmdSmiParameterException(profile_index, int)
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_gpu_accelerator_partition_profile(
+            processor_handle, profile_index
+        )
+    )
 
 def amdsmi_get_gpu_memory_partition(processor_handle: amdsmi_wrapper.amdsmi_processor_handle):
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
@@ -2763,6 +2798,39 @@ def amdsmi_get_gpu_memory_partition(processor_handle: amdsmi_wrapper.amdsmi_proc
 
     return memory_partition.value.decode("utf-8")
 
+def amdsmi_get_gpu_memory_partition_config(processor_handle: amdsmi_wrapper.amdsmi_processor_handle):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+    
+    config = amdsmi_wrapper.amdsmi_memory_partition_config_t()
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_gpu_memory_partition_config(
+            processor_handle, config
+        )
+    )
+    mem_caps_list = []
+    if config.partition_caps.amdsmi_nps_flags_t.nps1_cap == 1:
+        mem_caps_list.append("NPS1")
+    if config.partition_caps.amdsmi_nps_flags_t.nps2_cap == 1:
+        mem_caps_list.append("NPS2")
+    if config.partition_caps.amdsmi_nps_flags_t.nps4_cap == 1:
+        mem_caps_list.append("NPS4")
+    if config.partition_caps.amdsmi_nps_flags_t.nps8_cap == 1:
+        mem_caps_list.append("NPS8")
+
+    return_dict = {
+        "partition_caps": mem_caps_list,
+        "mp_mode": amdsmi_wrapper.amdsmi_memory_partition_type_t__enumvalues[
+            config.mp_mode].replace("AMDSMI_MEMORY_PARTITION_", "").replace("UNKNOWN", "N/A"),
+        "num_numa_ranges": "N/A",
+        "numa_range": "N/A",
+    }
+    logging.debug("amdsmi_interface.py | amdsmi_get_gpu_memory_partition_config | return_dictionary = \n" + str(json.dumps(return_dict, indent=4)))
+    return return_dict
+
 
 def amdsmi_set_gpu_memory_partition(processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
                                     memory_partition: AmdSmiMemoryPartitionType):
@@ -2780,6 +2848,21 @@ def amdsmi_set_gpu_memory_partition(processor_handle: amdsmi_wrapper.amdsmi_proc
         )
     )
 
+def amdsmi_set_gpu_memory_partition_mode(processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
+                                        memory_partition: AmdSmiMemoryPartitionType):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    if not isinstance(memory_partition, AmdSmiMemoryPartitionType):
+        raise AmdSmiParameterException(memory_partition, AmdSmiMemoryPartitionType)
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_gpu_memory_partition(
+            processor_handle, memory_partition
+        )
+    )
 
 def amdsmi_get_gpu_accelerator_partition_profile(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle
@@ -2788,29 +2871,129 @@ def amdsmi_get_gpu_accelerator_partition_profile(
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
-    partition_id = ctypes.c_uint32()
+    length = 8
+    partition_id = [0, 0, 0, 0, 0, 0, 0, 0]
+    partition_id_list = (ctypes.c_uint32 * length)(*partition_id)
     profile = amdsmi_wrapper.amdsmi_accelerator_partition_profile_t()
 
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_accelerator_partition_profile(processor_handle,
-                                                                    ctypes.byref(profile),
-                                                                    ctypes.byref(partition_id))
+                                ctypes.byref(profile), partition_id_list)
     )
+    profile_type_ret = amdsmi_wrapper.amdsmi_accelerator_partition_type_t__enumvalues[profile.profile_type].replace("AMDSMI_ACCELERATOR_PARTITION_", "")
+    profile_type_ret = profile_type_ret.replace("INVALID", "N/A")
+ 
+    length = profile.num_partitions
+    partition_ids = []
+    for i in range(profile.num_partitions):
+        partition_ids.append(partition_id_list[i])
+
+    last_element = 0
+    if length > 0: 
+        last_element = length - 1
+    if ((partition_ids[last_element] == 0)
+        and not((profile_type_ret == str("SPX")) or (profile_type_ret == str("N/A")))):
+        partition_ids = "N/A"
+
+    mem_caps_list = []
+    if profile.memory_caps.amdsmi_nps_flags_t.nps1_cap == 1:
+        mem_caps_list.append("NPS1")
+    if profile.memory_caps.amdsmi_nps_flags_t.nps2_cap == 1:
+        mem_caps_list.append("NPS2")
+    if profile.memory_caps.amdsmi_nps_flags_t.nps4_cap == 1:
+        mem_caps_list.append("NPS4")
+    if profile.memory_caps.amdsmi_nps_flags_t.nps8_cap == 1:
+        mem_caps_list.append("NPS8")
 
     partition_profile_dict = {
-        "profile_type" : profile.profile_type,
+        "profile_type" : profile_type_ret,
         "num_partitions" : profile.num_partitions,
         "profile_index" : profile.profile_index,
-        "memory_caps" : profile.memory_caps,
+        "memory_caps": mem_caps_list,
         "num_resources" : profile.num_resources,
         "resources" : "N/A"
     }
-
-    return {
-        "partition_id" : partition_id.value,
+    return_dictionary = {
+        "partition_id" : partition_ids,
         "partition_profile" : partition_profile_dict
     }
 
+    logging.debug("amdsmi_interface.py | amdsmi_get_gpu_accelerator_partition_profile | return_dictionary = \n" + str(json.dumps(return_dictionary, indent=4)))
+    return return_dictionary
+
+def amdsmi_get_gpu_accelerator_partition_profile_config(processor_handle: amdsmi_wrapper.amdsmi_processor_handle) -> Dict:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    config = amdsmi_wrapper.amdsmi_accelerator_partition_profile_config_t()
+
+    _check_res(amdsmi_wrapper.amdsmi_get_gpu_accelerator_partition_profile_config(processor_handle,
+                                                                    ctypes.byref(config)))
+    logging.debug("\namdsmi_interface.py | amdsmi_get_gpu_accelerator_partition_profile_config | START - "
+          + "config.num_profiles = " + str(config.num_profiles)
+          + "\n; config.num_resource_profiles = " + str(config.num_resource_profiles)
+          + "\n; config.resource_profiles = " + str(config.resource_profiles)
+          + "\n; config.default_profile_index = " + str(config.default_profile_index)
+          + "\n; config.profiles = " + str(config.profiles))
+
+    profiles = []
+    resource_idx = 0
+    for i in range(config.num_profiles):
+        profile = config.profiles[i]
+        logging.debug("\namdsmi_interface.py | amdsmi_get_gpu_accelerator_partition_profile_config | profile = " + str(profile))
+        profile_type_ret = amdsmi_wrapper.amdsmi_accelerator_partition_type_t__enumvalues[
+            config.profiles[i].profile_type].replace("AMDSMI_ACCELERATOR_PARTITION_", "")
+        profile_type_ret = profile_type_ret.replace("INVALID", "N/A")
+        resources = []
+
+        
+        mem_caps_list = []
+        if profile.memory_caps.amdsmi_nps_flags_t.nps1_cap == 1:
+            mem_caps_list.append("NPS1")
+        if profile.memory_caps.amdsmi_nps_flags_t.nps2_cap == 1:
+            mem_caps_list.append("NPS2")
+        if profile.memory_caps.amdsmi_nps_flags_t.nps4_cap == 1:
+            mem_caps_list.append("NPS4")
+        if profile.memory_caps.amdsmi_nps_flags_t.nps8_cap == 1:
+            mem_caps_list.append("NPS8")
+
+        for r in range(config.num_resource_profiles):
+            logging.debug("\namdsmi_interface.py | amdsmi_get_gpu_accelerator_partition_profile_config | i = " + str(i) + "; r = " + str(r) + "; resource_idx = " + str(resource_idx))
+            res_profile = config.resource_profiles[resource_idx]
+            resource_profiles_ret = amdsmi_wrapper.amdsmi_accelerator_partition_resource_type_t__enumvalues[
+                res_profile.resource_type].replace("AMDSMI_ACCELERATOR_", "")
+            resource_profile_dict = {
+                "profile_index": res_profile.profile_index,
+                "resource_type": resource_profiles_ret,
+                "partition_resource": res_profile.partition_resource,
+                "num_partitions_share_resource": res_profile.num_partitions_share_resource,
+            }
+            logging.debug("\namdsmi_interface.py | amdsmi_get_gpu_accelerator_partition_profile_config | resource_profile_dict = " + str(resource_profile_dict))
+            resources.append(resource_profile_dict)
+            resource_idx += 1
+        
+        profile_dict = {
+            "profile_type": profile_type_ret,
+            "num_partitions": profile.num_partitions,
+            "profile_index": profile.profile_index,
+            "memory_caps": mem_caps_list,
+            "num_resources": profile.num_resources,
+            "resources": resources
+        }
+        profiles.append(profile_dict)
+
+    config_dict = {
+        "num_profiles": config.num_profiles,
+        "num_resource_profiles": config.num_resource_profiles,
+        "resource_profiles": resources,
+        "default_profile_index": config.default_profile_index,
+        "profiles": profiles,
+    }
+    logging.debug("\namdsmi_interface.py | amdsmi_get_gpu_accelerator_partition_profile_config | END - config_dict = \n" + str(json.dumps(config_dict, indent=4)))
+
+    return config_dict
 
 def amdsmi_get_xgmi_info(processor_handle: amdsmi_wrapper.amdsmi_processor_handle):
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):

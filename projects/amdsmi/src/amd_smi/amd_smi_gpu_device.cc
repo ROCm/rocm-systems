@@ -128,7 +128,7 @@ amdsmi_status_t AMDSmiGPUDevice::amdgpu_query_vbios(void *info) const {
     amdsmi_status_t ret;
     uint32_t fd = 0;
     ret = drm_.get_drm_fd_by_index(gpu_id_, &fd);
-    if (ret != AMDSMI_STATUS_SUCCESS) return AMDSMI_STATUS_NOT_SUPPORTED;;
+    if (ret != AMDSMI_STATUS_SUCCESS) return AMDSMI_STATUS_NOT_SUPPORTED;
 
     return drm_.amdgpu_query_vbios(fd, info);
 }

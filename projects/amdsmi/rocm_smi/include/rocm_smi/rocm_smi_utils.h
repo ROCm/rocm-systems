@@ -118,6 +118,8 @@ rsmi_status_t rsmi_dev_number_of_computes_get(uint32_t dv_ind, uint32_t* num_com
 std::string leftTrim(const std::string &s);
 std::string rightTrim(const std::string &s);
 std::string trim(const std::string &s);
+std::string trimAllWhiteSpace(const std::string &s);
+std::string removeWhitespace(const std::string &s);
 std::string removeNewLines(const std::string &s);
 
 std::string removeString(const std::string origStr,

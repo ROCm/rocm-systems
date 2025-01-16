@@ -4156,14 +4156,35 @@ class AMDSMICommands():
 
                 self.logger.store_output(args.gpu, 'perfdeterminism', f"Successfully enabled performance determinism and set GFX clock frequency to {args.perf_determinism}")
             if args.compute_partition:
-                compute_partition = amdsmi_interface.AmdSmiComputePartitionType[args.compute_partition]
                 try:
-                    amdsmi_interface.amdsmi_set_gpu_compute_partition(args.gpu, compute_partition)
+                    (accelerator_set_choices, accelerator_profiles) = self.helpers.get_accelerator_choices_types_indices()
+                    logging.debug("args.compute_partition: %s; Accelerator_set_choices: %s", str(args.compute_partition), str(json.dumps(accelerator_set_choices, indent=4)))
+                    if args.compute_partition in accelerator_profiles['profile_types']:
+                        compute_partition = amdsmi_interface.AmdSmiComputePartitionType[args.compute_partition]
+                        index = accelerator_profiles['profile_types'].index(args.compute_partition)
+                        attempted_to_set = f"Attempted to set accelerator partition to {args.compute_partition} (profile #{accelerator_profiles['profile_indices'][int(index)]} on {gpu_string}"
+                        amdsmi_interface.amdsmi_set_gpu_compute_partition(args.gpu, compute_partition)
+                        self.logger.store_output(args.gpu, 'accelerator_partition', f"Successfully set accelerator partition to {args.compute_partition} (profile #{accelerator_profiles['profile_indices'][int(index)]})")
+                    elif args.compute_partition in accelerator_profiles['profile_indices']:
+                        compute_partition = int(args.compute_partition)
+                        index = accelerator_profiles['profile_indices'].index(args.compute_partition)
+                        attempted_to_set = f"Attempted to set accelerator partition to {accelerator_profiles['profile_types'][int(index)]} (profile #{args.compute_partition}) on {gpu_string}"
+                        amdsmi_interface.amdsmi_set_gpu_accelerator_partition_profile(args.gpu, compute_partition)
+                        self.logger.store_output(args.gpu, 'accelerator_partition', f"Successfully set accelerator partition to {accelerator_profiles['profile_types'][int(index)]} (profile #{args.compute_partition})")
+                    else:
+                        raise ValueError(f"Invalid accelerator configuration {args.compute_partition} on {gpu_string}")
+                        
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError('Command requires elevation') from e
-                    raise ValueError(f"Unable to set compute partition to {args.compute_partition} on {gpu_string}") from e
-                self.logger.store_output(args.gpu, 'computepartition', f"Successfully set compute partition to {args.compute_partition}")
+                    elif e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_SETTING_UNAVAILABLE:
+                        print(f"\n{attempted_to_set}\n"
+                              f"\n[AMDSMI_STATUS_SETTING_UNAVAILABLE] Please check amd-smi partition --memory --accelerator for available profiles.\n"
+                               "Users may need to switch memory partition to another mode in order to enable the desired accelerator partition.\n")
+                        raise ValueError(f"[AMDSMI_STATUS_SETTING_UNAVAILABLE] Unable to set accelerator partition to {args.compute_partition} on {gpu_string}") from e
+                    else:
+                        raise ValueError(f"Unable to set accelerator partition to {args.compute_partition} on {gpu_string}") from e
+
             if args.memory_partition:
                 lock = multiprocessing.Lock()
                 lock.acquire()
@@ -4172,49 +4193,18 @@ class AMDSMICommands():
                 # Info used if AMDSMI_STATUS_INVAL is caught & to set progress bar #
                 ####################################################################
                 try:
-                    memory_partition = amdsmi_interface.amdsmi_get_gpu_memory_partition(args.gpu) # this info likely actually comes from different apis than used here
+                    memory_dict = {'caps': "N/A", 'current': "N/A"}
+                    memory_partition_config = amdsmi_interface.amdsmi_get_gpu_memory_partition_config(args.gpu)
+                    memory_dict['caps'] = str(memory_partition_config['partition_caps']).replace("]", "").replace("[", "").replace("\'", "").replace(" ", "")
+                    memory_dict['current'] = memory_partition_config['mp_mode']
                 except amdsmi_exception.AmdSmiLibraryException as e:
-                    memory_partition = "N/A"
                     logging.debug("Failed to get current memory partition for GPU %s | %s", gpu_id, e.get_error_info())
-                try:
-                    mem_caps_str = "N/A"
-                    partition_dict = amdsmi_interface.amdsmi_get_gpu_accelerator_partition_profile(args.gpu)
-                    temp_mem_caps = partition_dict['partition_profile']['memory_caps']
-                    mem_caps = temp_mem_caps.nps_cap_mask
-                    if temp_mem_caps.amdsmi_nps_flags_t == None:
-                        mem_caps_list = []
-                        if mem_caps & 1 == 1:
-                            mem_caps_list.append("NPS1")
-                        if mem_caps & 2 == 2:
-                            mem_caps_list.append("NPS2")
-                        if mem_caps & 4 == 4:
-                            mem_caps_list.append("NPS4")
-                        if mem_caps & 8 == 8:
-                            mem_caps_list.append("NPS8")
-                        mem_caps_str = str(mem_caps_list).replace("]", "").replace("[", "")
-                    else:
-                        mem_caps = temp_mem_caps.amdsmi_nps_flags_t
-                        mem_caps_list = []
-                        if mem_caps.nps1_cap == 1:
-                            mem_caps_list.append("NPS1")
-                        if mem_caps.nps2_cap == 1:
-                            mem_caps_list.append("NPS2")
-                        if mem_caps.nps4_cap == 1:
-                            mem_caps_list.append("NPS4")
-                        if mem_caps.nps8_cap == 1:
-                            mem_caps_list.append("NPS8")
-                        mem_caps_str = str(mem_caps_list).replace("]", "").replace("[", "").replace("\'", "")
-                    if mem_caps_str == "":
-                        mem_caps_str = "N/A"
-                except amdsmi_exception.AmdSmiLibraryException as e:
-                    logging.debug("Failed to get accelerator partition profile for GPU %s | %s", gpu_id, e.get_error_info())
-                memory_dict = {'caps': mem_caps_str, 'current': memory_partition}
 
                 ###############################################################
                 # memory partition set starts here                            #
                 ###############################################################
                 showProgressBar = False
-                if ((str(memory_dict['current']) != "N/A") and (str(args.memory_partition) in mem_caps_str)
+                if ((str(memory_dict['current']) != "N/A") and (str(args.memory_partition) in memory_dict['caps'])
                    and ((str(memory_dict['current']) != str(args.memory_partition)))):
                     showProgressBar = True  # Only show progress bar if
                                             # 1) Device can set memory partition modes
@@ -4259,7 +4249,7 @@ class AMDSMICommands():
                             raise PermissionError('Command requires elevation') from e
                         if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL:
                             out = f"[AMDSMI_STATUS_INVAL] Unable to set memory partition to {args.memory_partition} on {gpu_string}"
-                            print(f"Valid Memory partition Modes: {mem_caps_str}\n")
+                            print(f"Valid Memory partition Modes: {memory_dict['caps']}\n")
                             self.logger.store_output(args.gpu, 'memory_partition', out)
                             self.logger.print_output()
                             self.logger.clear_multiple_devices_ouput()
@@ -5711,15 +5701,21 @@ class AMDSMICommands():
         if accelerator:
             args.accelerator = accelerator
 
+        ###########################################
+        # amd-smi partition (no args)             #
+        ###########################################
         # if no args are present, then everything should be displayed
         if not args.current and not args.memory and not args.accelerator:
             args.current = True
             args.memory = True
             args.accelerator = True
 
+        ###########################################
+        # amd-smi partition --current             #
+        ###########################################
         if args.current:
             self.logger.table_header = ''.rjust(7)
-            current_header = "GPU_ID".ljust(13) + \
+            current_header = "GPU_ID".ljust(8) + \
                              "MEMORY".ljust(8) + \
                              "ACCELERATOR_TYPE".ljust(18) + \
                              "ACCELERATOR_PROFILE_INDEX".ljust(27) + \
@@ -5733,11 +5729,11 @@ class AMDSMICommands():
                     partition_dict = amdsmi_interface.amdsmi_get_gpu_accelerator_partition_profile(gpu)
                     profile_type = partition_dict['partition_profile']['profile_type']
                     profile_index = partition_dict['partition_profile']['profile_index']
-                    partition_id = partition_dict['partition_id']
+                    partition_id = str(partition_dict['partition_id']).replace("[", "").replace("]", "").replace(" ", "")
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     profile_type = "N/A"
                     profile_index = "N/A"
-                    partition_id = "N/A"
+                    partition_id = "0"
                     logging.debug("Failed to get accelerator partition profile for GPU %s | %s", gpu_id, e.get_error_info())
                 try:
                     current_mem_cap = amdsmi_interface.amdsmi_get_gpu_memory_partition(gpu)
@@ -5756,65 +5752,52 @@ class AMDSMICommands():
                 tabular_output.append(tabular_output_dict)
 
             self.logger.multiple_device_output = tabular_output
-            self.logger.table_title = "CURRENT_PARTITION"
-            self.logger.print_output(multiple_device_enabled=True, tabular=True)
+            self.logger.table_title = "\nCURRENT_PARTITION"
+            self.logger.print_output(multiple_device_enabled=True, tabular=True, dynamic=True)
             self.logger.clear_multiple_devices_ouput()
 
+        ###########################################
+        # amd-smi partition --memory              #
+        ###########################################
         if args.memory:
+            tabular_output = []
+            self.logger.table_header = ''.rjust(7)
+            current_header = "GPU_ID".ljust(8) + \
+                             "MEMORY_PARTITION_CAPS".ljust(23) + \
+                             "CURRENT_MEMORY_PARTITION".ljust(26)
+            self.logger.table_header = current_header + self.logger.table_header.strip()
+
             for gpu in args.gpu:
                 gpu_id = self.helpers.get_gpu_id_from_device_handle(gpu)
+                mem_caps_str = "N/A"
+                current_memory_partition = "N/A"
                 try:
-                    memory_partition = amdsmi_interface.amdsmi_get_gpu_memory_partition(gpu) # this info likely actually comes from different apis than used here
+                    memory_partition_config = amdsmi_interface.amdsmi_get_gpu_memory_partition_config(gpu)
+                    mem_caps_str = str(memory_partition_config['partition_caps']).replace("]", "").replace("[", "").replace("\'", "").replace(" ", "")
+                    current_memory_partition = memory_partition_config['mp_mode']
                 except amdsmi_exception.AmdSmiLibraryException as e:
-                    memory_partition = "N/A"
                     logging.debug("Failed to get current memory partition for GPU %s | %s", gpu_id, e.get_error_info())
-                try:
-                    partition_dict = amdsmi_interface.amdsmi_get_gpu_accelerator_partition_profile(gpu)
-                    temp_mem_caps = partition_dict['partition_profile']['memory_caps']
 
-                    if temp_mem_caps.amdsmi_nps_flags_t == None:
-                        mem_caps = temp_mem_caps.nps_cap_mask
-                        mem_caps_list = []
-                        if mem_caps & 1 == 1:
-                            mem_caps_list.append("NPS1")
-                        if mem_caps & 2 == 2:
-                            mem_caps_list.append("NPS2")
-                        if mem_caps & 4 == 4:
-                            mem_caps_list.append("NPS4")
-                        if mem_caps & 8 == 8:
-                            mem_caps_list.append("NPS8")
-                        mem_caps_str = str(mem_caps_list).replace("]", "").replace("[", "")
-                    else:
-                        mem_caps = temp_mem_caps.amdsmi_nps_flags_t
-                        mem_caps_list = []
-                        if mem_caps.nps1_cap == 1:
-                            mem_caps_list.append("NPS1")
-                        if mem_caps.nps2_cap == 1:
-                            mem_caps_list.append("NPS2")
-                        if mem_caps.nps4_cap == 1:
-                            mem_caps_list.append("NPS4")
-                        if mem_caps.nps8_cap == 1:
-                            mem_caps_list.append("NPS8")
-                        mem_caps_str = str(mem_caps_list).replace("]", "").replace("[", "").replace("\'", "")
-                    if mem_caps_str == "":
-                        mem_caps_str = "N/A"
-                except amdsmi_exception.AmdSmiLibraryException as e:
-                    mem_caps_str = "N/A"
-                    logging.debug("Failed to get accelerator partition profile for GPU %s | %s", gpu_id, e.get_error_info())
+                tabular_output_dict = {"gpu_id": gpu_id,
+                                       "memory_partition_caps": mem_caps_str,
+                                       "current_memory_partition": current_memory_partition}
+                tabular_output.append(tabular_output_dict)
 
-                memory_dict = {'caps': mem_caps_str, 'current': memory_partition}
-                self.logger.store_output(gpu, 'memory_partition', memory_dict)
-                self.logger.store_multiple_device_output()
-            self.logger.print_output(multiple_device_enabled=True)
+            self.logger.multiple_device_output = tabular_output
+            self.logger.table_title = "\nMEMORY_PARTITION"
+            self.logger.print_output(multiple_device_enabled=True, tabular=True, dynamic=True)
             self.logger.clear_multiple_devices_ouput()
 
+        ###########################################
+        # amd-smi partition --accelerator         #
+        ###########################################
         if args.accelerator:
             self.logger.table_header = ''.rjust(7)
-            current_header = "GPU_ID".ljust(13) + \
+            current_header = "GPU_ID".ljust(8) + \
                              "PROFILE_INDEX".ljust(15) + \
                              "MEMORY_PARTITION_CAPS".ljust(23) + \
                              "ACCELERATOR_TYPE".ljust(18) + \
-                             "PARTITION_ID".ljust(14) + \
+                             "PARTITION_ID".ljust(17) + \
                              "NUM_PARTITIONS".ljust(16) + \
                              "NUM_RESOURCES".ljust(15) + \
                              "RESOURCE_INDEX".ljust(16) + \
@@ -5824,74 +5807,184 @@ class AMDSMICommands():
             self.logger.table_header = current_header + self.logger.table_header.strip()
 
             tabular_output = []
+            prev_gpu_id = "N/A"
             for gpu in args.gpu:
                 gpu_id = self.helpers.get_gpu_id_from_device_handle(gpu)
+                tabular_output_dict = {"gpu_id": "N/A",
+                                       "profile_index": "N/A",
+                                       "memory_partition_caps": "N/A",
+                                       "accelerator_type": "N/A",
+                                       "partition_id": "0",
+                                       "num_partitions": "N/A",
+                                       "num_resources": "N/A",
+                                       "resource_index": "N/A",
+                                       "resource_type": "N/A",
+                                       "resource_instances": "N/A",
+                                       "resources_shared": "N/A"}
                 try:
                     partition_dict = amdsmi_interface.amdsmi_get_gpu_accelerator_partition_profile(gpu)
-                    profile_type = partition_dict['partition_profile']['profile_type']
-                    profile_index = partition_dict['partition_profile']['profile_index']
-                    temp_mem_caps = partition_dict['partition_profile']['memory_caps']
-                    parition_id = partition_dict['partition_id']
-                    num_resources = partition_dict['partition_profile']['num_resources']
-                    resources = partition_dict['partition_profile']['resources']
+                    partition_id = str(partition_dict['partition_id']).replace("[", "").replace("]", "").replace(" ", "")
+                    current_accelerator_type = partition_dict['partition_profile']['profile_type']
 
-                    if temp_mem_caps.amdsmi_nps_flags_t == None:
-                        mem_caps = temp_mem_caps.nps_cap_mask
-                        mem_caps_list = []
-                        if mem_caps & 1 == 1:
-                            mem_caps_list.append("NPS1")
-                        if mem_caps & 2 == 2:
-                            mem_caps_list.append("NPS2")
-                        if mem_caps & 4 == 4:
-                            mem_caps_list.append("NPS4")
-                        if mem_caps & 8 == 8:
-                            mem_caps_list.append("NPS8")
-                        mem_caps_str = str(mem_caps_list).replace("]", "").replace("[", "").replace("\'", "")
-                    else:
-                        mem_caps = temp_mem_caps.amdsmi_nps_flags_t
-                        mem_caps_list = []
-                        if mem_caps.nps1_cap == 1:
-                            mem_caps_list.append("NPS1")
-                        if mem_caps.nps2_cap == 1:
-                            mem_caps_list.append("NPS2")
-                        if mem_caps.nps4_cap == 1:
-                            mem_caps_list.append("NPS4")
-                        if mem_caps.nps8_cap == 1:
-                            mem_caps_list.append("NPS8")
-                        mem_caps_str = str(mem_caps_list).replace("]", "").replace("[", "").replace("\'", "")
-                    if mem_caps_str == "":
-                        mem_caps_str = "N/A"
+                    # save only the primary GPU node's partition_id (the 1st listed device; non N/A one)
+                    # else keep current_partition_id unchanged for displaying in accelerator resource's output
+                    if partition_id != "N/A":
+                        current_partition_id = partition_id
+
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     profile_type = "N/A"
                     profile_index = "N/A"
-                    temp_mem_caps = "N/A"
-                    parition_id = "N/A"
-                    num_resources = "N/A"
-                    resources = "N/A"
+                    partition_id = "0"
                     mem_caps_str = "N/A"
+                    num_partitions = 0
+                    current_accelerator_type = "N/A"
                     logging.debug("Failed to get accelerator partition profile for GPU %s | %s", gpu_id, e.get_error_info())
 
-                if profile_type == 0:
-                    profile_type = "N/A"
+                try:
+                    partition_config_dict = amdsmi_interface.amdsmi_get_gpu_accelerator_partition_profile_config(gpu)
+                    logging.debug("amdsmi_commands.py | partition_config_dict: " + str(json.dumps(partition_config_dict, indent=4)))
+                    num_profiles = partition_config_dict['num_profiles']
+                    num_resource_profiles = partition_config_dict['num_resource_profiles']
 
-                tabular_output_dict = {"gpu_id": gpu_id,
+                    resource_index = 0
+                    prev_accelerator_type = "N/A"
+                    for p in range(0, num_profiles):
+                        accelerator_type = partition_config_dict['profiles'][p]['profile_type']
+                        profile_index = partition_config_dict['profiles'][p]['profile_index']
+                        num_partitions = partition_config_dict['profiles'][p]['num_partitions']
+                        mem_caps_str = str(partition_config_dict['profiles'][p]['memory_caps']).replace("]", "").replace("[", "").replace("\'", "").replace(" ", "")
+                        # 2 modifications based on the current accelerator type:
+                        # 1) display a * for the current accelerator type, otherwise display as normal
+                        # 2) display partition id only for the current accelerator profile (the *'d one)
+                        if current_accelerator_type == accelerator_type:
+                            accelerator_type = accelerator_type + "*"
+                            partition_id = current_partition_id
+                        else:
+                            partition_id = "N/A"
+                        # only display the first instance of the gpu_id, rest are empty strings
+                        if prev_gpu_id != gpu_id:
+                            tabular_gpu_id = gpu_id
+                            prev_gpu_id = gpu_id
+                        else:
+                            tabular_gpu_id = ""
+                        logging.debug("amdsmi_commands.py | tabular_gpu_id: " + str(tabular_gpu_id))
+
+                        if num_resource_profiles == 0:
+                            if prev_accelerator_type != accelerator_type: # only print the first instance of the resources
+                                tabular_output_dict = {"gpu_id": tabular_gpu_id,
                                        "profile_index": profile_index,
                                        "memory_partition_caps": mem_caps_str,
-                                       "accelerator_type": profile_type,
-                                       "partition_id": parition_id,
-                                       "num_partitions": 0,
-                                       "num_resources": num_resources,
-                                       "resource_index": resources,
-                                       "resource_type": resources,
-                                       "resource_instances": resources,
-                                       "resources_shared": resources}
-                tabular_output.append(tabular_output_dict)
+                                       "accelerator_type": accelerator_type,
+                                       "partition_id": partition_id,
+                                       "num_partitions": num_partitions,
+                                       "num_resources": num_resource_profiles,
+                                       "resource_index": "N/A",
+                                       "resource_type": "N/A",
+                                       "resource_instances": "N/A",
+                                       "resources_shared": "N/A"}
+                                prev_accelerator_type = accelerator_type
+                                tabular_output.append(tabular_output_dict)
+                            continue
+
+                        for r in range(0, num_resource_profiles):
+                            logging.debug("amdsmi_commands.py | p: " + str(p) + "; r: " + str(r)
+                                  + "; accelerator_type: " + str(accelerator_type))
+                            resource_type = partition_config_dict['profiles'][p]['resources'][r]['resource_type']
+                            resource_instances = partition_config_dict['profiles'][p]['resources'][r]['partition_resource']
+                            resources_shared = partition_config_dict['profiles'][p]['resources'][r]['num_partitions_share_resource']
+                            if prev_accelerator_type != accelerator_type: # only print the first instance of the resources
+                                tabular_output_dict = {"gpu_id": tabular_gpu_id,
+                                       "profile_index": profile_index,
+                                       "memory_partition_caps": mem_caps_str,
+                                       "accelerator_type": accelerator_type,
+                                       "partition_id": partition_id,
+                                       "num_partitions": num_partitions,
+                                       "num_resources": num_resource_profiles,
+                                       "resource_index": resource_index,
+                                       "resource_type": resource_type,
+                                       "resource_instances": resource_instances,
+                                       "resources_shared": resources_shared}
+                                prev_accelerator_type = accelerator_type
+                            else:
+                                tabular_output_dict = {"gpu_id": "",
+                                       "profile_index": "",
+                                       "memory_partition_caps": "",
+                                       "accelerator_type": "",
+                                       "partition_id": "",
+                                       "num_partitions": "",
+                                       "num_resources": "",
+                                       "resource_index": resource_index,
+                                       "resource_type": resource_type,
+                                       "resource_instances": resource_instances,
+                                       "resources_shared": resources_shared}
+                            resource_index += 1
+                            tabular_output.append(tabular_output_dict)
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    tabular_output.append(tabular_output_dict)
 
             self.logger.multiple_device_output = tabular_output
-            self.logger.table_title = "ACCELERATOR_PARTITION_PROFILES"
-            self.logger.print_output(multiple_device_enabled=True, tabular=True)
+            self.logger.table_title = "\nACCELERATOR_PARTITION_PROFILES"
+            self.logger.print_output(multiple_device_enabled=True, tabular=True, dynamic=True)
             self.logger.clear_multiple_devices_ouput()
 
+            #########################################
+            # print accelerator partition resources #
+            #########################################
+            self.logger.table_header = ''.rjust(7)
+            current_header = "RESOURCE_INDEX".ljust(16) + \
+                             "RESOURCE_TYPE".ljust(15) + \
+                             "RESOURCE_INSTANCES".ljust(20) + \
+                             "RESOURCES_SHARED".ljust(18)
+            self.logger.table_header = current_header + self.logger.table_header.strip()
+
+            tabular_output = []
+            for gpu in args.gpu:
+                gpu_id = self.helpers.get_gpu_id_from_device_handle(gpu)
+                tabular_output_dict = {"resource_index": "N/A",
+                                       "resource_type": "N/A",
+                                       "resource_instances": "N/A",
+                                       "resources_shared": "N/A"}
+                try:
+                    partition_config_dict = amdsmi_interface.amdsmi_get_gpu_accelerator_partition_profile_config(gpu)
+                    logging.debug("amdsmi_commands.py | partition_config_dict: " + str(json.dumps(partition_config_dict, indent=4)))
+                    num_profiles = partition_config_dict['num_profiles']
+                    num_resource_profiles = partition_config_dict['num_resource_profiles']
+
+                    if num_resource_profiles == 0:
+                        tabular_output.append(tabular_output_dict)
+                        continue
+
+                    resource_index = 0
+                    for p in range(0, num_profiles):   
+                        for r in range(0, num_resource_profiles):
+                            resource_type = partition_config_dict['profiles'][p]['resources'][r]['resource_type']
+                            resource_instances = partition_config_dict['profiles'][p]['resources'][r]['partition_resource']
+                            resources_shared = partition_config_dict['profiles'][p]['resources'][r]['num_partitions_share_resource']
+                            tabular_output_dict = {
+                                   "resource_index": resource_index,
+                                   "resource_type": resource_type,
+                                   "resource_instances": resource_instances,
+                                   "resources_shared": resources_shared}
+                            resource_index += 1
+                            tabular_output.append(tabular_output_dict)
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    tabular_output.append(tabular_output_dict)
+
+            self.logger.multiple_device_output = tabular_output
+            self.logger.table_title = "\nACCELERATOR_PARTITION_RESOURCES"
+            self.logger.print_output(multiple_device_enabled=True, tabular=True, dynamic=True)
+            self.logger.clear_multiple_devices_ouput()
+
+            # print legend
+            legend_parts = [
+                "\n\nLegend:",
+                "  * = Current mode"]
+            legend_output = "\n".join(legend_parts)
+            if self.logger.destination == 'stdout':
+                print(legend_output)
+            else:
+                with self.logger.destination.open('a', encoding="utf-8") as output_file:
+                    output_file.write(legend_output + '\n')
 
     def _event_thread(self, commands, i):
         devices = commands.device_handles

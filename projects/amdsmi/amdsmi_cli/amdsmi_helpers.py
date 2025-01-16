@@ -27,6 +27,7 @@ import sys
 import time
 import re
 import multiprocessing
+import json
 
 from typing import List, Union
 from enum import Enum
@@ -681,12 +682,30 @@ class AMDSMIHelpers():
         perf_levels_int = list(set(clock.value for clock in amdsmi_interface.AmdSmiDevPerfLevel))
         return perf_levels_str, perf_levels_int
 
+    def get_accelerator_partition_profile_config(self):
+        device_handles = amdsmi_interface.amdsmi_get_processor_handles()
+        accelerator_partition_profiles = {'profile_indices':[], 'profile_types':[], 'memory_caps': []}
+        for dev in device_handles:
+            try:
+                profile = amdsmi_interface.amdsmi_get_gpu_accelerator_partition_profile_config(dev)
+                num_profiles = profile['num_profiles']
+                for p in range(num_profiles):
+                    accelerator_partition_profiles['profile_indices'].append(str(profile['profiles'][p]['profile_index']))
+                    accelerator_partition_profiles['profile_types'].append(profile['profiles'][p]['profile_type'])
+                    accelerator_partition_profiles['memory_caps'].append(profile['profiles'][p]['memory_caps'])
+                break # Only need to get the profiles for one device    
+            except amdsmi_interface.AmdSmiLibraryException as e:
+                break
+        return accelerator_partition_profiles
 
-    def get_compute_partition_types(self):
-        compute_partitions_str = [partition.name for partition in amdsmi_interface.AmdSmiComputePartitionType]
-        if 'INVALID' in compute_partitions_str:
-            compute_partitions_str.remove('INVALID')
-        return compute_partitions_str
+    def get_accelerator_choices_types_indices(self):
+        return_val = ("N/A", {'profile_indices':[], 'profile_types':[]})
+        accelerator_partition_profiles = self.get_accelerator_partition_profile_config()
+        if len(accelerator_partition_profiles['profile_types']) != 0:
+            compute_partitions_str = accelerator_partition_profiles['profile_types'] + accelerator_partition_profiles['profile_indices']
+            accelerator_choices = ", ".join(compute_partitions_str)
+            return_val = (accelerator_choices, accelerator_partition_profiles)
+        return return_val
 
     def get_memory_partition_types(self):
         memory_partitions_str = [partition.name for partition in amdsmi_interface.AmdSmiMemoryPartitionType]

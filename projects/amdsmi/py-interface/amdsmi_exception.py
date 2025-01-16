@@ -87,6 +87,8 @@ class AmdSmiLibraryException(AmdSmiException):
             amdsmi_wrapper.AMDSMI_STATUS_ARG_PTR_NULL : "AMDSMI_STATUS_ARG_PTR_NULL - Parsed argument is invalid",
             amdsmi_wrapper.AMDSMI_STATUS_MAP_ERROR : "AMDSMI_STATUS_MAP_ERROR - The internal library error did not map to a status code",
             amdsmi_wrapper.AMDSMI_STATUS_AMDGPU_RESTART_ERR:  "AMDSMI_STATUS_AMDGPU_RESTART_ERR - AMDGPU restart failed, please check dmsg for errors",
+            amdsmi_wrapper.AMDSMI_STATUS_SETTING_UNAVAILABLE:  "AMDSMI_STATUS_SETTING_UNAVAILABLE - Setting is not available",
+            amdsmi_wrapper.AMDSMI_STATUS_CORRUPTED_EEPROM:  "AMDSMI_STATUS_CORRUPTED_EEPROM - Setting is not available",
             amdsmi_wrapper.AMDSMI_STATUS_UNKNOWN_ERROR : "AMDSMI_STATUS_UNKNOWN_ERROR - An unknown error occurred"
         }
 

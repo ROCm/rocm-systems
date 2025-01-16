@@ -120,6 +120,21 @@ static const char *kDevAvailableComputePartitionFName =
 static const char *kDevComputePartitionFName = "current_compute_partition";
 static const char *kDevMemoryPartitionFName = "current_memory_partition";
 static const char *kDevAvailableMemoryPartitionFName = "available_memory_partition";
+static const char *kDevSupportedXcpConfigsFName = "compute_partition_config/supported_xcp_configs";
+static const char *kDevSupportedNpsConfigsFName = "compute_partition_config/supported_nps_configs";
+static const char *kDevXcpConfigFName = "compute_partition_config/xcp_config";
+
+// XCP config resource files - not every file will exist in all ASICs (ex. Decoders vs Encoders)
+static const char *kDevDecoderInstFName = "compute_partition_config/dec/num_inst";
+static const char *kDevDecoderSharedFName = "compute_partition_config/dec/num_shared";
+static const char *kDevEncoderInstFName = "compute_partition_config/enc/num_inst";
+static const char *kDevEncoderSharedFName = "compute_partition_config/enc/num_shared";
+static const char *kDevDmaInstFName = "compute_partition_config/dma/num_inst";
+static const char *kDevDmaSharedFName = "compute_partition_config/dma/num_shared";
+static const char *kDevJpegInstFName = "compute_partition_config/jpeg/num_inst";
+static const char *kDevJpegSharedFName = "compute_partition_config/jpeg/num_shared";
+static const char *kDevXccInstFName = "compute_partition_config/xcc/num_inst";
+static const char *kDevXccSharedFName = "compute_partition_config/xcc/num_shared";
 
 // Firmware version files
 static const char *kDevFwVersionAsdFName = "fw_version/asd_fw_version";
@@ -309,6 +324,21 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevComputePartition, kDevComputePartitionFName},
     {kDevMemoryPartition, kDevMemoryPartitionFName},
     {kDevAvailableMemoryPartition, kDevAvailableMemoryPartitionFName},
+    {kDevSupportedXcpConfigs, kDevSupportedXcpConfigsFName},
+    {kDevSupportedNpsConfigs, kDevSupportedNpsConfigsFName},
+    {kDevXcpConfig, kDevXcpConfigFName},
+
+    // XCP config resource files
+    {kDevDecoderInst,   kDevDecoderInstFName},
+    {kDevDecoderShared, kDevDecoderSharedFName},
+    {kDevEncoderInst,   kDevEncoderInstFName},
+    {kDevEncoderShared, kDevEncoderSharedFName},
+    {kDevDmaInst,       kDevDmaInstFName},
+    {kDevDmaShared,     kDevDmaSharedFName},
+    {kDevJpegInst,      kDevJpegInstFName},
+    {kDevJpegShared,    kDevJpegSharedFName},
+    {kDevXccInst,       kDevXccInstFName},
+    {kDevXccShared,     kDevXccSharedFName},
 };
 
 static const std::map<rsmi_dev_perf_level, const char *> kDevPerfLvlMap = {
@@ -466,6 +496,20 @@ Device::devInfoTypesStrings = {
   {kDevXgmiPlpd, "kDevXgmiPlpd"},
   {kDevProcessIsolation, "kDevProcessIsolation"},
   {kDevShaderClean, "kDevShaderClean"},
+  {kDevSupportedXcpConfigs, "kDevSupportedXcpConfigs"},
+  {kDevSupportedNpsConfigs, "kDevSupportedNpsConfigs"},
+  {kDevXcpConfig, "kDevXcpConfig"},
+
+  {kDevDecoderInst,   "kDevDecoderInst"},
+  {kDevDecoderShared, "kDevDecoderShared"},
+  {kDevEncoderInst,   "kDevEncoderInst"},
+  {kDevEncoderShared, "kDevEncoderShared"},
+  {kDevDmaInst,       "kDevDmaInst"},
+  {kDevDmaShared,     "kDevDmaShared"},
+  {kDevJpegInst,      "kDevJpegInst"},
+  {kDevJpegShared,    "kDevJpegShared"},
+  {kDevXccInst,      "kDevXccInst"},
+  {kDevXccShared,    "kDevXccShared"},
 };
 
 static const std::map<const char *, dev_depends_t> kDevFuncDependsMap = {
@@ -946,6 +990,7 @@ int Device::writeDevInfo(DevInfoTypes type, std::string val) {
       return writeDevInfoStr(type, val);
     case kDevComputePartition:
     case kDevMemoryPartition:
+    case kDevXcpConfig:
       return writeDevInfoStr(type, val, true);
 
     default:
@@ -1292,6 +1337,19 @@ int Device::readDevInfo(DevInfoTypes type, std::string *val) {
     case kDevXGMIPhysicalID:
     case kDevAvailableMemoryPartition:
     case kDevProcessIsolation:
+    case kDevSupportedXcpConfigs:
+    case kDevSupportedNpsConfigs:
+    case kDevXcpConfig:
+    case kDevDecoderInst:
+    case kDevDecoderShared:
+    case kDevEncoderInst:
+    case kDevEncoderShared:
+    case kDevDmaInst:
+    case kDevDmaShared:
+    case kDevJpegInst:
+    case kDevJpegShared:
+    case kDevXccInst:
+    case kDevXccShared:
       return readDevInfoStr(type, val);
       break;
 
