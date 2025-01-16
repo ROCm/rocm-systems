@@ -39,9 +39,9 @@ extern "C" {
 
 #include <cstdint>
 #else
+#include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <assert.h>
 #endif  // __cplusplus
 
 /** \file rdc.h
@@ -195,7 +195,8 @@ typedef enum {
   RDC_FI_GPU_MM_ENC_UTIL,           //!< Multimedia encoder busy percentage
   RDC_FI_GPU_MM_DEC_UTIL,           //!< Multimedia decoder busy percentage
   RDC_FI_GPU_MEMORY_ACTIVITY,       //!< Memory busy percentage
-  RDC_FI_GPU_MEMORY_MAX_BANDWIDTH,  //<! The Memory max bandwidth at current memory clock in Mb/Second
+  RDC_FI_GPU_MEMORY_MAX_BANDWIDTH,  //<! The Memory max bandwidth at current memory clock in
+                                    // Mb/Second
   RDC_FI_GPU_MEMORY_CUR_BANDWIDTH,  //<! The Memory current bandwidth in Mb/Second
 
   /**
@@ -286,8 +287,11 @@ typedef enum {
   RDC_FI_PROF_EVAL_FLOPS_16,
   RDC_FI_PROF_EVAL_FLOPS_32,
   RDC_FI_PROF_EVAL_FLOPS_64,
+  // metrics below are not divided by time passed
   RDC_FI_PROF_VALU_PIPE_ISSUE_UTIL,
   RDC_FI_PROF_SM_ACTIVE,
+  RDC_FI_PROF_OCC_PER_ACTIVE_CU,
+  RDC_FI_PROF_OCC_ELAPSED,
 
   /**
    * @brief Raw XGMI counter events
@@ -350,14 +354,14 @@ typedef enum {
   /**
    * @brief RDC health related fields
    */
-  RDC_HEALTH_XGMI_ERROR = 3000,         //!< XGMI one or more errors detected
-  RDC_HEALTH_PCIE_REPLAY_COUNT,         //!< Total PCIE replay count
-  RDC_HEALTH_RETIRED_PAGE_NUM,          //!< Retired page number
-  RDC_HEALTH_PENDING_PAGE_NUM,          //!< Pending page number
-  RDC_HEALTH_RETIRED_PAGE_LIMIT,        //!< the threshold of retired page number
-  RDC_HEALTH_EEPROM_CONFIG_VALID,       //!< Reads the EEPROM and verifies the checksums
-  RDC_HEALTH_POWER_THROTTLE_TIME,       //!< Power throttle status counter
-  RDC_HEALTH_THERMAL_THROTTLE_TIME,     //!< Total time in thermal throttle status (microseconds)
+  RDC_HEALTH_XGMI_ERROR = 3000,      //!< XGMI one or more errors detected
+  RDC_HEALTH_PCIE_REPLAY_COUNT,      //!< Total PCIE replay count
+  RDC_HEALTH_RETIRED_PAGE_NUM,       //!< Retired page number
+  RDC_HEALTH_PENDING_PAGE_NUM,       //!< Pending page number
+  RDC_HEALTH_RETIRED_PAGE_LIMIT,     //!< the threshold of retired page number
+  RDC_HEALTH_EEPROM_CONFIG_VALID,    //!< Reads the EEPROM and verifies the checksums
+  RDC_HEALTH_POWER_THROTTLE_TIME,    //!< Power throttle status counter
+  RDC_HEALTH_THERMAL_THROTTLE_TIME,  //!< Total time in thermal throttle status (microseconds)
 } rdc_field_t;
 
 // even and odd numbers are used for correctable and uncorrectable errors
