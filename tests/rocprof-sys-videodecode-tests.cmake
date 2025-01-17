@@ -9,7 +9,7 @@ rocprofiler_systems_add_test(
     NAME videodecode
     TARGET videodecode
     GPU ON
-    RUN_ARGS -i ${ROCmVersion_DIR}/share/rocdecode/video/ -t 2
+    RUN_ARGS -i ${PROJECT_BINARY_DIR}/videos -t 1
     LABELS "videodecode")
 
 rocprofiler_systems_add_validation_test(
