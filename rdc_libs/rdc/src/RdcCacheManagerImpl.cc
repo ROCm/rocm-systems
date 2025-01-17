@@ -224,6 +224,7 @@ rdc_status_t RdcCacheManagerImpl::rdc_update_job_stats(uint32_t gpu_index,
     uint64_t time_elapsed = value.ts - gpu_iter->second.energy_last_time;
     // Stored in cache as microseconds and microwats
     gpu_iter->second.energy_consumed += (time_elapsed * value.value.l_int) / (1000.0 * 1000000);
+    gpu_iter->second.energy_last_time = value.ts;
   }
   fsummary->second.max_value =
       std::max(fsummary->second.max_value, static_cast<int64_t>(value.value.l_int));
