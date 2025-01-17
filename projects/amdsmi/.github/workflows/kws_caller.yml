@@ -1,13 +1,3 @@
-######################################################################################
-# Name            : Rocm Validation Suite
-# Developed by    : kiran.thumma@amd.com, gajeambi@amd.com
-# Maintained by   : kiran.thumma@amd.com, gajendrad.ambi@amd.com
-# Version         : 0.5
-# Description     : This workflow will eventually call the central rocm reusable workflow.
-#                   So developers should not edit/Modify this file
-#                   Donot add it into .*ignore file#
-# Docs            :
-######################################################################################
 name: Rocm Validation Suite KWS
 on:
   push:
@@ -15,7 +5,6 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
-
 jobs:
   kws:
     if: ${{ github.event_name == 'pull_request' }}
@@ -23,3 +12,4 @@ jobs:
     secrets: inherit
     with:
       pr_number: ${{github.event.pull_request.number}}
+      base_branch: ${{github.base_ref}}
