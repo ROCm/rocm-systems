@@ -369,6 +369,8 @@ const char* rdc_status_string(rdc_status_t result) {
       return "Data was requested, but none was found";
     case RDC_ST_PERM_ERROR:
       return "Insufficient permission to complete operation";
+    case RDC_ST_CORRUPTED_EEPROM:
+      return "EEPROM is corrupted";
     case RDC_ST_UNKNOWN_ERROR:
       return "Unknown error";
     default:

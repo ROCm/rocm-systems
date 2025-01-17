@@ -41,6 +41,7 @@ extern "C" {
 #else
 #include <stddef.h>
 #include <stdint.h>
+#include <assert.h>
 #endif  // __cplusplus
 
 /** \file rdc.h
@@ -79,6 +80,7 @@ typedef enum {
                             //!<   but none was found
   RDC_ST_PERM_ERROR,        //!< Insufficient permission to complete
                             //!<   operation
+  RDC_ST_CORRUPTED_EEPROM,  //!< EEPROM is corrupted
   RDC_ST_DISABLED_MODULE,   //!< Attempted loading disabled module
 
   RDC_ST_UNKNOWN_ERROR = 0xFFFFFFFF  //!< Unknown error
@@ -352,8 +354,8 @@ typedef enum {
   RDC_HEALTH_PCIE_REPLAY_COUNT,         //!< Total PCIE replay count
   RDC_HEALTH_RETIRED_PAGE_NUM,          //!< Retired page number
   RDC_HEALTH_PENDING_PAGE_NUM,          //!< Pending page number
-  RDC_HEALTH_RETIRED_PAGE_LIMIT,        //!< The threshold of retired page
-  RDC_HEALTH_UNCORRECTABLE_PAGE_LIMIT,  //!< The threshold of uncorrectable page
+  RDC_HEALTH_RETIRED_PAGE_LIMIT,        //!< the threshold of retired page number
+  RDC_HEALTH_EEPROM_CONFIG_VALID,       //!< Reads the EEPROM and verifies the checksums
   RDC_HEALTH_POWER_THROTTLE_TIME,       //!< Power throttle status counter
   RDC_HEALTH_THERMAL_THROTTLE_TIME,     //!< Total time in thermal throttle status (microseconds)
 } rdc_field_t;
@@ -680,7 +682,7 @@ typedef enum {
   RDC_HEALTH_WATCH_PCIE = 0x1,      //!< PCIe system watches
   RDC_HEALTH_WATCH_XGMI = 0x2,      //!< XGMI system watches
   RDC_HEALTH_WATCH_MEM = 0x4,       //!< Memory watches
-  RDC_HEALTH_WATCH_INFOROM = 0x8,   //!< Inforom watches
+  RDC_HEALTH_WATCH_EEPROM = 0x8,    //!< EEPROM watches
   RDC_HEALTH_WATCH_THERMAL = 0x10,  //!< Temperature watches
   RDC_HEALTH_WATCH_POWER = 0x20,    //!< Power watches
 } rdc_health_system_t;
@@ -715,7 +717,7 @@ typedef enum {
   RDC_FR_CLOCKS_THROTTLE_POWER = 1006,
   RDC_FR_XGMI_SINGLE_ERROR = 1007,
   RDC_FR_XGMI_MULTIPLE_ERROR = 1008,
-  RDC_FR_CORRUPT_INFOROM = 1009
+  RDC_FR_CORRUPT_EEPROM = 1009
 } rdc_health_error_code_t;
 
 /**
