@@ -169,8 +169,9 @@ FLD_DESC_ENT(RDC_EVNT_NOTIF_RING_HANG,   "GPU ring hang just occured",          
 // RDC health related fields
 FLD_DESC_ENT(RDC_HEALTH_XGMI_ERROR,               "XGMI one or more errors detected",           "XGMI_ERROR",               true)
 FLD_DESC_ENT(RDC_HEALTH_PCIE_REPLAY_COUNT,        "Total PCIE replay count",                    "PCIE_REPLAY_COUNT",        true)
+FLD_DESC_ENT(RDC_HEALTH_RETIRED_PAGE_NUM,         "Retired page number",                        "RETIRED_PAGE_NUM",         true)
 FLD_DESC_ENT(RDC_HEALTH_PENDING_PAGE_NUM,         "Pending page number",                        "PENDING_PAGE_NUM",         true)
-FLD_DESC_ENT(RDC_HEALTH_RETIRED_PAGE_LIMIT,       "Retired page limit",                         "RETIRED_PAGE_LIMIT",       false)
-FLD_DESC_ENT(RDC_HEALTH_UNCORRECTABLE_PAGE_LIMIT, "Uncorrectable page limit",                   "UNCORRECTABLE_PAGE_LIMIT", false)
-FLD_DESC_ENT(RDC_HEALTH_POWER_THROTTLE_TIME,      "Power throttle status counter",              "POWER_THROTTLE_TIME",      false)
-FLD_DESC_ENT(RDC_HEALTH_THERMAL_THROTTLE_TIME,    "Total time(ms) in thermal throttle status",  "THERMAL_THROTTLE_TIME",    false)
+FLD_DESC_ENT(RDC_HEALTH_RETIRED_PAGE_LIMIT,       "Retired page limit",                         "RETIRED_PAGE_LIMIT",       true)
+FLD_DESC_ENT(RDC_HEALTH_EEPROM_CONFIG_VALID,      "Verify checksum of EEPROM",                  "EEPROM_CONFIG_VALID",      true)
+FLD_DESC_ENT(RDC_HEALTH_POWER_THROTTLE_TIME,      "Power throttle status counter",              "POWER_THROTTLE_TIME",      true)
+FLD_DESC_ENT(RDC_HEALTH_THERMAL_THROTTLE_TIME,    "Total time(ms) in thermal throttle status",  "THERMAL_THROTTLE_TIME",    true)

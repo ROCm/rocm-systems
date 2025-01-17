@@ -137,6 +137,7 @@ class RdcWatchTableImpl : public RdcWatchTable {
   rdc_status_t get_start_end_values(rdc_gpu_group_t group_id,
                                     uint32_t gpu_index,
                                     rdc_field_t field,
+                                    uint64_t start_timestamp,
                                     rdc_field_value *start_value,
                                     rdc_field_value *end_value);
   rdc_status_t pcie_check(rdc_gpu_group_t group_id,
@@ -144,6 +145,12 @@ class RdcWatchTableImpl : public RdcWatchTable {
   rdc_status_t xgmi_check(rdc_gpu_group_t group_id,
                           uint32_t gpu_index, rdc_health_response_t* response);
   rdc_status_t memory_check(rdc_gpu_group_t group_id,
+                          uint32_t gpu_index, rdc_health_response_t* response);
+  rdc_status_t eeprom_check(rdc_gpu_group_t group_id,
+                          uint32_t gpu_index, rdc_health_response_t* response);
+  rdc_status_t thermal_check(rdc_gpu_group_t group_id,
+                          uint32_t gpu_index, rdc_health_response_t* response);
+  rdc_status_t power_check(rdc_gpu_group_t group_id,
                           uint32_t gpu_index, rdc_health_response_t* response);
 
   RdcGroupSettingsPtr group_settings_;
