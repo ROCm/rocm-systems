@@ -91,3 +91,6 @@ rocprofiler_add_interface_library(
     "rocprofiler-sdk-hsakmt without linking to HSAKMT library" IMPORTED)
 rocprofiler_add_interface_library(rocprofiler-sdk-rccl-nolink
                                   "RCCL headers without linking to RCCL library" IMPORTED)
+rocprofiler_add_interface_library(
+    rocprofiler-sdk-rocdecode-nolink
+    "ROCDECODE headers without linking to ROCDECODE library" IMPORTED)

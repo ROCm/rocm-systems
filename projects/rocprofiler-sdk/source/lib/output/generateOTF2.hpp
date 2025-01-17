@@ -46,6 +46,7 @@ write_otf2(
     std::deque<rocprofiler_buffer_tracing_marker_api_record_t>*        marker_api_data,
     std::deque<rocprofiler_buffer_tracing_scratch_memory_record_t>*    scratch_memory_data,
     std::deque<rocprofiler_buffer_tracing_rccl_api_record_t>*          rccl_api_data,
-    std::deque<rocprofiler_buffer_tracing_memory_allocation_record_t>* memory_allocation_data);
+    std::deque<rocprofiler_buffer_tracing_memory_allocation_record_t>* memory_allocation_data,
+    std::deque<rocprofiler_buffer_tracing_rocdecode_api_record_t>*     rocdecode_api_data);
 }  // namespace tool
 }  // namespace rocprofiler

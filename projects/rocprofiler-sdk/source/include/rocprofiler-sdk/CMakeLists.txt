@@ -31,6 +31,7 @@ set(ROCPROFILER_HEADER_FILES
     profile_config.h
     registration.h
     rccl.h
+    rocdecode.h
     spm.h
     ${CMAKE_CURRENT_BINARY_DIR}/version.h)
 
@@ -44,6 +45,7 @@ add_subdirectory(hsa)
 add_subdirectory(marker)
 add_subdirectory(ompt)
 add_subdirectory(rccl)
+add_subdirectory(rocdecode)
 add_subdirectory(cxx)
 add_subdirectory(kfd)
 add_subdirectory(amd_detail)

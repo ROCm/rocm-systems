@@ -46,6 +46,7 @@
 #include "lib/rocprofiler-sdk/pc_sampling/code_object.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/rccl/rccl.hpp"
+#include "lib/rocprofiler-sdk/rocdecode/rocdecode.hpp"
 #include "lib/rocprofiler-sdk/runtime_initialization.hpp"
 
 #include <rocprofiler-sdk/context.h>
@@ -907,6 +908,30 @@ rocprofiler_set_api_table(const char* name,
         // allow tools to install API wrappers
         rocprofiler::intercept_table::notify_intercept_table_registration(
             ROCPROFILER_RCCL_TABLE, lib_version, lib_instance, std::make_tuple(rccl_api));
+    }
+    else if(std::string_view{name} == "rocdecode")
+    {
+        // pass to rocdecode init
+        ROCP_ERROR_IF(num_tables > 1)
+            << "rocprofiler expected ROCDecode library to pass 1 API table, not " << num_tables;
+
+        auto* rocdecode_api = static_cast<RocDecodeDispatchTable*>(tables[0]);
+
+        // any internal modifications to the rocdecodeApiFuncTable need to be done before we make
+        // the copy or else those modifications will be lost when ROCDecode API tracing is enabled
+        // because the ROCDecode API tracing invokes the function pointers from the copy below
+        rocprofiler::rocdecode::copy_table(rocdecode_api, lib_instance);
+
+        // install rocprofiler API wrappers
+        rocprofiler::rocdecode::update_table(rocdecode_api);
+
+        // Tracing notifications the runtime has initialized
+        rocprofiler::runtime_init::initialize(
+            ROCPROFILER_RUNTIME_INITIALIZATION_ROCDECODE, lib_version, lib_instance);
+
+        // allow tools to install API wrappers
+        rocprofiler::intercept_table::notify_intercept_table_registration(
+            ROCPROFILER_ROCDECODE_TABLE, lib_version, lib_instance, std::make_tuple(rocdecode_api));
     }
     else
     {

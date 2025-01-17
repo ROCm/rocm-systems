@@ -52,6 +52,7 @@ add_subdirectory(tracing)
 add_subdirectory(kernel_dispatch)
 add_subdirectory(page_migration)
 add_subdirectory(rccl)
+add_subdirectory(rocdecode)
 add_subdirectory(details)
 add_subdirectory(ompt)
 
@@ -61,6 +62,7 @@ target_link_libraries(
            rocprofiler-sdk::rocprofiler-sdk-hip-nolink
            rocprofiler-sdk::rocprofiler-sdk-hsa-runtime-nolink
            rocprofiler-sdk::rocprofiler-sdk-rccl-nolink
+           rocprofiler-sdk::rocprofiler-sdk-rocdecode-nolink
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-build-flags
             rocprofiler-sdk::rocprofiler-sdk-memcheck
             rocprofiler-sdk::rocprofiler-sdk-common-library

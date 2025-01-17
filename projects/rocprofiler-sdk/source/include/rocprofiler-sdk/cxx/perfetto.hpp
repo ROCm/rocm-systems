@@ -82,6 +82,7 @@ ROCPROFILER_DEFINE_CATEGORY(category, openmp, "OpenMP")
 ROCPROFILER_DEFINE_CATEGORY(category, kernel_dispatch, "GPU kernel dispatch")
 ROCPROFILER_DEFINE_CATEGORY(category, memory_copy, "Async memory copy")
 ROCPROFILER_DEFINE_CATEGORY(category, memory_allocation, "Memory Allocation")
+ROCPROFILER_DEFINE_CATEGORY(category, rocdecode_api, "ROCDecode API function")
 
 #define ROCPROFILER_PERFETTO_CATEGORIES                                                            \
     ROCPROFILER_PERFETTO_CATEGORY(category::hsa_api),                                              \
@@ -91,7 +92,8 @@ ROCPROFILER_DEFINE_CATEGORY(category, memory_allocation, "Memory Allocation")
         ROCPROFILER_PERFETTO_CATEGORY(category::openmp),                                           \
         ROCPROFILER_PERFETTO_CATEGORY(category::kernel_dispatch),                                  \
         ROCPROFILER_PERFETTO_CATEGORY(category::memory_copy),                                      \
-        ROCPROFILER_PERFETTO_CATEGORY(category::memory_allocation)
+        ROCPROFILER_PERFETTO_CATEGORY(category::memory_allocation),                                \
+        ROCPROFILER_PERFETTO_CATEGORY(category::rocdecode_api)
 
 #include <perfetto.h>
 

@@ -152,6 +152,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - `--collection-period` feature added in rocprofv3, to enable filtering using time.
 - `--collection-period-unit` feature added in rocprofv3, to allow the user to control time units used in collection period option.
 - Added deprecation notice for rocprofiler(v1) and rocprofiler(v2).
+- Added support for rocDecode API Tracing
 
 ### Changed
 

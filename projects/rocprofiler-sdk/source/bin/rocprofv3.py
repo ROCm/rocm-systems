@@ -158,13 +158,13 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         aggregate_tracing_options,
         "-r",
         "--runtime-trace",
-        help="Collect tracing data for HIP runtime API, Marker (ROCTx) API, RCCL API, Memory operations (copies, scratch, and allocation), and Kernel dispatches. Similar to --sys-trace but without tracing HIP compiler API and the underlying HSA API.",
+        help="Collect tracing data for HIP runtime API, Marker (ROCTx) API, RCCL API, ROCDecode API, Memory operations (copies, scratch, and allocation), and Kernel dispatches. Similar to --sys-trace but without tracing HIP compiler API and the underlying HSA API.",
     )
     add_parser_bool_argument(
         aggregate_tracing_options,
         "-s",
         "--sys-trace",
-        help="Collect tracing data for HIP API, HSA API, Marker (ROCTx) API, RCCL API, Memory operations (copies, scratch, and allocations), and Kernel dispatches.",
+        help="Collect tracing data for HIP API, HSA API, Marker (ROCTx) API, RCCL API, ROCDecode API, Memory operations (copies, scratch, and allocations), and Kernel dispatches.",
     )
 
     pc_sampling_options = parser.add_argument_group("PC sampling options")
@@ -244,6 +244,11 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         basic_tracing_options,
         "--kokkos-trace",
         help="Enable built-in Kokkos Tools support (implies --marker-trace and --kernel-rename)",
+    )
+    add_parser_bool_argument(
+        basic_tracing_options,
+        "--rocdecode-trace",
+        help="For collecting ROCDecode Traces",
     )
 
     extended_tracing_options = parser.add_argument_group("Granular tracing options")
@@ -761,6 +766,7 @@ def run(app_args, args, **kwargs):
             "memory_allocation_trace",
             "scratch_memory_trace",
             "rccl_trace",
+            "rocdecode_trace",
         ):
             setattr(args, itr, True)
 
@@ -773,6 +779,7 @@ def run(app_args, args, **kwargs):
             "memory_allocation_trace",
             "scratch_memory_trace",
             "rccl_trace",
+            "rocdecode_trace",
         ):
             setattr(args, itr, True)
 
@@ -796,6 +803,7 @@ def run(app_args, args, **kwargs):
             ["hsa_finalizer_trace", "HSA_FINALIZER_EXT_API_TRACE"],
             ["marker_trace", "MARKER_API_TRACE"],
             ["rccl_trace", "RCCL_API_TRACE"],
+            ["rocdecode_trace", "ROCDECODE_API_TRACE"],
             ["kernel_trace", "KERNEL_TRACE"],
             ["memory_copy_trace", "MEMORY_COPY_TRACE"],
             ["memory_allocation_trace", "MEMORY_ALLOCATION_TRACE"],

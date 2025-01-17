@@ -37,6 +37,7 @@ enum class domain_type
     MEMORY_ALLOCATION,
     COUNTER_VALUES,
     PC_SAMPLING_HOST_TRAP,
+    ROCDECODE,
     LAST,
 };
 

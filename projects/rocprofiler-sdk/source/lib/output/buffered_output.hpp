@@ -163,5 +163,7 @@ using counter_records_buffered_output_t =
 using pc_sampling_host_trap_buffered_output_t =
     buffered_output<rocprofiler::tool::rocprofiler_tool_pc_sampling_host_trap_record_t,
                     domain_type::PC_SAMPLING_HOST_TRAP>;
+using rocdecode_buffered_output_t =
+    buffered_output<rocprofiler_buffer_tracing_rocdecode_api_record_t, domain_type::ROCDECODE>;
 }  // namespace tool
 }  // namespace rocprofiler

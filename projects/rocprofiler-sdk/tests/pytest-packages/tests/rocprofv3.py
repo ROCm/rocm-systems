@@ -26,7 +26,15 @@ from __future__ import absolute_import
 def test_perfetto_data(
     pftrace_data,
     json_data,
-    categories=("hip", "hsa", "marker", "kernel", "memory_copy", "memory_allocation"),
+    categories=(
+        "hip",
+        "hsa",
+        "marker",
+        "kernel",
+        "memory_copy",
+        "memory_allocation",
+        "rocdecode_api",
+    ),
 ):
 
     mapping = {
@@ -36,6 +44,7 @@ def test_perfetto_data(
         "kernel": ("kernel_dispatch", "kernel_dispatch"),
         "memory_copy": ("memory_copy", "memory_copy"),
         "memory_allocation": ("memory_allocation", "memory_allocation"),
+        "rocdecode_api": ("rocdecode_api", "rocdecode_api"),
     }
 
     # make sure they specified valid categories
@@ -73,6 +82,7 @@ def test_otf2_data(
         "kernel": ("kernel_dispatch", "kernel_dispatch"),
         "memory_copy": ("memory_copy", "memory_copy"),
         "memory_allocation": ("memory_allocation", "memory_allocation"),
+        "rocdecode_api": ("rocdecode_api", "rocdecode_api"),
     }
 
     # make sure they specified valid categories

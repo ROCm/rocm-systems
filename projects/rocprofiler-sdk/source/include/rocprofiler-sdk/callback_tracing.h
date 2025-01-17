@@ -29,6 +29,7 @@
 #include <rocprofiler-sdk/marker.h>
 #include <rocprofiler-sdk/ompt.h>
 #include <rocprofiler-sdk/rccl.h>
+#include <rocprofiler-sdk/rocdecode.h>
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_amd_tool.h>
@@ -107,6 +108,16 @@ typedef struct
     rocprofiler_rccl_api_args_t   args;
     rocprofiler_rccl_api_retval_t retval;
 } rocprofiler_callback_tracing_rccl_api_data_t;
+
+/**
+ * @brief ROCProfiler ROCDecode API Callback Data.
+ */
+typedef struct
+{
+    uint64_t                           size;  ///< size of this struct
+    rocprofiler_rocdecode_api_args_t   args;
+    rocprofiler_rocdecode_api_retval_t retval;
+} rocprofiler_callback_tracing_rocdecode_api_data_t;
 
 /**
  * @brief ROCProfiler Code Object Load Tracer Callback Record.

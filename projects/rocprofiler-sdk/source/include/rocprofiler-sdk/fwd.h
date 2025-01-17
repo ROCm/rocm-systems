@@ -176,6 +176,7 @@ typedef enum  // NOLINT(performance-enum-size)
                                                      ///< ::rocprofiler_memory_allocation_operation_t
     ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION,  ///< Callback notifying that a runtime
                                                           ///< library has been initialized
+    ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API,           ///< rocDecode API Tracing
     ROCPROFILER_CALLBACK_TRACING_LAST,
 } rocprofiler_callback_tracing_kind_t;
 
@@ -207,6 +208,7 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_BUFFER_TRACING_RUNTIME_INITIALIZATION,  ///< Record indicating a runtime library has
                                                         ///< been initialized. @see
                                                         ///< ::rocprofiler_runtime_initialization_operation_t
+    ROCPROFILER_BUFFER_TRACING_ROCDECODE_API,  ///< rocDecode tracing
     ROCPROFILER_BUFFER_TRACING_LAST,
 } rocprofiler_buffer_tracing_kind_t;
 
@@ -363,12 +365,13 @@ typedef enum
  */
 typedef enum
 {
-    ROCPROFILER_LIBRARY        = (1 << 0),
-    ROCPROFILER_HSA_LIBRARY    = (1 << 1),
-    ROCPROFILER_HIP_LIBRARY    = (1 << 2),
-    ROCPROFILER_MARKER_LIBRARY = (1 << 3),
-    ROCPROFILER_RCCL_LIBRARY   = (1 << 4),
-    ROCPROFILER_LIBRARY_LAST   = ROCPROFILER_RCCL_LIBRARY,
+    ROCPROFILER_LIBRARY           = (1 << 0),
+    ROCPROFILER_HSA_LIBRARY       = (1 << 1),
+    ROCPROFILER_HIP_LIBRARY       = (1 << 2),
+    ROCPROFILER_MARKER_LIBRARY    = (1 << 3),
+    ROCPROFILER_RCCL_LIBRARY      = (1 << 4),
+    ROCPROFILER_ROCDECODE_LIBRARY = (1 << 5),
+    ROCPROFILER_LIBRARY_LAST      = ROCPROFILER_ROCDECODE_LIBRARY,
 } rocprofiler_runtime_library_t;
 
 /**
@@ -384,7 +387,8 @@ typedef enum
     ROCPROFILER_MARKER_CONTROL_TABLE = (1 << 4),
     ROCPROFILER_MARKER_NAME_TABLE    = (1 << 5),
     ROCPROFILER_RCCL_TABLE           = (1 << 6),
-    ROCPROFILER_TABLE_LAST           = ROCPROFILER_RCCL_TABLE,
+    ROCPROFILER_ROCDECODE_TABLE      = (1 << 7),
+    ROCPROFILER_TABLE_LAST           = ROCPROFILER_ROCDECODE_TABLE,
 } rocprofiler_intercept_table_t;
 
 /**
@@ -392,11 +396,12 @@ typedef enum
  */
 typedef enum  // NOLINT(performance-enum-size)
 {
-    ROCPROFILER_RUNTIME_INITIALIZATION_NONE = 0,  ///< Unknown runtime initialization
-    ROCPROFILER_RUNTIME_INITIALIZATION_HSA,       ///< Application loaded HSA runtime
-    ROCPROFILER_RUNTIME_INITIALIZATION_HIP,       ///< Application loaded HIP runtime
-    ROCPROFILER_RUNTIME_INITIALIZATION_MARKER,    ///< Application loaded Marker (ROCTx) runtime
-    ROCPROFILER_RUNTIME_INITIALIZATION_RCCL,      ///< Application loaded RCCL runtime
+    ROCPROFILER_RUNTIME_INITIALIZATION_NONE = 0,   ///< Unknown runtime initialization
+    ROCPROFILER_RUNTIME_INITIALIZATION_HSA,        ///< Application loaded HSA runtime
+    ROCPROFILER_RUNTIME_INITIALIZATION_HIP,        ///< Application loaded HIP runtime
+    ROCPROFILER_RUNTIME_INITIALIZATION_MARKER,     ///< Application loaded Marker (ROCTx) runtime
+    ROCPROFILER_RUNTIME_INITIALIZATION_RCCL,       ///< Application loaded RCCL runtime
+    ROCPROFILER_RUNTIME_INITIALIZATION_ROCDECODE,  ///< Application loaded rocDecode runtime
     ROCPROFILER_RUNTIME_INITIALIZATION_LAST,
 } rocprofiler_runtime_initialization_operation_t;
 

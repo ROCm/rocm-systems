@@ -59,6 +59,8 @@ if(ROCPROFILER_BUILD_TESTS)
     rocprofiler_add_option(
         ROCPROFILER_BUILD_GTEST
         "Enable building gtest (Google testing) library internally" ON ADVANCED)
+    rocprofiler_add_option(ROCPROFILER_BUILD_ROCDECODE_TESTS
+                           "Enable building rocDecode tests" OFF ADVANCED)
 endif()
 
 rocprofiler_add_option(ROCPROFILER_ENABLE_CLANG_TIDY "Enable clang-tidy checks" OFF

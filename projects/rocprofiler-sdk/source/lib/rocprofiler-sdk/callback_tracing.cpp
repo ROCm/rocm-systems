@@ -33,6 +33,7 @@
 #include "lib/rocprofiler-sdk/ompt/ompt.hpp"
 #include "lib/rocprofiler-sdk/rccl/rccl.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
+#include "lib/rocprofiler-sdk/rocdecode/rocdecode.hpp"
 #include "lib/rocprofiler-sdk/runtime_initialization.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -41,6 +42,7 @@
 #include <rocprofiler-sdk/hsa/table_id.h>
 #include <rocprofiler-sdk/marker/table_id.h>
 #include <rocprofiler-sdk/rccl/table_id.h>
+#include <rocprofiler-sdk/rocdecode/table_id.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include <atomic>
@@ -88,6 +90,7 @@ ROCPROFILER_CALLBACK_TRACING_KIND_STRING(MEMORY_ALLOCATION)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(RCCL_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(OMPT)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(RUNTIME_INITIALIZATION)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(ROCDECODE_API)
 
 template <size_t Idx, size_t... Tail>
 std::pair<const char*, size_t>
@@ -269,6 +272,12 @@ rocprofiler_query_callback_tracing_kind_operation_name(rocprofiler_callback_trac
         case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
         {
             val = rocprofiler::runtime_init::name_by_id(operation);
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API:
+        {
+            val = rocprofiler::rocdecode::name_by_id<ROCPROFILER_ROCDECODE_TABLE_ID>(operation);
+            break;
         }
     };
 
@@ -397,6 +406,12 @@ rocprofiler_iterate_callback_tracing_kind_operations(
         case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
         {
             ops = rocprofiler::runtime_init::get_ids();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API:
+        {
+            ops = rocprofiler::rocdecode::get_ids<ROCPROFILER_ROCDECODE_TABLE_ID>();
+            break;
         }
     };
 
@@ -539,6 +554,7 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
         case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
         case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION:
         case ROCPROFILER_CALLBACK_TRACING_RCCL_API:
+        case ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API:
         case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
         {
             return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;

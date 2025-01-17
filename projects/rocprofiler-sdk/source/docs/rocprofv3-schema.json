@@ -1678,6 +1678,66 @@
                                         "address",
                                         "allocation_size"
                                     ]
+				}
+			    },
+			"rocdecoder_api": {
+                                "type": "array",
+                                "description": "ROCDecode API records.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "size": {
+                                            "type": "integer",
+                                            "description": "Size of the rocDecode API record."
+                                        },
+                                        "kind": {
+                                            "type": "integer",
+                                            "description": "Kind of the rocDecode API."
+                                        },
+                                        "operation": {
+                                            "type": "integer",
+                                            "description": "Operation of the rocDecode API."
+                                        },
+                                        "correlation_id": {
+                                            "type": "object",
+                                            "description": "Correlation ID information.",
+                                            "properties": {
+                                                "internal": {
+                                                    "type": "integer",
+                                                    "description": "Internal correlation ID."
+                                                },
+                                                "external": {
+                                                    "type": "integer",
+                                                    "description": "External correlation ID."
+                                                }
+                                            },
+                                            "required": [
+                                                "internal",
+                                                "external"
+                                            ]
+                                        },
+                                        "start_timestamp": {
+                                            "type": "integer",
+                                            "description": "Start timestamp."
+                                        },
+                                        "end_timestamp": {
+                                            "type": "integer",
+                                            "description": "End timestamp."
+                                        },
+                                        "thread_id": {
+                                            "type": "integer",
+                                            "description": "Thread ID."
+                                        }
+                                    },
+                                    "required": [
+                                        "size",
+                                        "kind",
+                                        "operation",
+                                        "correlation_id",
+                                        "start_timestamp",
+                                        "end_timestamp",
+                                        "thread_id"
+                                    ]
                                 }
                             }
                         }

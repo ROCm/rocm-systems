@@ -55,11 +55,11 @@ Here is the sample of commonly used ``rocprofv3`` command-line options. Some opt
     - Output control
 
   * - ``-r`` \| ``--runtime-trace``
-    - Collects HIP (runtime), memory copy, memory allocation, marker, scratch memory, and kernel dispatch traces.
+    - Collects HIP (runtime), memory copy, memory allocation, marker, scratch memory, rocDecode, and kernel dispatch traces.
     - Application Tracing
 
   * - ``-s`` \| ``--sys-trace``
-    - Collects HIP, HSA, memory copy, memory allocation, marker, scratch memory, and kernel dispatch traces.
+    - Collects HIP, HSA, memory copy, memory allocation, marker, scratch memory, rocDecode, and kernel dispatch traces.
     - Application Tracing
 
   * - ``--hip-trace``
@@ -84,6 +84,10 @@ Here is the sample of commonly used ``rocprofv3`` command-line options. Some opt
 
   * - ``--scratch-memory-trace``
     - Collects scratch memory operations traces.
+    - Application tracing
+
+  * - ``--rocdecode-trace``
+    - Collects rocDecode API traces.
     - Application tracing
 
   * - ``--hsa-trace``
@@ -612,6 +616,28 @@ Here are the contents of ``rccl_api_trace.csv`` file:
 
 .. csv-table:: RCCL trace
    :file: /data/rccl_trace.csv
+   :widths: 10,10,10,10,10,20,20
+   :header-rows: 1
+
+rocDecode trace
+++++++++++++++++
+
+`rocDecode <https://github.com/ROCm/rocDecode>`_ is a high-performance video decode SDK for AMD GPUs. This option traces the rocDecode API.
+
+.. code-block:: shell
+
+    rocprofv3 --rocdecode-trace -- <application_path>
+
+The above command generates a ``rocdecode_api_trace`` file prefixed with the process ID.
+
+.. code-block:: shell
+
+    $ cat 41688_rocdecode_api_trace.csv
+
+Here are the contents of ``rocdecode_api_trace.csv`` file:
+
+.. csv-table:: rocDecode trace
+   :file: /data/rocdecode_api_trace.csv
    :widths: 10,10,10,10,10,20,20
    :header-rows: 1
 
@@ -1336,3 +1362,15 @@ Properties
                   - **`handle`** *(integer, required)*: Handle of the agent.
                - **`address`** *(string, required)*: Starting address of allocation.
                - **`allocation_size`** *(integer, required)*: Size of allocation.
+         - **`rocDecode_api`** *(array)*: rocDecode API records.
+            - **Items** *(object)*
+               - **`size`** *(integer, required)*: Size of the rocDecode API record.
+               - **`kind`** *(integer, required)*: Kind of the rocDecode API.
+               - **`operation`** *(integer, required)*: Operation of the rocDecode API.
+               - **`correlation_id`** *(object, required)*: Correlation ID information.
+                  - **`internal`** *(integer, required)*: Internal correlation ID.
+                  - **`external`** *(integer, required)*: External correlation ID.
+               - **`start_timestamp`** *(integer, required)*: Start timestamp.
+               - **`end_timestamp`** *(integer, required)*: End timestamp.
+               - **`thread_id`** *(integer, required)*: Thread ID.
+

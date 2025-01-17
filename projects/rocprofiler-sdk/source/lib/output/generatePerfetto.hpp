@@ -46,6 +46,7 @@ write_perfetto(
     const generator<rocprofiler_buffer_tracing_marker_api_record_t>&        marker_api_gen,
     const generator<rocprofiler_buffer_tracing_scratch_memory_record_t>&    scratch_memory_gen,
     const generator<rocprofiler_buffer_tracing_rccl_api_record_t>&          rccl_api_gen,
-    const generator<rocprofiler_buffer_tracing_memory_allocation_record_t>& memory_allocation_gen);
+    const generator<rocprofiler_buffer_tracing_memory_allocation_record_t>& memory_allocation_gen,
+    const generator<rocprofiler_buffer_tracing_rocdecode_api_record_t>&     rocdecode_api_gen);
 }  // namespace tool
 }  // namespace rocprofiler

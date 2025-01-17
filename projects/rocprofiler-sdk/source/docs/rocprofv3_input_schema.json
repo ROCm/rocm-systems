@@ -65,7 +65,10 @@
                           "type": "boolean",
                           "description": "For Collecting Memory Allocation Traces"
                      },
-
+		      "rocdecode_trace": {
+                          "type": "boolean",
+                          "description": "For Collecting rocDecode Traces"
+                     },
                      "scratch_memory_trace": {
                           "type": "boolean",
                           "description": "For Collecting Scratch Memory operations Traces"
@@ -101,9 +104,14 @@
                               "description": "For Collecting HSA API Traces (Image-extenson API)"
                      },
 
+		     "runtime_trace" : {
+			     "type": "boolean",
+			     "description": "For collecting HIP (runtime), memory copy, memory allocation, marker, scratch memory, rocDecode, and Kernel dispatch traces."
+		     },
+
                      "sys_trace" : {
                               "type": "boolean",
-                              "description": "For Collecting HIP, HSA, Marker (ROCTx), Memory copy, Memory allocation, Scratch memory, and Kernel dispatch traces"
+                              "description": "For Collecting HIP, HSA, Marker (ROCTx), Memory copy, Memory allocation, Scratch memory, rocDecode, and Kernel dispatch traces"
                      },
 
                      "mangled_kernels": {

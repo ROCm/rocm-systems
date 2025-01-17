@@ -61,6 +61,7 @@ DEFINE_BUFFER_TYPE_NAME(PC_SAMPLING_HOST_TRAP,
                         "PC_SAMPLING_HOST_TRAP",
                         "pc_sampling_host_trap",
                         "pc_sampling_host_trap_stats")
+DEFINE_BUFFER_TYPE_NAME(ROCDECODE, "ROCDECODE_API", "rocdecode_api_trace", "rocdecode_api_stats")
 
 #undef DEFINE_BUFFER_TYPE_NAME
 
