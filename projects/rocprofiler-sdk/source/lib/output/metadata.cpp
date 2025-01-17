@@ -136,6 +136,14 @@ metadata::metadata(inprocess)
 
     for(auto itr : agents)
         agents_map.emplace(itr.id, itr);
+
+    // Add kernel ID of zero
+    kernel_symbol_info info{};
+    info.kernel_id             = 0;
+    info.formatted_kernel_name = "0";
+    info.demangled_kernel_name = "0";
+    info.truncated_kernel_name = "0";
+    add_kernel_symbol(std::move(info));
 }
 
 void metadata::init(inprocess)

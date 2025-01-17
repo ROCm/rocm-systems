@@ -1366,6 +1366,12 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         _fut.wait_for(std::chrono::seconds{1});  // wait for a max of 1 second
     }
 
+    // Handle kernel id of zero
+    bool include = std::regex_search("0", std::regex(tool::get_config().kernel_filter_include));
+    bool exclude = std::regex_search("0", std::regex(tool::get_config().kernel_filter_exclude));
+    if(include && (!exclude || tool::get_config().kernel_filter_exclude.empty()))
+        add_kernel_target(0, tool::get_config().kernel_filter_range);
+
     tool_metadata->process_id = getpid();
     rocprofiler_get_timestamp(&(tool_metadata->process_start_ns));
 
