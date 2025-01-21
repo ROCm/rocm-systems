@@ -62,9 +62,26 @@ union GpuMemoryCreateFlags {
     uint64_t interprocess               : 1; // physical buffer need share info between exporter and importer
     uint64_t locked                     : 1; // lock virtual address space into RAM, preventing that memory from being paged to the swap area
     uint64_t physical_contiguous        : 1; // contiguous physical pages
-    uint64_t unused                     : 59;
+    uint64_t imported_vram_alloc_va     : 1; // import buffer form dmabuf fd and allocate valid va (not from handle aperture)
+    uint64_t unused                     : 58;
   };
   uint64_t reserved;
+};
+
+union GpuMemoryDescFlags {
+  struct {
+    uint32_t is_virtual  : 1;
+    uint32_t is_shared   : 1;
+    uint32_t is_external : 1;
+    uint32_t is_physical_only : 1;
+    uint32_t is_locked : 1;
+    uint32_t is_queue_referenced : 1;
+    uint32_t is_physical_contiguous : 1;
+    uint32_t is_imported_vram_alloc_va : 1; // 0 - va from handle aperture; 1 - va from local heap;
+    uint32_t unused : 24;
+  };
+
+  uint32_t reserved;
 };
 
 struct GpuMemoryCreateInfo {
@@ -113,21 +130,7 @@ struct GpuMemoryDesc {
   gpusize alignment;
   gpusize handle_ape_addr;
 
-  union {
-    struct {
-      uint32_t is_virtual  : 1;
-      uint32_t is_shared   : 1;
-      uint32_t is_external : 1;
-      uint32_t is_physical_only : 1;
-      uint32_t is_locked : 1;
-      uint32_t is_queue_referenced : 1;
-      uint32_t is_physical_contiguous : 1;
-      uint32_t unused : 25;
-    };
-
-    uint32_t reserved;
-  } flags;
-
+  GpuMemoryDescFlags flags;
   int mem_flags;
   int engine_flag;
 };
@@ -196,7 +199,7 @@ public:
   ErrorCode Evict();
 
   ErrorCode ExportPhysicalHandle(int* dmabuf_fd, uint32_t flags = SHARED_ALLOCATION_ALL_ACCESS);
-  ErrorCode ImportPhysicalHandle(int dmabuf_fd);
+  ErrorCode ImportPhysicalHandle(const GpuMemoryCreateInfo &create_info);
   ~GpuMemory();
 protected:
   explicit GpuMemory(WDDMDevice *device);

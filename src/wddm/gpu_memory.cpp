@@ -60,7 +60,14 @@ ErrorCode GpuMemory::Init(const GpuMemoryCreateInfo &create_info) {
   desc_.flags.is_virtual = create_info.flags.virtual_alloc;
   desc_.flags.is_physical_only = create_info.flags.physical_only;
   desc_.flags.is_physical_contiguous = create_info.flags.physical_contiguous;
-  desc_.flags.is_shared = create_info.flags.interprocess;
+
+  /* we can't tell the allocation is regular vmm or ipc mem at creation stage,
+     they share same creation parameters, so forcing all vram allocations to
+     sharable to support IPC mem */
+  if (create_info.flags.interprocess ||
+      desc_.domain == thunk_proxy::AllocDomain::kLocal)
+    desc_.flags.is_shared = true;
+
   desc_.flags.is_locked = create_info.flags.locked;
 
   desc_.size = AdjustSize(desc_.client_size);
@@ -386,8 +393,9 @@ ErrorCode GpuMemory::ExportPhysicalHandle(int* dmabuf_fd, uint32_t flags) {
 }
 
 
-ErrorCode GpuMemory::ImportPhysicalHandle(int dmabuf_fd) {
+ErrorCode GpuMemory::ImportPhysicalHandle(const GpuMemoryCreateInfo &create_info) {
   D3DKMT_QUERYRESOURCEINFOFROMNTHANDLE query_args;
+  int dmabuf_fd = create_info.dmabuf_fd;
 
   if (dmabuf_fd <= 0)
     return ErrorCode::InvalidateParams;
@@ -426,6 +434,8 @@ ErrorCode GpuMemory::ImportPhysicalHandle(int dmabuf_fd) {
     return ErrorCode::OutOfMemory;
   }
 
+  auto guard = MakeScopeGuard([&open_info]() { free(open_info); });
+
   alloc_handles_ptr_ = new WinAllocationHandle[query_args.NumAllocations];
 
   D3DKMT_OPENRESOURCEFROMNTHANDLE open_args;
@@ -448,7 +458,7 @@ ErrorCode GpuMemory::ImportPhysicalHandle(int dmabuf_fd) {
   if (ret != ErrorCode::Success) {
     ret = ErrorCode::InvalidateParams;
     pr_err("open resource failed %d\n", static_cast<int>(ret));
-    goto err_out;
+    return ret;
   }
 
   desc_.size = shared_info.size;
@@ -462,14 +472,18 @@ ErrorCode GpuMemory::ImportPhysicalHandle(int dmabuf_fd) {
   for (int i = 0; i < num_allocations_; i++)
     alloc_handles_ptr_[i] = open_info[i].hAllocation;
 
-  free(open_info);
-  return device_->HandleApertureAlloc(desc_.size, &desc_.handle_ape_addr);
 
-err_out:
-  delete[] alloc_handles_ptr_;
-  alloc_handles_ptr_ = nullptr;
-  free(open_info);
-  return ret;
+  if (create_info.flags.imported_vram_alloc_va) {
+    desc_.flags.is_imported_vram_alloc_va = true;
+
+    ret = ReserveGpuVirtualAddress(create_info.va_hint, desc_.size, create_info.alignment);
+    if (ret != ErrorCode::Success)
+      pr_err("failed to allocate svm range, error:%d\n", static_cast<int>(ret));
+
+    return ret;
+  } else {
+    return device_->HandleApertureAlloc(desc_.size, &desc_.handle_ape_addr);
+  }
 }
 
 } // namespace thunk

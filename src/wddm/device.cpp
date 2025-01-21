@@ -491,7 +491,7 @@ ErrorCode WDDMDevice::CreateGpuMemory(const GpuMemoryCreateInfo &create_info, Gp
   *gpu_mem = nullptr;
   auto mem = new GpuMemory(this);
   if (create_info.dmabuf_fd > 0)
-    ret = mem->ImportPhysicalHandle(create_info.dmabuf_fd);
+    ret = mem->ImportPhysicalHandle(create_info);
   else 
     ret = mem->Init(create_info);
   if (ret == ErrorCode::Success)
