@@ -1674,10 +1674,7 @@ def amdsmi_get_gpu_asic_info(
     )
 
     market_name = _pad_hex_value(asic_info_struct.market_name.decode("utf-8"), 4)
-    target_graphics_version = str(asic_info_struct.target_graphics_version)
-    if target_graphics_version == "9010":
-        hex_part = str(hex(int(str(asic_info_struct.target_graphics_version)[2:]))).replace("0x", "")
-        target_graphics_version = str(asic_info_struct.target_graphics_version)[:2] + hex_part
+    target_graphics_version = hex(asic_info_struct.target_graphics_version)[2:]
     asic_info = {
         "market_name": market_name,
         "vendor_id": asic_info_struct.vendor_id,
