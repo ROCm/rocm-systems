@@ -404,6 +404,9 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
     AMD_HSA_BITS_SET(header->kernel_code_properties,
                      AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
                      1);
+    AMD_HSA_BITS_SET(header->kernel_code_properties,
+                      AMD_KERNEL_CODE_PROPERTIES_ENABLE_WAVEFRONT_SIZE32,
+                      (isa_->GetMajorVersion() == 12 && isa_->GetMinorVersion() >= 5) ? 1 : 0);
     AMD_HSA_BITS_SET(header->compute_pgm_rsrc1,
                      AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WAVEFRONT_SGPR_COUNT,
                      gran_sgprs);
