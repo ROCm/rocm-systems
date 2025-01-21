@@ -28,7 +28,7 @@ static void _noop_kernel() {
 }
 
 
-TEST_CASE("KernelLaunchLatency_IncreasingNumberOfStreams") {
+TEST_CASE("Perf_KernelLaunchLatency_IncreasingNumberOfStreams") {
   vector<int> streamsNumber{1, 10, 50, 100, 1000, 5000};
   hipError_t err = hipSuccess;
   hipEvent_t start, stop;
