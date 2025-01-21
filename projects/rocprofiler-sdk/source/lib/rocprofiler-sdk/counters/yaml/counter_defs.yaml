@@ -3982,7 +3982,7 @@ ValuIops:
   description: 'Unit: IOP'
 ValuPipeIssueUtil:
   architectures:
-    gfx90a/gfx940/gfx9:
+    gfx90a/gfx940/gfx9/gfx942/gfx941:
       expression: 100*reduce(SQ_ACTIVE_INST_VALU,sum)/(reduce(GRBM_GUI_ACTIVE,max)*CU_NUM)
   description: 'Unit: percent'
 VmemLatency:
