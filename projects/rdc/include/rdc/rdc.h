@@ -655,10 +655,9 @@ typedef struct {
 } rdc_device_topology_t;
 
 typedef enum {
-  RDC_LINK_STATE_NOT_SUPPORTED = 0,
+  RDC_LINK_STATE_DOWN = 0,
+  RDC_LINK_STATE_UP,
   RDC_LINK_STATE_DISABLED,
-  RDC_LINK_STATE_DOWN,
-  RDC_LINK_STATE_UP
 } rdc_link_state_t;
 
 #define RDC_MAX_NUM_OF_LINKS 16
