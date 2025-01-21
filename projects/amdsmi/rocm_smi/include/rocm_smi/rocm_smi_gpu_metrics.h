@@ -31,9 +31,12 @@
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <iostream>
 #include <string>
 #include <map>
 #include <memory>
+#include <mutex>
+#include <thread>
 #include <type_traits>
 #include <tuple>
 #include <variant>
@@ -938,19 +941,17 @@ class GpuMetricsBase_t {
     virtual void set_device_id(uint32_t device_id) { m_device_id = device_id; }
     virtual void set_partition_id(uint32_t partition_id) { m_partition_id = partition_id; }
     virtual AMDGpuDynamicMetricsTbl_t get_metrics_dynamic_tbl() {
-      return m_metrics_dynamic_tbl;
+      return m_base_metrics_dynamic_tbl;
     }
 
  protected:
-    AMDGpuDynamicMetricsTbl_t m_metrics_dynamic_tbl;
+    AMDGpuDynamicMetricsTbl_t m_base_metrics_dynamic_tbl;
     uint64_t m_metrics_timestamp;
     uint32_t m_device_id;
     uint32_t m_partition_id;
-
 };
 using GpuMetricsBasePtr = std::shared_ptr<GpuMetricsBase_t>;
 using AMDGpuMetricFactories_t = const std::map<AMDGpuMetricVersionFlags_t, GpuMetricsBasePtr>;
-
 
 class GpuMetricsBase_v11_t final : public GpuMetricsBase_t {
  public:
