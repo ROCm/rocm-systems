@@ -5365,7 +5365,7 @@ rsmi_status_t rsmi_dev_target_graphics_version_get(uint32_t dv_ind,
     }
     if (ret == RSMI_STATUS_SUCCESS) {
       version = amd::smi::removeString(version, "gfx");
-      *gfx_version = std::stoull(version);
+      *gfx_version = uint64_t(std::stoull(version, nullptr, 16));
     }
     ss << __PRETTY_FUNCTION__
        << " | ======= end ======= "

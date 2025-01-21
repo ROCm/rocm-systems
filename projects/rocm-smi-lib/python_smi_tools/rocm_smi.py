@@ -397,11 +397,8 @@ def getTargetGfxVersion(device, silent=False):
     target_graphics_version = c_uint64()
     gfx_ver_ret = "N/A"
     ret = rocmsmi.rsmi_dev_target_graphics_version_get(device, byref(target_graphics_version))
-    target_graphics_version = str(target_graphics_version.value)
+    target_graphics_version = hex(target_graphics_version.value)[2:]
     if rsmi_ret_ok(ret, device, 'get_target_gfx_version', silent=silent):
-        if target_graphics_version == "9010":
-            hex_part = str(hex(int(str(target_graphics_version)[2:]))).replace("0x", "")
-            target_graphics_version = str(target_graphics_version)[:2] + hex_part
         gfx_ver_ret = "gfx" + str(target_graphics_version)
     return gfx_ver_ret
 

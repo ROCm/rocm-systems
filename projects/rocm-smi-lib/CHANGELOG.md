@@ -48,6 +48,8 @@ $ rocm-smi --showmetrics
 
 ### Resolved issues
 
+- **Fixed `rsmi_dev_target_graphics_version_get`, `rocm-smi --showhw`, and `rocm-smi --showprod` not displaying graphics version properly for MI2x, MI1x or Navi 3x ASICs.**  
+
 ### Upcoming changes
 
 ## rocm_smi_lib for ROCm 6.3

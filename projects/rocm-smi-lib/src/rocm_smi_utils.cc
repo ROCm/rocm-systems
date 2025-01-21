@@ -1193,11 +1193,13 @@ rsmi_status_t rsmi_get_gfx_target_version(uint32_t dv_ind, std::string *gfx_vers
     // separate out parts -> put back into normal graphics version format
     major = static_cast<uint64_t>((orig_target_version / 10000) * 100);
     minor = static_cast<uint64_t>((orig_target_version % 10000 / 100) * 10);
-    if ((minor == 0) && (countDigit(major) < 4)) {
-      major *= 10;  // 0 as a minor is correct, but bump up by 10
-    }
     rev = static_cast<uint64_t>(orig_target_version % 100);
-    *gfx_version = "gfx" + std::to_string(major + minor + rev);
+
+    ss << std::hex << rev;
+    std::string revision = ss.str();
+    *gfx_version = "gfx" + std::to_string((major + minor)/10) + revision;
+
+    ss.str("");
     ss << __PRETTY_FUNCTION__
     << " | " << std::dec << "kfd_target_version = " << orig_target_version
     << "; major = " << major << "; minor = " << minor << "; rev = "
