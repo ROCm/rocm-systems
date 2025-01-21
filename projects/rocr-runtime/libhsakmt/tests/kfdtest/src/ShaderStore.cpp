@@ -147,7 +147,7 @@ const char *CopyDwordIsa =
         v_mov_b32 v3, s3
         .if (.amdgcn.gfx_generation_number >= 12)
             FLAT_LOAD_DWORD_NSS v4, v[0:1] scope:SCOPE_SYS
-            s_wait_loadcnt 0
+            s_wait_idle
             FLAT_STORE_DWORD_NSS v[2:3], v4 scope:SCOPE_SYS
         .else
             FLAT_LOAD_DWORD_NSS v4, v[0:1] glc slc
@@ -244,12 +244,15 @@ const char *AtomicIncIsa =
         .if (.amdgcn.gfx_generation_number >= 12)
             v_mov_b32 v2, 1
             FLAT_ATOMIC_ADD_NSS v3, v[0:1], v2 scope:SCOPE_SYS th:TH_ATOMIC_RETURN
+            s_wait_idle
         .elseif (.amdgcn.gfx_generation_number >= 8)
             v_mov_b32 v2, 1
             FLAT_ATOMIC_ADD_NSS v3, v[0:1], v2 glc slc
+            s_waitcnt 0
         .else
             v_mov_b32 v2, -1
             flat_atomic_inc v3, v[0:1], v2 glc slc
+            s_waitcnt 0
         .endif
         s_endpgm
 )";
@@ -293,7 +296,7 @@ const char *ScratchCopyDwordIsa =
         // Copy a dword between the passed addresses
         .if (.amdgcn.gfx_generation_number >= 12)
             FLAT_LOAD_DWORD_NSS v4, v[0:1] scope:SCOPE_SYS
-            s_wait_loadcnt 0
+            s_wait_idle
             FLAT_STORE_DWORD_NSS v[2:3], v4 scope:SCOPE_SYS
         .else
             FLAT_LOAD_DWORD_NSS v4, v[0:1] slc
@@ -392,7 +395,7 @@ const char *CopyOnSignalIsa =
             s_cbranch_scc0   POLLSIGNAL
 
             s_load_dword s17, s[0:1], 0x4 scope:SCOPE_SYS
-            s_wait_kmcnt 0
+            s_wait_idle
 
             v_mov_b32 v2, s17
             flat_store_dword v[4:5], v2 scope:SCOPE_SYS
@@ -891,7 +894,7 @@ const char *PersistentIterateIsa =
         // Store known-value output in register
         .if (.amdgcn.gfx_generation_number >= 12)
             FLAT_LOAD_DWORD_NSS     v6, v[4:5] scope:SCOPE_SYS
-            s_wait_loadcnt 0                        // wait for memory reads to finish
+            s_wait_idle                             // wait for memory reads to finish
         .else
             FLAT_LOAD_DWORD_NSS     v6, v[4:5] glc
             s_waitcnt vmcnt(0) & lgkmcnt(0)         // wait for memory reads to finish
@@ -906,7 +909,7 @@ const char *PersistentIterateIsa =
 
         .if (.amdgcn.gfx_generation_number >= 12)
             s_load_dword            s6, s[0:1], 0 scope:SCOPE_SYS
-            s_wait_loadcnt 0                        // wait for memory reads to finish
+            s_wait_idle                             // wait for memory reads to finish
         .else
             s_load_dword            s6, s[0:1], 0 glc
             s_waitcnt vmcnt(0) & lgkmcnt(0)         // wait for memory reads to finish
@@ -972,7 +975,7 @@ const char *ReadMemoryIsa =
         // Load 64bit local buffer address stored at v[2:3] to v[6:7]
         .if (.amdgcn.gfx_generation_number >= 12)
             FLAT_LOAD_DWORDX2_NSS   v[6:7], v[2:3] scope:SCOPE_DEV
-            s_wait_loadcnt 0
+            s_wait_idle
         .else
             FLAT_LOAD_DWORDX2_NSS   v[6:7], v[2:3] slc
             s_waitcnt vmcnt(0) & lgkmcnt(0)         // wait for memory reads to finish
@@ -982,7 +985,7 @@ const char *ReadMemoryIsa =
         L_REPEAT:
         .if (.amdgcn.gfx_generation_number >= 12)
             s_load_dword        s16, s[0:1], 0x0 scope:SCOPE_SYS
-            s_wait_kmcnt        0                      // wait for memory reads to finish
+            s_wait_idle                                // wait for memory reads to finish
         .else
             s_load_dword        s16, s[0:1], 0x0 glc
             s_waitcnt           vmcnt(0) & lgkmcnt(0)  // wait for memory reads to finish
@@ -1011,7 +1014,7 @@ const char *ReadMemoryIsa =
         L_QUIT:
         flat_store_dword        v[4:5], v8
         .if (.amdgcn.gfx_generation_number >= 12)
-            s_wait_storecnt     0
+            s_wait_idle
         .else
             s_waitcnt vmcnt(0) & lgkmcnt(0)         // wait for memory writes to finish
         .endif
@@ -1143,6 +1146,7 @@ const char *JumpToTrapIsa =
         .if (.amdgcn.gfx_generation_number >= 12)
             flat_store_dword v[0:1], v4 scope:SCOPE_SYS
             s_wait_storecnt 0
+            s_wait_idle
         .else
             flat_store_dword v[0:1], v4
             s_waitcnt vmcnt(0)&lgkmcnt(0)
@@ -1191,7 +1195,11 @@ const char *TrapHandlerIsa =
             s_mov_b32 exec_lo, ttmp2
         .elseif (.amdgcn.gfx_generation_number < 12)
             s_sendmsg_rtn_b32 ttmp3, sendmsg(MSG_RTN_GET_DOORBELL)
-            s_waitcnt lgkmcnt(0)
+            .if (.amdgcn.gfx_generation_number >= 12)
+                s_waitcnt_idle
+            .else
+                s_waitcnt lgkmcnt(0)
+            .endif
             s_and_b32 ttmp3, ttmp3, 0x3ff
         .else
             s_sendmsg_rtn_b32 ttmp3, sendmsg(MSG_RTN_GET_DOORBELL)
@@ -1205,7 +1213,7 @@ const char *TrapHandlerIsa =
         s_nop 0x0
         s_sendmsg sendmsg(MSG_INTERRUPT)
         .if (.amdgcn.gfx_generation_number >= 12)
-            s_wait_kmcnt 0
+            s_waitcnt_idle
         .else
             s_waitcnt lgkmcnt(0)
         .endif
@@ -1247,7 +1255,7 @@ const char *TrapHandlerIsa =
     "v_mov_b32 v3, s3\n"\
     "flat_load_dword v4, v[2:3]\n"\
     ".if (.amdgcn.gfx_generation_number >= 12)\n"\
-    "s_wait_loadcnt 0\n"\
+    "s_wait_idle\n"\
     ".else\n"\
     "s_waitcnt vmcnt(0) & lgkmcnt(0)\n"\
     ".endif\n"\
@@ -1265,6 +1273,9 @@ const char *TrapHandlerIsa =
     "s_wait_storecnt 0\n"\
     ".else\n"\
     "flat_store_dword v[2:3], v6\n"\
+    ".if (.amdgcn.gfx_generation_number >= 12)\n"\
+    "s_wait_idle\n"\
+    ".else\n"\
     "s_waitcnt vmcnt(0) & lgkmcnt(0)\n"\
     ".endif\n"\
     "s_endpgm\n"
