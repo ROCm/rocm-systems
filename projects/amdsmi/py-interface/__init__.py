@@ -231,6 +231,8 @@ from .amdsmi_interface import amdsmi_set_gpu_memory_partition_mode
 
 # # Individual GPU Metrics Functions
 from .amdsmi_interface import amdsmi_get_gpu_metrics_header_info
+from .amdsmi_interface import amdsmi_get_gpu_reg_table_info
+from .amdsmi_interface import amdsmi_get_gpu_pm_metrics_info
 
 # # Enums
 from .amdsmi_interface import AmdSmiInitFlags

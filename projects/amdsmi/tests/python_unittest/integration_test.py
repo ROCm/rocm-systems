@@ -20,6 +20,8 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import sys
+
+import amdsmi.amdsmi_wrapper
 sys.path.append("/opt/rocm/libexec/amdsmi_cli/")
 
 try:
@@ -923,7 +925,36 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
                 violation_status['active_gfx_clk_below_host_limit']))
         print()
         self.tearDown()
-
+    
+    # Add test for amdsmi_get_gpu_reg_table_info
+    @handle_exceptions
+    def test_gpu_reg_table_info(self):
+        self.setUp()
+        print("\n\n###Test amdsmi_get_gpu_reg_table_info")
+        processors = amdsmi.amdsmi_get_processor_handles()
+        for i in range(0, len(processors)):
+            print("\n\n###Test Processor {}".format(i))
+            print("\n###Test amdsmi_get_gpu_reg_table_info \n")
+            reg_table_info = amdsmi.amdsmi_get_gpu_reg_table_info(processors[i], amdsmi.amdsmi_interface.AmdSmiRegType.PCIE)
+            print("  reg_table_info['reg_table'] is: {}".format(
+                reg_table_info['reg_table']))
+        print()
+        self.tearDown()
+    
+    # Add test for amdsmi_get_gpu_pm_metrics_info
+    @handle_exceptions
+    def test_gpu_pm_metrics_info(self):
+        self.setUp()
+        print("\n\n###Test amdsmi_get_gpu_pm_metrics_info")
+        processors = amdsmi.amdsmi_get_processor_handles()
+        for i in range(0, len(processors)):
+            print("\n\n###Test Processor {}".format(i))
+            print("\n###Test amdsmi_get_gpu_pm_metrics_info \n")
+            pm_metrics_info = amdsmi.amdsmi_get_gpu_pm_metrics_info(processors[i])
+            print("  pm_metrics_info['pm_metrics'] is: {}".format(
+                pm_metrics_info['pm_metrics']))
+        print()
+        self.tearDown()
 
     def test_walkthrough(self):
         print("\n\n#######################################################################")
