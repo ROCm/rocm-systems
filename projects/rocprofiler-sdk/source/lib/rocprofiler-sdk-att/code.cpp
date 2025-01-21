@@ -155,7 +155,16 @@ CodeFile::~CodeFile()
 
             std::vector<std::string> path_elements(filepath.begin(), filepath.end());
             navigate(jsnapfiletree, path_elements, newfile.str());
-            rocprofiler::common::filesystem::copy(filepath, dir / newfile.str());
+
+            constexpr auto opt = rocprofiler::common::filesystem::copy_options::overwrite_existing;
+            try
+            {
+                rocprofiler::common::filesystem::copy(filepath, dir / newfile.str(), opt);
+            } catch(std::exception& e)
+            {
+                ROCP_WARNING << "Missing source file " << filepath << ": " << e.what();
+                ROCP_CI_LOG(ERROR) << "Unable to copy source files: " << (dir / newfile.str());
+            }
         }
     }
 
