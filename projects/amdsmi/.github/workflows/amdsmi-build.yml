@@ -88,12 +88,13 @@ jobs:
             echo 'Completed Build Testing'
           "
 
-      - name: Upload Test Results
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results-${{ matrix.os }}
-          path: /tmp/test-results/test-results/test-results-${{ matrix.os }}
-          if-no-files-found: warn
+      #   Artifacts disabled for now
+      # - name: Upload Test Results
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: test-results-${{ matrix.os }}
+      #     path: /tmp/test-results/test-results/test-results-${{ matrix.os }}
+      #     if-no-files-found: warn
 
       - name: AMDSMI Test Results
         run: |
@@ -246,12 +247,13 @@ jobs:
             echo 'Completed Build Testing'
           "
 
-      - name: Upload Test Results
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results-${{ matrix.os }}
-          path: /tmp/test-results/test-results/test-results-${{ matrix.os }}
-          if-no-files-found: warn
+      #   Artifacts disabled for now
+      # - name: Upload Test Results
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: test-results-${{ matrix.os }}
+      #     path: /tmp/test-results/test-results/test-results-${{ matrix.os }}
+      #     if-no-files-found: warn
 
       - name: AMDSMI Test Results
         run: |
