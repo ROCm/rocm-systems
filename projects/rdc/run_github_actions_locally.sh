@@ -6,7 +6,18 @@
 set -eu
 set -o pipefail
 
-REMOTE_NAME="${REMOTE_NAME:-origin}"
+get_remote() {
+    # redirect all stderr to /dev/null
+    exec 3>&2
+    exec 2>/dev/null
+
+    git config --get branch."$(git rev-parse --abbrev-ref HEAD)".remote || echo origin
+
+    # restore stderr
+    exec 2>&3
+}
+
+REMOTE_NAME="${REMOTE_NAME:-$(get_remote)}"
 CONTAINER="${CONTAINER:-ubuntu}"
 
 # act will use this file if it exists for vars
