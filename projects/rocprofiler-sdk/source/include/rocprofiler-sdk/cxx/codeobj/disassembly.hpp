@@ -301,9 +301,10 @@ public:
         CHECK_VA2FO(e_ident[EI_VERSION] == EV_CURRENT, "unexpected ei_version");
         CHECK_VA2FO(e_ident[EI_OSABI] == 64, "unexpected ei_osabi");  // ELFOSABI_AMDGPU_HSA
 
-        CHECK_VA2FO(e_ident[EI_ABIVERSION] == 2 ||  // ELFABIVERSION_AMDGPU_HSA_V4
-                        e_ident[EI_ABIVERSION] == 3,
-                    "unexpected ei_abiversion");  // ELFABIVERSION_AMDGPU_HSA_V5
+        CHECK_VA2FO(e_ident[EI_ABIVERSION] == 2 ||      // ELFABIVERSION_AMDGPU_HSA_V4
+                        e_ident[EI_ABIVERSION] == 3 ||  // ELFABIVERSION_AMDGPU_HSA_V5
+                        e_ident[EI_ABIVERSION] == 4,    // ELFABIVERSION_AMDGPU_HSA_V6
+                    "unexpected ei_abiversion");
 
         Elf64_Ehdr* ehdr = (Elf64_Ehdr*) buffer.data();
         CHECK_VA2FO(ehdr, "ehdr is nullptr");
