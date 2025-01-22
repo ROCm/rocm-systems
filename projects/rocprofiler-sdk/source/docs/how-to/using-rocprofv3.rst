@@ -533,7 +533,10 @@ In addition to the HSA memory allocation functions listed above, the correspondi
 free functions ``hsa_memory_free``, ``hsa_amd_memory_pool_free``, and ``hsa_amd_vmem_handle_release``
 are also tracked. Unlike the allocation functions, however, only the address of the freed memory
 is recorded. As such, the agent id and size of the freed memory are recorded as 0 in the CSV and
-JSON outputs.
+JSON outputs. It should be noted that it is possible for some free functions to records a null
+pointer address of 0x0. This situation can occur when some HIP functions such as hipStreamDestroy
+call underlying HSA free functions with null pointers, even if the user never explicitly calls
+free memory functions with null pointer addresses.
 
 To trace memory allocations during the application run, use:
 
