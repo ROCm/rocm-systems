@@ -703,7 +703,9 @@ def run(app_args, args, **kwargs):
     ROCPROF_KOKKOSP_LIBRARY = (
         f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofiler-sdk-tool-kokkosp.so"
     )
-    ROCPROF_LIST_AVAIL_TOOL_LIBRARY = f"{ROCM_DIR}/libexec/librocprofv3-list-avail.so"
+    ROCPROF_LIST_AVAIL_TOOL_LIBRARY = (
+        f"{ROCM_DIR}/libexec/rocprofiler-sdk/librocprofv3-list-avail.so"
+    )
 
     prepend_preload = [itr for itr in args.preload if itr]
     append_preload = [

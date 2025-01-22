@@ -23,7 +23,7 @@ function(rocprofiler_sdk_custom_compilation)
         NAMES rocprofiler-sdk-launch-compiler
         HINTS ${rocprofiler-sdk_ROOT_DIR} ${PROJECT_BINARY_DIR} ${CMAKE_BINARY_DIR}
         PATHS ${rocprofiler-sdk_ROOT_DIR} ${PROJECT_BINARY_DIR} ${CMAKE_BINARY_DIR}
-        PATH_SUFFIXES sbin)
+        PATH_SUFFIXES libexec/rocprofiler-sdk)
 
     if(NOT COMP_COMPILER)
         message(
