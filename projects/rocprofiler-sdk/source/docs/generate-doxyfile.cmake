@@ -17,3 +17,6 @@ string(REGEX REPLACE "([0-9]+)\\.([0-9]+)\\.([0-9]+)(.*)" "\\1.\\2.\\3"
 
 configure_file(${SOURCE_DIR}/source/docs/rocprofiler-sdk.dox.in
                ${SOURCE_DIR}/source/docs/rocprofiler-sdk.dox @ONLY)
+
+configure_file(${SOURCE_DIR}/source/docs/rocprofiler-sdk-roctx.dox.in
+               ${SOURCE_DIR}/source/docs/rocprofiler-sdk-roctx.dox @ONLY)

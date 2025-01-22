@@ -48,7 +48,21 @@ jobs:
         uses: actions/configure-pages@v5
       - name: Create Docs Directory
         run:
-          mkdir -p docs
+          mkdir -p docs/_doxygen/rocprofiler-sdk
+          mkdir -p docs/_doxygen/roctx
+      - name: Install Conda environment
+        shell: bash -el {0}
+        working-directory: source/docs
+        run: |
+          conda env create -n rocprofiler-docs -f environment.yml
+      - name: Install documentation dependencies
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y doxygen graphviz
+          sudo python3 -m pip install sphinx
+          sudo python3 -m pip install doxysphinx rocm-docs-core
       - name: Build Docs
         shell: bash -el {0}
         working-directory: source/docs
@@ -59,7 +73,7 @@ jobs:
           conda env create -n rocprofiler-docs -f environment.yml
           source activate
           conda activate rocprofiler-docs
-          ../scripts/update-docs.sh
+          sudo ../scripts/update-docs.sh
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
@@ -88,7 +102,10 @@ jobs:
         uses: actions/checkout@v4
         with:
             submodules: true
-
+      - name: Create Docs Directory
+        run:
+          mkdir -p source/docs/_doxygen/rocprofiler-sdk
+          mkdir -p source/docs/_doxygen/roctx
       - name: Install requirements
         timeout-minutes: 10
         shell: bash

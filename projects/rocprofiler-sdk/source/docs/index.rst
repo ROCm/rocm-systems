@@ -42,7 +42,8 @@ The documentation is structured as follows:
     * :doc:`Intercept table <api-reference/intercept_table>`
     * :doc:`PC sampling <api-reference/pc_sampling>`
     * :doc:`Tool library <api-reference/tool_library>`
-    * :doc:`API library <_doxygen/html/index>`
+    * :doc:`ROCprofiler-SDK API library <_doxygen/rocprofiler-sdk/html/index>`
+    * :doc:`ROCTx API library <_doxygen/roctx/html/index>`
 
   .. grid-item-card:: Conceptual
 

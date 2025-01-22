@@ -78,7 +78,7 @@ doxygen_root = "."
 doxysphinx_enabled = True
 doxygen_project = {
     "name": "rocprofiler-sdk",
-    "path": "_doxygen/xml",
+    "path": "_doxygen",
 }
 doxyfile = "rocprofiler-sdk.dox"
 

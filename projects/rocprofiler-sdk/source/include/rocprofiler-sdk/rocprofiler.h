@@ -22,6 +22,34 @@
 
 #pragma once
 
+/**
+ *
+ * \file rocprofiler.h
+ * \brief ROCProfiler-SDK API interface.
+ *
+ * \mainpage ROCProfiler-SDK API Specification
+ *
+ * \section introduction Introduction
+ * ROCprofiler-SDK is a library that implements the profiling and performance monitoring
+ * capabilities for AMD's ROCm platform. It provides a comprehensive set of APIs for:
+ *
+ * - Hardware performance counters monitoring
+ * - PC sampling for kernel execution analysis
+ * - Buffer and callback-based tracing mechanisms
+ * - Device and dispatch counting services
+ * - External correlation tracking
+ * - HIP and HSA runtime profiling support
+ *
+ * The library is designed to help developers analyze and optimize the performance
+ * of applications running on AMD GPUs. It offers both low-level hardware access
+ * and high-level profiling abstractions to accommodate different profiling needs.
+ *
+ *
+ * \section compatibility Compatibility
+ * ROCprofiler-SDK is compatible with AMD ROCm platform and supports
+ * profiling of applications using HIP and HSA runtimes.
+ */
+
 #include <stddef.h>
 #include <stdint.h>
 

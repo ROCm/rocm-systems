@@ -22,16 +22,50 @@
 
 #pragma once
 
-/** \mainpage ROCTx API Specification
+/**
+ * \file roctx.h
+ * \brief ROCTx API interface for AMD code annotation and profiling
+ *
+ * \mainpage ROCTx API Specification
  *
  * \section introduction Introduction
- * ROCTx is a library that implements the AMD code annotation API.  It provides
- * the support necessary to annotate events and code ranges in applications.
- */
-
-/**
- * \file
- * ROCTx API interface.
+ * ROCTx is a comprehensive library that implements the AMD code annotation API. It provides
+ * essential functionality for:
+ * - Event annotation and marking
+ * - Code range tracking and management
+ * - Profiler control and customization
+ * - Thread and device naming capabilities
+ *
+ * Key features:
+ * - Nested range tracking with push/pop functionality
+ * - Process-wide range management
+ * - Thread-specific and global profiler control
+ * - Device and stream naming support
+ * - HSA agent and HIP device management
+ *
+ * The API is divided into several main components:
+ * 1. Markers - For single event annotations
+ * 2. Ranges - For tracking code execution spans
+ * 3. Profiler Control - For managing profiling tool behavior
+ * 4. Naming Utilities - For labeling threads, devices, and streams
+ *
+ * Thread Safety:
+ * - Range operations are thread-local and thread-safe
+ * - Marking operations are thread-safe
+ * - Profiler control operations are process-wide
+ *
+ * Integration:
+ * - Compatible with HIP runtime
+ * - Supports HSA (Heterogeneous System Architecture)
+ * - Provides both C and C++ interfaces
+ *
+ * Performance Considerations:
+ * - Minimal overhead for marking and range operations
+ * - Thread-local storage for efficient range stacking
+ * - Lightweight profiler control mechanisms
+ *
+ * \note All string parameters must be null-terminated
+ * \warning Proper nesting of range push/pop operations is user's responsibility
  */
 
 #include <stddef.h>

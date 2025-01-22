@@ -10,7 +10,11 @@ popd
 pushd ${WORK_DIR}
 cmake -DSOURCE_DIR=${SOURCE_DIR} -P generate-doxyfile.cmake
 
-doxygen rocprofiler-sdk.dox
 
-doxysphinx build ${WORK_DIR} ${WORK_DIR}/_build/html ${WORK_DIR}/_doxygen/html
+mkdir -p _doxygen
+doxygen rocprofiler-sdk.dox
+doxygen rocprofiler-sdk-roctx.dox
+
+doxysphinx build ${WORK_DIR} ${WORK_DIR}/_build/html ${WORK_DIR}/_doxygen/rocprofiler-sdk/html
+doxysphinx build ${WORK_DIR} ${WORK_DIR}/_build/html ${WORK_DIR}/_doxygen/roctx/html
 popd

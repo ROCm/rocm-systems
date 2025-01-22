@@ -115,9 +115,10 @@ cd \${WORK_DIR}
 cmake -DSOURCE_DIR=\${SOURCE_DIR} -P \${WORK_DIR}/generate-doxyfile.cmake
 
 doxygen rocprofiler-sdk.dox
-doxygen rocprofiler-sdk.dox
+doxygen rocprofiler-sdk-roctx.dox
 
-doxysphinx build \${WORK_DIR} \${WORK_DIR}/_build/html \${WORK_DIR}/_doxygen/html
+doxysphinx build \${WORK_DIR} \${WORK_DIR}/_build/html \${WORK_DIR}/_doxygen/rocprofiler-sdk/html
+doxysphinx build \${WORK_DIR} \${WORK_DIR}/_build/html \${WORK_DIR}/_doxygen/roctx/html
 
 make html SPHINXOPTS=\"-W --keep-going ${DOCS_BUILD_JOBS} -n\"
 

@@ -3,19 +3,22 @@
 
 version: 2
 
-sphinx:
-  configuration: source/docs/conf.py
+build:
+  os: ubuntu-22.04
+  tools:
+    python: "mambaforge-22.9"
+  jobs:
+    post_create_environment:
+      - ./source/scripts/update-doxygen.sh
 
-formats: [htmlzip, pdf, epub]
+conda:
+  environment: source/docs/environment.yml
 
 python:
   install:
   - requirements: source/docs/sphinx/requirements.txt
 
-build:
-  os: ubuntu-22.04
-  tools:
-    python: "mambaforge-22.9"
+sphinx:
+  configuration: source/docs/conf.py
 
-conda:
-   environment: source/docs/environment.yml
+formats: [htmlzip, pdf, epub]

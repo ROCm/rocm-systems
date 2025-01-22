@@ -24,11 +24,13 @@ message "Generating rocprofiler-sdk.dox"
 cmake -DSOURCE_DIR=${SOURCE_DIR} -DPROJECT_NAME="Rocprofiler SDK" -P ${WORK_DIR}/generate-doxyfile.cmake
 
 message "Generating doxygen xml files"
+mkdir -p _doxygen
 doxygen rocprofiler-sdk.dox
-doxygen rocprofiler-sdk.dox
+doxygen rocprofiler-sdk-roctx.dox
 
 message "Running doxysphinx"
-doxysphinx build ${WORK_DIR} ${WORK_DIR}/_build/html ${WORK_DIR}/_doxygen/html
+doxysphinx build ${WORK_DIR} ${WORK_DIR}/_build/html ${WORK_DIR}/_doxygen/rocprofiler-sdk/html
+doxysphinx build ${WORK_DIR} ${WORK_DIR}/_build/html ${WORK_DIR}/_doxygen/roctx/html
 
 message "Building html documentation"
 make html SPHINXOPTS="--keep-going -n"

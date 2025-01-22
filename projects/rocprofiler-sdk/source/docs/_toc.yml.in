@@ -27,8 +27,10 @@ subtrees:
       title: PC sampling
     - file: api-reference/tool_library
       title: Tool library
-    - file: _doxygen/html/index
-      title: API library
+    - file: _doxygen/rocprofiler-sdk/html/index
+      title: ROCprofiler-SDK API library
+    - file: _doxygen/roctx/html/index
+      title: ROCTx API library
   - caption: Conceptual
     entries:
     - file: conceptual/comparing-with-legacy-tools
