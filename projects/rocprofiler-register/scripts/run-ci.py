@@ -13,7 +13,7 @@ import multiprocessing
 # this constant is used to define CTEST_PROJECT_NAME
 # and default value for CTEST_SUBMIT_URL
 _PROJECT_NAME = "rocprofiler-register"
-_BASE_URL = "10.194.116.31/cdash"
+_BASE_URL = "cdash.rocprofiler.amd.com"
 
 
 def which(cmd, require):
