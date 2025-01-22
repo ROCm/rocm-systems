@@ -273,6 +273,9 @@ class Flag {
       else
         fprintf(stderr, "Failed to parse HSA_ASYNCEVENTS_THREAD_PRIORITY");
     }
+
+    var = os::GetEnvVar("HSA_IMAGE_ENABLE_3D_SWIZZLE_DEBUG");
+    enable_3d_swizzle_ = (var == "1") ? true : false;
   }
 
   void parse_masks(uint32_t maxGpu, uint32_t maxCU) {
@@ -391,6 +394,8 @@ class Flag {
 
   int async_events_thread_priority() const { return async_events_thread_priority_; }
 
+  bool enable_3d_swizzle() const { return enable_3d_swizzle_; }
+
  private:
   bool check_flat_scratch_;
   bool enable_vm_fault_message_;
@@ -423,6 +428,7 @@ class Flag {
   bool dev_mem_queue_;
   uint32_t signal_abort_timeout_;
   int  async_events_thread_priority_;
+  bool enable_3d_swizzle_ = false;
 
   SDMA_OVERRIDE enable_sdma_;
   SDMA_OVERRIDE enable_peer_sdma_;

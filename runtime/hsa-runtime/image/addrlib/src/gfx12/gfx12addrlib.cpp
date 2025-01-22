@@ -1253,7 +1253,8 @@ void Gfx12Lib::SanityCheckSurfSize(
         // image, at least for single samples) but they still have the same number of mip levels as the
         // parent image.  This disconnect produces false assertions below as the image size doesn't apparently
         // support the specified number of mip levels.
-        ((pIn->flags.hiZHiS == 0) || (pIn->numMipLevels == 1)))
+        ((pIn->flags.hiZHiS == 0) || (pIn->numMipLevels == 1))   &&
+        !(pIn->flags.view3dAs2dArray))
     {
         UINT_32  lastMipSize   = 1;
         UINT_32  dataChainSize = 0;

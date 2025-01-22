@@ -48,6 +48,7 @@
 #include <algorithm>
 #include <climits>
 
+#include "core/inc/runtime.h"
 #include "inc/hsa_ext_amd.h"
 #include "core/inc/hsa_internal.h"
 #include "core/util/utils.h"
@@ -681,9 +682,39 @@ uint32_t ImageManagerGfx12::GetAddrlibSurfaceInfoNv(
       break;
 
     case HSA_EXT_IMAGE_GEOMETRY_3D:
-      in.resourceType = ADDR_RSRC_TEX_3D;
-      break;
+      {
+	in.resourceType = ADDR_RSRC_TEX_3D;
+	/*
+	 * 3D swizzle modes on GFX12 enforces alignment
+	 * of the number of slices  to the block depth.
+	 * If numSlices = 3 then the 3 slices are
+	 * interleaved for 3D locality among the 8 slices
+	 * that make up each block. This causes the memory
+	 * footprint to jump from an ideal size of ~12 GB
+	 * to ~32 GB.
+	 * 'enable3DSwizzleMode' flag tests for env variable
+	 * HSA_IMAGE_ENABLE_3D_SWIZZLE_DEBUG to enable or disable
+	 * 3D swizzle:
+	 * true: Keep view3dAs2dArray = 0 for real 3D interleaving.
+	 * false: Use view3dAs2dArray = 1 to avoid the alignment
+	 *       expansion.
+	 * 2D swizzle modes can lower size overhead but may yield
+	 * suboptimal cache behavior for fully 3D volumetric
+	 * operations.
+	 */
+	bool enable3DSwizzleMode = core::Runtime::runtime_singleton_->flag().enable_3d_swizzle();
+	if (enable3DSwizzleMode)
+	{
+		in.flags.view3dAs2dArray = 0;
+	}
+	else
+	{
+		in.flags.view3dAs2dArray = 1;
+	}
+	break;
+      }
   }
+
   in.flags.texture = 1;
 
   if (tileMode == Image::TileMode::LINEAR)
@@ -779,6 +810,7 @@ uint32_t ImageManagerGfx12::GetAddrlibSurfaceInfoNv(
           minSize = surfaceSize;
           bestSwizzle = (Addr3SwizzleMode) i;
         } else if ((surfaceSize * ratioHigh) <= (minSize * ratioLow)) {
+          minSize = surfaceSize;
           bestSwizzle = (Addr3SwizzleMode) i;
         }
       }
