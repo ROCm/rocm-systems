@@ -221,4 +221,4 @@ representations or warranties with respect to the accuracy or completeness of th
 no liability of any kind, including the implied warranties of noninfringement, merchantability or fitness for particular
 purposes, with respect to the operation or use of AMD hardware, software or other products described herein.
 
-© 2023-2024 Advanced Micro Devices, Inc. All Rights Reserved.
+© 2023-2025 Advanced Micro Devices, Inc. All Rights Reserved.
