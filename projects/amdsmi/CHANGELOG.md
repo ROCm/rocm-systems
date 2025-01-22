@@ -339,6 +339,18 @@ GPU2   0000:46:00.0 32 Gb/s  512 Gb/s      XGMI
 ### Resolved issues
 
 - **Fixed `amdsmi_get_gpu_asic_info` and `amd-smi static --asic` not displaying graphics version properly for MI2x, MI1x or Navi 3x ASICs.**  
+  Before on MI100:
+  ```shell
+  $ amd-smi static --asic | grep TARGET_GRAPHICS_VERSION
+        TARGET_GRAPHICS_VERSION: gfx9008
+        TARGET_GRAPHICS_VERSION: gfx9008
+  ```
+  After on MI100:
+  ```shell
+  $ amd-smi static --asic | grep TARGET_GRAPHICS_VERSION
+        TARGET_GRAPHICS_VERSION: gfx908
+        TARGET_GRAPHICS_VERSION: gfx908
+  ```
 
 ### Upcoming changes
 
