@@ -155,7 +155,7 @@ jobs:
         ctest --test-dir build-tests-deb -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
 
     - name: Archive production artifacts
-      if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
+      if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.runner, env.CORE_EXT_RUNNER) }}
       uses: actions/upload-artifact@v4
       with:
         name: installers-deb
@@ -278,7 +278,7 @@ jobs:
         ctest --test-dir build-tests-deb -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
 
     - name: Archive production artifacts
-      if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
+      if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.runner, env.CORE_EXT_RUNNER) }}
       uses: actions/upload-artifact@v4
       with:
         name: installers-rpm
