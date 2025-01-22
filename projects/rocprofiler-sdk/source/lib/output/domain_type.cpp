@@ -54,7 +54,7 @@ DEFINE_BUFFER_TYPE_NAME(COUNTER_COLLECTION,
 DEFINE_BUFFER_TYPE_NAME(RCCL, "RCCL_API", "rccl_api_trace", "rccl_api_stats")
 DEFINE_BUFFER_TYPE_NAME(MEMORY_ALLOCATION,
                         "MEMORY_ALLOCATION",
-                        "memory_allocation",
+                        "memory_allocation_trace",
                         "memory_allocation_stats")
 DEFINE_BUFFER_TYPE_NAME(COUNTER_VALUES, "COUNTER_VALUES", "counter_values", "no_filename")
 DEFINE_BUFFER_TYPE_NAME(PC_SAMPLING_HOST_TRAP,
