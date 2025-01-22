@@ -17,8 +17,10 @@ OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip/hip_runtime.h>
-#include<iostream>
-#include<string>
+#include <iostream>
+#include <string>
+#include <cstring>
+
 int main() {
   hipDevice_t device;
   int devCount;
