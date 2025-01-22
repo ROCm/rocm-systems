@@ -13,6 +13,7 @@ extern "C" {
 #    pragma weak roctxRangePush
 #    pragma weak roctxRangePop
 #    pragma weak ncclGetVersion
+#    pragma weak rocDecCreateDecoder
 #endif
 
 extern void
@@ -33,6 +34,22 @@ enum ncclResult_t
 
 extern ncclResult_t
 ncclGetVersion(int* version);
+
+enum rocDecStatus
+{
+};
+
+enum rocDecDecoderHandle
+{
+};
+
+enum RocDecoderCreateInfo
+{
+};
+
+extern rocDecStatus
+rocDecCreateDecoder(rocDecDecoderHandle*  decoder_handle,
+                    RocDecoderCreateInfo* decoder_create_info);
 
 #ifdef __cplusplus
 }

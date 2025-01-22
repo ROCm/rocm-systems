@@ -2,6 +2,7 @@
 #include <amdhip/amdhip.hpp>
 #include <hsa-runtime/hsa-runtime.hpp>
 #include <rccl/rccl.hpp>
+#include <rocdecode/rocdecode.hpp>
 #include <roctx/roctx.hpp>
 
 #include <dlfcn.h>
@@ -32,6 +33,13 @@ hsa_init()
 
 ncclResult_t
 ncclGetVersion(int*)
+{
+    printf("[%s] %s\n", ROCP_REG_FILE_NAME, __FUNCTION__);
+    return {};
+}
+
+rocDecStatus
+rocDecCreateDecoder(rocDecDecoderHandle*, RocDecoderCreateInfo*)
 {
     printf("[%s] %s\n", ROCP_REG_FILE_NAME, __FUNCTION__);
     return {};
@@ -83,10 +91,11 @@ rocprofiler_set_api_table(const char* name,
                                       " did not contain rocprofiler_configure symbol" };
     }
 
-    using hip_table_t   = hip::HipApiTable;
-    using hsa_table_t   = hsa::HsaApiTable;
-    using roctx_table_t = roctx::ROCTxApiTable;
-    using rccl_table_t  = rccl::rcclApiFuncTable;
+    using hip_table_t       = hip::HipApiTable;
+    using hsa_table_t       = hsa::HsaApiTable;
+    using roctx_table_t     = roctx::ROCTxApiTable;
+    using rccl_table_t      = rccl::rcclApiFuncTable;
+    using rocdecode_table_t = rocdecode::rocdecodeApiFuncTable;
 
     auto* _wrap_v = std::getenv("ROCP_REG_TEST_WRAP");
     bool  _wrap   = (_wrap_v != nullptr && std::stoi(_wrap_v) != 0);
@@ -120,6 +129,11 @@ rocprofiler_set_api_table(const char* name,
         {
             rccl_table_t* _table      = static_cast<rccl_table_t*>(tables[0]);
             _table->ncclGetVersion_fn = &rocprofiler::ncclGetVersion;
+        }
+        else if(std::string_view{ name } == "rocdecode")
+        {
+            rocdecode_table_t* _table      = static_cast<rocdecode_table_t*>(tables[0]);
+            _table->rocDecCreateDecoder_fn = &rocprofiler::rocDecCreateDecoder;
         }
     }
 
