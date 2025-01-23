@@ -604,6 +604,14 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Add Universal Arguments
         self._add_command_modifiers(version_parser)
 
+        # help info; CPU version code will be added back in once amd_hsmp code has been completed
+        gpu_version_help = "Display the current amdgpu driver version"
+        # cpu_version_help = "Display the current amd_hsmp driver version"
+
+        # Add GPU and CPU version Arguments
+        version_parser.add_argument('-g', '--gpu_version', action='store_true', required=False, help=gpu_version_help)
+        # version_parser.add_argument('-c', '--cpu_version', action='store_true', required=False, help=cpu_version_help)
+
 
     def _add_list_parser(self, subparsers: argparse._SubParsersAction, func):
         if not self.helpers.is_amdgpu_initialized():

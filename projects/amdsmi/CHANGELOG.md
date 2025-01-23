@@ -135,6 +135,14 @@ GPU: 0
 
 ### Changed
 
+- **Added amdgpu driver version to `amd-smi version` command**.  
+  - The `amd-smi version` command can now also display the amdgpu driver version using the `-g` flag.
+
+```shell
+amd-smi version -g
+AMDSMI Tool: 24.7.1+6fa991c-dirty | AMDSMI Library version: 24.7.2.0 | ROCm version: N/A | amdgpu version: 6.12.2
+```
+
 - **All `amd-smi set` and `amd-smi reset` options are now mutually exclusive**.  
   - Users can only use one set option at a time now.  
 
