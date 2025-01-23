@@ -948,9 +948,9 @@ class AMDSMICommands():
                             for level in range(len(frequencies['frequency'])):
                                 if frequencies['frequency'][level] != "N/A":
                                     freq = str(self.helpers.convert_SI_unit(frequencies['frequency'][level], AMDSMIHelpers.SI_Unit.MICRO)) + " MHz"
-                                    freq_dict['frequency_levels'].update({level:freq})
+                                    freq_dict['frequency_levels'].update({f"Level {level}":freq})
                                 else:
-                                    freq_dict['frequency_levels'].update("N/A")
+                                    freq_dict['frequency_levels'].update({f"Level {level}":"N/A"})
                         else:
                             freq_dict = "N/A"
                     except amdsmi_exception.AmdSmiLibraryException as e:
