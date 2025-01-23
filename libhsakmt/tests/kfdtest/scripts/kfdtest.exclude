@@ -357,6 +357,15 @@ FILTER[gfx942]=\
 "KFDIPCTest.BasicTest:"\
 "KFDQMTest.QueueLatency"
 
+FILTER[gfx950]=\
+"$BLACKLIST_ALL_ASICS:"\
+"KFDMemoryTest.LargestSysBufferTest:"\
+"KFDMemoryTest.BigSysBufferStressTest:"\
+"KFDMemoryTest.FlatScratchAccess:"\
+"KFDIPCTest.BasicTest:"\
+"KFDQMTest.QueueLatency:"\
+"KFDGWSTest.Semaphore"
+
 FILTER[gfx1200]=\
 "$BLACKLIST_ALL_ASICS:"\
 "$BLACKLIST_GFX12"
