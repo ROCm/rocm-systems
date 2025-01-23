@@ -152,16 +152,14 @@ if(BUILD_STANDALONE AND GRPC_ROOT STREQUAL GRPC_ROOT_DEFAULT)
     Continuing without gRPC install")
 endif()
 
-find_package(SMI
+find_package(amd_smi
     NAMES amd_smi
     HINTS ${ROCM_DIR}/lib/cmake
     CONFIGURE REQUIRED)
-set(SMI_INC_DIR "${AMD_SMI_INCLUDE_DIR}" CACHE INTERNAL "AMD SMI include directory.")
-set(SMI_LIB_DIR "${AMD_SMI_LIB_DIR}" CACHE INTERNAL "AMD SMI library directory.")
 
-if(NOT EXISTS "${SMI_INC_DIR}" OR NOT EXISTS "${SMI_LIB_DIR}")
-    message(FATAL_ERROR "amd_smi not found in ${SMI_INC_DIR}. Please
-    make sure amd_smi is installed and present in ${SMI_INC_DIR}.")
+if(NOT EXISTS "${AMD_SMI_INCLUDE_DIR}" OR NOT EXISTS "${AMD_SMI_LIB_DIR}")
+    message(FATAL_ERROR "amd_smi not found in ${AMD_SMI_INCLUDE_DIR}. Please
+    make sure amd_smi is installed and present in ${AMD_SMI_INCLUDE_DIR}.")
 endif()
 
 set(${RDC}_VERSION_MAJOR "${VERSION_MAJOR}")

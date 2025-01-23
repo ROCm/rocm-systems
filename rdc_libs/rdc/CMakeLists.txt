@@ -69,7 +69,7 @@ target_link_libraries(${RDC_LIB} ${BOOTSTRAP_LIB} pthread amd_smi cap)
 target_include_directories(${RDC_LIB} PRIVATE
     "${PROJECT_SOURCE_DIR}"
     "${PROJECT_SOURCE_DIR}/include"
-    "${SMI_INC_DIR}")
+    "${AMD_SMI_INCLUDE_DIR}")
 
 # Set the VERSION and SOVERSION values
 set_property(TARGET ${RDC_LIB} PROPERTY
