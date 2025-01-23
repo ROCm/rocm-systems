@@ -91,6 +91,16 @@ static const char* topology_link_type_to_str(rdc_topology_link_type_t type) {
 
 void RdciTopologyLinkSubSystem::process() {
   rdc_status_t result = RDC_ST_OK;
+  uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES];
+  uint32_t count = 0;
+  result = rdc_device_get_all(rdc_handle_, gpu_index_list, &count);
+  if (result != RDC_ST_OK) {
+    throw RdcException(result, "Error to find devices on the system.");
+  }
+  if (group_index_ >= count) {
+    throw RdcException(result,
+                       "Fail to get " + std::to_string(group_index_) + " to the topology gpu index");
+  }
   switch (topology_ops_) {
     case TOPOLOGY_INDEX: {
       rdc_device_topology_t topology;
@@ -108,8 +118,10 @@ void RdciTopologyLinkSubSystem::process() {
                   << "-----------------------------"
                   << "------------------+\n";
         for (uint32_t i = 0; i < topology.num_of_gpus; i++) {
-          std::cout << "| To GPU " << i + 1 << "\t\t"
-                    << "| " << topology_link_type_to_str(RDC_IOLINK_TYPE_XGMI) << "\t\t\t|\n";
+          if (group_index_ == i) continue;
+          std::cout << "| To GPU " << i << "\t\t"
+                    << "| " << topology_link_type_to_str(topology.link_infos[i].link_type)
+                    << "\t\t\t|\n";
         }
         std::cout << "+-----------------------+"
                   << "-----------------------------"
