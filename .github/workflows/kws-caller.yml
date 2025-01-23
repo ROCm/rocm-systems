@@ -1,13 +1,3 @@
-######################################################################################
-# Name            : Rocm Validation Suite
-# Developed by    : kiran.thumma@amd.com, gajeambi@amd.com
-# Maintained by   : kiran.thumma@amd.com, gajendrad.ambi@amd.com
-# Version         : 0.5
-# Description     : This workflow will eventually call the central rocm reusable workflow.
-#                   So developers should not edit/Modify this file
-#                   Donot add it into .*ignore file#
-# Docs            :
-######################################################################################
 name: Rocm Validation Suite KWS
 on:
   push:
@@ -15,15 +5,11 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
-
 jobs:
   kws:
-    # runs only for PR events. Add 3 environment variables in repo's settings
-    # - PROJECT_NAME : your project's name in keywordsearch.amd.com
-    # - KEYWORD_SCAN_USER : your username in keywordsearch.amd.com to access the above project
-    # - KEYWORD_SCAN_PASSWORD : your password in keywordsearch.amd.com to access the above project
     if: ${{ github.event_name == 'pull_request' }}
     uses: AMD-ROCm-Internal/rocm_ci_infra/.github/workflows/kws.yml@mainline
     secrets: inherit
     with:
       pr_number: ${{github.event.pull_request.number}}
+      base_branch: ${{github.base_ref}}

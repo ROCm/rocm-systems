@@ -128,8 +128,8 @@ int run() {
   field_ids.push_back(RDC_FI_GPU_MEMORY_USAGE);
   field_ids.push_back(RDC_FI_POWER_USAGE);
   // profiler metrics
-  field_ids.push_back(RDC_FI_PROF_MEAN_OCCUPANCY_PER_CU);
-  field_ids.push_back(RDC_FI_PROF_MEAN_OCCUPANCY_PER_ACTIVE_CU);
+  field_ids.push_back(RDC_FI_PROF_MEAN_OCC_PER_CU);
+  field_ids.push_back(RDC_FI_PROF_MEAN_OCC_PER_ACTIVE_CU);
   field_ids.push_back(RDC_FI_PROF_ACTIVE_CYCLES);
   field_ids.push_back(RDC_FI_PROF_ACTIVE_WAVES);
   field_ids.push_back(RDC_FI_PROF_ELAPSED_CYCLES);
