@@ -4431,6 +4431,5 @@ def amdsmi_get_link_topology_nearest(
         device_list.append(topology_nearest_list.processor_list[index])
 
     return {
-        'count': topology_nearest_list.count,
         'processor_list': device_list
     }

@@ -3917,7 +3917,6 @@ Input parameters:
 * `link_type` The AmdSmiLinkType level to search for nearest devices
 
 Output: Dictionary holding the following fields.
-* `count` number of nearest devices found based on given topology level
 * `processor_list` list of all nearest device handlers found
 
 
@@ -3939,7 +3938,7 @@ try:
         print(amdsmi_get_gpu_device_uuid(devices[0]))
 
     nearest_gpus = amdsmi_get_link_topology_nearest(devices[0], AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE)
-    if (nearest_gpus['count']) == 0:
+    if (len(nearest_gpus['processor_list'])) == 0:
         print("No nearest GPUs found on machine")
     else:
         print("Nearest GPUs")
