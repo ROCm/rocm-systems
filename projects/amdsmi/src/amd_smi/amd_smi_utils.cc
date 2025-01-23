@@ -475,7 +475,7 @@ amdsmi_status_t smi_amdgpu_validate_ras_eeprom(amd::smi::AMDSmiGPUDevice* device
     }
     SMIGPUDEVICE_MUTEX(device->get_mutex())
 
-    uint32_t index = GetDeviceIndex(device->get_gpu_path());
+    //uint32_t index = GetDeviceIndex(device->get_gpu_path());
     //TODO: need to expose the corresponding interface to validate the checksum of ras eeprom table.
     //verify fail: return AMDSMI_STATUS_CORRUPTED_EEPROM
     return AMDSMI_STATUS_NOT_SUPPORTED;
@@ -624,8 +624,6 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice
     amdgpu_device_handle device_handle = nullptr;
 
     uint32_t gpu_fd = device->get_gpu_fd();
-
-    char drm_path[32];
 
     int ret = amdgpu_device_initialize(gpu_fd, &major_version, &minor_version, &device_handle);
     if (ret != 0) {

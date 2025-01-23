@@ -1300,7 +1300,7 @@ amdsmi_get_gpu_xgmi_link_status(amdsmi_processor_handle processor_handle,
     }
 
     uint32_t dev_num = 0;
-    auto r = rsmi_num_monitor_devices(&dev_num);
+    rsmi_num_monitor_devices(&dev_num);
     link_status->total_links = AMDSMI_MAX_NUM_XGMI_LINKS;
     if (dev_num <= link_status->total_links) {
         link_status->total_links = dev_num;
@@ -2030,7 +2030,7 @@ amdsmi_get_gpu_accelerator_partition_profile_config(amdsmi_processor_handle proc
     LOG_DEBUG(ss);
     auto resource_index = 0;
     // get resource info for each profile
-    for (auto i = 0; i < profile_config->num_profiles; i++) {
+    for (auto i = 0U; i < profile_config->num_profiles; i++) {
         auto it = partition_types_map.find(profile_config->profiles[i].profile_type);
         std::string partition_type_str = "UNKNOWN";
         if (it != partition_types_map.end()) {
@@ -2223,7 +2223,6 @@ amdsmi_get_gpu_accelerator_partition_profile(amdsmi_processor_handle processor_h
 
     // TODO(amdsmi_team): add resources here ^
     auto tmp_partition_id = uint32_t(0);
-    auto tmp_xcd_count = uint16_t(0);
     amdsmi_status_t status = AMDSMI_STATUS_NOT_SUPPORTED;
 
     // get xcp config info (this will tell use # of profiles/index's)
@@ -2279,7 +2278,7 @@ amdsmi_get_gpu_accelerator_partition_profile(amdsmi_processor_handle processor_h
             if (accelerator_capabilities.find(current_partition_str) != std::string::npos) {
                 auto it = std::find(tokens.begin(), tokens.end(), current_partition_str);
                 if (it != tokens.end()) {
-                    profile->profile_index = std::distance(tokens.begin(), it);
+                    profile->profile_index = static_cast<uint32_t>(std::distance(tokens.begin(), it));
                 }
             }
         }
@@ -2403,7 +2402,7 @@ amdsmi_set_gpu_accelerator_partition_profile(amdsmi_processor_handle processor_h
             partition_type_str.clear();
             partition_type_str = it->second;
         }
-        config.profiles[i].profile_index;
+
         ss << __PRETTY_FUNCTION__ << " | "
         << "config.profiles[" << i << "].profile_type: "
         << static_cast<int>(config.profiles[i].profile_type) << "\n"

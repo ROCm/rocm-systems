@@ -871,7 +871,7 @@ int main() {
             idx = 0;
             for (const auto& temp : smu.xgmi_link_status) {
               std::cout << temp;
-              if ((idx + 1) != std::size(smu.xgmi_link_status)) {
+              if ((idx + 1) != static_cast<int>(std::size(smu.xgmi_link_status))) {
                 std::cout << ", ";
               } else {
                 std::cout << "]\n";

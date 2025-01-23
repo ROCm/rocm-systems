@@ -583,11 +583,11 @@ void GpuMetricsBase_v17_t::dump_internal_metrics_table()
     }
     for (auto& col : row.gfx_busy_inst) {
       ss << "\t [" << idx << "] [" << idy << "]: " << col;
-      if (idy + 1 != (std::end(row.gfx_busy_inst) - std::end(row.gfx_busy_inst) - 1)) {
+      if (idy + 1 != static_cast<uint64_t>((std::end(row.gfx_busy_inst) - std::end(row.gfx_busy_inst) - 1))) {
         ss << ", ";
       }
       if (idx + 1 !=
-          (std::end(m_gpu_metrics_tbl.m_xcp_stats) - std::end(m_gpu_metrics_tbl.m_xcp_stats) - 1)) {
+          static_cast<uint64_t>((std::end(m_gpu_metrics_tbl.m_xcp_stats) - std::end(m_gpu_metrics_tbl.m_xcp_stats) - 1))) {
         ss << "\n";
       } else {
         ss << "]\n";
@@ -606,11 +606,11 @@ void GpuMetricsBase_v17_t::dump_internal_metrics_table()
     }
     for (auto& col : row.vcn_busy) {
       ss << "\t [" << idx << "] [" << idy << "]: " << col;
-      if (idy + 1 != (std::end(row.vcn_busy) - std::end(row.vcn_busy) - 1)) {
+      if (idy + 1 != static_cast<uint64_t>((std::end(row.vcn_busy) - std::end(row.vcn_busy) - 1))) {
         ss << ", ";
       }
       if (idx + 1 !=
-          (std::end(m_gpu_metrics_tbl.m_xcp_stats) - std::end(m_gpu_metrics_tbl.m_xcp_stats) - 1)) {
+          static_cast<uint64_t>((std::end(m_gpu_metrics_tbl.m_xcp_stats) - std::end(m_gpu_metrics_tbl.m_xcp_stats) - 1))) {
         ss << "\n";
       } else {
         ss << "]\n";
@@ -629,11 +629,11 @@ void GpuMetricsBase_v17_t::dump_internal_metrics_table()
     }
     for (auto& col : row.jpeg_busy) {
       ss << "\t [" << idx << "] [" << idy << "]: " << col;
-      if (idy + 1 != (std::end(row.jpeg_busy) - std::end(row.jpeg_busy) - 1)) {
+      if (idy + 1 != static_cast<uint64_t>((std::end(row.jpeg_busy) - std::end(row.jpeg_busy) - 1))) {
         ss << ", ";
       }
       if (idx + 1 !=
-          (std::end(m_gpu_metrics_tbl.m_xcp_stats) - std::end(m_gpu_metrics_tbl.m_xcp_stats) - 1)) {
+          static_cast<uint64_t>((std::end(m_gpu_metrics_tbl.m_xcp_stats) - std::end(m_gpu_metrics_tbl.m_xcp_stats) - 1))) {
         ss << "\n";
       } else {
         ss << "]\n";
@@ -652,11 +652,11 @@ void GpuMetricsBase_v17_t::dump_internal_metrics_table()
     }
     for (auto& col : row.gfx_busy_acc) {
       ss << "\t [" << idx << "] [" << idy << "]: " << col;
-      if (idy + 1 != (std::end(row.gfx_busy_acc) - std::end(row.gfx_busy_acc) - 1)) {
+      if (idy + 1 != static_cast<uint64_t>((std::end(row.gfx_busy_acc) - std::end(row.gfx_busy_acc) - 1))) {
         ss << ", ";
       }
       if (idx + 1 !=
-          (std::end(m_gpu_metrics_tbl.m_xcp_stats) - std::end(m_gpu_metrics_tbl.m_xcp_stats) - 1)) {
+          static_cast<uint64_t>((std::end(m_gpu_metrics_tbl.m_xcp_stats) - std::end(m_gpu_metrics_tbl.m_xcp_stats) - 1))) {
         ss << "\n";
       } else {
         ss << "]\n";
