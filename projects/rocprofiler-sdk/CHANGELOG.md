@@ -100,9 +100,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
   - `Dispatch_Id`
 - CSV column for counter collection
 
-### Additions
-   --List supported PC Sampling Configurations
-### Changes
+
+## ROCprofiler-SDK 0.5.0 for ROCm release 6.3 (AFAR VII)
 
 ### Added
 
@@ -111,6 +110,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Support to specify hardware counters for collection using rocprofv3 as `rocprofv3 --pmc [COUNTER [COUNTER ...]]`
 - Memory Allocation Tracing
 - PC sampling tool support with CSV and JSON output formats
+- List supported PC Sampling Configurations
 
 ### Changed
 
@@ -143,7 +143,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Removed gfx8 metric definitions
 - Removed `rocprofv3` installation to sbin directory
 
-## ROCprofiler-SDK 0.5.0 for ROCm release 6.4
+## ROCprofiler-SDK 0.6.0 for ROCm release 6.4
 
 ### Added
 
