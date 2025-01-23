@@ -100,7 +100,7 @@ CounterSampler::CounterSampler(rocprofiler_agent_id_t agent) : agent_(agent) {
       "Could not setup buffered service", __FILE__, __LINE__);
 }
 
-CounterSampler::~CounterSampler() { rocprofiler_stop_context(ctx_); }
+CounterSampler::~CounterSampler() { ctx_ = {}; }
 
 const std::string& CounterSampler::decode_record_name(
     const rocprofiler_record_counter_t& rec) const {

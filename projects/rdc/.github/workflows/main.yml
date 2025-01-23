@@ -22,7 +22,7 @@ env:
 jobs:
   build:
     runs-on: lstt
-    container: rocm/rocm-build-ubuntu-22.04:6.2
+    container: rocm/rocm-build-ubuntu-22.04:6.3
     outputs:
       BUILD_NUM: ${{ steps.build_number.outputs.BUILD_NUM }}
       TODAY: ${{ steps.build_number.outputs.TODAY }}
@@ -36,7 +36,9 @@ jobs:
         cat /etc/os-release
         apt update -y
         # provides add-apt-repository and support for caching actions
-        apt install -y software-properties-common jq nodejs
+        apt install -y software-properties-common jq curl
+        curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+        apt install -y nodejs
         add-apt-repository -y ppa:apt-fast/stable
         apt update -y
         apt install -y apt-fast
@@ -131,7 +133,7 @@ jobs:
     # important to use v3 because v4 doesn't work with act:
     # https://github.com/nektos/act/issues/329
     - name: Package RDC
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: rdc
         path: build/rdc*.deb
@@ -141,7 +143,7 @@ jobs:
   test:
     needs: build
     runs-on: lstt
-    container: rocm/rocm-build-ubuntu-22.04:6.2
+    container: rocm/rocm-build-ubuntu-22.04:6.3
 
     steps:
     - name: Set up apt repos
@@ -149,10 +151,12 @@ jobs:
         cat /etc/os-release
         apt update -y
         # provides add-apt-repository and support for caching actions
-        apt install -y software-properties-common jq nodejs
+        apt install -y software-properties-common jq curl
+        curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+        apt install -y nodejs
 
     - name: Package RDC
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: rdc
         path: /opt/
