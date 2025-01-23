@@ -107,7 +107,6 @@ set(COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/common")
 set(GRPC_ROOT_DEFAULT "/usr")
 set(GRPC_ROOT ${GRPC_ROOT_DEFAULT} CACHE PATH "GRPC installation directory.")
 set(GRPC_DESIRED_VERSION 1.61.0 CACHE STRING "GRPC desired package version.")
-set(RDC_SHARE_INSTALL_PREFIX "share/${RDC}" CACHE INTERNAL "Tests and Example install directory")
 
 # add package search paths
 list(APPEND CMAKE_PREFIX_PATH
@@ -359,7 +358,7 @@ install(DIRECTORY ${PROJECT_SOURCE_DIR}/authentication
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${RDC}
     COMPONENT ${CLIENT_COMPONENT})
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/example
-    DESTINATION ${RDC_SHARE_INSTALL_PREFIX}
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}
     COMPONENT dev)
 
 #Identify between SLES and Centos for setting symlink for rdc.service
