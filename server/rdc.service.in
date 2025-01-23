@@ -13,7 +13,7 @@ After=network.target
 #Requires=
 
 [Service]
-EnvironmentFile=-/@CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_SYSCONFDIR@/rdc_options
+EnvironmentFile=-/@CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_DATAROOTDIR@/@RDC@/conf/rdc_options.conf
 User=rdc
 Group=rdc
 

@@ -147,9 +147,9 @@ When *rdcd* is started from a command-line the *capabilities* are determined by 
 
     systemctl start rdc         ## start rdc as systemd service
 
-Additional options can be passed to *rdcd* by modifying `/opt/rocm/etc/rdc_options`
+Additional options can be passed to *rdcd* by modifying `/opt/rocm/share/rdc/conf/rdc_options.conf`
 
-    ## file: /opt/rocm/etc/rdc_options
+    ## file: /opt/rocm/share/rdc/conf/rdc_options.conf
     # Append 'rdc' daemon parameters here
     RDC_OPTS="-p 50051 -u -d"
 

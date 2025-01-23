@@ -74,7 +74,7 @@ message("SERVER_SRC_LIST=${SERVER_SRC_LIST}")
 set(SERVER_DAEMON_EXE "rdcd")
 set(SERVICE_FILE_NAME "rdc.service")
 configure_file("rdc.service.in" "${PROJECT_BINARY_DIR}/${SERVICE_FILE_NAME}" @ONLY)
-set(SERVER_CONFIG_FILE "rdc_options")
+set(SERVER_CONFIG_FILE "rdc_options.conf")
 configure_file("${SERVER_CONFIG_FILE}" "${PROJECT_BINARY_DIR}/${SERVER_CONFIG_FILE}" COPYONLY)
 
 link_directories(${AMD_SMI_LIB_DIR})
@@ -98,7 +98,7 @@ install(FILES ${PROJECT_BINARY_DIR}/${SERVICE_FILE_NAME}
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${RDC}
     COMPONENT ${SERVER_COMPONENT})
 install(FILES ${PROJECT_BINARY_DIR}/${SERVER_CONFIG_FILE}
-    DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/conf
     COMPONENT ${SERVER_COMPONENT})
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")

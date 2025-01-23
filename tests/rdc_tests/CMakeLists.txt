@@ -82,9 +82,9 @@ target_link_libraries(${RDCTST}
     PUBLIC pthread)
 
 install(TARGETS ${RDCTST} gtest gtest_main
-    DESTINATION ${RDC_SHARE_INSTALL_PREFIX}/rdctst_tests
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
     COMPONENT ${TESTS_COMPONENT})
 
 install(FILES ${RDCTST}.exclude
-    DESTINATION ${RDC_SHARE_INSTALL_PREFIX}/rdctst_tests
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
     COMPONENT ${TESTS_COMPONENT})
