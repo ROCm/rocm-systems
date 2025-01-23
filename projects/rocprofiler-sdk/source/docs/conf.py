@@ -56,7 +56,7 @@ build_doxyfile()
 
 # -- Project information -----------------------------------------------------
 project = "Rocprofiler SDK"
-copyright = "2023-2024, Advanced Micro Devices, Inc."
+copyright = "2023-2025, Advanced Micro Devices, Inc."
 author = "Advanced Micro Devices, Inc."
 
 project_root = os.path.normpath(os.path.join(os.getcwd(), "..", ".."))

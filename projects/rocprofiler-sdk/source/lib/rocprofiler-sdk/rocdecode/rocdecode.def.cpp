@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -86,5 +86,3 @@ ROCDECODE_API_INFO_DEFINITION_V(ROCPROFILER_ROCDECODE_TABLE_ID, ROCPROFILER_ROCD
 #    error                                                                                         \
         "Do not compile this file directly. It is included by lib/rocprofiler-sdk/rocdecode/rocdecode.cpp"
 #endif
-
-

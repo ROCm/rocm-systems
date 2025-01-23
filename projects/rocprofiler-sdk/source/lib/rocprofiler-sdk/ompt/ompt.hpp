@@ -1,6 +1,6 @@
 // mit license
 //
-// copyright (c) 2023 advanced micro devices, inc. all rights reserved.
+// copyright (c) 2023-2025 Advanced Micro Devices, Inc. all rights reserved.
 //
 // permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "software"), to deal
