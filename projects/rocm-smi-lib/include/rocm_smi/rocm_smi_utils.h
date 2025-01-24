@@ -142,6 +142,8 @@ std::string removeString(const std::string origStr,
                         const std::string &removeMe);
 void system_wait(int milli_seconds);
 int countDigit(uint64_t n);
+std::string find_file_in_folder(const std::string& folder,
+               const std::string& regex);
 template <typename T>
   std::string print_int_as_hex(T i, bool showHexNotation = true,
   int overloadBitSize = 0) {

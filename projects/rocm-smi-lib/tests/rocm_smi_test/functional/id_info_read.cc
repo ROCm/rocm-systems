@@ -83,6 +83,7 @@ void TestIdInfoRead::Close() {
 }
 
 static const uint32_t kBufferLen = 80;
+static const uint32_t kSize5 = 5;
 
 void TestIdInfoRead::Run(void) {
   rsmi_status_t err;
@@ -91,6 +92,8 @@ void TestIdInfoRead::Run(void) {
   uint32_t drm_render_minor;
 
   char buffer[kBufferLen];
+  char fix_market_name[kBufferLen];
+  char small_buffer[kSize5];
 
   TestBase::Run();
   if (setup_failed_) {
@@ -99,6 +102,11 @@ void TestIdInfoRead::Run(void) {
   }
 
   for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
+    std::string temp_val = "Hello World111111111111111111111111111111";
+    memset(fix_market_name, '\0', kBufferLen);
+    temp_val.copy(fix_market_name, kBufferLen-1);
+    fix_market_name[kBufferLen-1] = '\0';
+
     IF_VERB(STANDARD) {
       std::cout << "\t*************************" << std::endl;
       std::cout << "\t**Device index: " << i << std::endl;
@@ -137,6 +145,62 @@ void TestIdInfoRead::Run(void) {
       // Verify api support checking functionality is working
       err = rsmi_dev_revision_get(i, nullptr);
       ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
+    }
+
+    // Verify api support checking functionality is working
+    err = rsmi_dev_market_name_get(i, small_buffer, kSize5);
+    if (err == RSMI_STATUS_NOT_SUPPORTED) {
+      std::cout << "\t**Device Marketing name (libdrm) not found on this system." <<
+                                                                    std::endl;
+    } else {
+      IF_VERB(STANDARD) {
+        std::cout << "\t**[Test small_buffer] Device Marketing name"
+                  << " (libdrm): " << small_buffer << std::endl;
+      }
+      ASSERT_EQ(err, RSMI_STATUS_INSUFFICIENT_SIZE);
+    }
+
+    err = rsmi_dev_market_name_get(i, nullptr, kBufferLen);
+    ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
+    bool shouldCompareMarketValue = false;
+
+    err = rsmi_dev_market_name_get(i, fix_market_name, kBufferLen);
+    if (err == RSMI_STATUS_NOT_SUPPORTED) {
+      std::cout << "\t**Device Marketing name (libdrm) not found on this system." <<
+                                                                    std::endl;
+    } else {
+      CHK_ERR_ASRT(err)
+      IF_VERB(STANDARD) {
+        std::cout << "\t**[Test fix_market_name] Device Marketing name"
+                  << " (libdrm): " << fix_market_name << std::endl;
+      }
+      if (err == RSMI_STATUS_SUCCESS) {
+        shouldCompareMarketValue = true;
+      }
+    }
+
+    err = rsmi_dev_market_name_get(i, buffer, kBufferLen);
+    if (err == RSMI_STATUS_NOT_SUPPORTED) {
+      std::cout << "\t**Device Marketing name (libdrm) not found on this system." <<
+                                                                    std::endl;
+    } else {
+      CHK_ERR_ASRT(err)
+      IF_VERB(STANDARD) {
+        std::cout << "\t**[buffer] Device Marketing name (libdrm): " << buffer << std::endl;
+      }
+      (shouldCompareMarketValue && err == RSMI_STATUS_SUCCESS) ? shouldCompareMarketValue = true :
+        shouldCompareMarketValue = false;
+    }
+
+    if (shouldCompareMarketValue) {
+      IF_VERB(STANDARD) {
+        std::cout << "\t**fix_market_name: |" << fix_market_name << "|" << std::endl;
+        std::cout << "\t**buffer: |" << buffer << "|" << std::endl;
+        (strcmp(fix_market_name, buffer) == 0) ?
+          (std::cout << "\t**Both fix_market_name & buffer are equal" << std::endl) :
+          (std::cout << "\t**Both fix_market_name & buffer not equal" << std::endl);
+      }
+      ASSERT_STREQ(fix_market_name, buffer);
     }
 
     err = rsmi_dev_name_get(i, buffer, kBufferLen);

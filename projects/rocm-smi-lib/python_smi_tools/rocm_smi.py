@@ -346,13 +346,13 @@ def getSubsystemId(device, silent=False):
     :param silent: Turn on to silence error output
         (you plan to handle manually). Default is off.
     """
-    model = create_string_buffer(MAX_BUFF_SIZE)
-    ret = rocmsmi.rsmi_dev_subsystem_name_get(device, model, MAX_BUFF_SIZE)
+    model = c_short()
+    ret = rocmsmi.rsmi_dev_subsystem_id_get(device, byref(model))
     device_model = "N/A"
     if rsmi_ret_ok(ret, device, 'get_subsystem_name', silent=silent):
-        device_model = model.value.decode()
+        device_model = model.value
         # padHexValue is used for applications that expect 4-digit card models
-        device_model = padHexValue(device_model, 4)
+        device_model = padHexValue(hex(device_model), 4)
     return device_model
 
 def getVendor(device, silent=False):
@@ -418,8 +418,8 @@ def getNodeId(device, silent=False):
     return node_id_ret
 
 def getDeviceName(device, silent=False):
-    """ Return the uint64 value of device's target
-        graphics version as reported by KFD
+    """ Return the uint64 value of device's name
+        reported by KFD
 
     :param device: DRM device identifier
     :param silent: Turn on to silence error output
@@ -428,7 +428,7 @@ def getDeviceName(device, silent=False):
     # Retrieve the device series
     series = create_string_buffer(MAX_BUFF_SIZE)
     device_name_ret = "N/A"
-    ret = rocmsmi.rsmi_dev_name_get(device, series, MAX_BUFF_SIZE)
+    ret = rocmsmi.rsmi_dev_market_name_get(device, series, MAX_BUFF_SIZE)
     if rsmi_ret_ok(ret, device, 'get_name', silent=silent):
         device_name_ret = series.value.decode()
     return device_name_ret
