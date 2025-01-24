@@ -409,7 +409,7 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
     filter_options.add_argument(
         "-p",
         "--collection-period",
-        help="The times are specified in seconds by default, but the unit can be changed using the `--collection-period-unit` or `-pu` option. Start Delay Time is the time in seconds before the collection begins, Collection Time is the duration in seconds for which data is collected, and Rate is the number of times the cycle is repeated. A repeat of 0 indicates that the cycle will repeat indefinitely. Users can specify multiple configurations, each defined by a triplet in the format `start_delay:collection_time:repeat`",
+        help="The times are specified in seconds by default, but the unit can be changed using the `--collection-period-unit` option. Start Delay Time is the time in seconds before the collection begins, Collection Time is the duration in seconds for which data is collected, and Rate is the number of times the cycle is repeated. A repeat of 0 indicates that the cycle will repeat indefinitely. Users can specify multiple configurations, each defined by a triplet in the format `start_delay:collection_time:repeat`",
         nargs="+",
         default=None,
         type=str,
@@ -417,7 +417,7 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
     )
     filter_options.add_argument(
         "--collection-period-unit",
-        help="To change the unit used in `--collection-period` or `-p`, you can specify the desired unit using the `--collection-period-unit` or `-pu` option. The available units are `hour` for hours, `min` for minutes, `sec` for seconds, `msec` for milliseconds, `usec` for microseconds, and `nsec` for nanoseconds",
+        help="To change the unit used in `--collection-period` or `-p`, you can specify the desired unit using the `--collection-period-unit` option. The available units are `hour` for hours, `min` for minutes, `sec` for seconds, `msec` for milliseconds, `usec` for microseconds, and `nsec` for nanoseconds",
         nargs=1,
         default=["sec"],
         type=str,
