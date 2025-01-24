@@ -1265,5 +1265,26 @@ int countDigit(uint64_t n) {
   return static_cast<int>(std::floor(log10(n) + 1));
 }
 
+std::string find_file_in_folder(const std::string& folder,
+               const std::string& regex) {
+  std::string file_name;
+  // TODO(amdsmi_dev): The closedir function has some non-standard attributes
+  // that are being ignored here which is causing a warning to be thrown
+  using dir_ptr = std::unique_ptr<DIR, decltype(&closedir)>;
+
+  struct dirent *dir = nullptr;
+  std::regex file_regex(regex);
+  auto drm_dir = dir_ptr(opendir(folder.c_str()), &closedir);
+  if (drm_dir == nullptr) return file_name;
+  std::cmatch m;
+  while ((dir = readdir(drm_dir.get())) != NULL) {
+    if (std::regex_search(dir->d_name, m, file_regex)) {
+        file_name = dir->d_name;
+        break;
+    }
+  }
+  return file_name;
+}
+
 }  // namespace smi
 }  // namespace amd

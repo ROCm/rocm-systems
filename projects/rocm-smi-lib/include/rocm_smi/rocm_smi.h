@@ -133,6 +133,7 @@ typedef enum {
                                          //!< for the current device
   RSMI_STATUS_AMDGPU_RESTART_ERR,        //!< Could not successfully restart
                                          //!< the amdgpu driver
+  RSMI_STATUS_DRM_ERROR,                 //!< Error when call libdrm
 
   RSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF,  //!< An unknown error occurred
 } rsmi_status_t;
@@ -1532,8 +1533,35 @@ rsmi_status_t rsmi_dev_brand_get(uint32_t dv_ind, char *brand, uint32_t len);
  *  be written.
  *
  */
-rsmi_status_t rsmi_dev_vendor_name_get(uint32_t dv_ind, char *name,
-                                                                  size_t len);
+rsmi_status_t rsmi_dev_vendor_name_get(uint32_t dv_ind, char *name, size_t len);
+
+
+/**
+ *  @brief Get the device's market name
+ *
+ *  @details Given a device index @p dv_ind, a pointer to a caller provided
+ *  char buffer @p market_name, and a length of this buffer @p len, this function will
+ *  write the name of the market name (up to @p len characters) buffer @p market_name.
+ *
+ *  @param[inout] market_name a pointer to a caller provided char buffer to which the
+ *  market name will be written
+ *  If this parameter is nullptr, this function will return
+ *  ::RSMI_STATUS_INVALID_ARGS if the function is supported with the provided,
+ *  arguments and ::RSMI_STATUS_DRM_ERROR if a DRM error occurs
+ *
+ *  @param[in] len the length of the caller provided buffer @p name.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *  @retval ::RSMI_STATUS_DRM_ERROR if a DRM error occurs
+ *  @retval ::RSMI_STATUS_INSUFFICIENT_SIZE is returned if @p len bytes is not
+ *  large enough to hold the entire name. In this case, only @p len bytes will
+ *  be written.
+ *
+ */
+rsmi_status_t rsmi_dev_market_name_get(uint32_t dv_ind, char *market_name, uint32_t len);
 
 /**
  *  @brief Get the vram vendor string of a gpu device.

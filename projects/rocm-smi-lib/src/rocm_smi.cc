@@ -41,15 +41,16 @@
  *
  */
 
-#include <fcntl.h>
-#include <poll.h>
-#include <pthread.h>
-#include <cstddef>
-#include <string>
 #include <sys/ioctl.h>
 #include <sys/utsname.h>
 #include <unistd.h>
+#include <libdrm/amdgpu.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <pthread.h>
 
+#include <cstddef>
+#include <string>
 #include <algorithm>
 #include <bitset>
 #include <cassert>
@@ -2336,6 +2337,60 @@ rsmi_dev_vendor_name_get(uint32_t dv_ind, char *name, size_t len) {
   ret = get_dev_name_from_id(dv_ind, name, len, NAME_STR_VENDOR);
   return ret;
   CATCH
+}
+
+rsmi_status_t rsmi_dev_market_name_get(uint32_t dv_ind, char *market_name, uint32_t len) {
+  if (market_name == nullptr || len == 0) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  DEVICE_MUTEX
+  GET_DEV_FROM_INDX
+  dev->index();
+  std::string render_file_name;
+
+  const std::string regex("renderD([0-9]+)");
+  const std::string renderD_folder = "/sys/class/drm/card"
+              + std::to_string(dev->index()) + "/../";
+
+  // looking for /sys/class/drm/card0/../renderD*
+  std::string render_name = amd::smi::find_file_in_folder(renderD_folder, regex);
+  int gpu_fd = -1;
+  std::string drm_path = "/dev/dri/" + render_name;
+  if (render_name != "") {
+    gpu_fd = open(drm_path.c_str(), O_RDWR | O_CLOEXEC);
+  } else {
+    market_name[0] = '\0';
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  amdgpu_device_handle device_handle = nullptr;
+  uint32_t major_version, minor_version;
+  int ret = amdgpu_device_initialize(gpu_fd, &major_version, &minor_version, &device_handle);
+  if (ret != 0) {
+    market_name[0] = '\0';
+    close(gpu_fd);
+    return RSMI_STATUS_DRM_ERROR;
+  }
+
+  // Get the marketing name using libdrm's API
+  const char *name = amdgpu_get_marketing_name(device_handle);
+  if (name != nullptr) {
+    // copy name to market name
+    std::string temp_market_name(name);
+    memset(market_name, '\0', len);
+    uint32_t ln = static_cast<uint32_t>(temp_market_name.copy(market_name, len));
+    market_name[std::min(len - 1, ln)] = '\0';
+    amdgpu_device_deinitialize(device_handle);
+    close(gpu_fd);
+    if (len < (temp_market_name.size() + 1)) {
+      return RSMI_STATUS_INSUFFICIENT_SIZE;
+    }
+    return RSMI_STATUS_SUCCESS;
+  }
+  amdgpu_device_deinitialize(device_handle);
+  close(gpu_fd);
+  return RSMI_STATUS_DRM_ERROR;
 }
 
 
