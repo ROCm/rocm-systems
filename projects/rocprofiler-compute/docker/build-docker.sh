@@ -177,10 +177,13 @@ do
                 4.1* | 4.0*)
                     ROCM_REPO_DIST="xenial"
                     ;;
-                5.3 | 5.3.* | 5.4 | 5.4.* | 5.5 | 5.5.* | 5.6 | 5.6.* | 5.7 | 5.7.* | 6.0 | 6.0.*)
+                5.3 | 5.3.* | 5.4 | 5.4.* | 5.5 | 5.5.* | 5.6 | 5.6.* | 5.7 | 5.7.* | 6.*)
                     case "${VERSION}" in
+                        24.04)
+                            ROCM_REPO_DIST="noble"
+                            ;;
                         22.04)
-                            ROCM_REPO_DIST="ubuntu"
+                            ROCM_REPO_DIST="jammy"
                             ;;
                         20.04)
                             ROCM_REPO_DIST="focal"

@@ -824,7 +824,7 @@ def detect_roofline(mspec):
         # Must be a valid SLES machine
         # Use SP3 binary for all forward compatible service pack versions
         distro = "15.3"
-    elif ubuntu_distro == "20.04" or ubuntu_distro == "22.04":
+    elif ubuntu_distro == "20.04" or ubuntu_distro == "22.04" or ubuntu_distro == "24.04":
         # Must be a valid Ubuntu machine
         distro = ubuntu_distro
     else:
@@ -867,6 +867,7 @@ def mibench(args, mspec):
         "15.3": "sles15sp5",
         "20.04": "ubuntu20_04",
         "22.04": "ubuntu20_04",
+        "24.04": "ubuntu20_04",
     }
 
     binary_paths = []
