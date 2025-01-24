@@ -165,7 +165,7 @@ class HostQueue : public Queue {
   }
 
   void* operator new(size_t size) {
-    return _aligned_malloc(size, HSA_QUEUE_ALIGN_BYTES);
+    return _aligned_malloc(AlignUp(size, HSA_QUEUE_ALIGN_BYTES), HSA_QUEUE_ALIGN_BYTES);
   }
 
   void* operator new(size_t size, void* ptr) { return ptr; }
