@@ -5,7 +5,7 @@ on:
     branches: [amd-staging, amd-npi]  
     types: [opened, reopened, synchronize]  
   push:  
-    branches: [amd-mainline]  
+    branches: [amd-staging, amd-mainline]  
   workflow_dispatch:  
   
 jobs:  
