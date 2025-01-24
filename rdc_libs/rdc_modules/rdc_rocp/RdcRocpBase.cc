@@ -118,6 +118,9 @@ RdcRocpBase::RdcRocpBase() {
       {RDC_FI_PROF_EVAL_FLOPS_16, "TOTAL_16_OPS"},
       {RDC_FI_PROF_EVAL_FLOPS_32, "TOTAL_32_OPS"},
       {RDC_FI_PROF_EVAL_FLOPS_64, "TOTAL_64_OPS"},
+      {RDC_FI_PROF_EVAL_FLOPS_16_PERCENT, "RDC_OPS_16_PER_SIMDCYCLE"},
+      {RDC_FI_PROF_EVAL_FLOPS_32_PERCENT, "RDC_OPS_32_PER_SIMDCYCLE"},
+      {RDC_FI_PROF_EVAL_FLOPS_64_PERCENT, "RDC_OPS_64_PER_SIMDCYCLE"},
       // metrics below are not divided by time passed
       {RDC_FI_PROF_VALU_PIPE_ISSUE_UTIL, "ValuPipeIssueUtil"},
       {RDC_FI_PROF_SM_ACTIVE, "VALUBusy"},
@@ -188,18 +191,6 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, double* value) 
     return RDC_ST_BAD_PARAMETER;
   }
 
-  if (field == RDC_FI_PROF_OCC_ELAPSED) {
-    double occupancy_val = run_profiler(gpu_index, RDC_FI_PROF_OCC_PER_ACTIVE_CU);
-    double active_cycles_val = run_profiler(gpu_index, RDC_FI_PROF_ACTIVE_CYCLES);
-
-    if (active_cycles_val != 0.0) {
-      *value = occupancy_val / active_cycles_val;
-      return RDC_ST_OK;
-    } else {
-      return RDC_ST_BAD_PARAMETER;
-    }
-  }
-
   const auto start_time = std::chrono::high_resolution_clock::now();
   *value = run_profiler(gpu_index, field);
   const auto stop_time = std::chrono::high_resolution_clock::now();
@@ -209,11 +200,48 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, double* value) 
         std::chrono::duration_cast<std::chrono::milliseconds>(stop_time - start_time).count();
     *value = *value / elapsed;
   }
-  // GPU_UTIL metric is available on more GPUs than ENGINE_ACTIVE.
-  // ENGINE_ACTIVE = GPU_UTIL/100, so do the math ourselves
-  if (field == RDC_FI_PROF_GPU_UTIL_PERCENT) {
-    *value = *value / 100.0F;
+
+  auto simd_to_cu = [this, gpu_index](double prof_value, double matrix_fp) {
+    // profiler result of RDC_OPS_*_PER_SIMDCYCLE is per SIMD, RDC needs it per CU
+    //
+    return prof_value / (matrix_fp / static_cast<double>(agents[gpu_index].simd_per_cu));
+  };
+
+  switch (field) {
+    case RDC_FI_PROF_GPU_UTIL_PERCENT:
+      // GPU_UTIL metric is available on more GPUs than ENGINE_ACTIVE.
+      // ENGINE_ACTIVE = GPU_UTIL/100, so do the math ourselves
+      *value = *value / 100.0F;
+      break;
+    case RDC_FI_PROF_OCC_ELAPSED: {
+      const double occupancy_val = run_profiler(gpu_index, RDC_FI_PROF_OCC_PER_ACTIVE_CU);
+      const double active_cycles_val = run_profiler(gpu_index, RDC_FI_PROF_ACTIVE_CYCLES);
+      if (active_cycles_val != 0.0) {
+        *value = occupancy_val / active_cycles_val;
+        return RDC_ST_OK;
+      } else {
+        return RDC_ST_BAD_PARAMETER;
+      }
+    } break;
+    case RDC_FI_PROF_EVAL_FLOPS_16_PERCENT: {
+      // 1024, 2048, and 256 are taken from "INTRODUCING AMD CDNA 3 ARCHITECTURE" white paper
+      const std::string target_version = agents[gpu_index].name;
+      // TODO: Design a lookup table for other GPUs
+      const bool isMI200 = (target_version.find("gfx90a") != std::string::npos);
+      if (isMI200) {
+        *value = simd_to_cu(*value, 1024.0F);  // FLOPS/clock/CU
+      } else {                                 // Assume mi300
+        *value = simd_to_cu(*value, 2048.0F);  // FLOPS/clock/CU
+      }
+    } break;
+    case RDC_FI_PROF_EVAL_FLOPS_32_PERCENT:
+    case RDC_FI_PROF_EVAL_FLOPS_64_PERCENT:
+      *value = simd_to_cu(*value, 256.0F);  // FLOPS/clock/CU
+      break;
+    default:
+      break;
   }
+
   return RDC_ST_OK;
 }
 
