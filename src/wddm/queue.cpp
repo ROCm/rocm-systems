@@ -967,20 +967,25 @@ void SDMAQueue::SdmaThread(SDMAQueue *queue) {
 
       SDMA_PKT_POLL_REGMEM* poll_pkt = reinterpret_cast<SDMA_PKT_POLL_REGMEM*>(queue->cmdbuf_addr + queue->WrapIntoRocrRing(start));
       SDMA_PKT_POLL_REGMEM* poll_next_pkt = poll_pkt + 1;
-      while (queue->IsPollPacket(poll_pkt) && queue->IsPollPacket(poll_next_pkt)) {
-        uint64_t poll_addr;
-        uint64_t poll_val;
-        if (poll_pkt->ADDR_LO_UNION.addr_31_0 > poll_next_pkt->ADDR_LO_UNION.addr_31_0) {
-          poll_addr = poll_next_pkt->ADDR_LO_UNION.addr_31_0 |
-                             (uint64_t)poll_next_pkt->ADDR_HI_UNION.addr_63_32 << 32;
-          poll_val = poll_next_pkt->VALUE_UNION.value |
-                            (uint64_t)poll_pkt->VALUE_UNION.value << 32;
-        } else {
-          poll_addr = poll_pkt->ADDR_LO_UNION.addr_31_0 |
+      while (queue->IsPollPacket(poll_pkt)) {
+        uint64_t poll_addr = poll_pkt->ADDR_LO_UNION.addr_31_0 |
                              (uint64_t)poll_pkt->ADDR_HI_UNION.addr_63_32 << 32;
-          poll_val = poll_pkt->VALUE_UNION.value |
-                            (uint64_t)poll_next_pkt->VALUE_UNION.value << 32;
+
+        uint64_t poll_val = poll_pkt->VALUE_UNION.value;
+        uint32_t skip = 1;
+
+        if (queue->IsPollPacket(poll_next_pkt)) {
+          uint64_t poll_next_addr = poll_next_pkt->ADDR_LO_UNION.addr_31_0 |
+                             (uint64_t)poll_next_pkt->ADDR_HI_UNION.addr_63_32 << 32;
+
+          if (poll_next_addr + sizeof(uint32_t) == poll_addr) {
+            poll_addr = poll_next_addr;
+            poll_val = poll_next_pkt->VALUE_UNION.value |
+                            (uint64_t)poll_pkt->VALUE_UNION.value << 32;
+            skip = 2;
+          }
         }
+
         amd_signal_t* signal = (amd_signal_t*)((char*)poll_addr - offsetof(amd_signal_t, value));
         uint64_t signal_handle = reinterpret_cast<uint64_t>(signal);
         debug_print("SDMA: poll signal %#lx addr %#lx val %d\n", signal_handle, poll_addr, poll_val);
@@ -989,9 +994,9 @@ void SDMAQueue::SdmaThread(SDMAQueue *queue) {
           hsakmt_hsa_signal_wait_relaxed(hsa_signal, HSA_SIGNAL_CONDITION_EQ, poll_val, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
         assert(value == poll_val);
 
-        memset(poll_pkt, 0, 2 * sizeof(*poll_pkt));
-        poll_pkt += 2;
-        poll_next_pkt += 2;
+        memset(poll_pkt, 0, skip * sizeof(*poll_pkt));
+        poll_pkt += skip;
+        poll_next_pkt += skip;
       }
       queue->PreparePacket(queue->WrapIntoRocrRing(start), end - start);
       std::atomic_thread_fence(std::memory_order_release);
