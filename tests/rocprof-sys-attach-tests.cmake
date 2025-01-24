@@ -30,7 +30,7 @@ endif()
 add_test(
     NAME parallel-overhead-attach
     COMMAND
-        ${CMAKE_CURRENT_LIST_DIR}/run-rocprofiler-systems-pid.sh
+        ${CMAKE_CURRENT_LIST_DIR}/run-rocprof-sys-pid.sh
         $<TARGET_FILE:rocprofiler-systems-instrument> -ME "\.c$" -E fib -e -v 1 --label
         return args file -l -- $<TARGET_FILE:parallel-overhead> 30 8 1000
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
