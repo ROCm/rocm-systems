@@ -595,7 +595,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
 
       value->status = amdsmi_get_gpu_vram_info(processor_handle, &vram_info);
       if (value->status == AMDSMI_STATUS_SUCCESS) {
-        value->value.l_int = value->value.l_int / 100 * vram_info.vram_max_bandwidth;
+        value->value.l_int = value->value.l_int * vram_info.vram_max_bandwidth / 100;
       }
       break;
     }

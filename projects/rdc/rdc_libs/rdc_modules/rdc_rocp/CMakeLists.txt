@@ -38,7 +38,7 @@ if(BUILD_PROFILER)
         "${PROJECT_SOURCE_DIR}"
         "${PROJECT_SOURCE_DIR}/include"
         "${COMMON_DIR}"
-        "${SMI_INC_DIR}"
+        "${AMD_SMI_INCLUDE_DIR}"
         "${ROCM_DIR}/include"
         "${ROCM_DIR}/include/hsa")
 

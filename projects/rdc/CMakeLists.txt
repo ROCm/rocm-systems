@@ -107,7 +107,6 @@ set(COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/common")
 set(GRPC_ROOT_DEFAULT "/usr")
 set(GRPC_ROOT ${GRPC_ROOT_DEFAULT} CACHE PATH "GRPC installation directory.")
 set(GRPC_DESIRED_VERSION 1.61.0 CACHE STRING "GRPC desired package version.")
-set(RDC_SHARE_INSTALL_PREFIX "share/${RDC}" CACHE INTERNAL "Tests and Example install directory")
 
 # add package search paths
 list(APPEND CMAKE_PREFIX_PATH
@@ -152,16 +151,14 @@ if(BUILD_STANDALONE AND GRPC_ROOT STREQUAL GRPC_ROOT_DEFAULT)
     Continuing without gRPC install")
 endif()
 
-find_package(SMI
+find_package(amd_smi
     NAMES amd_smi
     HINTS ${ROCM_DIR}/lib/cmake
     CONFIGURE REQUIRED)
-set(SMI_INC_DIR "${AMD_SMI_INCLUDE_DIR}" CACHE INTERNAL "AMD SMI include directory.")
-set(SMI_LIB_DIR "${AMD_SMI_LIB_DIR}" CACHE INTERNAL "AMD SMI library directory.")
 
-if(NOT EXISTS "${SMI_INC_DIR}" OR NOT EXISTS "${SMI_LIB_DIR}")
-    message(FATAL_ERROR "amd_smi not found in ${SMI_INC_DIR}. Please
-    make sure amd_smi is installed and present in ${SMI_INC_DIR}.")
+if(NOT EXISTS "${AMD_SMI_INCLUDE_DIR}" OR NOT EXISTS "${AMD_SMI_LIB_DIR}")
+    message(FATAL_ERROR "amd_smi not found in ${AMD_SMI_INCLUDE_DIR}. Please
+    make sure amd_smi is installed and present in ${AMD_SMI_INCLUDE_DIR}.")
 endif()
 
 set(${RDC}_VERSION_MAJOR "${VERSION_MAJOR}")
@@ -361,7 +358,7 @@ install(DIRECTORY ${PROJECT_SOURCE_DIR}/authentication
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${RDC}
     COMPONENT ${CLIENT_COMPONENT})
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/example
-    DESTINATION ${RDC_SHARE_INSTALL_PREFIX}
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}
     COMPONENT dev)
 
 #Identify between SLES and Centos for setting symlink for rdc.service

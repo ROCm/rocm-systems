@@ -31,8 +31,8 @@ message("----------Proj Src Dir: " ${PROJECT_SOURCE_DIR})
 message("----------Proj Bld Dir: " ${PROJECT_BINARY_DIR})
 message("----------Proj Lib Dir: " ${PROJECT_BINARY_DIR}/lib)
 message("----------Proj Exe Dir: " ${PROJECT_BINARY_DIR}/bin)
-message("----------SMI Lib Dir: " ${SMI_LIB_DIR})
-message("----------SMI Inc Dir: " ${SMI_INC_DIR})
+message("----------SMI Lib Dir: " ${AMD_SMI_LIB_DIR})
+message("----------SMI Inc Dir: " ${AMD_SMI_INCLUDE_DIR})
 message("---------GRPC Root Dir: " ${GRPC_ROOT})
 message("")
 
@@ -59,7 +59,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include
     "${PROJECT_SOURCE_DIR}/include"
     "${GRPC_ROOT}/include"
     "${PROTOB_OUT_DIR}"
-    "${SMI_INC_DIR}"
+    "${AMD_SMI_INCLUDE_DIR}"
     "${PROJECT_SOURCE_DIR}")
 
 set(SERVER_SRC_LIST
@@ -74,10 +74,10 @@ message("SERVER_SRC_LIST=${SERVER_SRC_LIST}")
 set(SERVER_DAEMON_EXE "rdcd")
 set(SERVICE_FILE_NAME "rdc.service")
 configure_file("rdc.service.in" "${PROJECT_BINARY_DIR}/${SERVICE_FILE_NAME}" @ONLY)
-set(SERVER_CONFIG_FILE "rdc_options")
+set(SERVER_CONFIG_FILE "rdc_options.conf")
 configure_file("${SERVER_CONFIG_FILE}" "${PROJECT_BINARY_DIR}/${SERVER_CONFIG_FILE}" COPYONLY)
 
-link_directories(${SMI_LIB_DIR})
+link_directories(${AMD_SMI_LIB_DIR})
 
 add_executable(${SERVER_DAEMON_EXE} "${SERVER_SRC_LIST}")
 target_compile_definitions(${SERVER_DAEMON_EXE} PRIVATE CURRENT_GIT_HASH=${GIT_HASH})
@@ -98,7 +98,7 @@ install(FILES ${PROJECT_BINARY_DIR}/${SERVICE_FILE_NAME}
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${RDC}
     COMPONENT ${SERVER_COMPONENT})
 install(FILES ${PROJECT_BINARY_DIR}/${SERVER_CONFIG_FILE}
-    DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/conf
     COMPONENT ${SERVER_COMPONENT})
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")

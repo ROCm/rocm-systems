@@ -144,6 +144,10 @@ FLD_DESC_ENT(RDC_FI_PROF_VALU_PIPE_ISSUE_UTIL,  "Percent of Active Pipe VALU",  
 FLD_DESC_ENT(RDC_FI_PROF_SM_ACTIVE,             "Ratio of Cycles with active warp on SM","VALUBusy",          false)
 FLD_DESC_ENT(RDC_FI_PROF_OCC_PER_ACTIVE_CU,     "Mean occ per active compute unit",      "OCC_CU",            false)
 FLD_DESC_ENT(RDC_FI_PROF_OCC_ELAPSED,           "Mean occ per active cu over elapsed",   "OCC_CU_ELAPSED",    false)
+// metrics below are divided by time passed
+FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_16_PERCENT, "Number of fp16 OPS percent of max",     "FLOPS_16_PERCENT",  false)
+FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_32_PERCENT, "Number of fp32 OPS percent of max",     "FLOPS_32_PERCENT",  false)
+FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_64_PERCENT, "Number of fp64 OPS percent of max",     "FLOPS_64_PERCENT",  false)
 
 // Events
 FLD_DESC_ENT(RDC_EVNT_XGMI_0_NOP_TX,     "NOPs sent to neighbor 0",                     "XGMI_NOP_0",       false)
