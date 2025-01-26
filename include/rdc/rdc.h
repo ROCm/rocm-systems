@@ -292,6 +292,10 @@ typedef enum {
   RDC_FI_PROF_SM_ACTIVE,
   RDC_FI_PROF_OCC_PER_ACTIVE_CU,
   RDC_FI_PROF_OCC_ELAPSED,
+  // metrics below are divided by time passed
+  RDC_FI_PROF_EVAL_FLOPS_16_PERCENT,
+  RDC_FI_PROF_EVAL_FLOPS_32_PERCENT,
+  RDC_FI_PROF_EVAL_FLOPS_64_PERCENT,
 
   /**
    * @brief Raw XGMI counter events

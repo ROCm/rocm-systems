@@ -39,8 +39,8 @@ message("--------Proj Src Dir: " ${PROJECT_SOURCE_DIR})
 message("--------Proj Bld Dir: " ${PROJECT_BINARY_DIR})
 message("--------Proj Lib Dir: " ${PROJECT_BINARY_DIR}/lib)
 message("--------Proj Exe Dir: " ${PROJECT_BINARY_DIR}/bin)
-message("--------SMI Lib Dir: " ${SMI_LIB_DIR})
-message("--------SMI Inc Dir: " ${SMI_INC_DIR})
+message("--------SMI Lib Dir: " ${AMD_SMI_LIB_DIR})
+message("--------SMI Inc Dir: " ${AMD_SMI_INCLUDE_DIR})
 message("")
 
 set(SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR})
@@ -61,7 +61,7 @@ aux_source_directory(${SRC_DIR} rdctstSources)
 # Other source directories
 aux_source_directory(${SRC_DIR}/functional functionalSources)
 
-link_directories(${ROCM_INSTALL_DIR} ${SMI_LIB_DIR})
+link_directories(${ROCM_INSTALL_DIR} ${AMD_SMI_LIB_DIR})
 
 # Build rules
 add_executable(${RDCTST} ${rdctstSources} ${functionalSources})
@@ -70,7 +70,7 @@ add_executable(${RDCTST} ${rdctstSources} ${functionalSources})
 target_include_directories(
     ${RDCTST}
     PUBLIC ${PROJECT_SOURCE_DIR}/include
-    PUBLIC ${SMI_INC_DIR}
+    PUBLIC ${AMD_SMI_INCLUDE_DIR}
     PUBLIC ${SRC_DIR}/..)
 
 target_link_libraries(${RDCTST}
@@ -82,9 +82,9 @@ target_link_libraries(${RDCTST}
     PUBLIC pthread)
 
 install(TARGETS ${RDCTST} gtest gtest_main
-    DESTINATION ${RDC_SHARE_INSTALL_PREFIX}/rdctst_tests
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
     COMPONENT ${TESTS_COMPONENT})
 
 install(FILES ${RDCTST}.exclude
-    DESTINATION ${RDC_SHARE_INSTALL_PREFIX}/rdctst_tests
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
     COMPONENT ${TESTS_COMPONENT})

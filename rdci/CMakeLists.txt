@@ -34,8 +34,8 @@ message("--------Proj Src Dir: " ${PROJECT_SOURCE_DIR})
 message("--------Proj Bld Dir: " ${PROJECT_BINARY_DIR})
 message("--------Proj Lib Dir: " ${PROJECT_BINARY_DIR}/lib)
 message("--------Proj Exe Dir: " ${PROJECT_BINARY_DIR}/bin)
-message("--------SMI Lib Dir: " ${SMI_LIB_DIR})
-message("--------SMI Inc Dir: " ${SMI_INC_DIR})
+message("--------SMI Lib Dir: " ${AMD_SMI_LIB_DIR})
+message("--------SMI Inc Dir: " ${AMD_SMI_INCLUDE_DIR})
 message("-------GRPC ROOT Dir: " ${GRPC_ROOT})
 message("")
 
@@ -77,7 +77,7 @@ set(RDCI_SRC_LIST
 message("RDCI_SRC_LIST=${RDCI_SRC_LIST}")
 set(RDCI_EXE "rdci")
 
-link_directories(${SMI_LIB_DIR})
+link_directories(${AMD_SMI_LIB_DIR})
 
 add_executable(${RDCI_EXE} "${RDCI_SRC_LIST}")
 target_compile_definitions(${RDCI_EXE} PRIVATE CURRENT_GIT_HASH=${GIT_HASH})

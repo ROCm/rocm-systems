@@ -45,7 +45,7 @@ if(BUILD_RUNTIME)
         "${PROJECT_SOURCE_DIR}"
         "${PROJECT_SOURCE_DIR}/include"
         "${COMMON_DIR}"
-        "${SMI_INC_DIR}"
+        "${AMD_SMI_INCLUDE_DIR}"
         "${ROCM_DIR}/include")
 
     # let bootstrap find this module at build time

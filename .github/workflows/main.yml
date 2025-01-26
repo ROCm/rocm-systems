@@ -114,6 +114,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
             -DGRPC_ROOT=/usr/grpc \
             -DBUILD_RUNTIME=ON \
+            -DGPU_TARGETS=gfx942 \
             -DBUILD_PROFILER=ON \
             -DBUILD_RVS=OFF \
             -DBUILD_TESTS=ON \
