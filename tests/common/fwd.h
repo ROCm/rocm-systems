@@ -14,6 +14,7 @@ extern "C" {
 #    pragma weak roctxRangePop
 #    pragma weak ncclGetVersion
 #    pragma weak rocDecCreateDecoder
+#    pragma weak rocJpegStreamCreate
 #endif
 
 extern void
@@ -50,6 +51,17 @@ enum RocDecoderCreateInfo
 extern rocDecStatus
 rocDecCreateDecoder(rocDecDecoderHandle*  decoder_handle,
                     RocDecoderCreateInfo* decoder_create_info);
+
+enum RocJpegStatus
+{
+};
+
+enum RocJpegStreamHandle
+{
+};
+
+extern RocJpegStatus
+rocJpegStreamCreate(RocJpegStreamHandle* jpeg_stream_handle);
 
 #ifdef __cplusplus
 }

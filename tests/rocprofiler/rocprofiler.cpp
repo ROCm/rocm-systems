@@ -3,6 +3,7 @@
 #include <hsa-runtime/hsa-runtime.hpp>
 #include <rccl/rccl.hpp>
 #include <rocdecode/rocdecode.hpp>
+#include <rocjpeg/rocjpeg.hpp>
 #include <roctx/roctx.hpp>
 
 #include <dlfcn.h>
@@ -40,6 +41,13 @@ ncclGetVersion(int*)
 
 rocDecStatus
 rocDecCreateDecoder(rocDecDecoderHandle*, RocDecoderCreateInfo*)
+{
+    printf("[%s] %s\n", ROCP_REG_FILE_NAME, __FUNCTION__);
+    return {};
+}
+
+RocJpegStatus
+rocJpegStreamCreate(RocJpegStreamHandle* jpeg_stream_handle)
 {
     printf("[%s] %s\n", ROCP_REG_FILE_NAME, __FUNCTION__);
     return {};
@@ -96,6 +104,7 @@ rocprofiler_set_api_table(const char* name,
     using roctx_table_t     = roctx::ROCTxApiTable;
     using rccl_table_t      = rccl::rcclApiFuncTable;
     using rocdecode_table_t = rocdecode::rocdecodeApiFuncTable;
+    using rocjpeg_table_t   = rocjpeg::rocjpegApiFuncTable;
 
     auto* _wrap_v = std::getenv("ROCP_REG_TEST_WRAP");
     bool  _wrap   = (_wrap_v != nullptr && std::stoi(_wrap_v) != 0);
@@ -134,6 +143,11 @@ rocprofiler_set_api_table(const char* name,
         {
             rocdecode_table_t* _table      = static_cast<rocdecode_table_t*>(tables[0]);
             _table->rocDecCreateDecoder_fn = &rocprofiler::rocDecCreateDecoder;
+        }
+        else if(std::string_view{ name } == "rocjpeg")
+        {
+            rocjpeg_table_t* _table        = static_cast<rocjpeg_table_t*>(tables[0]);
+            _table->rocJpegStreamCreate_fn = &rocprofiler::rocJpegStreamCreate;
         }
     }
 
