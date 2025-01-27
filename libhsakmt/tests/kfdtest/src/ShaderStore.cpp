@@ -183,7 +183,6 @@ const char *AtomicIncIsa =
             v_mov_b32 v2, -1
             flat_atomic_inc v3, v[0:1], v2 glc slc
         .endif
-        s_waitcnt 0
         s_endpgm
 )";
 
