@@ -59,9 +59,10 @@ enum class amdgpu_regnum_t : uint32_t
   /* 32-bit Vector registers (vgprs) for wave32 wavefronts.  */
   v0_32 = a255_64 + 1,
   v255_32 = v0_32 + 255,
+  v1023_32 = v0_32 + 1023,
 
   /* 32-bit Accumulation Vector registers (accvgprs) for wave64 wavefronts  */
-  a0_32 = v255_32 + 1,
+  a0_32 = v1023_32 + 1,
   a255_32 = a0_32 + 255,
 
   last_vgpr = a255_32,
