@@ -73,6 +73,7 @@ add_subdirectory(amdhip)
 add_subdirectory(roctx)
 add_subdirectory(rccl)
 add_subdirectory(rocdecode)
+add_subdirectory(rocjpeg)
 add_subdirectory(rocprofiler)
 
 #
