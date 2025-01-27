@@ -7556,6 +7556,508 @@ public:
   }
 };
 
+class gfx12_5_architecture_t : public gfx12_architecture_t
+{
+protected:
+  gfx12_5_architecture_t (elf_amdgpu_machine_t e_machine,
+                          std::string target_triplet);
+
+  class cwsr_record_t : public gfx12_architecture_t::cwsr_record_t
+  {
+  protected:
+    static constexpr uint32_t
+    compute_relaunch_state_payload_lds_size (uint32_t relaunch_state)
+    {
+      return utils::bit_extract (relaunch_state, 10, 18);
+    }
+
+    static constexpr uint32_t
+    compute_relaunch_wave_payload_last_wave (uint32_t relaunch_wave)
+    {
+      return utils::bit_extract (relaunch_wave, 13, 13);
+    }
+
+  public:
+    cwsr_record_t (compute_queue_t &queue, uint32_t xcc_id,
+                   uint32_t compute_relaunch_wave,
+                   uint32_t compute_relaunch_state,
+                   uint32_t compute_relaunch2_state,
+                   agent_address_t context_save_address)
+      : gfx12_architecture_t::cwsr_record_t (
+          queue, xcc_id, compute_relaunch_wave, compute_relaunch_state,
+          compute_relaunch2_state, context_save_address)
+    {
+    }
+
+    /* There's no "shared_vgpr" in gfx 125x anymore.  */
+    size_t shared_vgpr_count () const override { return 0; }
+    size_t vgpr_count () const override;
+    size_t hwreg_count () const override;
+    size_t lds_size () const override;
+    bool is_last_wave () const override;
+
+    std::optional<agent_address_t>
+    register_address (amdgpu_regnum_t regnum) const override;
+  };
+
+  std::unique_ptr<architecture_t::cwsr_record_t>
+  make_gfx1x_cwsr_record (compute_queue_t &queue,
+                          uint32_t xcc_id,
+                          uint32_t compute_relaunch_wave,
+                          uint32_t compute_relaunch_state,
+                          uint32_t compute_relaunch2_state,
+                          agent_address_t context_save_address) const override
+  {
+    return std::make_unique<cwsr_record_t> (
+      queue, xcc_id, compute_relaunch_wave, compute_relaunch_state,
+      compute_relaunch2_state, context_save_address);
+  }
+
+  /* A note regarding all the register methods in this class:
+
+     gfx10_architecute_t can handle the XNACK_MASK_32 regnum.
+     However, since it is not the one that actually adds it
+     to the "system" group (see the comment in gfx12_5 arch
+     constructor to know why), we handle it in these methods
+     for the sake of symmetry and clarity.  */
+  std::string register_name (amdgpu_regnum_t regnum) const override;
+  std::string register_type (amdgpu_regnum_t regnum) const override;
+  amd_dbgapi_size_t register_size (amdgpu_regnum_t regnum) const override;
+  amd_dbgapi_register_properties_t
+  register_properties (amdgpu_regnum_t regnum) const override;
+
+  static constexpr int ttmp11_saved_trap_id_shift = 28;
+  static constexpr int ttmp11_saved_trap_id_size = 4;
+  static constexpr uint32_t ttmp11_saved_trap_id_mask
+    = utils::bit_mask<uint32_t> (ttmp11_saved_trap_id_shift,
+                                 ttmp11_saved_trap_id_shift
+                                   + ttmp11_saved_trap_id_size - 1);
+
+  std::optional<trap_id_t> trap_id (const wave_t &wave) const override;
+
+  void initialize_trap_handler_ttmps (const wave_t &wave) const override;
+
+  void simulate_trap_handler (wave_t &wave, agent_address_t pc,
+                              std::optional<trap_id_t> trap_id) const override;
+
+  bool can_halt_at_endpgm () const override { return true; }
+  bool can_halt_at_sendmsg_dealloc_vgprs () const override { return true; }
+
+  bool can_execute_displaced (wave_t &wave,
+                              const instruction_t &instruction) const override;
+  bool can_simulate (wave_t &wave,
+                     const instruction_t &instruction) const override;
+  std::optional<agent_address_t>
+  simulate_instruction (wave_t &wave, agent_address_t pc,
+                        const instruction_t &instruction) const override;
+
+public:
+  const void *register_read_only_mask (amdgpu_regnum_t regnum) const override;
+
+private:
+  register_class_t &get_register_class (const char *class_name);
+};
+
+register_class_t &
+gfx12_5_architecture_t::get_register_class (const char *class_name)
+{
+  register_class_t *reg_class
+    = find_if ([&class_name] (const register_class_t &rc)
+               { return rc.name () == class_name; });
+  dbgapi_assert (reg_class != nullptr);
+
+  return *reg_class;
+}
+
+gfx12_5_architecture_t::gfx12_5_architecture_t (elf_amdgpu_machine_t e_machine,
+                                                std::string target_triple)
+  : gfx12_architecture_t (e_machine, target_triple)
+{
+  auto &sys_regs = get_register_class ("system");
+  auto &vec_regs = get_register_class ("vector");
+  auto &gen_regs = get_register_class ("general");
+
+  /* v0_32-v255_32 are added by gfx10_architecture_t.  */
+  vec_regs.add_registers (amdgpu_regnum_t::v255_32 + 1,
+                          amdgpu_regnum_t::v1023_32);
+  gen_regs.add_registers (amdgpu_regnum_t::v255_32 + 1,
+                          amdgpu_regnum_t::v1023_32);
+
+  /* GFX10 adds an xnack_mask_32 conditionally for ELF machines:
+
+       EF_AMDGPU_MACH_AMDGCN_GFX1010
+       EF_AMDGPU_MACH_AMDGCN_GFX1011
+       EF_AMDGPU_MACH_AMDGCN_GFX1012
+
+     So, it won't be useful to us.  We have to add it explicitly.  */
+  sys_regs.add_registers (amdgpu_regnum_t::xnack_mask_32,
+                          amdgpu_regnum_t::xnack_mask_32);
+}
+
+std::string
+gfx12_5_architecture_t::register_name (amdgpu_regnum_t regnum) const
+{
+  if (regnum >= amdgpu_regnum_t::v0_32 && regnum <= amdgpu_regnum_t::v1023_32)
+    {
+      int print_num = utils::narrow<int> (regnum - amdgpu_regnum_t::v0_32);
+      return string_printf ("v%d", print_num);
+    }
+
+  switch (regnum)
+    {
+    case amdgpu_regnum_t::xnack_mask_32:
+      return "xnack_mask";
+    default:
+      break;
+    }
+  return gfx12_architecture_t::register_name (regnum);
+}
+
+std::string
+gfx12_5_architecture_t::register_type (amdgpu_regnum_t regnum) const
+{
+  if ((regnum >= amdgpu_regnum_t::v0_32
+       && regnum <= amdgpu_regnum_t::v1023_32))
+    {
+      return "int32_t[32]";
+    }
+
+  switch (regnum)
+    {
+    case amdgpu_regnum_t::mode:
+      return "flags32_t mode {"
+             "  enum fp_round {"
+             "    NEAREST_EVEN = 0,"
+             "    PLUS_INF     = 1,"
+             "    MINUS_INF    = 2,"
+             "    ZERO         = 3"
+             "  } FP_ROUND.32 @0-1;"
+             "  enum fp_round FP_ROUND.64_16 @2-3;"
+             "  enum fp_denorm {"
+             "    FLUSH_SRC_DST = 0,"
+             "    FLUSH_DST     = 1,"
+             "    FLUSH_SRC     = 2,"
+             "    FLUSH_NONE    = 3"
+             "  } FP_DENORM.32 @4-5;"
+             "  enum fp_denorm FP_DENORM.64_16 @6-7;"
+             "  uint32_t DST_VGPR_MSB @12-13;"
+             "  uint32_t SRC0_VGPR_MSB @14-15;"
+             "  uint32_t SRC1_VGPR_MSB @16-17;"
+             "  uint32_t SRC2_VGPR_MSB @18-19;"
+             "  bool FP16_OVFL @23;"
+             "  bool SCALAR_PREFETCH_EN @24;"
+             "  enum replay_mode {"
+             "    SINGLE_VMEM_GROUP = 0,"
+             "    MULTI_VMEM_GROUP = 1"
+             "  } REPLAY_MODE @25-25;"
+             "  enum flat_scratch_is_nv {"
+             "    USE_ISA_NV_BIT = 0,"
+             "    OVERRIDE_TO_NV = 1"
+             "  } FLAT_SCRATCH_IS_NV @26-26;"
+             "  bool DISABLE_PERF @27;"
+             "}";
+    case amdgpu_regnum_t::xnack_mask_32:
+      return "uint32_t";
+    default:
+      break;
+    }
+  return gfx12_architecture_t::register_type (regnum);
+}
+
+amd_dbgapi_size_t
+gfx12_5_architecture_t::register_size (amdgpu_regnum_t regnum) const
+{
+  if ((regnum >= amdgpu_regnum_t::v0_32
+       && regnum <= amdgpu_regnum_t::v1023_32))
+    {
+      return sizeof (int32_t) * 32;
+    }
+
+  switch (regnum)
+    {
+    case amdgpu_regnum_t::xnack_mask_32:
+      return sizeof (uint32_t);
+    default:
+      break;
+    }
+  return gfx12_architecture_t::register_size (regnum);
+}
+
+amd_dbgapi_register_properties_t
+gfx12_5_architecture_t::register_properties (amdgpu_regnum_t regnum) const
+{
+  /* Don't let XNACK_MASK_32 register bleed into GFX10's
+     "register_properties()".  The property of GFX10's XNACK_MASK_32
+     is not suitable for this GFX125x register.  */
+  if (regnum == amdgpu_regnum_t::xnack_mask_32)
+    return AMD_DBGAPI_REGISTER_PROPERTY_NONE;
+
+  return gfx12_architecture_t::register_properties (regnum);
+}
+
+/* One of the clients of this method is the
+   "amdgcn_architecture_t::register_properties ()".  In case,
+   a non "nullptr" is returned, amdgcn's "register_properties ()" will
+   consider it an "AMD_DBGAPI_REGISTER_PROPERTY_READONLY_BITS" property.  */
+
+const void *
+gfx12_5_architecture_t::register_read_only_mask (amdgpu_regnum_t regnum) const
+{
+  switch (regnum)
+    {
+    case amdgpu_regnum_t::mode:
+      {
+        static uint32_t mode_ro_bits = utils::bit_mask<uint32_t> (8, 11)
+                                       | utils::bit_mask<uint32_t> (20, 22)
+                                       | utils::bit_mask<uint32_t> (28, 31);
+        return &mode_ro_bits;
+      }
+    default:
+      break;
+    }
+  return gfx12_architecture_t::register_read_only_mask (regnum);
+}
+
+size_t
+gfx12_5_architecture_t::cwsr_record_t::vgpr_count () const
+{
+  /* VGPRs are allocated in blocks of 16/8 registers (W32/W64).  */
+  size_t reg_count;
+  const uint32_t vgpr_blocks
+    = compute_relaunch_state_payload_vgprs (m_compute_relaunch_state) + 1;
+  const uint32_t wave32
+    = compute_relaunch_state_payload_w32_en (m_compute_relaunch_state);
+
+  if (wave32)
+    reg_count = 16;
+  else
+    fatal_error ("gfx12_5_architecture_t::cwsr_record_t::vgpr_count: "
+                 "wave64 is not expected.");
+
+  /* vgprs are allocated in blocks of 16/8 registers (W32/W64).  */
+  return vgpr_blocks * reg_count;
+}
+
+size_t
+gfx12_5_architecture_t::cwsr_record_t::hwreg_count () const
+{
+  return 128;
+}
+
+size_t
+gfx12_5_architecture_t::cwsr_record_t::lds_size () const
+{
+  /* There's no WGP_TAKEOVER mode anymore.  Just consider the "lds_size".
+     "lds_size": 256 dwords granularity.  */
+  return (compute_relaunch_state_payload_lds_size (m_compute_relaunch_state)
+          * 256 * sizeof (uint32_t));
+}
+
+bool
+gfx12_5_architecture_t::cwsr_record_t::is_last_wave () const
+{
+  return compute_relaunch_wave_payload_last_wave (m_compute_relaunch_wave);
+}
+
+std::optional<agent_address_t>
+gfx12_5_architecture_t::cwsr_record_t::register_address (
+  amdgpu_regnum_t regnum) const
+{
+  /* 0x00: M0
+     0x04: PC_LO
+     0x08: PC_HI
+     0x0C: EXEC_LO
+     0x10: EXEC_HI
+     0x14: STATE_PRIV
+     0x18: TRAPSTS
+     0x1C: XNACK_MASK
+     0x20: MODE
+     0x24: FLAT_SCRATCH_LO
+     0x28: FLAT_SCRATCH_HI
+     0x2C: EXCP_FLAG_USER
+     0x30: TRAP_CTRL
+     0x34: STATUS
+     0x38: barrier
+     0x3C: <blank>
+     0x40: TTMP4
+     0x44: TTMP5
+     0x48: TTMP6
+     0x4C: TTMP7
+     0x50: TTMP8
+     0x54: TTMP9
+     0x58: TTMP10
+     0x5C: TTMP11: XNACK_STATE_PRIV
+     0x60: TTMP13  */
+  switch (regnum)
+    {
+    case amdgpu_regnum_t::xnack_mask_32:
+      regnum = amdgpu_regnum_t::first_hwreg + 7;
+      break;
+    default:
+      break;
+    }
+
+  /* In gfx125x TTMPs are saved at the end of the SGPR block.  */
+  if (regnum >= amdgpu_regnum_t::first_ttmp
+      && regnum <= amdgpu_regnum_t::last_ttmp)
+    {
+      const size_t ttmp_size = sizeof (uint32_t);
+      const size_t ttmp_count = 16;
+      const size_t ttmps_addr
+        = gfx12_architecture_t::cwsr_record_t::register_address (
+            amdgpu_regnum_t::first_sgpr)
+            .value ()
+          + sgpr_count () * sizeof (uint32_t) - ttmp_size * ttmp_count;
+
+      size_t ttmp_nr
+        = utils::narrow<size_t> (regnum - amdgpu_regnum_t::first_ttmp);
+      return ttmps_addr + ttmp_nr * ttmp_size;
+    }
+
+  return gfx12_architecture_t::cwsr_record_t::register_address (regnum);
+}
+
+std::optional<amdgcn_architecture_t::trap_id_t>
+gfx12_5_architecture_t::trap_id (const wave_t &wave) const
+{
+  uint32_t ttmp11;
+  wave.read_register (amdgpu_regnum_t::ttmp11, &ttmp11);
+
+  if (uint8_t trap_id = utils::bit_extract<uint8_t> (
+        ttmp11, ttmp11_saved_trap_id_shift,
+        ttmp11_saved_trap_id_shift + ttmp11_saved_trap_id_size - 1);
+      trap_id != 0)
+    return trap_id_t{ trap_id };
+  return std::nullopt;
+}
+
+void
+gfx12_5_architecture_t::initialize_trap_handler_ttmps (
+  const wave_t &wave) const
+{
+  uint32_t ttmp6, ttmp8, ttmp11;
+
+  wave.read_register (amdgpu_regnum_t::ttmp6, &ttmp6);
+  wave.read_register (amdgpu_regnum_t::ttmp8, &ttmp8);
+  wave.read_register (amdgpu_regnum_t::ttmp11, &ttmp11);
+
+  dbgapi_assert (!(ttmp8 & ttmp8_debug_mark_mask)
+                 && "ttmps are already initialized");
+
+  ttmp8 |= ttmp8_debug_mark_mask;
+  ttmp11 &= ~ttmp11_saved_trap_id_mask; /* Clear the "trap_id".  */
+
+  /* If the wave has not entered the trap handler, it is not stopped,
+     and the saved halt is meaningless.  */
+  ttmp6 &= ~(ttmp6_wave_stopped_mask | ttmp6_saved_status_halt_mask);
+
+  wave.write_register (amdgpu_regnum_t::ttmp4, 0);
+  wave.write_register (amdgpu_regnum_t::ttmp5, 0);
+  wave.write_register (amdgpu_regnum_t::ttmp6, ttmp6);
+  wave.write_register (amdgpu_regnum_t::ttmp8, ttmp8);
+  wave.write_register (amdgpu_regnum_t::ttmp11, ttmp11);
+}
+
+void
+gfx12_5_architecture_t::simulate_trap_handler (
+  wave_t &wave, agent_address_t pc, std::optional<trap_id_t> trap_id) const
+{
+  dbgapi_assert (utils::is_aligned (pc, minimum_instruction_alignment ()));
+
+  uint32_t state_priv_reg, ttmp6, ttmp11;
+  wave.read_register (amdgpu_regnum_t::state_priv, &state_priv_reg);
+  wave.read_register (amdgpu_regnum_t::ttmp6, &ttmp6);
+  wave.read_register (amdgpu_regnum_t::ttmp11, &ttmp11);
+
+  /* Set the ttmp6.wave_stopped.  */
+  ttmp6 |= ttmp6_wave_stopped_mask;
+
+  /* Decide the ttmp6.saved_halt value.  */
+  ttmp6 &= ~ttmp6_saved_status_halt_mask;
+  if (state_priv_reg & sq_wave_state_priv_halt_mask)
+    ttmp6 |= ttmp6_saved_status_halt_mask;
+
+  wave.write_register (amdgpu_regnum_t::ttmp6, ttmp6);
+
+  /* Set the ttmp11.trap_id[3:0].  */
+  ttmp11 &= ~ttmp11_saved_trap_id_mask;
+  if (trap_id)
+    ttmp11 |= (static_cast<uint32_t> (*trap_id) << ttmp11_saved_trap_id_shift)
+              & ttmp11_saved_trap_id_mask;
+
+  wave.write_register (amdgpu_regnum_t::ttmp11, ttmp11);
+
+  /* Park the wave.  */
+  if (park_stopped_waves (wave.process ().runtime_rdebug_version ()))
+    {
+      save_pc_for_park (wave, pc);
+      pc = wave.queue ().park_instruction_address ();
+    }
+
+  wave.write_register (amdgpu_regnum_t::pc, pc);
+
+  /* Then halt the wave.  */
+  state_priv_reg |= sq_wave_state_priv_halt_mask;
+  wave.write_register (amdgpu_regnum_t::state_priv, state_priv_reg);
+}
+
+bool
+gfx12_5_architecture_t::can_execute_displaced (
+  wave_t &wave, const instruction_t &instruction) const
+{
+  /* Any "sendmsg", including DEALLOC_VGPRS, can be executed now.
+     If we don't return "true" here, "can_execute_displaced" method
+     of gfx11_architecture will return "false" for the DEALLOC_VGPRS
+     messages.  */
+  if (is_sendmsg (instruction))
+    return true;
+
+  return gfx12_architecture_t::can_execute_displaced (wave, instruction);
+}
+
+bool
+gfx12_5_architecture_t::can_simulate (wave_t &wave,
+                                      const instruction_t &instruction) const
+{
+  if (!instruction.is_valid ())
+    return false;
+
+  /* No need to simulate "sendmsg dealloc_vgprs" anymore, because the driver
+     sets up the configuration as such that the hardware treats it like a
+     NOP.  */
+  if (is_sendmsg (instruction))
+    return false;
+
+  return gfx12_architecture_t::can_simulate (wave, instruction);
+}
+
+std::optional<agent_address_t>
+gfx12_5_architecture_t::simulate_instruction (
+  wave_t &wave, agent_address_t pc, const instruction_t &instruction) const
+{
+  std::optional<agent_address_t> next_pc;
+
+  /* See the comments in "::can_simulate ()".  */
+  if (!is_sendmsg (instruction))
+    next_pc
+      = gfx12_architecture_t::simulate_instruction (wave, pc, instruction);
+
+  if (next_pc)
+    simulate_instruction_fixup (wave);
+
+  return next_pc;
+}
+
+class gfx1250_t final : public gfx12_5_architecture_t
+{
+public:
+  gfx1250_t ()
+    : gfx12_5_architecture_t (EF_AMDGPU_MACH_AMDGCN_GFX1250,
+                              "amdgcn-amd-amdhsa--gfx1250")
+  {
+  }
+};
+
 architecture_t::architecture_t (elf_amdgpu_machine_t e_machine,
                                 std::string target_triple)
   : m_architecture_id (
@@ -7744,6 +8246,7 @@ decltype (architecture_t::s_architecture_map)
       map.emplace (make_architecture<gfx12_generic_t> ());
       map.emplace (make_architecture<gfx1200_t> ());
       map.emplace (make_architecture<gfx1201_t> ());
+      map.emplace (make_architecture<gfx1250_t> ());
       return map;
     }()
   };
