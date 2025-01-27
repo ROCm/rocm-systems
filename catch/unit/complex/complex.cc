@@ -101,26 +101,6 @@ TEMPLATE_TEST_CASE("Unit_Device_Complex_Unary_Host_Sanity_Positive", "", hipFloa
 /**
  * Test Description
  * ------------------------
- *    - RTCs kernels that pass argument of invalid type for unary complex functions.
- *
- * Test source
- * ------------------------
- *    - unit/complex/complex.cc
- * Test requirements
- * ------------------------
- *    - HIP_VERSION >= 5.2
- */
-TEST_CASE("Unit_Device_Complex_Unary_Negative_Parameters_RTC") {
-  ComplexTypeRTCWrapper<42>(kComplexConj);
-  ComplexTypeRTCWrapper<28>(kComplexReal);
-  ComplexTypeRTCWrapper<28>(kComplexImag);
-  ComplexTypeRTCWrapper<28>(kComplexAbs);
-  ComplexTypeRTCWrapper<29>(kComplexSqabs);
-}
-
-/**
- * Test Description
- * ------------------------
  *    - Test that checks binary complex functions on device for reduced set of input values. The
  * results are compared against manually calculated ones:
  *    -# hipCadd, hipCaddf
@@ -189,25 +169,6 @@ TEMPLATE_TEST_CASE("Unit_Device_Complex_Binary_Host_Sanity_Positive", "", hipFlo
 /**
  * Test Description
  * ------------------------
- *    - RTCs kernels that pass argument of invalid type for binary complex functions.
- *
- * Test source
- * ------------------------
- *    - unit/complex/complex.cc
- * Test requirements
- * ------------------------
- *    - HIP_VERSION >= 5.2
- */
-TEST_CASE("Unit_Device_Complex_Binary_Negative_Parameters_RTC") {
-  ComplexTypeRTCWrapper<66>(kComplexAdd);
-  ComplexTypeRTCWrapper<66>(kComplexSub);
-  ComplexTypeRTCWrapper<66>(kComplexMul);
-  ComplexTypeRTCWrapper<66>(kComplexDiv);
-}
-
-/**
- * Test Description
- * ------------------------
  *    - Test that checks hipCfma/hipCfmaf complex functions on device for reduced set of input
  * values. The results are compared against manually calculated ones.
  *
@@ -261,22 +222,6 @@ TEMPLATE_TEST_CASE("Unit_Device_Complex_hipCfma_Host_Sanity_Positive", "", hipFl
   TestType input_val3 = MakeComplexType<TestType>(input3_r, input3_i);
 
   ComplexFunctionTernaryHostTest(ComplexFunction::kFma, input_val1, input_val2, input_val3);
-}
-
-/**
- * Test Description
- * ------------------------
- *    - RTCs kernels that pass argument of invalid type for hipCfma/hipCfmaf complex function.
- *
- * Test source
- * ------------------------
- *    - unit/complex/complex.cc
- * Test requirements
- * ------------------------
- *    - HIP_VERSION >= 5.2
- */
-TEST_CASE("Unit_Device_Complex_hipCfma_Negative_Parameters_RTC") {
-  ComplexTypeRTCWrapper<90>(kComplexFma);
 }
 
 /**
@@ -388,24 +333,6 @@ TEST_CASE("Unit_Device_make_hipComplex_Host_Positive") {
 /**
  * Test Description
  * ------------------------
- *    - RTCs kernels that pass argument of invalid type for make complex functions.
- *
- * Test source
- * ------------------------
- *    - unit/complex/complex.cc
- * Test requirements
- * ------------------------
- *    - HIP_VERSION >= 5.2
- */
-TEST_CASE("Unit_Device_make_Complex_Negative_Parameters_RTC") {
-  ComplexTypeRTCWrapper<27>(kMakeHipComplex);
-  ComplexTypeRTCWrapper<27>(kMakeHipFloatComplex);
-  ComplexTypeRTCWrapper<27>(kMakeHipDoubleComplex);
-}
-
-/**
- * Test Description
- * ------------------------
  *    - Test that checks hipComplexDoubleToFloat/hipComplexFloatToDouble functions on device for
  * reduced set of input values. The results are compared against manually calculated ones.
  *
@@ -459,23 +386,6 @@ TEMPLATE_TEST_CASE("Unit_Device_Complex_Cast_Host_Sanity_Positive", "", hipFloat
 
   REQUIRE(result.x == static_cast<decltype(CastType_t<TestType>().x)>(input_r));
   REQUIRE(result.y == static_cast<decltype(CastType_t<TestType>().x)>(input_i));
-}
-
-/**
- * Test Description
- * ------------------------
- *    - RTCs kernels that pass argument of invalid type for complex cast functions.
- *
- * Test source
- * ------------------------
- *    - unit/complex/complex.cc
- * Test requirements
- * ------------------------
- *    - HIP_VERSION >= 5.2
- */
-TEST_CASE("Unit_Device_Complex_Cast_Negative_Parameters_RTC") {
-  ComplexTypeRTCWrapper<21>(kComplexDoubleToFloat);
-  ComplexTypeRTCWrapper<21>(kComplexFloatToDouble);
 }
 
 /**

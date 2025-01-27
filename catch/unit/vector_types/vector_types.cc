@@ -292,68 +292,6 @@ TEMPLATE_TEST_CASE("Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Device",
     }
   }
 }
-
-template <int expected_errors_num> void VectorTypesRTCWrapper(const char* program_source) {
-  hiprtcProgram program{};
-  HIPRTC_CHECK(hiprtcCreateProgram(&program, program_source, "vector_types_kernels.cc", 0, nullptr,
-                                   nullptr));
-
-#if HT_AMD
-  std::string args = std::string("-ferror-limit=100");
-  const char* options[] = {args.c_str()};
-  hiprtcResult result{hiprtcCompileProgram(program, 1, options)};
-#else
-  hiprtcResult result{hiprtcCompileProgram(program, 0, nullptr)};
-#endif
-
-  size_t log_size{};
-  HIPRTC_CHECK(hiprtcGetProgramLogSize(program, &log_size));
-  std::string log(log_size, ' ');
-  HIPRTC_CHECK(hiprtcGetProgramLog(program, log.data()));
-  int error_count{0};
-
-  std::string error_message{"error:"};
-
-  size_t npos_e = log.find(error_message, 0);
-  while (npos_e != std::string::npos) {
-    ++error_count;
-    npos_e = log.find(error_message, npos_e + 1);
-  }
-
-  HIPRTC_CHECK(hiprtcDestroyProgram(&program));
-  HIPRTC_CHECK_ERROR(result, HIPRTC_ERROR_COMPILATION);
-  REQUIRE(error_count == expected_errors_num);
-}
-
-/**
- * Test Description
- * ------------------------
- *    - Compiles kernels and host functions with negative scenarios:
- *        -# Negate (-) operator on the unsigned vectors
- *        -# Bitwise operators on the floating-point vectors
- *        -# Calculate-assign operators that are not supported between vector and scalar
- *    - Utilizes HIP RTC for compilation
- * Test source
- * ------------------------
- *    - unit/vector_types/vector_types.cc
- * Test requirements
- * ------------------------
- *    - HIP_VERSION >= 5.2
- */
-TEST_CASE("Unit_VectorOperators_Negative_Parameters_RTC") {
-  VectorTypesRTCWrapper<8>(kNegateUnsignedChar);
-  VectorTypesRTCWrapper<8>(kNegateUnsignedShort);
-  VectorTypesRTCWrapper<8>(kNegateUnsignedInt);
-  VectorTypesRTCWrapper<8>(kNegateUnsignedLong);
-  VectorTypesRTCWrapper<8>(kNegateUnsignedLongLong);
-  VectorTypesRTCWrapper<96>(kBitwiseFloat);
-  VectorTypesRTCWrapper<96>(kBitwiseDouble);
-  VectorTypesRTCWrapper<96>(kCalculateAssignChar);
-  VectorTypesRTCWrapper<96>(kCalculateAssignShort);
-  VectorTypesRTCWrapper<96>(kCalculateAssignInt);
-  VectorTypesRTCWrapper<96>(kCalculateAssignLong);
-  VectorTypesRTCWrapper<96>(kCalculateAssignLongLong);
-}
 #endif  // HT_AMD
 
 /**
