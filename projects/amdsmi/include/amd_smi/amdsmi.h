@@ -535,7 +535,7 @@ typedef struct {
  */
 typedef struct {
     uint64_t reference_timestamp;  //!< Represents CPU timestamp in microseconds (uS)
-    uint64_t violation_timestamp;  //!< Violation time in milliseconds (ms)
+    uint64_t violation_timestamp;  //!< Violation time in nanoseconds (ns)
     uint64_t acc_counter;          //!< Current accumulated counter; Max uint64 means unsupported
     uint64_t acc_prochot_thrm;     //!< Current accumulated processor hot violation count; Max uint64 means unsupported
     uint64_t acc_ppt_pwr;          //!< PVIOL; Current accumulated Package Power Tracking (PPT) count; Max uint64 means unsupported

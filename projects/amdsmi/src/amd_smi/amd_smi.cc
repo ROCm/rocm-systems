@@ -845,8 +845,7 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
     // default to 0xffffffff as not supported
     uint32_t partitition_id = std::numeric_limits<uint32_t>::max();
     auto tmp_partition_id = uint32_t(0);
-    amdsmi_status_t status = rsmi_wrapper(rsmi_dev_partition_id_get, processor_handle, 0,
-                                            &(tmp_partition_id));
+    amdsmi_status_t status = rsmi_wrapper(rsmi_dev_partition_id_get, processor_handle, 0, &(tmp_partition_id));
     // Do not return early if this value fails
     // continue to try getting all info
     if (status == AMDSMI_STATUS_SUCCESS) {
@@ -890,6 +889,7 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
     }
 
     // Insert current accumulator counters into struct
+    violation_status->violation_timestamp = metric_info_b.firmware_timestamp;
     violation_status->acc_counter = metric_info_b.accumulation_counter;
     violation_status->acc_prochot_thrm = metric_info_b.prochot_residency_acc;
     violation_status->acc_ppt_pwr = metric_info_b.ppt_residency_acc;
@@ -940,7 +940,6 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
 
         if (violation_status->per_prochot_thrm > 0) {
             violation_status->active_prochot_thrm = 1;
-            violation_status->violation_timestamp = kFASTEST_POLL_TIME_MS;
         } else {
             violation_status->active_prochot_thrm = 0;
         }
@@ -961,7 +960,6 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
 
         if (violation_status->per_ppt_pwr > 0) {
             violation_status->active_ppt_pwr = 1;
-            violation_status->violation_timestamp = kFASTEST_POLL_TIME_MS;
         } else {
             violation_status->active_ppt_pwr = 0;
         }
@@ -983,7 +981,6 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
 
         if (violation_status->per_socket_thrm > 0) {
             violation_status->active_socket_thrm = 1;
-            violation_status->violation_timestamp = kFASTEST_POLL_TIME_MS;
         } else {
             violation_status->active_socket_thrm = 0;
         }
@@ -1005,7 +1002,6 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
 
         if (violation_status->per_vr_thrm > 0) {
             violation_status->active_vr_thrm = 1;
-            violation_status->violation_timestamp = kFASTEST_POLL_TIME_MS;
         } else {
             violation_status->active_vr_thrm = 0;
         }
@@ -1027,7 +1023,6 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
 
         if (violation_status->per_hbm_thrm > 0) {
             violation_status->active_hbm_thrm = 1;
-            violation_status->violation_timestamp = kFASTEST_POLL_TIME_MS;
         } else {
             violation_status->active_hbm_thrm = 0;
         }
@@ -1049,7 +1044,6 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
 
         if (violation_status->per_gfx_clk_below_host_limit > 0) {
             violation_status->active_gfx_clk_below_host_limit = 1;
-            violation_status->violation_timestamp = kFASTEST_POLL_TIME_MS;
         } else {
             violation_status->active_gfx_clk_below_host_limit = 0;
         }
