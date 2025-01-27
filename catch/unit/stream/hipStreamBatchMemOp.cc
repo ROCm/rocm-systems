@@ -71,7 +71,7 @@ TEST_CASE("Unit_hipStreamBatchMemOp_Negative_Tests") {
 
   SECTION("Stream as a nullptr") {
     HIP_CHECK_ERROR(hipStreamBatchMemOp(nullptr, totalOps, paramArray, 0),
-                    hipSuccess);
+                    hipErrorInvalidValue);
   }
 
   SECTION("Invalid Stream") {
@@ -96,7 +96,7 @@ TEST_CASE("Unit_hipStreamBatchMemOp_Negative_Tests") {
   }
   SECTION("Total Operations Zero") {
     HIP_CHECK_ERROR(hipStreamBatchMemOp(stream, 0, paramArray, 0),
-                    hipSuccess);
+                    hipErrorInvalidValue);
   }
 
   SECTION("Flag value not Zero") {
