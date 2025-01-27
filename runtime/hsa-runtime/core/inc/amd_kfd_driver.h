@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -87,6 +87,15 @@ public:
   hsa_status_t FreeMemory(void *mem, size_t size) override;
   hsa_status_t CreateQueue(core::Queue &queue) const override;
   hsa_status_t DestroyQueue(core::Queue &queue) const override;
+  hsa_status_t ExportDMABuf(void *mem, size_t size, int *dmabuf_fd,
+                            size_t *offset) override;
+  hsa_status_t ImportDMABuf(int dmabuf_fd, core::Agent &agent,
+                            core::ShareableHandle &handle) override;
+  hsa_status_t Map(core::ShareableHandle handle, void *mem, size_t offset,
+                   size_t size, hsa_access_permission_t perms) override;
+  hsa_status_t Unmap(core::ShareableHandle handle, void *mem, size_t offset,
+                     size_t size) override;
+  hsa_status_t ReleaseShareableHandle(core::ShareableHandle &handle) override;
 
 private:
   /// @brief Allocate agent accessible memory (system / local memory).

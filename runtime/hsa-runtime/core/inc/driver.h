@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2023, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -59,14 +59,20 @@ enum class DriverQuery { GET_DRIVER_VERSION };
 
 enum class DriverType { XDNA = 0, KFD, NUM_DRIVER_TYPES };
 
+/// @brief Handle for exported / imported memory.
+struct ShareableHandle {
+  uint64_t handle{};
+
+  bool IsValid() const { return handle != 0; }
+};
+
 /// @brief Kernel driver interface.
 ///
 /// @details A class used to provide an interface between the core runtime
 /// and agent kernel drivers. It also maintains state associated with active
 /// kernel drivers.
 class Driver {
- public:
-  Driver() = delete;
+public:
   Driver(DriverType kernel_driver_type, std::string devnode_name);
   virtual ~Driver() = default;
 
@@ -126,7 +132,7 @@ class Driver {
 
   /// @brief Allocate agent-accessible memory (system or agent-local memory).
   ///
-  /// @param[out] pointer to newly allocated memory.
+  /// @param[out] mem pointer to newly allocated memory.
   ///
   /// @retval HSA_STATUS_SUCCESS if memory was successfully allocated or
   /// hsa_status_t error code if the memory allocation failed.
@@ -140,6 +146,49 @@ class Driver {
   virtual hsa_status_t CreateQueue(Queue &queue) const = 0;
 
   virtual hsa_status_t DestroyQueue(Queue &queue) const = 0;
+
+  /// @brief Imports memory using dma-buf.
+  ///
+  /// @param[in] mem virtual address
+  /// @param[in] size memory size in bytes
+  /// @param[out] dmabuf_fd dma-buf file descriptor
+  /// @param[out] offset memory offset in bytes
+  virtual hsa_status_t ExportDMABuf(void *mem, size_t size, int *dmabuf_fd,
+                                    size_t *offset) = 0;
+
+  /// @brief Imports a memory chunk via dma-buf.
+  ///
+  /// @param[in] dmabuf_fd dma-buf file descriptor
+  /// @param[in] agent agent to import the memory for
+  /// @param[out] handle handle to the imported memory
+  virtual hsa_status_t ImportDMABuf(int dmabuf_fd, core::Agent &agent,
+                                    core::ShareableHandle &handle) = 0;
+
+  /// @brief Maps the memory associated with the handle.
+  ///
+  /// @param[in] handle handle to the memory object
+  /// @param[in] mem virtual address associated with the handle
+  /// @param[in] offset memory offset in bytes
+  /// @param[in] size memory size in bytes
+  /// @param[perms] perms new permissions
+  virtual hsa_status_t Map(core::ShareableHandle handle, void *mem,
+                           size_t offset, size_t size,
+                           hsa_access_permission_t perms) = 0;
+
+  /// @brief Unmaps the memory associated with the handle.
+  ///
+  /// @param[in] handle handle to the memory object
+  /// @param[in] mem virtual address associated with the handle
+  /// @param[in] offset memory offset in bytes
+  /// @param[in] size memory size in bytes
+  virtual hsa_status_t Unmap(core::ShareableHandle handle, void *mem,
+                             size_t offset, size_t size) = 0;
+
+  /// @brief Releases the object associated with the handle.
+  ///
+  /// @param[in] handle handle of the object to release
+  virtual hsa_status_t
+  ReleaseShareableHandle(core::ShareableHandle &handle) = 0;
 
   /// Unique identifier for supported kernel-mode drivers.
   const DriverType kernel_driver_type_;

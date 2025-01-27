@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -158,12 +158,17 @@ public:
                               void **mem, size_t size,
                               uint32_t node_id) override;
   hsa_status_t FreeMemory(void *mem, size_t size) override;
-
-  /// @brief Creates a context on the AIE device for this queue.
-  /// @param queue Queue whose on-device context is being created.
-  /// @return hsa_status_t
   hsa_status_t CreateQueue(core::Queue &queue) const override;
   hsa_status_t DestroyQueue(core::Queue &queue) const override;
+  hsa_status_t ExportDMABuf(void *mem, size_t size, int *dmabuf_fd,
+                            size_t *offset) override;
+  hsa_status_t ImportDMABuf(int dmabuf_fd, core::Agent &agent,
+                            core::ShareableHandle &handle) override;
+  hsa_status_t Map(core::ShareableHandle handle, void *mem, size_t offset,
+                   size_t size, hsa_access_permission_t perms) override;
+  hsa_status_t Unmap(core::ShareableHandle handle, void *mem, size_t offset,
+                     size_t size) override;
+  hsa_status_t ReleaseShareableHandle(core::ShareableHandle &handle) override;
 
   // @brief Submits num_pkts packets in a command chain to the XDNA driver
   hsa_status_t SubmitCmdChain(hsa_amd_aie_ert_packet_t* first_pkt, uint32_t num_pkts,

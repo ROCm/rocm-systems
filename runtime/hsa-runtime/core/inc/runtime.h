@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -776,7 +776,8 @@ class Runtime {
 
  private:
   void CheckVirtualMemApiSupport();
-  int GetAmdgpuDeviceArgs(Agent* agent, amdgpu_bo_handle bo, int* drm_fd, uint64_t* cpu_addr);
+  int GetAmdgpuDeviceArgs(Agent *agent, ShareableHandle handle, int *drm_fd,
+                          uint64_t *cpu_addr);
 
   bool virtual_mem_api_supported_;
   bool xnack_enabled_;
@@ -822,8 +823,6 @@ class Runtime {
 
   struct MappedHandle;
   struct MappedHandleAllowedAgent {
-    MappedHandleAllowedAgent()
-        : va(NULL), size(0), permissions(HSA_ACCESS_PERMISSION_NONE), mappedHandle(NULL), ldrm_bo(0) {}
     MappedHandleAllowedAgent(MappedHandle* _mappedHandle, Agent* targetAgent, void* va, size_t size,
                              hsa_access_permission_t perms);
     ~MappedHandleAllowedAgent();
@@ -836,42 +835,26 @@ class Runtime {
     Agent* targetAgent;
     hsa_access_permission_t permissions;
     MappedHandle* mappedHandle;
-    amdgpu_bo_handle ldrm_bo;
+    ShareableHandle shareable_handle;
   };
 
   struct MappedHandle {
-    MappedHandle()
-        : mem_handle(NULL),
-          address_handle(NULL),
-          offset(0),
-          mmap_offset(0),
-          size(0),
-          drm_fd(-1),
-          drm_cpu_addr(NULL),
-          ldrm_bo(0) {}
-
-    MappedHandle(MemoryHandle* mem_handle, AddressHandle* address_handle, uint64_t offset,
-                 size_t size, int drm_fd, void* drm_cpu_addr, hsa_access_permission_t perm,
-                 amdgpu_bo_handle bo)
-        : mem_handle(mem_handle),
-          address_handle(address_handle),
-          offset(offset),
-          mmap_offset(0),
-          size(size),
-          drm_fd(drm_fd),
-          drm_cpu_addr(drm_cpu_addr),
-          ldrm_bo(bo) {}
+    MappedHandle(MemoryHandle *mem_handle, AddressHandle *address_handle,
+                 uint64_t offset, size_t size, int drm_fd, void *drm_cpu_addr,
+                 hsa_access_permission_t perm, ShareableHandle shareable_handle)
+        : mem_handle(mem_handle), address_handle(address_handle),
+          offset(offset), size(size), drm_fd(drm_fd),
+          drm_cpu_addr(drm_cpu_addr), shareable_handle(shareable_handle) {}
 
     __forceinline core::Agent* agentOwner() const { return mem_handle->region->owner(); }
 
     MemoryHandle* mem_handle;
     AddressHandle* address_handle;
     uint64_t offset;
-    uint64_t mmap_offset;
     size_t size;
     int drm_fd;
     void* drm_cpu_addr;  // CPU Buffer address
-    amdgpu_bo_handle ldrm_bo;
+    ShareableHandle shareable_handle;
     std::map<Agent*, MappedHandleAllowedAgent> allowed_agents;
   };
   std::map<const void*, MappedHandle> mapped_handle_map_;  // Indexed by VA
