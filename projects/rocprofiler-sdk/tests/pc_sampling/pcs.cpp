@@ -245,8 +245,9 @@ configure_pc_sampling_prefer_stochastic(tool_agent_info*         agent_info,
         {
             if(cfg.method == ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC)
             {
-                first_stochastic_config = &cfg;
-                break;
+                // Temporarily disable stochastic sampling as it's not fully supported.
+                // first_stochastic_config = &cfg;
+                // break;
             }
             else if(!first_host_trap_config &&
                     cfg.method == ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP)
