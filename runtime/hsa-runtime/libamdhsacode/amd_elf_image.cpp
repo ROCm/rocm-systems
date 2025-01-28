@@ -1456,7 +1456,7 @@ namespace elf {
       }
 
       for (size_t i = 1; i < sections.size(); ++i) {
-        if (i == ehdr.e_shstrndx || i == ehdr.e_shstrndx) { continue; }
+        if (i == ehdr.e_shstrndx) { continue; }
         std::unique_ptr<GElfSection>& section = sections[i];
         if (section->type() == SHT_STRTAB) { strtabSection = static_cast<GElfStringTable*>(section.get()); }
         if (section->type() == SHT_SYMTAB) { symtabSection = static_cast<GElfSymbolTable*>(section.get()); }
