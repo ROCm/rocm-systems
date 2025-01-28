@@ -26,8 +26,10 @@ import os
 
 try:
     import argcomplete
-except ImportError:
+except ImportError as e:
+    logging.debug(f"Unhandled import error: {e}")
     logging.debug("argcomplete module not found. Autocomplete will not work.")
+
 from typing import TYPE_CHECKING
 # only used for type checking
 # pyright trips up and cannot find amdsmi scripts without it
@@ -56,7 +58,8 @@ except ImportError:
         import amdsmi_cli_exceptions
         from amdsmi import amdsmi_interface
         from amdsmi import amdsmi_exception
-    except ImportError:
+    except ImportError as e:
+        print(f"Unhandled import error: {e}")
         print(f"Still couldn't import 'amdsmi related scripts'. Make sure it's installed in {additional_path}")
         sys.exit(1)
 
