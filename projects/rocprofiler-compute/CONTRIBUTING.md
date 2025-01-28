@@ -1,12 +1,12 @@
 ## How to fork from us
 
-To keep our development fast and conflict free, we recommend you to [fork](https://github.com/ROCm/rocprofiler-compute/fork) our repository and start your work from our `amd-staging` branch in your private repository.
+To keep our development fast and conflict free, we recommend you to [fork](https://github.com/ROCm/rocprofiler-compute/fork) our repository and start your work from our `develop` branch in your private repository.
 
 Afterwards, git clone your repository to your local machine. But that is not it! To keep track of the original develop repository, add it as another remote.
 
 ```
 git remote add mainline https://github.com/ROCm/rocprofiler-compute.git
-git checkout amd-staging
+git checkout develop
 ```
 
 As always in git, start a new branch with
@@ -15,7 +15,7 @@ As always in git, start a new branch with
 git checkout -b topic-<yourFeatureName>
 ```
 
-and apply your changes there.
+and apply your changes there. For more help reference GitHub's ['About Forking'](https://docs.github.com/en/get-started/exploring-projects-on-github/contributing-to-a-project) page.
 
 ## How to contribute to ROCm Compute Profiler
 
@@ -31,7 +31,7 @@ and apply your changes there.
 
 - Ensure the PR description clearly describes the problem and solution. If there is an existing GitHub issue open describing this bug, please include it in the description so we can close it.
 
-- Ensure the PR is based on the `amd-staging` branch of the ROCm Compute Profiler GitHub repository.
+- Ensure the PR is based on the `develop` branch of the ROCm Compute Profiler GitHub repository.
 
 > [!TIP]
 > To ensure you meet all formatting requirements before publishing, we recommend you utilize our included [*pre-commit hooks*](https://pre-commit.com/#introduction). For more information on how to use pre-commit hooks please see the [section below](#using-pre-commit-hooks).

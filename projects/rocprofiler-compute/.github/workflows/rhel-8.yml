@@ -5,9 +5,9 @@ name: RHEL 8
 # Controls when the workflow will run
 on:
   push:
-    branches: [ amd-mainline, amd-staging, release/** ]
+    branches: [ amd-mainline, amd-staging, release/**, develop ]
   pull_request:
-    branches: [ amd-mainline, amd-staging, release/** ]
+    branches: [ amd-mainline, amd-staging, release/**, develop ]
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
