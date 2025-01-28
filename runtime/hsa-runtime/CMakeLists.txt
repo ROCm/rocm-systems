@@ -63,12 +63,6 @@ include ( utils )
 include ( hsa_common )
 include ( GNUInstallDirs )
 
-## Expose static library option
-if ( NOT DEFINED BUILD_SHARED_LIBS )
-  set ( BUILD_SHARED_LIBS ON )
-endif()
-set ( BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS} CACHE BOOL "Build shared library (.so) or not.")
-
 ## Adjust target name for static builds
 ## Original name will be an interface target that adds --whole-archive linker options around the target.
 if( NOT ${BUILD_SHARED_LIBS} )

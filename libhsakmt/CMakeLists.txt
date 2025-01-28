@@ -35,12 +35,6 @@ set(HSAKMT_STATIC_DRM_TARGET "${HSAKMT_TARGET}-staticdrm")
 
 project ( ${HSAKMT_TARGET} VERSION 1.9.0)
 
-# Build thunk as static by default
-if ( NOT DEFINED BUILD_SHARED_LIBS )
-  set ( BUILD_SHARED_LIBS "off" )
-endif()
-set ( BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS} CACHE BOOL "Build shared library (.so) or not.")
-
 # Optionally, build HSAKMT with ccache.
 set(ROCM_CCACHE_BUILD OFF CACHE BOOL "Set to ON for a ccache enabled build")
 if (ROCM_CCACHE_BUILD)

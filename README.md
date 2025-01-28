@@ -79,9 +79,9 @@ Ensure you have the following installed:
     ```
 
 - *Control whether libhsakmt and libhsa-runtime are shared or static*
-  The default (when `BUILD_SHARED_LIBS` is unset) is for libhsakmt to be static and libhsa-runtime to be shared. Setting `BUILD_SHARED_LIBS` to `OFF` will make both static and setting it to `ON` will make them both shared.
+    libhsakmt is always built as a static library that gets linked into libhsa-runtime, so there is a single library generated called libhsa-runtime64{.so/.a}. If `BUILD_SHARED_LIBS` is not set, this is a shared library by default. Setting `BUILD_SHARED_LIBS` to `OFF` will make it static.
     ```sh
-    -DBUILD_SHARED_LIBS=OFF   # or ON for both libs shared
+    -DBUILD_SHARED_LIBS=ON   # or OFF for static lib
     ```
 ### Building the tests
 #### rocrtst

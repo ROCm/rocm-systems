@@ -48,6 +48,12 @@ project("rocr")
 
 set(CMAKE_VERBOSE_MAKEFILE ON)
 
+## Expose static library option
+if ( NOT DEFINED BUILD_SHARED_LIBS )
+  set ( BUILD_SHARED_LIBS ON )
+endif()
+set ( BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS} CACHE BOOL "Build shared library (.so) or not.")
+
 if (NOT DEFINED BUILD_ROCR)
   set(BUILD_ROCR ON)
 endif()
