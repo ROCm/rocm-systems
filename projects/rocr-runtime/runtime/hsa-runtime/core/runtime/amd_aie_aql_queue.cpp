@@ -226,7 +226,7 @@ void AieAqlQueue::SubmitPackets() {
 
     // Get the packet header information
     if (pkt->header.header != HSA_PACKET_TYPE_VENDOR_SPECIFIC ||
-        pkt->header.AmdFormat != HSA_AMD_PACKET_TYPE_AIE_ERT) {
+        pkt->header.AmdFormat != HSA_AMD_PACKET_TYPE_RESERVED200 /*HSA_AMD_PACKET_TYPE_AIE_ERT*/) {
       throw hsa_exception(HSA_STATUS_ERROR_INVALID_PACKET_FORMAT, "Invalid packet header");
     }
 
