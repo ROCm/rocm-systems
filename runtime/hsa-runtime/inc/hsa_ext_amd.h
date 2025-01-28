@@ -771,7 +771,11 @@ typedef struct hsa_amd_hdp_flush_s {
 /**
  * @brief Region attributes.
  */
+#ifdef __cplusplus
+typedef enum hsa_amd_region_info_s : int {
+#else
 typedef enum hsa_amd_region_info_s {
+#endif
   /**
    * Determine if host can access the region. The type of this attribute
    * is bool.

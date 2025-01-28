@@ -3269,7 +3269,12 @@ typedef enum {
 /**
  * @brief Attributes of a memory region.
  */
+
+#ifdef __cplusplus
+typedef enum : int {
+#else
 typedef enum {
+#endif
   /**
    * Segment where memory in the region can be used. The type of this
    * attribute is ::hsa_region_segment_t.
