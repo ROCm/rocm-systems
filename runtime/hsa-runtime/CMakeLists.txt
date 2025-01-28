@@ -109,6 +109,18 @@ if ( HAVE_MEMFD_CREATE )
   target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HAVE_MEMFD_CREATE )
 endif()
 
+## Check for _GNU_SOURCE pthread extensions
+set(CMAKE_REQUIRED_DEFINITIONS -D_GNU_SOURCE)
+CHECK_SYMBOL_EXISTS ( "pthread_attr_setaffinity_np" "pthread.h" HAVE_PTHREAD_ATTR_SETAFFINITY_NP )
+CHECK_SYMBOL_EXISTS ( "pthread_rwlockattr_setkind_np" "pthread.h" HAVE_PTHREAD_RWLOCKATTR_SETKIND_NP )
+unset(CMAKE_REQUIRED_DEFINITIONS)
+if ( HAVE_PTHREAD_ATTR_SETAFFINITY_NP )
+  target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HAVE_PTHREAD_ATTR_SETAFFINITY_NP )
+endif()
+if ( HAVE_PTHREAD_RWLOCKATTR_SETKIND_NP )
+  target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HAVE_PTHREAD_RWLOCKATTR_SETKIND_NP )
+endif()
+
 ## Set include directories for ROCr runtime
 target_include_directories( ${CORE_RUNTIME_TARGET}
   PUBLIC

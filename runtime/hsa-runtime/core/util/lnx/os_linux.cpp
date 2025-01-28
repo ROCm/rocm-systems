@@ -138,12 +138,14 @@ class os_thread {
       for (int i = 0; i < cores; i++) {
         CPU_SET_S(i, CPU_ALLOC_SIZE(cores), cpuset);
       }
+#ifdef HAVE_PTHREAD_ATTR_SETAFFINITY_NP
       err = pthread_attr_setaffinity_np(&attrib, CPU_ALLOC_SIZE(cores), cpuset);
       CPU_FREE(cpuset);
       if (err != 0) {
         fprintf(stderr, "pthread_setaffinity_np failed: %s\n", strerror(err));
         return;
       }
+#endif
     }
 
     do {
@@ -166,6 +168,17 @@ class os_thread {
       }
     } while (stackSize < 20 * 1024 * 1024);
 
+#ifndef HAVE_PTHREAD_ATTR_SETAFFINITY_NP
+    if (cores && cpuset) {
+      err = pthread_setaffinity_np(thread, CPU_ALLOC_SIZE(cores), cpuset);
+      CPU_FREE(cpuset);
+      if (err != 0) {
+        fprintf(stderr, "pthread_setaffinity_np failed: %s\n", strerror(err));
+        thread = 0;
+        return;
+      }
+    }
+#endif
     struct sched_param param = {};
     if (priority != OS_THREAD_PRIORITY_DEFAULT) {
       int set_priority;
@@ -696,14 +709,8 @@ SharedMutex CreateSharedMutex() {
     return nullptr;
   }
 
-#ifdef __GLIBC__
+#ifdef HAVE_PTHREAD_RWLOCKATTR_SETKIND_NP
   err = pthread_rwlockattr_setkind_np(&attrib, PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP);
-  if (err != 0) {
-    fprintf(stderr, "Set rw lock attribute failure: %s\n", strerror(err));
-    return nullptr;
-  }
-#else
-  err = pthread_rwlockattr_setkind(&attrib, PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP);
   if (err != 0) {
     fprintf(stderr, "Set rw lock attribute failure: %s\n", strerror(err));
     return nullptr;

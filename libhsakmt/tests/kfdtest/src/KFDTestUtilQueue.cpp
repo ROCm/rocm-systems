@@ -57,13 +57,13 @@ class AsyncMPSQ {
         void PlacePacketOnNode(PacketList &packetList, int node, TSPattern tsp);
 
         /* Run the packets placed on nodes and return immediately.*/
-        void Submit(void) { ASSERT_NE((HSAuint64)m_queue, NULL); m_queue->SubmitPacket(); }
+        void Submit(void) { ASSERT_NE(m_queue, nullptr); m_queue->SubmitPacket(); }
 
         /* Return only when all packets are consumed.
          * If there is any packet issues some IO operations, wait these IO to complete too.
          */
         void Wait(void) {
-            ASSERT_NE((HSAuint64)m_queue, NULL);
+            ASSERT_NE(m_queue, nullptr);
             m_queue->Wait4PacketConsumption(m_event, std::max((unsigned int)6000, g_TestTimeOut));
         }
 
@@ -244,7 +244,7 @@ HSAuint64 AsyncMPSQ::Report(int indexOfPacket, HSAuint64 &begin, HSAuint64 &end)
     if (m_ts_pattern == HEAD_TAIL)
         indexOfPacket = 0;
 
-    EXPECT_NE((HSAuint64)m_ts, NULL)
+    EXPECT_NE(m_ts, nullptr)
         << " Error " << ++error << ": No timestamp buf!" << std::endl;
     /* m_ts_count is equal to packets count + 1, see PlacePacketOnNode().
      * So the max index of a packet is m_ts_count - 2.

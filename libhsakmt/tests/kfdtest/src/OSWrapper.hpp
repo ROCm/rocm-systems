@@ -23,6 +23,8 @@
 
 #include <stdlib.h>
 #include <stdint.h>
+#include <limits.h>
+#include <sys/user.h>
 #include <string>
 
 #include "KFDTestFlags.hpp"
@@ -33,10 +35,8 @@
 
 #ifndef PAGE_SIZE
 #define PAGE_SIZE   (1<<12)
-#define PAGE_SHIFT  (12)
 #endif
 #ifndef PAGE_SHIFT
-#define PAGE_SIZE   (1<<12)
 #define PAGE_SHIFT  (12)
 #endif
 
