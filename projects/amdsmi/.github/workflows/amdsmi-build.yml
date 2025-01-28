@@ -67,13 +67,16 @@ jobs:
             python3 -m pip list | grep setuptools
             echo 'Completed build and installation on ${{ matrix.os }}'
 
+            # Create the directory for test results
+            mkdir -p /shared/test-results/test-results-${{ matrix.os }}
+
             # Run AMDSMI Tests
             echo 'Running AMDSMI Tests'
             /opt/rocm/share/amd_smi/tests/amdsmitst > /shared/test-results/test-results-${{ matrix.os }}/amdsmi_tests.log
+            echo 'Completed AMDSMI Testing'
 
             # Run Python Unit Tests
             echo 'Running Python Unit Testing'
-            mkdir -p /shared/test-results/test-results-${{ matrix.os }}
             cd /opt/rocm/share/amd_smi/tests/python_unittest
             ./integration_test.py -v > /shared/test-results/test-results-${{ matrix.os }}/integration_test_output.txt 2>&1
             ./unit_tests.py -v > /shared/test-results/test-results-${{ matrix.os }}/unit_test_output.txt 2>&1
@@ -225,14 +228,16 @@ jobs:
             python3 -m pip list | grep setuptools
             echo 'Completed build and installation on ${{ matrix.os }}'
 
+            # Create the directory for test results
+            mkdir -p /shared/test-results/test-results-${{ matrix.os }}
+
             # Run AMDSMI Tests
             echo 'Running AMDSMI Tests'
             /opt/rocm/share/amd_smi/tests/amdsmitst > /shared/test-results/test-results-${{ matrix.os }}/amdsmi_tests.log
-            echo 'Completed AMDSMI Tests'
+            echo 'Completed AMDSMI Testing'
 
-            # Run Python Unit Testing
+            # Run Python Unit Tests
             echo 'Running Python Unit Testing'
-            mkdir -p /shared/test-results/test-results-${{ matrix.os }}
             cd /opt/rocm/share/amd_smi/tests/python_unittest
             ./integration_test.py -v > /shared/test-results/test-results-${{ matrix.os }}/integration_test_output.txt 2>&1
             ./unit_tests.py -v > /shared/test-results/test-results-${{ matrix.os }}/unit_test_output.txt 2>&1
