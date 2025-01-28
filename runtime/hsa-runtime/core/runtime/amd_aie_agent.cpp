@@ -282,25 +282,34 @@ void AieAgent::InitRegionList() {
   ///       This should be easier once the ROCt source is incorporated into the
   ///       ROCr source. Since the AIE itself currently has no memory regions of
   ///       its own all memory is just the system DRAM.
+  const uint64_t total_system_memory = XdnaDriver::GetSystemMemoryByteSize();
 
   /// For allocating kernel arguments or other objects that only need
   /// system memory.
   HsaMemoryProperties sys_mem_props = {};
   sys_mem_props.HeapType = HSA_HEAPTYPE_SYSTEM;
+  sys_mem_props.SizeInBytes = total_system_memory;
+
+  /// For any other allocation, e.g., buffers.
+  HsaMemoryProperties other_mem_props = {};
+  other_mem_props.HeapType = HSA_HEAPTYPE_SYSTEM;
+  other_mem_props.SizeInBytes = total_system_memory;
 
   /// For allocating memory for programmable device image (PDI) files. These
   /// need to be mapped to the device so the hardware can access the PDIs.
   HsaMemoryProperties dev_mem_props = {};
-  dev_mem_props.HeapType = HSA_HEAPTYPE_DEVICE_SVM,
+  dev_mem_props.HeapType = HSA_HEAPTYPE_DEVICE_SVM;
   dev_mem_props.SizeInBytes = XdnaDriver::GetDevHeapByteSize();
 
   /// As of now the AIE devices support coarse-grain memory regions that require
   /// explicit sync operations.
-  regions_.reserve(2);
+  regions_.reserve(3);
   regions_.push_back(
       new MemoryRegion(false, true, false, false, true, this, sys_mem_props));
   regions_.push_back(
       new MemoryRegion(false, false, false, false, true, this, dev_mem_props));
+  regions_.push_back(new MemoryRegion(false, false, false, false, true, this,
+                                      other_mem_props));
 }
 
 void AieAgent::GetAgentProperties() {

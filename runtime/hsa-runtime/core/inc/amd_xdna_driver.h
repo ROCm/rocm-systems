@@ -133,6 +133,9 @@ public:
 
   static hsa_status_t DiscoverDriver(std::unique_ptr<core::Driver>& driver);
 
+  /// @brief Returns the size of the system memory heap in bytes.
+  static uint64_t GetSystemMemoryByteSize();
+
   /// @brief Returns the size of the dev heap in bytes.
   static uint64_t GetDevHeapByteSize();
 
