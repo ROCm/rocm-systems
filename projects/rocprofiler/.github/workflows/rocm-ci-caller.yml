@@ -5,11 +5,14 @@ on:
     branches: [amd-staging, amd-npi]  
     types: [opened, reopened, synchronize]  
   push:  
-    branches: [amd-staging, amd-mainline]  
-  workflow_dispatch:  
+    branches: [amd-mainline]  
+  workflow_dispatch:
+  issue_comment:  
+    types: [created]
   
 jobs:  
-  call-workflow:  
+  call-workflow:
+    if: ${{ github.event_name != 'issue_comment' || github.event.comment.body == '!verify' }}
     uses: AMD-ROCm-Internal/rocm_ci_infra/.github/workflows/rocm_ci.yml@mainline 
     secrets: inherit  
     with:  
