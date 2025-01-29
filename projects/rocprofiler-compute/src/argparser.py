@@ -140,6 +140,22 @@ Examples:
         help="\t\t\tSpecify the type of subpath to save workload: node_name, gpu_model.",
     )
     profile_group.add_argument(
+        "--hip-trace",
+        dest="hip_trace",
+        required=False,
+        default=False,
+        action="store_true",
+        help="\t\t\tHIP trace, execturion trace for the entire application at the HIP level.",
+    )
+    profile_group.add_argument(
+        "--kokkos-trace",
+        dest="kokkos_trace",
+        required=False,
+        default=False,
+        action="store_true",
+        help="\t\t\tKokkos trace, traces Kokkos API calls.",
+    )
+    profile_group.add_argument(
         "-k",
         "--kernel",
         type=str,

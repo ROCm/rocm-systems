@@ -42,9 +42,17 @@ class rocprof_v3_profiler(RocProfCompute_Base):
 
     def get_profiler_options(self, fname):
         app_cmd = shlex.split(self.get_args().remaining)
+        trace_option = "--kernel-trace"
         rocprof_out_format = "json"
+
         if self.get_args().format_rocprof_output == "csv":
             rocprof_out_format = "csv"
+
+        if self.get_args().hip_trace:
+            trace_option += " " + "--hip-trace"
+        if self.get_args().kokkos_trace:
+            trace_option += " " + "--kokkos-trace"
+
         args = [
             "-E",
             os.path.join(
@@ -56,7 +64,7 @@ class rocprof_v3_profiler(RocProfCompute_Base):
             # v3 requires output directory argument
             "-d",
             self.get_args().path + "/" + "out",
-            "--kernel-trace",
+            trace_option,
             "--output-format",
             rocprof_out_format,
             "--",
