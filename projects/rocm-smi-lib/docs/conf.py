@@ -35,6 +35,8 @@ release = version_number
 
 external_toc_path = "./sphinx/_toc.yml"
 
+exclude_patterns = ['CHANGELOG.md']
+
 docs_core = ROCmDocs(left_nav_title)
 docs_core.run_doxygen(doxygen_root="doxygen", doxygen_path="doxygen/xml")
 docs_core.enable_api_reference()
@@ -48,3 +50,11 @@ for sphinx_var in ROCmDocs.SPHINX_VARS:
     globals()[sphinx_var] = getattr(docs_core, sphinx_var)
 
 extensions += ['sphinx.ext.mathjax']
+
+# Necessary to remove the header comments from the rocm_smi module
+def remove_module_docstring(app, what, name, obj, options, lines):
+    if what == "module":
+        del lines[:]
+
+def setup(app):
+    app.connect("autodoc-process-docstring", remove_module_docstring)
