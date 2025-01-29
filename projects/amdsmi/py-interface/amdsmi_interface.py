@@ -826,6 +826,21 @@ def amdsmi_get_cpu_smu_fw_version(processor_handle: amdsmi_wrapper.amdsmi_proces
         "smu_fw_major_ver_num": smu_fw.major
     }
 
+def amdsmi_get_cpu_hsmp_driver_version(processor_handle: amdsmi_wrapper.amdsmi_processor_handle):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    hsmp_driver_version = amdsmi_wrapper.amdsmi_hsmp_driver_version_t()
+
+    _check_res(amdsmi_wrapper.amdsmi_get_cpu_hsmp_driver_version(processor_handle, hsmp_driver_version))
+
+    return {
+        "hsmp_driver_major_ver_num": hsmp_driver_version.major,
+        "hsmp_driver_minor_ver_num": hsmp_driver_version.minor,
+    }
+
 def amdsmi_get_cpu_core_energy(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle
 ) -> int:
@@ -859,6 +874,16 @@ def amdsmi_get_cpu_socket_energy(
     )
 
     return f"{float(penergy.value * pow(10, -6))} J"
+
+def amdsmi_get_threads_per_core():
+    threads_per_core = ctypes.c_uint32()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_threads_per_core(
+            ctypes.byref(threads_per_core)
+        )
+    )
+
+    return threads_per_core.value
 
 def amdsmi_get_cpu_prochot_status(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle

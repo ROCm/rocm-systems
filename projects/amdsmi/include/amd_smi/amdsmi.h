@@ -1686,6 +1686,14 @@ typedef struct {
 
 #ifdef ENABLE_ESMI_LIB
 /**
+ * @brief This structure holds HSMP Driver version information.
+ */
+typedef struct {
+        uint8_t major;      //!< Major version number
+        uint8_t minor;      //!< Minor version number
+} amdsmi_hsmp_driver_version_t;
+
+/**
  * @brief This structure holds SMU Firmware version information.
  */
 typedef struct {
@@ -5364,6 +5372,19 @@ amdsmi_status_t amdsmi_get_cpu_socket_energy(amdsmi_processor_handle processor_h
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_threads_per_core(uint32_t *threads_per_core);
+
+/**
+ *  @brief Get HSMP Driver Version.
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]      processor_handle Cpu socket which to query
+ *  @param[in,out]  amdsmi_hsmp_driver_ver - Input buffer to return the HSMP Driver version
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_cpu_hsmp_driver_version(amdsmi_processor_handle processor_handle,
+                                              amdsmi_hsmp_driver_version_t *amdsmi_hsmp_driver_ver);
 
 /**
  *  @brief Get SMU Firmware Version.

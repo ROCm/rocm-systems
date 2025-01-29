@@ -3831,6 +3831,27 @@ amdsmi_status_t amdsmi_get_cpu_hsmp_proto_ver(amdsmi_processor_handle processor_
     return AMDSMI_STATUS_SUCCESS;
 }
 
+amdsmi_status_t amdsmi_get_cpu_hsmp_driver_version(amdsmi_processor_handle processor_handle,
+                                              amdsmi_hsmp_driver_version_t *amdsmi_hsmp_driver_ver)
+{
+    amdsmi_status_t status;
+    struct hsmp_driver_version hsmp_driver_ver;
+
+    AMDSMI_CHECK_INIT();
+
+    if (processor_handle == nullptr)
+        return AMDSMI_STATUS_INVAL;
+
+    status = static_cast<amdsmi_status_t>(esmi_hsmp_driver_version_get(&hsmp_driver_ver));
+    if (status != AMDSMI_STATUS_SUCCESS)
+        return amdsmi_errno_to_esmi_status(status);
+
+    amdsmi_hsmp_driver_ver->major = hsmp_driver_ver.major;
+    amdsmi_hsmp_driver_ver->minor = hsmp_driver_ver.minor;
+
+    return AMDSMI_STATUS_SUCCESS;
+}
+
 amdsmi_status_t amdsmi_get_cpu_smu_fw_version(amdsmi_processor_handle processor_handle,
                                               amdsmi_smu_fw_version_t *amdsmi_smu_fw)
 {
@@ -4340,13 +4361,20 @@ amdsmi_status_t amdsmi_get_cpu_ddr_bw(amdsmi_processor_handle processor_handle,
 {
     amdsmi_status_t status;
     struct ddr_bw_metrics ddr;
+    uint8_t sock_ind;
 
     AMDSMI_CHECK_INIT();
 
     if (processor_handle == nullptr)
         return AMDSMI_STATUS_INVAL;
 
-    status = static_cast<amdsmi_status_t>(esmi_ddr_bw_get(&ddr));
+    amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
+    if (r != AMDSMI_STATUS_SUCCESS)
+        return r;
+
+    sock_ind = (uint8_t)std::stoi(proc_id, NULL, 0);
+
+    status = static_cast<amdsmi_status_t>(esmi_ddr_bw_get(sock_ind, &ddr));
     if (status != AMDSMI_STATUS_SUCCESS)
         return amdsmi_errno_to_esmi_status(status);
 

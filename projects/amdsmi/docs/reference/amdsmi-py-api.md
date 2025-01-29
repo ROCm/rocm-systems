@@ -4010,6 +4010,52 @@ except AmdSmiException as e:
     print(e)
 ```
 
+### amdsmi_get_threads_per_core
+
+Description: Get number of threads per core.
+
+Output: cpu family
+
+Exceptions that can be thrown by `amdsmi_get_cpu_family` function:
+
+* `AmdSmiLibraryException`
+
+Example:
+
+```python
+try:
+     threads_per_core = amdsmi_get_threads_per_core()
+     print(threads_per_core)
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_get_cpu_hsmp_driver_version
+
+Description: Get the HSMP Driver version.
+
+Output: amdsmi HSMP Driver version
+
+Exceptions that can be thrown by `amdsmi_get_cpu_hsmp_driver_version` function:
+
+* `AmdSmiLibraryException`
+
+Example:
+
+```python
+try:
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            version = amdsmi_get_cpu_hsmp_driver_version(processor)
+            print(version['major'])
+            print(version['minor'])
+except AmdSmiException as e:
+    print(e)
+```
+
 ### amdsmi_get_cpu_smu_fw_version
 
 Description: Get the SMU Firmware version.

@@ -39,6 +39,8 @@ try:
     from .amdsmi_interface import amdsmi_get_cpu_smu_fw_version
     from .amdsmi_interface import amdsmi_get_cpu_core_energy
     from .amdsmi_interface import amdsmi_get_cpu_socket_energy
+    from .amdsmi_interface import amdsmi_get_threads_per_core
+    from .amdsmi_interface import amdsmi_get_cpu_hsmp_driver_version
     from .amdsmi_interface import amdsmi_get_cpu_prochot_status
     from .amdsmi_interface import amdsmi_get_cpu_fclk_mclk
     from .amdsmi_interface import amdsmi_get_cpu_cclk_limit
