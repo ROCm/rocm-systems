@@ -7,7 +7,7 @@
 Installing ROCm SMI
 *********************
 
-Planned deprecation notice 
+Planned deprecation notice
 ----------------------------
 
 ROCm System Management Interface (ROCm SMI) Library is planned to be ***deprecated***, and the release date will be announced soon. We recommend migration to AMD SMI.
@@ -15,11 +15,11 @@ ROCm System Management Interface (ROCm SMI) Library is planned to be ***deprecat
 Install amdgpu using ROCm
 --------------------------
 Use the following instructions to install AMDGPU using ROCm:
-  
+
 1. Install amdgpu driver. Refer to the following example, your release and link may differ. The `amdgpu-install --usecase=rocm` triggers both an amdgpu driver update and ROCm SMI packages to be installed on your device.
-  
+
 .. code-block:: shell
-  
+
     sudo apt update
     wget https://repo.radeon.com/amdgpu-install/6.0.2/ubuntu/jammy/amdgpu-install_6.0.60002-1_all.deb
     sudo apt install ./amdgpu-install_6.0.60002-1_all.deb
@@ -33,10 +33,8 @@ Building ROCm SMI
 Addtional required software
 ============================
 
-To build the ROCm SMI library, the following components are required. 
-  
-.. Note::
-  
+To build the ROCm SMI library, the following components are required.
+
 The following software versions are what was used in development. Earlier versions are not guaranteed to work:
 
 * CMake (v3.5.0)
@@ -52,7 +50,7 @@ The source code for ROCm SMI is available on `Github <https://github.com/RadeonO
 After the ROCm SMI library git repository is cloned to a local Linux machine, use the following CMake build sequence to build the library. Specifically,
 
 .. code-block:: shell
-  
+
     mkdir -p build
     cd build
     cmake ..

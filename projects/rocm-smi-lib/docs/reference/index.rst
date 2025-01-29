@@ -1,3 +1,5 @@
+:orphan:
+
 .. meta::
   :description: Install ROCm SMI
   :keywords: API, SMI, AMD, ROCm

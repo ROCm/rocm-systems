@@ -1266,19 +1266,19 @@ typedef union id {
         uint64_t id;           //!< uint64_t representation of value
         const char *name;      //!< name string (applicable to functions only)
         union {
-            //!< Used for ::rsmi_memory_type_t variants
+            /** Used for ::rsmi_memory_type_t variants */
             rsmi_memory_type_t memory_type;
-            //!< Used for ::rsmi_temperature_metric_t variants
+            /** Used for ::rsmi_temperature_metric_t variants */
             rsmi_temperature_metric_t temp_metric;
-            //!< Used for ::rsmi_event_type_t variants
+            /** Used for ::rsmi_event_type_t variants */
             rsmi_event_type_t evnt_type;
-            //!< Used for ::rsmi_event_group_t variants
+            /** Used for ::rsmi_event_group_t variants */
             rsmi_event_group_t evnt_group;
-            //!< Used for ::rsmi_clk_type_t variants
+            /** Used for ::rsmi_clk_type_t variants */
             rsmi_clk_type_t clk_type;
-            //!< Used for ::rsmi_fw_block_t variants
+            /** Used for ::rsmi_fw_block_t variants */
             rsmi_fw_block_t fw_block;
-            //!< Used for ::rsmi_gpu_block_t variants
+            /** Used for ::rsmi_gpu_block_t variants */
             rsmi_gpu_block_t gpu_block_type;
         };
 } rsmi_func_id_value_t;
@@ -1826,7 +1826,7 @@ rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t *bandwidth);
  *      BDFID = ((DOMAIN & 0xFFFFFFFF) << 32) | ((Partition & 0xF) << 28)
  *              | ((BUS & 0xFF) << 8) | ((DEVICE & 0x1F) <<3 )
  *              | (FUNCTION & 0x7)
- * 
+ *
  *  \code{.unparsed}
  *  | Name         | Field   | KFD property       KFD -> PCIe ID (uint64_t)
  *  -------------- | ------- | ---------------- | ---------------------------- |
@@ -1837,15 +1837,15 @@ rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t *bandwidth);
  *  | Device       | [ 7: 3] | "location id"    | (LOCATION & 0xF8)            |
  *  | Function     | [ 2: 0] | "location id"    | (LOCATION & 0x7)             |
  *  \endcode
- * 
+ *
  *  Note: In some devices, the partition ID may be stored in the function bits
  *  BDFID[2:0] instead of BDFID[31:28].
- *  
- *  Note: For MI series devices, the function bits are only used to store the 
- *  partition ID, but this modified BDF is internal to the ROCm stack. 
- *  To the OS, partitions share the same BDF as the unpartitioned device and  
+ *
+ *  Note: For MI series devices, the function bits are only used to store the
+ *  partition ID, but this modified BDF is internal to the ROCm stack.
+ *  To the OS, partitions share the same BDF as the unpartitioned device and
  *  have function bits = 0, which can be verified through lspci.
- * 
+ *
  *  @param[in] dv_ind a device index
  *
  *  @param[inout] bdfid a pointer to uint64_t to which the device bdfid value
