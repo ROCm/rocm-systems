@@ -119,12 +119,13 @@ if(ENABLE_ESMI_LIB)
     if(NOT EXISTS ${PROJECT_SOURCE_DIR}/esmi_ib_library/src)
         # TODO: use ExternalProject_Add instead or a submodule
         # as of 2023.10.16 CI builds are broken with an updated submodule
-        execute_process(COMMAND git clone --depth=1 -b esmi_pkg_ver-3.0.3 https://github.com/amd/esmi_ib_library.git ${PROJECT_SOURCE_DIR}/esmi_ib_library)
+        execute_process(COMMAND git clone --depth=1 -b esmi_pkg_ver-4.1.2 https://github.com/amd/esmi_ib_library.git ${PROJECT_SOURCE_DIR}/esmi_ib_library)
     endif()
-    if(NOT EXISTS ${PROJECT_SOURCE_DIR}/esmi_ib_library/include/asm/amd_hsmp.h)
-       file(COPY "${PROJECT_SOURCE_DIR}/include/amd_smi/impl/amd_hsmp.h"
-            DESTINATION "${PROJECT_SOURCE_DIR}/esmi_ib_library/include/asm")
-    endif()
+
+    # Make sure to update the amd_hsmp.h file with the corresponding esmi version
+    file(COPY "${PROJECT_SOURCE_DIR}/include/amd_smi/impl/amd_hsmp.h"
+         DESTINATION "${PROJECT_SOURCE_DIR}/esmi_ib_library/include/asm")
+
     add_definitions("-DENABLE_ESMI_LIB=1")
     set(ESMI_INC_DIR "${PROJECT_SOURCE_DIR}/esmi_ib_library/include")
     set(ESMI_SRC_DIR "${PROJECT_SOURCE_DIR}/esmi_ib_library/src")
