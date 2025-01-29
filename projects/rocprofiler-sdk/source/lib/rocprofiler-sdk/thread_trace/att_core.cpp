@@ -456,6 +456,8 @@ DispatchThreadTracer::start_context()
 void
 DispatchThreadTracer::stop_context()  // NOLINT(readability-convert-member-functions-to-static)
 {
+    CHECK_NOTNULL(hsa::get_queue_controller())->disable_serialization();
+
     client.wlock([&](auto& client_id) {
         if(!client_id) return;
 
@@ -463,8 +465,6 @@ DispatchThreadTracer::stop_context()  // NOLINT(readability-convert-member-funct
         CHECK_NOTNULL(hsa::get_queue_controller())->remove_callback(*client_id);
         client_id = std::nullopt;
     });
-
-    CHECK_NOTNULL(hsa::get_queue_controller())->disable_serialization();
 }
 
 void
