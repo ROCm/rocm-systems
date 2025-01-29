@@ -235,7 +235,8 @@ public:
     static void* hsa_malloc(size_t size, const Device::Memory& mem)
     {
         void*        ret;
-        hsa_status_t err = hsa_amd_memory_pool_allocate(mem.pool, size, 0, &ret);
+        hsa_status_t err =
+            hsa_amd_memory_pool_allocate(mem.pool, size, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG, &ret);
         RET_IF_HSA_ERR(err);
 
         err = hsa_amd_agents_allow_access(

@@ -139,7 +139,8 @@ set_profiler_active_on_queue(hsa_amd_memory_pool_t             pool,
     auto         size = (profile.command_buffer.size + mask) & ~mask;
 
     if(hsa::get_amd_ext_table()->hsa_amd_memory_pool_allocate_fn(
-           pool, size, 0, &profile.command_buffer.ptr) != HSA_STATUS_SUCCESS)
+           pool, size, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG, &profile.command_buffer.ptr) !=
+       HSA_STATUS_SUCCESS)
     {
         ROCP_WARNING << "Failed to allocate memory to enable profile command on agent, some "
                         "counters will be unavailable";
