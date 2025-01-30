@@ -88,6 +88,7 @@ class BaseQueue {
     virtual _HSA_QUEUE_TYPE GetQueueType() = 0;
     unsigned int GetNodeId() { return m_Node; }
     unsigned int GetFamilyId() { return m_FamilyId; }
+    int GetSDMAEngineId() { return m_SdmaEngineId; }
 
  protected:
     static const unsigned int CMD_NOP_TYPE_2        = 0x80000000;
@@ -100,6 +101,7 @@ class BaseQueue {
     HsaMemoryBuffer *m_QueueBuf;
     unsigned int m_Node;
     unsigned int m_FamilyId;
+    int m_SdmaEngineId;
 
     // @return Write pointer modulo queue size in dwords
     virtual unsigned int Wptr() = 0;

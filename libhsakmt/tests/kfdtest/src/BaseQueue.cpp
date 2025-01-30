@@ -56,14 +56,25 @@ HSAKMT_STATUS BaseQueue::Create(unsigned int NodeId, unsigned int size, HSAuint6
         m_Resources.Queue_write_ptr_aql = &pointers[1];
     }
 
-    status = hsaKmtCreateQueue(NodeId,
-                               type,
-                               DEFAULT_QUEUE_PERCENTAGE,
-                               DEFAULT_PRIORITY,
-                               m_QueueBuf->As<unsigned int*>(),
-                               m_QueueBuf->Size(),
-                               NULL,
-                               &m_Resources);
+    if (type == HSA_QUEUE_SDMA_BY_ENG_ID)
+        status = hsaKmtCreateQueueExt(NodeId,
+                                      type,
+                                      DEFAULT_QUEUE_PERCENTAGE,
+                                      DEFAULT_PRIORITY,
+                                      m_SdmaEngineId,
+                                      m_QueueBuf->As<unsigned int*>(),
+                                      m_QueueBuf->Size(),
+                                      NULL,
+                                      &m_Resources);
+    else
+        status = hsaKmtCreateQueue(NodeId,
+                                   type,
+                                   DEFAULT_QUEUE_PERCENTAGE,
+                                   DEFAULT_PRIORITY,
+                                   m_QueueBuf->As<unsigned int*>(),
+                                   m_QueueBuf->Size(),
+                                   NULL,
+                                   &m_Resources);
 
     if (status != HSAKMT_STATUS_SUCCESS) {
         return status;
