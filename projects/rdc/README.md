@@ -70,6 +70,7 @@ Below example installs gRPC into `/opt/grpc`
         -DgRPC_INSTALL=ON \
         -DgRPC_BUILD_TESTS=OFF \
         -DBUILD_SHARED_LIBS=ON \
+        -DCMAKE_SHARED_LINKER_FLAGS_INIT=-Wl,--enable-new-dtags,--build-id=sha1,--rpath,'$ORIGIN' \
         -DCMAKE_INSTALL_PREFIX="$GRPC_ROOT" \
         -DCMAKE_INSTALL_LIBDIR=lib \
         -DCMAKE_BUILD_TYPE=Release
