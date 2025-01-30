@@ -583,11 +583,11 @@ void GpuMetricsBase_v17_t::dump_internal_metrics_table()
     }
     for (auto& col : row.gfx_busy_inst) {
       ss << "\t [" << idx << "] [" << idy << "]: " << col;
-      if (idy + 1 != (std::end(row.gfx_busy_inst) - std::end(row.gfx_busy_inst) - 1)) {
+      if (idy + 1 != static_cast<uint64_t>((std::end(row.gfx_busy_inst) - std::end(row.gfx_busy_inst) - 1))) {
         ss << ", ";
       }
       if (idx + 1 !=
-          (std::end(m_gpu_metrics_tbl.m_xcp_stats) - std::end(m_gpu_metrics_tbl.m_xcp_stats) - 1)) {
+          static_cast<uint64_t>((std::end(m_gpu_metrics_tbl.m_xcp_stats) - std::end(m_gpu_metrics_tbl.m_xcp_stats) - 1))) {
         ss << "\n";
       } else {
         ss << "]\n";
@@ -606,11 +606,11 @@ void GpuMetricsBase_v17_t::dump_internal_metrics_table()
     }
     for (auto& col : row.vcn_busy) {
       ss << "\t [" << idx << "] [" << idy << "]: " << col;
-      if (idy + 1 != (std::end(row.vcn_busy) - std::end(row.vcn_busy) - 1)) {
+      if (idy + 1 != static_cast<uint64_t>((std::end(row.vcn_busy) - std::end(row.vcn_busy) - 1))) {
         ss << ", ";
       }
       if (idx + 1 !=
-          (std::end(m_gpu_metrics_tbl.m_xcp_stats) - std::end(m_gpu_metrics_tbl.m_xcp_stats) - 1)) {
+          static_cast<uint64_t>((std::end(m_gpu_metrics_tbl.m_xcp_stats) - std::end(m_gpu_metrics_tbl.m_xcp_stats) - 1))) {
         ss << "\n";
       } else {
         ss << "]\n";
@@ -629,11 +629,11 @@ void GpuMetricsBase_v17_t::dump_internal_metrics_table()
     }
     for (auto& col : row.jpeg_busy) {
       ss << "\t [" << idx << "] [" << idy << "]: " << col;
-      if (idy + 1 != (std::end(row.jpeg_busy) - std::end(row.jpeg_busy) - 1)) {
+      if (idy + 1 != static_cast<uint64_t>((std::end(row.jpeg_busy) - std::end(row.jpeg_busy) - 1))) {
         ss << ", ";
       }
       if (idx + 1 !=
-          (std::end(m_gpu_metrics_tbl.m_xcp_stats) - std::end(m_gpu_metrics_tbl.m_xcp_stats) - 1)) {
+          static_cast<uint64_t>((std::end(m_gpu_metrics_tbl.m_xcp_stats) - std::end(m_gpu_metrics_tbl.m_xcp_stats) - 1))) {
         ss << "\n";
       } else {
         ss << "]\n";
@@ -652,11 +652,11 @@ void GpuMetricsBase_v17_t::dump_internal_metrics_table()
     }
     for (auto& col : row.gfx_busy_acc) {
       ss << "\t [" << idx << "] [" << idy << "]: " << col;
-      if (idy + 1 != (std::end(row.gfx_busy_acc) - std::end(row.gfx_busy_acc) - 1)) {
+      if (idy + 1 != static_cast<uint64_t>((std::end(row.gfx_busy_acc) - std::end(row.gfx_busy_acc) - 1))) {
         ss << ", ";
       }
       if (idx + 1 !=
-          (std::end(m_gpu_metrics_tbl.m_xcp_stats) - std::end(m_gpu_metrics_tbl.m_xcp_stats) - 1)) {
+          static_cast<uint64_t>((std::end(m_gpu_metrics_tbl.m_xcp_stats) - std::end(m_gpu_metrics_tbl.m_xcp_stats) - 1))) {
         ss << "\n";
       } else {
         ss << "]\n";
@@ -869,10 +869,7 @@ rsmi_status_t GpuMetricsBase_v17_t::populate_metrics_dynamic_tbl() {
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
 
-  if (!m_metrics_dynamic_tbl.empty()) {
-    m_metrics_dynamic_tbl.clear();
-  }
-
+  auto m_metrics_dynamic_tbl = AMDGpuDynamicMetricsTbl_t{};
   //
   //  Note: Any metric treatment/changes (if any) should happen before they
   //        get written to internal/external tables.
@@ -1117,6 +1114,12 @@ rsmi_status_t GpuMetricsBase_v17_t::populate_metrics_dynamic_tbl() {
               << " |";
   LOG_TRACE(ss);
 
+  // Copy to base class
+  std::copy(m_metrics_dynamic_tbl.begin(),
+            m_metrics_dynamic_tbl.end(),
+            std::inserter(GpuMetricsBase_t::m_base_metrics_dynamic_tbl,
+                          GpuMetricsBase_t::m_base_metrics_dynamic_tbl.end()));
+
   return status_code;
 }
 
@@ -1126,10 +1129,7 @@ rsmi_status_t GpuMetricsBase_v16_t::populate_metrics_dynamic_tbl() {
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
 
-  if (!m_metrics_dynamic_tbl.empty()) {
-    m_metrics_dynamic_tbl.clear();
-  }
-
+  auto m_metrics_dynamic_tbl = AMDGpuDynamicMetricsTbl_t{};
   //
   //  Note: Any metric treatment/changes (if any) should happen before they
   //        get written to internal/external tables.
@@ -1357,6 +1357,12 @@ rsmi_status_t GpuMetricsBase_v16_t::populate_metrics_dynamic_tbl() {
               << " |";
   LOG_TRACE(ss);
 
+  // Copy to base class
+  std::copy(m_metrics_dynamic_tbl.begin(),
+            m_metrics_dynamic_tbl.end(),
+            std::inserter(GpuMetricsBase_t::m_base_metrics_dynamic_tbl,
+                          GpuMetricsBase_t::m_base_metrics_dynamic_tbl.end()));
+
   return status_code;
 }
 
@@ -1474,10 +1480,7 @@ rsmi_status_t GpuMetricsBase_v15_t::populate_metrics_dynamic_tbl() {
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
 
-  if (!m_metrics_dynamic_tbl.empty()) {
-    m_metrics_dynamic_tbl.clear();
-  }
-
+  auto m_metrics_dynamic_tbl = AMDGpuDynamicMetricsTbl_t{};
   //
   //  Note: Any metric treatment/changes (if any) should happen before they
   //        get written to internal/external tables.
@@ -1694,6 +1697,12 @@ rsmi_status_t GpuMetricsBase_v15_t::populate_metrics_dynamic_tbl() {
               << " |";
   LOG_TRACE(ss);
 
+  // Copy to base class
+  std::copy(m_metrics_dynamic_tbl.begin(),
+            m_metrics_dynamic_tbl.end(),
+            std::inserter(GpuMetricsBase_t::m_base_metrics_dynamic_tbl,
+                          GpuMetricsBase_t::m_base_metrics_dynamic_tbl.end()));
+
   return status_code;
 }
 
@@ -1803,10 +1812,7 @@ rsmi_status_t GpuMetricsBase_v14_t::populate_metrics_dynamic_tbl() {
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
 
-  if (!m_metrics_dynamic_tbl.empty()) {
-    m_metrics_dynamic_tbl.clear();
-  }
-
+  auto m_metrics_dynamic_tbl = AMDGpuDynamicMetricsTbl_t{};
   //
   //  Note: Any metric treatment/changes (if any) should happen before they
   //        get written to internal/external tables.
@@ -2007,6 +2013,12 @@ rsmi_status_t GpuMetricsBase_v14_t::populate_metrics_dynamic_tbl() {
      << " | Returning = " << getRSMIStatusString(status_code)
      << " |";
   LOG_TRACE(ss);
+
+  // Copy to base class
+  std::copy(m_metrics_dynamic_tbl.begin(),
+            m_metrics_dynamic_tbl.end(),
+            std::inserter(GpuMetricsBase_t::m_base_metrics_dynamic_tbl,
+                          GpuMetricsBase_t::m_base_metrics_dynamic_tbl.end()));
 
   return status_code;
 }
@@ -3014,10 +3026,7 @@ rsmi_status_t GpuMetricsBase_v13_t::populate_metrics_dynamic_tbl() {
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
 
-  if (!m_metrics_dynamic_tbl.empty()) {
-    m_metrics_dynamic_tbl.clear();
-  }
-
+  auto m_metrics_dynamic_tbl = AMDGpuDynamicMetricsTbl_t{};
   //
   //  Note: Any metric treatment/changes (if any) should happen before they
   //        get written to internal/external tables.
@@ -3263,6 +3272,12 @@ rsmi_status_t GpuMetricsBase_v13_t::populate_metrics_dynamic_tbl() {
               << " |";
   LOG_TRACE(ss);
 
+  // Copy to base class
+  std::copy(m_metrics_dynamic_tbl.begin(),
+            m_metrics_dynamic_tbl.end(),
+            std::inserter(GpuMetricsBase_t::m_base_metrics_dynamic_tbl,
+                          GpuMetricsBase_t::m_base_metrics_dynamic_tbl.end()));
+
   return status_code;
 }
 
@@ -3397,10 +3412,7 @@ rsmi_status_t GpuMetricsBase_v12_t::populate_metrics_dynamic_tbl() {
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
 
-  if (!m_metrics_dynamic_tbl.empty()) {
-    m_metrics_dynamic_tbl.clear();
-  }
-
+  auto m_metrics_dynamic_tbl = AMDGpuDynamicMetricsTbl_t{};
   //
   //  Note: Any metric treatment/changes (if any) should happen before they
   //        get written to internal/external tables.
@@ -3624,6 +3636,12 @@ rsmi_status_t GpuMetricsBase_v12_t::populate_metrics_dynamic_tbl() {
               << " |";
   LOG_TRACE(ss);
 
+  // Copy to base class
+  std::copy(m_metrics_dynamic_tbl.begin(),
+            m_metrics_dynamic_tbl.end(),
+            std::inserter(GpuMetricsBase_t::m_base_metrics_dynamic_tbl,
+                          GpuMetricsBase_t::m_base_metrics_dynamic_tbl.end()));
+
   return status_code;
 }
 
@@ -3734,10 +3752,7 @@ rsmi_status_t GpuMetricsBase_v11_t::populate_metrics_dynamic_tbl() {
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
 
-  if (!m_metrics_dynamic_tbl.empty()) {
-    m_metrics_dynamic_tbl.clear();
-  }
-
+  auto m_metrics_dynamic_tbl = AMDGpuDynamicMetricsTbl_t{};
   //
   //  Note: Any metric treatment/changes (if any) should happen before they
   //        get written to internal/external tables.
@@ -3947,6 +3962,12 @@ rsmi_status_t GpuMetricsBase_v11_t::populate_metrics_dynamic_tbl() {
               << " | Returning = " << getRSMIStatusString(status_code)
               << " |";
   LOG_TRACE(ss);
+
+  // Copy to base class
+  std::copy(m_metrics_dynamic_tbl.begin(),
+            m_metrics_dynamic_tbl.end(),
+            std::inserter(GpuMetricsBase_t::m_base_metrics_dynamic_tbl,
+                          GpuMetricsBase_t::m_base_metrics_dynamic_tbl.end()));
 
   return status_code;
 }
@@ -4692,8 +4713,8 @@ rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind, rsmi_gpu_metrics_t* smu) {
   CHK_SUPPORT_NAME_ONLY(smu)
 
   auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
-  std::ostringstream ostrstream;
-  std::ostringstream ss;
+  thread_local std::ostringstream ostrstream;
+  thread_local std::ostringstream ss;
 
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
@@ -4717,6 +4738,7 @@ rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind, rsmi_gpu_metrics_t* smu) {
   rsmi_dev_partition_id_get(dv_ind, &partition_id);
   dev->set_smi_partition_id(partition_id);
   dev->dev_log_gpu_metrics(ostrstream);
+
   const auto [error_code, external_metrics] = dev->dev_copy_internal_to_external_metrics();
   if (error_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
     ss << __PRETTY_FUNCTION__

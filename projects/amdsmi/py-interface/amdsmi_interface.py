@@ -826,6 +826,21 @@ def amdsmi_get_cpu_smu_fw_version(processor_handle: amdsmi_wrapper.amdsmi_proces
         "smu_fw_major_ver_num": smu_fw.major
     }
 
+def amdsmi_get_cpu_hsmp_driver_version(processor_handle: amdsmi_wrapper.amdsmi_processor_handle):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    hsmp_driver_version = amdsmi_wrapper.amdsmi_hsmp_driver_version_t()
+
+    _check_res(amdsmi_wrapper.amdsmi_get_cpu_hsmp_driver_version(processor_handle, hsmp_driver_version))
+
+    return {
+        "hsmp_driver_major_ver_num": hsmp_driver_version.major,
+        "hsmp_driver_minor_ver_num": hsmp_driver_version.minor,
+    }
+
 def amdsmi_get_cpu_core_energy(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle
 ) -> int:
@@ -859,6 +874,16 @@ def amdsmi_get_cpu_socket_energy(
     )
 
     return f"{float(penergy.value * pow(10, -6))} J"
+
+def amdsmi_get_threads_per_core():
+    threads_per_core = ctypes.c_uint32()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_threads_per_core(
+            ctypes.byref(threads_per_core)
+        )
+    )
+
+    return threads_per_core.value
 
 def amdsmi_get_cpu_prochot_status(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle
@@ -1674,10 +1699,7 @@ def amdsmi_get_gpu_asic_info(
     )
 
     market_name = _pad_hex_value(asic_info_struct.market_name.decode("utf-8"), 4)
-    target_graphics_version = str(asic_info_struct.target_graphics_version)
-    if target_graphics_version == "9010":
-        hex_part = str(hex(int(str(asic_info_struct.target_graphics_version)[2:]))).replace("0x", "")
-        target_graphics_version = str(asic_info_struct.target_graphics_version)[:2] + hex_part
+    target_graphics_version = hex(asic_info_struct.target_graphics_version)[2:]
     asic_info = {
         "market_name": market_name,
         "vendor_id": asic_info_struct.vendor_id,
@@ -1778,12 +1800,12 @@ def amdsmi_get_gpu_pm_metrics_info(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
 
-    pm_metrics = ctypes.POINTER(amdsmi_wrapper.amdsmi_name_value_t)
-    num_mets = ctypes.c_uint32
+    pm_metrics = ctypes.POINTER(amdsmi_wrapper.amdsmi_name_value_t)()
+    num_mets = ctypes.c_uint32()
 
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_pm_metrics_info(
-            processor_handle, ctypes.byref(pm_metrics), ctypes.byref(num_mets)
+            processor_handle, ctypes.pointer(pm_metrics), ctypes.byref(num_mets)
         )
     )
 
@@ -1807,12 +1829,12 @@ def amdsmi_get_gpu_reg_table_info(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
 
-    reg_metrics = ctypes.POINTER(amdsmi_wrapper.amdsmi_name_value_t)
-    num_regs = ctypes.c_uint32
+    reg_metrics = ctypes.POINTER(amdsmi_wrapper.amdsmi_name_value_t)()
+    num_regs = ctypes.c_uint32()
 
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_reg_table_info(
-            processor_handle, reg_type, ctypes.byref(reg_metrics), ctypes.byref(num_regs)
+            processor_handle, reg_type, ctypes.pointer(reg_metrics), ctypes.byref(num_regs)
         )
     )
 
@@ -4434,6 +4456,5 @@ def amdsmi_get_link_topology_nearest(
         device_list.append(topology_nearest_list.processor_list[index])
 
     return {
-        'count': topology_nearest_list.count,
         'processor_list': device_list
     }

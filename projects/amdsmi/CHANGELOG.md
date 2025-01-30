@@ -135,6 +135,16 @@ GPU: 0
 
 ### Changed
 
+- **Added amdgpu driver version and amd_hsmp driver version to `amd-smi version` command**.  
+  - The `amd-smi version` command can now also display the amdgpu driver version using the `-g` flag.
+  - The amd_hsmp driver version can also be displayed using the `-c` flag.
+  - The new default for the `version` command is to display all the version information, including both amdgpu and amd_hsmp driver versions.
+
+```shell
+amd-smi version -g
+AMDSMI Tool: 24.7.1+6fa991c-dirty | AMDSMI Library version: 24.7.2.0 | ROCm version: N/A | amdgpu version: 6.12.2
+```
+
 - **All `amd-smi set` and `amd-smi reset` options are now mutually exclusive**.  
   - Users can only use one set option at a time now.  
 
@@ -337,6 +347,20 @@ GPU2   0000:46:00.0 32 Gb/s  512 Gb/s      XGMI
 ```
 
 ### Resolved issues
+
+- **Fixed `amdsmi_get_gpu_asic_info` and `amd-smi static --asic` not displaying graphics version properly for MI2x, MI1x or Navi 3x ASICs.**  
+  Before on MI100:
+  ```shell
+  $ amd-smi static --asic | grep TARGET_GRAPHICS_VERSION
+        TARGET_GRAPHICS_VERSION: gfx9008
+        TARGET_GRAPHICS_VERSION: gfx9008
+  ```
+  After on MI100:
+  ```shell
+  $ amd-smi static --asic | grep TARGET_GRAPHICS_VERSION
+        TARGET_GRAPHICS_VERSION: gfx908
+        TARGET_GRAPHICS_VERSION: gfx908
+  ```
 
 ### Upcoming changes
 

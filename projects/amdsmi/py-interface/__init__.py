@@ -39,6 +39,8 @@ try:
     from .amdsmi_interface import amdsmi_get_cpu_smu_fw_version
     from .amdsmi_interface import amdsmi_get_cpu_core_energy
     from .amdsmi_interface import amdsmi_get_cpu_socket_energy
+    from .amdsmi_interface import amdsmi_get_threads_per_core
+    from .amdsmi_interface import amdsmi_get_cpu_hsmp_driver_version
     from .amdsmi_interface import amdsmi_get_cpu_prochot_status
     from .amdsmi_interface import amdsmi_get_cpu_fclk_mclk
     from .amdsmi_interface import amdsmi_get_cpu_cclk_limit
@@ -231,6 +233,8 @@ from .amdsmi_interface import amdsmi_set_gpu_memory_partition_mode
 
 # # Individual GPU Metrics Functions
 from .amdsmi_interface import amdsmi_get_gpu_metrics_header_info
+from .amdsmi_interface import amdsmi_get_gpu_reg_table_info
+from .amdsmi_interface import amdsmi_get_gpu_pm_metrics_info
 
 # # Enums
 from .amdsmi_interface import AmdSmiInitFlags

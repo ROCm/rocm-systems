@@ -845,8 +845,7 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
     // default to 0xffffffff as not supported
     uint32_t partitition_id = std::numeric_limits<uint32_t>::max();
     auto tmp_partition_id = uint32_t(0);
-    amdsmi_status_t status = rsmi_wrapper(rsmi_dev_partition_id_get, processor_handle, 0,
-                                            &(tmp_partition_id));
+    amdsmi_status_t status = rsmi_wrapper(rsmi_dev_partition_id_get, processor_handle, 0, &(tmp_partition_id));
     // Do not return early if this value fails
     // continue to try getting all info
     if (status == AMDSMI_STATUS_SUCCESS) {
@@ -890,6 +889,7 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
     }
 
     // Insert current accumulator counters into struct
+    violation_status->violation_timestamp = metric_info_b.firmware_timestamp;
     violation_status->acc_counter = metric_info_b.accumulation_counter;
     violation_status->acc_prochot_thrm = metric_info_b.prochot_residency_acc;
     violation_status->acc_ppt_pwr = metric_info_b.ppt_residency_acc;
@@ -940,7 +940,6 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
 
         if (violation_status->per_prochot_thrm > 0) {
             violation_status->active_prochot_thrm = 1;
-            violation_status->violation_timestamp = kFASTEST_POLL_TIME_MS;
         } else {
             violation_status->active_prochot_thrm = 0;
         }
@@ -961,7 +960,6 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
 
         if (violation_status->per_ppt_pwr > 0) {
             violation_status->active_ppt_pwr = 1;
-            violation_status->violation_timestamp = kFASTEST_POLL_TIME_MS;
         } else {
             violation_status->active_ppt_pwr = 0;
         }
@@ -983,7 +981,6 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
 
         if (violation_status->per_socket_thrm > 0) {
             violation_status->active_socket_thrm = 1;
-            violation_status->violation_timestamp = kFASTEST_POLL_TIME_MS;
         } else {
             violation_status->active_socket_thrm = 0;
         }
@@ -1005,7 +1002,6 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
 
         if (violation_status->per_vr_thrm > 0) {
             violation_status->active_vr_thrm = 1;
-            violation_status->violation_timestamp = kFASTEST_POLL_TIME_MS;
         } else {
             violation_status->active_vr_thrm = 0;
         }
@@ -1027,7 +1023,6 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
 
         if (violation_status->per_hbm_thrm > 0) {
             violation_status->active_hbm_thrm = 1;
-            violation_status->violation_timestamp = kFASTEST_POLL_TIME_MS;
         } else {
             violation_status->active_hbm_thrm = 0;
         }
@@ -1049,7 +1044,6 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
 
         if (violation_status->per_gfx_clk_below_host_limit > 0) {
             violation_status->active_gfx_clk_below_host_limit = 1;
-            violation_status->violation_timestamp = kFASTEST_POLL_TIME_MS;
         } else {
             violation_status->active_gfx_clk_below_host_limit = 0;
         }
@@ -1300,7 +1294,7 @@ amdsmi_get_gpu_xgmi_link_status(amdsmi_processor_handle processor_handle,
     }
 
     uint32_t dev_num = 0;
-    auto r = rsmi_num_monitor_devices(&dev_num);
+    rsmi_num_monitor_devices(&dev_num);
     link_status->total_links = AMDSMI_MAX_NUM_XGMI_LINKS;
     if (dev_num <= link_status->total_links) {
         link_status->total_links = dev_num;
@@ -2030,7 +2024,7 @@ amdsmi_get_gpu_accelerator_partition_profile_config(amdsmi_processor_handle proc
     LOG_DEBUG(ss);
     auto resource_index = 0;
     // get resource info for each profile
-    for (auto i = 0; i < profile_config->num_profiles; i++) {
+    for (auto i = 0U; i < profile_config->num_profiles; i++) {
         auto it = partition_types_map.find(profile_config->profiles[i].profile_type);
         std::string partition_type_str = "UNKNOWN";
         if (it != partition_types_map.end()) {
@@ -2223,7 +2217,6 @@ amdsmi_get_gpu_accelerator_partition_profile(amdsmi_processor_handle processor_h
 
     // TODO(amdsmi_team): add resources here ^
     auto tmp_partition_id = uint32_t(0);
-    auto tmp_xcd_count = uint16_t(0);
     amdsmi_status_t status = AMDSMI_STATUS_NOT_SUPPORTED;
 
     // get xcp config info (this will tell use # of profiles/index's)
@@ -2279,7 +2272,7 @@ amdsmi_get_gpu_accelerator_partition_profile(amdsmi_processor_handle processor_h
             if (accelerator_capabilities.find(current_partition_str) != std::string::npos) {
                 auto it = std::find(tokens.begin(), tokens.end(), current_partition_str);
                 if (it != tokens.end()) {
-                    profile->profile_index = std::distance(tokens.begin(), it);
+                    profile->profile_index = static_cast<uint32_t>(std::distance(tokens.begin(), it));
                 }
             }
         }
@@ -2403,7 +2396,7 @@ amdsmi_set_gpu_accelerator_partition_profile(amdsmi_processor_handle processor_h
             partition_type_str.clear();
             partition_type_str = it->second;
         }
-        config.profiles[i].profile_index;
+
         ss << __PRETTY_FUNCTION__ << " | "
         << "config.profiles[" << i << "].profile_type: "
         << static_cast<int>(config.profiles[i].profile_type) << "\n"
@@ -3838,6 +3831,27 @@ amdsmi_status_t amdsmi_get_cpu_hsmp_proto_ver(amdsmi_processor_handle processor_
     return AMDSMI_STATUS_SUCCESS;
 }
 
+amdsmi_status_t amdsmi_get_cpu_hsmp_driver_version(amdsmi_processor_handle processor_handle,
+                                              amdsmi_hsmp_driver_version_t *amdsmi_hsmp_driver_ver)
+{
+    amdsmi_status_t status;
+    struct hsmp_driver_version hsmp_driver_ver;
+
+    AMDSMI_CHECK_INIT();
+
+    if (processor_handle == nullptr)
+        return AMDSMI_STATUS_INVAL;
+
+    status = static_cast<amdsmi_status_t>(esmi_hsmp_driver_version_get(&hsmp_driver_ver));
+    if (status != AMDSMI_STATUS_SUCCESS)
+        return amdsmi_errno_to_esmi_status(status);
+
+    amdsmi_hsmp_driver_ver->major = hsmp_driver_ver.major;
+    amdsmi_hsmp_driver_ver->minor = hsmp_driver_ver.minor;
+
+    return AMDSMI_STATUS_SUCCESS;
+}
+
 amdsmi_status_t amdsmi_get_cpu_smu_fw_version(amdsmi_processor_handle processor_handle,
                                               amdsmi_smu_fw_version_t *amdsmi_smu_fw)
 {
@@ -4347,13 +4361,20 @@ amdsmi_status_t amdsmi_get_cpu_ddr_bw(amdsmi_processor_handle processor_handle,
 {
     amdsmi_status_t status;
     struct ddr_bw_metrics ddr;
+    uint8_t sock_ind;
 
     AMDSMI_CHECK_INIT();
 
     if (processor_handle == nullptr)
         return AMDSMI_STATUS_INVAL;
 
-    status = static_cast<amdsmi_status_t>(esmi_ddr_bw_get(&ddr));
+    amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
+    if (r != AMDSMI_STATUS_SUCCESS)
+        return r;
+
+    sock_ind = (uint8_t)std::stoi(proc_id, NULL, 0);
+
+    status = static_cast<amdsmi_status_t>(esmi_ddr_bw_get(sock_ind, &ddr));
     if (status != AMDSMI_STATUS_SUCCESS)
         return amdsmi_errno_to_esmi_status(status);
 

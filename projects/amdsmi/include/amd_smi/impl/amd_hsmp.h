@@ -13,58 +13,65 @@
  * HSMP Messages supported
  */
 enum hsmp_message_ids {
-    HSMP_TEST = 1,            /* 01h Increments input value by 1 */
-    HSMP_GET_SMU_VER,         /* 02h SMU FW version */
-    HSMP_GET_PROTO_VER,       /* 03h HSMP interface version */
-    HSMP_GET_SOCKET_POWER,    /* 04h average package power consumption */
+    HSMP_TEST = 1,                  /* 01h Increments input value by 1 */
+    HSMP_GET_SMU_VER,               /* 02h SMU FW version */
+    HSMP_GET_PROTO_VER,             /* 03h HSMP interface version */
+    HSMP_GET_SOCKET_POWER,          /* 04h average package power consumption */
     HSMP_SET_SOCKET_POWER_LIMIT,    /* 05h Set the socket power limit */
     HSMP_GET_SOCKET_POWER_LIMIT,    /* 06h Get current socket power limit */
     HSMP_GET_SOCKET_POWER_LIMIT_MAX,/* 07h Get maximum socket power value */
-    HSMP_SET_BOOST_LIMIT,     /* 08h Set a core maximum frequency limit */
+    HSMP_SET_BOOST_LIMIT,           /* 08h Set a core maximum frequency limit */
     HSMP_SET_BOOST_LIMIT_SOCKET,    /* 09h Set socket maximum frequency level */
-    HSMP_GET_BOOST_LIMIT,     /* 0Ah Get current frequency limit */
-    HSMP_GET_PROC_HOT,        /* 0Bh Get PROCHOT status */
-    HSMP_SET_XGMI_LINK_WIDTH, /* 0Ch Set max and min width of xGMI Link */
-    HSMP_SET_DF_PSTATE,       /* 0Dh Alter APEnable/Disable messages behavior */
-    HSMP_SET_AUTO_DF_PSTATE,  /* 0Eh Enable DF P-State Performance Boost algorithm */
-    HSMP_GET_FCLK_MCLK,       /* 0Fh Get FCLK and MEMCLK for current socket */
+    HSMP_GET_BOOST_LIMIT,           /* 0Ah Get current frequency limit */
+    HSMP_GET_PROC_HOT,              /* 0Bh Get PROCHOT status */
+    HSMP_SET_XGMI_LINK_WIDTH,       /* 0Ch Set max and min width of xGMI Link */
+    HSMP_SET_DF_PSTATE,             /* 0Dh Alter APEnable/Disable messages behavior */
+    HSMP_SET_AUTO_DF_PSTATE,        /* 0Eh Enable DF P-State Performance Boost algorithm */
+    HSMP_GET_FCLK_MCLK,             /* 0Fh Get FCLK and MEMCLK for current socket */
     HSMP_GET_CCLK_THROTTLE_LIMIT,   /* 10h Get CCLK frequency limit in socket */
-    HSMP_GET_C0_PERCENT,      /* 11h Get average C0 residency in socket */
-    HSMP_SET_NBIO_DPM_LEVEL,  /* 12h Set max/min LCLK DPM Level for a given NBIO */
-    HSMP_GET_NBIO_DPM_LEVEL,  /* 13h Get LCLK DPM level min and max for a given NBIO */
-    HSMP_GET_DDR_BANDWIDTH,   /* 14h Get theoretical maximum and current DDR Bandwidth */
-    HSMP_GET_TEMP_MONITOR,    /* 15h Get socket temperature */
-    HSMP_GET_DIMM_TEMP_RANGE, /* 16h Get per-DIMM temperature range and refresh rate */
-    HSMP_GET_DIMM_POWER,      /* 17h Get per-DIMM power consumption */
-    HSMP_GET_DIMM_THERMAL,    /* 18h Get per-DIMM thermal sensors */
-    HSMP_GET_SOCKET_FREQ_LIMIT,    /* 19h Get current active frequency per socket */
-    HSMP_GET_CCLK_CORE_LIMIT, /* 1Ah Get CCLK frequency limit per core */
-    HSMP_GET_RAILS_SVI,       /* 1Bh Get SVI-based Telemetry for all rails */
-    HSMP_GET_SOCKET_FMAX_FMIN,/* 1Ch Get Fmax and Fmin per socket */
-    HSMP_GET_IOLINK_BANDWITH, /* 1Dh Get current bandwidth on IO Link */
-    HSMP_GET_XGMI_BANDWITH,   /* 1Eh Get current bandwidth on xGMI Link */
-    HSMP_SET_GMI3_WIDTH,      /* 1Fh Set max and min GMI3 Link width */
-    HSMP_SET_PCI_RATE,        /* 20h Control link rate on PCIe devices */
-    HSMP_SET_POWER_MODE,      /* 21h Select power efficiency profile policy */
-    HSMP_SET_PSTATE_MAX_MIN,  /* 22h Set the max and min DF P-State  */
-    HSMP_GET_METRIC_TABLE_VER,/* 23h Get metrics table version */
-    HSMP_GET_METRIC_TABLE,    /* 24h Get metrics table */
+    HSMP_GET_C0_PERCENT,            /* 11h Get average C0 residency in socket */
+    HSMP_SET_NBIO_DPM_LEVEL,        /* 12h Set max/min LCLK DPM Level for a given NBIO */
+    HSMP_GET_NBIO_DPM_LEVEL,        /* 13h Get LCLK DPM level min and max for a given NBIO */
+    HSMP_GET_DDR_BANDWIDTH,         /* 14h Get theoretical maximum and current DDR Bandwidth */
+    HSMP_GET_TEMP_MONITOR,          /* 15h Get socket temperature */
+    HSMP_GET_DIMM_TEMP_RANGE,       /* 16h Get per-DIMM temperature range and refresh rate */
+    HSMP_GET_DIMM_POWER,            /* 17h Get per-DIMM power consumption */
+    HSMP_GET_DIMM_THERMAL,          /* 18h Get per-DIMM thermal sensors */
+    HSMP_GET_SOCKET_FREQ_LIMIT,     /* 19h Get current active frequency per socket */
+    HSMP_GET_CCLK_CORE_LIMIT,       /* 1Ah Get CCLK frequency limit per core */
+    HSMP_GET_RAILS_SVI,             /* 1Bh Get SVI-based Telemetry for all rails */
+    HSMP_GET_SOCKET_FMAX_FMIN,      /* 1Ch Get Fmax and Fmin per socket */
+    HSMP_GET_IOLINK_BANDWITH,       /* 1Dh Get current bandwidth on IO Link */
+    HSMP_GET_XGMI_BANDWITH,         /* 1Eh Get current bandwidth on xGMI Link */
+    HSMP_SET_GMI3_WIDTH,            /* 1Fh Set max and min GMI3 Link width */
+    HSMP_SET_PCI_RATE,              /* 20h Control link rate on PCIe devices */
+    HSMP_SET_POWER_MODE,            /* 21h Select power efficiency profile policy */
+    HSMP_SET_PSTATE_MAX_MIN,        /* 22h Set the max and min DF P-State  */
+    HSMP_GET_METRIC_TABLE_VER,      /* 23h Get metrics table version */
+    HSMP_GET_METRIC_TABLE,          /* 24h Get metrics table */
     HSMP_GET_METRIC_TABLE_DRAM_ADDR,/* 25h Get metrics table dram address */
+    HSMP_SET_XGMI_PSTATE_RANGE,     /* 26h Set xGMI P-state range */
+    HSMP_CPU_RAIL_ISO_FREQ_POLICY,  /* 27h Get/Set Cpu Iso frequency policy */
+    HSMP_DFC_ENABLE_CTRL,           /* 28h Enable/Disable DF C-state */
+    HSMP_GET_RAPL_UNITS = 0x30,     /* 30h Get scaling factor for energy */
+    HSMP_GET_RAPL_CORE_COUNTER,     /* 31h Get core energy counter value */
+    HSMP_GET_RAPL_PACKAGE_COUNTER,  /* 32h Get package energy counter value */
     HSMP_MSG_ID_MAX,
 };
 
 struct hsmp_message {
-    __u32   msg_id;           /* Message ID */
-    __u16   num_args;         /* Number of input argument words in message */
-    __u16   response_sz;      /* Number of expected output/response words */
-    __u32   args[HSMP_MAX_MSG_LEN]; /* argument/response buffer */
-    __u16   sock_ind;         /* socket number */
+    __u32    msg_id;                /* Message ID */
+    __u16    num_args;              /* Number of input argument words in message */
+    __u16    response_sz;           /* Number of expected output/response words */
+    __u32    args[HSMP_MAX_MSG_LEN];/* argument/response buffer */
+    __u16    sock_ind;              /* socket number */
 };
 
 enum hsmp_msg_type {
-    HSMP_RSVD = -1,
-    HSMP_SET  = 0,
-    HSMP_GET  = 1,
+    HSMP_RSVD    = -1,
+    HSMP_SET     = 0,
+    HSMP_GET     = 1,
+    HSMP_SET_GET = 2,
 };
 
 enum hsmp_proto_versions {
@@ -72,7 +79,8 @@ enum hsmp_proto_versions {
     HSMP_PROTO_VER3,
     HSMP_PROTO_VER4,
     HSMP_PROTO_VER5,
-    HSMP_PROTO_VER6
+    HSMP_PROTO_VER6,
+    HSMP_PROTO_VER7
 };
 
 struct hsmp_msg_desc {
@@ -88,8 +96,7 @@ struct hsmp_msg_desc {
  *
  * Not supported messages would return -ENOMSG.
  */
-static const struct hsmp_msg_desc hsmp_msg_desc_table[]
-                __attribute__((unused)) = {
+static const struct hsmp_msg_desc hsmp_msg_desc_table[] = {
     /* RESERVED */
     {0, 0, HSMP_RSVD},
 
@@ -252,7 +259,7 @@ static const struct hsmp_msg_desc hsmp_msg_desc_table[]
 
     /*
      * HSMP_GET_CCLK_CORE_LIMIT, num_args = 1, response_sz = 1
-     * input: args[0] = apic id [31:0]
+     * input: args[0] = apic id of the core[31:0]
      * output: args[0] = frequency in MHz[31:0]
      */
     {1, 1, HSMP_GET},
@@ -297,10 +304,11 @@ static const struct hsmp_msg_desc hsmp_msg_desc_table[]
     {1, 1, HSMP_SET},
 
     /*
-     * HSMP_SET_POWER_MODE, num_args = 1, response_sz = 0
-     * input: args[0] = power efficiency mode[2:0]
+     * HSMP_SET_POWER_MODE, num_args = 1, response_sz = 0/1
+     * input: args[0] = set/get power mode[31] + power efficiency mode[2:0]
+     * output: args[0] = current power efficiency mode[2:0]
      */
-    {1, 0, HSMP_SET},
+    {1, 1, HSMP_SET_GET},
 
     /*
      * HSMP_SET_PSTATE_MAX_MIN, num_args = 1, response_sz = 0
@@ -323,6 +331,57 @@ static const struct hsmp_msg_desc hsmp_msg_desc_table[]
      * HSMP_GET_METRIC_TABLE_DRAM_ADDR, num_args = 0, response_sz = 2
      * output: args[0] = lower 32 bits of the address
      * output: args[1] = upper 32 bits of the address
+     */
+    {0, 2, HSMP_GET},
+
+    /*
+     * HSMP_SET_XGMI_PSTATE_RANGE, num_args = 1, response_sz = 0
+     * input: args[0] = min xGMI p-state[15:8] + max xGMI state[7:0]
+     */
+    {1, 0, HSMP_SET},
+
+    /*
+     * HSMP_CPU_RAIL_ISO_FREQ_POLICY, num_args = 1, response_sz = 1
+     * input: args[0] = set/get policy[31] +
+     * disable/enable independent control[0]
+     * output: args[0] = current policy[0]
+     */
+    {1, 1, HSMP_SET_GET},
+
+    /*
+     * HSMP_DFC_ENABLE_CTRL, num_args = 1, response_sz = 1
+     * input: args[0] = set/get policy[31] + enable/disable DFC[0]
+     * output: args[0] = current policy[0]
+     */
+    {1, 1, HSMP_SET_GET},
+
+    /* RESERVED(0x29-0x2f) */
+    {0, 0, HSMP_RSVD},
+    {0, 0, HSMP_RSVD},
+    {0, 0, HSMP_RSVD},
+    {0, 0, HSMP_RSVD},
+    {0, 0, HSMP_RSVD},
+    {0, 0, HSMP_RSVD},
+    {0, 0, HSMP_RSVD},
+
+    /*
+     * HSMP_GET_RAPL_UNITS, response_sz = 1
+     * output: args[0] = tu value[19:16] + esu value[12:8]
+     */
+    {0, 1, HSMP_GET},
+
+    /*
+     * HSMP_GET_RAPL_CORE_COUNTER, num_args = 1, response_sz = 1
+     * input: args[0] = Apic id[15:0]
+     * output: args[0] = lower 32 bits of energy
+     * output: args[1] = upper 32 bits of energy
+     */
+    {1, 2, HSMP_GET},
+
+    /*
+     * HSMP_GET_RAPL_PACKAGE_COUNTER, num_args = 0, response_sz = 1
+     * output: args[0] = lower 32 bits of energy
+     * output: args[1] = upper 32 bits of energy
      */
     {0, 2, HSMP_GET},
 };

@@ -35,7 +35,7 @@ detected:
 ~$ amd-smi
 usage: amd-smi [-h]  ...
 
-AMD System Management Interface | Version: 24.7.2.0 | ROCm version: 6.4.0 | Platform: Linux Baremetal
+AMD System Management Interface | Version: 25.1.0.0 | ROCm version: 6.4.0 | Platform: Linux Baremetal
 
 options:
   -h, --help          show this help message and exit
