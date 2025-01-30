@@ -28,6 +28,8 @@
 
 #include "PM4Queue.hpp"
 #include "KFDBaseComponentTest.hpp"
+#include "SDMAQueueByEngId.hpp"
+#include "SDMAPacket.hpp"
 
 class KFDNegativeTest : public KFDBaseComponentTest {
  public:
