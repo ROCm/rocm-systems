@@ -39,7 +39,8 @@ class SDMAPacket : public BasePacket {
 class SDMAWriteDataPacket : public SDMAPacket {
  public:
     // This contructor will also init the packet, no need for additional calls
-    SDMAWriteDataPacket(unsigned int familyId, void* destAddr, unsigned int data);
+    SDMAWriteDataPacket(unsigned int familyId, void* destAddr, unsigned int data,
+		        unsigned int packSizeOffset = 0);
     SDMAWriteDataPacket(unsigned int familyId, void* destAddr, unsigned int ndw, void *data);
 
     virtual ~SDMAWriteDataPacket(void) {}
@@ -47,7 +48,7 @@ class SDMAWriteDataPacket : public SDMAPacket {
     // @returns Pointer to the packet
     virtual const void *GetPacket() const  { return packetData; }
     // @breif Initialise the packet
-    void InitPacket(void* destAddr, unsigned int ndw, void *data);
+    void InitPacket(void* destAddr, unsigned int ndw, void *data, unsigned int packetSizeOffset = 0);
     // @returns Packet size in bytes
     virtual unsigned int SizeInBytes() const { return packetSize; }
 

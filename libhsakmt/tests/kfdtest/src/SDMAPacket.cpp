@@ -32,10 +32,11 @@
  */
 #define SDMA_COUNT(c) (m_FamilyId < FAMILY_AI ? (c) : (c)-1)
 
-SDMAWriteDataPacket::SDMAWriteDataPacket(unsigned int familyId, void* destAddr, unsigned int data):
+SDMAWriteDataPacket::SDMAWriteDataPacket(unsigned int familyId, void* destAddr, unsigned int data,
+                                         unsigned int packetSizeOffset):
     packetData(NULL) {
     m_FamilyId = familyId;
-    InitPacket(destAddr, 1, &data);
+    InitPacket(destAddr, 1, &data, packetSizeOffset);
 }
 
 SDMAWriteDataPacket::SDMAWriteDataPacket(unsigned int familyId, void* destAddr, unsigned int ndw,
@@ -46,9 +47,10 @@ SDMAWriteDataPacket::SDMAWriteDataPacket(unsigned int familyId, void* destAddr, 
 }
 
 void SDMAWriteDataPacket::InitPacket(void* destAddr, unsigned int ndw,
-                                     void *data) {
+                                     void *data, unsigned int packetSizeOffset) {
     packetSize = sizeof(SDMA_PKT_WRITE_UNTILED) +
         (ndw - 1) * sizeof(unsigned int);
+    packetSize -= packetSizeOffset;
     packetData = reinterpret_cast<SDMA_PKT_WRITE_UNTILED *>(AllocPacket());
 
     packetData->HEADER_UNION.op = SDMA_OP_WRITE;
