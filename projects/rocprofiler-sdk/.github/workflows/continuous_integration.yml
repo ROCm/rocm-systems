@@ -487,7 +487,13 @@ jobs:
       timeout-minutes: 5
       uses: actions/github-script@v6
       env:
-        COMMENT_BODY: ${{ steps.generatereport.outputs.CODECOVERAGE_REPORT }}
+        COMMENT_BODY: |
+          <details>
+          <summary><h2>Code Coverage Report</h2></summary>
+
+          <!-- Keep the empty line above to render markdown properly -->
+          ${{ steps.generatereport.outputs.CODECOVERAGE_REPORT }}
+          </details>
       with:
         github-token: ${{ secrets.TOKEN }}
         script: |
