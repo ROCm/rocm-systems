@@ -135,8 +135,10 @@ GPU: 0
 
 ### Changed
 
-- **Added amdgpu driver version to `amd-smi version` command**.  
+- **Added amdgpu driver version and amd_hsmp driver version to `amd-smi version` command**.  
   - The `amd-smi version` command can now also display the amdgpu driver version using the `-g` flag.
+  - The amd_hsmp driver version can also be displayed using the `-c` flag.
+  - The new default for the `version` command is to display all the version information, including both amdgpu and amd_hsmp driver versions.
 
 ```shell
 amd-smi version -g

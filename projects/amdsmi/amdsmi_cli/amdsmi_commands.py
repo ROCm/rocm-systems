@@ -98,7 +98,9 @@ class AMDSMICommands():
             sys.exit(-1)
 
 
-    def version(self, args, gpu_version=None):
+
+    def version(self, args, gpu_version=None, cpu_version=None):
+
         """Print Version String
 
         Args:
@@ -107,12 +109,12 @@ class AMDSMICommands():
 
         if gpu_version:
             args.gpu_version = gpu_version
-        # if cpu_version:
-        #     args.cpu_version = cpu_version
-        # # if no args are given, display everything
-        # if not gpu_version and not cpu_version:
-        #     args.gpu_version = True
-        #     args.cpu_version = True
+        if cpu_version:
+            args.cpu_version = cpu_version
+        # if no args are given, display everything
+        if not gpu_version and not cpu_version:
+            args.gpu_version = True
+            args.cpu_version = True
 
         try:
             amdsmi_lib_version = amdsmi_interface.amdsmi_get_lib_version()
@@ -129,7 +131,7 @@ class AMDSMICommands():
         if args.gpu_version:
             try:
                 gpus = amdsmi_interface.amdsmi_get_processor_handles()
-                if gpus:
+                if isinstance(gpus, list):
                     gpu_version_info = amdsmi_interface.amdsmi_get_gpu_driver_info(gpus[0])
                     gpu_version_str = gpu_version_info['driver_version']
                 else:
@@ -137,18 +139,17 @@ class AMDSMICommands():
             except amdsmi_exception.AmdSmiLibraryException as e:
                 gpu_version_str = e.get_error_info()
             self.logger.output['amdgpu_version'] = gpu_version_str
-
-        # if args.cpu_version:
-        #     try:
-        #         cpus = amdsmi_interface.amdsmi_get_cpusocket_handles()
-        #         if cpus:
-        #             cpu_version_info = amdsmi_interface.amdsmi_get_amd_hsmp_deriver_version(cpus[0])
-        #             cpu_version_str = cpu_version_info['driver_version']
-        #         else:
-        #             cpu_version_str = "N/A"
-        #     except amdsmi_exception.AmdSmiLibraryException as e:
-        #         cpu_version_str = e.get_error_info()
-        #     self.logger.output['amd_hsmp_driver_version'] = cpu_version_str
+        if args.cpu_version:
+            try:
+                cpus = amdsmi_interface.amdsmi_get_cpusocket_handles()
+                if isinstance(cpus, list):
+                    cpu_version_info = amdsmi_interface.amdsmi_get_amd_hsmp_driver_version(cpus[0])
+                    cpu_version_str = cpu_version_info['driver_version']
+                else:
+                    cpu_version_str = "N/A"
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                cpu_version_str = e.get_error_info()
+            self.logger.output['amd_hsmp_driver_version'] = cpu_version_str
 
         if self.logger.is_human_readable_format():
             human_readable_output = f"AMDSMI Tool: {__version__} | " \
@@ -156,8 +157,8 @@ class AMDSMICommands():
                                     f"ROCm version: {rocm_version_str}"
             if args.gpu_version:
                 human_readable_output = human_readable_output + f" | amdgpu version: {gpu_version_str}"
-            # if args.cpu_version:
-            #     human_readable_output = human_readable_output + f" | amd_hsmp driver version: {cpu_version_str}"
+            if args.cpu_version:
+                human_readable_output = human_readable_output + f" | amd_hsmp driver version: {cpu_version_str}"
             # Custom human readable handling for version
             if self.logger.destination == 'stdout':
                 print(human_readable_output)
