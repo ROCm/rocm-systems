@@ -213,6 +213,7 @@ jobs:
       timeout-minutes: 30
       shell: bash
       run:
+        sudo git config --global --add safe.directory '*';
         sudo LD_LIBRARY_PATH=./build/lib:$LD_LIBRARY_PATH python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-core
           --build-jobs 16
