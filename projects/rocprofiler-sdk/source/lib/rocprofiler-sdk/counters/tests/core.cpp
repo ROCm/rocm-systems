@@ -755,7 +755,7 @@ TEST(core, check_load_counter_def_append)
     const std::string test_yaml = R"(
 TEST_YAML_LOAD:
   architectures:
-    gfx942/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx90a/gfx9:
+    gfx942/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx90a/gfx9/gfx12/gfx1200/gfx1201:
       expression: reduce(GRBM_GUI_ACTIVE,max)*CU_NUM
   description: 'Unit: cycles'
     )";
@@ -782,13 +782,13 @@ TEST(core, check_load_counter_def)
     const std::string test_yaml = R"(
 GRBM_GUI_ACTIVE:
   architectures:
-    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx900/gfx90a/gfx9:
+    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx900/gfx90a/gfx9/gfx12/gfx1200/gfx1201:
       block: GRBM
       event: 2
   description: The GUI is Active
 TEST_YAML_LOAD:
   architectures:
-    gfx942/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx90a/gfx9:
+    gfx942/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx90a/gfx9/gfx12/gfx1200/gfx1201:
       expression: reduce(GRBM_GUI_ACTIVE,max)
   description: cycles
     )";

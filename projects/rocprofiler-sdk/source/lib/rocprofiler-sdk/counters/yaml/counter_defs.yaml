@@ -134,7 +134,7 @@ CP_UTIL:
     blocks are busy
 CU_NUM:
   architectures:
-    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx900/gfx90a/gfx9:
+    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx900/gfx90a/gfx9/gfx12/gfx1200/gfx1201:
       expression: simd_count/simd_per_cu
   description: CU_NUM
 SIMD_NUM:
@@ -263,6 +263,7 @@ GL2C_EA_RDREQ:
     gfx12/gfx1200/gfx1201:
       block: GL2C
       event: 140
+  description: Number of GL2C/EA read requests (either 32-byte or 64-byte or 128-byte) for all clients.
 GL2C_EA_RDREQ_sum:
   architectures:
     gfx12/gfx1200/gfx1201:
@@ -327,6 +328,7 @@ GL2C_EA_WRREQ:
     gfx12/gfx1200/gfx1201:
       block: GL2C
       event: 108
+  description: Number of transactions (all sizes) going over the GL2C_EA_WRREQ interface for all clients. This does not include probe commands.
 GL2C_EA_WRREQ_sum:
   architectures:
     gfx12/gfx1200/gfx1201:
@@ -338,6 +340,7 @@ GL2C_EA_WRREQ_STALL:
     gfx12/gfx1200/gfx1201:
       block: GL2C
       event: 122
+  description: Number of cycles a write request was stalled.
 GL2C_EA_WRREQ_STALL_max:
   architectures:
     gfx12/gfx1200/gfx1201:
@@ -2122,7 +2125,7 @@ SQ_WAVES_SAVED:
     space). Returns one value per-SE (aggregates of SIMD values).
 SQ_WAVES_sum:
   architectures:
-    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx90a/gfx9/gfx900:
+    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx90a/gfx9/gfx900/gfx12/gfx1200/gfx1201:
       expression: reduce(SQ_WAVES,sum)
   description: Gives the total number of waves currently enqueued by the application during the collection
     timeframe (for dispatch profiling this is the timeframe of kernel execution, for agent profiling it
