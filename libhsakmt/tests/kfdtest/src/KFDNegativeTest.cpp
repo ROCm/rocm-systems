@@ -147,6 +147,20 @@ TEST_F(KFDNegativeTest, BasicPipeReset) {
  * Similar to compute queue reset, only processes that have bad SDMA queues should
  * be reset, leaving healthy SDMA queue unaffected.
  *
+ * The test forks two processes, where for every given engine, the parent process
+ * enqueues a healthy queue while the child process enqueues a bad queue that triggers
+ * the reset in the following sequence:
+ *
+ * - Parent/child communicates test status via pipe 1 & 2
+ * - Child waits on pipe 1 read for parent to enqueue a queue on SDMA engine <n> with
+ *   healthy poll and write packet.
+ * - Parent waits on pipe 2 read for child to enqueue a queue on SDMA engine <n> with
+ *   unhealthy write packet then destroy its queue to trigger reset on HWS hang.
+ * - Child waits on pipe 1 for parent to confirm healthy poll and write packet
+ *   complete on SDMA engine <n>.
+ * - Child should verify it recieves a reset event, while the parent should not
+ *   recieve a reset event.
+ * - The parent/child test re-iterates again on SDMA engine <n+1>.
  */
 TEST_F(KFDNegativeTest, BasicSDMAReset) {
     TEST_START(TESTPROFILE_RUNALL);
@@ -181,8 +195,9 @@ TEST_F(KFDNegativeTest, BasicSDMAReset) {
                 ASSERT_SUCCESS(CreateHWExceptionEvent(false, false, gpuNode, &resetEvent));
 
                 // wait for parent to schedule healthy queue on engine
-                char buf1, buf2 ='x';
+                char buf1, buf2 ='0' + i;
                 read(pipe1[0], &buf1, 1);
+                ASSERT_EQ(buf1, buf2);
 
                 // submit bad queue and destroy to trigger reset
                 SDMAQueueByEngId queue(i);
@@ -200,6 +215,7 @@ TEST_F(KFDNegativeTest, BasicSDMAReset) {
                 // ack reset to parent and wait for parent to check healthy queue
                 write(pipe2[1], &buf2, 1);
                 read(pipe1[0], &buf1, 1);
+                ASSERT_EQ(buf1, buf2);
             }
 
             close(pipe1[0]);
@@ -235,9 +251,10 @@ TEST_F(KFDNegativeTest, BasicSDMAReset) {
                queue.PlaceAndSubmitPacket(SDMAWriteDataPacket(queue.GetFamilyId(), &dest[0], targetDestValue));
 
                // wait for for child to trigger reset on engine
-               char buf1 = 'x', buf2;
+               char buf1 = '0' + i, buf2;
                write(pipe1[1], &buf1, 1);
                read(pipe2[0], &buf2, 1);
+               ASSERT_EQ(buf1, buf2);
 
                // expect no reset event, then update poll to trigger write completion check
                EXPECT_NE(HSAKMT_STATUS_SUCCESS, hsaKmtWaitOnEvent(resetEvent, 100));
