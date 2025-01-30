@@ -105,9 +105,9 @@ else()
 
     include("${@PACKAGE_NAME@_CMAKE_DIR}/@PACKAGE_NAME@-targets.cmake")
 
-    @PROJECT_NAME@_config_nolink_target(@PACKAGE_NAME@::@PACKAGE_NAME@-external-nolink hip::host)
-    @PROJECT_NAME@_config_nolink_target(@PACKAGE_NAME@::@PACKAGE_NAME@-external-nolink hsa-runtime64::hsa-runtime64)
-    @PROJECT_NAME@_config_nolink_target(@PACKAGE_NAME@::@PACKAGE_NAME@-external-nolink amd_comgr)
+    rocprofiler_config_nolink_target(@PACKAGE_NAME@::@PACKAGE_NAME@-external-nolink hip::host)
+    rocprofiler_config_nolink_target(@PACKAGE_NAME@::@PACKAGE_NAME@-external-nolink hsa-runtime64::hsa-runtime64)
+    rocprofiler_config_nolink_target(@PACKAGE_NAME@::@PACKAGE_NAME@-external-nolink amd_comgr)
 
     # Library dependencies
     if(@PACKAGE_NAME@_FIND_COMPONENTS)

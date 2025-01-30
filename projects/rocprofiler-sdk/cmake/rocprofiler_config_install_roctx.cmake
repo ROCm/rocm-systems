@@ -4,8 +4,8 @@ include_guard(GLOBAL)
 include(CMakePackageConfigHelpers)
 
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME roctx)
-set(SDK_PACKAGE_NAME "${PROJECT_NAME}-sdk")
-set(PACKAGE_NAME "rocprofiler-sdk-roctx")
+set(SDK_PACKAGE_NAME "${PROJECT_NAME}")
+set(PACKAGE_NAME "${PROJECT_NAME}-roctx")
 
 install(
     EXPORT ${PACKAGE_NAME}-targets
@@ -27,7 +27,7 @@ set(PROJECT_INSTALL_DIR ${CMAKE_INSTALL_PREFIX})
 set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR})
 set(LIB_INSTALL_DIR ${CMAKE_INSTALL_LIBDIR})
 set(PROJECT_BUILD_TARGETS ${PACKAGE_NAME}-shared-library)
-set(PROJECT_EXTRA_DIRS "${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}-sdk-roctx")
+set(PROJECT_EXTRA_DIRS "${CMAKE_INSTALL_INCLUDEDIR}/${PACKAGE_NAME}")
 
 configure_package_config_file(
     ${PROJECT_SOURCE_DIR}/cmake/Templates/${PACKAGE_NAME}/config.cmake.in

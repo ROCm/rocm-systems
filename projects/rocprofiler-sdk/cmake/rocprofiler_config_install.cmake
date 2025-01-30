@@ -90,7 +90,7 @@ write_basic_package_version_file(
 
 configure_file(
     ${PROJECT_SOURCE_DIR}/cmake/rocprofiler_config_nolink_target.cmake
-    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}-sdk/${PROJECT_NAME}-sdk-config-nolink-target.cmake
+    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}/${PACKAGE_NAME}-config-nolink-target.cmake
     COPYONLY)
 
 configure_file(
@@ -106,7 +106,7 @@ install(
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}
     COMPONENT development)
 
-export(PACKAGE ${PROJECT_NAME})
+export(PACKAGE ${PACKAGE_NAME})
 
 # ------------------------------------------------------------------------------#
 # build tree
