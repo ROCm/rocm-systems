@@ -213,6 +213,28 @@ void SDMATrapPacket::InitPacket(unsigned int eventID) {
     packetData.INT_CONTEXT_UNION.int_context = eventID;
 }
 
+SDMAPollRegMemPacket::SDMAPollRegMemPacket(void *addr, int value) {
+    InitPacket(addr, value);
+}
+
+SDMAPollRegMemPacket::~SDMAPollRegMemPacket(void) {
+}
+
+void SDMAPollRegMemPacket::InitPacket(void *addr, int value) {
+    memset(&packetData, 0, SizeInBytes());
+
+    packetData.HEADER_UNION.op = SDMA_OP_POLL_REGMEM;
+    packetData.HEADER_UNION.mem_poll = 1;
+    packetData.HEADER_UNION.func = 0x3; // IsEqual.
+    SplitU64(reinterpret_cast<unsigned long long>(addr),
+             packetData.ADDR_LO_UNION.DW_1_DATA,
+             packetData.ADDR_HI_UNION.DW_2_DATA);
+    packetData.VALUE_UNION.value = value;
+    packetData.MASK_UNION.mask = 0xffffffff; // Compare the whole content.
+    packetData.DW5_UNION.interval = 0x04;
+    packetData.DW5_UNION.retry_count = 0xfff;
+}
+
 SDMATimePacket::SDMATimePacket(void *destaddr) {
     InitPacket(destaddr);
 }

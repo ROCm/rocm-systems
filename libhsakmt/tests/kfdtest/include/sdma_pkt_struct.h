@@ -31,6 +31,7 @@ const unsigned int SDMA_OP_WRITE = 2;
 
 const unsigned int SDMA_OP_FENCE = 5;
 const unsigned int SDMA_OP_TRAP = 6;
+const unsigned int SDMA_OP_POLL_REGMEM = 8;
 const unsigned int SDMA_OP_TIMESTAMP = 13;
 
 const unsigned int SDMA_OP_CONST_FILL = 11;
@@ -317,6 +318,61 @@ typedef struct SDMA_PKT_TRAP_TAG
     } INT_CONTEXT_UNION;
 } SDMA_PKT_TRAP, *PSDMA_PKT_TRAP;
 
+/*
+** Definitions for SDMA_PKT_POLL_REGMEM_TAG packet
+*/
+
+typedef struct SDMA_PKT_POLL_REGMEM_TAG {
+    union {
+        struct {
+            unsigned int op : 8;
+            unsigned int sub_op : 8;
+            unsigned int reserved_0 : 10;
+            unsigned int hdp_flush : 1;
+            unsigned int reserved_1 : 1;
+            unsigned int func : 3;
+            unsigned int mem_poll : 1;
+        };
+        unsigned int DW_0_DATA;
+    } HEADER_UNION;
+
+    union {
+        struct {
+            unsigned int addr_31_0 : 32;
+        };
+        unsigned int DW_1_DATA;
+    } ADDR_LO_UNION;
+
+    union {
+        struct {
+            unsigned int addr_63_32 : 32;
+        };
+        unsigned int DW_2_DATA;
+    } ADDR_HI_UNION;
+
+    union {
+        struct {
+            unsigned int value : 32;
+        };
+        unsigned int DW_3_DATA;
+    } VALUE_UNION;
+
+    union {
+        struct {
+            unsigned int mask : 32;
+        };
+        unsigned int DW_4_DATA;
+    } MASK_UNION;
+
+    union {
+        struct {
+            unsigned int interval : 16;
+            unsigned int retry_count : 12;
+            unsigned int reserved_0 : 4;
+        };
+        unsigned int DW_5_DATA;
+    } DW5_UNION;
+} SDMA_PKT_POLL_REGMEM, *PSDMA_PKT_POLL_REGMEM;
 
 /*
 ** Definitions for SDMA_PKT_TIMESTAMP packet

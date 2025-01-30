@@ -140,6 +140,26 @@ class SDMATrapPacket : public SDMAPacket {
     SDMA_PKT_TRAP  packetData;
 };
 
+class SDMAPollRegMemPacket : public SDMAPacket {
+ public:
+    // This contructor will also init the packet, no need for additional calls
+    SDMAPollRegMemPacket(void* addr, int value);
+
+    virtual ~SDMAPollRegMemPacket(void);
+
+    // @returns Pointer to the packet
+    virtual const void *GetPacket() const  { return &packetData; }
+    // @breif Initialise the packet
+    void InitPacket(void* addr, int value);
+    // @returns Packet size in bytes
+    virtual unsigned int SizeInBytes() const { return sizeof(SDMA_PKT_POLL_REGMEM); }
+
+ protected:
+    // SDMA_PKT_WRITE_UNTILED struct contains all the packet's data
+    SDMA_PKT_POLL_REGMEM packetData;
+    unsigned int packetSize;
+};
+
 class SDMATimePacket : public SDMAPacket {
  public:
     // Empty constructor, before using the packet call the init func
