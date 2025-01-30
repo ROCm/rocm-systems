@@ -141,8 +141,14 @@ GPU: 0
   - The new default for the `version` command is to display all the version information, including both amdgpu and amd_hsmp driver versions.
 
 ```shell
+amd-smi version
+AMDSMI Tool: 24.7.1+b446d6c-dirty | AMDSMI Library version: 24.7.2.0 | ROCm version: N/A | amdgpu version: 6.10.10 | amd_hsmp version: 2.2
+
 amd-smi version -g
-AMDSMI Tool: 24.7.1+6fa991c-dirty | AMDSMI Library version: 24.7.2.0 | ROCm version: N/A | amdgpu version: 6.12.2
+AMDSMI Tool: 24.7.1+b446d6c-dirty | AMDSMI Library version: 24.7.2.0 | ROCm version: N/A | amdgpu version: 6.10.10
+
+amd-smi version -c
+AMDSMI Tool: 24.7.1+b446d6c-dirty | AMDSMI Library version: 24.7.2.0 | ROCm version: N/A | amd_hsmp version: 2.2
 ```
 
 - **All `amd-smi set` and `amd-smi reset` options are now mutually exclusive**.  

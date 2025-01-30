@@ -112,7 +112,7 @@ class AMDSMICommands():
         if cpu_version:
             args.cpu_version = cpu_version
         # if no args are given, display everything
-        if not gpu_version and not cpu_version:
+        if not args.gpu_version and not args.cpu_version:
             args.gpu_version = True
             args.cpu_version = True
 
@@ -131,7 +131,7 @@ class AMDSMICommands():
         if args.gpu_version:
             try:
                 gpus = amdsmi_interface.amdsmi_get_processor_handles()
-                if isinstance(gpus, list):
+                if isinstance(gpus, list) and len(gpus) > 0:
                     gpu_version_info = amdsmi_interface.amdsmi_get_gpu_driver_info(gpus[0])
                     gpu_version_str = gpu_version_info['driver_version']
                 else:
@@ -142,9 +142,9 @@ class AMDSMICommands():
         if args.cpu_version:
             try:
                 cpus = amdsmi_interface.amdsmi_get_cpusocket_handles()
-                if isinstance(cpus, list):
-                    cpu_version_info = amdsmi_interface.amdsmi_get_amd_hsmp_driver_version(cpus[0])
-                    cpu_version_str = cpu_version_info['driver_version']
+                if isinstance(cpus, list) and len(cpus) > 0:
+                    cpu_version_info = amdsmi_interface.amdsmi_get_cpu_hsmp_driver_version(cpus[0])
+                    cpu_version_str = str(cpu_version_info['hsmp_driver_major_ver_num']) + "." + str(cpu_version_info['hsmp_driver_minor_ver_num'])
                 else:
                     cpu_version_str = "N/A"
             except amdsmi_exception.AmdSmiLibraryException as e:
@@ -158,7 +158,7 @@ class AMDSMICommands():
             if args.gpu_version:
                 human_readable_output = human_readable_output + f" | amdgpu version: {gpu_version_str}"
             if args.cpu_version:
-                human_readable_output = human_readable_output + f" | amd_hsmp driver version: {cpu_version_str}"
+                human_readable_output = human_readable_output + f" | amd_hsmp version: {cpu_version_str}"
             # Custom human readable handling for version
             if self.logger.destination == 'stdout':
                 print(human_readable_output)
