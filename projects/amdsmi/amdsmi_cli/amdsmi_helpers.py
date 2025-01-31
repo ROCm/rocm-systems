@@ -57,6 +57,7 @@ class AMDSMIHelpers():
         self._is_windows = False
         self._count_of_sets_called = 0
 
+        # Check if the system is a virtual OS
         if self.operating_system.startswith("Linux"):
             self._is_linux = True
             logging.debug(f"AMDSMIHelpers: Platform is linux:{self._is_linux}")
@@ -70,14 +71,29 @@ class AMDSMIHelpers():
 
             self._is_baremetal = not self._is_virtual_os
 
-            # Check for passthrough system filtering by device id
+        if self._is_virtual_os:
+            #If hard coded passthrough device ids exist on Virtual OS,
+            #   then it is a passthrough system
             output = self.get_pci_device_ids()
             passthrough_device_ids = ["7460", "73c8", "74a0", "74a1", "74a2"]
             if any(('0x' + device_id) in output for device_id in passthrough_device_ids):
-                if self._is_virtual_os:
-                    self._is_baremetal = True
-                    self._is_virtual_os = False
-                    self._is_passthrough = True
+                self._is_baremetal = True
+                self._is_virtual_os = False
+                self._is_passthrough = True
+
+            # Check for passthrough system dynamically via drm querying id_flags
+            try:
+                if self.is_amdgpu_initialized() and not self._is_passthrough:
+                    device_handles = amdsmi_interface.amdsmi_get_processor_handles()
+                    for dev in device_handles:
+                        virtualization_info = amdsmi_interface.amdsmi_get_gpu_virtualization_mode_info(dev)
+                        if virtualization_info['mode'] == amdsmi_interface.AmdSmiVirtualizationMode.PASSTHROUGH:
+                            self._is_baremetal = True
+                            self._is_virtual_os = False
+                            self._is_passthrough = True
+                            break # Once passthrough is determined, we can immediately break
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                logging.debug("Unable to determine virtualization status: " + e.get_error_code())
 
     def increment_set_count(self):
         self._count_of_sets_called += 1
@@ -693,7 +709,7 @@ class AMDSMIHelpers():
                     accelerator_partition_profiles['profile_indices'].append(str(profile['profiles'][p]['profile_index']))
                     accelerator_partition_profiles['profile_types'].append(profile['profiles'][p]['profile_type'])
                     accelerator_partition_profiles['memory_caps'].append(profile['profiles'][p]['memory_caps'])
-                break # Only need to get the profiles for one device    
+                break # Only need to get the profiles for one device
             except amdsmi_interface.AmdSmiLibraryException as e:
                 break
         return accelerator_partition_profiles

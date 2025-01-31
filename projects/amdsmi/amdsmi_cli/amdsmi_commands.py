@@ -112,7 +112,7 @@ class AMDSMICommands():
         if cpu_version:
             args.cpu_version = cpu_version
         # if no args are given, display everything
-        if not gpu_version and not cpu_version:
+        if not args.gpu_version and not args.cpu_version:
             args.gpu_version = True
             args.cpu_version = True
 
@@ -131,7 +131,7 @@ class AMDSMICommands():
         if args.gpu_version:
             try:
                 gpus = amdsmi_interface.amdsmi_get_processor_handles()
-                if isinstance(gpus, list):
+                if isinstance(gpus, list) and len(gpus) > 0:
                     gpu_version_info = amdsmi_interface.amdsmi_get_gpu_driver_info(gpus[0])
                     gpu_version_str = gpu_version_info['driver_version']
                 else:
@@ -142,9 +142,9 @@ class AMDSMICommands():
         if args.cpu_version:
             try:
                 cpus = amdsmi_interface.amdsmi_get_cpusocket_handles()
-                if isinstance(cpus, list):
-                    cpu_version_info = amdsmi_interface.amdsmi_get_amd_hsmp_driver_version(cpus[0])
-                    cpu_version_str = cpu_version_info['driver_version']
+                if isinstance(cpus, list) and len(cpus) > 0:
+                    cpu_version_info = amdsmi_interface.amdsmi_get_cpu_hsmp_driver_version(cpus[0])
+                    cpu_version_str = str(cpu_version_info['hsmp_driver_major_ver_num']) + "." + str(cpu_version_info['hsmp_driver_minor_ver_num'])
                 else:
                     cpu_version_str = "N/A"
             except amdsmi_exception.AmdSmiLibraryException as e:
@@ -158,7 +158,7 @@ class AMDSMICommands():
             if args.gpu_version:
                 human_readable_output = human_readable_output + f" | amdgpu version: {gpu_version_str}"
             if args.cpu_version:
-                human_readable_output = human_readable_output + f" | amd_hsmp driver version: {cpu_version_str}"
+                human_readable_output = human_readable_output + f" | amd_hsmp version: {cpu_version_str}"
             # Custom human readable handling for version
             if self.logger.destination == 'stdout':
                 print(human_readable_output)
@@ -2427,7 +2427,7 @@ class AMDSMICommands():
             cpu_freq_metrics (bool, optional): Value override for args.cpu_freq_metrics. Defaults to None.
             cpu_c0_res (bool, optional): Value override for args.cpu_c0_res. Defaults to None
             cpu_lclk_dpm_level (list, optional): Value override for args.cpu_lclk_dpm_level. Defaults to None
-            cpu_pwr_svi_telemtry_rails (list, optional): value override for args.cpu_pwr_svi_telemtry_rails. Defaults to None
+            cpu_pwr_svi_telemetry_rails (list, optional): value override for args.cpu_pwr_svi_telemetry_rails. Defaults to None
             cpu_io_bandwidth (list, optional): value override for args.cpu_io_bandwidth. Defaults to None
             cpu_xgmi_bandwidth (list, optional): value override for args.cpu_xgmi_bandwidth. Defaults to None
             cpu_metrics_ver (bool, optional): Value override for args.cpu_metrics_ver. Defaults to None
@@ -2456,7 +2456,7 @@ class AMDSMICommands():
         if cpu_lclk_dpm_level:
             args.cpu_lclk_dpm_level = cpu_lclk_dpm_level
         if cpu_pwr_svi_telemetry_rails:
-            args.cpu_pwr_svi_telemtry_rails = cpu_pwr_svi_telemetry_rails
+            args.cpu_pwr_svi_telemetry_rails = cpu_pwr_svi_telemetry_rails
         if cpu_io_bandwidth:
             args.cpu_io_bandwidth = cpu_io_bandwidth
         if cpu_xgmi_bandwidth:
@@ -2480,13 +2480,13 @@ class AMDSMICommands():
 
         #store cpu args that are applicable to the current platform
         curr_platform_cpu_args = ["cpu_power_metrics", "cpu_prochot", "cpu_freq_metrics",
-                                  "cpu_c0_res", "cpu_lclk_dpm_level", "cpu_pwr_svi_telemtry_rails",
+                                  "cpu_c0_res", "cpu_lclk_dpm_level", "cpu_pwr_svi_telemetry_rails",
                                   "cpu_io_bandwidth", "cpu_xgmi_bandwidth", "cpu_metrics_ver",
                                   "cpu_metrics_table", "cpu_socket_energy", "cpu_ddr_bandwidth",
                                   "cpu_temp", "cpu_dimm_temp_range_rate", "cpu_dimm_pow_consumption",
                                   "cpu_dimm_thermal_sensor"]
         curr_platform_cpu_values = [args.cpu_power_metrics, args.cpu_prochot, args.cpu_freq_metrics,
-                                    args.cpu_c0_res, args.cpu_lclk_dpm_level, args.cpu_pwr_svi_telemtry_rails,
+                                    args.cpu_c0_res, args.cpu_lclk_dpm_level, args.cpu_pwr_svi_telemetry_rails,
                                     args.cpu_io_bandwidth, args.cpu_xgmi_bandwidth, args.cpu_metrics_ver,
                                     args.cpu_metrics_table, args.cpu_socket_energy, args.cpu_ddr_bandwidth,
                                     args.cpu_temp, args.cpu_dimm_temp_range_rate, args.cpu_dimm_pow_consumption,
@@ -2790,7 +2790,7 @@ class AMDSMICommands():
                 xgmi_err=None, energy=None, mem_usage=None, schedule=None,
                 guard=None, guest_data=None, fb_usage=None, xgmi=None,
                 cpu=None, cpu_power_metrics=None, cpu_prochot=None, cpu_freq_metrics=None,
-                cpu_c0_res=None, cpu_lclk_dpm_level=None, cpu_pwr_svi_telemtry_rails=None,
+                cpu_c0_res=None, cpu_lclk_dpm_level=None, cpu_pwr_svi_telemetry_rails=None,
                 cpu_io_bandwidth=None, cpu_xgmi_bandwidth=None, cpu_metrics_ver=None,
                 cpu_metrics_table=None, cpu_socket_energy=None, cpu_ddr_bandwidth=None,
                 cpu_temp=None, cpu_dimm_temp_range_rate=None, cpu_dimm_pow_consumption=None,
@@ -2833,7 +2833,7 @@ class AMDSMICommands():
             cpu_freq_metrics (bool, optional): Value override for args.cpu_freq_metrics. Defaults to None.
             cpu_c0_res (bool, optional): Value override for args.cpu_c0_res. Defaults to None
             cpu_lclk_dpm_level (list, optional): Value override for args.cpu_lclk_dpm_level. Defaults to None
-            cpu_pwr_svi_telemtry_rails (list, optional): value override for args.cpu_pwr_svi_telemtry_rails. Defaults to None
+            cpu_pwr_svi_telemetry_rails (list, optional): value override for args.cpu_pwr_svi_telemetry_rails. Defaults to None
             cpu_io_bandwidth (list, optional): value override for args.cpu_io_bandwidth. Defaults to None
             cpu_xgmi_bandwidth (list, optional): value override for args.cpu_xgmi_bandwidth. Defaults to None
             cpu_metrics_ver (bool, optional): Value override for args.cpu_metrics_ver. Defaults to None
@@ -2880,7 +2880,7 @@ class AMDSMICommands():
         # Check if a CPU argument has been set
         cpu_args_enabled = False
         cpu_attributes = ["cpu_power_metrics", "cpu_prochot", "cpu_freq_metrics", "cpu_c0_res",
-                          "cpu_lclk_dpm_level", "cpu_pwr_svi_telemtry_rails", "cpu_io_bandwidth",
+                          "cpu_lclk_dpm_level", "cpu_pwr_svi_telemetry_rails", "cpu_io_bandwidth",
                           "cpu_xgmi_bandwidth", "cpu_metrics_ver", "cpu_metrics_table",
                           "cpu_socket_energy", "cpu_ddr_bandwidth", "cpu_temp", "cpu_dimm_temp_range_rate",
                           "cpu_dimm_pow_consumption", "cpu_dimm_thermal_sensor"]
@@ -2926,7 +2926,7 @@ class AMDSMICommands():
             if args.cpu:
                 self.metric_cpu(args, multiple_devices, cpu, cpu_power_metrics, cpu_prochot,
                                 cpu_freq_metrics, cpu_c0_res, cpu_lclk_dpm_level,
-                                cpu_pwr_svi_telemtry_rails, cpu_io_bandwidth, cpu_xgmi_bandwidth,
+                                cpu_pwr_svi_telemetry_rails, cpu_io_bandwidth, cpu_xgmi_bandwidth,
                                 cpu_metrics_ver, cpu_metrics_table, cpu_socket_energy,
                                 cpu_ddr_bandwidth, cpu_temp, cpu_dimm_temp_range_rate,
                                 cpu_dimm_pow_consumption, cpu_dimm_thermal_sensor)
@@ -2960,7 +2960,7 @@ class AMDSMICommands():
             if args.cpu:
                 self.metric_cpu(args, multiple_devices, cpu, cpu_power_metrics, cpu_prochot,
                                 cpu_freq_metrics, cpu_c0_res, cpu_lclk_dpm_level,
-                                cpu_pwr_svi_telemtry_rails, cpu_io_bandwidth, cpu_xgmi_bandwidth,
+                                cpu_pwr_svi_telemetry_rails, cpu_io_bandwidth, cpu_xgmi_bandwidth,
                                 cpu_metrics_ver, cpu_metrics_table, cpu_socket_energy,
                                 cpu_ddr_bandwidth, cpu_temp, cpu_dimm_temp_range_rate,
                                 cpu_dimm_pow_consumption, cpu_dimm_thermal_sensor)

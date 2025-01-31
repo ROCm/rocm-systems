@@ -438,6 +438,14 @@ class AmdSmiRegType(IntEnum):
     USR1 = amdsmi_wrapper.AMDSMI_REG_USR1
 
 
+class AmdSmiVirtualizationMode(IntEnum):
+    UNKNOWN = amdsmi_wrapper.AMDSMI_VIRTUALIZATION_MODE_UNKNOWN
+    BAREMETAL = amdsmi_wrapper.AMDSMI_VIRTUALIZATION_MODE_BAREMETAL
+    HOST = amdsmi_wrapper.AMDSMI_VIRTUALIZATION_MODE_HOST
+    GUEST = amdsmi_wrapper.AMDSMI_VIRTUALIZATION_MODE_GUEST
+    PASSTHROUGH = amdsmi_wrapper.AMDSMI_VIRTUALIZATION_MODE_PASSTHROUGH
+
+
 class AmdSmiEventReader:
     def __init__(
         self, processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
@@ -4457,4 +4465,23 @@ def amdsmi_get_link_topology_nearest(
 
     return {
         'processor_list': device_list
+    }
+
+def amdsmi_get_gpu_virtualization_mode_info(
+    processor_handle: amdsmi_wrapper.amdsmi_processor_handle
+    ) -> Dict[str, AmdSmiVirtualizationMode]:
+
+    # make info struct here
+    mode = amdsmi_wrapper.amdsmi_virtualization_mode_t()
+
+    # call lib function here
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_gpu_virtualization_mode(
+            processor_handle,
+            ctypes.byref(mode)
+        )
+    )
+
+    return {
+        "mode": AmdSmiVirtualizationMode(mode.value)
     }

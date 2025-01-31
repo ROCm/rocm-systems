@@ -3785,6 +3785,61 @@ amdsmi_get_link_topology_nearest(amdsmi_processor_handle processor_handle,
     return status;
 }
 
+amdsmi_status_t
+amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle processor_handle, amdsmi_virtualization_mode_t *mode) {
+
+    AMDSMI_CHECK_INIT();
+
+    if (mode == nullptr) {
+        return AMDSMI_STATUS_INVAL;
+    }
+
+    struct drm_amdgpu_info_device dev_info = {};
+
+    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+    amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
+    if (r != AMDSMI_STATUS_SUCCESS)
+        return r;
+
+    amdsmi_status_t status;
+    if (gpu_device->check_if_drm_is_supported()){
+        status = gpu_device->amdgpu_query_info(AMDGPU_INFO_DEV_INFO, sizeof(struct drm_amdgpu_info_device), &dev_info);
+        if (status != AMDSMI_STATUS_SUCCESS) return status;
+
+        SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
+
+        // get drm version. If it's older than 3.62.0, then say not supported and exit.
+        drmVersionPtr drm_version;
+        int drm_fd = gpu_device->get_gpu_fd();
+        drm_version = drmGetVersion(drm_fd);
+
+        // minimum version that supports getting of virtualization mode
+        int major_version = 3;
+        int minor_version = 62;
+        int patch_version = 0;
+
+        if ((drm_version->version_major < major_version) || (drm_version->version_minor < minor_version) || (drm_version->version_patchlevel < patch_version)){
+            *mode = AMDSMI_VIRTUALIZATION_MODE_UNKNOWN;
+        }
+        else {
+            uint32_t ids_flag = (dev_info.ids_flags & AMDGPU_IDS_FLAGS_MODE_MASK) >> AMDGPU_IDS_FLAGS_MODE_SHIFT;
+            switch (ids_flag){
+                case 0: *mode = AMDSMI_VIRTUALIZATION_MODE_BAREMETAL; break;
+                case 1: *mode = AMDSMI_VIRTUALIZATION_MODE_GUEST; break;
+                case 2: *mode = AMDSMI_VIRTUALIZATION_MODE_PASSTHROUGH; break;
+                default: *mode = AMDSMI_VIRTUALIZATION_MODE_UNKNOWN; break;
+            }
+        }
+        free(drm_version);
+    }
+    else {
+        return AMDSMI_STATUS_DRM_ERROR;
+    }
+
+    return AMDSMI_STATUS_SUCCESS;
+}
+
+
 #ifdef ENABLE_ESMI_LIB
 static amdsmi_status_t amdsmi_errno_to_esmi_status(amdsmi_status_t status)
 {

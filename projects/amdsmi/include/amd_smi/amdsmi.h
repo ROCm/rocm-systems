@@ -158,7 +158,7 @@ typedef enum {
 #define AMDSMI_LIB_VERSION_YEAR 25
 
 //! Major version should be changed for every header change (adding/deleting APIs, changing names, fields of structures, etc.)
-#define AMDSMI_LIB_VERSION_MAJOR 1
+#define AMDSMI_LIB_VERSION_MAJOR 2
 
 //! Minor version should be updated for each API change, but without changing headers
 #define AMDSMI_LIB_VERSION_MINOR 0
@@ -1679,6 +1679,18 @@ typedef struct {
     amdsmi_processor_handle processor_list[AMDSMI_MAX_DEVICES];
     uint64_t reserved[15];
 } amdsmi_topology_nearest_t;
+
+
+/**
+ * @brief This structure contains information about virtualization mode of current system.
+ */
+typedef enum {
+    AMDSMI_VIRTUALIZATION_MODE_UNKNOWN = 0,
+    AMDSMI_VIRTUALIZATION_MODE_BAREMETAL,
+    AMDSMI_VIRTUALIZATION_MODE_HOST,
+    AMDSMI_VIRTUALIZATION_MODE_GUEST,
+    AMDSMI_VIRTUALIZATION_MODE_PASSTHROUGH
+} amdsmi_virtualization_mode_t;
 
 //! Place-holder "variant" for functions that have don't have any variants,
 //! but do have monitors or sensors.
@@ -5320,6 +5332,27 @@ amdsmi_status_t
 amdsmi_get_link_topology_nearest(amdsmi_processor_handle processor_handle,
                                  amdsmi_link_type_t link_type,
                                  amdsmi_topology_nearest_t* topology_nearest_info);
+
+/**
+ *  @brief          Returns the virtualization mode for the target device.
+ *
+ *  @platform{gpu_bm_linux}  @platform{host}
+ *
+ *  @details        Once called topology_nearest_info will get populated with a list of
+ *                  all nearest devices for a given link_type. The list has a count of
+ *                  the number of devices found and their respective handles/identifiers.
+ *
+ *  @param[in]      processor_handle The identifier of the given device.
+ *
+ *  @param[in,out]  mode Reference to the enum representing virtualization mode.
+ *                    - When zero, the virtualization mode is unknown
+ *                    - When non-zero, the virtualization mode is detected
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail.
+ */
+amdsmi_status_t
+amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle processor_handle,
+                                   amdsmi_virtualization_mode_t* mode);
 
 #ifdef ENABLE_ESMI_LIB
 /*****************************************************************************/
