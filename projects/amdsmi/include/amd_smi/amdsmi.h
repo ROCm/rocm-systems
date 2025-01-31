@@ -1680,6 +1680,17 @@ typedef struct {
     uint64_t reserved[15];
 } amdsmi_topology_nearest_t;
 
+
+/**
+ * @brief This structure contains information about passthrough mode in guest systems.
+ */
+typedef struct {
+    uint32_t device_id;
+    uint32_t rev_id;
+    uint32_t vendor_id;
+    uint64_t ids_flags;
+} amdsmi_passthrough_info_t;
+
 //! Place-holder "variant" for functions that have don't have any variants,
 //! but do have monitors or sensors.
 #define AMDSMI_DEFAULT_VARIANT 0xFFFFFFFFFFFFFFFF
@@ -5320,6 +5331,10 @@ amdsmi_status_t
 amdsmi_get_link_topology_nearest(amdsmi_processor_handle processor_handle,
                                  amdsmi_link_type_t link_type,
                                  amdsmi_topology_nearest_t* topology_nearest_info);
+
+amdsmi_status_t
+amdsmi_get_gpu_passthrough_info(amdsmi_processor_handle processor_handle,
+                                amdsmi_passthrough_info_t* info);
 
 #ifdef ENABLE_ESMI_LIB
 /*****************************************************************************/

@@ -1989,6 +1989,21 @@ struct_amdsmi_topology_nearest_t._fields_ = [
 ]
 
 amdsmi_topology_nearest_t = struct_amdsmi_topology_nearest_t
+
+class struct_amdsmi_passthrough_info_t(Structure):
+    pass
+
+struct_amdsmi_passthrough_info_t._pack_ = 1 # source:False
+struct_amdsmi_passthrough_info_t._fields_ = [
+    ('device_id', ctypes.c_uint32),
+    ('rev_id', ctypes.c_uint32),
+    ('vendor_id', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('ids_flags', ctypes.c_uint64),
+]
+
+amdsmi_passthrough_info_t = struct_amdsmi_passthrough_info_t
+
 class struct_amdsmi_hsmp_driver_version_t(Structure):
     pass
 
@@ -1999,6 +2014,7 @@ struct_amdsmi_hsmp_driver_version_t._fields_ = [
 ]
 
 amdsmi_hsmp_driver_version_t = struct_amdsmi_hsmp_driver_version_t
+
 class struct_amdsmi_smu_fw_version_t(Structure):
     pass
 
@@ -2554,6 +2570,9 @@ amdsmi_get_gpu_total_ecc_count.argtypes = [amdsmi_processor_handle, ctypes.POINT
 amdsmi_get_link_topology_nearest = _libraries['libamd_smi.so'].amdsmi_get_link_topology_nearest
 amdsmi_get_link_topology_nearest.restype = amdsmi_status_t
 amdsmi_get_link_topology_nearest.argtypes = [amdsmi_processor_handle, amdsmi_link_type_t, ctypes.POINTER(struct_amdsmi_topology_nearest_t)]
+amdsmi_get_gpu_passthrough_info = _libraries['libamd_smi.so'].amdsmi_get_gpu_passthrough_info
+amdsmi_get_gpu_passthrough_info.restype = amdsmi_status_t
+amdsmi_get_gpu_passthrough_info.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_passthrough_info_t)]
 amdsmi_get_cpu_core_energy = _libraries['libamd_smi.so'].amdsmi_get_cpu_core_energy
 amdsmi_get_cpu_core_energy.restype = amdsmi_status_t
 amdsmi_get_cpu_core_energy.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint64)]
@@ -2976,7 +2995,7 @@ __all__ = \
     'amdsmi_get_gpu_metrics_info',
     'amdsmi_get_gpu_od_volt_curve_regions',
     'amdsmi_get_gpu_od_volt_info', 'amdsmi_get_gpu_overdrive_level',
-    'amdsmi_get_gpu_pci_bandwidth',
+    'amdsmi_get_gpu_passthrough_info', 'amdsmi_get_gpu_pci_bandwidth',
     'amdsmi_get_gpu_pci_replay_counter',
     'amdsmi_get_gpu_pci_throughput', 'amdsmi_get_gpu_perf_level',
     'amdsmi_get_gpu_pm_metrics_info',
@@ -3025,9 +3044,9 @@ __all__ = \
     'amdsmi_mm_ip_t', 'amdsmi_name_value_t', 'amdsmi_nps_caps_t',
     'amdsmi_od_vddc_point_t', 'amdsmi_od_volt_curve_t',
     'amdsmi_od_volt_freq_data_t', 'amdsmi_p2p_capability_t',
-    'amdsmi_pcie_bandwidth_t', 'amdsmi_pcie_info_t',
-    'amdsmi_power_cap_info_t', 'amdsmi_power_info_t',
-    'amdsmi_power_profile_preset_masks_t',
+    'amdsmi_passthrough_info_t', 'amdsmi_pcie_bandwidth_t',
+    'amdsmi_pcie_info_t', 'amdsmi_power_cap_info_t',
+    'amdsmi_power_info_t', 'amdsmi_power_profile_preset_masks_t',
     'amdsmi_power_profile_status_t', 'amdsmi_proc_info_t',
     'amdsmi_process_handle_t', 'amdsmi_process_info_t',
     'amdsmi_processor_handle', 'amdsmi_range_t',
@@ -3093,6 +3112,7 @@ __all__ = \
     'struct_amdsmi_od_volt_curve_t',
     'struct_amdsmi_od_volt_freq_data_t',
     'struct_amdsmi_p2p_capability_t',
+    'struct_amdsmi_passthrough_info_t',
     'struct_amdsmi_pcie_bandwidth_t', 'struct_amdsmi_pcie_info_t',
     'struct_amdsmi_power_cap_info_t', 'struct_amdsmi_power_info_t',
     'struct_amdsmi_power_profile_status_t',

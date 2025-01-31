@@ -3785,6 +3785,42 @@ amdsmi_get_link_topology_nearest(amdsmi_processor_handle processor_handle,
     return status;
 }
 
+amdsmi_status_t
+amdsmi_get_gpu_passthrough_info(amdsmi_processor_handle processor_handle, amdsmi_passthrough_info_t *info) {
+
+    AMDSMI_CHECK_INIT();
+
+    if (info == nullptr) {
+        return AMDSMI_STATUS_INVAL;
+    }
+
+    struct drm_amdgpu_info_device dev_info = {};
+
+    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+    amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
+    if (r != AMDSMI_STATUS_SUCCESS)
+        return r;
+
+    amdsmi_status_t status;
+    if (gpu_device->check_if_drm_is_supported()){
+        status = gpu_device->amdgpu_query_info(AMDGPU_INFO_DEV_INFO, sizeof(struct drm_amdgpu_info_device), &dev_info);
+        if (status != AMDSMI_STATUS_SUCCESS) return status;
+
+        SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
+
+        info->device_id = dev_info.device_id;
+        info->rev_id = dev_info.pci_rev;
+        info->vendor_id = gpu_device->get_vendor_id();
+        info->ids_flags = dev_info.ids_flags;
+    }
+    else {
+        return AMDSMI_STATUS_DRM_ERROR;
+    }
+
+    return AMDSMI_STATUS_SUCCESS;
+}
+
+
 #ifdef ENABLE_ESMI_LIB
 static amdsmi_status_t amdsmi_errno_to_esmi_status(amdsmi_status_t status)
 {

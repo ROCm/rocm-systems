@@ -730,6 +730,18 @@ struct drm_amdgpu_cs_chunk_data {
  */
 #define AMDGPU_IDS_FLAGS_FUSION         0x1
 #define AMDGPU_IDS_FLAGS_PREEMPTION     0x2
+#define AMDGPU_IDS_FLAGS_TMZ            0x4
+#define AMDGPU_IDS_FLAGS_CONFORMANT_TRUNC_COORD 0x8
+
+/*
+ *  Query h/w info: Flag identifying VF/PF/PT mode
+ *
+ */
+#define AMDGPU_IDS_FLAGS_MODE_MASK      0x300
+#define AMDGPU_IDS_FLAGS_MODE_SHIFT     0x8
+#define AMDGPU_IDS_FLAGS_MODE_PF        0x0
+#define AMDGPU_IDS_FLAGS_MODE_VF        0x1
+#define AMDGPU_IDS_FLAGS_MODE_PT        0x2
 
 /* indicate if acceleration can be working */
 #define AMDGPU_INFO_ACCEL_WORKING		0x00
@@ -1059,7 +1071,7 @@ struct drm_amdgpu_info_device {
 	__u32 num_rb_pipes;
 	__u32 num_hw_gfx_contexts;
 	__u32 _pad;
-	__u64 ids_flags;
+	__u64 ids_flags;                    // Relevant info here REMOVE LATER
 	/** Starting virtual address for UMDs. */
 	__u64 virtual_address_offset;
 	/** The maximum virtual address */

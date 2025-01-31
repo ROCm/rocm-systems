@@ -438,6 +438,13 @@ class AmdSmiRegType(IntEnum):
     USR1 = amdsmi_wrapper.AMDSMI_REG_USR1
 
 
+class AmdSmiPassthroughInfoFlags(IntEnum):
+    MASK = 0x300
+    SHIFT = 0x8
+    PF = 0x0
+    VT = 0x1
+    PT = 0x2
+
 class AmdSmiEventReader:
     def __init__(
         self, processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
@@ -4457,4 +4464,26 @@ def amdsmi_get_link_topology_nearest(
 
     return {
         'processor_list': device_list
+    }
+
+def amdsmi_get_gpu_passthrough_info(
+    processor_handle: amdsmi_wrapper.amdsmi_processor_handle
+    ) -> Dict[str, int]:
+
+    # make info struct here
+    info = amdsmi_wrapper.amdsmi_passthrough_info_t()
+
+    # call lib function here
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_gpu_passthrough_info(
+            processor_handle,
+            ctypes.byref(info)
+        )
+    )
+
+    return {
+        "device_id": info.device_id,
+        "rev_id": info.rev_id,
+        "vendor_id": info.vendor_id,
+        "ids_flags": info.ids_flags
     }
