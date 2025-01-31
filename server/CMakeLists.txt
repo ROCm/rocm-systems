@@ -48,6 +48,16 @@ else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ggdb -O0 -DDEBUG")
 endif()
 
+# Issue with ABI compatibility and gRPC.
+# See:
+# - https://github.com/llvm/llvm-project/issues/102443
+# - https://github.com/abseil/abseil-cpp/issues/1747
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 18.0.0)
+    message("Compiler is " ${CMAKE_CXX_COMPILER_ID} ":" ${CMAKE_CXX_COMPILER_VERSION})
+    message("Applying abi patch...")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fclang-abi-compat=17")
+endif()
+
 set(SRC_DIR "src")
 set(INC_DIR "include/rdc")
 

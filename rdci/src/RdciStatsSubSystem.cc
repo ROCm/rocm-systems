@@ -261,15 +261,15 @@ void RdciStatsSubSystem::show_job_stats(const rdc_gpu_usage_info_t& gpu_info) co
             << std::setprecision(2) << gpu_info.gpu_temperature.standard_deviation << "\n";
   std::cout << "| PCIe Rx Bandwidth (megabytes)    | "
             << "Max: "
-            << (gpu_info.pcie_rx.max_value == std::numeric_limits<int>::max()
+            << (gpu_info.pcie_rx.max_value == std::numeric_limits<uint64_t>::max()
                     ? "N/A"
                     : std::to_string(gpu_info.pcie_rx.max_value))
             << " Min: "
-            << (gpu_info.pcie_rx.min_value == std::numeric_limits<int>::max()
+            << (gpu_info.pcie_rx.min_value == std::numeric_limits<uint64_t>::max()
                     ? "N/A"
                     : std::to_string(gpu_info.pcie_rx.min_value))
             << " Avg: "
-            << (gpu_info.pcie_rx.average == std::numeric_limits<int>::max()
+            << (gpu_info.pcie_rx.average == std::numeric_limits<uint64_t>::max()
                     ? "N/A"
                     : std::to_string(gpu_info.pcie_rx.average))
             << " SD: " << std::fixed << std::setprecision(2)
@@ -279,15 +279,15 @@ void RdciStatsSubSystem::show_job_stats(const rdc_gpu_usage_info_t& gpu_info) co
             << "\n";
   std::cout << "| PCIe Tx Bandwidth (megabytes)    | "
             << "Max: "
-            << (gpu_info.pcie_tx.max_value == std::numeric_limits<int>::max()
+            << (gpu_info.pcie_tx.max_value == std::numeric_limits<uint64_t>::max()
                     ? "N/A"
                     : std::to_string(gpu_info.pcie_tx.max_value))
             << " Min: "
-            << (gpu_info.pcie_tx.min_value == std::numeric_limits<int>::max()
+            << (gpu_info.pcie_tx.min_value == std::numeric_limits<uint64_t>::max()
                     ? "N/A"
                     : std::to_string(gpu_info.pcie_tx.min_value))
             << " Avg: "
-            << (gpu_info.pcie_tx.average == std::numeric_limits<int>::max()
+            << (gpu_info.pcie_tx.average == std::numeric_limits<uint64_t>::max()
                     ? "N/A"
                     : std::to_string(gpu_info.pcie_tx.average))
             << " SD: " << std::fixed << std::setprecision(2)
@@ -295,7 +295,7 @@ void RdciStatsSubSystem::show_job_stats(const rdc_gpu_usage_info_t& gpu_info) co
                     ? "N/A"
                     : std::to_string(gpu_info.pcie_tx.standard_deviation))
             << "\n";
-  std::cout << "| PCIe Total Bandwidth (megabytes)    | "
+  std::cout << "| PCIe Total Bandwidth (megabytes) | "
             << "Max: " << gpu_info.pcie_total.max_value << " Min: " << gpu_info.pcie_total.min_value
             << " Avg: " << gpu_info.pcie_total.average << " SD: " << std::fixed
             << std::setprecision(2) << gpu_info.pcie_total.standard_deviation << "\n";
