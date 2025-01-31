@@ -5338,9 +5338,7 @@ amdsmi_get_link_topology_nearest(amdsmi_processor_handle processor_handle,
  *
  *  @platform{gpu_bm_linux}  @platform{host}
  *
- *  @details        Once called topology_nearest_info will get populated with a list of
- *                  all nearest devices for a given link_type. The list has a count of
- *                  the number of devices found and their respective handles/identifiers.
+ *  @details        The virtualization mode is detected and returned as an enum.
  *
  *  @param[in]      processor_handle The identifier of the given device.
  *
