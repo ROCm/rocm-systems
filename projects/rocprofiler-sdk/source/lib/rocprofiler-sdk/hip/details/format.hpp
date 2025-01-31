@@ -30,6 +30,7 @@
 #include <hip/hip_runtime_api.h>
 // must be included after runtime api
 #include <hip/hip_deprecated.h>
+#include <hip/hip_version.h>
 
 #include "fmt/core.h"
 #include "fmt/ranges.h"
@@ -60,6 +61,15 @@
 
 #define ROCP_SDK_HIP_FORMAT_CASE_STMT(PREFIX, SUFFIX)                                              \
     case PREFIX##SUFFIX: return fmt::format_to(ctx.out(), #SUFFIX)
+
+// provide a default case when not building in CI
+#if defined(ROCPROFILER_CI)
+#    define ROCP_SDK_HIP_FORMAT_DFLT_CASE(PREFIX)
+#else
+#    define ROCP_SDK_HIP_FORMAT_DFLT_CASE(PREFIX)                                                  \
+        default:                                                                                   \
+            return fmt::format_to(ctx.out(), "{}_UNKNOWN={}", #PREFIX, static_cast<int>(v))
+#endif
 
 namespace rocprofiler
 {
@@ -177,6 +187,10 @@ struct formatter<hipGraphNodeType> : rocprofiler::hip::details::base_formatter
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipGraphNodeType, MemcpyToSymbol);
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipGraphNodeType, Empty);
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipGraphNodeType, Count);
+#if HIP_VERSION >= 60400000
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipGraphNodeType, BatchMemOp);
+#endif
+            ROCP_SDK_HIP_FORMAT_DFLT_CASE(hipGraphNodeType);
         }
         return fmt::format_to(ctx.out(), "Unknown");
     }
@@ -195,6 +209,7 @@ struct formatter<hipGraphInstantiateResult> : rocprofiler::hip::details::base_fo
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipGraphInstantiate, InvalidStructure);
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipGraphInstantiate, NodeOperationNotSupported);
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipGraphInstantiate, MultipleDevicesNotSupported);
+            ROCP_SDK_HIP_FORMAT_DFLT_CASE(hipGraphInstantiate);
         }
         return fmt::format_to(ctx.out(), "Unknown");
     }
@@ -211,6 +226,7 @@ struct formatter<hipMemAllocationType> : rocprofiler::hip::details::base_formatt
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemAllocationType, Invalid);
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemAllocationType, Pinned);
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemAllocationType, Max);
+            ROCP_SDK_HIP_FORMAT_DFLT_CASE(hipMemAllocationType);
         }
         return fmt::format_to(ctx.out(), "Unknown");
     }
@@ -226,6 +242,7 @@ struct formatter<hipMemLocationType> : rocprofiler::hip::details::base_formatter
         {
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemLocationType, Invalid);
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemLocationType, Device);
+            ROCP_SDK_HIP_FORMAT_DFLT_CASE(hipMemLocationType);
         }
         return fmt::format_to(ctx.out(), "Unknown");
     }
@@ -243,6 +260,7 @@ struct formatter<hipMemAllocationHandleType> : rocprofiler::hip::details::base_f
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemHandleType, PosixFileDescriptor);
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemHandleType, Win32);
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemHandleType, Win32Kmt);
+            ROCP_SDK_HIP_FORMAT_DFLT_CASE(hipMemHandleType);
         }
         return fmt::format_to(ctx.out(), "Unknown");
     }
@@ -262,6 +280,7 @@ struct formatter<hipMemcpyKind> : rocprofiler::hip::details::base_formatter
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemcpy, DeviceToDevice);
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemcpy, Default);
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemcpy, DeviceToDeviceNoCU);
+            ROCP_SDK_HIP_FORMAT_DFLT_CASE(hipMemcpy);
         }
         return fmt::format_to(ctx.out(), "Unknown");
     }
@@ -322,3 +341,4 @@ struct formatter<hipGraphNodeParams> : rocprofiler::hip::details::base_formatter
 #undef ROCP_SDK_HIP_FORMATTER
 #undef ROCP_SDK_HIP_OSTREAM_FORMATTER
 #undef ROCP_SDK_HIP_FORMAT_CASE_STMT
+#undef ROCP_SDK_HIP_FORMAT_DFLT_CASE
