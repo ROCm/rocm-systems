@@ -270,7 +270,7 @@ usage: amd-smi metric [-h] [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE 
                       [-w INTERVAL] [-W TIME] [-i ITERATIONS] [-m] [-u] [-p] [-c] [-t]
                       [-P] [-e] [-k] [-f] [-C] [-o] [-l] [-x] [-E] [--cpu-power-metrics]
                       [--cpu-prochot] [--cpu-freq-metrics] [--cpu-c0-res]
-                      [--cpu-lclk-dpm-level NBIOID] [--cpu-pwr-svi-telemtry-rails]
+                      [--cpu-lclk-dpm-level NBIOID] [--cpu-pwr-svi-telemetry-rails]
                       [--cpu-io-bandwidth IO_BW LINKID_NAME]
                       [--cpu-xgmi-bandwidth XGMI_BW LINKID_NAME] [--cpu-metrics-ver]
                       [--cpu-metrics-table] [--cpu-socket-energy] [--cpu-ddr-bandwidth]
@@ -325,7 +325,7 @@ CPU Arguments:
   --cpu-freq-metrics                        Displays currentFclkMemclk frequencies and cclk frequency limit
   --cpu-c0-res                              Displays C0 residency
   --cpu-lclk-dpm-level NBIOID               Displays lclk dpm level range. Requires socket ID and NBOID as inputs
-  --cpu-pwr-svi-telemtry-rails              Displays svi based telemetry for all rails
+  --cpu-pwr-svi-telemetry-rails              Displays svi based telemetry for all rails
   --cpu-io-bandwidth IO_BW LINKID_NAME      Displays current IO bandwidth for the selected CPU.
                                              input parameters are bandwidth type(1) and link ID encodings
                                              i.e. P2, P3, G0 - G7

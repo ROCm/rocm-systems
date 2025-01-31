@@ -832,7 +832,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         cpu_freq_help = "Displays currentFclkMemclk frequencies and cclk frequency limit"
         cpu_c0_res_help = "Displays C0 residency"
         cpu_lclk_dpm_help = "Displays lclk dpm level range. Requires socket ID and NBOID as inputs"
-        cpu_pwr_svi_telemtry_rails_help = "Displays svi based telemetry for all rails"
+        cpu_pwr_svi_telemetry_rails_help = "Displays svi based telemetry for all rails"
         cpu_io_bandwidth_help = "Displays current IO bandwidth for the selected CPU.\
         \n input parameters are bandwidth type(1) and link ID encodings\
         \n i.e. P2, P3, G0 - G7"
@@ -912,8 +912,8 @@ class AMDSMIParser(argparse.ArgumentParser):
             cpu_group.add_argument('--cpu-c0-res', action='store_true', required=False, help=cpu_c0_res_help)
             cpu_group.add_argument('--cpu-lclk-dpm-level', action='append', required=False, type=self._not_negative_int,
                                     nargs=1, metavar=("NBIOID"), help=cpu_lclk_dpm_help)
-            cpu_group.add_argument('--cpu-pwr-svi-telemtry-rails', action='store_true', required=False,
-                                    help=cpu_pwr_svi_telemtry_rails_help)
+            cpu_group.add_argument('--cpu-pwr-svi-telemetry-rails', action='store_true', required=False,
+                                    help=cpu_pwr_svi_telemetry_rails_help)
             cpu_group.add_argument('--cpu-io-bandwidth', action='append', required=False, nargs=2,
                                     metavar=("IO_BW", "LINKID_NAME"), help=cpu_io_bandwidth_help)
             cpu_group.add_argument('--cpu-xgmi-bandwidth', action='append', required=False, nargs=2,
