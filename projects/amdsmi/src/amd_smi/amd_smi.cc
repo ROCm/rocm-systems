@@ -3786,11 +3786,11 @@ amdsmi_get_link_topology_nearest(amdsmi_processor_handle processor_handle,
 }
 
 amdsmi_status_t
-amdsmi_get_gpu_passthrough_info(amdsmi_processor_handle processor_handle, amdsmi_passthrough_info_t *info) {
+amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle processor_handle, amdsmi_virtualization_mode_t *mode) {
 
     AMDSMI_CHECK_INIT();
 
-    if (info == nullptr) {
+    if (mode == nullptr) {
         return AMDSMI_STATUS_INVAL;
     }
 
@@ -3808,10 +3808,29 @@ amdsmi_get_gpu_passthrough_info(amdsmi_processor_handle processor_handle, amdsmi
 
         SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
 
-        info->device_id = dev_info.device_id;
-        info->rev_id = dev_info.pci_rev;
-        info->vendor_id = gpu_device->get_vendor_id();
-        info->ids_flags = dev_info.ids_flags;
+        // get drm version. If it's older than 3.62.0, then say not supported and exit.
+        drmVersionPtr drm_version;
+        int drm_fd = gpu_device->get_gpu_fd();
+        drm_version = drmGetVersion(drm_fd);
+
+        // minimum version that supports getting of virtualization mode
+        int major_version = 3;
+        int minor_version = 62;
+        int patch_version = 0;
+
+        if ((drm_version->version_major < major_version) || (drm_version->version_minor < minor_version) || (drm_version->version_patchlevel < patch_version)){
+            *mode = AMDSMI_VIRTUALIZATION_MODE_UNKNOWN;
+        }
+        else {
+            uint32_t ids_flag = (dev_info.ids_flags & AMDGPU_IDS_FLAGS_MODE_MASK) >> AMDGPU_IDS_FLAGS_MODE_SHIFT;
+            switch (ids_flag){
+                case 0: *mode = AMDSMI_VIRTUALIZATION_MODE_BAREMETAL; break;
+                case 1: *mode = AMDSMI_VIRTUALIZATION_MODE_GUEST; break;
+                case 2: *mode = AMDSMI_VIRTUALIZATION_MODE_PASSTHROUGH; break;
+                default: *mode = AMDSMI_VIRTUALIZATION_MODE_UNKNOWN; break;
+            }
+        }
+        free(drm_version);
     }
     else {
         return AMDSMI_STATUS_DRM_ERROR;

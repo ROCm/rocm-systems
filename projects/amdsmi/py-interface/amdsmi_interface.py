@@ -438,12 +438,13 @@ class AmdSmiRegType(IntEnum):
     USR1 = amdsmi_wrapper.AMDSMI_REG_USR1
 
 
-class AmdSmiPassthroughInfoFlags(IntEnum):
-    MASK = 0x300
-    SHIFT = 0x8
-    PF = 0x0
-    VT = 0x1
-    PT = 0x2
+class AmdSmiVirtualizationMode(IntEnum):
+    UNKNOWN = amdsmi_wrapper.AMDSMI_VIRTUALIZATION_MODE_UNKNOWN
+    BAREMETAL = amdsmi_wrapper.AMDSMI_VIRTUALIZATION_MODE_BAREMETAL
+    HOST = amdsmi_wrapper.AMDSMI_VIRTUALIZATION_MODE_HOST
+    GUEST = amdsmi_wrapper.AMDSMI_VIRTUALIZATION_MODE_GUEST
+    PASSTHROUGH = amdsmi_wrapper.AMDSMI_VIRTUALIZATION_MODE_PASSTHROUGH
+
 
 class AmdSmiEventReader:
     def __init__(
@@ -4466,24 +4467,21 @@ def amdsmi_get_link_topology_nearest(
         'processor_list': device_list
     }
 
-def amdsmi_get_gpu_passthrough_info(
+def amdsmi_get_gpu_virtualization_mode_info(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle
-    ) -> Dict[str, int]:
+    ) -> Dict[str, AmdSmiVirtualizationMode]:
 
     # make info struct here
-    info = amdsmi_wrapper.amdsmi_passthrough_info_t()
+    mode = amdsmi_wrapper.amdsmi_virtualization_mode_t()
 
     # call lib function here
     _check_res(
-        amdsmi_wrapper.amdsmi_get_gpu_passthrough_info(
+        amdsmi_wrapper.amdsmi_get_gpu_virtualization_mode(
             processor_handle,
-            ctypes.byref(info)
+            ctypes.byref(mode)
         )
     )
 
     return {
-        "device_id": info.device_id,
-        "rev_id": info.rev_id,
-        "vendor_id": info.vendor_id,
-        "ids_flags": info.ids_flags
+        "mode": AmdSmiVirtualizationMode(mode.value)
     }

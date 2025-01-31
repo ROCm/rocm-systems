@@ -82,16 +82,18 @@ class AMDSMIHelpers():
                 self._is_passthrough = True
 
             # Check for passthrough system dynamically via drm querying id_flags
-            if self.is_amdgpu_initialized() and not self._is_passthrough:
-                device_handles = amdsmi_interface.amdsmi_get_processor_handles()
-                for dev in device_handles:
-                    passthrough_info = amdsmi_interface.amdsmi_get_gpu_passthrough_info(dev)
-                    # isolate the relevant bits and then shift them over to get the correct values
-                    ids_flags = (passthrough_info['ids_flags'] & amdsmi_interface.AmdSmiPassthroughInfoFlags.MASK) >> amdsmi_interface.AmdSmiPassthroughInfoFlags.SHIFT
-                    if ids_flags & amdsmi_interface.AmdSmiPassthroughInfoFlags.PT == 0x2:
-                        self._is_baremetal = True
-                        self._is_virtual_os = False
-                        self._is_passthrough = True
+            try:
+                if self.is_amdgpu_initialized() and not self._is_passthrough:
+                    device_handles = amdsmi_interface.amdsmi_get_processor_handles()
+                    for dev in device_handles:
+                        virtualization_info = amdsmi_interface.amdsmi_get_gpu_virtualization_mode_info(dev)
+                        if virtualization_info['mode'] == amdsmi_interface.AmdSmiVirtualizationMode.PASSTHROUGH:
+                            self._is_baremetal = True
+                            self._is_virtual_os = False
+                            self._is_passthrough = True
+                            break # Once passthrough is determined, we can immediately break
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                logging.debug("Unable to determine virtualization status: " + e.get_error_code())
 
     def increment_set_count(self):
         self._count_of_sets_called += 1

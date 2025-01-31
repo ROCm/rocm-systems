@@ -7,6 +7,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added dynamic virtualization mode detection**.  
+  - Added new C and Python API `amdsmi_get_gpu_virtualization_mode_info`
+  - Added new C and Python enum `amdsmi_virtualization_mode_t`
+
 - **Added TVIOL_ACTIVE to `amd-smi monitor`**.  
 Added temperature violation active or not status to `amd-smi monitor`. TVIOL_ACTIVE will be displayed as below:
  - True if active

@@ -1682,14 +1682,15 @@ typedef struct {
 
 
 /**
- * @brief This structure contains information about passthrough mode in guest systems.
+ * @brief This structure contains information about virtualization mode of current system.
  */
-typedef struct {
-    uint32_t device_id;
-    uint32_t rev_id;
-    uint32_t vendor_id;
-    uint64_t ids_flags;
-} amdsmi_passthrough_info_t;
+typedef enum {
+    AMDSMI_VIRTUALIZATION_MODE_UNKNOWN = 0,
+    AMDSMI_VIRTUALIZATION_MODE_BAREMETAL,
+    AMDSMI_VIRTUALIZATION_MODE_HOST,
+    AMDSMI_VIRTUALIZATION_MODE_GUEST,
+    AMDSMI_VIRTUALIZATION_MODE_PASSTHROUGH
+} amdsmi_virtualization_mode_t;
 
 //! Place-holder "variant" for functions that have don't have any variants,
 //! but do have monitors or sensors.
@@ -5332,9 +5333,26 @@ amdsmi_get_link_topology_nearest(amdsmi_processor_handle processor_handle,
                                  amdsmi_link_type_t link_type,
                                  amdsmi_topology_nearest_t* topology_nearest_info);
 
+/**
+ *  @brief          Returns the virtualization mode for the target device.
+ *
+ *  @platform{gpu_bm_linux}  @platform{host}
+ *
+ *  @details        Once called topology_nearest_info will get populated with a list of
+ *                  all nearest devices for a given link_type. The list has a count of
+ *                  the number of devices found and their respective handles/identifiers.
+ *
+ *  @param[in]      processor_handle The identifier of the given device.
+ *
+ *  @param[in,out]  mode Reference to the enum representing virtualization mode.
+ *                    - When zero, the virtualization mode is unknown
+ *                    - When non-zero, the virtualization mode is detected
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail.
+ */
 amdsmi_status_t
-amdsmi_get_gpu_passthrough_info(amdsmi_processor_handle processor_handle,
-                                amdsmi_passthrough_info_t* info);
+amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle processor_handle,
+                                   amdsmi_virtualization_mode_t* mode);
 
 #ifdef ENABLE_ESMI_LIB
 /*****************************************************************************/

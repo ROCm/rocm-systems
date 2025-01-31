@@ -731,6 +731,79 @@ except AmdSmiException as e:
     print(e)
 ```
 
+### amdsmi_get_violation_status
+
+Description: Returns dictionary of violation status information for the given GPU.
+
+Input parameters:
+
+* `processor_handle` The identifier of the given device as an instance of `amdsmi_processor_handle`.
+*  `*violation_status` pointer to object of type amdsmi_violation_status_t to get the violation status information
+
+Output: Dictionary with fields
+
+Field | Description
+---|---
+`reference_timestamp` |  CPU Time Since Epoch in Microseconds
+`violation_timestamp` |  Time of Violation in Nanoseconds
+`acc_counter` |  Current Accumulated Counter
+`acc_prochot_thrm` |  Current Accumulated Processor Hot Violation Count
+`acc_ppt_pwr` |  Current Accumulated Package Power Tracking (PPT) PVIOL
+`acc_socket_thrm` |  Current Accumulated Socket Thermal Count  #TVIOL
+`acc_vr_thrm` |  Current Accumulated Voltage Regulator Count
+`acc_hbm_thrm` |  Current Accumulated High Bandwidth Memory (HBM) Thermal Count
+`acc_gfx_clk_below_host_limit` |  Current Graphic Clock Below Host Limit Count
+`per_prochot_thrm` |  Processor hot violation % (greater than 0% is a violation)
+`per_ppt_pwr` |  PVIOL Package Power Tracking (PPT) violation % (greater than 0% is a violation)
+`per_socket_thrm` |  TVIOL; Socket thermal violation % (greater than 0% is a violation)
+`per_vr_thrm` |  Voltage regulator violation % (greater than 0% is a violation)
+`per_hbm_thrm` |  High Bandwidth Memory (HBM) thermal violation % (greater than 0% is a violation)
+`per_gfx_clk_below_host_limit` |   Graphics clock below host limit violation % (greater than 0% is a violation)
+`active_prochot_thrm` |  Processor hot violation; 1 = active 0 = not active
+`active_ppt_pwr` |  Package Power Tracking (PPT) violation; 1 = active 0 = not active
+`active_socket_thrm` |  Socket thermal violation; 1 = active 0 = not active
+`active_vr_thrm` |  Voltage regulator violation; 1 = active 0 = not active
+`active_hbm_thrm` |  High Bandwidth Memory (HBM) thermal violation; 1 = active 0 = not active
+`active_gfx_clk_below_host_limit` |  Graphics Clock Below Host Limit Violation; 1 = Active 0 = Not Active
+
+Exceptions that can be thrown by `amdsmi_get_violation_status` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiRetryException`
+* `AmdSmiParameterException`
+* `AmdSmiTimeoutException`
+
+Example:
+
+```python
+try:
+    violation_status = amdsmi_interface.amdsmi_get_violation_status(args.gpu)
+    throttle_status['accumulation_counter'] = violation_status['acc_counter']
+    throttle_status['prochot_accumulated'] = violation_status['acc_prochot_thrm']
+    throttle_status['ppt_accumulated'] = violation_status['acc_ppt_pwr']
+    throttle_status['socket_thermal_accumulated'] = violation_status['acc_socket_thrm']
+    throttle_status['vr_thermal_accumulated'] = violation_status['acc_vr_thrm']
+    throttle_status['hbm_thermal_accumulated'] = violation_status['acc_hbm_thrm']
+    throttle_status['gfx_clk_below_host_limit_accumulated'] = violation_status['acc_gfx_clk_below_host_limit']
+
+    throttle_status['prochot_violation_status'] = violation_status['active_prochot_thrm']
+    throttle_status['ppt_violation_status'] = violation_status['active_ppt_pwr']
+    throttle_status['socket_thermal_violation_status'] = violation_status['active_socket_thrm']
+    throttle_status['vr_thermal_violation_status'] = violation_status['active_vr_thrm']
+    throttle_status['hbm_thermal_violation_status'] = violation_status['active_hbm_thrm']
+    throttle_status['gfx_clk_below_host_limit_violation_status'] = violation_status['active_gfx_clk_below_host_limit']
+
+    throttle_status['prochot_violation_activity'] = violation_status['per_prochot_thrm']
+    throttle_status['ppt_violation_activity'] = violation_status['per_ppt_pwr']
+    throttle_status['socket_thermal_violation_activity'] = violation_status['per_socket_thrm']
+    throttle_status['vr_thermal_violation_activity'] = violation_status['per_vr_thrm']
+    throttle_status['hbm_thermal_violation_activity'] = violation_status['per_hbm_thrm']
+    throttle_status['gfx_clk_below_host_limit_violation_activity'] = violation_status['per_gfx_clk_below_host_limit']
+
+except AmdSmiException as e:
+    print(e)
+```
+
 ### amdsmi_get_clock_info
 
 Description: Returns the clock measure for the given GPU.
@@ -3954,6 +4027,40 @@ finally:
         print(e)
 ```
 
+
+### amdsmi_get_gpu_virtualization_mode_info
+
+Description: Retrieve the virtualization mode for the selected GPU.
+
+Input parameters:
+* `processor_handle` The identifier of the given device.
+
+Output: Dictionary holding the following fields.
+* `mode` AmdSmiVirtualizationMode; an IntEnum denoting the possible virtualization modes
+Field | Description
+---|---
+`UNKNOWN` | Virtualization mode not detected
+`BAREMETAL` | Baremetal paltform detected
+`HOST` | Host/Hypervisor platform detected
+`GUEST` | Guest/Virtual Machine detected
+`PASSTHROUGH` | GPU Passthrough mode detected
+
+Exceptions that can be thrown by `amdsmi_get_gpu_virtualization_mode_info` function:
+
+* `AmdSmiLibraryException`
+
+Example:
+
+```python
+try:
+    device_handles = amdsmi_interface.amdsmi_get_processor_handles()
+    for dev in device_handles:
+        virtualization_info = amdsmi_interface.amdsmi_get_gpu_virtualization_mode_info(dev)
+        print(virtualization_info['mode'])
+except amdsmi_exception.AmdSmiLibraryException as e:
+    print(e)
+```
+
 ## CPU APIs
 
 ### amdsmi_get_processor_info
@@ -4979,79 +5086,6 @@ Example:
 try:
      cpu_model = amdsmi_get_cpu_model()
      print(cpu_model)
-except AmdSmiException as e:
-    print(e)
-```
-
-### amdsmi_get_violation_status
-
-Description: Returns dictionary of violation status information for the given GPU.
-
-Input parameters:
-
-* `processor_handle` The identifier of the given device as an instance of `amdsmi_processor_handle`.
-*  `*violation_status` pointer to object of type amdsmi_violation_status_t to get the violation status information
-
-Output: Dictionary with fields
-
-Field | Description
----|---
-`reference_timestamp` |  CPU Time Since Epoch in Microseconds
-`violation_timestamp` |  Time of Violation in Nanoseconds
-`acc_counter` |  Current Accumulated Counter
-`acc_prochot_thrm` |  Current Accumulated Processor Hot Violation Count
-`acc_ppt_pwr` |  Current Accumulated Package Power Tracking (PPT) PVIOL
-`acc_socket_thrm` |  Current Accumulated Socket Thermal Count  #TVIOL
-`acc_vr_thrm` |  Current Accumulated Voltage Regulator Count
-`acc_hbm_thrm` |  Current Accumulated High Bandwidth Memory (HBM) Thermal Count
-`acc_gfx_clk_below_host_limit` |  Current Graphic Clock Below Host Limit Count
-`per_prochot_thrm` |  Processor hot violation % (greater than 0% is a violation)
-`per_ppt_pwr` |  PVIOL Package Power Tracking (PPT) violation % (greater than 0% is a violation)
-`per_socket_thrm` |  TVIOL; Socket thermal violation % (greater than 0% is a violation)
-`per_vr_thrm` |  Voltage regulator violation % (greater than 0% is a violation)
-`per_hbm_thrm` |  High Bandwidth Memory (HBM) thermal violation % (greater than 0% is a violation)
-`per_gfx_clk_below_host_limit` |   Graphics clock below host limit violation % (greater than 0% is a violation)
-`active_prochot_thrm` |  Processor hot violation; 1 = active 0 = not active
-`active_ppt_pwr` |  Package Power Tracking (PPT) violation; 1 = active 0 = not active
-`active_socket_thrm` |  Socket thermal violation; 1 = active 0 = not active
-`active_vr_thrm` |  Voltage regulator violation; 1 = active 0 = not active
-`active_hbm_thrm` |  High Bandwidth Memory (HBM) thermal violation; 1 = active 0 = not active
-`active_gfx_clk_below_host_limit` |  Graphics Clock Below Host Limit Violation; 1 = Active 0 = Not Active
-
-Exceptions that can be thrown by `amdsmi_get_violation_status` function:
-
-* `AmdSmiLibraryException`
-* `AmdSmiRetryException`
-* `AmdSmiParameterException`
-* `AmdSmiTimeoutException`
-
-Example:
-
-```python
-try:
-    violation_status = amdsmi_interface.amdsmi_get_violation_status(args.gpu)
-    throttle_status['accumulation_counter'] = violation_status['acc_counter']
-    throttle_status['prochot_accumulated'] = violation_status['acc_prochot_thrm']
-    throttle_status['ppt_accumulated'] = violation_status['acc_ppt_pwr']
-    throttle_status['socket_thermal_accumulated'] = violation_status['acc_socket_thrm']
-    throttle_status['vr_thermal_accumulated'] = violation_status['acc_vr_thrm']
-    throttle_status['hbm_thermal_accumulated'] = violation_status['acc_hbm_thrm']
-    throttle_status['gfx_clk_below_host_limit_accumulated'] = violation_status['acc_gfx_clk_below_host_limit']
-
-    throttle_status['prochot_violation_status'] = violation_status['active_prochot_thrm']
-    throttle_status['ppt_violation_status'] = violation_status['active_ppt_pwr']
-    throttle_status['socket_thermal_violation_status'] = violation_status['active_socket_thrm']
-    throttle_status['vr_thermal_violation_status'] = violation_status['active_vr_thrm']
-    throttle_status['hbm_thermal_violation_status'] = violation_status['active_hbm_thrm']
-    throttle_status['gfx_clk_below_host_limit_violation_status'] = violation_status['active_gfx_clk_below_host_limit']
-
-    throttle_status['prochot_violation_activity'] = violation_status['per_prochot_thrm']
-    throttle_status['ppt_violation_activity'] = violation_status['per_ppt_pwr']
-    throttle_status['socket_thermal_violation_activity'] = violation_status['per_socket_thrm']
-    throttle_status['vr_thermal_violation_activity'] = violation_status['per_vr_thrm']
-    throttle_status['hbm_thermal_violation_activity'] = violation_status['per_hbm_thrm']
-    throttle_status['gfx_clk_below_host_limit_violation_activity'] = violation_status['per_gfx_clk_below_host_limit']
-
 except AmdSmiException as e:
     print(e)
 ```
