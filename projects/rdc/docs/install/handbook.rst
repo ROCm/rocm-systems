@@ -124,6 +124,7 @@ To generate the keys and certificates using these scripts, make the following ca
 
 .. code-block:: shell
   
+    $ cd /opt/rocm/libexec/rdc/authentication
     $ 01gen_root_cert.sh
     # provide answers to posed questions
     $ 02gen_ssl_artifacts.sh
