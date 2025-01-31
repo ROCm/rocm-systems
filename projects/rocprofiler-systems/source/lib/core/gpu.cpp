@@ -42,7 +42,7 @@
 #include <timemory/manager.hpp>
 
 #if ROCPROFSYS_USE_ROCM > 0
-#    include <rocm_smi/rocm_smi.h>
+#    include <amd_smi/amdsmi.h>
 #    include <rocprofiler-sdk/agent.h>
 #    include <rocprofiler-sdk/cxx/serialization.hpp>
 #    include <rocprofiler-sdk/fwd.h>
@@ -55,40 +55,43 @@ namespace gpu
 namespace
 {
 #if ROCPROFSYS_USE_ROCM > 0
-#    define ROCPROFSYS_ROCM_SMI_CALL(ERROR_CODE)                                         \
-        ::rocprofsys::gpu::check_rsmi_error(ERROR_CODE, __FILE__, __LINE__)
+#    define ROCPROFSYS_AMD_SMI_CALL(ERROR_CODE)                                          \
+        ::rocprofsys::gpu::check_amdsmi_error(ERROR_CODE, __FILE__, __LINE__)
 
 void
-check_rsmi_error(rsmi_status_t _code, const char* _file, int _line)
+check_amdsmi_error(amdsmi_status_t _code, const char* _file, int _line)
 {
-    if(_code == RSMI_STATUS_SUCCESS) return;
+    if(_code == AMDSMI_STATUS_SUCCESS) return;
     const char* _msg = nullptr;
-    auto        _err = rsmi_status_string(_code, &_msg);
-    if(_err != RSMI_STATUS_SUCCESS)
-        ROCPROFSYS_THROW("rsmi_status_string failed. No error message available. "
-                         "Error code %i originated at %s:%i\n",
-                         static_cast<int>(_code), _file, _line);
+    auto        _err = amdsmi_status_code_to_string(_code, &_msg);
+    if(_err != AMDSMI_STATUS_SUCCESS)
+        ROCPROFSYS_THROW(
+            "amdsmi_status_code_to_string failed. No error message available. "
+            "Error code %i originated at %s:%i\n",
+            static_cast<int>(_code), _file, _line);
     ROCPROFSYS_THROW("[%s:%i] Error code %i :: %s", _file, _line, static_cast<int>(_code),
                      _msg);
 }
 
 bool
-rsmi_init()
+amdsmi_init()
 {
-    auto _rsmi_init = []() {
+    auto _amdsmi_init = []() {
         try
         {
-            ROCPROFSYS_ROCM_SMI_CALL(::rsmi_init(0));
+            // Currently, only AMDSMI_INIT_AMD_GPUS is supported
+            ROCPROFSYS_AMD_SMI_CALL(::amdsmi_init(AMDSMI_INIT_AMD_GPUS));
+            get_processor_handles();
         } catch(std::exception& _e)
         {
-            ROCPROFSYS_BASIC_VERBOSE(1, "Exception thrown initializing rocm-smi: %s\n",
+            ROCPROFSYS_BASIC_VERBOSE(1, "Exception thrown initializing amd-smi: %s\n",
                                      _e.what());
             return false;
         }
         return true;
     }();
 
-    return _rsmi_init;
+    return _amdsmi_init;
 }
 #endif  // ROCPROFSYS_USE_ROCM > 0
 
@@ -126,7 +129,7 @@ query_rocm_gpu_agents()
 }  // namespace
 
 int
-rocm_device_count()
+device_count()
 {
 #if ROCPROFSYS_USE_ROCM > 0
     static int _num_devices = query_rocm_gpu_agents();
@@ -136,38 +139,13 @@ rocm_device_count()
 #endif
 }
 
-int
-rsmi_device_count()
+bool
+initialize_amdsmi()
 {
 #if ROCPROFSYS_USE_ROCM > 0
-    if(!rsmi_init()) return 0;
-
-    static auto _num_devices = []() {
-        uint32_t _v = 0;
-        try
-        {
-            ROCPROFSYS_ROCM_SMI_CALL(rsmi_num_monitor_devices(&_v));
-        } catch(std::exception& _e)
-        {
-            ROCPROFSYS_BASIC_VERBOSE(
-                1, "Exception thrown getting the rocm-smi devices: %s\n", _e.what());
-        }
-        return _v;
-    }();
-
-    return _num_devices;
+    return (amdsmi_init()) ? true : false;
 #else
-    return 0;
-#endif
-}
-
-int
-device_count()
-{
-#if ROCPROFSYS_USE_ROCM > 0
-    return rocm_device_count();
-#else
-    return 0;
+    return false;
 #endif
 }
 
@@ -217,5 +195,73 @@ add_device_metadata()
         }
     });
 }
+
+#if ROCPROFSYS_USE_ROCM > 0
+/*
+ * Required amdsmi methods to get processors and handles
+ */
+
+uint32_t                             processors::total_processor_count = 0;
+std::vector<amdsmi_processor_handle> processors::processors_list       = {};
+
+void
+get_processor_handles()
+{
+    uint32_t socket_count;
+    uint32_t processor_count;
+
+    // Passing nullptr will return us the number of sockets available for read in this
+    // system
+    auto ret = amdsmi_get_socket_handles(&socket_count, nullptr);
+    if(ret != AMDSMI_STATUS_SUCCESS)
+    {
+        return;
+    }
+    std::vector<amdsmi_socket_handle> sockets(socket_count);
+    ret = amdsmi_get_socket_handles(&socket_count, sockets.data());
+    for(auto& socket : sockets)
+    {
+        // Passing nullptr will return us the number of processors available for read for
+        // this socket
+        ret = amdsmi_get_processor_handles(socket, &processor_count, nullptr);
+        if(ret != AMDSMI_STATUS_SUCCESS)
+        {
+            return;
+        }
+        std::vector<amdsmi_processor_handle> all_processors(processor_count);
+        ret =
+            amdsmi_get_processor_handles(socket, &processor_count, all_processors.data());
+        if(ret != AMDSMI_STATUS_SUCCESS)
+        {
+            return;
+        }
+
+        for(auto& processor : all_processors)
+        {
+            processor_type_t processor_type = {};
+            ret = amdsmi_get_processor_type(processor, &processor_type);
+            if(processor_type != AMDSMI_PROCESSOR_TYPE_AMD_GPU)
+            {
+                ROCPROFSYS_THROW("Not AMD_GPU device type!");
+                return;
+            }
+            processors::processors_list.push_back(processor);
+        }
+    }
+    processors::total_processor_count = processors::processors_list.size();
+}
+uint32_t
+get_processor_count()
+{
+    return processors::total_processor_count;
+}
+
+amdsmi_processor_handle
+get_handle_from_id(uint32_t dev_id)
+{
+    return processors::processors_list[dev_id];
+}
+#endif
+
 }  // namespace gpu
 }  // namespace rocprofsys

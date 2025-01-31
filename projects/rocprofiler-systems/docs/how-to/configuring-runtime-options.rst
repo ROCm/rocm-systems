@@ -229,7 +229,7 @@ Generating a default configuration file
    ROCPROFSYS_USE_SAMPLING                             = false
    ROCPROFSYS_USE_PROCESS_SAMPLING                     = true
    ROCPROFSYS_USE_ROCM                                 = true
-   ROCPROFSYS_USE_ROCM_SMI                             = true
+   ROCPROFSYS_USE_AMD_SMI                              = true
    ROCPROFSYS_USE_KOKKOSP                              = false
    ROCPROFSYS_USE_CODE_COVERAGE                        = false
    ROCPROFSYS_USE_PID                                  = true
@@ -384,7 +384,7 @@ Viewing the setting descriptions
    | ROCPROFSYS_USE_OMPT                      | Enable support for OpenMP-Tools         |
    | ROCPROFSYS_TRACE                         | Enable perfetto backend                 |
    | ROCPROFSYS_USE_PID                       | Enable tagging filenames with proces... |
-   | ROCPROFSYS_USE_ROCM_SMI                  | Enable sampling GPU power, temp, uti... |
+   | ROCPROFSYS_USE_AMD_SMI                   | Enable sampling GPU power, temp, uti... |
    | ROCPROFSYS_USE_ROCM                      | Enable ROCM tracing                     |
    | ROCPROFSYS_USE_SAMPLING                  | Enable statistical sampling of call-... |
    | ROCPROFSYS_USE_PROCESS_SAMPLING          | Enable a background thread which sam... |
@@ -461,11 +461,11 @@ Viewing components
    | sampling_wall_clock               | Wall-clock timing. Derived from statistic... |
    | sampling_cpu_clock                | CPU-clock timing. Derived from statistica... |
    | sampling_percent                  | Fraction of wall-clock time spent in func... |
-   | sampling_gpu_power                | GPU Power Usage via ROCm-SMI. Derived fro... |
-   | sampling_gpu_temp                 | GPU Temperature via ROCm-SMI. Derived fro... |
-   | sampling_gpu_busy                 | GPU Utilization (% busy) via ROCm-SMI. De... |
-   | sampling_vcn_busy                 | GPU VCN Utilization (% activity) via ROCm... |
-   | sampling_gpu_memory_usage         | GPU Memory Usage via ROCm-SMI. Derived fr... |
+   | sampling_gpu_power                | GPU Power Usage via AMD-SMI. Derived from... |
+   | sampling_gpu_temp                 | GPU Temperature via AMD-SMI. Derived from... |
+   | sampling_gpu_busy                 | GPU Utilization (% busy) via AMD-SMI. Der... |
+   | sampling_vcn_busy                 | GPU VCN Utilization (% activity) via AMD-... |
+   | sampling_gpu_memory_usage         | GPU Memory Usage via AMD-SMI. Derived fro... |
    |-----------------------------------|----------------------------------------------|
 
 Viewing hardware counters

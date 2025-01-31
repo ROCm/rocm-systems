@@ -229,19 +229,19 @@ set(_VALID_GPU OFF)
 if(ROCPROFSYS_USE_ROCM AND (NOT DEFINED ROCPROFSYS_CI_GPU OR ROCPROFSYS_CI_GPU))
     set(_VALID_GPU ON)
     find_program(
-        ROCPROFSYS_ROCM_SMI_EXE
-        NAMES rocm-smi
+        ROCPROFSYS_AMD_SMI_EXE
+        NAMES amd-smi
         HINTS ${ROCmVersion_DIR}
         PATHS ${ROCmVersion_DIR}
         PATH_SUFFIXES bin)
-    if(ROCPROFSYS_ROCM_SMI_EXE)
+    if(ROCPROFSYS_AMD_SMI_EXE)
         execute_process(
-            COMMAND ${ROCPROFSYS_ROCM_SMI_EXE}
-            OUTPUT_VARIABLE _RSMI_OUT
-            ERROR_VARIABLE _RSMI_ERR
-            RESULT_VARIABLE _RSMI_RET)
-        if(_RSMI_RET EQUAL 0)
-            if("${_RSMI_OUTPUT}" MATCHES "ERROR" OR "${_RSMI_ERR}" MATCHES "ERROR")
+            COMMAND ${ROCPROFSYS_AMD_SMI_EXE}
+            OUTPUT_VARIABLE _AMDSMI_OUT
+            ERROR_VARIABLE _AMDSMI_ERR
+            RESULT_VARIABLE _AMDSMI_RET)
+        if(_AMDSMI_RET EQUAL 0)
+            if("${_AMDSMI_OUTPUT}" MATCHES "ERROR" OR "${_AMDSMI_ERR}" MATCHES "ERROR")
                 set(_VALID_GPU OFF)
             endif()
         else()
@@ -250,7 +250,7 @@ if(ROCPROFSYS_USE_ROCM AND (NOT DEFINED ROCPROFSYS_CI_GPU OR ROCPROFSYS_CI_GPU))
     endif()
     if(NOT _VALID_GPU)
         rocprofiler_systems_message(
-            AUTHOR_WARNING "rocm-smi did not successfully run. Disabling GPU tests...")
+            AUTHOR_WARNING "amd-smi did not successfully run. Disabling GPU tests...")
     endif()
 endif()
 
@@ -433,7 +433,7 @@ function(ROCPROFILER_SYSTEMS_ADD_TEST)
         endif()
 
         if(NOT "ROCPROFSYS_USE_ROCM=OFF" IN_LIST TEST_ENVIRONMENT)
-            list(APPEND TEST_LABELS "rocm-smi")
+            list(APPEND TEST_LABELS "amd-smi")
         endif()
     endif()
 
@@ -442,9 +442,9 @@ function(ROCPROFILER_SYSTEMS_ADD_TEST)
         list(APPEND TEST_LABELS "rocm")
     endif()
 
-    if("ROCPROFSYS_USE_ROCM_SMI=ON" IN_LIST TEST_ENVIRONMENT AND NOT "rocm-smi" IN_LIST
-                                                                 TEST_ENVIRONMENT)
-        list(APPEND TEST_LABELS "rocm-smi")
+    if("ROCPROFSYS_USE_AMD_SMI=ON" IN_LIST TEST_ENVIRONMENT AND NOT "amd-smi" IN_LIST
+                                                                TEST_ENVIRONMENT)
+        list(APPEND TEST_LABELS "amd-smi")
     endif()
 
     if(TARGET ${TEST_TARGET})
