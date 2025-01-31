@@ -125,7 +125,9 @@ using component::backtrace_timestamp;
 using component::backtrace_wall_clock;  // NOLINT
 using component::callchain;
 using component::sampling_cpu_clock;
-using component::sampling_gpu_busy;
+using component::sampling_gpu_busy_gfx;
+using component::sampling_gpu_busy_mm;
+using component::sampling_gpu_busy_umc;
 using component::sampling_gpu_memory;
 using component::sampling_gpu_power;
 using component::sampling_gpu_temp;
@@ -1551,11 +1553,25 @@ struct sampling_initialization
         sampling_percent::description() = "Percentage of samples";
         sampling_percent::set_precision(3);
 
-        sampling_gpu_busy::label()       = "sampling_gpu_busy_percent";
-        sampling_gpu_busy::description() = "Utilization of GPU(s)";
-        sampling_gpu_busy::set_precision(0);
-        sampling_gpu_busy::set_format_flags(sampling_gpu_busy::get_format_flags() &
-                                            std::ios_base::showpoint);
+        sampling_gpu_busy_gfx::label()       = "sampling_gpu_busy_gfx_percent";
+        sampling_gpu_busy_gfx::description() = "Utilization of GFX engines on GPU(s)";
+        sampling_gpu_busy_gfx::set_precision(0);
+        sampling_gpu_busy_gfx::set_format_flags(
+            sampling_gpu_busy_gfx::get_format_flags() & std::ios_base::showpoint);
+
+        sampling_gpu_busy_umc::label() = "sampling_gpu_busy_umc_percent";
+        sampling_gpu_busy_umc::description() =
+            "Utilization of memory controller on GPU(s)";
+        sampling_gpu_busy_umc::set_precision(0);
+        sampling_gpu_busy_umc::set_format_flags(
+            sampling_gpu_busy_umc::get_format_flags() & std::ios_base::showpoint);
+
+        sampling_gpu_busy_mm::label() = "sampling_gpu_busy_mm_percent";
+        sampling_gpu_busy_mm::description() =
+            "Utilization of multimedia engines on GPU(s)";
+        sampling_gpu_busy_mm::set_precision(0);
+        sampling_gpu_busy_mm::set_format_flags(sampling_gpu_busy_mm::get_format_flags() &
+                                               std::ios_base::showpoint);
 
         sampling_gpu_memory::label()       = "sampling_gpu_memory_usage";
         sampling_gpu_memory::description() = "Memory usage of GPU(s)";

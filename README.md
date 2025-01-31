@@ -59,7 +59,7 @@ The documentation source files reside in the [`/docs`](/docs) folder of this rep
 - HIP kernel tracing
 - HSA API tracing
 - HSA operation tracing
-- System-level sampling (via rocm-smi)
+- System-level sampling (via amd-smi)
   - Memory usage
   - Power usage
   - Temperature
