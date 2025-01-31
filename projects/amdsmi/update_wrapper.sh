@@ -16,19 +16,23 @@ command -v docker &>/dev/null || {
     exit 1
 }
 
-does_image_exist () {
-    docker images | grep -q "$DOCKER_NAME"
+DOCKER_BUILDKIT=$(docker buildx version >/dev/null 2>&1 && echo 1 || echo 0)
+export DOCKER_BUILDKIT
+
+build_docker_image () {
+    DOCKER_DIR="$DIR/py-interface"
+    DOCKERFILE="$DOCKER_DIR/Dockerfile"
+
+    DOCKERFILE_TIME=$(git log -1 --format=%at -- "$DOCKERFILE")
+    IMAGE_TIME=$(docker inspect "$DOCKER_NAME" --format '{{.Created}}' 2>/dev/null | date +%s -d- || echo 0)
+
+    # Build if Dockerfile is newer than image
+    if [ "$DOCKERFILE_TIME" -gt "$IMAGE_TIME" ]; then
+        docker build "$DOCKER_DIR" -f "$DOCKERFILE" -t "$DOCKER_NAME":latest
+    fi
 }
 
-if ! does_image_exist; then
-    # if you prefer to not generate it yourself:
-    # pull from https://hub.docker.com/r/dmitriigalantsev/amdsmi_wrapper_updater
-    # using the following command:
-    # docker pull dmitriigalantsev/amdsmi_wrapper_updater
-    echo "No docker image found! Generating one"
-    # set to 0 because it's compatible with more systems
-    DOCKER_BUILDKIT="${DOCKER_BUILDKIT:=0}" docker build "$DIR/py-interface" -t "$DOCKER_NAME":latest
-fi
+build_docker_image
 
 ENABLE_ESMI_LIB=""
 # source ENABLE_ESMI_LIB variable from the previous build if it exists

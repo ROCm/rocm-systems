@@ -13,6 +13,7 @@ RUN apt update --yes \
         && apt install --yes \
             build-essential \
             cmake \
+            git \
             gnupg \
             libdrm-dev \
             libpython3-dev \
@@ -42,9 +43,11 @@ RUN TEMPDIR=$(mktemp -d) \
         && rm -rf $TEMPDIR
 
 WORKDIR /src
-CMD cp -r /src /tmp/src \
-        && cd /tmp/src \
-        && rm -rf build .cache \
-        && cmake -B build -DBUILD_WRAPPER=ON \
-        && make -C build -j $(nproc) \
-        && cp /tmp/src/py-interface/amdsmi_wrapper.py /src/py-interface/amdsmi_wrapper.py
+CMD ["sh", "-c", "\
+    cp -r /src /tmp/src && \
+    cd /tmp/src && \
+    rm -rf build .cache && \
+    cmake -B build -DBUILD_WRAPPER=ON && \
+    make -C build -j $(nproc) && \
+    cp /tmp/src/py-interface/amdsmi_wrapper.py /src/py-interface/amdsmi_wrapper.py \
+"]
