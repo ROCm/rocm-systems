@@ -18,23 +18,27 @@ subtrees:
   - caption: How to
     entries:
     - file: how-to/configuring-validating-environment.rst
-      title: Configuring and validating the environment
-    - file: how-to/configuring-runtime-options.rst
-      title: Configuring runtime options
-    - file: how-to/sampling-call-stack.rst
-      title: Sampling the call stack
-    - file: how-to/instrumenting-rewriting-binary-application.rst
-      title: Instrumenting and rewriting a binary application
-    - file: how-to/performing-causal-profiling.rst
-      title: Performing causal profiling
+      title: Configuring the environment
+      subtrees:
+      - entries:
+        - file: how-to/configuring-runtime-options.rst
+          title: Configuring runtime options
+    - file: how-to/general-tips-using-rocprof-sys.rst
+      title: Profiling
+      subtrees:
+      - entries:
+        - file: how-to/sampling-call-stack.rst
+          title: Sampling the call stack
+        - file: how-to/instrumenting-rewriting-binary-application.rst
+          title: Instrumenting and rewriting a binary application
+        - file: how-to/performing-causal-profiling.rst
+          title: Performing causal profiling
+        - file: how-to/profiling-python-scripts.rst
+          title: Profiling Python scripts
     - file: how-to/understanding-rocprof-sys-output.rst
-      title: Understanding the ROCm Systems Profiler output
-    - file: how-to/profiling-python-scripts.rst
-      title: Profiling Python scripts
+      title: Understanding the output
     - file: how-to/using-rocprof-sys-api.rst
       title: Using the ROCm Systems Profiler API
-    - file: how-to/general-tips-using-rocprof-sys.rst
-      title: General tips for using ROCm Systems Profiler
 
   - caption: Conceptual
     entries:
