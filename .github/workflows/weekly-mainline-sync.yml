@@ -1,8 +1,6 @@
 name: Sync Mainline with Staging
 on:
     workflow_dispatch:
-    schedule:
-      - cron: 0 5 * * sun
 
 jobs:
   promote-stg-to-main:
