@@ -330,7 +330,8 @@ get_internal_basic_libs_impl()
                                             "librocprofiler-register.so",
                                             "librocprofiler-sdk.so",
                                             "librocprofiler-sdk-roctx.so",
-                                            "libamd_smi.so" };
+                                            "libamd_smi.so",
+                                            "libamd_comgr.so" };
 
     // shared libraries potentially used by timemory
     const auto _3rdparty_libs = strview_init_t{ "libcaliper.so",
