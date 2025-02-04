@@ -29,6 +29,7 @@
 #include "lib/common/units.hpp"
 #include "lib/output/format_path.hpp"
 #include "lib/output/output_config.hpp"
+#include "lib/rocprofiler-sdk-att/att_lib_wrapper.hpp"
 
 #include <rocprofiler-sdk/cxx/serialization.hpp>
 
@@ -62,6 +63,12 @@ get_config();
 
 std::string
 format_name(std::string_view _name, const config& = get_config<>());
+
+struct att_perfcounter
+{
+    std::string counter_name = {};
+    uint32_t    simd_mask    = 0xf;
+};
 
 struct config : output_config
 {
@@ -101,13 +108,20 @@ struct config : output_config
     bool   list_metrics                = get_env("ROCPROF_LIST_METRICS", false);
     bool   list_metrics_output_file    = get_env("ROCPROF_OUTPUT_LIST_METRICS_FILE", false);
     bool   pc_sampling_host_trap       = false;
+    bool   advanced_thread_trace       = get_env("ROCPROF_ADVANCED_THREAD_TRACE", false);
     size_t pc_sampling_interval        = get_env("ROCPROF_PC_SAMPLING_INTERVAL", 1);
+    bool   att_serialize_all           = get_env("ROCPROF_ATT_PARAM_SERIALIZE_ALL", false);
     rocprofiler_pc_sampling_method_t pc_sampling_method_value = ROCPROFILER_PC_SAMPLING_METHOD_NONE;
     rocprofiler_pc_sampling_unit_t   pc_sampling_unit_value   = ROCPROFILER_PC_SAMPLING_UNIT_NONE;
 
     std::string stats_summary_unit = get_env("ROCPROF_STATS_SUMMARY_UNITS", "nsec");
     int         mpi_size           = get_mpi_size();
     int         mpi_rank           = get_mpi_rank();
+    uint64_t    att_param_shader_engine_mask =
+        get_env<uint64_t>("ROCPROF_ATT_PARAM_SHADER_ENGINE_MASK", 0x1);
+    uint64_t att_param_buffer_size = get_env<uint64_t>("ROCPROF_ATT_PARAM_BUFFER_SIZE", 0x6000000);
+    uint64_t att_param_simd_select = get_env<uint64_t>("ROCPROF_ATT_PARAM_SIMD_SELECT", 0xF);
+    uint64_t att_param_target_cu   = get_env<uint64_t>("ROCPROF_ATT_PARAM_TARGET_CU", 1);
 
     std::string kernel_filter_include   = get_env("ROCPROF_KERNEL_FILTER_INCLUDE_REGEX", ".*");
     std::string kernel_filter_exclude   = get_env("ROCPROF_KERNEL_FILTER_EXCLUDE_REGEX", "");
@@ -115,8 +129,10 @@ struct config : output_config
     std::string pc_sampling_unit        = get_env("ROCPROF_PC_SAMPLING_UNIT", "none");
     std::string extra_counters_contents = get_env("ROCPROF_EXTRA_COUNTERS_CONTENTS", "");
 
-    std::unordered_set<uint32_t> kernel_filter_range = {};
-    std::set<std::string>        counters            = {};
+    std::unordered_set<uint32_t> kernel_filter_range    = {};
+    std::set<std::string>        counters               = {};
+    std::string                  att_capability         = get_env("ROCPROF_ATT_CAPABILITY", "");
+    std::vector<att_perfcounter> att_param_perfcounters = {};
 
     std::queue<CollectionPeriod> collection_periods = {};
 

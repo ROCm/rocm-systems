@@ -805,6 +805,11 @@ Properties
       -  **``pc_sampling_interval``** *(integer)*: pc sampling interval.
       -  **``pc-sampling-beta-enabled``** *(boolean)*: enable pc
          sampling support; beta version.
+      - **``att_filenames``** *(object)*
+            -  **``key``** *(integer)*: Dispatch id.
+            -  **``value``** *(array)*: An array of ATT filenames.
+      -  **``code_object_snapshot_filenames``** *(array)*: Code
+            object snapshot filename.
 
 .. code-block:: shell
 

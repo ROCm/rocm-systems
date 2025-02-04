@@ -25,6 +25,7 @@
 #include "statistics.hpp"
 #include "timestamps.hpp"
 
+#include "lib/common/filesystem.hpp"
 #include "lib/common/string_entry.hpp"
 #include "lib/common/utility.hpp"
 
@@ -37,6 +38,7 @@ namespace rocprofiler
 {
 namespace tool
 {
+namespace fs = common::filesystem;
 json_output::json_output(const output_config&       cfg,
                          std::string_view           filename,
                          JSONOutputArchive::Options _opts)
@@ -115,11 +117,18 @@ write_json(json_output&         json_ar,
     json_ar(cereal::make_nvp("counters", tool_metadata.get_counter_info()));
 
     {
-        auto callback_name_info = tool_metadata.callback_names;
-        auto buffer_name_info   = tool_metadata.buffer_names;
-        auto counter_dims       = tool_metadata.get_counter_dimension_info();
-        auto marker_msg_data    = tool_metadata.marker_messages.get();
-
+        auto callback_name_info             = tool_metadata.callback_names;
+        auto buffer_name_info               = tool_metadata.buffer_names;
+        auto counter_dims                   = tool_metadata.get_counter_dimension_info();
+        auto marker_msg_data                = tool_metadata.marker_messages.get();
+        auto code_object_load_info          = tool_metadata.get_code_object_load_info();
+        auto att_filenames                  = tool_metadata.get_att_filenames();
+        auto code_object_snapshot_filenames = std::vector<std::string>{};
+        code_object_snapshot_filenames.reserve(code_object_load_info.size());
+        for(auto info : code_object_load_info)
+        {
+            code_object_snapshot_filenames.emplace_back(fs::path(info.name).filename());
+        }
         json_ar.setNextName("strings");
         json_ar.startNode();
         json_ar(cereal::make_nvp("callback_records", callback_name_info));
@@ -131,7 +140,8 @@ write_json(json_output&         json_ar,
         json_ar(
             cereal::make_nvp("pc_sample_instructions", tool_metadata.get_pc_sample_instructions()));
         json_ar(cereal::make_nvp("pc_sample_comments", tool_metadata.get_pc_sample_comments()));
-
+        json_ar(cereal::make_nvp("att_filenames", att_filenames));
+        json_ar(cereal::make_nvp("code_object_snapshot_filenames", code_object_snapshot_filenames));
         {
             auto _extern_corr_id_strings = std::map<size_t, std::string>{};
             if(cfg.kernel_rename)

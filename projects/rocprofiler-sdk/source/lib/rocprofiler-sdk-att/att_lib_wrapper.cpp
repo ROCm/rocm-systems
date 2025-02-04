@@ -86,8 +86,8 @@ get_shader_id(const std::string& name)
     auto run_pos = name.rfind('_');
     if(run_pos == std::string::npos) throw std::runtime_error("Invalid name");
 
-    std::string_view stripped      = name.substr(0, run_pos);
-    auto             se_number_pos = stripped.rfind('_');
+    std::string stripped      = name.substr(0, run_pos);
+    auto        se_number_pos = stripped.rfind('_');
     if(se_number_pos == std::string::npos || se_number_pos + 1 >= stripped.size())
         throw std::runtime_error("Invalid name");
 
@@ -97,15 +97,11 @@ get_shader_id(const std::string& name)
 std::vector<tool_att_capability_t>
 query_att_decode_capability()
 {
-    std::vector<tool_att_capability_t> ret;
+    auto ret = std::vector<tool_att_capability_t>{};
 
     for(auto& [cap, libname] : get_lib_names())
     {
-        if(auto handle = dlopen(libname, RTLD_NOW | RTLD_LOCAL))
-        {
-            dlclose(handle);
-            ret.push_back(cap);
-        }
+        if(DL(libname).handle != 0) ret.push_back(cap);
     }
 
     return ret;

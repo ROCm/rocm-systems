@@ -35,7 +35,7 @@ class DL
     using StatusFn = decltype(rocprofiler_att_decoder_get_status_string);
 
 public:
-    DL(const char* dlname);
+    DL(const char* libname);
     ~DL();
 
     ParseFn*  att_parse_data_fn = nullptr;

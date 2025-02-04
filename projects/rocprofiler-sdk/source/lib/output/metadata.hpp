@@ -32,6 +32,7 @@
 #include "lib/common/demangle.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/synchronized.hpp"
+#include "lib/rocprofiler-sdk-att/att_lib_wrapper.hpp"
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/buffer_tracing.h>
@@ -74,8 +75,11 @@ using marker_message_ordered_map_t = std::map<uint64_t, std::string>;
 using string_entry_map_t           = std::unordered_map<size_t, std::unique_ptr<std::string>>;
 using counter_dimension_vec_t      = std::vector<rocprofiler_record_dimension_info_t>;
 using external_corr_id_set_t       = std::unordered_set<uint64_t>;
-using code_obj_decoder_t = rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate;
-using instruction_t      = rocprofiler::sdk::codeobj::disassembly::Instruction;
+using code_obj_decoder_t    = rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate;
+using instruction_t         = rocprofiler::sdk::codeobj::disassembly::Instruction;
+using att_agent_filenames_t = std::pair<rocprofiler_agent_id_t, std::vector<std::string>>;
+using att_filenames_map_t   = std::unordered_map<rocprofiler_dispatch_id_t, att_agent_filenames_t>;
+using code_object_load_info_vec_t = std::vector<rocprofiler::att_wrapper::CodeobjLoadInfo>;
 template <typename Tp>
 using synced_map = common::Synchronized<Tp, true>;
 
@@ -94,14 +98,16 @@ struct metadata
     agent_counter_info_map_t          agent_counter_info          = {};
     agent_pc_sample_config_info_map_t agent_pc_sample_config_info = {};
 
-    sdk::buffer_name_info                buffer_names      = {};
-    sdk::callback_name_info              callback_names    = {};
-    synced_map<code_object_data_map_t>   code_objects      = {};
-    synced_map<kernel_symbol_data_map_t> kernel_symbols    = {};
-    synced_map<marker_message_map_t>     marker_messages   = {};
-    synced_map<string_entry_map_t>       string_entries    = {};
-    synced_map<external_corr_id_set_t>   external_corr_ids = {};
-    synced_map<host_function_info_map_t> host_functions    = {};
+    sdk::buffer_name_info                   buffer_names      = {};
+    sdk::callback_name_info                 callback_names    = {};
+    synced_map<code_object_data_map_t>      code_objects      = {};
+    synced_map<kernel_symbol_data_map_t>    kernel_symbols    = {};
+    synced_map<marker_message_map_t>        marker_messages   = {};
+    synced_map<string_entry_map_t>          string_entries    = {};
+    synced_map<external_corr_id_set_t>      external_corr_ids = {};
+    synced_map<host_function_info_map_t>    host_functions    = {};
+    synced_map<code_object_load_info_vec_t> code_object_load  = {};
+    att_filenames_map_t                     att_filenames     = {};
 
     metadata() = default;
     metadata(inprocess);
@@ -122,6 +128,7 @@ struct metadata
     const tool_counter_info*            get_counter_info(rocprofiler_counter_id_t id) const;
     const counter_dimension_info_vec_t* get_counter_dimension_info(uint64_t instance_id) const;
 
+    std::vector<std::string> get_att_filenames() const;
     code_object_data_vec_t   get_code_objects() const;
     kernel_symbol_data_vec_t get_kernel_symbols() const;
     host_function_data_vec_t get_host_symbols() const;
@@ -135,6 +142,7 @@ struct metadata
     std::string_view get_comment(int64_t index) const { return instruction_comment.at(index); }
     int64_t          get_instruction_index(rocprofiler_pc_t record);
     void             add_decoder(rocprofiler_code_object_info_t* obj_data_v);
+    code_object_load_info_vec_t get_code_object_load_info() const;
 
     template <typename Tp>
     Tp get_marker_messages(Tp&&);

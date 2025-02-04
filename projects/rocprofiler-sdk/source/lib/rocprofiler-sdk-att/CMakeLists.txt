@@ -29,6 +29,7 @@ find_package(
     lib/cmake/amd_comgr)
 
 add_library(rocprofiler-sdk-att-parser STATIC)
+add_library(rocprofiler-sdk::rocprofiler-sdk-att-parser ALIAS rocprofiler-sdk-att-parser)
 target_sources(rocprofiler-sdk-att-parser PRIVATE ${ATT_TOOL_SOURCE_FILES})
 
 target_link_libraries(

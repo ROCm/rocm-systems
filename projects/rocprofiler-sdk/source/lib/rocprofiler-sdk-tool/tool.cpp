@@ -45,8 +45,11 @@
 #include "lib/output/statistics.hpp"
 #include "lib/output/tmp_file.hpp"
 #include "lib/output/tmp_file_buffer.hpp"
+#include "lib/rocprofiler-sdk-att/att_lib_wrapper.hpp"
 
 #include <rocprofiler-sdk/agent.h>
+#include <rocprofiler-sdk/amd_detail/thread_trace_core.h>
+#include <rocprofiler-sdk/amd_detail/thread_trace_dispatch.h>
 #include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/experimental/counters.h>
@@ -193,9 +196,10 @@ using kernel_iteration_t    = std::unordered_map<rocprofiler_kernel_id_t, uint32
 using kernel_rename_map_t   = std::unordered_map<uint64_t, uint64_t>;
 using kernel_rename_stack_t = std::stack<uint64_t>;
 
-auto* tool_metadata    = as_pointer<tool::metadata>(tool::metadata::inprocess{});
-auto  target_kernels   = common::Synchronized<targeted_kernels_map_t>{};
-auto  kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
+auto*      tool_metadata    = as_pointer<tool::metadata>(tool::metadata::inprocess{});
+auto       target_kernels   = common::Synchronized<targeted_kernels_map_t>{};
+auto       kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
+std::mutex att_shader_data;
 
 thread_local auto thread_dispatch_rename      = as_pointer<kernel_rename_stack_t>();
 thread_local auto thread_dispatch_rename_dtor = common::scope_destructor{[]() {
@@ -238,7 +242,14 @@ is_targeted_kernel(uint64_t _kern_id)
 
                 // If the iteration range is not given then all iterations of the kernel is profiled
                 if(_range.empty())
-                    return true;
+                {
+                    if(!tool::get_config().advanced_thread_trace)
+                        return true;
+                    else
+                    {
+                        if(itr == 1) return true;
+                    }
+                }
                 else if(_range.find(itr) != _range.end())
                     return true;
                 return false;
@@ -607,6 +618,75 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
             {
                 CHECK_NOTNULL(tool_metadata)->add_decoder(obj_data);
             }
+
+            if(obj_data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY &&
+               tool::get_config().advanced_thread_trace)
+            {
+                const char* gpu_name      = tool_metadata->agents_map.at(obj_data->rocp_agent).name;
+                auto        filename      = fmt::format("{}_code_object_id_{}",
+                                            std::string(gpu_name),
+                                            std::to_string(obj_data->code_object_id));
+                auto        output_stream = get_output_stream(tool::get_config(), filename, ".out");
+                std::string output_filename =
+                    get_output_filename(tool::get_config(), filename, ".out");
+
+                // NOLINTNEXTLINE(performance-no-int-to-ptr)
+                output_stream.stream->write(reinterpret_cast<char*>(obj_data->memory_base),
+                                            obj_data->memory_size);
+                tool_metadata->code_object_load.wlock(
+                    [](auto&                                 data_vec,
+                       std::string                           file_name,
+                       tool::rocprofiler_code_object_info_t* obj_data_v) {
+                        data_vec.push_back({file_name,
+                                            obj_data_v->code_object_id,
+                                            obj_data_v->load_base,
+                                            obj_data_v->load_size});
+                    },
+                    output_filename,
+                    obj_data);
+            }
+            else if(obj_data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE &&
+                    tool::get_config().advanced_thread_trace)
+            {
+                const char* gpu_name      = tool_metadata->agents_map.at(obj_data->rocp_agent).name;
+                auto        filename      = fmt::format("{}_code_object_id_{}",
+                                            std::string(gpu_name),
+                                            std::to_string(obj_data->code_object_id));
+                auto        output_stream = get_output_stream(tool::get_config(), filename, ".out");
+                std::string output_filename =
+                    get_output_filename(tool::get_config(), filename, ".out");
+
+                uint8_t*      binary      = nullptr;
+                size_t        buffer_size = 0;
+                std::ifstream code_object_file(obj_data->uri, std::ios::binary | std::ios::ate);
+                if(code_object_file.good())
+                {
+                    buffer_size = code_object_file.tellg();
+                    code_object_file.seekg(0, std::ios::beg);
+                    binary = new(std::nothrow) uint8_t[buffer_size];
+                    if(binary &&
+                       !code_object_file.read(reinterpret_cast<char*>(binary), buffer_size))
+                    {
+                        delete[] binary;
+                        binary = nullptr;
+                    }
+                }
+                // NOLINTBEGIN(performance-no-int-to-ptr)
+                output_stream.stream->write(reinterpret_cast<char*>(obj_data->memory_base),
+                                            obj_data->memory_size);
+                // NOLINTEND(performance-no-int-to-ptr)
+                tool_metadata->code_object_load.wlock(
+                    [](auto&                                 data_vec,
+                       std::string                           file_name,
+                       tool::rocprofiler_code_object_info_t* obj_data_v) {
+                        data_vec.push_back({file_name,
+                                            obj_data_v->code_object_id,
+                                            obj_data_v->load_base,
+                                            obj_data_v->load_size});
+                    },
+                    output_filename,
+                    obj_data);
+            }
         }
         else if(record.phase == ROCPROFILER_CALLBACK_PHASE_UNLOAD)
         {
@@ -879,6 +959,38 @@ get_instruction_index(rocprofiler_pc_t pc)
 
 }  // namespace
 
+std::vector<rocprofiler_att_parameter_t>
+get_att_perfcounter_params(std::vector<rocprofiler::tool::att_perfcounter>& att_perf_counters)
+{
+    std::vector<rocprofiler_att_parameter_t> _data;
+    if(att_perf_counters.empty()) return _data;
+
+    static const auto gpu_agents              = get_gpu_agents();
+    static const auto gpu_agents_counter_info = get_agent_counter_info();
+
+    for(const auto& [agent_, tool_counter_info_] : gpu_agents_counter_info)
+    {
+        for(const auto& counter_info_ : tool_counter_info_)
+        {
+            if(std::string_view(counter_info_.block) != "SQ") continue;
+
+            for(const auto& att_perf_counter : att_perf_counters)
+            {
+                if(std::string_view(counter_info_.name) == att_perf_counter.counter_name)
+                {
+                    auto param       = rocprofiler_att_parameter_t{};
+                    param.type       = ROCPROFILER_ATT_PARAMETER_PERFCOUNTER,
+                    param.counter_id = counter_info_.id,
+                    param.simd_mask  = att_perf_counter.simd_mask;
+                    _data.emplace_back(param);
+                }
+            }
+        }
+    }
+
+    return _data;
+}
+
 void
 rocprofiler_pc_sampling_callback(rocprofiler_context_id_t /* context_id*/,
                                  rocprofiler_buffer_id_t /* buffer_id*/,
@@ -918,6 +1030,55 @@ rocprofiler_pc_sampling_callback(rocprofiler_context_id_t /* context_id*/,
             ROCP_FATAL << "unexpected rocprofiler_record_header_t category + kind";
         }
     }
+}
+
+void
+att_shader_data_callback(rocprofiler_agent_id_t  agent,
+                         int64_t                 se_id,
+                         void*                   se_data,
+                         size_t                  data_size,
+                         rocprofiler_user_data_t userdata)
+{
+    std::lock_guard<std::mutex> lock(att_shader_data);
+    std::stringstream           filename;
+    filename << fmt::format("{}_shader_engine_{}_{}", agent.handle, se_id, userdata.value);
+
+    auto        dispatch_id     = static_cast<rocprofiler_dispatch_id_t>(userdata.value);
+    auto        output_stream   = get_output_stream(tool::get_config(), filename.str(), ".att");
+    std::string output_filename = get_output_filename(tool::get_config(), filename.str(), ".att");
+
+    output_stream.stream->write(reinterpret_cast<char*>(se_data), data_size);
+    tool_metadata->att_filenames[dispatch_id].first = agent;
+    tool_metadata->att_filenames[dispatch_id].second.emplace_back(output_filename);
+}
+
+rocprofiler_att_control_flags_t
+att_dispatch_callback(rocprofiler_agent_id_t /* agent_id  */,
+                      rocprofiler_queue_id_t /* queue_id  */,
+                      rocprofiler_correlation_id_t /* correlation_id */,
+                      rocprofiler_kernel_id_t   kernel_id,
+                      rocprofiler_dispatch_id_t dispatch_id,
+                      void* /*userdata_config*/,
+                      rocprofiler_user_data_t* userdata_shader)
+{
+    userdata_shader->value = dispatch_id;
+    kernel_iteration.wlock(
+        [](auto& _kernel_iter, rocprofiler_kernel_id_t _kernel_id) {
+            auto itr = _kernel_iter.find(_kernel_id);
+            if(itr == _kernel_iter.end())
+                _kernel_iter.emplace(_kernel_id, 1);
+            else
+            {
+                itr->second++;
+            }
+        },
+        kernel_id);
+
+    if(is_targeted_kernel(kernel_id))
+    {
+        return ROCPROFILER_ATT_CONTROL_START_AND_STOP;
+    }
+    return ROCPROFILER_ATT_CONTROL_NONE;
 }
 
 void
@@ -1214,6 +1375,37 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         }
     }
 
+    if(tool::get_config().advanced_thread_trace)
+    {
+        auto     parameters        = std::vector<rocprofiler_att_parameter_t>{};
+        uint64_t target_cu         = tool::get_config().att_param_target_cu;
+        uint64_t simd_select       = tool::get_config().att_param_simd_select;
+        uint64_t buffer_sz         = tool::get_config().att_param_buffer_size;
+        uint64_t shader_mask       = tool::get_config().att_param_shader_engine_mask;
+        auto&    att_perf          = tool::get_config().att_param_perfcounters;
+        bool     att_serialize_all = tool::get_config().att_serialize_all;
+        auto     att_perf_params   = get_att_perfcounter_params(att_perf);
+        parameters.insert(parameters.end(), att_perf_params.begin(), att_perf_params.end());
+
+        // TODO: att params could be different for different devices. How to support?
+        // Input file schema might also need to change to support multiple ATT params
+
+        parameters.push_back({ROCPROFILER_ATT_PARAMETER_TARGET_CU, {target_cu}});
+        parameters.push_back({ROCPROFILER_ATT_PARAMETER_SIMD_SELECT, {simd_select}});
+        parameters.push_back({ROCPROFILER_ATT_PARAMETER_BUFFER_SIZE, {buffer_sz}});
+        parameters.push_back({ROCPROFILER_ATT_PARAMETER_SHADER_ENGINE_MASK, {shader_mask}});
+        parameters.push_back({ROCPROFILER_ATT_PARAMETER_SERIALIZE_ALL, {att_serialize_all}});
+
+        ROCPROFILER_CALL(
+            rocprofiler_configure_dispatch_thread_trace_service(get_client_ctx(),
+                                                                parameters.data(),
+                                                                parameters.size(),
+                                                                att_dispatch_callback,
+                                                                att_shader_data_callback,
+                                                                tool_data),
+            "thread trace service configure");
+    }
+
     if(tool::get_config().hip_runtime_api_trace || tool::get_config().hip_compiler_api_trace)
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(get_client_ctx(),
@@ -1502,6 +1694,40 @@ tool_fini(void* /*tool_data*/)
     if(tool::get_config().stats && tool::get_config().csv_output)
     {
         tool::generate_csv(tool::get_config(), *tool_metadata, contributions);
+    }
+
+    if(tool::get_config().advanced_thread_trace)
+    {
+        std::unordered_map<std::string_view, rocprofiler::att_wrapper::tool_att_capability_t>
+            tool_att_capability_map = {
+                {"testing", rocprofiler::att_wrapper::ATT_CAPABILITIES_TESTING},
+                {"summary", rocprofiler::att_wrapper::ATT_CAPABILITIES_SUMMARY},
+                {"trace", rocprofiler::att_wrapper::ATT_CAPABILITIES_TRACE},
+                {"debug", rocprofiler::att_wrapper::ATT_CAPABILITIES_DEBUG}};
+
+        ROCP_FATAL_IF(tool::get_config().att_capability.empty())
+            << "Provide the decoder parser method as input";
+
+        auto att_capability_value = tool_att_capability_map.at(tool::get_config().att_capability);
+        auto decoder              = rocprofiler::att_wrapper::ATTDecoder(att_capability_value);
+        ROCP_FATAL_IF(!decoder.valid()) << "Decoder library not found at ROCPORF_ATT_LIBRARY_PATH";
+        auto codeobj     = tool_metadata->get_code_object_load_info();
+        auto output_path = tool::format_path(tool::get_config().output_path);
+        for(auto& [dispatch_id, att_filename_data] : tool_metadata->att_filenames)
+        {
+            std::string formats = "json,csv";
+            // if(tool::get_config().json_output) formats += "json,";
+            // if(tool::get_config().csv_output) formats += "csv,";
+
+            std::stringstream ui_name;
+            ui_name << fmt::format("ui_output_agent_{}_dispatch_{}",
+                                   std::to_string(att_filename_data.first.handle),
+                                   dispatch_id);
+            auto        out_path = fmt::format("{}/{}", output_path, ui_name.str());
+            std::string in_path  = ".";
+
+            decoder.parse(in_path, out_path, att_filename_data.second, codeobj, formats);
+        }
     }
 
     if(tool::get_config().json_output)

@@ -20,12 +20,19 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "dl.hpp"
+#include "lib/rocprofiler-sdk-att/dl.hpp"
+#include "lib/common/environment.hpp"
+#include "lib/common/filesystem.hpp"
+#include "lib/common/logging.hpp"
+
+#include <rocprofiler-sdk/cxx/details/tokenize.hpp>
+
 #include <dlfcn.h>
 #include <atomic>
 #include <cassert>
 #include <cstdlib>
 #include <mutex>
+#include <set>
 #include <stdexcept>
 #include <string>
 
@@ -33,9 +40,26 @@ namespace rocprofiler
 {
 namespace att_wrapper
 {
-DL::DL(const char* dlname)
+namespace fs = ::rocprofiler::common::filesystem;
+
+fs::path
+get_search_path(std::string path_name)
 {
-    handle = dlopen(dlname, RTLD_NOW | RTLD_LOCAL);
+    if(fs::exists(path_name)) return fs::path(path_name);
+    return "";
+}
+
+DL::DL(const char* libname)
+{
+    auto paths = rocprofiler::common::get_env("ROCPROF_ATT_LIBRARY_PATH", "");
+    if(paths.empty()) return;
+    auto path_set = rocprofiler::sdk::parse::tokenize(paths, ":");
+
+    for(auto&& name : path_set)
+    {
+        handle = dlopen((get_search_path(name) / libname).string().c_str(), RTLD_LAZY | RTLD_LOCAL);
+        if(handle) break;
+    }
     if(!handle) return;
 
     att_parse_data_fn =

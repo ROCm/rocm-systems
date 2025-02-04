@@ -144,6 +144,68 @@ get_kernel_filter_range(const std::string& kernel_filter)
     return range_set;
 }
 
+std::vector<att_perfcounter>
+parse_att_counters(std::string line)
+{
+    auto counters = std::vector<att_perfcounter>{};
+
+    if(line.empty()) return counters;
+
+    // strip the comment
+    if(auto pos = line.find('#'); pos != std::string::npos) line = line.substr(0, pos);
+
+    // trim line for any white spaces after comment strip
+    trim(line);
+
+    // check to see if comment stripping + trim resulted in empty line
+    if(line.empty()) return counters;
+
+    handle_special_chars(line);
+
+    auto extract_counter_name_and_simd_mask = [](std::string& input) {
+        std::string counter_name = "";
+        auto        ret          = att_perfcounter{};
+
+        size_t pos = input.find(':');
+
+        if(pos != std::string::npos)
+        {
+            ret.counter_name = input.substr(0, pos);
+            ret.simd_mask    = std::stoi(input.substr(pos + 1), nullptr, 16);
+        }
+        else
+            counter_name = input;
+        return ret;
+    };
+
+    // regex to check if string is of the form "counter_name:simd_mask"
+    std::regex            pattern(R"([a-zA-Z0-9_]+(:0x[0-9a-fA-F]+)?)");
+    std::set<std::string> unique_counters;
+
+    auto input_ss = std::stringstream{line};
+    while(true)
+    {
+        auto counter = std::string{};
+        input_ss >> counter;
+        if(counter.empty()) break;
+
+        // check if the counter string matches the pattern
+        if(!std::regex_match(counter, pattern))
+        {
+            ROCP_FATAL << "Invalid counter format for ATT: " << counter
+                       << ". Expected format : Counter_name:optional_simd_mask(hexadecimal)";
+        }
+
+        // Consider only those counters where combination of counter name and simd mask is unique
+        if(unique_counters.insert(counter).second == false) continue;
+
+        auto res = extract_counter_name_and_simd_mask(counter);
+        counters.emplace_back(res);
+    }
+
+    return counters;
+}
+
 std::set<std::string>
 parse_counters(std::string line)
 {
@@ -193,6 +255,8 @@ config::config()
 , kernel_filter_range{get_kernel_filter_range(
       get_env("ROCPROF_KERNEL_FILTER_RANGE", std::string{}))}
 , counters{parse_counters(get_env("ROCPROF_COUNTERS", std::string{}))}
+, att_param_perfcounters{
+      parse_att_counters(get_env("ROCPROF_ATT_PARAM_PERFCOUNTERS", std::string{}))}
 {
     if(kernel_filter_include.empty()) kernel_filter_include = std::string{".*"};
 

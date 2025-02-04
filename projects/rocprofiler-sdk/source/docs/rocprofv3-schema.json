@@ -567,6 +567,24 @@
                             "pc_sample_comments": {
                                 "type": "array",
                                 "description": "Comments matching assembly instructions from pc_sample_instructions array. If debug symbols are available, comments provide instructions to source-line mapping. Otherwise, a comment is an empty string."
+                            },
+                            "att_filenames" : {
+                                "type": "object",
+                                "properties": {
+                                    "key": {
+                                        "type": "integer",
+                                        "description": "Dispatch id."
+                                    },
+                                    "value": {
+                                        "type": "array",
+                                        "description": "An array of ATT filenames."
+                                    }
+
+                                }
+                            },
+                            "code_object_snapshot_filenames": {
+                                "type": "array",
+                                "description": "Code object snapshot filename"
                             }
                         }
                     },

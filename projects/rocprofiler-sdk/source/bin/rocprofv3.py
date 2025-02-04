@@ -26,6 +26,7 @@ import os
 import sys
 import argparse
 import subprocess
+import re
 
 
 class dotdict(dict):
@@ -85,6 +86,95 @@ def strtobool(val):
     else:
         val_type = type(val).__name__
         raise ValueError(f"invalid truth value {val} (type={val_type})")
+
+
+def search_path(path_list):
+    supported_option = []
+    lib_att_pattern = r"libatt_decoder_(trace|summary|debug|testing)\.so"
+    file_list = []
+
+    for path in path_list:
+        for root, dirs, files in os.walk(path, topdown=True):
+            file_list.extend(files)
+            break
+        for itr in file_list:
+            _match = re.match(lib_att_pattern, itr)
+            if _match:
+                lst = re.findall("trace|debug|summary|testing", itr)
+                supported_option.extend(lst)
+    return set(supported_option)
+
+
+def check_att_capability(args):
+
+    path = []
+    ROCPROFV3_DIR = os.path.dirname(os.path.realpath(__file__))
+    ROCM_DIR = os.path.dirname(ROCPROFV3_DIR)
+    support_input = {}
+    tmp_parser = argparse.ArgumentParser(add_help=False)
+    tmp_parser.add_argument(
+        "--att-library-path",
+        default=os.environ.get(
+            "ATT_LIBRARY_PATH", os.environ.get("LD_LIBRARY_PATH", None)
+        ),
+        type=str,
+        required=False,
+    )
+
+    tmp_parser.add_argument(
+        "-i",
+        "--input",
+        default=None,
+        type=str,
+        required=False,
+    )
+
+    tmp_data = {}
+    att_args, unparsed_args = tmp_parser.parse_known_args(args)
+    tmp_keys = list(att_args.__dict__.keys())
+
+    for itr in tmp_keys:
+        if has_set_attr(att_args, itr):
+            tmp_data[itr] = getattr(att_args, itr)
+
+    data = dotdict(tmp_data)
+    if data.input:
+        # If index of a pass in input file is a key in the support_input dict, then that pass has att-library-path arg
+        args_list = parse_input(data.input)
+        for index, itr in enumerate(args_list):
+            if itr.att_library_path:
+                library_path = []
+                if ":" in itr.att_library_path:
+                    library_path.extend(itr.att_library_path.split(":"))
+                else:
+                    library_path.append(itr.att_library_path)
+                support = search_path(library_path)
+                # If the att-library-path in the input file for a pass is valid, then the value of index key in the dict, support_input, is updated to that valid path
+                if support:
+                    support_input[index] = set(support)
+                else:
+                    # If the att-library-path in the input file for a pass is invalid, then the value of index key in the dict, support_input, is empty
+                    support_input[index] = []
+    if data.att_library_path:
+        if ":" in data.att_library_path:
+            path.extend(data.att_library_path.split(":"))
+        else:
+            path.append(data.att_library_path)
+    else:
+        path.append(f"{ROCM_DIR}/lib")
+        path.append(f"{ROCM_DIR}/lib64")
+
+    support = search_path(set(path))
+    if support:
+        if len(path) == 1:
+            os.environ["ATT_LIBRARY_PATH"] = path[0]
+            os.environ["ROCPROF_ATT_LIBRARY_PATH"] = path[0]
+        else:
+            os.environ["ATT_LIBRARY_PATH"] = ":".join(path)
+            os.environ["ROCPROF_ATT_LIBRARY_PATH"] = ":".join(path)
+        return support, support_input
+
+    return None, support_input
 
 
 class booleanArgAction(argparse.Action):
@@ -473,6 +563,14 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         default=os.environ.get("ROCPROF_PRELOAD", "").split(":"),
         nargs="*",
     )
+
+    advanced_options.add_argument(
+        "--att-library-path",
+        default=os.environ.get(
+            "ATT_LIBRARY_PATH", os.environ.get("LD_LIBRARY_PATH", None)
+        ),
+        help="ATT library path to find decoder library",
+    )
     # below is available for CI because LD_PRELOADing a library linked to a sanitizer library
     # causes issues in apps where HIP is part of shared library.
     add_parser_bool_argument(
@@ -494,7 +592,66 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
             app_args = args[(idx + 1) :]
             break
 
-    return (parser.parse_args(rocp_args), app_args)
+    supported_list, is_support_input = check_att_capability(rocp_args)
+    if supported_list or len(is_support_input) != 0:
+        choice_list = []
+        for keys, values in is_support_input.items():
+            choice_list.extend(values)
+        if supported_list:
+            choice_list.extend(list(supported_list))
+
+        att_options = parser.add_argument_group("Advanced Thread Trace")
+
+        add_parser_bool_argument(
+            att_options,
+            "--advanced-thread-trace",
+            help="Enable ATT",
+        )
+
+        att_options.add_argument(
+            "--att-target-cu",
+            help="ATT target compute unit",
+            default=None,
+            type=int,
+        )
+
+        att_options.add_argument(
+            "--att-simd-select",
+            help="Select ATT SIMD",
+            default=None,
+            type=str,
+        )
+
+        att_options.add_argument(
+            "--att-buffer-size",
+            help="Buffer Size",
+            default=None,
+            type=str,
+        )
+
+        att_options.add_argument(
+            "--att-shader-engine-mask",
+            help="att shader engine mask",
+            default=None,
+            type=str,
+        )
+
+        att_options.add_argument(
+            "--att-parse",
+            type=str.lower,
+            default=None,
+            help="Select ATT Parse method from the choices",
+            choices=set(choice_list),
+        )
+
+        add_parser_bool_argument(
+            att_options,
+            "--att-serialize-all",
+            default=False,
+            help="Serialize all kernels",
+        )
+
+    return (parser.parse_args(rocp_args), app_args, supported_list, is_support_input)
 
 
 def parse_yaml(yaml_file):
@@ -1048,6 +1205,77 @@ def run(app_args, args, **kwargs):
         update_env("ROCPROF_PC_SAMPLING_METHOD", args.pc_sampling_method)
         update_env("ROCPROF_PC_SAMPLING_INTERVAL", args.pc_sampling_interval)
 
+    if args.advanced_thread_trace:
+
+        def int_auto(num_str):
+            if "0x" in num_str:
+                return int(num_str, 16)
+            else:
+                return int(num_str, 10)
+
+        if args.pmc or (
+            args.pc_sampling_beta_enabled
+            or args.pc_sampling_unit
+            or args.pc_sampling_method
+            or args.pc_sampling_interval
+        ):
+            fatal_error(
+                "Advanced thread trace cannot be enabled with counter collection or pc sampling"
+            )
+
+        if not args.att_parse:
+            fatal_error("provide the parser choice")
+
+        update_env("ROCPROF_ADVANCED_THREAD_TRACE", True, overwrite=True)
+        update_env("ROCPROF_ATT_CAPABILITY", args.att_parse, overwrite=True)
+
+        if args.att_target_cu:
+            update_env("ROCPROF_ATT_PARAM_TARGET_CU", args.att_target_cu, overwrite=True)
+
+        if args.att_shader_engine_mask:
+            update_env(
+                "ROCPROF_ATT_PARAM_SHADER_ENGINE_MASK",
+                int_auto(args.att_shader_engine_mask),
+                overwrite=True,
+            )
+        if args.att_buffer_size:
+            update_env(
+                "ROCPROF_ATT_PARAM_BUFFER_SIZE",
+                int_auto(args.att_buffer_size),
+                overwrite=True,
+            )
+        if args.att_simd_select:
+            update_env(
+                "ROCPROF_ATT_PARAM_SIMD_SELECT",
+                int_auto(args.att_simd_select),
+                overwrite=True,
+            )
+        if args.att_serialize_all:
+            update_env(
+                "ROCPROF_ATT_PARAM_SERIALIZE_ALL",
+                args.att_serialize_all,
+                overwrite=True,
+            )
+
+        if args.att_library_path:
+
+            update_env(
+                "ROCPROF_ATT_LIBRARY_PATH",
+                args.att_library_path,
+                overwrite=True,
+            )
+            update_env(
+                "ATT_LIBRARY_PATH",
+                args.att_library_path,
+                overwrite=True,
+            )
+        if args.att_percounters:
+            update_env(
+                "ROCPROF_ATT_PARAM_PERFCOUNTERS",
+                " ".join(args.att_perfcounters),
+                overwrite=True,
+            )
+
     if use_execv:
         # does not return
         os.execvpe(app_args[0], app_args, env=app_env)
@@ -1061,9 +1289,45 @@ def run(app_args, args, **kwargs):
         return exit_code
 
 
+def check_att_path_parse_method(args, index, support_att_input, att_parse_supported):
+
+    if not att_parse_supported:
+        if index not in support_att_input.keys():
+            fatal_error(
+                f"Advanced_thread_trace enabled but no decoder library found in cmdline/env paths and att_library_path not set for pass-{index + 1}"
+            )
+        elif not support_att_input[index]:
+            fatal_error(
+                f"Advanced_thread_trace enabled but no decoder library found in att_library_path for pass-{index + 1}"
+            )
+        else:
+            if args.att_parse and args.att_parse not in support_att_input[index]:
+                fatal_error(
+                    f"Advanced_thread_trace enabled but decoder library for requested parse method not found in att_library_path for pass-{index + 1}"
+                )
+    else:
+        if index in support_att_input.keys() and not support_att_input[index]:
+            fatal_error(
+                f"Advanced_thread_trace enabled but no decoder library found in att_library_path for pass-{index + 1}"
+            )
+
+        elif index not in support_att_input.keys():
+            if args.att_parse and args.att_parse not in att_parse_supported:
+                fatal_error(
+                    "Advanced_thread_trace enabled but decoder library for requested parse method not found"
+                )
+        else:
+            if args.att_parse and args.att_parse not in support_att_input[index]:
+                fatal_error(
+                    f"Advanced_thread_trace enabled but decoder library for requested parse method not found for pass-{index + 1}"
+                )
+
+
 def main(argv=None):
 
-    cmd_args, app_args = parse_arguments(argv)
+    # att_parse_supported is valid path for decoder in env or commandline arg
+    # support_att_input is a dict, where key is a pass index with value being a valid decoder path
+    cmd_args, app_args, att_parse_supported, support_att_input = parse_arguments(argv)
     inp_args = (
         parse_input(cmd_args.input) if getattr(cmd_args, "input") else [dotdict({})]
     )
@@ -1073,10 +1337,16 @@ def main(argv=None):
         pass_idx = None
         if has_set_attr(args, "pmc") and len(args.pmc) > 0:
             pass_idx = 1
+        if args.advanced_thread_trace:
+            check_att_path_parse_method(args, 0, support_att_input, att_parse_supported)
         run(app_args, args, pass_id=pass_idx)
     else:
         for idx, itr in enumerate(inp_args):
             args = get_args(cmd_args, itr)
+            if args.advanced_thread_trace:
+                check_att_path_parse_method(
+                    args, idx, support_att_input, att_parse_supported
+                )
             run(
                 app_args,
                 args,

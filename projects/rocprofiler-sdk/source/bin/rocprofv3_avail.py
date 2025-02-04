@@ -23,7 +23,6 @@
 # THE SOFTWARE.
 
 import ctypes
-import pathlib
 import os
 import io
 import csv

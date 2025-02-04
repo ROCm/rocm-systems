@@ -22,12 +22,15 @@
 
 #include "metadata.hpp"
 
+#include "lib/common/filesystem.hpp"
 #include "lib/common/string_entry.hpp"
 #include "lib/output/agent_info.hpp"
 #include "lib/output/host_symbol_info.hpp"
 #include "lib/output/kernel_symbol_info.hpp"
+#include "lib/rocprofiler-sdk-att/att_lib_wrapper.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 
 #include <memory>
 #include <vector>
@@ -36,6 +39,7 @@ namespace rocprofiler
 {
 namespace tool
 {
+namespace fs = common::filesystem;
 namespace
 {
 rocprofiler_status_t
@@ -216,6 +220,34 @@ metadata::get_code_object(uint64_t code_obj_id) const
     return code_objects.rlock([code_obj_id](const auto& _data) -> const code_object_info* {
         return &_data.at(code_obj_id);
     });
+}
+
+code_object_load_info_vec_t
+metadata::get_code_object_load_info() const
+{
+    auto _data = code_object_load.rlock([](const auto& _data_v) {
+        auto _info = std::vector<rocprofiler::att_wrapper::CodeobjLoadInfo>{};
+        _info.reserve(_data_v.size());
+        for(const auto& itr : _data_v)
+            _info.emplace_back(itr);
+        return _info;
+    });
+
+    return _data;
+}
+
+std::vector<std::string>
+metadata::get_att_filenames() const
+{
+    auto data = std::vector<std::string>{};
+    for(auto filenames : att_filenames)
+    {
+        for(auto file : filenames.second.second)
+        {
+            data.emplace_back(fs::path(file).filename());
+        }
+    }
+    return data;
 }
 
 const kernel_symbol_info*

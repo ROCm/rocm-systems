@@ -6,7 +6,7 @@ project(rocprofiler-att-parser-waitcnt-tests LANGUAGES CXX)
 add_executable(att-decoder-waitcnt-test)
 target_link_libraries(
     att-decoder-waitcnt-test
-    PRIVATE rocprofiler-sdk-att-parser
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-att-parser
             rocprofiler-sdk::rocprofiler-sdk-json
             rocprofiler-sdk::rocprofiler-sdk-common-library
             rocprofiler-sdk::rocprofiler-sdk-glog
