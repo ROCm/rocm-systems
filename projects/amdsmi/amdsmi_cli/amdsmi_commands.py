@@ -1078,7 +1078,7 @@ class AMDSMICommands():
                 self.static_cpu(args, multiple_devices, cpu, interface_ver)
             if args.gpu:
                 self.logger.output = {}
-                self.logger.clear_multiple_devices_ouput()
+                self.logger.clear_multiple_devices_output()
                 self.static_gpu(args, multiple_devices, gpu, asic,
                                     bus, vbios, limit, driver, ras,
                                     board, numa, vram, cache, partition,
@@ -1093,7 +1093,7 @@ class AMDSMICommands():
             if args.gpu == None:
                 args.gpu = self.device_handles
 
-            self.logger.clear_multiple_devices_ouput()
+            self.logger.clear_multiple_devices_output()
             self.static_gpu(args, multiple_devices, gpu, asic,
                                 bus, vbios, limit, driver, ras,
                                 board, numa, vram, cache, partition,
@@ -2937,7 +2937,7 @@ class AMDSMICommands():
                                      core_curr_active_freq_core_limit, core_energy)
             if args.gpu:
                 self.logger.output = {}
-                self.logger.clear_multiple_devices_ouput()
+                self.logger.clear_multiple_devices_output()
                 self.metric_gpu(args, multiple_devices, watching_output, gpu,
                                 usage, watch, watch_time, iterations, power,
                                 clock, temperature, ecc, ecc_blocks, pcie,
@@ -2966,14 +2966,14 @@ class AMDSMICommands():
                                 cpu_dimm_pow_consumption, cpu_dimm_thermal_sensor)
             if args.core:
                 self.logger.output = {}
-                self.logger.clear_multiple_devices_ouput()
+                self.logger.clear_multiple_devices_output()
                 self.metric_core(args, multiple_devices, core, core_boost_limit,
                                      core_curr_active_freq_core_limit, core_energy)
         elif self.helpers.is_amdgpu_initialized(): # Only GPU is initialized
             if args.gpu == None:
                 args.gpu = self.device_handles
 
-            self.logger.clear_multiple_devices_ouput()
+            self.logger.clear_multiple_devices_output()
             self.metric_gpu(args, multiple_devices, watching_output, gpu,
                                 usage, watch, watch_time, iterations, power,
                                 clock, temperature, ecc, ecc_blocks, pcie,
@@ -4291,14 +4291,14 @@ class AMDSMICommands():
                             print(f"Valid Memory partition Modes: {memory_dict['caps']}\n")
                             self.logger.store_output(args.gpu, 'memory_partition', out)
                             self.logger.print_output()
-                            self.logger.clear_multiple_devices_ouput()
+                            self.logger.clear_multiple_devices_output()
                             lock.release()
                             return
                         if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
                             out = f"[AMDSMI_STATUS_NOT_SUPPORTED] Device does not support setting memory partition to {args.memory_partition} on {gpu_string}"
                             self.logger.store_output(args.gpu, 'memory_partition', out)
                             self.logger.print_output()
-                            self.logger.clear_multiple_devices_ouput()
+                            self.logger.clear_multiple_devices_output()
                             lock.release()
                             return
                         if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_AMDGPU_RESTART_ERR:
@@ -4311,7 +4311,7 @@ class AMDSMICommands():
                                 out = f"[AMDSMI_STATUS_AMDGPU_RESTART_ERR] Could not successfully restart driver after applying {args.memory_partition} on {gpu_string}"
                                 self.logger.store_output(args.gpu, 'memory_partition', out)
                                 self.logger.print_output()
-                                self.logger.clear_multiple_devices_ouput()
+                                self.logger.clear_multiple_devices_output()
                                 return
                             continue
 
@@ -4321,7 +4321,7 @@ class AMDSMICommands():
                         print(out)
                         self.logger.store_output(args.gpu, 'memorypartition', out)
                         self.logger.print_output()
-                        self.logger.clear_multiple_devices_ouput()
+                        self.logger.clear_multiple_devices_output()
                         lock.release()
                         return
                     except Exception as e:
@@ -4333,7 +4333,7 @@ class AMDSMICommands():
                         raise ValueError(f"Generic error found | Unable to set memory partition to {args.memory_partition} on {gpu_string}") from e
                 self.logger.store_output(args.gpu, 'memory_partition', f"Successfully set memory partition to {args.memory_partition}")
                 self.logger.print_output()
-                self.logger.clear_multiple_devices_ouput()
+                self.logger.clear_multiple_devices_output()
                 lock.release()
                 return
             if isinstance(args.power_cap, int):
@@ -4624,11 +4624,11 @@ class AMDSMICommands():
                                 cpu_enable_apb, cpu_disable_apb, soc_boost_limit)
             if args.core:
                 self.logger.output = {}
-                self.logger.clear_multiple_devices_ouput()
+                self.logger.clear_multiple_devices_output()
                 self.set_core(args, multiple_devices, core, core_boost_limit)
             if args.gpu:
                 self.logger.output = {}
-                self.logger.clear_multiple_devices_ouput()
+                self.logger.clear_multiple_devices_output()
                 self.set_gpu(args, multiple_devices, gpu, fan, perf_level,
                                 profile, perf_determinism, compute_partition,
                                 memory_partition, power_cap, soc_pstate, xgmi_plpd,
@@ -4643,12 +4643,12 @@ class AMDSMICommands():
                                 cpu_enable_apb, cpu_disable_apb, soc_boost_limit)
             if args.core:
                 self.logger.output = {}
-                self.logger.clear_multiple_devices_ouput()
+                self.logger.clear_multiple_devices_output()
                 self.set_core(args, multiple_devices, core, core_boost_limit)
         elif self.helpers.is_amdgpu_initialized(): # Only GPU is initialized
             if args.gpu == None:
                 args.gpu = self.device_handles
-            self.logger.clear_multiple_devices_ouput()
+            self.logger.clear_multiple_devices_output()
             self.set_gpu(args, multiple_devices, gpu, fan, perf_level,
                             profile, perf_determinism, compute_partition,
                             memory_partition, power_cap, soc_pstate, xgmi_plpd,
@@ -5709,7 +5709,7 @@ class AMDSMICommands():
             self.logger.multiple_device_output= tabular_output
             self.logger.table_title = "\nXGMI LINK STATUS"
             self.logger.print_output(multiple_device_enabled=True, tabular=True)
-            self.logger.clear_multiple_devices_ouput()
+            self.logger.clear_multiple_devices_output()
             if self.logger.is_human_readable_format():
                 print("\n* U:Up D:Down X:Disabled".ljust(13))
 
@@ -5793,7 +5793,7 @@ class AMDSMICommands():
             self.logger.multiple_device_output = tabular_output
             self.logger.table_title = "\nCURRENT_PARTITION"
             self.logger.print_output(multiple_device_enabled=True, tabular=True, dynamic=True)
-            self.logger.clear_multiple_devices_ouput()
+            self.logger.clear_multiple_devices_output()
 
         ###########################################
         # amd-smi partition --memory              #
@@ -5825,7 +5825,7 @@ class AMDSMICommands():
             self.logger.multiple_device_output = tabular_output
             self.logger.table_title = "\nMEMORY_PARTITION"
             self.logger.print_output(multiple_device_enabled=True, tabular=True, dynamic=True)
-            self.logger.clear_multiple_devices_ouput()
+            self.logger.clear_multiple_devices_output()
 
         ###########################################
         # amd-smi partition --accelerator         #
@@ -5964,7 +5964,7 @@ class AMDSMICommands():
             self.logger.multiple_device_output = tabular_output
             self.logger.table_title = "\nACCELERATOR_PARTITION_PROFILES"
             self.logger.print_output(multiple_device_enabled=True, tabular=True, dynamic=True)
-            self.logger.clear_multiple_devices_ouput()
+            self.logger.clear_multiple_devices_output()
 
             #########################################
             # print accelerator partition resources #
@@ -6012,7 +6012,7 @@ class AMDSMICommands():
             self.logger.multiple_device_output = tabular_output
             self.logger.table_title = "\nACCELERATOR_PARTITION_RESOURCES"
             self.logger.print_output(multiple_device_enabled=True, tabular=True, dynamic=True)
-            self.logger.clear_multiple_devices_ouput()
+            self.logger.clear_multiple_devices_output()
 
             # print legend
             legend_parts = [

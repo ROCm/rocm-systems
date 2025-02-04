@@ -73,7 +73,7 @@ class AMDSMILogger():
         return self.format == self.LoggerFormat.human_readable.value
 
 
-    def clear_multiple_devices_ouput(self):
+    def clear_multiple_devices_output(self):
         self.multiple_device_output.clear()
 
 
