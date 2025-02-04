@@ -132,7 +132,7 @@ agent_async_handler(hsa_signal_value_t /*signal_v*/, void* data)
         *prof_config->agent, prof_config->required_special_counters, decoded_pkt);
 
     auto* buf = buffer::get_buffer(callback_data.buffer.handle);
-    if(!buf)
+    if(!buf && callback_data.buffer != rocprofiler_buffer_id_t{.handle = 0})
     {
         ROCP_FATAL << fmt::format("Buffer {} destroyed before record was written",
                                   callback_data.buffer.handle);
@@ -160,8 +160,9 @@ agent_async_handler(hsa_signal_value_t /*signal_v*/, void* data)
             {
                 callback_data.cached_counters->push_back(val);
             }
-            buf->emplace(
-                ROCPROFILER_BUFFER_CATEGORY_COUNTERS, ROCPROFILER_COUNTER_RECORD_VALUE, val);
+            if(buf)
+                buf->emplace(
+                    ROCPROFILER_BUFFER_CATEGORY_COUNTERS, ROCPROFILER_COUNTER_RECORD_VALUE, val);
         }
     }
 

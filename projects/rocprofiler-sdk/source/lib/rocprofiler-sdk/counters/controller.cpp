@@ -82,7 +82,8 @@ CounterController::configure_agent_collection(rocprofiler_context_id_t context_i
     // cannot coexist in the same context for now.
     if(ctx.pc_sampler) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
 
-    if(!rocprofiler::buffer::get_buffer(buffer_id.handle))
+    if(!rocprofiler::buffer::get_buffer(buffer_id) &&
+       buffer_id != rocprofiler_buffer_id_t{.handle = 0})
     {
         return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
     }

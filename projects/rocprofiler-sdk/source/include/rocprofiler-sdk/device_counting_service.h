@@ -76,7 +76,9 @@ typedef void (*rocprofiler_device_counting_service_callback_t)(
  * @param [in] context_id context id
  * @param [in] buffer_id id of the buffer to use for the counting service. When
  * rocprofiler_sample_device_counting_service is called, counter data will be written
- * to this buffer.
+ * to this buffer. If the input buffer id is null (i.e. `rocprofiler_buffer_id_t{.handle = 0}`), the
+ * counter data will not be written to a buffer and will only be returned in the output_records of
+ * rocprofiler_sample_device_counting_service
  * @param [in] agent_id agent to configure profiling on.
  * @param [in] cb Callback called when the context is started for the tool to specify what
  * counters to collect (rocprofiler_profile_config_id_t).
