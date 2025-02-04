@@ -178,9 +178,25 @@ hsa_status_t KfdDriver::GetAgentProperties(core::Agent &agent) const {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t
-KfdDriver::GetMemoryProperties(uint32_t node_id,
-                               core::MemoryRegion &mem_region) const {
+hsa_status_t KfdDriver::GetMemoryProperties(uint32_t node_id,
+                                            std::vector<HsaMemoryProperties>& mem_props) const {
+  if (!mem_props.data()) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  if (hsaKmtGetNodeMemoryProperties(node_id, mem_props.size(), mem_props.data()) !=
+      HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::GetCacheProperties(uint32_t node_id, uint32_t processor_id,
+                                           std::vector<HsaCacheProperties>& cache_props) const {
+  if (!cache_props.data()) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  if (hsaKmtGetNodeCacheProperties(node_id, processor_id, cache_props.size(), cache_props.data()) !=
+      HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+
   return HSA_STATUS_SUCCESS;
 }
 

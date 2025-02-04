@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -73,8 +73,7 @@ void CpuAgent::InitRegionList() {
   const bool is_apu_node = (properties_.NumFComputeCores > 0);
 
   std::vector<HsaMemoryProperties> mem_props(properties_.NumMemoryBanks);
-  if (HSAKMT_STATUS_SUCCESS ==
-      hsaKmtGetNodeMemoryProperties(node_id(), properties_.NumMemoryBanks, &mem_props[0])) {
+  if (HSA_STATUS_SUCCESS == driver().GetMemoryProperties(node_id(), mem_props)) {
     std::vector<HsaMemoryProperties>::iterator system_prop =
         std::find_if(mem_props.begin(), mem_props.end(), [](HsaMemoryProperties prop) -> bool {
           return (prop.SizeInBytes > 0 && prop.HeapType == HSA_HEAPTYPE_SYSTEM);
@@ -107,9 +106,8 @@ void CpuAgent::InitRegionList() {
 void CpuAgent::InitCacheList() {
   // Get CPU cache information.
   cache_props_.resize(properties_.NumCaches);
-  if (HSAKMT_STATUS_SUCCESS !=
-      hsaKmtGetNodeCacheProperties(node_id(), properties_.CComputeIdLo,
-                                   properties_.NumCaches, &cache_props_[0])) {
+  if (HSA_STATUS_SUCCESS !=
+      driver().GetCacheProperties(node_id(), properties_.CComputeIdLo, cache_props_)) {
     cache_props_.clear();
   } else {
     // Only store CPU D-cache.

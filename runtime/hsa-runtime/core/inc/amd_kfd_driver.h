@@ -61,10 +61,21 @@ class Queue;
 
 namespace AMD {
 
+/// @brief AMD Kernel Fusion Driver (KFD) for AMD GPU and CPU agents.
+///
+/// @details The user-mode driver into the Linux KFD for AMD GPU and CPU HSA
+/// agents. Provides APIs for the ROCr core to discover the topology produced
+/// by the KFD, allocate memory out of the KFD, manage DMA bufs, allocate queues,
+/// and more.
 class KfdDriver final : public core::Driver {
 public:
   KfdDriver(std::string devnode_name);
 
+  /// @brief Determine of the KFD is present on the system and attemp to open it if found.
+  ///
+  /// @param[out] Driver object for the KFD.
+  /// @return HSA_STATUS_SUCCESS if driver found and opened.
+  /// @return HSA_STATUS_ERROR if unable to find or open the KFD.
   static hsa_status_t DiscoverDriver(std::unique_ptr<core::Driver>& driver);
 
   hsa_status_t Init() override;
@@ -77,9 +88,10 @@ public:
   hsa_status_t GetEdgeProperties(std::vector<HsaIoLinkProperties>& io_link_props,
                                  uint32_t node_id) const override;
   hsa_status_t GetAgentProperties(core::Agent &agent) const override;
-  hsa_status_t
-  GetMemoryProperties(uint32_t node_id,
-                      core::MemoryRegion &mem_region) const override;
+  hsa_status_t GetMemoryProperties(uint32_t node_id,
+                                   std::vector<HsaMemoryProperties>& mem_props) const override;
+  hsa_status_t GetCacheProperties(uint32_t node_id, uint32_t processor_id,
+                                  std::vector<HsaCacheProperties>& cache_props) const override;
   hsa_status_t AllocateMemory(const core::MemoryRegion &mem_region,
                               core::MemoryRegion::AllocateFlags alloc_flags,
                               void **mem, size_t size,

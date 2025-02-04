@@ -108,8 +108,7 @@ public:
 
   /// @brief Get the edge (IO link) properties of a specific node (that is
   /// managed by this driver) in the topology graph.
-  /// @param[out] io_link_props IO link properties of the node specified by \p
-  /// node_id.
+  /// @param[out] io_link_props IO link properties of the node specified by @p node_id.
   /// @param[in] node_id ID of the node whose link properties are being queried.
   virtual hsa_status_t GetEdgeProperties(std::vector<HsaIoLinkProperties>& io_link_props,
                                          uint32_t node_id) const = 0;
@@ -118,22 +117,26 @@ public:
   /// object.
   /// @param agent Agent whose properties we're getting.
   /// @retval HSA_STATUS_SUCCESS if the driver successfully returns the agent's
-  ///         properties.
+  /// properties.
   virtual hsa_status_t GetAgentProperties(Agent &agent) const = 0;
 
   /// @brief Get the memory properties of a specific node.
-  /// @param node_id Node ID of the agent
-  /// @param[in, out] mem_region MemoryRegion object whose properties will be
-  /// retrieved.
+  /// @param[in] node_id Node ID of the agent.
+  /// @param[out] mem_props Memory properties of the node specified by @p node_id.
   /// @retval HSA_STATUS_SUCCESS if the driver sucessfully returns the node's
-  ///         memory properties.
+  /// memory properties.
   virtual hsa_status_t GetMemoryProperties(uint32_t node_id,
-                                           MemoryRegion &mem_region) const = 0;
+                                           std::vector<HsaMemoryProperties>& mem_props) const = 0;
+
+  /// @brief Get the cache properties of a specific node.
+  /// @param[in] node_ide Node ID of the agent.
+  /// @param[out] cache_props Cache properties of the node specified by @p node_id.
+  /// @retval HSA_STATUS_SUCCESS if the driver successfully returns the node's cache properties.
+  virtual hsa_status_t GetCacheProperties(uint32_t node_id, uint32_t processor_id,
+                                          std::vector<HsaCacheProperties>& cache_props) const = 0;
 
   /// @brief Allocate agent-accessible memory (system or agent-local memory).
-  ///
   /// @param[out] mem pointer to newly allocated memory.
-  ///
   /// @retval HSA_STATUS_SUCCESS if memory was successfully allocated or
   /// hsa_status_t error code if the memory allocation failed.
   virtual hsa_status_t AllocateMemory(const MemoryRegion &mem_region,
@@ -170,7 +173,7 @@ public:
   /// @param[in] mem virtual address associated with the handle
   /// @param[in] offset memory offset in bytes
   /// @param[in] size memory size in bytes
-  /// @param[perms] perms new permissions
+  /// @param[out] perms new permissions
   virtual hsa_status_t Map(core::ShareableHandle handle, void *mem,
                            size_t offset, size_t size,
                            hsa_access_permission_t perms) = 0;

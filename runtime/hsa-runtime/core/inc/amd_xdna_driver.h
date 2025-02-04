@@ -153,9 +153,10 @@ public:
   hsa_status_t GetEdgeProperties(std::vector<HsaIoLinkProperties>& io_link_props,
                                  uint32_t node_id) const override;
   hsa_status_t GetAgentProperties(core::Agent &agent) const override;
-  hsa_status_t
-  GetMemoryProperties(uint32_t node_id,
-                      core::MemoryRegion &mem_region) const override;
+  hsa_status_t GetMemoryProperties(uint32_t node_id,
+                                   std::vector<HsaMemoryProperties>& mem_props) const override;
+  hsa_status_t GetCacheProperties(uint32_t node_id, uint32_t processor_id,
+                                  std::vector<HsaCacheProperties>& cache_props) const override;
   hsa_status_t AllocateMemory(const core::MemoryRegion &mem_region,
                               core::MemoryRegion::AllocateFlags alloc_flags,
                               void **mem, size_t size,

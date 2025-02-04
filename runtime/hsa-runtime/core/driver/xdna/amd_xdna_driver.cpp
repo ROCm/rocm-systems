@@ -175,10 +175,15 @@ hsa_status_t XdnaDriver::GetAgentProperties(core::Agent &agent) const {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t
-XdnaDriver::GetMemoryProperties(uint32_t node_id,
-                                core::MemoryRegion &mem_region) const {
+hsa_status_t XdnaDriver::GetMemoryProperties(uint32_t node_id,
+                                             std::vector<HsaMemoryProperties>& mem_props) const {
   return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t XdnaDriver::GetCacheProperties(uint32_t node_id, uint32_t processor_id,
+                                            std::vector<HsaCacheProperties>& cache_props) const {
+  // AIE currently has no caches.
+  return HSA_STATUS_ERROR_INVALID_CACHE;
 }
 
 hsa_status_t
