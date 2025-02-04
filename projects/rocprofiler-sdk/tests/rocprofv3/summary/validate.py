@@ -137,7 +137,9 @@ def test_memory_copy_trace(json_data):
                 return agent
         return None
 
-    assert len(memory_copy_data) == 12
+    # two threads * two directions
+    assert len(memory_copy_data) >= (2 * 2), f"{memory_copy_data}"
+    assert (len(memory_copy_data) % (2 * 2)) == 0, f"{memory_copy_data}"
 
     for row in memory_copy_data:
         src_agent = get_agent(row["src_agent_id"])
@@ -209,7 +211,9 @@ def test_summary_data(json_data):
         elif itr.domain == "HIP_API":
             assert itr.stats.count >= 2130 and itr.stats.count <= 2150
         elif itr.domain == "MEMORY_COPY":
-            assert itr.stats.count == 12
+            # two threads + two memory copies (H2D + D2H).
+            # HIP may decompose memory copies into more than one HSA memory copy
+            assert itr.stats.count >= 4 and (itr.stats.count % 4) == 0
         elif itr.domain == "MEMORY_ALLOCATION":
             assert itr.stats.count >= 10 and itr.stats.count <= 30
         elif itr.domain == "MARKER_API":

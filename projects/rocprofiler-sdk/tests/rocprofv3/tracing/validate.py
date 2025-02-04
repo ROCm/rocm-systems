@@ -255,7 +255,9 @@ def test_memory_copy_json_trace(json_data):
                 return agent
         return None
 
-    assert len(memory_copy_data) == 2
+    # one threads * two directions
+    assert len(memory_copy_data) >= 2, f"{memory_copy_data}"
+    assert (len(memory_copy_data) % 2) == 0, f"{memory_copy_data}"
 
     def test_row(idx, direction):
         assert direction in ("MEMORY_COPY_HOST_TO_DEVICE", "MEMORY_COPY_DEVICE_TO_HOST")

@@ -274,18 +274,25 @@ def test_async_copy_direction(input_data):
     #   2 == H2D (host to device)
     #   3 == D2H (device to host)
     #   4 == D2D (device to device)
-    async_dir_cnt = dict([(idx, 0) for idx in range(0, 5)])
-    for itr in sdk_data["buffer_records"]["memory_copies"]:
-        op_id = itr["operation"]
-        assert op_id > 1, f"{itr}"
-        assert op_id < 4, f"{itr}"
-        async_dir_cnt[op_id] += 1
-
-    for itr in sdk_data["callback_records"]["memory_copies"]:
+    default_async_dir_cnt = dict([(idx, 0) for idx in range(0, 5)])
+    thread_async_dir_cnt = {}
+    for itr in sdk_data.buffer_records.memory_copies:
+        tid = itr.thread_id
+        if tid not in thread_async_dir_cnt.keys():
+            thread_async_dir_cnt[tid] = default_async_dir_cnt
         op_id = itr.operation
         assert op_id > 1, f"{itr}"
         assert op_id < 4, f"{itr}"
-        async_dir_cnt[op_id] += 1
+        thread_async_dir_cnt[tid][op_id] += 1
+
+    for itr in sdk_data.callback_records.memory_copies:
+        tid = itr.thread_id
+        if tid not in thread_async_dir_cnt.keys():
+            thread_async_dir_cnt[tid] = default_async_dir_cnt
+        op_id = itr.operation
+        assert op_id > 1, f"{itr}"
+        assert op_id < 4, f"{itr}"
+        thread_async_dir_cnt[tid][op_id] += 1
 
         phase = itr.phase
         pitr = itr.payload
@@ -304,13 +311,27 @@ def test_async_copy_direction(input_data):
             assert phase == 1 or phase == 2, f"{itr}"
 
     # in the transpose test which generates the input file,
-    # two threads and the main thread (so three threads total)
-    # each perform one H2D + one D2H memory copy
-    assert async_dir_cnt[0] == 0
-    assert async_dir_cnt[1] == 0
-    assert async_dir_cnt[2] == 6 * 3
-    assert async_dir_cnt[3] == 6 * 3
-    assert async_dir_cnt[4] == 0
+    # two threads each perform one H2D + one D2H memory copy.
+    # there are at least two callback records (phase start +
+    # phase end) and one buffer record for each memory copy,
+    # i.e., at least 3 records per memory copy
+    assert len(thread_async_dir_cnt) == 2, f"{thread_async_dir_cnt}"
+    for tid, async_dir_cnt in thread_async_dir_cnt.items():
+        min_copy_records = 3
+        assert async_dir_cnt[0] == 0
+        assert async_dir_cnt[1] == 0
+        assert async_dir_cnt[2] >= min_copy_records, f"TID={tid}:\n\t{async_dir_cnt}"
+        assert async_dir_cnt[3] >= min_copy_records, f"TID={tid}:\n\t{async_dir_cnt}"
+        assert async_dir_cnt[4] == 0
+        # HIP memory copies may be decomposed into more than one
+        # memory copy at the HSA level so require it to be a multiple
+        # of min_copy_records
+        assert (
+            async_dir_cnt[2] % min_copy_records
+        ) == 0, f"TID={tid}:\n\t{async_dir_cnt}"
+        assert (
+            async_dir_cnt[3] % min_copy_records
+        ) == 0, f"TID={tid}:\n\t{async_dir_cnt}"
 
 
 def test_retired_correlation_ids(input_data):

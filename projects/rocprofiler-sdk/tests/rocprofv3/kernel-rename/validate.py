@@ -161,7 +161,9 @@ def test_memory_copy_json_trace(json_data):
                 return agent
         return None
 
-    assert len(memory_copy_data) == 12
+    # two threads * two directions
+    assert len(memory_copy_data) >= (2 * 2), f"{memory_copy_data}"
+    assert (len(memory_copy_data) % (2 * 2)) == 0, f"{memory_copy_data}"
 
     for row in memory_copy_data:
         src_agent = get_agent(row["src_agent_id"])
