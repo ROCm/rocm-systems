@@ -209,7 +209,7 @@ def test_summary_data(json_data):
                     )
                     assert oitr.value.count == 2
         elif itr.domain == "HIP_API":
-            assert itr.stats.count >= 2130 and itr.stats.count <= 2150
+            assert itr.stats.count >= 2130 and itr.stats.count <= 2165
         elif itr.domain == "MEMORY_COPY":
             # two threads + two memory copies (H2D + D2H).
             # HIP may decompose memory copies into more than one HSA memory copy

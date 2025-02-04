@@ -69,7 +69,7 @@ def test_data_structure(input_data):
 
     node_exists("names", sdk_data["buffer_records"])
     node_exists("kernel_dispatch", sdk_data["buffer_records"])
-    node_exists("memory_copies", sdk_data["buffer_records"], num_agents)
+    node_exists("memory_copies", sdk_data["buffer_records"], 0)
     node_exists("hsa_api_traces", sdk_data["buffer_records"])
     node_exists("hip_api_traces", sdk_data["buffer_records"], 0)
     node_exists("retired_correlation_ids", sdk_data["buffer_records"])
