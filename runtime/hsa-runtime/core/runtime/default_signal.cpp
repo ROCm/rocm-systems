@@ -41,7 +41,6 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "core/inc/default_signal.h"
-#include "core/util/timer.h"
 
 #if defined(__i386__) || defined(__x86_64__)
 #include <mwaitxintrin.h>
@@ -83,78 +82,31 @@ hsa_signal_value_t BusyWaitSignal::WaitRelaxed(hsa_signal_condition_t condition,
 
   waiting_++;
   MAKE_SCOPE_GUARD([&]() { waiting_--; });
-  bool condition_met = false;
-  int64_t value;
 
   const uint32_t &signal_abort_timeout =
     core::Runtime::runtime_singleton_->flag().signal_abort_timeout();
 
-  timer::fast_clock::time_point start_time, time;
-  start_time = timer::fast_clock::now();
-
-  // Set a polling timeout value
-  // Should be a few times bigger than null kernel latency
-  const timer::fast_clock::duration kMaxElapsed = std::chrono::microseconds(200);
-
-  uint64_t hsa_freq = 0;
-  HSA::hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &hsa_freq);
-  const timer::fast_clock::duration fast_timeout =
-      timer::duration_from_seconds<timer::fast_clock::duration>(
-          double(timeout) / double(hsa_freq));
-
-#if defined(__i386__) || defined(__x86_64__)
-  if (g_use_mwaitx) _mm_monitorx(const_cast<int64_t*>(&signal_.value), 0, 0);
-#endif
+  const timer::fast_clock::time_point start_time = timer::fast_clock::now();
+  const timer::fast_clock::duration fast_timeout = timer::GetFastTimeout(timeout);
 
   while (true) {
     if (!IsValid()) return 0;
 
-    value = atomic::Load(&signal_.value, std::memory_order_relaxed);
+    int64_t value = atomic::Load(&signal_.value, std::memory_order_relaxed);
 
-    switch (condition) {
-      case HSA_SIGNAL_CONDITION_EQ: {
-        condition_met = (value == compare_value);
-        break;
-      }
-      case HSA_SIGNAL_CONDITION_NE: {
-        condition_met = (value != compare_value);
-        break;
-      }
-      case HSA_SIGNAL_CONDITION_GTE: {
-        condition_met = (value >= compare_value);
-        break;
-      }
-      case HSA_SIGNAL_CONDITION_LT: {
-        condition_met = (value < compare_value);
-        break;
-      }
-      default:
-        return 0;
-    }
-    if (condition_met) return hsa_signal_value_t(value);
-
-    time = timer::fast_clock::now();
-    if (time - start_time > fast_timeout) {
-      value = atomic::Load(&signal_.value, std::memory_order_relaxed);
-      return hsa_signal_value_t(value);
+    if (CheckSignalCondition(value, condition, compare_value)) {
+      return value;
     }
 
-    if (signal_abort_timeout) {
-      const timer::fast_clock::duration abort_timeout =
-          std::chrono::seconds(signal_abort_timeout);
-
-      if(time - start_time > abort_timeout)
-        throw AMD::hsa_exception(HSA_STATUS_ERROR_FATAL,
-                                 "Signal wait abort timeout.\n");
+    if (timer::fast_clock::now() - start_time > fast_timeout) {
+      return value;
     }
 
-    if (time - start_time > kMaxElapsed) {
-      os::uSleep(20);
-#if defined(__i386__) || defined(__x86_64__)
-    } else if (g_use_mwaitx) {
-      _mm_mwaitx(0, 60000, MWAITX_ECX_TIMER_ENABLE);  // 60000 ~20us on a 1.5Ghz CPU
-      _mm_monitorx(const_cast<int64_t*>(&signal_.value), 0, 0);
-#endif
+    timer::CheckAbortTimeout(start_time, signal_abort_timeout);
+
+    if (g_use_mwaitx) {
+      // Use timer-enabled mwaitx for busy waiting
+      timer::DoMwaitx(const_cast<int64_t*>(&signal_.value), 60000, true);
     }
   }
 }

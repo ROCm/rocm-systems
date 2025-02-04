@@ -1659,7 +1659,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
         for (size_t i = index; i < async_events_.Size(); i++) {
           hsa_signal_handle sig(async_events_.signal_[i]);
           value[0] = atomic::Load(&sig->signal_.value, std::memory_order_relaxed);
-          if (checkCondition(async_events_.cond_[i], value[0], async_events_.value_[i])) {
+          if (CheckSignalCondition(value[0], async_events_.cond_[i], async_events_.value_[i])) {
             if (i == 0) {
               hsa_signal_handle(async_events_control_.wake)->StoreRelaxed(0);
             } else {

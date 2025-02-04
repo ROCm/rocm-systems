@@ -42,13 +42,7 @@
 
 #include "core/inc/interrupt_signal.h"
 #include "core/inc/runtime.h"
-#include "core/util/timer.h"
 #include "core/util/locks.h"
-
-#if defined(__i386__) || defined(__x86_64__)
-#include <mwaitxintrin.h>
-#define MWAITX_ECX_TIMER_ENABLE 0x2  // BIT(1)
-#endif
 
 namespace rocr {
 namespace core {
@@ -141,118 +135,64 @@ void InterruptSignal::StoreRelease(hsa_signal_value_t value) {
   SetEvent();
 }
 
-hsa_signal_value_t InterruptSignal::WaitRelaxed(
-    hsa_signal_condition_t condition, hsa_signal_value_t compare_value,
-    uint64_t timeout, hsa_wait_state_t wait_hint) {
+hsa_signal_value_t InterruptSignal::WaitRelaxed(hsa_signal_condition_t condition,
+                                               hsa_signal_value_t compare_value,
+                                               uint64_t timeout,
+                                               hsa_wait_state_t wait_hint) {
   Retain();
   MAKE_SCOPE_GUARD([&]() { Release(); });
 
   uint32_t prior = waiting_++;
   MAKE_SCOPE_GUARD([&]() { waiting_--; });
 
-  uint64_t event_age = 1;
+  uint64_t event_age = core::Runtime::runtime_singleton_->KfdVersion().supports_event_age ? 1 : 0;
+  if (!event_age && prior != 0) wait_hint = HSA_WAIT_STATE_ACTIVE;
 
+  const timer::fast_clock::time_point start_time = timer::fast_clock::now();
+  const timer::fast_clock::duration fast_timeout = timer::GetFastTimeout(timeout);
+  const timer::fast_clock::duration kMaxElapsed = std::chrono::microseconds(200);
   const uint32_t &signal_abort_timeout =
     core::Runtime::runtime_singleton_->flag().signal_abort_timeout();
-
-  if (!core::Runtime::runtime_singleton_->KfdVersion().supports_event_age) {
-      event_age = 0;
-      // Allow only the first waiter to sleep. Without event age tracking,
-      // race condition can cause some threads to sleep without wakeup since missing interrupt.
-      if (prior != 0) wait_hint = HSA_WAIT_STATE_ACTIVE;
-  }
-
-  int64_t value;
-
-  timer::fast_clock::time_point start_time = timer::fast_clock::now();
-
-  // Set a polling timeout value
-  // Should be a few times bigger than null kernel latency
-  const timer::fast_clock::duration kMaxElapsed = std::chrono::microseconds(200);
-
-  uint64_t hsa_freq = 0;
-  HSA::hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &hsa_freq);
-  const timer::fast_clock::duration fast_timeout =
-      timer::duration_from_seconds<timer::fast_clock::duration>(
-          double(timeout) / double(hsa_freq));
-
-  bool condition_met = false;
-
-#if defined(__i386__) || defined(__x86_64__)
-  if (g_use_mwaitx) _mm_monitorx(const_cast<int64_t*>(&signal_.value), 0, 0);
-#endif
 
   while (true) {
     if (!IsValid()) return 0;
 
-    value = atomic::Load(&signal_.value, std::memory_order_relaxed);
+    int64_t value = atomic::Load(&signal_.value, std::memory_order_relaxed);
 
-    switch (condition) {
-      case HSA_SIGNAL_CONDITION_EQ: {
-        condition_met = (value == compare_value);
-        break;
-      }
-      case HSA_SIGNAL_CONDITION_NE: {
-        condition_met = (value != compare_value);
-        break;
-      }
-      case HSA_SIGNAL_CONDITION_GTE: {
-        condition_met = (value >= compare_value);
-        break;
-      }
-      case HSA_SIGNAL_CONDITION_LT: {
-        condition_met = (value < compare_value);
-        break;
-      }
-      default:
-        return 0;
-    }
-    if (condition_met) return hsa_signal_value_t(value);
-
-    timer::fast_clock::time_point time = timer::fast_clock::now();
-    if (time - start_time > fast_timeout) {
-      value = atomic::Load(&signal_.value, std::memory_order_relaxed);
-      return hsa_signal_value_t(value);
+    if (CheckSignalCondition(value, condition, compare_value)) {
+      return value;
     }
 
-    if (signal_abort_timeout) {
-      const timer::fast_clock::duration abort_timeout =
-          std::chrono::seconds(signal_abort_timeout);
-
-      if(time - start_time > abort_timeout)
-        throw AMD::hsa_exception(HSA_STATUS_ERROR_FATAL,
-                                 "Signal wait abort timeout.\n");
+    auto now = timer::fast_clock::now();
+    if (now - start_time > fast_timeout) {
+      return value;
     }
+
+    timer::CheckAbortTimeout(start_time, signal_abort_timeout);
 
     if (wait_hint == HSA_WAIT_STATE_ACTIVE) {
-#if defined(__i386__) || defined(__x86_64__)
       if (g_use_mwaitx) {
-        _mm_mwaitx(0, 0, 0);
-        _mm_monitorx(const_cast<int64_t*>(&signal_.value), 0, 0);
+        // Short timeout for active waiting
+        timer::DoMwaitx(const_cast<int64_t*>(&signal_.value), 1000);
       }
-#endif
       continue;
     }
 
-    if (time - start_time < kMaxElapsed) {
-      //  os::uSleep(20);
-#if defined(__i386__) || defined(__x86_64__)
+    if (now - start_time < kMaxElapsed) {
       if (g_use_mwaitx) {
-        _mm_mwaitx(0, 60000, MWAITX_ECX_TIMER_ENABLE);
-        _mm_monitorx(const_cast<int64_t*>(&signal_.value), 0, 0);
+        // Longer timeout with timer for passive waiting
+        timer::DoMwaitx(const_cast<int64_t*>(&signal_.value), 60000, true);
       }
-#endif
       continue;
     }
 
-    uint32_t wait_ms;
-    auto time_remaining = fast_timeout - (time - start_time);
-    uint64_t ct = timer::duration_cast<std::chrono::milliseconds>(
-      time_remaining).count();
+    auto remaining_ms = timer::duration_cast<std::chrono::milliseconds>(
+      fast_timeout - (now - start_time)).count();
 
-    wait_ms = static_cast<uint32_t>(std::min(ct, 0xFFFFFFFEUL));
-    if (signal_abort_timeout)
-      wait_ms = std::min(wait_ms, signal_abort_timeout * 1000);
+    uint32_t wait_ms = std::min<uint32_t>(
+      static_cast<uint32_t>(std::min<uint64_t>(remaining_ms, 0xFFFFFFFEUL)),
+      static_cast<uint32_t>(signal_abort_timeout ? signal_abort_timeout * 1000 : 0xFFFFFFFFUL)
+    );
 
     hsaKmtWaitOnEvent_Ext(event_, wait_ms, &event_age);
   }

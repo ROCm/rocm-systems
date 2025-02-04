@@ -60,8 +60,16 @@
 
 #include "core/util/utils.h"
 #include "core/util/locks.h"
+#include "core/util/timer.h"
 
 #include "inc/amd_hsa_signal.h"
+
+#if defined(__i386__) || defined(__x86_64__)
+#include <mwaitxintrin.h>
+#ifndef MWAITX_ECX_TIMER_ENABLE
+#define MWAITX_ECX_TIMER_ENABLE 0x2  // BIT(1)
+#endif
+#endif
 
 // Allow hsa_signal_t to be keys in STL structures.
 namespace std {
@@ -76,6 +84,50 @@ template <> struct less<hsa_signal_t> {
 }
 
 namespace rocr {
+namespace timer {
+inline timer::fast_clock::duration GetFastTimeout(uint64_t timeout) {
+  uint64_t hsa_freq = 0;
+  HSA::hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &hsa_freq);
+  return timer::duration_from_seconds<timer::fast_clock::duration>(
+      double(timeout) / double(hsa_freq));
+}
+
+inline void CheckAbortTimeout(const timer::fast_clock::time_point& start_time,
+                            uint32_t signal_abort_timeout) {
+  if (signal_abort_timeout) {
+    const timer::fast_clock::duration abort_timeout =
+        std::chrono::seconds(signal_abort_timeout);
+    if (timer::fast_clock::now() - start_time > abort_timeout) {
+      throw AMD::hsa_exception(HSA_STATUS_ERROR_FATAL,
+                             "Signal wait abort timeout.\n");
+    }
+  }
+}
+
+inline void DoMwaitx(int64_t* addr, uint32_t timeout, bool timer_enable = false) {
+#if defined(__i386__) || defined(__x86_64__)
+  _mm_monitorx(addr, 0, 0);
+  _mm_mwaitx(0, timeout, timer_enable ? MWAITX_ECX_TIMER_ENABLE : 0);
+#endif
+}
+} // namespace timer
+
+inline bool CheckSignalCondition(int64_t value, hsa_signal_condition_t condition,
+                               hsa_signal_value_t compare_value) {
+  switch (condition) {
+    case HSA_SIGNAL_CONDITION_EQ:
+      return value == compare_value;
+    case HSA_SIGNAL_CONDITION_NE:
+      return value != compare_value;
+    case HSA_SIGNAL_CONDITION_GTE:
+      return value >= compare_value;
+    case HSA_SIGNAL_CONDITION_LT:
+      return value < compare_value;
+    default:
+      return false;
+  }
+}
+
 namespace core {
 class Agent;
 class Signal;
