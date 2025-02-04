@@ -234,9 +234,20 @@ public:
 
     static void* hsa_malloc(size_t size, const Device::Memory& mem)
     {
+#define LOCAL_HSA_AMD_INTERFACE_VERSION                                                            \
+    (10000 * HSA_AMD_INTERFACE_VERSION_MAJOR) + (100 * HSA_AMD_INTERFACE_VERSION_MINOR)
+
+#if LOCAL_HSA_AMD_INTERFACE_VERSION >= 10700
+        constexpr auto hsa_amd_memory_pool_executable_flag = HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
+#elif LOCAL_HSA_AMD_INTERFACE_VERSION == 10600
+        constexpr auto hsa_amd_memory_pool_executable_flag = (1 << 2);
+#else
+        constexpr auto hsa_amd_memory_pool_executable_flag = 0;
+#endif
+
         void*        ret;
         hsa_status_t err =
-            hsa_amd_memory_pool_allocate(mem.pool, size, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG, &ret);
+            hsa_amd_memory_pool_allocate(mem.pool, size, hsa_amd_memory_pool_executable_flag, &ret);
         RET_IF_HSA_ERR(err);
 
         err = hsa_amd_agents_allow_access(

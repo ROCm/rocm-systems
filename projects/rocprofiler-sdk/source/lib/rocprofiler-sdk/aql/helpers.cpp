@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
+#include "lib/common/defines.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
@@ -138,8 +139,19 @@ set_profiler_active_on_queue(hsa_amd_memory_pool_t             pool,
     const size_t mask = 0x1000 - 1;
     auto         size = (profile.command_buffer.size + mask) & ~mask;
 
+#define HSA_AMD_INTERFACE_VERSION                                                                  \
+    ROCPROFILER_COMPUTE_VERSION(HSA_AMD_INTERFACE_VERSION_MAJOR, HSA_AMD_INTERFACE_VERSION_MINOR, 0)
+
+#if HSA_AMD_INTERFACE_VERSION >= 10700
+    constexpr auto hsa_amd_memory_pool_executable_flag = HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
+#elif HSA_AMD_INTERFACE_VERSION == 10600
+    constexpr auto hsa_amd_memory_pool_executable_flag = (1 << 2);
+#else
+    constexpr auto hsa_amd_memory_pool_executable_flag = 0;
+#endif
+
     if(hsa::get_amd_ext_table()->hsa_amd_memory_pool_allocate_fn(
-           pool, size, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG, &profile.command_buffer.ptr) !=
+           pool, size, hsa_amd_memory_pool_executable_flag, &profile.command_buffer.ptr) !=
        HSA_STATUS_SUCCESS)
     {
         ROCP_WARNING << "Failed to allocate memory to enable profile command on agent, some "
