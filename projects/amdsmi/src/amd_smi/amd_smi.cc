@@ -3818,7 +3818,7 @@ amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle processor_handle, amd
         int minor_version = 62;
         int patch_version = 0;
 
-        if ((drm_version->version_major < major_version) || (drm_version->version_minor < minor_version) || (drm_version->version_patchlevel < patch_version)){
+        if ((drm_version->version_major <= major_version) && (drm_version->version_minor <= minor_version) && (drm_version->version_patchlevel < patch_version)){
             *mode = AMDSMI_VIRTUALIZATION_MODE_UNKNOWN;
         }
         else {
