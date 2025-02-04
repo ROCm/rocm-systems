@@ -507,5 +507,14 @@ typedef enum  // NOLINT(performance-enum-size)
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 6
     ROCPROFILER_HIP_RUNTIME_API_ID_hipDeviceGetTexture1DLinearMaxWidth,
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 7
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamBatchMemOp,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 8
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphAddBatchMemOpNode,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphBatchMemOpNodeGetParams,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphBatchMemOpNodeSetParams,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphExecBatchMemOpNodeSetParams,
+#endif
     ROCPROFILER_HIP_RUNTIME_API_ID_LAST,
 } rocprofiler_hip_runtime_api_id_t;

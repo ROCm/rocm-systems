@@ -3016,6 +3016,41 @@ typedef union rocprofiler_hip_api_args_t
         int                         device;
     } hipDeviceGetTexture1DLinearMaxWidth;
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 7
+    struct
+    {
+        hipStream_t                stream;
+        unsigned int               count;
+        hipStreamBatchMemOpParams* paramArray;
+        unsigned int               flags;
+    } hipStreamBatchMemOp;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 8
+    struct
+    {
+        hipGraphNode_t*                phGraphNode;
+        hipGraph_t                     hGraph;
+        const hipGraphNode_t*          dependencies;
+        size_t                         numDependencies;
+        const hipBatchMemOpNodeParams* nodeParams;
+    } hipGraphAddBatchMemOpNode;
+    struct
+    {
+        hipGraphNode_t           hNode;
+        hipBatchMemOpNodeParams* nodeParams_out;
+    } hipGraphBatchMemOpNodeGetParams;
+    struct
+    {
+        hipGraphNode_t           hNode;
+        hipBatchMemOpNodeParams* nodeParams;
+    } hipGraphBatchMemOpNodeSetParams;
+    struct
+    {
+        hipGraphExec_t                 hGraphExec;
+        hipGraphNode_t                 hNode;
+        const hipBatchMemOpNodeParams* nodeParams;
+    } hipGraphExecBatchMemOpNodeSetParams;
+#endif
 } rocprofiler_hip_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI

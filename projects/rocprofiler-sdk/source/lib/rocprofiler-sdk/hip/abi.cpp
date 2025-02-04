@@ -539,6 +539,17 @@ ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipExtHostAlloc_fn, 461)
 ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipDeviceGetTexture1DLinearMaxWidth_fn, 462)
 #endif
 
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 7
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipStreamBatchMemOp_fn, 463)
+#endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 8
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipGraphAddBatchMemOpNode_fn, 464)
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipGraphBatchMemOpNodeGetParams_fn, 465)
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipGraphBatchMemOpNodeSetParams_fn, 466)
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipGraphExecBatchMemOpNodeSetParams_fn, 467)
+#endif
+
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION == 0
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 442)
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 1
@@ -553,6 +564,10 @@ ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 461)
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 462)
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 6
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 463)
+#elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 7
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 464)
+#elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 8
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 468)
 #else
 INTERNAL_CI_ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 0)
 #endif

@@ -113,6 +113,7 @@ ROCP_SDK_HIP_OSTREAM_FORMATTER(hipHostNodeParams)
 ROCP_SDK_HIP_OSTREAM_FORMATTER(hipExternalSemaphoreSignalNodeParams)
 ROCP_SDK_HIP_OSTREAM_FORMATTER(hipExternalSemaphoreWaitNodeParams)
 ROCP_SDK_HIP_OSTREAM_FORMATTER(hipMemPoolProps)
+ROCP_SDK_HIP_OSTREAM_FORMATTER(hipCtx_t)
 
 ROCP_SDK_HIP_FORMATTER(hipMemcpyNodeParams,
                        "{}flags={}, copyParams={}{}",
@@ -163,6 +164,41 @@ ROCP_SDK_HIP_FORMATTER(HIP_MEMSET_NODE_PARAMS,
                        v.height,
                        '}')
 ROCP_SDK_HIP_FORMATTER(hipMemLocation, "{}type={}, id={}{}", '{', v.type, v.id, '}')
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 7
+ROCP_SDK_HIP_FORMATTER(
+    hipStreamBatchMemOpParams,
+    "{}operation={}, waitValueOperation={}, waitValueAddress={}, waitValueValue={}, "
+    "waitValueValue64={}, waitValueFlags={}, writeValueOperation={}, writeValueAddress={}, "
+    "writeValueValue={}, writeValueValue64={}, writeValueFlags={}, flushRemoteWritesOperation={}, "
+    "flushRemoteWritesFlags={}, memoryBarrierOperation={}, memoryBarrierFlags={}{}",
+    '{',
+    v.operation,
+    v.waitValue.operation,
+    v.waitValue.address,
+    v.waitValue.value,
+    v.waitValue.value64,
+    v.waitValue.flags,
+    v.writeValue.operation,
+    v.writeValue.address,
+    v.writeValue.value,
+    v.writeValue.value64,
+    v.writeValue.flags,
+    v.flushRemoteWrites.operation,
+    v.flushRemoteWrites.flags,
+    v.memoryBarrier.operation,
+    v.memoryBarrier.flags,
+    '}')
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 8
+ROCP_SDK_HIP_FORMATTER(hipBatchMemOpNodeParams,
+                       "{}ctx={}, count={}, paramArray=[{}], flags={}{}",
+                       '{',
+                       static_cast<void*>(v.ctx),
+                       v.count,
+                       fmt::join(v.paramArray, v.paramArray + v.count, ", "),
+                       v.flags,
+                       '}')
+#endif
 
 template <>
 struct formatter<hipGraphNodeType> : rocprofiler::hip::details::base_formatter
@@ -325,6 +361,9 @@ struct formatter<hipGraphNodeParams> : rocprofiler::hip::details::base_formatter
             case hipGraphNodeTypeMemcpyFromSymbol:
             case hipGraphNodeTypeMemcpyToSymbol:
             case hipGraphNodeTypeEmpty:
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 8
+            case hipGraphNodeTypeBatchMemOp:
+#endif
             case hipGraphNodeTypeCount:
             {
                 break;
@@ -333,6 +372,28 @@ struct formatter<hipGraphNodeParams> : rocprofiler::hip::details::base_formatter
         return fmt::format_to(ctx.out(), "{}type={}{}", '{', v.type, '}');
     }
 };
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 7
+template <>
+struct formatter<hipStreamBatchMemOpType> : rocprofiler::hip::details::base_formatter
+{
+    template <typename Ctx>
+    auto format(hipStreamBatchMemOpType v, Ctx& ctx) const
+    {
+        switch(v)
+        {
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipStreamMemOp, WaitValue32);
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipStreamMemOp, WriteValue32);
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipStreamMemOp, WaitValue64);
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipStreamMemOp, WriteValue64);
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipStreamMemOp, Barrier);
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipStreamMemOp, FlushRemoteWrites);
+            ROCP_SDK_HIP_FORMAT_DFLT_CASE(hipStreamMemOp);
+        }
+        return fmt::format_to(ctx.out(), "Unknown");
+    }
+};
+#endif
 }  // namespace fmt
 
 #undef ROCP_SDK_HIP_FORMATTER

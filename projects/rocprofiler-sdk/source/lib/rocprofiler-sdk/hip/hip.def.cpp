@@ -562,6 +562,17 @@ HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNT
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 6
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipDeviceGetTexture1DLinearMaxWidth, hipDeviceGetTexture1DLinearMaxWidth, hipDeviceGetTexture1DLinearMaxWidth_fn, maxWidthInElements, fmtDesc, device)
 #endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 7
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamBatchMemOp, hipStreamBatchMemOp, hipStreamBatchMemOp_fn, stream, count, paramArray, flags);
+#endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 8
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphAddBatchMemOpNode, hipGraphAddBatchMemOpNode, hipGraphAddBatchMemOpNode_fn, phGraphNode, hGraph, dependencies, numDependencies, nodeParams);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphBatchMemOpNodeGetParams, hipGraphBatchMemOpNodeGetParams, hipGraphBatchMemOpNodeGetParams_fn, hNode, nodeParams_out);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphBatchMemOpNodeSetParams, hipGraphBatchMemOpNodeSetParams, hipGraphBatchMemOpNodeSetParams_fn, hNode, nodeParams);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphExecBatchMemOpNodeSetParams, hipGraphExecBatchMemOpNodeSetParams, hipGraphExecBatchMemOpNodeSetParams_fn, hGraphExec, hNode, nodeParams);
+#endif
 // clang-format on
 
 #else
