@@ -1,11 +1,12 @@
 name: ROCm CI Caller
 on: 
   # Commenting below to avoid re-runs of amd smi for trivial rebases
+  # Once Rocr team aligns update amd-master to amd-mainline
   pull_request:  
-    branches: [amd-staging, amd-mainline, amd-npi]  
+    branches: [amd-staging, amd-master, amd-npi] 
     types: [opened, reopened, synchronize]  
   push:  
-    branches: [amd-mainline]  
+    branches: [amd-master]  
   workflow_dispatch:
   issue_comment:  
     types: [created]
