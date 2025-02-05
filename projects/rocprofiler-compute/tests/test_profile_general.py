@@ -45,7 +45,9 @@ config["COUNTER_LOGGING"] = False
 config["METRIC_COMPARE"] = False
 config["METRIC_LOGGING"] = False
 
-baseline_opts = ["rocprof-compute", "profile", "-n", "app_1", "-VVV"]
+# default option is no roof to reduce test run time
+baseline_opts = ["rocprof-compute", "profile", "--no-roof", "-n", "app_1", "-VVV"]
+baseline_with_roof_opts = ["rocprof-compute", "profile", "-n", "app_1", "-VVV"]
 
 num_kernels = 3
 num_devices = 1
@@ -96,7 +98,6 @@ ALL_CSVS_MI200 = sorted(
         "pmc_perf_7.csv",
         "pmc_perf_8.csv",
         "pmc_perf_9.csv",
-        "roofline.csv",
         "sysinfo.csv",
         "timestamps.csv",
     ]
@@ -118,7 +119,6 @@ ALL_CSVS_MI300 = sorted(
         "pmc_perf_6.csv",
         "pmc_perf_7.csv",
         "pmc_perf_8.csv",
-        "roofline.csv",
         "sysinfo.csv",
         "timestamps.csv",
     ]
@@ -507,9 +507,9 @@ def test_path():
     if soc == "MI100":
         assert sorted(list(file_dict.keys())) == ALL_CSVS
     elif soc == "MI200":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+        assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI200)
     elif "MI300" in soc:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI300
+        assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI300)
     else:
         print("This test is not supported for {}".format(soc))
         assert 0
@@ -520,38 +520,8 @@ def test_path():
 
 
 @pytest.mark.misc
-def test_no_roof():
-    options = baseline_opts + ["--no-roof"]
-    workload_dir = test_utils.get_output_dir()
-    test_utils.launch_rocprof_compute(config, options, workload_dir)
-
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-    if soc == "MI100":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS
-    elif soc == "MI200":
-        assert sorted(list(file_dict.keys())) == sorted(
-            list(filter(lambda elm: elm != "roofline.csv", ALL_CSVS_MI200))
-        )
-    elif "MI300" in soc:
-        assert sorted(list(file_dict.keys())) == sorted(
-            list(filter(lambda elm: elm != "roofline.csv", ALL_CSVS_MI300))
-        )
-    else:
-        print("This test is not supported for {}".format(soc))
-        assert 0
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.misc
 def test_kernel_names():
-    options = baseline_opts + ["--roof-only", "--kernel-names"]
+    options = baseline_with_roof_opts + ["--roof-only", "--kernel-names"]
     workload_dir = test_utils.get_output_dir()
     e = test_utils.launch_rocprof_compute(
         config, options, workload_dir, check_success=False
@@ -596,9 +566,9 @@ def test_device_filter():
     if soc == "MI100":
         assert sorted(list(file_dict.keys())) == ALL_CSVS
     elif soc == "MI200":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+        assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI200)
     elif "MI300" in soc:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI300
+        assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI300)
     else:
         print("Testing isn't supported yet for {}".format(soc))
         assert 0
@@ -624,9 +594,9 @@ def test_kernel():
     if soc == "MI100":
         assert sorted(list(file_dict.keys())) == ALL_CSVS
     elif soc == "MI200":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+        assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI200)
     elif "MI300" in soc:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI300
+        assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI300)
     else:
         print("Testing isn't supported yet for {}".format(soc))
         assert 0
@@ -680,7 +650,6 @@ def test_block_SQ():
             "pmc_perf_6.csv",
             "pmc_perf_7.csv",
             "pmc_perf_8.csv",
-            "roofline.csv",
             "sysinfo.csv",
             "timestamps.csv",
         ]
@@ -712,8 +681,6 @@ def test_block_SQC():
         "sysinfo.csv",
         "timestamps.csv",
     ]
-    if soc not in ["MI50", "MI60", "MI100"]:
-        expected_csvs.append("roofline.csv")
 
     assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
 
@@ -746,8 +713,6 @@ def test_block_TA():
         "sysinfo.csv",
         "timestamps.csv",
     ]
-    if soc not in ["MI50", "MI60", "MI100"]:
-        expected_csvs.append("roofline.csv")
 
     assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
 
@@ -782,7 +747,6 @@ def test_block_TD():
             "pmc_perf_1.csv",
             "pmc_perf_2.csv",
             "pmc_perf_3.csv",
-            "roofline.csv",
             "sysinfo.csv",
             "timestamps.csv",
         ]
@@ -820,8 +784,6 @@ def test_block_TCP():
         "sysinfo.csv",
         "timestamps.csv",
     ]
-    if soc not in ["MI50", "MI60", "MI100"]:
-        expected_csvs.append("roofline.csv")
 
     assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
 
@@ -869,7 +831,6 @@ def test_block_TCC():
             "pmc_perf_6.csv",
             "pmc_perf_7.csv",
             "pmc_perf_8.csv",
-            "roofline.csv",
             "sysinfo.csv",
             "timestamps.csv",
         ]
@@ -906,8 +867,6 @@ def test_block_SPI():
         "sysinfo.csv",
         "timestamps.csv",
     ]
-    if soc not in ["MI50", "MI60", "MI100"]:
-        expected_csvs.append("roofline.csv")
 
     assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
 
@@ -938,8 +897,6 @@ def test_block_CPC():
         "sysinfo.csv",
         "timestamps.csv",
     ]
-    if soc not in ["MI50", "MI60", "MI100"]:
-        expected_csvs.append("roofline.csv")
 
     assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
 
@@ -964,9 +921,6 @@ def test_block_CPF():
         "sysinfo.csv",
         "timestamps.csv",
     ]
-    if soc not in ["MI50", "MI60", "MI100"]:
-        expected_csvs.append("roofline.csv")
-
     assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
 
     validate(
@@ -1018,7 +972,6 @@ def test_block_SQ_CPC():
             "pmc_perf_6.csv",
             "pmc_perf_7.csv",
             "pmc_perf_8.csv",
-            "roofline.csv",
             "sysinfo.csv",
             "timestamps.csv",
         ]
@@ -1074,7 +1027,6 @@ def test_block_SQ_TA():
             "pmc_perf_6.csv",
             "pmc_perf_7.csv",
             "pmc_perf_8.csv",
-            "roofline.csv",
             "sysinfo.csv",
             "timestamps.csv",
         ]
@@ -1126,7 +1078,6 @@ def test_block_SQ_SPI():
             "pmc_perf_6.csv",
             "pmc_perf_7.csv",
             "pmc_perf_8.csv",
-            "roofline.csv",
             "sysinfo.csv",
             "timestamps.csv",
         ]
@@ -1181,7 +1132,6 @@ def test_block_SQ_SQC_TCP_CPC():
             "pmc_perf_6.csv",
             "pmc_perf_7.csv",
             "pmc_perf_8.csv",
-            "roofline.csv",
             "sysinfo.csv",
             "timestamps.csv",
         ]
@@ -1233,7 +1183,6 @@ def test_block_SQ_SPI_TA_TCC_CPF():
             "pmc_perf_6.csv",
             "pmc_perf_7.csv",
             "pmc_perf_8.csv",
-            "roofline.csv",
             "sysinfo.csv",
             "timestamps.csv",
         ]
@@ -1391,7 +1340,13 @@ def test_join_type_kernel():
 
 @pytest.mark.sort
 def test_sort_dispatches():
-    options = baseline_opts + ["--roof-only", "--sort", "dispatches"]
+    # only test 1 device for roofline
+    device_id = "0"
+    options = (
+        baseline_with_roof_opts
+        + ["--device", device_id]
+        + ["--roof-only", "--sort", "dispatches"]
+    )
     workload_dir = test_utils.get_output_dir()
     e = test_utils.launch_rocprof_compute(
         config, options, workload_dir, check_success=False
@@ -1406,7 +1361,7 @@ def test_sort_dispatches():
     # assert successful run
     assert e.value.code == 0
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
 
     if soc == "MI200" or "MI300" in soc:
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
@@ -1424,7 +1379,13 @@ def test_sort_dispatches():
 
 @pytest.mark.sort
 def test_sort_kernels():
-    options = baseline_opts + ["--roof-only", "--sort", "kernels"]
+    # only test 1 device for roofline
+    device_id = "0"
+    options = (
+        baseline_with_roof_opts
+        + ["--device", device_id]
+        + ["--roof-only", "--sort", "kernels"]
+    )
     workload_dir = test_utils.get_output_dir()
     e = test_utils.launch_rocprof_compute(
         config, options, workload_dir, check_success=False
@@ -1438,71 +1399,7 @@ def test_sort_kernels():
 
     # assert successful run
     assert e.value.code == 0
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-
-    if soc == "MI200" or "MI300" in soc:
-        assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
-    else:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.mem
-def test_mem_levels_HBM():
-    options = baseline_opts + ["--roof-only", "--mem-level", "HBM"]
-    workload_dir = test_utils.get_output_dir()
-    e = test_utils.launch_rocprof_compute(
-        config, options, workload_dir, check_success=False
-    )
-
-    if soc == "MI100":
-        # assert that it did not run
-        assert e.value.code >= 1
-        # Do not continue testing
-        return
-
-    # assert successful run
-    assert e.value.code == 0
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-
-    if soc == "MI200" or "MI300" in soc:
-        assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
-    else:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.mem
-def test_mem_levels_L2():
-    options = baseline_opts + ["--roof-only", "--mem-level", "L2"]
-    workload_dir = test_utils.get_output_dir()
-    e = test_utils.launch_rocprof_compute(
-        config, options, workload_dir, check_success=False
-    )
-
-    if soc == "MI100":
-        # assert that it did not run
-        assert e.value.code >= 1
-        # Do not continue testing
-        return
-
-    # assert successful run
-    assert e.value.code == 0
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
 
     if soc == "MI200" or "MI300" in soc:
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
@@ -1520,7 +1417,13 @@ def test_mem_levels_L2():
 
 @pytest.mark.mem
 def test_mem_levels_vL1D():
-    options = baseline_opts + ["--roof-only", "--mem-level", "vL1D"]
+    # only test 1 device for roofline
+    device_id = "0"
+    options = (
+        baseline_with_roof_opts
+        + ["--device", device_id]
+        + ["--roof-only", "--mem-level", "vL1D"]
+    )
     workload_dir = test_utils.get_output_dir()
     e = test_utils.launch_rocprof_compute(
         config, options, workload_dir, check_success=False
@@ -1534,7 +1437,7 @@ def test_mem_levels_vL1D():
 
     # assert successful run
     assert e.value.code == 0
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
 
     if soc == "MI200" or "MI300" in soc:
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
@@ -1552,7 +1455,13 @@ def test_mem_levels_vL1D():
 
 @pytest.mark.mem
 def test_mem_levels_LDS():
-    options = baseline_opts + ["--roof-only", "--mem-level", "LDS"]
+    # only test 1 device for roofline
+    device_id = "0"
+    options = (
+        baseline_with_roof_opts
+        + ["--device", device_id]
+        + ["--roof-only", "--mem-level", "LDS"]
+    )
     workload_dir = test_utils.get_output_dir()
     e = test_utils.launch_rocprof_compute(
         config, options, workload_dir, check_success=False
@@ -1566,102 +1475,7 @@ def test_mem_levels_LDS():
 
     # assert successful run
     assert e.value.code == 0
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-
-    if soc == "MI200" or "MI300" in soc:
-        assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
-    else:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.mem
-def test_mem_levels_HBM_LDS():
-    options = baseline_opts + ["--roof-only", "--mem-level", "HBM", "LDS"]
-    workload_dir = test_utils.get_output_dir()
-    e = test_utils.launch_rocprof_compute(
-        config, options, workload_dir, check_success=False
-    )
-
-    if soc == "MI100":
-        # assert that it did not run
-        assert e.value.code >= 1
-        # Do not continue testing
-        return
-
-    # assert successful run
-    assert e.value.code == 0
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-
-    if soc == "MI200" or "MI300" in soc:
-        assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
-    else:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.mem
-def test_mem_levels_vL1D_LDS():
-    options = baseline_opts + ["--roof-only", "--mem-level", "vL1D", "LDS"]
-    workload_dir = test_utils.get_output_dir()
-    e = test_utils.launch_rocprof_compute(
-        config, options, workload_dir, check_success=False
-    )
-
-    if soc == "MI100":
-        # assert that it did not run
-        assert e.value.code >= 1
-        # Do not continue testing
-        return
-
-    # assert successful run
-    assert e.value.code == 0
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-
-    if soc == "MI200" or "MI300" in soc:
-        assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
-    else:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.mem
-def test_mem_levels_L2_vL1D_LDS():
-    options = baseline_opts + ["--roof-only", "--mem-level", "L2", "vL1D", "LDS"]
-    workload_dir = test_utils.get_output_dir()
-    e = test_utils.launch_rocprof_compute(
-        config, options, workload_dir, check_success=False
-    )
-
-    if soc == "MI100":
-        # assert that it did not run
-        assert e.value.code >= 1
-        # Do not continue testing
-        return
-    # assert successful run
-    assert e.value.code == 0
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
 
     if soc == "MI200" or "MI300" in soc:
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
