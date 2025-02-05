@@ -63,7 +63,7 @@ THE SOFTWARE.
  * - gfx1031 (Navy Flounder)
  * - gfx1032 (Dimgrey Cavefish)
  * - gfx1100 (Navi31)
-*
+ *
  * \section known_limitations Known limitations and restrictions
  *
  * The AMD Profiler API library implementation has the following
@@ -133,6 +133,10 @@ THE SOFTWARE.
 
 #define ROCPROFILER_EXPORT ROCPROFILER_EXPORT_DECORATOR ROCPROFILER_CALL
 #define ROCPROFILER_IMPORT ROCPROFILER_IMPORT_DECORATOR ROCPROFILER_CALL
+
+//Deprecation warning for ROCprofiler V1 and V2
+#pragma message(                                                                                   \
+    "Warning: ROCProfiler and ROCTracer are being phased out in favor of the latest version ROCProfiler-SDK. We encourage all users to upgrade to ROCProfiler-SDK library and rocprofv3 tool, to ensure continued support and access to new features.")
 
 #if !defined(ROCPROFILER)
 #if defined(ROCPROFILER_EXPORTS)
