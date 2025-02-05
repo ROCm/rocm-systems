@@ -56,8 +56,16 @@ function(generic_package)
         ## Security breach mitigation flags
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DFORTIFY_SOURCE=2 -fstack-protector-all -Wcast-align" PARENT_SCOPE)
         ## More security breach mitigation flags
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wl,-z,noexecstack -Wl,-znoexecheap -Wl,-z,relro" PARENT_SCOPE)
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wtrampolines -Wl,-z,now" PARENT_SCOPE)
+        set(HARDENING_LDFLAGS
+            "${HARDENING_LDFLAGS} -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${HARDENING_LDFLAGS}" PARENT_SCOPE)
+        set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${HARDENING_LDFLAGS}" PARENT_SCOPE)
+
+        include(CheckCXXCompilerFlag)
+        check_cxx_compiler_flag("-Wtrampolines" CXX_SUPPORTS_WTRAMPOLINES)
+        if(CXX_SUPPORTS_WTRAMPOLINES)
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wtrampolines" PARENT_SCOPE)
+        endif()
     endif()
 
     # Clang does not set the build-id
