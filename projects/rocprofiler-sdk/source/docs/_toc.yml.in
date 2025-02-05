@@ -12,6 +12,7 @@ subtrees:
   - caption: How to
     entries:
     - file: how-to/using-rocprofv3
+    - file: how-to/using-rocprofiler-sdk-roctx
     - file: how-to/samples
   - caption: API reference
     entries:
