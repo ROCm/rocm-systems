@@ -955,6 +955,13 @@ typedef enum hsa_amd_agent_memory_properties_s {
 } hsa_amd_agent_memory_properties_t;
 
 /**
+ * @brief Agent AQL info properties attributes
+ */
+typedef enum hsa_amd_agent_aql_properties_s {
+  HSA_AMD_AQL_PROPERTY_EXT_DISPATCH = (1 << 0),
+} hsa_amd_agent_aql_properties_t;
+
+/**
  * @brief SDMA engine IDs unique by single set bit position.
  */
 typedef enum hsa_amd_sdma_engine_id {

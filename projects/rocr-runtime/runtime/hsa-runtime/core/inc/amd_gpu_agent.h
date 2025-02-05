@@ -797,6 +797,8 @@ class GpuAgent : public GpuAgentInt {
 
   void GetInfoMemoryProperties(uint8_t value[8]) const;
 
+  void GetAqlInfoProperties(uint8_t value[8]) const;
+
   // @brief Alternative aperture base address. Only on KV.
   uintptr_t ape1_base_;
 
@@ -899,8 +901,6 @@ class GpuAgent : public GpuAgentInt {
   amdgpu_device_handle ldrm_dev_;
   HsaAMDGPUDeviceHandle libthunk_dev_;
 
-  DISALLOW_COPY_AND_ASSIGN(GpuAgent);
-
   // Check if SDMA engine by ID is free
   bool DmaEngineIsFree(uint32_t engine_id);
 
@@ -924,6 +924,10 @@ class GpuAgent : public GpuAgentInt {
   bool xgmi_cpu_gpu_;
   /// @brief Is PCIe large BAR enabled.
   bool large_bar_enabled_;
+
+  bool extended_aql_dispatch_supported_;
+
+  DISALLOW_COPY_AND_ASSIGN(GpuAgent);
 };
 
 }  // namespace amd
