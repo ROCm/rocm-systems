@@ -328,7 +328,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         amdsmi_helpers = self.helpers
         class _GPUSelectAction(argparse.Action):
-            ouputformat=self.helpers.get_output_format()
+            outputformat=self.helpers.get_output_format()
             # Checks the values
             def __call__(self, parser, args, values, option_string=None):
                 if "all" in gpu_choices:
@@ -339,13 +339,13 @@ class AMDSMIParser(argparse.ArgumentParser):
                     setattr(args, self.dest, selected_device_handles)
                 else:
                     if selected_device_handles == '':
-                        raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException("--gpu", _GPUSelectAction.ouputformat)
+                        raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException("--gpu", _GPUSelectAction.outputformat)
                     elif not gpu_format:
                         raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(selected_device_handles,
-                                                                                         _GPUSelectAction.ouputformat)
+                                                                                         _GPUSelectAction.outputformat)
                     else:
                         raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(selected_device_handles,
-                                                                                  _GPUSelectAction.ouputformat,
+                                                                                  _GPUSelectAction.outputformat,
                                                                                   True, False, False)
 
         return _GPUSelectAction
@@ -358,7 +358,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         """
         amdsmi_helpers = self.helpers
         class _CPUSelectAction(argparse.Action):
-            ouputformat=self.helpers.get_output_format()
+            outputformat=self.helpers.get_output_format()
             # Checks the values
             def __call__(self, parser, args, values, option_string=None):
                 if "all" in cpu_choices:
@@ -369,13 +369,13 @@ class AMDSMIParser(argparse.ArgumentParser):
                     setattr(args, self.dest, selected_device_handles)
                 else:
                     if selected_device_handles == '':
-                        raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException("--cpu", _CPUSelectAction.ouputformat)
+                        raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException("--cpu", _CPUSelectAction.outputformat)
                     elif not cpu_format:
                         raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(selected_device_handles,
-                                                                                         _CPUSelectAction.ouputformat)
+                                                                                         _CPUSelectAction.outputformat)
                     else:
                         raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(selected_device_handles,
-                                                                                  _CPUSelectAction.ouputformat,
+                                                                                  _CPUSelectAction.outputformat,
                                                                                   False, True, False)
         return _CPUSelectAction
 
@@ -387,7 +387,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         """
         amdsmi_helpers = self.helpers
         class _CoreSelectAction(argparse.Action):
-            ouputformat=self.helpers.get_output_format()
+            outputformat=self.helpers.get_output_format()
             # Checks the values
             def __call__(self, parser, args, values, option_string=None):
                 if "all" in core_choices:
@@ -398,13 +398,13 @@ class AMDSMIParser(argparse.ArgumentParser):
                     setattr(args, self.dest, selected_device_handles)
                 else:
                     if selected_device_handles == '':
-                        raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException("--core", _CoreSelectAction.ouputformat)
+                        raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException("--core", _CoreSelectAction.outputformat)
                     elif not core_format:
                         raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(selected_device_handles,
-                                                                                         _CoreSelectAction.ouputformat)
+                                                                                         _CoreSelectAction.outputformat)
                     else:
                         raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(selected_device_handles,
-                                                                                  _CoreSelectAction.ouputformat,
+                                                                                  _CoreSelectAction.outputformat,
                                                                                   False, False, True)
         return _CoreSelectAction
 
