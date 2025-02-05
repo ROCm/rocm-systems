@@ -688,6 +688,15 @@ enum {
  */
 
 /**
+ * @brief Dispatch dimension limits
+ */
+typedef struct hsa_amd_dim3_s {
+    uint64_t x;
+    uint64_t y;
+    uint64_t z;
+} hsa_amd_dim3_t;
+
+/**
  * @brief IOMMU version supported
  */
 typedef enum {
@@ -902,7 +911,7 @@ typedef enum hsa_amd_agent_info_s {
    * bit is set at that position. User may use the hsa_flag_isset64 macro to verify whether a flag
    * is set. The type of this attribute is uint8_t[8].
    */
-  HSA_AMD_AGENT_INFO_AQL_EXTENSIONS = 0xA115, /* Not implemented yet */
+  HSA_AMD_AGENT_INFO_AQL_EXTENSIONS = 0xA115,
   /**
    * Maximum allowed value in bytes for scratch limit for this agent. This amount
    * is shared accross all queues created on this agent.
@@ -941,10 +950,40 @@ typedef enum hsa_amd_agent_info_s {
    */
   HSA_AMD_AGENT_INFO_HAS_EXPERT_SCHED_MODE = 0xA11B,
   /**
-   * Queries the secondary CUID (128-bit UUID (16 bytes) in UUIDv8 format) 
+   * Queries the secondary CUID (128-bit UUID (16 bytes) in UUIDv8 format)
    * of a CPU/GPU agent. The type of this attribute is uint8_t[16].
    */
   HSA_AMD_AGENT_INFO_CUID = 0xA11C,
+  /*
+   * Maximum number of work-groups across all dimensions for non-clustered dispatches.
+   * Returns uint64_t into value output
+   */
+  HSA_AMD_AGENT_INFO_KERNEL_WG_MAX_SIZE = 0xA11D,
+  /**
+   * Maximum number of clusters in each dimension for clustered dispatches.
+   * Returns hsa_amd_dim3_t into value output.
+   */
+  HSA_AMD_AGENT_INFO_KERNEL_CLUSTER_MAX_DIM = 0xA11E,
+  /*
+   * Maximum number of clusters across all dimensions for clustered dispatches
+   * Returns uint64_t into value output
+   */
+  HSA_AMD_AGENT_INFO_KERNEL_CLUSTER_MAX_SIZE = 0xA11F,
+  /*
+   * Maximum number of workgroups in a cluster in each dimension
+   * Returns hsa_amd_dim3_t into value output
+   */
+  HSA_AMD_AGENT_INFO_CLUSTER_MAX_DIM = 0xA120,
+  /*
+   * Maximum number of workgroups in a cluster across all dimensions
+   * Returns uint64_t into value output
+   */
+  HSA_AMD_AGENT_INFO_CLUSTER_MAX_SIZE = 0xA121,
+  /*
+   * Maximum number of work-groups in each dimension for non-clustered dispatches.
+   * Returns hsa_amd_dim3_t into value output.
+   */
+  HSA_AMD_AGENT_INFO_KERNEL_WG_MAX_DIM = 0xA122,
 } hsa_amd_agent_info_t;
 
 /**

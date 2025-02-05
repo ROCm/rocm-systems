@@ -123,7 +123,10 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
       pcs_stochastic_data_(),
       xgmi_cpu_gpu_(false),
       large_bar_enabled_(false),
-      extended_aql_dispatch_supported_(false) {
+      extended_aql_dispatch_supported_(false),
+      workgroup_clusters_supported_(false),
+      kern_cluster_max_dim_({ UINT32_MAX, UINT32_MAX, UINT32_MAX }),
+      cluster_max_dim_({ 1, 1, 1 }) {
   const bool is_apu_node = (properties_.NumCPUCores > 0);
   profile_ = (is_apu_node) ? HSA_PROFILE_FULL : HSA_PROFILE_BASE;
 
@@ -194,8 +197,18 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
     supported_isas_.push_back(core::IsaRegistry::GetIsa(isa_->GetIsaGeneric()));
   }
 
-  if (isa_->GetMajorVersion() == 12 && isa_->GetMinorVersion() >= 5)
+  if (isa_->GetMajorVersion() == 12 && isa_->GetMinorVersion() >= 5) {
     extended_aql_dispatch_supported_ = true;
+    workgroup_clusters_supported_ = true;
+  }
+
+  if (isa_->GetMajorVersion() >= 12)
+    kern_cluster_max_dim_ = { UINT32_MAX, UINT16_MAX, UINT16_MAX };
+
+  if (workgroup_clusters_supported_) {
+    const uint64_t num_cu_per_se = properties_.NumArrays * properties_.NumCUPerArray;
+    cluster_max_dim_ = { num_cu_per_se, num_cu_per_se, num_cu_per_se };
+  }
 
   current_coherency_type((profile_ == HSA_PROFILE_FULL)
                              ? HSA_AMD_COHERENCY_TYPE_COHERENT
@@ -1789,11 +1802,24 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       *((uint32_t*)value) = 1024;
       break;
     case HSA_AGENT_INFO_GRID_MAX_DIM: {
-      const hsa_dim3_t grid_size = {INT32_MAX, UINT16_MAX, UINT16_MAX};
-      std::memcpy(value, &grid_size, sizeof(hsa_dim3_t));
+      /*
+       * This query is marked as deprecated but we still return some valid
+       * values when possible.
+       */
+      hsa_dim3_t* dim3 = reinterpret_cast<hsa_dim3_t*>(value);
+
+      dim3->x = static_cast<uint32_t>(std::min(kern_cluster_max_dim_.x,
+        static_cast<uint64_t>(UINT32_MAX)));
+
+      dim3->y = static_cast<uint32_t>(std::min(kern_cluster_max_dim_.y,
+        static_cast<uint64_t>(UINT16_MAX)));
+
+      dim3->z = static_cast<uint32_t>(std::min(kern_cluster_max_dim_.z,
+        static_cast<uint64_t>(UINT16_MAX)));
     } break;
     case HSA_AGENT_INFO_GRID_MAX_SIZE:
-      *((uint32_t*)value) = UINT32_MAX;
+      *((uint32_t*)value) = static_cast<uint32_t>(std::min(kern_cluster_max_dim_.x,
+        static_cast<uint64_t>(UINT32_MAX)));
       break;
     case HSA_AGENT_INFO_FBARRIER_MAX_SIZE:
       // TODO: to confirm
@@ -2113,6 +2139,20 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       memcpy(cuid, derived_cuid_, sizeof(derived_cuid_));
       break;
     }
+    case HSA_AMD_AGENT_INFO_KERNEL_CLUSTER_MAX_DIM:
+    case HSA_AMD_AGENT_INFO_KERNEL_WG_MAX_DIM:
+      memcpy(value, &kern_cluster_max_dim_, sizeof(kern_cluster_max_dim_));
+      break;
+    case HSA_AMD_AGENT_INFO_KERNEL_WG_MAX_SIZE:
+    case HSA_AMD_AGENT_INFO_KERNEL_CLUSTER_MAX_SIZE:
+      *((uint64_t*)value) = kern_cluster_max_dim_.x * kern_cluster_max_dim_.y * kern_cluster_max_dim_.z;
+      break;
+    case HSA_AMD_AGENT_INFO_CLUSTER_MAX_DIM:
+      memcpy(value, &cluster_max_dim_, sizeof(cluster_max_dim_));
+      break;
+    case HSA_AMD_AGENT_INFO_CLUSTER_MAX_SIZE:
+      *((uint64_t*)value) = cluster_max_dim_.x;
+      break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       break;
