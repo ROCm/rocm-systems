@@ -109,7 +109,13 @@ public:
                      size_t size) override;
   hsa_status_t ReleaseShareableHandle(core::ShareableHandle &handle) override;
 
-private:
+  hsa_status_t SPMAcquire(uint32_t preferred_node_id) const override;
+  hsa_status_t SPMRelease(uint32_t preferred_node_id) const override;
+  hsa_status_t SPMSetDestBuffer(uint32_t preferred_node_id, uint32_t size_bytes, uint32_t* timeout,
+                                uint32_t* size_copied, void* dest_mem_addr,
+                                bool* is_spm_data_loss) const override;
+
+ private:
   /// @brief Allocate agent accessible memory (system / local memory).
   static void *AllocateKfdMemory(const HsaMemFlags &flags, uint32_t node_id,
                                  size_t size);

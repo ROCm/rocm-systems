@@ -193,6 +193,24 @@ public:
   virtual hsa_status_t
   ReleaseShareableHandle(core::ShareableHandle &handle) = 0;
 
+  /// @brief Acquire a streaming performance monitor on an agent.
+  /// @param[in] preferred_node_id Node ID of the preferred agent.
+  virtual hsa_status_t SPMAcquire(uint32_t preferred_node_id) const = 0;
+  /// @brief Release a streaming performance monitor on an agent.
+  /// @param[in] preferred_node_id Node ID of the preferred agent.
+  virtual hsa_status_t SPMRelease(uint32_t preferred_node_id) const = 0;
+  /// @brief Setup the destination user-mode buffer for streaming performance monitor data.
+  /// @param[in] preferred_node_id Node ID of the preferred agent.
+  /// @param[in] size_bytes Size of the destination buffer in bytes.
+  /// @param[in, out] timeout Timeout in milliseconds.
+  /// @param[out] size_copied Size of data copied in bytes.
+  /// @param[in] dest_mem_addr Destination address for streaming performance data. Set to NULL to
+  /// stop copy on previous buffer.
+  /// @param[out] is_spm_data_loss Data was lost if true.
+  virtual hsa_status_t SPMSetDestBuffer(uint32_t preferred_node_id, uint32_t size_bytes,
+                                        uint32_t* timeout, uint32_t* size_copied,
+                                        void* dest_mem_addr, bool* is_spm_data_loss) const = 0;
+
   /// Unique identifier for supported kernel-mode drivers.
   const DriverType kernel_driver_type_;
 

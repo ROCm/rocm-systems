@@ -671,5 +671,22 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_amd_aie_ert_packet_t* first_pkt, uin
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t XdnaDriver::SPMAcquire(uint32_t preferred_node_id) const {
+  // AIE does not support streaming performance monitor.
+  return HSA_STATUS_ERROR_INVALID_AGENT;
+}
+
+hsa_status_t XdnaDriver::SPMRelease(uint32_t preferred_node_id) const {
+  // AIE does not support streaming performance monitor.
+  return HSA_STATUS_ERROR_INVALID_AGENT;
+};
+
+hsa_status_t XdnaDriver::SPMSetDestBuffer(uint32_t preferred_node_id, uint32_t size_bytes,
+                                          uint32_t* timeout, uint32_t* size_copied,
+                                          void* dest_mem_addr, bool* is_spm_data_loss) const {
+  // AIE does not support streaming performance monitor.
+  return HSA_STATUS_ERROR_INVALID_AGENT;
+}
+
 } // namespace AMD
 } // namespace rocr

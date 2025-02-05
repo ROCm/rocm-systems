@@ -430,6 +430,28 @@ hsa_status_t KfdDriver::ReleaseShareableHandle(core::ShareableHandle &handle) {
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t KfdDriver::SPMAcquire(uint32_t preferred_node_id) const {
+  if (hsaKmtSPMAcquire(preferred_node_id) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::SPMRelease(uint32_t preferred_node_id) const {
+  if (hsaKmtSPMRelease(preferred_node_id) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::SPMSetDestBuffer(uint32_t preferred_node_id, uint32_t size_bytes,
+                                         uint32_t* timeout, uint32_t* size_copied,
+                                         void* dest_mem_addr, bool* is_spm_data_loss) const {
+  if (hsaKmtSPMSetDestBuffer(preferred_node_id, size_bytes, timeout, size_copied, dest_mem_addr,
+                             is_spm_data_loss) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+
+  return HSA_STATUS_SUCCESS;
+}
+
 void *KfdDriver::AllocateKfdMemory(const HsaMemFlags &flags, uint32_t node_id,
                                    size_t size) {
   void *mem = nullptr;

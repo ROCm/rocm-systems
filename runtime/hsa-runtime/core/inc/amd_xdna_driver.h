@@ -174,9 +174,15 @@ public:
                      size_t size) override;
   hsa_status_t ReleaseShareableHandle(core::ShareableHandle &handle) override;
 
-  // @brief Submits num_pkts packets in a command chain to the XDNA driver
+  /// @brief Submits num_pkts packets in a command chain to the XDNA driver
   hsa_status_t SubmitCmdChain(hsa_amd_aie_ert_packet_t* first_pkt, uint32_t num_pkts,
                               uint32_t num_operands, uint32_t hw_ctx_handle);
+
+  hsa_status_t SPMAcquire(uint32_t preferred_node_id) const override;
+  hsa_status_t SPMRelease(uint32_t preferred_node_id) const override;
+  hsa_status_t SPMSetDestBuffer(uint32_t preferred_node_id, uint32_t size_bytes, uint32_t* timeout,
+                                uint32_t* size_copied, void* dest_mem_addr,
+                                bool* is_spm_data_loss) const override;
 
  private:
   hsa_status_t QueryDriverVersion();
