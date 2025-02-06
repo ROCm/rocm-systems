@@ -86,7 +86,6 @@
 #define DEFAULT_SCRATCH_BYTES_PER_THREAD 2048
 #define MAX_WAVE_SCRATCH 8387584  // See COMPUTE_TMPRING_SIZE.WAVESIZE
 #define MAX_NUM_DOORBELLS 0x400
-#define DEFAULT_SCRATCH_SINGLE_LIMIT_ASYNC_PER_XCC (1 << 30)  // 1 GB
 
 namespace rocr {
 
@@ -556,12 +555,17 @@ void GpuAgent::InitScratchPool() {
 }
 
 void GpuAgent::InitAsyncScratchThresholds() {
+  if (!AsyncScratchReclaimEnabled()) return;
+
   scratch_limit_async_threshold_ =
       core::Runtime::runtime_singleton_->flag().scratch_single_limit_async();
 
-  if (!scratch_limit_async_threshold_)
+  if (!scratch_limit_async_threshold_) {
+    // User did not set env var HSA_SCRATCH_SINGLE_LIMIT_ASYNC
     scratch_limit_async_threshold_ =
-        DEFAULT_SCRATCH_SINGLE_LIMIT_ASYNC_PER_XCC * properties().NumXcc;
+      core::Runtime::runtime_singleton_->flag().DEFAULT_SCRATCH_SINGLE_LIMIT_ASYNC_PER_XCC *
+      (uint64_t)(properties().NumXcc);
+  }
 }
 
 void GpuAgent::ReserveScratch()
@@ -1769,8 +1773,9 @@ void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
   bool use_reclaim = true;
 
   large = (scratch.main_size > scratch.use_once_limit) ||
-      ((scratch_pool_.size() - scratch_pool_.remaining() - scratch_cache_.free_bytes() +
-        scratch.main_size) > small_limit);
+          (!AsyncScratchReclaimEnabled() &&
+            ((scratch_pool_.size() - scratch_pool_.remaining() - scratch_cache_.free_bytes() +
+             scratch.main_size) > small_limit));
 
   if ((isa_->GetMajorVersion() < 8) ||
       core::Runtime::runtime_singleton_->flag().no_scratch_reclaim()) {
@@ -1905,8 +1910,8 @@ void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
       : uintptr_t(scratch.main_queue_base) - uintptr_t(scratch_pool_.base());
 }
 
+/* Should be called with scratch_lock_ */
 void GpuAgent::ReleaseQueueMainScratch(ScratchInfo& scratch) {
-  ScopedAcquire<KernelMutex> lock(&scratch_lock_);
   if (scratch.main_queue_base == nullptr) return;
 
   scratch_cache_.freeMain(scratch);
@@ -1980,8 +1985,8 @@ void GpuAgent::AcquireQueueAltScratch(ScratchInfo& scratch) {
   scratch.alt_queue_process_offset = uintptr_t(scratch.alt_queue_base);
 }
 
+/* Should be called with scratch_lock_ */
 void GpuAgent::ReleaseQueueAltScratch(ScratchInfo& scratch) {
-  ScopedAcquire<KernelMutex> lock(&scratch_lock_);
   if (scratch.alt_queue_base == nullptr) return;
 
   scratch_cache_.freeAlt(scratch);
@@ -2023,7 +2028,6 @@ hsa_status_t GpuAgent::SetAsyncScratchThresholds(size_t use_once_limit) {
     auto aqlQueue = static_cast<AqlQueue*>(iter);
     aqlQueue->CheckScratchLimits();
   }
-
   return HSA_STATUS_SUCCESS;
 }
 
@@ -2232,10 +2236,10 @@ void GpuAgent::BindTrapHandler() {
     AssembleShader("TrapHandler", AssembleTarget::ISA, trap_code_buf_, trap_code_buf_size_);
 
     // Make an empty map from doorbell index to queue.
-    // The trap handler uses this to retrieve a wave's amd_queue_t*.
-    auto doorbell_queue_map_size = MAX_NUM_DOORBELLS * sizeof(amd_queue_t*);
+    // The trap handler uses this to retrieve a wave's amd_queue_v2_t*.
+    auto doorbell_queue_map_size = MAX_NUM_DOORBELLS * sizeof(amd_queue_v2_t*);
 
-    doorbell_queue_map_ = (amd_queue_t**)system_allocator()(doorbell_queue_map_size, 0x1000, 0);
+    doorbell_queue_map_ = (amd_queue_v2_t**)system_allocator()(doorbell_queue_map_size, 0x1000, 0);
     assert(doorbell_queue_map_ != NULL && "Doorbell queue map allocation failed");
 
     memset(doorbell_queue_map_, 0, doorbell_queue_map_size);

@@ -73,6 +73,9 @@
 namespace rocr {
 namespace AMD {
 
+
+#define SCRATCH_ALT_RATIO 4
+
 AqlQueue::AqlQueue(GpuAgent* agent, size_t req_size_pkts, HSAuint32 node_id, ScratchInfo& scratch,
                    core::HsaEventCallback callback, void* err_data, bool is_kv)
     : Queue(agent->node_id(), agent->isMES() ? (MemoryRegion::AllocateGTTAccess | MemoryRegion::AllocateNonPaged) : 0),
@@ -226,7 +229,7 @@ AqlQueue::AqlQueue(GpuAgent* agent, size_t req_size_pkts, HSAuint32 node_id, Scr
   if (queue_scratch_.async_reclaim) {
     queue_scratch_.use_once_limit = agent_->ScratchSingleLimitAsyncThreshold();
     queue_scratch_.use_alt_limit = core::Runtime::runtime_singleton_->flag().enable_scratch_alt()
-        ? (queue_scratch_.use_once_limit / 4)
+        ? (queue_scratch_.use_once_limit / SCRATCH_ALT_RATIO)
         : 0;
   }
 
@@ -301,8 +304,12 @@ AqlQueue::AqlQueue(GpuAgent* agent, size_t req_size_pkts, HSAuint32 node_id, Scr
   queue_id_ = queue_rsrc.QueueId;
   MAKE_NAMED_SCOPE_GUARD(QueueGuard, [&]() { hsaKmtDestroyQueue(queue_id_); });
 
-  amd_queue_.scratch_last_used_index = UINT64_MAX;
-  amd_queue_.alt_scratch_last_used_index = UINT64_MAX;
+  amd_queue_.scratch_max_use_index = UINT64_MAX;
+  amd_queue_.alt_scratch_max_use_index = UINT64_MAX;
+
+  // Set flag to notify CP FW that SW supports the new amd_queue_v2
+  if (agent_->AsyncScratchReclaimEnabled())
+    amd_queue_.caps |= AMD_QUEUE_CAPS_SW_ASYNC_RECLAIM;
 
   // On the first queue creation, reserve some scratch memory on this agent.
   agent_->ReserveScratch();
@@ -819,6 +826,14 @@ void AqlQueue::Suspend() {
   assert(err == HSAKMT_STATUS_SUCCESS && "hsaKmtUpdateQueue failed.");
 }
 
+void AqlQueue::Resume() {
+  if (suspended_) {
+    suspended_ = false;
+    auto err = hsaKmtUpdateQueue(queue_id_, 100, priority_, ring_buf_, ring_buf_alloc_bytes_, NULL);
+    assert(err == HSAKMT_STATUS_SUCCESS && "hsaKmtUpdateQueue failed.");
+  }
+}
+
 hsa_status_t AqlQueue::Inactivate() {
   bool active = active_.exchange(false, std::memory_order_relaxed);
   if (active) {
@@ -845,12 +860,14 @@ void AqlQueue::CheckScratchLimits() {
 
   scratch.use_once_limit = agent_->ScratchSingleLimitAsyncThreshold();
   scratch.use_alt_limit = core::Runtime::runtime_singleton_->flag().enable_scratch_alt()
-      ? (scratch.use_once_limit / 4)
+      ? (scratch.use_once_limit / SCRATCH_ALT_RATIO)
       : 0;
 
-  if (scratch.main_size > scratch.use_once_limit) AsyncReclaimMainScratch();
+  if (scratch.main_size > scratch.use_once_limit)
+    AsyncReclaimMainScratch();
 
-  if (scratch.alt_size > scratch.use_alt_limit) AsyncReclaimAltScratch();
+  if (scratch.alt_size > scratch.use_alt_limit)
+    AsyncReclaimAltScratch();
 
   return;
 }
@@ -862,34 +879,60 @@ void AqlQueue::FreeMainScratchSpace() {
   scratch.main_size_per_thread = 0;
   scratch.main_queue_process_offset = 0;
   InitScratchSRD();
-
-  HSA::hsa_signal_store_relaxed(amd_queue_.queue_inactive_signal, 0);
 }
 
 void AqlQueue::AsyncReclaimMainScratch() {
-  auto& scratch = queue_scratch_;
-  if (!scratch.async_reclaim || !scratch.main_size) return;
+  auto getMaxMainScratchUseIndex = [&]() {
+    uint64_t max = 0;
+    for (int i = 0; i < agent_->properties().NumXcc; i++) {
+      if (amd_queue_.scratch_last_used_index[i].main > max)
+        max = amd_queue_.scratch_last_used_index[i].main;
+    }
+    return max;
+  };
 
-  // Notify CP that we are trying to reclaim scratch. CP will assume scratch is reclaimed on next
-  // dispatch
+  auto& scratch = queue_scratch_;
+  if (!scratch.async_reclaim || !scratch.main_size) {
+    return;
+  }
+
+  assert((amd_queue_.caps & AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM) &&
+          "This version of CP FW should support async scratch, but flag is not set");
+
   tool::notify_event_scratch_async_reclaim_start(public_handle(),
                                                  HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE);
 
-  amd_queue_.scratch_wave64_lane_byte_size = 0;
-  uint64_t last_used =
-      atomic::Exchange(&amd_queue_.scratch_last_used_index, UINT64_MAX, std::memory_order_relaxed);
+  ScopedAcquire<KernelMutex> lock(&scratch_lock_);
 
-  // Wait for scratch to be idle.
-  while (true) {
-    uint64_t last = amd_queue_.scratch_last_used_index;
+  // Unmap the queue. CP will check amd_queue_ fields on re-map
+  Suspend();
 
-    if (std::min(last, last_used) < amd_queue_.read_dispatch_id) {
-      FreeMainScratchSpace();
-      tool::notify_event_scratch_async_reclaim_end(public_handle(),
-                                                   HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE);
-      return;
-    }
+  /*
+   * amd_queue_.scratch_last_used_index[*].main is updated by CP FW every time a
+   * dispatch packet is launched and it needs scratch memory.
+   * If amd_queue_.scratch_last_used_index[*].main > amd_queue_.read_dispatch_id
+   * then this XCC is currently running a dispatch that uses scratch.
+   * Setting max_scratch_use_index to max(amd_queue_.scratch_last_used_index[*].main)
+   * prevents CP from trying to use main-scratch after
+   * amd_queue_.scratch_max_use_index. If CP sees a dispatch that needs scratch,
+   * it will raise a new signal. CP may use alt-scratch in the meantime.
+   */
+  amd_queue_.scratch_max_use_index = getMaxMainScratchUseIndex();
+
+
+  Resume();
+
+  // If current dispatch is using scratch, wait for it to finish
+  while (amd_queue_.scratch_max_use_index > amd_queue_.read_dispatch_id) {
+    //TODO: if mwaitx supported, //mwaitx(amd_queue_.read_dispatch_id);
+    os::YieldThread();
   }
+
+  FreeMainScratchSpace();
+  tool::notify_event_scratch_async_reclaim_end(public_handle(),
+                                                HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE);
+
+  return;
 }
 
 void AqlQueue::FreeAltScratchSpace() {
@@ -899,34 +942,52 @@ void AqlQueue::FreeAltScratchSpace() {
   scratch.alt_size_per_thread = 0;
   scratch.alt_queue_process_offset = 0;
   InitScratchSRD();
-
-  HSA::hsa_signal_store_relaxed(amd_queue_.queue_inactive_signal, 0);
 }
 
 void AqlQueue::AsyncReclaimAltScratch() {
-  auto& scratch = queue_scratch_;
-  if (!scratch.async_reclaim || !scratch.alt_size) return;
+  /*
+   * See AsyncReclaimMainScratch() for scratch reclaim handshake protocol with
+   * CP FW.
+   */
+  auto getMaxAltScratchUseIndex = [&]() {
+    uint64_t max = 0;
+    for (int i = 0; i < agent_->properties().NumXcc; i++) {
+      if (amd_queue_.scratch_last_used_index[i].alt > max)
+        max = amd_queue_.scratch_last_used_index[i].alt;
+    }
+    return max;
+  };
 
-  // Notify CP that we are trying to reclaim scratch. CP will assume scratch is reclaimed on next
-  // dispatch
+  auto& scratch = queue_scratch_;
+  if (!scratch.async_reclaim || !scratch.alt_size) {
+    return;
+  }
+
+  assert((amd_queue_.caps & AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM) &&
+          "This version of CP FW should support async scratch, but flag is not set");
+
   tool::notify_event_scratch_async_reclaim_start(public_handle(),
                                                  HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
 
-  amd_queue_.alt_scratch_wave64_lane_byte_size = 0;
-  uint64_t last_used = atomic::Exchange(
-      &amd_queue_.alt_scratch_last_used_index, UINT64_MAX,
-      std::memory_order_relaxed);  // TODO: Confirm this is the correct memory order
-  // Wait for scratch to be idle.
-  while (true) {
-    uint64_t last = amd_queue_.alt_scratch_last_used_index;
+  ScopedAcquire<KernelMutex> lock(&scratch_lock_);
 
-    if (std::min(last, last_used) < amd_queue_.read_dispatch_id) {
-      FreeAltScratchSpace();
-      tool::notify_event_scratch_async_reclaim_end(public_handle(),
-                                                   HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
-      return;
-    }
+  // Unmap the queue. CP will check amd_queue_ fields on re-map
+  Suspend();
+
+  amd_queue_.alt_scratch_max_use_index = getMaxAltScratchUseIndex();
+
+  Resume();
+
+  // If current dispatch is using alt scratch, wait for it to finish
+  while (amd_queue_.alt_scratch_max_use_index > amd_queue_.read_dispatch_id) {
+    //DYSDEBUG TODO: if mwaitx supported, //mwaitx(amd_queue_.read_dispatch_id);
+    os::YieldThread();
   }
+
+  FreeAltScratchSpace();
+  tool::notify_event_scratch_async_reclaim_end(public_handle(),
+                                                HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
+  return;
 }
 
 void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
@@ -943,9 +1004,11 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
    *
    * //Default values:
    * size_t use_once_limit = 128 MB      // When async reclaim not supported
-   *                       = 1GB per-XCC // When async reclaim is supported
+   *                                     // DEFAULT_SCRATCH_SINGLE_LIMIT
+   *                       = 3GB per-XCC // When async reclaim is supported
+   *                                     // DEFAULT_SCRATCH_SINGLE_LIMIT_ASYNC_PER_XCC
    *
-   * size_t use_alt_limit  = 256 MB per-XCC
+   * size_t use_alt_limit  = 768 MB per-XCC // use_once_limit/SCRATCH_ALT_RATIO
    *
    * if (async-scratch-reclaim-supported
    *     && dispatch_slots < max_scratch_slots
@@ -1043,8 +1106,9 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
     return AlignUp(cu_count, engines) * agent_->properties().MaxSlotsScratchCU;
   };
 
-  assert((!scratch.async_reclaim || (amd_queue_.caps & AMD_QUEUE_CAPS_ASYNC_RECLAIM)) &&
-         "Asynchronous scratch reclaim capability not set, but this FW version should support it");
+  assert(core::Runtime::runtime_singleton_->flag().enable_scratch_async_reclaim() &&
+         (!scratch.async_reclaim || (amd_queue_.caps & AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM)) &&
+          "Asynchronous scratch reclaim capability not set, but this FW version should support it");
 
   scratch.cooperative = (amd_queue_.hsa_queue.type == HSA_QUEUE_TYPE_COOPERATIVE);
 
@@ -1070,6 +1134,8 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
   const uint64_t device_size = size_per_thread * lanes_per_wave * device_slots;
   const uint64_t dispatch_size = size_per_thread * lanes_per_wave * dispatch_slots;
 
+  ScopedAcquire<KernelMutex> lock(&scratch_lock_);
+
   // scratch.use_alt_limit will be 0 if alt scratch is not supported or disabled
   if (dispatch_size < scratch.use_alt_limit && dispatch_slots < device_slots) {
     // Try to use ALT scratch
@@ -1086,8 +1152,13 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
       scratch.alt_dispatch_limit_y = pkt->dispatch.grid_size_y;
       scratch.alt_dispatch_limit_z = pkt->dispatch.grid_size_z;
 
-      // Update queue SRD
       InitScratchSRD();
+      /*
+       * Indicate to CP FW that any dispatch may use alt scratch memory.
+       * If ROCr wants to reclain scratch memory, it will set
+       * amd_queue_.alt_scratch_max_use_index to a lower value
+       */
+      amd_queue_.alt_scratch_max_use_index = UINT64_MAX;
       // Restart the queue.
       HSA::hsa_signal_store_screlease(amd_queue_.queue_inactive_signal, 0);
       tool::notify_event_scratch_alloc_end(public_handle(), HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT,
@@ -1136,16 +1207,28 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
   } else if (scratch.alt_size && scratch.main_size > scratch.alt_size) {
     // Not using use-scratch-once, and dispatches that would fit in alt-scratch would also fit in
     // main scratch. No need for alt-scratch.
-    AsyncReclaimAltScratch();
+    tool::notify_event_scratch_async_reclaim_start(public_handle(),
+                                                 HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
+    FreeAltScratchSpace();
+    tool::notify_event_scratch_async_reclaim_end(public_handle(),
+                                                 HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
   }
 
   // Reset scratch memory related entities for the queue
   InitScratchSRD();
+  /*
+   * Indicate to CP FW that any dispatch may use alt scratch memory.
+   * If ROCr wants to reclain scratch memory, it will set
+   * amd_queue_.alt_scratch_max_use_index to a lower value
+   */
+  amd_queue_.scratch_max_use_index = UINT64_MAX;
+
   // Restart the queue.
   HSA::hsa_signal_store_screlease(amd_queue_.queue_inactive_signal, 0);
 
   auto alloc_flag = (scratch.large) ? HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_USE_ONCE
                                     : HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE;
+
   tool::notify_event_scratch_alloc_end(public_handle(), alloc_flag, dispatch_id, scratch.main_size,
                                        dispatch_slots);
 

@@ -71,7 +71,7 @@ typedef struct AMD_SIGNAL_ALIGN amd_signal_s {
   uint64_t start_ts;
   uint64_t end_ts;
   union {
-    amd_queue_t* queue_ptr;
+    amd_queue_v2_t* queue_ptr;
     uint64_t reserved2;
   };
   uint32_t reserved3[2];

@@ -435,11 +435,12 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief Returns true if scratch reclaim is enabled
   __forceinline bool AsyncScratchReclaimEnabled() const override {
+    const uint32_t GFX94X_MIN_CP_FW_VERSION_REQUIRED = 177;
     // TODO: Need to update min CP FW ucode version once it is released
     return (core::Runtime::runtime_singleton_->flag().enable_scratch_async_reclaim() &&
             supported_isas()[0]->GetMajorVersion() == 9 &&
-            supported_isas()[0]->GetMinorVersion() == 4 &&
-            properties_.EngineId.ui32.uCode > 999);
+            supported_isas()[0]->GetMinorVersion() >= 4 &&
+            properties_.EngineId.ui32.uCode >= GFX94X_MIN_CP_FW_VERSION_REQUIRED);
   };
 
   hsa_status_t SetAsyncScratchThresholds(size_t use_once_limit) override;
@@ -619,7 +620,7 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief Mappings from doorbell index to queue, for trap handler.
   // Correlates with output of s_sendmsg(MSG_GET_DOORBELL) for queue identification.
-  amd_queue_t** doorbell_queue_map_;
+  amd_queue_v2_t** doorbell_queue_map_;
 
   // @brief The GPU memory bus width in bit.
   uint32_t memory_bus_width_;
@@ -716,7 +717,7 @@ class GpuAgent : public GpuAgentInt {
   uint32_t sdma_blit_used_mask_;
 
   // Scratch limit thresholds when async scratch is enabled.
-  size_t scratch_limit_async_threshold_;
+  uint64_t scratch_limit_async_threshold_;
 
   ScratchCache scratch_cache_;
 

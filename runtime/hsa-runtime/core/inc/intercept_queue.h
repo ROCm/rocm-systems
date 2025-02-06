@@ -64,7 +64,7 @@ class QueueWrapper : public Queue {
   std::unique_ptr<Queue> wrapped;
 
   explicit QueueWrapper(std::unique_ptr<Queue> queue) : Queue(), wrapped(std::move(queue)) {
-    memcpy(&amd_queue_, &wrapped->amd_queue_, sizeof(amd_queue_t));
+    memcpy(&amd_queue_, &wrapped->amd_queue_, sizeof(amd_queue_));
     wrapped->set_public_handle(wrapped.get(), public_handle_);
   }
 

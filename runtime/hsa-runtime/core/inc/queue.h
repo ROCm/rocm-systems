@@ -151,10 +151,10 @@ struct AqlPacket {
 
 class Queue;
 
-/// @brief Helper structure to simplify conversion of amd_queue_t and
+/// @brief Helper structure to simplify conversion of amd_queue_v2_t and
 /// core::Queue object.
 struct SharedQueue {
-  amd_queue_t amd_queue;
+  amd_queue_v2_t amd_queue;
   Queue* core_queue;
 };
 
@@ -378,7 +378,7 @@ class Queue : public Checked<0xFA3906A679F9DB49>, private LocalQueue {
   static void DefaultErrorHandler(hsa_status_t status, hsa_queue_t* source, void* data);
 
   // Handle of AMD Queue struct
-  amd_queue_t& amd_queue_;
+  amd_queue_v2_t& amd_queue_;
 
   hsa_queue_t* public_handle() const { return public_handle_; }
 

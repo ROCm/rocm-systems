@@ -264,6 +264,9 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   /// @brief Halt the queue without destroying it or fencing memory.
   void Suspend();
 
+  /// @brief Resume the queue.
+  void Resume();
+
   /// @brief Handle insufficient scratch
   void HandleInsufficientScratch(hsa_signal_value_t& error_code, hsa_signal_value_t& waitVal,
                                  bool& changeWait);
@@ -326,6 +329,10 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
 
   // CU mask lock
   KernelMutex mask_lock_;
+
+  // Mutex to prevent AsyncReclaimScratch and HandleInsufficientScratch from
+  // happening at the same time.
+  KernelMutex scratch_lock_;
 
   // Current CU mask
   std::vector<uint32_t> cu_mask_;

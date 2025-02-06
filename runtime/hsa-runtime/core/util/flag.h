@@ -66,8 +66,9 @@ class Flag {
 
   // Lift limit for 2.10 release RCCL workaround. This limit is not used when asynchronous scratch
   // reclaim is supported
-  const size_t DEFAULT_SCRATCH_SINGLE_LIMIT = 146800640;  // small_limit >> 2;
-  const size_t DEFAULT_PCS_MAX_DEVICE_BUFFER_SIZE = 256 * 1024 * 1024;
+  const size_t DEFAULT_SCRATCH_SINGLE_LIMIT = (140 * (1UL<<20));  // small_limit >> 2;
+  const size_t DEFAULT_SCRATCH_SINGLE_LIMIT_ASYNC_PER_XCC = (3 * (1UL<<30));  // 3 GB
+  const size_t DEFAULT_PCS_MAX_DEVICE_BUFFER_SIZE = (256 * (1UL<<20)); //256 MB
 
   explicit Flag() { Refresh(); }
 
@@ -135,6 +136,9 @@ class Flag {
 
     // On GPUs that support asynchronous scratch reclaim
     // Scratch memory sizes > HSA_SCRATCH_SINGLE_LIMIT_ASYNC will trigger a use-once scheme
+    // Note: This only sets the initial value for the threshold. If
+    // hsa_amd_agent_set_async_scratch_limit is called after initialization, the threshold
+    // will be updated.
     if (os::IsEnvVarSet("HSA_SCRATCH_SINGLE_LIMIT_ASYNC")) {
       var = os::GetEnvVar("HSA_SCRATCH_SINGLE_LIMIT_ASYNC");
       char* end;
