@@ -3795,6 +3795,7 @@ amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle processor_handle, amd
     }
 
     struct drm_amdgpu_info_device dev_info = {};
+    *mode = AMDSMI_VIRTUALIZATION_MODE_UNKNOWN;
 
     amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
     amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
@@ -3819,16 +3820,15 @@ amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle processor_handle, amd
         int patch_version = 0;
 
         if ((drm_version->version_major <= major_version) && (drm_version->version_minor <= minor_version) && (drm_version->version_patchlevel < patch_version)){
-            *mode = AMDSMI_VIRTUALIZATION_MODE_UNKNOWN;
+            return AMDSMI_STATUS_NOT_SUPPORTED;
         }
-        else {
-            uint32_t ids_flag = (dev_info.ids_flags & AMDGPU_IDS_FLAGS_MODE_MASK) >> AMDGPU_IDS_FLAGS_MODE_SHIFT;
-            switch (ids_flag){
-                case 0: *mode = AMDSMI_VIRTUALIZATION_MODE_BAREMETAL; break;
-                case 1: *mode = AMDSMI_VIRTUALIZATION_MODE_GUEST; break;
-                case 2: *mode = AMDSMI_VIRTUALIZATION_MODE_PASSTHROUGH; break;
-                default: *mode = AMDSMI_VIRTUALIZATION_MODE_UNKNOWN; break;
-            }
+
+        uint32_t ids_flag = (dev_info.ids_flags & AMDGPU_IDS_FLAGS_MODE_MASK) >> AMDGPU_IDS_FLAGS_MODE_SHIFT;
+        switch (ids_flag){
+            case 0: *mode = AMDSMI_VIRTUALIZATION_MODE_BAREMETAL; break;
+            case 1: *mode = AMDSMI_VIRTUALIZATION_MODE_GUEST; break;
+            case 2: *mode = AMDSMI_VIRTUALIZATION_MODE_PASSTHROUGH; break;
+            default: *mode = AMDSMI_VIRTUALIZATION_MODE_UNKNOWN; break;
         }
         free(drm_version);
     }

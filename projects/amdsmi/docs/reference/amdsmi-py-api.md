@@ -4057,7 +4057,7 @@ try:
     for dev in device_handles:
         virtualization_info = amdsmi_interface.amdsmi_get_gpu_virtualization_mode_info(dev)
         print(virtualization_info['mode'])
-except amdsmi_exception.AmdSmiLibraryException as e:
+except AmdSmiException as e:
     print(e)
 ```
 

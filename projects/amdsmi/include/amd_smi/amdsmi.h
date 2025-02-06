@@ -2765,6 +2765,27 @@ amdsmi_status_t amdsmi_get_gpu_subsystem_id(amdsmi_processor_handle processor_ha
 amdsmi_status_t
 amdsmi_get_gpu_subsystem_name(amdsmi_processor_handle processor_handle, char *name, size_t len);
 
+/**
+ *  @brief          Returns the virtualization mode for the target device.
+ *
+ *  @ingroup tagIdentQuery
+ * 
+ *  @platform{gpu_bm_linux}  @platform{host}
+ *
+ *  @details        The virtualization mode is detected and returned as an enum.
+ *
+ *  @param[in]      processor_handle The identifier of the given device.
+ *
+ *  @param[in,out]  mode Reference to the enum representing virtualization mode.
+ *                    - When zero, the virtualization mode is unknown
+ *                    - When non-zero, the virtualization mode is detected
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail.
+ */
+amdsmi_status_t
+amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle processor_handle,
+                                   amdsmi_virtualization_mode_t* mode);
+
 /** @} End tagIdentQuery */
 
 /*****************************************************************************/
