@@ -493,7 +493,7 @@ uint8_t* HsaRsrcFactory::AllocateLocalMemory(const AgentInfo* agent_info, size_t
   hsa_status_t status = HSA_STATUS_ERROR;
   uint8_t* buffer = NULL;
   size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
-  status = hsa_api_.hsa_amd_memory_pool_allocate(agent_info->gpu_pool, size, 0,
+  status = hsa_api_.hsa_amd_memory_pool_allocate(agent_info->gpu_pool, size, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG,
                                                  reinterpret_cast<void**>(&buffer));
   uint8_t* ptr = (status == HSA_STATUS_SUCCESS) ? buffer : NULL;
   return ptr;
@@ -509,7 +509,7 @@ uint8_t* HsaRsrcFactory::AllocateKernArgMemory(const AgentInfo* agent_info, size
   uint8_t* buffer = NULL;
   if (!cpu_agents_.empty()) {
     size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
-    status = hsa_api_.hsa_amd_memory_pool_allocate(*kern_arg_pool_, size, 0,
+    status = hsa_api_.hsa_amd_memory_pool_allocate(*kern_arg_pool_, size, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG,
                                                    reinterpret_cast<void**>(&buffer));
     // Both the CPU and GPU can access the kernel arguments
     if (status == HSA_STATUS_SUCCESS) {
@@ -530,7 +530,7 @@ uint8_t* HsaRsrcFactory::AllocateSysMemory(const AgentInfo* agent_info, size_t s
   uint8_t* buffer = NULL;
   size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
   if (!cpu_agents_.empty()) {
-    status = hsa_api_.hsa_amd_memory_pool_allocate(*cpu_pool_, size, 0,
+    status = hsa_api_.hsa_amd_memory_pool_allocate(*cpu_pool_, size, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG,
                                                    reinterpret_cast<void**>(&buffer));
     // Both the CPU and GPU can access the memory
     if (status == HSA_STATUS_SUCCESS) {

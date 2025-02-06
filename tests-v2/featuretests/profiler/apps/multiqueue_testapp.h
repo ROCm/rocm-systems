@@ -221,7 +221,7 @@ class MQDependencyTest {
 
   void* hsaMalloc(size_t size, const Device::Memory& mem) {
     void* ret;
-    hsa_status_t err = hsa_amd_memory_pool_allocate(mem.pool, size, 0, &ret);
+    hsa_status_t err = hsa_amd_memory_pool_allocate(mem.pool, size, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG, &ret);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
     err = hsa_amd_agents_allow_access(Device::all_devices.size(), &Device::all_devices[0], nullptr,

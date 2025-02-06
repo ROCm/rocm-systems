@@ -328,14 +328,14 @@ int main() {
   // Allocate memory on each source/destination
   if (twoGPUs) {
     sz = lcm(sz, args.gpu2.granule);
-    err = hsa_amd_memory_pool_allocate(args.gpu2.pool, sz, 0,
+    err = hsa_amd_memory_pool_allocate(args.gpu2.pool, sz, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG,
                                        reinterpret_cast<void**>(&args.gpu2.ptr));
     RET_IF_HSA_ERR(err);
   }
-  err = hsa_amd_memory_pool_allocate(args.cpu.pool, sz, 0, reinterpret_cast<void**>(&args.cpu.ptr));
+  err = hsa_amd_memory_pool_allocate(args.cpu.pool, sz, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG, reinterpret_cast<void**>(&args.cpu.ptr));
   RET_IF_HSA_ERR(err);
   err =
-      hsa_amd_memory_pool_allocate(args.gpu1.pool, sz, 0, reinterpret_cast<void**>(&args.gpu1.ptr));
+      hsa_amd_memory_pool_allocate(args.gpu1.pool, sz, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG, reinterpret_cast<void**>(&args.gpu1.ptr));
   RET_IF_HSA_ERR(err);
   char name[64];
   err = hsa_agent_get_info(args.cpu.dev, HSA_AGENT_INFO_NAME, &name);
