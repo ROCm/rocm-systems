@@ -87,16 +87,18 @@ agent_t::agent_t (amd_dbgapi_agent_id_t agent_id, process_t &process,
            local and private_swizzled for the local_address_aperture_base/limit
            and private_address_aperture_base/limit respectively. If this check
            fails, this agent's generic address spaces should be examined.  */
-        address_space.lower (os_info ().local_address_aperture_base)
+        address_space.lower (*this, os_info ().local_address_aperture_base)
             .first.kind ()
           == address_space_t::kind_t::local
-        && address_space.lower (os_info ().local_address_aperture_limit)
+        && address_space.lower (*this, os_info ().local_address_aperture_limit)
                .first.kind ()
              == address_space_t::kind_t::local
-        && address_space.lower (os_info ().private_address_aperture_base)
+        && address_space
+               .lower (*this, os_info ().private_address_aperture_base)
                .first.kind ()
              == address_space_t::kind_t::private_swizzled
-        && address_space.lower (os_info ().private_address_aperture_limit)
+        && address_space
+               .lower (*this, os_info ().private_address_aperture_limit)
                .first.kind ()
              == address_space_t::kind_t::private_swizzled
         && "check the generic address space apertures");

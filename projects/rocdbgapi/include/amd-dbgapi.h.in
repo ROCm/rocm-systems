@@ -628,10 +628,16 @@ typedef unsigned long amd_dbgapi_DWORD;
 #define AMD_DBGAPI_VERSION_0_77
 
 /**
- * The function was introduced in version 0.77 of the interface and has the
+ * The function was introduced in version 0.78 of the interface and has the
  * symbol version string of ``"@AMD_DBGAPI_NAME@_0.78"``.
  */
 #define AMD_DBGAPI_VERSION_0_78
+
+/**
+ * The function was introduced in version 0.79 of the interface and has the
+ * symbol version string of ``"@AMD_DBGAPI_NAME@_0.79"``.
+ */
+#define AMD_DBGAPI_VERSION_0_79
 
 /** @} */
 
@@ -6301,6 +6307,13 @@ typedef enum
  * ::amd_dbgapi_write_memory require when reading and writing memory when given
  * a specific segment address in an address space.
  *
+ * \param[in] process_id The process that the \p segment_address belongs to.
+ * This is to handle generic addresses of a process.
+ *
+ * \param[in] wave_id The wave that is using the address.  If the \p
+ * address_space is ::AMD_DBGAPI_ADDRESS_SPACE_GLOBAL then \p wave_id may be
+ * ::AMD_DBGAPI_WAVE_NONE.
+ *
  * \param[in] address_space_id The address space of the \p segment_address.
  *
  * \param[in] segment_address The integral value of the segment address.  Only
@@ -6324,18 +6337,32 @@ typedef enum
  * destination_segment_address and \p segment_address_dependencies is
  * unaltered.
  *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_PROCESS_ID \p process_id is
+ * invalid.  \p segment_address_dependency is unaltered.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_WAVE_ID \p wave_id is invalid
+ * and \p address_space_id is not ::AMD_DBGAPI_ADDRESS_SPACE_GLOBAL.
+ * \p segment_address_dependency is unaltered.
+ *
  * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_ADDRESS_SPACE_ID \p
  * address_space_id is invalid.  \p segment_address_dependencies is unaltered.
  *
  * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT \p
  * segment_address_dependencies is NULL. \p segment_address_dependencies is
  * unaltered.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT_COMPATIBILITY \p
+ * address_space_id depends on the active wave but \p wave_id is
+ * ::AMD_DBGAPI_WAVE_NONE, or \p address_space_id is not supported by the
+ * architecture of \p wave_id.  \p segment_address_dependencies is unaltered.
  */
 amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_address_dependency (
+  amd_dbgapi_process_id_t process_id,
+  amd_dbgapi_wave_id_t wave_id,
   amd_dbgapi_address_space_id_t address_space_id,
   amd_dbgapi_segment_address_t segment_address,
   amd_dbgapi_segment_address_dependency_t *segment_address_dependency)
-  AMD_DBGAPI_VERSION_0_64;
+  AMD_DBGAPI_VERSION_0_79;
 
 /**
  * Indication of whether a segment address in an address space is a member of
