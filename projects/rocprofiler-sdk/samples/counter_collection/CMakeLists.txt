@@ -155,3 +155,31 @@ set_tests_properties(
     PROPERTIES TIMEOUT 120 LABELS "samples" ENVIRONMENT
                "${counter-collection-functional-counter-env}" FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+add_library(counter-collection-device-profiling-sync-client SHARED)
+target_sources(counter-collection-device-profiling-sync-client
+               PRIVATE device_counting_synchronous.cpp client.hpp)
+target_link_libraries(
+    counter-collection-device-profiling-sync-client
+    PUBLIC rocprofiler-sdk::samples-build-flags
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::samples-common-library)
+
+add_executable(counter-collection-device-profiling-sync)
+target_sources(counter-collection-device-profiling-sync PRIVATE main.cpp)
+target_link_libraries(
+    counter-collection-device-profiling-sync
+    PRIVATE counter-collection-device-profiling-sync-client Threads::Threads)
+
+rocprofiler_samples_get_preload_env(PRELOAD_ENV
+                                    counter-collection-device-profiling-sync-client)
+
+set(counter-collection-functional-counter-env "${PRELOAD_ENV}" "${LIBRARY_PATH_ENV}")
+
+add_test(NAME counter-collection-device-profiling-sync
+         COMMAND $<TARGET_FILE:counter-collection-device-profiling-sync>)
+
+set_tests_properties(
+    counter-collection-device-profiling-sync
+    PROPERTIES TIMEOUT 120 LABELS "samples" ENVIRONMENT
+               "${counter-collection-functional-counter-env}" FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
