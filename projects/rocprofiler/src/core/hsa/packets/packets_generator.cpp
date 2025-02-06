@@ -335,7 +335,7 @@ std::unique_ptr<AQLPacketProfile> InitializeAqlPackets(
   status = HSA_STATUS_ERROR;
   size_t size = (profile->command_buffer.size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
   status = hsasupport_singleton.GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(
-      agentInfo.cpu_pool_, size, 0, reinterpret_cast<void**>(&(profile->command_buffer.ptr)));
+      agentInfo.cpu_pool_, size, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG, reinterpret_cast<void**>(&(profile->command_buffer.ptr)));
   if (status != HSA_STATUS_SUCCESS) {
     profile->command_buffer.ptr = malloc(size);
     /*numa_alloc_onnode(
@@ -356,7 +356,7 @@ std::unique_ptr<AQLPacketProfile> InitializeAqlPackets(
     status = HSA_STATUS_ERROR;
     size_t size = (profile->output_buffer.size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
     status = hsasupport_singleton.GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(
-      agentInfo.kernarg_pool_, size, 0, &profile->output_buffer.ptr
+      agentInfo.kernarg_pool_, size, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG, &profile->output_buffer.ptr
     );
     if (status != HSA_STATUS_SUCCESS) {
       profile->output_buffer.ptr = malloc(size);
@@ -425,7 +425,7 @@ hsa_ven_amd_aqlprofile_profile_t* InitializeDeviceProfilingAqlPackets(
   if (size <= 0) return nullptr;
   size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
   status = hsasupport_singleton.GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(
-      agentInfo.cpu_pool_, size, 0, reinterpret_cast<void**>(&(profile->command_buffer.ptr)));
+      agentInfo.cpu_pool_, size, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG, reinterpret_cast<void**>(&(profile->command_buffer.ptr)));
   // Both the CPU and GPU can access the memory
   if (status == HSA_STATUS_SUCCESS) {
     status = hsasupport_singleton.GetAmdExtTable().hsa_amd_agents_allow_access_fn(
@@ -450,7 +450,7 @@ hsa_ven_amd_aqlprofile_profile_t* InitializeDeviceProfilingAqlPackets(
   profile->output_buffer.ptr = nullptr;
   size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
   status = hsasupport_singleton.GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(
-      agentInfo.gpu_pool_, size, 0, reinterpret_cast<void**>(&(profile->output_buffer.ptr)));
+      agentInfo.gpu_pool_, size, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG, reinterpret_cast<void**>(&(profile->output_buffer.ptr)));
   CHECK_HSA_STATUS("Error: Can't Allocate Output Buffer", status);
   // Both the CPU and GPU can access the kernel arguments
   if (status == HSA_STATUS_SUCCESS) {
@@ -484,7 +484,7 @@ uint8_t* AllocateSysMemory(hsa_agent_t gpu_agent, size_t size, hsa_amd_memory_po
   rocprofiler::HSASupport_Singleton& hsasupport_singleton =
       rocprofiler::HSASupport_Singleton::GetInstance();
   status = hsasupport_singleton.GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(
-      *cpu_pool, size, 0, reinterpret_cast<void**>(&buffer));
+      *cpu_pool, size, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG, reinterpret_cast<void**>(&buffer));
   // Both the CPU and GPU can access the memory
   if (status == HSA_STATUS_SUCCESS) {
     status = hsasupport_singleton.GetAmdExtTable().hsa_amd_agents_allow_access_fn(
@@ -502,7 +502,7 @@ uint8_t* AllocateLocalMemory(size_t size, hsa_amd_memory_pool_t* gpu_pool) {
   uint8_t* buffer = NULL;
   size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
   status = hsasupport_singleton.GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(
-      *gpu_pool, size, 0, reinterpret_cast<void**>(&buffer));
+      *gpu_pool, size, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG, reinterpret_cast<void**>(&buffer));
   uint8_t* ptr = (status == HSA_STATUS_SUCCESS) ? buffer : NULL;
   return ptr;
 }
