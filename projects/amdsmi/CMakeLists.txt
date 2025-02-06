@@ -171,7 +171,9 @@ if(ENABLE_ESMI_LIB)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-write-strings")
 endif()
 
+# sets DRM_LIBRARIES and DRM_INCLUDE_DIRS
 pkg_check_modules(DRM REQUIRED libdrm)
+# sets AMDGPU_DRM_LIBRARIES and AMDGPU_DRM_INCLUDE_DIRS
 pkg_check_modules(AMDGPU_DRM REQUIRED libdrm_amdgpu)
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/third_party/shared_mutex
