@@ -355,17 +355,7 @@ public:
 
 class generic_address_space_t : public address_space_t
 {
-public:
-  struct aperture_t
-  {
-    agent_address_t base;
-    agent_address_t mask;
-    const address_space_t &address_space;
-  };
-
 private:
-  std::vector<aperture_t> const m_apertures;
-
   /* Return the generic address for a given segment address space, segment
      address pair.  Converting an address from an address space other than
      one in the apertures is invalid.  */
@@ -376,8 +366,7 @@ private:
 
 public:
   generic_address_space_t (amd_dbgapi_address_space_id_t address_space_id,
-                           std::string name,
-                           std::vector<aperture_t> apertures);
+                           std::string name);
 
   amd_dbgapi_segment_address_dependency_t address_dependency (
     amd_dbgapi_segment_address_t /* address */) const override

@@ -41,6 +41,38 @@ agent_t::agent_t (amd_dbgapi_agent_id_t agent_id, process_t &process,
                   const architecture_t *architecture,
                   const os_agent_info_t &os_agent_info)
   : handle_object (agent_id), m_os_agent_info (os_agent_info),
+    m_apertures (
+      [architecture] (const os_agent_info_t &info)
+      {
+        if (architecture == nullptr)
+          {
+            /* The dummy agent does not have apertures.  */
+            return std::vector<aperture_t>{};
+          }
+
+        /* We need to find the local and private_lane address spaces.  In a
+           future change, where address spaces are global, we won't need to do
+           this anymore.  */
+        const auto *local = architecture->find_if (
+          [] (const address_space_t &address_space)
+          { return address_space.kind () == address_space_t::kind_t::local; });
+        const auto *private_lane = architecture->find_if (
+          [] (const address_space_t &address_space)
+          {
+            return address_space.kind ()
+                   == address_space_t::kind_t::private_swizzled;
+          });
+        dbgapi_assert (local != nullptr && private_lane != nullptr);
+
+        return std::vector<aperture_t>{
+          { info.local_address_aperture_base,
+            info.local_address_aperture_limit, *local },
+          { info.private_address_aperture_base,
+            info.private_address_aperture_limit, *private_lane },
+          { 0, static_cast<amd_dbgapi_global_address_t> (-1),
+            address_space_t::global () }
+        };
+      }(os_agent_info)),
     m_architecture (architecture), m_process (process),
     m_memory_cache (
       [this] (agent_address_t address, void *read, const void *write,
@@ -75,34 +107,6 @@ agent_t::agent_t (amd_dbgapi_agent_id_t agent_id, process_t &process,
 
   if (architecture == nullptr)
     return;
-
-  for (auto &&address_space : architecture->range<address_space_t> ())
-    {
-      if (address_space.kind () != address_space_t::kind_t::generic)
-        continue;
-
-      dbgapi_assert (
-        /* Lower the generic apertures addresses the os_driver reported for
-           this agent.  The resulting address spaces should be of the kind
-           local and private_swizzled for the local_address_aperture_base/limit
-           and private_address_aperture_base/limit respectively. If this check
-           fails, this agent's generic address spaces should be examined.  */
-        address_space.lower (*this, os_info ().local_address_aperture_base)
-            .first.kind ()
-          == address_space_t::kind_t::local
-        && address_space.lower (*this, os_info ().local_address_aperture_limit)
-               .first.kind ()
-             == address_space_t::kind_t::local
-        && address_space
-               .lower (*this, os_info ().private_address_aperture_base)
-               .first.kind ()
-             == address_space_t::kind_t::private_swizzled
-        && address_space
-               .lower (*this, os_info ().private_address_aperture_limit)
-               .first.kind ()
-             == address_space_t::kind_t::private_swizzled
-        && "check the generic address space apertures");
-    }
 
   m_watchpoints.resize (os_info ().address_watch_register_count);
 }
@@ -279,8 +283,7 @@ agent_t::agent_address_space () const
 {
   const address_space_t *agent_address_space = this->architecture ()->find_if (
     [] (const address_space_t &aspace)
-    { return aspace.kind () == address_space_t::kind_t::agent; },
-    true);
+    { return aspace.kind () == address_space_t::kind_t::agent; }, true);
   dbgapi_assert (agent_address_space != nullptr);
   return *agent_address_space;
 }

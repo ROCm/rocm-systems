@@ -391,67 +391,64 @@ private_unswizzled_address_space_t::convert (
 }
 
 generic_address_space_t::generic_address_space_t (
-  amd_dbgapi_address_space_id_t address_space_id, std::string name,
-  std::vector<aperture_t> apertures)
+  amd_dbgapi_address_space_id_t address_space_id, std::string name)
   : address_space_t (address_space_id, kind_t::generic, std::move (name),
                      { DW_ASPACE_AMDGPU_generic }, 64,
                      /* generic NULL is the same as global NULL  */
                      global ().null_address (),
-                     AMD_DBGAPI_ADDRESS_SPACE_ACCESS_ALL),
-    m_apertures (std::move (apertures))
+                     AMD_DBGAPI_ADDRESS_SPACE_ACCESS_ALL)
 {
-  for ([[maybe_unused]] auto &&aperture : m_apertures)
-    dbgapi_assert (
-      /* The aperture base address should be in the mask's range.  */
-      (aperture.base & aperture.mask) == aperture.base
-      /* Segment addresses should not overlap with the aperture mask.  */
-      && !(utils::zero_extend (-1, aperture.address_space.address_size ())
-           & aperture.mask));
 }
 
 std::optional<amd_dbgapi_segment_address_t>
 generic_address_space_t::generic_address_for_address_space (
-  const agent_t & /* agent */, const address_space_t &segment_address_space,
+  const agent_t &agent, const address_space_t &segment_address_space,
   amd_dbgapi_segment_address_t segment_address) const
 {
-  for (auto &&aperture : m_apertures)
-    if (aperture.address_space == segment_address_space)
-      {
-        if (segment_address == segment_address_space.null_address ())
-          return null_address ();
+  const auto &apertures = agent.apertures ();
 
-        return aperture.base
-               + utils::zero_extend (segment_address,
-                                     segment_address_space.address_size ());
-      }
+  const auto it = std::find_if (
+    apertures.begin (), apertures.end (),
+    [&segment_address_space] (const agent_t::aperture_t &aperture)
+    { return aperture.address_space == segment_address_space; });
 
-  /* not a valid address space conversion.  */
-  return std::nullopt;
+  /* If segment_address_space is not supported by this agent, then this is not
+     a valid address space conversion to a generic segment address.*/
+  if (it == apertures.end ())
+    return std::nullopt;
+
+  if (segment_address == segment_address_space.null_address ())
+    return null_address ();
+
+  return it->base
+         + utils::zero_extend (segment_address,
+                               segment_address_space.address_size ());
 }
 
 std::pair<const address_space_t &, amd_dbgapi_segment_address_t>
 generic_address_space_t::lower (
-  const agent_t & /* agent */,
-  amd_dbgapi_segment_address_t generic_address) const
+  const agent_t &agent, amd_dbgapi_segment_address_t generic_address) const
 {
-  for (auto &&aperture : m_apertures)
-    {
-      if ((generic_address & aperture.mask) != aperture.base)
-        continue;
+  const auto &apertures = agent.apertures ();
 
-      if (generic_address == null_address ())
-        return { aperture.address_space,
-                 aperture.address_space.null_address () };
-
-      return { aperture.address_space,
-               utils::zero_extend (generic_address,
-                                   aperture.address_space.address_size ()) };
-    }
+  const auto it = std::find_if (
+    apertures.begin (), apertures.end (),
+    [ptr = generic_address] (const agent_t::aperture_t &aperture)
+    { return ptr >= aperture.base && ptr <= aperture.limit; });
 
   /* There should always be a "catch all" aperture at the end of the apertures
      vector, so if we did not find an address space for the given generic
      address, it is likely that the apertures are incorrectly set up.  */
-  dbgapi_assert_not_reached ("invalid apertures");
+  if (it == apertures.end ())
+    dbgapi_assert_not_reached ("invalid apertures");
+
+  const auto &address_space = it->address_space;
+
+  if (generic_address == null_address ())
+    return { address_space, address_space.null_address () };
+
+  return { address_space, utils::zero_extend (generic_address,
+                                              address_space.address_size ()) };
 }
 
 std::pair<amd_dbgapi_segment_address_t, amd_dbgapi_size_t>
