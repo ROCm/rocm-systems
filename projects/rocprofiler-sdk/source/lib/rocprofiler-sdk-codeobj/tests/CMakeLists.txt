@@ -23,8 +23,10 @@ gtest_add_tests(
     TEST_LIST codeobj-library-test_TESTS
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
-set_tests_properties(${codeobj-library-test_TESTS} PROPERTIES TIMEOUT 10 LABELS
-                                                              "unittests")
+set_tests_properties(
+    ${codeobj-library-test_TESTS}
+    PROPERTIES TIMEOUT 10 LABELS "unittests" FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 target_compile_definitions(codeobj-library-test
                            PRIVATE -DCODEOBJ_BINARY_DIR=\"${CMAKE_CURRENT_BINARY_DIR}/\")

@@ -21,4 +21,7 @@ gtest_add_tests(
     TEST_LIST buffering-tests_TESTS
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
-set_tests_properties(${buffering-tests_TESTS} PROPERTIES TIMEOUT 360 LABELS "unittests")
+set_tests_properties(
+    ${buffering-tests_TESTS}
+    PROPERTIES TIMEOUT 360 LABELS "unittests" FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

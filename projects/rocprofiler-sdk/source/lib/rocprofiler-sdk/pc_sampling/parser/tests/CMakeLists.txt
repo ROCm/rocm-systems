@@ -28,7 +28,10 @@ gtest_add_tests(
     TEST_LIST pcs_gfx9_test_TESTS
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
-set_tests_properties(${pcs_gfx9_test_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests")
+set_tests_properties(
+    ${pcs_gfx9_test_TESTS}
+    PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 add_executable(pcs_id_test)
 
@@ -47,7 +50,9 @@ gtest_add_tests(
     TEST_LIST pcs_id_test_TESTS
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
-set_tests_properties(${pcs_id_test_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests")
+set_tests_properties(
+    ${pcs_id_test_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
+                                    "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 add_executable(pcs_bench_test)
 
@@ -80,4 +85,7 @@ gtest_add_tests(
     TEST_LIST pcs_thread_test_TESTS
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
-set_tests_properties(${pcs_thread_test_TESTS} PROPERTIES TIMEOUT 75 LABELS "unittests")
+set_tests_properties(
+    ${pcs_thread_test_TESTS}
+    PROPERTIES TIMEOUT 75 LABELS "unittests" FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

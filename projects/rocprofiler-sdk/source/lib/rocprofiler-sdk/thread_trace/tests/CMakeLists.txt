@@ -25,5 +25,7 @@ gtest_add_tests(
     TEST_LIST thread-trace-packet-test_TESTS
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
-set_tests_properties(${thread-trace-packet-test_TESTS} PROPERTIES TIMEOUT 10 LABELS
-                                                                  "unittests")
+set_tests_properties(
+    ${thread-trace-packet-test_TESTS}
+    PROPERTIES TIMEOUT 10 LABELS "unittests" FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

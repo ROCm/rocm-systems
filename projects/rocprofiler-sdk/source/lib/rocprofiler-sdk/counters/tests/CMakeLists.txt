@@ -90,6 +90,8 @@ set_tests_properties(
         45
         LABELS
         "unittests"
+        FAIL_REGULAR_EXPRESSION
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
         SKIP_REGULAR_EXPRESSION
         "Running non-intercept test(.*)could not be locked for profiling due to lack of permissions.*"
     )
@@ -110,4 +112,7 @@ gtest_add_tests(
     TEST_LIST consumer-tests_TESTS
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
-set_tests_properties(${consumer-tests_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests")
+set_tests_properties(
+    ${consumer-tests_TESTS}
+    PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

@@ -100,15 +100,15 @@ class CounterAQLPacket : public AQLPacket
     {
         using desc_t = aqlprofile_buffer_desc_flags_t;
 
-        hsa_agent_t                             gpu_agent;
-        hsa_amd_memory_pool_t                   cpu_pool_;
-        hsa_amd_memory_pool_t                   kernarg_pool_;
-        decltype(hsa_amd_memory_pool_allocate)* allocate_fn;
-        decltype(hsa_amd_agents_allow_access)*  allow_access_fn;
-        decltype(hsa_amd_memory_pool_free)*     free_fn;
-        decltype(hsa_amd_memory_fill)*          fill_fn;
-        decltype(hsa_memory_copy)*              api_copy_fn;
-        bool                                    bIgnoreKernArg;
+        hsa_agent_t                             gpu_agent       = {.handle = 0};
+        hsa_amd_memory_pool_t                   cpu_pool_       = {.handle = 0};
+        hsa_amd_memory_pool_t                   kernarg_pool_   = {.handle = 0};
+        decltype(hsa_amd_memory_pool_allocate)* allocate_fn     = nullptr;
+        decltype(hsa_amd_agents_allow_access)*  allow_access_fn = nullptr;
+        decltype(hsa_amd_memory_pool_free)*     free_fn         = nullptr;
+        decltype(hsa_amd_memory_fill)*          fill_fn         = nullptr;
+        decltype(hsa_memory_copy)*              api_copy_fn     = nullptr;
+        bool                                    bIgnoreKernArg  = false;
 
         static void         Free(void* ptr, void* data);
         static hsa_status_t Alloc(void** ptr, size_t size, desc_t flags, void* data);

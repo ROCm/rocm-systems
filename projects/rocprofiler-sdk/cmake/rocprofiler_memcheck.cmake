@@ -13,11 +13,12 @@ endif()
 
 set_property(CACHE ROCPROFILER_MEMCHECK PROPERTY STRINGS "${ROCPROFILER_MEMCHECK_TYPES}")
 
-function(rocprofiler_add_memcheck_flags _TYPE _FLAG _LIB_BASE)
+function(rocprofiler_add_memcheck_flags _TYPE _LIB_BASE _FLAG)
     target_compile_options(
         rocprofiler-sdk-memcheck
         INTERFACE $<BUILD_INTERFACE:-g3 -Og -fno-omit-frame-pointer
-                  -fno-optimize-sibling-calls -fno-inline-functions -fsanitize=${_FLAG}>)
+                  -fno-optimize-sibling-calls -fno-inline-functions -fsanitize=${_FLAG}
+                  ${ARGN}>)
     target_link_options(rocprofiler-sdk-memcheck INTERFACE
                         $<BUILD_INTERFACE:-fsanitize=${_FLAG} -Wl,--no-undefined>)
 
@@ -87,18 +88,19 @@ else()
 endif()
 
 if(ROCPROFILER_MEMCHECK STREQUAL "AddressSanitizer")
-    rocprofiler_add_memcheck_flags("${ROCPROFILER_MEMCHECK}" "address" "asan")
+    rocprofiler_add_memcheck_flags("${ROCPROFILER_MEMCHECK}" "asan" "address")
     rocprofiler_set_memcheck_env("${ROCPROFILER_MEMCHECK}" "asan"
                                  ${AddressSanitizer_SOVERSION})
 elseif(ROCPROFILER_MEMCHECK STREQUAL "LeakSanitizer")
-    rocprofiler_add_memcheck_flags("${ROCPROFILER_MEMCHECK}" "leak" "lsan")
+    rocprofiler_add_memcheck_flags("${ROCPROFILER_MEMCHECK}" "lsan" "leak")
     rocprofiler_set_memcheck_env("${ROCPROFILER_MEMCHECK}" "lsan")
 elseif(ROCPROFILER_MEMCHECK STREQUAL "ThreadSanitizer")
-    rocprofiler_add_memcheck_flags("${ROCPROFILER_MEMCHECK}" "thread" "tsan")
+    rocprofiler_add_memcheck_flags("${ROCPROFILER_MEMCHECK}" "tsan" "thread")
     rocprofiler_set_memcheck_env("${ROCPROFILER_MEMCHECK}" "tsan"
                                  ${ThreadSanitizer_SOVERSION})
 elseif(ROCPROFILER_MEMCHECK STREQUAL "UndefinedBehaviorSanitizer")
-    rocprofiler_add_memcheck_flags("${ROCPROFILER_MEMCHECK}" "undefined" "ubsan")
+    rocprofiler_add_memcheck_flags("${ROCPROFILER_MEMCHECK}" "ubsan" "undefined"
+                                   "-fno-sanitize-recover=undefined")
     rocprofiler_set_memcheck_env("${ROCPROFILER_MEMCHECK}" "ubsan")
 elseif(NOT ROCPROFILER_MEMCHECK STREQUAL "")
     message(FATAL_ERROR "Unsupported ROCPROFILER_MEMCHECK type: ${ROCPROFILER_MEMCHECK}")

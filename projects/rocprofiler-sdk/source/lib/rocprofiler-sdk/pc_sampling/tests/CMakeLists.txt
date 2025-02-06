@@ -26,5 +26,7 @@ gtest_add_tests(
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
 set_tests_properties(
-    ${pcs-tests_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests;pc-sampling"
-                                  SKIP_REGULAR_EXPRESSION "PC sampling unavailable")
+    ${pcs-tests_TESTS}
+    PROPERTIES TIMEOUT 45 LABELS "unittests;pc-sampling" SKIP_REGULAR_EXPRESSION
+               "PC sampling unavailable" FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

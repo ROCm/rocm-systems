@@ -86,8 +86,7 @@ rocprofiler::counters::set_dim_in_rec(rocprofiler_counter_instance_id_t&        
                                       rocprofiler_profile_counter_instance_types dim,
                                       size_t                                     value)
 {
-    size_t  bit_length = DIM_BIT_LENGTH / ROCPROFILER_DIMENSION_LAST;
-    int64_t mask       = (MAX_64 >> (64 - bit_length)) << ((dim - 1) * bit_length);
+    size_t bit_length = DIM_BIT_LENGTH / ROCPROFILER_DIMENSION_LAST;
 
     if(dim == ROCPROFILER_DIMENSION_NONE)
     {
@@ -100,7 +99,8 @@ rocprofiler::counters::set_dim_in_rec(rocprofiler_counter_instance_id_t&        
         // Reset bits to 0 for dimension. Does so by getting the bit length as F's then
         // shifiting that into the position of dim. Not's that value and then and's it
         // with id.
-        id = (id & ~(mask));
+        uint64_t mask = (MAX_64 >> (64 - bit_length)) << ((dim - 1) * bit_length);
+        id            = (id & ~(mask));
         // Set the value for the dimenstion
         id = id | (value << ((dim - 1) * bit_length));
     }

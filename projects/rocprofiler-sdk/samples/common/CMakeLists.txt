@@ -61,8 +61,8 @@ mark_as_advanced(libdw_INCLUDE_DIR libdw_LIBRARY)
 
 # default FAIL_REGULAR_EXPRESSION for tests
 set(ROCPROFILER_DEFAULT_FAIL_REGEX
-    "threw an exception|Permission denied|Could not create logging file"
-    CACHE STRING "Default FAIL_REGULAR_EXPRESSION for tests")
+    "threw an exception|Permission denied|Could not create logging file|failed with error code"
+    CACHE INTERNAL "Default FAIL_REGULAR_EXPRESSION for tests")
 
 # build flags
 add_library(rocprofiler-sdk-samples-build-flags INTERFACE)

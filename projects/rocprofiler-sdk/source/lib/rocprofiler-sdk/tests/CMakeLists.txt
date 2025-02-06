@@ -41,7 +41,9 @@ gtest_add_tests(
     TEST_LIST lib_TESTS
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
-set_tests_properties(${lib_TESTS} PROPERTIES TIMEOUT 30 LABELS "unittests")
+set_tests_properties(
+    ${lib_TESTS} PROPERTIES TIMEOUT 30 LABELS "unittests" FAIL_REGULAR_EXPRESSION
+                            "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 # -------------------------------------------------------------------------------------- #
 #
@@ -76,5 +78,7 @@ set(rocprofiler-sdk-lib-tests-env
     "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:$ENV{LD_LIBRARY_PATH}")
 
 set_tests_properties(
-    ${shared_lib_TESTS} PROPERTIES TIMEOUT 120 LABELS "unittests" ENVIRONMENT
-                                   "${rocprofiler-sdk-lib-tests-env}")
+    ${shared_lib_TESTS}
+    PROPERTIES TIMEOUT 120 LABELS "unittests" ENVIRONMENT
+               "${rocprofiler-sdk-lib-tests-env}" FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
