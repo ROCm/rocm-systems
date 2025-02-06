@@ -133,9 +133,6 @@ write_json(json_output&         json_ar,
         json_ar.startNode();
         json_ar(cereal::make_nvp("callback_records", callback_name_info));
         json_ar(cereal::make_nvp("buffer_records", buffer_name_info));
-        json_ar(
-            cereal::make_nvp("pc_sample_instructions", tool_metadata.get_pc_sample_instructions()));
-        json_ar(cereal::make_nvp("pc_sample_comments", tool_metadata.get_pc_sample_comments()));
         json_ar(cereal::make_nvp("marker_api", marker_msg_data));
         json_ar(
             cereal::make_nvp("pc_sample_instructions", tool_metadata.get_pc_sample_instructions()));
