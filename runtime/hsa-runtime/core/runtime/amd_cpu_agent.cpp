@@ -415,6 +415,10 @@ hsa_status_t CpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
     case HSA_AMD_AGENT_INFO_AQL_EXTENSIONS:
       memset(value, 0, sizeof(uint8_t) * 8);
       break;
+    case HSA_AMD_AGENT_INFO_SCRATCH_LIMIT_MAX:
+    case HSA_AMD_AGENT_INFO_SCRATCH_LIMIT_CURRENT:
+      *((uint64_t*)value) = 0;
+      break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       break;

@@ -1630,6 +1630,12 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       memset(value, 0, sizeof(uint8_t) * 8);
       /* Not yet implemented */
       break;
+    case HSA_AMD_AGENT_INFO_SCRATCH_LIMIT_MAX:
+      *((uint64_t*)value) = MaxScratchDevice();
+      break;
+    case HSA_AMD_AGENT_INFO_SCRATCH_LIMIT_CURRENT:
+      *((uint64_t*)value) = scratch_limit_async_threshold_;
+      break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       break;

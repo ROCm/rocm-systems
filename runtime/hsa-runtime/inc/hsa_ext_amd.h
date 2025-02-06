@@ -731,7 +731,26 @@ typedef enum hsa_amd_agent_info_s {
    * bit is set at that position. User may use the hsa_flag_isset64 macro to verify whether a flag
    * is set. The type of this attribute is uint8_t[8].
    */
-  HSA_AMD_AGENT_INFO_AQL_EXTENSIONS = 0xA115 /* Not implemented yet */
+  HSA_AMD_AGENT_INFO_AQL_EXTENSIONS = 0xA115, /* Not implemented yet */
+  /**
+   * Maximum allowed value in bytes for scratch limit for this agent. This amount
+   * is shared accross all queues created on this agent.
+   * The type of this attribute is uint64_t.
+   */
+  HSA_AMD_AGENT_INFO_SCRATCH_LIMIT_MAX = 0xA116,
+  /**
+   * Current scratch limit threshold in bytes for this agent. This limit can be
+   * modified using the hsa_amd_agent_set_async_scratch_limit call.
+   * - AQL dispatches that require scratch-memory above this threshold will trigger a
+   *   scratch use-once.
+   * - AQL dispatches using less scratch-memory than this threshold, ROCr will
+   *   permanently assign the allocated scratch memory to the queue handling the dispatch.
+   *   This memory can be reclaimed by calling hsa_amd_agent_set_async_scratch_limit
+   *   with a lower threshold by current value.
+   *
+   * The type of this attribute is uint64_t.
+   */
+  HSA_AMD_AGENT_INFO_SCRATCH_LIMIT_CURRENT = 0xA117
 } hsa_amd_agent_info_t;
 
 /**
