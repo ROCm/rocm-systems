@@ -223,6 +223,9 @@ struct formatter<hipGraphNodeType> : rocprofiler::hip::details::base_formatter
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipGraphNodeType, MemcpyToSymbol);
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipGraphNodeType, Empty);
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipGraphNodeType, Count);
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 7
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipGraphNodeType, BatchMemOp);
+#endif
             ROCP_SDK_HIP_FORMAT_DFLT_CASE(hipGraphNodeType);
         }
         return fmt::format_to(ctx.out(), "Unknown");

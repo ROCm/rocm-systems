@@ -1414,6 +1414,18 @@ typedef union rocprofiler_hsa_api_args_t
         void*    file;
     } hsa_amd_enable_logging;
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x05
+    struct
+    {
+        uint32_t                signal_count;
+        hsa_signal_t*           signals;
+        hsa_signal_condition_t* conds;
+        hsa_signal_value_t*     values;
+        uint64_t                timeout_hint;
+        hsa_wait_state_t        wait_hint;
+        hsa_signal_value_t*     satisfying_values;
+    } hsa_amd_signal_wait_all;
+#    endif
 #endif
 } rocprofiler_hsa_api_args_t;
 
