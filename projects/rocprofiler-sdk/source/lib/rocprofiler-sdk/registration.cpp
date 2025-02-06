@@ -382,6 +382,20 @@ get_clients()
     return _v;
 }
 
+uint64_t
+get_num_clients()
+{
+    uint64_t val = 0;
+    if(get_clients())
+    {
+        for(auto& itr : *get_clients())
+        {
+            if(itr && itr->configure_result != nullptr) val += 1;
+        }
+    }
+    return val;
+}
+
 using mutex_t       = std::mutex;
 using scoped_lock_t = std::unique_lock<mutex_t>;
 
@@ -605,7 +619,7 @@ initialize()
         init_logging();
         invoke_client_configures();
         invoke_client_initializers();
-        internal_threading::initialize();
+        if(get_num_clients() > 0) internal_threading::initialize();
         // initialization is no longer available
         set_init_status(1);
     });
@@ -637,6 +651,7 @@ finalize()
 
     static auto _once = std::once_flag{};
     std::call_once(_once, []() {
+        auto num_clients = get_num_clients();
         set_fini_status(-1);
         hsa::async_copy_fini();
         counters::device_counting_service_finalize();
@@ -653,7 +668,7 @@ finalize()
         {
             invoke_client_finalizers();
         }
-        internal_threading::finalize();
+        if(num_clients > 0) internal_threading::finalize();
         set_fini_status(1);
     });
 

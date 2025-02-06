@@ -157,6 +157,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Changed
 
+- SDK no longer creates a background thread when every tool returns a nullptr from `rocprofiler_configure`.
+
 ### Resolved issues
 
 ### Removed

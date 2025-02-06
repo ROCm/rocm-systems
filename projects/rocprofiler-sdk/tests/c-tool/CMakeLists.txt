@@ -36,7 +36,8 @@ set_tests_properties(
         PASS_REGULAR_EXPRESSION
         "Test C tool \\(priority=0\\) is using rocprofiler-sdk v([0-9]+\\.[0-9]+\\.[0-9]+)"
         FAIL_REGULAR_EXPRESSION
-        "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}|Internal thread for rocprofiler-sdk should not be created"
+    )
 
 # this test uses ROCP_TOOL_LIBRARIES instead of LD_PRELOAD
 add_test(NAME test-c-tool-rocp-tool-lib-execute COMMAND $<TARGET_FILE:transpose> 1)
@@ -59,4 +60,5 @@ set_tests_properties(
         PASS_REGULAR_EXPRESSION
         "Test C tool \\(priority=0\\) is using rocprofiler-sdk v([0-9]+\\.[0-9]+\\.[0-9]+)"
         FAIL_REGULAR_EXPRESSION
-        "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}|Internal thread for rocprofiler-sdk should not be created"
+    )

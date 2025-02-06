@@ -34,6 +34,29 @@
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
+#include <stdio.h>
+#include <stdlib.h>
+
+static void
+thread_precreate(rocprofiler_runtime_library_t lib, void* tool_data)
+{
+    uint32_t* priority = (uint32_t*) tool_data;
+
+    if(priority && *priority == 0)
+    {
+        fprintf(
+            stderr,
+            "Internal thread for rocprofiler-sdk should not be created when all tools return NULL "
+            "from rocprofiler_configure\n");
+        fflush(stderr);
+        abort();
+    }
+
+    (void) lib;
+}
+
+static uint32_t tool_priority = 0;
+
 rocprofiler_tool_configure_result_t*
 rocprofiler_configure(uint32_t                 version,
                       const char*              runtime_version,
@@ -42,6 +65,8 @@ rocprofiler_configure(uint32_t                 version,
 {
     // set the client name
     id->name = "Test C tool";
+
+    tool_priority = priority;
 
     // compute major/minor/patch version info
     uint32_t major = version / 10000;
@@ -56,6 +81,9 @@ rocprofiler_configure(uint32_t                 version,
            minor,
            patch,
            runtime_version);
+
+    rocprofiler_at_internal_thread_create(
+        thread_precreate, NULL, ROCPROFILER_LIBRARY, &tool_priority);
 
     // return pointer to configure data
     return NULL;

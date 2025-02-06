@@ -77,11 +77,11 @@ findDeviceMetrics(const hsa::AgentCache& agent, const std::unordered_set<std::st
     std::vector<counters::Metric> ret;
     const auto*                   all_counters = counters::getMetricMap();
 
-    ROCP_WARNING << "Looking up counters for " << std::string(agent.name());
+    ROCP_INFO << "Looking up counters for " << std::string(agent.name());
     const auto* gfx_metrics = common::get_val(*all_counters, std::string(agent.name()));
     if(!gfx_metrics)
     {
-        ROCP_WARNING << "No counters found for " << std::string(agent.name());
+        ROCP_INFO << "No counters found for " << std::string(agent.name());
         return ret;
     }
 
@@ -145,7 +145,7 @@ check_output_created(rocprofiler_context_id_t,
                 break;
             }
             found_value = record->user_data.value;
-            // ROCP_WARNING << fmt::format("Found counter value: {}", record->counter_value);
+            // ROCP_INFO << fmt::format("Found counter value: {}", record->counter_value);
             global_recs().wlock([&](auto& data) { data.push_back(*record); });
         }
     }
@@ -202,7 +202,7 @@ gen_kernel_pkt(uint64_t obj)
     packet.kernel_dispatch.kernel_object    = obj;
     packet.kernel_dispatch.kernarg_address  = nullptr;
     packet.kernel_dispatch.completion_signal.handle = 0;
-    ROCP_WARNING << fmt::format("{:x}", packet.kernel_dispatch.kernel_object);
+    ROCP_INFO << fmt::format("{:x}", packet.kernel_dispatch.kernel_object);
     return packet;
 }
 
@@ -334,7 +334,7 @@ protected:
                 std::vector<rocprofiler_record_counter_t> output_records(10000);
                 // global_recs().clear();
                 track_metric++;
-                ROCP_WARNING << "Testing metric " << metric.name();
+                ROCP_INFO << "Testing metric " << metric.name();
                 rocprofiler_context_id_t ctx = {.handle = 0};
                 ROCPROFILER_CALL(rocprofiler_create_context(&ctx), "context creation failed");
                 rocprofiler_buffer_id_t opt_buff_id = {.handle = 0};
@@ -387,8 +387,8 @@ protected:
                 auto status = rocprofiler_start_context(ctx);
                 if(status == ROCPROFILER_STATUS_ERROR_NO_HARDWARE_COUNTERS)
                 {
-                    ROCP_WARNING << fmt::format("No hardware counters for {}, skipping",
-                                                metric.name());
+                    ROCP_INFO << fmt::format("No hardware counters for {}, skipping",
+                                             metric.name());
                     continue;
                 }
                 else if(status != ROCPROFILER_STATUS_SUCCESS)
@@ -516,8 +516,8 @@ protected:
             test_kernels kernel_loader(gpu_agent);
             auto         kernel_handle = kernel_loader.load_kernel(gpu_agent, "null_kernel");
 
-            ROCP_WARNING << fmt::format("Running test on agent {:x}",
-                                        gpu_agent.get_hsa_agent().handle);
+            ROCP_INFO << fmt::format("Running test on agent {:x}",
+                                     gpu_agent.get_hsa_agent().handle);
 
             const auto* agent_map = rocprofiler::common::get_val(counters::get_ast_map(),
                                                                  std::string(gpu_agent.name()));
@@ -596,19 +596,19 @@ protected:
                                         UINT32_MAX,
                                         HSA_WAIT_STATE_ACTIVE);
 
-                ROCP_WARNING << "Processing Next...";
+                ROCP_INFO << "Processing Next...";
                 auto decoded_pkt = counters::EvaluateAST::read_pkt(&pkt_constructor, *inst_pkts);
                 CHECK(!decoded_pkt.empty());
-                ROCP_WARNING << "Decoded Packet:";
+                ROCP_INFO << "Decoded Packet:";
                 for(const auto& [id, data_vec] : decoded_pkt)
                 {
-                    ROCP_WARNING << fmt::format("\t[{} = {}]", id, fmt::join(data_vec, ","));
+                    ROCP_INFO << fmt::format("\t[{} = {}]", id, fmt::join(data_vec, ","));
                 }
 
                 std::vector<std::unique_ptr<std::vector<rocprofiler_record_counter_t>>> cache;
                 auto* ret = counter_ast.evaluate(decoded_pkt, cache);
                 CHECK(!ret->empty());
-                ROCP_WARNING << fmt::format(
+                ROCP_INFO << fmt::format(
                     "Final Decoded Counter Values: {} (iter={})", fmt::join(*ret, ","), i);
 
                 CHECK_EQ(ret->size(), expected_values.size());
@@ -648,7 +648,7 @@ TEST_F(device_counting_service_test, sync_grbm_verify)
 {
     test_run(ROCPROFILER_COUNTER_FLAG_NONE, {"GRBM_COUNT"}, 50000);
     auto local_recs = global_recs().rlock([](const auto& data) { return data; });
-    ROCP_WARNING << local_recs.size();
+    ROCP_INFO << local_recs.size();
 
     for(const auto& val : local_recs)
     {
@@ -656,7 +656,7 @@ TEST_F(device_counting_service_test, sync_grbm_verify)
         rocprofiler_query_record_counter_id(val.id, &id);
         rocprofiler_counter_info_v0_t info;
         rocprofiler_query_counter_info(id, ROCPROFILER_COUNTER_INFO_VERSION_0, &info);
-        ROCP_WARNING << fmt::format("Name: {} Counter value: {}", info.name, val.counter_value);
+        ROCP_INFO << fmt::format("Name: {} Counter value: {}", info.name, val.counter_value);
         EXPECT_GT(val.counter_value, 0.0);
     }
 }
@@ -665,7 +665,7 @@ TEST_F(device_counting_service_test, sync_gpu_util_verify)
 {
     test_run(ROCPROFILER_COUNTER_FLAG_NONE, {"GPU_UTIL"}, 50000);
     auto local_recs = global_recs().rlock([](const auto& data) { return data; });
-    ROCP_WARNING << local_recs.size();
+    ROCP_INFO << local_recs.size();
 
     for(const auto& val : local_recs)
     {
@@ -673,7 +673,7 @@ TEST_F(device_counting_service_test, sync_gpu_util_verify)
         rocprofiler_query_record_counter_id(val.id, &id);
         rocprofiler_counter_info_v0_t info;
         rocprofiler_query_counter_info(id, ROCPROFILER_COUNTER_INFO_VERSION_0, &info);
-        ROCP_WARNING << fmt::format("Name: {} Counter value: {}", info.name, val.counter_value);
+        ROCP_INFO << fmt::format("Name: {} Counter value: {}", info.name, val.counter_value);
         EXPECT_GT(val.counter_value, 0.0);
     }
 }
@@ -682,7 +682,7 @@ TEST_F(device_counting_service_test, sync_sq_waves_verify)
 {
     test_run(ROCPROFILER_COUNTER_FLAG_NONE, {"SQ_WAVES_sum"}, 50000);
     auto local_recs = global_recs().rlock([](const auto& data) { return data; });
-    ROCP_WARNING << local_recs.size();
+    ROCP_INFO << local_recs.size();
 
     for(const auto& val : local_recs)
     {
@@ -690,7 +690,7 @@ TEST_F(device_counting_service_test, sync_sq_waves_verify)
         rocprofiler_query_record_counter_id(val.id, &id);
         rocprofiler_counter_info_v0_t info;
         rocprofiler_query_counter_info(id, ROCPROFILER_COUNTER_INFO_VERSION_0, &info);
-        ROCP_WARNING << fmt::format("Name: {} Counter value: {}", info.name, val.counter_value);
+        ROCP_INFO << fmt::format("Name: {} Counter value: {}", info.name, val.counter_value);
         EXPECT_GT(val.counter_value, 0.0);
     }
 }
@@ -701,14 +701,14 @@ TEST_F(device_counting_service_test, sync_sq_waves_verify_non_intercept)
     // deamon.
     if(!counters::counter_collection_has_device_lock())
     {
-        ROCP_WARNING << "Unsupported kernel driver version, skipping test";
+        ROCP_INFO << "Unsupported kernel driver version, skipping test";
         GTEST_SKIP();
     }
 
     ROCP_WARNING << "Running non-intercept test";
     test_run(ROCPROFILER_COUNTER_FLAG_NONE, {"SQ_WAVES_sum"}, 50000, true);
     auto local_recs = global_recs().rlock([](const auto& data) { return data; });
-    ROCP_WARNING << local_recs.size();
+    ROCP_INFO << local_recs.size();
 
     for(const auto& val : local_recs)
     {
@@ -716,7 +716,7 @@ TEST_F(device_counting_service_test, sync_sq_waves_verify_non_intercept)
         rocprofiler_query_record_counter_id(val.id, &id);
         rocprofiler_counter_info_v0_t info;
         rocprofiler_query_counter_info(id, ROCPROFILER_COUNTER_INFO_VERSION_0, &info);
-        ROCP_WARNING << fmt::format("Name: {} Counter value: {}", info.name, val.counter_value);
+        ROCP_INFO << fmt::format("Name: {} Counter value: {}", info.name, val.counter_value);
         EXPECT_GT(val.counter_value, 0.0);
     }
 }
