@@ -530,7 +530,8 @@ write_perfetto(
     {
         // memory copy counter track
         auto mem_cpy_endpoints = std::map<rocprofiler_agent_id_t, std::map<uint64_t, uint64_t>>{};
-        auto mem_cpy_extremes  = std::pair<uint64_t, uint64_t>{};
+        auto mem_cpy_extremes  = std::pair<uint64_t, uint64_t>{std::numeric_limits<uint64_t>::max(),
+                                                              std::numeric_limits<uint64_t>::min()};
         for(auto ditr : memory_copy_gen)
             for(auto itr : memory_copy_gen.get(ditr))
             {
@@ -604,8 +605,9 @@ write_perfetto(
 
         // memory allocation counter track
         auto mem_alloc_endpoints = std::map<rocprofiler_agent_id_t, std::map<uint64_t, uint64_t>>{};
-        auto mem_alloc_extremes  = std::pair<uint64_t, uint64_t>{};
-        auto address_to_size     = std::unordered_map<uint64_t, uint64_t>{};
+        auto mem_alloc_extremes  = std::pair<uint64_t, uint64_t>{
+            std::numeric_limits<uint64_t>::max(), std::numeric_limits<uint64_t>::min()};
+        auto address_to_size = std::unordered_map<uint64_t, uint64_t>{};
         for(auto ditr : memory_allocation_gen)
             for(auto itr : memory_allocation_gen.get(ditr))
             {
