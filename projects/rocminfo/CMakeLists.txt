@@ -210,7 +210,7 @@ if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
 endif()
 
 #Debian package specific variables
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "hsa-rocr, pciutils, python3, libc6, libgcc-s1, libstdc++6")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "hsa-rocr, pciutils, python3, libc6, libgcc-s1 | libgcc1, libstdc++6")
 set(CPACK_DEBIAN_PACKAGE_HOMEPAGE ${CPACK_DEBIAN_PACKAGE_HOMEPAGE} CACHE STRING "https://github.com/RadeonOpenCompute/ROCm")
 if (DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
    set(CPACK_DEBIAN_PACKAGE_RELEASE $ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
