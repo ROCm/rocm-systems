@@ -656,6 +656,7 @@ It is not supported on virtual machine guest
 Input parameters:
 
 * `processor_handle` device which to query
+* `sensor_ind` optional argument that defaults to 0
 
 Output: Dictionary with fields
 
@@ -684,6 +685,8 @@ try:
     else:
         for device in devices:
             power_measure = amdsmi_get_power_info(device)
+            # Example with using sensor_ind
+            #   power_measure = amdsmi_get_power_info(device, 0)
             print(power_measure['current_socket_power'])
             print(power_measure['average_socket_power'])
             print(power_measure['gfx_voltage'])

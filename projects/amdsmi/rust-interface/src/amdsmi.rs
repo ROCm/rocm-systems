@@ -5720,9 +5720,10 @@ pub fn amdsmi_get_gpu_activity(
 /// #
 ///     // Example processor_handle, assuming the number of processors is greater than zero
 ///     let processor_handle = amdsmi_get_processor_handles!()[0];
+///     let sensor_ind = 0
 ///
 ///     // Retrieve the power information
-///     match amdsmi_get_power_info(processor_handle) {
+///     match amdsmi_get_power_info(processor_handle, sensor_ind) {
 ///         Ok(info) => println!("Power information: {:?}", info),
 ///         Err(e) => panic!("Failed to get power information: {}", e),
 ///     }
@@ -5741,6 +5742,7 @@ pub fn amdsmi_get_power_info(
     let mut info = MaybeUninit::<AmdsmiPowerInfoT>::uninit();
     call_unsafe!(amdsmi_wrapper::amdsmi_get_power_info(
         processor_handle,
+        sensor_ind,
         info.as_mut_ptr()
     ));
     let info = unsafe { info.assume_init() };

@@ -577,22 +577,17 @@ typedef enum {
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef enum {
-    AMDSMI_VRAM_VENDOR__PLACEHOLDER0,
-    AMDSMI_VRAM_VENDOR__SAMSUNG,
-    AMDSMI_VRAM_VENDOR__INFINEON,
-    AMDSMI_VRAM_VENDOR__ELPIDA,
-    AMDSMI_VRAM_VENDOR__ETRON,
-    AMDSMI_VRAM_VENDOR__NANYA,
-    AMDSMI_VRAM_VENDOR__HYNIX,
-    AMDSMI_VRAM_VENDOR__MOSEL,
-    AMDSMI_VRAM_VENDOR__WINBOND,
-    AMDSMI_VRAM_VENDOR__ESMT,
-    AMDSMI_VRAM_VENDOR__PLACEHOLDER1,
-    AMDSMI_VRAM_VENDOR__PLACEHOLDER2,
-    AMDSMI_VRAM_VENDOR__PLACEHOLDER3,
-    AMDSMI_VRAM_VENDOR__PLACEHOLDER4,
-    AMDSMI_VRAM_VENDOR__PLACEHOLDER5,
-    AMDSMI_VRAM_VENDOR__MICRON,
+    AMDSMI_VRAM_VENDOR_SAMSUNG,
+    AMDSMI_VRAM_VENDOR_INFINEON,
+    AMDSMI_VRAM_VENDOR_ELPIDA,
+    AMDSMI_VRAM_VENDOR_ETRON,
+    AMDSMI_VRAM_VENDOR_NANYA,
+    AMDSMI_VRAM_VENDOR_HYNIX,
+    AMDSMI_VRAM_VENDOR_MOSEL,
+    AMDSMI_VRAM_VENDOR_WINBOND,
+    AMDSMI_VRAM_VENDOR_ESMT,
+    AMDSMI_VRAM_VENDOR_MICRON,
+    AMDSMI_VRAM_VENDOR_UNKNOWN
 } amdsmi_vram_vendor_type_t;
 
 /**
@@ -832,20 +827,19 @@ typedef struct {
 } amdsmi_kfd_info_t;
 
 /**
- * @brief Possible Memory Partition Capabilities.
- * This union holds memory partition bitmask.
+ * @brief This union holds memory partition bitmask.
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef union {
-  struct nps_flags_ {
-    uint32_t nps1_cap :1;  //!< bool 1 = true; 0 = false
-    uint32_t nps2_cap :1;  //!< bool 1 = true; 0 = false
-    uint32_t nps4_cap :1;  //!< bool 1 = true; 0 = false
-    uint32_t nps8_cap :1;  //!< bool 1 = true; 0 = false
-    uint32_t reserved :28;
-  } amdsmi_nps_flags_t;
-  uint32_t nps_cap_mask;
+    struct nps_flags_ {
+        uint32_t nps1_cap :1;  //!< bool 1 = true; 0 = false
+        uint32_t nps2_cap :1;  //!< bool 1 = true; 0 = false
+        uint32_t nps4_cap :1;  //!< bool 1 = true; 0 = false
+        uint32_t nps8_cap :1;  //!< bool 1 = true; 0 = false
+        uint32_t reserved :28;
+    } nps_flags;
+    uint32_t nps_cap_mask;
 } amdsmi_nps_caps_t;
 
 /**
@@ -5886,9 +5880,7 @@ amdsmi_status_t
 amdsmi_get_gpu_activity(amdsmi_processor_handle processor_handle, amdsmi_engine_usage_t *info);
 
 /**
- *  @brief          Returns the current power and voltage of the GPU.
- *                  The voltage is in units of mV and the power in units of W.
- *                  It is not supported on virtual machine guest
+ *  @brief Returns the current power and voltage of the GPU.
  *
  *  @ingroup tagGPUMonitor
  *
@@ -5896,13 +5888,17 @@ amdsmi_get_gpu_activity(amdsmi_processor_handle processor_handle, amdsmi_engine_
  *
  *  @note amdsmi_power_info_t::socket_power metric can rarely spike above the socket power limit in some cases
  *
- *  @param[in]   processor_handle Device which to query
+ *  @param[in] processor_handle PF of a processor for which  to query
  *
- *  @param[out]  info Reference to the gpu power structure. Must be allocated by user.
+ *  @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
+ *  If a processor has more than one sensor, it could be greater than 0.
+ *  Parameter @p sensor_ind is unused on @platform{host}.
+ *
+ *  @param[out] info Reference to the gpu power structure. Must be allocated by user.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_power_info(amdsmi_processor_handle processor_handle, amdsmi_power_info_t *info);
+amdsmi_status_t amdsmi_get_power_info(amdsmi_processor_handle processor_handle, uint32_t sensor_ind, amdsmi_power_info_t *info);
 
 /**
  *  @brief Returns is power management enabled

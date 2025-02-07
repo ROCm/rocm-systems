@@ -104,7 +104,6 @@ where
 pub const AMDSMI_MAX_MM_IP_COUNT: u32 = 8;
 pub const AMDSMI_MAX_DATE_LENGTH: u32 = 32;
 pub const AMDSMI_MAX_STRING_LENGTH: u32 = 256;
-pub const AMDSMI_NORMAL_STRING_LENGTH: u32 = 256;
 pub const AMDSMI_256_LENGTH: u32 = 256;
 pub const AMDSMI_MAX_DEVICES: u32 = 32;
 pub const AMDSMI_MAX_NAME: u32 = 32;
@@ -3022,6 +3021,7 @@ extern "C" {
 extern "C" {
     pub fn amdsmi_get_power_info(
         processor_handle: AmdsmiProcessorHandle,
+        sensor_ind: u32,
         info: *mut AmdsmiPowerInfoT,
     ) -> AmdsmiStatusT;
 }

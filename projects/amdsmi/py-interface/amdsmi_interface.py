@@ -62,7 +62,6 @@ AMDSMI_NUM_VOLTAGE_CURVE_POINTS = 3
 AMDSMI_MAX_MM_IP_COUNT = 8
 AMDSMI_MAX_DATE_LENGTH = 32
 AMDSMI_MAX_STRING_LENGTH = 64
-AMDSMI_NORMAL_STRING_LENGTH = 32
 AMDSMI_MAX_DEVICES = 32
 AMDSMI_MAX_NAME = 32
 AMDSMI_MAX_DRIVER_VERSION_LENGTH = 80
@@ -2307,6 +2306,7 @@ def amdsmi_get_gpu_driver_info(
 
 def amdsmi_get_power_info(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
+    sensor_ind: int = 0
 ) -> Dict[str, ctypes.c_uint32]:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(
@@ -2316,7 +2316,7 @@ def amdsmi_get_power_info(
     power_measure = amdsmi_wrapper.amdsmi_power_info_t()
     _check_res(
         amdsmi_wrapper.amdsmi_get_power_info(
-            processor_handle, ctypes.byref(power_measure)
+            processor_handle, sensor_ind, ctypes.byref(power_measure)
         )
     )
 

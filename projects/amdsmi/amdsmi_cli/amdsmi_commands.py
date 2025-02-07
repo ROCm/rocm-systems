@@ -811,7 +811,7 @@ class AMDSMICommands():
                     vram_vendor = "N/A"
                 else:
                     # Remove amdsmi enum prefix
-                    vram_vendor = vram_vendor.replace('AMDSMI_VRAM_VENDOR__', '')
+                    vram_vendor = vram_vendor.replace('AMDSMI_VRAM_VENDOR_', '')
 
                 # Assign cleaned values to vram_info_dict
                 vram_info_dict['type'] = vram_type

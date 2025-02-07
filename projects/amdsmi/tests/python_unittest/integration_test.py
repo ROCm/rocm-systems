@@ -545,7 +545,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
             print("\n###Test amdsmi_get_power_info \n")
-            power_info = amdsmi.amdsmi_get_power_info(processors[i])
+            power_info = amdsmi.amdsmi_get_power_info(processors[i], 0)
             print("  power_info['current_socket_power'] is: {}".format(
                 power_info['current_socket_power']))
             print("  power_info['average_socket_power'] is: {}".format(

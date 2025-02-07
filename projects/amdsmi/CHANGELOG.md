@@ -139,6 +139,21 @@ GPU: 0
 
 ### Changed
 
+- **Added an additional argument `sensor_ind` to `amdsmi_get_power_info()`**.  
+This change breaks previous C API calls and will require a change
+Python API now accepts `sensor_ind` as an optional argument, does not imapact previous usage
+
+- **Depricated enum `AMDSMI_NORMAL_STRING_LENGTH` in favor of `AMDSMI_MAX_STRING_LENGTH`**.  
+
+- **Changed amdsmi_vram_vendor_type_t enum names impacting amdsmi_vram_info_t structure**. 
+This also change impacts usage of the vram_vendor output of `amdsmi_get_gpu_vram_info()` 
+
+- **Changed `amdsmi_nps_caps_t` struct impacting `amdsmi_memory_partition_config_t`, `amdsmi_accelerator_partition_t`, `amdsmi_accelerator_partition_profile_config_t`**.  
+  - Functions affected by struct change are:
+    - `amdsmi_get_gpu_memory_partition_config()`
+    - `amdsmi_get_gpu_accelerator_partition_profile()`
+    - `amdsmi_get_gpu_accelerator_partition_profile_config()`
+
 - **Corrected CLI CPU argument name**.  
   - `--cpu-pwr-svi-telemtry-rails` to `--cpu-pwr-svi-telemetry-rails`
 
@@ -2282,3 +2297,4 @@ Now the information is displayed as a table by each GPU's BDF, which closer rese
 
 - **Fix for driver not initialized**.  
 If driver module is not loaded, user retrieve error reponse indicating amdgpu module is not loaded.
+

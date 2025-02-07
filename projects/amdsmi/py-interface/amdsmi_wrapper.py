@@ -675,39 +675,29 @@ amdsmi_vram_type_t = ctypes.c_uint32 # enum
 
 # values for enumeration 'amdsmi_vram_vendor_type_t'
 amdsmi_vram_vendor_type_t__enumvalues = {
-    0: 'AMDSMI_VRAM_VENDOR__PLACEHOLDER0',
-    1: 'AMDSMI_VRAM_VENDOR__SAMSUNG',
-    2: 'AMDSMI_VRAM_VENDOR__INFINEON',
-    3: 'AMDSMI_VRAM_VENDOR__ELPIDA',
-    4: 'AMDSMI_VRAM_VENDOR__ETRON',
-    5: 'AMDSMI_VRAM_VENDOR__NANYA',
-    6: 'AMDSMI_VRAM_VENDOR__HYNIX',
-    7: 'AMDSMI_VRAM_VENDOR__MOSEL',
-    8: 'AMDSMI_VRAM_VENDOR__WINBOND',
-    9: 'AMDSMI_VRAM_VENDOR__ESMT',
-    10: 'AMDSMI_VRAM_VENDOR__PLACEHOLDER1',
-    11: 'AMDSMI_VRAM_VENDOR__PLACEHOLDER2',
-    12: 'AMDSMI_VRAM_VENDOR__PLACEHOLDER3',
-    13: 'AMDSMI_VRAM_VENDOR__PLACEHOLDER4',
-    14: 'AMDSMI_VRAM_VENDOR__PLACEHOLDER5',
-    15: 'AMDSMI_VRAM_VENDOR__MICRON',
+    0: 'AMDSMI_VRAM_VENDOR_SAMSUNG',
+    1: 'AMDSMI_VRAM_VENDOR_INFINEON',
+    2: 'AMDSMI_VRAM_VENDOR_ELPIDA',
+    3: 'AMDSMI_VRAM_VENDOR_ETRON',
+    4: 'AMDSMI_VRAM_VENDOR_NANYA',
+    5: 'AMDSMI_VRAM_VENDOR_HYNIX',
+    6: 'AMDSMI_VRAM_VENDOR_MOSEL',
+    7: 'AMDSMI_VRAM_VENDOR_WINBOND',
+    8: 'AMDSMI_VRAM_VENDOR_ESMT',
+    9: 'AMDSMI_VRAM_VENDOR_MICRON',
+    10: 'AMDSMI_VRAM_VENDOR_UNKNOWN',
 }
-AMDSMI_VRAM_VENDOR__PLACEHOLDER0 = 0
-AMDSMI_VRAM_VENDOR__SAMSUNG = 1
-AMDSMI_VRAM_VENDOR__INFINEON = 2
-AMDSMI_VRAM_VENDOR__ELPIDA = 3
-AMDSMI_VRAM_VENDOR__ETRON = 4
-AMDSMI_VRAM_VENDOR__NANYA = 5
-AMDSMI_VRAM_VENDOR__HYNIX = 6
-AMDSMI_VRAM_VENDOR__MOSEL = 7
-AMDSMI_VRAM_VENDOR__WINBOND = 8
-AMDSMI_VRAM_VENDOR__ESMT = 9
-AMDSMI_VRAM_VENDOR__PLACEHOLDER1 = 10
-AMDSMI_VRAM_VENDOR__PLACEHOLDER2 = 11
-AMDSMI_VRAM_VENDOR__PLACEHOLDER3 = 12
-AMDSMI_VRAM_VENDOR__PLACEHOLDER4 = 13
-AMDSMI_VRAM_VENDOR__PLACEHOLDER5 = 14
-AMDSMI_VRAM_VENDOR__MICRON = 15
+AMDSMI_VRAM_VENDOR_SAMSUNG = 0
+AMDSMI_VRAM_VENDOR_INFINEON = 1
+AMDSMI_VRAM_VENDOR_ELPIDA = 2
+AMDSMI_VRAM_VENDOR_ETRON = 3
+AMDSMI_VRAM_VENDOR_NANYA = 4
+AMDSMI_VRAM_VENDOR_HYNIX = 5
+AMDSMI_VRAM_VENDOR_MOSEL = 6
+AMDSMI_VRAM_VENDOR_WINBOND = 7
+AMDSMI_VRAM_VENDOR_ESMT = 8
+AMDSMI_VRAM_VENDOR_MICRON = 9
+AMDSMI_VRAM_VENDOR_UNKNOWN = 10
 amdsmi_vram_vendor_type_t = ctypes.c_uint32 # enum
 class struct_amdsmi_range_t(Structure):
     pass
@@ -825,19 +815,6 @@ amdsmi_card_form_factor_t = ctypes.c_uint32 # enum
 class struct_amdsmi_pcie_info_t(Structure):
     pass
 
-class struct_pcie_static_(Structure):
-    pass
-
-struct_pcie_static_._pack_ = 1 # source:False
-struct_pcie_static_._fields_ = [
-    ('max_pcie_width', ctypes.c_uint16),
-    ('PADDING_0', ctypes.c_ubyte * 2),
-    ('max_pcie_speed', ctypes.c_uint32),
-    ('pcie_interface_version', ctypes.c_uint32),
-    ('slot_type', amdsmi_card_form_factor_t),
-    ('reserved', ctypes.c_uint64 * 10),
-]
-
 class struct_pcie_metric_(Structure):
     pass
 
@@ -856,6 +833,19 @@ struct_pcie_metric_._fields_ = [
     ('pcie_lc_perf_other_end_recovery_count', ctypes.c_uint32),
     ('PADDING_2', ctypes.c_ubyte * 4),
     ('reserved', ctypes.c_uint64 * 12),
+]
+
+class struct_pcie_static_(Structure):
+    pass
+
+struct_pcie_static_._pack_ = 1 # source:False
+struct_pcie_static_._fields_ = [
+    ('max_pcie_width', ctypes.c_uint16),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('max_pcie_speed', ctypes.c_uint32),
+    ('pcie_interface_version', ctypes.c_uint32),
+    ('slot_type', amdsmi_card_form_factor_t),
+    ('reserved', ctypes.c_uint64 * 10),
 ]
 
 struct_amdsmi_pcie_info_t._pack_ = 1 # source:False
@@ -1005,7 +995,7 @@ struct_nps_flags_._fields_ = [
 
 union_amdsmi_nps_caps_t._pack_ = 1 # source:False
 union_amdsmi_nps_caps_t._fields_ = [
-    ('amdsmi_nps_flags_t', struct_nps_flags_),
+    ('nps_flags', struct_nps_flags_),
     ('nps_cap_mask', ctypes.c_uint32),
 ]
 
@@ -2240,6 +2230,9 @@ amdsmi_get_gpu_subsystem_id.argtypes = [amdsmi_processor_handle, ctypes.POINTER(
 amdsmi_get_gpu_subsystem_name = _libraries['libamd_smi.so'].amdsmi_get_gpu_subsystem_name
 amdsmi_get_gpu_subsystem_name.restype = amdsmi_status_t
 amdsmi_get_gpu_subsystem_name.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_char), size_t]
+amdsmi_get_gpu_virtualization_mode = _libraries['libamd_smi.so'].amdsmi_get_gpu_virtualization_mode
+amdsmi_get_gpu_virtualization_mode.restype = amdsmi_status_t
+amdsmi_get_gpu_virtualization_mode.argtypes = [amdsmi_processor_handle, ctypes.POINTER(amdsmi_virtualization_mode_t)]
 amdsmi_get_gpu_pci_bandwidth = _libraries['libamd_smi.so'].amdsmi_get_gpu_pci_bandwidth
 amdsmi_get_gpu_pci_bandwidth.restype = amdsmi_status_t
 amdsmi_get_gpu_pci_bandwidth.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_pcie_bandwidth_t)]
@@ -2573,7 +2566,7 @@ amdsmi_get_gpu_activity.restype = amdsmi_status_t
 amdsmi_get_gpu_activity.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_engine_usage_t)]
 amdsmi_get_power_info = _libraries['libamd_smi.so'].amdsmi_get_power_info
 amdsmi_get_power_info.restype = amdsmi_status_t
-amdsmi_get_power_info.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_power_info_t)]
+amdsmi_get_power_info.argtypes = [amdsmi_processor_handle, uint32_t, ctypes.POINTER(struct_amdsmi_power_info_t)]
 amdsmi_is_gpu_power_management_enabled = _libraries['libamd_smi.so'].amdsmi_is_gpu_power_management_enabled
 amdsmi_is_gpu_power_management_enabled.restype = amdsmi_status_t
 amdsmi_is_gpu_power_management_enabled.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_bool)]
@@ -2905,17 +2898,12 @@ __all__ = \
     'AMDSMI_VRAM_TYPE_HBM', 'AMDSMI_VRAM_TYPE_HBM2',
     'AMDSMI_VRAM_TYPE_HBM2E', 'AMDSMI_VRAM_TYPE_HBM3',
     'AMDSMI_VRAM_TYPE_UNKNOWN', 'AMDSMI_VRAM_TYPE__MAX',
-    'AMDSMI_VRAM_VENDOR__ELPIDA', 'AMDSMI_VRAM_VENDOR__ESMT',
-    'AMDSMI_VRAM_VENDOR__ETRON', 'AMDSMI_VRAM_VENDOR__HYNIX',
-    'AMDSMI_VRAM_VENDOR__INFINEON', 'AMDSMI_VRAM_VENDOR__MICRON',
-    'AMDSMI_VRAM_VENDOR__MOSEL', 'AMDSMI_VRAM_VENDOR__NANYA',
-    'AMDSMI_VRAM_VENDOR__PLACEHOLDER0',
-    'AMDSMI_VRAM_VENDOR__PLACEHOLDER1',
-    'AMDSMI_VRAM_VENDOR__PLACEHOLDER2',
-    'AMDSMI_VRAM_VENDOR__PLACEHOLDER3',
-    'AMDSMI_VRAM_VENDOR__PLACEHOLDER4',
-    'AMDSMI_VRAM_VENDOR__PLACEHOLDER5', 'AMDSMI_VRAM_VENDOR__SAMSUNG',
-    'AMDSMI_VRAM_VENDOR__WINBOND', 'AMDSMI_XGMI_LINK_DISABLE',
+    'AMDSMI_VRAM_VENDOR_ELPIDA', 'AMDSMI_VRAM_VENDOR_ESMT',
+    'AMDSMI_VRAM_VENDOR_ETRON', 'AMDSMI_VRAM_VENDOR_HYNIX',
+    'AMDSMI_VRAM_VENDOR_INFINEON', 'AMDSMI_VRAM_VENDOR_MICRON',
+    'AMDSMI_VRAM_VENDOR_MOSEL', 'AMDSMI_VRAM_VENDOR_NANYA',
+    'AMDSMI_VRAM_VENDOR_SAMSUNG', 'AMDSMI_VRAM_VENDOR_UNKNOWN',
+    'AMDSMI_VRAM_VENDOR_WINBOND', 'AMDSMI_XGMI_LINK_DISABLE',
     'AMDSMI_XGMI_LINK_DOWN', 'AMDSMI_XGMI_LINK_UP',
     'AMDSMI_XGMI_STATUS_ERROR', 'AMDSMI_XGMI_STATUS_MULTIPLE_ERRORS',
     'AMDSMI_XGMI_STATUS_NO_ERRORS', 'CLK_LIMIT_MAX', 'CLK_LIMIT_MIN',
@@ -3009,9 +2997,11 @@ __all__ = \
     'amdsmi_get_gpu_subsystem_id', 'amdsmi_get_gpu_subsystem_name',
     'amdsmi_get_gpu_topo_numa_affinity',
     'amdsmi_get_gpu_total_ecc_count', 'amdsmi_get_gpu_vbios_info',
-    'amdsmi_get_gpu_vendor_name', 'amdsmi_get_gpu_volt_metric',
-    'amdsmi_get_gpu_vram_info', 'amdsmi_get_gpu_vram_usage',
-    'amdsmi_get_gpu_vram_vendor', 'amdsmi_get_gpu_xgmi_link_status',
+    'amdsmi_get_gpu_vendor_name',
+    'amdsmi_get_gpu_virtualization_mode',
+    'amdsmi_get_gpu_volt_metric', 'amdsmi_get_gpu_vram_info',
+    'amdsmi_get_gpu_vram_usage', 'amdsmi_get_gpu_vram_vendor',
+    'amdsmi_get_gpu_xgmi_link_status',
     'amdsmi_get_hsmp_metrics_table',
     'amdsmi_get_hsmp_metrics_table_version', 'amdsmi_get_lib_version',
     'amdsmi_get_link_metrics', 'amdsmi_get_link_topology_nearest',
