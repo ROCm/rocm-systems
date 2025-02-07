@@ -34,6 +34,7 @@ The documentation is structured as follows:
     * :ref:`using-rocprofv3`
     * :ref:`using-rocprofiler-sdk-roctx`
     * :doc:`Samples <how-to/samples>`
+    * :ref:`using-rocprofv3-with-mpi`
 
   .. grid-item-card:: API reference
 
