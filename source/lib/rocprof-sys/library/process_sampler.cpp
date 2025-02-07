@@ -23,8 +23,8 @@
 #include "library/process_sampler.hpp"
 #include "core/config.hpp"
 #include "core/debug.hpp"
-#include "library/amd_smi.hpp"
 #include "library/cpu_freq.hpp"
+#include "library/rocm_smi.hpp"
 #include "library/runtime.hpp"
 
 #include <memory>
@@ -140,14 +140,14 @@ sampler::setup()
     // shutdown if already running
     shutdown();
 
-    if(get_use_amd_smi())
+    if(get_use_rocm_smi())
     {
-        auto& _amd_smi         = instances.emplace_back(std::make_unique<instance>());
-        _amd_smi->setup        = []() { amd_smi::setup(); };
-        _amd_smi->shutdown     = []() { amd_smi::shutdown(); };
-        _amd_smi->post_process = []() { amd_smi::post_process(); };
-        _amd_smi->config       = []() { amd_smi::config(); };
-        _amd_smi->sample       = []() { amd_smi::sample(); };
+        auto& _rocm_smi         = instances.emplace_back(std::make_unique<instance>());
+        _rocm_smi->setup        = []() { rocm_smi::setup(); };
+        _rocm_smi->shutdown     = []() { rocm_smi::shutdown(); };
+        _rocm_smi->post_process = []() { rocm_smi::post_process(); };
+        _rocm_smi->config       = []() { rocm_smi::config(); };
+        _rocm_smi->sample       = []() { rocm_smi::sample(); };
     }
 
     auto& _cpu_freq         = instances.emplace_back(std::make_unique<instance>());

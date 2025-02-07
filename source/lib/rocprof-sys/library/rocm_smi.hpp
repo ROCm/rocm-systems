@@ -34,10 +34,6 @@
 #include "core/state.hpp"
 #include "library/thread_data.hpp"
 
-#if ROCPROFSYS_USE_ROCM > 0
-#    include <amd_smi/amdsmi.h>
-#endif
-
 #include <chrono>
 #include <cstdint>
 #include <deque>
@@ -51,7 +47,7 @@
 
 namespace rocprofsys
 {
-namespace amd_smi
+namespace rocm_smi
 {
 void
 setup();
@@ -70,6 +66,9 @@ post_process();
 
 void set_state(State);
 
+uint32_t
+device_count();
+
 struct settings
 {
     bool busy         = true;
@@ -87,7 +86,7 @@ struct data
     using promise_t = std::promise<void>;
 
     using timestamp_t = int64_t;
-    using power_t     = uint32_t;
+    using power_t     = uint64_t;
     using busy_perc_t = uint32_t;
     using mem_usage_t = uint64_t;
     using temp_t      = int64_t;
@@ -103,16 +102,11 @@ struct data
 
     uint32_t              m_dev_id      = std::numeric_limits<uint32_t>::max();
     timestamp_t           m_ts          = 0;
+    busy_perc_t           m_busy_perc   = 0;
     temp_t                m_temp        = 0;
+    power_t               m_power       = 0;
     mem_usage_t           m_mem_usage   = 0;
     std::vector<uint16_t> m_vcn_metrics = {};
-#if ROCPROFSYS_USE_ROCM > 0
-    amdsmi_engine_usage_t m_busy_perc = {};
-    amdsmi_power_info_t   m_power     = {};
-#else
-    std::vector<busy_perc_t> m_busy_perc = {};
-    std::vector<power_t>     m_power     = {};
-#endif
 
     friend std::ostream& operator<<(std::ostream& _os, const data& _v)
     {
@@ -121,11 +115,11 @@ struct data
     }
 
 private:
-    friend void rocprofsys::amd_smi::setup();
-    friend void rocprofsys::amd_smi::config();
-    friend void rocprofsys::amd_smi::sample();
-    friend void rocprofsys::amd_smi::shutdown();
-    friend void rocprofsys::amd_smi::post_process();
+    friend void rocprofsys::rocm_smi::setup();
+    friend void rocprofsys::rocm_smi::config();
+    friend void rocprofsys::rocm_smi::sample();
+    friend void rocprofsys::rocm_smi::shutdown();
+    friend void rocprofsys::rocm_smi::post_process();
 
     static size_t                        device_count;
     static std::set<uint32_t>            device_list;
@@ -160,7 +154,7 @@ post_process()
 
 inline void set_state(State) {}
 #endif
-}  // namespace amd_smi
+}  // namespace rocm_smi
 }  // namespace rocprofsys
 
 #if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
@@ -172,16 +166,8 @@ inline void set_state(State) {}
 #        include <timemory/operations.hpp>
 
 ROCPROFSYS_DECLARE_EXTERN_COMPONENT(
-    TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_gpu_busy_gfx>),
-    true, double)
-
-ROCPROFSYS_DECLARE_EXTERN_COMPONENT(
-    TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_gpu_busy_umc>),
-    true, double)
-
-ROCPROFSYS_DECLARE_EXTERN_COMPONENT(
-    TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_gpu_busy_mm>),
-    true, double)
+    TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_gpu_busy>), true,
+    double)
 
 ROCPROFSYS_DECLARE_EXTERN_COMPONENT(
     TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_gpu_temp>), true,

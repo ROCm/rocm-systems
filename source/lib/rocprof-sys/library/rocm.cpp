@@ -25,7 +25,7 @@
 #include "core/debug.hpp"
 #include "core/dynamic_library.hpp"
 #include "core/gpu.hpp"
-#include "library/amd_smi.hpp"
+#include "library/rocm_smi.hpp"
 #include "library/rocprofiler-sdk.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_data.hpp"
