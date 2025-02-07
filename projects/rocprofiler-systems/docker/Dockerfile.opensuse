@@ -35,7 +35,7 @@ RUN if [ "${ROCM_VERSION}" != "0.0" ]; then \
         zypper --non-interactive addrepo https://download.opensuse.org/repositories/devel:languages:perl/15.${OS_VERSION_MINOR}/devel:languages:perl.repo && \
         zypper --non-interactive --no-gpg-checks install -y https://repo.radeon.com/amdgpu-install/${AMDGPU_RPM} && \
         zypper --non-interactive --gpg-auto-import-keys refresh && \
-        zypper --non-interactive install -y rocm-dev amd-smi-lib roctracer-dev rocprofiler-dev rccl-devel libpciaccess0 && \
+        zypper --non-interactive install -y rocm-dev rocm-smi-lib roctracer-dev rocprofiler-dev rccl-devel libpciaccess0 && \
         zypper --non-interactive clean --all; \
     fi
 

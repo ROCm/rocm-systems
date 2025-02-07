@@ -22,41 +22,18 @@
 
 #pragma once
 
-#if ROCPROFSYS_USE_ROCM > 0
-#    include <amd_smi/amdsmi.h>
-#endif
-
 namespace rocprofsys
 {
 namespace gpu
 {
-#if ROCPROFSYS_USE_ROCM > 0
-void
-get_processor_handles();
-
-uint32_t
-get_processor_count();
-
-amdsmi_processor_handle
-get_handle_from_id(uint32_t dev_id);
-
-struct processors
-{
-    static uint32_t                             total_processor_count;
-    static std::vector<amdsmi_processor_handle> processors_list;
-
-private:
-    friend void                    rocprofsys::gpu::get_processor_handles();
-    friend uint32_t                rocprofsys::gpu::get_processor_count();
-    friend amdsmi_processor_handle rocprofsys::gpu::get_handle_from_id(uint32_t dev_id);
-};
-#endif
-
 int
 device_count();
 
-bool
-initialize_amdsmi();
+int
+rocm_device_count();
+
+int
+rsmi_device_count();
 
 void
 add_device_metadata();

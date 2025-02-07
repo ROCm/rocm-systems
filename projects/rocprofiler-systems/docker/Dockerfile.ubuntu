@@ -39,7 +39,7 @@ RUN if [ "${ROCM_VERSION}" != "0.0" ]; then \
         wget https://repo.radeon.com/amdgpu-install/${ROCM_VERSION}/ubuntu/${ROCM_REPO_DIST}/${AMDGPU_DEB} && \
         apt-get install -y ./${AMDGPU_DEB} && \
         apt-get update && \
-        apt-get install -y rocm-dev amd-smi-lib roctracer-dev rocprofiler-dev rccl-dev libpciaccess0 ${EXTRA_PACKAGES} && \
+        apt-get install -y rocm-dev rocm-smi-lib roctracer-dev rocprofiler-dev rccl-dev libpciaccess0 ${EXTRA_PACKAGES} && \
         apt-get autoclean; \
     fi
 

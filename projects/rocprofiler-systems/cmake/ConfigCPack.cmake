@@ -157,11 +157,11 @@ if(NOT ROCPROFSYS_BUILD_DYNINST)
     endif()
 endif()
 if(ROCmVersion_FOUND)
-    set(_AMD_SMI_SUFFIX
+    set(_ROCM_SMI_SUFFIX
         " (>= ${ROCmVersion_MAJOR_VERSION}.0.0.${ROCmVersion_NUMERIC_VERSION})")
 endif()
 if(ROCPROFSYS_USE_ROCM)
-    list(APPEND _DEBIAN_PACKAGE_DEPENDS "amd-smi-lib${_AMD_SMI_SUFFIX}")
+    list(APPEND _DEBIAN_PACKAGE_DEPENDS "rocm-smi-lib${_ROCM_SMI_SUFFIX}")
     list(APPEND _DEBIAN_PACKAGE_DEPENDS "rocprofiler-sdk (>= ${rocprofiler-sdk_VERSION})")
 endif()
 if(ROCPROFSYS_USE_MPI)
