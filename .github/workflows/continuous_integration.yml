@@ -44,7 +44,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['navi4', 'mi300a']
+        runner: ['vega20', 'mi300a']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
         ci-flags: ['--linter clang-tidy']
@@ -54,7 +54,7 @@ jobs:
     # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-      CORE_EXT_RUNNER: mi300
+      CORE_EXT_RUNNER: mi300a
 
     steps:
     - uses: actions/checkout@v4
@@ -577,7 +577,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['vega20', 'navi3', 'mi300']
+        runner: ['vega20', 'mi325', 'mi300']
         sanitizer: ['AddressSanitizer', 'ThreadSanitizer', 'LeakSanitizer', 'UndefinedBehaviorSanitizer']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
@@ -587,9 +587,9 @@ jobs:
           - { runner: 'vega20', sanitizer: 'UndefinedBehaviorSanitizer' }
           - { runner: 'mi300', sanitizer: 'AddressSanitizer' }
           - { runner: 'mi300', sanitizer: 'LeakSanitizer' }
-          - { runner: 'navi3', sanitizer: 'LeakSanitizer' }
-          - { runner: 'navi3', sanitizer: 'ThreadSanitizer' }
-          - { runner: 'navi3', sanitizer: 'UndefinedBehaviorSanitizer' }
+          - { runner: 'mi325', sanitizer: 'LeakSanitizer' }
+          - { runner: 'mi325', sanitizer: 'ThreadSanitizer' }
+          - { runner: 'mi325', sanitizer: 'UndefinedBehaviorSanitizer' }
 
     if: ${{ contains(github.event_name, 'pull_request') }}
     runs-on: ${{ matrix.runner }}-emu-runner-set
