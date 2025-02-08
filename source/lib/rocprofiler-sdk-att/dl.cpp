@@ -43,7 +43,7 @@ namespace att_wrapper
 namespace fs = ::rocprofiler::common::filesystem;
 
 fs::path
-get_search_path(std::string path_name)
+get_search_path(std::string_view path_name)
 {
     if(fs::exists(path_name)) return fs::path(path_name);
     return "";

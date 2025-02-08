@@ -87,7 +87,7 @@ public:
         MEMORY_PARALLEL
     };
 
-    MemoryCounter(std::string _name)
+    MemoryCounter(std::string_view _name)
     : name(_name)
     {}
 

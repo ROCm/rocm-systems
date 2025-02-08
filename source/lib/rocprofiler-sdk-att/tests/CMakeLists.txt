@@ -3,6 +3,8 @@
 #
 project(rocprofiler-att-parser-tests LANGUAGES CXX)
 
+rocprofiler_deactivate_clang_tidy()
+
 add_executable(att-parser-tool-v3)
 target_link_libraries(
     att-parser-tool-v3

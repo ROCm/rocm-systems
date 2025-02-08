@@ -48,7 +48,7 @@ navigate(nlohmann::json& json, std::vector<std::string>& path, const std::string
     navigate(j, path, filename);
 }
 
-CodeFile::CodeFile(const Fspath& _dir, std::shared_ptr<AddressTable> _table)
+CodeFile::CodeFile(const Fspath& _dir, std::shared_ptr<AddressTable>& _table)
 : dir(_dir)
 , filename(_dir / "code.json")
 , table(_table)
@@ -145,7 +145,7 @@ CodeFile::~CodeFile()
     nlohmann::json jsnapfiletree;
     size_t         num_snap = 0;
 
-    for(auto& source_ref : snapshots)
+    for(const auto& source_ref : snapshots)
     {
         if(rocprofiler::common::filesystem::exists(source_ref))
         {

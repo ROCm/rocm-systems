@@ -33,7 +33,11 @@ rocprofiler_att_decoder_parse_data(rocprofiler_att_decoder_se_data_callback_t se
 {
     const int gfxip = 9;
 
-    trace_callback(ROCPROFILER_ATT_DECODER_TYPE_GFXIP, 0, (void*) gfxip, 0, userdata);
+    trace_callback(ROCPROFILER_ATT_DECODER_TYPE_GFXIP,
+                   0,
+                   reinterpret_cast<void*>(gfxip),  // NOLINT(performance-no-int-to-ptr)
+                   0,
+                   userdata);
     {
         std::vector<rocprofiler_att_decoder_info_t> infos{};
         for(size_t i = 1; i < ROCPROFILER_ATT_DECODER_INFO_LAST; i++)
@@ -52,7 +56,7 @@ rocprofiler_att_decoder_parse_data(rocprofiler_att_decoder_se_data_callback_t se
         uint8_t* buffer      = nullptr;
         size_t   buffer_size = 0;
 
-        while(se_data_callback(&se_id, &buffer, &buffer_size, userdata))
+        while(se_data_callback(&se_id, &buffer, &buffer_size, userdata) != 0u)
         {};
     }
 
@@ -101,7 +105,7 @@ rocprofiler_att_decoder_parse_data(rocprofiler_att_decoder_se_data_callback_t se
             inst.time         = i * 64 - 32;
             inst.pc.marker_id = 1;
             inst.pc.addr      = 8 * i;
-            insts.emplace_back(std::move(inst));
+            insts.emplace_back(inst);
         }
 
         wave.instructions_array = insts.data();

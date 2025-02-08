@@ -52,7 +52,8 @@ class CodeFile
     using AddressTable = rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate;
 
 public:
-    CodeFile(const Fspath& dir, std::shared_ptr<AddressTable> table);
+    CodeFile() = default;
+    CodeFile(const Fspath& dir, std::shared_ptr<AddressTable>& table);
     ~CodeFile();
 
     Fspath                                        dir{};

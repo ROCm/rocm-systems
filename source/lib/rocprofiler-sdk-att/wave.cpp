@@ -34,7 +34,8 @@ namespace att_wrapper
 {
 WaveFile::WaveFile(WaveConfig& config, const att_wave_data_t& wave)
 {
-    if(wave.contexts) ROCP_WARNING << "Wave had " << wave.contexts << " context save-restores";
+    ROCP_WARNING_IF(wave.contexts != 0u)
+        << "Wave had " << wave.contexts << " context save-restores";
 
     if(!GlobalDefs::get().has_format("json")) return;
     if(wave.instructions_size == 0 && wave.timeline_size < 3) return;
@@ -89,8 +90,8 @@ WaveFile::WaveFile(WaveConfig& config, const att_wave_data_t& wave)
         const WaitcntList& wait_list =
             WaitcntList::Get(config.filemgr->gfxip, wave, config.code->isa_map);
 
-        for(auto& line : wait_list.mem_unroll)
-            if(line.dependencies.size())
+        for(const auto& line : wait_list.mem_unroll)
+            if(!line.dependencies.empty())
             {
                 nlohmann::json json_line;
                 for(int dep : line.dependencies)

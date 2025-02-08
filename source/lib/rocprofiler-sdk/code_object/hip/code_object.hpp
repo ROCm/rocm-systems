@@ -30,7 +30,6 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
-#include "lib/rocprofiler-sdk/code_object/hip/code_object.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>

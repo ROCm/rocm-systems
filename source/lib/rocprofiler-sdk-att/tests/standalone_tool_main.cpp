@@ -123,7 +123,7 @@ main(int argc, char** argv)
             snapshot_files[elem["key"]] = elem["value"];
 
         for(auto& codeobj : sdk_json["code_objects"])
-            if(std::string(codeobj["uri"]).size())
+            if(!std::string{codeobj["uri"]}.empty())
             {
                 std::string filename = codeobj["uri"];
                 size_t      id       = size_t(codeobj["code_object_id"]);

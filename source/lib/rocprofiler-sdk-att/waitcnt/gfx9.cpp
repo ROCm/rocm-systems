@@ -129,13 +129,13 @@ WaitcntList::gfx9_construct(const wave_t& wave, isa_map_t& isa_map)
         }
         else if(typeclass == MemoryInstType::TYPE_WAITCNT)
         {
-            if(type & LGK_BIT)
+            if((type & LGK_BIT) != 0)
             {
                 if(auto joined = lgkm.handle_mem_op(inst_str, vflat_list))
                     mem_unroll.emplace_back(LineWaitcnt{line_number, std::move(*joined)});
             }
 
-            if(type & VMEM_BIT)
+            if((type & VMEM_BIT) != 0)
             {
                 if(auto joined = vmem.handle_mem_op(inst_str, vflat_list))
                     mem_unroll.emplace_back(LineWaitcnt{line_number, std::move(*joined)});

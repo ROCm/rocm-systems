@@ -163,8 +163,7 @@ parse_att_counters(std::string line)
     handle_special_chars(line);
 
     auto extract_counter_name_and_simd_mask = [](std::string& input) {
-        std::string counter_name = "";
-        auto        ret          = att_perfcounter{};
+        auto ret = att_perfcounter{};
 
         size_t pos = input.find(':');
 
@@ -174,7 +173,9 @@ parse_att_counters(std::string line)
             ret.simd_mask    = std::stoi(input.substr(pos + 1), nullptr, 16);
         }
         else
-            counter_name = input;
+        {
+            ret.counter_name = input;
+        }
         return ret;
     };
 

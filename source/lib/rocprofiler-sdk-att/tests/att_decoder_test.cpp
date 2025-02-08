@@ -102,7 +102,7 @@ TEST(att_decoder_test, warn_failures)
     codeobjs.at(4).name = "myfile123.out";
 
     std::vector<std::string> att_files;
-    att_files.emplace_back(std::string("file123.att"));
+    att_files.emplace_back("file123.att");
 
     ATTDecoderTest decoder;
     ROCP_FATAL_IF(!decoder.valid()) << "Failed to initialize decoder library!";
@@ -116,7 +116,7 @@ TEST(att_decoder_test, code_write)
     rocprofiler::att_wrapper::OutputFile::Enabled() = false;
     GlobalDefs::get().output_formats                = "json,csv";
 
-    CodeFile file(".", nullptr);
+    CodeFile file{};
 
     pcinfo_t addr{};
     addr.marker_id          = 0;
