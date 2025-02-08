@@ -301,7 +301,7 @@ Collected data is generally handled in one of the three following ways:
 In general, only instrumentation for relatively simple data is directly passed to
 Perfetto and/or Timemory during runtime.
 For example, the callbacks from binary instrumentation, user API instrumentation,
-and roctracer directly invoke
+and rocprofiler-sdk directly invoke
 calls to Perfetto or Timemory's storage model. Otherwise, the data is stored
 by ROCm Systems Profiler in the thread-data model
 which is more persistent than simply using ``thread_local`` static data, which gets deleted

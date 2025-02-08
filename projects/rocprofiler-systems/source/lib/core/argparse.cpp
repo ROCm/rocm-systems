@@ -543,9 +543,10 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _data.processed_environs.emplace("periods");
     }
 
-    strset_t _backend_choices = { "all",   "kokkosp",     "mpip",       "ompt",
-                                  "rcclp", "rocm-smi",    "roctracer",  "rocprofiler",
-                                  "roctx", "mutex-locks", "spin-locks", "rw-locks" };
+    strset_t _backend_choices = {
+        "all",      "kokkosp",         "mpip",        "ompt",       "rcclp",
+        "rocm-smi", "rocprofiler-sdk", "mutex-locks", "spin-locks", "rw-locks"
+    };
 
 #if !defined(ROCPROFSYS_USE_MPI) && !defined(ROCPROFSYS_USE_MPI_HEADERS)
     _backend_choices.erase("mpip");

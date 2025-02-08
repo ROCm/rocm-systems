@@ -17,10 +17,6 @@ rocprofiler_systems_add_interface_library(
     "Provides flags and libraries for Dyninst (dynamic instrumentation)")
 rocprofiler_systems_add_interface_library(rocprofiler-systems-rocm
                                           "Provides flags and libraries for ROCm")
-rocprofiler_systems_add_interface_library(rocprofiler-systems-roctracer
-                                          "Provides flags and libraries for roctracer")
-rocprofiler_systems_add_interface_library(rocprofiler-systems-rocprofiler
-                                          "Provides flags and libraries for rocprofiler")
 rocprofiler_systems_add_interface_library(
     rocprofiler-systems-rccl
     "Provides flags for ROCm Communication Collectives Library (RCCL)")
@@ -160,15 +156,6 @@ if(ROCPROFSYS_USE_ROCM)
     set(ROCPROFSYS_ROCM_VERSION_MINOR ${ROCmVersion_MINOR_VERSION})
     set(ROCPROFSYS_ROCM_VERSION_PATCH ${ROCmVersion_PATCH_VERSION})
     set(ROCPROFSYS_ROCM_VERSION ${ROCmVersion_TRIPLE_VERSION})
-
-    if(ROCPROFSYS_ROCM_VERSION_MAJOR GREATER_EQUAL 4 AND ROCPROFSYS_ROCM_VERSION_MINOR
-                                                         GREATER 3)
-        set(roctracer_kfdwrapper_LIBRARY)
-    endif()
-
-    if(NOT roctracer_kfdwrapper_LIBRARY)
-        set(roctracer_kfdwrapper_LIBRARY)
-    endif()
 
     rocprofiler_systems_add_feature(ROCPROFSYS_ROCM_VERSION
                                     "ROCm version used by rocprofiler-systems")

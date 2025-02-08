@@ -247,10 +247,7 @@ view the help menu.
                                  libpthread.so.0
                                  libresolv.so.2
                                  librocm_smi64.so
-                                 librocmtools.so
-                                 librocprofiler64.so
-                                 libroctracer64.so
-                                 libroctx64.so
+                                 librocprofiler-sdk.so
                                  librt.so.1
                                  libstdc++.so.6
                                  libtbb.so
@@ -854,7 +851,7 @@ By default, ``rocprof-sys-instrument`` uses ``--mode trace`` for instrumentation
 only instruments ``main`` in an executable. It activates both CPU call-stack sampling and
 background system-level thread sampling by default.
 Tracing capabilities which do not rely on instrumentation, such as the HIP API and kernel tracing
-(which is collected by roctracer), are still available.
+are still available.
 
 The ROCm Systems Profiler sampling capabilities are always available, even in trace mode, but are deactivated by default.
 To activate sampling in trace mode, set ``ROCPROFSYS_USE_SAMPLING=ON`` in the environment

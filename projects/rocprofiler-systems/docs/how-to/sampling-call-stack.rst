@@ -213,9 +213,9 @@ View the help menu of ``rocprof-sys-sample`` with the ``-h`` / ``--help`` option
 
       [BACKEND OPTIONS]  These options control region information captured w/o sampling or instrumentation
 
-      -I, --include [ all | kokkosp | mpip | mutex-locks | ompt | rcclp | rocm-smi | rocprofiler | roctracer | roctx | rw-locks | spin-locks ]
+      -I, --include [ all | kokkosp | mpip | mutex-locks | ompt | rcclp | rocm-smi | rocprofiler-sdk | rw-locks | spin-locks ]
                                     Include data from these backends (count: unlimited)
-      -E, --exclude [ all | kokkosp | mpip | mutex-locks | ompt | rcclp | rocm-smi | rocprofiler | roctracer | roctx | rw-locks | spin-locks ]
+      -E, --exclude [ all | kokkosp | mpip | mutex-locks | ompt | rcclp | rocm-smi | rocprofiler-sdk | rw-locks | spin-locks ]
                                     Exclude data from these backends (count: unlimited)
 
       [HARDWARE COUNTER OPTIONS] See also: rocprof-sys-avail -H

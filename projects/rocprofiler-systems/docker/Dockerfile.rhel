@@ -29,7 +29,7 @@ RUN if [ "${ROCM_VERSION}" != "0.0" ]; then \
         if [ "${OS_VERSION_MAJOR}" -eq 8 ]; then PERL_REPO=powertools; else PERL_REPO=crb; fi && \
         dnf -y --enablerepo=${PERL_REPO} install perl-File-BaseDir && \
         yum install -y https://repo.radeon.com/amdgpu-install/${AMDGPU_RPM} && \
-        yum install -y rocm-dev rocm-smi-lib roctracer-dev rocprofiler-dev libpciaccess && \
+        yum install -y rocm-dev && \
         yum clean all; \
     fi
 

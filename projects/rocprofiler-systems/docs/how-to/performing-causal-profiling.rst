@@ -80,7 +80,7 @@ in between samples. Progress points must be triggered in a deterministic manner 
 This can happen in three different ways:
 
 * `ROCm Systems Profiler <https://github.com/ROCm/rocprofiler-systems>`_ can leverage the callbacks from
-  Kokkos-Tools, OpenMP-Tools, roctracer, etc. and the wrappers around functions for
+  Kokkos-Tools, OpenMP-Tools, rocprofiler-sdk, etc. and the wrappers around functions for
   MPI, NUMA, RCCL, etc. to act as progress points
 * Users can leverage the :doc:`runtime instrumentation capabilities <./instrumenting-rewriting-binary-application>`
   to insert progress points

@@ -116,19 +116,6 @@ get_thread_pool_state()
 }  // namespace
 }  // namespace general
 
-namespace roctracer
-{
-namespace
-{
-auto&
-get_thread_pool_state()
-{
-    static auto _v = State::PreInit;
-    return _v;
-}
-}  // namespace
-}  // namespace roctracer
-
 void
 setup()
 {
@@ -140,17 +127,6 @@ setup()
 void
 join()
 {
-    if(roctracer::get_thread_pool_state() == State::Active)
-    {
-        ROCPROFSYS_DEBUG_F("waiting for all roctracer tasks to complete...\n");
-        for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
-            roctracer::get_task_group(i).join();
-    }
-    else
-    {
-        ROCPROFSYS_DEBUG_F("roctracer thread-pool is not active...\n");
-    }
-
     if(general::get_thread_pool_state() == State::Active)
     {
         ROCPROFSYS_DEBUG_F("waiting for all general tasks to complete...\n");
@@ -162,22 +138,6 @@ join()
 void
 shutdown()
 {
-    if(roctracer::get_thread_pool_state() == State::Active)
-    {
-        ROCPROFSYS_DEBUG_F("Waiting on completion of roctracer tasks...\n");
-        for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
-        {
-            roctracer::get_task_group(i).join();
-            roctracer::get_task_group(i).clear();
-            roctracer::get_task_group(i).set_pool(nullptr);
-        }
-        roctracer::get_thread_pool_state() = State::Finalized;
-    }
-    else
-    {
-        ROCPROFSYS_DEBUG_F("roctracer thread-pool is not active...\n");
-    }
-
     if(general::get_thread_pool_state() == State::Active)
     {
         ROCPROFSYS_DEBUG_F("Waiting on completion of general tasks...\n");
@@ -219,16 +179,5 @@ general::get_task_group(int64_t _tid)
     return *_v;
 }
 
-PTL::TaskGroup<void>&
-roctracer::get_task_group(int64_t _tid)
-{
-    struct local
-    {};
-    using thread_data_t          = thread_data<PTL::TaskGroup<void>, local>;
-    static thread_local auto& _v = (roctracer::get_thread_pool_state() = State::Active,
-                                    thread_data_t::instance(construct_on_thread{ _tid },
-                                                            &tasking::get_thread_pool()));
-    return *_v;
-}
 }  // namespace tasking
 }  // namespace rocprofsys
