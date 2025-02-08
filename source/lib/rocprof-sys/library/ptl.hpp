@@ -56,16 +56,5 @@ PTL::TaskGroup<void>&
 get_task_group(int64_t _tid = utility::get_thread_index());
 }
 
-//--------------------------------------------------------------------------------------//
-//
-//      roctracer
-//
-//--------------------------------------------------------------------------------------//
-
-namespace roctracer
-{
-PTL::TaskGroup<void>&
-get_task_group(int64_t _tid = utility::get_thread_index());
-}  // namespace roctracer
 }  // namespace tasking
 }  // namespace rocprofsys

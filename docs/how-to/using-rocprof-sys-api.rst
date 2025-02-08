@@ -192,75 +192,52 @@ First, instrument and run the program.
    ...
    $ rocprof-sys-run --profile --trace -- ./user-api.inst 10 12 1000
 
-   ROCPROFSYS: HSA_TOOLS_LIB=/opt/rocm-6.3.1/lib/librocprof-sys-dl.so.0.1.0
-   ROCPROFSYS: HSA_TOOLS_REPORT_LOAD_FAILURE=1
-   ROCPROFSYS: LD_PRELOAD=/opt/rocm-6.3.1/lib/librocprof-sys-dl.so.0.1.0
-   ROCPROFSYS: OMP_TOOL_LIBRARIES=/opt/rocm-6.3.1/lib/librocprof-sys-dl.so.0.1.0
+   ROCPROFSYS: LD_PRELOAD=/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/lib/librocprof-sys-dl.so.1.0.0
+   ROCPROFSYS: OMP_TOOL_LIBRARIES=/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/lib/librocprof-sys-dl.so.1.0.0
    ROCPROFSYS: ROCPROFSYS_PROFILE=true
    ROCPROFSYS: ROCPROFSYS_TRACE=true
    ROCPROFSYS: ROCPROFSYS_VERBOSE=0
-   ROCPROFSYS: ROCP_HSA_INTERCEPT=1
-   ROCPROFSYS: ROCP_TOOL_LIB=/opt/rocm-6.3.1/lib/librocprof-sys.so.0.1.0
-   [rocprof-sys][dl][297646] rocprofsys_main
-   [rocprof-sys][297646][rocprofsys_init_tooling] Instrumentation mode: Trace
+   [rocprof-sys][dl][1827155] rocprofsys_main
+   [rocprof-sys][1827155][rocprofsys_init_tooling] Instrumentation mode: Trace
 
 
-      ____   ___   ____ __  __   ______   ______ _____ _____ __  __ ____    ____  ____   ___  _____ ___ _     _____ ____
+       ____   ___   ____ __  __   ______   ______ _____ _____ __  __ ____    ____  ____   ___  _____ ___ _     _____ ____
       |  _ \ / _ \ / ___|  \/  | / ___\ \ / / ___|_   _| ____|  \/  / ___|  |  _ \|  _ \ / _ \|  ___|_ _| |   | ____|  _ \
       | |_) | | | | |   | |\/| | \___ \\ V /\___ \ | | |  _| | |\/| \___ \  | |_) | |_) | | | | |_   | || |   |  _| | |_) |
       |  _ <| |_| | |___| |  | |  ___) || |  ___) || | | |___| |  | |___) | |  __/|  _ <| |_| |  _|  | || |___| |___|  _ <
       |_| \_\\___/ \____|_|  |_| |____/ |_| |____/ |_| |_____|_|  |_|____/  |_|   |_| \_\\___/|_|   |___|_____|_____|_| \_\
 
-      rocprof-sys v0.1.0 (rev: b569c837e455f71dd76d06392d0b901ae927deca, x86_64-linux-gnu, compiler: GNU v11.4.0, rocm: v6.3.x)
-   [105.947]       perfetto.cc:47606 Configured tracing session 1, #sources:1, duration:0 ms, #buffers:1, total buffer size:1024000 KB, total sessions:1, uid:0 session name: ""
-   Pushing custom region :: ./user-api.inst
-   Pushing custom region :: initialization
+      rocprof-sys v1.0.0 (rev: 3213dc652728f7ed01b62bf55f6af76c43bfcbdb, x86_64-linux-gnu, compiler: GNU v11.4.0, rocm: v6.3.x)
+   [790.763]       perfetto.cc:47606 Configured tracing session 1, #sources:1, duration:0 ms, #buffers:1, total buffer size:1024000 KB, total sessions:1, uid:0 session name: ""
    [./user-api.inst] Threads: 12
    [./user-api.inst] Iterations: 1000
    [./user-api.inst] fibonacci(10)...
-   Pushing custom region :: thread_creation
-   Pushing custom region :: run(10) x 1000
-   Pushing custom region :: run(10) x 1000
-   Pushing custom region :: run(10) x 1000
-   Pushing custom region :: run(10) x 1000
-   Pushing custom region :: run(10) x 1000
-   Pushing custom region :: run(10) x 1000
-   Pushing custom region :: run(10) x 1000
-   Pushing custom region :: run(10) x 1000
-   Pushing custom region :: run(10) x 1000
-   Pushing custom region :: run(10) x 1000
-   Pushing custom region :: run(10) x 1000
-   Pushing custom region :: run(10) x 1000
-   Pushing custom region :: thread_wait
-   Pushing custom region :: run(10) x 1000
    [./user-api.inst] fibonacci(10) x 12 = 715000
 
-   [rocprof-sys][297646][0][rocprofsys_finalize] finalizing...
-   [rocprof-sys][297646][0][rocprofsys_finalize]
-   [rocprof-sys][297646][0][rocprofsys_finalize] rocprofsys/process/297646 : 0.978014 sec wall_clock,   26.752 MB peak_rss,   27.394 MB page_rss, 1.520000 sec cpu_clock,  155.4 % cpu_util [laps: 1]
-   [rocprof-sys][297646][0][rocprofsys_finalize] rocprofsys/process/297646/thread/0 : 0.976068 sec wall_clock, 0.789948 sec thread_cpu_clock,   80.9 % thread_cpu_util,   26.112 MB peak_rss [laps: 1]
-   [rocprof-sys][297646][0][rocprofsys_finalize] rocprofsys/process/297646/thread/1 : 0.027517 sec wall_clock, 0.027510 sec thread_cpu_clock,  100.0 % thread_cpu_util,    0.768 MB peak_rss [laps: 1]
-   [rocprof-sys][297646][0][rocprofsys_finalize] rocprofsys/process/297646/thread/2 : 0.027828 sec wall_clock, 0.027811 sec thread_cpu_clock,   99.9 % thread_cpu_util,    3.584 MB peak_rss [laps: 1]
-   [rocprof-sys][297646][0][rocprofsys_finalize] rocprofsys/process/297646/thread/3 : 0.027585 sec wall_clock, 0.027585 sec thread_cpu_clock,  100.0 % thread_cpu_util,    3.584 MB peak_rss [laps: 1]
-   [rocprof-sys][297646][0][rocprofsys_finalize] rocprofsys/process/297646/thread/4 : 0.033449 sec wall_clock, 0.033443 sec thread_cpu_clock,  100.0 % thread_cpu_util,    3.584 MB peak_rss [laps: 1]
-   [rocprof-sys][297646][0][rocprofsys_finalize] rocprofsys/process/297646/thread/5 : 0.027727 sec wall_clock, 0.027726 sec thread_cpu_clock,  100.0 % thread_cpu_util,    3.328 MB peak_rss [laps: 1]
-   [rocprof-sys][297646][0][rocprofsys_finalize] rocprofsys/process/297646/thread/6 : 0.032228 sec wall_clock, 0.032220 sec thread_cpu_clock,  100.0 % thread_cpu_util,    3.712 MB peak_rss [laps: 1]
-   [rocprof-sys][297646][0][rocprofsys_finalize] rocprofsys/process/297646/thread/7 : 0.030201 sec wall_clock, 0.030202 sec thread_cpu_clock,  100.0 % thread_cpu_util,    0.768 MB peak_rss [laps: 1]
-   [rocprof-sys][297646][0][rocprofsys_finalize] rocprofsys/process/297646/thread/8 : 0.027960 sec wall_clock, 0.027951 sec thread_cpu_clock,  100.0 % thread_cpu_util,    0.640 MB peak_rss [laps: 1]
-   [rocprof-sys][297646][0][rocprofsys_finalize] rocprofsys/process/297646/thread/9 : 0.034698 sec wall_clock, 0.034699 sec thread_cpu_clock,  100.0 % thread_cpu_util,    0.640 MB peak_rss [laps: 1]
-   [rocprof-sys][297646][0][rocprofsys_finalize] rocprofsys/process/297646/thread/10 : 0.033414 sec wall_clock, 0.033399 sec thread_cpu_clock,  100.0 % thread_cpu_util,    0.512 MB peak_rss [laps: 1]
-   [rocprof-sys][297646][0][rocprofsys_finalize] rocprofsys/process/297646/thread/11 : 0.028161 sec wall_clock, 0.028149 sec thread_cpu_clock,  100.0 % thread_cpu_util,    0.384 MB peak_rss [laps: 1]
-   [rocprof-sys][297646][0][rocprofsys_finalize] rocprofsys/process/297646/thread/12 : 0.027791 sec wall_clock, 0.027767 sec thread_cpu_clock,   99.9 % thread_cpu_util,    0.256 MB peak_rss [laps: 1]
-   [rocprof-sys][297646][0][rocprofsys_finalize]
-   [rocprof-sys][297646][0][rocprofsys_finalize] Finalizing perfetto...
-   [rocprofiler-systems][297646][perfetto]> Outputting '/home/gliff/opt/user-api-test/rocprofsys-user-api.inst-output/2025-01-02_19.29/perfetto-trace-297646.proto' (16728.58 KB / 16.73 MB / 0.02 GB)... Done
-   [rocprofiler-systems][297646][wall_clock]> Outputting 'rocprofsys-user-api.inst-output/2025-01-02_19.29/wall_clock-297646.json'
-   [rocprofiler-systems][297646][wall_clock]> Outputting 'rocprofsys-user-api.inst-output/2025-01-02_19.29/wall_clock-297646.txt'
-   [rocprofiler-systems][297646][roctracer]> Outputting 'rocprofsys-user-api.inst-output/2025-01-02_19.29/roctracer-297646.json'
-   [rocprofiler-systems][297646][roctracer]> Outputting 'rocprofsys-user-api.inst-output/2025-01-02_19.29/roctracer-297646.txt'
-   [rocprofiler-systems][297646][metadata]> Outputting 'rocprofsys-user-api.inst-output/2025-01-02_19.29/metadata-297646.json' and 'rocprofsys-user-api.inst-output/2025-01-02_19.29/functions-297646.json'
-   [rocprof-sys][297646][0][rocprofsys_finalize] Finalized: 0.314368 sec wall_clock,   19.040 MB peak_rss,    3.498 MB page_rss, 0.280000 sec cpu_clock,   89.1 % cpu_util
-   [107.243]       perfetto.cc:49204 Tracing session 1 ended, total sessions:0
+   [rocprof-sys][1827155][0][rocprofsys_finalize] finalizing...
+   [rocprof-sys][1827155][0][rocprofsys_finalize]
+   [rocprof-sys][1827155][0][rocprofsys_finalize] rocprofsys/process/1827155 : 0.137404 sec wall_clock,    6.528 MB peak_rss,    6.685 MB page_rss, 0.540000 sec cpu_clock,  393.0 % cpu_util [laps: 1]
+   [rocprof-sys][1827155][0][rocprofsys_finalize] rocprofsys/process/1827155/thread/0 : 0.135815 sec wall_clock, 0.035171 sec thread_cpu_clock,   25.9 % thread_cpu_util,    6.016 MB peak_rss [laps: 1]
+   [rocprof-sys][1827155][0][rocprofsys_finalize] rocprofsys/process/1827155/thread/1 : 0.028336 sec wall_clock, 0.028336 sec thread_cpu_clock,  100.0 % thread_cpu_util,    0.640 MB peak_rss [laps: 1]
+   [rocprof-sys][1827155][0][rocprofsys_finalize] rocprofsys/process/1827155/thread/2 : 0.030380 sec wall_clock, 0.030380 sec thread_cpu_clock,  100.0 % thread_cpu_util,    3.840 MB peak_rss [laps: 1]
+   [rocprof-sys][1827155][0][rocprofsys_finalize] rocprofsys/process/1827155/thread/3 : 0.035233 sec wall_clock, 0.035227 sec thread_cpu_clock,  100.0 % thread_cpu_util,    3.840 MB peak_rss [laps: 1]
+   [rocprof-sys][1827155][0][rocprofsys_finalize] rocprofsys/process/1827155/thread/4 : 0.035275 sec wall_clock, 0.035267 sec thread_cpu_clock,  100.0 % thread_cpu_util,    3.840 MB peak_rss [laps: 1]
+   [rocprof-sys][1827155][0][rocprofsys_finalize] rocprofsys/process/1827155/thread/5 : 0.035452 sec wall_clock, 0.035452 sec thread_cpu_clock,  100.0 % thread_cpu_util,    3.840 MB peak_rss [laps: 1]
+   [rocprof-sys][1827155][0][rocprofsys_finalize] rocprofsys/process/1827155/thread/6 : 0.036198 sec wall_clock, 0.036190 sec thread_cpu_clock,  100.0 % thread_cpu_util,    3.840 MB peak_rss [laps: 1]
+   [rocprof-sys][1827155][0][rocprofsys_finalize] rocprofsys/process/1827155/thread/7 : 0.034709 sec wall_clock, 0.034702 sec thread_cpu_clock,  100.0 % thread_cpu_util,    0.640 MB peak_rss [laps: 1]
+   [rocprof-sys][1827155][0][rocprofsys_finalize] rocprofsys/process/1827155/thread/8 : 0.036590 sec wall_clock, 0.033590 sec thread_cpu_clock,   91.8 % thread_cpu_util,    0.512 MB peak_rss [laps: 1]
+   [rocprof-sys][1827155][0][rocprofsys_finalize] rocprofsys/process/1827155/thread/9 : 0.033108 sec wall_clock, 0.033098 sec thread_cpu_clock,  100.0 % thread_cpu_util,    0.384 MB peak_rss [laps: 1]
+   [rocprof-sys][1827155][0][rocprofsys_finalize] rocprofsys/process/1827155/thread/10 : 0.032993 sec wall_clock, 0.032994 sec thread_cpu_clock,  100.0 % thread_cpu_util,    0.256 MB peak_rss [laps: 1]
+   [rocprof-sys][1827155][0][rocprofsys_finalize] rocprofsys/process/1827155/thread/11 : 0.035687 sec wall_clock, 0.035368 sec thread_cpu_clock,   99.1 % thread_cpu_util,    0.128 MB peak_rss [laps: 1]
+   [rocprof-sys][1827155][0][rocprofsys_finalize] rocprofsys/process/1827155/thread/12 : 0.035359 sec wall_clock, 0.035354 sec thread_cpu_clock,  100.0 % thread_cpu_util,    0.128 MB peak_rss [laps: 1]
+   [rocprof-sys][1827155][0][rocprofsys_finalize]
+   [rocprof-sys][1827155][0][rocprofsys_finalize] Finalizing perfetto...
+   [rocprofiler-systems][1827155][perfetto]> Outputting '/home/rocm-dev/opt/user-api-test/rocprofsys-user-api.inst-output/2025-01-15_17.57/perfetto-trace-1827155.proto' (17.20 KB / 0.02 MB / 0.00 GB)... Done
+   [rocprofiler-systems][1827155][wall_clock]> Outputting 'rocprofsys-user-api.inst-output/2025-01-15_17.57/wall_clock-1827155.json'
+   [rocprofiler-systems][1827155][wall_clock]> Outputting 'rocprofsys-user-api.inst-output/2025-01-15_17.57/wall_clock-1827155.txt'
+   [rocprofiler-systems][1827155][metadata]> Outputting 'rocprofsys-user-api.inst-output/2025-01-15_17.57/metadata-1827155.json' and 'rocprofsys-user-api.inst-output/2025-01-15_17.57/functions-1827155.json'
+   [rocprof-sys][1827155][0][rocprofsys_finalize] Finalized: 0.048039 sec wall_clock,    0.640 MB peak_rss,    0.655 MB page_rss, 0.020000 sec cpu_clock,   41.6 % cpu_util
+   [790.953]       perfetto.cc:49204 Tracing session 1 ended, total sessions:0
 
 Then review the output.
 

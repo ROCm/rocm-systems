@@ -713,20 +713,11 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             }
         });
 
-    std::set<std::string> _backend_choices = { "all",
-                                               "kokkosp",
-                                               "mpip",
-                                               "ompt",
-                                               "rcclp",
-                                               "rocm-smi",
-                                               "roctracer",
-                                               "rocprofiler",
-                                               "roctx",
-                                               "mutex-locks",
-                                               "spin-locks",
-                                               "rw-locks",
-                                               "rocprofiler-sdk",
-                                               "rocm" };
+    std::set<std::string> _backend_choices = {
+        "all",      "kokkosp",         "mpip",        "ompt",
+        "rcclp",    "rocm-smi",        "mutex-locks", "spin-locks",
+        "rw-locks", "rocprofiler-sdk", "rocm"
+    };
 
 #if !defined(ROCPROFSYS_USE_MPI) && !defined(ROCPROFSYS_USE_MPI_HEADERS)
     _backend_choices.erase("mpip");

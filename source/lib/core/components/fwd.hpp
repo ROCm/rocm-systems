@@ -39,8 +39,6 @@
 
 #include <type_traits>
 
-ROCPROFSYS_DECLARE_COMPONENT(roctracer)
-ROCPROFSYS_DECLARE_COMPONENT(rocprofiler)
 ROCPROFSYS_DECLARE_COMPONENT(rcclp_handle)
 ROCPROFSYS_DECLARE_COMPONENT(comm_data)
 
@@ -127,12 +125,6 @@ ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_gpu_memory, f
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_gpu_vcn, false_type)
 #endif
 
-TIMEMORY_SET_COMPONENT_API(rocprofsys::component::roctracer, project::rocprofsys,
-                           tpls::rocm, device::gpu, os::supports_linux,
-                           category::external)
-TIMEMORY_SET_COMPONENT_API(rocprofsys::component::rocprofiler, project::rocprofsys,
-                           tpls::rocm, device::gpu, os::supports_linux,
-                           category::external, category::hardware_counter)
 TIMEMORY_SET_COMPONENT_API(rocprofsys::component::sampling_wall_clock,
                            project::rocprofsys, category::timing, os::supports_unix,
                            category::sampling, category::interrupt_sampling)
@@ -160,10 +152,6 @@ TIMEMORY_SET_COMPONENT_API(rocprofsys::component::sampling_gpu_vcn, project::roc
                            tpls::rocm, device::gpu, os::supports_linux,
                            category::sampling, category::process_sampling)
 
-TIMEMORY_METADATA_SPECIALIZATION(rocprofsys::component::roctracer, "roctracer",
-                                 "High-precision ROCm API and kernel tracing", "")
-TIMEMORY_METADATA_SPECIALIZATION(rocprofsys::component::rocprofiler, "rocprofiler",
-                                 "ROCm kernel hardware counters", "")
 TIMEMORY_METADATA_SPECIALIZATION(rocprofsys::component::sampling_wall_clock,
                                  "sampling_wall_clock", "Wall-clock timing",
                                  "Derived from statistical sampling")

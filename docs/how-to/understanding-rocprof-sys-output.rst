@@ -77,164 +77,207 @@ Metadata JSON Sample
 .. code-block:: json
 
    {
-      "rocprof-sys": {
+      "rocprofiler-systems": {
          "metadata": {
-               "info": {
-                  "HW_L1_CACHE_SIZE": 32768,
-                  "HW_L2_CACHE_SIZE": 524288,
-                  "HW_L3_CACHE_SIZE": 16777216,
-                  "HW_PHYSICAL_CPU": 12,
-                  "HW_CONCURRENCY": 24,
-                  "LAUNCH_TIME": "02:04",
-                  "LAUNCH_DATE": "05/08/22",
-                  "TIMEMORY_GIT_REVISION": "52e7034fd419ff296506cdef43084f6071dbaba1",
-                  "TIMEMORY_VERSION": "3.3.0rc4",
-                  "TIMEMORY_API": "tim::project::timemory",
-                  "TIMEMORY_GIT_DESCRIBE": "v3.2.0-263-g52e7034f",
-                  "PWD": "/home/jrmadsen/devel/c++/AARInternal/hosttrace-dyninst/build-vscode",
-                  "USER": "jrmadsen",
-                  "HOME": "/home/jrmadsen",
-                  "SHELL": "/bin/bash",
-                  "CPU_MODEL": "AMD Ryzen Threadripper PRO 3945WX 12-Cores",
-                  "CPU_FREQUENCY": 2400,
-                  "CPU_VENDOR": "AuthenticAMD",
-                  "CPU_FEATURES": [
-                     "fpu",
-                     "msr",
-                     "sse",
-                     "sse2",
-                     "constant_tsc",
-                     "ssse3",
-                     "fma",
-                     "sse4_1",
-                     "sse4_2",
-                     "popcnt",
-                     "avx2",
-                     "... etc. ..."
-                  ],
-                  "memory_maps": [
-                     {
-                           "end_address": "7f4013797000",
-                           "start_address": "7f4012e58000",
-                           "pathname": "/opt/rocm-5.0.0/hip/lib/libamdhip64.so.5.0.50000",
-                           "offset": "34a000",
-                           "device": "103:05",
-                           "inode": 4331165,
-                           "permissions": "rw-p"
-                     },
-                     {
-                           "end_address": "7f4013902000",
-                           "start_address": "7f4013901000",
-                           "pathname": "/usr/lib/x86_64-linux-gnu/libm-2.31.so",
-                           "offset": "14d000",
-                           "device": "103:05",
-                           "inode": 42078854,
-                           "permissions": "rwxp"
-                     },
-                     {
-                           "end_address": "7f4013919000",
-                           "start_address": "7f4013908000",
-                           "pathname": "/usr/lib/x86_64-linux-gnu/libpthread-2.31.so",
-                           "offset": "6000",
-                           "device": "103:05",
-                           "inode": 42078874,
-                           "permissions": "r-xp"
-                     },
-                     {
-                           "...": "etc."
-                     },
-                  ],
-                  "memory_maps_files": [
-                     "/opt/rocm-5.0.0/hip/lib/libamdhip64.so.5.0.50000",
-                     "/opt/rocm-5.0.0/hsa-amd-aqlprofile/lib/libhsa-amd-aqlprofile64.so.1.0.50000",
-                     "/opt/rocm-5.0.0/lib/libamd_comgr.so.2.4.50000",
-                     "/opt/rocm-5.0.0/lib/libhsa-runtime64.so.1.5.50000",
-                     "/opt/rocm-5.0.0/rocm_smi/lib/librocm_smi64.so.5.0.50000",
-                     "/opt/rocm-5.0.0/roctracer/lib/libroctracer64.so.1.0.50000",
-                     "/usr/lib/x86_64-linux-gnu/ld-2.31.so",
-                     "/usr/lib/x86_64-linux-gnu/libc-2.31.so",
-                     "/usr/lib/x86_64-linux-gnu/libdl-2.31.so",
-                     "... etc. ..."
-                  ],
-               },
-               "output": {
-                  "text": [
-                     {
-                           "value": [
-                              "rocprof-sys-tests-output/parallel-overhead-binary-rewrite/roctracer.txt"
-                           ],
-                           "key": "roctracer"
-                     },
-                     {
-                           "value": [
-                              "rocprof-sys-tests-output/parallel-overhead-binary-rewrite/wall_clock.txt"
-                           ],
-                           "key": "wall_clock"
-                     }
-                  ],
-                  "json": [
-                     {
-                           "value": [
-                              "rocprof-sys-tests-output/parallel-overhead-binary-rewrite/roctracer.json",
-                              "rocprof-sys-tests-output/parallel-overhead-binary-rewrite/roctracer.tree.json"
-                           ],
-                           "key": "roctracer"
-                     },
-                     {
-                           "value": [
-                              "rocprof-sys-tests-output/parallel-overhead-binary-rewrite/wall_clock.json",
-                              "rocprof-sys-tests-output/parallel-overhead-binary-rewrite/wall_clock.tree.json"
-                           ],
-                           "key": "wall_clock"
-                     }
-                  ]
-               },
-               "environment": [
-                  {
-                     "value": "/home/jrmadsen",
-                     "key": "HOME"
-                  },
-                  {
-                     "value": "/bin/bash",
-                     "key": "SHELL"
-                  },
-                  {
-                     "value": "jrmadsen",
-                     "key": "USER"
-                  },
-                  {
-                     "value": "true",
-                     "key": "... etc. ..."
-                  }
+            "info": {
+            "CPU_MODEL": "AMD Ryzen 5 3600 6-Core Processor",
+            "CPU_VENDOR": "AuthenticAMD",
+            "HOME": "/home/rocm-dev",
+            "LAUNCH_DATE": "01/15/25",
+            "LAUNCH_TIME": "16:49",
+            "PWD": "/home/rocm-dev/code/rocprofiler-systems",
+            "ROCPROFSYS_COMPILER_ID": "GNU",
+            "ROCPROFSYS_COMPILER_VERSION": "11.4.0",
+            "ROCPROFSYS_GIT_DESCRIBE": "",
+            "ROCPROFSYS_GIT_REVISION": "3213dc652728f7ed01b62bf55f6af76c43bfcbdb",
+            "ROCPROFSYS_LIBRARY_ARCH": "x86_64-linux-gnu",
+            "ROCPROFSYS_ROCM_VERSION": "6.3.1",
+            "ROCPROFSYS_SYSTEM_NAME": "Linux",
+            "ROCPROFSYS_SYSTEM_PROCESSOR": "x86_64",
+            "ROCPROFSYS_SYSTEM_VERSION": "6.8.0-51-generic",
+            "ROCPROFSYS_VERSION": "1.0.0",
+            "SHELL": "/usr/bin/zsh",
+            "TIMEMORY_API": "tim::project::timemory",
+            "TIMEMORY_GIT_DESCRIBE": "v3.2.0-703-gba3c6486",
+            "TIMEMORY_GIT_REVISION": "ba3c648677b3c6f217abe147ef3198f36239e234",
+            "TIMEMORY_VERSION": "4.0.0rc0",
+            "USER": "rocm-dev",
+            "CPU_FREQUENCY": 1972,
+            "CPU_FEATURES": [
+               "fpu",
+               "vme",
+               "de",
+               "pse",
+               "tsc",
+               "msr",
+               "pae",
+               "... etc. ..."
+            ],
+            "HW_CONCURRENCY": 12,
+            "HW_PHYSICAL_CPU": 6,
+            "HW_L1_CACHE_SIZE": 32768,
+            "HW_L2_CACHE_SIZE": 524288,
+            "HW_L3_CACHE_SIZE": 16777216,
+            "ROCPROFSYS_VERSION_MAJOR": 1,
+            "ROCPROFSYS_VERSION_MINOR": 0,
+            "ROCPROFSYS_VERSION_PATCH": 0,
+            "ROCPROFSYS_ROCM_VERSION_MAJOR": 6,
+            "ROCPROFSYS_ROCM_VERSION_MINOR": 3,
+            "ROCPROFSYS_ROCM_VERSION_PATCH": 1,
+            "memory_maps_files": [
+               "/opt/rocm-6.3.1/lib/libhsa-amd-aqlprofile64.so.1.0.60301",
+               "/opt/rocm-6.3.1/lib/libhsa-runtime64.so.1.14.60301",
+               "/opt/rocm-6.3.1/lib/librocm_smi64.so.7.4.60301",
+               "/opt/rocm-6.3.1/lib/librocprofiler-register.so.0.4.0",
+               "/opt/rocm-6.3.1/lib/librocprofiler-sdk.so.0.5.0",
+               "/opt/rocm/lib/libhsa-amd-aqlprofile64.so.1",
+               "/opt/rocm/lib/libhsa-runtime64.so.1",
+               "/opt/rocm/lib/librocm_smi64.so.7",
+               "/opt/rocm/lib/librocprofiler-register.so.0",
+               "/opt/rocm/lib/librocprofiler-sdk.so.0",
+               "... etc. ..."
                ],
-               "settings": {
-                  "ROCPROFSYS_JSON_OUTPUT": {
-                     "count": -1,
-                     "environ_updated": false,
-                     "name": "json_output",
-                     "data_type": "bool",
-                     "initial": true,
-                     "enabled": true,
-                     "value": true,
-                     "max_count": 1,
-                     "cmdline": [
-                           "--rocprof-sys-json-output"
-                     ],
-                     "environ": "ROCPROFSYS_JSON_OUTPUT",
-                     "config_updated": false,
-                     "categories": [
-                           "io",
-                           "json",
-                           "native"
-                     ],
-                     "description": "Write json output files"
-                  },
-                  "... etc. ...": {
-                     "etc.": true
-                  }
+            "memory_maps": [
+               {
+                  "cereal_class_version": 0,
+                  "load_address": "76005b800000",
+                  "last_address": "76005b81b000",
+                  "permissions": "r---",
+                  "offset": "0",
+                  "device": "",
+                  "inode": 0,
+                  "pathname": "/opt/rocm/lib/libhsa-runtime64.so.1"
+               },
+               {
+                  "load_address": "76005b81b000",
+                  "last_address": "76005b93400d",
+                  "permissions": "r-x-",
+                  "offset": "1b000",
+                  "device": "",
+                  "inode": 0,
+                  "pathname": "/opt/rocm/lib/libhsa-runtime64.so.1"
+               },
+               {
+                  "load_address": "76005b935000",
+                  "last_address": "76005b9aeab8",
+                  "permissions": "r---",
+                  "offset": "135000",
+                  "device": "",
+                  "inode": 0,
+                  "pathname": "/opt/rocm/lib/libhsa-runtime64.so.1"
+               },
+               {
+                  "load_address": "76005b9b0638",
+                  "last_address": "76005bb2d598",
+                  "permissions": "rw--",
+                  "offset": "1af638",
+                  "device": "",
+                  "inode": 0,
+                  "pathname": "/opt/rocm/lib/libhsa-runtime64.so.1"
+               },
+               {
+                  "load_address": "76005bc00000",
+                  "last_address": "76005bc26140",
+                  "permissions": "r---",
+                  "offset": "0",
+                  "device": "",
+                  "inode": 0,
+                  "pathname": "/opt/rocm/lib/librocprofiler-sdk.so.0"
+               },
+               {
+                  "... etc. ..."
                }
-         }
-      }
+            ],
+         "settings": {
+            "cereal_class_version": 2,
+            "ROCPROFSYS_OUTPUT_PREFIX": {
+               "name": "output_prefix",
+               "environ": "ROCPROFSYS_OUTPUT_PREFIX",
+               "description": "Explicitly specify a prefix for all output files",
+               "count": 1,
+               "max_count": -1,
+               "cmdline": [
+                  "--rocprofiler-systems-output-prefix"
+               ],
+               "categories": [
+                  "filename",
+                  "io",
+                  "librocprof-sys",
+                  "native",
+                  "rocprofsys"
+               ],
+               "data_type": "string",
+               "initial": "parallel-overhead-binary-rewrite/",
+               "value": "parallel-overhead-binary-rewrite/",
+               "updated": "config",
+               "enabled": true
+            },
+            {
+               ... etc. ...
+            },
+            "command_line": [
+               "/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/parallel-overhead.inst",
+               "--",
+               "10",
+               "12",
+               "1000"
+            ],
+            "environment": [
+                  ... etc . ...
+            ]
+         },
+         "environment": [
+            {
+               "key": "GOTCHA_DEBUG",
+               "value": "0"
+            },
+            {
+               "key": "HIP_VISIBLE_DEVICES",
+               "value": ""
+            },
+            {
+               "key": "HOME",
+               "value": "/home/rocm-dev"
+            },
+            {
+               "key": "LD_LIBRARY_PATH",
+               "value": "/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/lib:/opt/rocm/lib"
+            },
+            {
+               "key": "LIBRARY_PATH",
+               "value": ""
+            },
+            {
+               etc ...
+            }
+         ]
+         "output": {
+            "json": [
+               {
+                  "key": "wall_clock",
+                  "value": [
+                    "/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/rocprof-sys-tests-output/parallel-overhead-binary-rewrite/wall_clock.json"
+                  ]
+               }
+            ],
+            "protobuf": [
+               {
+                  "key": "perfetto",
+                  "value": [
+                   "/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/rocprof-sys-tests-output/parallel-overhead-binary-rewrite/perfetto-trace.proto"
+                  ]
+               }
+            ],
+            "text": [
+               {
+                  "key": "wall_clock",
+                  "value": [
+                     "/home/rocm-dev/code/rocprofiler-systems/build/ubuntu/22.04/rocprof-sys-tests-output/parallel-overhead-binary-rewrite/wall_clock.txt"
+                  ]
+               }
+            ]
+         },
+      },
    }
 
 Configuring the ROCm Systems Profiler output

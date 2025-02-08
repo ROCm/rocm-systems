@@ -126,7 +126,6 @@ backtrace::filter_and_patch(const std::vector<entry_type>& _data)
         if(_lbl.find("DYNINST_") != _npos) return 0;
         if(_lbl.find("rocprofsys_") != _npos) return -1;
         if(_lbl.find("rocprofiler_") != _npos) return -1;
-        if(_lbl.find("roctracer_") != _npos) return -1;
         if(_lbl.find("perfetto::") != _npos) return -1;
         if(_lbl.find("protozero::") == 0) return -1;
         if(_lbl.find("gotcha_") != _npos) return -1;

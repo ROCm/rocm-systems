@@ -121,7 +121,7 @@ stop_bundle(bundle_t& _bundle, int64_t _tid, Args&&... _args)
     {
         auto _wc = *_bundle.get<comp::wall_clock>();
         _wc.stop();
-        // update roctracer_data
+        // update data
         _bundle.store(std::plus<double>{}, _wc.get() * _wc.unit());
         // stop all
         _bundle.stop();

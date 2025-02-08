@@ -39,7 +39,7 @@ namespace rocprofsys
 //  InternalTID:  zero-based, process-local thread-ID from atomic increment
 //                from user-created threads and rocprof-sys-created threads.
 //                This value may vary based on threads created by different
-//                backends, e.g., roctracer will create threads
+//                backends.
 //
 //  SystemTID:    system thread-ID. Should be same value as what is seen
 //                in debugger, etc.
