@@ -1830,6 +1830,10 @@ static void *fmm_allocate_host_gpu(uint32_t gpu_id, uint32_t node_id, void *addr
 	if (mflags.ui32.AQLQueueMemory)
 		size = MemorySizeInBytes * 2;
 
+	/* special case for va allocation without real memory alloc */
+	if (mflags.ui32.OnlyAddress)
+		return fmm_allocate_va(gpu_id, address, size, aperture, alignment, mflags);
+
 	/* Paged memory is allocated as a userptr mapping, non-paged
 	 * memory is allocated from KFD
 	 */
