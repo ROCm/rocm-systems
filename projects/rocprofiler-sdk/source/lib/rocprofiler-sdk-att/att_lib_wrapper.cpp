@@ -74,7 +74,7 @@ ATTFileMgr::parseShader(int se_id, const std::vector<char>& data)
     WaveConfig config(se_id, filenames, codefile, wstates);
     ToolData   tooldata(data, config, dl);
 
-    if(config.occupancy.size()) occupancy.emplace(se_id, std::move(config.occupancy));
+    if(!config.occupancy.empty()) occupancy.emplace(se_id, std::move(config.occupancy));
 
     for(auto& [pc, kernel] : config.kernel_names)
         codefile->kernel_names.emplace(pc, std::move(kernel));
@@ -101,7 +101,7 @@ query_att_decode_capability()
 
     for(auto& [cap, libname] : get_lib_names())
     {
-        if(DL(libname).handle != 0) ret.push_back(cap);
+        if(DL(libname).handle != nullptr) ret.push_back(cap);
     }
 
     return ret;
@@ -134,7 +134,7 @@ ATTDecoder::parse(const Fspath&                       input_dir,
 
     ATTFileMgr mgr(output_dir, dl);
 
-    for(auto& file : codeobj_files)
+    for(const auto& file : codeobj_files)
     {
         if(file.name.find("memory://") == 0)
         {
@@ -151,7 +151,7 @@ ATTDecoder::parse(const Fspath&                       input_dir,
         }
     }
 
-    for(auto& shader : att_files)
+    for(const auto& shader : att_files)
     {
         int shader_id = 0;
         try
@@ -186,7 +186,8 @@ ATTDecoder::parse(const Fspath&                       input_dir,
 bool
 ATTDecoder::valid() const
 {
-    return dl && dl->att_parse_data_fn && dl->att_info_fn && dl->att_status_fn;
+    return dl && (dl->att_parse_data_fn != nullptr) && (dl->att_info_fn != nullptr) &&
+           (dl->att_status_fn != nullptr);
 }
 
 }  // namespace att_wrapper

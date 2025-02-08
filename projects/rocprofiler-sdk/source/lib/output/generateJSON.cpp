@@ -125,7 +125,7 @@ write_json(json_output&         json_ar,
         auto att_filenames                  = tool_metadata.get_att_filenames();
         auto code_object_snapshot_filenames = std::vector<std::string>{};
         code_object_snapshot_filenames.reserve(code_object_load_info.size());
-        for(auto info : code_object_load_info)
+        for(const auto& info : code_object_load_info)
         {
             code_object_snapshot_filenames.emplace_back(fs::path(info.name).filename());
         }

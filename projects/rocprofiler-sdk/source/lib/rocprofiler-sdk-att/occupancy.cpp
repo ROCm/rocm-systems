@@ -73,18 +73,20 @@ convert(const att_occupancy_info_v2_t& v2)
     return v1.raw;
 };
 
+namespace OccupancyFile
+{
 void
-OccupancyFile::OccupancyFile(const Fspath&                                                 dir,
-                             std::shared_ptr<AddressTable>                                 table,
-                             const std::map<size_t, std::vector<att_occupancy_info_v2_t>>& occ)
+OccupancyFile(const Fspath&                                                 dir,
+              std::shared_ptr<AddressTable>&                                table,
+              const std::map<size_t, std::vector<att_occupancy_info_v2_t>>& occ)
 {
     if(!GlobalDefs::get().has_format("json")) return;
     nlohmann::json jocc;
 
-    for(auto& [se, eventlist] : occ)
+    for(const auto& [se, eventlist] : occ)
     {
         nlohmann::json list;
-        for(auto& event : eventlist)
+        for(const auto& event : eventlist)
             list.push_back(convert(event));
         jocc[std::to_string(se)] = list;
     }
@@ -104,6 +106,7 @@ OccupancyFile::OccupancyFile(const Fspath&                                      
 
     OutputFile(dir / "occupancy.json") << jocc;
 }
+}  // namespace OccupancyFile
 
 }  // namespace att_wrapper
 }  // namespace rocprofiler

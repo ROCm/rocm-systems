@@ -183,13 +183,13 @@ ToolData::ToolData(const std::vector<char>& _data, WaveConfig& _config, std::sha
         ROCP_ERROR << "Callback failed with status " << dl->att_status_fn(status);
 }
 
-ToolData::~ToolData() {}
+ToolData::~ToolData() = default;
 
 std::string
 demangle(std::string_view line)
 {
     int   status;
-    char* c_name = abi::__cxa_demangle(line.data(), 0, 0, &status);
+    char* c_name = abi::__cxa_demangle(line.data(), nullptr, nullptr, &status);
 
     if(c_name == nullptr) return "";
 
@@ -205,7 +205,7 @@ ToolData::get(pcinfo_t _pc)
     if(isa_map.find(_pc) != isa_map.end()) return *isa_map.at(_pc);
 
     // Attempt to disassemble full kernel
-    if(_pc.marker_id) try
+    if(_pc.marker_id != 0u) try
         {
             rocprofiler::sdk::codeobj::segment::CodeobjTableTranslator symbol_table;
             for(auto& [vaddr, symbol] : cfile->table->getSymbolMap(_pc.marker_id))
@@ -232,7 +232,7 @@ ToolData::get(pcinfo_t _pc)
 
                 cline.code_line = cfile->table->get(addr_range.id, addr);
                 addr += cline.code_line->size;
-                if(!cline.code_line->size) throw std::invalid_argument("Line has 0 bytes!");
+                if(cline.code_line->size == 0u) throw std::invalid_argument("Line has 0 bytes!");
             }
 
             if(isa_map.find(_pc) != isa_map.end()) return *isa_map.at(_pc);

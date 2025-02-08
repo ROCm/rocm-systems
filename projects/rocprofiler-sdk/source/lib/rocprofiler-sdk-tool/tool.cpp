@@ -1394,7 +1394,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         parameters.push_back({ROCPROFILER_ATT_PARAMETER_SIMD_SELECT, {simd_select}});
         parameters.push_back({ROCPROFILER_ATT_PARAMETER_BUFFER_SIZE, {buffer_sz}});
         parameters.push_back({ROCPROFILER_ATT_PARAMETER_SHADER_ENGINE_MASK, {shader_mask}});
-        parameters.push_back({ROCPROFILER_ATT_PARAMETER_SERIALIZE_ALL, {att_serialize_all}});
+        parameters.push_back(
+            {ROCPROFILER_ATT_PARAMETER_SERIALIZE_ALL, {static_cast<uint64_t>(att_serialize_all)}});
 
         ROCPROFILER_CALL(
             rocprofiler_configure_dispatch_thread_trace_service(get_client_ctx(),

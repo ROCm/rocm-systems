@@ -240,9 +240,9 @@ std::vector<std::string>
 metadata::get_att_filenames() const
 {
     auto data = std::vector<std::string>{};
-    for(auto filenames : att_filenames)
+    for(const auto& filenames : att_filenames)
     {
-        for(auto file : filenames.second.second)
+        for(const auto& file : filenames.second.second)
         {
             data.emplace_back(fs::path(file).filename());
         }

@@ -93,14 +93,14 @@ TEST(att_decoder_waitcnt_test, gfx9)
     wave.instructions_array = insts.data();
     wave.instructions_size  = insts.size();
 
-    auto& data = WaitcntList::Get(9, wave, isa_map);
+    const auto& data = WaitcntList::Get(9, wave, isa_map);
 
     std::map<int, std::set<int>> dependencies{};
 
-    for(auto& [dst, src] : data.mem_unroll)
+    for(const auto& [dst, src] : data.mem_unroll)
     {
         auto& dep = dependencies[dst];
-        for(auto& p : src)
+        for(const auto& p : src)
             dep.insert(p);
     }
 
@@ -183,14 +183,14 @@ TEST(att_decoder_waitcnt_test, gfx10)
     wave.instructions_array = insts.data();
     wave.instructions_size  = insts.size();
 
-    auto& data = WaitcntList::Get(10, wave, isa_map);
+    const auto& data = WaitcntList::Get(10, wave, isa_map);
 
     std::map<int, std::set<int>> dependencies{};
 
-    for(auto& [dst, src] : data.mem_unroll)
+    for(const auto& [dst, src] : data.mem_unroll)
     {
         auto& dep = dependencies[dst];
-        for(auto& p : src)
+        for(const auto& p : src)
             dep.insert(p);
     }
 
@@ -300,14 +300,14 @@ TEST(att_decoder_waitcnt_test, gfx12)
     wave.instructions_array = insts.data();
     wave.instructions_size  = insts.size();
 
-    auto& data = WaitcntList::Get(12, wave, isa_map);
+    const auto& data = WaitcntList::Get(12, wave, isa_map);
 
     std::map<int, std::set<int>> dependencies{};
 
-    for(auto& [dst, src] : data.mem_unroll)
+    for(const auto& [dst, src] : data.mem_unroll)
     {
         auto& dep = dependencies[dst];
-        for(auto& p : src)
+        for(const auto& p : src)
             dep.insert(p);
     }
 

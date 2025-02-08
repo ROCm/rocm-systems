@@ -38,7 +38,7 @@ WstatesFile::WstatesFile(int state, const Fspath& dir)
 
 WstatesFile::~WstatesFile()
 {
-    if(!events.size() || !GlobalDefs::get().has_format("json")) return;
+    if(events.empty() || !GlobalDefs::get().has_format("json")) return;
 
     std::sort(events.begin(), events.end(), [](const event_t& a, const event_t& b) {
         return a.first < b.first;
@@ -52,7 +52,7 @@ WstatesFile::~WstatesFile()
     for(auto& [time, value] : events)
     {
         accum += value;
-        if(!jtime.size() || time != prev_time)
+        if(jtime.empty() || time != prev_time)
         {
             jtime.push_back(time);
             jstate.push_back(accum);

@@ -38,7 +38,7 @@ using AddressTable = rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTrans
 
 void
 OccupancyFile(const Fspath&                                                 dir,
-              std::shared_ptr<AddressTable>                                 table,
+              std::shared_ptr<AddressTable>&                                table,
               const std::map<size_t, std::vector<att_occupancy_info_v2_t>>& occ);
 };  // namespace OccupancyFile
 
