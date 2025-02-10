@@ -57,11 +57,16 @@ CounterAQLPacket::CounterMemoryPool::Alloc(void** ptr, size_t size, desc_t flags
 
     hsa_status_t status;
     if(!pool.bIgnoreKernArg && flags.memory_hint == AQLPROFILE_MEMORY_HINT_DEVICE_UNCACHED)
-        status = pool.allocate_fn(pool.kernarg_pool_, size, 0, ptr);
+        status =
+            pool.allocate_fn(pool.kernarg_pool_, size, hsa_amd_memory_pool_executable_flag, ptr);
     else
-        status = pool.allocate_fn(pool.cpu_pool_, size, 0, ptr);
+        status = pool.allocate_fn(pool.cpu_pool_, size, hsa_amd_memory_pool_executable_flag, ptr);
 
-    if(status != HSA_STATUS_SUCCESS) return status;
+    if(status != HSA_STATUS_SUCCESS)
+    {
+        ROCP_FATAL << "Could not allocate memory";
+        return status;
+    }
 
     status = pool.fill_fn(*ptr, 0u, size / sizeof(uint32_t));
     if(status != HSA_STATUS_SUCCESS) return status;
@@ -149,7 +154,7 @@ TraceMemoryPool::Alloc(void** ptr, size_t size, desc_t flags, void* data)
     hsa_status_t status = HSA_STATUS_ERROR;
     if(flags.host_access)
     {
-        status = pool.allocate_fn(pool.cpu_pool_, size, 0, ptr);
+        status = pool.allocate_fn(pool.cpu_pool_, size, hsa_amd_memory_pool_executable_flag, ptr);
 
         if(status == HSA_STATUS_SUCCESS)
             status = pool.allow_access_fn(1, &pool.gpu_agent, nullptr, *ptr);
@@ -157,7 +162,8 @@ TraceMemoryPool::Alloc(void** ptr, size_t size, desc_t flags, void* data)
     else
     {
         // Return page aligned data to avoid cache flush overlap
-        status = pool.allocate_fn(pool.gpu_pool_, size + 0x2000, 0, ptr);
+        status = pool.allocate_fn(
+            pool.gpu_pool_, size + 0x2000, hsa_amd_memory_pool_executable_flag, ptr);
         *ptr = (void*) ((uintptr_t(*ptr) + 0xFFF) & ~0xFFFul);  // NOLINT(performance-no-int-to-ptr)
     }
     return status;

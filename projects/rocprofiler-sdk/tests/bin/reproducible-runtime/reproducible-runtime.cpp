@@ -58,7 +58,7 @@ namespace
 using auto_lock_t   = std::unique_lock<std::mutex>;
 auto     print_lock = std::mutex{};
 double   nruntime   = 500.0;  // ms
-uint32_t nspin      = 256 * 10000;
+uint32_t nspin      = 128 * 10000;
 size_t   nthreads   = 2;
 
 void
@@ -144,7 +144,7 @@ run(int tid, int devid)
     do
     {
         roctxMark("iteration");
-        uint32_t cyclesleft = 2000 * 1000 * (nruntime - static_cast<double>(time));
+        uint32_t cyclesleft = 1000 * 1000 * (nruntime - static_cast<double>(time));
         HIP_API_CALL(hipEventRecord(start, stream));
         reproducible_runtime<<<grid, block, 0, stream>>>(std::min<uint32_t>(nspin, cyclesleft));
         HIP_API_CALL(hipEventRecord(stop, stream));

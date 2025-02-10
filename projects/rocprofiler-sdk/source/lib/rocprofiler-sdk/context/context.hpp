@@ -199,6 +199,9 @@ get_active_contexts(context_array_t& data, context_filter_t filter = default_con
 context_array_t
 get_active_contexts(context_filter_t filter = default_context_filter);
 
+const context*
+get_active_context(rocprofiler_context_id_t id);
+
 /// \brief disable the contexturation.
 rocprofiler_status_t
 stop_client_contexts(rocprofiler_client_id_t id);

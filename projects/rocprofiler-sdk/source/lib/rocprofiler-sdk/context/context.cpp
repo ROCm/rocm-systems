@@ -172,6 +172,20 @@ get_active_contexts(context_filter_t filter)
     return data;
 }
 
+const context*
+get_active_context(rocprofiler_context_id_t id)
+{
+    if(get_num_active_contexts().load(std::memory_order_acquire) > 0)
+    {
+        for(auto& itr : get_active_contexts_impl())
+        {
+            const auto* ctx = itr.load(std::memory_order_acquire);
+            if(ctx && ctx->context_idx == id.handle) return ctx;
+        }
+    }
+    return nullptr;
+}
+
 // set the client index needs to be called before allocate_context()
 void
 push_client(uint32_t value)

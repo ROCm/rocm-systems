@@ -24,6 +24,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -37,6 +38,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include <rocprofiler-sdk/buffer.h>
+#include <rocprofiler-sdk/context.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
@@ -79,7 +82,7 @@ public:
 
     // Get the dimensions of a record (what CU/SE/etc the counter is for). High cost operation
     // should be cached if possible.
-    std::unordered_map<std::string, size_t> get_record_dimensions(
+    static std::unordered_map<std::string, size_t> get_record_dimensions(
         const rocprofiler_record_counter_t& rec);
 
     // Sample the counter values for a set of counters, returns the records in the out parameter.
@@ -89,6 +92,9 @@ public:
     // Get the available agents on the system
     static std::vector<rocprofiler_agent_v0_t> get_available_agents();
 
+    void flush() const { rocprofiler_flush_buffer(buf_); }
+    void stop() const { rocprofiler_stop_context(ctx_); }
+
 private:
     rocprofiler_agent_id_t          agent_   = {};
     rocprofiler_context_id_t        ctx_     = {};
@@ -97,20 +103,21 @@ private:
 
     std::map<std::vector<std::string>, rocprofiler_profile_config_id_t> cached_profiles_;
     std::map<uint64_t, uint64_t>                                        profile_sizes_;
+    mutable std::map<uint64_t, std::string>                             id_to_name_;
 
     // Internal function used to set the profile for the agent when start_context is called
     void set_profile(rocprofiler_context_id_t                 ctx,
                      rocprofiler_agent_set_profile_callback_t cb) const;
 
     // Get the size of a counter in number of records
-    size_t get_counter_size(rocprofiler_counter_id_t counter);
+    static size_t get_counter_size(rocprofiler_counter_id_t counter);
 
     // Get the supported counters for an agent
     static std::unordered_map<std::string, rocprofiler_counter_id_t> get_supported_counters(
         rocprofiler_agent_id_t agent);
 
     // Get the dimensions of a counter
-    std::vector<rocprofiler_record_dimension_info_t> get_counter_dimensions(
+    static std::vector<rocprofiler_record_dimension_info_t> get_counter_dimensions(
         rocprofiler_counter_id_t counter);
 };
 
@@ -161,18 +168,18 @@ counter_sampler::counter_sampler(rocprofiler_agent_id_t agent)
 const std::string&
 counter_sampler::decode_record_name(const rocprofiler_record_counter_t& rec) const
 {
-    static auto roc_counters = [this]() {
+    if(id_to_name_.empty())
+    {
         auto name_to_id = counter_sampler::get_supported_counters(agent_);
-        std::map<uint64_t, std::string> id_to_name;
         for(const auto& [name, id] : name_to_id)
         {
-            id_to_name.emplace(id.handle, name);
+            id_to_name_.emplace(id.handle, name);
         }
-        return id_to_name;
-    }();
+    }
+
     rocprofiler_counter_id_t counter_id = {.handle = 0};
     rocprofiler_query_record_counter_id(rec.id, &counter_id);
-    return roc_counters.at(counter_id.handle);
+    return id_to_name_.at(counter_id.handle);
 }
 
 std::unordered_map<std::string, size_t>
@@ -353,11 +360,22 @@ exit_toggle()
     static std::atomic<bool> exit_toggle = false;
     return exit_toggle;
 }
+
+rocprofiler_client_finalize_t    finalize       = nullptr;
+rocprofiler_client_id_t*         client_id      = nullptr;
+std::shared_ptr<counter_sampler> sampler        = {};
+std::thread*                     sampler_thread = nullptr;
 }  // namespace
 
 int
-tool_init(rocprofiler_client_finalize_t, void*)
+tool_init(rocprofiler_client_finalize_t fini_func, void*)
 {
+    finalize = fini_func;
+
+    std::atexit([]() {
+        if(client_id) finalize(*client_id);
+    });
+
     // Get the agents available on the device
     auto agents = counter_sampler::get_available_agents();
     if(agents.empty())
@@ -367,23 +385,25 @@ tool_init(rocprofiler_client_finalize_t, void*)
     }
 
     // Use the first agent found
-    std::shared_ptr<counter_sampler> sampler = std::make_shared<counter_sampler>(agents[0].id);
+    sampler = std::make_shared<counter_sampler>(agents[0].id);
 
-    std::thread([=]() {
+    sampler_thread = new std::thread{[=]() {
         size_t                                    count = 1;
         std::vector<rocprofiler_record_counter_t> records;
-        while(exit_toggle().load() == false)
+        while(sampler && exit_toggle().load() == false)
         {
             sampler->sample_counter_values({"SQ_WAVES"}, records);
             std::clog << "Sample " << count << ":\n";
             for(const auto& record : records)
             {
-                std::clog << "\tCounter: " << record.id
-                          << " Name: " << sampler->decode_record_name(record)
+                if(!sampler) break;
+                auto recname = sampler->decode_record_name(record);
+                std::clog << "\tCounter: " << record.id << " Name: " << recname
                           << " Value: " << record.counter_value
                           << " User data: " << record.user_data.value << "\n";
                 if(count == 1)
                 {
+                    if(!sampler) break;
                     auto dims = sampler->get_record_dimensions(record);
                     for(const auto& [name, pos] : dims)
                     {
@@ -395,7 +415,7 @@ tool_init(rocprofiler_client_finalize_t, void*)
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
         exit_toggle().store(false);
-    }).detach();
+    }};
 
     // no errors
     return 0;
@@ -404,13 +424,23 @@ tool_init(rocprofiler_client_finalize_t, void*)
 void
 tool_fini(void* user_data)
 {
+    client_id = nullptr;
+
     exit_toggle().store(true);
     while(exit_toggle().load() == true)
     {};
 
+    sampler->stop();
+    sampler->flush();
+
+    sampler_thread->join();
+
     auto* output_stream = static_cast<std::ostream*>(user_data);
     *output_stream << std::flush;
     if(output_stream != &std::cout && output_stream != &std::cerr) delete output_stream;
+
+    sampler.reset();
+    delete sampler_thread;
 }
 
 extern "C" rocprofiler_tool_configure_result_t*
@@ -420,7 +450,8 @@ rocprofiler_configure(uint32_t                 version,
                       rocprofiler_client_id_t* id)
 {
     // set the client name
-    id->name = "CounterClientSample";
+    id->name  = "CounterClientSample";
+    client_id = id;
 
     // compute major/minor/patch version info
     uint32_t major = version / 10000;
