@@ -596,6 +596,9 @@ def run_prof(
         new_env = os.environ.copy()
         new_env["ROCPROFILER_INDIVIDUAL_XCC_MODE"] = "1"
 
+    is_timestamps = False
+    if path(fname).name == "timestamps.txt":
+        is_timestamps = True
     time_1 = time.time()
 
     # profile the app
@@ -686,10 +689,14 @@ def run_prof(
                 results_files_csv = glob.glob(
                     workload_dir + "/out/pmc_1/*/*_converted.csv"
                 )
-            else:
+            elif is_timestamps:
+                # when the input is timestamps, we know counter csv file is not generated and will instead parse kernel trace file
                 results_files_csv = glob.glob(
                     workload_dir + "/out/pmc_1/*/*_kernel_trace.csv"
                 )
+            else:
+                # when the input is not for timestamps, and counter csv file is not generated, we assume failed rocprof run and will completely bypass the file generation and merging for current pmc
+                return
 
         else:
             console_error("The output file of rocprofv3 can only support json or csv!!!")

@@ -39,10 +39,16 @@ class rocprof_v2_profiler(RocProfCompute_Base):
             or not self.get_args().roof_only
         )
 
-    def get_profiler_options(self, fname):
+    def get_profiler_options(self, fname, soc):
         fbase = Path(fname).stem
         app_cmd = shlex.split(self.get_args().remaining)
-        args = [
+
+        args = []
+        # can be removed in the future. It supports gfx908 + v2
+        if soc.get_arch() == "gfx908":
+            args += ["-m", soc.get_workload_perfmon_dir() + "/" + "metrics.xml"]
+
+        args += [
             # v2 requires output directory argument
             "-d",
             self.get_args().path + "/" + "out",

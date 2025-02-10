@@ -98,12 +98,6 @@ class OmniSoC_Base:
         return self.__compatible_profilers
 
     @demarcate
-    def get_profiler_options(self):
-        """Fetch any SoC specific arguments required by the profiler"""
-        # assume no SoC specific options and return empty list by default
-        return []
-
-    @demarcate
     def populate_mspec(self):
         from utils.specs import run, search, total_sqc, total_xcds
 
