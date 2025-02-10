@@ -19,6 +19,10 @@ endif()
 
 project(rocprofiler-tests-bin-reproducible-runtime LANGUAGES CXX HIP)
 
+if(NOT CMAKE_BUILD_TYPE MATCHES "(Release|RelWithDebInfo)")
+    set(CMAKE_BUILD_TYPE "RelWithDebInfo")
+endif()
+
 foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
     if("${CMAKE_HIP_FLAGS_${_TYPE}}" STREQUAL "")
         set(CMAKE_HIP_FLAGS_${_TYPE} "${CMAKE_CXX_FLAGS_${_TYPE}}")

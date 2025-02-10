@@ -25,9 +25,15 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
 #include "lib/rocprofiler-sdk/counters/device_counting.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 #include "rocprofiler-sdk/fwd.h"
 
 #include <string.h>
+
+namespace
+{
+constexpr auto rocprofiler_context_none = ROCPROFILER_CONTEXT_NONE;
+}
 
 extern "C" {
 rocprofiler_status_t
@@ -48,14 +54,26 @@ rocprofiler_sample_device_counting_service(rocprofiler_context_id_t      context
                                            rocprofiler_record_counter_t* output_records,
                                            size_t*                       rec_count)
 {
+    if(context_id == rocprofiler_context_none) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
+
+    // if finalized or finalizing, ignore request
+    if(rocprofiler::registration::get_fini_status() != 0) return ROCPROFILER_STATUS_ERROR_FINALIZED;
+
+    // capture the active context status now
+    const auto* ctx = rocprofiler::context::get_active_context(context_id);
+
+    // do not proceed if context has not been started
+    if(!ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED;
+
     if(output_records != nullptr)
     {
-        if((flags & ROCPROFILER_COUNTER_FLAG_ASYNC) != 0)
+        if(!rec_count || (flags & ROCPROFILER_COUNTER_FLAG_ASYNC) != 0)
             return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-        CHECK(rec_count);
+
+        if(*rec_count == 0) return ROCPROFILER_STATUS_ERROR_OUT_OF_RESOURCES;
+
         auto recs   = std::vector<rocprofiler_record_counter_t>{};
-        auto status = rocprofiler::counters::read_agent_ctx(
-            rocprofiler::context::get_registered_context(context_id), user_data, flags, &recs);
+        auto status = rocprofiler::counters::read_agent_ctx(ctx, user_data, flags, &recs);
         if(status == ROCPROFILER_STATUS_SUCCESS)
         {
             if(recs.size() > *rec_count)
@@ -70,7 +88,6 @@ rocprofiler_sample_device_counting_service(rocprofiler_context_id_t      context
         return status;
     }
 
-    return rocprofiler::counters::read_agent_ctx(
-        rocprofiler::context::get_registered_context(context_id), user_data, flags, nullptr);
+    return rocprofiler::counters::read_agent_ctx(ctx, user_data, flags, nullptr);
 }
 }

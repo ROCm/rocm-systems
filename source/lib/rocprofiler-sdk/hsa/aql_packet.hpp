@@ -40,6 +40,15 @@ class ThreadTraceAQLPacketFactory;
 
 namespace hsa
 {
+#define HSA_AMD_INTERFACE_VERSION                                                                  \
+    ROCPROFILER_COMPUTE_VERSION(HSA_AMD_INTERFACE_VERSION_MAJOR, HSA_AMD_INTERFACE_VERSION_MINOR, 0)
+
+#if HSA_AMD_INTERFACE_VERSION >= 10700
+constexpr auto hsa_amd_memory_pool_executable_flag = HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
+#else
+constexpr auto hsa_amd_memory_pool_executable_flag = (1 << 2);
+#endif
+
 constexpr hsa_ext_amd_aql_pm4_packet_t null_amd_aql_pm4_packet = {
     .header            = 0,
     .pm4_command       = {0},
