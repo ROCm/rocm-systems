@@ -73,9 +73,6 @@ THE SOFTWARE.
 #endif /* !defined (ROCPROFILER_EXPORTS) */
 #endif /* !defined (ROCPROFILER) */
 
-// Deprecation warning for ROCProfiler V1 and V2
-#pragma message(                                                                                   \
-    "Warning: ROCProfiler and ROCTracer are being phased out in favor of the latest version ROCProfiler-SDK. We encourage all users to upgrade to ROCProfiler-SDK library and rocprofv3 tool, to ensure continued support and access to new features.")
 
 #include <stddef.h>
 #include <stdint.h>
