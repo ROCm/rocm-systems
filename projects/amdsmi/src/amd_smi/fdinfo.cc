@@ -235,7 +235,7 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t &bdf, long int pid,
 		return AMDSMI_STATUS_API_FAILED;
 
 	strncpy(info.name, name.c_str(), std::min(
-				(unsigned long) AMDSMI_NORMAL_STRING_LENGTH,
+				(unsigned long) AMDSMI_MAX_STRING_LENGTH,
 				name.length()));
 
 	for (int i = 0; i < AMDSMI_MAX_CONTAINER_TYPE; i++) {

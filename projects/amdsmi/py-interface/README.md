@@ -11,13 +11,13 @@ with AMD hardware through a user-friendly API. Find the documentation in the
 ## Online documentation
 
 Explore the latest documentation on the [ROCm documentation
-portal](https://rocm.docs.amd.com/projects/en/latest/index.html).
+portal](https://rocm.docs.amd.com/projects/amdsmi/en/latest/index.html).
 
 - [Install AMD
-  SMI](https://rocm.docs.amd.com/projects/en/latest/install/install.html)
+  SMI](https://rocm.docs.amd.com/projects/amdsmi/en/latest/install/install.html)
 
 - [Python library
-  usage](https://rocm.docs.amd.com/projects/en/latest/how-to/amdsmi-py-lib.html).
+  usage](https://rocm.docs.amd.com/projects/amdsmi/en/latest/how-to/amdsmi-py-lib.html).
 
 - [Python API
-  reference](https://rocm.docs.amd.com/projects/en/latest/reference/amdsmi-py-api.html).
+  reference](https://rocm.docs.amd.com/projects/amdsmi/en/latest/reference/amdsmi-py-api.html).

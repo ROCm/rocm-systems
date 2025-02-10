@@ -811,7 +811,7 @@ class AMDSMICommands():
                     vram_vendor = "N/A"
                 else:
                     # Remove amdsmi enum prefix
-                    vram_vendor = vram_vendor.replace('AMDSMI_VRAM_VENDOR__', '')
+                    vram_vendor = vram_vendor.replace('AMDSMI_VRAM_VENDOR_', '')
 
                 # Assign cleaned values to vram_info_dict
                 vram_info_dict['type'] = vram_type
@@ -1542,7 +1542,15 @@ class AMDSMICommands():
                         pcie_dict['speed'] = pcie_speed_GTs_value
 
                     pcie_dict['bandwidth'] = pcie_metric['pcie_bandwidth']
+
                     pcie_dict['replay_count'] = pcie_metric['pcie_replay_count']
+                    if pcie_dict['replay_count'] == "N/A":
+                        try:
+                            pcie_replay = amdsmi_interface.amdsmi_get_gpu_pci_replay_counter(args.gpu)
+                            pcie_dict['replay_count'] = pcie_replay
+                        except amdsmi_exception.AmdSmiLibraryException as e:
+                            logging.debug("Failed to get sysfs pcie replay counter on gpu %s | %s", gpu_id, e.get_error_info())
+
                     pcie_dict['l0_to_recovery_count'] = pcie_metric['pcie_l0_to_recovery_count']
                     pcie_dict['replay_roll_over_count'] = pcie_metric['pcie_replay_roll_over_count']
                     pcie_dict['nak_received_count'] = pcie_metric['pcie_nak_received_count']
