@@ -389,6 +389,8 @@ ioctl_query_pcs_configs(const rocprofiler_agent_t* agent, rocp_pcs_cfgs_vec_t& r
     {
         // FIXME: Why this happens?
         if(ioctl_cfg.method == 0) continue;
+        // Skip showing stochastic sampling until it's fully supported.
+        if(ioctl_cfg.method == ROCPROFILER_IOCTL_PC_SAMPLING_METHOD_KIND_STOCHASTIC_V1) continue;
         auto rocp_cfg = common::init_public_api_struct(rocprofiler_pc_sampling_configuration_t{});
         auto rocp_ret = convert_ioctl_pcs_config_to_rocp(ioctl_cfg, rocp_cfg);
         if(rocp_ret != ROCPROFILER_STATUS_SUCCESS)
@@ -459,6 +461,10 @@ ioctl_pcs_create(const rocprofiler_agent_t*       agent,
 {
     if(auto status = is_pc_sampling_supported(agent); status != ROCPROFILER_STATUS_SUCCESS)
         return status;
+
+    // Block configuring stochastic sampling until it's fully supported.
+    if(method == ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC)
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
     rocprofiler_ioctl_pc_sampling_info_t ioctl_cfg;
     auto ret = create_ioctl_pcs_config_from_rocp(ioctl_cfg, method, unit, interval);
