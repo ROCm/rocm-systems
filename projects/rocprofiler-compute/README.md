@@ -72,11 +72,11 @@ style reference is provided below for convenience:
                   Keith Lowery and
                   Nicholas Curtis and
                   Cristian Di Pietrantonio},
-  title        = {ROCm/rocprofiler-compute: v3.0.0 (01 November 2024)},
-  month        = November,
-  year         = 2024,
+  title        = {ROCm/rocprofiler-compute: v3.1.0 (12 February 2025)},
+  month        = February,
+  year         = 2025,
   publisher    = {Zenodo},
-  version      = {v3.0.0},
+  version      = {v3.1.0},
   doi          = {10.5281/zenodo.7314631},
   url          = {https://doi.org/10.5281/zenodo.7314631}
 }
