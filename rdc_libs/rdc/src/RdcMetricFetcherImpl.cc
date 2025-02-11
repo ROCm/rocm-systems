@@ -610,7 +610,8 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
     } break;
     case RDC_FI_POWER_USAGE: {
       amdsmi_power_info_t power_info = {};
-      value->status = amdsmi_get_power_info(processor_handle, &power_info);
+      uint32_t sensor_ind = 0;
+      value->status = amdsmi_get_power_info(processor_handle, sensor_ind, &power_info);
       value->type = INTEGER;
       if (value->status != AMDSMI_STATUS_SUCCESS) {
         RDC_LOG(RDC_ERROR, "amdsmi_get_power_info failed!");
