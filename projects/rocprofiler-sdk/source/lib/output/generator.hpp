@@ -146,7 +146,7 @@ save(ArchiveT& ar, const rocprofiler::tool::generator<Tp>& data)
     for(auto itr : data)
     {
         auto dat = data.get(itr);
-        for(auto ditr : dat)
+        for(const auto& ditr : dat)
             ar(ditr);
     }
 }

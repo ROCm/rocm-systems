@@ -47,9 +47,9 @@
     }                                                                                              \
     catch(std::exception & e)                                                                      \
     {                                                                                              \
-        std::cerr << "Error in " << __FILE__ << ':' << __LINE__ << ' ' << e.what() << std::endl;   \
+        std::cerr << "Error in " << __FILE__ << ':' << __LINE__ << ' ' << e.what() << '\n';        \
     }                                                                                              \
-    catch(...) { std::cerr << "Error in " << __FILE__ << ':' << __LINE__ << std::endl; }
+    catch(...) { std::cerr << "Error in " << __FILE__ << ':' << __LINE__ << '\n'; }
 
 namespace rocprofiler
 {

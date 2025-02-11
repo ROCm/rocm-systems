@@ -25,6 +25,12 @@ foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
     endif()
 endforeach()
 
+if(ROCPROFILER_MEMCHECK STREQUAL "ThreadSanitizer")
+    set(IS_THREAD_SANITIZER ON)
+else()
+    set(IS_THREAD_SANITIZER OFF)
+endif()
+
 find_package(rocprofiler-sdk REQUIRED)
 
 add_library(counter-collection-buffer-client SHARED)
@@ -152,9 +158,16 @@ add_test(NAME counter-collection-device-profiling
 
 set_tests_properties(
     counter-collection-device-profiling
-    PROPERTIES TIMEOUT 120 LABELS "samples" ENVIRONMENT
-               "${counter-collection-functional-counter-env}" FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "samples"
+               ENVIRONMENT
+               "${counter-collection-functional-counter-env}"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               "${IS_THREAD_SANITIZER}")
 
 add_library(counter-collection-device-profiling-sync-client SHARED)
 target_sources(counter-collection-device-profiling-sync-client
@@ -180,6 +193,13 @@ add_test(NAME counter-collection-device-profiling-sync
 
 set_tests_properties(
     counter-collection-device-profiling-sync
-    PROPERTIES TIMEOUT 120 LABELS "samples" ENVIRONMENT
-               "${counter-collection-functional-counter-env}" FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "samples"
+               ENVIRONMENT
+               "${counter-collection-functional-counter-env}"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               "${IS_THREAD_SANITIZER}")

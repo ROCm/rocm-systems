@@ -424,6 +424,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void*)
 void
 tool_fini(void* user_data)
 {
+    std::clog << "In tool fini\n" << std::flush;
+
     client_id = nullptr;
 
     exit_toggle().store(true);
@@ -441,6 +443,8 @@ tool_fini(void* user_data)
 
     sampler.reset();
     delete sampler_thread;
+
+    std::clog << "Completed tool fini\n" << std::flush;
 }
 
 extern "C" rocprofiler_tool_configure_result_t*

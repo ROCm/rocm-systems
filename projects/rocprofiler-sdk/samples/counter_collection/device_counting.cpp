@@ -307,17 +307,20 @@ tool_init(rocprofiler_client_finalize_t, void* user_data)
 void
 tool_fini(void* user_data)
 {
+    std::clog << "In tool fini\n" << std::flush;
+
     exit_toggle().store(true);
     while(exit_toggle().load() == true)
     {};
 
-    std::clog << "In tool fini\n";
     rocprofiler_stop_context(get_client_ctx());
     ROCPROFILER_CALL(rocprofiler_flush_buffer(get_buffer()), "buffer flush");
 
     auto* output_stream = static_cast<std::ostream*>(user_data);
     *output_stream << std::flush;
     if(output_stream != &std::cout && output_stream != &std::cerr) delete output_stream;
+
+    std::clog << "Completed tool fini\n" << std::flush;
 }
 }  // namespace
 

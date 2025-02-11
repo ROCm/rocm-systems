@@ -147,7 +147,7 @@ ATTDecoder::parse(const Fspath&                       input_dir,
             mgr.table->addDecoder((input_dir / file.name).c_str(), file.id, file.addr, file.size);
         } catch(std::exception& e)
         {
-            ROCP_ERROR << file.id << ':' << file.name << " - " << e.what() << std::endl;
+            ROCP_ERROR << file.id << ':' << file.name << " - " << e.what();
         }
     }
 

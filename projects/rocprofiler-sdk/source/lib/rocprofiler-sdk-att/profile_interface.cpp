@@ -57,13 +57,13 @@ get_trace_data(rocprofiler_att_decoder_record_type_t trace_id,
     CHECK_NOTNULL(userdata);
     trace_data_t& trace_data = *reinterpret_cast<trace_data_t*>(userdata);
     CHECK_NOTNULL(trace_data.tool);
-    ToolData& tool = *reinterpret_cast<ToolData*>(trace_data.tool);
+    ToolData& tool = *trace_data.tool;
 
     if(trace_id == ROCPROFILER_ATT_DECODER_TYPE_INFO)
     {
         auto* infos = (rocprofiler_att_decoder_info_t*) trace_events;
         for(size_t i = 0; i < trace_size; i++)
-            ROCP_WARNING << tool.dl->att_info_fn(infos[i]) << std::endl;
+            ROCP_WARNING << tool.dl->att_info_fn(infos[i]);
 
         return ROCPROFILER_ATT_DECODER_STATUS_SUCCESS;
     }
@@ -138,7 +138,7 @@ isa_callback(char*     isa_instruction,
     CHECK_NOTNULL(userdata);
     trace_data_t& trace_data = *reinterpret_cast<trace_data_t*>(userdata);
     CHECK_NOTNULL(trace_data.tool);
-    ToolData& tool = *reinterpret_cast<ToolData*>(trace_data.tool);
+    ToolData& tool = *trace_data.tool;
 
     std::shared_ptr<Instruction> instruction{nullptr};
 

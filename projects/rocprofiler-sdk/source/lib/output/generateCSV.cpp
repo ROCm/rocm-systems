@@ -585,7 +585,7 @@ generate_csv(const output_config&                    cfg,
 
     for(auto ditr : data)
     {
-        for(auto record : data.get(ditr))
+        for(const auto& record : data.get(ditr))
         {
             auto kernel_id        = record.dispatch_data.dispatch_info.kernel_id;
             auto counter_id_value = std::map<rocprofiler_counter_id_t, double>{};

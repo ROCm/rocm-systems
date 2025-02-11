@@ -68,7 +68,7 @@ jobs:
         apt-get install -y build-essential cmake g++-11 g++-12 python3-pip libdw-dev rccl-dev rccl-unittests
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
-        python3 -m pip install -r requirements.txt
+        python3 -m pip install -U --user -r requirements.txt
 
     - name: List Files
       shell: bash
@@ -96,6 +96,7 @@ jobs:
           --site ${RUNNER_HOSTNAME}
           --gpu-targets ${{ env.GPU_TARGETS }}
           --run-attempt ${{ github.run_attempt }}
+          ${{ matrix.ci-flags }}
           --
           -DROCPROFILER_DEP_ROCMCORE=ON
           -DROCPROFILER_BUILD_DOCS=OFF
@@ -190,8 +191,7 @@ jobs:
       timeout-minutes: 10
       shell: bash
       run: |
-        sudo python3 -m pip install 'perfetto<0.9.0'
-        sudo python3 -m pip install -r requirements.txt
+        sudo python3 -m pip install -U --user -r requirements.txt
 
     - name: List Files
       shell: bash
@@ -220,6 +220,7 @@ jobs:
           --site ${RUNNER_HOSTNAME}
           --gpu-targets ${{ env.GPU_TARGETS }}
           --run-attempt ${{ github.run_attempt }}
+          ${{ matrix.ci-flags }}
           --
           -DROCPROFILER_DEP_ROCMCORE=ON
           -DROCPROFILER_BUILD_DOCS=OFF
@@ -346,7 +347,7 @@ jobs:
         git config --global --add safe.directory '*'
         apt-get update
         apt-get install -y build-essential cmake python3-pip gcovr wkhtmltopdf xvfb xfonts-base xfonts-75dpi xfonts-100dpi xfonts-utils xfonts-encodings libfontconfig libdw-dev
-        python3 -m pip install -r requirements.txt
+        python3 -m pip install -U --user -r requirements.txt
 
     - name: Sync gcov with compilers
       timeout-minutes: 10
@@ -608,12 +609,13 @@ jobs:
       run: |
         git config --global --add safe.directory '*'
         apt-get update
-        apt-get install -y build-essential cmake python3-pip libasan8 libtsan2 software-properties-common
+        apt-get install -y build-essential cmake python3-pip libasan8 libtsan2 software-properties-common clang-15
         add-apt-repository ppa:ubuntu-toolchain-r/test
         apt-get update
+        apt-get upgrade -y
         apt-get install -y gcc-${{ env.GCC_COMPILER_VERSION }} g++-${{ env.GCC_COMPILER_VERSION }} libdw-dev
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-${{ env.GCC_COMPILER_VERSION }} 100 --slave /usr/bin/g++ g++ /usr/bin/g++-${{ env.GCC_COMPILER_VERSION }} --slave /usr/bin/gcov gcov /usr/bin/gcov-${{ env.GCC_COMPILER_VERSION }}
-        python3 -m pip install -r requirements.txt
+        python3 -m pip install -U --user -r requirements.txt
 
     - name: List Files
       shell: bash

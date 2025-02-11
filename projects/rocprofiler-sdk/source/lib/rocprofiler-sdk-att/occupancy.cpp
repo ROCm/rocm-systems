@@ -35,6 +35,8 @@ namespace rocprofiler
 {
 namespace att_wrapper
 {
+namespace
+{
 union occupancy_data_v1
 {
     struct
@@ -52,7 +54,7 @@ union occupancy_data_v1
 std::map<pcinfo_t, int> kernel_ids{{pcinfo_t{0, 0}, 0}};
 std::atomic<int>        current_id{1};
 
-static int
+int
 get_kernel_id(pcinfo_t pc)
 {
     if(kernel_ids.find(pc) != kernel_ids.end()) return kernel_ids.at(pc);
@@ -60,7 +62,7 @@ get_kernel_id(pcinfo_t pc)
     return kernel_ids.emplace(pc, current_id.fetch_add(1)).first->second;
 }
 
-static uint64_t
+uint64_t
 convert(const att_occupancy_info_v2_t& v2)
 {
     occupancy_data_v1 v1{};
@@ -71,7 +73,8 @@ convert(const att_occupancy_info_v2_t& v2)
     v1.cu        = v2.cu;
     v1.kernel_id = get_kernel_id(v2.pc);
     return v1.raw;
-};
+}
+}  // namespace
 
 namespace OccupancyFile
 {
@@ -107,6 +110,5 @@ OccupancyFile(const Fspath&                                                 dir,
     OutputFile(dir / "occupancy.json") << jocc;
 }
 }  // namespace OccupancyFile
-
 }  // namespace att_wrapper
 }  // namespace rocprofiler

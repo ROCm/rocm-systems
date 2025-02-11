@@ -704,8 +704,8 @@ struct poll_kfd_t
     poll_kfd_t(const poll_kfd_t&) = delete;
     poll_kfd_t& operator=(const poll_kfd_t&) = delete;
 
-    poll_kfd_t(poll_kfd_t&&) = default;
-    poll_kfd_t& operator=(poll_kfd_t&&) = default;
+    poll_kfd_t(poll_kfd_t&&) noexcept = default;
+    poll_kfd_t& operator=(poll_kfd_t&&) noexcept = default;
 
     ~poll_kfd_t()
     {

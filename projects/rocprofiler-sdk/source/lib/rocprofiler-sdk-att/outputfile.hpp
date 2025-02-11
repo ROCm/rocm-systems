@@ -43,7 +43,7 @@ public:
     {
         if(!Enabled()) return;
         ofs = std::ofstream(str, std::ofstream::out);
-        ROCP_FATAL_IF(!ofs.is_open()) << "Could not open output file " << str << std::endl;
+        ROCP_FATAL_IF(!ofs.is_open()) << "Could not open output file " << str;
     }
 
     template <typename T>

@@ -70,7 +70,9 @@ union MemoryInst
 
 static_assert(sizeof(MemoryInst) == sizeof(int));
 
-static MemoryInst
+namespace
+{
+MemoryInst
 classify(const std::string& inst)
 {
     constexpr size_t npos = std::string::npos;
@@ -130,6 +132,7 @@ classify(const std::string& inst)
     else
         return MemoryInstType::TYPE_NOT_MEM;
 }
+}  // namespace
 
 std::vector<LineWaitcnt>
 WaitcntList::gfx12_construct(const wave_t& wave, isa_map_t& isa_map)
