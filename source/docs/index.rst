@@ -33,6 +33,7 @@ The documentation is structured as follows:
 
     * :ref:`using-rocprofv3`
     * :ref:`using-rocprofiler-sdk-roctx`
+    * :ref:`using-pc-sampling`
     * :doc:`Samples <how-to/samples>`
     * :ref:`using-rocprofv3-with-mpi`
 
