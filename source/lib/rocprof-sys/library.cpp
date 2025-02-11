@@ -47,6 +47,7 @@
 #include "library/components/mpi_gotcha.hpp"
 #include "library/components/numa_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
+#include "library/components/vaapi_gotcha.hpp"
 #include "library/coverage.hpp"
 #include "library/ompt.hpp"
 #include "library/process_sampler.hpp"
@@ -486,6 +487,12 @@ rocprofsys_init_tooling_hidden()
     // start these gotchas once settings have been initialized
     if(get_init_bundle()) get_init_bundle()->start();
 
+    if(get_use_vaapi_tracing())
+    {
+        ROCPROFSYS_VERBOSE_F(1, "Setting up VA-API traces...\n");
+        component::vaapi_gotcha::start();
+    }
+
     if(get_use_sampling()) sampling::block_signals();
 
     // perfetto initialization
@@ -761,6 +768,12 @@ rocprofsys_finalize_hidden(void)
 
     fini_bundle_t _finalization{};
     _finalization.start();
+
+    if(get_use_vaapi_tracing())
+    {
+        ROCPROFSYS_VERBOSE_F(1, "Shutting down VA-API tracing...\n");
+        component::vaapi_gotcha::shutdown();
+    }
 
     if(get_use_rcclp())
     {

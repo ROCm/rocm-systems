@@ -41,6 +41,7 @@ target_link_libraries(
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-elfutils>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-bfd>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-mpi>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-libva>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-ptl>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-rocm>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-rccl>

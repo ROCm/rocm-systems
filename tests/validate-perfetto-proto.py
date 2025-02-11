@@ -191,7 +191,7 @@ if __name__ == "__main__":
         total_value = 0
         for row in sum_counter_values:
             total_value = row.total_value if row.total_value is not None else -1
-        if total_value < 0:
+        if total_value <= 0:
             ret = 1
 
     if ret == 0:

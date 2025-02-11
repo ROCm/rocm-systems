@@ -473,7 +473,6 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
         user_data->value = ts;
-
         switch(record.kind)
         {
             case ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API:
@@ -498,6 +497,15 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                                             user_data, ts);
                 break;
             }
+#if(ROCPROFILER_VERSION_MAJOR == 0 && ROCPROFILER_VERSION_MINOR >= 6) ||                 \
+    ROCPROFILER_VERSION_MAJOR >= 1
+            case ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API:
+            {
+                tool_tracing_callback_start(category::rocm_rocdecode_api{}, record,
+                                            user_data, ts);
+                break;
+            }
+#endif
             case ROCPROFILER_CALLBACK_TRACING_NONE:
             case ROCPROFILER_CALLBACK_TRACING_LAST:
             case ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API:
@@ -523,6 +531,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
         constexpr bool   bt_with_signal_frame = true;
 
         auto _bt_data = std::optional<backtrace_entry_vec_t>{};
+
         if(config::get_use_perfetto() && config::get_perfetto_annotations() &&
            tool_data->backtrace_operations.at(record.kind).count(record.operation) > 0)
         {
@@ -567,6 +576,15 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                                            ts, _bt_data);
                 break;
             }
+#if(ROCPROFILER_VERSION_MAJOR == 0 && ROCPROFILER_VERSION_MINOR >= 6) ||                 \
+    ROCPROFILER_VERSION_MAJOR >= 1
+            case ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API:
+            {
+                tool_tracing_callback_stop(category::rocm_rocdecode_api{}, record,
+                                           user_data, ts, _bt_data);
+                break;
+            }
+#endif
             case ROCPROFILER_CALLBACK_TRACING_NONE:
             case ROCPROFILER_CALLBACK_TRACING_LAST:
             case ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API:
@@ -991,13 +1009,19 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         _data->primary_ctx, ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT, nullptr, 0,
         tool_code_object_callback, _data));
 
-    for(auto itr : { ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API,
-                     ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API,
-                     ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API,
-                     ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API,
-                     ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
-                     ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
-                     ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API })
+    for(auto itr : {
+            ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API,
+                ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API,
+                ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API,
+                ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API,
+                ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
+                ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
+#if(ROCPROFILER_VERSION_MAJOR == 0 && ROCPROFILER_VERSION_MINOR >= 6) ||                 \
+    ROCPROFILER_VERSION_MAJOR >= 1
+                ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API,
+#endif
+                ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API
+        })
     {
         if(_callback_domains.count(itr) > 0)
         {

@@ -22,6 +22,8 @@ rocprofiler_systems_add_interface_library(
     "Provides flags for ROCm Communication Collectives Library (RCCL)")
 rocprofiler_systems_add_interface_library(rocprofiler-systems-mpi
                                           "Provides MPI or MPI headers")
+rocprofiler_systems_add_interface_library(rocprofiler-systems-libva
+                                          "Provides VA-API headers")
 rocprofiler_systems_add_interface_library(rocprofiler-systems-bfd
                                           "Provides Binary File Descriptor (BFD)")
 rocprofiler_systems_add_interface_library(rocprofiler-systems-ptl
@@ -689,6 +691,10 @@ if(ROCPROFSYS_USE_BFD)
     rocprofiler_systems_target_compile_definitions(rocprofiler-systems-bfd
                                                    INTERFACE ROCPROFSYS_USE_BFD)
 endif()
+
+find_package(Libva-headers ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
+target_include_directories(rocprofiler-systems-libva
+                           INTERFACE ${LIBVA_HEADERS_INCLUDE_DIR})
 
 # ----------------------------------------------------------------------------------------#
 #

@@ -1872,6 +1872,25 @@ get_use_kokkosp_kernel_logger()
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
+// Check if VAAPI tracing is enabled
+bool
+get_use_vaapi_tracing()
+{
+#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
+    static auto _v = get_config()->find("ROCPROFSYS_ROCM_DOMAINS");
+    if(_v == get_config()->end())
+    {
+        return false;  // Setting not found
+    }
+    std::string domains = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+    auto        domain_list = tim::delimit(domains, " ,;:\t\n");
+    return std::find(domain_list.begin(), domain_list.end(), "rocdecode_api") !=
+           domain_list.end();
+#else
+    return false;
+#endif
+}
+
 bool
 get_use_ompt()
 {
