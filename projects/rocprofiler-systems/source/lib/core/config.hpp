@@ -226,6 +226,9 @@ bool
 get_use_kokkosp_kernel_logger();
 
 bool
+get_use_vaapi_tracing();
+
+bool
 get_use_ompt();
 
 bool

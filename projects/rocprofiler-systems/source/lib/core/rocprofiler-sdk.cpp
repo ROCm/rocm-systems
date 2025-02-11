@@ -350,15 +350,20 @@ std::unordered_set<rocprofiler_callback_tracing_kind_t>
 get_callback_domains()
 {
     const auto callback_tracing_info = rocprofiler::sdk::get_callback_tracing_names();
-    const auto supported = std::unordered_set<rocprofiler_callback_tracing_kind_t>{
+    const auto supported = std::unordered_set<rocprofiler_callback_tracing_kind_t>
+    {
         ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API,
-        ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API,
-        ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API,
-        ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API,
-        ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
-        ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
-        ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
-        ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,
+            ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API,
+            ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API,
+            ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API,
+            ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
+            ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
+            ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
+            ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,
+#    if(ROCPROFILER_VERSION_MAJOR == 0 && ROCPROFILER_VERSION_MINOR >= 6) ||             \
+        ROCPROFILER_VERSION_MAJOR >= 1
+            ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API,
+#    endif
     };
 
     auto _data = std::unordered_set<rocprofiler_callback_tracing_kind_t>{};
@@ -393,7 +398,7 @@ get_callback_domains()
         }
         else if(itr == "hip_api")
         {
-            for(auto eitr : { ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
+            for(auto eitr : { ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
                               ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API })
                 _data.emplace(eitr);
         }
@@ -401,6 +406,13 @@ get_callback_domains()
         {
             _data.emplace(ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API);
         }
+#    if(ROCPROFILER_VERSION_MAJOR == 0 && ROCPROFILER_VERSION_MINOR >= 6) ||             \
+        ROCPROFILER_VERSION_MAJOR >= 1
+        else if(itr == "rocdecode_api")
+        {
+            _data.emplace(ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API);
+        }
+#    endif
         else
         {
             for(size_t idx = 0; idx < callback_tracing_info.size(); ++idx)
@@ -462,7 +474,7 @@ get_buffered_domains()
         else if(itr == "hip_api")
         {
             for(auto eitr : { ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API,
-                              ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API })
+                              ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API })
                 _data.emplace(eitr);
         }
         else if(itr == "marker_api" || itr == "roctx")
@@ -570,6 +582,7 @@ namespace rocprofiler_sdk
 void
 config_settings(const std::shared_ptr<settings>&)
 {}
+
 }  // namespace rocprofiler_sdk
 }  // namespace rocprofsys
 
