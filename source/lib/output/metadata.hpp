@@ -52,19 +52,22 @@
 #include <unordered_set>
 #include <vector>
 
-#define ROCPROFILER_CHECK_NESTED(VAR, RESULT)                                                      \
+#define ROCPROFILER_CHECK_NESTED(VAR, RESULT, LEVEL)                                               \
     {                                                                                              \
-        rocprofiler_status_t ROCPROFILER_VARIABLE(CHECKSTATUS, VAR) = RESULT;                      \
-        if(ROCPROFILER_VARIABLE(CHECKSTATUS, VAR) != ROCPROFILER_STATUS_SUCCESS)                   \
+        if(rocprofiler_status_t ROCPROFILER_VARIABLE(CHECKSTATUS, VAR) = RESULT;                   \
+           ROCPROFILER_VARIABLE(CHECKSTATUS, VAR) != ROCPROFILER_STATUS_SUCCESS)                   \
         {                                                                                          \
-            std::string_view status_msg =                                                          \
-                rocprofiler_get_status_string(ROCPROFILER_VARIABLE(CHECKSTATUS, VAR));             \
-            ROCP_FATAL << "[" << __FUNCTION__ << "] " << #RESULT << " failed with error code "     \
-                       << ROCPROFILER_VARIABLE(CHECKSTATUS, VAR) << " :: " << status_msg;          \
+            ROCP_##LEVEL << fmt::format(                                                           \
+                "[{}] {} returned {} :: {}",                                                       \
+                __FUNCTION__,                                                                      \
+                #RESULT,                                                                           \
+                rocprofiler_get_status_name(ROCPROFILER_VARIABLE(CHECKSTATUS, VAR)),               \
+                rocprofiler_get_status_string(ROCPROFILER_VARIABLE(CHECKSTATUS, VAR)));            \
         }                                                                                          \
     }
 
-#define ROCPROFILER_CHECK(RESULT) ROCPROFILER_CHECK_NESTED(__COUNTER__, RESULT)
+#define ROCPROFILER_CHECK(RESULT)         ROCPROFILER_CHECK_NESTED(__COUNTER__, RESULT, FATAL)
+#define ROCPROFILER_CHECK_WARNING(RESULT) ROCPROFILER_CHECK_NESTED(__COUNTER__, RESULT, WARNING)
 
 namespace rocprofiler
 {
