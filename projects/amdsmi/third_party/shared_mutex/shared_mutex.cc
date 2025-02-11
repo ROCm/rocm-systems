@@ -44,7 +44,8 @@ THE SOFTWARE.
 #include "rocm_smi/rocm_smi_exception.h"
 #include "rocm_smi/rocm_smi_main.h"
 
-#define THREAD_ONLY_ENV_VAR "RSMI_MUTEX_THREAD_ONLY"
+// Default to thread only mutex unless export AMDSMI_MUTEX_CROSS_PROCESS=1
+#define PROCESS_CROSS_PROCESS_ENV_VAR "AMDSMI_MUTEX_CROSS_PROCESS"
 #define MUTEX_TIME_OUT_ENV_VAR "RSMI_MUTEX_TIMEOUT"
 #define DEFAULT_MUTEX_TIMEOUT_SECONDS 5
 
@@ -141,7 +142,7 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried) {
 
   amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
 
-  if (GetEnvVarUInteger(THREAD_ONLY_ENV_VAR) == 1 || smi.is_thread_only_mutex()) {
+  if (GetEnvVarUInteger(PROCESS_CROSS_PROCESS_ENV_VAR) != 1 || smi.is_thread_only_mutex()) {
     return init_thread_safe_only(name);
   }
 
@@ -296,7 +297,7 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried) {
 
 int shared_mutex_close(shared_mutex_t mutex) {
   amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
-  const bool is_thread_only = GetEnvVarUInteger(THREAD_ONLY_ENV_VAR) == 1 ||
+  const bool is_thread_only = GetEnvVarUInteger(PROCESS_CROSS_PROCESS_ENV_VAR) != 1 ||
           smi.is_thread_only_mutex();
   if (is_thread_only) {
     delete mutex.ptr;
@@ -317,7 +318,7 @@ int shared_mutex_close(shared_mutex_t mutex) {
 
 int shared_mutex_destroy(shared_mutex_t mutex) {
   amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
-  const bool is_thread_only = GetEnvVarUInteger(THREAD_ONLY_ENV_VAR) == 1 ||
+  const bool is_thread_only = GetEnvVarUInteger(PROCESS_CROSS_PROCESS_ENV_VAR) != 1 ||
           smi.is_thread_only_mutex();
   if ((errno = pthread_mutex_destroy(mutex.ptr))) {
     perror("pthread_mutex_destroy");
