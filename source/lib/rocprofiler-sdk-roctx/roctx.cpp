@@ -223,7 +223,7 @@ roctxRangeStartA(const char* message)
 void
 roctxRangeStop(roctx_range_id_t id)
 {
-    return ::rocprofiler::roctx::get_table()->core.roctxRangeStop_fn(id);
+    ::rocprofiler::roctx::get_table()->core.roctxRangeStop_fn(id);
 }
 
 int

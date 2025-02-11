@@ -47,9 +47,9 @@ struct CodeobjLoadInfo
 
 enum tool_att_capability_t
 {
-    ATT_CAPABILITIES_TESTING,  // used for code coverage testing
-    ATT_CAPABILITIES_SUMMARY,  // used for CSV output only
-    ATT_CAPABILITIES_TRACE,    // used for all outputs
+    ATT_CAPABILITIES_TESTING = 0,  // used for code coverage testing
+    ATT_CAPABILITIES_SUMMARY,      // used for CSV output only
+    ATT_CAPABILITIES_TRACE,        // used for all outputs
     ATT_CAPABILITIES_DEBUG,
     ATT_CAPABILITIES_LAST = ATT_CAPABILITIES_DEBUG,
 };

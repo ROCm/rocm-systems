@@ -62,10 +62,10 @@ WaveFile::WaveFile(WaveConfig& config, const att_wave_data_t& wave)
     for(size_t i = 0; i < wave.instructions_size; i++)
     {
         auto& inst = wave.instructions_array[i];
-        instructions.push_back({(int64_t) inst.time,
-                                (int) inst.category,
-                                (int) inst.stall,
-                                (int64_t) inst.duration,
+        instructions.push_back({inst.time,
+                                static_cast<int>(inst.category),
+                                static_cast<int>(inst.stall),
+                                static_cast<int64_t>(inst.duration),
                                 config.code->line_numbers[inst.pc]});
     }
 
