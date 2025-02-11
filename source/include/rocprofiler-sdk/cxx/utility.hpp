@@ -23,6 +23,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <iomanip>
 #include <sstream>
 
@@ -36,8 +37,14 @@ template <typename Tp>
 auto
 as_hex(Tp val, size_t width = 0)
 {
+    uintptr_t _uintp_val = 0;
+    if constexpr(std::is_pointer<Tp>::value)
+        _uintp_val = reinterpret_cast<uintptr_t>(val);
+    else
+        _uintp_val = val;
+
     auto ss = std::stringstream{};
-    ss << "0x" << std::hex << std::setfill('0') << std::setw(width) << val;
+    ss << "0x" << std::hex << std::setfill('0') << std::setw(width) << _uintp_val;
     return ss.str();
 }
 }  // namespace utility

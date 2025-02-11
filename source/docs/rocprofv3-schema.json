@@ -602,26 +602,13 @@
                                     "type": "integer",
                                     "description": "ID of the code object."
                                 },
-                                "rocp_agent": {
+                                "agent_id": {
                                     "type": "object",
-                                    "description": "ROCP agent information.",
+                                    "description": "Rocprofiler-SDK agent information.",
                                     "properties": {
                                         "handle": {
                                             "type": "integer",
-                                            "description": "Handle of the ROCP agent."
-                                        }
-                                    },
-                                    "required": [
-                                        "handle"
-                                    ]
-                                },
-                                "hsa_agent": {
-                                    "type": "object",
-                                    "description": "HSA agent information.",
-                                    "properties": {
-                                        "handle": {
-                                            "type": "integer",
-                                            "description": "Handle of the HSA agent."
+                                            "description": "Handle of the Rocprofiler-SDK agent."
                                         }
                                     },
                                     "required": [

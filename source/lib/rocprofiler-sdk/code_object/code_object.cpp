@@ -37,6 +37,7 @@
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>
+#include <rocprofiler-sdk/cxx/utility.hpp>
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
@@ -170,12 +171,12 @@ using amd_compute_pgm_rsrc_three32_t = uint32_t;
 struct kernel_descriptor_t
 {
     uint8_t  reserved0[16];
-    int64_t  kernel_code_entry_byte_offset;
+    int64_t  kernel_code_entry_byte_offset = 0;
     uint8_t  reserved1[20];
-    uint32_t compute_pgm_rsrc3;
-    uint32_t compute_pgm_rsrc1;
-    uint32_t compute_pgm_rsrc2;
-    uint16_t kernel_code_properties;
+    uint32_t compute_pgm_rsrc3      = 0;
+    uint32_t compute_pgm_rsrc1      = 0;
+    uint32_t compute_pgm_rsrc2      = 0;
+    uint16_t kernel_code_properties = 0;
     uint8_t  reserved2[6];
 };
 
@@ -485,8 +486,11 @@ executable_iterate_agent_symbols_load_callback(hsa_executable_t        executabl
     const auto* kernel_descript = get_kernel_descriptor(data.kernel_object);
     if(CHECK_NOTNULL(code_obj_v) && CHECK_NOTNULL(kernel_descript))
     {
-        const auto* rocp_agent = agent::get_agent(code_obj_v->rocp_data.rocp_agent);
-        if(CHECK_NOTNULL(rocp_agent))
+        data.kernel_code_entry_byte_offset = kernel_descript->kernel_code_entry_byte_offset;
+        data.kernel_address.value = data.kernel_object + data.kernel_code_entry_byte_offset;
+
+        if(const auto* rocp_agent = agent::get_agent(code_obj_v->rocp_data.rocp_agent);
+           CHECK_NOTNULL(rocp_agent))
         {
             data.arch_vgpr_count  = arch_vgpr_count(rocp_agent->name, *kernel_descript);
             data.accum_vgpr_count = accum_vgpr_count(rocp_agent->name, *kernel_descript);
@@ -692,15 +696,17 @@ code_object_unload_callback(hsa_executable_t         executable,
 
     CHECK_NOTNULL(code_obj_arr);
 
-    // auto _size = CHECK_NOTNULL(get_code_objects())->rlock([](const auto& data) { return
-    // data.size(); }); ROCP_INFO << "[inp] executable=" << executable.handle
-    //            << ", code_object=" << loaded_code_object.handle << " vs. " << _size;
+    ROCP_TRACE << "[inp] executable=" << executable.handle
+               << ", code_object=" << loaded_code_object.handle << " vs. "
+               << (CHECK_NOTNULL(get_code_objects())->rlock([](const auto& data) {
+                      return data.size();
+                  }));
 
     CHECK_NOTNULL(get_code_objects())->rlock([&](const code_object_array_t& arr) {
         for(const auto& itr : arr)
         {
-            // ROCP_INFO << "[cmp] executable=" << itr->hsa_executable.handle
-            //            << ", code_object=" << itr->hsa_code_object.handle;
+            ROCP_TRACE << "[cmp] executable=" << itr->hsa_executable.handle
+                       << ", code_object=" << itr->hsa_code_object.handle;
             if(itr->hsa_executable.handle == executable.handle &&
                itr->hsa_code_object.handle == loaded_code_object.handle)
             // if(itr && *itr == code_obj_v)
@@ -708,9 +714,12 @@ code_object_unload_callback(hsa_executable_t         executable,
                 auto& _last =
                     code_obj_arr->emplace_back(hsa::code_object_unload{.object = itr.get()});
 
-                auto agent = itr->rocp_data.hsa_agent;
-                ::rocprofiler::hsa::get_core_table()->hsa_executable_iterate_agent_symbols_fn(
-                    executable, agent, executable_iterate_agent_symbols_unload_callback, &_last);
+                if(auto agent = agent::get_hsa_agent(itr->rocp_data.agent_id); agent)
+                    ::rocprofiler::hsa::get_core_table()->hsa_executable_iterate_agent_symbols_fn(
+                        executable,
+                        *agent,
+                        executable_iterate_agent_symbols_unload_callback,
+                        &_last);
             }
         }
     });

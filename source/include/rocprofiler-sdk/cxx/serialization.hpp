@@ -151,8 +151,7 @@ save(ArchiveT& ar, rocprofiler_callback_tracing_code_object_load_data_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(size);
     ROCP_SDK_SAVE_DATA_FIELD(code_object_id);
-    ROCP_SDK_SAVE_DATA_FIELD(rocp_agent);
-    ROCP_SDK_SAVE_DATA_FIELD(hsa_agent);
+    ROCP_SDK_SAVE_DATA_FIELD(agent_id);
     ROCP_SDK_SAVE_DATA_CSTR(uri);
     ROCP_SDK_SAVE_DATA_FIELD(load_base);
     ROCP_SDK_SAVE_DATA_FIELD(load_size);
@@ -185,6 +184,8 @@ save(ArchiveT& ar, rocprofiler_callback_tracing_code_object_kernel_symbol_regist
     ROCP_SDK_SAVE_DATA_FIELD(sgpr_count);
     ROCP_SDK_SAVE_DATA_FIELD(arch_vgpr_count);
     ROCP_SDK_SAVE_DATA_FIELD(accum_vgpr_count);
+    ROCP_SDK_SAVE_DATA_FIELD(kernel_code_entry_byte_offset);
+    ROCP_SDK_SAVE_DATA_FIELD(kernel_address);
 }
 
 template <typename ArchiveT>

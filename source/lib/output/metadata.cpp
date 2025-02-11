@@ -75,7 +75,7 @@ query_pc_sampling_configuration(const rocprofiler_pc_sampling_configuration_t* c
 }  // namespace
 
 kernel_symbol_info::kernel_symbol_info()
-: base_type{0, 0, 0, "", 0, 0, 0, 0, 0, 0, 0, 0}
+: base_type{0, 0, 0, "", 0, 0, 0, 0, 0, 0, 0, 0, 0, {.value = 0}}
 {}
 
 constexpr auto null_address_v = rocprofiler_address_t{.value = 0};

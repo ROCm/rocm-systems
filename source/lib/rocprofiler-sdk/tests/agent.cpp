@@ -20,13 +20,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "lib/rocprofiler-sdk/agent.hpp"
+#include "lib/common/environment.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
+#include "lib/rocprofiler-sdk/tests/details/agent.hpp"
+
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
-
-#include "lib/rocprofiler-sdk/agent.hpp"
-#include "lib/rocprofiler-sdk/registration.hpp"
-#include "lib/rocprofiler-sdk/tests/details/agent.hpp"
+#include <rocprofiler-sdk/cxx/operators.hpp>
+#include <rocprofiler-sdk/cxx/utility.hpp>
 
 #include <fmt/core.h>
 #include <gtest/gtest.h>
@@ -104,10 +107,11 @@ TEST(rocprofiler_lib, agent_abi)
     EXPECT_EQ(offsetof(rocprofiler_agent_t, node_id), 280) << msg;
     EXPECT_EQ(offsetof(rocprofiler_agent_t, logical_node_id), 284) << msg;
     EXPECT_EQ(offsetof(rocprofiler_agent_t, logical_node_type_id), 288) << msg;
-    EXPECT_EQ(offsetof(rocprofiler_agent_t, reserved_padding0), 292) << msg;
+    EXPECT_EQ(offsetof(rocprofiler_agent_t, runtime_visibility), 292) << msg;
+    EXPECT_EQ(offsetof(rocprofiler_agent_t, uuid), 296) << msg;
     // Add test for offset of new field above this. Do NOT change any existing values!
 
-    constexpr auto expected_rocp_agent_size = 296;
+    constexpr auto expected_rocp_agent_size = 304;
     // If a new field is added, increase this value by the size of the new field(s)
     EXPECT_EQ(sizeof(rocprofiler_agent_t), expected_rocp_agent_size)
         << "ABI break. If you added a new field, make sure that this is the only new check that "
@@ -285,4 +289,490 @@ TEST(rocprofiler_lib, agent)
     // clean up memory leak
     for(auto& itr : _rocm_info.isas)
         delete[] itr.name_str;
+}
+
+namespace
+{
+namespace common = ::rocprofiler::common;
+
+auto
+get_gpu_agents()
+{
+    namespace agent = ::rocprofiler::agent;
+
+    auto get_env_str = [](std::string_view name) {
+        return fmt::format("{:>22} = {}", name, common::get_env(name, ""));
+    };
+
+    ROCP_WARNING << "get_gpu_agents() :: refreshing internal topology..."
+                 << fmt::format("\n\t{}\n\t{}\n\t{}\n\t{}",
+                                get_env_str("ROCR_VISIBLE_DEVICES"),
+                                get_env_str("HIP_VISIBLE_DEVICES"),
+                                get_env_str("GPU_DEVICE_ORDINAL"),
+                                get_env_str("CUDA_VISIBLE_DEVICES"));
+
+    agent::internal_refresh_topology();
+    auto _agents     = agent::get_agents();
+    auto _gpu_agents = decltype(_agents){};
+    auto _cpu_agents = decltype(_agents){};
+    for(const auto* itr : _agents)
+    {
+        if(itr->type == ROCPROFILER_AGENT_TYPE_CPU)
+        {
+            EXPECT_EQ(itr->runtime_visibility.hsa, 1)
+                << "expect cpu agent-" << itr->node_id << " to be visible";
+            EXPECT_EQ(itr->runtime_visibility.hip, 1)
+                << "expect cpu agent-" << itr->node_id << " to be visible";
+            EXPECT_EQ(itr->runtime_visibility.rccl, 1)
+                << "expect cpu agent-" << itr->node_id << " to be visible";
+            EXPECT_EQ(itr->runtime_visibility.rocdecode, 1)
+                << "expect cpu agent-" << itr->node_id << " to be visible";
+            _cpu_agents.emplace_back(itr);
+        }
+        else if(itr->type == ROCPROFILER_AGENT_TYPE_GPU)
+        {
+            _gpu_agents.emplace_back(itr);
+        }
+    }
+
+    EXPECT_EQ(_agents.size(), _cpu_agents.size() + _gpu_agents.size())
+        << "cpu: " << _cpu_agents.size() << ", gpu: " << _gpu_agents.size();
+
+    return _gpu_agents;
+}
+}  // namespace
+
+TEST(rocprofiler_lib, agent_visibility)
+{
+    constexpr auto noval = std::string_view{};
+
+    common::set_env("ROCR_VISIBLE_DEVICES", noval, 1);
+    common::set_env("HIP_VISIBLE_DEVICES", noval, 1);
+    common::set_env("GPU_DEVICE_ORDINAL", noval, 1);
+    common::set_env("CUDA_VISIBLE_DEVICES", noval, 1);
+
+    auto num_gpu_agents = get_gpu_agents().size();
+    auto strngpus       = std::to_string(num_gpu_agents);
+
+    if(num_gpu_agents < 1)
+    {
+        GTEST_SKIP() << "no gpu agents";
+    }
+
+    for(const auto* itr : get_gpu_agents())
+    {
+        EXPECT_EQ(itr->runtime_visibility.hsa, 1) << "agent-" << itr->node_id;
+        EXPECT_EQ(itr->runtime_visibility.hip, 1) << "agent-" << itr->node_id;
+        EXPECT_EQ(itr->runtime_visibility.rccl, 1) << "agent-" << itr->node_id;
+        EXPECT_EQ(itr->runtime_visibility.rocdecode, 1) << "agent-" << itr->node_id;
+    }
+
+    common::set_env("ROCR_VISIBLE_DEVICES", strngpus, 1);
+    common::set_env("HIP_VISIBLE_DEVICES", noval, 1);
+    common::set_env("GPU_DEVICE_ORDINAL", noval, 1);
+    common::set_env("CUDA_VISIBLE_DEVICES", noval, 1);
+
+    for(const auto* itr : get_gpu_agents())
+    {
+        EXPECT_EQ(itr->runtime_visibility.hsa, 0) << "agent-" << itr->node_id;
+        EXPECT_EQ(itr->runtime_visibility.hip, 0) << "agent-" << itr->node_id;
+        EXPECT_EQ(itr->runtime_visibility.rccl, 0) << "agent-" << itr->node_id;
+        EXPECT_EQ(itr->runtime_visibility.rocdecode, 0) << "agent-" << itr->node_id;
+    }
+
+    common::set_env("ROCR_VISIBLE_DEVICES", noval, 1);
+    common::set_env("HIP_VISIBLE_DEVICES", strngpus, 1);
+    common::set_env("GPU_DEVICE_ORDINAL", noval, 1);
+    common::set_env("CUDA_VISIBLE_DEVICES", noval, 1);
+
+    for(const auto* itr : get_gpu_agents())
+    {
+        EXPECT_EQ(itr->runtime_visibility.hsa, 1) << "agent-" << itr->node_id;
+        EXPECT_EQ(itr->runtime_visibility.hip, 0) << "agent-" << itr->node_id;
+        EXPECT_EQ(itr->runtime_visibility.rccl, 0) << "agent-" << itr->node_id;
+        EXPECT_EQ(itr->runtime_visibility.rocdecode, 0) << "agent-" << itr->node_id;
+    }
+
+    common::set_env("ROCR_VISIBLE_DEVICES", noval, 1);
+    common::set_env("HIP_VISIBLE_DEVICES", noval, 1);
+    common::set_env("GPU_DEVICE_ORDINAL", strngpus, 1);
+    common::set_env("CUDA_VISIBLE_DEVICES", noval, 1);
+
+    for(const auto* itr : get_gpu_agents())
+    {
+        EXPECT_EQ(itr->runtime_visibility.hsa, 1) << "agent-" << itr->node_id;
+        EXPECT_EQ(itr->runtime_visibility.hip, 0) << "agent-" << itr->node_id;
+        EXPECT_EQ(itr->runtime_visibility.rccl, 0) << "agent-" << itr->node_id;
+        EXPECT_EQ(itr->runtime_visibility.rocdecode, 0) << "agent-" << itr->node_id;
+    }
+
+    common::set_env("ROCR_VISIBLE_DEVICES", noval, 1);
+    common::set_env("HIP_VISIBLE_DEVICES", noval, 1);
+    common::set_env("GPU_DEVICE_ORDINAL", noval, 1);
+    common::set_env("CUDA_VISIBLE_DEVICES", strngpus, 1);
+
+    for(const auto* itr : get_gpu_agents())
+    {
+        EXPECT_EQ(itr->runtime_visibility.hsa, 1) << "agent-" << itr->node_id;
+        EXPECT_EQ(itr->runtime_visibility.hip, 0) << "agent-" << itr->node_id;
+        EXPECT_EQ(itr->runtime_visibility.rccl, 0) << "agent-" << itr->node_id;
+        EXPECT_EQ(itr->runtime_visibility.rocdecode, 0) << "agent-" << itr->node_id;
+    }
+}
+
+TEST(rocprofiler_lib, agent_visibility_multigpu)
+{
+    constexpr auto noval = std::string_view{};
+
+    common::set_env("ROCR_VISIBLE_DEVICES", noval, 1);
+    common::set_env("HIP_VISIBLE_DEVICES", noval, 1);
+    common::set_env("GPU_DEVICE_ORDINAL", noval, 1);
+    common::set_env("CUDA_VISIBLE_DEVICES", noval, 1);
+
+    auto ordinals       = std::map<rocprofiler_agent_id_t, uint32_t>{};
+    auto uuids          = std::map<rocprofiler_agent_id_t, std::string>{};
+    auto in_half        = std::map<rocprofiler_agent_id_t, uint32_t>{};
+    auto num_gpu_agents = size_t{0};
+    auto all_ordinals   = std::string{};
+    auto all_uuids      = std::string{};
+    auto all_mixed      = std::string{};
+    auto half_ordinals  = std::string{};
+    auto half_uuids     = std::string{};
+    auto half_mixed     = std::string{};
+    {
+        auto _agents   = get_gpu_agents();
+        num_gpu_agents = _agents.size();
+        size_t count   = 0;
+        for(const auto* itr : _agents)
+        {
+            ordinals.emplace(itr->id, itr->logical_node_type_id);
+            uuids.emplace(itr->id, fmt::format("GPU-{:X}", itr->uuid.value));
+            ROCP_WARNING << ordinals.at(itr->id) << " :: " << uuids.at(itr->id);
+
+            all_ordinals = fmt::format("{},{}", all_ordinals, ordinals.at(itr->id));
+            all_uuids    = fmt::format("{},{}", all_uuids, uuids.at(itr->id));
+
+            if((count % 2) == 0)
+                all_mixed = fmt::format("{},{}", all_mixed, uuids.at(itr->id));
+            else
+                all_mixed = fmt::format("{},{}", all_mixed, ordinals.at(itr->id));
+
+            if(count < (num_gpu_agents / 2))
+            {
+                half_ordinals = all_ordinals.substr(1);
+                half_uuids    = all_uuids.substr(1);
+                half_mixed    = all_mixed.substr(1);
+                in_half.emplace(itr->id, 1);
+            }
+            else
+            {
+                in_half.emplace(itr->id, 0);
+            }
+            ++count;
+        }
+    }
+
+    ASSERT_EQ(in_half.size(), num_gpu_agents);
+
+    auto strngpus = std::to_string(num_gpu_agents);
+    all_ordinals  = all_ordinals.substr(1);
+    all_uuids     = all_uuids.substr(1);
+    all_mixed     = all_mixed.substr(1);
+
+    if(num_gpu_agents < 2)
+    {
+        GTEST_SKIP() << "requires multiple gpu agents";
+    }
+
+    common::set_env("ROCR_VISIBLE_DEVICES", all_ordinals, 1);
+    common::set_env("HIP_VISIBLE_DEVICES", noval, 1);
+    common::set_env("GPU_DEVICE_ORDINAL", noval, 1);
+    common::set_env("CUDA_VISIBLE_DEVICES", noval, 1);
+
+    for(const auto* itr : get_gpu_agents())
+    {
+        ASSERT_EQ(itr->runtime_visibility.hsa, 1) << "agent-" << itr->node_id;
+        ASSERT_EQ(itr->runtime_visibility.hip, 1) << "agent-" << itr->node_id;
+        ASSERT_EQ(itr->runtime_visibility.rccl, 1) << "agent-" << itr->node_id;
+        ASSERT_EQ(itr->runtime_visibility.rocdecode, 1) << "agent-" << itr->node_id;
+    }
+
+    common::set_env("ROCR_VISIBLE_DEVICES", all_uuids, 1);
+    common::set_env("HIP_VISIBLE_DEVICES", noval, 1);
+    common::set_env("GPU_DEVICE_ORDINAL", noval, 1);
+    common::set_env("CUDA_VISIBLE_DEVICES", noval, 1);
+
+    for(const auto* itr : get_gpu_agents())
+    {
+        ASSERT_EQ(itr->runtime_visibility.hsa, 1) << "agent-" << itr->node_id;
+        ASSERT_EQ(itr->runtime_visibility.hip, 1) << "agent-" << itr->node_id;
+        ASSERT_EQ(itr->runtime_visibility.rccl, 1) << "agent-" << itr->node_id;
+        ASSERT_EQ(itr->runtime_visibility.rocdecode, 1) << "agent-" << itr->node_id;
+    }
+
+    common::set_env("ROCR_VISIBLE_DEVICES", noval, 1);
+    common::set_env("HIP_VISIBLE_DEVICES", half_ordinals, 1);
+    common::set_env("GPU_DEVICE_ORDINAL", noval, 1);
+    common::set_env("CUDA_VISIBLE_DEVICES", noval, 1);
+
+    for(const auto* itr : get_gpu_agents())
+    {
+        ASSERT_EQ(itr->runtime_visibility.hsa, 1) << "agent-" << itr->node_id;
+        ASSERT_EQ(itr->runtime_visibility.hip, in_half.at(itr->id)) << "agent-" << itr->node_id;
+        ASSERT_EQ(itr->runtime_visibility.rccl, in_half.at(itr->id)) << "agent-" << itr->node_id;
+        ASSERT_EQ(itr->runtime_visibility.rocdecode, in_half.at(itr->id))
+            << "agent-" << itr->node_id;
+    }
+
+    common::set_env("ROCR_VISIBLE_DEVICES", noval, 1);
+    common::set_env("HIP_VISIBLE_DEVICES", noval, 1);
+    common::set_env("GPU_DEVICE_ORDINAL", half_ordinals, 1);
+    common::set_env("CUDA_VISIBLE_DEVICES", noval, 1);
+
+    for(const auto* itr : get_gpu_agents())
+    {
+        ASSERT_EQ(itr->runtime_visibility.hsa, 1) << "agent-" << itr->node_id;
+        ASSERT_EQ(itr->runtime_visibility.hip, in_half.at(itr->id)) << "agent-" << itr->node_id;
+        ASSERT_EQ(itr->runtime_visibility.rccl, in_half.at(itr->id)) << "agent-" << itr->node_id;
+        ASSERT_EQ(itr->runtime_visibility.rocdecode, in_half.at(itr->id))
+            << "agent-" << itr->node_id;
+    }
+
+    common::set_env("ROCR_VISIBLE_DEVICES", noval, 1);
+    common::set_env("HIP_VISIBLE_DEVICES", noval, 1);
+    common::set_env("GPU_DEVICE_ORDINAL", noval, 1);
+    common::set_env("CUDA_VISIBLE_DEVICES", half_ordinals, 1);
+
+    for(const auto* itr : get_gpu_agents())
+    {
+        ASSERT_EQ(itr->runtime_visibility.hsa, 1) << "agent-" << itr->node_id;
+        ASSERT_EQ(itr->runtime_visibility.hip, in_half.at(itr->id)) << "agent-" << itr->node_id;
+        ASSERT_EQ(itr->runtime_visibility.rccl, in_half.at(itr->id)) << "agent-" << itr->node_id;
+        ASSERT_EQ(itr->runtime_visibility.rocdecode, in_half.at(itr->id))
+            << "agent-" << itr->node_id;
+    }
+
+    common::set_env("ROCR_VISIBLE_DEVICES", all_ordinals, 1);
+    common::set_env("HIP_VISIBLE_DEVICES", half_uuids, 1);
+    common::set_env("GPU_DEVICE_ORDINAL", noval, 1);
+    common::set_env("CUDA_VISIBLE_DEVICES", noval, 1);
+
+    for(const auto* itr : get_gpu_agents())
+    {
+        ASSERT_EQ(itr->runtime_visibility.hsa, 1) << "agent-" << itr->node_id;
+        ASSERT_EQ(itr->runtime_visibility.hip, in_half.at(itr->id)) << "agent-" << itr->node_id;
+        ASSERT_EQ(itr->runtime_visibility.rccl, in_half.at(itr->id)) << "agent-" << itr->node_id;
+        ASSERT_EQ(itr->runtime_visibility.rocdecode, in_half.at(itr->id))
+            << "agent-" << itr->node_id;
+    }
+
+    common::set_env("ROCR_VISIBLE_DEVICES", half_uuids, 1);
+    common::set_env("HIP_VISIBLE_DEVICES", all_ordinals, 1);
+    common::set_env("GPU_DEVICE_ORDINAL", noval, 1);
+    common::set_env("CUDA_VISIBLE_DEVICES", noval, 1);
+
+    for(const auto* itr : get_gpu_agents())
+    {
+        ASSERT_EQ(itr->runtime_visibility.hsa, in_half.at(itr->id)) << "agent-" << itr->node_id;
+        ASSERT_EQ(itr->runtime_visibility.hip, in_half.at(itr->id)) << "agent-" << itr->node_id;
+        ASSERT_EQ(itr->runtime_visibility.rccl, in_half.at(itr->id)) << "agent-" << itr->node_id;
+        ASSERT_EQ(itr->runtime_visibility.rocdecode, in_half.at(itr->id))
+            << "agent-" << itr->node_id;
+    }
+
+    common::set_env("ROCR_VISIBLE_DEVICES", half_uuids, 1);
+    common::set_env("HIP_VISIBLE_DEVICES", noval, 1);
+    common::set_env("GPU_DEVICE_ORDINAL", all_ordinals, 1);
+    common::set_env("CUDA_VISIBLE_DEVICES", noval, 1);
+
+    for(const auto* itr : get_gpu_agents())
+    {
+        ASSERT_EQ(itr->runtime_visibility.hsa, in_half.at(itr->id)) << "agent-" << itr->node_id;
+        ASSERT_EQ(itr->runtime_visibility.hip, in_half.at(itr->id)) << "agent-" << itr->node_id;
+        ASSERT_EQ(itr->runtime_visibility.rccl, in_half.at(itr->id)) << "agent-" << itr->node_id;
+        ASSERT_EQ(itr->runtime_visibility.rocdecode, in_half.at(itr->id))
+            << "agent-" << itr->node_id;
+    }
+
+    common::set_env("ROCR_VISIBLE_DEVICES", half_uuids, 1);
+    common::set_env("HIP_VISIBLE_DEVICES", noval, 1);
+    common::set_env("GPU_DEVICE_ORDINAL", noval, 1);
+    common::set_env("CUDA_VISIBLE_DEVICES", all_ordinals, 1);
+
+    for(const auto* itr : get_gpu_agents())
+    {
+        ASSERT_EQ(itr->runtime_visibility.hsa, in_half.at(itr->id)) << "agent-" << itr->node_id;
+        ASSERT_EQ(itr->runtime_visibility.hip, in_half.at(itr->id)) << "agent-" << itr->node_id;
+        ASSERT_EQ(itr->runtime_visibility.rccl, in_half.at(itr->id)) << "agent-" << itr->node_id;
+        ASSERT_EQ(itr->runtime_visibility.rocdecode, in_half.at(itr->id))
+            << "agent-" << itr->node_id;
+    }
+}
+
+TEST(rocprofiler_lib, agent_visibility_inverted_multigpu)
+{
+    constexpr auto noval = std::string_view{};
+
+    common::set_env("ROCR_VISIBLE_DEVICES", noval, 1);
+    common::set_env("HIP_VISIBLE_DEVICES", noval, 1);
+    common::set_env("GPU_DEVICE_ORDINAL", noval, 1);
+    common::set_env("CUDA_VISIBLE_DEVICES", noval, 1);
+
+    auto ordinals       = std::map<rocprofiler_agent_id_t, uint32_t>{};
+    auto num_gpu_agents = size_t{0};
+    auto reversed_uuid  = std::string{};
+    {
+        auto _agents   = get_gpu_agents();
+        num_gpu_agents = _agents.size();
+
+        if(num_gpu_agents < 2)
+        {
+            GTEST_SKIP() << "requires 2 or more gpu agents";
+        }
+
+        for(const auto* itr : _agents)
+        {
+            auto _uuid = fmt::format("GPU-{:X}", itr->uuid.value);
+            if(ordinals.empty()) reversed_uuid = fmt::format("1,{}", _uuid);
+
+            ordinals.emplace(itr->id, itr->logical_node_type_id);
+        }
+
+        // make sure there are 0 and 1 ordinal entries for later checks
+        size_t count = 0;
+        for(const auto* itr : _agents)
+        {
+            if(ordinals.at(itr->id) == 0) count += 1;
+            if(ordinals.at(itr->id) == 1) count += 1;
+        }
+        ASSERT_EQ(count, 2) << "Did not have ordinals 0 and 1";
+    }
+
+    // flip the first two devices
+    common::set_env("ROCR_VISIBLE_DEVICES", "1,0", 1);
+    common::set_env("HIP_VISIBLE_DEVICES", "0", 1);
+    common::set_env("GPU_DEVICE_ORDINAL", noval, 1);
+    common::set_env("CUDA_VISIBLE_DEVICES", noval, 1);
+
+    for(const auto* itr : get_gpu_agents())
+    {
+        if(ordinals.at(itr->id) == 0)
+        {
+            ASSERT_EQ(itr->runtime_visibility.hsa, 1) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.hip, 0) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.rccl, 0) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.rocdecode, 0) << "agent-" << itr->node_id;
+        }
+        else if(ordinals.at(itr->id) == 1)
+        {
+            ASSERT_EQ(itr->runtime_visibility.hsa, 1) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.hip, 1) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.rccl, 1) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.rocdecode, 1) << "agent-" << itr->node_id;
+        }
+        else
+        {
+            ASSERT_GT(ordinals.at(itr->id), 1);
+            ASSERT_EQ(itr->runtime_visibility.hsa, 0) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.hip, 0) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.rccl, 0) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.rocdecode, 0) << "agent-" << itr->node_id;
+        }
+    }
+
+    // flip the first two devices
+    common::set_env("ROCR_VISIBLE_DEVICES", "1,0", 1);
+    common::set_env("HIP_VISIBLE_DEVICES", noval, 1);
+    common::set_env("GPU_DEVICE_ORDINAL", "0", 1);
+    common::set_env("CUDA_VISIBLE_DEVICES", noval, 1);
+
+    for(const auto* itr : get_gpu_agents())
+    {
+        if(ordinals.at(itr->id) == 0)
+        {
+            ASSERT_EQ(itr->runtime_visibility.hsa, 1) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.hip, 0) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.rccl, 0) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.rocdecode, 0) << "agent-" << itr->node_id;
+        }
+        else if(ordinals.at(itr->id) == 1)
+        {
+            ASSERT_EQ(itr->runtime_visibility.hsa, 1) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.hip, 1) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.rccl, 1) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.rocdecode, 1) << "agent-" << itr->node_id;
+        }
+        else
+        {
+            ASSERT_GT(ordinals.at(itr->id), 1);
+            ASSERT_EQ(itr->runtime_visibility.hsa, 0) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.hip, 0) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.rccl, 0) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.rocdecode, 0) << "agent-" << itr->node_id;
+        }
+    }
+
+    // flip the first two devices
+    common::set_env("ROCR_VISIBLE_DEVICES", "1,0", 1);
+    common::set_env("HIP_VISIBLE_DEVICES", noval, 1);
+    common::set_env("GPU_DEVICE_ORDINAL", noval, 1);
+    common::set_env("CUDA_VISIBLE_DEVICES", "0", 1);
+
+    for(const auto* itr : get_gpu_agents())
+    {
+        if(ordinals.at(itr->id) == 0)
+        {
+            ASSERT_EQ(itr->runtime_visibility.hsa, 1) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.hip, 0) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.rccl, 0) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.rocdecode, 0) << "agent-" << itr->node_id;
+        }
+        else if(ordinals.at(itr->id) == 1)
+        {
+            ASSERT_EQ(itr->runtime_visibility.hsa, 1) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.hip, 1) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.rccl, 1) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.rocdecode, 1) << "agent-" << itr->node_id;
+        }
+        else
+        {
+            ASSERT_GT(ordinals.at(itr->id), 1);
+            ASSERT_EQ(itr->runtime_visibility.hsa, 0) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.hip, 0) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.rccl, 0) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.rocdecode, 0) << "agent-" << itr->node_id;
+        }
+    }
+
+    // flip the first two devices
+    common::set_env("ROCR_VISIBLE_DEVICES", reversed_uuid, 1);
+    common::set_env("HIP_VISIBLE_DEVICES", "0", 1);
+    common::set_env("GPU_DEVICE_ORDINAL", noval, 1);
+    common::set_env("CUDA_VISIBLE_DEVICES", noval, 1);
+
+    for(const auto* itr : get_gpu_agents())
+    {
+        if(ordinals.at(itr->id) == 0)
+        {
+            ASSERT_EQ(itr->runtime_visibility.hsa, 1) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.hip, 0) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.rccl, 0) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.rocdecode, 0) << "agent-" << itr->node_id;
+        }
+        else if(ordinals.at(itr->id) == 1)
+        {
+            ASSERT_EQ(itr->runtime_visibility.hsa, 1) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.hip, 1) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.rccl, 1) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.rocdecode, 1) << "agent-" << itr->node_id;
+        }
+        else
+        {
+            ASSERT_GT(ordinals.at(itr->id), 1);
+            ASSERT_EQ(itr->runtime_visibility.hsa, 0) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.hip, 0) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.rccl, 0) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.rocdecode, 0) << "agent-" << itr->node_id;
+        }
+    }
 }

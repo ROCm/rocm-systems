@@ -532,6 +532,16 @@ typedef union rocprofiler_address_t
     void*    ptr;    ///< usage example: generic form of address
 } rocprofiler_address_t;
 
+/**
+ * @brief Stores UUID for devices.
+ *
+ */
+typedef union rocprofiler_uuid_t
+{
+    uint64_t value;  ///< numerical value
+    void*    bytes;  ///< uuid in hexadecimal
+} rocprofiler_uuid_t;
+
 //--------------------------------------------------------------------------------------//
 //
 //                                      STRUCTS

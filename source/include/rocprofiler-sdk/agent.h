@@ -98,6 +98,26 @@ typedef struct rocprofiler_agent_mem_bank_t
 } rocprofiler_agent_mem_bank_t;
 
 /**
+ * @brief Provides an *estimate* about the runtime visibility of an agent based on the environment
+ * variables (ROCR_VISIBLE_DEVICES, HIP_VISIBLE_DEVICES, GPU_DEVICE_ORDINAL, CUDA_VISIBLE_DEVICES).
+ * Reference: https://rocm.docs.amd.com/en/latest/conceptual/gpu-isolation.html
+ */
+typedef struct rocprofiler_agent_runtime_visiblity_t
+{
+    // Note: HSA == ROCR
+    uint32_t hsa       : 1;  ///> if not visible to HSA, agent not visible to anything built on HSA
+    uint32_t hip       : 1;  ///> Built on HSA
+    uint32_t rccl      : 1;  ///> Built on HIP
+    uint32_t rocdecode : 1;  ///> Built on HIP
+    uint32_t reserved  : 28;
+} rocprofiler_agent_runtime_visiblity_t;
+
+ROCPROFILER_CXX_CODE(
+    static_assert(
+        sizeof(rocprofiler_agent_runtime_visiblity_t) == sizeof(uint32_t),
+        "Increasing the size of the rocprofiler_agent_runtime_visiblity_t is not permitted");)
+
+/**
  * @brief Stores the properties of an agent (CPU, GPU, etc.)
  *
  * The `node_id` member is the KFD topology node id. It should be considered the "universal"
@@ -180,20 +200,33 @@ typedef struct rocprofiler_agent_v0_t
                                            ///< dimension of a work-group.
     rocprofiler_dim3_t grid_max_dim;  ///< GPU only. Maximum number of work-items of each dimension
                                       ///< of a grid.
-    const rocprofiler_agent_mem_bank_t* mem_banks;
-    const rocprofiler_agent_cache_t*    caches;
-    const rocprofiler_agent_io_link_t*  io_links;
-    const char* name;          ///< Name of the agent. Will be identical to product name for CPU
-    const char* vendor_name;   ///< Vendor of agent (will be AMD)
-    const char* product_name;  ///< Marketing name
-    const char* model_name;    ///< GPU only. Will be something like vega20, mi200, etc.
-    uint32_t    node_id;       ///< Node sequence number. This will be equivalent to the HSA-runtime
-                               ///< HSA_AMD_AGENT_INFO_DRIVER_NODE_ID property
-    int32_t logical_node_id;   ///< Logical sequence number. This will always be [0..N) where N is
-                               ///< the total number of agents
-    int32_t logical_node_type_id;
-    int32_t reserved_padding0;  ///< padding logical_node_id to 64 bytes
+    const rocprofiler_agent_mem_bank_t*   mem_banks;
+    const rocprofiler_agent_cache_t*      caches;
+    const rocprofiler_agent_io_link_t*    io_links;
+    const char*                           name;
+    const char*                           vendor_name;   ///< Vendor of agent (will be AMD)
+    const char*                           product_name;  ///< Marketing name
+    const char*                           model_name;
+    uint32_t                              node_id;
+    int32_t                               logical_node_id;
+    int32_t                               logical_node_type_id;
+    rocprofiler_agent_runtime_visiblity_t runtime_visibility;
+    rocprofiler_uuid_t                    uuid;  ///< GPU only. Universally unique identifier.
 
+    /// @var name
+    /// @brief Name of the agent. Will be identical to product name for CPU
+    ///
+    /// @var model_name
+    /// @brief GPU only. Will be something like vega20, mi200, etc.
+    ///
+    /// @var node_id
+    /// @brief Node sequence number. This will be equivalent to the HSA-runtime
+    /// HSA_AMD_AGENT_INFO_DRIVER_NODE_ID property
+    ///
+    /// @var logical_node_id
+    /// @brief Logical sequence number. This will always be [0..N) where N is the total number of
+    /// agents
+    ///
     /// @var logical_node_type_id
     /// @brief Logical sequence number with respect to other agents of same type. This will always
     /// be [0..N) where N is the total number of X agents (where X is a ::rocprofiler_agent_type_t
@@ -207,6 +240,13 @@ typedef struct rocprofiler_agent_v0_t
     /// then then CPU node_ids 0 and 2 would have logical_node_type_id values of 0 and 1,
     /// respectively, and GPU node_ids 1 and 3 would also have logical_node_type_id values of 0
     /// and 1.
+    ///
+    /// @var runtime_visibility
+    /// @brief See @rocprofiler_runtime_library_t. This is an estimate about whether this agent will
+    /// be visible for the runtimes, e.g. if (agent.runtime_visibility & ROCPROFILER_HIP_LIBRARY) !=
+    /// 0 then we believe this agent will be visible to the HIP library. However, this is an
+    /// estimate and we cannot be certain until the HIP runtime is initialized. This will always be
+    /// true for CPU agents.
 } rocprofiler_agent_v0_t;
 
 typedef rocprofiler_agent_v0_t rocprofiler_agent_t;
