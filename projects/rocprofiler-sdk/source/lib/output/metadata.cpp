@@ -30,8 +30,12 @@
 #include "lib/rocprofiler-sdk-att/att_lib_wrapper.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/rocprofiler.h>
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 
+#include <fmt/format.h>
+
+#include <unistd.h>
 #include <memory>
 #include <vector>
 
@@ -179,12 +183,22 @@ void metadata::init(inprocess)
                         ROCPROFILER_COUNTER_INFO_VERSION_0,
                         &static_cast<rocprofiler_counter_info_v0_t&>(_info)));
 
-                    ROCPROFILER_CHECK(rocprofiler_iterate_counter_dimensions(
-                        counters[i], dimensions_info_callback, &_dim_info));
-
-                    _dim_ids.reserve(_dim_info.size());
-                    for(auto ditr : _dim_info)
-                        _dim_ids.emplace_back(ditr.id);
+                    if(auto _itr_dim_stat = rocprofiler_iterate_counter_dimensions(
+                           counters[i], dimensions_info_callback, &_dim_info);
+                       _itr_dim_stat == ROCPROFILER_STATUS_SUCCESS)
+                    {
+                        _dim_ids.reserve(_dim_info.size());
+                        for(auto ditr : _dim_info)
+                            _dim_ids.emplace_back(ditr.id);
+                    }
+                    else
+                    {
+                        ROCP_WARNING << fmt::format("rocprofiler_iterate_counter_dimensions(...) "
+                                                    "for counter {} returned {} :: {}",
+                                                    _info.name,
+                                                    rocprofiler_get_status_name(_itr_dim_stat),
+                                                    rocprofiler_get_status_string(_itr_dim_stat));
+                    }
 
                     data_v->at(id).emplace_back(
                         id, _info, std::move(_dim_ids), std::move(_dim_info));
@@ -193,14 +207,12 @@ void metadata::init(inprocess)
             },
             &agent_counter_info);
 
-        if(status != ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED)
-        {
-            ROCPROFILER_CHECK(status);
-        }
-        else
-        {
-            ROCP_WARNING << "Init failed for agent " << itr.node_id << " (" << itr.name << ")";
-        }
+        ROCP_WARNING_IF(status != ROCPROFILER_STATUS_SUCCESS) << fmt::format(
+            "rocprofiler_iterate_agent_supported_counters returned {} for agent {} ({}) :: {}",
+            rocprofiler_get_status_name(status),
+            itr.node_id,
+            itr.name,
+            rocprofiler_get_status_string(status));
     }
 }
 
