@@ -911,6 +911,24 @@ TEST_F(KFDQMTest, BasicCuMaskingLinear) {
 #define DBG_PRINT
 #endif
 
+
+/*
+ * Helper function to print multi-dword mask.
+ *
+ *   pHeader: A non-NULL pointer to a string to use as the header.
+ *     pMask: A pointer to the mask to print out.
+ * numDwords: Number of elements in mask array.
+ *
+ */
+static void printMask(const char *pHeader, uint32_t *pMask, uint32_t numDwords) {
+    printf("%s0x", pHeader);
+    for (int i = numDwords - 1; i >= 0; i--) {
+        printf("%08x", pMask[i]);
+    }
+    printf("\n");
+}
+
+
 /*
  * Set the CU mask for each specified WGPs.
  *
@@ -961,6 +979,65 @@ static bool setCUMask(uint32_t *pMask, mask_config_t maskConfig, uint32_t seMask
     return result;
 }
 
+
+/*
+ * Compute an adjusted CU mask to use when some WGPs are inactive.
+ *
+ * The adjusted mask takes into account the inactive WGPs by removing their corresponding
+ * bits from the mask as these are skipped by KFD.   As bits are removed from the mask,
+ * the remaining bit values are shifted right.
+ *
+ *   pAdjMask: A non-NULL pointer where the adjusted mask will be written.
+ *      pMask: A non-NULL pointer to the CU mask.
+ * maskConfig: Information on GPU configuration.
+ *
+ * Returns:
+ *      true: If adjusted mask has one or more non-zero bit set.
+ *     false: If the adjusted mask is all zeroes (no WGPs left to do work).
+ *
+ * When false is returned, we should skipped the specific test scenario.
+ *
+ */
+bool adjustMask(uint32_t *pAdjMask, uint32_t *pMask, mask_config_t maskConfig) {
+    int wi = 0;
+    int totalBits = maskConfig.numBits;
+    bool nonZero = false;
+
+    memset(pAdjMask, 0, sizeof(uint32_t) * maskConfig.numDwords);
+
+    for (int ri = 0; ri < totalBits; ri += 2) {
+
+        uint32_t value = (pMask[ri / 32] >> (ri % 32)) & 0x3;
+
+        if ((maskConfig.pInactiveMask[ri / 32] & (0x3 << (ri % 32))) != 0)
+        {
+            // skip that entry
+        }
+        else
+        {
+            uint32_t newValue = value << (wi % 32);
+            pAdjMask[wi / 32] |= newValue;
+            wi += 2;
+
+            if (value != 0) {
+                nonZero = true;
+            }
+        }
+    }
+
+#if CUMASK_DEBUG
+    printf("\nAdjusting mask:\n");
+    printMask("    mask: ", pMask, maskConfig.numDwords);
+    printMask("inactive: ", maskConfig.pInactiveMask, maskConfig.numDwords);
+    printMask("adjusted: ", pAdjMask, maskConfig.numDwords);
+    printf("\n");
+#endif //CUMASK_DEBUG
+
+    return nonZero;
+}
+
+
+
 /*
  * Validates the result of a test.
  *
@@ -968,12 +1045,14 @@ static bool setCUMask(uint32_t *pMask, mask_config_t maskConfig, uint32_t seMask
  * maskConfig:   Information on GPU configuration.
  * numWorkItems: Number of work items used for shader execution.
  * pOutput:      Pointer to the output array.
+ * pResultMask:  If non-NULL, result mask constructed from output is stored at that memory location.
  *
  */
-static bool validateTest(uint32_t *pMask, mask_config_t maskConfig, uint32_t numWorkItems, out_data_t *pOutput)
+static bool validateTest(uint32_t *pMask, mask_config_t maskConfig, uint32_t numWorkItems, out_data_t *pOutput, uint32_t *pResultMask)
 {
     uint32_t resultMask[maskConfig.numDwords];
     bool result = false;
+
     memset(resultMask, 0, sizeof(resultMask));
 
     for (int i = 0; i < numWorkItems; i++) {
@@ -985,19 +1064,40 @@ static bool validateTest(uint32_t *pMask, mask_config_t maskConfig, uint32_t num
                   1 << pOutput[i].wgp);
     }
 
-    result = (memcmp(pMask, resultMask, sizeof(resultMask)) == 0);
+    if (pResultMask) {
+        memcpy(pResultMask, resultMask, sizeof(resultMask));
+    }
+
+    if (maskConfig.pInactiveMask) {
+        // If some WGPs were inactive, compute a verify mask taking into account the inactive WGPs.
+        uint32_t verifyMask[maskConfig.numDwords];
+        memset(verifyMask, 0, sizeof(verifyMask));
+
+        for (int i = 0; i < maskConfig.numDwords; i++) {
+            verifyMask[i] = pMask[i] & ~maskConfig.pInactiveMask[i];
+        }
 
 #if CUMASK_DEBUG
-    fprintf(stderr,   "        mask: ");
-    for (int i = 0; i < maskConfig.numDwords; i++) {
-      fprintf(stderr, " %08x", pMask[i]);
-    }
-    fprintf(stderr, "\n  resultMask: ");
-    for (int i = 0; i < maskConfig.numDwords; i++) {
-      fprintf(stderr, " %08x", resultMask[i]);
-    }
-    fprintf(stderr, "\n      result: %s\n", result ? "PASS" : "FAIL");
+        printf("\nValidate test:\n");
+        printMask("        mask: ", pMask, maskConfig.numDwords);
+        printMask("  resultMask: ", resultMask, maskConfig.numDwords);
+        printMask("inactiveMask: ", maskConfig.pInactiveMask, maskConfig.numDwords);
+        printMask("  verifyMask: ", verifyMask, maskConfig.numDwords);
 #endif //CUMASK_DEBUG
+
+        result = (memcmp(verifyMask, resultMask, sizeof(resultMask)) == 0);
+    } else {
+
+#if CUMASK_DEBUG
+        printf("\nValidate test:\n");
+        printMask("        mask: ", pMask, maskConfig.numDwords);
+        printMask("  resultMask: ", resultMask, maskConfig.numDwords);
+#endif //CUMASK_DEBUG
+
+        result = (memcmp(pMask, resultMask, sizeof(resultMask)) == 0);
+    }
+
+    DBG_PRINT("      Result: %s\n\n", result ? "PASS" : "FAIL");
 
     return result;
 }
@@ -1011,23 +1111,39 @@ static bool validateTest(uint32_t *pMask, mask_config_t maskConfig, uint32_t num
  * programBuffer: The buffer that contains the shader program.
  * numWorkItems:  The number of work items to use.
  * pOutput:       A non-NULL pointer to the output buffer used by the shader.
+ * pResultMask:   If non-NULL, result mask constructed from output is stored at that memory location.
  *
  */
-static bool testCUMask(int gpuNode, uint32_t *pMask, mask_config_t maskConfig, HsaMemoryBuffer &programBuffer, uint32_t numWorkItems, out_data_t *pOutput) {
+static bool testCUMask(int gpuNode, uint32_t *pMask, mask_config_t maskConfig, HsaMemoryBuffer &programBuffer, uint32_t numWorkItems, out_data_t *pOutput, uint32_t *pResultMask = NULL) {
 
     PM4Queue queue;
+    uint32_t *pAdjMask = NULL;
+    uint32_t adjMask[maskConfig.numDwords];
+
+    if (maskConfig.pInactiveMask) {
+        if (adjustMask(adjMask, pMask, maskConfig)) {
+            pAdjMask = adjMask;
+        } else {
+            // Adjusted mask is all zeroes, skip test and mark as passing.
+            return true;
+        }
+    } else {
+        pAdjMask = pMask;
+    }
 
     Dispatch dispatch(programBuffer);
     dispatch.SetArgs(NULL, pOutput);
     dispatch.SetDim(numWorkItems, 1, 1);
 
     EXPECT_SUCCESS_GPU(queue.Create(gpuNode), gpuNode);
-    EXPECT_SUCCESS_GPU(queue.SetCUMask(pMask, maskConfig.numBits), gpuNode);
+
+    EXPECT_SUCCESS_GPU(queue.SetCUMask(pAdjMask, maskConfig.numBits), gpuNode);
+
     dispatch.Submit(queue);
     dispatch.Sync();
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 
-    return validateTest(pMask, maskConfig, numWorkItems, pOutput);
+    return validateTest(pMask, maskConfig, numWorkItems, pOutput, pResultMask);
 }
 
 
@@ -1076,28 +1192,33 @@ static void extendedCuMasking(KFDTEST_PARAMETERS* pTestParameters) {
         const uint32_t numSEs = pProps->NumShaderBanks;
         const uint32_t numSAperSE = pProps->NumArrays;
         const uint32_t numWGPperSA = pProps->NumCUPerArray / 2;
+        const uint32_t maxCU = numSEs * numSAperSE * numWGPperSA * 2;
 
-        std::ostringstream nodeStr;
-        nodeStr << "(Node " << gpuNode << ")";
-        const char *pNodeStr = nodeStr.str().c_str();
+        std::ostringstream nodeStream;
+        nodeStream << "(Node " << gpuNode << ")";
+        const std::string nodeStr = nodeStream.str();
 
         logMutex.lock();
         LOG() << std::endl;
-        LOG() << std::dec << "****** GFX Configuration " << pNodeStr << " ******" << std::endl;
+        LOG() << std::dec << "****** GFX Configuration " << nodeStr << " ******" << std::endl;
         LOG() << std::dec << "  Compute Cores (SIMD): " << std::setw(3) << pProps->NumFComputeCores << std::endl;
         LOG() << std::dec << "          SIMDs per CU: " << std::setw(3) << pProps->NumSIMDPerCU << std::endl;
         LOG() << std::dec << "            Active CUs: " << std::setw(3) << activeCU << std::endl;
+        LOG() << std::dec << "               Max CUs: " << std::setw(3) << maxCU << std::endl;
         LOG() << std::dec << "        Shader Engines: " << std::setw(3) << numSEs << std::endl;
         LOG() << std::dec << "            SAs per SE: " << std::setw(3) << numSAperSE << std::endl;
         LOG() << std::dec << "           WGPs per SA: " << std::setw(3) << numWGPperSA << std::endl;
         LOG() << std::dec << "****************************************" << std::endl;
         logMutex.unlock();
 
-        const uint32_t maskNumDwords = (activeCU + 31) / 32; /* Round up to the nearest multiple of 32 */
+        const uint32_t maskNumDwords = (maxCU + 31) / 32; /* Round up to the nearest multiple of 32 */
         const uint32_t maskNumBits = maskNumDwords * 32;
-        uint32_t mask[maskNumDwords];
 
-        const mask_config_t maskConfig = { maskNumDwords, maskNumBits, numSEs, numSAperSE, numWGPperSA };
+
+        uint32_t mask[maskNumDwords];
+        uint32_t inactiveMask[maskNumDwords];
+
+        mask_config_t maskConfig = { maskNumDwords, maskNumBits, numSEs, numSAperSE, numWGPperSA, NULL };
 
         /*
          * Note: On system with WGPs, CU bits in the same WGP must be either both set or both unset
@@ -1145,6 +1266,43 @@ static void extendedCuMasking(KFDTEST_PARAMETERS* pTestParameters) {
         ASSERT_NOTNULL_GPU(pAsm, gpuNode);
         ASSERT_SUCCESS_GPU(pAsm->RunAssembleBuf(CheckCuMaskIsa, programBuffer.As<char*>()), gpuNode);
 
+
+       /*
+        * Check and record any inactive WPGs.
+        *
+        */
+        memset(mask, 0, sizeof(mask));
+        memset(inactiveMask, 0, sizeof(inactiveMask));
+
+        // Use full mask and collect all active CUs in inactiveMask
+        setCUMask(mask, maskConfig, -1, -1, -1);
+        if (testCUMask(gpuNode, mask, maskConfig, programBuffer, numWorkItems, pOutput, inactiveMask)) {
+            // Using full mask, if all CUs are used, we expect them to be all active.
+            EXPECT_TRUE_GPU(activeCU == maxCU, gpuNode);
+        } else {
+            // Some CUs were not used, generate inactive mask and count inactive CUs.
+            uint32_t inactiveCount = 0;
+
+            // Flip bits and count inactive
+            for (int i = 0; i < maskNumDwords; i++) {
+                inactiveMask[i] = ~inactiveMask[i];
+                inactiveCount += __builtin_popcount(inactiveMask[i]);
+            }
+
+            // Check if what we detected is consistent with info from KFD
+            EXPECT_TRUE_GPU((activeCU + inactiveCount) == maxCU, gpuNode);
+
+            maskConfig.pInactiveMask = inactiveMask;
+
+            std::ostringstream logStr;
+            logStr << nodeStr << " Inactive WGP detected: " << inactiveCount << "  0x" << std::hex << std::setw(8);
+            for (int i = maskNumDwords - 1; i >= 0; i--) {
+                logStr << inactiveMask[i];
+            }
+            LOG() << logStr.str() << std::endl;
+        }
+
+
         /*
          * Generate symmetric test configuration for all (SE, SA, WGP) combinations, one level at a time.
          *
@@ -1157,7 +1315,7 @@ static void extendedCuMasking(KFDTEST_PARAMETERS* pTestParameters) {
         uint32_t totalConfigTested = 0;
 
         // All SE combination (0 not allowed, need at least one enabled)
-        LOG() << pNodeStr << " === Testing SE mask (" << ((1 << numSEs) - 1) << " configs)\n";
+        LOG() << nodeStr << " === Testing SE mask (" << ((1 << numSEs) - 1) << " configs)\n";
         for (int i = 1; i < (1 << numSEs); i++) {
             memset(mask, 0, sizeof(mask));
             DBG_PRINT("SE mask: 0x%x\n", i);
@@ -1167,7 +1325,7 @@ static void extendedCuMasking(KFDTEST_PARAMETERS* pTestParameters) {
         }
 
         // All SA combinations (0 not allowed, need at least one enabled)
-        LOG() << pNodeStr << " === Testing SA mask (" << ((1 << numSAperSE) - 1) << " configs)\n";
+        LOG() << nodeStr << " === Testing SA mask (" << ((1 << numSAperSE) - 1) << " configs)\n";
         for (uint32_t i = 1; i < (1 << numSAperSE); i++) {
             memset(mask, 0, sizeof(mask));
 
@@ -1178,7 +1336,7 @@ static void extendedCuMasking(KFDTEST_PARAMETERS* pTestParameters) {
         }
 
         // All WGP combinations (0 not allowed, need at least one enabled)
-        LOG() << pNodeStr << " === Testing WGP mask (" << ((1 << numWGPperSA) - 1) << " configs)\n";
+        LOG() << nodeStr << " === Testing WGP mask (" << ((1 << numWGPperSA) - 1) << " configs)\n";
         for (uint32_t i = 1; i < (1 << numWGPperSA); i++) {
             memset(mask, 0, sizeof(mask));
 
@@ -1197,7 +1355,7 @@ static void extendedCuMasking(KFDTEST_PARAMETERS* pTestParameters) {
         {
             uint32_t totalWGPs = numSEs * numSAperSE * numWGPperSA;
 
-            LOG() << pNodeStr << " === Testing linear mask (" << totalWGPs << " configs)\n";
+            LOG() << nodeStr << " === Testing linear mask (" << totalWGPs << " configs)\n";
 
             memset(mask, 0, sizeof(mask));
 
@@ -1205,11 +1363,7 @@ static void extendedCuMasking(KFDTEST_PARAMETERS* pTestParameters) {
                 mask[i / 16] |= (0x3 << (i * 2));
 
 #if CUMASK_DEBUG
-                printf("  linear mask: ");
-                for (int j = maskNumDwords - 1; j >= 0; j--) {
-                    printf("%08x", mask[j]);
-                }
-                printf("\n");
+                printMask("  linear mask: ", mask, maskNumDwords);
 #endif //CUMASK_DEBUG
 
                 EXPECT_TRUE_GPU(testCUMask(gpuNode, mask, maskConfig, programBuffer, numWorkItems, pOutput), gpuNode);
@@ -1229,13 +1383,13 @@ static void extendedCuMasking(KFDTEST_PARAMETERS* pTestParameters) {
 
             srand(seed);
 
-            LOG() << pNodeStr << " === Testing " << randomCount << " random mask config...\n";
+            LOG() << nodeStr << " === Testing " << randomCount << " random mask config...\n";
 
             for (uint32_t i = 0; i < randomCount; i++) {
 
                 memset(mask, 0, sizeof(mask));
 
-                uint32_t wgpLeft = activeCU / 2;   // init to total WGPs
+                uint32_t wgpLeft = maxCU / 2;   // init to total WGPs
                 uint32_t maskIndex = 0;
 
                 while (wgpLeft > 0) {
@@ -1268,7 +1422,7 @@ static void extendedCuMasking(KFDTEST_PARAMETERS* pTestParameters) {
         }
 
         LOG() << std::endl;
-        LOG() << pNodeStr << " Total config tested: " << totalConfigTested << std::endl;
+        LOG() << nodeStr << " Total config tested: " << totalConfigTested << std::endl;
         LOG() << std::endl;
 
     } else {

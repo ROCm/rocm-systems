@@ -39,6 +39,7 @@ typedef struct {
     uint32_t numSEs;
     uint32_t numSAperSE;
     uint32_t numWGPperSA;
+    uint32_t *pInactiveMask;
 } mask_config_t;
 
 /*
