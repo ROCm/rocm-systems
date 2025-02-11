@@ -171,7 +171,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['mi325']
+        runner: ['mi300']
         os: ['rhel-emu', 'sles-emu']
         build-type: ['RelWithDebInfo']
         ci-flags: ['--linter clang-tidy']
@@ -577,7 +577,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['vega20', 'mi325', 'mi300']
+        runner: ['vega20', 'mi300a', 'mi300']
         sanitizer: ['AddressSanitizer', 'ThreadSanitizer', 'LeakSanitizer', 'UndefinedBehaviorSanitizer']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
@@ -587,9 +587,9 @@ jobs:
           - { runner: 'vega20', sanitizer: 'UndefinedBehaviorSanitizer' }
           - { runner: 'mi300', sanitizer: 'AddressSanitizer' }
           - { runner: 'mi300', sanitizer: 'LeakSanitizer' }
-          - { runner: 'mi325', sanitizer: 'LeakSanitizer' }
-          - { runner: 'mi325', sanitizer: 'ThreadSanitizer' }
-          - { runner: 'mi325', sanitizer: 'UndefinedBehaviorSanitizer' }
+          - { runner: 'mi300a', sanitizer: 'LeakSanitizer' }
+          - { runner: 'mi300a', sanitizer: 'ThreadSanitizer' }
+          - { runner: 'mi300a', sanitizer: 'UndefinedBehaviorSanitizer' }
 
     if: ${{ contains(github.event_name, 'pull_request') }}
     runs-on: ${{ matrix.runner }}-emu-runner-set
