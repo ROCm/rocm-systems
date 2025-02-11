@@ -454,8 +454,8 @@ main(int argc, char** argv)
     parser.add_argument({ "-F", "--config-format" }, "Configuration file format")
         .min_count(1)
         .max_count(3)
-        .set_default(std::set<std::string>{ "txt" })
         .choices({ "txt", "json", "xml" })
+        .set_default(std::set<std::string>{ "txt" })
         .dtype("filename")
         .action([&_config_fmts](parser_t& _p) {
             _config_fmts = _p.get<std::set<std::string>>("config-format");
