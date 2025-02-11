@@ -82,8 +82,7 @@ rdc_status_t RdcPolicyImpl::rdc_policy_set(rdc_gpu_group_t group_id, rdc_policy_
       gpu_index = group_info.entity_ids[i];
 
       status = metric_fetcher_->fetch_smi_field(gpu_index, RDC_FI_GPU_PAGE_RETRIED, &value);
-      if (status == RDC_ST_MSI_ERROR)
-        return RDC_ST_NOT_SUPPORTED;
+      if (status == RDC_ST_MSI_ERROR) return RDC_ST_NOT_SUPPORTED;
     }
   }
 
@@ -219,15 +218,15 @@ void RdcPolicyImpl::rdc_policy_check_condition() {
         status = metric_fetcher_->fetch_smi_field(gpu_index, map[policy.condition.type], &value);
         if (status == RDC_ST_OK) {
           if (value.value.l_int > policy.condition.value) {
-            if (RDC_POLICY_ACTION_GPU_RESET == policy.action) {
-              rdc_policy_gpu_reset(gpu_index);
-            }
-
             // callback if needed
             if (callback) {
               rdc_policy_callback_response_t response = {1, policy.condition, group_id,
                                                          value.value.l_int};
               callback(&response);
+            }
+
+            if (RDC_POLICY_ACTION_GPU_RESET == policy.action) {
+              rdc_policy_gpu_reset(gpu_index);
             }
           }
         }
