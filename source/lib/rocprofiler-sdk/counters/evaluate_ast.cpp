@@ -89,21 +89,22 @@ perform_reduction_to_single_instance(ReduceOperation                            
         case REDUCE_SUM: [[fallthrough]];
         case REDUCE_AVG:
         {
-            *result = std::accumulate(input_array->begin(),
-                                      input_array->end(),
-                                      rocprofiler_record_counter_t{.id            = 0,
-                                                                   .counter_value = 0,
-                                                                   .dispatch_id   = 0,
-                                                                   .user_data     = {.value = 0},
-                                                                   .agent_id      = {.handle = 0}},
-                                      [](auto& a, auto& b) {
-                                          return rocprofiler_record_counter_t{
-                                              .id            = a.id,
-                                              .counter_value = a.counter_value + b.counter_value,
-                                              .dispatch_id   = a.dispatch_id,
-                                              .user_data     = {.value = 0},
-                                              .agent_id      = {.handle = 0}};
-                                      });
+            *result = std::accumulate(
+                input_array->begin(),
+                input_array->end(),
+                rocprofiler_record_counter_t{.id            = input_array->begin()->id,
+                                             .counter_value = 0,
+                                             .dispatch_id   = input_array->begin()->dispatch_id,
+                                             .user_data     = input_array->begin()->user_data,
+                                             .agent_id      = input_array->begin()->agent_id},
+                [](auto& a, auto& b) {
+                    return rocprofiler_record_counter_t{
+                        .id            = a.id,
+                        .counter_value = a.counter_value + b.counter_value,
+                        .dispatch_id   = a.dispatch_id,
+                        .user_data     = a.user_data,
+                        .agent_id      = a.agent_id};
+                });
             if(reduce_op == REDUCE_AVG)
             {
                 (*result).counter_value /= input_array->size();
@@ -127,7 +128,7 @@ perform_reduction(
                                             .counter_value = 0,
                                             .dispatch_id   = 0,
                                             .user_data     = {.value = 0},
-                                            .agent_id      = {.handle = 0}};
+                                            .agent_id      = input_array->begin()->agent_id};
         perform_reduction_to_single_instance(reduce_op, input_array, &result);
         input_array->clear();
         input_array->push_back(result);
