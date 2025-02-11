@@ -141,7 +141,8 @@ constexpr rocprofiler_agent_t default_agent =
                         .node_id                    = 0,
                         .logical_node_id            = 0,
                         .logical_node_type_id       = 0,
-                        .reserved_padding0          = 0};
+                        .runtime_visibility         = {0, 0, 0, 0, 0},
+                        .uuid                       = {.value = 0}};
 }  // namespace
 
 void

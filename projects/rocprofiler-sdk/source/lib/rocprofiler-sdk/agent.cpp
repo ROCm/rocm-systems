@@ -20,18 +20,20 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <rocprofiler-sdk/agent.h>
-#include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/rocprofiler.h>
-
+#include "lib/rocprofiler-sdk/agent.hpp"
+#include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/string_entry.hpp"
 #include "lib/common/utility.hpp"
-#include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+
+#include <rocprofiler-sdk/agent.h>
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/rocprofiler.h>
+#include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 
 #include <fmt/core.h>
 #include <fmt/format.h>
@@ -42,6 +44,7 @@
 #include <xf86drm.h>
 
 #include <fstream>
+#include <iomanip>
 #include <limits>
 #include <random>
 #include <regex>
@@ -326,6 +329,216 @@ read_property(const MapT& data, const std::string& label, Tp& value)
     }
 }
 
+void
+update_agent_runtime_visibility(rocprofiler_agent_t& agent_info)
+{
+    //
+    //      https://rocm.docs.amd.com/en/latest/conceptual/gpu-isolation.html
+    //
+    //
+    // ROCR_VISIBLE_DEVICES
+    //
+    //      A list of device indices or UUIDs that will be exposed to applications.
+    //
+    //      Runtime : ROCm Software Runtime. Applies to all applications using the user mode
+    //      ROCm software stack.
+    //
+    //      Example to expose the 1. device and a device based on UUID.
+    //          export ROCR_VISIBLE_DEVICES="0,GPU-DEADBEEFDEADBEEF"
+    //
+    // GPU_DEVICE_ORDINAL
+    //      Devices indices exposed to OpenCL and HIP applications.
+    //
+    //      Runtime : ROCm Compute Language Runtime (ROCclr). Applies to applications and
+    //      runtimes using the ROCclr abstraction layer including HIP and OpenCL applications.
+    //
+    //      Example to expose the 1. and 3. device in the system.
+    //          export GPU_DEVICE_ORDINAL="0,2"
+    //
+    // HIP_VISIBLE_DEVICES
+    //      Device indices exposed to HIP applications.
+    //
+    //      Runtime: HIP runtime. Applies only to applications using HIP on the AMD platform.
+    //
+    //      Example to expose the 1. and 3. devices in the system.
+    //          export HIP_VISIBLE_DEVICES="0,2"
+    //
+    // CUDA_VISIBLE_DEVICES
+    //      Provided for CUDA compatibility, has the same effect as HIP_VISIBLE_DEVICES on the
+    //      AMD platform.
+    //
+    //      Runtime : HIP or CUDA Runtime. Applies to HIP applications on the AMD or NVIDIA
+    //      platform and CUDA applications.
+    //
+    // OMP_DEFAULT_DEVICE
+    //      Default device used for OpenMP target offloading.
+    //
+    //      Runtime : OpenMP Runtime. Applies only to applications using OpenMP offloading.
+    //
+    //      Example on setting the default device to the third device.
+    //          export OMP_DEFAULT_DEVICE="2"
+    //
+
+    struct parse_result
+    {
+        bool    value = false;
+        int32_t index = -1;
+
+        operator bool() const { return (value && index >= 0); }
+    };
+
+    constexpr auto zero_visibility = rocprofiler_agent_runtime_visiblity_t{
+        .hsa = 0, .hip = 0, .rccl = 0, .rocdecode = 0, .reserved = 0};
+    constexpr auto full_visibility = rocprofiler_agent_runtime_visiblity_t{
+        .hsa = 1, .hip = 1, .rccl = 1, .rocdecode = 1, .reserved = 0};
+
+    agent_info.runtime_visibility = zero_visibility;
+
+    if(agent_info.type == ROCPROFILER_AGENT_TYPE_CPU)
+    {
+        agent_info.runtime_visibility = full_visibility;
+    }
+    else if(agent_info.type == ROCPROFILER_AGENT_TYPE_GPU)
+    {
+        auto set_hip_visibility = [&agent_info](bool is_hip_visible) {
+            if(is_hip_visible && agent_info.runtime_visibility.hsa == 0)
+            {
+                ROCP_WARNING << fmt::format("Attempt to enable hip visiblity for agent-{} which is "
+                                            "not visible to HSA (ROCR)",
+                                            agent_info.node_id);
+                return;
+            }
+
+            ROCP_INFO << "agent-" << agent_info.node_id
+                      << " ::  HIP_VISIBLE_DEVICE = " << std::boolalpha << is_hip_visible;
+            agent_info.runtime_visibility.hip       = is_hip_visible;
+            agent_info.runtime_visibility.rccl      = is_hip_visible;
+            agent_info.runtime_visibility.rocdecode = is_hip_visible;
+        };
+
+        auto set_hsa_visibility = [&agent_info, &set_hip_visibility](bool is_hsa_visible) {
+            ROCP_INFO << "agent-" << agent_info.node_id
+                      << " :: ROCR_VISIBLE_DEVICE = " << std::boolalpha << is_hsa_visible;
+            agent_info.runtime_visibility.hsa = is_hsa_visible;
+            if(!is_hsa_visible) set_hip_visibility(false);
+        };
+
+        auto parse_env_visible = [&agent_info](std::string_view env_varname,
+                                               int32_t env_node_id) -> std::optional<parse_result> {
+            constexpr auto uuid_prefix = std::string_view{"GPU-"};
+            auto           env_value   = common::get_env(env_varname, "");
+            if(env_value.empty()) return std::nullopt;
+
+            ROCP_INFO << "Found visibility environment variable :: " << env_varname << " = "
+                      << env_value;
+            int32_t idx = 0;
+            for(const auto& itr : rocprofiler::sdk::parse::tokenize(env_value, ", "))
+            {
+                if(itr.empty()) continue;
+
+                ROCP_TRACE << "Processing " << env_varname << " token: " << itr;
+
+                auto _idx_v = idx++;
+                if(itr.find_first_not_of("0123456789") == std::string::npos)
+                {
+                    auto _ordinal = std::stoll(itr);
+                    if(_ordinal == env_node_id) return parse_result{true, _idx_v};
+                }
+                else if(itr.find(uuid_prefix) == 0 && itr.length() > uuid_prefix.length())
+                {
+                    auto _uuid =
+                        std::strtoull(itr.substr(uuid_prefix.length()).c_str(), nullptr, 16);
+                    if(_uuid == agent_info.uuid.value) return parse_result{true, _idx_v};
+                }
+                else
+                {
+                    ROCP_CI_LOG(WARNING)
+                        << fmt::format("Sequence '{}' in {}={} not recognized. Expected device "
+                                       "ordinal or GPU-XXX where XXX is the hexadecimal UUID",
+                                       itr,
+                                       env_varname,
+                                       env_value);
+                }
+            }
+            return parse_result{false, agent_info.logical_node_type_id};
+        };
+
+        static_assert(
+            ROCPROFILER_LIBRARY_LAST == ROCPROFILER_ROCDECODE_LIBRARY,
+            "Since a new library was added to rocprofiler_runtime_library_t, please make sure "
+            "rocprofiler_agent_runtime_visiblity_t has an entry for this library (if "
+            "necessary) and make the necessary updates to the logic below has been updated");
+
+        std::string_view hip_visible_envvar = "HIP_VISIBLE_DEVICES";
+
+        auto rocr_visible =
+            parse_env_visible("ROCR_VISIBLE_DEVICES", agent_info.logical_node_type_id);
+
+        auto rocr_index =
+            (rocr_visible && *rocr_visible) ? rocr_visible->index : agent_info.logical_node_type_id;
+
+        ROCP_INFO << fmt::format("agent-{} (GPU {}) has a rocr index = {}",
+                                 agent_info.node_id,
+                                 agent_info.logical_node_type_id,
+                                 rocr_index);
+
+        auto hip_visible = parse_env_visible(hip_visible_envvar, rocr_index);
+
+        auto parse_hip_visible_alt = [&hip_visible, &agent_info, &rocr_index, &parse_env_visible](
+                                         std::string_view env_primary,
+                                         std::string_view env_secondary) {
+            auto secondary_visible = parse_env_visible(env_secondary, rocr_index);
+            if(secondary_visible && !hip_visible)
+            {
+                hip_visible = secondary_visible;
+                return env_secondary;
+            }
+            else if(secondary_visible && hip_visible && *secondary_visible != *hip_visible)
+            {
+                ROCP_CI_LOG(WARNING) << fmt::format("Conflicting visibility of agent-{} between "
+                                                    "{} and {}. Assuming {} supersedes {}",
+                                                    agent_info.node_id,
+                                                    env_primary,
+                                                    env_secondary,
+                                                    env_primary,
+                                                    env_secondary);
+            }
+            return env_primary;
+        };
+
+        // if HIP_VISIBLE_DEVICES is not set, fall back on these
+        hip_visible_envvar = parse_hip_visible_alt(hip_visible_envvar, "CUDA_VISIBLE_DEVICES");
+        hip_visible_envvar = parse_hip_visible_alt(hip_visible_envvar, "GPU_DEVICE_ORDINAL");
+
+        if(!hip_visible && !rocr_visible)
+        {
+            set_hsa_visibility(true);
+            set_hip_visibility(true);
+        }
+        else
+        {
+            ROCP_INFO << "agent-" << agent_info.node_id
+                      << " :: logical node type id: " << agent_info.logical_node_type_id;
+
+            if(rocr_visible)
+                set_hsa_visibility(*rocr_visible);
+            else
+                set_hsa_visibility(true);
+
+            if(hip_visible)
+                set_hip_visibility(*hip_visible);
+            else
+                set_hip_visibility((rocr_visible) ? rocr_visible->value : true);
+        }
+    }
+    else
+    {
+        ROCP_CI_LOG(WARNING) << "Agent-" << agent_info.node_id
+                             << " has unexpected agent type value " << agent_info.type
+                             << " passed to " << __FUNCTION__;
+    }
+}
+
 using unique_agent_t = std::unique_ptr<rocprofiler_agent_t, void (*)(rocprofiler_agent_t*)>;
 
 auto
@@ -436,11 +649,13 @@ read_topology()
         agent_info.name         = "";
         agent_info.product_name = "";
         agent_info.vendor_name  = "";
+        agent_info.uuid         = {.value = 0};
         if(agent_info.type == ROCPROFILER_AGENT_TYPE_GPU)
         {
             constexpr auto workgrp_max = 1024;
             constexpr auto grid_max    = std::numeric_limits<uint32_t>::max();
 
+            read_property(properties, "unique_id", agent_info.uuid.value);
             read_property(
                 properties, "max_engine_clk_fcompute", agent_info.max_engine_clk_fcompute);
             read_property(properties, "local_mem_size", agent_info.local_mem_size);
@@ -590,6 +805,8 @@ read_topology()
                 read_property(subproperties, "flags", agent_info.io_links[i].flags.LinkProperty);
             }
         }
+
+        update_agent_runtime_visibility(agent_info);
 
         data.emplace_back(new rocprofiler_agent_t{agent_info}, [](rocprofiler_agent_t* ptr) {
             if(ptr)
@@ -908,6 +1125,13 @@ get_hsa_agent(const rocprofiler_agent_t* agent)
     return std::nullopt;
 }
 
+std::optional<hsa_agent_t>
+get_hsa_agent(rocprofiler_agent_id_t agent_id)
+{
+    if(const auto* _agent = get_agent(agent_id); _agent) return get_hsa_agent(_agent);
+    return std::nullopt;
+}
+
 const rocprofiler_agent_t*
 get_rocprofiler_agent(hsa_agent_t agent)
 {
@@ -946,6 +1170,13 @@ get_agent_available_properties()
 {
     static std::unordered_set<std::string> _prop;
     return _prop;
+}
+
+void
+internal_refresh_topology()
+{
+    auto _updated_topology = read_topology();
+    std::swap(get_agent_topology(), _updated_topology);
 }
 }  // namespace agent
 }  // namespace rocprofiler

@@ -155,6 +155,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Added support for rocDecode API Tracing
 - Added usage documentation for ROCTx
 - Added usage documentation for MPI applications
+- SDK: `rocprofiler_agent_v0_t` support for agent UUIDs
+- SDK: `rocprofiler_agent_v0_t` support for agent visibility based on gpu isolation environment variables (`ROCR_VISIBLE_DEVICES`, etc.)
 
 ### Changed
 

@@ -49,6 +49,9 @@ construct_agent_cache(::HsaApiTable* table);
 std::optional<hsa_agent_t>
 get_hsa_agent(const rocprofiler_agent_t* agent);
 
+std::optional<hsa_agent_t>
+get_hsa_agent(rocprofiler_agent_id_t agent_id);
+
 const rocprofiler_agent_t*
 get_rocprofiler_agent(hsa_agent_t agent);
 
@@ -72,5 +75,8 @@ get_aql_agent(rocprofiler_agent_id_t id);
 
 void
 construct_agent_cache(::HsaApiTable* table);
+
+void
+internal_refresh_topology();  // only for internal testing
 }  // namespace agent
 }  // namespace rocprofiler

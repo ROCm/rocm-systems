@@ -146,6 +146,7 @@ SPECIALIZE_GET_ENV(uint64_t)
 
 SPECIALIZE_SET_ENV(const char*)
 SPECIALIZE_SET_ENV(std::string)
+SPECIALIZE_SET_ENV(std::string_view)
 SPECIALIZE_SET_ENV(float)
 SPECIALIZE_SET_ENV(double)
 }  // namespace impl

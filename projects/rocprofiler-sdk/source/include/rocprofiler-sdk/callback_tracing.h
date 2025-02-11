@@ -124,22 +124,36 @@ typedef struct
  */
 typedef struct
 {
-    uint64_t               size;            ///< size of this struct
-    uint64_t               code_object_id;  ///< unique code object identifier
-    rocprofiler_agent_id_t rocp_agent;  ///< The agent on which this loaded code object is loaded
-    hsa_agent_t            hsa_agent;   ///< The agent on which this loaded code object is loaded
-    const char*            uri;         ///< The URI name from which the code object was loaded
-    uint64_t load_base;  ///< The base memory address at which the code object is loaded. This is
-                         ///< the base address of the allocation for the lowest addressed segment of
-                         ///< the code object that is loaded. Note that any non-loaded segments
-                         ///< before the first loaded segment are ignored.
-    uint64_t load_size;  ///< The byte size of the loaded code objects contiguous memory allocation.
-    int64_t  load_delta;  ///< The signed byte address difference of the memory address at which the
-                          ///< code object is loaded minus the virtual address specified in the code
-                          ///< object that is loaded.
-    rocprofiler_code_object_storage_type_t
-        storage_type;  ///< storage type of the code object reader used to load the loaded code
-                       ///< object
+    uint64_t size;            ///< size of this struct
+    uint64_t code_object_id;  ///< unique code object identifier
+    union
+    {
+        rocprofiler_agent_id_t rocp_agent;  ///< Deprecated. Renamed to agent_id
+        rocprofiler_agent_id_t agent_id;  ///< The agent on which this loaded code object is loaded
+    };
+    hsa_agent_t hsa_agent;  ///< Deprecated. The agent on which this loaded code object is loaded
+    const char* uri;        ///< The URI name from which the code object was loaded
+    uint64_t    load_base;
+    uint64_t    load_size;
+    int64_t     load_delta;
+    rocprofiler_code_object_storage_type_t storage_type;
+
+    /// @var load_base
+    /// @brief The base memory address at which the code object is loaded. This is the base address
+    /// of the allocation for the lowest addressed segment of the code object that is loaded. Note
+    /// that any non-loaded segments before the first loaded segment are ignored.
+    ///
+    /// @var load_size
+    /// @brief The byte size of the loaded code objects contiguous memory allocation.
+    ///
+    /// @var load_delta
+    /// @brief The signed byte address difference of the memory address at which the code object is
+    /// loaded minus the virtual address specified in the code object that is loaded.
+    ///
+    /// @var storage_type
+    /// @brief storage type of the code object reader used to load the loaded code object
+    ///
+
     union
     {
         struct
@@ -171,26 +185,47 @@ typedef struct
  * @brief ROCProfiler Code Object Kernel Symbol Tracer Callback Record.
  *
  */
-typedef struct
+typedef struct rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t
 {
-    uint64_t    size;               ///< size of this struct
-    uint64_t    kernel_id;          ///< unique symbol identifier value
-    uint64_t    code_object_id;     ///< parent unique code object identifier
-    const char* kernel_name;        ///< name of the kernel
-    uint64_t    kernel_object;      ///< kernel object handle, used in the kernel dispatch packet
-    uint32_t kernarg_segment_size;  ///< size of memory (in bytes) allocated for kernel arguments.
-                                    ///< Will be multiple of 16
-    uint32_t kernarg_segment_alignment;  ///< Alignment (in bytes) of the buffer used to pass
-                                         ///< arguments to the kernel
-    uint32_t group_segment_size;    ///< Size of static group segment memory required by the kernel
-                                    ///< (per work-group), in bytes. AKA: LDS size
-    uint32_t private_segment_size;  ///< Size of static private, spill, and arg segment memory
-                                    ///< required by this kernel (per work-item), in bytes. AKA:
-                                    ///< scratch size
-    uint32_t sgpr_count;            ///< Scalar general purpose register count
-    uint32_t arch_vgpr_count;       ///< Architecture vector general purpose register count
-    uint32_t accum_vgpr_count;      ///< Accum vector general purpose register count
+    uint64_t              size;            ///< size of this struct
+    uint64_t              kernel_id;       ///< unique symbol identifier value
+    uint64_t              code_object_id;  ///< parent unique code object identifier
+    const char*           kernel_name;     ///< name of the kernel
+    uint64_t              kernel_object;
+    uint32_t              kernarg_segment_size;
+    uint32_t              kernarg_segment_alignment;
+    uint32_t              group_segment_size;
+    uint32_t              private_segment_size;
+    uint32_t              sgpr_count;        ///< Scalar general purpose register count
+    uint32_t              arch_vgpr_count;   ///< Architecture vector general purpose register count
+    uint32_t              accum_vgpr_count;  ///< Accum vector general purpose register count
+    int64_t               kernel_code_entry_byte_offset;
+    rocprofiler_address_t kernel_address;
 
+    /// @var kernel_object
+    /// @brief kernel object handle, used in the kernel dispatch packet
+    ///
+    /// @var kernarg_segment_size
+    /// @brief size of memory (in bytes) allocated for kernel arguments. Will be multiple of 16
+    ///
+    /// @var kernarg_segment_alignment
+    /// @brief Alignment (in bytes) of the buffer used to pass arguments to the kernel
+    ///
+    /// @var group_segment_size
+    /// @brief Size of static group segment memory required by the kernel (per work-group), in
+    /// bytes. AKA: LDS size
+    ///
+    /// @var private_segment_size
+    /// @brief Size of static private, spill, and arg segment memory required by this kernel (per
+    /// work-item), in bytes. AKA: scratch size
+    ///
+    /// @var kernel_code_entry_byte_offset
+    /// @brief Relative offset from kernel_object address to calculate the first address of a
+    /// kernel.
+    ///
+    /// @var kernel_address
+    /// @brief The first address of a kernel. Useful for PC sampling.
+    ///
 } rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
 // rename struct
 
