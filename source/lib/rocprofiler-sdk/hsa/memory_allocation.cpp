@@ -336,7 +336,7 @@ struct memory_allocation_data
     rocprofiler_thread_id_t                   tid            = common::get_tid();
     rocprofiler_agent_id_t                    agent          = null_rocp_agent_id;
     uint64_t                                  size_allocated = 0;
-    rocprofiler_address_t                     address        = {.value = 0};
+    rocprofiler_address_t                     address        = {.handle = 0};
     uint64_t                                  start_ts       = 0;
     context::correlation_id*                  correlation_id = nullptr;
     tracing::tracing_data                     tracing_data   = {};
@@ -428,7 +428,7 @@ handle_starting_addr(void** starting_addr_pointer)
 rocprofiler_address_t
 handle_starting_addr(hsa_amd_vmem_alloc_handle_t* vmem_alloc_handle)
 {
-    return rocprofiler_address_t{.value = (vmem_alloc_handle) ? vmem_alloc_handle->handle : 0};
+    return rocprofiler_address_t{.handle = (vmem_alloc_handle) ? vmem_alloc_handle->handle : 0};
 }
 
 // Handling starting address for free memory operations
@@ -442,7 +442,7 @@ handle_starting_addr(void* starting_addr_pointer)
 rocprofiler_address_t
 handle_starting_addr(hsa_amd_vmem_alloc_handle_t vmem_alloc_handle)
 {
-    return rocprofiler_address_t{.value = vmem_alloc_handle.handle};
+    return rocprofiler_address_t{.handle = vmem_alloc_handle.handle};
 }
 
 // Wrapper implementation that stores memory allocation information

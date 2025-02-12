@@ -529,20 +529,24 @@ write_perfetto(
     // counter tracks
     {
         // memory copy counter track
-        auto mem_cpy_endpoints = std::map<rocprofiler_agent_id_t, std::map<uint64_t, uint64_t>>{};
-        auto mem_cpy_extremes  = std::pair<uint64_t, uint64_t>{std::numeric_limits<uint64_t>::max(),
+        auto mem_cpy_endpoints =
+            std::map<rocprofiler_agent_id_t, std::map<rocprofiler_timestamp_t, uint64_t>>{};
+        auto mem_cpy_extremes = std::pair<uint64_t, uint64_t>{std::numeric_limits<uint64_t>::max(),
                                                               std::numeric_limits<uint64_t>::min()};
+        auto constexpr timestamp_buffer = 1000;
         for(auto ditr : memory_copy_gen)
             for(auto itr : memory_copy_gen.get(ditr))
             {
                 uint64_t _mean_timestamp =
                     itr.start_timestamp + (0.5 * (itr.end_timestamp - itr.start_timestamp));
 
-                mem_cpy_endpoints[itr.dst_agent_id].emplace(itr.start_timestamp - 1000, 0);
+                mem_cpy_endpoints[itr.dst_agent_id].emplace(itr.start_timestamp - timestamp_buffer,
+                                                            0);
                 mem_cpy_endpoints[itr.dst_agent_id].emplace(itr.start_timestamp, 0);
                 mem_cpy_endpoints[itr.dst_agent_id].emplace(_mean_timestamp, 0);
                 mem_cpy_endpoints[itr.dst_agent_id].emplace(itr.end_timestamp, 0);
-                mem_cpy_endpoints[itr.dst_agent_id].emplace(itr.end_timestamp + 1000, 0);
+                mem_cpy_endpoints[itr.dst_agent_id].emplace(itr.end_timestamp + timestamp_buffer,
+                                                            0);
 
                 mem_cpy_extremes =
                     std::make_pair(std::min(mem_cpy_extremes.first, itr.start_timestamp),
@@ -563,7 +567,8 @@ write_perfetto(
                     mitr->second += itr.bytes;
             }
 
-        constexpr auto bytes_multiplier = 1024;
+        constexpr auto bytes_multiplier         = 1024;
+        constexpr auto extremes_endpoint_buffer = 5000;
 
         auto mem_cpy_tracks =
             std::unordered_map<rocprofiler_agent_id_t, ::perfetto::CounterTrack>{};
@@ -571,8 +576,10 @@ write_perfetto(
         mem_cpy_cnt_names.reserve(mem_cpy_endpoints.size());
         for(auto& mitr : mem_cpy_endpoints)
         {
-            mem_cpy_endpoints[mitr.first].emplace(mem_cpy_extremes.first - 5000, 0);
-            mem_cpy_endpoints[mitr.first].emplace(mem_cpy_extremes.second + 5000, 0);
+            mem_cpy_endpoints[mitr.first].emplace(mem_cpy_extremes.first - extremes_endpoint_buffer,
+                                                  0);
+            mem_cpy_endpoints[mitr.first].emplace(
+                mem_cpy_extremes.second + extremes_endpoint_buffer, 0);
 
             auto        _track_name = std::stringstream{};
             const auto* _agent      = _get_agent(mitr.first);
@@ -604,77 +611,153 @@ write_perfetto(
         }
 
         // memory allocation counter track
-        auto mem_alloc_endpoints = std::map<rocprofiler_agent_id_t, std::map<uint64_t, uint64_t>>{};
-        auto mem_alloc_extremes  = std::pair<uint64_t, uint64_t>{
+        constexpr auto null_rocp_agent_id =
+            rocprofiler_agent_id_t{.handle = std::numeric_limits<uint64_t>::max()};
+        struct free_memory_information
+        {
+            rocprofiler_timestamp_t start_timestamp = 0;
+            rocprofiler_timestamp_t end_timestamp   = 0;
+            rocprofiler_address_t   address         = {.handle = 0};
+        };
+
+        struct memory_information
+        {
+            uint64_t              alloc_size  = {0};
+            rocprofiler_address_t address     = {.handle = 0};
+            bool                  is_alloc_op = {false};
+        };
+
+        struct agent_and_size
+        {
+            rocprofiler_agent_id_t agent_id =
+                rocprofiler_agent_id_t{.handle = std::numeric_limits<uint64_t>::max()};
+            uint64_t size = {0};
+        };
+
+        auto mem_alloc_endpoints =
+            std::unordered_map<rocprofiler_agent_id_t,
+                               std::map<rocprofiler_timestamp_t, memory_information>>{};
+        auto mem_alloc_extremes = std::pair<uint64_t, uint64_t>{
             std::numeric_limits<uint64_t>::max(), std::numeric_limits<uint64_t>::min()};
-        auto address_to_size = std::unordered_map<uint64_t, uint64_t>{};
+        auto address_to_agent_and_size =
+            std::unordered_map<rocprofiler_address_t, agent_and_size>{};
+        auto free_mem_info = std::vector<free_memory_information>{};
+
+        // Load memory allocation endpoints
         for(auto ditr : memory_allocation_gen)
             for(auto itr : memory_allocation_gen.get(ditr))
             {
-                uint64_t _mean_timestamp =
-                    itr.start_timestamp + (0.5 * (itr.end_timestamp - itr.start_timestamp));
-
-                mem_alloc_endpoints[itr.agent_id].emplace(itr.start_timestamp - 1000, 0);
-                mem_alloc_endpoints[itr.agent_id].emplace(itr.start_timestamp, 0);
-                mem_alloc_endpoints[itr.agent_id].emplace(_mean_timestamp, 0);
-                mem_alloc_endpoints[itr.agent_id].emplace(itr.end_timestamp, 0);
-                mem_alloc_endpoints[itr.agent_id].emplace(itr.end_timestamp + 1000, 0);
-
-                mem_alloc_extremes =
-                    std::make_pair(std::min(mem_alloc_extremes.first, itr.start_timestamp),
-                                   std::max(mem_alloc_extremes.second, itr.end_timestamp));
                 if(itr.operation == ROCPROFILER_MEMORY_ALLOCATION_ALLOCATE ||
                    itr.operation == ROCPROFILER_MEMORY_ALLOCATION_VMEM_ALLOCATE)
                 {
-                    address_to_size.emplace(itr.address.value, itr.allocation_size);
+                    LOG_IF(FATAL, itr.agent_id == null_rocp_agent_id)
+                        << "Missing agent id for memory allocation trace";
+                    mem_alloc_endpoints[itr.agent_id].emplace(
+                        itr.start_timestamp,
+                        memory_information{itr.allocation_size, itr.address, true});
+                    mem_alloc_endpoints[itr.agent_id].emplace(
+                        itr.end_timestamp,
+                        memory_information{itr.allocation_size, itr.address, true});
+                    address_to_agent_and_size.emplace(
+                        itr.address, agent_and_size{itr.agent_id, itr.allocation_size});
+                }
+                else if(itr.operation == ROCPROFILER_MEMORY_ALLOCATION_FREE ||
+                        itr.operation == ROCPROFILER_MEMORY_ALLOCATION_VMEM_FREE)
+                {
+                    // Store free memory operations in seperate vector to pair with agent
+                    // and allocation size in following loop
+                    free_mem_info.push_back(free_memory_information{
+                        itr.start_timestamp, itr.end_timestamp, itr.address});
+                }
+                else
+                {
+                    ROCP_CI_LOG(WARNING) << "unhandled memory allocation type " << itr.operation;
                 }
             }
-
-        for(auto ditr : memory_allocation_gen)
-            for(auto itr : memory_allocation_gen.get(ditr))
+        // Add free memory operations to the endpoint map
+        for(const auto& itr : free_mem_info)
+        {
+            if(address_to_agent_and_size.count(itr.address) == 0)
             {
-                auto alloc_beg =
-                    mem_alloc_endpoints.at(itr.agent_id).lower_bound(itr.start_timestamp);
-                auto alloc_end =
-                    mem_alloc_endpoints.at(itr.agent_id).upper_bound(itr.end_timestamp);
-
-                LOG_IF(FATAL, alloc_beg == alloc_end)
-                    << "Missing range for timestamp [" << itr.start_timestamp << ", "
-                    << itr.end_timestamp << "]";
-
-                for(auto alloc_itr = alloc_beg; alloc_itr != alloc_end; ++alloc_itr)
+                if(itr.address.handle == 0)
                 {
-                    if(address_to_size.count(itr.address.value) > 0)
+                    // Freeing null pointers is expected behavior and is occurs in HSA functions
+                    // like hipStreamDestroy
+                    ROCP_INFO << "null pointer freed due to HSA operation";
+                }
+                else
+                {
+                    // Following should not occur
+                    ROCP_INFO << "Unpaired free operation occurred";
+                }
+                continue;
+            }
+            auto [agent_id, allocation_size] = address_to_agent_and_size[itr.address];
+            mem_alloc_endpoints[agent_id].emplace(
+                itr.start_timestamp, memory_information{allocation_size, itr.address, false});
+            mem_alloc_endpoints[agent_id].emplace(
+                itr.end_timestamp, memory_information{allocation_size, itr.address, false});
+        }
+        // Create running sum of allocated memory
+        for(auto& [_, endpoint_map] : mem_alloc_endpoints)
+        {
+            if(!endpoint_map.empty())
+            {
+                auto earliest_agent_timestamp = endpoint_map.begin()->first;
+                auto latest_agent_timestamp   = (--endpoint_map.end())->first;
+                mem_alloc_extremes =
+                    std::make_pair(std::min(mem_alloc_extremes.first, earliest_agent_timestamp),
+                                   std::max(mem_alloc_extremes.second, latest_agent_timestamp));
+            }
+            if(endpoint_map.size() <= 1)
+            {
+                continue;
+            }
+
+            auto prev = endpoint_map.begin();
+            auto itr  = std::next(prev);
+            for(; itr != endpoint_map.end(); ++itr, ++prev)
+            {
+                // If address or allocation type are different, add or subtract from running sum
+                if(prev->second.address != itr->second.address ||
+                   prev->second.is_alloc_op != itr->second.is_alloc_op)
+                {
+                    if(itr->second.is_alloc_op)
                     {
-                        alloc_itr->second += address_to_size.at(itr.address.value);
+                        itr->second.alloc_size += prev->second.alloc_size;
+                    }
+                    else if(prev->second.alloc_size >= itr->second.alloc_size)
+                    {
+                        itr->second.alloc_size = prev->second.alloc_size - itr->second.alloc_size;
                     }
                 }
+                else
+                {
+                    itr->second.alloc_size = prev->second.alloc_size;
+                }
             }
+        }
 
         auto mem_alloc_tracks =
             std::unordered_map<rocprofiler_agent_id_t, ::perfetto::CounterTrack>{};
-        auto           mem_alloc_cnt_names = std::vector<std::string>{};
-        constexpr auto null_rocp_agent_id =
-            rocprofiler_agent_id_t{.handle = std::numeric_limits<uint64_t>::max()};
+        auto mem_alloc_cnt_names = std::vector<std::string>{};
         mem_alloc_cnt_names.reserve(mem_alloc_endpoints.size());
         for(auto& alloc_itr : mem_alloc_endpoints)
         {
-            mem_alloc_endpoints[alloc_itr.first].emplace(mem_alloc_extremes.first - 5000, 0);
-            mem_alloc_endpoints[alloc_itr.first].emplace(mem_alloc_extremes.second + 5000, 0);
+            mem_alloc_endpoints[alloc_itr.first].emplace(
+                mem_alloc_extremes.first - extremes_endpoint_buffer,
+                memory_information{0, {0}, false});
+            mem_alloc_endpoints[alloc_itr.first].emplace(
+                mem_alloc_extremes.second + extremes_endpoint_buffer,
+                memory_information{0, {0}, false});
 
             auto                       _track_name = std::stringstream{};
-            const rocprofiler_agent_t* _agent      = nullptr;
-            if(alloc_itr.first != null_rocp_agent_id)
-            {
-                _agent = _get_agent(alloc_itr.first);
-            }
+            const rocprofiler_agent_t* _agent      = _get_agent(alloc_itr.first);
 
-            if(_agent != nullptr && _agent->type == ROCPROFILER_AGENT_TYPE_CPU)
+            if(_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
                 _track_name << "ALLOCATE BYTES on AGENT [" << _agent->logical_node_id << "] (CPU)";
-            else if(_agent != nullptr && _agent->type == ROCPROFILER_AGENT_TYPE_GPU)
+            else if(_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
                 _track_name << "ALLOCATE BYTES on AGENT [" << _agent->logical_node_id << "] (GPU)";
-            else
-                _track_name << "FREE BYTES";
 
             constexpr auto _unit = ::perfetto::CounterTrack::Unit::UNIT_SIZE_BYTES;
             auto&          _name = mem_alloc_cnt_names.emplace_back(_track_name.str());
@@ -692,7 +775,7 @@ write_perfetto(
                 TRACE_COUNTER(sdk::perfetto_category<sdk::category::memory_allocation>::name,
                               mem_alloc_tracks.at(alloc_itr.first),
                               itr.first,
-                              itr.second / bytes_multiplier);
+                              itr.second.alloc_size / bytes_multiplier);
                 tracing_session->FlushBlocking();
             }
         }

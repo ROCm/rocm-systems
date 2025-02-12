@@ -94,6 +94,7 @@ less(Tp lhs, Tp rhs)
 
 // declaration of operator== and operator!=
 ROCPROFILER_CXX_DECLARE_OPERATORS(rocprofiler_context_id_t)
+ROCPROFILER_CXX_DECLARE_OPERATORS(rocprofiler_address_t)
 ROCPROFILER_CXX_DECLARE_OPERATORS(rocprofiler_agent_id_t)
 ROCPROFILER_CXX_DECLARE_OPERATORS(rocprofiler_queue_id_t)
 ROCPROFILER_CXX_DECLARE_OPERATORS(rocprofiler_buffer_id_t)
@@ -110,6 +111,7 @@ ROCPROFILER_CXX_DECLARE_OPERATORS(hsa_amd_memory_pool_t)
 
 // definitions of operator==
 ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(rocprofiler_context_id_t)
+ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(rocprofiler_address_t)
 ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(rocprofiler_agent_id_t)
 ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(rocprofiler_queue_id_t)
 ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(rocprofiler_buffer_id_t)
@@ -136,6 +138,7 @@ operator==(rocprofiler_dim3_t lhs, rocprofiler_dim3_t rhs)
 
 // definitions of operator!=
 ROCPROFILER_CXX_DEFINE_NE_OPERATOR(rocprofiler_context_id_t)
+ROCPROFILER_CXX_DEFINE_NE_OPERATOR(rocprofiler_address_t)
 ROCPROFILER_CXX_DEFINE_NE_OPERATOR(rocprofiler_agent_id_t)
 ROCPROFILER_CXX_DEFINE_NE_OPERATOR(rocprofiler_queue_id_t)
 ROCPROFILER_CXX_DEFINE_NE_OPERATOR(rocprofiler_buffer_id_t)
@@ -152,6 +155,7 @@ ROCPROFILER_CXX_DEFINE_NE_OPERATOR(hsa_amd_memory_pool_t)
 
 // definitions of operator<
 ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(rocprofiler_context_id_t)
+ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(rocprofiler_address_t)
 ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(rocprofiler_agent_id_t)
 ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(rocprofiler_queue_id_t)
 ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(rocprofiler_buffer_id_t)
@@ -183,6 +187,7 @@ operator<(rocprofiler_dim3_t lhs, rocprofiler_dim3_t rhs)
 
 // definitions of operator>, operator<=, operator>=
 ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(rocprofiler_context_id_t)
+ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(rocprofiler_address_t)
 ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(rocprofiler_agent_id_t)
 ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(rocprofiler_queue_id_t)
 ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(rocprofiler_buffer_id_t)

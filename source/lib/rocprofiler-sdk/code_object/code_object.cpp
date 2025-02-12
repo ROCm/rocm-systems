@@ -488,7 +488,7 @@ executable_iterate_agent_symbols_load_callback(hsa_executable_t        executabl
     if(CHECK_NOTNULL(code_obj_v) && CHECK_NOTNULL(kernel_descript))
     {
         data.kernel_code_entry_byte_offset = kernel_descript->kernel_code_entry_byte_offset;
-        data.kernel_address.value = data.kernel_object + data.kernel_code_entry_byte_offset;
+        data.kernel_address.handle = data.kernel_object + data.kernel_code_entry_byte_offset;
 
         if(const auto* rocp_agent = agent::get_agent(code_obj_v->rocp_data.rocp_agent);
            CHECK_NOTNULL(rocp_agent))

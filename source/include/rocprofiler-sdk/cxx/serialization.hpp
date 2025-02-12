@@ -142,7 +142,7 @@ template <typename ArchiveT>
 void
 save(ArchiveT& ar, rocprofiler_address_t data)
 {
-    ROCP_SDK_SAVE_DATA_FIELD(value);
+    ROCP_SDK_SAVE_DATA_FIELD(handle);
 }
 
 template <typename ArchiveT>
@@ -367,7 +367,7 @@ save(ArchiveT& ar, rocprofiler_callback_tracing_memory_allocation_data_t data)
     ROCP_SDK_SAVE_DATA_FIELD(start_timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(end_timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(agent_id);
-    ROCP_SDK_SAVE_VALUE("address", rocprofiler::sdk::utility::as_hex(data.address.value, 16));
+    ROCP_SDK_SAVE_VALUE("address", rocprofiler::sdk::utility::as_hex(data.address.handle, 16));
     ROCP_SDK_SAVE_DATA_FIELD(allocation_size);
 }
 
@@ -594,7 +594,7 @@ save(ArchiveT& ar, rocprofiler_buffer_tracing_memory_allocation_record_t data)
     ROCP_SDK_SAVE_DATA_FIELD(start_timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(end_timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(agent_id);
-    ROCP_SDK_SAVE_VALUE("address", rocprofiler::sdk::utility::as_hex(data.address.value, 16));
+    ROCP_SDK_SAVE_VALUE("address", rocprofiler::sdk::utility::as_hex(data.address.handle, 16));
     ROCP_SDK_SAVE_DATA_FIELD(allocation_size);
 }
 
