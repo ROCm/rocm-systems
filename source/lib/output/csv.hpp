@@ -102,7 +102,7 @@ struct csv_encoder
 using api_csv_encoder                   = csv_encoder<7>;
 using agent_info_csv_encoder            = csv_encoder<53>;
 using kernel_trace_csv_encoder          = csv_encoder<18>;
-using counter_collection_csv_encoder    = csv_encoder<18>;
+using counter_collection_csv_encoder    = csv_encoder<19>;
 using memory_copy_csv_encoder           = csv_encoder<7>;
 using memory_allocation_csv_encoder     = csv_encoder<8>;
 using marker_csv_encoder                = csv_encoder<7>;
