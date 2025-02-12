@@ -1,5 +1,5 @@
 .. meta::
-  :description: documentation of the installation, configuration, and use of the ROCm Data Center tool 
+  :description: documentation of the installation, configuration, and use of the ROCm Data Center tool
   :keywords: ROCm Data Center tool, RDC, ROCm, API, reference, data type, support
 
 .. _rdc-use:
@@ -27,7 +27,7 @@ The audience for the AMD RDC tool consists of:
 * Administrators: RDC provides the cluster administrator with the capability of monitoring, validating, and configuring policies.
 * HPC Users: Provides GPU-centric feedback for their workload submissions.
 * OEM: Add GPU information to their existing cluster management software.
-* Open source Contributors: RDC is open source and accepts contributions from the community. 
+* Open source Contributors: RDC is open source and accepts contributions from the community.
 
 Objective
 =========
@@ -47,25 +47,25 @@ Terminology
     * - **Terms**
       - **Description**
 
-    * - RDC 
+    * - RDC
       - ROCm Data Center tool
 
-    * - Compute node (CN) 
+    * - Compute node (CN)
       - One of many nodes containing one or more GPUs in the Data Center on which compute jobs are run
 
-    * - Management node (MN) or Main console 
+    * - Management node (MN) or Main console
       - A machine running system administration applications to administer and manage the Data Center
 
-    * - GPU Groups 
+    * - GPU Groups
       - Logical grouping of one or more GPUs in a compute node
 
-    * - Fields 
+    * - Fields
       - A metric that can be monitored by the RDC, such as GPU temperature, memory usage, and power usage
 
-    * - Field Groups 
+    * - Field Groups
       - Logical grouping of multiple fields
 
-    * - Job 
+    * - Job
       - A workload that is submitted to one or more compute nodes
 
- 
+
