@@ -8,19 +8,21 @@ subtrees:
   entries:
   - file: install/install
     title: Installing RDC
-  - file: install/handbook
-    title: Building and testing RDC
 
 - caption: How to
   entries:
-  - file: how-to/user_guide
-  - file: how-to/features
+  - file: how-to/using_RDC
+  - file: how-to/using_RDC_features
   - file: how-to/integration
 
 - caption: API reference
   entries:
   - file: reference/api_intro
   - file: reference/api_ref
+
+- caption: Tutorial
+  entries:
+  - file: tutorial/job_stats_sample
 
 - caption: About
   entries:
