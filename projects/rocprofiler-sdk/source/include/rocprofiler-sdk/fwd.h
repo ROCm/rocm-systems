@@ -528,8 +528,8 @@ typedef union rocprofiler_user_data_t
  */
 typedef union rocprofiler_address_t
 {
-    uint64_t value;  ///< usage example: store address in uint64_t format
-    void*    ptr;    ///< usage example: generic form of address
+    uint64_t handle;  ///< usage example: store address in uint64_t format
+    void*    ptr;     ///< usage example: generic form of address
 } rocprofiler_address_t;
 
 /**

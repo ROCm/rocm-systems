@@ -75,10 +75,10 @@ query_pc_sampling_configuration(const rocprofiler_pc_sampling_configuration_t* c
 }  // namespace
 
 kernel_symbol_info::kernel_symbol_info()
-: base_type{0, 0, 0, "", 0, 0, 0, 0, 0, 0, 0, 0, 0, {.value = 0}}
+: base_type{0, 0, 0, "", 0, 0, 0, 0, 0, 0, 0, 0, 0, {.handle = 0}}
 {}
 
-constexpr auto null_address_v = rocprofiler_address_t{.value = 0};
+constexpr auto null_address_v = rocprofiler_address_t{.handle = 0};
 constexpr auto null_dim3_v    = rocprofiler_dim3_t{.x = 0, .y = 0, .z = 0};
 
 host_function_info::host_function_info()

@@ -482,7 +482,7 @@ generate_csv(const output_config&                                               
                 api_name,
                 agent_info,
                 record.allocation_size,
-                rocprofiler::sdk::utility::as_hex(record.address.value, 16),
+                rocprofiler::sdk::utility::as_hex(record.address.handle, 16),
                 record.correlation_id.internal,
                 record.start_timestamp,
                 record.end_timestamp);
