@@ -917,11 +917,11 @@ To collect counters for the kernels matching the filters specified in the preced
     rocprofv3 -i input.yml -- <application_path>
 
     $ cat pass_1/312_counter_collection.csv
-    "Correlation_Id","Dispatch_Id","Agent_Id","Queue_Id","Process_Id","Thread_Id","Grid_Size","Kernel_Name","Workgroup_Size","LDS_Block_Size","Scratch_Size","VGPR_Count","SGPR_Count","Counter_Name","Counter_Value","Start_Timestamp","End_Timestamp"
-    4,4,1,1,36499,36499,1048576,"divide_kernel(float*, float const*, float const*, int, int)",64,0,0,12,16,"SQ_WAVES",16384,2228955885095594,2228955885119754
-    8,8,1,2,36499,36499,1048576,"divide_kernel(float*, float const*, float const*, int, int)",64,0,0,12,16,"SQ_WAVES",16384,2228955885095594,2228955885119754
-    12,12,1,3,36499,36499,1048576,"divide_kernel(float*, float const*, float const*, int, int)",64,0,0,12,16,"SQ_WAVES",16384,2228955892986914,2228955893006114
-    16,16,1,4,36499,36499,1048576,"divide_kernel(float*, float const*, float const*, int, int)",64,0,0,12,16,"SQ_WAVES",16384,2228955892986914,2228955893006114
+    "Correlation_Id","Dispatch_Id","Agent_Id","Queue_Id","Process_Id","Thread_Id","Grid_Size","Kernel_Id","Kernel_Name","Workgroup_Size","LDS_Block_Size","Scratch_Size","VGPR_Count","Accum_VGPR_Count","SGPR_Count","Counter_Name","Counter_Value","Start_Timestamp","End_Timestamp"
+    1,1,4,1,225049,225049,1048576,10,"void addition_kernel<float>(float*, float const*, float const*, int, int)",64,0,0,8,0,16,"SQ_WAVES",16384.000000,317095766765717,317095766775957
+    2,2,4,1,225049,225049,1048576,13,"subtract_kernel(float*, float const*, float const*, int, int)",64,0,0,8,0,16,"SQ_WAVES",16384.000000,317095767013157,317095767022957
+    3,3,4,1,225049,225049,1048576,11,"multiply_kernel(float*, float const*, float const*, int, int)",64,0,0,8,0,16,"SQ_WAVES",16384.000000,317095767176998,317095767186678
+    4,4,4,1,225049,225049,1048576,12,"divide_kernel(float*, float const*, float const*, int, int)",64,0,0,12,4,16,"SQ_WAVES",16384.000000,317095767380718,317095767390878
 
 
 I/O control options
@@ -1088,7 +1088,10 @@ The following table lists the various fields or the columns in the output CSV fi
     - Kernel's Scalar General Purpose Register (SGPR) count.
 
   * - VGPR_Count
-    - Kernel's Vector General Purpose Register (VGPR) count.
+    - Kernel's Architected Vector General Purpose Register (VGPR) count.
+
+  * - Accum_VGPR_Count
+    - Kernel's Accumulation Vector General Purpose Register (Accum_VGPR/AGPR) count.
 
 Output formats
 ----------------
@@ -1313,7 +1316,8 @@ Here are the properties of the JSON output schema:
                         - **`handle`** *(integer, required)*: Handle of the counter.
                      - **`value`** *(number, required)*: Value of the counter.
                - **`thread_id`** *(integer, required)*: Thread ID.
-               - **`arch_vgpr_count`** *(integer, required)*: Count of VGPRs.
+               - **`arch_vgpr_count`** *(integer, required)*: Count of Architected VGPRs.
+               - **`accum_vgpr_count`** *(integer, required)*: Count of Accumulation VGPRs.
                - **`sgpr_count`** *(integer, required)*: Count of SGPRs.
                - **`lds_block_size_v`** *(integer, required)*: Size of LDS block.
       -  **``pc_sample_host_trap``** *(array)*: Host Trap PC Sampling records.

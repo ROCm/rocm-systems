@@ -244,10 +244,11 @@ accum_vgpr_count(std::string_view name, kernel_descriptor_t kernel_code)
     if(name == "gfx908")
         return arch_vgpr_count(name, kernel_code);
     else if(name == "gfx90a" || name.find("gfx94") == 0)
-        return (AMD_HSA_BITS_GET(kernel_code.compute_pgm_rsrc1,
-                                 AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WORKITEM_VGPR_COUNT) +
-                1) *
-               (8 - arch_vgpr_count(name, kernel_code));
+        return ((AMD_HSA_BITS_GET(kernel_code.compute_pgm_rsrc1,
+                                  AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WORKITEM_VGPR_COUNT) +
+                 1) *
+                8) -
+               arch_vgpr_count(name, kernel_code);
 
     bool emplaced = false;
     {
