@@ -1,7 +1,6 @@
 #
 # Waitcnt ISA tests
 #
-project(rocprofiler-att-parser-waitcnt-tests LANGUAGES CXX)
 
 add_executable(att-decoder-waitcnt-test)
 target_link_libraries(

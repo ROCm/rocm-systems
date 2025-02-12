@@ -1,0 +1,30 @@
+jobs:
+  - advanced_thread_trace: True
+    att_parse: summary
+    att_library_path:
+    - @LIBRARY_OUTPUT_DIR@/att
+
+  - advanced_thread_trace: True
+    att_parse: summary
+    att_library_path:
+    - @LIBRARY_OUTPUT_DIR@/att
+    - @LIBRARY_OUTPUT_DIR@
+
+  - advanced_thread_trace: True
+    att_parse: testing
+    att_library_path:
+    - @LIBRARY_OUTPUT_DIR@/att
+    - @LIBRARY_OUTPUT_DIR@
+
+  - advanced_thread_trace: True
+    att_parse: testing
+
+  - advanced_thread_trace: True
+    att_parse: testing
+    att_library_path:
+    - @LIBRARY_OUTPUT_DIR@
+
+  - advanced_thread_trace: True
+    att_parse: testing
+    att_library_path:
+    - @LIBRARY_OUTPUT_DIR@

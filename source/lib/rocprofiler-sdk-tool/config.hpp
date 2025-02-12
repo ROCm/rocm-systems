@@ -68,6 +68,9 @@ struct att_perfcounter
 {
     std::string counter_name = {};
     uint32_t    simd_mask    = 0xf;
+
+    template <typename ArchiveT>
+    void save(ArchiveT&) const;
 };
 
 struct config : output_config
@@ -79,6 +82,9 @@ struct config : output_config
         uint64_t delay    = 0;
         uint64_t duration = 0;
         uint64_t repeat   = 0;
+
+        template <typename ArchiveT>
+        void save(ArchiveT& ar) const;
     };
 
     config();
@@ -114,10 +120,9 @@ struct config : output_config
     rocprofiler_pc_sampling_method_t pc_sampling_method_value = ROCPROFILER_PC_SAMPLING_METHOD_NONE;
     rocprofiler_pc_sampling_unit_t   pc_sampling_unit_value   = ROCPROFILER_PC_SAMPLING_UNIT_NONE;
 
-    std::string stats_summary_unit = get_env("ROCPROF_STATS_SUMMARY_UNITS", "nsec");
-    int         mpi_size           = get_mpi_size();
-    int         mpi_rank           = get_mpi_rank();
-    uint64_t    att_param_shader_engine_mask =
+    int      mpi_size = get_mpi_size();
+    int      mpi_rank = get_mpi_rank();
+    uint64_t att_param_shader_engine_mask =
         get_env<uint64_t>("ROCPROF_ATT_PARAM_SHADER_ENGINE_MASK", 0x1);
     uint64_t att_param_buffer_size = get_env<uint64_t>("ROCPROF_ATT_PARAM_BUFFER_SIZE", 0x6000000);
     uint64_t att_param_simd_select = get_env<uint64_t>("ROCPROF_ATT_PARAM_SIMD_SELECT", 0xF);
@@ -144,13 +149,30 @@ struct config : output_config
     {}
 };
 
+#define CFG_SERIALIZE_MEMBER(VAR)             ar(cereal::make_nvp(#VAR, VAR))
+#define CFG_SERIALIZE_NAMED_MEMBER(NAME, VAR) ar(cereal::make_nvp(NAME, VAR))
+
+template <typename ArchiveT>
+void
+att_perfcounter::save(ArchiveT& ar) const
+{
+    CFG_SERIALIZE_MEMBER(counter_name);
+    CFG_SERIALIZE_MEMBER(simd_mask);
+}
+
+template <typename ArchiveT>
+void
+config::CollectionPeriod::save(ArchiveT& ar) const
+{
+    CFG_SERIALIZE_MEMBER(delay);
+    CFG_SERIALIZE_MEMBER(duration);
+    CFG_SERIALIZE_MEMBER(repeat);
+}
+
 template <typename ArchiveT>
 void
 config::save(ArchiveT& ar) const
 {
-#define CFG_SERIALIZE_MEMBER(VAR)             ar(cereal::make_nvp(#VAR, VAR))
-#define CFG_SERIALIZE_NAMED_MEMBER(NAME, VAR) ar(cereal::make_nvp(NAME, VAR))
-
     CFG_SERIALIZE_MEMBER(kernel_trace);
     CFG_SERIALIZE_MEMBER(hsa_core_api_trace);
     CFG_SERIALIZE_MEMBER(hsa_amd_ext_api_trace);
@@ -163,19 +185,40 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(counter_collection);
     CFG_SERIALIZE_MEMBER(hip_runtime_api_trace);
     CFG_SERIALIZE_MEMBER(hip_compiler_api_trace);
-    CFG_SERIALIZE_MEMBER(kernel_rename);
+    CFG_SERIALIZE_MEMBER(rccl_api_trace);
+    CFG_SERIALIZE_MEMBER(rocdecode_api_trace);
+
+    CFG_SERIALIZE_MEMBER(mpi_rank);
+    CFG_SERIALIZE_MEMBER(mpi_size);
+    CFG_SERIALIZE_MEMBER(collection_periods);
     CFG_SERIALIZE_MEMBER(counters);
+    CFG_SERIALIZE_MEMBER(extra_counters_contents);
     CFG_SERIALIZE_MEMBER(kernel_filter_include);
     CFG_SERIALIZE_MEMBER(kernel_filter_exclude);
     CFG_SERIALIZE_MEMBER(kernel_filter_range);
     CFG_SERIALIZE_MEMBER(demangle);
     CFG_SERIALIZE_MEMBER(truncate);
 
+    CFG_SERIALIZE_MEMBER(pc_sampling_method);
+    CFG_SERIALIZE_MEMBER(pc_sampling_unit);
+    CFG_SERIALIZE_MEMBER(pc_sampling_interval);
+    CFG_SERIALIZE_MEMBER(pc_sampling_method_value);
+    CFG_SERIALIZE_MEMBER(pc_sampling_unit_value);
+
+    CFG_SERIALIZE_MEMBER(advanced_thread_trace);
+    CFG_SERIALIZE_MEMBER(att_serialize_all);
+    CFG_SERIALIZE_MEMBER(att_param_shader_engine_mask);
+    CFG_SERIALIZE_MEMBER(att_param_buffer_size);
+    CFG_SERIALIZE_MEMBER(att_param_simd_select);
+    CFG_SERIALIZE_MEMBER(att_param_target_cu);
+    CFG_SERIALIZE_MEMBER(att_capability);
+    CFG_SERIALIZE_MEMBER(att_param_perfcounters);
+
     static_cast<const base_type&>(*this).save(ar);
+}
 
 #undef CFG_SERIALIZE_MEMBER
 #undef CFG_SERIALIZE_NAMED_MEMBER
-}
 
 template <config_context ContextT>
 config&

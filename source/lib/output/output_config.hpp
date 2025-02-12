@@ -121,6 +121,13 @@ output_config::save(ArchiveT& ar) const
     CFG_SERIALIZE_NAMED_MEMBER("summary_unit", stats_summary_unit);
     CFG_SERIALIZE_NAMED_MEMBER("summary_file", stats_summary_file);
 
+    CFG_SERIALIZE_MEMBER(csv_output);
+    CFG_SERIALIZE_MEMBER(json_output);
+    CFG_SERIALIZE_MEMBER(pftrace_output);
+    CFG_SERIALIZE_MEMBER(otf2_output);
+    CFG_SERIALIZE_MEMBER(summary_output);
+    CFG_SERIALIZE_MEMBER(kernel_rename);
+
 #undef CFG_SERIALIZE_MEMBER
 #undef CFG_SERIALIZE_NAMED_MEMBER
 }

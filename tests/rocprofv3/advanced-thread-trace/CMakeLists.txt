@@ -21,8 +21,8 @@ find_package(rocprofiler-sdk REQUIRED)
 add_test(
     NAME rocprofv3-test-hsa-multiqueue-att-cmd-env-ld-lib-path-execute
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --advanced-thread-trace 1
-        --att-target-cu 1 --att-shader-engine-mask 0x11 --kernel-include-regex copyD
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --log-level env --advanced-thread-trace
+        1 --att-target-cu 1 --att-shader-engine-mask 0x11 --kernel-include-regex copyD
         --att-buffer-size 0x6000000 --att-simd-select 0x3 --att-parse testing
         --att-serialize-all 1 -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace/cmd_input -o
         out --output-format json ${PRELOAD_ARGS} --
@@ -31,14 +31,13 @@ add_test(
 set_tests_properties(
     rocprofv3-test-hsa-multiqueue-att-cmd-env-ld-lib-path-execute
     PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT
-               LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib:$ENV{LD_LIBRARY_PATH}
-               FAIL_REGULAR_EXPRESSION "HSA_API|HIP_API")
+               LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:$ENV{LD_LIBRARY_PATH})
 # hsa multiqueue dependency test
 add_test(
     NAME rocprofv3-test-hsa-multiqueue-att-cmd-env-att-lib-path-execute
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --advanced-thread-trace 1
-        --att-target-cu 1 --att-shader-engine-mask 0x11 --kernel-include-regex copyD
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --log-level env --advanced-thread-trace
+        1 --att-target-cu 1 --att-shader-engine-mask 0x11 --kernel-include-regex copyD
         --att-buffer-size 0x6000000 --att-simd-select 0x3 --att-parse testing
         --att-serialize-all 1 -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace/cmd_input -o
         out --output-format json ${PRELOAD_ARGS} --
@@ -47,22 +46,20 @@ add_test(
 set_tests_properties(
     rocprofv3-test-hsa-multiqueue-att-cmd-env-att-lib-path-execute
     PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT
-               ATT_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib FAIL_REGULAR_EXPRESSION
-               "HSA_API|HIP_API")
+               ROCPROF_ATT_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY})
 
 # hsa multiqueue dependency test
 add_test(
     NAME rocprofv3-test-hsa-multiqueue-att-json-execute
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --att-library-path
-        ${CMAKE_BINARY_DIR}/lib -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace/json_input -i
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --log-level env --att-library-path
+        ${CMAKE_LIBRARY_OUTPUT_DIRECTORY} -d
+        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace/json_input -i
         ${CMAKE_CURRENT_BINARY_DIR}/att_input.json ${PRELOAD_ARGS} --
         $<TARGET_FILE:hsa_code_object_testapp>)
 
-set_tests_properties(
-    rocprofv3-test-hsa-multiqueue-att-json-execute
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" FAIL_REGULAR_EXPRESSION
-               "HSA_API|HIP_API")
+set_tests_properties(rocprofv3-test-hsa-multiqueue-att-json-execute
+                     PROPERTIES TIMEOUT 45 LABELS "integration-tests")
 
 add_test(
     NAME rocprofv3-test-hsa-multiqueue-att-cmd-validate
@@ -98,3 +95,101 @@ set_tests_properties(
     PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
                "rocprofv3-test-hsa-multiqueue-att-json-execute" FAIL_REGULAR_EXPRESSION
                "AssertionError")
+
+if(TARGET rocprofiler-sdk::att-decoder-testing AND TARGET
+                                                   rocprofiler-sdk::att-decoder-summary)
+    set(MISSING_TEST_DECODER_LIBS OFF)
+else()
+    set(MISSING_TEST_DECODER_LIBS ON)
+endif()
+
+function(configure_att_input _FILENAME _OUTDIR)
+    set(LIBRARY_OUTPUT_DIR ${_OUTDIR})
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/att_input.yml.in
+                   ${CMAKE_CURRENT_BINARY_DIR}/${_FILENAME} @ONLY)
+endfunction()
+
+configure_att_input(att_input.yml "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}")
+configure_att_input(att_input_will_fail.yml "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+
+#
+# Uses att_library_path in YAML input to specify ATT library path
+#
+add_test(
+    NAME rocprofv3-test-att-library-path-yaml-input
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
+            ${CMAKE_CURRENT_BINARY_DIR}/att_input.yml --log-level env --echo -- sleep 0)
+
+set_tests_properties(
+    rocprofv3-test-att-library-path-yaml-input
+    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DISABLED
+               "${MISSING_TEST_DECODER_LIBS}")
+
+add_test(
+    NAME rocprofv3-test-att-library-path-yaml-input-will-fail
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
+        ${CMAKE_CURRENT_BINARY_DIR}/att_input_will_fail.yml --log-level env --echo --
+        sleep 0)
+
+set_tests_properties(
+    rocprofv3-test-att-library-path-yaml-input-will-fail
+    PROPERTIES TIMEOUT 45 LABELS "integration-tests" WILL_FAIL ON DISABLED
+               "${MISSING_TEST_DECODER_LIBS}")
+
+#
+# Uses --att-library-path to specify ATT library path
+#
+add_test(
+    NAME rocprofv3-test-att-library-path-cmd-line
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --att --att-library-path
+        ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/att --att-parse summary --log-level env --echo
+        -- sleep 0)
+
+set_tests_properties(
+    rocprofv3-test-att-library-path-cmd-line
+    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DISABLED
+               "${MISSING_TEST_DECODER_LIBS}")
+
+add_test(
+    NAME rocprofv3-test-att-library-path-cmd-line-will-fail
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --att --att-library-path
+        ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/att --att-parse testing --log-level env --echo
+        -- sleep 0)
+
+set_tests_properties(
+    rocprofv3-test-att-library-path-cmd-line-will-fail
+    PROPERTIES TIMEOUT 45 LABELS "integration-tests" WILL_FAIL ON DISABLED
+               "${MISSING_TEST_DECODER_LIBS}")
+
+#
+# Uses ROCPROF_ATT_LIBRARY_PATH to specify ATT library path
+#
+add_test(NAME rocprofv3-test-att-library-path-env-var
+         COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --att --att-parse summary
+                 --log-level env --echo -- sleep 0)
+
+set_tests_properties(
+    rocprofv3-test-att-library-path-env-var
+    PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT
+               "ROCPROF_ATT_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/att" DISABLED
+               "${MISSING_TEST_DECODER_LIBS}")
+
+add_test(NAME rocprofv3-test-att-library-path-env-var-will-fail
+         COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --att --att-parse testing
+                 --log-level env --echo -- sleep 0)
+
+set_tests_properties(
+    rocprofv3-test-att-library-path-env-var-will-fail
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               ENVIRONMENT
+               "ROCPROF_ATT_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/att"
+               WILL_FAIL
+               ON
+               DISABLED
+               "${MISSING_TEST_DECODER_LIBS}")
