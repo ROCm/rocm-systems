@@ -607,7 +607,6 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
             "--att-target-cu",
             help="ATT target compute unit",
             default=None,
-            type=int,
         )
 
         att_options.add_argument(
@@ -1204,10 +1203,17 @@ def run(app_args, args, **kwargs):
     if args.advanced_thread_trace:
 
         def int_auto(num_str):
-            if "0x" in num_str:
-                return int(num_str, 16)
+            if isinstance(num_str, str):
+                if "0x" in num_str:
+                    return int(num_str, 16)
+                else:
+                    return int(num_str, 10)
+            elif isinstance(num_str, int):
+                return num_str
             else:
-                return int(num_str, 10)
+                raise ValueError(
+                    f"{type(num_str)} is not supported. {num_str} should be of type integer or string."
+                )
 
         if args.pmc or (
             args.pc_sampling_beta_enabled
@@ -1225,8 +1231,12 @@ def run(app_args, args, **kwargs):
         update_env("ROCPROF_ADVANCED_THREAD_TRACE", True, overwrite=True)
         update_env("ROCPROF_ATT_CAPABILITY", args.att_parse, overwrite=True)
 
-        if args.att_target_cu:
-            update_env("ROCPROF_ATT_PARAM_TARGET_CU", args.att_target_cu, overwrite=True)
+        if args.att_target_cu is not None:
+            update_env(
+                "ROCPROF_ATT_PARAM_TARGET_CU",
+                int_auto(args.att_target_cu),
+                overwrite=True,
+            )
 
         if args.att_shader_engine_mask:
             update_env(
