@@ -1,6 +1,6 @@
 .. meta::
   :description: Documentation of the installation, configuration, use of the ROCprofiler-SDK, and rocprofv3 command-line tool
-  :keywords: ROCprofiler-SDK tool, ROCprofiler-SDK library, rocprofv3, rocprofv3 tool usage, Using rocprofv3, ROCprofiler-SDK command line tool, ROCprofiler-SDK CLI
+  :keywords: ROCprofiler-SDK tool, rocprofv3, rocprofv3 tool usage, ROCprofiler-SDK command-line tool, ROCprofiler-SDK CLI, ROCprofiler-SDK command line tool
 
 .. _using-rocprofv3:
 
@@ -26,8 +26,10 @@ Before you start tracing or profiling your HIP application using ``rocprofv3``, 
     cmake -B <build-directory> <source-directory> -DCMAKE_PREFIX_PATH=/opt/rocm
     cmake --build <build-directory> --target all --parallel <N>
 
-Options
----------
+.. _cli-options:
+
+Command-line options
+--------------------
 
 Here is the sample of commonly used ``rocprofv3`` command-line options. Some options are used for application tracing and some for kernel profiling while the output control options control the presentation and redirection of the generated output.
 
@@ -43,11 +45,11 @@ Here is the sample of commonly used ``rocprofv3`` command-line options. Some opt
     - Run Configuration
 
   * - ``-d`` \| ``--output-directory``
-    - Specifies the path for the output files. Supports special keys: ``%hostname%``, ``%pid%``, ``%rank%``, etc.
+    - Specifies the path for the output files. Supports special keys: ``%hostname%``, ``%pid%``, ``%rank%`` etc. Please see ::ref:`output-prefix-keys` for all supported keys.
     - Output control
 
   * - ``-o`` \| ``--output-file``
-    - Specifies the name of the output file. Note that this name is appended to the default names (_api_trace or counter_collection.csv) of the generated files'. Supports special keys: ``%hostname%``, ``%pid%``, ``%rank%``, etc.
+    - Specifies the name of the output file. Note that this name is appended to the default names (_api_trace or counter_collection.csv) of the generated files'. Supports special keys: ``%hostname%``, ``%pid%``, ``%rank%``, etc. Please see ::ref:`output-prefix-keys` for all supported keys
     - Output control
 
   * - ``--output-format``
@@ -218,7 +220,7 @@ To trace HIP runtime APIs, use:
 
     rocprofv3 --hip-trace -- <application_path>
 
-The above command generates a ``hip_api_trace.csv`` file prefixed with the process ID.
+The preceding command generates a ``hip_api_trace.csv`` file prefixed with the process ID.
 
 .. code-block:: shell
 
@@ -237,7 +239,7 @@ To trace HIP compile time APIs, use:
 
     rocprofv3 --hip-compiler-trace -- <application_path>
 
-The above command generates a ``hip_api_trace.csv`` file prefixed with the process ID.
+The preceding command generates a ``hip_api_trace.csv`` file prefixed with the process ID.
 
 .. code-block:: shell
 
@@ -263,7 +265,7 @@ HSA trace contains the start and end time of HSA runtime API calls and their asy
 
     rocprofv3 --hsa-trace -- <application_path>
 
-The above command generates a ``hsa_api_trace.csv`` file prefixed with process ID. Note that the contents of this file have been truncated for demonstration purposes.
+The preceding command generates a ``hsa_api_trace.csv`` file prefixed with process ID. Note that the contents of this file have been truncated for demonstration purposes.
 
 .. code-block:: shell
 
@@ -314,13 +316,13 @@ See how to use ``--kernel-rename`` option with help of below code snippet:
     roctxRangePop();  // for "hipLaunchKernel"
     roctxRangeStop(rangeId);
 
-To rename the kernel , use:
+To rename the kernel, use:
 
 .. code-block:: bash
 
     rocprofv3 --marker-trace --kernel-rename -- <application_path>
 
-The above command generates a ``marker-trace`` file prefixed with the process ID.
+The preceding command generates a ``marker-trace`` file prefixed with the process ID.
 
 .. code-block:: shell
 
@@ -334,19 +336,18 @@ The above command generates a ``marker-trace`` file prefixed with the process ID
    "MARKER_CORE_API","memCopyDth",315155,315155,7,58378844938371,58378851383270
    "MARKER_CORE_API","HIP_Kernel-1",315155,315155,1,58378526575735,58378851384485
 
-
-Kokkos Trace
+Kokkos trace
 ++++++++++++++
 
-rocprofv3 has a built-in `Kokkos Tools library <https://github.com/kokkos/kokkos-tools>`_ support to trace Kokkos API calls. `Kokkos <https://github.com/kokkos/kokkos>`_ is a C++ library for writing performance portable applications. It is used in many scientific applications to write performance portable code that can run on CPUs, GPUs, and other accelerators.
-rocprofv3 loads a built-in Kokkos tools library which emits roctx ranges with the labels passed through the API, e.g. Kokkos::parallel_for(“MyParallelForLabel”, …); will internally calls for roctxRangePush and enables the kernel renaming option so that the highly templated kernel names are replaced by the Kokkos labels.
-To enable built-in marker support, use the ``kokkos-trace`` option. Internally this option enables ``marker-trace`` and ``kernel-rename``.:
+`Kokkos <https://github.com/kokkos/kokkos>`_ is a C++ library for writing performance portable applications. Kokkos is used in many scientific applications for writing performance portable code that can run on CPUs, GPUs, and other accelerators.
+``rocprofv3`` loads an inbuilt `Kokkos Tools library <https://github.com/kokkos/kokkos-tools>`_, which emits roctx ranges with the labels passed using Kokkos APIs. For example, ``Kokkos::parallel_for(“MyParallelForLabel”, …)`` calls ``roctxRangePush`` internally and enables the kernel renaming option to replace the highly templated kernel names with the Kokkos labels.
+To enable the inbuilt marker support, use the ``kokkos-trace`` option. Internally, this option enables ``marker-trace`` and ``kernel-rename``:
 
 .. code-block:: bash
 
     rocprofv3 --kokkos-trace -- <application_path>
 
-The above command generates a ``marker-trace`` file prefixed with the process ID.
+The preceding command generates a ``marker-trace`` file prefixed with the process ID.
 
 .. code-block:: shell
 
@@ -366,7 +367,7 @@ To trace kernel dispatch traces, use:
 
     rocprofv3 --kernel-trace -- <application_path>
 
-The above command generates a ``kernel_trace.csv`` file prefixed with the process ID.
+The preceding command generates a ``kernel_trace.csv`` file prefixed with the process ID.
 
 .. code-block:: shell
 
@@ -390,7 +391,7 @@ To trace memory moves across the application, use:
 
     rocprofv3 –-memory-copy-trace -- <application_path>
 
-The above command generates a ``memory_copy_trace.csv`` file prefixed with the process ID.
+The preceding command generates a ``memory_copy_trace.csv`` file prefixed with the process ID.
 
 .. code-block:: shell
 
@@ -428,7 +429,7 @@ To trace memory allocations during the application run, use:
 
     rocprofv3 –-memory-allocation-trace -- < app_path >
 
-The above command generates a ``memory_allocation_trace.csv`` file prefixed with the process ID.
+The preceding command generates a ``memory_allocation_trace.csv`` file prefixed with the process ID.
 
 .. code-block:: shell
 
@@ -446,43 +447,40 @@ For the description of the fields in the output file, see :ref:`output-file-fiel
 Runtime trace
 +++++++++++++++
 
-This is a short-hand option which attempts to target the most relevant tracing options for a standard user by
-excluding tracing the HSA runtime API and HIP compiler API.
+This is a short-hand option that targets the most relevant tracing options for a standard user by
+excluding traces for HSA runtime API and HIP compiler API.
 
 The HSA runtime API is excluded because it is a lower-level API upon which HIP and OpenMP target are built and
-thus, tends to be an implementation detail not relevant to most users. The HIP compiler API is excluded
-because these are functions which are automatically inserted during HIP compilation and thus, also tend to be
-implementation details which are not relevant to most users.
+thus, tends to be an implementation detail irrelevant to most users. Similarly, the HIP compiler API is also excluded for being an implementation detail as these functions are automatically inserted during HIP compilation.
 
-At present, `--runtime-trace` enables tracing the HIP runtime API, the marker API, kernel dispatches, and
+``--runtime-trace`` traces the HIP runtime API, marker API, kernel dispatches, and
 memory operations (copies and scratch).
 
 .. code-block:: shell
 
     rocprofv3 –-runtime-trace -- <application_path>
 
-Running the above command generates ``hip_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, ``scratch_memory_trace.csv``, ``memory_allocation_trace.csv``, and ``marker_api_trace.csv`` (if ``ROCTx`` APIs are specified in the application) files prefixed with the process ID.
+Running the preceding command generates ``hip_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, ``scratch_memory_trace.csv``, ``memory_allocation_trace.csv``, and ``marker_api_trace.csv`` (if ``ROCTx`` APIs are specified in the application) files prefixed with the process ID.
 
 System trace
 ++++++++++++++
 
-This is an all-inclusive option to collect all the above-mentioned traces.
+This is an all-inclusive option to collect HIP, HSA, kernel, memory copy, memory allocation, and marker trace (if ``ROCTx`` APIs are specified in the application).
 
 .. code-block:: shell
 
     rocprofv3 –-sys-trace -- <application_path>
 
-Running the above command generates ``hip_api_trace.csv``, ``hsa_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, ``memory_allocation_trace.csv``, and ``marker_api_trace.csv`` (if ``ROCTx`` APIs are specified in the application) files prefixed with the process ID.
+Running the above command generates ``hip_api_trace.csv``, ``hsa_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, ``memory_allocation_trace.csv``, and ``marker_api_trace.csv`` (if  files prefixed with the process ID.
 
 Scratch memory trace
 ++++++++++++++++++++++
 
-This option collects scratch memory operation's traces. Scratch is an address space on AMD GPUs, which is roughly equivalent to the `local memory` in NVIDIA CUDA. The `local memory` in CUDA is a thread-local global memory with interleaved addressing, which is used for register spills or stack space. With this option, you can trace when the ``rocr`` runtime allocates, frees, and tries to reclaim scratch memory.
+This option collects scratch memory operation traces. Scratch is an address space on AMD GPUs roughly equivalent to the `local memory` in NVIDIA CUDA. The `local memory` in CUDA is a thread-local global memory with interleaved addressing, which is used for register spills or stack space. This option helps to trace when the ``rocr`` runtime allocates, frees, and tries to reclaim scratch memory.
 
 .. code-block:: shell
 
     rocprofv3 --scratch-memory-trace -- <application_path>
-
 
 RCCL trace
 ++++++++++++
@@ -493,7 +491,7 @@ RCCL trace
 
     rocprofv3 --rccl-trace -- <application_path>
 
-The above command generates a ``rccl_api_trace`` file prefixed with the process ID.
+The preceding command generates a ``rccl_api_trace`` file prefixed with the process ID.
 
 .. code-block:: shell
 
@@ -531,17 +529,19 @@ Here are the contents of ``rocdecode_api_trace.csv`` file:
 Post-processing tracing options
 ++++++++++++++++++++++++++++++++
 
-1. Stats
-+++++++++
+``rocprofv3`` provides options to collect tracing summary or statistics after conclusion of a tracing session. These options are described here.
 
-This option collects statistics for the enabled tracing types. For example, to collect statistics of HIP APIs, when HIP trace is enabled.
-A higher percentage in statistics can help user focus on the API/function that has taken the most time:
+Stats
+######
+
+This option collects statistics for the enabled tracing types. For example, it collects statistics of HIP APIs, when HIP trace is enabled.
+The statistics help to determine the API or function that took the most amount of time.
 
 .. code-block:: shell
 
     rocprofv3 --stats --hip-trace  -- <application_path>
 
-The above command generates a ``hip_api_stats.csv``, ``domain_stats.csv`` and ``hip_api_trace.csv`` file prefixed with the process ID.
+The preceding command generates a ``hip_api_stats.csv``, ``domain_stats.csv`` and ``hip_api_trace.csv`` file prefixed with the process ID.
 
 .. code-block:: shell
 
@@ -563,10 +563,10 @@ Here are the contents of ``domain_stats.csv`` file:
 
 For the description of the fields in the output file, see :ref:`output-file-fields`.
 
-2. Summary
-+++++++++++
+Summary
+########
 
-Output single summary of tracing data at the conclusion of the profiling session
+This option displays a summary of tracing data for the enabled tracing type, after conclusion of the profiling session.
 
 .. code-block:: shell
 
@@ -574,23 +574,23 @@ Output single summary of tracing data at the conclusion of the profiling session
 
 .. image:: /data/rocprofv3_summary.png
 
+Summary per domain
+###################
 
-2.1 Summary per domain
-++++++++++++++++++++++
-
-Outputs the summary of each tracing domain at the end of profiling session.
+This option displays a summary of each tracing domain for the enabled tracing type, after conclusion of the profiling session.
 
 .. code-block:: shell
 
     rocprofv3 -D --hsa-trace --hip-trace  -- <application_path>
 
-The above command generates a ``hip_trace.csv``, ``hsa_trace.csv`` file prefixed with the process ID along with the summary of each domain at the terminal.
+The preceding command generates a ``hip_trace.csv`` and ``hsa_trace.csv`` file prefixed with the process ID along with displaying the summary of each domain.
 
-2.2 Summary groups
-+++++++++++++++++++
+Summary groups
+###############
 
-Users can create a summary of multiple domains by specifying the domain names in the command line. The summary groups are separated by a pipe (|) symbol.
-To create a summary for ``MEMORY_COPY`` domains, use:
+This option displays a summary of multiple domains for the domain names specified on the command line. The summary groups can be separated using a pipe ( | ) symbol.
+
+To see a summary for ``MEMORY_COPY`` domains, use:
 
 .. code-block:: shell
 
@@ -598,8 +598,7 @@ To create a summary for ``MEMORY_COPY`` domains, use:
 
 .. image:: /data/rocprofv3_memcpy_summary.png
 
-
-To create a summary for ``MEMORY_COPY`` and ``HIP_API`` domains, use:
+To see a summary for ``MEMORY_COPY`` and ``HIP_API`` domains, use:
 
 .. code-block:: shell
 
@@ -607,26 +606,50 @@ To create a summary for ``MEMORY_COPY`` and ``HIP_API`` domains, use:
 
 .. image:: /data/rocprofv3_hip_memcpy_summary.png
 
+Collecting traces using input file
+++++++++++++++++++++++++++++++++++++
 
-Kernel profiling
--------------------
+The preceding sections describe how to collect traces by specifying the desired tracing type on the command line. You can also specify the desired tracing types in an input file in YAML (.yaml/.yml), or JSON (.json) format. You can supply any command-line option for tracing in the input file.
 
-The application tracing functionality allows you to evaluate the duration of kernel execution but is of little help in providing insight into kernel execution details. The kernel profiling functionality allows you to select kernels for profiling and choose the basic counters or derived metrics to be collected for each kernel execution, thus providing a greater insight into kernel execution.
+Here is a sample input.yaml file for collecting tracing summary:
 
-For a comprehensive list of counters available on MI200, see `MI200 performance counters and metrics <https://rocm.docs.amd.com/en/latest/conceptual/gpu-arch/mi300-mi200-performance-counters.html>`_.
+.. code-block:: yaml
 
-Input file
-++++++++++++
+jobs:
+  - output_directory: "@CMAKE_CURRENT_BINARY_DIR@/%env{ARBITRARY_ENV_VARIABLE}%"
+    output_file: out
+    output_format: [pftrace, json, otf2]
+    log_level: env
+    runtime_trace: true
+    kernel_rename: true
+    summary: true
+    summary_per_domain: true
+    summary_groups: ["KERNEL_DISPATCH|MEMORY_COPY"]
+    summary_output_file: "summary"
 
-To collect the desired basic counters or derived metrics or tracing, mention them in an input file. The input file could be in text (.txt), yaml (.yaml/.yml), or JSON (.json) format.
+Here is a sample input.json file for collecting tracing summary:
 
-In the input text file, the line consisting of the counter or metric names must begin with ``pmc``.
-The number of basic counters or derived metrics that can be collected in one run of profiling are limited by the GPU hardware resources. If too many counters or metrics are selected, the kernels need to be executed multiple times to collect them. For multi-pass execution, include multiple ``pmc`` rows in the input file. Counters or metrics in each ``pmc`` row can be collected in each application run.
+.. code-block:: json
 
-The JSON and YAML files supports all the command line options and it can be used to configure both tracing and profiling. The input file has an array of profiling/tracing configurations called jobs. Each job is used to configure profiling/tracing for an application execution. The input schema of these files is given below.
+  {
+    "jobs": [
+      {
+        "output_directory": "out-directory",
+        "output_file": "out",
+        "output_format": ["pftrace", "json", "otf2"],
+        "log_level": "env",
+        "runtime_trace": true,
+        "kernel_rename": true,
+        "summary": true,
+        "summary_per_domain": true,
+        "summary_groups": ["KERNEL_DISPATCH|MEMORY_COPY"],
+        "summary_output_file": "summary"
+      }
+    ]
+  }
 
-Properties
-++++++++++++
+
+Here is the input schema (properties) of JSON or YAML input files:
 
 -  **``jobs``** *(array)*: rocprofv3 input data per application run.
 
@@ -702,6 +725,35 @@ Properties
     pmc: GPUBusy SQ_WAVES
     pmc: GRBM_GUI_ACTIVE
 
+While the input file in text format can only be used for counter collection, JSON and YAML formats support all the command-line options for profiling. The input file in YAML or JSON format has an array of profiling configurations called jobs. Each job is used to configure profiling for an application execution.
+
+Here is the input schema (properties) of JSON or YAML input files:
+
+-  **``jobs``** *(array)*: ``rocprofv3`` input data per application run
+
+   -  **Items** *(object)*: Data for ``rocprofv3``
+
+      -  **``pmc``** *(array)*: list of counters for collection
+      -  **``kernel_include_regex``** *(string)*
+      -  **``kernel_exclude_regex``** *(string)*
+      -  **``kernel_iteration_range``** *(string)*
+      -  **``mangled_kernels``** *(boolean)*
+      -  **``truncate_kernels``** *(boolean)*
+      -  **``output_file``** *(string)*
+      -  **``output_directory``** *(string)*
+      -  **``output_format``** *(array)*
+      -  **``list_avail``** *(boolean)*
+      -  **``log_level``** *(string)*
+      -  **``preload``** *(array)*
+      -  **``pc_sampling_unit``** *(string)*
+      -  **``pc_sampling_method``** *(string)*
+      -  **``pc_sampling_interval``** *(integer)*
+      -  **``pc_sampling_beta_enabled``** *(boolean)*
+
+For description of the options specified under job items, see :ref:`cli-options`.
+
+Here is a sample input.json file for specifying counters for collection along with the options to filter and control the output:
+
 .. code-block:: shell
 
     $ cat input.json
@@ -726,59 +778,75 @@ Properties
       ]
     }
 
-.. code-block:: shell
+Here is a sample input.yaml file for counter collection:
 
-    $ cat input.yaml
+.. code-block:: yaml
 
   jobs:
-    - pmc:
-        - SQ_WAVES
-        - GRBM_COUNT
-        - GRBM_GUI_ACTIVE
-    - pmc:
-        - FETCH_SIZE
-        - WRITE_SIZE
+    - pmc: ["SQ_WAVES", "GRBM_COUNT", "GRBM_GUI_ACTIVE"]
+    - pmc: ["FETCH_SIZE", "WRITE_SIZE"]
+      kernel_include_regex: ".*_kernel"
+      kernel_exclude_regex: "multiply"
+      kernel_iteration_range: "[1-2],[3-4]"
+      output_file: "out"
+      output_format:
+        - "csv"
+        - "json"
+      truncate_kernels: true
 
+To supply the input file for kernel profiling, use:
 
-Command-line
-+++++++++++++
+.. code-block:: bash
 
-Desired counters can now be collected as ``command-line`` option as well.
+    rocprofv3 -i input.yaml -- <application_path>
 
-To supply the counters via ``command-line`` options, use:
+Counter collection using command line
+++++++++++++++++++++++++++++++++++++++
+
+You can also collect the desired counters by directly specifying them in the command line instead of using an input file.
+
+To supply the counters in the command line, use:
 
 .. code-block:: shell
 
    rocprofv3 --pmc SQ_WAVES GRBM_COUNT GRBM_GUI_ACTIVE -- <application_path>
 
 .. note::
-   1. Please note that more than 1 counters should be separated by a space or a comma.
-   2. Job will fail if entire set of counters cannot be collected in single pass
 
-Extra-counters
+   - When specifying more than one counter, separate them using space or a comma.
+   - Job fails if the entire set of counters can't be collected in a single pass.
+
+.. _extra-counters:
+
+Extra counters
 ++++++++++++++++
 
-Counters with custom definitions can be defined through an extra_counters.yaml
-file using the ``command-line`` option.
+While the basic counters and derived metrics are available for collection by default, you can also define counters as per requirement. These user-defined counters with custom definitions are named extra counters.
 
-To supply the extra counters via ``command-line`` options, use:
+You can define the extra counters in a YAML file as shown:
 
 .. code-block:: shell
 
-   rocprofv3 -E <path-to-extra_counters.yaml> --pmc <custom_metric> -- <app_relative_path>
+   $ cat extra_counters.yaml
+
+   GRBM_GUI_ACTIVE_SUM:
+      architectures:
+         gfx942/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx90a/gfx9:
+      expression: reduce(GRBM_GUI_ACTIVE,max)*CU_NUM
+      description: 'Unit: cycles'
+
+To collect the extra counters defined in the `extra_counters.yaml` file , use option ``--pmc`` to specify the extra counters to be collected:
+
+.. code-block:: shell
+
+   rocprofv3 -E <path-to-extra_counters.yaml> --pmc GRBM_GUI_ACTIVE_SUM -- <app_relative_path>
 
 Kernel profiling output
 +++++++++++++++++++++++++
 
-To supply the input file for kernel profiling, use:
+Using ``rocprofv3`` for counter collection using input file or command line generates a ``./pmc_n/counter_collection.csv`` file prefixed with the process ID. For each ``pmc`` row, a directory ``pmc_n`` containing a ``counter_collection.csv`` file is generated, where n = 1 for the first row and so on.
 
-.. code-block:: shell
-
-    rocprofv3 -i input.txt -- <application_path>
-
-Running the above command generates a ``./pmc_n/counter_collection.csv`` file prefixed with the process ID. For each ``pmc`` row, a directory ``pmc_n`` containing a ``counter_collection.csv`` file is generated, where n = 1 for the first row and so on.
-
-In case of JSON or YAML input file, for each job, a directory ``pass_n`` containing a ``counter_collection.csv`` file is generated where n = 1...N jobs.
+When using input file in JSON or YAML format, for each job, a directory ``pass_n`` containing a ``counter_collection.csv`` file is generated, where n = 1 for the first job and so on.
 
 Each row of the CSV file is an instance of kernel execution. Here is a truncated version of the output file from ``pmc_1``:
 
@@ -829,8 +897,7 @@ The ``agent_info.csv`` file contains information about the CPU or GPU the kernel
 Kernel filtering
 +++++++++++++++++
 
-Kernel filtering allows you to filter the kernel profiling output based on the kernel name by specifying regex strings in the input file. To include kernel names matching the regex string in the kernel profiling output, use ``kernel_include_regex``. To exclude the kernel names matching the regex string from the kernel profiling output, use ``kernel_exclude_regex``.
-You can also specify an iteration range for set of iterations of the included kernels. If the iteration range is not specified, then all iterations of the included kernels are profiled.
+Kernel filtering allows you to include or exclude the kernels for profiling by specifying a filter using a regex string. You can also specify an iteration range for profiling the included kernels. If the iteration range is not provided, then all iterations of the included kernels are profiled.
 
 Here is an input file with kernel filters:
 
@@ -841,6 +908,7 @@ Here is an input file with kernel filters:
         - pmc: [SQ_WAVES]
         kernel_include_regex: "divide"
         kernel_exclude_regex: ""
+        kernel_iteration_range: "[1, 2, [5-8]]"
 
 To collect counters for the kernels matching the filters specified in the preceding input file, run:
 
@@ -854,6 +922,115 @@ To collect counters for the kernels matching the filters specified in the preced
     8,8,1,2,36499,36499,1048576,"divide_kernel(float*, float const*, float const*, int, int)",64,0,0,12,16,"SQ_WAVES",16384,2228955885095594,2228955885119754
     12,12,1,3,36499,36499,1048576,"divide_kernel(float*, float const*, float const*, int, int)",64,0,0,12,16,"SQ_WAVES",16384,2228955892986914,2228955893006114
     16,16,1,4,36499,36499,1048576,"divide_kernel(float*, float const*, float const*, int, int)",64,0,0,12,16,"SQ_WAVES",16384,2228955892986914,2228955893006114
+
+
+I/O control options
+++++++++++++++++++++
+
+Output file
+++++++++++++
+
+The output file name can be specified using the ``--output-file`` or ``-o`` option. If nothing specified, the output file is by-default prefixed with the process ID.
+
+.. code-block:: shell
+
+    rocprofv3 --hip-trace --output-file output -- <application_path>
+
+The above command generates an ``output_hip_api_trace.csv`` file.
+
+Output directory
++++++++++++++++++
+
+The output directory can be specified using the ``--output-directory`` or ``-d`` option. If nothing specified, default path is `%hostname%/%pid%`.
+
+.. code-block:: shell
+
+    rocprofv3 --hip-trace --output-directory output_dir -- <application_path>
+
+The above command generates an ``output_dir/%hostname%/%pid%_hip_api_trace.csv`` file.
+
+Output directory option supports many placeholders. To name a few:
+
+  - %hostname%: Hostname of the machine
+  - %pid%: Process ID
+  - %env{NAME}% - Consistent with other output key formats (start+end with %)
+  - $ENV{NAME} - Similar to CMake
+  - %q{NAME}% - Compatibility with NVIDIA
+
+To see a full list, refer to :ref:`output-prefix-keys`.
+
+The following example shows how to use the output directory option with placeholders:
+
+.. code-block:: bash
+
+   mpirun -n 2 rocprofv3 --hip-trace -d %h.%p.%env{OMPI_COMM_WORLD_RANK}%  --  <application_path>
+
+The above command runs the application with `rocprofv3` and generates the trace file for each rank. The trace files are prefixed with the hostname, process ID, and the MPI rank.
+
+Assuming the hostname is `ubuntu-latest`, the process ID is `3000020` and `3000019`, the output file names are:
+
+.. code-block:: bash
+
+    ubuntu-latest.3000020.1/ubuntu-latest/3000020_agent_info.csv
+    ubuntu-latest.3000019.0/ubuntu-latest/3000019_agent_info.csv
+    ubuntu-latest.3000020.1/ubuntu-latest/3000020_hip_api_trace.csv
+    ubuntu-latest.3000019.0/ubuntu-latest/3000019_hip_api_trace.csv
+
+.. _output-prefix-keys:
+
+Output prefix keys
++++++++++++++++++++
+
+Output prefix keys have many uses but are most helpful when dealing with multiple profiling runs or large MPI jobs. Here is a list of the available keys:
+
+.. list-table:: 
+   :header-rows: 1
+
+   * - String
+     - Encoding
+   * - ``%argv%``
+     - Entire command-line condensed into a single string
+   * - ``%argt%``
+     - Similar to ``%argv%`` except basename of first command line argument
+   * - ``%args%``
+     - All command line arguments condensed into a single string
+   * - ``%tag%``
+     - Basename of first command line argument 
+   * - ``%hostname%``
+     - Hostname of the machine (i.e. gethostname()) 
+   * - ``%pid%``
+     - Process identifier (i.e. getpid())
+   * - ``%ppid%``
+     - Parent process identifier (i.e. getppid())
+   * - ``%pgid%``
+     - Process group identifier (i.e. getpgid(getpid()))
+   * - ``%psid%``
+     - Process session identifier  (i.e. getsid(getpid()))
+   * - ``%psize%``
+     - Number of sibling process (from reading /proc/<PPID>/tasks/<PPID>/children)
+   * - ``%job%``
+     - Value of SLURM_JOB_ID environment variable if exists, else 0
+   * - ``%rank%``
+     - Value of SLURM_PROCID environment variable if exists, else MPI_Comm_rank (or 0 non-mpi)
+   * - ``%size%``
+     - MPI_Comm_size or 1 if non-mpi
+   * - ``%nid%``
+     - %rank% if possible, otherwise ``%pid%``
+   * - ``%launch_time%``
+     - Launch date and time (Date and/or time according to ROCPROF_TIME_FORMAT)
+   * - ``%env{NAME}%``
+     - Value of environment variable NAME (i.e. getenv(NAME))
+   * - ``$env{NAME}``
+     - Alternative syntax to ``%env{NAME}%``
+   * - ``%p``
+     - Shorthand for ``%pid%``
+   * - ``%j``
+     - Shorthand for ``%job%``
+   * - ``%r``
+     - Shorthand for ``%rank%``
+   * - ``%s``
+     - Shorthand for ``%size%``
+
 
 .. _output-file-fields:
 
@@ -921,29 +1098,39 @@ Output formats
 - CSV (Default)
 - JSON (Custom format for programmatic analysis only)
 - PFTrace (Perfetto trace for visualization with Perfetto)
-- OTF2 (Open Trace Format for visualization with compatible third party tools)
+- OTF2 (Open Trace Format for visualization with compatible third-party tools)
 
-You can specify the output format using the ``--output-format`` command-line option. Format selection is case-insensitive
-and multiple output formats are supported. For example: ``--output-format json`` enables JSON output exclusively whereas
-``--output-format csv json pftrace otf2`` enables all four output formats for the run.
+To specify the output format, use:
 
-For .pftrace trace visualization, use the PFTrace format and open the trace in `ui.perfetto.dev <https://ui.perfetto.dev/>`_.
+.. code-block::
 
-For .otf2 trace visualization, open the trace in `vampir.eu <https://vampir.eu/>`_ or any supported visualizer.
+   rocprofv3 -i input.txt --output-format json -- <application_path>
+
+Format selection is case-insensitive and multiple output formats are supported. While ``--output-format json`` exclusively enables JSON output, ``--output-format csv json pftrace otf2`` enables all four output formats for the run.
+
+For PFTrace trace visualization, use the PFTrace format and open the trace in `ui.perfetto.dev <https://ui.perfetto.dev/>`_.
+
+For OTF2 trace visualization, open the trace in `vampir.eu <https://vampir.eu/>`_ or any supported visualizer.
 
 .. note::
-  For large trace files(> 10GB), its recommended to use otf2 format.
+  For large trace files (> 10GB), it's recommended to use OTF2 format.
 
 JSON output schema
 ++++++++++++++++++++
 
 ``rocprofv3`` supports a **custom** JSON output format designed for programmatic analysis and **NOT** for visualization.
-The schema is optimized for size while factoring in usability. The Perfetto UI does not accept this JSON output format produced by rocprofv3.
-Perfetto is dropping support for the JSON Chrome tracing format in favor of the binary Perfetto protobuf format (.pftrace extension), which is supported by rocprofv3.
-You can generate the JSON output using ``--output-format json`` command-line option.
+The schema is optimized for size while factoring in usability.
+
+.. note::
+
+   Perfetto UI doesn't accept this JSON output format.
+
+To generate the JSON output, use ``--output-format json`` command-line option.
 
 Properties
-++++++++++++
+###########
+
+Here are the properties of the JSON output schema:
 
 - **`rocprofiler-sdk-tool`** `(array)`: rocprofv3 data per process (each element represents a process).
    - **Items** `(object)`: Data for rocprofv3.
