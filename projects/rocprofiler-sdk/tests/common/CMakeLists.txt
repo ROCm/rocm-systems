@@ -36,6 +36,14 @@ set(AMDGPU_TARGETS
           "GPU targets to compile for AMDGPUs (update GPU_TARGETS, not this variable)"
           FORCE)
 
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.24)
+    cmake_policy(SET CMP0135 NEW)
+endif()
+
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.30)
+    cmake_policy(SET CMP0167 NEW)
+endif()
+
 # build flags
 add_library(rocprofiler-sdk-tests-build-flags INTERFACE)
 add_library(rocprofiler-sdk::tests-build-flags ALIAS rocprofiler-sdk-tests-build-flags)
@@ -78,7 +86,6 @@ if(NOT TARGET rocprofiler-sdk::rocprofiler-sdk-cereal)
             ${PROJECT_BINARY_DIR}/external/build/cereal-build SUBBUILD_DIR
             ${PROJECT_BINARY_DIR}/external/build/cereal-subdir)
 
-        # This particular version of projD requires workarounds
         fetchcontent_getproperties(cereal)
 
         if(NOT cereal_POPULATED)

@@ -210,14 +210,6 @@ read_tmp_file(domain_type type)
     auto& _fs = filebuf->file.stream;
     if(_fs.is_open()) _fs.close();
     filebuf->file.open(std::ios::binary | std::ios::in);
-    // for(auto itr : filebuf->file.file_pos)
-    // {
-    //     _fs.seekg(itr);  // set to the absolute position
-    //     if(_fs.eof()) break;
-    //     auto _buffer = ring_buffer_t<Tp>{};
-    //     _buffer.load(_fs);
-    //     _data.emplace_back(std::move(_buffer));
-    // }
 }
 }  // namespace tool
 }  // namespace rocprofiler

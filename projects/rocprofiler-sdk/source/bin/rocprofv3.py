@@ -107,16 +107,21 @@ def search_path(path_list):
 
 def check_att_capability(args):
 
-    path = []
     ROCPROFV3_DIR = os.path.dirname(os.path.realpath(__file__))
     ROCM_DIR = os.path.dirname(ROCPROFV3_DIR)
-    support_input = {}
-    tmp_parser = argparse.ArgumentParser(add_help=False)
+    ld_library_paths = []
+    for itr in os.environ.get("LD_LIBRARY_PATH", "").split(":") + [f"{ROCM_DIR}/lib"]:
+        # don't add duplicates
+        if itr not in ld_library_paths:
+            ld_library_paths += [itr]
+
+    tmp_parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
     tmp_parser.add_argument(
         "--att-library-path",
         default=os.environ.get(
-            "ATT_LIBRARY_PATH", os.environ.get("LD_LIBRARY_PATH", None)
-        ),
+            "ROCPROF_ATT_LIBRARY_PATH", ":".join(ld_library_paths)
+        ).split(":"),
+        nargs="+",
         type=str,
         required=False,
     )
@@ -129,52 +134,28 @@ def check_att_capability(args):
         required=False,
     )
 
-    tmp_data = {}
-    att_args, unparsed_args = tmp_parser.parse_known_args(args)
-    tmp_keys = list(att_args.__dict__.keys())
+    att_args, _ = tmp_parser.parse_known_args(args)
 
-    for itr in tmp_keys:
-        if has_set_attr(att_args, itr):
-            tmp_data[itr] = getattr(att_args, itr)
-
-    data = dotdict(tmp_data)
-    if data.input:
+    support = search_path(att_args.att_library_path)
+    support_input = {}
+    if att_args.input:
         # If index of a pass in input file is a key in the support_input dict, then that pass has att-library-path arg
-        args_list = parse_input(data.input)
+        args_list = parse_input(att_args.input)
         for index, itr in enumerate(args_list):
             if itr.att_library_path:
-                library_path = []
-                if ":" in itr.att_library_path:
-                    library_path.extend(itr.att_library_path.split(":"))
-                else:
-                    library_path.append(itr.att_library_path)
-                support = search_path(library_path)
-                # If the att-library-path in the input file for a pass is valid, then the value of index key in the dict, support_input, is updated to that valid path
-                if support:
-                    support_input[index] = set(support)
-                else:
-                    # If the att-library-path in the input file for a pass is invalid, then the value of index key in the dict, support_input, is empty
-                    support_input[index] = []
-    if data.att_library_path:
-        if ":" in data.att_library_path:
-            path.extend(data.att_library_path.split(":"))
-        else:
-            path.append(data.att_library_path)
-    else:
-        path.append(f"{ROCM_DIR}/lib")
-        path.append(f"{ROCM_DIR}/lib64")
+                library_path = (
+                    itr.att_library_path.split(":")
+                    if isinstance(itr.att_library_path, str)
+                    else itr.att_library_path
+                )
+                _support = search_path(library_path)
+                # If the att-library-path in the input file for a pass is valid, then the value of index key in the dict,
+                # support_input, is updated to that valid path
+                # If the att-library-path in the input file for a pass is invalid, then the value of index key in the dict,
+                # support_input, is empty
+                support_input[index] = set(_support) if support else []
 
-    support = search_path(set(path))
-    if support:
-        if len(path) == 1:
-            os.environ["ATT_LIBRARY_PATH"] = path[0]
-            os.environ["ROCPROF_ATT_LIBRARY_PATH"] = path[0]
-        else:
-            os.environ["ATT_LIBRARY_PATH"] = ":".join(path)
-            os.environ["ROCPROF_ATT_LIBRARY_PATH"] = ":".join(path)
-        return support, support_input
-
-    return None, support_input
+    return (att_args.att_library_path, set(support), support_input)
 
 
 class booleanArgAction(argparse.Action):
@@ -279,36 +260,6 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         help="Collect tracing data for HIP API, HSA API, Marker (ROCTx) API, RCCL API, ROCDecode API, Memory operations (copies, scratch, and allocations), and Kernel dispatches.",
     )
 
-    pc_sampling_options = parser.add_argument_group("PC sampling options")
-
-    add_parser_bool_argument(
-        pc_sampling_options,
-        "--pc-sampling-beta-enabled",
-        help="enable pc sampling support; beta version",
-    )
-
-    pc_sampling_options.add_argument(
-        "--pc-sampling-unit",
-        help="",
-        default=None,
-        type=str.lower,
-        choices=("instructions", "cycles", "time"),
-    )
-
-    pc_sampling_options.add_argument(
-        "--pc-sampling-method",
-        help="",
-        default=None,
-        type=str.lower,
-        choices=("stochastic", "host_trap"),
-    )
-
-    pc_sampling_options.add_argument(
-        "--pc-sampling-interval",
-        help="",
-        default=None,
-        type=int,
-    )
     basic_tracing_options = parser.add_argument_group("Basic tracing options")
 
     # Add the arguments
@@ -406,6 +357,37 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         ),
         default=None,
         nargs="*",
+    )
+
+    pc_sampling_options = parser.add_argument_group("PC sampling options")
+
+    add_parser_bool_argument(
+        pc_sampling_options,
+        "--pc-sampling-beta-enabled",
+        help="enable pc sampling support; beta version",
+    )
+
+    pc_sampling_options.add_argument(
+        "--pc-sampling-unit",
+        help="",
+        default=None,
+        type=str.lower,
+        choices=("instructions", "cycles", "time"),
+    )
+
+    pc_sampling_options.add_argument(
+        "--pc-sampling-method",
+        help="",
+        default=None,
+        type=str.lower,
+        choices=("stochastic", "host_trap"),
+    )
+
+    pc_sampling_options.add_argument(
+        "--pc-sampling-interval",
+        help="",
+        default=None,
+        type=int,
     )
 
     post_processing_options = parser.add_argument_group("Post-processing tracing options")
@@ -564,18 +546,18 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         nargs="*",
     )
 
-    advanced_options.add_argument(
-        "--att-library-path",
-        default=os.environ.get(
-            "ATT_LIBRARY_PATH", os.environ.get("LD_LIBRARY_PATH", None)
-        ),
-        help="ATT library path to find decoder library",
-    )
     # below is available for CI because LD_PRELOADing a library linked to a sanitizer library
     # causes issues in apps where HIP is part of shared library.
     add_parser_bool_argument(
         advanced_options,
         "--suppress-marker-preload",
+        help=argparse.SUPPRESS,
+    )
+
+    # just echo the command line
+    add_parser_bool_argument(
+        advanced_options,
+        "--echo",
         help=argparse.SUPPRESS,
     )
 
@@ -592,20 +574,33 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
             app_args = args[(idx + 1) :]
             break
 
-    supported_list, is_support_input = check_att_capability(rocp_args)
-    if supported_list or len(is_support_input) != 0:
+    default_att_lib_path, att_support_args, att_support_inp = check_att_capability(
+        rocp_args
+    )
+    if att_support_args or len(att_support_inp) != 0:
         choice_list = []
-        for keys, values in is_support_input.items():
+        for keys, values in att_support_inp.items():
             choice_list.extend(values)
-        if supported_list:
-            choice_list.extend(list(supported_list))
+        if att_support_args:
+            choice_list.extend(list(att_support_args))
 
-        att_options = parser.add_argument_group("Advanced Thread Trace")
+        # remove duplicates
+        choice_list = list(set(choice_list))
+
+        att_options = parser.add_argument_group("Advanced Thread Trace (ATT) options")
 
         add_parser_bool_argument(
             att_options,
             "--advanced-thread-trace",
+            "--att",
             help="Enable ATT",
+        )
+
+        att_options.add_argument(
+            "--att-library-path",
+            help="Search path(s) to decoder library/libraries",
+            default=default_att_lib_path if not att_support_inp else None,
+            nargs="+",
         )
 
         att_options.add_argument(
@@ -639,7 +634,9 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         att_options.add_argument(
             "--att-parse",
             type=str.lower,
-            default=None,
+            default=(
+                choice_list[0] if len(choice_list) == 1 and not att_support_inp else None
+            ),
             help="Select ATT Parse method from the choices",
             choices=set(choice_list),
         )
@@ -651,7 +648,7 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
             help="Serialize all kernels",
         )
 
-    return (parser.parse_args(rocp_args), app_args, supported_list, is_support_input)
+    return (parser.parse_args(rocp_args), app_args, att_support_args, att_support_inp)
 
 
 def parse_yaml(yaml_file):
@@ -792,7 +789,9 @@ def get_args(cmd_args, inp_args):
             and has_set_attr(inp_args, itr)
             and getattr(cmd_args, itr) != getattr(inp_args, itr)
         ):
-            raise RuntimeError(f"conflicting value for {itr}")
+            raise RuntimeError(
+                f"conflicting value for {itr} : {getattr(cmd_args, itr)} vs {getattr(inp_args, itr)}"
+            )
         else:
             data[itr] = get_attr(itr)
 
@@ -889,7 +888,6 @@ def run(app_args, args, **kwargs):
     prepend_preload = [itr for itr in args.preload if itr]
     append_preload = [
         ROCPROF_TOOL_LIBRARY,
-        ROCPROF_LIST_AVAIL_TOOL_LIBRARY,
         ROCPROF_SDK_LIBRARY,
     ]
 
@@ -1054,11 +1052,14 @@ def run(app_args, args, **kwargs):
         args.truncate_kernels,
         overwrite_if_true=True,
     )
-    update_env(
-        "ROCPROF_LIST_AVAIL",
-        args.list_avail,
-        overwrite_if_true=True,
-    )
+
+    if args.list_avail:
+        update_env(
+            "ROCPROF_LIST_AVAIL_TOOL_LIBRARY",
+            ROCPROF_LIST_AVAIL_TOOL_LIBRARY,
+            overwrite_if_true=True,
+        )
+
     if args.collection_period:
         factors = {
             "hour": 60 * 60 * 1e9,
@@ -1136,11 +1137,11 @@ def run(app_args, args, **kwargs):
         update_env("ROCPROFILER_PC_SAMPLING_BETA_ENABLED", "on")
         path = os.path.join(f"{ROCM_DIR}", "bin/rocprofv3_avail")
         if app_args:
-            exit_code = subprocess.check_call(["python3", path], env=app_env)
+            exit_code = subprocess.check_call([sys.executable, path], env=app_env)
         else:
-            app_args = ["python3", path]
+            app_args = [sys.executable, path]
 
-    elif not app_args:
+    elif not app_args and not args.echo:
         log_config(app_env)
         fatal_error("No application provided")
 
@@ -1169,11 +1170,6 @@ def run(app_args, args, **kwargs):
         update_env(
             "ROCPROF_COUNTERS", "pmc: {}".format(" ".join(args.pmc)), overwrite=True
         )
-    else:
-        update_env("ROCPROF_COUNTER_COLLECTION", False, overwrite=True)
-
-    if args.log_level in ("info", "trace", "env"):
-        log_config(app_env)
 
     if args.pc_sampling_unit or args.pc_sampling_method or args.pc_sampling_interval:
 
@@ -1256,17 +1252,10 @@ def run(app_args, args, **kwargs):
                 args.att_serialize_all,
                 overwrite=True,
             )
-
         if args.att_library_path:
-
             update_env(
                 "ROCPROF_ATT_LIBRARY_PATH",
-                args.att_library_path,
-                overwrite=True,
-            )
-            update_env(
-                "ATT_LIBRARY_PATH",
-                args.att_library_path,
+                ":".join(args.att_library_path),
                 overwrite=True,
             )
         if args.att_percounters:
@@ -1276,10 +1265,23 @@ def run(app_args, args, **kwargs):
                 overwrite=True,
             )
 
+    if args.log_level in ("info", "trace", "env"):
+        log_config(app_env)
+
     if use_execv:
-        # does not return
-        os.execvpe(app_args[0], app_args, env=app_env)
+        if args.echo:
+            sys.stderr.flush()
+            print(f"command: {app_args}")
+            sys.stdout.flush()
+        else:
+            # does not return
+            os.execvpe(app_args[0], app_args, env=app_env)
     else:
+        if args.echo:
+            sys.stderr.flush()
+            print(f"command: {app_args}")
+            sys.stdout.flush()
+            return 0
         try:
             exit_code = subprocess.check_call(app_args, env=app_env)
             if exit_code != 0:

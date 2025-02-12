@@ -33,6 +33,12 @@ include(GNUInstallDirs)
 # always use lib instead of lib64
 set(CMAKE_INSTALL_LIBDIR "lib")
 
+# define the library output directory
+if(PROJECT_IS_TOP_LEVEL)
+    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}")
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}")
+endif()
+
 # needed for validation
 find_package(Python3 REQUIRED)
 

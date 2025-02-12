@@ -1606,10 +1606,16 @@ using domain_stats_vec_t = tool::domain_stats_vec_t;
 
 template <typename Tp, domain_type DomainT>
 void
-generate_output(tool::buffered_output<Tp, DomainT>& output_v, domain_stats_vec_t& contributions_v)
+generate_output(tool::buffered_output<Tp, DomainT>& output_v,
+                uint64_t&                           num_output_v,
+                domain_stats_vec_t&                 contributions_v)
 {
     if(!output_v) return;
 
+    // if it has reached this point, the generator is not empty
+    num_output_v += 1;
+
+    // opens temporary file and sets read position to beginning
     output_v.read();
 
     if(tool::get_config().stats || tool::get_config().summary_output)
@@ -1668,38 +1674,46 @@ tool_fini(void* /*tool_data*/)
     auto pc_sampling_host_trap_output =
         tool::pc_sampling_host_trap_buffered_output_t{tool::get_config().pc_sampling_host_trap};
 
-    auto node_id_sort = [](const auto& lhs, const auto& rhs) { return lhs.node_id < rhs.node_id; };
+    auto node_id_sort  = [](const auto& lhs, const auto& rhs) { return lhs.node_id < rhs.node_id; };
+    auto agents_output = CHECK_NOTNULL(tool_metadata)->agents;
+    std::sort(agents_output.begin(), agents_output.end(), node_id_sort);
 
-    auto _agents = CHECK_NOTNULL(tool_metadata)->agents;
-    std::sort(_agents.begin(), _agents.end(), node_id_sort);
+    uint64_t num_output    = 0;
+    auto     contributions = domain_stats_vec_t{};
 
-    if(tool::get_config().csv_output)
+    generate_output(kernel_dispatch_output, num_output, contributions);
+    generate_output(hsa_output, num_output, contributions);
+    generate_output(hip_output, num_output, contributions);
+    generate_output(memory_copy_output, num_output, contributions);
+    generate_output(memory_allocation_output, num_output, contributions);
+    generate_output(marker_output, num_output, contributions);
+    generate_output(rccl_output, num_output, contributions);
+    generate_output(counters_output, num_output, contributions);
+    generate_output(scratch_memory_output, num_output, contributions);
+    generate_output(rocdecode_output, num_output, contributions);
+    generate_output(pc_sampling_host_trap_output, num_output, contributions);
+
+    if(tool::get_config().advanced_thread_trace && !tool::get_config().att_capability.empty() &&
+       !tool_metadata->att_filenames.empty())
     {
-        tool::generate_csv(tool::get_config(), *tool_metadata, _agents);
+        num_output += 1;
     }
 
-    auto contributions = domain_stats_vec_t{};
+    ROCP_INFO << "Number of services generating output: " << num_output;
 
-    generate_output(kernel_dispatch_output, contributions);
-    generate_output(hsa_output, contributions);
-    generate_output(hip_output, contributions);
-    generate_output(memory_copy_output, contributions);
-    generate_output(memory_allocation_output, contributions);
-    generate_output(marker_output, contributions);
-    generate_output(rccl_output, contributions);
-    generate_output(counters_output, contributions);
-    generate_output(scratch_memory_output, contributions);
-    generate_output(rocdecode_output, contributions);
-    generate_output(pc_sampling_host_trap_output, contributions);
+    if(tool::get_config().csv_output && num_output > 0)
+    {
+        tool::generate_csv(tool::get_config(), *tool_metadata, agents_output);
+    }
 
-    if(tool::get_config().stats && tool::get_config().csv_output)
+    if(tool::get_config().stats && tool::get_config().csv_output && num_output > 0)
     {
         tool::generate_csv(tool::get_config(), *tool_metadata, contributions);
     }
 
     if(tool::get_config().advanced_thread_trace)
     {
-        std::unordered_map<std::string_view, rocprofiler::att_wrapper::tool_att_capability_t>
+        const std::unordered_map<std::string_view, rocprofiler::att_wrapper::tool_att_capability_t>
             tool_att_capability_map = {
                 {"testing", rocprofiler::att_wrapper::ATT_CAPABILITIES_TESTING},
                 {"summary", rocprofiler::att_wrapper::ATT_CAPABILITIES_SUMMARY},
@@ -1711,7 +1725,7 @@ tool_fini(void* /*tool_data*/)
 
         auto att_capability_value = tool_att_capability_map.at(tool::get_config().att_capability);
         auto decoder              = rocprofiler::att_wrapper::ATTDecoder(att_capability_value);
-        ROCP_FATAL_IF(!decoder.valid()) << "Decoder library not found at ROCPORF_ATT_LIBRARY_PATH";
+        ROCP_FATAL_IF(!decoder.valid()) << "Decoder library not found at ROCPROF_ATT_LIBRARY_PATH";
         auto codeobj     = tool_metadata->get_code_object_load_info();
         auto output_path = tool::format_path(tool::get_config().output_path);
         for(auto& [dispatch_id, att_filename_data] : tool_metadata->att_filenames)
@@ -1731,7 +1745,7 @@ tool_fini(void* /*tool_data*/)
         }
     }
 
-    if(tool::get_config().json_output)
+    if(tool::get_config().json_output && num_output > 0)
     {
         auto json_ar = tool::open_json(tool::get_config());
 
@@ -1757,11 +1771,11 @@ tool_fini(void* /*tool_data*/)
         tool::close_json(json_ar);
     }
 
-    if(tool::get_config().pftrace_output)
+    if(tool::get_config().pftrace_output && num_output > 0)
     {
         tool::write_perfetto(tool::get_config(),
                              *tool_metadata,
-                             _agents,
+                             agents_output,
                              hip_output.get_generator(),
                              hsa_output.get_generator(),
                              kernel_dispatch_output.get_generator(),
@@ -1773,7 +1787,7 @@ tool_fini(void* /*tool_data*/)
                              rocdecode_output.get_generator());
     }
 
-    if(tool::get_config().otf2_output)
+    if(tool::get_config().otf2_output && num_output > 0)
     {
         auto hip_elem_data               = hip_output.load_all();
         auto hsa_elem_data               = hsa_output.load_all();
@@ -1788,7 +1802,7 @@ tool_fini(void* /*tool_data*/)
         tool::write_otf2(tool::get_config(),
                          *tool_metadata,
                          getpid(),
-                         _agents,
+                         agents_output,
                          &hip_elem_data,
                          &hsa_elem_data,
                          &kernel_dispatch_elem_data,
@@ -1800,7 +1814,7 @@ tool_fini(void* /*tool_data*/)
                          &rocdecode_elem_data);
     }
 
-    if(tool::get_config().summary_output)
+    if(tool::get_config().summary_output && num_output > 0)
     {
         tool::generate_stats(tool::get_config(), *tool_metadata, contributions);
     }
