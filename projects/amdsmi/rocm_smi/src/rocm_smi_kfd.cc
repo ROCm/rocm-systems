@@ -922,30 +922,28 @@ int KFDNode::get_cache_info(rsmi_gpu_cache_info_t *info) {
       int cache_type = std::stoi(type);
       if (cache_type <= 0) continue;
 
-      // num_cu_shared – this can be fetched by counting the number of 1’s in the sibling_map.
-      std::string sibling_map =
-              get_properties_from_file(prop_file, "sibling_map ");
-      uint32_t num_cu_shared = static_cast<uint32_t>(std::count(sibling_map.begin(), sibling_map.end(), '1'));
-
-      // known cache type
-      bool is_count_already = false;
-      for (unsigned int i=0; i < info->num_cache_types; i++) {
-        if (info->cache[i].cache_level == static_cast<uint32_t>(cache_level) &&
-            info->cache[i].flags == static_cast<uint32_t>(cache_type)) {
-          is_count_already = true;
-          if (info->cache[i].max_num_cu_shared < num_cu_shared)
-              info->cache[i].max_num_cu_shared = num_cu_shared;
-          info->cache[i].num_cache_instance++;
-          break;
-        }
-      }
-      if (is_count_already) continue;
-
-      // new cache type
-      if (info->num_cache_types >= RSMI_MAX_CACHE_TYPES) return 1;
       std::string size = get_properties_from_file(prop_file, "size ");
       int cache_size = std::stoi(size);
       if (cache_size <= 0) continue;
+
+      std::string sibling_map =
+          get_properties_from_file(prop_file, "sibling_map ");
+      uint32_t num_cu_shared = static_cast<uint32_t>(std::count(sibling_map.begin(), sibling_map.end(), '1'));
+
+      bool is_count_already = false;
+      for (unsigned int i = 0; i < info->num_cache_types; i++) {
+        if (info->cache[i].cache_level == static_cast<uint32_t>(cache_level) &&
+          info->cache[i].flags == static_cast<uint32_t>(cache_type) &&
+          info->cache[i].cache_size_kb == static_cast<uint32_t>(cache_size) &&
+          info->cache[i].max_num_cu_shared == num_cu_shared) {
+          is_count_already = true;
+          info->cache[i].num_cache_instance++;
+          break;
+      }
+      }
+      if (is_count_already) continue;
+
+      if (info->num_cache_types >= RSMI_MAX_CACHE_TYPES) return 1;
 
       info->cache[info->num_cache_types].cache_level = cache_level;
       info->cache[info->num_cache_types].cache_size_kb = cache_size;
