@@ -83,16 +83,32 @@ Please report in the Github Issues.
 
   - Using PC sampling on multi-threaded applications might fail with `HSA_STATUS_ERROR_EXCEPTION`.Furthermore, if three or more threads launch operations to the same agent, and if PC sampling is enabled, the `HSA_STATUS_ERROR_EXCEPTION` might appear.
 
-- Navi3x requires a stable power state for counter collection.
-  Currently, this state needs to be set by the user.
-  To do so, set "power_dpm_force_performance_level" to be writeable for non-root users, then set performance level to profile_standard:
-
+- gfx11 and gfx12 requires a stable power state for counter collection. This includes Radeon 7000 GPUs.
   ```bash
-  sudo chmod 777 /sys/class/drm/card0/device/power_dpm_force_performance_level
-  echo profile_standard >> /sys/class/drm/card0/device/power_dpm_force_performance_level
+  # For device <N>. Use 'rocm-smi' or 'amd-smi monitor' to see device number.
+  sudo amd-smi set -g <N> -l stable_std
+  # After profiling, set power state back to 'auto'
+  sudo amd-smi set -g <N> -l auto
   ```
 
-  Recommended: "profile_standard" for counter collection and "auto" for all other profiling. Use rocm-smi to verify the current power state. For multiGPU systems (includes integrated graphics), replace "card0" by the desired card.
+  The gfx version can be found via `amd-smi static --asic -g <N>` in the `TARGET_GRAPHICS_VERSION` field: 
+
+  ```bash
+  $ amd-smi static -a -g 2
+  GPU: 2
+      ASIC:
+          MARKET_NAME: Navi 33 [Radeon Pro W7500]
+          VENDOR_ID: 0x1002
+          VENDOR_NAME: Advanced Micro Devices Inc. [AMD/ATI]
+          SUBVENDOR_ID: 0x1002
+          DEVICE_ID: 0x7489
+          SUBSYSTEM_ID: 0x0e0d
+          REV_ID: 0x00
+          ASIC_SERIAL: N/A
+          OAM_ID: N/A
+          NUM_COMPUTE_UNITS: 28
+          TARGET_GRAPHICS_VERSION: gfx1102
+  ```
 
 > [!WARNING]
 > The latest mainline version of AQLprofile can be found at [https://repo.radeon.com/rocm/misc/aqlprofile/](https://repo.radeon.com/rocm/misc/aqlprofile/). However, it's important to note that updates to the public AQLProfile may not occur as frequently as updates to the rocprofiler-sdk. This discrepancy could lead to a potential mismatch between the AQLprofile binary and the rocprofiler-sdk source.
