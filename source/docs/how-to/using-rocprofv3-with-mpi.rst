@@ -5,8 +5,8 @@
 
 .. _using-rocprofv3-with-mpi:
 
-Using rocprofv3 with MPI
-+++++++++++++++++++++++++
+Using rocprofv3 with ``MPI``
++++++++++++++++++++++++++++++
 
 Message Passing Interface (MPI) is a standardized and portable message-passing system designed to function on a wide variety of parallel computing architectures. MPI is widely used for developing parallel applications and is considered the de facto standard for communication in high-performance computing (HPC) environments.
 MPI applications are parallel applications that run across multiple processes, which can be distributed over one or more nodes. 
