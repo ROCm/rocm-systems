@@ -1196,7 +1196,7 @@ const char *TrapHandlerIsa =
         .elseif (.amdgcn.gfx_generation_number < 12)
             s_sendmsg_rtn_b32 ttmp3, sendmsg(MSG_RTN_GET_DOORBELL)
             .if (.amdgcn.gfx_generation_number >= 12)
-                s_waitcnt_idle
+                s_wait_idle
             .else
                 s_waitcnt lgkmcnt(0)
             .endif
@@ -1213,7 +1213,7 @@ const char *TrapHandlerIsa =
         s_nop 0x0
         s_sendmsg sendmsg(MSG_INTERRUPT)
         .if (.amdgcn.gfx_generation_number >= 12)
-            s_waitcnt_idle
+            s_wait_idle
         .else
             s_waitcnt lgkmcnt(0)
         .endif
