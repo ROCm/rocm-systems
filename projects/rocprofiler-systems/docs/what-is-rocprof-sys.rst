@@ -15,6 +15,11 @@ A visualization of the comprehensive ROCm Systems Profiler results can be observ
 web browser. Upload the Perfetto (``.proto``) output files produced by ROCm Systems Profiler at
 `ui.perfetto.dev <https://ui.perfetto.dev/>`_ to see the details.
 
+.. important::
+   If you are using a version of ROCm prior to ROCm 6.3.1 and are experiencing problems viewing your
+   trace in the latest version of [Perfetto](http://ui.perfetto.dev), then try using
+   [Perfetto UI v46.0](https://ui.perfetto.dev/v46.0-35b3d9845/#!/).
+
 Aggregated high-level results are available as human-readable text files and
 JSON files for programmatic analysis. The JSON output files are compatible with the
 `hatchet <https://github.com/hatchet/hatchet>`_ Python package. Hatchet converts
