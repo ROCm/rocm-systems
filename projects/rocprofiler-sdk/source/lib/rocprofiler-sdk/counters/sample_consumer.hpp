@@ -23,6 +23,7 @@
 #pragma once
 
 #include "lib/rocprofiler-sdk/counters/sample_processing.hpp"
+#include "lib/rocprofiler-sdk/internal_threading.hpp"
 
 #include <condition_variable>
 #include <mutex>
@@ -49,7 +50,9 @@ public:
         if(valid.exchange(true)) return;
         exited.store(false);
 
+        internal_threading::notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
         consumer = std::thread{&consumer_thread_t::consumer_loop, this};
+        internal_threading::notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
     }
 
     void exit()
