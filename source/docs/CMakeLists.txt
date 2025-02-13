@@ -114,6 +114,9 @@ cd \${WORK_DIR}
 
 cmake -DSOURCE_DIR=\${SOURCE_DIR} -P \${WORK_DIR}/generate-doxyfile.cmake
 
+mkdir -p _doxygen/rocprofiler-sdk
+mkdir -p _doxygen/roctx
+
 doxygen rocprofiler-sdk.dox
 doxygen rocprofiler-sdk-roctx.dox
 
