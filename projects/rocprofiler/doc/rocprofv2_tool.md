@@ -145,39 +145,10 @@ The user has two options for building:
       rocprofv2 --help
   ```
 
-  - (ATT) Advanced Thread Trace: It can collect kernel running time, granular hardware metrics per kernel dispatch and provide hotspot analysis at source code level via hardware tracing.
-     Usage:
-  ```bash
-      # ATT(Advanced Thread Trace) needs few preconditions before running.
-      # 1. Make sure to generate the assembly file for application by executing the following before compiling your HIP Application
-      export HIPCC_COMPILE_FLAGS_APPEND="--save-temps -g"
-
-      # 2. Install plugin package
-      see Plugin Support section for installation
-
-      # 3. Run the following to view the trace
-      rocprofv2 --plugin att <app_relative_path_assembly_file> --mode <network, file, off> -i input.txt <app_relative_path>
-
-      # app_assembly_file_relative_path is the assembly file with .s extension generated in 1st step
-      # app_relative_path is the path for the application binary
-      # Mode:
-        # - Network: opens the server with the browser UI.
-            # att needs 2 ports opened (8000, 18000), In case the browser is running on a different machine.
-        # - File: dumps the json files to disk, it can be used to quickly verify if there is anything wrong with the data.
-        # - Off runs collection but not analysis/parsing. So it can be later used on another system to be viewed.
-      # input.txt gives flexibility to to target the compute unit and provide filters.
-        # input.txt contents:
-            # TARGET_CU=1 // or some other CU [0,15]
-            # SE_MASK=0x1 // bitmask of shader engines. The fewer, the easier on the hardware. Default enables all 24 because SE_MASK code is recent.
-            # SIMD_MASK=0xF // bitmask of SIMDs, there are four in GFX9.
-      # samples/att.txt is having an example on how to right input file for ATT
-  ```
-
 - Plugin Support: We have a template for adding new plugins. New plugins can be written on top of rocprofv2 to support the desired output format using include/rocprofiler/v2/rocprofiler_plugins.h header file. These plugins are modular in nature and can easily be decoupled from the code based on need. E.g.
   - file plugin: outputs the data in txt files.
   - Perfetto plugin: outputs the data in protobuf format.
     - Protobuf files can be viewed using ui.perfetto.dev or using trace_processor
-  - ATT (Advanced thread tracer) plugin: advanced hardware traces data in binary format. Please refer ATT section.
   - CTF plugin: Outputs the data in ctf format(a binary trace format)
   - CTF binary output can be viewed using TraceCompass or babeltrace.
 
@@ -267,9 +238,8 @@ samples can be run as independent executables once installed
 - plugin
   - file: File Plugin
   - perfetto: Perfetto Plugin
-  - att: Advanced thread tracer Plugin
   - ctf: CTF Plugin
-- samples: Samples of how to use the API, and also input.txt input file samples for counter collection and ATT.
+- samples: Samples of how to use the API, and also input.txt input file samples for counter collection.
 - script: Scripts needed for tracing
 - src: Source files of the project
   - api: API implementation for rocprofv2
@@ -285,7 +255,6 @@ samples can be run as independent executables once installed
       - tracer: Tracing support of the session
       - profiler: Profiling support of the session
       - spm: SPM support of the session
-      - att: ATT support of the session
   - tools: Tools needed to run profiling and tracing
     - rocsys: Controlling Session from another CLI
   - utils: Utilities needed by the project
