@@ -71,7 +71,7 @@ constexpr auto kernel_symbol_metadata_lookup = ".symbol";
     {                                                                                              \
         const char* reason = "";                                                                   \
         amd_comgr_status_string(status, &reason);                                                  \
-        ROCP_WARNING << #call << " failed with error code " << status << " :: " << reason;         \
+        ROCP_INFO << #call << " failed with error code " << status << " :: " << reason;            \
     }
 
 #define CHECK_WARNING_COMGR_EXT(call, ...)                                                         \
@@ -79,8 +79,8 @@ constexpr auto kernel_symbol_metadata_lookup = ".symbol";
     {                                                                                              \
         const char* reason = "";                                                                   \
         amd_comgr_status_string(status, &reason);                                                  \
-        ROCP_WARNING << #call << " failed with error code " << status << " :: " << reason          \
-                     << " :: " << __VA_ARGS__;                                                     \
+        ROCP_INFO << #call << " failed with error code " << status << " :: " << reason             \
+                  << " :: " << __VA_ARGS__;                                                        \
     }
 
 #define CHECK_RETURN_COMGR(call)                                                                   \
