@@ -254,7 +254,7 @@ bool WDDMDevice::ReserveSystemHeapSpace() {
 
 bool WDDMDevice::FreeSystemHeapSpace(void) {
   void *cpu = (void *)system_heap_space_start_;
-  if (munmap(cpu, system_heap_space_size_ != 0)) {
+  if (munmap(cpu, system_heap_space_size_) != 0) {
     pr_err("fail to unmap = %p \n", cpu);
     return false;
   }
