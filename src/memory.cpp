@@ -177,7 +177,7 @@ HSAKMT_STATUS hsaKmtAllocMemoryAlignInternal(HSAuint32 PreferredNode,
 
   create_info.alignment = Alignment;
   create_info.va_hint = reinterpret_cast<gpusize>(*MemoryAddress);
-  if ((PreferredNode == 0 && !MemFlags.ui32.NonPaged)
+  if ((PreferredNode == 0 && MemFlags.ui32.HostAccess)
     || zfb_support || MemFlags.ui32.GTTAccess) {
     if (SizeInBytes > max_single_alloc_size)
       return HSAKMT_STATUS_NO_MEMORY;
