@@ -496,6 +496,14 @@ Examples:
         help="\t\tSpecify GPU id(s) for filtering.",
     )
     analyze_group.add_argument(
+        "--spatial-multiplexing",
+        dest="spatial_multiplexing",
+        required=False,
+        default=False,
+        action="store_true",
+        help="\t\t\tMode of spatial multiplexing.",
+    )
+    analyze_group.add_argument(
         "-o",
         "--output",
         metavar="",

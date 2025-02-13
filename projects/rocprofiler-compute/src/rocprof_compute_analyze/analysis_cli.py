@@ -44,9 +44,15 @@ class cli_analysis(OmniAnalyze_Base):
             self._runs[d[0]].raw_pmc = file_io.create_df_pmc(
                 d[0],
                 self.get_args().nodes,
+                self.get_args().spatial_multiplexing,
                 self.get_args().kernel_verbose,
                 self.get_args().verbose,
             )
+
+            if self.get_args().spatial_multiplexing:
+                self._runs[d[0]].raw_pmc = self.spatial_multiplex_merge_counters(
+                    self._runs[d[0]].raw_pmc
+                )
 
             file_io.create_df_kernel_top_stats(
                 df_in=self._runs[d[0]].raw_pmc,

@@ -36,6 +36,7 @@ from utils.utils import (
     console_log,
     demarcate,
     is_workload_empty,
+    merge_counters_spatial_multiplex,
 )
 
 
@@ -56,6 +57,10 @@ class OmniAnalyze_Base:
 
     def get_socs(self):
         return self.__socs
+
+    @demarcate
+    def spatial_multiplex_merge_counters(self, df):
+        return merge_counters_spatial_multiplex(df)
 
     @demarcate
     def generate_configs(self, arch, config_dir, list_stats, filter_metrics, sys_info):
@@ -142,6 +147,7 @@ class OmniAnalyze_Base:
             sysinfo_path = (
                 Path(d[0])
                 if self.__args.nodes is None
+                and self.__args.spatial_multiplexing is not True
                 else file_io.find_1st_sub_dir(d[0])
             )
             sys_info = file_io.load_sys_info(sysinfo_path.joinpath("sysinfo.csv"))
@@ -166,6 +172,7 @@ class OmniAnalyze_Base:
             sysinfo_path = (
                 Path(d[0])
                 if self.__args.nodes is None
+                and self.__args.spatial_multiplexing is not True
                 else file_io.find_1st_sub_dir(d[0])
             )
             w.sys_info = file_io.load_sys_info(sysinfo_path.joinpath("sysinfo.csv"))
@@ -199,7 +206,11 @@ class OmniAnalyze_Base:
             # validate profiling data
 
             # Todo: more err check
-            if not (self.__args.nodes != None or self.__args.list_nodes):
+            if not (
+                self.__args.nodes != None
+                or self.__args.list_nodes
+                or self.__args.spatial_multiplexing
+            ):
                 is_workload_empty(dir[0])
             # else:
 

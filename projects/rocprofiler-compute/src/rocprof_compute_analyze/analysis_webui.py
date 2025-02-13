@@ -113,9 +113,16 @@ class webui_analysis(OmniAnalyze_Base):
             base_data[base_run].raw_pmc = file_io.create_df_pmc(
                 self.dest_dir,
                 self.get_args().nodes,
+                self.get_args().spatial_multiplexing,
                 self.get_args().kernel_verbose,
                 self.get_args().verbose,
             )
+
+            if self.get_args().spatial_multiplexing:
+                base_data[base_run].raw_pmc = self.spatial_multiplex_merge_counters(
+                    base_data[base_run].raw_pmc
+                )
+
             console_debug("analysis", "gui dispatch filter is %s" % disp_filt)
             console_debug("analysis", "gui kernel filter is %s" % kernel_filter)
             console_debug("analysis", "gui gpu filter is %s" % gcd_filter)
@@ -290,6 +297,12 @@ class webui_analysis(OmniAnalyze_Base):
                 self.get_args().kernel_verbose,
                 args.verbose,
             )
+
+            if self.get_args().spatial_multiplexing:
+                self._runs[self.dest_dir].raw_pmc = self.spatial_multiplex_merge_counters(
+                    self._runs[self.dest_dir].raw_pmc
+                )
+
             file_io.create_df_kernel_top_stats(
                 df_in=self._runs[self.dest_dir].raw_pmc,
                 raw_data_dir=self.dest_dir,
