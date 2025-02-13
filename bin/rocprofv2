@@ -55,10 +55,8 @@ usage() {
   echo -e "${GREEN}--kernel-trace ${RESET}               For Collecting Kernel dispatch Traces"
   echo -e "${GREEN}--sys-trace ${RESET}                  For Collecting HIP and HSA APIs and their Activities Traces along ROCTX\n"
   echo -e "\t#${GREY}usage e.g: rocprofv2 --[hip-trace|hsa-trace|roctx-trace|kernel-trace|sys-trace]  <executable>\n"${RESET}
-  echo -e "${GREEN}--plugin ${RESET} PLUGIN_NAME         For enabling a plugin (cli/file/perfetto/att/ctf/speedscope)"
+  echo -e "${GREEN}--plugin ${RESET} PLUGIN_NAME         For enabling a plugin (cli/file/perfetto/ctf/speedscope)"
   echo -e "\t#${GREY} usage(file/perfetto/ctf) e.g: rocprofv2 -i pmc.txt --plugin [file/perfetto/ctf/json] -d out_dir <executable>"
-  echo -e "\t# usage(att): rocprofv2 <rocprofv2_params> --plugin att <ISA_file> <att_parameters> <executable>"
-  echo -e "\t# use \"rocprofv2 --plugin att --help\" for ATT-specific parameters help.${RESET}\n"
   echo -e "\t# use \"rocprofv2 --plugin json --disable-json-data-flows ...\" for SpeedScope support as speedscope doesn't support data flows.${RESET}\n"
   echo -e "${GREEN}--plugin-version ${RESET} <1|2>       For selecting the version for the plugin (1/2)"
   echo -e "\t#${GREY} 1 - Legacy output format, 2 - New output format (default)${RESET}\n"
