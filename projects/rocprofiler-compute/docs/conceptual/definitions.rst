@@ -95,7 +95,7 @@ Memory type
 
 AMD Instinct accelerators contain a number of different memory allocation
 types to enable the HIP language's
-:doc:`memory coherency model <hip:how-to/programming_manual>`.
+:doc:`memory coherency model <hip:how-to/hip_runtime_api/memory_management/coherence_control>`.
 These memory types are broadly similar between AMD Instinct accelerator
 generations, but may differ in exact implementation.
 
