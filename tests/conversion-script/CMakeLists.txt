@@ -13,8 +13,6 @@ find_package(rocprofiler-sdk REQUIRED)
 rocprofiler_configure_pytest_files(COPY validate.py input.txt conftest.py
                                    CONFIG pytest.ini)
 
-configure_file(${CMAKE_SOURCE_DIR}/source/scripts/convert-counters-collection-format.py
-               ${CMAKE_CURRENT_BINARY_DIR}/convert-counters-collection-format.py COPYONLY)
 add_test(
     NAME test-conversion-script-execute
     COMMAND
@@ -36,7 +34,8 @@ set_tests_properties(
 add_test(
     NAME test-conversion-script-convert
     COMMAND
-        ${Python3_EXECUTABLE} convert-counters-collection-format.py --input
+        ${Python3_EXECUTABLE}
+        $<TARGET_FILE:rocprofiler-sdk::convert-counters-collection-format> --input
         ${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script --output
         ${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script/converted.csv)
 
