@@ -6,7 +6,14 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
-* Roofline support for Ubuntu 24.04 (#541)
+* Roofline support for Ubuntu 24.04
+* Experimental support rocprofv3 (not enabled as default)
+* Experimental feature: Spatial multiplexing
+
+### Resolved issues
+
+* Fixed PoP of VALU Active Threads
+* Workaround broken mclk for old version of rocm-smi
 
 ## ROCm Compute Profiler 3.0.0 for ROCm 6.3.0
 
