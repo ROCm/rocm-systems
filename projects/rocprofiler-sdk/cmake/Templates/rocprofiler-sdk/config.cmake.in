@@ -150,3 +150,8 @@ find_package_handle_standard_args(
 if(EXISTS ${@PACKAGE_NAME@_CMAKE_DIR}/Modules)
     list(APPEND CMAKE_MODULE_PATH ${@PACKAGE_NAME@_CMAKE_DIR}/Modules)
 endif()
+
+add_executable(@PACKAGE_NAME@::convert-counters-collection-format IMPORTED)
+set_property(
+    TARGET @PACKAGE_NAME@::convert-counters-collection-format
+    PROPERTY IMPORTED_LOCATION ${@PACKAGE_NAME@_ROOT_DIR}/share/@PACKAGE_NAME@/convert-counters-collection-format.py)
