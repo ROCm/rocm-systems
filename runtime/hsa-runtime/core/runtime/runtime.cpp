@@ -2098,12 +2098,6 @@ void Runtime::Unload() {
   amd::hsa::loader::Loader::Destroy(loader_);
   loader_ = nullptr;
 
-  std::for_each(gpu_agents_.begin(), gpu_agents_.end(), DeleteObject());
-  gpu_agents_.clear();
-
-  std::for_each(disabled_gpu_agents_.begin(), disabled_gpu_agents_.end(), DeleteObject());
-  disabled_gpu_agents_.clear();
-
   asyncSignals_.control.Shutdown();
   asyncExceptions_.control.Shutdown();
 
@@ -2124,6 +2118,9 @@ void Runtime::Unload() {
   SharedSignalPool.clear();
 
   EventPool.clear();
+
+  mapped_handle_map_.clear();
+  memory_handle_map_.clear();
 
   DestroyAgents();
 
