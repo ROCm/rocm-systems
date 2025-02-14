@@ -68,13 +68,24 @@ TEST_CASE("Unit_hipFuncSetAttribute_Positive_MaxDynamicSharedMemorySize") {
  *  - HIP_VERSION >= 5.2
  */
 TEST_CASE("Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout") {
+#if (HT_AMD == 1)
+  // on AMD, it is completely ignored, i.e. no effect in L1/shared distribution; but
+  // also when queried again, its value must match the old value
+  hipFuncAttributes old_attributes, new_attributes;
+
+  HIP_CHECK(hipFuncGetAttributes(&old_attributes, reinterpret_cast<void*>(kernel)));
   HIP_CHECK(hipFuncSetAttribute(reinterpret_cast<void*>(kernel),
                                 hipFuncAttributePreferredSharedMemoryCarveout, 50));
+  HIP_CHECK(hipFuncGetAttributes(&new_attributes, reinterpret_cast<void*>(kernel)));
+  REQUIRE(old_attributes.preferredShmemCarveout == new_attributes.preferredShmemCarveout);
+#else
+  hipFuncAttributes new_attributes;
 
-  hipFuncAttributes attributes;
-  HIP_CHECK(hipFuncGetAttributes(&attributes, reinterpret_cast<void*>(kernel)));
-
-  REQUIRE(attributes.preferredShmemCarveout == 50);
+  HIP_CHECK(hipFuncSetAttribute(reinterpret_cast<void*>(kernel),
+                                hipFuncAttributePreferredSharedMemoryCarveout, 50));
+  HIP_CHECK(hipFuncGetAttributes(&new_attributes, reinterpret_cast<void*>(kernel)));
+  REQUIRE(new_attributes.preferredShmemCarveout == 50);
+#endif
 }
 
 /**
@@ -203,70 +214,6 @@ TEST_CASE("Unit_hipFuncSetAttribute_Negative_Parameters") {
                                         hipFuncAttributePreferredSharedMemoryCarveout, 101),
                     hipErrorInvalidValue);
   }
-}
-
-/**
- * Test Description
- * ------------------------
- *  - Sets `hipFuncAttributeMaxDynamicSharedMemorySize` to the non-supported value
- *    - Expected output: return `hipErrorNotSupported`
- * Test source
- * ------------------------
- *  - unit/executionControl/hipFuncSetAttribute.cc
- * Test requirements
- * ------------------------
- *  - Platform specific (AMD)
- *  - HIP_VERSION >= 5.2
- */
-TEST_CASE("Unit_hipFuncSetAttribute_Positive_MaxDynamicSharedMemorySize_Not_Supported") {
-#if HT_NVIDIA
-  HipTest::HIP_SKIP_TEST("This is an AMD specific test");
-  return;
-#endif
-
-  hipFuncAttributes old_attributes;
-  HIP_CHECK(hipFuncGetAttributes(&old_attributes, reinterpret_cast<void*>(kernel)));
-
-  HIP_CHECK_ERROR(hipFuncSetAttribute(reinterpret_cast<void*>(kernel),
-                                      hipFuncAttributeMaxDynamicSharedMemorySize, 1024),
-                  hipErrorNotSupported);
-
-  hipFuncAttributes new_attributes;
-  HIP_CHECK(hipFuncGetAttributes(&new_attributes, reinterpret_cast<void*>(kernel)));
-
-  REQUIRE(old_attributes.maxDynamicSharedSizeBytes == new_attributes.maxDynamicSharedSizeBytes);
-}
-
-/**
- * Test Description
- * ------------------------
- *  - Sets `hipFuncAttributePreferredSharedMemoryCarveout` to the non-supported value
- *    - Expected output: return `hipErrorNotSupported`
- * Test source
- * ------------------------
- *  - unit/executionControl/hipFuncSetAttribute.cc
- * Test requirements
- * ------------------------
- *  - Platform specific (AMD)
- *  - HIP_VERSION >= 5.2
- */
-TEST_CASE("Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout_Not_Supported") {
-#if HT_NVIDIA
-  HipTest::HIP_SKIP_TEST("This is an AMD specific test");
-  return;
-#endif
-
-  hipFuncAttributes old_attributes;
-  HIP_CHECK(hipFuncGetAttributes(&old_attributes, reinterpret_cast<void*>(kernel)));
-
-  HIP_CHECK_ERROR(hipFuncSetAttribute(reinterpret_cast<void*>(kernel),
-                                      hipFuncAttributePreferredSharedMemoryCarveout, 50),
-                  hipErrorNotSupported);
-
-  hipFuncAttributes new_attributes;
-  HIP_CHECK(hipFuncGetAttributes(&new_attributes, reinterpret_cast<void*>(kernel)));
-
-  REQUIRE(old_attributes.preferredShmemCarveout == new_attributes.preferredShmemCarveout);
 }
 
 /**
