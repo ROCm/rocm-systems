@@ -483,16 +483,15 @@ void GpuAgent::InitRegionList() {
           regions_.push_back(region);
 
           if (region->IsLocalMemory()) {
-            // Extended Fine-Grain memory
-            if (!(isa_->GetMajorVersion() == 12 && isa_->GetMinorVersion() == 0))
-              regions_.push_back(
-                  new MemoryRegion(false, false, false, true, true, this, mem_props[mem_idx]));
-
             // Expose VRAM as uncached/fine grain over PCIe (if enabled) or XGMI.
             bool user_visible = (properties_.HiveID != 0) ||
                 core::Runtime::runtime_singleton_->flag().fine_grain_pcie();
 
             regions_.push_back(new MemoryRegion(true, false, false, false, user_visible, this,
+                                                mem_props[mem_idx]));
+
+            // Extended Fine-Grain memory
+            regions_.push_back(new MemoryRegion(false, false, false, true, user_visible, this,
                                                 mem_props[mem_idx]));
           }
           break;
