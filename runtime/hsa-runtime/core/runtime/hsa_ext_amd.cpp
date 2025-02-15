@@ -635,7 +635,9 @@ hsa_status_t hsa_amd_signal_async_handler(hsa_signal_t hsa_signal, hsa_signal_co
 
   core::Signal* signal = core::Signal::Convert(hsa_signal);
   IS_VALID(signal);
-  if (core::g_use_interrupt_wait && (!core::InterruptSignal::IsType(signal)))
+
+  if ((core::g_use_interrupt_wait && (!core::InterruptSignal::IsType(signal)) &&
+      !core::IPCSignal::IsType(signal)))
     return HSA_STATUS_ERROR_INVALID_SIGNAL;
   return core::Runtime::runtime_singleton_->SetAsyncSignalHandler(
       hsa_signal, cond, value, handler, arg);
