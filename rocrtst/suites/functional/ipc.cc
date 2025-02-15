@@ -43,18 +43,6 @@
  *
  */
 
-// The purpose of this test is to provide an example of the use of the
-// common RocrTest classes and utilities that are used in many examples.
-// It can be used as a template to start off with when writing new tests.
-// In many cases, the existing boilerplate code will be sufficient as is.
-// Otherwise, the boilerplate code can be either supplemented or replaced
-// by your own code in your example, as necessary.
-//
-// The comments below capture the high-level flow of the two processes that
-// exercise ROCr Api for IPC. The test consists of two processes a result of
-// forking: One creates a buffer and signal which it shares with the second
-// process via shared data/ structure. The interaction between the two process
-// is given below.
 //
 //        Parent Process
 //  Allocate a block of gpu-local memory
@@ -73,6 +61,10 @@
 //  Wait for Child processes signal
 //  Verify Child has updated DWords of gpu-local memory to 0x02
 //  Print log message about validation of gpu-local memory
+//  Set the DWords of gpu-local memory with 0x03
+//  Signal Child process that it can proceed  by setting signal to 3
+//  Wait for Child processes signal
+//  Verify Child has updated DWords of gpu-local memory to 0x04
 //  Print log message that IPC test passed
 //
 //        Child Process
@@ -85,53 +77,17 @@
 //  Verify Parent process has updated every DWord of Gpu buffer to 0x01
 //  Update every DWord of Gpu buffer with 0x02 value
 //  Print log message about validation of Gpu buffer state i.e every DWord has 0x01
-//
+//  Register a callback using hsa_amd_signal_async_handler on the ipc signal
+//    - the callback function will update gpu-local memory DWords to 0x04
+//    - and update a local token to indicate that the callback happened.
+//  Signal the parent process that it can proceed by setting signal to 2
+//  Wait for callback function to update the local token.
+//  Signal the parent process that it can proceed by setting signal to 4
+//  Wait for parent to set signal to 0 to indicate that it can clean-up and exit.
 //
 // The comments provided below are focused more on the use of common rocrtst
 // utilities and boilerplate code, rather than the example app. itself.
 //
-// The boilerplate code includes code for:
-// * hsa initialization and clean up
-// * code to load pre-built kernels
-// * creating queues
-// * populating AQL packets
-// * checking for required profiles
-// * finding cpu and gpu agents (callbacks for common use cases)
-// * finding pools (having common requirements)
-// * allocating and setting kernel arguments
-// * somewhat standardized output
-// * handling additional command line arguments, beyond google-test arguments
-// * support for various level of verbosity, controlled from command line arg
-// * support for building OpenCL kernels
-// * timer support
-//
-// Overview of RocrTst code organization:
-// Classes:
-// * class BaseRocR (base_rocr.h) -- base class for all rocrtst examples and
-//   tests. Most of the rocrtst common utilities act on BaseRocR objects
-//
-// * TestBase (test_base.h)  -- derives from BaseRocR and is the base class
-//   for all tests under <rocrtst root>/suites. The implementation in TestBase
-//   methods are typically actions that are required for most/all tests and
-//   should therefore be called from the derived implementions of the methods.
-//
-// Utilities:
-// * <rocrtst root>/common/base_rocr_utils.<cc/h> contains a set of utilities
-//   that act on BaseRocR objects.
-//
-// * <rocrtst root>/common/common.<cc/h> contain other non-BaseRocR utilities
-//
-// Special Files:
-// * main.cc -- The main google test file from which the tests are invoked.
-//     There should be an entry for each test to be run there.
-//
-// * kernels -- OpenCL kernel source files should go in the kernels directory
-//
-// * CMakeLists.txt -- Host code (*.cc and *.h files) should build without
-//     modifying the CMakeList.txt file, if the files are place in the
-//     "performance" directory. However, an entry for OpenCL kernels. For
-//     each kernel to be built, the bitcode libraries must be indicated before
-//     the call to "build_kernel()" is made. See existing code for examples.
 
 #include <sys/mman.h>
 
@@ -324,6 +280,32 @@ uint32_t IPCTest::RealIterationNum(void) {
   return num_iteration() * 1.2 + 1;
 }
 
+/*
+ * if the hsa_signal_value_t value matches sig_value, and
+ * then set destination to
+ * new value.
+ */
+struct signal_cb_handler_data {
+  IPCTest *obj;
+  hsa_signal_value_t exp_sig_value;
+  uint32_t exp_value;
+  uint32_t *destination;
+  uint32_t new_value;
+  std::atomic<int> token;
+};
+
+bool SignalCallbackHandler(hsa_signal_value_t value, void* arg) {
+  signal_cb_handler_data* cb_data = reinterpret_cast<signal_cb_handler_data*>(arg);
+  if (cb_data->exp_sig_value != value)
+    return false;
+
+  cb_data->obj->CheckAndFillBuffer(cb_data->destination, cb_data->exp_value, cb_data->new_value);
+  cb_data->token++;
+
+  /* return false to stop monitoring this callback */
+  return false;
+}
+
 void IPCTest::ChildProcessImpl() {
 
   // Yield until shared token value changes i.e. is updated by parent.
@@ -353,7 +335,7 @@ void IPCTest::ChildProcessImpl() {
   FORK_ASSERT_EQ(HSA_STATUS_SUCCESS, err, "Child: Failure in attaching to IPC memory handle\n");
   PROCESS_LOG("Child: Attached to IPC buffer shared by parent process\n");
   PROCESS_LOG("Child: Address of buffer enabled for IPC: %p\n", ipc_ptr);
-  
+
   // Attach to IPC signal handle shared by parent process
   hsa_signal_t ipc_signal;
   err = hsa_amd_ipc_signal_attach(const_cast<hsa_amd_ipc_signal_t*>(&shared_->signal_handle),
@@ -361,39 +343,66 @@ void IPCTest::ChildProcessImpl() {
   USR_TRIGGERED_FAILURE(err, HSA_STATUS_ERROR, 201);
   FORK_ASSERT_EQ(HSA_STATUS_SUCCESS, err, "Child: Failure in attaching to IPC signal handle\n");
   PROCESS_LOG("Child: Attached to IPC signal shared by parent process\n");
-  
+
   // Validate Gpu buffer is filled per expectation i.e. if so update
   // per previously agreed upon value (first_val_ and second_val_)
   CheckAndFillBuffer(reinterpret_cast<uint32_t*>(ipc_ptr), first_val_, second_val_);
   PROCESS_LOG("Child: Confirmed DWord's of IPC buffer has: %d\n", first_val_);
   PROCESS_LOG("Child: Updated DWord's of IPC buffer to: %d\n", second_val_);
 
-  // Detach IPC memory that was used to test
-  err = hsa_amd_ipc_memory_detach(ipc_ptr);
-  USR_TRIGGERED_FAILURE(err, HSA_STATUS_ERROR, 202);
-  FORK_ASSERT_EQ(HSA_STATUS_SUCCESS, err, "Child: Failure in detaching IPC memory handle\n");
-  PROCESS_LOG("Child: Detached IPC memory handle\n");
+  // Register an async handler, we wait for parent process to set buffer value to
+  // third_val_. During the callback, SignalCallbackHandler  will set cb_result
+  // to fourth_val_ and increment cb_data->token
+  struct signal_cb_handler_data child_cb_data;
+  child_cb_data.obj = this;
+  child_cb_data.exp_sig_value = 3;
+  child_cb_data.exp_value = third_val_;
+  child_cb_data.destination = reinterpret_cast<uint32_t*>(ipc_ptr);
+  child_cb_data.new_value = fourth_val_;
+  child_cb_data.token = 0;
 
-  // Signal parent process to wake up and continue
+  err = hsa_amd_signal_async_handler(ipc_signal, HSA_SIGNAL_CONDITION_GTE, 3, &SignalCallbackHandler, &child_cb_data);
+  USR_TRIGGERED_FAILURE(err, HSA_STATUS_ERROR, 202);
+  FORK_ASSERT_EQ(HSA_STATUS_SUCCESS, err, "Child: Failure registering async_handler to ipc_signal\n");
+  PROCESS_LOG("Child: [pid:%d] Attached async handler to IPC signal shared by parent process\n", getpid());
+
+  // Signal parent process to wake up and continue.
+  // The next time parent process updates ipc_signal, SignalCallbackHandler will
+  // be called
   hsa_signal_store_release(ipc_signal, 2);
 
-  // Wait for signal from parent to continue, expected value is zero
-  hsa_signal_value_t ret = 2;
+  // Wait for SignalCallbackHandler to be called
+  while (child_cb_data.token <= 0)
+    sched_yield();
+
+  PROCESS_LOG("Child: Confirmed DWord's of IPC buffer has: %d\n", third_val_);
+  PROCESS_LOG("Child: Updated DWord's of IPC buffer to: %d\n", fourth_val_);
+
+  // Signal parent process to wake up and continue
+  hsa_signal_store_release(ipc_signal, 4);
+
+  hsa_signal_value_t ret = 1;
   while(true) {
-    ret = hsa_signal_wait_relaxed(ipc_signal, HSA_SIGNAL_CONDITION_NE, 2, timeout_, HSA_WAIT_STATE_BLOCKED);
-    if (shared_->parent_status == -1) {
+    ret = hsa_signal_wait_acquire(ipc_signal, HSA_SIGNAL_CONDITION_LT, 0, timeout_, HSA_WAIT_STATE_BLOCKED);
+    if (shared_->child_status == -1) {
       exit(0);
     }
-    if (ret == 0) {
+    if (ret < 0) {
       break;
     }
   }
   USR_TRIGGERED_FAILURE(ret, HSA_STATUS_ERROR, 203);
-  FORK_ASSERT_EQ(0, ret, "Child: Expected signal value of 0, but got " << ret << "\n");
+  FORK_ASSERT_EQ(-1, ret, "Child: Expected signal value of 0, but got " << ret << "\n");
+
+  // Detach IPC memory that was used to test
+  err = hsa_amd_ipc_memory_detach(ipc_ptr);
+  USR_TRIGGERED_FAILURE(err, HSA_STATUS_ERROR, 204);
+  FORK_ASSERT_EQ(HSA_STATUS_SUCCESS, err, "Child: Failure in detaching IPC memory handle\n");
+  PROCESS_LOG("Child: Detached IPC memory handle\n");
 
   // Reset the signal object and release acquired resources
   err = hsa_signal_destroy(ipc_signal);
-  USR_TRIGGERED_FAILURE(err, HSA_STATUS_ERROR, 204);
+  USR_TRIGGERED_FAILURE(err, HSA_STATUS_ERROR, 205);
   FORK_ASSERT_EQ(HSA_STATUS_SUCCESS, err, "Child: Failure in destroying IPC signal handle\n");
   PROCESS_LOG("Child: IPC test PASSED\n");
 }
@@ -414,7 +423,7 @@ void IPCTest::ParentProcessImpl() {
                                      reinterpret_cast<void**>(&gpuBuf));
   PROCESS_LOG("Parent: Allocated framebuffer of size: %zu\n", gpu_mem_granule);
   PROCESS_LOG("Parent: Address of allocated framebuffer: %p\n", gpuBuf);
-  
+
   // Free the test allocation of memory block
   err = hsa_amd_memory_pool_free(discard);
   USR_TRIGGERED_FAILURE(err, HSA_STATUS_ERROR, 101);
@@ -471,11 +480,11 @@ void IPCTest::ParentProcessImpl() {
   // value to TWO (2). Check signal value is per expectation
   hsa_signal_value_t ret = 1;
   while(true) {
-    ret = hsa_signal_wait_acquire(ipc_signal, HSA_SIGNAL_CONDITION_NE, 1, timeout_, HSA_WAIT_STATE_BLOCKED);
+    ret = hsa_signal_wait_acquire(ipc_signal, HSA_SIGNAL_CONDITION_GTE, 2, timeout_, HSA_WAIT_STATE_BLOCKED);
     if (shared_->child_status == -1) {
       exit(0);
     }
-    if (ret == 2) {
+    if (ret >= 2) {
       break;
     }
   }
@@ -488,13 +497,31 @@ void IPCTest::ParentProcessImpl() {
   PROCESS_LOG("Parent: Confirmed DWord's of frambuffer has: %d\n", second_val_);
   PROCESS_LOG("Parent: Updated DWord's of framebuffer to: %d\n", third_val_);
 
+  hsa_signal_store_relaxed(ipc_signal, 3);
+
+  while(true) {
+    ret = hsa_signal_wait_acquire(ipc_signal, HSA_SIGNAL_CONDITION_GTE, 4, timeout_, HSA_WAIT_STATE_BLOCKED);
+    if (shared_->child_status == -1) {
+      exit(0);
+    }
+    if (ret >= 4) {
+      break;
+    }
+  }
+
+  CheckAndFillBuffer(gpuBuf, fourth_val_, 0);
+  PROCESS_LOG("Parent: Confirmed DWord's of frambuffer has: %d\n", fourth_val_);
+
+  USR_TRIGGERED_FAILURE(ret, HSA_STATUS_ERROR, 108);
+  FORK_ASSERT_EQ(4, ret, "Parent: Expected signal value of 4, but got " << ret << "\n");
+
   // Reset the signal object and release acquired resources
-  hsa_signal_store_relaxed(ipc_signal, 0);
+  hsa_signal_store_relaxed(ipc_signal, -1);
   err = hsa_signal_destroy(ipc_signal);
-  USR_TRIGGERED_FAILURE(err, HSA_STATUS_ERROR, 108);
+  USR_TRIGGERED_FAILURE(err, HSA_STATUS_ERROR, 109);
   FORK_ASSERT_EQ(HSA_STATUS_SUCCESS, err, "Parent: Failure in destroying IPC signal\n");
   err = hsa_amd_memory_pool_free(gpuBuf);
-  USR_TRIGGERED_FAILURE(err, HSA_STATUS_ERROR, 109);
+  USR_TRIGGERED_FAILURE(err, HSA_STATUS_ERROR, 110);
   FORK_ASSERT_EQ(HSA_STATUS_SUCCESS, err, "Parent: Failed to free gpu memory\n");
   PROCESS_LOG("Parent: IPC test PASSED\n");
 

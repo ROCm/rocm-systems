@@ -92,6 +92,10 @@ class IPCTest : public TestBase {
   // @Brief: Implements parent process exclusive logic
   void ParentProcessImpl();
 
+  // @Brief: Implements the check to see if buffer has expected
+  // value if so updates it with new values
+  void CheckAndFillBuffer(void* gpu_src_ptr, uint32_t exp_cur_val, uint32_t new_val);
+
  private:
   // @Brief: Bind number of iterations to run per user specification
   uint32_t RealIterationNum(void);
@@ -99,14 +103,12 @@ class IPCTest : public TestBase {
   // @Brief: Collect and print verbose messages to enable debugging
   void PrintVerboseMesg(void);
 
-  // @Brief: Implements the check to see if buffer has expected
-  // value if so updates it with new values
-  void CheckAndFillBuffer(void* gpu_src_ptr, uint32_t exp_cur_val, uint32_t new_val);
-
   // @Brief: Values used to initialize framebuffer that is shared
   uint32_t first_val_ = 0x01;
   uint32_t second_val_ = 0x02;
   uint32_t third_val_ = 0x03;
+  uint32_t fourth_val_ = 0x04;
+  uint32_t fifth_val_ = 0x05;
 
   int child_;
   Shared* shared_;
