@@ -92,13 +92,17 @@ bool TestHsa::Initialize(int /*arg_cnt*/, char** /*arg_list*/) {
   const char* hsaco_obj_files_path_str = getenv("HSACO_OBJ_FILES_PATH");
   fs::path hsaco_obj_files_path;
   Dl_info dl_info;
+
   if(hsaco_obj_files_path_str) {
     hsaco_obj_files_path = fs::path(hsaco_obj_files_path_str);
-  } else {
-    hsaco_obj_files_path = fs::path(dl_info.dli_fname);
+    brig_path_obj_.append(hsaco_obj_files_path.remove_filename());
+
+  } else if (dladdr(reinterpret_cast<const void*>(TestHsa::HsaShutdown), &dl_info) != 0) {
+
+    hsaco_obj_files_path = fs::canonical(fs::path(dl_info.dli_fname));
+    brig_path_obj_.append(hsaco_obj_files_path.remove_filename().parent_path().parent_path().parent_path());
+    brig_path_obj_ += "/share/rocprofiler/tests-v1/";
   }
-  if (dladdr(reinterpret_cast<const void*>(TestHsa::HsaShutdown), &dl_info) != 0)
-    brig_path_obj_.append(hsaco_obj_files_path.remove_filename().remove_filename());
   brig_path_obj_.append(agentName);
   brig_path_obj_.append("_" + name_ + ".hsaco");
 
