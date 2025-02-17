@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2022-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -76,9 +76,9 @@ hsa_status_t AieAgent::VisitRegion(bool include_peer,
   AMD::callback_t<decltype(callback)> call(callback);
   for (const auto r : regions_) {
     hsa_region_t region_handle(core::MemoryRegion::Convert(r));
-    hsa_status_t status = call(region_handle, data);
-    if (status != HSA_STATUS_SUCCESS) {
-      return status;
+    hsa_status_t err = call(region_handle, data);
+    if (err != HSA_STATUS_SUCCESS) {
+      return err;
     }
   }
   return HSA_STATUS_SUCCESS;
@@ -102,8 +102,8 @@ hsa_status_t AieAgent::IterateSupportedIsas(
                                                           void* data) const {
   AMD::callback_t<decltype(callback)> call(callback);
   for (const auto& isa : supported_isas()) {
-    hsa_status_t stat = call(core::Isa::Handle(isa), data);
-    if (stat != HSA_STATUS_SUCCESS) return stat;
+    hsa_status_t err = call(core::Isa::Handle(isa), data);
+    if (err != HSA_STATUS_SUCCESS) return err;
   }
   return HSA_STATUS_SUCCESS;
 }
