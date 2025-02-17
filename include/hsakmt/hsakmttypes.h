@@ -151,7 +151,8 @@ typedef struct _HsaVersionCapability
             HSAuint64 Scratch            :1; // HSA_SCRATCH_SINGLE_LIMIT, HSA_SCRATCH_SINGLE_LIMIT_ASYNC
             HSAuint64 XNack              :1; // HSA_XNACK
             HSAuint64 VendorPacket       :1; // Enable vendor packet in hsa-runtime
-            HSAuint64 Reserved           :53;
+            HSAuint64 FineGrainPcie      :1; // uncached/fine grained VRAM
+            HSAuint64 Reserved           :52;
         }ui64;
     };
 } HsaVersionCapability;
