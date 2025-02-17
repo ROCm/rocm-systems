@@ -1,7 +1,7 @@
-#include <pthread.h>
 #include <dlfcn.h>
-#include <iostream>
+#include <pthread.h>
 #include <atomic>
+#include <iostream>
 #include <mutex>
 
 #if defined(_MSC_VER)
@@ -10,32 +10,47 @@
 #    define ROCPROFILER_PUBLIC_API __attribute__((visibility("default")))
 #endif
 
-typedef void (*rocprofiler_internal_thread_library_cb_t)(int, void*);
-typedef int (*rocprofiler_at_internal_thread_create_t)(rocprofiler_internal_thread_library_cb_t precreate, rocprofiler_internal_thread_library_cb_t postcreate, int libs, void* data);
+#define ASSERT(x, msg)                                                                             \
+    if(!(x))                                                                                       \
+    {                                                                                              \
+        std::cerr << __FILE__ << ':' << __LINE__ << " - " << msg << std::endl;                     \
+        abort();                                                                                   \
+    }
 
-typedef void*(routine_t)(void *);
+#define MAX_ALLOWED_THREADS 3
+
+typedef void (*rocprofiler_internal_thread_library_cb_t)(int, void*);
+typedef int (*rocprofiler_at_internal_thread_create_t)(
+    rocprofiler_internal_thread_library_cb_t precreate,
+    rocprofiler_internal_thread_library_cb_t postcreate,
+    int                                      libs,
+    void*                                    data);
+
+typedef void*(routine_t)(void*);
 
 class RegisterProfiler
 {
 public:
     RegisterProfiler() = default;
 
-    void try_register()
+    bool try_register()
     {
-        if (init.load()) return;
+        if(init.load()) return true;
 
         auto lk = std::unique_lock{mut};
-        if (init.load()) return;
+        if(init.load()) return false;
 
         auto* handle = dlopen("librocprofiler-sdk.so", RTLD_LAZY | RTLD_NOLOAD);
-        if (!handle) return;
+        if(!handle) return false;
 
-        auto* register_fn = (rocprofiler_at_internal_thread_create_t) dlsym(handle, "rocprofiler_at_internal_thread_create");
-        if (!register_fn) throw std::runtime_error("Could not dlsym rocprofiler library");
+        auto* register_fn = (rocprofiler_at_internal_thread_create_t) dlsym(
+            handle, "rocprofiler_at_internal_thread_create");
+        ASSERT(register_fn, "Could not dlsym rocprofiler library");
 
         register_fn(pre_callback, post_callback, ~0, this);
         dlclose(handle);
         init.store(true);
+        return false;
     }
 
     static void pre_callback(int bitmask, void* arg)
@@ -56,51 +71,38 @@ public:
 class DL
 {
     using PthreadFn = decltype(pthread_create);
+
 public:
     DL()
     {
         handle = dlopen("libpthread.so.0", RTLD_LAZY | RTLD_LOCAL);
-        if (!handle) throw std::runtime_error("Could not load pthread library");
+        ASSERT(handle, "Could not load pthread library");
 
         pthread_create_fn = (PthreadFn*) dlsym(handle, "pthread_create");
-        if (!pthread_create_fn) throw std::runtime_error("Could not dlsym pthread library");
+        ASSERT(pthread_create_fn, "Could not dlsym pthread library");
     }
-    void* handle = nullptr;
+    ~DL()
+    {
+        pthread_create_fn = nullptr;
+        if(handle) dlclose(handle);
+    }
+    void*      handle            = nullptr;
     PthreadFn* pthread_create_fn = nullptr;
 };
 
-RegisterProfiler* get_reg()
+ROCPROFILER_PUBLIC_API
+int
+pthread_create(pthread_t* thread, const pthread_attr_t* attr, routine_t* start_routine, void* arg)
 {
     static auto* reg = new RegisterProfiler();
-    return reg;
-}
+    static auto* dl  = new DL();
 
-ROCPROFILER_PUBLIC_API
-int pthread_create(
-    pthread_t* thread,
-    const pthread_attr_t* attr,
-    routine_t* start_routine,
-    void* arg
-) {
-    static auto* dl = new DL();
-    auto* reg = get_reg();
+    static std::atomic<size_t> unwrapped_threads{0};
 
-    reg->try_register();
+    if(reg->try_register() && reg->pre_library_list.load() == 0) unwrapped_threads++;
 
-    if (reg->pre_library_list.load() == 0) throw std::runtime_error("Thread not registered!");
+    ASSERT(unwrapped_threads <= MAX_ALLOWED_THREADS,
+           "Limit reached for number of thread not inside a pre/post callback!");
 
-    std::cout << "Creating thread: " << std::hex << reg->pre_library_list << std::dec << std::endl;
     return dl->pthread_create_fn(thread, attr, start_routine, arg);
 }
-
-class ConstructCheck
-{
-public:
-    ConstructCheck() = default;
-    ~ConstructCheck()
-    {
-        if (!get_reg()->init.load()) abort();
-    }
-};
-
-ConstructCheck const_check();

@@ -12,7 +12,6 @@ find_package(rocprofiler-sdk REQUIRED)
 
 add_library(pthread_wrapper SHARED)
 target_sources(pthread_wrapper PRIVATE pthread_wrapper.cpp)
-target_include_directories(pthread_wrapper PRIVATE $<rocprofiler-sdk:Library>)
 
 add_test(
     NAME rocprofv3-test-internal-threading
