@@ -76,7 +76,10 @@ hsa_status_t AieAgent::VisitRegion(bool include_peer,
   AMD::callback_t<decltype(callback)> call(callback);
   for (const auto r : regions_) {
     hsa_region_t region_handle(core::MemoryRegion::Convert(r));
-    call(region_handle, data);
+    hsa_status_t status = call(region_handle, data);
+    if (status != HSA_STATUS_SUCCESS) {
+      return status;
+    }
   }
   return HSA_STATUS_SUCCESS;
 }
