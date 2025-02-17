@@ -16,33 +16,43 @@ target_sources(pthread_wrapper PRIVATE pthread_wrapper.cpp)
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
+# Disable test when using memcheck: The test needs to leak memory.
 if(DEFINED ROCPROFILER_MEMCHECK AND NOT ${ROCPROFILER_MEMCHECK} STREQUAL "")
     set(IS_DISABLED True)
 else()
     set(IS_DISABLED False)
 endif()
 
-message(STATUS "IS_DISABLED: ${IS_DISABLED} - MEMCHECK: ${ROCPROFILER_MEMCHECK}")
-
-add_test(
-    NAME rocprofv3-test-internal-threading-pmc
-    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES
-            --preload $<TARGET_FILE:pthread_wrapper> -- $<TARGET_FILE:transpose> 1 15)
+add_test(NAME rocprofv3-test-internal-threading-pmc
+         COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES --preload
+                 $<TARGET_FILE:pthread_wrapper> -- $<TARGET_FILE:transpose> 1 15)
 
 set_tests_properties(
     rocprofv3-test-internal-threading-pmc
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT
-               "${PRELOAD_ENV}" FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}" DISABLED ${IS_DISABLED})
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               ENVIRONMENT
+               "${PRELOAD_ENV}"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               ${IS_DISABLED})
 
-               
-add_test(
-    NAME rocprofv3-test-internal-threading-sys-trace
-    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --sys-trace
-            --preload $<TARGET_FILE:pthread_wrapper> -- $<TARGET_FILE:transpose> 1 15)
+add_test(NAME rocprofv3-test-internal-threading-sys-trace
+         COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --sys-trace --preload
+                 $<TARGET_FILE:pthread_wrapper> -- $<TARGET_FILE:transpose> 1 15)
 
 set_tests_properties(
     rocprofv3-test-internal-threading-sys-trace
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT
-               "${PRELOAD_ENV}" FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}" DISABLED ${IS_DISABLED})
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               ENVIRONMENT
+               "${PRELOAD_ENV}"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               ${IS_DISABLED})
