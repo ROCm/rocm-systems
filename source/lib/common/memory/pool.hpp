@@ -23,6 +23,7 @@
 #pragma once
 
 #include "lib/common/defines.hpp"
+#include "lib/common/logging.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -68,8 +69,7 @@ public:
     {
         if(!(m_addrs.empty() && m_blocks.empty()))
         {
-            throw std::runtime_error{"cannot call pool::rebind() after alloc"};
-            ::abort();
+            ROCP_FATAL << "cannot call pool::rebind() after alloc";
         }
 
         m_size = size;

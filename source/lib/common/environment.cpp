@@ -24,6 +24,8 @@
 #include "lib/common/demangle.hpp"
 #include "lib/common/logging.hpp"
 
+#include <fmt/format.h>
+
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
@@ -62,8 +64,7 @@ get_env(std::string_view env_id, bool _default)
     {
         if(std::string_view{env_var}.empty())
         {
-            throw std::runtime_error(std::string{"No boolean value provided for "} +
-                                     std::string{env_id});
+            ROCP_FATAL << fmt::format("No boolean value provided for {}", env_id);
         }
 
         if(std::string_view{env_var}.find_first_not_of("0123456789") == std::string_view::npos)

@@ -21,11 +21,11 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/pc_sampling/ioctl/ioctl_adapter.hpp"
-
-#include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
-
 #include "lib/common/logging.hpp"
+#include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
 #include "lib/rocprofiler-sdk/pc_sampling/ioctl/ioctl_adapter_types.hpp"
+
+#include <rocprofiler-sdk/fwd.h>
 
 #include <sys/ioctl.h>
 
@@ -61,14 +61,15 @@ struct pc_sampling_ioctl_version_t
 int
 kfd_open()
 {
-    int               fd                = -1;
-    static const char kfd_device_name[] = "/dev/kfd";
+    int             fd              = -1;
+    constexpr auto* kfd_device_name = "/dev/kfd";
 
     fd = open(kfd_device_name, O_RDWR | O_CLOEXEC);
 
     if(fd == -1)
     {
-        throw std::runtime_error("Cannot open /dev/kfd");
+        ROCP_CI_LOG(WARNING) << fmt::format("Cannot open {} for pc sampling", kfd_device_name);
+        return -1;
     }
 
     return fd;
@@ -484,6 +485,8 @@ ioctl_pcs_create(const rocprofiler_agent_t*       agent,
     args.sample_info_ptr = (uint64_t)(&ioctl_cfg);
     args.num_sample_info = 1;
     args.trace_id        = INVALID_TRACE_ID;
+
+    if(get_kfd_fd() == -1) return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
 
     auto ioctl_ret = ioctl(get_kfd_fd(), AMDKFD_IOC_PC_SAMPLE, &args);
     *ioctl_pcs_id  = args.trace_id;

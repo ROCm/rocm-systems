@@ -546,6 +546,23 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         nargs="*",
     )
 
+    advanced_options.add_argument(
+        "--rocm-root",
+        help="Use the given path as the root ROCm path instead of the relative path of this script",
+        type=str,
+        metavar="PATH",
+        default=None,
+    )
+    add_parser_bool_argument(
+        advanced_options,
+        "--readlink",
+        help=argparse.SUPPRESS,
+    )
+    add_parser_bool_argument(
+        advanced_options,
+        "--realpath",
+        help=argparse.SUPPRESS,
+    )
     # below is available for CI because LD_PRELOADing a library linked to a sanitizer library
     # causes issues in apps where HIP is part of shared library.
     add_parser_bool_argument(
@@ -874,6 +891,8 @@ def run(app_args, args, **kwargs):
 
     ROCPROFV3_DIR = os.path.dirname(os.path.realpath(__file__))
     ROCM_DIR = os.path.dirname(ROCPROFV3_DIR)
+    if args.rocm_root is not None:
+        ROCM_DIR = os.path.abspath(args.rocm_root)
     ROCPROF_TOOL_LIBRARY = f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
     ROCPROF_SDK_LIBRARY = f"{ROCM_DIR}/lib/librocprofiler-sdk.so"
     ROCPROF_ROCTX_LIBRARY = f"{ROCM_DIR}/lib/librocprofiler-sdk-roctx.so"
@@ -883,6 +902,22 @@ def run(app_args, args, **kwargs):
     ROCPROF_LIST_AVAIL_TOOL_LIBRARY = (
         f"{ROCM_DIR}/libexec/rocprofiler-sdk/librocprofv3-list-avail.so"
     )
+
+    def resolve_path(val):
+        if not os.path.exists(val):
+            fatal_error(f"{val} does not exist")
+        if os.path.islink(val):
+            if args.readlink:
+                val = os.path.abspath(os.readlink(val))
+            if args.realpath:
+                val = os.path.realpath(val)
+        return val
+
+    ROCPROF_TOOL_LIBRARY = resolve_path(ROCPROF_TOOL_LIBRARY)
+    ROCPROF_SDK_LIBRARY = resolve_path(ROCPROF_SDK_LIBRARY)
+    ROCPROF_ROCTX_LIBRARY = resolve_path(ROCPROF_ROCTX_LIBRARY)
+    ROCPROF_KOKKOSP_LIBRARY = resolve_path(ROCPROF_KOKKOSP_LIBRARY)
+    ROCPROF_LIST_AVAIL_TOOL_LIBRARY = resolve_path(ROCPROF_LIST_AVAIL_TOOL_LIBRARY)
 
     prepend_preload = [itr for itr in args.preload if itr]
     append_preload = [

@@ -78,14 +78,16 @@ amd_intercept_marker_handler_callback(const struct amd_aql_intercept_marker_s* p
     if(ext_table_->hsa_amd_queue_get_info_fn(queue, HSA_AMD_QUEUE_INFO_AGENT, &hsa_agent) !=
        HSA_STATUS_SUCCESS)
     {
-        throw std::runtime_error("Cannot map hsa_queue_t* to hsa_agent_t");
+        ROCP_CI_LOG(WARNING) << "Cannot map hsa_queue_t* to hsa_agent_t";
+        return;
     }
 
     uint64_t doorbell_id = 0;
     if(ext_table_->hsa_amd_queue_get_info_fn(queue, HSA_AMD_QUEUE_INFO_DOORBELL_ID, &doorbell_id) !=
        HSA_STATUS_SUCCESS)
     {
-        throw std::runtime_error("Cannot map hsa_queue_t* to doorbell_id");
+        ROCP_CI_LOG(WARNING) << "Cannot map hsa_queue_t* to doorbell id";
+        return;
     }
 
     auto internal_correlation = packet->user_data[0];

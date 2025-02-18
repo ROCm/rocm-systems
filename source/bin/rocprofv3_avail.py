@@ -69,9 +69,20 @@ class pc_config:
         self.max_interval = max_interval
 
 
+ROCPROFV3_AVAIL_DIR = os.path.dirname(os.path.realpath(__file__))
+ROCM_DIR = os.path.dirname(ROCPROFV3_AVAIL_DIR)
+ROCPROF_LIST_AVAIL_TOOL_LIBRARY = (
+    f"{ROCM_DIR}/libexec/rocprofiler-sdk/librocprofv3-list-avail.so"
+)
+
 MAX_STR = 256
-libname = os.environ.get("ROCPROF_LIST_AVAIL_TOOL_LIBRARY")
+libname = os.environ.get(
+    "ROCPROF_LIST_AVAIL_TOOL_LIBRARY", ROCPROF_LIST_AVAIL_TOOL_LIBRARY
+)
 c_lib = ctypes.CDLL(libname)
+
+if c_lib is None:
+    fatal_error(f"Error opening {libname}")
 
 c_lib.get_number_of_counters.restype = ctypes.c_ulong
 c_lib.get_number_of_pc_sample_configs.restype = ctypes.c_ulong

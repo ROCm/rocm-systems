@@ -256,7 +256,7 @@ metadata::get_att_filenames() const
     {
         for(const auto& file : filenames.second.second)
         {
-            data.emplace_back(fs::path(file).filename());
+            data.emplace_back(fs::path{file}.filename());
         }
     }
     return data;
