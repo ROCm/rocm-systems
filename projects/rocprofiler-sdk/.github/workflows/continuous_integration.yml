@@ -578,7 +578,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['vega20', 'mi300a', 'mi300']
+        runner: ['vega20', 'mi300a', 'mi325']
         sanitizer: ['AddressSanitizer', 'ThreadSanitizer', 'LeakSanitizer', 'UndefinedBehaviorSanitizer']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
@@ -586,8 +586,8 @@ jobs:
           - { runner: 'vega20', sanitizer: 'ThreadSanitizer' }
           - { runner: 'vega20', sanitizer: 'AddressSanitizer' }
           - { runner: 'vega20', sanitizer: 'UndefinedBehaviorSanitizer' }
-          - { runner: 'mi300', sanitizer: 'AddressSanitizer' }
-          - { runner: 'mi300', sanitizer: 'LeakSanitizer' }
+          - { runner: 'mi325', sanitizer: 'AddressSanitizer' }
+          - { runner: 'mi325', sanitizer: 'LeakSanitizer' }
           - { runner: 'mi300a', sanitizer: 'LeakSanitizer' }
           - { runner: 'mi300a', sanitizer: 'ThreadSanitizer' }
           - { runner: 'mi300a', sanitizer: 'UndefinedBehaviorSanitizer' }
