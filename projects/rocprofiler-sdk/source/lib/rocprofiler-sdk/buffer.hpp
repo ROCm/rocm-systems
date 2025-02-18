@@ -124,11 +124,12 @@ rocprofiler::buffer::instance::emplace(uint32_t category, uint32_t kind, Tp& val
     {
         if(buffers.at(idx).capacity() < sizeof(value))
         {
-            auto msg = std::stringstream{};
-            msg << "buffer " << buffer_id << " to small (size=" << buffers.at(idx).capacity()
-                << ") to hold an object of type " << common::cxx_demangle(typeid(value).name())
-                << " with size " << sizeof(value);
-            throw std::runtime_error(msg.str());
+            ROCP_CI_LOG(ERROR) << "buffer " << buffer_id
+                               << " too small (size=" << buffers.at(idx).capacity()
+                               << ") to hold an object of type "
+                               << common::cxx_demangle(typeid(value).name()) << " with size "
+                               << sizeof(value);
+            return false;
         }
 
         if(policy == ROCPROFILER_BUFFER_POLICY_LOSSLESS)

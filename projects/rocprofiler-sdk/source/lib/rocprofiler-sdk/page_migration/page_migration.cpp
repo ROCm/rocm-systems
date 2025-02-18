@@ -424,8 +424,8 @@ parse_event<ROCPROFILER_PAGE_MIGRATION_DROPPED_EVENT>(std::string_view str)
 template <>
 page_migration_record_t parse_event<ROCPROFILER_PAGE_MIGRATION_NONE>(std::string_view)
 {
-    throw std::runtime_error(
-        "ROCPROFILER_PAGE_MIGRATION_NONE for parsing page migration events should not happen");
+    ROCP_CI_LOG(WARNING)
+        << "ROCPROFILER_PAGE_MIGRATION_NONE for parsing page migration events should not happen";
 }
 
 template <size_t OpInx, size_t... OpInxs>
@@ -648,10 +648,11 @@ struct poll_kfd_t
 
         [&]() {
             const auto retcode = pipe2(&thread_pipes[0], DEFAULT_FLAGS);
-
-            if(retcode != 0)
-                throw std::runtime_error{
-                    fmt::format("Pipe creation for thread notify failed with {} code\n", retcode)};
+            const auto _err    = errno;
+            ROCP_FATAL_IF(retcode != 0)
+                << fmt::format("Pipe creation for page-migration thread notify returned {} :: {}\n",
+                               retcode,
+                               strerror(_err));
         }();
 
         thread_notify = pollfd{
@@ -792,7 +793,11 @@ poll_events(small_vector<pollfd> file_handles)
         auto poll_ret = poll(file_handles.data(), file_handles.size(), -1);
 
         if(poll_ret == -1)
-            throw std::runtime_error{"Background thread file descriptors are invalid"};
+        {
+            ROCP_CI_LOG(WARNING)
+                << "Background thread file descriptors for page-migration are invalid";
+            return;
+        }
 
         if((exitfd.revents & POLLIN) != 0)
         {

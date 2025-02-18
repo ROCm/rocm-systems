@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/pc_sampling/utils.hpp"
+#include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/defines.hpp"
 
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
@@ -49,7 +50,7 @@ get_matching_hsa_pcs_method(rocprofiler_pc_sampling_method_t method)
         case ROCPROFILER_PC_SAMPLING_METHOD_LAST: break;
     }
 
-    throw std::runtime_error("Illegal pc sampling method\n");
+    ROCP_FATAL << "Illegal pc sampling method " << method;
 }
 
 hsa_ven_amd_pcs_units_t
@@ -66,7 +67,7 @@ get_matching_hsa_pcs_units(rocprofiler_pc_sampling_unit_t unit)
         case ROCPROFILER_PC_SAMPLING_UNIT_LAST: break;
     }
 
-    throw std::runtime_error("Illegal pc sampling units\n");
+    ROCP_FATAL << "Illegal pc sampling unit " << unit;
 }
 }  // namespace utils
 }  // namespace pc_sampling

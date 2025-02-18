@@ -1007,9 +1007,11 @@ rocprofiler_pc_sampling_callback(rocprofiler_context_id_t /* context_id*/,
 
         if(cur_header == nullptr)
         {
-            throw std::runtime_error{
-                "rocprofiler provided a null pointer to header. this should never happen"};
+            ROCP_CI_LOG(WARNING) << "rocprofiler provided a null pointer to buffer record header. "
+                                    "this should never happen";
+            continue;
         }
+
         else if(cur_header->category == ROCPROFILER_BUFFER_CATEGORY_PC_SAMPLING)
         {
             if(cur_header->kind == ROCPROFILER_PC_SAMPLING_RECORD_HOST_TRAP_V0_SAMPLE)

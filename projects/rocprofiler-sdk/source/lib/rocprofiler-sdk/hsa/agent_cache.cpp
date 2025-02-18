@@ -91,18 +91,14 @@ init_cpu_pool(const AmdExtTable& api, rocprofiler::hsa::AgentCache& agent)
 
     auto status =
         api.hsa_amd_agent_iterate_memory_pools_fn(agent.near_cpu(), FindStandardPool, &params);
-    if(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
-    {
-        throw std::runtime_error("Error: Command Buffer Pool is not initialized");
-    }
+    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
+        << "HSA Command Buffer Pool is not initialized";
 
     params.second = &agent.kernarg_pool();
     status =
         api.hsa_amd_agent_iterate_memory_pools_fn(agent.near_cpu(), FindKernArgPool, &(params));
-    if(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
-    {
-        throw std::runtime_error("Error: Output Buffer Pool is not initialized");
-    }
+    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
+        << "HSA Output Buffer Pool is not initialized";
 }
 
 void
@@ -113,10 +109,8 @@ init_gpu_pool(const AmdExtTable& api, rocprofiler::hsa::AgentCache& agent)
     auto status =
         api.hsa_amd_agent_iterate_memory_pools_fn(agent.get_hsa_agent(), FindStandardPool, &params);
 
-    if(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
-    {
-        throw std::runtime_error("Error: GPU Pool is not initialized");
-    }
+    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
+        << "HSA GPU Pool is not initialized";
 }
 
 }  // namespace
@@ -153,10 +147,8 @@ AgentCache::init_device_counting_service_queue(const CoreApiTable& api,
                                           UINT32_MAX,
                                           UINT32_MAX,
                                           &m_profile_queue);
-    if(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
-    {
-        throw std::runtime_error("Error: Queue is not initialized");
-    }
+    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
+        << "HSA Queue is not initialized";
 
     CHECK(ext.hsa_amd_queue_set_priority_fn) << "no hsa_amd_queue_set_priority_fn in api table";
     ext.hsa_amd_queue_set_priority_fn(m_profile_queue, HSA_AMD_QUEUE_PRIORITY_HIGH);

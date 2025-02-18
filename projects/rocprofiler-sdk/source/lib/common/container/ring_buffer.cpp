@@ -24,6 +24,8 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/units.hpp"
 
+#include <fmt/format.h>
+
 #include <sys/mman.h>
 #include <atomic>
 #include <cerrno>
@@ -71,9 +73,8 @@ ring_buffer::operator=(ring_buffer&& rhs) noexcept
 void
 ring_buffer::init(size_t _size)
 {
-    if(m_init)
-        throw std::runtime_error("rocprofiler::common::container::base::ring_buffer::init(size_t) "
-                                 ":: already initialized");
+    ROCP_FATAL_IF(m_init)
+        << "rocprofiler::common::container::base::ring_buffer::init(size_t) :: already initialized";
 
     m_init = true;
 
@@ -85,9 +86,10 @@ ring_buffer::init(size_t _size)
     if((_size % units::get_page_size()) > 0)
     {
         std::ostringstream _oss{};
-        _oss << "Error! size is not a multiple of page size: " << _size << " % "
-             << units::get_page_size() << " = " << (_size % units::get_page_size());
-        throw std::runtime_error(_oss.str());
+        ROCP_FATAL << fmt::format("Error! size is not a multiple of page size: {} % {} = {}",
+                                  _size,
+                                  units::get_page_size(),
+                                  (_size % units::get_page_size()));
     }
 
     m_size        = _size;
@@ -101,7 +103,7 @@ ring_buffer::init(size_t _size)
     {
         destroy();
         auto _err = errno;
-        throw std::runtime_error(strerror(_err));
+        ROCP_FATAL << fmt::format("mmap failed with errno {} :: {}", _err, strerror(_err));
     }
 }
 
@@ -256,10 +258,9 @@ ring_buffer::can_clear() const
 bool
 ring_buffer::clear()
 {
-    if(!can_clear())
-        throw std::runtime_error(
-            "ring_buffer does not permit invoking clear() member function when the read "
-            "pointer is non-zero because this introduces thread-safety issues");
+    ROCP_CI_LOG_IF(WARNING, !can_clear())
+        << "ring_buffer does not permit invoking clear() member function when the read pointer is "
+           "non-zero because this introduces thread-safety issues";
 
     m_write_count.store(0, std::memory_order_release);
     return true;
