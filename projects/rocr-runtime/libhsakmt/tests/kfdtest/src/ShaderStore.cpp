@@ -461,8 +461,8 @@ const char *PollAndCopyIsa =
             s_load_dword s17, s[0:1], 0x4 glc
             s_waitcnt vmcnt(0) & lgkmcnt(0)
             s_store_dword s17, s[2:3], 0x0 glc
+            s_waitcnt vmcnt(0) & lgkmcnt(0)
         .endif
-        s_waitcnt vmcnt(0) & lgkmcnt(0)
         s_endpgm
 )";
 
@@ -1029,8 +1029,7 @@ const char *ReadMemoryIsa =
 const char *GwsInitIsa =
     SHADER_START
     R"(
-        .if (.amdgcn.gfx_generation_number >= 12)
-        .else
+        .if (.amdgcn.gfx_generation_number < 12)
             s_mov_b32 m0, 0
             s_nop 0
             s_load_dword s16, s[0:1], 0x0 glc
@@ -1039,8 +1038,8 @@ const char *GwsInitIsa =
             s_waitcnt 0
             ds_gws_init v0 offset:0 gds
             s_waitcnt 0
-            s_endpgm
         .endif
+        s_endpgm
 )";
 
 /* Atomically increase a value in memory
@@ -1053,8 +1052,7 @@ const char *GwsAtomicIncreaseIsa =
     SHADER_START
     R"(
         // Assume src address in s0, s1
-        .if (.amdgcn.gfx_generation_number >= 12)
-        .elseif (.amdgcn.gfx_generation_number >= 10)
+        .if (.amdgcn.gfx_generation_number >= 10 && .amdgcn.gfx_generation_number < 12)
             s_mov_b32 m0, 0
             s_mov_b32 exec_lo, 0x1
             v_mov_b32 v0, s0
@@ -1067,7 +1065,7 @@ const char *GwsAtomicIncreaseIsa =
             flat_store_dword v[0:1], v2
             s_waitcnt_vscnt null, 0
             ds_gws_sema_v offset:0 gds
-        .else
+        .elseif (.amdgcn.gfx_generation_number < 10)
             s_mov_b32 m0, 0
             s_nop 0
             ds_gws_sema_p offset:0 gds
@@ -1078,8 +1076,8 @@ const char *GwsAtomicIncreaseIsa =
             s_store_dword s16, s[0:1], 0x0 glc
             s_waitcnt lgkmcnt(0)
             ds_gws_sema_v offset:0 gds
+            s_waitcnt 0
         .endif
-        s_waitcnt 0
         s_endpgm
 )";
 
