@@ -479,6 +479,18 @@ class GpuAgent : public GpuAgentInt {
 
   const std::function<void(void*)>& finegrain_deallocator() const { return finegrain_deallocator_; }
 
+  /// @brief Allocate coarse grain device memory on this GPU agent.
+  const std::function<void*(size_t size, core::MemoryRegion::AllocateFlags flags)>&
+  coarsegrain_allocator() const {
+    return coarsegrain_allocator_;
+  }
+
+  /// @brief Deallocate memory allocated from the coarsegrain_allocator
+  /// on this GPU agent.
+  const std::function<void(void*)>& coarsegrain_deallocator() const {
+    return coarsegrain_deallocator_;
+  }
+
  protected:
   // Sizes are in packets.
   const uint32_t minAqlSize_ = 0x40;     // 4KB min
@@ -731,16 +743,19 @@ class GpuAgent : public GpuAgentInt {
 
   ScratchCache scratch_cache_;
 
-  // System memory allocator in the nearest NUMA node.
+  /// @brief System memory allocator in the nearest NUMA node.
   std::function<void*(size_t size, size_t align, core::MemoryRegion::AllocateFlags flags)>
       system_allocator_;
-
+  /// @brief System memory deallocator in the nearest NUMA node.
   std::function<void(void*)> system_deallocator_;
-
-  // Fine grain allocator on this device
+  /// @brief Fine-grain allocator on this GPU.
   std::function<void*(size_t size, core::MemoryRegion::AllocateFlags flags)> finegrain_allocator_;
-
+  /// @brief Fine-grain deallocator on this GPU.
   std::function<void(void*)> finegrain_deallocator_;
+  /// @brief Coarse-grain allocator on this GPU.
+  std::function<void*(size_t size, core::MemoryRegion::AllocateFlags flags)> coarsegrain_allocator_;
+  /// @brief Coarse-grain deallocator on this GPU.
+  std::function<void(void*)> coarsegrain_deallocator_;
 
   void* trap_handler_tma_region_;
 

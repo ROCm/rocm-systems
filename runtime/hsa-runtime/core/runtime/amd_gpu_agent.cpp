@@ -2456,25 +2456,32 @@ void GpuAgent::InitAllocators() {
   }
   assert(system_allocator_ && "Nearest NUMA node did not have a kernarg pool.");
 
-  // Setup fine-grain allocator
+  // Setup this GPU's fine-grain and coarse-grain allocators.
   for (auto region : regions()) {
-    const AMD::MemoryRegion* amd_region = (const AMD::MemoryRegion*)region;
-    if (amd_region->IsLocalMemory() && amd_region->fine_grain()) {
-      finegrain_allocator_ = [region](size_t size,
-                                      MemoryRegion::AllocateFlags alloc_flags) -> void* {
-        void* ptr = nullptr;
-        return (HSA_STATUS_SUCCESS ==
-                core::Runtime::runtime_singleton_->AllocateMemory(region, size, alloc_flags, &ptr))
-            ? ptr
-            : nullptr;
-      };
+    const AMD::MemoryRegion* amd_region = static_cast<const AMD::MemoryRegion*>(region);
 
-      finegrain_deallocator_ = [](void* ptr) {
-        core::Runtime::runtime_singleton_->FreeMemory(ptr);
-      };
+    auto region_allocator = [region](size_t size,
+                                     MemoryRegion::AllocateFlags alloc_flags) -> void* {
+      void* ptr = nullptr;
+       return (HSA_STATUS_SUCCESS ==
+               core::Runtime::runtime_singleton_->AllocateMemory(region, size, alloc_flags, &ptr))
+           ? ptr
+           : nullptr;
+    };
+
+    auto region_deallocator = [](void* ptr) { core::Runtime::runtime_singleton_->FreeMemory(ptr); };
+
+    if (amd_region->IsLocalMemory() && amd_region->fine_grain()) {
+      finegrain_allocator_ = region_allocator;
+      finegrain_deallocator_ = region_deallocator;
+    } else if (amd_region->IsLocalMemory() &&
+               !(amd_region->fine_grain() || amd_region->extended_scope_fine_grain())) {
+      coarsegrain_allocator_ = region_allocator;
+      coarsegrain_deallocator_ = region_deallocator;
     }
   }
-  assert(finegrain_deallocator_ && "Agent does not have a fine-grain allocator");
+  assert(finegrain_allocator_ && "GPU agent does not have a fine-grain allocator");
+  assert(coarsegrain_allocator_ && "GPU agent does not have a coarse-grain allocator");
 }
 
 core::Agent* GpuAgent::GetNearestCpuAgent() const {
