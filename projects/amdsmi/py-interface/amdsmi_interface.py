@@ -2842,13 +2842,13 @@ def amdsmi_get_gpu_memory_partition_config(processor_handle: amdsmi_wrapper.amds
         )
     )
     mem_caps_list = []
-    if config.partition_caps.amdsmi_nps_flags_t.nps1_cap == 1:
+    if config.partition_caps.nps_flags.nps1_cap == 1:
         mem_caps_list.append("NPS1")
-    if config.partition_caps.amdsmi_nps_flags_t.nps2_cap == 1:
+    if config.partition_caps.nps_flags.nps2_cap == 1:
         mem_caps_list.append("NPS2")
-    if config.partition_caps.amdsmi_nps_flags_t.nps4_cap == 1:
+    if config.partition_caps.nps_flags.nps4_cap == 1:
         mem_caps_list.append("NPS4")
-    if config.partition_caps.amdsmi_nps_flags_t.nps8_cap == 1:
+    if config.partition_caps.nps_flags.nps8_cap == 1:
         mem_caps_list.append("NPS8")
 
     return_dict = {
@@ -2926,13 +2926,13 @@ def amdsmi_get_gpu_accelerator_partition_profile(
         partition_ids = "N/A"
 
     mem_caps_list = []
-    if profile.memory_caps.amdsmi_nps_flags_t.nps1_cap == 1:
+    if profile.memory_caps.nps_flags.nps1_cap == 1:
         mem_caps_list.append("NPS1")
-    if profile.memory_caps.amdsmi_nps_flags_t.nps2_cap == 1:
+    if profile.memory_caps.nps_flags.nps2_cap == 1:
         mem_caps_list.append("NPS2")
-    if profile.memory_caps.amdsmi_nps_flags_t.nps4_cap == 1:
+    if profile.memory_caps.nps_flags.nps4_cap == 1:
         mem_caps_list.append("NPS4")
-    if profile.memory_caps.amdsmi_nps_flags_t.nps8_cap == 1:
+    if profile.memory_caps.nps_flags.nps8_cap == 1:
         mem_caps_list.append("NPS8")
 
     partition_profile_dict = {
@@ -2980,13 +2980,13 @@ def amdsmi_get_gpu_accelerator_partition_profile_config(processor_handle: amdsmi
 
         
         mem_caps_list = []
-        if profile.memory_caps.amdsmi_nps_flags_t.nps1_cap == 1:
+        if profile.memory_caps.nps_flags.nps1_cap == 1:
             mem_caps_list.append("NPS1")
-        if profile.memory_caps.amdsmi_nps_flags_t.nps2_cap == 1:
+        if profile.memory_caps.nps_flags.nps2_cap == 1:
             mem_caps_list.append("NPS2")
-        if profile.memory_caps.amdsmi_nps_flags_t.nps4_cap == 1:
+        if profile.memory_caps.nps_flags.nps4_cap == 1:
             mem_caps_list.append("NPS4")
-        if profile.memory_caps.amdsmi_nps_flags_t.nps8_cap == 1:
+        if profile.memory_caps.nps_flags.nps8_cap == 1:
             mem_caps_list.append("NPS8")
 
         for r in range(config.num_resource_profiles):

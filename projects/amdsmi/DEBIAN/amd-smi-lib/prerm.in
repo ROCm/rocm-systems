@@ -1,5 +1,5 @@
 #!/bin/bash
-
+echo "Removing AMDSMI LIB Packages..."
 
 # Other prerm actions
 rm_ldconfig() {
@@ -94,13 +94,19 @@ case "$1" in
   ( remove | upgrade)
     # remove old gpuv-smi symlink
     rm -f @CPACK_PACKAGING_INSTALL_PREFIX@/bin/gpuv-smi &> /dev/null
-    echo "Removing AMDSMI LIB Packages..."
+    echo "Removing AMDSMI Lib Packages..."
     rm_python_lib
+    echo "python library removed"
     rm_ldconfig
+    echo "ldconfig removed"
     rm_leftovers
+    echo "leftovers removed"
     rm_logFolder
+    echo "log folder removed"
     rm_rocm_tests_dir
+    echo "rocm tests directory removed"
     return_logrotateToOrigConfig
+    echo "logrotate configuration restored"
   ;;
   ( purge )
   ;;

@@ -972,7 +972,7 @@ const _: () = {
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub union AmdsmiNpsCapsT {
-    pub amdsmi_nps_flags_t: AmdsmiNpsCapsTNpsFlags,
+    pub nps_flags: AmdsmiNpsCapsTNpsFlags,
     pub nps_cap_mask: u32,
 }
 #[repr(C)]
@@ -1079,8 +1079,8 @@ impl AmdsmiNpsCapsTNpsFlags {
 const _: () = {
     ["Size of AmdsmiNpsCapsT"][::std::mem::size_of::<AmdsmiNpsCapsT>() - 4usize];
     ["Alignment of AmdsmiNpsCapsT"][::std::mem::align_of::<AmdsmiNpsCapsT>() - 4usize];
-    ["Offset of field: AmdsmiNpsCapsT::amdsmi_nps_flags_t"]
-        [::std::mem::offset_of!(AmdsmiNpsCapsT, amdsmi_nps_flags_t) - 0usize];
+    ["Offset of field: AmdsmiNpsCapsT::nps_flags"]
+        [::std::mem::offset_of!(AmdsmiNpsCapsT, nps_flags) - 0usize];
     ["Offset of field: AmdsmiNpsCapsT::nps_cap_mask"]
         [::std::mem::offset_of!(AmdsmiNpsCapsT, nps_cap_mask) - 0usize];
 };

@@ -307,8 +307,13 @@ set(CPACK_DEBIAN_DEV_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
 
 ## Process the Debian install/remove scripts to update the CPACK variables
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/postinst.in DEBIAN/postinst @ONLY)
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/prerm.in DEBIAN/prerm @ONLY)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/amd-smi-lib/prerm.in DEBIAN/prerm @ONLY)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/amd-smi-lib-tests/prerm.in DEBIAN/prerm @ONLY)
 set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "DEBIAN/postinst;DEBIAN/prerm")
+
+# Assign control scripts to the AMDSMI Lib & Tests packages
+set(CPACK_DEBIAN_DEV_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/amd-smi-lib/prerm")
+set(CPACK_DEBIAN_TESTS_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/amd-smi-lib-tests/prerm")
 
 # RPM package specific variables
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
@@ -345,9 +350,11 @@ endif()
 ## Enable Component Mode and set component specific flags
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_DEBIAN_DEV_PACKAGE_NAME "${AMD_SMI_PACKAGE}")
+set(CPACK_DEBIAN_TESTS_PACKAGE_NAME "${AMD_SMI_PACKAGE}-tests")
 set(CPACK_DEBIAN_ASAN_PACKAGE_NAME "${AMD_SMI_PACKAGE}-asan")
 set(CPACK_RPM_COMPONENT_INSTALL ON)
 set(CPACK_RPM_DEV_PACKAGE_NAME "${AMD_SMI_PACKAGE}")
+set(CPACK_RPM_TESTS_PACKAGE_NAME "${AMD_SMI_PACKAGE}-tests")
 set(CPACK_RPM_ASAN_PACKAGE_NAME "${AMD_SMI_PACKAGE}-asan")
 if(ENABLE_ASAN_PACKAGING)
   # ASAN Package requires only asan component with libraries and license file
@@ -362,10 +369,12 @@ endif()
 
 ## Process the Rpm install/remove scripts to update the CPACK variables
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/post.in" RPM/post @ONLY)
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/preun.in" RPM/preun @ONLY)
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/amd-smi-lib/preun.in" RPM/preun @ONLY)
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/amd-smi-lib-tests/preun.in" RPM/preun @ONLY)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/postun.in" RPM/postun @ONLY)
 set(CPACK_RPM_POST_INSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/post")
-set(CPACK_RPM_PRE_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/preun")
+set(CPACK_RPM_PRE_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/amd-smi-lib/preun")
+set(CPACK_RPM_PRE_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/amd-smi-lib-tests/preun")
 set(CPACK_RPM_POST_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/postun")
 
 #Set the names now using CPACK utility
