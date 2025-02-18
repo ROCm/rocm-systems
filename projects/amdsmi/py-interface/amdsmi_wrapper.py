@@ -227,8 +227,8 @@ class struct_amdsmi_hsmp_driver_version_t(Structure):
 
 struct_amdsmi_hsmp_driver_version_t._pack_ = 1 # source:False
 struct_amdsmi_hsmp_driver_version_t._fields_ = [
-    ('major', ctypes.c_ubyte),
-    ('minor', ctypes.c_ubyte),
+    ('major', ctypes.c_uint32),
+    ('minor', ctypes.c_uint32),
 ]
 
 amdsmi_hsmp_driver_version_t = struct_amdsmi_hsmp_driver_version_t

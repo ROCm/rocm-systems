@@ -38,11 +38,11 @@
 namespace amd {
 namespace smi {
 
+void closedir(DIR* /*ptr*/) {}
+
 std::string AMDSmiDrm::find_file_in_folder(const std::string& folder,
                const std::string& regex) {
     std::string file_name;
-    // TODO: The closedir function has some non-standard attributes that are being ignored here
-    //       which is causing a warning to be thrown
     using dir_ptr = std::unique_ptr<DIR, decltype(&closedir)>;
 
     struct dirent *dir = nullptr;
