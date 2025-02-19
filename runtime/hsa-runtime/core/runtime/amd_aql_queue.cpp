@@ -738,6 +738,11 @@ void AqlQueue::AllocRegisteredRingBuffer(uint32_t queue_size_pkts) {
     assert(IsMultipleOf(ring_buf_alloc_bytes_, 4096) && "Ring buffer sizes must be 4KiB aligned.");
 
     if (IsDeviceMemRingBuf()) {
+      if (!agent_->LargeBarEnabled()) {
+        throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_QUEUE_CREATION,
+                                 "Trying to allocate an AQL ring buffer in device memory without "
+                                 "large BAR PCIe enabled.");
+      }
       ring_buf_ = agent_->coarsegrain_allocator()(
           ring_buf_alloc_bytes_,
           core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateUncached);

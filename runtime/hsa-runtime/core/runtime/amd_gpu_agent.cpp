@@ -232,10 +232,13 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
 
 #endif
 
-  auto& firstCpu = core::Runtime::runtime_singleton_->cpu_agents()[0];
-  auto linkInfo = core::Runtime::runtime_singleton_->GetLinkInfo(firstCpu->node_id(),
-                                                                node_id());
-  xgmi_cpu_gpu_ = (linkInfo.info.link_type == HSA_AMD_LINK_INFO_TYPE_XGMI);
+  auto& first_cpu = core::Runtime::runtime_singleton_->cpu_agents()[0];
+  auto link_info = core::Runtime::runtime_singleton_->GetLinkInfo(first_cpu->node_id(), node_id());
+  xgmi_cpu_gpu_ = (link_info.info.link_type == HSA_AMD_LINK_INFO_TYPE_XGMI);
+
+  if (link_info.num_hop >= 1) {
+    large_bar_enabled_ = true;
+  }
 
   // Populate region list.
   InitRegionList();
