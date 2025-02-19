@@ -834,7 +834,8 @@ hsa_status_t hsa_amd_memory_pool_allocate(hsa_amd_memory_pool_t memory_pool, siz
     alloc_flag |= core::MemoryRegion::AllocateExecutable;
 
 #ifdef SANITIZER_AMDGPU
-  alloc_flag |= core::MemoryRegion::AllocateAsan;
+  if (mem_region->owner()->device_type() == core::Agent::kAmdGpuDevice)
+    alloc_flag |= core::MemoryRegion::AllocateAsan;
 #endif
 
   return core::Runtime::runtime_singleton_->AllocateMemory(mem_region, size, alloc_flag, ptr);
