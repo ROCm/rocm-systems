@@ -180,19 +180,47 @@ def main():
         library_path = os.path.join(os.path.dirname(__file__), library)
         line_to_replace = "_libraries['{}'] = ctypes.CDLL('{}')".format(library_name, library_path)
         new_line = f"""from pathlib import Path
-libamd_smi_parent_dir = Path(__file__).resolve().parent / "{library_name}"
-libamd_smi_cwd = Path.cwd() / "{library_name}"
+# {library_name} can be located in several different places.
+# Look for it with below priority:
+# 1. ROCM_HOME/ROCM_PATH environment variables
+#    - ROCM_HOME/lib
+#    - ROCM_PATH/lib (usually set to /opt/rocm/)
+# 2. Decided by the linker
+#    - LD_LIBRARY_PATH env var
+#    - defined path in /etc/ld.so.conf.d/
+# 3. Relative to amdsmi_wrapper.py
+#    - parent directory
+#    - current directory
+def find_smi_library():
+    err = OSError("Could not load {library_name}")
+    possible_locations = list()
+    # 1.
+    rocm_path = os.getenv("ROCM_HOME", os.getenv("ROCM_PATH"))
+    if rocm_path:
+        possible_locations.append(os.path.join(rocm_path, "lib/{library_name}"))
+    # 2.
+    possible_locations.append("{library_name}")
+    # 3.
+    libamd_smi_parent_dir = Path(__file__).resolve().parent / "{library_name}"
+    libamd_smi_cwd = Path.cwd() / "{library_name}"
+    possible_locations.append(libamd_smi_parent_dir)
+    possible_locations.append(libamd_smi_cwd)
+
+    for location in possible_locations:
+        try:
+            lib = ctypes.CDLL(location)
+            return lib, location
+        except OSError as e:
+            err = e
+            continue
+    raise err
 
 try:
-    if libamd_smi_parent_dir.is_file():
-        # try to fall back to parent directory
-        _libraries['{library_name}'] = ctypes.CDLL(libamd_smi_parent_dir)
-    else:
-        # lastly - search in current working directory
-        _libraries['{library_name}'] = ctypes.CDLL(libamd_smi_cwd)
-except OSError as error:
-    print(error)
-    print("Unable to find amdsmi library try installing amd-smi-lib from your package manager")"""
+    _libraries['{library_name}'], location = find_smi_library()
+    #print(f"found smi lib in [", location, "]")
+except OSError as e:
+    print(e)
+    print("Unable to find {library_name} library try installing amd-smi-lib from your package manager")"""
     else:
         print("Unknown operating system. It is only supporing Linux and Windows.")
         return
