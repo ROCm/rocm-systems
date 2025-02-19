@@ -28,6 +28,12 @@ be the same size.
    ``OS`` is the operating system, and ``ABI`` is the application binary interface,
    for example, ``libpyrocprofsys.cpython-38-x86_64-linux-gnu.so``.
 
+.. note::
+
+   ROCm Systems Profiler has limited support for Artificial Intelligence (AI) and Machine Learning (ML) workloads.
+   Data from child threads is not captured. For other profiling options,
+   see `rocprofV3 <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#using-rocprofv3>`_.
+
 Getting started
 ========================================
 
@@ -145,7 +151,7 @@ Consider the following Python code (``example.py``):
    if __name__ == "__main__":
       run(20)
 
-Running ``rocprof-sys-python ./example.py`` with ``ROCPROFSYS_PROFILE=ON`` and
+Running ``rocprof-sys-python -- ./example.py`` with ``ROCPROFSYS_PROFILE=ON`` and
 ``ROCPROFSYS_TIMEMORY_COMPONENTS=trip_count`` produces the following:
 
 .. code-block:: shell
@@ -229,7 +235,7 @@ Alternatively, use ``rocprofsys.profile()`` as a context-manager around ``run(20
          run(20)
 
 The results for both of the source-level instrumentation modes are identical to the
-original ``rocprofsys-python ./example.py`` results:
+original ``rocprof-sys-python -- ./example.py`` results:
 
 .. code-block:: shell
 
