@@ -216,6 +216,7 @@ class HsaNodeInfo {
     ~HsaNodeInfo();
 
     bool Init(int NumOfNodes);
+    void Delete();
 
     /* This function should be deprecated soon. This for transistion purpose only
      * Currently, KfdTest is designed to test only ONE node. This function acts

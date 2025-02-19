@@ -609,13 +609,19 @@ bool HsaNodeInfo::Init(int NumOfNodes) {
     return ret;
 }
 
-HsaNodeInfo::~HsaNodeInfo() {
+void HsaNodeInfo::Delete() {
     const HsaNodeProperties *nodeProperties;
 
     for (unsigned int i = 0; i < m_HsaNodeProps.size(); i++)
         delete m_HsaNodeProps.at(i);
 
     m_HsaNodeProps.clear();
+    m_NodesWithGPU.clear();
+    m_NodesWithoutGPU.clear();
+}
+
+HsaNodeInfo::~HsaNodeInfo() {
+    Delete();
 }
 
 const std::vector<int>& HsaNodeInfo::GetNodesWithGPU() const {

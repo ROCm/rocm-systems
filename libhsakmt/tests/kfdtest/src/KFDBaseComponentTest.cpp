@@ -166,6 +166,7 @@ void KFDBaseComponentTest::TearDown() {
 
     closelog();
 
+    m_NodeInfo.Delete();
     ROUTINE_END
 }
 
