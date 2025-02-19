@@ -1854,11 +1854,9 @@ amdgcn_architecture_t::register_name (amdgpu_regnum_t regnum) const
         = utils::narrow<int> (regnum - amdgpu_regnum_t::first_sgpr);
       return string_printf ("s%d", print_num);
     }
-  if (regnum >= amdgpu_regnum_t::first_vgpr_64
-      && regnum <= amdgpu_regnum_t::last_vgpr_64)
+  if (regnum >= amdgpu_regnum_t::v0_64 && regnum <= amdgpu_regnum_t::v255_64)
     {
-      auto print_num
-        = utils::narrow<int> (regnum - amdgpu_regnum_t::first_vgpr_64);
+      int print_num = utils::narrow<int> (regnum - amdgpu_regnum_t::v0_64);
       return string_printf ("v%d", print_num);
     }
   if (regnum >= amdgpu_regnum_t::first_ttmp
@@ -1954,8 +1952,7 @@ std::string
 amdgcn_architecture_t::register_type (amdgpu_regnum_t regnum) const
 {
   /* Vector registers.  */
-  if (regnum >= amdgpu_regnum_t::first_vgpr_64
-      && regnum <= amdgpu_regnum_t::last_vgpr_64)
+  if (regnum >= amdgpu_regnum_t::v0_64 && regnum <= amdgpu_regnum_t::v255_64)
     {
       return "int32_t[64]";
     }
@@ -2018,8 +2015,7 @@ amd_dbgapi_size_t
 amdgcn_architecture_t::register_size (amdgpu_regnum_t regnum) const
 {
   /* Vector registers.  */
-  if (regnum >= amdgpu_regnum_t::first_vgpr_64
-      && regnum <= amdgpu_regnum_t::last_vgpr_64)
+  if (regnum >= amdgpu_regnum_t::v0_64 && regnum <= amdgpu_regnum_t::v255_64)
     {
       return sizeof (int32_t) * 64;
     }
@@ -2608,8 +2604,8 @@ gfx9_architecture_t::gfx9_architecture_t (elf_amdgpu_machine_t e_machine,
 
   /* Vector registers: [v0-v255]  */
   auto &vector_registers = create<register_class_t> (*this, "vector");
-  vector_registers.add_registers (amdgpu_regnum_t::first_vgpr_64,
-                                  amdgpu_regnum_t::last_vgpr_64);
+  vector_registers.add_registers (amdgpu_regnum_t::v0_64,
+                                  amdgpu_regnum_t::v255_64);
 
   /* Trap temporary registers: [ttmp4-ttmp11, ttmp13]  */
   auto &trap_registers = create<register_class_t> (*this, "trap");
@@ -2638,8 +2634,8 @@ gfx9_architecture_t::gfx9_architecture_t (elf_amdgpu_machine_t e_machine,
      amdgpu_regnum_t::first_sgpr
      + utils::narrow<amdgpu_regdiff_t> (scalar_register_count)
      - 1);
-  general_registers.add_registers (amdgpu_regnum_t::first_vgpr_64,
-                                   amdgpu_regnum_t::last_vgpr_64);
+  general_registers.add_registers (amdgpu_regnum_t::v0_64,
+                                   amdgpu_regnum_t::v255_64);
   general_registers.add_registers (amdgpu_regnum_t::m0, amdgpu_regnum_t::m0);
   general_registers.add_registers (amdgpu_regnum_t::pc, amdgpu_regnum_t::pc);
   general_registers.add_registers (amdgpu_regnum_t::pseudo_exec_64,
@@ -3281,8 +3277,7 @@ gfx9_architecture_t::cwsr_record_t::register_address (
   size_t vgpr_size = sizeof (int32_t) * 64;
   agent_address_t vgprs_addr = sgprs_addr - vgpr_count * vgpr_size;
 
-  if (regnum >= amdgpu_regnum_t::first_vgpr_64
-      && regnum <= amdgpu_regnum_t::last_vgpr_64
+  if (regnum >= amdgpu_regnum_t::v0_64 && regnum <= amdgpu_regnum_t::v255_64
       && ((regnum - amdgpu_regnum_t::v0_64)
           < utils::narrow<amdgpu_regdiff_t> (vgpr_count)))
     {
@@ -3327,8 +3322,7 @@ gfx9_architecture_t::control_stack_iterate (
             queue, xcc_id, relaunch, state, last_wave_area - 64);
 
           last_wave_area
-            = cwsr_record->register_address (amdgpu_regnum_t::first_vgpr_64)
-                .value ();
+            = cwsr_record->register_address (amdgpu_regnum_t::v0_64).value ();
 
           wave_callback (std::move (cwsr_record));
           ++wave_count;
@@ -3488,8 +3482,8 @@ mi_architecture_t::mi_architecture_t (elf_amdgpu_machine_t e_machine,
                { return register_class.name () == "vector"; });
   dbgapi_assert (vector_registers != nullptr);
 
-  vector_registers->add_registers (amdgpu_regnum_t::first_accvgpr_64,
-                                   amdgpu_regnum_t::last_accvgpr_64);
+  vector_registers->add_registers (amdgpu_regnum_t::a0_64,
+                                   amdgpu_regnum_t::a255_64);
 
   /* General registers: [a0-a255]  */
   register_class_t *general_registers
@@ -3497,18 +3491,16 @@ mi_architecture_t::mi_architecture_t (elf_amdgpu_machine_t e_machine,
                { return register_class.name () == "general"; });
   dbgapi_assert (general_registers != nullptr);
 
-  general_registers->add_registers (amdgpu_regnum_t::first_accvgpr_64,
-                                    amdgpu_regnum_t::last_accvgpr_64);
+  general_registers->add_registers (amdgpu_regnum_t::a0_64,
+                                    amdgpu_regnum_t::a255_64);
 }
 
 std::string
 mi_architecture_t::register_name (amdgpu_regnum_t regnum) const
 {
-  if (regnum >= amdgpu_regnum_t::first_accvgpr_64
-      && regnum <= amdgpu_regnum_t::last_accvgpr_64)
+  if (regnum >= amdgpu_regnum_t::a0_64 && regnum <= amdgpu_regnum_t::a255_64)
     {
-      int print_num
-        = utils::narrow<int> (regnum - amdgpu_regnum_t::first_accvgpr_64);
+      int print_num = utils::narrow<int> (regnum - amdgpu_regnum_t::a0_64);
       return string_printf ("a%d", print_num);
     }
 
@@ -3518,8 +3510,7 @@ mi_architecture_t::register_name (amdgpu_regnum_t regnum) const
 std::string
 mi_architecture_t::register_type (amdgpu_regnum_t regnum) const
 {
-  if (regnum >= amdgpu_regnum_t::first_accvgpr_64
-      && regnum <= amdgpu_regnum_t::last_accvgpr_64)
+  if (regnum >= amdgpu_regnum_t::a0_64 && regnum <= amdgpu_regnum_t::a255_64)
     {
       return "int32_t[64]";
     }
@@ -3530,8 +3521,7 @@ mi_architecture_t::register_type (amdgpu_regnum_t regnum) const
 amd_dbgapi_size_t
 mi_architecture_t::register_size (amdgpu_regnum_t regnum) const
 {
-  if (regnum >= amdgpu_regnum_t::first_accvgpr_64
-      && regnum <= amdgpu_regnum_t::last_accvgpr_64)
+  if (regnum >= amdgpu_regnum_t::a0_64 && regnum <= amdgpu_regnum_t::a255_64)
     {
       return sizeof (int32_t) * 64;
     }
@@ -3558,8 +3548,7 @@ mi_architecture_t::cwsr_record_t::register_address (
   size_t accvgpr_size = sizeof (int32_t) * 64;
   agent_address_t accvgprs_addr = sgprs_addr - accvgpr_count * accvgpr_size;
 
-  if (regnum >= amdgpu_regnum_t::first_accvgpr_64
-      && regnum <= amdgpu_regnum_t::last_accvgpr_64
+  if (regnum >= amdgpu_regnum_t::a0_64 && regnum <= amdgpu_regnum_t::a255_64
       && ((regnum - amdgpu_regnum_t::a0_64)
           < utils::narrow<amdgpu_regdiff_t> (accvgpr_count)))
     {
@@ -3572,8 +3561,7 @@ mi_architecture_t::cwsr_record_t::register_address (
   size_t vgpr_size = sizeof (int32_t) * 64;
   agent_address_t vgprs_addr = accvgprs_addr - vgpr_count * vgpr_size;
 
-  if (regnum >= amdgpu_regnum_t::first_vgpr_64
-      && regnum <= amdgpu_regnum_t::last_vgpr_64
+  if (regnum >= amdgpu_regnum_t::v0_64 && regnum <= amdgpu_regnum_t::v255_64
       && ((regnum - amdgpu_regnum_t::v0_64)
           < utils::narrow<amdgpu_regdiff_t> (vgpr_count)))
     {
@@ -4015,8 +4003,7 @@ gfx9_4_architecture_t::simulate_instruction (
 std::string
 gfx9_4_architecture_t::register_type (amdgpu_regnum_t regnum) const
 {
-  if (regnum >= amdgpu_regnum_t::first_accvgpr_64
-      && regnum <= amdgpu_regnum_t::last_accvgpr_64)
+  if (regnum >= amdgpu_regnum_t::a0_64 && regnum <= amdgpu_regnum_t::a255_64)
     {
       return "int32_t[64]";
     }
@@ -4450,8 +4437,8 @@ gfx10_architecture_t::gfx10_architecture_t (elf_amdgpu_machine_t e_machine,
                { return register_class.name () == "vector"; });
   dbgapi_assert (vector_registers != nullptr);
 
-  vector_registers->add_registers (amdgpu_regnum_t::first_vgpr_32,
-                                   amdgpu_regnum_t::last_vgpr_32);
+  vector_registers->add_registers (amdgpu_regnum_t::v0_32,
+                                   amdgpu_regnum_t::v255_32);
 
   /* System registers: [xnack_mask_32]  */
   register_class_t *system_registers
@@ -4481,8 +4468,8 @@ gfx10_architecture_t::gfx10_architecture_t (elf_amdgpu_machine_t e_machine,
      (amdgpu_regnum_t::first_sgpr
       + utils::narrow<amdgpu_regdiff_t> (gfx10_scalar_register_count)
       - 1));
-  general_registers->add_registers (amdgpu_regnum_t::first_vgpr_32,
-                                    amdgpu_regnum_t::last_vgpr_32);
+  general_registers->add_registers (amdgpu_regnum_t::v0_32,
+                                    amdgpu_regnum_t::v255_32);
   general_registers->add_registers (amdgpu_regnum_t::pseudo_exec_32,
                                     amdgpu_regnum_t::pseudo_exec_32);
   general_registers->add_registers (amdgpu_regnum_t::pseudo_vcc_32,
@@ -4492,11 +4479,9 @@ gfx10_architecture_t::gfx10_architecture_t (elf_amdgpu_machine_t e_machine,
 std::string
 gfx10_architecture_t::register_name (amdgpu_regnum_t regnum) const
 {
-  if (regnum >= amdgpu_regnum_t::first_vgpr_32
-      && regnum <= amdgpu_regnum_t::last_vgpr_32)
+  if (regnum >= amdgpu_regnum_t::v0_32 && regnum <= amdgpu_regnum_t::v255_32)
     {
-      auto print_num
-        = utils::narrow<int> (regnum - amdgpu_regnum_t::first_vgpr_32);
+      int print_num = utils::narrow<int> (regnum - amdgpu_regnum_t::v0_32);
       return string_printf ("v%d", print_num);
     }
   if (regnum == amdgpu_regnum_t::exec_32
@@ -4530,8 +4515,7 @@ std::string
 gfx10_architecture_t::register_type (amdgpu_regnum_t regnum) const
 {
   /* Vector registers (arch and acc).  */
-  if ((regnum >= amdgpu_regnum_t::first_vgpr_32
-       && regnum <= amdgpu_regnum_t::last_vgpr_32))
+  if ((regnum >= amdgpu_regnum_t::v0_32 && regnum <= amdgpu_regnum_t::v255_32))
     {
       return "int32_t[32]";
     }
@@ -4646,8 +4630,7 @@ amd_dbgapi_size_t
 gfx10_architecture_t::register_size (amdgpu_regnum_t regnum) const
 {
   /* Vector registers (arch and acc).  */
-  if ((regnum >= amdgpu_regnum_t::first_vgpr_32
-       && regnum <= amdgpu_regnum_t::last_vgpr_32))
+  if ((regnum >= amdgpu_regnum_t::v0_32 && regnum <= amdgpu_regnum_t::v255_32))
     {
       return sizeof (int32_t) * 32;
     }
@@ -4940,7 +4923,7 @@ gfx10_architecture_t::cwsr_record_t::register_address (
 
   if (regnum >= (amdgpu_regnum_t::v0_32
                  + utils::narrow<amdgpu_regdiff_t> (private_vgpr_count))
-      && regnum <= amdgpu_regnum_t::last_vgpr_32
+      && regnum <= amdgpu_regnum_t::v255_32
       && ((regnum - amdgpu_regnum_t::v0_32)
           < utils::narrow<amdgpu_regdiff_t> (private_vgpr_count
                                              + shared_vgpr_count)))
@@ -4953,8 +4936,8 @@ gfx10_architecture_t::cwsr_record_t::register_address (
                  * shared_vgpr_size));
     }
 
-  if (lane_count == 32 && regnum >= amdgpu_regnum_t::first_vgpr_32
-      && regnum <= amdgpu_regnum_t::last_vgpr_32
+  if (lane_count == 32 && regnum >= amdgpu_regnum_t::v0_32
+      && regnum <= amdgpu_regnum_t::v255_32
       && ((regnum - amdgpu_regnum_t::v0_32)
           < utils::narrow<amdgpu_regdiff_t> (private_vgpr_count)))
     {
@@ -4963,8 +4946,8 @@ gfx10_architecture_t::cwsr_record_t::register_address (
                  * private_vgpr_size));
     }
 
-  if (lane_count == 64 && regnum >= amdgpu_regnum_t::first_vgpr_64
-      && regnum <= amdgpu_regnum_t::last_vgpr_64
+  if (lane_count == 64 && regnum >= amdgpu_regnum_t::v0_64
+      && regnum <= amdgpu_regnum_t::v255_64
       && ((regnum - amdgpu_regnum_t::v0_64)
           < utils::narrow<amdgpu_regdiff_t> (private_vgpr_count)))
     {
@@ -5622,10 +5605,9 @@ std::optional<agent_address_t>
 gfx11_architecture_t::cwsr_record_t::register_address (
   amdgpu_regnum_t regnum) const
 {
-  if ((regnum >= amdgpu_regnum_t::first_vgpr_64
-       && regnum < amdgpu_regnum_t::last_vgpr_64)
-      || (regnum >= amdgpu_regnum_t::first_vgpr_32
-          && regnum < amdgpu_regnum_t::last_vgpr_32))
+  if ((regnum >= amdgpu_regnum_t::v0_64 && regnum < amdgpu_regnum_t::v255_64)
+      || (regnum >= amdgpu_regnum_t::v0_32
+          && regnum < amdgpu_regnum_t::v255_32))
     {
       const agent_address_t status_reg_address
         = register_address (amdgpu_regnum_t::status).value ();
