@@ -74,10 +74,10 @@ using namespace rocr::amd::hsa::common;
 // 5: New trap handler ABI. Save the PC in ttmp11[22:7] ttmp6[31:0], and park the wave if stopped
 // 6: New trap handler ABI. ttmp6[25:0] contains dispatch index modulo queue size
 // 7: New trap handler ABI. Send interrupts as a bitmask, coalescing concurrent exceptions.
-// 8: New trap handler ABI. for gfx940: Initialize ttmp[4:5] if ttmp11[31] == 0.
+// 8: New trap handler ABI. for gfx942: Initialize ttmp[4:5] if ttmp11[31] == 0.
 // 9: New trap handler ABI. For gfx11: Save PC in ttmp11[22:7] ttmp6[31:0], and park the wave if stopped.
 // 10: New trap handler ABI. Set status.skip_export when halting the wave.
-//                           For gfx940, set ttmp6[31] = 0 if ttmp11[31] == 0.
+//                           For gfx942, set ttmp6[31] = 0 if ttmp11[31] == 0.
 
 HSA_API r_debug _amdgpu_r_debug;
 static __forceinline link_map*& r_debug_tail() {

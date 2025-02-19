@@ -70,23 +70,6 @@
 	.endif
 .endm
 
-//sc1 sc0 params are only needed for gfx940/gfx941. On gfx942, we use the compiled code for gfx9
-.macro FLAT_STORE_DWORD dst, src
-  .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor == 4)
-    flat_store_dword      \dst, \src sc1 sc0
-  .else
-    flat_store_dword      \dst, \src
-  .endif
-.endm
-
-.macro FLAT_STORE_DWORDX4 dst, src
-  .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor == 4)
-    flat_store_dwordx4    \dst, \src sc1 sc0
-  .else
-    flat_store_dwordx4    \dst, \src
-  .endif
-.endm
-
 .set kFillVecWidth, 4
 .set kFillUnroll, 1
 
@@ -159,9 +142,9 @@ Fill:
 
 .macro mFillPhase1 iter iter_end
     .if kFillVecWidth == 4
-      FLAT_STORE_DWORDX4   v[2:3], v[4:7]
+      flat_store_dwordx4   v[2:3], v[4:7]
     .else
-      FLAT_STORE_DWORD     v[2:3], v4
+      flat_store_dword     v[2:3], v4
     .endif
 
      V_ADD_CO_U32          v2, v2, s12
@@ -192,7 +175,7 @@ mFillPhase1 0, kFillUnroll - 1
     s_and_b64               exec, exec, vcc
 
 
-    FLAT_STORE_DWORD        v[2:3], v4
+    flat_store_dword        v[2:3], v4
     V_ADD_CO_U32            v2, v2, s12
     V_ADD_CO_CI_U32         v3, v3, 0x0
 

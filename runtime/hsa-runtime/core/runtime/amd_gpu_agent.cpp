@@ -287,7 +287,6 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
     ASICShader compute_8;
     ASICShader compute_9;
     ASICShader compute_90a;
-    ASICShader compute_940;
     ASICShader compute_942;
     ASICShader compute_1010;
     ASICShader compute_10;
@@ -302,7 +301,6 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
            {kCodeTrapHandler8, sizeof(kCodeTrapHandler8), 2, 4},            // gfx8
            {kCodeTrapHandler9, sizeof(kCodeTrapHandler9), 2, 4},            // gfx9
            {kCodeTrapHandler90a, sizeof(kCodeTrapHandler90a), 2, 4},        // gfx90a
-           {NULL, 0, 0, 0},                                                 // gfx940
            {NULL, 0, 0, 0},                                                 // gfx942
            {kCodeTrapHandler1010, sizeof(kCodeTrapHandler1010), 2, 4},      // gfx1010
            {kCodeTrapHandler10, sizeof(kCodeTrapHandler10), 2, 4},          // gfx10
@@ -317,8 +315,7 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
            {kCodeTrapHandler8, sizeof(kCodeTrapHandler8), 2, 4},            // gfx8
            {kCodeTrapHandlerV2_9, sizeof(kCodeTrapHandlerV2_9), 2, 4},      // gfx9
            {kCodeTrapHandlerV2_9, sizeof(kCodeTrapHandlerV2_9), 2, 4},      // gfx90a
-           {kCodeTrapHandlerV2_940, sizeof(kCodeTrapHandlerV2_940), 2, 4},  // gfx940
-           {kCodeTrapHandlerV2_940, sizeof(kCodeTrapHandlerV2_940), 2, 4},  // gfx942
+           {kCodeTrapHandlerV2_942, sizeof(kCodeTrapHandlerV2_942), 2, 4},  // gfx942
            {kCodeTrapHandlerV2_1010, sizeof(kCodeTrapHandlerV2_1010), 2, 4},// gfx1010
            {kCodeTrapHandlerV2_10, sizeof(kCodeTrapHandlerV2_10), 2, 4},    // gfx10
            {kCodeTrapHandlerV2_11, sizeof(kCodeTrapHandlerV2_11), 2, 4},    // gfx11
@@ -330,7 +327,6 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
            {kCodeCopyAligned8, sizeof(kCodeCopyAligned8), 32, 12},          // gfx8
            {kCodeCopyAligned9, sizeof(kCodeCopyAligned9), 32, 12},          // gfx9
            {kCodeCopyAligned9, sizeof(kCodeCopyAligned9), 32, 12},          // gfx90a
-           {kCodeCopyAligned940, sizeof(kCodeCopyAligned940), 32, 12},      // gfx940
            {kCodeCopyAligned9, sizeof(kCodeCopyAligned9), 32, 12},          // gfx942
            {kCodeCopyAligned10, sizeof(kCodeCopyAligned10), 32, 12},        // gfx1010
            {kCodeCopyAligned10, sizeof(kCodeCopyAligned10), 32, 12},        // gfx10
@@ -343,7 +339,6 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
            {kCodeCopyMisaligned8, sizeof(kCodeCopyMisaligned8), 23, 10},    // gfx8
            {kCodeCopyMisaligned9, sizeof(kCodeCopyMisaligned9), 23, 10},    // gfx9
            {kCodeCopyMisaligned9, sizeof(kCodeCopyMisaligned9), 23, 10},    // gfx90a
-           {kCodeCopyMisaligned940, sizeof(kCodeCopyMisaligned940), 23, 10},// gfx940
            {kCodeCopyMisaligned9, sizeof(kCodeCopyMisaligned9), 23, 10},    // gfx942
            {kCodeCopyMisaligned10, sizeof(kCodeCopyMisaligned10), 23, 10},  // gfx1010
            {kCodeCopyMisaligned10, sizeof(kCodeCopyMisaligned10), 23, 10},  // gfx10
@@ -356,7 +351,6 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
            {kCodeFill8, sizeof(kCodeFill8), 19, 8},                         // gfx8
            {kCodeFill9, sizeof(kCodeFill9), 19, 8},                         // gfx9
            {kCodeFill9, sizeof(kCodeFill9), 19, 8},                         // gfx90a
-           {kCodeFill940, sizeof(kCodeFill940), 19, 8},                     // gfx940
            {kCodeFill9, sizeof(kCodeFill9), 19, 8},                         // gfx942
            {kCodeFill10, sizeof(kCodeFill10), 19, 8},                       // gfx1010
            {kCodeFill10, sizeof(kCodeFill10), 19, 8},                       // gfx10
@@ -380,18 +374,7 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
     case 9:
       if((isa_->GetMinorVersion() == 0) && (isa_->GetStepping() == 10)) {
         asic_shader = &compiled_shader_it->second.compute_90a;
-      } else if(isa_->GetMinorVersion() == 4) {
-        switch(isa_->GetStepping()) {
-          case 0:
-          case 1:
-            asic_shader = &compiled_shader_it->second.compute_940;
-            break;
-          case 2:
-          default:
-            asic_shader = &compiled_shader_it->second.compute_942;
-            break;
-        }
-      } else if(isa_->GetMinorVersion() == 5) {
+      } else if(isa_->GetMinorVersion() == 4 || isa_->GetMinorVersion() == 5) {
         asic_shader = &compiled_shader_it->second.compute_942;
       } else {
         asic_shader = &compiled_shader_it->second.compute_9;
@@ -449,7 +432,7 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
     AMD_HSA_BITS_SET(header->compute_pgm_rsrc2,
                      AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_X, 1);
 
-    // gfx90a, gfx940, gfx941, gfx942, gfx950
+    // gfx90a, gfx942, gfx950
     if ((isa_->GetMajorVersion() == 9) &&
         (((isa_->GetMinorVersion() == 0) && (isa_->GetStepping() == 10)) ||
         (isa_->GetMinorVersion() == 4 || isa_->GetMinorVersion() == 5))) {

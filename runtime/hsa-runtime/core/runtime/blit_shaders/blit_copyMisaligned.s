@@ -71,23 +71,6 @@
 	.endif
 .endm
 
-//sc1 sc0 params are only needed for gfx940/gfx941. On gfx942, we use the compiled code for gfx9
-.macro FLAT_LOAD_UBYTE dst, src
-  .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor == 4)
-    flat_load_ubyte      \dst, \src sc1 sc0
-  .else
-    flat_load_ubyte      \dst, \src
-  .endif
-.endm
-
-.macro FLAT_STORE_BYTE dst, src
-  .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor == 4)
-    flat_store_byte      \dst, \src sc1 sc0
-  .else
-    flat_store_byte      \dst, \src
-  .endif
-.endm
-
 .set kCopyMisalignedUnroll, 4
 .set kCopyMisalignedNumSGPRs, 17
 .set kCopyMisalignedNumVGPRs, 6 + kCopyMisalignedUnroll
@@ -140,7 +123,7 @@ CopyMisaligned:
 
 
   .macro mCopyMisalignedPhase1Load iter iter_end
-    FLAT_LOAD_UBYTE     v[6 + \iter], v[2:3]
+    flat_load_ubyte     v[6 + \iter], v[2:3]
     V_ADD_CO_U32        v2, v2, s16
     V_ADD_CO_CI_U32     v3, v3, 0x0
 
@@ -154,7 +137,7 @@ CopyMisaligned:
   s_waitcnt                vmcnt(0)
 
   .macro mCopyMisalignedPhase1Store iter iter_end
-    FLAT_STORE_BYTE        v[4:5], v[6 + \iter]
+    flat_store_byte        v[4:5], v[6 + \iter]
     V_ADD_CO_U32           v4, v4, s16
     V_ADD_CO_CI_U32        v5, v5, 0x0
 
@@ -184,12 +167,12 @@ CopyMisaligned:
     s_and_b64               exec, exec, vcc
 
 
-    FLAT_LOAD_UBYTE         v1, v[2:3]
+    flat_load_ubyte         v1, v[2:3]
     V_ADD_CO_U32            v2, v2, s16
     V_ADD_CO_CI_U32         v3, v3, 0x0
     s_waitcnt               vmcnt(0)
 
-    FLAT_STORE_BYTE         v[4:5], v1
+    flat_store_byte         v[4:5], v1
     V_ADD_CO_U32            v4, v4, s16
     V_ADD_CO_CI_U32         v5, v5, 0x0
 

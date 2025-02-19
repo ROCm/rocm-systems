@@ -92,8 +92,8 @@
 .endif
 
 // Defining TTMP_REG1 and TTMP_REG2 for clarity in comments
-// TTMP_REG1 means ttmp6 register if gfx>=940 and means ttmp13 register if gfx<940
-// TTMP_REG2 means ttmp11 register if gfx>=940 and means ttmp6 register if gfx<940
+// TTMP_REG1 means ttmp6 register if gfx>=942 and means ttmp13 register if gfx<942
+// TTMP_REG2 means ttmp11 register if gfx>=942 and means ttmp6 register if gfx<942
 
 .if .amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4
   .set TTMP11_TTMPS_SETUP_SHIFT              , 31
@@ -205,12 +205,12 @@
 //   ttmp15 = TMA[63:32]
 // gfx9:
 //   ttmp1 = 0[2:0], PCRewind[3:0], HostTrap[0], TrapId[7:0], PC[47:32]
-// all gfx9 (except gfx940, gfx941, gfx942):
+// all gfx9 (except gfx942):
 //   ttmp6 = 0[6:0], DispatchPktIndx[24:0]
 //   ttmp11 = SQ_WAVE_IB_STS[20:15], 0[1:0], DebugEnabled[0], 0[15:0], NoScratch[0], WaveInWg[5:0]
 //            Note: Once stochastic sampling is implemented, L2 Trap Handler will use Bit 23
 //            (TTMP11_PCS_IS_STOCHASTIC) to differentiate between stochastic and hosttrap
-// gfx940/gfx941/gfx942:
+// gfx942:
 //   ttmp11 = 0[0], DispatchPktIndx[24:0], WaveIdInWg[5:0]
 //   ttmp13 = SQ_WAVE_IB_STS[20:15], 0[1:0], DebugEnabled[0], 0[22:0]
 // gfx10:

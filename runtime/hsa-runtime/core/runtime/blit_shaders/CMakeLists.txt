@@ -49,10 +49,10 @@ find_package(Clang REQUIRED HINTS ${CMAKE_PREFIX_PATH}/llvm PATHS /opt/rocm/llvm
 find_package(LLVM REQUIRED HINTS ${CMAKE_PREFIX_PATH}/llvm PATHS /opt/rocm/llvm )
 
 # Set the target devices
-set (TARGET_DEVS "gfx900;gfx940;gfx1010;gfx1030;gfx1100;gfx1200")
+set (TARGET_DEVS "gfx900;gfx1010;gfx1030;gfx1100;gfx1200")
 
 # Set the postfix for each target device
-set (POSTFIX "9;940;1010;10;11;12")
+set (POSTFIX "9;1010;10;11;12")
 
 # If verbose output is enabled, print paths and target devices
 if(${CMAKE_VERBOSE_MAKEFILE})
