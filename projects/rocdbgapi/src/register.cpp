@@ -166,29 +166,29 @@ amdgpu_regnum_to_dwarf_register (amdgpu_regnum_t regnum)
       /* Scalar registers 64-105.  */
       return 1024 + (regnum - amdgpu_regnum_t::first_sgpr);
     }
-  else if (regnum >= amdgpu_regnum_t::first_vgpr_32
-           && regnum < (amdgpu_regnum_t::first_vgpr_32 + 256))
+  else if (regnum >= amdgpu_regnum_t::v0_32
+           && regnum <= amdgpu_regnum_t::v255_32)
     {
       /* Vector registers 0-255 (wave32).  */
-      return 1536 + (regnum - amdgpu_regnum_t::first_vgpr_32);
+      return 1536 + (regnum - amdgpu_regnum_t::v0_32);
     }
-  else if (regnum >= amdgpu_regnum_t::first_accvgpr_32
-           && regnum < (amdgpu_regnum_t::first_accvgpr_32 + 256))
+  else if (regnum >= amdgpu_regnum_t::a0_32
+           && regnum <= amdgpu_regnum_t::a255_32)
     {
       /* Accumulation Vector registers 0-255 (wave32).  */
-      return 2048 + (regnum - amdgpu_regnum_t::first_accvgpr_32);
+      return 2048 + (regnum - amdgpu_regnum_t::a0_32);
     }
-  else if (regnum >= amdgpu_regnum_t::first_vgpr_64
-           && regnum < (amdgpu_regnum_t::first_vgpr_64 + 256))
+  else if (regnum >= amdgpu_regnum_t::v0_64
+           && regnum <= amdgpu_regnum_t::v255_64)
     {
       /* Vector registers 0-255 (wave64).  */
-      return 2560 + (regnum - amdgpu_regnum_t::first_vgpr_64);
+      return 2560 + (regnum - amdgpu_regnum_t::v0_64);
     }
-  else if (regnum >= amdgpu_regnum_t::first_accvgpr_64
-           && regnum < (amdgpu_regnum_t::first_accvgpr_64 + 256))
+  else if (regnum >= amdgpu_regnum_t::a0_64
+           && regnum <= amdgpu_regnum_t::a255_64)
     {
       /* Accumulation Vector registers 0-255 (wave64).  */
-      return 3072 + (regnum - amdgpu_regnum_t::first_accvgpr_64);
+      return 3072 + (regnum - amdgpu_regnum_t::a0_64);
     }
 
   return std::nullopt;
@@ -237,22 +237,22 @@ dwarf_register_to_amdgpu_regnum (uint64_t dwarf_register_)
   else if (dwarf_register >= 1536 && dwarf_register <= 1791)
     {
       /* Vector registers 0-255 (wave32).  */
-      return amdgpu_regnum_t::first_vgpr_32 + (dwarf_register - 1536);
+      return amdgpu_regnum_t::v0_32 + (dwarf_register - 1536);
     }
   else if (dwarf_register >= 2048 && dwarf_register <= 2303)
     {
       /* Accumulation Vector registers 0-255 (wave32).  */
-      return amdgpu_regnum_t::first_accvgpr_32 + (dwarf_register - 2048);
+      return amdgpu_regnum_t::a0_32 + (dwarf_register - 2048);
     }
   else if (dwarf_register >= 2560 && dwarf_register <= 2815)
     {
       /* Vector registers 0-255 (wave64).  */
-      return amdgpu_regnum_t::first_vgpr_64 + (dwarf_register - 2560);
+      return amdgpu_regnum_t::v0_64 + (dwarf_register - 2560);
     }
   else if (dwarf_register >= 3072 && dwarf_register <= 3327)
     {
       /* Accumulation Vector registers 0-255 (wave64).  */
-      return amdgpu_regnum_t::first_accvgpr_64 + (dwarf_register - 3072);
+      return amdgpu_regnum_t::a0_64 + (dwarf_register - 3072);
     }
 
   return std::nullopt;
