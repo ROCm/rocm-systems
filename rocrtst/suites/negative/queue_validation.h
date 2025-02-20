@@ -48,6 +48,8 @@
 #include "common/base_rocr.h"
 #include "hsa/hsa.h"
 #include "suites/test_common/test_base.h"
+#include <sys/resource.h>
+
 
 class QueueValidation : public TestBase {
  public:
@@ -93,6 +95,8 @@ class QueueValidation : public TestBase {
 
 
  private:
+  struct rlimit rlimit_; //value of rlimit before test starts
+
   void QueueValidationForInvalidDimension(hsa_agent_t cpuAgent, hsa_agent_t gpuAgent);
   void QueueValidationInvalidGroupMemory(hsa_agent_t cpuAgent, hsa_agent_t gpuAgent);
   void QueueValidationForInvalidKernelObject(hsa_agent_t cpuAgent, hsa_agent_t gpuAgent);
