@@ -163,7 +163,7 @@ def to_std(a):
 
 def to_int(a):
     if str(type(a)) == "<class 'NoneType'>":
-        return np.nan
+        return None
     elif isinstance(a, (int, float, np.int64)):
         return int(a)
     elif isinstance(a, pd.core.series.Series):
@@ -811,9 +811,8 @@ def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug):
                                 # print("eval_metric", id, expr)
                                 try:
                                     out = eval(compile(row[expr], "<string>", "eval"))
-                                    if row.name != "19.1.1" and np.isnan(
-                                        out
-                                    ):  # Special exception for unique format of Active CUs in mem chart
+
+                                    if np.isnan(out):
                                         row[expr] = ""
                                     else:
                                         row[expr] = out
