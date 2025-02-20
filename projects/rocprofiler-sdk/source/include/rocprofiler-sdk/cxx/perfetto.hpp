@@ -84,6 +84,7 @@ ROCPROFILER_DEFINE_CATEGORY(category, memory_copy, "Async memory copy")
 ROCPROFILER_DEFINE_CATEGORY(category, memory_allocation, "Memory Allocation")
 ROCPROFILER_DEFINE_CATEGORY(category, rocdecode_api, "rocDecode API function")
 ROCPROFILER_DEFINE_CATEGORY(category, rocjpeg_api, "rocJPEG API function")
+ROCPROFILER_DEFINE_CATEGORY(category, counter_collection, "Counter Collection")
 
 #define ROCPROFILER_PERFETTO_CATEGORIES                                                            \
     ROCPROFILER_PERFETTO_CATEGORY(category::hsa_api),                                              \
@@ -93,6 +94,7 @@ ROCPROFILER_DEFINE_CATEGORY(category, rocjpeg_api, "rocJPEG API function")
         ROCPROFILER_PERFETTO_CATEGORY(category::openmp),                                           \
         ROCPROFILER_PERFETTO_CATEGORY(category::kernel_dispatch),                                  \
         ROCPROFILER_PERFETTO_CATEGORY(category::memory_copy),                                      \
+        ROCPROFILER_PERFETTO_CATEGORY(category::counter_collection),                               \
         ROCPROFILER_PERFETTO_CATEGORY(category::memory_allocation),                                \
         ROCPROFILER_PERFETTO_CATEGORY(category::rocdecode_api),                                    \
         ROCPROFILER_PERFETTO_CATEGORY(category::rocjpeg_api)

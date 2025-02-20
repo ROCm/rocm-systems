@@ -72,7 +72,8 @@ write_perfetto(
     const generator<rocprofiler_buffer_tracing_hsa_api_record_t>&              hsa_api_gen,
     const generator<tool_buffer_tracing_kernel_dispatch_with_stream_record_t>& kernel_dispatch_gen,
     const generator<tool_buffer_tracing_memory_copy_with_stream_record_t>&     memory_copy_gen,
-    const generator<rocprofiler_buffer_tracing_marker_api_record_t>&           marker_api_gen,
+    const generator<tool_counter_record_t>&                          counter_collection_gen,
+    const generator<rocprofiler_buffer_tracing_marker_api_record_t>& marker_api_gen,
     const generator<rocprofiler_buffer_tracing_scratch_memory_record_t>& /*scratch_memory_gen*/,
     const generator<rocprofiler_buffer_tracing_rccl_api_record_t>&          rccl_api_gen,
     const generator<rocprofiler_buffer_tracing_memory_allocation_record_t>& memory_allocation_gen,
@@ -343,6 +344,12 @@ write_perfetto(
         }
     }
 
+    // Fetch counter values
+    auto counter_id_value = std::map<rocprofiler_counter_id_t, double>{};
+
+    // Create counter_id_to_name map
+    auto counter_id_to_name = std::unordered_map<rocprofiler_counter_id_t, std::string_view>{};
+
     // trace events
     {
         auto buffer_names     = sdk::get_buffer_tracing_names();
@@ -584,6 +591,24 @@ write_perfetto(
 
                 tracing_session->FlushBlocking();
             }
+
+        for(auto ditr : counter_collection_gen)
+            for(const auto& record : counter_collection_gen.get(ditr))
+            {
+                for(const auto& counter_info : tool_metadata.get_counter_info())
+                {
+                    counter_id_to_name.emplace(counter_info.id, counter_info.name);
+                }
+
+                auto record_vector = record.read();
+
+                // Accumulate counters based on ID
+                for(auto& count : record_vector)
+                {
+                    counter_id_value[count.id] += count.value;
+                }
+            }
+
         for(auto ditr : kernel_dispatch_gen)
         {
             auto generator = kernel_dispatch_gen.get(ditr);
@@ -697,7 +722,14 @@ write_perfetto(
                             "workgroup_size",
                             info.workgroup_size.x * info.workgroup_size.y * info.workgroup_size.z,
                             "grid_size",
-                            info.grid_size.x * info.grid_size.y * info.grid_size.z);
+                            info.grid_size.x * info.grid_size.y * info.grid_size.z,
+                            [&](::perfetto::EventContext ctx) {
+                                for(auto& [counter_id, counter_value] : counter_id_value)
+                                {
+                                    sdk::add_perfetto_annotation(
+                                        ctx, counter_id_to_name.at(counter_id), counter_value);
+                                }
+                            });
                         TRACE_EVENT_END(
                             sdk::perfetto_category<sdk::category::kernel_dispatch>::name,
                             *_track,
@@ -708,6 +740,7 @@ write_perfetto(
             }
         }
     }
+
     // counter tracks
     {
         // memory copy counter track
@@ -965,6 +998,93 @@ write_perfetto(
                 tracing_session->FlushBlocking();
             }
         }
+    }
+
+    // Create counter tracks per agent
+    {
+        auto counters_endpoints = std::unordered_map<
+            rocprofiler_agent_id_t,
+            std::unordered_map<rocprofiler_counter_id_t, std::map<uint64_t, uint64_t>>>{};
+
+        auto counters_extremes = std::pair<uint64_t, uint64_t>{
+            std::numeric_limits<uint64_t>::max(), std::numeric_limits<uint64_t>::min()};
+
+        auto constexpr timestamp_buffer = 1000;
+
+        for(auto ditr : counter_collection_gen)
+            for(const auto& record : counter_collection_gen.get(ditr))
+            {
+                const auto& info = record.dispatch_data.dispatch_info;
+
+                const auto& start_timestamp = record.dispatch_data.start_timestamp;
+                const auto& end_timestamp   = record.dispatch_data.end_timestamp;
+
+                uint64_t _mean_timestamp =
+                    start_timestamp + (0.5 * (end_timestamp - start_timestamp));
+
+                for(auto& [counter_id, counter_value] : counter_id_value)
+                {
+                    counters_endpoints[info.agent_id][counter_id].emplace(
+                        start_timestamp - timestamp_buffer, 0);
+                    counters_endpoints[info.agent_id][counter_id].emplace(start_timestamp,
+                                                                          counter_value);
+                    counters_endpoints[info.agent_id][counter_id].emplace(_mean_timestamp,
+                                                                          counter_value);
+                    counters_endpoints[info.agent_id][counter_id].emplace(end_timestamp, 0);
+                    counters_endpoints[info.agent_id][counter_id].emplace(
+                        end_timestamp + timestamp_buffer, 0);
+                }
+
+                counters_extremes = std::make_pair(
+                    std::min(counters_extremes.first, record.dispatch_data.start_timestamp),
+                    std::max(counters_extremes.second, record.dispatch_data.end_timestamp));
+            }
+
+        auto counter_tracks = std::unordered_map<rocprofiler_agent_id_t,
+                                                 std::map<std::string, ::perfetto::CounterTrack>>{};
+
+        constexpr auto extremes_endpoint_buffer = 5000;
+
+        for(auto ditr : counter_collection_gen)
+            for(const auto& record : counter_collection_gen.get(ditr))
+            {
+                const auto& info = record.dispatch_data.dispatch_info;
+                const auto& sym  = tool_metadata.get_kernel_symbol(info.kernel_id);
+
+                CHECK(sym != nullptr);
+
+                auto name = sym->formatted_kernel_name;
+
+                for(auto& [counter_id, counter_value] : counter_id_value)
+                {
+                    counters_endpoints[info.agent_id][counter_id].emplace(
+                        counters_extremes.first - extremes_endpoint_buffer, 0);
+                    counters_endpoints[info.agent_id][counter_id].emplace(
+                        counters_extremes.second + extremes_endpoint_buffer, 0);
+
+                    auto agent_index_info =
+                        tool_metadata.get_agent_index(info.agent_id, ocfg.agent_index_value);
+                    auto track_name_ss = std::stringstream{};
+                    track_name_ss << agent_index_info.label << " [" << agent_index_info.index
+                                  << "] "
+                                  << "PMC " << counter_id_to_name.at(counter_id);
+
+                    auto track_name = track_name_ss.str();
+
+                    counter_tracks[info.agent_id].emplace(
+                        track_name, ::perfetto::CounterTrack(track_name.c_str()));
+                    auto& endpoints = counters_endpoints[info.agent_id][counter_id];
+                    for(auto& counter_itr : endpoints)
+                    {
+                        TRACE_COUNTER(
+                            sdk::perfetto_category<sdk::category::counter_collection>::name,
+                            counter_tracks[info.agent_id].at(track_name),
+                            counter_itr.first,
+                            counter_itr.second);
+                        tracing_session->FlushBlocking();
+                    }
+                }
+            }
     }
 
     ::perfetto::TrackEvent::Flush();

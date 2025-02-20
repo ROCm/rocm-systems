@@ -35,6 +35,7 @@ def test_perfetto_data(
         "memory_allocation",
         "rocdecode_api",
         "rocjpeg_api",
+        "counter_collection",
     ),
 ):
 
@@ -47,6 +48,7 @@ def test_perfetto_data(
         "memory_allocation": ("memory_allocation", "memory_allocation"),
         "rocdecode_api": ("rocdecode_api", "rocdecode_api"),
         "rocjpeg_api": ("rocjpeg_api", "rocjpeg_api"),
+        "counter_collection": ("counter_collection", "counter_collection"),
     }
 
     # make sure they specified valid categories
@@ -57,7 +59,23 @@ def test_perfetto_data(
         itr for key, itr in mapping.items() if key in categories
     ]:
         _pf_data = pftrace_data.loc[pftrace_data["category"] == pf_category]
-        _js_data = json_data["rocprofiler-sdk-tool"]["buffer_records"][js_category]
+
+        _js_data = []
+        if js_category != "counter_collection":
+            _js_data = json_data["rocprofiler-sdk-tool"]["buffer_records"][js_category]
+        else:
+            unique_counter_ids = set()
+
+            for dispatch_entry in json_data["rocprofiler-sdk-tool"]["callback_records"][
+                js_category
+            ]:
+                counter_records = dispatch_entry["records"]
+
+                for record in counter_records:
+                    counter_id = record["counter_id"]["handle"]
+                    unique_counter_ids.add(counter_id)
+
+            _js_data = [{"counter_id": id} for id in unique_counter_ids]
 
         assert len(_pf_data) == len(
             _js_data
