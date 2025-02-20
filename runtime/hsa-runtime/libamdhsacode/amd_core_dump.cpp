@@ -291,19 +291,13 @@ struct LoadSegmentBuilder : public SegmentBuilder {
   int fd_ = -1;
 };
 
-hsa_status_t build_core_dump(const std::string& filename, const SegmentsInfo& segments) {
+hsa_status_t build_core_dump(const std::string& filename, const SegmentsInfo& segments, size_t size_limit) {
   std::unique_ptr<unsigned char[]> copy_buffer(new unsigned char[MAX_BUFFER_SIZE]);
-  struct rlimit rlimit;
-
-  if (getrlimit(RLIMIT_CORE, &rlimit)) {
-    perror("Could not get core file size\n");
-    return HSA_STATUS_ERROR;
-  }
-  debug_print("core file size: %ld\n", rlimit.rlim_cur);
   if (!segments.size()) return HSA_STATUS_SUCCESS;
   SegmentInfo front = segments.front();
   off_t offset = sizeof(Elf64_Ehdr) + segments.size() * sizeof(Elf64_Phdr);
-  if (rlimit.rlim_cur != -1 && (offset + front.size > rlimit.rlim_cur)) {
+
+  if (size_limit != -1 && (offset + front.size > size_limit)) {
     debug_print("Core file size over limit\n");
     return HSA_STATUS_SUCCESS;
   }
@@ -379,7 +373,7 @@ hsa_status_t build_core_dump(const std::string& filename, const SegmentsInfo& se
           return (uint32_t)0;
       }
     }(seg.stype);
-    if (rlimit.rlim_cur != -1 && (offset + seg.size > rlimit.rlim_cur)) {
+    if (size_limit != -1 && (offset + seg.size > size_limit)) {
       printf("Core limit file reached. GPU core dump created: %s\n", filename.c_str());
       close(fd);
       return HSA_STATUS_SUCCESS;
@@ -434,6 +428,17 @@ hsa_status_t dump_gpu_core() {
   impl::LoadSegmentBuilder lbuilder;
   impl::SegmentsInfo segments;
 
+  struct rlimit rlimit;
+
+  if (getrlimit(RLIMIT_CORE, &rlimit)) {
+    perror("Could not get core file size\n");
+    return HSA_STATUS_ERROR;
+  }
+  debug_print("core file size: %ld\n", rlimit.rlim_cur);
+
+  if (rlimit.rlim_cur == 0)
+    return HSA_STATUS_SUCCESS;
+
   hsa_status_t status = nbuilder.Collect(segments);
   if (status != HSA_STATUS_SUCCESS) return status;
 
@@ -442,7 +447,7 @@ hsa_status_t dump_gpu_core() {
 
   std::stringstream st;
   st << PREFIX_FILE_NAME << "." << getpid();
-  return build_core_dump(st.str(), segments);
+  return build_core_dump(st.str(), segments, rlimit.rlim_cur);
 }
 }   //  namespace coredump
 }   //  namespace amd
