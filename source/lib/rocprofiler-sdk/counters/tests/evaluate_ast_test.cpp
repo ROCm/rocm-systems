@@ -1054,8 +1054,9 @@ TEST(evaluate_ast, evaluate_mixed_counters)
          Metric("gfx9", "BATES", "a", "a", "a", "MAX_WAVE_SIZE*reduce(VOORHEES,sum)", "", 6)},
         {"KRAMER", Metric("gfx9", "KRAMER", "a", "a", "a", "reduce(KRUEGER,sum)*SE_NUM", "", 7)},
         {"TORRANCE",
-         Metric("gfx9", "TORRANCE", "a", "a", "a", "reduce(KRUEGER,sum)*SIMD_NUM", "", 8)}};
-    add_constants(metrics, 9);
+         Metric("gfx9", "TORRANCE", "a", "a", "a", "reduce(KRUEGER,sum)*SIMD_NUM", "", 8)},
+        {"DODGE", Metric("gfx9", "DODGE", "a", "a", "a", "10*TORRANCE", "", 9)}};
+    add_constants(metrics, 10);
 
     std::unordered_map<std::string, std::vector<rocprofiler_record_counter_t>> base_counter_data = {
         {"VOORHEES", construct_test_data_dim(get_base_rec_id(0), {ROCPROFILER_DIMENSION_NONE}, 8)},
@@ -1088,6 +1089,24 @@ TEST(evaluate_ast, evaluate_mixed_counters)
                                                                   .user_data     = {.value = 0},
                                                                   .agent_id      = {.handle = 0}}}),
              2},
+
+            {"DODGE",
+             times_vec(sum_vec(base_counter_data["KRUEGER"]),
+                       std::vector<rocprofiler_record_counter_t>{{.id            = 0,
+                                                                  .counter_value = 6240,
+                                                                  .dispatch_id   = 0,
+                                                                  .user_data     = {.value = 0},
+                                                                  .agent_id      = {.handle = 0}}}),
+             2},
+            {"DODGE",
+             times_vec(sum_vec(base_counter_data["KRUEGER"]),
+                       std::vector<rocprofiler_record_counter_t>{{.id            = 0,
+                                                                  .counter_value = 6240,
+                                                                  .dispatch_id   = 0,
+                                                                  .user_data     = {.value = 0},
+                                                                  .agent_id      = {.handle = 0}}}),
+             2},
+
         };
 
     std::unordered_map<std::string, std::unordered_map<std::string, EvaluateAST>> asts;
