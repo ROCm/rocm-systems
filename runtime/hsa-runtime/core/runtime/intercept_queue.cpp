@@ -42,6 +42,7 @@
 
 #include "core/inc/intercept_queue.h"
 #include "core/inc/amd_aql_queue.h"
+#include "core/inc/default_signal.h"
 #include "core/util/utils.h"
 #include "inc/hsa_api_trace.h"
 
@@ -135,7 +136,10 @@ InterceptQueue::InterceptQueue(std::unique_ptr<Queue> queue)
   // Match the queue's signal ABI block to async_doorbell_'s
   // This allows us to use the queue's signal ABI block from devices to trigger async_doorbell while
   // host side use jumps directly to the queue's signal implementation.
-  async_doorbell_ = new InterruptSignal(DOORBELL_MAX);
+  if (core::Runtime::runtime_singleton_->flag().enable_dtif())
+    async_doorbell_ = new DefaultSignal(DOORBELL_MAX);
+  else
+    async_doorbell_ = new InterruptSignal(DOORBELL_MAX);
   MAKE_NAMED_SCOPE_GUARD(sigGuard, [&]() { async_doorbell_->DestroySignal(); });
   this->signal_ = async_doorbell_->signal_;
   amd_queue_.hsa_queue.doorbell_signal = Signal::Convert(this);

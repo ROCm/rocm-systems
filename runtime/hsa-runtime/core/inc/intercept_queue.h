@@ -232,7 +232,7 @@ class InterceptQueue : public QueueProxy, private LocalSignal, public DoorbellSi
   bool IsPendingRetryPoint(uint64_t wrapped_current_read_index) const;
 
   // Event signal to use for async packet processing and control flag.
-  InterruptSignal* async_doorbell_;
+  Signal* async_doorbell_;
   std::atomic<bool> quit_;
 
   // Indicates queue active/inactive state.
