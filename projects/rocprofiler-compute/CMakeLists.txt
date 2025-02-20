@@ -372,6 +372,28 @@ add_custom_target(
         "src/${PACKAGE_NAME},cmake/Dockerfile,cmake/rocm_install.sh,docker/docker-entrypoint.sh,src/rocprof_compute_analyze/convertor/mongodb/convert"
     )
 
+# Standalone binary creation
+add_custom_target(
+    standalonebinary
+    # Change working directory to src
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/src
+    # Check nuitka
+    COMMAND ${Python3_EXECUTABLE} -m pip list | grep -i nuitka > /dev/null 2>&1
+    # Check patchelf
+    COMMAND ${Python3_EXECUTABLE} -m pip list | grep -i patchelf > /dev/null 2>&1
+    # Build standalone binary
+    COMMAND
+        ${Python3_EXECUTABLE} -m nuitka --mode=onefile
+        --include-data-files=${PROJECT_SOURCE_DIR}/VERSION*=./ --enable-plugin=no-qt
+        --include-package-data=dash_svg --include-package=dash_bootstrap_components
+        --include-package=plotly --include-package-data=kaleido
+        --include-package=rocprof_compute_soc --include-package-data=rocprof_compute_soc
+        --include-package-data=utils rocprof-compute
+    # Remove library rpath from executable
+    COMMAND patchelf --remove-rpath rocprof-compute.bin
+    # Move to build directory
+    COMMAND mv rocprof-compute.bin ${CMAKE_BINARY_DIR})
+
 install(
     FILES ${PROJECT_SOURCE_DIR}/LICENSE
     DESTINATION ${CMAKE_INSTALL_DOCDIR}

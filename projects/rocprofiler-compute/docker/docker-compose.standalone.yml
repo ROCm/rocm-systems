@@ -1,0 +1,12 @@
+services:
+  standalone:
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile.standalone
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    security_opt:
+      - seccomp:unconfined
+    volumes:
+      - ../:/app

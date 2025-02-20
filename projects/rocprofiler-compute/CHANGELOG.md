@@ -2,6 +2,10 @@
 
 Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/).
 
+## Unreleased
+
+* Add Docker files to package the application and dependencies into a single portable and executable standalone binary file  
+
 ## (Unreleased) ROCm Compute Profiler 3.1.0 for ROCm 6.4.0
 
 ### Added

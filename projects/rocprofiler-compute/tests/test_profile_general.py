@@ -11,6 +11,7 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 import test_utils
+from test_utils import binary_handler_profile_rocprof_compute
 
 # Globals
 
@@ -35,9 +36,6 @@ MI300_CHIP_IDS = {
 # --
 
 config = {}
-config["rocprofiler-compute"] = SourceFileLoader(
-    "rocprofiler-compute", "src/rocprof-compute"
-).load_module()
 config["kernel_name_1"] = "vecCopy"
 config["app_1"] = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
 config["cleanup"] = True
@@ -45,13 +43,8 @@ config["COUNTER_LOGGING"] = False
 config["METRIC_COMPARE"] = False
 config["METRIC_LOGGING"] = False
 
-# default option is no roof to reduce test run time
-baseline_opts = ["rocprof-compute", "profile", "--no-roof", "-n", "app_1", "-VVV"]
-baseline_with_roof_opts = ["rocprof-compute", "profile", "-n", "app_1", "-VVV"]
-
 num_kernels = 3
 num_devices = 1
-dispatch_id = 0
 
 DEFAULT_ABS_DIFF = 15
 DEFAULT_REL_DIFF = 50
@@ -497,10 +490,9 @@ def validate(test_name, workload_dir, file_dict, args=[]):
 
 
 @pytest.mark.misc
-def test_path():
-    options = baseline_opts
+def test_path(binary_handler_profile_rocprof_compute):
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_rocprof_compute(config, options, workload_dir)
+    binary_handler_profile_rocprof_compute(config, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
 
@@ -520,22 +512,22 @@ def test_path():
 
 
 @pytest.mark.misc
-def test_kernel_names():
-    options = baseline_with_roof_opts + ["--roof-only", "--kernel-names"]
+def test_kernel_names(binary_handler_profile_rocprof_compute):
+    options = ["--device", "0", "--roof-only", "--kernel-names"]
     workload_dir = test_utils.get_output_dir()
-    e = test_utils.launch_rocprof_compute(
-        config, options, workload_dir, check_success=False
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=True
     )
 
     if soc == "MI100":
         # assert that it did not run
-        assert e.value.code >= 1
+        assert returncode >= 1
         # Do not continue testing
         return
     # assert successful run
-    assert e.value.code == 0
+    assert returncode == 0
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
     if soc == "MI200" or "MI300" in soc:
         assert sorted(list(file_dict.keys())) == sorted(
             ROOF_ONLY_FILES + ["kernelName_legend.pdf"]
@@ -553,14 +545,10 @@ def test_kernel_names():
 
 
 @pytest.mark.misc
-def test_device_filter():
-    device_id = "0"
-    # if "HIP_VISIBLE_DEVICES" in os.environ:
-    #     device_id = os.environ["HIP_VISIBLE_DEVICES"]
-
-    options = baseline_opts + ["--device", device_id]
+def test_device_filter(binary_handler_profile_rocprof_compute):
+    options = ["--device", "0"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_rocprof_compute(config, options, workload_dir)
+    binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
     if soc == "MI100":
@@ -585,10 +573,10 @@ def test_device_filter():
 
 
 @pytest.mark.kernel_execution
-def test_kernel():
-    options = baseline_opts + ["--kernel", config["kernel_name_1"]]
+def test_kernel(binary_handler_profile_rocprof_compute):
+    options = ["--kernel", config["kernel_name_1"]]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_rocprof_compute(config, options, workload_dir)
+    binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     if soc == "MI100":
@@ -611,10 +599,10 @@ def test_kernel():
 
 
 @pytest.mark.block
-def test_block_SQ():
-    options = baseline_opts + ["--block", "SQ"]
+def test_block_SQ(binary_handler_profile_rocprof_compute):
+    options = ["--block", "SQ"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_rocprof_compute(config, options, workload_dir)
+    binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     expected_csvs = [
@@ -666,10 +654,10 @@ def test_block_SQ():
 
 
 @pytest.mark.block
-def test_block_SQC():
-    options = baseline_opts + ["--block", "SQC"]
+def test_block_SQC(binary_handler_profile_rocprof_compute):
+    options = ["--block", "SQC"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_rocprof_compute(config, options, workload_dir)
+    binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     expected_csvs = [
@@ -694,10 +682,10 @@ def test_block_SQC():
 
 
 @pytest.mark.block
-def test_block_TA():
-    options = baseline_opts + ["--block", "TA"]
+def test_block_TA(binary_handler_profile_rocprof_compute):
+    options = ["--block", "TA"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_rocprof_compute(config, options, workload_dir)
+    binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     expected_csvs = [
@@ -726,10 +714,10 @@ def test_block_TA():
 
 
 @pytest.mark.block
-def test_block_TD():
-    options = baseline_opts + ["--block", "TD"]
+def test_block_TD(binary_handler_profile_rocprof_compute):
+    options = ["--block", "TD"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_rocprof_compute(config, options, workload_dir)
+    binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     expected_csvs = [
@@ -763,10 +751,10 @@ def test_block_TD():
 
 
 @pytest.mark.block
-def test_block_TCP():
-    options = baseline_opts + ["--block", "TCP"]
+def test_block_TCP(binary_handler_profile_rocprof_compute):
+    options = ["--block", "TCP"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_rocprof_compute(config, options, workload_dir)
+    binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     expected_csvs = [
@@ -797,10 +785,10 @@ def test_block_TCP():
 
 
 @pytest.mark.block
-def test_block_TCC():
-    options = baseline_opts + ["--block", "TCC"]
+def test_block_TCC(binary_handler_profile_rocprof_compute):
+    options = ["--block", "TCC"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_rocprof_compute(config, options, workload_dir)
+    binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     expected_csvs = [
@@ -847,10 +835,10 @@ def test_block_TCC():
 
 
 @pytest.mark.block
-def test_block_SPI():
-    options = baseline_opts + ["--block", "SPI"]
+def test_block_SPI(binary_handler_profile_rocprof_compute):
+    options = ["--block", "SPI"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_rocprof_compute(config, options, workload_dir)
+    binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     expected_csvs = [
@@ -880,10 +868,10 @@ def test_block_SPI():
 
 
 @pytest.mark.block
-def test_block_CPC():
-    options = baseline_opts + ["--block", "CPC"]
+def test_block_CPC(binary_handler_profile_rocprof_compute):
+    options = ["--block", "CPC"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_rocprof_compute(config, options, workload_dir)
+    binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     expected_csvs = [
@@ -906,10 +894,10 @@ def test_block_CPC():
 
 
 @pytest.mark.block
-def test_block_CPF():
-    options = baseline_opts + ["--block", "CPF"]
+def test_block_CPF(binary_handler_profile_rocprof_compute):
+    options = ["--block", "CPF"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_rocprof_compute(config, options, workload_dir)
+    binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     expected_csvs = [
@@ -933,10 +921,10 @@ def test_block_CPF():
 
 
 @pytest.mark.block
-def test_block_SQ_CPC():
-    options = baseline_opts + ["--block", "SQ", "CPC"]
+def test_block_SQ_CPC(binary_handler_profile_rocprof_compute):
+    options = ["--block", "SQ", "CPC"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_rocprof_compute(config, options, workload_dir)
+    binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     expected_csvs = [
@@ -988,115 +976,10 @@ def test_block_SQ_CPC():
 
 
 @pytest.mark.block
-def test_block_SQ_TA():
-    options = baseline_opts + ["--block", "SQ", "TA"]
+def test_block_SQ_TA(binary_handler_profile_rocprof_compute):
+    options = ["--block", "SQ", "TA"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_rocprof_compute(config, options, workload_dir)
-
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-    expected_csvs = [
-        "SQ_IFETCH_LEVEL.csv",
-        "SQ_INST_LEVEL_LDS.csv",
-        "SQ_INST_LEVEL_SMEM.csv",
-        "SQ_INST_LEVEL_VMEM.csv",
-        "SQ_LEVEL_WAVES.csv",
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
-        "pmc_perf_2.csv",
-        "pmc_perf_3.csv",
-        "pmc_perf_4.csv",
-        "pmc_perf_5.csv",
-        "sysinfo.csv",
-        "timestamps.csv",
-    ]
-    if soc == "MI200" or "MI300" in soc:
-        expected_csvs = [
-            "SQ_IFETCH_LEVEL.csv",
-            "SQ_INST_LEVEL_LDS.csv",
-            "SQ_INST_LEVEL_SMEM.csv",
-            "SQ_INST_LEVEL_VMEM.csv",
-            "SQ_LEVEL_WAVES.csv",
-            "pmc_perf.csv",
-            "pmc_perf_0.csv",
-            "pmc_perf_1.csv",
-            "pmc_perf_2.csv",
-            "pmc_perf_3.csv",
-            "pmc_perf_4.csv",
-            "pmc_perf_5.csv",
-            "pmc_perf_6.csv",
-            "pmc_perf_7.csv",
-            "pmc_perf_8.csv",
-            "sysinfo.csv",
-            "timestamps.csv",
-        ]
-
-    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
-
-    validate(inspect.stack()[0][3], workload_dir, file_dict)
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.block
-def test_block_SQ_SPI():
-    options = baseline_opts + ["--block", "SQ", "SPI"]
-    workload_dir = test_utils.get_output_dir()
-    test_utils.launch_rocprof_compute(config, options, workload_dir)
-
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-    expected_csvs = [
-        "SQ_IFETCH_LEVEL.csv",
-        "SQ_INST_LEVEL_LDS.csv",
-        "SQ_INST_LEVEL_SMEM.csv",
-        "SQ_INST_LEVEL_VMEM.csv",
-        "SQ_LEVEL_WAVES.csv",
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
-        "pmc_perf_2.csv",
-        "pmc_perf_3.csv",
-        "pmc_perf_4.csv",
-        "pmc_perf_5.csv",
-        "sysinfo.csv",
-        "timestamps.csv",
-    ]
-    if soc == "MI200" or "MI300" in soc:
-        expected_csvs = [
-            "SQ_IFETCH_LEVEL.csv",
-            "SQ_INST_LEVEL_LDS.csv",
-            "SQ_INST_LEVEL_SMEM.csv",
-            "SQ_INST_LEVEL_VMEM.csv",
-            "SQ_LEVEL_WAVES.csv",
-            "pmc_perf.csv",
-            "pmc_perf_0.csv",
-            "pmc_perf_1.csv",
-            "pmc_perf_2.csv",
-            "pmc_perf_3.csv",
-            "pmc_perf_4.csv",
-            "pmc_perf_5.csv",
-            "pmc_perf_6.csv",
-            "pmc_perf_7.csv",
-            "pmc_perf_8.csv",
-            "sysinfo.csv",
-            "timestamps.csv",
-        ]
-
-    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.block
-def test_block_SQ_SQC_TCP_CPC():
-    options = baseline_opts + ["--block", "SQ", "SQC", "TCP", "CPC"]
-    workload_dir = test_utils.get_output_dir()
-    test_utils.launch_rocprof_compute(config, options, workload_dir)
+    binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     expected_csvs = [
@@ -1144,10 +1027,115 @@ def test_block_SQ_SQC_TCP_CPC():
 
 
 @pytest.mark.block
-def test_block_SQ_SPI_TA_TCC_CPF():
-    options = baseline_opts + ["--block", "SQ", "SPI", "TA", "TCC", "CPF"]
+def test_block_SQ_SPI(binary_handler_profile_rocprof_compute):
+    options = ["--block", "SQ", "SPI"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_rocprof_compute(config, options, workload_dir)
+    binary_handler_profile_rocprof_compute(config, workload_dir, options)
+
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
+    expected_csvs = [
+        "SQ_IFETCH_LEVEL.csv",
+        "SQ_INST_LEVEL_LDS.csv",
+        "SQ_INST_LEVEL_SMEM.csv",
+        "SQ_INST_LEVEL_VMEM.csv",
+        "SQ_LEVEL_WAVES.csv",
+        "pmc_perf.csv",
+        "pmc_perf_0.csv",
+        "pmc_perf_1.csv",
+        "pmc_perf_2.csv",
+        "pmc_perf_3.csv",
+        "pmc_perf_4.csv",
+        "pmc_perf_5.csv",
+        "sysinfo.csv",
+        "timestamps.csv",
+    ]
+    if soc == "MI200" or "MI300" in soc:
+        expected_csvs = [
+            "SQ_IFETCH_LEVEL.csv",
+            "SQ_INST_LEVEL_LDS.csv",
+            "SQ_INST_LEVEL_SMEM.csv",
+            "SQ_INST_LEVEL_VMEM.csv",
+            "SQ_LEVEL_WAVES.csv",
+            "pmc_perf.csv",
+            "pmc_perf_0.csv",
+            "pmc_perf_1.csv",
+            "pmc_perf_2.csv",
+            "pmc_perf_3.csv",
+            "pmc_perf_4.csv",
+            "pmc_perf_5.csv",
+            "pmc_perf_6.csv",
+            "pmc_perf_7.csv",
+            "pmc_perf_8.csv",
+            "sysinfo.csv",
+            "timestamps.csv",
+        ]
+
+    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
+
+    validate(
+        inspect.stack()[0][3],
+        workload_dir,
+        file_dict,
+    )
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.block
+def test_block_SQ_SQC_TCP_CPC(binary_handler_profile_rocprof_compute):
+    options = ["--block", "SQ", "SQC", "TCP", "CPC"]
+    workload_dir = test_utils.get_output_dir()
+    binary_handler_profile_rocprof_compute(config, workload_dir, options)
+
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
+    expected_csvs = [
+        "SQ_IFETCH_LEVEL.csv",
+        "SQ_INST_LEVEL_LDS.csv",
+        "SQ_INST_LEVEL_SMEM.csv",
+        "SQ_INST_LEVEL_VMEM.csv",
+        "SQ_LEVEL_WAVES.csv",
+        "pmc_perf.csv",
+        "pmc_perf_0.csv",
+        "pmc_perf_1.csv",
+        "pmc_perf_2.csv",
+        "pmc_perf_3.csv",
+        "pmc_perf_4.csv",
+        "pmc_perf_5.csv",
+        "sysinfo.csv",
+        "timestamps.csv",
+    ]
+    if soc == "MI200" or "MI300" in soc:
+        expected_csvs = [
+            "SQ_IFETCH_LEVEL.csv",
+            "SQ_INST_LEVEL_LDS.csv",
+            "SQ_INST_LEVEL_SMEM.csv",
+            "SQ_INST_LEVEL_VMEM.csv",
+            "SQ_LEVEL_WAVES.csv",
+            "pmc_perf.csv",
+            "pmc_perf_0.csv",
+            "pmc_perf_1.csv",
+            "pmc_perf_2.csv",
+            "pmc_perf_3.csv",
+            "pmc_perf_4.csv",
+            "pmc_perf_5.csv",
+            "pmc_perf_6.csv",
+            "pmc_perf_7.csv",
+            "pmc_perf_8.csv",
+            "sysinfo.csv",
+            "timestamps.csv",
+        ]
+
+    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
+
+    validate(inspect.stack()[0][3], workload_dir, file_dict)
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.block
+def test_block_SQ_SPI_TA_TCC_CPF(binary_handler_profile_rocprof_compute):
+    options = ["--block", "SQ", "SPI", "TA", "TCC", "CPF"]
+    workload_dir = test_utils.get_output_dir()
+    binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     expected_csvs = [
@@ -1199,10 +1187,10 @@ def test_block_SQ_SPI_TA_TCC_CPF():
 
 
 @pytest.mark.dispatch
-def test_dispatch_0():
-    options = baseline_opts + ["--dispatch", "0"]
+def test_dispatch_0(binary_handler_profile_rocprof_compute):
+    options = ["--dispatch", "0"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_rocprof_compute(config, options, workload_dir)
+    binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
     if soc == "MI100":
@@ -1229,10 +1217,10 @@ def test_dispatch_0():
 
 
 @pytest.mark.dispatch
-def test_dispatch_0_1():
-    options = baseline_opts + ["--dispatch", "0:2"]
+def test_dispatch_0_1(binary_handler_profile_rocprof_compute):
+    options = ["--dispatch", "0:2"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_rocprof_compute(config, options, workload_dir)
+    binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, 2)
     if soc == "MI100":
@@ -1256,10 +1244,10 @@ def test_dispatch_0_1():
 
 
 @pytest.mark.dispatch
-def test_dispatch_2():
-    options = baseline_opts + ["--dispatch", dispatch_id]
+def test_dispatch_2(binary_handler_profile_rocprof_compute):
+    options = ["--dispatch", "0"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_rocprof_compute(config, options, workload_dir)
+    binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
     if soc == "MI100":
@@ -1278,7 +1266,7 @@ def test_dispatch_2():
         file_dict,
         [
             "--dispatch",
-            str(dispatch_id),
+            "0",
         ],
     )
 
@@ -1286,10 +1274,10 @@ def test_dispatch_2():
 
 
 @pytest.mark.join
-def test_join_type_grid():
-    options = baseline_opts + ["--join-type", "grid"]
+def test_join_type_grid(binary_handler_profile_rocprof_compute):
+    options = ["--join-type", "grid"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_rocprof_compute(config, options, workload_dir)
+    binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     if soc == "MI100":
@@ -1312,10 +1300,10 @@ def test_join_type_grid():
 
 
 @pytest.mark.join
-def test_join_type_kernel():
-    options = baseline_opts + ["--join-type", "kernel"]
+def test_join_type_kernel(binary_handler_profile_rocprof_compute):
+    options = ["--join-type", "kernel"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_rocprof_compute(config, options, workload_dir)
+    binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
 
@@ -1339,27 +1327,22 @@ def test_join_type_kernel():
 
 
 @pytest.mark.sort
-def test_sort_dispatches():
+def test_sort_dispatches(binary_handler_profile_rocprof_compute):
     # only test 1 device for roofline
-    device_id = "0"
-    options = (
-        baseline_with_roof_opts
-        + ["--device", device_id]
-        + ["--roof-only", "--sort", "dispatches"]
-    )
+    options = ["--device", "0", "--roof-only", "--sort", "dispatches"]
     workload_dir = test_utils.get_output_dir()
-    e = test_utils.launch_rocprof_compute(
-        config, options, workload_dir, check_success=False
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=True
     )
 
     if soc == "MI100":
         # assert that it did not run
-        assert e.value.code >= 1
+        assert returncode >= 1
         # Do not continue testing
         return
 
     # assert successful run
-    assert e.value.code == 0
+    assert returncode == 0
 
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
 
@@ -1378,27 +1361,22 @@ def test_sort_dispatches():
 
 
 @pytest.mark.sort
-def test_sort_kernels():
+def test_sort_kernels(binary_handler_profile_rocprof_compute):
     # only test 1 device for roofline
-    device_id = "0"
-    options = (
-        baseline_with_roof_opts
-        + ["--device", device_id]
-        + ["--roof-only", "--sort", "kernels"]
-    )
+    options = ["--device", "0", "--roof-only", "--sort", "kernels"]
     workload_dir = test_utils.get_output_dir()
-    e = test_utils.launch_rocprof_compute(
-        config, options, workload_dir, check_success=False
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=True
     )
 
     if soc == "MI100":
         # assert that it did not run
-        assert e.value.code >= 1
+        assert returncode >= 1
         # Do not continue testing
         return
 
     # assert successful run
-    assert e.value.code == 0
+    assert returncode == 0
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
 
     if soc == "MI200" or "MI300" in soc:
@@ -1416,27 +1394,22 @@ def test_sort_kernels():
 
 
 @pytest.mark.mem
-def test_mem_levels_vL1D():
+def test_mem_levels_vL1D(binary_handler_profile_rocprof_compute):
     # only test 1 device for roofline
-    device_id = "0"
-    options = (
-        baseline_with_roof_opts
-        + ["--device", device_id]
-        + ["--roof-only", "--mem-level", "vL1D"]
-    )
+    options = ["--device", "0", "--roof-only", "--mem-level", "vL1D"]
     workload_dir = test_utils.get_output_dir()
-    e = test_utils.launch_rocprof_compute(
-        config, options, workload_dir, check_success=False
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=True
     )
 
     if soc == "MI100":
         # assert that it did not run
-        assert e.value.code >= 1
+        assert returncode >= 1
         # Do not continue testing
         return
 
     # assert successful run
-    assert e.value.code == 0
+    assert returncode == 0
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
 
     if soc == "MI200" or "MI300" in soc:
@@ -1454,27 +1427,22 @@ def test_mem_levels_vL1D():
 
 
 @pytest.mark.mem
-def test_mem_levels_LDS():
+def test_mem_levels_LDS(binary_handler_profile_rocprof_compute):
     # only test 1 device for roofline
-    device_id = "0"
-    options = (
-        baseline_with_roof_opts
-        + ["--device", device_id]
-        + ["--roof-only", "--mem-level", "LDS"]
-    )
+    options = ["--device", "0", "--roof-only", "--mem-level", "LDS"]
     workload_dir = test_utils.get_output_dir()
-    e = test_utils.launch_rocprof_compute(
-        config, options, workload_dir, check_success=False
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=True
     )
 
     if soc == "MI100":
         # assert that it did not run
-        assert e.value.code >= 1
+        assert returncode >= 1
         # Do not continue testing
         return
 
     # assert successful run
-    assert e.value.code == 0
+    assert returncode == 0
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
 
     if soc == "MI200" or "MI300" in soc:

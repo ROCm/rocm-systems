@@ -6,10 +6,7 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 import test_utils
-
-rocprof_compute = SourceFileLoader("rocprof-compute", "src/rocprof-compute").load_module()
-
-baseline_opts = ["rocprof-compute", "analyze"]
+from test_utils import binary_handler_analyze_rocprof_compute
 
 config = {}
 config["cleanup"] = True if "PYTEST_XDIST_WORKER_COUNT" in os.environ else False
@@ -23,809 +20,440 @@ indirs = [
 
 
 @pytest.mark.misc
-def test_valid_path():
+def test_valid_path(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                ["rocprof-compute", "analyze", "--path", workload_dir],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.misc
-def test_list_kernels():
+def test_list_kernels(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--list-stats",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--list-stats"]
+        )
+        assert code == 0
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.list_metrics
-def test_list_metrics_gfx90a():
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv", ["rocprof-compute", "analyze", "--list-metrics", "gfx90a"]
-        ):
-            rocprof_compute.main()
-    assert e.value.code == 1
+def test_list_metrics_gfx90a(binary_handler_analyze_rocprof_compute):
+    code = binary_handler_analyze_rocprof_compute(["analyze", "--list-metrics", "gfx90a"])
+    assert code == 1
 
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--list-metrics",
-                    "gfx90a",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--list-metrics", "gfx90a"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.list_metrics
-def test_list_metrics_gfx906():
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv", ["rocprof-compute", "analyze", "--list-metrics", "gfx906"]
-        ):
-            rocprof_compute.main()
-    assert e.value.code == 1
+def test_list_metrics_gfx906(binary_handler_analyze_rocprof_compute):
+    code = binary_handler_analyze_rocprof_compute(["analyze", "--list-metrics", "gfx906"])
+    assert code == 1
 
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--list-metrics",
-                    "gfx906",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--list-metrics", "gfx906"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.list_metrics
-def test_list_metrics_gfx908():
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv", ["rocprof-compute", "analyze", "--list-metrics", "gfx908"]
-        ):
-            rocprof_compute.main()
-    assert e.value.code == 1
+def test_list_metrics_gfx908(binary_handler_analyze_rocprof_compute):
+    code = binary_handler_analyze_rocprof_compute(["analyze", "--list-metrics", "gfx908"])
+    assert code == 1
 
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--list-metrics",
-                    "gfx908",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--list-metrics", "gfx908"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.filter_block
-def test_filter_block_1():
+def test_filter_block_1(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--block",
-                    "1",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--block", "1"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.filter_block
-def test_filter_block_2():
+def test_filter_block_2(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--block",
-                    "5",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--block", "5"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.filter_block
-def test_filter_block_3():
+def test_filter_block_3(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--block",
-                    "5.2.2",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--block", "5.2.2"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.filter_block
-def test_filter_block_4():
+def test_filter_block_4(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--block",
-                    "6.1",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--block", "6.1"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.filter_block
-def test_filter_block_5():
+def test_filter_block_5(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--block",
-                    "10",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--block", "10"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.filter_block
-def test_filter_block_6():
+def test_filter_block_6(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--block",
-                    "100",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--block", "100"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.serial
-def test_filter_kernel_1():
+def test_filter_kernel_1(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--kernel",
-                    "0",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--kernel", "0"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.serial
-def test_filter_kernel_2():
+def test_filter_kernel_2(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--kernel",
-                    "1",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 1
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--kernel", "1"]
+        )
+        assert code == 1
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.serial
-def test_filter_kernel_3():
+def test_filter_kernel_3(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--kernel",
-                    "0",
-                    "1",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 1
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--kernel", "0", "1"]
+        )
+        assert code == 1
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.serial
-def test_dispatch_1():
+def test_dispatch_1(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--dispatch",
-                    "0",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--dispatch", "0"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.serial
-def test_dispatch_2():
+def test_dispatch_2(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--dispatch",
-                    "1",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--dispatch", "1"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.serial
-def test_dispatch_3():
+def test_dispatch_3(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--dispatch",
-                    "2",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--dispatch", "2"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.serial
-def test_dispatch_4():
+def test_dispatch_4(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--dispatch",
-                    "1",
-                    "4",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 1
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--dispatch", "1", "4"]
+        )
+        assert code == 1
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.serial
-def test_dispatch_5():
+def test_dispatch_5(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--dispatch",
-                    "5",
-                    "6",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 1
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--dispatch", "5", "6"]
+        )
+        assert code == 1
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.misc
-def test_gpu_ids():
+def test_gpu_ids(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--gpu-id",
-                    "2",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--gpu-id", "2"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.normal_unit
-def test_normal_unit_per_wave():
+def test_normal_unit_per_wave(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--normal-unit",
-                    "per_wave",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--normal-unit", "per_wave"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.normal_unit
-def test_normal_unit_per_cycle():
+def test_normal_unit_per_cycle(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--normal-unit",
-                    "per_cycle",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--normal-unit", "per_cycle"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.normal_unit
-def test_normal_unit_per_second():
+def test_normal_unit_per_second(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--normal-unit",
-                    "per_second",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--normal-unit", "per_second"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.normal_unit
-def test_normal_unit_per_kernel():
+def test_normal_unit_per_kernel(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--normal-unit",
-                    "per_kernel",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--normal-unit", "per_kernel"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.max_stat
-def test_max_stat_num_1():
+def test_max_stat_num_1(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--max-stat-num",
-                    "0",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--max-stat-num", "0"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.max_stat
-def test_max_stat_num_2():
+def test_max_stat_num_2(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--max-stat-num",
-                    "5",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--max-stat-num", "5"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.max_stat
-def test_max_stat_num_3():
+def test_max_stat_num_3(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--max-stat-num",
-                    "10",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--max-stat-num", "10"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.max_stat
-def test_max_stat_num_4():
+def test_max_stat_num_4(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--max-stat-num",
-                    "15",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--max-stat-num", "15"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.time_unit
-def test_time_unit_s():
+def test_time_unit_s(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--time-unit",
-                    "s",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--time-unit", "s"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.time_unit
-def test_time_unit_ms():
+def test_time_unit_ms(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--time-unit",
-                    "ms",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--time-unit", "ms"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.time_unit
-def test_time_unit_us():
+def test_time_unit_us(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--time-unit",
-                    "us",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--time-unit", "us"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.time_unit
-def test_time_unit_ns():
+def test_time_unit_ns(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--time-unit",
-                    "ns",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--time-unit", "ns"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.decimal
-def test_decimal_1():
+def test_decimal_1(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--decimal",
-                    "0",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--decimal", "0"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.decimal
-def test_decimal_2():
+def test_decimal_2(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--decimal",
-                    "1",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--decimal", "1"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.decimal
-def test_decimal_3():
+def test_decimal_3(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--decimal",
-                    "4",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--decimal", "4"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.misc
-def test_save_dfs():
+def test_save_dfs(binary_handler_analyze_rocprof_compute):
     output_path = "tests/workloads/vcopy/saved_analysis"
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--save-dfs",
-                    output_path,
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--save-dfs", output_path]
+        )
+        assert code == 0
 
         files_in_workload = os.listdir(output_path)
         single_row_tables = [
@@ -845,20 +473,10 @@ def test_save_dfs():
 
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            [
-                "rocprof-compute",
-                "analyze",
-                "--path",
-                workload_dir,
-                "--save-dfs",
-                output_path,
-            ],
-        ):
-            rocprof_compute.main()
-    assert e.value.code == 0
+    code = binary_handler_analyze_rocprof_compute(
+        ["analyze", "--path", workload_dir, "--save-dfs", output_path]
+    )
+    assert code == 0
 
     files_in_workload = os.listdir(output_path)
     for file_name in files_in_workload:
@@ -871,310 +489,179 @@ def test_save_dfs():
 
 
 @pytest.mark.col
-def test_col_1():
+def test_col_1(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--cols",
-                    "0",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--cols", "0"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.col
-def test_col_2():
+def test_col_2(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--cols",
-                    "2",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--cols", "2"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.col
-def test_col_3():
+def test_col_3(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--cols",
-                    "0",
-                    "2",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--cols", "0", "2"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.misc
-def test_g():
+def test_g(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "-g",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "-g"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.kernel_verbose
-def test_kernel_verbose_0():
+def test_kernel_verbose_0(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--kernel-verbose",
-                    "0",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--kernel-verbose", "0"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.kernel_verbose
-def test_kernel_verbose_1():
+def test_kernel_verbose_1(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--kernel-verbose",
-                    "1",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--kernel-verbose", "1"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.kernel_verbose
-def test_kernel_verbose_2():
+def test_kernel_verbose_2(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--kernel-verbose",
-                    "2",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--kernel-verbose", "2"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.kernel_verbose
-def test_kernel_verbose_3():
+def test_kernel_verbose_3(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--kernel-verbose",
-                    "3",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--kernel-verbose", "3"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.kernel_verbose
-def test_kernel_verbose_4():
+def test_kernel_verbose_4(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--kernel-verbose",
-                    "4",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--kernel-verbose", "4"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.kernel_verbose
-def test_kernel_verbose_5():
+def test_kernel_verbose_5(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--kernel-verbose",
-                    "5",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--kernel-verbose", "5"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.kernel_verbose
-def test_kernel_verbose_6():
+def test_kernel_verbose_6(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--kernel-verbose",
-                    "6",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--kernel-verbose", "6"]
+        )
+        assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.misc
-def test_baseline():
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            [
-                "rocprof-compute",
-                "analyze",
-                "--path",
-                "tests/workloads/vcopy/MI200",
-                "--path",
-                "tests/workloads/vcopy/MI100",
-            ],
-        ):
-            rocprof_compute.main()
-    assert e.value.code == 0
+def test_baseline(binary_handler_analyze_rocprof_compute):
+    code = binary_handler_analyze_rocprof_compute(
+        [
+            "analyze",
+            "--path",
+            "tests/workloads/vcopy/MI200",
+            "--path",
+            "tests/workloads/vcopy/MI100",
+        ]
+    )
+    assert code == 0
 
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            [
-                "rocprof-compute",
-                "analyze",
-                "--path",
-                "tests/workloads/vcopy/MI200",
-                "--path",
-                "tests/workloads/vcopy/MI200",
-            ],
-        ):
-            rocprof_compute.main()
-    assert e.value.code == 1
+    code = binary_handler_analyze_rocprof_compute(
+        [
+            "analyze",
+            "--path",
+            "tests/workloads/vcopy/MI200",
+            "--path",
+            "tests/workloads/vcopy/MI200",
+        ]
+    )
+    assert code == 1
 
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            [
-                "rocprof-compute",
-                "analyze",
-                "--path",
-                "tests/workloads/vcopy/MI100",
-                "--path",
-                "tests/workloads/vcopy/MI100",
-            ],
-        ):
-            rocprof_compute.main()
-    assert e.value.code == 1
+    code = binary_handler_analyze_rocprof_compute(
+        [
+            "analyze",
+            "--path",
+            "tests/workloads/vcopy/MI100",
+            "--path",
+            "tests/workloads/vcopy/MI100",
+        ]
+    )
+    assert code == 1
 
 
 @pytest.mark.misc
-def test_dependency_MI100():
+def test_dependency_MI100(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
-        with pytest.raises(SystemExit) as e:
-            with patch(
-                "sys.argv",
-                [
-                    "rocprof-compute",
-                    "analyze",
-                    "--path",
-                    workload_dir,
-                    "--dependency",
-                ],
-            ):
-                rocprof_compute.main()
-        assert e.value.code == 0
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--dependency"]
+        )
+        assert code == 0
     test_utils.clean_output_dir(config["cleanup"], workload_dir)

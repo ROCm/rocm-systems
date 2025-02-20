@@ -37,8 +37,8 @@ Users may checkout `amd-staging` to preview upcoming features.
 ## Testing
 
 To quickly get the environment (bash shell) for building and testing, run the following commands:
-* `cd utils/docker_env`
-* `docker compose run app`
+* `cd docker`
+* `docker compose -f docker-compose.test.yml run test`
 
 Inside the docker container, clean, build and install the project with tests enabled:
 ```
@@ -55,6 +55,27 @@ ctest
 For manual testing, you can find the executable at `install/bin/rocprof-compute`
 
 NOTE: This Dockerfile uses `rocm/dev-ubuntu-22.04` as the base image
+
+## Standalone binary
+
+To create a standalone binary, run the following commands:
+* `cd docker`
+* `docker compose -f docker-compose.standalone.yml run standalone`
+
+You should find the rocprof-compute.bin standalone binary inside the `build` folder in the root directory of the project.
+
+To build the binary we follow these steps:
+* Use RHEL 8 image used to build ROCm as the base image
+* Install python3.8
+* Install dependencies for runtime and for making standalone binary
+* Call the make target which uses Nuitka to build the standalone binary
+
+NOTE: Since RHEL 8 ships with glibc version 2.28, this standalone binary can only be run on environment with glibc version greater than 2.28.
+glibc version can be checked using `ldd --version` command.
+
+NOTE: libnss3.so shared library is required when using --roof-only option which generates roofline data in PDF format 
+
+To test the standalone binary provide the `--call-binary` option to pytest.
 
 ## How to Cite
 

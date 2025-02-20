@@ -26,11 +26,15 @@
 import inspect
 import os
 import shutil
+import subprocess
+from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
 import pytest
+
+rocprof_compute = SourceFileLoader("rocprof-compute", "src/rocprof-compute").load_module()
 
 
 def check_resource_allocation():
@@ -128,26 +132,67 @@ def check_csv_files(output_dir, num_devices, num_kernels):
     return file_dict
 
 
-def launch_rocprof_compute(config, options, workload_dir, check_success=True):
-    """Launch ROCm Compute Profiler with command-line optoins
+@pytest.fixture
+def binary_handler_profile_rocprof_compute(request):
+    def _handler(config, workload_dir, options=[], check_success=True, roof=False):
+        if request.config.getoption("--call-binary"):
+            baseline_opts = [
+                "build/rocprof-compute.bin",
+                "profile",
+                "-n",
+                "app_1",
+                "-VVV",
+            ]
+            if not roof:
+                baseline_opts.append("--no-roof")
+            process = subprocess.run(
+                baseline_opts
+                + options
+                + ["--path", workload_dir, "--"]
+                + config["app_1"],
+                text=True,
+            )
+            # verify run status
+            if check_success:
+                assert process.returncode == 0
+            return process.returncode
+        else:
+            baseline_opts = ["rocprof-compute", "profile", "-n", "app_1", "-VVV"]
+            if not roof:
+                baseline_opts.append("--no-roof")
+            with pytest.raises(SystemExit) as e:
+                with patch(
+                    "sys.argv",
+                    baseline_opts
+                    + options
+                    + ["--path", workload_dir, "--"]
+                    + config["app_1"],
+                ):
+                    rocprof_compute.main()
+            # verify run status
+            if check_success:
+                assert e.value.code == 0
+            return e.value.code
 
-    Args:
-        config (list): runtime configuration settings
-        options (list): command line options to provide to rocprofiler-compute
-        workload_dir (string): desired output directory
-        check_success (bool, optional): Whether to verify successful exit condition. Defaults to True.
+    return _handler
 
-    Returns:
-       exception: SystemExit exception
-    """
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv", options + ["--path", workload_dir, "--"] + config["app_1"]
-        ):
-            config["rocprofiler-compute"].main()
 
-    # verify run status
-    if check_success:
-        assert e.value.code == 0
+@pytest.fixture
+def binary_handler_analyze_rocprof_compute(request):
+    def _handler(arguments):
+        if request.config.getoption("--call-binary"):
+            process = subprocess.run(
+                ["build/rocprof-compute.bin", *arguments],
+                text=True,
+            )
+            return process.returncode
+        else:
+            with pytest.raises(SystemExit) as e:
+                with patch(
+                    "sys.argv",
+                    ["rocprof-compute", *arguments],
+                ):
+                    rocprof_compute.main()
+            return e.value.code
 
-    return e
+    return _handler
