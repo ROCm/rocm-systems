@@ -98,8 +98,11 @@ if (NOT DEFINED BUILD_SHARED_LIBS)
 	set(BUILD_SHARED_LIBS ON)
 endif()
 
-# Set dependency for rocprofiler-register package
-set(HSA_DEP_ROCPROFILER_REGISTER ON CACHE INTERNAL "")
+# Set hsa pkg dependency with rocprofiler-register package
+# for Shared Library Only.
+if (BUILD_SHARED_LIBS)
+  set(HSA_DEP_ROCPROFILER_REGISTER ON CACHE INTERNAL "")
+endif()
 
 if (HSA_DEP_ROCPROFILER_REGISTER)
   string(APPEND CPACK_DEBIAN_BINARY_PACKAGE_DEPENDS ", rocprofiler-register")
