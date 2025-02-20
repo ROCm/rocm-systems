@@ -1972,6 +1972,7 @@ tool_fini(void* /*tool_data*/)
                              hsa_output.get_generator(),
                              kernel_dispatch_with_stream_output.get_generator(),
                              memory_copy_output_with_stream_output.get_generator(),
+                             counters_output.get_generator(),
                              marker_output.get_generator(),
                              scratch_memory_output.get_generator(),
                              rccl_output.get_generator(),

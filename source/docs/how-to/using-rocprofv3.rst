@@ -902,6 +902,25 @@ Here is the same sample in JSON format:
       ]
    }
 
+Perfetto visualization for counter collection
++++++++++++++++++++++++++++++++++++++++++++++
+
+When collecting performance counter data, you can visualize the counter tracks per agent in the Perfetto viewer by using the PFTrace output format. This allows you to see how counter values change over time during kernel execution.
+
+To generate a Perfetto trace file with counter data, use:
+
+.. code-block:: shell
+
+    rocprofv3 --pmc SQ_WAVES GRBM_GUI_ACTIVE --output-format pftrace -- <application_path>
+
+You can also combine this with other tracing options to correlate counter data with API and kernel execution:
+
+.. code-block:: shell
+
+    rocprofv3 -s --pmc SQ_WAVES --output-format pftrace -- <application_path>
+
+The generated Perfetto trace file can be opened in the Perfetto UI (https://ui.perfetto.dev/). In the viewer, performance counters will appear as counter tracks organized by agent, allowing you to visualize counter values changing over time alongside kernel executions and other traced activities.
+
 Agent info
 ++++++++++++
 
