@@ -1799,13 +1799,9 @@ typedef struct {
     uint16_t xgmi_link_speed;  //!< XGMI bus bitrate in GB/s
 
     uint64_t pcie_bandwidth_acc; //!< PCIE accumulated bandwidth (GB/sec)
-
     uint64_t pcie_bandwidth_inst; //!< PCIE instantaneous bandwidth (GB/sec)
-
     uint64_t pcie_l0_to_recov_count_acc; //!< PCIE L0 to recovery state transition accumulated count
-
     uint64_t pcie_replay_count_acc; //!< PCIE replay accumulated count
-
     uint64_t pcie_replay_rover_count_acc; //!< PCIE replay rollover accumulated count
 
     /**
