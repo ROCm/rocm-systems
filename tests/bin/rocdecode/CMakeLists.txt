@@ -33,11 +33,12 @@ set(CMAKE_HIP_EXTENSIONS OFF)
 set(CMAKE_HIP_STANDARD_REQUIRED ON)
 
 set_source_files_properties(rocdecode.cpp roc_video_dec.cpp PROPERTIES LANGUAGE HIP)
-add_executable(rocdecode)
-target_sources(rocdecode PRIVATE rocdecode.cpp roc_video_dec.cpp)
+add_executable(rocdecode-demo)
+target_sources(rocdecode-demo PRIVATE rocdecode.cpp roc_video_dec.cpp)
 
 find_package(Threads REQUIRED)
 find_package(rocDecode REQUIRED)
 target_link_libraries(
-    rocdecode PRIVATE rocprofiler-sdk::tests-build-flags Threads::Threads hsa-runtime64
-                      rocprofiler-sdk::tests-common-library rocDecode::rocDecode)
+    rocdecode-demo
+    PRIVATE rocprofiler-sdk::tests-build-flags Threads::Threads hsa-runtime64
+            rocprofiler-sdk::tests-common-library rocDecode::rocDecode)

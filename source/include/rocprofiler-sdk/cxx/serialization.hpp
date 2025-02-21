@@ -404,6 +404,21 @@ save(ArchiveT& ar, rocprofiler_callback_tracing_rocdecode_api_data_t data)
 
 template <typename ArchiveT>
 void
+save(ArchiveT& ar, rocprofiler_rocjpeg_api_retval_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(rocJpegStatus_retval);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_callback_tracing_rocjpeg_api_data_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(size);
+    ROCP_SDK_SAVE_DATA_FIELD(retval);
+}
+
+template <typename ArchiveT>
+void
 save(ArchiveT& ar, rocprofiler_callback_tracing_ompt_data_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(size);
@@ -498,6 +513,13 @@ save(ArchiveT& ar, rocprofiler_buffer_tracing_rccl_api_record_t data)
 template <typename ArchiveT>
 void
 save(ArchiveT& ar, rocprofiler_buffer_tracing_rocdecode_api_record_t data)
+{
+    save_buffer_tracing_api_record(ar, data);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_buffer_tracing_rocjpeg_api_record_t data)
 {
     save_buffer_tracing_api_record(ar, data);
 }

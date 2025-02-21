@@ -251,13 +251,13 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         aggregate_tracing_options,
         "-r",
         "--runtime-trace",
-        help="Collect tracing data for HIP runtime API, Marker (ROCTx) API, RCCL API, ROCDecode API, Memory operations (copies, scratch, and allocation), and Kernel dispatches. Similar to --sys-trace but without tracing HIP compiler API and the underlying HSA API.",
+        help="Collect tracing data for HIP runtime API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, Memory operations (copies, scratch, and allocation), and Kernel dispatches. Similar to --sys-trace but without tracing HIP compiler API and the underlying HSA API.",
     )
     add_parser_bool_argument(
         aggregate_tracing_options,
         "-s",
         "--sys-trace",
-        help="Collect tracing data for HIP API, HSA API, Marker (ROCTx) API, RCCL API, ROCDecode API, Memory operations (copies, scratch, and allocations), and Kernel dispatches.",
+        help="Collect tracing data for HIP API, HSA API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, Memory operations (copies, scratch, and allocations), and Kernel dispatches.",
     )
 
     basic_tracing_options = parser.add_argument_group("Basic tracing options")
@@ -311,7 +311,12 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
     add_parser_bool_argument(
         basic_tracing_options,
         "--rocdecode-trace",
-        help="For collecting ROCDecode Traces",
+        help="For collecting rocDecode Traces",
+    )
+    add_parser_bool_argument(
+        basic_tracing_options,
+        "--rocjpeg-trace",
+        help="For collecting rocJPEG Traces",
     )
 
     extended_tracing_options = parser.add_argument_group("Granular tracing options")
@@ -980,6 +985,7 @@ def run(app_args, args, **kwargs):
             "scratch_memory_trace",
             "rccl_trace",
             "rocdecode_trace",
+            "rocjpeg_trace",
         ):
             setattr(args, itr, True)
 
@@ -993,6 +999,7 @@ def run(app_args, args, **kwargs):
             "scratch_memory_trace",
             "rccl_trace",
             "rocdecode_trace",
+            "rocjpeg_trace",
         ):
             setattr(args, itr, True)
 
@@ -1017,6 +1024,7 @@ def run(app_args, args, **kwargs):
             ["marker_trace", "MARKER_API_TRACE"],
             ["rccl_trace", "RCCL_API_TRACE"],
             ["rocdecode_trace", "ROCDECODE_API_TRACE"],
+            ["rocjpeg_trace", "ROCJPEG_API_TRACE"],
             ["kernel_trace", "KERNEL_TRACE"],
             ["memory_copy_trace", "MEMORY_COPY_TRACE"],
             ["memory_allocation_trace", "MEMORY_ALLOCATION_TRACE"],

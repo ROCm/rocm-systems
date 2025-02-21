@@ -73,7 +73,8 @@ write_perfetto(
     const generator<rocprofiler_buffer_tracing_scratch_memory_record_t>& /*scratch_memory_gen*/,
     const generator<rocprofiler_buffer_tracing_rccl_api_record_t>&          rccl_api_gen,
     const generator<rocprofiler_buffer_tracing_memory_allocation_record_t>& memory_allocation_gen,
-    const generator<rocprofiler_buffer_tracing_rocdecode_api_record_t>&     rocdecode_api_gen)
+    const generator<rocprofiler_buffer_tracing_rocdecode_api_record_t>&     rocdecode_api_gen,
+    const generator<rocprofiler_buffer_tracing_rocjpeg_api_record_t>&       rocjpeg_api_gen)
 {
     namespace sdk = ::rocprofiler::sdk;
 
@@ -171,6 +172,9 @@ write_perfetto(
                 tids.emplace(itr.thread_id);
         for(auto ditr : rocdecode_api_gen)
             for(auto itr : rocdecode_api_gen.get(ditr))
+                tids.emplace(itr.thread_id);
+        for(auto ditr : rocjpeg_api_gen)
+            for(auto itr : rocjpeg_api_gen.get(ditr))
                 tids.emplace(itr.thread_id);
 
         for(auto ditr : memory_copy_gen)
@@ -429,6 +433,37 @@ write_perfetto(
                                   "corr_id",
                                   itr.correlation_id.internal);
                 TRACE_EVENT_END(sdk::perfetto_category<sdk::category::rocdecode_api>::name,
+                                track,
+                                itr.end_timestamp);
+                tracing_session->FlushBlocking();
+            }
+
+        for(auto ditr : rocjpeg_api_gen)
+            for(auto itr : rocjpeg_api_gen.get(ditr))
+            {
+                auto  name  = buffer_names.at(itr.kind, itr.operation);
+                auto& track = thread_tracks.at(itr.thread_id);
+
+                TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::rocjpeg_api>::name,
+                                  ::perfetto::StaticString(name.data()),
+                                  track,
+                                  itr.start_timestamp,
+                                  ::perfetto::Flow::ProcessScoped(itr.correlation_id.internal),
+                                  "begin_ns",
+                                  itr.start_timestamp,
+                                  "end_ns",
+                                  itr.end_timestamp,
+                                  "delta_ns",
+                                  (itr.end_timestamp - itr.start_timestamp),
+                                  "tid",
+                                  itr.thread_id,
+                                  "kind",
+                                  itr.kind,
+                                  "operation",
+                                  itr.operation,
+                                  "corr_id",
+                                  itr.correlation_id.internal);
+                TRACE_EVENT_END(sdk::perfetto_category<sdk::category::rocjpeg_api>::name,
                                 track,
                                 itr.end_timestamp);
                 tracing_session->FlushBlocking();

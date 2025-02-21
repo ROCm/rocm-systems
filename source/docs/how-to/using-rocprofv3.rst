@@ -526,6 +526,28 @@ Here are the contents of ``rocdecode_api_trace.csv`` file:
    :widths: 10,10,10,10,10,20,20
    :header-rows: 1
 
+rocJPEG trace
++++++++++++++++
+
+`rocJPEG <https://github.com/ROCm/rocJPEG>`_ is a high-performance jpeg decode SDK for decoding jpeg images. This option traces the rocJPEG API.
+
+.. code-block:: shell
+
+    rocprofv3 --rocjpeg-trace -- <application_path>
+
+The above command generates a ``rocjpeg_api_trace`` file prefixed with the process ID.
+
+.. code-block:: shell
+
+    $ cat 41688_rocjpeg_api_trace.csv
+
+Here are the contents of ``rocjpeg_api_trace.csv`` file:
+
+.. csv-table:: rocJPEG trace
+   :file: /data/rocjpeg_api_trace.csv
+   :widths: 10,10,10,10,10,20,20
+   :header-rows: 1
+
 Post-processing tracing options
 ++++++++++++++++++++++++++++++++
 

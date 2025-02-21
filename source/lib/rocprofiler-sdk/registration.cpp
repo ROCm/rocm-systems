@@ -47,6 +47,7 @@
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/rccl/rccl.hpp"
 #include "lib/rocprofiler-sdk/rocdecode/rocdecode.hpp"
+#include "lib/rocprofiler-sdk/rocjpeg/rocjpeg.hpp"
 #include "lib/rocprofiler-sdk/runtime_initialization.hpp"
 
 #include <rocprofiler-sdk/context.h>
@@ -1004,10 +1005,31 @@ rocprofiler_set_api_table(const char* name,
         rocprofiler::intercept_table::notify_intercept_table_registration(
             ROCPROFILER_ROCDECODE_TABLE, lib_version, lib_instance, std::make_tuple(rocdecode_api));
     }
+    else if(std::string_view{name} == "rocjpeg")
+    {
+        ROCP_ERROR_IF(num_tables > 1)
+            << "rocprofiler expected rocJPEG library to pass 1 API table, not " << num_tables;
+
+        auto* rocjpeg_api = static_cast<RocJpegDispatchTable*>(tables[0]);
+
+        // any internal modifications to the rocjpegApiFuncTable need to be done before we make
+        // the copy or else those modifications will be lost when rocJPEG API tracing is enabled
+        // because the rocJPEG API tracing invokes the function pointers from the copy below
+        rocprofiler::rocjpeg::copy_table(rocjpeg_api, lib_instance);
+
+        // install rocprofiler API wrappers
+        rocprofiler::rocjpeg::update_table(rocjpeg_api);
+
+        // Tracing notifications the runtime has initialized
+        rocprofiler::runtime_init::initialize(
+            ROCPROFILER_RUNTIME_INITIALIZATION_ROCJPEG, lib_version, lib_instance);
+
+        // allow tools to install API wrappers
+        rocprofiler::intercept_table::notify_intercept_table_registration(
+            ROCPROFILER_ROCJPEG_TABLE, lib_version, lib_instance, std::make_tuple(rocjpeg_api));
+    }
     else
     {
-        ROCP_ERROR << "rocprofiler does not accept API tables from " << name;
-
         return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
     }
 

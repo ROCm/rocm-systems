@@ -27,7 +27,7 @@
 #include <rocprofiler-sdk/version.h>
 
 /**
- * @brief ROCProfiler enumeration of HSA Core API tracing operations
+ * @brief ROCProfiler enumeration of rocDecode API tracing operations
  */
 typedef enum  // NOLINT(performance-enum-size)
 {

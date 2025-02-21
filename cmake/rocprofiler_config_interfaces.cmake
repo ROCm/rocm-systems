@@ -336,12 +336,31 @@ find_package(rocDecode)
 
 if(rocDecode_FOUND
    AND rocDecode_INCLUDE_DIR
-   AND EXISTS "${ROCDECODE_INCLUDE_DIR}/rocdecode/amd_detail/rocdecode_api_trace.h")
+   AND EXISTS "${rocDecode_INCLUDE_DIR}/rocdecode/amd_detail/rocdecode_api_trace.h")
     rocprofiler_config_nolink_target(
         rocprofiler-sdk-rocdecode-nolink rocdecode::rocdecode INTERFACE
         ROCPROFILER_SDK_USE_SYSTEM_ROCDECODE=1)
 else()
     target_compile_definitions(rocprofiler-sdk-rocdecode-nolink
                                INTERFACE ROCPROFILER_SDK_USE_SYSTEM_ROCDECODE=0)
+
+endif()
+
+# ----------------------------------------------------------------------------------------#
+#
+# rocJPEG
+#
+# ----------------------------------------------------------------------------------------#
+
+find_package(rocJPEG)
+
+if(rocJPEG_FOUND
+   AND rocJPEG_INCLUDE_DIR
+   AND EXISTS "${rocJPEG_INCLUDE_DIR}/rocjpeg/amd_detail/rocjpeg_api_trace.h")
+    rocprofiler_config_nolink_target(rocprofiler-sdk-rocjpeg-nolink rocjpeg::rocjpeg
+                                     INTERFACE ROCPROFILER_SDK_USE_SYSTEM_ROCJPEG=1)
+else()
+    target_compile_definitions(rocprofiler-sdk-rocjpeg-nolink
+                               INTERFACE ROCPROFILER_SDK_USE_SYSTEM_ROCJPEG=0)
 
 endif()

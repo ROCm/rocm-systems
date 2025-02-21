@@ -246,6 +246,24 @@ generate_stats(const output_config& /*cfg*/,
     return get_stats(rocdecode_stats);
 }
 
+stats_entry_t
+generate_stats(const output_config& /*cfg*/,
+               const metadata&                                                   tool_metadata,
+               const generator<rocprofiler_buffer_tracing_rocjpeg_api_record_t>& data)
+{
+    auto rocjpeg_stats = stats_map_t{};
+    for(auto ditr : data)
+    {
+        for(auto record : data.get(ditr))
+        {
+            auto api_name = tool_metadata.get_operation_name(record.kind, record.operation);
+            rocjpeg_stats[api_name] += (record.end_timestamp - record.start_timestamp);
+        }
+    }
+
+    return get_stats(rocjpeg_stats);
+}
+
 namespace
 {
 void

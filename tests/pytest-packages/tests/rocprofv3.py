@@ -34,6 +34,7 @@ def test_perfetto_data(
         "memory_copy",
         "memory_allocation",
         "rocdecode_api",
+        "rocjpeg_api",
     ),
 ):
 
@@ -45,6 +46,7 @@ def test_perfetto_data(
         "memory_copy": ("memory_copy", "memory_copy"),
         "memory_allocation": ("memory_allocation", "memory_allocation"),
         "rocdecode_api": ("rocdecode_api", "rocdecode_api"),
+        "rocjpeg_api": ("rocjpeg_api", "rocjpeg_api"),
     }
 
     # make sure they specified valid categories
@@ -83,6 +85,7 @@ def test_otf2_data(
         "memory_copy": ("memory_copy", "memory_copy"),
         "memory_allocation": ("memory_allocation", "memory_allocation"),
         "rocdecode_api": ("rocdecode_api", "rocdecode_api"),
+        "rocjpeg_api": ("rocjpeg_api", "rocjpeg_api"),
     }
 
     # make sure they specified valid categories

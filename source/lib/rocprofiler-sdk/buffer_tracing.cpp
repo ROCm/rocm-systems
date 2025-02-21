@@ -35,6 +35,7 @@
 #include "lib/rocprofiler-sdk/rccl/rccl.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/rocdecode/rocdecode.hpp"
+#include "lib/rocprofiler-sdk/rocjpeg/rocjpeg.hpp"
 #include "lib/rocprofiler-sdk/runtime_initialization.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
@@ -43,6 +44,7 @@
 #include <rocprofiler-sdk/marker/table_id.h>
 #include <rocprofiler-sdk/rccl/table_id.h>
 #include <rocprofiler-sdk/rocdecode/table_id.h>
+#include <rocprofiler-sdk/rocjpeg/table_id.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include <atomic>
@@ -94,6 +96,7 @@ ROCPROFILER_BUFFER_TRACING_KIND_STRING(RCCL_API)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(OMPT)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(RUNTIME_INITIALIZATION)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(ROCDECODE_API)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(ROCJPEG_API)
 
 template <size_t Idx, size_t... Tail>
 std::pair<const char*, size_t>
@@ -293,7 +296,13 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
         }
         case ROCPROFILER_BUFFER_TRACING_ROCDECODE_API:
         {
-            val = rocprofiler::rocdecode::name_by_id<ROCPROFILER_ROCDECODE_TABLE_ID>(operation);
+            val =
+                rocprofiler::rocdecode::name_by_id<ROCPROFILER_ROCDECODE_TABLE_ID_CORE>(operation);
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_ROCJPEG_API:
+        {
+            val = rocprofiler::rocjpeg::name_by_id<ROCPROFILER_ROCJPEG_TABLE_ID_CORE>(operation);
             break;
         }
     };
@@ -429,7 +438,12 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
         }
         case ROCPROFILER_BUFFER_TRACING_ROCDECODE_API:
         {
-            ops = rocprofiler::rocdecode::get_ids<ROCPROFILER_ROCDECODE_TABLE_ID>();
+            ops = rocprofiler::rocdecode::get_ids<ROCPROFILER_ROCDECODE_TABLE_ID_CORE>();
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_ROCJPEG_API:
+        {
+            ops = rocprofiler::rocjpeg::get_ids<ROCPROFILER_ROCJPEG_TABLE_ID_CORE>();
             break;
         }
     }
