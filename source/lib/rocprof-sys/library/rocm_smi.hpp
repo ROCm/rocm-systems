@@ -71,11 +71,12 @@ device_count();
 
 struct settings
 {
-    bool busy         = true;
-    bool temp         = true;
-    bool power        = true;
-    bool mem_usage    = true;
-    bool vcn_activity = true;
+    bool busy          = true;
+    bool temp          = true;
+    bool power         = true;
+    bool mem_usage     = true;
+    bool vcn_activity  = true;
+    bool jpeg_activity = true;
 };
 
 struct data
@@ -100,13 +101,14 @@ struct data
 
     static void post_process(uint32_t _dev_id);
 
-    uint32_t              m_dev_id      = std::numeric_limits<uint32_t>::max();
-    timestamp_t           m_ts          = 0;
-    busy_perc_t           m_busy_perc   = 0;
-    temp_t                m_temp        = 0;
-    power_t               m_power       = 0;
-    mem_usage_t           m_mem_usage   = 0;
-    std::vector<uint16_t> m_vcn_metrics = {};
+    uint32_t    m_dev_id    = std::numeric_limits<uint32_t>::max();
+    timestamp_t m_ts        = 0;
+    busy_perc_t m_busy_perc = 0;
+    temp_t      m_temp      = 0;
+    power_t     m_power     = 0;
+    mem_usage_t m_mem_usage = 0;
+    std::unordered_map<uint32_t, std::vector<double>> m_vcn_metrics  = {};
+    std::unordered_map<uint32_t, std::vector<double>> m_jpeg_metrics = {};
 
     friend std::ostream& operator<<(std::ostream& _os, const data& _v)
     {
@@ -183,6 +185,10 @@ ROCPROFSYS_DECLARE_EXTERN_COMPONENT(
 
 ROCPROFSYS_DECLARE_EXTERN_COMPONENT(
     TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_gpu_vcn>), true,
+    double)
+
+ROCPROFSYS_DECLARE_EXTERN_COMPONENT(
+    TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_gpu_jpeg>), true,
     double)
 
 #    endif

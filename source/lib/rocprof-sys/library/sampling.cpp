@@ -126,6 +126,7 @@ using component::backtrace_wall_clock;  // NOLINT
 using component::callchain;
 using component::sampling_cpu_clock;
 using component::sampling_gpu_busy;
+using component::sampling_gpu_jpeg;
 using component::sampling_gpu_memory;
 using component::sampling_gpu_power;
 using component::sampling_gpu_temp;
@@ -1575,10 +1576,16 @@ struct sampling_initialization
         sampling_gpu_temp::set_format_flags(sampling_gpu_temp::get_format_flags());
 
         sampling_gpu_vcn::label()       = "sampling_gpu_vcn_percent";
-        sampling_gpu_vcn::description() = "Utilization of VCN(s)";
+        sampling_gpu_vcn::description() = "VCN instance(s) activity";
         sampling_gpu_vcn::set_precision(0);
         sampling_gpu_vcn::set_format_flags(sampling_gpu_vcn::get_format_flags() &
                                            std::ios_base::showpoint);
+
+        sampling_gpu_jpeg::label()       = "sampling_gpu_jpeg_percent";
+        sampling_gpu_jpeg::description() = "JPEG instance(s) activity";
+        sampling_gpu_jpeg::set_precision(0);
+        sampling_gpu_jpeg::set_format_flags(sampling_gpu_jpeg::get_format_flags() &
+                                            std::ios_base::showpoint);
     }
 };
 }  // namespace

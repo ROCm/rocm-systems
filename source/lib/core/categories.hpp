@@ -106,6 +106,7 @@ ROCPROFSYS_DEFINE_CATEGORY(category, rocm_smi_temp, ROCPROFSYS_CATEGORY_ROCM_SMI
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_smi_power, ROCPROFSYS_CATEGORY_ROCM_SMI_POWER, "device_power", "Power consumption of a GPU device")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_smi_memory_usage, ROCPROFSYS_CATEGORY_ROCM_SMI_MEMORY_USAGE, "device_memory_usage", "Memory usage of a GPU device")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_smi_vcn_activity, ROCPROFSYS_CATEGORY_ROCM_SMI_VCN_ACTIVITY, "device_vcn_activity", "VCN Activity of a GPU device")
+ROCPROFSYS_DEFINE_CATEGORY(category, rocm_smi_jpeg_activity, ROCPROFSYS_CATEGORY_ROCM_SMI_JPEG_ACTIVITY, "device_jpeg_activity", "JPEG Activity of a GPU device")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rocdecode_api, ROCPROFSYS_CATEGORY_ROCM_ROCDECODE_API, "rocm_rocdecode_api", "ROCm ROCDecode API")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rccl, ROCPROFSYS_CATEGORY_ROCM_RCCL, "rccl", "ROCm Communication Collectives Library (RCCL) regions")
 ROCPROFSYS_DEFINE_CATEGORY(category, pthread, ROCPROFSYS_CATEGORY_PTHREAD, "pthread", "POSIX threading functions")
@@ -171,6 +172,7 @@ using name = perfetto_category<Tp...>;
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_smi_power),                          \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_smi_memory_usage),                   \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_smi_vcn_activity),                   \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_smi_jpeg_activity),                  \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_rocdecode_api),                      \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_rccl),                               \
         ROCPROFSYS_PERFETTO_CATEGORY(category::pthread),                                 \
