@@ -157,7 +157,7 @@ jobs:
           -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
           -DROCPROFSYS_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10;py3.11"
           -DROCPROFSYS_MAX_THREADS=64
-          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;videodecode"
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;videodecode;jpegdecode"
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
           -DMPI_HEADERS_ALLOW_MPICH=OFF
 
@@ -248,7 +248,7 @@ jobs:
         rocm-version: ['6.3']
         mpi-headers: ['OFF']
         build-jobs: ['3']
-        ctest-exclude: ['-LE "transpose|videodecode"']
+        ctest-exclude: ['-LE "transpose|videodecode|jpegdecode"']
 
     env:
       BUILD_TYPE: MinSizeRel
@@ -489,7 +489,7 @@ jobs:
           -DDYNINST_BUILD_STATIC_LIBS=OFF
           -DDYNINST_ELFUTILS_DOWNLOAD_VERSION=${{ env.ELFUTILS_DOWNLOAD_VERSION }}
           -DROCPROFSYS_MAX_THREADS=64
-          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;videodecode"
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;videodecode;jpegdecode"
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
           -DMPI_HEADERS_ALLOW_MPICH=ON
 
@@ -628,5 +628,5 @@ jobs:
           -DROCPROFSYS_USE_ROCM=OFF
           -DROCPROFSYS_USE_RCCL=OFF
           -DROCPROFSYS_MAX_THREADS=64
-          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;videodecode"
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;videodecode;jpegdecode"
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}

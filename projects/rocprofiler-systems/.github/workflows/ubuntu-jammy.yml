@@ -190,7 +190,7 @@ jobs:
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
           -DUSE_CLANG_OMP=OFF
           --
-          -LE "transpose|rccl|videodecode"
+          -LE "transpose|rccl|videodecode|jpegdecode"
 
     - name: Install
       timeout-minutes: 10

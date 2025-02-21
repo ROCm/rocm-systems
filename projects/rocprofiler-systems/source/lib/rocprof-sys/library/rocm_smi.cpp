@@ -160,12 +160,15 @@ data::sample(uint32_t _dev_id)
                         &m_power, &power_type)
     ROCPROFSYS_RSMI_GET(get_settings(m_dev_id).mem_usage, rsmi_dev_memory_usage_get,
                         _dev_id, RSMI_MEM_TYPE_VRAM, &m_mem_usage);
-    ROCPROFSYS_RSMI_GET(get_settings(m_dev_id).vcn_activity,
-                        rsmi_dev_gpu_metrics_info_get, _dev_id, &_gpu_metrics);
+    ROCPROFSYS_ROCM_SMI_CALL(rsmi_dev_gpu_metrics_info_get(_dev_id, &_gpu_metrics));
 
-    for(const auto& activity : _gpu_metrics.vcn_activity)
+    for(const auto& v_activity : _gpu_metrics.vcn_activity)
     {
-        if(activity != UINT16_MAX) m_vcn_metrics.push_back(activity);
+        if(v_activity != UINT16_MAX) m_vcn_metrics[_dev_id].push_back(v_activity);
+    }
+    for(const auto& j_activity : _gpu_metrics.jpeg_activity)
+    {
+        if(j_activity != UINT16_MAX) m_jpeg_metrics[_dev_id].push_back(j_activity);
     }
 
 #undef ROCPROFSYS_RSMI_GET
@@ -262,6 +265,7 @@ void
 data::post_process(uint32_t _dev_id)
 {
     using component::sampling_gpu_busy;
+    using component::sampling_gpu_jpeg;
     using component::sampling_gpu_memory;
     using component::sampling_gpu_power;
     using component::sampling_gpu_temp;
@@ -282,7 +286,7 @@ data::post_process(uint32_t _dev_id)
     auto _settings = get_settings(_dev_id);
 
     auto _process_perfetto = [&]() {
-        auto _idx = std::array<uint64_t, 5>{};
+        auto _idx = std::array<uint64_t, 6>{};
         {
             _idx.fill(_idx.size());
             uint64_t nidx = 0;
@@ -291,6 +295,7 @@ data::post_process(uint32_t _dev_id)
             if(_settings.power) _idx.at(2) = nidx++;
             if(_settings.mem_usage) _idx.at(3) = nidx++;
             if(_settings.vcn_activity) _idx.at(4) = nidx++;
+            if(_settings.jpeg_activity) _idx.at(5) = nidx++;
         }
 
         for(auto& itr : _rocm_smi)
@@ -301,6 +306,18 @@ data::post_process(uint32_t _dev_id)
             {
                 auto addendum = [&](const char* _v) {
                     return JOIN(" ", "GPU", _v, JOIN("", '[', _dev_id, ']'), "(S)");
+                };
+                auto addendum_blk = [&](std::size_t _i, const char* _metric) {
+                    if(_i < 10)
+                    {
+                        return JOIN(" ", "GPU", JOIN("", '[', _dev_id, ']'), _metric,
+                                    JOIN("", "[0", _i, ']'), "(S)");
+                    }
+                    else
+                    {
+                        return JOIN(" ", "GPU", JOIN("", '[', _dev_id, ']'), _metric,
+                                    JOIN("", '[', _i, ']'), "(S)");
+                    }
                 };
 
                 if(_settings.busy) counter_track::emplace(_dev_id, addendum("Busy"), "%");
@@ -313,11 +330,25 @@ data::post_process(uint32_t _dev_id)
                                            "megabytes");
                 if(_settings.vcn_activity)
                 {
-                    for(std::size_t i = 0; i < std::size(itr.m_vcn_metrics); ++i)
-                        counter_track::emplace(
-                            _dev_id,
-                            addendum(("VCN Activity on " + std::to_string(i)).c_str()),
-                            "%");
+                    for(const auto& [dev_id, metrics] : itr.m_vcn_metrics)
+                    {
+                        for(std::size_t i = 0; i < std::size(metrics); ++i)
+                        {
+                            counter_track::emplace(
+                                _dev_id, addendum_blk(i, "  VCN Activity"), "%");
+                        }
+                    }
+                }
+                if(_settings.jpeg_activity)
+                {
+                    for(const auto& [dev_id, metrics] : itr.m_jpeg_metrics)
+                    {
+                        for(std::size_t i = 0; i < std::size(metrics); ++i)
+                        {
+                            counter_track::emplace(_dev_id,
+                                                   addendum_blk(i, "JPEG Activity"), "%");
+                        }
+                    }
                 }
             }
             uint64_t _ts = itr.m_ts;
@@ -342,12 +373,28 @@ data::post_process(uint32_t _dev_id)
                               counter_track::at(_dev_id, _idx.at(3)), _ts, _usage);
             if(_settings.vcn_activity)
             {
-                uint64_t idx = _idx.at(4);
-                for(const auto& temp : itr.m_vcn_metrics)
+                for(const auto& [dev_id, metrics] : itr.m_vcn_metrics)
                 {
-                    TRACE_COUNTER("device_vcn_activity", counter_track::at(_dev_id, idx),
-                                  _ts, temp);
-                    ++idx;
+                    for(std::size_t i = 0; i < std::size(metrics); ++i)
+                    {
+                        double _vcn_activity = metrics[i];
+                        TRACE_COUNTER("device_vcn_activity",
+                                      counter_track::at(_dev_id, _idx.at(4) + i), _ts,
+                                      _vcn_activity);
+                    }
+                }
+            }
+            if(_settings.jpeg_activity)
+            {
+                for(const auto& [dev_id, metrics] : itr.m_jpeg_metrics)
+                {
+                    for(std::size_t i = 0; i < std::size(metrics); ++i)
+                    {
+                        double _jpeg_activity = metrics[i];
+                        TRACE_COUNTER("device_jpeg_activity",
+                                      counter_track::at(_dev_id, _idx.at(5) + i), _ts,
+                                      _jpeg_activity);
+                    }
                 }
             }
         }
@@ -440,9 +487,10 @@ setup()
                     key_pair_t{ "power", get_settings(dev_id).power },
                     key_pair_t{ "mem_usage", get_settings(dev_id).mem_usage },
                     key_pair_t{ "vcn_activity", get_settings(dev_id).vcn_activity },
+                    key_pair_t{ "jpeg_activity", get_settings(dev_id).jpeg_activity },
                 };
 
-                get_settings(dev_id) = { false, false, false, false };
+                get_settings(dev_id) = { false, false, false, false, false, false };
                 for(const auto& metric : tim::delimit(*_metrics, ",;:\t\n "))
                 {
                     auto iitr = supported.find(metric);
@@ -523,4 +571,8 @@ ROCPROFSYS_INSTANTIATE_EXTERN_COMPONENT(
 
 ROCPROFSYS_INSTANTIATE_EXTERN_COMPONENT(
     TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_gpu_vcn>), true,
+    double)
+
+ROCPROFSYS_INSTANTIATE_EXTERN_COMPONENT(
+    TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_gpu_jpeg>), true,
     double)

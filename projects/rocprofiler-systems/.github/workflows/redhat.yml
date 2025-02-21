@@ -121,7 +121,7 @@ jobs:
           -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl"
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
           --
-          -LE "transpose|rccl|videodecode"
+          -LE "transpose|rccl|videodecode|jpegdecode"
 
     - name: Install
       timeout-minutes: 10

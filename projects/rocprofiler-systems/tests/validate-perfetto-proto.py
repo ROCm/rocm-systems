@@ -186,7 +186,7 @@ if __name__ == "__main__":
         sum_counter_values = tp.query(
             f"""SELECT SUM(counter.value) AS total_value FROM counter_track JOIN counter ON
               counter.track_id = counter_track.id WHERE counter_track.name LIKE
-              '{counter_name}%'"""
+              '%{counter_name}%'"""
         )
         total_value = 0
         for row in sum_counter_values:

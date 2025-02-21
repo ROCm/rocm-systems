@@ -82,6 +82,8 @@ struct backtrace_gpu_memory
 {};
 struct backtrace_gpu_vcn
 {};
+struct backtrace_gpu_jpeg
+{};
 using sampling_wall_clock = data_tracker<double, backtrace_wall_clock>;
 using sampling_cpu_clock  = data_tracker<double, backtrace_cpu_clock>;
 using sampling_percent    = data_tracker<double, backtrace_fraction>;
@@ -90,6 +92,7 @@ using sampling_gpu_temp   = data_tracker<double, backtrace_gpu_temp>;
 using sampling_gpu_power  = data_tracker<double, backtrace_gpu_power>;
 using sampling_gpu_memory = data_tracker<double, backtrace_gpu_memory>;
 using sampling_gpu_vcn    = data_tracker<double, backtrace_gpu_vcn>;
+using sampling_gpu_jpeg   = data_tracker<double, backtrace_gpu_jpeg>;
 
 template <typename ApiT, typename StartFuncT = default_functor_t,
           typename StopFuncT = default_functor_t>
@@ -123,6 +126,7 @@ ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_gpu_temp, fal
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_gpu_power, false_type)
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_gpu_memory, false_type)
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_gpu_vcn, false_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_gpu_jpeg, false_type)
 #endif
 
 TIMEMORY_SET_COMPONENT_API(rocprofsys::component::sampling_wall_clock,
@@ -149,6 +153,9 @@ TIMEMORY_SET_COMPONENT_API(rocprofsys::component::sampling_gpu_temp, project::ro
                            category::temperature, category::sampling,
                            category::process_sampling)
 TIMEMORY_SET_COMPONENT_API(rocprofsys::component::sampling_gpu_vcn, project::rocprofsys,
+                           tpls::rocm, device::gpu, os::supports_linux,
+                           category::sampling, category::process_sampling)
+TIMEMORY_SET_COMPONENT_API(rocprofsys::component::sampling_gpu_jpeg, project::rocprofsys,
                            tpls::rocm, device::gpu, os::supports_linux,
                            category::sampling, category::process_sampling)
 
@@ -179,6 +186,10 @@ TIMEMORY_METADATA_SPECIALIZATION(rocprofsys::component::sampling_gpu_vcn,
                                  "sampling_gpu_vcn",
                                  "GPU VCN Utilization (% activity) via ROCm-SMI",
                                  "Derived from sampling")
+TIMEMORY_METADATA_SPECIALIZATION(rocprofsys::component::sampling_gpu_jpeg,
+                                 "sampling_gpu_jpeg",
+                                 "GPU JPEG Utilization (% activity) via ROCm-SMI",
+                                 "Derived from sampling")
 
 // statistics type
 TIMEMORY_STATISTICS_TYPE(rocprofsys::component::sampling_wall_clock, double)
@@ -188,6 +199,7 @@ TIMEMORY_STATISTICS_TYPE(rocprofsys::component::sampling_gpu_temp, double)
 TIMEMORY_STATISTICS_TYPE(rocprofsys::component::sampling_gpu_power, double)
 TIMEMORY_STATISTICS_TYPE(rocprofsys::component::sampling_gpu_memory, double)
 TIMEMORY_STATISTICS_TYPE(rocprofsys::component::sampling_gpu_vcn, double)
+TIMEMORY_STATISTICS_TYPE(rocprofsys::component::sampling_gpu_jpeg, double)
 TIMEMORY_STATISTICS_TYPE(rocprofsys::component::comm_data_tracker_t, float)
 
 // enable timing units
@@ -220,6 +232,7 @@ ROCPROFSYS_DEFINE_CONCRETE_TRAIT(report_sum, component::sampling_gpu_temp, false
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(report_sum, component::sampling_gpu_power, false_type)
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(report_sum, component::sampling_gpu_memory, false_type)
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(report_sum, component::sampling_gpu_vcn, false_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(report_sum, component::sampling_gpu_jpeg, false_type)
 
 // reporting categories (mean)
 ROCPROFSYS_DEFINE_CONCRETE_TRAIT(report_mean, component::sampling_percent, false_type)
