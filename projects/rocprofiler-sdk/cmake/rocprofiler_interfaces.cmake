@@ -94,3 +94,7 @@ rocprofiler_add_interface_library(rocprofiler-sdk-rccl-nolink
 rocprofiler_add_interface_library(
     rocprofiler-sdk-rocdecode-nolink
     "ROCDECODE headers without linking to ROCDECODE library" IMPORTED)
+
+rocprofiler_add_interface_library(
+    rocprofiler-sdk-rocjpeg-nolink "ROCJPEG headers without linking to ROCJPEG library"
+    IMPORTED)

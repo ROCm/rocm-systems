@@ -143,10 +143,11 @@ struct buffer_ids
     rocprofiler_buffer_id_t rccl_api_trace          = {};
     rocprofiler_buffer_id_t pc_sampling_host_trap   = {};
     rocprofiler_buffer_id_t rocdecode_api_trace     = {};
+    rocprofiler_buffer_id_t rocjpeg_api_trace       = {};
 
     auto as_array() const
     {
-        return std::array<rocprofiler_buffer_id_t, 10>{hsa_api_trace,
+        return std::array<rocprofiler_buffer_id_t, 11>{hsa_api_trace,
                                                        hip_api_trace,
                                                        kernel_trace,
                                                        memory_copy_trace,
@@ -155,7 +156,8 @@ struct buffer_ids
                                                        scratch_memory,
                                                        rccl_api_trace,
                                                        pc_sampling_host_trap,
-                                                       rocdecode_api_trace};
+                                                       rocdecode_api_trace,
+                                                       rocjpeg_api_trace};
     }
 };
 
@@ -831,6 +833,13 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
 
                 tool::write_ring_buffer(*record, domain_type::ROCDECODE);
             }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_ROCJPEG_API)
+            {
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_rocjpeg_api_record_t*>(header->payload);
+
+                tool::write_ring_buffer(*record, domain_type::ROCJPEG);
+            }
             else
             {
                 ROCP_FATAL << fmt::format(
@@ -1491,6 +1500,26 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             "buffer tracing service for ROCDecode api configure");
     }
 
+    if(tool::get_config().rocjpeg_api_trace)
+    {
+        ROCPROFILER_CALL(rocprofiler_create_buffer(get_client_ctx(),
+                                                   buffer_size,
+                                                   buffer_watermark,
+                                                   ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                                   buffered_tracing_callback,
+                                                   tool_data,
+                                                   &get_buffers().rocjpeg_api_trace),
+                         "buffer creation");
+
+        ROCPROFILER_CALL(
+            rocprofiler_configure_buffer_tracing_service(get_client_ctx(),
+                                                         ROCPROFILER_BUFFER_TRACING_ROCJPEG_API,
+                                                         nullptr,
+                                                         0,
+                                                         get_buffers().rocjpeg_api_trace),
+            "buffer tracing service for ROCDecode api configure");
+    }
+
     if(tool::get_config().kernel_rename)
     {
         auto rename_ctx            = rocprofiler_context_id_t{0};
@@ -1671,10 +1700,11 @@ tool_fini(void* /*tool_data*/)
         tool::memory_allocation_buffered_output_t{tool::get_config().memory_allocation_trace};
     auto counters_records_output =
         tool::counter_records_buffered_output_t{tool::get_config().counter_collection};
-    auto rocdecode_output =
-        tool::rocdecode_buffered_output_t{tool::get_config().rocdecode_api_trace};
     auto pc_sampling_host_trap_output =
         tool::pc_sampling_host_trap_buffered_output_t{tool::get_config().pc_sampling_host_trap};
+    auto rocdecode_output =
+        tool::rocdecode_buffered_output_t{tool::get_config().rocdecode_api_trace};
+    auto rocjpeg_output = tool::rocjpeg_buffered_output_t{tool::get_config().rocjpeg_api_trace};
 
     auto node_id_sort  = [](const auto& lhs, const auto& rhs) { return lhs.node_id < rhs.node_id; };
     auto agents_output = CHECK_NOTNULL(tool_metadata)->agents;
@@ -1694,6 +1724,7 @@ tool_fini(void* /*tool_data*/)
     generate_output(scratch_memory_output, num_output, contributions);
     generate_output(rocdecode_output, num_output, contributions);
     generate_output(pc_sampling_host_trap_output, num_output, contributions);
+    generate_output(rocjpeg_output, num_output, contributions);
 
     if(tool::get_config().advanced_thread_trace && !tool::get_config().att_capability.empty() &&
        !tool_metadata->att_filenames.empty())
@@ -1767,7 +1798,8 @@ tool_fini(void* /*tool_data*/)
                          rccl_output.get_generator(),
                          memory_allocation_output.get_generator(),
                          pc_sampling_host_trap_output.get_generator(),
-                         rocdecode_output.get_generator());
+                         rocdecode_output.get_generator(),
+                         rocjpeg_output.get_generator());
         json_ar.finish_process();
 
         tool::close_json(json_ar);
@@ -1786,7 +1818,8 @@ tool_fini(void* /*tool_data*/)
                              scratch_memory_output.get_generator(),
                              rccl_output.get_generator(),
                              memory_allocation_output.get_generator(),
-                             rocdecode_output.get_generator());
+                             rocdecode_output.get_generator(),
+                             rocjpeg_output.get_generator());
     }
 
     if(tool::get_config().otf2_output && num_output > 0)
@@ -1800,6 +1833,7 @@ tool_fini(void* /*tool_data*/)
         auto rccl_elem_data              = rccl_output.load_all();
         auto memory_allocation_elem_data = memory_allocation_output.load_all();
         auto rocdecode_elem_data         = rocdecode_output.load_all();
+        auto rocjpeg_elem_data           = rocjpeg_output.load_all();
 
         tool::write_otf2(tool::get_config(),
                          *tool_metadata,
@@ -1813,7 +1847,8 @@ tool_fini(void* /*tool_data*/)
                          &scratch_memory_elem_data,
                          &rccl_elem_data,
                          &memory_allocation_elem_data,
-                         &rocdecode_elem_data);
+                         &rocdecode_elem_data,
+                         &rocjpeg_elem_data);
     }
 
     if(tool::get_config().summary_output && num_output > 0)
@@ -1833,8 +1868,9 @@ tool_fini(void* /*tool_data*/)
     destroy_output(scratch_memory_output);
     destroy_output(rccl_output);
     destroy_output(counters_records_output);
-    destroy_output(rocdecode_output);
     destroy_output(pc_sampling_host_trap_output);
+    destroy_output(rocdecode_output);
+    destroy_output(rocjpeg_output);
 
     if(destructors)
     {

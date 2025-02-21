@@ -38,6 +38,7 @@ enum class domain_type
     COUNTER_VALUES,
     PC_SAMPLING_HOST_TRAP,
     ROCDECODE,
+    ROCJPEG,
     LAST,
 };
 

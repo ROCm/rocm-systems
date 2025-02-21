@@ -123,7 +123,8 @@ constexpr auto creation_notifier_library_seq = library_sequence_t<ROCPROFILER_LI
                                                                   ROCPROFILER_HIP_LIBRARY,
                                                                   ROCPROFILER_MARKER_LIBRARY,
                                                                   ROCPROFILER_RCCL_LIBRARY,
-                                                                  ROCPROFILER_ROCDECODE_LIBRARY>{};
+                                                                  ROCPROFILER_ROCDECODE_LIBRARY,
+                                                                  ROCPROFILER_ROCJPEG_LIBRARY>{};
 
 // check that creation_notifier_library_seq is up to date
 static_assert((1 << (creation_notifier_library_seq.size() - 1)) == ROCPROFILER_LIBRARY_LAST,

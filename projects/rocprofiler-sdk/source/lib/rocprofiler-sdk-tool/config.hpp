@@ -111,6 +111,7 @@ struct config : output_config
     bool   hip_compiler_api_trace      = get_env("ROCPROF_HIP_COMPILER_API_TRACE", false);
     bool   rccl_api_trace              = get_env("ROCPROF_RCCL_API_TRACE", false);
     bool   rocdecode_api_trace         = get_env("ROCPROF_ROCDECODE_API_TRACE", false);
+    bool   rocjpeg_api_trace           = get_env("ROCPROF_ROCJPEG_API_TRACE", false);
     bool   list_metrics                = get_env("ROCPROF_LIST_METRICS", false);
     bool   list_metrics_output_file    = get_env("ROCPROF_OUTPUT_LIST_METRICS_FILE", false);
     bool   pc_sampling_host_trap       = false;

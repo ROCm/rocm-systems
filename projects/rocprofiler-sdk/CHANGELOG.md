@@ -159,6 +159,12 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - SDK: `rocprofiler_agent_v0_t` support for agent visibility based on gpu isolation environment variables (`ROCR_VISIBLE_DEVICES`, etc.)
 - Accumulation VGPR support for rocprofv3.
 
+## ROCprofiler-SDK 0.7.0 for ROCm release 6.5
+
+### Added
+
+- Added support for rocJPEG API Tracing
+
 ### Changed
 
 - SDK no longer creates a background thread when every tool returns a nullptr from `rocprofiler_configure`.
@@ -166,5 +172,17 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 ### Resolved issues
 
 - Fixed missing callbacks around internal thread creation within counter collection service
+
+### Removed
+
+## ROCprofiler-SDK 0.7.0 for ROCm release 6.5
+
+### Added
+
+- Added support for rocJPEG API Tracing.
+
+### Changed
+
+### Resolved issues
 
 ### Removed
