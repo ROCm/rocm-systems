@@ -853,6 +853,8 @@ struct_pcie_static_._fields_ = [
     ('max_pcie_speed', ctypes.c_uint32),
     ('pcie_interface_version', ctypes.c_uint32),
     ('slot_type', amdsmi_card_form_factor_t),
+    ('max_pcie_interface_version', ctypes.c_uint32),
+    ('PADDING_1', ctypes.c_ubyte * 4),
     ('reserved', ctypes.c_uint64 * 9),
 ]
 
