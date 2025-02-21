@@ -853,7 +853,7 @@ struct_pcie_static_._fields_ = [
     ('max_pcie_speed', ctypes.c_uint32),
     ('pcie_interface_version', ctypes.c_uint32),
     ('slot_type', amdsmi_card_form_factor_t),
-    ('reserved', ctypes.c_uint64 * 10),
+    ('reserved', ctypes.c_uint64 * 9),
 ]
 
 class struct_pcie_metric_(Structure):
@@ -1430,7 +1430,8 @@ amdsmi_temperature_metric_t__enumvalues = {
     11: 'AMDSMI_TEMP_OFFSET',
     12: 'AMDSMI_TEMP_LOWEST',
     13: 'AMDSMI_TEMP_HIGHEST',
-    13: 'AMDSMI_TEMP_LAST',
+    14: 'AMDSMI_TEMP_SHUTDOWN',
+    14: 'AMDSMI_TEMP_LAST',
 }
 AMDSMI_TEMP_CURRENT = 0
 AMDSMI_TEMP_FIRST = 0
@@ -1447,7 +1448,8 @@ AMDSMI_TEMP_CRIT_MIN_HYST = 10
 AMDSMI_TEMP_OFFSET = 11
 AMDSMI_TEMP_LOWEST = 12
 AMDSMI_TEMP_HIGHEST = 13
-AMDSMI_TEMP_LAST = 13
+AMDSMI_TEMP_SHUTDOWN = 14
+AMDSMI_TEMP_LAST = 14
 amdsmi_temperature_metric_t = ctypes.c_uint32 # enum
 
 # values for enumeration 'amdsmi_voltage_metric_t'
@@ -2906,7 +2908,7 @@ __all__ = \
     'AMDSMI_TEMP_HIGHEST', 'AMDSMI_TEMP_LAST', 'AMDSMI_TEMP_LOWEST',
     'AMDSMI_TEMP_MAX', 'AMDSMI_TEMP_MAX_HYST', 'AMDSMI_TEMP_MIN',
     'AMDSMI_TEMP_MIN_HYST', 'AMDSMI_TEMP_OFFSET',
-    'AMDSMI_UTILIZATION_COUNTER_FIRST',
+    'AMDSMI_TEMP_SHUTDOWN', 'AMDSMI_UTILIZATION_COUNTER_FIRST',
     'AMDSMI_UTILIZATION_COUNTER_LAST',
     'AMDSMI_VIRTUALIZATION_MODE_BAREMETAL',
     'AMDSMI_VIRTUALIZATION_MODE_GUEST',
