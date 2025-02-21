@@ -3074,6 +3074,10 @@ rsmi_dev_pci_throughput_get(uint32_t dv_ind, uint64_t *sent,
     fs_rng >> *max_pkt_sz;
   }
 
+  if ((sent && *sent == UINT64_MAX) || (received && *received == UINT64_MAX)){
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+
   return RSMI_STATUS_SUCCESS;
   CATCH
 }
