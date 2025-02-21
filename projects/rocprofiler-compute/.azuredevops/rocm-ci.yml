@@ -13,6 +13,7 @@ trigger:
   batch: true
   branches:
     include:
+    - develop
     - amd-staging
     - amd-mainline
   paths:
@@ -29,6 +30,7 @@ pr:
   autoCancel: true
   branches:
     include:
+    - develop
     - amd-staging
     - amd-mainline
   paths:
