@@ -508,24 +508,20 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief Binds the second-level trap handler to this node.
   void BindTrapHandler();
-  hsa_status_t UpdateTrapHandlerWithPCS(void* pcs_hosttrap_buffers, void* stochastic_hosttrap_buffers);
 
   // @brief Override from core::Agent.
   hsa_status_t EnableDmaProfiling(bool enable) override;
 
   hsa_status_t PcSamplingIterateConfig(hsa_ven_amd_pcs_iterate_configuration_callback_t cb,
                                        void* cb_data) override;
-  hsa_status_t PcSamplingCreate(pcs::PcsRuntime::PcSamplingSession& session) override;
+  hsa_status_t PcSamplingCreate(pcs::PcsRuntime::PcSamplingSession& session);
   hsa_status_t PcSamplingCreateFromId(HsaPcSamplingTraceId pcsId,
-                            pcs::PcsRuntime::PcSamplingSession& session) override;
-  hsa_status_t PcSamplingDestroy(pcs::PcsRuntime::PcSamplingSession& session) override;
-  hsa_status_t PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& session) override;
-  hsa_status_t PcSamplingStop(pcs::PcsRuntime::PcSamplingSession& session) override;
-  hsa_status_t PcSamplingFlush(pcs::PcsRuntime::PcSamplingSession& session) override;
-  hsa_status_t PcSamplingFlushHostTrapDeviceBuffers(pcs::PcsRuntime::PcSamplingSession& session);
-
-  static void PcSamplingThreadRun(void* agent);
-  void PcSamplingThread();
+                            pcs::PcsRuntime::PcSamplingSession& session);
+  hsa_status_t PcSamplingDestroy(pcs::PcsRuntime::PcSamplingSession& session);
+  hsa_status_t PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& session);
+  hsa_status_t PcSamplingStop(pcs::PcsRuntime::PcSamplingSession& session);
+  hsa_status_t PcSamplingFlush(pcs::PcsRuntime::PcSamplingSession& session);
+  hsa_status_t PcSamplingFlushDeviceBuffers(pcs::PcsRuntime::PcSamplingSession& session);
 
   // @brief Node properties.
   const HsaNodeProperties properties_;
@@ -749,13 +745,13 @@ class GpuAgent : public GpuAgentInt {
     uint8_t reserved1[16];
     /* pc_sample_t buffer0[buf_size]; */
     /* pc_sample_t buffer1[buf_size]; */
-  } pcs_hosttrap_sampling_data_t;
+  } pcs_sampling_data_t;
 
   typedef struct {
-    /* Hosttrap data - stored on device so that trap_handler code can access efficiently */
-    pcs_hosttrap_sampling_data_t* device_data;
+    /* Sampling data - stored on device for trap handler access */
+    pcs_sampling_data_t* device_data;
 
-    /* Hosttrap host buffer - stored on host */
+    /* Sampling host buffer - stored on host */
     uint8_t* host_buffer;
     size_t host_buffer_size;
     uint8_t* host_buffer_wrap_pos;
@@ -774,10 +770,15 @@ class GpuAgent : public GpuAgentInt {
 
     os::Thread thread;
     pcs::PcsRuntime::PcSamplingSession* session;
-  } pcs_hosttrap_t;
-
-  pcs_hosttrap_t pcs_hosttrap_data_;
+  } pcs_data_t;
   /* PC Sampling fields - end */
+
+  hsa_status_t UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttrap_buffers,
+                                        pcs_sampling_data_t* pcs_stochastic_buffers);
+
+  // @brief Thread function to process PC sampling data collected via host-trap
+  // or Stochastic sampling.
+  void PcSamplingThread(pcs_data_t& pcs_data, const char* thread_name);
 
   // @brief device handle
   amdgpu_device_handle ldrm_dev_;
@@ -792,6 +793,12 @@ class GpuAgent : public GpuAgentInt {
   std::map<uint64_t, uint32_t> rec_sdma_eng_id_peers_info_;
 
   bool uses_rec_sdma_eng_id_mask_;
+
+  // structure for host trap sampling
+  pcs_data_t pcs_hosttrap_data_;
+
+  // structure for stochastic sampling
+  pcs_data_t pcs_stochastic_data_;
 
   // @bried XGMI CPU<->GPU
   bool xgmi_cpu_gpu_;

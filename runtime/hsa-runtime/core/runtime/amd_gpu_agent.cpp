@@ -116,6 +116,7 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
           [this](void* base, size_t size, bool large) { ReleaseScratch(base, size, large); }),
       trap_handler_tma_region_(NULL),
       pcs_hosttrap_data_(),
+      pcs_stochastic_data_(),
       xgmi_cpu_gpu_(false) {
   const bool is_apu_node = (properties_.NumCPUCores > 0);
   profile_ = (is_apu_node) ? HSA_PROFILE_FULL : HSA_PROFILE_BASE;
@@ -2166,7 +2167,7 @@ void GpuAgent::SyncClocks() {
   assert(err == HSAKMT_STATUS_SUCCESS && "hsaGetClockCounters error");
 }
 
-hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(void* pcs_hosttrap_buffers, void* pcs_stochastic_buffers) {
+hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttrap_buffers, pcs_sampling_data_t* pcs_stochastic_buffers) {
   // Assemble the trap handler source code.
   void* tma_addr = nullptr;
   uint64_t tma_size = 0;
@@ -2541,7 +2542,11 @@ hsa_status_t GpuAgent::PcSamplingCreate(pcs::PcsRuntime::PcSamplingSession& sess
   ret = PcSamplingCreateFromId(0, session);
   if (ret != HSA_STATUS_SUCCESS) return ret;
 
+  // Obtain the sampling information from the session.
   session.GetHsaKmtSamplingInfo(&sampleInfo);
+
+  // Pass the sampling information to the kernel driver to create PC
+  // sampling session.
   HSAKMT_STATUS retkmt = hsaKmtPcSamplingCreate(node_id(), &sampleInfo, &thunkId);
   if (retkmt != HSAKMT_STATUS_SUCCESS) {
     return (retkmt == HSAKMT_STATUS_KERNEL_ALREADY_OPENED) ? (hsa_status_t)HSA_STATUS_ERROR_RESOURCE_BUSY
@@ -2557,114 +2562,133 @@ hsa_status_t GpuAgent::PcSamplingCreate(pcs::PcsRuntime::PcSamplingSession& sess
 
 hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
                                               pcs::PcsRuntime::PcSamplingSession& session) {
-  pcs_hosttrap_t& ht_data = pcs_hosttrap_data_;
+  // Determine the sampling method from the session
+  hsa_ven_amd_pcs_method_kind_t sampling_method = session.method();
 
-  if (session.method() == HSA_VEN_AMD_PCS_METHOD_HOSTTRAP_V1) {
-    // TODO: For now can only have 1 hosttrap session at a time. As a final solution, we want to be
-    // able to support multiple sessions at a time. But this makes the session.HandleSampleData more
-    // complicated if multiple sessions have different buffer sizes.
-    if (ht_data.session) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  pcs_data_t* pcs_data = nullptr;
 
-    // This is current amd_aql_queue->pm4_ib_size_b_
-    ht_data.cmd_data_sz = 0x1000;
-    ht_data.cmd_data = (uint32_t*)malloc(ht_data.cmd_data_sz);
-    assert(ht_data.cmd_data);
+  if (sampling_method == HSA_VEN_AMD_PCS_METHOD_HOSTTRAP_V1) {
+    pcs_data = &pcs_hosttrap_data_;
+  } else if (sampling_method == HSA_VEN_AMD_PCS_METHOD_STOCHASTIC_V1) {
+    pcs_data = &pcs_stochastic_data_;
+  } else {
+    // Unsupported sampling method
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
-    if (HSA::hsa_signal_create(1, 0, NULL, &ht_data.exec_pm4_signal) != HSA_STATUS_SUCCESS)
-      return HSA_STATUS_ERROR;
+  // Ensure only one session is active at a time for the given method
+  if (pcs_data->session)
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;  // TODO: For now, we can only have
+                                               // 1 pc sampling session at a
+                                               // time. As a final solution, we
+                                               // want to be able to support
+                                               // multiple sessions at a time.
+                                               // But this makes the
+                                               // session.HandleSampleData more
+                                               // complicated if multiple
+                                               // sessions have different buffer
+                                               // sizes.
 
-    ht_data.old_val = (uint64_t*)system_allocator()(sizeof(uint64_t), 0x1000, 0);
-    assert(ht_data.old_val);
+  // This is current amd_aql_queue->pm4_ib_size_b_
+  pcs_data->cmd_data_sz = 0x1000;  // 4KB
+  pcs_data->cmd_data = (uint32_t*)malloc(pcs_data->cmd_data_sz);
+  if (!pcs_data->cmd_data) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
-    if (AMD::hsa_amd_agents_allow_access(1, &public_handle_, NULL, ht_data.old_val))
-      return HSA_STATUS_ERROR;
+  if (HSA::hsa_signal_create(1, 0, NULL, &pcs_data->exec_pm4_signal) != HSA_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
 
-    // Local copy of hosttrap data - we cannot access device memory directly on non-large BAR
-    // systems
-    pcs_hosttrap_sampling_data_t* device_datahost =
-        (pcs_hosttrap_sampling_data_t*)system_allocator()(sizeof(*device_datahost), 0x1000, 0);
-    if (!device_datahost) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  pcs_data->old_val = (uint64_t*)system_allocator()(sizeof(uint64_t), 0x1000, 0);
+  if (!pcs_data->old_val) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
-    MAKE_SCOPE_GUARD([&]() { system_deallocator()(device_datahost); });
+  if (AMD::hsa_amd_agents_allow_access(1, &public_handle_, NULL, pcs_data->old_val))
+    return HSA_STATUS_ERROR;
 
-    memset(device_datahost, 0, sizeof(*device_datahost));
+  // Local copy of pc sampling data - we cannot access device memory directly on non-large BAR
+  // systems
+  pcs_sampling_data_t* device_datahost =
+      (pcs_sampling_data_t*)system_allocator()(sizeof(pcs_sampling_data_t), 0x1000, 0);
+  if (!device_datahost) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
-    if (AMD::hsa_amd_agents_allow_access(1, &public_handle_, NULL, device_datahost) !=
-        HSA_STATUS_SUCCESS)
-      return HSA_STATUS_ERROR;
+  MAKE_SCOPE_GUARD([&]() { system_deallocator()(device_datahost); });
 
-    MAKE_NAMED_SCOPE_GUARD(freeHostTrapResources, [&]() {
-      if (ht_data.device_data) {
-        if (ht_data.device_data->done_sig0.handle)
-          HSA::hsa_signal_destroy(ht_data.device_data->done_sig0);
-        if (ht_data.device_data->done_sig1.handle)
-          HSA::hsa_signal_destroy(ht_data.device_data->done_sig1);
+  memset(device_datahost, 0, sizeof(*device_datahost));
 
-        finegrain_deallocator()(ht_data.device_data);
-      }
-      if (ht_data.host_buffer) system_deallocator()(ht_data.host_buffer);
-    });
+  if (AMD::hsa_amd_agents_allow_access(1, &public_handle_, NULL, device_datahost) !=
+      HSA_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
 
-    // Force creating of PC Sampling queue to trigger exception early in case we exceed max availble
-    // CP queues on this agent
-    queues_[QueuePCSampling].touch();
+  MAKE_NAMED_SCOPE_GUARD(freeResources, [&]() {
+    if (pcs_data->device_data) {
+      if (pcs_data->device_data->done_sig0.handle)
+        HSA::hsa_signal_destroy(pcs_data->device_data->done_sig0);
+      if (pcs_data->device_data->done_sig1.handle)
+        HSA::hsa_signal_destroy(pcs_data->device_data->done_sig1);
 
-    /*
-     * When calling queue->ExecutePM4() Indirect Buffer size which is 0x1000 bytes (1024 DW).
-     * The maximum indirect buffer size we need occurs when we enqueue the
-     * WAIT_REG_MEM, DMA_COPY(s), WRITE_DATA ops:
-     * For WAIT_REG_MEM = 7 DW
-     * For each DMA_COPY = 7 DW
-     * For WRITE_DATA_CMD = 6 DW
-     *
-     * So maximum number of DMA_COPY ops is:
-     * (MAX_IB_SIZE - sizeof(WAIT_REG_MEM) - sizeof(WRITE_DATA_CMD)) / sizeof(DMA_COPY)
-     * (1024 - 7 - 6) / 7 = 144
-     *
-     * Each DMA_COPY op can transfer (1 << 26) bytes, which is 9 GB. trap_buffer_size is a 32-bit
-     * number, so the buffer must be < 4 GB. So we are not limited by Indirect Buffer size.
-     * Set current limit to 256 MB to limit device VRAM usage
-     */
-    const size_t max_trap_buffer_size =
-        core::Runtime::runtime_singleton_->flag().pc_sampling_max_device_buffer_size();
+      finegrain_deallocator()(pcs_data->device_data);
+    }
+    if (pcs_data->host_buffer) system_deallocator()(pcs_data->host_buffer);
+  });
 
-    /*
-     * We use a double-buffer mechanism where there are 2 trap-buffers and 1 host-buffer
-     * Warning: This currently assumes that client latency is smaller than time to fill 1
-     * trap-buffer If latency is bigger, we have to increate host-buffer
-     *
-     * host-buffer must be >= client-buffer so that we can copy full size of client-buffer each
-     * time. To avoid having to deal with wrap-arounds, host-buffer must be a multiple of
-     * trap-buffers
-     *
-     * if client-buffer size is greater than 2x max_trap_buffer_size:
-     *    We are limited by max_trap_buffer_size.
-     *    trap-buffer = max-trap-buffer-size
-     *    host-buffer = 2*smallest size greater than client-buffer but multiple of 1 trap-buffer
-     * else:
-     *    We reduce the trap-buffers so that:
-     *    trap-buffer = half of user-buffer
-     *    host-buffer = 2*user-buffer
-     *
-     * TODO: We are currently using a temporary host-buffer so that we can increase host-buffer to
-     * factor in client latency. Using a direct-copy to the client buffer would be more efficient.
-     * Revisit this once we have empirical data of latency vs how long it takes to fill 1
-     * trap-buffer.
-     */
+  // Force creating of PC Sampling queue to trigger exception early in case we exceed max availble
+  // CP queues on this agent
+  queues_[QueuePCSampling].touch();
 
-    size_t trap_buffer_size = 0;
-    if (session.buffer_size() > 2 * max_trap_buffer_size) {
-      trap_buffer_size = max_trap_buffer_size;
-      ht_data.host_buffer_size = 2 * AlignUp(session.buffer_size(), trap_buffer_size);
+  /*
+   * When calling queue->ExecutePM4() Indirect Buffer size which is 0x1000 bytes (1024 DW).
+   * The maximum indirect buffer size we need occurs when we enqueue the
+   * WAIT_REG_MEM, DMA_COPY(s), WRITE_DATA ops:
+   * For WAIT_REG_MEM = 7 DW
+   * For each DMA_COPY = 7 DW
+   * For WRITE_DATA_CMD = 6 DW
+   *
+   * So maximum number of DMA_COPY ops is:
+   * (MAX_IB_SIZE - sizeof(WAIT_REG_MEM) - sizeof(WRITE_DATA_CMD)) / sizeof(DMA_COPY)
+   * (1024 - 7 - 6) / 7 = 144
+   *
+   * Each DMA_COPY op can transfer (1 << 26) bytes, which is 9 GB. trap_buffer_size is a 32-bit
+   * number, so the buffer must be < 4 GB. So we are not limited by Indirect Buffer size.
+   * Set current limit to 256 MB to limit device VRAM usage
+   */
+  const size_t max_trap_buffer_size =
+      core::Runtime::runtime_singleton_->flag().pc_sampling_max_device_buffer_size();
+
+  /*
+   * We use a double-buffer mechanism where there are 2 trap-buffers and 1 host-buffer
+   * Warning: This currently assumes that client latency is smaller than time to fill 1
+   * trap-buffer If latency is bigger, we have to increate host-buffer
+   *
+   * host-buffer must be >= client-buffer so that we can copy full size of client-buffer each
+   * time. To avoid having to deal with wrap-arounds, host-buffer must be a multiple of
+   * trap-buffers
+   *
+   * if client-buffer size is greater than 2x max_trap_buffer_size:
+   *    We are limited by max_trap_buffer_size.
+   *    trap-buffer = max-trap-buffer-size
+   *    host-buffer = 2*smallest size greater than client-buffer but multiple of 1 trap-buffer
+   * else:
+   *    We reduce the trap-buffers so that:
+   *    trap-buffer = half of user-buffer
+   *    host-buffer = 2*user-buffer
+   *
+   * TODO: We are currently using a temporary host-buffer so that we can increase host-buffer to
+   * factor in client latency. Using a direct-copy to the client buffer would be more efficient.
+   * Revisit this once we have empirical data of latency vs how long it takes to fill 1
+   * trap-buffer.
+   */
+
+  size_t trap_buffer_size = 0;
+  if (session.buffer_size() > 2 * max_trap_buffer_size) {
+    trap_buffer_size = max_trap_buffer_size;
+    pcs_data->host_buffer_size = 2 * AlignUp(session.buffer_size(), trap_buffer_size);
     } else {
       trap_buffer_size = session.buffer_size() / 2;
-      ht_data.host_buffer_size = 2 * session.buffer_size();
+      pcs_data->host_buffer_size = 2 * session.buffer_size();
     }
 
-    ht_data.host_buffer = (uint8_t*)system_allocator()(ht_data.host_buffer_size, 0x1000, 0);
-    if (!ht_data.host_buffer) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    pcs_data->host_buffer = (uint8_t*)system_allocator()(pcs_data->host_buffer_size, 0x1000, 0);
+    if (!pcs_data->host_buffer) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
-    if (AMD::hsa_amd_agents_allow_access(1, &public_handle_, NULL, ht_data.host_buffer) !=
+    if (AMD::hsa_amd_agents_allow_access(1, &public_handle_, NULL, pcs_data->host_buffer) !=
         HSA_STATUS_SUCCESS)
       return HSA_STATUS_ERROR;
 
@@ -2682,101 +2706,162 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
     device_datahost->buf_watermark1 = 0.8 * device_datahost->buf_size;
 
     // Allocate device memory for 2nd level trap handler TMA
-    size_t deviceAllocSize = sizeof(*ht_data.device_data) + (2 * trap_buffer_size);
-    ht_data.device_data = (pcs_hosttrap_sampling_data_t*)finegrain_allocator()(deviceAllocSize, 0);
-    if (ht_data.device_data == nullptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    size_t deviceAllocSize = sizeof(*pcs_data->device_data) + (2 * trap_buffer_size);
+    pcs_data->device_data = (pcs_sampling_data_t*)finegrain_allocator()(deviceAllocSize, 0);
+    if (pcs_data->device_data == nullptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
     // This cpuAgent is the owner of the system_allocator() pool
     auto cpuAgent = GetNearestCpuAgent()->public_handle();
-    hsa_status_t ret = AMD::hsa_amd_agents_allow_access(1, &cpuAgent, NULL, ht_data.device_data);
-    assert(ret == HSA_STATUS_SUCCESS);
+    if (AMD::hsa_amd_agents_allow_access(1, &cpuAgent, NULL, pcs_data->device_data) != HSA_STATUS_SUCCESS)
+      return HSA_STATUS_ERROR;
 
-    if (DmaCopy(ht_data.device_data, device_datahost, sizeof(*device_datahost)) !=
+    if (DmaCopy(pcs_data->device_data, device_datahost, sizeof(*device_datahost)) !=
         HSA_STATUS_SUCCESS) {
       debug_print("Failed to dmaCopy!\n");
       return HSA_STATUS_ERROR;
     }
 
     uint8_t* device_buf_ptr =
-        ((uint8_t*)ht_data.device_data) + sizeof(pcs_hosttrap_sampling_data_t);
-    if (DmaFill(device_buf_ptr, 0, deviceAllocSize - sizeof(pcs_hosttrap_sampling_data_t)) !=
+        ((uint8_t*)pcs_data->device_data) + sizeof(pcs_sampling_data_t);
+    if (DmaFill(device_buf_ptr, 0, deviceAllocSize - sizeof(pcs_sampling_data_t)) !=
         HSA_STATUS_SUCCESS) {
       debug_print("Failed to dmaFill!\n");
       return HSA_STATUS_ERROR;
     }
 
-    ht_data.lost_sample_count = 0;
-    ht_data.host_buffer_wrap_pos = 0;
-    ht_data.host_write_ptr = ht_data.host_buffer;
-    ht_data.host_read_ptr = ht_data.host_write_ptr;
+    pcs_data->lost_sample_count = 0;
+    pcs_data->host_buffer_wrap_pos = 0;
+    pcs_data->host_write_ptr = pcs_data->host_buffer;
+    pcs_data->host_read_ptr = pcs_data->host_write_ptr;
 
-    ht_data.session = &session;
-    freeHostTrapResources.Dismiss();
+    pcs_data->session = &session;
 
-    if (UpdateTrapHandlerWithPCS(ht_data.device_data, NULL) != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
-  }
+    if (UpdateTrapHandlerWithPCS(
+            sampling_method == HSA_VEN_AMD_PCS_METHOD_HOSTTRAP_V1 ? pcs_data->device_data : nullptr,
+            sampling_method == HSA_VEN_AMD_PCS_METHOD_STOCHASTIC_V1
+                ? pcs_data->device_data
+                : nullptr) != HSA_STATUS_SUCCESS)
+      return HSA_STATUS_ERROR;
 
-  session.SetThunkId(ioctlId);
-  ht_data.session = &session;
+    session.SetThunkId(ioctlId);
 
-  return HSA_STATUS_SUCCESS;
+    freeResources.Dismiss();
+
+    return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t GpuAgent::PcSamplingDestroy(pcs::PcsRuntime::PcSamplingSession& session) {
   if (PcSamplingStop(session) != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
-  pcs_hosttrap_t& ht_data = pcs_hosttrap_data_;
   HSAKMT_STATUS retKmt = hsaKmtPcSamplingDestroy(node_id(), session.ThunkId());
-  ht_data.session = NULL;
+  hsa_ven_amd_pcs_method_kind_t sampling_method = session.method();
 
-  if (session.method() == HSA_VEN_AMD_PCS_METHOD_HOSTTRAP_V1) {
-    free(ht_data.cmd_data);
-    system_deallocator()(ht_data.old_val);
-    HSA::hsa_signal_destroy(ht_data.exec_pm4_signal);
-    HSA::hsa_signal_destroy(ht_data.device_data->done_sig0);
-    HSA::hsa_signal_destroy(ht_data.device_data->done_sig1);
-    finegrain_deallocator()(ht_data.device_data);
-    system_deallocator()(ht_data.host_buffer);
+  pcs_data_t* pcs_data = nullptr;
 
-    ht_data.device_data = NULL;
-    ht_data.host_buffer = NULL;
-    ht_data.session = NULL;
-
-    UpdateTrapHandlerWithPCS(NULL, NULL);
+  if (sampling_method == HSA_VEN_AMD_PCS_METHOD_HOSTTRAP_V1) {
+    pcs_data = &pcs_hosttrap_data_;
+  } else if (sampling_method == HSA_VEN_AMD_PCS_METHOD_STOCHASTIC_V1) {
+    pcs_data = &pcs_stochastic_data_;
+  } else {
+    // Unsupported sampling method
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
+
+  // Mark session as inactive
+  pcs_data->session = nullptr;
+
+  free(pcs_data->cmd_data);
+  system_deallocator()(pcs_data->old_val);
+  HSA::hsa_signal_destroy(pcs_data->exec_pm4_signal);
+  HSA::hsa_signal_destroy(pcs_data->device_data->done_sig0);
+  HSA::hsa_signal_destroy(pcs_data->device_data->done_sig1);
+  finegrain_deallocator()(pcs_data->device_data);
+  system_deallocator()(pcs_data->host_buffer);
+
+  pcs_data->device_data = NULL;
+  pcs_data->host_buffer = NULL;
+  pcs_data->session = NULL;
+
+  // Update the trap handler to clear any associated device data
+  UpdateTrapHandlerWithPCS(nullptr, nullptr);
+
   return (retKmt == HSAKMT_STATUS_SUCCESS) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
 }
 
 hsa_status_t GpuAgent::PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& session) {
   if (session.isActive()) return HSA_STATUS_SUCCESS;
 
-  pcs_hosttrap_t& ht_data = pcs_hosttrap_data_;
 
   auto method = session.method();
+
+  pcs_data_t* pcs_data = nullptr;
+  const char* thread_name = nullptr;
   if (method == HSA_VEN_AMD_PCS_METHOD_HOSTTRAP_V1) {
-    if (ht_data.session->isActive()) {
-      debug_warning("Already have a Host trap session in progress!");
-      return (hsa_status_t)HSA_STATUS_ERROR_RESOURCE_BUSY;
-    }
-    ht_data.session->start();
-    // This thread will handle all hosttrap sessions on this agent
-    // In the future, there will be another thread to handle stochastic sessions.
-    ht_data.thread = os::CreateThread(PcSamplingThreadRun, (void*)this);
-    if (!ht_data.thread)
-      throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
-                               "Failed to start PC Sampling thread.");
+    pcs_data = &pcs_hosttrap_data_;
+    thread_name = "PcSamplingHostTrapThread";
+  } else if (method == HSA_VEN_AMD_PCS_METHOD_STOCHASTIC_V1) {
+    pcs_data = &pcs_stochastic_data_;
+    thread_name = "PcSamplingStochasticThread";
+  } else {
+    // Unsupported sampling method
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
+  // Check if a session is already active
+  if (pcs_data->session && pcs_data->session->isActive()) {
+    debug_warning("Already have a PC sampling session in progress!");
+    return (hsa_status_t)HSA_STATUS_ERROR_RESOURCE_BUSY;
+  }
+
+  // Assign the new session and mark it as active
+  pcs_data->session = &session;
+  pcs_data->session->start();
+
+  // Creating thread data
+  struct ThreadData {
+    GpuAgent* agent;
+    pcs_data_t* pcs_data;
+    const char* thread_name;
+  };
+
+  auto* thread_data = new ThreadData{this, pcs_data, thread_name};
+
+  // This thread will handle all PC Sampling sessions on this agent
+  pcs_data->thread = os::CreateThread(
+      [](void* arg) -> void {
+        auto* thread_data = static_cast<ThreadData*>(arg);
+        try {
+          GpuAgent* agent = thread_data->agent;
+          pcs_data_t* pcs_data = thread_data->pcs_data;
+          const char* thread_name = thread_data->thread_name;
+
+          agent->PcSamplingThread(*pcs_data, thread_name);
+        } catch (...) {
+	   fprintf(stdout, "Exception caught in PcSamplingThread. Exiting the thread!");
+        }
+
+        delete thread_data;
+      },
+      thread_data);
+
+  if (!pcs_data->thread) {
+    // if thread creation failed
+    delete thread_data;
+    throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
+                             "Failed to start PC Sampling thread.");
+  }
+
+  // Start the sampling session in the kernel driver
   if (hsaKmtPcSamplingStart(node_id(), session.ThunkId()) == HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_SUCCESS;
 
   debug_print("Failed to start PC sampling session with thunkId:%d\n", session.ThunkId());
-  if (method == HSA_VEN_AMD_PCS_METHOD_HOSTTRAP_V1) {
-    ht_data.session->stop();
-    os::WaitForThread(ht_data.thread);
-    os::CloseThread(ht_data.thread);
-    ht_data.thread = NULL;
-  }
+  // Clean up if starting the session failed
+  pcs_data->session->stop();
+  os::WaitForThread(pcs_data->thread);
+  os::CloseThread(pcs_data->thread);
+  pcs_data->thread = nullptr;
+  pcs_data->session = nullptr;
 
   return HSA_STATUS_ERROR;
 }
@@ -2784,35 +2869,51 @@ hsa_status_t GpuAgent::PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& sessi
 hsa_status_t GpuAgent::PcSamplingStop(pcs::PcsRuntime::PcSamplingSession& session) {
   if (!session.isActive()) return HSA_STATUS_SUCCESS;
 
-  pcs_hosttrap_t& ht_data = pcs_hosttrap_data_;
-
+  // Stop the session
   session.stop();
 
+  // Stop PC sampling in the kernel driver
   HSAKMT_STATUS retKmt = hsaKmtPcSamplingStop(node_id(), session.ThunkId());
   if (retKmt != HSAKMT_STATUS_SUCCESS)
     throw AMD::hsa_exception(HSA_STATUS_ERROR, "Failed to stop PC Sampling session.");
 
-  if (session.method() == HSA_VEN_AMD_PCS_METHOD_HOSTTRAP_V1) {
-    // Wake up pcs_hosttrap_thread_ if it is waiting for data
-    HSA::hsa_signal_store_screlease(ht_data.device_data->done_sig0, -1);
-    HSA::hsa_signal_store_screlease(ht_data.device_data->done_sig1, -1);
+  // Determine the sampling method and corresponding data
+  pcs_data_t* pcs_data = nullptr;
+  auto method = session.method();
 
-    os::WaitForThread(ht_data.thread);
-    os::CloseThread(ht_data.thread);
-    ht_data.thread = NULL;
+  if (method == HSA_VEN_AMD_PCS_METHOD_HOSTTRAP_V1) {
+    pcs_data = &pcs_hosttrap_data_;
+  } else if (method == HSA_VEN_AMD_PCS_METHOD_STOCHASTIC_V1) {
+    pcs_data = &pcs_stochastic_data_;
+  } else {
+    // Unsupported sampling method
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
+  // Wake up pcs_hosttrap_thread_ if it is waiting for data
+  HSA::hsa_signal_store_screlease(pcs_data->device_data->done_sig0, -1);
+  HSA::hsa_signal_store_screlease(pcs_data->device_data->done_sig1, -1);
+
+  // Wait for the thread to finish and clean up
+  os::WaitForThread(pcs_data->thread);
+  os::CloseThread(pcs_data->thread);
+  pcs_data->thread = nullptr;
+  pcs_data->session = nullptr;
 
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t GpuAgent::PcSamplingFlushHostTrapDeviceBuffers(
+hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
     pcs::PcsRuntime::PcSamplingSession& session) {
-  pcs_hosttrap_t& ht_data = pcs_hosttrap_data_;
-  uint32_t& which_buffer = ht_data.which_buffer;
-  uint32_t* cmd_data = ht_data.cmd_data;
-  size_t& cmd_data_sz = ht_data.cmd_data_sz;
-  uint64_t* old_val = ht_data.old_val;
-  hsa_signal_t& exec_pm4_signal = ht_data.exec_pm4_signal;
+  pcs_data_t* pcs_data = nullptr;
+
+  if (session.method() == HSA_VEN_AMD_PCS_METHOD_HOSTTRAP_V1) {
+    pcs_data = &pcs_hosttrap_data_;
+  } else if (session.method() == HSA_VEN_AMD_PCS_METHOD_STOCHASTIC_V1) {
+    pcs_data = &pcs_stochastic_data_;
+  } else {
+    // No sampling session active
+    return HSA_STATUS_SUCCESS;
+  }
 
   /*
    * Device-buffer to Host-buffer to User-Buffer copy logic
@@ -2951,19 +3052,33 @@ hsa_status_t GpuAgent::PcSamplingFlushHostTrapDeviceBuffers(
 
   uint32_t pred_exec_cmd_sz = 0;
 
-  uint8_t* host_buffer_begin = ht_data.host_buffer;
-  uint8_t* host_buffer_end = ht_data.host_buffer + ht_data.host_buffer_size;
+  uint64_t buf_write_val;
+  uint64_t buf_written_val[2];
+  size_t buf_offset;
+  uint8_t* buffer[2];
+  size_t buf_size;
 
-  uint64_t buf_write_val = (uint64_t) & (ht_data.device_data->buf_write_val);
-  uint64_t buf_written_val[] = {(uint64_t) & (ht_data.device_data->buf_written_val0),
-                                (uint64_t) & (ht_data.device_data->buf_written_val1)};
+  uint32_t& which_buffer = pcs_data->which_buffer;
+  uint32_t* cmd_data = pcs_data->cmd_data;
+  size_t cmd_data_sz = pcs_data->cmd_data_sz;
+  uint64_t* old_val = pcs_data->old_val;
+  hsa_signal_t& exec_pm4_signal = pcs_data->exec_pm4_signal;
 
-  size_t const buf_offset = offsetof(pcs_hosttrap_sampling_data_t, reserved1) +
-      sizeof(((pcs_hosttrap_sampling_data_t*)0)->reserved1);
+  uint8_t* host_buffer_begin = pcs_data->host_buffer;
+  size_t& host_buffer_size = pcs_data->host_buffer_size;
+  uint8_t*& host_write_ptr = pcs_data->host_write_ptr;
+  uint8_t* host_buffer_end = host_buffer_begin + host_buffer_size;
 
-  uint8_t* buffer[] = {(uint8_t*)ht_data.device_data + buf_offset,
-                       (uint8_t*)ht_data.device_data + buf_offset +
-                           ht_data.device_data->buf_size * session.sample_size()};
+  buf_write_val = reinterpret_cast<uint64_t>(&pcs_data->device_data->buf_write_val);
+  buf_written_val[0] = reinterpret_cast<uint64_t>(&pcs_data->device_data->buf_written_val0);
+  buf_written_val[1] = reinterpret_cast<uint64_t>(&pcs_data->device_data->buf_written_val1);
+  buf_size = pcs_data->device_data->buf_size;
+
+  buf_offset =
+      offsetof(pcs_sampling_data_t, reserved1) + sizeof(((pcs_sampling_data_t*)0)->reserved1);
+
+  buffer[0] = reinterpret_cast<uint8_t*>(pcs_data->device_data) + buf_offset;
+  buffer[1] = buffer[0] + buf_size * session.sample_size();
 
   next_buffer = (which_buffer + 1) % 2;
   reset_write_val = (uint64_t)next_buffer << 63;
@@ -3022,25 +3137,25 @@ hsa_status_t GpuAgent::PcSamplingFlushHostTrapDeviceBuffers(
   /* If the number of entries in old_val is larger than buf_size, then there was a buffer overflow
    * and the 2nd level trap handler code will skip recording samples, causing lost samples
    */
-  if (*old_val > (uint64_t)ht_data.device_data->buf_size) {
-    ht_data.lost_sample_count = *old_val - (uint64_t)ht_data.device_data->buf_size;
-    *old_val = (uint64_t)ht_data.device_data->buf_size;
+  if (*old_val > buf_size) {
+    pcs_data->lost_sample_count = *old_val - buf_size;
+    *old_val = buf_size;
   }
 
   to_copy = *old_val * session.sample_size();
 
   /* Make sure there is enough space after host_write_ptr */
-  if (ht_data.host_write_ptr + to_copy >= host_buffer_end) {
+  if (host_write_ptr + to_copy >= host_buffer_end) {
     // Need to wrap around
-    ht_data.host_buffer_wrap_pos = ht_data.host_write_ptr;
-    ht_data.host_write_ptr = host_buffer_begin;
+    pcs_data->host_buffer_wrap_pos = host_write_ptr;
+    host_write_ptr = host_buffer_begin;
   }
 
   i = 0;
   memset(cmd_data, 0, cmd_data_sz);
 
   if (properties_.NumXcc > 1) {
-    const uint32_t n = ceil(to_copy / (32 * 1024 * 1024));
+    const uint64_t n = ceil(to_copy / (32 * 1024 * 1024));
     pred_exec_cmd_sz = 2;
     cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz, isa_->GetMajorVersion());
     cmd_data[i++] =
@@ -3073,7 +3188,8 @@ hsa_status_t GpuAgent::PcSamplingFlushHostTrapDeviceBuffers(
   unsigned int num_copy_command = 0;
   uint8_t* buffer_temp = buffer[which_buffer];
 
-  for (copy_bytes = CP_DMA_DATA_TRANSFER_CNT_MAX; 0 < to_copy; to_copy -= copy_bytes) {
+  for (copy_bytes = std::min(to_copy, (uint32_t)CP_DMA_DATA_TRANSFER_CNT_MAX); 0 < to_copy;
+       to_copy -= copy_bytes) {
     num_copy_command++;
 
     /* DMA_DATA PACKETS, copy buffer using CPDMA */
@@ -3082,9 +3198,8 @@ hsa_status_t GpuAgent::PcSamplingFlushHostTrapDeviceBuffers(
                                      PM4_DMA_DATA_SRC_SEL_SRC_ADDR_USING_L2);
     cmd_data[i++] = PM4_DMA_DATA_DW2_SRC_ADDR_LO((uint64_t)buffer_temp);
     cmd_data[i++] = PM4_DMA_DATA_DW3_SRC_ADDR_HI(((uint64_t)buffer_temp) >> 32);
-    cmd_data[i++] = PM4_DMA_DATA_DW4_DST_ADDR_LO((uint64_t)ht_data.host_write_ptr);
-    cmd_data[i++] = PM4_DMA_DATA_DW5_DST_ADDR_HI(((uint64_t)ht_data.host_write_ptr) >> 32);
-
+    cmd_data[i++] = PM4_DMA_DATA_DW4_DST_ADDR_LO((uint64_t)host_write_ptr);
+    cmd_data[i++] = PM4_DMA_DATA_DW5_DST_ADDR_HI(((uint64_t)host_write_ptr) >> 32);
     if (copy_bytes >= to_copy) {
       copy_bytes = to_copy;
       cmd_data[i++] =
@@ -3093,7 +3208,7 @@ hsa_status_t GpuAgent::PcSamplingFlushHostTrapDeviceBuffers(
       cmd_data[i++] = PM4_DMA_DATA_DW6(PM4_DMA_DATA_BYTE_COUNT(copy_bytes) | PM4_DMA_DATA_DIS_WC);
     }
     buffer_temp += copy_bytes;
-    ht_data.host_write_ptr += copy_bytes;
+    host_write_ptr += copy_bytes;
   }
 
   /* WRITE_DATA, Reset buf_written_val */
@@ -3117,167 +3232,180 @@ hsa_status_t GpuAgent::PcSamplingFlushHostTrapDeviceBuffers(
     if (val == 0) break;
   } while (true);
 
+  // save the position of next buffer
   which_buffer = next_buffer;
 
   return HSA_STATUS_SUCCESS;
 }
 
-void GpuAgent::PcSamplingThread() {
+void GpuAgent::PcSamplingThread(pcs_data_t& pcs_data, const char* thread_name) {
   // TODO: Implement lost sample count
   // TODO: Implement latency
 
-  pcs_hosttrap_t& ht_data = pcs_hosttrap_data_;
-  pcs::PcsRuntime::PcSamplingSession& session = *ht_data.session;
-  uint32_t& which_buffer = ht_data.which_buffer;
+  try {
+    pcs::PcsRuntime::PcSamplingSession& session = *pcs_data.session;
+    uint32_t& which_buffer = pcs_data.which_buffer;
 
-  uint8_t* host_buffer_begin = ht_data.host_buffer;
-  uint8_t* host_buffer_end = ht_data.host_buffer + ht_data.host_buffer_size;
+    uint8_t* host_buffer_begin = pcs_data.host_buffer;
+    uint8_t* host_buffer_end = pcs_data.host_buffer + pcs_data.host_buffer_size;
 
-  hsa_signal_t done_sig[] = {ht_data.device_data->done_sig0, ht_data.device_data->done_sig1};
+    hsa_signal_t done_sig[] = {pcs_data.device_data->done_sig0, pcs_data.device_data->done_sig1};
 
-  while (ht_data.session->isActive()) {
-    do {
-      hsa_signal_value_t val = HSA::hsa_signal_wait_scacquire(
-          done_sig[which_buffer], HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
-      if (val == -1) goto thread_exit;
-      if (val == 0) break;
-    } while (true);
-    HSA::hsa_signal_store_screlease(done_sig[which_buffer], 1);
+    while (pcs_data.session->isActive()) {
+      // Wait for the signal to process the buffer
+      do {
+        hsa_signal_value_t val = HSA::hsa_signal_wait_scacquire(
+            done_sig[which_buffer], HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+        if (val == -1) goto thread_exit;
+        if (val == 0) break;
+      } while (true);
+      HSA::hsa_signal_store_screlease(done_sig[which_buffer], 1);
 
-    std::lock_guard<std::mutex> lock(ht_data.host_buffer_mutex);
-    if (PcSamplingFlushHostTrapDeviceBuffers(session) != HSA_STATUS_SUCCESS)
-      goto thread_exit;
+      // Lock buffer to ensure thread-safe access
+      std::lock_guard<std::mutex> lock(pcs_data.host_buffer_mutex);
+      // Flush device buffers
+      if (PcSamplingFlushDeviceBuffers(session) != HSA_STATUS_SUCCESS)
+	    goto thread_exit;
 
-    size_t bytes_before_wrap;
-    size_t bytes_after_wrap;
+      size_t bytes_before_wrap;
+      size_t bytes_after_wrap;
 
-    assert(ht_data.host_read_ptr >= host_buffer_begin && ht_data.host_read_ptr < host_buffer_end);
-    assert(ht_data.host_write_ptr >= host_buffer_begin && ht_data.host_write_ptr < host_buffer_end);
-    assert(ht_data.host_buffer_wrap_pos ? (ht_data.host_read_ptr > ht_data.host_write_ptr)
-                                        : (ht_data.host_read_ptr <= ht_data.host_write_ptr));
+      assert(pcs_data.host_read_ptr >= host_buffer_begin && pcs_data.host_read_ptr < host_buffer_end);
+      assert(pcs_data.host_write_ptr >= host_buffer_begin && pcs_data.host_write_ptr < host_buffer_end);
+      assert(pcs_data.host_buffer_wrap_pos ? (pcs_data.host_read_ptr > pcs_data.host_write_ptr)
+                                           : (pcs_data.host_read_ptr <= pcs_data.host_write_ptr));
 
-    if (ht_data.host_buffer_wrap_pos) {
-      assert(ht_data.host_buffer_wrap_pos <= host_buffer_end &&
-             ht_data.host_buffer_wrap_pos > host_buffer_begin);
-      assert(ht_data.host_read_ptr <= ht_data.host_buffer_wrap_pos);
+      if (pcs_data.host_buffer_wrap_pos) {
+        assert(pcs_data.host_buffer_wrap_pos <= host_buffer_end &&
+               pcs_data.host_buffer_wrap_pos > host_buffer_begin);
+        assert(pcs_data.host_read_ptr <= pcs_data.host_buffer_wrap_pos);
 
-      // Wrapped around
-      bytes_before_wrap = ht_data.host_buffer_wrap_pos - ht_data.host_read_ptr;
-      bytes_after_wrap = ht_data.host_write_ptr - host_buffer_begin;
+        // Wrapped around
+        bytes_before_wrap = pcs_data.host_buffer_wrap_pos - pcs_data.host_read_ptr;
+        bytes_after_wrap = pcs_data.host_write_ptr - host_buffer_begin;
 
-      while (bytes_before_wrap >= session.buffer_size()) {
-        session.HandleSampleData(ht_data.host_read_ptr, session.buffer_size(), NULL, 0,
-                                 ht_data.lost_sample_count);
-        ht_data.host_read_ptr += session.buffer_size();
-        bytes_before_wrap = ht_data.host_buffer_wrap_pos - ht_data.host_read_ptr;
-        ht_data.lost_sample_count = 0;
-      }
+        while (bytes_before_wrap >= session.buffer_size()) {
+          session.HandleSampleData(pcs_data.host_read_ptr, session.buffer_size(), nullptr, 0,
+                                   pcs_data.lost_sample_count);
+          pcs_data.host_read_ptr += session.buffer_size();
+          bytes_before_wrap = pcs_data.host_buffer_wrap_pos - pcs_data.host_read_ptr;
+          pcs_data.lost_sample_count = 0;
+        }
 
-      if (bytes_before_wrap + bytes_after_wrap >= session.buffer_size()) {
-        session.HandleSampleData(ht_data.host_read_ptr, bytes_before_wrap, host_buffer_begin,
-                                 (session.buffer_size() - bytes_before_wrap), 0);
-        ht_data.host_read_ptr = host_buffer_begin + (session.buffer_size() - bytes_before_wrap);
-        bytes_before_wrap = 0;
-        ht_data.host_buffer_wrap_pos = 0;
-        bytes_after_wrap = ht_data.host_write_ptr - ht_data.host_read_ptr;
-        ht_data.lost_sample_count = 0;
-      }
+        if (bytes_before_wrap + bytes_after_wrap >= session.buffer_size()) {
+          session.HandleSampleData(pcs_data.host_read_ptr, bytes_before_wrap, host_buffer_begin,
+                                   (session.buffer_size() - bytes_before_wrap), 0);
+          pcs_data.host_read_ptr = host_buffer_begin + (session.buffer_size() - bytes_before_wrap);
+          bytes_before_wrap = 0;
+          pcs_data.host_buffer_wrap_pos = 0;
+          bytes_after_wrap = pcs_data.host_write_ptr - pcs_data.host_read_ptr;
+          pcs_data.lost_sample_count = 0;
+        }
 
-      while (bytes_after_wrap >= session.buffer_size()) {
-        session.HandleSampleData(ht_data.host_read_ptr, session.buffer_size(), NULL, 0,
-                                 ht_data.lost_sample_count);
-        ht_data.host_read_ptr += session.buffer_size();
-        bytes_before_wrap = 0;
-        bytes_after_wrap = ht_data.host_write_ptr - ht_data.host_read_ptr;
-        ht_data.lost_sample_count = 0;
-      }
-    } else {
-      bytes_before_wrap = ht_data.host_write_ptr - ht_data.host_read_ptr;
+        while (bytes_after_wrap >= session.buffer_size()) {
+          session.HandleSampleData(pcs_data.host_read_ptr, session.buffer_size(), nullptr, 0,
+                                   pcs_data.lost_sample_count);
+          pcs_data.host_read_ptr += session.buffer_size();
+          bytes_before_wrap = 0;
+          bytes_after_wrap = pcs_data.host_write_ptr - pcs_data.host_read_ptr;
+          pcs_data.lost_sample_count = 0;
+        }
+      } else {
+        // Handle non-wrapped buffer
+        bytes_before_wrap = pcs_data.host_write_ptr - pcs_data.host_read_ptr;
 
-      while (bytes_before_wrap >= session.buffer_size()) {
-        assert(ht_data.host_read_ptr >= host_buffer_begin &&
-               ht_data.host_read_ptr + session.buffer_size() < host_buffer_end);
-        session.HandleSampleData(ht_data.host_read_ptr, session.buffer_size(), NULL, 0,
-                                 ht_data.lost_sample_count);
-        ht_data.host_read_ptr += session.buffer_size();
-        bytes_before_wrap = ht_data.host_write_ptr - ht_data.host_read_ptr;
-        ht_data.lost_sample_count = 0;
+        while (bytes_before_wrap >= session.buffer_size()) {
+          assert(pcs_data.host_read_ptr >= host_buffer_begin &&
+                 pcs_data.host_read_ptr + session.buffer_size() <= host_buffer_end);
+          session.HandleSampleData(pcs_data.host_read_ptr, session.buffer_size(), nullptr, 0,
+                                   pcs_data.lost_sample_count);
+          pcs_data.host_read_ptr += session.buffer_size();
+          bytes_before_wrap = pcs_data.host_write_ptr - pcs_data.host_read_ptr;
+          pcs_data.lost_sample_count = 0;
+        }
       }
     }
-  }
 thread_exit:
-  debug_print("PcSamplingThread::Exiting\n");
+  debug_print("%s::Exiting\n", thread_name);
+} catch (const std::exception& e) {
+  debug_print("Exception in %s: %s\n", thread_name, e.what());
+} catch (...) {
+  debug_print("Unknown exception in %s\n", thread_name);
 }
-
-void GpuAgent::PcSamplingThreadRun(void* _agent) {
-  GpuAgent* agent = (GpuAgent*)_agent;
-  agent->PcSamplingThread();
-  debug_print("PcSamplingThread exiting...");
 }
 
 hsa_status_t GpuAgent::PcSamplingFlush(pcs::PcsRuntime::PcSamplingSession& session) {
-  pcs_hosttrap_t& ht_data = pcs_hosttrap_data_;
+  pcs_data_t* pcs_data = nullptr;
 
-  uint8_t* host_buffer_begin = ht_data.host_buffer;
-  uint8_t* host_buffer_end = ht_data.host_buffer + ht_data.host_buffer_size;
+  if (session.method() == HSA_VEN_AMD_PCS_METHOD_HOSTTRAP_V1) {
+    pcs_data = &pcs_hosttrap_data_;
+  } else if (session.method() == HSA_VEN_AMD_PCS_METHOD_STOCHASTIC_V1) {
+    pcs_data = &pcs_stochastic_data_;
+  } else {
+    return HSA_STATUS_SUCCESS;  // Unsupported sampling method
+  }
+
+  uint8_t* host_buffer_begin = pcs_data->host_buffer;
+  uint8_t* host_buffer_end = pcs_data->host_buffer + pcs_data->host_buffer_size;
 
   size_t bytes_before_wrap;
   size_t bytes_after_wrap;
 
-  std::lock_guard<std::mutex> lock(ht_data.host_buffer_mutex);
-  if (PcSamplingFlushHostTrapDeviceBuffers(session) != HSA_STATUS_SUCCESS)
-    return HSA_STATUS_ERROR;
+  std::lock_guard<std::mutex> lock(pcs_data->host_buffer_mutex);
+  // Flush device buffers
+  if (PcSamplingFlushDeviceBuffers(session) != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
-  assert(ht_data.host_read_ptr >= host_buffer_begin && ht_data.host_read_ptr < host_buffer_end);
-  assert(ht_data.host_write_ptr >= host_buffer_begin && ht_data.host_write_ptr < host_buffer_end);
-  assert(ht_data.host_buffer_wrap_pos ? (ht_data.host_read_ptr > ht_data.host_write_ptr)
-                                      : (ht_data.host_read_ptr <= ht_data.host_write_ptr));
+  assert(pcs_data->host_read_ptr >= host_buffer_begin && pcs_data->host_read_ptr < host_buffer_end);
+  assert(pcs_data->host_write_ptr >= host_buffer_begin &&
+         pcs_data->host_write_ptr < host_buffer_end);
+  assert(pcs_data->host_buffer_wrap_pos ? (pcs_data->host_read_ptr > pcs_data->host_write_ptr)
+                                        : (pcs_data->host_read_ptr <= pcs_data->host_write_ptr));
 
-  if (ht_data.host_buffer_wrap_pos) {
-    assert(ht_data.host_buffer_wrap_pos <= host_buffer_end &&
-           ht_data.host_buffer_wrap_pos > host_buffer_begin);
-    assert(ht_data.host_read_ptr <= ht_data.host_buffer_wrap_pos);
+  if (pcs_data->host_buffer_wrap_pos) {
+    assert(pcs_data->host_buffer_wrap_pos <= host_buffer_end &&
+           pcs_data->host_buffer_wrap_pos > host_buffer_begin);
+    assert(pcs_data->host_read_ptr <= pcs_data->host_buffer_wrap_pos);
 
-    // Wrapped around
-    bytes_before_wrap = ht_data.host_buffer_wrap_pos - ht_data.host_read_ptr;
-    bytes_after_wrap = ht_data.host_write_ptr - host_buffer_begin;
+    // Handle wrapped-around buffer
+    bytes_before_wrap = pcs_data->host_buffer_wrap_pos - pcs_data->host_read_ptr;
+    bytes_after_wrap = pcs_data->host_write_ptr - host_buffer_begin;
 
     while (bytes_before_wrap > 0) {
       size_t bytes_to_copy = std::min(bytes_before_wrap, session.buffer_size());
 
-      session.HandleSampleData(ht_data.host_read_ptr, bytes_to_copy, NULL, 0,
-                               ht_data.lost_sample_count);
-      ht_data.host_read_ptr += bytes_to_copy;
-      bytes_before_wrap = ht_data.host_buffer_wrap_pos - ht_data.host_read_ptr;
-      ht_data.lost_sample_count = 0;
+      session.HandleSampleData(pcs_data->host_read_ptr, bytes_to_copy, nullptr, 0,
+                               pcs_data->lost_sample_count);
+      pcs_data->host_read_ptr += bytes_to_copy;
+      bytes_before_wrap = pcs_data->host_buffer_wrap_pos - pcs_data->host_read_ptr;
+      pcs_data->lost_sample_count = 0;
     }
 
-    assert(ht_data.host_read_ptr == ht_data.host_buffer_wrap_pos);
-    ht_data.host_buffer_wrap_pos = 0;
-    ht_data.host_read_ptr = host_buffer_begin;
+    assert(pcs_data->host_read_ptr == pcs_data->host_buffer_wrap_pos);
+    pcs_data->host_buffer_wrap_pos = 0;
+    pcs_data->host_read_ptr = host_buffer_begin;
 
     while (bytes_after_wrap > 0) {
       size_t bytes_to_copy = std::min(bytes_after_wrap, session.buffer_size());
 
-      session.HandleSampleData(ht_data.host_read_ptr, bytes_to_copy, NULL, 0,
-                               ht_data.lost_sample_count);
-      ht_data.host_read_ptr += bytes_to_copy;
-      bytes_after_wrap = ht_data.host_write_ptr - ht_data.host_read_ptr;
-      ht_data.lost_sample_count = 0;
+      session.HandleSampleData(pcs_data->host_read_ptr, bytes_to_copy, nullptr, 0,
+                               pcs_data->lost_sample_count);
+      pcs_data->host_read_ptr += bytes_to_copy;
+      bytes_after_wrap = pcs_data->host_write_ptr - pcs_data->host_read_ptr;
+      pcs_data->lost_sample_count = 0;
     }
   } else {
-    bytes_before_wrap = ht_data.host_write_ptr - ht_data.host_read_ptr;
+    bytes_before_wrap = pcs_data->host_write_ptr - pcs_data->host_read_ptr;
 
-    while (bytes_before_wrap) {
+    while (bytes_before_wrap > 0) {
       size_t bytes_to_copy = std::min(bytes_before_wrap, session.buffer_size());
-      assert(ht_data.host_read_ptr >= host_buffer_begin &&
-             ht_data.host_read_ptr + bytes_to_copy <= host_buffer_end);
+      assert(pcs_data->host_read_ptr >= host_buffer_begin &&
+             pcs_data->host_read_ptr + bytes_to_copy <= host_buffer_end);
 
-      session.HandleSampleData(ht_data.host_read_ptr, bytes_to_copy, NULL, 0,
-                               ht_data.lost_sample_count);
-      ht_data.host_read_ptr += bytes_to_copy;
-      bytes_before_wrap = ht_data.host_write_ptr - ht_data.host_read_ptr;
-      ht_data.lost_sample_count = 0;
+      session.HandleSampleData(pcs_data->host_read_ptr, bytes_to_copy, nullptr, 0,
+                               pcs_data->lost_sample_count);
+      pcs_data->host_read_ptr += bytes_to_copy;
+      bytes_before_wrap = pcs_data->host_write_ptr - pcs_data->host_read_ptr;
+      pcs_data->lost_sample_count = 0;
     }
   }
   return HSA_STATUS_SUCCESS;

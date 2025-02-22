@@ -53,6 +53,7 @@
 .set SQ_WAVE_TRAPSTS_ILLEGAL_INST_SHIFT      , 11
 .set SQ_WAVE_TRAPSTS_XNACK_ERROR_SHIFT       , 28
 .set SQ_WAVE_TRAPSTS_MATH_EXCP               , 0x7F
+.set SQ_WAVE_TRAPSTS_PERF_SNAPSHOT_SHIFT     , 26
 .set SQ_WAVE_MODE_EXCP_EN_SHIFT              , 12
 .set SQ_WAVE_MODE_EXCP_EN_SIZE               , 8
 .set TRAP_ID_ABORT                           , 2
@@ -95,12 +96,23 @@
 // TTMP_REG1 means ttmp6 register if gfx>=942 and means ttmp13 register if gfx<942
 // TTMP_REG2 means ttmp11 register if gfx>=942 and means ttmp6 register if gfx<942
 
-.if .amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4
+.if .amdgcn.gfx_generation_number == 9
   .set TTMP11_TTMPS_SETUP_SHIFT              , 31
 
-  // Bit to indicate that this is a hosttrap trap instead of stochastic trap
-  // Currently not used
-  .set TTMP13_PCS_IS_STOCHASTIC              , 24
+.if (.amdgcn.gfx_generation_minor >= 4)
+  .set TTMP11_WAVE_IN_WG_MASK 		     , 0x3F
+
+  // Bit to indicate that this is a stochastic trap
+  .set TTMP13_PCS_IS_STOCHASTIC              , 21
+
+  // Bit to indicate that this is a host trap
+  .set TTMP13_PCS_IS_HOSTTRAP                , 22
+
+.else
+
+  // Bit to indicate that this is a host trap
+  .set TTMP11_PCS_IS_HOSTTRAP                , 22
+.endif
 .endif
 
 .if (.amdgcn.gfx_generation_number == 9)
@@ -205,27 +217,45 @@
 //   ttmp15 = TMA[63:32]
 // gfx9:
 //   ttmp1 = 0[2:0], PCRewind[3:0], HostTrap[0], TrapId[7:0], PC[47:32]
-// all gfx9 (except gfx942):
+// For all gfx9 (except gfx940, gfx941, gfx942):
 //   ttmp6 = 0[6:0], DispatchPktIndx[24:0]
 //   ttmp11 = SQ_WAVE_IB_STS[20:15], 0[1:0], DebugEnabled[0], 0[15:0], NoScratch[0], WaveInWg[5:0]
-//            Note: Once stochastic sampling is implemented, L2 Trap Handler will use Bit 23
-//            (TTMP11_PCS_IS_STOCHASTIC) to differentiate between stochastic and hosttrap
-// gfx942:
+//
+// For gfx940/gfx941/gfx942:
 //   ttmp11 = 0[0], DispatchPktIndx[24:0], WaveIdInWg[5:0]
-//   ttmp13 = SQ_WAVE_IB_STS[20:15], 0[1:0], DebugEnabled[0], 0[22:0]
+//   ttmp13:
+//       Bits 31:26 : SQ_WAVE_IB_STS[20:15] (1TH)
+//            25:24 : 0 on 2TH entry. Used by 1st level TH but also
+//                    free to be used in the 2nd level TH
+//            23    : Debug Enabled (1TH)
+//            22:0  : values are unspecified on 2TH entry. Free.
+//
 // gfx10:
 //   ttmp1 = 0[0], PCRewind[5:0], HostTrap[0], TrapId[7:0], PC[47:32]
+//
 // gfx10/gfx11:
 //   ttmp6 = 0[6:0], DispatchPktIndx[24:0]
+//
 // gfx1010:
 //   ttmp11 = SQ_WAVE_IB_STS[25], SQ_WAVE_IB_STS[21:15], DebugEnabled[0], 0[15:0], NoScratch[0], WaveIdInWG[5:0]
+//
 // gfx1030/gfx1100:
 //   ttmp11 = 0[7:0], DebugEnabled[0], 0[15:0], NoScratch[0], WaveIdInWG[5:0]
+//
+// ttmp[14:15] points to TMA2; Available: ttmp[2:3], ttmp[4:5]
+//
+// ttmp7 : gfx9, gfx1010, gfx1030, gfx11 - 31:0 : PC[31:0]  (2TH, DBG);
+//       : gfx940 - free;
+//       : gfx12 - ttmp7 - 31:16 : workgroup_z[15:0]  (SPI) and 15:0 : workgroup_y[15:0]  (SPI)
 
 trap_entry:
-  // Branch if not a trap (an exception instead).
-  s_bfe_u32            			ttmp2, ttmp1, SQ_WAVE_PC_HI_TRAP_ID_BFE
-  s_cbranch_scc0       			.no_skip_debugtrap
+  // Extract trap_id from ttmp2
+  s_bfe_u32                             ttmp2, ttmp1, SQ_WAVE_PC_HI_TRAP_ID_BFE
+  s_cbranch_scc0                        .not_s_trap                      // If trap_id == 0, it's not an s_trap nor host trap
+
+  // Check if the it was an host trap.
+  s_bitcmp1_b32       			ttmp1, SQ_WAVE_PC_HI_HT_SHIFT
+  s_cbranch_scc0      			.not_host_trap
 
 .if (.amdgcn.gfx_generation_number == 9) // PC_SAMPLING_GFX9
   // ttmp[14:15] is TMA2; Available: ttmp[2:3], ttmp[4:5], ttmp7, TTMP_REG1
@@ -236,29 +266,42 @@ trap_entry:
   //   [0x08] out_buf_t* stochastic_trap_buffers;
   //
   // --- Start profile trap handlers GFX9 --- //
-  //  if (host_trap) {
-  //    if (stochastic)       // Not implemented yet
-  //        ttmp11.bit23 = 1; // Not implemented yet
-  //    profiling_trap_handler(tma->host_trap_buffers);
-  //  }
+  // If the wave entered the trap handler: 
+  // If on gfx9:
+  // - Check SQ_WAVE_PC_HI_HT_SHIFT bit on TTMP1 register to
+  //   identify if it was a host trap.
+  // If a host trap is detected:
+  // - Mark TTMP13(gfx94x) or TTMP11(gfx9) hosttrap bit
+  // - Load host_trap_buffers
+  // - Branch to the profile trap handler logic.
+  //
+  // If on gfx9.4+:
+  // - Check TRAPSTS bit 26 (SQ_WAVE_TRAPSTS_PERF_SNAPSHOT_SHIFT) to
+  //   identify stochastic traps.
+  // If a stochastic trap is detected:
+  // - Set bit 21 in TTMP13 to indicate a stochastic trap.
+  // - Branch to the profile trap handler logic.
 
-  s_bitcmp1_b32       			ttmp1, SQ_WAVE_PC_HI_HT_SHIFT
-  s_cbranch_scc0      			.not_host_trap_gfx9
-  s_load_dwordx2      			ttmp[14:15], ttmp[14:15], 0 glc 	// ttmp[14:15]=&host_trap_buffers
-  // TODO: When implementing stochastic sampling, need to set TTMP11_PCS_IS_STOCHASTIC
-  // or TTMP13_PCS_IS_STOCHASTIC to differentiate between hosttrap and stochastic sampling
+  s_load_dwordx2  			ttmp[2:3], ttmp[14:15], 0 glc   // ttmp[14:15]=*host_trap_buffers
+.if .amdgcn.gfx_generation_minor >= 4
+  s_bitset0_b32                         ttmp13, TTMP13_PCS_IS_STOCHASTIC
+  s_bitset1_b32                         ttmp13, TTMP13_PCS_IS_HOSTTRAP   // set bit 22 in TTMP13
+.else
+  s_bitset1_b32                         ttmp11, TTMP11_PCS_IS_HOSTTRAP    // Set bit 22 in TTMP11
+.endif
   s_waitcnt           			lgkmcnt(0)
-  s_branch            			.profile_trap_handlers_gfx9		// Off to the profile handlers
+  s_mov_b64      			ttmp[14:15], ttmp[2:3]		//now ttmp[14:15] = host_trap_buffers
+  s_branch            			.profile_trap_handlers_gfx9	// Off to the profile handlers
+.else
+  // Ignore host traps.  They should be masked by the driver anyway.
+  s_branch .not_s_trap
+.endif
 
-.not_host_trap_gfx9:
-.endif // PC_SAMPLING_GFX9
-  // If caused by s_trap then advance PC.
-  s_bitcmp1_b32        			ttmp1, SQ_WAVE_PC_HI_HT_SHIFT
-  s_cbranch_scc1       			.not_s_trap
+.not_host_trap:
+  // It's an s_trap; advance the PC
   s_add_u32            			ttmp0, ttmp0, 0x4
   s_addc_u32           			ttmp1, ttmp1, 0x0
 
-.not_s_trap:
   // If llvm.debugtrap and debugger is not attached.
   s_cmp_eq_u32         			ttmp2, TRAP_ID_DEBUGTRAP
   s_cbranch_scc0       			.no_skip_debugtrap
@@ -271,6 +314,24 @@ trap_entry:
 
   // Ignore llvm.debugtrap.
   s_branch             			.exit_trap
+
+.not_s_trap:
+.if .amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4
+  //Check for stochastic trap on gfx9.4+
+  s_getreg_b32    			ttmp7, hwreg(HW_REG_TRAPSTS)           	 // On gfx94x, TRAPSTS bit 26 ...
+  s_bitcmp1_b32   			ttmp7, SQ_WAVE_TRAPSTS_PERF_SNAPSHOT_SHIFT   // is stochastic_sample_trap
+  s_cbranch_scc0  			.no_skip_debugtrap
+
+  // Handle stochastic trap
+  s_load_dwordx2  			ttmp[2:3], ttmp[14:15], 0x8 glc // ttmp[14:15]=*stoch_trap_buf
+  s_bitset0_b32                         ttmp13, TTMP13_PCS_IS_HOSTTRAP
+  s_bitset1_b32   			ttmp13, TTMP13_PCS_IS_STOCHASTIC  // set bit 25 in TTMP13
+  s_waitcnt       			lgkmcnt(0)
+  s_mov_b64      			ttmp[14:15], ttmp[2:3]
+  s_branch        			.profile_trap_handlers_gfx9      // Off to the profile handlers
+.else
+  s_branch                              .no_skip_debugtrap
+.endif // PC_SAMPLING_GFX9
 
 .if (.amdgcn.gfx_generation_number == 9) // PC_SAMPLING_GFX9
   // tma->host_trap_buffers Offsets:
@@ -348,6 +409,26 @@ trap_entry:
   s_addc_u32            		ttmp5, ttmp15, ttmp5            // buffer0 or buffer1
   s_mov_b32             		ttmp7, ttmp2
 
+ .if .amdgcn.gfx_generation_number == 9
+
+ .if .amdgcn.gfx_generation_minor >= 4
+  // Check if it's a stochastic trap
+  s_bitcmp1_b32  			ttmp13, TTMP13_PCS_IS_STOCHASTIC
+  s_cbranch_scc1 			.fill_sample_stochastic
+  // Check if it's a host trap
+  s_bitcmp1_b32  			ttmp13, TTMP13_PCS_IS_HOSTTRAP
+  s_cbranch_scc1 			.fill_sample_hosttrap
+.else
+ // Check if it's a host trap
+  s_bitcmp1_b32                         ttmp11, TTMP11_PCS_IS_HOSTTRAP
+  s_cbranch_scc1                        .fill_sample_hosttrap
+
+.endif
+.endif
+  // If neither bit is set, this is unexpected.
+  // This branch is not expected to be taken.
+  s_branch 				.no_skip_debugtrap
+
   // ttmp7 contains local_entry, ttmp[4:5] contains "&bufferX",
   // ttmp[14:15] holds 'tma->host_trap_buffers' pointer
   // ttmp[2:3] and ttmp13 are available for gathering perf sample info
@@ -381,7 +462,7 @@ trap_entry:
   //    buf->timestamp = s_memrealtime;
   //    buf->correlation_id = get_correlation_id();
   // }
-
+.fill_sample_hosttrap:
   s_mul_i32             		ttmp2, ttmp7, 0x40              // offset into buffer for 64B objects
   s_mul_hi_u32          		ttmp3, ttmp7, 0x40              // ttmp[2:3] will contain byte ...
   s_add_u32             		ttmp2, ttmp2, ttmp4
@@ -401,19 +482,56 @@ trap_entry:
 .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)
   s_getreg_b32          		ttmp4, hwreg(HW_REG_XCC_ID)     //store XCC_ID
   s_lshl_b32            		ttmp4, ttmp4, 8
-  s_and_b32             		ttmp5, ttmp11, 0x3f
+  s_and_b32             		ttmp5, ttmp11, TTMP11_WAVE_IN_WG_MASK
   s_or_b32              		ttmp4, ttmp4, ttmp5
   s_store_dword         		ttmp4, ttmp[2:3], 0x1c          // store wave_in_wg
 .else
   s_and_b32             		ttmp4, ttmp11, 0x3f
   s_store_dword         		ttmp4, ttmp[2:3], 0x1c         	// store wave_in_wg
 .endif
-  // Get HW_ID using S_GETREG_B32 with size=32 (F8 in upper bits), offset=0, and HW_ID = 4 (0x4)
   s_getreg_b32          		ttmp4, hwreg(HW_REG_HW_ID)
   s_store_dword         		ttmp4, ttmp[2:3], 0x20          // store HW_ID
 
-  // ttmp[2:3] = &buffer[local_entry]; ttmp[4:5], ttmp7, and ttmp13 are free
-  // ttmp[14:15] = tma->host_trap_buffers and is live out; ttmp6.b31 is buf_to_use, 0 or 1
+  s_branch                              .get_correlation_id
+
+.if .amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4
+.fill_sample_stochastic:
+  s_mul_i32       			ttmp2, ttmp7, 0x40              // offset into buffer for 64B objects
+  s_mul_hi_u32                          ttmp3, ttmp7, 0x40
+  s_add_u32       			ttmp2, ttmp2, ttmp4
+  s_addc_u32      			ttmp3, ttmp3, ttmp5             // ttmp[2:3]=&buffer[local_entry]
+  s_memrealtime   			ttmp[4:5]
+  s_waitcnt       			lgkmcnt(0)                      // Wait for timestamp
+  s_store_dwordx2 			ttmp[4:5], ttmp[2:3] 0x30       // Store timestamp
+
+  s_getreg_b32    			ttmp4, hwreg(HW_REG_SQ_PERF_SNAPSHOT_DATA)
+  s_getreg_b32   	 	  	ttmp5, hwreg(HW_REG_SQ_PERF_SNAPSHOT_DATA1)
+  s_store_dwordx2 			ttmp[4:5], ttmp[2:3], 0x24            // store snapshot PC
+  s_getreg_b32          		ttmp4, hwreg(HW_REG_SQ_PERF_SNAPSHOT_PC_LO)
+  s_getreg_b32          		ttmp5, hwreg(HW_REG_SQ_PERF_SNAPSHOT_PC_HI)
+  s_store_dwordx2 			ttmp[4:5], ttmp[2:3] 0x00       // store snapshot data
+
+  s_mov_b32       			ttmp6, exec_lo
+  s_store_dword   			ttmp6, ttmp[2:3], 0x8           // store EXEC_LO
+  s_mov_b32       			ttmp6, exec_hi
+  s_store_dword   			ttmp6, ttmp[2:3], 0xc           // store EXEC_HI
+
+  s_store_dwordx2 			ttmp[8:9], ttmp[2:3], 0x10      // store wg_id_x and wg_id_y
+  s_store_dword   			ttmp10, ttmp[2:3], 0x18         // store wg_id_z
+  s_getreg_b32    			ttmp4, hwreg(HW_REG_XCC_ID)
+  s_lshl_b32      			ttmp4, ttmp4, 8
+  s_and_b32       			ttmp5, ttmp11, TTMP11_WAVE_IN_WG_MASK
+  s_or_b32        			ttmp4, ttmp4, ttmp5
+  s_store_dword   			ttmp4, ttmp[2:3], 0x1c          // store chiplet_and_wave_id
+  s_getreg_b32    			ttmp4, hwreg(HW_REG_HW_ID)
+  s_store_dword   			ttmp4, ttmp[2:3], 0x20          // store HW_ID
+  // ttmp[2:3]=&buffer[local_entry]; ttmp[4:5], ttmp[6:7] are free
+  // ttmp[14:15]=ptr to ‘tma’ and is live out; ttmp11.b31 is buf_to_use, 0 or 1
+  s_branch        			.get_correlation_id
+
+.endif
+
+.get_correlation_id:
 
   // get_correlation_id() -- begin //
   // Returns a value to use as a correlation ID.
@@ -437,6 +555,7 @@ trap_entry:
   // ttmp[4:5], ttmp7, and ttmp13 are free
   // ttmp[14:15] = tma->host_trap_buffers and is live out
   // ttmp6.b31 is buf_to_use, 0 or 1 and is live out
+
   s_mov_b64             		ttmp[4:5], exec                 // back up EXEC mask
   s_mov_b32             		exec_lo, 0x80000000             // prepare EXEC for doorbell spin
   s_sendmsg             		sendmsg(MSG_GET_DOORBELL)       // message 10, puts doorbell in EXEC
@@ -519,7 +638,6 @@ trap_entry:
   s_getreg_b32          		ttmp3, hwreg(HW_REG_MODE, SQ_WAVE_MODE_EXCP_EN_SHIFT, SQ_WAVE_MODE_EXCP_EN_SIZE) // ttmp3[7:0] = MODE.EXCP_EN
   // Set bits corresponding to TRAPSTS.MEM_VIOL, TRAPSTS.ILLEGAL_INST and TRAPSTS.XNACK_ERROR
   s_or_b32              		ttmp3, ttmp3, (1 << SQ_WAVE_TRAPSTS_MEM_VIOL_SHIFT | 1 << SQ_WAVE_TRAPSTS_ILLEGAL_INST_SHIFT | 1 << SQ_WAVE_TRAPSTS_XNACK_ERROR_SHIFT)
-  s_getreg_b32          		ttmp2, hwreg(HW_REG_TRAPSTS)
   s_and_b32             		ttmp2, ttmp2, ttmp3
   // SCC will be 1 if either a maskable instruction was set, or one of MEM_VIOL, ILL_INST, XNACK_ERROR
   s_cbranch_scc1        		.no_skip_debugtrap		// if any of those are set, handle exceptions
@@ -539,6 +657,7 @@ trap_entry:
 .no_skip_debugtrap:
   // Save trap id and halt status in ttmp6.
   s_andn2_b32          			ttmp6, ttmp6, (TTMP6_SAVED_TRAP_ID_MASK | TTMP6_SAVED_STATUS_HALT_MASK)
+  s_bfe_u32                             ttmp2, ttmp1, SQ_WAVE_PC_HI_TRAP_ID_BFE
   s_min_u32            			ttmp2, ttmp2, 0xF
   s_lshl_b32           			ttmp2, ttmp2, TTMP6_SAVED_TRAP_ID_SHIFT
   s_or_b32             			ttmp6, ttmp6, ttmp2
