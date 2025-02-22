@@ -817,7 +817,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         perf_level_help = "Current DPM performance level"
         xgmi_err_help = "XGMI error information since last read"
         energy_help = "Amount of energy consumed"
-        throttle_help = "Displays throttle accumulators; Only available for MI300 or newer ASICs"
+        throttle_help = "Displays throttle accumulators;\n    Only available for MI300 or newer ASICs"
 
         # Help text for Arguments only on Hypervisors
         schedule_help = "All scheduling information"
