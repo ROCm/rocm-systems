@@ -460,7 +460,7 @@ TEST(pc_sampling, pc_sampling_vs_device_counter_collection)
 {
     auto device_counter_collection_setup_fn = [](rocprofiler_context_id_t context_id,
                                                  rocprofiler_agent_id_t   agent_id) {
-        rocprofiler_buffer_id_t cc_buf_id;
+        rocprofiler_buffer_id_t cc_buf_id{};
         // Create PC sampling buffer
         EXPECT_EQ(rocprofiler_create_buffer(context_id,
                                             BUFFER_SIZE_BYTES,
@@ -496,7 +496,7 @@ TEST(pc_sampling, device_counter_collection_vs_pc_sampling)
 {
     auto device_counter_collection_setup_fn = [](rocprofiler_context_id_t context_id,
                                                  rocprofiler_agent_id_t   agent_id) {
-        rocprofiler_buffer_id_t cc_buf_id;
+        rocprofiler_buffer_id_t cc_buf_id{};
         // Create PC sampling buffer
         EXPECT_EQ(rocprofiler_create_buffer(context_id,
                                             BUFFER_SIZE_BYTES,
