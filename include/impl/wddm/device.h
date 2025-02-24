@@ -110,6 +110,7 @@ public:
   uint64_t PrivateApertureSize() { return device_info_.private_aperture_size; }
   uint64_t SharedApertureBase() { return device_info_.shared_aperture_base; }
   uint64_t SharedApertureSize() { return device_info_.shared_aperture_size; }
+  uint64_t SystemHeapSize() { return system_heap_space_size_; }
   uint32_t LdsSize() { return device_info_.lds_size; }
   uint64_t GPUCounterFrequency() { return device_info_.gpu_counter_frequency; }
   uint32_t GetSwsQueueSize(void) const { return device_info_.user_queue_size; }
@@ -184,10 +185,18 @@ public:
 
   const thunk_proxy::DeviceInfo& DeviceInfo() const { return device_info_; }
 
+  ErrorCode ReserveIPCSysMem(gpusize size,
+                             gpusize *out_gpu_virtual_addr,
+                             gpusize alignment,
+                             int &memfd,
+                             bool lock=false);
+
+  ErrorCode FreeIPCSysMem(gpusize gpu_addr, gpusize size, int &memfd);
+
   ErrorCode ReserveGpuVirtualAddress(thunk_proxy::AllocDomain domain,
                                      gpusize hit_base_addr,
                                      gpusize size,
-                                     gpusize *out_gpu_virtual_addr, 
+                                     gpusize *out_gpu_virtual_addr,
                                      gpusize alignment,
                                      bool lock=false);
 
@@ -219,6 +228,8 @@ private:
   bool InitHandleApertureSpace(void);
   bool CommitSystemHeapSpace(void* addr, int64_t size, bool lock=false);
   bool DecommitSystemHeapSpace(void* addr, int64_t size);
+  bool CommitSystemHeapSpaceIPC(void* addr, int64_t size, int &fd, bool lock=false);
+  bool DecommitSystemHeapSpaceIPC(void* addr, int64_t size, int &memfd);
   bool FreeLocalHeapSpace(void);
   void InitVaMgr();
   void InitHandleApertureMgr();

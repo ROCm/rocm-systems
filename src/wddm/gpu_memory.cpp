@@ -1,3 +1,4 @@
+#include <sys/stat.h>
 #include <cinttypes>
 #include <cassert>
 #include "impl/wddm/gpu_memory.h"
@@ -41,6 +42,7 @@ GpuMemory::GpuMemory(WDDMDevice *device) : device_(device) {
   alloc_handles_ptr_ = nullptr;
   alloc_handle_ = 0;
   resource_ = 0;
+  mem_fd_ = -1;
 }
 
 GpuMemory::~GpuMemory() {
@@ -60,6 +62,7 @@ ErrorCode GpuMemory::Init(const GpuMemoryCreateInfo &create_info) {
   desc_.flags.is_virtual = create_info.flags.virtual_alloc;
   desc_.flags.is_physical_only = create_info.flags.physical_only;
   desc_.flags.is_physical_contiguous = create_info.flags.physical_contiguous;
+  desc_.flags.is_imported_sys_memfd = create_info.flags.imported_sys_memfd;
 
   /* we can't tell the allocation is regular vmm or ipc mem at creation stage,
      they share same creation parameters, so forcing all vram allocations to
@@ -69,7 +72,6 @@ ErrorCode GpuMemory::Init(const GpuMemoryCreateInfo &create_info) {
     desc_.flags.is_shared = true;
 
   desc_.flags.is_locked = create_info.flags.locked;
-
   desc_.size = AdjustSize(desc_.client_size);
 
   if (IsUserMemory() || IsSystem())
@@ -243,9 +245,18 @@ ErrorCode GpuMemory::MapGpuVirtualAddress(const gpusize addr, const gpusize size
 }
 
 ErrorCode GpuMemory::ReserveGpuVirtualAddress(gpusize base_virt_addr, gpusize size, gpusize alignment) {
+  ErrorCode status;
   gpusize gpu_virt_addr = 0;
-  auto status = device_->ReserveGpuVirtualAddress(desc_.domain, base_virt_addr, size, &gpu_virt_addr, alignment,
-    desc_.flags.is_locked);
+  if (desc_.flags.is_imported_sys_memfd && desc_.domain == thunk_proxy::AllocDomain::kSystem) {
+    int mfd = (mem_fd_ > -1)? mem_fd_ : -1;
+    status = device_->ReserveIPCSysMem(Size(), &gpu_virt_addr, desc_.alignment, mfd, desc_.flags.is_locked);
+    if (status == ErrorCode::Success)
+      mem_fd_ = mfd;
+  } else {
+    status = device_->ReserveGpuVirtualAddress(desc_.domain, base_virt_addr, size, &gpu_virt_addr, alignment,
+        desc_.flags.is_locked);
+  }
+
   if (status == ErrorCode::Success) {
     desc_.gpu_addr = gpu_virt_addr;
 
@@ -256,6 +267,9 @@ ErrorCode GpuMemory::ReserveGpuVirtualAddress(gpusize base_virt_addr, gpusize si
 }
 
 ErrorCode GpuMemory::FreeGpuVirtualAddress(gpusize base_addr, gpusize size) {
+  if (mem_fd_ > -1)
+    return device_->FreeIPCSysMem(GpuAddress(), Size(), mem_fd_);
+
   return base_addr != 0 ?
          device_->FreeGpuVirtualAddress(desc_.domain, base_addr, size) :
          ErrorCode::Success;
@@ -386,6 +400,11 @@ ErrorCode GpuMemory::Evict() {
 }
 
 ErrorCode GpuMemory::ExportPhysicalHandle(int* dmabuf_fd, uint32_t flags) {
+  if (mem_fd_ > -1) {
+    *dmabuf_fd = mem_fd_;
+    return ErrorCode::Success;
+  }
+
   if (IsShared())
     return d3dthunk::ShareObjects(num_allocations_, resource_, flags, dmabuf_fd);
   else
@@ -399,6 +418,64 @@ ErrorCode GpuMemory::ImportPhysicalHandle(const GpuMemoryCreateInfo &create_info
 
   if (dmabuf_fd <= 0)
     return ErrorCode::InvalidateParams;
+
+  if(create_info.flags.imported_sys_memfd) {
+    // the ipc signal sys mem fd will be closed in Runtime::IPCClientImport, dup to hold a reference
+    mem_fd_ = dup(dmabuf_fd);
+    desc_.client_size = create_info.size;
+    desc_.size = AdjustSize(desc_.client_size);
+    desc_.domain = thunk_proxy::AllocDomain::kSystem;
+    desc_.adapter_luid = device_->GetLuid();
+    desc_.alignment = 0x1000;
+    desc_.mem_flags = create_info.mem_flags;
+    desc_.engine_flag = create_info.engine_flag;
+    desc_.flags.is_imported_sys_memfd = create_info.flags.imported_sys_memfd;
+    desc_.flags.is_virtual = create_info.flags.virtual_alloc;
+    desc_.flags.is_physical_only = create_info.flags.physical_only;
+    desc_.flags.is_physical_contiguous = create_info.flags.physical_contiguous;
+    desc_.flags.is_locked = create_info.flags.locked;
+
+    auto code = ReserveGpuVirtualAddress(create_info.va_hint, Size(), create_info.alignment);
+    if (code != ErrorCode::Success)
+      return code;
+
+    bool physical_created = false;
+    auto guard = MakeScopeGuard([this, &physical_created, &code]() {
+          if (code != ErrorCode::Success) {
+            if (physical_created)
+              FreePhysicalMemory();
+            FreeGpuVirtualAddress(GpuAddress(), Size());
+          }
+        });
+    (void)guard;
+
+    num_allocations_ = CalcChunkNumbers(Size());
+    if (num_allocations_ == 1)
+      alloc_handles_ptr_ = &alloc_handle_;
+    else
+      alloc_handles_ptr_ = new WinAllocationHandle[num_allocations_];
+
+    memset(alloc_handles_ptr_, 0, num_allocations_ * sizeof(WinAllocationHandle));
+
+    code = CreatePhysicalMemory();
+    if (code != ErrorCode::Success)
+      return code;
+
+    physical_created = true;
+
+    code = MapGpuVirtualAddress(GpuAddress(), Size());
+    if (code != ErrorCode::Success)
+      return code;
+
+    code = MakeResident();
+    if (code != ErrorCode::Success)
+      return code;
+
+    if (!GetDevice()->WaitOnPagingFenceFromCpu())
+      code = ErrorCode::Unknown;
+
+    return code;
+  }
 
   memset(&query_args, 0, sizeof(query_args));
   query_args.hDevice = device_->DeviceHandle();

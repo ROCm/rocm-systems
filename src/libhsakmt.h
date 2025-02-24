@@ -202,6 +202,6 @@ uint32_t get_vgpr_size_per_cu(HSA_ENGINE_ID id);
 
 HSAKMT_STATUS hsaKmtImportDMABufHandle(int DMABufFd,
 				       HsaGraphicsResourceInfo *GraphicsResourceInfo,
-				       bool requiresVAddr = false);
+				       HSA_REGISTER_MEM_FLAGS RegisterFlags = {0});
 
 #endif

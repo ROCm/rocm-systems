@@ -63,7 +63,8 @@ union GpuMemoryCreateFlags {
     uint64_t locked                     : 1; // lock virtual address space into RAM, preventing that memory from being paged to the swap area
     uint64_t physical_contiguous        : 1; // contiguous physical pages
     uint64_t imported_vram_alloc_va     : 1; // import buffer form dmabuf fd and allocate valid va (not from handle aperture)
-    uint64_t unused                     : 58;
+    uint64_t imported_sys_memfd         : 1; // allocate system memory for IPC signal
+    uint64_t unused                     : 57;
   };
   uint64_t reserved;
 };
@@ -78,7 +79,8 @@ union GpuMemoryDescFlags {
     uint32_t is_queue_referenced : 1;
     uint32_t is_physical_contiguous : 1;
     uint32_t is_imported_vram_alloc_va : 1; // 0 - va from handle aperture; 1 - va from local heap;
-    uint32_t unused : 24;
+    uint32_t is_imported_sys_memfd : 1;     // 0 - ignored; 1 - va from system heap
+    uint32_t unused : 23;
   };
 
   uint32_t reserved;
@@ -103,7 +105,7 @@ struct GpuMemoryCreateInfo {
   gpusize alignment;
   int mem_flags;
   int engine_flag;
-  int dmabuf_fd; // Import from dmabuf 
+  int dmabuf_fd; // Import from dmabuf
 
   void *user_ptr;
   gpusize va_hint;
@@ -162,6 +164,7 @@ public:
   inline bool IsLocal() const { return desc_.domain == thunk_proxy::kLocal; }
   inline bool IsUserMemory() const { return desc_.domain == thunk_proxy::kUserMemory; }
   inline bool IsSystem() const { return desc_.domain == thunk_proxy::kSystem; }
+  inline bool IsSysMemFd() const { return desc_.flags.is_imported_sys_memfd; }
   inline bool IsUserQueue() const { return desc_.domain == thunk_proxy::kUserQueue; }
   inline bool IsPhysicalOnly() const { return desc_.flags.is_physical_only; }
   inline bool IsPhysicalContiguous() const { return desc_.flags.is_physical_contiguous; }
@@ -220,6 +223,8 @@ private:
   WinAllocationHandle alloc_handle_; // Optimization for num_allocations_ is 1
 
   WinResourceHandle resource_;     // Handle to a resource object that wraps the allocation. Used for shared resources
+
+  int mem_fd_; // IPC sigal's sys mem fd
 
   DISALLOW_COPY_AND_ASSIGN(GpuMemory);
 };

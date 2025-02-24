@@ -82,6 +82,9 @@ HSAKMTAPI int amdgpu_device_get_fd(amdgpu_device_handle dev) {
 }
 
 HSAKMTAPI int amdgpu_bo_cpu_map(amdgpu_bo_handle bo, void **cpu) {
+  wsl::thunk::GpuMemory *gpu_mem = get_gpu_mem(bo);
+  if (gpu_mem->IsSysMemFd())
+    *cpu = gpu_mem->CpuAddress();
   return 0;
 }
 
@@ -116,11 +119,14 @@ HSAKMTAPI int amdgpu_bo_va_op(amdgpu_bo_handle bo,
                               uint64_t addr,
                               uint64_t flags,
                               uint32_t ops) {
+  wsl::thunk::GpuMemory *gpu_mem = get_gpu_mem(bo);
+  assert(gpu_mem != nullptr);
+  if (gpu_mem->IsSysMemFd())
+    return 0;
+
   switch(ops) {
     case AMDGPU_VA_OP_MAP:
       {
-        wsl::thunk::GpuMemory *gpu_mem = get_gpu_mem(bo);
-        assert(gpu_mem != nullptr);
         auto code = gpu_mem->MapGpuVirtualAddress(reinterpret_cast<gpusize>(addr), size, offset);
         if (code != ErrorCode::Success)
           return -1;
@@ -132,8 +138,6 @@ HSAKMTAPI int amdgpu_bo_va_op(amdgpu_bo_handle bo,
       break;
     case AMDGPU_VA_OP_UNMAP:
       {
-        wsl::thunk::GpuMemory *gpu_mem = get_gpu_mem(bo);
-        assert(gpu_mem != nullptr);
         auto code = gpu_mem->UnmapGpuVirtualAddress(reinterpret_cast<gpusize>(addr), size, offset);
         if (code != ErrorCode::Success)
           return -1;
