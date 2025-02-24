@@ -42,6 +42,7 @@ hsaKmtGetVersionCapInfo(HsaVersionCapability *VersionCapInfo) {
 
   VersionCapInfo->Value = 0;
   VersionCapInfo->ui64.Sdma = 1;
+  VersionCapInfo->ui64.IPCLegacyMode = 0; // Force to 0 to support IPC mem
   /*VersionCapInfo->ui64.InterruptSignal = 0;
   VersionCapInfo->ui64.SdmaUserQueue = 0;
   VersionCapInfo->ui64.SdmaPeer = 0;
