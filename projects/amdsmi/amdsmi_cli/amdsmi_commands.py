@@ -1793,8 +1793,8 @@ class AMDSMICommands():
                 deep_sleep_threshold = 140
 
                 # Populate clock values from gpu_metrics_info
+                # Populate GFX clock values
                 try:
-                    # Populate GFX clock values
                     current_gfx_clocks = gpu_metric["current_gfxclks"]
                     for clock_index, current_gfx_clock in enumerate(current_gfx_clocks):
                         # If the current clock is N/A then nothing else applies
@@ -1819,8 +1819,11 @@ class AMDSMICommands():
                             clocks[gfx_index]["deep_sleep"] = "ENABLED"
                         else:
                             clocks[gfx_index]["deep_sleep"] = "DISABLED"
+                except KeyError as e:
+                    logging.debug("Failed to get current_gfxclks for gpu %s | %s", gpu_id, e)
 
-                    # Populate MEM clock value
+                # Populate MEM clock value
+                try:
                     current_mem_clock = gpu_metric["current_uclk"] # single value
                     if current_mem_clock != "N/A":
                         clocks["mem_0"]["clk"] = self.helpers.unit_format(self.logger,
@@ -1831,8 +1834,11 @@ class AMDSMICommands():
                             clocks["mem_0"]["deep_sleep"] = "ENABLED"
                         else:
                             clocks["mem_0"]["deep_sleep"] = "DISABLED"
+                except KeyError as e:
+                    logging.debug("Failed to get current_uclk for gpu %s | %s", gpu_id, e)
 
-                    # Populate VCLK clock values
+                # Populate VCLK clock values
+                try:
                     current_vclk_clocks = gpu_metric["current_vclk0s"]
                     for clock_index, current_vclk_clock in enumerate(current_vclk_clocks):
                         # If the current clock is N/A then nothing else applies
@@ -1848,8 +1854,11 @@ class AMDSMICommands():
                             clocks[vclk_index]["deep_sleep"] = "ENABLED"
                         else:
                             clocks[vclk_index]["deep_sleep"] = "DISABLED"
+                except KeyError as e:
+                    logging.debug("Failed to get current_vclk0s for gpu %s | %s", gpu_id, e)
 
-                    # Populate DCLK clock values
+                # Populate DCLK clock values
+                try:
                     current_dclk_clocks = gpu_metric["current_dclk0s"]
                     for clock_index, current_dclk_clock in enumerate(current_dclk_clocks):
                         # If the current clock is N/A then nothing else applies
@@ -1865,8 +1874,11 @@ class AMDSMICommands():
                             clocks[dclk_index]["deep_sleep"] = "ENABLED"
                         else:
                             clocks[dclk_index]["deep_sleep"] = "DISABLED"
+                except KeyError as e:
+                    logging.debug("Failed to get current_dclk0s for gpu %s | %s", gpu_id, e)
 
-                    # Populate FCLK clock value; fclk not present in gpu_metrics so use amdsmi_get_clk_freq
+                # Populate FCLK clock value; fclk not present in gpu_metrics so use amdsmi_get_clk_freq
+                try:
                     frequency_dict = amdsmi_interface.amdsmi_get_clk_freq(args.gpu, amdsmi_interface.AmdSmiClkType.DF)
                     current_fclk_clock = frequency_dict['frequency'][frequency_dict['current']]
                     current_fclk_clock = self.helpers.convert_SI_unit(current_fclk_clock, self.helpers.SI_Unit.MICRO)
@@ -1878,8 +1890,11 @@ class AMDSMICommands():
                         clocks["fclk_0"]["deep_sleep"] = "ENABLED"
                     else:
                         clocks["fclk_0"]["deep_sleep"] = "DISABLED"
+                except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
+                    logging.debug("Failed to get fclk info for gpu %s | %s", gpu_id, e)
 
-                    # Populate SOCCLK clock value
+                # Populate SOCCLK clock value
+                try:
                     current_socclk_clock = gpu_metric["current_socclk"]
                     clocks["socclk_0"]["clk"] = self.helpers.unit_format(self.logger,
                                                                          current_socclk_clock,
@@ -1889,9 +1904,8 @@ class AMDSMICommands():
                         clocks["socclk_0"]["deep_sleep"] = "ENABLED"
                     else:
                         clocks["socclk_0"]["deep_sleep"] = "DISABLED"
-
-                except Exception as e:
-                    logging.debug("Failed to get gpu_metrics_info for gpu %s | %s", gpu_id, e)
+                except KeyError as e:
+                    logging.debug("Failed to get current_socclk for gpu %s | %s", gpu_id, e)
 
                 # Populate the max and min clock values from sysfs
                 #   Min and Max values are per clock type, not per clock engine

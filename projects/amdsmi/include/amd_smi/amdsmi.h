@@ -251,8 +251,8 @@ typedef void *amdsmi_cpusocket_handle;
  * @cond @tag{cpu_bm} @endcond
  */
 typedef struct {
-        uint8_t major;      //!< Major version number
-        uint8_t minor;      //!< Minor version number
+        uint32_t major;      //!< Major version number
+        uint32_t minor;      //!< Minor version number
 } amdsmi_hsmp_driver_version_t;
 
 #endif

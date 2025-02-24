@@ -103,7 +103,7 @@ EOF
 do_ldconfig() {
   # left-hand term originates from ENABLE_LDCONFIG = ON/OFF at package build
   if [ "@ENABLE_LDCONFIG@" == "ON" ]; then
-    echo @CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_LIBDIR@ > /etc/ld.so.conf.d/x86_64-libamd_smi_lib.conf
+    echo $RPM_INSTALL_PREFIX0/@CMAKE_INSTALL_LIBDIR@ > /etc/ld.so.conf.d/x86_64-libamd_smi_lib.conf
     ldconfig
   fi
 }
@@ -157,8 +157,8 @@ do_install_amdsmi_python_lib() {
     return
   fi
 
-  # install python library at @CPACK_PACKAGING_INSTALL_PREFIX@/@SHARE_INSTALL_PREFIX@/amdsmi
-  local python_lib_path=@CPACK_PACKAGING_INSTALL_PREFIX@/@SHARE_INSTALL_PREFIX@
+  # install python library at $RPM_INSTALL_PREFIX0/@SHARE_INSTALL_PREFIX@/amdsmi
+  local python_lib_path=$RPM_INSTALL_PREFIX0/@SHARE_INSTALL_PREFIX@
   local amdsmi_python_lib_path="$python_lib_path"
   local amdsmi_setup_py_path="$python_lib_path/setup.py"
 
