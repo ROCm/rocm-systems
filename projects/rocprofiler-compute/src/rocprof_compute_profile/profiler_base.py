@@ -26,6 +26,7 @@ import glob
 import logging
 import os
 import re
+import shutil
 import sys
 import time
 from abc import ABC, abstractmethod
@@ -286,7 +287,8 @@ class RocProfCompute_Base:
         # verify correct formatting for application binary
         self.__args.remaining = self.__args.remaining[1:]
         if self.__args.remaining:
-            if not Path(self.__args.remaining[0]).is_file():
+            # Ensure that command points to an executable
+            if not shutil.which(self.__args.remaining[0]):
                 console_error(
                     "Your command %s doesn't point to a executable. Please verify."
                     % self.__args.remaining[0]
