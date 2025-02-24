@@ -844,26 +844,18 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtQueryPointerInfo(const void *Pointer,
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
   pr_debug("pointer %p\n", Pointer);
-  void *ptr = const_cast<void*>(Pointer);
 
   memset(PointerInfo, 0, sizeof(HsaPointerInfo));
-  void* block_base = nullptr;
-  {
-    std::lock_guard<std::mutex> gard(*fragment_allocator_lock_);
-      block_base = fragment_allocator_.block_base(ptr);
-    if (block_base != nullptr)
-      ptr = block_base;
-  }
 
   Allocation allocation_info;
   bool found = false;
   {
     std::lock_guard<std::mutex> gard(*allocation_map_lock_);
-    auto it = allocation_map_.upper_bound(ptr);
+    auto it = allocation_map_.upper_bound(Pointer);
     if (it != allocation_map_.begin()) {
       --it;
-      if (ptr >= it->first &&
-        (ptr < reinterpret_cast<const uint8_t*>(it->first) + it->second.size_requested)) {
+      if (Pointer >= it->first &&
+        (Pointer < reinterpret_cast<const uint8_t*>(it->first) + it->second.size_requested)) {
         allocation_info = it->second;
         found = true;
       }
@@ -888,13 +880,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtQueryPointerInfo(const void *Pointer,
   PointerInfo->MemFlags.Value = allocation_info.mem_flags_value;
   PointerInfo->CPUAddress = allocation_info.cpu_addr;
   PointerInfo->GPUAddress = allocation_info.gpu_addr;
-  if (block_base != nullptr) {
-    uint64_t offset = reinterpret_cast<uint64_t>(Pointer) -
-      reinterpret_cast<uint64_t>(block_base);
-    PointerInfo->CPUAddress = reinterpret_cast<void*>(
-      reinterpret_cast<uint64_t>(PointerInfo->CPUAddress) + offset);
-    PointerInfo->GPUAddress += offset;
-  }
   PointerInfo->UserData = allocation_info.user_data;
 
   return HSAKMT_STATUS_SUCCESS;
