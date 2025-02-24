@@ -168,5 +168,35 @@ typedef struct PM4_MEC_RELEASE_MEM_GFX125X {
     unsigned int int_ctxid;
 } PM4MEC_RELEASE_MEM_GFX125X, *PPM4MEC_RELEASE_MEM_GFX125X;
 
+typedef struct _PM4WRITE_DATA_GFX125X {
+    union {
+        PM4_TYPE_3_HEADER   header;
+        unsigned int        ordinal1;
+    };
+
+    union {
+        struct {
+            unsigned int reserved1:8;
+            MEC_WRITE_DATA_dst_sel_enum dst_sel:4;
+            unsigned int scope:2;
+            unsigned int mode:2;
+            MEC_WRITE_DATA_addr_incr_enum addr_incr:1;
+            unsigned int reserved2:1;
+            unsigned int md_id:2;
+            MEC_WRITE_DATA_wr_confirm_enum wr_confirm:1;
+            unsigned int xcd_id:4;
+            unsigned int temporal:2;
+            unsigned int coop_disable:1;
+            unsigned int reserved3:4;
+        } bitfields2;
+        unsigned int ordinal2;
+    };
+
+    unsigned int dst_addr_lo;
+
+    unsigned int dst_address_hi;
+
+    unsigned int data[1];    // 1..N of these fields
+}  PM4WRITE_DATA_GFX125X, *PPM4WRITE_DATA_GFX125X;
 
 #endif // __PM4__PKT__STRUCT__NV__HPP__

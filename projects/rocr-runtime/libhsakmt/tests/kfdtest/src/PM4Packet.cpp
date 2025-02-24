@@ -43,28 +43,50 @@ void PM4Packet::InitPM4Header(PM4_TYPE_3_HEADER &header, it_opcode_type opCode) 
     header.reserved1             = 0;
 }
 
-unsigned int PM4WriteDataPacket::SizeInBytes() const {
-    return (offsetof(PM4WRITE_DATA_CI, data) + m_ndw*sizeof(uint32_t));
-}
-
 void PM4WriteDataPacket::InitPacket(unsigned int *destBuf, void *data) {
-    m_pPacketData = reinterpret_cast<PM4WRITE_DATA_CI *>(AllocPacket());
+    if (m_FamilyId == FAMILY_GFX125X) {
+        PM4WRITE_DATA_GFX125X *pkt;
 
-    InitPM4Header(m_pPacketData->header, IT_WRITE_DATA);
+        m_packetSize = offsetof(PM4WRITE_DATA_GFX125X, data) + m_ndw*sizeof(uint32_t);
+        pkt = reinterpret_cast<PM4WRITE_DATA_GFX125X *>(AllocPacket());
 
-    m_pPacketData->bitfields2.dst_sel      = dst_sel_mec_write_data_MEMORY_5;  // memory-async
-    m_pPacketData->bitfields2.addr_incr    = addr_incr_mec_write_data_INCREMENT_ADDR_0;  // increment addr
-    m_pPacketData->bitfields2.wr_confirm   = wr_confirm_mec_write_data_WAIT_FOR_CONFIRMATION_1;
-    m_pPacketData->bitfields2.atc          = hsakmt_is_dgpu() ?
-        atc_write_data_NOT_USE_ATC_0 : atc_write_data_USE_ATC_1;
-    m_pPacketData->bitfields2.cache_policy = cache_policy_mec_write_data_BYPASS_2;
+        m_pPacketData = pkt;
+        InitPM4Header(pkt->header, IT_WRITE_DATA);
 
-    m_pPacketData->dst_addr_lo    = static_cast<uint32_t>(
-        reinterpret_cast<uint64_t>(destBuf));  // byte addr
-    m_pPacketData->dst_address_hi = static_cast<uint32_t>(
-        reinterpret_cast<uint64_t>(destBuf) >> 32);
+        pkt->bitfields2.dst_sel      = dst_sel_mec_write_data_MEMORY_5;  // memory-async
+        pkt->bitfields2.scope        = 3;  // scope
+        pkt->bitfields2.addr_incr    = addr_incr_mec_write_data_INCREMENT_ADDR_0;  // increment addr
+        pkt->bitfields2.wr_confirm   = wr_confirm_mec_write_data_WAIT_FOR_CONFIRMATION_1;
 
-    memcpy(m_pPacketData->data, data, m_ndw * sizeof(uint32_t));
+        pkt->dst_addr_lo    = static_cast<uint32_t>(
+            reinterpret_cast<uint64_t>(destBuf));  // byte addr
+        pkt->dst_address_hi = static_cast<uint32_t>(
+            reinterpret_cast<uint64_t>(destBuf) >> 32);
+
+        memcpy(pkt->data, data, m_ndw * sizeof(uint32_t));
+    } else {
+        PM4WRITE_DATA_CI *pkt;
+
+        m_packetSize = offsetof(PM4WRITE_DATA_CI, data) + m_ndw*sizeof(uint32_t);
+        pkt = reinterpret_cast<PM4WRITE_DATA_CI *>(AllocPacket());
+
+        m_pPacketData = pkt;
+        InitPM4Header(pkt->header, IT_WRITE_DATA);
+
+        pkt->bitfields2.dst_sel      = dst_sel_mec_write_data_MEMORY_5;  // memory-async
+        pkt->bitfields2.addr_incr    = addr_incr_mec_write_data_INCREMENT_ADDR_0;  // increment addr
+        pkt->bitfields2.wr_confirm   = wr_confirm_mec_write_data_WAIT_FOR_CONFIRMATION_1;
+        pkt->bitfields2.atc          = hsakmt_is_dgpu() ?
+            atc_write_data_NOT_USE_ATC_0 : atc_write_data_USE_ATC_1;
+        pkt->bitfields2.cache_policy = cache_policy_mec_write_data_BYPASS_2;
+
+        pkt->dst_addr_lo    = static_cast<uint32_t>(
+            reinterpret_cast<uint64_t>(destBuf));  // byte addr
+        pkt->dst_address_hi = static_cast<uint32_t>(
+            reinterpret_cast<uint64_t>(destBuf) >> 32);
+
+        memcpy(pkt->data, data, m_ndw * sizeof(uint32_t));
+    }
 }
 
 PM4ReleaseMemoryPacket::PM4ReleaseMemoryPacket(unsigned int familyId, bool isPolling,
