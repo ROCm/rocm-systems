@@ -374,3 +374,11 @@ FILTER[gfx1200]=\
 FILTER[gfx1201]=\
 "$BLACKLIST_ALL_ASICS:"\
 "$BLACKLIST_GFX12"
+
+FILTER[RHEL9]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$BLACKLIST_GFX11:"\
+"KFDQMTest.ExtendedCuMasking:"\
+"KFDIPCTest.*:"\
+"KFDEvictTest.QueueTest:"\
+"KFDPCSamplingTest.*"
