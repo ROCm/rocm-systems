@@ -76,8 +76,10 @@ PM4ReleaseMemoryPacket::PM4ReleaseMemoryPacket(unsigned int familyId, bool isPol
         InitPacketCI(isPolling, address, data, is64bit, isTimeStamp);
     else if (familyId < FAMILY_NV)
         InitPacketAI(isPolling, address, data, is64bit, isTimeStamp);
-    else
+    else if (familyId < FAMILY_GFX125X)
         InitPacketNV(isPolling, address, data, is64bit, isTimeStamp);
+    else
+        InitPacketGfx125x(isPolling, address, data, is64bit, isTimeStamp);
 }
 
 void PM4ReleaseMemoryPacket::InitPacketCI(bool isPolling, uint64_t address,
@@ -233,6 +235,48 @@ void PM4ReleaseMemoryPacket::InitPacketNV(bool isPolling, uint64_t address,
     pkt->int_ctxid = static_cast<uint32_t>(data);
 }
 
+void PM4ReleaseMemoryPacket::InitPacketGfx125x(bool isPolling, uint64_t address,
+                                uint64_t data, bool is64bit, bool isTimeStamp) {
+    PM4MEC_RELEASE_MEM_GFX125X *pkt;
+
+    m_packetSize = sizeof(PM4_MEC_RELEASE_MEM_GFX125X);
+    pkt = reinterpret_cast<PM4_MEC_RELEASE_MEM_GFX125X *>(AllocPacket());
+    m_pPacketData = pkt;
+
+    InitPM4Header(pkt->header, IT_RELEASE_MEM);
+
+    pkt->bitfields2.event_type       = 0x14;
+    pkt->bitfields2.event_index      = event_index__mec_release_mem__end_of_pipe;
+    pkt->bitfields2.gcr_cntl         = (1<<12) | (1<<10) | (1<<9) | 1;
+    pkt->bitfields3.dst_sel          = dst_sel__mec_release_mem__memory_controller;
+
+    if (address) {
+        pkt->bitfields3.int_sel  = (isPolling ?
+                int_sel__mec_release_mem__send_data_after_write_confirm:
+                int_sel__mec_release_mem__send_interrupt_after_write_confirm);
+
+        if (isTimeStamp && is64bit)
+            pkt->bitfields3.data_sel = data_sel__mec_release_mem__send_gpu_clock_counter;
+        else
+            pkt->bitfields3.data_sel     = is64bit ?
+                    data_sel__mec_release_mem__send_64_bit_data :
+                    data_sel__mec_release_mem__send_32_bit_low;
+    } else {
+        pkt->bitfields3.int_sel  = (isPolling ?
+                int_sel__mec_release_mem__none:
+                int_sel__mec_release_mem__send_interrupt_only);
+        pkt->bitfields3.data_sel     = data_sel__mec_release_mem__none;
+    }
+
+    pkt->bitfields4a.address_lo_32b = static_cast<uint32_t>((address&0xffffffff) >> 2);
+    pkt->address_hi = static_cast<uint32_t>(address>>32);
+
+    pkt->data_lo = static_cast<uint32_t>(data);
+    pkt->data_hi = static_cast<uint32_t>(data >> 32);
+
+    pkt->int_ctxid = static_cast<uint32_t>(data);
+}
+
 PM4IndirectBufPacket::PM4IndirectBufPacket(IndirectBuffer *pIb) {
     InitPacket(pIb);
 }
@@ -261,8 +305,10 @@ PM4AcquireMemoryPacket::PM4AcquireMemoryPacket(unsigned int familyId):m_pPacketD
 
     if (familyId < FAMILY_NV)
         InitPacketAI();
-    else
+    else if (familyId < FAMILY_GFX125X)
         InitPacketNV();
+    else
+        InitPacketGfx125x();
 }
 
 void PM4AcquireMemoryPacket::InitPacketAI(void) {
@@ -298,6 +344,22 @@ void PM4AcquireMemoryPacket::InitPacketNV(void) {
           * Invalidate all Icache (GLI)
           */
     pkt->bitfields6.gcr_cntl = (1<<14|1<<9|1<<8|1<<7|1);
+}
+
+void PM4AcquireMemoryPacket::InitPacketGfx125x(void) {
+    PM4ACQUIRE_MEM_GFX125X *pkt;
+    m_packetSize = sizeof(PM4ACQUIRE_MEM_GFX125X);
+    pkt = reinterpret_cast<PM4ACQUIRE_MEM_GFX125X*>(AllocPacket());
+    m_pPacketData = pkt;
+
+    InitPM4Header(pkt->header,  IT_ACQUIRE_MEM);
+    pkt->coher_size                = 0xFFFFFFFF;
+    pkt->bitfields3.coher_size_hi  = 0;
+    pkt->coher_base_lo             = 0;
+    pkt->bitfields4.coher_base_hi  = 0;
+    pkt->bitfields5.poll_interval  = 4; //copied from the way the HSART does this.
+
+    pkt->bitfields6.gcr_cntl = (1<<14|1<<8|1<<7|1<<4|1);
 }
 
 PM4SetShaderRegPacket::PM4SetShaderRegPacket(void) {
