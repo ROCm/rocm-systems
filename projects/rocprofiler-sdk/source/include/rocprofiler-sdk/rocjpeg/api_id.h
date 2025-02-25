@@ -42,4 +42,4 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_ROCJPEG_API_ID_rocJpegGetErrorName,
 
     ROCPROFILER_ROCJPEG_API_ID_LAST,
-} rocprofiler_rocjpef_api_id_t;
+} rocprofiler_rocjpeg_api_id_t;
