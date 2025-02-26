@@ -39,7 +39,6 @@ add_subdirectory(collection-period)
 add_subdirectory(internal-threading)
 add_subdirectory(rocdecode-trace)
 add_subdirectory(rocjpeg-trace)
-
 if(TARGET att_decoder_testing)
     add_subdirectory(advanced-thread-trace)
 endif()
