@@ -139,6 +139,8 @@ GPU: 0
 
 ### Changed
 
+- **Removed initialization requirements for `amdsmi_get_lib_version()` and added `amdsmi_get_rocm_version()` to the python API & CLI**.  
+
 - **Added an additional argument `sensor_ind` to `amdsmi_get_power_info()`**.  
 This change breaks previous C API calls and will require a change
 Python API now accepts `sensor_ind` as an optional argument, does not imapact previous usage

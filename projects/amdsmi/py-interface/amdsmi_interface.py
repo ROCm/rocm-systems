@@ -18,19 +18,33 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import ctypes
-import re
 import json
 import logging
-from typing import Union, Any, Dict, List
-from enum import IntEnum
+import math
+import os
+import re
+import sys
 from collections.abc import Iterable
+from enum import IntEnum
+from pathlib import Path
+from time import asctime, localtime, time
+from typing import Any, Dict, List, Tuple, Union
 
 from . import amdsmi_wrapper
 from .amdsmi_exception import *
-import sys
-import math
-from time import localtime, asctime, time
-import json
+
+
+### Non Library Specific Constants ###
+class MaxUIntegerTypes(IntEnum):
+    UINT8_T  = 0xFF
+    UINT16_T = 0xFFFF
+    UINT32_T = 0xFFFFFFFF
+    UINT64_T = 0xFFFFFFFFFFFFFFFF
+
+NO_OF_32BITS = (sys.getsizeof(ctypes.c_uint32) * 8)
+NO_OF_64BITS = (sys.getsizeof(ctypes.c_uint64) * 8)
+KILO = math.pow(10, 3)
+###############################
 
 MAX_NUM_PROCESSES = 1024
 
@@ -72,6 +86,7 @@ AMDSMI_MAX_NUM_XGMI_PHYSICAL_LINK = 64
 AMDSMI_GPU_UUID_SIZE = 38
 MAX_AMDSMI_NAME_LENGTH = 64
 MAX_EVENT_NOTIFICATION_MSG_SIZE = 96
+_AMDSMI_STRING_LENGTH = 80
 
 
 class AmdSmiInitFlags(IntEnum):
@@ -256,6 +271,7 @@ class AmdSmiEvtNotificationType(IntEnum):
     GPU_PRE_RESET = amdsmi_wrapper.AMDSMI_EVT_NOTIF_GPU_PRE_RESET
     GPU_POST_RESET = amdsmi_wrapper.AMDSMI_EVT_NOTIF_GPU_POST_RESET
     RING_HANG = amdsmi_wrapper.AMDSMI_EVT_NOTIF_RING_HANG
+
 
 class AmdSmiTemperatureMetric(IntEnum):
     CURRENT = amdsmi_wrapper.AMDSMI_TEMP_CURRENT
@@ -511,11 +527,6 @@ class AmdSmiEventReader:
         self.stop()
 
 
-_AMDSMI_MAX_DRIVER_VERSION_LENGTH = 80
-_AMDSMI_GPU_UUID_SIZE = 38
-_AMDSMI_STRING_LENGTH = 80
-
-
 def _format_bad_page_info(bad_page_info, bad_page_count: ctypes.c_uint32) -> List[Dict]:
     """
     Format bad page info data retrieved.
@@ -618,6 +629,7 @@ def _make_amdsmi_bdf_from_list(bdf):
     amdsmi_bdf.struct_amdsmi_bdf_t.domain_number = bdf[0]
     return amdsmi_bdf
 
+
 def _pad_hex_value(value, length):
     """ Pad a hexadecimal value with a given length of zeros
 
@@ -633,11 +645,6 @@ def _pad_hex_value(value, length):
         return '0x' + value[2:].zfill(length)
     return value
 
-class MaxUIntegerTypes(IntEnum):
-    UINT8_T  = 0xFF
-    UINT16_T = 0xFFFF
-    UINT32_T = 0xFFFFFFFF
-    UINT64_T = 0xFFFFFFFFFFFFFFFF
 
 def _validate_if_max_uint(value, uint_type: MaxUIntegerTypes, isActivity=False, isBool=False):
     return_val = "N/A"
@@ -660,7 +667,6 @@ def _validate_if_max_uint(value, uint_type: MaxUIntegerTypes, isActivity=False, 
         return bool(return_val)
     else:
         return return_val
-
 
 def amdsmi_get_socket_handles() -> List[amdsmi_wrapper.amdsmi_socket_handle]:
     """
@@ -719,7 +725,6 @@ def amdsmi_get_cpusocket_handles() -> List[amdsmi_wrapper.amdsmi_socket_handle]:
     ]
     return cpu_handles
 
-
 def amdsmi_get_socket_info(socket_handle):
     if not isinstance(socket_handle, amdsmi_wrapper.amdsmi_socket_handle):
         raise AmdSmiParameterException(
@@ -746,7 +751,6 @@ def amdsmi_get_processor_info(processor_handle):
     )
 
     return processor_info.value.decode()
-
 
 def amdsmi_get_processor_handles() -> List[amdsmi_wrapper.amdsmi_processor_handle]:
     socket_handles = amdsmi_get_socket_handles()
@@ -798,7 +802,6 @@ def amdsmi_get_cpucore_handles() -> List[amdsmi_wrapper.amdsmi_processor_handle]
     ]
 
     return core_handles
-
 
 def amdsmi_get_cpu_hsmp_proto_ver(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
@@ -1501,10 +1504,6 @@ def amdsmi_get_hsmp_metrics_table_version(
 
     return metric_tbl_version.value
 
-
-NO_OF_32BITS = (sys.getsizeof(ctypes.c_uint32) * 8)
-NO_OF_64BITS = (sys.getsizeof(ctypes.c_uint64) * 8)
-KILO = math.pow(10, 3)
 
 # Get 2's complement of 32 bit unsigned integer
 def check_msb_32(num):
@@ -2265,10 +2264,10 @@ def amdsmi_get_gpu_device_uuid(processor_handle: amdsmi_wrapper.amdsmi_processor
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
 
-    uuid = ctypes.create_string_buffer(_AMDSMI_GPU_UUID_SIZE)
+    uuid = ctypes.create_string_buffer(AMDSMI_GPU_UUID_SIZE)
 
     uuid_length = ctypes.c_uint32()
-    uuid_length.value = _AMDSMI_GPU_UUID_SIZE
+    uuid_length.value = AMDSMI_GPU_UUID_SIZE
 
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_device_uuid(
@@ -2288,7 +2287,7 @@ def amdsmi_get_gpu_driver_info(
         )
 
     length = ctypes.c_int()
-    length.value = _AMDSMI_MAX_DRIVER_VERSION_LENGTH
+    length.value = AMDSMI_MAX_DRIVER_VERSION_LENGTH
 
     info = amdsmi_wrapper.amdsmi_driver_info_t()
     _check_res(
@@ -4451,6 +4450,7 @@ def amdsmi_get_gpu_metrics_header_info(
         "content_revision": header_info.content_revision
     }
 
+
 def amdsmi_get_link_topology_nearest(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
     link_type: AmdSmiLinkType,
@@ -4491,3 +4491,80 @@ def amdsmi_get_gpu_virtualization_mode_info(
     return {
         "mode": AmdSmiVirtualizationMode(mode.value)
     }
+
+### Non C-Lib APIs ###
+
+def amdsmi_get_rocm_version()-> Tuple[bool, str]:
+    """
+    Get the ROCm version for the rocm-core library.
+
+    This function attempts to retrieve the ROCm version by loading the `librocm-core.so` shared library
+    and calling its `getROCmVersion` function. The version is returned as a string in the format "major.minor.patch".
+
+    Returns:
+        Tuple[bool, str]: A tuple containing a boolean and a string.
+            - The boolean indicates whether the operation was successful.
+            - The string contains the ROCm version if successful, or an error message if not.
+
+    Raises:
+        Exception: If there is an error loading the shared library or calling the function.
+
+    Example:
+        rocm_lib_status, version_message = amdsmi_get_rocm_version()
+        if rocm_lib_status:
+            print(f"ROCm version: {version_message}")
+        else:
+            print(f"Error: {version_message}")
+    """
+    # librocm-core.so can be located in found using several different methods.
+    # Look for it with below priority:
+    # 1. ROCM_HOME/ROCM_PATH environment variables
+    #    - ROCM_HOME/lib
+    #    - ROCM_PATH/lib (usually set to /opt/rocm/)
+    # 2. Decided by the linker
+    #    - LD_LIBRARY_PATH env var
+    #    - defined path in /etc/ld.so.conf.d/
+    # 3. Relative to amdsmi_wrapper.py in /opt/rocm/share/amd_smi
+    #    - parent directory
+
+    try:
+        possible_locations = list()
+        # 1.
+        rocm_path = os.getenv("ROCM_HOME", os.getenv("ROCM_PATH"))
+        if rocm_path:
+            possible_locations.append(os.path.join(rocm_path, "lib/librocm-core.so"))
+
+        # Check if /opt/rocm/lib/librocm-core.so exists and add it to the list
+        if os.path.exists("/opt/rocm/lib/librocm-core.so"):
+            possible_locations.append("/opt/rocm/lib/librocm-core.so")
+        # 2.
+        possible_locations.append("librocm-core.so")
+        # 3.
+        librocm_core_parent_dir =  Path(__file__).resolve().parent.parent.parent / "lib" / "librocm-core.so"
+        possible_locations.append(librocm_core_parent_dir)
+
+        for librocm_core_file_path in possible_locations:
+            try:
+                librocm_core = ctypes.CDLL(librocm_core_file_path)
+                VerErrors = ctypes.c_uint32
+                get_rocm_core_version = librocm_core.getROCmVersion
+                get_rocm_core_version.restype = VerErrors
+                get_rocm_core_version.argtypes = [ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32),ctypes.POINTER(ctypes.c_uint32)]
+
+                # call the function
+                major =  ctypes.c_uint32()
+                minor =  ctypes.c_uint32()
+                patch =  ctypes.c_uint32()
+
+                if get_rocm_core_version(ctypes.byref(major), ctypes.byref(minor),ctypes.byref(patch)) == 0:
+                    return True, f"{major.value}.{minor.value}.{patch.value}"
+                else:
+                    return False, "Failed to unpack ROCm version"
+            except OSError as e:
+                err = e
+                continue
+
+        # If we hit here, we were unable to find the librocm-core.so file
+        return False, "Could not find librocm-core.so"
+    except Exception as e:
+        return False, f"Unable to detect ROCm installation, Unknown Error: {e}"

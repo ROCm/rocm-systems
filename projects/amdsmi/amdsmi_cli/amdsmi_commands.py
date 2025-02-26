@@ -19,6 +19,7 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+import argparse
 import logging
 import sys
 import threading
@@ -32,7 +33,6 @@ from _version import __version__
 from amdsmi_helpers import AMDSMIHelpers
 from amdsmi_logger import AMDSMILogger
 from amdsmi_cli_exceptions import AmdSmiRequiredCommandException, AmdSmiInvalidParameterException
-from rocm_version import get_rocm_version
 from amdsmi import amdsmi_interface
 from amdsmi import amdsmi_exception
 
@@ -95,36 +95,14 @@ class AMDSMICommands():
                 exit_flag = True
 
         if exit_flag:
-            try:
-                amdsmi_lib_version = amdsmi_interface.amdsmi_get_lib_version()
-                amdsmi_lib_version_str = f"{amdsmi_lib_version['year']}.{amdsmi_lib_version['major']}.{amdsmi_lib_version['minor']}.{amdsmi_lib_version['release']}"
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                amdsmi_lib_version_str = e.get_error_info()
-
-            self.logger.output['tool'] = 'AMDSMI Tool'
-            self.logger.output['version'] = f'{__version__}'
-            self.logger.output['amdsmi_library_version'] = f'{amdsmi_lib_version_str}'
-            self.logger.output['rocm_version'] = f'{get_rocm_version()}'
-
-            if self.logger.is_human_readable_format():
-                human_readable_output = f"AMDSMI Tool: {__version__} | " \
-                                    f"AMDSMI Library version: {amdsmi_lib_version_str} | " \
-                                    f"ROCm version: {get_rocm_version()}"
-                # Custom human readable handling for version
-                if self.logger.destination == 'stdout':
-                    print(human_readable_output)
-                else:
-                    with self.logger.destination.open('a', encoding="utf-8") as output_file:
-                        output_file.write(human_readable_output + '\n')
-            elif self.logger.is_json_format() or self.logger.is_csv_format():
-                self.logger.print_output()
-
+            version_args = argparse.Namespace()
+            version_args.gpu_version = False
+            version_args.cpu_version = False
+            self.version(version_args)
             sys.exit(-1)
 
 
-
     def version(self, args, gpu_version=None, cpu_version=None):
-
         """Print Version String
 
         Args:
@@ -136,16 +114,22 @@ class AMDSMICommands():
         if cpu_version:
             args.cpu_version = cpu_version
         # if no args are given, display everything
-        if not args.gpu_version and not args.cpu_version:
+        if args.gpu_version is None and args.cpu_version is None:
             args.gpu_version = True
             args.cpu_version = True
 
         try:
             amdsmi_lib_version = amdsmi_interface.amdsmi_get_lib_version()
             amdsmi_lib_version_str = f"{amdsmi_lib_version['year']}.{amdsmi_lib_version['major']}.{amdsmi_lib_version['minor']}.{amdsmi_lib_version['release']}"
-            rocm_version_str = get_rocm_version()
         except amdsmi_exception.AmdSmiLibraryException as e:
             amdsmi_lib_version_str = e.get_error_info()
+
+        try:
+            rocm_lib_status, rocm_version_str = amdsmi_interface.amdsmi_get_rocm_version()
+            if rocm_lib_status is not True:
+                rocm_version_str = "N/A"
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            rocm_version_str = e.get_error_info()
 
         self.logger.output['tool'] = 'AMDSMI Tool'
         self.logger.output['version'] = f'{__version__}'
@@ -984,7 +968,7 @@ class AMDSMICommands():
 
                 static_dict['clock'] = clk_dict
             else:
-                raise amdsmi_exception.AmdSmiParameterException(args.clock, list[str])
+                raise amdsmi_exception.AmdSmiParameterException(args.clock, 'list[str]')
             # if original_clock_args is a boolean, set it back to the original value
             if isinstance(original_clock_args, bool):
                 args.clock = original_clock_args
@@ -4218,6 +4202,7 @@ class AMDSMICommands():
 
                 self.logger.store_output(args.gpu, 'perfdeterminism', f"Successfully enabled performance determinism and set GFX clock frequency to {args.perf_determinism}")
             if args.compute_partition:
+                attempted_to_set = "N/A"
                 try:
                     (accelerator_set_choices, accelerator_profiles) = self.helpers.get_accelerator_choices_types_indices()
                     logging.debug("args.compute_partition: %s; Accelerator_set_choices: %s", str(args.compute_partition), str(json.dumps(accelerator_set_choices, indent=4)))
@@ -4474,6 +4459,9 @@ class AMDSMICommands():
                     amdsmi_clk_type =  amdsmi_interface.AmdSmiClkType.GFX
                 elif clk_type == "mclk":
                     amdsmi_clk_type =  amdsmi_interface.AmdSmiClkType.MEM
+                else:
+                    raise ValueError(f"Invalid clock type {clk_type} for {gpu_string}")
+
                 clk_tuple = amdsmi_interface.amdsmi_get_clock_info(args.gpu, amdsmi_clk_type)
 
                 if lim_type == "min":

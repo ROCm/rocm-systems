@@ -33,7 +33,6 @@ from pathlib import Path
 
 from _version import __version__
 from amdsmi_helpers import AMDSMIHelpers
-from rocm_version import get_rocm_version
 import amdsmi_cli_exceptions
 
 
@@ -95,7 +94,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         version_string = f"Version: {__version__}"
         platform_string = f"Platform: {self.helpers.os_info()}"
-        rocm_version = get_rocm_version()
+        rocm_version = self.helpers.get_rocm_version()
         rocm_version_string = f"ROCm version: {rocm_version}"
         program_name = 'amd-smi'
 

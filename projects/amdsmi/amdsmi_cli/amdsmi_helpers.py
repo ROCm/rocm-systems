@@ -29,9 +29,8 @@ import re
 import multiprocessing
 import json
 
-from typing import List, Union
 from enum import Enum
-from typing import Set
+from typing import List, Set, Union
 
 from amdsmi_init import *
 from BDF import BDF
@@ -98,8 +97,10 @@ class AMDSMIHelpers():
     def increment_set_count(self):
         self._count_of_sets_called += 1
 
+
     def get_set_count(self):
         return self._count_of_sets_called
+
 
     def is_virtual_os(self):
         return self._is_virtual_os
@@ -171,6 +172,16 @@ class AMDSMIHelpers():
 
     def is_amd_hsmp_initialized(self):
         return AMDSMI_INIT_FLAG & amdsmi_interface.amdsmi_wrapper.AMDSMI_INIT_AMD_CPUS
+
+
+    def get_rocm_version(self):
+        try:
+            rocm_lib_status, rocm_version = amdsmi_interface.amdsmi_get_rocm_version()
+            if rocm_lib_status is not True:
+                return "N/A"
+            return rocm_version
+        except amdsmi_interface.AmdSmiLibraryException as e:
+            return "N/A"
 
 
     def get_cpu_choices(self):
