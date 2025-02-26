@@ -63,7 +63,8 @@ typedef int (*rocprofiler_at_internal_thread_create_t)(
 typedef void*(routine_t)(void*);
 
 // Bitmask for each library that is inside a pre callback
-size_t& get_library_bitmask()
+size_t&
+get_library_bitmask()
 {
     // Pre-post callbacks are supposed to be called from the same thread as pthread_create
     thread_local auto* bitmask = new size_t{0};
@@ -99,15 +100,9 @@ public:
         return false;
     }
 
-    static void pre_callback(int bitmask, void* /* arg */)
-    {
-        get_library_bitmask() |= bitmask;
-    }
+    static void pre_callback(int bitmask, void* /* arg */) { get_library_bitmask() |= bitmask; }
 
-    static void post_callback(int bitmask, void* /* arg */)
-    {
-        get_library_bitmask() &= ~bitmask;
-    }
+    static void post_callback(int bitmask, void* /* arg */) { get_library_bitmask() &= ~bitmask; }
 
     // Indicates we have registered rocprofiler_at_internal_thread_create_t
     std::atomic<bool> init{false};
