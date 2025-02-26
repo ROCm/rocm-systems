@@ -2952,8 +2952,6 @@ amdsmi_status_t amdsmi_get_gpu_topo_numa_affinity(
 }
 
 amdsmi_status_t amdsmi_get_lib_version(amdsmi_version_t *version) {
-    AMDSMI_CHECK_INIT();
-
     if (version == nullptr)
         return AMDSMI_STATUS_INVAL;
 

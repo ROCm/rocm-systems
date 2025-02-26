@@ -95,6 +95,30 @@ class AMDSMICommands():
                 exit_flag = True
 
         if exit_flag:
+            try:
+                amdsmi_lib_version = amdsmi_interface.amdsmi_get_lib_version()
+                amdsmi_lib_version_str = f"{amdsmi_lib_version['year']}.{amdsmi_lib_version['major']}.{amdsmi_lib_version['minor']}.{amdsmi_lib_version['release']}"
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                amdsmi_lib_version_str = e.get_error_info()
+
+            self.logger.output['tool'] = 'AMDSMI Tool'
+            self.logger.output['version'] = f'{__version__}'
+            self.logger.output['amdsmi_library_version'] = f'{amdsmi_lib_version_str}'
+            self.logger.output['rocm_version'] = f'{get_rocm_version()}'
+
+            if self.logger.is_human_readable_format():
+                human_readable_output = f"AMDSMI Tool: {__version__} | " \
+                                    f"AMDSMI Library version: {amdsmi_lib_version_str} | " \
+                                    f"ROCm version: {get_rocm_version()}"
+                # Custom human readable handling for version
+                if self.logger.destination == 'stdout':
+                    print(human_readable_output)
+                else:
+                    with self.logger.destination.open('a', encoding="utf-8") as output_file:
+                        output_file.write(human_readable_output + '\n')
+            elif self.logger.is_json_format() or self.logger.is_csv_format():
+                self.logger.print_output()
+
             sys.exit(-1)
 
 
