@@ -5738,6 +5738,7 @@ pub fn amdsmi_get_gpu_activity(
 /// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_power_info` call fails.
 pub fn amdsmi_get_power_info(
     processor_handle: AmdsmiProcessorHandle,
+    sensor_ind: u32,
 ) -> AmdsmiResult<AmdsmiPowerInfoT> {
     let mut info = MaybeUninit::<AmdsmiPowerInfoT>::uninit();
     call_unsafe!(amdsmi_wrapper::amdsmi_get_power_info(
