@@ -48,6 +48,7 @@
 #include <algorithm>
 #include <climits>
 
+#include "core/inc/runtime.h"
 #include "hsakmt/hsakmt.h"
 #include "inc/hsa_ext_amd.h"
 #include "core/inc/hsa_internal.h"
@@ -858,8 +859,33 @@ bool ImageManagerKv::GetAddrlibSurfaceInfo(
     case HSA_EXT_IMAGE_GEOMETRY_3D:
     case HSA_EXT_IMAGE_GEOMETRY_2DA:
     case HSA_EXT_IMAGE_GEOMETRY_2DADEPTH:
-      in.resourceType = ADDR_RSRC_TEX_3D;
-      break;
+      {
+	      in.resourceType = ADDR_RSRC_TEX_3D;
+	      /*
+	       * 3D swizzle modes enforce alignment
+	       * of the number of slices  to the block depth.
+	       * If numSlices = 3 then the 3 slices are
+	       * interleaved for 3D locality among the 8 slices
+	       * that make up each block. This causes the memory
+	       * footprint to jump to a 3x size of the ideal size
+	       * 'enable3DSwizzleMode' flag tests for env variable
+	       * HSA_IMAGE_ENABLE_3D_SWIZZLE_DEBUG to enable or disable
+	       * 3D swizzle:
+	       * true: Keep view3dAs2dArray = 0 for real 3D interleaving.
+	       * false: Use view3dAs2dArray = 1 to avoid the alignment
+	       *       expansion.
+	       * 2D swizzle modes can lower size overhead but may yield
+	       * suboptimal cache behavior for fully 3D volumetric
+	       * operations.
+	       */
+	      bool enable3DSwizzleMode = core::Runtime::runtime_singleton_->flag().enable_3d_swizzle();
+	      if (enable3DSwizzleMode)
+		      in.flags.view3dAs2dArray = 0;
+	      else
+		      in.flags.view3dAs2dArray = 1;
+
+	      break;
+      }
     }
     in.flags.texture = 1;
 
