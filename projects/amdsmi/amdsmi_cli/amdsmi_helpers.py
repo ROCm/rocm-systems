@@ -22,6 +22,7 @@
 import logging
 import math
 import os
+import grp
 import platform
 import sys
 import time
@@ -985,3 +986,24 @@ class AMDSMIHelpers():
             title += ": "
         for i in self.progressbar(range(timeInSeconds), title, 40):
             time.sleep(1)
+
+    def check_required_groups(self):
+        """
+        Check if the current user is a member of the required groups.
+        If not, log a warning.
+        """
+        required_groups = {'video', 'render'}
+        try:
+            user_groups = {grp.getgrgid(gid).gr_name for gid in os.getgroups()}
+        except Exception as e:
+            logging.warning("Unable to determine group memberships: %s", e)
+            return
+
+        missing_groups = required_groups - user_groups
+        if missing_groups:
+            msg = (
+                "WARNING: User is missing the following required groups: %s. "
+                "Please add user to these groups."
+            ) % ", ".join(sorted(missing_groups))
+            print(msg)
+            logging.warning(msg)

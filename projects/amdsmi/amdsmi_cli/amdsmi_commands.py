@@ -49,6 +49,7 @@ class AMDSMICommands():
         self.cpu_handles = []
         self.core_handles = []
         self.stop = ''
+        self.group_check_printed = False
 
         amdsmi_init_flag = self.helpers.get_amdsmi_init_flag()
         logging.debug(f"AMDSMI Init Flag: {amdsmi_init_flag}")
@@ -198,6 +199,8 @@ class AMDSMICommands():
         # Handle No GPU passed
         if args.gpu == None:
             args.gpu = self.device_handles
+
+        self.helpers.check_required_groups()
 
         # Handle multiple GPUs
         handled_multiple_gpus, device_handle = self.helpers.handle_gpus(args, self.logger, self.list)
@@ -381,6 +384,8 @@ class AMDSMICommands():
         current_platform_values = [args.asic, args.bus, args.vbios, args.driver, args.ras,
                                    args.vram, args.cache, args.board, args.process_isolation,
                                    args.clock]
+
+        self.helpers.check_required_groups()
 
         if self.helpers.is_linux() and self.helpers.is_baremetal():
             if partition:
@@ -1444,6 +1449,10 @@ class AMDSMICommands():
         # Handle No GPU passed
         if args.gpu == None:
             args.gpu = self.device_handles
+
+        if not self.group_check_printed:
+            self.helpers.check_required_groups()
+            self.group_check_printed = True
 
         # Handle watch logic, will only enter this block once
         if args.watch:
@@ -3297,6 +3306,8 @@ class AMDSMICommands():
         # Clear the table header
         self.logger.table_header = ''.rjust(12)
 
+        self.helpers.check_required_groups()
+
         # Populate the possible gpus
         topo_values = []
         for src_gpu_index, src_gpu in enumerate(args.gpu):
@@ -4571,6 +4582,8 @@ class AMDSMICommands():
         if core:
             args.core = core
 
+        self.helpers.check_required_groups()
+
         # Check if a GPU argument has been set
         gpu_args_enabled = False
         gpu_attributes = ["fan", "perf_level", "profile", "perf_determinism", "compute_partition",
@@ -4714,6 +4727,8 @@ class AMDSMICommands():
         # Handle No GPU passed
         if args.gpu == None:
             args.gpu = self.device_handles
+
+        self.helpers.check_required_groups()
 
         # Handle multiple GPUs
         handled_multiple_gpus, device_handle = self.helpers.handle_gpus(args, self.logger, self.reset)
@@ -4950,6 +4965,10 @@ class AMDSMICommands():
         # Handle No GPU passed
         if args.gpu == None:
             args.gpu = self.device_handles
+
+        if not self.group_check_printed:
+            self.helpers.check_required_groups()
+            self.group_check_printed = True
 
         # If all arguments are False, the print all values
         # Don't include process in this logic as it's an optional edge case
@@ -5507,6 +5526,8 @@ class AMDSMICommands():
         # Clear the table header
         self.logger.table_header = ''.rjust(7)
 
+        self.helpers.check_required_groups()
+
         # Populate the possible gpus and their bdfs
         xgmi_values = []
         for gpu in args.gpu:
@@ -5750,6 +5771,8 @@ class AMDSMICommands():
             args.memory = memory
         if accelerator:
             args.accelerator = accelerator
+
+        self.helpers.check_required_groups()
 
         ###########################################
         # amd-smi partition (no args)             #
