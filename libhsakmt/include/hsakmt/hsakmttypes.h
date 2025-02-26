@@ -222,6 +222,16 @@ typedef union
     } ui32;
 } HSA_CAPABILITY;
 
+typedef union
+{
+    HSAuint32 Value;
+    struct
+    {
+        unsigned int PerSDMAQueueResetSupported : 1; // Indicates per-sdma queue reset supported
+        unsigned int Reserved : 31; // Reserved
+    } ui32;
+} HSA_CAPABILITY2;
+
 // Debug Properties and values
 // HSA runtime may expose a subset of the capabilities outlined to the applicati
 typedef union
@@ -281,6 +291,7 @@ typedef struct _HsaNodeProperties
                                        // units available on this node
 
     HSA_CAPABILITY  Capability;        // see above
+    HSA_CAPABILITY2  Capability2;      // see above
 
     HSAuint32       MaxWavesPerSIMD;   // This identifies the max. number of launched waves per SIMD.
                                        // If NumFComputeCores is 0, this value is ignored.
