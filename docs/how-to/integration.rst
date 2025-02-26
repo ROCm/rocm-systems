@@ -539,37 +539,46 @@ The ``dmon`` command monitors GPU index 0, field 600, and 601, where 600 is for 
   
     % rdci dmon -l
     ... ...
-    600 RDC_FI_ECC_CORRECT_TOTAL : Accumulated Single Error Correction.
-    601 RDC_FI_ECC_UNCORRECT_TOTAL : Accumulated Double Error Detection.
-    602 RDC_FI_ECC_SDMA_SEC : SDMA Single Error Correction.
-    603 RDC_FI_ECC_SDMA_DED : SDMA Double Error Detection.
-    604 RDC_FI_ECC_GFX_SEC : GFX Single Error Correction.
-    605 RDC_FI_ECC_GFX_DED : GFX Double Error Detection.
-    606 RDC_FI_ECC_MMHUB_SEC : MMHUB Single Error Correction.
-    607 RDC_FI_ECC_MMHUB_DED : MMHUB Double Error Detection.
-    608 RDC_FI_ECC_ATHUB_SEC : ATHUB Single Error Correction.
-    609 RDC_FI_ECC_ATHUB_DED : ATHUB Double Error Detection.
-    610 RDC_FI_ECC_BIF_SEC : BIF Single Error Correction.
-    611 RDC_FI_ECC_BIF_DED : BIF Double Error Detection.
-    612 RDC_FI_ECC_HDP_SEC : HDP Single Error Correction.
-    613 RDC_FI_ECC_HDP_DED : HDP Double Error Detection.
-    614 RDC_FI_ECC_XGMI_WAFL_SEC : XGMI WAFL Single Error Correction.
-    615 RDC_FI_ECC_XGMI_WAFL_DED : XGMI WAFL Double Error Detection.
-    616 RDC_FI_ECC_DF_SEC : DF Single Error Correction.
-    617 RDC_FI_ECC_DF_DED : DF Double Error Detection.
-    618 RDC_FI_ECC_SMN_SEC : SMN Single Error Correction.
-    619 RDC_FI_ECC_SMN_DED : SMN Double Error Detection.
-    620 RDC_FI_ECC_SEM_SEC : SEM Single Error Correction.
-    621 RDC_FI_ECC_SEM_DED : SEM Double Error Detection.
-    622 RDC_FI_ECC_MP0_SEC : MP0 Single Error Correction.
-    623 RDC_FI_ECC_MP0_DED : MP0 Double Error Detection.
-    624 RDC_FI_ECC_MP1_SEC : MP1 Single Error Correction.
-    
-    625 RDC_FI_ECC_MP1_DED : MP1 Double Error Detection.
-    626 RDC_FI_ECC_FUSE_SEC : FUSE Single Error Correction.
-    627 RDC_FI_ECC_FUSE_DED : FUSE Double Error Detection.
-    628 RDC_FI_ECC_UMC_SEC : UMC Single Error Correction.
-    629 RDC_FI_ECC_UMC_DED : UMC Double Error Detection.
+    600 RDC_FI_ECC_CORRECT_TOTAL   : Accumulated Single Error Correction
+    601 RDC_FI_ECC_UNCORRECT_TOTAL : Accumulated Double Error Detection
+    602 RDC_FI_ECC_SDMA_CE         : SDMA Correctable Error
+    603 RDC_FI_ECC_SDMA_UE         : SDMA Uncorrectable Error
+    604 RDC_FI_ECC_GFX_CE          : GFX Correctable Error
+    605 RDC_FI_ECC_GFX_UE          : GFX Uncorrectable Error
+    606 RDC_FI_ECC_MMHUB_CE        : MMHUB Correctable Error
+    607 RDC_FI_ECC_MMHUB_UE        : MMHUB Uncorrectable Error
+    608 RDC_FI_ECC_ATHUB_CE        : ATHUB Correctable Error
+    609 RDC_FI_ECC_ATHUB_UE        : ATHUB Uncorrectable Error
+    610 RDC_FI_ECC_PCIE_BIF_CE     : PCIE_BIF Correctable Error
+    611 RDC_FI_ECC_PCIE_BIF_UE     : PCIE_BIF Uncorrectable Error
+    612 RDC_FI_ECC_HDP_CE          : HDP Correctable Error
+    613 RDC_FI_ECC_HDP_UE          : HDP Uncorrectable Error
+    614 RDC_FI_ECC_XGMI_WAFL_CE    : XGMI WAFL Correctable Error
+    615 RDC_FI_ECC_XGMI_WAFL_UE    : XGMI WAFL Uncorrectable Error
+    616 RDC_FI_ECC_DF_CE           : DF Correctable Error
+    617 RDC_FI_ECC_DF_UE           : DF Uncorrectable Error
+    618 RDC_FI_ECC_SMN_CE          : SMN Correctable Error
+    619 RDC_FI_ECC_SMN_UE          : SMN Uncorrectable Error
+    620 RDC_FI_ECC_SEM_CE          : SEM Correctable Error
+    621 RDC_FI_ECC_SEM_UE          : SEM Uncorrectable Error
+    622 RDC_FI_ECC_MP0_CE          : MP0 Correctable Error
+    623 RDC_FI_ECC_MP0_UE          : MP0 Uncorrectable Error
+    624 RDC_FI_ECC_MP1_CE          : MP1 Correctable Error
+    625 RDC_FI_ECC_MP1_UE          : MP1 Uncorrectable Error
+    626 RDC_FI_ECC_FUSE_CE         : FUSE Correctable Error
+    627 RDC_FI_ECC_FUSE_UE         : FUSE Uncorrectable Error
+    628 RDC_FI_ECC_UMC_CE          : UMC Correctable Error
+    629 RDC_FI_ECC_UMC_UE          : UMC Uncorrectable Error
+    630 RDC_FI_ECC_MCA_CE          : MCA Correctable Error
+    631 RDC_FI_ECC_MCA_UE          : MCA Uncorrectable Error
+    632 RDC_FI_ECC_VCN_CE          : VCN Correctable Error
+    633 RDC_FI_ECC_VCN_UE          : VCN Uncorrectable Error
+    634 RDC_FI_ECC_JPEG_CE         : JPEG Correctable Error
+    635 RDC_FI_ECC_JPEG_UE         : JPEG Uncorrectable Error
+    636 RDC_FI_ECC_IH_CE           : IH Correctable Error
+    637 RDC_FI_ECC_IH_UE           : IH Uncorrectable Error
+    638 RDC_FI_ECC_MPIO_CE         : MPIO Correctable Error
+    639 RDC_FI_ECC_MPIO_UE         : MPIO Uncorrectable Error
     ... ...
 
 
