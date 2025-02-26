@@ -207,11 +207,17 @@ read_file(const std::string& fname)
     auto data = std::vector<std::string>{};
 
     if(!is_readable(fs::path{fname}))
-        throw std::runtime_error{fmt::format("file '{}' cannot be read", fname)};
+    {
+        ROCP_CI_LOG(WARNING) << fmt::format("file '{}' cannot be read", fname);
+        return data;
+    }
 
     auto ifs = std::ifstream{fname};
     if(!ifs || !ifs.good())
-        throw std::runtime_error{fmt::format("file '{}' cannot be read", fname)};
+    {
+        ROCP_CI_LOG(WARNING) << fmt::format("file '{}' cannot be read", fname);
+        return data;
+    }
 
     while(true)
     {
@@ -231,11 +237,17 @@ read_map(const std::string& fname)
     auto data = std::unordered_map<std::string, std::string>{};
 
     if(!is_readable(fs::path{fname}))
-        throw std::runtime_error{fmt::format("file '{}' cannot be read", fname)};
+    {
+        ROCP_CI_LOG(WARNING) << fmt::format("file '{}' cannot be read", fname);
+        return data;
+    }
 
     auto ifs = std::ifstream{fname};
     if(!ifs || !ifs.good())
-        throw std::runtime_error{fmt::format("file '{}' cannot be read", fname)};
+    {
+        ROCP_CI_LOG(WARNING) << fmt::format("file '{}' cannot be read", fname);
+        return data;
+    }
 
     auto last_label = std::string{};
     while(true)
@@ -247,17 +259,23 @@ read_map(const std::string& fname)
         auto entry = std::string{};
         ifs >> entry;
         if(ifs.eof())
-            throw std::runtime_error{
-                fmt::format("unexpected file format in '{}' at {}", fname, label)};
+        {
+            ROCP_CI_LOG(WARNING) << fmt::format(
+                "unexpected file format in '{}' at {}", fname, label);
+            continue;
+        }
 
         auto ret = data.emplace(label, entry);
         if(!ret.second)
-            throw std::runtime_error{
-                fmt::format("duplicate entry in '{}': '{}' (='{}'). last label was '{}'",
-                            fname,
-                            label,
-                            entry,
-                            last_label)};
+        {
+            ROCP_CI_LOG(WARNING) << fmt::format(
+                "duplicate entry in '{}': '{}' (='{}'). last label was '{}'",
+                fname,
+                label,
+                entry,
+                last_label);
+            continue;
+        }
 
         if(!label.empty()) last_label = std::move(label);
     }
@@ -305,21 +323,22 @@ read_property(const MapT& data, const std::string& label, Tp& value)
         constexpr auto max_value = std::numeric_limits<Tp>::max();
         if(local_value < min_value)
         {
-            throw std::runtime_error{
-                fmt::format("data with label {} has a value (={}) which is less "
-                            "than the min value for the type (={})",
-                            label,
-                            local_value,
-                            min_value)};
+            ROCP_CI_LOG(WARNING) << fmt::format(
+                "data with label {} has a value (={}) which is less "
+                "than the min value for the type (={})",
+                label,
+                local_value,
+                min_value);
+            return;
         }
         else if(local_value > max_value)
         {
-            throw std::runtime_error{fmt::format("data with label {} has a value (={}) which is "
-                                                 "greater "
-                                                 "than the max value for the type (={})",
-                                                 label,
-                                                 local_value,
-                                                 max_value)};
+            ROCP_CI_LOG(WARNING) << fmt::format("data with label {} has a value (={}) which is "
+                                                "greater than the max value for the type (={})",
+                                                label,
+                                                local_value,
+                                                max_value);
+            return;
         }
 
         if constexpr(std::is_const<Tp>::value)
@@ -464,7 +483,7 @@ update_agent_runtime_visibility(rocprofiler_agent_t& agent_info)
         };
 
         static_assert(
-            ROCPROFILER_LIBRARY_LAST == ROCPROFILER_ROCDECODE_LIBRARY,
+            ROCPROFILER_LIBRARY_LAST == ROCPROFILER_ROCJPEG_LIBRARY,
             "Since a new library was added to rocprofiler_runtime_library_t, please make sure "
             "rocprofiler_agent_runtime_visiblity_t has an entry for this library (if "
             "necessary) and make the necessary updates to the logic below has been updated");
@@ -544,13 +563,17 @@ using unique_agent_t = std::unique_ptr<rocprofiler_agent_t, void (*)(rocprofiler
 auto
 read_topology()
 {
-    auto sysfs_nodes_path = fs::path{"/sys/class/kfd/kfd/topology/nodes/"};
+    auto data = std::vector<unique_agent_t>{};
+
+    const auto sysfs_nodes_path = fs::path{"/sys/class/kfd/kfd/topology/nodes"};
     if(!fs::exists(sysfs_nodes_path))
-        throw std::runtime_error{
-            fmt::format("sysfs nodes path '{}' does not exist", sysfs_nodes_path.string())};
+    {
+        ROCP_CI_LOG(WARNING) << fmt::format("sysfs nodes path '{}' does not exist",
+                                            sysfs_nodes_path.string());
+        return data;
+    }
 
     const auto& cpu_info_v = get_cpu_info();
-    auto        data       = std::vector<unique_agent_t>{};
     uint64_t    idcount    = 0;
     uint64_t    nodecount  = 0;
     uint64_t    cpucount   = 0;

@@ -767,7 +767,12 @@ EvaluateAST::evaluate(
         case NONE:
         case CONSTANT_NODE:
         case RANGE_NODE: break;
-        case NUMBER_NODE: return &_static_value;
+        case NUMBER_NODE:
+        {
+            cache.emplace_back(std::make_unique<std::vector<rocprofiler_record_counter_t>>());
+            *cache.back() = _static_value;
+            return cache.back().get();
+        }
         case ADDITION_NODE:
             return perform_op([](auto& a, auto& b) {
                 return rocprofiler_record_counter_t{

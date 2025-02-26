@@ -251,13 +251,13 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         aggregate_tracing_options,
         "-r",
         "--runtime-trace",
-        help="Collect tracing data for HIP runtime API, Marker (ROCTx) API, RCCL API, ROCDecode API, Memory operations (copies, scratch, and allocation), and Kernel dispatches. Similar to --sys-trace but without tracing HIP compiler API and the underlying HSA API.",
+        help="Collect tracing data for HIP runtime API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, Memory operations (copies, scratch, and allocation), and Kernel dispatches. Similar to --sys-trace but without tracing HIP compiler API and the underlying HSA API.",
     )
     add_parser_bool_argument(
         aggregate_tracing_options,
         "-s",
         "--sys-trace",
-        help="Collect tracing data for HIP API, HSA API, Marker (ROCTx) API, RCCL API, ROCDecode API, Memory operations (copies, scratch, and allocations), and Kernel dispatches.",
+        help="Collect tracing data for HIP API, HSA API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, Memory operations (copies, scratch, and allocations), and Kernel dispatches.",
     )
 
     basic_tracing_options = parser.add_argument_group("Basic tracing options")
@@ -311,7 +311,12 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
     add_parser_bool_argument(
         basic_tracing_options,
         "--rocdecode-trace",
-        help="For collecting ROCDecode Traces",
+        help="For collecting rocDecode Traces",
+    )
+    add_parser_bool_argument(
+        basic_tracing_options,
+        "--rocjpeg-trace",
+        help="For collecting rocJPEG Traces",
     )
 
     extended_tracing_options = parser.add_argument_group("Granular tracing options")
@@ -546,6 +551,23 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         nargs="*",
     )
 
+    advanced_options.add_argument(
+        "--rocm-root",
+        help="Use the given path as the root ROCm path instead of the relative path of this script",
+        type=str,
+        metavar="PATH",
+        default=None,
+    )
+    add_parser_bool_argument(
+        advanced_options,
+        "--readlink",
+        help=argparse.SUPPRESS,
+    )
+    add_parser_bool_argument(
+        advanced_options,
+        "--realpath",
+        help=argparse.SUPPRESS,
+    )
     # below is available for CI because LD_PRELOADing a library linked to a sanitizer library
     # causes issues in apps where HIP is part of shared library.
     add_parser_bool_argument(
@@ -874,6 +896,8 @@ def run(app_args, args, **kwargs):
 
     ROCPROFV3_DIR = os.path.dirname(os.path.realpath(__file__))
     ROCM_DIR = os.path.dirname(ROCPROFV3_DIR)
+    if args.rocm_root is not None:
+        ROCM_DIR = os.path.abspath(args.rocm_root)
     ROCPROF_TOOL_LIBRARY = f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
     ROCPROF_SDK_LIBRARY = f"{ROCM_DIR}/lib/librocprofiler-sdk.so"
     ROCPROF_ROCTX_LIBRARY = f"{ROCM_DIR}/lib/librocprofiler-sdk-roctx.so"
@@ -883,6 +907,22 @@ def run(app_args, args, **kwargs):
     ROCPROF_LIST_AVAIL_TOOL_LIBRARY = (
         f"{ROCM_DIR}/libexec/rocprofiler-sdk/librocprofv3-list-avail.so"
     )
+
+    def resolve_path(val):
+        if not os.path.exists(val):
+            fatal_error(f"{val} does not exist")
+        if os.path.islink(val):
+            if args.readlink:
+                val = os.path.abspath(os.readlink(val))
+            if args.realpath:
+                val = os.path.realpath(val)
+        return val
+
+    ROCPROF_TOOL_LIBRARY = resolve_path(ROCPROF_TOOL_LIBRARY)
+    ROCPROF_SDK_LIBRARY = resolve_path(ROCPROF_SDK_LIBRARY)
+    ROCPROF_ROCTX_LIBRARY = resolve_path(ROCPROF_ROCTX_LIBRARY)
+    ROCPROF_KOKKOSP_LIBRARY = resolve_path(ROCPROF_KOKKOSP_LIBRARY)
+    ROCPROF_LIST_AVAIL_TOOL_LIBRARY = resolve_path(ROCPROF_LIST_AVAIL_TOOL_LIBRARY)
 
     prepend_preload = [itr for itr in args.preload if itr]
     append_preload = [
@@ -945,6 +985,7 @@ def run(app_args, args, **kwargs):
             "scratch_memory_trace",
             "rccl_trace",
             "rocdecode_trace",
+            "rocjpeg_trace",
         ):
             setattr(args, itr, True)
 
@@ -958,6 +999,7 @@ def run(app_args, args, **kwargs):
             "scratch_memory_trace",
             "rccl_trace",
             "rocdecode_trace",
+            "rocjpeg_trace",
         ):
             setattr(args, itr, True)
 
@@ -982,6 +1024,7 @@ def run(app_args, args, **kwargs):
             ["marker_trace", "MARKER_API_TRACE"],
             ["rccl_trace", "RCCL_API_TRACE"],
             ["rocdecode_trace", "ROCDECODE_API_TRACE"],
+            ["rocjpeg_trace", "ROCJPEG_API_TRACE"],
             ["kernel_trace", "KERNEL_TRACE"],
             ["memory_copy_trace", "MEMORY_COPY_TRACE"],
             ["memory_allocation_trace", "MEMORY_ALLOCATION_TRACE"],

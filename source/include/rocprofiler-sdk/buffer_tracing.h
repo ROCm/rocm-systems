@@ -183,9 +183,9 @@ typedef struct
 } rocprofiler_buffer_tracing_rccl_api_record_t;
 
 /**
- * @brief ROCProfiler Buffer ROCDecode API Record.
+ * @brief ROCProfiler Buffer rocDecode API Record.
  */
-typedef struct
+typedef struct rocprofiler_buffer_tracing_rocdecode_api_record_t
 {
     uint64_t                          size;  ///< size of this struct
     rocprofiler_buffer_tracing_kind_t kind;
@@ -200,6 +200,25 @@ typedef struct
     /// @var operation
     /// @brief Specification of the API function, e.g., ::rocprofiler_rocdecode_api_id_t
 } rocprofiler_buffer_tracing_rocdecode_api_record_t;
+
+/**
+ * @brief ROCProfiler Buffer rocJPEG API Record.
+ */
+typedef struct rocprofiler_buffer_tracing_rocjpeg_api_record_t
+{
+    uint64_t                          size;  ///< size of this struct
+    rocprofiler_buffer_tracing_kind_t kind;
+    rocprofiler_tracing_operation_t   operation;
+    rocprofiler_correlation_id_t      correlation_id;   ///< correlation ids for record
+    rocprofiler_timestamp_t           start_timestamp;  ///< start time in nanoseconds
+    rocprofiler_timestamp_t           end_timestamp;    ///< end time in nanoseconds
+    rocprofiler_thread_id_t           thread_id;        ///< id for thread generating this record
+
+    /// @var kind
+    /// @brief ::ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API
+    /// @var operation
+    /// @brief Specification of the API function, e.g., ::rocprofiler_rocjpeg_api_id_t
+} rocprofiler_buffer_tracing_rocjpeg_api_record_t;
 
 /**
  * @brief ROCProfiler Buffer Memory Copy Tracer Record.

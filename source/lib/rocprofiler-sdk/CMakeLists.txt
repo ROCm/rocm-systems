@@ -38,7 +38,6 @@ add_library(rocprofiler-sdk::rocprofiler-sdk-object-library ALIAS
 
 target_sources(rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_SOURCES}
                                                       ${ROCPROFILER_LIB_HEADERS})
-
 add_subdirectory(hsa)
 add_subdirectory(hip)
 add_subdirectory(code_object)
@@ -53,6 +52,7 @@ add_subdirectory(kernel_dispatch)
 add_subdirectory(page_migration)
 add_subdirectory(rccl)
 add_subdirectory(rocdecode)
+add_subdirectory(rocjpeg)
 add_subdirectory(details)
 add_subdirectory(ompt)
 
@@ -63,6 +63,7 @@ target_link_libraries(
            rocprofiler-sdk::rocprofiler-sdk-hsa-runtime-nolink
            rocprofiler-sdk::rocprofiler-sdk-rccl-nolink
            rocprofiler-sdk::rocprofiler-sdk-rocdecode-nolink
+           rocprofiler-sdk::rocprofiler-sdk-rocjpeg-nolink
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-build-flags
             rocprofiler-sdk::rocprofiler-sdk-memcheck
             rocprofiler-sdk::rocprofiler-sdk-common-library

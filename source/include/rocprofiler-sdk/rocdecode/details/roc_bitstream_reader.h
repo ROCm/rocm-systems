@@ -22,17 +22,7 @@ THE SOFTWARE.
 
 #pragma once
 
-#if !defined(ROCPROFILER_SDK_USE_SYSTEM_ROCDECODE)
-#    if defined __has_include
-#        if __has_include(<rocdecode/rocdecode.h>)
-#            define ROCPROFILER_SDK_USE_SYSTEM_ROCDECODE 1
-#        else
-#            define ROCPROFILER_SDK_USE_SYSTEM_ROCDECODE 0
-#        endif
-#    else
-#        define ROCPROFILER_SDK_USE_SYSTEM_ROCDECODE 0
-#    endif
-#endif
+#include <rocprofiler-sdk/rocdecode/details/rocdecode_headers.h>
 
 #if ROCPROFILER_SDK_USE_SYSTEM_ROCDECODE > 0
 #    include <rocdecode/rocdecode.h>

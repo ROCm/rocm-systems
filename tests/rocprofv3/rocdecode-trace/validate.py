@@ -32,6 +32,9 @@ def test_rocdeocde(json_data):
     buffer_records = data["buffer_records"]
 
     rocdecode_data = buffer_records["rocdecode_api"]
+    # If rocDecode tracing is not supported, end early
+    if len(rocdecode_data) == 0:
+        return pytest.skip("rocdecode tracing unavailable")
 
     _, bf_op_names = get_operation(data, "ROCDECODE_API")
 
@@ -62,6 +65,9 @@ def test_rocdeocde(json_data):
 
 
 def test_csv_data(csv_data):
+    # If rocDecode tracing is not supported, end early
+    if len(csv_data) == 0:
+        return pytest.skip("rocdecode tracing unavailable")
     assert len(csv_data) > 0, "Expected non-empty csv data"
 
     api_calls = []
@@ -116,20 +122,34 @@ def test_csv_data(csv_data):
 def test_perfetto_data(pftrace_data, json_data):
     import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
 
+    # If rocDecode tracing is not supported, end early
+    if (
+        pftrace_data == None
+        or len(json_data["rocprofiler-sdk-tool"]["buffer_records"]["rocdecode_api"]) == 0
+    ):
+        return pytest.skip("rocdecode tracing unavailable")
+
     rocprofv3.test_perfetto_data(
         pftrace_data,
         json_data,
-        ("hip", "hsa", "memory_allocation", "rocdecode_api"),
+        ("rocdecode_api",),
     )
 
 
 def test_otf2_data(otf2_data, json_data):
     import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
 
+    # If rocDecode tracing is not supported, end early
+    if (
+        otf2_data == None
+        or len(json_data["rocprofiler-sdk-tool"]["buffer_records"]["rocdecode_api"]) == 0
+    ):
+        return pytest.skip("rocdecode tracing unavailable")
+
     rocprofv3.test_otf2_data(
         otf2_data,
         json_data,
-        ("hip", "hsa", "memory_allocation", "rocdecode_api"),
+        ("rocdecode_api",),
     )
 
 

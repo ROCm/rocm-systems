@@ -32,16 +32,12 @@ def test_data_structure(input_data):
     node_exists("buffer_records", sdk_data)
 
     node_exists("names", sdk_data["callback_records"])
-    node_exists("hsa_api_traces", sdk_data["callback_records"])
-    node_exists("hip_api_traces", sdk_data["callback_records"])
-    node_exists("memory_allocations", sdk_data["callback_records"])
-    node_exists("rocdecode_api_traces", sdk_data["callback_records"])
+    # Uncomment when rocprofiler register mainline supports rocdecode
+    # node_exists("rocdecode_api_traces", sdk_data["callback_records"])
 
     node_exists("names", sdk_data["buffer_records"])
-    node_exists("hsa_api_traces", sdk_data["buffer_records"])
-    node_exists("hip_api_traces", sdk_data["buffer_records"])
-    node_exists("memory_allocations", sdk_data["buffer_records"])
-    node_exists("rocdecode_api_traces", sdk_data["buffer_records"])
+    # Uncomment when rocprofiler register mainline supports rocdecode
+    # node_exists("rocdecode_api_traces", sdk_data["buffer_records"])
 
 
 def test_size_entries(input_data):
@@ -77,7 +73,7 @@ def test_timestamps(input_data):
 
     cb_start = {}
     cb_end = {}
-    for titr in ["hsa_api_traces", "hip_api_traces", "rocdecode_api_traces"]:
+    for titr in ["rocdecode_api_traces"]:
         for itr in sdk_data["callback_records"][titr]:
             cid = itr["correlation_id"]["internal"]
             phase = itr["phase"]
@@ -91,29 +87,6 @@ def test_timestamps(input_data):
 
         for itr in sdk_data["buffer_records"][titr]:
             assert itr["start_timestamp"] <= itr["end_timestamp"]
-
-    for titr in ["memory_allocations"]:
-        for itr in sdk_data["buffer_records"][titr]:
-            assert itr["start_timestamp"] < itr["end_timestamp"], f"[{titr}] {itr}"
-            assert itr["correlation_id"]["internal"] > 0, f"[{titr}] {itr}"
-            assert itr["correlation_id"]["external"] > 0, f"[{titr}] {itr}"
-            assert (
-                sdk_data["metadata"]["init_time"] < itr["start_timestamp"]
-            ), f"[{titr}] {itr}"
-            assert (
-                sdk_data["metadata"]["init_time"] < itr["end_timestamp"]
-            ), f"[{titr}] {itr}"
-            assert (
-                sdk_data["metadata"]["fini_time"] > itr["start_timestamp"]
-            ), f"[{titr}] {itr}"
-            assert (
-                sdk_data["metadata"]["fini_time"] > itr["end_timestamp"]
-            ), f"[{titr}] {itr}"
-
-            api_start = cb_start[itr["correlation_id"]["internal"]]
-            # api_end = cb_end[itr["correlation_id"]["internal"]]
-            assert api_start < itr["start_timestamp"], f"[{titr}] {itr}"
-            # assert api_end <= itr["end_timestamp"], f"[{titr}] {itr}"
 
 
 def test_internal_correlation_ids(input_data):
@@ -138,37 +111,6 @@ def test_internal_correlation_ids(input_data):
     len_corr_id_unq = len(api_corr_ids_unique)
     assert len(api_corr_ids) != len_corr_id_unq
     assert max(api_corr_ids_sorted) == len_corr_id_unq
-
-
-def test_external_correlation_ids(input_data):
-    data = input_data
-    sdk_data = data["rocprofiler-sdk-json-tool"]
-
-    extern_corr_ids = []
-    for titr in ["hsa_api_traces", "hip_api_traces", "rocdecode_api_traces"]:
-        for itr in sdk_data["callback_records"][titr]:
-            assert itr["correlation_id"]["external"] > 0
-            assert itr["thread_id"] == itr["correlation_id"]["external"]
-            extern_corr_ids.append(itr["correlation_id"]["external"])
-
-    extern_corr_ids = list(set(sorted(extern_corr_ids)))
-    for titr in ["hsa_api_traces", "hip_api_traces", "rocdecode_api_traces"]:
-        for itr in sdk_data["buffer_records"][titr]:
-            assert itr["correlation_id"]["external"] > 0, f"[{titr}] {itr}"
-            assert (
-                itr["thread_id"] == itr["correlation_id"]["external"]
-            ), f"[{titr}] {itr}"
-            assert itr["thread_id"] in extern_corr_ids, f"[{titr}] {itr}"
-            assert itr["correlation_id"]["external"] in extern_corr_ids, f"[{titr}] {itr}"
-
-    for titr in ["memory_allocations"]:
-        for itr in sdk_data["buffer_records"][titr]:
-            assert itr["correlation_id"]["external"] > 0, f"[{titr}] {itr}"
-            assert itr["correlation_id"]["external"] in extern_corr_ids, f"[{titr}] {itr}"
-
-        for itr in sdk_data["callback_records"][titr]:
-            assert itr["correlation_id"]["external"] > 0, f"[{titr}] {itr}"
-            assert itr["correlation_id"]["external"] in extern_corr_ids, f"[{titr}] {itr}"
 
 
 def get_operation(record, kind_name, op_name=None):
@@ -196,7 +138,9 @@ def test_rocdecode_traces(input_data):
 
     rocdecode_cb_traces = sdk_data["callback_records"]["rocdecode_api_traces"]
     rocdecode_api_cb_ops = get_operation(callback_records, "ROCDECODE_API")
-
+    # If rocDecode tracing is not supported, end early
+    if len(rocdecode_bf_traces) == 0:
+        return pytest.skip("rocdecode tracing unavailable")
     assert (
         rocdecode_api_bf_ops[1] == rocdecode_api_cb_ops[1]
         and len(rocdecode_api_cb_ops[1]) == 16

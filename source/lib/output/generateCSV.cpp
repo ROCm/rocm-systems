@@ -769,6 +769,48 @@ generate_csv(const output_config&                                               
 void
 generate_csv(const output_config&                                              cfg,
              const metadata&                                                   tool_metadata,
+             const generator<rocprofiler_buffer_tracing_rocjpeg_api_record_t>& data,
+             const stats_entry_t&                                              stats)
+{
+    if(data.empty()) return;
+
+    if(cfg.stats && stats)
+        write_stats(get_stats_output_file(cfg, domain_type::ROCJPEG), stats.entries);
+
+    auto ofs = tool::csv_output_file{cfg,
+                                     domain_type::ROCJPEG,
+                                     tool::csv::api_csv_encoder{},
+                                     {"Domain",
+                                      "Function",
+                                      "Process_Id",
+                                      "Thread_Id",
+                                      "Correlation_Id",
+                                      "Start_Timestamp",
+                                      "End_Timestamp"}};
+    for(auto ditr : data)
+    {
+        for(auto record : data.get(ditr))
+        {
+            auto row_ss   = std::stringstream{};
+            auto api_name = tool_metadata.get_operation_name(record.kind, record.operation);
+            rocprofiler::tool::csv::api_csv_encoder::write_row(
+                row_ss,
+                tool_metadata.get_kind_name(record.kind),
+                api_name,
+                tool_metadata.process_id,
+                record.thread_id,
+                record.correlation_id.internal,
+                record.start_timestamp,
+                record.end_timestamp);
+
+            ofs << row_ss.str();
+        }
+    }
+}
+
+void
+generate_csv(const output_config&                                              cfg,
+             const metadata&                                                   tool_metadata,
              const generator<rocprofiler_tool_pc_sampling_host_trap_record_t>& data,
              const stats_entry_t&                                              stats)
 {
