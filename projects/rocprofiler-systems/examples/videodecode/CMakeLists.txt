@@ -49,7 +49,7 @@ function(videodecode_message _MSG_TYPE)
 endfunction()
 
 # Find RocDecode
-find_package(rocDecode REQUIRED)
+find_package(rocDecode QUIET)
 if(NOT ROCDECODE_FOUND)
     videodecode_message(AUTHOR_WARNING "${PROJECT_NAME} skipped. Missing RocDecode...")
     return()

@@ -1885,7 +1885,9 @@ get_use_vaapi_tracing()
     std::string domains = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
     auto        domain_list = tim::delimit(domains, " ,;:\t\n");
     return std::find(domain_list.begin(), domain_list.end(), "rocdecode_api") !=
-           domain_list.end();
+               domain_list.end() ||
+           std::find(domain_list.begin(), domain_list.end(), "rocjpeg_api") !=
+               domain_list.end();  // Check rocdecode_api or rocjpeg_api is present
 #else
     return false;
 #endif

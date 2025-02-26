@@ -360,9 +360,10 @@ get_callback_domains()
             ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
             ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
             ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,
-#    if(ROCPROFILER_VERSION_MAJOR == 0 && ROCPROFILER_VERSION_MINOR >= 6) ||             \
+#    if(ROCPROFILER_VERSION_MAJOR == 0 && ROCPROFILER_VERSION_MINOR >= 7) ||             \
         ROCPROFILER_VERSION_MAJOR >= 1
             ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API,
+            ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API,
 #    endif
     };
 
@@ -406,13 +407,6 @@ get_callback_domains()
         {
             _data.emplace(ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API);
         }
-#    if(ROCPROFILER_VERSION_MAJOR == 0 && ROCPROFILER_VERSION_MINOR >= 6) ||             \
-        ROCPROFILER_VERSION_MAJOR >= 1
-        else if(itr == "rocdecode_api")
-        {
-            _data.emplace(ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API);
-        }
-#    endif
         else
         {
             for(size_t idx = 0; idx < callback_tracing_info.size(); ++idx)
