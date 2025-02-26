@@ -6,9 +6,12 @@ WORKDIR /app
 
 # Update package list and install prerequisites
 RUN apt-get update && apt-get install -y \
-    software-properties-common cmake locales \
+    software-properties-common cmake locales git \
     && add-apt-repository ppa:deadsnakes/ppa \
     && apt-get update
+
+# Allows running git commands in /app
+RUN git config --global --add safe.directory /app
 
 # Generate the desired locale
 RUN locale-gen en_US.UTF-8

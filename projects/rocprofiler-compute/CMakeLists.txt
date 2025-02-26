@@ -381,6 +381,8 @@ add_custom_target(
     COMMAND ${Python3_EXECUTABLE} -m pip list | grep -i nuitka > /dev/null 2>&1
     # Check patchelf
     COMMAND ${Python3_EXECUTABLE} -m pip list | grep -i patchelf > /dev/null 2>&1
+    # Create VERSION.sha file
+    COMMAND git -C ${PROJECT_SOURCE_DIR} rev-parse HEAD > VERSION.sha
     # Build standalone binary
     COMMAND
         ${Python3_EXECUTABLE} -m nuitka --mode=onefile

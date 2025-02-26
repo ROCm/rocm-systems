@@ -118,29 +118,24 @@ def get_version(rocprof_compute_home) -> dict:
         console_error("Cannot find VERSION file at {}".format(searchDirs))
 
     # git version info
-    gitDir = str(path(rocprof_compute_home.parent).joinpath(".git"))
-    if (shutil.which("git") is not None) and path(gitDir).exists():
-        gitQuery = subprocess.run(
-            ["git", "log", "--pretty=format:%h", "-n", "1"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+    try:
+        success, output = capture_subprocess_output(
+            ["git", "-C", versionDir, "log", "--pretty=format:%h", "-n", "1"],
         )
-        if gitQuery.returncode != 0:
-            SHA = "unknown"
-            MODE = "unknown"
-        else:
-            SHA = gitQuery.stdout.decode("utf-8")
+        if success:
+            SHA = output
             MODE = "dev"
-    else:
-        shaFile = str(path(versionDir).joinpath("VERSION.sha"))
+        else:
+            raise Exception(output)
+    except:
         try:
+            shaFile = path(versionDir).joinpath("VERSION.sha").absolute().resolve()
             with open(shaFile, "r") as file:
                 SHA = file.read().replace("\n", "")
-        except EnvironmentError:
-            console_error("Cannot find VERSION.sha file at {}".format(shaFile))
-            sys.exit(1)
-
-        MODE = "release"
+                MODE = "release"
+        except Exception:
+            SHA = "unknown"
+            MODE = "unknown"
 
     versionData = {"version": VER, "sha": SHA, "mode": MODE}
     return versionData

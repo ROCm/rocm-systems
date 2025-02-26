@@ -2,7 +2,10 @@ FROM redhat/ubi8:8.10-1184
 
 WORKDIR /app
 
-RUN yum install -y curl gcc cmake
+RUN yum install -y curl gcc cmake git
+
+# Allows running git commands in /app
+RUN git config --global --add safe.directory /app
 
 RUN yum install -y python38 python38-devel && \
     yum clean all && \
