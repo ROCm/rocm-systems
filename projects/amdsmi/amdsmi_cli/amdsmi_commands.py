@@ -1777,20 +1777,18 @@ class AMDSMICommands():
                                           "deep_sleep" : "N/A"}
 
                 clocks["fclk_0"] = {"clk" : "N/A",
-                                   "min_clk" : "N/A",
-                                   "max_clk" : "N/A",
-                                   "clk_locked" : "N/A",
-                                   "deep_sleep" : "N/A"}
+                                    "min_clk" : "N/A",
+                                    "max_clk" : "N/A",
+                                    "clk_locked" : "N/A",
+                                    "deep_sleep" : "N/A"}
 
                 clocks["socclk_0"] = {"clk" : "N/A",
-                                   "min_clk" : "N/A",
-                                   "max_clk" : "N/A",
-                                   "clk_locked" : "N/A",
-                                   "deep_sleep" : "N/A"}
+                                      "min_clk" : "N/A",
+                                      "max_clk" : "N/A",
+                                      "clk_locked" : "N/A",
+                                      "deep_sleep" : "N/A"}
 
                 clock_unit = "MHz"
-                # TODO make the deepsleep threshold correspond to the * in sysfs for current deep sleep status
-                deep_sleep_threshold = 140
 
                 # Populate clock values from gpu_metrics_info
                 # Populate GFX clock values
@@ -1813,12 +1811,6 @@ class AMDSMICommands():
                                 clocks[gfx_index]["clk_locked"] = "ENABLED"
                             else:
                                 clocks[gfx_index]["clk_locked"] = "DISABLED"
-
-                        # Populate deep sleep status
-                        if int(current_gfx_clock) <= deep_sleep_threshold:
-                            clocks[gfx_index]["deep_sleep"] = "ENABLED"
-                        else:
-                            clocks[gfx_index]["deep_sleep"] = "DISABLED"
                 except KeyError as e:
                     logging.debug("Failed to get current_gfxclks for gpu %s | %s", gpu_id, e)
 
@@ -1829,11 +1821,6 @@ class AMDSMICommands():
                         clocks["mem_0"]["clk"] = self.helpers.unit_format(self.logger,
                                                                           current_mem_clock,
                                                                           clock_unit)
-
-                        if int(current_mem_clock) <= deep_sleep_threshold:
-                            clocks["mem_0"]["deep_sleep"] = "ENABLED"
-                        else:
-                            clocks["mem_0"]["deep_sleep"] = "DISABLED"
                 except KeyError as e:
                     logging.debug("Failed to get current_uclk for gpu %s | %s", gpu_id, e)
 
@@ -1849,11 +1836,6 @@ class AMDSMICommands():
                         clocks[vclk_index]["clk"] = self.helpers.unit_format(self.logger,
                                                                              current_vclk_clock,
                                                                              clock_unit)
-
-                        if int(current_vclk_clock) <= deep_sleep_threshold:
-                            clocks[vclk_index]["deep_sleep"] = "ENABLED"
-                        else:
-                            clocks[vclk_index]["deep_sleep"] = "DISABLED"
                 except KeyError as e:
                     logging.debug("Failed to get current_vclk0s for gpu %s | %s", gpu_id, e)
 
@@ -1869,11 +1851,6 @@ class AMDSMICommands():
                         clocks[dclk_index]["clk"] = self.helpers.unit_format(self.logger,
                                                                              current_dclk_clock,
                                                                              clock_unit)
-
-                        if int(current_dclk_clock) <= deep_sleep_threshold:
-                            clocks[dclk_index]["deep_sleep"] = "ENABLED"
-                        else:
-                            clocks[dclk_index]["deep_sleep"] = "DISABLED"
                 except KeyError as e:
                     logging.debug("Failed to get current_dclk0s for gpu %s | %s", gpu_id, e)
 
@@ -1885,11 +1862,6 @@ class AMDSMICommands():
                     clocks["fclk_0"]["clk"] = self.helpers.unit_format(self.logger,
                                                                        current_fclk_clock,
                                                                        clock_unit)
-
-                    if int(current_fclk_clock) <= deep_sleep_threshold:
-                        clocks["fclk_0"]["deep_sleep"] = "ENABLED"
-                    else:
-                        clocks["fclk_0"]["deep_sleep"] = "DISABLED"
                 except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
                     logging.debug("Failed to get fclk info for gpu %s | %s", gpu_id, e)
 
@@ -1899,11 +1871,6 @@ class AMDSMICommands():
                     clocks["socclk_0"]["clk"] = self.helpers.unit_format(self.logger,
                                                                          current_socclk_clock,
                                                                          clock_unit)
-
-                    if int(current_socclk_clock) <= deep_sleep_threshold:
-                        clocks["socclk_0"]["deep_sleep"] = "ENABLED"
-                    else:
-                        clocks["socclk_0"]["deep_sleep"] = "DISABLED"
                 except KeyError as e:
                     logging.debug("Failed to get current_socclk for gpu %s | %s", gpu_id, e)
 
@@ -2014,6 +1981,16 @@ class AMDSMICommands():
                                                                                 clock_unit)
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     logging.debug("Failed to get socclk info for gpu %s | %s", gpu_id, e.get_error_info())
+
+                # Populate the deep sleep status for each clock
+                for clock in clocks:
+                    if clocks[clock]["clk"] != "N/A" and clocks[clock]["min_clk"] != "N/A":
+                        if clocks[clock]["clk"] < clocks[clock]["min_clk"]:
+                            clocks[clock]["deep_sleep"] = "ENABLED"
+                        else:
+                            clocks[clock]["deep_sleep"] = "DISABLED"
+                    else:
+                        clocks[clock]["deep_sleep"] = "N/A"
 
                 values_dict['clock'] = clocks
         if "temperature" in current_platform_args:
