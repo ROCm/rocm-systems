@@ -65,6 +65,16 @@ if(EXISTS "${ROCmVersion_DIR}/share/rocjpeg/images")
 
     file(GLOB_RECURSE image_files "${ROCmVersion_DIR}/share/rocjpeg/images/*")
     file(COPY ${image_files} DESTINATION ${CMAKE_BINARY_DIR}/images)
+    set(NUM_COPIES 20)
+
+    # Loop over each file and make additional copies
+    foreach(file ${image_files})
+        get_filename_component(filename ${file} NAME)
+        foreach(i RANGE 1 ${NUM_COPIES})
+            file(COPY ${file}
+                 DESTINATION ${CMAKE_BINARY_DIR}/images/${filename}_copy${i}.jpg)
+        endforeach()
+    endforeach()
 else()
     message(
         AUTHOR_WARNING

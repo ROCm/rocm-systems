@@ -191,6 +191,8 @@ if __name__ == "__main__":
         total_value = 0
         for row in sum_counter_values:
             total_value = row.total_value if row.total_value is not None else -1
+        if args.print:
+            print(f"Total value of {counter_name} is {total_value}")
         if total_value <= 0:
             ret = 1
 
