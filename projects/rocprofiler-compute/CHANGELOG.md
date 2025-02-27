@@ -4,7 +4,14 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ## Unreleased
 
-* Add Docker files to package the application and dependencies into a single portable and executable standalone binary file  
+### Added
+
+* Add Docker files to package the application and dependencies into a single portable and executable standalone binary file
+
+### Changed
+
+* Change normal_unit default to per_kernel
+
 
 ## (Unreleased) ROCm Compute Profiler 3.1.0 for ROCm 6.4.0
 

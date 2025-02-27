@@ -535,9 +535,9 @@ Examples:
         "--normal-unit",
         dest="normal_unit",
         metavar="",
-        default="per_wave",
+        default="per_kernel",
         choices=["per_wave", "per_cycle", "per_second", "per_kernel"],
-        help="\t\tSpecify the normalization unit: (DEFAULT: per_wave)\n\t\t   per_wave\n\t\t   per_cycle\n\t\t   per_second\n\t\t   per_kernel",
+        help="\t\tSpecify the normalization unit: (DEFAULT: per_kernel)\n\t\t   per_wave\n\t\t   per_cycle\n\t\t   per_second\n\t\t   per_kernel",
     )
     analyze_advanced_group.add_argument(
         "-t",
