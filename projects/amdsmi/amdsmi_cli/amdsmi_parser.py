@@ -1258,7 +1258,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         mem_usage_help = "Monitor memory usage in MB"
         pcie_bandwidth_help = "Monitor PCIe bandwidth in Mb/s"
         process_help = "Enable Process information table below monitor output"
-        violation_help = "Monitor power and thermal violation status (%%); Only available for MI300 or newer ASICs"
+        violation_help = "Monitor power and thermal violation status (%%);\n    Only available for MI300 or newer ASICs"
 
         # Create monitor subparser
         monitor_parser = subparsers.add_parser('monitor', help=monitor_help, description=monitor_subcommand_help, aliases=["dmon"])
