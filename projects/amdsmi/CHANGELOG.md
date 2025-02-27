@@ -139,6 +139,10 @@ GPU: 0
 
 ### Changed
 
+- **AMDSMI Library Version number to reflect changes in backwards compatability**.  
+Removed Year from AMDSMI Library version number. Version changed from 25.2.0.0 (Year.Major.Minor.Patch) to 25.2.0 (Major.Minor.Patch)
+Removed year in all version references
+
 - **Removed initialization requirements for `amdsmi_get_lib_version()` and added `amdsmi_get_rocm_version()` to the python API & CLI**.  
 
 - **Added an additional argument `sensor_ind` to `amdsmi_get_power_info()`**.  
@@ -397,6 +401,8 @@ GPU2   0000:46:00.0 32 Gb/s  512 Gb/s      XGMI
   ```
 
 ### Upcoming changes
+
+- **Deprication of the `AMDSMI_LIB_VERSION_YEAR`
 
 ### Known issues
 
