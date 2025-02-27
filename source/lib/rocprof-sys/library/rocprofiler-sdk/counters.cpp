@@ -126,6 +126,14 @@ counter_storage::operator()(const counter_event& _event, timing_interval _timing
 void
 counter_storage::write() const
 {
+    if(!trait::runtime_enabled<counter_data_tracker>::get())
+    {
+        ROCPROFSYS_WARNING_F(
+            1, "%s counter_data_tracker is disabled. Can't write storage.\n",
+            metric_name.c_str());
+        return;
+    }
+
     operation::set_storage<counter_data_tracker>{}(storage.get());
     counter_data_tracker::label()       = metric_name;
     counter_data_tracker::description() = metric_description;
