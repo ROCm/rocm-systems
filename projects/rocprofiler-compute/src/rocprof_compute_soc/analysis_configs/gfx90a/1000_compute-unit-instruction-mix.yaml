@@ -241,6 +241,12 @@ Panel Config:
             max: MAX((SQ_INSTS_VALU_MFMA_I8 / $denom))
             unit: (instr + $normUnit)
             tips:
+          MFMA-F8:
+            avg: None
+            min: None
+            max: None
+            unit: (instr + $normUnit)
+            tips:
           MFMA-F16:
             avg: AVG((SQ_INSTS_VALU_MFMA_F16 / $denom))
             min: MIN((SQ_INSTS_VALU_MFMA_F16 / $denom))

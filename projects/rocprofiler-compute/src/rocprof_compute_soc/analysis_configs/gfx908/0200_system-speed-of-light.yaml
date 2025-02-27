@@ -32,6 +32,12 @@ Panel Config:
             peak: (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000)
             pop: None # No perf counter
             tips:
+          MFMA FLOPs (F8):
+            value: None # No HW module
+            unit: GFLOP
+            peak: None # No HW module
+            pop: None # No HW module
+            tips:
           MFMA FLOPs (BF16):
             value: None # No perf counter
             unit: GFLOPs

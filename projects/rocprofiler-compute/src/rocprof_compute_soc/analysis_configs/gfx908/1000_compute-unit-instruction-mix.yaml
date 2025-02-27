@@ -73,13 +73,13 @@ Panel Config:
           unit: Unit
           tips: Tips
         metric:
-          INT-32:
+          INT32:
             avg: None # No perf counter
             min: None # No perf counter
             max: None # No perf counter
             unit: (instr + $normUnit)
             tips:
-          INT-64:
+          INT64:
             avg: None # No perf counter
             min: None # No perf counter
             max: None # No perf counter
@@ -239,6 +239,12 @@ Panel Config:
             avg: None # No HW module
             min: None # No HW module
             max: None # No HW module
+            unit: (instr + $normUnit)
+            tips:
+          MFMA-F8:
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module None # No HW module
             unit: (instr + $normUnit)
             tips:
           MFMA-F16:

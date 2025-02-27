@@ -349,6 +349,14 @@ def perfmon_coalesce(pmc_files_list, perfmon_config, workload_dir, spatial_multi
                         if ctr.startswith("TCC_BUBBLE"):
                             continue
 
+                    # Remove me later:
+                    # v1 and v2 don't support these counters
+                    if not using_v3():
+                        if ctr.startswith("SQ_INSTS_VALU_MFMA_F8") or ctr.startswith(
+                            "SQ_INSTS_VALU_MFMA_MOPS_F8"
+                        ):
+                            continue
+
                     # Channel counter e.g. TCC_ATOMIC[0]
                     if "[" in ctr:
 

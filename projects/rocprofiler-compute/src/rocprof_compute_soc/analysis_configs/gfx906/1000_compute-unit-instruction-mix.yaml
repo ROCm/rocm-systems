@@ -241,6 +241,12 @@ Panel Config:
             max: None # No HW module
             unit: (instr + $normUnit)
             tips:
+          MFMA-F8:
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module None # No HW module
+            unit: (instr + $normUnit)
+            tips:
           MFMA-F16:
             avg: None # No HW module
             min: None # No HW module

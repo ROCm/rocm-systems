@@ -21,15 +21,21 @@ Panel Config:
         metric:
           VALU FLOPs:
             value: None # No perf counter
-            Unit: None
+            unit: None
             peak: None
             pop: None
             tips:
           VALU IOPs:
             value: None # No perf counter
-            Unit: None
+            unit: None
             peak: None
             pop: None
+            tips:
+          MFMA FLOPs (F8):
+            value: None # No perf counter
+            unit: GFLOP
+            peak: None # No perf counter
+            pop: None # No perf counter
             tips:
           MFMA FLOPs (BF16):
             value: None # No perf counter
@@ -39,25 +45,25 @@ Panel Config:
             tips:
           MFMA FLOPs (F16):
             value: None # No perf counter
-            Unit: None
+            unit: None
             peak: None
             pop: None
             tips:
           MFMA FLOPs (F32):
             value: None # No perf counter
-            Unit: None
+            unit: None
             peak: None
             pop: None
             tips:
           MFMA FLOPs (F64):
             value: None # No perf counter
-            Unit: None
+            unit: None
             peak: None
             pop: None
             tips:
           MFMA IOPs (INT8):
             value: None # No perf counter
-            Unit: None
+            unit: None
             peak: None
             pop: None
             tips:
@@ -172,6 +178,12 @@ Panel Config:
             avg: None # No perf counter
             min: None # No perf counter
             max: None # No perf counter
+            unit: (OPs  + $normUnit)
+            tips:
+          F8 OPs:
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (OPs  + $normUnit)
             tips:
           F16 OPs:

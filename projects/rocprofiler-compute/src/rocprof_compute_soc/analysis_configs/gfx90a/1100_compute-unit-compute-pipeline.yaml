@@ -41,6 +41,12 @@ Panel Config:
             pop: ((100 * AVG(((64 * (SQ_INSTS_VALU_INT32 + SQ_INSTS_VALU_INT64)) / (End_Timestamp
               - Start_Timestamp)))) / (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000))
             tips:
+          MFMA FLOPs (F8):
+            value: None
+            unit: GFLOP
+            peak: None
+            pop: None
+            tips:
           MFMA FLOPs (BF16):
             value: AVG(((SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) / (End_Timestamp - Start_Timestamp)))
             unit: GFLOP
@@ -214,6 +220,12 @@ Panel Config:
             avg: AVG(((64 * (SQ_INSTS_VALU_INT32 + SQ_INSTS_VALU_INT64)) + (SQ_INSTS_VALU_MFMA_MOPS_I8 * 512)) / $denom)
             min: MIN(((64 * (SQ_INSTS_VALU_INT32 + SQ_INSTS_VALU_INT64)) + (SQ_INSTS_VALU_MFMA_MOPS_I8 * 512)) / $denom)
             max: MAX(((64 * (SQ_INSTS_VALU_INT32 + SQ_INSTS_VALU_INT64)) + (SQ_INSTS_VALU_MFMA_MOPS_I8 * 512)) / $denom)
+            unit: (OPs  + $normUnit)
+            tips:
+          F8 OPs:
+            avg: None
+            min: None
+            max: None
             unit: (OPs  + $normUnit)
             tips:
           F16 OPs:
