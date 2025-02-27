@@ -27,6 +27,8 @@ jobs:
     steps:
       - name: Install baseline OS dependencies
         run: |
+          yum clean all
+          yum makecache
           yum -y install git
           yum -y install python39
           yum -y install cmake3
