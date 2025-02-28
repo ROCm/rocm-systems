@@ -160,9 +160,13 @@ typedef enum { INTEGER = 0, DOUBLE, STRING, BLOB } rdc_field_type_t;
 typedef enum {
   RDC_FI_INVALID = 0,  //!< Invalid field value
   //!< @brief Identifier fields
-  RDC_FI_GPU_COUNT = 1,  //!< GPU count in the system
-  RDC_FI_DEV_NAME,       //!< Name of the device
-  RDC_FI_OAM_ID,         //!< OAM ID of the device
+  RDC_FI_GPU_COUNT = 1,            //!< GPU count in the system
+  RDC_FI_DEV_NAME,                 //!< Name of the device
+  RDC_FI_OAM_ID,                   //!< OAM ID of the device
+  RDC_FI_DEV_ID,                   //!< Device ID
+  RDC_FI_REV_ID,                   //!<
+  RDC_FI_TARGET_GRAPHICS_VERSION,  //!< Target graphics version
+  RDC_FI_NUM_OF_COMPUTE_UNITS,     //!< Number of compute units
 
   /**
    * @brief Frequency related fields
@@ -388,6 +392,9 @@ typedef uint32_t rdc_field_grp_t;  //!< Field group ID type
  */
 typedef struct {
   char device_name[RDC_MAX_STR_LENGTH];  //!< Name of the device.
+  uint64_t device_id;                    //!< The device id of a GPU
+  uint32_t num_of_compute_units;
+  uint64_t target_graphics_version;
 } rdc_device_attributes_t;
 
 /**
@@ -533,7 +540,8 @@ typedef enum {
   RDC_DIAG_RVS_MEMBW_TEST,   //!< RVS bandwidth test
   RDC_DIAG_RVS_H2DD2H_TEST,  //!< RVS Host<->Device transfer speed test
   RDC_DIAG_RVS_IET_TEST,     //!< RVS IET test
-  RDC_DIAG_TEST_LAST = RDC_DIAG_RVS_IET_TEST
+  RDC_DIAG_RVS_CUSTOM,       //!< RVS custom test
+  RDC_DIAG_TEST_LAST,
 } rdc_diag_test_cases_t;
 
 /**
@@ -547,7 +555,7 @@ typedef enum {
 /**
  * @brief The maximum test cases to run
  */
-#define MAX_TEST_CASES (RDC_DIAG_TEST_LAST - RDC_DIAG_TEST_FIRST + 1)
+#define MAX_TEST_CASES (RDC_DIAG_TEST_LAST - RDC_DIAG_TEST_FIRST)
 
 /**
  * @brief The maximum length of the diagnostic messages
@@ -1606,6 +1614,8 @@ rdc_status_t rdc_config_get(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
  *  @retval RDC_ST_OK is returned upon successful call.
  */
 rdc_status_t rdc_config_clear(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id);
+
+const char* get_rocm_path(const char* search_string);
 
 #ifdef __cplusplus
 }

@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 #include <dlfcn.h>
 #include <string.h>
+#include <fstream>
 
 #include <map>
 
@@ -476,6 +477,7 @@ char* strncpy_with_null(char* dest, const char* src, size_t n) {
   return dest;
 }
 
+
 rdc_status_t rdc_policy_set(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                             rdc_policy_t policy) {
   if (!p_rdc_handle) {
@@ -533,3 +535,42 @@ rdc_status_t rdc_link_status_get(rdc_handle_t p_rdc_handle, rdc_link_status_t* r
   return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
       ->rdc_link_status_get(results);
 }
+
+const char * get_rocm_path(const char * search_string) {
+  // set default rocm path in case lookup fails
+  static std::string rocm_path("/opt/rocm");
+  const char* rocm_path_env = getenv("ROCM_PATH");
+  if (rocm_path_env != nullptr) {
+    rocm_path = rocm_path_env;
+  }
+
+  std::ifstream file("/proc/self/maps");
+
+  if (!file.is_open()) {
+    RDC_LOG(RDC_DEBUG, "CANT OPEN FILE");
+    return rocm_path.c_str();
+  }
+
+  std::string line;
+  while (getline(file, line)) {
+    size_t index_end = line.find(search_string);
+    size_t index_start = index_end;
+    if (index_end == std::string::npos) {
+      // no library on this line
+      continue;
+    }
+    // walk index backwards until it reaches a space
+    while ((index_start > 0) && (line[index_start - 1] != ' ')) {
+      index_start--;
+    }
+    // extract library path, drop library name
+    rocm_path = line.substr(index_start, index_end - index_start);
+    // appending "../" should result in "/opt/rocm/lib/.." or similar
+    rocm_path += "..";
+    RDC_LOG(RDC_DEBUG, "FOUND SOMETHING!");
+    return rocm_path.c_str();
+  }
+
+  return rocm_path.c_str();
+}
+
