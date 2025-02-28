@@ -49,9 +49,12 @@ rdc_status_t RdcDiagnosticModule::rdc_diag_test_cases_query(
   return RDC_ST_OK;
 }
 
-rdc_status_t RdcDiagnosticModule::rdc_test_case_run(
-    rdc_diag_test_cases_t test_case, uint32_t gpu_index[RDC_MAX_NUM_DEVICES], uint32_t gpu_count,
-    const char* config, size_t config_size, rdc_diag_test_result_t* result, rdc_diag_callback_t* callback) {
+rdc_status_t RdcDiagnosticModule::rdc_test_case_run(rdc_diag_test_cases_t test_case,
+                                                    uint32_t gpu_index[RDC_MAX_NUM_DEVICES],
+                                                    uint32_t gpu_count, const char* config,
+                                                    size_t config_size,
+                                                    rdc_diag_test_result_t* result,
+                                                    rdc_diag_callback_t* callback) {
   if (result == nullptr) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -74,24 +77,41 @@ rdc_status_t RdcDiagnosticModule::rdc_diagnostic_run(const rdc_group_info_t& gpu
                                                      size_t config_size,
                                                      rdc_diag_response_t* response,
                                                      rdc_diag_callback_t* callback) {
+  const bool is_custom = config != nullptr && config_size != 0;
+
   if (response == nullptr) {
     return RDC_ST_BAD_PARAMETER;
   }
 
-  std::vector<rdc_diag_test_cases_t> rdc_runs;
+  std::vector<rdc_diag_test_cases_t> tests_to_search_for;
   if (level >= RDC_DIAG_LVL_SHORT) {  // Short run and above
-    rdc_runs.push_back(RDC_DIAG_COMPUTE_PROCESS);
-    rdc_runs.push_back(RDC_DIAG_NODE_TOPOLOGY);
-    rdc_runs.push_back(RDC_DIAG_GPU_PARAMETERS);
-    rdc_runs.push_back(RDC_DIAG_COMPUTE_QUEUE);
-    rdc_runs.push_back(RDC_DIAG_SYS_MEM_CHECK);
+    tests_to_search_for.push_back(RDC_DIAG_COMPUTE_PROCESS);
+    tests_to_search_for.push_back(RDC_DIAG_NODE_TOPOLOGY);
+    tests_to_search_for.push_back(RDC_DIAG_GPU_PARAMETERS);
+    tests_to_search_for.push_back(RDC_DIAG_COMPUTE_QUEUE);
+    tests_to_search_for.push_back(RDC_DIAG_SYS_MEM_CHECK);
   }
 
   if (level >= RDC_DIAG_LVL_MED) {  // Medium run and above
-    rdc_runs.push_back(RDC_DIAG_RVS_GST_TEST);
-    rdc_runs.push_back(RDC_DIAG_RVS_MEMBW_TEST);
-    rdc_runs.push_back(RDC_DIAG_RVS_H2DD2H_TEST);
-    rdc_runs.push_back(RDC_DIAG_RVS_IET_TEST);
+    tests_to_search_for.push_back(RDC_DIAG_RVS_GST_TEST);
+    tests_to_search_for.push_back(RDC_DIAG_RVS_MEMBW_TEST);
+    tests_to_search_for.push_back(RDC_DIAG_RVS_H2DD2H_TEST);
+    tests_to_search_for.push_back(RDC_DIAG_RVS_IET_TEST);
+  }
+
+  std::vector<rdc_diag_test_cases_t> tests_to_run;
+  if (is_custom) {
+    // respect custom config
+    tests_to_run.push_back(RDC_DIAG_RVS_CUSTOM);
+  } else {
+    // respect level
+    for (auto& test : tests_to_search_for) {
+      if (testcases_to_module_.find(test) != testcases_to_module_.end()) {
+        tests_to_run.push_back(test);
+      } else {
+        RDC_LOG(RDC_DEBUG, "test not found: " << test);
+      }
+    }
   }
 
   if (callback != nullptr && callback->callback != nullptr && callback->cookie != nullptr) {
@@ -99,15 +119,17 @@ rdc_status_t RdcDiagnosticModule::rdc_diagnostic_run(const rdc_group_info_t& gpu
     callback->callback(callback->cookie, log.data());
   }
 
+  unsigned int i = 0;
   response->results_count = 0;
-  for (unsigned int i = 0; i < rdc_runs.size(); i++) {
+  for (i = 0; i < tests_to_run.size(); i++) {
     if (callback != nullptr && callback->callback != nullptr && callback->cookie != nullptr) {
-      std::string log = "Test " + std::to_string(i) + " / " + std::to_string(rdc_runs.size());
+      std::string log =
+          "Test " + std::to_string(i + 1) + " / " + std::to_string(tests_to_run.size());
       callback->callback(callback->cookie, log.data());
     }
-    response->diag_info[i].test_case = rdc_runs[i];
+    response->diag_info[i].test_case = tests_to_run[i];
     // NOTE: rdc_test_case_run reuses the diagnostic_run callback
-    rdc_test_case_run(rdc_runs[i], const_cast<uint32_t*>(gpus.entity_ids), gpus.count, config,
+    rdc_test_case_run(tests_to_run[i], const_cast<uint32_t*>(gpus.entity_ids), gpus.count, config,
                       config_size, &(response->diag_info[i]), callback);
     response->results_count++;
   }

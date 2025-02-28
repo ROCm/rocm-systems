@@ -61,4 +61,13 @@ if(BUILD_RVS)
             TARGET ${RDC_RVS_LIB}
             POST_BUILD COMMAND ${CMAKE_STRIP} ${RDC_RVS_LIB_COMPONENT}.so)
     endif()
+
+    # Install RVS config files into /opt/rocm/share/rdc/conf/rvs/
+    #file(GLOB RDC_RVS_CONFIG_FILES "${SRC_DIR}/conf/*")
+    install(DIRECTORY "${SRC_DIR}/conf/"
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/conf/rvs/
+        COMPONENT ${SERVER_COMPONENT})
+    #install(FILES ${RDC_RVS_CONFIG_FILES}
+    #    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/conf
+    #    COMPONENT ${RDC_RVS_LIB_COMPONENT})
 endif()
