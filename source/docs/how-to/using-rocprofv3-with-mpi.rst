@@ -5,19 +5,19 @@
 
 .. _using-rocprofv3-with-mpi:
 
-Using rocprofv3 with ``MPI``
+Using rocprofv3 with MPI
 +++++++++++++++++++++++++++++
 
 Message Passing Interface (MPI) is a standardized and portable message-passing system designed to function on a wide variety of parallel computing architectures. MPI is widely used for developing parallel applications and is considered the de facto standard for communication in high-performance computing (HPC) environments.
-MPI applications are parallel applications that run across multiple processes, which can be distributed over one or more nodes. 
+MPI applications are parallel applications running across multiple processes that can be distributed over one or more nodes.
 
-For ``MPI`` applications or other job launchers such as ``SLURM``, place ``rocprofv3`` inside the job launcher. The following example demonstrates how to use ``rocprofv3`` with MPI:
+For MPI applications or other job launchers such as SLURM, place ``rocprofv3`` inside the job launcher. The following example demonstrates how to use ``rocprofv3`` with MPI:
 
 .. code-block:: bash
 
     mpirun -n 4 rocprofv3 --hip-trace -- <application_path>
 
-The above command runs the application with `rocprofv3` and generates the trace file for each rank. The trace files are prefixed with the process ID.
+The preceding command runs the application with ``rocprofv3`` and generates the trace file for each rank. The trace files are prefixed with the process ID.
 
 .. code-block:: bash
 
@@ -30,14 +30,14 @@ The above command runs the application with `rocprofv3` and generates the trace 
     2293215_agent_info.csv
     2293215_hip_api_trace.csv
 
-Since we do the data collection in-process, it is ideal to be in the process(es) launched by ``MPI``. Outside of ``mpirun``, the tool library is loaded into the ``mpirun`` executable.
-It will ideally work but you will get agent info for the ``mpirun`` process too. Example:
+Since the data collection is performed in-process, it's ideal to collect data from within the process(es) launched by MPI. Outside of ``mpirun``, the tool library is loaded into the ``mpirun`` executable.
+Collecting data outside of ``mpirun`` works but fetches agent info for the ``mpirun`` process too. For example:
 
 .. code-block:: bash
 
     rocprofv3 --hip-trace -d %h.%p.%env{OMPI_COMM_WORLD_RANK}% -- mpirun -n 2  <application_path>
 
-In the above example, an extra agent info file is generated for the ``mpirun`` process. The trace files are prefixed with the hostname, process ID, and the MPI rank.
+In the preceding example, an extra agent info file is generated for the ``mpirun`` process. The trace files are prefixed with the hostname, process ID, and the MPI rank.
 
 .. code-block:: bash
 
@@ -47,9 +47,10 @@ In the above example, an extra agent info file is generated for the ``mpirun`` p
     3000019_hip_api_trace.csv
     3164458_agent_info.csv
 
-`ROCTx` annotations
+ROCTx annotations
 ===================
-For an MPI application, you can use `ROCTx` annotations to mark the start and end of the MPI code region. The following example demonstrates how to use `ROCTx` annotations with MPI:
+
+For an MPI application, you can use ROCTx annotations to mark the start and end of the MPI code region. The following example demonstrates how to use ROCTx annotations with MPI:
 
 .. code-block:: cpp
 
@@ -128,10 +129,10 @@ For an MPI application, you can use `ROCTx` annotations to mark the start and en
         roctxRangeStop(roctx_run_id);
     }
 
-This gives you output similar to the following:
+This preceding sample generates output similar to the following:
 
 .. code-block:: shell
-    
+
     "MARKER_CORE_API","run/rank-0/thread-0/device-0/begin",2936128,2936128,5,432927100747635,432927100747635
     "MARKER_CORE_API","run/rank-0/thread-1/device-1/begin",2936128,2936397,7,432927100811475,432927100811475
     "MARKER_CORE_API","run/iteration",2936128,2936397,22,432928615598809,432928648197081
@@ -149,23 +150,18 @@ This gives you output similar to the following:
     "MARKER_CORE_API","run/rank-0/thread-0/device-0/end",2936128,2936128,6342,432929612438185,432929612438185
     "MARKER_CORE_API","run",2936128,2936128,4,432927100729745,432929612448285
 
-Output Format Features:
+Output format features
 =======================
-To use ``rocprofv3`` to collect the profiles of the individual MPI processes, you must tell ``rocprofv3`` to send its output to unique files.
-This is done using the following placeholders:
 
-Output directory option supports following placeholders:
--  %hostname%: Hostname of the machine
--  %pid%: Process ID
--  %env{USER}% - Consistent with other output key formats (start+end with %)
--  $ENV{USER} - Similar to CMake
--  %q{USER}% - Compatibility with NVIDIA
-  
+To collect the profiles of the individual MPI processes, use ``rocprofv3`` with output directory option to send output to unique files.
+
 .. code-block:: bash
 
     mpirun -n 2 rocprofv3 --hip-trace -d %h.%p.%env{OMPI_COMM_WORLD_RANK}%  --  <application_path>
 
-Assuming the hostname is `ubuntu-latest`, the process ID is `3000020` and `3000019`, the output file names are:
+To see the placeholders supported by the output directory option, see :ref:`output directory placeholders <output_field_format>`.
+
+Assuming the hostname as `ubuntu-latest`, the process IDs as 3000020 and 3000019, the generated output file names are:
 
 .. code-block:: bash
 

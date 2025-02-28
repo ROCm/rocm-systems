@@ -1,41 +1,43 @@
 .. meta::
   :description: Documentation of the usage of pc-sampling with rocprofv3 command-line tool
-  :keywords: ROCprofiler-SDK tool, ROCprofiler-SDK library, rocprofv3, rocprofv3 tool usage, Using rocprofv3, ROCprofiler-SDK command line tool, PC sampling
+  :keywords: Sampling PC, Sampling program counter, rocprofv3, rocprofv3 tool usage, Using rocprofv3, ROCprofiler-SDK command line tool, PC sampling
 
 .. _using-pc-sampling:
 
-======================
-Using ``pc-sampling``
-======================
+==================
+Using PC sampling
+==================
 
-PC (Program Counter) Sampling service for GPU profiling is a profiling technique that periodically samples the program counter during GPU kernel execution to understand code execution patterns and hotspots. 
-This helps in:
-- Identifying performance bottlenecks
-- Understanding kernel execution behavior
-- Analyzing code coverage
-- Finding heavily executed code paths
+PC (Program Counter) sampling service for GPU profiling is a profiling technique to periodically sample the program counter during GPU kernel execution. PC sampling helps to understand code execution patterns and hotspots.
 
-To try out the PC sampling feature, you can use the rocprofv3 command-line tool or the rocprofiler SDK library on `ROCm 6.4` or later.
+Here are the benefits of using PC sampling:
 
-.. note:: 
-  PC sampling is supported on AMD GPUs with gfx90a and later architectures. Before using the PC sampling feature, ensure that the GPU supports it.
+- Identify performance bottlenecks
+- Understand kernel execution behavior
+- Analyze code coverage
+- Find heavily executed code paths
 
-PC Sampling availability and Configuration
-==========================================
+To try out the PC sampling feature, you can use the command-line tool ``rocprofv3`` or the ROCprofiler-SDK library on `ROCm 6.4` or later.
 
-To check if the GPU supports PC sampling, use the following command:
+.. note::
+  PC sampling is ONLY supported on AMD GPUs with architectures gfx90a and later.
+
+PC sampling availability and configuration
+===========================================
+
+To check if the GPU supports PC sampling, use:
 
 .. code-block:: bash
 
   rocprofv3 -L
 
-OR
+Or
 
 .. code-block:: bash
 
   rocprofv3 --list-avail
 
-The output will list if `rocprofv3` supports PC sampling on the GPU and what configuration is supported.
+The output lists if ``rocprofv3`` supports PC sampling on the GPU and the supported configuration.
 
 .. code-block:: bash
 
@@ -45,58 +47,60 @@ The output will list if `rocprofv3` supports PC sampling on the GPU and what con
   Minimum_Interval:       1
   Maximum_Interval:       18446744073709551615
 
-The above output shows that the GPU supports PC sampling with the ``ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP`` method and the ``ROCPROFILER_PC_SAMPLING_UNIT_TIME`` unit. The minimum and maximum intervals are also displayed.
+The preceding output shows that the GPU supports PC sampling with the ``ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP`` method and the ``ROCPROFILER_PC_SAMPLING_UNIT_TIME`` unit. The minimum and maximum intervals are also displayed.
 
-Based on the above configuration, you can use the following command to profile the application using PC sampling:
+Based on the preceding configuration, you can use the following command to profile the application using PC sampling:
 
 .. code-block:: bash
 
   rocprofv3 --pc-sampling-beta-enabled --pc-sampling-method host_trap --pc-sampling-unit time --pc-sampling-interval 1 -- <application_path>
 
-The above command enables PC sampling with the `host_trap` method, `time` unit, and an interval of `1` us(micro second). Replace `<application_path>` with the path to the application you want to profile.
+The preceding command enables PC sampling with the ``host_trap`` method, ``time`` unit, and an interval of ``1`` μs (micro second). Replace ``<application_path>`` with the path to the application you want to profile.
 
-This will generate 2 files. ``agent_info.csv`` and ``pc_sampling_host_trap.csv``. Both files are prefixed with file prefixed with the process ID.
-Here is the output of pc-sampling for the `MatrixTranspose` sample application:
+This generates two files, ``agent_info.csv`` and ``pc_sampling_host_trap.csv``. Both files are prefixed with the process ID.
 
-Here are the contents of ``pc_sampling_host_trap.csv`` file:
+Here are the contents of ``pc_sampling_host_trap.csv`` file generated for MatrixTranspose sample application:
 
 .. csv-table:: PC sampling host trap
    :file: /data/pc_sampling_host_trap.csv
    :widths: 20,10,10,10,10,20
    :header-rows: 1
 
-For the description of the fields in the output file, see :ref:`pc-sampling-fields`.
 
-If you noticed ``Instruction_Comment`` field in the output file was empty. It is recommended to compile your application with debug symbols to populate this field.
-It maps back to the source line if debug symbols were enabled when the application was compiled. This helps in understanding the code execution pattern and hotspots.
+For description of the fields in the output file, see :ref:`pc-sampling-fields`.
+
+If you find the ``Instruction_Comment`` field in the output file to be empty, populate this field by compiling your application with debug symbols.
+Enabling debug symbols while compiling the application maps back to the source line. This helps in understanding the code execution pattern and hotspots.
 
 .. csv-table:: PC sampling host trap with debug symbols
    :file: /data/pc_sampling_host_trap_debug.csv
    :widths: 20,10,10,10,10,20
    :header-rows: 1
 
-The above output shows the `Instruction_Comment` field populated with the source line information.
+
+The preceding output shows the ``Instruction_Comment`` field populated with the source-line information.
 
 .. _pc-sampling-fields:
 
-PC Sampling Fields:
+PC sampling fields
 ===================
-The output file generated by PC sampling contains the following fields:
+
+Here are the fields in the output file generated by PC sampling:
 
 - ``Sample_Timestamp``: Timestamp when sample is generated
 - ``Exec_Mask``: Active SIMD lanes when sampled
 - ``Dispatch_Id``: Originating kernel dispatch ID
-- ``Instruction``: Assembly instruction e.g: ``s_load_dword s8, s[1:2], 0x10``
-- ``Instruction_Comment``: Instruction comment (Maps back to source-line if debug symbols were enabled when application was compiled)
-- ``Correlation_Id``: API launch call id that matches dispatch ID
+- ``Instruction``: Assembly instruction such as ``s_load_dword s8, s[1:2], 0x10``
+- ``Instruction_Comment``: Instruction comment that maps back to the source-line if debug symbols were enabled when application was compiled
+- ``Correlation_Id``: API launch call ID that matches dispatch ID
 
-By default the output file is in CSV format. To dump samples in a more comprehensive format, one can use JSON through `--output-format json`.
+By default, the output file is in CSV format. To dump samples in a more comprehensive format, use JSON through ``--output-format json``:
 
 .. code-block:: bash
 
   rocprofv3 --pc-sampling-beta-enabled --pc-sampling-method host_trap --pc-sampling-unit time --pc-sampling-interval 1 --output-format json -- <application_path>
 
-This will generate a JSON file with the comprehensive output. Here is a trimmed down output with multiple records:
+The preceding command generates a JSON file with the comprehensive output. Here is a trimmed down output with multiple records:
 
 .. code-block:: text
 
@@ -175,4 +179,4 @@ This will generate a JSON file with the comprehensive output. Here is a trimmed 
     ]
   }
 
-The description of the fields in the JSON output is available in the :ref:`output-file-fields`.
+For description of the fields in the JSON output, see :ref:`output-file-fields`.
