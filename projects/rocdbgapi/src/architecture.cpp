@@ -135,19 +135,7 @@ protected:
     debug_trap = 0x3,
   };
 
-  /* The trap handler only saves 4 bits of the original trap_id.  trap_id 0
-     cannot be detected and is invalid, trap_id >= 15 could be any ID between
-     15 and 255, and therefore cannot be differentiated.  The debugger API
-     library only handles trap IDs between 1 and 14.  */
-  static constexpr std::optional<trap_id_t> ttmp6_saved_trap_id (uint32_t x)
-  {
-    if (auto trap_id = utils::bit_extract<uint8_t> (
-          x, ttmp6_saved_trap_id_shift,
-          ttmp6_saved_trap_id_shift + ttmp6_saved_trap_id_size - 1);
-        trap_id != 0)
-      return trap_id_t{ trap_id };
-    return std::nullopt;
-  }
+  virtual std::optional<trap_id_t> trap_id (const wave_t &wave) const;
 
   static constexpr uint32_t sq_wave_mode_debug_en_mask = 1 << 11;
   static constexpr uint32_t sq_wave_mode_excp_en_invalid_mask = 1 << 12;
@@ -513,6 +501,24 @@ struct disassembly_user_data_t
 };
 
 } /* namespace detail */
+
+std::optional<amdgcn_architecture_t::trap_id_t>
+amdgcn_architecture_t::trap_id (const wave_t &wave) const
+{
+  uint32_t ttmp6;
+  wave.read_register (amdgpu_regnum_t::ttmp6, &ttmp6);
+
+  /* The trap handler only saves 4 bits of the original trap_id.  trap_id 0
+     cannot be detected and is invalid, trap_id >= 15 could be any ID between
+     15 and 255, and therefore cannot be differentiated.  The debugger API
+     library only handles trap IDs between 1 and 14.  */
+  if (uint8_t trap_id = utils::bit_extract<uint8_t> (
+        ttmp6, ttmp6_saved_trap_id_shift,
+        ttmp6_saved_trap_id_shift + ttmp6_saved_trap_id_size - 1);
+      trap_id != 0)
+    return { trap_id_t{ trap_id } };
+  return std::nullopt;
+}
 
 amd_comgr_disassembly_info_t
 amdgcn_architecture_t::disassembly_info () const
@@ -1544,7 +1550,7 @@ amdgcn_architecture_t::wave_get_state (wave_t &wave) const
     stop_reason |= AMD_DBGAPI_WAVE_STOP_REASON_TRAP;
 
   /* Check for traps caused by an s_trap instruction.  */
-  if (auto trap_id = ttmp6_saved_trap_id (ttmp6); trap_id)
+  if (auto trap_id = this->trap_id (wave); trap_id.has_value ())
     {
       switch (*trap_id)
         {
