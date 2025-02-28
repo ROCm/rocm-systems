@@ -2,28 +2,32 @@
 myst:
     html_meta:
         "description": "ROCprofiler-SDK is a tooling infrastructure for profiling general-purpose GPU compute applications running on the ROCm software."
-        "keywords": "ROCprofiler-SDK API reference, ROCprofiler-SDK PC sampling, Program counter sampling, PC sampling"
+        "keywords": "ROCprofiler-SDK API reference, Program counter sampling, PC sampling"
 ---
 
 # ROCprofiler-SDK PC sampling method
 
 Program Counter (PC) sampling is a profiling method that uses statistical approximation of the kernel execution by sampling GPU program counters. Furthermore, this method periodically chooses an active wave in a round robin manner and snapshots its PC. This process takes place on every compute unit simultaneously, making it device-wide PC sampling. The outcome is the histogram of samples, explaining how many times each kernel instruction was sampled.
 
-> **Warning:**
-> Risk acknowledgment: The PC sampling feature is under development and might not be completely stable. Use this beta feature cautiously. It may affect your system's stability and performance. Proceed at your own risk.
->
-> By activating this feature through `ROCPROFILER_PC_SAMPLING_BETA_ENABLED` environment variable, you acknowledge and accept the following potential risks:
->
-> - Hardware freeze: This beta feature could cause your hardware to freeze unexpectedly.
-> - Need for cold restart: In the event of a hardware freeze, you might need to perform a cold restart (turning the hardware off and on) to restore normal operations.
+:::{warning}
 
-## ROCprofiler-SDK PC Sampling Service
+Risk acknowledgment: The PC sampling feature is under development and might not be completely stable. Use this beta feature cautiously. It may affect your system's stability and performance. Proceed at your own risk.
 
-This section describes usage of ROCProfiler-SDK PC Sampling API to configure and use PC sampling service. For a fully functional example, see [Samples](https://github.com/ROCm/rocprofiler-sdk/tree/amd-mainline/samples).
+By activating this feature through `ROCPROFILER_PC_SAMPLING_BETA_ENABLED` environment variable, you acknowledge and accept the following potential risks:
 
-### tool_init() Setup
+- Hardware freeze: This beta feature could cause your hardware to freeze unexpectedly.
+- Need for cold restart: In the event of a hardware freeze, you might need to perform a cold restart (turning the hardware off and on) to restore normal operations.
+:::
 
-As the PC sampling service belongs to the group of [buffered services](buffered_services.md), it requires a buffer and a context to be set up in this phase.
+## ROCprofiler-SDK PC sampling service
+
+This section describes how to use ROCProfiler-SDK PC sampling API to configure and use PC sampling service. For fully functional examples, see [Samples](https://github.com/ROCm/rocprofiler-sdk/tree/amd-mainline/samples).
+
+### tool_init() setup
+
+Here are the steps to set up ``tool_init()``:
+
+1. As the PC sampling service belongs to the group of [buffered services](buffered_services.md), it requires a buffer and a context to be set up in this phase.
 
 ```cpp
 rocprofiler_context_id_t ctx{0};
@@ -39,16 +43,16 @@ ROCPROFILER_CALL(rocprofiler_create_buffer(ctx,
                     "buffer creation failed");
 ```
 
-For more details about the buffer creation, please refer to the [buffered services section](buffered_services.md).
+For more details on buffer creation, see [buffered services](buffered_services.md).
 
-The PC sampling service is tied to a GPU agent. To extract the list of available agents, one could use the `rocprofiler_query_available_agents` as the following snippet outlines.
+2. The PC sampling service is tied to a GPU agent. To extract the list of available agents, use the `rocprofiler_query_available_agents` as shown in the following code snippet:
 
 ```cpp
 std::vector<rocprofiler_agent_v0_t> agents;
 
 // Callback used by rocprofiler_query_available_agents to return
-// agents on the device. This can include CPU agents as well. We
-// select GPU agents only (i.e. type == ROCPROFILER_AGENT_TYPE_GPU)
+// agents on the device. This can include CPU agents as well.
+// Select GPU agents only (type == ROCPROFILER_AGENT_TYPE_GPU)
 rocprofiler_query_available_agents_cb_t iterate_cb = [](rocprofiler_agent_version_t agents_ver,
                                                         const void**                agents_arr,
                                                         size_t                      num_agents,
@@ -64,7 +68,7 @@ rocprofiler_query_available_agents_cb_t iterate_cb = [](rocprofiler_agent_versio
     return ROCPROFILER_STATUS_SUCCESS;
 };
 
-// Query the agents, only a single callback is made that contains a vector
+// Query the agents. Only a single callback is made that contains a vector
 // of all agents.
 ROCPROFILER_CALL(
     rocprofiler_query_available_agents(ROCPROFILER_AGENT_INFO_VERSION_0,
@@ -74,7 +78,7 @@ ROCPROFILER_CALL(
     "query available agents");
 ```
 
-Only recent GPU architectures support the feature. To determine whether an agent with `agent_it` supports the PC sampling and what configurations (`rocprofiler_pc_sampling_configuration_t`) are available, one should use the `rocprofiler_query_pc_sampling_agent_configurations`.
+3. Only newer GPU architectures (MI200 onwards) support this feature. To determine whether an agent with `agent_id` supports the PC sampling and the available configurations (`rocprofiler_pc_sampling_configuration_t`), use the `rocprofiler_query_pc_sampling_agent_configurations`.
 
 ```cpp
 std::vector<rocprofiler_pc_sampling_configuration_t> available_configurations;
@@ -94,7 +98,7 @@ auto status = rocprofiler_query_pc_sampling_agent_configurations(
     agent_id, cb, &available_configurations);
 ```
 
-Assuming the `available_configurations` contains a single element:
+Assuming the `available_configurations` contain a single element:
 
 ```cpp
 rocprofiler_pc_sampling_configuration_t {
@@ -105,7 +109,7 @@ rocprofiler_pc_sampling_configuration_t {
 };
 ```
 
-one proceeds configuring the PC sampling service on an agent with `agent_id` to generate samples every 1000 micro-seconds in the following way:
+4. Configure the PC sampling service on an agent with `agent_id` to generate samples every 1000 micro-seconds as shown here:
 
 ```cpp
 auto status = rocprofiler_configure_pc_sampling_service(ctx,
@@ -125,13 +129,13 @@ else
 }
 ```
 
-> **Note**
->
-> Multiple processes can share the same GPU agent simultaneously, so the following ABA problem is possible on shared systems. Namely, process A can query available configurations and decide to configure the service with configuration CA. However, process B manages to finish configuring the service with configuration CB, meaning process A will fail. Thus, we advise that process A repeat the querying process to observe configuration CB and reuse it for configuring the PC sampling service. Please refer to the [Samples](https://github.com/ROCm/rocprofiler-sdk/tree/amd-mainline/samples) section for more technical details.
+:::{note}
+Multiple processes can share the same GPU agent simultaneously, so the following A->B->A problem is possible on shared systems. For example, process A can query available configurations and opt to configure the service with configuration CA. However, if process B manages to finish configuring the service with configuration CB, then proess A will fail. Thus, it is advisable for the process A to repeat the querying process to observe configuration CB and reuse it for configuring the PC sampling service. For more details, refer to the [Samples](https://github.com/ROCm/rocprofiler-sdk/tree/amd-mainline/samples).
+:::
 
-### Processing PC Samples (`pc_sampling_callback`)
+### Processing PC samples
 
-PC sampling service asynchronously delivers samples via a dedicated callback. The following code outlines the process of iterating over samples.
+The PC sampling service asynchronously delivers samples via a dedicated callback (`pc_sampling_callback`). The following code snippet outlines the process of iterating over samples.
 
 ```cpp
 void
@@ -164,6 +168,8 @@ pc_sampling_callback(rocprofiler_context_id_t ctx,
 }
 ```
 
-For more information about what data comprises a single sample, please refer to the [pc_sampling.h](https://github.com/ROCm/rocprofiler-sdk/blob/amd-mainline/source/include/rocprofiler-sdk/pc_sampling.h).
+For more information on the data comprising a single sample, see [pc_sampling.h](https://github.com/ROCm/rocprofiler-sdk/blob/amd-mainline/source/include/rocprofiler-sdk/pc_sampling.h).
 
-Note, a user can synchronously flush buffers via `rocprofiler_buffer_flush` that triggers `pc_sampling_callback`.
+:::{note}
+A user can synchronously flush buffers via `rocprofiler_buffer_flush` that triggers `pc_sampling_callback`.
+:::
