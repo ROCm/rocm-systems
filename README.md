@@ -48,7 +48,9 @@ Ensure you have the following installed:
 - `libelf-dev`
 - `g++`
 - `libdrm-amdgpu-dev` or `libdrm-dev`
+- `pkg-config`
 - `rocm-core`
+- `rocm-llvm-dev`
 
 ### ROCr & ROCt Build Instructions
 1. **Clone this repository and cd into its root**
@@ -58,7 +60,11 @@ Ensure you have the following installed:
     ```
 3. **Configure the build (example)**
     ```sh
-    cmake -DCMAKE_INSTALL_PREFIX=/opt/<rocm install dir>/llvm ..
+    cmake -DCMAKE_INSTALL_PREFIX=<rocm install dir> ..
+    ```
+    e.g: 
+    ```
+    cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm ..
     ```
 4. **Compile the project**
     ```sh
