@@ -3541,28 +3541,6 @@ except AmdSmiException as e:
     print(e)
 ```
 
-### amdsmi_get_lib_version
-
-Description: Get the build version information for the currently running build of AMDSMI.
-
-Output: amdsmi build version
-
-Exceptions that can be thrown by `amdsmi_get_lib_version` function:
-
-* `AmdSmiLibraryException`
-* `AmdSmiRetryException`
-* `AmdSmiParameterException`
-
-Example:
-
-```python
-try:
-    version = amdsmi_get_lib_version()
-    print(version)
-except AmdSmiException as e:
-    print(e)
-```
-
 ### amdsmi_topo_get_numa_node_number
 
 Description: Retrieve the NUMA CPU node number for a device
@@ -5089,6 +5067,52 @@ Example:
 try:
      cpu_model = amdsmi_get_cpu_model()
      print(cpu_model)
+except AmdSmiException as e:
+    print(e)
+```
+
+## No amdsmi_init APIs
+
+### amdsmi_get_lib_version
+
+Description: Get the build version information for the currently running build of AMDSMI. This function doesn't require amdsmi library init.
+
+Output: amdsmi build version
+
+Exceptions that can be thrown by `amdsmi_get_lib_version` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiRetryException`
+* `AmdSmiParameterException`
+
+Example:
+
+```python
+try:
+    version = amdsmi_get_lib_version()
+    print(version)
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_get_rocm_version
+
+Description: This function attempts to retrieve the ROCm version by loading the `librocm-core.so` shared library. This function doesn't require amdsmi library init.
+
+Output: Tuple (bool, str) containing rocm_load_status and version_message
+
+Exceptions that can be thrown by `amdsmi_get_rocm_version` function:
+
+* `AmdSmiLibraryException`
+
+Example:
+
+```python
+try:
+    import amdsmi
+    rocm_load_status, version_message = amdsmi_get_rocm_version()
+    print(f"ROCm load status: {rocm_load_status}")
+    print(f"ROCm version msg: {version_message}")
 except AmdSmiException as e:
     print(e)
 ```

@@ -22,6 +22,7 @@
 import logging
 import math
 import os
+import grp
 import platform
 import sys
 import time
@@ -29,9 +30,8 @@ import re
 import multiprocessing
 import json
 
-from typing import List, Union
 from enum import Enum
-from typing import Set
+from typing import List, Set, Union
 
 from amdsmi_init import *
 from BDF import BDF
@@ -98,8 +98,10 @@ class AMDSMIHelpers():
     def increment_set_count(self):
         self._count_of_sets_called += 1
 
+
     def get_set_count(self):
         return self._count_of_sets_called
+
 
     def is_virtual_os(self):
         return self._is_virtual_os
@@ -171,6 +173,16 @@ class AMDSMIHelpers():
 
     def is_amd_hsmp_initialized(self):
         return AMDSMI_INIT_FLAG & amdsmi_interface.amdsmi_wrapper.AMDSMI_INIT_AMD_CPUS
+
+
+    def get_rocm_version(self):
+        try:
+            rocm_lib_status, rocm_version = amdsmi_interface.amdsmi_get_rocm_version()
+            if rocm_lib_status is not True:
+                return "N/A"
+            return rocm_version
+        except amdsmi_interface.AmdSmiLibraryException as e:
+            return "N/A"
 
 
     def get_cpu_choices(self):
@@ -974,3 +986,24 @@ class AMDSMIHelpers():
             title += ": "
         for i in self.progressbar(range(timeInSeconds), title, 40):
             time.sleep(1)
+
+    def check_required_groups(self):
+        """
+        Check if the current user is a member of the required groups.
+        If not, log a warning.
+        """
+        required_groups = {'video', 'render'}
+        try:
+            user_groups = {grp.getgrgid(gid).gr_name for gid in os.getgroups()}
+        except Exception as e:
+            logging.warning("Unable to determine group memberships: %s", e)
+            return
+
+        missing_groups = required_groups - user_groups
+        if missing_groups:
+            msg = (
+                "WARNING: User is missing the following required groups: %s. "
+                "Please add user to these groups."
+            ) % ", ".join(sorted(missing_groups))
+            print(msg)
+            logging.warning(msg)

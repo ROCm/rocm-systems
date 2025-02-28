@@ -127,13 +127,21 @@ class AMDSMILogger():
                 table_values += string_value.rjust(10) + '  '
             elif key == 'power_usage':
                 table_values += string_value.rjust(7)
-            elif key in ('gfx_clock', 'mem_clock', 'vram_used'):
+            elif key in ('hotspot_temperature', 'memory_temperature'):
+                table_values += string_value.rjust(8)
+            elif key in ('gfx', 'mem'):
+                table_values += string_value.rjust(7)
+            elif key in ('gfx_clk'):
+                table_values += string_value.rjust(10)
+            elif key in ('mem_clock', 'vram_used'):
                 table_values += string_value.rjust(11)
+            elif key in ('encoder', 'decoder'):
+                table_values += string_value.rjust(7)
             elif key in ('vclock', 'dclock'):
                 table_values += string_value.rjust(10)
-            elif key == 'vram_total' or 'ecc' in key or key == 'pcie_bw':
+            elif key in ('single_bit_ecc', 'double_bit_ecc', 'pcie_bw', 'vram_total'):
                 table_values += string_value.rjust(12)
-            elif key in ['pcie_replay']:
+            elif key in ('pcie_replay'):
                 table_values += string_value.rjust(13)
             # Only for handling topology tables
             elif 'gpu_' in key:

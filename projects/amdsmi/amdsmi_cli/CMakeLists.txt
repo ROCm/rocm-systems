@@ -22,7 +22,6 @@ add_custom_command(
            ${PY_PACKAGE_DIR}/amdsmi_logger.py
            ${PY_PACKAGE_DIR}/amdsmi_parser.py
            ${PY_PACKAGE_DIR}/amdsmi_cli_exceptions.py
-           ${PY_PACKAGE_DIR}/rocm_version.py
            ${PY_PACKAGE_DIR}/BDF.py
            ${PY_PACKAGE_DIR}/README.md
            ${PY_PACKAGE_DIR}/Release_Notes.md
@@ -36,7 +35,6 @@ add_custom_command(
     COMMAND ln -Pf ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_logger.py ${PY_PACKAGE_DIR}/
     COMMAND ln -Pf ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_parser.py ${PY_PACKAGE_DIR}/
     COMMAND ln -Pf ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_cli_exceptions.py ${PY_PACKAGE_DIR}/
-    COMMAND ln -Pf ${CMAKE_CURRENT_SOURCE_DIR}/rocm_version.py ${PY_PACKAGE_DIR}/
     COMMAND ln -Pf ${CMAKE_CURRENT_SOURCE_DIR}/BDF.py ${PY_PACKAGE_DIR}/
     COMMAND ln -Pf ${CMAKE_CURRENT_SOURCE_DIR}/README.md ${PY_PACKAGE_DIR}/
     COMMAND ln -Pf ${CMAKE_CURRENT_SOURCE_DIR}/Release_Notes.md ${PY_PACKAGE_DIR}/)
@@ -54,7 +52,6 @@ add_custom_target(
             ${PY_PACKAGE_DIR}/amdsmi_logger.py
             ${PY_PACKAGE_DIR}/amdsmi_parser.py
             ${PY_PACKAGE_DIR}/amdsmi_cli_exceptions.py
-            ${PY_PACKAGE_DIR}/rocm_version.py
             ${PY_PACKAGE_DIR}/BDF.py
             ${PY_PACKAGE_DIR}/README.md
             ${PY_PACKAGE_DIR}/Release_Notes.md)

@@ -13,7 +13,6 @@ def get_version_info(filepath):
         content = f.read()
 
     version_pattern = (
-        r"^#define\s+AMDSMI_LIB_VERSION_YEAR\s+(\d+)\s*$|"
         r"^#define\s+AMDSMI_LIB_VERSION_MAJOR\s+(\d+)\s*$|"
         r"^#define\s+AMDSMI_LIB_VERSION_MINOR\s+(\d+)\s*$|"
         r"^#define\s+AMDSMI_LIB_VERSION_RELEASE\s+(\d+)\s*$"
@@ -21,19 +20,19 @@ def get_version_info(filepath):
 
     matches = re.findall(version_pattern, content, re.MULTILINE)
 
-    if len(matches) == 4:
-        version_year, version_major, version_minor, version_release = [
+    if len(matches) == 3:
+        version_major, version_minor, version_release = [
             match for match in matches if any(match)
         ]
-        return version_year[0], version_major[1], version_minor[2], version_release[3]
+        return version_major[0], version_minor[1], version_release[2]
     else:
         raise ValueError("Couldn't find all VERSION numbers.")
 
 
-version_year, version_major, version_minor, version_release = get_version_info(
+version_major, version_minor, version_release = get_version_info(
     "../include/amd_smi/amdsmi.h"
 )
-version_number = f"{version_year}.{version_major}.{version_minor}.{version_release}"
+version_number = f"{version_major}.{version_minor}.{version_release}"
 
 # project info
 project = "AMD SMI"

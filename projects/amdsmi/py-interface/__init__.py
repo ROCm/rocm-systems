@@ -9,7 +9,7 @@
 #
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
-#
+#``
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
 # FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
@@ -207,9 +207,6 @@ from .amdsmi_interface import amdsmi_get_gpu_vram_vendor
 from .amdsmi_interface import amdsmi_get_gpu_subsystem_id
 from .amdsmi_interface import amdsmi_get_gpu_subsystem_name
 
-# # Version information
-from .amdsmi_interface import amdsmi_get_lib_version
-
 # # Hardware topology query
 from .amdsmi_interface import amdsmi_topo_get_numa_node_number
 from .amdsmi_interface import amdsmi_topo_get_link_weight
@@ -238,6 +235,11 @@ from .amdsmi_interface import amdsmi_get_gpu_pm_metrics_info
 
 # # Virtualization Mode Detection
 from .amdsmi_interface import amdsmi_get_gpu_virtualization_mode_info
+
+# # Functions where library initialization is not needed
+# # Version information
+from .amdsmi_interface import amdsmi_get_lib_version
+from .amdsmi_interface import amdsmi_get_rocm_version
 
 # # Enums
 from .amdsmi_interface import AmdSmiInitFlags

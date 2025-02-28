@@ -310,6 +310,11 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
                 return AMDSMI_STATUS_NO_DATA;
             }
         } else {
+            // skip this line if it contains a * which indicates the current level
+            const char *current_indicator = strstr(line.c_str(), "*");
+            if (current_indicator != nullptr){
+                continue;
+            }
             if (sscanf(line.c_str(), "%u: %d%c", &dpm_level, &freq, str) <= 2){
                 ranges.close();
                 return AMDSMI_STATUS_IO;

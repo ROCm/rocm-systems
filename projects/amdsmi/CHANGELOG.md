@@ -3,6 +3,7 @@
 Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/projects/amdsmi](https://rocm.docs.amd.com/projects/amdsmi/en/latest/).
 
 ***All information listed below is for reference and subject to change.***
+
 ## amd_smi_lib for ROCm 6.4.0
 
 ### Added
@@ -18,18 +19,19 @@ Added temperature violation active or not status to `amd-smi monitor`. TVIOL_ACT
   - N/A if not supported.
 
   Example CLI output:
-```shell
-$ amd-smi monitor --viol
-GPU  PVIOL  TVIOL  TVIOL_ACTIVE  PHOT_TVIOL  VR_TVIOL  HBM_TVIOL
-  0  100 %    1 %          True         0 %       0 %        0 %
-  1  100 %    0 %         False         0 %       0 %        0 %
-  2  100 %    0 %         False         0 %       0 %        0 %
-  3  100 %    0 %         False         0 %       0 %        0 %
-  4  100 %    0 %         False         0 %       0 %        0 %
-  5  100 %    3 %          True         0 %       0 %        0 %
-  6  100 %    0 %         False         0 %       0 %        0 %
-  7  100 %    0 %         False         0 %       0 %        0 %
-```
+
+    ```shell
+    $ amd-smi monitor --viol
+    GPU  PVIOL  TVIOL  TVIOL_ACTIVE  PHOT_TVIOL  VR_TVIOL  HBM_TVIOL
+    0  100 %    1 %          True         0 %       0 %        0 %
+    1  100 %    0 %         False         0 %       0 %        0 %
+    2  100 %    0 %         False         0 %       0 %        0 %
+    3  100 %    0 %         False         0 %       0 %        0 %
+    4  100 %    0 %         False         0 %       0 %        0 %
+    5  100 %    3 %          True         0 %       0 %        0 %
+    6  100 %    0 %         False         0 %       0 %        0 %
+    7  100 %    0 %         False         0 %       0 %        0 %
+    ```
 
 - **Added support for GPU metrics 1.7 to `amdsmi_get_gpu_metrics_info()`**.  
 Updated `amdsmi_get_gpu_metrics_info()` and structure `amdsmi_gpu_metrics_t` to include new fields for XGMI Link Status, graphics clocks below host limit (per XCP), and VRAM max bandwidth:  
@@ -38,34 +40,38 @@ Updated `amdsmi_get_gpu_metrics_info()` and structure `amdsmi_gpu_metrics_t` to 
   - `uint64_t gfx_below_host_limit_acc[MAX_NUM_XCC]` - graphics clocks below host limit (per XCP) accumulators. Used for graphic clk below host limit violation status.
 
 - **Added new API `amdsmi_get_gpu_xgmi_link_status()` and CLI `amd-smi xgmi --link-status`**  
-New API is defined as: 
-```C
-typedef enum {
-  AMDSMI_XGMI_LINK_DOWN,     //!< The XGMI Link is down
-  AMDSMI_XGMI_LINK_UP,       //!< The XGMI Link is up
-  AMDSMI_XGMI_LINK_DISABLE,  //!< The XGMI Link is disabled
-} amdsmi_xgmi_link_status_type_t;
 
-typedef struct {
-  uint32_t total_links;     //!< The total links in the status array
-  amdsmi_xgmi_link_status_type_t status[AMDSMI_MAX_NUM_XGMI_LINKS];
-  uint64_t reserved[7];
-} amdsmi_xgmi_link_status_t;
+    New API is defined as:
 
-amdsmi_status_t amdsmi_get_gpu_xgmi_link_status(amdsmi_processor_handle processor_handle, amdsmi_xgmi_link_status_t *link_status)
-```
-Example CLI output:
-```shell
-$ amd-smi xgmi --link-status
+    ```C
+    typedef enum {
+    AMDSMI_XGMI_LINK_DOWN,     //!< The XGMI Link is down
+    AMDSMI_XGMI_LINK_UP,       //!< The XGMI Link is up
+    AMDSMI_XGMI_LINK_DISABLE,  //!< The XGMI Link is disabled
+    } amdsmi_xgmi_link_status_type_t;
 
-XGMI LINK STATUS:
-       bdf           link_status
-GPU0   0000:08:00.0  U  U  U  U  D  U  D  X
-GPU1   0000:44:00.0  U  U  U  U  D  U  D  X
-...
+    typedef struct {
+    uint32_t total_links;     //!< The total links in the status array
+    amdsmi_xgmi_link_status_type_t status[AMDSMI_MAX_NUM_XGMI_LINKS];
+    uint64_t reserved[7];
+    } amdsmi_xgmi_link_status_t;
 
-* U:Up D:Down X:Disabled
-```
+    amdsmi_status_t amdsmi_get_gpu_xgmi_link_status(amdsmi_processor_handle processor_handle, amdsmi_xgmi_link_status_t *link_status)
+    ```
+
+    Example CLI output:
+
+    ```shell
+    $ amd-smi xgmi --link-status
+
+    XGMI LINK STATUS:
+        bdf           link_status
+    GPU0   0000:08:00.0  U  U  U  U  D  U  D  X
+    GPU1   0000:44:00.0  U  U  U  U  D  U  D  X
+    ...
+
+    * U:Up D:Down X:Disabled
+    ```
 
 - **Added fclk and socclk info to `amd-smi metric -c/--clock`**.  
   fclk and socclk information such as min and max clock have been added to the metric command, in line with all the other clocks.  
@@ -90,73 +96,80 @@ GPU1   0000:44:00.0  U  U  U  U  D  U  D  X
 - **Added new command `amd-smi set -c/--clock-level`**.  
   This new command sets the performance level of the selected clock on the desired GPUs. The command can accept a range of acceptable levels, but will not set the level when a level is beyond the number of frequency levels as show in `amd-smi static -C/--clock`.  
 
-```shell
-sudo amd-smi set -c sclk 5 6
-GPU: 0
-    CLK_LEVEL: Successfully changed sclk perf level(s) to 5, 6
+    ```shell
+    sudo amd-smi set -c sclk 5 6
+    GPU: 0
+        CLK_LEVEL: Successfully changed sclk perf level(s) to 5, 6
 
-GPU: 1
-    CLK_LEVEL: level(s) 5, 6 is/are greater than performance levels supported for device
-```
+    GPU: 1
+        CLK_LEVEL: level(s) 5, 6 is/are greater than performance levels supported for device
+    ```
 
 - **Added new command `amd-smi static -C/--clock`**.  
   This new command displays the clock frequency performance levels for the selected GPUs and clocks.
 
-```shell
-amd-smi static --clock all -g 0
-GPU: 0
-    CLOCK:
-        SYS:
-            CURRENT LEVEL: 2
-            FREQUENCY_LEVELS:
-                0: 300 MHz
-                1: 904 MHz
-                2: 1165 MHz
-                3: 1360 MHz
-                4: 1440 MHz
-                5: 1544 MHz
-                6: 1627 MHz
-                7: 1720 MHz
-                8: 1800 MHz
-        MEM:
-            CURRENT LEVEL: 0
-            FREQUENCY_LEVELS:
-                0: 167 MHz
-        DF:
-            CURRENT LEVEL: 0
-            FREQUENCY_LEVELS:
-                0: 1400 MHz
-        SOC:
-            CURRENT LEVEL: 0
-            FREQUENCY_LEVELS:
-                0: 302 MHz
-        DCEF: N/A
-        VCLK0: N/A
-        VCLK1: N/A
-        DCLK0: N/A
-        DCLK1: N/A
-```
+    ```shell
+    amd-smi static --clock all -g 0
+    GPU: 0
+        CLOCK:
+            SYS:
+                CURRENT LEVEL: 2
+                FREQUENCY_LEVELS:
+                    0: 300 MHz
+                    1: 904 MHz
+                    2: 1165 MHz
+                    3: 1360 MHz
+                    4: 1440 MHz
+                    5: 1544 MHz
+                    6: 1627 MHz
+                    7: 1720 MHz
+                    8: 1800 MHz
+            MEM:
+                CURRENT LEVEL: 0
+                FREQUENCY_LEVELS:
+                    0: 167 MHz
+            DF:
+                CURRENT LEVEL: 0
+                FREQUENCY_LEVELS:
+                    0: 1400 MHz
+            SOC:
+                CURRENT LEVEL: 0
+                FREQUENCY_LEVELS:
+                    0: 302 MHz
+            DCEF: N/A
+            VCLK0: N/A
+            VCLK1: N/A
+            DCLK0: N/A
+            DCLK1: N/A
+    ```
 
 ### Changed
 
+- **AMDSMI Library Version number to reflect changes in backwards compatability**.  
+  - Removed Year from AMDSMI Library version number.
+  - Version changed from 25.2.0.0 (Year.Major.Minor.Patch) to 25.2.0 (Major.Minor.Patch)
+  - Removed year in all version references
+
+- **Removed initialization requirements for `amdsmi_get_lib_version()` and added `amdsmi_get_rocm_version()` to the python API & CLI**.  
+
 - **Added an additional argument `sensor_ind` to `amdsmi_get_power_info()`**.  
-This change breaks previous C API calls and will require a change
-Python API now accepts `sensor_ind` as an optional argument, does not imapact previous usage
+  - This change breaks previous C API calls and will require a change
+  - Python API now accepts `sensor_ind` as an optional argument, does not imapact previous usage
 
 - **Depricated enum `AMDSMI_NORMAL_STRING_LENGTH` in favor of `AMDSMI_MAX_STRING_LENGTH`**.  
 
 - **Changed to use thread local mutex by default**.  
-Most sysfs reads do not require cross-process level mutex, and writes to sysfs should be protected by the kernel already.  
-Users can still switch to the old behavior by setting the environment variable `AMDSMI_MUTEX_CROSS_PROCESS=1`.
+  - Most sysfs reads do not require cross-process level mutex, and writes to sysfs should be protected by the kernel already.
+  - Users can still switch to the old behavior by setting the environment variable `AMDSMI_MUTEX_CROSS_PROCESS=1`.
 
-- **Changed `amdsmi_vram_vendor_type_t` enum names impacting `amdsmi_vram_info_t` structure**. 
-This also change impacts usage of the vram_vendor output of `amdsmi_get_gpu_vram_info()` 
+- **Changed `amdsmi_vram_vendor_type_t` enum names impacting `amdsmi_vram_info_t` structure**.  
+This also change impacts usage of the vram_vendor output of `amdsmi_get_gpu_vram_info()`
 
 - **Changed `amdsmi_nps_caps_t` struct impacting `amdsmi_memory_partition_config_t`, `amdsmi_accelerator_partition_t`, `amdsmi_accelerator_partition_profile_config_t`**.  
-  - Functions affected by struct change are:
-    - `amdsmi_get_gpu_memory_partition_config()`
-    - `amdsmi_get_gpu_accelerator_partition_profile()`
-    - `amdsmi_get_gpu_accelerator_partition_profile_config()`
+Functions affected by struct change are:
+  - `amdsmi_get_gpu_memory_partition_config()`
+  - `amdsmi_get_gpu_accelerator_partition_profile()`
+  - `amdsmi_get_gpu_accelerator_partition_profile_config()`
 
 - **Corrected CLI CPU argument name**.  
   - `--cpu-pwr-svi-telemtry-rails` to `--cpu-pwr-svi-telemetry-rails`
@@ -166,16 +179,16 @@ This also change impacts usage of the vram_vendor output of `amdsmi_get_gpu_vram
   - The amd_hsmp driver version can also be displayed using the `-c` flag.
   - The new default for the `version` command is to display all the version information, including both amdgpu and amd_hsmp driver versions.
 
-```shell
-amd-smi version
-AMDSMI Tool: 24.7.1+b446d6c-dirty | AMDSMI Library version: 24.7.2.0 | ROCm version: N/A | amdgpu version: 6.10.10 | amd_hsmp version: 2.2
+    ```shell
+    amd-smi version
+    AMDSMI Tool: 24.7.1+b446d6c-dirty | AMDSMI Library version: 24.7.2.0 | ROCm version: N/A | amdgpu version: 6.10.10 | amd_hsmp version: 2.2
 
-amd-smi version -g
-AMDSMI Tool: 24.7.1+b446d6c-dirty | AMDSMI Library version: 24.7.2.0 | ROCm version: N/A | amdgpu version: 6.10.10
+    amd-smi version -g
+    AMDSMI Tool: 24.7.1+b446d6c-dirty | AMDSMI Library version: 24.7.2.0 | ROCm version: N/A | amdgpu version: 6.10.10
 
-amd-smi version -c
-AMDSMI Tool: 24.7.1+b446d6c-dirty | AMDSMI Library version: 24.7.2.0 | ROCm version: N/A | amd_hsmp version: 2.2
-```
+    amd-smi version -c
+    AMDSMI Tool: 24.7.1+b446d6c-dirty | AMDSMI Library version: 24.7.2.0 | ROCm version: N/A | amd_hsmp version: 2.2
+    ```
 
 - **All `amd-smi set` and `amd-smi reset` options are now mutually exclusive**.  
   - Users can only use one set option at a time now.  
@@ -301,7 +314,8 @@ Updated structure `amdsmi_vram_info_t`:
 - **Removed `GFX_BUSY_ACC` from `amd-smi metric --usage`**.  
   Displaying `GFX_BUSY_ACC` does not provide helpful outputs for users.  
 
-  Old output:  
+  Old output:
+  
   ```shell
   $ amd-smi metric --usage
     GPU: 0
@@ -322,7 +336,8 @@ Updated structure `amdsmi_vram_info_t`:
   ...
   ```
 
-  New Output:  
+  New Output:
+
   ```shell
   $ amd-smi metric --usage
   GPU: 0
@@ -340,7 +355,6 @@ Updated structure `amdsmi_vram_info_t`:
               XCP_0: [0 %, 0 %, 0 %, 0 %]
   ...
   ```
-
 
 ### Optimized
 
@@ -360,34 +374,38 @@ Updated structure `amdsmi_vram_info_t`:
 
 - **Converted xgmi read and write from KB's to readable units**.  
   - With this change `amd-smi xgmi` will now display the statistics in dynamically selected readable units.
-  - Example output is shown below.
+  - Example output CLI output:
 
-```shell
-$ amd-smi xgmi
-LINK METRIC TABLE:
-       bdf          bit_rate max_bandwidth link_type 0000:05:00.0 0000:26:00.0 0000:46:00.0 0000:65:00.0 0000:85:00.0 0000:a6:00.0 0000:c6:00.0 0000:e5:00.0
-GPU0   0000:05:00.0 32 Gb/s  512 Gb/s      XGMI
- Read                                                N/A          1.123 PB     1.123 PB     1.123 PB     1.123 PB     1.123 PB     1.123 PB     1.123 PB
- Write                                               N/A          229.1 MB     229.1 MB     229.1 MB     229.1 MB     229.1 MB     229.1 MB     229.1 MB
-GPU1   0000:26:00.0 32 Gb/s  512 Gb/s      XGMI
- Read                                                1.123 PB     N/A          1.123 PB     1.123 PB     1.123 PB     1.123 PB     1.123 PB     1.123 PB
- Write                                               229.1 MB     N/A          229.1 MB     229.1 MB     229.1 MB     229.1 MB     229.1 MB     229.1 MB
-GPU2   0000:46:00.0 32 Gb/s  512 Gb/s      XGMI
- Read                                                1.123 PB     1.123 PB     N/A          1.123 PB     1.123 PB     1.123 PB     1.123 PB     1.123 PB
- Write                                               229.1 MB     229.1 MB     N/A          229.1 MB     229.1 MB     229.1 MB     229.1 MB     229.1 MB
-...
-```
+    ```shell
+    $ amd-smi xgmi
+    LINK METRIC TABLE:
+        bdf          bit_rate max_bandwidth link_type 0000:05:00.0 0000:26:00.0 0000:46:00.0 0000:65:00.0 0000:85:00.0 0000:a6:00.0 0000:c6:00.0 0000:e5:00.0
+    GPU0   0000:05:00.0 32 Gb/s  512 Gb/s      XGMI
+    Read                                                N/A          1.123 PB     1.123 PB     1.123 PB     1.123 PB     1.123 PB     1.123 PB     1.123 PB
+    Write                                               N/A          229.1 MB     229.1 MB     229.1 MB     229.1 MB     229.1 MB     229.1 MB     229.1 MB
+    GPU1   0000:26:00.0 32 Gb/s  512 Gb/s      XGMI
+    Read                                                1.123 PB     N/A          1.123 PB     1.123 PB     1.123 PB     1.123 PB     1.123 PB     1.123 PB
+    Write                                               229.1 MB     N/A          229.1 MB     229.1 MB     229.1 MB     229.1 MB     229.1 MB     229.1 MB
+    GPU2   0000:46:00.0 32 Gb/s  512 Gb/s      XGMI
+    Read                                                1.123 PB     1.123 PB     N/A          1.123 PB     1.123 PB     1.123 PB     1.123 PB     1.123 PB
+    Write                                               229.1 MB     229.1 MB     N/A          229.1 MB     229.1 MB     229.1 MB     229.1 MB     229.1 MB
+    ...
+    ```
 
 ### Resolved issues
 
 - **Fixed `amdsmi_get_gpu_asic_info` and `amd-smi static --asic` not displaying graphics version properly for MI2x, MI1x or Navi 3x ASICs.**  
+
   Before on MI100:
+
   ```shell
   $ amd-smi static --asic | grep TARGET_GRAPHICS_VERSION
         TARGET_GRAPHICS_VERSION: gfx9008
         TARGET_GRAPHICS_VERSION: gfx9008
   ```
+
   After on MI100:
+
   ```shell
   $ amd-smi static --asic | grep TARGET_GRAPHICS_VERSION
         TARGET_GRAPHICS_VERSION: gfx908
@@ -396,16 +414,18 @@ GPU2   0000:46:00.0 32 Gb/s  512 Gb/s      XGMI
 
 ### Upcoming changes
 
+- **Deprication of the `AMDSMI_LIB_VERSION_YEAR` enum and API fields.**  
+
 ### Known issues
 
 - **AMD SMI only reports 63 GPU devices when setting CPX on all 8 GPUs**  
     When setting CPX as a partition mode, there is a DRM node limitation of 64.  
-    This is a known limitation of the Linux kernel, not the driver. Other drivers, such as those using PCIe space (e.g., ast), may be occupying the necessary DRM nodes.   
+    This is a known limitation of the Linux kernel, not the driver. Other drivers, such as those using PCIe space (e.g., ast), may be occupying the necessary DRM nodes.  
     The number of DRM nodes used can be checked via `ls /sys/class/drm`  
 
-    - References to kernel changes:  
-      - [Updates to number of node](https://cgit.freedesktop.org/drm/libdrm/commit/?id=7130cb163eb860d4a965c6708b64fe87cee881d6)  
-      - [Identification of node type](https://cgit.freedesktop.org/drm/libdrm/commit/?id=3bc3cca230c5a064b2f554f26fdec27db0f5ead8)  
+  - References to kernel changes:  
+    - [Updates to number of node](https://cgit.freedesktop.org/drm/libdrm/commit/?id=7130cb163eb860d4a965c6708b64fe87cee881d6)  
+    - [Identification of node type](https://cgit.freedesktop.org/drm/libdrm/commit/?id=3bc3cca230c5a064b2f554f26fdec27db0f5ead8)  
 
     Options are as follows:
     1) ***Workaround - removing other devices using DRM nodes***  

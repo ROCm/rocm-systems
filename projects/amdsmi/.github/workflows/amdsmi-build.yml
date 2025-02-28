@@ -2,9 +2,9 @@ name: Build and Install AMDSMI
 
 on:
   pull_request:
-    branches: [amd-staging, amd-mainline]
+    branches: [amd-staging, amd-mainline, release/rocm-rel-*]
   push:
-    branches: [amd-staging, amd-mainline]
+    branches: [amd-staging, amd-mainline, release/rocm-rel-*]
   workflow_dispatch:
 
 jobs:
