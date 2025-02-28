@@ -4,61 +4,60 @@
 
 .. _using-rocprofiler-sdk-roctx:
 
-=============================================
-Using ``ROCTx`` (AMD Tools Extension Library)
-=============================================
+============
+Using ROCTx
+============
 
-``ROCtx`` is AMD's cross platform API for annotating code with markers and ranges. The ``ROCTx`` API is written in C++.
-In certain situations, such as debugging performance issues in large-scale GPU programs, API-level tracing might be too fine-grained to provide a big picture of the program execution. 
-In such cases, it is helpful to define specific tasks to be traced.To specify the tasks for tracing, enclose the respective source code with the API calls provided by the ``ROCTx`` library. 
+ROCTx is AMD tools extension library, a cross platform API for annotating code with markers and ranges. The ROCTx API is written in C++.
+In certain situations, such as debugging performance issues in large-scale GPU programs, API-level tracing might be too fine-grained to provide a big picture of the program execution.
+In such cases, it is helpful to define specific tasks to be traced. To specify the tasks for tracing, enclose the respective source code with the API calls provided by the ROCTx library.
 This process is also known as instrumentation.
 
-What kinds of annotation does ``ROCTx`` provide?
-+++++++++++++++++++++++++++++++++++++++++++++++++
-``ROCTx`` provides two types of annotations: markers and ranges.
+ROCTx annotations
+++++++++++++++++++
 
-Markers:
+ROCTx provides two types of annotations: markers and ranges.
+
+Markers
 ========
-Helps you inserts a marker in the code with a message. Creating markers help you see when a line of code is executed.
 
-Ranges:
+Markers are used to insert a marker in the code with a message. Creating markers help you see when a line of code is executed.
+
+Ranges
 =======
-The scope of code for instrumentation is defined using the enclosing API calls, it is called a range. 
-A range is a programmer-defined task that has a well-defined start and end code scope. 
+
+Ranges are used to define the scope of code for instrumentation using enclosing API calls.
+A range is a programmer-defined task that has a well-defined start and end code scope.
 You can also refine the scope specified within a range using further nested ranges. ``rocprofv3`` also reports the timelines for these nested ranges.
-There are two types of ranges:
 
-1. **Push/Pop ranges**:
-   - These can be nested to form a stack.
-   - The Pop call is automatically associated with a prior Push call on the same thread.
+These are the two types of ranges:
 
-2. **Start/End ranges**:
-   - These may overlap with other ranges arbitrarily.
-   - The Start call returns a handle which must be passed to the End call.
-   - These ranges can start and end on different threads.
+- **Push and Pop:** These can be nested to form a stack. The Pop call is automatically associated with a prior Push call on the same thread.
 
-List of APIs supported by ``ROCTx``
-===================================
-Here is a list of useful APIs for code instrumentation.
+- **Start and End:** These may overlap with other ranges arbitrarily. The Start call returns a handle that must be passed to the End call. These ranges can start and end on different threads.
+
+ROCTx APIs
+===========
+
+Here is the list of useful APIs for code instrumentation:
 
 - ``roctxMark``: Inserts a marker in the code with a message. Creating marks help you see when a line of code is executed.
 - ``roctxRangeStart``: Starts a range. Different threads can start ranges.
 - ``roctxRangePush``: Starts a new nested range.
 - ``roctxRangePop``: Stops the current nested range.
 - ``roctxRangeStop``: Stops the given range.
-- ``roctxProfilerPause``: Request any currently running profiling tool that it should stop collecting data.
-- ``roctxProfilerResume``: Request any currently running profiling tool that it should resume collecting data.
-- ``roctxGetThreadId``: Retrieve a id value for the current thread which will be identical to the id value a profiling tool gets via `rocprofiler_get_thread_id(rocprofiler_thread_id_t*)`.
-- ``roctxNameOsThread``: Current CPU OS thread to be labeled by the provided name in the output of the profiling tool.
-- ``roctxNameHsaAgent``: Given HSA agent to be labeled by the provided name in the output of the profiling tool.
-- ``roctxNameHipDevice``: Given HIP device id to be labeled by the provided name in the output of the profiling tool.
-- ``roctxNameHipStream``: Given HIP stream to be labeled by the provided name in the output of the profiling tool.
+- ``roctxProfilerPause``: Requests any currently running profiling tool to stop data collection.
+- ``roctxProfilerResume``: Requests any currently running profiling tool to resume data collection.
+- ``roctxGetThreadId``: Retrieves the ID for the current thread identical to the ID received using ``rocprofiler_get_thread_id(rocprofiler_thread_id_t*)``.
+- ``roctxNameOsThread``: Labels the current CPU OS thread in the profiling tool output with the provided name.
+- ``roctxNameHsaAgent``: Labels the given HSA agent in the profiling tool output with the provided name.
+- ``roctxNameHipDevice``: Labels the HIP device ID in the profiling tool output with the provided name.
+- ``roctxNameHipStream``: Labels the given HIP stream in the profiling tool output with the provided name.
 
+Using ROCTx in the application
++++++++++++++++++++++++++++++++
 
-How to use ``ROCTx`` in your application?
-===========================================
-
-See how to use ``ROCTx`` APIs in the MatrixTranspose application below:
+The following sample code from the MatrixTranspose application shows the usage of ROCTx APIs:
 
 .. code-block:: bash
 
@@ -134,11 +133,13 @@ For the description of the fields in the output file, see :ref:`output-file-fiel
     HIP_API_CALL(
         hipMemcpy(TransposeMatrix, gpuTransposeMatrix, NUM * sizeof(float), hipMemcpyDeviceToHost));
 
+To trace the preceding code, use:
+
 .. code-block:: shell
 
     rocprofv3 --marker-trace --hip-trace -- <application_path>
 
-    The above command generates a ``hip_api_trace.csv`` file prefixed with the process ID, which has only 2  `hipMemcpy` calls and the in between ``hipMemcpyDeviceToHost`` is hidden .
+The preceding command generates a ``hip_api_trace.csv`` file prefixed with the process ID. The file has only two ``hipMemcpy`` calls with the in-between ``hipMemcpyDeviceToHost`` hidden .
 
 .. code-block:: shell
 
@@ -156,27 +157,34 @@ For the description of the fields in the output file, see :ref:`output-file-fiel
    "HIP_RUNTIME_API","hipFree",1643920,1643920,15,320301643320908,320301643511479
    "HIP_RUNTIME_API","hipFree",1643920,1643920,16,320301643512629,320301643585639
 
-Resource Naming:
+Resource naming
 ++++++++++++++++
 
-OS Thread:
-==========
+``ROCTx`` provides APIs to rename certain resources in the output generated by the profiling tool. You can pass the desired label for a specific resource in the output as an argument to the API. Note that ROCprofiler-SDK doesn't provide any explicit support for how profiling tools handle this request. Support for this capability is tool-specific.
 
-:code:`roctxNameOsThread(const char*)` function Current CPU OS thread to be labeled by the provided name in the output of the profiling tool.
+The following table lists the APIs available for labeling the given resources:
 
-Indicate to a profiling tool that, where possible, you would like the current CPU OS thread to be labeled by the provided name in the output of the profiling tool.
-Rocprofiler does not provide any explicit support for how profiling tools handle this request:
-- support for this capability is tool specific.
-- ROCTx does NOT rename the thread via `pthread_setname_np`.
+.. |br| raw:: html
 
-HIP Runtime Resources:
-======================
+    <br />
 
-:code:`roctxNameHipDevice(const char* name, int device_id)` and :code:`roctxNameHipStream(const char* name, const struct ihipStream_t* stream)` functions indicate to a profiling tool that, where possible, you would like the given HIP device id and HIP stream-id to be labeled by the provided name in the output of the profiling tool. Rocprofiler does not provide any explicit support for how profiling tools handle this request:
-- support for this capability is tool specific.
+.. list-table:: resource naming
+    :header-rows: 1
 
-HSA Runtime Resources:
-======================
+    * - Resource
+      - API
+      - Description
 
-:code:`roctxNameHsaAgent(const char* name, const struct hsa_agent_s*)` function indicates to a profiling tool that, where possible, you would like the given HSA agent to be labeled by the provided name in the output of the profiling tool.
-- support for this capability is tool specific.
+    * - OS thread
+      - ``roctxNameOsThread(const char* name)``
+      - Labels the current CPU OS thread with the given name in the output. Note that ROCTx does NOT rename the thread using ``pthread_setname_np``.
+
+    * - HIP runtime
+      - | ``roctxNameHipDevice(const char* name, int device_id)`` |br| |br|
+        | ``roctxNameHipStream(const char* name, const struct ihipStream_t* stream)``
+      - | Labels the given HIP device ID with the given name in the output. |br| |br|
+        | Labels the given HIP stream ID with the given name in the output.
+
+    * - HSA runtime
+      - ``roctxNameHsaAgent(const char* name, const struct hsa_agent_s*)``
+      - Labels the given HSA agent with the given name in the output.

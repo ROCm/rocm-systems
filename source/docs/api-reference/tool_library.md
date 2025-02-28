@@ -2,7 +2,7 @@
 myst:
     html_meta:
         "description": "ROCprofiler-SDK is a tooling infrastructure for profiling general-purpose GPU compute applications running on the ROCm software."
-        "keywords": "ROCprofiler-SDK API reference, ROCprofiler-SDK tool library, Tool library API"
+        "keywords": "ROCprofiler-SDK API reference, Tool library API"
 ---
 
 # ROCprofiler-SDK tool library

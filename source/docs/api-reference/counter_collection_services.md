@@ -2,7 +2,7 @@
 myst:
     html_meta:
         "description": "ROCprofiler-SDK is a tooling infrastructure for profiling general-purpose GPU compute applications running on the ROCm software."
-        "keywords": "ROCprofiler-SDK API reference, ROCprofiler-SDK counter collection services, Counter collection services API"
+        "keywords": "ROCprofiler-SDK API reference, Counter collection services API"
 ---
 
 # ROCprofiler-SDK counter collection services
@@ -404,13 +404,12 @@ MeanOccupancyPerCU:
 - `MeanOccupancyPerCU`: In the preceding example, the `MeanOccupancyPerCU` metric calculates the mean occupancy per compute unit. It uses the accumulate function with `HIGH_RES` to sum the `SQ_LEVEL_WAVES` counter every clock cycle.
 This sum is then divided by the maximum value of GRBM_GUI_ACTIVE and the number of compute units `CU_NUM` to derive the mean occupancy.
 
-## Kernel Serialization
+## Kernel serialization
 
-In *dispatch counting* mode, counter collection requires serialized execution of kernels on a target device to function. Kernel serialization isolates kernel executions, which helps to collect performance counter data. However, kernel serialization also leads to deadlock when applications requiring two kernels to execute on the same device simultaneously (co-dependent kernels) in dispatch counting mode. To avoid deadlock in such applications, opt for any of the following options:
+Counter collection in *dispatch counting* mode requires serialized execution of kernels on a target device. Kernel serialization isolates kernel executions, which helps to collect performance counter data. However, for applications requiring two kernels to execute on the same device simultaneously (co-dependent kernels), kernel serialization leads to deadlock in dispatch counter collection mode. To avoid deadlock in such applications, opt for any of the following options:
 
 - Avoid co-dependent kernels in application.
 
-- Don't collect performance data for co-dependent kernels by specifying `filter` tag in the rocprofv3’s PMC file.
+- Don't collect performance data for co-dependent kernels by using kernel filtration methods in the rocprofv3’s input configuration PMC file.
 
 - Use ROCprofiler-SDK's device-wide counter collection mode to collect performance data. You can use tools such as RDC and PAPI to collect information. Note that the device-wide counter collection captures data for all executions on the device and not specific to the kernels.
-
