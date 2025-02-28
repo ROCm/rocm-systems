@@ -13,8 +13,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+
+  call-workflow-passing-data:
+    name: Documentation
+    uses: ROCm/rocm-docs-core/.github/workflows/linting.yml@develop
+  
   python:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
         python-version: [3.8]
@@ -35,7 +40,7 @@ jobs:
         black --diff --check .
 
   cmake:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
 
     steps:
     - uses: actions/checkout@v4
@@ -81,7 +86,7 @@ jobs:
         fi
 
   includes:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
 
     steps:
     - uses: actions/checkout@v4
