@@ -85,8 +85,11 @@
 #define vm_object_tree(app, is_userptr)				\
 		((is_userptr) ? &(app)->user_tree : &(app)->tree)
 
-#define START_NON_CANONICAL_ADDR (1ULL << 47)
-#define END_NON_CANONICAL_ADDR (~0UL - (1UL << 47))
+/*
+ * support up to 57bit VA and 48bit VA
+ */
+#define START_NON_CANONICAL_ADDR (1ULL << 56)
+#define END_NON_CANONICAL_ADDR (~0ULL - (1ULL << 56))
 
 struct vm_object {
 	void *start;
@@ -2514,7 +2517,12 @@ static void *reserve_address(void *addr, unsigned long long int len)
  */
 #define SVM_RESERVATION_LIMIT ((1ULL << 40) - 1)
 #define SVM_MIN_VM_SIZE (4ULL << 30)
-#define IS_CANONICAL_ADDR(a) ((a) < (1ULL << 47))
+
+/*
+ * Support up to 57bit VA, 56bit user space and 48bit VA, 47bit user space
+ */
+#define CANONICAL_ADDRESS_LIMIT	((1ULL << 56) - 1)
+#define IS_CANONICAL_ADDR(a)	((a) <= CANONICAL_ADDRESS_LIMIT)
 
 static HSAKMT_STATUS init_svm_apertures(struct hsa_kfd_fmm_context *fmm_ctx,
 					HSAuint64 base, HSAuint64 limit,
@@ -2823,9 +2831,9 @@ static bool init_mem_handle_aperture(struct hsa_kfd_fmm_context *fmm_ctx,
 					mem_handle_aper->base, mem_handle_aper->limit);
 			return true;
 		} else {
-			/* increase base by 1UL<<47 to check next hole */
-			mem_handle_aper->base =  VOID_PTR_ADD(mem_handle_aper->base, (1UL << 47));
-			mem_handle_aper->limit = VOID_PTR_ADD(mem_handle_aper->base, (1ULL << 47));
+			/* increase base by 1ULL<<56 to check next hole */
+			mem_handle_aper->base =  VOID_PTR_ADD(mem_handle_aper->base, (1ULL << 56));
+			mem_handle_aper->limit = VOID_PTR_ADD(mem_handle_aper->base, (1ULL << 56));
 		}
 	}
 
@@ -3153,7 +3161,7 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 	}
 
 	fmm_ctx->cpuvm_aperture.align = PAGE_SIZE;
-	fmm_ctx->cpuvm_aperture.limit = (void *)0x7FFFFFFFFFFF; /* 2^47 - 1 */
+	fmm_ctx->cpuvm_aperture.limit = (void *)CANONICAL_ADDRESS_LIMIT;
 
 	fmm_init_rbtree(fmm_ctx);
 
