@@ -1082,7 +1082,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Subparser help text
         set_value_help = "Set options for devices"
         set_value_subcommand_help = "If no GPU is specified, will select all GPUs on the system.\
-                                    \nA set argument must be provided; Multiple set arguments are accepted"
+                                    \nA set argument must be provided; Multiple set arguments are accepted.\
+                                    \nRequires 'sudo' privileges."
         set_value_optionals_title = "Set Arguments"
 
         # Help text for Arguments only on BM platforms
@@ -1190,7 +1191,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Subparser help text
         reset_help = "Reset options for devices"
         reset_subcommand_help = "If no GPU is specified, will select all GPUs on the system.\
-                                \nA reset argument must be provided; Multiple reset arguments are accepted"
+                                \nA reset argument must be provided; Multiple reset arguments are accepted.\
+                                \nRequires 'sudo' privileges."
         reset_optionals_title = "Reset Arguments"
 
         # Help text for Arguments only on Guest and BM platforms
