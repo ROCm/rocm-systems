@@ -1358,7 +1358,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       *((uint32_t*)value) = 1024;
       break;
     case HSA_AGENT_INFO_GRID_MAX_DIM: {
-      const hsa_dim3_t grid_size = {UINT32_MAX, UINT32_MAX, UINT32_MAX};
+      const hsa_dim3_t grid_size = {INT32_MAX, UINT16_MAX, UINT16_MAX};
       std::memcpy(value, &grid_size, sizeof(hsa_dim3_t));
     } break;
     case HSA_AGENT_INFO_GRID_MAX_SIZE:
