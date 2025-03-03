@@ -38,7 +38,7 @@ Users may checkout `amd-staging` to preview upcoming features.
 
 To quickly get the environment (bash shell) for building and testing, run the following commands:
 * `cd docker`
-* `docker compose -f docker-compose.test.yml run test`
+* `docker compose -f docker-compose.test.yml up --force-recreate -d && docker attach docker-test-1`
 
 Inside the docker container, clean, build and install the project with tests enabled:
 ```
@@ -60,7 +60,7 @@ NOTE: This Dockerfile uses `rocm/dev-ubuntu-22.04` as the base image
 
 To create a standalone binary, run the following commands:
 * `cd docker`
-* `docker compose -f docker-compose.standalone.yml run standalone`
+* `docker compose -f docker-compose.standalone.yml up --force-recreate -d && docker attach docker-standalone-1`
 
 You should find the rocprof-compute.bin standalone binary inside the `build` folder in the root directory of the project.
 

@@ -10,3 +10,7 @@ services:
       - seccomp:unconfined
     volumes:
       - ../:/app
+    ports:
+      - 8050:8050
+    tty: true
+    stdin_open: true
