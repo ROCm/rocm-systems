@@ -2000,10 +2000,14 @@ class AMDSMICommands():
                 # Populate the deep sleep status for each clock
                 for clock in clocks:
                     if clocks[clock]["clk"] != "N/A" and clocks[clock]["min_clk"] != "N/A":
-                        if clocks[clock]["clk"] < clocks[clock]["min_clk"]:
-                            clocks[clock]["deep_sleep"] = "ENABLED"
+                        # Default to Disabled
+                        clocks[clock]["deep_sleep"] = "DISABLED"
+                        if self.logger.is_json_format():
+                            if clocks[clock]["clk"]["value"] < clocks[clock]["min_clk"]["value"]:
+                                clocks[clock]["deep_sleep"] = "ENABLED"
                         else:
-                            clocks[clock]["deep_sleep"] = "DISABLED"
+                            if clocks[clock]["clk"] < clocks[clock]["min_clk"]:
+                                clocks[clock]["deep_sleep"] = "ENABLED"
                     else:
                         clocks[clock]["deep_sleep"] = "N/A"
 
