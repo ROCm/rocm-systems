@@ -146,9 +146,8 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
     endif()
 
     function(ROCPROFILER_SYSTEMS_ADD_PYTHON_VALIDATION_TEST)
-        cmake_parse_arguments(
-            TEST "" "NAME;TIMEMORY_METRIC;TIMEMORY_FILE;PERFETTO_METRIC;PERFETTO_FILE"
-            "ARGS" ${ARGN})
+        cmake_parse_arguments(TEST "" "NAME;TIMEMORY_METRIC;TIMEMORY_FILE;PERFETTO_FILE"
+                              "ARGS;PERFETTO_METRIC" ${ARGN})
 
         rocprofiler_systems_add_python_test(
             NAME ${TEST_NAME}-validate-timemory
@@ -207,12 +206,14 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         2
         3)
 
+    set(python_source_categories python user)
+
     rocprofiler_systems_add_python_validation_test(
         NAME python-source
         TIMEMORY_METRIC "trip_count"
         TIMEMORY_FILE "trip_count.json"
-        PERFETTO_METRIC "host;user"
         PERFETTO_FILE "perfetto-trace.proto"
+        PERFETTO_METRIC ${python_source_categories}
         ARGS -l ${python_source_labels} -c ${python_source_count} -d
              ${python_source_depth})
 
@@ -260,7 +261,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         NAME python-builtin
         TIMEMORY_METRIC "trip_count"
         TIMEMORY_FILE "trip_count.json"
-        PERFETTO_METRIC "host;user"
+        PERFETTO_METRIC "python"
         PERFETTO_FILE "perfetto-trace.proto"
         ARGS -l ${python_builtin_labels} -c ${python_builtin_count} -d
              ${python_builtin_depth})

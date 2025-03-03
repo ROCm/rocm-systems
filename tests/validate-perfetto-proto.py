@@ -10,7 +10,7 @@ def load_trace(inp, max_tries=5, retry_wait=1, bin_path=None):
     """Occasionally connecting to the trace processor fails with HTTP errors
     so this function tries to reduce spurious test failures"""
 
-    n = 0
+    tries = 0
     tp = None
 
     # Check if bin_path is set and if it exists
@@ -31,18 +31,36 @@ def load_trace(inp, max_tries=5, retry_wait=1, bin_path=None):
             sys.stderr.write(f"{ex}\n")
             sys.stderr.flush()
 
-            if n >= max_tries:
+            if tries >= max_tries:
                 raise
             else:
                 import time
 
                 time.sleep(retry_wait)
         finally:
-            n += 1
+            tries += 1
     return tp
 
 
 def validate_perfetto(data, labels, counts, depths):
+    """
+    Validates the given perfetto data against expected labels, counts, and depths.
+
+    Args:
+        data (list of dict): A list of dictionaries where each dictionary contains
+            'label' (str), 'count' (int), and 'depth' (int) keys.
+        labels (list of str): A list of expected labels.
+        counts (list of int): A list of expected counts corresponding to the labels.
+        depths (list of int): A list of expected depths corresponding to the labels.
+
+    Raises:
+        RuntimeError: If any of the labels, counts, or depths in the data do not match
+            the expected values.
+    """
+
+    if not data and labels:
+        raise RuntimeError("Data is empty but labels are not")
+
     expected = []
     for litr, citr, ditr in zip(labels, counts, depths):
         entry = []
@@ -146,6 +164,7 @@ if __name__ == "__main__":
 
     # demo display of data
     if args.print:
+        print(f"Printing Perfetto Data {args.categories}")
         for itr in perfetto_data:
             n = 0 if itr["depth"] < 2 else itr["depth"] - 1
             lbl = "{}{}{}".format(
@@ -163,7 +182,7 @@ if __name__ == "__main__":
         )
 
     except RuntimeError as e:
-        print(f"{e}")
+        print(f"Fail: {e}")
         ret = 1
 
     for key_name, key_count in zip(args.key_names, args.key_counts):
@@ -189,11 +208,15 @@ if __name__ == "__main__":
               '%{counter_name}%'"""
         )
         total_value = 0
+
         for row in sum_counter_values:
             total_value = row.total_value if row.total_value is not None else -1
+
         if args.print:
             print(f"Total value of {counter_name} is {total_value}")
+
         if total_value <= 0:
+            print(f"Fail: Counter {counter_name} is not found in the traces")
             ret = 1
 
     if ret == 0:
