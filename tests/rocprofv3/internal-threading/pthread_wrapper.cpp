@@ -34,11 +34,7 @@
 #include <iostream>
 #include <mutex>
 
-#if defined(_MSC_VER)
-#    define ROCPROFILER_PUBLIC_API __declspec(dllexport)
-#else
-#    define ROCPROFILER_PUBLIC_API __attribute__((visibility("default")))
-#endif
+#define PUBLIC_API __attribute__((visibility("default")))
 
 #define ASSERT(x, msg)                                                                             \
     if(!(x))                                                                                       \
@@ -62,6 +58,11 @@ typedef int (*rocprofiler_at_internal_thread_create_t)(
 // Used in pthread_create
 typedef void*(routine_t)(void*);
 
+namespace
+{
+// Number of calls to pthread_create sucessfuly wrapped in pre/post callbacks
+std::atomic<size_t> wrapped_threads{0};
+
 // Bitmask for each library that is inside a pre callback
 size_t&
 get_library_bitmask()
@@ -69,6 +70,18 @@ get_library_bitmask()
     // Pre-post callbacks are supposed to be called from the same thread as pthread_create
     thread_local auto* bitmask = new size_t{0};
     return *bitmask;
+}
+
+void
+pre_callback(int bitmask, void* /* arg */)
+{
+    get_library_bitmask() |= bitmask;
+}
+
+void
+post_callback(int bitmask, void* /* arg */)
+{
+    get_library_bitmask() &= ~bitmask;
 }
 
 class RegisterProfiler
@@ -100,10 +113,6 @@ public:
         return false;
     }
 
-    static void pre_callback(int bitmask, void* /* arg */) { get_library_bitmask() |= bitmask; }
-
-    static void post_callback(int bitmask, void* /* arg */) { get_library_bitmask() &= ~bitmask; }
-
     // Indicates we have registered rocprofiler_at_internal_thread_create_t
     std::atomic<bool> init{false};
     std::mutex        mut{};
@@ -131,27 +140,44 @@ public:
     PthreadFn* pthread_create_fn = nullptr;
 };
 
-ROCPROFILER_PUBLIC_API
+__attribute__((destructor)) void
+check_wrapped_threads()
+{
+    // Ensures the test has actually run
+    ASSERT(wrapped_threads.load() > 0, "No thread was created inside a pre/post callback");
+}
+}  // namespace
+
+// This function wraps pthread_create defined in pthread.h
+PUBLIC_API
 int
 pthread_create(pthread_t* thread, const pthread_attr_t* attr, routine_t* start_routine, void* arg)
 {
     static auto* reg = new RegisterProfiler();
     static auto* dl  = new DL();
 
-    // Number of threads not wrapped inside a pre/post callbac
-    static auto* unwrapped_threads = new std::atomic<size_t>{0};
+    // Number of threads not wrapped inside a pre/post callback
+    static auto unwrapped_threads = std::atomic<size_t>{0};
 
     // If try_register returns false, SDK was not loaded yet or has just been loaded.
     // We have to ignore the first initialization because we may have just missed a pre-callback.
-    // Comparing to zero checks if any library has called pre-callback.
-    if(reg->try_register() && get_library_bitmask() == 0)
+    if(reg->try_register())
     {
-        size_t count = unwrapped_threads->fetch_add(1);
+        // Comparing to zero checks if any library has called pre-callback.
+        if(get_library_bitmask() == 0)
+        {
+            size_t count = unwrapped_threads.fetch_add(1);
 
-        // This will fail if either rocprofiler does not wrap a thread,
-        // or if the runtime decides to create new threads. TODO: HIP/HSA callbacks
-        ASSERT(count < MAX_ALLOWED_THREADS,
-               "Limit reached for number of threads not inside a pre/post callback!");
+            // This will fail if either rocprofiler does not wrap a thread,
+            // or if the runtime decides to create new threads. TODO: HIP/HSA callbacks
+            ASSERT(count < MAX_ALLOWED_THREADS,
+                   "Limit reached for number of threads not inside a pre/post callback!");
+        }
+        else
+        {
+            // We have sucessfuly created a thread wrapped in pre/post callbacks
+            wrapped_threads.fetch_add(1);
+        }
     }
 
     return dl->pthread_create_fn(thread, attr, start_routine, arg);

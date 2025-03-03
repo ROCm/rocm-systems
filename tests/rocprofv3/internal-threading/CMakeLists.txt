@@ -17,7 +17,7 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
 # Disable test when using memcheck: The test needs to leak memory.
-if(DEFINED ROCPROFILER_MEMCHECK AND NOT ${ROCPROFILER_MEMCHECK} STREQUAL "")
+if("${ROCPROFILER_MEMCHECK}" STREQUAL "LeakSanitizer")
     set(IS_DISABLED True)
 else()
     set(IS_DISABLED False)
