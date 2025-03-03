@@ -14,7 +14,7 @@ add_library(pthread_wrapper SHARED)
 target_sources(pthread_wrapper PRIVATE pthread_wrapper.cpp)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV} $<TARGET_FILE:pthread_wrapper>")
 
 # Disable LeakSanitizer when using memcheck: The test needs to leak memory.
 # ThreadSanitizer conflicts with this library.
@@ -36,7 +36,7 @@ set_tests_properties(
                LABELS
                "integration-tests"
                ENVIRONMENT
-               "${PRELOAD_ENV} $<TARGET_FILE:pthread_wrapper>"
+               "${PRELOAD_ENV}"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                DISABLED
@@ -53,7 +53,7 @@ set_tests_properties(
                LABELS
                "integration-tests"
                ENVIRONMENT
-               "${PRELOAD_ENV} $<TARGET_FILE:pthread_wrapper>"
+               "${PRELOAD_ENV}"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                DISABLED
