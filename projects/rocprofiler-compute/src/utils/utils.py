@@ -624,6 +624,18 @@ def run_prof(
     if rocprof_cmd.endswith("v2"):
         # rocprofv2 has separate csv files for each process
         results_files = glob.glob(workload_dir + "/out/pmc_1/results_*.csv")
+
+        # Combine results into single CSV file
+        combined_results = pd.concat(
+            [pd.read_csv(f) for f in results_files], ignore_index=True
+        )
+
+        # Overwrite column to ensure unique IDs.
+        combined_results["Dispatch_ID"] = range(0, len(combined_results))
+
+        combined_results.to_csv(
+            workload_dir + "/out/pmc_1/results_" + fbase + ".csv", index=False
+        )
     elif rocprof_cmd.endswith("v3"):
         # rocprofv3 requires additional processing for each process
         results_files = process_rocprofv3_output(
@@ -638,17 +650,17 @@ def run_prof(
             process_kokkos_trace_output(workload_dir, fbase)
         # TODO: add hip trace output processing
 
-    # Combine results into single CSV file
-    combined_results = pd.concat(
-        [pd.read_csv(f) for f in results_files], ignore_index=True
-    )
+        # Combine results into single CSV file
+        combined_results = pd.concat(
+            [pd.read_csv(f) for f in results_files], ignore_index=True
+        )
 
-    # Overwrite column to ensure unique IDs.
-    combined_results["Dispatch_ID"] = range(0, len(combined_results))
+        # Overwrite column to ensure unique IDs.
+        combined_results["Dispatch_ID"] = range(0, len(combined_results))
 
-    combined_results.to_csv(
-        workload_dir + "/out/pmc_1/results_" + fbase + ".csv", index=False
-    )
+        combined_results.to_csv(
+            workload_dir + "/out/pmc_1/results_" + fbase + ".csv", index=False
+        )
 
     if new_env:
         # flatten tcc for applicable mi300 input
