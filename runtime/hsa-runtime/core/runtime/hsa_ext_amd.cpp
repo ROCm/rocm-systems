@@ -578,22 +578,42 @@ uint32_t hsa_amd_signal_wait_all(uint32_t signal_count, hsa_signal_t* hsa_signal
   TRY;
   if (!core::Runtime::runtime_singleton_->IsOpen()) {
     assert(false && "hsa_amd_signal_wait_all called while not initialized.");
-    return 0;
+    return uint32_t(0);
   }
-  // Do not check for signal invalidation. Invalidation may occur during async
-  // signal handler loop and is not an error.
-  for (int i = 0; i < signal_count; ++i)
-    assert(hsa_signals[i].handle != 0 && core::SharedSignal::Convert(hsa_signals[i])->IsValid() &&
-           "Invalid signal.");
 
-  std::vector<hsa_signal_value_t> satisfying_values_vec;
-  satisfying_values_vec.resize(signal_count);
+  // Treat NULL and invalid signals as already satisfied their condition and skip them
+  std::vector<hsa_signal_t> valid_signals;
+  std::vector<uint32_t> valid_signal_ids;
+  for (uint32_t i = 0; i < signal_count; i++){
+    if (hsa_signals[i].handle != 0 && core::SharedSignal::Convert(hsa_signals[i])->IsValid()){
+      valid_signals.emplace_back(hsa_signals[i]);
+      valid_signal_ids.emplace_back(i);
+    }
+  }
+
+  // Return if there's no valid signal to wait on
+  if (valid_signals.empty()){
+    if (satisfying_values) {
+      // Set 0 as satisfying value for NULL and invalid signals
+      std::fill(satisfying_values, satisfying_values + signal_count, 0);
+    }
+    return uint32_t(0);
+  }
+
+  uint32_t valid_signal_count = valid_signals.size();
+
+  std::vector<hsa_signal_value_t> satisfying_values_vec(valid_signal_count);
   uint32_t first_satysifying_signal_idx =
-      core::Signal::WaitMultiple(signal_count, hsa_signals, conds, values, timeout_hint, wait_hint,
+      core::Signal::WaitMultiple(valid_signal_count, valid_signals.data(), conds, values, timeout_hint, wait_hint,
                                  satisfying_values_vec, true);
 
   if (satisfying_values) {
-    std::copy(satisfying_values_vec.begin(), satisfying_values_vec.end(), satisfying_values);
+    // Set 0 as satisfying value for NULL and invalid signals
+    std::vector<hsa_signal_value_t> satisfying_values_vec_result(signal_count, 0);
+    for (uint32_t i = 0; i < valid_signal_count; i++){
+      satisfying_values_vec_result[valid_signal_ids[i]] = satisfying_values_vec[i];
+    }
+    std::copy(satisfying_values_vec_result.begin(), satisfying_values_vec_result.end(), satisfying_values);
   }
 
   return first_satysifying_signal_idx;
@@ -609,16 +629,30 @@ uint32_t hsa_amd_signal_wait_any(uint32_t signal_count, hsa_signal_t* hsa_signal
     assert(false && "hsa_amd_signal_wait_any called while not initialized.");
     return uint32_t(0);
   }
-  // Do not check for signal invalidation.  Invalidation may occur during async
-  // signal handler loop and is not an error.
-  for (uint i = 0; i < signal_count; i++)
-    assert(hsa_signals[i].handle != 0 && core::SharedSignal::Convert(hsa_signals[i])->IsValid() &&
-           "Invalid signal.");
+
+  // Ignore NULL and invalid signals
+  std::vector<hsa_signal_t> valid_signals;
+  std::vector<uint32_t> valid_signal_ids;
+  for (uint32_t i = 0; i < signal_count; i++){
+    if (hsa_signals[i].handle != 0 && core::SharedSignal::Convert(hsa_signals[i])->IsValid()){
+      valid_signals.emplace_back(hsa_signals[i]);
+      valid_signal_ids.emplace_back(i);
+    }
+  }
+
+  // Return if there's no valid signal to wait on
+  // satisfying_value is ignored
+  if (valid_signals.empty()){
+    return std::numeric_limits<uint32_t>::max();
+  }
 
   std::vector<hsa_signal_value_t> satisfying_value_vec(1);
   uint32_t satisfying_signal_idx =
-      core::Signal::WaitMultiple(signal_count, hsa_signals, conds, values, timeout_hint, wait_hint,
+      core::Signal::WaitMultiple(valid_signals.size(), valid_signals.data(), conds, values, timeout_hint, wait_hint,
                                  satisfying_value_vec, false);
+                                 
+  //  Map back the index
+  satisfying_signal_idx = valid_signal_ids[satisfying_signal_idx];
 
   if (satisfying_value) *satisfying_value = satisfying_value_vec.at(0);
 
