@@ -107,7 +107,7 @@ activate-global-python-argcomplete --user
 ## Install the Python library for multiple ROCm instances
 
 If {doc}`multiple ROCm versions are installed
-<rocm-install-on-linux:install/native-install/multi-version-install>` and you
+<rocm-install-on-linux:install/install-methods/multi-version-install>` and you
 are not using `pyenv`, uninstall previous versions of AMD SMI before installing
 the desired version from your ROCm instance.
 
