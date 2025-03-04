@@ -23,7 +23,10 @@ THE SOFTWARE.
 #define ROC_JPEG_SAMPLES_COMMON
 #pragma once
 
+#include "common/filesystem.hpp"
+
 #include <algorithm>
+#include <chrono>
 #include <condition_variable>
 #include <fstream>
 #include <functional>
@@ -34,15 +37,10 @@ THE SOFTWARE.
 #include <string>
 #include <thread>
 #include <vector>
-#if __cplusplus >= 201703L && __has_include(<filesystem>)
-#    include <filesystem>
-namespace fs = std::filesystem;
-#else
-#    include <experimental/filesystem>
-namespace fs = std::experimental::filesystem;
-#endif
+
 #include <rocjpeg/rocjpeg.h>
-#include <chrono>
+
+namespace fs = common::fs;
 
 #define CHECK_ROCJPEG(call)                                                                        \
     {                                                                                              \
