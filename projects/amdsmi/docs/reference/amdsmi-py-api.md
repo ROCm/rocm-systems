@@ -1045,6 +1045,10 @@ except AmdSmiException as e:
 Description: Returns the ECC error count for the given GPU.
 It is not supported on virtual machine guest
 
+See [RAS Error Count sysfs Interface (AMDGPU RAS Support - Linux Kernel
+documentation)](https://docs.kernel.org/gpu/amdgpu/ras.html#ras-error-count-sysfs-interface)
+to learn how these error counts are accessed.
+
 Input parameters:
 
 * `processor_handle` device which to query
@@ -3106,6 +3110,10 @@ except AmdSmiException as e:
 Description: Retrieve the error counts for a GPU block. It is not supported
 on virtual machine guest
 
+See [RAS Error Count sysfs Interface (AMDGPU RAS Support - Linux Kernel
+documentation)](https://docs.kernel.org/gpu/amdgpu/ras.html#ras-error-count-sysfs-interface)
+to learn how these error counts are accessed.
+
 Input parameters:
 
 * `processor_handle` handle for the given device
@@ -3145,6 +3153,10 @@ except AmdSmiException as e:
 Description: Retrieve the enabled ECC bit-mask. It is not supported on virtual
 machine guest
 
+See [RAS Error Count sysfs Interface (AMDGPU RAS Support - Linux Kernel
+documentation)](https://docs.kernel.org/gpu/amdgpu/ras.html#ras-error-count-sysfs-interface)
+to learn how these error counts are accessed.
+
 Input parameters:
 
 * `processor_handle` handle for the given device
@@ -3176,6 +3188,10 @@ except AmdSmiException as e:
 
 Description: Retrieve the ECC status for a GPU block. It is not supported
 on virtual machine guest
+
+See [RAS Error Count sysfs Interface (AMDGPU RAS Support - Linux Kernel
+documentation)](https://docs.kernel.org/gpu/amdgpu/ras.html#ras-error-count-sysfs-interface)
+to learn how these error counts are accessed.
 
 Input parameters:
 
