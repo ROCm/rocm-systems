@@ -2,6 +2,23 @@
 
 Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](https://rocm.docs.amd.com/projects/rdc/en/latest/).
 
+## RDC for ROCm 6.4.0
+
+### Added
+
+- RDC policy feature
+- Power and thermal throttling metrics
+- RVS [IET](https://github.com/ROCm/ROCmValidationSuite/tree/a6177fc5e3f2679f98bbbc80dc536d535a43fb69/iet.so), [PEBB](https://github.com/ROCm/ROCmValidationSuite/tree/a6177fc5e3f2679f98bbbc80dc536d535a43fb69/pebb.so), and [memory bandwidth tests](https://github.com/ROCm/ROCmValidationSuite/tree/a6177fc5e3f2679f98bbbc80dc536d535a43fb69/babel.so)
+- Link status
+- RDC_FI_PROF_SM_ACTIVE metric
+
+### Changed
+
+- Migrated from [rocprofiler v1](https://github.com/ROCm/rocprofiler) to [rocprofiler-sdk](https://github.com/ROCm/rocprofiler-sdk)
+- Improved README.md for better usability
+- Moved `rdc_options` into `share/rdc/conf/`
+- Fixed ABSL in clang18+
+
 ## RDC for ROCm 6.3.0
 
 ### Added
