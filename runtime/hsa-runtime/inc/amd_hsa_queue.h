@@ -133,7 +133,7 @@ typedef struct AMD_QUEUE_ALIGN amd_queue_v2_s {
   uint32_t compute_tmpring_size;
   uint32_t scratch_resource_descriptor[4];
   uint64_t scratch_backing_memory_location;
-  uint32_t reserved3[2];
+  uint64_t scratch_backing_memory_byte_size;
   uint32_t scratch_wave64_lane_byte_size;
   amd_queue_properties32_t queue_properties;
   volatile uint64_t scratch_max_use_index;       /* V2 */

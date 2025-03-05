@@ -154,9 +154,11 @@ class Flag {
     enable_scratch_async_reclaim_ = (var == "0") ? false : true;
 
     var = os::GetEnvVar("HSA_ENABLE_SCRATCH_ALT");
-    //Temporary: Disable alternate scratch by default as it can cause occasional hangs
-    //enable_scratch_alt_ = (var == "0") || !enable_scratch_async_reclaim_ ? false : true;
-    enable_scratch_alt_ = (var == "1") && enable_scratch_async_reclaim_ ? true : false;
+    // Temporary: Completely disable alternate scratch because we need to update
+    // the debugger so that it can tell whether a dispatch is using alternate scratch
+    // instead of main scratch
+    // enable_scratch_alt_ = (var == "0") || !enable_scratch_async_reclaim_ ? false : true;
+    enable_scratch_alt_ = false;
 
     tools_lib_names_ = os::GetEnvVar("HSA_TOOLS_LIB");
 
