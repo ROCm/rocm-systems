@@ -314,12 +314,21 @@ foreach(
         file(WRITE "${ROCPROFSYS_PAPI_INSTALL_DIR}/bin/${_UTIL_EXE}3"
              "${_HL_OUTPUT_WRITER}")
         set(_UTIL_EXE "${_UTIL_EXE}3")
-    endif()
 
-    install(
-        PROGRAMS ${ROCPROFSYS_PAPI_INSTALL_DIR}/bin/${_UTIL_EXE}
-        DESTINATION ${CMAKE_INSTALL_BINDIR}
-        RENAME ${_UTIL_EXE_INSTALL_NAME}
-        COMPONENT papi
-        OPTIONAL)
+        # python script file install to libexec
+        install(
+            PROGRAMS ${ROCPROFSYS_PAPI_INSTALL_DIR}/bin/${_UTIL_EXE}
+            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+            RENAME ${_UTIL_EXE_INSTALL_NAME}
+            COMPONENT papi
+            OPTIONAL)
+    else()
+        # Binary files moved to bin
+        install(
+            PROGRAMS ${ROCPROFSYS_PAPI_INSTALL_DIR}/bin/${_UTIL_EXE}
+            DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}
+            RENAME ${_UTIL_EXE_INSTALL_NAME}
+            COMPONENT papi
+            OPTIONAL)
+    endif()
 endforeach()
