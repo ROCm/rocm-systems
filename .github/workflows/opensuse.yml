@@ -39,7 +39,7 @@ env:
 
 jobs:
   opensuse:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     container:
       image: dgaliffiamd/rocprofiler-systems:ci-base-opensuse-${{ matrix.os-release }}
     strategy:

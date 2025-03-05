@@ -39,7 +39,7 @@ env:
 
 jobs:
   ubuntu-noble:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     container:
       image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-24.04
     strategy:

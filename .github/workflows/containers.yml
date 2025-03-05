@@ -23,7 +23,7 @@ jobs:
   rocprofiler-systems-ci:
     if: github.repository == 'ROCm/rocprofiler-systems'
 
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
 
     strategy:
       fail-fast: false
@@ -78,7 +78,7 @@ jobs:
   rocprofiler-systems-release:
     if: github.repository == 'ROCm/rocprofiler-systems'
 
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
 
     strategy:
       fail-fast: false
