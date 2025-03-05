@@ -1643,11 +1643,13 @@ generate_output(tool::buffered_output<Tp, DomainT>& output_v,
 {
     if(!output_v) return;
 
-    // if it has reached this point, the generator is not empty
-    num_output_v += 1;
-
     // opens temporary file and sets read position to beginning
     output_v.read();
+
+    if(output_v.get_generator().empty()) return;
+
+    // if it has reached this point, the generator is not empty
+    num_output_v += 1;
 
     if(tool::get_config().stats || tool::get_config().summary_output)
     {
