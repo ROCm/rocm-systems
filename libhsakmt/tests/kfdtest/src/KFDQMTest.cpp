@@ -22,6 +22,7 @@
  */
 
 #include <sys/time.h>
+#include <sys/mman.h>
 #include <vector>
 #include <utility>
 #include <mutex>
@@ -2645,6 +2646,169 @@ TEST_F(KFDQMTest, GPUDoorbellWrite) {
     TEST_START(TESTPROFILE_RUNALL)
 
     ASSERT_SUCCESS(KFDTest_Launch(GPUDoorbellWrite));
+
+    TEST_END
+}
+
+TEST_F(KFDQMTest, UserQueueBufValidation) {
+    TEST_START(TESTPROFILE_RUNALL)
+
+    int defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
+    ASSERT_GE(defaultGPUNode, 0) << "failed to get default GPU Node";
+
+    HsaQueueResource QueueResources;
+    HsaMemoryBuffer *QueueBuf;
+    HSAKMT_STATUS status;
+
+    memset(&QueueResources, 0, sizeof(QueueResources));
+
+    // System memory mapping on GPU
+    QueueBuf = new HsaMemoryBuffer(PAGE_SIZE, defaultGPUNode);
+
+    EXPECT_SUCCESS(hsaKmtCreateQueue(defaultGPUNode,
+                               HSA_QUEUE_COMPUTE,
+                               100,
+                               HSA_QUEUE_PRIORITY_NORMAL,
+                               QueueBuf->As<unsigned int*>(),
+                               PAGE_SIZE,
+                               NULL,
+                               &QueueResources));
+    EXPECT_SUCCESS(hsaKmtDestroyQueue(QueueResources.QueueId));
+
+    // CP Queue creation should fail using wrong ring buffer size
+    EXPECT_SUCCESS(!hsaKmtCreateQueue(defaultGPUNode,
+                               HSA_QUEUE_COMPUTE,
+                               100,
+                               HSA_QUEUE_PRIORITY_NORMAL,
+                               QueueBuf->As<unsigned int*>(),
+                               PAGE_SIZE * 2,
+                               NULL,
+                               &QueueResources));
+
+    // SDMA queue create should fail using wrong ring buffer size
+    EXPECT_SUCCESS(!hsaKmtCreateQueue(defaultGPUNode,
+                               HSA_QUEUE_SDMA,
+                               100,
+                               HSA_QUEUE_PRIORITY_NORMAL,
+                               QueueBuf->As<unsigned int*>(),
+                               PAGE_SIZE * 2,
+                               NULL,
+                               &QueueResources));
+
+    // CP queue create should fail using NULL ring buffer
+    EXPECT_SUCCESS(!hsaKmtCreateQueue(defaultGPUNode,
+                               HSA_QUEUE_COMPUTE,
+                               100,
+                               HSA_QUEUE_PRIORITY_NORMAL,
+                               NULL,
+                               PAGE_SIZE,
+                               NULL,
+                               &QueueResources));
+
+    // SDMA queue create should fail using NULL ring buffer
+    EXPECT_SUCCESS(!hsaKmtCreateQueue(defaultGPUNode,
+                               HSA_QUEUE_SDMA,
+                               100,
+                               HSA_QUEUE_PRIORITY_NORMAL,
+                               NULL,
+                               PAGE_SIZE,
+                               NULL,
+                               &QueueResources));
+
+    EXPECT_SUCCESS(hsaKmtUnmapMemoryToGPU(QueueBuf->As<unsigned int*>()));
+    EXPECT_SUCCESS(hsaKmtFreeMemory(QueueBuf->As<unsigned int*>(), PAGE_SIZE));
+
+    //
+    // This following negative test will evict user queues, must execute in child process,
+    // because parent process is allowed to create queue to run the remaining tests.
+    //
+    pid_t childPid = fork();
+
+    if (childPid == 0) { /* Child process */
+        void *cwsr_addr;
+        int exit_code = 1;
+
+        TearDown();
+        SetUp();
+
+        // System memory mapping on GPU
+        QueueBuf = new HsaMemoryBuffer(PAGE_SIZE, defaultGPUNode);
+        memset(&QueueResources, 0, sizeof(QueueResources));
+
+        status = hsaKmtCreateQueue(defaultGPUNode,
+                               HSA_QUEUE_COMPUTE,
+                               100,
+                               HSA_QUEUE_PRIORITY_NORMAL,
+                               QueueBuf->As<unsigned int*>(),
+                               PAGE_SIZE,
+                               NULL,
+                               &QueueResources);
+        if (status != HSAKMT_STATUS_SUCCESS) {
+            LOG() << "create queue failed." << std::endl;
+            goto free_exit;
+        }
+
+        // Update queue percentage 0 to set queue inactive in order to get queue info CWSR area
+        status = hsaKmtUpdateQueue(QueueResources.QueueId, 0, HSA_QUEUE_PRIORITY_NORMAL,
+                                     QueueBuf->As<unsigned int*>(), PAGE_SIZE, NULL);
+        if (status != HSAKMT_STATUS_SUCCESS) {
+            LOG() << "update queue failed." << std::endl;
+            goto err_exit;
+        }
+
+        HsaQueueInfo QueueInfo;
+        status = hsaKmtGetQueueInfo(QueueResources.QueueId, &QueueInfo);
+        if (status != HSAKMT_STATUS_SUCCESS) {
+            LOG() << "get queue info failed." << std::endl;
+            goto err_exit;
+        }
+
+        // unmap CWSR buffer will evict queue before queue is destroyed
+        cwsr_addr = QueueInfo.UserContextSaveArea;
+        munmap(cwsr_addr, PAGE_SIZE);
+
+        // unmap and free queue ring buffer should fail before the queue is destroyed
+        status = hsaKmtFreeMemory(QueueBuf->As<unsigned int*>(), PAGE_SIZE);
+        if (status == HSAKMT_STATUS_SUCCESS) {
+            LOG() << "free queue buf should fail." << std::endl;
+            goto err_exit;
+        }
+
+        status = hsaKmtUnmapMemoryToGPU(QueueBuf->As<unsigned int*>());
+        if (status == HSAKMT_STATUS_SUCCESS) {
+            LOG() << "unmap queue buf should fail." << std::endl;
+            goto err_exit;
+        }
+
+        exit_code = 0;
+
+err_exit:
+        status = hsaKmtDestroyQueue(QueueResources.QueueId);
+        if (status != HSAKMT_STATUS_SUCCESS) {
+            LOG() << "destroy queue failed." << std::endl;
+            exit_code = 1;
+        }
+free_exit:
+        status = hsaKmtUnmapMemoryToGPU(QueueBuf->As<unsigned int*>());
+        if (status != HSAKMT_STATUS_SUCCESS) {
+            LOG() << "unmap queue buf failed." << std::endl;
+            exit_code = 1;
+        }
+
+        status = hsaKmtFreeMemory(QueueBuf->As<unsigned int*>(), PAGE_SIZE);
+        if (status != HSAKMT_STATUS_SUCCESS) {
+            LOG() << "free queue buf failed." << std::endl;
+            exit_code = 1;
+        }
+
+        exit(exit_code);
+    } else {
+        int childStatus;
+
+        waitpid(childPid, &childStatus, 0);
+        EXPECT_EQ(true, WIFEXITED(childStatus));
+        EXPECT_EQ(0, WEXITSTATUS(childStatus));
+    }
 
     TEST_END
 }
