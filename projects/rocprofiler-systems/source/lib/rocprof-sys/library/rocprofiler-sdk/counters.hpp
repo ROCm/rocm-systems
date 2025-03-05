@@ -108,7 +108,8 @@ struct counter_storage
     void operator()(const counter_event& _event, timing_interval _timing,
                     scope::config _scope = scope::get_default()) const;
 
-    void write() const;
+    static void write(counter_storage_type* storage, std::string metric_name,
+                      std::string metric_description);
 };
 }  // namespace rocprofiler_sdk
 }  // namespace rocprofsys
@@ -166,3 +167,13 @@ struct get_storage<::rocprofsys::rocprofiler_sdk::counter_data_tracker>
 };
 }  // namespace operation
 }  // namespace tim
+
+// Add columns for MIN, MAX, VAR, STDDEV
+TIMEMORY_STATISTICS_TYPE(rocprofsys::rocprofiler_sdk::counter_data_tracker, double)
+// Hide DEPTH, UNITS, and %SELF columns since they are not relevant
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(report_depth, rocprofiler_sdk::counter_data_tracker,
+                                 false_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(report_units, rocprofiler_sdk::counter_data_tracker,
+                                 false_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(report_self, rocprofiler_sdk::counter_data_tracker,
+                                 false_type)

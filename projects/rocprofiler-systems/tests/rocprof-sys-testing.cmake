@@ -929,7 +929,7 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
         TEST
         ""
         "NAME;TIMEOUT;TIMEMORY_METRIC;TIMEMORY_FILE;PERFETTO_METRIC;PERFETTO_FILE"
-        "ENVIRONMENT;LABELS;PROPERTIES;PASS_REGEX;FAIL_REGEX;SKIP_REGEX;DEPENDS;ARGS"
+        "ENVIRONMENT;LABELS;PROPERTIES;PASS_REGEX;FAIL_REGEX;SKIP_REGEX;DEPENDS;EXIST_FILES;ARGS"
         ${ARGN})
 
     if(NOT TEST "${TEST_NAME}")
@@ -962,6 +962,14 @@ function(ROCPROFILER_SYSTEMS_ADD_VALIDATION_TEST)
             "rocprof-sys-tests-output/${TEST_NAME}/(${TEST_TIMEMORY_FILE}|${TEST_PERFETTO_FILE}) validated"
             )
     endif()
+
+    foreach(_FILE ${TEST_EXIST_FILES})
+        add_test(
+            NAME validate-${TEST_NAME}-${_FILE}-exists
+            COMMAND test -e
+                    ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/${TEST_NAME}/${_FILE}
+            WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+    endforeach()
 
     if(TEST_TIMEMORY_FILE)
         add_test(

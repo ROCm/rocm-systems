@@ -62,10 +62,6 @@ rocprofiler_systems_add_test(
     REWRITE_FAIL_REGEX "0 instrumented loops in procedure transpose")
 
 if(ROCPROFSYS_USE_ROCM)
-    set(_ROCP_PASS_REGEX
-        "rocprof-device-0-GRBM_COUNT.txt(.*)rocprof-device-0-SQ_INSTS_VALU.txt(.*)rocprof-device-0-SQ_WAVES.txt(.*)rocprof-device-0-TA_TA_BUSY.txt(.*)"
-        )
-
     rocprofiler_systems_add_test(
         SKIP_BASELINE SKIP_RUNTIME
         NAME transpose-rocprofiler
@@ -80,4 +76,19 @@ if(ROCPROFSYS_USE_ROCM)
         REWRITE_RUN_PASS_REGEX "${_ROCP_PASS_REGEX}"
         SAMPLING_PASS_REGEX "${_ROCP_PASS_REGEX}")
 
+    rocprofiler_systems_add_validation_test(
+        NAME transpose-rocprofiler-sampling
+        PERFETTO_FILE "perfetto-trace.proto"
+        ARGS --counter-names "TA_TA_BUSY" "SQ_WAVES" "GRBM_COUNT" "SQ_INSTS_VALU" -p
+        EXIST_FILES rocprof-device-0-GRBM_COUNT.txt rocprof-device-0-TA_TA_BUSY.txt
+                    rocprof-device-0-SQ_INSTS_VALU.txt rocprof-device-0-SQ_WAVES.txt
+        LABELS "rocprofiler")
+
+    rocprofiler_systems_add_validation_test(
+        NAME transpose-rocprofiler-binary-rewrite
+        PERFETTO_FILE "perfetto-trace.proto"
+        ARGS --counter-names "TA_TA_BUSY" "SQ_WAVES" "GRBM_COUNT" "SQ_INSTS_VALU" -p
+        EXIST_FILES rocprof-device-0-GRBM_COUNT.txt rocprof-device-0-TA_TA_BUSY.txt
+                    rocprof-device-0-SQ_INSTS_VALU.txt rocprof-device-0-SQ_WAVES.txt
+        LABELS "rocprofiler")
 endif()
