@@ -577,8 +577,7 @@ uint32_t hsa_amd_signal_wait_all(uint32_t signal_count, hsa_signal_t* hsa_signal
                                  hsa_signal_value_t* satisfying_values) {
   TRY;
   if (!core::Runtime::runtime_singleton_->IsOpen()) {
-    assert(false && "hsa_amd_signal_wait_all called while not initialized.");
-    return uint32_t(0);
+    throw AMD::hsa_exception(HSA_STATUS_ERROR_NOT_INITIALIZED, "hsa_amd_signal_wait_all called while not initialized");
   }
 
   // Treat NULL and invalid signals as already satisfied their condition and skip them
@@ -626,8 +625,7 @@ uint32_t hsa_amd_signal_wait_any(uint32_t signal_count, hsa_signal_t* hsa_signal
                                  hsa_signal_value_t* satisfying_value) {
   TRY;
   if (!core::Runtime::runtime_singleton_->IsOpen()) {
-    assert(false && "hsa_amd_signal_wait_any called while not initialized.");
-    return uint32_t(0);
+    throw AMD::hsa_exception(HSA_STATUS_ERROR_NOT_INITIALIZED, "hsa_amd_signal_wait_any called while not initialized");
   }
 
   // Ignore NULL and invalid signals
