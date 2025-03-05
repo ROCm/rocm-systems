@@ -55,12 +55,36 @@ except NameError:
         with open(filename, "rb") as f:
             exec_(compile(f.read(), filename, "exec"), globals, locals)
 
+def is_module(name):
+    try:
+        exec("import {}".format(name))
+        return True
+    except:
+        return False
+
+def get_module_file_path(module_name):
+    loc = {}
+    exec(
+"""
+import {module}
+file_path = {module}.__file__
+""".format(module=module_name), globals(), loc)
+    return loc['file_path']
 
 def find_script(script_name):
     """Find the script.
 
+    If the input is a module, then find the module path.
     If the input is not a file, then $PATH will be searched.
     """
+    if is_module(script_name):
+        try: 
+            file_path = get_module_file_path(script_name)
+            print('Module file path: {}.'.format(file_path))
+            return file_path
+        except:
+            print("A module has been detected, but we are unable to locate its path.")
+
     if os.path.isfile(script_name):
         return script_name
     path = os.getenv("PATH", os.defpath).split(os.pathsep)
