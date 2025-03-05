@@ -17,7 +17,7 @@ env:
 jobs:
   release:
     if: github.repository == 'ROCm/rocprofiler-systems'
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     permissions:
       contents: write
       packages: write

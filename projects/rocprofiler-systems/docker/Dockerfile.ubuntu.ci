@@ -28,12 +28,12 @@ RUN apt-get update && \
     apt-get install -y autoconf autotools-dev bash-completion bison build-essential \
         bzip2 cmake curl environment-modules flex gettext git-core gnupg2 gzip \
         libiberty-dev libpapi-dev libpfm4-dev libtool locales lsb-release m4 \
-        python3-pip texinfo unzip wget zip zlib1g-dev && \
+        python3-pip texinfo unzip wget vim zip zlib1g-dev && \
     apt-get autoclean && \
     if [ "${OS_VERSION}" == "24.04" ]; then \
-        python3 -m pip install --break-system-packages 'cmake==3.21' \
+        python3 -m pip install --break-system-packages 'cmake==3.21' perfetto \
     else \
-        python3 -m pip install 'cmake==3.21'; \
+        python3 -m pip install 'cmake==3.21' perfetto; \
     fi
 
 COPY ./dyninst-source /tmp/dyninst
