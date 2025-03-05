@@ -1179,22 +1179,6 @@ tool_fini(void* callback_data)
 
     if(get_counter_storage())
     {
-        auto _storages = std::vector<const counter_storage*>{};
-        for(const auto& citr : *get_counter_storage())
-        {
-            for(const auto& itr : citr.second)
-                _storages.emplace_back(&itr.second);
-        }
-
-        std::sort(_storages.begin(), _storages.end(),
-                  [](const counter_storage* lhs, const counter_storage* rhs) {
-                      return *lhs < *rhs;
-                  });
-
-        for(const auto* itr : _storages)
-            itr->write();
-        _storages.clear();
-
         get_counter_storage()->clear();
         delete get_counter_storage();
         get_counter_storage() = nullptr;

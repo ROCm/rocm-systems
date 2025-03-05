@@ -230,6 +230,7 @@ parse:
         PERFETTO_METRIC: '*'
         TIMEMORY_FILE: '*'
         TIMEMORY_METRIC: '*'
+        EXIST_FILES: '*'
   override_spec: {}
   vartags: []
   proptags: []
