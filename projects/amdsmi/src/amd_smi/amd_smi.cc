@@ -3317,7 +3317,8 @@ amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_handle, uint32_t *
 }
 
 amdsmi_status_t
-amdsmi_get_power_info(amdsmi_processor_handle processor_handle, uint32_t sensor_ind, amdsmi_power_info_t *info) {
+amdsmi_get_power_info(amdsmi_processor_handle processor_handle, __attribute__((unused)) uint32_t sensor_ind, amdsmi_power_info_t *info) {
+
     AMDSMI_CHECK_INIT();
 
     if (info == nullptr) {
