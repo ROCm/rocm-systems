@@ -62,11 +62,15 @@ The documentation source files reside in the [`/docs`](/docs) folder of this rep
 - HIP kernel tracing
 - HSA API tracing
 - HSA operation tracing
+- rocDecode API tracing
+- rocJPEG API tracing
 - System-level sampling (via rocm-smi)
   - Memory usage
   - Power usage
   - Temperature
   - Utilization
+  - VCN Utilization
+  - JPEG Utilization
 
 ### CPU Metrics
 

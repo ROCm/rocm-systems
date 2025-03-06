@@ -52,6 +52,8 @@ GPU metrics
 * HIP kernel tracing
 * HSA API tracing
 * HSA operation tracing
+* rocDecode API tracing
+* rocJPEG API tracing
 * System-level sampling (via rocm-smi)
 
   * Memory usage
@@ -59,6 +61,7 @@ GPU metrics
   * Temperature
   * Utilization
   * VCN activity
+  * JPEG activity
 
 CPU metrics
 ========================================

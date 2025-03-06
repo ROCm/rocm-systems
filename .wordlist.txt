@@ -38,6 +38,9 @@ pid
 polymorphism
 ppc
 proc
+rocDecode
+rocJPEG
+roctx
 rpath
 rvalues
 sdk

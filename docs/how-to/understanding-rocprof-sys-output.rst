@@ -366,21 +366,31 @@ absolute path, then all ``ROCPROFSYS_OUTPUT_PATH`` and similar
 settings are ignored. Visit `ui.perfetto.dev <https://ui.perfetto.dev>`_ and open
 this file.
 
+**Figure 1:** Visualization of a performance graph in Perfetto
+
 .. image:: ../data/rocprof-sys-perfetto.png
    :alt: Visualization of a performance graph in Perfetto
    :width: 800
+
+**Figure 2:** Visualization of ROCm data in Perfetto
 
 .. image:: ../data/rocprof-sys-rocm.png
    :alt: Visualization of ROCm data in Perfetto
    :width: 800
 
+**Figure 3:** Visualization of ROCm flow data in Perfetto
+
 .. image:: ../data/rocprof-sys-rocm-flow.png
    :alt: Visualization of ROCm flow data in Perfetto
    :width: 800
 
+**Figure 4:** Visualization of ROCm API calls in Perfetto
+
 .. image:: ../data/rocprof-sys-user-api.png
    :alt: Visualization of ROCm API calls in Perfetto
    :width: 800
+
+**Figure 5:** Visualization of ROCm GPU metrics in Perfetto
 
 .. image:: ../data/rocprof-sys-gpu-metrics.png
    :alt: Visualization of ROCm GPU metrics in Perfetto
