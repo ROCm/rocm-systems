@@ -110,6 +110,15 @@ mapStringToRSMIMemoryPartitionTypes {
   {"NPS8", RSMI_MEMORY_PARTITION_NPS8}
 };
 
+static const std::map<std::string, rsmi_compute_partition_type_t>
+mapStringToRSMIComputePartitionTypes {
+  {"DPX", RSMI_COMPUTE_PARTITION_DPX},
+  {"TPX", RSMI_COMPUTE_PARTITION_TPX},
+  {"QPX", RSMI_COMPUTE_PARTITION_QPX},
+  {"CPX", RSMI_COMPUTE_PARTITION_CPX},
+  {"SPX", RSMI_COMPUTE_PARTITION_SPX}
+};
+
 void TestMemoryPartitionReadWrite::Run(void) {
   rsmi_status_t ret, err, ret_set;
   char orig_memory_partition[255];
@@ -123,6 +132,41 @@ void TestMemoryPartitionReadWrite::Run(void) {
   if (setup_failed_) {
     std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
     return;
+  }
+
+  // initial_num_devices - keep this value static, due to parition changes
+  // fluctuating # of devices. We should end up with same # of devices at
+  // end of test.
+  uint32_t initial_num_devices = num_monitor_devs();
+  char orig_char_computePartition[initial_num_devices][255];
+  char current_char_computePartition[255];
+
+  for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
+    // Run and get compute_partition, so we can reset to later
+    ret = rsmi_dev_compute_partition_get(dv_ind, orig_char_computePartition[dv_ind],
+      255);
+    if(ret == RSMI_STATUS_SETTING_UNAVAILABLE
+      || ret== RSMI_STATUS_PERMISSION
+      || ret == RSMI_STATUS_BUSY
+      || ret == RSMI_STATUS_NOT_SUPPORTED
+      || ret == RSMI_STATUS_INVALID_ARGS) {
+      IF_VERB(STANDARD) {
+        std::cout << "\t**rsmi_dev_compute_partition_get(): "
+        << "Not supported on this device"
+        << std::endl;
+      }
+      continue;
+    }
+
+    std::cout << "\t**rsmi_dev_compute_partition_get(" << dv_ind
+      << ", " << orig_char_computePartition[dv_ind] << ")\n";
+
+    ret = rsmi_dev_compute_partition_get(dv_ind, orig_char_computePartition[dv_ind], 255);
+    IF_VERB(STANDARD) {
+      std::cout << std::endl << "\t**"
+        << "Original compute partition: "
+        << orig_char_computePartition[dv_ind] << std::endl;
+    }
   }
 
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
@@ -406,6 +450,30 @@ void TestMemoryPartitionReadWrite::Run(void) {
                 << "Confirmed prior memory partition (" << orig_memory_partition
                 << ") is  equal to current memory partition ("
                 << current_memory_partition << ")" << std::endl;
+    }
+  }
+
+  // Return to original compute_partition
+  for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
+    ret = rsmi_dev_compute_partition_get(dv_ind, current_char_computePartition, 255);
+    if(ret == RSMI_STATUS_SETTING_UNAVAILABLE
+      || ret== RSMI_STATUS_PERMISSION
+      || ret == RSMI_STATUS_BUSY
+      || ret == RSMI_STATUS_NOT_SUPPORTED
+      || ret == RSMI_STATUS_INVALID_ARGS)
+      continue;
+
+    if (strcmp(orig_char_computePartition[dv_ind], current_char_computePartition) != 0) {
+      rsmi_compute_partition_type_t newPartition
+        = mapStringToRSMIComputePartitionTypes.at(
+                                      std::string(orig_char_computePartition[dv_ind]));
+      ret = rsmi_dev_compute_partition_set(dv_ind, newPartition);
+
+      IF_VERB(STANDARD) {
+        std::cout << "\t**"
+                  << "Returning compute partition to: "
+                  << std::string(orig_char_computePartition[dv_ind]) << std::endl;
+      }
     }
   }
 }
