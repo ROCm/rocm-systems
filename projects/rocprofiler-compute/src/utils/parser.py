@@ -686,20 +686,20 @@ def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug):
         console_warning("Dectected GRBM_GUI_ACTIVE == 0")
         console_error("Hauting execution for warning above.")
 
-    ammolite__se_per_gpu = sys_info.se_per_gpu
-    ammolite__pipes_per_gpu = sys_info.pipes_per_gpu
-    ammolite__cu_per_gpu = sys_info.cu_per_gpu
-    ammolite__simd_per_cu = sys_info.simd_per_cu  # not used
-    ammolite__sqc_per_gpu = sys_info.sqc_per_gpu
-    ammolite__lds_banks_per_cu = sys_info.lds_banks_per_cu
-    ammolite__cur_sclk = sys_info.cur_sclk  # not used
-    ammolite__mclk = sys_info.cur_mclk  # not used
-    ammolite__max_sclk = sys_info.max_sclk
-    ammolite__max_waves_per_cu = sys_info.max_waves_per_cu
-    ammolite__hbm_bw = sys_info.hbm_bw
+    ammolite__se_per_gpu = int(sys_info.se_per_gpu)
+    ammolite__pipes_per_gpu = int(sys_info.pipes_per_gpu)
+    ammolite__cu_per_gpu = int(sys_info.cu_per_gpu)
+    ammolite__simd_per_cu = int(sys_info.simd_per_cu)  # not used
+    ammolite__sqc_per_gpu = int(sys_info.sqc_per_gpu)
+    ammolite__lds_banks_per_cu = int(sys_info.lds_banks_per_cu)
+    ammolite__cur_sclk = float(sys_info.cur_sclk)  # not used
+    ammolite__mclk = float(sys_info.cur_mclk)  # not used
+    ammolite__max_sclk = float(sys_info.max_sclk)
+    ammolite__max_waves_per_cu = int(sys_info.max_waves_per_cu)
+    ammolite__hbm_bw = float(sys_info.hbm_bw)
     ammolite__total_l2_chan = calc_builtin_var("$total_l2_chan", sys_info)
-    ammolite__num_xcd = sys_info.num_xcd
-    ammolite__wave_size = sys_info.wave_size
+    ammolite__num_xcd = int(sys_info.num_xcd)
+    ammolite__wave_size = int(sys_info.wave_size)
 
     # TODO: fix all $normUnit in Unit column or title
 

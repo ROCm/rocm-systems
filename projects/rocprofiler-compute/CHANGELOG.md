@@ -12,6 +12,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Change normal_unit default to per_kernel
 
+### Resolved issues
+
+* Fixed option specs-correction
 
 ## (Unreleased) ROCm Compute Profiler 3.1.0 for ROCm 6.4.0
 
