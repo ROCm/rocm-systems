@@ -599,6 +599,9 @@ TEST_F(KFDDBGTest, HitMemoryViolation) {
                     break;
                 }
             }
+            waitpid(childPid, &childStatus, 0);
+            while (!WIFSTOPPED(childStatus));
+
             // Assume tracee queue has died and halted process
             ptrace(PTRACE_CONT, childPid, NULL, NULL);
 
