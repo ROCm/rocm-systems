@@ -206,12 +206,12 @@ jobs:
         if: matrix.os == 'Mariner2'
         run: |
           echo "DOCKER_IMAGE=${{ secrets.MARINER2_DOCKER_IMAGE }}" >> $GITHUB_ENV
-          echo "PACKAGE_MANAGER=dnf" >> $GITHUB_ENV
+          echo "PACKAGE_MANAGER=tdnf" >> $GITHUB_ENV
       - name: Set Docker Image and Package Manager for AzureLinux3
         if: matrix.os == 'AzureLinux3'
         run: |
           echo "DOCKER_IMAGE=${{ secrets.AZURELINUX3_DOCKER_IMAGE }}" >> $GITHUB_ENV
-          echo "PACKAGE_MANAGER=dnf" >> $GITHUB_ENV
+          echo "PACKAGE_MANAGER=tdnf" >> $GITHUB_ENV
       - name: Set Docker Image and Package Manager for AlmaLinux8
         if: matrix.os == 'AlmaLinux8'
         run: |
@@ -253,7 +253,13 @@ jobs:
                 timeout 10m sudo zypper --no-refresh --no-gpg-checks install -y \$BUILD_FOLDER/\$RPM_BUILD
                 ;;
               dnf)
+                dnf install python3-setuptools python3-wheel -y
                 timeout 10m dnf install -y --skip-broken --disablerepo=* \$BUILD_FOLDER/\$RPM_BUILD
+                ;;
+              tdnf)
+                tdnf install python3-setuptools python3-wheel -y
+                python3 -m pip install more_itertools
+                timeout 10m tdnf install -y --skip-broken --disablerepo=* \$BUILD_FOLDER/\$RPM_BUILD
                 ;;
               *)
                 echo 'Unsupported package manager: $PACKAGE_MANAGER'
@@ -323,6 +329,9 @@ jobs:
                 ;;
               dnf)
                 dnf remove -y amd-smi-lib
+                ;;
+              tdnf)
+                tdnf remove -y amd-smi-lib
                 ;;
               *)
                 echo 'Unsupported package manager: $PACKAGE_MANAGER'

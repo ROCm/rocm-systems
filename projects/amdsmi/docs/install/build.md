@@ -25,9 +25,6 @@ In order to build the AMD SMI Python package, the following components are
 required:
 
 * Python (3.6.8 or later)
-  * prerequisite modules:
-    * python3-wheel
-    * python3-setuptools
 * virtualenv -- `python3 -m pip install virtualenv`
 
 ## Build steps
