@@ -2,6 +2,12 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
+## ROCm Systems Profiler 1.1.0 for ROCm 6.5
+
+### Added
+
+- Added profiling and metric collection capabilities for VCN engine activity, JPEG engine activity and API tracing for rocDecode, rocJPEG and VA-APIs.
+
 ## ROCm Systems Profiler 0.1.1 for ROCm 6.3.2
 
 ### Resolved issues

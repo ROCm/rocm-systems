@@ -217,6 +217,44 @@ The following example:
 
    ROCPROFSYS_ROCM_EVENTS = GPUBusy     SQ_WAVES:device=0    SQ_INSTS_VALU:device=1
 
+Exploring GPU Metrics
+---------------------
+
+ROCm Systems Profiler supports GPU metrics collection, sampling, and API tracing via `ROCprofiler-SDK <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/index.html>`_ and `ROCm-SMI <https://rocm.docs.amd.com/projects/rocm_smi_lib/en/latest/>`_.
+ROCprofiler-SDK supports application tracing to provide a big picture of the GPU application execution and kernel profiling to provide low-level hardware details from the performance counters.
+The ROCm-SMI library offers a unified tool for managing, monitoring, and retrieving information about the system's drivers and GPUs.
+
+Sampling GPU metrics like utilization, temperature, power consumption, memory usage, etc., can be configured with ``ROCPROFSYS_ROCM_SMI_METRICS``. 
+The ``ROCPROFSYS_USE_ROCM_SMI`` setting should be enabled for GPU metric collection.
+
+For example, the following is a valid configuration:
+
+.. code-block:: shell
+
+   ROCPROFSYS_ROCM_SMI_METRICS=busy,temp,power,vcn_activity,mem_usage
+
+Supported values for ``ROCPROFSYS_ROCM_SMI_METRICS`` are: ``busy``, ``temp``, ``power``, ``vcn_activity``, ``mem_usage``, ``jpeg_activity``.
+
+API tracing is configured with the ``ROCPROFSYS_ROCM_DOMAINS`` setting. The domains are used to filter the events that are captured during profiling.
+Supported values for this setting are those supported by ROCprofiler-SDK, which are returned by the API ``get_callback_tracing_names()`` and ``get_buffer_tracing_names()``. See the `ROCprofiler-SDK developer API documentation <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/_doxygen/html/namespacerocprofiler_1_1sdk.html>`_ to learn more about ROCprofiler-SDK APIs.
+Use the following command to view the available domains:
+
+.. code-block:: shell
+
+   rocprof-sys-avail -bd -r ROCM_DOMAINS
+
+.. note::
+
+Some  settings can enable tracing for multiple domains, such as ``hip_api`` which will enable both ``hip_runtime_api`` and ``hip_compiler_api``.
+And ``hsa_api`` which will enable all hsa domains, ``hsa_core_api``, ``hsa_amd_ext_api``, ``hsa_image_exit_api``, ``hsa_finalize_ext_api``.
+The setting ``marker_api`` or ``roctx`` can be used to enable the roctx marker API tracing.
+
+For example, the following is a valid configuration:
+
+.. code-block:: shell
+
+   ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,rocdecode_api,rocjpeg_api
+
 rocprof-sys-avail examples
 -----------------------------------
 
@@ -474,7 +512,8 @@ Viewing components
    | sampling_gpu_power                | GPU Power Usage via ROCm-SMI. Derived fro... |
    | sampling_gpu_temp                 | GPU Temperature via ROCm-SMI. Derived fro... |
    | sampling_gpu_busy                 | GPU Utilization (% busy) via ROCm-SMI. De... |
-   | sampling_vcn_busy                 | GPU VCN Utilization (% activity) via ROCm... |
+   | sampling_gpu_vcn                  | GPU VCN Utilization (% activity) via ROCm... |
+   | sampling_gpu_jpeg                 | GPU JPEG Utilization (% activity) via ROCm.. |
    | sampling_gpu_memory_usage         | GPU Memory Usage via ROCm-SMI. Derived fr... |
    |-----------------------------------|----------------------------------------------|
 
