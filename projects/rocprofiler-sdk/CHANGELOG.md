@@ -147,17 +147,17 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Added
 
-- Added support for select() operation in counter expression.
-- Added reduce operation for counter expression wrt dimension.
-- `--collection-period` feature added in rocprofv3, to enable filtering using time.
-- `--collection-period-unit` feature added in rocprofv3, to allow the user to control time units used in collection period option.
-- Added deprecation notice for rocprofiler(v1) and rocprofiler(v2).
-- Added support for rocDecode API Tracing
-- Added usage documentation for ROCTx
-- Added usage documentation for MPI applications
+- Support for `select()` operation in counter expression.
+- `reduce()` operation for counter expression with respect to dimension.
+- `--collection-period` feature in `rocprofv3` to enable filtering using time.
+- `--collection-period-unit` feature in `rocprofv3` to control time units used in collection period option.
+- Deprecation notice for ROCProfiler and ROCProfilerV2.
+- Support for rocDecode API Tracing
+- Usage documentation for ROCTx
+- Usage documentation for MPI applications
 - SDK: `rocprofiler_agent_v0_t` support for agent UUIDs
-- SDK: `rocprofiler_agent_v0_t` support for agent visibility based on gpu isolation environment variables (`ROCR_VISIBLE_DEVICES`, etc.)
-- Accumulation VGPR support for rocprofv3.
+- SDK: `rocprofiler_agent_v0_t` support for agent visibility based on gpu isolation environment variables such as `ROCR_VISIBLE_DEVICES` and so on.
+- Accumulation VGPR support for `rocprofv3`.
 
 ## ROCprofiler-SDK 0.7.0 for ROCm release 6.5
 
