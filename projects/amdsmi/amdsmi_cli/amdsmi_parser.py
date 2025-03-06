@@ -608,8 +608,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         cpu_version_help = "Display the current amd_hsmp driver version"
 
         # Add GPU and CPU version Arguments
-        version_parser.add_argument('-g', '--gpu_version', action='store_true', required=False, help=gpu_version_help)
-        version_parser.add_argument('-c', '--cpu_version', action='store_true', required=False, help=cpu_version_help)
+        version_parser.add_argument('-g', '--gpu_version', action='store_true', required=False, help=gpu_version_help, default=None)
+        version_parser.add_argument('-c', '--cpu_version', action='store_true', required=False, help=cpu_version_help, default=None)
 
 
     def _add_list_parser(self, subparsers: argparse._SubParsersAction, func):

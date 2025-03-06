@@ -132,6 +132,9 @@ if __name__ == "__main__":
             sys.tracebacklimit = 10
         else:
             sys.tracebacklimit = -1
+
+        logging.debug(args)
+
         # Execute subcommands
         args.func(args)
     except amdsmi_cli_exceptions.AmdSmiException as e:
