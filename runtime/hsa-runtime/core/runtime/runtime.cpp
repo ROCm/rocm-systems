@@ -1582,13 +1582,13 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       if (hsa_events.size() <= unique_evts) {
           hsa_events.resize(unique_evts + 10);
           event_age.resize(unique_evts + 10);
-       }
-       hsa_events[unique_evts] = hsa_event;
-       if (init_age) {
-         event_age[unique_evts] = runtime_singleton_->KfdVersion().supports_event_age ? 1 : 0;
-       }
-       unique_evts++;
-       return true;
+      }
+      if (init_age || hsa_events[unique_evts] != hsa_event ) {
+        event_age[unique_evts] = runtime_singleton_->KfdVersion().supports_event_age ? 1 : 0;
+      }
+      hsa_events[unique_evts] = hsa_event;
+      unique_evts++;
+      return true;
     }
   };
 
