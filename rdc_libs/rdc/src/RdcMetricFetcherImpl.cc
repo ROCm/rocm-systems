@@ -716,7 +716,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
     }
     case RDC_FI_GPU_MM_ENC_UTIL: {
       value->status = AMDSMI_STATUS_NOT_SUPPORTED;
-      RDC_LOG(RDC_ERROR, "AMDSMI No Supported: cannot get MM_ENC_ACTIVITY");
+      RDC_LOG(RDC_ERROR, "AMDSMI Not Supported: cannot get MM_ENC_ACTIVITY");
       return RDC_ST_NO_DATA;
     }
     case RDC_FI_GPU_MM_DEC_UTIL: {
