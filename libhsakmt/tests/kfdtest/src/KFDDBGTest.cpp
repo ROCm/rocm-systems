@@ -584,9 +584,6 @@ TEST_F(KFDDBGTest, HitMemoryViolation) {
             ASSERT_NE(deviceId, -1);
             ASSERT_EQ(queryMask, memViolMask);
 
-            // Assume tracee queue has died and halted process
-            ptrace(PTRACE_CONT, childPid, NULL, NULL);
-
             const std::vector<int> gpuNodes = m_NodeInfo.GetNodesWithGPU();
             uint32_t snapshotSize = gpuNodes.size();
             struct kfd_dbg_device_info_entry deviceInfo[snapshotSize];
@@ -602,6 +599,8 @@ TEST_F(KFDDBGTest, HitMemoryViolation) {
                     break;
                 }
             }
+            // Assume tracee queue has died and halted process
+            ptrace(PTRACE_CONT, childPid, NULL, NULL);
 
             debug->Detach();
 
