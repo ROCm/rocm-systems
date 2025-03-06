@@ -39,7 +39,7 @@ env:
 
 jobs:
   ubuntu-focal-external:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     container:
       image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-20.04
     strategy:
@@ -238,7 +238,7 @@ jobs:
         if [ -n "${RUNNING_PROCS}" ]; then kill -s 9 ${RUNNING_PROCS}; fi
 
   ubuntu-focal-external-rocm:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     container:
       image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-20.04
     strategy:
@@ -398,175 +398,8 @@ jobs:
         RUNNING_PROCS=$(pgrep trace_processor_shell)
         if [ -n "${RUNNING_PROCS}" ]; then kill -s 9 ${RUNNING_PROCS}; fi
 
-  ubuntu-focal:
-    runs-on: ubuntu-20.04
-    strategy:
-      fail-fast: false
-      matrix:
-        compiler: ['g++']
-        mpi: [ 'nompi', 'mpich', 'openmpi' ]
-        boost: ['OFF']
-        tbb: ['OFF']
-        build-type: ['Release']
-        python: ['ON']
-        ompt: ['ON']
-        papi: ['ON']
-        deps: ['libtbb-dev libboost-{atomic,system,thread,date-time,filesystem,timer}-dev']
-
-    env:
-      ELFUTILS_DOWNLOAD_VERSION: 0.186
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Install Packages
-      timeout-minutes: 25
-      uses: nick-fields/retry@v3
-      with:
-        retry_wait_seconds: 30
-        timeout_minutes: 25
-        max_attempts: 5
-        command: |
-          sudo apt-get update &&
-          sudo apt-get install -y \
-            autoconf autotools-dev bash-completion bison build-essential \
-            bzip2 cmake curl environment-modules flex gettext git-core gnupg2 \
-            gzip libiberty-dev libomp-dev libpapi-dev libpfm4-dev libtool locales \
-            lsb-release m4 python3-pip texinfo unzip wget zip zlib1g-dev \
-            ${{ matrix.deps }} ${{ matrix.compiler }} &&
-          if [ "${{ matrix.mpi }}" = "mpich" ]; then sudo apt-get install -y libmpich-dev mpich; fi &&
-          if [ "${{ matrix.mpi }}" = "openmpi" ]; then sudo apt-get install -y libopenmpi-dev openmpi-bin libfabric-dev; fi &&
-          wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v47.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
-          chmod +x /opt/trace_processor/bin/trace_processor_shell &&
-          python3 -m pip install --upgrade pip &&
-          python3 -m pip install --upgrade numpy perfetto dataclasses &&
-          python3 -m pip install 'cmake==3.21' &&
-          sudo apt-get -y --purge autoremove &&
-          sudo apt-get -y clean
-
-
-    - name: Test Environment Modules
-      timeout-minutes: 15
-      run: |
-        set -v
-        source /usr/share/modules/init/$(basename ${SHELL})
-        module avail
-
-    - name: Configure Env
-      run:
-        echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV &&
-        echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV &&
-        echo "${HOME}/.local/bin" >> $GITHUB_PATH
-
-    - name: Configure, Build, and Test
-      timeout-minutes: 115
-      shell: bash
-      run:
-        cmake --version &&
-        if [ "${{ matrix.mpi }}" = "nompi" ]; then USE_MPI=OFF; else USE_MPI=ON; fi &&
-        if [ -z "${{ matrix.deps }}" ]; then TAG=""; else TAG="-external-deps"; fi &&
-        python3 ./scripts/run-ci.py -B ${{ github.workspace }}/build
-          --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-focal-${{ matrix.compiler }}-${{ matrix.mpi }}${TAG}
-          --build-jobs 2
-          --site GitHub
-          --
-          -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
-          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
-          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
-          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems
-          -DROCPROFSYS_BUILD_TESTING=ON
-          -DROCPROFSYS_BUILD_DYNINST=ON
-          -DROCPROFSYS_USE_MPI=${USE_MPI}
-          -DROCPROFSYS_USE_ROCM=OFF
-          -DROCPROFSYS_USE_PYTHON=${{ matrix.python }}
-          -DROCPROFSYS_USE_OMPT=${{ matrix.ompt }}
-          -DROCPROFSYS_USE_PAPI=${{ matrix.papi }}
-          -DDYNINST_BUILD_ELFUTILS=ON
-          -DDYNINST_BUILD_LIBIBERTY=ON
-          -DDYNINST_BUILD_TBB=${{ matrix.tbb }}
-          -DDYNINST_BUILD_BOOST=${{ matrix.boost }}
-          -DDYNINST_BUILD_SHARED_LIBS=ON
-          -DDYNINST_BUILD_STATIC_LIBS=OFF
-          -DDYNINST_ELFUTILS_DOWNLOAD_VERSION=${{ env.ELFUTILS_DOWNLOAD_VERSION }}
-          -DROCPROFSYS_MAX_THREADS=64
-          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;videodecode;jpegdecode"
-          -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
-          -DMPI_HEADERS_ALLOW_MPICH=ON
-
-    - name: Test Build-Tree Env
-      timeout-minutes: 60
-      run:
-        source /usr/share/modules/init/$(basename ${SHELL})
-        module use ${{ github.workspace }}/build/share/modulefiles
-        module avail
-        module load rocprofiler-systems
-        module list
-        env
-        module unload rocprofiler-systems
-        module list
-        env
-        source ${{ github.workspace }}/build/share/rocprofiler-systems/setup-env.sh
-        env
-
-    - name: Install
-      working-directory: ${{ github.workspace }}/build
-      run: |
-        cpack -G STGZ
-        mkdir -p /opt/rocprofiler-systems
-        ./rocprofiler-systems-*.sh --prefix=/opt/rocprofiler-systems --exclude-subdir --skip-license
-
-    - name: Test Install with setup-env.sh
-      timeout-minutes: 15
-      run: |
-        set -v
-        source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
-        ${{ github.workspace }}/scripts/test-install.sh --test-rocprof-sys-{instrument,avail,sample,python,rewrite,runtime}=1
-
-    - name: Test Install with Modulefile
-      timeout-minutes: 15
-      run: |
-        set -v
-        source /usr/share/modules/init/$(basename ${SHELL})
-        module use /opt/rocprofiler-systems/share/modulefiles
-        module load rocprofiler-systems
-        ${{ github.workspace }}/scripts/test-install.sh --test-rocprof-sys-{instrument,avail,sample,python,rewrite,runtime}=1
-
-    - name: Test User API
-      timeout-minutes: 10
-      run: |
-        set -v
-        ${{ github.workspace }}/scripts/test-find-package.sh --install-dir /opt/rocprofiler-systems
-
-    - name: CTest Artifacts
-      if: failure()
-      continue-on-error: True
-      uses: actions/upload-artifact@v4
-      with:
-        name: ctest-${{ github.job }}-${{ strategy.job-index }}-log
-        path: |
-          ${{ github.workspace }}/build/*.log
-
-    - name: Data Artifacts
-      if: failure()
-      continue-on-error: True
-      uses: actions/upload-artifact@v4
-      with:
-        name: data-${{ github.job }}-${{ strategy.job-index }}-files
-        path: |
-          ${{ github.workspace }}/build/rocprof-sys-tests-config/*.cfg
-          ${{ github.workspace }}/build/rocprof-sys-tests-output/**/*.txt
-          ${{ github.workspace }}/build/rocprof-sys-tests-output/**/*-instr*.json
-
-    - name: Kill Perfetto
-      if: success() || failure()
-      continue-on-error: True
-      run: |
-        set +e
-        RUNNING_PROCS=$(pgrep trace_processor_shell)
-        if [ -n "${RUNNING_PROCS}" ]; then kill -s 9 ${RUNNING_PROCS}; fi
-
   ubuntu-focal-codecov:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
 
     container:
       image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-20.04
