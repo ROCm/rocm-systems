@@ -50,6 +50,10 @@ class rocprof_v3_profiler(RocProfCompute_Base):
 
         if self.get_args().kokkos_trace:
             trace_option = "--kokkos-trace"
+            # NOTE: --kokkos-trace feature is incomplete and is disabled for now.
+            console_error(
+                "The option '--kokkos-trace' is not supported in the current version of rocprof-compute. This functionality is planned for a future release. Please adjust your profiling options accordingly."
+            )
         if self.get_args().hip_trace:
             trace_option = "--hip-trace"
 
