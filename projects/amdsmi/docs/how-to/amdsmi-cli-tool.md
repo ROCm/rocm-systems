@@ -510,7 +510,8 @@ usage: amd-smi set [-h] (-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...
                    [--loglevel LEVEL]
 
 If no GPU is specified, will select all GPUs on the system.
-A set argument must be provided; Multiple set arguments are accepted
+A set argument must be provided; Multiple set arguments are accepted.
+Requires 'sudo' privileges.
 
 Set Arguments:
   -h, --help                                   show this help message and exit
@@ -589,7 +590,8 @@ usage: amd-smi reset [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
                      [-f] [-p] [-x] [-d] [-C] [-M] [-o] [-l]
 
 If no GPU is specified, will select all GPUs on the system.
-A reset argument must be provided; Multiple reset arguments are accepted
+A reset argument must be provided; Multiple reset arguments are accepted.
+Requires 'sudo' privileges.
 
 Reset Arguments:
   -h, --help                  show this help message and exit

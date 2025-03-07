@@ -608,8 +608,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         cpu_version_help = "Display the current amd_hsmp driver version"
 
         # Add GPU and CPU version Arguments
-        version_parser.add_argument('-g', '--gpu_version', action='store_true', required=False, help=gpu_version_help)
-        version_parser.add_argument('-c', '--cpu_version', action='store_true', required=False, help=cpu_version_help)
+        version_parser.add_argument('-g', '--gpu_version', action='store_true', required=False, help=gpu_version_help, default=None)
+        version_parser.add_argument('-c', '--cpu_version', action='store_true', required=False, help=cpu_version_help, default=None)
 
 
     def _add_list_parser(self, subparsers: argparse._SubParsersAction, func):
@@ -1082,7 +1082,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Subparser help text
         set_value_help = "Set options for devices"
         set_value_subcommand_help = "If no GPU is specified, will select all GPUs on the system.\
-                                    \nA set argument must be provided; Multiple set arguments are accepted"
+                                    \nA set argument must be provided; Multiple set arguments are accepted.\
+                                    \nRequires 'sudo' privileges."
         set_value_optionals_title = "Set Arguments"
 
         # Help text for Arguments only on BM platforms
@@ -1107,8 +1108,8 @@ class AMDSMIParser(argparse.ArgumentParser):
                 set_soc_pstate_help = f"Set the GPU soc pstate policy using policy id, an integer. Valid id's include:\n\t{soc_pstate_help_info}"
                 xgmi_plpd_help_info = ", ".join(self.helpers.get_xgmi_plpd_policies())
                 set_xgmi_plpd_help = f"Set the GPU XGMI per-link power down policy using policy id, an integer. Valid id's include:\n\t{xgmi_plpd_help_info}"
-                set_clk_limit_help = "Sets the sclk (aka gfxclk) or mclk minimum and maximum frequencies. \n\tex: amd-smi set -L (sclk | mclk) (min | max) value"
-            set_clock_freq_help = "Set one or more sclk (aka gfxclk), mclk, fclk, pcie, or socclk frequency levels.\n\tUse `amd-smi static --clock` to find acceptable levels."
+                set_clock_freq_help = "Set one or more sclk (aka gfxclk), mclk, fclk, pcie, or socclk frequency levels.\n\tUse `amd-smi static --clock` to find acceptable levels."
+            set_clk_limit_help = "Sets the sclk (aka gfxclk) or mclk minimum and maximum frequencies. \n\tex: amd-smi set -L (sclk | mclk) (min | max) value"
             set_process_isolation_help = "Enable or disable the GPU process isolation on a per partition basis: 0 for disable and 1 for enable.\n"
 
         # Help text for CPU set options
@@ -1190,7 +1191,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Subparser help text
         reset_help = "Reset options for devices"
         reset_subcommand_help = "If no GPU is specified, will select all GPUs on the system.\
-                                \nA reset argument must be provided; Multiple reset arguments are accepted"
+                                \nA reset argument must be provided; Multiple reset arguments are accepted.\
+                                \nRequires 'sudo' privileges."
         reset_optionals_title = "Reset Arguments"
 
         # Help text for Arguments only on Guest and BM platforms

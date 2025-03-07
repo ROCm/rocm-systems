@@ -992,6 +992,11 @@ class AMDSMIHelpers():
         Check if the current user is a member of the required groups.
         If not, log a warning.
         """
+
+        # Skip check if running as root.
+        if os.geteuid() == 0:
+            return
+
         required_groups = {'video', 'render'}
         try:
             user_groups = {grp.getgrgid(gid).gr_name for gid in os.getgroups()}

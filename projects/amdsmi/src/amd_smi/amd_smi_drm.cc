@@ -171,9 +171,7 @@ amdsmi_status_t AMDSmiDrm::init() {
         bdf.function_number = ((bdf_rocm & 0x7));
         bdf.device_number = ((bdf_rocm & 0xF8) >> 3);
         bdf.bus_number = ((bdf_rocm & 0xFF00) >> 8);
-        // TODO: This is throwing a compiler warning since bdf.domain_number is part of a struct
-        //       and is 48 bits long and throws a conversion warning
-        bdf.domain_number = ((bdf_rocm & 0xFFFFFFFF00000000) >> 32);
+        bdf.domain_number = static_cast<uint32_t>(((bdf_rocm & 0xFFFFFFFF00000000) >> 32));
         ss << __PRETTY_FUNCTION__ << " | " << "Received bdf: Domain = " << bdf.domain_number
            << "; Bus# = " << bdf.bus_number << "; Device# = "<< bdf.device_number
            << "; Function# = " << bdf.function_number;
