@@ -41,7 +41,7 @@ set_target_properties(
     rocprofiler-systems-dl-library
     PROPERTIES OUTPUT_NAME ${BINARY_NAME_PREFIX}-dl
                VERSION ${PROJECT_VERSION}
-               SOVERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
+               SOVERSION ${PROJECT_VERSION_MAJOR}
                BUILD_RPATH "\$ORIGIN"
                INSTALL_RPATH "\$ORIGIN")
 
