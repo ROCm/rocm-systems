@@ -5,7 +5,10 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
 import re
+import sys
+from pathlib import Path
 
+sys.path.append(str(Path('_extension').resolve()))
 
 # get version number to print in docs
 def get_version_info(filepath):
@@ -49,7 +52,7 @@ suppress_warnings = ["etoc.toctree"]
 external_toc_path = "./sphinx/_toc.yml"
 
 external_projects_current_project = "amdsmi"
-extensions = ["rocm_docs", "rocm_docs.doxygen"]
+extensions = ["rocm_docs", "rocm_docs.doxygen", "go_api_ref"]
 
 doxygen_root = "doxygen"
 doxysphinx_enabled = True

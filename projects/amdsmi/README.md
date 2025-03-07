@@ -26,10 +26,23 @@ for more information.
 * [Install the AMD SMI library and CLI tool](https://rocm.docs.amd.com/projects/amdsmi/en/latest/install/install.html)
 
 ## Requirements
-The following are required to install and use the AMD SMI libraries and CLI tool.
+
+The following are required to install and use the AMD SMI library through its language interfaces and CLI.
+
+* `amdgpu` driver must be loaded for [`amdsmi_init()`](./docs/how-to/amdsmi-cpp-lib#hello-amd-smi) to work.
+* Export `LD_LIBRARY_PATH` to the `amdsmi` installation directory.
+
+  ```bash
+  export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/lib:/opt/rocm/lib64
+  ```
+
+### Python interface and CLI tool prerequisites
 
 * Python 3.6.8+ (64-bit)
-* `amdgpu` driver must be loaded for [`amdsmi_init()`](./docs/how-to/amdsmi-cpp-lib#hello-amd-smi) to work.
+
+### Go API prerequisites
+
+* Go version 1.20 or greater
 
 ## Install amdgpu driver and AMD SMI with ROCm
 
@@ -95,6 +108,17 @@ hardware. It simplifies tasks like monitoring and controlling GPU operations, al
 
 Refer to the [user guide](https://rocm.docs.amd.com/projects/amdsmi/en/latest/how-to/amdsmi-py-lib.html) and the
 detailed [Python API reference](https://rocm.docs.amd.com/projects/amdsmi/en/latest/reference/amdsmi-py-api.html) in the
+ROCm documentation portal.
+
+### Go library
+
+The AMD SMI Go interface provides a simple
+[API](https://rocm.docs.amd.com/projects/amdsmi/en/latest/reference/amdsmi-go-lib.html)
+for AMD hardware management. It streamlines hardware monitoring and control
+while leveraging Golang's features.
+
+Refer to the [user guide](https://rocm.docs.amd.com/projects/amdsmi/en/latest/how-to/amdsmi-go-lib.html) and the
+[Go API reference](https://rocm.docs.amd.com/projects/amdsmi/en/latest/reference/amdsmi-go-api.html) in the
 ROCm documentation portal.
 
 ### CLI tool

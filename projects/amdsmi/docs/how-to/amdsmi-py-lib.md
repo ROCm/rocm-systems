@@ -9,14 +9,35 @@ myst:
 
 The AMD SMI Python interface provides a convenient way to interact with AMD
 hardware through a simple and accessible [API](../reference/amdsmi-py-api.md).
-Compatible with Python 3.6 and higher, this library requires the AMD driver to
-be loaded for initialization -- review the [prerequisites](#install_reqs).
 
 ```{seealso}
 Refer to the [Python library API reference](../reference/amdsmi-py-api.md).
 ```
 
+## Prerequisites
+
+Before get started, make sure your environment satisfies the following prerequisites.
+See the [requirements](#install_reqs) section for more information.
+
+1. Ensure `amdgpu` drivers are installed properly for initialization.
+
+2. Export `LD_LIBRARY_PATH` to the `amdsmi` installation directory.
+
+   ```bash
+   export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/lib:/opt/rocm/lib64:
+   ```
+
+3. Install Python 3.6.8+.
+
 ## Get started
+
+```{note}
+``hipcc`` and other compilers will not automatically link in the ``libamd_smi``
+dynamic library. To compile code that uses the AMD SMI library API, ensure the
+``libamd_smi.so`` can be located by setting the ``LD_LIBRARY_PATH`` environment
+variable to the directory containing ``librocm_smi64.so`` (usually
+``/opt/rocm/lib``) or by passing the ``-lamd_smi`` flag to the compiler.
+```
 
 To get started, the `amdsmi` folder should be copied and placed next to
 the importing script. Import it as follows:
@@ -51,18 +72,6 @@ File name             | Description
 (py_usage)=
 ## Usage
 
-```{note}
-``hipcc`` and other compilers will not automatically link in the ``libamd_smi``
-dynamic library. To compile code that uses the AMD SMI library API, ensure the
-``libamd_smi.so`` can be located by setting the ``LD_LIBRARY_PATH`` environment
-variable to the directory containing ``librocm_smi64.so`` (usually
-``/opt/rocm/lib``) or by passing the ``-lamd_smi`` flag to the compiler.
-```
-
-```{seealso}
-Refer to the [Python library API reference](../reference/amdsmi-py-api.md).
-```
-
 An application using AMD SMI must call `amdsmi_init()` to initialize the AMI SMI
 library before all other calls. This call initializes the internal data
 structures required for subsequent AMD SMI operations. In the call, a flag can
@@ -71,6 +80,10 @@ type.
 
 `amdsmi_shut_down()` must be the last call to properly close connection to
 driver and make sure that any resources held by AMD SMI are released.
+
+```{seealso}
+Refer to the [Python library API reference](../reference/amdsmi-py-api.md).
+```
 
 (py_exceptions)=
 ## Exceptions
