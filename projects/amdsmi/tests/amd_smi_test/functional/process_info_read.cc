@@ -64,6 +64,7 @@ void TestProcInfoRead::Close() {
 static void dumpProcess(amdsmi_process_info_t *p) {
   assert(p != nullptr);
   std::cout << "\t** ProcessID: " << p->process_id << " ";
+  // TODO remove pasid Not working in ROCm 6.4+, deprecating in 7.0
   std::cout << "PASID: " << p->pasid << " ";
   std::cout << std::endl;
 }

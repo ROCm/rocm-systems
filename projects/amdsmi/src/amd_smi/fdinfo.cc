@@ -144,6 +144,7 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t &bdf, long int pid,
 		return AMDSMI_STATUS_NO_PERM;
 
 	/* Vectors to check if repated fd pasid */
+	// TODO remove pasid Not working in ROCm 6.4+, deprecating in 7.0
 	std::vector<int> pasids;
 
 	memset(&info, 0, sizeof(info));

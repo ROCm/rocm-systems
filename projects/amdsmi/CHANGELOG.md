@@ -444,7 +444,9 @@ Updated structure `amdsmi_vram_info_t`:
 
 ### Upcoming changes
 
-- **Deprication of the `AMDSMI_LIB_VERSION_YEAR` enum and API fields.**  
+- **Deprication in ROCm 7.0 of the `AMDSMI_LIB_VERSION_YEAR` enum and API fields.**  
+
+- **Deprication in ROCm 7.0 of the `pasid` field within struct `amdsmi_process_info_t`**  
 
 ### Known issues
 

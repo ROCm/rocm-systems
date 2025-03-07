@@ -243,6 +243,7 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& 
             // Is this device running this process?
             if (list_device_ptr[device_idx] == get_gpu_id()) {
                 rsmi_process_info_t rsmi_dev_proc_info{};
+                // TODO remove pasid Not working in ROCm 6.4+, deprecating in 7.0
                 auto status_code = rsmi_compute_process_info_by_device_get(process_id, list_device_ptr[device_idx], &rsmi_dev_proc_info);
                 if ((status_code == rsmi_status_t::RSMI_STATUS_SUCCESS) &&
                     ((rsmi_dev_proc_info.process_id == process_id) && (rsmi_dev_proc_info.pasid == proc_addr_id))) {

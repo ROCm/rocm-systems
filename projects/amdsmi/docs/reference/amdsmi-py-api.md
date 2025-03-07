@@ -3296,7 +3296,7 @@ Output: List of python dicts each containing a process information
 Field | Description
 ---|---
 `process_id` | Process ID
-`pasid` | PASID
+`pasid` | PASID (Not working in ROCm 6.4+, deprecating in 7.0)
 `vram_usage` | VRAM usage
 `sdma_usage` | SDMA usage in microseconds
 `cu_occupancy` | Compute Unit usage in percents
@@ -3330,7 +3330,7 @@ Output: Dict containing a process information
 Field | Description
 ---|---
 `process_id` | Process ID
-`pasid` | PASID
+`pasid` | PASID (Not working in ROCm 6.4+, deprecating in 7.0)
 `vram_usage` | VRAM usage
 `sdma_usage` | SDMA usage in microseconds
 `cu_occupancy` | Compute Unit usage in percents

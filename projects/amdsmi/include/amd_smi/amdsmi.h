@@ -1975,7 +1975,7 @@ typedef struct {
  */
 typedef struct {
     uint32_t process_id;    //!< Process ID
-    uint32_t pasid;         //!< PASID
+    uint32_t pasid;         //!< PASID (Not working in ROCm 6.4+, deprecating in 7.0)
     uint64_t vram_usage;    //!< VRAM usage in MB
     uint64_t sdma_usage;    //!< SDMA usage in microseconds
     uint32_t cu_occupancy;  //!< Compute Unit usage in percent
