@@ -827,6 +827,19 @@ union_amdsmi_bdf_t._fields_ = [
 ]
 
 amdsmi_bdf_t = union_amdsmi_bdf_t
+class struct_amdsmi_enumeration_info_t(Structure):
+    pass
+
+struct_amdsmi_enumeration_info_t._pack_ = 1 # source:False
+struct_amdsmi_enumeration_info_t._fields_ = [
+    ('drm_render', ctypes.c_uint32),
+    ('drm_card', ctypes.c_uint32),
+    ('hsa_id', ctypes.c_uint32),
+    ('hip_id', ctypes.c_uint32),
+    ('hip_uuid', ctypes.c_char * 256),
+]
+
+amdsmi_enumeration_info_t = struct_amdsmi_enumeration_info_t
 
 # values for enumeration 'amdsmi_card_form_factor_t'
 amdsmi_card_form_factor_t__enumvalues = {
@@ -842,21 +855,6 @@ AMDSMI_CARD_FORM_FACTOR_UNKNOWN = 3
 amdsmi_card_form_factor_t = ctypes.c_uint32 # enum
 class struct_amdsmi_pcie_info_t(Structure):
     pass
-
-class struct_pcie_static_(Structure):
-    pass
-
-struct_pcie_static_._pack_ = 1 # source:False
-struct_pcie_static_._fields_ = [
-    ('max_pcie_width', ctypes.c_uint16),
-    ('PADDING_0', ctypes.c_ubyte * 2),
-    ('max_pcie_speed', ctypes.c_uint32),
-    ('pcie_interface_version', ctypes.c_uint32),
-    ('slot_type', amdsmi_card_form_factor_t),
-    ('max_pcie_interface_version', ctypes.c_uint32),
-    ('PADDING_1', ctypes.c_ubyte * 4),
-    ('reserved', ctypes.c_uint64 * 9),
-]
 
 class struct_pcie_metric_(Structure):
     pass
@@ -876,6 +874,21 @@ struct_pcie_metric_._fields_ = [
     ('pcie_lc_perf_other_end_recovery_count', ctypes.c_uint32),
     ('PADDING_2', ctypes.c_ubyte * 4),
     ('reserved', ctypes.c_uint64 * 12),
+]
+
+class struct_pcie_static_(Structure):
+    pass
+
+struct_pcie_static_._pack_ = 1 # source:False
+struct_pcie_static_._fields_ = [
+    ('max_pcie_width', ctypes.c_uint16),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('max_pcie_speed', ctypes.c_uint32),
+    ('pcie_interface_version', ctypes.c_uint32),
+    ('slot_type', amdsmi_card_form_factor_t),
+    ('max_pcie_interface_version', ctypes.c_uint32),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+    ('reserved', ctypes.c_uint64 * 9),
 ]
 
 struct_amdsmi_pcie_info_t._pack_ = 1 # source:False
@@ -2243,6 +2256,9 @@ amdsmi_get_gpu_device_bdf.argtypes = [amdsmi_processor_handle, ctypes.POINTER(un
 amdsmi_get_gpu_device_uuid = _libraries['libamd_smi.so'].amdsmi_get_gpu_device_uuid
 amdsmi_get_gpu_device_uuid.restype = amdsmi_status_t
 amdsmi_get_gpu_device_uuid.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_char)]
+amdsmi_get_gpu_enumeration_info = _libraries['libamd_smi.so'].amdsmi_get_gpu_enumeration_info
+amdsmi_get_gpu_enumeration_info.restype = amdsmi_status_t
+amdsmi_get_gpu_enumeration_info.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_enumeration_info_t)]
 amdsmi_get_gpu_id = _libraries['libamd_smi.so'].amdsmi_get_gpu_id
 amdsmi_get_gpu_id.restype = amdsmi_status_t
 amdsmi_get_gpu_id.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint16)]
@@ -2957,9 +2973,9 @@ __all__ = \
     'amdsmi_dimm_thermal_t', 'amdsmi_dpm_level_t',
     'amdsmi_dpm_policy_entry_t', 'amdsmi_dpm_policy_t',
     'amdsmi_driver_info_t', 'amdsmi_engine_usage_t',
-    'amdsmi_error_count_t', 'amdsmi_event_group_t',
-    'amdsmi_event_handle_t', 'amdsmi_event_type_t',
-    'amdsmi_evt_notification_data_t',
+    'amdsmi_enumeration_info_t', 'amdsmi_error_count_t',
+    'amdsmi_event_group_t', 'amdsmi_event_handle_t',
+    'amdsmi_event_type_t', 'amdsmi_evt_notification_data_t',
     'amdsmi_evt_notification_type_t',
     'amdsmi_first_online_core_on_cpu_socket',
     'amdsmi_free_name_value_pairs', 'amdsmi_freq_ind_t',
@@ -3005,6 +3021,7 @@ __all__ = \
     'amdsmi_get_gpu_device_bdf', 'amdsmi_get_gpu_device_uuid',
     'amdsmi_get_gpu_driver_info', 'amdsmi_get_gpu_ecc_count',
     'amdsmi_get_gpu_ecc_enabled', 'amdsmi_get_gpu_ecc_status',
+    'amdsmi_get_gpu_enumeration_info',
     'amdsmi_get_gpu_event_notification', 'amdsmi_get_gpu_fan_rpms',
     'amdsmi_get_gpu_fan_speed', 'amdsmi_get_gpu_fan_speed_max',
     'amdsmi_get_gpu_id', 'amdsmi_get_gpu_kfd_info',
@@ -3123,7 +3140,7 @@ __all__ = \
     'struct_amdsmi_dimm_thermal_t', 'struct_amdsmi_dpm_level_t',
     'struct_amdsmi_dpm_policy_entry_t', 'struct_amdsmi_dpm_policy_t',
     'struct_amdsmi_driver_info_t', 'struct_amdsmi_engine_usage_t',
-    'struct_amdsmi_error_count_t',
+    'struct_amdsmi_enumeration_info_t', 'struct_amdsmi_error_count_t',
     'struct_amdsmi_evt_notification_data_t',
     'struct_amdsmi_freq_volt_region_t', 'struct_amdsmi_frequencies_t',
     'struct_amdsmi_frequency_range_t', 'struct_amdsmi_fw_info_t',

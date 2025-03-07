@@ -1690,6 +1690,65 @@ def amdsmi_get_gpu_device_bdf(processor_handle: amdsmi_wrapper.amdsmi_processor_
     return _format_bdf(bdf_info)
 
 
+def amdsmi_get_gpu_device_uuid(processor_handle: amdsmi_wrapper.amdsmi_processor_handle) -> str:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    uuid = ctypes.create_string_buffer(AMDSMI_GPU_UUID_SIZE)
+
+    uuid_length = ctypes.c_uint32()
+    uuid_length.value = AMDSMI_GPU_UUID_SIZE
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_gpu_device_uuid(
+            processor_handle, ctypes.byref(uuid_length), uuid
+        )
+    )
+
+    return uuid.value.decode("utf-8")
+
+
+def amdsmi_get_gpu_enumeration_info(processor_handle: amdsmi_wrapper.amdsmi_processor_handle) -> Dict[str, Any]:
+    """
+    Retrieves GPU enumeration information including DRM card ID, DRM render ID, HIP ID, and HIP UUID.
+
+    Parameters:
+        processor_handle (amdsmi_processor_handle): The processor handle.
+
+    Returns:
+        Dict[str, Any]: A dictionary containing the retrieved enumeration information.
+
+    Raises:
+        AmdSmiParameterException: If the input parameters are invalid.
+    """
+    # Validate the processor handle
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    # Create an instance of the enumeration info struct
+    enumeration_info = amdsmi_wrapper.amdsmi_enumeration_info_t()
+
+    # Call the C function to populate the struct
+    status = amdsmi_wrapper.amdsmi_get_gpu_enumeration_info(processor_handle, ctypes.byref(enumeration_info))
+    
+    # Validate the status result
+    _check_res(status)
+
+    # Convert the struct fields into a dictionary and return
+    enumeration_info = {
+        "drm_render": _validate_if_max_uint(enumeration_info.drm_render, MaxUIntegerTypes.UINT32_T),
+        "drm_card": _validate_if_max_uint(enumeration_info.drm_render, MaxUIntegerTypes.UINT32_T),
+        "hsa_id": _validate_if_max_uint(enumeration_info.hsa_id, MaxUIntegerTypes.UINT32_T),
+        "hip_id": _validate_if_max_uint(enumeration_info.hip_id, MaxUIntegerTypes.UINT32_T),
+        "hip_uuid": enumeration_info.hip_uuid.decode('utf-8')
+    }
+
+    return enumeration_info
+
 def amdsmi_get_gpu_asic_info(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
 ) -> Dict[str, Any]:
@@ -2256,26 +2315,6 @@ def amdsmi_get_gpu_process_list(
         })
 
     return result
-
-
-def amdsmi_get_gpu_device_uuid(processor_handle: amdsmi_wrapper.amdsmi_processor_handle) -> str:
-    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
-        raise AmdSmiParameterException(
-            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
-        )
-
-    uuid = ctypes.create_string_buffer(AMDSMI_GPU_UUID_SIZE)
-
-    uuid_length = ctypes.c_uint32()
-    uuid_length.value = AMDSMI_GPU_UUID_SIZE
-
-    _check_res(
-        amdsmi_wrapper.amdsmi_get_gpu_device_uuid(
-            processor_handle, ctypes.byref(uuid_length), uuid
-        )
-    )
-
-    return uuid.value.decode("utf-8")
 
 
 def amdsmi_get_gpu_driver_info(

@@ -8,6 +8,36 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added enumeration mapping `amdsmi_get_gpu_enumeration_info()` to Python & C APIs.**  
+  - Enumeration mapping consists of `amdsmi_enumeration_info_t`
+
+    ```shell
+    typedef struct {
+        uint32_t drm_render; // the render node under /sys/class/drm/renderD*
+        uint32_t drm_card;   // the graphic card device under /sys/class/drm/card*
+        uint32_t hsa_id;     // the HSA enumeration ID
+        uint32_t hip_id;     // the HIP enumeration ID
+        char hip_uuid[AMDSMI_MAX_STRING_LENGTH];  // the HIP unique identifer
+    } amdsmi_enumeration_info_t;
+    ```
+
+  - The mapping is also enabled in the CLI interface via `amd-smi list -e`
+
+    ```shell
+    $ amd-smi list -e
+    GPU: 0
+        BDF: 0000:23:00.0
+        UUID: XXXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+        KFD_ID: 45412
+        NODE_ID: 1
+        PARTITION_ID: 0
+        RENDER: renderD128
+        CARD: card0
+        HSA_ID: 1
+        HIP_ID: 0
+        HIP_UUID: GPU-XXXXXXXXXXXXXXXX
+    ```
+
 - **Added dynamic virtualization mode detection**.  
   - Added new C and Python API `amdsmi_get_gpu_virtualization_mode_info`
   - Added new C and Python enum `amdsmi_virtualization_mode_t`

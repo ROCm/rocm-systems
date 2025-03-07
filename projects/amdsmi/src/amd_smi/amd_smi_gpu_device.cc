@@ -30,6 +30,7 @@
 #include <map>
 #include <memory>
 #include <unordered_set>
+#include <filesystem>
 
 namespace amd {
 namespace smi {
@@ -283,6 +284,77 @@ const GPUComputeProcessList_t& AMDSmiGPUDevice::amdgpu_get_compute_process_list(
     }
 
     return compute_process_list_;
+}
+
+// Convert `amdsmi_bdf_t` to a PCI BDF string
+std::string AMDSmiGPUDevice::bdf_to_string() const {
+    std::ostringstream oss;
+    oss << std::setfill('0') << std::hex      // Use hexadecimal formatting
+        << std::setw(4) << bdf_.domain_number << ":"  // Domain (4 digits)
+        << std::setw(2) << static_cast<int>(bdf_.bus_number) << ":"  // Bus (2 digits)
+        << std::setw(2) << static_cast<int>(bdf_.device_number) << "."  // Device (2 digits)
+        << static_cast<int>(bdf_.function_number);  // Function (1 digit)
+    return oss.str();
+}
+
+uint32_t AMDSmiGPUDevice::get_card_from_bdf() const {
+    const std::string drm_path = "/sys/class/drm/";
+
+    // Iterate over the contents of /sys/class/drm/
+    for (const auto& entry : std::filesystem::directory_iterator(drm_path)) {
+        const std::string device_name = entry.path().filename();
+
+        // Check if the entry starts with "card"
+        if (device_name.find("card") == 0) {
+            const std::string card_path = drm_path + device_name + "/device";
+
+            // Open the uevent file for the device
+            std::ifstream uevent_file(card_path + "/uevent");
+            if (!uevent_file) {
+                continue;  // Skip if the file is not found
+            }
+
+            std::string line;
+            while (std::getline(uevent_file, line)) {
+                // Check for the PCI_SLOT_NAME and if it contains the BDF
+                if (line.rfind("PCI_SLOT_NAME", 0) == 0 && line.find(bdf_to_string()) != std::string::npos) {
+                    return std::stoi(device_name.substr(4));  // Convert extracted number to int
+                }
+            }
+        }
+    }
+
+    return std::numeric_limits<uint32_t>::max();  // Return -1 if no matching card is found
+}
+
+uint32_t AMDSmiGPUDevice::get_render_id() const {
+    const std::string drm_path = "/sys/class/drm/";
+
+    // Iterate over the contents of /sys/class/drm/
+    for (const auto& entry : std::filesystem::directory_iterator(drm_path)) {
+        const std::string device_name = entry.path().filename();
+
+        // Check if the entry starts with "renderD"
+        if (device_name.find("renderD") == 0) {
+            const std::string render_path = drm_path + device_name + "/device";
+
+            // Open the uevent file for the device
+            std::ifstream uevent_file(render_path + "/uevent");
+            if (!uevent_file) {
+                continue;  // Skip if the file is not found
+            }
+
+            std::string line;
+            while (std::getline(uevent_file, line)) {
+                // Check for the PCI_SLOT_NAME and if it contains the BDF
+                if (line.rfind("PCI_SLOT_NAME", 0) == 0 && line.find(bdf_to_string()) != std::string::npos) {
+                    return std::stoi(device_name.substr(7));  // Extract only the number after "renderD"
+                }
+            }
+        }
+    }
+
+    return std::numeric_limits<uint32_t>::max();  // Return -1 if no matching render ID is found
 }
 
 
