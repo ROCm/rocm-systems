@@ -3804,7 +3804,7 @@ except AmdSmiException as e:
 
 ### amdsmi_set_gpu_compute_partition
 
-Description: Set the compute partition to the given GPU
+Description: Set the compute partition to the given GPU. This function does not allow any concurrent operations. Device must be idle and have no workloads when performing set partition operations.
 
 Input parameters:
 
@@ -3868,7 +3868,7 @@ except AmdSmiException as e:
 
 ### amdsmi_set_gpu_memory_partition
 
-Description: Set the memory partition to the given GPU
+Description: Set the memory partition to the given GPU. This function does not allow any concurrent operations. Devices must be idle and have no workloads when performing set partition operations.
 
 Input parameters:
 
