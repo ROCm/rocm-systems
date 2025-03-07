@@ -62,7 +62,7 @@ set_target_properties(
     rocprofiler-systems-shared-library
     PROPERTIES OUTPUT_NAME ${BINARY_NAME_PREFIX}
                VERSION ${PROJECT_VERSION}
-               SOVERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
+               SOVERSION ${PROJECT_VERSION_MAJOR}
                INSTALL_RPATH "${ROCPROFSYS_LIB_INSTALL_RPATH}")
 
 rocprofiler_systems_strip_target(rocprofiler-systems-shared-library)

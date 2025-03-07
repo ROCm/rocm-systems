@@ -36,7 +36,7 @@ set_target_properties(
     rocprofiler-systems-user-library
     PROPERTIES OUTPUT_NAME ${BINARY_NAME_PREFIX}-user
                VERSION ${PROJECT_VERSION}
-               SOVERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
+               SOVERSION ${PROJECT_VERSION_MAJOR}
                POSITION_INDEPENDENT_CODE ON
                BUILD_RPATH "\$ORIGIN"
                INSTALL_RPATH "\$ORIGIN")
