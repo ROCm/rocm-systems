@@ -30,7 +30,8 @@
 #include <map>
 #include <memory>
 #include <unordered_set>
-#include <filesystem>
+#include <dirent.h>
+#include <sys/types.h>
 
 namespace amd {
 namespace smi {
@@ -297,12 +298,18 @@ std::string AMDSmiGPUDevice::bdf_to_string() const {
     return oss.str();
 }
 
+
 uint32_t AMDSmiGPUDevice::get_card_from_bdf() const {
     const std::string drm_path = "/sys/class/drm/";
 
-    // Iterate over the contents of /sys/class/drm/
-    for (const auto& entry : std::filesystem::directory_iterator(drm_path)) {
-        const std::string device_name = entry.path().filename();
+    DIR* dir = opendir(drm_path.c_str());
+    if (!dir) {
+        return std::numeric_limits<uint32_t>::max();
+    }
+
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != nullptr) {
+        std::string device_name = entry->d_name;
 
         // Check if the entry starts with "card"
         if (device_name.find("card") == 0) {
@@ -318,21 +325,28 @@ uint32_t AMDSmiGPUDevice::get_card_from_bdf() const {
             while (std::getline(uevent_file, line)) {
                 // Check for the PCI_SLOT_NAME and if it contains the BDF
                 if (line.rfind("PCI_SLOT_NAME", 0) == 0 && line.find(bdf_to_string()) != std::string::npos) {
+                    closedir(dir);
                     return std::stoi(device_name.substr(4));  // Convert extracted number to int
                 }
             }
         }
     }
 
+    closedir(dir);
     return std::numeric_limits<uint32_t>::max();  // Return -1 if no matching card is found
 }
 
 uint32_t AMDSmiGPUDevice::get_render_id() const {
     const std::string drm_path = "/sys/class/drm/";
 
-    // Iterate over the contents of /sys/class/drm/
-    for (const auto& entry : std::filesystem::directory_iterator(drm_path)) {
-        const std::string device_name = entry.path().filename();
+    DIR* dir = opendir(drm_path.c_str());
+    if (!dir) {
+        return std::numeric_limits<uint32_t>::max();
+    }
+
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != nullptr) {
+        std::string device_name = entry->d_name;
 
         // Check if the entry starts with "renderD"
         if (device_name.find("renderD") == 0) {
@@ -348,12 +362,14 @@ uint32_t AMDSmiGPUDevice::get_render_id() const {
             while (std::getline(uevent_file, line)) {
                 // Check for the PCI_SLOT_NAME and if it contains the BDF
                 if (line.rfind("PCI_SLOT_NAME", 0) == 0 && line.find(bdf_to_string()) != std::string::npos) {
+                    closedir(dir);
                     return std::stoi(device_name.substr(7));  // Extract only the number after "renderD"
                 }
             }
         }
     }
 
+    closedir(dir);
     return std::numeric_limits<uint32_t>::max();  // Return -1 if no matching render ID is found
 }
 
