@@ -56,6 +56,7 @@ class AI_Data:
 
     total_flops: float
     valu_flops: float
+    mfma_flops_f8: float
     mfma_flops_f16: float
     mfma_flops_bf16: float
     mfma_flops_f32: float
@@ -193,11 +194,11 @@ def calc_ai(mspec, sort_type, ret_df):
     df = df.sort_values(by=["Kernel_Name"])
     df = df.reset_index(drop=True)
 
-    total_flops = valu_flops = mfma_flops_bf16 = mfma_flops_f16 = mfma_iops_i8 = (
-        mfma_flops_f32
-    ) = mfma_flops_f64 = lds_data = L1cache_data = L2cache_data = hbm_data = calls = (
-        totalDuration
-    ) = avgDuration = 0.0
+    total_flops = valu_flops = mfma_flops_f8 = mfma_flops_bf16 = mfma_flops_f16 = (
+        mfma_iops_i8
+    ) = mfma_flops_f32 = mfma_flops_f64 = lds_data = L1cache_data = L2cache_data = (
+        hbm_data
+    ) = calls = totalDuration = avgDuration = 0.0
 
     kernelName = ""
 
@@ -250,6 +251,8 @@ def calc_ai(mspec, sort_type, ret_df):
                 + (df["SQ_INSTS_VALU_MFMA_MOPS_F32"][idx] * 512)
                 + (df["SQ_INSTS_VALU_MFMA_MOPS_F64"][idx] * 512)
             )
+            if mspec.gpu_series != "MI200":
+                total_flops += df["SQ_INSTS_VALU_MFMA_MOPS_F8"][idx] * 512
         except KeyError:
             console_debug(
                 "roofline",
@@ -288,6 +291,8 @@ def calc_ai(mspec, sort_type, ret_df):
             pass
 
         try:
+            if mspec.gpu_series != "MI200":
+                mfma_flops_f8 += df["SQ_INSTS_VALU_MFMA_MOPS_F8"][idx] * 512
             mfma_flops_f16 += df["SQ_INSTS_VALU_MFMA_MOPS_F16"][idx] * 512
             mfma_flops_bf16 += df["SQ_INSTS_VALU_MFMA_MOPS_BF16"][idx] * 512
             mfma_flops_f32 += df["SQ_INSTS_VALU_MFMA_MOPS_F32"][idx] * 512
@@ -388,6 +393,7 @@ def calc_ai(mspec, sort_type, ret_df):
                     calls,
                     total_flops / calls,
                     valu_flops / calls,
+                    mfma_flops_f8 / calls,
                     mfma_flops_f16 / calls,
                     mfma_flops_bf16 / calls,
                     mfma_flops_f32 / calls,
@@ -406,11 +412,11 @@ def calc_ai(mspec, sort_type, ret_df):
                     kernelName, idx, calls
                 )
             )
-            total_flops = valu_flops = mfma_flops_bf16 = mfma_flops_f16 = mfma_iops_i8 = (
-                mfma_flops_f32
-            ) = mfma_flops_f64 = lds_data = L1cache_data = L2cache_data = hbm_data = (
-                calls
-            ) = totalDuration = avgDuration = 0.0
+            total_flops = valu_flops = mfma_flops_f8 = mfma_flops_bf16 = (
+                mfma_flops_f16
+            ) = mfma_iops_i8 = mfma_flops_f32 = mfma_flops_f64 = lds_data = (
+                L1cache_data
+            ) = L2cache_data = hbm_data = calls = totalDuration = avgDuration = 0.0
 
         if sort_type == "dispatches":
             myList.append(
@@ -419,6 +425,7 @@ def calc_ai(mspec, sort_type, ret_df):
                     calls,
                     total_flops,
                     valu_flops,
+                    mfma_flops_f8,
                     mfma_flops_f16,
                     mfma_flops_bf16,
                     mfma_flops_f32,
@@ -432,11 +439,11 @@ def calc_ai(mspec, sort_type, ret_df):
                     avgDuration,
                 )
             )
-            total_flops = valu_flops = mfma_flops_bf16 = mfma_flops_f16 = mfma_iops_i8 = (
-                mfma_flops_f32
-            ) = mfma_flops_f64 = lds_data = L1cache_data = L2cache_data = hbm_data = (
-                calls
-            ) = totalDuration = avgDuration = 0.0
+            total_flops = valu_flops = mfma_flops_f8 = mfma_flops_bf16 = (
+                mfma_flops_f16
+            ) = mfma_iops_i8 = mfma_flops_f32 = mfma_flops_f64 = lds_data = (
+                L1cache_data
+            ) = L2cache_data = hbm_data = calls = totalDuration = avgDuration = 0.0
 
     myList.sort(key=lambda x: x.totalDuration, reverse=True)
 

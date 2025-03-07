@@ -121,6 +121,7 @@ ROOF_ONLY_FILES = sorted(
     [
         "empirRoof_gpu-0_fp32_fp64.pdf",
         "empirRoof_gpu-0_int8_fp16.pdf",
+        "empirRoof_gpu-0_fp8.pdf",
         "pmc_perf.csv",
         "pmc_perf_0.csv",
         "pmc_perf_1.csv",

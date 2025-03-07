@@ -441,9 +441,9 @@ successfully.
 
 .. note::
 
-   ROCm Compute Profiler generates two roofline outputs to organize results and reduce
-   clutter. One chart plots FP32/FP64 performance while the other plots I8/FP16
-   performance.
+   ROCm Compute Profiler generates three roofline outputs to organize results and reduce
+   clutter. One chart plots FP32/FP64 performance, one plots I8/FP16
+   performance, and the other plots FP8 performance.
 
 The following image is a sample ``empirRoof_gpu-0_int8_fp16.pdf`` roofline
 plot.
