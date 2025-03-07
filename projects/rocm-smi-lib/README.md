@@ -1,5 +1,9 @@
+# 🛠️ Maintenance Mode Notice 🛠️
 
-## Use C++ in ROCm SMI 
+Starting with ROCm 6.5, only critical bug fixes will be applied to ROCm-SMI.
+For a seamless experience and continued support, please switch to [AMD-SMI](https://github.com/ROCm/amdsmi).
+
+## Use C++ in ROCm SMI
 
 ### Device Indices
 
@@ -7,7 +11,7 @@ Many of the functions in the library take a "device index". The device index is 
 
 ## Hello ROCm SMI
 
-The only required ROCm-SMI call for any program that wants to use ROCm-SMI is the `rsmi_init()` call. This call initializes some internal data structures that will be used by subsequent ROCm-SMI calls. 
+The only required ROCm-SMI call for any program that wants to use ROCm-SMI is the `rsmi_init()` call. This call initializes some internal data structures that will be used by subsequent ROCm-SMI calls.
 
 When ROCm-SMI is no longer being used, `rsmi_shut_down()` should be called. This provides a way to do any releasing of resources that ROCm-SMI may have held. In many cases, this may have no effect, but may be necessary in future versions of the library.
 
