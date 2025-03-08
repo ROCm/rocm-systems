@@ -80,6 +80,11 @@ class AMDSmiGPUDevice: public AMDSmiProcessor {
     amdsmi_status_t amdgpu_query_driver_name(std::string& name) const;
     amdsmi_status_t amdgpu_query_driver_date(std::string& date) const;
 
+// New methods for -e feature
+    std::string bdf_to_string() const;
+    uint32_t get_card_from_bdf() const;
+    uint32_t get_render_id() const;
+
  private:
     uint32_t gpu_id_;
     uint32_t fd_;

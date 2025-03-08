@@ -274,6 +274,46 @@ except AmdSmiException as e:
     print(e)
 ```
 
+### amdsmi_get_gpu_enumeration_info
+
+Description: Returns enumeration information for the given GPU
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Dictionary with fields
+
+Field | Content
+---|---
+`drm_render` | DRM render ID
+`drm_card` | DRM card ID
+`hsa_id` | HSA ID
+`hip_id` | HIP ID
+`hip_uuid` | HIP UUID
+
+Exceptions that can be thrown by `amdsmi_get_gpu_enumeration_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiRetryException`
+* `AmdSmiParameterException`
+
+Example:
+
+```python
+try:
+    devices = amdsmi_get_processor_handles()
+    for device in devices:
+        info = amdsmi_get_gpu_enumeration_info(device)
+        print("DRM Render ID:", info['drm_render'])
+        print("DRM Card ID:", info['drm_card'])
+        print("HSA ID:", info['hsa_id'])
+        print("HIP ID:", info['hip_id'])
+        print("HIP UUID:", info['hip_uuid'])
+except AmdSmiException as e:
+    print(e)
+```
+
 ### amdsmi_get_gpu_driver_info
 
 Description: Returns the info of the driver
@@ -3256,7 +3296,7 @@ Output: List of python dicts each containing a process information
 Field | Description
 ---|---
 `process_id` | Process ID
-`pasid` | PASID
+`pasid` | PASID (Not working in ROCm 6.4+, deprecating in 7.0)
 `vram_usage` | VRAM usage
 `sdma_usage` | SDMA usage in microseconds
 `cu_occupancy` | Compute Unit usage in percents
@@ -3290,7 +3330,7 @@ Output: Dict containing a process information
 Field | Description
 ---|---
 `process_id` | Process ID
-`pasid` | PASID
+`pasid` | PASID (Not working in ROCm 6.4+, deprecating in 7.0)
 `vram_usage` | VRAM usage
 `sdma_usage` | SDMA usage in microseconds
 `cu_occupancy` | Compute Unit usage in percents

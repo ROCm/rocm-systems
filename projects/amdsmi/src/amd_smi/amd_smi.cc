@@ -54,6 +54,7 @@
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi.h"
+#include "rocm_smi/rocm_smi_kfd.h"
 
 // a global instance of std::mutex to protect data passed during threads
 std::mutex myMutex;
@@ -123,6 +124,7 @@ static amdsmi_status_t get_gpu_device_from_handle(amdsmi_processor_handle proces
 
     return AMDSMI_STATUS_NOT_SUPPORTED;
 }
+
 
 template <typename F, typename ...Args>
 amdsmi_status_t rsmi_wrapper(F && f,
@@ -510,8 +512,8 @@ amdsmi_status_t amdsmi_get_processor_handles_by_type(amdsmi_socket_handle socket
     return AMDSMI_STATUS_SUCCESS;
 }
 
-
 #endif
+
 amdsmi_status_t amdsmi_get_processor_type(amdsmi_processor_handle processor_handle ,
               processor_type_t* processor_type) {
 
@@ -549,7 +551,103 @@ amdsmi_get_gpu_device_bdf(amdsmi_processor_handle processor_handle, amdsmi_bdf_t
     return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_handle, amdsmi_board_info_t *board_info) {
+amdsmi_status_t
+amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_handle,
+                           unsigned int *uuid_length,
+                           char *uuid) {
+    AMDSMI_CHECK_INIT();
+
+    if (uuid_length == nullptr || uuid == nullptr || uuid_length == nullptr || *uuid_length < AMDSMI_GPU_UUID_SIZE) {
+        return AMDSMI_STATUS_INVAL;
+    }
+
+    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+    amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
+    if (r != AMDSMI_STATUS_SUCCESS)
+        return r;
+
+    amdsmi_status_t status = AMDSMI_STATUS_SUCCESS;
+    SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
+
+    amdsmi_asic_info_t asic_info = {};
+    const uint8_t fcn = 0xff;
+
+    status = amdsmi_get_gpu_asic_info(processor_handle, &asic_info);
+    if (status != AMDSMI_STATUS_SUCCESS) {
+        printf("Getting asic info failed. Return code: %d", status);
+        return status;
+    }
+
+    /* generate random UUID */
+    status = amdsmi_uuid_gen(uuid,
+                strtoull(asic_info.asic_serial, nullptr, 16),
+                (uint16_t)asic_info.device_id, fcn);
+    return status;
+}
+
+amdsmi_status_t
+amdsmi_get_gpu_enumeration_info(amdsmi_processor_handle processor_handle,
+                                amdsmi_enumeration_info_t *info){
+
+    // Ensure library initialization
+    AMDSMI_CHECK_INIT();
+
+    if (info == nullptr) {
+        return AMDSMI_STATUS_INVAL;
+    }
+
+    amdsmi_status_t status;
+
+    // Retrieve GPU device from the processor handle
+    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+    status = get_gpu_device_from_handle(processor_handle, &gpu_device);
+    if (status != AMDSMI_STATUS_SUCCESS) {
+        return status;
+    }
+
+    // Retrieve DRM Card ID
+    info->drm_card = gpu_device->get_card_from_bdf();
+
+    // Retrieve DRM Render ID
+    info->drm_render = gpu_device->get_render_id();
+
+    // Retrieve HIP ID (difference from the smallest node ID) and HSA ID
+    std::map<uint64_t, std::shared_ptr<amd::smi::KFDNode>> nodes;
+    if (amd::smi::DiscoverKFDNodes(&nodes) == 0) {
+        uint32_t smallest_node_id = std::numeric_limits<uint32_t>::max();
+        for (const auto& node_pair : nodes) {
+            uint32_t node_id = 0;
+            if (node_pair.second->get_node_id(&node_id) == 0) {
+                smallest_node_id = std::min(smallest_node_id, node_id);
+            }
+        }
+
+        // Default to 0xffffffff as not supported
+        info->hsa_id = std::numeric_limits<uint32_t>::max();
+        info->hip_id = std::numeric_limits<uint32_t>::max();
+        amdsmi_kfd_info_t kfd_info;
+        status = amdsmi_get_gpu_kfd_info(processor_handle, &kfd_info);
+        if (status == AMDSMI_STATUS_SUCCESS) {
+            info->hsa_id = kfd_info.node_id;
+            info->hip_id = kfd_info.node_id - smallest_node_id;
+        }
+    }
+
+    // Retrieve HIP UUID
+    std::string hip_uuid_str = "GPU-";
+    amdsmi_asic_info_t asic_info = {};
+    status = amdsmi_get_gpu_asic_info(processor_handle, &asic_info);
+    if (status == AMDSMI_STATUS_SUCCESS) {
+        hip_uuid_str += std::string(asic_info.asic_serial).substr(0, sizeof(info->hip_uuid) - hip_uuid_str.size() - 1);
+        std::strncpy(info->hip_uuid, hip_uuid_str.c_str(), sizeof(info->hip_uuid) - 1);
+        info->hip_uuid[sizeof(info->hip_uuid) - 1] = '\0'; // Ensure null termination
+    }
+
+    return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t
+amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_handle, amdsmi_board_info_t *board_info) {
     AMDSMI_CHECK_INIT();
 
     if (board_info == nullptr) {
@@ -1276,6 +1374,7 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
 
     return AMDSMI_STATUS_SUCCESS;
 }
+
 
 amdsmi_status_t
 amdsmi_get_gpu_xgmi_link_status(amdsmi_processor_handle processor_handle,
@@ -3398,38 +3497,6 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
     return status;
 }
 
-
-amdsmi_status_t
-amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_handle, unsigned int *uuid_length, char *uuid) {
-    AMDSMI_CHECK_INIT();
-
-    if (uuid_length == nullptr || uuid == nullptr || uuid_length == nullptr || *uuid_length < AMDSMI_GPU_UUID_SIZE) {
-        return AMDSMI_STATUS_INVAL;
-    }
-
-    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
-    amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
-    if (r != AMDSMI_STATUS_SUCCESS)
-        return r;
-
-    amdsmi_status_t status = AMDSMI_STATUS_SUCCESS;
-    SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
-
-    amdsmi_asic_info_t asic_info = {};
-    const uint8_t fcn = 0xff;
-
-    status = amdsmi_get_gpu_asic_info(processor_handle, &asic_info);
-    if (status != AMDSMI_STATUS_SUCCESS) {
-        printf("Getting asic info failed. Return code: %d", status);
-        return status;
-    }
-
-    /* generate random UUID */
-    status = amdsmi_uuid_gen(uuid,
-                strtoull(asic_info.asic_serial, nullptr, 16),
-                (uint16_t)asic_info.device_id, fcn);
-    return status;
-}
 
 amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle, amdsmi_pcie_info_t *info) {
     AMDSMI_CHECK_INIT();

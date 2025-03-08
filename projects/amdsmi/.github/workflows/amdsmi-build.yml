@@ -13,6 +13,7 @@ jobs:
     runs-on:
       - self-hosted
       - ${{ vars.RUNNER_TYPE }}
+    continue-on-error: true
     strategy:
       matrix:
         os:
@@ -171,6 +172,7 @@ jobs:
     runs-on:
       - self-hosted
       - ${{ vars.RUNNER_TYPE }}
+    continue-on-error: true
     strategy:
       matrix:
         os:

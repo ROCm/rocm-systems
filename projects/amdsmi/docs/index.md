@@ -30,6 +30,7 @@ AMD SMI is the successor to <https://github.com/ROCm/rocm_smi_lib>.
 :::{grid-item-card} How to
 * [C++ library usage](./how-to/amdsmi-cpp-lib.md)
 * [Python library usage](./how-to/amdsmi-py-lib.md)
+* [Go library usage](./how-to/amdsmi-go-lib.md)
 * [CLI tool usage](./how-to/amdsmi-cli-tool.md)
 :::
 
@@ -41,6 +42,7 @@ AMD SMI is the successor to <https://github.com/ROCm/rocm_smi_lib>.
   * [Data structures](../doxygen/docBin/html/annotated)
   * [Data fields](../doxygen/docBin/html/functions_data_fields)
 * [Python API](./reference/amdsmi-py-api.md)
+* [Go API](./reference/amdsmi-go-api.md)
 :::
 
 :::{grid-item-card} Tutorials

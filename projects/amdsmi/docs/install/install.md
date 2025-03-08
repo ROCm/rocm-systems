@@ -13,12 +13,29 @@ and command line tool either as part of the
 
 (install_reqs)=
 ## Requirements
-The following are required to install and use the AMD SMI libraries and CLI
-tool.
 
-* Python 3.6.8+ (64-bit)
-* `amdgpu` driver must be loaded for [`amdsmi_init()`](#cpp_hello_amdsmi) to
-  work.
+The following are required to install and use the AMD SMI library through its language interfaces and CLI.
+
+* The `amdgpu` driver must be loaded for AMD SMI initialization to work.
+
+* Export `LD_LIBRARY_PATH` to the `amdsmi` installation directory.
+
+  ```bash
+  export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/lib:/opt/rocm/lib64
+  ```
+
+### Python interface and CLI tool prerequisites
+
+* Python version 3.6.8 or greater (64-bit)
+
+* Modules:
+  * `python3-wheel`
+
+  * `python3-setuptools`
+
+### Go interface prerequisites
+
+* Go version 1.20 or greater
 
 ### Supported platforms
 

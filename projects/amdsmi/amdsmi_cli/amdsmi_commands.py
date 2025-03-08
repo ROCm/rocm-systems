@@ -175,7 +175,6 @@ class AMDSMICommands():
         elif self.logger.is_json_format() or self.logger.is_csv_format():
             self.logger.print_output()
 
-
     def list(self, args, multiple_devices=False, gpu=None):
         """List information for target gpu
 
@@ -214,11 +213,19 @@ class AMDSMICommands():
             bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(args.gpu)
         except amdsmi_exception.AmdSmiLibraryException as e:
             bdf = e.get_error_info()
-
         try:
             uuid = amdsmi_interface.amdsmi_get_gpu_device_uuid(args.gpu)
         except amdsmi_exception.AmdSmiLibraryException as e:
             uuid = e.get_error_info()
+
+        try:
+            enumeration_info = amdsmi_interface.amdsmi_get_gpu_enumeration_info(args.gpu)
+        except:
+            enumeration_info = {"drm_render": "N/A",
+                                "drm_card": "N/A",
+                                "hip_id": "N/A",
+                                "hip_uuid": "N/A",
+                                "hsa_id": "N/A"}
 
         try:
             kfd_info = amdsmi_interface.amdsmi_get_gpu_kfd_info(args.gpu)
@@ -233,15 +240,26 @@ class AMDSMICommands():
         if self.logger.is_csv_format():
             self.logger.store_output(args.gpu, 'gpu_bdf', bdf)
             self.logger.store_output(args.gpu, 'gpu_uuid', uuid)
-            self.logger.store_output(args.gpu, 'kfd_id', kfd_id)
-            self.logger.store_output(args.gpu, 'node_id', node_id)
-            self.logger.store_output(args.gpu, 'partition_id', partition_id)
         else:
             self.logger.store_output(args.gpu, 'bdf', bdf)
             self.logger.store_output(args.gpu, 'uuid', uuid)
-            self.logger.store_output(args.gpu, 'kfd_id', kfd_id)
-            self.logger.store_output(args.gpu, 'node_id', node_id)
-            self.logger.store_output(args.gpu, 'partition_id', partition_id)
+
+        self.logger.store_output(args.gpu, 'kfd_id', kfd_id)
+        self.logger.store_output(args.gpu, 'node_id', node_id)
+        self.logger.store_output(args.gpu, 'partition_id', partition_id)
+
+        if args.e:
+            if enumeration_info['drm_render'] == "N/A":
+                self.logger.store_output(args.gpu, 'render', enumeration_info['drm_render'])
+            else:
+                self.logger.store_output(args.gpu, 'render', f"renderD{enumeration_info['drm_render']}")
+            if enumeration_info['drm_card'] == "N/A":
+                self.logger.store_output(args.gpu, 'card', enumeration_info['drm_card'])
+            else:
+                self.logger.store_output(args.gpu, 'card', f"card{enumeration_info['drm_card']}")
+            self.logger.store_output(args.gpu, 'hsa_id', enumeration_info['hsa_id'])
+            self.logger.store_output(args.gpu, 'hip_id', enumeration_info['hip_id'])
+            self.logger.store_output(args.gpu, 'hip_uuid', enumeration_info['hip_uuid'])
 
         if multiple_devices:
             self.logger.store_multiple_device_output()

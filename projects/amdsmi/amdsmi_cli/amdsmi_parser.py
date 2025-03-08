@@ -626,6 +626,8 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Create list subparser
         list_parser = subparsers.add_parser('list', help=list_help, description=list_subcommand_help)
+        # Create -e subparser
+        list_parser.add_argument("-e", action="store_true", help="Enumeration mapping to other features.\n    Lists the BDF, UUID, KFD_ID, CARD, RENDER, HIP_ID, HIP_UUID and HSA_ID for each GPU.")
         list_parser.formatter_class=lambda prog: AMDSMISubparserHelpFormatter(prog)
         list_parser.set_defaults(func=func)
 

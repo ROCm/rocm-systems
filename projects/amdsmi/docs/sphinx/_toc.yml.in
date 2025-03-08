@@ -15,6 +15,8 @@ subtrees:
     title: C++ library usage
   - file: how-to/amdsmi-py-lib.md
     title: Python library usage
+  - file: how-to/amdsmi-go-lib.md
+    title: Go library usage
   - file: how-to/amdsmi-cli-tool.md
     title: CLI tool usage
 
@@ -35,6 +37,8 @@ subtrees:
       title: Data fields
   - file: reference/amdsmi-py-api.md
     title: Python API
+  - file: reference/amdsmi-go-api.md
+    title: Go API
   - file: reference/changelog.md
     title: Changelog
 
