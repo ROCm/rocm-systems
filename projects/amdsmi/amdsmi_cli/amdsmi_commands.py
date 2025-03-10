@@ -29,10 +29,10 @@ import threading
 import time
 
 from _version import __version__
-from amdsmi import amdsmi_exception, amdsmi_interface
 from amdsmi_cli_exceptions import AmdSmiInvalidParameterException, AmdSmiRequiredCommandException
 from amdsmi_helpers import AMDSMIHelpers
 from amdsmi_logger import AMDSMILogger
+from amdsmi import amdsmi_exception, amdsmi_interface
 
 
 class AMDSMICommands():
