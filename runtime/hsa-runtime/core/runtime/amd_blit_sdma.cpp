@@ -301,6 +301,15 @@ hsa_status_t BlitSdma<RingIndexTy, HwIndexMonotonic, SizeToCountOffset, useGCR>:
         num_poll_command++;
     }
   }
+
+  // Workaround for rare-issue on gfx908 where SDMA_OP_POLL_REGMEM returns before
+  // polled memory is cleared
+  static bool doublePoll = agent_->supported_isas()[0]->GetMajorVersion() == 9 &&
+                           agent_->supported_isas()[0]->GetMinorVersion() == 0 &&
+                           agent_->supported_isas()[0]->GetStepping() != 10;
+  if (doublePoll)
+    num_poll_command *= 2;
+
   const uint32_t total_poll_command_size =
       (num_poll_command * poll_command_size_);
 
@@ -386,12 +395,26 @@ hsa_status_t BlitSdma<RingIndexTy, HwIndexMonotonic, SizeToCountOffset, useGCR>:
         command_addr += poll_command_size_;
         bytes_written_[wrapped_index] = prior_bytes;
         wrapped_index += poll_command_size_;
+
+        if (doublePoll) {
+          BuildPollCommand(command_addr, &signal_addr[1], 0);
+          command_addr += poll_command_size_;
+          bytes_written_[wrapped_index] = prior_bytes;
+          wrapped_index += poll_command_size_;
+        }
       }
       // Then wait for the lower 32 bits to 0.
       BuildPollCommand(command_addr, &signal_addr[0], 0);
       command_addr += poll_command_size_;
       bytes_written_[wrapped_index] = prior_bytes;
       wrapped_index += poll_command_size_;
+
+      if (doublePoll) {
+        BuildPollCommand(command_addr, &signal_addr[0], 0);
+        command_addr += poll_command_size_;
+        bytes_written_[wrapped_index] = prior_bytes;
+        wrapped_index += poll_command_size_;
+      }
     }
   }
 
