@@ -28,6 +28,7 @@
 #include "lib/rocprofiler-sdk/counters/core.hpp"
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/details/fmt.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/rocprofiler_packet.hpp"
@@ -82,6 +83,10 @@ submitPacket(hsa_queue_t* queue, const void* packet)
     // ringdoor bell
     hsa::get_core_table()->hsa_signal_store_relaxed_fn(queue->doorbell_signal, write_idx);
 
+    ROCP_TRACE << fmt::format("SLOT_IDX: {} WRITE_IDX: {} PKT: {}",
+                              slot_idx,
+                              write_idx,
+                              *static_cast<const hsa::rocprofiler_packet*>(packet));
     return write_idx;
 }
 
