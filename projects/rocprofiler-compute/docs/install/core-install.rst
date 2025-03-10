@@ -225,7 +225,7 @@ software stack.
 
          $ sudo apt install rocprofiler-compute
          # Include rocprofiler-compute in your system PATH
-         $ sudo update-alternatives --install /usr/bin/rocprofiler-compute rocprof-compute /opt/rocm/bin/rocprofiler-compute 0
+         $ sudo update-alternatives --install /usr/bin/rocprof-compute rocprof-compute /opt/rocm/bin/rocprof-compute 0
          # Install Python dependencies
          $ python3 -m pip install -r /opt/rocm/libexec/rocprofiler-compute/requirements.txt
 
@@ -235,7 +235,7 @@ software stack.
 
          $ sudo dnf install rocprofiler-compute
          # Include rocprofiler-compute in your system PATH
-         $ sudo update-alternatives --install /usr/bin/rocprofiler-compute rocprof-compute /opt/rocm/bin/rocprofiler-compute 0
+         $ sudo update-alternatives --install /usr/bin/rocprof-compute rocprof-compute /opt/rocm/bin/rocprof-compute 0
          # Install Python dependencies
          $ python3 -m pip install -r /opt/rocm/libexec/rocprofiler-compute/requirements.txt
 
@@ -245,7 +245,7 @@ software stack.
 
          $ sudo zypper install rocprofiler-compute
          # Include rocprofiler-compute in your system PATH
-         $ sudo update-alternatives --install /usr/bin/rocprofiler-compute rocprof-compute /opt/rocm/bin/rocprofiler-compute 0
+         $ sudo update-alternatives --install /usr/bin/rocprof-compute rocprof-compute /opt/rocm/bin/rocprof-compute 0
          # Install Python dependencies
          $ python3 -m pip install -r /opt/rocm/libexec/rocprofiler-compute/requirements.txt
 
