@@ -10,9 +10,12 @@ updates:
     open-pull-requests-limit: 10
     schedule:
       interval: "daily"
-    target-branch: "amd-staging"
+    target-branch: "develop"
     labels:
       - "documentation"
       - "dependencies"
     reviewers:
       - "samjwu"
+      - "feizheng10"
+      - "coleramos425"
+      - "vedithal-amd"
