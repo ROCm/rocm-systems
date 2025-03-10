@@ -208,8 +208,11 @@ template <typename Allocator> class SimpleHeap {
       cache_size_ -= size;
     } else {  // Alloc new block - new block may be larger than default.
       void* ptr = block_allocator_.alloc(bytes, size);
+      if (ptr == nullptr) {
+        fprintf(stderr, "Block allocation failed, Allocator is expected to throw.\n");
+        return nullptr;
+      }
       base = reinterpret_cast<uintptr_t>(ptr);
-      assert(ptr != nullptr && "Block allocation failed, Allocator is expected to throw.");
     }
 
     in_use_size_ += size;
