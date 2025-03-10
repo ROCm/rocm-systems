@@ -27,7 +27,6 @@ import logging
 import os
 import re
 import shutil
-import sys
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -51,15 +50,22 @@ from utils.utils import (
 
 
 class RocProfCompute_Base:
-    def __init__(self, args, profiler_mode, soc):
+    def __init__(self, args, profiler_mode, soc, supported_archs):
         self.__args = args
         self.__profiler = profiler_mode
+        self.__supported_archs = supported_archs
         self._soc = soc  # OmniSoC obj
         self.__perfmon_dir = str(
             Path(str(config.rocprof_compute_home)).joinpath(
                 "rocprof_compute_soc", "profile_configs"
             )
         )
+        self.__filter_hardware_blocks = [
+            name for name, type in args.filter_blocks.items() if type == "hardware_block"
+        ]
+        self.__filter_metric_ids = [
+            name for name, type in args.filter_blocks.items() if type == "metric_id"
+        ]
 
     def get_args(self):
         return self.__args
@@ -320,10 +326,14 @@ class RocProfCompute_Base:
         console_log("Command: " + str(self.__args.remaining))
         console_log("Kernel Selection: " + str(self.__args.kernel))
         console_log("Dispatch Selection: " + str(self.__args.dispatch))
-        if self.__args.ipblocks == None:
+        if self.__filter_hardware_blocks == None:
             console_log("Hardware Blocks: All")
         else:
-            console_log("Hardware Blocks: " + str(self.__args.ipblocks))
+            console_log("Hardware Blocks: " + str(self.__filter_hardware_blocks))
+        if self.__filter_metric_ids == None:
+            console_log("Report Sections: All")
+        else:
+            console_log("Report Sections: " + str(self.__filter_metric_ids))
 
         msg = "Collecting Performance Counters"
         (
@@ -424,7 +434,11 @@ class RocProfCompute_Base:
         gen_sysinfo(
             workload_name=self.__args.name,
             workload_dir=self.get_args().path,
-            ip_blocks=self.__args.ipblocks,
+            ip_blocks=[
+                name
+                for name, type in self.__args.filter_blocks.items()
+                if type == "hardware_block"
+            ],
             app_cmd=self.__args.remaining,
             skip_roof=self.__args.no_roof,
             roof_only=self.__args.roof_only,

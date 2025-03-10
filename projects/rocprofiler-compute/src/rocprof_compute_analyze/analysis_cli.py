@@ -100,4 +100,5 @@ class cli_analysis(OmniAnalyze_Base):
                     self._runs[self.get_args().path[0][0]].sys_info.iloc[0]["gpu_arch"]
                 ],
                 self._output,
+                self._profiling_config,
             )

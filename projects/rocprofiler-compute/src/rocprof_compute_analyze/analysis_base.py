@@ -45,6 +45,7 @@ class OmniAnalyze_Base:
         self.__args = args
         self._runs = OrderedDict()
         self._arch_configs = {}
+        self._profiling_config = dict()
         self.__supported_archs = supported_archs
         self._output = None
         self.__socs: dict = None  # available OmniSoC objs
@@ -253,6 +254,9 @@ class OmniAnalyze_Base:
         self._output = (
             open(self.__args.output_file, "w+") if self.__args.output_file else sys.stdout
         )
+
+        # Read profiling config
+        self._profiling_config = file_io.load_profiling_config(self.__args.path[0][0])
 
         # initalize runs
         self._runs = self.initalize_runs()

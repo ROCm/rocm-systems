@@ -6,7 +6,6 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 import test_utils
-from test_utils import binary_handler_analyze_rocprof_compute
 
 config = {}
 config["cleanup"] = True if "PYTEST_XDIST_WORKER_COUNT" in os.environ else False

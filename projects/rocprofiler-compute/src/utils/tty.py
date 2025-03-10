@@ -29,7 +29,7 @@ import pandas as pd
 from tabulate import tabulate
 
 from utils import parser
-from utils.utils import console_log, console_warning
+from utils.utils import console_log, console_warning, convert_metric_id_to_panel_idx
 
 hidden_columns = ["Tips", "coll_level"]
 hidden_sections = [1900, 2000]
@@ -60,10 +60,19 @@ def get_table_string(df, transpose=False, decimal=2):
     )
 
 
-def show_all(args, runs, archConfigs, output):
+def show_all(args, runs, archConfigs, output, profiling_config):
     """
     Show all panels with their data in plain text mode.
     """
+    comparable_columns = parser.build_comparable_columns(args.time_unit)
+    filter_panel_ids = [
+        convert_metric_id_to_panel_idx(section)
+        for section in [
+            name
+            for name, type in profiling_config.get("filter_blocks", {}).items()
+            if type == "metric_id"
+        ]
+    ]
     comparable_columns = parser.build_comparable_columns(args.time_unit)
 
     for panel_id, panel in archConfigs.panel_configs.items():
@@ -74,6 +83,27 @@ def show_all(args, runs, archConfigs, output):
 
         for data_source in panel["data source"]:
             for type, table_config in data_source.items():
+                # If block filtering was used during analysis, then dont use profiling config
+                # If block filtering was used in profiling config, only show those panels
+                # If block filtering not used in profiling config, show all panels
+                # Skip this table if table id or panel id is not present in block filters
+                # However, always show panel id <= 100
+                if (
+                    not args.filter_metrics
+                    and filter_panel_ids
+                    and table_config["id"] not in filter_panel_ids
+                    and panel_id not in filter_panel_ids
+                    and panel_id > 100
+                ):
+                    table_id_str = (
+                        str(table_config["id"] // 100)
+                        + "."
+                        + str(table_config["id"] % 100)
+                    )
+                    console_log(
+                        f"Not showing table not selected during profiling: {table_id_str} {table_config['title']}"
+                    )
+                    continue
                 # take the 1st run as baseline
                 base_run, base_data = next(iter(runs.items()))
                 base_df = base_data.dfs[table_config["id"]]
@@ -207,7 +237,25 @@ def show_all(args, runs, archConfigs, output):
                         + str(table_config["id"] % 100)
                     )
 
-                    if "title" in table_config and table_config["title"]:
+                    # Check if any column in df is empty
+                    is_empty_columns_exist = any(
+                        [
+                            df.columns[col_idx]
+                            for col_idx in range(len(df.columns))
+                            if df.replace("", None).iloc[:, col_idx].isnull().all()
+                        ]
+                    )
+                    # Do not print the table if any column is empty
+                    if is_empty_columns_exist:
+                        console_log(
+                            f"Not showing table with empty column(s): {table_id_str} {table_config['title']}"
+                        )
+
+                    if (
+                        "title" in table_config
+                        and table_config["title"]
+                        and not is_empty_columns_exist
+                    ):
                         ss += table_id_str + " " + table_config["title"] + "\n"
 
                     if args.df_file_dir:
@@ -238,10 +286,13 @@ def show_all(args, runs, archConfigs, output):
                         and "columnwise" in table_config
                         and table_config["columnwise"] == True
                     )
-                    ss += (
-                        get_table_string(df, transpose=transpose, decimal=args.decimal)
-                        + "\n"
-                    )
+                    if not is_empty_columns_exist:
+                        ss += (
+                            get_table_string(
+                                df, transpose=transpose, decimal=args.decimal
+                            )
+                            + "\n"
+                        )
 
         if ss:
             print("\n" + "-" * 80, file=output)

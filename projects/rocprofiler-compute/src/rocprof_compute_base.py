@@ -33,10 +33,11 @@ import time
 from pathlib import Path
 
 import pandas as pd
+import yaml
 
 import config
 from argparser import omniarg_parser
-from utils import file_io
+from utils import file_io, parser, schema
 from utils.logger import (
     setup_console_handler,
     setup_file_handler,
@@ -47,6 +48,7 @@ from utils.utils import (
     console_debug,
     console_error,
     console_log,
+    console_warning,
     demarcate,
     detect_rocprof,
     get_submodules,
@@ -231,9 +233,48 @@ class RocProfCompute:
         return
 
     @demarcate
+    def list_metrics(self):
+        if not self.__args.list_metrics:
+            arch = self.__mspec.gpu_arch
+        else:
+            arch = self.__args.list_metrics
+        if arch in self.__supported_archs.keys():
+            ac = schema.ArchConfig()
+            ac.panel_configs = file_io.load_panel_configs(
+                self.__args.config_dir.joinpath(arch)
+            )
+            sys_info = self.__mspec.get_class_members().iloc[0]
+            parser.build_dfs(archConfigs=ac, filter_metrics=[], sys_info=sys_info)
+            for key, value in ac.metric_list.items():
+                prefix = ""
+                if "." not in str(key):
+                    prefix = ""
+                elif str(key).count(".") == 1:
+                    prefix = "\t"
+                else:
+                    prefix = "\t\t"
+                print(prefix + key, "->", value)
+            sys.exit(0)
+        else:
+            console_error("Unsupported arch")
+
+    @demarcate
     def run_profiler(self):
         self.print_graphic()
         self.load_soc_specs()
+
+        if self.__args.list_metrics is not None:
+            self.list_metrics()
+        elif self.__args.name is None:
+            sys.exit("Either --list-name or --name is required")
+
+        # Deprecation warning for hardware blocks
+        if [
+            name
+            for name, type in self.__args.filter_blocks.items()
+            if type == "hardware_block"
+        ]:
+            console_warning("Hardware block based filtering will be deprecated soon")
 
         # FIXME:
         #     Changing default path should be done at the end of arg parsing stage,
@@ -250,25 +291,37 @@ class RocProfCompute:
             from rocprof_compute_profile.profiler_rocprof_v1 import rocprof_v1_profiler
 
             profiler = rocprof_v1_profiler(
-                self.__args, self.__profiler_mode, self.__soc[self.__mspec.gpu_arch]
+                self.__args,
+                self.__profiler_mode,
+                self.__soc[self.__mspec.gpu_arch],
+                self.__supported_archs,
             )
         elif self.__profiler_mode == "rocprofv2":
             from rocprof_compute_profile.profiler_rocprof_v2 import rocprof_v2_profiler
 
             profiler = rocprof_v2_profiler(
-                self.__args, self.__profiler_mode, self.__soc[self.__mspec.gpu_arch]
+                self.__args,
+                self.__profiler_mode,
+                self.__soc[self.__mspec.gpu_arch],
+                self.__supported_archs,
             )
         elif self.__profiler_mode == "rocprofv3":
             from rocprof_compute_profile.profiler_rocprof_v3 import rocprof_v3_profiler
 
             profiler = rocprof_v3_profiler(
-                self.__args, self.__profiler_mode, self.__soc[self.__mspec.gpu_arch]
+                self.__args,
+                self.__profiler_mode,
+                self.__soc[self.__mspec.gpu_arch],
+                self.__supported_archs,
             )
         elif self.__profiler_mode == "rocscope":
             from rocprof_compute_profile.profiler_rocscope import rocscope_profiler
 
             profiler = rocscope_profiler(
-                self.__args, self.__profiler_mode, self.__soc[self.__mspec.gpu_arch]
+                self.__args,
+                self.__profiler_mode,
+                self.__soc[self.__mspec.gpu_arch],
+                self.__supported_archs,
             )
         else:
             console_error("Unsupported profiler")
@@ -278,6 +331,11 @@ class RocProfCompute:
         # -----------------------
 
         self.__soc[self.__mspec.gpu_arch].profiling_setup()
+        # Write profiling configuration as yaml file
+        with open(Path(self.__args.path).joinpath("profiling_config.yaml"), "w") as f:
+            args_dict = vars(self.__args)
+            args_dict["config_dir"] = str(args_dict["config_dir"])
+            yaml.dump(args_dict, f)
         # enable file-based logging
         setup_file_handler(self.__args.loglevel, self.__args.path)
 

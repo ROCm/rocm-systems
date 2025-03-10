@@ -32,8 +32,8 @@ from utils.utils import console_error, console_log, demarcate, replace_timestamp
 
 
 class rocprof_v3_profiler(RocProfCompute_Base):
-    def __init__(self, profiling_args, profiler_mode, soc):
-        super().__init__(profiling_args, profiler_mode, soc)
+    def __init__(self, profiling_args, profiler_mode, soc, supported_archs):
+        super().__init__(profiling_args, profiler_mode, soc, supported_archs)
         self.ready_to_profile = (
             self.get_args().roof_only
             and not Path(self.get_args().path).joinpath("pmc_perf.csv").is_file()

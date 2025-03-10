@@ -191,7 +191,7 @@ def capture_subprocess_output(subprocess_args, new_env=None, profileMode=False):
     global rocprof_args
     # Format command for debug messages, formatting for rocprofv1 and rocprofv2
     command = " ".join(rocprof_args)
-    console_debug("subprocess", "Running: " + command)
+    console_debug("subprocess", "Running: " + command + " " + " ".join(subprocess_args))
     # Start subprocess
     # bufsize = 1 means output is line buffered
     # universal_newlines = True is required for line buffering
@@ -820,7 +820,7 @@ def gen_sysinfo(
     df["workload_name"] = workload_name
 
     blocks = []
-    if ip_blocks == None:
+    if not ip_blocks:
         t = ["SQ", "LDS", "SQC", "TA", "TD", "TCP", "TCC", "SPI", "CPC", "CPF"]
         blocks += t
     else:
@@ -1249,3 +1249,16 @@ def merge_counters_spatial_multiplex(df_multi_index):
 
     final_df = pd.concat(result_dfs, keys=coll_levels, axis=1, copy=False)
     return final_df
+
+
+def convert_metric_id_to_panel_idx(metric_id):
+    # "4.02" -> 402
+    # "4.23" -> 423
+    # "4" -> 400
+    tokens = metric_id.split(".")
+    if len(tokens) == 1:
+        return int(tokens[0]) * 100
+    elif len(tokens) == 2:
+        return int(tokens[0]) * 100 + int(tokens[1])
+    else:
+        raise Exception(f"Invalid metric id: {metric_id}")

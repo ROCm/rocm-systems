@@ -27,8 +27,8 @@ from utils.utils import console_log, demarcate
 
 
 class rocscope_profiler(RocProfCompute_Base):
-    def __init__(self, profiling_args, profiler_mode, soc):
-        super().__init__(profiling_args, profiler_mode, soc)
+    def __init__(self, profiling_args, profiler_mode, soc, supported_archs):
+        super().__init__(profiling_args, profiler_mode, soc, supported_archs)
 
     # -----------------------
     # Required child methods

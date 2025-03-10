@@ -1,8 +1,6 @@
 from unittest.mock import patch
 
-import pandas as pd
 import pytest
-from test_utils import binary_handler_analyze_rocprof_compute
 
 ##################################################
 ##          Generated tests                     ##

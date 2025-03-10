@@ -230,7 +230,7 @@ Filtering options
 -----------------
 
 ``-b``, ``--block <block-name>``
-   Allows system profiling on one or more selected hardware components to speed
+   Allows system profiling on one or more selected hardware report blocks to speed
    up the profiling process. See :ref:`profiling-hw-component-filtering`.
 
 ``-k``, ``--kernel <kernel-substr>``
@@ -251,21 +251,91 @@ Filtering options
 
 .. _profiling-hw-component-filtering:
 
-Hardware component filtering
+Hardware report block filtering
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-You can profile specific hardware components to speed up the profiling process.
-In ROCm Compute Profiler, the term hardware block to refers to a hardware component or a
-group of hardware components. All profiling results are accumulated in the same
-target directory without overwriting those for other hardware components. This
-enables incremental profiling and analysis.
+You can profile specific hardware report blocks to speed up the profiling process.
+In ROCm Compute Profiler, the term hardware report block refers to a section of the
+analysis report which focuses on metrics associated with a hardware component or
+a group of hardware components. All profiling results are accumulated in the same
+target directory without overwriting those for other hardware components.
+This enables incremental profiling and analysis.
 
-The following example only gathers hardware counters for the shader sequencer
-(SQ) and L2 cache (TCC) components, skipping all other hardware components.
+The following example only gathers hardware counters used to calculate metrics
+for ``Compute Unit - Instruction Mix`` (block 10) and ``Wavefront Launch Statistics``
+(block 7) sections of the analysis report, while skipping over all other hardware counters.
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --name vcopy -b SQ TCC -- ./vcopy -n 1048576 -b 256
+   $ rocprof-compute profile --name vcopy -b 10 7 -- ./vcopy -n 1048576 -b 256
+
+                                    __                                       _
+    _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
+   | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
+   | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
+   |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
+                  |_|                                           |_|
+
+   rocprofiler-compute version: 2.0.0
+   Profiler choice: rocprofv1
+   Path: /home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200
+   Target: MI200
+   Command: ./vcopy -n 1048576 -b 256
+   Kernel Selection: None
+   Dispatch Selection: None
+   Hardware Blocks: []
+   Report Sections: ['10', '7']
+
+   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   Collecting Performance Counters
+   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   ...
+
+
+To see a list of available hardware report blocks, use the ``--list-metrics`` option.
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --list-metrics
+
+                                    __                                       _
+    _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
+   | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
+   | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
+   |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
+                  |_|                                           |_|
+
+   0 -> Top Stats
+   1 -> System Info
+   2 -> System Speed-of-Light
+         2.1 -> Speed-of-Light
+                  2.1.0 -> VALU FLOPs
+                  2.1.1 -> VALU IOPs
+                  2.1.2 -> MFMA FLOPs (F8)
+   ...
+   5 -> Command Processor (CPC/CPF)
+         5.1 -> Command Processor Fetcher
+                  5.1.0 -> CPF Utilization
+                  5.1.1 -> CPF Stall
+                  5.1.2 -> CPF-L2 Utilization
+         5.2 -> Packet Processor
+                  5.2.0 -> CPC Utilization
+                  5.2.1 -> CPC Stall Rate
+                  5.2.5 -> CPC-UTCL1 Stall
+   ...
+   6 -> Workgroup Manager (SPI)
+         6.1 -> Workgroup Manager Utilizations
+                  6.1.0 -> Accelerator Utilization
+                  6.1.1 -> Scheduler-Pipe Utilization
+                  6.1.2 -> Workgroup Manager Utilization
+
+
+It is also possible to filter counter collection by hardware component such as Shader Sequencer (SQ)
+and L2 cache (TCC) as shown below.
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --name vcopy -b 10 7 -- ./vcopy -n 1048576 -b 256
 
                                     __                                       _
     _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
@@ -297,11 +367,17 @@ The following example only gathers hardware counters for the shader sequencer
    Kernel Selection: None
    Dispatch Selection: None
    Hardware Blocks: ['sq', 'tcc']
+   Report Sections: []
 
    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    Collecting Performance Counters
    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    ...
+
+.. warning::
+
+   Filtering by hardware components (e.g. SQ, TCC) will soon be deprecated.
+   It is recommended to use hardware report block based filtering.
 
 .. _profiling-kernel-filtering:
 

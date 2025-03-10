@@ -36,7 +36,7 @@ import yaml
 import config
 from utils import schema
 from utils.kernel_name_shortener import kernel_name_shortener
-from utils.utils import console_debug, console_error, demarcate
+from utils.utils import console_debug, console_error, console_log, demarcate
 
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd
@@ -83,6 +83,21 @@ def load_panel_configs(dir):
     # for key, value in od.items():
     #     print(key, value)
     return od
+
+
+def load_profiling_config(config_dir):
+    """
+    Load profiling config from yaml file.
+    """
+    try:
+        with open(Path(config_dir).joinpath("profiling_config.yaml")) as file:
+            prof_config = yaml.safe_load(file)
+            return prof_config
+    except FileNotFoundError:
+        console_log(
+            f"Could not find profiling_config.yaml in {config_dir} for filtering analysis report"
+        )
+    return dict()
 
 
 @demarcate

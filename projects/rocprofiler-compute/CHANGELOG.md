@@ -8,6 +8,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Add Docker files to package the application and dependencies into a single portable and executable standalone binary file
 
+* Analysis report based filtering
+  * -b option in profile mode now additionally accepts metric id(s) for analysis report based filtering
+  * -b option in profile mode also accept hardware IP block for filtering, however, this support will be deprecated soon
+  * --list-metrics option added in profile mode to list possible metric id(s), similar to analyze mode
+
 ### Changed
 
 * Change normal_unit default to per_kernel

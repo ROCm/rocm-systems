@@ -11,7 +11,6 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 import test_utils
-from test_utils import binary_handler_profile_rocprof_compute
 
 # Globals
 
@@ -1457,4 +1456,137 @@ def test_mem_levels_LDS(binary_handler_profile_rocprof_compute):
         file_dict,
     )
 
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.section
+def test_instmix_section(binary_handler_profile_rocprof_compute):
+    options = ["--block", "10"]
+    workload_dir = test_utils.get_output_dir()
+    _ = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=True, roof=False
+    )
+
+    file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
+    validate(
+        inspect.stack()[0][3],
+        workload_dir,
+        file_dict,
+    )
+
+    assert test_utils.check_file_pattern(
+        "'10': metric_id", f"{workload_dir}/profiling_config.yaml"
+    )
+    assert test_utils.check_file_pattern(
+        "SQ_INSTS_VALU_MFMA_F64", f"{workload_dir}/pmc_perf.csv"
+    )
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.section
+def test_instmix_memchart_section(binary_handler_profile_rocprof_compute):
+    options = ["--block", "10", "3"]
+    workload_dir = test_utils.get_output_dir()
+    _ = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=True, roof=False
+    )
+
+    file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
+    validate(
+        inspect.stack()[0][3],
+        workload_dir,
+        file_dict,
+    )
+
+    assert test_utils.check_file_pattern(
+        "'10': metric_id", f"{workload_dir}/profiling_config.yaml"
+    )
+    assert test_utils.check_file_pattern(
+        "'3': metric_id", f"{workload_dir}/profiling_config.yaml"
+    )
+    assert test_utils.check_file_pattern(
+        "SQ_INSTS_VALU_MFMA_F64", f"{workload_dir}/pmc_perf.csv"
+    )
+    assert test_utils.check_file_pattern(
+        "SQC_TC_DATA_READ_REQ", f"{workload_dir}/pmc_perf.csv"
+    )
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.section
+def test_instmix_section_TA_block(binary_handler_profile_rocprof_compute):
+    options = ["--block", "10", "TA"]
+    workload_dir = test_utils.get_output_dir()
+    _ = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=True, roof=False
+    )
+
+    file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
+    validate(
+        inspect.stack()[0][3],
+        workload_dir,
+        file_dict,
+    )
+
+    assert test_utils.check_file_pattern(
+        "'10': metric_id", f"{workload_dir}/profiling_config.yaml"
+    )
+    assert test_utils.check_file_pattern(
+        "TA: hardware_block", f"{workload_dir}/profiling_config.yaml"
+    )
+    assert test_utils.check_file_pattern(
+        "TA_FLAT_WAVEFRONTS", f"{workload_dir}/pmc_perf.csv"
+    )
+    assert not test_utils.check_file_pattern(
+        "SQC_TC_DATA_READ_REQ", f"{workload_dir}/pmc_perf.csv"
+    )
+    assert test_utils.check_file_pattern("", f"{workload_dir}/pmc_perf.csv")
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.section
+def test_instmix_section_global_write_kernel(binary_handler_profile_rocprof_compute):
+    options = ["-k", "global_write", "--block", "10"]
+    custom_config = dict(config)
+    custom_config["kernel_name_1"] = "global_write"
+    custom_config["app_1"] = ["./tests/vmem"]
+    num_kernels = 1
+
+    workload_dir = test_utils.get_output_dir()
+    _ = binary_handler_profile_rocprof_compute(
+        custom_config, workload_dir, options, check_success=True, roof=False
+    )
+
+    file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
+    validate(
+        inspect.stack()[0][3],
+        workload_dir,
+        file_dict,
+    )
+
+    assert test_utils.check_file_pattern(
+        "'10': metric_id", f"{workload_dir}/profiling_config.yaml"
+    )
+    assert test_utils.check_file_pattern(
+        "- global_write", f"{workload_dir}/profiling_config.yaml"
+    )
+    assert test_utils.check_file_pattern(
+        "SQ_INSTS_VALU_MFMA_F64", f"{workload_dir}/pmc_perf.csv"
+    )
+    assert test_utils.check_file_pattern("global_write", f"{workload_dir}/pmc_perf.csv")
+    assert not test_utils.check_file_pattern(
+        "global_read", f"{workload_dir}/pmc_perf.csv"
+    )
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.section
+def test_list_metrics(binary_handler_profile_rocprof_compute):
+    options = ["--list-metrics"]
+    workload_dir = test_utils.get_output_dir()
+    _ = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=True, roof=False
+    )
+    # workload dir should be empty
+    assert not os.listdir(workload_dir)
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
