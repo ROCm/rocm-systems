@@ -158,13 +158,20 @@ get_os_info()
 find_package(PkgConfig)
 # Check for libraries required for building
 find_library(LIBC NAMES c REQUIRED)
-find_library(NUMA NAMES numa REQUIRED)
-message(STATUS "LIBC:" ${LIBC})
-message(STATUS "NUMA:" ${NUMA})
+find_package(NUMA)
+if(NUMA_FOUND)
+  set(NUMA "${NUMA_LIBRARIES}")
+else()
+  find_library(NUMA NAMES numa REQUIRED)
+endif()
+message(STATUS "LIBC: " ${LIBC})
+message(STATUS "NUMA: " ${NUMA})
 
 ## If environment variable DRM_DIR is set, the script
 ## will pick up the corresponding libraries from that path.
-list (PREPEND CMAKE_PREFIX_PATH "${DRM_DIR}")
+if(DRM_DIR)
+  list (PREPEND CMAKE_PREFIX_PATH "${DRM_DIR}")
+endif()
 
 # The module name passed to pkg_check_modules() is determined by the
 # name of file *.pc
@@ -174,7 +181,7 @@ include_directories(${DRM_AMDGPU_INCLUDE_DIRS})
 include_directories(${DRM_INCLUDE_DIRS})
 
 target_link_libraries ( ${HSAKMT_TARGET}
-  PRIVATE ${DRM_LDFLAGS} ${DRM_AMDGPU_LDFLAGS} pthread rt c numa ${CMAKE_DL_LIBS}
+  PRIVATE ${DRM_LDFLAGS} ${DRM_AMDGPU_LDFLAGS} pthread rt ${LIBC} ${NUMA} ${CMAKE_DL_LIBS}
 )
 
 target_compile_options(${HSAKMT_TARGET} PRIVATE ${DRM_CFLAGS} ${HSAKMT_C_FLAGS})
