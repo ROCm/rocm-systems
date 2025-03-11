@@ -2378,7 +2378,11 @@ typedef enum {
   /*
   Memory has been shared with the local process via ROCr IPC APIs.
   */
-  HSA_EXT_POINTER_TYPE_IPC = 4
+  HSA_EXT_POINTER_TYPE_IPC = 4,
+  /*
+  No backend memory but virtual address
+  */
+  HSA_EXT_POINTER_TYPE_RESERVED_ADDR = 5
 } hsa_amd_pointer_type_t;
 
 /**
