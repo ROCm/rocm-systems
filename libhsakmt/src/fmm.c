@@ -1539,6 +1539,8 @@ static void *fmm_allocate_va(uint32_t gpu_id, void *address, uint64_t size,
 			aperture_release_area(aperture, mem, size);
 			mem = NULL;
 		}
+		/* Set node_id to 0 for OnlyAddress */
+		vm_obj->node_id = 0;
 	}
 
 	pthread_mutex_unlock(&aperture->fmm_mutex);
