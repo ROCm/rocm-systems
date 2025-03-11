@@ -282,6 +282,31 @@ endmacro()
 
 # -------------------------------------------------------------------------------------- #
 
+# Define the function to check for a specific GPU
+function(check_gpu gpu_name return_var)
+    # Run the rocminfo command and capture the output
+    execute_process(
+        COMMAND rocminfo | grep ${gpu_name}
+        OUTPUT_VARIABLE ROCMINFO_OUTPUT
+        RESULT_VARIABLE ROCMINFO_RESULT
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+    # Check if the specified GPU is present
+    if(ROCMINFO_RESULT EQUAL 0)
+        message(STATUS "${gpu_name} GPU detected")
+        set(${return_var}
+            TRUE
+            PARENT_SCOPE)
+    else()
+        message(STATUS "${gpu_name} GPU not detected")
+        set(${return_var}
+            FALSE
+            PARENT_SCOPE)
+    endif()
+endfunction()
+
+# -------------------------------------------------------------------------------------- #
+
 function(ROCPROFILER_SYSTEMS_WRITE_TEST_CONFIG _FILE _ENV)
     set(_ENV_ONLY
         "ROCPROFSYS_(CI|CI_TIMEOUT|MODE|USE_MPIP|DEBUG_[A-Z_]+|FORCE_ROCPROFILER_INIT|DEFAULT_MIN_INSTRUCTIONS|MONOCHROME|VERBOSE)="

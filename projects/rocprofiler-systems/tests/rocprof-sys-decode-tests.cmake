@@ -15,6 +15,15 @@ set(_jpeg_decode_environment
     "ROCPROFSYS_ROCM_SMI_METRICS=busy,temp,power,jpeg_activity,mem_usage"
     "ROCPROFSYS_SAMPLING_CPUS=none")
 
+check_gpu("MI300" MI300_DETECTED)
+if(MI300_DETECTED)
+    list(APPEND VCN_COUNTER_NAMES_ARG --counter-names "VCN Activity")
+    list(APPEND JPEG_COUNTER_NAMES_ARG --counter-names "JPEG Activity")
+endif()
+
+# check_gpu("MI100" MI100_DETECTED) if(MI100_DETECTED) list(APPEND VCN_COUNTER_NAMES_ARG
+# --counter-names "VCN Activity") endif()
+
 rocprofiler_systems_add_test(
     SKIP_BASELINE SKIP_RUNTIME SKIP_REWRITE
     NAME video-decode
@@ -29,15 +38,7 @@ rocprofiler_systems_add_validation_test(
     PERFETTO_METRIC "rocm_rocdecode_api"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "decode"
-    ARGS -l
-         rocDecCreateVideoParser
-         -c
-         2
-         -d
-         1
-         --counter-names
-         "VCN Activity"
-         -p)
+    ARGS -l rocDecCreateVideoParser -c 2 -d 1 ${VCN_COUNTER_NAMES_ARG} -p)
 
 # -------------------------------------------------------------------------------------- #
 #
@@ -59,12 +60,4 @@ rocprofiler_systems_add_validation_test(
     PERFETTO_METRIC "rocm_rocjpeg_api"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "decode"
-    ARGS -l
-         rocJpegCreate
-         -c
-         1
-         -d
-         1
-         --counter-names
-         "JPEG Activity"
-         -p)
+    ARGS -l rocJpegCreate -c 1 -d 1 ${JPEG_COUNTER_NAMES_ARG} -p)
