@@ -190,7 +190,7 @@ Examples:
     def validate_block(value):
         # Metric id regex, for example, 10, 4, 4.3, 4.32
         # Dont allow more than two digits after decimal point
-        metric_id_pattern = re.compile(r"^\d+$|^\d\.\d$|^\d+\.\d\d$")
+        metric_id_pattern = re.compile(r"^\d+$|^\d+\.\d$|^\d+\.\d\d$")
         # Allow only the following hardware blocks
         hardware_block_pattern = re.compile(r"^(SQ|SQC|TA|TD|TCP|TCC|SPI|CPC|CPF)$")
         if metric_id_pattern.match(value):
