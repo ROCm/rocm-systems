@@ -46,7 +46,7 @@ amdsmi_status_t AMDSmiLibraryLoader::load(const char* filename) {
       if (!libHandler_) {
           char* error = dlerror();
           std::cerr << "Fail to open " << filename <<": " << error
-                  << std::endl;
+                    << std::endl;
           return AMDSMI_STATUS_FAIL_LOAD_MODULE;
       }
     }

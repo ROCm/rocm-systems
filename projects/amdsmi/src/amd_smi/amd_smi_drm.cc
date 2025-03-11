@@ -38,24 +38,23 @@
 namespace amd {
 namespace smi {
 
-void closedir(DIR* /*ptr*/) {}
 
 std::string AMDSmiDrm::find_file_in_folder(const std::string& folder,
                const std::string& regex) {
     std::string file_name;
-    using dir_ptr = std::unique_ptr<DIR, decltype(&closedir)>;
-
-    struct dirent *dir = nullptr;
+    DIR *drm_dir;
+    struct dirent *dir;
     std::regex file_regex(regex);
-    auto drm_dir = dir_ptr(opendir(folder.c_str()), &closedir);
+    drm_dir = opendir(folder.c_str());
     if (drm_dir == nullptr) return file_name;
     std::cmatch m;
-    while ((dir = readdir(drm_dir.get())) != NULL) {
-        if (std::regex_search(dir->d_name, m, file_regex)) {
-            file_name = dir->d_name;
-            break;
-        }
+    while ((dir = readdir(drm_dir)) != nullptr) {
+      if (std::regex_search(dir->d_name, m, file_regex)) {
+        file_name = dir->d_name;
+        break;
+      }
     }
+    closedir(drm_dir);
     return file_name;
 }
 
@@ -197,9 +196,9 @@ amdsmi_status_t AMDSmiDrm::cleanup() {
         close(drm_fds_[i]);
     }
 
-    drm_fds_.clear();
-    drm_paths_.clear();
-    drm_bdfs_.clear();
+    if (!drm_fds_.empty()) {drm_fds_.clear();}
+    if (!drm_paths_.empty()) {drm_paths_.clear();}
+    if (!drm_bdfs_.empty()) {drm_bdfs_.clear();}
     lib_loader_.unload();
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -306,9 +305,15 @@ amdsmi_status_t AMDSmiDrm::get_drm_fd_by_index(uint32_t gpu_index, uint32_t *fd_
 }
 
 amdsmi_status_t AMDSmiDrm::get_bdf_by_index(uint32_t gpu_index, amdsmi_bdf_t *bdf_info) const {
-    if (gpu_index + 1 > drm_bdfs_.size()) return AMDSMI_STATUS_NOT_SUPPORTED;
-    *bdf_info = drm_bdfs_[gpu_index];
     std::ostringstream ss;
+    if (gpu_index + 1 > drm_bdfs_.size()) {
+        ss << __PRETTY_FUNCTION__ << " | gpu_index = " << gpu_index
+        << "; \nReturning = AMDSMI_STATUS_NOT_SUPPORTED";
+        LOG_INFO(ss);
+        // std::cout << ss.str() << std::endl;
+        return AMDSMI_STATUS_NOT_SUPPORTED;
+    }
+    *bdf_info = drm_bdfs_[gpu_index];
     ss << __PRETTY_FUNCTION__ << " | gpu_index = " << gpu_index
     << "; \nreceived bdf: Domain = " << bdf_info->domain_number
     << "; \nBus# = " << bdf_info->bus_number

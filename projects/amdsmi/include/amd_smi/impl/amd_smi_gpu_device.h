@@ -27,7 +27,6 @@
 #include "amd_smi/impl/amd_smi_processor.h"
 #include "amd_smi/impl/amd_smi_drm.h"
 #include "shared_mutex.h"  // NOLINT
-#include "rocm_smi/rocm_smi_logger.h"
 
 namespace amd {
 namespace smi {

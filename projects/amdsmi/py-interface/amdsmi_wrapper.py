@@ -2603,6 +2603,9 @@ amdsmi_get_power_cap_info.argtypes = [amdsmi_processor_handle, uint32_t, ctypes.
 amdsmi_get_pcie_info = _libraries['libamd_smi.so'].amdsmi_get_pcie_info
 amdsmi_get_pcie_info.restype = amdsmi_status_t
 amdsmi_get_pcie_info.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_pcie_info_t)]
+amdsmi_get_gpu_xcd_counter = _libraries['libamd_smi.so'].amdsmi_get_gpu_xcd_counter
+amdsmi_get_gpu_xcd_counter.restype = amdsmi_status_t
+amdsmi_get_gpu_xcd_counter.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint16)]
 amdsmi_get_fw_info = _libraries['libamd_smi.so'].amdsmi_get_fw_info
 amdsmi_get_fw_info.restype = amdsmi_status_t
 amdsmi_get_fw_info.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_fw_info_t)]
@@ -3050,7 +3053,7 @@ __all__ = \
     'amdsmi_get_gpu_virtualization_mode',
     'amdsmi_get_gpu_volt_metric', 'amdsmi_get_gpu_vram_info',
     'amdsmi_get_gpu_vram_usage', 'amdsmi_get_gpu_vram_vendor',
-    'amdsmi_get_gpu_xgmi_link_status',
+    'amdsmi_get_gpu_xcd_counter', 'amdsmi_get_gpu_xgmi_link_status',
     'amdsmi_get_hsmp_metrics_table',
     'amdsmi_get_hsmp_metrics_table_version', 'amdsmi_get_lib_version',
     'amdsmi_get_link_metrics', 'amdsmi_get_link_topology_nearest',

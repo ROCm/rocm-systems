@@ -121,6 +121,83 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         print()
         self.tearDown()
 
+    # amdsmi_get_vram_info should be supported on all ASICs
+    @handle_exceptions
+    def test_get_vram_info(self):
+        self.setUp()
+        processors = amdsmi.amdsmi_get_processor_handles()
+        self.assertGreaterEqual(len(processors), 1)
+        self.assertLessEqual(len(processors), 32)
+        for i in range(0, len(processors)):
+            bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
+            print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
+            print("\n###Test amdsmi_get_gpu_vram_info \n")
+
+            vram_types = {
+                amdsmi.AmdSmiVramType.UNKNOWN: "UNKNOWN",
+                amdsmi.AmdSmiVramType.HBM:     "HBM",
+                amdsmi.AmdSmiVramType.HBM2:    "HBM2",
+                amdsmi.AmdSmiVramType.HBM2E:   "HBM2E",
+                amdsmi.AmdSmiVramType.HBM3:    "HBM3",
+                amdsmi.AmdSmiVramType.DDR2:    "DDR2",
+                amdsmi.AmdSmiVramType.DDR3:    "DDR3",
+                amdsmi.AmdSmiVramType.DDR4:    "DDR4",
+                amdsmi.AmdSmiVramType.GDDR1:   "GDDR1",
+                amdsmi.AmdSmiVramType.GDDR2:   "GDDR2",
+                amdsmi.AmdSmiVramType.GDDR3:   "GDDR3",
+                amdsmi.AmdSmiVramType.GDDR4:   "GDDR4",
+                amdsmi.AmdSmiVramType.GDDR5:   "GDDR5",
+                amdsmi.AmdSmiVramType.GDDR6:   "GDDR6",
+                amdsmi.AmdSmiVramType.GDDR7:   "GDDR7",
+                amdsmi.AmdSmiVramType.MAX:     "MAX"
+            }
+
+            vram_vendors = {
+                amdsmi.AmdSmiVramVendor.SAMSUNG:  "SAMSUNG",
+                amdsmi.AmdSmiVramVendor.INFINEON: "INFINEON",
+                amdsmi.AmdSmiVramVendor.ELPIDA:   "ELPIDA",
+                amdsmi.AmdSmiVramVendor.ETRON:    "ETRON",
+                amdsmi.AmdSmiVramVendor.NANYA:    "NANYA",
+                amdsmi.AmdSmiVramVendor.HYNIX:    "HYNIX",
+                amdsmi.AmdSmiVramVendor.MOSEL:    "MOSEL",
+                amdsmi.AmdSmiVramVendor.WINBOND:  "WINBOND",
+                amdsmi.AmdSmiVramVendor.ESMT:     "ESMT",
+                amdsmi.AmdSmiVramVendor.MICRON:   "MICRON",
+                amdsmi.AmdSmiVramVendor.UNKNOWN:  "UNKNOWN"
+            }
+
+            vram_info = amdsmi.amdsmi_get_gpu_vram_info(processors[i])
+            print("  vram_info['vram_type'] is: {}".format(
+                vram_types[vram_info['vram_type']]))
+            print("  vram_info['vram_vendor'] is: {}".format(
+                vram_vendors[vram_info['vram_vendor']]))
+            print("  vram_info['vram_size'] is: {} MB".format(
+                vram_info['vram_size']))
+            print("  vram_info['vram_bit_width'] is: {}".format(
+                vram_info['vram_bit_width']))
+            print("  vram_info['vram_max_bandwidth'] is: {} GB/s".format(
+                vram_info['vram_max_bandwidth']))
+        print()
+        self.tearDown()
+    
+    # amdsmi_get_gpu_xcd_counter should be supported on all ASICs
+    @handle_exceptions
+    def test_get_xcd_counter(self):
+        self.setUp()
+        processors = amdsmi.amdsmi_get_processor_handles()
+        self.assertGreaterEqual(len(processors), 1)
+        self.assertLessEqual(len(processors), 32)
+        for i in range(0, len(processors)):
+            bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
+            print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
+            print("\n###Test amdsmi_get_gpu_xcd_counter \n")
+
+            xcd_count = amdsmi.amdsmi_get_gpu_xcd_counter(processors[i])
+            print("  xcd_counter['counter'] is: {}".format(
+                xcd_count))
+        print()
+        self.tearDown()
+
     # amdsmi_get_gpu_bad_page_info is not supported in Navi2x, Navi3x
     @handle_exceptions
     def test_bad_page_info(self):
@@ -863,6 +940,44 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             accelerator_partition = amdsmi.amdsmi_get_gpu_accelerator_partition_profile(processors[i])
             print("  Current partition id: {}".format(
                 accelerator_partition['partition_id']))
+            print("  Profile_type: {}".format(
+                accelerator_partition['partition_profile']['profile_type']))
+            print("  profile_index: {}".format(
+                accelerator_partition['partition_profile']['profile_index']))
+            print("  memory_caps: {}".format(
+                accelerator_partition['partition_profile']['memory_caps']))
+            print("  num_resources: {}".format(
+                accelerator_partition['partition_profile']['num_resources']))
+        print()
+        self.tearDown()
+
+    # Requires sudo (to see full resource/config detail).
+    # Should only be supported on MI300+ ASICs
+    @handle_exceptions
+    def test_accelerator_partition_profile_config(self):
+        self.setUp()
+        processors = amdsmi.amdsmi_get_processor_handles()
+        self.assertGreaterEqual(len(processors), 1)
+        self.assertLessEqual(len(processors), 32)
+        for i in range(0, len(processors)):
+            bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
+            print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
+            print("\n###Test amdsmi_get_gpu_accelerator_partition_profile_config \n")
+            profile_config = amdsmi.amdsmi_get_gpu_accelerator_partition_profile_config(processors[i])
+            print("  num_profiles: {}".format(profile_config['num_profiles']))
+            print("  num_resource_profiles: {}".format(profile_config['num_resource_profiles']))
+            print("  default_profile_index: {}".format(profile_config['default_profile_index']))
+            for p in profile_config['profiles']:
+                print("\t\t  profile_type: {}".format(p['profile_type']))
+                print("\t\t  num_partitions: {}".format(p['num_partitions']))
+                print("\t\t  profile_index: {}".format(p['profile_index']))
+                print("\t\t  num_resources: {}".format(p['num_resources']))
+                for r in range(0, p['num_resources']):
+                    print("\t\t\t  profile_index: {}".format(p['resources'][r]['profile_index']))
+                    print("\t\t\t  resource_type: {}".format(p['resources'][r]['resource_type']))
+                    print("\t\t\t  partition_resource: {}".format(p['resources'][r]['partition_resource']))
+                    print("\t\t\t  num_partitions_share_resource: {}".format(
+                        p['resources'][r]['num_partitions_share_resource']))
         print()
         self.tearDown()
 
