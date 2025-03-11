@@ -391,8 +391,11 @@ add_custom_target(
     # Create VERSION.sha file
     COMMAND git -C ${PROJECT_SOURCE_DIR} rev-parse HEAD > VERSION.sha
     # Build standalone binary
+    # NOTE: --no-deployment-flag=self-execution is used to avoid self-execution and fork
+    # bombs as explained in
+    # https://nuitka.net/user-documentation/common-issue-solutions.html#fork-bombs-self-execution
     COMMAND
-        ${Python3_EXECUTABLE} -m nuitka --mode=onefile
+        ${Python3_EXECUTABLE} -m nuitka --mode=onefile --no-deployment-flag=self-execution
         --include-data-files=${PROJECT_SOURCE_DIR}/VERSION*=./ --enable-plugin=no-qt
         --include-package=dash_svg --include-package-data=dash_svg
         --include-package=dash_bootstrap_components
