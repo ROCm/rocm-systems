@@ -37,11 +37,12 @@ rdc_status_t rdc_diag_test_cases_query(rdc_diag_test_cases_t test_cases[MAX_TEST
     return RDC_ST_BAD_PARAMETER;
   }
 
-  *test_case_count = 4;
+  *test_case_count = 3;
   test_cases[0] = RDC_DIAG_RVS_GST_TEST;
   test_cases[1] = RDC_DIAG_RVS_MEMBW_TEST;
   test_cases[2] = RDC_DIAG_RVS_H2DD2H_TEST;
-  test_cases[3] = RDC_DIAG_RVS_IET_TEST;
+  // Temporarily disabled due to configuration issues
+  // test_cases[3] = RDC_DIAG_RVS_IET_TEST;
 
   return RDC_ST_OK;
 }
