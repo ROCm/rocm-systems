@@ -909,8 +909,18 @@ executable_freeze(hsa_executable_t executable, const char* options)
                                     CHECK_NOTNULL(get_hip_register_data())
                                         ->rlock([device_name](
                                                     const hip::hip_register_data& register_data) {
-                                            return register_data.host_function_map.at(device_name);
+                                            // Add check for out of range here
+                                            const auto it =
+                                                register_data.host_function_map.find(device_name);
+                                            if(it == register_data.host_function_map.end())
+                                            {
+                                                return rocprofiler_callback_tracing_code_object_host_kernel_symbol_register_data_t{};
+                                            }
+                                            return it->second;
                                         });
+                                // when kernel_symbol_device_map kernels are not present in
+                                // host_function_map, skip.
+                                if(host_data.device_function == nullptr) continue;
                                 host_data.code_object_id   = sym_data.code_object_id;
                                 host_data.kernel_id        = sym_data.kernel_id;
                                 host_data.host_function_id = ++get_host_function_id();
