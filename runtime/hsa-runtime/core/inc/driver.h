@@ -211,6 +211,10 @@ public:
                                         uint32_t* timeout, uint32_t* size_copied,
                                         void* dest_mem_addr, bool* is_spm_data_loss) const = 0;
 
+  /// @brief Check if the HSA KMT Model is enabled
+  /// @param[out] enable True if the model is enabled, false otherwise
+  virtual hsa_status_t IsModelEnabled(bool* enable) const = 0;
+
   /// Unique identifier for supported kernel-mode drivers.
   const DriverType kernel_driver_type_;
 

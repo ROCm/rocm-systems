@@ -116,6 +116,7 @@ set ( HSAKMT_SRC "src/debug.c"
                  "src/events.c"
                  "src/fmm.c"
                  "src/globals.c"
+                 "src/hsakmtmodel.c"
                  "src/libhsakmt.c"
                  "src/memory.c"
                  "src/openclose.c"
@@ -185,6 +186,14 @@ target_link_libraries ( ${HSAKMT_TARGET}
 )
 
 target_compile_options(${HSAKMT_TARGET} PRIVATE ${DRM_CFLAGS} ${HSAKMT_C_FLAGS})
+
+include(CheckFunctionExists)
+set(CMAKE_REQUIRED_DEFINITIONS -D__USE_GNU=1)
+set(CMAKE_REQUIRED_INCLUDES sys/mman.h)
+check_function_exists(memfd_create HAVE_MEMFD_CREATE)
+if(HAVE_MEMFD_CREATE)
+  target_compile_definitions(${HSAKMT_TARGET} PRIVATE -DHAVE_MEMFD_CREATE=1)
+endif()
 
 ## Define default paths and packages.
 if( CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT )

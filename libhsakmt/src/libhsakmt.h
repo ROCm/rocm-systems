@@ -236,6 +236,8 @@ extern int hsakmt_ioctl(int fd, unsigned long request, void *arg);
 	typeof(a) tmp1 = (a), tmp2 = (b);	\
 	tmp1 > tmp2 ? tmp1 : tmp2; })
 
+#define POWER_OF_2(x) ((x && (!(x & (x - 1)))) ? 1 : 0)
+
 void hsakmt_clear_events_page(void);
 void hsakmt_fmm_clear_all_mem(void);
 void hsakmt_clear_process_doorbells(void);

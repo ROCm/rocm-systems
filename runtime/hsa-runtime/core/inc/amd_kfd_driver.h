@@ -115,6 +115,8 @@ public:
                                 uint32_t* size_copied, void* dest_mem_addr,
                                 bool* is_spm_data_loss) const override;
 
+  hsa_status_t IsModelEnabled(bool* enable) const override;
+
  private:
   /// @brief Allocate agent accessible memory (system / local memory).
   static void *AllocateKfdMemory(const HsaMemFlags &flags, uint32_t node_id,

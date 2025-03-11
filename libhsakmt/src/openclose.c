@@ -29,6 +29,7 @@
 #define _GNU_SOURCE
 
 #include "libhsakmt.h"
+#include "hsakmt/hsakmtmodel.h"
 
 #include <stdlib.h>
 #include <sys/types.h>
@@ -174,7 +175,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
 		if (result != HSAKMT_STATUS_SUCCESS)
 			goto open_failed;
 
-		if (hsakmt_kfd_fd < 0) {
+		// Check if we are using the hsakmtmodel and setup initial state
+		model_init_env_vars();
+
+		if (hsakmt_kfd_fd < 0 && !hsakmt_use_model) {
 			fd = open(kfd_device_name, O_RDWR | O_CLOEXEC);
 
 			if (fd == -1) {
@@ -193,8 +197,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
 
 		useSvmStr = getenv("HSA_USE_SVM");
 		hsakmt_is_svm_api_supported = !(useSvmStr && !strcmp(useSvmStr, "0"));
-
-		result = hsakmt_topology_sysfs_get_system_props(&sys_props);
+		if(!hsakmt_use_model)
+			result = hsakmt_topology_sysfs_get_system_props(&sys_props);
+		
 		if (result != HSAKMT_STATUS_SUCCESS)
 			goto topology_sysfs_failed;
 

@@ -112,8 +112,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAllocMemory(HSAuint32 PreferredNode,
 	return hsaKmtAllocMemoryAlign(PreferredNode, SizeInBytes, 0, MemFlags, MemoryAddress);
 }
 
-#define POWER_OF_2(x) ((x && (!(x & (x - 1)))) ? 1 : 0)
-
 HSAKMT_STATUS HSAKMTAPI hsaKmtAllocMemoryAlign(HSAuint32 PreferredNode,
 					  HSAuint64 SizeInBytes,
 					  HSAuint64 Alignment,

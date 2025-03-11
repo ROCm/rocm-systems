@@ -284,7 +284,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCheckRuntimeDebugSupport(void) {
 			return HSAKMT_STATUS_ERROR;
 
 		//ignore cpu node
-		if (node.NumCPUCores)
+		if (node.NumCPUCores && !node.NumFComputeCores)
 			continue;
 		if (!node.Capability.ui32.DebugSupportedFirmware)
 			return HSAKMT_STATUS_NOT_SUPPORTED;

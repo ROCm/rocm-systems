@@ -33,6 +33,7 @@
 #include <stdio.h>
 #include "hsakmt/linux/kfd_ioctl.h"
 #include "fmm.h"
+#include "hsakmt/hsakmtmodel.h"
 
 static HSAuint64 *events_page = NULL;
 
@@ -82,7 +83,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateEvent(HsaEventDescriptor *EventDesc,
 			pthread_mutex_unlock(&hsakmt_mutex);
 			return HSAKMT_STATUS_ERROR;
 		}
-		hsakmt_fmm_get_handle(events_page, (uint64_t *)&args.event_page_offset);
+		if (hsakmt_use_model)
+			model_set_event_page(events_page, KFD_SIGNAL_EVENT_LIMIT);
+		else
+			hsakmt_fmm_get_handle(events_page, (uint64_t *)&args.event_page_offset);
 	}
 
 	if (hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_CREATE_EVENT, &args) != 0) {

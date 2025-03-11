@@ -425,6 +425,9 @@ bool Load() {
   if (core::Runtime::runtime_singleton_->AgentDrivers().empty()) return false;
 
   for (auto& d : core::Runtime::runtime_singleton_->AgentDrivers()) {
+    bool is_model_enabled = false;
+    d->IsModelEnabled(&is_model_enabled);
+    if (is_model_enabled) continue;
     if (!InitializeDriver(d)) return false;
   }
 

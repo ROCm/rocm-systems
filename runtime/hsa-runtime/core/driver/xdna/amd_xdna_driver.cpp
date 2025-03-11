@@ -688,5 +688,11 @@ hsa_status_t XdnaDriver::SPMSetDestBuffer(uint32_t preferred_node_id, uint32_t s
   return HSA_STATUS_ERROR_INVALID_AGENT;
 }
 
+hsa_status_t XdnaDriver::IsModelEnabled(bool* enable) const {
+  // AIE does not support streaming performance monitor.
+  *enable = false;
+  return HSA_STATUS_SUCCESS;
+}
+
 } // namespace AMD
 } // namespace rocr

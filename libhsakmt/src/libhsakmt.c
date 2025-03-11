@@ -3,10 +3,14 @@
 #include <sys/ioctl.h>
 
 #include "libhsakmt.h"
+#include "hsakmt/hsakmtmodel.h"
 
 /* Call ioctl, restarting if it is interrupted */
 int hsakmt_ioctl(int fd, unsigned long request, void *arg)
 {
+	if (hsakmt_use_model)
+		return model_kfd_ioctl(request, arg);
+
 	int ret;
 
 	do {

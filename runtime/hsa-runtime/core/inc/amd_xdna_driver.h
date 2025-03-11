@@ -184,6 +184,8 @@ public:
                                 uint32_t* size_copied, void* dest_mem_addr,
                                 bool* is_spm_data_loss) const override;
 
+  hsa_status_t IsModelEnabled(bool* enable) const override;
+
  private:
   hsa_status_t QueryDriverVersion();
   /// @brief Allocate device accesible heap space.
