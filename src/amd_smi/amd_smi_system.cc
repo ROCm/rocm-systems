@@ -22,13 +22,13 @@
 
 #include <sstream>
 #include <iomanip>
+#include <fstream>
 #include "amd_smi/impl/amd_smi_system.h"
 #include "amd_smi/impl/amd_smi_gpu_device.h"
 #include "amd_smi/impl/amd_smi_common.h"
+#include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_main.h"
-#include <fstream>
-
 
 namespace amd {
 namespace smi {
@@ -111,7 +111,6 @@ amdsmi_status_t AMDSmiSystem::init(uint64_t flags) {
     }
 #endif
     return AMDSMI_STATUS_SUCCESS;
-
 }
 
 #ifdef ENABLE_ESMI_LIB
@@ -160,6 +159,7 @@ amdsmi_status_t AMDSmiSystem::populate_amd_cpus() {
 #endif
 
 amdsmi_status_t AMDSmiSystem::populate_amd_gpu_devices() {
+    AMDSmiSystem::cleanup();
     // init rsmi
     rsmi_driver_state_t state;
     rsmi_status_t ret = rsmi_init(0);
@@ -262,18 +262,15 @@ amdsmi_status_t AMDSmiSystem::cleanup() {
     }
 #endif
     if (init_flag_ & AMDSMI_INIT_AMD_GPUS) {
-        for (uint32_t i = 0; i < sockets_.size(); i++) {
-            delete sockets_[i];
-        }
-        processors_.clear();
-        sockets_.clear();
+        // we do not need to delete the sockets/processors, clear takes care of this
+        if (!processors_.empty()) {processors_.clear();}
+        if (!sockets_.empty()) {sockets_.clear();}
         init_flag_ &= ~AMDSMI_INIT_AMD_GPUS;
+        amd::smi::AMDSmiSystem::getInstance().clean_up_drm();
         rsmi_status_t ret = rsmi_shut_down();
         if (ret != RSMI_STATUS_SUCCESS) {
             return amd::smi::rsmi_to_amdsmi_status(ret);
         }
-
-        drm_.cleanup();
     }
 
     return AMDSMI_STATUS_SUCCESS;

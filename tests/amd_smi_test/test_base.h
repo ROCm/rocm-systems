@@ -26,6 +26,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <map>
 #include "amd_smi/amdsmi.h"
 
 // The max devices can be monitored
@@ -97,6 +98,46 @@ class TestBase {
   uint32_t num_iterations(void) const {
     return num_iterations_;
   }
+
+  const std::map<amdsmi_accelerator_partition_type_t, std::string> partition_types_map = {
+    { AMDSMI_ACCELERATOR_PARTITION_INVALID, "N/A" },
+    { AMDSMI_ACCELERATOR_PARTITION_SPX, "SPX" },
+    { AMDSMI_ACCELERATOR_PARTITION_DPX, "DPX" },
+    { AMDSMI_ACCELERATOR_PARTITION_TPX, "TPX" },
+    { AMDSMI_ACCELERATOR_PARTITION_QPX, "QPX" },
+    { AMDSMI_ACCELERATOR_PARTITION_CPX, "CPX" },
+    { AMDSMI_ACCELERATOR_PARTITION_MAX, "MAX" },
+  };
+
+  const std::map<amdsmi_accelerator_partition_type_t, std::string> accelerator_types_map = {
+    { AMDSMI_ACCELERATOR_PARTITION_INVALID, "AMDSMI_ACCELERATOR_PARTITION_INVALID" },
+    { AMDSMI_ACCELERATOR_PARTITION_SPX, "AMDSMI_ACCELERATOR_PARTITION_SPX" },
+    { AMDSMI_ACCELERATOR_PARTITION_DPX, "AMDSMI_ACCELERATOR_PARTITION_DPX" },
+    { AMDSMI_ACCELERATOR_PARTITION_TPX, "AMDSMI_ACCELERATOR_PARTITION_TPX" },
+    { AMDSMI_ACCELERATOR_PARTITION_QPX, "AMDSMI_ACCELERATOR_PARTITION_QPX" },
+    { AMDSMI_ACCELERATOR_PARTITION_CPX, "AMDSMI_ACCELERATOR_PARTITION_CPX" },
+    { AMDSMI_ACCELERATOR_PARTITION_MAX, "AMDSMI_ACCELERATOR_PARTITION_MAX" },
+  };
+
+  struct AcceleratorProfileConfig {
+    amdsmi_accelerator_partition_type_t original_profile_type;
+    std::string original_profile_type_str;
+    uint32_t original_profile_index;
+    uint32_t number_of_profiles;
+    std::vector<amdsmi_accelerator_partition_type_t> available_profiles;
+    std::vector<std::string> available_profile_str;
+    std::vector<uint32_t> available_profile_indices;
+  };
+
+  AcceleratorProfileConfig getAvailableProfileConfigs(uint32_t device_index,
+                              amdsmi_accelerator_partition_profile_t current_profile,
+                              amdsmi_accelerator_partition_profile_config_t config,
+                              bool isVerbose);
+  void waitForUserInput();
+
+  uint32_t promptNumDevicesToTest(uint32_t current_num_devices);
+
+  std::string getResourceType(amdsmi_accelerator_partition_resource_type_t resource_type);
 
  protected:
   void MakeHeaderStr(const char *inStr, std::string *outStr) const;

@@ -22,11 +22,11 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <gtest/gtest.h>
 
 #include <iostream>
 #include <string>
-
-#include <gtest/gtest.h>
+#include <map>
 #include "amd_smi/amdsmi.h"
 #include "id_info_read.h"
 #include "../test_common.h"
@@ -62,6 +62,15 @@ void TestIdInfoRead::Close() {
 }
 
 static const uint32_t kBufferLen = 80;
+
+static const std::map< amdsmi_virtualization_mode_t, std::string>
+  virtualization_mode_map = {
+  {AMDSMI_VIRTUALIZATION_MODE_UNKNOWN,      "UNKNOWN"},
+  {AMDSMI_VIRTUALIZATION_MODE_BAREMETAL,    "BAREMETAL"},
+  { AMDSMI_VIRTUALIZATION_MODE_HOST,        "HOST"},
+  { AMDSMI_VIRTUALIZATION_MODE_GUEST,       "GUEST"},
+  {AMDSMI_VIRTUALIZATION_MODE_PASSTHROUGH,  "PASSTHROUGH"}
+};
 
 void TestIdInfoRead::Run(void) {
   amdsmi_status_t err;
@@ -227,5 +236,20 @@ void TestIdInfoRead::Run(void) {
     // Verify api support checking functionality is working
     err = amdsmi_get_gpu_bdf_id(processor_handles_[i], nullptr);
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
+
+    // Verify api support checking functionality is working
+    err = amdsmi_get_gpu_virtualization_mode(processor_handles_[i], nullptr);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
+    amdsmi_virtualization_mode_t vmode;
+    err = amdsmi_get_gpu_virtualization_mode(processor_handles_[i], &vmode);
+    ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
+    IF_VERB(STANDARD) {
+      auto it = virtualization_mode_map.find(vmode);
+      if (it != virtualization_mode_map.end()) {
+        std::cout << "\t**Virtualization Mode: " << it->second << std::endl;
+      } else {
+        std::cout << "\t**Virtualization Mode: MAP TYPE UNKNOWN?" << std::endl;
+      }
+    }
   }
 }

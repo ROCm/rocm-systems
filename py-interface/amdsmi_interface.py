@@ -460,6 +460,36 @@ class AmdSmiVirtualizationMode(IntEnum):
     GUEST = amdsmi_wrapper.AMDSMI_VIRTUALIZATION_MODE_GUEST
     PASSTHROUGH = amdsmi_wrapper.AMDSMI_VIRTUALIZATION_MODE_PASSTHROUGH
 
+class AmdSmiVramType(IntEnum):
+    UNKNOWN = amdsmi_wrapper.AMDSMI_VRAM_TYPE_UNKNOWN
+    HBM = amdsmi_wrapper.AMDSMI_VRAM_TYPE_HBM
+    HBM2 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_HBM2
+    HBM2E = amdsmi_wrapper.AMDSMI_VRAM_TYPE_HBM2E
+    HBM3 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_HBM3
+    DDR2 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_DDR2
+    DDR3 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_DDR3
+    DDR4 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_DDR4
+    GDDR1 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_GDDR1
+    GDDR2 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_GDDR2
+    GDDR3 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_GDDR3
+    GDDR4 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_GDDR4
+    GDDR5 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_GDDR5
+    GDDR6 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_GDDR6
+    GDDR7 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_GDDR7
+    MAX = amdsmi_wrapper.AMDSMI_VRAM_TYPE__MAX
+
+class AmdSmiVramVendor(IntEnum):
+    SAMSUNG = amdsmi_wrapper.AMDSMI_VRAM_VENDOR_SAMSUNG
+    INFINEON = amdsmi_wrapper.AMDSMI_VRAM_VENDOR_INFINEON
+    ELPIDA = amdsmi_wrapper.AMDSMI_VRAM_VENDOR_ELPIDA
+    ETRON = amdsmi_wrapper.AMDSMI_VRAM_VENDOR_ETRON
+    NANYA = amdsmi_wrapper.AMDSMI_VRAM_VENDOR_NANYA
+    HYNIX = amdsmi_wrapper.AMDSMI_VRAM_VENDOR_HYNIX
+    MOSEL = amdsmi_wrapper.AMDSMI_VRAM_VENDOR_MOSEL
+    WINBOND = amdsmi_wrapper.AMDSMI_VRAM_VENDOR_WINBOND
+    ESMT = amdsmi_wrapper.AMDSMI_VRAM_VENDOR_ESMT
+    MICRON = amdsmi_wrapper.AMDSMI_VRAM_VENDOR_MICRON
+    UNKNOWN = amdsmi_wrapper.AMDSMI_VRAM_VENDOR_UNKNOWN
 
 class AmdSmiEventReader:
     def __init__(
@@ -2525,6 +2555,18 @@ def amdsmi_get_pcie_info(
 
     return pcie_info_dict
 
+def amdsmi_get_gpu_xcd_counter(processor_handle: amdsmi_wrapper.amdsmi_processor_handle) -> Dict[str, Any]:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    xcd_counter = ctypes.c_uint16()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_gpu_xcd_counter(
+            processor_handle, ctypes.byref(xcd_counter)
+        )
+    )
+
+    return xcd_counter.value
 
 def amdsmi_get_processor_handle_from_bdf(bdf):
     bdf = _parse_bdf(bdf)
@@ -2958,15 +3000,11 @@ def amdsmi_get_gpu_accelerator_partition_profile(
  
     length = profile.num_partitions
     partition_ids = []
-    for i in range(profile.num_partitions):
-        partition_ids.append(partition_id_list[i])
-
-    last_element = 0
-    if length > 0: 
-        last_element = length - 1
-    if ((partition_ids[last_element] == 0)
-        and not((profile_type_ret == str("SPX")) or (profile_type_ret == str("N/A")))):
-        partition_ids = "N/A"
+ 
+    #partition_id[0] will contain the partition id of each device
+    #BM/Guest will include this logic. Host will only display primary partition ids.
+    kPOSITION_OF_PARTITION_ID = 0
+    partition_ids.append(partition_id_list[kPOSITION_OF_PARTITION_ID])
 
     mem_caps_list = []
     if profile.memory_caps.nps_flags.nps1_cap == 1:

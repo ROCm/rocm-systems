@@ -407,7 +407,7 @@ typedef enum {
                                    //!< work together with shared memory
     AMDSMI_COMPUTE_PARTITION_QPX,   //!< Quad GPU mode (QPX)- Quarter XCCs
                                    //!< work together with shared memory
-    AMDSMI_COMPUTE_PARTITION_CPX,  //!< Core mode (CPX)- Per-chip XCC with
+    AMDSMI_COMPUTE_PARTITION_CPX   //!< Core mode (CPX)- Per-chip XCC with
                                    //!< shared memory
 } amdsmi_compute_partition_type_t;
 
@@ -5846,6 +5846,25 @@ amdsmi_get_power_cap_info(amdsmi_processor_handle processor_handle, uint32_t sen
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle, amdsmi_pcie_info_t *info);
+
+/**
+ *  @brief Returns the 'xcd_counter' from the GPU metrics associated with the device
+ *
+ *  @ingroup tagAsicBoardInfo
+ * 
+ *  @platform{gpu_bm_linux}  @platform{guest_1vf}  @platform{guest_mvf}
+ *
+ *  @param[in] processor_handle Device which to query
+ *
+ *  @param[inout] xcd_count a pointer to uint16_t to which the device gpu
+ *  metric unit will be stored. Must be allocated by user.
+ *
+ *  @retval ::AMDSMI_STATUS_SUCCESS is returned upon successful call.
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
+ *            does not exist for the given device.
+ */
+amdsmi_status_t amdsmi_get_gpu_xcd_counter(amdsmi_processor_handle processor_handle,
+                                            uint16_t *xcd_count);
 
 /** @} End tagAsicBoardInfo */
 

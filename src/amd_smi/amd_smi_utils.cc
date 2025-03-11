@@ -20,7 +20,9 @@
  * THE SOFTWARE.
  */
 
-#include <amdgpu.h>
+#include <limits.h>
+#include <sys/ioctl.h>
+#include <libdrm/amdgpu.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
@@ -34,6 +36,7 @@
 #include <xf86drmMode.h>
 #include <dirent.h>
 #include <sys/types.h>
+
 #include <memory>
 #include <random>
 #include <fstream>
@@ -42,13 +45,13 @@
 #include <cstdio>
 #include <sstream>
 #include <iterator>
-#include <sys/ioctl.h>
 #include <algorithm>
-#include <limits.h>
 
 #include "amd_smi/impl/amd_smi_utils.h"
+#include "amd_smi/impl/amd_smi_system.h"
 #include "shared_mutex.h"  // NOLINT
 #include "rocm_smi/rocm_smi_logger.h"
+#include "rocm_smi/rocm_smi_utils.h"
 
 std::string leftTrim(const std::string &s) {
   if (!s.empty()) {
@@ -94,15 +97,33 @@ std::string removeString(const std::string origStr,
   return modifiedStr;
 }
 
-void openFileAndModifyBuffer(std::string path, char *buff, size_t sizeOfBuff) {
+static void clearCharBufferAndReinitialize(char buffer[], uint32_t len, std::string newString) {
+    char *begin = &buffer[0];
+    char *end = &buffer[len];
+    std::fill(begin, end, 0);
+
+    // Safer approach - copy directly with length limit
+    size_t copy_len = std::min(static_cast<size_t>(len - 1), newString.length());
+    if (copy_len > 0) {
+        std::memcpy(buffer, newString.c_str(), copy_len);
+    }
+    buffer[copy_len] = '\0';
+  }
+
+int openFileAndModifyBuffer(std::string path, char *buff, size_t sizeOfBuff,
+                            bool trim_whitespace = true) {
     bool errorDiscovered = false;
     std::ifstream file(path, std::ifstream::in);
     std::string contents = {std::istreambuf_iterator<char>{file}, std::istreambuf_iterator<char>{}};
-    memset(buff, 0, sizeof(char) * sizeOfBuff);
+    clearCharBufferAndReinitialize(buff, sizeOfBuff, contents);
     if (!file.is_open()) {
         errorDiscovered = true;
     } else {
-        contents = trim(contents);
+        if (trim_whitespace) {
+            contents = amd::smi::trimAllWhiteSpace(contents);
+        }
+        // remove all new lines
+        contents.erase(std::remove(contents.begin(), contents.end(), '\n'), contents.cend());
     }
 
     file.close();
@@ -110,6 +131,9 @@ void openFileAndModifyBuffer(std::string path, char *buff, size_t sizeOfBuff) {
         && !contents.empty()) {
         std::strncpy(buff, contents.c_str(), sizeOfBuff-1);
         buff[sizeOfBuff-1] = '\0';
+        return 0;
+    } else {
+        return -1;
     }
 }
 
@@ -143,9 +167,6 @@ static bool isAMDGPU(std::string dev_path) {
 
 amdsmi_status_t smi_amdgpu_find_hwmon_dir(amd::smi::AMDSmiGPUDevice *device, std::string* full_path)
 {
-    if (!device->check_if_drm_is_supported()) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
     if (full_path == nullptr) {
         return AMDSMI_STATUS_API_FAILED;
     }
@@ -181,9 +202,6 @@ amdsmi_status_t smi_amdgpu_find_hwmon_dir(amd::smi::AMDSmiGPUDevice *device, std
 
 
 amdsmi_status_t smi_amdgpu_get_board_info(amd::smi::AMDSmiGPUDevice* device, amdsmi_board_info_t *info) {
-    if (!device->check_if_drm_is_supported()) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
     SMIGPUDEVICE_MUTEX(device->get_mutex())
     std::string model_number_path = "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/product_number");
     std::string product_serial_path = "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/serial_number");
@@ -191,25 +209,34 @@ amdsmi_status_t smi_amdgpu_get_board_info(amd::smi::AMDSmiGPUDevice* device, amd
     std::string manufacturer_name_path = "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/manufacturer");
     std::string product_name_path = "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/product_name");
 
-    openFileAndModifyBuffer(model_number_path, info->model_number, AMDSMI_MAX_STRING_LENGTH);
-    openFileAndModifyBuffer(product_serial_path, info->product_serial, AMDSMI_MAX_STRING_LENGTH);
-    openFileAndModifyBuffer(fru_id_path, info->fru_id, AMDSMI_MAX_STRING_LENGTH);
-    openFileAndModifyBuffer(manufacturer_name_path, info->manufacturer_name, AMDSMI_MAX_STRING_LENGTH);
-    openFileAndModifyBuffer(product_name_path, info->product_name, AMDSMI_MAX_STRING_LENGTH);
+    auto ret_mod = openFileAndModifyBuffer(model_number_path, info->model_number,
+                                           AMDSMI_MAX_STRING_LENGTH);
+    auto ret_ser = openFileAndModifyBuffer(product_serial_path, info->product_serial,
+                                           AMDSMI_MAX_STRING_LENGTH);
+    auto ret_fru = openFileAndModifyBuffer(fru_id_path, info->fru_id, AMDSMI_MAX_STRING_LENGTH);
+    auto ret_man = openFileAndModifyBuffer(manufacturer_name_path, info->manufacturer_name,
+                                           AMDSMI_MAX_STRING_LENGTH);
+    auto ret_prod = openFileAndModifyBuffer(product_name_path, info->product_name,
+                                            AMDSMI_MAX_STRING_LENGTH, false);
 
     std::ostringstream ss;
     ss << __PRETTY_FUNCTION__ << "[Before correction] "
        << "Returning status = AMDSMI_STATUS_SUCCESS"
        << " | model_number_path = |" << model_number_path << "|\n"
        << "; info->model_number: |" << info->model_number << "|\n"
+       << "; ret_mod = " << ret_mod << "|\n"
        << "\n product_serial_path = |" << product_serial_path << "|\n"
        << "; info->product_serial: |" << info->product_serial << "|\n"
+       << "; ret_ser = " << ret_ser << "|\n"
        << "\n fru_id_path = |" << fru_id_path << "|\n"
        << "; info->fru_id: |" << info->fru_id << "|\n"
+       << "; ret_fru = " << ret_fru << "|\n"
        << "\n manufacturer_name_path = |" << manufacturer_name_path << "|\n"
        << "; info->manufacturer_name: |" << info->manufacturer_name << "|\n"
+       << "; ret_man = " << ret_man << "|\n"
        << "\n product_name_path = |" << product_name_path << "|\n"
-       << "; info->product_name: |" << info->product_name << "|";
+       << "; info->product_name: |" << info->product_name << "|"
+       << "; ret_prod = " << ret_prod << "|\n";
     LOG_INFO(ss);
 
     return AMDSMI_STATUS_SUCCESS;
@@ -217,9 +244,6 @@ amdsmi_status_t smi_amdgpu_get_board_info(amd::smi::AMDSmiGPUDevice* device, amd
 
 amdsmi_status_t smi_amdgpu_get_power_cap(amd::smi::AMDSmiGPUDevice* device, int *cap)
 {
-    if (!device->check_if_drm_is_supported()) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
     constexpr int DATA_SIZE = 16;
     char val[DATA_SIZE];
     std::string fullpath;
@@ -251,9 +275,6 @@ amdsmi_status_t smi_amdgpu_get_power_cap(amd::smi::AMDSmiGPUDevice* device, int 
 amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_clk_type_t domain,
         int *max_freq, int *min_freq, int *num_dpm, int *sleep_state_freq)
 {
-    if (!device->check_if_drm_is_supported()) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
     SMIGPUDEVICE_MUTEX(device->get_mutex())
         std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device";
 
@@ -289,7 +310,7 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
     std::ifstream ranges(fullpath.c_str());
 
     if (ranges.fail()) {
-        return AMDSMI_STATUS_API_FAILED;
+        return AMDSMI_STATUS_NOT_SUPPORTED;
     }
 
     unsigned int max, min, dpm, sleep_freq;
@@ -339,16 +360,13 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
 }
 
 amdsmi_status_t smi_amdgpu_get_enabled_blocks(amd::smi::AMDSmiGPUDevice* device, uint64_t *enabled_blocks) {
-    if (!device->check_if_drm_is_supported()) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
     SMIGPUDEVICE_MUTEX(device->get_mutex())
-        std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device/ras/features";
+    std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device/ras/features";
     std::ifstream f(fullpath.c_str());
     std::string tmp_str;
 
     if (f.fail()) {
-        return AMDSMI_STATUS_API_FAILED;
+        return AMDSMI_STATUS_NOT_SUPPORTED;
     }
 
     std::string line;
@@ -372,9 +390,6 @@ amdsmi_status_t smi_amdgpu_get_enabled_blocks(amd::smi::AMDSmiGPUDevice* device,
 
 amdsmi_status_t smi_amdgpu_get_bad_page_info(amd::smi::AMDSmiGPUDevice* device,
         uint32_t *num_pages, amdsmi_retired_page_record_t *info) {
-    if (!device->check_if_drm_is_supported()) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
     SMIGPUDEVICE_MUTEX(device->get_mutex())
         std::string line;
     std::vector<std::string> badPagesVec;
@@ -449,9 +464,6 @@ static uint32_t GetDeviceIndex(const std::string s) {
 
 amdsmi_status_t smi_amdgpu_get_bad_page_threshold(amd::smi::AMDSmiGPUDevice* device,
         uint32_t *threshold) {
-    if (!device->check_if_drm_is_supported()) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
     SMIGPUDEVICE_MUTEX(device->get_mutex())
 
     //TODO: Accessing the node requires root privileges, and its interface may need to be exposed in another path
@@ -475,9 +487,6 @@ amdsmi_status_t smi_amdgpu_get_bad_page_threshold(amd::smi::AMDSmiGPUDevice* dev
 }
 
 amdsmi_status_t smi_amdgpu_validate_ras_eeprom(amd::smi::AMDSmiGPUDevice* device) {
-    if (!device->check_if_drm_is_supported()) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
     SMIGPUDEVICE_MUTEX(device->get_mutex())
 
     //uint32_t index = GetDeviceIndex(device->get_gpu_path());
@@ -487,9 +496,6 @@ amdsmi_status_t smi_amdgpu_validate_ras_eeprom(amd::smi::AMDSmiGPUDevice* device
 }
 
 amdsmi_status_t smi_amdgpu_get_ecc_error_count(amd::smi::AMDSmiGPUDevice* device, amdsmi_error_count_t *err_cnt) {
-    if (!device->check_if_drm_is_supported()) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
     SMIGPUDEVICE_MUTEX(device->get_mutex())
         char str[10];
 
@@ -511,81 +517,26 @@ amdsmi_status_t smi_amdgpu_get_ecc_error_count(amd::smi::AMDSmiGPUDevice* device
 
     return AMDSMI_STATUS_SUCCESS;
 }
-
 amdsmi_status_t smi_amdgpu_get_driver_version(amd::smi::AMDSmiGPUDevice* device, int *length, char *version) {
-    if (!device->check_if_drm_is_supported()) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
     SMIGPUDEVICE_MUTEX(device->get_mutex())
-        amdsmi_status_t status = AMDSMI_STATUS_SUCCESS;
-    FILE *fp;
-    char *tmp, *ptr, *token;
-    char *ver = NULL;
-    int i = 0;
+    amdsmi_status_t status = AMDSMI_STATUS_SUCCESS;
     size_t len;
-
-    if (length)
-        len = *length < AMDSMI_MAX_DRIVER_VERSION_LENGTH ? *length : AMDSMI_MAX_DRIVER_VERSION_LENGTH;
-    else
-        len = AMDSMI_MAX_DRIVER_VERSION_LENGTH;
-
-    std::string path = "/sys/module/amdgpu/version";
-
-    fp = fopen(path.c_str(), "r");
-    if (fp == nullptr){
-        fp = fopen("/proc/version", "r");
-        if (fp == nullptr) {
-            status = AMDSMI_STATUS_IO;
-            return status;
-        }
-
-        len = 0;
-        if (getline(&ver, &len, fp) <= 0) {
-            status = AMDSMI_STATUS_IO;
-            fclose(fp);
-            free(ver);
-            return status;
-        }
-
-        fclose(fp);
-
-        ptr = ver;
-        token = strtok_r(ptr, " ", &tmp);
-
-        if (!token) {
-            free(ver);
-            status = AMDSMI_STATUS_IO;
-            return status;
-        }
-        for (i = 0; i < 2; i++) {
-            ptr = strtok_r(NULL, " ", &tmp);
-            if (!ptr)
-                break;
-        }
-        if (i != 2 || !ptr) {
-            free(ver);
-            status = AMDSMI_STATUS_IO;
-            return status;
-        }
-        if (length)
-            len = *length < AMDSMI_MAX_DRIVER_VERSION_LENGTH ? *length :
-                AMDSMI_MAX_DRIVER_VERSION_LENGTH;
-        else
-            len = AMDSMI_MAX_DRIVER_VERSION_LENGTH;
-
-        strncpy(version, ptr,  len);
-        free(ver);
+    if (*length <= 0 || version == nullptr) {
+        return AMDSMI_STATUS_INVAL;
     } else {
-        if ((len = getline(&version, &len, fp)) <= 0)
-            status = AMDSMI_STATUS_IO;
-
-        fclose(fp);
-        if (length) {
-            *length = version[len-1] == '\n' ? static_cast<int>(len - 1) : static_cast<int>(len);
-        }
-        version[len-1] = version[len-1] == '\n' ? '\0' : version[len-1];
+        len = static_cast<size_t>(*length);
     }
 
+    std::string empty = "";
+    std::strncpy(version, empty.c_str(), len-1);
+    openFileAndModifyBuffer("/sys/module/amdgpu/version",
+                                      version, static_cast<size_t>(len));
+    if (version[0] == '\0') {
+        openFileAndModifyBuffer("/proc/version", version, static_cast<size_t>(len));
+        if (version[0] == '\0') {
+            return AMDSMI_STATUS_IO;
+        }
+    }
     return status;
 }
 
@@ -621,17 +572,37 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice
         return AMDSMI_STATUS_ARG_PTR_NULL;
     }
 
+    std::ostringstream ss;
+    // requires libdrm being active
     if (!device->check_if_drm_is_supported()) {
+        ss << __PRETTY_FUNCTION__ << " | DRM is not supported";
+        LOG_ERROR(ss);
         return AMDSMI_STATUS_NOT_SUPPORTED;
     }
 
     uint32_t major_version, minor_version;
     amdgpu_device_handle device_handle = nullptr;
+    std::string render_name = device->get_gpu_path();
+    int fd = -1;
+    std::string path = "/dev/dri/" + render_name;
 
-    uint32_t gpu_fd = device->get_gpu_fd();
+    if (render_name != "") {
+        fd = open(path.c_str(), O_RDWR | O_CLOEXEC);
+    } else {
+        market_name[0] = '\0';
+        close(fd);
+        return AMDSMI_STATUS_NOT_SUPPORTED;
+    }
+    ss << __PRETTY_FUNCTION__ << " | Render Name: "
+    << render_name << "; path: " << path << "; fd: " << fd;
+    LOG_DEBUG(ss);
 
-    int ret = amdgpu_device_initialize(gpu_fd, &major_version, &minor_version, &device_handle);
+    int ret = amdgpu_device_initialize(fd, &major_version, &minor_version, &device_handle);
     if (ret != 0) {
+        std::string empty = "";
+        std::strncpy(market_name, empty.c_str(), AMDSMI_256_LENGTH - 1);
+        amdgpu_device_deinitialize(device_handle);
+        close(fd);
         return AMDSMI_STATUS_DRM_ERROR;
     }
 
@@ -641,19 +612,17 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice
         std::strncpy(market_name, name, AMDSMI_256_LENGTH - 1);
         market_name[AMDSMI_256_LENGTH - 1] = '\0';
         amdgpu_device_deinitialize(device_handle);
+        close(fd);
         return AMDSMI_STATUS_SUCCESS;
     }
 
     amdgpu_device_deinitialize(device_handle);
+    close(fd);
     return AMDSMI_STATUS_DRM_ERROR;
 }
 
 amdsmi_status_t smi_amdgpu_is_gpu_power_management_enabled(amd::smi::AMDSmiGPUDevice* device,
         bool *enabled) {
-    if (!device->check_if_drm_is_supported()) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
-
     if (enabled == nullptr) {
         return AMDSMI_STATUS_API_FAILED;
     }
@@ -713,3 +682,184 @@ std::string smi_amdgpu_get_status_string(amdsmi_status_t ret, bool fullStatus = 
   return std::string(err_str);
 }
 
+// TODO(amdsmi_team): Do we want to include these functions in header?
+amdsmi_status_t smi_amdgpu_get_device_index(amdsmi_processor_handle processor_handle,
+                                            uint32_t *device_index) {
+  uint32_t socket_count;
+  std::vector<amdsmi_socket_handle> sockets;
+  std::ostringstream ss;
+
+  if (device_index == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+  *device_index = std::numeric_limits<uint32_t>::max();  // set to max value for invalid readings
+
+  auto ret = amdsmi_get_socket_handles(&socket_count, nullptr);
+  if (ret != AMDSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+  // allocate memory
+  sockets.resize(socket_count);
+  ret = amdsmi_get_socket_handles(&socket_count, &sockets[0]);
+  if (ret != AMDSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  uint32_t current_device_index = 0;
+  for (uint32_t i = 0; i < socket_count; i++) {
+    // Get Socket info
+    char socket_info[128];
+    ret = amdsmi_get_socket_info(sockets[i], 128, socket_info);
+    ss << __PRETTY_FUNCTION__ << " | Socket " << socket_info << "\n";
+    LOG_DEBUG(ss);
+
+    // Get the device count available for the socket.
+    uint32_t device_count = 0;
+    ret = amdsmi_get_processor_handles(sockets[i], &device_count, nullptr);
+
+    // Allocate the memory for the device handlers on the socket
+    std::vector<amdsmi_processor_handle> processor_handles(device_count);
+    // Get all devices of the socket
+    ret = amdsmi_get_processor_handles(sockets[i], &device_count, &processor_handles[0]);
+    ss << __PRETTY_FUNCTION__ << " | Processor Count: " << device_count << "\n";
+    LOG_DEBUG(ss);
+
+    for (uint32_t j = 0; j < device_count; j++) {
+      if (processor_handles[j] == processor_handle) {
+        *device_index = current_device_index;
+        ss << __PRETTY_FUNCTION__ << " | AMDSMI_STATUS_SUCCESS "
+           << "Returning device_index: " << *device_index << "\nSocket #: " << i
+           << "; Device #: " << j << "; current_device_index #: " << current_device_index
+           << "\n";
+        // std::cout << ss.str();
+        LOG_DEBUG(ss);
+        return AMDSMI_STATUS_SUCCESS;
+      }
+      current_device_index++;
+    }
+  }
+  ss << __PRETTY_FUNCTION__ << " | AMDSMI_STATUS_API_FAILED "
+     << "Returning device_index: " << *device_index << "\n";
+  LOG_DEBUG(ss);
+  return AMDSMI_STATUS_API_FAILED;
+}
+
+// TODO(amdsmi_team): Do we want to include these functions in header?
+amdsmi_status_t smi_amdgpu_get_device_count(uint32_t *total_num_devices) {
+  uint32_t socket_count;
+  std::vector<amdsmi_socket_handle> sockets;
+  std::ostringstream ss;
+
+  if (total_num_devices == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+  // set to max value for invalid readings
+  *total_num_devices = std::numeric_limits<uint32_t>::max();
+
+  auto ret = amdsmi_get_socket_handles(&socket_count, nullptr);
+  if (ret != AMDSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+  // allocate memory
+  sockets.resize(socket_count);
+  ret = amdsmi_get_socket_handles(&socket_count, &sockets[0]);
+  if (ret != AMDSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  uint32_t device_num = 0;
+  for (uint32_t i = 0; i < socket_count; i++) {
+    // Get Socket info
+    char socket_info[128];
+    ret = amdsmi_get_socket_info(sockets[i], 128, socket_info);
+    ss << __PRETTY_FUNCTION__ << " | Socket " << socket_info << "\n";
+    LOG_DEBUG(ss);
+
+    // Get the processor count available for the socket.
+    uint32_t processor_count = 0;
+    ret = amdsmi_get_processor_handles(sockets[i], &processor_count, nullptr);
+
+    // Allocate the memory for the device handlers on the socket
+    std::vector<amdsmi_processor_handle> processor_handles(processor_count);
+    // Get all devices of the socket
+    ret = amdsmi_get_processor_handles(sockets[i], &processor_count, &processor_handles[0]);
+    ss << __PRETTY_FUNCTION__ << " | Processor Count: " << processor_count << "\n";
+    LOG_DEBUG(ss);
+
+    for (uint32_t j = 0; j < processor_count; j++) {
+      device_num++;
+    }
+  }
+  *total_num_devices = device_num;
+  ss << __PRETTY_FUNCTION__ << " | AMDSMI_STATUS_SUCCESS "
+     << "Returning device_index: " << *total_num_devices << "\n";
+  LOG_DEBUG(ss);
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+// TODO(amdsmi_team): Do we want to include these functions in header?
+amdsmi_status_t smi_amdgpu_get_processor_handle_by_index(
+                                        uint32_t device_index,
+                                        amdsmi_processor_handle *processor_handle) {
+  uint32_t socket_count;
+  std::vector<amdsmi_socket_handle> sockets;
+  std::ostringstream ss;
+
+  if (processor_handle == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  auto ret = amdsmi_get_socket_handles(&socket_count, nullptr);
+  if (ret != AMDSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+  // allocate memory
+  sockets.resize(socket_count);
+  ret = amdsmi_get_socket_handles(&socket_count, &sockets[0]);
+  if (ret != AMDSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  uint32_t current_device_index = 0;
+  for (uint32_t i = 0; i < socket_count; i++) {
+    // Get Socket info
+    char socket_info[128];
+    ret = amdsmi_get_socket_info(sockets[i], 128, socket_info);
+    ss << __PRETTY_FUNCTION__ << " | Socket " << socket_info << "\n";
+    LOG_DEBUG(ss);
+
+    // Get the device count available for the socket.
+    uint32_t device_count = 0;
+    ret = amdsmi_get_processor_handles(sockets[i], &device_count, nullptr);
+
+    // Allocate the memory for the device handlers on the socket
+    std::vector<amdsmi_processor_handle> processor_handles(device_count);
+    // Get all devices of the socket
+    ret = amdsmi_get_processor_handles(sockets[i], &device_count, &processor_handles[0]);
+    ss << __PRETTY_FUNCTION__ << " | Processor Count: " << device_count << "\n";
+    LOG_DEBUG(ss);
+
+    for (uint32_t j = 0; j < device_count; j++) {
+    //   std::cout << "current_device_index: " << current_device_index
+    //   << " device_index: " << device_index << std::endl;
+      if (current_device_index == device_index) {
+        *processor_handle = processor_handles[j];
+        ss << __PRETTY_FUNCTION__ << " | AMDSMI_STATUS_SUCCESS"
+           << "\nReturning processor_handle for device_index: " << device_index
+           << "\nSocket #: " << i << "; Device #: " << j
+           << "; current_device_index #: " << current_device_index
+           << "; processor_handle: " << *processor_handle
+           << "; processor_handles[j]: " << processor_handles[j]
+           << "\n";
+        // std::cout << ss.str();
+        LOG_DEBUG(ss);
+        return AMDSMI_STATUS_SUCCESS;
+      }
+      current_device_index++;
+    }
+  }
+  ss << __PRETTY_FUNCTION__ << " | AMDSMI_STATUS_API_FAILED "
+     << "Could not find matching processor_handle for device_index: " << device_index << "\n";
+  LOG_DEBUG(ss);
+  return AMDSMI_STATUS_API_FAILED;
+}

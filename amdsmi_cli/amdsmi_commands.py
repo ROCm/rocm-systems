@@ -387,6 +387,8 @@ class AMDSMICommands():
             args.cache = cache
         if process_isolation:
             args.process_isolation = process_isolation
+        if partition:
+            args.partition = partition
         if clock:
             args.clock = clock
         # args.clock defaults to False so if it was overwritten to empty list, that indicates that it was given as an arguments but with an empty list
@@ -396,24 +398,22 @@ class AMDSMICommands():
         # Store args that are applicable to the current platform
         current_platform_args = ["asic", "bus", "vbios", "driver", "ras",
                                  "vram", "cache", "board", "process_isolation",
-                                 "clock"]
+                                 "clock", "partition"]
         current_platform_values = [args.asic, args.bus, args.vbios, args.driver, args.ras,
                                    args.vram, args.cache, args.board, args.process_isolation,
-                                   args.clock]
+                                   args.clock, args.partition]
 
         self.helpers.check_required_groups()
 
         if self.helpers.is_linux() and self.helpers.is_baremetal():
-            if partition:
-                args.partition = partition
             if limit:
                 args.limit = limit
             if soc_pstate:
                 args.soc_pstate = soc_pstate
             if xgmi_plpd:
                 args.xgmi_plpd = xgmi_plpd
-            current_platform_args += ["ras", "limit", "partition", "soc_pstate", "xgmi_plpd"]
-            current_platform_values += [args.ras, args.limit, args.partition, args.soc_pstate, args.xgmi_plpd]
+            current_platform_args += ["ras", "limit", "soc_pstate", "xgmi_plpd"]
+            current_platform_values += [args.ras, args.limit, args.soc_pstate, args.xgmi_plpd]
 
         if self.helpers.is_linux() and not self.helpers.is_virtual_os():
             if numa:
@@ -4240,7 +4240,7 @@ class AMDSMICommands():
                     if args.compute_partition in accelerator_profiles['profile_types']:
                         compute_partition = amdsmi_interface.AmdSmiComputePartitionType[args.compute_partition]
                         index = accelerator_profiles['profile_types'].index(args.compute_partition)
-                        attempted_to_set = f"Attempted to set accelerator partition to {args.compute_partition} (profile #{accelerator_profiles['profile_indices'][int(index)]} on {gpu_string}"
+                        attempted_to_set = f"Attempted to set accelerator partition to {args.compute_partition} (profile #{accelerator_profiles['profile_indices'][int(index)]}) on {gpu_string}"
                         amdsmi_interface.amdsmi_set_gpu_compute_partition(args.gpu, compute_partition)
                         self.logger.store_output(args.gpu, 'accelerator_partition', f"Successfully set accelerator partition to {args.compute_partition} (profile #{accelerator_profiles['profile_indices'][int(index)]})")
                     elif args.compute_partition in accelerator_profiles['profile_indices']:
@@ -4294,7 +4294,7 @@ class AMDSMICommands():
 
                 threads = []
                 k140secs = 140
-                string_out = f"Updating memory partition for gpu {gpu_id}"
+                string_out = f"Updating memory partition for GPU: {gpu_id}"
                 timesToRetryRestartErr = 1
 
                 self.helpers.increment_set_count()
@@ -4305,9 +4305,9 @@ class AMDSMICommands():
                 while timesToRetryRestartErr >= 0:
                     timesToRetryRestartErr -= 1
                     try:
-                        if showProgressBar: # only show reload warning on 1st set
+                        if showProgressBar:  # we want to overwrite the previous progress bar
                             t1 = multiprocessing.Process(target=self.helpers.showProgressbar,
-                                                        args=(string_out, k140secs,))
+                                                         args=(string_out, k140secs, True,))
                             threads.append(t1)
                             t1.start()
                         memory_partition = amdsmi_interface.AmdSmiMemoryPartitionType[args.memory_partition]
@@ -4342,7 +4342,7 @@ class AMDSMICommands():
                             return
                         if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_AMDGPU_RESTART_ERR:
                             # Try again on a failure -> work around for not being able to close libdrm
-                            string_out = f"Trying again - Updating memory partition for gpu {gpu_id}"
+                            string_out = f"Trying again - Updating memory partition for GPU: {gpu_id}         "
                             for thread in threads:
                                 thread.terminate()
                                 thread.join()

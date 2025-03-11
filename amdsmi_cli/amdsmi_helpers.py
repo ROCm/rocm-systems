@@ -969,11 +969,15 @@ class AMDSMIHelpers():
                 continue
         return pci_devices
 
-    def progressbar(self, it, prefix="", size=60, out=sys.stdout):
+    def progressbar(self, it, prefix="", size=60, out=sys.stdout, add_newline=False):
         count = len(it)
+        if (add_newline):
+            print("{}\n".format(prefix),end='\r', file=out, flush=False)
+        else:
+            print("{}".format(prefix),end='\r', file=out, flush=False)
         def show(j):
             x = int(size*j/count)
-            print("{}[{}{}] {}/{} secs remain".format(prefix, u"█"*x, "."*(size-x), j, count),
+            print("[{}{}] {}/{} secs remain".format(u"█"*x, "."*(size-x), j, count),
                     end='\r', file=out, flush=True)
         show(0)
         for i, item in enumerate(it):
@@ -981,10 +985,10 @@ class AMDSMIHelpers():
             show(i+1)
         print("\n\n", end='\r', flush=True, file=out)
 
-    def showProgressbar(self, title="", timeInSeconds=13):
+    def showProgressbar(self, title="", timeInSeconds=13, add_newline=False):
         if title != "":
-            title += ": "
-        for i in self.progressbar(range(timeInSeconds), title, 40):
+            title += " "
+        for i in self.progressbar(range(timeInSeconds), title, 40, add_newline=add_newline):
             time.sleep(1)
 
     def check_required_groups(self):

@@ -20,12 +20,14 @@
  * THE SOFTWARE.
  */
 
+#include <gtest/gtest.h>
 #include <cassert>
+#include <limits>
 
 #include "amd_smi/amdsmi.h"
+#include "amd_smi/impl/amd_smi_utils.h"
 #include "test_base.h"
 #include "test_common.h"
-#include <gtest/gtest.h>
 
 static const int kOutputLineLength = 80;
 static const char kLabelDelimiter[] = "####";
@@ -136,7 +138,20 @@ void TestBase::SetUp(uint64_t init_flags) {
 void TestBase::PrintDeviceHeader(amdsmi_processor_handle dv_ind) {
   amdsmi_status_t err;
   uint16_t val_ui16;
+  uint32_t val_ui32;
   amdsmi_asic_info_t info;
+
+  err = smi_amdgpu_get_device_count(&val_ui32);
+  CHK_ERR_ASRT(err)
+  IF_VERB(STANDARD) {
+    std::cout << "\t**Total Devices: " << val_ui32 << std::endl;
+  }
+
+  err = smi_amdgpu_get_device_index(dv_ind, &val_ui32);
+  CHK_ERR_ASRT(err)
+  IF_VERB(STANDARD) {
+    std::cout << "\t**AMD SMI Device index: " << val_ui32 << std::endl;
+  }
 
   IF_VERB(STANDARD) {
     std::cout << "\t**Device handle: " << dv_ind << std::endl;
@@ -166,6 +181,15 @@ void TestBase::PrintDeviceHeader(amdsmi_processor_handle dv_ind) {
       std::cout << "\t**Device Vendor ID: 0x" << std::hex <<
           info.vendor_id << std::endl;
     }
+  }
+
+  amdsmi_asic_info_t asic_info;
+  err = amdsmi_get_gpu_asic_info(dv_ind, &asic_info);
+  CHK_ERR_ASRT(err)
+  IF_VERB(STANDARD) {
+    std::cout << "\t**Market name: " << asic_info.market_name  << std::endl;
+    std::cout << "\t**ASIC serial: 0x" << std::hex << asic_info.asic_serial  << std::endl;
+    std::cout << "\t**Target GFX Version: gfx" << asic_info.target_graphics_version  << std::endl;
   }
 
   err = amdsmi_get_gpu_subsystem_id(dv_ind, &val_ui16);
@@ -232,5 +256,139 @@ void TestBase::set_description(std::string d) {
     description_.replace(endlptr, 1, "\n");
     i = endlptr;
   }
+}
+
+TestBase::AcceleratorProfileConfig TestBase::getAvailableProfileConfigs(
+                                      uint32_t device_index,
+                                      amdsmi_accelerator_partition_profile_t current_profile,
+                                      amdsmi_accelerator_partition_profile_config_t config,
+                                      bool isVerbose) {
+  AcceleratorProfileConfig profile_config = {};
+  profile_config.number_of_profiles = config.num_profiles;
+  profile_config.original_profile_type = current_profile.profile_type;
+  profile_config.original_profile_index = current_profile.profile_index;
+  profile_config.original_profile_type_str =
+    partition_types_map.at(current_profile.profile_type);
+  profile_config.available_profiles = std::vector<amdsmi_accelerator_partition_type_t>(
+    config.num_profiles);
+  profile_config.available_profile_str = std::vector<std::string>(config.num_profiles);
+  profile_config.available_profile_indices = std::vector<uint32_t>(config.num_profiles);
+  for (uint32_t i = 0; i < config.num_profiles; i++) {
+    std::string profile_type_str = "N/A";
+    profile_config.available_profiles[i] = config.profiles[i].profile_type;
+    profile_config.available_profile_str[i].clear();
+    profile_config.available_profile_str[i] =
+      partition_types_map.at(config.profiles[i].profile_type);
+    profile_config.available_profile_indices[i] = config.profiles[i].profile_index;
+  }
+
+  if (isVerbose) {
+    const uint32_t kMAX_UINT32 = std::numeric_limits<uint32_t>::max();
+    std::cout << "\t**[Device #" << device_index << "] Profile Configs: ";
+    std::cout << "\n\t\t**Original Profile Index: "
+              << (profile_config.original_profile_index == kMAX_UINT32 ?
+                  "N/A" : std::to_string(profile_config.original_profile_index))
+              << "\n\t\t**Original Profile Type: "
+              << profile_config.original_profile_type_str
+              << "\n\t\t**Original profile: " << profile_config.original_profile_type
+              << " (" << accelerator_types_map.at(profile_config.original_profile_type) << ")"
+              << "\n\t\t**Number of Profiles: " << profile_config.number_of_profiles
+              << "\n\t\t**Available_profiles: ";
+  }
+  std::string available_profiles_str = "N/A\n";
+  for (uint32_t j = 0; j < profile_config.number_of_profiles; j++) {
+    if (available_profiles_str == "N/A\n") {
+      available_profiles_str.clear();
+    }
+
+    if (j + 1 >= profile_config.number_of_profiles) {
+      available_profiles_str += ("\n\t\t\tProfile[profile_index: "
+        + std::to_string(profile_config.available_profile_indices[j])
+        + "]: " + profile_config.available_profile_str[j] + "\n");
+    } else {
+      available_profiles_str += ("\n\t\t\tProfile[profile_index: "
+        + std::to_string(profile_config.available_profile_indices[j])
+        + "]: " + profile_config.available_profile_str[j] + ", ");
+    }
+  }
+  if (isVerbose) {
+    std::cout << available_profiles_str;
+  }
+  return profile_config;
+}
+
+void TestBase::waitForUserInput() {
+  for (;;) {
+    std::cout << "\n\t**Press any key to continue**" << std::endl;
+    int input = std::cin.get();
+    if (input == EOF) {
+      std::cout << "EOF detected. Exiting." << std::endl;
+      return;
+    }
+    char input_char = static_cast<char>(input);
+    std::cout << "User entered: " << input_char << std::endl;
+    if (input_char == '\n') {
+      return;
+    }
+  }
+}
+
+uint32_t TestBase::promptNumDevicesToTest(uint32_t current_num_devices) {
+  uint32_t return_value = 0;
+  std::cout << "**How many devices would you like to test? (0 to skip): ";
+  std::string devices_to_test = "";
+  do {
+    int input = std::cin.get();
+    if (input == EOF) {
+      std::cout << "EOF detected. Exiting." << std::endl;
+      return 0;
+    }
+    char input_char = static_cast<char>(input);
+    if (input_char == '\n') {
+      break;
+    }
+    if (input_char >= '0' && input_char <= '9') {
+      devices_to_test += input_char;
+    } else {
+      std::cout << "Invalid input. Please enter a number between 0 and "
+                << current_num_devices << std::endl;
+    }
+  } while (true);
+
+  return_value = std::stoi(devices_to_test);
+  if (return_value > current_num_devices) {
+    std::cout << "Invalid input. Please enter a number between 0 and "
+              << current_num_devices << std::endl;
+    return 0;
+  }
+  return return_value;
+}
+
+std::string TestBase::getResourceType(amdsmi_accelerator_partition_resource_type_t resource_type) {
+  std::string resource_type_str = "";
+  switch (resource_type) {
+    case AMDSMI_ACCELERATOR_XCC:
+      resource_type_str = "XCC";
+      break;
+    case AMDSMI_ACCELERATOR_ENCODER:
+      resource_type_str = "ENCODER";
+      break;
+    case AMDSMI_ACCELERATOR_DECODER:
+      resource_type_str = "DECODER";
+      break;
+    case AMDSMI_ACCELERATOR_DMA:
+      resource_type_str = "DMA";
+      break;
+    case AMDSMI_ACCELERATOR_JPEG:
+      resource_type_str = "JPEG";
+      break;
+    case AMDSMI_ACCELERATOR_MAX:
+      resource_type_str = "MAX";
+      break;
+    default:
+      resource_type_str = "N/A";
+      break;
+  }
+  return resource_type_str;
 }
 

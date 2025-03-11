@@ -23,17 +23,18 @@
 #include <pwd.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <inttypes.h>
 
 #include <bitset>
 #include <cassert>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
-#include <inttypes.h>
 #include <vector>
 #include <sstream>
 
 #include "amd_smi/amdsmi.h"
+#include "amd_smi/impl/amd_smi_utils.h"
 
 
 #define CHK_AMDSMI_RET(RET)                                                    \
@@ -201,8 +202,62 @@ std::string print_unsigned_int(T value) {
   return ss.str();
 }
 
+static const std::string
+computePartitionString(amdsmi_compute_partition_type_t computeParitionType) {
+  switch (computeParitionType) {
+    case AMDSMI_COMPUTE_PARTITION_SPX:
+      return "SPX";
+    case AMDSMI_COMPUTE_PARTITION_DPX:
+      return "DPX";
+    case AMDSMI_COMPUTE_PARTITION_TPX:
+      return "TPX";
+    case AMDSMI_COMPUTE_PARTITION_QPX:
+      return "QPX";
+    case AMDSMI_COMPUTE_PARTITION_CPX:
+      return "CPX";
+    default:
+      return "N/A";
+  }
+}
+
+static const std::map<std::string, amdsmi_compute_partition_type_t>
+mapStringToSMIComputePartitionTypes {
+  {"SPX", AMDSMI_COMPUTE_PARTITION_SPX},
+  {"DPX", AMDSMI_COMPUTE_PARTITION_DPX},
+  {"TPX", AMDSMI_COMPUTE_PARTITION_TPX},
+  {"QPX", AMDSMI_COMPUTE_PARTITION_QPX},
+  {"CPX", AMDSMI_COMPUTE_PARTITION_CPX},
+  {"N/A", AMDSMI_COMPUTE_PARTITION_INVALID}
+};
+
+static const std::string
+memoryPartitionString(amdsmi_memory_partition_type_t memoryParitionType) {
+  switch (memoryParitionType) {
+    case AMDSMI_MEMORY_PARTITION_NPS1:
+      return "NPS1";
+    case AMDSMI_MEMORY_PARTITION_NPS2:
+      return "NPS2";
+    case AMDSMI_MEMORY_PARTITION_NPS4:
+      return "NPS4";
+    case AMDSMI_MEMORY_PARTITION_NPS8:
+      return "NPS8";
+    default:
+      return "N/A";
+  }
+}
+
+static const std::map<std::string, amdsmi_memory_partition_type_t>
+mapStringToSMIMemoryPartitionTypes {
+  {"NPS1", AMDSMI_MEMORY_PARTITION_NPS1},
+  {"NPS2", AMDSMI_MEMORY_PARTITION_NPS2},
+  {"NPS4", AMDSMI_MEMORY_PARTITION_NPS4},
+  {"NPS8", AMDSMI_MEMORY_PARTITION_NPS8},
+  {"N/A", AMDSMI_MEMORY_PARTITION_UNKNOWN}
+};
+
 int main() {
-    amdsmi_status_t ret;
+    amdsmi_status_t ret, ret_set;
+    const char *err_str;
 
     // Init amdsmi for sockets and devices.
     // Here we are only interested in AMD_GPUS.
@@ -248,6 +303,20 @@ int main() {
 
         // For each device of the socket, get name and temperature.
         for (uint32_t j = 0; j < device_count; j++) {
+            uint32_t device_cnt = 0;
+            ret = smi_amdgpu_get_device_count(&device_cnt);
+            CHK_AMDSMI_RET(ret)
+            std::cout << "Device Count: " << device_cnt << std::endl;
+
+            // Get device index
+            uint32_t device_index = 0;
+            ret = smi_amdgpu_get_device_index(processor_handles[j], &device_index);
+            CHK_AMDSMI_RET(ret)
+            std::cout << "Device Index: " << device_index << std::endl;
+
+            std::vector<amdsmi_processor_handle> p_handles(device_cnt);
+            ret = smi_amdgpu_get_processor_handle_by_index(device_index, &p_handles[j]);
+
             // Get device type. Since the amdsmi is initialized with
             // AMD_SMI_INIT_AMD_GPUS, the processor_type must be AMDSMI_PROCESSOR_TYPE_AMD_GPU.
             processor_type_t processor_type = {};
@@ -285,6 +354,173 @@ int main() {
             printf("\tRevisionID: 0x%x\n", asic_info.rev_id);
             printf("\tAsic serial: 0x%s\n", asic_info.asic_serial);
             printf("\tNum of Computes: %d\n\n", asic_info.num_of_compute_units);
+
+            bool is_power_management_enabled = false;
+            ret = amdsmi_is_gpu_power_management_enabled(processor_handles[j],
+                                                    &is_power_management_enabled);
+            CHK_AMDSMI_RET(ret)
+            printf("    Output of amdsmi_is_gpu_power_management_enabled:\n");
+            printf("\tPower Management Enabled: %s\n\n",
+                    (is_power_management_enabled ? "TRUE" : "FALSE"));
+
+            std::cout << "    **Version 1: Accelerator/Compute Partition API Examples**\n";
+            char original_compute_partition[AMDSMI_MAX_STRING_LENGTH];
+            ret = amdsmi_get_gpu_compute_partition(processor_handles[j], original_compute_partition,
+                                        static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
+
+            amdsmi_status_code_to_string(ret, &err_str);
+            if (ret == AMDSMI_STATUS_SUCCESS) {
+                CHK_AMDSMI_RET(ret)
+                std::cout << "    Output of amdsmi_get_gpu_compute_partition:\n";
+                std::cout << "\tamdsmi_get_gpu_compute_partition(" << j << ", "
+                << mapStringToSMIComputePartitionTypes.at(original_compute_partition) << "): "
+                << err_str << "\n\n";
+                std::cout << "\tCompute Partition (original): "
+                << original_compute_partition << "\n\n";
+            } else {
+                std::cout << "\tamdsmi_get_gpu_compute_partition(" << j << ", "
+                << computePartitionString(AMDSMI_COMPUTE_PARTITION_INVALID) << "): "
+                << err_str << "\n\n";
+            }
+
+            for (int partition = static_cast<int>(AMDSMI_COMPUTE_PARTITION_SPX);
+                    partition <= static_cast<int>(AMDSMI_COMPUTE_PARTITION_CPX);
+                    partition++) {
+                amdsmi_compute_partition_type_t updatePartition
+                    = static_cast<amdsmi_compute_partition_type_t>(partition);
+                ret_set = amdsmi_set_gpu_compute_partition(processor_handles[j],
+                                                                updatePartition);
+                amdsmi_status_code_to_string(ret_set, &err_str);
+                if (ret_set == AMDSMI_STATUS_SUCCESS) {
+                    CHK_AMDSMI_RET(ret_set)
+                }
+                std::cout << "\tamdsmi_set_gpu_compute_partition(" << j << ", "
+                << computePartitionString(updatePartition) << "): "
+                << err_str << "\n\n";
+
+                // Get the current compute partition
+                char current_compute_partition[AMDSMI_MAX_STRING_LENGTH];
+                ret = amdsmi_get_gpu_compute_partition(processor_handles[j],
+                                                current_compute_partition,
+                                                static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
+                amdsmi_status_code_to_string(ret, &err_str);
+                if (ret == AMDSMI_STATUS_SUCCESS) {
+                    CHK_AMDSMI_RET(ret)
+                    std::cout << "    Output of amdsmi_get_gpu_compute_partition:\n";
+                    std::cout << "\tamdsmi_get_gpu_compute_partition(" << j << ", "
+                              << computePartitionString(updatePartition) << "): "
+                              << err_str << "\n\n";
+                    std::cout << "\tCompute Partition (current): "
+                              << current_compute_partition << "\n\n";
+                } else {
+                    std::cout << "\tamdsmi_get_gpu_compute_partition(" << j << ", "
+                    << computePartitionString(AMDSMI_COMPUTE_PARTITION_INVALID) << "): "
+                    << err_str << "\n\n";
+                }
+            }
+            // return to original compute partition
+            amdsmi_compute_partition_type_t original_compute_partition_type;
+            if (ret == AMDSMI_STATUS_SUCCESS) {
+                original_compute_partition_type
+                    = mapStringToSMIComputePartitionTypes.at(original_compute_partition);
+            } else {
+                original_compute_partition_type = AMDSMI_COMPUTE_PARTITION_INVALID;
+            }
+            std::cout << "    Returning to original compute partition ("
+                      << computePartitionString(original_compute_partition_type) << ")\n";
+            auto ret_set = amdsmi_set_gpu_compute_partition(processor_handles[j],
+                                                original_compute_partition_type);
+            amdsmi_status_code_to_string(ret_set, &err_str);
+            if (ret_set == AMDSMI_STATUS_SUCCESS) {
+                CHK_AMDSMI_RET(ret_set)
+            }
+            std::cout << "\tamdsmi_set_gpu_compute_partition(" << j << ", "
+            << computePartitionString(original_compute_partition_type) << "): "
+            << err_str << "\n\n";
+
+            std::cout << "    **Version 1: Memory Partition API Examples**\n";
+            char original_memory_partition[AMDSMI_MAX_STRING_LENGTH];
+            ret = amdsmi_get_gpu_memory_partition(processor_handles[j], original_memory_partition,
+                                        static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
+            amdsmi_status_code_to_string(ret, &err_str);
+            if (ret == AMDSMI_STATUS_SUCCESS) {
+                CHK_AMDSMI_RET(ret)
+                std::cout << "    Output of amdsmi_get_gpu_memory_partition:\n";
+                std::cout << "\tamdsmi_get_gpu_memory_partition(" << j << ", "
+                << mapStringToSMIMemoryPartitionTypes.at(original_memory_partition) << "): "
+                << err_str << "\n\n";
+                std::cout << "\tMemory Partition (original): "
+                << original_memory_partition << "\n\n";
+            } else {
+                std::cout << "\tamdsmi_get_gpu_memory_partition(" << j << ", "
+                << memoryPartitionString(AMDSMI_MEMORY_PARTITION_UNKNOWN) << "): "
+                << err_str << "\n\n";
+            }
+
+            for (int partition = static_cast<int>(AMDSMI_MEMORY_PARTITION_NPS1);
+                    partition <= static_cast<int>(AMDSMI_MEMORY_PARTITION_NPS8);
+                    partition++) {
+                if (partition != static_cast<int>(AMDSMI_MEMORY_PARTITION_NPS1)
+                    && partition != static_cast<int>(AMDSMI_MEMORY_PARTITION_NPS2)
+                    && partition != static_cast<int>(AMDSMI_MEMORY_PARTITION_NPS4)
+                    && partition != static_cast<int>(AMDSMI_MEMORY_PARTITION_NPS8)) {
+                    continue;
+                }
+                amdsmi_memory_partition_type_t updatePartition
+                    = static_cast<amdsmi_memory_partition_type_t>(partition);
+                auto ret_set = amdsmi_set_gpu_memory_partition(processor_handles[j],
+                                                                updatePartition);
+                amdsmi_status_code_to_string(ret_set, &err_str);
+                if (ret_set == AMDSMI_STATUS_SUCCESS) {
+                    CHK_AMDSMI_RET(ret_set)
+                    std::cout << "    Output of amdsmi_set_gpu_memory_partition:\n";
+                }
+                std::cout << "\tamdsmi_set_gpu_memory_partition(" << j << ", "
+                          << memoryPartitionString(updatePartition) << "): "
+                          << err_str << "\n\n";
+
+                // Get the current memory partition
+                char current_memory_partition[AMDSMI_MAX_STRING_LENGTH];
+                ret = amdsmi_get_gpu_memory_partition(processor_handles[j],
+                                            current_memory_partition,
+                                            static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
+
+                amdsmi_status_code_to_string(ret, &err_str);
+                if (ret == AMDSMI_STATUS_SUCCESS) {
+                    CHK_AMDSMI_RET(ret)
+                    std::cout << "\tamdsmi_get_gpu_memory_partition(" << j << ", "
+                    << memoryPartitionString(updatePartition) << "): "
+                    << err_str << "\n\n";
+                    std::cout << "\tMemory Partition (current): "
+                    << current_memory_partition << "\n\n";
+                } else {
+                    std::cout << "\tamdsmi_get_gpu_memory_partition(" << j << ", "
+                    << memoryPartitionString(AMDSMI_MEMORY_PARTITION_UNKNOWN) << "): "
+                    << err_str << "\n\n";
+                }
+            }
+            // return to original compute partition
+            amdsmi_memory_partition_type_t original_memory_partition_type;
+            if (ret == AMDSMI_STATUS_SUCCESS) {
+                original_memory_partition_type
+                    = mapStringToSMIMemoryPartitionTypes.at(original_memory_partition);
+            } else {
+                original_memory_partition_type = AMDSMI_MEMORY_PARTITION_UNKNOWN;
+            }
+            std::cout << "    Returning to original memory partition ("
+                      << memoryPartitionString(original_memory_partition_type)
+                      << ")\n";
+            ret_set = amdsmi_set_gpu_memory_partition(processor_handles[j],
+                                                original_memory_partition_type);
+            amdsmi_status_code_to_string(ret_set, &err_str);
+            if (ret_set == AMDSMI_STATUS_SUCCESS) {
+                CHK_AMDSMI_RET(ret_set)
+            }
+            std::cout << "\tamdsmi_set_gpu_compute_partition(" << j << ", "
+                      << memoryPartitionString(original_memory_partition_type) << "): "
+                      << err_str << "\n\n";
+
+            // TODO(amdsmi_team): Add V2 partiton APIs
 
             // Get VRAM info
             amdsmi_vram_info_t vram_info = {};
@@ -478,7 +714,7 @@ int main() {
                  block = (amdsmi_gpu_block_t)(block * 2)) {
                 ret = amdsmi_get_gpu_ras_block_features_enabled(processor_handles[j], block,
                                                       &state);
-                if (ret != AMDSMI_STATUS_API_FAILED) {
+                if (ret != AMDSMI_STATUS_API_FAILED && ret != AMDSMI_STATUS_NOT_SUPPORTED) {
                     CHK_AMDSMI_RET(ret)
                 }
 
@@ -520,7 +756,9 @@ int main() {
             // Get ECC error counts
             amdsmi_error_count_t err_cnt_info = {};
             ret = amdsmi_get_gpu_total_ecc_count(processor_handles[j], &err_cnt_info);
-            CHK_AMDSMI_RET(ret)
+            if (ret != AMDSMI_STATUS_NOT_SUPPORTED) {
+                CHK_AMDSMI_RET(ret)
+            }
             printf("    Output of amdsmi_get_gpu_total_ecc_count:\n");
             printf("\tCorrectable errors: %lu\n", err_cnt_info.correctable_count);
             printf("\tUncorrectable errors: %lu\n\n",
@@ -530,7 +768,7 @@ int main() {
             ret = amdsmi_get_gpu_process_list(processor_handles[j], &num_process, nullptr);
             CHK_AMDSMI_RET(ret)
             if (!num_process) {
-                printf("No processes found.\n");
+                printf("amdsmi_get_gpu_process_list(): No processes found.\n\n");
             } else {
                 std::cout << "Processes found: " << num_process << "\n";
                 amdsmi_proc_info_t process_info_list[num_process];

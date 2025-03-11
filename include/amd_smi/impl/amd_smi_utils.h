@@ -26,10 +26,10 @@
 #include <limits>
 #include <type_traits>
 #include <string>
+#include <utility>
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_gpu_device.h"
-#include "rocm_smi/rocm_smi_utils.h"
 
 
 #define SMIGPUDEVICE_MUTEX(MUTEX) \
@@ -55,6 +55,63 @@ amdsmi_status_t smi_amdgpu_is_gpu_power_management_enabled(amd::smi::AMDSmiGPUDe
 std::string smi_split_string(std::string str, char delim);
 std::string smi_amdgpu_get_status_string(amdsmi_status_t ret, bool fullStatus);
 
+/**
+ *  @brief Get the device index given the processor handle.
+ *
+ *  @details Given a processor handle @p processor_handle 
+ *  and a pointer to a uint32_t @p device_index will be returned.
+ *
+ *  @param[in] processor_handle Device which to query
+ *
+ *  @param[inout] device_index a pointer to uint32_t to which the matching device
+ *  index will be stored
+ *
+ *  @retval ::AMDSMI_STATUS_SUCCESS is returned upon successful call.
+ *          ::AMDSMI_STATUS_INVAL is returned if user provides a null pointer
+ *          for device_index.
+ *          ::AMDSMI_STATUS_API_FAILED is returned if the corresponding device
+ *          index for the processor handle cannot be found.
+ */
+amdsmi_status_t smi_amdgpu_get_device_index(amdsmi_processor_handle processor_handle,
+                                            uint32_t* device_index);
+
+/**
+ *  @brief Get total number of devices
+ *
+ *  @details Given a pointer to a uint32_t @p total_num_devices will be returned
+ *
+ *  @param[inout] total_num_devices a pointer to uint32_t to which the total number
+ *  of devices will be stored
+ *
+ *  @retval ::AMDSMI_STATUS_SUCCESS is returned upon successful call.
+ *          ::AMDSMI_STATUS_INVAL is returned if user provides a null pointer
+ *          for total_num_devices.
+ */
+amdsmi_status_t smi_amdgpu_get_device_count(uint32_t *total_num_devices);
+
+/**
+ *  @brief Get the processor handle given the device index.
+ *
+ *  @details Given a uint32_t @p device_index and a pointer to
+ *  a processor handle @p processor_handle, the device index will be used to
+ *  find the processor handle of the device and store it in the provided pointer
+ *
+ *  @param[in] device_index a uint32_t to value to help find the corresponding
+ *  processor handle
+ *
+ *  @param[inout] processor_handle a pointer to amdsmi_processor_handle
+ *  which the corresponding processor_handle will be stored
+ *
+ *  @retval ::AMDSMI_STATUS_SUCCESS is returned upon successful call.
+ *          ::AMDSMI_STATUS_INVAL is returned if user provides a null pointer
+ *          for processor_handle.
+ *          ::AMDSMI_STATUS_API_FAILED is returned if the device_index is cannot
+ *          be found.
+ */
+amdsmi_status_t smi_amdgpu_get_processor_handle_by_index(
+                                        uint32_t device_index,
+                                        amdsmi_processor_handle *processor_handle);
+
 
 template<typename>
 constexpr bool is_dependent_false_v = false;
@@ -72,8 +129,7 @@ constexpr T get_std_num_limit()
 {
     if constexpr (is_supported_type_v<T>) {
         return std::numeric_limits<T>::max();
-    }
-    else {
+    } else {
         return std::numeric_limits<T>::min();
         static_assert(is_dependent_false_v<T>, "Error: Type not supported...");
     }
@@ -98,12 +154,11 @@ constexpr T translate_umax_or_assign_value(U source_value, V target_value)
         }
 
         return result;
-    }
-    else {
+    } else {
         static_assert(is_dependent_false_v<T>, "Error: Type not supported...");
     }
 
     return result;
 }
 
-#endif //
+#endif  // AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_

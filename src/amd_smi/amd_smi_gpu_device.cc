@@ -20,18 +20,20 @@
  * THE SOFTWARE.
  */
 
-#include "amd_smi/impl/amd_smi_gpu_device.h"
-#include "amd_smi/impl/amd_smi_common.h"
-#include "amd_smi/impl/fdinfo.h"
-#include "rocm_smi/rocm_smi_kfd.h"
-#include "rocm_smi/rocm_smi_utils.h"
-
 #include <functional>
 #include <map>
 #include <memory>
 #include <unordered_set>
 #include <dirent.h>
 #include <sys/types.h>
+
+#include "amd_smi/impl/amd_smi_gpu_device.h"
+#include "amd_smi/impl/amd_smi_common.h"
+#include "amd_smi/impl/amd_smi_utils.h"
+#include "amd_smi/impl/fdinfo.h"
+#include "rocm_smi/rocm_smi_kfd.h"
+#include "rocm_smi/rocm_smi_utils.h"
+#include "rocm_smi/rocm_smi_logger.h"
 
 namespace amd {
 namespace smi {
@@ -61,11 +63,32 @@ amdsmi_status_t AMDSmiGPUDevice::get_drm_data() {
     uint32_t fd = 0;
     std::string path;
     amdsmi_bdf_t bdf;
+    std::ostringstream ss;
     ret = drm_.get_drm_fd_by_index(gpu_id_, &fd);
+    ss << __PRETTY_FUNCTION__ << " | gpu_id_: " << gpu_id_
+    << "; fd: " << fd
+    << "; drm_.get_drm_fd_by_index(gpu_id_, &fd): "
+    << smi_amdgpu_get_status_string(ret, false) << std::endl;
+    // std::cout << ss.str();
+    LOG_DEBUG(ss);
     if (ret != AMDSMI_STATUS_SUCCESS) return AMDSMI_STATUS_NOT_SUPPORTED;
     ret = drm_.get_drm_path_by_index(gpu_id_, &path);
+    ss << __PRETTY_FUNCTION__ << " | gpu_id_: " << gpu_id_
+    << "; path: " << path
+    << "; drm_.get_drm_fd_by_index(gpu_id_, &path): "
+    << smi_amdgpu_get_status_string(ret, false) << std::endl;
+    // std::cout << ss.str();
+    LOG_DEBUG(ss);
     if (ret != AMDSMI_STATUS_SUCCESS) return AMDSMI_STATUS_NOT_SUPPORTED;
     ret = drm_.get_bdf_by_index(gpu_id_, &bdf);
+    ss << __PRETTY_FUNCTION__ << " | gpu_id_: " << gpu_id_
+    << "; domain: " << bdf.domain_number
+    << "; bus: " << bdf.bus_number
+    << "; device: " << bdf.device_number
+    << "; drm_.get_drm_fd_by_index(gpu_id_, &bdf): "
+    << smi_amdgpu_get_status_string(ret, false) << std::endl;
+    // std::cout << ss.str();
+    LOG_DEBUG(ss);
     if (ret != AMDSMI_STATUS_SUCCESS) return AMDSMI_STATUS_NOT_SUPPORTED;
 
     bdf_ = bdf, path_ = path, fd_ = fd;
