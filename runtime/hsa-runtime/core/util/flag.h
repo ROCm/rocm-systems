@@ -70,7 +70,7 @@ class Flag {
   const size_t DEFAULT_SCRATCH_SINGLE_LIMIT_ASYNC_PER_XCC = (3 * (1UL<<30));  // 3 GB
   const size_t DEFAULT_PCS_MAX_DEVICE_BUFFER_SIZE = (256 * (1UL<<20)); //256 MB
 
-  explicit Flag() { Refresh(); }
+  Flag() {}
 
   virtual ~Flag() {}
 
