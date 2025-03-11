@@ -224,7 +224,8 @@ def create_df_pmc(
                     dfs.append(tmp_df)
                     coll_levels.append(f[:-4])
 
-        final_df = pd.concat(dfs, keys=coll_levels, axis=1, copy=False)
+        # TODO: double check the case if all tmp_df.shape[0] are not on the same page
+        final_df = pd.concat(dfs, keys=coll_levels, axis=1, join="inner", copy=False)
         if verbose >= 2:
             console_debug("pmc_raw_data final_single_df %s" % final_df.info)
         return final_df

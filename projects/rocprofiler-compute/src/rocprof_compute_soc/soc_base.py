@@ -371,9 +371,9 @@ class CounterFile:
         return self.blocks[block].add(counter)
 
 
-# TODO: This is a HACK
+# FIXME: This is a HACK
 def using_v3():
-    return "ROCPROF" in os.environ.keys() and os.environ["ROCPROF"] == "rocprofv3"
+    return "ROCPROF" in os.environ.keys() and os.environ["ROCPROF"].endswith("rocprofv3")
 
 
 @demarcate
