@@ -199,6 +199,16 @@ class Roofline:
                 )
             console_log("roofline", "Empirical Roofline PDFs saved!")
         else:
+            if self.__mspec.gpu_series != "MI200":
+                fp8_graph = html.Div(
+                    className="float-child",
+                    children=[
+                        html.H3(children="Empirical Roofline Analysis (FP8)"),
+                        dcc.Graph(figure=fig_fp8),
+                    ],
+                )
+            else:
+                fp8_graph = None
             return html.Section(
                 id="roofline",
                 children=[
@@ -223,6 +233,7 @@ class Roofline:
                                     dcc.Graph(figure=ml_combo_fig_int8_fp16),
                                 ],
                             ),
+                            fp8_graph,
                         ],
                     )
                 ],
