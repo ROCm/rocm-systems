@@ -4,21 +4,22 @@
 # list see the documentation:
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
-from rocm_docs import ROCmDocs
-
-
 # for PDF output on Read the Docs
-project = "ROCm Data Center Documentation"
+project = "ROCm Data Center tool"
 author = "Advanced Micro Devices, Inc."
-copyright = "Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved."
+copyright = "Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved."
 
+html_theme = "rocm_docs_theme"
+html_theme_options = {"flavor": "rocm"}
+html_title = f"RDC documentation"
 external_toc_path = "./sphinx/_toc.yml"
 
-docs_core = ROCmDocs("ROCm Data Center Documentation")
-docs_core.run_doxygen(doxygen_root="doxygen", doxygen_path="doxygen/xml")
-docs_core.setup()
-
 external_projects_current_project = "rdc"
+extensions = ["rocm_docs", "rocm_docs.doxygen"]
 
-for sphinx_var in ROCmDocs.SPHINX_VARS:
-    globals()[sphinx_var] = getattr(docs_core, sphinx_var)
+doxygen_root = "doxygen"
+doxysphinx_enabled = True
+doxygen_project = {
+    "name": "ROCm Data Center Tool API reference",
+    "path": "doxygen/xml",
+}
