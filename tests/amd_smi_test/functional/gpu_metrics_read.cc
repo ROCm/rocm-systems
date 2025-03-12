@@ -35,6 +35,7 @@
 #include "gpu_metrics_read.h"
 #include "../test_common.h"
 #include "rocm_smi/rocm_smi_utils.h"
+#include "amd_smi/impl/amd_smi_utils.h"
 
 
 TestGpuMetricsRead::TestGpuMetricsRead() : TestBase() {
@@ -101,6 +102,15 @@ void TestGpuMetricsRead::Run(void) {
         }
       }
     } else {
+      auto temp_xcd_counter_value = uint16_t(0);
+      auto ret_xcd = amdsmi_get_gpu_xcd_counter(processor_handles_[i], &temp_xcd_counter_value);
+      IF_VERB(STANDARD) {
+        std::cout << "\t\t** amdsmi_get_gpu_xcd_counter(): "
+                  << smi_amdgpu_get_status_string(ret_xcd, false)
+                  << "\n\t\t** XCD Counter Value: "
+                  << temp_xcd_counter_value
+                  << "\n";
+      }
       CHK_ERR_ASRT(err);
       IF_VERB(STANDARD) {
           std::cout << "METRIC TABLE HEADER:\n";
@@ -380,13 +390,5 @@ void TestGpuMetricsRead::Run(void) {
     amdsmi_status_code_to_string(err, &status_string);
     std::cout << "\t\t** amdsmi_get_gpu_metrics_info(nullptr check): " << status_string << "\n";
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
-
-
-    // TODO(AMD_SMI_team): add xcd_counter_get for amd smi
-    // auto temp_xcd_counter_value = uint16_t(0);
-    // err = rsmi_dev_metrics_xcd_counter_get(i, &temp_xcd_counter_value);
-    // if (err != RSMI_STATUS_NOT_SUPPORTED) {
-    //   CHK_ERR_ASRT(err);
-    // }
   }
 }

@@ -6577,6 +6577,16 @@ rsmi_dev_partition_id_get(uint32_t dv_ind, uint32_t *partition_id) {
   if (ret == RSMI_STATUS_SUCCESS) {
     *partition_id = static_cast<uint32_t>((pci_id >> 28) & 0xf);
   }
+  std::ostringstream bdf_sstream;
+  bdf_sstream << std::hex << std::setfill('0') << std::setw(4)
+  << ((pci_id >> 32) & 0xFFFFFFFF) << ":";
+  bdf_sstream << std::hex << std::setfill('0') << std::setw(2) << ((pci_id >> 8) & 0xFF) << ":";
+  bdf_sstream << std::hex << std::setfill('0') << std::setw(2) << ((pci_id >> 3) & 0xF8) << ".";
+  bdf_sstream << std::hex << std::setfill('0') << +(pci_id & 0x7);
+  bdf_sstream << "\nPartition ID ((pci_id >> 28) & 0xf): " << std::dec
+  << static_cast<int>((pci_id >> 28) & 0xf);
+  bdf_sstream << "\nPartition ID (pci_id & 0x7): " << std::dec << static_cast<int>(pci_id & 0x7);
+  // std::cout << __PRETTY_FUNCTION__ << " BDF: " << bdf_sstream.str() << std::endl;
 
   /**
    * Fall back is required due to driver changes within KFD.
@@ -6603,9 +6613,11 @@ rsmi_dev_partition_id_get(uint32_t dv_ind, uint32_t *partition_id) {
      << " | Success"
      << " | Device #: " << dv_ind
      << " | Type: partition_id"
-     << " | Data: " << *partition_id
+     << " | Data: " << static_cast<int>(*partition_id)
      << " | Returning = "
-     << getRSMIStatusString(RSMI_STATUS_SUCCESS) << " |";
+     << getRSMIStatusString(RSMI_STATUS_SUCCESS) << " |"
+     << "\n BDF: " << bdf_sstream.str() << std::endl;
+  // std::cout << ss.str() << std::endl;
   LOG_INFO(ss);
   return ret;
   CATCH

@@ -3387,7 +3387,7 @@ AMGpuMetricsPublicLatestTupl_t GpuMetricsBase_v13_t::copy_internal_to_external_m
       metrics_public_init.vcn_activity[0] = metrics_public_init.average_mm_activity;
     }
     // average_mm_activity needs to not be UIN16_MAX and
-    // metrics_public_init.xcp_stats->vcn_busy[0] should also be UIN16_MAX
+    // metrics_public_init.xcp_stats->vcn_busy[0] should also be UINT16_MAX
     if (metrics_public_init.average_mm_activity != UINT16_MAX
         && metrics_public_init.xcp_stats->vcn_busy[0] == UINT16_MAX) {
       metrics_public_init.xcp_stats->vcn_busy[0] = metrics_public_init.average_mm_activity;

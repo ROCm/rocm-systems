@@ -1020,7 +1020,7 @@ int Device::readDevInfoLine(DevInfoTypes type, std::string *line) {
      << get_type_string(type) << "), returning *line = "
      << *line;
   LOG_INFO(ss);
-
+  fs.close();
   return 0;
 }
 
@@ -1103,6 +1103,7 @@ int Device::readDevInfoMultiLineStr(DevInfoTypes type,
   while (std::getline(fs, line)) {
     retVec->push_back(line);
   }
+  fs.close();
 
   if (retVec->empty()) {
     ss << "Read devInfoMultiLineStr for DevInfoType ("
@@ -1769,6 +1770,38 @@ std::string Device::readBootPartitionState<rsmi_memory_partition_type_t>(
   std::tie(std::ignore, boot_state) = readTmpFile(dv_ind, "boot",
                                                   "memory_partition");
   return boot_state;
+}
+
+rsmi_status_t Device::get_smi_device_identifiers(uint32_t device_id,
+        rsmi_device_identifiers_t *device_identifiers) {
+  bool found_device = false;
+  rsmi_status_t ret = RSMI_STATUS_NOT_SUPPORTED;
+  if (device_identifiers == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+  auto devices = smi.devices();
+
+  for (uint32_t i = 0; i < devices.size(); i++) {
+    if (i != device_id) {
+      continue;
+    }
+    rsmi_device_identifiers_t smi_device;
+    smi_device.card_index = devices[i]->index();
+    smi_device.drm_render_minor = devices[i]->drm_render_minor();
+    smi_device.bdfid = devices[i]->bdfid();
+    smi_device.kfd_gpu_id = devices[i]->kfd_gpu_id();
+    smi_device.partition_id = devices[i]->m_partition_id;
+    smi_device.smi_device_id = i;
+    *device_identifiers = smi_device;
+    found_device = true;
+    break;
+  }
+  if (found_device) {
+    ret = RSMI_STATUS_SUCCESS;
+  }
+  return ret;
 }
 
 

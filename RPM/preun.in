@@ -9,6 +9,9 @@ rm_leftovers() {
   rm -rf "$RPM_INSTALL_PREFIX0/@SHARE_INSTALL_PREFIX@/amdsmi.egg-info"
   rm -rf "$RPM_INSTALL_PREFIX0/@SHARE_INSTALL_PREFIX@/build"
 
+  # remove dist files (only applies to old setuptools versions like on RHEL8)
+  rm -rf "$RPM_INSTALL_PREFIX0/@SHARE_INSTALL_PREFIX@/dist"
+
   # remove leftover doc files
   if test -e "$RPM_INSTALL_PREFIX0/@SHARE_INSTALL_PREFIX@/../doc/amd_smi*"; then
     rm -rf "$RPM_INSTALL_PREFIX0/@SHARE_INSTALL_PREFIX@/../doc/amd_smi*"
