@@ -64,6 +64,8 @@
 #include "functional/version_read.h"
 #include "functional/mutual_exclusion.h"
 #include "functional/init_shutdown_refcount.h"
+#include "functional/memorypartition_read_write.h"
+#include "functional/computepartition_read_write.h"
 
 static AMDSMITstGlobals *sRSMIGlvalues = nullptr;
 
@@ -250,8 +252,17 @@ TEST(amdsmitstReadOnly, TestMutualExclusion) {
   RunCustomTestEpilog(&tst);
 }
 */
-// TODO: add TestComputePartitionReadWrite
-// TODO: add TestMemoryPartitionReadWrite
+
+TEST(amdsmitstReadWrite, TestComputePartitionReadWrite) {
+  TestComputePartitionReadWrite tst;
+  RunGenericTest(&tst);
+}
+
+TEST(amdsmitstReadWrite, TestMemoryPartitionReadWrite) {
+  TestMemoryPartitionReadWrite tst;
+  RunGenericTest(&tst);
+}
+
 TEST(amdsmitstReadWrite, TestEvtNotifReadWrite) {
   TestEvtNotifReadWrite tst;
   RunGenericTest(&tst);
