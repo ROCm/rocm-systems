@@ -76,7 +76,6 @@ set(CMAKE_LIBRARY_PATH
 find_package(rdc
     CONFIG REQUIRED)
 
-
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                             Cmake Example                                 ")
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
