@@ -2,4 +2,4 @@ disabled: false
 scmId: gh-emu
 branchesToScan:
   - amd-staging
-jenkinsUrl: https://palamidajenkinsvm.amd.com/job/palamida/job/uat/job/ScanInitiatorGitHub
+jenkinsUrl: https://palamidajenkinsvm.amd.com/job/palamida/job/pci/job/ScanInitiatorGitHub
