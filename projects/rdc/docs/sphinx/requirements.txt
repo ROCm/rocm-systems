@@ -10,7 +10,7 @@ alabaster==1.0.0
     # via sphinx
 asttokens==3.0.0
     # via stack-data
-attrs==25.2.0
+attrs==25.3.0
     # via
     #   jsonschema
     #   jupyter-cache
@@ -226,7 +226,7 @@ requests==2.32.3
     # via
     #   pygithub
     #   sphinx
-rocm-docs-core[api-reference]==1.17.1
+rocm-docs-core[api-reference]==1.18.1
     # via -r docs/sphinx/requirements.in
 rpds-py==0.23.1
     # via
