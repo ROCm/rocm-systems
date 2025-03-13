@@ -68,6 +68,9 @@ option(BUILD_RVS "Build targets for librdc_rvs.so" ON)
 # When cmake -DBUILD_TESTS=off, it will not build RDC tests.
 option(BUILD_TESTS "Build test suite" OFF)
 
+# When cmake -DBUILD_EXAMPLES=off, it will not build RDC examples
+option(BUILD_EXAMPLES "Build examples" OFF)
+
 # Enable shared libraries for gtest
 option(BUILD_SHARED_LIBS "Build shared library (.so) or not." ON)
 
@@ -315,6 +318,10 @@ endif()
 
 # Folders for both standalone and embedded
 add_subdirectory("rdc_libs")
+
+if(BUILD_EXAMPLES)
+    add_subdirectory("example")
+endif()
 
 # Export the package for use from the build-tree
 # (this registers the build-tree with a global CMake-registry)
