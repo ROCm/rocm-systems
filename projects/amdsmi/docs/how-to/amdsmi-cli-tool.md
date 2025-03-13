@@ -55,6 +55,7 @@ AMD-SMI Commands:
     reset             Reset options for devices
     monitor (dmon)    Monitor metrics for target devices
     xgmi              Displays xgmi information of the devices
+    partition         Displays partition information of the devices
 ```
 
 Example commands:
@@ -721,6 +722,39 @@ Command Modifiers:
   --csv                       Displays output in CSV format (human readable by default).
   --file FILE                 Saves output into a file on the provided path (stdout by default).
   --loglevel LEVEL            Set the logging level from the possible choices:
+                                DEBUG, INFO, WARNING, ERROR, CRITICAL
+```
+
+(cmd-partition)=
+### amd-smi partition
+
+Displays partition information of the devices.
+
+```shell-session
+~$ amd-smi partition --help
+usage: amd-smi partition [-h] [-g GPU [GPU ...]] [-c] [-m] [-a] [--json | --csv]
+                         [--file FILE] [--loglevel LEVEL]
+
+If no GPU is specified, returns information for all GPUs on the system.
+If no partition argument is provided, all partition information will be displayed.
+
+partition arguments:
+  -h, --help               show this help message and exit
+  -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, or UUID from the possible choices:
+                           ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                             all | Selects all devices
+  -c, --current            display the current partition information
+  -m, --memory             display the current memory partition mode and capabilities
+  -a, --accelerator        display accelerator partition information
+
+Command Modifiers:
+  --json                   Displays output in JSON format (human readable by default).
+  --csv                    Displays output in CSV format (human readable by default).
+  --file FILE              Saves output into a file on the provided path (stdout by default).
+  --loglevel LEVEL         Set the logging level from the possible choices:
                                 DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
