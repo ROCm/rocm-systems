@@ -168,6 +168,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 ### Changed
 
 - SDK no longer creates a background thread when every tool returns a nullptr from `rocprofiler_configure`.
+- Updated disassembly.hpp's vaddr-to-file-offset mapping to use the dedicated comgr API.
 
 ### Resolved issues
 
