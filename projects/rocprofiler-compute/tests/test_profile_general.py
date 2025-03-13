@@ -1478,7 +1478,7 @@ def test_instmix_section(binary_handler_profile_rocprof_compute):
         "'10': metric_id", f"{workload_dir}/profiling_config.yaml"
     )
     assert test_utils.check_file_pattern(
-        "SQ_INSTS_VALU_MFMA_F64", f"{workload_dir}/pmc_perf.csv"
+        "TA_FLAT_WAVEFRONTS", f"{workload_dir}/pmc_perf.csv"
     )
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -1505,7 +1505,7 @@ def test_instmix_memchart_section(binary_handler_profile_rocprof_compute):
         "'3': metric_id", f"{workload_dir}/profiling_config.yaml"
     )
     assert test_utils.check_file_pattern(
-        "SQ_INSTS_VALU_MFMA_F64", f"{workload_dir}/pmc_perf.csv"
+        "TA_FLAT_WAVEFRONTS", f"{workload_dir}/pmc_perf.csv"
     )
     assert test_utils.check_file_pattern(
         "SQC_TC_DATA_READ_REQ", f"{workload_dir}/pmc_perf.csv"
@@ -1571,7 +1571,7 @@ def test_instmix_section_global_write_kernel(binary_handler_profile_rocprof_comp
         "- global_write", f"{workload_dir}/profiling_config.yaml"
     )
     assert test_utils.check_file_pattern(
-        "SQ_INSTS_VALU_MFMA_F64", f"{workload_dir}/pmc_perf.csv"
+        "TA_FLAT_WAVEFRONTS", f"{workload_dir}/pmc_perf.csv"
     )
     assert test_utils.check_file_pattern("global_write", f"{workload_dir}/pmc_perf.csv")
     assert not test_utils.check_file_pattern(
