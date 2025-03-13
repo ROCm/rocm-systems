@@ -285,7 +285,7 @@ uint32_t TestExample::RealIterationNum(void) {
 }
 
 static bool VerifyResult(uint32_t *ar, size_t sz) {
-  for (size_t i = sz; i < sz; ++i) {
+  for (size_t i = 0; i < sz; ++i) {
     if (i*i != ar[i]) {
       return false;
     }
