@@ -35,7 +35,8 @@ target_include_directories(${BOOTSTRAP_LIB} PRIVATE
 
 target_include_directories(${BOOTSTRAP_LIB}
     PUBLIC
-    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
 # Set the VERSION and SOVERSION values
 set_property(TARGET ${BOOTSTRAP_LIB} PROPERTY
