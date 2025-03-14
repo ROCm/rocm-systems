@@ -249,13 +249,34 @@ parse_counters(std::string line)
 
     return counters;
 }
+
+std::vector<std::set<std::string>>
+parse_counter_envs()
+{
+    if(auto single_counter = get_env("ROCPROF_COUNTERS", std::string{}); !single_counter.empty())
+    {
+        return {parse_counters(single_counter)};
+    }
+
+    if(auto group_counters = get_env("ROCPROF_COUNTER_GROUPS", std::string{});
+       !group_counters.empty())
+    {
+        auto counters = std::vector<std::set<std::string>>{};
+        for(const auto& group : rocprofiler::sdk::parse::tokenize(group_counters, "\n"))
+        {
+            counters.emplace_back(parse_counters(group));
+        }
+        return counters;
+    }
+    return {};
+}
 }  // namespace
 
 config::config()
 : base_type{base_type::load_from_env()}
 , kernel_filter_range{get_kernel_filter_range(
       get_env("ROCPROF_KERNEL_FILTER_RANGE", std::string{}))}
-, counters{parse_counters(get_env("ROCPROF_COUNTERS", std::string{}))}
+, counters{parse_counter_envs()}
 , att_param_perfcounters{
       parse_att_counters(get_env("ROCPROF_ATT_PARAM_PERFCOUNTERS", std::string{}))}
 {

@@ -186,6 +186,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 ### Added
 
 - Added support for rocJPEG API Tracing.
+- Added support for iteration based counter multiplexing to rocprofv3 (see documentation)
 
 ### Changed
 

@@ -865,96 +865,129 @@ get_agent_counter_info()
     return CHECK_NOTNULL(tool_metadata)->agent_counter_info;
 }
 
+struct agent_profiles
+{
+    std::unordered_map<rocprofiler_agent_id_t, std::atomic<uint64_t>> current_iter;
+    const uint64_t                                                    rotation;
+    const std::unordered_map<rocprofiler_agent_id_t, std::vector<rocprofiler_profile_config_id_t>>
+        profiles;
+};
+
+std::optional<rocprofiler_profile_config_id_t>
+construct_counter_collection_profile(rocprofiler_agent_id_t       agent_id,
+                                     const std::set<std::string>& counters)
+{
+    static const auto gpu_agents_counter_info = get_agent_counter_info();
+    auto              profile                 = std::optional<rocprofiler_profile_config_id_t>{};
+    auto              counters_v              = counter_vec_t{};
+    auto              found_v                 = std::vector<std::string_view>{};
+    const auto*       agent_v                 = tool_metadata->get_agent(agent_id);
+    auto              expected_v              = counters.size();
+
+    constexpr auto device_qualifier = std::string_view{":device="};
+    for(const auto& itr : counters)
+    {
+        auto name_v = itr;
+        if(auto pos = std::string::npos; (pos = itr.find(device_qualifier)) != std::string::npos)
+        {
+            name_v        = itr.substr(0, pos);
+            auto dev_id_s = itr.substr(pos + device_qualifier.length());
+
+            ROCP_FATAL_IF(dev_id_s.empty() ||
+                          dev_id_s.find_first_not_of("0123456789") != std::string::npos)
+                << "invalid device qualifier format (':device=N) where N is the "
+                   "GPU "
+                   "id: "
+                << itr;
+
+            auto dev_id_v = std::stol(dev_id_s);
+            // skip this counter if the counter is for a specific device id (which
+            // doesn't this agent's device id)
+            if(dev_id_v != agent_v->gpu_index)
+            {
+                --expected_v;  // is not expected
+                continue;
+            }
+        }
+
+        // search the gpu agent counter info for a counter with a matching name
+        for(const auto& citr : gpu_agents_counter_info.at(agent_id))
+        {
+            if(name_v == std::string_view{citr.name})
+            {
+                counters_v.emplace_back(citr.id);
+                found_v.emplace_back(itr);
+            }
+        }
+    }
+
+    if(expected_v != counters_v.size())
+    {
+        auto requested_counters =
+            fmt::format("{}", fmt::join(counters.begin(), counters.end(), ", "));
+        auto found_counters = fmt::format("{}", fmt::join(found_v.begin(), found_v.end(), ", "));
+        ROCP_WARNING << "Unable to find all counters for agent " << agent_v->node_id << " (gpu-"
+                     << agent_v->gpu_index << ", " << agent_v->name << ") in ["
+                     << requested_counters << "]. Found: [" << found_counters << "]";
+    }
+
+    if(!counters_v.empty())
+    {
+        auto profile_v = rocprofiler_profile_config_id_t{};
+        ROCPROFILER_CALL(rocprofiler_create_profile_config(
+                             agent_id, counters_v.data(), counters_v.size(), &profile_v),
+                         "Could not construct profile cfg");
+        profile = profile_v;
+    }
+    return profile;
+}
+
+agent_profiles
+generate_agent_profiles()
+{
+    std::unordered_map<rocprofiler_agent_id_t, std::vector<rocprofiler_profile_config_id_t>>
+                                                                      profiles;
+    std::unordered_map<rocprofiler_agent_id_t, std::atomic<uint64_t>> pos;
+    for(const auto& agent : get_gpu_agents())
+    {
+        for(const auto& counter_set : tool::get_config().counters)
+        {
+            if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+            auto profile = construct_counter_collection_profile(agent->id, counter_set);
+            if(profile.has_value())
+            {
+                profiles[agent->id].push_back(profile.value());
+            }
+        }
+        pos[agent->id] = 0;
+    }
+    return agent_profiles{std::move(pos), tool::get_config().counter_groups_interval, profiles};
+}
+
 // this function creates a rocprofiler profile config on the first entry
-auto
+std::optional<rocprofiler_profile_config_id_t>
 get_device_counting_service(rocprofiler_agent_id_t agent_id)
 {
-    static auto       data                    = common::Synchronized<agent_counter_map_t>{};
-    static const auto gpu_agents              = get_gpu_agents();
-    static const auto gpu_agents_counter_info = get_agent_counter_info();
+    static auto agent_profiles = generate_agent_profiles();
 
-    auto profile = std::optional<rocprofiler_profile_config_id_t>{};
-    data.ulock(
-        [agent_id, &profile](const agent_counter_map_t& data_v) {
-            auto itr = data_v.find(agent_id);
-            if(itr != data_v.end())
-            {
-                profile = itr->second;
-                return true;
-            }
-            return false;
-        },
-        [agent_id, &profile](agent_counter_map_t& data_v) {
-            auto        counters_v = counter_vec_t{};
-            auto        found_v    = std::vector<std::string_view>{};
-            const auto* agent_v    = tool_metadata->get_agent(agent_id);
-            auto        expected_v = tool::get_config().counters.size();
+    auto agent_iter = agent_profiles.current_iter.find(agent_id);
+    if(agent_iter == agent_profiles.current_iter.end())
+    {
+        return std::nullopt;
+    }
 
-            constexpr auto device_qualifier = std::string_view{":device="};
-            for(const auto& itr : tool::get_config().counters)
-            {
-                auto name_v = itr;
-                if(auto pos = std::string::npos;
-                   (pos = itr.find(device_qualifier)) != std::string::npos)
-                {
-                    name_v        = itr.substr(0, pos);
-                    auto dev_id_s = itr.substr(pos + device_qualifier.length());
+    auto my_iter = agent_iter->second.fetch_add(1);
 
-                    ROCP_FATAL_IF(dev_id_s.empty() ||
-                                  dev_id_s.find_first_not_of("0123456789") != std::string::npos)
-                        << "invalid device qualifier format (':device=N) where N is the "
-                           "GPU "
-                           "id: "
-                        << itr;
+    const auto profiles = agent_profiles.profiles.find(agent_id);
+    if(profiles == agent_profiles.profiles.end())
+    {
+        return std::nullopt;
+    }
 
-                    auto dev_id_v = std::stol(dev_id_s);
-                    // skip this counter if the counter is for a specific device id (which
-                    // doesn't this agent's device id)
-                    if(dev_id_v != agent_v->gpu_index)
-                    {
-                        --expected_v;  // is not expected
-                        continue;
-                    }
-                }
+    if(profiles->second.empty()) return std::nullopt;
 
-                // search the gpu agent counter info for a counter with a matching name
-                for(const auto& citr : gpu_agents_counter_info.at(agent_id))
-                {
-                    if(name_v == std::string_view{citr.name})
-                    {
-                        counters_v.emplace_back(citr.id);
-                        found_v.emplace_back(itr);
-                    }
-                }
-            }
-
-            if(expected_v != counters_v.size())
-            {
-                auto requested_counters = fmt::format("{}",
-                                                      fmt::join(tool::get_config().counters.begin(),
-                                                                tool::get_config().counters.end(),
-                                                                ", "));
-                auto found_counters =
-                    fmt::format("{}", fmt::join(found_v.begin(), found_v.end(), ", "));
-                ROCP_WARNING << "Unable to find all counters for agent " << agent_v->node_id
-                             << " (gpu-" << agent_v->gpu_index << ", " << agent_v->name << ") in ["
-                             << requested_counters << "]. Found: [" << found_counters << "]";
-            }
-
-            if(!counters_v.empty())
-            {
-                auto profile_v = rocprofiler_profile_config_id_t{};
-                ROCPROFILER_CALL(rocprofiler_create_profile_config(
-                                     agent_id, counters_v.data(), counters_v.size(), &profile_v),
-                                 "Could not construct profile cfg");
-                profile = profile_v;
-            }
-
-            data_v.emplace(agent_id, profile);
-            return true;
-        });
-
-    return profile;
+    uint64_t profile_pos = my_iter / agent_profiles.rotation;
+    return profiles->second[profile_pos % profiles->second.size()];
 }
 
 int64_t
