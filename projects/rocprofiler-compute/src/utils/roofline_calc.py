@@ -447,13 +447,19 @@ def calc_ai(mspec, sort_type, ret_df):
 
     myList.sort(key=lambda x: x.totalDuration, reverse=True)
 
-    # print("Top 5 intensities ('{}')...".format(roof_details["sort"]))
     intensities = {"ai_l1": [], "ai_l2": [], "ai_hbm": []}
     curr_perf = []
     kernelNames = []
     i = 0
     # Create list of top 5 intensities
     while i < TOP_N and i != len(myList):
+        if myList[i].total_flops == 0:
+            console_debug(
+                "No flops counted for {}, arithmetic intensities will not display on plots.".format(
+                    myList[i].KernelName
+                )
+            )
+
         kernelNames.append(myList[i].KernelName)
         (
             intensities["ai_l1"].append(myList[i].total_flops / myList[i].L1cache_data)
