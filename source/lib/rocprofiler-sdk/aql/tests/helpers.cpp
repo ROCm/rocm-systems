@@ -44,11 +44,11 @@ auto
 findDeviceMetrics(const rocprofiler_agent_t& agent, const std::unordered_set<std::string>& metrics)
 {
     std::vector<counters::Metric> ret;
-    auto                          all_counters = counters::getBaseHardwareMetrics();
+    auto                          all_counters = counters::loadMetrics()->arch_to_metric;
 
     ROCP_INFO << "Looking up counters for " << std::string(agent.name);
 
-    auto gfx_metrics = common::get_val(all_counters, std::string(agent.name));
+    auto* gfx_metrics = common::get_val(all_counters, std::string(agent.name));
     if(!gfx_metrics)
     {
         ROCP_ERROR << "No counters found for " << std::string(agent.name);

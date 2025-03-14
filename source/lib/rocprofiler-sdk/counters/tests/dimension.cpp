@@ -158,17 +158,18 @@ auto
 findDeviceMetrics(const hsa::AgentCache& agent, const std::unordered_set<std::string>& metrics)
 {
     std::vector<counters::Metric> ret;
-    auto                          all_counters = counters::getMetricMap();
+    auto                          mets         = counters::loadMetrics();
+    const auto&                   all_counters = mets->arch_to_metric;
 
     ROCP_INFO << "Looking up counters for " << std::string(agent.name());
-    auto gfx_metrics = common::get_val(*all_counters, std::string(agent.name()));
+    const auto* gfx_metrics = common::get_val(all_counters, std::string(agent.name()));
     if(!gfx_metrics)
     {
         ROCP_ERROR << "No counters found for " << std::string(agent.name());
         return ret;
     }
 
-    for(auto& counter : *gfx_metrics)
+    for(const auto& counter : *gfx_metrics)
     {
         if(metrics.count(counter.name()) > 0 || metrics.empty())
         {
@@ -212,8 +213,8 @@ TEST(dimension, block_dim_test)
              */
             std::unordered_map<counters::rocprofiler_profile_counter_instance_types, uint64_t>
                 rocp_dims;
-            ROCP_INFO << metric.name() << " " << metric.special();
-            if(!metric.special().empty())
+            ROCP_INFO << metric.name() << " " << metric.constant();
+            if(!metric.constant().empty())
             {
                 rocp_dims[counters::rocprofiler_profile_counter_instance_types::
                               ROCPROFILER_DIMENSION_INSTANCE] = 1;
@@ -261,8 +262,8 @@ TEST(dimension, block_dim_test)
             /**
              * Check this value exists in the dimension cache
              */
-            const auto* dim_cache =
-                rocprofiler::common::get_val(counters::get_dimension_cache(), metric.id());
+            auto        dim_ptr   = counters::get_dimension_cache();
+            const auto* dim_cache = rocprofiler::common::get_val(dim_ptr->id_to_dim, metric.id());
             ASSERT_TRUE(dim_cache);
             EXPECT_EQ(fmt::format("{}", fmt::join(dims, "|")),
                       fmt::format("{}", fmt::join(*dim_cache, "|")));

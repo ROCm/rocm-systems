@@ -280,7 +280,7 @@ read_agent_ctx(const context::context*                    ctx,
     // If we have not initiualized HSA yet, nothing to read, return;
     if(hsa_inited().load() == false)
     {
-        return ROCPROFILER_STATUS_ERROR;
+        return ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED;
     }
 
     // Set the state to LOCKED to prevent other calls to start/stop/read.
@@ -385,7 +385,7 @@ start_agent_ctx(const context::context* ctx)
 
     if(hsa_inited().load() == false)
     {
-        return ROCPROFILER_STATUS_SUCCESS;
+        return ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED;
     }
 
     // Set the state to LOCKED to prevent other calls to start/stop/read.
@@ -518,7 +518,7 @@ stop_agent_ctx(const context::context* ctx)
 
     if(hsa_inited().load() == false)
     {
-        return ROCPROFILER_STATUS_SUCCESS;
+        return ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED;
     }
 
     auto expected = rocprofiler::context::device_counting_service::state::ENABLED;

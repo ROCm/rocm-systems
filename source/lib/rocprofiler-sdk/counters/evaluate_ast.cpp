@@ -239,67 +239,140 @@ perform_selection(std::map<rocprofiler_profile_counter_instance_types, std::stri
     return input_array;
 }
 
-}  // namespace
-
-const std::unordered_map<std::string, EvaluateASTMap>&
-get_ast_map()
+const ASTs
+load_asts()
 {
-    static std::unordered_map<std::string, EvaluateASTMap> ast_map = []() {
-        std::unordered_map<std::string, EvaluateASTMap> data;
-        const auto& metric_map = *CHECK_NOTNULL(counters::getMetricMap());
-        for(const auto& [gfx, metrics] : metric_map)
+    std::unordered_map<std::string, EvaluateASTMap> data;
+
+    auto        mets       = counters::loadMetrics(true);
+    const auto& metric_map = mets->arch_to_metric;
+    for(const auto& [gfx, metrics] : metric_map)
+    {
+        // TODO: Remove global XML from derived counters...
+        if(gfx == "global") continue;
+
+        std::unordered_map<std::string, Metric> by_name;
+        for(const auto& metric : metrics)
         {
-            // TODO: Remove global XML from derived counters...
-            if(gfx == "global") continue;
-
-            std::unordered_map<std::string, Metric> by_name;
-            for(const auto& metric : metrics)
-            {
-                by_name.emplace(metric.name(), metric);
-            }
-
-            auto& eval_map = data.emplace(gfx, EvaluateASTMap{}).first->second;
-            for(auto& [_, metric] : by_name)
-            {
-                RawAST* ast = nullptr;
-                auto*   buf =
-                    yy_scan_string(metric.expression().empty() ? metric.name().c_str()
-                                                               : metric.expression().c_str());
-                yyparse(&ast);
-                if(!ast)
-                {
-                    ROCP_ERROR << fmt::format("Unable to parse metric {}", metric);
-                    throw std::runtime_error(fmt::format("Unable to parse metric {}", metric));
-                }
-                try
-                {
-                    auto& evaluate_ast_node =
-                        eval_map
-                            .emplace(metric.name(),
-                                     EvaluateAST({.handle = metric.id()}, by_name, *ast, gfx))
-                            .first->second;
-                    evaluate_ast_node.validate_raw_ast(
-                        by_name);  // TODO: refactor and consolidate internal post-construction
-                                   // logic as a Finish() method
-                } catch(std::exception& e)
-                {
-                    ROCP_ERROR << e.what();
-                    throw std::runtime_error(
-                        fmt::format("AST was not generated for {}:{}", gfx, metric.name()));
-                }
-                yy_delete_buffer(buf);
-                delete ast;
-            }
-
-            for(auto& [name, ast] : eval_map)
-            {
-                ast.expand_derived(eval_map);
-            }
+            by_name.emplace(metric.name(), metric);
         }
 
+        auto& eval_map = data.emplace(gfx, EvaluateASTMap{}).first->second;
+        for(auto& [_, metric] : by_name)
+        {
+            RawAST* ast = nullptr;
+            auto*   buf = yy_scan_string(metric.expression().empty() ? metric.name().c_str()
+                                                                     : metric.expression().c_str());
+            yyparse(&ast);
+            if(!ast)
+            {
+                ROCP_ERROR << fmt::format("Unable to parse metric {}", metric);
+                throw std::runtime_error(fmt::format("Unable to parse metric {}", metric));
+            }
+            try
+            {
+                auto& evaluate_ast_node =
+                    eval_map
+                        .emplace(metric.name(),
+                                 EvaluateAST({.handle = metric.id()}, by_name, *ast, gfx))
+                        .first->second;
+                evaluate_ast_node.validate_raw_ast(
+                    by_name);  // TODO: refactor and consolidate internal post-construction
+                               // logic as a Finish() method
+            } catch(std::exception& e)
+            {
+                ROCP_ERROR << e.what();
+                throw std::runtime_error(
+                    fmt::format("AST was not generated for {}:{}", gfx, metric.name()));
+            }
+            yy_delete_buffer(buf);
+            delete ast;
+        }
+
+        for(auto& [name, ast] : eval_map)
+        {
+            ast.expand_derived(eval_map);
+        }
+    }
+
+    return {.arch_to_counter_asts = data};
+}
+
+}  // namespace
+
+rocprofiler_status_t
+check_ast_generation(std::string_view arch, Metric metric)
+{
+    auto        metrics = counters::loadMetrics();
+    const auto* metric_list =
+        rocprofiler::common::get_val(metrics->arch_to_metric, std::string(arch));
+    if(!metric_list) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
+
+    RawAST* ast = nullptr;
+    auto*   buf = yy_scan_string(metric.expression().empty() ? metric.name().c_str()
+                                                             : metric.expression().c_str());
+
+    auto delete_ast = [&]() {
+        yy_delete_buffer(buf);
+        delete ast;
+    };
+
+    yyparse(&ast);
+    if(!ast)
+    {
+        if(buf) yy_delete_buffer(buf);
+        ROCP_ERROR << fmt::format("Unable to parse metric {}", metric);
+        return ROCPROFILER_STATUS_ERROR_AST_GENERATION_FAILED;
+    }
+
+    std::unordered_map<std::string, Metric> by_name;
+    for(const auto& existing_metric : *metric_list)
+    {
+        by_name.emplace(existing_metric.name(), existing_metric);
+    }
+
+    if(!by_name.emplace(metric.name(), metric).second)
+    {
+        delete_ast();
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    try
+    {
+        auto evaluate_ast_node =
+            EvaluateAST({.handle = metric.id()}, by_name, *ast, std::string(arch));
+        evaluate_ast_node.validate_raw_ast(by_name);
+    } catch(std::exception& e)
+    {
+        ROCP_ERROR << fmt::format("Unable to generate AST for {} error: {}", metric, e.what());
+        delete_ast();
+        return ROCPROFILER_STATUS_ERROR_AST_GENERATION_FAILED;
+    }
+
+    delete_ast();
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+std::shared_ptr<const ASTs>
+get_ast_map(bool reload)
+{
+    using ASTSync             = common::Synchronized<std::shared_ptr<const ASTs>>;
+    static ASTSync*& ast_data = common::static_object<ASTSync>::construct(
+        [&]() { return std::make_shared<const ASTs>(load_asts()); }());
+
+    if(!reload)
+    {
+        return ast_data->rlock([](const auto& data) {
+            CHECK(data);
+            return data;
+        });
+    }
+
+    return ast_data->wlock([&](auto& data) {
+        data = std::make_shared<const ASTs>(load_asts());
+        CHECK(data);
         return data;
-    }();
-    return ast_map;
+    });
 }
 
 std::optional<std::set<Metric>>

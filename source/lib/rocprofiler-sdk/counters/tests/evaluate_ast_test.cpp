@@ -312,7 +312,7 @@ TEST(evaluate_ast, counter_constants)
         for(const auto& c : *eval_counters)
         {
             EXPECT_NE(expected.find(c.name()), expected.end());
-            EXPECT_TRUE(!c.special().empty());
+            EXPECT_TRUE(!c.constant().empty());
         }
 
         // Check that special counters are being decoded properly by the AST
@@ -451,7 +451,7 @@ TEST(evaluate_ast, evaluate_simple_counters)
     for(const auto& [val, metric] : metrics)
     {
         RawAST* ast = nullptr;
-        auto    buf = yy_scan_string(metric.expression().empty() ? metric.name().c_str()
+        auto*   buf = yy_scan_string(metric.expression().empty() ? metric.name().c_str()
                                                                  : metric.expression().c_str());
         yyparse(&ast);
         ASSERT_TRUE(ast) << metric.expression() << " " << metric.name();
@@ -470,7 +470,7 @@ TEST(evaluate_ast, evaluate_simple_counters)
         ASSERT_TRUE(eval_counters);
         ASSERT_EQ(eval_counters->size(), 1);
         EXPECT_EQ(eval_counters->begin()->name(), name);
-        EXPECT_TRUE(eval_counters->begin()->special().empty());
+        EXPECT_TRUE(eval_counters->begin()->constant().empty());
         std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>> decode = {
             {metrics[name].id(), expected}};
         std::vector<std::unique_ptr<std::vector<rocprofiler_record_counter_t>>> cache;

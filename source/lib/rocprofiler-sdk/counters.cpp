@@ -28,17 +28,23 @@
 
 #include "lib/common/container/small_vector.hpp"
 #include "lib/common/logging.hpp"
-#include "lib/common/static_object.hpp"
-#include "lib/common/synchronized.hpp"
+#include "lib/common/string_entry.hpp"
+#include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
-#include "lib/rocprofiler-sdk/aql/helpers.hpp"
 #include "lib/rocprofiler-sdk/counters/dimensions.hpp"
 #include "lib/rocprofiler-sdk/counters/evaluate_ast.hpp"
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
-#include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
-#include "lib/rocprofiler-sdk/hsa/queue.hpp"
-#include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+
+namespace
+{
+const char*
+get_static_string(const std::string& str)
+{
+    return rocprofiler::common::get_string_entry(rocprofiler::common::add_string_entry(str))
+        ->c_str();
+}
+}  // namespace
 
 extern "C" {
 /**
@@ -60,19 +66,21 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
 {
     if(version != ROCPROFILER_COUNTER_INFO_VERSION_0)
         return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI;
-    const auto& id_map = *CHECK_NOTNULL(rocprofiler::counters::getMetricIdMap());
+    auto metrics_map = rocprofiler::counters::loadMetrics();
+
+    const auto& id_map = metrics_map->id_to_metric;
 
     auto& out_struct = *static_cast<rocprofiler_counter_info_v0_t*>(info);
 
     if(const auto* metric_ptr = rocprofiler::common::get_val(id_map, counter_id.handle))
     {
         out_struct.id          = counter_id;
-        out_struct.is_constant = (metric_ptr->special().empty()) ? 0 : 1;
+        out_struct.is_constant = (metric_ptr->constant().empty()) ? 0 : 1;
         out_struct.is_derived  = (metric_ptr->expression().empty()) ? 0 : 1;
-        out_struct.name        = metric_ptr->name().c_str();
-        out_struct.description = metric_ptr->description().c_str();
-        out_struct.block       = metric_ptr->block().c_str();
-        out_struct.expression  = metric_ptr->expression().c_str();
+        out_struct.name        = get_static_string(metric_ptr->name());
+        out_struct.description = get_static_string(metric_ptr->description());
+        out_struct.block       = get_static_string(metric_ptr->block());
+        out_struct.expression  = get_static_string(metric_ptr->expression());
         return ROCPROFILER_STATUS_SUCCESS;
     }
 
@@ -94,9 +102,9 @@ rocprofiler_query_counter_instance_count(rocprofiler_agent_id_t,
                                          size_t*                  instance_count)
 {
     *instance_count = 0;
+    auto dim_ptr    = rocprofiler::counters::get_dimension_cache();
 
-    const auto* dims = rocprofiler::common::get_val(rocprofiler::counters::get_dimension_cache(),
-                                                    counter_id.handle);
+    const auto* dims = rocprofiler::common::get_val(dim_ptr->id_to_dim, counter_id.handle);
     if(!dims) return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
 
     for(const auto& metric_dim : *dims)
@@ -169,8 +177,9 @@ rocprofiler_iterate_counter_dimensions(rocprofiler_counter_id_t              id,
                                        rocprofiler_available_dimensions_cb_t info_cb,
                                        void*                                 user_data)
 {
-    const auto* dims =
-        rocprofiler::common::get_val(rocprofiler::counters::get_dimension_cache(), id.handle);
+    auto dim_ptr = rocprofiler::counters::get_dimension_cache();
+
+    const auto* dims = rocprofiler::common::get_val(dim_ptr->id_to_dim, id.handle);
     if(!dims) return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
 
     // This is likely faster than a map lookup given the limited number of dims.
@@ -178,7 +187,7 @@ rocprofiler_iterate_counter_dimensions(rocprofiler_counter_id_t              id,
     for(const auto& internal_dim : *dims)
     {
         auto& dim         = user_dims.emplace_back();
-        dim.name          = internal_dim.name().c_str();
+        dim.name          = get_static_string(internal_dim.name());
         dim.instance_size = internal_dim.size();
         dim.id            = static_cast<rocprofiler_counter_dimension_id_t>(internal_dim.type());
     }
@@ -202,5 +211,58 @@ rocprofiler_load_counter_definition(const char* yaml, size_t size, rocprofiler_c
     def.append = (flags == ROCPROFILER_COUNTER_FLAG_APPEND_DEFINITION ? true : false);
     def.loaded = false;
     return rocprofiler::counters::setCustomCounterDefinition(def);
+}
+
+rocprofiler_status_t
+rocprofiler_create_counter(const char*               name,
+                           size_t                    name_len,
+                           const char*               expr,
+                           size_t                    expr_len,
+                           const char*               description,
+                           size_t                    description_len,
+                           rocprofiler_agent_id_t    agent,
+                           rocprofiler_counter_id_t* counter_id)
+{
+    const auto* agent_ptr = rocprofiler::agent::get_agent(agent);
+    if(!agent_ptr) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
+
+    rocprofiler::counters::Metric new_metric(
+        "",
+        std::string(name, name_len),
+        "",
+        "",
+        std::string((description ? description : ""), description_len),
+        std::string(expr, expr_len),
+        "",
+        -1);
+
+    // Validate the metric. Checks for duplicate names and invalid expressions.
+    if(auto status = rocprofiler::counters::check_ast_generation(agent_ptr->name, new_metric);
+       status != ROCPROFILER_STATUS_SUCCESS)
+    {
+        return status;
+    }
+
+    auto add_metric =
+        rocprofiler::counters::loadMetrics(true, std::make_pair(agent_ptr->name, new_metric));
+
+    if(add_metric->arch_to_metric.at(agent_ptr->name).back().name() != new_metric.name())
+    {
+        ROCP_ERROR << fmt::format("Custom metric {} was not added", new_metric.name());
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    counter_id->handle = add_metric->arch_to_metric.at(agent_ptr->name).back().id();
+    // Regenerate ASTs and Dimension Cache
+    try
+    {
+        rocprofiler::counters::get_ast_map(true);
+        rocprofiler::counters::get_dimension_cache(true);
+    } catch(std::exception& e)
+    {
+        ROCP_FATAL << "Could not regenerate ASTs and Dimension Cache " << e.what();
+    }
+
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 }
