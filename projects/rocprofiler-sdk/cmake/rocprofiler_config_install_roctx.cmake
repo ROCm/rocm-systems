@@ -57,10 +57,8 @@ set(${PACKAGE_NAME}_BUILD_TREE
     ON
     CACHE BOOL "" FORCE)
 
-set(PROJECT_BUILD_TREE_TARGETS
-    ${SDK_PACKAGE_NAME}::${PACKAGE_NAME}-shared-library
-    ${SDK_PACKAGE_NAME}::${SDK_PACKAGE_NAME}-headers
-    ${SDK_PACKAGE_NAME}::${SDK_PACKAGE_NAME}-stack-protector)
+set(PROJECT_BUILD_TREE_TARGETS ${SDK_PACKAGE_NAME}::${PACKAGE_NAME}-shared-library
+                               ${SDK_PACKAGE_NAME}::${SDK_PACKAGE_NAME}-stack-protector)
 
 configure_file(
     ${PROJECT_SOURCE_DIR}/cmake/Templates/${PACKAGE_NAME}/build-config.cmake.in

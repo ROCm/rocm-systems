@@ -16,9 +16,7 @@ find_package(rocJPEG)
 # applications used by integration tests which DO link to rocprofiler-sdk-roctx
 add_subdirectory(reproducible-runtime)
 add_subdirectory(transpose)
-if(ROCPROFILER_BUILD_OPENMP_TESTS)
-    add_subdirectory(openmp)
-endif()
+add_subdirectory(openmp)
 
 set(CMAKE_BUILD_RPATH "\$ORIGIN:\$ORIGIN/../lib")
 
