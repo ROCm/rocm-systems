@@ -58,12 +58,17 @@ private:
     rocprofiler_profile_counter_instance_types type_;
 };
 
+struct metric_dims
+{
+    const std::unordered_map<uint64_t, std::vector<MetricDimension>> id_to_dim;
+};
+
 // get all dimensions for an agent, block_name
 std::vector<MetricDimension>
 getBlockDimensions(std::string_view agent, const counters::Metric&);
 
-const std::unordered_map<uint64_t, std::vector<MetricDimension>>&
-get_dimension_cache();
+std::shared_ptr<const metric_dims>
+get_dimension_cache(bool reload = false);
 }  // namespace counters
 }  // namespace rocprofiler
 

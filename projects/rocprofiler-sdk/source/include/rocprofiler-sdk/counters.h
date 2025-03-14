@@ -164,4 +164,36 @@ rocprofiler_iterate_agent_supported_counters(rocprofiler_agent_id_t             
 
 /** @} */
 
+/**
+ * @brief Creates a new counter based on a derived metric provided. The counter will only
+ *        be available for counter collection profiles created after the addition of this counter.
+ *        Due to the regeneration of internal ASTs and dimension cache, this call may be slow and
+ *        should generally be avoided in performance sensitive code blocks (i.e. dispatch
+ *        callbacks).
+ *
+ * @param [in] name The name of the new counter.
+ * @param [in] name_len The length of the counter name.
+ * @param [in] expr The counter expression, formatted identically to YAML counter definitions.
+ * @param [in] expr_len The length of the expression.
+ * @param [in] agent The rocprofiler_agent_id_t specifying the agent for which to create the
+ * counter.
+ * @param [in] description The description of the new counter (optional).
+ * @param [in] description_len The length of the description.
+ * @param [out] counter_id The rocprofiler_counter_id_t of the created counter.
+ * @return ::rocprofiler_status_t
+ * @retval ROCPROFILER_STATUS_SUCCESS if the counter was successfully created.
+ * @retval ROCPROFILER_STATUS_ERROR_AST_GENERATION_FAILED if the counter could not be created.
+ * @retval ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT if a counter argument is incorrect
+ * @retval ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND if the agent is not found
+ */
+rocprofiler_status_t
+rocprofiler_create_counter(const char*               name,
+                           size_t                    name_len,
+                           const char*               expr,
+                           size_t                    expr_len,
+                           const char*               description,
+                           size_t                    description_len,
+                           rocprofiler_agent_id_t    agent,
+                           rocprofiler_counter_id_t* counter_id) ROCPROFILER_NONNULL(1, 3, 8);
+
 ROCPROFILER_EXTERN_C_FINI

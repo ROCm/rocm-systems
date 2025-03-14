@@ -76,17 +76,18 @@ auto
 findDeviceMetrics(const hsa::AgentCache& agent, const std::unordered_set<std::string>& metrics)
 {
     std::vector<counters::Metric> ret;
-    auto                          all_counters = counters::getMetricMap();
+    auto                          mets         = counters::loadMetrics();
+    const auto&                   all_counters = mets->arch_to_metric;
 
     ROCP_INFO << "Looking up counters for " << std::string(agent.name());
-    auto gfx_metrics = common::get_val(*all_counters, std::string(agent.name()));
+    const auto* gfx_metrics = common::get_val(all_counters, std::string(agent.name()));
     if(!gfx_metrics)
     {
         ROCP_ERROR << "No counters found for " << std::string(agent.name());
         return ret;
     }
 
-    for(auto& counter : *gfx_metrics)
+    for(const auto& counter : *gfx_metrics)
     {
         if(metrics.count(counter.name()) > 0 || metrics.empty())
         {
@@ -246,12 +247,13 @@ TEST(core, check_packet_generation)
              * Check that required hardware counters match
              */
             ASSERT_TRUE(profile->agent);
-            auto name_str = std::string(profile->agent->name);
-            auto req_counters =
-                counters::get_required_hardware_counters(counters::get_ast_map(), name_str, metric);
+            auto       name_str     = std::string(profile->agent->name);
+            const auto asts         = counters::get_ast_map();
+            auto       req_counters = counters::get_required_hardware_counters(
+                asts->arch_to_counter_asts, name_str, metric);
             for(const auto& req_metric : *req_counters)
             {
-                if(req_metric.special().empty())
+                if(req_metric.constant().empty())
                 {
                     EXPECT_GT(profile->reqired_hw_counters.count(req_metric), 0)
                         << "Could not find metric - " << req_metric.name();
@@ -809,5 +811,49 @@ TEST_YAML_LOAD:
         EXPECT_EQ(
             findDeviceMetrics(agent, {"TEST_YAML_LOAD", "GRBM_GUI_ACTIVE", "MAX_WAVE_SIZE"}).size(),
             2);
+    }
+}
+
+TEST(core, create_counter)
+{
+    std::vector<Metric> to_add = {
+        Metric("", "SQ_WAVES_REDUCE_T", "", "", "", "reduce(SQ_WAVES,sum)", "", 10000),
+        Metric("", "SQ_WAVES_AVR_T", "", "", "", "reduce(SQ_WAVES,avr)", "", 10001),
+        Metric("", "SQ_WAVES_INVALID", "", "", "", "reduce(ABC,avr)", "", 10002),
+    };
+
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+    auto agents = hsa::get_queue_controller()->get_supported_agents();
+    for(const auto& [_, agent] : agents)
+    {
+        for(auto& metric : to_add)
+        {
+            rocprofiler_counter_id_t id;
+            auto                     status  = rocprofiler_create_counter(metric.name().c_str(),
+                                                     metric.name().size(),
+                                                     metric.expression().c_str(),
+                                                     metric.expression().size(),
+                                                     metric.description().c_str(),
+                                                     metric.description().size(),
+                                                     agent.get_rocp_agent()->id,
+                                                     &id);
+            auto                     metrics = findDeviceMetrics(agent, {metric.name()});
+            if(metric.name() == "SQ_WAVES_INVALID")
+            {
+                EXPECT_EQ(status, ROCPROFILER_STATUS_ERROR_AST_GENERATION_FAILED);
+                EXPECT_TRUE(metrics.empty());
+            }
+            else
+            {
+                EXPECT_EQ(metrics.size(), 1);
+                EXPECT_EQ(metric.name(), metrics[0].name());
+                EXPECT_EQ(metric.expression(), metrics[0].expression());
+            }
+        }
     }
 }

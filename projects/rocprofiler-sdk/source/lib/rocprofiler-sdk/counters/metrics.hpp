@@ -22,11 +22,14 @@
 
 #pragma once
 
+#include "rocprofiler-sdk/fwd.h"
+
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
-#include "rocprofiler-sdk/fwd.h"
 
 #include <fmt/core.h>
 #include <fmt/ranges.h>
@@ -47,14 +50,14 @@ public:
            std::string event,
            std::string dsc,
            std::string expr,
-           std::string special,
+           std::string constant,
            uint64_t    id)
     : name_(std::move(name))
     , block_(std::move(block))
     , event_(std::move(event))
     , description_(std::move(dsc))
     , expression_(std::move(expr))
-    , special_(std::move(special))
+    , constant_(std::move(constant))
     , id_(id)
     {}
 
@@ -63,7 +66,7 @@ public:
     const std::string& event() const { return event_; }
     const std::string& description() const { return description_; }
     const std::string& expression() const { return expression_; }
-    const std::string& special() const { return special_; }
+    const std::string& constant() const { return constant_; }
     uint64_t           id() const { return id_; }
     uint32_t           flags() const { return flags_; }
     bool               empty() const { return empty_; }
@@ -79,7 +82,7 @@ private:
     std::string event_       = {};
     std::string description_ = {};
     std::string expression_  = {};
-    std::string special_     = {};
+    std::string constant_    = {};
     int64_t     id_          = -1;
     bool        empty_       = false;
     uint32_t    flags_       = 0;
@@ -94,24 +97,18 @@ struct CustomCounterDefinition
 
 using MetricMap   = std::unordered_map<std::string, std::vector<Metric>>;
 using MetricIdMap = std::unordered_map<uint64_t, Metric>;
+using ArchToId    = std::unordered_map<std::string, std::unordered_set<uint64_t>>;
+using ArchMetric  = std::pair<std::string, Metric>;
 
-/**
- * Get base hardware counters for all GFXs Map<GFX Name, Counters>
- */
-MetricMap
-getBaseHardwareMetrics();
+struct counter_metrics_t
+{
+    const MetricMap   arch_to_metric;
+    const MetricIdMap id_to_metric;
+    const ArchToId    arch_to_id;
+};
 
-/**
- * Get derived hardware metrics for all GFXs  Map<GFX Name, Counters>
- */
-MetricMap
-getDerivedHardwareMetrics();
-
-/**
- * Combined map containing both base and derived counters
- */
-const MetricMap*
-getMetricMap();
+std::shared_ptr<const counter_metrics_t>
+loadMetrics(bool reload = false, std::optional<ArchMetric> add_metric = std::nullopt);
 
 /**
  * Get the metrics that apply to a specific agent. Supplied parameter
@@ -119,12 +116,6 @@ getMetricMap();
  */
 std::vector<Metric>
 getMetricsForAgent(const std::string&);
-
-/**
- * Get a map of metric::id() -> metric
- */
-const MetricIdMap*
-getMetricIdMap();
 
 /**
  * Get the metric event ids for perfcounters options in thread trace

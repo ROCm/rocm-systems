@@ -75,10 +75,10 @@ auto
 findDeviceMetrics(const hsa::AgentCache& agent, const std::unordered_set<std::string>& metrics)
 {
     std::vector<counters::Metric> ret;
-    const auto*                   all_counters = counters::getMetricMap();
-
+    auto                          mets         = counters::loadMetrics();
+    const auto&                   all_counters = mets->arch_to_metric;
     ROCP_INFO << "Looking up counters for " << std::string(agent.name());
-    const auto* gfx_metrics = common::get_val(*all_counters, std::string(agent.name()));
+    const auto* gfx_metrics = common::get_val(all_counters, std::string(agent.name()));
     if(!gfx_metrics)
     {
         ROCP_INFO << "No counters found for " << std::string(agent.name());
@@ -518,8 +518,8 @@ protected:
 
             ROCP_INFO << fmt::format("Running test on agent {:x}",
                                      gpu_agent.get_hsa_agent().handle);
-
-            const auto* agent_map = rocprofiler::common::get_val(counters::get_ast_map(),
+            auto        ast_map   = counters::get_ast_map();
+            const auto* agent_map = rocprofiler::common::get_val(ast_map->arch_to_counter_asts,
                                                                  std::string(gpu_agent.name()));
             CHECK(agent_map);
             const auto* original_ast = rocprofiler::common::get_val(*agent_map, metric_to_test);

@@ -55,7 +55,9 @@ counter_callback_info::setup_profile_config(std::shared_ptr<profile_config>& pro
     auto  agent_name = std::string(config.agent->name);
     for(const auto& metric : config.metrics)
     {
-        auto req_counters = get_required_hardware_counters(get_ast_map(), agent_name, metric);
+        const auto asts = get_ast_map();
+        auto       req_counters =
+            get_required_hardware_counters(asts->arch_to_counter_asts, agent_name, metric);
 
         if(!req_counters)
         {
@@ -67,7 +69,7 @@ counter_callback_info::setup_profile_config(std::shared_ptr<profile_config>& pro
         // constants like MAX_WAVE_SIZE
         for(const auto& req_metric : *req_counters)
         {
-            if(req_metric.special().empty())
+            if(req_metric.constant().empty())
             {
                 config.reqired_hw_counters.insert(req_metric);
             }
@@ -77,8 +79,8 @@ counter_callback_info::setup_profile_config(std::shared_ptr<profile_config>& pro
             }
         }
 
-        const auto& asts      = get_ast_map();
-        const auto* agent_map = rocprofiler::common::get_val(asts, agent_name);
+        const auto* agent_map =
+            rocprofiler::common::get_val(asts->arch_to_counter_asts, agent_name);
         if(!agent_map)
         {
             ROCP_ERROR << fmt::format("Coult not build AST for {}", agent_name);

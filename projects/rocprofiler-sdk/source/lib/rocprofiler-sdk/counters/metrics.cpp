@@ -25,6 +25,7 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include "lib/common/filesystem.hpp"
+#include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
@@ -45,6 +46,8 @@
 #include <dlfcn.h>  // for dladdr
 #include <cstdint>
 #include <cstdlib>
+#include <memory>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -59,13 +62,6 @@ getCustomCounterDefinition()
     return def;
 }
 
-uint64_t&
-current_id()
-{
-    static uint64_t id = 0;
-    return id;
-}
-
 /**
  * Constant/speical metrics are treated as psudo-metrics in that they
  * are given their own metric id. MAX_WAVE_SIZE for example is not collected
@@ -75,11 +71,10 @@ current_id()
  * used in derived counters (exact support properties that can be used can
  * be viewed in evaluate_ast.cpp:get_agent_property()).
  */
-const std::vector<Metric>&
-get_constants()
+std::vector<Metric>
+get_constants(uint64_t starting_id)
 {
-    static std::vector<Metric> constants;
-    if(!constants.empty()) return constants;
+    std::vector<Metric> constants;
     // Ensure topology is read
     rocprofiler::agent::get_agents();
     for(const auto& prop : rocprofiler::agent::get_agent_available_properties())
@@ -91,8 +86,8 @@ get_constants()
                                fmt::format("Constant value {} from agent properties", prop),
                                "",
                                "yes",
-                               current_id());
-        current_id()++;
+                               starting_id);
+        starting_id++;
     }
     return constants;
 }
@@ -109,9 +104,12 @@ get_constants()
  *      ...
  *  description: General counter desctiption
  */
-MetricMap
-loadYAML(const std::string& filename, bool load_constants = false, bool load_derived = false)
+counter_metrics_t
+loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
 {
+    // Stores metrics that are added via the API
+    static MetricMap added_metrics;
+
     MetricMap ret;
     auto      override = getCustomCounterDefinition().wlock([&](auto& data) {
         data.loaded = true;
@@ -132,7 +130,8 @@ loadYAML(const std::string& filename, bool load_constants = false, bool load_der
         counter_data << override.data;
     }
 
-    auto yaml = YAML::Load(counter_data.str());
+    auto     yaml       = YAML::Load(counter_data.str());
+    uint64_t current_id = 0;
 
     for(auto it = yaml.begin(); it != yaml.end(); ++it)
     {
@@ -157,37 +156,87 @@ loadYAML(const std::string& filename, bool load_constants = false, bool load_der
             while(std::getline(ss, arch_name, '/'))
             {
                 auto& metricVec = ret.emplace(arch_name, std::vector<Metric>()).first->second;
-                if(metricVec.empty() && load_constants)
+                if(metricVec.empty())
                 {
-                    metricVec.insert(
-                        metricVec.end(), get_constants().begin(), get_constants().end());
+                    const auto constants = get_constants(current_id);
+                    metricVec.insert(metricVec.end(), constants.begin(), constants.end());
+                    current_id += constants.size();
                 }
 
-                if((def["expression"] && load_derived) || (!load_derived && !def["expression"]))
-                {
-                    std::string description;
-                    if(def["description"])
-                        description = def["description"].as<std::string>();
-                    else if(counter_def["description"])
-                        description = counter_def["description"].as<std::string>();
-                    metricVec.emplace_back(
-                        arch_name,
-                        counter_name,
-                        (def["block"] ? def["block"].as<std::string>() : ""),
-                        (def["event"] ? def["event"].as<std::string>() : ""),
-                        description,
-                        (def["expression"] ? def["expression"].as<std::string>() : ""),
-                        "",
-                        current_id());
-                    current_id()++;
-                    ROCP_TRACE << fmt::format("Inserted info {}: {}", arch_name, metricVec.back());
-                }
+                std::string description;
+                if(def["description"])
+                    description = def["description"].as<std::string>();
+                else if(counter_def["description"])
+                    description = counter_def["description"].as<std::string>();
+                metricVec.emplace_back(
+                    arch_name,
+                    counter_name,
+                    (def["block"] ? def["block"].as<std::string>() : ""),
+                    (def["event"] ? def["event"].as<std::string>() : ""),
+                    description,
+                    (def["expression"] ? def["expression"].as<std::string>() : ""),
+                    "",
+                    current_id);
+                current_id++;
+                ROCP_TRACE << fmt::format("Inserted info {}: {}", arch_name, metricVec.back());
             }
         }
     }
-    ROCP_FATAL_IF(current_id() > 65536)
+
+    // Add custom counters after adding the above counters, ensures that the mapping is
+    // deterministic when generated.
+    for(const auto& [arch, metrics] : added_metrics)
+    {
+        auto& metricVec = ret.emplace(arch, std::vector<Metric>()).first->second;
+        metricVec.insert(metricVec.end(), metrics.begin(), metrics.end());
+        current_id += metrics.size();
+    }
+
+    if(add_metric)
+    {
+        Metric with_id = Metric(add_metric->first,
+                                add_metric->second.name(),
+                                add_metric->second.block(),
+                                add_metric->second.event(),
+                                add_metric->second.description(),
+                                add_metric->second.expression(),
+                                "",
+                                current_id);
+        added_metrics.emplace(add_metric->first, std::vector<Metric>{})
+            .first->second.push_back(with_id);
+        ret.emplace(add_metric->first, std::vector<Metric>{}).first->second.push_back(with_id);
+    }
+
+    ROCP_FATAL_IF(current_id > 65536)
         << "Counter count exceeds 16 bits, which may break counter id output";
-    return ret;
+
+    return {.arch_to_metric = ret,
+            .id_to_metric =
+                [&]() {
+                    MetricIdMap map;
+                    for(const auto& [agent_name, metrics] : ret)
+                    {
+                        for(const auto& m : metrics)
+                        {
+                            map.emplace(m.id(), m);
+                        }
+                    }
+                    return map;
+                }(),
+            .arch_to_id =
+                [&]() {
+                    ArchToId map;
+                    for(const auto& [agent_name, metrics] : ret)
+                    {
+                        std::unordered_set<uint64_t> ids;
+                        for(const auto& m : metrics)
+                        {
+                            ids.insert(m.id());
+                        }
+                        map.emplace(agent_name, std::move(ids));
+                    }
+                    return map;
+                }()};
 }
 
 std::string
@@ -229,47 +278,51 @@ setCustomCounterDefinition(const CustomCounterDefinition& def)
     });
 }
 
-MetricMap
-getDerivedHardwareMetrics()
+std::shared_ptr<const counter_metrics_t>
+loadMetrics(bool reload, const std::optional<ArchMetric> add_metric)
 {
-    auto counters_path = findViaEnvironment("counter_defs.yaml");
-    ROCP_FATAL_IF(!common::filesystem::exists(counters_path))
-        << "metric xml file '" << counters_path << "' does not exist";
-    return loadYAML(counters_path, false, true);
-}
+    using sync_metric = common::Synchronized<std::shared_ptr<const counter_metrics_t>>;
 
-MetricMap
-getBaseHardwareMetrics()
-{
-    auto counters_path = findViaEnvironment("counter_defs.yaml");
-    ROCP_FATAL_IF(!common::filesystem::exists(counters_path))
-        << "metric xml file '" << counters_path << "' does not exist";
-    return loadYAML(counters_path, true, false);
-}
+    if(!reload && add_metric)
+    {
+        ROCP_FATAL << "Adding a metric without reloading metric list, this should not happen and "
+                      "will result in custom metrics not being added";
+    }
 
-const MetricIdMap*
-getMetricIdMap()
-{
-    static MetricIdMap*& id_map = common::static_object<MetricIdMap>::construct([]() {
-        MetricIdMap map;
-        for(const auto& [_, val] : *CHECK_NOTNULL(getMetricMap()))
-        {
-            for(const auto& metric : val)
-            {
-                map.emplace(metric.id(), metric);
-            }
-        }
-        return map;
-    }());
-    return id_map;
+    auto reload_func = [&]() {
+        auto counters_path = findViaEnvironment("counter_defs.yaml");
+        ROCP_FATAL_IF(!common::filesystem::exists(counters_path))
+            << "metric xml file '" << counters_path << "' does not exist";
+        return std::make_shared<counter_metrics_t>(loadYAML(counters_path, add_metric));
+    };
+
+    static sync_metric*& id_map =
+        common::static_object<sync_metric>::construct([&]() { return reload_func(); }());
+
+    if(!id_map) return nullptr;
+
+    if(!reload)
+    {
+        return id_map->rlock([](const auto& data) {
+            CHECK(data);
+            return data;
+        });
+    }
+
+    return id_map->wlock([&](auto& data) {
+        data = reload_func();
+        CHECK(data);
+        return data;
+    });
 }
 
 std::unordered_map<uint64_t, int>
 getPerfCountersIdMap()
 {
     std::unordered_map<uint64_t, int> map;
+    auto                              mets = loadMetrics();
 
-    for(const auto& [agent, list] : *CHECK_NOTNULL(getMetricMap()))
+    for(const auto& [agent, list] : mets->arch_to_metric)
     {
         if(agent.find("gfx9") == std::string::npos) continue;
         for(const auto& metric : list)
@@ -282,29 +335,11 @@ getPerfCountersIdMap()
     return map;
 }
 
-const MetricMap*
-getMetricMap()
-{
-    static MetricMap*& map = common::static_object<MetricMap>::construct([]() {
-        MetricMap ret = getBaseHardwareMetrics();
-        for(auto& [key, val] : getDerivedHardwareMetrics())
-        {
-            auto [iter, inserted] = ret.emplace(key, val);
-            if(!inserted)
-            {
-                iter->second.insert(iter->second.end(), val.begin(), val.end());
-            }
-        }
-        return ret;
-    }());
-    return map;
-}
-
 std::vector<Metric>
 getMetricsForAgent(const std::string& agent)
 {
-    const auto& map = *CHECK_NOTNULL(getMetricMap());
-    if(const auto* metric_ptr = rocprofiler::common::get_val(map, agent))
+    auto mets = loadMetrics();
+    if(const auto* metric_ptr = rocprofiler::common::get_val(mets->arch_to_metric, agent))
     {
         return *metric_ptr;
     }
@@ -315,24 +350,8 @@ getMetricsForAgent(const std::string& agent)
 bool
 checkValidMetric(const std::string& agent, const Metric& metric)
 {
-    static auto*& agent_to_id =
-        common::static_object<std::unordered_map<std::string, std::unordered_set<uint64_t>>>::
-            construct([]() -> std::unordered_map<std::string, std::unordered_set<uint64_t>> {
-                std::unordered_map<std::string, std::unordered_set<uint64_t>> ret;
-                const auto& map = *CHECK_NOTNULL(getMetricMap());
-                for(const auto& [agent_name, metrics] : map)
-                {
-                    auto& id_set =
-                        ret.emplace(agent_name, std::unordered_set<uint64_t>{}).first->second;
-                    for(const auto& m : metrics)
-                    {
-                        id_set.insert(m.id());
-                    }
-                }
-                return ret;
-            }());
-
-    const auto* agent_map = common::get_val(*agent_to_id, agent);
+    auto        metrics   = loadMetrics();
+    const auto* agent_map = common::get_val(metrics->arch_to_id, agent);
     return agent_map != nullptr && agent_map->count(metric.id()) > 0;
 }
 
@@ -351,7 +370,7 @@ operator==(Metric const& lhs, Metric const& rhs)
                         x.event_,
                         x.description_,
                         x.expression_,
-                        x.special_,
+                        x.constant_,
                         x.id_,
                         x.empty_,
                         x.flags_);

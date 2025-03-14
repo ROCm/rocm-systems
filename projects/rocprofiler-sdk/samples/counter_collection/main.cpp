@@ -116,7 +116,7 @@ main(int argc, char** argv)
     int ntotdevice = 0;
     HIP_CALL(hipGetDeviceCount(&ntotdevice));
 
-    long nitr    = 5000;
+    long nitr    = 50000;
     long nsync   = 500;
     long ndevice = 0;
 

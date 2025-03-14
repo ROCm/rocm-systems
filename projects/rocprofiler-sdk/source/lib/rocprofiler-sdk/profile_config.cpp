@@ -56,7 +56,9 @@ rocprofiler_create_profile_config(rocprofiler_agent_id_t           agent_id,
     std::shared_ptr<rocprofiler::counters::profile_config> config =
         std::make_shared<rocprofiler::counters::profile_config>();
 
-    const auto& id_map = *CHECK_NOTNULL(rocprofiler::counters::getMetricIdMap());
+    auto        metrics_map = rocprofiler::counters::loadMetrics();
+    const auto& id_map      = metrics_map->id_to_metric;
+
     for(size_t i = 0; i < counters_count; i++)
     {
         auto& counter_id = counters_list[i];

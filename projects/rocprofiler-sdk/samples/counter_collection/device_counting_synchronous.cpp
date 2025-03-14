@@ -78,7 +78,7 @@ public:
     counter_sampler(rocprofiler_agent_id_t agent);
 
     // Decode the counter name of a record
-    const std::string& decode_record_name(const rocprofiler_record_counter_t& rec) const;
+    std::string decode_record_name(const rocprofiler_record_counter_t& rec) const;
 
     // Get the dimensions of a record (what CU/SE/etc the counter is for). High cost operation
     // should be cached if possible.
@@ -86,8 +86,8 @@ public:
         const rocprofiler_record_counter_t& rec);
 
     // Sample the counter values for a set of counters, returns the records in the out parameter.
-    void sample_counter_values(const std::vector<std::string>&            counters,
-                               std::vector<rocprofiler_record_counter_t>& out);
+    rocprofiler_status_t sample_counter_values(const std::vector<std::string>&            counters,
+                                               std::vector<rocprofiler_record_counter_t>& out);
 
     // Get the available agents on the system
     static std::vector<rocprofiler_agent_v0_t> get_available_agents();
@@ -165,7 +165,7 @@ counter_sampler::counter_sampler(rocprofiler_agent_id_t agent)
                      "Could not setup buffered service");
 }
 
-const std::string&
+std::string
 counter_sampler::decode_record_name(const rocprofiler_record_counter_t& rec) const
 {
     if(id_to_name_.empty())
@@ -179,6 +179,11 @@ counter_sampler::decode_record_name(const rocprofiler_record_counter_t& rec) con
 
     rocprofiler_counter_id_t counter_id = {.handle = 0};
     rocprofiler_query_record_counter_id(rec.id, &counter_id);
+    if(id_to_name_.find(counter_id.handle) == id_to_name_.end())
+    {
+        std::clog << "Unknown counter id = " << counter_id.handle << "\n";
+        return "UNKNOWN";
+    }
     return id_to_name_.at(counter_id.handle);
 }
 
@@ -199,7 +204,7 @@ counter_sampler::get_record_dimensions(const rocprofiler_record_counter_t& rec)
     return out;
 }
 
-void
+rocprofiler_status_t
 counter_sampler::sample_counter_values(const std::vector<std::string>&            counters,
                                        std::vector<rocprofiler_record_counter_t>& out)
 {
@@ -228,15 +233,23 @@ counter_sampler::sample_counter_values(const std::vector<std::string>&          
         profile_sizes_.emplace(profile.handle, expected_size);
         profile_cached = cached_profiles_.find(counters);
     }
-
-    out.resize(profile_sizes_.at(profile_cached->second.handle));
+    try
+    {
+        out.resize(profile_sizes_.at(profile_cached->second.handle));
+    } catch(const std::exception& e)
+    {
+        std::cerr << "Caught exception: " << e.what() << "\n";
+        return ROCPROFILER_STATUS_ERROR;
+    }
     profile_ = profile_cached->second;
     rocprofiler_start_context(ctx_);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
     size_t out_size = out.size();
-    rocprofiler_sample_device_counting_service(
+    auto   status   = rocprofiler_sample_device_counting_service(
         ctx_, {}, ROCPROFILER_COUNTER_FLAG_NONE, out.data(), &out_size);
     rocprofiler_stop_context(ctx_);
     out.resize(out_size);
+    return status;
 }
 
 std::vector<rocprofiler_agent_v0_t>
@@ -392,22 +405,31 @@ tool_init(rocprofiler_client_finalize_t fini_func, void*)
         std::vector<rocprofiler_record_counter_t> records;
         while(sampler && exit_toggle().load() == false)
         {
-            sampler->sample_counter_values({"SQ_WAVES"}, records);
-            std::clog << "Sample " << count << ":\n";
-            for(const auto& record : records)
+            auto status = sampler->sample_counter_values({"SQ_WAVES"}, records);
+            if(status == ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED)
             {
-                if(!sampler) break;
-                auto recname = sampler->decode_record_name(record);
-                std::clog << "\tCounter: " << record.id << " Name: " << recname
-                          << " Value: " << record.counter_value
-                          << " User data: " << record.user_data.value << "\n";
-                if(count == 1)
+                std::clog << "HSA not loaded yet....\n";
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                continue;
+            }
+            std::clog << "Sample " << count << ":\n";
+            if(status == ROCPROFILER_STATUS_SUCCESS)
+            {
+                for(const auto& record : records)
                 {
                     if(!sampler) break;
-                    auto dims = sampler->get_record_dimensions(record);
-                    for(const auto& [name, pos] : dims)
+                    auto recname = sampler->decode_record_name(record);
+                    std::clog << "\tCounter: " << record.id << " Name: " << recname
+                              << " Value: " << record.counter_value
+                              << " User data: " << record.user_data.value << "\n";
+                    if(count == 1)
                     {
-                        std::clog << "\t\tDimension Name: " << name << ": " << pos << "\n";
+                        if(!sampler) break;
+                        auto dims = sampler->get_record_dimensions(record);
+                        for(const auto& [name, pos] : dims)
+                        {
+                            std::clog << "\t\tDimension Name: " << name << ": " << pos << "\n";
+                        }
                     }
                 }
             }
