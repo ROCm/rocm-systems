@@ -127,7 +127,7 @@ def test_scratch_memory(json_input_data, csv_input_data):
 
         assert row["Kind"] == "SCRATCH_MEMORY"
         assert row["Operation"] in ["SCRATCH_MEMORY_ALLOC", "SCRATCH_MEMORY_FREE"]
-        assert int(row["Agent_Id"]) > 0
+        assert int(row["Agent_Id"].split(" ")[-1]) >= 0
         assert int(row["Queue_Id"]) > 0
         assert int(row["Thread_Id"]) > 0
         assert int(row["Start_Timestamp"]) > 0

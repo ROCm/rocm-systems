@@ -33,6 +33,7 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 
+#include <fmt/core.h>
 #include <fmt/format.h>
 
 #include <unistd.h>
@@ -534,10 +535,36 @@ metadata::get_operation_name(rocprofiler_buffer_tracing_kind_t kind,
     return buffer_names.at(kind, op);
 }
 
-uint64_t
-metadata::get_node_id(rocprofiler_agent_id_t _val) const
+agent_index
+metadata::get_agent_index(rocprofiler_agent_id_t id, agent_indexing index) const
 {
-    return CHECK_NOTNULL(get_agent(_val))->logical_node_id;
+    const auto* _agent = get_agent(id);
+    ROCP_FATAL_IF(!_agent) << "Information of the agent with handle: " << id.handle
+                           << " is not present";
+
+    // stringify agent type
+    auto get_type = [_agent]() -> std::string_view {
+        switch(_agent->type)
+        {
+            case ROCPROFILER_AGENT_TYPE_CPU: return "CPU";
+            case ROCPROFILER_AGENT_TYPE_GPU: return "GPU";
+            case ROCPROFILER_AGENT_TYPE_NONE:
+            case ROCPROFILER_AGENT_TYPE_LAST: break;
+        }
+        return "UNK";
+    };
+
+    switch(index)
+    {
+        case agent_indexing::node: return agent_index{"Agent", _agent->node_id, get_type()};
+        case agent_indexing::logical_node_type:
+            return agent_index{
+                get_type(), static_cast<uint32_t>(_agent->logical_node_type_id), get_type()};
+
+        case agent_indexing::logical_node:
+        default:
+            return agent_index{"Agent", static_cast<uint32_t>(_agent->logical_node_id), get_type()};
+    }
 }
 
 const std::string*

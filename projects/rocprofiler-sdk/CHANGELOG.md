@@ -158,6 +158,10 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - SDK: `rocprofiler_agent_v0_t` support for agent UUIDs
 - SDK: `rocprofiler_agent_v0_t` support for agent visibility based on gpu isolation environment variables such as `ROCR_VISIBLE_DEVICES` and so on.
 - Accumulation VGPR support for `rocprofv3`.
+-  Added `--agent-index` option in rocprofv3 to specify the agent naming convention in the output
+    - absolute == node_id
+    - relative == logical_node_id
+    - type-relative == logical_node_type_id
 
 ## ROCprofiler-SDK 0.7.0 for ROCm release 6.5
 

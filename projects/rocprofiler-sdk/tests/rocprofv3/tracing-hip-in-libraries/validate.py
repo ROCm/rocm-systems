@@ -300,7 +300,7 @@ def test_kernel_trace(kernel_input_data, kernel_stats_data):
             continue
 
         assert row["Kind"] == "KERNEL_DISPATCH"
-        assert int(row["Agent_Id"]) > 0
+        assert int(row["Agent_Id"].split(" ")[-1]) >= 0
         assert int(row["Queue_Id"]) > 0
         assert int(row["Kernel_Id"]) > 0
         assert int(row["Correlation_Id"]) > 0
@@ -419,8 +419,8 @@ def test_memory_copy_trace(
             "MEMORY_COPY_DEVICE_TO_HOST",
         )
 
-        src_agent = get_agent(row["Source_Agent_Id"])
-        dst_agent = get_agent(row["Destination_Agent_Id"])
+        src_agent = get_agent(row["Source_Agent_Id"].split(" ")[-1])
+        dst_agent = get_agent(row["Destination_Agent_Id"].split(" ")[-1])
         assert src_agent is not None and dst_agent is not None, f"{agent_info_input_data}"
 
         if row["Direction"] == "MEMORY_COPY_HOST_TO_DEVICE":

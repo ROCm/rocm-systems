@@ -49,7 +49,11 @@ def test_multi_agent_support(
     # Determine the agent on which sample was generated
     samples_df["Agent_Id"] = (
         samples_df["Dispatch_Id"]
-        .map(input_kernel_trace_csv.set_index("Dispatch_Id")["Agent_Id"])
+        .map(
+            input_kernel_trace_csv.set_index("Dispatch_Id")["Agent_Id"]
+            .str.split(" ")
+            .str[1]
+        )
         .astype(np.uint64)
     )
     sampled_agents = samples_df["Agent_Id"].unique()
