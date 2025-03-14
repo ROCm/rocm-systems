@@ -19,6 +19,8 @@ subtrees:
     title: Go library usage
   - file: how-to/amdsmi-cli-tool.md
     title: CLI tool usage
+  - file: how-to/setup-docker-container.md
+    title: Use AMD SMI in a Docker container
 
 - caption: Reference
   entries:
