@@ -22,11 +22,11 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import os
-import sys
 import argparse
-import subprocess
+import os
 import re
+import subprocess
+import sys
 
 
 class dotdict(dict):
@@ -44,7 +44,7 @@ class dotdict(dict):
             elif isinstance(v, (list, tuple)):
                 self.__setitem__(
                     k,
-                    [dotdict(i) if isinstance(i, (list, tuple, dict)) else i for i in v],
+                    [dotdict(i) if isinstance(i, (dict)) else i for i in v],
                 )
 
 
@@ -1224,11 +1224,34 @@ def run(app_args, args, **kwargs):
             e_file_contents = e_file.read()
             update_env("ROCPROF_EXTRA_COUNTERS_CONTENTS", e_file_contents, overwrite=True)
 
+    if args.pmc and args.pmc_groups:
+        fatal_error("Cannot specify both --pmc and --pmc-groups")
+
     if args.pmc:
         update_env("ROCPROF_COUNTER_COLLECTION", True, overwrite=True)
         update_env(
             "ROCPROF_COUNTERS", "pmc: {}".format(" ".join(args.pmc)), overwrite=True
         )
+
+    if args.pmc_groups:
+        group_env = ""
+        update_env("ROCPROF_COUNTER_COLLECTION", True, overwrite=True)
+
+        for row in map(" ".join, args.pmc_groups):
+            # pmc: added to allow for the same parser to be shared between the two
+            #      counter collection modes. Output will be new line delimited between
+            #      groups.
+            group_env += f"pmc: {row}\n"
+        group_env = group_env.rstrip()
+
+        update_env("ROCPROF_COUNTER_GROUPS", group_env, overwrite=True)
+
+        if args.pmc_group_interval:
+            update_env(
+                "ROCPROF_COUNTER_GROUPS_INTERVAL",
+                f"{str(args.pmc_group_interval)}",
+                overwrite=True,
+            )
 
     if args.pc_sampling_unit or args.pc_sampling_method or args.pc_sampling_interval:
 

@@ -135,12 +135,14 @@ struct config : output_config
     std::string pc_sampling_unit        = get_env("ROCPROF_PC_SAMPLING_UNIT", "none");
     std::string extra_counters_contents = get_env("ROCPROF_EXTRA_COUNTERS_CONTENTS", "");
 
-    std::unordered_set<uint32_t> kernel_filter_range    = {};
-    std::set<std::string>        counters               = {};
-    std::string                  att_capability         = get_env("ROCPROF_ATT_CAPABILITY", "");
-    std::vector<att_perfcounter> att_param_perfcounters = {};
+    std::unordered_set<uint32_t>       kernel_filter_range = {};
+    std::vector<std::set<std::string>> counters            = {};
+    std::string                        att_capability      = get_env("ROCPROF_ATT_CAPABILITY", "");
+    std::vector<att_perfcounter>       att_param_perfcounters = {};
 
     std::queue<CollectionPeriod> collection_periods = {};
+    uint64_t counter_groups_random_seed = get_env("ROCPROF_COUNTER_GROUPS_RANDOM_SEED", 0);
+    uint64_t counter_groups_interval    = get_env("ROCPROF_COUNTER_GROUPS_INTERVAL", 1);
 
     template <typename ArchiveT>
     void save(ArchiveT&) const;
