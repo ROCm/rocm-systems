@@ -51,7 +51,7 @@ def test_validate_counter_collection_yml_pmc(counter_input_data):
     di_list = []
 
     for row in counter_input_data:
-        assert int(row["Agent_Id"]) > 0
+        assert int(row["Agent_Id"].split(" ")[-1]) >= 0
         assert int(row["Queue_Id"]) > 0
         assert int(row["Process_Id"]) > 0
         assert len(row["Kernel_Name"]) > 0

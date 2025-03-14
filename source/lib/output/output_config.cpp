@@ -87,6 +87,14 @@ output_config::parse_env()
             << "Unsupported output format type: " << itr;
     }
 
+    std::string agent_index = common::get_env("ROCPROF_AGENT_INDEX", "relative");
+    if(agent_index == "type-relative")
+        agent_index_value = agent_indexing::logical_node_type;
+    else if(agent_index == "absolute")
+        agent_index_value = agent_indexing::node;
+    else
+        agent_index_value = agent_indexing::logical_node;
+
     const auto supported_perfetto_backends = std::set<std::string_view>{"inprocess", "system"};
     LOG_IF(FATAL, supported_perfetto_backends.count(perfetto_backend) == 0)
         << "Unsupported perfetto backend type: " << perfetto_backend;

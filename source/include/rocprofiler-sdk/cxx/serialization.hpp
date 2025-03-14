@@ -956,6 +956,23 @@ save(ArchiveT& ar, rocprofiler_pc_sampling_configuration_t data)
 
 template <typename ArchiveT>
 void
+save(ArchiveT& ar, rocprofiler_agent_runtime_visiblity_t data)
+{
+    ROCP_SDK_SAVE_DATA_BITFIELD("hsa", hsa);
+    ROCP_SDK_SAVE_DATA_BITFIELD("hip", hip);
+    ROCP_SDK_SAVE_DATA_BITFIELD("rccl", rccl);
+    ROCP_SDK_SAVE_DATA_BITFIELD("rocdecode", rocdecode);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_uuid_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(value);
+}
+
+template <typename ArchiveT>
+void
 save(ArchiveT& ar, const rocprofiler_agent_v0_t& data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(size);
@@ -1012,6 +1029,9 @@ save(ArchiveT& ar, const rocprofiler_agent_v0_t& data)
     ROCP_SDK_SAVE_DATA_CSTR(model_name);
     ROCP_SDK_SAVE_DATA_FIELD(node_id);
     ROCP_SDK_SAVE_DATA_FIELD(logical_node_id);
+    ROCP_SDK_SAVE_DATA_FIELD(logical_node_type_id);
+    ROCP_SDK_SAVE_DATA_FIELD(runtime_visibility);
+    ROCP_SDK_SAVE_DATA_FIELD(uuid);
 
     auto generate = [&](auto name, const auto* value, uint64_t size) {
         using value_type = std::remove_const_t<std::remove_pointer_t<decltype(value)>>;

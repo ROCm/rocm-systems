@@ -568,6 +568,20 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         "--realpath",
         help=argparse.SUPPRESS,
     )
+    advanced_options.add_argument(
+        "-A",
+        "--agent-index",
+        choices=("absolute", "relative", "type-relative"),
+        help="""absolute == node_id, e.g. Agent-0, Agent-2, Agent-4- absolute index of the agent regardless of cgroups masking.
+        This is a monotonically increasing number that is incremented for every folder in /sys/class/kfd/kfd/topology/nodes.
+    relative == logical_node_id,
+        e.g. Agent-0, Agent-1, Agent-2- relative index of the agent accounting for cgroups masking.
+        This is a monotonically increasing number which is incremented for every folder in /sys/class/kfd/kfd/topology/nodes/ whose properties file was non-empty.
+    type-relative == logical_node_type_id,
+        e.g. CPU-0, GPU-0, GPU-1- relative index of the agent accounting for cgroups masking where indexing starts at zero for each agent type.
+        It is a monotonically increasing number for each agent type and is incremented for every type folder in /sys/class/kfd/kfd/topology/nodes/ whose properties file is non-empty.
+        If agent-index is not provided then the default value for it is relative.""",
+    )
     # below is available for CI because LD_PRELOADing a library linked to a sanitizer library
     # causes issues in apps where HIP is part of shared library.
     add_parser_bool_argument(
@@ -1201,6 +1215,9 @@ def run(app_args, args, **kwargs):
 
     if args.kernel_iteration_range:
         update_env("ROCPROF_KERNEL_FILTER_RANGE", ", ".join(args.kernel_iteration_range))
+
+    if args.agent_index:
+        update_env("ROCPROF_AGENT_INDEX", args.agent_index)
 
     if args.extra_counters is not None:
         with open(args.extra_counters, "r") as e_file:

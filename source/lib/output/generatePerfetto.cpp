@@ -260,15 +260,11 @@ write_perfetto(
             const auto* _agent = _get_agent(aitr.first);
 
             auto _namess = std::stringstream{};
-            _namess << "COMPUTE AGENT [" << _agent->logical_node_id << "] QUEUE [" << nqueue++
-                    << "] ";
-
-            if(_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
-                _namess << "(CPU)";
-            else if(_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-                _namess << "(GPU)";
-            else
-                _namess << "(UNK)";
+            auto agent_index_info =
+                tool_metadata.get_agent_index(_agent->id, ocfg.agent_index_value);
+            _namess << "COMPUTE " << agent_index_info.label << " [" << agent_index_info.index
+                    << "] QUEUE [" << nqueue++ << "] ";
+            _namess << agent_index_info.type;
 
             auto _track = ::perfetto::Track{get_hash_id(_namess.str())};
             auto _desc  = _track.Serialize();
@@ -478,31 +474,34 @@ write_perfetto(
                 auto  name  = buffer_names.at(itr.kind, itr.operation);
                 auto& track = agent_thread_tracks.at(itr.dst_agent_id).at(itr.thread_id);
 
-                TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::memory_copy>::name,
-                                  ::perfetto::StaticString(name.data()),
-                                  track,
-                                  itr.start_timestamp,
-                                  ::perfetto::Flow::ProcessScoped(itr.correlation_id.internal),
-                                  "begin_ns",
-                                  itr.start_timestamp,
-                                  "end_ns",
-                                  itr.end_timestamp,
-                                  "delta_ns",
-                                  (itr.end_timestamp - itr.start_timestamp),
-                                  "kind",
-                                  itr.kind,
-                                  "operation",
-                                  itr.operation,
-                                  "src_agent",
-                                  agents_map.at(itr.src_agent_id).logical_node_id,
-                                  "dst_agent",
-                                  agents_map.at(itr.dst_agent_id).logical_node_id,
-                                  "copy_bytes",
-                                  itr.bytes,
-                                  "corr_id",
-                                  itr.correlation_id.internal,
-                                  "tid",
-                                  itr.thread_id);
+                TRACE_EVENT_BEGIN(
+                    sdk::perfetto_category<sdk::category::memory_copy>::name,
+                    ::perfetto::StaticString(name.data()),
+                    track,
+                    itr.start_timestamp,
+                    ::perfetto::Flow::ProcessScoped(itr.correlation_id.internal),
+                    "begin_ns",
+                    itr.start_timestamp,
+                    "end_ns",
+                    itr.end_timestamp,
+                    "delta_ns",
+                    (itr.end_timestamp - itr.start_timestamp),
+                    "kind",
+                    itr.kind,
+                    "operation",
+                    itr.operation,
+                    "src_agent",
+                    tool_metadata.get_agent_index(itr.src_agent_id, ocfg.agent_index_value)
+                        .as_string("-"),
+                    "dst_agent",
+                    tool_metadata.get_agent_index(itr.dst_agent_id, ocfg.agent_index_value)
+                        .as_string("-"),
+                    "copy_bytes",
+                    itr.bytes,
+                    "corr_id",
+                    itr.correlation_id.internal,
+                    "tid",
+                    itr.thread_id);
                 TRACE_EVENT_END(sdk::perfetto_category<sdk::category::memory_copy>::name,
                                 track,
                                 itr.end_timestamp);
@@ -592,7 +591,10 @@ write_perfetto(
                             "kind",
                             current.kind,
                             "agent",
-                            tool_metadata.get_node_id(info.agent_id),
+                            tool_metadata
+                                .get_agent_index(agents_map.at(info.agent_id).id,
+                                                 ocfg.agent_index_value)
+                                .as_string("-"),
                             "corr_id",
                             current.correlation_id.internal,
                             "queue",
@@ -676,11 +678,10 @@ write_perfetto(
 
             auto        _track_name = std::stringstream{};
             const auto* _agent      = _get_agent(mitr.first);
-
-            if(_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
-                _track_name << "COPY BYTES to AGENT [" << _agent->logical_node_id << "] (CPU)";
-            else if(_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-                _track_name << "COPY BYTES to AGENT [" << _agent->logical_node_id << "] (GPU)";
+            auto        agent_index_info =
+                tool_metadata.get_agent_index(_agent->id, ocfg.agent_index_value);
+            _track_name << "COPY BYTES to " << agent_index_info.label << " ["
+                        << agent_index_info.index << "] (" << agent_index_info.type << ")";
 
             constexpr auto _unit = ::perfetto::CounterTrack::Unit::UNIT_SIZE_BYTES;
             auto&          _name = mem_cpy_cnt_names.emplace_back(_track_name.str());
@@ -847,10 +848,15 @@ write_perfetto(
             auto                       _track_name = std::stringstream{};
             const rocprofiler_agent_t* _agent      = _get_agent(alloc_itr.first);
 
-            if(_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
-                _track_name << "ALLOCATE BYTES on AGENT [" << _agent->logical_node_id << "] (CPU)";
-            else if(_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-                _track_name << "ALLOCATE BYTES on AGENT [" << _agent->logical_node_id << "] (GPU)";
+            if(_agent != nullptr)
+            {
+                auto agent_index_info =
+                    tool_metadata.get_agent_index(_agent->id, ocfg.agent_index_value);
+                _track_name << "ALLOCATE BYTES on " << agent_index_info.label << " ["
+                            << agent_index_info.index << "] (" << agent_index_info.type << ")";
+            }
+            else
+                _track_name << "FREE BYTES";
 
             constexpr auto _unit = ::perfetto::CounterTrack::Unit::UNIT_SIZE_BYTES;
             auto&          _name = mem_alloc_cnt_names.emplace_back(_track_name.str());

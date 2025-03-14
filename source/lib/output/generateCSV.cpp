@@ -288,10 +288,12 @@ generate_csv(const output_config&                                               
             auto row_ss      = std::stringstream{};
             auto kernel_name = tool_metadata.get_kernel_name(record.dispatch_info.kernel_id,
                                                              record.correlation_id.external.value);
+
             rocprofiler::tool::csv::kernel_trace_csv_encoder::write_row(
                 row_ss,
                 tool_metadata.get_kind_name(record.kind),
-                tool_metadata.get_node_id(record.dispatch_info.agent_id),
+                tool_metadata.get_agent_index(record.dispatch_info.agent_id, cfg.agent_index_value)
+                    .as_string(),
                 record.dispatch_info.queue_id.handle,
                 record.thread_id,
                 record.dispatch_info.dispatch_id,
@@ -418,6 +420,7 @@ generate_csv(const output_config&                                              c
                                       "Correlation_Id",
                                       "Start_Timestamp",
                                       "End_Timestamp"}};
+
     for(auto ditr : data)
     {
         for(auto record : data.get(ditr))
@@ -428,8 +431,10 @@ generate_csv(const output_config&                                              c
                 row_ss,
                 tool_metadata.get_kind_name(record.kind),
                 api_name,
-                tool_metadata.get_node_id(record.src_agent_id),
-                tool_metadata.get_node_id(record.dst_agent_id),
+                tool_metadata.get_agent_index(record.src_agent_id, cfg.agent_index_value)
+                    .as_string(),
+                tool_metadata.get_agent_index(record.dst_agent_id, cfg.agent_index_value)
+                    .as_string(),
                 record.correlation_id.internal,
                 record.start_timestamp,
                 record.end_timestamp);
@@ -465,13 +470,14 @@ generate_csv(const output_config&                                               
     {
         for(auto record : data.get(ditr))
         {
-            uint64_t agent_info{0};
+            auto agent_info = std::string{};
             // Free functions currently do not track agent information. Only set it on allocation
             // operations, otherwise set it to 0 currently
             if(record.operation == ROCPROFILER_MEMORY_ALLOCATION_ALLOCATE ||
                record.operation == ROCPROFILER_MEMORY_ALLOCATION_VMEM_ALLOCATE)
             {
-                agent_info = tool_metadata.get_node_id(record.agent_id);
+                agent_info = tool_metadata.get_agent_index(record.agent_id, cfg.agent_index_value)
+                                 .as_string();
             }
             auto api_name = tool_metadata.get_operation_name(record.kind, record.operation);
             auto row_ss   = std::stringstream{};
@@ -611,7 +617,10 @@ generate_csv(const output_config&                    cfg,
                     row_ss,
                     correlation_id.internal,
                     record.dispatch_data.dispatch_info.dispatch_id,
-                    tool_metadata.get_node_id(record.dispatch_data.dispatch_info.agent_id),
+                    tool_metadata
+                        .get_agent_index(record.dispatch_data.dispatch_info.agent_id,
+                                         cfg.agent_index_value)
+                        .as_string(),
                     record.dispatch_data.dispatch_info.queue_id.handle,
                     tool_metadata.process_id,
                     record.thread_id,
@@ -667,15 +676,16 @@ generate_csv(const output_config&                                               
             auto kind_name = tool_metadata.get_kind_name(record.kind);
             auto op_name   = tool_metadata.get_operation_name(record.kind, record.operation);
 
-            tool::csv::scratch_memory_encoder::write_row(row_ss,
-                                                         kind_name,
-                                                         op_name,
-                                                         tool_metadata.get_node_id(record.agent_id),
-                                                         record.queue_id.handle,
-                                                         record.thread_id,
-                                                         record.flags,
-                                                         record.start_timestamp,
-                                                         record.end_timestamp);
+            tool::csv::scratch_memory_encoder::write_row(
+                row_ss,
+                kind_name,
+                op_name,
+                tool_metadata.get_agent_index(record.agent_id, cfg.agent_index_value).as_string(),
+                record.queue_id.handle,
+                record.thread_id,
+                record.flags,
+                record.start_timestamp,
+                record.end_timestamp);
 
             ofs << row_ss.str();
         }

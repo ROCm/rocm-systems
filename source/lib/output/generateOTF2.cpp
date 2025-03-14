@@ -476,15 +476,13 @@ write_otf2(
     {
         for(auto& [agent, evt] : itr)
         {
-            const auto* _agent     = _get_agent(agent);
-            auto        _type_name = std::string_view{"UNK"};
-            if(_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
-                _type_name = "CPU";
-            else if(_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-                _type_name = "GPU";
-
-            evt.name = fmt::format(
-                "Thread {}, Copy to {} {}", tid, _type_name, _agent->logical_node_type_id);
+            const auto* _agent = _get_agent(agent);
+            auto        agent_index_info =
+                tool_metadata.get_agent_index(_agent->id, cfg.agent_index_value);
+            evt.name = fmt::format("Thread {}, Copy to {} {}",
+                                   tid,
+                                   agent_index_info.type,
+                                   agent_index_info.as_string("-"));
         }
     }
 
@@ -501,16 +499,20 @@ write_otf2(
             {
                 _agent = _get_agent(agent);
             }
-            auto _type_name = std::string_view{"UNK"};
-            if(_agent != nullptr && _agent->type == ROCPROFILER_AGENT_TYPE_CPU)
-                _type_name = "CPU";
-            else if(_agent != nullptr && _agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-                _type_name = "GPU";
-
-            evt.name = fmt::format("Thread {}, Memory Operation at {} {}",
-                                   tid,
-                                   _type_name,
-                                   _agent == nullptr ? 0 : _agent->logical_node_type_id);
+            if(_agent)
+            {
+                auto agent_index_info =
+                    tool_metadata.get_agent_index(_agent->id, cfg.agent_index_value);
+                evt.name = fmt::format("Thread {}, Memory Operation at {} {}",
+                                       tid,
+                                       agent_index_info.type,
+                                       agent_index_info.as_string("-"));
+            }
+            else
+            {
+                auto _type_name = std::string_view{"UNK"};
+                evt.name = fmt::format("Thread {}, Memory Operation at {} {}", tid, _type_name, 0);
+            }
         }
     }
 
@@ -532,17 +534,13 @@ write_otf2(
         {
             for(auto& [queue, evt] : qitr)
             {
-                const auto* _agent     = _get_agent(agent);
-                auto        _type_name = std::string_view{"UNK"};
-                if(_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
-                    _type_name = "CPU";
-                else if(_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-                    _type_name = "GPU";
-
+                const auto* _agent = _get_agent(agent);
+                auto        agent_index_info =
+                    tool_metadata.get_agent_index(_agent->id, cfg.agent_index_value);
                 evt.name = fmt::format("Thread {}, Compute on {} {}, Queue {}",
                                        tid,
-                                       _type_name,
-                                       _agent->logical_node_type_id,
+                                       agent_index_info.type,
+                                       agent_index_info.as_string("-"),
                                        _queue_ids.at(queue));
             }
         }
