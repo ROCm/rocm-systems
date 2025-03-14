@@ -3,7 +3,7 @@ on:
   # Commenting below to avoid re-runs of amd smi for trivial rebases
   # Once Rocr team aligns update amd-master to amd-mainline
   pull_request:  
-    branches: [amd-staging, amd-master, amd-npi] 
+    branches: [amd-staging, amd-master, amd-npi, release/rocm-rel-*] 
     types: [opened, reopened, synchronize]  
   push:  
     branches: [amd-master]  
