@@ -2,7 +2,7 @@ name: ROCm CI Caller
 on: 
   # Commenting below to avoid re-runs of amd smi for trivial rebases
   pull_request:  
-    branches: [amd-staging, amd-mainline]  
+    branches: [amd-staging, amd-mainline , release/rocm-rel-*]  
     types: [opened, reopened, synchronize]  
   push:  
     branches: [amd-mainline]  
