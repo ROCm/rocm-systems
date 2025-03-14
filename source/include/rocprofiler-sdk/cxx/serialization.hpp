@@ -116,6 +116,13 @@ save(ArchiveT& ar, rocprofiler_queue_id_t data)
 
 template <typename ArchiveT>
 void
+save(ArchiveT& ar, rocprofiler_stream_id_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(handle);
+}
+
+template <typename ArchiveT>
+void
 save(ArchiveT& ar, rocprofiler_counter_id_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(handle);

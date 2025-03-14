@@ -24,6 +24,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
+#include "lib/rocprofiler-sdk/hip/stream.hpp"
 #include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/memory_allocation.hpp"
@@ -97,6 +98,7 @@ ROCPROFILER_BUFFER_TRACING_KIND_STRING(OMPT)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(RUNTIME_INITIALIZATION)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(ROCDECODE_API)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(ROCJPEG_API)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIP_STREAM_API)
 
 template <size_t Idx, size_t... Tail>
 std::pair<const char*, size_t>
@@ -305,6 +307,11 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
             val = rocprofiler::rocjpeg::name_by_id<ROCPROFILER_ROCJPEG_TABLE_ID_CORE>(operation);
             break;
         }
+        case ROCPROFILER_BUFFER_TRACING_HIP_STREAM_API:
+        {
+            val = rocprofiler::hip::stream::name_by_id(operation);
+            break;
+        }
     };
 
     if(!val)
@@ -444,6 +451,11 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
         case ROCPROFILER_BUFFER_TRACING_ROCJPEG_API:
         {
             ops = rocprofiler::rocjpeg::get_ids<ROCPROFILER_ROCJPEG_TABLE_ID_CORE>();
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_HIP_STREAM_API:
+        {
+            ops = rocprofiler::hip::stream::get_ids();
             break;
         }
     }

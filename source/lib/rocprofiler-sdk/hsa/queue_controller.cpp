@@ -274,31 +274,7 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
         }
     }
 
-    auto enable_intercepter = false;
-    for(const auto& itr : context::get_registered_contexts())
-    {
-        constexpr auto expected_context_size = 216UL;
-        static_assert(
-            sizeof(context::context) == expected_context_size,
-            "If you added a new field to context struct, make sure there is a check here if it "
-            "requires queue interception. Once you have done so, increment expected_context_size");
-
-        bool has_kernel_tracing = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH) ||
-                                  itr->is_tracing(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH);
-
-        bool has_scratch_reporting = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY) ||
-                                     itr->is_tracing(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
-
-        if(itr->counter_collection || itr->pc_sampler || has_kernel_tracing ||
-           has_scratch_reporting || itr->device_counter_collection || itr->agent_thread_trace ||
-           itr->dispatch_thread_trace)
-        {
-            enable_intercepter = true;
-            break;
-        }
-    }
-
-    if(enable_intercepter)
+    if(enable_queue_intercept())
     {
         core_table.hsa_queue_create_fn  = hsa::create_queue;
         core_table.hsa_queue_destroy_fn = hsa::destroy_queue;
@@ -473,6 +449,32 @@ get_queue_controller()
 {
     static auto*& controller = common::static_object<QueueController>::construct();
     return controller;
+}
+
+bool
+enable_queue_intercept()
+{
+    for(const auto& itr : context::get_registered_contexts())
+    {
+        constexpr auto expected_context_size = 216UL;
+        static_assert(
+            sizeof(context::context) == expected_context_size,
+            "If you added a new field to context struct, make sure there is a check here if it "
+            "requires queue interception. Once you have done so, increment expected_context_size");
+
+        bool has_kernel_tracing = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH) ||
+                                  itr->is_tracing(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH);
+
+        bool has_scratch_reporting = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY) ||
+                                     itr->is_tracing(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
+
+        if(itr->counter_collection || itr->pc_sampler || has_kernel_tracing ||
+           has_scratch_reporting || itr->device_counter_collection || itr->agent_thread_trace ||
+           itr->dispatch_thread_trace)
+            return true;
+    }
+
+    return false;
 }
 
 void

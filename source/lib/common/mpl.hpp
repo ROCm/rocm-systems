@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include "lib/common/details/mpl.hpp"
+
 #include <cstddef>
 #include <string>
 #include <string_view>
@@ -162,6 +164,15 @@ struct assert_false
 {
     static constexpr auto value = false;
 };
+
+template <typename InTuple>
+using reverse = typename impl::reverse<InTuple, void>::type;
+
+template <typename Tp>
+using function_traits = impl::function_traits<Tp>;
+
+template <typename Tp>
+using function_args_t = typename impl::function_traits<Tp>::args_type;
 }  // namespace mpl
 }  // namespace common
 }  // namespace rocprofiler

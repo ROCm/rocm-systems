@@ -123,6 +123,9 @@ private:
 QueueController*
 get_queue_controller();
 
+bool
+enable_queue_intercept();
+
 void
 queue_controller_init(HsaApiTable* table);
 
@@ -134,6 +137,5 @@ queue_controller_sync();
 
 void
 profiler_serializer_kernel_completion_signal(hsa_signal_t queue_block_signal);
-
 }  // namespace hsa
 }  // namespace rocprofiler

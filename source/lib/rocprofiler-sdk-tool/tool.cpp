@@ -22,11 +22,13 @@
 
 #include "config.hpp"
 #include "helper.hpp"
+#include "stream_stack.hpp"
 
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/scope_destructor.hpp"
+#include "lib/common/static_object.hpp"
 #include "lib/common/string_entry.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/common/units.hpp"
@@ -43,6 +45,7 @@
 #include "lib/output/generateStats.hpp"
 #include "lib/output/output_stream.hpp"
 #include "lib/output/statistics.hpp"
+#include "lib/output/stream_info.hpp"
 #include "lib/output/tmp_file.hpp"
 #include "lib/output/tmp_file_buffer.hpp"
 #include "lib/rocprofiler-sdk-att/att_lib_wrapper.hpp"
@@ -209,6 +212,32 @@ thread_local auto thread_dispatch_rename_dtor = common::scope_destructor{[]() {
     thread_dispatch_rename = nullptr;
 }};
 
+// Stores stream_ids and kernel_rename_vals for kernel-rename service and hip stream display service
+struct kernel_rename_and_stream_display_pair
+{
+    uint64_t                kernel_rename_val{0};
+    rocprofiler_stream_id_t stream_id{.handle = 0};
+};
+auto kernel_rename_and_stream_display_pair_dtors =
+    new std::vector<kernel_rename_and_stream_display_pair*>{};
+
+auto
+get_kernel_rename_and_stream_display_pair_lock()
+{
+    static auto _mutex = std::mutex{};
+    return std::unique_lock<std::mutex>{_mutex};
+}
+
+void
+add_kernel_rename_and_stream_display_pairs(kernel_rename_and_stream_display_pair* ptr)
+{
+    auto lock = get_kernel_rename_and_stream_display_pair_lock();
+    if(ptr != nullptr && kernel_rename_and_stream_display_pair_dtors != nullptr)
+    {
+        kernel_rename_and_stream_display_pair_dtors->emplace_back(ptr);
+    }
+}
+
 bool
 add_kernel_target(uint64_t _kern_id, const std::unordered_set<uint32_t>& range)
 {
@@ -357,23 +386,49 @@ collection_period_cntrl(std::promise<void>&& _promise, rocprofiler_context_id_t 
 }
 
 int
-set_kernel_rename_correlation_id(rocprofiler_thread_id_t                            thr_id,
-                                 rocprofiler_context_id_t                           ctx_id,
-                                 rocprofiler_external_correlation_id_request_kind_t kind,
-                                 rocprofiler_tracing_operation_t                    op,
-                                 uint64_t                 internal_corr_id,
-                                 rocprofiler_user_data_t* external_corr_id,
-                                 void*                    user_data)
+set_kernel_rename_and_stream_display_correlation_id(
+    rocprofiler_thread_id_t                            thr_id,
+    rocprofiler_context_id_t                           ctx_id,
+    rocprofiler_external_correlation_id_request_kind_t kind,
+    rocprofiler_tracing_operation_t                    op,
+    uint64_t                                           internal_corr_id,
+    rocprofiler_user_data_t*                           external_corr_id,
+    void*                                              user_data)
 {
-    ROCP_FATAL_IF(kind != ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH)
+    ROCP_FATAL_IF(kind != ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH &&
+                  kind != ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY)
         << "unexpected kind: " << kind;
+    // Check whether services are enabled
+    const bool kernel_rename_service_enabled =
+        tool::get_config().kernel_rename && thread_dispatch_rename != nullptr &&
+        !thread_dispatch_rename->empty() &&
+        kind == ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH;
+    const bool hip_stream_display_enabled =
+        !tool::get_config().group_by_queue &&
+        kernel_rename_and_stream_display_pair_dtors != nullptr &&
+        !rocprofiler::tool::stream::stream_stack_empty();
 
-    if(thread_dispatch_rename != nullptr && !thread_dispatch_rename->empty())
+    kernel_rename_and_stream_display_pair* kernel_rename_and_stream_display_vals = nullptr;
+    if(kernel_rename_service_enabled || hip_stream_display_enabled)
+    {
+        kernel_rename_and_stream_display_vals = new kernel_rename_and_stream_display_pair{};
+    }
+    // Get value for kernel rename service
+    if(kernel_rename_service_enabled && kernel_rename_and_stream_display_vals != nullptr)
     {
         auto val = thread_dispatch_rename->top();
         if(tool_metadata) tool_metadata->add_external_correlation_id(val);
-        external_corr_id->value = val;
+        kernel_rename_and_stream_display_vals->kernel_rename_val = val;
     }
+    // Get stream ID from stream HIP display service
+    if(hip_stream_display_enabled && kernel_rename_and_stream_display_vals != nullptr)
+    {
+        auto stream_id = rocprofiler::tool::stream::get_stream_id();
+        kernel_rename_and_stream_display_vals->stream_id = stream_id;
+    }
+    // Set the external correlation id service to point to struct
+    external_corr_id->ptr = kernel_rename_and_stream_display_vals;
+    add_kernel_rename_and_stream_display_pairs(kernel_rename_and_stream_display_vals);
 
     common::consume_args(thr_id, ctx_id, kind, op, internal_corr_id, user_data);
 
@@ -458,6 +513,54 @@ kernel_rename_callback(rocprofiler_callback_tracing_record_t record,
         }
     }
 
+    common::consume_args(user_data, data);
+}
+
+// Stores stream IDs onto stack when callback is triggered
+void
+hip_stream_display_callback(rocprofiler_callback_tracing_record_t record,
+                            rocprofiler_user_data_t*              user_data,
+                            void*                                 data)
+{
+    if(tool::get_config().group_by_queue ||
+       record.kind != ROCPROFILER_CALLBACK_TRACING_HIP_STREAM_API)
+        return;
+    // Extract stream ID from record
+    auto* stream_handle_data =
+        static_cast<rocprofiler_callback_tracing_stream_handle_data_t*>(record.payload);
+    auto stream_id = stream_handle_data->stream_id;
+    // STREAM_HANDLE_CREATE and DESTROY are no-ops
+    if(record.operation == ROCPROFILER_HIP_STREAM_CREATE)
+    {
+        ROCP_INFO
+            << "Entered hip_stream_display_callback function for ROCPROFILER_HIP_STREAM_CREATE";
+    }
+    else if(record.operation == ROCPROFILER_HIP_STREAM_DESTROY)
+    {
+        ROCP_INFO
+            << "Entered hip_stream_display_callback function for ROCPROFILER_HIP_STREAM_DESTROY";
+    }
+    else if(record.operation == ROCPROFILER_HIP_STREAM_SET)
+    {
+        // Push the stream ID onto the stream stack when before underlying HIP function is called
+        if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+        {
+            ROCP_INFO << "Entered hip_stream_display_callback function for "
+                         "ROCPROFILER_HIP_STREAM_SET with ROCPROFILER_CALLBACK_PHASE_ENTER";
+            rocprofiler::tool::stream::push_stream_id(stream_id);
+        }
+        // Pop stream ID off of stream stack after underlying HIP function is completed
+        else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
+        {
+            ROCP_INFO << "Entered hip_stream_display_callback function for "
+                         "ROCPROFILER_HIP_STREAM_SET with ROCPROFILER_CALLBACK_PHASE_EXIT";
+            rocprofiler::tool::stream::pop_stream_id();
+        }
+    }
+    else
+    {
+        ROCP_FATAL << "Unsupported operation for ROCPROFILER_HIP_STREAM";
+    }
     common::consume_args(user_data, data);
 }
 
@@ -759,7 +862,7 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                           rocprofiler_buffer_id_t /*buffer_id*/,
                           rocprofiler_record_header_t** headers,
                           size_t                        num_headers,
-                          void* /*user_data*/,
+                          void* /* user_data*/,
                           uint64_t /*drop_count*/)
 {
     ROCP_INFO << "Executing buffered tracing callback for " << num_headers << " headers";
@@ -776,8 +879,21 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
             {
                 auto* record = static_cast<rocprofiler_buffer_tracing_kernel_dispatch_record_t*>(
                     header->payload);
-
-                tool::write_ring_buffer(*record, domain_type::KERNEL_DISPATCH);
+                rocprofiler_stream_id_t stream_id{.handle = 0};
+                uint64_t                kernel_rename_val = 0;
+                if((!tool::get_config().group_by_queue || tool::get_config().kernel_rename) &&
+                   record->correlation_id.external.ptr != nullptr)
+                {
+                    // Extract the stream id
+                    auto* kernel_stream_pair_ptr =
+                        static_cast<kernel_rename_and_stream_display_pair*>(
+                            record->correlation_id.external.ptr);
+                    stream_id         = kernel_stream_pair_ptr->stream_id;
+                    kernel_rename_val = kernel_stream_pair_ptr->kernel_rename_val;
+                }
+                rocprofiler::tool::tool_buffer_tracing_kernel_dispatch_with_stream_record_t
+                    record_with_stream{*record, stream_id, kernel_rename_val};
+                tool::write_ring_buffer(record_with_stream, domain_type::KERNEL_DISPATCH);
             }
 
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_HSA_CORE_API ||
@@ -794,8 +910,19 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
             {
                 auto* record =
                     static_cast<rocprofiler_buffer_tracing_memory_copy_record_t*>(header->payload);
-
-                tool::write_ring_buffer(*record, domain_type::MEMORY_COPY);
+                rocprofiler_stream_id_t stream_id{.handle = 0};
+                if(!tool::get_config().group_by_queue &&
+                   record->correlation_id.external.ptr != nullptr)
+                {
+                    // Extract the stream id
+                    auto* kernel_stream_pair_ptr =
+                        static_cast<kernel_rename_and_stream_display_pair*>(
+                            record->correlation_id.external.ptr);
+                    stream_id = kernel_stream_pair_ptr->stream_id;
+                }
+                rocprofiler::tool::tool_buffer_tracing_memory_copy_with_stream_record_t
+                    record_with_stream{*record, stream_id};
+                tool::write_ring_buffer(record_with_stream, domain_type::MEMORY_COPY);
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION)
             {
@@ -1171,6 +1298,13 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
 
     counter_record.dispatch_data = dispatch_data;
     counter_record.thread_id     = user_data.value;
+    if(dispatch_data.correlation_id.external.ptr != nullptr)
+    {
+        // Extract the kernel id
+        auto* kernel_stream_pair_ptr = static_cast<kernel_rename_and_stream_display_pair*>(
+            dispatch_data.correlation_id.external.ptr);
+        counter_record.kernel_rename_val = kernel_stream_pair_ptr->kernel_rename_val;
+    }
 
     auto serialized_records = std::vector<tool::tool_counter_value_t>{};
     serialized_records.reserve(record_count);
@@ -1552,7 +1686,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                          get_buffers().rocjpeg_api_trace),
             "buffer tracing service for ROCDecode api configure");
     }
-
     if(tool::get_config().kernel_rename)
     {
         auto rename_ctx            = rocprofiler_context_id_t{0};
@@ -1573,16 +1706,36 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                          "callback tracing service failed to configure");
 
         ROCPROFILER_CALL(rocprofiler_start_context(rename_ctx), "start context failed");
+    }
+    if(!tool::get_config().group_by_queue)
+    {
+        auto hip_stream_display_ctx = rocprofiler_context_id_t{0};
 
+        ROCPROFILER_CALL(rocprofiler_create_context(&hip_stream_display_ctx),
+                         "failed to create context");
+
+        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
+                             hip_stream_display_ctx,
+                             ROCPROFILER_CALLBACK_TRACING_HIP_STREAM_API,
+                             nullptr,
+                             0,
+                             hip_stream_display_callback,
+                             nullptr),
+                         "stream tracing configure failed");
+        ROCPROFILER_CALL(rocprofiler_start_context(hip_stream_display_ctx), "start context failed");
+    }
+    if(tool::get_config().kernel_rename || !tool::get_config().group_by_queue)
+    {
         auto external_corr_id_request_kinds =
-            std::array<rocprofiler_external_correlation_id_request_kind_t, 1>{
-                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH};
+            std::array<rocprofiler_external_correlation_id_request_kind_t, 2>{
+                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH,
+                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY};
 
         ROCPROFILER_CALL(rocprofiler_configure_external_correlation_id_request_service(
                              get_client_ctx(),
                              external_corr_id_request_kinds.data(),
                              external_corr_id_request_kinds.size(),
-                             set_kernel_rename_correlation_id,
+                             set_kernel_rename_and_stream_display_correlation_id,
                              nullptr),
                          "Could not configure external correlation id request service");
     }
@@ -1715,16 +1868,17 @@ tool_fini(void* /*tool_data*/)
     rocprofiler_stop_context(get_client_ctx());
     flush();
 
-    auto kernel_dispatch_output =
-        tool::kernel_dispatch_buffered_output_t{tool::get_config().kernel_trace};
+    auto kernel_dispatch_with_stream_output =
+        rocprofiler::tool::kernel_dispatch_buffered_output_with_stream_t{
+            tool::get_config().kernel_trace};
     auto hsa_output = tool::hsa_buffered_output_t{tool::get_config().hsa_core_api_trace ||
                                                   tool::get_config().hsa_amd_ext_api_trace ||
                                                   tool::get_config().hsa_image_ext_api_trace ||
                                                   tool::get_config().hsa_finalizer_ext_api_trace};
     auto hip_output = tool::hip_buffered_output_t{tool::get_config().hip_runtime_api_trace ||
                                                   tool::get_config().hip_compiler_api_trace};
-    auto memory_copy_output =
-        tool::memory_copy_buffered_output_t{tool::get_config().memory_copy_trace};
+    auto memory_copy_output_with_stream_output =
+        tool::memory_copy_buffered_output_with_stream_t{tool::get_config().memory_copy_trace};
     auto marker_output = tool::marker_buffered_output_t{tool::get_config().marker_api_trace};
     auto counters_output =
         tool::counter_collection_buffered_output_t{tool::get_config().counter_collection};
@@ -1748,10 +1902,10 @@ tool_fini(void* /*tool_data*/)
     uint64_t num_output    = 0;
     auto     contributions = domain_stats_vec_t{};
 
-    generate_output(kernel_dispatch_output, num_output, contributions);
+    generate_output(kernel_dispatch_with_stream_output, num_output, contributions);
     generate_output(hsa_output, num_output, contributions);
     generate_output(hip_output, num_output, contributions);
-    generate_output(memory_copy_output, num_output, contributions);
+    generate_output(memory_copy_output_with_stream_output, num_output, contributions);
     generate_output(memory_allocation_output, num_output, contributions);
     generate_output(marker_output, num_output, contributions);
     generate_output(rccl_output, num_output, contributions);
@@ -1825,8 +1979,8 @@ tool_fini(void* /*tool_data*/)
                          contributions,
                          hip_output.get_generator(),
                          hsa_output.get_generator(),
-                         kernel_dispatch_output.get_generator(),
-                         memory_copy_output.get_generator(),
+                         kernel_dispatch_with_stream_output.get_generator(),
+                         memory_copy_output_with_stream_output.get_generator(),
                          counters_output.get_generator(),
                          marker_output.get_generator(),
                          scratch_memory_output.get_generator(),
@@ -1847,8 +2001,8 @@ tool_fini(void* /*tool_data*/)
                              agents_output,
                              hip_output.get_generator(),
                              hsa_output.get_generator(),
-                             kernel_dispatch_output.get_generator(),
-                             memory_copy_output.get_generator(),
+                             kernel_dispatch_with_stream_output.get_generator(),
+                             memory_copy_output_with_stream_output.get_generator(),
                              marker_output.get_generator(),
                              scratch_memory_output.get_generator(),
                              rccl_output.get_generator(),
@@ -1861,8 +2015,8 @@ tool_fini(void* /*tool_data*/)
     {
         auto hip_elem_data               = hip_output.load_all();
         auto hsa_elem_data               = hsa_output.load_all();
-        auto kernel_dispatch_elem_data   = kernel_dispatch_output.load_all();
-        auto memory_copy_elem_data       = memory_copy_output.load_all();
+        auto kernel_dispatch_elem_data   = kernel_dispatch_with_stream_output.load_all();
+        auto memory_copy_elem_data       = memory_copy_output_with_stream_output.load_all();
         auto marker_elem_data            = marker_output.load_all();
         auto scratch_memory_elem_data    = scratch_memory_output.load_all();
         auto rccl_elem_data              = rccl_output.load_all();
@@ -1890,13 +2044,12 @@ tool_fini(void* /*tool_data*/)
     {
         tool::generate_stats(tool::get_config(), *tool_metadata, contributions);
     }
-
     auto destroy_output = [](auto& _buffered_output_v) { _buffered_output_v.destroy(); };
 
-    destroy_output(kernel_dispatch_output);
+    destroy_output(kernel_dispatch_with_stream_output);
     destroy_output(hsa_output);
     destroy_output(hip_output);
-    destroy_output(memory_copy_output);
+    destroy_output(memory_copy_output_with_stream_output);
     destroy_output(memory_allocation_output);
     destroy_output(marker_output);
     destroy_output(counters_output);
@@ -1906,6 +2059,17 @@ tool_fini(void* /*tool_data*/)
     destroy_output(pc_sampling_host_trap_output);
     destroy_output(rocdecode_output);
     destroy_output(rocjpeg_output);
+
+    if(kernel_rename_and_stream_display_pair_dtors != nullptr)
+    {
+        for(auto& itr : *kernel_rename_and_stream_display_pair_dtors)
+        {
+            delete itr;
+            itr = nullptr;
+        }
+        delete kernel_rename_and_stream_display_pair_dtors;
+        kernel_rename_and_stream_display_pair_dtors = nullptr;
+    }
 
     if(destructors)
     {
