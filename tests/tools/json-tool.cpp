@@ -1997,6 +1997,11 @@ write_perfetto()
     auto track_event_cfg = ::perfetto::protos::gen::TrackEventConfig{};
     auto cfg             = ::perfetto::TraceConfig{};
 
+    // Enabled by default, set this env to any value to disable
+    bool enable_debug_annotations = []() {
+        return getenv("ROCPROFILER_DISABLE_PERFETTO_ANNOTATIONS") == nullptr;
+    }();
+
     // environment settings
     auto shmem_size_hint = size_t{64};
     auto buffer_size_kb  = size_t{1024000};
@@ -2035,35 +2040,35 @@ write_perfetto()
     };
 
     {
-        for(auto itr : hsa_api_bf_records)
+        for(const auto& itr : hsa_api_bf_records)
             tids.emplace(itr.thread_id);
-        for(auto itr : hip_api_bf_records)
+        for(const auto& itr : hip_api_bf_records)
             tids.emplace(itr.thread_id);
-        for(auto itr : marker_api_bf_records)
+        for(const auto& itr : marker_api_bf_records)
             tids.emplace(itr.thread_id);
-        for(auto itr : rccl_api_bf_records)
+        for(const auto& itr : rccl_api_bf_records)
             tids.emplace(itr.thread_id);
-        for(auto itr : ompt_bf_records)
+        for(const auto& itr : ompt_bf_records)
             tids.emplace(itr.thread_id);
-        for(auto itr : rocdecode_api_bf_records)
+        for(const auto& itr : rocdecode_api_bf_records)
             tids.emplace(itr.thread_id);
-        for(auto itr : rocjpeg_api_bf_records)
+        for(const auto& itr : rocjpeg_api_bf_records)
             tids.emplace(itr.thread_id);
 
-        for(auto itr : memory_copy_bf_records)
+        for(const auto& itr : memory_copy_bf_records)
         {
             tids.emplace(itr.thread_id);
             agent_ids.emplace(itr.dst_agent_id.handle);
             agent_ids.emplace(itr.src_agent_id.handle);
         }
 
-        for(auto itr : memory_allocation_bf_records)
+        for(const auto& itr : memory_allocation_bf_records)
         {
             tids.emplace(itr.thread_id);
             agent_ids_alloc.emplace(itr.agent_id.handle);
         }
 
-        for(auto itr : kernel_dispatch_bf_records)
+        for(const auto& itr : kernel_dispatch_bf_records)
         {
             tids.emplace(itr.thread_id);
             agent_queue_ids[itr.dispatch_info.agent_id.handle].emplace(
@@ -2074,7 +2079,7 @@ write_perfetto()
     auto thread_tracks = std::unordered_map<rocprofiler_thread_id_t, ::perfetto::Track>{};
 
     uint64_t nthrn = 0;
-    for(auto itr : tids)
+    for(const auto& itr : tids)
     {
         if(itr == main_tid)
             thread_tracks.emplace(main_tid, ::perfetto::ThreadTrack::Current());
@@ -2093,7 +2098,7 @@ write_perfetto()
 
     auto agent_tracks = std::unordered_map<uint64_t, ::perfetto::Track>{};
 
-    for(auto itr : agent_ids)
+    for(const auto& itr : agent_ids)
     {
         const auto* _agent = _get_agent(itr);
         if(!_agent) throw std::runtime_error{"agent lookup error"};
@@ -2119,7 +2124,7 @@ write_perfetto()
         agent_tracks.emplace(itr, _track);
     }
 
-    for(auto itr : agent_ids_alloc)
+    for(const auto& itr : agent_ids_alloc)
     {
         const auto* _agent  = _get_agent(itr);
         auto        _namess = std::stringstream{};
@@ -2155,7 +2160,7 @@ write_perfetto()
     for(const auto& aitr : agent_queue_ids)
     {
         uint32_t nqueue = 0;
-        for(auto qitr : aitr.second)
+        for(const auto& qitr : aitr.second)
         {
             const auto* _agent = _get_agent(aitr.first);
             if(!_agent) throw std::runtime_error{"agent lookup error"};
@@ -2185,18 +2190,22 @@ write_perfetto()
         auto buffer_names     = sdk::get_buffer_tracing_names();
         auto callbk_name_info = sdk::get_callback_tracing_names();
 
-        for(auto itr : hsa_api_bf_records)
+        for(const auto& itr : hsa_api_bf_records)
         {
             auto  name  = buffer_names.at(itr.kind, itr.operation);
             auto& track = thread_tracks.at(itr.thread_id);
 
             auto _args = callback_arg_array_t{};
-            auto ritr  = std::find_if(
-                hsa_api_cb_records.begin(), hsa_api_cb_records.end(), [&itr](const auto& citr) {
-                    return (citr.record.correlation_id.internal == itr.correlation_id.internal &&
-                            !citr.args.empty());
-                });
-            if(ritr != hsa_api_cb_records.end()) _args = ritr->args;
+            if(enable_debug_annotations)
+            {
+                auto ritr = std::find_if(
+                    hsa_api_cb_records.begin(), hsa_api_cb_records.end(), [&itr](const auto& citr) {
+                        return (citr.record.correlation_id.internal ==
+                                    itr.correlation_id.internal &&
+                                !citr.args.empty());
+                    });
+                if(ritr != hsa_api_cb_records.end()) _args = ritr->args;
+            }
 
             TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::hsa_api>::name,
                               ::perfetto::StaticString(name.data()),
@@ -2224,18 +2233,22 @@ write_perfetto()
                             itr.end_timestamp);
         }
 
-        for(auto itr : hip_api_bf_records)
+        for(const auto& itr : hip_api_bf_records)
         {
             auto  name  = buffer_names.at(itr.kind, itr.operation);
             auto& track = thread_tracks.at(itr.thread_id);
 
             auto _args = callback_arg_array_t{};
-            auto ritr  = std::find_if(
-                hip_api_cb_records.begin(), hip_api_cb_records.end(), [&itr](const auto& citr) {
-                    return (citr.record.correlation_id.internal == itr.correlation_id.internal &&
-                            !citr.args.empty());
-                });
-            if(ritr != hip_api_cb_records.end()) _args = ritr->args;
+            if(enable_debug_annotations)
+            {
+                auto ritr = std::find_if(
+                    hip_api_cb_records.begin(), hip_api_cb_records.end(), [&itr](const auto& citr) {
+                        return (citr.record.correlation_id.internal ==
+                                    itr.correlation_id.internal &&
+                                !citr.args.empty());
+                    });
+                if(ritr != hip_api_cb_records.end()) _args = ritr->args;
+            }
 
             TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::hip_api>::name,
                               ::perfetto::StaticString(name.data()),
@@ -2263,18 +2276,23 @@ write_perfetto()
                             itr.end_timestamp);
         }
 
-        for(auto itr : rccl_api_bf_records)
+        for(const auto& itr : rccl_api_bf_records)
         {
             auto  name  = buffer_names.at(itr.kind, itr.operation);
             auto& track = thread_tracks.at(itr.thread_id);
 
             auto _args = callback_arg_array_t{};
-            auto ritr  = std::find_if(
-                rccl_api_cb_records.begin(), rccl_api_cb_records.end(), [&itr](const auto& citr) {
-                    return (citr.record.correlation_id.internal == itr.correlation_id.internal &&
-                            !citr.args.empty());
-                });
-            if(ritr != rccl_api_cb_records.end()) _args = ritr->args;
+            if(enable_debug_annotations)
+            {
+                auto ritr = std::find_if(rccl_api_cb_records.begin(),
+                                         rccl_api_cb_records.end(),
+                                         [&itr](const auto& citr) {
+                                             return (citr.record.correlation_id.internal ==
+                                                         itr.correlation_id.internal &&
+                                                     !citr.args.empty());
+                                         });
+                if(ritr != rccl_api_cb_records.end()) _args = ritr->args;
+            }
 
             TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::rccl_api>::name,
                               ::perfetto::StaticString(name.data()),
@@ -2302,20 +2320,23 @@ write_perfetto()
                             itr.end_timestamp);
         }
 
-        for(auto itr : rocdecode_api_bf_records)
+        for(const auto& itr : rocdecode_api_bf_records)
         {
             auto  name  = buffer_names.at(itr.kind, itr.operation);
             auto& track = thread_tracks.at(itr.thread_id);
 
             auto _args = callback_arg_array_t{};
-            auto ritr  = std::find_if(
-                rocdecode_api_cb_records.begin(),
-                rocdecode_api_cb_records.end(),
-                [&itr](const auto& citr) {
-                    return (citr.record.correlation_id.internal == itr.correlation_id.internal &&
-                            !citr.args.empty());
-                });
-            if(ritr != rocdecode_api_cb_records.end()) _args = ritr->args;
+            if(enable_debug_annotations)
+            {
+                auto ritr = std::find_if(rocdecode_api_cb_records.begin(),
+                                         rocdecode_api_cb_records.end(),
+                                         [&itr](const auto& citr) {
+                                             return (citr.record.correlation_id.internal ==
+                                                         itr.correlation_id.internal &&
+                                                     !citr.args.empty());
+                                         });
+                if(ritr != rocdecode_api_cb_records.end()) _args = ritr->args;
+            }
 
             TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::rocdecode_api>::name,
                               ::perfetto::StaticString(name.data()),
@@ -2343,20 +2364,23 @@ write_perfetto()
                             itr.end_timestamp);
         }
 
-        for(auto itr : rocjpeg_api_bf_records)
+        for(const auto& itr : rocjpeg_api_bf_records)
         {
             auto  name  = buffer_names.at(itr.kind, itr.operation);
             auto& track = thread_tracks.at(itr.thread_id);
 
             auto _args = callback_arg_array_t{};
-            auto ritr  = std::find_if(
-                rocjpeg_api_cb_records.begin(),
-                rocjpeg_api_cb_records.end(),
-                [&itr](const auto& citr) {
-                    return (citr.record.correlation_id.internal == itr.correlation_id.internal &&
-                            !citr.args.empty());
-                });
-            if(ritr != rocjpeg_api_cb_records.end()) _args = ritr->args;
+            if(enable_debug_annotations)
+            {
+                auto ritr = std::find_if(rocjpeg_api_cb_records.begin(),
+                                         rocjpeg_api_cb_records.end(),
+                                         [&itr](const auto& citr) {
+                                             return (citr.record.correlation_id.internal ==
+                                                         itr.correlation_id.internal &&
+                                                     !citr.args.empty());
+                                         });
+                if(ritr != rocjpeg_api_cb_records.end()) _args = ritr->args;
+            }
 
             TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::rocjpeg_api>::name,
                               ::perfetto::StaticString(name.data()),
@@ -2384,18 +2408,22 @@ write_perfetto()
                             itr.end_timestamp);
         }
 
-        for(auto itr : ompt_bf_records)
+        for(const auto& itr : ompt_bf_records)
         {
             auto  name  = buffer_names.at(itr.kind, itr.operation);
             auto& track = thread_tracks.at(itr.thread_id);
 
             auto _args = callback_arg_array_t{};
-            auto ritr  = std::find_if(
-                ompt_cb_records.begin(), ompt_cb_records.end(), [&itr](const auto& citr) {
-                    return (citr.record.correlation_id.internal == itr.correlation_id.internal &&
-                            !citr.args.empty());
-                });
-            if(ritr != ompt_cb_records.end()) _args = ritr->args;
+            if(enable_debug_annotations)
+            {
+                auto ritr = std::find_if(
+                    ompt_cb_records.begin(), ompt_cb_records.end(), [&itr](const auto& citr) {
+                        return (citr.record.correlation_id.internal ==
+                                    itr.correlation_id.internal &&
+                                !citr.args.empty());
+                    });
+                if(ritr != ompt_cb_records.end()) _args = ritr->args;
+            }
 
             TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::openmp>::name,
                               ::perfetto::StaticString(name.data()),
@@ -2423,7 +2451,7 @@ write_perfetto()
                             itr.end_timestamp);
         }
 
-        for(auto itr : memory_copy_bf_records)
+        for(const auto& itr : memory_copy_bf_records)
         {
             auto  name  = buffer_names.at(itr.kind, itr.operation);
             auto& track = agent_tracks.at(itr.dst_agent_id.handle);
@@ -2453,7 +2481,7 @@ write_perfetto()
         }
 
         auto demangled = std::unordered_map<std::string_view, std::string>{};
-        for(auto itr : kernel_dispatch_bf_records)
+        for(const auto& itr : kernel_dispatch_bf_records)
         {
             const auto&                            info = itr.dispatch_info;
             const kernel_symbol_callback_record_t* sym  = nullptr;
