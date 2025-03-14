@@ -32,8 +32,11 @@
 #include <rocprofiler-sdk/cxx/operators.hpp>
 #include <rocprofiler-sdk/cxx/perfetto.hpp>
 
+#include <fmt/core.h>
+
 #include <atomic>
 #include <future>
+#include <iostream>
 #include <map>
 #include <thread>
 #include <unordered_map>
@@ -505,62 +508,117 @@ write_perfetto(
                                 itr.end_timestamp);
                 tracing_session->FlushBlocking();
             }
-
         for(auto ditr : kernel_dispatch_gen)
-            for(auto itr : kernel_dispatch_gen.get(ditr))
+        {
+            auto generator = kernel_dispatch_gen.get(ditr);
+            // Group kernels on the same queue and agent. Temporary fix for firmware timestamp bug
+            // Can be removed once bug is resolved.
+            auto dispatch_bins = std::unordered_map<
+                rocprofiler_agent_id_t,
+                std::unordered_map<
+                    rocprofiler_queue_id_t,
+                    std::vector<rocprofiler_buffer_tracing_kernel_dispatch_record_t*>>>{};
+            for(auto& itr : generator)
             {
-                const auto&               info = itr.dispatch_info;
-                const kernel_symbol_info* sym  = tool_metadata.get_kernel_symbol(info.kernel_id);
-
-                CHECK(sym != nullptr);
-
-                auto  name  = std::string_view{sym->kernel_name};
-                auto& track = agent_queue_tracks.at(info.agent_id).at(info.queue_id);
-
-                if(demangled.find(name) == demangled.end())
-                {
-                    demangled.emplace(name, common::cxx_demangle(name));
-                }
-
-                TRACE_EVENT_BEGIN(
-                    sdk::perfetto_category<sdk::category::kernel_dispatch>::name,
-                    ::perfetto::StaticString(demangled.at(name).c_str()),
-                    track,
-                    itr.start_timestamp,
-                    ::perfetto::Flow::ProcessScoped(itr.correlation_id.internal),
-                    "begin_ns",
-                    itr.start_timestamp,
-                    "end_ns",
-                    itr.end_timestamp,
-                    "delta_ns",
-                    (itr.end_timestamp - itr.start_timestamp),
-                    "kind",
-                    itr.kind,
-                    "agent",
-                    agents_map.at(info.agent_id).logical_node_id,
-                    "corr_id",
-                    itr.correlation_id.internal,
-                    "queue",
-                    info.queue_id.handle,
-                    "tid",
-                    itr.thread_id,
-                    "kernel_id",
-                    info.kernel_id,
-                    "private_segment_size",
-                    info.private_segment_size,
-                    "group_segment_size",
-                    info.group_segment_size,
-                    "workgroup_size",
-                    info.workgroup_size.x * info.workgroup_size.y * info.workgroup_size.z,
-                    "grid_size",
-                    info.grid_size.x * info.grid_size.y * info.grid_size.z);
-                TRACE_EVENT_END(sdk::perfetto_category<sdk::category::kernel_dispatch>::name,
-                                track,
-                                itr.end_timestamp);
-                tracing_session->FlushBlocking();
+                const auto& info = itr.dispatch_info;
+                dispatch_bins[info.agent_id][info.queue_id].emplace_back(&itr);
             }
-    }
 
+            for(const auto& aitr : dispatch_bins)
+            {
+                for(auto qitr : aitr.second)
+                {
+                    // Sort kernels on the same queue and agent by timestamp
+                    std::sort(qitr.second.begin(),
+                              qitr.second.end(),
+                              [](const auto* lhs, const auto* rhs) {
+                                  return lhs->start_timestamp < rhs->start_timestamp;
+                              });
+
+                    // Loop over the kernels (qitr.second) and put them into perfetto.
+                    for(auto it = qitr.second.begin(); it != qitr.second.end(); ++it)
+                    {
+                        auto&                     current = **it;
+                        const auto&               info    = current.dispatch_info;
+                        const kernel_symbol_info* sym =
+                            tool_metadata.get_kernel_symbol(info.kernel_id);
+
+                        CHECK(sym != nullptr);
+
+                        auto  name  = std::string_view{sym->kernel_name};
+                        auto& track = agent_queue_tracks.at(info.agent_id).at(info.queue_id);
+
+                        // Temporary fix until timestamp issues are resolved: Set timestamps to be
+                        // halfway between ending timestamp and starting timestamp of overlapping
+                        // kernel dispatches. Perfetto displays slices incorrectly if overlapping
+                        // slices on the same track are not completely enveloped.
+                        auto next = std::next(it);
+                        if(next != qitr.second.end() &&
+                           (*next)->start_timestamp < (*it)->end_timestamp)
+                        {
+                            auto start = (*next)->start_timestamp;
+                            auto end   = std::min((*it)->end_timestamp, (*next)->end_timestamp);
+                            auto mid   = start + (end - start) / 2;
+                            // Report changed timestamps to ROCP INFO
+                            ROCP_INFO << fmt::format(
+                                "Kernel ending timestamp increased by {} ns to {} ns with "
+                                "following kernel starting timestamp decreased by {} ns to {} ns "
+                                "due to firmware timestamp error.",
+                                ((*it)->end_timestamp - mid),
+                                mid,
+                                (mid - (*next)->start_timestamp),
+                                mid);
+                            (*it)->end_timestamp     = mid;
+                            (*next)->start_timestamp = mid;
+                        }
+
+                        if(demangled.find(name) == demangled.end())
+                        {
+                            demangled.emplace(name, common::cxx_demangle(name));
+                        }
+
+                        TRACE_EVENT_BEGIN(
+                            sdk::perfetto_category<sdk::category::kernel_dispatch>::name,
+                            ::perfetto::StaticString(demangled.at(name).c_str()),
+                            track,
+                            current.start_timestamp,
+                            ::perfetto::Flow::ProcessScoped(current.correlation_id.internal),
+                            "begin_ns",
+                            current.start_timestamp,
+                            "end_ns",
+                            current.end_timestamp,
+                            "delta_ns",
+                            (current.end_timestamp - current.start_timestamp),
+                            "kind",
+                            current.kind,
+                            "agent",
+                            tool_metadata.get_node_id(info.agent_id),
+                            "corr_id",
+                            current.correlation_id.internal,
+                            "queue",
+                            info.queue_id.handle,
+                            "tid",
+                            current.thread_id,
+                            "kernel_id",
+                            info.kernel_id,
+                            "private_segment_size",
+                            info.private_segment_size,
+                            "group_segment_size",
+                            info.group_segment_size,
+                            "workgroup_size",
+                            info.workgroup_size.x * info.workgroup_size.y * info.workgroup_size.z,
+                            "grid_size",
+                            info.grid_size.x * info.grid_size.y * info.grid_size.z);
+                        TRACE_EVENT_END(
+                            sdk::perfetto_category<sdk::category::kernel_dispatch>::name,
+                            track,
+                            current.end_timestamp);
+                        tracing_session->FlushBlocking();
+                    }
+                }
+            }
+        }
+    }
     // counter tracks
     {
         // memory copy counter track
