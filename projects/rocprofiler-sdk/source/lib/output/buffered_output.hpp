@@ -26,6 +26,7 @@
 #include "generator.hpp"
 #include "pc_sample_transform.hpp"
 #include "statistics.hpp"
+#include "stream_info.hpp"
 #include "tmp_file_buffer.hpp"
 
 #include "lib/common/container/ring_buffer.hpp"
@@ -140,11 +141,6 @@ using hip_buffered_output_t =
     buffered_output<rocprofiler_buffer_tracing_hip_api_record_t, domain_type::HIP>;
 using hsa_buffered_output_t =
     buffered_output<rocprofiler_buffer_tracing_hsa_api_record_t, domain_type::HSA>;
-using kernel_dispatch_buffered_output_t =
-    buffered_output<rocprofiler_buffer_tracing_kernel_dispatch_record_t,
-                    domain_type::KERNEL_DISPATCH>;
-using memory_copy_buffered_output_t =
-    buffered_output<rocprofiler_buffer_tracing_memory_copy_record_t, domain_type::MEMORY_COPY>;
 using marker_buffered_output_t =
     buffered_output<rocprofiler_buffer_tracing_marker_api_record_t, domain_type::MARKER>;
 using rccl_buffered_output_t =
@@ -167,5 +163,10 @@ using rocdecode_buffered_output_t =
     buffered_output<rocprofiler_buffer_tracing_rocdecode_api_record_t, domain_type::ROCDECODE>;
 using rocjpeg_buffered_output_t =
     buffered_output<rocprofiler_buffer_tracing_rocjpeg_api_record_t, domain_type::ROCJPEG>;
+using kernel_dispatch_buffered_output_with_stream_t =
+    buffered_output<tool_buffer_tracing_kernel_dispatch_with_stream_record_t,
+                    domain_type::KERNEL_DISPATCH>;
+using memory_copy_buffered_output_with_stream_t =
+    buffered_output<tool_buffer_tracing_memory_copy_with_stream_record_t, domain_type::MEMORY_COPY>;
 }  // namespace tool
 }  // namespace rocprofiler

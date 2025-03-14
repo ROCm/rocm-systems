@@ -356,15 +356,15 @@ create_attribute_list()
 
 void
 write_otf2(
-    const output_config&                                             cfg,
-    const metadata&                                                  tool_metadata,
-    uint64_t                                                         pid,
-    const std::vector<agent_info>&                                   agent_data,
-    std::deque<rocprofiler_buffer_tracing_hip_api_record_t>*         hip_api_data,
-    std::deque<rocprofiler_buffer_tracing_hsa_api_record_t>*         hsa_api_data,
-    std::deque<rocprofiler_buffer_tracing_kernel_dispatch_record_t>* kernel_dispatch_data,
-    std::deque<rocprofiler_buffer_tracing_memory_copy_record_t>*     memory_copy_data,
-    std::deque<rocprofiler_buffer_tracing_marker_api_record_t>*      marker_api_data,
+    const output_config&                                                  cfg,
+    const metadata&                                                       tool_metadata,
+    uint64_t                                                              pid,
+    const std::vector<agent_info>&                                        agent_data,
+    std::deque<rocprofiler_buffer_tracing_hip_api_record_t>*              hip_api_data,
+    std::deque<rocprofiler_buffer_tracing_hsa_api_record_t>*              hsa_api_data,
+    std::deque<tool_buffer_tracing_kernel_dispatch_with_stream_record_t>* kernel_dispatch_data,
+    std::deque<tool_buffer_tracing_memory_copy_with_stream_record_t>*     memory_copy_data,
+    std::deque<rocprofiler_buffer_tracing_marker_api_record_t>*           marker_api_data,
     std::deque<rocprofiler_buffer_tracing_scratch_memory_record_t>* /*scratch_memory_data*/,
     std::deque<rocprofiler_buffer_tracing_rccl_api_record_t>*          rccl_api_data,
     std::deque<rocprofiler_buffer_tracing_memory_allocation_record_t>* memory_allocation_data,
@@ -676,8 +676,7 @@ write_otf2(
         const auto* sym  = _get_kernel_sym_data(info);
         CHECK(sym != nullptr);
 
-        auto name =
-            tool_metadata.get_kernel_name(info.kernel_id, itr.correlation_id.external.value);
+        auto name = tool_metadata.get_kernel_name(info.kernel_id, itr.kernel_rename_val);
         _hash_data.emplace(
             get_hash_id(name),
             region_info{std::string{name}, OTF2_REGION_ROLE_FUNCTION, OTF2_PARADIGM_HIP});

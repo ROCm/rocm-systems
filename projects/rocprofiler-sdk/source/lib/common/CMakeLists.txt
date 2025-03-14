@@ -52,3 +52,5 @@ target_link_libraries(
 
 set_target_properties(rocprofiler-sdk-common-library PROPERTIES OUTPUT_NAME
                                                                 rocprofiler-sdk-common)
+
+add_subdirectory(details)

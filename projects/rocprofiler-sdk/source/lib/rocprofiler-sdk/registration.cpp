@@ -32,6 +32,7 @@
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
+#include "lib/rocprofiler-sdk/hip/stream.hpp"
 #include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/memory_allocation.hpp"
@@ -754,6 +755,8 @@ rocprofiler_is_finalized(int* status)
 rocprofiler_status_t
 rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
 {
+    rocprofiler::registration::init_logging();
+
     ROCP_INFO << "forcing rocprofiler configuration";
 
     auto& forced_config = rocprofiler::registration::get_forced_configure();
@@ -816,6 +819,9 @@ rocprofiler_set_api_table(const char* name,
         rocprofiler::runtime_init::initialize(
             ROCPROFILER_RUNTIME_INITIALIZATION_HIP, lib_version, lib_instance);
 
+        // install HIP stream deduction wrappers
+        rocprofiler::hip::stream::update_table(hip_runtime_api_table);
+
         // allow tools to install API wrappers
         rocprofiler::intercept_table::notify_intercept_table_registration(
             ROCPROFILER_HIP_RUNTIME_TABLE,
@@ -840,6 +846,9 @@ rocprofiler_set_api_table(const char* name,
 
         // install rocprofiler API wrappers
         rocprofiler::hip::update_table(hip_compiler_api_table);
+
+        // install HIP stream deduction wrappers
+        rocprofiler::hip::stream::update_table(hip_compiler_api_table);
 
         // allow tools to install API wrappers
         rocprofiler::intercept_table::notify_intercept_table_registration(

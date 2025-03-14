@@ -354,7 +354,7 @@ Here are the contents of ``kernel_trace.csv`` file:
 
 .. csv-table:: Kernel trace
    :file: /data/kernel_trace.csv
-   :widths: 10,10,10,10,10,10,10,10,20,20,10,10,10,10,10,10,10,10
+   :widths: 10,10,10,10,10,10,10,10,10,20,20,10,10,10,10,10,10,10,10
    :header-rows: 1
 
 For the description of the fields in the output file, see :ref:`output-file-fields`.
@@ -378,7 +378,7 @@ Here are the contents of ``memory_copy_trace.csv`` file:
 
 .. csv-table:: Memory copy trace
    :file: /data/memory_copy_trace.csv
-   :widths: 10,10,10,10,10,20,20
+   :widths: 10,10,10,10,10,10,20,20
    :header-rows: 1
 
 For the description of the fields in the output file, see :ref:`output-file-fields`.
@@ -1085,6 +1085,9 @@ The following table lists the various fields or the columns in the output CSV fi
 
   * - Queue_Id
     - ROCm queue unique identifier to which the kernel was submitted.
+
+  * - Stream_Id
+    - Identifies HIP stream ID to which kernel or memory copy operation was submitted. Defaults to 0 if the hip-stream-display option is not enabled
 
   * - Private_Segment_Size
     - The amount of memory required in bytes for the combined private, spill, and arg segments for a work item.

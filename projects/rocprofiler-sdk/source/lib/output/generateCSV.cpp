@@ -249,22 +249,22 @@ generate_csv(const output_config& cfg,
 }
 
 void
-generate_csv(const output_config&                                                  cfg,
-             const metadata&                                                       tool_metadata,
-             const generator<rocprofiler_buffer_tracing_kernel_dispatch_record_t>& data,
-             const stats_entry_t&                                                  stats)
+generate_csv(const output_config& cfg,
+             const metadata&      tool_metadata,
+             const generator<tool_buffer_tracing_kernel_dispatch_with_stream_record_t>& data,
+             const stats_entry_t&                                                       stats)
 {
     if(data.empty()) return;
 
     if(cfg.stats && stats)
         write_stats(get_stats_output_file(cfg, domain_type::KERNEL_DISPATCH), stats.entries);
-
     auto ofs = tool::csv_output_file{cfg,
                                      domain_type::KERNEL_DISPATCH,
-                                     tool::csv::kernel_trace_csv_encoder{},
+                                     tool::csv::kernel_trace_with_stream_csv_encoder{},
                                      {"Kind",
                                       "Agent_Id",
                                       "Queue_Id",
+                                      "Stream_Id",
                                       "Thread_Id",
                                       "Dispatch_Id",
                                       "Kernel_Id",
@@ -287,14 +287,14 @@ generate_csv(const output_config&                                               
         {
             auto row_ss      = std::stringstream{};
             auto kernel_name = tool_metadata.get_kernel_name(record.dispatch_info.kernel_id,
-                                                             record.correlation_id.external.value);
-
-            rocprofiler::tool::csv::kernel_trace_csv_encoder::write_row(
+                                                             record.kernel_rename_val);
+            rocprofiler::tool::csv::kernel_trace_with_stream_csv_encoder::write_row(
                 row_ss,
                 tool_metadata.get_kind_name(record.kind),
                 tool_metadata.get_agent_index(record.dispatch_info.agent_id, cfg.agent_index_value)
                     .as_string(),
                 record.dispatch_info.queue_id.handle,
+                record.stream_id.handle,
                 record.thread_id,
                 record.dispatch_info.dispatch_id,
                 record.dispatch_info.kernel_id,
@@ -310,7 +310,6 @@ generate_csv(const output_config&                                               
                 record.dispatch_info.grid_size.x,
                 record.dispatch_info.grid_size.y,
                 record.dispatch_info.grid_size.z);
-
             ofs << row_ss.str();
         }
     }
@@ -400,10 +399,10 @@ generate_csv(const output_config&                                          cfg,
 }
 
 void
-generate_csv(const output_config&                                              cfg,
-             const metadata&                                                   tool_metadata,
-             const generator<rocprofiler_buffer_tracing_memory_copy_record_t>& data,
-             const stats_entry_t&                                              stats)
+generate_csv(const output_config&                                                   cfg,
+             const metadata&                                                        tool_metadata,
+             const generator<tool_buffer_tracing_memory_copy_with_stream_record_t>& data,
+             const stats_entry_t&                                                   stats)
 {
     if(data.empty()) return;
 
@@ -412,9 +411,10 @@ generate_csv(const output_config&                                              c
 
     auto ofs = tool::csv_output_file{cfg,
                                      domain_type::MEMORY_COPY,
-                                     tool::csv::memory_copy_csv_encoder{},
+                                     tool::csv::memory_copy_with_stream_csv_encoder{},
                                      {"Kind",
                                       "Direction",
+                                      "Stream_Id",
                                       "Source_Agent_Id",
                                       "Destination_Agent_Id",
                                       "Correlation_Id",
@@ -427,10 +427,11 @@ generate_csv(const output_config&                                              c
         {
             auto row_ss   = std::stringstream{};
             auto api_name = tool_metadata.get_operation_name(record.kind, record.operation);
-            rocprofiler::tool::csv::memory_copy_csv_encoder::write_row(
+            rocprofiler::tool::csv::memory_copy_with_stream_csv_encoder::write_row(
                 row_ss,
                 tool_metadata.get_kind_name(record.kind),
                 api_name,
+                record.stream_id.handle,
                 tool_metadata.get_agent_index(record.src_agent_id, cfg.agent_index_value)
                     .as_string(),
                 tool_metadata.get_agent_index(record.dst_agent_id, cfg.agent_index_value)
@@ -438,7 +439,6 @@ generate_csv(const output_config&                                              c
                 record.correlation_id.internal,
                 record.start_timestamp,
                 record.end_timestamp);
-
             ofs << row_ss.str();
         }
     }
@@ -626,7 +626,7 @@ generate_csv(const output_config&                    cfg,
                     record.thread_id,
                     magnitude(record.dispatch_data.dispatch_info.grid_size),
                     record.dispatch_data.dispatch_info.kernel_id,
-                    tool_metadata.get_kernel_name(kernel_id, correlation_id.external.value),
+                    tool_metadata.get_kernel_name(kernel_id, record.kernel_rename_val),
                     magnitude(record.dispatch_data.dispatch_info.workgroup_size),
                     lds_block_size_v,
                     record.dispatch_data.dispatch_info.private_segment_size,

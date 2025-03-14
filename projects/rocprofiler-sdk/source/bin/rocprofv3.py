@@ -542,6 +542,12 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         help="List available PC sampling configurations and metrics for counter collection. Backed by a valid YAML file. In earlier rocprof versions, this was known as --list-basic, --list-derived and --list-counters",
     )
 
+    add_parser_bool_argument(
+        display_options,
+        "--group-by-queue",
+        help="For displaying the HIP streams that kernels and memory copy operations are submitted to rather than HSA queues.",
+    )
+
     advanced_options = parser.add_argument_group("Advanced options")
 
     advanced_options.add_argument(
@@ -1043,6 +1049,7 @@ def run(app_args, args, **kwargs):
             ["memory_copy_trace", "MEMORY_COPY_TRACE"],
             ["memory_allocation_trace", "MEMORY_ALLOCATION_TRACE"],
             ["scratch_memory_trace", "SCRATCH_MEMORY_TRACE"],
+            ["group_by_queue", "GROUP_BY_QUEUE"],
         ]
     ).items():
         val = getattr(args, f"{opt}")
