@@ -205,7 +205,7 @@ bool Isa::GetInfo(const hsa_isa_info_t &attribute, void *value) const {
       return true;
     }
     case HSA_ISA_INFO_GRID_MAX_DIM: {
-      const hsa_dim3_t grid_max_dim = {UINT32_MAX, UINT32_MAX, UINT32_MAX};
+      const hsa_dim3_t grid_max_dim = {INT32_MAX, UINT16_MAX, UINT16_MAX};
       memcpy(value, &grid_max_dim, sizeof(grid_max_dim));
       return true;
     }
