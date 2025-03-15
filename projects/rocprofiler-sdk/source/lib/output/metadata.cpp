@@ -23,6 +23,7 @@
 #include "metadata.hpp"
 
 #include "lib/common/filesystem.hpp"
+#include "lib/common/logging.hpp"
 #include "lib/common/string_entry.hpp"
 #include "lib/output/agent_info.hpp"
 #include "lib/output/host_symbol_info.hpp"
@@ -31,6 +32,7 @@
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
+#include <cstdint>
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 
 #include <fmt/core.h>
@@ -246,7 +248,20 @@ metadata::get_code_object_load_info() const
         return _info;
     });
 
-    return _data;
+    uint64_t _sz = 0;
+    for(const auto& itr : _data)
+        _sz = std::max(_sz, itr.id);
+
+    ROCP_WARNING_IF((_sz + 1) - _data.size() > 1000) << fmt::format(
+        "Spares index detected for code object load info: {} < {}", _data.size(), _sz);
+
+    auto _code_obj_data = std::vector<rocprofiler::att_wrapper::CodeobjLoadInfo>{};
+    _code_obj_data.resize(_sz + 1, rocprofiler::att_wrapper::CodeobjLoadInfo{});
+    // index by the code object id
+    for(auto& itr : _data)
+        _code_obj_data.at(itr.id) = itr;
+
+    return _code_obj_data;
 }
 
 std::vector<std::string>

@@ -12,6 +12,7 @@ set(ATT_TOOL_SOURCE_FILES
     filenames.cpp
     occupancy.cpp
     wstates.cpp
+    perfcounter.cpp
     profile_interface.cpp
     dl.cpp)
 

@@ -24,57 +24,11 @@
 
 #include "att_lib_wrapper.hpp"
 
-#include <map>
-#include <vector>
-#include "att_decoder.h"
-#include "util.hpp"
-
 namespace rocprofiler
 {
 namespace att_wrapper
 {
-class FilenameMgr
-{
-public:
-    struct Coord
-    {
-        int  se{0};
-        int  sm{0};
-        int  sl{0};
-        int  id{0};
-        bool operator==(const Coord& other) const
-        {
-            return se == other.se && sm == other.sm && sl == other.sl && id == other.id;
-        }
-        bool operator<(const Coord& other) const
-        {
-            if(se != other.se) return se < other.se;
-            if(sm != other.sm) return sm < other.sm;
-            if(sl != other.sl) return sl < other.sl;
-            return id < other.id;
-        }
-    };
-    struct WaveName
-    {
-        std::string name{};
-        size_t      begin{0};
-        size_t      end{0};
-    };
-
-    FilenameMgr(const Fspath& _dir)
-    : dir(_dir)
-    , filename(_dir / "filenames.json")
-    {}
-    ~FilenameMgr();
-
-    void addwave(const Fspath& file, Coord coord, size_t start, size_t end);
-
-    Fspath                    dir{};
-    Fspath                    filename{};
-    std::map<Coord, WaveName> streams{};
-    std::vector<std::string>  perfcounters{};
-    int                       gfxip = 9;
-};
-
+void
+PerfcounterFile(class WaveConfig& config, const att_perfevent_t* events, size_t event_count);
 }  // namespace att_wrapper
 }  // namespace rocprofiler

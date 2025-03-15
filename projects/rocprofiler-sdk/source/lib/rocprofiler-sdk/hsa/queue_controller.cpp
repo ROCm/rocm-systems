@@ -148,12 +148,6 @@ constexpr rocprofiler_agent_t default_agent =
 void
 QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
 {
-    for(const auto& itr : context::get_registered_contexts())
-    {
-        if(auto* trace = itr->dispatch_thread_trace.get())
-            trace->resource_init(queue->get_agent(), get_core_table(), get_ext_table());
-    }
-
     CHECK(queue);
     _callback_cache.wlock([&](auto& callbacks) {
         _queues.wlock([&](auto& map) {
@@ -175,16 +169,6 @@ void
 QueueController::destroy_queue(hsa_queue_t* id)
 {
     if(!id) return;
-
-    for(const auto& itr : context::get_registered_contexts())
-    {
-        if(!itr->dispatch_thread_trace) continue;
-
-        _queues.wlock([&](auto& map) {
-            if(map.find(id) != map.end())
-                itr->dispatch_thread_trace->resource_deinit(map.at(id)->get_agent());
-        });
-    }
 
     const auto* queue = get_queue(*id);
 
@@ -469,7 +453,7 @@ enable_queue_intercept()
                                      itr->is_tracing(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
 
         if(itr->counter_collection || itr->pc_sampler || has_kernel_tracing ||
-           has_scratch_reporting || itr->device_counter_collection || itr->agent_thread_trace ||
+           has_scratch_reporting || itr->device_counter_collection || itr->device_thread_trace ||
            itr->dispatch_thread_trace)
             return true;
     }

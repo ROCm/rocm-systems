@@ -124,6 +124,17 @@ typedef struct
     att_wave_instruction_t* instructions_array;
 } att_wave_data_t;
 
+typedef struct att_perfevent_t
+{
+    int64_t  time;
+    uint16_t events0;
+    uint16_t events1;
+    uint16_t events2;
+    uint16_t events3;
+    uint8_t  CU;
+    uint8_t  bank;
+} att_perfevent_t;
+
 typedef rocprofiler_att_decoder_status_t (*rocprofiler_att_decoder_isa_callback_t)(
     char*     instruction,
     uint64_t* memory_size,

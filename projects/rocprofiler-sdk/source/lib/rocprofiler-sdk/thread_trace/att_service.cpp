@@ -31,25 +31,30 @@
 #include "rocprofiler-sdk/amd_detail/thread_trace.h"
 
 using DispatchThreadTracer = rocprofiler::thread_trace::DispatchThreadTracer;
-using AgentThreadTracer    = rocprofiler::thread_trace::AgentThreadTracer;
+using DeviceThreadTracer   = rocprofiler::thread_trace::DeviceThreadTracer;
 
 extern "C" {
 rocprofiler_status_t
 rocprofiler_configure_dispatch_thread_trace_service(
     rocprofiler_context_id_t               context_id,
+    rocprofiler_agent_id_t                 agent_id,
     rocprofiler_att_parameter_t*           parameters,
     size_t                                 num_parameters,
     rocprofiler_att_dispatch_callback_t    dispatch_callback,
     rocprofiler_att_shader_data_callback_t shader_callback,
     void*                                  callback_userdata)
 {
+    ROCP_TRACE << "Configuring Dispatch ATT for agent " << agent_id.handle;
+
     if(rocprofiler::registration::get_init_status() > -1)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
 
     auto* ctx = rocprofiler::context::get_mutable_registered_context(context_id);
     if(!ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
-    if(ctx->dispatch_thread_trace) return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED;
-    if(ctx->agent_thread_trace) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
+    if(ctx->device_thread_trace) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
+
+    if(!ctx->dispatch_thread_trace)
+        ctx->dispatch_thread_trace = std::make_unique<DispatchThreadTracer>();
 
     auto pack = rocprofiler::thread_trace::thread_trace_parameter_pack{};
 
@@ -92,19 +97,21 @@ rocprofiler_configure_dispatch_thread_trace_service(
 
     if(!pack.are_params_valid()) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
-    ctx->dispatch_thread_trace = std::make_unique<DispatchThreadTracer>(pack);
+    ctx->dispatch_thread_trace->add_agent(agent_id, pack);
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
 rocprofiler_status_t
-rocprofiler_configure_agent_thread_trace_service(
+rocprofiler_configure_device_thread_trace_service(
     rocprofiler_context_id_t               context_id,
+    rocprofiler_agent_id_t                 agent_id,
     rocprofiler_att_parameter_t*           parameters,
     size_t                                 num_parameters,
-    rocprofiler_agent_id_t                 agent,
     rocprofiler_att_shader_data_callback_t shader_callback,
     rocprofiler_user_data_t                userdata)
 {
+    ROCP_TRACE << "Configuring Device ATT for agent " << agent_id.handle;
+
     if(rocprofiler::registration::get_init_status() > -1)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
 
@@ -112,7 +119,7 @@ rocprofiler_configure_agent_thread_trace_service(
     if(!ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
     if(ctx->dispatch_thread_trace) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
 
-    if(!ctx->agent_thread_trace) ctx->agent_thread_trace = std::make_unique<AgentThreadTracer>();
+    if(!ctx->device_thread_trace) ctx->device_thread_trace = std::make_unique<DeviceThreadTracer>();
 
     auto pack = rocprofiler::thread_trace::thread_trace_parameter_pack{};
 
@@ -154,8 +161,7 @@ rocprofiler_configure_agent_thread_trace_service(
 
     if(!pack.are_params_valid()) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
-    assert(ctx->agent_thread_trace);
-    ctx->agent_thread_trace->add_agent(agent, pack);
+    ctx->device_thread_trace->add_agent(agent_id, pack);
     return ROCPROFILER_STATUS_SUCCESS;
 }
 }

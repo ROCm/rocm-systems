@@ -347,7 +347,9 @@ pc_sampling_service_finish_configuration(context::pc_sampling_service* service)
            rocprofiler_dispatch_id_t /*dispatch_id*/,
            rocprofiler_user_data_t*,
            const rocprofiler::hsa::Queue::queue_info_session_t::external_corr_id_map_t&,
-           const context::correlation_id*) { return nullptr; },
+           const context::correlation_id*) {
+            return rocprofiler::hsa::Queue::pkt_and_serialize_t{};
+        },
         // Completion CB
         [](const rocprofiler::hsa::Queue&                                  q,
            rocprofiler::hsa::rocprofiler_packet                            kern_pkt,

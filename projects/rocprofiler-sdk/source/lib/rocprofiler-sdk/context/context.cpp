@@ -339,7 +339,7 @@ start_context(rocprofiler_context_id_t context_id)
     auto status = ROCPROFILER_STATUS_SUCCESS;
 
     if(cfg->counter_collection) rocprofiler::counters::start_context(cfg);
-    if(cfg->agent_thread_trace) cfg->agent_thread_trace->start_context();
+    if(cfg->device_thread_trace) cfg->device_thread_trace->start_context();
     if(cfg->dispatch_thread_trace) cfg->dispatch_thread_trace->start_context();
     if(cfg->device_counter_collection) status = rocprofiler::counters::start_agent_ctx(cfg);
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
@@ -374,7 +374,7 @@ stop_context(rocprofiler_context_id_t idx)
                     rocprofiler::counters::stop_context(const_cast<context*>(_expected));
                 }
 
-                if(_expected->agent_thread_trace) _expected->agent_thread_trace->stop_context();
+                if(_expected->device_thread_trace) _expected->device_thread_trace->stop_context();
                 if(_expected->dispatch_thread_trace)
                     _expected->dispatch_thread_trace->stop_context();
 

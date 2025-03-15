@@ -27,6 +27,7 @@
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 #include "lib/rocprofiler-sdk/counters/tests/hsa_tables.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
@@ -64,11 +65,13 @@ test_init()
         HsaApiTable table;
         table.amd_ext_ = &get_ext_table();
         table.core_    = &get_api_table();
+        rocprofiler::hsa::copy_table(table.core_, 0);
+        rocprofiler::hsa::copy_table(table.amd_ext_, 0);
         agent::construct_agent_cache(&table);
         hsa::get_queue_controller()->init(get_api_table(), get_ext_table());
         return true;
     };
-    [[maybe_unused]] static bool run_ince = init();
+    [[maybe_unused]] static bool run_once = init();
 }
 
 }  // namespace rocprofiler
@@ -85,6 +88,7 @@ TEST(thread_trace, resource_creation)
 
     auto agents = hsa::get_queue_controller()->get_supported_agents();
     ASSERT_GT(agents.size(), 0);
+
     for(const auto& [_, agent] : agents)
     {
         auto params = thread_trace::thread_trace_parameter_pack{};
@@ -101,14 +105,12 @@ TEST(thread_trace, resource_creation)
 
     {
         thread_trace::thread_trace_parameter_pack params{};
-        thread_trace::DispatchThreadTracer        tracer(std::move(params));
+        thread_trace::DispatchThreadTracer        tracer{};
 
         for(const auto& [_, agent] : agents)
-        {
-            // Init twice to simulate two queues
-            tracer.resource_init(agent, get_api_table(), get_ext_table());
-            tracer.resource_init(agent, get_api_table(), get_ext_table());
-        }
+            tracer.add_agent(agent.get_rocp_agent()->id, params);
+
+        tracer.resource_init();
 
         for(auto& [_, agenttracer] : tracer.agents)
         {
@@ -117,18 +119,13 @@ TEST(thread_trace, resource_creation)
             agenttracer->unload_codeobj(1);
         }
 
-        for(const auto& [_, agent] : agents)
-        {
-            // Deinit twice to remove both queues
-            tracer.resource_deinit(agent);
-            tracer.resource_deinit(agent);
-        }
+        tracer.resource_deinit();
     }
-    hsa_shut_down();
 }
 
 TEST(thread_trace, configure_test)
 {
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     test_init();
 
     registration::init_logging();
@@ -143,29 +140,35 @@ TEST(thread_trace, configure_test)
     params.push_back({ROCPROFILER_ATT_PARAMETER_BUFFER_SIZE, {0x1000000}});
     params.push_back({ROCPROFILER_ATT_PARAMETER_SIMD_SELECT, {0xF}});
 
-    rocprofiler_configure_dispatch_thread_trace_service(
-        ctx,
-        params.data(),
-        params.size(),
-        [](rocprofiler_agent_id_t,
-           rocprofiler_queue_id_t,
-           rocprofiler_correlation_id_t,
-           rocprofiler_kernel_id_t,
-           rocprofiler_dispatch_id_t,
-           void*,
-           rocprofiler_user_data_t*) { return ROCPROFILER_ATT_CONTROL_NONE; },
-        [](rocprofiler_agent_id_t, int64_t, void*, size_t, rocprofiler_user_data_t) {},
-        nullptr);
+    auto agents = hsa::get_queue_controller()->get_supported_agents();
+    ASSERT_GT(agents.size(), 0);
 
-    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    for(auto& [_, agent] : agents)
+    {
+        rocprofiler_configure_dispatch_thread_trace_service(
+            ctx,
+            agent.get_rocp_agent()->id,
+            params.data(),
+            params.size(),
+            [](rocprofiler_agent_id_t,
+               rocprofiler_queue_id_t,
+               rocprofiler_correlation_id_t,
+               rocprofiler_kernel_id_t,
+               rocprofiler_dispatch_id_t,
+               void*,
+               rocprofiler_user_data_t*) { return ROCPROFILER_ATT_CONTROL_NONE; },
+            [](rocprofiler_agent_id_t, int64_t, void*, size_t, rocprofiler_user_data_t) {},
+            nullptr);
+    }
+
     ROCPROFILER_CALL(rocprofiler_start_context(ctx), "context start failed");
     ROCPROFILER_CALL(rocprofiler_stop_context(ctx), "context stop failed");
     context::pop_client(1);
-    hsa_shut_down();
 }
 
 TEST(thread_trace, perfcounters_configure_test)
 {
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     test_init();
 
     registration::init_logging();
@@ -194,36 +197,45 @@ TEST(thread_trace, perfcounters_configure_test)
                 expected.insert({std::atoi(metric.event().c_str()), simd_mask});
             }
 
-    rocprofiler_configure_dispatch_thread_trace_service(
-        ctx,
-        params.data(),
-        params.size(),
-        [](rocprofiler_agent_id_t,
-           rocprofiler_queue_id_t,
-           rocprofiler_correlation_id_t,
-           rocprofiler_kernel_id_t,
-           rocprofiler_dispatch_id_t,
-           void*,
-           rocprofiler_user_data_t*) { return ROCPROFILER_ATT_CONTROL_NONE; },
-        [](rocprofiler_agent_id_t, int64_t, void*, size_t, rocprofiler_user_data_t) {},
-        nullptr);
+    auto agents = hsa::get_queue_controller()->get_supported_agents();
+    ASSERT_GT(agents.size(), 0);
+
+    for(auto& [_, agent] : agents)
+    {
+        rocprofiler_configure_dispatch_thread_trace_service(
+            ctx,
+            agent.get_rocp_agent()->id,
+            params.data(),
+            params.size(),
+            [](rocprofiler_agent_id_t,
+               rocprofiler_queue_id_t,
+               rocprofiler_correlation_id_t,
+               rocprofiler_kernel_id_t,
+               rocprofiler_dispatch_id_t,
+               void*,
+               rocprofiler_user_data_t*) { return ROCPROFILER_ATT_CONTROL_NONE; },
+            [](rocprofiler_agent_id_t, int64_t, void*, size_t, rocprofiler_user_data_t) {},
+            nullptr);
+    }
 
     auto* context = rocprofiler::context::get_mutable_registered_context(ctx);
     auto* tracer  = context->dispatch_thread_trace.get();
 
     ASSERT_NE(tracer, nullptr);
-    ASSERT_EQ(tracer->params.perfcounter_ctrl, 1);
-    ASSERT_EQ(tracer->params.perfcounters.size(), 3);
-    for(const auto& param : tracer->params.perfcounters)
-        EXPECT_TRUE(expected.find(param) != expected.end())
-            << "valid AQLprofile mask not generated for perfcounters";
+    for(auto& [id, agent] : tracer->agents)
+    {
+        ASSERT_EQ(agent->params.perfcounter_ctrl, 1);
+        ASSERT_EQ(agent->params.perfcounters.size(), 3);
+        for(const auto& param : agent->params.perfcounters)
+            EXPECT_TRUE(expected.find(param) != expected.end())
+                << "valid AQLprofile mask not generated for perfcounters";
+    }
     context::pop_client(1);
-    hsa_shut_down();
 }
 
 TEST(thread_trace, perfcounters_aql_options_test)
 {
-    hsa_init();
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     test_init();
 
     registration::init_logging();
@@ -243,12 +255,11 @@ TEST(thread_trace, perfcounters_aql_options_test)
                 _params.perfcounters.push_back({std::atoi(metric.event().c_str()), simd_mask});
     _params.perfcounter_ctrl = 2;
     auto new_tracer          = std::make_unique<thread_trace::ThreadTracerQueue>(
-        _params, begin(agents)->second, get_api_table(), get_ext_table());
+        _params, begin(agents)->second.get_rocp_agent()->id);
 
     ASSERT_EQ(new_tracer->factory->aql_params.size(),
               sqtt_default_num_options + perf_counters.size());
     context::pop_client(1);
-    hsa_shut_down();
 }
 
 rocprofiler_status_t
@@ -281,11 +292,11 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
             params.push_back(att_param);
         }
 
-        rocprofiler_configure_agent_thread_trace_service(
+        rocprofiler_configure_device_thread_trace_service(
             *reinterpret_cast<rocprofiler_context_id_t*>(ctx_ptr),
+            agent->id,
             params.data(),
             params.size(),
-            agent->id,
             [](rocprofiler_agent_id_t, int64_t, void*, size_t, rocprofiler_user_data_t) {},
             rocprofiler_user_data_t{});
     }
@@ -294,6 +305,7 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
 
 TEST(thread_trace, agent_configure_test)
 {
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     test_init();
 
     registration::init_logging();

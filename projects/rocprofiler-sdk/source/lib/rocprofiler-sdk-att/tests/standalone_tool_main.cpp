@@ -53,7 +53,7 @@ main(int argc, char** argv)
         FLAGS_colorlogtostderr = true;
     });
 
-    auto cap = rocprofiler::att_wrapper::tool_att_capability_t::ATT_CAPABILITIES_SUMMARY;
+    auto cap = rocprofiler::att_wrapper::tool_att_capability_t::ATT_CAPABILITIES_TRACE;
     {
         auto query = rocprofiler::att_wrapper::query_att_decode_capability();
         ROCP_FATAL_IF(query.empty()) << "No decoder capability available!";
@@ -98,7 +98,7 @@ main(int argc, char** argv)
 
     std::unordered_map<int, std::vector<std::string>> all_runs;
 
-    for(auto& file : sdk_json["strings"]["att_files"])
+    for(auto& file : sdk_json["strings"]["att_filenames"])
     {
         try
         {
@@ -119,7 +119,7 @@ main(int argc, char** argv)
         std::vector<rocprofiler::att_wrapper::CodeobjLoadInfo> codeobj_files{};
 
         std::map<size_t, std::string> snapshot_files{};
-        for(auto elem : sdk_json["strings"]["code_object_snapshot_files"])
+        for(auto elem : sdk_json["strings"]["code_object_snapshot_filenames"])
             snapshot_files[elem["key"]] = elem["value"];
 
         for(auto& codeobj : sdk_json["code_objects"])
@@ -158,7 +158,8 @@ main(int argc, char** argv)
         std::string run_name = input_path.filename().c_str();
         std::string ui_name  = run_name.substr(0, run_name.find(".json"));
         auto output_dir      = output_path / ("ui_output_" + ui_name + std::to_string(run_number));
-        decoder.parse(input_path.parent_path(), output_dir, att_filenames, codeobj_files, formats);
+        decoder.parse(
+            input_path.parent_path(), output_dir, att_filenames, codeobj_files, {}, formats);
     }
 
     ROCP_INFO << "Finalizing ATT Tool";

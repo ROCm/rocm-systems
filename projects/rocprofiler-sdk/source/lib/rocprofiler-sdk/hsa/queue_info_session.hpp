@@ -64,6 +64,7 @@ struct queue_info_session
     rocprofiler_packet       kernel_pkt       = {};
     callback_record_t        callback_record  = {};
     tracing::tracing_data    tracing_data     = {};
+    bool                     is_serialized    = false;
 };
 }  // namespace hsa
 }  // namespace rocprofiler

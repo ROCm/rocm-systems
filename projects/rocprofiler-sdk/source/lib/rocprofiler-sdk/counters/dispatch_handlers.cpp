@@ -46,7 +46,7 @@ namespace counters
  *
  * We return an AQLPacket containing the start/stop/read packets for injection.
  */
-std::unique_ptr<rocprofiler::hsa::AQLPacket>
+hsa::Queue::pkt_and_serialize_t
 queue_cb(const context::context*                                         ctx,
          const std::shared_ptr<counter_callback_info>&                   info,
          const hsa::Queue&                                               queue,
@@ -59,43 +59,25 @@ queue_cb(const context::context*                                         ctx,
 {
     CHECK(info && ctx);
 
-    // Maybe adds serialization packets to the AQLPacket (if serializer is enabled)
-    // and maybe adds barrier packets if the state is transitioning from serialized <->
-    // unserialized
-    auto maybe_add_serialization = [&](auto& gen_pkt) {
-        CHECK_NOTNULL(hsa::get_queue_controller())
-            ->serializer(&queue)
-            .rlock([&](const auto& serializer) {
-                for(auto& s_pkt : serializer.kernel_dispatch(queue))
-                {
-                    gen_pkt->before_krn_pkt.push_back(s_pkt.ext_amd_aql_pm4);
-                }
-            });
-    };
-
     // Packet generated when no instrumentation is performed. May contain serialization
     // packets/barrier packets (and can be empty).
     auto no_instrumentation = [&]() {
         auto ret_pkt = std::make_unique<rocprofiler::hsa::EmptyAQLPacket>();
+        info->packet_return_map.wlock([&](auto& data) { data.emplace(ret_pkt.get(), nullptr); });
         // If we have a counter collection context but it is not enabled, we still might need
         // to add barrier packets to transition from serialized -> unserialized execution. This
         // transition is coordinated by the serializer.
-        maybe_add_serialization(ret_pkt);
-        info->packet_return_map.wlock([&](auto& data) { data.emplace(ret_pkt.get(), nullptr); });
         return ret_pkt;
     };
 
-    if(!ctx || !ctx->counter_collection) return nullptr;
+    if(!ctx || !ctx->counter_collection) return {nullptr, false};
 
     bool is_enabled = false;
 
     ctx->counter_collection->enabled.rlock(
         [&](const auto& collect_ctx) { is_enabled = collect_ctx; });
 
-    if(!is_enabled || !info->user_cb)
-    {
-        return no_instrumentation();
-    }
+    if(!is_enabled || !info->user_cb) return {no_instrumentation(), true};
 
     auto _corr_id_v =
         rocprofiler_correlation_id_t{.internal = 0, .external = context::null_user_data};
@@ -133,10 +115,7 @@ queue_cb(const context::context*                                         ctx,
 
     info->user_cb(dispatch_data, &req_profile, user_data, info->callback_args);
 
-    if(req_profile.handle == 0)
-    {
-        return no_instrumentation();
-    }
+    if(req_profile.handle == 0) return {no_instrumentation(), true};
 
     auto prof_config = get_controller().get_profile_cfg(req_profile);
     CHECK(prof_config);
@@ -145,18 +124,15 @@ queue_cb(const context::context*                                         ctx,
     auto                                         status = info->get_packet(ret_pkt, prof_config);
     CHECK_EQ(status, ROCPROFILER_STATUS_SUCCESS) << rocprofiler_get_status_string(status);
 
-    maybe_add_serialization(ret_pkt);
-    if(ret_pkt->empty)
+    if(!ret_pkt->empty)
     {
-        return ret_pkt;
+        ret_pkt->populate_before();
+        ret_pkt->populate_after();
+        for(auto& aql_pkt : ret_pkt->after_krn_pkt)
+            aql_pkt.completion_signal.handle = 0;
     }
 
-    ret_pkt->populate_before();
-    ret_pkt->populate_after();
-    for(auto& aql_pkt : ret_pkt->after_krn_pkt)
-        aql_pkt.completion_signal.handle = 0;
-
-    return ret_pkt;
+    return {std::move(ret_pkt), true};
 }
 
 /**
@@ -169,7 +145,6 @@ completed_cb(const context::context*                            ctx,
              inst_pkt_t&                                        pkts,
              kernel_dispatch::profiling_time                    dispatch_time)
 {
-    auto& session = *ptr_session;
     CHECK(info && ctx);
 
     std::shared_ptr<profile_config> prof_config;
@@ -189,14 +164,8 @@ completed_cb(const context::context*                            ctx,
         }
     });
 
-    if(!pkt) return;
-
-    CHECK_NOTNULL(hsa::get_queue_controller())
-        ->serializer(&session.queue)
-        .wlock([&](auto& serializer) { serializer.kernel_completion_signal(session.queue); });
-
     // We have no profile config, nothing to output.
-    if(!prof_config) return;
+    if(!pkt || !prof_config) return;
 
     completed_cb_params_t params{info, ptr_session, dispatch_time, prof_config, std::move(pkt)};
     process_callback_data(std::move(params));

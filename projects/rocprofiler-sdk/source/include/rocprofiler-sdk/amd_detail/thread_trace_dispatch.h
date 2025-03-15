@@ -66,8 +66,9 @@ typedef rocprofiler_att_control_flags_t (*rocprofiler_att_dispatch_callback_t)(
 /**
  * @brief Enables the advanced thread trace service for dispatch-based tracing.
  * The tool has an option to enable/disable thread trace on every dispatch callback.
- * This service enables kernel serialization.
- * @param [in] context_id context_id.
+ * This service serializes all traced kernels, and optionally all non-traced kernels.
+ * @param [in] context_id id of the context used for start/stop thread_trace.
+ * @param [in] agent_id rocprofiler_agent_id_t to configure thread trace.
  * @param [in] parameters List of ATT-specific parameters.
  * @param [in] num_parameters Number of parameters. Zero is allowed.
  * @param [in] dispatch_callback Control fn which decides when ATT starts/stop collecting.
@@ -84,6 +85,7 @@ typedef rocprofiler_att_control_flags_t (*rocprofiler_att_dispatch_callback_t)(
 rocprofiler_status_t
 rocprofiler_configure_dispatch_thread_trace_service(
     rocprofiler_context_id_t               context_id,
+    rocprofiler_agent_id_t                 agent_id,
     rocprofiler_att_parameter_t*           parameters,
     size_t                                 num_parameters,
     rocprofiler_att_dispatch_callback_t    dispatch_callback,

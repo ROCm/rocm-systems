@@ -444,8 +444,8 @@ TEST(core, check_callbacks)
                                               extern_ids,
                                               &corr_id);
 
-            ASSERT_TRUE(ret_pkt) << fmt::format("Expected a packet to be generated for - {}",
-                                                metric.name());
+            ASSERT_TRUE(ret_pkt.pkt)
+                << fmt::format("Expected a packet to be generated for - {}", metric.name());
 
             /**
              * Create the buffer and run test
@@ -469,7 +469,7 @@ TEST(core, check_callbacks)
 
             counters::inst_pkt_t pkts;
             pkts.emplace_back(
-                std::make_pair(std::move(ret_pkt), static_cast<counters::ClientID>(0)));
+                std::make_pair(std::move(ret_pkt.pkt), static_cast<counters::ClientID>(0)));
             completed_cb(&ctx, cb_info, sess, pkts, kernel_dispatch::profiling_time{});
             rocprofiler_flush_buffer(opt_buff_id);
             rocprofiler_destroy_buffer(opt_buff_id);
