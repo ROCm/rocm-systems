@@ -73,17 +73,23 @@ public:
     using callback_t           = void (*)(hsa_status_t status, hsa_queue_t* source, void* data);
     using queue_info_session_t = queue_info_session;
 
-    // Function prototype used to notify consumers that a kernel has been
-    // enqueued. An AQL packet can be returned that will be injected into
-    // the queue.
-    using queue_cb_t = std::function<std::unique_ptr<AQLPacket>(
-        const Queue&,
-        const rocprofiler_packet&,
-        rocprofiler_kernel_id_t,
-        rocprofiler_dispatch_id_t,
-        rocprofiler_user_data_t*,
-        const queue_info_session_t::external_corr_id_map_t&,
-        const context::correlation_id*)>;
+    struct pkt_and_serialize_t
+    {
+        std::unique_ptr<AQLPacket> pkt{nullptr};
+        bool                       request_serialize{false};
+    };
+
+    // Function prototype used to notify consumers that a kernel has been enqueued.
+    // Pair first: An AQL packet can be returned that will be injected into the queue.
+    // Pair second: Boolean flag indicating the dispatch needs to be serialized.
+    using queue_cb_t =
+        std::function<pkt_and_serialize_t(const Queue&,
+                                          const rocprofiler_packet&,
+                                          rocprofiler_kernel_id_t,
+                                          rocprofiler_dispatch_id_t,
+                                          rocprofiler_user_data_t*,
+                                          const queue_info_session_t::external_corr_id_map_t&,
+                                          const context::correlation_id*)>;
     // Signals the completion of the kernel packet.
     using completed_cb_t = std::function<void(const Queue&,
                                               const rocprofiler_packet&,

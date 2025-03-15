@@ -193,17 +193,16 @@ as_pointer()
 }
 
 using targeted_kernels_map_t =
-    std::unordered_map<rocprofiler_kernel_id_t, std::unordered_set<uint32_t>>;
+    std::unordered_map<rocprofiler_kernel_id_t, std::unordered_set<size_t>>;
 using counter_dimension_info_map_t =
     std::unordered_map<uint64_t, std::vector<rocprofiler_record_dimension_info_t>>;
 using agent_info_map_t      = std::unordered_map<rocprofiler_agent_id_t, rocprofiler_agent_t>;
-using kernel_iteration_t    = std::unordered_map<rocprofiler_kernel_id_t, uint32_t>;
+using kernel_iteration_t    = std::unordered_map<rocprofiler_kernel_id_t, size_t>;
 using kernel_rename_map_t   = std::unordered_map<uint64_t, uint64_t>;
 using kernel_rename_stack_t = std::stack<uint64_t>;
 
-auto*      tool_metadata    = as_pointer<tool::metadata>(tool::metadata::inprocess{});
-auto       target_kernels   = common::Synchronized<targeted_kernels_map_t>{};
-auto       kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
+auto*      tool_metadata  = as_pointer<tool::metadata>(tool::metadata::inprocess{});
+auto       target_kernels = common::Synchronized<targeted_kernels_map_t>{};
 std::mutex att_shader_data;
 
 thread_local auto thread_dispatch_rename      = as_pointer<kernel_rename_stack_t>();
@@ -239,13 +238,13 @@ add_kernel_rename_and_stream_display_pairs(kernel_rename_and_stream_display_pair
 }
 
 bool
-add_kernel_target(uint64_t _kern_id, const std::unordered_set<uint32_t>& range)
+add_kernel_target(uint64_t _kern_id, const std::unordered_set<size_t>& range)
 {
     return target_kernels
         .wlock(
-            [](targeted_kernels_map_t&             _targets_v,
-               uint64_t                            _kern_id_v,
-               const std::unordered_set<uint32_t>& _range) {
+            [](targeted_kernels_map_t&           _targets_v,
+               uint64_t                          _kern_id_v,
+               const std::unordered_set<size_t>& _range) {
                 return _targets_v.emplace(_kern_id_v, _range);
             },
             _kern_id,
@@ -254,10 +253,11 @@ add_kernel_target(uint64_t _kern_id, const std::unordered_set<uint32_t>& range)
 }
 
 bool
-is_targeted_kernel(uint64_t _kern_id)
+is_targeted_kernel(uint64_t                                        _kern_id,
+                   common::Synchronized<kernel_iteration_t, true>& _kernel_iteration)
 {
-    const std::unordered_set<uint32_t>* range = target_kernels.rlock(
-        [](const auto& _targets_v, uint64_t _kern_id_v) -> const std::unordered_set<uint32_t>* {
+    const std::unordered_set<size_t>* range = target_kernels.rlock(
+        [](const auto& _targets_v, uint64_t _kern_id_v) -> const std::unordered_set<size_t>* {
             if(_targets_v.find(_kern_id_v) != _targets_v.end()) return &_targets_v.at(_kern_id_v);
             return nullptr;
         },
@@ -265,21 +265,28 @@ is_targeted_kernel(uint64_t _kern_id)
 
     if(range)
     {
-        return kernel_iteration.rlock(
-            [](const auto&                         _kernel_iter,
-               uint64_t                            _kernel_id,
-               const std::unordered_set<uint32_t>& _range) {
-                auto itr = _kernel_iter.at(_kernel_id);
+        _kernel_iteration.wlock(
+            [](auto& _kernel_iter, rocprofiler_kernel_id_t _kernel_id) {
+                auto itr = _kernel_iter.find(_kernel_id);
+                if(itr == _kernel_iter.end())
+                    _kernel_iter.emplace(_kernel_id, 1);
+                else
+                    itr->second++;
+            },
+            _kern_id);
 
+        return _kernel_iteration.rlock(
+            [](const auto&                       _kernel_iter,
+               uint64_t                          _kernel_id,
+               const std::unordered_set<size_t>& _range) {
+                auto itr = _kernel_iter.at(_kernel_id);
                 // If the iteration range is not given then all iterations of the kernel is profiled
                 if(_range.empty())
                 {
                     if(!tool::get_config().advanced_thread_trace)
                         return true;
-                    else
-                    {
-                        if(itr == 1) return true;
-                    }
+                    else if(itr == 1)
+                        return true;
                 }
                 else if(_range.find(itr) != _range.end())
                     return true;
@@ -1129,32 +1136,33 @@ get_instruction_index(rocprofiler_pc_t pc)
 }  // namespace
 
 std::vector<rocprofiler_att_parameter_t>
-get_att_perfcounter_params(std::vector<rocprofiler::tool::att_perfcounter>& att_perf_counters)
+get_att_perfcounter_params(rocprofiler_agent_id_t                           agent,
+                           std::vector<rocprofiler::tool::att_perfcounter>& att_perf_counters)
 {
-    std::vector<rocprofiler_att_parameter_t> _data;
+    std::vector<rocprofiler_att_parameter_t> _data{};
     if(att_perf_counters.empty()) return _data;
 
-    static const auto gpu_agents              = get_gpu_agents();
-    static const auto gpu_agents_counter_info = get_agent_counter_info();
+    static const auto agent_counter_info = get_agent_counter_info();
 
-    for(const auto& [agent_, tool_counter_info_] : gpu_agents_counter_info)
+    for(const auto& att_perf_counter : att_perf_counters)
     {
-        for(const auto& counter_info_ : tool_counter_info_)
-        {
-            if(std::string_view(counter_info_.block) != "SQ") continue;
+        bool counter_found = false;
 
-            for(const auto& att_perf_counter : att_perf_counters)
-            {
-                if(std::string_view(counter_info_.name) == att_perf_counter.counter_name)
-                {
-                    auto param       = rocprofiler_att_parameter_t{};
-                    param.type       = ROCPROFILER_ATT_PARAMETER_PERFCOUNTER,
-                    param.counter_id = counter_info_.id,
-                    param.simd_mask  = att_perf_counter.simd_mask;
-                    _data.emplace_back(param);
-                }
-            }
+        for(const auto& counter_info_ : agent_counter_info.at(agent))
+        {
+            if(std::string_view(counter_info_.name) != att_perf_counter.counter_name) continue;
+
+            auto param       = rocprofiler_att_parameter_t{};
+            param.type       = ROCPROFILER_ATT_PARAMETER_PERFCOUNTER;
+            param.counter_id = counter_info_.id;
+            param.simd_mask  = att_perf_counter.simd_mask;
+            _data.emplace_back(param);
+            counter_found = true;
+            break;
         }
+
+        ROCP_WARNING_IF(!counter_found)
+            << "Agent " << agent.handle << " counter not found: " << att_perf_counter.counter_name;
     }
 
     return _data;
@@ -1232,23 +1240,12 @@ att_dispatch_callback(rocprofiler_agent_id_t /* agent_id  */,
                       void* /*userdata_config*/,
                       rocprofiler_user_data_t* userdata_shader)
 {
-    userdata_shader->value = dispatch_id;
-    kernel_iteration.wlock(
-        [](auto& _kernel_iter, rocprofiler_kernel_id_t _kernel_id) {
-            auto itr = _kernel_iter.find(_kernel_id);
-            if(itr == _kernel_iter.end())
-                _kernel_iter.emplace(_kernel_id, 1);
-            else
-            {
-                itr->second++;
-            }
-        },
-        kernel_id);
+    static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
 
-    if(is_targeted_kernel(kernel_id))
-    {
+    userdata_shader->value = dispatch_id;
+
+    if(is_targeted_kernel(kernel_id, kernel_iteration))
         return ROCPROFILER_ATT_CONTROL_START_AND_STOP;
-    }
     return ROCPROFILER_ATT_CONTROL_NONE;
 }
 
@@ -1258,22 +1255,12 @@ dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                   rocprofiler_user_data_t*                     user_data,
                   void* /*callback_data_args*/)
 {
+    static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
+
     auto kernel_id = dispatch_data.dispatch_info.kernel_id;
     auto agent_id  = dispatch_data.dispatch_info.agent_id;
 
-    kernel_iteration.wlock(
-        [](auto& _kernel_iter, rocprofiler_kernel_id_t _kernel_id) {
-            auto itr = _kernel_iter.find(_kernel_id);
-            if(itr == _kernel_iter.end())
-                _kernel_iter.emplace(_kernel_id, 1);
-            else
-            {
-                itr->second++;
-            }
-        },
-        kernel_id);
-
-    if(!is_targeted_kernel(kernel_id))
+    if(!is_targeted_kernel(kernel_id, kernel_iteration))
     {
         return;
     }
@@ -1555,34 +1542,50 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     if(tool::get_config().advanced_thread_trace)
     {
-        auto     parameters        = std::vector<rocprofiler_att_parameter_t>{};
+        auto     global_parameters = std::vector<rocprofiler_att_parameter_t>{};
         uint64_t target_cu         = tool::get_config().att_param_target_cu;
         uint64_t simd_select       = tool::get_config().att_param_simd_select;
         uint64_t buffer_sz         = tool::get_config().att_param_buffer_size;
         uint64_t shader_mask       = tool::get_config().att_param_shader_engine_mask;
+        uint64_t perfcounter_ctrl  = tool::get_config().att_param_perf_ctrl;
         auto&    att_perf          = tool::get_config().att_param_perfcounters;
         bool     att_serialize_all = tool::get_config().att_serialize_all;
-        auto     att_perf_params   = get_att_perfcounter_params(att_perf);
-        parameters.insert(parameters.end(), att_perf_params.begin(), att_perf_params.end());
 
-        // TODO: att params could be different for different devices. How to support?
-        // Input file schema might also need to change to support multiple ATT params
-
-        parameters.push_back({ROCPROFILER_ATT_PARAMETER_TARGET_CU, {target_cu}});
-        parameters.push_back({ROCPROFILER_ATT_PARAMETER_SIMD_SELECT, {simd_select}});
-        parameters.push_back({ROCPROFILER_ATT_PARAMETER_BUFFER_SIZE, {buffer_sz}});
-        parameters.push_back({ROCPROFILER_ATT_PARAMETER_SHADER_ENGINE_MASK, {shader_mask}});
-        parameters.push_back(
+        global_parameters.push_back({ROCPROFILER_ATT_PARAMETER_TARGET_CU, {target_cu}});
+        global_parameters.push_back({ROCPROFILER_ATT_PARAMETER_SIMD_SELECT, {simd_select}});
+        global_parameters.push_back({ROCPROFILER_ATT_PARAMETER_BUFFER_SIZE, {buffer_sz}});
+        global_parameters.push_back({ROCPROFILER_ATT_PARAMETER_SHADER_ENGINE_MASK, {shader_mask}});
+        global_parameters.push_back(
             {ROCPROFILER_ATT_PARAMETER_SERIALIZE_ALL, {static_cast<uint64_t>(att_serialize_all)}});
 
-        ROCPROFILER_CALL(
-            rocprofiler_configure_dispatch_thread_trace_service(get_client_ctx(),
-                                                                parameters.data(),
-                                                                parameters.size(),
-                                                                att_dispatch_callback,
-                                                                att_shader_data_callback,
-                                                                tool_data),
-            "thread trace service configure");
+        if(perfcounter_ctrl != 0 && !att_perf.empty())
+        {
+            global_parameters.push_back(
+                {ROCPROFILER_ATT_PARAMETER_PERFCOUNTERS_CTRL, {perfcounter_ctrl}});
+        }
+        else if(perfcounter_ctrl != 0 || !att_perf.empty())
+        {
+            ROCP_FATAL << "ATT Perf requires setting both perfcounter_ctrl and perfcounter list!";
+        }
+
+        for(auto& [id, agent] : tool_metadata->agents_map)
+        {
+            if(agent.type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+
+            auto agent_params = global_parameters;
+            for(auto& counter : get_att_perfcounter_params(id, att_perf))
+                agent_params.push_back(counter);
+
+            ROCPROFILER_CALL(
+                rocprofiler_configure_dispatch_thread_trace_service(get_client_ctx(),
+                                                                    id,
+                                                                    agent_params.data(),
+                                                                    agent_params.size(),
+                                                                    att_dispatch_callback,
+                                                                    att_shader_data_callback,
+                                                                    tool_data),
+                "thread trace service configure");
+        }
     }
 
     if(tool::get_config().hip_runtime_api_trace || tool::get_config().hip_compiler_api_trace)
@@ -1933,40 +1936,6 @@ tool_fini(void* /*tool_data*/)
         tool::generate_csv(tool::get_config(), *tool_metadata, contributions);
     }
 
-    if(tool::get_config().advanced_thread_trace)
-    {
-        const std::unordered_map<std::string_view, rocprofiler::att_wrapper::tool_att_capability_t>
-            tool_att_capability_map = {
-                {"testing", rocprofiler::att_wrapper::ATT_CAPABILITIES_TESTING},
-                {"summary", rocprofiler::att_wrapper::ATT_CAPABILITIES_SUMMARY},
-                {"trace", rocprofiler::att_wrapper::ATT_CAPABILITIES_TRACE},
-                {"debug", rocprofiler::att_wrapper::ATT_CAPABILITIES_DEBUG}};
-
-        ROCP_FATAL_IF(tool::get_config().att_capability.empty())
-            << "Provide the decoder parser method as input";
-
-        auto att_capability_value = tool_att_capability_map.at(tool::get_config().att_capability);
-        auto decoder              = rocprofiler::att_wrapper::ATTDecoder(att_capability_value);
-        ROCP_FATAL_IF(!decoder.valid()) << "Decoder library not found at ROCPROF_ATT_LIBRARY_PATH";
-        auto codeobj     = tool_metadata->get_code_object_load_info();
-        auto output_path = tool::format_path(tool::get_config().output_path);
-        for(auto& [dispatch_id, att_filename_data] : tool_metadata->att_filenames)
-        {
-            std::string formats = "json,csv";
-            // if(tool::get_config().json_output) formats += "json,";
-            // if(tool::get_config().csv_output) formats += "csv,";
-
-            std::stringstream ui_name;
-            ui_name << fmt::format("ui_output_agent_{}_dispatch_{}",
-                                   std::to_string(att_filename_data.first.handle),
-                                   dispatch_id);
-            auto        out_path = fmt::format("{}/{}", output_path, ui_name.str());
-            std::string in_path  = ".";
-
-            decoder.parse(in_path, out_path, att_filename_data.second, codeobj, formats);
-        }
-    }
-
     if(tool::get_config().json_output && num_output > 0)
     {
         auto json_ar = tool::open_json(tool::get_config());
@@ -2044,6 +2013,51 @@ tool_fini(void* /*tool_data*/)
     {
         tool::generate_stats(tool::get_config(), *tool_metadata, contributions);
     }
+
+    if(tool::get_config().advanced_thread_trace)
+    {
+        const std::unordered_map<std::string_view, rocprofiler::att_wrapper::tool_att_capability_t>
+            tool_att_capability_map = {
+                {"testing1", rocprofiler::att_wrapper::ATT_CAPABILITIES_TESTING1},
+                {"testing2", rocprofiler::att_wrapper::ATT_CAPABILITIES_TESTING2},
+                {"trace", rocprofiler::att_wrapper::ATT_CAPABILITIES_TRACE},
+                {"debug", rocprofiler::att_wrapper::ATT_CAPABILITIES_DEBUG}};
+
+        ROCP_FATAL_IF(tool::get_config().att_capability.empty())
+            << "Provide the decoder parser method as input";
+
+        auto att_capability_value = tool_att_capability_map.at(tool::get_config().att_capability);
+        auto decoder              = rocprofiler::att_wrapper::ATTDecoder(att_capability_value);
+        ROCP_FATAL_IF(!decoder.valid()) << "Decoder library not found at ROCPROF_ATT_LIBRARY_PATH";
+        auto codeobj     = tool_metadata->get_code_object_load_info();
+        auto output_path = tool::format_path(tool::get_config().output_path);
+
+        std::vector<std::string> perf{};
+        for(auto& counter : tool::get_config().att_param_perfcounters)
+        {
+            std::stringstream ss;
+            ss << counter.counter_name;
+
+            if(counter.simd_mask != 0xF) ss << ':' << std::hex << counter.simd_mask;
+
+            perf.emplace_back(ss.str());
+        }
+
+        for(auto& [dispatch_id, att_filename_data] : tool_metadata->att_filenames)
+        {
+            std::string formats = "json,csv";
+
+            auto ui_name = std::stringstream{};
+            ui_name << fmt::format("ui_output_agent_{}_dispatch_{}",
+                                   std::to_string(att_filename_data.first.handle),
+                                   dispatch_id);
+            auto out_path = fmt::format("{}/{}", output_path, ui_name.str());
+            auto in_path  = std::string(".");
+
+            decoder.parse(in_path, out_path, att_filename_data.second, codeobj, perf, formats);
+        }
+    }
+
     auto destroy_output = [](auto& _buffered_output_v) { _buffered_output_v.destroy(); };
 
     destroy_output(kernel_dispatch_with_stream_output);

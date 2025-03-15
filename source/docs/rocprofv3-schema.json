@@ -569,22 +569,27 @@
                                 "description": "Comments matching assembly instructions from pc_sample_instructions array. If debug symbols are available, comments provide instructions to source-line mapping. Otherwise, a comment is an empty string."
                             },
                             "att_filenames" : {
-                                "type": "object",
-                                "properties": {
-                                    "key": {
-                                        "type": "integer",
-                                        "description": "Dispatch id."
-                                    },
-                                    "value": {
-                                        "type": "array",
-                                        "description": "An array of ATT filenames."
-                                    }
-
+                                "type": "array",
+                                "items": {
+                                    "type": "string",
+                                    "description": "Filename of saved .att data in the form name_shader_engine_seId_dispatchId.att"
                                 }
                             },
                             "code_object_snapshot_filenames": {
                                 "type": "array",
-                                "description": "Code object snapshot filename"
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "key": {
+                                            "type": "integer",
+                                            "description": "Code object load id."
+                                        },
+                                        "value": {
+                                            "type": "string",
+                                            "description": "Saved code object filename"
+                                        }
+                                    }
+                                }
                             }
                         }
                     },

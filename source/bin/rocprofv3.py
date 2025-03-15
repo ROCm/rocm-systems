@@ -90,7 +90,7 @@ def strtobool(val):
 
 def search_path(path_list):
     supported_option = []
-    lib_att_pattern = r"libatt_decoder_(trace|summary|debug|testing)\.so"
+    lib_att_pattern = r"libatt_decoder_(trace|debug|testing1|testing2)\.so"
     file_list = []
 
     for path in path_list:
@@ -100,7 +100,7 @@ def search_path(path_list):
         for itr in file_list:
             _match = re.match(lib_att_pattern, itr)
             if _match:
-                lst = re.findall("trace|debug|summary|testing", itr)
+                lst = re.findall("trace|debug|testing1|testing2", itr)
                 supported_option.extend(lst)
     return set(supported_option)
 
@@ -680,6 +680,20 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
             ),
             help="Select ATT Parse method from the choices",
             choices=set(choice_list),
+        )
+
+        att_options.add_argument(
+            "--att-perfcounters",
+            help="Set performance counters, and optionally their mask",
+            default=None,
+            type=str.upper,
+        )
+
+        att_options.add_argument(
+            "--att-perfcounter-ctrl",
+            help="Integer in [0,32] range specifying collection period.",
+            default=None,
+            type=int,
         )
 
         add_parser_bool_argument(
@@ -1305,15 +1319,13 @@ def run(app_args, args, **kwargs):
                     f"{type(num_str)} is not supported. {num_str} should be of type integer or string."
                 )
 
-        if args.pmc or (
+        if (
             args.pc_sampling_beta_enabled
             or args.pc_sampling_unit
             or args.pc_sampling_method
             or args.pc_sampling_interval
         ):
-            fatal_error(
-                "Advanced thread trace cannot be enabled with counter collection or pc sampling"
-            )
+            fatal_error("Advanced thread trace cannot be enabled with pc sampling")
 
         if not args.att_parse:
             fatal_error("provide the parser choice")
@@ -1358,12 +1370,24 @@ def run(app_args, args, **kwargs):
                 ":".join(args.att_library_path),
                 overwrite=True,
             )
-        if args.att_percounters:
-            update_env(
-                "ROCPROF_ATT_PARAM_PERFCOUNTERS",
-                " ".join(args.att_perfcounters),
-                overwrite=True,
-            )
+        if args.att_perfcounters:
+            if args.pmc:
+                fatal_error("ATT perfcounters cannot be enabled with PMC")
+            else:
+                update_env(
+                    "ROCPROF_ATT_PARAM_PERFCOUNTERS",
+                    args.att_perfcounters,
+                    overwrite=True,
+                )
+        if args.att_perfcounter_ctrl:
+            if args.pmc:
+                fatal_error("ATT perfcounters cannot be enabled with PMC")
+            else:
+                update_env(
+                    "ROCPROF_ATT_PARAM_PERFCOUNTER_CTRL",
+                    args.att_perfcounter_ctrl,
+                    overwrite=True,
+                )
 
     if args.log_level in ("info", "trace", "env"):
         log_config(app_env)

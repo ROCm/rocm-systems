@@ -73,14 +73,36 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* tool_data)
     std::vector<rocprofiler_att_parameter_t> params{};
     params.push_back({ROCPROFILER_ATT_PARAMETER_SERIALIZE_ALL, 1});
 
+    std::vector<rocprofiler_agent_id_t> agents{};
+
     ROCPROFILER_CALL(
-        rocprofiler_configure_dispatch_thread_trace_service(client_ctx,
-                                                            params.data(),
-                                                            params.size(),
-                                                            dispatch_callback,
-                                                            Callbacks::shader_data_callback,
-                                                            tool_data),
-        "thread trace service configure");
+        rocprofiler_query_available_agents(
+            ROCPROFILER_AGENT_INFO_VERSION_0,
+            [](rocprofiler_agent_version_t, const void** _agents, size_t _num_agents, void* _data) {
+                auto* agent_v = static_cast<std::vector<rocprofiler_agent_id_t>*>(_data);
+                for(size_t i = 0; i < _num_agents; ++i)
+                {
+                    auto* agent = static_cast<const rocprofiler_agent_v0_t*>(_agents[i]);
+                    if(agent->type == ROCPROFILER_AGENT_TYPE_GPU) agent_v->emplace_back(agent->id);
+                }
+                return ROCPROFILER_STATUS_SUCCESS;
+            },
+            sizeof(rocprofiler_agent_v0_t),
+            &agents),
+        "Failed to iterate agents");
+
+    for(auto id : agents)
+    {
+        ROCPROFILER_CALL(
+            rocprofiler_configure_dispatch_thread_trace_service(client_ctx,
+                                                                id,
+                                                                params.data(),
+                                                                params.size(),
+                                                                dispatch_callback,
+                                                                Callbacks::shader_data_callback,
+                                                                tool_data),
+            "thread trace service configure");
+    }
 
     int valid_ctx = 0;
     ROCPROFILER_CALL(rocprofiler_context_is_valid(client_ctx, &valid_ctx),

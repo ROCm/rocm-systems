@@ -26,12 +26,14 @@
 #endif
 
 #include "profile_interface.hpp"
+#include "att_decoder.h"
+#include "dl.hpp"
+#include "perfcounter.hpp"
+
 #include <cxxabi.h>
 #include <cstring>
 #include <fstream>
 #include <shared_mutex>
-#include "att_decoder.h"
-#include "dl.hpp"
 
 namespace rocprofiler
 {
@@ -64,11 +66,8 @@ get_trace_data(rocprofiler_att_decoder_record_type_t trace_id,
         auto* infos = (rocprofiler_att_decoder_info_t*) trace_events;
         for(size_t i = 0; i < trace_size; i++)
             ROCP_WARNING << tool.dl->att_info_fn(infos[i]);
-
-        return ROCPROFILER_ATT_DECODER_STATUS_SUCCESS;
     }
-
-    if(trace_id == ROCPROFILER_ATT_DECODER_TYPE_GFXIP)
+    else if(trace_id == ROCPROFILER_ATT_DECODER_TYPE_GFXIP)
     {
         tool.config.filemgr->gfxip = reinterpret_cast<size_t>(trace_events);
     }
@@ -77,6 +76,10 @@ get_trace_data(rocprofiler_att_decoder_record_type_t trace_id,
         for(size_t i = 0; i < trace_size; i++)
             tool.config.occupancy.push_back(
                 reinterpret_cast<const att_occupancy_info_v2_t*>(trace_events)[i]);
+    }
+    else if(trace_id == ROCPROFILER_ATT_DECODER_TYPE_PERFEVENT)
+    {
+        PerfcounterFile(tool.config, reinterpret_cast<att_perfevent_t*>(trace_events), trace_size);
     }
 
     if(trace_id != ROCPROFILER_ATT_DECODER_TYPE_WAVE) return ROCPROFILER_ATT_DECODER_STATUS_SUCCESS;

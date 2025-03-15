@@ -34,7 +34,7 @@ using ClientID   = int64_t;
 using inst_pkt_t = common::container::
     small_vector<std::pair<std::unique_ptr<rocprofiler::hsa::AQLPacket>, ClientID>, 4>;
 
-std::unique_ptr<rocprofiler::hsa::AQLPacket>
+hsa::Queue::pkt_and_serialize_t
 queue_cb(const context::context*                                         ctx,
          const std::shared_ptr<counter_callback_info>&                   info,
          const hsa::Queue&                                               queue,

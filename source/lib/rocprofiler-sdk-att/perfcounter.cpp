@@ -20,61 +20,43 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#pragma once
+#include "perfcounter.hpp"
+#include "outputfile.hpp"
+#include "wave.hpp"
 
-#include "att_lib_wrapper.hpp"
-
-#include <map>
-#include <vector>
-#include "att_decoder.h"
-#include "util.hpp"
+#include <fstream>
+#include <iostream>
+#include <nlohmann/json.hpp>
+#include <sstream>
 
 namespace rocprofiler
 {
 namespace att_wrapper
 {
-class FilenameMgr
+void
+PerfcounterFile(WaveConfig& config, const att_perfevent_t* events, size_t event_count)
 {
-public:
-    struct Coord
+    nlohmann::json data;
+    for(size_t i = 0; i < event_count; i++)
     {
-        int  se{0};
-        int  sm{0};
-        int  sl{0};
-        int  id{0};
-        bool operator==(const Coord& other) const
-        {
-            return se == other.se && sm == other.sm && sl == other.sl && id == other.id;
-        }
-        bool operator<(const Coord& other) const
-        {
-            if(se != other.se) return se < other.se;
-            if(sm != other.sm) return sm < other.sm;
-            if(sl != other.sl) return sl < other.sl;
-            return id < other.id;
-        }
-    };
-    struct WaveName
-    {
-        std::string name{};
-        size_t      begin{0};
-        size_t      end{0};
-    };
+        const auto& event = events[i];
 
-    FilenameMgr(const Fspath& _dir)
-    : dir(_dir)
-    , filename(_dir / "filenames.json")
-    {}
-    ~FilenameMgr();
+        nlohmann::json json_event;
+        json_event.push_back(event.time);
+        json_event.push_back(event.events0);
+        json_event.push_back(event.events1);
+        json_event.push_back(event.events2);
+        json_event.push_back(event.events3);
+        json_event.push_back(event.CU);
+        json_event.push_back(event.bank);
 
-    void addwave(const Fspath& file, Coord coord, size_t start, size_t end);
+        data.push_back(json_event);
+    }
 
-    Fspath                    dir{};
-    Fspath                    filename{};
-    std::map<Coord, WaveName> streams{};
-    std::vector<std::string>  perfcounters{};
-    int                       gfxip = 9;
-};
+    const nlohmann::json json{{"data", data}};
 
+    std::string filename = "se" + std::to_string(config.shader_engine) + "_perfcounter.json";
+    OutputFile(config.filemgr->dir / filename) << json;
+}
 }  // namespace att_wrapper
 }  // namespace rocprofiler

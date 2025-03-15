@@ -137,6 +137,15 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
         }
     });
 
+    if(queue_info_session.is_serialized)
+    {
+        CHECK_NOTNULL(hsa::get_queue_controller())
+            ->serializer(&queue_info_session.queue)
+            .wlock([&](auto& serializer) {
+                serializer.kernel_completion_signal(queue_info_session.queue);
+            });
+    }
+
     // Delete signals and packets, signal we have completed.
     if(queue_info_session.interrupt_signal.handle != 0u)
     {
@@ -367,24 +376,36 @@ WriteInterceptor(const void* packets,
         // completed_cb_t)
         auto inst_pkt = inst_pkt_t{};
 
+        // True if any service (ATT,SPM,CC) requests this dispatch to be serialized
+        bool bRequest_Serialize = false;
+
         // Signal callbacks that a kernel_pkt is being enqueued
         queue.signal_callback([&](const auto& map) {
             for(const auto& [client_id, cb_pair] : map)
             {
-                if(auto maybe_pkt = cb_pair.first(queue,
-                                                  kernel_pkt,
-                                                  kernel_id,
-                                                  dispatch_id,
-                                                  &user_data,
-                                                  tracing_data_v.external_correlation_ids,
-                                                  corr_id))
-                {
-                    inst_pkt.push_back(std::make_pair(std::move(maybe_pkt), client_id));
-                }
+                auto [packet, bSerial] = cb_pair.first(queue,
+                                                       kernel_pkt,
+                                                       kernel_id,
+                                                       dispatch_id,
+                                                       &user_data,
+                                                       tracing_data_v.external_correlation_ids,
+                                                       corr_id);
+                bRequest_Serialize |= bSerial;
+                if(packet) inst_pkt.push_back(std::make_pair(std::move(packet), client_id));
             }
         });
 
         bool inserted_before = false;
+        if(bRequest_Serialize)
+        {
+            inserted_before = true;
+            CHECK_NOTNULL(hsa::get_queue_controller())
+                ->serializer(&queue)
+                .rlock([&](const auto& serializer) {
+                    for(auto& s_pkt : serializer.kernel_dispatch(queue))
+                        transformed_packets.emplace_back(s_pkt.ext_amd_aql_pm4);
+                });
+        }
         for(const auto& pkt_injection : inst_pkt)
         {
             for(const auto& pkt : pkt_injection.first->before_krn_pkt)
@@ -460,7 +481,8 @@ WriteInterceptor(const void* packets,
                                                      .correlation_id   = corr_id,
                                                      .kernel_pkt       = kernel_pkt,
                                                      .callback_record  = callback_record,
-                                                     .tracing_data     = tracing_data_v};
+                                                     .tracing_data     = tracing_data_v,
+                                                     .is_serialized    = bRequest_Serialize};
 
             auto shared = std::make_shared<Queue::queue_info_session_t>(std::move(info_session));
 
@@ -521,7 +543,8 @@ Queue::Queue(const AgentCache&  agent,
         << "Could not setup intercept profiler";
 
     if(!context::get_registered_contexts([](const context::context* ctx) {
-            return (ctx->counter_collection || ctx->device_counter_collection);
+            return (ctx->counter_collection || ctx->device_counter_collection ||
+                    ctx->dispatch_thread_trace || ctx->device_thread_trace);
         }).empty())
     {
         CHECK(_agent.cpu_pool().handle != 0);
