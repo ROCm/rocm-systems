@@ -168,6 +168,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 ### Added
 
 - Added support for rocJPEG API Tracing
+- Added MI350X/MI355X support
 - Added rocprofiler_create_counter to allow for adding custom derived counters at runtime.
 
 ### Changed

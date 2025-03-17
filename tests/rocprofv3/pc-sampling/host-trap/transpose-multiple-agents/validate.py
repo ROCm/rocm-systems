@@ -39,7 +39,9 @@ def test_multi_agent_support(
 
     mi2xx_mi3xx_agents_df = input_agent_info_csv[
         input_agent_info_csv["Name"].apply(
-            lambda name: name == "gfx90a" or name.startswith("gfx94")
+            lambda name: name == "gfx90a"
+            or name.startswith("gfx94")
+            or name.startswith("gfx95")
         )
     ]
 
