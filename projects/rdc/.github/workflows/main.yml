@@ -112,6 +112,7 @@ jobs:
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
+            -DGRPC_DESIRED_VERSION=1.61.0 \
             -DGRPC_ROOT=/usr/grpc \
             -DBUILD_RUNTIME=ON \
             -DGPU_TARGETS=gfx942 \

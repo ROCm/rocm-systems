@@ -72,7 +72,14 @@ class rdc_field_type_t(c_int):
      STRING = 2
      BLOB = 3
 
+class rdc_metric_type_t(c_int):
+     INVALID = 0
+     GAUGE = 1
+     COUNTER = 2
+     LABEL = 3
+
 class rdc_field_t(c_int):
+
      RDC_FI_INVALID = 0
      RDC_FI_GPU_COUNT = 1
      RDC_FI_DEV_NAME = 2
@@ -197,6 +204,38 @@ class rdc_field_t(c_int):
      RDC_HEALTH_EEPROM_CONFIG_VALID = 3005
      RDC_HEALTH_POWER_THROTTLE_TIME = 3006
      RDC_HEALTH_THERMAL_THROTTLE_TIME = 3007
+
+     _rdc_metric_type_lookup = {
+        RDC_FI_INVALID: rdc_metric_type_t.INVALID,
+        RDC_FI_GPU_COUNT: rdc_metric_type_t.LABEL,
+        RDC_FI_DEV_NAME: rdc_metric_type_t.LABEL,
+        RDC_FI_OAM_ID: rdc_metric_type_t.LABEL,
+        RDC_FI_GPU_MEMORY_TOTAL: rdc_metric_type_t.COUNTER,
+        RDC_FI_ECC_CORRECT_TOTAL: rdc_metric_type_t.COUNTER,
+        RDC_FI_ECC_UNCORRECT_TOTAL: rdc_metric_type_t.COUNTER,
+        RDC_EVNT_NOTIF_VMFAULT: rdc_metric_type_t.COUNTER,
+        RDC_EVNT_NOTIF_THERMAL_THROTTLE: rdc_metric_type_t.COUNTER,
+        RDC_EVNT_NOTIF_PRE_RESET: rdc_metric_type_t.COUNTER,
+        RDC_EVNT_NOTIF_POST_RESET: rdc_metric_type_t.COUNTER,
+        RDC_EVNT_NOTIF_RING_HANG: rdc_metric_type_t.COUNTER,
+     }
+
+     @classmethod
+     def get_rdc_metric_type(cls, rdc_metric_t):
+        if isinstance(rdc_metric_t, str):
+            rdc_metric_t = getattr(cls, rdc_metric_t, None)
+        
+        # If the metric was found, do the lookup, otherwise default GAUGE
+        if rdc_metric_t is not None:
+            return cls._rdc_metric_type_lookup.get(rdc_metric_t, rdc_metric_type_t.GAUGE)
+        return rdc_metric_type_t.GAUGE
+
+     @classmethod
+     def get_field_name(cls, value):
+        for attr_name, attr_value in cls.__dict__.items():
+            if isinstance(attr_value, int) and attr_value == value:
+                return attr_name
+        return "Unknown field value"    
 
 rdc_handle_t = c_void_p
 rdc_gpu_group_t = c_uint32

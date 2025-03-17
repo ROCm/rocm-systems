@@ -1,37 +1,140 @@
 .. meta::
-  :description: documentation of the installation, configuration, and use of the ROCm Data Center tool 
-  :keywords: ROCm Data Center tool, RDC, ROCm, API, reference, data type, support
+  :description: The ROCm Data Center tool (RDC) addresses key infrastructure challenges regarding AMD GPUs in cluster and data center environments and simplifies their administration
+  :keywords: RDC installation, Install RDC, Install ROCm Data Center tool, Building ROCm Data Center, Building RDC
 
 .. _rdc-install:
 
-******************************************
-Installing and running RDC
-******************************************
+******************
+RDC installation
+******************
 
-The ROCm Data Center tool (RDC) is part of the AMD ROCm software and available on the distributions supported by AMD ROCm. For RDC installation from prebuilt packages, follow the instructions in this section.
+RDC is part of the AMD ROCm software and available on the distributions supported by AMD ROCm. This topic provides information required to install RDC from prebuilt packages and source.
 
 Prerequisites
-=============
+==============
 
-The installation dependencies are described in `Dependencies in the README <https://github.com/ROCm/rdc?tab=readme-ov-file#dependencies>`_. To see the list of supported operating systems, refer to `System requirements <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html>`_.  
+To install RDC from source, ensure that your system meets the following requirements:
 
-Install gRPC
-============
+- **Supported platforms:** AMD ROCm-supported platform. See the `list of supported operating systems <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-operating-systems>`_.
 
-To see the instructions for building ``gRPC`` and ``protoc``, refer to `Building gRPC and protoc <https://github.com/ROCm/rdc#building-grpc-and-protoc>`_.
+- **Dependencies:**
+  - CMake >= 3.15
+  - g++ (5.4.0)
+  - gRPC and protoc
+  - libcap-dev
+  - :doc:`AMD ROCm platform <rocm:index>` including:
+    - :doc:`AMDSMI library <amdsmi:index>`
+    - `ROCK kernel driver <https://github.com/ROCm/ROCK-Kernel-Driver>`_
 
-Authentication keys
-===================
+  For building latest documentation:
+  - Doxygen (1.8.11)
+  - LaTeX (pdfTeX 3.14159265-2.6-1.40.16)
 
-RDC can be used with or without authentication. If authentication is required you must configure proper authentication keys as described in *Authentication* in :ref:`rdc-handbook`.
+  .. code-block:: shell
 
-Prebuilt packages
-=================
+    $ sudo apt install libcap-dev
+    $ sudo apt install -y doxygen
 
-RDC is packaged as part of the ROCm software repository. You must install the AMD ROCm software before installing RDC, as described in `ROCm installation <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/>`_.
+Build RDC from source
+======================
 
-To install RDC after installing the ROCm package, use the following instructions.
+The following sections provide steps to build RDC from source.
 
+Build gRPC and Protoc
+----------------------
+
+gRPC and Protoc must be built from source as the prebuilt packages are not available for the same. Here are the steps:
+
+1. Install the required tools:
+
+.. code-block:: shell
+
+    sudo apt-get update
+    sudo apt-get install automake make g++ unzip build-essential autoconf libtool pkg-config libgflags-dev libgtest-dev clang libc++-dev curl
+
+2. Clone and build gRPC:
+
+.. code-block:: shell
+
+    git clone -b v1.61.0 https://github.com/grpc/grpc --depth=1 --shallow-submodules --recurse-submodules
+    cd grpc
+    export GRPC_ROOT=/opt/grpc
+    cmake -B build \
+        -DgRPC_INSTALL=ON \
+        -DgRPC_BUILD_TESTS=OFF \
+        -DBUILD_SHARED_LIBS=ON \
+        -DCMAKE_INSTALL_PREFIX="$GRPC_ROOT" \
+        -DCMAKE_INSTALL_LIBDIR=lib \
+        -DCMAKE_BUILD_TYPE=Release
+    make -C build -j $(nproc)
+    sudo make -C build install
+    echo "$GRPC_ROOT" | sudo tee /etc/ld.so.conf.d/grpc.conf
+    sudo ldconfig
+    cd ..
+
+Build RDC
+-----------
+
+1. Clone the RDC repository:
+
+.. code-block:: shell
+
+    git clone https://github.com/ROCm/rdc
+    cd rdc
+
+2. Configure the build:
+
+.. code-block:: shell
+
+    cmake -B build -DGRPC_ROOT="$GRPC_ROOT"
+
+3. You can also enable the following optional features:
+
+   - ROCm profiler:
+
+     .. code-block:: shell
+
+        cmake -B build -DBUILD_PROFILER=ON
+
+   - ROCm Validation Suite (RVS):
+
+     .. code-block:: shell
+
+        cmake -B build -DBUILD_RVS=ON
+
+   - RDC library only (without ``rdci`` and ``rdcd``):
+
+     .. code-block:: shell
+
+        cmake -B build -DBUILD_STANDALONE=OFF
+
+   - RDC library without ROCm runtime:
+
+     .. code-block:: shell
+
+        cmake -B build -DBUILD_RUNTIME=OFF
+
+4. Build and install:
+
+.. code-block:: shell
+
+    make -C build -j $(nproc)
+    sudo make -C build install
+
+5. Update system library path:
+
+.. code-block:: shell
+
+    export RDC_LIB_DIR=/opt/rocm/lib/rdc
+    export GRPC_LIB_DIR="/opt/grpc/lib"
+    echo "${RDC_LIB_DIR}" | sudo tee /etc/ld.so.conf.d/x86_64-librdc_client.conf
+    echo "${GRPC_LIB_DIR}" | sudo tee -a /etc/ld.so.conf.d/x86_64-librdc_client.conf
+    sudo ldconfig
+
+Installing RDC using prebuilt packages
+=======================================
+
+RDC is packaged as part of the ROCm software repository. To install RDC using prebuilt package, first :doc:`install the AMD ROCm software <rocm-install-on-linux:index>`, then use the following instructions:
 
 .. tab-set::
 
@@ -52,140 +155,3 @@ To install RDC after installing the ROCm package, use the following instructions
             $ sudo zypper install rdc
             # or, to install a specific version
             $ sudo zypper install rdc<x.y.z>
-
-
-Components
-==========
-
-The components of the RDC tool are as shown below:
-
-.. figure:: ../data/install_components.png
-
-    High-level diagram of RDC components
-
-
-RDC (API) library
------------------
-
-This library is the central piece, which interacts with different modules and provides all the features described. This shared library provides C API and Python bindings so that third-party tools should be able to use it directly if required.
-
-RDC daemon (``rdcd``)
----------------------
-
-The ``rdcd`` daemon records telemetry information from GPUs. It also provides an interface to RDC command-line tool (``rdci``) running locally or remotely. It relies on the above RDC Library for all the core features.
-
-RDC command-line tool (``rdci``)
---------------------------------
-
-A command-line tool to invoke all the features of the RDC tool. This CLI can be run locally or remotely.
-
-AMDSMI library
---------------
-
-A stateless system management library that provides low-level interfaces to access GPU information
-
-Starting RDC
-============
-
-The RDC tool can be run in the following two modes. The feature set is similar in both the cases. You have the flexibility to choose the option that best fits your environment.
-
-* :ref:`standalone`
-* :ref:`embedded`
-
-The capability in each mode depends on the privileges you have for starting the RDC tool. A normal user has access only to monitor (GPU telemetry) capabilities. A privileged user can run the tool with full capability. In the full capability mode, GPU configuration features can be invoked. This may or may not affect all the users and processes sharing the GPU.
-
-.. _`standalone`:
-
-Standalone mode
----------------
-
-This is the preferred mode of operation, as it does not have any external dependencies. To start RDC in standalone mode, RDC Server Daemon (``rdcd``) must run on each compute node. Refer to *Terminology* in :ref:`rdc-use` for more information. You can start ``rdcd`` as a ``systemd`` service or directly from the command-line.
-
-Start the RDC tool using ``systemd``
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-If multiple RDC versions are installed, copy `/opt/rocm-<x.y.z>/libexec/rdc/rdc.service`, which is installed with the desired RDC version, to the ``systemd`` folder. The capability of RDC can be configured by modifying the ``rdc.service`` system configuration file. Use the ``systemctl`` command to start ``rdcd``.
-
-.. code-block:: shell
-  
-    $ systemctl start rdc
-
-
-By default, ``rdcd`` starts with full capability. To change to monitor only, comment out the following two lines:
-
-.. code-block:: shell
-  
-    $ sudo vi /lib/systemd/system/rdc.service
-
-    # CapabilityBoundingSet=CAP_DAC_OVERRIDE
-    # AmbientCapabilities=CAP_DAC_OVERRIDE
-
- 
-.. note::
-  ``rdcd`` can be started by using the ``systemctl`` command.
-
-.. code-block:: shell
-  
-    $ systemctl start rdc
-
-
-If the GPU reset fails, restart the server. Note that restarting the server also initiates ``rdcd``. You may then encounter the following two scenarios:
-
-* ``rdcd`` returns the correct GPU information to ``rdci``
-* ``rdcd`` returns the "No GPUs found on the system" error to ``rdci``. To resolve this error, restart ``rdcd`` with the following instruction: 
-
-.. code-block:: shell
-  
-    $ sudo systemctl restart rdcd
-
-
-Start the RDC tool from the command-line
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-While ``systemctl`` is the preferred way to start ``rdcd``, you can also start directly from the command-line. The installation scripts create a default user - ``rdc``. Users have the option to edit the profile file (``rdc.service`` installed at ``/lib/systemd/system``) and change these lines accordingly:
-
-.. code-block:: shell
-  
-    [Service]
-    User=rdc
-    Group=rdc
-
-From the command-line, start ``rdcd`` as a user such as ``rdc``, or start it as ``root``:
-
-.. code-block:: shell
-  
-    #Start as user rdc
-    $ sudo -u rdc rdcd
- 
-    # Start as root
-    $ sudo rdcd
-
-
-In this use case, the ``rdc.service`` file mentioned in the previous section is not involved. Here, the capability of RDC is determined by the privilege of the user starting ``rdcd``. If ``rdcd`` is running under a normal user account it has the monitor-only capability. If ``rdcd`` is running as ``root`` then it has the full capability.
-
-.. note::
-  If a user other than ``rdc`` or ``root`` starts the ``rdcd`` daemon, the file ownership of the SSL keys mentioned in the Authentication section must be modified to allow read and write access.
-
-Troubleshoot ``rdcd``
----------------------
-
-When ``rdcd`` is started using ``systemctl``, the logs can be viewed using the following command:
-
-.. code-block:: shell
-  
-    $ journalctl -u rdc
-
-
-These messages provide useful status and debugging information. The logs can also help debug problems like ``rdcd`` failing to start, communication issues with a client, and others.
-
-.. _`embedded`:
-
-Embedded mode
--------------
-
-The embedded mode is useful if the end user has a monitoring agent running on the compute node. The monitoring agent can directly use the RDC library and will have a finer-grain control on how and when RDC features are invoked. For example, if the monitoring agent has a facility to synchronize across multiple nodes, it can synchronize GPU telemetry across these nodes.
-
-The RDC daemon ``rdcd`` can be used as a reference code for this purpose. The dependency on ``gRPC`` is also eliminated if the RDC library is directly used.
-
-.. caution::
-    RDC command-line ``rdci`` will not function in this mode. Third-party monitoring software is responsible for providing the user interface and remote access/monitoring. 

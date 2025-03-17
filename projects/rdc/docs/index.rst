@@ -1,23 +1,22 @@
 .. meta::
-  :description: documentation of the installation, configuration, and use of the ROCm Data Center tool 
-  :keywords: ROCm Data Center tool, RDC, ROCm, API, reference, data type, support
+  :description: The ROCm Data Center tool (RDC) addresses key infrastructure challenges regarding AMD GPUs in cluster and data center environments and simplifies their administration
+  :keywords: ROCm Data Center tool, RDC, Data Center
 
 .. _index:
 
-******************************************
-ROCm Data Center (RDC) tool documentation
-******************************************
+*************************************
+ROCm Data Center tool documentation
+*************************************
 
-The ROCm Data Center tool (RDC) simplifies the administration of, and addresses key infrastructure challenges in AMD GPUs in cluster and datacenter environments. The main features are of RDC include:
+The ROCm Data Center tool (RDC) addresses key infrastructure challenges regarding AMD GPUs in cluster and data center environments and simplifies their administration.
+Here are the main RDC features:
 
 * GPU telemetry
 * GPU statistics for jobs
 * Integration with third-party tools
 * Open source
 
-You can access the RDC tool on `GitHub repository <https://github.com/ROCm/rdc>`_.
-
-The documentation is structured as follows:
+The code is open and hosted at `<https://github.com/ROCm/rdc>`_.
 
 .. grid:: 2
   :gutter: 3
@@ -25,11 +24,10 @@ The documentation is structured as follows:
   .. grid-item-card:: Install
 
     * :ref:`rdc-install`
-    * :ref:`rdc-handbook`
 
   .. grid-item-card:: How to
 
-    * :ref:`rdc-use`
+    * :ref:`using-RDC`
     * :ref:`rdc-features`
     * :ref:`rdc-3rd-party`
 
@@ -38,7 +36,10 @@ The documentation is structured as follows:
     * :ref:`api-intro`
     * :ref:`rdc-ref`
 
- 
+  .. grid-item-card:: Tutorial
+
+    * :ref:`job-stats-sample`
+
 To contribute to the documentation, refer to
 `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
 

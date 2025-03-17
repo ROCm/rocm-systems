@@ -9,9 +9,8 @@ The ROCm™ Data Center Tool (RDC) simplifies administration and addresses key i
 - **Integration with Third-Party Tools** 🔗
 - **Open Source** 🛠️
 
-For comprehensive documentation and to get started with RDC using pre-built packages, refer to the [**ROCm Data Center Tool User Guide**](https://rocm.docs.amd.com/projects/rdc/en/latest/).
-
----
+> [!NOTE]
+> The published documentation is available at [ROCm Data Center Tool](https://rocm.docs.amd.com/projects/rdc/en/latest/index.html) in an organized, easy-to-read format, with search and a table of contents. The documentation source files reside in the `rdc/docs` folder of this repository. As with all ROCm projects, the documentation is open source. For more information on contributing to the documentation, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
 
 ## 🛠️ Installation Guide
 
@@ -146,7 +145,7 @@ If you prefer to build RDC from source, follow the steps below.
 2. **Clone and Build gRPC:**
 
     ```bash
-    git clone -b v1.61.0 https://github.com/grpc/grpc --depth=1 --shallow-submodules --recurse-submodules
+    git clone -b v1.67.1 https://github.com/grpc/grpc --depth=1 --shallow-submodules --recurse-submodules
     cd grpc
     export GRPC_ROOT=/opt/grpc
     cmake -B build \
