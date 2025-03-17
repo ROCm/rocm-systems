@@ -1073,7 +1073,6 @@ def checkIfSecondaryDie(device):
         return True
     return False
 
-
 def resetClocks(deviceList):
     """ Reset clocks to default
 
