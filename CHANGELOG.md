@@ -170,6 +170,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Added support for rocJPEG API Tracing
 - Added MI350X/MI355X support
 - Added rocprofiler_create_counter to allow for adding custom derived counters at runtime.
+- Added support for iteration based counter multiplexing to rocprofv3 (see documentation)
 
 ### Changed
 
@@ -182,15 +183,4 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Removed
 
-## ROCprofiler-SDK 0.7.0 for ROCm release 6.5
-
-### Added
-
-- Added support for rocJPEG API Tracing.
-- Added support for iteration based counter multiplexing to rocprofv3 (see documentation)
-
-### Changed
-
-### Resolved issues
-
-### Removed
+- Support of gfx940 and gfx941 targets from compilation
