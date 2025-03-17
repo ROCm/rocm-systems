@@ -432,33 +432,33 @@ rdc_status_t RdcMetricFetcherImpl::bulk_fetch_smi_fields(
 constexpr double kGig = 1000000000.0;
 
 static uint64_t sum_xgmi_read(const amdsmi_gpu_metrics_t& gpu_metrics) {
-    uint64_t total = 0;
-    const auto not_supported_metrics_data = std::numeric_limits<uint64_t>::max();
-    for (int i = 0; i < AMDSMI_MAX_NUM_XGMI_LINKS; ++i) {
-        if (gpu_metrics.xgmi_read_data_acc[i] == not_supported_metrics_data){
-          continue;
-        }
-        total += gpu_metrics.xgmi_read_data_acc[i];
+  uint64_t total = 0;
+  const auto not_supported_metrics_data = std::numeric_limits<uint64_t>::max();
+  for (int i = 0; i < AMDSMI_MAX_NUM_XGMI_LINKS; ++i) {
+    if (gpu_metrics.xgmi_read_data_acc[i] == not_supported_metrics_data) {
+      continue;
     }
-    if (total == 0){
-      return not_supported_metrics_data;
-    }
-    return total;
+    total += gpu_metrics.xgmi_read_data_acc[i];
+  }
+  if (total == 0) {
+    return not_supported_metrics_data;
+  }
+  return total;
 }
 
 static uint64_t sum_xgmi_write(const amdsmi_gpu_metrics_t& gpu_metrics) {
-    uint64_t total = 0;
-    const auto not_supported_metrics_data = std::numeric_limits<uint64_t>::max();
-    for (int i = 0; i < AMDSMI_MAX_NUM_XGMI_LINKS; ++i) {
-        if (gpu_metrics.xgmi_write_data_acc[i] == not_supported_metrics_data){
-          continue;
-        }
-        total += gpu_metrics.xgmi_write_data_acc[i];
+  uint64_t total = 0;
+  const auto not_supported_metrics_data = std::numeric_limits<uint64_t>::max();
+  for (int i = 0; i < AMDSMI_MAX_NUM_XGMI_LINKS; ++i) {
+    if (gpu_metrics.xgmi_write_data_acc[i] == not_supported_metrics_data) {
+      continue;
     }
-    if (total == 0){
-      return not_supported_metrics_data;
-    }
-    return total;
+    total += gpu_metrics.xgmi_write_data_acc[i];
+  }
+  if (total == 0) {
+    return not_supported_metrics_data;
+  }
+  return total;
 }
 
 rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field_t field_id,
@@ -659,6 +659,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
       break;
     }
     case RDC_FI_DEV_NAME: {
+      // source values from asic_info
       amdsmi_asic_info_t asic_info;
       value->status = amdsmi_get_gpu_asic_info(processor_handle, &asic_info);
       value->type = STRING;
@@ -700,17 +701,44 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
         value->value.l_int = num_pages;
       }
       break;
-    case RDC_FI_OAM_ID: {
+    case RDC_FI_OAM_ID:
+    case RDC_FI_DEV_ID:
+    case RDC_FI_REV_ID:
+    case RDC_FI_TARGET_GRAPHICS_VERSION:
+    case RDC_FI_NUM_OF_COMPUTE_UNITS: {
       amdsmi_asic_info_t asic_info;
       value->status = amdsmi_get_gpu_asic_info(processor_handle, &asic_info);
       value->type = INTEGER;
-      if (value->status == AMDSMI_STATUS_SUCCESS) {
+      if (value->status != AMDSMI_STATUS_SUCCESS) {
+        break;
+      }
+      if (field_id == RDC_FI_OAM_ID) {
         // 0xFFFF means not supported for OAM ID
         if (asic_info.oam_id == 0xFFFF) {
           value->status = AMDSMI_STATUS_NOT_SUPPORTED;
         } else {
           value->value.l_int = asic_info.oam_id;
         }
+      } else if (field_id == RDC_FI_DEV_ID) {
+        value->value.l_int = asic_info.device_id;
+      } else if (field_id == RDC_FI_REV_ID) {
+        value->value.l_int = asic_info.rev_id;
+      } else if (field_id == RDC_FI_TARGET_GRAPHICS_VERSION) {
+        if (asic_info.target_graphics_version == 0xFFFFFFFFFFFFFFFF) {
+          value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+        } else {
+          value->value.l_int = asic_info.target_graphics_version;
+        }
+      } else if (field_id == RDC_FI_NUM_OF_COMPUTE_UNITS) {
+        if (asic_info.num_of_compute_units == 0xFFFFFFFF) {
+          value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+        } else {
+          value->value.l_int = asic_info.num_of_compute_units;
+        }
+      } else {
+        // this should never happen as all fields are handled above
+        RDC_LOG(RDC_ERROR, "Unexpected field id: " << field_id);
+        value->status = AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS;
       }
       break;
     }
@@ -726,7 +754,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
       uint64_t timestamp;
 
       value->status = amdsmi_get_utilization_count(processor_handle, utilization_counters,
-                                                  kUTILIZATION_COUNTERS, &timestamp);
+                                                   kUTILIZATION_COUNTERS, &timestamp);
       value->type = INTEGER;
       if (value->status == AMDSMI_STATUS_SUCCESS) {
         value->value.l_int = static_cast<int64_t>(utilization_counters[0].value);
@@ -858,32 +886,29 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
       uint32_t num_pages = 0;
       ret = amdsmi_get_gpu_bad_page_info(processor_handle, &num_pages, nullptr);
       if (AMDSMI_STATUS_SUCCESS == ret) {
-          if (RDC_HEALTH_RETIRED_PAGE_NUM == field_id) {
-            value->status = Smi2RdcError(ret);
-            value->type = INTEGER;
-            value->value.l_int = static_cast<int64_t>(num_pages);
-            break;
-          }
+        if (RDC_HEALTH_RETIRED_PAGE_NUM == field_id) {
+          value->status = Smi2RdcError(ret);
+          value->type = INTEGER;
+          value->value.l_int = static_cast<int64_t>(num_pages);
+          break;
+        }
 
-          if ((0 < num_pages) &&
-              (RDC_HEALTH_PENDING_PAGE_NUM == field_id)) {
-            std::vector<amdsmi_retired_page_record_t> bad_page_info(num_pages);
-            ret = amdsmi_get_gpu_bad_page_info(processor_handle, &num_pages,
-                                               bad_page_info.data());
-            value->status = Smi2RdcError(ret);
-            value->type = INTEGER;
-            if (AMDSMI_STATUS_SUCCESS == ret) {
-              uint64_t pending_page_num = 0;
-              for (uint32_t i=0; i < num_pages; i++) {
-                if (AMDSMI_MEM_PAGE_STATUS_PENDING == bad_page_info[i].status)
-                    pending_page_num++;
-              }
-
-              value->value.l_int = static_cast<int64_t>(pending_page_num);
+        if ((0 < num_pages) && (RDC_HEALTH_PENDING_PAGE_NUM == field_id)) {
+          std::vector<amdsmi_retired_page_record_t> bad_page_info(num_pages);
+          ret = amdsmi_get_gpu_bad_page_info(processor_handle, &num_pages, bad_page_info.data());
+          value->status = Smi2RdcError(ret);
+          value->type = INTEGER;
+          if (AMDSMI_STATUS_SUCCESS == ret) {
+            uint64_t pending_page_num = 0;
+            for (uint32_t i = 0; i < num_pages; i++) {
+              if (AMDSMI_MEM_PAGE_STATUS_PENDING == bad_page_info[i].status) pending_page_num++;
             }
+
+            value->value.l_int = static_cast<int64_t>(pending_page_num);
           }
+        }
       } else
-         value->status = Smi2RdcError(ret);
+        value->status = Smi2RdcError(ret);
       break;
     }
 

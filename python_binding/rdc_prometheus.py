@@ -1,8 +1,11 @@
 import argparse
+import os
 from RdcReader import RdcReader
 from RdcUtil import RdcUtil
 from rdc_bootstrap import *
-from prometheus_client import start_http_server, Gauge, REGISTRY, PROCESS_COLLECTOR, PLATFORM_COLLECTOR
+from prometheus_client import start_http_server, Gauge, Counter, Info, REGISTRY, PROCESS_COLLECTOR, PLATFORM_COLLECTOR
+
+os.environ['PROMETHEUS_DISABLE_CREATED_SERIES'] = "True"
 
 default_field_ids = [
         rdc_field_t.RDC_FI_GPU_MEMORY_USAGE,
@@ -35,16 +38,48 @@ class PrometheusReader(RdcReader):
             REGISTRY.unregister(PROCESS_COLLECTOR)
             REGISTRY.unregister(PLATFORM_COLLECTOR)
 
-        # Create the gauges
-        self.guages = {}
+        # Create the metrics
+        self.gauges = {}
+        self.counters = {}
+        self.infos = {}
+
         for fid in self.field_ids:
-            field_name = self.rdc_util.field_id_string(fid).lower()
-            self.guages[fid] = Gauge(field_name, field_name, labelnames=['gpu_index'])
+            field_name = self.rdc_util.field_id_string(fid)
+
+            rdc_metric_type = rdc_field_t.get_rdc_metric_type(rdc_field_t.get_field_name(fid))
+
+            field_name = field_name.lower()
+
+
+            if rdc_metric_type == 1:
+                self.gauges[fid] = Gauge(field_name, field_name, labelnames=['gpu_index'])
+            elif rdc_metric_type == 2:
+                self.counters[fid] = Counter(field_name, field_name, labelnames=['gpu_index'])
+            else:
+                self.infos[fid] = Info(field_name, field_name, labelnames=['gpu_index'])
+            
+
 
     def handle_field(self, gpu_index, value):
         gpu_label = gpu_index
-        if value.field_id.value in self.guages:
-            self.guages[value.field_id.value].labels(gpu_label).set(value.value.l_int)
+        if value.field_id.value in self.gauges:
+            self.gauges[value.field_id.value].labels(gpu_label).set(value.value.l_int)
+        elif value.field_id.value in self.counters:
+            self.counters[value.field_id.value].labels(gpu_label).inc(value.value.l_int)
+        else:
+            self.infos[value.field_id.value].labels(gpu_label).info({'gpu_label': self.process_value(value)})
+
+    def process_value(self, value):
+        if value.type.value == rdc_field_type_t.INTEGER:
+            return str(value.value.l_int)
+        elif value.type.value == rdc_field_type_t.DOUBLE:
+            return str(value.value.d_float)
+        elif value.type.value == rdc_field_type_t.STRING:
+            return value.value.str.decode('utf-8', 'ignore')
+        elif value.type.value == rdc_field_type_t.BLOB:
+            return value.value.str.hex()
+        else:
+            return "unknown"
 
 def get_field_ids(args):
     field_ids = []
