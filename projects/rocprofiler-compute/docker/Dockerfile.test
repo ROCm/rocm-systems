@@ -13,9 +13,6 @@ RUN apt-get update && apt-get install -y \
 # Allows running git commands in /app
 RUN git config --global --add safe.directory /app
 
-# Generate the desired locale
-RUN locale-gen en_US.UTF-8
-
 # Install Python 3.10 and pip
 RUN apt-get install -y python3.10 python3.10-venv python3.10-dev python3-pip
 

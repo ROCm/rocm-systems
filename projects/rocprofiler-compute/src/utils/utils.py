@@ -1120,10 +1120,10 @@ def print_status(msg):
 
 def set_locale_encoding():
     try:
-        locale.setlocale(locale.LC_ALL, "en_US.UTF-8")
+        locale.setlocale(locale.LC_ALL, "C.UTF-8")
     except locale.Error as error:
         console_error(
-            "Please ensure that the 'en_US.UTF-8' locale is available on your system.",
+            "Please ensure that the 'C.UTF-8' locale is available on your system.",
             exit=False,
         )
         console_error(error)
