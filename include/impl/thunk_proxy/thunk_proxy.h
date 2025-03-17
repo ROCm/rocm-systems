@@ -101,6 +101,7 @@ typedef struct {
   void *adapter_info;
   void *adapter_ex_info;
   void *adapter_proxy_info;
+  uint32_t kmd_version;
 } DeviceInfo;
 
 int EngineOrdinal(int engine, DeviceInfo *device_info);
