@@ -16,6 +16,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Changed
 
 * Change normal_unit default to per_kernel
+* change dependency from rocm-smi to amd-smi
 
 ### Resolved issues
 

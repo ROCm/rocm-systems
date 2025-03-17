@@ -263,8 +263,8 @@ def counter_compare(test_name, errors_pd, baseline_df, run_df, threshold=5):
 
 def run(cmd):
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if cmd[0] == "rocm-smi" and p.returncode == 8:
-        print("ERROR: No GPU detected. Unable to load rocm-smi")
+    if cmd[0] == "amd-smi" and p.returncode == 8:
+        print("ERROR: No GPU detected. Unable to load amd-smi")
         assert 0
     return p.stdout.decode("ascii")
 

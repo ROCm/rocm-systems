@@ -164,8 +164,14 @@ class OmniSoC_Base:
         )
 
         # we get the max mclk from rocm-smi --showmclkrange
-        rocm_smi_mclk = run(["rocm-smi", "--showmclkrange"], exit_on_error=True)
-        self._mspec.max_mclk = search(r"(\d+)Mhz\s*$", rocm_smi_mclk)
+        # Regular expression to extract the max memory clock (third frequency level in MEM)
+        memory_clock_pattern = (
+            r"MEM:\s*[^:]*FREQUENCY_LEVELS:\s*(?:\d+: \d+ MHz\s*){2}(\d+)\s*MHz"
+        )
+        amd_smi_mclk = run(["amd-smi", "static"], exit_on_error=True)
+        self._mspec.max_mclk = search(memory_clock_pattern, amd_smi_mclk)
+
+        console_debug("max mem clock is {}".format(self._mspec.max_mclk))
 
         # these are just max's now, because the parsing was broken and this was inconsistent
         # with how we use the clocks elsewhere (all max, all the time)
