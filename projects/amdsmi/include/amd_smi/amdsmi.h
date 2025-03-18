@@ -202,7 +202,7 @@ typedef enum {
 #define AMDSMI_LIB_VERSION_MAJOR 25
 
 //! Minor version should be updated for each API change, but without changing headers
-#define AMDSMI_LIB_VERSION_MINOR 2
+#define AMDSMI_LIB_VERSION_MINOR 3
 
 //! Release version should be set to 0 as default and can be updated by the PMs for each CSP point release
 #define AMDSMI_LIB_VERSION_RELEASE 0
@@ -5969,7 +5969,24 @@ amdsmi_get_gpu_activity(amdsmi_processor_handle processor_handle, amdsmi_engine_
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_power_info(amdsmi_processor_handle processor_handle, uint32_t sensor_ind, amdsmi_power_info_t *info);
+amdsmi_status_t amdsmi_get_power_info_v2(amdsmi_processor_handle processor_handle, uint32_t sensor_ind, amdsmi_power_info_t *info);
+
+/**
+ *  @brief Returns the current power and voltage of the GPU.
+ *
+ *  @ingroup tagGPUMonitor
+ *
+ *  @platform{gpu_bm_linux} @platform{host} @platform{guest_windows}
+ *
+ *  @note amdsmi_power_info_t::socket_power metric can rarely spike above the socket power limit in some cases
+ *
+ *  @param[in] processor_handle PF of a processor for which  to query
+ *
+ *  @param[out] info Reference to the gpu power structure. Must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_power_info(amdsmi_processor_handle processor_handle, amdsmi_power_info_t *info);
 
 /**
  *  @brief Returns is power management enabled

@@ -18,6 +18,19 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Increasing available JPEG engines to 40.  
   Current ASICs may not support all 40. These will be indicated as UINT16_MAX or N/A in CLI.
 
+## amd_smi_lib for ROCm 6.4.1
+
+### Removed
+
+- **Removed `sensor_ind` in `amdsmi_get_power_info()` for backwards compatibility**.  
+  - This change breaks 6.4.0 C API change, but makes it backwards compatible with 6.3
+  - Python API still accepts `sensor_ind` as an optional argument
+  - Changed AMDSMI version from 25.2 to 25.3
+
+### Added
+
+- **Added `amdsmi_get_power_info_v2()` with `sensor_ind`**.
+
 ## amd_smi_lib for ROCm 6.4.0
 
 ### Added
@@ -31,7 +44,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
         uint32_t drm_card;   // the graphic card device under /sys/class/drm/card*
         uint32_t hsa_id;     // the HSA enumeration ID
         uint32_t hip_id;     // the HIP enumeration ID
-        char hip_uuid[AMDSMI_MAX_STRING_LENGTH];  // the HIP unique identifer
+        char hip_uuid[AMDSMI_MAX_STRING_LENGTH];  // the HIP unique identifier
     } amdsmi_enumeration_info_t;
     ```
 
@@ -198,7 +211,7 @@ Updated `amdsmi_get_gpu_metrics_info()` and structure `amdsmi_gpu_metrics_t` to 
 
 - **Added an additional argument `sensor_ind` to `amdsmi_get_power_info()`**.  
   - This change breaks previous C API calls and will require a change
-  - Python API now accepts `sensor_ind` as an optional argument, does not imapact previous usage
+  - Python API now accepts `sensor_ind` as an optional argument, does not impact previous usage
 
 - **Depricated enum `AMDSMI_NORMAL_STRING_LENGTH` in favor of `AMDSMI_MAX_STRING_LENGTH`**.  
 

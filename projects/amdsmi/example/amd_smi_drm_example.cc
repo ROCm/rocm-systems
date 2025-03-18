@@ -566,7 +566,7 @@ int main() {
 
             // Get power measure
             amdsmi_power_info_t power_measure = {};
-            ret = amdsmi_get_power_info(processor_handles[j], 0, &power_measure);
+            ret = amdsmi_get_power_info(processor_handles[j], &power_measure);
             CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_power_info:\n");
             printf("\tCurrent GFX Voltage: %d\n",
