@@ -21,6 +21,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Resolved issues
 
 * Fixed option specs-correction
+* Fixed kernel name and kernel dispatch filtering when using rocprof v3
+
+### Known issues
+
+* gpu id filtering is not supported when using rocprof v3
 
 ## (Unreleased) ROCm Compute Profiler 3.1.0 for ROCm 6.4.0
 
