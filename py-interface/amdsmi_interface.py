@@ -2378,6 +2378,8 @@ def amdsmi_get_gpu_driver_info(
     return driver_info
 
 
+# NOTE: this uses amdsmi_get_power_info_v2 under the hood because the C api
+# needs to be backwards compatible
 def amdsmi_get_power_info(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
     sensor_ind: int = 0
@@ -2389,7 +2391,7 @@ def amdsmi_get_power_info(
 
     power_measure = amdsmi_wrapper.amdsmi_power_info_t()
     _check_res(
-        amdsmi_wrapper.amdsmi_get_power_info(
+        amdsmi_wrapper.amdsmi_get_power_info_v2(
             processor_handle, sensor_ind, ctypes.byref(power_measure)
         )
     )

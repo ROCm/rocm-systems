@@ -467,7 +467,7 @@ uint64_t goamdsmi_gpu_dev_power_get(uint32_t dv_ind)
     uint64_t gpu_power_temp                     = GOAMDSMI_UINT64_MAX;
     amdsmi_power_info_t amdsmi_power_info_temp  = {0};
 
-    if((dv_ind < num_gpu_devices_inAllSocket) && (AMDSMI_STATUS_SUCCESS == amdsmi_get_power_info(amdsmi_processor_handle_all_gpu_device_across_socket[dv_ind], 0, &amdsmi_power_info_temp)))
+    if((dv_ind < num_gpu_devices_inAllSocket) && (AMDSMI_STATUS_SUCCESS == amdsmi_get_power_info(amdsmi_processor_handle_all_gpu_device_across_socket[dv_ind], &amdsmi_power_info_temp)))
     {
         gpu_power_temp = amdsmi_power_info_temp.average_socket_power;
         if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_2)) {printf("AMDSMI, Success for Gpu:%d, GpuPowerAverage:%llu, GpuPowerAverageinWatt:%.6f\n", dv_ind, (unsigned long long)(gpu_power_temp), ((double)(gpu_power_temp))/1000000);}
