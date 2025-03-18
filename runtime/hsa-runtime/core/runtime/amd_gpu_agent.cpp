@@ -2714,7 +2714,7 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
     device_datahost->buf_watermark1 = 0.8 * device_datahost->buf_size;
 
     // Allocate device memory for 2nd level trap handler TMA
-    size_t deviceAllocSize = sizeof(*pcs_data->device_data) + (2 * trap_buffer_size);
+    size_t deviceAllocSize = sizeof(pcs_sampling_data_t) + (2 * trap_buffer_size);
     pcs_data->device_data = (pcs_sampling_data_t*)finegrain_allocator()(deviceAllocSize, 0);
     if (pcs_data->device_data == nullptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
@@ -2730,9 +2730,12 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
     }
 
     uint8_t* device_buf_ptr =
-        ((uint8_t*)pcs_data->device_data) + sizeof(pcs_sampling_data_t);
-    if (DmaFill(device_buf_ptr, 0, deviceAllocSize - sizeof(pcs_sampling_data_t)) !=
-        HSA_STATUS_SUCCESS) {
+	reinterpret_cast<uint8_t*>(pcs_data->device_data) + sizeof(pcs_sampling_data_t);
+    size_t count_in_bytes = deviceAllocSize - sizeof(pcs_sampling_data_t);
+    size_t count_in_dwords = count_in_bytes / sizeof(uint32_t);
+
+    if (DmaFill(device_buf_ptr, 0, count_in_dwords) !=
+	 HSA_STATUS_SUCCESS) {
       debug_print("Failed to dmaFill!\n");
       return HSA_STATUS_ERROR;
     }
