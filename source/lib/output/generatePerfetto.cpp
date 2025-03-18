@@ -32,8 +32,11 @@
 #include <rocprofiler-sdk/cxx/operators.hpp>
 #include <rocprofiler-sdk/cxx/perfetto.hpp>
 
+#include <fmt/core.h>
+
 #include <atomic>
 #include <future>
+#include <iostream>
 #include <map>
 #include <thread>
 #include <unordered_map>
@@ -62,14 +65,14 @@ get_hash_id(Tp&& _val)
 
 void
 write_perfetto(
-    const output_config&                                                  ocfg,
-    const metadata&                                                       tool_metadata,
-    std::vector<agent_info>                                               agent_data,
-    const generator<rocprofiler_buffer_tracing_hip_api_record_t>&         hip_api_gen,
-    const generator<rocprofiler_buffer_tracing_hsa_api_record_t>&         hsa_api_gen,
-    const generator<rocprofiler_buffer_tracing_kernel_dispatch_record_t>& kernel_dispatch_gen,
-    const generator<rocprofiler_buffer_tracing_memory_copy_record_t>&     memory_copy_gen,
-    const generator<rocprofiler_buffer_tracing_marker_api_record_t>&      marker_api_gen,
+    const output_config&                                                       ocfg,
+    const metadata&                                                            tool_metadata,
+    std::vector<agent_info>                                                    agent_data,
+    const generator<rocprofiler_buffer_tracing_hip_api_record_t>&              hip_api_gen,
+    const generator<rocprofiler_buffer_tracing_hsa_api_record_t>&              hsa_api_gen,
+    const generator<tool_buffer_tracing_kernel_dispatch_with_stream_record_t>& kernel_dispatch_gen,
+    const generator<tool_buffer_tracing_memory_copy_with_stream_record_t>&     memory_copy_gen,
+    const generator<rocprofiler_buffer_tracing_marker_api_record_t>&           marker_api_gen,
     const generator<rocprofiler_buffer_tracing_scratch_memory_record_t>& /*scratch_memory_gen*/,
     const generator<rocprofiler_buffer_tracing_rccl_api_record_t>&          rccl_api_gen,
     const generator<rocprofiler_buffer_tracing_memory_allocation_record_t>& memory_allocation_gen,
@@ -136,6 +139,8 @@ write_perfetto(
     auto agent_thread_ids_alloc = std::unordered_map<rocprofiler_agent_id_t, std::set<uint64_t>>{};
     auto agent_queue_ids =
         std::unordered_map<rocprofiler_agent_id_t, std::unordered_set<rocprofiler_queue_id_t>>{};
+    auto agent_stream_ids =
+        std::unordered_map<rocprofiler_agent_id_t, std::unordered_set<rocprofiler_stream_id_t>>{};
     auto thread_indexes = std::unordered_map<rocprofiler_thread_id_t, uint64_t>{};
 
     auto thread_tracks = std::unordered_map<rocprofiler_thread_id_t, ::perfetto::Track>{};
@@ -148,6 +153,12 @@ write_perfetto(
     auto agent_queue_tracks =
         std::unordered_map<rocprofiler_agent_id_t,
                            std::unordered_map<rocprofiler_queue_id_t, ::perfetto::Track>>{};
+    auto agent_stream_compute_tracks =
+        std::unordered_map<rocprofiler_agent_id_t,
+                           std::unordered_map<rocprofiler_stream_id_t, ::perfetto::Track>>{};
+    auto agent_stream_copy_tracks =
+        std::unordered_map<rocprofiler_agent_id_t,
+                           std::unordered_map<rocprofiler_stream_id_t, ::perfetto::Track>>{};
 
     auto _get_agent = [&agent_data](rocprofiler_agent_id_t _id) -> const rocprofiler_agent_t* {
         for(const auto& itr : agent_data)
@@ -181,7 +192,11 @@ write_perfetto(
             for(auto itr : memory_copy_gen.get(ditr))
             {
                 tids.emplace(itr.thread_id);
-                agent_thread_ids[itr.dst_agent_id].emplace(itr.thread_id);
+                agent_stream_ids[itr.dst_agent_id].emplace(itr.stream_id);
+                if(ocfg.group_by_queue)
+                {
+                    agent_thread_ids[itr.dst_agent_id].emplace(itr.thread_id);
+                }
             }
 
         for(auto ditr : memory_allocation_gen)
@@ -195,7 +210,11 @@ write_perfetto(
             for(auto itr : kernel_dispatch_gen.get(ditr))
             {
                 tids.emplace(itr.thread_id);
-                agent_queue_ids[itr.dispatch_info.agent_id].emplace(itr.dispatch_info.queue_id);
+                agent_stream_ids[itr.dispatch_info.agent_id].emplace(itr.stream_id);
+                if(ocfg.group_by_queue)
+                {
+                    agent_queue_ids[itr.dispatch_info.agent_id].emplace(itr.dispatch_info.queue_id);
+                }
             }
     }
 
@@ -257,15 +276,11 @@ write_perfetto(
             const auto* _agent = _get_agent(aitr.first);
 
             auto _namess = std::stringstream{};
-            _namess << "COMPUTE AGENT [" << _agent->logical_node_id << "] QUEUE [" << nqueue++
-                    << "] ";
-
-            if(_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
-                _namess << "(CPU)";
-            else if(_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-                _namess << "(GPU)";
-            else
-                _namess << "(UNK)";
+            auto agent_index_info =
+                tool_metadata.get_agent_index(_agent->id, ocfg.agent_index_value);
+            _namess << "COMPUTE " << agent_index_info.label << " [" << agent_index_info.index
+                    << "] QUEUE [" << nqueue++ << "] ";
+            _namess << agent_index_info.type;
 
             auto _track = ::perfetto::Track{get_hash_id(_namess.str())};
             auto _desc  = _track.Serialize();
@@ -274,6 +289,57 @@ write_perfetto(
             perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
 
             agent_queue_tracks[aitr.first].emplace(qitr, _track);
+        }
+    }
+
+    for(const auto& aitr : agent_stream_ids)
+    {
+        for(auto sitr : aitr.second)
+        {
+            const auto* _agent    = _get_agent(aitr.first);
+            const auto  stream_id = sitr.handle;
+
+            {
+                auto _namess = std::stringstream{};
+                _namess << "COMPUTE AGENT [" << _agent->logical_node_id << "] STREAM [" << stream_id
+                        << "] ";
+
+                if(_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
+                    _namess << "(CPU)";
+                else if(_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
+                    _namess << "(GPU)";
+                else
+                    _namess << "(UNK)";
+
+                auto _track = ::perfetto::Track{get_hash_id(_namess.str())};
+                auto _desc  = _track.Serialize();
+                _desc.set_name(_namess.str());
+
+                perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
+
+                agent_stream_compute_tracks[aitr.first].emplace(sitr, _track);
+            }
+
+            {
+                auto _namess = std::stringstream{};
+                _namess << "COPY to AGENT [" << _agent->logical_node_id << "] STREAM [" << stream_id
+                        << "] ";
+
+                if(_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
+                    _namess << "(CPU)";
+                else if(_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
+                    _namess << "(GPU)";
+                else
+                    _namess << "(UNK)";
+
+                auto _track = ::perfetto::Track{get_hash_id(_namess.str())};
+                auto _desc  = _track.Serialize();
+                _desc.set_name(_namess.str());
+
+                perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
+
+                agent_stream_copy_tracks[aitr.first].emplace(sitr, _track);
+            }
         }
     }
 
@@ -472,60 +538,22 @@ write_perfetto(
         for(auto ditr : memory_copy_gen)
             for(auto itr : memory_copy_gen.get(ditr))
             {
-                auto  name  = buffer_names.at(itr.kind, itr.operation);
-                auto& track = agent_thread_tracks.at(itr.dst_agent_id).at(itr.thread_id);
+                auto name = buffer_names.at(itr.kind, itr.operation);
 
-                TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::memory_copy>::name,
-                                  ::perfetto::StaticString(name.data()),
-                                  track,
-                                  itr.start_timestamp,
-                                  ::perfetto::Flow::ProcessScoped(itr.correlation_id.internal),
-                                  "begin_ns",
-                                  itr.start_timestamp,
-                                  "end_ns",
-                                  itr.end_timestamp,
-                                  "delta_ns",
-                                  (itr.end_timestamp - itr.start_timestamp),
-                                  "kind",
-                                  itr.kind,
-                                  "operation",
-                                  itr.operation,
-                                  "src_agent",
-                                  agents_map.at(itr.src_agent_id).logical_node_id,
-                                  "dst_agent",
-                                  agents_map.at(itr.dst_agent_id).logical_node_id,
-                                  "copy_bytes",
-                                  itr.bytes,
-                                  "corr_id",
-                                  itr.correlation_id.internal,
-                                  "tid",
-                                  itr.thread_id);
-                TRACE_EVENT_END(sdk::perfetto_category<sdk::category::memory_copy>::name,
-                                track,
-                                itr.end_timestamp);
-                tracing_session->FlushBlocking();
-            }
-
-        for(auto ditr : kernel_dispatch_gen)
-            for(auto itr : kernel_dispatch_gen.get(ditr))
-            {
-                const auto&               info = itr.dispatch_info;
-                const kernel_symbol_info* sym  = tool_metadata.get_kernel_symbol(info.kernel_id);
-
-                CHECK(sym != nullptr);
-
-                auto  name  = std::string_view{sym->kernel_name};
-                auto& track = agent_queue_tracks.at(info.agent_id).at(info.queue_id);
-
-                if(demangled.find(name) == demangled.end())
+                ::perfetto::Track* _track = nullptr;
+                if(ocfg.group_by_queue)
                 {
-                    demangled.emplace(name, common::cxx_demangle(name));
+                    _track = &agent_thread_tracks.at(itr.dst_agent_id).at(itr.thread_id);
+                }
+                else
+                {
+                    _track = &agent_stream_copy_tracks.at(itr.dst_agent_id).at(itr.stream_id);
                 }
 
                 TRACE_EVENT_BEGIN(
-                    sdk::perfetto_category<sdk::category::kernel_dispatch>::name,
-                    ::perfetto::StaticString(demangled.at(name).c_str()),
-                    track,
+                    sdk::perfetto_category<sdk::category::memory_copy>::name,
+                    ::perfetto::StaticString(name.data()),
+                    *_track,
                     itr.start_timestamp,
                     ::perfetto::Flow::ProcessScoped(itr.correlation_id.internal),
                     "begin_ns",
@@ -536,31 +564,150 @@ write_perfetto(
                     (itr.end_timestamp - itr.start_timestamp),
                     "kind",
                     itr.kind,
-                    "agent",
-                    agents_map.at(info.agent_id).logical_node_id,
+                    "operation",
+                    itr.operation,
+                    "src_agent",
+                    tool_metadata.get_agent_index(itr.src_agent_id, ocfg.agent_index_value)
+                        .as_string("-"),
+                    "dst_agent",
+                    tool_metadata.get_agent_index(itr.dst_agent_id, ocfg.agent_index_value)
+                        .as_string("-"),
+                    "copy_bytes",
+                    itr.bytes,
                     "corr_id",
                     itr.correlation_id.internal,
-                    "queue",
-                    info.queue_id.handle,
                     "tid",
-                    itr.thread_id,
-                    "kernel_id",
-                    info.kernel_id,
-                    "private_segment_size",
-                    info.private_segment_size,
-                    "group_segment_size",
-                    info.group_segment_size,
-                    "workgroup_size",
-                    info.workgroup_size.x * info.workgroup_size.y * info.workgroup_size.z,
-                    "grid_size",
-                    info.grid_size.x * info.grid_size.y * info.grid_size.z);
-                TRACE_EVENT_END(sdk::perfetto_category<sdk::category::kernel_dispatch>::name,
-                                track,
+                    itr.thread_id);
+                TRACE_EVENT_END(sdk::perfetto_category<sdk::category::memory_copy>::name,
+                                *_track,
                                 itr.end_timestamp);
+
                 tracing_session->FlushBlocking();
             }
-    }
+        for(auto ditr : kernel_dispatch_gen)
+        {
+            auto generator = kernel_dispatch_gen.get(ditr);
+            // Group kernels on the same queue and agent. Temporary fix for firmware timestamp bug
+            // Can be removed once bug is resolved.
+            auto dispatch_bins = std::unordered_map<
+                rocprofiler_agent_id_t,
+                std::unordered_map<
+                    rocprofiler_queue_id_t,
+                    std::vector<tool_buffer_tracing_kernel_dispatch_with_stream_record_t*>>>{};
+            for(auto& itr : generator)
+            {
+                const auto& info = itr.dispatch_info;
+                dispatch_bins[info.agent_id][info.queue_id].emplace_back(&itr);
+            }
 
+            for(const auto& aitr : dispatch_bins)
+            {
+                for(auto qitr : aitr.second)
+                {
+                    // Sort kernels on the same queue and agent by timestamp
+                    std::sort(qitr.second.begin(),
+                              qitr.second.end(),
+                              [](const auto* lhs, const auto* rhs) {
+                                  return lhs->start_timestamp < rhs->start_timestamp;
+                              });
+
+                    // Loop over the kernels (qitr.second) and put them into perfetto.
+                    for(auto it = qitr.second.begin(); it != qitr.second.end(); ++it)
+                    {
+                        auto&                     current = **it;
+                        const auto&               info    = current.dispatch_info;
+                        const kernel_symbol_info* sym =
+                            tool_metadata.get_kernel_symbol(info.kernel_id);
+
+                        CHECK(sym != nullptr);
+
+                        auto name = std::string_view{sym->kernel_name};
+
+                        ::perfetto::Track* _track = nullptr;
+                        if(ocfg.group_by_queue)
+                        {
+                            _track = &agent_queue_tracks.at(info.agent_id).at(info.queue_id);
+                        }
+                        else
+                        {
+                            _track =
+                                &agent_stream_compute_tracks.at(info.agent_id).at((*it)->stream_id);
+                        }
+
+                        // Temporary fix until timestamp issues are resolved: Set timestamps to be
+                        // halfway between ending timestamp and starting timestamp of overlapping
+                        // kernel dispatches. Perfetto displays slices incorrectly if overlapping
+                        // slices on the same track are not completely enveloped.
+                        auto next = std::next(it);
+                        if(next != qitr.second.end() &&
+                           (*next)->start_timestamp < (*it)->end_timestamp)
+                        {
+                            auto start = (*next)->start_timestamp;
+                            auto end   = std::min((*it)->end_timestamp, (*next)->end_timestamp);
+                            auto mid   = start + (end - start) / 2;
+                            // Report changed timestamps to ROCP INFO
+                            ROCP_INFO << fmt::format(
+                                "Kernel ending timestamp increased by {} ns to {} ns with "
+                                "following kernel starting timestamp decreased by {} ns to {} ns "
+                                "due to firmware timestamp error.",
+                                ((*it)->end_timestamp - mid),
+                                mid,
+                                (mid - (*next)->start_timestamp),
+                                mid);
+                            (*it)->end_timestamp     = mid;
+                            (*next)->start_timestamp = mid;
+                        }
+
+                        if(demangled.find(name) == demangled.end())
+                        {
+                            demangled.emplace(name, common::cxx_demangle(name));
+                        }
+
+                        TRACE_EVENT_BEGIN(
+                            sdk::perfetto_category<sdk::category::kernel_dispatch>::name,
+                            ::perfetto::StaticString(demangled.at(name).c_str()),
+                            *_track,
+                            current.start_timestamp,
+                            ::perfetto::Flow::ProcessScoped(current.correlation_id.internal),
+                            "begin_ns",
+                            current.start_timestamp,
+                            "end_ns",
+                            current.end_timestamp,
+                            "delta_ns",
+                            (current.end_timestamp - current.start_timestamp),
+                            "kind",
+                            current.kind,
+                            "agent",
+                            tool_metadata
+                                .get_agent_index(agents_map.at(info.agent_id).id,
+                                                 ocfg.agent_index_value)
+                                .as_string("-"),
+                            "corr_id",
+                            current.correlation_id.internal,
+                            "queue",
+                            info.queue_id.handle,
+                            "tid",
+                            current.thread_id,
+                            "kernel_id",
+                            info.kernel_id,
+                            "private_segment_size",
+                            info.private_segment_size,
+                            "group_segment_size",
+                            info.group_segment_size,
+                            "workgroup_size",
+                            info.workgroup_size.x * info.workgroup_size.y * info.workgroup_size.z,
+                            "grid_size",
+                            info.grid_size.x * info.grid_size.y * info.grid_size.z);
+                        TRACE_EVENT_END(
+                            sdk::perfetto_category<sdk::category::kernel_dispatch>::name,
+                            *_track,
+                            current.end_timestamp);
+                        tracing_session->FlushBlocking();
+                    }
+                }
+            }
+        }
+    }
     // counter tracks
     {
         // memory copy counter track
@@ -618,11 +765,10 @@ write_perfetto(
 
             auto        _track_name = std::stringstream{};
             const auto* _agent      = _get_agent(mitr.first);
-
-            if(_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
-                _track_name << "COPY BYTES to AGENT [" << _agent->logical_node_id << "] (CPU)";
-            else if(_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-                _track_name << "COPY BYTES to AGENT [" << _agent->logical_node_id << "] (GPU)";
+            auto        agent_index_info =
+                tool_metadata.get_agent_index(_agent->id, ocfg.agent_index_value);
+            _track_name << "COPY BYTES to " << agent_index_info.label << " ["
+                        << agent_index_info.index << "] (" << agent_index_info.type << ")";
 
             constexpr auto _unit = ::perfetto::CounterTrack::Unit::UNIT_SIZE_BYTES;
             auto&          _name = mem_cpy_cnt_names.emplace_back(_track_name.str());
@@ -789,10 +935,15 @@ write_perfetto(
             auto                       _track_name = std::stringstream{};
             const rocprofiler_agent_t* _agent      = _get_agent(alloc_itr.first);
 
-            if(_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
-                _track_name << "ALLOCATE BYTES on AGENT [" << _agent->logical_node_id << "] (CPU)";
-            else if(_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-                _track_name << "ALLOCATE BYTES on AGENT [" << _agent->logical_node_id << "] (GPU)";
+            if(_agent != nullptr)
+            {
+                auto agent_index_info =
+                    tool_metadata.get_agent_index(_agent->id, ocfg.agent_index_value);
+                _track_name << "ALLOCATE BYTES on " << agent_index_info.label << " ["
+                            << agent_index_info.index << "] (" << agent_index_info.type << ")";
+            }
+            else
+                _track_name << "FREE BYTES";
 
             constexpr auto _unit = ::perfetto::CounterTrack::Unit::UNIT_SIZE_BYTES;
             auto&          _name = mem_alloc_cnt_names.emplace_back(_track_name.str());

@@ -44,7 +44,7 @@ namespace counters
 std::vector<MetricDimension>
 getBlockDimensions(std::string_view agent, const Metric& metric)
 {
-    if(!metric.special().empty())
+    if(!metric.constant().empty())
     {
         // Special non-hardware counters without dimension data
         return std::vector<MetricDimension>{{dimension_map().at(ROCPROFILER_DIMENSION_INSTANCE),
@@ -95,34 +95,55 @@ getBlockDimensions(std::string_view agent, const Metric& metric)
     return ret;
 }
 
-const std::unordered_map<uint64_t, std::vector<MetricDimension>>&
-get_dimension_cache()
+namespace
 {
-    static auto*& cache =
-        common::static_object<std::unordered_map<uint64_t, std::vector<MetricDimension>>>::
-            construct([]() -> std::unordered_map<uint64_t, std::vector<MetricDimension>> {
-                std::unordered_map<uint64_t, std::vector<MetricDimension>> dims;
+metric_dims
+generate_dimensions()
+{
+    std::unordered_map<uint64_t, std::vector<MetricDimension>> dims;
 
-                const auto& asts = counters::get_ast_map();
-                for(const auto& [gfx, metrics] : asts)
-                {
-                    for(const auto& [metric, ast] : metrics)
-                    {
-                        auto ast_copy = ast;
-                        try
-                        {
-                            dims.emplace(ast.out_id().handle, ast_copy.set_dimensions());
-                        } catch(std::runtime_error& e)
-                        {
-                            ROCP_ERROR << metric << " has improper dimensions"
-                                       << " " << e.what();
-                            throw;
-                        }
-                    }
-                }
-                return dims;
-            }());
-    return *cache;
+    const auto asts = counters::get_ast_map();
+    for(const auto& [gfx, metrics] : asts->arch_to_counter_asts)
+    {
+        for(const auto& [metric, ast] : metrics)
+        {
+            auto ast_copy = ast;
+            try
+            {
+                dims.emplace(ast.out_id().handle, ast_copy.set_dimensions());
+            } catch(std::runtime_error& e)
+            {
+                ROCP_FATAL << metric << " has improper dimensions"
+                           << " " << e.what();
+            }
+        }
+    }
+    return {.id_to_dim = dims};
+}
+}  // namespace
+
+std::shared_ptr<const metric_dims>
+get_dimension_cache(bool reload)
+{
+    using DimSync             = common::Synchronized<std::shared_ptr<const metric_dims>>;
+    static DimSync*& dim_data = common::static_object<DimSync>::construct(
+        [&]() { return std::make_shared<const metric_dims>(generate_dimensions()); }());
+
+    if(!dim_data) return nullptr;
+
+    if(!reload)
+    {
+        return dim_data->rlock([](const auto& data) {
+            CHECK(data);
+            return data;
+        });
+    }
+
+    return dim_data->wlock([&](auto& data) {
+        data = std::make_shared<const metric_dims>(generate_dimensions());
+        CHECK(data);
+        return data;
+    });
 }
 
 }  // namespace counters

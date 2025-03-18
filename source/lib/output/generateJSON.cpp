@@ -125,9 +125,10 @@ write_json(json_output&         json_ar,
         auto att_filenames                  = tool_metadata.get_att_filenames();
         auto code_object_snapshot_filenames = std::vector<std::string>{};
 
-        code_object_snapshot_filenames.reserve(code_object_load_info.size());
+        code_object_snapshot_filenames.resize(code_object_load_info.size());
+
         for(const auto& info : code_object_load_info)
-            code_object_snapshot_filenames.emplace_back(fs::path(info.name).filename());
+            code_object_snapshot_filenames.at(info.id) = fs::path(info.name).filename();
 
         json_ar.setNextName("strings");
         json_ar.startNode();
@@ -185,11 +186,11 @@ void
 write_json(json_output& json_ar,
            const output_config& /*cfg*/,
            const metadata& /*tool_metadata*/,
-           const domain_stats_vec_t&                                        domain_stats,
-           generator<rocprofiler_buffer_tracing_hip_api_record_t>&&         hip_api_gen,
-           generator<rocprofiler_buffer_tracing_hsa_api_record_t>           hsa_api_gen,
-           generator<rocprofiler_buffer_tracing_kernel_dispatch_record_t>   kernel_dispatch_gen,
-           generator<rocprofiler_buffer_tracing_memory_copy_record_t>       memory_copy_gen,
+           const domain_stats_vec_t&                                           domain_stats,
+           generator<rocprofiler_buffer_tracing_hip_api_record_t>&&            hip_api_gen,
+           generator<rocprofiler_buffer_tracing_hsa_api_record_t>              hsa_api_gen,
+           generator<tool_buffer_tracing_kernel_dispatch_with_stream_record_t> kernel_dispatch_gen,
+           generator<tool_buffer_tracing_memory_copy_with_stream_record_t>     memory_copy_gen,
            generator<tool_counter_record_t>                                 counter_collection_gen,
            generator<rocprofiler_buffer_tracing_marker_api_record_t>        marker_api_gen,
            generator<rocprofiler_buffer_tracing_scratch_memory_record_t>    scratch_memory_gen,

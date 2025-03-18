@@ -61,7 +61,21 @@ loadTestData(const std::unordered_map<std::string, std::vector<std::vector<std::
 
 TEST(metrics, base_load)
 {
-    auto rocp_data = counters::getBaseHardwareMetrics();
+    auto loaded_metrics = counters::loadMetrics();
+    auto rocp_data      = [&]() {
+        // get only base metrics (those without expressions)
+        std::unordered_map<std::string, std::vector<counters::Metric>> ret;
+        for(const auto& [gfx, metrics] : loaded_metrics->arch_to_metric)
+        {
+            std::vector<counters::Metric> base_metrics;
+            std::copy_if(metrics.begin(),
+                         metrics.end(),
+                         std::back_inserter(base_metrics),
+                         [](const auto& m) { return m.expression().empty(); });
+            if(!base_metrics.empty()) ret.emplace(gfx, std::move(base_metrics));
+        }
+        return ret;
+    }();
     auto test_data = loadTestData(basic_gfx908);
 
     ASSERT_EQ(rocp_data.count("gfx908"), 1);
@@ -97,7 +111,22 @@ TEST(metrics, base_load)
 
 TEST(metrics, derived_load)
 {
-    auto rocp_data = counters::getDerivedHardwareMetrics();
+    auto loaded_metrics = counters::loadMetrics();
+    auto rocp_data      = [&]() {
+        // get only derrived metrics
+        std::unordered_map<std::string, std::vector<counters::Metric>> ret;
+        for(const auto& [gfx, metrics] : loaded_metrics->arch_to_metric)
+        {
+            std::vector<counters::Metric> derived_metrics;
+            std::copy_if(metrics.begin(),
+                         metrics.end(),
+                         std::back_inserter(derived_metrics),
+                         [](const auto& m) { return !m.expression().empty(); });
+            if(!derived_metrics.empty()) ret.emplace(gfx, std::move(derived_metrics));
+        }
+        return ret;
+    }();
+
     auto test_data = loadTestData(derived_gfx908);
     ASSERT_EQ(rocp_data.count("gfx908"), 1);
     ASSERT_EQ(test_data.count("gfx908"), 1);
@@ -128,8 +157,10 @@ TEST(metrics, derived_load)
 
 TEST(metrics, check_agent_valid)
 {
-    const auto& rocp_data      = *counters::getMetricMap();
-    auto        common_metrics = [&]() -> std::set<uint64_t> {
+    auto        mets      = counters::loadMetrics();
+    const auto& rocp_data = mets->arch_to_metric;
+
+    auto common_metrics = [&]() -> std::set<uint64_t> {
         std::set<uint64_t> ret;
         for(const auto& [gfx, counters] : rocp_data)
         {
@@ -171,7 +202,7 @@ TEST(metrics, check_agent_valid)
             if(other_gfx == gfx) continue;
             for(const auto& metric : other_counters)
             {
-                if(common_metrics.count(metric.id()) || !metric.special().empty()) continue;
+                if(common_metrics.count(metric.id()) > 0 || !metric.constant().empty()) continue;
                 EXPECT_EQ(counters::checkValidMetric(gfx, metric), false)
                     << fmt::format("GFX {} has Metric {} but shouldn't", gfx, metric);
             }
@@ -181,8 +212,9 @@ TEST(metrics, check_agent_valid)
 
 TEST(metrics, check_public_api_query)
 {
-    const auto* id_map = counters::getMetricIdMap();
-    for(const auto& [id, metric] : *id_map)
+    auto        metrics_map = rocprofiler::counters::loadMetrics();
+    const auto& id_map      = metrics_map->id_to_metric;
+    for(const auto& [id, metric] : id_map)
     {
         rocprofiler_counter_info_v0_t version;
 
@@ -190,10 +222,10 @@ TEST(metrics, check_public_api_query)
             rocprofiler_query_counter_info(
                 {.handle = id}, ROCPROFILER_COUNTER_INFO_VERSION_0, static_cast<void*>(&version)),
             ROCPROFILER_STATUS_SUCCESS);
-        EXPECT_EQ(version.name, metric.name().c_str());
-        EXPECT_EQ(version.block, metric.block().c_str());
-        EXPECT_EQ(version.expression, metric.expression().c_str());
+        EXPECT_EQ(std::string(version.name), metric.name());
+        EXPECT_EQ(std::string(version.block), metric.block());
+        EXPECT_EQ(std::string(version.expression), metric.expression());
         EXPECT_EQ(version.is_derived, !metric.expression().empty());
-        EXPECT_EQ(version.description, metric.description().c_str());
+        EXPECT_EQ(std::string(version.description), metric.description());
     }
 }

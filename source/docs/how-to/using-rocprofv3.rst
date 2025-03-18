@@ -354,7 +354,7 @@ Here are the contents of ``kernel_trace.csv`` file:
 
 .. csv-table:: Kernel trace
    :file: /data/kernel_trace.csv
-   :widths: 10,10,10,10,10,10,10,10,20,20,10,10,10,10,10,10,10,10
+   :widths: 10,10,10,10,10,10,10,10,10,20,20,10,10,10,10,10,10,10,10
    :header-rows: 1
 
 For the description of the fields in the output file, see :ref:`output-file-fields`.
@@ -378,7 +378,7 @@ Here are the contents of ``memory_copy_trace.csv`` file:
 
 .. csv-table:: Memory copy trace
    :file: /data/memory_copy_trace.csv
-   :widths: 10,10,10,10,10,20,20
+   :widths: 10,10,10,10,10,10,20,20
    :header-rows: 1
 
 For the description of the fields in the output file, see :ref:`output-file-fields`.
@@ -861,6 +861,47 @@ Here are the contents of ``counter_collection.csv`` file:
 
 For the description of the fields in the output file, see :ref:`output-file-fields`.
 
+Iteration based counter multiplexing
+++++++++++++++++++++++++++++++++++++
+
+Counter multiplexing allows a single run of the program to collect groups of counters. This is useful when the counters you want to collect exceed the hardware limits and you cannot run the program multiple times for collection. 
+
+This feature is available when using YAML (.yaml/.yml) or JSON (.json) input formats. Two new fields are introduced,  ``pmc_groups`` and ``pmc_group_interval``. The ``pmc_groups`` field is used to specify the groups of counters to be collected in each run. The ``pmc_group_interval`` field is used to specify the interval between each group of counters. Interval is per-device and increments per dispatch on the device (i.e. dispatch_id). When the interval is reached the next group is selected.
+
+Here is a sample input.yaml file for specifying counter multiplexing:
+
+.. code-block:: yaml
+   
+   jobs:
+   - pmc_groups: [["SQ_WAVES", "GRBM_COUNT"], ["GRBM_GUI_ACTIVE"]]
+      pmc_group_interval: 4
+
+This sample input will collect the first group of counters (``SQ_WAVES``, ``GRBM_COUNT``) for the first 4 kernel executions on the device, then the second group of counters (``GRBM_GUI_ACTIVE``) for the next 4 kernel executions on the device, and so on.
+
+An example of the interval period for this input is given below:
+
+.. code-block:: shell
+    
+    Device 1, <Kernel A>, Collect SQ_WAVES, GRBM_COUNT
+    Device 1, <Kernel A>, Collect SQ_WAVES, GRBM_COUNT
+    Device 1, <Kernel B>, Collect SQ_WAVES, GRBM_COUNT
+    Device 1, <Kernel C>, Collect SQ_WAVES, GRBM_COUNT
+    <Interval reached on Device 1, Swtiching Counters>
+    Device 1, <Kernel D>, Collect GRBM_GUI_ACTIVE
+
+Here is the same sample in JSON format:
+
+.. code-block:: shell
+
+   {
+      "jobs": [
+         {
+               "pmc_groups": [["SQ_WAVES", "GRBM_COUNT"], ["GRBM_GUI_ACTIVE"]],
+               "pmc_group_interval": 4
+         }
+      ]
+   }
+
 Agent info
 ++++++++++++
 
@@ -1044,6 +1085,9 @@ The following table lists the various fields or the columns in the output CSV fi
 
   * - Queue_Id
     - ROCm queue unique identifier to which the kernel was submitted.
+
+  * - Stream_Id
+    - Identifies HIP stream ID to which kernel or memory copy operation was submitted. Defaults to 0 if the hip-stream-display option is not enabled
 
   * - Private_Segment_Size
     - The amount of memory required in bytes for the combined private, spill, and arg segments for a work item.

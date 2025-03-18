@@ -36,7 +36,8 @@ def unique(lst):
 def validate_csv(df, kernel_list, counter_name):
 
     assert not df.empty
-    assert (df["Agent_Id"].astype(int).values > 0).all()
+    df_Agent_id = df["Agent_Id"].str.split(" ").str[-1]
+    assert (df_Agent_id.astype(int).values >= 0).all()
     assert (df["Queue_Id"].astype(int).values > 0).all()
     assert (df["Process_Id"].astype(int).values > 0).all()
     assert len(df["Kernel_Name"]) > 0

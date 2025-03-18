@@ -123,12 +123,12 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
         parameters.push_back({ROCPROFILER_ATT_PARAMETER_SERIALIZE_ALL, 0});
 
         ROCPROFILER_CALL(
-            rocprofiler_configure_agent_thread_trace_service(agent_ctx,
-                                                             parameters.data(),
-                                                             parameters.size(),
-                                                             agent->id,
-                                                             Callbacks::shader_data_callback,
-                                                             user),
+            rocprofiler_configure_device_thread_trace_service(agent_ctx,
+                                                              agent->id,
+                                                              parameters.data(),
+                                                              parameters.size(),
+                                                              Callbacks::shader_data_callback,
+                                                              user),
             "thread trace service configure");
     }
     return ROCPROFILER_STATUS_SUCCESS;

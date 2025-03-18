@@ -44,6 +44,8 @@
 #include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
+#include <fmt/core.h>
+
 #include <cstdint>
 #include <map>
 #include <string>
@@ -85,6 +87,26 @@ using att_filenames_map_t   = std::unordered_map<rocprofiler_dispatch_id_t, att_
 using code_object_load_info_vec_t = std::vector<rocprofiler::att_wrapper::CodeobjLoadInfo>;
 template <typename Tp>
 using synced_map = common::Synchronized<Tp, true>;
+
+enum class agent_indexing
+{
+    node = 0,
+    logical_node,
+    logical_node_type,
+};
+
+struct agent_index
+{
+    std::string_view label = {};  // e.g. Agent, CPU, GPU
+    uint32_t         index = 0;   // the numerical index
+    std::string_view type  = {};  // e.g. CPU, GPU, etc.
+
+    // returns label + index
+    std::string as_string(std::string_view sep = " ") const
+    {
+        return fmt::format("{}{}{}", label, sep, index);
+    }
+};
 
 struct metadata
 {
@@ -165,7 +187,7 @@ struct metadata
                                           rocprofiler_tracing_operation_t     op) const;
     std::string_view   get_operation_name(rocprofiler_buffer_tracing_kind_t kind,
                                           rocprofiler_tracing_operation_t   op) const;
-    uint64_t           get_node_id(rocprofiler_agent_id_t _val) const;
+    agent_index        get_agent_index(rocprofiler_agent_id_t agent, agent_indexing index) const;
     const std::string* get_string_entry(size_t key) const;
 
 private:

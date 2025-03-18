@@ -68,13 +68,10 @@ add_subdirectory(thread-trace)
 add_subdirectory(pc_sampling)
 add_subdirectory(hip-graph-tracing)
 add_subdirectory(counter-collection)
+add_subdirectory(openmp-tools)
 add_subdirectory(rocdecode)
 add_subdirectory(rocjpeg)
 add_subdirectory(conversion-script)
-
-if(ROCPROFILER_BUILD_OPENMP_TESTS)
-    add_subdirectory(openmp-tools)
-endif()
 
 # rocprofv3 validation tests
 add_subdirectory(rocprofv3)

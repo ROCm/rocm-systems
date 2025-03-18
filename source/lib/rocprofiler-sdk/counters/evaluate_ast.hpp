@@ -183,12 +183,20 @@ private:
 
 using EvaluateASTMap = std::unordered_map<std::string, EvaluateAST>;
 
+struct ASTs
+{
+    const std::unordered_map<std::string, EvaluateASTMap> arch_to_counter_asts;
+};
+
+rocprofiler_status_t
+check_ast_generation(std::string_view arch, Metric metric);
+
 /**
  * Construct the ASTs for all counters appearing in basic/derived counter
  * definition files.
  */
-const std::unordered_map<std::string, EvaluateASTMap>&
-get_ast_map();
+std::shared_ptr<const ASTs>
+get_ast_map(bool reload = false);
 
 /**
  * Get the required basic/hardware counters needed to evaluate a

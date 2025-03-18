@@ -274,15 +274,17 @@ TEST(parser, selection)
     }
 }
 
-TEST(parser, parse_derived_counters)
+TEST(parser, parse_counters)
 {
     // Checks that ASTs are properly formed from derived counters defined in XML
     // Does not check accuracy, only parseability
-    auto derived_counters = rocprofiler::counters::getDerivedHardwareMetrics();
-    for(auto& [gfx, counter_list] : derived_counters)
+    auto derived_counters = rocprofiler::counters::loadMetrics();
+    for(const auto& [gfx, counter_list] : derived_counters->arch_to_metric)
     {
         for(const auto& v : counter_list)
         {
+            if(!v.constant().empty() || v.expression().empty()) continue;
+
             RawAST* ast = nullptr;
             auto*   buf = yy_scan_string(v.expression().c_str());
             yyparse(&ast);

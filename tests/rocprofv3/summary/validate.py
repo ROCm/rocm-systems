@@ -75,6 +75,7 @@ def test_kernel_trace(json_data):
 
     def get_kernel_rename(corr_id):
         for itr in data.strings.correlation_id.external:
+            print(itr)
             if itr.key == corr_id:
                 return itr.value
         return None
@@ -113,7 +114,7 @@ def test_kernel_trace(json_data):
         external_corr_id = dispatch["correlation_id"]["external"]
         assert external_corr_id > 0
 
-        kernel_rename = get_kernel_rename(external_corr_id)
+        kernel_rename = get_kernel_rename(dispatch.kernel_rename_val)
         assert kernel_rename is not None, f"{dispatch}"
         assert kernel_rename != kernel_name, f"{dispatch}"
         assert (

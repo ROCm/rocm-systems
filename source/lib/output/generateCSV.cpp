@@ -249,22 +249,22 @@ generate_csv(const output_config& cfg,
 }
 
 void
-generate_csv(const output_config&                                                  cfg,
-             const metadata&                                                       tool_metadata,
-             const generator<rocprofiler_buffer_tracing_kernel_dispatch_record_t>& data,
-             const stats_entry_t&                                                  stats)
+generate_csv(const output_config& cfg,
+             const metadata&      tool_metadata,
+             const generator<tool_buffer_tracing_kernel_dispatch_with_stream_record_t>& data,
+             const stats_entry_t&                                                       stats)
 {
     if(data.empty()) return;
 
     if(cfg.stats && stats)
         write_stats(get_stats_output_file(cfg, domain_type::KERNEL_DISPATCH), stats.entries);
-
     auto ofs = tool::csv_output_file{cfg,
                                      domain_type::KERNEL_DISPATCH,
-                                     tool::csv::kernel_trace_csv_encoder{},
+                                     tool::csv::kernel_trace_with_stream_csv_encoder{},
                                      {"Kind",
                                       "Agent_Id",
                                       "Queue_Id",
+                                      "Stream_Id",
                                       "Thread_Id",
                                       "Dispatch_Id",
                                       "Kernel_Id",
@@ -287,12 +287,14 @@ generate_csv(const output_config&                                               
         {
             auto row_ss      = std::stringstream{};
             auto kernel_name = tool_metadata.get_kernel_name(record.dispatch_info.kernel_id,
-                                                             record.correlation_id.external.value);
-            rocprofiler::tool::csv::kernel_trace_csv_encoder::write_row(
+                                                             record.kernel_rename_val);
+            rocprofiler::tool::csv::kernel_trace_with_stream_csv_encoder::write_row(
                 row_ss,
                 tool_metadata.get_kind_name(record.kind),
-                tool_metadata.get_node_id(record.dispatch_info.agent_id),
+                tool_metadata.get_agent_index(record.dispatch_info.agent_id, cfg.agent_index_value)
+                    .as_string(),
                 record.dispatch_info.queue_id.handle,
+                record.stream_id.handle,
                 record.thread_id,
                 record.dispatch_info.dispatch_id,
                 record.dispatch_info.kernel_id,
@@ -308,7 +310,6 @@ generate_csv(const output_config&                                               
                 record.dispatch_info.grid_size.x,
                 record.dispatch_info.grid_size.y,
                 record.dispatch_info.grid_size.z);
-
             ofs << row_ss.str();
         }
     }
@@ -398,10 +399,10 @@ generate_csv(const output_config&                                          cfg,
 }
 
 void
-generate_csv(const output_config&                                              cfg,
-             const metadata&                                                   tool_metadata,
-             const generator<rocprofiler_buffer_tracing_memory_copy_record_t>& data,
-             const stats_entry_t&                                              stats)
+generate_csv(const output_config&                                                   cfg,
+             const metadata&                                                        tool_metadata,
+             const generator<tool_buffer_tracing_memory_copy_with_stream_record_t>& data,
+             const stats_entry_t&                                                   stats)
 {
     if(data.empty()) return;
 
@@ -410,30 +411,34 @@ generate_csv(const output_config&                                              c
 
     auto ofs = tool::csv_output_file{cfg,
                                      domain_type::MEMORY_COPY,
-                                     tool::csv::memory_copy_csv_encoder{},
+                                     tool::csv::memory_copy_with_stream_csv_encoder{},
                                      {"Kind",
                                       "Direction",
+                                      "Stream_Id",
                                       "Source_Agent_Id",
                                       "Destination_Agent_Id",
                                       "Correlation_Id",
                                       "Start_Timestamp",
                                       "End_Timestamp"}};
+
     for(auto ditr : data)
     {
         for(auto record : data.get(ditr))
         {
             auto row_ss   = std::stringstream{};
             auto api_name = tool_metadata.get_operation_name(record.kind, record.operation);
-            rocprofiler::tool::csv::memory_copy_csv_encoder::write_row(
+            rocprofiler::tool::csv::memory_copy_with_stream_csv_encoder::write_row(
                 row_ss,
                 tool_metadata.get_kind_name(record.kind),
                 api_name,
-                tool_metadata.get_node_id(record.src_agent_id),
-                tool_metadata.get_node_id(record.dst_agent_id),
+                record.stream_id.handle,
+                tool_metadata.get_agent_index(record.src_agent_id, cfg.agent_index_value)
+                    .as_string(),
+                tool_metadata.get_agent_index(record.dst_agent_id, cfg.agent_index_value)
+                    .as_string(),
                 record.correlation_id.internal,
                 record.start_timestamp,
                 record.end_timestamp);
-
             ofs << row_ss.str();
         }
     }
@@ -465,13 +470,14 @@ generate_csv(const output_config&                                               
     {
         for(auto record : data.get(ditr))
         {
-            uint64_t agent_info{0};
+            auto agent_info = std::string{};
             // Free functions currently do not track agent information. Only set it on allocation
             // operations, otherwise set it to 0 currently
             if(record.operation == ROCPROFILER_MEMORY_ALLOCATION_ALLOCATE ||
                record.operation == ROCPROFILER_MEMORY_ALLOCATION_VMEM_ALLOCATE)
             {
-                agent_info = tool_metadata.get_node_id(record.agent_id);
+                agent_info = tool_metadata.get_agent_index(record.agent_id, cfg.agent_index_value)
+                                 .as_string();
             }
             auto api_name = tool_metadata.get_operation_name(record.kind, record.operation);
             auto row_ss   = std::stringstream{};
@@ -611,13 +617,16 @@ generate_csv(const output_config&                    cfg,
                     row_ss,
                     correlation_id.internal,
                     record.dispatch_data.dispatch_info.dispatch_id,
-                    tool_metadata.get_node_id(record.dispatch_data.dispatch_info.agent_id),
+                    tool_metadata
+                        .get_agent_index(record.dispatch_data.dispatch_info.agent_id,
+                                         cfg.agent_index_value)
+                        .as_string(),
                     record.dispatch_data.dispatch_info.queue_id.handle,
                     tool_metadata.process_id,
                     record.thread_id,
                     magnitude(record.dispatch_data.dispatch_info.grid_size),
                     record.dispatch_data.dispatch_info.kernel_id,
-                    tool_metadata.get_kernel_name(kernel_id, correlation_id.external.value),
+                    tool_metadata.get_kernel_name(kernel_id, record.kernel_rename_val),
                     magnitude(record.dispatch_data.dispatch_info.workgroup_size),
                     lds_block_size_v,
                     record.dispatch_data.dispatch_info.private_segment_size,
@@ -667,15 +676,16 @@ generate_csv(const output_config&                                               
             auto kind_name = tool_metadata.get_kind_name(record.kind);
             auto op_name   = tool_metadata.get_operation_name(record.kind, record.operation);
 
-            tool::csv::scratch_memory_encoder::write_row(row_ss,
-                                                         kind_name,
-                                                         op_name,
-                                                         tool_metadata.get_node_id(record.agent_id),
-                                                         record.queue_id.handle,
-                                                         record.thread_id,
-                                                         record.flags,
-                                                         record.start_timestamp,
-                                                         record.end_timestamp);
+            tool::csv::scratch_memory_encoder::write_row(
+                row_ss,
+                kind_name,
+                op_name,
+                tool_metadata.get_agent_index(record.agent_id, cfg.agent_index_value).as_string(),
+                record.queue_id.handle,
+                record.thread_id,
+                record.flags,
+                record.start_timestamp,
+                record.end_timestamp);
 
             ofs << row_ss.str();
         }

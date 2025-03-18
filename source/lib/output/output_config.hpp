@@ -23,6 +23,7 @@
 #pragma once
 
 #include "format_path.hpp"
+#include "metadata.hpp"
 
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
@@ -68,9 +69,11 @@ struct output_config
     bool                     otf2_output                 = false;
     bool                     summary_output              = false;
     bool                     kernel_rename               = false;
+    bool                     group_by_queue              = false;
     uint64_t                 stats_summary_unit_value    = 1;
     size_t                   perfetto_shmem_size_hint    = defaults::perfetto_shmem_size_hint_kb;
     size_t                   perfetto_buffer_size        = defaults::perfetto_buffer_size_kb;
+    agent_indexing           agent_index_value           = agent_indexing::logical_node;
     std::string              stats_summary_unit          = "nsec";
     std::string              output_path                 = "%cwd%";
     std::string              output_file                 = "%hostname%/%pid%";

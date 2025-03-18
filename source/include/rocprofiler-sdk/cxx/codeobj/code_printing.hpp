@@ -22,6 +22,9 @@
 
 #pragma once
 
+#include "disassembly.hpp"
+#include "segment.hpp"
+
 #include <elfutils/libdw.h>
 #include <hsa/amd_hsa_elf.h>
 
@@ -34,9 +37,6 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-
-#include "disassembly.hpp"
-#include "segment.hpp"
 
 namespace rocprofiler
 {
@@ -169,7 +169,7 @@ public:
     std::optional<uint64_t> va2fo(uint64_t vaddr) const
     {
         if(disassembly) return disassembly->va2fo(vaddr);
-        return {};
+        return std::nullopt;
     };
 
     std::unique_ptr<Instruction> disassemble_instruction(uint64_t faddr, uint64_t vaddr)

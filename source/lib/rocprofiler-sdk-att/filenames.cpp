@@ -50,12 +50,13 @@ FilenameMgr::~FilenameMgr()
                 [to_string(coord.id)] = {data.name, data.begin, data.end};
     }
 
-    nlohmann::json metadata = {{"global_begin_time", 0},
-                               {"gfxv", (gfxip > 9) ? "navi" : "vega"},
-                               {"gfxip", gfxip},
-                               {"version", TOOL_VERSION}};
+    const nlohmann::json metadata = {{"global_begin_time", 0},
+                                     {"gfxv", (gfxip > 9) ? "navi" : "vega"},
+                                     {"gfxip", gfxip},
+                                     {"version", TOOL_VERSION},
+                                     {"counter_names", perfcounters},
+                                     {"wave_filenames", namelist}};
 
-    metadata["wave_filenames"] = namelist;
     OutputFile(filename) << metadata;
 }
 

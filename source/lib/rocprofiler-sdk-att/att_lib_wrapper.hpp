@@ -47,9 +47,9 @@ struct CodeobjLoadInfo
 
 enum tool_att_capability_t
 {
-    ATT_CAPABILITIES_TESTING = 0,  // used for code coverage testing
-    ATT_CAPABILITIES_SUMMARY,      // used for CSV output only
-    ATT_CAPABILITIES_TRACE,        // used for all outputs
+    ATT_CAPABILITIES_TESTING1 = 0,  // used for code coverage testing
+    ATT_CAPABILITIES_TESTING2,      // used for code coverage testing
+    ATT_CAPABILITIES_TRACE,         // used for all outputs
     ATT_CAPABILITIES_DEBUG,
     ATT_CAPABILITIES_LAST = ATT_CAPABILITIES_DEBUG,
 };
@@ -77,6 +77,7 @@ public:
                const Fspath&                       output_dir,
                const std::vector<std::string>&     att_files,
                const std::vector<CodeobjLoadInfo>& codeobj_files,
+               const std::vector<std::string>&     counters_names,
                const std::string&                  output_formats);
 
     bool valid() const;
@@ -90,7 +91,7 @@ class ATTFileMgr
     using AddressTable = rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate;
 
 public:
-    ATTFileMgr(Fspath _dir, std::shared_ptr<DL> _dl);
+    ATTFileMgr(Fspath _dir, std::shared_ptr<DL> _dl, std::vector<std::string> _counters);
     ~ATTFileMgr();
 
     void parseShader(int se_id, const std::vector<char>& data);

@@ -78,7 +78,12 @@ typedef struct
 {
     uint64_t                     size;  ///< size of this struct
     rocprofiler_hip_api_args_t   args;
-    rocprofiler_hip_api_retval_t retval;
+    rocprofiler_hip_api_retval_t retval;  ///< return value of function call
+
+    /// @var args
+    /// @brief Arguments of the function call. @see
+    /// ::rocprofiler_iterate_callback_tracing_kind_operation_args for generic
+    /// access/stringification of the arguments.
 } rocprofiler_callback_tracing_hip_api_data_t;
 
 /**
@@ -328,6 +333,15 @@ typedef struct rocprofiler_callback_tracing_runtime_initialization_data_t
     ///
     /// Version number is encoded as: (10000 * MAJOR) + (100 * MINOR) + PATCH
 } rocprofiler_callback_tracing_runtime_initialization_data_t;
+
+/**
+ * @brief ROCProfiler Stream Handle Callback Data.
+ */
+typedef struct
+{
+    uint64_t                size;       ///< size of this struct
+    rocprofiler_stream_id_t stream_id;  ///< HIP stream ID
+} rocprofiler_callback_tracing_stream_handle_data_t;
 
 /**
  * @brief API Tracing callback function. This function is invoked twice per API function: once

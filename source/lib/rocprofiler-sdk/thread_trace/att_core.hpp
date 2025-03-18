@@ -25,6 +25,7 @@
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/code_object.hpp"
 
@@ -72,11 +73,9 @@ struct thread_trace_parameter_pack
     // GFX9 Only
     std::vector<std::pair<uint32_t, uint32_t>> perfcounters;
 
-    static constexpr size_t DEFAULT_SIMD                  = 0x7;
-    static constexpr size_t DEFAULT_PERFCOUNTER_SIMD_MASK = 0xF;
-    static constexpr size_t DEFAULT_SE_MASK               = 0x21;
-    static constexpr size_t DEFAULT_BUFFER_SIZE           = 0x8000000;
-    static constexpr size_t PERFCOUNTER_SIMD_MASK_SHIFT   = 28;
+    static constexpr size_t DEFAULT_SIMD        = 0xF;
+    static constexpr size_t DEFAULT_SE_MASK     = 0x1;
+    static constexpr size_t DEFAULT_BUFFER_SIZE = 0x8000000;
 
     bool are_params_valid() const;
 };
@@ -86,10 +85,7 @@ class ThreadTracerQueue
     using code_object_id_t = uint64_t;
 
 public:
-    ThreadTracerQueue(thread_trace_parameter_pack _params,
-                      const hsa::AgentCache&,
-                      const CoreApiTable&,
-                      const AmdExtTable&);
+    ThreadTracerQueue(thread_trace_parameter_pack _params, rocprofiler_agent_id_t);
     virtual ~ThreadTracerQueue();
 
     void load_codeobj(code_object_id_t id, uint64_t addr, uint64_t size);
@@ -98,17 +94,17 @@ public:
     std::unique_ptr<hsa::TraceControlAQLPacket> get_control(bool bStart);
     void iterate_data(aqlprofile_handle_t handle, rocprofiler_user_data_t data);
 
-    hsa_queue_t*                queue = nullptr;
+    hsa_queue_t* queue{nullptr};
+
     std::mutex                  trace_resources_mut;
     thread_trace_parameter_pack params;
     std::atomic<int>            active_traces{0};
-    std::atomic<int>            active_queues{1};
 
     std::unique_ptr<hsa::TraceControlAQLPacket>       control_packet;
     std::unique_ptr<aql::ThreadTraceAQLPacketFactory> factory;
 
     [[nodiscard]] std::unique_ptr<class Signal> Submit(hsa_ext_amd_aql_pm4_packet_t* packet,
-                                                       bool                          bWait);
+                                                       bool                          bWait) const;
 
     template <typename VecType>
     [[nodiscard]] std::unique_ptr<class Signal> SubmitAndSignalLast(VecType vec)
@@ -125,11 +121,6 @@ private:
     std::unique_ptr<code_object::CodeobjCallbackRegistry> codeobj_reg{nullptr};
 
     rocprofiler_agent_id_t agent_id;
-
-    decltype(hsa_queue_load_read_index_relaxed)* load_read_index_relaxed_fn{nullptr};
-    decltype(hsa_queue_add_write_index_relaxed)* add_write_index_relaxed_fn{nullptr};
-    decltype(hsa_signal_store_screlease)*        signal_store_screlease_fn{nullptr};
-    decltype(hsa_queue_destroy)*                 queue_destroy_fn{nullptr};
 };
 
 class DispatchThreadTracer
@@ -139,17 +130,21 @@ class DispatchThreadTracer
     using inst_pkt_t       = common::container::small_vector<std::pair<AQLPacketPtr, int64_t>, 4>;
 
 public:
-    DispatchThreadTracer(thread_trace_parameter_pack _params)
-    : params(std::move(_params))
-    {}
+    DispatchThreadTracer()  = default;
     ~DispatchThreadTracer() = default;
 
     void start_context();
     void stop_context();
-    void resource_init(const hsa::AgentCache&, const CoreApiTable&, const AmdExtTable&);
-    void resource_deinit(const hsa::AgentCache&);
+    void resource_init();
+    void resource_deinit();
 
-    std::unique_ptr<hsa::AQLPacket> pre_kernel_call(const hsa::Queue&              queue,
+    void add_agent(rocprofiler_agent_id_t agent, thread_trace_parameter_pack pack)
+    {
+        auto lk       = std::unique_lock{agents_map_mut};
+        params[agent] = std::move(pack);
+    }
+
+    hsa::Queue::pkt_and_serialize_t pre_kernel_call(const hsa::Queue&              queue,
                                                     uint64_t                       kernel_id,
                                                     rocprofiler_dispatch_id_t      dispatch_id,
                                                     rocprofiler_user_data_t*       user_data,
@@ -157,23 +152,22 @@ public:
 
     void post_kernel_call(inst_pkt_t& aql, const hsa::queue_info_session& session);
 
-    std::unordered_map<hsa_agent_t, std::unique_ptr<ThreadTracerQueue>> agents{};
+    std::unordered_map<hsa_agent_t, std::unique_ptr<ThreadTracerQueue>>     agents{};
+    std::unordered_map<rocprofiler_agent_id_t, thread_trace_parameter_pack> params{};
 
     std::shared_mutex agents_map_mut{};
     std::atomic<int>  post_move_data{0};
-
-    thread_trace_parameter_pack params{};
 };
 
-class AgentThreadTracer
+class DeviceThreadTracer
 {
 public:
-    AgentThreadTracer()  = default;
-    ~AgentThreadTracer() = default;
+    DeviceThreadTracer()  = default;
+    ~DeviceThreadTracer() = default;
 
     void start_context();
     void stop_context();
-    void resource_init(const CoreApiTable&, const AmdExtTable&);
+    void resource_init();
     void resource_deinit();
 
     void add_agent(rocprofiler_agent_id_t id, thread_trace_parameter_pack _params)
@@ -187,7 +181,7 @@ public:
         return params.find(id) != params.end();
     }
 
-    std::map<rocprofiler_agent_id_t, std::unique_ptr<ThreadTracerQueue>> tracers{};
+    std::map<rocprofiler_agent_id_t, std::unique_ptr<ThreadTracerQueue>> agents{};
     std::map<rocprofiler_agent_id_t, thread_trace_parameter_pack>        params{};
 
     std::mutex agent_mut;

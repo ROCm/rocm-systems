@@ -72,6 +72,7 @@ public:
     Fspath                    dir{};
     Fspath                    filename{};
     std::map<Coord, WaveName> streams{};
+    std::vector<std::string>  perfcounters{};
     int                       gfxip = 9;
 };
 

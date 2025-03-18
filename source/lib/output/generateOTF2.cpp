@@ -356,15 +356,15 @@ create_attribute_list()
 
 void
 write_otf2(
-    const output_config&                                             cfg,
-    const metadata&                                                  tool_metadata,
-    uint64_t                                                         pid,
-    const std::vector<agent_info>&                                   agent_data,
-    std::deque<rocprofiler_buffer_tracing_hip_api_record_t>*         hip_api_data,
-    std::deque<rocprofiler_buffer_tracing_hsa_api_record_t>*         hsa_api_data,
-    std::deque<rocprofiler_buffer_tracing_kernel_dispatch_record_t>* kernel_dispatch_data,
-    std::deque<rocprofiler_buffer_tracing_memory_copy_record_t>*     memory_copy_data,
-    std::deque<rocprofiler_buffer_tracing_marker_api_record_t>*      marker_api_data,
+    const output_config&                                                  cfg,
+    const metadata&                                                       tool_metadata,
+    uint64_t                                                              pid,
+    const std::vector<agent_info>&                                        agent_data,
+    std::deque<rocprofiler_buffer_tracing_hip_api_record_t>*              hip_api_data,
+    std::deque<rocprofiler_buffer_tracing_hsa_api_record_t>*              hsa_api_data,
+    std::deque<tool_buffer_tracing_kernel_dispatch_with_stream_record_t>* kernel_dispatch_data,
+    std::deque<tool_buffer_tracing_memory_copy_with_stream_record_t>*     memory_copy_data,
+    std::deque<rocprofiler_buffer_tracing_marker_api_record_t>*           marker_api_data,
     std::deque<rocprofiler_buffer_tracing_scratch_memory_record_t>* /*scratch_memory_data*/,
     std::deque<rocprofiler_buffer_tracing_rccl_api_record_t>*          rccl_api_data,
     std::deque<rocprofiler_buffer_tracing_memory_allocation_record_t>* memory_allocation_data,
@@ -476,15 +476,13 @@ write_otf2(
     {
         for(auto& [agent, evt] : itr)
         {
-            const auto* _agent     = _get_agent(agent);
-            auto        _type_name = std::string_view{"UNK"};
-            if(_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
-                _type_name = "CPU";
-            else if(_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-                _type_name = "GPU";
-
-            evt.name = fmt::format(
-                "Thread {}, Copy to {} {}", tid, _type_name, _agent->logical_node_type_id);
+            const auto* _agent = _get_agent(agent);
+            auto        agent_index_info =
+                tool_metadata.get_agent_index(_agent->id, cfg.agent_index_value);
+            evt.name = fmt::format("Thread {}, Copy to {} {}",
+                                   tid,
+                                   agent_index_info.type,
+                                   agent_index_info.as_string("-"));
         }
     }
 
@@ -501,16 +499,20 @@ write_otf2(
             {
                 _agent = _get_agent(agent);
             }
-            auto _type_name = std::string_view{"UNK"};
-            if(_agent != nullptr && _agent->type == ROCPROFILER_AGENT_TYPE_CPU)
-                _type_name = "CPU";
-            else if(_agent != nullptr && _agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-                _type_name = "GPU";
-
-            evt.name = fmt::format("Thread {}, Memory Operation at {} {}",
-                                   tid,
-                                   _type_name,
-                                   _agent == nullptr ? 0 : _agent->logical_node_type_id);
+            if(_agent)
+            {
+                auto agent_index_info =
+                    tool_metadata.get_agent_index(_agent->id, cfg.agent_index_value);
+                evt.name = fmt::format("Thread {}, Memory Operation at {} {}",
+                                       tid,
+                                       agent_index_info.type,
+                                       agent_index_info.as_string("-"));
+            }
+            else
+            {
+                auto _type_name = std::string_view{"UNK"};
+                evt.name = fmt::format("Thread {}, Memory Operation at {} {}", tid, _type_name, 0);
+            }
         }
     }
 
@@ -532,17 +534,13 @@ write_otf2(
         {
             for(auto& [queue, evt] : qitr)
             {
-                const auto* _agent     = _get_agent(agent);
-                auto        _type_name = std::string_view{"UNK"};
-                if(_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
-                    _type_name = "CPU";
-                else if(_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-                    _type_name = "GPU";
-
+                const auto* _agent = _get_agent(agent);
+                auto        agent_index_info =
+                    tool_metadata.get_agent_index(_agent->id, cfg.agent_index_value);
                 evt.name = fmt::format("Thread {}, Compute on {} {}, Queue {}",
                                        tid,
-                                       _type_name,
-                                       _agent->logical_node_type_id,
+                                       agent_index_info.type,
+                                       agent_index_info.as_string("-"),
                                        _queue_ids.at(queue));
             }
         }
@@ -678,8 +676,7 @@ write_otf2(
         const auto* sym  = _get_kernel_sym_data(info);
         CHECK(sym != nullptr);
 
-        auto name =
-            tool_metadata.get_kernel_name(info.kernel_id, itr.correlation_id.external.value);
+        auto name = tool_metadata.get_kernel_name(info.kernel_id, itr.kernel_rename_val);
         _hash_data.emplace(
             get_hash_id(name),
             region_info{std::string{name}, OTF2_REGION_ROLE_FUNCTION, OTF2_PARADIGM_HIP});

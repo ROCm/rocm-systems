@@ -178,6 +178,8 @@ typedef enum  // NOLINT(performance-enum-size)
                                                           ///< library has been initialized
     ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API,           ///< rocDecode API Tracing
     ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API,             ///< rocJPEG API Tracing
+    ROCPROFILER_CALLBACK_TRACING_HIP_STREAM_API,          ///< @see
+                                                          ///< ::rocprofiler_hip_stream_operation_t
     ROCPROFILER_CALLBACK_TRACING_LAST,
 } rocprofiler_callback_tracing_kind_t;
 
@@ -209,8 +211,9 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_BUFFER_TRACING_RUNTIME_INITIALIZATION,  ///< Record indicating a runtime library has
                                                         ///< been initialized. @see
                                                         ///< ::rocprofiler_runtime_initialization_operation_t
-    ROCPROFILER_BUFFER_TRACING_ROCDECODE_API,  ///< rocDecode tracing
-    ROCPROFILER_BUFFER_TRACING_ROCJPEG_API,    ///< rocJPEG tracing
+    ROCPROFILER_BUFFER_TRACING_ROCDECODE_API,   ///< rocDecode tracing
+    ROCPROFILER_BUFFER_TRACING_ROCJPEG_API,     ///< rocJPEG tracing
+    ROCPROFILER_BUFFER_TRACING_HIP_STREAM_API,  ///< Display HIP Stream
     ROCPROFILER_BUFFER_TRACING_LAST,
 } rocprofiler_buffer_tracing_kind_t;
 
@@ -225,6 +228,23 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_CODE_OBJECT_HOST_KERNEL_SYMBOL_REGISTER,    ///< Kernel symbols - Host
     ROCPROFILER_CODE_OBJECT_LAST,
 } rocprofiler_code_object_operation_t;
+
+/**
+ * @brief ROCProfiler Stream Handle Operations.
+ */
+typedef enum  // NOLINT(performance-enum-size)
+{
+    ROCPROFILER_HIP_STREAM_NONE = 0,  ///< Unknown stream handle operation
+    ROCPROFILER_HIP_STREAM_CREATE,    ///< A stream handle is created
+    ROCPROFILER_HIP_STREAM_DESTROY,   ///< A stream handle is destroyed
+    ROCPROFILER_HIP_STREAM_SET,
+    ROCPROFILER_HIP_STREAM_LAST,
+
+    /// @var ROCPROFILER_HIP_STREAM_SET
+    /// @brief Invokes callbacks before and after a HIP API, kernel dispatch, or memory copy
+    /// operation that has a stream handle associated with it. HIP API calls will always have a
+    /// stream, but kernel dispatches and memory copy operations may or may not.
+} rocprofiler_hip_stream_operation_t;
 
 /**
  * @brief Memory Copy Operations.
@@ -556,7 +576,7 @@ typedef union rocprofiler_uuid_t
 /**
  * @brief Context ID.
  */
-typedef struct
+typedef struct rocprofiler_context_id_t
 {
     uint64_t handle;
 } rocprofiler_context_id_t;
@@ -564,15 +584,23 @@ typedef struct
 /**
  * @brief Queue ID.
  */
-typedef struct
+typedef struct rocprofiler_queue_id_t
 {
     uint64_t handle;
 } rocprofiler_queue_id_t;
 
 /**
+ * @brief Stream ID.
+ */
+typedef struct rocprofiler_stream_id_t
+{
+    uint64_t handle;
+} rocprofiler_stream_id_t;
+
+/**
  * @brief ROCProfiler Record Correlation ID.
  */
-typedef struct
+typedef struct rocprofiler_correlation_id_t
 {
     uint64_t                internal;
     rocprofiler_user_data_t external;
@@ -587,7 +615,7 @@ typedef struct
  * @struct rocprofiler_buffer_id_t
  * @brief Buffer ID.
  */
-typedef struct
+typedef struct rocprofiler_buffer_id_t
 {
     uint64_t handle;
 } rocprofiler_buffer_id_t;
@@ -595,7 +623,7 @@ typedef struct
 /**
  * @brief Agent Identifier
  */
-typedef struct
+typedef struct rocprofiler_agent_id_t
 {
     uint64_t handle;
 } rocprofiler_agent_id_t;
@@ -603,7 +631,7 @@ typedef struct
 /**
  * @brief Counter ID.
  */
-typedef struct
+typedef struct rocprofiler_counter_id_t
 {
     uint64_t handle;
 } rocprofiler_counter_id_t;
@@ -612,7 +640,7 @@ typedef struct
  * @brief Profile Configurations
  * @see rocprofiler_create_profile_config for how to create.
  */
-typedef struct
+typedef struct rocprofiler_profile_config_id_t
 {
     uint64_t handle;  // Opaque handle
 } rocprofiler_profile_config_id_t;

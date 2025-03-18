@@ -76,17 +76,18 @@ auto
 findDeviceMetrics(const hsa::AgentCache& agent, const std::unordered_set<std::string>& metrics)
 {
     std::vector<counters::Metric> ret;
-    auto                          all_counters = counters::getMetricMap();
+    auto                          mets         = counters::loadMetrics();
+    const auto&                   all_counters = mets->arch_to_metric;
 
     ROCP_INFO << "Looking up counters for " << std::string(agent.name());
-    auto gfx_metrics = common::get_val(*all_counters, std::string(agent.name()));
+    const auto* gfx_metrics = common::get_val(all_counters, std::string(agent.name()));
     if(!gfx_metrics)
     {
         ROCP_ERROR << "No counters found for " << std::string(agent.name());
         return ret;
     }
 
-    for(auto& counter : *gfx_metrics)
+    for(const auto& counter : *gfx_metrics)
     {
         if(metrics.count(counter.name()) > 0 || metrics.empty())
         {
@@ -246,12 +247,13 @@ TEST(core, check_packet_generation)
              * Check that required hardware counters match
              */
             ASSERT_TRUE(profile->agent);
-            auto name_str = std::string(profile->agent->name);
-            auto req_counters =
-                counters::get_required_hardware_counters(counters::get_ast_map(), name_str, metric);
+            auto       name_str     = std::string(profile->agent->name);
+            const auto asts         = counters::get_ast_map();
+            auto       req_counters = counters::get_required_hardware_counters(
+                asts->arch_to_counter_asts, name_str, metric);
             for(const auto& req_metric : *req_counters)
             {
-                if(req_metric.special().empty())
+                if(req_metric.constant().empty())
                 {
                     EXPECT_GT(profile->reqired_hw_counters.count(req_metric), 0)
                         << "Could not find metric - " << req_metric.name();
@@ -442,8 +444,8 @@ TEST(core, check_callbacks)
                                               extern_ids,
                                               &corr_id);
 
-            ASSERT_TRUE(ret_pkt) << fmt::format("Expected a packet to be generated for - {}",
-                                                metric.name());
+            ASSERT_TRUE(ret_pkt.pkt)
+                << fmt::format("Expected a packet to be generated for - {}", metric.name());
 
             /**
              * Create the buffer and run test
@@ -467,7 +469,7 @@ TEST(core, check_callbacks)
 
             counters::inst_pkt_t pkts;
             pkts.emplace_back(
-                std::make_pair(std::move(ret_pkt), static_cast<counters::ClientID>(0)));
+                std::make_pair(std::move(ret_pkt.pkt), static_cast<counters::ClientID>(0)));
             completed_cb(&ctx, cb_info, sess, pkts, kernel_dispatch::profiling_time{});
             rocprofiler_flush_buffer(opt_buff_id);
             rocprofiler_destroy_buffer(opt_buff_id);
@@ -755,7 +757,7 @@ TEST(core, check_load_counter_def_append)
     const std::string test_yaml = R"(
 TEST_YAML_LOAD:
   architectures:
-    gfx942/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx90a/gfx9/gfx12/gfx1200/gfx1201:
+    gfx950/gfx942/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx90a/gfx9/gfx12/gfx1200/gfx1201:
       expression: reduce(GRBM_GUI_ACTIVE,max)*CU_NUM
   description: 'Unit: cycles'
     )";
@@ -782,13 +784,13 @@ TEST(core, check_load_counter_def)
     const std::string test_yaml = R"(
 GRBM_GUI_ACTIVE:
   architectures:
-    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx900/gfx90a/gfx9/gfx12/gfx1200/gfx1201:
+    gfx950/gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx900/gfx90a/gfx9/gfx12/gfx1200/gfx1201:
       block: GRBM
       event: 2
   description: The GUI is Active
 TEST_YAML_LOAD:
   architectures:
-    gfx942/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx90a/gfx9/gfx12/gfx1200/gfx1201:
+    gfx950/gfx942/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx90a/gfx9/gfx12/gfx1200/gfx1201:
       expression: reduce(GRBM_GUI_ACTIVE,max)
   description: cycles
     )";
@@ -809,5 +811,49 @@ TEST_YAML_LOAD:
         EXPECT_EQ(
             findDeviceMetrics(agent, {"TEST_YAML_LOAD", "GRBM_GUI_ACTIVE", "MAX_WAVE_SIZE"}).size(),
             2);
+    }
+}
+
+TEST(core, create_counter)
+{
+    std::vector<Metric> to_add = {
+        Metric("", "SQ_WAVES_REDUCE_T", "", "", "", "reduce(SQ_WAVES,sum)", "", 10000),
+        Metric("", "SQ_WAVES_AVR_T", "", "", "", "reduce(SQ_WAVES,avr)", "", 10001),
+        Metric("", "SQ_WAVES_INVALID", "", "", "", "reduce(ABC,avr)", "", 10002),
+    };
+
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+    auto agents = hsa::get_queue_controller()->get_supported_agents();
+    for(const auto& [_, agent] : agents)
+    {
+        for(auto& metric : to_add)
+        {
+            rocprofiler_counter_id_t id;
+            auto                     status  = rocprofiler_create_counter(metric.name().c_str(),
+                                                     metric.name().size(),
+                                                     metric.expression().c_str(),
+                                                     metric.expression().size(),
+                                                     metric.description().c_str(),
+                                                     metric.description().size(),
+                                                     agent.get_rocp_agent()->id,
+                                                     &id);
+            auto                     metrics = findDeviceMetrics(agent, {metric.name()});
+            if(metric.name() == "SQ_WAVES_INVALID")
+            {
+                EXPECT_EQ(status, ROCPROFILER_STATUS_ERROR_AST_GENERATION_FAILED);
+                EXPECT_TRUE(metrics.empty());
+            }
+            else
+            {
+                EXPECT_EQ(metrics.size(), 1);
+                EXPECT_EQ(metric.name(), metrics[0].name());
+                EXPECT_EQ(metric.expression(), metrics[0].expression());
+            }
+        }
     }
 }

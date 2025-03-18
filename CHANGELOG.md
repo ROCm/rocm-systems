@@ -158,16 +158,24 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - SDK: `rocprofiler_agent_v0_t` support for agent UUIDs
 - SDK: `rocprofiler_agent_v0_t` support for agent visibility based on gpu isolation environment variables such as `ROCR_VISIBLE_DEVICES` and so on.
 - Accumulation VGPR support for `rocprofv3`.
+-  Added `--agent-index` option in rocprofv3 to specify the agent naming convention in the output
+    - absolute == node_id
+    - relative == logical_node_id
+    - type-relative == logical_node_type_id
 
 ## ROCprofiler-SDK 0.7.0 for ROCm release 6.5
 
 ### Added
 
 - Added support for rocJPEG API Tracing
+- Added MI350X/MI355X support
+- Added rocprofiler_create_counter to allow for adding custom derived counters at runtime.
+- Added support for iteration based counter multiplexing to rocprofv3 (see documentation)
 
 ### Changed
 
 - SDK no longer creates a background thread when every tool returns a nullptr from `rocprofiler_configure`.
+- Updated disassembly.hpp's vaddr-to-file-offset mapping to use the dedicated comgr API.
 
 ### Resolved issues
 
@@ -175,14 +183,4 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Removed
 
-## ROCprofiler-SDK 0.7.0 for ROCm release 6.5
-
-### Added
-
-- Added support for rocJPEG API Tracing.
-
-### Changed
-
-### Resolved issues
-
-### Removed
+- Support of gfx940 and gfx941 targets from compilation

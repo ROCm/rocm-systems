@@ -8,7 +8,8 @@
             "output_file": "out",
             "output_format": [
                 "csv"
-            ]
+            ],
+            "agent_index": "type-relative" 
         }
     ]
 }

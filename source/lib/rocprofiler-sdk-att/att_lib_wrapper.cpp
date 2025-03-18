@@ -48,13 +48,13 @@ get_lib_names()
     std::vector<std::pair<tool_att_capability_t, const char*>> lib_names = {
         {tool_att_capability_t::ATT_CAPABILITIES_DEBUG, "libatt_decoder_debug.so"},
         {tool_att_capability_t::ATT_CAPABILITIES_TRACE, "libatt_decoder_trace.so"},
-        {tool_att_capability_t::ATT_CAPABILITIES_SUMMARY, "libatt_decoder_summary.so"},
-        {tool_att_capability_t::ATT_CAPABILITIES_TESTING, "libatt_decoder_testing.so"},
+        {tool_att_capability_t::ATT_CAPABILITIES_TESTING1, "libatt_decoder_testing1.so"},
+        {tool_att_capability_t::ATT_CAPABILITIES_TESTING2, "libatt_decoder_testing2.so"},
     };
     return lib_names;
 }
 
-ATTFileMgr::ATTFileMgr(Fspath _dir, std::shared_ptr<DL> _dl)
+ATTFileMgr::ATTFileMgr(Fspath _dir, std::shared_ptr<DL> _dl, std::vector<std::string> _counters)
 : dir(std::move(_dir))
 , dl(std::move(_dl))
 {
@@ -62,8 +62,10 @@ ATTFileMgr::ATTFileMgr(Fspath _dir, std::shared_ptr<DL> _dl)
     table     = std::make_shared<AddressTable>();
     codefile  = std::make_shared<CodeFile>(dir, table);
     filenames = std::make_shared<FilenameMgr>(dir);
+
     for(size_t i = 0; i < ATT_WAVE_STATE_LAST; i++)
         wstates.at(i) = std::make_shared<WstatesFile>(i, dir);
+    filenames->perfcounters = std::move(_counters);
 }
 
 ATTFileMgr::~ATTFileMgr() { OccupancyFile::OccupancyFile(dir, table, occupancy); }
@@ -124,6 +126,7 @@ ATTDecoder::parse(const Fspath&                       input_dir,
                   const Fspath&                       output_dir,
                   const std::vector<std::string>&     att_files,
                   const std::vector<CodeobjLoadInfo>& codeobj_files,
+                  const std::vector<std::string>&     counters_names,
                   const std::string&                  output_formats)
 {
     auto& formats = GlobalDefs::get().output_formats;
@@ -132,7 +135,7 @@ ATTDecoder::parse(const Fspath&                       input_dir,
         return std::tolower(c);
     });
 
-    ATTFileMgr mgr(output_dir, dl);
+    ATTFileMgr mgr(output_dir, dl, counters_names);
 
     for(const auto& file : codeobj_files)
     {

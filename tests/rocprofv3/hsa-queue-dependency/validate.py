@@ -73,7 +73,7 @@ def test_kernel_trace(kernel_trace_input_data):
     assert len(kernel_trace_input_data) == 3
     for row in kernel_trace_input_data:
         assert row["Kind"] == "KERNEL_DISPATCH"
-        assert int(row["Agent_Id"]) > 0
+        assert int(row["Agent_Id"].split(" ")[-1]) >= 0
         assert int(row["Queue_Id"]) > 0
         assert int(row["Kernel_Id"]) > 0
         assert row["Kernel_Name"] in valid_kernel_names

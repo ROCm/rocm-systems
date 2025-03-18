@@ -38,7 +38,8 @@ counters_list = ["SQ_WAVES", "GRBM_GUI_ACTIVE"]
 def test_validate_counter_collection_pmc1(input_data: pd.DataFrame):
     df = input_data
     assert not df.empty
-    assert (df["Agent_Id"].astype(int).values > 0).all()
+    df_agent_id = df["Agent_Id"].str.split(" ").str[-1]
+    assert (df_agent_id.astype(int).values >= 0).all()
     assert (df["Queue_Id"].astype(int).values > 0).all()
     assert len(df["Kernel_Name"]) > 0
 

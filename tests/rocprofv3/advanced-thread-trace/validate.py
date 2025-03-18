@@ -19,11 +19,14 @@ def test_code_object_memory(code_object_file_path, json_data, output_path):
     data = json_data["rocprofiler-sdk-tool"]
     tool_memory_load = data["strings"]["code_object_snapshot_filenames"]
     gfx_pattern = "gfx[a-z0-9]+"
-    match = re.search(gfx_pattern, tool_memory_load[0])
+    match = re.search(gfx_pattern, tool_memory_load[1])
     assert match != None
     gpu_name = match.group(0)
-    tool_memory_load_1 = open(os.path.join(output_path, tool_memory_load[0]), "rb")
-    tool_memory_load_2 = open(os.path.join(output_path, tool_memory_load[1]), "rb")
+
+    read_bytes = lambda filename: open(os.path.join(output_path, filename), "rb").read()
+    # Loads all saved code objects
+    tool_memory = [read_bytes(saved) for saved in tool_memory_load[1:]]
+
     found = False
     for hsa_file in code_object_file_path["hsa_memory_load"]:
 
@@ -33,11 +36,9 @@ def test_code_object_memory(code_object_file_path, json_data, output_path):
 
         if gpu == gpu_name:
             found = True
-            hsa_memory_load = open(hsa_file, "rb")
-            hsa_memory_fs = hsa_memory_load.read()
-            tool_memory_fs_1 = tool_memory_load_1.read()
-            tool_memory_fs_2 = tool_memory_load_2.read()
-            assert hsa_memory_fs == tool_memory_fs_2 or hsa_memory_fs == tool_memory_fs_1
+            hsa_memory_bytes = open(hsa_file, "rb").read()
+            # Checks if hsa_file is one of the saved code objects
+            assert any([hsa_memory_bytes == fs for fs in tool_memory])
             break
     assert found == True
 

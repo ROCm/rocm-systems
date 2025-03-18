@@ -39,7 +39,9 @@ def test_multi_agent_support(
 
     mi2xx_mi3xx_agents_df = input_agent_info_csv[
         input_agent_info_csv["Name"].apply(
-            lambda name: name == "gfx90a" or name.startswith("gfx94")
+            lambda name: name == "gfx90a"
+            or name.startswith("gfx94")
+            or name.startswith("gfx95")
         )
     ]
 
@@ -49,7 +51,11 @@ def test_multi_agent_support(
     # Determine the agent on which sample was generated
     samples_df["Agent_Id"] = (
         samples_df["Dispatch_Id"]
-        .map(input_kernel_trace_csv.set_index("Dispatch_Id")["Agent_Id"])
+        .map(
+            input_kernel_trace_csv.set_index("Dispatch_Id")["Agent_Id"]
+            .str.split(" ")
+            .str[1]
+        )
         .astype(np.uint64)
     )
     sampled_agents = samples_df["Agent_Id"].unique()

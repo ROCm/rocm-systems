@@ -156,7 +156,7 @@ run_vector_ops_impl(int num_queue, int device_id)
 
     std::vector<hipStream_t> streams(num_queue);
 
-    auto sync_stream = [num_queue, streams](int q) {
+    auto sync_stream = [num_queue, &streams](int q) {
         if(q < 0 || q >= num_queue)
             throw std::runtime_error{std::string{"invalid stream id: "} + std::to_string(q)};
 

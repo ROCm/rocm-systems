@@ -22,11 +22,11 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import os
-import sys
 import argparse
-import subprocess
+import os
 import re
+import subprocess
+import sys
 
 
 class dotdict(dict):
@@ -44,7 +44,7 @@ class dotdict(dict):
             elif isinstance(v, (list, tuple)):
                 self.__setitem__(
                     k,
-                    [dotdict(i) if isinstance(i, (list, tuple, dict)) else i for i in v],
+                    [dotdict(i) if isinstance(i, (dict)) else i for i in v],
                 )
 
 
@@ -90,7 +90,7 @@ def strtobool(val):
 
 def search_path(path_list):
     supported_option = []
-    lib_att_pattern = r"libatt_decoder_(trace|summary|debug|testing)\.so"
+    lib_att_pattern = r"libatt_decoder_(trace|debug|testing1|testing2)\.so"
     file_list = []
 
     for path in path_list:
@@ -100,7 +100,7 @@ def search_path(path_list):
         for itr in file_list:
             _match = re.match(lib_att_pattern, itr)
             if _match:
-                lst = re.findall("trace|debug|summary|testing", itr)
+                lst = re.findall("trace|debug|testing1|testing2", itr)
                 supported_option.extend(lst)
     return set(supported_option)
 
@@ -542,6 +542,12 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         help="List available PC sampling configurations and metrics for counter collection. Backed by a valid YAML file. In earlier rocprof versions, this was known as --list-basic, --list-derived and --list-counters",
     )
 
+    add_parser_bool_argument(
+        display_options,
+        "--group-by-queue",
+        help="For displaying the HIP streams that kernels and memory copy operations are submitted to rather than HSA queues.",
+    )
+
     advanced_options = parser.add_argument_group("Advanced options")
 
     advanced_options.add_argument(
@@ -567,6 +573,20 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         advanced_options,
         "--realpath",
         help=argparse.SUPPRESS,
+    )
+    advanced_options.add_argument(
+        "-A",
+        "--agent-index",
+        choices=("absolute", "relative", "type-relative"),
+        help="""absolute == node_id, e.g. Agent-0, Agent-2, Agent-4- absolute index of the agent regardless of cgroups masking.
+        This is a monotonically increasing number that is incremented for every folder in /sys/class/kfd/kfd/topology/nodes.
+    relative == logical_node_id,
+        e.g. Agent-0, Agent-1, Agent-2- relative index of the agent accounting for cgroups masking.
+        This is a monotonically increasing number which is incremented for every folder in /sys/class/kfd/kfd/topology/nodes/ whose properties file was non-empty.
+    type-relative == logical_node_type_id,
+        e.g. CPU-0, GPU-0, GPU-1- relative index of the agent accounting for cgroups masking where indexing starts at zero for each agent type.
+        It is a monotonically increasing number for each agent type and is incremented for every type folder in /sys/class/kfd/kfd/topology/nodes/ whose properties file is non-empty.
+        If agent-index is not provided then the default value for it is relative.""",
     )
     # below is available for CI because LD_PRELOADing a library linked to a sanitizer library
     # causes issues in apps where HIP is part of shared library.
@@ -660,6 +680,20 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
             ),
             help="Select ATT Parse method from the choices",
             choices=set(choice_list),
+        )
+
+        att_options.add_argument(
+            "--att-perfcounters",
+            help="Set performance counters, and optionally their mask",
+            default=None,
+            type=str.upper,
+        )
+
+        att_options.add_argument(
+            "--att-perfcounter-ctrl",
+            help="Integer in [0,32] range specifying collection period.",
+            default=None,
+            type=int,
         )
 
         add_parser_bool_argument(
@@ -1029,6 +1063,7 @@ def run(app_args, args, **kwargs):
             ["memory_copy_trace", "MEMORY_COPY_TRACE"],
             ["memory_allocation_trace", "MEMORY_ALLOCATION_TRACE"],
             ["scratch_memory_trace", "SCRATCH_MEMORY_TRACE"],
+            ["group_by_queue", "GROUP_BY_QUEUE"],
         ]
     ).items():
         val = getattr(args, f"{opt}")
@@ -1202,16 +1237,42 @@ def run(app_args, args, **kwargs):
     if args.kernel_iteration_range:
         update_env("ROCPROF_KERNEL_FILTER_RANGE", ", ".join(args.kernel_iteration_range))
 
+    if args.agent_index:
+        update_env("ROCPROF_AGENT_INDEX", args.agent_index)
+
     if args.extra_counters is not None:
         with open(args.extra_counters, "r") as e_file:
             e_file_contents = e_file.read()
             update_env("ROCPROF_EXTRA_COUNTERS_CONTENTS", e_file_contents, overwrite=True)
+
+    if args.pmc and args.pmc_groups:
+        fatal_error("Cannot specify both --pmc and --pmc-groups")
 
     if args.pmc:
         update_env("ROCPROF_COUNTER_COLLECTION", True, overwrite=True)
         update_env(
             "ROCPROF_COUNTERS", "pmc: {}".format(" ".join(args.pmc)), overwrite=True
         )
+
+    if args.pmc_groups:
+        group_env = ""
+        update_env("ROCPROF_COUNTER_COLLECTION", True, overwrite=True)
+
+        for row in map(" ".join, args.pmc_groups):
+            # pmc: added to allow for the same parser to be shared between the two
+            #      counter collection modes. Output will be new line delimited between
+            #      groups.
+            group_env += f"pmc: {row}\n"
+        group_env = group_env.rstrip()
+
+        update_env("ROCPROF_COUNTER_GROUPS", group_env, overwrite=True)
+
+        if args.pmc_group_interval:
+            update_env(
+                "ROCPROF_COUNTER_GROUPS_INTERVAL",
+                f"{str(args.pmc_group_interval)}",
+                overwrite=True,
+            )
 
     if args.pc_sampling_unit or args.pc_sampling_method or args.pc_sampling_interval:
 
@@ -1258,15 +1319,13 @@ def run(app_args, args, **kwargs):
                     f"{type(num_str)} is not supported. {num_str} should be of type integer or string."
                 )
 
-        if args.pmc or (
+        if (
             args.pc_sampling_beta_enabled
             or args.pc_sampling_unit
             or args.pc_sampling_method
             or args.pc_sampling_interval
         ):
-            fatal_error(
-                "Advanced thread trace cannot be enabled with counter collection or pc sampling"
-            )
+            fatal_error("Advanced thread trace cannot be enabled with pc sampling")
 
         if not args.att_parse:
             fatal_error("provide the parser choice")
@@ -1311,12 +1370,24 @@ def run(app_args, args, **kwargs):
                 ":".join(args.att_library_path),
                 overwrite=True,
             )
-        if args.att_percounters:
-            update_env(
-                "ROCPROF_ATT_PARAM_PERFCOUNTERS",
-                " ".join(args.att_perfcounters),
-                overwrite=True,
-            )
+        if args.att_perfcounters:
+            if args.pmc:
+                fatal_error("ATT perfcounters cannot be enabled with PMC")
+            else:
+                update_env(
+                    "ROCPROF_ATT_PARAM_PERFCOUNTERS",
+                    args.att_perfcounters,
+                    overwrite=True,
+                )
+        if args.att_perfcounter_ctrl:
+            if args.pmc:
+                fatal_error("ATT perfcounters cannot be enabled with PMC")
+            else:
+                update_env(
+                    "ROCPROF_ATT_PARAM_PERFCOUNTER_CTRL",
+                    args.att_perfcounter_ctrl,
+                    overwrite=True,
+                )
 
     if args.log_level in ("info", "trace", "env"):
         log_config(app_env)

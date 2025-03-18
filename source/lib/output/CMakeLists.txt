@@ -25,6 +25,7 @@ set(TOOL_OUTPUT_HEADERS
     output_key.hpp
     output_stream.hpp
     statistics.hpp
+    stream_info.hpp
     timestamps.hpp
     tmp_file_buffer.hpp
     tmp_file.hpp)

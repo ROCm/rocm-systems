@@ -37,6 +37,7 @@ namespace counters
 constexpr uint64_t COUNTER_BIT_LENGTH = 16;
 constexpr uint64_t DIM_BIT_LENGTH     = 48;
 constexpr uint64_t MAX_64             = std::numeric_limits<uint64_t>::max();
+constexpr uint64_t BITS_IN_UINT64     = std::numeric_limits<uint64_t>::digits;
 enum rocprofiler_profile_counter_instance_types
 {
     ROCPROFILER_DIMENSION_NONE = 0,       ///< No dimension data, returns/sets 48 bit value as is
@@ -86,7 +87,7 @@ rocprofiler::counters::set_dim_in_rec(rocprofiler_counter_instance_id_t&        
                                       rocprofiler_profile_counter_instance_types dim,
                                       size_t                                     value)
 {
-    size_t bit_length = DIM_BIT_LENGTH / ROCPROFILER_DIMENSION_LAST;
+    uint64_t bit_length = DIM_BIT_LENGTH / ROCPROFILER_DIMENSION_LAST;
 
     if(dim == ROCPROFILER_DIMENSION_NONE)
     {
@@ -96,16 +97,17 @@ rocprofiler::counters::set_dim_in_rec(rocprofiler_counter_instance_id_t&        
     }
     else
     {
+        uint64_t mask = (MAX_64 >> (BITS_IN_UINT64 - bit_length)) << ((dim - 1) * bit_length);
         // Reset bits to 0 for dimension. Does so by getting the bit length as F's then
         // shifiting that into the position of dim. Not's that value and then and's it
         // with id.
-        uint64_t mask = (MAX_64 >> (64 - bit_length)) << ((dim - 1) * bit_length);
-        id            = (id & ~(mask));
+        id = (id & ~(mask));
         // Set the value for the dimenstion
         id = id | (value << ((dim - 1) * bit_length));
     }
 
-    CHECK(value <= (MAX_64 >> (64 - bit_length))) << "Dimension value exceeds max allowed";
+    CHECK(value <= (MAX_64 >> (BITS_IN_UINT64 - bit_length)))
+        << "Dimension value exceeds max allowed";
 }
 
 inline void
@@ -115,7 +117,7 @@ rocprofiler::counters::set_counter_in_rec(rocprofiler_counter_instance_id_t& id,
     // Maximum counter value given the current setup.
     CHECK(value.handle <= 0xffff) << "Counter id exceeds max allowed";
     // Reset bits to 0 for counter id
-    id = id & ~((MAX_64 >> (64 - DIM_BIT_LENGTH)) << (DIM_BIT_LENGTH));
+    id = id & ~((MAX_64 >> (BITS_IN_UINT64 - DIM_BIT_LENGTH)) << (DIM_BIT_LENGTH));
     // Set the value for the dimenstion
     id = id | (value.handle << (DIM_BIT_LENGTH));
 }
@@ -131,6 +133,6 @@ rocprofiler::counters::rec_to_dim_pos(rocprofiler_counter_instance_id_t         
     }
 
     size_t bit_length = DIM_BIT_LENGTH / ROCPROFILER_DIMENSION_LAST;
-    id                = id & ((MAX_64 >> (64 - bit_length)) << ((dim - 1) * bit_length));
+    id = id & ((MAX_64 >> (BITS_IN_UINT64 - bit_length)) << ((dim - 1) * bit_length));
     return id >> ((dim - 1) * bit_length);
 }

@@ -37,7 +37,7 @@ class ATTDecoderTest : public ATTDecoder
 {
 public:
     ATTDecoderTest()
-    : ATTDecoder(rocprofiler::att_wrapper::tool_att_capability_t::ATT_CAPABILITIES_TESTING)
+    : ATTDecoder(rocprofiler::att_wrapper::tool_att_capability_t::ATT_CAPABILITIES_TESTING1)
     {
         rocprofiler::att_wrapper::OutputFile::Enabled() = false;
         GlobalDefs::get().output_formats                = "json,csv";
@@ -46,7 +46,7 @@ public:
 
     void test_parse()
     {
-        ATTFileMgr mgr("out/", dl);
+        ATTFileMgr mgr("out/", dl, {});
 
         auto append_isa = [&](const char* line) {
             // matches addresses in dummy_decoder.cpp
@@ -107,7 +107,7 @@ TEST(att_decoder_test, warn_failures)
     ATTDecoderTest decoder;
     ROCP_FATAL_IF(!decoder.valid()) << "Failed to initialize decoder library!";
 
-    decoder.parse(".", ".", att_files, codeobjs, "csv,json");
+    decoder.parse(".", ".", att_files, codeobjs, {}, "csv,json");
 }
 
 TEST(att_decoder_test, code_write)

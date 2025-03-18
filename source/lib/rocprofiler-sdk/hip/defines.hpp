@@ -46,6 +46,8 @@
         using domain_type::retval_type;                                                            \
         using domain_type::callback_data_type;                                                     \
                                                                                                    \
+        static constexpr auto get_args_type() { return common::mpl::type_list<>{}; }               \
+                                                                                                   \
         static constexpr auto offset()                                                             \
         {                                                                                          \
             return offsetof(hip_table_lookup<table_idx>::type, HIP_FUNC_PTR);                      \
@@ -167,6 +169,12 @@
         static auto get_functor(RetT (*)(Args...))                                                 \
         {                                                                                          \
             return &base_type::functor<RetT, Args...>;                                             \
+        }                                                                                          \
+                                                                                                   \
+        static constexpr auto get_args_type()                                                      \
+        {                                                                                          \
+            using func_t = decltype(get_table_func());                                             \
+            return common::mpl::function_args_t<func_t>{};                                         \
         }                                                                                          \
                                                                                                    \
         static std::vector<void*> as_arg_addr(callback_data_type trace_data)                       \

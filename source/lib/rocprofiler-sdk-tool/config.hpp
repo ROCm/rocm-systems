@@ -128,6 +128,7 @@ struct config : output_config
     uint64_t att_param_buffer_size = get_env<uint64_t>("ROCPROF_ATT_PARAM_BUFFER_SIZE", 0x6000000);
     uint64_t att_param_simd_select = get_env<uint64_t>("ROCPROF_ATT_PARAM_SIMD_SELECT", 0xF);
     uint64_t att_param_target_cu   = get_env<uint64_t>("ROCPROF_ATT_PARAM_TARGET_CU", 1);
+    uint64_t att_param_perf_ctrl   = get_env<uint64_t>("ROCPROF_ATT_PARAM_PERFCOUNTER_CTRL", 0);
 
     std::string kernel_filter_include   = get_env("ROCPROF_KERNEL_FILTER_INCLUDE_REGEX", ".*");
     std::string kernel_filter_exclude   = get_env("ROCPROF_KERNEL_FILTER_EXCLUDE_REGEX", "");
@@ -135,12 +136,14 @@ struct config : output_config
     std::string pc_sampling_unit        = get_env("ROCPROF_PC_SAMPLING_UNIT", "none");
     std::string extra_counters_contents = get_env("ROCPROF_EXTRA_COUNTERS_CONTENTS", "");
 
-    std::unordered_set<uint32_t> kernel_filter_range    = {};
-    std::set<std::string>        counters               = {};
-    std::string                  att_capability         = get_env("ROCPROF_ATT_CAPABILITY", "");
-    std::vector<att_perfcounter> att_param_perfcounters = {};
+    std::unordered_set<size_t>         kernel_filter_range = {};
+    std::vector<std::set<std::string>> counters            = {};
+    std::string                        att_capability      = get_env("ROCPROF_ATT_CAPABILITY", "");
+    std::vector<att_perfcounter>       att_param_perfcounters = {};
 
     std::queue<CollectionPeriod> collection_periods = {};
+    uint64_t counter_groups_random_seed = get_env("ROCPROF_COUNTER_GROUPS_RANDOM_SEED", 0);
+    uint64_t counter_groups_interval    = get_env("ROCPROF_COUNTER_GROUPS_INTERVAL", 1);
 
     template <typename ArchiveT>
     void save(ArchiveT&) const;

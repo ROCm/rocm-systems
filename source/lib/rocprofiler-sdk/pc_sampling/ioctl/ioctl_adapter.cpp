@@ -238,6 +238,16 @@ is_pc_sampling_supported(const rocprofiler_agent_t* agent)
         else
             return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
     }
+    else if(agent_name.find("gfx95") == 0)
+    {
+        // As I am not sure if the PCS IOCTL is going to be bumped for gfx950,
+        // I introduced a separate branch for it.
+        // We expect PC sampling IOCTL to be at least 0.3 for gfx950.
+        if(pcs_ioctl_version.major_version > 0 || pcs_ioctl_version.minor_version >= 3)
+            return ROCPROFILER_STATUS_SUCCESS;
+        else
+            return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
+    }
     else
     {
         // The agent does not support PC sampling.

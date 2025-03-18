@@ -93,9 +93,10 @@ struct tool_counter_record_t
 {
     using container_type = std::vector<tool_counter_value_t>;
 
-    uint64_t                                     thread_id     = 0;
-    rocprofiler_dispatch_counting_service_data_t dispatch_data = {};
-    serialized_counter_record_t                  record        = {};
+    uint64_t                                     thread_id         = 0;
+    rocprofiler_dispatch_counting_service_data_t dispatch_data     = {};
+    serialized_counter_record_t                  record            = {};
+    uint64_t                                     kernel_rename_val = {};
 
     template <typename ArchiveT>
     void save(ArchiveT& ar) const
@@ -106,6 +107,7 @@ struct tool_counter_record_t
         ar(cereal::make_nvp("thread_id", thread_id));
         ar(cereal::make_nvp("dispatch_data", dispatch_data));
         ar(cereal::make_nvp("records", tmp));
+        ar(cereal::make_nvp("kernel_rename_val", kernel_rename_val));
     }
 
     container_type read() const;

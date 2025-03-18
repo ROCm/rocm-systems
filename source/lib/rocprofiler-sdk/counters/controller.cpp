@@ -30,6 +30,7 @@
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/ioctl.hpp"
+#include "lib/rocprofiler-sdk/counters/metrics.hpp"
 
 namespace rocprofiler
 {
@@ -38,7 +39,7 @@ namespace counters
 CounterController::CounterController()
 {
     // Pre-read metrics map file to catch faliures during initial setup.
-    rocprofiler::counters::getMetricIdMap();
+    rocprofiler::counters::loadMetrics();
 }
 
 // Adds a counter collection profile to our global cache.

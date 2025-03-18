@@ -28,6 +28,7 @@
 #include "lib/rocprofiler-sdk/counters/core.hpp"
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/details/fmt.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/rocprofiler_packet.hpp"
@@ -82,6 +83,10 @@ submitPacket(hsa_queue_t* queue, const void* packet)
     // ringdoor bell
     hsa::get_core_table()->hsa_signal_store_relaxed_fn(queue->doorbell_signal, write_idx);
 
+    ROCP_TRACE << fmt::format("SLOT_IDX: {} WRITE_IDX: {} PKT: {}",
+                              slot_idx,
+                              write_idx,
+                              *static_cast<const hsa::rocprofiler_packet*>(packet));
     return write_idx;
 }
 
@@ -275,7 +280,7 @@ read_agent_ctx(const context::context*                    ctx,
     // If we have not initiualized HSA yet, nothing to read, return;
     if(hsa_inited().load() == false)
     {
-        return ROCPROFILER_STATUS_ERROR;
+        return ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED;
     }
 
     // Set the state to LOCKED to prevent other calls to start/stop/read.
@@ -380,7 +385,7 @@ start_agent_ctx(const context::context* ctx)
 
     if(hsa_inited().load() == false)
     {
-        return ROCPROFILER_STATUS_SUCCESS;
+        return ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED;
     }
 
     // Set the state to LOCKED to prevent other calls to start/stop/read.
@@ -513,7 +518,7 @@ stop_agent_ctx(const context::context* ctx)
 
     if(hsa_inited().load() == false)
     {
-        return ROCPROFILER_STATUS_SUCCESS;
+        return ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED;
     }
 
     auto expected = rocprofiler::context::device_counting_service::state::ENABLED;

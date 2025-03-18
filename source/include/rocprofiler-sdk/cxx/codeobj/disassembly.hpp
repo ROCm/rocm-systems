@@ -23,13 +23,15 @@
 #pragma once
 
 #include <amd_comgr/amd_comgr.h>
-#include <fcntl.h>
 #include <hsa/amd_hsa_elf.h>
+
+#include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -59,13 +61,6 @@
         std::cerr << __FILE__ << ':' << __LINE__ << " code: " << status << " failed: " << reason   \
                   << "\n";                                                                         \
         return AMD_COMGR_STATUS_ERROR;                                                             \
-    }
-
-#define CHECK_VA2FO(x, msg)                                                                        \
-    if(!(x))                                                                                       \
-    {                                                                                              \
-        std::cerr << __FILE__ << ' ' << __LINE__ << ' ' << msg << "\n";                            \
-        return std::nullopt;                                                                       \
     }
 
 namespace rocprofiler
@@ -285,54 +280,26 @@ public:
         instance.last_instruction = instruction;
     }
 
-    std::optional<uint64_t> va2fo(uint64_t va)
+    std::optional<uint64_t> va2fo(uint64_t va) const
     {
-        CHECK_VA2FO(buffer.size() > sizeof(Elf64_Ehdr), "buffer is not large enough");
+        uint64_t offset    = 0;
+        uint64_t slicesize = 0;
+        bool     nobits    = false;
 
-        uint8_t* e_ident = (uint8_t*) buffer.data();
-        CHECK_VA2FO(e_ident, "e_ident is nullptr");
+        auto status = amd_comgr_map_elf_virtual_address_to_code_object_offset(
+            data, va, &offset, &slicesize, &nobits);
 
-        CHECK_VA2FO(e_ident[EI_MAG0] == ELFMAG0 || e_ident[EI_MAG1] == ELFMAG1 ||
-                        e_ident[EI_MAG2] == ELFMAG2 || e_ident[EI_MAG3] == ELFMAG3,
-                    "unexpected ei_mag");
-
-        CHECK_VA2FO(e_ident[EI_CLASS] == ELFCLASS64, "unexpected ei_class");
-        CHECK_VA2FO(e_ident[EI_DATA] == ELFDATA2LSB, "unexpected ei_data");
-        CHECK_VA2FO(e_ident[EI_VERSION] == EV_CURRENT, "unexpected ei_version");
-        CHECK_VA2FO(e_ident[EI_OSABI] == 64, "unexpected ei_osabi");  // ELFOSABI_AMDGPU_HSA
-
-        CHECK_VA2FO(e_ident[EI_ABIVERSION] == 2 ||      // ELFABIVERSION_AMDGPU_HSA_V4
-                        e_ident[EI_ABIVERSION] == 3 ||  // ELFABIVERSION_AMDGPU_HSA_V5
-                        e_ident[EI_ABIVERSION] == 4,    // ELFABIVERSION_AMDGPU_HSA_V6
-                    "unexpected ei_abiversion");
-
-        Elf64_Ehdr* ehdr = (Elf64_Ehdr*) buffer.data();
-        CHECK_VA2FO(ehdr, "ehdr is nullptr");
-        CHECK_VA2FO(ehdr->e_type == ET_DYN, "unexpected e_type");
-        CHECK_VA2FO(ehdr->e_machine == ELF::EM_AMDGPU, "unexpected e_machine");
-        CHECK_VA2FO(ehdr->e_phoff != 0, "unexpected e_phoff");
-
-        CHECK_VA2FO(buffer.size() > ehdr->e_phoff + sizeof(Elf64_Phdr),
-                    "buffer is not large enough");
-
-        Elf64_Phdr* phdr = (Elf64_Phdr*) ((uint8_t*) buffer.data() + ehdr->e_phoff);
-        CHECK_VA2FO(phdr, "phdr is nullptr");
-
-        for(uint16_t i = 0; i < ehdr->e_phnum; ++i)
-        {
-            if(phdr[i].p_type != PT_LOAD) continue;
-            if(va < phdr[i].p_vaddr || va >= (phdr[i].p_vaddr + phdr[i].p_memsz)) continue;
-
-            return va + phdr[i].p_offset - phdr[i].p_vaddr;
-        }
-        return std::nullopt;
+        if(status != AMD_COMGR_STATUS_SUCCESS || nobits)
+            return std::nullopt;
+        else
+            return offset;
     }
 
-    std::vector<char>              buffer;
-    std::string                    last_instruction;
-    amd_comgr_disassembly_info_t   info;
-    amd_comgr_data_t               data;
-    std::map<uint64_t, SymbolInfo> symbol_map;
+    std::vector<char>              buffer{};
+    std::string                    last_instruction{};
+    amd_comgr_disassembly_info_t   info{};
+    amd_comgr_data_t               data{};
+    std::map<uint64_t, SymbolInfo> symbol_map{};
 };
 
 }  // namespace disassembly
