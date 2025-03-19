@@ -814,9 +814,12 @@ NTSTATUS WDDMGetAdapters(D3DKMT_ADAPTERINFO *&adapters, int &num_adapters)
     if (ret != STATUS_SUCCESS)
       goto err_out1;
 
+    if (!std::wcsstr(query.ChipType, L"AMD"))
+      continue;
+
     supported = thunk_proxy::QueryAdapterSupported(info[i].hAdapter);
 
-    if (std::wcsstr(query.ChipType, L"AMD") && supported) {
+    if (supported) {
       adapters[num_adapters++] = info[i];
     }
   }
