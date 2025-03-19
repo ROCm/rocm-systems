@@ -53,6 +53,7 @@ struct delay : comp::empty_base
 
     static std::atomic<int64_t>& get_global();
     static int64_t&              get_local(int64_t _tid = threading::get_id());
+    static bool                  is_local_available();
 
     static int64_t  get(int64_t _tid = threading::get_id());
     static uint64_t compute_total_delay(uint64_t);

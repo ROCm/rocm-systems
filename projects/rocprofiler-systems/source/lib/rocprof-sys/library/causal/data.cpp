@@ -855,7 +855,6 @@ sample_selection(size_t _nitr, size_t _wait_ns)
 
     while(eligible_pc_idx.load(std::memory_order_relaxed) == 0)
     {
-        if(get_state() >= State::Finalized) return selected_entry{};
         std::this_thread::yield();
         std::this_thread::sleep_for(std::chrono::nanoseconds{ _wait_ns });
     }

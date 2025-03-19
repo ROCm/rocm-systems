@@ -654,7 +654,16 @@ get_instances()
 std::unique_ptr<perf_event>&
 get_instance(int64_t _tid)
 {
-    auto& _data = get_instances();
+    static auto nullInstance = std::unique_ptr<perf_event>{ nullptr };
+    auto&       _data        = get_instances();
+
+    // If get_instances() returned an empty object, we have to return a reference to a
+    // static null instance, or else we will crash.
+    if(_data == nullptr)
+    {
+        return nullInstance;
+    }
+
     if(static_cast<size_t>(_tid) >= _data->size())
     {
         ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
