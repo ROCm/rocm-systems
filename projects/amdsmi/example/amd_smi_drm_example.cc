@@ -1256,6 +1256,79 @@ int main() {
               idx++;
             }
 
+            /*New scp stats v1.8*/
+            idx = 0;
+            idy = 0;
+            std::cout  << "\txcp_stats.gfx_below_host_limit_ppt_acc: " << "\n";
+            for (auto& row : smu.xcp_stats) {
+              std::cout << "\t XCP [" << idx << "] : [";
+              for (auto& col : row.gfx_below_host_limit_ppt_acc) {
+                if ((idy + 1) != static_cast<int>(std::size(row.gfx_below_host_limit_ppt_acc))) {
+                    std::cout << col << ", ";
+                } else {
+                    std::cout << col;
+                }
+                idy++;
+              }
+              std::cout << "]\n";
+              idy = 0;
+              idx++;
+            }
+
+            idx = 0;
+            idy = 0;
+            std::cout  << "\txcp_stats.gfx_below_host_limit_thm_acc: " << "\n";
+            for (auto& row : smu.xcp_stats) {
+              std::cout << "\t XCP [" << idx << "] : [";
+              for (auto& col : row.gfx_below_host_limit_thm_acc) {
+                if ((idy + 1) != static_cast<int>(std::size(row.gfx_below_host_limit_thm_acc))) {
+                    std::cout << col << ", ";
+                } else {
+                    std::cout << col;
+                }
+                idy++;
+              }
+              std::cout << "]\n";
+              idy = 0;
+              idx++;
+            }
+
+            idx = 0;
+            idy = 0;
+            std::cout  << "\txcp_stats.gfx_low_utilization_acc: " << "\n";
+            for (auto& row : smu.xcp_stats) {
+              std::cout << "\t XCP [" << idx << "] : [";
+              for (auto& col : row.gfx_low_utilization_acc) {
+                if ((idy + 1) != static_cast<int>(std::size(row.gfx_low_utilization_acc))) {
+                    std::cout << col << ", ";
+                } else {
+                    std::cout << col;
+                }
+                idy++;
+              }
+              std::cout << "]\n";
+              idy = 0;
+              idx++;
+            }
+
+            idx = 0;
+            idy = 0;
+            std::cout  << "\txcp_stats.gfx_below_host_limit_total_acc: " << "\n";
+            for (auto& row : smu.xcp_stats) {
+              std::cout << "\t XCP [" << idx << "] : [";
+              for (auto& col : row.gfx_below_host_limit_total_acc) {
+                if ((idy + 1) != static_cast<int>(std::size(row.gfx_below_host_limit_total_acc))) {
+                    std::cout << col << ", ";
+                } else {
+                    std::cout << col;
+                }
+                idy++;
+              }
+              std::cout << "]\n";
+              idy = 0;
+              idx++;
+            }
+
             std::cout << "\n\n";
             std::cout << "\t ** -> Checking metrics with constant changes ** " << "\n";
             constexpr uint16_t kMAX_ITER_TEST = 10;

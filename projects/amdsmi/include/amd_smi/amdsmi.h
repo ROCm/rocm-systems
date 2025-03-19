@@ -153,6 +153,12 @@ typedef enum {
 #define AMDSMI_MAX_NUM_JPEG 32
 
 /**
+ * @brief new for gpu metrics v1.8, document presents NUM_JPEG_ENG_V1
+ * but will change to AMDSMI_MAX_NUM_JPEG_ENG_V1 for continuity
+ */
+#define AMDSMI_MAX_NUM_JPEG_ENG_V1 40
+
+/**
  * @brief This should match AMDSMI_MAX_NUM_XCC;
  * XCC - Accelerated Compute Core, the collection of compute units,
  * ACE (Asynchronous Compute Engines), caches,
@@ -1688,9 +1694,9 @@ typedef struct {
      * @brief v1.6 additions
      * The max uint32_t will be used if that information is N/A
      */
-    uint32_t gfx_busy_inst[AMDSMI_MAX_NUM_XCC];  //!< Utilization Instantaneous in %
-    uint16_t jpeg_busy[AMDSMI_MAX_NUM_JPEG];     //!< Utilization Instantaneous in %
-    uint16_t vcn_busy[AMDSMI_MAX_NUM_VCN];       //!< Utilization Instantaneous in %
+    uint32_t gfx_busy_inst[AMDSMI_MAX_NUM_XCC];       //!< Utilization Instantaneous in %
+    uint16_t jpeg_busy[AMDSMI_MAX_NUM_JPEG_ENG_V1];   //!< Utilization Instantaneous in % (UPDATED: to 40 in v1.8)
+    uint16_t vcn_busy[AMDSMI_MAX_NUM_VCN];            //!< Utilization Instantaneous in %
 
     uint64_t gfx_busy_acc[AMDSMI_MAX_NUM_XCC];   //!< Utilization Accumulated in %
 
@@ -1699,6 +1705,17 @@ typedef struct {
     */
   /* Total App Clock Counter Accumulated */
   uint64_t gfx_below_host_limit_acc[AMDSMI_MAX_NUM_XCC]; //!< Total App Clock Counter Accumulated
+
+  /**
+   * @brief v1.8 additions
+   */
+  /* Total App Clock Counter Accumulated */
+    uint64_t gfx_below_host_limit_ppt_acc[AMDSMI_MAX_NUM_XCC];
+    uint64_t gfx_below_host_limit_thm_acc[AMDSMI_MAX_NUM_XCC];
+    uint64_t gfx_low_utilization_acc[AMDSMI_MAX_NUM_XCC];
+    uint64_t gfx_below_host_limit_total_acc[AMDSMI_MAX_NUM_XCC];
+
+
 } amdsmi_gpu_xcp_metrics_t;
 
 /**
@@ -1889,7 +1906,7 @@ typedef struct {
 
     uint32_t pcie_lc_perf_other_end_recovery; //!< PCIE other end recovery counter
 
-    /*
+    /**
     * @brief v1.7 additions
     */
     uint64_t vram_max_bandwidth; //!< VRAM max bandwidth at max memory clock (GB/s)

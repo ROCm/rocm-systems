@@ -4200,6 +4200,10 @@ def amdsmi_get_gpu_metrics_info(
         "xcp_stats.vcn_busy": list(gpu_metrics.xcp_stats),
         "xcp_stats.gfx_busy_acc": list(gpu_metrics.xcp_stats),
         "xcp_stats.gfx_below_host_limit_acc": list(gpu_metrics.xcp_stats),
+        "xcp_stats.gfx_below_host_limit_ppt_acc": list(gpu_metrics.xcp_stats),
+        "xcp_stats.gfx_below_host_limit_thm_acc": list(gpu_metrics.xcp_stats),
+        "xcp_stats.gfx_low_utilization_acc": list(gpu_metrics.xcp_stats),
+        "xcp_stats.gfx_below_host_limit_total_acc": list(gpu_metrics.xcp_stats),
         "pcie_lc_perf_other_end_recovery": _validate_if_max_uint(gpu_metrics.pcie_lc_perf_other_end_recovery, MaxUIntegerTypes.UINT32_T),
         "vram_max_bandwidth": _validate_if_max_uint(gpu_metrics.vram_max_bandwidth, MaxUIntegerTypes.UINT64_T),
         "xgmi_link_status": _validate_if_max_uint(list(gpu_metrics.xgmi_link_status), MaxUIntegerTypes.UINT16_T),
@@ -4231,15 +4235,40 @@ def amdsmi_get_gpu_metrics_info(
         for xcp_index, xcp_metrics in enumerate(gpu_metrics_output['xcp_stats.gfx_busy_acc']):
             xcp_detail = []
             for val in xcp_metrics.gfx_busy_acc:
-                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T, isActivity=True))
+                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T))
             gpu_metrics_output["xcp_stats.gfx_busy_acc"][xcp_index] = xcp_detail
 
     if 'xcp_stats.gfx_below_host_limit_acc' in gpu_metrics_output:
         for xcp_index, xcp_metrics in enumerate(gpu_metrics_output['xcp_stats.gfx_below_host_limit_acc']):
             xcp_detail = []
             for val in xcp_metrics.gfx_below_host_limit_acc:
-                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T, isActivity=True))
+                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T))
             gpu_metrics_output['xcp_stats.gfx_below_host_limit_acc'][xcp_index] = xcp_detail
+    # new for gpu metrics v1.8
+    if 'xcp_stats.gfx_below_host_limit_ppt_acc'  in gpu_metrics_output:
+        for xcp_index, xcp_metrics in enumerate(gpu_metrics_output['xcp_stats.gfx_below_host_limit_ppt_acc']):
+            xcp_detail = []
+            for val in xcp_metrics.gfx_below_host_limit_ppt_acc:
+                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T))
+            gpu_metrics_output['xcp_stats.gfx_below_host_limit_ppt_acc'][xcp_index] = xcp_detail
+    if 'xcp_stats.gfx_below_host_limit_thm_acc' in gpu_metrics_output:
+        for xcp_index, xcp_metrics in enumerate(gpu_metrics_output['xcp_stats.gfx_below_host_limit_thm_acc']):
+            xcp_detail = []
+            for val in xcp_metrics.gfx_below_host_limit_thm_acc:
+                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T))
+            gpu_metrics_output['xcp_stats.gfx_below_host_limit_thm_acc'][xcp_index] = xcp_detail
+    if 'xcp_stats.gfx_low_utilization_acc' in gpu_metrics_output:
+        for xcp_index, xcp_metrics in enumerate(gpu_metrics_output['xcp_stats.gfx_low_utilization_acc']):
+            xcp_detail = []
+            for val in xcp_metrics.gfx_low_utilization_acc:
+                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T))
+            gpu_metrics_output['xcp_stats.gfx_low_utilization_acc'][xcp_index] = xcp_detail
+    if 'xcp_stats.gfx_below_host_limit_total_acc' in gpu_metrics_output:
+        for xcp_index, xcp_metrics in enumerate(gpu_metrics_output['xcp_stats.gfx_below_host_limit_total_acc']):
+            xcp_detail = []
+            for val in xcp_metrics.gfx_below_host_limit_total_acc:
+                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T))
+            gpu_metrics_output['xcp_stats.gfx_below_host_limit_total_acc'][xcp_index] = xcp_detail
     return gpu_metrics_output
 
 

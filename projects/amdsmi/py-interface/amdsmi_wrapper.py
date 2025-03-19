@@ -1849,10 +1849,14 @@ class struct_amdsmi_gpu_xcp_metrics_t(Structure):
 struct_amdsmi_gpu_xcp_metrics_t._pack_ = 1 # source:False
 struct_amdsmi_gpu_xcp_metrics_t._fields_ = [
     ('gfx_busy_inst', ctypes.c_uint32 * 8),
-    ('jpeg_busy', ctypes.c_uint16 * 32),
+    ('jpeg_busy', ctypes.c_uint16 * 40),
     ('vcn_busy', ctypes.c_uint16 * 4),
     ('gfx_busy_acc', ctypes.c_uint64 * 8),
     ('gfx_below_host_limit_acc', ctypes.c_uint64 * 8),
+    ('gfx_below_host_limit_ppt_acc', ctypes.c_uint64 * 8),
+    ('gfx_below_host_limit_thm_acc', ctypes.c_uint64 * 8),
+    ('gfx_low_utilization_acc', ctypes.c_uint64 * 8),
+    ('gfx_below_host_limit_total_acc', ctypes.c_uint64 * 8),
 ]
 
 amdsmi_gpu_xcp_metrics_t = struct_amdsmi_gpu_xcp_metrics_t
