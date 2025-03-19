@@ -89,8 +89,7 @@
 // Size of scratch (private) segment pre-allocated per thread, in bytes.
 #define DEFAULT_SCRATCH_BYTES_PER_THREAD 2048
 #define MAX_WAVE_SCRATCH 8387584  // See COMPUTE_TMPRING_SIZE.WAVESIZE
-#define MAX_WAVE_SCRATCH_GFX12 33554432
-
+#define MAX_WAVE_SCRATCH_GFX12 67106816 // 2MB stack size per wave
 #define MAX_NUM_DOORBELLS 0x400
 
 namespace rocr {
