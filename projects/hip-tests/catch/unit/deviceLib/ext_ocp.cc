@@ -1257,7 +1257,7 @@ TEST_CASE("Unit_amd_ocp_cpp_types") {
 
   SECTION("fp8 to float e5m2") {
     constexpr size_t size = 32;
-    float *d_res1, *d_res2, *d_res3, *d_res4, *d_res5, *d_res6;
+    float *d_res1, *d_res2, *d_res3, *d_res4, *d_res5;
     HIP_CHECK(hipMalloc(&d_res1, sizeof(float) * size));
     HIP_CHECK(hipMalloc(&d_res2, sizeof(float) * size));
     HIP_CHECK(hipMalloc(&d_res3, sizeof(float) * size));
