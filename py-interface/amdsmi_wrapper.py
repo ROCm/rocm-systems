@@ -1849,10 +1849,14 @@ class struct_amdsmi_gpu_xcp_metrics_t(Structure):
 struct_amdsmi_gpu_xcp_metrics_t._pack_ = 1 # source:False
 struct_amdsmi_gpu_xcp_metrics_t._fields_ = [
     ('gfx_busy_inst', ctypes.c_uint32 * 8),
-    ('jpeg_busy', ctypes.c_uint16 * 32),
+    ('jpeg_busy', ctypes.c_uint16 * 40),
     ('vcn_busy', ctypes.c_uint16 * 4),
     ('gfx_busy_acc', ctypes.c_uint64 * 8),
     ('gfx_below_host_limit_acc', ctypes.c_uint64 * 8),
+    ('gfx_below_host_limit_ppt_acc', ctypes.c_uint64 * 8),
+    ('gfx_below_host_limit_thm_acc', ctypes.c_uint64 * 8),
+    ('gfx_low_utilization_acc', ctypes.c_uint64 * 8),
+    ('gfx_below_host_limit_total_acc', ctypes.c_uint64 * 8),
 ]
 
 amdsmi_gpu_xcp_metrics_t = struct_amdsmi_gpu_xcp_metrics_t
@@ -2615,9 +2619,12 @@ amdsmi_get_gpu_vbios_info.argtypes = [amdsmi_processor_handle, ctypes.POINTER(st
 amdsmi_get_gpu_activity = _libraries['libamd_smi.so'].amdsmi_get_gpu_activity
 amdsmi_get_gpu_activity.restype = amdsmi_status_t
 amdsmi_get_gpu_activity.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_engine_usage_t)]
+amdsmi_get_power_info_v2 = _libraries['libamd_smi.so'].amdsmi_get_power_info_v2
+amdsmi_get_power_info_v2.restype = amdsmi_status_t
+amdsmi_get_power_info_v2.argtypes = [amdsmi_processor_handle, uint32_t, ctypes.POINTER(struct_amdsmi_power_info_t)]
 amdsmi_get_power_info = _libraries['libamd_smi.so'].amdsmi_get_power_info
 amdsmi_get_power_info.restype = amdsmi_status_t
-amdsmi_get_power_info.argtypes = [amdsmi_processor_handle, uint32_t, ctypes.POINTER(struct_amdsmi_power_info_t)]
+amdsmi_get_power_info.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_power_info_t)]
 amdsmi_is_gpu_power_management_enabled = _libraries['libamd_smi.so'].amdsmi_is_gpu_power_management_enabled
 amdsmi_is_gpu_power_management_enabled.restype = amdsmi_status_t
 amdsmi_is_gpu_power_management_enabled.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_bool)]
@@ -3059,7 +3066,7 @@ __all__ = \
     'amdsmi_get_link_metrics', 'amdsmi_get_link_topology_nearest',
     'amdsmi_get_minmax_bandwidth_between_processors',
     'amdsmi_get_pcie_info', 'amdsmi_get_power_cap_info',
-    'amdsmi_get_power_info',
+    'amdsmi_get_power_info', 'amdsmi_get_power_info_v2',
     'amdsmi_get_processor_count_from_handles',
     'amdsmi_get_processor_handle_from_bdf',
     'amdsmi_get_processor_handles',

@@ -5723,7 +5723,60 @@ pub fn amdsmi_get_gpu_activity(
 ///     let sensor_ind = 0
 ///
 ///     // Retrieve the power information
-///     match amdsmi_get_power_info(processor_handle, sensor_ind) {
+///     match amdsmi_get_power_info_v2(processor_handle, sensor_ind) {
+///         Ok(info) => println!("Power information: {:?}", info),
+///         Err(e) => panic!("Failed to get power information: {}", e),
+///     }
+/// #
+/// #   // Shut down the AMD SMI library
+/// #   amdsmi_shut_down().expect("Failed to shut down AMD SMI");
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_power_info_v2` call fails.
+pub fn amdsmi_get_power_info_v2(
+    processor_handle: AmdsmiProcessorHandle,
+    sensor_ind: u32,
+) -> AmdsmiResult<AmdsmiPowerInfoT> {
+    let mut info = MaybeUninit::<AmdsmiPowerInfoT>::uninit();
+    call_unsafe!(amdsmi_wrapper::amdsmi_get_power_info_v2(
+        processor_handle,
+        sensor_ind,
+        info.as_mut_ptr()
+    ));
+    let info = unsafe { info.assume_init() };
+    Ok(info)
+}
+
+/// Get the power information for the device with the specified processor handle.
+///
+/// Given a processor handle `processor_handle`, this function retrieves the power information
+/// for the specified processor.
+///
+/// # Arguments
+///
+/// * `processor_handle` - A handle to the processor for which the power information is being queried.
+///
+/// # Returns
+///
+/// * `AmdsmiResult<AmdsmiPowerInfoT>` - Returns `Ok(AmdsmiPowerInfoT)` containing the [`AmdsmiPowerInfoT`] if successful, or an error if it fails.
+///
+/// # Example
+///
+/// ```rust
+/// # use amdsmi::*;
+/// #
+/// # fn main() {
+/// #   // Initialize the AMD SMI library
+/// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdGpus).expect("Failed to initialize AMD SMI");
+/// #
+///     // Example processor_handle, assuming the number of processors is greater than zero
+///     let processor_handle = amdsmi_get_processor_handles!()[0];
+///
+///     // Retrieve the power information
+///     match amdsmi_get_power_info(processor_handle) {
 ///         Ok(info) => println!("Power information: {:?}", info),
 ///         Err(e) => panic!("Failed to get power information: {}", e),
 ///     }
@@ -5738,12 +5791,10 @@ pub fn amdsmi_get_gpu_activity(
 /// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_power_info` call fails.
 pub fn amdsmi_get_power_info(
     processor_handle: AmdsmiProcessorHandle,
-    sensor_ind: u32,
 ) -> AmdsmiResult<AmdsmiPowerInfoT> {
     let mut info = MaybeUninit::<AmdsmiPowerInfoT>::uninit();
     call_unsafe!(amdsmi_wrapper::amdsmi_get_power_info(
         processor_handle,
-        sensor_ind,
         info.as_mut_ptr()
     ));
     let info = unsafe { info.assume_init() };
