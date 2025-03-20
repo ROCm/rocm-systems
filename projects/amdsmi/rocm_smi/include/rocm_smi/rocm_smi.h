@@ -1069,6 +1069,11 @@ typedef struct metrics_table_header_t metrics_table_header_t;
 #define RSMI_MAX_NUM_JPEG_ENGS 32
 
 /**
+ * @brief This should match kRSMI_MAX_NUM_JPEG_ENG_V1
+ */
+#define RSMI_MAX_NUM_JPEG_ENG_V1 40
+
+/**
  * @brief This should match kRSMI_MAX_NUM_CLKS
  */
 #define RSMI_MAX_NUM_CLKS 4
@@ -1115,7 +1120,7 @@ struct amdgpu_xcp_metrics_t {
   */
   /* Utilization Instantaneous (%) */
   uint32_t gfx_busy_inst[RSMI_MAX_NUM_XCC];
-  uint16_t jpeg_busy[RSMI_MAX_NUM_JPEG_ENGS];
+  uint16_t jpeg_busy[RSMI_MAX_NUM_JPEG_ENG_V1];
   uint16_t vcn_busy[RSMI_MAX_NUM_VCNS];
 
   /* Utilization Accumulated (%) */
@@ -1126,6 +1131,14 @@ struct amdgpu_xcp_metrics_t {
   */
   /* Total App Clock Counter Accumulated */
   uint64_t gfx_below_host_limit_acc[RSMI_MAX_NUM_XCC];
+
+  /**
+   * v1.8 additions
+   */
+  uint64_t gfx_below_host_limit_ppt_acc[RSMI_MAX_NUM_XCC];
+  uint64_t gfx_below_host_limit_thm_acc[RSMI_MAX_NUM_XCC];
+  uint64_t gfx_low_utilization_acc[RSMI_MAX_NUM_XCC];
+  uint64_t gfx_below_host_limit_total_acc[RSMI_MAX_NUM_XCC];
 };
 
 typedef struct {
