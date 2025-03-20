@@ -65,7 +65,9 @@ def test_data_structure(input_data):
     node_exists("host_functions", sdk_data["callback_records"])
     node_exists("hsa_api_traces", sdk_data["callback_records"])
     node_exists("hip_api_traces", sdk_data["callback_records"], 0)
-    node_exists("scratch_memory_traces", sdk_data["callback_records"], min_len=8)
+    node_exists(
+        "scratch_memory_traces", sdk_data["callback_records"], min_len=(2 * num_agents)
+    )
 
     node_exists("names", sdk_data["buffer_records"])
     node_exists("kernel_dispatch", sdk_data["buffer_records"])
@@ -73,7 +75,9 @@ def test_data_structure(input_data):
     node_exists("hsa_api_traces", sdk_data["buffer_records"])
     node_exists("hip_api_traces", sdk_data["buffer_records"], 0)
     node_exists("retired_correlation_ids", sdk_data["buffer_records"])
-    node_exists("scratch_memory_traces", sdk_data["buffer_records"], min_len=8)
+    node_exists(
+        "scratch_memory_traces", sdk_data["buffer_records"], min_len=(1 * num_agents)
+    )
 
 
 def test_timestamps(input_data):

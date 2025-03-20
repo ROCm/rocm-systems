@@ -12,7 +12,7 @@ else()
     set(_TIDY_REQUIRED)
 endif()
 
-if(NOT ROCPROFILE_CLANG_TIDY_EXE AND EXISTS $ENV{HOME}/.local/bin/clang-tidy)
+if(NOT ROCPROFILER_CLANG_TIDY_EXE AND EXISTS $ENV{HOME}/.local/bin/clang-tidy)
     execute_process(
         COMMAND $ENV{HOME}/.local/bin/clang-tidy --version
         WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
