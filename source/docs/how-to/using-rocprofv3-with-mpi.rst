@@ -41,11 +41,10 @@ In the preceding example, an extra agent info file is generated for the ``mpirun
 
 .. code-block:: bash
 
-    3000020_agent_info.csv
-    3000019_agent_info.csv
-    3000020_hip_api_trace.csv
-    3000019_hip_api_trace.csv
-    3164458_agent_info.csv
+    ubuntu-latest.3000020.1/3000020_agent_info.csv
+    ubuntu-latest.3000020.0/3000019_agent_info.csv
+    ubuntu-latest.3000020.1/3000020_hip_api_trace.csv
+    ubuntu-latest.3000020.0/3000019_hip_api_trace.csv
 
 ROCTx annotations
 ===================
