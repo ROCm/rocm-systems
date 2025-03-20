@@ -3795,9 +3795,41 @@ def showGPUMetrics(deviceList):
             },
             "xcp_stats.gfx_busy_acc": {
                 "value": gpu_metrics.xcp_stats,
-                "unit": percent_unit,
+                "unit": count,
             },
             "xcp_stats.gfx_below_host_limit_acc": {
+                "value": gpu_metrics.xcp_stats,
+                "unit": count,
+            },
+             "xcp_stats.gfx_below_host_limit_ppt_acc": {
+                "value": gpu_metrics.xcp_stats,
+                "unit": count,
+            },
+            "xcp_stats.gfx_below_host_limit_thm_acc": {
+                "value": gpu_metrics.xcp_stats,
+                "unit": count,
+            },
+            "xcp_stats.gfx_low_utilization_acc": {
+                "value": gpu_metrics.xcp_stats,
+                "unit": count,
+            },
+            "xcp_stats.gfx_below_host_limit_total_acc": {
+                "value": gpu_metrics.xcp_stats,
+                "unit": count,
+            },
+            "xcp_stats.gfx_below_host_limit_ppt_acc": {
+                "value": gpu_metrics.xcp_stats,
+                "unit": percent_unit,
+            },
+            "xcp_stats.gfx_below_host_limit_thm_acc": {
+                "value": gpu_metrics.xcp_stats,
+                "unit": percent_unit,
+            },
+            "xcp_stats.gfx_low_utilization_acc": {
+                "value": gpu_metrics.xcp_stats,
+                "unit": percent_unit,
+            },
+            "xcp_stats.gfx_below_host_limit_total_acc": {
                 "value": gpu_metrics.xcp_stats,
                 "unit": percent_unit,
             },
@@ -3839,6 +3871,30 @@ def showGPUMetrics(deviceList):
                     for curr_xcp, item in enumerate(v['value']):
                         print_xcp_detail = []
                         for _, val in enumerate(item.gfx_below_host_limit_acc):
+                            print_xcp_detail.append(validateIfMaxUint(val, UIntegerTypes.UINT64_T))
+                        printLog(device, k + " (" + str(v["unit"]) + ")", str(print_xcp_detail), xcp=str(curr_xcp))
+                if 'xcp_stats.gfx_below_host_limit_ppt_acc' in k:
+                    for curr_xcp, item in enumerate(v['value']):
+                        print_xcp_detail = []
+                        for _, val in enumerate(item.gfx_below_host_limit_ppt_acc):
+                            print_xcp_detail.append(validateIfMaxUint(val, UIntegerTypes.UINT64_T))
+                        printLog(device, k + " (" + str(v["unit"]) + ")", str(print_xcp_detail), xcp=str(curr_xcp))
+                if 'xcp_stats.gfx_below_host_limit_thm_acc' in k:
+                    for curr_xcp, item in enumerate(v['value']):
+                        print_xcp_detail = []
+                        for _, val in enumerate(item.gfx_below_host_limit_thm_acc):
+                            print_xcp_detail.append(validateIfMaxUint(val, UIntegerTypes.UINT64_T))
+                        printLog(device, k + " (" + str(v["unit"]) + ")", str(print_xcp_detail), xcp=str(curr_xcp))
+                if 'xcp_stats.gfx_low_utilization_acc' in k:
+                    for curr_xcp, item in enumerate(v['value']):
+                        print_xcp_detail = []
+                        for _, val in enumerate(item.gfx_low_utilization_acc):
+                            print_xcp_detail.append(validateIfMaxUint(val, UIntegerTypes.UINT64_T))
+                        printLog(device, k + " (" + str(v["unit"]) + ")", str(print_xcp_detail), xcp=str(curr_xcp))
+                if 'xcp_stats.gfx_below_host_limit_total_acc' in k:
+                    for curr_xcp, item in enumerate(v['value']):
+                        print_xcp_detail = []
+                        for _, val in enumerate(item.gfx_below_host_limit_total_acc):
                             print_xcp_detail.append(validateIfMaxUint(val, UIntegerTypes.UINT64_T))
                         printLog(device, k + " (" + str(v["unit"]) + ")", str(print_xcp_detail), xcp=str(curr_xcp))
 
