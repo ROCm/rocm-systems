@@ -19,7 +19,7 @@ else()
     set(_FMT_REQUIRED)
 endif()
 
-if(NOT ROCPROFILE_CLANG_FORMAT_EXE AND EXISTS $ENV{HOME}/.local/bin/clang-format)
+if(NOT ROCPROFILER_CLANG_FORMAT_EXE AND EXISTS $ENV{HOME}/.local/bin/clang-format)
     execute_process(
         COMMAND $ENV{HOME}/.local/bin/clang-format --version
         WORKING_DIRECTORY ${PROJECT_BINARY_DIR}

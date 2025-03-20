@@ -24,7 +24,9 @@
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
 #include <cstdio>
+#include <iomanip>
 #include <iostream>
+#include <numeric>
 #include <vector>
 
 #include "common/defines.hpp"
@@ -167,11 +169,13 @@ test_primary_then_uso(uint64_t* data_ptr)
 int
 test_scratch()
 {
-    uint64_t* data_ptr;
+    uint64_t* data_ptr = nullptr;
     hipCheckErr(HIP_HOST_ALLOC_FUNC(&data_ptr, sizeof(uint64_t), 0));
 
-    std::vector<float> host_floats(1024);
-    float*             dev;
+    auto   host_floats = std::vector<float>(1024, 0.0f);
+    float* dev         = nullptr;
+
+    std::iota(host_floats.begin(), host_floats.end(), 1.0f);
 
     hipCheckErr(hipMalloc((void**) &dev, host_floats.size() * sizeof(float)));
     hipCheckErr(hipMemcpy(
@@ -233,6 +237,7 @@ main()
 
     for(size_t i = 0; i < agents.size(); ++i)
     {
+        printf("Testing scratch on device %zu\n", i);
         hipCheckErr(hipSetDevice(i));
         test_scratch();
     }
