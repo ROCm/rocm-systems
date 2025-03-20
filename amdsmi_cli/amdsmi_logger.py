@@ -40,6 +40,7 @@ class AMDSMILogger():
         self.table_header = ""
         self.secondary_table_title = ""
         self.secondary_table_header = ""
+        self.warning_message = ""
         self.helpers = AMDSMIHelpers()
 
 
@@ -827,6 +828,8 @@ class AMDSMILogger():
             primary_table_heading = ''
             if self.table_title:
                 primary_table_heading = self.table_title + ':\n'
+            if self.warning_message:  # Add warning message below the table title
+                primary_table_heading += self.warning_message + '\n'
             primary_table_heading += self.table_header + '\n'
             primary_table = primary_table_heading + primary_table
 
@@ -884,6 +887,8 @@ class AMDSMILogger():
                         primary_table_heading = ''
                         if self.table_title:
                             primary_table_heading = self.table_title + ':\n'
+                        if self.warning_message: # Add warning message below the table title
+                            primary_table_heading += self.warning_message + '\n'
                         primary_table_heading += self.table_header + '\n'
                         primary_table = primary_table_heading + primary_table
 

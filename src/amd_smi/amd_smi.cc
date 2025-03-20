@@ -2003,6 +2003,9 @@ amdsmi_status_t
 amdsmi_get_gpu_accelerator_partition_profile_config(amdsmi_processor_handle processor_handle,
                                   amdsmi_accelerator_partition_profile_config_t *profile_config) {
     AMDSMI_CHECK_INIT();
+    if (!amd::smi::is_sudo_user()) {
+        return AMDSMI_STATUS_NO_PERM;
+    }
     std::ostringstream ss;
     ss << __PRETTY_FUNCTION__
        << " | START ";
