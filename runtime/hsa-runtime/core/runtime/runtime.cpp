@@ -1560,17 +1560,6 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
     return keep;
   };
 
-  auto checkCondition = [](hsa_signal_condition_t cond, hsa_signal_value_t value,
-                           hsa_signal_value_t compare) {
-    switch (cond) {
-      case HSA_SIGNAL_CONDITION_EQ: return value == compare;
-      case HSA_SIGNAL_CONDITION_NE: return value != compare;
-      case HSA_SIGNAL_CONDITION_GTE: return value >= compare;
-      case HSA_SIGNAL_CONDITION_LT: return value < compare;
-      default: return false;
-    }
-  };
-
   // Prepares a list of events for a wait inside KFD
   auto PrepareInterrupt = [&](size_t idx, bool init_age) {
     HsaEvent* hsa_event = hsa_signals[idx]->EopEvent();
