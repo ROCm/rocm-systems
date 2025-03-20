@@ -94,14 +94,8 @@ public:
     std::unique_ptr<hsa::TraceControlAQLPacket> get_control(bool bStart);
     void iterate_data(aqlprofile_handle_t handle, rocprofiler_user_data_t data);
 
-    hsa_queue_t* queue{nullptr};
-
-    std::mutex                  trace_resources_mut;
-    thread_trace_parameter_pack params;
-    std::atomic<int>            active_traces{0};
-
-    std::unique_ptr<hsa::TraceControlAQLPacket>       control_packet;
-    std::unique_ptr<aql::ThreadTraceAQLPacketFactory> factory;
+    thread_trace_parameter_pack  params;
+    const rocprofiler_agent_id_t agent_id;
 
     [[nodiscard]] std::unique_ptr<class Signal> Submit(hsa_ext_amd_aql_pm4_packet_t* packet,
                                                        bool                          bWait) const;
@@ -116,11 +110,15 @@ public:
         }
         return nullptr;
     }
+    std::unique_ptr<aql::ThreadTraceAQLPacketFactory> factory{nullptr};
 
 private:
-    std::unique_ptr<code_object::CodeobjCallbackRegistry> codeobj_reg{nullptr};
+    hsa_queue_t*     queue{nullptr};
+    std::atomic<int> active_traces{0};
+    std::mutex       trace_resources_mut{};
 
-    rocprofiler_agent_id_t agent_id;
+    std::unique_ptr<hsa::TraceControlAQLPacket>           control_packet{nullptr};
+    std::unique_ptr<code_object::CodeobjCallbackRegistry> codeobj_reg{nullptr};
 };
 
 class DispatchThreadTracer
@@ -150,8 +148,10 @@ public:
                                                     rocprofiler_user_data_t*       user_data,
                                                     const context::correlation_id* corr_id);
 
-    void post_kernel_call(inst_pkt_t& aql, const hsa::queue_info_session& session);
+    void        post_kernel_call(inst_pkt_t& aql, const hsa::queue_info_session& session);
+    const auto& get_agents() const { return agents; }
 
+private:
     std::unordered_map<hsa_agent_t, std::unique_ptr<ThreadTracerQueue>>     agents{};
     std::unordered_map<rocprofiler_agent_id_t, thread_trace_parameter_pack> params{};
 
@@ -181,6 +181,9 @@ public:
         return params.find(id) != params.end();
     }
 
+    const auto& get_agents() const { return agents; }
+
+private:
     std::map<rocprofiler_agent_id_t, std::unique_ptr<ThreadTracerQueue>> agents{};
     std::map<rocprofiler_agent_id_t, thread_trace_parameter_pack>        params{};
 

@@ -112,7 +112,7 @@ TEST(thread_trace, resource_creation)
 
         tracer.resource_init();
 
-        for(auto& [_, agenttracer] : tracer.agents)
+        for(auto& [_, agenttracer] : tracer.get_agents())
         {
             agenttracer->load_codeobj(1, 0x1000, 0x1000);
             agenttracer->load_codeobj(2, 0x3000, 0x1000);
@@ -222,7 +222,7 @@ TEST(thread_trace, perfcounters_configure_test)
     auto* tracer  = context->dispatch_thread_trace.get();
 
     ASSERT_NE(tracer, nullptr);
-    for(auto& [id, agent] : tracer->agents)
+    for(auto& [id, agent] : tracer->get_agents())
     {
         ASSERT_EQ(agent->params.perfcounter_ctrl, 1);
         ASSERT_EQ(agent->params.perfcounters.size(), 3);

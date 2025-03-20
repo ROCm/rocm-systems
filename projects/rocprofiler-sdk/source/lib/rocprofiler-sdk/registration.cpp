@@ -903,6 +903,7 @@ rocprofiler_set_api_table(const char* name,
         if(runtime_pc_sampling_table)
             rocprofiler::pc_sampling::code_object::initialize(hsa_api_table);
 #endif
+        rocprofiler::thread_trace::code_object::initialize(hsa_api_table);
 
         // install rocprofiler API wrappers
         rocprofiler::hsa::update_table(hsa_api_table->core_, lib_instance);
