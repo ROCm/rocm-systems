@@ -42,7 +42,7 @@ def load_trace(inp, max_tries=5, retry_wait=1, bin_path=None):
     return tp
 
 
-def validate_perfetto(data, labels, counts, depths):
+def validate_perfetto(data, labels, counts, depths, useSubstringForLabels=False):
     """
     Validates the given perfetto data against expected labels, counts, and depths.
 
@@ -52,7 +52,8 @@ def validate_perfetto(data, labels, counts, depths):
         labels (list of str): A list of expected labels.
         counts (list of int): A list of expected counts corresponding to the labels.
         depths (list of int): A list of expected depths corresponding to the labels.
-
+        useSubstringForLabels (bool): If True, checks if the label in data contains
+            the expected label as a substring. If False, checks for exact matches.
     Raises:
         RuntimeError: If any of the labels, counts, or depths in the data do not match
             the expected values.
@@ -75,8 +76,15 @@ def validate_perfetto(data, labels, counts, depths):
         _count = ditr["count"]
         _depth = ditr["depth"]
 
-        if _label != eitr[0]:
-            raise RuntimeError(f"Mismatched prefix: {_label} vs. {eitr[0]}")
+        if useSubstringForLabels:
+            if eitr[0] not in _label:
+                raise RuntimeError(
+                    f"Mismatched prefix: {_label} does not contain {eitr[0]}"
+                )
+        else:
+            if _label != eitr[0]:
+                raise RuntimeError(f"Mismatched prefix: {_label} vs. {eitr[0]}")
+
         if _count != eitr[1]:
             raise RuntimeError(f"Mismatched count: {_count} vs. {eitr[1]}")
         if _depth != eitr[2]:
@@ -87,13 +95,26 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        "-l", "--labels", nargs="+", type=str, help="Expected labels", default=[]
+        "-l",
+        "--labels",
+        nargs="+",
+        type=str,
+        help="Expected labels. Not to be used with '-s'",
+        default=[],
     )
     parser.add_argument(
         "-c", "--counts", nargs="+", type=int, help="Expected counts", default=[]
     )
     parser.add_argument(
         "-d", "--depths", nargs="+", type=int, help="Expected depths", default=[]
+    )
+    parser.add_argument(
+        "-s",
+        "--label-substrings",
+        nargs="+",
+        type=str,
+        help="Expected labels substrings. Not to be used with '-l'",
+        default=[],
     )
     parser.add_argument(
         "-m", "--categories", nargs="+", help="Perfetto categories", default=[]
@@ -129,7 +150,15 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    if len(args.labels) != len(args.counts) or len(args.labels) != len(args.depths):
+    # check for mutually exclusive arguments
+    if args.labels and args.label_substrings:
+        raise RuntimeError(
+            "Cannot specify both expected labels and expected label substrings"
+        )
+
+    labels = args.labels if args.labels else args.label_substrings
+
+    if len(labels) != len(args.counts) or len(labels) != len(args.depths):
         raise RuntimeError(
             "The same number of labels, counts, and depths must be specified"
         )
@@ -176,9 +205,10 @@ if __name__ == "__main__":
     try:
         validate_perfetto(
             perfetto_data,
-            args.labels,
+            labels,
             args.counts,
             args.depths,
+            useSubstringForLabels=args.label_substrings is not None,
         )
 
     except RuntimeError as e:
