@@ -507,8 +507,6 @@ initialize(HsaApiTable* table)
 {
     ROCP_FATAL_IF(!table->core_ || !table->amd_ext_);
 
-    code_object::initialize(table);
-
     for(auto& ctx : context::get_registered_contexts())
     {
         if(ctx->device_thread_trace) ctx->device_thread_trace->resource_init();
