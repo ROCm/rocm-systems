@@ -94,6 +94,9 @@ push_correlation_id(correlation_id*);
 void
 dump_correlation_stack(const char*);
 
+void
+correlation_id_finalize();
+
 /// permits tools opportunity to modify the correlation id based on the domain, op, and
 /// the rocprofiler generated correlation id
 struct correlation_tracing_service

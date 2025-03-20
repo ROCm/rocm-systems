@@ -125,7 +125,7 @@ get_agent_list()
     std::vector<hsa_agent_t> agents(num_agents);
 
     // Get the agent list
-    hsa_agent_t* agent_iter = &agents[0];
+    hsa_agent_t* agent_iter = agents.data();
     status                  = hsa_iterate_agents(get_agents, &agent_iter);
     RET_IF_HSA_ERR(status)
 
@@ -182,7 +182,7 @@ call_hsa_memory_allocate(const size_t i, const size_t base_size, hsa_agent_t age
     }
     // Allocate memory to hold region list of an agent
     std::vector<hsa_region_t> region_list(num_regions);
-    hsa_region_t*             ptr_reg = &region_list[0];
+    hsa_region_t*             ptr_reg = region_list.data();
     status = hsa_agent_iterate_regions(agent, callback_get_regions, &ptr_reg);
     RET_IF_HSA_ERR(status)
     auto address_vec = std::vector<void*>{};
@@ -190,7 +190,7 @@ call_hsa_memory_allocate(const size_t i, const size_t base_size, hsa_agent_t age
 
     for(size_t j = 0; j < i; ++j)
     {
-        void* addr = 0;
+        void* addr = nullptr;
 
         status = hsa_memory_allocate(region_list[0], base_size, &addr);
         RET_IF_HSA_ERR(status)
@@ -218,7 +218,7 @@ call_hsa_memory_pool_allocate(const size_t i, const size_t base_size, hsa_agent_
     }
     // Allocate memory to hold region list of an agent
     std::vector<hsa_amd_memory_pool_t> memory_pool_list(num_pools);
-    hsa_amd_memory_pool_t*             ptr_memory_pool = &memory_pool_list[0];
+    hsa_amd_memory_pool_t*             ptr_memory_pool = memory_pool_list.data();
     status = hsa_amd_agent_iterate_memory_pools(agent, callback_get_memory_pools, &ptr_memory_pool);
     RET_IF_HSA_ERR(status)
     auto address_vec = std::vector<void*>{};
@@ -226,7 +226,7 @@ call_hsa_memory_pool_allocate(const size_t i, const size_t base_size, hsa_agent_
 
     for(size_t j = 0; j < i; ++j)
     {
-        void*    addr  = 0;
+        void*    addr  = nullptr;
         uint32_t flags = 0;
 
         status = hsa_amd_memory_pool_allocate(memory_pool_list[0], base_size, flags, &addr);
@@ -255,7 +255,7 @@ call_hsa_vmem_allocate(const size_t i, hsa_agent_t agent)
     }
     // Allocate memory to hold region list of an agent
     std::vector<hsa_amd_memory_pool_t> memory_pool_list(num_pools);
-    hsa_amd_memory_pool_t*             ptr_memory_pool = &memory_pool_list[0];
+    hsa_amd_memory_pool_t*             ptr_memory_pool = memory_pool_list.data();
     status = hsa_amd_agent_iterate_memory_pools(agent, callback_get_memory_pools, &ptr_memory_pool);
     RET_IF_HSA_ERR(status)
 
