@@ -22,10 +22,13 @@ else()
     set(PRELOAD_ENV "LD_PRELOAD=$<TARGET_FILE:rocprofiler-sdk-json-tool>")
 endif()
 
-if(ROCPROFILER_MEMCHECK STREQUAL "ThreadSanitizer")
-    set(IS_THREAD_SANITIZER ON)
+set(ROCPROFILER_MEMCHECK_TYPES "ThreadSanitizer" "AddressSanitizer"
+                               "UndefinedBehaviorSanitizer")
+
+if(ROCPROFILER_MEMCHECK AND ROCPROFILER_MEMCHECK IN_LIST ROCPROFILER_MEMCHECK_TYPES)
+    set(IS_SANITIZER ON)
 else()
-    set(IS_THREAD_SANITIZER OFF)
+    set(IS_SANITIZER OFF)
 endif()
 
 add_test(NAME test-openmp-tools-execute COMMAND $<TARGET_FILE:openmp-target>)
@@ -51,7 +54,7 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                DISABLED
-               "${IS_THREAD_SANITIZER}")
+               "${IS_SANITIZER}")
 
 # copy to binary directory
 rocprofiler_configure_pytest_files(COPY validate.py conftest.py CONFIG pytest.ini)
@@ -72,4 +75,4 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                DISABLED
-               "${IS_THREAD_SANITIZER}")
+               "${IS_SANITIZER}")

@@ -36,10 +36,13 @@ set(OPENMP_GPU_TARGETS
     "${DEFAULT_GPU_TARGETS}"
     CACHE STRING "GPU targets to compile for")
 
-if(ROCPROFILER_MEMCHECK STREQUAL "ThreadSanitizer")
-    set(IS_THREAD_SANITIZER ON)
+set(ROCPROFILER_MEMCHECK_TYPES "ThreadSanitizer" "AddressSanitizer"
+                               "UndefinedBehaviorSanitizer")
+
+if(ROCPROFILER_MEMCHECK AND ROCPROFILER_MEMCHECK IN_LIST ROCPROFILER_MEMCHECK_TYPES)
+    set(IS_SANITIZER ON)
 else()
-    set(IS_THREAD_SANITIZER OFF)
+    set(IS_SANITIZER OFF)
 endif()
 
 find_package(Threads REQUIRED)
@@ -83,4 +86,4 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                DISABLED
-               "${IS_THREAD_SANITIZER}")
+               "${IS_SANITIZER}")
