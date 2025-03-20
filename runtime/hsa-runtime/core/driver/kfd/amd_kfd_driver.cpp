@@ -527,6 +527,7 @@ hsa_status_t KfdDriver::IsModelEnabled(bool* enable) const {
   if (status != HSAKMT_STATUS_SUCCESS) {
      return HSA_STATUS_ERROR;
   }
+  return HSA_STATUS_SUCCESS;
 }
 
 } // namespace AMD
