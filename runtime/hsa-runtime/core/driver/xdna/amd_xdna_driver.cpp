@@ -529,7 +529,7 @@ hsa_status_t XdnaDriver::RegisterCmdBOs(
 
   // Transform the instruction sequence address into device address
   cmd_pkt_payload->data[CMD_PKT_PAYLOAD_INSTRUCTION_SEQUENCE_IDX] =
-      DEV_ADDR_BASE | instr_addr & DEV_ADDR_OFFSET_MASK;
+      DEV_ADDR_BASE | (instr_addr & DEV_ADDR_OFFSET_MASK);
 
   return HSA_STATUS_SUCCESS;
 }
