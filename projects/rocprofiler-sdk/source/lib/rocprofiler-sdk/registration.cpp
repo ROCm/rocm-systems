@@ -31,6 +31,7 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/context/correlation_id.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hip/stream.hpp"
 #include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
@@ -56,6 +57,7 @@
 #include <rocprofiler-sdk/hsa.h>
 #include <rocprofiler-sdk/marker.h>
 #include <rocprofiler-sdk/ompt.h>
+#include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/version.h>
 
 #include <hsa/hsa_api_trace.h>
@@ -537,13 +539,17 @@ invoke_client_initializers()
 
     if(!get_clients()) return false;
 
+    // if there is only one client, just fully finalize
+    rocprofiler_client_finalize_t client_fini_func =
+        (get_clients()->size() == 1) ? [](rocprofiler_client_id_t) -> void { finalize(); }
+                                     : &invoke_client_finalizer;
+
     for(auto& itr : *get_clients())
     {
         if(itr && itr->configure_result && itr->configure_result->initialize)
         {
             context::push_client(itr->internal_client_id.handle);
-            itr->configure_result->initialize(&invoke_client_finalizer,
-                                              itr->configure_result->tool_data);
+            itr->configure_result->initialize(client_fini_func, itr->configure_result->tool_data);
             context::pop_client(itr->internal_client_id.handle);
             // set to nullptr so initialize only gets called once
             itr->configure_result->initialize = nullptr;
@@ -722,6 +728,7 @@ finalize()
         pc_sampling::code_object::finalize();
 #endif
         code_object::finalize();
+        context::correlation_id_finalize();
         if(get_init_status() > 0)
         {
             invoke_client_finalizers();
