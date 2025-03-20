@@ -8,6 +8,30 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 - Added profiling and metric collection capabilities for VCN engine activity, JPEG engine activity and API tracing for rocDecode, rocJPEG and VA-APIs.
 
+### Resolved issues
+
+- Fixed application hang when enabling the RCCL backend
+
+## ROCm Systems Profiler 1.0.0 for ROCm 6.4
+
+### Added
+
+- Support for VA-API and rocDecode tracing.
+
+### Changed
+
+- Backend refactored to use rocprofiler-sdk rather than rocprofiler and roctracer.
+
+### Resolved issues
+
+- Fixed hardware counter summary files not being generated after profiling.
+
+- Fixed an application crash when collecting performance counters with rocprofiler.
+
+- Fixed interruption in config file generation.
+
+- Fixed segmentation fault while running rocprof-sys-instrument.
+
 ## ROCm Systems Profiler 0.1.1 for ROCm 6.3.2
 
 ### Resolved issues
