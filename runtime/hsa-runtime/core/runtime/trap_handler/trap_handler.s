@@ -54,6 +54,7 @@
 .set SQ_WAVE_TRAPSTS_XNACK_ERROR_SHIFT       , 28
 .set SQ_WAVE_TRAPSTS_MATH_EXCP               , 0x7F
 .set SQ_WAVE_TRAPSTS_PERF_SNAPSHOT_SHIFT     , 26
+.set SQ_WAVE_TRAPSTS_HOST_TRAP_SHIFT         , 22
 .set SQ_WAVE_MODE_EXCP_EN_SHIFT              , 12
 .set SQ_WAVE_MODE_EXCP_EN_SIZE               , 8
 .set TRAP_ID_ABORT                           , 2
@@ -284,6 +285,7 @@ trap_entry:
 
   s_load_dwordx2  			ttmp[2:3], ttmp[14:15], 0 glc   // ttmp[14:15]=*host_trap_buffers
 .if .amdgcn.gfx_generation_minor >= 4
+  s_setreg_imm32_b32			hwreg(HW_REG_TRAPSTS, SQ_WAVE_TRAPSTS_HOST_TRAP_SHIFT, 1), 0
   s_bitset0_b32                         ttmp13, TTMP13_PCS_IS_STOCHASTIC
   s_bitset1_b32                         ttmp13, TTMP13_PCS_IS_HOSTTRAP   // set bit 22 in TTMP13
 .else
@@ -323,6 +325,7 @@ trap_entry:
   s_cbranch_scc0  			.no_skip_debugtrap
 
   // Handle stochastic trap
+  s_setreg_imm32_b32			hwreg(HW_REG_TRAPSTS, SQ_WAVE_TRAPSTS_PERF_SNAPSHOT_SHIFT, 1), 0
   s_load_dwordx2  			ttmp[2:3], ttmp[14:15], 0x8 glc // ttmp[14:15]=*stoch_trap_buf
   s_bitset0_b32                         ttmp13, TTMP13_PCS_IS_HOSTTRAP
   s_bitset1_b32   			ttmp13, TTMP13_PCS_IS_STOCHASTIC  // set bit 25 in TTMP13
