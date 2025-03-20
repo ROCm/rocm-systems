@@ -5882,7 +5882,7 @@ class AMDSMICommands():
                 tabular_output.append(tabular_output_dict)
 
             self.logger.multiple_device_output = tabular_output
-            self.logger.table_title = "\nCURRENT_PARTITION"
+            self.logger.table_title = "CURRENT_PARTITION"
             self.logger.print_output(multiple_device_enabled=True, tabular=True, dynamic=True)
             self.logger.clear_multiple_devices_output()
 
@@ -6054,8 +6054,18 @@ class AMDSMICommands():
 
             self.logger.multiple_device_output = tabular_output
             self.logger.table_title = "\nACCELERATOR_PARTITION_PROFILES"
+            # only display warning message if not running as root or with sudo
+            if os.geteuid() != 0:
+                self.logger.warning_message = """
+***************************************************************************
+** WARNING:                                                              **
+** ACCELERATOR_PARTITION_PROFILES requires sudo/root permissions to run. **
+** Please run the command with sudo permissions to get accurate results. **
+***************************************************************************
+"""
             self.logger.print_output(multiple_device_enabled=True, tabular=True, dynamic=True)
             self.logger.clear_multiple_devices_output()
+            self.logger.warning_message = "" # clear the warning message
 
             #########################################
             # print accelerator partition resources #

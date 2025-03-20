@@ -5536,8 +5536,7 @@ amdsmi_set_gpu_memory_partition_mode(amdsmi_processor_handle processor_handle,
 /**
  *  @brief Version 2.0: Returns gpu accelerator partition caps as currently configured in the system
  *  User must use admin/sudo privledges to run this API, or API will not be able to
- *  read resources. Otherwise, API will fill in the structure with as much information as
- *  it can.
+ *  read resources.
  *
  *  @ingroup tagAcceleratorPartition
  *
