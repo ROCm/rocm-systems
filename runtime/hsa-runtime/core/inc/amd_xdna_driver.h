@@ -42,6 +42,7 @@
 #ifndef HSA_RUNTIME_CORE_INC_AMD_XDNA_DRIVER_H_
 #define HSA_RUNTIME_CORE_INC_AMD_XDNA_DRIVER_H_
 
+#include <map>
 #include <memory>
 #include <unordered_map>
 
@@ -127,9 +128,23 @@ inline uint32_t GetOperandCount(uint32_t arg_count) {
 }
 
 class XdnaDriver final : public core::Driver {
+  /// @brief BO handle information.
+  struct BOHandle {
+    /// Mapped address.
+    void* vaddr = nullptr;
+    /// Handle returned by xdna.
+    uint32_t handle = AMDXDNA_INVALID_BO_HANDLE;
+    /// Size in bytes.
+    size_t size = 0;
+
+    constexpr BOHandle() = default;
+    constexpr BOHandle(void* vaddr, uint32_t handle, size_t size)
+        : vaddr{vaddr}, handle{handle}, size{size} {}
+    constexpr bool IsValid() const { return handle != AMDXDNA_INVALID_BO_HANDLE; }
+  };
+
 public:
   XdnaDriver(std::string devnode_name);
-  ~XdnaDriver() = default;
 
   static hsa_status_t DiscoverDriver(std::unique_ptr<core::Driver>& driver);
 
@@ -142,9 +157,6 @@ public:
   hsa_status_t Init() override;
   hsa_status_t ShutDown() override;
   hsa_status_t QueryKernelModeDriver(core::DriverQuery query) override;
-
-  std::unordered_map<uint32_t, void*>& GetHandleMappings();
-  std::unordered_map<void*, uint32_t>& GetAddrMappings();
 
   hsa_status_t Open() override;
   hsa_status_t Close() override;
@@ -174,7 +186,7 @@ public:
                      size_t size) override;
   hsa_status_t ReleaseShareableHandle(core::ShareableHandle &handle) override;
 
-  /// @brief Submits num_pkts packets in a command chain to the XDNA driver
+  /// @brief Submits @p num_pkts packets in a command chain.
   hsa_status_t SubmitCmdChain(hsa_amd_aie_ert_packet_t* first_pkt, uint32_t num_pkts,
                               uint32_t num_operands, uint32_t hw_ctx_handle);
 
@@ -187,7 +199,11 @@ public:
   hsa_status_t IsModelEnabled(bool* enable) const override;
 
  private:
+  /// @brief Finds the BO associated with the address.
+  BOHandle FindBOHandle(void* mem) const;
+
   hsa_status_t QueryDriverVersion();
+
   /// @brief Allocate device accesible heap space.
   ///
   /// Allocate and map a buffer object (BO) that the AIE device can access.
@@ -210,8 +226,7 @@ public:
   /// @param cmd_pkt_payload A pointer to the payload of the command
   hsa_status_t RegisterCmdBOs(uint32_t count, std::vector<uint32_t>& bo_args,
                               std::vector<uint32_t>& bo_sizes, std::vector<uint64_t>& bo_addrs,
-                              hsa_amd_aie_ert_start_kernel_data_t* cmd_pkt_payload,
-                              const std::unordered_map<void*, uint32_t>& vmem_addr_mappings);
+                              hsa_amd_aie_ert_start_kernel_data_t* cmd_pkt_payload);
 
   /// @brief Syncs all BOs referenced in bo_args
   ///
@@ -230,17 +245,18 @@ public:
   /// driver handles requires a bit more refactoring. So rely on the XDNA driver
   /// to manage some of this for now.
   std::unordered_map<uint32_t, void *> vmem_handle_mappings;
-  std::unordered_map<void*, uint32_t> vmem_addr_mappings;
+  std::map<void*, BOHandle> vmem_addr_mappings;
 
   /// @brief Virtual address range allocated for the device heap.
   ///
   /// Allocate a large enough space so we can carve out the device heap in
   /// this range and ensure it is aligned to 64MB. Currently, npu1 supports
   /// 64MB device heap and it must be aligned to 64MB.
-  void *dev_heap_parent = nullptr;
+  BOHandle dev_heap_handle;
 
   /// @brief The aligned device heap.
   void *dev_heap_aligned = nullptr;
+
   static constexpr size_t dev_heap_size = 64 * 1024 * 1024;
   static constexpr size_t dev_heap_align = 64 * 1024 * 1024;
 };
