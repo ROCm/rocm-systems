@@ -172,6 +172,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Added rocprofiler_create_counter to allow for adding custom derived counters at runtime.
 - Added support for iteration based counter multiplexing to rocprofv3 (see documentation)
 - Added perfetto support for counter collection.
+- Added support for negating rocprofv3 tracing options when using aggregate options, e.g. `--sys-trace --hsa-trace=no`
 
 ### Changed
 

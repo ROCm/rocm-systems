@@ -26,6 +26,7 @@ import argparse
 import os
 import re
 import subprocess
+import textwrap
 import sys
 
 
@@ -48,10 +49,26 @@ class dotdict(dict):
                 )
 
 
-def fatal_error(msg, exit_code=1):
+def patch_message(msg, *args):
+    msg = textwrap.dedent(msg)
+
+    if len(args) > 0:
+        msg = msg.format(*args)
+
+    return msg.strip("\n").strip()
+
+
+def fatal_error(msg, *args, exit_code=1):
+    msg = patch_message(msg, *args)
     sys.stderr.write(f"Fatal error: {msg}\n")
     sys.stderr.flush()
     sys.exit(exit_code)
+
+
+def warning(msg, *args):
+    msg = patch_message(msg, *args)
+    sys.stderr.write(f"Warning: {msg}\n")
+    sys.stderr.flush()
 
 
 def format_help(formatter, w=120, h=40):
@@ -234,7 +251,7 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         "--log-level",
         help="Set the desired log level",
         default=None,
-        choices=("fatal", "error", "warning", "info", "trace", "env"),
+        choices=("fatal", "error", "warning", "info", "trace", "env", "config"),
         type=str.lower,
     )
     io_options.add_argument(
@@ -859,6 +876,10 @@ def run(app_args, args, **kwargs):
     use_execv = kwargs.get("use_execv", True)
     app_pass = kwargs.get("pass_id", None)
 
+    def setattrifnone(obj, attr, value):
+        if getattr(obj, f"{attr}") is None:
+            setattr(obj, f"{attr}", value)
+
     def update_env(env_var, env_val, **kwargs):
         """Local function for updating application environment which supports
         various options for dealing with existing environment variables
@@ -990,7 +1011,9 @@ def run(app_args, args, **kwargs):
             f"{_output_path}", f"{args.sub_directory}{app_pass}"
         )
 
-    if args.output_file is not None or args.output_directory is not None:
+    if args.list_avail and (
+        args.output_file is not None or args.output_directory is not None
+    ):
         update_env("ROCPROF_OUTPUT_LIST_AVAIL_FILE", True)
 
     if not args.output_format:
@@ -1006,7 +1029,7 @@ def run(app_args, args, **kwargs):
             "marker_trace",
             "kernel_rename",
         ):
-            setattr(args, itr, True)
+            setattrifnone(args, itr, True)
 
     if args.sys_trace:
         for itr in (
@@ -1021,7 +1044,7 @@ def run(app_args, args, **kwargs):
             "rocdecode_trace",
             "rocjpeg_trace",
         ):
-            setattr(args, itr, True)
+            setattrifnone(args, itr, True)
 
     if args.runtime_trace:
         for itr in (
@@ -1035,15 +1058,15 @@ def run(app_args, args, **kwargs):
             "rocdecode_trace",
             "rocjpeg_trace",
         ):
-            setattr(args, itr, True)
+            setattrifnone(args, itr, True)
 
     if args.hip_trace:
         for itr in ("compiler", "runtime"):
-            setattr(args, f"hip_{itr}_trace", True)
+            setattrifnone(args, f"hip_{itr}_trace", True)
 
     if args.hsa_trace:
         for itr in ("core", "amd", "image", "finalizer"):
-            setattr(args, f"hsa_{itr}_trace", True)
+            setattrifnone(args, f"hsa_{itr}_trace", True)
 
     trace_count = 0
     trace_opts = ["--hip-trace", "--hsa-trace"]
@@ -1071,12 +1094,21 @@ def run(app_args, args, **kwargs):
         trace_count += 1 if val else 0
         trace_opts += ["--{}".format(opt.replace("_", "-"))]
 
+    for opt in ["advanced_thread_trace", "pmc", "pc_sampling_beta_enabled"]:
+        if not hasattr(args, f"{opt}"):
+            continue
+        val = getattr(args, f"{opt}")
+        trace_count += 1 if val else 0
+        trace_opts += ["--{}".format(opt.replace("_", "-"))]
+
     # if marker tracing was requested, LD_PRELOAD the rocprofiler-sdk-roctx library
     # to override the roctx symbols of an app linked to the old roctracer roctx
     if args.marker_trace and not args.suppress_marker_preload:
         update_env("LD_PRELOAD", ROCPROF_ROCTX_LIBRARY, append=True)
 
     if trace_count == 0:
+        warning("No tracing options were enabled.")
+
         # if no tracing was enabled but the options below were enabled, raise an error
         for oitr in [
             "stats",
@@ -1093,20 +1125,29 @@ def run(app_args, args, **kwargs):
                 )
             elif getattr(args, _attr):
                 _len = max([len(f"{key}") for key in args.keys()])
-                _args = "\n\t".join(
+                _args = "\n    ".join(
                     sorted([f"{key:<{_len}} = {val}" for key, val in args.items()])
                 )
                 fatal_error(
-                    "No tracing options were enabled for --{} option.\nConfiguration argument values:\n\t{}\nTracing options:\n\t{}".format(
-                        oitr, f"{_args}", "\n\t".join(trace_opts)
-                    )
+                    """
+                    No tracing options were enabled for --{} option.
+
+                    Configuration argument values:
+                        {}
+
+                    Tracing options:
+                        {}
+                    """,
+                    oitr,
+                    f"{_args}",
+                    "\n    ".join(trace_opts),
                 )
 
     _summary_groups = "##@@##".join(args.summary_groups) if args.summary_groups else None
     _summary_output_fname = args.summary_output_file
-    if _summary_output_fname is None:
+    if args.summary and _summary_output_fname is None:
         _summary_output_fname = "stderr"
-    elif _summary_output_fname.lower() in ("stdout", "stderr"):
+    elif args.summary and _summary_output_fname.lower() in ("stdout", "stderr"):
         _summary_output_fname = _summary_output_fname.lower()
 
     update_env("ROCPROF_STATS", args.stats, overwrite_if_true=True)
@@ -1196,17 +1237,31 @@ def run(app_args, args, **kwargs):
             update_env(f"ROCPROF_{env_val}", val, overwrite=True)
 
     def log_config(_env):
-        existing_env = dict(os.environ)
-        init_message = "\n- rocprofv3 configuration{}:\n".format(
+
+        cfg_init_message = "\n- rocprofv3 configuration{}:\n".format(
             "" if app_pass is None else f" (pass {app_pass})"
         )
-        for key, itr in _env.items():
-            if key not in existing_env.keys():
-                if init_message:
-                    sys.stderr.write(init_message)
-                    init_message = None
-                sys.stderr.write(f"\t- {key}={itr}\n")
-        if init_message is None:
+        if args.log_level in ("info", "trace", "config"):
+            _len = max([len(f"{key}") for key in args.keys()])
+            _args = sorted([f"{key:<{_len}} = {val}" for key, val in args.items()])
+            sys.stderr.write(cfg_init_message)
+            cfg_init_message = None
+            for itr in _args:
+                sys.stderr.write(f"    - {itr}\n")
+
+        env_init_message = "\n- rocprofv3 environment{}:\n".format(
+            "" if app_pass is None else f" (pass {app_pass})"
+        )
+        if args.log_level in ("info", "trace", "env"):
+            existing_env = dict(os.environ)
+            for key, itr in _env.items():
+                if key not in existing_env.keys():
+                    if env_init_message:
+                        sys.stderr.write(env_init_message)
+                        env_init_message = None
+                    sys.stderr.write(f"    - {key}={itr}\n")
+
+        if cfg_init_message is None or env_init_message is None:
             sys.stderr.write("\n")
         sys.stderr.flush()
 
@@ -1389,7 +1444,7 @@ def run(app_args, args, **kwargs):
                     overwrite=True,
                 )
 
-    if args.log_level in ("info", "trace", "env"):
+    if args.log_level in ("info", "trace", "env", "config"):
         log_config(app_env)
 
     if use_execv:
