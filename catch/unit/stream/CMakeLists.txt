@@ -19,8 +19,7 @@ set(TEST_SRC
     hipLaunchHostFunc.cc
     hipStreamGetDevice.cc
     hipStreamLegacy_Ext.cc
-    hipStreamLegacy_compiler_options.cc
-)
+    hipStreamLegacy_compiler_options.cc)
 
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC ${TEST_SRC} hipStreamGetCUMask.cc hipStreamWithCUMask.cc
@@ -28,7 +27,8 @@ if(HIP_PLATFORM MATCHES "amd")
 	       hipStreamGetFlags_spt.cc
                hipStreamGetPriority_spt.cc
                hipStreamQuery_spt.cc
-               hipStreamSynchronize_spt.cc)
+               hipStreamSynchronize_spt.cc
+               hipStreamBatchMemOp.cc)
 else()
   set(TEST_SRC
       ${TEST_SRC}
@@ -55,3 +55,4 @@ hip_add_exe_to_target(
 
 add_executable(hipStreamLegacy_exe EXCLUDE_FROM_ALL hipStreamLegacy_exe.cc)
 add_dependencies(StreamTest hipStreamLegacy_exe)
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipStreamLegacy_exe)

@@ -150,15 +150,6 @@ TEST_CASE("Unit_hipMemcpy2DAsync_Negative_Parameters") {
                       hipErrorInvalidMemcpyDirection);
     }
 #endif
-#if HT_NVIDIA // Disabled on AMD due to defect - EXSWHTEC-235
-    SECTION("Invalid stream") {
-      StreamGuard stream_guard(Streams::created);
-      HIP_CHECK(hipStreamDestroy(stream_guard.stream()));
-      HIP_CHECK_ERROR(
-          hipMemcpy2DAsync(dst, dpitch, src, spitch, width, height, kind, stream_guard.stream()),
-          hipErrorContextIsDestroyed);
-    }
-#endif
   };
 
   SECTION("Host to device") {

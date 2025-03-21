@@ -66,7 +66,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_Positive_Basic") {
 
   hipMemAllocationProp prop = {};
   prop.type = hipMemAllocationTypePinned;
-  prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+  prop.requestedHandleTypes = hipMemHandleTypePosixFileDescriptor;
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;
 
@@ -105,7 +105,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_Negative_Parameters") {
 
   hipMemAllocationProp prop = {};
   prop.type = hipMemAllocationTypePinned;
-  prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+  prop.requestedHandleTypes = hipMemHandleTypePosixFileDescriptor;
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;
 
@@ -224,7 +224,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl") {
     // Set property
     hipMemAllocationProp prop = {};
     prop.type = hipMemAllocationTypePinned;
-    prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+    prop.requestedHandleTypes = hipMemHandleTypePosixFileDescriptor;
     prop.location.type = hipMemLocationTypeDevice;
     prop.location.id = device;
     // Set Granularity of the VMM memory
@@ -349,7 +349,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl") {
     // Set property
     hipMemAllocationProp prop = {};
     prop.type = hipMemAllocationTypePinned;
-    prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+    prop.requestedHandleTypes = hipMemHandleTypePosixFileDescriptor;
     prop.location.type = hipMemLocationTypeDevice;
     prop.location.id = device;
     // Set Granularity of the VMM memory
@@ -508,7 +508,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl") {
     // Set property
     hipMemAllocationProp prop = {};
     prop.type = hipMemAllocationTypePinned;
-    prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+    prop.requestedHandleTypes = hipMemHandleTypePosixFileDescriptor;
     prop.location.type = hipMemLocationTypeDevice;
     prop.location.id = device;
     // Set Granularity of the VMM memory

@@ -68,4 +68,10 @@ TEST_CASE("Unit_hipStreamCreate_MultistreamBasicFunctionalities") {
   HIP_CHECK(hipMemcpy(&x, xd, sizeof(float), hipMemcpyDeviceToHost));
   HIP_CHECK(hipMemcpy(&y, yd, sizeof(float), hipMemcpyDeviceToHost));
   REQUIRE(x == y);
+
+  HIP_CHECK(hipFree(yd));
+  HIP_CHECK(hipFree(xd));
+  for (int i = 0; i < NUM_STREAMS; ++i) {
+    HIP_CHECK(hipFree(data[i]));
+  }
 }

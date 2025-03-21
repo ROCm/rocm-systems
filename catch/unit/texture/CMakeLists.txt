@@ -32,25 +32,38 @@ set(TEST_SRC
     hipSimpleTexture1DLayered.cc
     hipSimpleTexture2DLayered.cc
     hipBindTexture.cc
-    hipBindTex2DPitch.cc
+    hipBindTexture2D.cc
     hipTex1DFetchCheckModes.cc
     hipGetChanDesc.cc
     hipGetTextureAlignmentOffset.cc
+    hipGetTextureReference.cc
     hipTexObjPitch.cc
     hipTexRefSetArray.cc
     hipTexRefGetArray.cc
     hipTexRefGetBorderColor.cc
     hipTexRefSetBorderColor.cc
+    hipTexRefGetAddress.cc
+    hipTexRefSetAddress.cc
+    hipTexRefGetFormat.cc
+    hipTexRefSetFormat.cc
     hipTextureObj1DFetch.cc
     hipTextureObj1DCheckModes.cc
     hipTextureObj2DCheckModes.cc
     hipTextureObj3DCheckModes.cc
     hipTextureObj1DCheckSRGBModes.cc
     hipTextureObj2DCheckSRGBModes.cc
+    hipTexObjectCreate.cc
     hipTexObjectTests.cc
     hipTextureObjectTests.cc
     hipTexRefSetAddress2D.cc
     hipTexRefSetMaxAnisotropy.cc
+    hipTexRefGetMaxAnisotropy.cc
+    hipUnbindTexture.cc
+    hipTexRefSetFlags.cc
+    hipBindTextureToArray.cc
+    hipTexRefGetFlags.cc
+    hipTexRefSetAddressMode.cc
+    hipTexRefGetAddressMode.cc
 )
 
 # tests not for gfx90a+
@@ -69,7 +82,7 @@ set(NOT_FOR_gfx90a_AND_ABOVE_TEST
     tex3DGrad.cc
 )
 
-set(gfx90a_AND_ABOVE_TARGETS gfx90a gfx940 gfx941 gfx942 gfx950)
+set(gfx90a_AND_ABOVE_TARGETS gfx90a gfx942 gfx950)
 function(CheckRejectedArchs OFFLOAD_ARCH_STR_LOCAL)
   set(ARCH_CHECK -1 PARENT_SCOPE)
   string(REGEX MATCHALL "--offload-arch=gfx[0-9a-z]+" OFFLOAD_ARCH_LIST ${OFFLOAD_ARCH_STR_LOCAL})
@@ -130,6 +143,7 @@ set(TEST_SRC
     tex3DLod.cc
 )
 endif()
+
 
 hip_add_exe_to_target(NAME TextureTest
                       TEST_SRC ${TEST_SRC}

@@ -72,3 +72,20 @@ TEST_CASE("Unit_hipModuleGetFunction_Negative_Parameters") {
     HIP_CHECK_ERROR(hipModuleGetFunction(&kernel, GetModule(), "DeviceKernel"), hipErrorNotFound);
   }
 }
+
+// Test description: Loading kernel function from different device than the one on which the module
+// is loaded
+TEST_CASE("Unit_hipModuleGetFunction_DiffDevice") {
+  int numDevices = 0;
+  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  if (numDevices < 2) {
+    SUCCEED("skipped the testcase as no of devices is less than 2");
+    return;
+  }
+
+  hipFunction_t kernel = nullptr;
+  auto module = GetModule();
+  HIP_CHECK(hipSetDevice(1));
+  HIP_CHECK(hipModuleGetFunction(&kernel, module, "GlobalKernel"));
+  REQUIRE(kernel != nullptr);
+}

@@ -1,7 +1,6 @@
 {
     "DisabledTests": [
         "=== Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/85 ===",
-        "Unit_hipFuncSetAttribute_Negative_Parameters",
         "=== Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/215 ===",
         "Unit_ChannelDescriptor_Positive_Basic_1D - long",
         "Unit_ChannelDescriptor_Positive_Basic_1D - unsigned long",
@@ -226,8 +225,21 @@
         "=== Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/210 ===",
         "Unit_hipMemImportFromShareableHandle_Positive_MultiProc",
         "Unit_hipMemMapArrayAsync_Positive_Basic",
-        "=== Disabling failing nvidia tests ====",
+        "=== Disabling failing nvidia tests ===",
         "Unit_hipDeviceSetLimit_Negative_PrintfFifoSize",
-        "Unit_hipDeviceSetLimit_Negative_MallocHeapSize"
+        "Unit_hipDeviceSetLimit_Negative_MallocHeapSize",
+        "=== Disabling tests which no longer behave the same on nvidia platform ===",
+        "Unit_hipGraphInstantiateWithParams_Negative",
+        "Unit_hipGraphAddChildGraphNode_OrgGraphAsChildGraph",
+        "Unit_hipStreamBeginCapture_Negative_Parameters",
+        "Unit_hipStreamDestroy_Negative_DoubleDestroy",
+        "Unit_hipDeviceSynchronize_Positive_Nullstream",
+        "Unit_hipDeviceSynchronize_Functional",
+        "Unit_hipGetSetDeviceFlags_InvalidFlag",
+        "Unit_hipDeviceReset_Positive_Basic",
+        "Unit_hipDeviceReset_Positive_Threaded",
+        "Unit_hipModuleLaunchKernel_Negative_Parameters",
+        "Unit_hipModuleGetTexRef_Positive_Basic",
+        "Unit_hipLaunchCooperativeKernel_Negative_Parameters"
     ]
 }

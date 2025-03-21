@@ -95,10 +95,7 @@
         "Unit_hipFuncSetCacheConfig_Positive_Basic",
         "Unit_hipFuncSetCacheConfig_Negative_Parameters",
         "Unit_hipFuncSetSharedMemConfig_Positive_Basic",
-        "Unit_hipFuncSetAttribute_Positive_MaxDynamicSharedMemorySize",
         "Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout",
-        "Unit_hipFuncSetAttribute_Positive_Parameters",
-        "Unit_hipFuncSetAttribute_Negative_Parameters",
         "Unit_hipEventCreateWithFlags_DisableSystemFence_HstVisMem",
         "Unit_hipEventCreateWithFlags_DefaultFlg_HstVisMem",
         "Unit_hipEventCreateWithFlags_DisableSystemFence_NonCohHstMem",
@@ -253,7 +250,6 @@
         "Unit_hipMemSetAccess_EntireVMMRangeSetGet",
         "Unit_hipMemGetAccess_NegTst",
         "Unit_hipMemSetAccess_FuncTstOnMultDev",
-        "Unit_hipMemSetAccess_AccessDirectlyFromHost",
         "Unit_hipMemSetAccess_ChangeAccessProp",
         "Unit_hipMemSetAccess_Vmm2UnifiedMemCpy",
         "Unit_hipMemSetAccess_Vmm2DevMemCpy",
@@ -377,10 +373,7 @@
         "Unit_hipFuncSetCacheConfig_Positive_Basic",
         "Unit_hipFuncSetCacheConfig_Negative_Parameters",
         "Unit_hipFuncSetSharedMemConfig_Positive_Basic",
-        "Unit_hipFuncSetAttribute_Positive_MaxDynamicSharedMemorySize",
         "Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout",
-        "Unit_hipFuncSetAttribute_Positive_Parameters",
-        "Unit_hipFuncSetAttribute_Negative_Parameters",
         "Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_Negative_Parameters",
         "Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_Negative_Parameters",
         "Unit_hipModuleOccupancyMaxPotentialBlockSizeWithFlags_Negative_Parameters",
@@ -491,7 +484,6 @@
         "Unit_hipMemSetAccess_EntireVMMRangeSetGet",
         "Unit_hipMemGetAccess_NegTst",
         "Unit_hipMemSetAccess_FuncTstOnMultDev",
-        "Unit_hipMemSetAccess_AccessDirectlyFromHost",
         "Unit_hipMemSetAccess_ChangeAccessProp",
         "Unit_hipMemSetAccess_Vmm2UnifiedMemCpy",
         "Unit_hipMemSetAccess_Vmm2DevMemCpy",
@@ -645,6 +637,8 @@
         "Note: test dropped in latest gerritgit",
         "Unit_hipStreamCreate_WithPriorityPerformance_Default_high",
         "Unit_hipStreamCreate_WithPriorityPerformance_Nonblocking_high",
-        "Unit_hipStreamCreate_WithPriorityPerformance_Default_low"
+        "Unit_hipStreamCreate_WithPriorityPerformance_Default_low",
+        "=== Following tests disabled as it should be a local perf test",
+        "Performance_hipExtLaunchKernelGGL_QueryGPUFrequency"
     ]
 }

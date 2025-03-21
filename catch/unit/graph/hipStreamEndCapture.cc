@@ -56,12 +56,13 @@ TEST_CASE("Unit_hipStreamEndCapture_Negative_Parameters") {
   }
 #if HT_NVIDIA
   SECTION("Pass graph as nullptr") {
-    HIP_CHECK_ERROR(hipStreamEndCapture(stream, nullptr), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipStreamEndCapture(stream, nullptr), hipErrorIllegalState);
   }
 #endif
   SECTION("End capture on stream where capture has not yet started") {
     HIP_CHECK_ERROR(hipStreamEndCapture(stream, &graph), hipErrorIllegalState);
   }
+#if HT_AMD
   SECTION("Destroy stream and try to end capture") {
     hipStream_t destroyed_stream;
     HIP_CHECK(hipStreamCreate(&destroyed_stream));
@@ -69,6 +70,7 @@ TEST_CASE("Unit_hipStreamEndCapture_Negative_Parameters") {
     HIP_CHECK(hipStreamDestroy(destroyed_stream));
     HIP_CHECK_ERROR(hipStreamEndCapture(destroyed_stream, &graph), hipErrorContextIsDestroyed);
   }
+#endif
 }
 
 /**

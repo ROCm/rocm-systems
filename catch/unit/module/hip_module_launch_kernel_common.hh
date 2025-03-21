@@ -118,8 +118,13 @@ template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelPositiveParamet
   }
 }
 
-template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelNegativeParameters() {
+template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelNegativeParameters(
+                                                           bool extLaunch = false) {
   hipFunction_t f = GetKernel(mg.module(), "NOPKernel");
+  hipError_t expectedErrorZeroBlockDim = (extLaunch == true) ? hipErrorInvalidConfiguration
+                                                             : hipErrorInvalidValue;
+  hipError_t expectedErrorOverCapacityGridDim = (extLaunch == true) ? hipSuccess
+                                                                    : hipErrorInvalidValue;
 
   SECTION("f == nullptr") {
     HIP_CHECK_ERROR(
@@ -144,35 +149,35 @@ template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelNegativeParamet
 
   SECTION("blockDimX == 0") {
     HIP_CHECK_ERROR(func(f, 1, 1, 1, 0, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
-                    hipErrorInvalidValue);
+                    expectedErrorZeroBlockDim);
   }
 
   SECTION("blockDimY == 0") {
     HIP_CHECK_ERROR(func(f, 1, 1, 1, 1, 0, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
-                    hipErrorInvalidValue);
+                    expectedErrorZeroBlockDim);
   }
 
   SECTION("blockDimZ == 0") {
     HIP_CHECK_ERROR(func(f, 1, 1, 1, 1, 1, 0, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
-                    hipErrorInvalidValue);
+                    expectedErrorZeroBlockDim);
   }
 
   SECTION("gridDimX > maxGridDimX") {
     const unsigned int x = GetDeviceAttribute(hipDeviceAttributeMaxGridDimX, 0) + 1u;
     HIP_CHECK_ERROR(func(f, x, 1, 1, 1, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
-                    hipErrorInvalidValue);
+                    expectedErrorOverCapacityGridDim);
   }
 
   SECTION("gridDimY > maxGridDimY") {
     const unsigned int y = GetDeviceAttribute(hipDeviceAttributeMaxGridDimY, 0) + 1u;
     HIP_CHECK_ERROR(func(f, 1, y, 1, 1, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
-                    hipErrorInvalidValue);
+                    expectedErrorOverCapacityGridDim);
   }
 
   SECTION("gridDimZ > maxGridDimZ") {
     const unsigned int z = GetDeviceAttribute(hipDeviceAttributeMaxGridDimZ, 0) + 1u;
     HIP_CHECK_ERROR(func(f, 1, 1, z, 1, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
-                    hipErrorInvalidValue);
+                    expectedErrorOverCapacityGridDim);
   }
 
   SECTION("blockDimX > maxBlockDimX") {
@@ -207,16 +212,17 @@ template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelNegativeParamet
                     hipErrorInvalidValue);
   }
 
-// Disabled on AMD due to defect - EXSWHTEC-160
-#if HT_NVIDIA
   SECTION("Invalid stream") {
     hipStream_t stream = nullptr;
     HIP_CHECK(hipStreamCreate(&stream));
     HIP_CHECK(hipStreamDestroy(stream));
+    hipError_t err = hipErrorInvalidValue;
+    #if HT_NVIDIA
+    err = hipErrorContextIsDestroyed;
+    #endif
     HIP_CHECK_ERROR(func(f, 1, 1, 1, 1, 1, 0, 0, stream, nullptr, nullptr, nullptr, nullptr, 0u),
-                    hipErrorContextIsDestroyed);
+                    err);
   }
-#endif
 
   SECTION("Passing kernel_args and extra simultaneously") {
     hipFunction_t f = GetKernel(mg.module(), "Kernel42");

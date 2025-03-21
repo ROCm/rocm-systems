@@ -22,54 +22,7 @@ THE SOFTWARE.
 #include <utils.hh>
 #include "hip/hip_ext.h"
 #include "hip_module_common.hh"
-
-/**
- * @addtogroup hipGetProcAddress hipGetProcAddress
- * @{
- * @ingroup DeviceTest
- * `hipGetProcAddress(const char* symbol, void** pfn,
-                      int  hipVersion, uint64_t flags,
-                      hipDriverProcAddressQueryResult* symbolStatus);` -
- * Gets the symbol's function address.
- */
-
-/**
- * Local Function to fill the array with given value
- */
-void fillHostArray(int *arr, int size, int value) {
-  for ( int i = 0; i < size; i++ ) {
-    arr[i] = value;
-  }
-}
-
-/**
- * Local Function to validate the array with given reference value
- */
-bool validateHostArray(int *arr, int size, int refValue) {
-  for ( int i = 0; i < size; i++ ) {
-    if ( arr[i] != refValue ) {
-      return false;
-    }
-  }
-  return true;
-}
-
-/**
- * Kernel to add one for each element in array
- */
-__global__ void addOneKernel(int *a, int size) {
-  int offset = blockDim.x * blockIdx.x + threadIdx.x;
-  int stride = blockDim.x * gridDim.x;
-  for ( int i = offset; i < size; i+=stride ) {
-    a[i] += 1;
-  }
-}
-
-/**
- * A simple kernel to check some APIs functionality
- */
-__global__ void sampleKernel() {
-}
+#include "../device/hipGetProcAddressHelpers.hh"
 
 /**
  * Test Description
@@ -628,7 +581,7 @@ TEST_CASE("Unit_hipGetProcAddress_ModuleApisCooperativeKernels") {
     std::vector<hipLaunchParams> params(deviceCount);
 
     for (int i = 0; i < deviceCount; ++i) {
-      params[i].func = reinterpret_cast<void *>(sampleKernel);
+      params[i].func = reinterpret_cast<void *>(simpleKernel);
       params[i].gridDim = {1, 1, 1};
       params[i].blockDim = {1, 1, 1};
       params[i].args = nullptr;
@@ -663,7 +616,7 @@ TEST_CASE("Unit_hipGetProcAddress_ModuleApisCooperativeKernels") {
     std::vector<hipLaunchParams> params(deviceCount);
 
     for (int i = 0; i < deviceCount; ++i) {
-      params[i].func = reinterpret_cast<void *>(sampleKernel);
+      params[i].func = reinterpret_cast<void *>(simpleKernel);
       params[i].gridDim = {1, 1, 1};
       params[i].blockDim = {1, 1, 1};
       params[i].args = nullptr;

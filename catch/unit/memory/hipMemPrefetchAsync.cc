@@ -155,7 +155,7 @@ TEST_CASE("Unit_hipMemPrefetchAsync_Negative_Parameters") {
     HIP_CHECK_ERROR(hipMemPrefetchAsync(alloc.ptr(), kPageSize, hipInvalidDeviceId),
                     hipErrorInvalidDevice);
   }
-
+#if HT_AMD
   SECTION("Invalid stream") {
     hipStream_t stream;
     HIP_CHECK(hipStreamCreate(&stream));
@@ -163,4 +163,5 @@ TEST_CASE("Unit_hipMemPrefetchAsync_Negative_Parameters") {
     HIP_CHECK_ERROR(hipMemPrefetchAsync(alloc.ptr(), kPageSize, device, stream),
                     hipErrorContextIsDestroyed);
   }
+#endif
 }

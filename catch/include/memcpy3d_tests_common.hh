@@ -426,10 +426,9 @@ template <typename F>
 void Memcpy3DHtoDSyncBehavior(F memcpy_func, const bool should_sync,
                               const hipStream_t kernel_stream = nullptr) {
   using LA = LinearAllocs;
-  const auto host_alloc_type = GENERATE(LA::malloc, LA::hipHostMalloc);
   LinearAllocGuard3D<int> device_alloc(make_hipExtent(32 * sizeof(int), 32, 8));
   LinearAllocGuard<int> host_alloc(
-      host_alloc_type, device_alloc.width() * device_alloc.height() * device_alloc.depth());
+    LA::hipHostMalloc, device_alloc.width() * device_alloc.height() * device_alloc.depth());
   MemcpySyncBehaviorCheck(
       std::bind(memcpy_func, device_alloc.pitched_ptr(), make_hipPos(0, 0, 0),
                 make_hipPitchedPtr(host_alloc.ptr(), device_alloc.width(), device_alloc.width(),
@@ -450,7 +449,7 @@ void Memcpy3DDtoHPageableSyncBehavior(F memcpy_func, const bool should_sync,
                                    device_alloc.height()),
                 make_hipPos(0, 0, 0), device_alloc.pitched_ptr(), make_hipPos(0, 0, 0),
                 device_alloc.extent(), hipMemcpyDeviceToHost, kernel_stream),
-      should_sync, kernel_stream);
+                should_sync, kernel_stream);
 }
 
 template <typename F>
@@ -740,8 +739,6 @@ static inline bool operator==(const HIP_MEMCPY3D& lhs, const HIP_MEMCPY3D& rhs) 
   return pos_eq && extent_eq && mem_eq;
 }
 
-// APIs hipDrvGraphMemcpyNodeGetParams, hipDrvGraphMemcpyNodeSetParams are yet to be implemented in HIP runtime.
-#if 0
 template <bool set_params = false>
 hipError_t DrvMemcpy3DGraphWrapper(DrvPtrVariant dst_ptr, hipPos dst_pos, DrvPtrVariant src_ptr,
                                    hipPos src_pos, hipExtent extent, hipMemcpyKind kind,
@@ -774,7 +771,6 @@ hipError_t DrvMemcpy3DGraphWrapper(DrvPtrVariant dst_ptr, hipPos dst_pos, DrvPtr
 
   return hipSuccess;
 }
-#endif //if 0
 
 template <bool async = false>
 hipError_t DrvMemcpy3DWrapper(DrvPtrVariant dst_ptr, hipPos dst_pos, DrvPtrVariant src_ptr,

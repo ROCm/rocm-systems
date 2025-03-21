@@ -18,6 +18,7 @@
  */
 
 #include <stdio.h>
+#include <stdbool.h>
 #include <hip/hip_runtime.h>
 #include "LaunchKernel.h"
 #define KNRM "\x1B[0m"

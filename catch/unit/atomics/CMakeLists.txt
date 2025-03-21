@@ -55,41 +55,9 @@ if(HIP_PLATFORM MATCHES "amd")
       __hip_atomic_fetch_or.cc
       __hip_atomic_fetch_xor.cc
       __hip_atomic_exchange.cc
-    )
-
-  #atomicInc & atomicDec tests are disabled on gfx941 due to SWDEV-440688
-  set(NOT_FOR_GFX941_TEST
       atomicInc.cc
       atomicDec.cc
-  )
-  set(GFX941_TARGET gfx941)
-  function(CheckRejectedArchs OFFLOAD_ARCH_STR_LOCAL)
-    set(ARCH_CHECK -1 PARENT_SCOPE)
-    string(REGEX MATCHALL "--offload-arch=gfx[0-9a-z]+" OFFLOAD_ARCH_LIST ${OFFLOAD_ARCH_STR_LOCAL})
-    foreach(OFFLOAD_ARCH IN LISTS OFFLOAD_ARCH_LIST)
-      string(REGEX MATCHALL "--offload-arch=(gfx[0-9a-z]+)" matches ${OFFLOAD_ARCH})
-      if (CMAKE_MATCH_COUNT EQUAL 1)
-        if (CMAKE_MATCH_1 IN_LIST GFX941_TARGET)
-          set(ARCH_CHECK 1 PARENT_SCOPE)
-        endif()         # CMAKE_MATCH_1
-      endif()        # CMAKE_MATCH_COUNT
-    endforeach()   # OFFLOAD_ARCH_LIST
-  endfunction()  # CheckAcceptedArchs
-
-  if (DEFINED OFFLOAD_ARCH_STR)
-    CheckRejectedArchs(${OFFLOAD_ARCH_STR})
-  elseif(DEFINED $ENV{HCC_AMDGPU_TARGET})
-    CheckRejectedArchs($ENV{HCC_AMDGPU_TARGET})
-  else()
-    set(ARCH_CHECK -1)
-  endif()
-  if(${ARCH_CHECK} EQUAL -1)
-    message(STATUS "Adding test: ${NOT_FOR_GFX941_TEST}")
-    set(TEST_SRC ${TEST_SRC} ${NOT_FOR_GFX941_TEST})
-  else()
-    message(STATUS "Removing test: ${NOT_FOR_GFX941_TEST}")
-  endif()
-
+    )
 
   hip_add_exe_to_target(NAME AtomicsTest
                         TEST_SRC ${TEST_SRC}

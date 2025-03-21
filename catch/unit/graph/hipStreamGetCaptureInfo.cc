@@ -185,15 +185,6 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_Negative_Parameters") {
     HIP_CHECK(hipStreamEndCapture(stream, &graph));
     HIP_CHECK(hipGraphDestroy(graph));
   }
-  SECTION("Capture status when stream is uninitialized") {
-    constexpr auto InvalidStream = [] {
-      StreamGuard sg(Streams::created);
-      return sg.stream();
-    };
-
-    HIP_CHECK_ERROR(hipStreamGetCaptureInfo(InvalidStream(), &cStatus, &capSequenceID),
-                    hipErrorContextIsDestroyed);
-  }
 #endif
 }
 

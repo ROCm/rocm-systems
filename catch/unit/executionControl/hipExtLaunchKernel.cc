@@ -114,21 +114,21 @@ TEST_CASE("Unit_hipExtLaunchKernel_Negative_Parameters") {
     const unsigned int x = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimX, 0) + 1u;
     HIP_CHECK_ERROR(hipExtLaunchKernel(reinterpret_cast<void*>(kernel), dim3{1, 1, 1},
                                        dim3{x, 1, 1}, nullptr, 0, nullptr, nullptr, nullptr, 0u),
-                    hipErrorInvalidConfiguration);
+                    hipErrorInvalidValue);
   }
 
   SECTION("blockDim.y > maxBlockDimY") {
     const unsigned int y = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimY, 0) + 1u;
     HIP_CHECK_ERROR(hipExtLaunchKernel(reinterpret_cast<void*>(kernel), dim3{1, 1, 1},
                                        dim3{1, y, 1}, nullptr, 0, nullptr, nullptr, nullptr, 0u),
-                    hipErrorInvalidConfiguration);
+                    hipErrorInvalidValue);
   }
 
   SECTION("blockDim.z > maxBlockDimZ") {
     const unsigned int z = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimZ, 0) + 1u;
     HIP_CHECK_ERROR(hipExtLaunchKernel(reinterpret_cast<void*>(kernel), dim3{1, 1, 1},
                                        dim3{1, 1, z}, nullptr, 0, nullptr, nullptr, nullptr, 0u),
-                    hipErrorInvalidConfiguration);
+                    hipErrorInvalidValue);
   }
 
   SECTION("blockDim.x * blockDim.y * blockDim.z > maxThreadsPerBlock") {
@@ -137,14 +137,14 @@ TEST_CASE("Unit_hipExtLaunchKernel_Negative_Parameters") {
     HIP_CHECK_ERROR(
         hipExtLaunchKernel(reinterpret_cast<void*>(kernel), dim3{1, 1, 1}, dim3{dim, dim, dim},
                            nullptr, 0, nullptr, nullptr, nullptr, 0u),
-        hipErrorInvalidConfiguration);
+        hipErrorInvalidValue);
   }
 
   SECTION("sharedMemBytes > maxSharedMemoryPerBlock") {
     const unsigned int max = GetDeviceAttribute(hipDeviceAttributeMaxSharedMemoryPerBlock, 0) + 1u;
     HIP_CHECK_ERROR(hipExtLaunchKernel(reinterpret_cast<void*>(kernel), dim3{1, 1, 1},
                                        dim3{1, 1, 1}, nullptr, max, nullptr, nullptr, nullptr, 0u),
-                    hipErrorOutOfMemory);
+                    hipErrorInvalidValue);
   }
 
   SECTION("Invalid stream") {

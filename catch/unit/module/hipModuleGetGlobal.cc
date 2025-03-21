@@ -143,3 +143,21 @@ TEST_CASE("Unit_hipModuleGetGlobal_Negative_Dptr_And_Bytes_Are_Nullptr") {
   hipModule_t module = GetModule();
   HIP_CHECK_ERROR(hipModuleGetGlobal(nullptr, nullptr, module, "int_var"), hipErrorInvalidValue);
 }
+
+// Test description: Loading device ptr from different device than the one on which the module
+// is loaded
+TEST_CASE("Unit_hipModuleGetGlobal_DiffDevice") {
+  int numDevices = 0;
+  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  if (numDevices < 2) {
+    SUCCEED("skipped the testcase as no of devices is less than 2");
+    return;
+  }
+  auto module = GetModule();
+  HIP_CHECK(hipSetDevice(1));
+  hipDeviceptr_t global;
+  size_t global_size = 0;
+  HIP_CHECK(hipModuleGetGlobal(&global, &global_size, module, "int_var"));
+  REQUIRE(global != 0);
+  REQUIRE(sizeof(int) == global_size);
+}

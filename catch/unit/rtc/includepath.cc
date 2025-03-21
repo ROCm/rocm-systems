@@ -22,7 +22,7 @@ TEST_CASE("Unit_hiprtc_includepath") {
 
   string saxpy = "";
   {
-    fstream f("saxpy.h");
+    fstream f("saxpy.h" , std::ios::in);
     if (f.is_open()) {
       size_t sizeFile;
       f.seekg(0, fstream::end);
@@ -31,6 +31,9 @@ TEST_CASE("Unit_hiprtc_includepath") {
       saxpy.resize(size, ' ');
       f.read(&saxpy[0], size);
       f.close();
+   }
+   else {
+      FAIL("Failed to open saxpy.h. Please ensure the file exists and is accessible.");
    }
  }
 

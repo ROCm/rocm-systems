@@ -142,15 +142,10 @@ __host__ __device__ void Consumer(int* const flag, int* const data, int* const r
 
 template <BuiltinAtomicOperation operation, int memory_order, int memory_scope>
 __global__ void TestKernel(int* const flag, int* data, int* const ret) {
-  __shared__ int shared_mem;
+   __shared__ int shared_mem;
 
-  if (data == nullptr) data = &shared_mem;
-
-  if (blockIdx.x == 0 && threadIdx.x == 0) {
-    if constexpr (operation == BuiltinAtomicOperation::kAnd)
-      *flag = 1;
-    else
-      *flag = 0;
+  if (data == nullptr) {
+    data = &shared_mem;
   }
   __syncthreads();
 
@@ -210,6 +205,13 @@ template <BuiltinAtomicOperation operation, int memory_order, int memory_scope> 
   }
 
   LinearAllocGuard<int> flag(LinearAllocs::hipMalloc, sizeof(int));
+  int flagvalue = 0;
+
+  if constexpr (operation == BuiltinAtomicOperation::kAnd) {
+     flagvalue = 1;
+  }
+  HIP_CHECK(hipMemcpy(flag.ptr(), &flagvalue, sizeof(int), hipMemcpyHostToDevice));
+
   LinearAllocGuard<int> ret(LinearAllocs::hipMallocManaged, sizeof(int));
 
   SECTION("Global memory") {
@@ -219,7 +221,7 @@ template <BuiltinAtomicOperation operation, int memory_order, int memory_scope> 
         <<<blocks, threads>>>(flag.ptr(), data.ptr(), ret.ptr());
   }
 
-  if (memory_scope != __HIP_MEMORY_SCOPE_AGENT && memory_scope != __HIP_MEMORY_SCOPE_SYSTEM) {
+  if constexpr (memory_scope != __HIP_MEMORY_SCOPE_AGENT && memory_scope != __HIP_MEMORY_SCOPE_SYSTEM) {
     SECTION("Shared memory") {
       TestKernel<operation, memory_order, memory_scope>
           <<<blocks, threads>>>(flag.ptr(), nullptr, ret.ptr());
@@ -277,12 +279,21 @@ namespace SequentialConsistency {
 
 template <BuiltinAtomicOperation operation, int memory_scope>
 __host__ __device__ void Producer(int* const flag) {
-  if constexpr (operation == BuiltinAtomicOperation::kAnd) {
-    __atomic_store_n(flag, 0, __ATOMIC_SEQ_CST);
-  }
-  else {
-    __atomic_store_n(flag, 1, __ATOMIC_SEQ_CST);
-  }
+  #ifdef __HIP_DEVICE_COMPILE__ 
+    if constexpr (operation == BuiltinAtomicOperation::kAnd) {
+      __hip_atomic_store(flag, 0, __ATOMIC_SEQ_CST, memory_scope);
+    }
+    else {
+      __hip_atomic_store(flag, 1, __ATOMIC_SEQ_CST, memory_scope);
+    }
+  #else
+    if constexpr (operation == BuiltinAtomicOperation::kAnd) {
+      __atomic_store_n(flag, 0, __ATOMIC_SEQ_CST);
+    }
+    else {
+      __atomic_store_n(flag, 1, __ATOMIC_SEQ_CST);
+    }
+  #endif
 }
 
 template <BuiltinAtomicOperation operation, int memory_scope>
@@ -299,17 +310,18 @@ __host__ __device__ void Consumer(int* const flag1, int* const counter) {
 template <BuiltinAtomicOperation operation, int memory_scope>
 __global__ void TestKernel(int* flag1, int* flag2, int* const counter1, int* const counter2) {
   __shared__ int shared_mem[2];
-
-  if (flag1 == nullptr) flag1 = &shared_mem[0];
-  if (flag2 == nullptr) flag2 = &shared_mem[1];
-
-  if (blockIdx.x == 0 && threadIdx.x == 0) {
-    if constexpr (operation == BuiltinAtomicOperation::kAnd) {
-      *flag1 = 1;
-      *flag2 = 1;
-    } else {
-      *flag1 = 0;
-      *flag2 = 0;
+    
+  if (flag1 == nullptr && flag2 == nullptr) {
+    flag1 = &shared_mem[0];
+    flag2 = &shared_mem[1];
+    if (threadIdx.x == 0 ) {
+      if constexpr (operation == BuiltinAtomicOperation::kAnd) {
+        *flag1 = 1;
+        *flag2 = 1;
+       } else {
+        *flag1 = 0;
+        *flag2 = 0;
+       }
     }
   }
   __syncthreads();
@@ -390,11 +402,18 @@ template <BuiltinAtomicOperation operation, int memory_scope> void Test() {
     const auto alloc_type = LinearAllocs::hipMalloc;
     LinearAllocGuard<int> flag1(alloc_type, sizeof(int));
     LinearAllocGuard<int> flag2(alloc_type, sizeof(int));
+    int flagvalue = 0;
+    if constexpr (operation == BuiltinAtomicOperation::kAnd) {
+       flagvalue = 1;
+    }
+    HIP_CHECK(hipMemcpy(flag1.ptr(), &flagvalue, sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(flag2.ptr(), &flagvalue, sizeof(int), hipMemcpyHostToDevice));
+
     TestKernel<operation, memory_scope>
         <<<blocks, threads>>>(flag1.ptr(), flag2.ptr(), counter1.ptr(), counter2.ptr());
   }
 
-  if (memory_scope != __HIP_MEMORY_SCOPE_AGENT && memory_scope != __HIP_MEMORY_SCOPE_SYSTEM) {
+  if constexpr (memory_scope != __HIP_MEMORY_SCOPE_AGENT && memory_scope != __HIP_MEMORY_SCOPE_SYSTEM) {
     SECTION("Shared memory") {
       TestKernel<operation, memory_scope><<<blocks, threads>>>(nullptr, nullptr, counter1.ptr(), counter2.ptr());
     }
@@ -407,10 +426,8 @@ template <BuiltinAtomicOperation operation, int memory_scope> void Test() {
 }
 
 template <BuiltinAtomicOperation operation> void SystemTest() {
-
   HipTest::HIP_SKIP_TEST("Skip system scope tests due to random failures!!");
   return;
-
   std::thread host_producer, host_consumer;
 
   LinearAllocGuard<int> counter1(LinearAllocs::hipMallocManaged, sizeof(int));
@@ -426,6 +443,12 @@ template <BuiltinAtomicOperation operation> void SystemTest() {
     const auto alloc_type = LinearAllocs::hipMallocManaged;
     LinearAllocGuard<int> flag1(alloc_type, sizeof(int));
     LinearAllocGuard<int> flag2(alloc_type, sizeof(int));
+    int flagvalue = 0;
+    if constexpr (operation == BuiltinAtomicOperation::kAnd) {
+       flagvalue = 1;
+    }
+    HIP_CHECK(hipMemcpy(flag1.ptr(), &flagvalue, sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(flag2.ptr(), &flagvalue, sizeof(int), hipMemcpyHostToDevice));
 
     const auto &stream1 = streams[0].stream();
     ConsumerKernel<operation, __HIP_MEMORY_SCOPE_SYSTEM>

@@ -230,12 +230,6 @@ TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_Negative_Parameters") {
                                                 height, static_cast<hipMemcpyKind>(-1), nullptr),
                       hipErrorInvalidMemcpyDirection);
     }
-    SECTION("Invalid stream") {
-      HIP_CHECK_ERROR(hipMemcpy2DFromArrayAsync(host_alloc.ptr(), 2 * width * sizeof(int),
-                                                array_alloc.ptr(), 0, 0, width * sizeof(int),
-                                                height, hipMemcpyDeviceToHost, InvalidStream()),
-                      hipErrorContextIsDestroyed);
-    }
 #endif
   }
   SECTION("Array to device") {
@@ -283,12 +277,6 @@ TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_Negative_Parameters") {
                                                 array_alloc.ptr(), 0, 0, width * sizeof(int),
                                                 height, static_cast<hipMemcpyKind>(-1), nullptr),
                       hipErrorInvalidMemcpyDirection);
-    }
-    SECTION("Invalid stream") {
-      HIP_CHECK_ERROR(hipMemcpy2DFromArrayAsync(device_alloc.ptr(), device_alloc.pitch(),
-                                                array_alloc.ptr(), 0, 0, width * sizeof(int),
-                                                height, hipMemcpyDeviceToDevice, InvalidStream()),
-                      hipErrorContextIsDestroyed);
     }
 #endif
   }

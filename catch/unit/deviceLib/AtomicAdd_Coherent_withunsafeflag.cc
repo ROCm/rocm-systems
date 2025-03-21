@@ -22,7 +22,7 @@
 AtomicAdd on FineGrainMemory
 1. The following test scenario verifies
 atomicAdd on fineGrain memory with -munsafe-fp-atomics flag
-This testcase works only on gfx90a, gfx940, gfx941, gfx942.
+This testcase works only on gfx90a, gfx942, gfx950.
 */
 
 #include<hip_test_checkers.hh>
@@ -99,7 +99,7 @@ TEMPLATE_TEST_CASE("Unit_AtomicAdd_CoherentwithUnsafeflag", "",
       HIP_CHECK(hipHostFree(result));
     }
   } else {
-    SUCCEED("Memory model feature is only supported for gfx90a, gfx940, gfx941, gfx942, Hence"
-             "skipping the testcase for this GPU " << device);
+    SUCCEED("Memory model feature is only supported for gfx90a, gfx942, gfx950,"
+        "Hence skipping the testcase for this GPU " << device);
   }
 }

@@ -41,7 +41,9 @@ TEST_CASE("Unit_hipMemcpy3D_Positive_Basic") {
     SECTION("Peer access disabled") {
       Memcpy3DDeviceToDeviceShell<async, false>(Memcpy3DWrapper<>);
     }
-    SECTION("Peer access enabled") { Memcpy3DDeviceToDeviceShell<async, true>(Memcpy3DWrapper<>); }
+    SECTION("Peer access enabled") {
+      Memcpy3DDeviceToDeviceShell<async, true>(Memcpy3DWrapper<>);
+    }
   }
 
   SECTION("Host to Device") { Memcpy3DHostToDeviceShell<async>(Memcpy3DWrapper<>); }
@@ -78,7 +80,12 @@ TEST_CASE("Unit_hipMemcpy3D_Positive_DeviceToDevice_Synchronization_Behavior") {
 
   b_context.block_stream();
   REQUIRE(b_context.is_blocked());
-  HIP_CHECK(hipMemcpy3D(&parms));
+
+  hipError_t memcpy_err = hipSuccess;
+  BEGIN_CAPTURE_SYNC(memcpy_err, false);
+  HIP_CHECK_ERROR(hipMemcpy3D(&parms), memcpy_err);
+  END_CAPTURE_SYNC(memcpy_err);
+
   HIP_CHECK_ERROR(hipStreamQuery(kernel_stream), hipErrorNotReady);
   b_context.unblock_stream();
   HIP_CHECK(hipDeviceSynchronize());
@@ -89,16 +96,16 @@ TEST_CASE("Unit_hipMemcpy3D_Positive_Parameters") {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = false;
-  Memcpy3DZeroWidthHeightDepth<async>(Memcpy3DWrapper<async>);
+  Memcpy3DZeroWidthHeightDepth<async>(Memcpy3DWrapper<>);
 }
 
 TEST_CASE("Unit_hipMemcpy3D_Positive_Array") {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = false;
-  SECTION("Array from/to Host") { Memcpy3DArrayHostShell<async>(Memcpy3DWrapper<async>); }
+  SECTION("Array from/to Host") { Memcpy3DArrayHostShell<async>(Memcpy3DWrapper<>); }
 #if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-238
-  SECTION("Array from/to Device") { Memcpy3DArrayDeviceShell<async>(Memcpy3DWrapper<async>); }
+  SECTION("Array from/to Device") { Memcpy3DArrayDeviceShell<async>(Memcpy3DWrapper<>); }
 #endif
 }
 
@@ -249,4 +256,23 @@ TEST_CASE("Unit_hipMemcpy3D_Negative_Parameters") {
     NegativeTests(dst_alloc.pitched_ptr(), make_hipPos(0, 0, 0), src_alloc.pitched_ptr(),
                   make_hipPos(0, 0, 0), extent, hipMemcpyDeviceToDevice);
   }
+}
+
+TEST_CASE("Unit_hipMemcpy3D_Capture") {
+  CHECK_IMAGE_SUPPORT
+
+  constexpr hipExtent extent{16 * sizeof(int), 16, 16};
+  LinearAllocGuard3D<int> dev_alloc(extent);
+  LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc,
+                                   dev_alloc.pitch() * dev_alloc.height() * dev_alloc.depth());
+
+  auto params = GetMemcpy3DParms(dev_alloc.pitched_ptr(), make_hipPos(0, 0, 0),
+                                 make_hipPitchedPtr(host_alloc.ptr(), dev_alloc.pitch(),
+                                                    dev_alloc.width(), dev_alloc.height()),
+                                 make_hipPos(0, 0, 0), extent, hipMemcpyHostToDevice);
+
+  hipError_t memcpy_err = hipSuccess;
+  BEGIN_CAPTURE_SYNC(memcpy_err, false);
+  HIP_CHECK_ERROR(hipMemcpy3D(&params), memcpy_err);
+  END_CAPTURE_SYNC(memcpy_err);
 }

@@ -186,3 +186,283 @@ TEST_CASE("Unit_fp162_arith") {
     HIP_CHECK(hipFree(din2));
   }
 }
+
+TEST_CASE("Unit_fp16_host_operations") {
+  std::vector<float> f_a, f_b;
+  f_a.reserve(50);
+  f_b.reserve(50);
+
+  for (int i = -10; i <= 10; i++) {
+    if (i == 0) continue;  // skip to cause issue with 0/0
+    f_a.push_back(static_cast<float>(i));
+    f_b.push_back(static_cast<float>(i));
+  }
+
+  std::reverse(f_b.begin(), f_b.end());
+
+  std::vector<__half> d_a, d_b;
+  d_a.reserve(f_a.size());
+  d_b.reserve(f_b.size());
+
+  for (size_t i = 0; i < f_a.size(); i++) {
+    d_a.push_back(f_a[i]);
+    d_b.push_back(f_b[i]);
+  }
+
+  SECTION("plus equal op - host") {
+    auto res = d_a;
+    for (size_t i = 0; i < res.size(); i++) {
+      res[i] += d_b[i];
+    }
+
+    for (size_t i = 0; i < res.size(); i++) {
+      auto f_res = f_a[i] + f_b[i];
+      INFO("Float res: " << f_res << " half res: " << float(res[i]));
+      REQUIRE(__half(f_res) == res[i]);
+    }
+  }
+
+  SECTION("minus equal op - host") {
+    auto res = d_a;
+    for (size_t i = 0; i < res.size(); i++) {
+      res[i] -= d_b[i];
+    }
+
+    for (size_t i = 0; i < res.size(); i++) {
+      auto f_res = f_a[i] - f_b[i];
+      INFO("Float res: " << f_res << " half res: " << float(res[i]));
+      REQUIRE(__half(f_res) == res[i]);
+    }
+  }
+
+  SECTION("mul equal op - host") {
+    auto res = d_a;
+    for (size_t i = 0; i < res.size(); i++) {
+      res[i] *= d_b[i];
+    }
+
+    for (size_t i = 0; i < res.size(); i++) {
+      auto f_res = f_a[i] * f_b[i];
+      INFO("Float res: " << f_res << " half res: " << float(res[i]));
+      REQUIRE(__half(f_res) == res[i]);
+    }
+  }
+
+  SECTION("div equal op - host") {
+    auto res = d_a;
+    for (size_t i = 0; i < res.size(); i++) {
+      res[i] /= d_b[i];
+    }
+
+    for (size_t i = 0; i < res.size(); i++) {
+      auto f_res = f_a[i] / f_b[i];
+      INFO("Float res: " << f_res << " half res: " << float(res[i]));
+      REQUIRE(__half(f_res) == res[i]);
+    }
+  }
+
+  SECTION("++ op - host") {
+    auto res = d_a;
+    for (size_t i = 0; i < res.size(); i++) {
+      res[i]++;
+    }
+
+    for (size_t i = 0; i < res.size(); i++) {
+      auto f_res = f_a[i] + 1;
+      INFO("Float res: " << f_res << " half res: " << float(res[i]));
+      REQUIRE(__half(f_res) == res[i]);
+    }
+  }
+
+  SECTION("-- op - host") {
+    auto res = d_a;
+    for (size_t i = 0; i < res.size(); i++) {
+      res[i]--;
+    }
+
+    for (size_t i = 0; i < res.size(); i++) {
+      auto f_res = f_a[i] - 1;
+      INFO("Float res: " << f_res << " half res: " << float(res[i]));
+      REQUIRE(__half(f_res) == res[i]);
+    }
+  }
+}
+
+TEST_CASE("Unit_half_isnan_host") {
+  std::vector<__half> in{std::nanf(""),
+                         std::nanf("1"),
+                         std::nanf("2"),
+                         -std::nanf(""),
+                         -std::nanf("1"),
+                         -std::nanf("2"),
+                         std::numeric_limits<float>::infinity(),
+                         -std::numeric_limits<float>::infinity(),
+                         HIPRT_MAX_NORMAL_FP16,
+                         -0.0f,
+                         0.0f};
+
+  std::vector<__half> h_in;
+  h_in.reserve(in.size());
+  for (const auto& i : in) {
+    h_in.push_back(i);
+  }
+
+  SECTION("isnan") {
+    for (const auto& i : in) {
+      if (std::isnan(float(i))) {
+        INFO("isnan check: " << float(i));
+        REQUIRE(__hisnan(i));
+      } else {
+        INFO("not isnan check: " << float(i));
+        REQUIRE(!__hisnan(i));
+      }
+    }
+  }
+
+
+  SECTION("isinf") {
+    for (const auto& i : in) {
+      if (std::isinf(float(i))) {
+        INFO("isinf check: " << float(i));
+        REQUIRE(__hisinf(i));
+      } else {
+        INFO("not isnan check: " << float(i));
+        REQUIRE(!__hisinf(i));
+      }
+    }
+  }
+}
+
+TEST_CASE("Unit_half_abs_host") {
+  std::vector<float> f_a;
+  f_a.reserve(1000);
+
+  for (int i = -100; i <= 100; i++) {
+    f_a.push_back(static_cast<float>(i));
+  }
+
+  std::vector<__half> d_a;
+  d_a.reserve(f_a.size());
+
+  for (size_t i = 0; i < f_a.size(); i++) {
+    d_a.push_back(f_a[i]);
+  }
+
+  SECTION("habs") {
+    for (const auto& i : d_a) {
+      INFO("Abs of: " << float(i));
+      REQUIRE(__habs(i) == __half(std::abs(float(i))));
+    }
+  }
+
+  SECTION("habs2") {
+    for (size_t i = 0; i < d_a.size(); i++) {
+      __half2 tmp{d_a[i], d_a[i]};
+      auto abs_res = __habs2(tmp);
+      INFO("Abs of: " << float(d_a[i]));
+      REQUIRE(abs_res == __half2{std::abs(float(d_a[i])), std::abs(float(d_a[i]))});
+    }
+  }
+}
+
+TEST_CASE("Unit_half_min_max_host") {
+  std::vector<float> f_a;
+  f_a.reserve(1000);
+
+  for (int i = -100; i <= 100; i++) {
+    f_a.push_back(static_cast<float>(i));
+  }
+
+  std::vector<__half> d_a, d_b;
+  d_a.reserve(f_a.size());
+
+  for (size_t i = 0; i < f_a.size(); i++) {
+    d_a.push_back(f_a[i]);
+  }
+
+  d_b = d_a;
+  std::reverse(d_b.begin(), d_b.end());
+
+  auto p_nan = __half(std::nan(""));
+  auto n_nan = __half(-p_nan);
+
+  SECTION("min") {
+    for (size_t i = 0; i < d_a.size(); i++) {
+      float f_1 = float(d_a[i]), f_2 = float(d_b[i]);
+      INFO("Checking min of " << f_1 << ", " << f_2);
+      REQUIRE(__hmin(d_a[i], d_b[i]) == __half(std::min(f_1, f_2)));
+    }
+  }
+
+  SECTION("max") {
+    for (size_t i = 0; i < d_a.size(); i++) {
+      float f_1 = float(d_a[i]), f_2 = float(d_b[i]);
+      INFO("Checking min of " << f_1 << ", " << f_2);
+      REQUIRE(__hmax(d_a[i], d_b[i]) == __half(std::max(f_1, f_2)));
+    }
+  }
+
+  SECTION("min with nan") {
+    __half one = 1.0f;
+    REQUIRE(__hmin(p_nan, one) == one);
+    REQUIRE(__hmin(one, p_nan) == one);
+    REQUIRE(__hmin(n_nan, one) == one);
+    REQUIRE(__hmin(one, n_nan) == one);
+
+    REQUIRE(__hisnan(__hmin(p_nan, p_nan)));
+    REQUIRE(__hisnan(__hmin(n_nan, p_nan)));
+    REQUIRE(__hisnan(__hmin(p_nan, n_nan)));
+    REQUIRE(__hisnan(__hmin(n_nan, n_nan)));
+  }
+
+
+  SECTION("max with nan") {
+    __half one = 1.0f;
+    REQUIRE(__hmax(p_nan, one) == one);
+    REQUIRE(__hmax(one, p_nan) == one);
+    REQUIRE(__hmax(n_nan, one) == one);
+    REQUIRE(__hmax(one, n_nan) == one);
+
+    REQUIRE(__hisnan(__hmax(p_nan, p_nan)));
+    REQUIRE(__hisnan(__hmax(n_nan, p_nan)));
+    REQUIRE(__hisnan(__hmax(p_nan, n_nan)));
+    REQUIRE(__hisnan(__hmax(n_nan, n_nan)));
+  }
+
+  SECTION("hmin_nan") {
+    __half one = 1.0f;
+    __half n_one = -one;
+    REQUIRE(__hisnan(__hmin_nan(p_nan, one)));
+    REQUIRE(__hisnan(__hmin_nan(one, p_nan)));
+    REQUIRE(__hisnan(__hmin_nan(n_nan, one)));
+    REQUIRE(__hisnan(__hmin_nan(one, n_nan)));
+    REQUIRE(__hisnan(__hmin_nan(p_nan, p_nan)));
+    REQUIRE(__hisnan(__hmin_nan(n_nan, p_nan)));
+    REQUIRE(__hisnan(__hmin_nan(p_nan, n_nan)));
+    REQUIRE(__hisnan(__hmin_nan(n_nan, n_nan)));
+
+    REQUIRE(__hmin_nan(one, n_one) == n_one);
+    REQUIRE(__hmin_nan(n_one, one) == n_one);
+    REQUIRE(__hmin_nan(one, one) == one);
+    REQUIRE(__hmin_nan(n_one, n_one) == n_one);
+  }
+
+
+  SECTION("hmax_nan") {
+    __half one = 1.0f;
+    __half n_one = -one;
+    REQUIRE(__hisnan(__hmax_nan(p_nan, one)));
+    REQUIRE(__hisnan(__hmax_nan(one, p_nan)));
+    REQUIRE(__hisnan(__hmax_nan(n_nan, one)));
+    REQUIRE(__hisnan(__hmax_nan(one, n_nan)));
+    REQUIRE(__hisnan(__hmax_nan(p_nan, p_nan)));
+    REQUIRE(__hisnan(__hmax_nan(n_nan, p_nan)));
+    REQUIRE(__hisnan(__hmax_nan(p_nan, n_nan)));
+    REQUIRE(__hisnan(__hmax_nan(n_nan, n_nan)));
+
+    REQUIRE(__hmax_nan(one, n_one) == one);
+    REQUIRE(__hmax_nan(n_one, one) == one);
+    REQUIRE(__hmax_nan(one, one) == one);
+    REQUIRE(__hmax_nan(n_one, n_one) == n_one);
+  }
+}

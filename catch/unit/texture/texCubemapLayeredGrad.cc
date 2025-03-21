@@ -59,11 +59,7 @@ TEMPLATE_TEST_CASE("Unit_texCubemapLayeredGrad_Positive_ReadModeElementType", ""
   params.layers = 1;
   params.cubemap = true;
   params.GenerateTextureDesc();
-  if (params.tex_desc.addressMode[0] != params.tex_desc.addressMode[1] ||
-      params.tex_desc.addressMode[0] != params.tex_desc.addressMode[2]) {
-    INFO("Different address modes on X, Y, Z aren't supported. Skipped.");
-    return;
-  }
+
   TextureTestFixture<TestType, false, true> fixture{params};
 
   const auto [num_threads_x, num_blocks_x] = GetLaunchConfig(10, params.NumItersX());
@@ -150,11 +146,7 @@ TEMPLATE_TEST_CASE("Unit_texCubemapLayeredGrad_Positive_ReadModeNormalizedFloat"
   params.layers = 1;
   params.cubemap = true;
   params.GenerateTextureDesc(hipReadModeNormalizedFloat);
-  if (params.tex_desc.addressMode[0] != params.tex_desc.addressMode[1] ||
-      params.tex_desc.addressMode[0] != params.tex_desc.addressMode[2]) {
-    INFO("Different address modes on X, Y, Z aren't supported. Skipped.");
-    return;
-  }
+
   TextureTestFixture<TestType, true, true> fixture{params};
 
   const auto [num_threads_x, num_blocks_x] = GetLaunchConfig(10, params.NumItersX());

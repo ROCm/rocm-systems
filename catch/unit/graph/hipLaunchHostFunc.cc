@@ -67,7 +67,7 @@ TEST_CASE("Unit_hipLaunchHostFunc_Negative_Parameters") {
   SECTION("Pass functions as nullptr") {
     HIP_CHECK_ERROR(hipLaunchHostFunc(stream, nullptr, nullptr), hipErrorInvalidValue);
   }
-
+#if HT_AMD
   SECTION("Pass uninitialized stream") {
     hipHostFn_t fn = hostNodeCallbackDummy;
     constexpr auto InvalidStream = [] {
@@ -76,6 +76,7 @@ TEST_CASE("Unit_hipLaunchHostFunc_Negative_Parameters") {
     };
     HIP_CHECK_ERROR(hipLaunchHostFunc(InvalidStream(), fn, nullptr), hipErrorContextIsDestroyed);
   }
+#endif
 }
 
 /**

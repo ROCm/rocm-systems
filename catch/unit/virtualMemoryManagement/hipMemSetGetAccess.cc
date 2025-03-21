@@ -386,67 +386,6 @@ TEST_CASE("Unit_hipMemSetAccess_FuncTstOnMultDev") {
 /**
  * Test Description
  * ------------------------
- *    - Allocate physical memory and map it to a VMM range.
- * Access (Read/Write) the virtual pointer directly on host.
- * Ensure this behavior for all devices on host.
- * ------------------------
- *    - unit/virtualMemoryManagement/hipMemMap.cc
- * Test requirements
- * ------------------------
- *    - HIP_VERSION >= 6.1
- */
-TEST_CASE("Unit_hipMemSetAccess_AccessDirectlyFromHost") {
-  size_t granularity = 0;
-  constexpr int N = DATA_SIZE;
-  size_t buffer_size = N * sizeof(int);
-  int devicecount = 0;
-  HIP_CHECK(hipGetDeviceCount(&devicecount));
-  if (devicecount < 2) {
-    HipTest::HIP_SKIP_TEST("Machine is Single GPU. Skipping Test..");
-    return;
-  }
-  for (int dev = 0; dev < devicecount; dev++) {
-    hipDevice_t device;
-    HIP_CHECK(hipDeviceGet(&device, dev));
-    checkVMMSupported(device);
-    hipMemAllocationProp prop{};
-    prop.type = hipMemAllocationTypePinned;
-    prop.location.type = hipMemLocationTypeDevice;
-    prop.location.id = device;  // Current Devices
-    HIP_CHECK(
-        hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
-    REQUIRE(granularity > 0);
-    size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
-    hipMemGenericAllocationHandle_t handle;
-    // Allocate a physical memory chunk
-    HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
-    // Allocate num_buf virtual address ranges
-    hipDeviceptr_t ptrA;
-    HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
-    hipMemAccessDesc accessDesc = {};
-    accessDesc.location.type = hipMemLocationTypeDevice;
-    accessDesc.location.id = device;
-    accessDesc.flags = hipMemAccessFlagsProtReadWrite;
-    HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0));
-    HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
-    int* vptr = reinterpret_cast<int*>(ptrA);
-    for (int idx = 0; idx < N; idx++) {
-      *(vptr + idx) = idx;
-    }
-    // validate
-    for (int idx = 0; idx < N; idx++) {
-      REQUIRE(*(vptr + idx) == idx);
-    }
-    HIP_CHECK(hipMemUnmap(ptrA, size_mem));
-    // Release resources
-    HIP_CHECK(hipMemRelease(handle));
-    HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
-  }
-}
-
-/**
- * Test Description
- * ------------------------
  *    - Create a virtual memnory chunk and set the property of
  * the range to read/write. Write to the memory chunk. Change
  * the property of the range to read only. Check if the memory

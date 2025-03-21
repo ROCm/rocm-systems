@@ -54,7 +54,7 @@ TEST_CASE("Unit_hipMemExportToShareableHandle_Positive_Basic") {
 
   hipMemAllocationProp prop = {};
   prop.type = hipMemAllocationTypePinned;
-  prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+  prop.requestedHandleTypes = hipMemHandleTypePosixFileDescriptor;
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;
 
@@ -93,7 +93,7 @@ TEST_CASE("Unit_hipMemExportToShareableHandle_Negative_Parameters") {
 
   hipMemAllocationProp prop = {};
   prop.type = hipMemAllocationTypePinned;
-  prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+  prop.requestedHandleTypes = hipMemHandleTypePosixFileDescriptor;
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;
 

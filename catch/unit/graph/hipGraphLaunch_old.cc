@@ -95,8 +95,9 @@ TEST_CASE("Unit_hipGraphLaunch_Negative") {
     HIP_CHECK(hipGraphDestroy(graph));
     HIP_CHECK(hipStreamDestroy(stream));
   }
-/* In this case in CUDA setup this api call is giving - unknown error (999)
-   So enabling this test for both AMD and CUDA by checking with hipSuccess */
+/* In this case in CUDA setup this api call leads to undefined behavior
+   So enabling this test only for AMD and checking with hipSuccess */
+#if HT_AMD
   SECTION("Destroy stream and try to launch respective executable graph") {
     constexpr size_t Nbytes = 1024;
     hipGraph_t graph;
@@ -133,6 +134,7 @@ TEST_CASE("Unit_hipGraphLaunch_Negative") {
     HIP_CHECK(hipGraphExecDestroy(graphExec));
     HIP_CHECK(hipGraphDestroy(graph));
   }
+#endif
   SECTION("Destroy graph and try to launch respective executable graph") {
     constexpr size_t Nbytes = 1024;
     hipGraph_t graph;

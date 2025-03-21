@@ -64,12 +64,12 @@ TEST_CASE("Unit_hipStreamEndCapture_Negative") {
     hipStream_t stream;
     HIP_CHECK(hipStreamCreate(&stream));
     ret = hipStreamEndCapture(stream, nullptr);
-    REQUIRE(hipErrorInvalidValue == ret);
+    REQUIRE(hipErrorIllegalState == ret);
     HIP_CHECK(hipStreamDestroy(stream));
   }
   SECTION("Pass graph as nullptr and stream as hipStreamPerThread") {
     ret = hipStreamEndCapture(hipStreamPerThread, nullptr);
-    REQUIRE(hipErrorInvalidValue == ret);
+    REQUIRE(hipErrorIllegalState == ret);
   }
 #endif
   SECTION("End capture on stream where capture has not yet started") {
@@ -80,6 +80,7 @@ TEST_CASE("Unit_hipStreamEndCapture_Negative") {
     REQUIRE(hipErrorIllegalState == ret);
     HIP_CHECK(hipStreamDestroy(stream));
   }
+#if HT_AMD
   SECTION("Destroy stream and try to end capture") {
     hipStream_t stream;
     hipGraph_t graph;
@@ -89,6 +90,7 @@ TEST_CASE("Unit_hipStreamEndCapture_Negative") {
     ret = hipStreamEndCapture(stream, &graph);
     REQUIRE(hipErrorContextIsDestroyed == ret);
   }
+#endif
   SECTION("Destroy graph and try to end capture in between") {
     hipStream_t stream{nullptr};
     hipGraph_t graph{nullptr};

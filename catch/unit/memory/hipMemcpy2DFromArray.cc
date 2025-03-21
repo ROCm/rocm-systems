@@ -132,9 +132,9 @@ TEST_CASE("Unit_hipMemcpy2DFromArray_Positive_ZeroWidthHeight") {
           width, height);
     }
     SECTION("Width is 0") {
-      Memcpy2DFromArrayZeroWidthHeight<false>(
-          std::bind(hipMemcpy2DFromArray, _1, _2, _3, 0, 0, 0, height, hipMemcpyDeviceToHost),
-          width, height);
+      Memcpy2DFromArrayZeroWidthHeight<false>(std::bind(hipMemcpy2DFromArray, _1, _2, _3,
+                                                        0, 0, 0, height, hipMemcpyDeviceToHost),
+                                              width, height);
     }
   }
   SECTION("Array to device") {
@@ -259,4 +259,26 @@ TEST_CASE("Unit_hipMemcpy2DFromArray_Negative_Parameters") {
     }
 #endif
   }
+}
+
+TEST_CASE("Unit_hipMemcpy2DFromArray_Capture") {
+  CHECK_IMAGE_SUPPORT
+
+  const auto width = 16;
+  const auto height = 16;
+  const auto size = width * height * sizeof(int);
+
+  ArrayAllocGuard<int> A_d(make_hipExtent(width, height, 0), hipArrayDefault);
+  LinearAllocGuard<int> A_h(LinearAllocs::hipHostMalloc, size);
+  LinearAllocGuard<int> B_h(LinearAllocs::hipHostMalloc, size);
+
+  HIP_CHECK(hipMemcpy2DToArray(A_d.ptr(), 0, 0, A_h.ptr(), width * sizeof(int),
+                               width * sizeof(int), height, hipMemcpyHostToDevice));
+
+  hipError_t memcpy_err = hipSuccess;
+  BEGIN_CAPTURE_SYNC(memcpy_err, false);
+  HIP_CHECK_ERROR(hipMemcpy2DFromArray(B_h.host_ptr(), width * sizeof(int), A_d.ptr(), 0, 0,
+                                       width * sizeof(int), height, hipMemcpyDeviceToHost),
+                  memcpy_err);
+  END_CAPTURE_SYNC(memcpy_err);
 }

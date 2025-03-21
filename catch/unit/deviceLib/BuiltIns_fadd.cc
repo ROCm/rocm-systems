@@ -91,8 +91,8 @@ TEST_CASE("Unit_BuiltInAtomicAdd_CoherentGlobalMem") {
       HIP_CHECK(hipFree(result));
     }
   } else {
-    SUCCEED("Memory model feature is only supported for gfx90a, gfx940, gfx941, gfx942 Hence"
-            "skipping the testcase for this GPU " << device);
+    SUCCEED("Memory model feature is only supported for gfx90a, gfx942, gfx950,"
+        "Hence skipping the testcase for this GPU " << device);
   }
 }
 
@@ -135,7 +135,7 @@ TEST_CASE("Unit_BuiltInAtomicAdd_NonCoherentGlobalMem") {
       free(B_h);
     }
   } else {
-    SUCCEED("Memory model feature is only supported for gfx90a, gfx940, gfx941, gfx942"
+    SUCCEED("Memory model feature is only supported for gfx90a, gfx942, gfx950"
             "Hence skipping the testcase for GPU-0");
   }
 }
@@ -219,8 +219,8 @@ TEST_CASE("Unit_BuiltInAtomicAdd_CoherentGlobalMemWithRtc") {
       free(B_h);
     }
   } else {
-    SUCCEED("Memory model feature is only supported for gfx90a, gfx940, gfx941, gfx942, Hence"
-             "skipping the testcase for this GPU " << device);
+    SUCCEED("Memory model feature is only supported for gfx90a, gfx942, gfx950,"
+        "Hence skipping the testcase for this GPU " << device);
   }
 }
 
@@ -299,7 +299,7 @@ TEST_CASE("Unit_BuiltInAtomicAdd_NonCoherentGlobalMemWithRtc") {
       free(B_h);
     }
   } else {
-    SUCCEED("Memory model feature is only supported for gfx90a, gfx940, gfx941, gfx942, Hence"
-             "skipping the testcase for this GPU " << device);
+    SUCCEED("Memory model feature is only supported for gfx90a, gfx942, gfx950,"
+        "Hence skipping the testcase for this GPU " << device);
   }
 }

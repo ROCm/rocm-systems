@@ -34,6 +34,7 @@ THE SOFTWARE.
 #include <mutex>
 #include <cstdlib>
 #include <thread>
+#include "hip_test_features.hh"
 
 #ifdef TEST_CLOCK_CYCLE
 #define clock_function() clock64()

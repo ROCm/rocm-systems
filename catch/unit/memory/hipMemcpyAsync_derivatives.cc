@@ -70,13 +70,14 @@ TEST_CASE("Unit_hipMemcpyDtoHAsync_Negative_Parameters") {
         return hipMemcpyDtoHAsync(dst, reinterpret_cast<hipDeviceptr_t>(src), count, nullptr);
       },
       host_alloc.ptr(), device_alloc.ptr(), kPageSize);
-
+#if HT_AMD
   SECTION("Invalid stream") {
     HIP_CHECK_ERROR(
         hipMemcpyDtoHAsync(host_alloc.ptr(), reinterpret_cast<hipDeviceptr_t>(device_alloc.ptr()),
                            kPageSize, InvalidStream()),
         hipErrorContextIsDestroyed);
   }
+#endif
 }
 
 TEST_CASE("Unit_hipMemcpyHtoDAsync_Positive_Basic") {
@@ -115,12 +116,13 @@ TEST_CASE("Unit_hipMemcpyHtoDAsync_Negative_Parameters") {
         return hipMemcpyHtoDAsync(reinterpret_cast<hipDeviceptr_t>(dst), src, count, nullptr);
       },
       device_alloc.ptr(), host_alloc.ptr(), kPageSize);
-
+#if HT_AMD
   SECTION("Invalid stream") {
     HIP_CHECK_ERROR(hipMemcpyHtoDAsync(reinterpret_cast<hipDeviceptr_t>(device_alloc.ptr()),
                                        host_alloc.ptr(), kPageSize, InvalidStream()),
                     hipErrorContextIsDestroyed);
   }
+#endif
 }
 
 TEST_CASE("Unit_hipMemcpyDtoDAsync_Positive_Basic") {
@@ -165,13 +167,14 @@ TEST_CASE("Unit_hipMemcpyDtoDAsync_Negative_Parameters") {
                                   reinterpret_cast<hipDeviceptr_t>(src), count, nullptr);
       },
       dst_alloc.ptr(), src_alloc.ptr(), kPageSize);
-
+#if HT_AMD
   SECTION("Invalid stream") {
     HIP_CHECK_ERROR(hipMemcpyDtoDAsync(reinterpret_cast<hipDeviceptr_t>(dst_alloc.ptr()),
                                        reinterpret_cast<hipDeviceptr_t>(src_alloc.ptr()), kPageSize,
                                        InvalidStream()),
                     hipErrorContextIsDestroyed);
   }
+#endif
 }
 
 /**

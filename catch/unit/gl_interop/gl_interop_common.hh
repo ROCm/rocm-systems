@@ -125,6 +125,12 @@ class GLUTContextScopeGuard {
 class EGLContextScopeGuard {
  public:
   EGLContextScopeGuard() {
+
+    if(!HipTest::isImageSupported()) {
+      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
+      exit(1);
+    }
+
     // 1. Initialize EGL
     PFNEGLQUERYDEVICESEXTPROC eglQueryDevicesEXT =
         (PFNEGLQUERYDEVICESEXTPROC)eglGetProcAddress("eglQueryDevicesEXT");

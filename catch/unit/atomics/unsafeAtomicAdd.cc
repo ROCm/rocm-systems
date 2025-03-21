@@ -128,19 +128,25 @@ TEMPLATE_TEST_CASE("Unit_unsafeAtomicAdd_Positive_Multi_Kernel", "", float, doub
 
 template <typename Type,
           std::enable_if_t<std::is_same<Type, __half2>::value ||
-                               std::is_same<Type, __hip_bfloat162>::value,
+                               std::is_same<Type, __hip_bfloat162>::value ||
+                               std::is_same<Type, __hip_bfloat16>::value ||
+                               std::is_same<Type, __half>::value,
                            bool> = true>
 __global__ void unsafe_add_kernel(Type* ptr, Type val) {
   (void)unsafeAtomicAdd(ptr, val);
 }
 
-TEMPLATE_TEST_CASE("Unit_unsafe_atomic_add_half_and_bfloat", "", __half2, __hip_bfloat162) {
+TEMPLATE_TEST_CASE("Unit_unsafe_atomic_add_half_and_bfloat", "", __half2, __hip_bfloat162, __half, __hip_bfloat16) {
   auto kernel = unsafe_add_kernel<TestType>;
   TestType val;
   if constexpr (std::is_same<TestType, __half2>::value) {
     val = __float22half2_rn(float2{1.0f, 2.0f});
-  } else {
+  } else if constexpr (std::is_same<TestType, __hip_bfloat162>::value) {
     val = __float22bfloat162_rn(float2{1.0f, 2.0f});
+  } else if constexpr (std::is_same<TestType, __half>::value) {
+    val = __float2half(float{2.0f});
+  } else {
+    val = __float2bfloat16(float{2.0f});
   }
 
   TestType* out;
@@ -150,11 +156,18 @@ TEMPLATE_TEST_CASE("Unit_unsafe_atomic_add_half_and_bfloat", "", __half2, __hip_
 
   TestType dout;
   HIP_CHECK(hipMemcpy(&dout, out, sizeof(TestType), hipMemcpyDeviceToHost));
+
   float2 hout;
   if constexpr (std::is_same<TestType, __half2>::value) {
     hout = __half22float2(dout);
-  } else {
+  } else if constexpr (std::is_same<TestType, __hip_bfloat162>::value) {
     hout = __bfloat1622float2(dout);
+  } else if constexpr (std::is_same<TestType, __half>::value) {
+    hout.x = 32.0f;
+    hout.y  = __half2float(dout);
+  } else {
+    hout.x = 32.0f;
+    hout.y = __bfloat162float(dout);
   }
 
   REQUIRE(hout.x == 32.0f);

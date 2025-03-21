@@ -77,7 +77,7 @@ set(TEST_SRC
     ${TEST_SRC}
     hipExtModuleLaunchKernel.cc
     hipHccModuleLaunchKernel.cc
-    hipGetProcAddress_Module_APIs.cc)
+    hipGetProcAddressModuleApis.cc)
 
 add_custom_target(empty_module.code
                   COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR}
@@ -113,12 +113,21 @@ add_custom_target(copyKernelCompressed.code
                   -I${HIP_PATH}/include/ --rocm-path=${ROCM_PATH}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --rocm-path=${ROCM_PATH})
 
+set(OFFLOAD_ARCH_GENERIC_STR "--offload-arch=gfx9-generic --offload-arch=gfx9-4-generic --offload-arch=gfx10-1-generic --offload-arch=gfx10-3-generic --offload-arch=gfx11-generic --offload-arch=gfx12-generic")
+add_custom_target(copyKernelGenericTarget.code
+                  COMMAND ${CMAKE_CXX_COMPILER} -mcode-object-version=6 --genco ${OFFLOAD_ARCH_GENERIC_STR}
+                  ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copyKernelGenericTarget.code
+                  -I${HIP_PATH}/include/ --rocm-path=${ROCM_PATH}
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --rocm-path=${ROCM_PATH})
+
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/empty_module.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.s
   ${CMAKE_CURRENT_BINARY_DIR}/addKernel.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernelCompressed.code
+  ${CMAKE_CURRENT_BINARY_DIR}/copyKernelGenericTarget.code
 )
 
 if(UNIX)
@@ -214,6 +223,8 @@ add_dependencies(build_tests empty_module.code)
 add_dependencies(build_tests copyKernel.code copyKernel.s)
 add_dependencies(build_tests addKernel.code)
 add_dependencies(build_tests copyKernelCompressed.code)
+add_dependencies(build_tests copyKernelGenericTarget.code)
+
 if(UNIX)
 add_dependencies(build_tests copiousArgKernel.code copiousArgKernel0.code copiousArgKernel1.code copiousArgKernel2.code
 copiousArgKernel3.code copiousArgKernel16.code copiousArgKernel17.code)

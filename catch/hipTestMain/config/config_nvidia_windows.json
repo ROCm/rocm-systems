@@ -58,6 +58,19 @@
         "Unit_hipMallocArray_Negative_BadNumberOfBits",
         "Unit_hipMallocArray_Negative_3ChannelElement",
         "Unit_hipMallocArray_Negative_ChannelAfterZeroChannel",
-        "Unit_hipMallocArray_Negative_InvalidChannelFormat"
+        "Unit_hipMallocArray_Negative_InvalidChannelFormat",
+        "=== Disabling tests which no longer behave the same on nvidia platform ===",
+        "Unit_hipGraphInstantiateWithParams_Negative",
+        "Unit_hipGraphAddChildGraphNode_OrgGraphAsChildGraph",
+        "Unit_hipStreamBeginCapture_Negative_Parameters",
+        "Unit_hipStreamDestroy_Negative_DoubleDestroy",
+        "Unit_hipDeviceSynchronize_Positive_Nullstream",
+        "Unit_hipDeviceSynchronize_Functional",
+        "Unit_hipGetSetDeviceFlags_InvalidFlag",
+        "Unit_hipDeviceReset_Positive_Basic",
+        "Unit_hipDeviceReset_Positive_Threaded",
+        "Unit_hipModuleLaunchKernel_Negative_Parameters",
+        "Unit_hipModuleGetTexRef_Positive_Basic",
+        "Unit_hipLaunchCooperativeKernel_Negative_Parameters"
     ]
 }

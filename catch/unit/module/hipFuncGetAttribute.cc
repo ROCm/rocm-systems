@@ -39,13 +39,9 @@ TEST_CASE("Unit_hipFuncGetAttribute_Positive_Basic") {
 
   SECTION("binaryVersion") {
     HIP_CHECK(hipFuncGetAttribute(&value, HIP_FUNC_ATTRIBUTE_BINARY_VERSION, kernel));
-#if HT_NVIDIA
     const auto major = GetDeviceAttribute(hipDeviceAttributeComputeCapabilityMajor, 0);
     const auto minor = GetDeviceAttribute(hipDeviceAttributeComputeCapabilityMinor, 0);
     REQUIRE(value == major * 10 + minor);
-#elif HT_AMD
-    REQUIRE(value > 0);
-#endif
   }
 
   SECTION("cacheModeCA") {

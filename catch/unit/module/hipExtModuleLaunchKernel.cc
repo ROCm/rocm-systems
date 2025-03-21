@@ -52,6 +52,8 @@ THE SOFTWARE.
 constexpr auto fileName = "copyKernel.code";
 constexpr auto kernel_name = "copy_ker";
 constexpr auto fileNameCompressed = "copyKernelCompressed.code";
+constexpr auto fileNameGenericTarget = "copyKernelGenericTarget.code";
+
 static constexpr auto totalWorkGroups{1024};
 static constexpr auto localWorkSize{512};
 static constexpr auto lastWorkSizeEven{256};
@@ -196,6 +198,13 @@ TEST_CASE("Unit_hipExtModuleLaunchKernel_UniformWorkGroup") {
   SECTION("compressed codeobjects") {
      HIP_CHECK(hipModuleLoad(&Module, fileNameCompressed));
   }
+  SECTION("generic target codeobjects") {
+    if (!isGenericTargetSupported()) {
+      fprintf(stderr, "Generic target test is skipped\n");
+      return;
+    }
+    HIP_CHECK(hipModuleLoad(&Module, fileNameGenericTarget));
+  }
   HIP_CHECK(hipModuleGetFunction(&Function, Module, kernel_name));
   // Allocate resources
   int* A = new int[arraylength];
@@ -271,7 +280,7 @@ TEST_CASE("Unit_hipExtModuleLaunchKernel_Positive_Parameters") {
 }
 
 TEST_CASE("Unit_hipExtModuleLaunchKernel_Negative_Parameters") {
-  ModuleLaunchKernelNegativeParameters<hipExtModuleLaunchKernel>();
+  ModuleLaunchKernelNegativeParameters<hipExtModuleLaunchKernel>(true);
 }
 /**
  * Test Description
@@ -745,12 +754,15 @@ bool ModuleLaunchKernel::ExtModule_Corner_tests() {
   unsigned int maxblockX = deviceProp.maxThreadsDim[0];
   unsigned int maxblockY = deviceProp.maxThreadsDim[1];
   unsigned int maxblockZ = deviceProp.maxThreadsDim[2];
+  unsigned int maxgridX = deviceProp.maxGridSize[0];
+  unsigned int maxgridY = deviceProp.maxGridSize[1];
+  unsigned int maxgridZ = deviceProp.maxGridSize[2];
   struct gridblockDim test[6] = {{1, 1, 1, maxblockX, 1, 1},
                                  {1, 1, 1, 1, maxblockY, 1},
                                  {1, 1, 1, 1, 1, maxblockZ},
-                                 {UINT32_MAX, 1, 1, 1, 1, 1},
-                                 {1, UINT32_MAX, 1, 1, 1, 1},
-                                 {1, 1, UINT32_MAX, 1, 1, 1}};
+                                 {maxgridX, 1, 1, 1, 1, 1},
+                                 {1, maxgridY, 1, 1, 1, 1},
+                                 {1, 1, maxgridZ, 1, 1, 1}};
 
   for (int i = 0; i < 6; i++) {
     err = hipExtModuleLaunchKernel(DummyKernel,

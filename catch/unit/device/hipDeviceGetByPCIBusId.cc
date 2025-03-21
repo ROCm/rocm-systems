@@ -133,19 +133,19 @@ TEST_CASE("Unit_hipDeviceGetByPCIBusId_WrongBusID") {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   HIP_ASSERT(deviceCount != 0);
-  constexpr int MaxLen = 20;
   constexpr int MaxIter = 256;
   constexpr int MaxBusIdLen = 12;
-  int pciBusId[MaxLen], pciDeviceID[MaxLen],
-      pciDomainID[MaxLen];
+  std::vector<int> pciBusId;
+  std::vector<int> pciDeviceID;
+  std::vector<int> pciDomainID;
 
   // get bus id of all the devices
   for (int i = 0; i < deviceCount; i++) {
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, i));
-    pciBusId[i] = prop.pciBusID;
-    pciDeviceID[i] = prop.pciDeviceID;
-    pciDomainID[i] = prop.pciDomainID;
+    pciBusId.push_back(prop.pciBusID);
+    pciDeviceID.push_back(prop.pciDeviceID);
+    pciDomainID.push_back(prop.pciDomainID);
     printf("device %d: pciDomainID=%x, pciBusID=%x, pciDeviceID=%x \n",
            i, prop.pciDomainID, prop.pciBusID, prop.pciDomainID);
   }

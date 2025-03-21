@@ -9,6 +9,11 @@ set(TEST_SRC
 )
 
 if(HIP_PLATFORM MATCHES "amd")
+   set(TEST_SRC ${TEST_SRC}
+       hipGetProcAddressSptApis.cc)
+endif()
+
+if(HIP_PLATFORM MATCHES "amd")
         set_source_files_properties(hipStreamPerThrdCompilerOptn.cc PROPERTIES COMPILE_OPTIONS "-fgpu-default-stream=per-thread")
 endif()
 

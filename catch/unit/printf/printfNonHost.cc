@@ -20,13 +20,18 @@
  */
 #include <hip_test_common.hh>
 
-
-#define ITER_COUNT 61681
 #define KERNEL_ITERATIONS 15
-#define BLOCK_SIZE 61
+#define BLOCK_SIZE 2
 #define THREADS_PER_BLOCK 1024
-#define ITER_COUNT_FOR_THREAD 62464
+#define ITER_COUNT_FOR_THREAD (BLOCK_SIZE * THREADS_PER_BLOCK)
 #define CONST_STR "Hello World from Device.Iam printing 55 bytes of data.\n"
+
+//info_.printfBufferSize_ = PrintfDbg::WorkitemDebugSize(4096) * info().maxWorkGroupSize_(1024)
+#define MAX_BUFF_SIZE  (4096 * 1024)
+//<control DWord (4 bytes)><format string hash (8 bytes)><printf arguments each aligned to 8 bytes>
+#define Item_BUFF_SIZE (4 + 8 + 56) /* 56 = 55 + 1 byte null terminator */
+#define VALID_COUNT    (MAX_BUFF_SIZE / Item_BUFF_SIZE)
+#define ITER_COUNT     (VALID_COUNT + 1)
 
 // Kernel Functions
 __global__ void run_printf_basic(int *count) {
@@ -106,7 +111,6 @@ TEST_CASE("Unit_NonHost_Printf_loop") {
     return;
   }
   int *count{nullptr}, *count_d{nullptr};
-
   count = reinterpret_cast<int*>(malloc(ITER_COUNT * sizeof(int)));
   HIP_CHECK(hipMalloc(&count_d, ITER_COUNT * sizeof(int)));
 
@@ -150,7 +154,7 @@ TEST_CASE("Unit_NonHost_Printf_multiple_Threads") {
     return;
   }
   int *count{nullptr}, *count_d{nullptr};
-
+  fprintf(stderr, "VALID_COUNT=%d, ITER_COUNT_FOR_THREAD=%d\n", VALID_COUNT, ITER_COUNT_FOR_THREAD);
   count = reinterpret_cast<int*>(malloc(ITER_COUNT_FOR_THREAD * sizeof(int)));
   HIP_CHECK(hipMalloc(&count_d, ITER_COUNT_FOR_THREAD * sizeof(int)));
 
@@ -167,10 +171,10 @@ TEST_CASE("Unit_NonHost_Printf_multiple_Threads") {
       check = check+1;
     }
   }
-  if (check == ITER_COUNT_FOR_THREAD -(ITER_COUNT - 1)) {
-    REQUIRE(true);
+  if (VALID_COUNT < ITER_COUNT_FOR_THREAD) {
+    REQUIRE(check == ITER_COUNT_FOR_THREAD - VALID_COUNT);
   } else {
-    REQUIRE(false);
+    REQUIRE(check == 0);
   }
   free(count);
   HIP_CHECK(hipFree(count_d));
