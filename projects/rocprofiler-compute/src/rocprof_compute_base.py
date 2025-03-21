@@ -208,15 +208,11 @@ class RocProfCompute:
             #     Might want to get host name from detected spec
             if self.__args.subpath == "node_name":
                 self.__args.path = str(
-                    Path(self.__args.path).joinpath(
-                        self.__args.name, socket.gethostname()
-                    )
+                    Path(self.__args.path).joinpath(socket.gethostname())
                 )
             elif self.__args.subpath == "gpu_model":
                 self.__args.path = str(
-                    Path(self.__args.path).joinpath(
-                        self.__args.name, self.__mspec.gpu_model
-                    )
+                    Path(self.__args.path).joinpath(self.__mspec.gpu_model)
                 )
 
             p = Path(self.__args.path)
