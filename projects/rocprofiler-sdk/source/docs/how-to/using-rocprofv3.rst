@@ -684,6 +684,33 @@ To supply the input file for collecting traces, use:
 
    rocprofv3 -i input.yaml -- <application_path>
 
+Disabling specific tracing options
+++++++++++++++++++++++++++++++++++++
+
+When using aggregate tracing options like ``--runtime-trace`` or ``--sys-trace``, you can disable specific tracing options by setting them to ``False``. This allows fine-grained control over which traces are collected.
+
+.. code-block:: shell
+
+   rocprofv3 --runtime-trace --scratch-memory-trace=False -- <application_path>
+
+The above command enables all traces included in ``--runtime-trace`` except for scratch memory tracing.
+
+Similarly, for ``--sys-trace``:
+
+.. code-block:: shell
+
+   rocprofv3 --sys-trace --hsa-trace=False -- <application_path>
+
+This command enables all traces included in ``--sys-trace`` except for HSA API tracing.
+
+You can disable multiple specific tracing options:
+
+.. code-block:: shell
+
+   rocprofv3 --sys-trace --hsa-trace=False --scratch-memory-trace=False -- <application_path>
+
+This feature is particularly useful when you want to collect most traces but exclude specific ones that might be unnecessary for your analysis or that generate excessive data.
+
 Kernel counter collection
 --------------------------
 
