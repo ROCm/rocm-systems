@@ -291,6 +291,8 @@ typedef struct
     rocprofiler_agent_id_t  dst_agent_id;     ///< destination agent of copy
     rocprofiler_agent_id_t  src_agent_id;     ///< source agent of copy
     uint64_t                bytes;            ///< bytes copied
+    rocprofiler_address_t   dst_address;      ///< destination address
+    rocprofiler_address_t   src_address;      ///< source address
 } rocprofiler_callback_tracing_memory_copy_data_t;
 
 /**

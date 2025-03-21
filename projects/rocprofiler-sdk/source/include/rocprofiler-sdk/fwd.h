@@ -553,8 +553,9 @@ typedef union rocprofiler_user_data_t
  */
 typedef union rocprofiler_address_t
 {
-    uint64_t handle;  ///< usage example: store address in uint64_t format
-    void*    ptr;     ///< usage example: generic form of address
+    uint64_t    handle;  ///< compatability
+    uint64_t    value;   ///< usage example: store address in uint64_t format
+    const void* ptr;     ///< usage example: generic form of address
 } rocprofiler_address_t;
 
 /**
@@ -742,11 +743,19 @@ typedef struct rocprofiler_kernel_dispatch_info_t
     rocprofiler_queue_id_t    queue_id;     ///< Queue ID where kernel packet is enqueued
     rocprofiler_kernel_id_t   kernel_id;    ///< Kernel identifier
     rocprofiler_dispatch_id_t dispatch_id;  ///< unique id for each dispatch
-    uint32_t                  private_segment_size;  ///< runtime private memory segment size
-    uint32_t                  group_segment_size;    ///< runtime group memory segment size
+    uint32_t                  private_segment_size;
+    uint32_t                  group_segment_size;
     rocprofiler_dim3_t        workgroup_size;        ///< runtime workgroup size (grid * threads)
     rocprofiler_dim3_t        grid_size;             ///< runtime grid size
     uint8_t                   reserved_padding[56];  // reserved for extensions w/o ABI break
+
+    /// @var group_segment_size
+    /// @brief Runtime group memory segment size. Size of  group segment memory (static + runtime)
+    /// required by the kernel (per work-group), in bytes. AKA: LDS size
+    ///
+    /// @var private_segment_size
+    /// @brief Runtime private memory segment size. Size of private, spill, and arg segment memory
+    /// (static + runtime) required by this kernel (per work-item), in bytes. AKA: scratch size
 } rocprofiler_kernel_dispatch_info_t;
 
 /**
