@@ -507,12 +507,12 @@ trap_entry:
   s_waitcnt       			lgkmcnt(0)                      // Wait for timestamp
   s_store_dwordx2 			ttmp[4:5], ttmp[2:3] 0x30       // Store timestamp
 
-  s_getreg_b32    			ttmp4, hwreg(HW_REG_SQ_PERF_SNAPSHOT_DATA)
-  s_getreg_b32   	 	  	ttmp5, hwreg(HW_REG_SQ_PERF_SNAPSHOT_DATA1)
-  s_store_dwordx2 			ttmp[4:5], ttmp[2:3], 0x24            // store snapshot PC
   s_getreg_b32          		ttmp4, hwreg(HW_REG_SQ_PERF_SNAPSHOT_PC_LO)
   s_getreg_b32          		ttmp5, hwreg(HW_REG_SQ_PERF_SNAPSHOT_PC_HI)
   s_store_dwordx2 			ttmp[4:5], ttmp[2:3] 0x00       // store snapshot data
+  s_getreg_b32   	 	  	ttmp5, hwreg(HW_REG_SQ_PERF_SNAPSHOT_DATA1)
+  s_getreg_b32    			ttmp4, hwreg(HW_REG_SQ_PERF_SNAPSHOT_DATA)
+  s_store_dwordx2 			ttmp[4:5], ttmp[2:3], 0x24            // store snapshot PC
 
   s_mov_b32       			ttmp6, exec_lo
   s_store_dword   			ttmp6, ttmp[2:3], 0x8           // store EXEC_LO
