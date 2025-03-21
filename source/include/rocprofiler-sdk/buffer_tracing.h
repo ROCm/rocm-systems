@@ -235,6 +235,8 @@ typedef struct
     rocprofiler_agent_id_t              dst_agent_id;     ///< destination agent of copy
     rocprofiler_agent_id_t              src_agent_id;     ///< source agent of copy
     uint64_t                            bytes;            ///< bytes copied
+    rocprofiler_address_t               dst_address;      ///< destination address
+    rocprofiler_address_t               src_address;      ///< source address
 
     /// @var kind
     /// @brief ::ROCPROFILER_BUFFER_TRACING_MEMORY_COPY
@@ -258,6 +260,7 @@ typedef struct
     rocprofiler_agent_id_t agent_id;         ///< agent information for memory allocation
     rocprofiler_address_t  address;          ///< starting address for memory allocation
     uint64_t               allocation_size;  ///< size for memory allocation
+
     /// @var kind
     /// @brief ::ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION
     /// @var operation

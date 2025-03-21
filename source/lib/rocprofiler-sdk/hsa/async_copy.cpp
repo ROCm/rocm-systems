@@ -156,6 +156,8 @@ struct async_copy_data
     rocprofiler_thread_id_t             tid            = common::get_tid();
     rocprofiler_agent_id_t              dst_agent      = null_rocp_agent_id;
     rocprofiler_agent_id_t              src_agent      = null_rocp_agent_id;
+    rocprofiler_address_t               dst_address    = {.value = 0};
+    rocprofiler_address_t               src_address    = {.value = 0};
     rocprofiler_memory_copy_operation_t direction      = ROCPROFILER_MEMORY_COPY_NONE;
     uint64_t                            bytes_copied   = 0;
     uint64_t                            start_ts       = 0;
@@ -173,8 +175,14 @@ async_copy_data::get_callback_data(timestamp_t _beg, timestamp_t _end) const
 {
     ROCP_FATAL_IF(direction == ROCPROFILER_MEMORY_COPY_NONE) << "direction has not been set";
 
-    return common::init_public_api_struct(
-        callback_data_t{}, _beg, _end, dst_agent, src_agent, bytes_copied);
+    return common::init_public_api_struct(callback_data_t{},
+                                          _beg,
+                                          _end,
+                                          dst_agent,
+                                          src_agent,
+                                          bytes_copied,
+                                          dst_address,
+                                          src_address);
 }
 
 async_copy_data::buffered_data_t
@@ -197,7 +205,9 @@ async_copy_data::get_buffered_record(const context_t* _ctx,
                                           _end,
                                           dst_agent,
                                           src_agent,
-                                          bytes_copied);
+                                          bytes_copied,
+                                          dst_address,
+                                          src_address);
 }
 
 struct active_signals
@@ -446,8 +456,13 @@ get_next_dispatch()
 template <size_t Idx>
 struct arg_indices;
 
-#define HSA_ASYNC_COPY_DEFINE_ARG_INDICES(                                                         \
-    ENUM_ID, DST_AGENT_IDX, SRC_AGENT_IDX, COMPLETION_SIGNAL_IDX, COPY_SIZE_IDX)                   \
+#define HSA_ASYNC_COPY_DEFINE_ARG_INDICES(ENUM_ID,                                                 \
+                                          DST_AGENT_IDX,                                           \
+                                          SRC_AGENT_IDX,                                           \
+                                          COMPLETION_SIGNAL_IDX,                                   \
+                                          COPY_SIZE_IDX,                                           \
+                                          DST_ADDR_IDX,                                            \
+                                          SRC_ADDR_IDX)                                            \
     template <>                                                                                    \
     struct arg_indices<ENUM_ID>                                                                    \
     {                                                                                              \
@@ -455,11 +470,13 @@ struct arg_indices;
         static constexpr auto src_agent_idx         = SRC_AGENT_IDX;                               \
         static constexpr auto completion_signal_idx = COMPLETION_SIGNAL_IDX;                       \
         static constexpr auto copy_size_idx         = COPY_SIZE_IDX;                               \
+        static constexpr auto dst_address_idx       = DST_ADDR_IDX;                                \
+        static constexpr auto src_address_idx       = SRC_ADDR_IDX;                                \
     };
 
-HSA_ASYNC_COPY_DEFINE_ARG_INDICES(async_copy_id, 1, 3, 7, 4)
-HSA_ASYNC_COPY_DEFINE_ARG_INDICES(async_copy_on_engine_id, 1, 3, 7, 4)
-HSA_ASYNC_COPY_DEFINE_ARG_INDICES(async_copy_rect_id, 5, 5, 9, 4)
+HSA_ASYNC_COPY_DEFINE_ARG_INDICES(async_copy_id, 1, 3, 7, 4, 0, 2)
+HSA_ASYNC_COPY_DEFINE_ARG_INDICES(async_copy_on_engine_id, 1, 3, 7, 4, 0, 2)
+HSA_ASYNC_COPY_DEFINE_ARG_INDICES(async_copy_rect_id, 5, 5, 9, 4, 0, 2)
 
 template <typename FuncT, typename ArgsT, size_t... Idx>
 decltype(auto)
@@ -470,6 +487,10 @@ invoke(FuncT&& _func, ArgsT&& _args, std::index_sequence<Idx...>)
 
 template <typename Tp>
 uint64_t compute_copy_bytes(Tp);
+
+template <typename Tp>
+rocprofiler_address_t
+compute_address(const Tp*);
 
 template <>
 uint64_t
@@ -485,6 +506,20 @@ compute_copy_bytes(const hsa_dim3_t* val)
     return (val) ? (val->x * val->y * val->z) : 0;
 }
 
+template <>
+rocprofiler_address_t
+compute_address(const void* val)
+{
+    return rocprofiler_address_t{.ptr = val};
+}
+
+template <>
+rocprofiler_address_t
+compute_address(const hsa_pitched_ptr_t* val)
+{
+    return rocprofiler_address_t{.ptr = val->base};
+}
+
 template <size_t TableIdx, size_t OpIdx, typename... Args>
 hsa_status_t
 async_copy_impl(Args... args)
@@ -493,6 +528,8 @@ async_copy_impl(Args... args)
 
     constexpr auto N             = sizeof...(Args);
     constexpr auto copy_size_idx = arg_indices<OpIdx>::copy_size_idx;
+    constexpr auto dst_addr_idx  = arg_indices<OpIdx>::dst_address_idx;
+    constexpr auto src_addr_idx  = arg_indices<OpIdx>::src_address_idx;
 
     auto&& _tied_args = std::tie(args...);
 
@@ -589,6 +626,8 @@ async_copy_impl(Args... args)
     _data->src_agent    = _src_agent_id;
     _data->direction    = _direction;
     _data->bytes_copied = compute_copy_bytes(std::get<copy_size_idx>(_tied_args));
+    _data->dst_address  = compute_address(std::get<dst_addr_idx>(_tied_args));
+    _data->src_address  = compute_address(std::get<src_addr_idx>(_tied_args));
 
     constexpr auto           completion_signal_idx  = arg_indices<OpIdx>::completion_signal_idx;
     auto&                    _completion_signal     = std::get<completion_signal_idx>(_tied_args);
