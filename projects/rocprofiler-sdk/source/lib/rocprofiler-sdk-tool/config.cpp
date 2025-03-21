@@ -285,10 +285,28 @@ config::config()
          {"stochastic", ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC},
          {"host_trap", ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP}};
 
-    pc_sampling_method_value = pc_sampling_method_map.at(pc_sampling_method);
+    try
+    {
+        pc_sampling_method_value = pc_sampling_method_map.at(pc_sampling_method);
+    } catch(...)
+    {
+        ROCP_FATAL << "Invalid value for ROCPROF_PC_SAMPLING_METHOD: " << pc_sampling_method << "."
+                   << "Valid choices are stochastic and host_trap\n";
+    }
+
     if(pc_sampling_method_value == ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP)
         pc_sampling_host_trap = true;
-    pc_sampling_unit_value = pc_sampling_unit_map.at(pc_sampling_unit);
+    else if(pc_sampling_method_value == ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC)
+        pc_sampling_stochastic = true;
+
+    try
+    {
+        pc_sampling_unit_value = pc_sampling_unit_map.at(pc_sampling_unit);
+    } catch(...)
+    {
+        ROCP_FATAL << "Invalid value for ROCPROF_PC_SAMPLING_UNIT: " << pc_sampling_unit << "."
+                   << "Valid choices are instructions, cycles and time\n";
+    }
 
     if(auto _collection_period = get_env("ROCPROF_COLLECTION_PERIOD", "");
        !_collection_period.empty())

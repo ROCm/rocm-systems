@@ -241,6 +241,8 @@ add_upcoming_samples(const device_handle     device,
 
         auto& pc_sample = samples[p];
         pc_sample       = copySample<GFXIP, PcSamplingRecordT>((const void*) (buffer + p));
+        // skip invalid samples
+        if(pc_sample.size == 0) continue;
 
         // Convert PC -> (loaded code object id containing PC, offset within code object)
         if(!cache_addr_range.inrange(snap->pc))

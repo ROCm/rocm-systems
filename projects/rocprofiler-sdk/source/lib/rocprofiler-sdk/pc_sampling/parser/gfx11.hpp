@@ -32,7 +32,7 @@ public:
         TYPE_TEX,
         TYPE_LDS,
         TYPE_LDS_DIRECT,
-        TYPE_EXP,
+        TYPE_EXPORT,
         TYPE_MESSAGE,
         TYPE_BARRIER,
         TYPE_BRANCH_NOT_TAKEN,
@@ -47,15 +47,15 @@ public:
 
     enum reason_not_issued
     {
-        REASON_NOT_AVAILABLE = 0,
-        REASON_ALU,
+        REASON_NO_INSTRUCTION_AVAILABLE = 0,
+        REASON_ALU_DEPENDENCY,
         REASON_WAITCNT,
-        REASON_ARBITER,
-        REASON_SLEEP,
-        REASON_BARRIER,
+        REASON_ARBITER_NOT_WIN,
+        REASON_SLEEP_WAIT,
+        REASON_BARRIER_WAIT,
         REASON_OTHER_WAIT,
-        REASON_INTERNAL = 31,
-        REASON_EX_STALL = 31,
+        REASON_INTERNAL_INSTRUCTION = 31,
+        REASON_ARBITER_WIN_EX_STALL = 31,
     };
 
     enum arb_state

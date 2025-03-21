@@ -28,6 +28,7 @@
 #include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/internal_threading.h>
+#include <rocprofiler-sdk/pc_sampling.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 #include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <rocprofiler-sdk/cxx/perfetto.hpp>
@@ -928,6 +929,93 @@ save(ArchiveT& ar, rocprofiler_pc_sampling_record_host_trap_v0_t data)
     ROCP_SDK_SAVE_DATA_VALUE("corr_id", correlation_id);
     ROCP_SDK_SAVE_DATA_VALUE("wrkgrp_id", workgroup_id);
     ROCP_SDK_SAVE_DATA_BITFIELD("wave_in_grp", wave_in_group);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_pc_sampling_record_stochastic_header_t data)
+{
+    ROCP_SDK_SAVE_DATA_BITFIELD("has_mem_cnt", has_memory_counter);
+}
+
+template <typename ArchiveT>
+void
+save_pc_sampling_inst_type(ArchiveT& ar, rocprofiler_pc_sampling_instruction_type_t inst_type)
+{
+    ar(make_nvp("inst_type",
+                std::string(rocprofiler_get_pc_sampling_instruction_type_name(inst_type))));
+}
+
+template <typename ArchiveT>
+void
+save_pc_sampling_stall_reason(ArchiveT&                                               ar,
+                              rocprofiler_pc_sampling_instruction_not_issued_reason_t stall_reason)
+{
+    ar(make_nvp(
+        "stall_reason",
+        std::string(rocprofiler_get_pc_sampling_instruction_not_issued_reason_name(stall_reason))));
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_pc_sampling_snapshot_v0_t data)
+{
+    save_pc_sampling_stall_reason(
+        ar,
+        static_cast<rocprofiler_pc_sampling_instruction_not_issued_reason_t>(
+            data.reason_not_issued));
+
+    ROCP_SDK_SAVE_DATA_BITFIELD("dual_issue_valu", dual_issue_valu);
+
+    // Arb state (pipe issued)
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_issue_valu", arb_state_issue_valu);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_issue_matrix", arb_state_issue_matrix);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_issue_lds", arb_state_issue_lds);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_issue_lds_direct", arb_state_issue_lds_direct);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_issue_scalar", arb_state_issue_scalar);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_issue_vmem_tex", arb_state_issue_vmem_tex);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_issue_flat", arb_state_issue_flat);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_issue_exp", arb_state_issue_exp);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_issue_misc", arb_state_issue_misc);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_issue_brmsg", arb_state_issue_brmsg);
+    // Arb state (pipe stalled)
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_stall_valu", arb_state_stall_valu);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_stall_matrix", arb_state_stall_matrix);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_stall_lds", arb_state_stall_lds);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_stall_lds_direct", arb_state_stall_lds_direct);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_stall_scalar", arb_state_stall_scalar);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_stall_vmem_tex", arb_state_stall_vmem_tex);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_stall_flat", arb_state_stall_flat);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_stall_exp", arb_state_stall_exp);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_stall_misc", arb_state_stall_misc);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_stall_brmsg", arb_state_stall_brmsg);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_pc_sampling_record_stochastic_v0_t data)
+{
+    // flags specific for stochastic sampling
+    ROCP_SDK_SAVE_DATA_FIELD(flags);
+
+    // Common for host-trap and stochastic
+    ROCP_SDK_SAVE_DATA_FIELD(hw_id);
+    ROCP_SDK_SAVE_DATA_FIELD(pc);
+    ROCP_SDK_SAVE_DATA_FIELD(exec_mask);
+    ROCP_SDK_SAVE_DATA_FIELD(timestamp);
+    ROCP_SDK_SAVE_DATA_FIELD(dispatch_id);
+    ROCP_SDK_SAVE_DATA_VALUE("corr_id", correlation_id);
+    ROCP_SDK_SAVE_DATA_VALUE("wrkgrp_id", workgroup_id);
+    ROCP_SDK_SAVE_DATA_BITFIELD("wave_in_grp", wave_in_group);
+
+    // fields specific for stochastic
+    ROCP_SDK_SAVE_DATA_BITFIELD("wave_issued", wave_issued);
+    save_pc_sampling_inst_type(
+        ar, static_cast<rocprofiler_pc_sampling_instruction_type_t>(data.inst_type));
+    ROCP_SDK_SAVE_DATA_BITFIELD("wave_cnt", wave_count);
+    ROCP_SDK_SAVE_DATA_FIELD(snapshot);
+
+    // TODO: add memory counters
 }
 
 template <typename ArchiveT>

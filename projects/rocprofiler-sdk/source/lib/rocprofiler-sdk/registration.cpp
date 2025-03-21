@@ -601,6 +601,7 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
 
                 hsa::async_copy_sync();
                 hsa::queue_controller_sync();
+                pc_sampling::service_sync();
 
                 auto _fini_status = get_fini_status();
                 if(_fini_status == 0) set_fini_status(-1);
@@ -726,6 +727,8 @@ finalize()
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
         // WARNING: this must precede `code_object::finalize()`
         pc_sampling::code_object::finalize();
+        // WARNING: this must follows queue_controller_fini.
+        pc_sampling::service_fini();
 #endif
         code_object::finalize();
         context::correlation_id_finalize();

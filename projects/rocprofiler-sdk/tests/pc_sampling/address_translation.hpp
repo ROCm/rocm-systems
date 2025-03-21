@@ -25,6 +25,7 @@
 #include <rocprofiler-sdk/cxx/codeobj/code_printing.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <functional>
 #include <map>
@@ -47,8 +48,8 @@ using marker_id_t             = rocprofiler::sdk::codeobj::disassembly::marker_i
  */
 struct inst_id_t
 {
-    marker_id_t code_object_id;
-    uint64_t    pc_addr;
+    marker_id_t code_object_id = 0;
+    uint64_t    pc_addr        = 0;
 
     bool operator==(const inst_id_t& b) const
     {
@@ -97,12 +98,12 @@ public:
     uint64_t    end_address() const { return end_address_; };
 
 private:
-    mutable std::shared_mutex                 mut;
-    uint64_t                                  code_object_id_;
-    std::string                               kernel_name_;
-    uint64_t                                  begin_address_;
-    uint64_t                                  end_address_;
-    std::vector<std::unique_ptr<Instruction>> instructions_;
+    mutable std::shared_mutex                 mut             = {};
+    uint64_t                                  code_object_id_ = 0;
+    std::string                               kernel_name_    = {};
+    uint64_t                                  begin_address_  = 0;
+    uint64_t                                  end_address_    = 0;
+    std::vector<std::unique_ptr<Instruction>> instructions_   = {};
 };
 
 class KernelObjectMap
@@ -156,8 +157,8 @@ public:
     }
 
 private:
-    std::unordered_map<std::string, std::unique_ptr<KernelObject>> kernel_object_map;
-    mutable std::shared_mutex                                      mut;
+    std::unordered_map<std::string, std::unique_ptr<KernelObject>> kernel_object_map = {};
+    mutable std::shared_mutex                                      mut               = {};
 
     std::string form_key(uint64_t code_object_id, std::string kernel_name, uint64_t begin_address)
     {
@@ -206,14 +207,14 @@ public:
     uint64_t sample_count() const { return sample_count_; };
 
 private:
-    mutable std::shared_mutex mut;
+    mutable std::shared_mutex mut = {};
 
     // FIXME: prevent direct access of the following fields.
     // The following fields should be accessible only from within `process` function.
-    std::unique_ptr<Instruction> inst_;
+    std::unique_ptr<Instruction> inst_ = {};
     // In case an instruction is samples with different exec masks,
     // keep track of how many time each exec_mask was observed.
-    std::map<uint64_t, uint64_t> exec_mask_counts_;
+    std::map<uint64_t, uint64_t> exec_mask_counts_ = {};
     // How many time this instruction is samples
     uint64_t sample_count_ = 0;
 };
@@ -226,6 +227,8 @@ public:
     // write lock required
     void add_sample(std::unique_ptr<Instruction> instruction, uint64_t exec_mask)
     {
+        // counting valid decoded samples
+        valid_decoded_samples_num++;
         auto lock = std::unique_lock{mut};
 
         inst_id_t inst_id = {.code_object_id = instruction->codeobj_id,
@@ -256,10 +259,30 @@ public:
         return nullptr;
     }
 
+    void add_invalid_sample()
+    {
+        // counting invalid samples
+        invalid_decoded_samples_num++;
+    }
+
+    /**
+     * @brief Verify that more valid decoded samples is generated.
+     */
+    bool more_valid_decoded_samples_expected() const
+    {
+        return valid_decoded_samples_num > invalid_decoded_samples_num;
+    }
+
+    uint64_t get_valid_decoded_samples_num() const { return valid_decoded_samples_num; }
+
+    uint64_t get_invalid_samples_num() const { return invalid_decoded_samples_num; }
+
 private:
     // TODO: optimize to use unordered_map
-    std::map<inst_id_t, std::unique_ptr<SampleInstruction>> samples;
-    mutable std::shared_mutex                               mut;
+    std::map<inst_id_t, std::unique_ptr<SampleInstruction>> samples                     = {};
+    std::atomic<uint64_t>                                   valid_decoded_samples_num   = {};
+    std::atomic<uint64_t>                                   invalid_decoded_samples_num = {};
+    mutable std::shared_mutex                               mut                         = {};
 };
 
 std::mutex&

@@ -40,9 +40,6 @@ init();
 void
 fini();
 
-std::atomic<uint64_t>&
-total_samples_num();
-
 void
 configure_pc_sampling_on_all_agents(rocprofiler_context_id_t context);
 

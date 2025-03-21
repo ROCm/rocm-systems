@@ -25,9 +25,9 @@
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/parser/correlation.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/parser/parser_types.hpp"
-#include "lib/rocprofiler-sdk/pc_sampling/parser/stochastic_records.h"
 
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/pc_sampling.h>
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
 

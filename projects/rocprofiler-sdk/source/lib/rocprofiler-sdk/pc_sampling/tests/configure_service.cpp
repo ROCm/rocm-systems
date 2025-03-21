@@ -138,8 +138,9 @@ find_all_gpu_agents_supporting_pc_sampling_impl(rocprofiler_agent_version_t vers
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
-const rocprofiler_pc_sampling_configuration_t
-extract_pc_sampling_config_prefer_stochastic(rocprofiler_agent_id_t agent_id)
+rocprofiler_pc_sampling_configuration_t
+extract_pc_sampling_config_prefer(rocprofiler_pc_sampling_method_t method,
+                                  rocprofiler_agent_id_t           agent_id)
 {
     auto cb = [](const rocprofiler_pc_sampling_configuration_t* configs,
                  size_t                                         num_config,
@@ -158,29 +159,44 @@ extract_pc_sampling_config_prefer_stochastic(rocprofiler_agent_id_t agent_id)
     ROCPROFILER_CALL(rocprofiler_query_pc_sampling_agent_configurations(agent_id, cb, &configs),
                      "Failed to query available configurations");
 
-    const rocprofiler_pc_sampling_configuration_t* first_host_trap_config  = nullptr;
-    const rocprofiler_pc_sampling_configuration_t* first_stochastic_config = nullptr;
-    // Search until encountering on the stochastic configuration, if any.
-    // Otherwise, use the host trap config
+    const rocprofiler_pc_sampling_configuration_t* first_preferred_method_config = nullptr;
+    const rocprofiler_pc_sampling_configuration_t* first_remained_method_config  = nullptr;
+    // Search until encountering the prefered method configuration, if any.
+    // Otherwise, use what remained.
     for(auto const& cfg : configs)
     {
-        if(cfg.method == ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC)
+        if(cfg.method == method)
         {
-            // Temporarily disable stochastic sampling as it's not fully supported.
-            // first_stochastic_config = &cfg;
-            // break;
+            first_preferred_method_config = &cfg;
+            break;
         }
-        else if(!first_host_trap_config && cfg.method == ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP)
+        else if(!first_remained_method_config &&
+                cfg.method != ROCPROFILER_PC_SAMPLING_METHOD_NONE &&
+                cfg.method != ROCPROFILER_PC_SAMPLING_METHOD_LAST)
         {
-            first_host_trap_config = &cfg;
+            first_remained_method_config = &cfg;
         }
     }
 
-    // Check if the stochastic config is found. Use host trap config otherwise.
+    // Check if the config with the preferred method is found. Use config with other method
+    // otherwise.
     const rocprofiler_pc_sampling_configuration_t* picked_cfg =
-        (first_stochastic_config != nullptr) ? first_stochastic_config : first_host_trap_config;
+        (first_preferred_method_config != nullptr) ? first_preferred_method_config
+                                                   : first_remained_method_config;
 
     return *picked_cfg;
+}
+
+rocprofiler_pc_sampling_configuration_t
+extract_pc_sampling_config_prefer_stochastic(rocprofiler_agent_id_t agent_id)
+{
+    return extract_pc_sampling_config_prefer(ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC, agent_id);
+}
+
+rocprofiler_pc_sampling_configuration_t
+extract_pc_sampling_config_prefer_host_trap(rocprofiler_agent_id_t agent_id)
+{
+    return extract_pc_sampling_config_prefer(ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP, agent_id);
 }
 
 void
@@ -306,6 +322,41 @@ test_fail_because_service_is_already_configured(
               ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED);
 }
 
+/**
+ * @brief Current limitation - Stochastic and Host-Trap PC sampling cannot coexist
+ * on the same device simultaneously.
+ */
+void
+test_fail_stochastic_vs_host_trap(const callback_data*                           cb_data,
+                                  rocprofiler_agent_id_t                         agent_id,
+                                  const rocprofiler_pc_sampling_configuration_t* picked_pcs_config)
+{
+    // Ensure that stochastic sampling has been configured on the device.
+    if(picked_pcs_config->method == ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC)
+    {
+        // KFD is implemented in the way that if stochastic is configured,
+        // no host-trap configuration will be returned (and vice-versa).
+        // Thus, ensure that the following function, although prefers host-trap,
+        // returns stochastic.
+        auto still_stochastic_config = extract_pc_sampling_config_prefer_host_trap(agent_id);
+        EXPECT_EQ(still_stochastic_config.method, ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC);
+
+        constexpr uint64_t host_trap_interva_us = 1;
+        // Now, ensure that a user cannot still force rocprofiler-sdk and configure host-trap
+        // sampling on the device with configured stochastic sampling.
+        // ensure that stochastic and host trap sampling cannot coexist on the same device.
+        EXPECT_EQ(
+            rocprofiler_configure_pc_sampling_service(cb_data->client_ctx,
+                                                      agent_id,
+                                                      ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP,
+                                                      ROCPROFILER_PC_SAMPLING_UNIT_TIME,
+                                                      host_trap_interva_us,
+                                                      cb_data->client_buffer,
+                                                      0),
+            ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED);
+    }
+}
+
 }  // namespace
 
 TEST(pc_sampling, rocprofiler_configure_pc_sampling_service)
@@ -388,6 +439,7 @@ TEST(pc_sampling, rocprofiler_configure_pc_sampling_service)
                              "Failed to configure PC sampling service");
 
             test_fail_because_service_is_already_configured(cb_data, agent_id, &pcs_config);
+            test_fail_stochastic_vs_host_trap(cb_data, agent_id, &pcs_config);
 
             // Cannot create PC sampling service in context different than the `cb_data->client_ctx`
             EXPECT_EQ(rocprofiler_configure_pc_sampling_service(another_ctx,
