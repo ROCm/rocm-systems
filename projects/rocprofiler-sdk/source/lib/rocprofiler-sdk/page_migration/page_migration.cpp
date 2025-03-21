@@ -24,6 +24,7 @@
 #include "lib/common/logging.hpp"
 #include "lib/common/mpl.hpp"
 #include "lib/common/static_object.hpp"
+#include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -426,6 +427,7 @@ page_migration_record_t parse_event<ROCPROFILER_PAGE_MIGRATION_NONE>(std::string
 {
     ROCP_CI_LOG(WARNING)
         << "ROCPROFILER_PAGE_MIGRATION_NONE for parsing page migration events should not happen";
+    return common::init_public_api_struct(page_migration_record_t{});
 }
 
 template <size_t OpInx, size_t... OpInxs>
