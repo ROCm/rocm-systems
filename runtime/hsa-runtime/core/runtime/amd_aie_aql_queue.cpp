@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2023, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -196,13 +196,13 @@ uint64_t AieAqlQueue::AddWriteIndexAcqRel(uint64_t value) {
 }
 
 void AieAqlQueue::StoreRelaxed(hsa_signal_value_t value) {
-  auto& driver = static_cast<XdnaDriver&>(agent_.driver());
-  SubmitCmd(driver, amd_queue_.hsa_queue.base_address, amd_queue_.read_dispatch_id,
+  SubmitCmd(amd_queue_.hsa_queue.base_address, amd_queue_.read_dispatch_id,
             amd_queue_.write_dispatch_id);
 }
 
-hsa_status_t AieAqlQueue::SubmitCmd(XdnaDriver& driver, void* queue_base, uint64_t read_dispatch_id,
+hsa_status_t AieAqlQueue::SubmitCmd(void* queue_base, uint64_t read_dispatch_id,
                                     uint64_t write_dispatch_id) {
+  auto& driver = static_cast<XdnaDriver&>(agent_.driver());
   uint64_t cur_id = read_dispatch_id;
   while (cur_id < write_dispatch_id) {
     hsa_amd_aie_ert_packet_t* pkt = static_cast<hsa_amd_aie_ert_packet_t*>(queue_base) + cur_id;
@@ -230,9 +230,11 @@ hsa_status_t AieAqlQueue::SubmitCmd(XdnaDriver& driver, void* queue_base, uint64
         }
 
         // Call into the driver to submit from cur_id to write_dispatch_id
-        if (driver.SubmitCmdChain(pkt, num_cont_start_cu_pkts, num_operands, hw_ctx_handle_) !=
-            HSA_STATUS_SUCCESS)
-          return HSA_STATUS_ERROR;
+        hsa_status_t status =
+            driver.SubmitCmdChain(pkt, num_cont_start_cu_pkts, num_operands, hw_ctx_handle_);
+        if (status != HSA_STATUS_SUCCESS) {
+          return status;
+        }
 
         cur_id += num_cont_start_cu_pkts;
         break;
