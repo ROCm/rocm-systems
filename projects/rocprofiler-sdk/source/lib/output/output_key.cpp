@@ -68,7 +68,9 @@ get_local_datetime(const std::string& dt_format, std::time_t*& _dt_curr)
     char mbstr[strsize] = {};
     memset(mbstr, '\0', sizeof(mbstr) * sizeof(char));
 
-    if(std::strftime(mbstr, sizeof(mbstr) - 1, dt_format.c_str(), std::localtime(_dt_curr)) != 0)
+    struct tm tm_struct;
+    if(std::strftime(
+           mbstr, sizeof(mbstr) - 1, dt_format.c_str(), localtime_r(_dt_curr, &tm_struct)) != 0)
         return new std::string{mbstr};
 
     return nullptr;
