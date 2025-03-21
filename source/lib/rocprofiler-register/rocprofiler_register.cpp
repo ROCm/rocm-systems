@@ -26,6 +26,7 @@
 #include "details/environment.hpp"
 #include "details/filesystem.hpp"
 #include "details/logging.hpp"
+#include "details/scope_destructor.hpp"
 
 #include <fmt/format.h>
 #include <glog/logging.h>
@@ -33,6 +34,7 @@
 #include <array>
 #include <atomic>
 #include <bitset>
+#include <fstream>
 #include <mutex>
 #include <regex>
 #include <stdexcept>
@@ -40,6 +42,7 @@
 #include <utility>
 
 #include <dlfcn.h>
+#include <unistd.h>
 
 extern "C" {
 #pragma weak rocprofiler_configure
@@ -247,7 +250,13 @@ auto rocp_reg_get_imports(std::index_sequence<Idx...>)
 rocp_set_api_table_data_t
 rocp_load_rocprofiler_lib(std::string _rocp_reg_lib);
 
-auto
+struct rocp_scan_data
+{
+    void*                       handle           = nullptr;
+    rocprofiler_set_api_table_t set_api_table_fn = nullptr;
+};
+
+rocp_scan_data
 rocp_reg_scan_for_tools()
 {
     auto* _configure_func = dlsym(RTLD_DEFAULT, "rocprofiler_configure");
@@ -265,7 +274,7 @@ rocp_reg_scan_for_tools()
     if(_found_tool)
     {
         if(rocprofiler_lib_handle && rocprofiler_lib_config_fn)
-            return std::make_pair(rocprofiler_lib_handle, rocprofiler_lib_config_fn);
+            return rocp_scan_data{ rocprofiler_lib_handle, rocprofiler_lib_config_fn };
 
         if(_rocp_reg_lib.empty()) _rocp_reg_lib = rocprofiler_lib_name;
 
@@ -281,7 +290,7 @@ rocp_reg_scan_for_tools()
         rocprofiler_lib_config_fn = &rocprofiler_set_api_table;
     }
 
-    return std::make_pair(rocprofiler_lib_handle, rocprofiler_lib_config_fn);
+    return rocp_scan_data{ rocprofiler_lib_handle, rocprofiler_lib_config_fn };
 }
 
 rocp_set_api_table_data_t
@@ -355,10 +364,105 @@ rocp_load_rocprofiler_lib(std::string _rocp_reg_lib)
     return std::make_tuple(rocprofiler_lib_handle, rocprofiler_lib_config_fn);
 }
 
+struct registered_library_api_table
+{
+    bool                               propagated     = false;
+    const char*                        common_name    = nullptr;
+    rocprofiler_register_import_func_t import_func    = nullptr;
+    uint32_t                           lib_version    = 0;
+    std::vector<void*>                 api_tables     = {};
+    uint64_t                           instance_value = 0;
+};
+
+constexpr auto instance_bits     = sizeof(uint64_t) * 8;  // bits in instance_counters
+constexpr auto max_instances     = instance_bits * ROCP_REG_LAST;
 constexpr auto library_seq       = std::make_index_sequence<ROCP_REG_LAST>{};
 auto           global_count      = std::atomic<uint32_t>{ 0 };
 auto           import_info       = rocp_reg_get_imports(library_seq);
 auto           instance_counters = std::array<std::atomic_uint64_t, ROCP_REG_LAST>{};
+auto           registered =
+    std::array<std::optional<registered_library_api_table>, max_instances>{};
+
+struct scoped_count
+{
+    scoped_count()
+    : value{ ++global_count }
+    { }
+
+    ~scoped_count() { --global_count; }
+
+    scoped_count(const scoped_count&)     = delete;
+    scoped_count(scoped_count&&) noexcept = delete;
+    scoped_count& operator=(const scoped_count&) = delete;
+    scoped_count& operator=(scoped_count&&) noexcept = delete;
+
+    uint32_t value = 0;
+};
+
+std::optional<registered_library_api_table>*
+rocp_add_registered_library_api_table(const char*                        common_name,
+                                      rocprofiler_register_import_func_t import_func,
+                                      uint32_t                           lib_version,
+                                      void**                             api_tables,
+                                      uint64_t                           api_tables_len,
+                                      uint64_t                           instance_val)
+{
+    LOG(INFO) << fmt::format("rocprofiler-register library api table registration:\n\t-"
+                             "name: {}\n\t- version: {}\n\t- # tables: {}",
+                             common_name,
+                             lib_version,
+                             api_tables_len);
+
+    for(auto& itr : registered)
+    {
+        if(!itr)
+        {
+            auto _tables = std::vector<void*>{};
+            _tables.reserve(api_tables_len);
+            for(uint64_t i = 0; i < api_tables_len; ++i)
+                _tables.emplace_back(api_tables[i]);
+
+            itr = registered_library_api_table{
+                false,       common_name,        import_func,
+                lib_version, std::move(_tables), instance_val
+            };
+            return &itr;
+        }
+    }
+
+    return nullptr;
+}
+
+rocprofiler_register_error_code_t
+rocp_invoke_registrations(bool invoke_all)
+{
+    auto _count = scoped_count{};
+    if(_count.value > 1) return ROCP_REG_DEADLOCK;
+
+    for(auto& itr : registered)
+    {
+        if(itr && (!itr->propagated || invoke_all))
+        {
+            auto _scan_result = rocp_reg_scan_for_tools();
+
+            // rocprofiler_set_api_table has been found and we have pass the API data
+            auto _activate_rocprofiler = (_scan_result.set_api_table_fn != nullptr);
+
+            if(_activate_rocprofiler)
+            {
+                auto _ret = _scan_result.set_api_table_fn(itr->common_name,
+                                                          itr->lib_version,
+                                                          itr->instance_value,
+                                                          itr->api_tables.data(),
+                                                          itr->api_tables.size());
+                if(_ret != 0) return ROCP_REG_ROCPROFILER_ERROR;
+                itr->propagated = true;
+            }
+        }
+    }
+
+    return ROCP_REG_SUCCESS;
+}
 }  // namespace
 
 extern "C" {
@@ -381,22 +485,6 @@ rocprofiler_register_library_api_table(
         LOG(INFO) << "rocprofiler-register disabled via ROCPROFILER_REGISTER_ENABLED=0";
         return ROCP_REG_NO_TOOLS;
     }
-
-    struct scoped_count
-    {
-        scoped_count()
-        : value{ ++global_count }
-        { }
-
-        ~scoped_count() { --global_count; }
-
-        scoped_count(const scoped_count&)     = delete;
-        scoped_count(scoped_count&&) noexcept = delete;
-        scoped_count& operator=(const scoped_count&) = delete;
-        scoped_count& operator=(scoped_count&&) noexcept = delete;
-
-        uint32_t value = 0;
-    };
 
     auto _count = scoped_count{};
     if(_count.value > 1) return ROCP_REG_DEADLOCK;
@@ -464,17 +552,33 @@ rocprofiler_register_library_api_table(
     auto& _bits         = *reinterpret_cast<bitset_t*>(&register_id->handle);
     _bits = bitset_t{ (offset_factor * _import_match->library_idx) + _instance_val };
 
+    auto* reginfo = rocp_add_registered_library_api_table(common_name,
+                                                          import_func,
+                                                          lib_version,
+                                                          api_tables,
+                                                          api_table_length,
+                                                          _instance_val);
+
+    LOG_IF(WARNING, !reginfo) << fmt::format(
+        "rocprofiler-register failed to create registration info for "
+        "{} version {} (instance {})",
+        common_name,
+        lib_version,
+        _instance_val);
+
     if(_bits.to_ulong() != register_id->handle)
         throw std::runtime_error("error encoding register_id");
 
     // rocprofiler library is dlopened and we have the functor to pass the API data
-    auto _activate_rocprofiler = (_scan_result.second != nullptr);
+    auto _activate_rocprofiler = (_scan_result.set_api_table_fn != nullptr);
 
     if(_activate_rocprofiler)
     {
-        auto _ret = _scan_result.second(
+        auto _ret = _scan_result.set_api_table_fn(
             common_name, lib_version, _instance_val, api_tables, api_table_length);
         if(_ret != 0) return ROCP_REG_ROCPROFILER_ERROR;
+
+        if(reginfo) (*reginfo)->propagated = true;
     }
     else
     {
@@ -489,5 +593,50 @@ rocprofiler_register_error_string(rocprofiler_register_error_code_t _ec)
 {
     return rocprofiler_register_error_string(
         _ec, std::make_index_sequence<ROCP_REG_ERROR_CODE_END>{});
+}
+
+rocprofiler_register_error_code_t
+rocprofiler_register_iterate_registration_info(
+    rocprofiler_register_registration_info_cb_t callback,
+    void*                                       data)
+{
+    for(const auto& itr : registered)
+    {
+        if(itr)
+        {
+            auto _info = rocprofiler_register_registration_info_t{
+                .size             = sizeof(rocprofiler_register_registration_info_t),
+                .common_name      = itr->common_name,
+                .lib_version      = itr->lib_version,
+                .api_table_length = itr->api_tables.size()
+            };
+            // invoke callback and break if the caller does not return zero
+            if(callback(&_info, data) != ROCP_REG_SUCCESS) break;
+        }
+    }
+
+    return ROCP_REG_SUCCESS;
+}
+
+rocprofiler_register_error_code_t
+rocprofiler_register_invoke_nonpropagated_registrations() ROCPROFILER_REGISTER_PUBLIC_API;
+
+//
+//  This function can be invoked by ptrace
+rocprofiler_register_error_code_t
+rocprofiler_register_invoke_nonpropagated_registrations()
+{
+    return rocp_invoke_registrations(false);
+}
+
+rocprofiler_register_error_code_t
+rocprofiler_register_invoke_all_registrations() ROCPROFILER_REGISTER_PUBLIC_API;
+
+//
+//  This function can be invoked by ptrace
+rocprofiler_register_error_code_t
+rocprofiler_register_invoke_all_registrations()
+{
+    return rocp_invoke_registrations(true);
 }
 }
