@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -314,53 +314,6 @@ typedef enum {
    */
   HSA_AMD_AIE_ERT_START_NPU_PREEMPT = 21
 } hsa_amd_aie_ert_cmd_opcode_t;
-
-/**
- * Command types for HSA AMD AIE ERT.
- */
-typedef enum {
-  /**
-   * Default command type.
-   */
-  HSA_AMD_AIE_ERT_CMD_TYPE_DEFAULT = 0,
-  /**
-   * Command processed by kernel domain scheduler (KDS) locally.
-   */
-  HSA_AMD_AIE_ERT_CMD_TYPE_KDS_LOCAL = 1,
-  /**
-   * Control command uses reserved command queue slot.
-   */
-  HSA_AMD_AIE_ERT_CMD_TYPE_CTRL = 2,
-  /**
-   * Control command uses reserved command queue slot.
-   */
-  HSA_AMD_AIE_ERT_CMD_TYPE_CU = 3,
-  /**
-   * CU command.
-   */
-  HSA_AMD_AIE_ERT_CMD_TYPE_SCU = 4
-} hsa_amd_aie_ert_cmd_type_t;
-
-/**
- * Format for start kernel packet header.
- */
-typedef struct hsa_amd_aie_ert_start_kernel_header_s {
-  uint32_t state : 4;
-  /**
-   * Enable driver to record timestamp for various states the
-   * command has gone through. The stat data is appended after
-   * the command data.
-   */
-  uint32_t stat_enabled : 1;
-  uint32_t unused : 5;
-  /**
-   * Extra CU masks in addition to the mandatory mask.
-   */
-  uint32_t extra_cu_masks : 2;
-  uint32_t count : 11;
-  uint32_t opcode : 5;
-  uint32_t type : 4;
-} hsa_amd_aie_ert_start_kernel_header_t;
 
 /**
  * Payload data for AIE ERT start kernel packets (i.e., when the opcode is
