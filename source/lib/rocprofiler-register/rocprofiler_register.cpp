@@ -25,7 +25,10 @@
 #include "details/dl.hpp"
 #include "details/environment.hpp"
 #include "details/filesystem.hpp"
-#include "glog/logging.h"
+#include "details/logging.hpp"
+
+#include <fmt/format.h>
+#include <glog/logging.h>
 
 #include <array>
 #include <atomic>
@@ -92,8 +95,6 @@ static_assert(sizeof(bitset_t) ==
                   sizeof(rocprofiler_register_library_indentifier_t::handle),
               "bitset should be same at uint64_t");
 
-int rocprofiler_register_verbose = common::get_env("ROCPROFILER_REGISTER_VERBOSE", 0);
-constexpr int  rocprofiler_register_info_level     = 2;
 constexpr auto rocprofiler_lib_name                = "librocprofiler-sdk.so";
 constexpr auto rocprofiler_lib_register_entrypoint = "rocprofiler_set_api_table";
 constexpr auto rocprofiler_register_lib_name =
@@ -338,9 +339,8 @@ rocp_load_rocprofiler_lib(std::string _rocp_reg_lib)
             dlopen(_rocp_reg_lib_path.c_str(), RTLD_GLOBAL | RTLD_LAZY);
     }
 
-    if(rocprofiler_register_verbose >= rocprofiler_register_info_level)
-        LOG(INFO) << "loaded " << _rocp_reg_lib_path_fname.string() << " library at "
-                  << _rocp_reg_lib_path.string();
+    LOG(INFO) << "loaded " << _rocp_reg_lib_path_fname.string() << " library at "
+              << _rocp_reg_lib_path.string();
 
     LOG_IF(WARNING, rocprofiler_lib_handle == nullptr)
         << _rocp_reg_lib << " failed to load\n";
@@ -356,7 +356,7 @@ rocp_load_rocprofiler_lib(std::string _rocp_reg_lib)
 }
 
 constexpr auto library_seq       = std::make_index_sequence<ROCP_REG_LAST>{};
-auto           global_mutex      = std::recursive_mutex{};
+auto           global_count      = std::atomic<uint32_t>{ 0 };
 auto           import_info       = rocp_reg_get_imports(library_seq);
 auto           instance_counters = std::array<std::atomic_uint64_t, ROCP_REG_LAST>{};
 }  // namespace
@@ -373,11 +373,33 @@ rocprofiler_register_library_api_table(
 {
     if(api_table_length < 1) return ROCP_REG_BAD_API_TABLE_LENGTH;
 
-    (void) lib_version;
-    (void) api_tables;
+    rocprofiler_register::logging::initialize();
 
-    auto _lk = std::unique_lock<std::recursive_mutex>{ global_mutex, std::defer_lock };
-    if(_lk.owns_lock()) return ROCP_REG_DEADLOCK;
+    // rocprofiler-register is disabled via environment
+    if(!common::get_env("ROCPROFILER_REGISTER_ENABLED", true))
+    {
+        LOG(INFO) << "rocprofiler-register disabled via ROCPROFILER_REGISTER_ENABLED=0";
+        return ROCP_REG_NO_TOOLS;
+    }
+
+    struct scoped_count
+    {
+        scoped_count()
+        : value{ ++global_count }
+        { }
+
+        ~scoped_count() { --global_count; }
+
+        scoped_count(const scoped_count&)     = delete;
+        scoped_count(scoped_count&&) noexcept = delete;
+        scoped_count& operator=(const scoped_count&) = delete;
+        scoped_count& operator=(scoped_count&&) noexcept = delete;
+
+        uint32_t value = 0;
+    };
+
+    auto _count = scoped_count{};
+    if(_count.value > 1) return ROCP_REG_DEADLOCK;
 
     auto _scan_result = rocp_reg_scan_for_tools();
 
