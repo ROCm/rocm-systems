@@ -129,6 +129,50 @@ rocprofiler_register_library_api_table(
 const char* rocprofiler_register_error_string(rocprofiler_register_error_code_t)
     ROCPROFILER_REGISTER_PUBLIC_API;
 
+/// @brief Struct containing the information about the libraries which have registered
+/// with rocprofiler-register. @see rocprofiler_register_iterate_registration_info
+typedef struct rocprofiler_register_registration_info_t
+{
+    size_t      size;              ///< in case of future extensions
+    const char* common_name;       ///< name of the library
+    uint32_t    lib_version;       ///< version
+    uint64_t    api_table_length;  ///< number of API tables
+} rocprofiler_register_registration_info_t;
+
+/**
+ * @brief Callback function for iterating over the libraries which have registered
+ * with rocprofiler-register. @see rocprofiler_register_iterate_registration_info
+ *
+ * @param [in] info Pointer to library registration instance. Invokee should make a copy
+ * for reference outside of callback.
+ * @param [in] data User data passed to ::rocprofiler_register_iterate_registration_info
+ * @return int
+ * @retval 0 If zero is returned from callback, rocprofiler-register will continue to next
+ * registration info, if one exists
+ * @retval -1 If -1 (or any value != 0) is returned from callback, rocprofiler-register
+ * will cease to iterate over the remaining registration info, if any exists
+ */
+typedef int (*rocprofiler_register_registration_info_cb_t)(
+    rocprofiler_register_registration_info_t* info,
+    void*                                     data);
+
+/**
+ * @brief Iterates over all the (valid) libraries which registered their API tables with
+ * rocprofiler-register. Any libraries which do not have an accepted common name, have an
+ * invalid import function address (in secure mode), or have registered too many instances
+ * are not reported by this function.
+ *
+ * @param [in] callback Callback function to invoke for each valid registered library
+ * @param [in] data User data to pass to the callback function
+ * @return ::rocprofiler_register_error_code_t
+ * @retval ::ROCP_REG_SUCCESS Always returned
+ */
+rocprofiler_register_error_code_t
+rocprofiler_register_iterate_registration_info(
+    rocprofiler_register_registration_info_cb_t callback,
+    void*                                       data)
+    ROCPROFILER_REGISTER_ATTRIBUTE(nonnull(1)) ROCPROFILER_REGISTER_PUBLIC_API;
+
 #ifdef __cplusplus
 }
 #endif
