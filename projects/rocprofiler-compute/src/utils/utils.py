@@ -880,7 +880,11 @@ def detect_roofline(mspec):
             msg = "user-supplied path to binary not accessible"
             msg += "--> ROOFLINE_BIN = %s\n" % target_binary
             console_error("roofline", msg)
-    elif rhel_distro == "platform:el8" or rhel_distro == "platform:el9":
+    elif (
+        rhel_distro == "platform:el8"
+        or rhel_distro == "platform:el9"
+        or rhel_distro == "platform:al8"
+    ):
         # Must be a valid RHEL machine
         distro = "platform:el8"
     elif (
