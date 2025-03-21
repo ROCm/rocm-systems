@@ -32,5 +32,8 @@ namespace utils
 {
 std::ostream*&
 get_output_stream();
-}
+
+void
+pcs_assert(bool condition, std::string_view error_msg);
+}  // namespace utils
 }  // namespace client

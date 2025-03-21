@@ -46,17 +46,46 @@ namespace
 {
 #define PC_SAMPLING_IOCTL_BITMASK 0xFFFF
 
-/**
- * @brief Used to determine the version of PC sampling
- * IOCTL implementation in the driver.
- *
- * @todo Remove this once the KFD IOCTL is upstreamed
- */
-struct pc_sampling_ioctl_version_t
+#define PC_SAMPLING_IOCTL_COMPUTE_VERSION(major, minor) ROCPROFILER_COMPUTE_VERSION(major, minor, 0)
+
+using pcs_ioctl_version_t = uint32_t;
+
+#define KFD_ROCP_PCS_METHOD_PAIR(KFD_ENUM_VAL, ROCP_ENUM_VAL)                                      \
+    template <>                                                                                    \
+    struct pcs_method_pair<KFD_ENUM_VAL>                                                           \
+    {                                                                                              \
+        static constexpr auto rocp_enum_val = ROCP_ENUM_VAL;                                       \
+    };
+
+template <size_t Idx>
+struct pcs_method_pair;
+
+KFD_ROCP_PCS_METHOD_PAIR(ROCPROFILER_IOCTL_PC_SAMPLING_METHOD_KIND_NONE,
+                         ROCPROFILER_PC_SAMPLING_METHOD_NONE);
+KFD_ROCP_PCS_METHOD_PAIR(ROCPROFILER_IOCTL_PC_SAMPLING_METHOD_KIND_HOSTTRAP_V1,
+                         ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP);
+KFD_ROCP_PCS_METHOD_PAIR(ROCPROFILER_IOCTL_PC_SAMPLING_METHOD_KIND_STOCHASTIC_V1,
+                         ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC);
+
+template <size_t Idx, size_t... Tail>
+rocprofiler_pc_sampling_method_t
+get_rocp_pcs_method(rocprofiler_ioctl_pc_sampling_method_kind_t kfd_method,
+                    std::index_sequence<Idx, Tail...>)
 {
-    uint32_t major_version;  /// PC sampling IOCTL major version
-    uint32_t minor_version;  /// PC sampling IOCTL minor version
-};
+    if(kfd_method == Idx) return pcs_method_pair<Idx>::rocp_enum_val;
+    // recursion until tail empty
+    if constexpr(sizeof...(Tail) > 0)
+        return get_rocp_pcs_method(kfd_method, std::index_sequence<Tail...>{});
+    // Return none value if matching fails
+    return ROCPROFILER_PC_SAMPLING_METHOD_NONE;
+}
+
+rocprofiler_pc_sampling_method_t
+get_rocp_pcs_method_from_kfd(rocprofiler_ioctl_pc_sampling_method_kind_t kfd_method)
+{
+    return get_rocp_pcs_method(
+        kfd_method, std::make_index_sequence<ROCPROFILER_IOCTL_PC_SAMPLING_METHOD_KIND_LAST>{});
+}
 
 int
 kfd_open()
@@ -137,7 +166,7 @@ get_ioctl_version(rocprofiler_ioctl_version_info_t& ioctl_version)
  * @return ::rocprofiler_status_t
  */
 rocprofiler_status_t
-get_pc_sampling_ioctl_version(uint32_t kfd_gpu_id, pc_sampling_ioctl_version_t& pcs_ioctl_version)
+get_pc_sampling_ioctl_version(uint32_t kfd_gpu_id, pcs_ioctl_version_t* pcs_ioctl_version)
 {
     struct kfd_ioctl_pc_sample_args args;
     args.op              = KFD_IOCTL_PCS_OP_QUERY_CAPABILITIES;
@@ -172,29 +201,27 @@ get_pc_sampling_ioctl_version(uint32_t kfd_gpu_id, pc_sampling_ioctl_version_t& 
     // `version` field contains PC Sampling IOCTL version
     auto version = args.version;
     // Lower 16 bits represent minor version
-    pcs_ioctl_version.minor_version = version & PC_SAMPLING_IOCTL_BITMASK;
+    auto minor_version = version & PC_SAMPLING_IOCTL_BITMASK;
     // Upper 16 bits represent major version
-    pcs_ioctl_version.major_version = (version >> 16) & PC_SAMPLING_IOCTL_BITMASK;
+    auto major_version = (version >> 16) & PC_SAMPLING_IOCTL_BITMASK;
+    // finally, compute the version
+    *pcs_ioctl_version = PC_SAMPLING_IOCTL_COMPUTE_VERSION(major_version, minor_version);
 
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
 /**
- * @brief Check if PC sampling is supported on the device with @p kfd_gpu_id.
+ * @brief Check if PC sampling feature is supported in KFD.
  *
  * Starting from KFD IOCTL 1.16, KFD delivers beta implementation of the PC sampling.
- * Furthermore, ROCProfiler-SDK expects PC sampling IOCTL 0.1 version.
- * @todo: Once KFD is upstreamed, ROCProfiler-SDK will rely only on KFD IOCTL version.
  *
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_SUCCESS PC sampling is supported in the driver.
  * Other values informs users about the reason why PC sampling is not supported.
  */
 rocprofiler_status_t
-is_pc_sampling_supported(const rocprofiler_agent_t* agent)
+is_pc_sampling_supported()
 {
-    auto             kfd_gpu_id = agent->gpu_id;
-    std::string_view agent_name = agent->name;
     // Verify KFD 1.16 version
     rocprofiler_ioctl_version_info_t ioctl_version = {.major_version = 0, .minor_version = 0};
     auto                             status        = get_ioctl_version(ioctl_version);
@@ -208,58 +235,131 @@ is_pc_sampling_supported(const rocprofiler_agent_t* agent)
         return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
     }
 
-    // TODO: remove once KFD is upstreamed
-    // Verify PC sampling IOCTL version
-    pc_sampling_ioctl_version_t pcs_ioctl_version = {.major_version = 0, .minor_version = 0};
-    status = get_pc_sampling_ioctl_version(kfd_gpu_id, pcs_ioctl_version);
-    if(status != ROCPROFILER_STATUS_SUCCESS)
+    // PC Sampling feature is supported in the driver.
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+/**
+ * @brief Check if PC sampling method is supported on the agent.
+ *
+ * The function complements the @ref is_pc_sampling_supported function.
+ * It introduces a strict check against the PC sampling IOCTL version
+ * that tells us whether a certain PC sampling method is safe to be used
+ * on the specific device architecture.
+ *
+ * @param method - PC sampling method to be checked
+ * @param agent - The agent to be checked
+ * @param pcs_ioctl_version - The PC sampling IOCTL version
+ * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_SUCCESS - The method is supported
+ * Other values informs users about the reason why the method is not supported.
+ */
+rocprofiler_status_t
+is_pc_sampling_method_supported(rocprofiler_pc_sampling_method_t method,
+                                const rocprofiler_agent_t*       agent,
+                                pcs_ioctl_version_t              pcs_ioctl_version)
+{
+    std::string_view agent_name = agent->name;
+    if(method == ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP)
     {
-        // The reason for not emitting the "PC sampling unavailable" message is the following.
-        // Assume that all devices except one support PC sampling on the system.
-        // By emitting the message for that one device that doesn't support PC sampling,
-        // all tests and samples are skipped. Instead, tests and samples will ignore
-        // that one problematic device and continue using PC sampling on other devices
-        // that support this feature.
-        return status;
+        if(agent_name == "gfx90a")
+        {
+            // 0.1 version enables host-trap PC sampling on gfx90a
+            if(pcs_ioctl_version >= PC_SAMPLING_IOCTL_COMPUTE_VERSION(0, 1))
+                return ROCPROFILER_STATUS_SUCCESS;
+            else
+                return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
+        }
+        else if(agent_name.find("gfx94") == 0)
+        {
+            // 0.3 version enables host-trap PC sampling on gfx940, gfx941, gfx942, etc.
+            if(pcs_ioctl_version >= PC_SAMPLING_IOCTL_COMPUTE_VERSION(0, 3))
+                return ROCPROFILER_STATUS_SUCCESS;
+            else
+                return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
+        }
+        else if(agent_name.find("gfx95") == 0)
+        {
+            // 1.2 version enables host-trap PC sampling on gfx950
+            if(pcs_ioctl_version >= PC_SAMPLING_IOCTL_COMPUTE_VERSION(1, 2))
+                return ROCPROFILER_STATUS_SUCCESS;
+            else
+                return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
+        }
     }
-    else if(agent_name == "gfx90a")
+    else if(method == ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC)
     {
-        // For gfx90a, we expect PC sampling IOCTL to be at least 0.1.
-        if(pcs_ioctl_version.major_version > 0 || pcs_ioctl_version.minor_version >= 1)
-            return ROCPROFILER_STATUS_SUCCESS;
-        else
-            return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
-    }
-    else if(agent_name.find("gfx94") == 0)
-    {
-        // We expect PC sampling IOCTL to be at least 0.3 for gfx940, gfx941, gfx942, etc.
-        if(pcs_ioctl_version.major_version > 0 || pcs_ioctl_version.minor_version >= 3)
-            return ROCPROFILER_STATUS_SUCCESS;
-        else
-            return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
-    }
-    else if(agent_name.find("gfx95") == 0)
-    {
-        // As I am not sure if the PCS IOCTL is going to be bumped for gfx950,
-        // I introduced a separate branch for it.
-        // We expect PC sampling IOCTL to be at least 0.3 for gfx950.
-        if(pcs_ioctl_version.major_version > 0 || pcs_ioctl_version.minor_version >= 3)
-            return ROCPROFILER_STATUS_SUCCESS;
-        else
-            return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
+        if(agent_name == "gfx90a")
+        {
+            // gfx90a doesn't support stochastic PC sampling
+            return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
+        }
+        else if(agent_name.find("gfx94") == 0)
+        {
+            // 1.3 version enables stochastic PC sampling on gfx940, gfx941, gfx942, etc.
+            if(pcs_ioctl_version >= PC_SAMPLING_IOCTL_COMPUTE_VERSION(1, 3))
+                return ROCPROFILER_STATUS_SUCCESS;
+            else
+                return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
+        }
+        else if(agent_name.find("gfx95") == 0)
+        {
+            // 1.4 version enables stochastic PC sampling on gfx950
+            if(pcs_ioctl_version >= PC_SAMPLING_IOCTL_COMPUTE_VERSION(1, 4))
+                return ROCPROFILER_STATUS_SUCCESS;
+            else
+                return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
+        }
     }
     else
     {
-        // The agent does not support PC sampling.
-        return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
     }
+
+    // Other architecture do not support the PC sampling method.
+    return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
+}
+
+/**
+ * @brief Returns the PC sampling IOCTL version if the PC sampling feature is supported in the
+ * driver.
+ *
+ * First, check the minimal driver version via @ref is_pc_sampling_supported.
+ * Then, determines the PC sampling IOCTL version via @ref get_pc_sampling_ioctl_version.
+ *
+ * @param [in] kfd_gpu_id - The KFD GPU identifier
+ * @param [out] pcs_ioctl_version_t - The PC sampling IOCTL version
+ * @return ::rocprofiler_status_t
+ */
+rocprofiler_status_t
+get_pcs_ioctl_version_if_kfd_supports(uint32_t kfd_gpu_id, pcs_ioctl_version_t* pcs_ioctl_version)
+{
+    // Check if the PC sampling feature is supported in the driver
+    auto status = is_pc_sampling_supported();
+    if(status != ROCPROFILER_STATUS_SUCCESS) return status;
+
+    // Get the PC sampling IOCTL version
+    status = get_pc_sampling_ioctl_version(kfd_gpu_id, pcs_ioctl_version);
+    return status;
+}
+
+/**
+ * @brief Same as @ref is_pc_sampling_method_supported.
+ */
+rocprofiler_status_t
+is_pc_sampling_method_supported(rocprofiler_ioctl_pc_sampling_method_kind_t ioctl_method,
+                                const rocprofiler_agent_t*                  agent,
+                                pcs_ioctl_version_t                         pcs_ioctl_version)
+{
+    auto rocp_method = get_rocp_pcs_method_from_kfd(ioctl_method);
+    return is_pc_sampling_method_supported(rocp_method, agent, pcs_ioctl_version);
 }
 
 /**
  * @kfd_gpu_id represents the gpu identifier read from the content of the
  * /sys/class/kfd/kfd/topology/nodes/<node-id>/gpu_id.
  */
-ROCPROFILER_IOCTL_STATUS
+rocprofiler_ioctl_status_t
 ioctl_query_pc_sampling_capabilities(uint32_t  kfd_gpu_id,
                                      void*     sample_info,
                                      uint32_t  sample_info_sz,
@@ -366,8 +466,9 @@ get_kfd_fd()
 rocprofiler_status_t
 ioctl_query_pcs_configs(const rocprofiler_agent_t* agent, rocp_pcs_cfgs_vec_t& rocp_configs)
 {
-    if(auto status = is_pc_sampling_supported(agent); status != ROCPROFILER_STATUS_SUCCESS)
-        return status;
+    pcs_ioctl_version_t pcs_ioctl_version = 0;
+    auto status = get_pcs_ioctl_version_if_kfd_supports(agent->gpu_id, &pcs_ioctl_version);
+    if(status != ROCPROFILER_STATUS_SUCCESS) return status;
 
     uint32_t kfd_gpu_id = agent->gpu_id;
 
@@ -400,8 +501,15 @@ ioctl_query_pcs_configs(const rocprofiler_agent_t* agent, rocp_pcs_cfgs_vec_t& r
     {
         // FIXME: Why this happens?
         if(ioctl_cfg.method == 0) continue;
-        // Skip showing stochastic sampling until it's fully supported.
-        if(ioctl_cfg.method == ROCPROFILER_IOCTL_PC_SAMPLING_METHOD_KIND_STOCHASTIC_V1) continue;
+
+        // Strict check whether the driver version (safely) supports the sampling method for
+        // this specific device architecture.
+        // If not, skip showing this configuration to the user, as it's not safe to use this
+        // sampling method on this device.
+        if(is_pc_sampling_method_supported(ioctl_cfg.method, agent, pcs_ioctl_version) !=
+           ROCPROFILER_STATUS_SUCCESS)
+            continue;
+
         auto rocp_cfg = common::init_public_api_struct(rocprofiler_pc_sampling_configuration_t{});
         auto rocp_ret = convert_ioctl_pcs_config_to_rocp(ioctl_cfg, rocp_cfg);
         if(rocp_ret != ROCPROFILER_STATUS_SUCCESS)
@@ -470,12 +578,15 @@ ioctl_pcs_create(const rocprofiler_agent_t*       agent,
                  uint64_t                         interval,
                  uint32_t*                        ioctl_pcs_id)
 {
-    if(auto status = is_pc_sampling_supported(agent); status != ROCPROFILER_STATUS_SUCCESS)
-        return status;
+    pcs_ioctl_version_t pcs_ioctl_version = 0;
+    auto status = get_pcs_ioctl_version_if_kfd_supports(agent->gpu_id, &pcs_ioctl_version);
+    if(status != ROCPROFILER_STATUS_SUCCESS) return status;
 
-    // Block configuring stochastic sampling until it's fully supported.
-    if(method == ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC)
-        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    // Strict check: whether the driver version (safely) supports the sampling method for
+    // this specific device architecture. If not, return an error and prevent the user from
+    // using this sampling method on this device.
+    status = is_pc_sampling_method_supported(method, agent, pcs_ioctl_version);
+    if(status != ROCPROFILER_STATUS_SUCCESS) return status;
 
     rocprofiler_ioctl_pc_sampling_info_t ioctl_cfg;
     auto ret = create_ioctl_pcs_config_from_rocp(ioctl_cfg, method, unit, interval);
@@ -501,17 +612,27 @@ ioctl_pcs_create(const rocprofiler_agent_t*       agent,
     auto ioctl_ret = ioctl(get_kfd_fd(), AMDKFD_IOC_PC_SAMPLE, &args);
     *ioctl_pcs_id  = args.trace_id;
 
-    if(ioctl_ret != 0 && (errno == EBUSY || errno == EEXIST))
+    if(ioctl_ret != 0)
     {
-        // Currently, KFD uses EBUSY when e.g., PC sampling create is requested from
-        // withing the ROCgdb.
-        // On the other hand, EEXIST is used when one tries to create a PC sampling
-        // with a configuration different than the one already active.
-        return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
-    }
-    else if(ioctl_ret != 0)
-    {
-        return ROCPROFILER_STATUS_ERROR;
+        if(errno == EBUSY || errno == EEXIST)
+        {
+            // Currently, KFD uses EBUSY when e.g., PC sampling create is requested from
+            // withing the ROCgdb.
+            // On the other hand, EEXIST is used when one tries to create a PC sampling
+            // with a configuration different than the one already active.
+            return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
+        }
+        else if(errno == EINVAL)
+        {
+            // invalid argument (e.g., interval must be power of 2, but a value that's
+            // not power of 2 is provided)
+            return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+        }
+        else
+        {
+            // generic error
+            return ROCPROFILER_STATUS_ERROR;
+        }
     }
 
     return ROCPROFILER_STATUS_SUCCESS;

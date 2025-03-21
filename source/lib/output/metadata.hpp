@@ -87,6 +87,9 @@ using att_filenames_map_t   = std::unordered_map<rocprofiler_dispatch_id_t, att_
 using code_object_load_info_vec_t = std::vector<rocprofiler::att_wrapper::CodeobjLoadInfo>;
 template <typename Tp>
 using synced_map = common::Synchronized<Tp, true>;
+template <typename Tp>
+using synced_obj          = common::Synchronized<Tp, true>;
+using pc_sampling_stats_t = rocprofiler_tool_pc_sampling_stats;
 
 enum class agent_indexing
 {
@@ -133,6 +136,7 @@ struct metadata
     synced_map<host_function_info_map_t>    host_functions    = {};
     synced_map<code_object_load_info_vec_t> code_object_load  = {};
     att_filenames_map_t                     att_filenames     = {};
+    synced_obj<pc_sampling_stats_t>         pc_sampling_stats = {};
 
     metadata() = default;
     metadata(inprocess);

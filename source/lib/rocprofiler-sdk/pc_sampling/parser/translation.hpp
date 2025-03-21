@@ -30,7 +30,8 @@
 #include "lib/rocprofiler-sdk/pc_sampling/parser/gfx9.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/parser/parser_types.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/parser/rocr.h"
-#include "lib/rocprofiler-sdk/pc_sampling/parser/stochastic_records.h"
+
+#include <rocprofiler-sdk/pc_sampling.h>
 
 // TODO: refactor the commented code for stochastic sampling
 
@@ -51,7 +52,6 @@
 
 //     ret.wave_count = sample.perf_snapshot_data1 & 0x3F;
 
-//     ret.wave_issued                = sample.perf_snapshot_data >> 1;
 //     ret.snapshot.dual_issue_valu   = sample.perf_snapshot_data >> 2;
 //     ret.snapshot.inst_type         = sample.perf_snapshot_data >> 3;
 //     ret.snapshot.reason_not_issued = (sample.perf_snapshot_data >> 7) & 0x7;
@@ -103,90 +103,76 @@
 
 // #undef BITSHIFT
 
-// #define LUTOVERLOAD(sname) this->operator[](GFX::sname) = PCSAMPLE::sname
+#define LUTOVERLOAD(sname, rocp_prefix) this->operator[](GFX::sname) = rocp_prefix##_##sname
+#define LUTOVERLOAD_INST(sname)         LUTOVERLOAD(sname, ROCPROFILER_PC_SAMPLING_INSTRUCTION)
+#define LUTOVERLOAD_INST_NOT_ISSUED(sname)                                                         \
+    LUTOVERLOAD(sname, ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED)
 
-// template <typename GFX>
-// class GFX_REASON_LUT : public std::array<int, 32>
-// {
-// public:
-//     GFX_REASON_LUT()
-//     {
-//         std::memset(data(), 0, size() * sizeof(int));
-//         LUTOVERLOAD(REASON_NOT_AVAILABLE);
-//         LUTOVERLOAD(REASON_ALU);
-//         LUTOVERLOAD(REASON_WAITCNT);
-//         LUTOVERLOAD(REASON_INTERNAL);
-//         LUTOVERLOAD(REASON_BARRIER);
-//         LUTOVERLOAD(REASON_ARBITER);
-//         LUTOVERLOAD(REASON_EX_STALL);
-//         LUTOVERLOAD(REASON_OTHER_WAIT);
-//         LUTOVERLOAD(REASON_SLEEP);
-//     }
-// };
+template <typename GFX>
+struct gfx_inst_lut : public std::array<int, 32>
+{
+    gfx_inst_lut()
+    {
+        std::memset(data(), 0, size() * sizeof(int));
+        LUTOVERLOAD_INST(TYPE_VALU);
+        LUTOVERLOAD_INST(TYPE_MATRIX);
+        LUTOVERLOAD_INST(TYPE_SCALAR);
+        LUTOVERLOAD_INST(TYPE_TEX);
+        LUTOVERLOAD_INST(TYPE_LDS);
+        LUTOVERLOAD_INST(TYPE_LDS_DIRECT);
+        LUTOVERLOAD_INST(TYPE_FLAT);
+        LUTOVERLOAD_INST(TYPE_EXPORT);
+        LUTOVERLOAD_INST(TYPE_MESSAGE);
+        LUTOVERLOAD_INST(TYPE_BARRIER);
+        LUTOVERLOAD_INST(TYPE_BRANCH_NOT_TAKEN);
+        LUTOVERLOAD_INST(TYPE_BRANCH_TAKEN);
+        LUTOVERLOAD_INST(TYPE_JUMP);
+        LUTOVERLOAD_INST(TYPE_OTHER);
+        LUTOVERLOAD_INST(TYPE_NO_INST);
+        LUTOVERLOAD_INST(TYPE_DUAL_VALU);
+    }
+};
 
-// template <typename GFX>
-// class GFX_INST_LUT : public std::array<int, 32>
-// {
-// public:
-//     GFX_INST_LUT()
-//     {
-//         std::memset(data(), 0, size() * sizeof(int));
-//         LUTOVERLOAD(TYPE_VALU);
-//         LUTOVERLOAD(TYPE_MATRIX);
-//         LUTOVERLOAD(TYPE_SCALAR);
-//         LUTOVERLOAD(TYPE_TEX);
-//         LUTOVERLOAD(TYPE_LDS);
-//         LUTOVERLOAD(TYPE_LDS_DIRECT);
-//         LUTOVERLOAD(TYPE_FLAT);
-//         LUTOVERLOAD(TYPE_EXP);
-//         LUTOVERLOAD(TYPE_MESSAGE);
-//         LUTOVERLOAD(TYPE_BARRIER);
-//         LUTOVERLOAD(TYPE_BRANCH_NOT_TAKEN);
-//         LUTOVERLOAD(TYPE_BRANCH_TAKEN);
-//         LUTOVERLOAD(TYPE_JUMP);
-//         LUTOVERLOAD(TYPE_OTHER);
-//         LUTOVERLOAD(TYPE_NO_INST);
-//         LUTOVERLOAD(TYPE_DUAL_VALU);
-//     }
-// };
+template <typename GFX>
+struct gfx_reason_lut : public std::array<int, 32>
+{
+    gfx_reason_lut()
+    {
+        std::memset(data(), 0, size() * sizeof(int));
+        LUTOVERLOAD_INST_NOT_ISSUED(REASON_NO_INSTRUCTION_AVAILABLE);
+        LUTOVERLOAD_INST_NOT_ISSUED(REASON_ALU_DEPENDENCY);
+        LUTOVERLOAD_INST_NOT_ISSUED(REASON_WAITCNT);
+        LUTOVERLOAD_INST_NOT_ISSUED(REASON_INTERNAL_INSTRUCTION);
+        LUTOVERLOAD_INST_NOT_ISSUED(REASON_BARRIER_WAIT);
+        LUTOVERLOAD_INST_NOT_ISSUED(REASON_ARBITER_NOT_WIN);
+        LUTOVERLOAD_INST_NOT_ISSUED(REASON_ARBITER_WIN_EX_STALL);
+        LUTOVERLOAD_INST_NOT_ISSUED(REASON_OTHER_WAIT);
+        LUTOVERLOAD_INST_NOT_ISSUED(REASON_SLEEP_WAIT);
+    }
+};
 
-// template <typename GFX>
-// inline int
-// translate_reason(int in)
-// {
-//     static GFX_REASON_LUT<GFX> lut;
-//     return lut[in & 0x1F];
-// }
+template <typename GFX>
+inline int
+translate_inst(int in)
+{
+    static gfx_inst_lut<GFX> lut;
+    return lut[in & 0x1F];
+}
 
-// template <typename GFX>
-// inline int
-// translate_inst(int in)
-// {
-//     static GFX_INST_LUT<GFX> lut;
-//     return lut[in & 0x1F];
-// }
+template <typename GFX>
+inline int
+translate_reason(int in)
+{
+    static gfx_reason_lut<GFX> lut;
+    return lut[in & 0x1F];
+}
 
-// #undef LUTOVERLOAD
-
-// template <bool HostTrap, typename GFX>
-// inline rocprofiler_pc_sampling_record_t
-// copySample(const void* sample)
-// {
-//     if(HostTrap) return copyHostTrapSample(*(const perf_sample_host_trap_v1*) sample);
-
-//     rocprofiler_pc_sampling_record_t ret =
-//         copyStochasticSample<GFX>(*(const perf_sample_snapshot_v1*) sample);
-
-//     ret.snapshot.inst_type         = translate_inst<GFX>(ret.snapshot.inst_type);
-//     ret.snapshot.arb_state_issue   = translate_arb<GFX>(ret.snapshot.arb_state_issue);
-//     ret.snapshot.arb_state_stall   = translate_arb<GFX>(ret.snapshot.arb_state_stall);
-//     ret.snapshot.reason_not_issued = translate_reason<GFX>(ret.snapshot.reason_not_issued);
-
-//     return ret;
-// }
+#undef LUTOVERLOAD_INST_NOT_ISSUED
+#undef LUTOVERLOAD_INST
+#undef LUTOVERLOAD
 
 #define EXTRACT_BITS(val, bit_end, bit_start)                                                      \
-    (val >> bit_start) & ((1U << (bit_end - bit_start + 1)) - 1)
+    ((val >> bit_start) & ((1U << (bit_end - bit_start + 1)) - 1))
 
 template <typename GFX, typename PcSamplingRecordT, typename SType>
 inline void
@@ -227,8 +213,6 @@ copyHwId<GFX9, rocprofiler_pc_sampling_hw_id_v0_t>(rocprofiler_pc_sampling_hw_id
     // 31:30 -> me_id
     hw_id.microengine_id = EXTRACT_BITS(hw_id_reg, 31, 30);
 }
-
-#undef EXTRACT_BITS
 
 template <typename PcSamplingRecordT, typename SType>
 inline PcSamplingRecordT
@@ -276,11 +260,65 @@ inline rocprofiler_pc_sampling_record_stochastic_v0_t
 copySample<GFX9, rocprofiler_pc_sampling_record_stochastic_v0_t>(const void* sample)
 {
     const auto& sample_ = *static_cast<const perf_sample_snapshot_v1*>(sample);
-    auto        ret     = copySampleHeader<rocprofiler_pc_sampling_record_stochastic_v0_t>(sample_);
+
+    // Extracting data from the perf_snapshot_data register
+    auto perf_snapshot_data = sample_.perf_snapshot_data;
+    // The sample is valid iff neither of perf_snapshot_data.valid and perf_snapshot_data.error == 0
+    // is one
+    auto valid = static_cast<bool>(EXTRACT_BITS(perf_snapshot_data, 0, 0) &
+                                   ~EXTRACT_BITS(perf_snapshot_data, 26, 26));
+    if(!valid)
+    {
+        // To reduce refactoring of the PC sampling parser, we agreed to internally represent
+        // invalid samples with `rocprofiler_pc_sampling_record_stochastic_v0_t` with size 0.
+        // Eventually, those records are replaced with rocprofiler_pc_sampling_record_invalid_t
+        // and placed into the SDK buffer consumed by the end tool.
+        rocprofiler_pc_sampling_record_stochastic_v0_t invalid{};
+        invalid.size = 0;
+        // No need to further process invalid samples
+        return invalid;
+    }
+
+    auto ret = copySampleHeader<rocprofiler_pc_sampling_record_stochastic_v0_t>(sample_);
     copyChipletId<GFX9>(ret, sample_);
     copyHwId<GFX9>(ret.hw_id, sample_.hw_id);
-    ret.wave_count = sample_.perf_snapshot_data1 & 0x3F;
-    // TODO: implement logic for manipulating stochastic related fields
+
+    // no memory counters on GFX9
+    ret.flags.has_memory_counter = false;
+
+    // wave issued an instruction
+    ret.wave_issued = EXTRACT_BITS(perf_snapshot_data, 1, 1);
+    // type of issued instruction, valid only if `ret.wave_issued` is true.
+    ret.inst_type = translate_inst<GFX9>(EXTRACT_BITS(perf_snapshot_data, 6, 3));
+    // two VALU instructions issued in this cycles
+    ret.snapshot.dual_issue_valu = EXTRACT_BITS(perf_snapshot_data, 2, 2);
+    // reason for not issuing an instruction, valid only if `ret.wave_issued` is false
+    ret.snapshot.reason_not_issued = translate_reason<GFX9>(EXTRACT_BITS(perf_snapshot_data, 9, 7));
+
+    // arbiter state information
+    uint16_t arb_state                    = EXTRACT_BITS(perf_snapshot_data, 25, 10);
+    ret.snapshot.arb_state_issue_valu     = EXTRACT_BITS(arb_state, 7, 7);
+    ret.snapshot.arb_state_issue_matrix   = EXTRACT_BITS(arb_state, 6, 6);
+    ret.snapshot.arb_state_issue_lds      = EXTRACT_BITS(arb_state, 3, 3);
+    ret.snapshot.arb_state_issue_scalar   = EXTRACT_BITS(arb_state, 5, 5);
+    ret.snapshot.arb_state_issue_vmem_tex = EXTRACT_BITS(arb_state, 4, 4);
+    ret.snapshot.arb_state_issue_flat     = EXTRACT_BITS(arb_state, 2, 2);
+    ret.snapshot.arb_state_issue_exp      = EXTRACT_BITS(arb_state, 1, 1);
+    ret.snapshot.arb_state_issue_misc     = EXTRACT_BITS(arb_state, 0, 0);
+
+    ret.snapshot.arb_state_stall_valu     = EXTRACT_BITS(arb_state, 15, 15);
+    ret.snapshot.arb_state_stall_matrix   = EXTRACT_BITS(arb_state, 14, 14);
+    ret.snapshot.arb_state_stall_lds      = EXTRACT_BITS(arb_state, 11, 11);
+    ret.snapshot.arb_state_stall_scalar   = EXTRACT_BITS(arb_state, 13, 13);
+    ret.snapshot.arb_state_stall_vmem_tex = EXTRACT_BITS(arb_state, 12, 12);
+    ret.snapshot.arb_state_stall_flat     = EXTRACT_BITS(arb_state, 10, 10);
+    ret.snapshot.arb_state_stall_exp      = EXTRACT_BITS(arb_state, 9, 9);
+    ret.snapshot.arb_state_stall_misc     = EXTRACT_BITS(arb_state, 8, 8);
+
+    // Extracting data from the perf_snapshot_data1 register
+    // Active waves on CU at the moment of sampling
+    ret.wave_count = EXTRACT_BITS(sample_.perf_snapshot_data1, 5, 0);
+
     return ret;
 }
 
@@ -309,3 +347,5 @@ copySample<GFX11, rocprofiler_pc_sampling_record_stochastic_v0_t>(const void* sa
     // ret.wave_count      = sample_.perf_snapshot_data1 & 0x3F;
     return ret;
 }
+
+#undef EXTRACT_BITS

@@ -25,6 +25,7 @@
 class GFX9
 {
 public:
+    // matches values specified in perf_snapshot_data register
     enum inst_type_issued
     {
         TYPE_VALU = 0,
@@ -33,7 +34,7 @@ public:
         TYPE_TEX,
         TYPE_LDS,
         TYPE_FLAT,
-        TYPE_EXP,
+        TYPE_EXPORT,
         TYPE_MESSAGE,
         TYPE_BARRIER,
         TYPE_BRANCH_NOT_TAKEN,
@@ -46,30 +47,32 @@ public:
         TYPE_LDS_DIRECT = 31
     };
 
+    // matces values specified in perf_snapshot_data register
     enum reason_not_issued
     {
-        REASON_NOT_AVAILABLE = 0,
-        REASON_ALU,
+        REASON_NO_INSTRUCTION_AVAILABLE = 0,
+        REASON_ALU_DEPENDENCY,
         REASON_WAITCNT,
-        REASON_INTERNAL,
-        REASON_BARRIER,
-        REASON_ARBITER,
-        REASON_EX_STALL,
+        REASON_INTERNAL_INSTRUCTION,
+        REASON_BARRIER_WAIT,
+        REASON_ARBITER_NOT_WIN,
+        REASON_ARBITER_WIN_EX_STALL,
         REASON_OTHER_WAIT,
         REASON_LAST,
-        REASON_SLEEP = 31
+        REASON_SLEEP_WAIT = 31
     };
 
+    // matches the order of arb_state bits in perf_snapshot_data register
     enum arb_state
     {
-        ISSUE_VALU = 0,
-        ISSUE_MATRIX,
-        ISSUE_SCALAR,
-        ISSUE_VMEM_TEX,
-        ISSUE_LDS,
-        ISSUE_FLAT,
+        ISSUE_MISC = 0,
         ISSUE_EXP,
-        ISSUE_MISC,
+        ISSUE_FLAT,
+        ISSUE_LDS,
+        ISSUE_VMEM_TEX,
+        ISSUE_SCALAR,
+        ISSUE_MATRIX,
+        ISSUE_VALU,
         ISSUE_LAST,
         ISSUE_LDS_DIRECT = 31,
         ISSUE_BRMSG      = 31,

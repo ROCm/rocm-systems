@@ -35,6 +35,87 @@
 
 namespace
 {
+#define ROCPROFILER_INSTRUCTION_TYPE_STRING(CODE)                                                  \
+    template <>                                                                                    \
+    struct instruction_type_string<CODE>                                                           \
+    {                                                                                              \
+        static constexpr auto name = #CODE;                                                        \
+    };
+
+#define ROCPROFILER_NO_ISSUE_REASON_STRING(CODE)                                                   \
+    template <>                                                                                    \
+    struct no_issue_reason_string<CODE>                                                            \
+    {                                                                                              \
+        static constexpr auto name = #CODE;                                                        \
+    };
+
+template <size_t Idx>
+struct instruction_type_string;
+
+template <size_t Idx>
+struct no_issue_reason_string;
+
+ROCPROFILER_INSTRUCTION_TYPE_STRING(ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_NONE);
+ROCPROFILER_INSTRUCTION_TYPE_STRING(ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_VALU);
+ROCPROFILER_INSTRUCTION_TYPE_STRING(ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_MATRIX);
+ROCPROFILER_INSTRUCTION_TYPE_STRING(ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_SCALAR);
+ROCPROFILER_INSTRUCTION_TYPE_STRING(ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_TEX);
+ROCPROFILER_INSTRUCTION_TYPE_STRING(ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_LDS);
+ROCPROFILER_INSTRUCTION_TYPE_STRING(ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_LDS_DIRECT);
+ROCPROFILER_INSTRUCTION_TYPE_STRING(ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_FLAT);
+ROCPROFILER_INSTRUCTION_TYPE_STRING(ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_EXPORT);
+ROCPROFILER_INSTRUCTION_TYPE_STRING(ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_MESSAGE);
+ROCPROFILER_INSTRUCTION_TYPE_STRING(ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_BARRIER);
+ROCPROFILER_INSTRUCTION_TYPE_STRING(ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_BRANCH_NOT_TAKEN);
+ROCPROFILER_INSTRUCTION_TYPE_STRING(ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_BRANCH_TAKEN);
+ROCPROFILER_INSTRUCTION_TYPE_STRING(ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_JUMP);
+ROCPROFILER_INSTRUCTION_TYPE_STRING(ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_OTHER);
+ROCPROFILER_INSTRUCTION_TYPE_STRING(ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_NO_INST);
+ROCPROFILER_INSTRUCTION_TYPE_STRING(ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_DUAL_VALU);
+
+ROCPROFILER_NO_ISSUE_REASON_STRING(ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_NONE);
+ROCPROFILER_NO_ISSUE_REASON_STRING(
+    ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_NO_INSTRUCTION_AVAILABLE);
+ROCPROFILER_NO_ISSUE_REASON_STRING(
+    ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_ALU_DEPENDENCY);
+ROCPROFILER_NO_ISSUE_REASON_STRING(ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_WAITCNT);
+ROCPROFILER_NO_ISSUE_REASON_STRING(
+    ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_INTERNAL_INSTRUCTION);
+ROCPROFILER_NO_ISSUE_REASON_STRING(
+    ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_BARRIER_WAIT);
+ROCPROFILER_NO_ISSUE_REASON_STRING(
+    ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_ARBITER_NOT_WIN);
+ROCPROFILER_NO_ISSUE_REASON_STRING(
+    ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_ARBITER_WIN_EX_STALL);
+ROCPROFILER_NO_ISSUE_REASON_STRING(
+    ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_OTHER_WAIT);
+ROCPROFILER_NO_ISSUE_REASON_STRING(
+    ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_SLEEP_WAIT);
+
+template <size_t Idx, size_t... Tail>
+const char*
+get_instruction_type_name(rocprofiler_pc_sampling_instruction_type_t instruction_type,
+                          std::index_sequence<Idx, Tail...>)
+{
+    if(instruction_type == Idx) return instruction_type_string<Idx>::name;
+    // recursion until tail empty
+    if constexpr(sizeof...(Tail) > 0)
+        return get_instruction_type_name(instruction_type, std::index_sequence<Tail...>{});
+    return nullptr;
+}
+
+template <size_t Idx, size_t... Tail>
+const char*
+get_no_issue_reason_name(rocprofiler_pc_sampling_instruction_not_issued_reason_t no_issue_reason,
+                         std::index_sequence<Idx, Tail...>)
+{
+    if(no_issue_reason == Idx) return no_issue_reason_string<Idx>::name;
+    // recursion until tail empty
+    if constexpr(sizeof...(Tail) > 0)
+        return get_no_issue_reason_name(no_issue_reason, std::index_sequence<Tail...>{});
+    return nullptr;
+}
+
 /**
  * @brief The functions checks if the `ROCPROFILER_PC_SAMPLING_BETA_ENABLED` is set.
  * If so, it will enable PC sampling API. Otherwise, the API is reported
@@ -129,5 +210,23 @@ rocprofiler_query_pc_sampling_agent_configurations(
     // ROCr runtime is missing PC sampling.
     return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
 #endif
+}
+
+const char*
+rocprofiler_get_pc_sampling_instruction_type_name(
+    rocprofiler_pc_sampling_instruction_type_t instruction_type)
+{
+    return get_instruction_type_name(
+        instruction_type,
+        std::make_index_sequence<ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_LAST>{});
+}
+
+const char*
+rocprofiler_get_pc_sampling_instruction_not_issued_reason_name(
+    rocprofiler_pc_sampling_instruction_not_issued_reason_t not_issued_reason)
+{
+    return get_no_issue_reason_name(
+        not_issued_reason,
+        std::make_index_sequence<ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_LAST>{});
 }
 }

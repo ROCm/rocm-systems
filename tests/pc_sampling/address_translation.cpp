@@ -44,14 +44,13 @@ namespace
 {
 struct FlatProfiler
 {
-public:
     FlatProfiler()  = default;
     ~FlatProfiler() = default;
 
-    CodeobjAddressTranslate translator;
-    KernelObjectMap         kernel_object_map;
-    FlatProfile             flat_profile;
-    std::mutex              global_mut;
+    CodeobjAddressTranslate translator        = {};
+    KernelObjectMap         kernel_object_map = {};
+    FlatProfile             flat_profile      = {};
+    std::mutex              global_mut        = {};
 };
 }  // namespace
 
@@ -68,6 +67,7 @@ void
 fini()
 {
     delete flat_profiler;
+    flat_profiler = nullptr;
 }
 
 CodeobjAddressTranslate&
@@ -186,15 +186,19 @@ dump_flat_profile()
         ss << "====================================\n" << std::endl;
     });
 
-    ss << "The total number of decoded   samples: " << samples_num << std::endl;
-    ss << "The total number of collected samples: " << client::pcs::total_samples_num()
+    ss << "The total number of valid decoded samples: "
+       << flat_profile.get_valid_decoded_samples_num() << std::endl;
+    ss << "The total number of invalid samples      : " << flat_profile.get_invalid_samples_num()
        << std::endl;
 
     *utils::get_output_stream() << ss.str() << std::endl;
 
-    assert(samples_num == client::pcs::total_samples_num());
-    // We expect at least one PC sample to be decoded/delivered;
-    assert(samples_num > 0);
+    utils::pcs_assert(
+        samples_num == flat_profile.get_valid_decoded_samples_num(),
+        "Number of collected valid samples different than the number of decoded samples.");
+    utils::pcs_assert(samples_num > 0, "No valid samples collected/decoded.");
+    utils::pcs_assert(flat_profile.more_valid_decoded_samples_expected(),
+                      "More invalid samples observed.");
 }
 
 }  // namespace address_translation

@@ -48,3 +48,5 @@ from __future__ import absolute_import
 
 from . import pytest_utils
 ")
+
+add_subdirectory(pc_sampling)

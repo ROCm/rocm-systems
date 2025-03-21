@@ -43,7 +43,7 @@ namespace ioctl
 // 4. ROCPROFILER_IOCTL_STATUS_UNAVAILABLE
 // We might replace 1, 2, and 4 with rocprofiler_status_t, but still lacking a counterpart
 // for the ROCPROFILER_IOCTL_STATUS_BUFFER_TOO_SMALL
-typedef enum _ROCPROFILER_IOCTL_STATUS
+typedef enum rocprofiler_ioctl_status_t
 {
     ROCPROFILER_IOCTL_STATUS_SUCCESS = 0,  /// Operation successful // USED
     ROCPROFILER_IOCTL_STATUS_ERROR = 1,  /// General error return if not otherwise specified // USED
@@ -72,7 +72,7 @@ typedef enum _ROCPROFILER_IOCTL_STATUS
     ROCPROFILER_IOCTL_STATUS_MEMORY_ALREADY_REGISTERED = 35,  /// Memory buffer already registered
     ROCPROFILER_IOCTL_STATUS_MEMORY_NOT_REGISTERED     = 36,  /// Memory buffer not registered
     ROCPROFILER_IOCTL_STATUS_MEMORY_ALIGNMENT          = 37,  /// Memory parameter not aligned
-} ROCPROFILER_IOCTL_STATUS;
+} rocprofiler_ioctl_status_t;
 
 typedef struct rocprofiler_ioctl_version_info_s
 {
@@ -80,27 +80,29 @@ typedef struct rocprofiler_ioctl_version_info_s
     uint32_t minor_version;  /// supported IOCTL interface minor version
 } rocprofiler_ioctl_version_info_t;
 
-typedef enum _ROCPROFILER_IOCTL_PC_SAMPLING_METHOD_KIND
+typedef enum rocprofiler_ioctl_pc_sampling_method_kind_t
 {
+    ROCPROFILER_IOCTL_PC_SAMPLING_METHOD_KIND_NONE        = 0,
     ROCPROFILER_IOCTL_PC_SAMPLING_METHOD_KIND_HOSTTRAP_V1 = 1,
     ROCPROFILER_IOCTL_PC_SAMPLING_METHOD_KIND_STOCHASTIC_V1,
-} ROCPROFILER_IOCTL_PC_SAMPLING_METHOD_KIND;
+    ROCPROFILER_IOCTL_PC_SAMPLING_METHOD_KIND_LAST,
+} rocprofiler_ioctl_pc_sampling_method_kind_t;
 
-typedef enum _ROCPROFILER_IOCTL_PC_SAMPLING_UNITS
+typedef enum rocprofiler_ioctl_pc_sampling_unit_interval_t
 {
     ROCPROFILER_IOCTL_PC_SAMPLING_UNIT_INTERVAL_MICROSECONDS,
     ROCPROFILER_IOCTL_PC_SAMPLING_UNIT_INTERVAL_CYCLES,
     ROCPROFILER_IOCTL_PC_SAMPLING_UNIT_INTERVAL_INSTRUCTIONS,
-} ROCPROFILER_IOCTL_PC_SAMPLING_UNIT_INTERVAL;
+} rocprofiler_ioctl_pc_sampling_unit_interval_t;
 
 typedef struct rocprofiler_ioctl_pc_sampling_info_s
 {
-    uint64_t                                    interval;
-    uint64_t                                    interval_min;
-    uint64_t                                    interval_max;
-    uint64_t                                    flags;
-    ROCPROFILER_IOCTL_PC_SAMPLING_METHOD_KIND   method;
-    ROCPROFILER_IOCTL_PC_SAMPLING_UNIT_INTERVAL units;
+    uint64_t                                      interval;
+    uint64_t                                      interval_min;
+    uint64_t                                      interval_max;
+    uint64_t                                      flags;
+    rocprofiler_ioctl_pc_sampling_method_kind_t   method;
+    rocprofiler_ioctl_pc_sampling_unit_interval_t units;
 } rocprofiler_ioctl_pc_sampling_info_t;
 
 }  // namespace ioctl
