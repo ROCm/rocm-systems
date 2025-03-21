@@ -196,6 +196,9 @@ endif()
 set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 
+# Cpack converts !/usr/bin/env python3 to /usr/libexec/platform-python in RHEL8. prevent
+# the BRP(buildroot policy) script from checking and modifying interpreter directives
+set(CPACK_RPM_SPEC_MORE_DEFINE "%undefine __brp_mangle_shebangs")
 # -------------------------------------------------------------------------------------- #
 #
 # Prepare final version for the CPACK use
