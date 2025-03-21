@@ -88,7 +88,8 @@ rocprofiler_register_target_compile_options(
 rocprofiler_register_target_compile_options(
     rocprofiler-register-developer-flags
     LANGUAGES C CXX
-    INTERFACE "-Werror" "-Wdouble-promotion" "-Wshadow" "-Wextra")
+    INTERFACE "-Werror" "-Wdouble-promotion" "-Wshadow" "-Wextra"
+              "-Wno-deprecated-declarations")
 
 if(ROCPROFILER_REGISTER_BUILD_DEVELOPER)
     target_link_libraries(rocprofiler-register-build-flags

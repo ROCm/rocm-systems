@@ -81,7 +81,8 @@ jobs:
         sudo update-alternatives --install /usr/bin/cc cc /usr/bin/${CC} 100 &&
         sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/${CXX} 100 &&
         python3 -m pip install --upgrade pip &&
-        python3 -m pip install 'cmake==3.21.4'
+        python3 -m pip install 'cmake==3.22.0' &&
+        python3 -m pip install -r requirements.txt
 
     - name: Setup GCov
       timeout-minutes: 25

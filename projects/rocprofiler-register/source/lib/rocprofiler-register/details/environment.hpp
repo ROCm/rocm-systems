@@ -20,8 +20,8 @@
 
 #pragma once
 
-#include "fmt/core.h"
-#include "glog/logging.h"
+#include <fmt/core.h>
+#include <glog/logging.h>
 
 #include <unistd.h>
 #include <cstdio>
@@ -106,6 +106,21 @@ get_env_impl(std::string_view env_id, bool _default)
     }
     return _default;
 }
+
+inline int
+set_env_impl(std::string_view env_id, bool value, int overwrite)
+{
+    return ::setenv(env_id.data(), (value) ? "1" : "0", overwrite);
+}
+
+template <typename Tp>
+int
+set_env_impl(std::string_view env_id, Tp value, int overwrite)
+{
+    auto str_value = std::stringstream{};
+    str_value << value;
+    return ::setenv(env_id.data(), str_value.str().c_str(), overwrite);
+}
 }  // namespace
 
 template <typename Tp>
@@ -124,18 +139,25 @@ get_env(std::string_view env_id, Tp&& _default)
     }
 }
 
+template <typename Tp>
+inline auto
+set_env(std::string_view env_id, Tp&& value, int overwrite = 0)
+{
+    return set_env_impl(env_id, std::forward<Tp>(value), overwrite);
+}
+
 struct env_config
 {
     std::string env_name  = {};
     std::string env_value = {};
-    int         override  = 0;
+    int         overwrite = 0;
 
     auto operator()() const
     {
         if(env_name.empty()) return -1;
         LOG(INFO) << fmt::format(
-            "setenv({}, {}, {})", env_name.c_str(), env_value.c_str(), override);
-        return setenv(env_name.c_str(), env_value.c_str(), override);
+            "setenv({}, {}, {})", env_name.c_str(), env_value.c_str(), overwrite);
+        return setenv(env_name.c_str(), env_value.c_str(), overwrite);
     }
 };
 }  // namespace common
