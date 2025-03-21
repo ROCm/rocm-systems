@@ -739,6 +739,7 @@ ompt_impl<OpIdx>::begin(ompt_data_t* data, Args... args)
 
     auto* corr_id          = tracing::correlation_service::construct(ref_count);
     auto  internal_corr_id = corr_id->internal;
+    auto  ancestor_corr_id = corr_id->ancestor;
 
     tracing::populate_external_correlation_ids(external_corr_ids,
                                                thr_id,
@@ -756,6 +757,7 @@ ompt_impl<OpIdx>::begin(ompt_data_t* data, Args... args)
                                                thr_id,
                                                internal_corr_id,
                                                external_corr_ids,
+                                               ancestor_corr_id,
                                                info_type::callback_domain_idx,
                                                info_type::operation_idx,
                                                tracer_data);
@@ -813,6 +815,7 @@ ompt_impl<OpIdx>::end(ompt_data_t* data, Args... args)
 
     auto* corr_id          = state->corr_id;
     auto  internal_corr_id = corr_id->internal;
+    auto  ancestor_corr_id = corr_id->ancestor;
 
     ROCP_FATAL_IF(common::get_tid() != state->thr_id)
         << "MIsmatch of OMPT begin/end thread id: "
@@ -878,6 +881,7 @@ ompt_impl<OpIdx>::end(ompt_data_t* data, Args... args)
                                                state->thr_id,
                                                internal_corr_id,
                                                external_corr_ids,
+                                               ancestor_corr_id,
                                                info_type::buffered_domain_idx,
                                                info_type::operation_idx,
                                                buffer_record);
@@ -919,6 +923,7 @@ ompt_impl<OpIdx>::event_common(Args... args)
     auto     tracer_data      = common::init_public_api_struct(callback_ompt_data_t{});
     auto*    corr_id          = tracing::correlation_service::construct(ref_count);
     uint64_t internal_corr_id = corr_id->internal;
+    uint64_t ancestor_corr_id = corr_id->ancestor;
 
     tracing::populate_external_correlation_ids(external_corr_ids,
                                                thr_id,
@@ -935,6 +940,7 @@ ompt_impl<OpIdx>::event_common(Args... args)
                                               thr_id,
                                               internal_corr_id,
                                               external_corr_ids,
+                                              ancestor_corr_id,
                                               info_type::callback_domain_idx,
                                               info_type::operation_idx,
                                               tracer_data);
@@ -951,6 +957,7 @@ ompt_impl<OpIdx>::event_common(Args... args)
                                                thr_id,
                                                internal_corr_id,
                                                external_corr_ids,
+                                               ancestor_corr_id,
                                                info_type::buffered_domain_idx,
                                                info_type::operation_idx,
                                                buffer_record);

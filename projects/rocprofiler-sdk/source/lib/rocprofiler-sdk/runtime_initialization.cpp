@@ -119,7 +119,8 @@ initialize(rocprofiler_runtime_initialization_operation_t operation_idx,
 
     constexpr auto callback_domain_idx = ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION;
     constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_RUNTIME_INITIALIZATION;
-    constexpr auto corr_id = rocprofiler_correlation_id_t{0, rocprofiler_user_data_t{.value = 0}};
+    constexpr auto corr_id =
+        rocprofiler_correlation_id_t{0, rocprofiler_user_data_t{.value = 0}, 0};
 
     ROCP_INFO << pretty_name_by_id(operation_idx) << " has been initialized";
 
@@ -138,6 +139,7 @@ initialize(rocprofiler_runtime_initialization_operation_t operation_idx,
                                               thr_id,
                                               corr_id.internal,
                                               data.external_correlation_ids,
+                                              corr_id.ancestor,
                                               callback_domain_idx,
                                               operation_idx,
                                               tracer_data);
@@ -151,6 +153,7 @@ initialize(rocprofiler_runtime_initialization_operation_t operation_idx,
                                                thr_id,
                                                corr_id.internal,
                                                data.external_correlation_ids,
+                                               corr_id.ancestor,
                                                buffered_domain_idx,
                                                operation_idx,
                                                buffer_record);

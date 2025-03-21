@@ -605,12 +605,42 @@ typedef struct rocprofiler_correlation_id_t
 {
     uint64_t                internal;
     rocprofiler_user_data_t external;
+    uint64_t                ancestor;
+
+    /// @var internal
+    /// @brief A unique ID created by rocprofiler-sdk when an API call is invoked.
+    /// @var external
+    /// @brief An ID specified by tools to associate external events.
+    /// See include/rocprofiler-sdk/external_correlation.h
+    /// @var ancestor
+    /// @brief Stores the ::internal value of the API call that generated this
+    /// API call.
 } rocprofiler_correlation_id_t;
+
+/**
+ * @brief ROCProfiler Correlation ID record for async activity.
+ */
+typedef struct rocprofiler_async_correlation_id_t
+{
+    uint64_t                internal;
+    rocprofiler_user_data_t external;
+
+    /// @var internal
+    /// @brief A unique ID created by rocprofiler-sdk when an API call is invoked.
+    /// @var external
+    /// @brief An ID specified by tools to associate external events.
+    /// See include/rocprofiler-sdk/external_correlation.h
+} rocprofiler_async_correlation_id_t;
 
 /**
  * @brief The NULL value of an internal correlation ID.
  */
 #define ROCPROFILER_CORRELATION_ID_INTERNAL_NONE ROCPROFILER_UINT64_C(0)
+
+/**
+ * @brief The NULL value of an ancestor correlation ID.
+ */
+#define ROCPROFILER_CORRELATION_ID_ANCESTOR_NONE ROCPROFILER_UINT64_C(0)
 
 /**
  * @struct rocprofiler_buffer_id_t

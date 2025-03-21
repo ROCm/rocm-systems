@@ -362,7 +362,8 @@ memory_allocation_data::get_buffered_record(const context_t* _ctx,
 {
     auto _external_corr_id =
         (_ctx) ? tracing_data.external_correlation_ids.at(_ctx) : context::null_user_data;
-    auto _corr_id = rocprofiler_correlation_id_t{correlation_id->internal, _external_corr_id};
+    auto _corr_id = rocprofiler_correlation_id_t{
+        correlation_id->internal, _external_corr_id, correlation_id->ancestor};
 
     return common::init_public_api_struct(buffered_data_t{},
                                           ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
@@ -520,6 +521,7 @@ memory_allocation_impl(Args... args)
                                                thr_id,
                                                _data.correlation_id->internal,
                                                tracing_data.external_correlation_ids,
+                                               _data.correlation_id->ancestor,
                                                ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION,
                                                rocprofiler_enum,
                                                _tracer_data);
@@ -561,6 +563,7 @@ memory_allocation_impl(Args... args)
                                                    _data.tid,
                                                    _data.correlation_id->internal,
                                                    _data.tracing_data.external_correlation_ids,
+                                                   _data.correlation_id->ancestor,
                                                    ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
                                                    rocprofiler_enum,
                                                    record);
@@ -644,6 +647,7 @@ memory_free_impl(Args... args)
                                                thr_id,
                                                _data.correlation_id->internal,
                                                tracing_data.external_correlation_ids,
+                                               _data.correlation_id->ancestor,
                                                ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION,
                                                rocprofiler_enum,
                                                _tracer_data);
@@ -679,6 +683,7 @@ memory_free_impl(Args... args)
                                                    _data.tid,
                                                    _data.correlation_id->internal,
                                                    _data.tracing_data.external_correlation_ids,
+                                                   _data.correlation_id->ancestor,
                                                    ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
                                                    rocprofiler_enum,
                                                    record);

@@ -340,7 +340,7 @@ hsa_api_impl<TableIdx, OpIdx>::functor(Args... args)
     auto  tracer_data      = common::init_public_api_struct(callback_hsa_api_data_t{});
     auto* corr_id          = tracing::correlation_service::construct(ref_count);
     auto  internal_corr_id = corr_id->internal;
-
+    auto  ancestor_corr_id = corr_id->ancestor;
     tracing::populate_external_correlation_ids(external_corr_ids,
                                                thr_id,
                                                external_corr_id_domain_idx,
@@ -356,6 +356,7 @@ hsa_api_impl<TableIdx, OpIdx>::functor(Args... args)
                                                thr_id,
                                                internal_corr_id,
                                                external_corr_ids,
+                                               ancestor_corr_id,
                                                info_type::callback_domain_idx,
                                                info_type::operation_idx,
                                                tracer_data);
@@ -399,6 +400,7 @@ hsa_api_impl<TableIdx, OpIdx>::functor(Args... args)
                                                thr_id,
                                                internal_corr_id,
                                                external_corr_ids,
+                                               ancestor_corr_id,
                                                info_type::buffered_domain_idx,
                                                info_type::operation_idx,
                                                buffer_record);

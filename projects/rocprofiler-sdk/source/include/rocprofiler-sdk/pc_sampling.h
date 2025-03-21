@@ -254,10 +254,13 @@ typedef struct rocprofiler_pc_sampling_record_host_trap_v0_t
     uint64_t                           exec_mask;    ///< active SIMD lanes when sampled
     uint64_t                           timestamp;    ///< timestamp when sample is generated
     uint64_t                           dispatch_id;  ///< originating kernel dispatch ID
-    rocprofiler_correlation_id_t correlation_id;  ///< API launch call id that matches dispatch ID
-    rocprofiler_dim3_t           workgroup_id;    ///< wave coordinates within the workgroup
-    uint32_t                     wave_in_group : 8;   ///< wave position within the workgroup (0-31)
-    uint32_t                     reserved0     : 24;  ///< wave position within the workgroup (0-31)
+    rocprofiler_async_correlation_id_t correlation_id;
+    rocprofiler_dim3_t                 workgroup_id;  ///< wave coordinates within the workgroup
+    uint32_t wave_in_group : 8;                       ///< wave position within the workgroup (0-31)
+    uint32_t reserved0     : 24;                      ///< wave position within the workgroup (0-31)
+
+    /// @var correlation_id
+    /// @brief API launch call id that matches dispatch ID
 } rocprofiler_pc_sampling_record_host_trap_v0_t;
 
 /** @} */

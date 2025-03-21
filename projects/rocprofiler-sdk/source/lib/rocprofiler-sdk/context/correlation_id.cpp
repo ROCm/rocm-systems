@@ -23,6 +23,7 @@
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
+#include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 
@@ -130,7 +131,11 @@ correlation_tracing_service::construct(uint32_t _init_ref_count)
     auto* corr_id_map  = get_correlation_id_map();
     if(!corr_id_map) return nullptr;
     auto& ret = corr_id_map->wlock([](auto& data) -> auto& { return data.emplace_back(); });
-    ret       = std::make_unique<correlation_id>(_init_ref_count, common::get_tid(), _internal_id);
+
+    ret = std::make_unique<correlation_id>(_init_ref_count, common::get_tid(), _internal_id);
+
+    if(auto* prev_api_corr_id = get_latest_correlation_id())
+        ret->ancestor = prev_api_corr_id->internal;
 
     get_latest_correlation_id_impl().emplace_back(ret.get());
 

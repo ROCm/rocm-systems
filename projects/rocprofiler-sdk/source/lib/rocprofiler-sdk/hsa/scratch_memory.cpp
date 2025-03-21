@@ -455,6 +455,7 @@ impl(Args... args)
     const auto thr_id           = common::get_tid();
     auto*      corr_id          = context::get_latest_correlation_id();
     auto       internal_corr_id = (corr_id) ? corr_id->internal : 0;
+    auto       ancestor_corr_id = (corr_id) ? corr_id->ancestor : 0;
 
     [[maybe_unused]] const auto get_agent_id =
         [](const hsa_queue_t* hsa_queue) -> rocprofiler_agent_id_t {
@@ -500,6 +501,7 @@ impl(Args... args)
                                                    thr_id,
                                                    internal_corr_id,
                                                    tls.external_corr_ids,
+                                                   ancestor_corr_id,
                                                    ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY,
                                                    OpIdx,
                                                    tls.callback_data);
@@ -553,6 +555,7 @@ impl(Args... args)
                                                    thr_id,
                                                    internal_corr_id,
                                                    tls.external_corr_ids,
+                                                   ancestor_corr_id,
                                                    ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
                                                    OpIdx,
                                                    std::move(_buffered_data));

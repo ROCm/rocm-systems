@@ -38,7 +38,7 @@ rocprofiler_client_id_t* client_id = nullptr;
 rocprofiler_att_control_flags_t
 dispatch_callback(rocprofiler_agent_id_t /* agent */,
                   rocprofiler_queue_id_t /* queue_id */,
-                  rocprofiler_correlation_id_t /* correlation_id */,
+                  rocprofiler_async_correlation_id_t /* correlation_id */,
                   rocprofiler_kernel_id_t kernel_id,
                   rocprofiler_dispatch_id_t /* dispatch_id */,
                   void*                    userdata,

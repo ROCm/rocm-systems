@@ -72,8 +72,8 @@ typedef struct
     uint64_t      write_index;
     uint64_t      read_index;
     /// both internal and external correlation ID.
-    rocprofiler_correlation_id_t correlation_id;
-    rocprofiler_dispatch_id_t    dispatch_id;
+    rocprofiler_async_correlation_id_t correlation_id;
+    rocprofiler_dispatch_id_t          dispatch_id;
 } dispatch_pkt_id_t;
 
 typedef struct

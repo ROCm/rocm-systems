@@ -25,6 +25,7 @@
 #include "lib/common/mpl.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/context/correlation_id.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
@@ -202,6 +203,7 @@ execute_phase_none_callbacks(callback_context_data_vec_t&         callback_conte
                              rocprofiler_thread_id_t              thr_id,
                              uint64_t                             internal_corr_id,
                              const external_correlation_id_map_t& external_corr_ids,
+                             uint64_t                             ancestor_corr_id,
                              rocprofiler_callback_tracing_kind_t  domain,
                              rocprofiler_tracing_operation_t      operation,
                              TracerDataT&                         tracer_data)
@@ -215,7 +217,8 @@ execute_phase_none_callbacks(callback_context_data_vec_t&         callback_conte
         auto&       user_data        = itr.user_data;
         const auto& extern_corr_id_v = external_corr_ids.at(ctx);
 
-        auto corr_id_v = rocprofiler_correlation_id_t{internal_corr_id, extern_corr_id_v};
+        auto corr_id_v =
+            rocprofiler_correlation_id_t{internal_corr_id, extern_corr_id_v, ancestor_corr_id};
         record = rocprofiler_callback_tracing_record_t{rocprofiler_context_id_t{ctx->context_idx},
                                                        thr_id,
                                                        corr_id_v,
@@ -235,6 +238,7 @@ execute_phase_enter_callbacks(callback_context_data_vec_t&         callback_cont
                               rocprofiler_thread_id_t              thr_id,
                               uint64_t                             internal_corr_id,
                               const external_correlation_id_map_t& external_corr_ids,
+                              uint64_t                             ancestor_corr_id,
                               rocprofiler_callback_tracing_kind_t  domain,
                               rocprofiler_tracing_operation_t      operation,
                               TracerDataT&                         tracer_data)
@@ -248,7 +252,8 @@ execute_phase_enter_callbacks(callback_context_data_vec_t&         callback_cont
         auto&       user_data        = itr.user_data;
         const auto& extern_corr_id_v = external_corr_ids.at(ctx);
 
-        auto corr_id_v = rocprofiler_correlation_id_t{internal_corr_id, extern_corr_id_v};
+        auto corr_id_v =
+            rocprofiler_correlation_id_t{internal_corr_id, extern_corr_id_v, ancestor_corr_id};
         record = rocprofiler_callback_tracing_record_t{rocprofiler_context_id_t{ctx->context_idx},
                                                        thr_id,
                                                        corr_id_v,
@@ -279,8 +284,8 @@ execute_phase_exit_callbacks(callback_context_data_vec_t&         callback_conte
         auto&       user_data        = itr.user_data;
         const auto& extern_corr_id_v = external_corr_ids.at(ctx);
 
-        auto corr_id_v =
-            rocprofiler_correlation_id_t{record.correlation_id.internal, extern_corr_id_v};
+        auto corr_id_v = rocprofiler_correlation_id_t{
+            record.correlation_id.internal, extern_corr_id_v, record.correlation_id.ancestor};
         record = rocprofiler_callback_tracing_record_t{rocprofiler_context_id_t{ctx->context_idx},
                                                        record.thread_id,
                                                        corr_id_v,
@@ -300,15 +305,33 @@ execute_buffer_record_emplace(const buffered_context_data_vec_t&   buffered_cont
                               rocprofiler_thread_id_t              thr_id,
                               uint64_t                             internal_corr_id,
                               const external_correlation_id_map_t& external_corr_ids,
+                              uint64_t                             ancestor_corr_id,
                               rocprofiler_buffer_tracing_kind_t    domain,
                               OperationT                           operation,
                               BufferRecordT&&                      base_record)
 {
+    using record_corr_id_t = decltype(base_record.correlation_id);
+
     base_record.thread_id = thr_id;
     base_record.kind      = domain;
     base_record.operation = operation;
+
     // external correlation will be updated right before record is placed in buffer
-    base_record.correlation_id = rocprofiler_correlation_id_t{internal_corr_id, empty_user_data};
+    if constexpr(std::is_same_v<rocprofiler_correlation_id_t, record_corr_id_t>)
+    {
+        base_record.correlation_id =
+            rocprofiler_correlation_id_t{internal_corr_id, empty_user_data, ancestor_corr_id};
+    }
+    else if constexpr(std::is_same_v<rocprofiler_async_correlation_id_t, record_corr_id_t>)
+    {
+        base_record.correlation_id =
+            rocprofiler_async_correlation_id_t{internal_corr_id, empty_user_data};
+    }
+    else
+    {
+        static_assert(common::mpl::assert_false<record_corr_id_t>::value,
+                      "Invalid correlation ID type");
+    }
 
     for(const auto& itr : buffered_contexts)
     {

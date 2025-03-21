@@ -287,6 +287,7 @@ WriteInterceptor(const void* packets,
         auto thr_id           = (corr_id) ? corr_id->thread_idx : common::get_tid();
         auto user_data        = rocprofiler_user_data_t{.value = 0};
         auto internal_corr_id = (corr_id) ? corr_id->internal : 0;
+        auto ancestor_corr_id = (corr_id) ? corr_id->ancestor : 0;
 
         // if we constructed a correlation id, this decrements the reference count after the
         // underlying function returns
@@ -352,6 +353,7 @@ WriteInterceptor(const void* packets,
                                                    thr_id,
                                                    internal_corr_id,
                                                    tracing_data_v.external_correlation_ids,
+                                                   ancestor_corr_id,
                                                    ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
                                                    ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
                                                    tracer_data);

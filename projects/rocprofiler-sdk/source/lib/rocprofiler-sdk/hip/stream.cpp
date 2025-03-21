@@ -176,6 +176,7 @@ FuncT create_write_functor(RetT (*func)(Args...))
 
         auto tracer_data      = common::init_public_api_struct(callback_api_data_t{});
         auto internal_corr_id = 0;
+        auto ancestor_corr_id = 0;
 
         constexpr auto stream_idx = common::mpl::index_of<hipStream_t*, function_args_type>::value;
         auto           stream = std::get<stream_idx>(std::make_tuple(std::forward<Args>(args)...));
@@ -194,6 +195,7 @@ FuncT create_write_functor(RetT (*func)(Args...))
                                                   thr_id,
                                                   internal_corr_id,
                                                   external_corr_ids,
+                                                  ancestor_corr_id,
                                                   ROCPROFILER_CALLBACK_TRACING_HIP_STREAM_API,
                                                   ROCPROFILER_HIP_STREAM_CREATE,
                                                   tracer_data);
@@ -237,6 +239,7 @@ FuncT create_destroy_functor(RetT (*func)(Args...))
 
         auto tracer_data      = common::init_public_api_struct(callback_api_data_t{});
         auto internal_corr_id = 0;
+        auto ancestor_corr_id = 0;
 
         auto stream = std::get<stream_idx>(std::make_tuple(std::forward<Args>(args)...));
 
@@ -252,6 +255,7 @@ FuncT create_destroy_functor(RetT (*func)(Args...))
                                                   thr_id,
                                                   internal_corr_id,
                                                   external_corr_ids,
+                                                  ancestor_corr_id,
                                                   ROCPROFILER_CALLBACK_TRACING_HIP_STREAM_API,
                                                   ROCPROFILER_HIP_STREAM_DESTROY,
                                                   tracer_data);
@@ -296,6 +300,7 @@ FuncT create_read_functor(RetT (*func)(Args...))
 
         auto tracer_data      = common::init_public_api_struct(callback_api_data_t{});
         auto internal_corr_id = 0;
+        auto ancestor_corr_id = 0;
 
         auto stream = std::get<stream_idx>(std::make_tuple(std::forward<Args>(args)...));
 
@@ -306,6 +311,7 @@ FuncT create_read_functor(RetT (*func)(Args...))
                                                    thr_id,
                                                    internal_corr_id,
                                                    external_corr_ids,
+                                                   ancestor_corr_id,
                                                    ROCPROFILER_CALLBACK_TRACING_HIP_STREAM_API,
                                                    ROCPROFILER_HIP_STREAM_SET,
                                                    tracer_data);
