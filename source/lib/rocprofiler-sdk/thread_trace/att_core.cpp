@@ -319,10 +319,13 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
                                       rocprofiler_user_data_t*       user_data,
                                       const context::correlation_id* corr_id)
 {
-    rocprofiler_correlation_id_t rocprof_corr_id =
-        rocprofiler_correlation_id_t{.internal = 0, .external = context::null_user_data};
+    rocprofiler_async_correlation_id_t rocprof_corr_id =
+        rocprofiler_async_correlation_id_t{.internal = 0, .external = context::null_user_data};
 
-    if(corr_id) rocprof_corr_id.internal = corr_id->internal;
+    if(corr_id)
+    {
+        rocprof_corr_id.internal = corr_id->internal;
+    }
     // TODO: Get external
 
     std::shared_lock<std::shared_mutex> lk(agents_map_mut);

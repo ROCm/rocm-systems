@@ -304,15 +304,15 @@ namespace
 struct expected_dispatch
 {
     // To pass back
-    rocprofiler_profile_config_id_t  id             = {.handle = 0};
-    rocprofiler_queue_id_t           queue_id       = {.handle = 0};
-    rocprofiler_agent_id_t           agent_id       = {.handle = 0};
-    uint64_t                         kernel_id      = 0;
-    uint64_t                         dispatch_id    = 0;
-    rocprofiler_correlation_id_t     correlation_id = {.internal = 0, .external = {.value = 0}};
-    rocprofiler_dim3_t               workgroup_size = {0, 0, 0};
-    rocprofiler_dim3_t               grid_size      = {0, 0, 0};
-    rocprofiler_profile_config_id_t* config         = nullptr;
+    rocprofiler_profile_config_id_t    id             = {.handle = 0};
+    rocprofiler_queue_id_t             queue_id       = {.handle = 0};
+    rocprofiler_agent_id_t             agent_id       = {.handle = 0};
+    uint64_t                           kernel_id      = 0;
+    uint64_t                           dispatch_id    = 0;
+    rocprofiler_async_correlation_id_t correlation_id = {.internal = 0, .external = {.value = 0}};
+    rocprofiler_dim3_t                 workgroup_size = {0, 0, 0};
+    rocprofiler_dim3_t                 grid_size      = {0, 0, 0};
+    rocprofiler_profile_config_id_t*   config         = nullptr;
 };
 
 void

@@ -194,7 +194,7 @@ async_copy_data::get_buffered_record(const context_t* _ctx,
 
     auto _external_corr_id =
         (_ctx) ? tracing_data.external_correlation_ids.at(_ctx) : context::null_user_data;
-    auto _corr_id = rocprofiler_correlation_id_t{correlation_id->internal, _external_corr_id};
+    auto _corr_id = rocprofiler_async_correlation_id_t{correlation_id->internal, _external_corr_id};
 
     return common::init_public_api_struct(buffered_data_t{},
                                           ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
@@ -400,6 +400,7 @@ async_copy_handler(hsa_signal_value_t signal_value, void* arg)
                                                    _data->tid,
                                                    _data->correlation_id->internal,
                                                    _data->tracing_data.external_correlation_ids,
+                                                   _data->correlation_id->ancestor,
                                                    ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
                                                    _data->direction,
                                                    record);
@@ -712,6 +713,7 @@ async_copy_impl(Args... args)
                                                thr_id,
                                                _data->correlation_id->internal,
                                                tracing_data.external_correlation_ids,
+                                               _data->correlation_id->ancestor,
                                                ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY,
                                                _direction,
                                                _tracer_data);

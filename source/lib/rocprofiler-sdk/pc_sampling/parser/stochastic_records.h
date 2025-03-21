@@ -169,10 +169,10 @@ typedef struct rocprofiler_pc_sampling_record_stochastic_v0_t
     rocprofiler_pc_t                   pc;            ///< information about sampled program counter
     uint64_t                           exec_mask;     ///< active SIMD lanes at the moment sampling
     rocprofiler_dim3_t                 workgroup_id;  ///< wave coordinates within the workgroup
-    uint32_t                     wave_count;   /// active waves on the CU at the moment of sampling
-    uint64_t                     timestamp;    ///< timestamp when sample is generated
-    uint64_t                     dispatch_id;  ///< originating kernel dispatch ID
-    rocprofiler_correlation_id_t correlation_id;
+    uint32_t wave_count;   /// active waves on the CU at the moment of sampling
+    uint64_t timestamp;    ///< timestamp when sample is generated
+    uint64_t dispatch_id;  ///< originating kernel dispatch ID
+    rocprofiler_async_correlation_id_t correlation_id;
     rocprofiler_pc_sampling_snapshot_v0_t
         snapshot;  ///< @see ::rocprofiler_pc_sampling_snapshot_v0_t
     rocprofiler_pc_sampling_memory_counters_t

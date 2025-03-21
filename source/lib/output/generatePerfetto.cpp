@@ -379,7 +379,10 @@ write_perfetto(
                                   "operation",
                                   itr.operation,
                                   "corr_id",
-                                  itr.correlation_id.internal);
+                                  itr.correlation_id.internal,
+                                  "ancestor_id",
+                                  itr.correlation_id.ancestor);
+
                 TRACE_EVENT_END(
                     sdk::perfetto_category<sdk::category::hsa_api>::name, track, itr.end_timestamp);
                 tracing_session->FlushBlocking();
@@ -409,7 +412,10 @@ write_perfetto(
                                   "operation",
                                   itr.operation,
                                   "corr_id",
-                                  itr.correlation_id.internal);
+                                  itr.correlation_id.internal,
+                                  "ancestor_id",
+                                  itr.correlation_id.ancestor);
+
                 TRACE_EVENT_END(
                     sdk::perfetto_category<sdk::category::hip_api>::name, track, itr.end_timestamp);
                 tracing_session->FlushBlocking();
@@ -442,7 +448,9 @@ write_perfetto(
                                   "operation",
                                   itr.operation,
                                   "corr_id",
-                                  itr.correlation_id.internal);
+                                  itr.correlation_id.internal,
+                                  "ancestor_id",
+                                  itr.correlation_id.ancestor);
                 TRACE_EVENT_END(sdk::perfetto_category<sdk::category::marker_api>::name,
                                 track,
                                 itr.end_timestamp);
@@ -473,7 +481,9 @@ write_perfetto(
                                   "operation",
                                   itr.operation,
                                   "corr_id",
-                                  itr.correlation_id.internal);
+                                  itr.correlation_id.internal,
+                                  "ancestor_id",
+                                  itr.correlation_id.ancestor);
                 TRACE_EVENT_END(sdk::perfetto_category<sdk::category::rccl_api>::name,
                                 track,
                                 itr.end_timestamp);
@@ -504,7 +514,9 @@ write_perfetto(
                                   "operation",
                                   itr.operation,
                                   "corr_id",
-                                  itr.correlation_id.internal);
+                                  itr.correlation_id.internal,
+                                  "ancestor_id",
+                                  itr.correlation_id.ancestor);
                 TRACE_EVENT_END(sdk::perfetto_category<sdk::category::rocdecode_api>::name,
                                 track,
                                 itr.end_timestamp);
@@ -535,7 +547,9 @@ write_perfetto(
                                   "operation",
                                   itr.operation,
                                   "corr_id",
-                                  itr.correlation_id.internal);
+                                  itr.correlation_id.internal,
+                                  "ancestor_id",
+                                  itr.correlation_id.ancestor);
                 TRACE_EVENT_END(sdk::perfetto_category<sdk::category::rocjpeg_api>::name,
                                 track,
                                 itr.end_timestamp);

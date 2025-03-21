@@ -134,6 +134,15 @@ save(ArchiveT& ar, rocprofiler_correlation_id_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(internal);
     ROCP_SDK_SAVE_DATA_VALUE("external", external.value);
+    ROCP_SDK_SAVE_DATA_VALUE("ancestor", ancestor);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_async_correlation_id_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(internal);
+    ROCP_SDK_SAVE_DATA_VALUE("external", external.value);
 }
 
 template <typename ArchiveT>

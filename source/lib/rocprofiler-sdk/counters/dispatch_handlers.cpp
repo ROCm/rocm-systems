@@ -80,7 +80,7 @@ queue_cb(const context::context*                                         ctx,
     if(!is_enabled || !info->user_cb) return {no_instrumentation(), true};
 
     auto _corr_id_v =
-        rocprofiler_correlation_id_t{.internal = 0, .external = context::null_user_data};
+        rocprofiler_async_correlation_id_t{.internal = 0, .external = context::null_user_data};
     if(const auto* _corr_id = correlation_id)
     {
         _corr_id_v.internal = _corr_id->internal;

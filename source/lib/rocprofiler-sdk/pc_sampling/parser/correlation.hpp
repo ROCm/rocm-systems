@@ -49,8 +49,8 @@ namespace Parser
 {
 struct dispatch_correlation_ids_t
 {
-    rocprofiler_dispatch_id_t    dispatch_id;
-    rocprofiler_correlation_id_t correlation_id;
+    rocprofiler_dispatch_id_t          dispatch_id;
+    rocprofiler_async_correlation_id_t correlation_id;
 };
 
 /**
@@ -107,6 +107,14 @@ struct std::hash<Parser::DispatchPkt>
 
 namespace Parser
 {
+// 64B for performance reasons
+constexpr auto pcs_parser_sample_record_size = 64;
+static_assert(sizeof(generic_sample_t) == pcs_parser_sample_record_size);
+static_assert(sizeof(generic_sample_t) == sizeof(perf_sample_snapshot_v1));
+static_assert(sizeof(generic_sample_t) == sizeof(perf_sample_host_trap_v1));
+static_assert(sizeof(generic_sample_t) == sizeof(upcoming_samples_t));
+static_assert(sizeof(generic_sample_t) == sizeof(dispatch_pkt_id_t));
+
 /**
  * Coordinates DispatchMap and DoorBellMap to reconstruct the original correlation_id
  * from the correlation_id seen by the trap handler.
