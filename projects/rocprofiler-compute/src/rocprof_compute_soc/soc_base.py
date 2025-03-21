@@ -27,11 +27,13 @@ import math
 import os
 import re
 import shutil
+import threading
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import yaml
 
 from rocprof_compute_base import MI300_CHIP_IDS, SUPPORTED_ARCHS
@@ -42,6 +44,8 @@ from utils.utils import (
     console_log,
     convert_metric_id_to_panel_idx,
     demarcate,
+    get_default_accumulate_counter_file_ymal,
+    using_v3,
 )
 
 
@@ -317,6 +321,8 @@ class OmniSoC_Base:
             workload_dir,
             self.get_args().spatial_multiplexing,
             self.__section_counters,
+            self._mspec,
+            self.__arch,
         )
 
     # ----------------------------------------------------
@@ -364,7 +370,9 @@ class LimitedSet:
 # block limited according to perfmon config.
 class CounterFile:
     def __init__(self, name, perfmon_config) -> None:
-        self.file_name = name
+        name_no_extension = name.split(".")[0]
+        self.file_name_txt = name_no_extension + ".txt"
+        self.file_name_yaml = name_no_extension + ".yaml"
         self.blocks = {b: LimitedSet(v) for b, v in perfmon_config.items()}
 
     def add(self, counter) -> bool:
@@ -413,7 +421,13 @@ def parse_counters(config_text):
 
 @demarcate
 def perfmon_coalesce(
-    pmc_files_list, perfmon_config, workload_dir, spatial_multiplexing, section_counters
+    pmc_files_list,
+    perfmon_config,
+    workload_dir,
+    spatial_multiplexing,
+    section_counters,
+    mspec,
+    arch,
 ):
     """Sort and bucket all related performance counters to minimize required application passes"""
     workload_perfmon_dir = workload_dir + "/perfmon"
@@ -447,12 +461,6 @@ def perfmon_coalesce(
             else:
                 # Normal counters
                 for ctr in counters:
-
-                    # v3 doesn't seem to support this counter
-                    if using_v3():
-                        if ctr.startswith("TCC_BUBBLE"):
-                            continue
-
                     # Remove me later:
                     # v1 and v2 don't support these counters
                     if not using_v3():
@@ -554,7 +562,7 @@ def perfmon_coalesce(
             ctrs.append(accum_name)
 
         # Use the name of the accumulate counter as the file name
-        output_files.append(CounterFile(ctr_name + ".txt", perfmon_config))
+        output_files.append(CounterFile(ctr_name, perfmon_config))
         for ctr in ctrs:
             output_files[-1].add(ctr)
         accu_file_count += 1
@@ -647,32 +655,142 @@ def perfmon_coalesce(
     else:
         # Output to files
         for f in output_files:
-            file_name = str(Path(workload_perfmon_dir).joinpath(f.file_name))
+            file_name_txt = str(Path(workload_perfmon_dir).joinpath(f.file_name_txt))
+            file_name_yaml = str(Path(workload_perfmon_dir).joinpath(f.file_name_yaml))
 
             pmc = []
             for block_name in f.blocks.keys():
-                if not using_v3() and block_name == "TCC":
-                    # Expand and interleve the TCC channel counters
-                    # e.g.  TCC_HIT[0] TCC_ATOMIC[0] ... TCC_HIT[1] TCC_ATOMIC[1] ...
-                    channel_counters = []
-                    for ctr in f.blocks[block_name].elements:
-                        if "_expand" in ctr:
-                            channel_counters.append(ctr.split("_expand")[0])
-                    for i in range(0, perfmon_config["TCC_channels"]):
-                        for c in channel_counters:
-                            pmc.append("{}[{}]".format(c, i))
-                    # Handle the rest of the TCC counters
-                    for ctr in f.blocks[block_name].elements:
-                        if "_expand" not in ctr:
-                            pmc.append(ctr)
+                if block_name == "TCC":
+                    if using_v3():
+                        # TODO: implement mehcanisim for muti channel TCC counter for v3
+                        # Expand and interleve the TCC channel counters
+                        # e.g.  TCC_HIT[0] TCC_ATOMIC[0] ... TCC_HIT[1] TCC_ATOMIC[1] ...
+                        from utils.specs import total_xcds
+
+                        channel_counters = []
+                        xcds = total_xcds(mspec.gpu_model, mspec.compute_partition)
+                        tcc_channel_per_xcd = int(mspec._l2_banks)
+
+                        for ctr in f.blocks[block_name].elements:
+                            if "_sum" in ctr:
+                                channel_counters.append(ctr.split("_sum")[0])
+
+                        channel_counters = (
+                            pd.Series(channel_counters).drop_duplicates().to_list()
+                        )
+
+                        lock = threading.Lock()
+
+                        def generate_yaml_config_per_pmc(
+                            raw_counter_name,
+                            tcc_counter_1d_index,
+                            xcd_index,
+                            channel_index,
+                        ):
+                            # Ensure that the keys exist before trying to assign values
+                            yaml_data = {}
+                            if tcc_counter_1d_index not in yaml_data:
+                                yaml_data[tcc_counter_1d_index] = {
+                                    "architectures": {},
+                                    "description": "",
+                                }
+
+                            if (
+                                arch
+                                not in yaml_data[tcc_counter_1d_index]["architectures"]
+                            ):
+                                yaml_data[tcc_counter_1d_index]["architectures"][
+                                    arch
+                                ] = {}
+
+                            yaml_data[tcc_counter_1d_index]["architectures"][arch][
+                                "expression"
+                            ] = "select({},[DIMENSION_XCC=[{}], DIMENSION_INSTANCE=[{}]])".format(
+                                raw_counter_name, xcd_index, channel_index
+                            )
+                            yaml_data[tcc_counter_1d_index]["description"] = (
+                                "{} on {}th XCC and {}th channel".format(
+                                    raw_counter_name, xcd_index, channel_index
+                                )
+                            )
+
+                            lock.acquire()
+                            pmc.append(tcc_counter_1d_index)
+                            with open(file_name_yaml, "a") as file_yaml:
+                                yaml.dump(
+                                    yaml_data,
+                                    file_yaml,
+                                    default_flow_style=False,
+                                    allow_unicode=True,
+                                )
+                            lock.release()
+
+                        threads_edit_yaml = []
+
+                        for i in range(0, xcds):
+                            for j in range(0, tcc_channel_per_xcd):
+                                for c in channel_counters:
+                                    tcc_counter_1d_index = "{}[{}]".format(
+                                        c, (i * tcc_channel_per_xcd) + j
+                                    )
+
+                                    thread = threading.Thread(
+                                        target=generate_yaml_config_per_pmc,
+                                        args=[c, tcc_counter_1d_index, i, j],
+                                    )
+                                    threads_edit_yaml.append(thread)
+                                    thread.start()
+
+                        for thread in threads_edit_yaml:
+                            thread.join()
+
+                        # Handle the rest of the TCC counters
+                        for ctr in f.blocks[block_name].elements:
+                            if "_expand" not in ctr and "_sum" not in ctr:
+                                pmc.append(ctr)
+
+                    else:
+                        # Expand and interleve the TCC channel counters
+                        # e.g.  TCC_HIT[0] TCC_ATOMIC[0] ... TCC_HIT[1] TCC_ATOMIC[1] ...
+                        channel_counters = []
+                        for ctr in f.blocks[block_name].elements:
+                            if "_expand" in ctr:
+                                channel_counters.append(ctr.split("_expand")[0])
+                        for i in range(0, perfmon_config["TCC_channels"]):
+                            for c in channel_counters:
+                                pmc.append("{}[{}]".format(c, i))
+                        # Handle the rest of the TCC counters
+                        for ctr in f.blocks[block_name].elements:
+                            if "_expand" not in ctr:
+                                pmc.append(ctr)
+
                 else:
-                    for ctr in f.blocks[block_name].elements:
-                        pmc.append(ctr)
+                    if using_v3():
+                        yaml_global_config_dir = (
+                            get_default_accumulate_counter_file_ymal()
+                        )
+                        with open(yaml_global_config_dir, "r") as file_read:
+                            with open(file_name_yaml, "a") as file_out:
+                                dic_read = yaml.safe_load(file_read)
+                                for ctr in f.blocks[block_name].elements:
+                                    if ctr in dic_read:
+                                        section_to_dump = {ctr: dic_read[ctr]}
+                                        yaml.dump(
+                                            section_to_dump,
+                                            file_out,
+                                            default_flow_style=False,
+                                            allow_unicode=True,
+                                        )
+                                    pmc.append(ctr)
+
+                    else:
+                        for ctr in f.blocks[block_name].elements:
+                            pmc.append(ctr)
 
             stext = "pmc: " + " ".join(pmc)
 
             # Write counters to file
-            fd = open(file_name, "w")
+            fd = open(file_name_txt, "w")
             fd.write(stext + "\n\n")
             fd.write("gpu:\n")
             fd.write("range:\n")
