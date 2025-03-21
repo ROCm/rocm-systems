@@ -42,6 +42,7 @@ from pathlib import Path as path
 import pandas as pd
 
 import config
+from utils.mi_gpu_spec import get_mi300_num_xcds
 
 rocprof_cmd = ""
 rocprof_args = ""
@@ -686,7 +687,7 @@ def run_prof(
     if new_env and not using_v3():
         # flatten tcc for applicable mi300 input
         f = path(workload_dir + "/out/pmc_1/results_" + fbase + ".csv")
-        xcds = total_xcds(mspec.gpu_model, mspec.compute_partition)
+        xcds = get_mi300_num_xcds(mspec.gpu_model, mspec.compute_partition)
         df = flatten_tcc_info_across_xcds(f, xcds, int(mspec._l2_banks))
         df.to_csv(f, index=False)
 
@@ -835,6 +836,7 @@ def replace_timestamps(workload_dir):
 def gen_sysinfo(
     workload_name, workload_dir, ip_blocks, app_cmd, skip_roof, roof_only, mspec, soc
 ):
+    console_debug("[gen_sysinfo]")
     df = mspec.get_class_members()
 
     # Append workload information to machine specs
@@ -1051,47 +1053,58 @@ def flatten_tcc_info_across_xcds(file, xcds, tcc_channel_per_xcd):
     return df
 
 
-def total_xcds(archname, compute_partition):
+def total_xcds(gpu_model, compute_partition):
+    """
+    Returns the number of xcds for a gpu model and compute_partition pair.
+    """
+
+    # For mi300 chips, return result from mi_gpu_spec
+    result = get_mi300_num_xcds(gpu_model, compute_partition)
+    if result:
+        return result
+
+    # For other systems, use manual check
     # check MI300 has a valid compute partition
-    mi300a_archs = ["mi300a_a0", "mi300a_a1"]
-    mi300x_archs = ["mi300x_a0", "mi300x_a1"]
-    mi308x_archs = ["mi308x"]
+    mi300a_model = ["mi300a_a0", "mi300a_a1"]
+    mi300x_model = ["mi300x_a0", "mi300x_a1"]
+    mi308x_model = ["mi308x"]
     if (
-        archname.lower() in mi300a_archs + mi300x_archs + mi308x_archs
+        gpu_model.lower() in mi300a_model + mi300x_model + mi308x_model
         and compute_partition == "NA"
     ):
-        console_error("Invalid compute partition found for {}".format(archname))
-    if archname.lower() not in mi300a_archs + mi300x_archs + mi308x_archs:
+        console_error("Invalid compute partition found for {}".format(gpu_model))
+
+    if gpu_model.lower() not in mi300a_model + mi300x_model + mi308x_model:
         return 1
     # from the whitepaper
     # https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/white-papers/amd-cdna-3-white-paper.pdf
     if compute_partition.lower() == "spx":
-        if archname.lower() in mi300a_archs:
+        if gpu_model.lower() in mi300a_model:
             return 6
-        if archname.lower() in mi300x_archs:
+        if gpu_model.lower() in mi300x_model:
             return 8
-        if archname.lower() in mi308x_archs:
+        if gpu_model.lower() in mi308x_model:
             return 4
     if compute_partition.lower() == "tpx":
-        if archname.lower() in mi300a_archs:
+        if gpu_model.lower() in mi300a_model:
             return 2
     if compute_partition.lower() == "dpx":
-        if archname.lower() in mi300x_archs:
+        if gpu_model.lower() in mi300x_model:
             return 4
-        if archname.lower() in mi308x_archs:
+        if gpu_model.lower() in mi308x_model:
             return 2
     if compute_partition.lower() == "qpx":
-        if archname.lower() in mi300x_archs:
+        if gpu_model.lower() in mi300x_model:
             return 2
     if compute_partition.lower() == "cpx":
-        if archname.lower() in mi300x_archs:
-            return 2
-        if archname.lower() in mi308x_archs:
+        if gpu_model.lower() in mi300x_model:
+            return 1
+        if gpu_model.lower() in mi308x_model:
             return 1
     # TODO implement other archs here as needed
     console_error(
         "Unknown compute partition / arch found for {} / {}".format(
-            compute_partition, archname
+            compute_partition, gpu_model
         )
     )
 

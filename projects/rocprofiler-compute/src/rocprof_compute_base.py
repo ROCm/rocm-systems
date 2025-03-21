@@ -24,7 +24,6 @@
 
 import argparse
 import importlib
-import logging
 import os
 import shutil
 import socket
@@ -43,6 +42,10 @@ from utils.logger import (
     setup_file_handler,
     setup_logging_priority,
 )
+from utils.mi_gpu_spec import (
+    get_gpu_series_dict,
+    parse_mi_gpu_spec,
+)
 from utils.specs import MachineSpecs, generate_machine_specs
 from utils.utils import (
     console_debug,
@@ -56,21 +59,6 @@ from utils.utils import (
     get_version_display,
     set_locale_encoding,
 )
-
-SUPPORTED_ARCHS = {
-    "gfx906": {"mi50": ["MI50", "MI60"]},
-    "gfx908": {"mi100": ["MI100"]},
-    "gfx90a": {"mi200": ["MI210", "MI250", "MI250X"]},
-    "gfx940": {"mi300": ["MI300A_A0"]},
-    "gfx941": {"mi300": ["MI300X_A0"]},
-    "gfx942": {"mi300": ["MI300A_A1", "MI300X_A1"]},
-}
-
-MI300_CHIP_IDS = {
-    "29856": "MI300A_A1",
-    "29857": "MI300X_A1",
-    "29858": "MI308X",
-}
 
 
 class RocProfCompute:
@@ -87,7 +75,8 @@ class RocProfCompute:
             "ver_pretty": None,
         }
         self.__options = {}
-        self.__supported_archs = SUPPORTED_ARCHS
+        parse_mi_gpu_spec()
+        self.__supported_archs = get_gpu_series_dict()
         self.__mspec: MachineSpecs = None  # to be initalized in load_soc_specs()
         setup_console_handler()
         self.set_version()

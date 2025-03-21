@@ -27,6 +27,7 @@ import math
 import os
 import re
 import shutil
+import sys
 import threading
 from abc import ABC, abstractmethod
 from collections import OrderedDict
@@ -36,7 +37,7 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from rocprof_compute_base import MI300_CHIP_IDS, SUPPORTED_ARCHS
+from utils.mi_gpu_spec import get_gpu_model, get_gpu_series
 from utils.parser import build_in_vars, supported_denom
 from utils.utils import (
     console_debug,
@@ -45,6 +46,7 @@ from utils.utils import (
     convert_metric_id_to_panel_idx,
     demarcate,
     get_default_accumulate_counter_file_ymal,
+    total_xcds,
     using_v3,
 )
 
@@ -53,6 +55,7 @@ class OmniSoC_Base:
     def __init__(
         self, args, mspec
     ):  # new info field will contain rocminfo or sysinfo to populate properties
+        console_debug("[omnisoc init]")
         self.__args = args
         self.__arch = None
         self._mspec = mspec
@@ -102,7 +105,8 @@ class OmniSoC_Base:
 
     @demarcate
     def populate_mspec(self):
-        from utils.specs import run, search, total_sqc, total_xcds
+        console_debug("[populate_mspec]")
+        from utils.specs import run, search, total_sqc
 
         if not hasattr(self._mspec, "_rocminfo") or self._mspec._rocminfo is None:
             return
@@ -151,11 +155,6 @@ class OmniSoC_Base:
                 self._mspec.workgroup_max_size = key
                 continue
 
-            key = search(r"^\s*Chip ID:\s+ ([a-zA-Z0-9]+)\s*", linetext)
-            if key != None:
-                self._mspec.chip_id = key
-                continue
-
             key = search(r"^\s*Max Waves Per CU:\s+ ([a-zA-Z0-9]+)\s*", linetext)
             if key != None:
                 self._mspec.max_waves_per_cu = key
@@ -182,18 +181,11 @@ class OmniSoC_Base:
         self._mspec.cur_sclk = self._mspec.max_sclk
         self._mspec.cur_mclk = self._mspec.max_mclk
 
-        self._mspec.gpu_series = list(SUPPORTED_ARCHS[self._mspec.gpu_arch].keys())[
-            0
-        ].upper()
-        # specify gpu name for gfx942 hardware
-        self._mspec.gpu_model = list(SUPPORTED_ARCHS[self._mspec.gpu_arch].keys())[
-            0
-        ].upper()
-        if self._mspec.gpu_model == "MI300":
-            # Use Chip ID to distinguish MI300 gpu model using the built-in dictionary
-            if self._mspec.chip_id in MI300_CHIP_IDS:
-                self._mspec.gpu_model = MI300_CHIP_IDS[self._mspec.chip_id]
-
+        self._mspec.gpu_series = get_gpu_series(self._mspec.gpu_arch).upper()
+        # specify gpu model name for gfx942 hardware
+        self._mspec.gpu_model = get_gpu_model(
+            self._mspec.gpu_arch, self._mspec.gpu_chip_id
+        ).upper()
         self._mspec.num_xcd = str(
             total_xcds(self._mspec.gpu_model, self._mspec.compute_partition)
         )
@@ -593,7 +585,8 @@ def perfmon_coalesce(
         # TODO: more error checking
         if len(spatial_multiplexing) != 3:
             console_error(
-                "profiling", "multiplexing need provide node_idx node_count and gpu_count"
+                "profiling",
+                "multiplexing need provide node_idx node_count and gpu_count",
             )
 
         node_idx = int(spatial_multiplexing[0])
