@@ -40,13 +40,19 @@ set(ROCPROFILER_MEMCHECK_TYPES "ThreadSanitizer" "AddressSanitizer"
                                "UndefinedBehaviorSanitizer")
 
 if(ROCPROFILER_MEMCHECK AND ROCPROFILER_MEMCHECK IN_LIST ROCPROFILER_MEMCHECK_TYPES)
-    set(IS_SANITIZER ON)
+    set(IS_DISABLED ON)
 else()
-    set(IS_SANITIZER OFF)
+    set(IS_DISABLED OFF)
 endif()
 
 find_package(Threads REQUIRED)
 find_package(rocprofiler-sdk-roctx REQUIRED)
+
+# disable when GPU-0 is navi2, navi3, and navi4
+list(GET rocprofiler-sdk-samples-gfx-info 0 openmp-tools-gpu-0-gfx-info)
+if("${openmp-tools-gpu-0-gfx-info}" MATCHES "^gfx(10|11|12)[0-9][0-9]$")
+    set(IS_DISABLED ON)
+endif()
 
 add_executable(openmp-target-sample)
 target_sources(openmp-target-sample PRIVATE main.cpp)
@@ -86,4 +92,4 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                DISABLED
-               "${IS_SANITIZER}")
+               "${IS_DISABLED}")

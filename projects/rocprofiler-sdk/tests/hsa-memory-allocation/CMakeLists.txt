@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
 project(
-    rocprofiler-tests-memory-allocation-tracing
+    rocprofiler-sdk-tests-memory-allocation-tracing
     LANGUAGES CXX
     VERSION 0.0.0)
 

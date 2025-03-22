@@ -1,7 +1,7 @@
 #
 #
 #
-project(rocprofiler-tests-buffering LANGUAGES C CXX)
+project(rocprofiler-sdk-tests-buffering LANGUAGES C CXX)
 
 include(GoogleTest)
 

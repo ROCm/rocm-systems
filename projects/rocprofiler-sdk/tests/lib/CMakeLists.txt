@@ -3,7 +3,7 @@
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
-project(rocprofiler-tests-lib LANGUAGES C CXX)
+project(rocprofiler-sdk-tests-lib LANGUAGES C CXX)
 
 set(CMAKE_BUILD_RPATH "\$ORIGIN:\$ORIGIN/../lib")
 

@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
 project(
-    rocprofiler-tests-rocprofv3-att
+    rocprofiler-sdk-tests-rocprofv3-att
     LANGUAGES CXX
     VERSION 0.0.0)
 
@@ -17,8 +17,6 @@ rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.p
 find_package(rocprofiler-sdk REQUIRED)
 
 # hsa multiqueue dependency test
-
-message("Add  rocprofv3-test-hsa-multiqueue-att-cmd-env-ld-lib-path-execute")
 
 add_test(
     NAME rocprofv3-test-hsa-multiqueue-att-cmd-env-ld-lib-path-execute

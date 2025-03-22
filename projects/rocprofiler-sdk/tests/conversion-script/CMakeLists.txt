@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
 project(
-    rocprofiler-tests-conversion-script
+    rocprofiler-sdk-tests-conversion-script
     LANGUAGES CXX
     VERSION 0.0.0)
 

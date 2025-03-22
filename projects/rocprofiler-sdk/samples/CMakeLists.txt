@@ -20,6 +20,12 @@ set(CMAKE_INSTALL_LIBDIR "lib")
 enable_testing()
 include(CTest)
 
+# generally needed
+find_package(rocprofiler-sdk REQUIRED)
+
+# get the gfx architectures that are present on the system
+rocprofiler_sdk_get_gfx_architectures(rocprofiler-sdk-samples-gfx-info ECHO)
+
 # common utilities for samples
 add_subdirectory(common)
 

@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
 project(
-    rocprofiler-tests-openmp-tools
+    rocprofiler-sdk-tests-openmp-tools
     LANGUAGES CXX
     VERSION 0.0.0)
 
@@ -26,9 +26,15 @@ set(ROCPROFILER_MEMCHECK_TYPES "ThreadSanitizer" "AddressSanitizer"
                                "UndefinedBehaviorSanitizer")
 
 if(ROCPROFILER_MEMCHECK AND ROCPROFILER_MEMCHECK IN_LIST ROCPROFILER_MEMCHECK_TYPES)
-    set(IS_SANITIZER ON)
+    set(IS_DISABLED ON)
 else()
-    set(IS_SANITIZER OFF)
+    set(IS_DISABLED OFF)
+endif()
+
+# disable when GPU-0 is navi2, navi3, and navi4
+list(GET rocprofiler-sdk-tests-gfx-info 0 openmp-tools-gpu-0-gfx-info)
+if("${openmp-tools-gpu-0-gfx-info}" MATCHES "^gfx(10|11|12)[0-9][0-9]$")
+    set(IS_DISABLED ON)
 endif()
 
 add_test(NAME test-openmp-tools-execute COMMAND $<TARGET_FILE:openmp-target>)
@@ -54,7 +60,7 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                DISABLED
-               "${IS_SANITIZER}")
+               "${IS_DISABLED}")
 
 # copy to binary directory
 rocprofiler_configure_pytest_files(COPY validate.py conftest.py CONFIG pytest.ini)
@@ -75,4 +81,4 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                DISABLED
-               "${IS_SANITIZER}")
+               "${IS_DISABLED}")

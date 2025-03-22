@@ -780,7 +780,7 @@ class PerfettoReader:
             #         f"{_stack_id} already exists in track_id_dict[{_tp_index}][{_rank}][{_thread}]. failed to set:\n  {hnode.frame} (current)\n    {_existing.frame} (existing)"
             #     )
 
-            _hash = hash((_tp_index, _slice_id))
+            _hash = hash((_tp_index, _slice_id, _track_id))
             if _hash in callpath_to_node:
                 raise ValueError(f"{_hash} already exists in callpath_to_node dict")
 

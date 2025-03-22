@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
 project(
-    rocprofiler-tests-async-copy-tracing
+    rocprofiler-sdk-tests-async-copy-tracing
     LANGUAGES CXX
     VERSION 0.0.0)
 
