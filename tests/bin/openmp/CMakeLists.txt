@@ -19,7 +19,7 @@ if(NOT OMP_TARGET_COMPILER)
     endif()
 endif()
 
-project(rocprofiler-tests-bin-openmp LANGUAGES CXX)
+project(rocprofiler-sdk-tests-bin-openmp LANGUAGES CXX)
 
 find_package(rocprofiler-sdk REQUIRED)
 

@@ -3,7 +3,7 @@
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
-project(rocprofiler-tests-bin LANGUAGES C CXX)
+project(rocprofiler-sdk-tests-bin LANGUAGES C CXX)
 
 set(CMAKE_BUILD_RPATH
     "\$ORIGIN:\$ORIGIN/../lib:$<TARGET_FILE_DIR:rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library>"

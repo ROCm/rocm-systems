@@ -17,7 +17,7 @@ if(NOT CMAKE_HIP_COMPILER)
     endif()
 endif()
 
-project(rocprofiler-tests-bin-multistream LANGUAGES CXX HIP)
+project(rocprofiler-sdk-tests-bin-multistream LANGUAGES CXX HIP)
 
 foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
     if("${CMAKE_HIP_FLAGS_${_TYPE}}" STREQUAL "")

@@ -17,7 +17,7 @@ if(NOT CMAKE_HIP_COMPILER)
     endif()
 endif()
 
-project(rocprofiler-tests-bin-reproducible-runtime LANGUAGES CXX HIP)
+project(rocprofiler-sdk-tests-bin-reproducible-runtime LANGUAGES CXX HIP)
 
 if(NOT CMAKE_BUILD_TYPE MATCHES "(Release|RelWithDebInfo)")
     set(CMAKE_BUILD_TYPE "RelWithDebInfo")

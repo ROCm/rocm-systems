@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
 project(
-    rocprofiler-tests-pc-sampling
+    rocprofiler-sdk-tests-pc-sampling-host-trap-exec-mask-manipulation
     LANGUAGES CXX
     VERSION 0.0.0)
 

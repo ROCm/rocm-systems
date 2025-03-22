@@ -149,6 +149,7 @@ find_package_handle_standard_args(
 
 if(EXISTS ${@PACKAGE_NAME@_CMAKE_DIR}/Modules)
     list(APPEND CMAKE_MODULE_PATH ${@PACKAGE_NAME@_CMAKE_DIR}/Modules)
+    include(rocprofiler-sdk-utilities)
 endif()
 
 add_executable(@PACKAGE_NAME@::convert-counters-collection-format IMPORTED)
