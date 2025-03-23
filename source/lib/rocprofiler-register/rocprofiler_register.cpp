@@ -56,6 +56,27 @@ extern "C" {
 #pragma weak rocprofiler_register_import_roctx
 #pragma weak rocprofiler_register_import_roctx_static
 
+typedef struct rocprofiler_client_id_t
+{
+    const char*    name;    ///< clients should set this value for debugging
+    const uint32_t handle;  ///< internal handle
+} rocprofiler_client_id_t;
+
+typedef void (*rocprofiler_client_finalize_t)(rocprofiler_client_id_t);
+
+typedef int (*rocprofiler_tool_initialize_t)(rocprofiler_client_finalize_t finalize_func,
+                                             void*                         tool_data);
+
+typedef void (*rocprofiler_tool_finalize_t)(void* tool_data);
+
+typedef struct rocprofiler_tool_configure_result_t
+{
+    size_t                        size;        ///< in case of future extensions
+    rocprofiler_tool_initialize_t initialize;  ///< context creation
+    rocprofiler_tool_finalize_t   finalize;    ///< cleanup
+    void* tool_data;  ///< data to provide to init and fini callbacks
+} rocprofiler_tool_configure_result_t;
+
 extern rocprofiler_tool_configure_result_t*
 rocprofiler_configure(uint32_t, const char*, uint32_t, rocprofiler_client_id_t*);
 
