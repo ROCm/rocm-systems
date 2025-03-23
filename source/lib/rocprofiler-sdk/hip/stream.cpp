@@ -34,12 +34,14 @@
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
+#include "rocprofiler-sdk/hip/compiler_api_id.h"
 
 #include <rocprofiler-sdk/buffer.h>
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hip/runtime_api_id.h>
 #include <rocprofiler-sdk/hip/table_id.h>
+#include <rocprofiler-sdk/cxx/utility.hpp>
 
 #include <hip/driver_types.h>
 #include <hip/hip_runtime_api.h>
@@ -79,16 +81,26 @@ add_stream(hipStream_t stream)
 {
     return get_stream_map()->wlock(
         [](stream_map_t& _data, hipStream_t _stream) {
-            if(_data.count(_stream) == 0)
+            static uint64_t idx_offset = 0;
+
+            auto idx = _data.size() + idx_offset;
+            ROCP_INFO << fmt::format(
+                "hipStream_t={} :: id={}.handle={}{}", static_cast<void*>(_stream), '{', idx, '}');
+
+            ROCP_CI_LOG_IF(WARNING, idx == 0 && _stream != nullptr)
+                << "null hip stream does not have index 0";
+
+            if(!_data.emplace(_stream, rocprofiler_stream_id_t{.handle = idx}).second)
             {
-                auto idx = _data.size();
-                ROCP_INFO << fmt::format("hipStream_t={} :: id={}.handle={}{}",
-                                         static_cast<void*>(_stream),
-                                         '{',
-                                         idx,
-                                         '}');
-                _data.emplace(_stream, rocprofiler_stream_id_t{.handle = idx});
+                idx_offset += 1;
+                auto _existing = _data.at(_stream);
+                ROCP_INFO << "existing hipStream_t ("
+                          << sdk::utility::as_hex(static_cast<void*>(_stream))
+                          << ") reallocated. rocprofiler_stream_id_t{.handle = " << _existing.handle
+                          << "} -> rocprofiler_stream_id_t{.handle = " << idx << "}";
+                _data.at(_stream) = rocprofiler_stream_id_t{.handle = idx};
             }
+
             return _data.at(_stream);
         },
         stream);
@@ -353,13 +365,16 @@ enable_stream_stack()
 
     for(const auto& itr : context::get_registered_contexts())
     {
-        if(itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY) ||
-           itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API) ||
-           itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API) ||
-           itr->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_STREAM_API) ||
-           itr->is_tracing(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY) ||
-           itr->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API) ||
-           itr->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API))
+        if(itr->is_tracing_one_of(ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY,
+                                  ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
+                                  ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
+                                  ROCPROFILER_CALLBACK_TRACING_HIP_STREAM_API,
+                                  ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
+                                  ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API,
+                                  ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API,
+                                  ROCPROFILER_BUFFER_TRACING_HIP_STREAM_API,
+                                  ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT,
+                                  ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT))
             return true;
     }
 
@@ -371,8 +386,9 @@ enable_compiler_stream_stack()
 {
     for(const auto& itr : context::get_registered_contexts())
     {
-        if(itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API) ||
-           itr->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API))
+        if(itr->is_tracing_one_of(ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
+                                  ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API,
+                                  ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT))
             return true;
     }
 
@@ -399,6 +415,11 @@ update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
         ROCP_TRACE << "updating table entry for " << _info.name;
 
         constexpr auto num_args = function_args_type::size();
+        constexpr auto is_hip_pop_call_config_func =
+            std::is_same<decltype(info_type::operation_idx),
+                         rocprofiler_hip_compiler_api_id_t>::value &&
+            (static_cast<rocprofiler_hip_compiler_api_id_t>(info_type::operation_idx) ==
+             ROCPROFILER_HIP_COMPILER_API_ID___hipPopCallConfiguration);
 
         if constexpr(common::mpl::is_one_of<hipStream_t, function_args_type>::value)
         {
@@ -430,14 +451,17 @@ update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
                  ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamDestroy);
             if constexpr(is_hip_destroy_func)
             {
+                ROCP_INFO << _info.name << " has been designated as a stream destroy function";
                 _func = create_destroy_functor<TableIdx, OpIdx>(_func);
             }
             else
             {
+                ROCP_INFO << _info.name << " has been designated as a stream set function";
                 _func = create_read_functor<TableIdx, OpIdx>(_func);
             }
         }
-        else if constexpr(common::mpl::is_one_of<hipStream_t*, function_args_type>::value)
+        else if constexpr(common::mpl::is_one_of<hipStream_t*, function_args_type>::value &&
+                          !is_hip_pop_call_config_func)
         {
             constexpr auto stream_idx =
                 common::mpl::index_of<hipStream_t*, function_args_type>::value;
@@ -456,6 +480,8 @@ update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
                 if(!enable_compiler_stream_stack()) return;
             }
 
+            ROCP_INFO << _info.name << " has been designated as a stream create function";
+
             // 1. get the sub-table containing the function pointer in original table
             // 2. get reference to function pointer in sub-table in original table
             // 3. update function pointer with wrapper
@@ -464,6 +490,9 @@ update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
             _func        = create_write_functor<TableIdx, OpIdx>(_func);
         }
     }
+
+    // suppress unused-but-set-parameter warning
+    common::consume_args(_orig);
 }
 
 template <size_t TableIdx, typename Tp, size_t OpIdx, size_t... OpIdxTail>

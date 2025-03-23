@@ -68,7 +68,7 @@ write_perfetto(
     const output_config&                                                       ocfg,
     const metadata&                                                            tool_metadata,
     std::vector<agent_info>                                                    agent_data,
-    const generator<rocprofiler_buffer_tracing_hip_api_record_t>&              hip_api_gen,
+    const generator<rocprofiler_buffer_tracing_hip_api_ext_record_t>&          hip_api_gen,
     const generator<rocprofiler_buffer_tracing_hsa_api_record_t>&              hsa_api_gen,
     const generator<tool_buffer_tracing_kernel_dispatch_with_stream_record_t>& kernel_dispatch_gen,
     const generator<tool_buffer_tracing_memory_copy_with_stream_record_t>&     memory_copy_gen,

@@ -36,20 +36,22 @@ namespace hip
 template <>
 struct hip_domain_info<ROCPROFILER_HIP_TABLE_ID_LAST>
 {
-    using args_type          = rocprofiler_hip_api_args_t;
-    using retval_type        = rocprofiler_hip_api_retval_t;
-    using callback_data_type = rocprofiler_callback_tracing_hip_api_data_t;
-    using buffered_data_type = rocprofiler_buffer_tracing_hip_api_record_t;
+    using args_type              = rocprofiler_hip_api_args_t;
+    using retval_type            = rocprofiler_hip_api_retval_t;
+    using callback_data_type     = rocprofiler_callback_tracing_hip_api_data_t;
+    using buffered_data_type     = rocprofiler_buffer_tracing_hip_api_record_t;
+    using buffered_ext_data_type = rocprofiler_buffer_tracing_hip_api_ext_record_t;
 };
 
 template <>
 struct hip_domain_info<ROCPROFILER_HIP_TABLE_ID_Runtime>
 : hip_domain_info<ROCPROFILER_HIP_TABLE_ID_LAST>
 {
-    static constexpr auto callback_domain_idx = ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API;
-    static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API;
-    static constexpr auto none                = ROCPROFILER_HIP_RUNTIME_API_ID_NONE;
-    static constexpr auto last                = ROCPROFILER_HIP_RUNTIME_API_ID_LAST;
+    static constexpr auto callback_domain_idx     = ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API;
+    static constexpr auto buffered_domain_idx     = ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API;
+    static constexpr auto buffered_ext_domain_idx = ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT;
+    static constexpr auto none                    = ROCPROFILER_HIP_RUNTIME_API_ID_NONE;
+    static constexpr auto last                    = ROCPROFILER_HIP_RUNTIME_API_ID_LAST;
     static constexpr auto external_correlation_id_domain_idx =
         ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HIP_RUNTIME_API;
 };
@@ -58,10 +60,11 @@ template <>
 struct hip_domain_info<ROCPROFILER_HIP_TABLE_ID_Compiler>
 : hip_domain_info<ROCPROFILER_HIP_TABLE_ID_LAST>
 {
-    static constexpr auto callback_domain_idx = ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API;
-    static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API;
-    static constexpr auto none                = ROCPROFILER_HIP_COMPILER_API_ID_NONE;
-    static constexpr auto last                = ROCPROFILER_HIP_COMPILER_API_ID_LAST;
+    static constexpr auto callback_domain_idx     = ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API;
+    static constexpr auto buffered_domain_idx     = ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API;
+    static constexpr auto buffered_ext_domain_idx = ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT;
+    static constexpr auto none                    = ROCPROFILER_HIP_COMPILER_API_ID_NONE;
+    static constexpr auto last                    = ROCPROFILER_HIP_COMPILER_API_ID_LAST;
     static constexpr auto external_correlation_id_domain_idx =
         ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HIP_COMPILER_API;
 };

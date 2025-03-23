@@ -214,7 +214,16 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_BUFFER_TRACING_ROCDECODE_API,   ///< rocDecode tracing
     ROCPROFILER_BUFFER_TRACING_ROCJPEG_API,     ///< rocJPEG tracing
     ROCPROFILER_BUFFER_TRACING_HIP_STREAM_API,  ///< Display HIP Stream
+    ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT,
+    ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT,
     ROCPROFILER_BUFFER_TRACING_LAST,
+
+    /// @var ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT
+    /// @brief Similar to ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API except the buffer record
+    /// contains the function argument(s) and return value
+    /// @var ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT
+    /// @brief Similar to ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API except the buffer record
+    /// contains the function argument(s) and return value
 } rocprofiler_buffer_tracing_kind_t;
 
 /**

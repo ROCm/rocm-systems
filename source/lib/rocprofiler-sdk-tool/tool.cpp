@@ -541,12 +541,12 @@ hip_stream_display_callback(rocprofiler_callback_tracing_record_t record,
     // STREAM_HANDLE_CREATE and DESTROY are no-ops
     if(record.operation == ROCPROFILER_HIP_STREAM_CREATE)
     {
-        ROCP_INFO
+        ROCP_TRACE
             << "Entered hip_stream_display_callback function for ROCPROFILER_HIP_STREAM_CREATE";
     }
     else if(record.operation == ROCPROFILER_HIP_STREAM_DESTROY)
     {
-        ROCP_INFO
+        ROCP_TRACE
             << "Entered hip_stream_display_callback function for ROCPROFILER_HIP_STREAM_DESTROY";
     }
     else if(record.operation == ROCPROFILER_HIP_STREAM_SET)
@@ -554,15 +554,15 @@ hip_stream_display_callback(rocprofiler_callback_tracing_record_t record,
         // Push the stream ID onto the stream stack when before underlying HIP function is called
         if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
         {
-            ROCP_INFO << "Entered hip_stream_display_callback function for "
-                         "ROCPROFILER_HIP_STREAM_SET with ROCPROFILER_CALLBACK_PHASE_ENTER";
+            ROCP_TRACE << "Entered hip_stream_display_callback function for "
+                          "ROCPROFILER_HIP_STREAM_SET with ROCPROFILER_CALLBACK_PHASE_ENTER";
             rocprofiler::tool::stream::push_stream_id(stream_id);
         }
         // Pop stream ID off of stream stack after underlying HIP function is completed
         else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
         {
-            ROCP_INFO << "Entered hip_stream_display_callback function for "
-                         "ROCPROFILER_HIP_STREAM_SET with ROCPROFILER_CALLBACK_PHASE_EXIT";
+            ROCP_TRACE << "Entered hip_stream_display_callback function for "
+                          "ROCPROFILER_HIP_STREAM_SET with ROCPROFILER_CALLBACK_PHASE_EXIT";
             rocprofiler::tool::stream::pop_stream_id();
         }
     }
@@ -948,11 +948,11 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
 
                 tool::write_ring_buffer(*record, domain_type::SCRATCH_MEMORY);
             }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API ||
-                    header->kind == ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API)
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT ||
+                    header->kind == ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT)
             {
                 auto* record =
-                    static_cast<rocprofiler_buffer_tracing_hip_api_record_t*>(header->payload);
+                    static_cast<rocprofiler_buffer_tracing_hip_api_ext_record_t*>(header->payload);
 
                 tool::write_ring_buffer(*record, domain_type::HIP);
             }
@@ -979,9 +979,17 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
             }
             else
             {
-                ROCP_FATAL << fmt::format(
-                    "unsupported category + kind: {} + {}", header->category, header->kind);
+                ROCP_CI_LOG(WARNING) << fmt::format(
+                    "unsupported ROCPROFILER_BUFFER_CATEGORY_TRACING kind: {} :: {}",
+                    header->kind,
+                    tool_metadata->get_kind_name(
+                        static_cast<rocprofiler_buffer_tracing_kind_t>(header->kind)));
             }
+        }
+        else
+        {
+            ROCP_CI_LOG(WARNING) << fmt::format(
+                "unsupported category + kind: {} + {}", header->category, header->kind);
         }
     }
 }
@@ -1682,7 +1690,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         {
             ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
                                  get_client_ctx(),
-                                 ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API,
+                                 ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT,
                                  nullptr,
                                  0,
                                  get_buffers().hip_api_trace),
@@ -1693,7 +1701,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         {
             ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
                                  get_client_ctx(),
-                                 ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API,
+                                 ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT,
                                  nullptr,
                                  0,
                                  get_buffers().hip_api_trace),

@@ -25,6 +25,7 @@
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/defines.h>
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/hip/api_args.h>
 #include <rocprofiler-sdk/kfd/page_migration_args.h>
 
 #include <stdint.h>
@@ -84,7 +85,30 @@ typedef struct
 } rocprofiler_buffer_tracing_hip_api_record_t;
 
 /**
- * @brief Additional trace data for OMPT target routines
+ * @brief ROCProfiler Buffer HIP API Tracer Record.
+ */
+typedef struct
+{
+    uint64_t                          size;  ///< size of this struct
+    rocprofiler_buffer_tracing_kind_t kind;
+    rocprofiler_tracing_operation_t   operation;
+    rocprofiler_correlation_id_t      correlation_id;   ///< correlation ids for record
+    rocprofiler_timestamp_t           start_timestamp;  ///< start time in nanoseconds
+    rocprofiler_timestamp_t           end_timestamp;    ///< end time in nanoseconds
+    rocprofiler_thread_id_t           thread_id;        ///< id for thread generating this record
+    rocprofiler_hip_api_args_t        args;             ///< arguments of function call
+    rocprofiler_hip_api_retval_t      retval;           ///< return value of function call
+
+    /// @var kind
+    /// @brief ::ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API or
+    /// ::ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API
+    /// @var operation
+    /// @brief Specification of the API function, e.g., ::rocprofiler_hip_runtime_api_id_t or
+    /// ::rocprofiler_hip_compiler_api_id_t
+} rocprofiler_buffer_tracing_hip_api_ext_record_t;
+
+/**
+ * @brief Additional trace data for OpenMP target routines
  */
 
 typedef struct rocprofiler_buffer_tracing_ompt_target_t
@@ -493,6 +517,53 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
     rocprofiler_buffer_tracing_kind_t              kind,
     rocprofiler_buffer_tracing_kind_operation_cb_t callback,
     void*                                          data) ROCPROFILER_API ROCPROFILER_NONNULL(2);
+
+/**
+ * @brief Callback function for iterating over the function arguments to a traced function.
+ * This function will be invoked for each argument.
+ * @see rocprofiler_iterate_buffer_tracing_record_args
+ *
+ * @param [in] kind domain
+ * @param [in] operation associated domain operation
+ * @param [in] arg_number the argument number, starting at zero
+ * @param [in] arg_value_addr the address of the argument stored by rocprofiler.
+ * @param [in] arg_indirection_count the total number of indirection levels for the argument, e.g.
+ * int == 0, int* == 1, int** == 2
+ * @param [in] arg_type the typeid name of the argument (not demangled)
+ * @param [in] arg_name the name of the argument in the prototype (or rocprofiler union)
+ * @param [in] arg_value_str conversion of the argument to a string, e.g. operator<< overload
+ * @param [in] data user data
+ */
+typedef int (*rocprofiler_buffer_tracing_operation_args_cb_t)(
+    rocprofiler_buffer_tracing_kind_t kind,
+    rocprofiler_tracing_operation_t   operation,
+    uint32_t                          arg_number,
+    const void* const                 arg_value_addr,
+    int32_t                           arg_indirection_count,
+    const char*                       arg_type,
+    const char*                       arg_name,
+    const char*                       arg_value_str,
+    void*                             data);
+
+/**
+ * @brief Iterates over all the arguments for the traced function (when available). This is
+ * particularly useful when tools want to annotate traces with the function arguments. See
+ * @example samples/api_buffer_tracing/client.cpp for a usage example.
+ *
+ * In contrast to ::rocprofiler_iterate_callback_tracing_kind_operation_args, this function
+ * cannot dereference pointer arguments since there is a high probability that the pointer
+ * address references the stack and the buffer tracing record is delivered after the
+ * stack variables of the corresponding function have been destroyed.
+ *
+ * @param[in] record Buffer record
+ * @param[in] callback The callback function which will be invoked for each argument
+ * @param[in] user_data Data to be passed to each invocation of the callback
+ */
+rocprofiler_status_t
+rocprofiler_iterate_buffer_tracing_record_args(
+    rocprofiler_record_header_t                    record,
+    rocprofiler_buffer_tracing_operation_args_cb_t callback,
+    void* user_data) ROCPROFILER_API ROCPROFILER_NONNULL(2);
 
 /** @} */
 

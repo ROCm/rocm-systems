@@ -93,9 +93,13 @@
             return &base_type::functor<RetT, Args...>;                                             \
         }                                                                                          \
                                                                                                    \
-        static std::vector<void*> as_arg_addr(callback_data_type) { return std::vector<void*>{}; } \
+        static std::vector<void*> as_arg_addr(rocprofiler_hip_api_args_t)                          \
+        {                                                                                          \
+            return std::vector<void*>{};                                                           \
+        }                                                                                          \
                                                                                                    \
-        static std::vector<common::stringified_argument> as_arg_list(callback_data_type, int32_t)  \
+        static std::vector<common::stringified_argument> as_arg_list(rocprofiler_hip_api_args_t,   \
+                                                                     int32_t)                      \
         {                                                                                          \
             return {};                                                                             \
         }                                                                                          \
@@ -177,17 +181,16 @@
             return common::mpl::function_args_t<func_t>{};                                         \
         }                                                                                          \
                                                                                                    \
-        static std::vector<void*> as_arg_addr(callback_data_type trace_data)                       \
+        static std::vector<void*> as_arg_addr(rocprofiler_hip_api_args_t args)                     \
         {                                                                                          \
             return std::vector<void*>{                                                             \
-                GET_ADDR_MEMBER_FIELDS(get_api_data_args(trace_data.args), __VA_ARGS__)};          \
+                GET_ADDR_MEMBER_FIELDS(get_api_data_args(args), __VA_ARGS__)};                     \
         }                                                                                          \
                                                                                                    \
-        static auto as_arg_list(callback_data_type trace_data, int32_t max_deref)                  \
+        static auto as_arg_list(rocprofiler_hip_api_args_t args, int32_t max_deref)                \
         {                                                                                          \
             return utils::stringize(                                                               \
-                max_deref,                                                                         \
-                GET_NAMED_MEMBER_FIELDS(get_api_data_args(trace_data.args), __VA_ARGS__));         \
+                max_deref, GET_NAMED_MEMBER_FIELDS(get_api_data_args(args), __VA_ARGS__));         \
         }                                                                                          \
     };                                                                                             \
     }                                                                                              \

@@ -135,6 +135,12 @@ struct context
 
     template <typename KindT>
     bool is_tracing(KindT _kind) const;
+
+    template <typename... Args>
+    bool is_tracing_one_of(Args... _args) const
+    {
+        return ((false || is_tracing(_args)), ...);
+    }
 };
 
 // set the client index needs to be called before allocate_context()
