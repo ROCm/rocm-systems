@@ -168,6 +168,11 @@ struct async_copy_data
     buffered_data_t get_buffered_record(const context_t* _ctx,
                                         timestamp_t      _beg = 0,
                                         timestamp_t      _end = 0) const;
+
+    auto get_lock() { return std::make_unique<std::unique_lock<std::mutex>>(m_mtx); }
+
+private:
+    std::mutex m_mtx = {};
 };
 
 async_copy_data::callback_data_t
@@ -347,11 +352,21 @@ async_copy_handler(hsa_signal_value_t signal_value, void* arg)
 
     auto  ts               = common::timestamp_ns();
     auto* _data            = static_cast<async_copy_data*>(arg);
+    auto  _lk              = _data->get_lock();
     auto  copy_time        = hsa_amd_profiling_async_copy_time_t{};
     auto  copy_time_status = get_amd_ext_table()->hsa_amd_profiling_get_async_copy_time_fn(
         _data->rocp_signal, &copy_time);
 
     auto _profile_time = tracing::profiling_time{copy_time_status, copy_time.start, copy_time.end};
+
+    // we need to decrement this reference count at the end of the functions
+    auto* _corr_id = _data->correlation_id;
+    auto  _dtor    = common::scope_destructor{[&_lk, &_data, &_corr_id]() {
+        _lk.reset();  // reset the unique_ptr so the lock is released
+        delete _data;
+
+        if(_corr_id) _corr_id->sub_ref_count();
+    }};
 
     if(_profile_time.status == HSA_STATUS_SUCCESS)
     {
@@ -375,8 +390,6 @@ async_copy_handler(hsa_signal_value_t signal_value, void* arg)
 
     // get the contexts that were active when the signal was created
     const auto& tracing_data = _data->tracing_data;
-    // we need to decrement this reference count at the end of the functions
-    auto* _corr_id = _data->correlation_id;
 
     if(_profile_time.status == HSA_STATUS_SUCCESS && !tracing_data.empty())
     {
@@ -431,9 +444,6 @@ async_copy_handler(hsa_signal_value_t signal_value, void* arg)
     }
 
     ROCP_HSA_TABLE_CALL(ERROR, get_core_table()->hsa_signal_destroy_fn(_data->rocp_signal));
-    delete _data;
-
-    if(_corr_id) _corr_id->sub_ref_count();
 
     return false;
 }
@@ -619,6 +629,7 @@ async_copy_impl(Args... args)
         _data->tracing_data = std::move(tracing_data);
     }
 
+    auto  _lk          = _data->get_lock();
     auto& tracing_data = _data->tracing_data;
 
     // at this point, we want to install our own signal handler

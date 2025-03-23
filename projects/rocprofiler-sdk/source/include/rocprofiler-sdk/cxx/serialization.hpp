@@ -85,7 +85,68 @@
 #    define ROCPROFILER_SDK_CEREAL_NAMESPACE_END }  // namespace cereal
 #endif
 
+namespace rocprofiler
+{
+namespace sdk
+{
+namespace serialization
+{
+struct buffer_tracing_args
+{
+    std::string type  = {};
+    std::string name  = {};
+    std::string value = {};
+};
+
+template <typename Tp>
+auto
+get_buffer_tracing_args(Tp& data)
+{
+    auto populate_args_array = [](rocprofiler_buffer_tracing_kind_t /*kind*/,
+                                  rocprofiler_tracing_operation_t /*operation*/,
+                                  uint32_t arg_number,
+                                  const void* const /*arg_value_addr*/,
+                                  int32_t /*arg_indirection_count*/,
+                                  const char* arg_type,
+                                  const char* arg_name,
+                                  const char* arg_value_str,
+                                  void*       cb_data) -> int {
+        if(!cb_data) return 1;
+
+        auto* vec = static_cast<std::vector<buffer_tracing_args>*>(cb_data);
+        auto  sz  = std::max<size_t>(arg_number + 1, vec->size());
+        vec->resize(sz, buffer_tracing_args{});
+        vec->at(arg_number) = buffer_tracing_args{arg_type, arg_name, arg_value_str};
+
+        return 0;
+    };
+
+    auto ret    = std::vector<buffer_tracing_args>{};
+    auto record = rocprofiler_record_header_t{};
+    record.hash =
+        rocprofiler_record_header_compute_hash(ROCPROFILER_BUFFER_CATEGORY_TRACING, data.kind);
+    record.payload = &data;
+
+    rocprofiler_iterate_buffer_tracing_record_args(record, populate_args_array, &ret);
+
+    return ret;
+}
+}  // namespace serialization
+}  // namespace sdk
+}  // namespace rocprofiler
+
 ROCPROFILER_SDK_CEREAL_NAMESPACE_BEGIN
+
+namespace sdk = ::rocprofiler::sdk;
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, const sdk::serialization::buffer_tracing_args& data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(type);
+    ROCP_SDK_SAVE_DATA_FIELD(name);
+    ROCP_SDK_SAVE_DATA_FIELD(value);
+}
 
 template <typename ArchiveT>
 void
@@ -316,7 +377,7 @@ template <typename ArchiveT>
 void
 save(ArchiveT& ar, rocprofiler_hip_api_retval_t data)
 {
-    ROCP_SDK_SAVE_DATA_FIELD(hipError_t_retval);
+    ROCP_SDK_SAVE_DATA_FIELD(uint64_t_retval);
 }
 
 template <typename ArchiveT>
@@ -511,6 +572,16 @@ void
 save(ArchiveT& ar, rocprofiler_buffer_tracing_hip_api_record_t data)
 {
     save_buffer_tracing_api_record(ar, data);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_buffer_tracing_hip_api_ext_record_t data)
+{
+    save_buffer_tracing_api_record(ar, data);
+    auto args = sdk::serialization::get_buffer_tracing_args(data);
+    ROCP_SDK_SAVE_VALUE("args", args);
+    ROCP_SDK_SAVE_DATA_FIELD(retval);
 }
 
 template <typename ArchiveT>

@@ -35,6 +35,8 @@
 #include <hip/amd_detail/amd_hip_gl_interop.h>
 #include <hip/amd_detail/hip_api_trace.hpp>
 
+#include <stdint.h>
+
 ROCPROFILER_EXTERN_C_INIT
 
 // Empty struct has a size of 0 in C but size of 1 in C++.
@@ -52,6 +54,7 @@ typedef union rocprofiler_hip_api_retval_t
     ~rocprofiler_hip_api_retval_t() = default;
 #endif
 
+    uint64_t             uint64_t_retval;
     int                  int_retval;
     const char*          const_charp_retval;
     hipError_t           hipError_t_retval;

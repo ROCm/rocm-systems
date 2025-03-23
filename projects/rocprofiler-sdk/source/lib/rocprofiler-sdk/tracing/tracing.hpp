@@ -23,6 +23,7 @@
 #pragma once
 
 #include "lib/common/mpl.hpp"
+#include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
@@ -95,6 +96,57 @@ populate_contexts(rocprofiler_callback_tracing_kind_t callback_domain_idx,
         {
             buffered_contexts.emplace_back(buffered_context_data{itr});
             extern_corr_ids.emplace(itr, empty_user_data);
+        }
+    }
+}
+
+template <typename ClearContainersT = std::false_type,
+          typename DomainIdx,
+          typename ContextContainerT>
+inline void
+populate_contexts(DomainIdx                       domain_idx,
+                  rocprofiler_tracing_operation_t operation_idx,
+                  ContextContainerT&              contexts,
+                  external_correlation_id_map_t&  extern_corr_ids,
+                  ClearContainersT = ClearContainersT{})
+{
+    if constexpr(ClearContainersT::value)
+    {
+        contexts.clear();
+        extern_corr_ids.clear();
+    }
+
+    const auto minimal_context_filter = [](const context_t* ctx) {
+        return (ctx->callback_tracer || ctx->buffered_tracer);
+    };
+
+    for(const auto* itr : context::get_active_contexts(minimal_context_filter))
+    {
+        if(!itr) continue;
+
+        if constexpr(std::is_same<DomainIdx, rocprofiler_callback_tracing_kind_t>::value)
+        {
+            // if the given domain + op is not enabled, skip this context
+            if(context_filter(itr, domain_idx, operation_idx))
+            {
+                contexts.emplace_back(
+                    callback_context_data{itr, rocprofiler_callback_tracing_record_t{}});
+                extern_corr_ids.emplace(itr, empty_user_data);
+            }
+        }
+        else if constexpr(std::is_same<DomainIdx, rocprofiler_buffer_tracing_kind_t>::value)
+        {
+            // if the given domain + op is not enabled, skip this context
+            if(context_filter(itr, domain_idx, operation_idx))
+            {
+                contexts.emplace_back(buffered_context_data{itr});
+                extern_corr_ids.emplace(itr, empty_user_data);
+            }
+        }
+        else
+        {
+            static_assert(common::mpl::assert_false<DomainIdx>::value,
+                          "Error! invalid domain type");
         }
     }
 }
@@ -350,6 +402,8 @@ execute_buffer_record_emplace(const buffered_context_data_vec_t&   buffered_cont
             buffer_v->emplace(ROCPROFILER_BUFFER_CATEGORY_TRACING, domain, record_v);
         }
     }
+
+    common::consume_args(ancestor_corr_id);
 }
 }  // namespace tracing
 }  // namespace rocprofiler

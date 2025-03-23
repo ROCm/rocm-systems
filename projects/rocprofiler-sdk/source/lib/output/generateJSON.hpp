@@ -85,7 +85,7 @@ write_json(json_output&                                                        j
            const output_config&                                                cfg,
            const metadata&                                                     tool_metadata,
            const domain_stats_vec_t&                                           domain_stats,
-           generator<rocprofiler_buffer_tracing_hip_api_record_t>&&            hip_api_gen,
+           generator<rocprofiler_buffer_tracing_hip_api_ext_record_t>&&        hip_api_gen,
            generator<rocprofiler_buffer_tracing_hsa_api_record_t>              hsa_api_gen,
            generator<tool_buffer_tracing_kernel_dispatch_with_stream_record_t> kernel_dispatch_gen,
            generator<tool_buffer_tracing_memory_copy_with_stream_record_t>     memory_copy_gen,

@@ -548,7 +548,7 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
         {
             rocprofiler::hip::iterate_args<ROCPROFILER_HIP_TABLE_ID_Compiler>(
                 record.operation,
-                *static_cast<rocprofiler_callback_tracing_hip_api_data_t*>(record.payload),
+                static_cast<rocprofiler_callback_tracing_hip_api_data_t*>(record.payload)->args,
                 callback,
                 max_deref,
                 user_data);
@@ -558,7 +558,7 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
         {
             rocprofiler::hip::iterate_args<ROCPROFILER_HIP_TABLE_ID_Runtime>(
                 record.operation,
-                *static_cast<rocprofiler_callback_tracing_hip_api_data_t*>(record.payload),
+                static_cast<rocprofiler_callback_tracing_hip_api_data_t*>(record.payload)->args,
                 callback,
                 max_deref,
                 user_data);

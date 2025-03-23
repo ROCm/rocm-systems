@@ -89,6 +89,8 @@ def test_api_trace(
         assert row["Domain"] in [
             "HIP_RUNTIME_API",
             "HIP_COMPILER_API",
+            "HIP_RUNTIME_API_EXT",
+            "HIP_COMPILER_API_EXT",
         ]
         assert int(row["Process_Id"]) > 0
         assert int(row["Thread_Id"]) == 0 or int(row["Thread_Id"]) >= int(
@@ -210,6 +212,8 @@ def test_api_trace_json(json_data):
     valid_hip_domain = [
         "HIP_RUNTIME_API",
         "HIP_COMPILER_API",
+        "HIP_RUNTIME_API_EXT",
+        "HIP_COMPILER_API_EXT",
     ]
 
     valid_marker_domain = [
