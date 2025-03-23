@@ -5,7 +5,7 @@
 #include <string_view>
 
 extern "C" {
-typedef struct
+typedef struct rocprofiler_client_id_t
 {
     const char*    name;    ///< clients should set this value for debugging
     const uint32_t handle;  ///< internal handle
@@ -18,7 +18,7 @@ typedef int (*rocprofiler_tool_initialize_t)(rocprofiler_client_finalize_t final
 
 typedef void (*rocprofiler_tool_finalize_t)(void* tool_data);
 
-typedef struct
+typedef struct rocprofiler_tool_configure_result_t
 {
     size_t                        size;        ///< in case of future extensions
     rocprofiler_tool_initialize_t initialize;  ///< context creation
