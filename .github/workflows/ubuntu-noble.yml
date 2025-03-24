@@ -15,6 +15,7 @@ on:
       - '.github/workflows/formatting.yml'
       - '.github/workflows/weekly-mainline-sync.yml'
       - 'docker/**'
+      - .wordlist.txt
   pull_request:
     branches: [ amd-mainline, amd-staging, release/** ]
     paths-ignore:
@@ -28,6 +29,7 @@ on:
       - '.github/workflows/formatting.yml'
       - '.github/workflows/weekly-mainline-sync.yml'
       - 'docker/**'
+      - .wordlist.txt
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -84,7 +86,7 @@ jobs:
         wget -q https://repo.radeon.com/amdgpu-install/${{ matrix.rocm-version }}/ubuntu/noble/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
         apt-get install -y ./amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
         apt-get update
-        apt-get install -y rocm-dev rocdecode-dev libavformat-dev libavcodec-dev 
+        apt-get install -y rocm-dev rocdecode-dev libavformat-dev libavcodec-dev
 
     - name: Configure
       timeout-minutes: 30
