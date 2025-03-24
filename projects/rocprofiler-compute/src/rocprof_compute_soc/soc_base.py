@@ -667,6 +667,7 @@ def perfmon_coalesce(
                         for ctr in f.blocks[block_name].elements:
                             if "_sum" in ctr:
                                 channel_counters.append(ctr.split("_sum")[0])
+                                pmc.append(ctr)
 
                         channel_counters = (
                             pd.Series(channel_counters).drop_duplicates().to_list()
