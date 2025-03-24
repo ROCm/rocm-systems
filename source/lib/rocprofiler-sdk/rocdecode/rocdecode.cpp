@@ -556,7 +556,9 @@ using rocdecode_op_args_cb_t = rocprofiler_callback_tracing_operation_args_cb_t;
     template const char*              name_by_id<TABLE_IDX>(uint32_t);                             \
     template uint32_t                 id_by_name<TABLE_IDX>(const char*);                          \
     template std::vector<uint32_t>    get_ids<TABLE_IDX>();                                        \
-    template std::vector<const char*> get_names<TABLE_IDX>();
+    template std::vector<const char*> get_names<TABLE_IDX>();                                      \
+    template void                     iterate_args<TABLE_IDX>(                                     \
+        uint32_t, const rocdecode_api_data_t&, rocdecode_op_args_cb_t, int32_t, void*);
 
 INSTANTIATE_ROCDECODE_TABLE_FUNC(rocdecode_api_func_table_t, ROCPROFILER_ROCDECODE_TABLE_ID_CORE)
 }  // namespace rocdecode

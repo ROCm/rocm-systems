@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/rocdecode/defines.hpp"
 #include "lib/rocprofiler-sdk/rocdecode/rocdecode.hpp"
+#include "lib/rocprofiler-sdk/rocdecode/utils.hpp"
 
 #include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
