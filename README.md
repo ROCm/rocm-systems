@@ -576,6 +576,14 @@ The RAS plugin enables monitoring and counting of ECC (Error-Correcting Code) er
 >    - Limited metrics on MI200.
 >    - Consumer GPUs (e.g., RX6800) have fewer supported metrics.
 >
+>#### 🛑 RDC crashes on GPU reset
+>
+> This is expected behavior. Plugins for RDC (such as RVS and RocProfiler)
+> enter an undefined state when GPU resets. Currently there is no way to
+> automatically re-initialize those without restarting RDC.
+>
+> Due to above issues - **Policy** feature cannot monitor for GPU reset.
+>
 >#### 🐍 dmon RocProfiler Fields Return Zeros
 >
 >**Solution:**
