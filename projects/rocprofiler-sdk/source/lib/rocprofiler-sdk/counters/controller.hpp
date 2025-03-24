@@ -42,7 +42,7 @@ namespace counters
 // to collect counters on, the metrics to collect, the hw
 // counters needed to evaluate the metrics, and the ASTs.
 // This profile can be shared among many rocprof contexts.
-struct profile_config
+struct counter_config
 {
     const rocprofiler_agent_t*    agent = nullptr;
     std::vector<counters::Metric> metrics{};
@@ -55,13 +55,12 @@ struct profile_config
     std::set<counters::Metric> required_special_counters{};
     // ASTs to evaluate
     std::vector<counters::EvaluateAST> asts{};
-    rocprofiler_profile_config_id_t    id{.handle = 0};
+    rocprofiler_counter_config_id_t    id{.handle = 0};
     // Packet generator to create AQL packets for insertion
     std::unique_ptr<rocprofiler::aql::CounterPacketConstruct> pkt_generator{nullptr};
     // A packet cache of AQL packets. This allows reuse of AQL packets (preventing costly
     // allocation of new packets/destruction).
-    rocprofiler::common::Synchronized<std::vector<std::unique_ptr<rocprofiler::hsa::AQLPacket>>>
-        packets{};
+    common::Synchronized<std::vector<std::unique_ptr<rocprofiler::hsa::AQLPacket>>> packets{};
 };
 
 class CounterController
@@ -72,7 +71,7 @@ public:
     // Adds a counter collection profile to our global cache.
     // Note: these profiles can be used across multiple contexts
     //       and are independent of the context.
-    uint64_t add_profile(std::shared_ptr<profile_config>&& config);
+    uint64_t add_profile(std::shared_ptr<counter_config>&& config);
 
     void destroy_profile(uint64_t id);
     // Setup the counter collection service. counter_callback_info is created here
@@ -80,37 +79,36 @@ public:
     // the AQL packet generator for injecting packets. Note: the service is created
     // in the stop state.
     static rocprofiler_status_t configure_dispatch(
-        rocprofiler_context_id_t                         context_id,
-        rocprofiler_buffer_id_t                          buffer,
-        rocprofiler_dispatch_counting_service_callback_t callback,
-        void*                                            callback_args,
-        rocprofiler_profile_counting_record_callback_t   record_callback,
-        void*                                            record_callback_args);
-    std::shared_ptr<profile_config> get_profile_cfg(rocprofiler_profile_config_id_t id);
+        rocprofiler_context_id_t                   context_id,
+        rocprofiler_buffer_id_t                    buffer,
+        rocprofiler_dispatch_counting_service_cb_t callback,
+        void*                                      callback_args,
+        rocprofiler_dispatch_counting_record_cb_t  record_callback,
+        void*                                      record_callback_args);
+    std::shared_ptr<counter_config> get_profile_cfg(rocprofiler_counter_config_id_t id);
 
     static rocprofiler_status_t configure_agent_collection(
-        rocprofiler_context_id_t                       context_id,
-        rocprofiler_buffer_id_t                        buffer_id,
-        rocprofiler_agent_id_t                         agent_id,
-        rocprofiler_device_counting_service_callback_t cb,
-        void*                                          user_data);
+        rocprofiler_context_id_t                 context_id,
+        rocprofiler_buffer_id_t                  buffer_id,
+        rocprofiler_agent_id_t                   agent_id,
+        rocprofiler_device_counting_service_cb_t cb,
+        void*                                    user_data);
 
 private:
-    rocprofiler::common::Synchronized<std::unordered_map<uint64_t, std::shared_ptr<profile_config>>>
-        _configs;
+    common::Synchronized<std::unordered_map<uint64_t, std::shared_ptr<counter_config>>> _configs;
 };
 
 CounterController&
 get_controller();
 
 rocprofiler_status_t
-create_counter_profile(std::shared_ptr<profile_config> config);
+create_counter_profile(std::shared_ptr<counter_config> config);
 
 void
 destroy_counter_profile(uint64_t id);
 
-std::shared_ptr<profile_config>
-get_profile_config(rocprofiler_profile_config_id_t id);
+std::shared_ptr<counter_config>
+get_counter_config(rocprofiler_counter_config_id_t id);
 
 }  // namespace counters
 }  // namespace rocprofiler

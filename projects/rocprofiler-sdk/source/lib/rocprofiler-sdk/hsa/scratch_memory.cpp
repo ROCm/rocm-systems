@@ -444,6 +444,9 @@ impl(Args... args)
     constexpr auto external_corr_id_domain_idx =
         amd_tool_api_info<OpIdx>::external_correlation_id_domain_idx;
 
+    // suppress unused-but-set-variable warning
+    common::consume_args(external_corr_id_domain_idx);
+
     auto&& _tied_args = std::tie(args...);
     auto&  event_data = std::get<0>(_tied_args);
 

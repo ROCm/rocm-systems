@@ -19,34 +19,41 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+//
 
 #pragma once
 
-#include "lib/rocprofiler-sdk/context/context.hpp"
-#include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
-#include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
+#include <rocprofiler-sdk/fwd.h>
+
+#include <cstdint>
 
 namespace rocprofiler
 {
-namespace counters
+namespace sdk
 {
-struct completed_cb_params_t
+namespace version
 {
-    std::shared_ptr<counter_callback_info>            info;
-    std::shared_ptr<hsa::Queue::queue_info_session_t> session;
-    kernel_dispatch::profiling_time                   dispatch_time;
-    std::shared_ptr<counter_config>                   prof_config;
-    std::unique_ptr<rocprofiler::hsa::AQLPacket>      pkt;
-};
+/**
+ * @brief This function extracts the `<major>.<minor>.<patch>` from a single integer which encodes
+ * this triplet by a factor of `N`. E.g. version 3.2.1 using N=100 is represented by the value of
+ * 30201; version 3.2.1 using N=1000 is represented by the value of 3002001.
+ *
+ * For a given factor `N`, the major version can be extracted by
+ * dividing the version value by (N * N); the minor version can be extracted via
+ * computing the modulus of (N * N) and then divided by N; the patch version is simply the modulus
+ * of N.
+ */
+template <uint64_t FactorV = 100>
+constexpr rocprofiler_version_triplet_t
+compute_version_triplet(uint64_t version)
+{
+    constexpr auto factor = FactorV;
 
-void
-callback_thread_start();
-
-void
-callback_thread_stop();
-
-void
-process_callback_data(completed_cb_params_t&& params);
-
-}  // namespace counters
+    return rocprofiler_version_triplet_t{
+        .major = static_cast<uint32_t>(version / (factor * factor)),
+        .minor = static_cast<uint32_t>((version % (factor * factor)) / factor),
+        .patch = static_cast<uint32_t>(version % factor)};
+}
+}  // namespace version
+}  // namespace sdk
 }  // namespace rocprofiler

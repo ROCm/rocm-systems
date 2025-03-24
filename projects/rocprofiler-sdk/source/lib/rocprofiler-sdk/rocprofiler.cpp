@@ -154,6 +154,15 @@ rocprofiler_get_version(uint32_t* major, uint32_t* minor, uint32_t* patch)
 }
 
 rocprofiler_status_t
+rocprofiler_get_version_triplet(rocprofiler_version_triplet_t* info)
+{
+    *info = {.major = ROCPROFILER_VERSION_MAJOR,
+             .minor = ROCPROFILER_VERSION_MINOR,
+             .patch = ROCPROFILER_VERSION_PATCH};
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+rocprofiler_status_t
 rocprofiler_get_timestamp(rocprofiler_timestamp_t* ts)
 {
     *ts = rocprofiler::common::timestamp_ns();

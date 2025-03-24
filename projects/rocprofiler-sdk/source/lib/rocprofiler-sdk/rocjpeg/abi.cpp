@@ -25,8 +25,8 @@
 #include "lib/common/abi.hpp"
 #include "lib/common/defines.hpp"
 
+#include <rocprofiler-sdk/ext_version.h>
 #include <rocprofiler-sdk/rocjpeg.h>
-#include <rocprofiler-sdk/version.h>
 
 namespace rocprofiler
 {

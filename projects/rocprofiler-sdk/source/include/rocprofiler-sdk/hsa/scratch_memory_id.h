@@ -28,7 +28,7 @@
  * @brief Allocation flags for @see rocprofiler_buffer_tracing_scratch_memory_record_t
  */
 // NOLINTNEXTLINE(performance-enum-size)
-typedef enum
+typedef enum rocprofiler_scratch_alloc_flag_t
 {
     ROCPROFILER_SCRATCH_ALLOC_FLAG_NONE = 0,
     ROCPROFILER_SCRATCH_ALLOC_FLAG_USE_ONCE =

@@ -77,9 +77,9 @@ ROCPROFILER_EXTERN_C_INIT
  * patch)
  * @brief Query the version of the installed library.
  *
- * Return the version of the installed library.  This can be used to check if
- * it is compatible with this interface version.  This function can be used
- * even when the library is not initialized.
+ * Returns the version of the rocprofiler-sdk library loaded at runtime.  This can be used to check
+ * if the runtime version is equal to or compatible with the version of rocprofiler-sdk used during
+ * compilation time. This function can be invoked before tool initialization.
  *
  * @param [out] major The major version number is stored if non-NULL.
  * @param [out] minor The minor version number is stored if non-NULL.
@@ -87,6 +87,19 @@ ROCPROFILER_EXTERN_C_INIT
  */
 rocprofiler_status_t
 rocprofiler_get_version(uint32_t* major, uint32_t* minor, uint32_t* patch) ROCPROFILER_API;
+
+/**
+ * @brief Simplified alternative to ::rocprofiler_get_version
+ *
+ * Returns the version of the rocprofiler-sdk library loaded at runtime.  This can be used to check
+ * if the runtime version is equal to or compatible with the version of rocprofiler-sdk used during
+ * compilation time. This function can be invoked before tool initialization.
+ *
+ * @param [out] info Pointer to version triplet struct which will be populated by the function call.
+ */
+rocprofiler_status_t
+rocprofiler_get_version_triplet(rocprofiler_version_triplet_t* info) ROCPROFILER_API
+    ROCPROFILER_NONNULL(1);
 
 ROCPROFILER_EXTERN_C_FINI
 
@@ -97,6 +110,7 @@ ROCPROFILER_EXTERN_C_FINI
 #include "rocprofiler-sdk/buffer_tracing.h"
 #include "rocprofiler-sdk/callback_tracing.h"
 #include "rocprofiler-sdk/context.h"
+#include "rocprofiler-sdk/counter_config.h"
 #include "rocprofiler-sdk/counters.h"
 #include "rocprofiler-sdk/device_counting_service.h"
 #include "rocprofiler-sdk/dispatch_counting_service.h"
@@ -106,9 +120,15 @@ ROCPROFILER_EXTERN_C_FINI
 #include "rocprofiler-sdk/intercept_table.h"
 #include "rocprofiler-sdk/internal_threading.h"
 #include "rocprofiler-sdk/marker.h"
+#include "rocprofiler-sdk/ompt.h"
 #include "rocprofiler-sdk/pc_sampling.h"
-#include "rocprofiler-sdk/profile_config.h"
+#include "rocprofiler-sdk/rccl.h"
+#include "rocprofiler-sdk/rocdecode.h"
+#include "rocprofiler-sdk/rocjpeg.h"
 // #include "rocprofiler-sdk/spm.h"
+
+// subject to removal
+#include "rocprofiler-sdk/deprecated/profile_config.h"
 
 ROCPROFILER_EXTERN_C_INIT
 

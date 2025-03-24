@@ -22,6 +22,9 @@
 
 #include "client.hpp"
 
+#include <rocprofiler-sdk/registration.h>
+#include <rocprofiler-sdk/rocprofiler.h>
+
 #include <atomic>
 #include <chrono>
 #include <fstream>
@@ -34,10 +37,6 @@
 #include <stdexcept>
 #include <unordered_map>
 #include <vector>
-
-#include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/registration.h>
-#include <rocprofiler-sdk/rocprofiler.h>
 
 #define ROCPROFILER_CALL(result, msg)                                                              \
     {                                                                                              \
@@ -128,23 +127,23 @@ buffered_callback(rocprofiler_context_id_t,
     *output_stream << "[" << __FUNCTION__ << "] " << ss.str() << "\n";
 }
 
-std::unordered_map<uint64_t, rocprofiler_profile_config_id_t>&
+std::unordered_map<uint64_t, rocprofiler_counter_config_id_t>&
 get_profile_cache()
 {
-    static std::unordered_map<uint64_t, rocprofiler_profile_config_id_t> profile_cache;
+    static std::unordered_map<uint64_t, rocprofiler_counter_config_id_t> profile_cache;
     return profile_cache;
 }
 
 /**
  * Callback from rocprofiler when an kernel dispatch is enqueued into the HSA queue.
- * rocprofiler_profile_config_id_t* is a return to specify what counters to collect
+ * rocprofiler_counter_config_id_t* is a return to specify what counters to collect
  * for this dispatch (dispatch_packet). This example function creates a profile
  * to collect the counter SQ_WAVES for all kernel dispatch packets.
  */
 void
-set_profile(rocprofiler_context_id_t                 context_id,
-            rocprofiler_agent_id_t                   agent,
-            rocprofiler_agent_set_profile_callback_t set_config,
+set_profile(rocprofiler_context_id_t               context_id,
+            rocprofiler_agent_id_t                 agent,
+            rocprofiler_device_counting_agent_cb_t set_config,
             void*)
 {
     /**
@@ -170,7 +169,7 @@ set_profile(rocprofiler_context_id_t                 context_id,
     }
 }
 
-rocprofiler_profile_config_id_t
+rocprofiler_counter_config_id_t
 build_profile_for_agent(rocprofiler_agent_id_t agent)
 {
     std::set<std::string>                 counters_to_collect = {"SQ_WAVES"};
@@ -196,20 +195,20 @@ build_profile_for_agent(rocprofiler_agent_id_t agent)
     std::vector<rocprofiler_counter_id_t> collect_counters;
     for(auto& counter : gpu_counters)
     {
-        rocprofiler_counter_info_v0_t version;
+        rocprofiler_counter_info_v0_t info;
         ROCPROFILER_CALL(
             rocprofiler_query_counter_info(
-                counter, ROCPROFILER_COUNTER_INFO_VERSION_0, static_cast<void*>(&version)),
+                counter, ROCPROFILER_COUNTER_INFO_VERSION_0, static_cast<void*>(&info)),
             "Could not query info for counter");
-        if(counters_to_collect.count(std::string(version.name)) > 0)
+        if(counters_to_collect.count(std::string(info.name)) > 0)
         {
-            std::clog << "Counter: " << counter.handle << " " << version.name << "\n";
+            std::clog << "Counter: " << counter.handle << " " << info.name << "\n";
             collect_counters.push_back(counter);
         }
     }
 
-    rocprofiler_profile_config_id_t profile = {.handle = 0};
-    ROCPROFILER_CALL(rocprofiler_create_profile_config(
+    rocprofiler_counter_config_id_t profile = {.handle = 0};
+    ROCPROFILER_CALL(rocprofiler_create_counter_config(
                          agent, collect_counters.data(), collect_counters.size(), &profile),
                      "Could not construct profile cfg");
 

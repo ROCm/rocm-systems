@@ -207,7 +207,7 @@ record_callback(rocprofiler_dispatch_counting_service_data_t /*dispatch_data*/,
 
 void
 dispatch_callback(rocprofiler_dispatch_counting_service_data_t /*dispatch_data*/,
-                  rocprofiler_profile_config_id_t* /*config*/,
+                  rocprofiler_counter_config_id_t* /*config*/,
                   rocprofiler_user_data_t* /*user_data*/,
                   void* /*callback_data_args*/)
 {}
@@ -215,7 +215,7 @@ dispatch_callback(rocprofiler_dispatch_counting_service_data_t /*dispatch_data*/
 void
 set_profile(rocprofiler_context_id_t /*context_id*/,
             rocprofiler_agent_id_t /*agent*/,
-            rocprofiler_agent_set_profile_callback_t /*set_config*/,
+            rocprofiler_device_counting_agent_cb_t /*set_config*/,
             void*)
 {}
 

@@ -33,23 +33,25 @@ ROCPROFILER_EXTERN_C_INIT
  *
  * @{
  * @example api_buffered_tracing/client.cpp
- * Example demonstrating @ref BUFFER_TRACING_SERVICE that includes usage of @ref
- * rocprofiler_at_internal_thread_create, @ref rocprofiler_create_callback_thread, and @ref
- * rocprofiler_assign_callback_thread.
+ * Example demonstrating ::BUFFER_TRACING_SERVICE that includes usage of
+ * ::rocprofiler_at_internal_thread_create, ::rocprofiler_create_callback_thread, and
+ * ::rocprofiler_assign_callback_thread.
  */
 
 /**
- * @brief Callback type before and after internal thread creation. @see
+ * @brief (experimental) Callback type before and after internal thread creation. @see
  * rocprofiler_at_internal_thread_create
  *
  */
+ROCPROFILER_SDK_EXPERIMENTAL
 typedef void (*rocprofiler_internal_thread_library_cb_t)(rocprofiler_runtime_library_t, void*);
 
 /**
- * @brief Invoke this function to receive callbacks before and after the creation of an internal
- * thread by a library which as invoked on the thread which is creating the internal thread(s).
+ * @brief (experimental) Invoke this function to receive callbacks before and after the creation of
+ * an internal thread by a library which as invoked on the thread which is creating the internal
+ * thread(s).
  *
- * Use the @ref rocprofiler_runtime_library_t enumeration for specifying which libraries you want
+ * Use the ::rocprofiler_runtime_library_t enumeration for specifying which libraries you want
  * callbacks before and after the library creates an internal thread. These callbacks will be
  * invoked on the thread that is about to create the new thread (not on the newly created thread).
  * In thread-aware tools that wrap pthread_create, this can be used to disable the wrapper before
@@ -74,6 +76,7 @@ typedef void (*rocprofiler_internal_thread_library_cb_t)(rocprofiler_runtime_lib
  * @retval ::ROCPROFILER_STATUS_SUCCESS There are currently no conditions which result in any other
  * value, even if internal threads have already been created
  */
+ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
 rocprofiler_at_internal_thread_create(rocprofiler_internal_thread_library_cb_t precreate,
                                       rocprofiler_internal_thread_library_cb_t postcreate,
@@ -81,38 +84,40 @@ rocprofiler_at_internal_thread_create(rocprofiler_internal_thread_library_cb_t p
                                       void* data) ROCPROFILER_API;
 
 /**
- * @brief opaque handle to an internal thread identifier which delivers callbacks for buffers
+ * @brief (experimental) opaque handle to an internal thread identifier which delivers callbacks for
+ * buffers
  * @see rocprofiler_create_callback_thread
  */
-typedef struct
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_callback_thread_t
 {
     uint64_t handle;
 } rocprofiler_callback_thread_t;
 
 /**
- * @brief Create a handle to a unique thread (created by rocprofiler) which, when associated with a
- * particular buffer, will guarantee those buffered results always get delivered on the same thread.
- * This is useful to prevent/control thread-safety issues and/or enable multithreaded processing of
- * buffers with non-overlapping data
+ * @brief (experimental) Create a handle to a unique thread (created by rocprofiler) which, when
+ * associated with a particular buffer, will guarantee those buffered results always get delivered
+ * on the same thread. This is useful to prevent/control thread-safety issues and/or enable
+ * multithreaded processing of buffers with non-overlapping data
  *
- * @param [in] cb_thread_id User-provided pointer to a @ref rocprofiler_callback_thread_t
+ * @param [in] cb_thread_id User-provided pointer to a ::rocprofiler_callback_thread_t
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_SUCCESS Successful thread creation
  * @retval ::ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED Thread creation is no longer available
  * post-initialization
  * @retval ::ROCPROFILER_STATUS_ERROR Failed to create thread
  */
+ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
 rocprofiler_create_callback_thread(rocprofiler_callback_thread_t* cb_thread_id) ROCPROFILER_API
     ROCPROFILER_NONNULL(1);
 
 /**
- * @brief By default, all buffered results are delivered on the same thread. Using @ref
- * rocprofiler_create_callback_thread, one or more buffers can be assigned to deliever their results
- * on a unique, dedicated thread.
+ * @brief (experimental) By default, all buffered results are delivered on the same thread. Using
+ * ::rocprofiler_create_callback_thread, one or more buffers can be assigned to deliever their
+ * results on a unique, dedicated thread.
  *
  * @param [in] buffer_id Buffer identifier
- * @param [in] cb_thread_id Callback thread identifier via @ref rocprofiler_create_callback_thread
+ * @param [in] cb_thread_id Callback thread identifier via ::rocprofiler_create_callback_thread
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_SUCCESS Successful assignment of the delivery thread for the given
  * buffer
@@ -123,6 +128,7 @@ rocprofiler_create_callback_thread(rocprofiler_callback_thread_t* cb_thread_id) 
  * @retval ::ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND Buffer identifier did not match any of the
  * buffers registered with rocprofiler
  */
+ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
 rocprofiler_assign_callback_thread(rocprofiler_buffer_id_t       buffer_id,
                                    rocprofiler_callback_thread_t cb_thread_id) ROCPROFILER_API;

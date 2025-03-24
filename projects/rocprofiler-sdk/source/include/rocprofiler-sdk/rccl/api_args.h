@@ -23,7 +23,6 @@
 #pragma once
 
 #include <rocprofiler-sdk/defines.h>
-#include <rocprofiler-sdk/version.h>
 
 #if !defined(ROCPROFILER_SDK_USE_SYSTEM_RCCL)
 #    if defined __has_include

@@ -42,7 +42,7 @@ ROCPROFILER_EXTERN_C_INIT
 /**
  * @brief ROCProfiler Buffer HSA API Tracer Record.
  */
-typedef struct
+typedef struct rocprofiler_buffer_tracing_hsa_api_record_t
 {
     uint64_t                          size;  ///< size of this struct
     rocprofiler_buffer_tracing_kind_t kind;
@@ -66,7 +66,7 @@ typedef struct
 /**
  * @brief ROCProfiler Buffer HIP API Tracer Record.
  */
-typedef struct
+typedef struct rocprofiler_buffer_tracing_hip_api_record_t
 {
     uint64_t                          size;  ///< size of this struct
     rocprofiler_buffer_tracing_kind_t kind;
@@ -87,7 +87,7 @@ typedef struct
 /**
  * @brief ROCProfiler Buffer HIP API Tracer Record.
  */
-typedef struct
+typedef struct rocprofiler_buffer_tracing_hip_api_ext_record_t
 {
     uint64_t                          size;  ///< size of this struct
     rocprofiler_buffer_tracing_kind_t kind;
@@ -167,7 +167,7 @@ typedef struct rocprofiler_buffer_tracing_ompt_record_t
 /**
  * @brief ROCProfiler Buffer Marker Tracer Record.
  */
-typedef struct
+typedef struct rocprofiler_buffer_tracing_marker_api_record_t
 {
     uint64_t                          size;  ///< size of this struct
     rocprofiler_buffer_tracing_kind_t kind;
@@ -190,7 +190,7 @@ typedef struct
 /**
  * @brief ROCProfiler Buffer RCCL API Record.
  */
-typedef struct
+typedef struct rocprofiler_buffer_tracing_rccl_api_record_t
 {
     uint64_t                          size;  ///< size of this struct
     rocprofiler_buffer_tracing_kind_t kind;
@@ -247,7 +247,7 @@ typedef struct rocprofiler_buffer_tracing_rocjpeg_api_record_t
 /**
  * @brief ROCProfiler Buffer Memory Copy Tracer Record.
  */
-typedef struct
+typedef struct rocprofiler_buffer_tracing_memory_copy_record_t
 {
     uint64_t                            size;  ///< size of this struct
     rocprofiler_buffer_tracing_kind_t   kind;
@@ -272,7 +272,7 @@ typedef struct
 /**
  * @brief ROCProfiler Buffer Memory Allocation Tracer Record.
  */
-typedef struct
+typedef struct rocprofiler_buffer_tracing_memory_allocation_record_t
 {
     uint64_t                                  size;  ///< size of this struct
     rocprofiler_buffer_tracing_kind_t         kind;
@@ -328,7 +328,7 @@ typedef struct rocprofiler_buffer_tracing_page_migration_record_t
 /**
  * @brief ROCProfiler Buffer Scratch Memory Tracer Record
  */
-typedef struct
+typedef struct rocprofiler_buffer_tracing_scratch_memory_record_t
 {
     uint64_t                               size;  ///< size of this struct
     rocprofiler_buffer_tracing_kind_t      kind;  ///< ::ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY
@@ -345,7 +345,7 @@ typedef struct
 /**
  * @brief ROCProfiler Buffer Correlation ID Retirement Tracer Record.
  */
-typedef struct
+typedef struct rocprofiler_buffer_tracing_correlation_id_retirement_record_t
 {
     uint64_t                          size;  ///< size of this struct
     rocprofiler_buffer_tracing_kind_t kind;

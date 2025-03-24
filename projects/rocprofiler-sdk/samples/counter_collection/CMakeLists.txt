@@ -34,7 +34,7 @@ endif()
 find_package(rocprofiler-sdk REQUIRED)
 
 add_library(counter-collection-buffer-client SHARED)
-target_sources(counter-collection-buffer-client PRIVATE client.cpp client.hpp)
+target_sources(counter-collection-buffer-client PRIVATE buffered_client.cpp client.hpp)
 target_link_libraries(
     counter-collection-buffer-client
     PUBLIC rocprofiler-sdk::samples-build-flags
@@ -59,10 +59,10 @@ set_tests_properties(
                "${counter-collection-buffer-env}" FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
-set_source_files_properties(per_dev_serialization.cpp PROPERTIES LANGUAGE HIP)
+set_source_files_properties(device_serialized_main.cpp PROPERTIES LANGUAGE HIP)
 add_executable(counter-collection-buffer-device-serialization)
 target_sources(counter-collection-buffer-device-serialization
-               PRIVATE per_dev_serialization.cpp)
+               PRIVATE device_serialized_main.cpp)
 target_link_libraries(counter-collection-buffer-device-serialization
                       PRIVATE counter-collection-buffer-client Threads::Threads)
 
@@ -109,7 +109,7 @@ set_tests_properties(
 
 add_library(counter-collection-functional-counter-client SHARED)
 target_sources(counter-collection-functional-counter-client
-               PRIVATE print_functional_counters.cpp client.hpp)
+               PRIVATE print_functional_counters_client.cpp client.hpp)
 target_link_libraries(
     counter-collection-functional-counter-client
     PUBLIC rocprofiler-sdk::samples-build-flags
@@ -136,8 +136,8 @@ set_tests_properties(
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 add_library(counter-collection-device-profiling-client SHARED)
-target_sources(counter-collection-device-profiling-client PRIVATE device_counting.cpp
-                                                                  client.hpp)
+target_sources(counter-collection-device-profiling-client
+               PRIVATE device_counting_async_client.cpp client.hpp)
 target_link_libraries(
     counter-collection-device-profiling-client
     PUBLIC rocprofiler-sdk::samples-build-flags
@@ -171,7 +171,7 @@ set_tests_properties(
 
 add_library(counter-collection-device-profiling-sync-client SHARED)
 target_sources(counter-collection-device-profiling-sync-client
-               PRIVATE device_counting_synchronous.cpp client.hpp)
+               PRIVATE device_counting_sync_client.cpp client.hpp)
 target_link_libraries(
     counter-collection-device-profiling-sync-client
     PUBLIC rocprofiler-sdk::samples-build-flags

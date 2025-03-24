@@ -35,7 +35,8 @@ ROCPROFILER_EXTERN_C_INIT
  */
 
 /**
- * @brief Function used to configure the PC sampling service on the GPU agent with @p agent_id.
+ * @brief (experimental) Function used to configure the PC sampling service on the GPU agent with @p
+ * agent_id.
  *
  * Prerequisites are the following:
  * - The client must create a context and supply its @p context_id. By using this context,
@@ -114,6 +115,7 @@ ROCPROFILER_EXTERN_C_INIT
  * setup in the context
  * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT function invoked with an invalid argument
  */
+ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
 rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         context_id,
                                           rocprofiler_agent_id_t           agent_id,
@@ -124,9 +126,10 @@ rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         conte
                                           int                              flags) ROCPROFILER_API;
 
 /**
- * @brief Enumeration describing values of flags of ::rocprofiler_pc_sampling_configuration_t.
+ * @brief (experimental) Enumeration describing values of flags of
+ * ::rocprofiler_pc_sampling_configuration_t.
  */
-typedef enum rocprofiler_pc_sampling_configuration_flags_t
+typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_configuration_flags_t
 {
     ROCPROFILER_PC_SAMPLING_CONFIGURATION_FLAGS_NONE = 0,
     ROCPROFILER_PC_SAMPLING_CONFIGURATION_FLAGS_INTERVAL_POW2,
@@ -137,9 +140,9 @@ typedef enum rocprofiler_pc_sampling_configuration_flags_t
 } rocprofiler_pc_sampling_configuration_flags_t;
 
 /**
- * @brief PC sampling configuration supported by a GPU agent.
+ * @brief (experimental) PC sampling configuration supported by a GPU agent.
  */
-typedef struct
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_configuration_t
 {
     uint64_t                         size;  ///< Size of this struct
     rocprofiler_pc_sampling_method_t method;
@@ -165,26 +168,27 @@ typedef struct
 } rocprofiler_pc_sampling_configuration_t;
 
 /**
- * @brief Rocprofiler SDK's callback function to deliver the list of available PC
+ * @brief (experimental) Rocprofiler SDK's callback function to deliver the list of available PC
  * sampling configurations upon the call to the
- * @ref rocprofiler_query_pc_sampling_agent_configurations.
+ * ::rocprofiler_query_pc_sampling_agent_configurations.
  *
  * @param[out] configs - The array of PC sampling configurations supported by the agent
- * at the moment of invoking @ref rocprofiler_query_pc_sampling_agent_configurations.
+ * at the moment of invoking ::rocprofiler_query_pc_sampling_agent_configurations.
  * @param[out] num_config - The number of configurations contained in the underlying array
  * @p configs.
  * In case the GPU agent does not support PC sampling, the value is 0.
  * @param[in] user_data - client's private data passed via
- * @ref rocprofiler_query_pc_sampling_agent_configurations
+ * ::rocprofiler_query_pc_sampling_agent_configurations
  * @return ::rocprofiler_status_t
  */
+ROCPROFILER_SDK_EXPERIMENTAL
 typedef rocprofiler_status_t (*rocprofiler_available_pc_sampling_configurations_cb_t)(
     const rocprofiler_pc_sampling_configuration_t* configs,
     size_t                                         num_config,
     void*                                          user_data);
 
 /**
- * @brief Query PC Sampling Configuration.
+ * @brief (experimental) Query PC Sampling Configuration.
  *
  * Lists PC sampling configurations a GPU agent with @p agent_id supports at the moment
  * of invoking the function. Delivers configurations via @p cb.
@@ -205,6 +209,7 @@ typedef rocprofiler_status_t (*rocprofiler_available_pc_sampling_configurations_
  * @retval ::ROCPROFILER_STATUS_ERROR a general error caused by the amdgpu driver
  * @retval ::ROCPROFILER_STATUS_SUCCESS @p cb successfully finished
  */
+ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
 rocprofiler_query_pc_sampling_agent_configurations(
     rocprofiler_agent_id_t                                agent_id,
@@ -212,10 +217,10 @@ rocprofiler_query_pc_sampling_agent_configurations(
     void* user_data) ROCPROFILER_API ROCPROFILER_NONNULL(2, 3);
 
 /**
- * @brief Information about the GPU part where wave was executing
+ * @brief (experimental) Information about the GPU part where wave was executing
  * at the moment of sampling.
  */
-typedef struct rocprofiler_pc_sampling_hw_id_v0_t
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_hw_id_v0_t
 {
     uint64_t chiplet          : 6;  ///< chiplet index (3 bits allocated by the ROCr runtime)
     uint64_t wave_id          : 7;  ///< wave slot index
@@ -235,9 +240,9 @@ typedef struct rocprofiler_pc_sampling_hw_id_v0_t
 } rocprofiler_pc_sampling_hw_id_v0_t;
 
 /**
- * @brief Sampled program counter.
+ * @brief (experimental) Sampled program counter.
  */
-typedef struct
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_t
 {
     uint64_t code_object_id;
     uint64_t code_object_offset;
@@ -260,9 +265,9 @@ typedef struct
 } rocprofiler_pc_t;
 
 /**
- * @brief ROCProfiler Host-Trap PC Sampling Record.
+ * @brief (experimental) ROCProfiler Host-Trap PC Sampling Record.
  */
-typedef struct rocprofiler_pc_sampling_record_host_trap_v0_t
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_host_trap_v0_t
 {
     uint64_t                           size;         ///< Size of this struct
     rocprofiler_pc_sampling_hw_id_v0_t hw_id;        ///< @see ::rocprofiler_pc_sampling_hw_id_0_t
@@ -280,11 +285,11 @@ typedef struct rocprofiler_pc_sampling_record_host_trap_v0_t
 } rocprofiler_pc_sampling_record_host_trap_v0_t;
 
 /**
- * @brief The header of the @ref rocprofiler_pc_sampling_record_stochastic_v0_t, indicating
- * what fields of the @ref rocprofiler_pc_sampling_record_stochastic_v0_t instance are meaningful
- * for the sample.
+ * @brief (experimental) The header of the ::rocprofiler_pc_sampling_record_stochastic_v0_t,
+ * indicating what fields of the ::rocprofiler_pc_sampling_record_stochastic_v0_t instance are
+ * meaningful for the sample.
  */
-typedef struct rocprofiler_pc_sampling_record_stochastic_header_t
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_stochastic_header_t
 {
     uint8_t has_memory_counter : 1;  ///< pc sample provides memory counters information
                                      ///< via ::rocprofiler_pc_sampling_memory_counters_t
@@ -292,9 +297,9 @@ typedef struct rocprofiler_pc_sampling_record_stochastic_header_t
 } rocprofiler_pc_sampling_record_stochastic_header_t;
 
 /**
- * @brief Enumeration describing type of sampled issued instruction.
+ * @brief (experimental) Enumeration describing type of sampled issued instruction.
  */
-typedef enum rocprofiler_pc_sampling_instruction_type_t
+typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_instruction_type_t
 {
     ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_NONE = 0,
     ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_VALU,        ///< vector ALU instruction
@@ -322,9 +327,9 @@ typedef enum rocprofiler_pc_sampling_instruction_type_t
 } rocprofiler_pc_sampling_instruction_type_t;
 
 /**
- * @brief Enumeration describing reason for not issuing an instruction.
+ * @brief (experimental) Enumeration describing reason for not issuing an instruction.
  */
-typedef enum rocprofiler_pc_sampling_instruction_not_issued_reason_t
+typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_instruction_not_issued_reason_t
 {
     ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_NONE = 0,
     ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_NO_INSTRUCTION_AVAILABLE,
@@ -354,10 +359,10 @@ typedef enum rocprofiler_pc_sampling_instruction_not_issued_reason_t
 } rocprofiler_pc_sampling_instruction_not_issued_reason_t;
 
 /**
- * @brief Data provided by stochastic sampling hardware.
+ * @brief (experimental) Data provided by stochastic sampling hardware.
  *
  */
-typedef struct rocprofiler_pc_sampling_snapshot_v0_t
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_snapshot_v0_t
 {
     uint32_t reason_not_issued          : 4;
     uint32_t reserved0                  : 1;  ///< reserved for future use
@@ -390,7 +395,7 @@ typedef struct rocprofiler_pc_sampling_snapshot_v0_t
 
     /// @var reason_not_issued
     /// @brief The reason for not issuing an instruction. The field takes one of the value defined
-    /// in @ref ::rocprofiler_pc_sampling_instruction_not_issued_reason_t
+    /// in ::rocprofiler_pc_sampling_instruction_not_issued_reason_t
     /// @var arb_state_stall_valu
     /// @brief VALU instruction was stalled when a sample was generated
     /// @var dual_issue_valu
@@ -398,9 +403,9 @@ typedef struct rocprofiler_pc_sampling_snapshot_v0_t
 } rocprofiler_pc_sampling_snapshot_v0_t;
 
 /**
- * @brief Counters of issued but not yet completed instructions.
+ * @brief (experimental) Counters of issued but not yet completed instructions.
  */
-typedef struct rocprofiler_pc_sampling_memory_counters_t
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_memory_counters_t
 {
     uint32_t load_cnt   : 6;
     uint32_t store_cnt  : 6;
@@ -425,9 +430,9 @@ typedef struct rocprofiler_pc_sampling_memory_counters_t
 } rocprofiler_pc_sampling_memory_counters_t;
 
 /**
- * @brief ROCProfiler Stochastic PC Sampling Record.
+ * @brief (experimental) ROCProfiler Stochastic PC Sampling Record.
  */
-typedef struct rocprofiler_pc_sampling_record_stochastic_v0_t
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_stochastic_v0_t
 {
     uint64_t                                           size;  ///< Size of this struct
     rocprofiler_pc_sampling_record_stochastic_header_t flags;
@@ -482,33 +487,33 @@ typedef struct rocprofiler_pc_sampling_record_stochastic_v0_t
 } rocprofiler_pc_sampling_record_stochastic_v0_t;
 
 /**
- * @brief Record representing an invalid PC Sampling Record.
+ * @brief (experimental) Record representing an invalid PC Sampling Record.
  */
-typedef struct rocprofiler_pc_sampling_record_invalid_t
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_invalid_t
 {
     uint64_t size;  ///< Size of the struct
 } rocprofiler_pc_sampling_record_invalid_t;
 
 /**
- * @fn C compatible string representation of the PC sampling instruction type
- * @brief Return the string encoding of @ref rocprofiler_pc_sampling_instruction_type_t value
+ * @brief (experimental) Return the string encoding of ::rocprofiler_pc_sampling_instruction_type_t
+ * value
  * @param [in] instruction_type instruction type enum value
- * @return Will return a nullptr if invalid/unsupported @ref
- * rocprofiler_pc_sampling_instruction_type_t value is provided.
+ * @return Will return a nullptr if invalid/unsupported ::rocprofiler_pc_sampling_instruction_type_t
+ * value is provided.
  */
+ROCPROFILER_SDK_EXPERIMENTAL
 const char*
 rocprofiler_get_pc_sampling_instruction_type_name(
     rocprofiler_pc_sampling_instruction_type_t instruction_type) ROCPROFILER_API;
 
 /**
- * @fn C compatible string representation of reason for not issuing an instruciton
- * @brief Return the string encoding of @ref rocprofiler_pc_sampling_instruction_not_issued_reason_t
- * value
+ * @brief (experimental) Return the string encoding of
+ * ::rocprofiler_pc_sampling_instruction_not_issued_reason_t value
  * @param [in] not_issued_reason no issue reason enum value
- * @return Will return a nullptr if invalid/unsupported @ref
- * rocprofiler_pc_sampling_instruction_not_issued_reason_t value is provided.
+ * @return Will return a nullptr if invalid/unsupported
+ * ::rocprofiler_pc_sampling_instruction_not_issued_reason_t value is provided.
  */
-const char*
+ROCPROFILER_SDK_EXPERIMENTAL const char*
 rocprofiler_get_pc_sampling_instruction_not_issued_reason_name(
     rocprofiler_pc_sampling_instruction_not_issued_reason_t not_issued_reason) ROCPROFILER_API;
 

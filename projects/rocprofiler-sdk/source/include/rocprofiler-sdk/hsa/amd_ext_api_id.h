@@ -22,13 +22,13 @@
 
 #pragma once
 
+#include <rocprofiler-sdk/ext_version.h>
 #include <rocprofiler-sdk/hsa/api_trace_version.h>
-#include <rocprofiler-sdk/version.h>
 
 /**
  * @brief ROCProfiler enumeration of HSA AMD Extended API tracing operations
  */
-typedef enum  // NOLINT(performance-enum-size)
+typedef enum rocprofiler_hsa_amd_ext_api_id_t  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_HSA_AMD_EXT_API_ID_NONE = -1,
     ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_coherency_get_type,

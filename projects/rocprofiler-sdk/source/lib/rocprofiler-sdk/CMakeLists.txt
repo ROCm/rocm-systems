@@ -10,19 +10,19 @@ set(ROCPROFILER_LIB_SOURCES
     agent.cpp
     buffer.cpp
     buffer_tracing.cpp
-    device_counting_service.cpp
     callback_tracing.cpp
     context.cpp
+    counter_config.cpp
     counters.cpp
-    dispatch_profile.cpp
+    device_counting_service.cpp
+    dispatch_counting_service.cpp
     external_correlation.cpp
     intercept_table.cpp
     internal_threading.cpp
     ompt.cpp
     pc_sampling.cpp
-    profile_config.cpp
-    rocprofiler.cpp
     registration.cpp
+    rocprofiler.cpp
     runtime_initialization.cpp)
 
 # ----------------------------------------------------------------------------------------#

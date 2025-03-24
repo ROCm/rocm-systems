@@ -142,10 +142,10 @@ inject_barriers(hsa_barrier& barrier, QueueController::queue_map_t& queues)
 
     for(auto& [hsa_queue, fq] : queues)
     {
-        auto pkt = barrier.enqueue_packet(fq.get());
-        ASSERT_EQ(pkt.has_value(), true);
-        hsa_barrier_and_packet_t* packets = (hsa_barrier_and_packet_t*) hsa_queue->base_address;
-        enqueue_pkt(hsa_queue, packets, pkt->barrier_and);
+        auto _pkt = barrier.enqueue_packet(fq.get());
+        ASSERT_EQ(_pkt.has_value(), true);
+        hsa_barrier_and_packet_t* _packets = (hsa_barrier_and_packet_t*) hsa_queue->base_address;
+        enqueue_pkt(hsa_queue, _packets, _pkt->barrier_and);
 
         // Construct packet that will trigger async handler after barrier is released
         rocprofiler_packet post_barrier{};
@@ -158,7 +158,7 @@ inject_barriers(hsa_barrier& barrier, QueueController::queue_map_t& queues)
                                      0,
                                      barrier_signal_handler,
                                      static_cast<void*>(completion_signal));
-        enqueue_pkt(hsa_queue, packets, post_barrier.barrier_and);
+        enqueue_pkt(hsa_queue, _packets, post_barrier.barrier_and);
     }
 
     // Ensure that the barrier packet is reached on all queues

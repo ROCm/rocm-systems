@@ -99,7 +99,7 @@ ROCPROFILER_BUFFER_TRACING_KIND_STRING(OMPT)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(RUNTIME_INITIALIZATION)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(ROCDECODE_API)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(ROCJPEG_API)
-ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIP_STREAM_API)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIP_STREAM)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIP_RUNTIME_API_EXT)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIP_COMPILER_API_EXT)
 
@@ -312,7 +312,7 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
             val = rocprofiler::rocjpeg::name_by_id<ROCPROFILER_ROCJPEG_TABLE_ID_CORE>(operation);
             break;
         }
-        case ROCPROFILER_BUFFER_TRACING_HIP_STREAM_API:
+        case ROCPROFILER_BUFFER_TRACING_HIP_STREAM:
         {
             val = rocprofiler::hip::stream::name_by_id(operation);
             break;
@@ -460,7 +460,7 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
             ops = rocprofiler::rocjpeg::get_ids<ROCPROFILER_ROCJPEG_TABLE_ID_CORE>();
             break;
         }
-        case ROCPROFILER_BUFFER_TRACING_HIP_STREAM_API:
+        case ROCPROFILER_BUFFER_TRACING_HIP_STREAM:
         {
             ops = rocprofiler::hip::stream::get_ids();
             break;

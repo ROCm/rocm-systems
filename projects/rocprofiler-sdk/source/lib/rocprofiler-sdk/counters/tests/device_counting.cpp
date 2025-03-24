@@ -349,10 +349,10 @@ protected:
                 /**
                  * Check profile construction
                  */
-                rocprofiler_profile_config_id_t cfg_id = {.handle = 0};
+                rocprofiler_counter_config_id_t cfg_id = {.handle = 0};
                 rocprofiler_counter_id_t        id     = {.handle = metric.id()};
                 ROCPROFILER_CALL(
-                    rocprofiler_create_profile_config(agent.get_rocp_agent()->id, &id, 1, &cfg_id),
+                    rocprofiler_create_counter_config(agent.get_rocp_agent()->id, &id, 1, &cfg_id),
                     "Unable to create profile");
 
                 ROCPROFILER_CALL(
@@ -362,12 +362,12 @@ protected:
                         agent.get_rocp_agent()->id,
                         [](rocprofiler_context_id_t context_id,
                            rocprofiler_agent_id_t,
-                           rocprofiler_agent_set_profile_callback_t set_config,
-                           void*                                    user_data) {
+                           rocprofiler_device_counting_agent_cb_t set_config,
+                           void*                                  user_data) {
                             CHECK(user_data);
                             if(auto status = set_config(
                                    context_id,
-                                   *static_cast<rocprofiler_profile_config_id_t*>(user_data));
+                                   *static_cast<rocprofiler_counter_config_id_t*>(user_data));
                                status != ROCPROFILER_STATUS_SUCCESS)
                             {
                                 ROCP_FATAL << rocprofiler_get_status_string(status);

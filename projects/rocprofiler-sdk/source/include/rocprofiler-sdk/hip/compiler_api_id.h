@@ -22,14 +22,12 @@
 
 #pragma once
 
-#include <rocprofiler-sdk/version.h>
-
 #include <hip/amd_detail/hip_api_trace.hpp>
 
 /**
  * @brief ROCProfiler enumeration of HIP Compiler API tracing operations
  */
-typedef enum  // NOLINT(performance-enum-size)
+typedef enum rocprofiler_hip_compiler_api_id_t  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_HIP_COMPILER_API_ID_NONE                      = -1,
     ROCPROFILER_HIP_COMPILER_API_ID___hipPopCallConfiguration = 0,

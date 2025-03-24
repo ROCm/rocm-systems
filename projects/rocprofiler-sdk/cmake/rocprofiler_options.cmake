@@ -81,6 +81,11 @@ rocprofiler_add_option(ROCPROFILER_UNSAFE_NO_VERSION_CHECK
 rocprofiler_add_option(
     ROCPROFILER_REGENERATE_COUNTERS_PARSER
     "Regenerate the counter parser (requires bison and flex)" OFF ADVANCED)
+rocprofiler_add_option(
+    ROCPROFILER_BUILD_EXPERIMENTAL_WARNINGS
+    "Enable warnings for experimental features but hide with -Wno-deprecated-declarations (this ensures that experimental warning message does not break macros)"
+    OFF
+    ADVANCED)
 
 # In the future, we will do this even with clang-tidy enabled
 foreach(_OPT ROCPROFILER_BUILD_DEVELOPER ROCPROFILER_BUILD_WERROR)

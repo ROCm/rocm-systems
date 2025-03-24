@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include <rocprofiler-sdk/version.h>
+#include <rocprofiler-sdk/ext_version.h>
 
 #if defined(__cplusplus)
 #    include <hsa/hsa_api_trace.h>  // safe to include from C++

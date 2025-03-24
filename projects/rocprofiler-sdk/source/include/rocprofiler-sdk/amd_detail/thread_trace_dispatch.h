@@ -37,7 +37,7 @@ ROCPROFILER_EXTERN_C_INIT
  * @{
  */
 
-typedef enum
+typedef enum rocprofiler_att_control_flags_t
 {
     ROCPROFILER_ATT_CONTROL_NONE           = 0,
     ROCPROFILER_ATT_CONTROL_START_AND_STOP = 3

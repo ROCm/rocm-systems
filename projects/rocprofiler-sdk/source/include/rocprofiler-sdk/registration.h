@@ -35,17 +35,18 @@ ROCPROFILER_EXTERN_C_INIT
  */
 
 /**
- * @brief A client refers to an individual or entity engaged in the configuration of ROCprofiler
- * services. e.g: any third party tool like PAPI or any internal tool (Omnitrace). A pointer to this
- * data structure is provided to the client tool initialization function. The name member can be set
- * by the client to assist with debugging (e.g. rocprofiler cannot start your context because there
- * is a conflicting context started by `<name>` -- at least that is the plan). The handle member is
- * a unique identifer assigned by rocprofiler for the client and the client can store it and pass it
- * to the @ref rocprofiler_client_finalize_t function to force finalization (i.e. deactivate all of
- * it's contexts) for the client.
+ * @brief (experimental) A client refers to an individual or entity engaged in the configuration of
+ * ROCprofiler services. e.g: any third party tool like PAPI or any internal tool (Omnitrace). A
+ * pointer to this data structure is provided to the client tool initialization function. The name
+ * member can be set by the client to assist with debugging (e.g. rocprofiler cannot start your
+ * context because there is a conflicting context started by `<name>` -- at least that is the plan).
+ * The handle member is a unique identifer assigned by rocprofiler for the client and the client can
+ * store it and pass it to the ::rocprofiler_client_finalize_t function to force finalization
+ * (i.e. deactivate all of it's contexts) for the client.
  */
-typedef struct rocprofiler_client_id_t
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_client_id_t
 {
+    size_t         size;    ///< size of this struct
     const char*    name;    ///< clients should set this value for debugging
     const uint32_t handle;  ///< internal handle
 } rocprofiler_client_id_t;
@@ -127,11 +128,11 @@ rocprofiler_is_finalized(int* status) ROCPROFILER_API ROCPROFILER_NONNULL(1);
 /**
  * @brief This is the special function that tools define to enable rocprofiler support. The tool
  * should return a pointer to
- * @ref rocprofiler_tool_configure_result_t which will contain a function pointer to (1) an
+ * ::rocprofiler_tool_configure_result_t which will contain a function pointer to (1) an
  * initialization function where all the contexts are created, (2) a finalization function (if
  * necessary) which will be invoked when rocprofiler shutdown and, (3) a pointer to any data that
- * the tool wants communicated between the @ref rocprofiler_tool_configure_result_t::initialize and
- * @ref rocprofiler_tool_configure_result_t::finalize functions. If the user
+ * the tool wants communicated between the ::rocprofiler_tool_configure_result_t::initialize and
+ * ::rocprofiler_tool_configure_result_t::finalize functions. If the user
  *
  * @param [in] version The version of rocprofiler: `(10000 * major) + (100 * minor) + patch`
  * @param [in] runtime_version String descriptor of the rocprofiler version and other relevant info.
@@ -227,7 +228,7 @@ rocprofiler_configure(uint32_t                 version,
 // want the symbol to be visible when the user includes the header for the prototype
 
 /**
- * @brief Function pointer typedef for @ref rocprofiler_configure function
+ * @brief Function pointer typedef for ::rocprofiler_configure function
  * @param [in] version The version of rocprofiler: `(10000 * major) + (100 * minor) + patch`
  * @param [in] runtime_version String descriptor of the rocprofiler version and other relevant info.
  * @param [in] priority How many client tools were initialized before this client tool
@@ -243,7 +244,7 @@ typedef rocprofiler_tool_configure_result_t* (*rocprofiler_configure_func_t)(
  * @brief Function for explicitly registering a configuration with rocprofiler. This can be invoked
  * before any ROCm runtimes (lazily) initialize and context(s) can be started before the runtimes
  * initialize.
- * @param [in] configure_func Address of @ref rocprofiler_configure function. A null pointer is
+ * @param [in] configure_func Address of ::rocprofiler_configure function. A null pointer is
  * acceptable if the address is not known
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_SUCCESS Registration was successfully triggered.

@@ -40,7 +40,7 @@ namespace rocprofiler
 namespace counters
 {
 rocprofiler_status_t
-counter_callback_info::setup_profile_config(std::shared_ptr<profile_config>& profile)
+counter_callback_info::setup_counter_config(std::shared_ptr<counter_config>& profile)
 {
     if(profile->pkt_generator || !profile->reqired_hw_counters.empty())
     {
@@ -115,12 +115,12 @@ counter_callback_info::setup_profile_config(std::shared_ptr<profile_config>& pro
 
 rocprofiler_status_t
 counter_callback_info::get_packet(std::unique_ptr<rocprofiler::hsa::AQLPacket>& ret_pkt,
-                                  std::shared_ptr<profile_config>&              profile)
+                                  std::shared_ptr<counter_config>&              profile)
 {
     rocprofiler_status_t status;
     // Check packet cache
     profile->packets.wlock([&](auto& pkt_vector) {
-        status = counter_callback_info::setup_profile_config(profile);
+        status = counter_callback_info::setup_counter_config(profile);
         if(!pkt_vector.empty() && status == ROCPROFILER_STATUS_SUCCESS)
         {
             ret_pkt = std::move(pkt_vector.back());
@@ -216,21 +216,21 @@ stop_context(const context::context* ctx)
 }
 
 rocprofiler_status_t
-configure_agent_collection(rocprofiler_context_id_t                       context_id,
-                           rocprofiler_buffer_id_t                        buffer_id,
-                           rocprofiler_agent_id_t                         agent_id,
-                           rocprofiler_device_counting_service_callback_t cb,
-                           void*                                          user_data)
+configure_agent_collection(rocprofiler_context_id_t                 context_id,
+                           rocprofiler_buffer_id_t                  buffer_id,
+                           rocprofiler_agent_id_t                   agent_id,
+                           rocprofiler_device_counting_service_cb_t cb,
+                           void*                                    user_data)
 {
     return get_controller().configure_agent_collection(
         context_id, buffer_id, agent_id, cb, user_data);
 }
 
 rocprofiler_status_t
-configure_buffered_dispatch(rocprofiler_context_id_t                         context_id,
-                            rocprofiler_buffer_id_t                          buffer,
-                            rocprofiler_dispatch_counting_service_callback_t callback,
-                            void*                                            callback_args)
+configure_buffered_dispatch(rocprofiler_context_id_t                   context_id,
+                            rocprofiler_buffer_id_t                    buffer,
+                            rocprofiler_dispatch_counting_service_cb_t callback,
+                            void*                                      callback_args)
 {
     CHECK_NE(buffer.handle, 0);
     return get_controller().configure_dispatch(
@@ -238,11 +238,11 @@ configure_buffered_dispatch(rocprofiler_context_id_t                         con
 }
 
 rocprofiler_status_t
-configure_callback_dispatch(rocprofiler_context_id_t                         context_id,
-                            rocprofiler_dispatch_counting_service_callback_t callback,
-                            void*                                            callback_data_args,
-                            rocprofiler_profile_counting_record_callback_t   record_callback,
-                            void*                                            record_callback_args)
+configure_callback_dispatch(rocprofiler_context_id_t                   context_id,
+                            rocprofiler_dispatch_counting_service_cb_t callback,
+                            void*                                      callback_data_args,
+                            rocprofiler_dispatch_counting_record_cb_t  record_callback,
+                            void*                                      record_callback_args)
 {
     return get_controller().configure_dispatch(context_id,
                                                {.handle = 0},

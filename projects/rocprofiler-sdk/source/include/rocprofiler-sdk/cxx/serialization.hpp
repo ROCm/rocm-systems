@@ -1237,6 +1237,30 @@ save(ArchiveT& ar, rocprofiler_counter_info_v0_t data)
 
 template <typename ArchiveT>
 void
+save(ArchiveT& ar, rocprofiler_counter_info_v1_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(id);
+    ROCP_SDK_SAVE_DATA_BITFIELD("is_constant", is_constant);
+    ROCP_SDK_SAVE_DATA_BITFIELD("is_derived", is_derived);
+    ROCP_SDK_SAVE_DATA_CSTR(name);
+    ROCP_SDK_SAVE_DATA_CSTR(description);
+    ROCP_SDK_SAVE_DATA_CSTR(block);
+    ROCP_SDK_SAVE_DATA_CSTR(expression);
+
+    auto convert = [](const auto* val, uint64_t sz) {
+        using data_type = std::remove_cv_t<std::remove_pointer_t<decltype(val)>>;
+        auto retval     = std::vector<data_type>{};
+        for(uint64_t i = 0; i < sz; ++i)
+            retval.emplace_back(val[i]);
+        return retval;
+    };
+
+    ROCP_SDK_SAVE_VALUE("dims", convert(data.dimensions, data.dimensions_count));
+    ROCP_SDK_SAVE_VALUE("instances", convert(data.instance_ids, data.instance_ids_count));
+}
+
+template <typename ArchiveT>
+void
 save(ArchiveT& ar, rocprofiler_record_dimension_info_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(id);

@@ -39,14 +39,15 @@ ROCPROFILER_EXTERN_C_INIT
  *
  * @param [in] context_id
  * @param [in] buffer_id
- * @param [in] profile_config
+ * @param [in] counter_config
  * @param [in] interval
  * @return ::rocprofiler_status_t
  */
+ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
 rocprofiler_configure_spm_service(rocprofiler_context_id_t        context_id,
                                   rocprofiler_buffer_id_t         buffer_id,
-                                  rocprofiler_profile_config_id_t profile_config,
+                                  rocprofiler_counter_config_id_t counter_config,
                                   uint64_t                        interval) ROCPROFILER_API;
 
 /** @} */

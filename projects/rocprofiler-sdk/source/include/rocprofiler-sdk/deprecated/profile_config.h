@@ -22,31 +22,35 @@
 
 #pragma once
 
-#include "lib/rocprofiler-sdk/context/context.hpp"
-#include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
-#include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
+#include <rocprofiler-sdk/counter_config.h>
+#include <rocprofiler-sdk/defines.h>
+#include <rocprofiler-sdk/fwd.h>
 
-namespace rocprofiler
+ROCPROFILER_EXTERN_C_INIT
+
+/**
+ * @brief (deprecated) Replaced by ::rocprofiler_create_counter_config.
+ *
+ */
+ROCPROFILER_SDK_DEPRECATED("profile_config renamed to counter_config")
+static inline rocprofiler_status_t
+rocprofiler_create_profile_config(rocprofiler_agent_id_t           agent_id,
+                                  rocprofiler_counter_id_t*        counters_list,
+                                  size_t                           counters_count,
+                                  rocprofiler_profile_config_id_t* config_id)
 {
-namespace counters
+    return rocprofiler_create_counter_config(agent_id, counters_list, counters_count, config_id);
+}
+
+/**
+ * @brief (deprecated) Replaced by ::rocprofiler_destroy_counter_config.
+ *
+ */
+ROCPROFILER_SDK_DEPRECATED("profile_config renamed to counter_config")
+static inline rocprofiler_status_t
+rocprofiler_destroy_profile_config(rocprofiler_profile_config_id_t config_id)
 {
-struct completed_cb_params_t
-{
-    std::shared_ptr<counter_callback_info>            info;
-    std::shared_ptr<hsa::Queue::queue_info_session_t> session;
-    kernel_dispatch::profiling_time                   dispatch_time;
-    std::shared_ptr<counter_config>                   prof_config;
-    std::unique_ptr<rocprofiler::hsa::AQLPacket>      pkt;
-};
+    return rocprofiler_destroy_counter_config(config_id);
+}
 
-void
-callback_thread_start();
-
-void
-callback_thread_stop();
-
-void
-process_callback_data(completed_cb_params_t&& params);
-
-}  // namespace counters
-}  // namespace rocprofiler
+ROCPROFILER_EXTERN_C_FINI

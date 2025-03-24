@@ -38,6 +38,9 @@ rocprofiler_add_interface_library(rocprofiler-sdk-release-flags
 rocprofiler_add_interface_library(rocprofiler-sdk-stack-protector
                                   "Adds stack-protector compiler flags" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-memcheck INTERFACE INTERNAL)
+rocprofiler_add_interface_library(
+    rocprofiler-sdk-experimental-flags
+    "Compiler flags for experimental feature compilation" INTERNAL)
 
 #
 # interfaces for libraries (general)

@@ -91,7 +91,7 @@ queue_cb(const context::context*                                         ctx,
         }
     }
 
-    auto req_profile = rocprofiler_profile_config_id_t{.handle = 0};
+    auto req_profile = rocprofiler_counter_config_id_t{.handle = 0};
     auto dispatch_data =
         common::init_public_api_struct(rocprofiler_dispatch_counting_service_data_t{});
 
@@ -147,7 +147,7 @@ completed_cb(const context::context*                            ctx,
 {
     CHECK(info && ctx);
 
-    std::shared_ptr<profile_config> prof_config;
+    std::shared_ptr<counter_config> prof_config;
     // Get the Profile Config
     std::unique_ptr<rocprofiler::hsa::AQLPacket> pkt = nullptr;
     info->packet_return_map.wlock([&](auto& data) {

@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <rocprofiler-sdk/ext_version.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 #include <rocprofiler-sdk/version.h>
@@ -27,6 +28,8 @@
 #include "lib/common/utility.hpp"
 
 #include <gtest/gtest.h>
+
+#include <tuple>
 
 TEST(rocprofiler_lib, version)
 {

@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include <rocprofiler-sdk/version.h>
+#include <rocprofiler-sdk/ext_version.h>
 
 #include "lib/common/defines.hpp"
 

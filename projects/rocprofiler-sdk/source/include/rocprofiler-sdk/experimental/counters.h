@@ -29,10 +29,10 @@
 ROCPROFILER_EXTERN_C_INIT
 
 /**
- * @brief Apply a custom counter definition (YAML). This function must be called before
- *   counter iteration functions like @ref rocprofiler_iterate_agent_supported_counters
- *   if custom counter definitions are to be used. This function will return an error
- *   if the definition has already been loaded.
+ * @brief (experimental) Apply a custom counter definition (YAML). This function must be called
+ * before counter iteration functions like @ref rocprofiler_iterate_agent_supported_counters if
+ * custom counter definitions are to be used. This function will return an error if the definition
+ * has already been loaded.
  * @param [in] yaml YAML string containing counter definitions
  * @param [in] size Size of the YAML string
  * @param [in] flags Flags to apply to the counter definition
@@ -40,6 +40,7 @@ ROCPROFILER_EXTERN_C_INIT
  * @retval ROCPROFILER_STATUS_SUCCESS if counter definition applied
  * @retval ROCPROFILER_STATUS_ERROR if counter definition already loaded
  */
+ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
 rocprofiler_load_counter_definition(const char*                yaml,
                                     size_t                     size,

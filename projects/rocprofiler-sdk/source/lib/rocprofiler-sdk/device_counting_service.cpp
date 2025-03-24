@@ -37,11 +37,11 @@ constexpr auto rocprofiler_context_none = ROCPROFILER_CONTEXT_NONE;
 
 extern "C" {
 rocprofiler_status_t
-rocprofiler_configure_device_counting_service(rocprofiler_context_id_t context_id,
-                                              rocprofiler_buffer_id_t  buffer_id,
-                                              rocprofiler_agent_id_t   agent_id,
-                                              rocprofiler_device_counting_service_callback_t cb,
-                                              void* user_data)
+rocprofiler_configure_device_counting_service(rocprofiler_context_id_t                 context_id,
+                                              rocprofiler_buffer_id_t                  buffer_id,
+                                              rocprofiler_agent_id_t                   agent_id,
+                                              rocprofiler_device_counting_service_cb_t cb,
+                                              void*                                    user_data)
 {
     return rocprofiler::counters::configure_agent_collection(
         context_id, buffer_id, agent_id, cb, user_data);

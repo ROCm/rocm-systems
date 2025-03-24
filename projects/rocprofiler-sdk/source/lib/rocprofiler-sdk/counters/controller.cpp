@@ -46,12 +46,12 @@ CounterController::CounterController()
 // Note: these profiles can be used across multiple contexts
 //       and are independent of the context.
 uint64_t
-CounterController::add_profile(std::shared_ptr<profile_config>&& config)
+CounterController::add_profile(std::shared_ptr<counter_config>&& config)
 {
     static std::atomic<uint64_t> profile_val = 1;
     uint64_t                     ret         = 0;
     _configs.wlock([&](auto& data) {
-        config->id = rocprofiler_profile_config_id_t{.handle = profile_val};
+        config->id = rocprofiler_counter_config_id_t{.handle = profile_val};
         data.emplace(profile_val, std::move(config));
         ret = profile_val;
         profile_val++;
@@ -66,11 +66,11 @@ CounterController::destroy_profile(uint64_t id)
 }
 
 rocprofiler_status_t
-CounterController::configure_agent_collection(rocprofiler_context_id_t context_id,
-                                              rocprofiler_buffer_id_t  buffer_id,
-                                              rocprofiler_agent_id_t   agent_id,
-                                              rocprofiler_device_counting_service_callback_t cb,
-                                              void* user_data)
+CounterController::configure_agent_collection(rocprofiler_context_id_t                 context_id,
+                                              rocprofiler_buffer_id_t                  buffer_id,
+                                              rocprofiler_agent_id_t                   agent_id,
+                                              rocprofiler_device_counting_service_cb_t cb,
+                                              void*                                    user_data)
 {
     auto* ctx_p = rocprofiler::context::get_mutable_registered_context(context_id);
     if(!ctx_p) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
@@ -127,13 +127,12 @@ CounterController::configure_agent_collection(rocprofiler_context_id_t context_i
 // the AQL packet generator for injecting packets. Note: the service is created
 // in the stop state.
 rocprofiler_status_t
-CounterController::configure_dispatch(
-    rocprofiler_context_id_t                         context_id,
-    rocprofiler_buffer_id_t                          buffer,
-    rocprofiler_dispatch_counting_service_callback_t callback,
-    void*                                            callback_args,
-    rocprofiler_profile_counting_record_callback_t   record_callback,
-    void*                                            record_callback_args)
+CounterController::configure_dispatch(rocprofiler_context_id_t                   context_id,
+                                      rocprofiler_buffer_id_t                    buffer,
+                                      rocprofiler_dispatch_counting_service_cb_t callback,
+                                      void*                                      callback_args,
+                                      rocprofiler_dispatch_counting_record_cb_t  record_callback,
+                                      void* record_callback_args)
 {
     auto* ctx_p = rocprofiler::context::get_mutable_registered_context(context_id);
     if(!ctx_p) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
@@ -169,10 +168,10 @@ CounterController::configure_dispatch(
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
-std::shared_ptr<profile_config>
-CounterController::get_profile_cfg(rocprofiler_profile_config_id_t id)
+std::shared_ptr<counter_config>
+CounterController::get_profile_cfg(rocprofiler_counter_config_id_t id)
 {
-    std::shared_ptr<profile_config> cfg;
+    std::shared_ptr<counter_config> cfg;
     _configs.rlock([&](const auto& map) { cfg = map.at(id.handle); });
     return cfg;
 }
@@ -185,10 +184,10 @@ get_controller()
 }
 
 rocprofiler_status_t
-create_counter_profile(std::shared_ptr<profile_config> config)
+create_counter_profile(std::shared_ptr<counter_config> config)
 {
     auto status = ROCPROFILER_STATUS_SUCCESS;
-    if(status = counters::counter_callback_info::setup_profile_config(config);
+    if(status = counters::counter_callback_info::setup_counter_config(config);
        status != ROCPROFILER_STATUS_SUCCESS)
     {
         return status;
@@ -210,8 +209,8 @@ destroy_counter_profile(uint64_t id)
     get_controller().destroy_profile(id);
 }
 
-std::shared_ptr<profile_config>
-get_profile_config(rocprofiler_profile_config_id_t id)
+std::shared_ptr<counter_config>
+get_counter_config(rocprofiler_counter_config_id_t id)
 {
     try
     {

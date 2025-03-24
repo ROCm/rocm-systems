@@ -25,7 +25,6 @@
 #include "lib/rocprofiler-sdk/hip/details/ostream.hpp"
 
 #include <rocprofiler-sdk/rocprofiler.h>
-#include <rocprofiler-sdk/version.h>
 
 #include <hip/hip_runtime_api.h>
 // must be included after runtime api

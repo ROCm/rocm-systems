@@ -23,11 +23,9 @@
 #pragma once
 
 #include <rocprofiler-sdk/defines.h>
-#include <rocprofiler-sdk/hsa/api_trace_version.h>
-#include <rocprofiler-sdk/version.h>
 
-#include <hsa/hsa.h>
-#include <hsa/hsa_amd_tool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 ROCPROFILER_EXTERN_C_INIT
 
