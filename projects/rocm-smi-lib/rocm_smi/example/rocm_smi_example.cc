@@ -991,6 +991,11 @@ int main() {
       std::cout << "\t  -> " << std::dec << dclk << "\n";
     }
 
+    std::cout << "\t**.jpeg_activity[] : " << std::dec << "\n";
+    for (const auto& jpeg : gpu_metrics.jpeg_activity) {
+      std::cout << "\t  -> " << std::dec << jpeg << "\n";
+    }
+
     std::cout << std::dec << "xcp_stats.gfx_busy_inst = \n";
     auto xcp = 0;
     for (auto& row : gpu_metrics.xcp_stats) {
@@ -1041,6 +1046,50 @@ int main() {
       std::cout << "XCP[" << xcp << "] = " << "[ ";
       std::copy(std::begin(row.gfx_below_host_limit_acc),
               std::end(row.gfx_below_host_limit_acc),
+              amd::smi::make_ostream_joiner(&std::cout, ", "));
+      std::cout << " ]\n";
+      xcp++;
+    }
+
+    xcp = 0;
+    std::cout << std::dec << "xcp_stats.gfx_below_host_limit_ppt_acc = \n";  // new for 1.8
+    for (auto& row : gpu_metrics.xcp_stats) {
+      std::cout << "XCP[" << xcp << "] = " << "[ ";
+      std::copy(std::begin(row.gfx_below_host_limit_ppt_acc),
+              std::end(row.gfx_below_host_limit_ppt_acc),
+              amd::smi::make_ostream_joiner(&std::cout, ", "));
+      std::cout << " ]\n";
+      xcp++;
+    }
+
+    xcp = 0;
+    std::cout << std::dec << "xcp_stats.gfx_below_host_limit_thm_acc = \n";  // new for 1.8
+    for (auto& row : gpu_metrics.xcp_stats) {
+      std::cout << "XCP[" << xcp << "] = " << "[ ";
+      std::copy(std::begin(row.gfx_below_host_limit_thm_acc),
+              std::end(row.gfx_below_host_limit_thm_acc),
+              amd::smi::make_ostream_joiner(&std::cout, ", "));
+      std::cout << " ]\n";
+      xcp++;
+    }
+
+    xcp = 0;
+    std::cout << std::dec << "xcp_stats.gfx_low_utilization_acc = \n";
+    for (auto& row : gpu_metrics.xcp_stats) {
+      std::cout << "XCP[" << xcp << "] = " << "[ ";
+      std::copy(std::begin(row.gfx_low_utilization_acc),
+              std::end(row.gfx_low_utilization_acc),
+              amd::smi::make_ostream_joiner(&std::cout, ", "));
+      std::cout << " ]\n";
+      xcp++;
+    }
+
+    xcp = 0;
+    std::cout << std::dec << "xcp_stats.gfx_below_host_limit_total_acc = \n";
+    for (auto& row : gpu_metrics.xcp_stats) {
+      std::cout << "XCP[" << xcp << "] = " << "[ ";
+      std::copy(std::begin(row.gfx_below_host_limit_total_acc),
+              std::end(row.gfx_below_host_limit_total_acc),
               amd::smi::make_ostream_joiner(&std::cout, ", "));
       std::cout << " ]\n";
       xcp++;

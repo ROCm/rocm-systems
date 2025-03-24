@@ -662,10 +662,14 @@ class amdgpu_xcp_metrics_t(Structure):
 # amdgpu_xcp_metrics_t._pack_ = 1 # source:False
 amdgpu_xcp_metrics_t._fields_ = [
     ('gfx_busy_inst', c_uint32 * 8),
-    ('jpeg_busy', c_uint16 * 32),
+    ('jpeg_busy', c_uint16 * 40),
     ('vcn_busy', c_uint16 * 4),
     ('gfx_busy_acc', c_uint64 * 8),
     ('gfx_below_host_limit_acc', c_uint64 * 8),
+    ('gfx_below_host_limit_ppt_acc', c_uint64 * 8),
+    ('gfx_below_host_limit_thm_acc', c_uint64 * 8),
+    ('gfx_low_utilization_acc', c_uint64 * 8),
+    ('gfx_below_host_limit_total_acc', c_uint64 * 8),
 ]
 xcp_stats_t = amdgpu_xcp_metrics_t
 

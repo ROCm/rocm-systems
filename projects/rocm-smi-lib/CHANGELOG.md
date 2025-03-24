@@ -4,6 +4,44 @@ Full documentation for rocm_smi_lib is available at [https://rocm.docs.amd.com/]
 
 ***All information listed below is for reference and subject to change.***
 
+## amd_smi_lib for ROCm 6.5.0
+
+### Added
+
+- **Added support for GPU metrics 1.8**.  
+  - Added new fields for `rsmi_gpu_metrics_t` including:  
+    - Adding the following metrics to allow new calculations for violation status:
+    - Per XCP metrics `gfx_below_host_limit_ppt_acc[XCP][MAX_XCC]` - GFX Clock Host limit Package Power Tracking violation counts
+    - Per XCP metrics `gfx_below_host_limit_thm_acc[XCP][MAX_XCC]` - GFX Clock Host limit Thermal (TVIOL) violation counts
+    - Per XCP metrics `gfx_low_utilization_acc[XCP][MAX_XCC]` - violation counts for how did low utilization caused the GPU to be below application clocks.
+    - Per XCP metrics `gfx_below_host_limit_total_acc[XCP][MAX_XCC]`- violation counts for how long GPU was held below application clocks any limiter (see above new violation metrics).
+  - Increasing available JPEG engines to 40.  
+  Current ASICs may not support all 40. These will be indicated as UINT16_MAX or N/A in CLI.
+
+### Changed
+
+- N/A
+
+### Removed
+
+- N/A
+
+### Optimized
+
+- N/A
+
+### Resolved issues
+
+- N/A
+
+### Upcoming changes
+
+- N/A
+
+### Known issues
+
+- N/A
+
 ## rocm_smi_lib for ROCm 6.4
 
 ### Added
