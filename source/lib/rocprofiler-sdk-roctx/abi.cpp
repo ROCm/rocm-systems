@@ -27,7 +27,7 @@
 #include <rocprofiler-sdk-roctx/defines.h>
 #include <rocprofiler-sdk-roctx/roctx.h>
 #include <rocprofiler-sdk-roctx/types.h>
-#include <rocprofiler-sdk/version.h>
+#include <rocprofiler-sdk-roctx/version.h>
 
 namespace rocprofiler
 {

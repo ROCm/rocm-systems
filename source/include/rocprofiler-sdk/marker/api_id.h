@@ -25,7 +25,7 @@
 /**
  * @brief ROCProfiler enumeration of Marker (ROCTx) API tracing operations
  */
-typedef enum  // NOLINT(performance-enum-size)
+typedef enum rocprofiler_marker_core_api_id_t  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_MARKER_CORE_API_ID_NONE       = -1,
     ROCPROFILER_MARKER_CORE_API_ID_roctxMarkA = 0,
@@ -37,7 +37,7 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_MARKER_CORE_API_ID_LAST,
 } rocprofiler_marker_core_api_id_t;
 
-typedef enum  // NOLINT(performance-enum-size)
+typedef enum rocprofiler_marker_control_api_id_t  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_MARKER_CONTROL_API_ID_NONE               = -1,
     ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerPause = 0,
@@ -45,7 +45,7 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_MARKER_CONTROL_API_ID_LAST,
 } rocprofiler_marker_control_api_id_t;
 
-typedef enum  // NOLINT(performance-enum-size)
+typedef enum rocprofiler_marker_name_api_id_t  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_MARKER_NAME_API_ID_NONE              = -1,
     ROCPROFILER_MARKER_NAME_API_ID_roctxNameOsThread = 0,

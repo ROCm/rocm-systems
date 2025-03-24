@@ -24,7 +24,6 @@
 
 #include <rocprofiler-sdk/defines.h>
 #include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/version.h>
 
 #include <hip/hip_runtime.h>
 #include <hip/hip_runtime_api.h>

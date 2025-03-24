@@ -24,12 +24,12 @@
 
 #pragma once
 
-#include <rocprofiler-sdk/version.h>
+#include <rocprofiler-sdk/rocdecode/api_trace.h>
 
 /**
  * @brief ROCProfiler enumeration of rocDecode API tracing operations
  */
-typedef enum  // NOLINT(performance-enum-size)
+typedef enum rocprofiler_rocdecode_api_id_t  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_ROCDECODE_API_ID_NONE = -1,
 

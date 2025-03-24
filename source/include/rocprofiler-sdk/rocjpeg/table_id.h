@@ -22,8 +22,7 @@
 
 #pragma once
 
-// NOLINTNEXTLINE(performance-enum-size)
-typedef enum
+typedef enum rocprofiler_rocjpeg_table_id_t  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_ROCJPEG_TABLE_ID_NONE = -1,
     ROCPROFILER_ROCJPEG_TABLE_ID_CORE = 0,

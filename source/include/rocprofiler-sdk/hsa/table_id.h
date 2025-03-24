@@ -23,7 +23,7 @@
 #pragma once
 
 // NOLINTNEXTLINE(performance-enum-size)
-typedef enum
+typedef enum rocprofiler_hsa_table_id_t
 {
     ROCPROFILER_HSA_TABLE_ID_NONE = -1,
     ROCPROFILER_HSA_TABLE_ID_Core = 0,

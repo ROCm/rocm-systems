@@ -124,7 +124,8 @@ WARN_LOGFILE           =
 #---------------------------------------------------------------------------
 INPUT                  = @SOURCE_DIR@/README.md \
                          @SOURCE_DIR@/source/include/rocprofiler-sdk \
-                         @SOURCE_DIR@/build-docs/source/include/rocprofiler-sdk/version.h
+                         @SOURCE_DIR@/build-docs/source/include/rocprofiler-sdk/version.h \
+                         @SOURCE_DIR@/build-docs/source/include/rocprofiler-sdk/ext_version.h
 INPUT_ENCODING         = UTF-8
 INPUT_FILE_ENCODING    =
 FILE_PATTERNS          = *.h \
@@ -177,7 +178,7 @@ INPUT_FILTER           =
 FILTER_PATTERNS        =
 FILTER_SOURCE_FILES    = NO
 FILTER_SOURCE_PATTERNS =
-USE_MDFILE_AS_MAINPAGE = 
+USE_MDFILE_AS_MAINPAGE =
 FORTRAN_COMMENT_AFTER  = 72
 #---------------------------------------------------------------------------
 # Configuration options related to source browsing
@@ -202,10 +203,10 @@ IGNORE_PREFIX          =
 GENERATE_HTML          = YES
 HTML_OUTPUT            = html
 HTML_FILE_EXTENSION    = .html
-HTML_HEADER            = 
-HTML_FOOTER            = 
-HTML_STYLESHEET        = 
-HTML_EXTRA_STYLESHEET  = 
+HTML_HEADER            =
+HTML_FOOTER            =
+HTML_STYLESHEET        =
+HTML_EXTRA_STYLESHEET  =
 HTML_EXTRA_FILES       =
 HTML_COLORSTYLE        = LIGHT
 HTML_COLORSTYLE_HUE    = 220
@@ -338,7 +339,7 @@ EXPAND_ONLY_PREDEF     = NO
 SEARCH_INCLUDES        = NO
 INCLUDE_PATH           = @SOURCE_DIR@/source/include
 INCLUDE_FILE_PATTERNS  = *.h \
-                         *.hpp 
+                         *.hpp
 PREDEFINED             = "ROCPROFILER_API=" \
                          "ROCPROFILER_EXPORT=" \
                          "ROCPROFILER_IMPORT=" \

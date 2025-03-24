@@ -22,6 +22,9 @@
 
 #include "client.hpp"
 
+#include <rocprofiler-sdk/registration.h>
+#include <rocprofiler-sdk/rocprofiler.h>
+
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -37,12 +40,6 @@
 #include <stdexcept>
 #include <unordered_map>
 #include <vector>
-
-#include <rocprofiler-sdk/buffer.h>
-#include <rocprofiler-sdk/context.h>
-#include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/registration.h>
-#include <rocprofiler-sdk/rocprofiler.h>
 
 #define ROCPROFILER_CALL(result, msg)                                                              \
     {                                                                                              \
@@ -99,15 +96,14 @@ private:
     rocprofiler_agent_id_t          agent_   = {};
     rocprofiler_context_id_t        ctx_     = {};
     rocprofiler_buffer_id_t         buf_     = {};
-    rocprofiler_profile_config_id_t profile_ = {.handle = 0};
+    rocprofiler_counter_config_id_t profile_ = {.handle = 0};
 
-    std::map<std::vector<std::string>, rocprofiler_profile_config_id_t> cached_profiles_;
+    std::map<std::vector<std::string>, rocprofiler_counter_config_id_t> cached_profiles_;
     std::map<uint64_t, uint64_t>                                        profile_sizes_;
     mutable std::map<uint64_t, std::string>                             id_to_name_;
 
     // Internal function used to set the profile for the agent when start_context is called
-    void set_profile(rocprofiler_context_id_t                 ctx,
-                     rocprofiler_agent_set_profile_callback_t cb) const;
+    void set_profile(rocprofiler_context_id_t ctx, rocprofiler_device_counting_agent_cb_t cb) const;
 
     // Get the size of a counter in number of records
     static size_t get_counter_size(rocprofiler_counter_id_t counter);
@@ -153,8 +149,8 @@ counter_sampler::counter_sampler(rocprofiler_agent_id_t agent)
                          agent,
                          [](rocprofiler_context_id_t context_id,
                             rocprofiler_agent_id_t,
-                            rocprofiler_agent_set_profile_callback_t set_config,
-                            void*                                    user_data) {
+                            rocprofiler_device_counting_agent_cb_t set_config,
+                            void*                                  user_data) {
                              if(user_data)
                              {
                                  auto* sampler = static_cast<counter_sampler*>(user_data);
@@ -212,7 +208,7 @@ counter_sampler::sample_counter_values(const std::vector<std::string>&          
     if(profile_cached == cached_profiles_.end())
     {
         size_t                                expected_size = 0;
-        rocprofiler_profile_config_id_t       profile       = {};
+        rocprofiler_counter_config_id_t       profile       = {};
         std::vector<rocprofiler_counter_id_t> gpu_counters;
         auto                                  roc_counters = get_supported_counters(agent_);
         for(const auto& counter : counters)
@@ -226,7 +222,7 @@ counter_sampler::sample_counter_values(const std::vector<std::string>&          
             gpu_counters.push_back(it->second);
             expected_size += get_counter_size(it->second);
         }
-        ROCPROFILER_CALL(rocprofiler_create_profile_config(
+        ROCPROFILER_CALL(rocprofiler_create_counter_config(
                              agent_, gpu_counters.data(), gpu_counters.size(), &profile),
                          "Could not create profile");
         cached_profiles_.emplace(counters, profile);
@@ -281,8 +277,8 @@ counter_sampler::get_available_agents()
 }
 
 void
-counter_sampler::set_profile(rocprofiler_context_id_t                 ctx,
-                             rocprofiler_agent_set_profile_callback_t cb) const
+counter_sampler::set_profile(rocprofiler_context_id_t               ctx,
+                             rocprofiler_device_counting_agent_cb_t cb) const
 {
     if(profile_.handle != 0)
     {
@@ -293,22 +289,11 @@ counter_sampler::set_profile(rocprofiler_context_id_t                 ctx,
 size_t
 counter_sampler::get_counter_size(rocprofiler_counter_id_t counter)
 {
-    size_t size = 1;
-    rocprofiler_iterate_counter_dimensions(
-        counter,
-        [](rocprofiler_counter_id_t,
-           const rocprofiler_record_dimension_info_t* dim_info,
-           size_t                                     num_dims,
-           void*                                      user_data) {
-            size_t* s = static_cast<size_t*>(user_data);
-            for(size_t i = 0; i < num_dims; i++)
-            {
-                *s *= dim_info[i].instance_size;
-            }
-            return ROCPROFILER_STATUS_SUCCESS;
-        },
-        static_cast<void*>(&size));
-    return size;
+    rocprofiler_counter_info_v1_t info;
+    ROCPROFILER_CALL(rocprofiler_query_counter_info(
+                         counter, ROCPROFILER_COUNTER_INFO_VERSION_1, static_cast<void*>(&info)),
+                     "Could not query info for counter");
+    return info.instance_ids_count;
 }
 
 std::unordered_map<std::string, rocprofiler_counter_id_t>
@@ -335,12 +320,12 @@ counter_sampler::get_supported_counters(rocprofiler_agent_id_t agent)
                      "Could not fetch supported counters");
     for(auto& counter : gpu_counters)
     {
-        rocprofiler_counter_info_v0_t version;
+        rocprofiler_counter_info_v0_t info;
         ROCPROFILER_CALL(
             rocprofiler_query_counter_info(
-                counter, ROCPROFILER_COUNTER_INFO_VERSION_0, static_cast<void*>(&version)),
+                counter, ROCPROFILER_COUNTER_INFO_VERSION_0, static_cast<void*>(&info)),
             "Could not query info for counter");
-        out.emplace(version.name, counter);
+        out.emplace(info.name, counter);
     }
     return out;
 }
@@ -348,23 +333,12 @@ counter_sampler::get_supported_counters(rocprofiler_agent_id_t agent)
 std::vector<rocprofiler_record_dimension_info_t>
 counter_sampler::get_counter_dimensions(rocprofiler_counter_id_t counter)
 {
-    std::vector<rocprofiler_record_dimension_info_t> dims;
-    rocprofiler_available_dimensions_cb_t            cb =
-        [](rocprofiler_counter_id_t,
-           const rocprofiler_record_dimension_info_t* dim_info,
-           size_t                                     num_dims,
-           void*                                      user_data) {
-            std::vector<rocprofiler_record_dimension_info_t>* vec =
-                static_cast<std::vector<rocprofiler_record_dimension_info_t>*>(user_data);
-            for(size_t i = 0; i < num_dims; i++)
-            {
-                vec->push_back(dim_info[i]);
-            }
-            return ROCPROFILER_STATUS_SUCCESS;
-        };
-    ROCPROFILER_CALL(rocprofiler_iterate_counter_dimensions(counter, cb, &dims),
-                     "Could not iterate counter dimensions");
-    return dims;
+    rocprofiler_counter_info_v1_t info;
+    ROCPROFILER_CALL(rocprofiler_query_counter_info(
+                         counter, ROCPROFILER_COUNTER_INFO_VERSION_1, static_cast<void*>(&info)),
+                     "Could not query info for counter");
+    return std::vector<rocprofiler_record_dimension_info_t>{
+        info.dimensions, info.dimensions + info.dimensions_count};
 }
 
 std::atomic<bool>&

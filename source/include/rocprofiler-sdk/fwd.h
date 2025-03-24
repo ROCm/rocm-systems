@@ -42,14 +42,10 @@ ROCPROFILER_EXTERN_C_INIT
  * @{
  */
 
-// TODO(aelwazir): Do we need to add a null (way) for every handle?
-// TODO(aelwazir): Remove API Data args from the doxygen?
-// TODO(aelwazir): Not everything in bin needs to be installed bin, use libexec or share?
-
 /**
  * @brief Status codes.
  */
-typedef enum  // NOLINT(performance-enum-size)
+typedef enum rocprofiler_status_t  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_STATUS_SUCCESS = 0,                ///< No error occurred
     ROCPROFILER_STATUS_ERROR,                      ///< Generalized error
@@ -111,10 +107,10 @@ typedef enum  // NOLINT(performance-enum-size)
 } rocprofiler_status_t;
 
 /**
- * @brief Buffer record categories. This enumeration type is encoded in @ref
- * rocprofiler_record_header_t category field
+ * @brief Buffer record categories. This enumeration type is encoded in
+ * ::rocprofiler_record_header_t category field
  */
-typedef enum  // NOLINT(performance-enum-size)
+typedef enum rocprofiler_buffer_category_t  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_BUFFER_CATEGORY_NONE = 0,
     ROCPROFILER_BUFFER_CATEGORY_TRACING,
@@ -126,7 +122,7 @@ typedef enum  // NOLINT(performance-enum-size)
 /**
  * @brief Agent type.
  */
-typedef enum  // NOLINT(performance-enum-size)
+typedef enum rocprofiler_agent_type_t  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_AGENT_TYPE_NONE = 0,  ///< Agent type is unknown
     ROCPROFILER_AGENT_TYPE_CPU,       ///< Agent type is a CPU
@@ -137,7 +133,7 @@ typedef enum  // NOLINT(performance-enum-size)
 /**
  * @brief Service Callback Phase.
  */
-typedef enum  // NOLINT(performance-enum-size)
+typedef enum rocprofiler_callback_phase_t  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_CALLBACK_PHASE_NONE = 0,  ///< Callback has no phase
     ROCPROFILER_CALLBACK_PHASE_ENTER,     ///< Callback invoked prior to function execution
@@ -152,7 +148,7 @@ typedef enum  // NOLINT(performance-enum-size)
 /**
  * @brief Service Callback Tracing Kind. @see rocprofiler_configure_callback_tracing_service.
  */
-typedef enum  // NOLINT(performance-enum-size)
+typedef enum rocprofiler_callback_tracing_kind_t  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_CALLBACK_TRACING_NONE = 0,
     ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API,       ///< @see ::rocprofiler_hsa_core_api_id_t
@@ -178,15 +174,14 @@ typedef enum  // NOLINT(performance-enum-size)
                                                           ///< library has been initialized
     ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API,           ///< rocDecode API Tracing
     ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API,             ///< rocJPEG API Tracing
-    ROCPROFILER_CALLBACK_TRACING_HIP_STREAM_API,          ///< @see
-                                                          ///< ::rocprofiler_hip_stream_operation_t
+    ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,  ///< @see ::rocprofiler_hip_stream_operation_t
     ROCPROFILER_CALLBACK_TRACING_LAST,
 } rocprofiler_callback_tracing_kind_t;
 
 /**
  * @brief Service Buffer Tracing Kind. @see rocprofiler_configure_buffer_tracing_service.
  */
-typedef enum  // NOLINT(performance-enum-size)
+typedef enum rocprofiler_buffer_tracing_kind_t  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_BUFFER_TRACING_NONE = 0,
     ROCPROFILER_BUFFER_TRACING_HSA_CORE_API,          ///< @see ::rocprofiler_hsa_core_api_id_t
@@ -211,9 +206,9 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_BUFFER_TRACING_RUNTIME_INITIALIZATION,  ///< Record indicating a runtime library has
                                                         ///< been initialized. @see
                                                         ///< ::rocprofiler_runtime_initialization_operation_t
-    ROCPROFILER_BUFFER_TRACING_ROCDECODE_API,   ///< rocDecode tracing
-    ROCPROFILER_BUFFER_TRACING_ROCJPEG_API,     ///< rocJPEG tracing
-    ROCPROFILER_BUFFER_TRACING_HIP_STREAM_API,  ///< Display HIP Stream
+    ROCPROFILER_BUFFER_TRACING_ROCDECODE_API,  ///< rocDecode tracing
+    ROCPROFILER_BUFFER_TRACING_ROCJPEG_API,    ///< rocJPEG tracing
+    ROCPROFILER_BUFFER_TRACING_HIP_STREAM,     ///< @see ::rocprofiler_hip_stream_operation_t
     ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT,
     ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT,
     ROCPROFILER_BUFFER_TRACING_LAST,
@@ -229,7 +224,7 @@ typedef enum  // NOLINT(performance-enum-size)
 /**
  * @brief ROCProfiler Code Object Tracer Operations.
  */
-typedef enum  // NOLINT(performance-enum-size)
+typedef enum rocprofiler_code_object_operation_t  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_CODE_OBJECT_NONE = 0,  ///< Unknown code object operation
     ROCPROFILER_CODE_OBJECT_LOAD,      ///< Code object containing kernel symbols
@@ -239,9 +234,10 @@ typedef enum  // NOLINT(performance-enum-size)
 } rocprofiler_code_object_operation_t;
 
 /**
- * @brief ROCProfiler Stream Handle Operations.
+ * @brief ROCProfiler HIP Stream Operations. These operations can be used to associate subsequent
+ * information with a HIP stream
  */
-typedef enum  // NOLINT(performance-enum-size)
+typedef enum rocprofiler_hip_stream_operation_t  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_HIP_STREAM_NONE = 0,  ///< Unknown stream handle operation
     ROCPROFILER_HIP_STREAM_CREATE,    ///< A stream handle is created
@@ -258,7 +254,7 @@ typedef enum  // NOLINT(performance-enum-size)
 /**
  * @brief Memory Copy Operations.
  */
-typedef enum  // NOLINT(performance-enum-size)
+typedef enum rocprofiler_memory_copy_operation_t  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_MEMORY_COPY_NONE = 0,          ///< Unknown memory copy direction
     ROCPROFILER_MEMORY_COPY_HOST_TO_HOST,      ///< Memory copy from host to host
@@ -271,7 +267,7 @@ typedef enum  // NOLINT(performance-enum-size)
 /**
  * @brief Memory Allocation Operation.
  */
-typedef enum  // NOLINT(performance-enum-size)
+typedef enum rocprofiler_memory_allocation_operation_t  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_MEMORY_ALLOCATION_NONE = 0,       ///< Unknown memory allocation function
     ROCPROFILER_MEMORY_ALLOCATION_ALLOCATE,       ///< Allocate memory function
@@ -284,7 +280,7 @@ typedef enum  // NOLINT(performance-enum-size)
 /**
  * @brief ROCProfiler Kernel Dispatch Tracing Operation Types.
  */
-typedef enum  // NOLINT(performance-enum-size)
+typedef enum rocprofiler_kernel_dispatch_operation_t  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_KERNEL_DISPATCH_NONE    = 0,  ///< Unknown kernel dispatch operation
     ROCPROFILER_KERNEL_DISPATCH_ENQUEUE = 1,
@@ -330,7 +326,7 @@ typedef enum  // NOLINT(performance-enum-size)
 /**
  * @brief PC Sampling Method.
  */
-typedef enum  // NOLINT(performance-enum-size)
+typedef enum rocprofiler_pc_sampling_method_t  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_PC_SAMPLING_METHOD_NONE = 0,    ///< Unknown sampling type
     ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC,  ///< Stochastic sampling (MI300+)
@@ -341,7 +337,7 @@ typedef enum  // NOLINT(performance-enum-size)
 /**
  * @brief PC Sampling Unit.
  */
-typedef enum  // NOLINT(performance-enum-size)
+typedef enum rocprofiler_pc_sampling_unit_t  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_PC_SAMPLING_UNIT_NONE = 0,      ///< Sample interval has unspecified units
     ROCPROFILER_PC_SAMPLING_UNIT_INSTRUCTIONS,  ///< Sample interval is in instructions
@@ -353,7 +349,7 @@ typedef enum  // NOLINT(performance-enum-size)
 /**
  * @brief Actions when Buffer is full.
  */
-typedef enum  // NOLINT(performance-enum-size)
+typedef enum rocprofiler_buffer_policy_t  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_BUFFER_POLICY_NONE = 0,  ///< No policy has been set
     ROCPROFILER_BUFFER_POLICY_DISCARD,   ///< Drop records when buffer is full
@@ -364,7 +360,7 @@ typedef enum  // NOLINT(performance-enum-size)
 /**
  * @brief Page migration event.
  */
-typedef enum  // NOLINT(performance-enum-size)
+typedef enum rocprofiler_page_migration_operation_t  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_PAGE_MIGRATION_NONE = 0,  ///< Unknown event
     ROCPROFILER_PAGE_MIGRATION_PAGE_MIGRATE_START,
@@ -381,7 +377,7 @@ typedef enum  // NOLINT(performance-enum-size)
 /**
  * @brief Scratch event kind
  */
-typedef enum
+typedef enum rocprofiler_scratch_memory_operation_t
 {
     ROCPROFILER_SCRATCH_MEMORY_NONE = 0,       ///< Unknown scratch operation
     ROCPROFILER_SCRATCH_MEMORY_ALLOC,          ///< Scratch memory allocation event
@@ -394,7 +390,7 @@ typedef enum
  * @brief Enumeration for specifying runtime libraries supported by rocprofiler. This enumeration is
  * used for thread creation callbacks. @see INTERNAL_THREADING.
  */
-typedef enum
+typedef enum rocprofiler_runtime_library_t
 {
     ROCPROFILER_LIBRARY           = (1 << 0),
     ROCPROFILER_HSA_LIBRARY       = (1 << 1),
@@ -410,7 +406,7 @@ typedef enum
  * @brief Enumeration for specifying intercept tables supported by rocprofiler. This enumeration is
  * used for intercept tables. @see INTERCEPT_TABLE.
  */
-typedef enum
+typedef enum rocprofiler_intercept_table_t
 {
     ROCPROFILER_HSA_TABLE            = (1 << 0),
     ROCPROFILER_HIP_RUNTIME_TABLE    = (1 << 1),
@@ -427,7 +423,7 @@ typedef enum
 /**
  * @brief ROCProfiler Runtime Initialization Tracer Operations.
  */
-typedef enum  // NOLINT(performance-enum-size)
+typedef enum rocprofiler_runtime_initialization_operation_t  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_RUNTIME_INITIALIZATION_NONE = 0,   ///< Unknown runtime initialization
     ROCPROFILER_RUNTIME_INITIALIZATION_HSA,        ///< Application loaded HSA runtime
@@ -442,10 +438,11 @@ typedef enum  // NOLINT(performance-enum-size)
 /**
  * @brief Enumeration for specifying the counter info struct version you want.
  */
-typedef enum
+typedef enum rocprofiler_counter_info_version_id_t
 {
     ROCPROFILER_COUNTER_INFO_VERSION_NONE,
     ROCPROFILER_COUNTER_INFO_VERSION_0,  ///< @see ::rocprofiler_counter_info_v0_t
+    ROCPROFILER_COUNTER_INFO_VERSION_1,  ///< @see ::rocprofiler_counter_info_v1_t
     ROCPROFILER_COUNTER_INFO_VERSION_LAST,
 } rocprofiler_counter_info_version_id_t;
 
@@ -453,7 +450,7 @@ typedef enum
  * @brief Enumeration for distinguishing different buffer record kinds within the
  * ::ROCPROFILER_BUFFER_CATEGORY_COUNTERS category
  */
-typedef enum
+typedef enum rocprofiler_counter_record_kind_t
 {
     ROCPROFILER_COUNTER_RECORD_NONE = 0,
     ROCPROFILER_COUNTER_RECORD_PROFILE_COUNTING_DISPATCH_HEADER,  ///< ::rocprofiler_dispatch_counting_service_record_t
@@ -468,7 +465,7 @@ typedef enum
 /**
  * @brief Enumeration of flags that can be used with some counter api calls
  */
-typedef enum
+typedef enum rocprofiler_counter_flag_t
 {
     ROCPROFILER_COUNTER_FLAG_NONE = 0,
     ROCPROFILER_COUNTER_FLAG_ASYNC,              ///< Do not wait for completion before returning.
@@ -481,7 +478,7 @@ typedef enum
  * @brief Enumeration for distinguishing different buffer record kinds within the
  * ::ROCPROFILER_BUFFER_CATEGORY_PC_SAMPLING category
  */
-typedef enum
+typedef enum rocprofiler_pc_sampling_record_kind_t
 {
     ROCPROFILER_PC_SAMPLING_RECORD_NONE = 0,
     ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE,  ///< ::rocprofiler_pc_sampling_record_invalid_t
@@ -585,6 +582,16 @@ typedef union rocprofiler_uuid_t
 //--------------------------------------------------------------------------------------//
 
 /**
+ * @brief Versioning info.
+ */
+typedef struct rocprofiler_version_triplet_t
+{
+    uint32_t major;
+    uint32_t minor;
+    uint32_t patch;
+} rocprofiler_version_triplet_t;
+
+/**
  * @brief Context ID.
  */
 typedef struct rocprofiler_context_id_t
@@ -679,12 +686,12 @@ typedef struct rocprofiler_counter_id_t
 
 /**
  * @brief Profile Configurations
- * @see rocprofiler_create_profile_config for how to create.
+ * @see rocprofiler_create_counter_config for how to create.
  */
-typedef struct rocprofiler_profile_config_id_t
+typedef struct rocprofiler_counter_config_id_t
 {
     uint64_t handle;  // Opaque handle
-} rocprofiler_profile_config_id_t;
+} rocprofiler_counter_config_id_t;
 
 /**
  * @brief Multi-dimensional struct of data used to describe GPU workgroup and grid sizes
@@ -740,13 +747,13 @@ typedef struct rocprofiler_callback_tracing_record_t
  *
  * @endcode
  */
-typedef struct
+typedef struct rocprofiler_record_header_t
 {
     union
     {
         struct
         {
-            uint32_t category;  ///< rocprofiler_buffer_category_t
+            uint32_t category;  ///< ::rocprofiler_buffer_category_t
             uint32_t kind;      ///< domain
         };
         uint64_t hash;  ///< generic identifier. You can compute this via: `uint64_t hash = category
@@ -756,12 +763,12 @@ typedef struct
 } rocprofiler_record_header_t;
 
 /**
- * @brief Function for computing the unsigned 64-bit hash value in @ref rocprofiler_record_header_t
+ * @brief Function for computing the unsigned 64-bit hash value in ::rocprofiler_record_header_t
  * from a category and kind (two unsigned 32-bit values)
  *
- * @param [in] category a value from @ref rocprofiler_buffer_category_t
- * @param [in] kind depending on the category, this is the domain value, e.g., @ref
- * rocprofiler_buffer_tracing_kind_t value
+ * @param [in] category a value from ::rocprofiler_buffer_category_t
+ * @param [in] kind depending on the category, this is the domain value, e.g.,
+ * ::rocprofiler_buffer_tracing_kind_t value
  * @return uint64_t hash value of category and kind
  */
 static inline uint64_t
@@ -801,20 +808,22 @@ typedef struct rocprofiler_kernel_dispatch_info_t
 /**
  * @brief Details for the dimension, including its size, for a counter record.
  */
-typedef struct
+typedef struct rocprofiler_counter_record_dimension_info_t
 {
     const char*                        name;
     size_t                             instance_size;
     rocprofiler_counter_dimension_id_t id;
 
     /// @var id
-    /// @brief Id for this dimension used by @ref rocprofiler_query_record_dimension_position
-} rocprofiler_record_dimension_info_t;
+    /// @brief Id for this dimension used by ::rocprofiler_query_record_dimension_position
+} rocprofiler_counter_record_dimension_info_t;
+
+typedef rocprofiler_counter_record_dimension_info_t rocprofiler_record_dimension_info_t;
 
 /**
  * @brief ROCProfiler Profile Counting Counter Record per instance.
  */
-typedef struct
+typedef struct rocprofiler_counter_record_t
 {
     rocprofiler_counter_instance_id_t id;             ///< counter identifier
     double                            counter_value;  ///< counter value
@@ -831,27 +840,15 @@ typedef struct
     /// instance (provided during callback for profile config) or a
     /// ::rocprofiler_dispatch_counting_service_record_t records (which will be insert into the
     /// buffer prior to the associated ::rocprofiler_record_counter_t records).
-} rocprofiler_record_counter_t;
+} rocprofiler_counter_record_t;
 
-/**
- * @brief Counter info struct version 0
- */
-typedef struct
-{
-    rocprofiler_counter_id_t id;               ///< Id of this counter
-    const char*              name;             ///< Name of the counter
-    const char*              description;      ///< Description of the counter
-    const char*              block;            ///< Block of the counter (non-derived only)
-    const char*              expression;       ///< Counter expression (derived counters only)
-    uint8_t                  is_constant : 1;  ///< If this counter is HW constant
-    uint8_t                  is_derived  : 1;  ///< If this counter is a derived counter
-} rocprofiler_counter_info_v0_t;
+typedef rocprofiler_counter_record_t rocprofiler_record_counter_t;
 
 /**
  * @brief ROCProfiler SPM Record.
  *
  */
-typedef struct
+typedef struct rocprofiler_spm_record_t
 {
     /**
      * Counters, including identifiers to get counter information and Counters
@@ -860,6 +857,14 @@ typedef struct
     rocprofiler_record_counter_t* counters;
     uint64_t                      counters_count;
 } rocprofiler_spm_record_t;
+
+#if defined(ROCPROFILER_SDK_BETA_COMPAT) && ROCPROFILER_SDK_BETA_COMPAT > 0
+
+// "profile_config" renamed to "counter_config"
+ROCPROFILER_SDK_DEPRECATED("profile_config renamed to counter_config")
+typedef rocprofiler_counter_config_id_t rocprofiler_profile_config_id_t;
+
+#endif
 
 /** @} */
 

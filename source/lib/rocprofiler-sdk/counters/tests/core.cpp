@@ -168,7 +168,7 @@ buffered_callback(rocprofiler_context_id_t,
 
 void
 null_dispatch_callback(rocprofiler_dispatch_counting_service_data_t,
-                       rocprofiler_profile_config_id_t*,
+                       rocprofiler_counter_config_id_t*,
                        rocprofiler_user_data_t*,
                        void*)
 {}
@@ -209,15 +209,15 @@ TEST(core, check_packet_generation)
             /**
              * Check profile construction
              */
-            rocprofiler_profile_config_id_t cfg_id = {.handle = 0};
+            rocprofiler_counter_config_id_t cfg_id = {.handle = 0};
             rocprofiler_counter_id_t        id     = {.handle = metric.id()};
             ROCP_ERROR << fmt::format("Generating packet for {}", metric);
             ROCPROFILER_CALL(
-                rocprofiler_create_profile_config(agent.get_rocp_agent()->id, &id, 1, &cfg_id),
+                rocprofiler_create_counter_config(agent.get_rocp_agent()->id, &id, 1, &cfg_id),
                 "Unable to create profile");
-            auto profile = counters::get_profile_config(cfg_id);
+            auto profile = counters::get_counter_config(cfg_id);
             ASSERT_TRUE(profile);
-            EXPECT_EQ(counters::counter_callback_info::setup_profile_config(profile),
+            EXPECT_EQ(counters::counter_callback_info::setup_counter_config(profile),
                       ROCPROFILER_STATUS_SUCCESS)
                 << fmt::format("Could not build profile for {}", metric.name());
 
@@ -304,7 +304,7 @@ namespace
 struct expected_dispatch
 {
     // To pass back
-    rocprofiler_profile_config_id_t    id             = {.handle = 0};
+    rocprofiler_counter_config_id_t    id             = {.handle = 0};
     rocprofiler_queue_id_t             queue_id       = {.handle = 0};
     rocprofiler_agent_id_t             agent_id       = {.handle = 0};
     uint64_t                           kernel_id      = 0;
@@ -312,12 +312,12 @@ struct expected_dispatch
     rocprofiler_async_correlation_id_t correlation_id = {.internal = 0, .external = {.value = 0}};
     rocprofiler_dim3_t                 workgroup_size = {0, 0, 0};
     rocprofiler_dim3_t                 grid_size      = {0, 0, 0};
-    rocprofiler_profile_config_id_t*   config         = nullptr;
+    rocprofiler_counter_config_id_t*   config         = nullptr;
 };
 
 void
 user_dispatch_cb(rocprofiler_dispatch_counting_service_data_t dispatch_data,
-                 rocprofiler_profile_config_id_t*             config,
+                 rocprofiler_counter_config_id_t*             config,
                  rocprofiler_user_data_t*                     user_data,
                  void*                                        callback_data_args)
 {
@@ -402,9 +402,9 @@ TEST(core, check_callbacks)
             expected_dispatch        expected = {};
             rocprofiler_counter_id_t id       = {.handle = metric.id()};
             ROCPROFILER_CALL(
-                rocprofiler_create_profile_config(agent.get_rocp_agent()->id, &id, 1, &expected.id),
+                rocprofiler_create_counter_config(agent.get_rocp_agent()->id, &id, 1, &expected.id),
                 "Unable to create profile");
-            auto profile = counters::get_profile_config(expected.id);
+            auto profile = counters::get_counter_config(expected.id);
             ASSERT_TRUE(profile);
 
             std::shared_ptr<counters::counter_callback_info> cb_info =
@@ -502,14 +502,14 @@ TEST(core, destroy_counter_profile)
             expected_dispatch        expected = {};
             rocprofiler_counter_id_t id       = {.handle = metric.id()};
             ROCPROFILER_CALL(
-                rocprofiler_create_profile_config(agent.get_rocp_agent()->id, &id, 1, &expected.id),
+                rocprofiler_create_counter_config(agent.get_rocp_agent()->id, &id, 1, &expected.id),
                 "Unable to create profile");
-            ROCPROFILER_CALL(rocprofiler_destroy_profile_config(expected.id),
+            ROCPROFILER_CALL(rocprofiler_destroy_counter_config(expected.id),
                              "Could not delete profile id");
             /**
              * Check the profile was actually destroyed
              */
-            auto profile = counters::get_profile_config(expected.id);
+            auto profile = counters::get_counter_config(expected.id);
             EXPECT_FALSE(profile);
         }
     }
@@ -538,7 +538,7 @@ TEST(core, start_stop_buffered_ctx)
                                                &opt_buff_id),
                      "Could not create buffer");
 
-    ROCPROFILER_CALL(rocprofiler_configure_buffered_dispatch_counting_service(
+    ROCPROFILER_CALL(rocprofiler_configure_buffer_dispatch_counting_service(
                          get_client_ctx(), opt_buff_id, null_dispatch_callback, (void*) 0x12345),
                      "Could not setup buffered service");
     ROCPROFILER_CALL(rocprofiler_start_context(get_client_ctx()), "start context");
@@ -671,16 +671,16 @@ TEST(core, test_profile_incremental)
             }
         }
 
-        rocprofiler_profile_config_id_t cfg_id = {};
+        rocprofiler_counter_config_id_t cfg_id = {};
 
         // Add one counter from each block to incrementally to make sure we can
         // add them incrementally
         for(const auto& [block_name, block_metrics] : metric_blocks)
         {
-            rocprofiler_profile_config_id_t old_id = cfg_id;
+            rocprofiler_counter_config_id_t old_id = cfg_id;
             rocprofiler_counter_id_t        id     = {.handle = block_metrics.front().id()};
             ROCPROFILER_CALL(
-                rocprofiler_create_profile_config(agent.get_rocp_agent()->id, &id, 1, &cfg_id),
+                rocprofiler_create_counter_config(agent.get_rocp_agent()->id, &id, 1, &cfg_id),
                 "Unable to create profile incrementally when we should be able to");
             EXPECT_NE(old_id.handle, cfg_id.handle)
                 << "We expect that the handle changes this is due to the existing profile being "
@@ -697,7 +697,7 @@ TEST(core, test_profile_incremental)
              */
             rocprofiler_counter_id_t id = {.handle = metric.id()};
             if(status =
-                   rocprofiler_create_profile_config(agent.get_rocp_agent()->id, &id, 1, &cfg_id);
+                   rocprofiler_create_counter_config(agent.get_rocp_agent()->id, &id, 1, &cfg_id);
                status != ROCPROFILER_STATUS_SUCCESS)
             {
                 break;

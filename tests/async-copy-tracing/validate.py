@@ -47,6 +47,14 @@ def get_operation(record, kind_name, op_name=None):
     return None
 
 
+def get_operation_name(record, kind_idx, op_idx):
+    for idx, itr in enumerate(record["names"]):
+        if idx == kind_idx:
+            return itr["operations"][op_idx]
+
+    return None
+
+
 def test_data_structure(input_data):
     """verify minimum amount of expected data is present"""
     data = input_data
@@ -418,12 +426,6 @@ def test_ancestor_ids(input_data):
         len(memcopies) == num_hsa_memcopies
     ), "Expected number of memcopies to be same as number of async HSA (hsa_amd_memory_async_copy_on_engine) calls"
 
-    print(" > hip_memcopy_id       : ", hip_memcopy_id)
-    print(" > has_async_memcopy_id : ", has_async_memcopy_id)
-    print(
-        " > len(hip_memcopies)  : ", num_hsa_memcopies, len(hip_memcopies), len(memcopies)
-    )
-
     for tid in hip_memcopies:
         # We expect only 1 record with this internal id, per thread
         for corr_id, records in hip_memcopies[tid].items():
@@ -469,6 +471,8 @@ def test_ancestor_ids(input_data):
 def test_retired_correlation_ids(input_data):
     data = input_data
     sdk_data = data["rocprofiler-sdk-json-tool"]
+    buffer_records = sdk_data["buffer_records"]
+    api_name_info = {}
 
     def _sort_dict(inp):
         return dict(sorted(inp.items()))
@@ -477,8 +481,13 @@ def test_retired_correlation_ids(input_data):
     for titr in ["hsa_api_traces", "marker_api_traces", "hip_api_traces"]:
         for itr in sdk_data["buffer_records"][titr]:
             corr_id = itr["correlation_id"]["internal"]
+            name = get_operation_name(buffer_records, itr["kind"], itr["operation"])
+
             assert corr_id not in api_corr_ids.keys()
+            assert name is not None, f"{itr}"
+
             api_corr_ids[corr_id] = itr
+            api_name_info[corr_id] = name
 
     async_corr_ids = {}
     for titr in ["kernel_dispatch", "memory_copies"]:
@@ -497,19 +506,55 @@ def test_retired_correlation_ids(input_data):
     async_corr_ids = _sort_dict(async_corr_ids)
     retired_corr_ids = _sort_dict(retired_corr_ids)
 
-    for cid, itr in async_corr_ids.items():
-        assert cid in retired_corr_ids.keys()
-        retired_ts = retired_corr_ids[cid]["timestamp"]
-        end_ts = itr["end_timestamp"]
-        assert (retired_ts - end_ts) > 0, f"correlation-id: {cid}, data: {itr}"
+    #
+    # verify all the correlation ids were retired
+    #
+    num_api_corr_ids = len(api_corr_ids.keys())
+    num_retired_corr_ids = len(retired_corr_ids.keys())
 
+    missing_retired_corr_ids = [
+        itr for itr in api_corr_ids.keys() if itr not in retired_corr_ids.keys()
+    ]
+    # log in case of failure
+    sys.stderr.flush()
+    for itr in missing_retired_corr_ids:
+        name = api_name_info[itr]
+        info = api_corr_ids[itr]
+        sys.stderr.write(f"- unretired corr id: {itr} :: {name} :: {info}\n")
+    sys.stderr.flush()
+
+    assert (
+        num_api_corr_ids == num_retired_corr_ids
+    ), f"correlation ids not retired:\n\t{missing_retired_corr_ids}"
+
+    #
+    #   verify the retirement timestamp is >= the end timestamp of the records
+    #
     for cid, itr in api_corr_ids.items():
         assert cid in retired_corr_ids.keys()
         retired_ts = retired_corr_ids[cid]["timestamp"]
         end_ts = itr["end_timestamp"]
-        assert (retired_ts - end_ts) > 0, f"correlation-id: {cid}, data: {itr}"
+        name = api_name_info[cid]
+        assert (
+            retired_ts - end_ts
+        ) >= 0, f"\n\tcorr: {cid}\n\tname: {name}\n\tdata: {itr}"
 
-    assert len(api_corr_ids.keys()) == (len(retired_corr_ids.keys()))
+    # allow the retired timestamp to be 10 usec earlier than async end timestamp
+    # since the async timestamps undergo conversion from the GPU clock domain to
+    # the CPU clock domain. 10 microseconds was arbitrarily chosen to be an
+    # acceptable amount of inaccuracy -- in an ideal world, retired_ts should
+    # always be >= end_ts
+    usec = 1000
+    supported_fuzzing = 10 * usec
+
+    for cid, itr in async_corr_ids.items():
+        assert cid in retired_corr_ids.keys()
+        retired_ts = retired_corr_ids[cid]["timestamp"]
+        end_ts = itr["end_timestamp"]
+        name = api_name_info[cid]
+        assert (
+            retired_ts - end_ts
+        ) >= -supported_fuzzing, f"\n\tcorr: {cid}\n\tname: {name}\n\tdata: {itr}"
 
 
 if __name__ == "__main__":

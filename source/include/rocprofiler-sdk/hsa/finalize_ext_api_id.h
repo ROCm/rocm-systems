@@ -22,12 +22,12 @@
 
 #pragma once
 
-#include <rocprofiler-sdk/version.h>
+#include <rocprofiler-sdk/ext_version.h>
 
 /**
  * @brief ROCProfiler enumeration of HSA Image Extended API tracing operations
  */
-typedef enum  // NOLINT(performance-enum-size)
+typedef enum rocprofiler_hsa_finalize_ext_api_id_t  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_HSA_FINALIZE_EXT_API_ID_NONE                   = -1,
     ROCPROFILER_HSA_FINALIZE_EXT_API_ID_hsa_ext_program_create = 0,

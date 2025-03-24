@@ -22,6 +22,9 @@
 
 #include "client.hpp"
 
+#include <rocprofiler-sdk/registration.h>
+#include <rocprofiler-sdk/rocprofiler.h>
+
 #include <cstdint>
 #include <fstream>
 #include <functional>
@@ -32,10 +35,6 @@
 #include <sstream>
 #include <unordered_map>
 #include <vector>
-
-#include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/registration.h>
-#include <rocprofiler-sdk/rocprofiler.h>
 
 #define ROCPROFILER_CALL(result, msg)                                                              \
     {                                                                                              \
@@ -104,22 +103,15 @@ fill_dimension_cache(rocprofiler_counter_id_t counter)
 {
     assert(*dimension_cache() != nullptr);
     std::vector<rocprofiler_record_dimension_info_t> dims;
-    rocprofiler_available_dimensions_cb_t            cb =
-        [](rocprofiler_counter_id_t,
-           const rocprofiler_record_dimension_info_t* dim_info,
-           size_t                                     num_dims,
-           void*                                      user_data) {
-            std::vector<rocprofiler_record_dimension_info_t>* vec =
-                static_cast<std::vector<rocprofiler_record_dimension_info_t>*>(user_data);
-            for(size_t i = 0; i < num_dims; i++)
-            {
-                vec->push_back(dim_info[i]);
-            }
-            return ROCPROFILER_STATUS_SUCCESS;
-        };
-    ROCPROFILER_CALL(rocprofiler_iterate_counter_dimensions(counter, cb, &dims),
-                     "Could not iterate counter dimensions");
-    (*dimension_cache())->emplace(counter.handle, dims);
+    rocprofiler_counter_info_v1_t                    info;
+    ROCPROFILER_CALL(rocprofiler_query_counter_info(
+                         counter, ROCPROFILER_COUNTER_INFO_VERSION_1, static_cast<void*>(&info)),
+                     "Could not query info for counter");
+
+    (*dimension_cache())
+        ->emplace(counter.handle,
+                  std::vector<rocprofiler_record_dimension_info_t>{
+                      info.dimensions, info.dimensions + info.dimensions_count});
 }
 
 /**
@@ -187,22 +179,22 @@ buffered_callback(rocprofiler_context_id_t,
  * to select the profile config (and in turn counters) to use when a kernel dispatch
  * is received.
  */
-std::unordered_map<uint64_t, rocprofiler_profile_config_id_t>&
+std::unordered_map<uint64_t, rocprofiler_counter_config_id_t>&
 get_profile_cache()
 {
-    static std::unordered_map<uint64_t, rocprofiler_profile_config_id_t> profile_cache;
+    static std::unordered_map<uint64_t, rocprofiler_counter_config_id_t> profile_cache;
     return profile_cache;
 }
 
 /**
  * Callback from rocprofiler when an kernel dispatch is enqueued into the HSA queue.
- * rocprofiler_profile_config_id_t* is a return to specify what counters to collect
+ * rocprofiler_counter_config_id_t* is a return to specify what counters to collect
  * for this dispatch (dispatch_packet). This example function creates a profile
  * to collect the counter SQ_WAVES for all kernel dispatch packets.
  */
 void
 dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
-                  rocprofiler_profile_config_id_t*             config,
+                  rocprofiler_counter_config_id_t*             config,
                   rocprofiler_user_data_t* /*user_data*/,
                   void* /*callback_data_args*/)
 {
@@ -236,7 +228,7 @@ dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
  * to consturct them once in advance (i.e. in tool_init()) since there are non-trivial
  * costs associated with constructing the profile.
  */
-rocprofiler_profile_config_id_t
+rocprofiler_counter_config_id_t
 build_profile_for_agent(rocprofiler_agent_id_t       agent,
                         const std::set<std::string>& counters_to_collect)
 {
@@ -264,22 +256,22 @@ build_profile_for_agent(rocprofiler_agent_id_t       agent,
     std::vector<rocprofiler_counter_id_t> collect_counters;
     for(auto& counter : gpu_counters)
     {
-        rocprofiler_counter_info_v0_t version;
+        rocprofiler_counter_info_v0_t info;
         ROCPROFILER_CALL(
             rocprofiler_query_counter_info(
-                counter, ROCPROFILER_COUNTER_INFO_VERSION_0, static_cast<void*>(&version)),
+                counter, ROCPROFILER_COUNTER_INFO_VERSION_0, static_cast<void*>(&info)),
             "Could not query info for counter");
-        if(counters_to_collect.count(std::string(version.name)) > 0)
+        if(counters_to_collect.count(std::string(info.name)) > 0)
         {
-            std::clog << "Counter: " << counter.handle << " " << version.name << "\n";
+            std::clog << "Counter: " << counter.handle << " " << info.name << "\n";
             collect_counters.push_back(counter);
             fill_dimension_cache(counter);
         }
     }
 
     // Create and return the profile
-    rocprofiler_profile_config_id_t profile = {.handle = 0};
-    ROCPROFILER_CALL(rocprofiler_create_profile_config(
+    rocprofiler_counter_config_id_t profile = {.handle = 0};
+    ROCPROFILER_CALL(rocprofiler_create_counter_config(
                          agent, collect_counters.data(), collect_counters.size(), &profile),
                      "Could not construct profile cfg");
 
@@ -375,7 +367,7 @@ tool_init(rocprofiler_client_finalize_t, void* user_data)
     // counters to collect by returning a profile config id. In this example, we create the profile
     // configs above and store them in the map get_profile_cache() so we can look them up at
     // dispatch.
-    ROCPROFILER_CALL(rocprofiler_configure_buffered_dispatch_counting_service(
+    ROCPROFILER_CALL(rocprofiler_configure_buffer_dispatch_counting_service(
                          get_client_ctx(), get_buffer(), dispatch_callback, nullptr),
                      "Could not setup buffered service");
 

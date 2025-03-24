@@ -23,10 +23,10 @@
 #pragma once
 
 #include <rocprofiler-sdk/agent.h>
+#include <rocprofiler-sdk/counter_config.h>
 #include <rocprofiler-sdk/defines.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>
-#include <rocprofiler-sdk/profile_config.h>
 
 ROCPROFILER_EXTERN_C_INIT
 
@@ -38,10 +38,10 @@ ROCPROFILER_EXTERN_C_INIT
  */
 
 /**
- * @brief Kernel dispatch data for profile counting callbacks.
+ * @brief (experimental) Kernel dispatch data for profile counting callbacks.
  *
  */
-typedef struct rocprofiler_dispatch_counting_service_data_t
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_dispatch_counting_service_data_t
 {
     uint64_t                           size;             ///< Size of this struct
     rocprofiler_async_correlation_id_t correlation_id;   ///< Correlation ID for this dispatch
@@ -51,11 +51,11 @@ typedef struct rocprofiler_dispatch_counting_service_data_t
 } rocprofiler_dispatch_counting_service_data_t;
 
 /**
- * @brief ROCProfiler Profile Counting Counter Record Header Information
+ * @brief (experimental) ROCProfiler Profile Counting Counter Record Header Information
  *
  * This is buffer equivalent of ::rocprofiler_dispatch_counting_service_data_t
  */
-typedef struct rocprofiler_dispatch_counting_service_record_t
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_dispatch_counting_service_record_t
 {
     uint64_t size;         ///< Size of this struct
     uint64_t num_records;  ///< number of ::rocprofiler_record_counter_t records
@@ -66,27 +66,27 @@ typedef struct rocprofiler_dispatch_counting_service_record_t
 } rocprofiler_dispatch_counting_service_record_t;
 
 /**
- * @brief Kernel Dispatch Callback. This is a callback that is invoked before the kernel
- *        is enqueued into the HSA queue. What counters to collect for a kernel are set
- *        via passing back a profile config (config) in this callback. These counters
- *        will be collected and emplaced in the buffer with @ref rocprofiler_buffer_id_t used when
- *        setting up this callback.
+ * @brief (experimental) Kernel Dispatch Callback. This is a callback that is invoked before the
+ * kernel is enqueued into the HSA queue. What counters to collect for a kernel are set via passing
+ * back a profile config (config) in this callback. These counters will be collected and emplaced in
+ * the buffer with @ref rocprofiler_buffer_id_t used when setting up this callback.
  *
  * @param [in] dispatch_data      @see ::rocprofiler_dispatch_counting_service_data_t
  * @param [out] config            Profile config detailing the counters to collect for this kernel
  * @param [out] user_data         User data unique to this dispatch. Returned in record callback
  * @param [in] callback_data_args Callback supplied via buffered_dispatch_counting_service
  */
-typedef void (*rocprofiler_dispatch_counting_service_callback_t)(
+ROCPROFILER_SDK_EXPERIMENTAL
+typedef void (*rocprofiler_dispatch_counting_service_cb_t)(
     rocprofiler_dispatch_counting_service_data_t dispatch_data,
-    rocprofiler_profile_config_id_t*             config,
+    rocprofiler_counter_config_id_t*             config,
     rocprofiler_user_data_t*                     user_data,
     void*                                        callback_data_args);
 
 /**
- * @brief Counting record callback. This is a callback is invoked when the kernel
+ * @brief (experimental) Counting record callback. This is a callback is invoked when the kernel
  *        execution is complete and contains the counter profile data requested in
- *        @ref rocprofiler_dispatch_counting_service_callback_t. Only used with
+ *        @ref rocprofiler_dispatch_counting_service_cb_t. Only used with
  *        @ref rocprofiler_configure_callback_dispatch_counting_service.
  *
  * @param [in] dispatch_data      @see ::rocprofiler_dispatch_counting_service_data_t
@@ -95,7 +95,8 @@ typedef void (*rocprofiler_dispatch_counting_service_callback_t)(
  * @param [in] user_data          User data instance from dispatch callback
  * @param [in] callback_data_args Callback supplied via buffered_dispatch_counting_service
  */
-typedef void (*rocprofiler_profile_counting_record_callback_t)(
+ROCPROFILER_SDK_EXPERIMENTAL
+typedef void (*rocprofiler_dispatch_counting_record_cb_t)(
     rocprofiler_dispatch_counting_service_data_t dispatch_data,
     rocprofiler_record_counter_t*                record_data,
     size_t                                       record_count,
@@ -103,7 +104,7 @@ typedef void (*rocprofiler_profile_counting_record_callback_t)(
     void*                                        callback_data_args);
 
 /**
- * @brief Configure buffered dispatch profile Counting Service.
+ * @brief (experimental) Configure buffered dispatch profile Counting Service.
  *        Collects the counters in dispatch packets and stores them
  *        in a buffer with @p buffer_id. The buffer may contain packets from more than
  *        one dispatch (denoted by correlation id). Will trigger the
@@ -112,14 +113,14 @@ typedef void (*rocprofiler_profile_counting_record_callback_t)(
  *        NOTE: Interface is up for comment as to whether restrictions
  *        on agent should be made here (limiting the CB based on agent)
  *        or if the restriction should be performed by the tool in
- *        @ref rocprofiler_dispatch_counting_service_callback_t (i.e.
+ *        @ref rocprofiler_dispatch_counting_service_cb_t (i.e.
  *        tool code checking the agent param to see if they want to profile
  *        it).
  *
  *        Interface is up for comment as to whether restrictions
  *        on agent should be made here (limiting the CB based on agent)
  *        or if the restriction should be performed by the tool in
- *        @ref rocprofiler_dispatch_counting_service_callback_t (i.e.
+ *        @ref rocprofiler_dispatch_counting_service_cb_t (i.e.
  *        tool code checking the agent param to see if they want to profile
  *        it).
  *
@@ -129,15 +130,16 @@ typedef void (*rocprofiler_profile_counting_record_callback_t)(
  * @param [in] callback_data_args callback data
  * @return ::rocprofiler_status_t
  */
+ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
-rocprofiler_configure_buffered_dispatch_counting_service(
-    rocprofiler_context_id_t                         context_id,
-    rocprofiler_buffer_id_t                          buffer_id,
-    rocprofiler_dispatch_counting_service_callback_t callback,
-    void*                                            callback_data_args) ROCPROFILER_API;
+rocprofiler_configure_buffer_dispatch_counting_service(
+    rocprofiler_context_id_t                   context_id,
+    rocprofiler_buffer_id_t                    buffer_id,
+    rocprofiler_dispatch_counting_service_cb_t callback,
+    void*                                      callback_data_args) ROCPROFILER_API;
 
 /**
- * @brief Configure buffered dispatch profile Counting Service.
+ * @brief (experimental) Configure buffered dispatch profile Counting Service.
  *        Collects the counters in dispatch packets and calls a callback
  *        with the counters collected during that dispatch.
  *
@@ -148,13 +150,15 @@ rocprofiler_configure_buffered_dispatch_counting_service(
  * @param [in] record_callback_args Callback args for record callback
  * @return ::rocprofiler_status_t
  */
+ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
 rocprofiler_configure_callback_dispatch_counting_service(
-    rocprofiler_context_id_t                         context_id,
-    rocprofiler_dispatch_counting_service_callback_t dispatch_callback,
-    void*                                            dispatch_callback_args,
-    rocprofiler_profile_counting_record_callback_t   record_callback,
-    void*                                            record_callback_args) ROCPROFILER_API;
+    rocprofiler_context_id_t                   context_id,
+    rocprofiler_dispatch_counting_service_cb_t dispatch_callback,
+    void*                                      dispatch_callback_args,
+    rocprofiler_dispatch_counting_record_cb_t  record_callback,
+    void*                                      record_callback_args) ROCPROFILER_API;
+
 /** @} */
 
 ROCPROFILER_EXTERN_C_FINI

@@ -143,7 +143,7 @@ get_table_impl()
 {
     rocprofiler::common::init_logging("ROCTX");
 
-    auto*& tbl = rocprofiler::common::static_object<roctx_api_table>::construct();
+    auto*& tbl = common::static_object<roctx_api_table>::construct();
 
     tbl->core = roctxCoreApiTable_t{sizeof(roctxCoreApiTable_t),
                                     &::rocprofiler::roctx::roctxMarkA,

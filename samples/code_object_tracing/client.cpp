@@ -31,9 +31,6 @@
  * @brief Example rocprofiler client (tool)
  */
 
-#include <rocprofiler-sdk/buffer.h>
-#include <rocprofiler-sdk/callback_tracing.h>
-#include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 

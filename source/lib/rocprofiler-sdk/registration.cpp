@@ -245,17 +245,19 @@ find_clients()
         return true;
     };
 
-    auto emplace_client = [&data, priority_offset](
+    constexpr auto client_id_size = sizeof(rocprofiler_client_id_t);
+    auto           emplace_client = [&data, priority_offset](
                               std::string_view _name,
                               void*            _dlhandle,
                               auto*            _cfg_func) -> std::optional<client_library>& {
         uint32_t _prio = priority_offset + data.size();
-        return data.emplace_back(client_library{std::string{_name},
-                                                _dlhandle,
-                                                _cfg_func,
-                                                nullptr,
-                                                rocprofiler_client_id_t{nullptr, _prio},
-                                                rocprofiler_client_id_t{nullptr, _prio}});
+        return data.emplace_back(
+            client_library{std::string{_name},
+                           _dlhandle,
+                           _cfg_func,
+                           nullptr,
+                           rocprofiler_client_id_t{client_id_size, nullptr, _prio},
+                           rocprofiler_client_id_t{client_id_size, nullptr, _prio}});
     };
 
     auto rocprofiler_configure_dlsym = [](auto _handle) {

@@ -531,12 +531,11 @@ hip_stream_display_callback(rocprofiler_callback_tracing_record_t record,
                             rocprofiler_user_data_t*              user_data,
                             void*                                 data)
 {
-    if(tool::get_config().group_by_queue ||
-       record.kind != ROCPROFILER_CALLBACK_TRACING_HIP_STREAM_API)
+    if(tool::get_config().group_by_queue || record.kind != ROCPROFILER_CALLBACK_TRACING_HIP_STREAM)
         return;
     // Extract stream ID from record
     auto* stream_handle_data =
-        static_cast<rocprofiler_callback_tracing_stream_handle_data_t*>(record.payload);
+        static_cast<rocprofiler_callback_tracing_hip_stream_data_t*>(record.payload);
     auto stream_id = stream_handle_data->stream_id;
     // STREAM_HANDLE_CREATE and DESTROY are no-ops
     if(record.operation == ROCPROFILER_HIP_STREAM_CREATE)
@@ -996,7 +995,7 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
 
 using counter_vec_t = std::vector<rocprofiler_counter_id_t>;
 using agent_counter_map_t =
-    std::unordered_map<rocprofiler_agent_id_t, std::optional<rocprofiler_profile_config_id_t>>;
+    std::unordered_map<rocprofiler_agent_id_t, std::optional<rocprofiler_counter_config_id_t>>;
 
 auto
 get_gpu_agents()
@@ -1014,16 +1013,16 @@ struct agent_profiles
 {
     std::unordered_map<rocprofiler_agent_id_t, std::atomic<uint64_t>> current_iter;
     const uint64_t                                                    rotation;
-    const std::unordered_map<rocprofiler_agent_id_t, std::vector<rocprofiler_profile_config_id_t>>
+    const std::unordered_map<rocprofiler_agent_id_t, std::vector<rocprofiler_counter_config_id_t>>
         profiles;
 };
 
-std::optional<rocprofiler_profile_config_id_t>
+std::optional<rocprofiler_counter_config_id_t>
 construct_counter_collection_profile(rocprofiler_agent_id_t       agent_id,
                                      const std::set<std::string>& counters)
 {
     static const auto gpu_agents_counter_info = get_agent_counter_info();
-    auto              profile                 = std::optional<rocprofiler_profile_config_id_t>{};
+    auto              profile                 = std::optional<rocprofiler_counter_config_id_t>{};
     auto              counters_v              = counter_vec_t{};
     auto              found_v                 = std::vector<std::string_view>{};
     const auto*       agent_v                 = tool_metadata->get_agent(agent_id);
@@ -1078,8 +1077,8 @@ construct_counter_collection_profile(rocprofiler_agent_id_t       agent_id,
 
     if(!counters_v.empty())
     {
-        auto profile_v = rocprofiler_profile_config_id_t{};
-        ROCPROFILER_CALL(rocprofiler_create_profile_config(
+        auto profile_v = rocprofiler_counter_config_id_t{};
+        ROCPROFILER_CALL(rocprofiler_create_counter_config(
                              agent_id, counters_v.data(), counters_v.size(), &profile_v),
                          "Could not construct profile cfg");
         profile = profile_v;
@@ -1090,7 +1089,7 @@ construct_counter_collection_profile(rocprofiler_agent_id_t       agent_id,
 agent_profiles
 generate_agent_profiles()
 {
-    std::unordered_map<rocprofiler_agent_id_t, std::vector<rocprofiler_profile_config_id_t>>
+    std::unordered_map<rocprofiler_agent_id_t, std::vector<rocprofiler_counter_config_id_t>>
                                                                       profiles;
     std::unordered_map<rocprofiler_agent_id_t, std::atomic<uint64_t>> pos;
     for(const auto& agent : get_gpu_agents())
@@ -1110,7 +1109,7 @@ generate_agent_profiles()
 }
 
 // this function creates a rocprofiler profile config on the first entry
-std::optional<rocprofiler_profile_config_id_t>
+std::optional<rocprofiler_counter_config_id_t>
 get_device_counting_service(rocprofiler_agent_id_t agent_id)
 {
     static auto agent_profiles = generate_agent_profiles();
@@ -1292,7 +1291,7 @@ att_dispatch_callback(rocprofiler_agent_id_t /* agent_id  */,
 
 void
 dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
-                  rocprofiler_profile_config_id_t*             config,
+                  rocprofiler_counter_config_id_t*             config,
                   rocprofiler_user_data_t*                     user_data,
                   void* /*callback_data_args*/)
 {
@@ -1804,14 +1803,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         ROCPROFILER_CALL(rocprofiler_create_context(&hip_stream_display_ctx),
                          "failed to create context");
 
-        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
-                             hip_stream_display_ctx,
-                             ROCPROFILER_CALLBACK_TRACING_HIP_STREAM_API,
-                             nullptr,
-                             0,
-                             hip_stream_display_callback,
-                             nullptr),
-                         "stream tracing configure failed");
+        ROCPROFILER_CALL(
+            rocprofiler_configure_callback_tracing_service(hip_stream_display_ctx,
+                                                           ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
+                                                           nullptr,
+                                                           0,
+                                                           hip_stream_display_callback,
+                                                           nullptr),
+            "stream tracing configure failed");
         ROCPROFILER_CALL(rocprofiler_start_context(hip_stream_display_ctx), "start context failed");
     }
     if(tool::get_config().kernel_rename || !tool::get_config().group_by_queue)

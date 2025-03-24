@@ -65,7 +65,7 @@ After creating a context and buffer to store results in ``tool_init``, it is hig
     // Setup the dispatch profile counting service. This service will trigger the dispatch_callback
     // when a kernel dispatch is enqueued into the HSA queue. The callback will specify what
     // counters to collect by returning a profile config id.
-    ROCPROFILER_CALL(rocprofiler_configure_buffered_dispatch_counting_service(
+    ROCPROFILER_CALL(rocprofiler_configure_buffer_dispatch_counting_service(
                          ctx, buff, dispatch_callback, nullptr),
                      "Could not setup buffered service");
 
@@ -145,21 +145,21 @@ Profile Setup
     {
         // Contains name and other attributes about the counter.
         // See API documentation for more info on the contents of this struct.
-        rocprofiler_counter_info_v0_t version;
+        rocprofiler_counter_info_v0_t info;
         ROCPROFILER_CALL(
             rocprofiler_query_counter_info(
-                counter, ROCPROFILER_COUNTER_INFO_VERSION_0, static_cast<void*>(&version)),
+                counter, ROCPROFILER_COUNTER_INFO_VERSION_0, static_cast<void*>(&info)),
             "Could not query info for counter");
     }
 
 
-4. After identifying the counters to be collected, construct a profile by passing a list of these counters to ``rocprofiler_create_profile_config``.
+4. After identifying the counters to be collected, construct a profile by passing a list of these counters to ``rocprofiler_create_counter_config``.
 
 .. code-block:: cpp
 
     // Create and return the profile
-    rocprofiler_profile_config_id_t profile;
-    ROCPROFILER_CALL(rocprofiler_create_profile_config(
+    rocprofiler_counter_config_id_t profile;
+    ROCPROFILER_CALL(rocprofiler_create_counter_config(
                          agent, counters_array, counters_array_count, &profile),
                      "Could not construct profile cfg");
 
@@ -172,7 +172,7 @@ Profile Setup
     - Profile created is *only valid* for the agent it was created for.
     - Profiles are immutable. To collect a new counter set, construct a new profile.
     - A single profile can be used multiple times on the same agent.
-    - Counter Ids supplied to ``rocprofiler_create_profile_config`` are *agent-specific* and can't be used to construct profiles for other agents.
+    - Counter Ids supplied to ``rocprofiler_create_counter_config`` are *agent-specific* and can't be used to construct profiles for other agents.
 
 Dispatch Counting Callback
 --------------------------
@@ -183,7 +183,7 @@ When a kernel is dispatched, a dispatch callback is issued to the tool to allow 
 
     void
     dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
-                      rocprofiler_profile_config_id_t*             config,
+                      rocprofiler_counter_config_id_t*             config,
                       rocprofiler_user_data_t* user_data,
                       void* /*callback_data_args*/)
 
@@ -197,9 +197,9 @@ This callback is invoked after the context starts and allows the tool to specify
 .. code-block:: cpp
 
     void
-    set_profile(rocprofiler_context_id_t                 context_id,
-                rocprofiler_agent_id_t                   agent,
-                rocprofiler_agent_set_profile_callback_t set_config,
+    set_profile(rocprofiler_context_id_t               context_id,
+                rocprofiler_agent_id_t                 agent,
+                rocprofiler_device_counting_agent_cb_t set_config,
                 void*)
 
 The profile to be used for this agent is specified by calling ``set_config(agent, profile)``.
@@ -210,7 +210,7 @@ Buffered callback
 Data from collected counter values is returned through a buffered callback. The buffered callback routines are similar for dispatch and device counting except that some data such as kernel launch Ids is not available in device counting mode. Here is a sample iteration to print out counter collection data:
 
 .. code-block:: cpp
-    
+
     for(size_t i = 0; i < num_headers; ++i)
     {
         auto* header = headers[i];

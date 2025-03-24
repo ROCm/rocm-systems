@@ -20,6 +20,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+// Allow testing of deprecated calls
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/aql/packet_construct.hpp"
@@ -320,3 +324,4 @@ TEST(dimension, block_dim_test)
 
     hsa_shut_down();
 }
+#pragma GCC diagnostic pop

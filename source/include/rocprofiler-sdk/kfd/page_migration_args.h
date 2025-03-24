@@ -94,7 +94,7 @@ typedef struct rocprofiler_page_migration_dropped_event_t
     uint32_t dropped_events_count;
 } rocprofiler_page_migration_dropped_event_t;
 
-typedef union
+typedef union rocprofiler_page_migration_args_t
 {
     rocprofiler_page_migration_none_t               none;
     rocprofiler_page_migration_page_migrate_start_t page_migrate_start;

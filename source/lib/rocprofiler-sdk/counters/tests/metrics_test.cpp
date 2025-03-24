@@ -25,12 +25,17 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include "lib/common/logging.hpp"
+#include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
+#include "lib/rocprofiler-sdk/counters/dimensions.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
+#include "rocprofiler-sdk/fwd.h"
 
 namespace
 {
@@ -216,16 +221,57 @@ TEST(metrics, check_public_api_query)
     const auto& id_map      = metrics_map->id_to_metric;
     for(const auto& [id, metric] : id_map)
     {
-        rocprofiler_counter_info_v0_t version;
+        rocprofiler_counter_info_v1_t info;
 
-        ASSERT_EQ(
-            rocprofiler_query_counter_info(
-                {.handle = id}, ROCPROFILER_COUNTER_INFO_VERSION_0, static_cast<void*>(&version)),
-            ROCPROFILER_STATUS_SUCCESS);
-        EXPECT_EQ(std::string(version.name), metric.name());
-        EXPECT_EQ(std::string(version.block), metric.block());
-        EXPECT_EQ(std::string(version.expression), metric.expression());
-        EXPECT_EQ(version.is_derived, !metric.expression().empty());
-        EXPECT_EQ(std::string(version.description), metric.description());
+        auto dim_ptr = rocprofiler::counters::get_dimension_cache();
+
+        const auto* dims = rocprofiler::common::get_val(dim_ptr->id_to_dim, metric.id());
+        ASSERT_TRUE(dims);
+
+        auto status = rocprofiler_query_counter_info(
+            {.handle = id}, ROCPROFILER_COUNTER_INFO_VERSION_1, static_cast<void*>(&info));
+        ASSERT_EQ(status, ROCPROFILER_STATUS_SUCCESS);
+        EXPECT_EQ(std::string(info.name ? info.name : ""), metric.name());
+        EXPECT_EQ(std::string(info.block ? info.block : ""), metric.block());
+        EXPECT_EQ(std::string(info.expression ? info.expression : ""), metric.expression());
+        EXPECT_EQ(info.is_derived, !metric.expression().empty());
+        EXPECT_EQ(std::string(info.description ? info.description : ""), metric.description());
+
+        EXPECT_EQ(info.dimensions_count, dims->size());
+        for(size_t i = 0; i < info.dimensions_count; i++)
+        {
+            const auto& dim = dims->at(i);
+            EXPECT_EQ(dim.size(), info.dimensions[i].instance_size);
+            EXPECT_EQ(dim.type(), info.dimensions[i].id);
+            EXPECT_EQ(std::string(info.dimensions[i].name), dim.name());
+        }
+
+        size_t instance_count = 0;
+        // Checks the equality with the old rocprofiler_query_counter_instance_count
+        for(const auto& metric_dim : *dims)
+        {
+            if(instance_count == 0)
+                instance_count = metric_dim.size();
+            else if(metric_dim.size() > 0)
+                instance_count = metric_dim.size() * instance_count;
+        }
+
+        EXPECT_EQ(info.instance_ids_count, instance_count);
+        std::set<std::vector<size_t>> dim_permutations;
+
+        for(size_t i = 0; i < info.instance_ids_count; i++)
+        {
+            std::vector<size_t> dim_ids;
+            ASSERT_EQ(rocprofiler::counters::rec_to_counter_id(info.instance_ids[i]).handle,
+                      metric.id());
+            for(const auto& metric_dim : *dims)
+            {
+                dim_ids.push_back(
+                    rocprofiler::counters::rec_to_dim_pos(info.instance_ids[i], metric_dim.type()));
+            }
+            // Ensure that the premutation is unique
+            ASSERT_EQ(dim_permutations.insert(dim_ids).second, true);
+        }
+        ASSERT_EQ(instance_count, dim_permutations.size());
     }
 }

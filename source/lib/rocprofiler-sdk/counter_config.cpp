@@ -44,17 +44,17 @@ extern "C" {
  * @return ::rocprofiler_status_t
  */
 rocprofiler_status_t
-rocprofiler_create_profile_config(rocprofiler_agent_id_t           agent_id,
+rocprofiler_create_counter_config(rocprofiler_agent_id_t           agent_id,
                                   rocprofiler_counter_id_t*        counters_list,
                                   size_t                           counters_count,
-                                  rocprofiler_profile_config_id_t* config_id)
+                                  rocprofiler_counter_config_id_t* config_id)
 {
     std::unordered_set<uint64_t> already_added;
     const auto*                  agent = ::rocprofiler::agent::get_agent(agent_id);
     if(!agent) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
 
-    std::shared_ptr<rocprofiler::counters::profile_config> config =
-        std::make_shared<rocprofiler::counters::profile_config>();
+    std::shared_ptr<rocprofiler::counters::counter_config> config =
+        std::make_shared<rocprofiler::counters::counter_config>();
 
     auto        metrics_map = rocprofiler::counters::loadMetrics();
     const auto& id_map      = metrics_map->id_to_metric;
@@ -78,7 +78,7 @@ rocprofiler_create_profile_config(rocprofiler_agent_id_t           agent_id,
     if(config_id->handle != 0)
     {
         // Copy existing counters from previous config
-        if(auto existing = rocprofiler::counters::get_profile_config(*config_id))
+        if(auto existing = rocprofiler::counters::get_counter_config(*config_id))
         {
             for(const auto& metric : existing->metrics)
             {
@@ -100,7 +100,7 @@ rocprofiler_create_profile_config(rocprofiler_agent_id_t           agent_id,
 }
 
 rocprofiler_status_t
-rocprofiler_destroy_profile_config(rocprofiler_profile_config_id_t config_id)
+rocprofiler_destroy_counter_config(rocprofiler_counter_config_id_t config_id)
 {
     rocprofiler::counters::destroy_counter_profile(config_id.handle);
     return ROCPROFILER_STATUS_SUCCESS;

@@ -23,7 +23,6 @@
 #pragma once
 
 #include <rocprofiler-sdk/defines.h>
-#include <rocprofiler-sdk/version.h>
 
 #include <rocprofiler-sdk/ompt/omp-tools.h>
 

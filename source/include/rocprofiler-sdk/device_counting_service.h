@@ -25,16 +25,17 @@
 #include <rocprofiler-sdk/defines.h>
 #include <rocprofiler-sdk/fwd.h>
 
+ROCPROFILER_EXTERN_C_INIT
+
 /**
  * @defgroup device_counting_service Agent Profile Counting Service
  * @brief needs brief description
  *
  * @{
  */
-ROCPROFILER_EXTERN_C_INIT
 
 /**
- * @brief Callback to set the profile config for the agent.
+ * @brief (experimental) Callback to set the profile config for the agent.
  *
  * @param [in] context_id context id
  * @param [in] config_id Profile config detailing the counters to collect for this kernel
@@ -47,31 +48,33 @@ ROCPROFILER_EXTERN_C_INIT
  * context.
  * @retval ::ROCPROFILER_STATUS_SUCCESS Returned if succesfully configured
  */
-typedef rocprofiler_status_t (*rocprofiler_agent_set_profile_callback_t)(
+ROCPROFILER_SDK_EXPERIMENTAL
+typedef rocprofiler_status_t (*rocprofiler_device_counting_agent_cb_t)(
     rocprofiler_context_id_t        context_id,
-    rocprofiler_profile_config_id_t config_id);
+    rocprofiler_counter_config_id_t config_id);
 
 /**
- * @brief Configure Profile Counting Service for agent. Called when the context is started.
- *        Selects the counters to be used for agent profiling.
+ * @brief (experimental) Configure Profile Counting Service for agent. Called when the context is
+ * started. Selects the counters to be used for agent profiling.
  *
  * @param [in]  context_id context id
  * @param [in]  agent_id agent id
  * @param [in]  set_config Function to call to set the profile config (see
- * rocprofiler_agent_set_profile_callback_t)
+ * rocprofiler_device_counting_agent_cb_t)
  * @param [in]  user_data Data supplied to rocprofiler_configure_device_counting_service
  */
-typedef void (*rocprofiler_device_counting_service_callback_t)(
-    rocprofiler_context_id_t                 context_id,
-    rocprofiler_agent_id_t                   agent_id,
-    rocprofiler_agent_set_profile_callback_t set_config,
-    void*                                    user_data);
+ROCPROFILER_SDK_EXPERIMENTAL
+typedef void (*rocprofiler_device_counting_service_cb_t)(
+    rocprofiler_context_id_t               context_id,
+    rocprofiler_agent_id_t                 agent_id,
+    rocprofiler_device_counting_agent_cb_t set_config,
+    void*                                  user_data);
 
 /**
- * @brief Configure Device Counting Service for agent. There may only be one counting service
- * configured per agent in a context and can be only one active context that is profiling a single
- * agent at a time. Multiple agent contexts can be started at the same time if they are profiling
- * different agents.
+ * @brief (experimental) Configure Device Counting Service for agent. There may only be one counting
+ * service configured per agent in a context and can be only one active context that is profiling a
+ * single agent at a time. Multiple agent contexts can be started at the same time if they are
+ * profiling different agents.
  *
  * @param [in] context_id context id
  * @param [in] buffer_id id of the buffer to use for the counting service. When
@@ -81,7 +84,7 @@ typedef void (*rocprofiler_device_counting_service_callback_t)(
  * rocprofiler_sample_device_counting_service
  * @param [in] agent_id agent to configure profiling on.
  * @param [in] cb Callback called when the context is started for the tool to specify what
- * counters to collect (rocprofiler_profile_config_id_t).
+ * counters to collect (rocprofiler_counter_config_id_t).
  * @param [in] user_data User supplied data to be passed to the callback cb when triggered
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID Returned if the context does not exist.
@@ -90,28 +93,28 @@ typedef void (*rocprofiler_device_counting_service_callback_t)(
  *                                                     profiling configured for agent_id.
  * @retval ::ROCPROFILER_STATUS_SUCCESS Returned if succesfully configured
  */
+ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
-rocprofiler_configure_device_counting_service(rocprofiler_context_id_t context_id,
-                                              rocprofiler_buffer_id_t  buffer_id,
-                                              rocprofiler_agent_id_t   agent_id,
-                                              rocprofiler_device_counting_service_callback_t cb,
-                                              void* user_data)
+rocprofiler_configure_device_counting_service(rocprofiler_context_id_t                 context_id,
+                                              rocprofiler_buffer_id_t                  buffer_id,
+                                              rocprofiler_agent_id_t                   agent_id,
+                                              rocprofiler_device_counting_service_cb_t cb,
+                                              void*                                    user_data)
     ROCPROFILER_NONNULL(4) ROCPROFILER_API;
 
 /**
- * @brief Trigger a read of the counter data for the agent profile. The counter data will be
- * written to the buffer specified in rocprofiler_configure_device_counting_service.
- * The data in rocprofiler_user_data_t will be written to the buffer along with the counter data.
- * flags can be used to specify if this call should be performed asynchronously (default is
- * synchronous).
+ * @brief (experimental) Trigger a read of the counter data for the agent profile. The counter data
+ * will be written to the buffer specified in rocprofiler_configure_device_counting_service. The
+ * data in rocprofiler_user_data_t will be written to the buffer along with the counter data. flags
+ * can be used to specify if this call should be performed asynchronously (default is synchronous).
  *
  * @param [in] context_id context id
  * @param [in] user_data User supplied data, included in records outputted to buffer.
  * @param [in] flags Flags to specify how the counter data should be collected (defaults to sync).
- * @param [in] output_records Output records collected via sampling (output is also written to
- * buffer). Must be allocated by caller.
- * @param [in] rec_count On entry, this is the maximum number of records rocprof can store in
- * output_records. On exit, contains the number of actual records.
+ * @param [in] output_records (Optional) Provides the values immediately instead of outputting to
+ * buffer. Must be allocated by caller.
+ * @param [in] rec_count (Optional) On entry, this is the maximum number of records rocprof can
+ * store in output_records. On exit, contains the number of actual records.
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID Returned if the context does not exist or
  * the context is not configured for agent profiling.
@@ -124,6 +127,7 @@ rocprofiler_configure_device_counting_service(rocprofiler_context_id_t context_i
  * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT Returned If ASYNC is being used while
  * output_records is not null.
  */
+ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
 rocprofiler_sample_device_counting_service(rocprofiler_context_id_t      context_id,
                                            rocprofiler_user_data_t       user_data,

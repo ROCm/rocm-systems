@@ -23,8 +23,8 @@
 #pragma once
 
 #include <rocprofiler-sdk/defines.h>
+#include <rocprofiler-sdk/ext_version.h>
 #include <rocprofiler-sdk/hsa/api_trace_version.h>
-#include <rocprofiler-sdk/version.h>
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>

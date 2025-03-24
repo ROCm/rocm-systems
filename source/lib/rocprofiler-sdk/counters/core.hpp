@@ -45,7 +45,7 @@ namespace counters
 struct counter_callback_info
 {
     // User callback
-    rocprofiler_dispatch_counting_service_callback_t user_cb{nullptr};
+    rocprofiler_dispatch_counting_service_cb_t user_cb{nullptr};
     // User id
     void* callback_args{nullptr};
     // Link to the context this is associated with
@@ -58,45 +58,45 @@ struct counter_callback_info
     // Buffer to use for storing counter data. Used if callback is not set.
     std::optional<rocprofiler_buffer_id_t> buffer;
 
-    rocprofiler_profile_counting_record_callback_t record_callback;
-    void*                                          record_callback_args;
+    rocprofiler_dispatch_counting_record_cb_t record_callback;
+    void*                                     record_callback_args;
 
     // Facilitates the return of an AQL Packet to the profile config that constructed it.
-    rocprofiler::common::Synchronized<
-        std::unordered_map<rocprofiler::hsa::AQLPacket*, std::shared_ptr<profile_config>>>
+    common::Synchronized<
+        std::unordered_map<rocprofiler::hsa::AQLPacket*, std::shared_ptr<counter_config>>>
         packet_return_map{};
 
-    static rocprofiler_status_t setup_profile_config(std::shared_ptr<profile_config>&);
+    static rocprofiler_status_t setup_counter_config(std::shared_ptr<counter_config>&);
 
     rocprofiler_status_t get_packet(std::unique_ptr<rocprofiler::hsa::AQLPacket>&,
-                                    std::shared_ptr<profile_config>&);
+                                    std::shared_ptr<counter_config>&);
 };
 
 uint64_t
-create_counter_profile(std::shared_ptr<rocprofiler::counters::profile_config>&& config);
+create_counter_profile(std::shared_ptr<rocprofiler::counters::counter_config>&& config);
 
 void
 destroy_counter_profile(uint64_t id);
 
 rocprofiler_status_t
-configure_buffered_dispatch(rocprofiler_context_id_t                         context_id,
-                            rocprofiler_buffer_id_t                          buffer,
-                            rocprofiler_dispatch_counting_service_callback_t callback,
-                            void*                                            callback_args);
+configure_buffered_dispatch(rocprofiler_context_id_t                   context_id,
+                            rocprofiler_buffer_id_t                    buffer,
+                            rocprofiler_dispatch_counting_service_cb_t callback,
+                            void*                                      callback_args);
 
 rocprofiler_status_t
-configure_callback_dispatch(rocprofiler_context_id_t                         context_id,
-                            rocprofiler_dispatch_counting_service_callback_t callback,
-                            void*                                            callback_data_args,
-                            rocprofiler_profile_counting_record_callback_t   record_callback,
-                            void*                                            record_callback_args);
+configure_callback_dispatch(rocprofiler_context_id_t                   context_id,
+                            rocprofiler_dispatch_counting_service_cb_t callback,
+                            void*                                      callback_data_args,
+                            rocprofiler_dispatch_counting_record_cb_t  record_callback,
+                            void*                                      record_callback_args);
 
 rocprofiler_status_t
-configure_agent_collection(rocprofiler_context_id_t                       context_id,
-                           rocprofiler_buffer_id_t                        buffer_id,
-                           rocprofiler_agent_id_t                         agent_id,
-                           rocprofiler_device_counting_service_callback_t cb,
-                           void*                                          user_data);
+configure_agent_collection(rocprofiler_context_id_t                 context_id,
+                           rocprofiler_buffer_id_t                  buffer_id,
+                           rocprofiler_agent_id_t                   agent_id,
+                           rocprofiler_device_counting_service_cb_t cb,
+                           void*                                    user_data);
 
 void
 start_context(const context::context*);

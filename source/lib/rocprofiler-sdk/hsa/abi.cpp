@@ -20,8 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#include <rocprofiler-sdk/ext_version.h>
 #include <rocprofiler-sdk/hsa.h>
-#include <rocprofiler-sdk/version.h>
 
 #include "lib/common/abi.hpp"
 #include "lib/common/defines.hpp"

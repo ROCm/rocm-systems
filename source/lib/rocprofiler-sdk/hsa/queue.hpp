@@ -152,16 +152,16 @@ public:
     void                            set_state(queue_state state);
 
 private:
-    std::atomic<int>                                  _notifiers            = {0};
-    std::atomic<int64_t>                              _active_async_packets = {0};
-    CoreApiTable                                      _core_api             = {};
-    AmdExtTable                                       _ext_api              = {};
-    const AgentCache&                                 _agent;
-    rocprofiler::common::Synchronized<callback_map_t> _callbacks       = {};
-    hsa_queue_t*                                      _intercept_queue = nullptr;
-    queue_state                                       _state           = queue_state::normal;
-    std::mutex                                        _lock_queue;
-    hsa_signal_t                                      _active_kernels = {.handle = 0};
+    std::atomic<int>                     _notifiers            = {0};
+    std::atomic<int64_t>                 _active_async_packets = {0};
+    CoreApiTable                         _core_api             = {};
+    AmdExtTable                          _ext_api              = {};
+    const AgentCache&                    _agent;
+    common::Synchronized<callback_map_t> _callbacks       = {};
+    hsa_queue_t*                         _intercept_queue = nullptr;
+    queue_state                          _state           = queue_state::normal;
+    std::mutex                           _lock_queue;
+    hsa_signal_t                         _active_kernels = {.handle = 0};
 };
 
 inline rocprofiler_queue_id_t

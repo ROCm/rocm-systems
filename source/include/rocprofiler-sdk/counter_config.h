@@ -29,51 +29,53 @@
 ROCPROFILER_EXTERN_C_INIT
 
 /**
- * @defgroup PROFILE_CONFIG Profile Configurations
+ * @defgroup COUNTER_CONFIG HW Counter Configurations
  * @brief Group one or more hardware counters into a unique handle
  *
  * @{
  */
 
 /**
- * @brief Create Profile Configuration. A profile is bound to an agent but can
- *        be used across many contexts. The profile has a fixed set of counters
+ * @brief (experimental) Create Counter Configuration. A config is bound to an agent but can
+ *        be used across many contexts. The config has a fixed set of counters
  *        that are collected (and specified by counter_list). The available
  *        counters for an agent can be queried using
- *        @ref rocprofiler_iterate_agent_supported_counters. An existing profile
- *        may be supplied via config_id to use as a base for the new profile.
- *        All counters in the existing profile will be copied over to the new
- *        profile. The existing profile will remain unmodified and usable with
- *        the new profile id being returned in config_id.
+ *        @ref rocprofiler_iterate_agent_supported_counters. An existing config
+ *        may be supplied via config_id to use as a base for the new config.
+ *        All counters in the existing config will be copied over to the new
+ *        config. The existing config will remain unmodified and usable with
+ *        the new config id being returned in config_id.
  *
  * @param [in] agent_id Agent identifier
  * @param [in] counters_list List of GPU counters
  * @param [in] counters_count Size of counters list
  * @param [in,out] config_id Identifier for GPU counters group. If an existing
-                   profile is supplied, that profiles counters will be copied
-                   over to a new profile (returned via this id)
+                   config is supplied, that profiles counters will be copied
+                   over to a new config (returned via this id)
  * @return ::rocprofiler_status_t
- * @retval ROCPROFILER_STATUS_SUCCESS if profile created
- * @retval ROCPROFILER_STATUS_ERROR if profile could not be created
+ * @retval ROCPROFILER_STATUS_SUCCESS if config created
+ * @retval ROCPROFILER_STATUS_ERROR if config could not be created
  *
  */
+ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
-rocprofiler_create_profile_config(rocprofiler_agent_id_t           agent_id,
+rocprofiler_create_counter_config(rocprofiler_agent_id_t           agent_id,
                                   rocprofiler_counter_id_t*        counters_list,
                                   size_t                           counters_count,
-                                  rocprofiler_profile_config_id_t* config_id) ROCPROFILER_API
+                                  rocprofiler_counter_config_id_t* config_id) ROCPROFILER_API
     ROCPROFILER_NONNULL(4);
 
 /**
- * @brief Destroy Profile Configuration.
+ * @brief (experimental) Destroy Profile Configuration.
  *
  * @param [in] config_id
  * @return ::rocprofiler_status_t
- * @retval ROCPROFILER_STATUS_SUCCESS if profile destroyed
- * @retval ROCPROFILER_STATUS_ERROR if profile could not be destroyed
+ * @retval ROCPROFILER_STATUS_SUCCESS if config destroyed
+ * @retval ROCPROFILER_STATUS_ERROR if config could not be destroyed
  */
+ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
-rocprofiler_destroy_profile_config(rocprofiler_profile_config_id_t config_id) ROCPROFILER_API;
+rocprofiler_destroy_counter_config(rocprofiler_counter_config_id_t config_id) ROCPROFILER_API;
 
 /** @} */
 

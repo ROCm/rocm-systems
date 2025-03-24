@@ -50,19 +50,6 @@ namespace fs = common::filesystem;
 namespace
 {
 rocprofiler_status_t
-dimensions_info_callback(rocprofiler_counter_id_t /*id*/,
-                         const rocprofiler_record_dimension_info_t* dim_info,
-                         long unsigned int                          num_dims,
-                         void*                                      user_data)
-{
-    auto* dimensions_info = static_cast<counter_dimension_info_vec_t*>(user_data);
-    dimensions_info->reserve(num_dims);
-    for(size_t j = 0; j < num_dims; j++)
-        dimensions_info->emplace_back(dim_info[j]);
-    return ROCPROFILER_STATUS_SUCCESS;
-}
-
-rocprofiler_status_t
 query_pc_sampling_configuration(const rocprofiler_pc_sampling_configuration_t* configs,
                                 long unsigned int                              num_config,
                                 void*                                          user_data)
@@ -177,31 +164,17 @@ void metadata::init(inprocess)
 
                 for(size_t i = 0; i < num_counters; ++i)
                 {
-                    auto _info     = rocprofiler_counter_info_v0_t{};
+                    auto _info     = rocprofiler_counter_info_v1_t{};
                     auto _dim_ids  = std::vector<rocprofiler_counter_dimension_id_t>{};
                     auto _dim_info = std::vector<rocprofiler_record_dimension_info_t>{};
 
                     ROCPROFILER_CHECK(rocprofiler_query_counter_info(
                         counters[i],
-                        ROCPROFILER_COUNTER_INFO_VERSION_0,
-                        &static_cast<rocprofiler_counter_info_v0_t&>(_info)));
+                        ROCPROFILER_COUNTER_INFO_VERSION_1,
+                        &static_cast<rocprofiler_counter_info_v1_t&>(_info)));
 
-                    if(auto _itr_dim_stat = rocprofiler_iterate_counter_dimensions(
-                           counters[i], dimensions_info_callback, &_dim_info);
-                       _itr_dim_stat == ROCPROFILER_STATUS_SUCCESS)
-                    {
-                        _dim_ids.reserve(_dim_info.size());
-                        for(auto ditr : _dim_info)
-                            _dim_ids.emplace_back(ditr.id);
-                    }
-                    else
-                    {
-                        ROCP_WARNING << fmt::format("rocprofiler_iterate_counter_dimensions(...) "
-                                                    "for counter {} returned {} :: {}",
-                                                    _info.name,
-                                                    rocprofiler_get_status_name(_itr_dim_stat),
-                                                    rocprofiler_get_status_string(_itr_dim_stat));
-                    }
+                    for(uint64_t j = 0; j < _info.dimensions_count; ++j)
+                        _dim_ids.emplace_back(_info.dimensions[j].id);
 
                     data_v->at(id).emplace_back(
                         id, _info, std::move(_dim_ids), std::move(_dim_info));
