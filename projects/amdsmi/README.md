@@ -139,6 +139,21 @@ Check out
 [Getting to Know Your GPU: A Deep Dive into AMD SMI -- ROCm Blogs](https://rocm.blogs.amd.com/software-tools-optimization/amd-smi-overview/README.html)
 for a rundown.
 
+### Docker container configuration
+
+To ensure proper functionality of AMD SMI within a Docker container, the
+following configuration options must be included. These settings are
+particularly important for managing memory partitions, as partitioning depends
+on loading and unloading kernel drivers.
+
+- `--cap-add=SYS_MODULE`
+
+- `-v /lib/modules:/lib/modules`
+
+See [Using AMD SMI in a Docker
+container](https://rocm.docs.amd.com/projects/amdsmi/en/latest/how-to/setup-docker-container.html)
+for more information.
+
 ## Building AMD SMI
 
 This section describes the prerequisites and steps to build AMD SMI from source.
