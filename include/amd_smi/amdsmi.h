@@ -153,6 +153,12 @@ typedef enum {
 #define AMDSMI_MAX_NUM_JPEG 32
 
 /**
+ * @brief new for gpu metrics v1.8, document presents NUM_JPEG_ENG_V1
+ * but will change to AMDSMI_MAX_NUM_JPEG_ENG_V1 for continuity
+ */
+#define AMDSMI_MAX_NUM_JPEG_ENG_V1 40
+
+/**
  * @brief This should match AMDSMI_MAX_NUM_XCC;
  * XCC - Accelerated Compute Core, the collection of compute units,
  * ACE (Asynchronous Compute Engines), caches,
@@ -196,7 +202,7 @@ typedef enum {
 #define AMDSMI_LIB_VERSION_MAJOR 25
 
 //! Minor version should be updated for each API change, but without changing headers
-#define AMDSMI_LIB_VERSION_MINOR 2
+#define AMDSMI_LIB_VERSION_MINOR 3
 
 //! Release version should be set to 0 as default and can be updated by the PMs for each CSP point release
 #define AMDSMI_LIB_VERSION_RELEASE 0
@@ -1688,9 +1694,9 @@ typedef struct {
      * @brief v1.6 additions
      * The max uint32_t will be used if that information is N/A
      */
-    uint32_t gfx_busy_inst[AMDSMI_MAX_NUM_XCC];  //!< Utilization Instantaneous in %
-    uint16_t jpeg_busy[AMDSMI_MAX_NUM_JPEG];     //!< Utilization Instantaneous in %
-    uint16_t vcn_busy[AMDSMI_MAX_NUM_VCN];       //!< Utilization Instantaneous in %
+    uint32_t gfx_busy_inst[AMDSMI_MAX_NUM_XCC];       //!< Utilization Instantaneous in %
+    uint16_t jpeg_busy[AMDSMI_MAX_NUM_JPEG_ENG_V1];   //!< Utilization Instantaneous in % (UPDATED: to 40 in v1.8)
+    uint16_t vcn_busy[AMDSMI_MAX_NUM_VCN];            //!< Utilization Instantaneous in %
 
     uint64_t gfx_busy_acc[AMDSMI_MAX_NUM_XCC];   //!< Utilization Accumulated in %
 
@@ -1699,6 +1705,17 @@ typedef struct {
     */
   /* Total App Clock Counter Accumulated */
   uint64_t gfx_below_host_limit_acc[AMDSMI_MAX_NUM_XCC]; //!< Total App Clock Counter Accumulated
+
+  /**
+   * @brief v1.8 additions
+   */
+  /* Total App Clock Counter Accumulated */
+    uint64_t gfx_below_host_limit_ppt_acc[AMDSMI_MAX_NUM_XCC];
+    uint64_t gfx_below_host_limit_thm_acc[AMDSMI_MAX_NUM_XCC];
+    uint64_t gfx_low_utilization_acc[AMDSMI_MAX_NUM_XCC];
+    uint64_t gfx_below_host_limit_total_acc[AMDSMI_MAX_NUM_XCC];
+
+
 } amdsmi_gpu_xcp_metrics_t;
 
 /**
@@ -1889,7 +1906,7 @@ typedef struct {
 
     uint32_t pcie_lc_perf_other_end_recovery; //!< PCIE other end recovery counter
 
-    /*
+    /**
     * @brief v1.7 additions
     */
     uint64_t vram_max_bandwidth; //!< VRAM max bandwidth at max memory clock (GB/s)
@@ -5952,7 +5969,24 @@ amdsmi_get_gpu_activity(amdsmi_processor_handle processor_handle, amdsmi_engine_
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_power_info(amdsmi_processor_handle processor_handle, uint32_t sensor_ind, amdsmi_power_info_t *info);
+amdsmi_status_t amdsmi_get_power_info_v2(amdsmi_processor_handle processor_handle, uint32_t sensor_ind, amdsmi_power_info_t *info);
+
+/**
+ *  @brief Returns the current power and voltage of the GPU.
+ *
+ *  @ingroup tagGPUMonitor
+ *
+ *  @platform{gpu_bm_linux} @platform{host} @platform{guest_windows}
+ *
+ *  @note amdsmi_power_info_t::socket_power metric can rarely spike above the socket power limit in some cases
+ *
+ *  @param[in] processor_handle PF of a processor for which  to query
+ *
+ *  @param[out] info Reference to the gpu power structure. Must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_power_info(amdsmi_processor_handle processor_handle, amdsmi_power_info_t *info);
 
 /**
  *  @brief Returns is power management enabled

@@ -566,7 +566,7 @@ int main() {
 
             // Get power measure
             amdsmi_power_info_t power_measure = {};
-            ret = amdsmi_get_power_info(processor_handles[j], 0, &power_measure);
+            ret = amdsmi_get_power_info(processor_handles[j], &power_measure);
             CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_power_info:\n");
             printf("\tCurrent GFX Voltage: %d\n",
@@ -1245,6 +1245,79 @@ int main() {
               std::cout << "\t XCP [" << idx << "] : [";
               for (auto& col : row.gfx_below_host_limit_acc) {
                 if ((idy + 1) != static_cast<int>(std::size(row.gfx_below_host_limit_acc))) {
+                    std::cout << col << ", ";
+                } else {
+                    std::cout << col;
+                }
+                idy++;
+              }
+              std::cout << "]\n";
+              idy = 0;
+              idx++;
+            }
+
+            /*New scp stats v1.8*/
+            idx = 0;
+            idy = 0;
+            std::cout  << "\txcp_stats.gfx_below_host_limit_ppt_acc: " << "\n";
+            for (auto& row : smu.xcp_stats) {
+              std::cout << "\t XCP [" << idx << "] : [";
+              for (auto& col : row.gfx_below_host_limit_ppt_acc) {
+                if ((idy + 1) != static_cast<int>(std::size(row.gfx_below_host_limit_ppt_acc))) {
+                    std::cout << col << ", ";
+                } else {
+                    std::cout << col;
+                }
+                idy++;
+              }
+              std::cout << "]\n";
+              idy = 0;
+              idx++;
+            }
+
+            idx = 0;
+            idy = 0;
+            std::cout  << "\txcp_stats.gfx_below_host_limit_thm_acc: " << "\n";
+            for (auto& row : smu.xcp_stats) {
+              std::cout << "\t XCP [" << idx << "] : [";
+              for (auto& col : row.gfx_below_host_limit_thm_acc) {
+                if ((idy + 1) != static_cast<int>(std::size(row.gfx_below_host_limit_thm_acc))) {
+                    std::cout << col << ", ";
+                } else {
+                    std::cout << col;
+                }
+                idy++;
+              }
+              std::cout << "]\n";
+              idy = 0;
+              idx++;
+            }
+
+            idx = 0;
+            idy = 0;
+            std::cout  << "\txcp_stats.gfx_low_utilization_acc: " << "\n";
+            for (auto& row : smu.xcp_stats) {
+              std::cout << "\t XCP [" << idx << "] : [";
+              for (auto& col : row.gfx_low_utilization_acc) {
+                if ((idy + 1) != static_cast<int>(std::size(row.gfx_low_utilization_acc))) {
+                    std::cout << col << ", ";
+                } else {
+                    std::cout << col;
+                }
+                idy++;
+              }
+              std::cout << "]\n";
+              idy = 0;
+              idx++;
+            }
+
+            idx = 0;
+            idy = 0;
+            std::cout  << "\txcp_stats.gfx_below_host_limit_total_acc: " << "\n";
+            for (auto& row : smu.xcp_stats) {
+              std::cout << "\t XCP [" << idx << "] : [";
+              for (auto& col : row.gfx_below_host_limit_total_acc) {
+                if ((idy + 1) != static_cast<int>(std::size(row.gfx_below_host_limit_total_acc))) {
                     std::cout << col << ", ";
                 } else {
                     std::cout << col;
