@@ -16,24 +16,25 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Changed
 
 * Change normal_unit default to per_kernel
-* change dependency from rocm-smi to amd-smi
+* Change dependency from rocm-smi to amd-smi
+* Decrease profiling time by not collecting counters not used in post analysis
 
 ### Resolved issues
 
 * Fixed option specs-correction
 * Fixed kernel name and kernel dispatch filtering when using rocprof v3
+* Fixed not collecting TCC channel counters in rocprof v3
 
 ### Known issues
 
-* gpu id filtering is not supported when using rocprof v3
+* GPU id filtering is not supported when using rocprof v3
 
-## (Unreleased) ROCm Compute Profiler 3.1.0 for ROCm 6.4.0
+## ROCm Compute Profiler 3.1.0 for ROCm 6.4.0
 
 ### Added
 
 * Roofline support for Ubuntu 24.04
 * Experimental support rocprofv3 (not enabled as default)
-* Experimental feature: Spatial multiplexing
 
 ### Resolved issues
 

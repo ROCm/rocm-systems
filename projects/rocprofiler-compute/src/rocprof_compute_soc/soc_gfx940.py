@@ -45,17 +45,6 @@ class gfx940_soc(OmniSoC_Base):
                     )
                 )
             )
-        else:
-            # NB: We're using generalized Mi300 perfmon configs
-            self.set_perfmon_dir(
-                set(
-                    Path(str(config.rocprof_compute_home)).joinpath(
-                        "rocprof_compute_soc",
-                        "profile_configs",
-                        "gfx940",
-                    )
-                )
-            )
         self.set_compatible_profilers(["rocprofv1", "rocprofv2", "rocprofv3"])
         # Per IP block max number of simultaneous counters. GFX IP Blocks
         self.set_perfmon_config(
@@ -70,7 +59,6 @@ class gfx940_soc(OmniSoC_Base):
                 "SPI": 2,
                 "GRBM": 2,
                 "GDS": 4,
-                "TCC_channels": 32,
             }
         )
         self.roofline_obj = Roofline(args, self._mspec)

@@ -42,10 +42,7 @@ from utils.logger import (
     setup_file_handler,
     setup_logging_priority,
 )
-from utils.mi_gpu_spec import (
-    get_gpu_series_dict,
-    parse_mi_gpu_spec,
-)
+from utils.mi_gpu_spec import get_gpu_series_dict, parse_mi_gpu_spec
 from utils.specs import MachineSpecs, generate_machine_specs
 from utils.utils import (
     console_debug,

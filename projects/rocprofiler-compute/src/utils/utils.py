@@ -48,21 +48,12 @@ rocprof_cmd = ""
 rocprof_args = ""
 
 
-# TODO: This is a HACK
+def is_tcc_channel_counter(counter):
+    return counter.startswith("TCC") and counter.endswith("]")
+
+
 def using_v3():
     return "ROCPROF" in os.environ.keys() and "rocprofv3" in os.environ["ROCPROF"]
-
-
-# TODO: This is a HACK
-def get_default_accumulate_counter_file_ymal():
-    """Return the path of the default derivative counters' definatin's yaml file that we current use to store accumulated counters' defination. It will possibly be removed later on"""
-    return str(
-        config.rocprof_compute_home.joinpath(
-            "rocprof_compute_soc",
-            "profile_configs",
-            "accum_counters.yaml",
-        )
-    )
 
 
 def demarcate(function):
@@ -205,11 +196,10 @@ def store_app_cmd(args):
     rocprof_args = args
 
 
-def capture_subprocess_output(subprocess_args, new_env=None, profileMode=False):
-    global rocprof_args
-    # Format command for debug messages, formatting for rocprofv1 and rocprofv2
-    command = " ".join(rocprof_args)
-    console_debug("subprocess", "Running: " + command + " " + " ".join(subprocess_args))
+def capture_subprocess_output(
+    subprocess_args, new_env=None, profileMode=False, enable_logging=True
+):
+    console_debug("subprocess", "Running: " + " ".join(subprocess_args))
     # Start subprocess
     # bufsize = 1 means output is line buffered
     # universal_newlines = True is required for line buffering
@@ -241,10 +231,11 @@ def capture_subprocess_output(subprocess_args, new_env=None, profileMode=False):
             # line to read when this function is called
             line = stream.readline()
             buf.write(line)
-            if profileMode:
-                console_log(rocprof_cmd, line.strip(), indent_level=1)
-            else:
-                console_log(line.strip())
+            if enable_logging:
+                if profileMode:
+                    console_log(rocprof_cmd, line.strip(), indent_level=1)
+                else:
+                    console_log(line.strip())
         except UnicodeDecodeError:
             # Skip this line
             pass

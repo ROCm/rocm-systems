@@ -45,16 +45,6 @@ class gfx90a_soc(OmniSoC_Base):
                     )
                 )
             )
-        else:
-            self.set_perfmon_dir(
-                str(
-                    Path(str(config.rocprof_compute_home)).joinpath(
-                        "rocprof_compute_soc",
-                        "profile_configs",
-                        self.get_arch(),
-                    )
-                )
-            )
         self.set_compatible_profilers(["rocprofv1", "rocscope", "rocprofv2", "rocprofv3"])
         # Per IP block max number of simultaneous counters. GFX IP Blocks
         self.set_perfmon_config(
@@ -69,7 +59,6 @@ class gfx90a_soc(OmniSoC_Base):
                 "SPI": 2,
                 "GRBM": 2,
                 "GDS": 4,
-                "TCC_channels": 32,
             }
         )
         self.roofline_obj = Roofline(args, self._mspec)
