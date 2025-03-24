@@ -23,6 +23,7 @@ trigger:
     - '*.md'
     - LICENSE
     - VERSION
+    - .wordlist.txt
 
 pr:
   autoCancel: true
@@ -38,6 +39,7 @@ pr:
     - '*.md'
     - LICENSE
     - VERSION
+    - .wordlist.txt
   drafts: false
 
 jobs:
