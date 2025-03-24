@@ -261,13 +261,12 @@ TEST_CASE("Unit_hipExtModuleLaunchKernel_UniformWorkGroup") {
 
 TEST_CASE("Unit_hipExtModuleLaunchKernel_Positive_Parameters") {
   ModuleLaunchKernelPositiveParameters<hipExtModuleLaunchKernel>();
-
+  auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
   SECTION("Pass only start event") {
     hipEvent_t start_event = nullptr;
     HIP_CHECK(hipEventCreate(&start_event));
     const auto kernel = GetKernel(mg.module(), "NOPKernel");
-    HIP_CHECK(hipExtModuleLaunchKernel(kernel, 1, 1, 1, 1, 1, 1, 0, nullptr,
-                                       nullptr, nullptr,
+    HIP_CHECK(hipExtModuleLaunchKernel(kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, nullptr,
                                        start_event, nullptr));
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipEventQuery(start_event));
