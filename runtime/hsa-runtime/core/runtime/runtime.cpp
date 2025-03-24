@@ -2098,6 +2098,11 @@ void Runtime::Unload() {
   amd::hsa::loader::Loader::Destroy(loader_);
   loader_ = nullptr;
 
+  for(auto nodeAgent: agents_by_node_) {
+    for (auto agent: nodeAgent.second)
+      agent->ReleaseResources();
+  }
+
   asyncSignals_.control.Shutdown();
   asyncExceptions_.control.Shutdown();
 

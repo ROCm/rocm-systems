@@ -320,9 +320,13 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
 
   __forceinline void Enable() { enabled_ = true; }
 
+  __forceinline void Disable() { enabled_ = false; }
+
   virtual void Trim() {
     for (auto region : regions()) region->Trim();
   }
+
+  virtual void ReleaseResources() { }
 
 protected:
   // Intention here is to have a polymorphic update procedure for public_handle_

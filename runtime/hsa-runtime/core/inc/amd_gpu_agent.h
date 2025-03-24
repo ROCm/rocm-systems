@@ -87,6 +87,8 @@ class GpuAgentInt : public core::Agent {
    // @retval HSA_STATUS_SUCCESS if initialization is successful.
    virtual hsa_status_t PostToolsInit() = 0;
 
+   virtual void ReleaseResources() = 0;
+
    // @brief Invoke the user provided callback for each region accessible by
    // this agent.
    //
@@ -236,6 +238,9 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief GPU agent destructor.
   ~GpuAgent();
+
+  // @brief Release allocated resources and disables agent
+  void ReleaseResources() override;
 
   // @brief Ensure blits are ready (performance hint).
   void PreloadBlits() override;
