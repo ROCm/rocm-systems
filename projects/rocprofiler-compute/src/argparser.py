@@ -367,6 +367,19 @@ Examples:
         action="store_true",
         help="\t\t\tInclude kernel names in roofline plot.",
     )
+
+    roofline_group.add_argument(
+        "-R",
+        "--roofline-data-type",
+        required=False,
+        choices=["FP8", "FP16", "BF16", "FP32", "FP64", "I8"],
+        metavar="",
+        nargs="+",
+        type=str,
+        default=["FP32"],
+        help="\t\t\tChoose datatypes to generate plotted roofline PDFs for: (DEFAULT: FP32)\n\t\t\t   FP8\n\t\t\t   FP16\n\t\t\t   BF16\n\t\t\t   FP32\n\t\t\t   FP64\n\t\t\t   I8",
+    )
+
     # roofline_group.add_argument('-w', '--workgroups', required=False, default=-1, type=int, help="\t\t\tNumber of kernel workgroups (DEFAULT: 1024)")
     # roofline_group.add_argument('--wsize', required=False, default=-1, type=int, help="\t\t\tWorkgroup size (DEFAULT: 256)")
     # roofline_group.add_argument('--dataset', required=False, default = -1, type=int, help="\t\t\tDataset size (DEFAULT: 536M)")

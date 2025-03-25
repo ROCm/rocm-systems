@@ -231,7 +231,7 @@ The following table lists ROCm Compute Profiler's basic operations, their
 
    * - :ref:`Standalone roofline analysis <standalone-roofline>`
      - ``profile``
-     - ``--name``, ``--roof-only``, ``-- <profile_cmd>``
+     - ``--name``, ``--roof-only``, ``--roofline-data-type <data_type>``, ``-- <profile_cmd>``
 
    * - :ref:`Import a workload to database <grafana-gui-import>`
      - ``database``

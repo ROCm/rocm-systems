@@ -33,7 +33,13 @@ import pandas as pd
 import plotly.graph_objects as go
 from dash import dcc, html
 
-from utils.roofline_calc import calc_ai, constuct_roof
+from utils.roofline_calc import (
+    MFMA_DATATYPES,
+    PEAK_OPS_DATATYPES,
+    SUPPORTED_DATATYPES,
+    calc_ai,
+    constuct_roof,
+)
 from utils.utils import (
     console_debug,
     console_error,
@@ -60,6 +66,7 @@ class Roofline:
                 "mem_level": "ALL",
                 "include_kernel_names": False,
                 "is_standalone": False,
+                "roofline_data_type": ["FP32"],
             }
         )
         self.__ai_data = None
@@ -76,7 +83,10 @@ class Roofline:
             self.__run_parameters["mem_level"] = self.__args.mem_level
         if hasattr(self.__args, "sort") and self.__args.sort != "ALL":
             self.__run_parameters["sort_type"] = self.__args.sort
-
+        if hasattr(
+            self.__args, "roofline_data_type"
+        ) and self.__args.roofline_data_type != ["FP32"]:
+            self.__run_parameters["roofline_data_type"] = self.__args.roofline_data_type
         self.validate_parameters()
 
     def validate_parameters(self):
@@ -121,19 +131,42 @@ class Roofline:
             msg += "\n\t%s -> %s" % (i, self.__ai_data[i])
         console_debug(msg)
 
-        # Generate a roofline figure for each data type
-        fp32_fig = self.generate_plot(dtype="FP32")
-        ml_combo_fig_fp32_fp64 = self.generate_plot(
-            dtype="FP64",
-            fig=fp32_fig,
-        )
-        fp16_fig = self.generate_plot(dtype="FP16")
-        ml_combo_fig_int8_fp16 = self.generate_plot(
-            dtype="I8",
-            fig=fp16_fig,
-        )
-        if self.__mspec.gpu_series != "MI200":
-            fig_fp8 = self.generate_plot(dtype="FP8")
+        # Generate a roofline figure for the datatypes
+        ops_figure = flops_figure = None
+        ops_dt_list = flops_dt_list = ""
+        for dt in self.__run_parameters["roofline_data_type"]:
+            # Do not generate a roofline figure if the datatype is not supported on this gpu_arch
+            if not str(dt) in SUPPORTED_DATATYPES[self.__mspec.gpu_arch]:
+                console_error(
+                    "{} is not a supported datatype for roofline profiling on {}".format(
+                        str(dt), self.__mspec.gpu_model
+                    ),
+                    exit=False,
+                )
+                continue
+
+            ops_flops = "Ops" if (str(dt[:1]) == "I") else "Flops"
+
+            if ops_flops == "Ops":
+                if ops_figure:
+                    ops_combo_figure = self.generate_plot(
+                        dtype=str(dt),
+                        fig=ops_figure,
+                    )
+                    ops_figure = ops_combo_figure
+                else:
+                    ops_figure = self.generate_plot(dtype=str(dt))
+                ops_dt_list += "_" + str(dt)
+            if ops_flops == "Flops":
+                if flops_figure:
+                    flops_combo_figure = self.generate_plot(
+                        dtype=str(dt),
+                        fig=flops_figure,
+                    )
+                    flops_figure = flops_combo_figure
+                else:
+                    flops_figure = self.generate_plot(dtype=str(dt))
+                flops_dt_list += "_" + str(dt)
 
         # Create a legend and distinct kernel markers. This can be saved, optionally
         self.__figure = go.Figure(
@@ -160,80 +193,55 @@ class Roofline:
         if self.__run_parameters["is_standalone"]:
             dev_id = str(self.__run_parameters["device_id"])
 
-            ml_combo_fig_fp32_fp64.write_image(
-                self.__run_parameters["workload_dir"]
-                + "/empirRoof_gpu-{}_fp32_fp64.pdf".format(dev_id)
-            )
-            ml_combo_fig_int8_fp16.write_image(
-                self.__run_parameters["workload_dir"]
-                + "/empirRoof_gpu-{}_int8_fp16.pdf".format(dev_id)
-            )
-            if self.__mspec.gpu_series != "MI200":
-                fig_fp8.write_image(
-                    self.__run_parameters["workload_dir"]
-                    + "/empirRoof_gpu-{}_fp8.pdf".format(dev_id)
-                )
-            # only save a legend if kernel_names option is toggled
-            if self.__run_parameters["include_kernel_names"]:
-                self.__figure.write_image(
-                    self.__run_parameters["workload_dir"] + "/kernelName_legend.pdf"
-                )
-            time.sleep(1)
             # Re-save to remove loading MathJax pop up
-            ml_combo_fig_fp32_fp64.write_image(
-                self.__run_parameters["workload_dir"]
-                + "/empirRoof_gpu-{}_fp32_fp64.pdf".format(dev_id)
-            )
-            ml_combo_fig_int8_fp16.write_image(
-                self.__run_parameters["workload_dir"]
-                + "/empirRoof_gpu-{}_int8_fp16.pdf".format(dev_id)
-            )
-            if self.__mspec.gpu_series != "MI200":
-                fig_fp8.write_image(
-                    self.__run_parameters["workload_dir"]
-                    + "/empirRoof_gpu-{}_fp8.pdf".format(dev_id)
-                )
-            if self.__run_parameters["include_kernel_names"]:
-                self.__figure.write_image(
-                    self.__run_parameters["workload_dir"] + "/kernelName_legend.pdf"
-                )
+            for i in range(2):
+                if ops_figure:
+                    ops_figure.write_image(
+                        self.__run_parameters["workload_dir"]
+                        + "/empirRoof_gpu-{}{}.pdf".format(dev_id, ops_dt_list)
+                    )
+                if flops_figure:
+                    flops_figure.write_image(
+                        self.__run_parameters["workload_dir"]
+                        + "/empirRoof_gpu-{}{}.pdf".format(dev_id, flops_dt_list)
+                    )
+
+                # only save a legend if kernel_names option is toggled
+                if self.__run_parameters["include_kernel_names"]:
+                    self.__figure.write_image(
+                        self.__run_parameters["workload_dir"] + "/kernelName_legend.pdf"
+                    )
+                time.sleep(1)
             console_log("roofline", "Empirical Roofline PDFs saved!")
         else:
-            if self.__mspec.gpu_series != "MI200":
-                fp8_graph = html.Div(
+            if ops_figure:
+                ops_graph = html.Div(
                     className="float-child",
                     children=[
-                        html.H3(children="Empirical Roofline Analysis (FP8)"),
-                        dcc.Graph(figure=fig_fp8),
+                        html.H3(children="Empirical Roofline Analysis (Ops)"),
+                        dcc.Graph(figure=ops_figure),
                     ],
                 )
             else:
-                fp8_graph = None
+                ops_graph = None
+            if flops_figure:
+                flops_graph = html.Div(
+                    className="float-child",
+                    children=[
+                        html.H3(children="Empirical Roofline Analysis (Flops)"),
+                        dcc.Graph(figure=flops_figure),
+                    ],
+                )
+            else:
+                flops_graph = None
             return html.Section(
                 id="roofline",
                 children=[
                     html.Div(
                         className="float-container",
                         children=[
-                            html.Div(
-                                className="float-child",
-                                children=[
-                                    html.H3(
-                                        children="Empirical Roofline Analysis (FP32/FP64)"
-                                    ),
-                                    dcc.Graph(figure=ml_combo_fig_fp32_fp64),
-                                ],
-                            ),
-                            html.Div(
-                                className="float-child",
-                                children=[
-                                    html.H3(
-                                        children="Empirical Roofline Analysis (FP16/INT8)"
-                                    ),
-                                    dcc.Graph(figure=ml_combo_fig_int8_fp16),
-                                ],
-                            ),
-                            fp8_graph,
+                            ops_graph,
+                            flops_graph,
                         ],
                     )
                 ],
@@ -284,9 +292,10 @@ class Roofline:
                 )
             )
 
+        ops_flops = "OP" if (dtype[:1] == "I") else "FLOP"
+
         # Plot peak VALU ceiling
-        # VALU info I8/FP16 not collected via microbench
-        if dtype != "FP16" and dtype != "I8":
+        if dtype in PEAK_OPS_DATATYPES:
             fig.add_trace(
                 go.Scatter(
                     x=self.__ceiling_data["valu"][0],
@@ -298,20 +307,18 @@ class Roofline:
                         (
                             None
                             if self.__run_parameters["is_standalone"]
-                            else "{} GFLOP/s".format(
-                                to_int(self.__ceiling_data["valu"][2])
+                            else "{} G{}/s".format(
+                                to_int(self.__ceiling_data["valu"][2], ops_flops)
                             )
                         ),
-                        "{} GFLOP/s".format(to_int(self.__ceiling_data["valu"][2])),
+                        "{} G{}/s".format(
+                            to_int(self.__ceiling_data["valu"][2]), ops_flops
+                        ),
                     ],
                     textposition="top left",
                 )
             )
 
-        if dtype == "FP16":
-            pos = "bottom left"
-        else:
-            pos = "top left"
         # Plot peak MFMA ceiling
         fig.add_trace(
             go.Scatter(
@@ -324,26 +331,26 @@ class Roofline:
                     (
                         None
                         if self.__run_parameters["is_standalone"]
-                        else "{} GFLOP/s".format(to_int(self.__ceiling_data["mfma"][2]))
+                        else "{} G{}/s".format(
+                            to_int(self.__ceiling_data["mfma"][2]), ops_flops
+                        )
                     ),
-                    "{} GFLOP/s".format(to_int(self.__ceiling_data["mfma"][2])),
+                    "{} G{}/s".format(to_int(self.__ceiling_data["mfma"][2]), ops_flops),
                 ],
-                textposition=pos,
+                textposition="top left",
             )
         )
         #######################
         # Plot Application AI
         #######################
-        if dtype != "I8" and dtype != "FP64":
-            # Plot the arithmetic intensity points for each cache level
-            # Omitting I8 AIs to clean up graph. FP16 tends to be higher.
+        # Plot the arithmetic intensity points for each cache level
+        if ops_flops == "FLOP":
             fig.add_trace(
                 go.Scatter(
                     x=self.__ai_data["ai_l1"][0],
                     y=self.__ai_data["ai_l1"][1],
-                    name="ai_l1",
+                    name=dtype + "_ai_l1",
                     mode="markers",
-                    marker={"color": "#00CC96"},
                     marker_symbol=(
                         SYMBOLS if self.__run_parameters["include_kernel_names"] else None
                     ),
@@ -353,9 +360,8 @@ class Roofline:
                 go.Scatter(
                     x=self.__ai_data["ai_l2"][0],
                     y=self.__ai_data["ai_l2"][1],
-                    name="ai_l2",
+                    name=dtype + "_ai_l2",
                     mode="markers",
-                    marker={"color": "#EF553B"},
                     marker_symbol=(
                         SYMBOLS if self.__run_parameters["include_kernel_names"] else None
                     ),
@@ -365,22 +371,30 @@ class Roofline:
                 go.Scatter(
                     x=self.__ai_data["ai_hbm"][0],
                     y=self.__ai_data["ai_hbm"][1],
-                    name="ai_hbm",
+                    name=dtype + "_ai_hbm",
                     mode="markers",
-                    marker={"color": "#636EFA"},
                     marker_symbol=(
                         SYMBOLS if self.__run_parameters["include_kernel_names"] else None
                     ),
                 )
             )
 
-        # Set layout
-        fig.update_layout(
-            xaxis_title="Arithmetic Intensity (FLOPs/Byte)",
-            yaxis_title="Performance (GFLOP/sec)",
-            hovermode="x unified",
-            margin=dict(l=50, r=50, b=50, t=50, pad=4),
-        )
+            # Set layout
+            fig.update_layout(
+                xaxis_title="Arithmetic Intensity (FLOPs/Byte)",
+                yaxis_title="Performance (GFLOP/sec)",
+                hovermode="x unified",
+                margin=dict(l=50, r=50, b=50, t=50, pad=4),
+            )
+        else:
+            # Set layout
+            fig.update_layout(
+                xaxis_title="Bandwidth (GB/sec)",
+                yaxis_title="Performance (GOP/sec)",
+                hovermode="x unified",
+                margin=dict(l=50, r=50, b=50, t=50, pad=4),
+            )
+
         fig.update_xaxes(type="log", autorange=True)
         fig.update_yaxes(type="log", autorange=True)
 

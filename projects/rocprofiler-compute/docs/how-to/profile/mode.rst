@@ -474,6 +474,9 @@ Roofline options
    Allows you to specify a device ID to collect performance data from when
    running a roofline benchmark on your system.
 
+``--roofline-data-type <datatype>``
+   Allows you to specify datatypes that you want plotted in the roofline PDF output(s). Selecting more than one datatype will overlay the results onto the same plot. Default: FP32
+
 To distinguish different kernels in your ``.pdf`` roofline plot use
 ``--kernel-names``. This will give each kernel a unique marker identifiable from
 the plot's key.
@@ -507,8 +510,7 @@ successfully.
 
    $ ls workloads/vcopy/MI200/
    total 48
-   -rw-r--r-- 1 auser agroup 13331 Mar  1 16:05 empirRoof_gpu-0_fp32_fp64.pdf
-   -rw-r--r-- 1 auser agroup 13136 Mar  1 16:05 empirRoof_gpu-0_int8_fp16.pdf
+   -rw-r--r-- 1 auser agroup 13331 Mar  1 16:05 empirRoof_gpu-0_FP32.pdf
    drwxr-xr-x 1 auser agroup     0 Mar  1 16:03 perfmon
    -rw-r--r-- 1 auser agroup  1101 Mar  1 16:03 pmc_perf.csv
    -rw-r--r-- 1 auser agroup  1715 Mar  1 16:05 roofline.csv
@@ -517,11 +519,9 @@ successfully.
 
 .. note::
 
-   ROCm Compute Profiler generates three roofline outputs to organize results and reduce
-   clutter. One chart plots FP32/FP64 performance, one plots I8/FP16
-   performance, and the other plots FP8 performance.
+   ROCm Compute Profiler currently captures roofline profiling for all data types, but has the ability to reduce clutter in the PDF outputs by selecting datatype(s). Selecting multiple datatypes will overlay the results into the same PDF. If the user would like separate PDFs for each datatype off of the same workload run, the user can run the profiling command again with the single datatype as long as the roofline.csv still exists in the workload folder.
 
-The following image is a sample ``empirRoof_gpu-0_int8_fp16.pdf`` roofline
+The following image is a sample ``empirRoof_gpu-0_FP32.pdf`` roofline
 plot.
 
 .. image:: ../../data/profile/sample-roof-plot.jpg
