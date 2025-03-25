@@ -2484,6 +2484,7 @@ protected:
     bool is_first_wave () const override;
 
     size_t lds_size () const override;
+    size_t hwreg_count () const override;
 
     agent_address_t begin () const override
     {
@@ -2782,6 +2783,12 @@ gfx9_architecture_t::cwsr_record_t::lds_size () const
 {
   return compute_relaunch_state_payload_lds_size (m_compute_relaunch_state)
          * 128 * sizeof (uint32_t);
+}
+
+size_t
+gfx9_architecture_t::cwsr_record_t::hwreg_count () const
+{
+  return 32;
 }
 
 bool
@@ -3152,9 +3159,14 @@ gfx9_architecture_t::cwsr_record_t::register_address (
         return save_area_addr;
     }
 
-  size_t ttmp_size = sizeof (uint32_t);
-  size_t ttmp_count = 16;
-  agent_address_t ttmps_addr = save_area_addr - ttmp_count * ttmp_size;
+  const size_t hwreg_size = sizeof (uint32_t);
+  const agent_address_t hwregs_addr
+    = save_area_addr - (this->hwreg_count () * hwreg_size);
+
+  /* TTMP registers are saved at the end of the HWREG block.  */
+  const size_t ttmp_size = sizeof (uint32_t);
+  const size_t ttmp_count = 16;
+  const agent_address_t ttmps_addr = save_area_addr - ttmp_count * ttmp_size;
 
   if (regnum >= amdgpu_regnum_t::first_ttmp
       && regnum <= amdgpu_regnum_t::last_ttmp)
@@ -3163,10 +3175,6 @@ gfx9_architecture_t::cwsr_record_t::register_address (
               + (utils::narrow<size_t> (regnum - amdgpu_regnum_t::first_ttmp)
                  * ttmp_size));
     }
-
-  size_t hwreg_count = 16;
-  size_t hwreg_size = sizeof (uint32_t);
-  agent_address_t hwregs_addr = ttmps_addr - hwreg_count * hwreg_size;
 
   /* Rename registers that map to the hwreg block.  */
   switch (regnum)
