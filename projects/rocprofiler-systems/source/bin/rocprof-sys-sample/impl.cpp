@@ -441,7 +441,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             auto _h = p.get<bool>("host");
             auto _d = p.get<bool>("device");
             update_env(_env, "ROCPROFSYS_USE_PROCESS_SAMPLING", _h || _d);
-            update_env(_env, "ROCPROFSYS_USE_ROCM_SMI", _d);
+            update_env(_env, "ROCPROFSYS_USE_AMD_SMI", _d);
         });
     parser
         .add_argument({ "-w", "--wait" },
@@ -715,7 +715,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
 
     std::set<std::string> _backend_choices = {
         "all",      "kokkosp",         "mpip",        "ompt",
-        "rcclp",    "rocm-smi",        "mutex-locks", "spin-locks",
+        "rcclp",    "amd-smi",         "mutex-locks", "spin-locks",
         "rw-locks", "rocprofiler-sdk", "rocm"
     };
 
@@ -733,7 +733,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
 
 #if !defined(ROCPROFSYS_USE_ROCM)
     _backend_choices.erase("rocm");
-    _backend_choices.erase("rocm-smi");
+    _backend_choices.erase("amd-smi");
     _backend_choices.erase("rocprofiler-sdk");
 #endif
 
@@ -752,7 +752,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             _update("ROCPROFSYS_USE_OMPT", _v.count("ompt") > 0);
             _update("ROCPROFSYS_USE_ROCM", _v.count("rocm") > 0);
             _update("ROCPROFSYS_USE_RCCLP", _v.count("rcclp") > 0);
-            _update("ROCPROFSYS_USE_ROCM_SMI", _v.count("rocm-smi") > 0);
+            _update("ROCPROFSYS_USE_AMD_SMI", _v.count("amd-smi") > 0);
             _update("ROCPROFSYS_TRACE_THREAD_LOCKS", _v.count("mutex-locks") > 0);
             _update("ROCPROFSYS_TRACE_THREAD_RW_LOCKS", _v.count("rw-locks") > 0);
             _update("ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS", _v.count("spin-locks") > 0);
@@ -776,7 +776,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             _update("ROCPROFSYS_USE_OMPT", _v.count("ompt") > 0);
             _update("ROCPROFSYS_USE_ROCM", _v.count("rocm") > 0);
             _update("ROCPROFSYS_USE_RCCLP", _v.count("rcclp") > 0);
-            _update("ROCPROFSYS_USE_ROCM_SMI", _v.count("rocm-smi") > 0);
+            _update("ROCPROFSYS_USE_AMD_SMI", _v.count("amd-smi") > 0);
             _update("ROCPROFSYS_TRACE_THREAD_LOCKS", _v.count("mutex-locks") > 0);
             _update("ROCPROFSYS_TRACE_THREAD_RW_LOCKS", _v.count("rw-locks") > 0);
             _update("ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS", _v.count("spin-locks") > 0);
