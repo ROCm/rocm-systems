@@ -36,7 +36,7 @@ try:
     from importlib import metadata
 
     from rocprof_compute_base import RocProfCompute
-    from utils.utils import console_error
+    from utils.logger import console_error
 except ImportError as e:
     # print("Failed to import required modules: " + str(e))
     pass

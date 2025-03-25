@@ -32,14 +32,14 @@ from pymongo import MongoClient
 from tqdm import tqdm
 
 from utils.kernel_name_shortener import kernel_name_shortener
-from utils.utils import (
+from utils.logger import (
     console_debug,
     console_error,
     console_log,
     console_warning,
     demarcate,
-    is_workload_empty,
 )
+from utils.utils import is_workload_empty
 
 MAX_SERVER_SEL_DELAY = 5000  # 5 sec connection timeout
 

@@ -38,16 +38,15 @@ from pathlib import Path as path
 import pandas as pd
 
 import config
-from utils.mi_gpu_spec import get_gpu_series_dict, get_mi300_chip_id_dict
-from utils.tty import get_table_string
-from utils.utils import (
+from utils.logger import (
     console_debug,
     console_error,
     console_log,
     console_warning,
-    get_version,
-    total_xcds,
 )
+from utils.mi_gpu_spec import get_gpu_series_dict, get_mi300_chip_id_dict
+from utils.tty import get_table_string
+from utils.utils import get_version, total_xcds
 
 VERSION_LOC = [
     "version",

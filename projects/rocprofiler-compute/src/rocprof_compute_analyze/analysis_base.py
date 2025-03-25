@@ -30,14 +30,8 @@ from collections import OrderedDict
 from pathlib import Path
 
 from utils import file_io, parser, schema
-from utils.utils import (
-    console_debug,
-    console_error,
-    console_log,
-    demarcate,
-    is_workload_empty,
-    merge_counters_spatial_multiplex,
-)
+from utils.logger import console_debug, console_error, console_log, demarcate
+from utils.utils import is_workload_empty, merge_counters_spatial_multiplex
 
 
 class OmniAnalyze_Base:

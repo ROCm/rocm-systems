@@ -27,8 +27,6 @@ import os
 import sys
 from pathlib import Path
 
-from utils.utils import trace_logger
-
 # Define the colors
 BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE = range(8)
 RESET_SEQ = "\033[0m"
@@ -42,6 +40,54 @@ COLORS = {
     "ERROR": RED,
     "TRACE": MAGENTA,
 }
+
+
+def demarcate(function):
+    def wrap_function(*args, **kwargs):
+        logging.trace("----- [entering function] -> %s()" % (function.__qualname__))
+        result = function(*args, **kwargs)
+        logging.trace("----- [exiting  function] -> %s()" % function.__qualname__)
+        return result
+
+    return wrap_function
+
+
+def console_error(*argv, exit=True):
+    if len(argv) > 1:
+        logging.error(f"[{argv[0]}] {argv[1]}")
+    else:
+        logging.error(f"{argv[0]}")
+    if exit:
+        sys.exit(1)
+
+
+def console_log(*argv, indent_level=0):
+    indent = ""
+    if indent_level >= 1:
+        indent = " " * 3 * indent_level + "|-> "  # spaces per indent level
+
+    if len(argv) > 1:
+        logging.info(indent + f"[{argv[0]}] {argv[1]}")
+    else:
+        logging.info(indent + f"{argv[0]}")
+
+
+def console_debug(*argv):
+    if len(argv) > 1:
+        logging.debug(f"[{argv[0]}] {argv[1]}")
+    else:
+        logging.debug(f"{argv[0]}")
+
+
+def console_warning(*argv):
+    if len(argv) > 1:
+        logging.warning(f"[{argv[0]}] {argv[1]}")
+    else:
+        logging.warning(f"{argv[0]}")
+
+
+def trace_logger(message, *args, **kwargs):
+    logging.log(logging.TRACE, message, *args, **kwargs)
 
 
 # Define the formatter
@@ -78,6 +124,7 @@ class PlainFormatter(logging.Formatter):
 # Setup console handler - provided as separate function to be called
 # prior to argument parsing
 def setup_console_handler():
+    logging.getLogger().handlers.clear()
     # register a trace level logger
     logging.TRACE = logging.DEBUG - 5
     logging.addLevelName(logging.TRACE, "TRACE")

@@ -32,7 +32,7 @@ import numpy as np
 import pandas as pd
 
 from utils import schema
-from utils.utils import console_error, console_warning, demarcate
+from utils.logger import console_error, console_warning, demarcate
 
 # ------------------------------------------------------------------------------
 # Internal global definitions

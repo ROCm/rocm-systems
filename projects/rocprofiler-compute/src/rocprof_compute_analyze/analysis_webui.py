@@ -35,7 +35,7 @@ from dash.dependencies import Input, Output, State
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from utils import file_io, parser
 from utils.gui import build_bar_chart, build_table_chart
-from utils.utils import console_debug, console_error, demarcate
+from utils.logger import console_debug, console_error, demarcate
 
 PROJECT_NAME = "rocprofiler-compute"
 

@@ -25,7 +25,7 @@
 from dash import html
 from dash_svg import G, Path, Rect, Svg, Text
 
-from utils.utils import console_error
+from utils.logger import console_error
 
 hidden_columns = ["Tips", "coll_level"]
 

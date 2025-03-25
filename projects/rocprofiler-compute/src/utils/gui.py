@@ -28,7 +28,7 @@ import plotly.express as px
 from dash import dash_table, html
 
 from utils import schema
-from utils.utils import console_error
+from utils.logger import console_error
 
 pd.set_option(
     "mode.chained_assignment", None

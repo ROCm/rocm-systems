@@ -27,7 +27,8 @@ from pathlib import Path
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from roofline import Roofline
-from utils.utils import console_error, console_log, demarcate, mibench
+from utils.logger import console_error, console_log, demarcate
+from utils.utils import mibench
 
 
 class gfx940_soc(OmniSoC_Base):
