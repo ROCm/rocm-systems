@@ -93,7 +93,7 @@ class AMDSMIHelpers():
                             self._is_passthrough = True
                             break # Once passthrough is determined, we can immediately break
             except amdsmi_exception.AmdSmiLibraryException as e:
-                logging.debug("Unable to determine virtualization status: " + e.get_error_code())
+                logging.debug("Unable to determine virtualization status: " + str(e.get_error_code()))
 
     def increment_set_count(self):
         self._count_of_sets_called += 1
