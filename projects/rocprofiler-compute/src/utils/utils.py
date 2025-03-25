@@ -691,7 +691,7 @@ def run_prof(
     if new_env and not using_v3() and not using_v1():
         # flatten tcc for applicable mi300 input
         f = path(workload_dir + "/out/pmc_1/results_" + fbase + ".csv")
-        xcds = get_mi300_num_xcds(mspec.gpu_model, mspec.compute_partition)
+        xcds = total_xcds(mspec.gpu_model, mspec.compute_partition)
         df = flatten_tcc_info_across_xcds(f, xcds, int(mspec._l2_banks))
         df.to_csv(f, index=False)
 
@@ -746,38 +746,40 @@ def process_rocprofv3_output(rocprof_output, workload_dir, is_timestamps):
             csv_file = pathlib.Path(json_file).with_suffix(".csv")
             v3_json_to_csv(json_file, csv_file)
         results_files_csv = glob.glob(workload_dir + "/out/pmc_1/*/*.csv")
+
     elif rocprof_output == "csv":
         counter_info_csvs = glob.glob(
             workload_dir + "/out/pmc_1/*/*_counter_collection.csv"
         )
         existing_counter_files_csv = [d for d in counter_info_csvs if path(d).is_file()]
 
-        if len(existing_counter_files_csv) > 0:
+        if existing_counter_files_csv:
             for counter_file in existing_counter_files_csv:
-                current_dir = str(path(counter_file).parent)
-                agent_info_filepath = str(
-                    path(current_dir).joinpath(
-                        path(counter_file).name.replace(
-                            "_counter_collection", "_agent_info"
-                        )
-                    )
+                counter_path = path(counter_file)
+                current_dir = counter_path.parent
+
+                agent_info_filepath = current_dir / counter_path.name.replace(
+                    "_counter_collection", "_agent_info"
                 )
-                if not path(agent_info_filepath).is_file():
+
+                if not agent_info_filepath.is_file():
                     raise ValueError(
                         '{} has no coresponding "agent info" file'.format(counter_file)
                     )
 
-                converted_csv_file = str(
-                    path(current_dir).joinpath(
-                        path(counter_file).name.replace(
-                            "_counter_collection", "_converted"
-                        )
-                    )
+                converted_csv_file = current_dir / counter_path.name.replace(
+                    "_counter_collection", "_converted"
                 )
 
-                v3_counter_csv_to_v2_csv(
-                    counter_file, agent_info_filepath, converted_csv_file
-                )
+                try:
+                    v3_counter_csv_to_v2_csv(
+                        counter_file, str(agent_info_filepath), str(converted_csv_file)
+                    )
+                except Exception as e:
+                    console_warning(
+                        f"Error converting {counter_file} from v3 to v2 csv: {e}"
+                    )
+                    return []
 
             results_files_csv = glob.glob(workload_dir + "/out/pmc_1/*/*_converted.csv")
         elif is_timestamps:

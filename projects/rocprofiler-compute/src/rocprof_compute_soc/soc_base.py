@@ -103,7 +103,6 @@ class OmniSoC_Base:
 
     @demarcate
     def populate_mspec(self):
-        console_debug("[populate_mspec]")
         from utils.specs import run, search, total_sqc
 
         if not hasattr(self._mspec, "_rocminfo") or self._mspec._rocminfo is None:
