@@ -154,15 +154,13 @@ void AtomicExchSameAddress(const dim3 blocks, const dim3 threads, const LinearAl
   }
 }
 
-template <typename TestType, AtomicScopes scope> void AtomicExchSameAddressTest() {
+template <typename TestType, AtomicScopes scope>
+void AtomicExchSameAddressTest(const LinearAllocs alloc_type) {
   const auto threads = GENERATE(dim3(1024), dim3(1023), dim3(511), dim3(17), dim3(31));
 
   SECTION("Global memory") {
     const auto blocks = GENERATE(dim3(20));
-    using LA = LinearAllocs;
-    const auto allocation_type =
-        GENERATE(LA::hipMalloc, LA::hipHostMalloc, LA::hipMallocManaged, LA::mallocAndRegister);
-    AtomicExchSameAddress<TestType, false, AtomicScopes::device>(blocks, threads, allocation_type);
+    AtomicExchSameAddress<TestType, false, AtomicScopes::device>(blocks, threads, alloc_type);
   }
 
   SECTION("Shared memory") {
@@ -310,7 +308,8 @@ inline dim3 GenerateAtomicExchBlockDimensions() {
 }
 
 template <typename TestType, AtomicScopes scope, int memory_scope = __HIP_MEMORY_SCOPE_AGENT>
-void AtomicExchSingleDeviceSingleKernelTest(const unsigned int width, const unsigned int pitch) {
+void AtomicExchSingleDeviceSingleKernelTest(const unsigned int width, const unsigned int pitch,
+                                            const LinearAllocs alloc_type) {
   AtomicExchParams params;
   params.num_devices = 1;
   params.kernel_count = 1;
@@ -336,14 +335,9 @@ void AtomicExchSingleDeviceSingleKernelTest(const unsigned int width, const unsi
     } else {
       params.blocks = GenerateAtomicExchBlockDimensions();
     }
-    using LA = LinearAllocs;
-    for (const auto alloc_type :
-         {LA::hipMalloc, LA::hipHostMalloc, LA::hipMallocManaged}) {
-      params.alloc_type = alloc_type;
-      DYNAMIC_SECTION("Allocation type: " << to_string(alloc_type)) {
-        AtomicExch<TestType, false, scope, memory_scope>().run(params);
-      }
-    }
+
+    params.alloc_type = alloc_type;
+    AtomicExch<TestType, false, scope, memory_scope>().run(params);
   }
 
   SECTION("Shared memory") {
@@ -355,7 +349,8 @@ void AtomicExchSingleDeviceSingleKernelTest(const unsigned int width, const unsi
 
 template <typename TestType, AtomicScopes scope>
 void AtomicExchSingleDeviceMultipleKernelTest(const unsigned int kernel_count,
-                                              const unsigned int width, const unsigned int pitch) {
+                                              const unsigned int width, const unsigned int pitch,
+                                              const LinearAllocs alloc_type) {
   int concurrent_kernels = 0;
   HIP_CHECK(hipDeviceGetAttribute(&concurrent_kernels, hipDeviceAttributeConcurrentKernels, 0));
   if (!concurrent_kernels) {
@@ -371,14 +366,8 @@ void AtomicExchSingleDeviceMultipleKernelTest(const unsigned int kernel_count,
   params.width = width;
   params.pitch = pitch;
 
-  using LA = LinearAllocs;
-  for (const auto alloc_type :
-       {LA::hipMalloc, LA::hipHostMalloc, LA::hipMallocManaged}) {
-    params.alloc_type = alloc_type;
-    DYNAMIC_SECTION("Allocation type: " << to_string(alloc_type)) {
-      AtomicExch<TestType, false, scope>().run(params);
-    }
-  }
+  params.alloc_type = alloc_type;
+  AtomicExch<TestType, false, scope>().run(params);
 }
 
 template <typename TestType>
@@ -386,6 +375,7 @@ void AtomicExchMultipleDeviceMultipleKernelAndHostTest(const unsigned int num_de
                                                        const unsigned int kernel_count,
                                                        const unsigned int width,
                                                        const unsigned int pitch,
+                                                       const LinearAllocs alloc_type,
                                                        const unsigned int host_thread_count = 0u) {
   if (num_devices > 1) {
     if (HipTest::getDeviceCount() < num_devices) {
@@ -428,11 +418,6 @@ void AtomicExchMultipleDeviceMultipleKernelAndHostTest(const unsigned int num_de
   params.pitch = pitch;
   params.host_thread_count = host_thread_count;
 
-  using LA = LinearAllocs;
-  for (const auto alloc_type : {LA::hipHostMalloc , LA::hipMallocManaged}) {
-    params.alloc_type = alloc_type;
-    DYNAMIC_SECTION("Allocation type: " << to_string(alloc_type)) {
-      AtomicExch<TestType, false, AtomicScopes::system>().run(params);
-    }
-  }
+  params.alloc_type = alloc_type;
+  AtomicExch<TestType, false, AtomicScopes::system>().run(params);
 }

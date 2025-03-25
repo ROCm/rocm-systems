@@ -23,6 +23,12 @@ THE SOFTWARE.
 #include "atomicExch_common.hh"
 #include "atomicExch_negative_kernels_rtc.hh"
 
+#if HT_NVIDIA
+#define TEST_TYPES int, unsigned int, unsigned long long, float
+#else
+#define TEST_TYPES int, unsigned int, unsigned long, unsigned long long, float, double
+#endif
+
 /**
  * @addtogroup atomicExch atomicExch
  * @{
@@ -50,19 +56,20 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-#if HT_NVIDIA
-TEMPLATE_TEST_CASE("Unit_atomicExch_Positive_Same_Address_Compile_Time", "", int, unsigned int,
-                   unsigned long long, float) {
-#else
-TEMPLATE_TEST_CASE("Unit_atomicExch_Positive_Same_Address_Compile_Time", "", int, unsigned int,
-                   unsigned long, unsigned long long, float, double) {
-#endif  // HT_NVIDIA
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Positive Same Address" << current) {
-      AtomicExchSameAddressTest<TestType, AtomicScopes::device>();
-    }
+#define ATOMIC_EXCH_POSITIVE_SAME_ADDRESS_COMPILE_TIME_TEST(alloc_type)                            \
+  TEMPLATE_TEST_CASE("Unit_atomicExch_Positive_Same_Address_Compile_Time_" #alloc_type, "",        \
+                     TEST_TYPES) {                                                                 \
+    for (auto current = 0; current < cmd_options.atomic_iterations; ++current) {                   \
+      DYNAMIC_SECTION("Positive Same Address" << current) {                                        \
+        AtomicExchSameAddressTest<TestType, AtomicScopes::device>(LinearAllocs::alloc_type);       \
+      }                                                                                            \
+    }                                                                                              \
   }
-}
+
+ATOMIC_EXCH_POSITIVE_SAME_ADDRESS_COMPILE_TIME_TEST(hipMalloc)
+ATOMIC_EXCH_POSITIVE_SAME_ADDRESS_COMPILE_TIME_TEST(hipHostMalloc)
+ATOMIC_EXCH_POSITIVE_SAME_ADDRESS_COMPILE_TIME_TEST(hipMallocManaged)
+// ATOMIC_EXCH_POSITIVE_SAME_ADDRESS_COMPILE_TIME_TEST(mallocAndRegister)
 
 /**
  * Test Description
@@ -90,32 +97,34 @@ TEMPLATE_TEST_CASE("Unit_atomicExch_Positive_Same_Address_Compile_Time", "", int
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-#if HT_NVIDIA
-TEMPLATE_TEST_CASE("Unit_atomicExch_Positive", "", int, unsigned int, unsigned long long, float) {
-#else
-TEMPLATE_TEST_CASE("Unit_atomicExch_Positive", "", int, unsigned int, unsigned long,
-                   unsigned long long, float, double) {
-#endif  // HT_NVIDIA
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      AtomicExchSingleDeviceSingleKernelTest<TestType, AtomicScopes::device>(1, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      AtomicExchSingleDeviceSingleKernelTest<TestType, AtomicScopes::device>(warp_size,
-                                                                             sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      AtomicExchSingleDeviceSingleKernelTest<TestType, AtomicScopes::device>(warp_size,
-                                                                             cache_line_size);
-    }
+#define ATOMIC_EXCH_POSITIVE_SINGLE_DEVICE_SINGLE_KERNEL_TEST(alloc_type)                          \
+  TEMPLATE_TEST_CASE("Unit_atomicExch_Positive_" #alloc_type, "", TEST_TYPES) {                    \
+    int warp_size = 0;                                                                             \
+    HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));                   \
+    const auto cache_line_size = 128u;                                                             \
+                                                                                                   \
+    for (auto current = 0; current < cmd_options.atomic_iterations; ++current) {                   \
+      DYNAMIC_SECTION("Same address " << current) {                                                \
+        AtomicExchSingleDeviceSingleKernelTest<TestType, AtomicScopes::device>(                    \
+            1, sizeof(TestType), LinearAllocs::alloc_type);                                        \
+      }                                                                                            \
+                                                                                                   \
+      DYNAMIC_SECTION("Adjacent addresses " << current) {                                          \
+        AtomicExchSingleDeviceSingleKernelTest<TestType, AtomicScopes::device>(                    \
+            warp_size, sizeof(TestType), LinearAllocs::alloc_type);                                \
+      }                                                                                            \
+                                                                                                   \
+      DYNAMIC_SECTION("Scattered addresses " << current) {                                         \
+        AtomicExchSingleDeviceSingleKernelTest<TestType, AtomicScopes::device>(                    \
+            warp_size, cache_line_size, LinearAllocs::alloc_type);                                 \
+      }                                                                                            \
+    }                                                                                              \
   }
-}
+
+ATOMIC_EXCH_POSITIVE_SINGLE_DEVICE_SINGLE_KERNEL_TEST(hipMalloc)
+// ATOMIC_EXCH_POSITIVE_SINGLE_DEVICE_SINGLE_KERNEL_TEST(hipHostMalloc)
+// ATOMIC_EXCH_POSITIVE_SINGLE_DEVICE_SINGLE_KERNEL_TEST(hipMallocManaged)
+// ATOMIC_EXCH_POSITIVE_SINGLE_DEVICE_SINGLE_KERNEL_TEST(mallocAndRegister)
 
 /**
  * Test Description
@@ -142,34 +151,34 @@ TEMPLATE_TEST_CASE("Unit_atomicExch_Positive", "", int, unsigned int, unsigned l
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-#if HT_NVIDIA
-TEMPLATE_TEST_CASE("Unit_atomicExch_Positive_Multi_Kernel", "", int, unsigned int,
-                   unsigned long long, float) {
-#else
-TEMPLATE_TEST_CASE("Unit_atomicExch_Positive_Multi_Kernel", "", int, unsigned int, unsigned long,
-                   unsigned long long, float, double) {
-#endif  // HT_NVIDIA
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      AtomicExchSingleDeviceMultipleKernelTest<TestType, AtomicScopes::device>(2, 1,
-                                                                               sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      AtomicExchSingleDeviceMultipleKernelTest<TestType, AtomicScopes::device>(2, warp_size,
-                                                                               sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      AtomicExchSingleDeviceMultipleKernelTest<TestType, AtomicScopes::device>(2, warp_size,
-                                                                               cache_line_size);
-    }
+#define ATOMIC_EXCH_POSITIVE_SINGLE_DEVICE_MULTI_KERNEL_TEST(alloc_type)                           \
+  TEMPLATE_TEST_CASE("Unit_atomicExch_Positive_Multi_Kernel_" #alloc_type, "", TEST_TYPES) {       \
+    int warp_size = 0;                                                                             \
+    HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));                   \
+    const auto cache_line_size = 128u;                                                             \
+                                                                                                   \
+    for (auto current = 0; current < cmd_options.atomic_iterations; ++current) {                   \
+      DYNAMIC_SECTION("Same address " << current) {                                                \
+        AtomicExchSingleDeviceMultipleKernelTest<TestType, AtomicScopes::device>(                  \
+            2, 1, sizeof(TestType), LinearAllocs::alloc_type);                                     \
+      }                                                                                            \
+                                                                                                   \
+      DYNAMIC_SECTION("Adjacent addresses " << current) {                                          \
+        AtomicExchSingleDeviceMultipleKernelTest<TestType, AtomicScopes::device>(                  \
+            2, warp_size, sizeof(TestType), LinearAllocs::alloc_type);                             \
+      }                                                                                            \
+                                                                                                   \
+      DYNAMIC_SECTION("Scattered addresses " << current) {                                         \
+        AtomicExchSingleDeviceMultipleKernelTest<TestType, AtomicScopes::device>(                  \
+            2, warp_size, cache_line_size, LinearAllocs::alloc_type);                              \
+      }                                                                                            \
+    }                                                                                              \
   }
-}
+
+ATOMIC_EXCH_POSITIVE_SINGLE_DEVICE_MULTI_KERNEL_TEST(hipMalloc)
+// ATOMIC_EXCH_POSITIVE_SINGLE_DEVICE_MULTI_KERNEL_TEST(hipHostMalloc)
+// ATOMIC_EXCH_POSITIVE_SINGLE_DEVICE_MULTI_KERNEL_TEST(hipMallocManaged)
+// ATOMIC_EXCH_POSITIVE_SINGLE_DEVICE_MULTI_KERNEL_TEST(mallocAndRegister)
 
 /**
  * Test Description

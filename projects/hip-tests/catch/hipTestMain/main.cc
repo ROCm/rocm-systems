@@ -78,6 +78,9 @@ int main(int argc, char** argv) {
     | Opt(cmd_options.reduction_factor, "reduction_factor")
         ["-R"]["--reduction-factor"]
         ("Percentage of test data to be actually tested (default: 0.1%)")
+    | Opt(cmd_options.atomic_iterations, "atomic_iterations")
+        ["-T"]["--atomic-iterations"]
+        ("Number of iterations used for atomic tests (default: 1)")
   ;
   // clang-format on
 

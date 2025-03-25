@@ -24,528 +24,157 @@ THE SOFTWARE.
 
 #include "memory_order_common.hh"
 
-TEST_CASE("Unit___hip_atomic_load_store_Positive_Acquire_Release") {
-  SECTION("ACQUIRE/RELEASE") {
-    SECTION("WAVEFRONT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kLoadStore, __ATOMIC_ACQUIRE,
-                           __HIP_MEMORY_SCOPE_WAVEFRONT>();
-    }
-    SECTION("WORKGROUP") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kLoadStore, __ATOMIC_ACQUIRE,
-                           __HIP_MEMORY_SCOPE_WORKGROUP>();
-    }
-    SECTION("AGENT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kLoadStore, __ATOMIC_ACQUIRE,
-                           __HIP_MEMORY_SCOPE_AGENT>();
-    }
-    SECTION("SYSTEM") {
-      AcquireRelease::SystemTest<BuiltinAtomicOperation::kLoadStore, __ATOMIC_ACQUIRE>();
-    }
+#define HIP_ACQUIRE_RELEASE_SECTION(operation, alloc_type)                                         \
+  SECTION("ACQUIRE/RELEASE") {                                                                     \
+    SECTION("WAVEFRONT") {                                                                         \
+      AcquireRelease::Test<BuiltinAtomicOperation::operation, __ATOMIC_ACQUIRE,                    \
+                           __HIP_MEMORY_SCOPE_WAVEFRONT>(LinearAllocs::alloc_type);                \
+    }                                                                                              \
+    SECTION("WORKGROUP") {                                                                         \
+      AcquireRelease::Test<BuiltinAtomicOperation::kLoadStore, __ATOMIC_ACQUIRE,                   \
+                           __HIP_MEMORY_SCOPE_WORKGROUP>(LinearAllocs::alloc_type);                \
+    }                                                                                              \
+    SECTION("AGENT") {                                                                             \
+      AcquireRelease::Test<BuiltinAtomicOperation::kLoadStore, __ATOMIC_ACQUIRE,                   \
+                           __HIP_MEMORY_SCOPE_AGENT>(LinearAllocs::alloc_type);                    \
+    }                                                                                              \
   }
-  SECTION("SEQ_CST") {
-    SECTION("WAVEFRONT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kLoadStore, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_WAVEFRONT>();
-    }
-    SECTION("WORKGROUP") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kLoadStore, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_WORKGROUP>();
-    }
-    SECTION("AGENT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kLoadStore, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_AGENT>();
-    }
-    SECTION("SYSTEM") {
-      AcquireRelease::SystemTest<BuiltinAtomicOperation::kLoadStore, __ATOMIC_SEQ_CST>();
-    }
-  }
-}
 
-TEST_CASE("Unit___hip_atomic_exchange_Positive_Acquire_Release") {
-  SECTION("ACQUIRE/RELEASE") {
-    SECTION("WAVEFRONT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kExchange, __ATOMIC_ACQUIRE,
-                           __HIP_MEMORY_SCOPE_WAVEFRONT>();
-    }
-    SECTION("WORKGROUP") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kExchange, __ATOMIC_ACQUIRE,
-                           __HIP_MEMORY_SCOPE_WORKGROUP>();
-    }
-    SECTION("AGENT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kExchange, __ATOMIC_ACQUIRE,
-                           __HIP_MEMORY_SCOPE_AGENT>();
-    }
-    SECTION("SYSTEM") {
-      AcquireRelease::SystemTest<BuiltinAtomicOperation::kExchange, __ATOMIC_ACQUIRE>();
-    }
+#define HIP_ACQ_REL_SECTION(operation, alloc_type)                                                 \
+  SECTION("ACQ_REL") {                                                                             \
+    SECTION("WAVEFRONT") {                                                                         \
+      AcquireRelease::Test<BuiltinAtomicOperation::operation, __ATOMIC_ACQ_REL,                    \
+                           __HIP_MEMORY_SCOPE_WAVEFRONT>(LinearAllocs::alloc_type);                \
+    }                                                                                              \
+    SECTION("WORKGROUP") {                                                                         \
+      AcquireRelease::Test<BuiltinAtomicOperation::operation, __ATOMIC_ACQ_REL,                    \
+                           __HIP_MEMORY_SCOPE_WORKGROUP>(LinearAllocs::alloc_type);                \
+    }                                                                                              \
+    SECTION("AGENT") {                                                                             \
+      AcquireRelease::Test<BuiltinAtomicOperation::operation, __ATOMIC_ACQ_REL,                    \
+                           __HIP_MEMORY_SCOPE_AGENT>(LinearAllocs::alloc_type);                    \
+    }                                                                                              \
   }
-  SECTION("ACQ_REL") {
-    SECTION("WAVEFRONT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kExchange, __ATOMIC_ACQ_REL,
-                           __HIP_MEMORY_SCOPE_WAVEFRONT>();
-    }
-    SECTION("WORKGROUP") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kExchange, __ATOMIC_ACQ_REL,
-                           __HIP_MEMORY_SCOPE_WORKGROUP>();
-    }
-    SECTION("AGENT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kExchange, __ATOMIC_ACQ_REL,
-                           __HIP_MEMORY_SCOPE_AGENT>();
-    }
-    SECTION("SYSTEM") {
-      AcquireRelease::SystemTest<BuiltinAtomicOperation::kExchange, __ATOMIC_ACQ_REL>();
-    }
-  }
-  SECTION("SEQ_CST") {
-    SECTION("WAVEFRONT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kExchange, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_WAVEFRONT>();
-    }
-    SECTION("WORKGROUP") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kExchange, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_WORKGROUP>();
-    }
-    SECTION("AGENT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kExchange, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_AGENT>();
-    }
-    SECTION("SYSTEM") {
-      AcquireRelease::SystemTest<BuiltinAtomicOperation::kExchange, __ATOMIC_SEQ_CST>();
-    }
-  }
-}
 
-TEST_CASE("Unit___hip_atomic_compare_exchange_strong_Positive_Acquire_Release") {
-  SECTION("ACQUIRE/RELEASE") {
-    SECTION("WAVEFRONT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kCompareExchangeStrong, __ATOMIC_ACQUIRE,
-                           __HIP_MEMORY_SCOPE_WAVEFRONT>();
-    }
-    SECTION("WORKGROUP") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kCompareExchangeStrong, __ATOMIC_ACQUIRE,
-                           __HIP_MEMORY_SCOPE_WORKGROUP>();
-    }
-    SECTION("AGENT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kCompareExchangeStrong, __ATOMIC_ACQUIRE,
-                           __HIP_MEMORY_SCOPE_AGENT>();
-    }
-    SECTION("SYSTEM") {
-      AcquireRelease::SystemTest<BuiltinAtomicOperation::kCompareExchangeStrong,
-                                 __ATOMIC_ACQUIRE>();
-    }
+#define HIP_SEQ_CST_SECTION(operation, alloc_type)                                                 \
+  SECTION("SEQ_CST") {                                                                             \
+    SECTION("WAVEFRONT") {                                                                         \
+      AcquireRelease::Test<BuiltinAtomicOperation::operation, __ATOMIC_SEQ_CST,                    \
+                           __HIP_MEMORY_SCOPE_WAVEFRONT>(LinearAllocs::alloc_type);                \
+    }                                                                                              \
+    SECTION("WORKGROUP") {                                                                         \
+      AcquireRelease::Test<BuiltinAtomicOperation::kLoadStore, __ATOMIC_SEQ_CST,                   \
+                           __HIP_MEMORY_SCOPE_WORKGROUP>(LinearAllocs::alloc_type);                \
+    }                                                                                              \
+    SECTION("AGENT") {                                                                             \
+      AcquireRelease::Test<BuiltinAtomicOperation::kLoadStore, __ATOMIC_SEQ_CST,                   \
+                           __HIP_MEMORY_SCOPE_AGENT>(LinearAllocs::alloc_type);                    \
+    }                                                                                              \
   }
-  SECTION("ACQ_REL") {
-    SECTION("WAVEFRONT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kCompareExchangeStrong, __ATOMIC_ACQ_REL,
-                           __HIP_MEMORY_SCOPE_WAVEFRONT>();
-    }
-    SECTION("WORKGROUP") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kCompareExchangeStrong, __ATOMIC_ACQ_REL,
-                           __HIP_MEMORY_SCOPE_WORKGROUP>();
-    }
-    SECTION("AGENT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kCompareExchangeStrong, __ATOMIC_ACQ_REL,
-                           __HIP_MEMORY_SCOPE_AGENT>();
-    }
-    SECTION("SYSTEM") {
-      AcquireRelease::SystemTest<BuiltinAtomicOperation::kCompareExchangeStrong,
-                                 __ATOMIC_ACQ_REL>();
-    }
-  }
-  SECTION("SEQ_CST") {
-    SECTION("WAVEFRONT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kCompareExchangeStrong, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_WAVEFRONT>();
-    }
-    SECTION("WORKGROUP") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kCompareExchangeStrong, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_WORKGROUP>();
-    }
-    SECTION("AGENT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kCompareExchangeStrong, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_AGENT>();
-    }
-    SECTION("SYSTEM") {
-      AcquireRelease::SystemTest<BuiltinAtomicOperation::kCompareExchangeStrong,
-                                 __ATOMIC_SEQ_CST>();
-    }
-  }
-}
 
-TEST_CASE("Unit___hip_atomic_compare_exchange_weak_Positive_Acquire_Release") {
-  SECTION("ACQUIRE/RELEASE") {
-    SECTION("WAVEFRONT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kCompareExchangeWeak, __ATOMIC_ACQUIRE,
-                           __HIP_MEMORY_SCOPE_WAVEFRONT>();
-    }
-    SECTION("WORKGROUP") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kCompareExchangeWeak, __ATOMIC_ACQUIRE,
-                           __HIP_MEMORY_SCOPE_WORKGROUP>();
-    }
-    SECTION("AGENT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kCompareExchangeWeak, __ATOMIC_ACQUIRE,
-                           __HIP_MEMORY_SCOPE_AGENT>();
-    }
-    SECTION("SYSTEM") {
-      AcquireRelease::SystemTest<BuiltinAtomicOperation::kCompareExchangeWeak, __ATOMIC_ACQUIRE>();
-    }
+#define HIP_ACQUIRE_RELEASE_SYSTEM_SECTION(operation, alloc_type)                                  \
+  SECTION("ACQUIRE/RELEASE") {                                                                     \
+    SECTION("SYSTEM") {                                                                            \
+      AcquireRelease::SystemTest<BuiltinAtomicOperation::operation, __ATOMIC_ACQUIRE>(             \
+          LinearAllocs::alloc_type);                                                               \
+    }                                                                                              \
   }
-  SECTION("ACQ_REL") {
-    SECTION("WAVEFRONT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kCompareExchangeWeak, __ATOMIC_ACQ_REL,
-                           __HIP_MEMORY_SCOPE_WAVEFRONT>();
-    }
-    SECTION("WORKGROUP") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kCompareExchangeWeak, __ATOMIC_ACQ_REL,
-                           __HIP_MEMORY_SCOPE_WORKGROUP>();
-    }
-    SECTION("AGENT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kCompareExchangeWeak, __ATOMIC_ACQ_REL,
-                           __HIP_MEMORY_SCOPE_AGENT>();
-    }
-    SECTION("SYSTEM") {
-      AcquireRelease::SystemTest<BuiltinAtomicOperation::kCompareExchangeWeak, __ATOMIC_ACQ_REL>();
-    }
-  }
-  SECTION("SEQ_CST") {
-    SECTION("WAVEFRONT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kCompareExchangeWeak, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_WAVEFRONT>();
-    }
-    SECTION("WORKGROUP") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kCompareExchangeWeak, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_WORKGROUP>();
-    }
-    SECTION("AGENT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kCompareExchangeWeak, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_AGENT>();
-    }
-    SECTION("SYSTEM") {
-      AcquireRelease::SystemTest<BuiltinAtomicOperation::kCompareExchangeWeak, __ATOMIC_SEQ_CST>();
-    }
-  }
-}
 
-TEST_CASE("Unit___hip_atomic_fetch_add_Positive_Acquire_Release") {
-  SECTION("ACQUIRE/RELEASE") {
-    SECTION("WAVEFRONT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kAdd, __ATOMIC_ACQUIRE,
-                           __HIP_MEMORY_SCOPE_WAVEFRONT>();
-    }
-    SECTION("WORKGROUP") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kAdd, __ATOMIC_ACQUIRE,
-                           __HIP_MEMORY_SCOPE_WORKGROUP>();
-    }
-    SECTION("AGENT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kAdd, __ATOMIC_ACQUIRE,
-                           __HIP_MEMORY_SCOPE_AGENT>();
-    }
-    SECTION("SYSTEM") {
-      AcquireRelease::SystemTest<BuiltinAtomicOperation::kAdd, __ATOMIC_ACQUIRE>();
-    }
+#define HIP_ACQ_REL_SYSTEM_SECTION(operation, alloc_type)                                          \
+  SECTION("ACQ_REL") {                                                                             \
+    SECTION("SYSTEM") {                                                                            \
+      AcquireRelease::SystemTest<BuiltinAtomicOperation::operation, __ATOMIC_ACQ_REL>(             \
+          LinearAllocs::alloc_type);                                                               \
+    }                                                                                              \
   }
-  SECTION("ACQ_REL") {
-    SECTION("WAVEFRONT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kAdd, __ATOMIC_ACQ_REL,
-                           __HIP_MEMORY_SCOPE_WAVEFRONT>();
-    }
-    SECTION("WORKGROUP") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kAdd, __ATOMIC_ACQ_REL,
-                           __HIP_MEMORY_SCOPE_WORKGROUP>();
-    }
-    SECTION("AGENT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kAdd, __ATOMIC_ACQ_REL,
-                           __HIP_MEMORY_SCOPE_AGENT>();
-    }
-    SECTION("SYSTEM") {
-      AcquireRelease::SystemTest<BuiltinAtomicOperation::kAdd, __ATOMIC_ACQ_REL>();
-    }
-  }
-  SECTION("SEQ_CST") {
-    SECTION("WAVEFRONT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kAdd, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_WAVEFRONT>();
-    }
-    SECTION("WORKGROUP") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kAdd, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_WORKGROUP>();
-    }
-    SECTION("AGENT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kAdd, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_AGENT>();
-    }
-    SECTION("SYSTEM") {
-      AcquireRelease::SystemTest<BuiltinAtomicOperation::kAdd, __ATOMIC_SEQ_CST>();
-    }
-  }
-}
 
-TEST_CASE("Unit___hip_atomic_fetch_and_Positive_Acquire_Release") {
-  SECTION("ACQUIRE/RELEASE") {
-    SECTION("WAVEFRONT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kAnd, __ATOMIC_ACQUIRE,
-                           __HIP_MEMORY_SCOPE_WAVEFRONT>();
-    }
-    SECTION("WORKGROUP") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kAnd, __ATOMIC_ACQUIRE,
-                           __HIP_MEMORY_SCOPE_WORKGROUP>();
-    }
-    SECTION("AGENT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kAnd, __ATOMIC_ACQUIRE,
-                           __HIP_MEMORY_SCOPE_AGENT>();
-    }
-    SECTION("SYSTEM") {
-      AcquireRelease::SystemTest<BuiltinAtomicOperation::kAnd, __ATOMIC_ACQUIRE>();
-    }
+#define HIP_SEQ_CST_SYSTEM_SECTION(operation, alloc_type)                                          \
+  SECTION("SEQ_CST") {                                                                             \
+    SECTION("SYSTEM") {                                                                            \
+      AcquireRelease::SystemTest<BuiltinAtomicOperation::operation, __ATOMIC_SEQ_CST>(             \
+          LinearAllocs::alloc_type);                                                               \
+    }                                                                                              \
   }
-  SECTION("ACQ_REL") {
-    SECTION("WAVEFRONT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kAnd, __ATOMIC_ACQ_REL,
-                           __HIP_MEMORY_SCOPE_WAVEFRONT>();
-    }
-    SECTION("WORKGROUP") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kAnd, __ATOMIC_ACQ_REL,
-                           __HIP_MEMORY_SCOPE_WORKGROUP>();
-    }
-    SECTION("AGENT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kAnd, __ATOMIC_ACQ_REL,
-                           __HIP_MEMORY_SCOPE_AGENT>();
-    }
-    SECTION("SYSTEM") {
-      AcquireRelease::SystemTest<BuiltinAtomicOperation::kAnd, __ATOMIC_ACQ_REL>();
-    }
-  }
-  SECTION("SEQ_CST") {
-    SECTION("WAVEFRONT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kAnd, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_WAVEFRONT>();
-    }
-    SECTION("WORKGROUP") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kAnd, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_WORKGROUP>();
-    }
-    SECTION("AGENT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kAnd, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_AGENT>();
-    }
-    SECTION("SYSTEM") {
-      AcquireRelease::SystemTest<BuiltinAtomicOperation::kAnd, __ATOMIC_SEQ_CST>();
-    }
-  }
-}
 
-TEST_CASE("Unit___hip_atomic_fetch_or_Positive_Acquire_Release") {
-  SECTION("ACQUIRE/RELEASE") {
-    SECTION("WAVEFRONT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kOr, __ATOMIC_ACQUIRE,
-                           __HIP_MEMORY_SCOPE_WAVEFRONT>();
-    }
-    SECTION("WORKGROUP") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kOr, __ATOMIC_ACQUIRE,
-                           __HIP_MEMORY_SCOPE_WORKGROUP>();
-    }
-    SECTION("AGENT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kOr, __ATOMIC_ACQUIRE,
-                           __HIP_MEMORY_SCOPE_AGENT>();
-    }
-    SECTION("SYSTEM") {
-      AcquireRelease::SystemTest<BuiltinAtomicOperation::kOr, __ATOMIC_ACQUIRE>();
-    }
+#define HIP_POSITIVE_ACQUIRE_SEQ_CST_TEST(operation, operation_str, alloc_type)                    \
+  TEST_CASE("Unit___hip_atomic_" operation_str "_Positive_Acquire_Release_" #alloc_type) {         \
+    HIP_ACQUIRE_RELEASE_SECTION(operation, alloc_type)                                             \
+    HIP_SEQ_CST_SECTION(operation, alloc_type)                                                     \
   }
-  SECTION("ACQ_REL") {
-    SECTION("WAVEFRONT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kOr, __ATOMIC_ACQ_REL,
-                           __HIP_MEMORY_SCOPE_WAVEFRONT>();
-    }
-    SECTION("WORKGROUP") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kOr, __ATOMIC_ACQ_REL,
-                           __HIP_MEMORY_SCOPE_WORKGROUP>();
-    }
-    SECTION("AGENT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kOr, __ATOMIC_ACQ_REL,
-                           __HIP_MEMORY_SCOPE_AGENT>();
-    }
-    SECTION("SYSTEM") {
-      AcquireRelease::SystemTest<BuiltinAtomicOperation::kOr, __ATOMIC_ACQ_REL>();
-    }
-  }
-  SECTION("SEQ_CST") {
-    SECTION("WAVEFRONT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kOr, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_WAVEFRONT>();
-    }
-    SECTION("WORKGROUP") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kOr, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_WORKGROUP>();
-    }
-    SECTION("AGENT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kOr, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_AGENT>();
-    }
-    SECTION("SYSTEM") {
-      AcquireRelease::SystemTest<BuiltinAtomicOperation::kOr, __ATOMIC_SEQ_CST>();
-    }
-  }
-}
 
-TEST_CASE("Unit___hip_atomic_fetch_xor_Positive_Acquire_Release") {
-  SECTION("ACQUIRE/RELEASE") {
-    SECTION("WAVEFRONT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kXor, __ATOMIC_ACQUIRE,
-                           __HIP_MEMORY_SCOPE_WAVEFRONT>();
-    }
-    SECTION("WORKGROUP") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kXor, __ATOMIC_ACQUIRE,
-                           __HIP_MEMORY_SCOPE_WORKGROUP>();
-    }
-    SECTION("AGENT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kXor, __ATOMIC_ACQUIRE,
-                           __HIP_MEMORY_SCOPE_AGENT>();
-    }
-    SECTION("SYSTEM") {
-      AcquireRelease::SystemTest<BuiltinAtomicOperation::kXor, __ATOMIC_ACQUIRE>();
-    }
+#define HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_TEST(operation, operation_str, alloc_type)            \
+  TEST_CASE("Unit___hip_atomic_" operation_str "_Positive_Acquire_Release_" #alloc_type) {         \
+    HIP_ACQUIRE_RELEASE_SECTION(operation, alloc_type)                                             \
+    HIP_ACQ_REL_SECTION(operation, alloc_type)                                                     \
+    HIP_SEQ_CST_SECTION(operation, alloc_type)                                                     \
   }
-  SECTION("ACQ_REL") {
-    SECTION("WAVEFRONT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kXor, __ATOMIC_ACQ_REL,
-                           __HIP_MEMORY_SCOPE_WAVEFRONT>();
-    }
-    SECTION("WORKGROUP") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kXor, __ATOMIC_ACQ_REL,
-                           __HIP_MEMORY_SCOPE_WORKGROUP>();
-    }
-    SECTION("AGENT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kXor, __ATOMIC_ACQ_REL,
-                           __HIP_MEMORY_SCOPE_AGENT>();
-    }
-    SECTION("SYSTEM") {
-      AcquireRelease::SystemTest<BuiltinAtomicOperation::kXor, __ATOMIC_ACQ_REL>();
-    }
-  }
-  SECTION("SEQ_CST") {
-    SECTION("WAVEFRONT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kXor, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_WAVEFRONT>();
-    }
-    SECTION("WORKGROUP") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kXor, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_WORKGROUP>();
-    }
-    SECTION("AGENT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kXor, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_AGENT>();
-    }
-    SECTION("SYSTEM") {
-      AcquireRelease::SystemTest<BuiltinAtomicOperation::kXor, __ATOMIC_SEQ_CST>();
-    }
-  }
-}
 
-TEST_CASE("Unit___hip_atomic_fetch_min_Positive_Acquire_Release") {
-  SECTION("ACQUIRE/RELEASE") {
-    SECTION("WAVEFRONT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kMin, __ATOMIC_ACQUIRE,
-                           __HIP_MEMORY_SCOPE_WAVEFRONT>();
-    }
-    SECTION("WORKGROUP") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kMin, __ATOMIC_ACQUIRE,
-                           __HIP_MEMORY_SCOPE_WORKGROUP>();
-    }
-    SECTION("AGENT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kMin, __ATOMIC_ACQUIRE,
-                           __HIP_MEMORY_SCOPE_AGENT>();
-    }
-    SECTION("SYSTEM") {
-      AcquireRelease::SystemTest<BuiltinAtomicOperation::kMin, __ATOMIC_ACQUIRE>();
-    }
+#define HIP_POSITIVE_ACQUIRE_SEQ_CST_SYSTEM_TEST(operation, operation_str, alloc_type)             \
+  TEST_CASE("Unit___hip_atomic_" operation_str "_Positive_Acquire_Release_system_" #alloc_type) {  \
+    HIP_ACQUIRE_RELEASE_SYSTEM_SECTION(operation, alloc_type)                                      \
+    HIP_SEQ_CST_SYSTEM_SECTION(operation, alloc_type)                                              \
   }
-  SECTION("ACQ_REL") {
-    SECTION("WAVEFRONT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kMin, __ATOMIC_ACQ_REL,
-                           __HIP_MEMORY_SCOPE_WAVEFRONT>();
-    }
-    SECTION("WORKGROUP") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kMin, __ATOMIC_ACQ_REL,
-                           __HIP_MEMORY_SCOPE_WORKGROUP>();
-    }
-    SECTION("AGENT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kMin, __ATOMIC_ACQ_REL,
-                           __HIP_MEMORY_SCOPE_AGENT>();
-    }
-    SECTION("SYSTEM") {
-      AcquireRelease::SystemTest<BuiltinAtomicOperation::kMin, __ATOMIC_ACQ_REL>();
-    }
-  }
-  SECTION("SEQ_CST") {
-    SECTION("WAVEFRONT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kMin, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_WAVEFRONT>();
-    }
-    SECTION("WORKGROUP") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kMin, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_WORKGROUP>();
-    }
-    SECTION("AGENT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kMin, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_AGENT>();
-    }
-    SECTION("SYSTEM") {
-      AcquireRelease::SystemTest<BuiltinAtomicOperation::kMin, __ATOMIC_SEQ_CST>();
-    }
-  }
-}
 
-TEST_CASE("Unit___hip_atomic_fetch_max_Positive_Acquire_Release") {
-  SECTION("ACQUIRE/RELEASE") {
-    SECTION("WAVEFRONT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kMax, __ATOMIC_ACQUIRE,
-                           __HIP_MEMORY_SCOPE_WAVEFRONT>();
-    }
-    SECTION("WORKGROUP") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kMax, __ATOMIC_ACQUIRE,
-                           __HIP_MEMORY_SCOPE_WORKGROUP>();
-    }
-    SECTION("AGENT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kMax, __ATOMIC_ACQUIRE,
-                           __HIP_MEMORY_SCOPE_AGENT>();
-    }
-    SECTION("SYSTEM") {
-      AcquireRelease::SystemTest<BuiltinAtomicOperation::kMax, __ATOMIC_ACQUIRE>();
-    }
+#define HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_SYSTEM_TEST(operation, operation_str, alloc_type)     \
+  TEST_CASE("Unit___hip_atomic_" operation_str "_Positive_Acquire_Release_system_" #alloc_type) {  \
+    HIP_ACQUIRE_RELEASE_SYSTEM_SECTION(operation, alloc_type)                                      \
+    HIP_ACQ_REL_SYSTEM_SECTION(operation, alloc_type)                                              \
+    HIP_SEQ_CST_SYSTEM_SECTION(operation, alloc_type)                                              \
   }
-  SECTION("ACQ_REL") {
-    SECTION("WAVEFRONT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kMax, __ATOMIC_ACQ_REL,
-                           __HIP_MEMORY_SCOPE_WAVEFRONT>();
-    }
-    SECTION("WORKGROUP") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kMax, __ATOMIC_ACQ_REL,
-                           __HIP_MEMORY_SCOPE_WORKGROUP>();
-    }
-    SECTION("AGENT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kMax, __ATOMIC_ACQ_REL,
-                           __HIP_MEMORY_SCOPE_AGENT>();
-    }
-    SECTION("SYSTEM") {
-      AcquireRelease::SystemTest<BuiltinAtomicOperation::kMax, __ATOMIC_ACQ_REL>();
-    }
-  }
-  SECTION("SEQ_CST") {
-    SECTION("WAVEFRONT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kMax, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_WAVEFRONT>();
-    }
-    SECTION("WORKGROUP") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kMax, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_WORKGROUP>();
-    }
-    SECTION("AGENT") {
-      AcquireRelease::Test<BuiltinAtomicOperation::kMax, __ATOMIC_SEQ_CST,
-                           __HIP_MEMORY_SCOPE_AGENT>();
-    }
-    SECTION("SYSTEM") {
-      AcquireRelease::SystemTest<BuiltinAtomicOperation::kMax, __ATOMIC_SEQ_CST>();
-    }
-  }
-}
+
+// HIP_POSITIVE_ACQUIRE_SEQ_CST_TEST(kLoadStore, "load_store", hipMalloc)
+// HIP_POSITIVE_ACQUIRE_SEQ_CST_TEST(kLoadStore, "load_store", hipMallocManaged)
+// HIP_POSITIVE_ACQUIRE_SEQ_CST_SYSTEM_TEST(kLoadStore, "load_store", hipHostMalloc)
+// HIP_POSITIVE_ACQUIRE_SEQ_CST_SYSTEM_TEST(kLoadStore, "load_store", hipMallocManaged)
+
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_TEST(kExchange, "exchange", hipMalloc)
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_TEST(kExchange, "exchange", hipMallocManaged)
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_SYSTEM_TEST(kExchange, "exchange", hipHostMalloc)
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_SYSTEM_TEST(kExchange, "exchange", hipMallocManaged)
+
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_TEST(kCompareExchangeStrong, "compare_exchange_strong",
+//                                           hipMalloc)
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_TEST(kCompareExchangeStrong, "compare_exchange_strong",
+//                                           hipMallocManaged)
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_SYSTEM_TEST(kCompareExchangeStrong, "compare_exchange_strong",
+//                                                  hipHostMalloc)
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_SYSTEM_TEST(kCompareExchangeStrong, "compare_exchange_strong",
+//                                                  hipMallocManaged)
+
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_TEST(kCompareExchangeWeak, "compare_exchange_weak", hipMalloc)
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_TEST(kCompareExchangeWeak, "compare_exchange_weak",
+//                                           hipMallocManaged)
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_SYSTEM_TEST(kCompareExchangeWeak, "compare_exchange_weak",
+//                                                  hipHostMalloc)
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_SYSTEM_TEST(kCompareExchangeWeak, "compare_exchange_weak",
+//                                                  hipMallocManaged)
+
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_TEST(kAdd, "fetch_add", hipMalloc)
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_TEST(kAdd, "fetch_add", hipMallocManaged)
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_SYSTEM_TEST(kAdd, "fetch_add", hipHostMalloc)
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_SYSTEM_TEST(kAdd, "fetch_add", hipMallocManaged)
+
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_TEST(kAnd, "fetch_and", hipMalloc)
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_TEST(kAnd, "fetch_and", hipMallocManaged)
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_SYSTEM_TEST(kAnd, "fetch_and", hipHostMalloc)
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_SYSTEM_TEST(kAnd, "fetch_and", hipMallocManaged)
+
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_TEST(kOr, "fetch_or", hipMalloc)
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_TEST(kOr, "fetch_or", hipMallocManaged)
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_SYSTEM_TEST(kOr, "fetch_or", hipHostMalloc)
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_SYSTEM_TEST(kOr, "fetch_or", hipMallocManaged)
+
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_TEST(kXor, "fetch_xor", hipMalloc)
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_TEST(kXor, "fetch_xor", hipMallocManaged)
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_SYSTEM_TEST(kXor, "fetch_xor", hipHostMalloc)
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_SYSTEM_TEST(kXor, "fetch_xor", hipMallocManaged)
+
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_TEST(kMin, "fetch_min", hipMalloc)
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_TEST(kMin, "fetch_min", hipMallocManaged)
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_SYSTEM_TEST(kMin, "fetch_min", hipHostMalloc)
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_SYSTEM_TEST(kMin, "fetch_min", hipMallocManaged)
+
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_TEST(kMax, "fetch_max", hipMalloc)
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_TEST(kMax, "fetch_max", hipMallocManaged)
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_SYSTEM_TEST(kMax, "fetch_max", hipHostMalloc)
+// HIP_POSITIVE_ACQUIRE_ACQ_REL_SEQ_CST_SYSTEM_TEST(kMax, "fetch_max", hipMallocManaged)

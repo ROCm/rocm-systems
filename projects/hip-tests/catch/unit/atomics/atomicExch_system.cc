@@ -23,6 +23,12 @@ THE SOFTWARE.
 #include "atomicExch_common.hh"
 #include "atomicExch_system_negative_kernels_rtc.hh"
 
+#if HT_NVIDIA
+#define TEST_TYPES int, unsigned int, unsigned long long, float
+#else
+#define TEST_TYPES int, unsigned int, unsigned long, unsigned long long, float, double
+#endif
+
 /**
  * @addtogroup atomicExch_system atomicExch_system
  * @{
@@ -54,32 +60,33 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-#if HT_NVIDIA
-TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Peer_GPUs", "", int, unsigned int,
-                   unsigned long long, float) {
-#else
-TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Peer_GPUs", "", int, unsigned int,
-                   unsigned long, unsigned long long, float, double) {
-#endif  // HT_NVIDIA
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(2, 2, 1, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(2, 2, warp_size,
-                                                                  sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(2, 2, warp_size, cache_line_size);
-    }
+#define ATOMIC_EXCH_SYSTEM_POSITIVE_PEER_GPUS_TEST(alloc_type)                                     \
+  TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Peer_GPUs_" #alloc_type, "", TEST_TYPES) {   \
+    int warp_size = 0;                                                                             \
+    HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));                   \
+    const auto cache_line_size = 128u;                                                             \
+                                                                                                   \
+    for (auto current = 0; current < cmd_options.atomic_iterations; ++current) {                   \
+      DYNAMIC_SECTION("Same address " << current) {                                                \
+        AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(2, 2, 1, sizeof(TestType),     \
+                                                                    LinearAllocs::alloc_type);     \
+      }                                                                                            \
+                                                                                                   \
+      DYNAMIC_SECTION("Adjacent addresses " << current) {                                          \
+        AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(                               \
+            2, 2, warp_size, sizeof(TestType), LinearAllocs::alloc_type);                          \
+      }                                                                                            \
+                                                                                                   \
+      DYNAMIC_SECTION("Scattered addresses " << current) {                                         \
+        AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(                               \
+            2, 2, warp_size, cache_line_size, LinearAllocs::alloc_type);                           \
+      }                                                                                            \
+    }                                                                                              \
   }
-}
+
+// ATOMIC_EXCH_SYSTEM_POSITIVE_PEER_GPUS_TEST(hipHostMalloc)
+// ATOMIC_EXCH_SYSTEM_POSITIVE_PEER_GPUS_TEST(hipMallocManaged)
+// ATOMIC_EXCH_SYSTEM_POSITIVE_PEER_GPUS_TEST(mallocAndRegister)
 
 /**
  * Test Description
@@ -108,33 +115,34 @@ TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Peer_GPUs", "", int, unsigne
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-#if HT_NVIDIA
-TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Host_And_GPU", "", int, unsigned int,
-                   unsigned long long, float) {
-#else
-TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Host_And_GPU", "", int, unsigned int,
-                   unsigned long, unsigned long long, float, double) {
-#endif  // HT_NVIDIA
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(1, 1, 1, sizeof(TestType), 4);
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(1, 1, warp_size, sizeof(TestType),
-                                                                  4);
-    }
-
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(1, 1, warp_size, cache_line_size,
-                                                                  4);
-    }
+#define ATOMIC_EXCH_SYSTEM_POSITIVE_HOST_AND_GPU_TEST(alloc_type)                                  \
+  TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Host_And_GPU_" #alloc_type, "",              \
+                     TEST_TYPES) {                                                                 \
+    int warp_size = 0;                                                                             \
+    HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));                   \
+    const auto cache_line_size = 128u;                                                             \
+                                                                                                   \
+    for (auto current = 0; current < cmd_options.atomic_iterations; ++current) {                   \
+      DYNAMIC_SECTION("Same address " << current) {                                                \
+        AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(1, 1, 1, sizeof(TestType),     \
+                                                                    LinearAllocs::alloc_type, 4);  \
+      }                                                                                            \
+                                                                                                   \
+      DYNAMIC_SECTION("Adjacent addresses " << current) {                                          \
+        AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(                               \
+            1, 1, warp_size, sizeof(TestType), LinearAllocs::alloc_type, 4);                       \
+      }                                                                                            \
+                                                                                                   \
+      DYNAMIC_SECTION("Scattered addresses " << current) {                                         \
+        AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(                               \
+            1, 1, warp_size, cache_line_size, LinearAllocs::alloc_type, 4);                        \
+      }                                                                                            \
+    }                                                                                              \
   }
-}
+
+// ATOMIC_EXCH_SYSTEM_POSITIVE_HOST_AND_GPU_TEST(hipHostMalloc)
+// ATOMIC_EXCH_SYSTEM_POSITIVE_HOST_AND_GPU_TEST(hipMallocManaged)
+// ATOMIC_EXCH_SYSTEM_POSITIVE_HOST_AND_GPU_TEST(mallocAndRegister)
 
 /**
  * Test Description
@@ -163,33 +171,34 @@ TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Host_And_GPU", "", int, unsi
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-#if HT_NVIDIA
-TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Host_And_Peer_GPUs", "", int, unsigned int,
-                   unsigned long long, float) {
-#else
-TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Host_And_Peer_GPUs", "", int, unsigned int,
-                   unsigned long, unsigned long long, float, double) {
-#endif  // HT_NVIDIA
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(2, 2, 1, sizeof(TestType), 4);
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(2, 2, warp_size, sizeof(TestType),
-                                                                  4);
-    }
-
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(2, 2, warp_size, cache_line_size,
-                                                                  4);
-    }
+#define ATOMIC_EXCH_SYSTEM_POSITIVE_HOST_AND_PEER_GPUS_TEST(alloc_type)                            \
+  TEMPLATE_TEST_CASE("Unit_atomicExch_system_Positive_Host_And_Peer_GPUs_" #alloc_type, "",        \
+                     TEST_TYPES) {                                                                 \
+    int warp_size = 0;                                                                             \
+    HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));                   \
+    const auto cache_line_size = 128u;                                                             \
+                                                                                                   \
+    for (auto current = 0; current < cmd_options.atomic_iterations; ++current) {                   \
+      DYNAMIC_SECTION("Same address " << current) {                                                \
+        AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(2, 2, 1, sizeof(TestType),     \
+                                                                    LinearAllocs::alloc_type, 4);  \
+      }                                                                                            \
+                                                                                                   \
+      DYNAMIC_SECTION("Adjacent addresses " << current) {                                          \
+        AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(                               \
+            2, 2, warp_size, sizeof(TestType), LinearAllocs::alloc_type, 4);                       \
+      }                                                                                            \
+                                                                                                   \
+      DYNAMIC_SECTION("Scattered addresses " << current) {                                         \
+        AtomicExchMultipleDeviceMultipleKernelAndHostTest<TestType>(                               \
+            2, 2, warp_size, cache_line_size, LinearAllocs::alloc_type, 4);                        \
+      }                                                                                            \
+    }                                                                                              \
   }
-}
+
+// ATOMIC_EXCH_SYSTEM_POSITIVE_HOST_AND_PEER_GPUS_TEST(hipHostMalloc)
+// ATOMIC_EXCH_SYSTEM_POSITIVE_HOST_AND_PEER_GPUS_TEST(hipMallocManaged)
+// ATOMIC_EXCH_SYSTEM_POSITIVE_HOST_AND_PEER_GPUS_TEST(mallocAndRegister)
 
 /**
  * Test Description

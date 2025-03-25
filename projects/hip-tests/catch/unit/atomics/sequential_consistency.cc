@@ -24,142 +24,57 @@ THE SOFTWARE.
 
 #include "memory_order_common.hh"
 
-TEST_CASE("Unit___hip_atomic_load_store_Positive_Sequential_Consistency") {
-  SECTION("WAVEFRONT") {
-    SequentialConsistency::Test<BuiltinAtomicOperation::kLoadStore, __HIP_MEMORY_SCOPE_WAVEFRONT>();
+#define HIP_SEQUENTIAL_CONSISTENCY_SECTION(operation, operation_str, alloc_type)                   \
+  TEST_CASE("Unit___hip_atomic_" operation_str "_Positive_Sequential_Consistency_" #alloc_type) {  \
+    SECTION("WAVEFRONT") {                                                                         \
+      SequentialConsistency::Test<BuiltinAtomicOperation::operation,                               \
+                                  __HIP_MEMORY_SCOPE_WAVEFRONT>(LinearAllocs::alloc_type);         \
+    }                                                                                              \
+    SECTION("WORKGROUP") {                                                                         \
+      SequentialConsistency::Test<BuiltinAtomicOperation::operation,                               \
+                                  __HIP_MEMORY_SCOPE_WORKGROUP>(LinearAllocs::alloc_type);         \
+    }                                                                                              \
+    SECTION("AGENT") {                                                                             \
+      SequentialConsistency::Test<BuiltinAtomicOperation::operation, __HIP_MEMORY_SCOPE_AGENT>(    \
+          LinearAllocs::alloc_type);                                                               \
+    }                                                                                              \
   }
-  SECTION("WORKGROUP") {
-    SequentialConsistency::Test<BuiltinAtomicOperation::kLoadStore, __HIP_MEMORY_SCOPE_WORKGROUP>();
-  }
-  SECTION("AGENT") {
-    SequentialConsistency::Test<BuiltinAtomicOperation::kLoadStore, __HIP_MEMORY_SCOPE_AGENT>();
-  }
-  SECTION("SYSTEM") { SequentialConsistency::SystemTest<BuiltinAtomicOperation::kLoadStore>(); }
-}
 
-TEST_CASE("Unit___hip_atomic_exchange_Positive_Sequential_Consistency") {
-  SECTION("WAVEFRONT") {
-    SequentialConsistency::Test<BuiltinAtomicOperation::kExchange, __HIP_MEMORY_SCOPE_WAVEFRONT>();
+#define HIP_SEQUENTIAL_CONSISTENCY_SYSTEM_SECTION(operation, operation_str, alloc_type)            \
+  TEST_CASE("Unit___hip_atomic_" operation_str                                                     \
+            "_Positive_Sequential_Consistency_system_" #alloc_type) {                              \
+    SECTION("SYSTEM") {                                                                            \
+      SequentialConsistency::SystemTest<BuiltinAtomicOperation::operation>(                        \
+          LinearAllocs::alloc_type);                                                               \
+    }                                                                                              \
   }
-  SECTION("WORKGROUP") {
-    SequentialConsistency::Test<BuiltinAtomicOperation::kExchange, __HIP_MEMORY_SCOPE_WORKGROUP>();
-  }
-  SECTION("AGENT") {
-    SequentialConsistency::Test<BuiltinAtomicOperation::kExchange, __HIP_MEMORY_SCOPE_AGENT>();
-  }
-  SECTION("SYSTEM") { SequentialConsistency::SystemTest<BuiltinAtomicOperation::kExchange>(); }
-}
 
-TEST_CASE("Unit___hip_atomic_compare_exchange_strong_Positive_Sequential_Consistency") {
-  SECTION("WAVEFRONT") {
-    SequentialConsistency::Test<BuiltinAtomicOperation::kCompareExchangeStrong,
-                                __HIP_MEMORY_SCOPE_WAVEFRONT>();
-  }
-  SECTION("WORKGROUP") {
-    SequentialConsistency::Test<BuiltinAtomicOperation::kCompareExchangeStrong,
-                                __HIP_MEMORY_SCOPE_WORKGROUP>();
-  }
-  SECTION("AGENT") {
-    SequentialConsistency::Test<BuiltinAtomicOperation::kCompareExchangeStrong,
-                                __HIP_MEMORY_SCOPE_AGENT>();
-  }
-  SECTION("SYSTEM") {
-    SequentialConsistency::SystemTest<BuiltinAtomicOperation::kCompareExchangeStrong>();
-  }
-}
+// HIP_SEQUENTIAL_CONSISTENCY_SECTION(kLoadStore, "load_store", hipMalloc)
+// HIP_SEQUENTIAL_CONSISTENCY_SYSTEM_SECTION(kLoadStore, "load_store", hipMallocManaged)
 
-TEST_CASE("Unit___hip_atomic_compare_exchange_weak_Positive_Sequential_Consistency") {
-  SECTION("WAVEFRONT") {
-    SequentialConsistency::Test<BuiltinAtomicOperation::kCompareExchangeWeak,
-                                __HIP_MEMORY_SCOPE_WAVEFRONT>();
-  }
-  SECTION("WORKGROUP") {
-    SequentialConsistency::Test<BuiltinAtomicOperation::kCompareExchangeWeak,
-                                __HIP_MEMORY_SCOPE_WORKGROUP>();
-  }
-  SECTION("AGENT") {
-    SequentialConsistency::Test<BuiltinAtomicOperation::kCompareExchangeWeak,
-                                __HIP_MEMORY_SCOPE_AGENT>();
-  }
-  SECTION("SYSTEM") {
-    SequentialConsistency::SystemTest<BuiltinAtomicOperation::kCompareExchangeWeak>();
-  }
-}
+// HIP_SEQUENTIAL_CONSISTENCY_SECTION(kExchange, "exchange", hipMalloc)
+// HIP_SEQUENTIAL_CONSISTENCY_SYSTEM_SECTION(kExchange, "exchange", hipMallocManaged)
 
-TEST_CASE("Unit___hip_atomic_fetch_add_Positive_Sequential_Consistency") {
-  SECTION("WAVEFRONT") {
-    SequentialConsistency::Test<BuiltinAtomicOperation::kAdd, __HIP_MEMORY_SCOPE_WAVEFRONT>();
-  }
-  SECTION("WORKGROUP") {
-    SequentialConsistency::Test<BuiltinAtomicOperation::kAdd, __HIP_MEMORY_SCOPE_WORKGROUP>();
-  }
-  SECTION("AGENT") {
-    SequentialConsistency::Test<BuiltinAtomicOperation::kAdd, __HIP_MEMORY_SCOPE_AGENT>();
-  }
-  SECTION("SYSTEM") { SequentialConsistency::SystemTest<BuiltinAtomicOperation::kAdd>(); }
-}
+// HIP_SEQUENTIAL_CONSISTENCY_SECTION(kCompareExchangeStrong, "compare_exchange_strong", hipMalloc)
+// HIP_SEQUENTIAL_CONSISTENCY_SYSTEM_SECTION(kCompareExchangeStrong, "compare_exchange_strong", hipMallocManaged)
 
-TEST_CASE("Unit___hip_atomic_fetch_and_Positive_Sequential_Consistency") {
-  SECTION("WAVEFRONT") {
-    SequentialConsistency::Test<BuiltinAtomicOperation::kAnd, __HIP_MEMORY_SCOPE_WAVEFRONT>();
-  }
-  SECTION("WORKGROUP") {
-    SequentialConsistency::Test<BuiltinAtomicOperation::kAnd, __HIP_MEMORY_SCOPE_WORKGROUP>();
-  }
-  SECTION("AGENT") {
-    SequentialConsistency::Test<BuiltinAtomicOperation::kAnd, __HIP_MEMORY_SCOPE_AGENT>();
-  }
-  SECTION("SYSTEM") { SequentialConsistency::SystemTest<BuiltinAtomicOperation::kAnd>(); }
-}
+// HIP_SEQUENTIAL_CONSISTENCY_SECTION(kCompareExchangeWeak, "compare_exchange_weak", hipMalloc)
+// HIP_SEQUENTIAL_CONSISTENCY_SYSTEM_SECTION(kCompareExchangeWeak, "compare_exchange_weak", hipMallocManaged)
 
-TEST_CASE("Unit___hip_atomic_fetch_or_Positive_Sequential_Consistency") {
-  SECTION("WAVEFRONT") {
-    SequentialConsistency::Test<BuiltinAtomicOperation::kOr, __HIP_MEMORY_SCOPE_WAVEFRONT>();
-  }
-  SECTION("WORKGROUP") {
-    SequentialConsistency::Test<BuiltinAtomicOperation::kOr, __HIP_MEMORY_SCOPE_WORKGROUP>();
-  }
-  SECTION("AGENT") {
-    SequentialConsistency::Test<BuiltinAtomicOperation::kOr, __HIP_MEMORY_SCOPE_AGENT>();
-  }
-  SECTION("SYSTEM") { SequentialConsistency::SystemTest<BuiltinAtomicOperation::kOr>(); }
-}
+// HIP_SEQUENTIAL_CONSISTENCY_SECTION(kAdd, "fetch_add", hipMalloc)
+// HIP_SEQUENTIAL_CONSISTENCY_SYSTEM_SECTION(kAdd, "fetch_add", hipMallocManaged)
 
-TEST_CASE("Unit___hip_atomic_fetch_xor_Positive_Sequential_Consistency") {
-  SECTION("WAVEFRONT") {
-    SequentialConsistency::Test<BuiltinAtomicOperation::kXor, __HIP_MEMORY_SCOPE_WAVEFRONT>();
-  }
-  SECTION("WORKGROUP") {
-    SequentialConsistency::Test<BuiltinAtomicOperation::kXor, __HIP_MEMORY_SCOPE_WORKGROUP>();
-  }
-  SECTION("AGENT") {
-    SequentialConsistency::Test<BuiltinAtomicOperation::kXor, __HIP_MEMORY_SCOPE_AGENT>();
-  }
-  SECTION("SYSTEM") { SequentialConsistency::SystemTest<BuiltinAtomicOperation::kXor>(); }
-}
+// HIP_SEQUENTIAL_CONSISTENCY_SECTION(kAnd, "fetch_and", hipMalloc)
+// HIP_SEQUENTIAL_CONSISTENCY_SYSTEM_SECTION(kAnd, "fetch_and", hipMallocManaged)
 
-TEST_CASE("Unit___hip_atomic_fetch_min_Positive_Sequential_Consistency") {
-  SECTION("WAVEFRONT") {
-    SequentialConsistency::Test<BuiltinAtomicOperation::kMin, __HIP_MEMORY_SCOPE_WAVEFRONT>();
-  }
-  SECTION("WORKGROUP") {
-    SequentialConsistency::Test<BuiltinAtomicOperation::kMin, __HIP_MEMORY_SCOPE_WORKGROUP>();
-  }
-  SECTION("AGENT") {
-    SequentialConsistency::Test<BuiltinAtomicOperation::kMin, __HIP_MEMORY_SCOPE_AGENT>();
-  }
-  SECTION("SYSTEM") { SequentialConsistency::SystemTest<BuiltinAtomicOperation::kMin>(); }
-}
+// HIP_SEQUENTIAL_CONSISTENCY_SECTION(kOr, "fetch_or", hipMalloc)
+// HIP_SEQUENTIAL_CONSISTENCY_SYSTEM_SECTION(kOr, "fetch_or", hipMallocManaged)
 
-TEST_CASE("Unit___hip_atomic_fetch_max_Positive_Sequential_Consistency") {
-  SECTION("WAVEFRONT") {
-    SequentialConsistency::Test<BuiltinAtomicOperation::kMax, __HIP_MEMORY_SCOPE_WAVEFRONT>();
-  }
-  SECTION("WORKGROUP") {
-    SequentialConsistency::Test<BuiltinAtomicOperation::kMax, __HIP_MEMORY_SCOPE_WORKGROUP>();
-  }
-  SECTION("AGENT") {
-    SequentialConsistency::Test<BuiltinAtomicOperation::kMax, __HIP_MEMORY_SCOPE_AGENT>();
-  }
-  SECTION("SYSTEM") { SequentialConsistency::SystemTest<BuiltinAtomicOperation::kMax>(); }
-}
+// HIP_SEQUENTIAL_CONSISTENCY_SECTION(kXor, "fetch_xor", hipMalloc)
+// HIP_SEQUENTIAL_CONSISTENCY_SYSTEM_SECTION(kXor, "fetch_xor", hipMallocManaged)
+
+// HIP_SEQUENTIAL_CONSISTENCY_SECTION(kMin, "fetch_min", hipMalloc)
+// HIP_SEQUENTIAL_CONSISTENCY_SYSTEM_SECTION(kMin, "fetch_min", hipMallocManaged)
+
+// HIP_SEQUENTIAL_CONSISTENCY_SECTION(kMax, "fetch_max", hipMalloc)
+// HIP_SEQUENTIAL_CONSISTENCY_SYSTEM_SECTION(kMax, "fetch_max", hipMallocManaged)

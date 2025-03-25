@@ -489,7 +489,8 @@ inline dim3 GenerateBlockDimensions() {
 
 // Configures and creates the TestCore for a single device, and a single kernel launch
 template <typename TestType, AtomicOperation operation, int memory_scope = __HIP_MEMORY_SCOPE_AGENT>
-void SingleDeviceSingleKernelTest(const unsigned int width, const unsigned int pitch) {
+void SingleDeviceSingleKernelTest(const unsigned int width, const unsigned int pitch,
+                                  const LinearAllocs alloc_type) {
   TestParams params;
   params.num_devices = 1;
   params.kernel_count = 1;
@@ -519,14 +520,9 @@ void SingleDeviceSingleKernelTest(const unsigned int width, const unsigned int p
     } else {
       params.blocks = GenerateBlockDimensions();
     }
-    using LA = LinearAllocs;
-    for (const auto alloc_type :
-         {LA::hipMalloc}) {
-      params.alloc_type = alloc_type;
-      DYNAMIC_SECTION("Allocation type: " << to_string(alloc_type)) {
-        TestCore<TestType, operation, false, memory_scope>(params);
-      }
-    }
+
+    params.alloc_type = alloc_type;
+    TestCore<TestType, operation, false, memory_scope>(params);
   }
 #ifdef __linux__
    SECTION("Shared memory") {
@@ -540,7 +536,7 @@ void SingleDeviceSingleKernelTest(const unsigned int width, const unsigned int p
 // Configures and creates the TestCore for a single device, and multiple kernel launches
 template <typename TestType, AtomicOperation operation>
 void SingleDeviceMultipleKernelTest(const unsigned int kernel_count, const unsigned int width,
-                                    const unsigned int pitch) {
+                                    const unsigned int pitch, const LinearAllocs alloc_type) {
   int concurrent_kernels = 0;
   HIP_CHECK(hipDeviceGetAttribute(&concurrent_kernels, hipDeviceAttributeConcurrentKernels, 0));
   if (!concurrent_kernels) {
@@ -556,14 +552,8 @@ void SingleDeviceMultipleKernelTest(const unsigned int kernel_count, const unsig
   params.width = width;
   params.pitch = pitch;
 
-  using LA = LinearAllocs;
-  for (const auto alloc_type :
-       {LA::hipMalloc}) {
-    params.alloc_type = alloc_type;
-    DYNAMIC_SECTION("Allocation type: " << to_string(alloc_type)) {
-      TestCore<TestType, operation, false>(params);
-    }
-  }
+  params.alloc_type = alloc_type;
+  TestCore<TestType, operation, false>(params);
 }
 
 // Configures and creates the TestCore for a multiple devices (and host), and multiple kernel
@@ -572,6 +562,7 @@ template <typename TestType, AtomicOperation operation>
 void MultipleDeviceMultipleKernelAndHostTest(const unsigned int num_devices,
                                              const unsigned int kernel_count,
                                              const unsigned int width, const unsigned int pitch,
+                                             const LinearAllocs alloc_type,
                                              const unsigned int host_thread_count = 0u) {
   if (num_devices > 1) {
     if (HipTest::getDeviceCount() < num_devices) {
@@ -614,11 +605,6 @@ void MultipleDeviceMultipleKernelAndHostTest(const unsigned int num_devices,
   params.pitch = pitch;
   params.host_thread_count = host_thread_count;
 
-  using LA = LinearAllocs;
-  for (const auto alloc_type : {LA::hipMalloc}) {
-    params.alloc_type = alloc_type;
-    DYNAMIC_SECTION("Allocation type: " << to_string(alloc_type)) {
-      TestCore<TestType, operation, false, __HIP_MEMORY_SCOPE_SYSTEM>(params);
-    }
-  }
+  params.alloc_type = alloc_type;
+  TestCore<TestType, operation, false, __HIP_MEMORY_SCOPE_SYSTEM>(params);
 }

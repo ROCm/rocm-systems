@@ -45,15 +45,21 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicXor_Positive_SameAddress", "", int, unsigned int, unsigned long,
-                   unsigned long long) {
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      Bitwise::SingleDeviceSingleKernelTest<TestType, Bitwise::AtomicOperation::kXor>(
-          1, sizeof(TestType));
-    }
+#define ATOMIC_XOR_POSITIVE_SAME_ADDRESS_TEST(alloc_type)                                          \
+  TEMPLATE_TEST_CASE("Unit_atomicXor_Positive_SameAddress_" #alloc_type, "", int, unsigned int,    \
+                     unsigned long, unsigned long long) {                                          \
+    for (auto current = 0; current < cmd_options.atomic_iterations; ++current) {                   \
+      DYNAMIC_SECTION("Same address " << current) {                                                \
+        Bitwise::SingleDeviceSingleKernelTest<TestType, Bitwise::AtomicOperation::kXor>(           \
+            1, sizeof(TestType), LinearAllocs::alloc_type);                                        \
+      }                                                                                            \
+    }                                                                                              \
   }
-}
+
+ATOMIC_XOR_POSITIVE_SAME_ADDRESS_TEST(hipMalloc)
+// ATOMIC_XOR_POSITIVE_SAME_ADDRESS_TEST(hipHostMalloc)
+// ATOMIC_XOR_POSITIVE_SAME_ADDRESS_TEST(hipMallocManaged)
+// ATOMIC_XOR_POSITIVE_SAME_ADDRESS_TEST(mallocAndRegister)
 
 /**
  * Test Description
@@ -67,18 +73,24 @@ TEMPLATE_TEST_CASE("Unit_atomicXor_Positive_SameAddress", "", int, unsigned int,
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicXor_Positive_Adjacent_Addresses", "", int, unsigned int,
-                   unsigned long, unsigned long long) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Adjacent address " << current) {
-      Bitwise::SingleDeviceSingleKernelTest<TestType, Bitwise::AtomicOperation::kXor>(
-          warp_size, sizeof(TestType));
-    }
+#define ATOMIC_XOR_POSITIVE_ADJACENT_ADDRESSES_TEST(alloc_type)                                    \
+  TEMPLATE_TEST_CASE("Unit_atomicXor_Positive_Adjacent_Addresses_" #alloc_type, "", int,           \
+                     unsigned int, unsigned long, unsigned long long) {                            \
+    int warp_size = 0;                                                                             \
+    HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));                   \
+                                                                                                   \
+    for (auto current = 0; current < cmd_options.atomic_iterations; ++current) {                   \
+      DYNAMIC_SECTION("Adjacent address " << current) {                                            \
+        Bitwise::SingleDeviceSingleKernelTest<TestType, Bitwise::AtomicOperation::kXor>(           \
+            warp_size, sizeof(TestType), LinearAllocs::alloc_type);                                \
+      }                                                                                            \
+    }                                                                                              \
   }
-}
+
+ATOMIC_XOR_POSITIVE_ADJACENT_ADDRESSES_TEST(hipMalloc)
+// ATOMIC_XOR_POSITIVE_ADJACENT_ADDRESSES_TEST(hipHostMalloc)
+// ATOMIC_XOR_POSITIVE_ADJACENT_ADDRESSES_TEST(hipMallocManaged)
+// ATOMIC_XOR_POSITIVE_ADJACENT_ADDRESSES_TEST(mallocAndRegister)
 
 /**
  * Test Description
@@ -92,19 +104,25 @@ TEMPLATE_TEST_CASE("Unit_atomicXor_Positive_Adjacent_Addresses", "", int, unsign
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicXor_Positive_Scattered_Addresses", "", int, unsigned int,
-                   unsigned long, unsigned long long) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Scattered address " << current) {
-      Bitwise::SingleDeviceSingleKernelTest<TestType, Bitwise::AtomicOperation::kXor>(
-          warp_size, cache_line_size);
-    }
+#define ATOMIC_XOR_POSITIVE_SCATTERED_ADDRESSES_TEST(alloc_type)                                   \
+  TEMPLATE_TEST_CASE("Unit_atomicXor_Positive_Scattered_Addresses_" #alloc_type, "", int,          \
+                     unsigned int, unsigned long, unsigned long long) {                            \
+    int warp_size = 0;                                                                             \
+    HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));                   \
+    const auto cache_line_size = 128u;                                                             \
+                                                                                                   \
+    for (auto current = 0; current < cmd_options.atomic_iterations; ++current) {                   \
+      DYNAMIC_SECTION("Scattered address " << current) {                                           \
+        Bitwise::SingleDeviceSingleKernelTest<TestType, Bitwise::AtomicOperation::kXor>(           \
+            warp_size, cache_line_size, LinearAllocs::alloc_type);                                 \
+      }                                                                                            \
+    }                                                                                              \
   }
-}
+
+ATOMIC_XOR_POSITIVE_SCATTERED_ADDRESSES_TEST(hipMalloc)
+// ATOMIC_XOR_POSITIVE_SCATTERED_ADDRESSES_TEST(hipHostMalloc)
+// ATOMIC_XOR_POSITIVE_SCATTERED_ADDRESSES_TEST(hipMallocManaged)
+// ATOMIC_XOR_POSITIVE_SCATTERED_ADDRESSES_TEST(mallocAndRegister)
 
 /**
  * Test Description
@@ -118,15 +136,21 @@ TEMPLATE_TEST_CASE("Unit_atomicXor_Positive_Scattered_Addresses", "", int, unsig
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicXor_Positive_Multi_Kernel_Same_Address", "", int, unsigned int,
-                   unsigned long, unsigned long long) {
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      Bitwise::SingleDeviceMultipleKernelTest<TestType, Bitwise::AtomicOperation::kXor>(
-          2, 1, sizeof(TestType));
-    }
+#define ATOMIC_XOR_POSITIVE_MULTI_KERNEL_SAME_ADDRESS_TEST(alloc_type)                             \
+  TEMPLATE_TEST_CASE("Unit_atomicXor_Positive_Multi_Kernel_Same_Address_" #alloc_type, "", int,    \
+                     unsigned int, unsigned long, unsigned long long) {                            \
+    for (auto current = 0; current < cmd_options.atomic_iterations; ++current) {                   \
+      DYNAMIC_SECTION("Same address " << current) {                                                \
+        Bitwise::SingleDeviceMultipleKernelTest<TestType, Bitwise::AtomicOperation::kXor>(         \
+            2, 1, sizeof(TestType), LinearAllocs::alloc_type);                                     \
+      }                                                                                            \
+    }                                                                                              \
   }
-}
+
+ATOMIC_XOR_POSITIVE_MULTI_KERNEL_SAME_ADDRESS_TEST(hipMalloc)
+// ATOMIC_XOR_POSITIVE_MULTI_KERNEL_SAME_ADDRESS_TEST(hipHostMalloc)
+// ATOMIC_XOR_POSITIVE_MULTI_KERNEL_SAME_ADDRESS_TEST(hipMallocManaged)
+// ATOMIC_XOR_POSITIVE_MULTI_KERNEL_SAME_ADDRESS_TEST(mallocAndRegister)
 
 /**
  * Test Description
@@ -140,17 +164,23 @@ TEMPLATE_TEST_CASE("Unit_atomicXor_Positive_Multi_Kernel_Same_Address", "", int,
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicXor_Positive_Multi_Kernel_Adjacent_Addresses", "", int, unsigned int,
-                   unsigned long, unsigned long long) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Adjacent address " << current) {
-      Bitwise::SingleDeviceMultipleKernelTest<TestType, Bitwise::AtomicOperation::kXor>(
-          2, warp_size, sizeof(TestType));
-    }
+#define ATOMIC_XOR_POSITIVE_MULTI_KERNEL_ADJACENT_ADDRESSES_TEST(alloc_type)                       \
+  TEMPLATE_TEST_CASE("Unit_atomicXor_Positive_Multi_Kernel_Adjacent_Addresses_" #alloc_type, "",   \
+                     int, unsigned int, unsigned long, unsigned long long) {                       \
+    int warp_size = 0;                                                                             \
+    HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));                   \
+    for (auto current = 0; current < cmd_options.atomic_iterations; ++current) {                   \
+      DYNAMIC_SECTION("Adjacent address " << current) {                                            \
+        Bitwise::SingleDeviceMultipleKernelTest<TestType, Bitwise::AtomicOperation::kXor>(         \
+            2, warp_size, sizeof(TestType), LinearAllocs::alloc_type);                             \
+      }                                                                                            \
+    }                                                                                              \
   }
-}
+
+ATOMIC_XOR_POSITIVE_MULTI_KERNEL_ADJACENT_ADDRESSES_TEST(hipMalloc)
+// ATOMIC_XOR_POSITIVE_MULTI_KERNEL_ADJACENT_ADDRESSES_TEST(hipHostMalloc)
+// ATOMIC_XOR_POSITIVE_MULTI_KERNEL_ADJACENT_ADDRESSES_TEST(hipMallocManaged)
+// ATOMIC_XOR_POSITIVE_MULTI_KERNEL_ADJACENT_ADDRESSES_TEST(mallocAndRegister)
 
 /**
  * Test Description
@@ -164,19 +194,25 @@ TEMPLATE_TEST_CASE("Unit_atomicXor_Positive_Multi_Kernel_Adjacent_Addresses", ""
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicXor_Positive_Multi_Kernel_Scattered_Addresses", "", int,
-                   unsigned int, unsigned long, unsigned long long) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Scattered address " << current) {
-      Bitwise::SingleDeviceMultipleKernelTest<TestType, Bitwise::AtomicOperation::kXor>(
-          2, warp_size, cache_line_size);
-    }
+#define ATOMIC_XOR_POSITIVE_MULTI_KERNEL_SCATTERED_ADDRESSES_TEST(alloc_type)                      \
+  TEMPLATE_TEST_CASE("Unit_atomicXor_Positive_Multi_Kernel_Scattered_Addresses_" #alloc_type, "",  \
+                     int, unsigned int, unsigned long, unsigned long long) {                       \
+    int warp_size = 0;                                                                             \
+    HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));                   \
+    const auto cache_line_size = 128u;                                                             \
+                                                                                                   \
+    for (auto current = 0; current < cmd_options.atomic_iterations; ++current) {                   \
+      DYNAMIC_SECTION("Scattered address " << current) {                                           \
+        Bitwise::SingleDeviceMultipleKernelTest<TestType, Bitwise::AtomicOperation::kXor>(         \
+            2, warp_size, cache_line_size, LinearAllocs::alloc_type);                              \
+      }                                                                                            \
+    }                                                                                              \
   }
-}
+
+ATOMIC_XOR_POSITIVE_MULTI_KERNEL_SCATTERED_ADDRESSES_TEST(hipMalloc)
+// ATOMIC_XOR_POSITIVE_MULTI_KERNEL_SCATTERED_ADDRESSES_TEST(hipHostMalloc)
+// ATOMIC_XOR_POSITIVE_MULTI_KERNEL_SCATTERED_ADDRESSES_TEST(hipMallocManaged)
+// ATOMIC_XOR_POSITIVE_MULTI_KERNEL_SCATTERED_ADDRESSES_TEST(mallocAndRegister)
 
 /**
  * Test Description

@@ -189,7 +189,8 @@ __global__ void ConsumerKernel(int* const flag, int* const data, int* const ret)
   Consumer<operation, memory_order, memory_scope>(flag, data, ret);
 }
 
-template <BuiltinAtomicOperation operation, int memory_order, int memory_scope> void Test() {
+template <BuiltinAtomicOperation operation, int memory_order, int memory_scope>
+void Test(const LinearAllocs alloc_type) {
   int blocks = 1, threads = 1;
   if (memory_scope == __HIP_MEMORY_SCOPE_WAVEFRONT) {
     blocks = 1;
@@ -215,7 +216,6 @@ template <BuiltinAtomicOperation operation, int memory_order, int memory_scope> 
   LinearAllocGuard<int> ret(LinearAllocs::hipMallocManaged, sizeof(int));
 
   SECTION("Global memory") {
-    const auto alloc_type = LinearAllocs::hipMalloc;
     LinearAllocGuard<int> data(alloc_type, sizeof(int));
     TestKernel<operation, memory_order, memory_scope>
         <<<blocks, threads>>>(flag.ptr(), data.ptr(), ret.ptr());
@@ -233,16 +233,14 @@ template <BuiltinAtomicOperation operation, int memory_order, int memory_scope> 
   REQUIRE(ret.ptr()[0] == kTestValue);
 }
 
-template <BuiltinAtomicOperation operation, int memory_order> void SystemTest() {
-  HipTest::HIP_SKIP_TEST("Skip system scope tests due to random failures!!");
-  return;
+template <BuiltinAtomicOperation operation, int memory_order>
+void SystemTest(const LinearAllocs alloc_type) {
   std::thread host_thread;
 
   LinearAllocGuard<int> flag(LinearAllocs::hipMallocManaged, sizeof(int));
   LinearAllocGuard<int> ret(LinearAllocs::hipMallocManaged, sizeof(int));
 
   SECTION("Global memory") {
-    const auto alloc_type = GENERATE(LinearAllocs::hipHostMalloc , LinearAllocs::hipMallocManaged);
     LinearAllocGuard<int> data(alloc_type, sizeof(int));
 
     if constexpr(operation == BuiltinAtomicOperation::kAnd) {
@@ -380,7 +378,8 @@ __global__ void ConsumerKernel(int* const flag1, int* const counter) {
   Consumer<operation, memory_scope>(flag1, counter);
 }
 
-template <BuiltinAtomicOperation operation, int memory_scope> void Test() {
+template <BuiltinAtomicOperation operation, int memory_scope>
+void Test(const LinearAllocs alloc_type) {
   int blocks = 1, threads = 1;
   if (memory_scope == __HIP_MEMORY_SCOPE_WAVEFRONT) {
     blocks = 1;
@@ -399,7 +398,6 @@ template <BuiltinAtomicOperation operation, int memory_scope> void Test() {
   LinearAllocGuard<int> counter2(LinearAllocs::hipMallocManaged, sizeof(int));
 
   SECTION("Global memory") {
-    const auto alloc_type = LinearAllocs::hipMalloc;
     LinearAllocGuard<int> flag1(alloc_type, sizeof(int));
     LinearAllocGuard<int> flag2(alloc_type, sizeof(int));
     int flagvalue = 0;
@@ -425,9 +423,7 @@ template <BuiltinAtomicOperation operation, int memory_scope> void Test() {
   REQUIRE(counter2.ptr()[0] != 0);
 }
 
-template <BuiltinAtomicOperation operation> void SystemTest() {
-  HipTest::HIP_SKIP_TEST("Skip system scope tests due to random failures!!");
-  return;
+template <BuiltinAtomicOperation operation> void SystemTest(const LinearAllocs alloc_type) {
   std::thread host_producer, host_consumer;
 
   LinearAllocGuard<int> counter1(LinearAllocs::hipMallocManaged, sizeof(int));
@@ -440,7 +436,6 @@ template <BuiltinAtomicOperation operation> void SystemTest() {
   }
 
   SECTION("Global memory") {
-    const auto alloc_type = LinearAllocs::hipMallocManaged;
     LinearAllocGuard<int> flag1(alloc_type, sizeof(int));
     LinearAllocGuard<int> flag2(alloc_type, sizeof(int));
     int flagvalue = 0;

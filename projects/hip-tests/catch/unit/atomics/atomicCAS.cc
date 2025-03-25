@@ -31,10 +31,10 @@ THE SOFTWARE.
  * @ingroup AtomicsTest
  */
 
-#ifdef HT_NVIDIA
-#define TYPES
+#if HT_NVIDIA
+#define TEST_TYPES int, unsigned short int, unsigned int, unsigned long long
 #else
-#define TYPES , float, double
+#define TEST_TYPES int, unsigned short int, unsigned int, unsigned long long, float, double
 #endif
 
 /**
@@ -62,26 +62,34 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicCAS_Positive", "", int, unsigned int, unsigned long long,
-                   unsigned short int TYPES) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kCASAdd>(1, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kCASAdd>(warp_size, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kCASAdd>(warp_size, cache_line_size);
-    }
+#define ATOMIC_CAS_POSITIVE_TEST(alloc_type)                                                       \
+  TEMPLATE_TEST_CASE("Unit_atomicCAS_Positive_" #alloc_type, "", TEST_TYPES) {                     \
+    int warp_size = 0;                                                                             \
+    HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));                   \
+    const auto cache_line_size = 128u;                                                             \
+                                                                                                   \
+    for (auto current = 0; current < cmd_options.atomic_iterations; ++current) {                   \
+      DYNAMIC_SECTION("Same address " << current) {                                                \
+        SingleDeviceSingleKernelTest<TestType, AtomicOperation::kCASAdd>(                          \
+            1, sizeof(TestType), LinearAllocs::alloc_type);                                        \
+      }                                                                                            \
+                                                                                                   \
+      DYNAMIC_SECTION("Adjacent addresses " << current) {                                          \
+        SingleDeviceSingleKernelTest<TestType, AtomicOperation::kCASAdd>(                          \
+            warp_size, sizeof(TestType), LinearAllocs::alloc_type);                                \
+      }                                                                                            \
+                                                                                                   \
+      DYNAMIC_SECTION("Scattered addresses " << current) {                                         \
+        SingleDeviceSingleKernelTest<TestType, AtomicOperation::kCASAdd>(                          \
+            warp_size, cache_line_size, LinearAllocs::alloc_type);                                 \
+      }                                                                                            \
+    }                                                                                              \
   }
-}
+
+ATOMIC_CAS_POSITIVE_TEST(hipMalloc)
+// ATOMIC_CAS_POSITIVE_TEST(hipHostMalloc)
+// ATOMIC_CAS_POSITIVE_TEST(hipMallocManaged)
+// ATOMIC_CAS_POSITIVE_TEST(mallocAndRegister)
 
 /**
  * Test Description
@@ -107,28 +115,34 @@ TEMPLATE_TEST_CASE("Unit_atomicCAS_Positive", "", int, unsigned int, unsigned lo
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicCAS_Positive_Multi_Kernel", "", int, unsigned int,
-                   unsigned long long, unsigned short int TYPES) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kCASAdd>(2, 1, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kCASAdd>(2, warp_size,
-                                                                         sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kCASAdd>(2, warp_size,
-                                                                         cache_line_size);
-    }
+#define ATOMIC_CAS_POSITIVE_MULTI_KERNEL_TEST(alloc_type)                                          \
+  TEMPLATE_TEST_CASE("Unit_atomicCAS_Positive_Multi_Kernel_" #alloc_type, "", TEST_TYPES) {        \
+    int warp_size = 0;                                                                             \
+    HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));                   \
+    const auto cache_line_size = 128u;                                                             \
+                                                                                                   \
+    for (auto current = 0; current < cmd_options.atomic_iterations; ++current) {                   \
+      DYNAMIC_SECTION("Same address " << current) {                                                \
+        SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kCASAdd>(                        \
+            2, 1, sizeof(TestType), LinearAllocs::alloc_type);                                     \
+      }                                                                                            \
+                                                                                                   \
+      DYNAMIC_SECTION("Adjacent addresses " << current) {                                          \
+        SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kCASAdd>(                        \
+            2, warp_size, sizeof(TestType), LinearAllocs::alloc_type);                             \
+      }                                                                                            \
+                                                                                                   \
+      DYNAMIC_SECTION("Scattered addresses " << current) {                                         \
+        SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kCASAdd>(                        \
+            2, warp_size, cache_line_size, LinearAllocs::alloc_type);                              \
+      }                                                                                            \
+    }                                                                                              \
   }
-}
+
+ATOMIC_CAS_POSITIVE_MULTI_KERNEL_TEST(hipMalloc)
+// ATOMIC_CAS_POSITIVE_MULTI_KERNEL_TEST(hipHostMalloc)
+// ATOMIC_CAS_POSITIVE_MULTI_KERNEL_TEST(hipMallocManaged)
+// ATOMIC_CAS_POSITIVE_MULTI_KERNEL_TEST(mallocAndRegister)
 
 /**
  * Test Description

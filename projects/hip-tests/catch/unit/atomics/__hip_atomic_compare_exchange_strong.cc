@@ -55,29 +55,38 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit___hip_atomic_compare_exchange_strong_Positive_Wavefront", "", int,
-                   unsigned int, unsigned long, unsigned long long, float, double) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kBuiltinCAS,
-                                   __HIP_MEMORY_SCOPE_WAVEFRONT>(1, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kBuiltinCAS,
-                                   __HIP_MEMORY_SCOPE_WAVEFRONT>(warp_size, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kBuiltinCAS,
-                                   __HIP_MEMORY_SCOPE_WAVEFRONT>(warp_size, cache_line_size);
-    }
+#define ATOMIC_FETCH_COMPARE_EXCHANGE_STRONG_POSITIVE_WAVEFRONT_TEST(alloc_type)                   \
+  TEMPLATE_TEST_CASE("Unit___hip_atomic_compare_exchange_strong_Positive_Wavefront_" #alloc_type,  \
+                     "", int, unsigned int, unsigned long, unsigned long long, float, double) {    \
+    int warp_size = 0;                                                                             \
+    HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));                   \
+    const auto cache_line_size = 128u;                                                             \
+                                                                                                   \
+    for (auto current = 0; current < cmd_options.atomic_iterations; ++current) {                   \
+      DYNAMIC_SECTION("Same address " << current) {                                                \
+        SingleDeviceSingleKernelTest<TestType, AtomicOperation::kBuiltinCAS,                       \
+                                     __HIP_MEMORY_SCOPE_WAVEFRONT>(1, sizeof(TestType),            \
+                                                                   LinearAllocs::alloc_type);      \
+      }                                                                                            \
+                                                                                                   \
+      DYNAMIC_SECTION("Adjacent addresses " << current) {                                          \
+        SingleDeviceSingleKernelTest<TestType, AtomicOperation::kBuiltinCAS,                       \
+                                     __HIP_MEMORY_SCOPE_WAVEFRONT>(warp_size, sizeof(TestType),    \
+                                                                   LinearAllocs::alloc_type);      \
+      }                                                                                            \
+                                                                                                   \
+      DYNAMIC_SECTION("Scattered addresses " << current) {                                         \
+        SingleDeviceSingleKernelTest<TestType, AtomicOperation::kBuiltinCAS,                       \
+                                     __HIP_MEMORY_SCOPE_WAVEFRONT>(warp_size, cache_line_size,     \
+                                                                   LinearAllocs::alloc_type);      \
+      }                                                                                            \
+    }                                                                                              \
   }
-}
+
+ATOMIC_FETCH_COMPARE_EXCHANGE_STRONG_POSITIVE_WAVEFRONT_TEST(hipMalloc)
+// ATOMIC_FETCH_COMPARE_EXCHANGE_STRONG_POSITIVE_WAVEFRONT_TEST(hipHostMalloc)
+// ATOMIC_FETCH_COMPARE_EXCHANGE_STRONG_POSITIVE_WAVEFRONT_TEST(hipMallocManaged)
+// ATOMIC_FETCH_COMPARE_EXCHANGE_STRONG_POSITIVE_WAVEFRONT_TEST(mallocAndRegister)
 
 /**
  * Test Description
@@ -104,29 +113,38 @@ TEMPLATE_TEST_CASE("Unit___hip_atomic_compare_exchange_strong_Positive_Wavefront
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit___hip_atomic_compare_exchange_strong_Positive_Workgroup", "", int,
-                   unsigned int, unsigned long, unsigned long long, float, double) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kBuiltinCAS,
-                                   __HIP_MEMORY_SCOPE_WORKGROUP>(1, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kBuiltinCAS,
-                                   __HIP_MEMORY_SCOPE_WORKGROUP>(warp_size, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kBuiltinCAS,
-                                   __HIP_MEMORY_SCOPE_WORKGROUP>(warp_size, cache_line_size);
-    }
+#define ATOMIC_FETCH_COMPARE_EXCHANGE_STRONG_POSITIVE_WORKGROUP_TEST(alloc_type)                   \
+  TEMPLATE_TEST_CASE("Unit___hip_atomic_compare_exchange_strong_Positive_Workgroup_" #alloc_type,  \
+                     "", int, unsigned int, unsigned long, unsigned long long, float, double) {    \
+    int warp_size = 0;                                                                             \
+    HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));                   \
+    const auto cache_line_size = 128u;                                                             \
+                                                                                                   \
+    for (auto current = 0; current < cmd_options.atomic_iterations; ++current) {                   \
+      DYNAMIC_SECTION("Same address " << current) {                                                \
+        SingleDeviceSingleKernelTest<TestType, AtomicOperation::kBuiltinCAS,                       \
+                                     __HIP_MEMORY_SCOPE_WORKGROUP>(1, sizeof(TestType),            \
+                                                                   LinearAllocs::alloc_type);      \
+      }                                                                                            \
+                                                                                                   \
+      DYNAMIC_SECTION("Adjacent addresses " << current) {                                          \
+        SingleDeviceSingleKernelTest<TestType, AtomicOperation::kBuiltinCAS,                       \
+                                     __HIP_MEMORY_SCOPE_WORKGROUP>(warp_size, sizeof(TestType),    \
+                                                                   LinearAllocs::alloc_type);      \
+      }                                                                                            \
+                                                                                                   \
+      DYNAMIC_SECTION("Scattered addresses " << current) {                                         \
+        SingleDeviceSingleKernelTest<TestType, AtomicOperation::kBuiltinCAS,                       \
+                                     __HIP_MEMORY_SCOPE_WORKGROUP>(warp_size, cache_line_size,     \
+                                                                   LinearAllocs::alloc_type);      \
+      }                                                                                            \
+    }                                                                                              \
   }
-}
+
+ATOMIC_FETCH_COMPARE_EXCHANGE_STRONG_POSITIVE_WORKGROUP_TEST(hipMalloc)
+// ATOMIC_FETCH_COMPARE_EXCHANGE_STRONG_POSITIVE_WORKGROUP_TEST(hipHostMalloc)
+// ATOMIC_FETCH_COMPARE_EXCHANGE_STRONG_POSITIVE_WORKGROUP_TEST(hipMallocManaged)
+// ATOMIC_FETCH_COMPARE_EXCHANGE_STRONG_POSITIVE_WORKGROUP_TEST(mallocAndRegister)
 
 /**
  * End doxygen group AtomicsTest.

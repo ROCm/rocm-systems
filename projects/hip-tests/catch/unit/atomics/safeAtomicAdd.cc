@@ -55,26 +55,34 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_safeAtomicAdd_Positive", "", float, double) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kSafeAdd>(1, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kSafeAdd>(warp_size,
-                                                                        sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      SingleDeviceSingleKernelTest<TestType, AtomicOperation::kSafeAdd>(warp_size, cache_line_size);
-    }
+#define ATOMIC_SAFE_ADD_POSITIVE_TEST(alloc_type)                                                  \
+  TEMPLATE_TEST_CASE("Unit_safeAtomicAdd_Positive_" #alloc_type, "", float, double) {              \
+    int warp_size = 0;                                                                             \
+    HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));                   \
+    const auto cache_line_size = 128u;                                                             \
+                                                                                                   \
+    for (auto current = 0; current < cmd_options.atomic_iterations; ++current) {                   \
+      DYNAMIC_SECTION("Same address " << current) {                                                \
+        SingleDeviceSingleKernelTest<TestType, AtomicOperation::kSafeAdd>(                         \
+            1, sizeof(TestType), LinearAllocs::alloc_type);                                        \
+      }                                                                                            \
+                                                                                                   \
+      DYNAMIC_SECTION("Adjacent addresses " << current) {                                          \
+        SingleDeviceSingleKernelTest<TestType, AtomicOperation::kSafeAdd>(                         \
+            warp_size, sizeof(TestType), LinearAllocs::alloc_type);                                \
+      }                                                                                            \
+                                                                                                   \
+      DYNAMIC_SECTION("Scattered addresses " << current) {                                         \
+        SingleDeviceSingleKernelTest<TestType, AtomicOperation::kSafeAdd>(                         \
+            warp_size, cache_line_size, LinearAllocs::alloc_type);                                 \
+      }                                                                                            \
+    }                                                                                              \
   }
-}
+
+ATOMIC_SAFE_ADD_POSITIVE_TEST(hipMalloc)
+// ATOMIC_SAFE_ADD_POSITIVE_TEST(hipHostMalloc)
+// ATOMIC_SAFE_ADD_POSITIVE_TEST(hipMallocManaged)
+// ATOMIC_SAFE_ADD_POSITIVE_TEST(mallocAndRegister)
 
 /**
  * Test Description
@@ -100,27 +108,34 @@ TEMPLATE_TEST_CASE("Unit_safeAtomicAdd_Positive", "", float, double) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_safeAtomicAdd_Positive_Multi_Kernel", "", float, double) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kSafeAdd>(2, 1, sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Adjacent addresses " << current) {
-      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kSafeAdd>(2, warp_size,
-                                                                          sizeof(TestType));
-    }
-
-    DYNAMIC_SECTION("Scattered addresses " << current) {
-      SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kSafeAdd>(2, warp_size,
-                                                                          cache_line_size);
-    }
+#define ATOMIC_SAFE_ADD_POSITIVE_MULTI_KERNEL_TEST(alloc_type)                                     \
+  TEMPLATE_TEST_CASE("Unit_safeAtomicAdd_Positive_Multi_Kernel_" #alloc_type, "", float, double) { \
+    int warp_size = 0;                                                                             \
+    HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));                   \
+    const auto cache_line_size = 128u;                                                             \
+                                                                                                   \
+    for (auto current = 0; current < cmd_options.atomic_iterations; ++current) {                   \
+      DYNAMIC_SECTION("Same address " << current) {                                                \
+        SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kSafeAdd>(                       \
+            2, 1, sizeof(TestType), LinearAllocs::alloc_type);                                     \
+      }                                                                                            \
+                                                                                                   \
+      DYNAMIC_SECTION("Adjacent addresses " << current) {                                          \
+        SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kSafeAdd>(                       \
+            2, warp_size, sizeof(TestType), LinearAllocs::alloc_type);                             \
+      }                                                                                            \
+                                                                                                   \
+      DYNAMIC_SECTION("Scattered addresses " << current) {                                         \
+        SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kSafeAdd>(                       \
+            2, warp_size, cache_line_size, LinearAllocs::alloc_type);                              \
+      }                                                                                            \
+    }                                                                                              \
   }
-}
+
+ATOMIC_SAFE_ADD_POSITIVE_MULTI_KERNEL_TEST(hipMalloc)
+// ATOMIC_SAFE_ADD_POSITIVE_MULTI_KERNEL_TEST(hipHostMalloc)
+// ATOMIC_SAFE_ADD_POSITIVE_MULTI_KERNEL_TEST(hipMallocManaged)
+// ATOMIC_SAFE_ADD_POSITIVE_MULTI_KERNEL_TEST(mallocAndRegister)
 
 /**
  * End doxygen group AtomicsTest.
