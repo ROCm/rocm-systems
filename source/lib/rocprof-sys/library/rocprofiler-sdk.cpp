@@ -30,8 +30,8 @@
 #include "core/perfetto.hpp"
 #include "core/rocprofiler-sdk.hpp"
 #include "core/state.hpp"
+#include "library/amd_smi.hpp"
 #include "library/components/category_region.hpp"
-#include "library/rocm_smi.hpp"
 #include "library/rocprofiler-sdk/counters.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
 #include "library/thread_info.hpp"
@@ -1164,10 +1164,10 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     gpu::add_device_metadata();
 
-    if(config::get_use_process_sampling() && config::get_use_rocm_smi())
+    if(config::get_use_process_sampling() && config::get_use_amd_smi())
     {
-        ROCPROFSYS_VERBOSE_F(1, "Setting rocm_smi state to active...\n");
-        rocm_smi::set_state(State::Active);
+        ROCPROFSYS_VERBOSE_F(1, "Setting amd_smi state to active...\n");
+        amd_smi::set_state(State::Active);
     }
 
     start();
@@ -1185,8 +1185,8 @@ tool_fini(void* callback_data)
     flush();
     stop();
 
-    if(config::get_use_process_sampling() && config::get_use_rocm_smi())
-        rocm_smi::shutdown();
+    if(config::get_use_process_sampling() && config::get_use_amd_smi())
+        amd_smi::shutdown();
 
     if(get_counter_storage())
     {

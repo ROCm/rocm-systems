@@ -361,8 +361,8 @@ main(int argc, char** argv)
                         "lib(dyninstAPI|stackwalk|pcontrol|patchAPI|parseAPI|"
                         "instructionAPI|symtabAPI|dynDwarf|common|dynElf|tbb|tbbmalloc|"
                         "tbbmalloc_proxy|gotcha|libunwind|hsa-runtime|amdhip|"
-                        "amd_comgr|rocm_smi64|rocprofiler-register|"
-                        "rocprofiler-sdk|rocprofiler-sdk-roctx|amd_smi)\\.(so|a)" }))
+                        "amd_comgr|amd_smi|rocprofiler-register|"
+                        "rocprofiler-sdk|rocprofiler-sdk-roctx)\\.(so|a)" }))
         {
             if(!find(filepath::dirname(itr), lib_search_paths))
                 lib_search_paths.emplace_back(filepath::dirname(itr));

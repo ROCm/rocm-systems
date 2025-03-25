@@ -64,7 +64,7 @@ The documentation source files reside in the [`/docs`](/docs) folder of this rep
 - HSA operation tracing
 - rocDecode API tracing
 - rocJPEG API tracing
-- System-level sampling (via rocm-smi)
+- System-level sampling (via AMD-SMI)
   - Memory usage
   - Power usage
   - Temperature
