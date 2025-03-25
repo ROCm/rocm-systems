@@ -22,7 +22,7 @@ if(BUILD_PROFILER)
 
     message("RDC_ROCP_LIB_INC_LIST=${RDC_ROCP_LIB_INC_LIST}")
 
-    find_package(rocprofiler-sdk HINTS ${ROCM_DIR}/lib/cmake CONFIGURE REQUIRED)
+    find_package(rocprofiler-sdk 1.0.0 HINTS ${ROCM_DIR}/lib/cmake CONFIGURE REQUIRED)
     find_package(
         hsa-runtime64
         NAMES
