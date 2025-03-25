@@ -205,15 +205,47 @@ compute_queue_t::update_waves ()
     dbgapi_assert (*this == cwsr_record->queue ());
     process_t &process = cwsr_record->process ();
 
-    auto prefetch_begin
-      = cwsr_record->register_address (amdgpu_regnum_t::first_hwreg).value ();
-    auto prefetch_end
-      = cwsr_record->register_address (amdgpu_regnum_t::last_ttmp).value ()
-        + architecture ().register_size (amdgpu_regnum_t::last_ttmp);
+    constexpr auto cache_line_size = std::remove_reference_t<
+      decltype (cwsr_record->agent ().memory_cache ())>::cache_line_size;
 
-    dbgapi_assert (prefetch_end > prefetch_begin);
-    cwsr_record->agent ().memory_cache ().prefetch (
-      prefetch_begin, prefetch_end - prefetch_begin);
+    auto hwreg_begin = utils::align_down (
+      cwsr_record->register_address (amdgpu_regnum_t::first_hwreg).value (),
+      cache_line_size);
+    auto hwreg_end = utils::align_up (
+      hwreg_begin + cwsr_record->hwreg_count () * sizeof (uint32_t),
+      cache_line_size);
+
+    auto ttmp_begin = utils::align_down (
+      cwsr_record->register_address (amdgpu_regnum_t::first_ttmp).value (),
+      cache_line_size);
+    auto ttmp_end = utils::align_up (
+      cwsr_record->register_address (amdgpu_regnum_t::last_ttmp).value ()
+        + architecture ().register_size (amdgpu_regnum_t::last_ttmp),
+      cache_line_size);
+
+    dbgapi_assert (hwreg_begin < hwreg_end);
+    dbgapi_assert (ttmp_begin < ttmp_end);
+
+    /* Are the two blocks disjoint?  */
+    if (ttmp_end < hwreg_begin || ttmp_begin > hwreg_end)
+      {
+        const auto hwreg_blk_size = hwreg_end - hwreg_begin;
+        const auto ttmp_blk_size = ttmp_end - ttmp_begin;
+
+        cwsr_record->agent ().memory_cache ().prefetch (hwreg_begin,
+                                                        hwreg_blk_size);
+        cwsr_record->agent ().memory_cache ().prefetch (ttmp_begin,
+                                                        ttmp_blk_size);
+      }
+    /* Blocks overlap or are contiguous: we can fetch in one swoop.  */
+    else
+      {
+        const auto prefetch_begin = std::min (hwreg_begin, ttmp_begin);
+        const auto prefetch_end = std::max (hwreg_end, ttmp_end);
+
+        cwsr_record->agent ().memory_cache ().prefetch (
+          prefetch_begin, prefetch_end - prefetch_begin);
+      }
 
     wave_t *wave = nullptr;
 
