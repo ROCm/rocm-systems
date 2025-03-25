@@ -52,6 +52,10 @@ def is_tcc_channel_counter(counter):
     return counter.startswith("TCC") and counter.endswith("]")
 
 
+def using_v1():
+    return "ROCPROF" in os.environ.keys() and os.environ["ROCPROF"].endswith("rocprof")
+
+
 def using_v3():
     return "ROCPROF" in os.environ.keys() and "rocprofv3" in os.environ["ROCPROF"]
 
@@ -675,7 +679,7 @@ def run_prof(
             workload_dir + "/out/pmc_1/results_" + fbase + ".csv", index=False
         )
 
-    if new_env and not using_v3():
+    if new_env and not using_v3() and not using_v1():
         # flatten tcc for applicable mi300 input
         f = path(workload_dir + "/out/pmc_1/results_" + fbase + ".csv")
         xcds = get_mi300_num_xcds(mspec.gpu_model, mspec.compute_partition)
