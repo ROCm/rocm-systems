@@ -36,6 +36,8 @@
 
 #include "Dispatch.hpp"
 
+extern unsigned int g_TestGPUsNum;
+
 void KFDQMTest::SetUp() {
     ROUTINE_START
 
@@ -740,7 +742,13 @@ static void OverSubscribeCpQueues(KFDTEST_PARAMETERS* pTestParamters) {
         return;
     }
 
-    static const unsigned int MAX_CP_QUEUES = 65;
+    /* The max queues per process is 1024 limited by
+     * KFD, so MAX_CP_QUEUES is needed to adapt it
+     * when total queues exceed it.
+     */
+    static const unsigned int MAX_CP_QUEUES = g_TestGPUsNum > 15 ?
+                                              1024 / g_TestGPUsNum :
+                                              65;
     static const unsigned int MAX_PACKETS = 100;
 
     HsaMemoryBuffer destBuf(PAGE_SIZE, gpuNode, false);
