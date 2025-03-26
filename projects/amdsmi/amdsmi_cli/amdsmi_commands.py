@@ -5336,23 +5336,36 @@ class AMDSMICommands():
             try:
                 vram_usage = amdsmi_interface.amdsmi_get_gpu_vram_usage(args.gpu)
                 monitor_values['vram_used'] = vram_usage['vram_used']
+                monitor_values['vram_free'] = vram_usage['vram_total'] - vram_usage['vram_used']
                 monitor_values['vram_total'] = vram_usage['vram_total']
+                monitor_values['vram_percent'] = round ((vram_usage['vram_used'] / vram_usage['vram_total']), 2)
                 vram_usage_unit = "MB"
+                vram_percent_unit = "%"
                 if self.logger.is_human_readable_format():
                     monitor_values['vram_used'] = f"{monitor_values['vram_used']} {vram_usage_unit}"
+                    monitor_values['vram_free'] = f"{monitor_values['vram_free']} {vram_usage_unit}"
                     monitor_values['vram_total'] = f"{monitor_values['vram_total']} {vram_usage_unit}"
+                    monitor_values['vram_percent'] = f"{monitor_values['vram_percent']} {vram_percent_unit}"
                 if self.logger.is_json_format():
                     monitor_values['vram_used'] = {"value" : monitor_values['vram_used'],
                                                    "unit" : vram_usage_unit}
+                    monitor_values['vram_free'] = {"value" : monitor_values['vram_free'],
+                                                   "unit" : vram_usage_unit}
                     monitor_values['vram_total'] = {"value" : monitor_values['vram_total'],
                                                     "unit" : vram_usage_unit}
+                    monitor_values['vram_percent'] = {"value" : monitor_values['vram_percent'],
+                                                      "unit" : vram_percent_unit}
             except amdsmi_exception.AmdSmiLibraryException as e:
                 monitor_values['vram_used'] = "N/A"
+                monitor_values['vram_free'] = "N/A"
                 monitor_values['vram_total'] = "N/A"
+                monitor_values['vram_percent'] = "N/A"
                 logging.debug("Failed to get vram memory usage on gpu %s | %s", gpu_id, e.get_error_info())
 
             self.logger.table_header += 'VRAM_USED'.rjust(11)
+            self.logger.table_header += 'VRAM_FREE'.rjust(12)
             self.logger.table_header += 'VRAM_TOTAL'.rjust(12)
+            self.logger.table_header += 'VRAM%'.rjust(9)
 
         if args.vram_usage and args.default_output:
             try:

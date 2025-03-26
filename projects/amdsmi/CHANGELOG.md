@@ -18,6 +18,18 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Increasing available JPEG engines to 40.  
   Current ASICs may not support all 40. These will be indicated as UINT16_MAX or N/A in CLI.
 
+### Changed
+
+- **Modified VRAM display for `amd-smi monitor -v`**.  
+  - Added free VRAM and VRAM percentage.
+
+    ```shell
+    $ amd-smi monitor -v
+    GPU  VRAM_USED   VRAM_FREE  VRAM_TOTAL    VRAM%
+      0     174 MB    16011 MB    16185 MB   0.01 %
+      1      78 MB      347 MB      425 MB   0.18 %
+      ...
+    ```
 
 ## amd_smi_lib for ROCm 6.4.1
 
