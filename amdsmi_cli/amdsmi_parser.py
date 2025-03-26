@@ -1252,7 +1252,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         monitor_optionals_title = "Monitor Arguments"
 
         # Help text for Arguments only on Guest and BM platforms
-        power_usage_help = "Monitor power usage in Watts"
+        power_usage_help = "Monitor power usage and power cap in Watts"
         temperature_help = "Monitor temperature in Celsius"
         gfx_util_help = "Monitor graphics utilization (%%) and clock (MHz)"
         mem_util_help = "Monitor memory utilization (%%) and clock (MHz)"
