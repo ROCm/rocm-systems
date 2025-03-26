@@ -136,11 +136,15 @@ class AMDSMILogger():
                 table_values += string_value.rjust(10)
             elif key in ('mem_clock', 'vram_used'):
                 table_values += string_value.rjust(11)
+            elif key in ('vram_total', 'vram_free'):
+                table_values += string_value.rjust(12)
+            elif key == 'vram_percent':
+                table_values += string_value.rjust(9)
             elif key in ('encoder', 'decoder'):
                 table_values += string_value.rjust(7)
             elif key in ('vclock', 'dclock'):
                 table_values += string_value.rjust(10)
-            elif key in ('single_bit_ecc', 'double_bit_ecc', 'pcie_bw', 'vram_total'):
+            elif key in ('single_bit_ecc', 'double_bit_ecc', 'pcie_bw'):
                 table_values += string_value.rjust(12)
             elif key in ('pcie_replay'):
                 table_values += string_value.rjust(13)
