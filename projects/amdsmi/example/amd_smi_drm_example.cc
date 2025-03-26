@@ -30,11 +30,11 @@
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <map>
 #include <vector>
 #include <sstream>
 
 #include "amd_smi/amdsmi.h"
-#include "amd_smi/impl/amd_smi_utils.h"
 
 
 #define CHK_AMDSMI_RET(RET)                                                    \
@@ -302,25 +302,21 @@ int main() {
         std::cout << "Processor Count: " << device_count << std::endl;
 
         // For each device of the socket, get name and temperature.
-        for (uint32_t j = 0; j < device_count; j++) {
-            uint32_t device_cnt = 0;
-            ret = smi_amdgpu_get_device_count(&device_cnt);
-            CHK_AMDSMI_RET(ret)
-            std::cout << "Device Count: " << device_cnt << std::endl;
-
-            // Get device index
-            uint32_t device_index = 0;
-            ret = smi_amdgpu_get_device_index(processor_handles[j], &device_index);
-            CHK_AMDSMI_RET(ret)
+        for (uint32_t device_index = 0; device_index < device_count; device_index++) {
             std::cout << "Device Index: " << device_index << std::endl;
-
-            std::vector<amdsmi_processor_handle> p_handles(device_cnt);
-            ret = smi_amdgpu_get_processor_handle_by_index(device_index, &p_handles[j]);
+#ifdef ENABLE_ESMI_LIB
+            uint32_t cpu_sockets = 0;
+            uint32_t gpus = 0;
+            ret = amdsmi_get_processor_count_from_handles(&processor_handles[device_index], &device_count, &cpu_sockets, nullptr, &gpus);
+            CHK_AMDSMI_RET(ret)
+            std::cout << "CPU socket count: " << cpu_sockets << std::endl;
+            std::cout << "GPU count: " << gpus << std::endl;
+#endif
 
             // Get device type. Since the amdsmi is initialized with
             // AMD_SMI_INIT_AMD_GPUS, the processor_type must be AMDSMI_PROCESSOR_TYPE_AMD_GPU.
             processor_type_t processor_type = {};
-            ret = amdsmi_get_processor_type(processor_handles[j], &processor_type);
+            ret = amdsmi_get_processor_type(processor_handles[device_index], &processor_type);
             CHK_AMDSMI_RET(ret)
             if (processor_type != AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
                 std::cout << "Expect AMDSMI_PROCESSOR_TYPE_AMD_GPU device type!\n";
@@ -329,7 +325,7 @@ int main() {
 
             // Get BDF info
             amdsmi_bdf_t bdf = {};
-            ret = amdsmi_get_gpu_device_bdf(processor_handles[j], &bdf);
+            ret = amdsmi_get_gpu_device_bdf(processor_handles[device_index], &bdf);
             CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_gpu_device_bdf:\n");
             printf("\tDevice[%d] BDF %04" PRIx64 ":%02" PRIx32 ":%02" PRIx32 ".%" PRIu32 "\n\n", i,
@@ -345,7 +341,7 @@ int main() {
 
             // Get ASIC info
             amdsmi_asic_info_t asic_info = {};
-            ret = amdsmi_get_gpu_asic_info(processor_handles[j], &asic_info);
+            ret = amdsmi_get_gpu_asic_info(processor_handles[device_index], &asic_info);
             CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_gpu_asic_info:\n");
             printf("\tMarket Name: %s\n", asic_info.market_name);
@@ -356,7 +352,7 @@ int main() {
             printf("\tNum of Computes: %d\n\n", asic_info.num_of_compute_units);
 
             bool is_power_management_enabled = false;
-            ret = amdsmi_is_gpu_power_management_enabled(processor_handles[j],
+            ret = amdsmi_is_gpu_power_management_enabled(processor_handles[device_index],
                                                     &is_power_management_enabled);
             CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_is_gpu_power_management_enabled:\n");
@@ -365,20 +361,20 @@ int main() {
 
             std::cout << "    **Version 1: Accelerator/Compute Partition API Examples**\n";
             char original_compute_partition[AMDSMI_MAX_STRING_LENGTH];
-            ret = amdsmi_get_gpu_compute_partition(processor_handles[j], original_compute_partition,
+            ret = amdsmi_get_gpu_compute_partition(processor_handles[device_index], original_compute_partition,
                                         static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
 
             amdsmi_status_code_to_string(ret, &err_str);
             if (ret == AMDSMI_STATUS_SUCCESS) {
                 CHK_AMDSMI_RET(ret)
                 std::cout << "    Output of amdsmi_get_gpu_compute_partition:\n";
-                std::cout << "\tamdsmi_get_gpu_compute_partition(" << j << ", "
+                std::cout << "\tamdsmi_get_gpu_compute_partition(" << device_index << ", "
                 << mapStringToSMIComputePartitionTypes.at(original_compute_partition) << "): "
                 << err_str << "\n\n";
                 std::cout << "\tCompute Partition (original): "
                 << original_compute_partition << "\n\n";
             } else {
-                std::cout << "\tamdsmi_get_gpu_compute_partition(" << j << ", "
+                std::cout << "\tamdsmi_get_gpu_compute_partition(" << device_index << ", "
                 << computePartitionString(AMDSMI_COMPUTE_PARTITION_INVALID) << "): "
                 << err_str << "\n\n";
             }
@@ -388,32 +384,32 @@ int main() {
                     partition++) {
                 amdsmi_compute_partition_type_t updatePartition
                     = static_cast<amdsmi_compute_partition_type_t>(partition);
-                ret_set = amdsmi_set_gpu_compute_partition(processor_handles[j],
+                ret_set = amdsmi_set_gpu_compute_partition(processor_handles[device_index],
                                                                 updatePartition);
                 amdsmi_status_code_to_string(ret_set, &err_str);
                 if (ret_set == AMDSMI_STATUS_SUCCESS) {
                     CHK_AMDSMI_RET(ret_set)
                 }
-                std::cout << "\tamdsmi_set_gpu_compute_partition(" << j << ", "
+                std::cout << "\tamdsmi_set_gpu_compute_partition(" << device_index << ", "
                 << computePartitionString(updatePartition) << "): "
                 << err_str << "\n\n";
 
                 // Get the current compute partition
                 char current_compute_partition[AMDSMI_MAX_STRING_LENGTH];
-                ret = amdsmi_get_gpu_compute_partition(processor_handles[j],
+                ret = amdsmi_get_gpu_compute_partition(processor_handles[device_index],
                                                 current_compute_partition,
                                                 static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
                 amdsmi_status_code_to_string(ret, &err_str);
                 if (ret == AMDSMI_STATUS_SUCCESS) {
                     CHK_AMDSMI_RET(ret)
                     std::cout << "    Output of amdsmi_get_gpu_compute_partition:\n";
-                    std::cout << "\tamdsmi_get_gpu_compute_partition(" << j << ", "
+                    std::cout << "\tamdsmi_get_gpu_compute_partition(" << device_index << ", "
                               << computePartitionString(updatePartition) << "): "
                               << err_str << "\n\n";
                     std::cout << "\tCompute Partition (current): "
                               << current_compute_partition << "\n\n";
                 } else {
-                    std::cout << "\tamdsmi_get_gpu_compute_partition(" << j << ", "
+                    std::cout << "\tamdsmi_get_gpu_compute_partition(" << device_index << ", "
                     << computePartitionString(AMDSMI_COMPUTE_PARTITION_INVALID) << "): "
                     << err_str << "\n\n";
                 }
@@ -428,31 +424,31 @@ int main() {
             }
             std::cout << "    Returning to original compute partition ("
                       << computePartitionString(original_compute_partition_type) << ")\n";
-            auto ret_set = amdsmi_set_gpu_compute_partition(processor_handles[j],
+            auto ret_set = amdsmi_set_gpu_compute_partition(processor_handles[device_index],
                                                 original_compute_partition_type);
             amdsmi_status_code_to_string(ret_set, &err_str);
             if (ret_set == AMDSMI_STATUS_SUCCESS) {
                 CHK_AMDSMI_RET(ret_set)
             }
-            std::cout << "\tamdsmi_set_gpu_compute_partition(" << j << ", "
+            std::cout << "\tamdsmi_set_gpu_compute_partition(" << device_index << ", "
             << computePartitionString(original_compute_partition_type) << "): "
             << err_str << "\n\n";
 
             std::cout << "    **Version 1: Memory Partition API Examples**\n";
             char original_memory_partition[AMDSMI_MAX_STRING_LENGTH];
-            ret = amdsmi_get_gpu_memory_partition(processor_handles[j], original_memory_partition,
+            ret = amdsmi_get_gpu_memory_partition(processor_handles[device_index], original_memory_partition,
                                         static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
             amdsmi_status_code_to_string(ret, &err_str);
             if (ret == AMDSMI_STATUS_SUCCESS) {
                 CHK_AMDSMI_RET(ret)
                 std::cout << "    Output of amdsmi_get_gpu_memory_partition:\n";
-                std::cout << "\tamdsmi_get_gpu_memory_partition(" << j << ", "
+                std::cout << "\tamdsmi_get_gpu_memory_partition(" << device_index << ", "
                 << mapStringToSMIMemoryPartitionTypes.at(original_memory_partition) << "): "
                 << err_str << "\n\n";
                 std::cout << "\tMemory Partition (original): "
                 << original_memory_partition << "\n\n";
             } else {
-                std::cout << "\tamdsmi_get_gpu_memory_partition(" << j << ", "
+                std::cout << "\tamdsmi_get_gpu_memory_partition(" << device_index << ", "
                 << memoryPartitionString(AMDSMI_MEMORY_PARTITION_UNKNOWN) << "): "
                 << err_str << "\n\n";
             }
@@ -468,33 +464,33 @@ int main() {
                 }
                 amdsmi_memory_partition_type_t updatePartition
                     = static_cast<amdsmi_memory_partition_type_t>(partition);
-                auto ret_set = amdsmi_set_gpu_memory_partition(processor_handles[j],
+                auto ret_set = amdsmi_set_gpu_memory_partition(processor_handles[device_index],
                                                                 updatePartition);
                 amdsmi_status_code_to_string(ret_set, &err_str);
                 if (ret_set == AMDSMI_STATUS_SUCCESS) {
                     CHK_AMDSMI_RET(ret_set)
                     std::cout << "    Output of amdsmi_set_gpu_memory_partition:\n";
                 }
-                std::cout << "\tamdsmi_set_gpu_memory_partition(" << j << ", "
+                std::cout << "\tamdsmi_set_gpu_memory_partition(" << device_index << ", "
                           << memoryPartitionString(updatePartition) << "): "
                           << err_str << "\n\n";
 
                 // Get the current memory partition
                 char current_memory_partition[AMDSMI_MAX_STRING_LENGTH];
-                ret = amdsmi_get_gpu_memory_partition(processor_handles[j],
+                ret = amdsmi_get_gpu_memory_partition(processor_handles[device_index],
                                             current_memory_partition,
                                             static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
 
                 amdsmi_status_code_to_string(ret, &err_str);
                 if (ret == AMDSMI_STATUS_SUCCESS) {
                     CHK_AMDSMI_RET(ret)
-                    std::cout << "\tamdsmi_get_gpu_memory_partition(" << j << ", "
+                    std::cout << "\tamdsmi_get_gpu_memory_partition(" << device_index << ", "
                     << memoryPartitionString(updatePartition) << "): "
                     << err_str << "\n\n";
                     std::cout << "\tMemory Partition (current): "
                     << current_memory_partition << "\n\n";
                 } else {
-                    std::cout << "\tamdsmi_get_gpu_memory_partition(" << j << ", "
+                    std::cout << "\tamdsmi_get_gpu_memory_partition(" << device_index << ", "
                     << memoryPartitionString(AMDSMI_MEMORY_PARTITION_UNKNOWN) << "): "
                     << err_str << "\n\n";
                 }
@@ -510,13 +506,13 @@ int main() {
             std::cout << "    Returning to original memory partition ("
                       << memoryPartitionString(original_memory_partition_type)
                       << ")\n";
-            ret_set = amdsmi_set_gpu_memory_partition(processor_handles[j],
+            ret_set = amdsmi_set_gpu_memory_partition(processor_handles[device_index],
                                                 original_memory_partition_type);
             amdsmi_status_code_to_string(ret_set, &err_str);
             if (ret_set == AMDSMI_STATUS_SUCCESS) {
                 CHK_AMDSMI_RET(ret_set)
             }
-            std::cout << "\tamdsmi_set_gpu_compute_partition(" << j << ", "
+            std::cout << "\tamdsmi_set_gpu_compute_partition(" << device_index << ", "
                       << memoryPartitionString(original_memory_partition_type) << "): "
                       << err_str << "\n\n";
 
@@ -524,7 +520,7 @@ int main() {
 
             // Get VRAM info
             amdsmi_vram_info_t vram_info = {};
-            ret = amdsmi_get_gpu_vram_info(processor_handles[j], &vram_info);
+            ret = amdsmi_get_gpu_vram_info(processor_handles[device_index], &vram_info);
             if (ret != amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED) {
                 CHK_AMDSMI_RET(ret)
                 printf("    Output of amdsmi_get_gpu_vram_info:\n");
@@ -540,7 +536,7 @@ int main() {
 
             // Get VBIOS info
             amdsmi_vbios_info_t vbios_info = {};
-            ret = amdsmi_get_gpu_vbios_info(processor_handles[j], &vbios_info);
+            ret = amdsmi_get_gpu_vbios_info(processor_handles[device_index], &vbios_info);
             CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_gpu_vbios_info:\n");
             printf("\tVBios Name: %s\n", vbios_info.name);
@@ -551,7 +547,7 @@ int main() {
 
             // Get Cache info
             amdsmi_gpu_cache_info_t cache_info = {};
-            ret = amdsmi_get_gpu_cache_info(processor_handles[j], &cache_info);
+            ret = amdsmi_get_gpu_cache_info(processor_handles[device_index], &cache_info);
             CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_gpu_cache_info:\n");
             for (unsigned int i = 0 ; i < cache_info.num_cache_types; i++) {
@@ -566,7 +562,7 @@ int main() {
 
             // Get power measure
             amdsmi_power_info_t power_measure = {};
-            ret = amdsmi_get_power_info(processor_handles[j], &power_measure);
+            ret = amdsmi_get_power_info(processor_handles[device_index], &power_measure);
             CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_power_info:\n");
             printf("\tCurrent GFX Voltage: %d\n",
@@ -577,7 +573,7 @@ int main() {
 
             // Get driver version
             amdsmi_driver_info_t driver_info;
-            ret = amdsmi_get_gpu_driver_info(processor_handles[j], &driver_info);
+            ret = amdsmi_get_gpu_driver_info(processor_handles[device_index], &driver_info);
             CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_gpu_driver_info:\n");
             printf("\tDriver name: %s\n", driver_info.driver_name);
@@ -587,14 +583,14 @@ int main() {
             // Get device uuid
             unsigned int uuid_length = AMDSMI_GPU_UUID_SIZE;
 	        char uuid[AMDSMI_GPU_UUID_SIZE];
-            ret = amdsmi_get_gpu_device_uuid(processor_handles[j], &uuid_length, uuid);
+            ret = amdsmi_get_gpu_device_uuid(processor_handles[device_index], &uuid_length, uuid);
             CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_gpu_device_uuid:\n");
             printf("\tDevice uuid: %s\n\n", uuid);
 
             // Get engine usage info
             amdsmi_engine_usage_t engine_usage = {};
-            ret = amdsmi_get_gpu_activity(processor_handles[j], &engine_usage);
+            ret = amdsmi_get_gpu_activity(processor_handles[device_index], &engine_usage);
             CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_gpu_activity:\n");
             printf("\tAverage GFX Activity: %d\n",
@@ -607,7 +603,7 @@ int main() {
             // Get firmware info
             amdsmi_fw_info_t fw_information = {};
             char ucode_name[AMDSMI_MAX_STRING_LENGTH];
-            ret = amdsmi_get_fw_info(processor_handles[j], &fw_information);
+            ret = amdsmi_get_fw_info(processor_handles[device_index], &fw_information);
             CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_fw_info:\n");
             printf("Number of Microcodes: %d\n", fw_information.num_fw_info);
@@ -618,7 +614,7 @@ int main() {
 
             // Get GFX clock measurements
             amdsmi_clk_info_t gfx_clk_values = {};
-            ret = amdsmi_get_clock_info(processor_handles[j], AMDSMI_CLK_TYPE_GFX,
+            ret = amdsmi_get_clock_info(processor_handles[device_index], AMDSMI_CLK_TYPE_GFX,
                                            &gfx_clk_values);
             CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_clock_info:\n");
@@ -627,7 +623,7 @@ int main() {
 
             // Get MEM clock measurements
             amdsmi_clk_info_t mem_clk_values = {};
-            ret = amdsmi_get_clock_info(processor_handles[j], AMDSMI_CLK_TYPE_MEM,
+            ret = amdsmi_get_clock_info(processor_handles[device_index], AMDSMI_CLK_TYPE_MEM,
                                            &mem_clk_values);
             CHK_AMDSMI_RET(ret)
             printf("\tGPU MEM Max Clock: %d\n", mem_clk_values.max_clk);
@@ -635,7 +631,7 @@ int main() {
 
             // Get PCIe status
             amdsmi_pcie_info_t pcie_info = {};
-            ret = amdsmi_get_pcie_info(processor_handles[j], &pcie_info);
+            ret = amdsmi_get_pcie_info(processor_handles[device_index], &pcie_info);
             CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_pcie_info:\n");
             printf("\tCurrent PCIe lanes: %d\n", pcie_info.pcie_metric.pcie_width);
@@ -657,7 +653,7 @@ int main() {
             // Get VRAM temperature limit
             int64_t temperature = 0;
             ret = amdsmi_get_temp_metric(
-                processor_handles[j], AMDSMI_TEMPERATURE_TYPE_VRAM,
+                processor_handles[device_index], AMDSMI_TEMPERATURE_TYPE_VRAM,
                 AMDSMI_TEMP_CRITICAL, &temperature);
             CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_temp_metric:\n");
@@ -665,7 +661,7 @@ int main() {
 
             // Get GFX temperature limit
             ret = amdsmi_get_temp_metric(
-                processor_handles[j], AMDSMI_TEMPERATURE_TYPE_EDGE,
+                processor_handles[device_index], AMDSMI_TEMPERATURE_TYPE_EDGE,
                 AMDSMI_TEMP_CRITICAL, &temperature);
             if (ret != amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED) {
                 CHK_AMDSMI_RET(ret)
@@ -681,7 +677,7 @@ int main() {
                 AMDSMI_TEMPERATURE_TYPE_VRAM, AMDSMI_TEMPERATURE_TYPE_PLX};
             for (const auto &temp_type : temp_types) {
                 ret = amdsmi_get_temp_metric(
-                    processor_handles[j], temp_type,
+                    processor_handles[device_index], temp_type,
                     AMDSMI_TEMP_CURRENT,
                     &temp_measurements[(int)(temp_type)]);
                 if (ret != amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED) {
@@ -712,7 +708,7 @@ int main() {
             for (auto block = AMDSMI_GPU_BLOCK_FIRST;
                  block <= AMDSMI_GPU_BLOCK_LAST;
                  block = (amdsmi_gpu_block_t)(block * 2)) {
-                ret = amdsmi_get_gpu_ras_block_features_enabled(processor_handles[j], block,
+                ret = amdsmi_get_gpu_ras_block_features_enabled(processor_handles[device_index], block,
                                                       &state);
                 if (ret != AMDSMI_STATUS_API_FAILED && ret != AMDSMI_STATUS_NOT_SUPPORTED) {
                     CHK_AMDSMI_RET(ret)
@@ -728,7 +724,7 @@ int main() {
             char bad_page_status_names[3][15] = {"RESERVED", "PENDING",
                                                  "UNRESERVABLE"};
             uint32_t num_pages = 0;
-            ret = amdsmi_get_gpu_bad_page_info(processor_handles[j], &num_pages,
+            ret = amdsmi_get_gpu_bad_page_info(processor_handles[device_index], &num_pages,
                                            nullptr);
             if (ret != AMDSMI_STATUS_NOT_SUPPORTED) {
                 CHK_AMDSMI_RET(ret)
@@ -738,7 +734,7 @@ int main() {
                 printf("\tNo bad pages found.\n");
             } else {
                 std::vector<amdsmi_retired_page_record_t> bad_page_info(num_pages);
-                ret = amdsmi_get_gpu_bad_page_info(processor_handles[j], &num_pages,
+                ret = amdsmi_get_gpu_bad_page_info(processor_handles[device_index], &num_pages,
                                                bad_page_info.data());
                 CHK_AMDSMI_RET(ret)
                 for (uint32_t page_it = 0; page_it < num_pages; page_it += 1) {
@@ -755,7 +751,7 @@ int main() {
 
             // Get ECC error counts
             amdsmi_error_count_t err_cnt_info = {};
-            ret = amdsmi_get_gpu_total_ecc_count(processor_handles[j], &err_cnt_info);
+            ret = amdsmi_get_gpu_total_ecc_count(processor_handles[device_index], &err_cnt_info);
             if (ret != AMDSMI_STATUS_NOT_SUPPORTED) {
                 CHK_AMDSMI_RET(ret)
             }
@@ -765,7 +761,7 @@ int main() {
                    err_cnt_info.uncorrectable_count);
 
             uint32_t num_process = 0;
-            ret = amdsmi_get_gpu_process_list(processor_handles[j], &num_process, nullptr);
+            ret = amdsmi_get_gpu_process_list(processor_handles[device_index], &num_process, nullptr);
             CHK_AMDSMI_RET(ret)
             if (!num_process) {
                 printf("amdsmi_get_gpu_process_list(): No processes found.\n\n");
@@ -781,7 +777,7 @@ int main() {
                    static_cast<uint32_t>(bdf.bus_number),
                    static_cast<uint32_t>(bdf.device_number),
                    static_cast<uint32_t>(bdf.function_number));
-                ret = amdsmi_get_gpu_process_list(processor_handles[j], &num_process, process_info_list);
+                ret = amdsmi_get_gpu_process_list(processor_handles[device_index], &num_process, process_info_list);
                 std::cout << "Allocation size for process list: " << num_process << "\n";
                 CHK_AMDSMI_RET(ret);
                 for (auto idx = uint32_t(0); idx < num_process; ++idx) {
@@ -856,10 +852,10 @@ int main() {
 
             // Get device name
             amdsmi_board_info_t board_info = {};
-            ret = amdsmi_get_gpu_board_info(processor_handles[j], &board_info);
+            ret = amdsmi_get_gpu_board_info(processor_handles[device_index], &board_info);
             CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_gpu_board_info:\n");
-            std::cout << "\tdevice [" << j
+            std::cout << "\tdevice [" << device_index
                       << "]\n\t\tProduct name: " << board_info.product_name
                       << "\n"
                       << "\t\tModel Number: " << board_info.model_number
@@ -871,7 +867,7 @@ int main() {
 
             // Get temperature
             int64_t val_i64 = 0;
-            ret =  amdsmi_get_temp_metric(processor_handles[j], AMDSMI_TEMPERATURE_TYPE_EDGE,
+            ret =  amdsmi_get_temp_metric(processor_handles[device_index], AMDSMI_TEMPERATURE_TYPE_EDGE,
                                              AMDSMI_TEMP_CURRENT, &val_i64);
             if (ret != amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED) {
                 CHK_AMDSMI_RET(ret)
@@ -882,14 +878,14 @@ int main() {
 
             // Get frame buffer
             amdsmi_vram_usage_t vram_usage = {};
-            ret = amdsmi_get_gpu_vram_usage(processor_handles[j], &vram_usage);
+            ret = amdsmi_get_gpu_vram_usage(processor_handles[device_index], &vram_usage);
             CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_gpu_vram_usage:\n");
             std::cout << "\t\tFrame buffer usage (MB): " << vram_usage.vram_used
                       << "/" << vram_usage.vram_total << "\n\n";
 
             amdsmi_power_cap_info_t cap_info = {};
-            ret = amdsmi_get_power_cap_info(processor_handles[j], 0, &cap_info);
+            ret = amdsmi_get_power_cap_info(processor_handles[device_index], 0, &cap_info);
             CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_power_cap_info:\n");
             std::cout << "\t\t Power Cap: " << cap_info.power_cap
@@ -906,7 +902,7 @@ int main() {
             /// Get GPU Metrics info
             std::cout << "\n\n";
             amdsmi_gpu_metrics_t smu;
-            ret = amdsmi_get_gpu_metrics_info(processor_handles[j], &smu);
+            ret = amdsmi_get_gpu_metrics_info(processor_handles[device_index], &smu);
             CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_gpu_metrics_info:\n");
             printf("\tDevice[%d] BDF %04" PRIx64 ":%02" PRIx32 ":%02" PRIx32 ".%" PRIu32 "\n\n", i,
@@ -1334,14 +1330,14 @@ int main() {
             constexpr uint16_t kMAX_ITER_TEST = 10;
             amdsmi_gpu_metrics_t gpu_metrics_check = {};
             for (auto idx = uint16_t(1); idx <= kMAX_ITER_TEST; ++idx) {
-                amdsmi_get_gpu_metrics_info(processor_handles[j], &gpu_metrics_check);
+                amdsmi_get_gpu_metrics_info(processor_handles[device_index], &gpu_metrics_check);
                 std::cout << "\t\t -> firmware_timestamp [" << idx << "/" << kMAX_ITER_TEST << "]: "
                           << gpu_metrics_check.firmware_timestamp << "\n";
             }
 
             std::cout << "\n";
             for (auto idx = uint16_t(1); idx <= kMAX_ITER_TEST; ++idx) {
-                amdsmi_get_gpu_metrics_info(processor_handles[j], &gpu_metrics_check);
+                amdsmi_get_gpu_metrics_info(processor_handles[device_index], &gpu_metrics_check);
                 std::cout << "\t\t -> system_clock_counter [" << idx << "/" << kMAX_ITER_TEST << "]: "
                           << gpu_metrics_check.system_clock_counter << "\n";
             }
@@ -1361,14 +1357,14 @@ int main() {
             printf("\tOutput of amdsmi_get_link_topology_nearest:\n");
             for (uint32_t topo_link_type = AMDSMI_LINK_TYPE_INTERNAL; topo_link_type <= AMDSMI_LINK_TYPE_UNKNOWN; topo_link_type++) {
                 auto topology_nearest_info = amdsmi_topology_nearest_t();
-                ret = amdsmi_get_link_topology_nearest(processor_handles[j],
+                ret = amdsmi_get_link_topology_nearest(processor_handles[device_index],
                                                        static_cast<amdsmi_link_type_t>(topo_link_type),
                                                        nullptr);
                 if (ret != AMDSMI_STATUS_INVAL) {
                     CHK_AMDSMI_RET(ret);
                 }
 
-                ret = amdsmi_get_link_topology_nearest(processor_handles[j],
+                ret = amdsmi_get_link_topology_nearest(processor_handles[device_index],
                                                        static_cast<amdsmi_link_type_t>(topo_link_type),
                                                        &topology_nearest_info);
                 if (ret != AMDSMI_STATUS_INVAL) {
