@@ -58,7 +58,7 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_dispatch_counting_servic
 typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_dispatch_counting_service_record_t
 {
     uint64_t size;         ///< Size of this struct
-    uint64_t num_records;  ///< number of ::rocprofiler_record_counter_t records
+    uint64_t num_records;  ///< number of ::rocprofiler_counter_record_t records
     rocprofiler_async_correlation_id_t correlation_id;   ///< Correlation ID for this dispatch
     rocprofiler_timestamp_t            start_timestamp;  ///< start time in nanoseconds
     rocprofiler_timestamp_t            end_timestamp;    ///< end time in nanoseconds
@@ -98,7 +98,7 @@ typedef void (*rocprofiler_dispatch_counting_service_cb_t)(
 ROCPROFILER_SDK_EXPERIMENTAL
 typedef void (*rocprofiler_dispatch_counting_record_cb_t)(
     rocprofiler_dispatch_counting_service_data_t dispatch_data,
-    rocprofiler_record_counter_t*                record_data,
+    rocprofiler_counter_record_t*                record_data,
     size_t                                       record_count,
     rocprofiler_user_data_t                      user_data,
     void*                                        callback_data_args);

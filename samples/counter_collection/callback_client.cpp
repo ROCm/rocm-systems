@@ -74,7 +74,7 @@ get_client_ctx()
 
 void
 record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
-                rocprofiler_record_counter_t*                record_data,
+                rocprofiler_counter_record_t*                record_data,
                 size_t                                       record_count,
                 rocprofiler_user_data_t /* user_data */,
                 void* callback_data_args)

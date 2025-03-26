@@ -75,16 +75,16 @@ public:
     counter_sampler(rocprofiler_agent_id_t agent);
 
     // Decode the counter name of a record
-    std::string decode_record_name(const rocprofiler_record_counter_t& rec) const;
+    std::string decode_record_name(const rocprofiler_counter_record_t& rec) const;
 
     // Get the dimensions of a record (what CU/SE/etc the counter is for). High cost operation
     // should be cached if possible.
     static std::unordered_map<std::string, size_t> get_record_dimensions(
-        const rocprofiler_record_counter_t& rec);
+        const rocprofiler_counter_record_t& rec);
 
     // Sample the counter values for a set of counters, returns the records in the out parameter.
     rocprofiler_status_t sample_counter_values(const std::vector<std::string>&            counters,
-                                               std::vector<rocprofiler_record_counter_t>& out);
+                                               std::vector<rocprofiler_counter_record_t>& out);
 
     // Get the available agents on the system
     static std::vector<rocprofiler_agent_v0_t> get_available_agents();
@@ -113,7 +113,7 @@ private:
         rocprofiler_agent_id_t agent);
 
     // Get the dimensions of a counter
-    static std::vector<rocprofiler_record_dimension_info_t> get_counter_dimensions(
+    static std::vector<rocprofiler_counter_record_dimension_info_t> get_counter_dimensions(
         rocprofiler_counter_id_t counter);
 };
 
@@ -162,7 +162,7 @@ counter_sampler::counter_sampler(rocprofiler_agent_id_t agent)
 }
 
 std::string
-counter_sampler::decode_record_name(const rocprofiler_record_counter_t& rec) const
+counter_sampler::decode_record_name(const rocprofiler_counter_record_t& rec) const
 {
     if(id_to_name_.empty())
     {
@@ -184,7 +184,7 @@ counter_sampler::decode_record_name(const rocprofiler_record_counter_t& rec) con
 }
 
 std::unordered_map<std::string, size_t>
-counter_sampler::get_record_dimensions(const rocprofiler_record_counter_t& rec)
+counter_sampler::get_record_dimensions(const rocprofiler_counter_record_t& rec)
 {
     std::unordered_map<std::string, size_t> out;
     rocprofiler_counter_id_t                counter_id = {.handle = 0};
@@ -202,7 +202,7 @@ counter_sampler::get_record_dimensions(const rocprofiler_record_counter_t& rec)
 
 rocprofiler_status_t
 counter_sampler::sample_counter_values(const std::vector<std::string>&            counters,
-                                       std::vector<rocprofiler_record_counter_t>& out)
+                                       std::vector<rocprofiler_counter_record_t>& out)
 {
     auto profile_cached = cached_profiles_.find(counters);
     if(profile_cached == cached_profiles_.end())
@@ -330,14 +330,14 @@ counter_sampler::get_supported_counters(rocprofiler_agent_id_t agent)
     return out;
 }
 
-std::vector<rocprofiler_record_dimension_info_t>
+std::vector<rocprofiler_counter_record_dimension_info_t>
 counter_sampler::get_counter_dimensions(rocprofiler_counter_id_t counter)
 {
     rocprofiler_counter_info_v1_t info;
     ROCPROFILER_CALL(rocprofiler_query_counter_info(
                          counter, ROCPROFILER_COUNTER_INFO_VERSION_1, static_cast<void*>(&info)),
                      "Could not query info for counter");
-    return std::vector<rocprofiler_record_dimension_info_t>{
+    return std::vector<rocprofiler_counter_record_dimension_info_t>{
         info.dimensions, info.dimensions + info.dimensions_count};
 }
 
@@ -376,7 +376,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void*)
 
     sampler_thread = new std::thread{[=]() {
         size_t                                    count = 1;
-        std::vector<rocprofiler_record_counter_t> records;
+        std::vector<rocprofiler_counter_record_t> records;
         while(sampler && exit_toggle().load() == false)
         {
             auto status = sampler->sample_counter_values({"SQ_WAVES"}, records);

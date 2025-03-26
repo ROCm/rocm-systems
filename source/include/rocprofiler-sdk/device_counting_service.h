@@ -132,8 +132,18 @@ rocprofiler_status_t
 rocprofiler_sample_device_counting_service(rocprofiler_context_id_t      context_id,
                                            rocprofiler_user_data_t       user_data,
                                            rocprofiler_counter_flag_t    flags,
-                                           rocprofiler_record_counter_t* output_records,
+                                           rocprofiler_counter_record_t* output_records,
                                            size_t*                       rec_count) ROCPROFILER_API;
+
+#if defined(ROCPROFILER_SDK_BETA_COMPAT) && ROCPROFILER_SDK_BETA_COMPAT > 0
+
+// "rocprofiler_agent_set_profile_callback_t" renamed to
+// "rocprofiler_device_counting_agent_cb_t"
+ROCPROFILER_SDK_DEPRECATED(
+    "rocprofiler_agent_set_profile_callback_t renamed to rocprofiler_device_counting_agent_cb_t")
+typedef rocprofiler_device_counting_agent_cb_t rocprofiler_agent_set_profile_callback_t;
+
+#endif
 
 /** @} */
 

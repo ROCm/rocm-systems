@@ -51,7 +51,7 @@ rocprofiler_status_t
 rocprofiler_sample_device_counting_service(rocprofiler_context_id_t      context_id,
                                            rocprofiler_user_data_t       user_data,
                                            rocprofiler_counter_flag_t    flags,
-                                           rocprofiler_record_counter_t* output_records,
+                                           rocprofiler_counter_record_t* output_records,
                                            size_t*                       rec_count)
 {
     if(context_id == rocprofiler_context_none) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
@@ -72,7 +72,7 @@ rocprofiler_sample_device_counting_service(rocprofiler_context_id_t      context
 
         if(*rec_count == 0) return ROCPROFILER_STATUS_ERROR_OUT_OF_RESOURCES;
 
-        auto recs   = std::vector<rocprofiler_record_counter_t>{};
+        auto recs   = std::vector<rocprofiler_counter_record_t>{};
         auto status = rocprofiler::counters::read_agent_ctx(ctx, user_data, flags, &recs);
         if(status == ROCPROFILER_STATUS_SUCCESS)
         {
@@ -83,7 +83,7 @@ rocprofiler_sample_device_counting_service(rocprofiler_context_id_t      context
             }
             *rec_count = recs.size();
             std::memcpy(
-                output_records, recs.data(), sizeof(rocprofiler_record_counter_t) * recs.size());
+                output_records, recs.data(), sizeof(rocprofiler_counter_record_t) * recs.size());
         }
         return status;
     }

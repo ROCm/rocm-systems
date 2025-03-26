@@ -197,7 +197,7 @@ as_pointer()
 using targeted_kernels_map_t =
     std::unordered_map<rocprofiler_kernel_id_t, std::unordered_set<size_t>>;
 using counter_dimension_info_map_t =
-    std::unordered_map<uint64_t, std::vector<rocprofiler_record_dimension_info_t>>;
+    std::unordered_map<uint64_t, std::vector<rocprofiler_counter_record_dimension_info_t>>;
 using agent_info_map_t      = std::unordered_map<rocprofiler_agent_id_t, rocprofiler_agent_t>;
 using kernel_iteration_t    = std::unordered_map<rocprofiler_kernel_id_t, size_t>;
 using kernel_rename_map_t   = std::unordered_map<uint64_t, uint64_t>;
@@ -1313,7 +1313,7 @@ dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
 
 void
 counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
-                        rocprofiler_record_counter_t*                record_data,
+                        rocprofiler_counter_record_t*                record_data,
                         size_t                                       record_count,
                         rocprofiler_user_data_t                      user_data,
                         void* /*callback_data_args*/)
@@ -2163,11 +2163,11 @@ tool_fini(void* /*tool_data*/)
 #endif
 }
 
-std::vector<rocprofiler_record_dimension_info_t>
+std::vector<rocprofiler_counter_record_dimension_info_t>
 get_tool_counter_dimension_info()
 {
     auto _data = get_agent_counter_info();
-    auto _ret  = std::vector<rocprofiler_record_dimension_info_t>{};
+    auto _ret  = std::vector<rocprofiler_counter_record_dimension_info_t>{};
     for(const auto& itr : _data)
     {
         for(const auto& iitr : itr.second)
@@ -2175,12 +2175,12 @@ get_tool_counter_dimension_info()
                 _ret.emplace_back(ditr);
     }
 
-    auto _sorter = [](const rocprofiler_record_dimension_info_t& lhs,
-                      const rocprofiler_record_dimension_info_t& rhs) {
+    auto _sorter = [](const rocprofiler_counter_record_dimension_info_t& lhs,
+                      const rocprofiler_counter_record_dimension_info_t& rhs) {
         return std::tie(lhs.id, lhs.instance_size) < std::tie(rhs.id, rhs.instance_size);
     };
-    auto _equiv = [](const rocprofiler_record_dimension_info_t& lhs,
-                     const rocprofiler_record_dimension_info_t& rhs) {
+    auto _equiv = [](const rocprofiler_counter_record_dimension_info_t& lhs,
+                     const rocprofiler_counter_record_dimension_info_t& rhs) {
         return std::tie(lhs.id, lhs.instance_size) == std::tie(rhs.id, rhs.instance_size);
     };
 

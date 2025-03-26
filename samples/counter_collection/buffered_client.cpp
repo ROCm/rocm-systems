@@ -74,10 +74,11 @@ get_buffer()
     return buf;
 }
 
-std::unordered_map<uint64_t, std::vector<rocprofiler_record_dimension_info_t>>**
+std::unordered_map<uint64_t, std::vector<rocprofiler_counter_record_dimension_info_t>>**
 dimension_cache()
 {
-    static std::unordered_map<uint64_t, std::vector<rocprofiler_record_dimension_info_t>>* cache;
+    static std::unordered_map<uint64_t, std::vector<rocprofiler_counter_record_dimension_info_t>>*
+        cache;
     return &cache;
 }
 
@@ -85,7 +86,7 @@ dimension_cache()
  * For a given counter, query the dimensions that it has. Typically you will
  * want to call this function once to get the dimensions and cache them.
  */
-std::vector<rocprofiler_record_dimension_info_t>
+std::vector<rocprofiler_counter_record_dimension_info_t>
 counter_dimensions(rocprofiler_counter_id_t counter)
 {
     if(*dimension_cache() == nullptr) return {};
@@ -102,15 +103,15 @@ void
 fill_dimension_cache(rocprofiler_counter_id_t counter)
 {
     assert(*dimension_cache() != nullptr);
-    std::vector<rocprofiler_record_dimension_info_t> dims;
-    rocprofiler_counter_info_v1_t                    info;
+    std::vector<rocprofiler_counter_record_dimension_info_t> dims;
+    rocprofiler_counter_info_v1_t                            info;
     ROCPROFILER_CALL(rocprofiler_query_counter_info(
                          counter, ROCPROFILER_COUNTER_INFO_VERSION_1, static_cast<void*>(&info)),
                      "Could not query info for counter");
 
     (*dimension_cache())
         ->emplace(counter.handle,
-                  std::vector<rocprofiler_record_dimension_info_t>{
+                  std::vector<rocprofiler_counter_record_dimension_info_t>{
                       info.dimensions, info.dimensions + info.dimensions_count});
 }
 
@@ -149,7 +150,7 @@ buffered_callback(rocprofiler_context_id_t,
                 header->kind == ROCPROFILER_COUNTER_RECORD_VALUE)
         {
             // Print the returned counter data.
-            auto* record = static_cast<rocprofiler_record_counter_t*>(header->payload);
+            auto* record = static_cast<rocprofiler_counter_record_t*>(header->payload);
             rocprofiler_counter_id_t counter_id = {.handle = 0};
 
             rocprofiler_query_record_counter_id(record->id, &counter_id);
@@ -436,7 +437,8 @@ rocprofiler_configure(uint32_t                 version,
                                             static_cast<void*>(output_stream)};
 
     *dimension_cache() =
-        new std::unordered_map<uint64_t, std::vector<rocprofiler_record_dimension_info_t>>();
+        new std::unordered_map<uint64_t,
+                               std::vector<rocprofiler_counter_record_dimension_info_t>>();
 
     // return pointer to configure data
     return &cfg;

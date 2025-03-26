@@ -85,7 +85,7 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_counter_info_v1_t
 /**
  * @brief (experimental) Query counter id information from record_id.
  *
- * @param [in] id record id from rocprofiler_record_counter_t
+ * @param [in] id record id from rocprofiler_counter_record_t
  * @param [out] counter_id counter id associated with the record
  * @return ::rocprofiler_status_t
  * @retval ROCPROFILER_STATUS_SUCCESS if id decoded
@@ -99,7 +99,7 @@ rocprofiler_query_record_counter_id(rocprofiler_counter_instance_id_t id,
  * @brief (experimental) Query dimension position from record_id. If the dimension does not exist
  *        in the counter, the return will be 0.
  *
- * @param [in] id record id from @ref rocprofiler_record_counter_t
+ * @param [in] id record id from @ref rocprofiler_counter_record_t
  * @param [in]  dim dimension for which positional info is requested (currently only
  *              0 is allowed, i.e. flat array without dimension).
  * @param [out] pos value of the dimension in id

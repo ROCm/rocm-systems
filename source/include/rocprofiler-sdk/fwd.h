@@ -806,9 +806,9 @@ typedef struct rocprofiler_kernel_dispatch_info_t
 } rocprofiler_kernel_dispatch_info_t;
 
 /**
- * @brief Details for the dimension, including its size, for a counter record.
+ * @brief (experimental) Details for the dimension, including its size, for a counter record.
  */
-typedef struct rocprofiler_counter_record_dimension_info_t
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_counter_record_dimension_info_t
 {
     const char*                        name;
     size_t                             instance_size;
@@ -818,12 +818,14 @@ typedef struct rocprofiler_counter_record_dimension_info_t
     /// @brief Id for this dimension used by ::rocprofiler_query_record_dimension_position
 } rocprofiler_counter_record_dimension_info_t;
 
+ROCPROFILER_SDK_DEPRECATED("rocprofiler_counter_record_dimension_info_t was renamed to "
+                           "rocprofiler_counter_record_dimension_info_t")
 typedef rocprofiler_counter_record_dimension_info_t rocprofiler_record_dimension_info_t;
 
 /**
- * @brief ROCProfiler Profile Counting Counter Record per instance.
+ * @brief (experimental) ROCProfiler Profile Counting Counter Record per instance.
  */
-typedef struct rocprofiler_counter_record_t
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_counter_record_t
 {
     rocprofiler_counter_instance_id_t id;             ///< counter identifier
     double                            counter_value;  ///< counter value
@@ -839,24 +841,12 @@ typedef struct rocprofiler_counter_record_t
     /// ::rocprofiler_kernel_dispatch_info_t) of a ::rocprofiler_dispatch_counting_service_data_t
     /// instance (provided during callback for profile config) or a
     /// ::rocprofiler_dispatch_counting_service_record_t records (which will be insert into the
-    /// buffer prior to the associated ::rocprofiler_record_counter_t records).
+    /// buffer prior to the associated ::rocprofiler_counter_record_t records).
 } rocprofiler_counter_record_t;
 
+ROCPROFILER_SDK_DEPRECATED(
+    "rocprofiler_record_counter_t was renamed to rocprofiler_counter_record_t")
 typedef rocprofiler_counter_record_t rocprofiler_record_counter_t;
-
-/**
- * @brief ROCProfiler SPM Record.
- *
- */
-typedef struct rocprofiler_spm_record_t
-{
-    /**
-     * Counters, including identifiers to get counter information and Counters
-     * values
-     */
-    rocprofiler_record_counter_t* counters;
-    uint64_t                      counters_count;
-} rocprofiler_spm_record_t;
 
 #if defined(ROCPROFILER_SDK_BETA_COMPAT) && ROCPROFILER_SDK_BETA_COMPAT > 0
 

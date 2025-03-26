@@ -107,7 +107,7 @@ buffered_callback(rocprofiler_context_id_t,
                 header->kind == ROCPROFILER_COUNTER_RECORD_VALUE)
         {
             // Print the returned counter data.
-            auto* record = static_cast<rocprofiler_record_counter_t*>(header->payload);
+            auto* record = static_cast<rocprofiler_counter_record_t*>(header->payload);
             ss << "  (Id: " << record->id << " Value [D]: " << record->counter_value << ","
                << " user_data: " << record->user_data.value << "),";
 

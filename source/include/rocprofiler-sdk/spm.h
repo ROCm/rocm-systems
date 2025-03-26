@@ -35,6 +35,20 @@ ROCPROFILER_EXTERN_C_INIT
  */
 
 /**
+ * @brief (experimental) ROCProfiler SPM Record.
+ *
+ */
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_record_t
+{
+    /**
+     * Counters, including identifiers to get counter information and Counters
+     * values
+     */
+    rocprofiler_counter_record_t* counters;
+    uint64_t                      counters_count;
+} rocprofiler_spm_record_t;
+
+/**
  * @brief Configure SPM Service.
  *
  * @param [in] context_id
