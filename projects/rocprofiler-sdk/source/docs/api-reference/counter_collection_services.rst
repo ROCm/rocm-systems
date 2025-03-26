@@ -228,7 +228,7 @@ Data from collected counter values is returned through a buffered callback. The 
                 header->kind == ROCPROFILER_COUNTER_RECORD_VALUE)
         {
             // Print the returned counter data.
-            auto* record = static_cast<rocprofiler_record_counter_t*>(header->payload);
+            auto* record = static_cast<rocprofiler_counter_record_t*>(header->payload);
             rocprofiler_counter_id_t counter_id = {.handle = 0};
 
             rocprofiler_query_record_counter_id(record->id, &counter_id);

@@ -287,7 +287,7 @@ rocprofiler_iterate_agent_supported_counters(rocprofiler_agent_id_t             
 /**
  * @brief Query counter id information from record_id
  *
- * @param [in] id record id from rocprofiler_record_counter_t
+ * @param [in] id record id from rocprofiler_counter_record_t
  * @param [out] counter_id counter id associated with the record
  * @return ::rocprofiler_status_t
  */
@@ -321,7 +321,8 @@ rocprofiler_iterate_counter_dimensions(rocprofiler_counter_id_t              id,
     if(!dims) return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
 
     // This is likely faster than a map lookup given the limited number of dims.
-    auto user_dims = common::container::small_vector<rocprofiler_record_dimension_info_t, 6>{};
+    auto user_dims =
+        common::container::small_vector<rocprofiler_counter_record_dimension_info_t, 6>{};
     for(const auto& internal_dim : *dims)
     {
         auto& dim         = user_dims.emplace_back();

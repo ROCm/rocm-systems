@@ -85,7 +85,7 @@ struct validate_dim_presence
 {
     validate_dim_presence() {}
 
-    void maybe_forward(const rocprofiler_record_dimension_info_t& dim)
+    void maybe_forward(const rocprofiler_counter_record_dimension_info_t& dim)
     {
         if(sub_vectors.empty())
         {
@@ -118,8 +118,9 @@ struct validate_dim_presence
         sub_vectors.at(pos)->mark_seen(id);
     }
 
-    bool check_seen(std::stringstream&                                                   out,
-                    std::vector<std::pair<rocprofiler_record_dimension_info_t, size_t>>& pos_stack)
+    bool check_seen(
+        std::stringstream&                                                           out,
+        std::vector<std::pair<rocprofiler_counter_record_dimension_info_t, size_t>>& pos_stack)
     {
         bool ret = true;
         if(sub_vectors.empty())
@@ -150,9 +151,9 @@ struct validate_dim_presence
         return ret;
     }
 
-    std::pair<rocprofiler_record_dimension_info_t, size_t> vector_pos;
-    std::vector<std::unique_ptr<validate_dim_presence>>    sub_vectors;
-    bool                                                   has_value{false};
+    std::pair<rocprofiler_counter_record_dimension_info_t, size_t> vector_pos;
+    std::vector<std::unique_ptr<validate_dim_presence>>            sub_vectors;
+    bool                                                           has_value{false};
 };
 
 struct CaptureRecords
@@ -197,7 +198,7 @@ buffered_callback(rocprofiler_context_id_t,
             // Record the counters we have in the buffer and the number of instances of
             // the counter we have seen.
             rocprofiler_counter_id_t counter;
-            auto* record = static_cast<rocprofiler_record_counter_t*>(header->payload);
+            auto* record = static_cast<rocprofiler_counter_record_t*>(header->payload);
             rocprofiler_query_record_counter_id(record->id, &counter);
             cap.expected_data_dims.at(counter.handle).mark_seen(record->id);
             seen_counters.emplace(counter.handle, 0).first->second++;
@@ -406,8 +407,8 @@ tool_fini(void*)
         else
         {
             // Counter collected OK
-            std::stringstream                                                   ss;
-            std::vector<std::pair<rocprofiler_record_dimension_info_t, size_t>> stack;
+            std::stringstream                                                           ss;
+            std::vector<std::pair<rocprofiler_counter_record_dimension_info_t, size_t>> stack;
             bool passed = cap.expected_data_dims.at(counter_id).check_seen(ss, stack);
             if(!PRINT_ONLY_FAILING || !passed)
             {

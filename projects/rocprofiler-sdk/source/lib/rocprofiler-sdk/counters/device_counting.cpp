@@ -154,7 +154,7 @@ agent_async_handler(hsa_signal_value_t /*signal_v*/, void* data)
     // Write out the AQL data to the buffer
     for(auto& ast : prof_config->asts)
     {
-        std::vector<std::unique_ptr<std::vector<rocprofiler_record_counter_t>>> cache;
+        std::vector<std::unique_ptr<std::vector<rocprofiler_counter_record_t>>> cache;
         auto* ret = CHECK_NOTNULL(ast.evaluate(decoded_pkt, cache));
         ast.set_out_id(*ret);
         for(auto& val : *ret)
@@ -266,7 +266,7 @@ rocprofiler_status_t
 read_agent_ctx(const context::context*                    ctx,
                rocprofiler_user_data_t                    user_data,
                rocprofiler_counter_flag_t                 flags,
-               std::vector<rocprofiler_record_counter_t>* out_counters)
+               std::vector<rocprofiler_counter_record_t>* out_counters)
 {
     rocprofiler_status_t status = ROCPROFILER_STATUS_SUCCESS;
     if(!ctx->device_counter_collection)

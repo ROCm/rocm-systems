@@ -41,10 +41,10 @@ ROCPROFILER_EXTERN_C_INIT
 ROCPROFILER_SDK_DEPRECATED(
     "Function using this alias has been deprecated. See rocprofiler_iterate_counter_dimensions")
 typedef rocprofiler_status_t (*rocprofiler_available_dimensions_cb_t)(
-    rocprofiler_counter_id_t                   id,
-    const rocprofiler_record_dimension_info_t* dim_info,
-    size_t                                     num_dims,
-    void*                                      user_data);
+    rocprofiler_counter_id_t                           id,
+    const rocprofiler_counter_record_dimension_info_t* dim_info,
+    size_t                                             num_dims,
+    void*                                              user_data);
 
 /**
  * @brief (deprecated) Return information about the dimensions that exists for a specific counter

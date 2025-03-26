@@ -560,7 +560,7 @@ save(ArchiveT& ar, rocprofiler_buffer_tracing_hsa_api_record_t data)
 
 template <typename ArchiveT>
 void
-save(ArchiveT& ar, rocprofiler_record_counter_t data)
+save(ArchiveT& ar, rocprofiler_counter_record_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(id);
     ROCP_SDK_SAVE_DATA_FIELD(counter_value);
@@ -1261,7 +1261,7 @@ save(ArchiveT& ar, rocprofiler_counter_info_v1_t data)
 
 template <typename ArchiveT>
 void
-save(ArchiveT& ar, rocprofiler_record_dimension_info_t data)
+save(ArchiveT& ar, rocprofiler_counter_record_dimension_info_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(id);
     ROCP_SDK_SAVE_DATA_FIELD(instance_size);

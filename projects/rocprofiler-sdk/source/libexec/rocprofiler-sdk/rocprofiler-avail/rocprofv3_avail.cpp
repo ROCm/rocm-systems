@@ -180,12 +180,12 @@ pc_configuration_callback(const rocprofiler_pc_sampling_configuration_t* configs
 
 rocprofiler_status_t
 dimensions_info_callback(rocprofiler_counter_id_t /*id*/,
-                         const rocprofiler_record_dimension_info_t* dim_info,
-                         long unsigned int                          num_dims,
-                         void*                                      user_data)
+                         const rocprofiler_counter_record_dimension_info_t* dim_info,
+                         long unsigned int                                  num_dims,
+                         void*                                              user_data)
 {
     auto* dimensions_info =
-        static_cast<std::vector<rocprofiler_record_dimension_info_t>*>(user_data);
+        static_cast<std::vector<rocprofiler_counter_record_dimension_info_t>*>(user_data);
     dimensions_info->reserve(num_dims);
     for(size_t j = 0; j < num_dims; j++)
         dimensions_info->emplace_back(dim_info[j]);
@@ -202,13 +202,13 @@ iterate_agent_counters_callback(rocprofiler_agent_id_t,
     for(size_t i = 0; i < num_counters; i++)
     {
         auto _info           = rocprofiler_counter_info_v1_t{};
-        auto dimensions_data = std::vector<rocprofiler_record_dimension_info_t>{};
+        auto dimensions_data = std::vector<rocprofiler_counter_record_dimension_info_t>{};
         ROCPROFILER_CALL(
             rocprofiler_query_counter_info(
                 counters[i], ROCPROFILER_COUNTER_INFO_VERSION_1, static_cast<void*>(&_info)),
             "Could not query counter_id");
 
-        dimensions_data = std::vector<rocprofiler_record_dimension_info_t>{
+        dimensions_data = std::vector<rocprofiler_counter_record_dimension_info_t>{
             _info.dimensions, _info.dimensions + _info.dimensions_count};
         auto dimensions_info = std::vector<std::vector<std::string>>{};
         dimensions_info.reserve(dimensions_data.size());
