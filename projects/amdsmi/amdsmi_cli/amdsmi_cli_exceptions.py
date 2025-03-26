@@ -241,6 +241,21 @@ class AmdSmiRequiredCommandException(AmdSmiException):
         self.stdout_message = f"{common_message} Error code: {self.value}"
 
 
+class AmdSmiInvalidSubcommandException(AmdSmiException):
+    def __init__(self, command, outputformat: str):
+        super().__init__()
+        self.value = -10
+        self.command = command
+        self.output_format = outputformat
+
+        common_message = f"AMD-SMI Command '{self.command}' is invalid. Must receive valid AMD-SMI Command first. Run '--help' for more info."
+
+        self.json_message["error"] = common_message
+        self.json_message["code"] = self.value
+        self.csv_message = f"error,code\n{common_message}, {self.value}"
+        self.stdout_message = f"{common_message} Error code: {self.value}"
+
+
 class AmdSmiUnknownErrorException(AmdSmiException):
     def __init__(self, command, outputformat: str):
         super().__init__()
