@@ -128,7 +128,12 @@ jobs:
             echo 'Uninstalling AMD-SMI'
             sudo apt remove -y amd-smi-lib
             sudo rm -f /usr/local/bin/amd-smi
-            echo 'Successfully Completed uninstallation on ${{ matrix.os }}'
+            if [ -d /opt/rocm/share/amd_smi ]; then
+              echo '/opt/rocm/share/amd_smi directory still exists. Failing the job.'
+              exit 1
+            else
+              echo 'Successfully Completed uninstallation on ${{ matrix.os }}'
+            fi
           "
 
       - name: Debug Test Results Directory
@@ -341,7 +346,12 @@ jobs:
                 ;;
             esac
             rm -f /usr/local/bin/amd-smi
-            echo 'Successfully Completed uninstallation on ${{ matrix.os }}'
+            if [ -d /opt/rocm/share/amd_smi ]; then
+              echo '/opt/rocm/share/amd_smi directory still exists. Failing the job.'
+              exit 1
+            else
+              echo 'Successfully Completed uninstallation on ${{ matrix.os }}'
+            fi
           "
 
       - name: Debug Test Results Directory
