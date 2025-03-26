@@ -71,6 +71,7 @@ include(GNUInstallDirs)
 option(BUILD_TESTS "Build test suite" OFF)
 option(ENABLE_ASAN_PACKAGING "" OFF)
 option(ENABLE_ESMI_LIB "Build ESMI Library" ON)
+option(BUILD_EXAMPLES "Build examples" OFF)
 
 include(CMakeDependentOption)
 # these options don't work without BUILD_SHARED_LIBS
@@ -80,7 +81,7 @@ cmake_dependent_option(BUILD_RUST_WRAPPER "Build rust wrapper and install" OFF "
 cmake_dependent_option(ENABLE_LDCONFIG "Set library links and caches using ldconfig." ON "BUILD_SHARED_LIBS" OFF)
 
 # Set share path here because project name != amd_smi
-set(SHARE_INSTALL_PREFIX "share/${AMD_SMI}" CACHE STRING "Tests and Example install directory")
+set(SHARE_INSTALL_PREFIX "${CMAKE_INSTALL_DATAROOTDIR}/${AMD_SMI}" CACHE STRING "Tests and Example install directory")
 
 # Packaging directives
 set(CPACK_PACKAGE_NAME
@@ -108,11 +109,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wformat=2 -fno-common -Wstrict-overflow
 # Intentionally leave out -Wsign-promo. It causes spurious warnings.
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Woverloaded-virtual -Wreorder")
 
-set(COMMON_SRC_DIR "${PROJECT_SOURCE_DIR}/src")
 set(ROCM_SRC_DIR "${PROJECT_SOURCE_DIR}/rocm_smi/src")
-set(AMDSMI_SRC_DIR "${PROJECT_SOURCE_DIR}/src/amd_smi")
-set(COMMON_INC_DIR "${PROJECT_SOURCE_DIR}/include/amd_smi")
-set(AMDSMI_INC_DIR "${PROJECT_SOURCE_DIR}/include/amd_smi")
 set(ROCM_INC_DIR "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi")
 set(SHR_MUTEX_DIR "${PROJECT_SOURCE_DIR}/third_party/shared_mutex")
 if(ENABLE_ESMI_LIB)
@@ -220,7 +217,6 @@ set(CMN_INC_LIST
 
 add_subdirectory("rocm_smi")
 add_subdirectory("src")
-add_subdirectory("example")
 
 if(BUILD_TESTS)
     set(TESTS_COMPONENT "tests")
@@ -239,6 +235,11 @@ if(BUILD_SHARED_LIBS)
         add_subdirectory("rust-interface")
     endif()
 endif()
+
+if(BUILD_EXAMPLES)
+    add_subdirectory("example")
+endif()
+
 
 include(CMakePackageConfigHelpers)
 
@@ -273,25 +274,27 @@ install(
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${AMD_SMI}
     COMPONENT dev)
 
-#License file
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 # install license file in share/doc/amd_smi-asan folder
 install(
     FILES ${CPACK_RESOURCE_FILE_LICENSE}
-    DESTINATION share/doc/${AMD_SMI}-asan
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/${AMD_SMI}-asan
     RENAME LICENSE.txt
     COMPONENT asan)
 # docs are installed into different share directory from tests and examples
 install(
     FILES ${CPACK_RESOURCE_FILE_LICENSE}
-    DESTINATION share/doc/${AMD_SMI}
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/${AMD_SMI}
     RENAME LICENSE.txt
     COMPONENT dev)
 
-#Readme file
 install(
     FILES ${CMAKE_CURRENT_SOURCE_DIR}/README.md
-    DESTINATION share/doc/${AMD_SMI}
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/${AMD_SMI}
+    COMPONENT dev)
+install(
+    DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/example
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${AMD_SMI}
     COMPONENT dev)
 
 # Make for goamdsmi_shim library
