@@ -379,6 +379,8 @@ FILTER[RHEL9]=\
 "$BLACKLIST_ALL_ASICS:"\
 "$BLACKLIST_GFX11:"\
 "KFDQMTest.ExtendedCuMasking:"\
-"KFDIPCTest.*:"\
 "KFDEvictTest.QueueTest:"\
 "KFDPCSamplingTest.*"
+
+FILTER[upstream]=\
+"KFDIPCTest.*"

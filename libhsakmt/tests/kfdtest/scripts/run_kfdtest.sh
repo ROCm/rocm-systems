@@ -128,6 +128,13 @@ getFilter() {
             gtestFilter="--gtest_filter=${FILTER[$platform]}"
             ;;
     esac
+
+    # Check if the loaded driver is upstream (in-box) or DKMS
+    rdma_get_pages_func=$(cat /proc/kallsyms | grep rdma_get_pages)
+    if [ -z "$rdma_get_pages_func" ]; then
+	    gtestFilter="$gtestFilter:${FILTER[upstream]}"
+    fi
+
     if [ -n "$ADDITIONAL_EXCLUDE" ]; then
 	    gtestFilter="$gtestFilter:$ADDITIONAL_EXCLUDE"
     fi
