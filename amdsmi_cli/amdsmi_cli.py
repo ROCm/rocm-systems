@@ -103,9 +103,18 @@ if __name__ == "__main__":
         except NameError:
             logging.debug("argcomplete module not found. Autocomplete will not work.")
 
+        valid_commands = ['version', 'list', 'static', 'firmware', 'bad-pages',
+                          'metric', 'process', 'profile', 'event', 'topology', 'set',
+                          'reset', 'monitor', 'xgmi', 'partition', '--help']
+
         sys.argv = [arg.lower() if arg.startswith('--') or not arg.startswith('-')
                     else arg for arg in sys.argv]
-        args = amd_smi_parser.parse_args(args=None if sys.argv[1:] else ['--help'])
+        if len(sys.argv) == 1:
+            args = amd_smi_parser.parse_args(args=['--help'])
+        elif sys.argv[1] in valid_commands:
+            args = amd_smi_parser.parse_args(args=None)
+        else:
+            raise amdsmi_cli_exceptions.AmdSmiInvalidSubcommandException(sys.argv[1],amd_smi_commands.logger.destination)
 
         # Handle command modifiers before subcommand execution
         if args.json:
