@@ -111,6 +111,7 @@ hsa_status_t XdnaDriver::QueryKernelModeDriver(core::DriverQuery query) {
   default:
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
+  return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 }
 
 hsa_status_t XdnaDriver::Open() {
