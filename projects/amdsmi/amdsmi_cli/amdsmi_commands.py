@@ -5104,6 +5104,24 @@ class AMDSMICommands():
 
             self.logger.table_header += 'POWER'.rjust(7)
 
+        if args.power_usage and not args.default_output:
+            # Get Max Power Cap
+            try:
+                power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(args.gpu)
+                monitor_values['max_power'] = power_cap_info['max_power_cap']
+                monitor_values['max_power'] = self.helpers.convert_SI_unit(monitor_values['max_power'], AMDSMIHelpers.SI_Unit.MICRO)
+
+                if self.logger.is_human_readable_format() and monitor_values['max_power'] != "N/A":
+                    monitor_values['max_power'] = f"{monitor_values['max_power']} {power_unit}"
+                if self.logger.is_json_format() and monitor_values['max_power'] != "N/A":
+                    monitor_values['max_power'] = {"value" : monitor_values['max_power'],
+                                                     "unit" : power_unit}
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                monitor_values['max_power'] = "N/A"
+                logging.debug("Failed to get power cap info for gpu %s | %s", gpu_id, e.get_error_info())
+
+            self.logger.table_header += 'PWR_CAP'.rjust(9)
+
         if args.temperature:
             try:
                 temperature = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)['temperature_hotspot']

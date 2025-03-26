@@ -20,6 +20,17 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
+- **Added Power Cap to amd-smi monitor**.  
+  - 'amd-smi monitor -p' will display the power cap along with power.
+    ```shell
+    $ amd-smi monitor -p
+    GPU  POWER  PWR_CAP
+      0  148 W    750 W
+      1  156 W    750 W
+      2  153 W    750 W
+      ...
+    ```
+
 - **Modified VRAM display for `amd-smi monitor -v`**.  
   - Added free VRAM and VRAM percentage.
 

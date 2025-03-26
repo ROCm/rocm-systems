@@ -128,6 +128,8 @@ class AMDSMILogger():
                 table_values += string_value.rjust(10) + '  '
             elif key == 'power_usage':
                 table_values += string_value.rjust(7)
+            elif key == 'max_power':
+                table_values += string_value.rjust(9)
             elif key in ('hotspot_temperature', 'memory_temperature'):
                 table_values += string_value.rjust(8)
             elif key in ('gfx', 'mem'):
