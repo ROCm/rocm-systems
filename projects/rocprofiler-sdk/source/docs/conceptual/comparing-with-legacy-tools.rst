@@ -74,7 +74,7 @@ ROCprofiler-SDK introduces a new command-line tool, `rocprofv3`, which is a more
      - New option to trace scratch memory operations
      - 
    * - Basic tracing options
-     - Marker Trace(ROCTx)
+     - Marker Trace (ROCTx)
      - `--roctx-trace`
      - `--roctx-trace`
      - `--marker-trace`
@@ -155,7 +155,28 @@ ROCprofiler-SDK introduces a new command-line tool, `rocprofv3`, which is a more
      - *Not Available*
      - *Not Available*
      - `--rccl-trace`
-     - For collecting RCCL(ROCm Communication Collectives Library. Also pronounced as 'Rickle' ) Traces
+     - For collecting RCCL (ROCm Communication Collectives Library. Also pronounced as 'Rickle' ) Traces
+     - 
+   * - Advanced tracing options
+     - Scratch memory trace
+     - *Not Available*
+     - *Not Available*
+     - `--scratch-memory-trace`
+     - Collecting scratch memory event traces.
+     - 
+   * - Advanced tracing options
+     - rocDecode trace
+     - *Not Available*
+     - *Not Available*
+     - `--rocdecode-trace`
+     - Tracing rocDecode library.
+     - 
+   * - Advanced tracing options
+     - rocJPEG trace
+     - *Not Available*
+     - *Not Available*
+     - `--rocjpeg-trace`
+     - Tracing rocJPEG library.
      - 
    * - Aggregate tracing options
      - Sys Trace
@@ -332,8 +353,8 @@ ROCprofiler-SDK introduces a new command-line tool, `rocprofv3`, which is a more
      - Providing Custom metrics file
      - `-m`  <metric file>
      - `-m`  <metric file>
-     - Not available
-     - Not yet in rocprofv3
+     - `-E`  <metric file> --pmc <counter>
+     - In rocprofv3, this option has changed to provide a file with custom metrics and collect performance counters from the command line using --pmc option
      - 
    * - Advanced options
      - Preload
