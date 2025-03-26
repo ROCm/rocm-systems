@@ -23,7 +23,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
-- **Added `amdsmi_get_power_info_v2()` with `sensor_ind`**.
+- N/A
 
 ### Changed
 
@@ -115,10 +115,7 @@ GPU_ID  MEMORY  ACCELERATOR_TYPE  ACCELERATOR_PROFILE_INDEX  PARTITION_ID
 
 ### Removed
 
-- **Removed `sensor_ind` in `amdsmi_get_power_info()` for backwards compatibility**.  
-  - This change breaks 6.4.0 C API change, but makes it backwards compatible with 6.3
-  - Python API still accepts `sensor_ind` as an optional argument
-  - Changed AMDSMI version from 25.2 to 25.3
+- N/A
 
 ### Optimized
 
@@ -314,8 +311,7 @@ Updated `amdsmi_get_gpu_metrics_info()` and structure `amdsmi_gpu_metrics_t` to 
 
 - **Removed initialization requirements for `amdsmi_get_lib_version()` and added `amdsmi_get_rocm_version()` to the python API & CLI**.  
 
-- **Added an additional argument `sensor_ind` to `amdsmi_get_power_info()`**.  
-  - This change breaks previous C API calls and will require a change
+- **Added `amdsmi_get_power_info_v2()` with `sensor_ind`**.
   - Python API now accepts `sensor_ind` as an optional argument, does not impact previous usage
 
 - **Depricated enum `AMDSMI_NORMAL_STRING_LENGTH` in favor of `AMDSMI_MAX_STRING_LENGTH`**.  
