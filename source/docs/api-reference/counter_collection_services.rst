@@ -355,7 +355,7 @@ Select Function
 
 select() only returns counter values which match the dimension indexes provided by the user in expression. This operation is to allow a user to state they only want to select specific dimensions index. Supported dimensions include ``DIMENSION_XCC, DIMENSION_AID, DIMENSION_SHADER_ENGINE, DIMENSION_AGENT, DIMENSION_SHADER_ARRAY, DIMENSION_WGP, DIMENSION_INSTANCE``. For example ``select(Y, [DIMENSION_XCC=[0],DIMENSION_SHADER_ENGINE=[2]])`` gives counter values which are from DIMENSION_XCC= 0 and DIMENSION_SHADER_ENGINE= 2 for Y Metric.
 
-Let's say Y has XCC, SHADER_ENGINE(SE), WGP dimensions with sizes 2, 4, 4 respectively.
+Let's say Y has XCC, SHADER_ENGINE (SE), WGP dimensions with sizes 2, 4, 4 respectively.
 
 Raw Counter Data in 3D space:
 
