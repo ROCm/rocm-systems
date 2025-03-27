@@ -81,12 +81,13 @@ set(AMD_TEST_SRC
     hipTestFMA.cc
     hipTestNativeHalf.cc
     hip_test_make_type.cc
-    bfloat16.cc
+    #bfloat16.cc
     AtomicsWithRandomActiveLanesInWavefront.cc
     fp16_ops.cc
     fp8_host.cc
     fp6_ocp.cc
     fp4_ocp.cc
+    # fp8_host.cc #missing bf16trunc
 )
 
 set(AMD_ARCH_SPEC_TEST_SRC

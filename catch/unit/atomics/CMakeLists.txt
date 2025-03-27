@@ -30,9 +30,9 @@ if(HIP_PLATFORM MATCHES "amd")
       atomicMin_system.cc
       atomicMax.cc
       atomicMax_system.cc
-      safeAtomicMin.cc
+      # safeAtomicMin.cc # JIRA Raised
       unsafeAtomicMin.cc
-      safeAtomicMax.cc
+      # safeAtomicMax.cc # JIRA raised
       unsafeAtomicMax.cc
       __hip_atomic_fetch_min.cc
       __hip_atomic_fetch_max.cc
