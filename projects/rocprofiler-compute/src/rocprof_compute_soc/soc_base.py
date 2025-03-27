@@ -323,6 +323,9 @@ class OmniSoC_Base:
         if self.__arch not in ("gfx908", "gfx90a"):
             counters = counters - {"TCP_TCP_LATENCY_sum"}
 
+        # SQ_ACCUM_PREV_HIRES will be injected for level counters later on
+        counters = counters - {"SQ_ACCUM_PREV_HIRES"}
+
         # Coalesce and writeback workload specific perfmon
         self.perfmon_coalesce(counters)
 
