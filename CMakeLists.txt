@@ -179,8 +179,7 @@ rocprofiler_systems_add_option(ROCPROFSYS_USE_MPI "Enable MPI support" OFF)
 rocprofiler_systems_add_option(ROCPROFSYS_USE_ROCM "Enable ROCm support" ON)
 rocprofiler_systems_add_option(ROCPROFSYS_USE_PAPI "Enable HW counter support via PAPI"
                                ON)
-rocprofiler_systems_add_option(ROCPROFSYS_USE_RCCL "Enable RCCL support"
-                               ${ROCPROFSYS_USE_ROCM})
+rocprofiler_systems_add_option(ROCPROFSYS_USE_RCCL "Enable RCCL support" OFF)
 rocprofiler_systems_add_option(
     ROCPROFSYS_USE_MPI_HEADERS
     "Enable wrapping MPI functions w/o enabling MPI dependency" ON)

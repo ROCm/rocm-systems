@@ -34,6 +34,7 @@
 #include "core/constraint.hpp"
 #include "core/debug.hpp"
 #include "core/defines.hpp"
+#include "core/dynamic_library.hpp"
 #include "core/gpu.hpp"
 #include "core/locking.hpp"
 #include "core/perfetto_fwd.hpp"
@@ -441,6 +442,13 @@ rocprofsys_init_tooling_hidden(bool postinit)
         rocprofsys_init_library_hidden_with_rccl(postinit);
         return false;
     }
+
+#if ROCPROFSYS_USE_ROCM > 0
+    dynamic_library _amdhip64{ "ROCPROFSYS_ROCTRACER_LIBAMDHIP64",
+                               find_library_path("libamdhip64.so",
+                                                 { "ROCPROFSYS_ROCM_PATH", "ROCM_PATH" },
+                                                 { ROCPROFSYS_DEFAULT_ROCM_PATH }) };
+#endif
 
     static bool _once       = false;
     static auto _debug_init = get_debug_init();
