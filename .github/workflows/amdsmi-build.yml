@@ -101,8 +101,13 @@ jobs:
             # Run AMDSMI Tests
             echo 'Running AMDSMI Tests'
             /opt/rocm/share/amd_smi/tests/amdsmitst > /shared/test-results-${{ matrix.os }}/amdsmi_tests.log 2>&1
-            parse_and_explain /shared/test-results-${{ matrix.os }}/amdsmi_tests.log 'AMDSMI Tests'
-            echo 'Completed AMDSMI Testing'
+            if [ \$? -ne 0 ]; then
+              echo \"AMDSMI Tests failed. Check the log file for details: /shared/test-results-${{ matrix.os }}/amdsmi_tests.log\"
+              exit 1
+            else
+              parse_and_explain /shared/test-results-${{ matrix.os }}/amdsmi_tests.log 'AMDSMI Tests'
+              echo 'Completed AMDSMI Testing'
+            fi
 
             # Run Python Unit Tests
             echo 'Running Python Unit Testing'
@@ -305,8 +310,13 @@ jobs:
             # Run AMDSMI Tests
             echo 'Running AMDSMI Tests'
             /opt/rocm/share/amd_smi/tests/amdsmitst > /shared/test-results-${{ matrix.os }}/amdsmi_tests.log 2>&1
-            parse_and_explain /shared/test-results-${{ matrix.os }}/amdsmi_tests.log 'AMDSMI Tests'
-            echo 'Completed AMDSMI Testing'
+            if [ \$? -ne 0 ]; then
+              echo \"AMDSMI Tests failed. Check the log file for details: /shared/test-results-${{ matrix.os }}/amdsmi_tests.log\"
+              exit 1
+            else
+              parse_and_explain /shared/test-results-${{ matrix.os }}/amdsmi_tests.log 'AMDSMI Tests'
+              echo 'Completed AMDSMI Testing'
+            fi
 
             # Run Python Unit Tests
             echo 'Running Python Unit Testing'
