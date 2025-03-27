@@ -372,7 +372,7 @@ Examples:
         "-R",
         "--roofline-data-type",
         required=False,
-        choices=["FP8", "FP16", "BF16", "FP32", "FP64", "I8"],
+        choices=["FP8", "FP16", "BF16", "FP32", "FP64", "I8", "I32", "I64"],
         metavar="",
         nargs="+",
         type=str,

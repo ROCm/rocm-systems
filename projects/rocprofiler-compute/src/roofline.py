@@ -319,26 +319,29 @@ class Roofline:
             )
 
         # Plot peak MFMA ceiling
-        fig.add_trace(
-            go.Scatter(
-                x=self.__ceiling_data["mfma"][0],
-                y=self.__ceiling_data["mfma"][1],
-                name="Peak MFMA-{}".format(dtype),
-                mode=plot_mode,
-                hovertemplate="<b>%{text}</b>",
-                text=[
-                    (
-                        None
-                        if self.__run_parameters["is_standalone"]
-                        else "{} G{}/s".format(
+        if dtype in MFMA_DATATYPES:
+            fig.add_trace(
+                go.Scatter(
+                    x=self.__ceiling_data["mfma"][0],
+                    y=self.__ceiling_data["mfma"][1],
+                    name="Peak MFMA-{}".format(dtype),
+                    mode=plot_mode,
+                    hovertemplate="<b>%{text}</b>",
+                    text=[
+                        (
+                            None
+                            if self.__run_parameters["is_standalone"]
+                            else "{} G{}/s".format(
+                                to_int(self.__ceiling_data["mfma"][2]), ops_flops
+                            )
+                        ),
+                        "{} G{}/s".format(
                             to_int(self.__ceiling_data["mfma"][2]), ops_flops
-                        )
-                    ),
-                    "{} G{}/s".format(to_int(self.__ceiling_data["mfma"][2]), ops_flops),
-                ],
-                textposition="top left",
+                        ),
+                    ],
+                    textposition="top left",
+                )
             )
-        )
         #######################
         # Plot Application AI
         #######################
