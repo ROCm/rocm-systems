@@ -1,6 +1,7 @@
 import os,time
 from rdc_bootstrap import *
 from RdcUtil import RdcUtil
+from typing import Dict
 
 default_field_ids = [
         rdc_field_t.RDC_FI_GPU_MEMORY_USAGE,
@@ -26,10 +27,18 @@ default_unit_coverter = {
         rdc_field_t.RDC_FI_GPU_TEMP: 0.001, # degree
 }
 
+class rdc_entity_info_t(Structure):
+    _fields_ = [
+        ("device_type",   c_uint32),
+        ("entity_role",   c_uint32),
+        ("instance_index", c_uint32),
+        ("device_index",   c_uint32),
+    ]
+
 class RdcReader:
     # To run the RDC in embedded mode, set the ip_port = None
     def __init__(self, ip_port = "localhost:50051", field_ids = default_field_ids,
-            unit_converter: dict[int, float] = default_unit_coverter,
+            unit_converter: Dict[int, float] = default_unit_coverter,
             update_freq = 10000000, max_keep_age = 3600.0 , max_keep_samples = 1000,
             field_group_name = "rdc_reader_field_group", gpu_group_name = "rdc_reader_gpu_group",
             gpu_indexes = None, root_ca = "/etc/rdc/client/certs/rdc_cacert.pem",
@@ -43,6 +52,11 @@ class RdcReader:
 
         self.unit_converter = unit_converter
         self.rdc_handle = c_void_p()
+
+        rdc.rdc_get_entity_index_from_info.argtypes = [rdc_entity_info_t]
+        rdc.rdc_get_entity_index_from_info.restype  = c_uint32    
+        rdc.rdc_get_info_from_entity_index.argtypes = [c_uint32]
+        rdc.rdc_get_info_from_entity_index.restype  = rdc_entity_info_t
 
         self.is_standalone = True
         if not ip_port:  # embedded
@@ -69,7 +83,25 @@ class RdcReader:
         if gpu_indexes == None:
             self.gpu_indexes = self.rdc_util.get_all_gpu_indexes(self.rdc_handle)
         else:
-            self.gpu_indexes = gpu_indexes
+            self.gpu_indexes = []
+            for idx in gpu_indexes:
+                idx_str = str(idx)
+                encoded = idx_str.encode("utf-8")
+                phys_gpu = ctypes.c_uint32()
+                part_idx = ctypes.c_uint32()
+                if rdc.rdc_is_partition_string(encoded):
+                    rc = rdc.rdc_parse_partition_string(encoded, ctypes.byref(phys_gpu), ctypes.byref(part_idx))
+                    if not rc:
+                        raise Exception("Rdc failed to parse partition string")
+                    info = rdc_entity_info_t()
+                    info.device_type   = 0 #RDC_DEVICE_TYPE_GPU
+                    info.entity_role   = 1 #RDC_DEVICE_ROLE_PARTITION
+                    info.instance_index = part_idx
+                    info.device_index   = phys_gpu
+                    entity = rdc.rdc_get_entity_index_from_info(info)
+                    self.gpu_indexes.append(entity)
+                else:
+                    self.gpu_indexes.append(int(idx_str))
         self.gpu_group_id, gpu_group_created = self.rdc_util.create_gpu_group(self.rdc_handle, self.gpu_group_name, self.gpu_indexes)
 
         # Create the field group
@@ -140,8 +172,16 @@ class RdcReader:
 
 
     def handle_field(self, gpu_index, value):
+
+        info = rdc.rdc_get_info_from_entity_index(gpu_index)
+
+        if info.entity_role == 1: #RDC_DEVICE_ROLE_PARTITION_INSTANCE
+            gpu_str = f"g{info.device_index}.{info.instance_index}"
+        else:
+            gpu_str = str(info.device_index)
+
         field_name = self.rdc_util.field_id_string(value.field_id)
-        print("%d %d:%d %s:%d" % (value.ts, gpu_index, value.field_id.value, field_name, value.value.l_int))
+        print("%d %s:%d %s:%d" % (value.ts, gpu_str, value.field_id.value, field_name, value.value.l_int))
 
 
 if __name__ == '__main__':

@@ -23,13 +23,17 @@ THE SOFTWARE.
 
 #include <ctime>
 
+#include "amd_smi/amdsmi.h"
 #include "rdc_lib/RdcLogger.h"
+#include "rdc_lib/impl/RdcPartitionImpl.h"
+#include "rdc_lib/impl/SmiUtils.h"
 #include "rdc_lib/rdc_common.h"
 
 namespace amd {
 namespace rdc {
 
-RdcGroupSettingsImpl::RdcGroupSettingsImpl() {
+RdcGroupSettingsImpl::RdcGroupSettingsImpl(const RdcPartitionPtr& partition)
+    : partition_(partition) {
   // Add the default job stats fields
   rdc_field_t job_fields[] = {RDC_FI_GPU_MEMORY_USAGE, RDC_FI_POWER_USAGE, RDC_FI_GPU_CLOCK,
                               RDC_FI_GPU_UTIL,         RDC_FI_PCIE_TX,     RDC_FI_PCIE_RX,
@@ -67,23 +71,50 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_gpu_destroy(rdc_gpu_group_t p_rdc_g
 rdc_status_t RdcGroupSettingsImpl::rdc_group_gpu_add(rdc_gpu_group_t groupId, uint32_t gpu_index) {
   std::lock_guard<std::mutex> guard(group_mutex_);
   auto ite = gpu_group_.find(groupId);
-  if (ite != gpu_group_.end()) {
-    // Check whether the index already exists
-    for (uint32_t i = 0; i < ite->second.count; i++) {
-      if (ite->second.entity_ids[i] == gpu_index) {
-        RDC_LOG(RDC_INFO, "Fail to add " << gpu_index << " to GPU group " << groupId
-                                         << " as it is already exists");
+  if (ite == gpu_group_.end()) {
+    return RDC_ST_NOT_FOUND;
+  }
+
+  rdc_entity_info_t entity_info = rdc_get_info_from_entity_index(gpu_index);
+
+  uint16_t num_partitions = 0;
+  rdc_status_t status =
+      partition_->rdc_get_num_partition_impl(entity_info.device_index, &num_partitions);
+  if (status != RDC_ST_OK) {
+    return status;
+  }
+
+  if (num_partitions != UINT16_MAX && num_partitions > 1) {
+    if (entity_info.entity_role == RDC_DEVICE_ROLE_PARTITION_INSTANCE) {
+      if (entity_info.instance_index >= num_partitions) {
+        RDC_LOG(RDC_INFO, "Invalid partition instance: GPU "
+                              << entity_info.device_index << " supports " << num_partitions
+                              << " partitions, but instance index is "
+                              << entity_info.instance_index);
         return RDC_ST_BAD_PARAMETER;
       }
     }
-    if (ite->second.count < RDC_GROUP_MAX_ENTITIES) {
-      ite->second.entity_ids[ite->second.count] = gpu_index;
-      ite->second.count++;
-    } else {
-      return RDC_ST_MAX_LIMIT;
-    }
   } else {
-    return RDC_ST_NOT_FOUND;
+    if (entity_info.entity_role != RDC_DEVICE_ROLE_PHYSICAL) {
+      RDC_LOG(RDC_INFO, "GPU " << entity_info.device_index
+                               << " is not partitionable, but a partition instance was provided.");
+      return RDC_ST_BAD_PARAMETER;
+    }
+  }
+
+  // Check whether the index already exists
+  for (uint32_t i = 0; i < ite->second.count; i++) {
+    if (ite->second.entity_ids[i] == gpu_index) {
+      RDC_LOG(RDC_INFO, "Fail to add " << gpu_index << " to GPU group " << groupId
+                                       << " as it is already exists");
+      return RDC_ST_BAD_PARAMETER;
+    }
+  }
+  if (ite->second.count < RDC_GROUP_MAX_ENTITIES) {
+    ite->second.entity_ids[ite->second.count] = gpu_index;
+    ite->second.count++;
+  } else {
+    return RDC_ST_MAX_LIMIT;
   }
 
   return RDC_ST_OK;

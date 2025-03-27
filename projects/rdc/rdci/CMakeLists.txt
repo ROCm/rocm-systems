@@ -56,7 +56,8 @@ set(INC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 include_directories(${INC_DIR} ${PROJECT_SOURCE_DIR}/include
     "${GRPC_ROOT}/include"
-    ${PROJECT_SOURCE_DIR})
+    ${PROJECT_SOURCE_DIR}
+    ${AMD_SMI_INCLUDE_DIR})
 
 set(RDCI_SRC_LIST
     "${COMMON_DIR}/rdc_fields_supported.cc"

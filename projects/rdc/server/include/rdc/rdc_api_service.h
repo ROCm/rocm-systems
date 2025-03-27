@@ -184,6 +184,14 @@ class RdcAPIServiceImpl final : public ::rdc::RdcAPI::Service {
                              const ::rdc::ClearConfigRequest* request,
                              ::rdc::ClearConfigResponse* reply) override;
 
+  ::grpc::Status GetNumPartition(::grpc::ServerContext* context,
+                                 const ::rdc::GetNumPartitionRequest* request,
+                                 ::rdc::GetNumPartitionResponse* reply) override;
+
+  ::grpc::Status GetInstanceProfile(::grpc::ServerContext* context,
+                                    const ::rdc::GetInstanceProfileRequest* request,
+                                    ::rdc::GetInstanceProfileResponse* reply) override;
+
  private:
   bool copy_gpu_usage_info(const rdc_gpu_usage_info_t& src, ::rdc::GpuUsageInfo* target);
   rdc_handle_t rdc_handle_;
