@@ -103,9 +103,9 @@ header_pkt(hsa_packet_type_t type)
 }
 
 std::unique_ptr<hsa::CounterAQLPacket>
-construct_aql_pkt(std::shared_ptr<profile_config>& profile)
+construct_aql_pkt(std::shared_ptr<counter_config>& profile)
 {
-    if(counter_callback_info::setup_profile_config(profile) != ROCPROFILER_STATUS_SUCCESS)
+    if(counter_callback_info::setup_counter_config(profile) != ROCPROFILER_STATUS_SUCCESS)
     {
         return nullptr;
     }
@@ -154,7 +154,7 @@ agent_async_handler(hsa_signal_value_t /*signal_v*/, void* data)
     // Write out the AQL data to the buffer
     for(auto& ast : prof_config->asts)
     {
-        std::vector<std::unique_ptr<std::vector<rocprofiler_record_counter_t>>> cache;
+        std::vector<std::unique_ptr<std::vector<rocprofiler_counter_record_t>>> cache;
         auto* ret = CHECK_NOTNULL(ast.evaluate(decoded_pkt, cache));
         ast.set_out_id(*ret);
         for(auto& val : *ret)
@@ -266,7 +266,7 @@ rocprofiler_status_t
 read_agent_ctx(const context::context*                    ctx,
                rocprofiler_user_data_t                    user_data,
                rocprofiler_counter_flag_t                 flags,
-               std::vector<rocprofiler_record_counter_t>* out_counters)
+               std::vector<rocprofiler_counter_record_t>* out_counters)
 {
     rocprofiler_status_t status = ROCPROFILER_STATUS_SUCCESS;
     if(!ctx->device_counter_collection)
@@ -422,11 +422,11 @@ start_agent_ctx(const context::context* ctx)
             {.handle = ctx->context_idx},
             callback_data.agent_id,
             [](rocprofiler_context_id_t        context_id,
-               rocprofiler_profile_config_id_t config_id) -> rocprofiler_status_t {
+               rocprofiler_counter_config_id_t config_id) -> rocprofiler_status_t {
                 auto* cb_ctx = rocprofiler::context::get_mutable_registered_context(context_id);
                 if(!cb_ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
 
-                auto config = rocprofiler::counters::get_profile_config(config_id);
+                auto config = rocprofiler::counters::get_counter_config(config_id);
                 if(!config) return ROCPROFILER_STATUS_ERROR_PROFILE_NOT_FOUND;
 
                 if(!cb_ctx->device_counter_collection)

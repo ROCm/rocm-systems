@@ -8,3 +8,5 @@ leak:amdhip
 leak:python
 leak:hsa-amd-aqlprofile
 leak:__new_exitfn
+leak:omptarget
+leak:llvm

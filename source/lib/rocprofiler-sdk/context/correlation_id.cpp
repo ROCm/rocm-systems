@@ -21,7 +21,9 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
+#include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
+#include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 
@@ -129,7 +131,11 @@ correlation_tracing_service::construct(uint32_t _init_ref_count)
     auto* corr_id_map  = get_correlation_id_map();
     if(!corr_id_map) return nullptr;
     auto& ret = corr_id_map->wlock([](auto& data) -> auto& { return data.emplace_back(); });
-    ret       = std::make_unique<correlation_id>(_init_ref_count, common::get_tid(), _internal_id);
+
+    ret = std::make_unique<correlation_id>(_init_ref_count, common::get_tid(), _internal_id);
+
+    if(auto* prev_api_corr_id = get_latest_correlation_id())
+        ret->ancestor = prev_api_corr_id->internal;
 
     get_latest_correlation_id_impl().emplace_back(ret.get());
 
@@ -148,22 +154,20 @@ pop_latest_correlation_id(correlation_id* val)
 {
     if(!val)
     {
-        ROCP_ERROR << "passed nullptr to correlation id";
+        ROCP_CI_LOG(ERROR) << "passed nullptr to correlation id";
         return nullptr;
     }
 
     auto& stack = get_latest_correlation_id_impl();
     if(stack.empty())
     {
-        ROCP_ERROR << "empty thread-local correlation id stack";
+        ROCP_CI_LOG(ERROR) << "empty thread-local correlation id stack";
         return nullptr;
     }
 
-    if(stack.back() != val)
-    {
-        ROCP_ERROR << "pop_latest_correlation_id is happening out of order for " << val->internal
-                   << ". top of stack is " << stack.back()->internal;
-    }
+    ROCP_CI_LOG_IF(ERROR, get_latest_correlation_id_impl().back() != val)
+        << "pop_latest_correlation_id is happening out of order for " << val->internal
+        << ". top of stack is " << get_latest_correlation_id_impl().back()->internal;
 
     stack.pop_back();
 
@@ -200,5 +204,27 @@ dump_correlation_stack(const char* s)
     printf("%s", info.str().c_str());
 }
 
+void
+correlation_id_finalize()
+{
+    if(!get_correlation_id_map()) return;
+
+    get_correlation_id_map()->rlock([](const auto& data) {
+        uint64_t ndangling = 0;
+        for(const auto& itr : data)
+        {
+            if(itr && itr->get_ref_count() > 0)
+            {
+                ++ndangling;
+                ROCP_WARNING << "retiring dangling correlation ID " << itr->internal
+                             << " from thread " << itr->thread_idx
+                             << " :: remaining reference count: " << itr->get_ref_count();
+                while(itr && itr->get_ref_count() > 0 && itr->sub_ref_count() > 1)
+                {}
+            }
+        }
+        ROCP_CI_LOG_IF(INFO, ndangling > 0) << "retired dangling correlation IDs: " << ndangling;
+    });
+}
 }  // namespace context
 }  // namespace rocprofiler

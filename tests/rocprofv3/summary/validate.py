@@ -37,7 +37,10 @@ def test_hip_api_trace(json_data):
     def get_kind_name(kind_id):
         return data["strings"]["buffer_records"][kind_id]["kind"]
 
-    valid_domain_names = ("HIP_RUNTIME_API",)
+    valid_domain_names = (
+        "HIP_RUNTIME_API",
+        "HIP_RUNTIME_API_EXT",
+    )
 
     hip_api_data = data["buffer_records"]["hip_api"]
 

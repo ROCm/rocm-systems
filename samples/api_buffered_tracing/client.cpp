@@ -33,12 +33,6 @@
 
 #include "client.hpp"
 
-#include <rocprofiler-sdk/buffer.h>
-#include <rocprofiler-sdk/buffer_tracing.h>
-#include <rocprofiler-sdk/callback_tracing.h>
-#include <rocprofiler-sdk/external_correlation.h>
-#include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/internal_threading.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 

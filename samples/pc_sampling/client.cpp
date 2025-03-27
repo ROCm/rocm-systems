@@ -34,9 +34,6 @@
 #include "pcs.hpp"
 #include "utils.hpp"
 
-#include <rocprofiler-sdk/buffer.h>
-#include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/internal_threading.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 

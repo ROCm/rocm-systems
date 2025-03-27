@@ -68,7 +68,7 @@ proccess_completed_cb(completed_cb_params_t&& params)
 
     prof_config->packets.wlock([&](auto& pkt_vector) { pkt_vector.emplace_back(std::move(pkt)); });
 
-    common::container::small_vector<rocprofiler_record_counter_t, 128> out;
+    common::container::small_vector<rocprofiler_counter_record_t, 128> out;
     rocprofiler::buffer::instance*                                     buf = nullptr;
 
     if(info->buffer)
@@ -77,7 +77,8 @@ proccess_completed_cb(completed_cb_params_t&& params)
     }
 
     auto _corr_id_v =
-        rocprofiler_correlation_id_t{.internal = 0, .external = context::null_user_data};
+        rocprofiler_async_correlation_id_t{.internal = 0, .external = context::null_user_data};
+
     if(const auto* _corr_id = session.correlation_id)
     {
         _corr_id_v.internal = _corr_id->internal;
@@ -91,7 +92,7 @@ proccess_completed_cb(completed_cb_params_t&& params)
     auto _dispatch_id = session.callback_record.dispatch_info.dispatch_id;
     for(auto& ast : prof_config->asts)
     {
-        std::vector<std::unique_ptr<std::vector<rocprofiler_record_counter_t>>> cache;
+        std::vector<std::unique_ptr<std::vector<rocprofiler_counter_record_t>>> cache;
         auto* ret = ast.evaluate(decoded_pkt, cache);
         CHECK(ret);
         ast.set_out_id(*ret);

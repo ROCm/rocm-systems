@@ -34,12 +34,14 @@
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
+#include "rocprofiler-sdk/hip/compiler_api_id.h"
 
 #include <rocprofiler-sdk/buffer.h>
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hip/runtime_api_id.h>
 #include <rocprofiler-sdk/hip/table_id.h>
+#include <rocprofiler-sdk/cxx/utility.hpp>
 
 #include <hip/driver_types.h>
 #include <hip/hip_runtime_api.h>
@@ -79,16 +81,26 @@ add_stream(hipStream_t stream)
 {
     return get_stream_map()->wlock(
         [](stream_map_t& _data, hipStream_t _stream) {
-            if(_data.count(_stream) == 0)
+            static uint64_t idx_offset = 0;
+
+            auto idx = _data.size() + idx_offset;
+            ROCP_INFO << fmt::format(
+                "hipStream_t={} :: id={}.handle={}{}", static_cast<void*>(_stream), '{', idx, '}');
+
+            ROCP_CI_LOG_IF(WARNING, idx == 0 && _stream != nullptr)
+                << "null hip stream does not have index 0";
+
+            if(!_data.emplace(_stream, rocprofiler_stream_id_t{.handle = idx}).second)
             {
-                auto idx = _data.size();
-                ROCP_INFO << fmt::format("hipStream_t={} :: id={}.handle={}{}",
-                                         static_cast<void*>(_stream),
-                                         '{',
-                                         idx,
-                                         '}');
-                _data.emplace(_stream, rocprofiler_stream_id_t{.handle = idx});
+                idx_offset += 1;
+                auto _existing = _data.at(_stream);
+                ROCP_INFO << "existing hipStream_t ("
+                          << sdk::utility::as_hex(static_cast<void*>(_stream))
+                          << ") reallocated. rocprofiler_stream_id_t{.handle = " << _existing.handle
+                          << "} -> rocprofiler_stream_id_t{.handle = " << idx << "}";
+                _data.at(_stream) = rocprofiler_stream_id_t{.handle = idx};
             }
+
             return _data.at(_stream);
         },
         stream);
@@ -157,7 +169,7 @@ FuncT create_write_functor(RetT (*func)(Args...))
     return [](Args... args) -> RetT {
         using function_args_type = common::mpl::type_list<Args...>;
 
-        using callback_api_data_t = rocprofiler_callback_tracing_stream_handle_data_t;
+        using callback_api_data_t = rocprofiler_callback_tracing_hip_stream_data_t;
 
         constexpr auto external_corr_id_domain_idx =
             hip_domain_info<TableIdx>::external_correlation_id_domain_idx;
@@ -167,8 +179,8 @@ FuncT create_write_functor(RetT (*func)(Args...))
         auto buffered_contexts = tracing::buffered_context_data_vec_t{};
         auto external_corr_ids = tracing::external_correlation_id_map_t{};
 
-        tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_HIP_STREAM_API,
-                                   ROCPROFILER_BUFFER_TRACING_HIP_STREAM_API,
+        tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
+                                   ROCPROFILER_BUFFER_TRACING_HIP_STREAM,
                                    callback_contexts,
                                    buffered_contexts,
                                    external_corr_ids);
@@ -176,6 +188,7 @@ FuncT create_write_functor(RetT (*func)(Args...))
 
         auto tracer_data      = common::init_public_api_struct(callback_api_data_t{});
         auto internal_corr_id = 0;
+        auto ancestor_corr_id = 0;
 
         constexpr auto stream_idx = common::mpl::index_of<hipStream_t*, function_args_type>::value;
         auto           stream = std::get<stream_idx>(std::make_tuple(std::forward<Args>(args)...));
@@ -194,7 +207,8 @@ FuncT create_write_functor(RetT (*func)(Args...))
                                                   thr_id,
                                                   internal_corr_id,
                                                   external_corr_ids,
-                                                  ROCPROFILER_CALLBACK_TRACING_HIP_STREAM_API,
+                                                  ancestor_corr_id,
+                                                  ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
                                                   ROCPROFILER_HIP_STREAM_CREATE,
                                                   tracer_data);
         }
@@ -218,7 +232,7 @@ FuncT create_destroy_functor(RetT (*func)(Args...))
         using function_args_type  = common::mpl::type_list<Args...>;
         constexpr auto stream_idx = common::mpl::index_of<hipStream_t, function_args_type>::value;
 
-        using callback_api_data_t = rocprofiler_callback_tracing_stream_handle_data_t;
+        using callback_api_data_t = rocprofiler_callback_tracing_hip_stream_data_t;
 
         constexpr auto external_corr_id_domain_idx =
             hip_domain_info<TableIdx>::external_correlation_id_domain_idx;
@@ -228,8 +242,8 @@ FuncT create_destroy_functor(RetT (*func)(Args...))
         auto buffered_contexts = tracing::buffered_context_data_vec_t{};
         auto external_corr_ids = tracing::external_correlation_id_map_t{};
 
-        tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_HIP_STREAM_API,
-                                   ROCPROFILER_BUFFER_TRACING_HIP_STREAM_API,
+        tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
+                                   ROCPROFILER_BUFFER_TRACING_HIP_STREAM,
                                    callback_contexts,
                                    buffered_contexts,
                                    external_corr_ids);
@@ -237,6 +251,7 @@ FuncT create_destroy_functor(RetT (*func)(Args...))
 
         auto tracer_data      = common::init_public_api_struct(callback_api_data_t{});
         auto internal_corr_id = 0;
+        auto ancestor_corr_id = 0;
 
         auto stream = std::get<stream_idx>(std::make_tuple(std::forward<Args>(args)...));
 
@@ -252,7 +267,8 @@ FuncT create_destroy_functor(RetT (*func)(Args...))
                                                   thr_id,
                                                   internal_corr_id,
                                                   external_corr_ids,
-                                                  ROCPROFILER_CALLBACK_TRACING_HIP_STREAM_API,
+                                                  ancestor_corr_id,
+                                                  ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
                                                   ROCPROFILER_HIP_STREAM_DESTROY,
                                                   tracer_data);
         }
@@ -276,7 +292,7 @@ FuncT create_read_functor(RetT (*func)(Args...))
         using function_args_type  = common::mpl::type_list<Args...>;
         constexpr auto stream_idx = common::mpl::index_of<hipStream_t, function_args_type>::value;
 
-        using callback_api_data_t = rocprofiler_callback_tracing_stream_handle_data_t;
+        using callback_api_data_t = rocprofiler_callback_tracing_hip_stream_data_t;
 
         constexpr auto external_corr_id_domain_idx =
             hip_domain_info<TableIdx>::external_correlation_id_domain_idx;
@@ -286,8 +302,8 @@ FuncT create_read_functor(RetT (*func)(Args...))
         auto buffered_contexts = tracing::buffered_context_data_vec_t{};
         auto external_corr_ids = tracing::external_correlation_id_map_t{};
 
-        tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_HIP_STREAM_API,
-                                   ROCPROFILER_BUFFER_TRACING_HIP_STREAM_API,
+        tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
+                                   ROCPROFILER_BUFFER_TRACING_HIP_STREAM,
                                    callback_contexts,
                                    buffered_contexts,
                                    external_corr_ids);
@@ -296,6 +312,7 @@ FuncT create_read_functor(RetT (*func)(Args...))
 
         auto tracer_data      = common::init_public_api_struct(callback_api_data_t{});
         auto internal_corr_id = 0;
+        auto ancestor_corr_id = 0;
 
         auto stream = std::get<stream_idx>(std::make_tuple(std::forward<Args>(args)...));
 
@@ -306,7 +323,8 @@ FuncT create_read_functor(RetT (*func)(Args...))
                                                    thr_id,
                                                    internal_corr_id,
                                                    external_corr_ids,
-                                                   ROCPROFILER_CALLBACK_TRACING_HIP_STREAM_API,
+                                                   ancestor_corr_id,
+                                                   ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
                                                    ROCPROFILER_HIP_STREAM_SET,
                                                    tracer_data);
         }
@@ -320,7 +338,7 @@ FuncT create_read_functor(RetT (*func)(Args...))
         {
             tracing::execute_phase_exit_callbacks(callback_contexts,
                                                   external_corr_ids,
-                                                  ROCPROFILER_CALLBACK_TRACING_HIP_STREAM_API,
+                                                  ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
                                                   ROCPROFILER_HIP_STREAM_SET,
                                                   tracer_data);
         }
@@ -347,13 +365,16 @@ enable_stream_stack()
 
     for(const auto& itr : context::get_registered_contexts())
     {
-        if(itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY) ||
-           itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API) ||
-           itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API) ||
-           itr->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_STREAM_API) ||
-           itr->is_tracing(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY) ||
-           itr->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API) ||
-           itr->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API))
+        if(itr->is_tracing_one_of(ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY,
+                                  ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
+                                  ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
+                                  ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
+                                  ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
+                                  ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API,
+                                  ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API,
+                                  ROCPROFILER_BUFFER_TRACING_HIP_STREAM,
+                                  ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT,
+                                  ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT))
             return true;
     }
 
@@ -365,8 +386,9 @@ enable_compiler_stream_stack()
 {
     for(const auto& itr : context::get_registered_contexts())
     {
-        if(itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API) ||
-           itr->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API))
+        if(itr->is_tracing_one_of(ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
+                                  ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API,
+                                  ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT))
             return true;
     }
 
@@ -393,6 +415,11 @@ update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
         ROCP_TRACE << "updating table entry for " << _info.name;
 
         constexpr auto num_args = function_args_type::size();
+        constexpr auto is_hip_pop_call_config_func =
+            std::is_same<decltype(info_type::operation_idx),
+                         rocprofiler_hip_compiler_api_id_t>::value &&
+            (static_cast<rocprofiler_hip_compiler_api_id_t>(info_type::operation_idx) ==
+             ROCPROFILER_HIP_COMPILER_API_ID___hipPopCallConfiguration);
 
         if constexpr(common::mpl::is_one_of<hipStream_t, function_args_type>::value)
         {
@@ -403,8 +430,8 @@ update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
 
             // index_of finds the first argument of that type. So find the first and last
             // arg of the given type and make sure it resolves to the same distance
-            assert(stream_idx == (num_args - rstream_idx - 1) &&
-                   "function has more than one stream argument");
+            static_assert(stream_idx == (num_args - rstream_idx - 1),
+                          "function has more than one stream argument");
 
             // don't wrap the compiler API functions unless HIP compiler API tracing is enabled
             if constexpr(TableIdx == ROCPROFILER_HIP_TABLE_ID_Compiler)
@@ -424,14 +451,17 @@ update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
                  ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamDestroy);
             if constexpr(is_hip_destroy_func)
             {
+                ROCP_INFO << _info.name << " has been designated as a stream destroy function";
                 _func = create_destroy_functor<TableIdx, OpIdx>(_func);
             }
             else
             {
+                ROCP_INFO << _info.name << " has been designated as a stream set function";
                 _func = create_read_functor<TableIdx, OpIdx>(_func);
             }
         }
-        else if constexpr(common::mpl::is_one_of<hipStream_t*, function_args_type>::value)
+        else if constexpr(common::mpl::is_one_of<hipStream_t*, function_args_type>::value &&
+                          !is_hip_pop_call_config_func)
         {
             constexpr auto stream_idx =
                 common::mpl::index_of<hipStream_t*, function_args_type>::value;
@@ -441,14 +471,16 @@ update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
 
             // index_of finds the first argument of that type. So find the first and last
             // arg of the given type and make sure it resolves to the same distance
-            assert(stream_idx == (num_args - rstream_idx - 1) &&
-                   "function has more than one stream argument");
+            static_assert(stream_idx == (num_args - rstream_idx - 1),
+                          "function has more than one stream argument");
 
             // don't wrap the compiler API functions unless HIP compiler API tracing is enabled
             if constexpr(TableIdx == ROCPROFILER_HIP_TABLE_ID_Compiler)
             {
                 if(!enable_compiler_stream_stack()) return;
             }
+
+            ROCP_INFO << _info.name << " has been designated as a stream create function";
 
             // 1. get the sub-table containing the function pointer in original table
             // 2. get reference to function pointer in sub-table in original table
@@ -458,6 +490,9 @@ update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
             _func        = create_write_functor<TableIdx, OpIdx>(_func);
         }
     }
+
+    // suppress unused-but-set-parameter warning
+    common::consume_args(_orig);
 }
 
 template <size_t TableIdx, typename Tp, size_t OpIdx, size_t... OpIdxTail>

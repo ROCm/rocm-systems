@@ -31,6 +31,7 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/context/correlation_id.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hip/stream.hpp"
 #include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
@@ -56,6 +57,7 @@
 #include <rocprofiler-sdk/hsa.h>
 #include <rocprofiler-sdk/marker.h>
 #include <rocprofiler-sdk/ompt.h>
+#include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/version.h>
 
 #include <hsa/hsa_api_trace.h>
@@ -243,17 +245,19 @@ find_clients()
         return true;
     };
 
-    auto emplace_client = [&data, priority_offset](
+    constexpr auto client_id_size = sizeof(rocprofiler_client_id_t);
+    auto           emplace_client = [&data, priority_offset](
                               std::string_view _name,
                               void*            _dlhandle,
                               auto*            _cfg_func) -> std::optional<client_library>& {
         uint32_t _prio = priority_offset + data.size();
-        return data.emplace_back(client_library{std::string{_name},
-                                                _dlhandle,
-                                                _cfg_func,
-                                                nullptr,
-                                                rocprofiler_client_id_t{nullptr, _prio},
-                                                rocprofiler_client_id_t{nullptr, _prio}});
+        return data.emplace_back(
+            client_library{std::string{_name},
+                           _dlhandle,
+                           _cfg_func,
+                           nullptr,
+                           rocprofiler_client_id_t{client_id_size, nullptr, _prio},
+                           rocprofiler_client_id_t{client_id_size, nullptr, _prio}});
     };
 
     auto rocprofiler_configure_dlsym = [](auto _handle) {
@@ -537,13 +541,17 @@ invoke_client_initializers()
 
     if(!get_clients()) return false;
 
+    // if there is only one client, just fully finalize
+    rocprofiler_client_finalize_t client_fini_func =
+        (get_clients()->size() == 1) ? [](rocprofiler_client_id_t) -> void { finalize(); }
+                                     : &invoke_client_finalizer;
+
     for(auto& itr : *get_clients())
     {
         if(itr && itr->configure_result && itr->configure_result->initialize)
         {
             context::push_client(itr->internal_client_id.handle);
-            itr->configure_result->initialize(&invoke_client_finalizer,
-                                              itr->configure_result->tool_data);
+            itr->configure_result->initialize(client_fini_func, itr->configure_result->tool_data);
             context::pop_client(itr->internal_client_id.handle);
             // set to nullptr so initialize only gets called once
             itr->configure_result->initialize = nullptr;
@@ -595,6 +603,7 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
 
                 hsa::async_copy_sync();
                 hsa::queue_controller_sync();
+                pc_sampling::service_sync();
 
                 auto _fini_status = get_fini_status();
                 if(_fini_status == 0) set_fini_status(-1);
@@ -720,8 +729,11 @@ finalize()
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
         // WARNING: this must precede `code_object::finalize()`
         pc_sampling::code_object::finalize();
+        // WARNING: this must follows queue_controller_fini.
+        pc_sampling::service_fini();
 #endif
         code_object::finalize();
+        context::correlation_id_finalize();
         if(get_init_status() > 0)
         {
             invoke_client_finalizers();
@@ -903,6 +915,7 @@ rocprofiler_set_api_table(const char* name,
         if(runtime_pc_sampling_table)
             rocprofiler::pc_sampling::code_object::initialize(hsa_api_table);
 #endif
+        rocprofiler::thread_trace::code_object::initialize(hsa_api_table);
 
         // install rocprofiler API wrappers
         rocprofiler::hsa::update_table(hsa_api_table->core_, lib_instance);

@@ -82,12 +82,12 @@ public:
      *                         computations. This is needed to avoid destroying data
      *                         in the result map that may be used by other evaluate calls.
      *
-     * @return std::vector<rocprofiler_record_counter_t>* A pointer to the output records.
+     * @return std::vector<rocprofiler_counter_record_t>* A pointer to the output records.
      *          This pointer SHOULD NOT BE FREE'D/DELETED BY THE CALLER.
      */
-    std::vector<rocprofiler_record_counter_t>* evaluate(
-        std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>>& results_map,
-        std::vector<std::unique_ptr<std::vector<rocprofiler_record_counter_t>>>& cache);
+    std::vector<rocprofiler_counter_record_t>* evaluate(
+        std::unordered_map<uint64_t, std::vector<rocprofiler_counter_record_t>>& results_map,
+        std::vector<std::unique_ptr<std::vector<rocprofiler_counter_record_t>>>& cache);
 
     /**
      * @brief Expand derived counter ASTs contained within this AST to full hardware counter
@@ -120,20 +120,20 @@ public:
                                std::set<Metric>&                                   counters) const;
 
     /**
-     * @brief Read the AQL packet and construct rocprofiler_record_counter_t. This call
+     * @brief Read the AQL packet and construct rocprofiler_counter_record_t. This call
      *        does not perform any evaluation, only dumping the packet contents into
-     *        rocprofiler_record_counter_t.
+     *        rocprofiler_counter_record_t.
      *
      * @param [in] pkt_gen packet generator used to generate the AQL packet. This packet
      *                     generator contains information, such as the ordering of instances
      *                     contained in the return packet, that is required to decode what
      *                     data goes with what base counters.
      * @param [in] pkt     AQL packet structure to decode
-     * @return std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>> map of
+     * @return std::unordered_map<uint64_t, std::vector<rocprofiler_counter_record_t>> map of
      *         {metric->id(), vector<records>}
      *
      */
-    static std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>> read_pkt(
+    static std::unordered_map<uint64_t, std::vector<rocprofiler_counter_record_t>> read_pkt(
         const aql::CounterPacketConstruct* pkt_gen,
         hsa::AQLPacket&                    pkt);
 
@@ -148,7 +148,7 @@ public:
     static void read_special_counters(
         const rocprofiler_agent_t&        agent,
         const std::set<counters::Metric>& required_special_counters,
-        std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>>& out_map);
+        std::unordered_map<uint64_t, std::vector<rocprofiler_counter_record_t>>& out_map);
 
     NodeType                            type() const { return _type; }
     ReduceOperation                     reduce_op() const { return _reduce_op; }
@@ -162,7 +162,7 @@ public:
      *
      * @param [in] results computed results that will have their id modified to be counter _out_id
      */
-    void set_out_id(std::vector<rocprofiler_record_counter_t>& results) const;
+    void set_out_id(std::vector<rocprofiler_counter_record_t>& results) const;
 
     const rocprofiler_counter_id_t& out_id() const { return _out_id; }
 
@@ -174,7 +174,7 @@ private:
     std::vector<EvaluateAST>                                          _children;
     std::string                                                       _agent;
     std::vector<MetricDimension>                                      _dimension_types{};
-    std::vector<rocprofiler_record_counter_t>                         _static_value;
+    std::vector<rocprofiler_counter_record_t>                         _static_value;
     std::unordered_set<rocprofiler_profile_counter_instance_types>    _reduce_dimension_set;
     std::map<rocprofiler_profile_counter_instance_types, std::string> _select_dimension_map;
     bool                                                              _expanded{false};
@@ -214,7 +214,7 @@ get_agent_property(std::string_view property, const rocprofiler_agent_t& agent);
 namespace fmt
 {
 template <>
-struct formatter<rocprofiler_record_counter_t>
+struct formatter<rocprofiler_counter_record_t>
 {
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx)
@@ -223,7 +223,7 @@ struct formatter<rocprofiler_record_counter_t>
     }
 
     template <typename Ctx>
-    auto format(rocprofiler_record_counter_t const& data, Ctx& ctx) const
+    auto format(rocprofiler_counter_record_t const& data, Ctx& ctx) const
     {
         return fmt::format_to(ctx.out(),
                               "(CounterId: {}, Dimension: {:x}, Value [D]: {})",

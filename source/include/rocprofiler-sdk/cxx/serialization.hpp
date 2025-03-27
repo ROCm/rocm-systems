@@ -28,6 +28,7 @@
 #include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/internal_threading.h>
+#include <rocprofiler-sdk/pc_sampling.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 #include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <rocprofiler-sdk/cxx/perfetto.hpp>
@@ -84,7 +85,68 @@
 #    define ROCPROFILER_SDK_CEREAL_NAMESPACE_END }  // namespace cereal
 #endif
 
+namespace rocprofiler
+{
+namespace sdk
+{
+namespace serialization
+{
+struct buffer_tracing_args
+{
+    std::string type  = {};
+    std::string name  = {};
+    std::string value = {};
+};
+
+template <typename Tp>
+auto
+get_buffer_tracing_args(Tp& data)
+{
+    auto populate_args_array = [](rocprofiler_buffer_tracing_kind_t /*kind*/,
+                                  rocprofiler_tracing_operation_t /*operation*/,
+                                  uint32_t arg_number,
+                                  const void* const /*arg_value_addr*/,
+                                  int32_t /*arg_indirection_count*/,
+                                  const char* arg_type,
+                                  const char* arg_name,
+                                  const char* arg_value_str,
+                                  void*       cb_data) -> int {
+        if(!cb_data) return 1;
+
+        auto* vec = static_cast<std::vector<buffer_tracing_args>*>(cb_data);
+        auto  sz  = std::max<size_t>(arg_number + 1, vec->size());
+        vec->resize(sz, buffer_tracing_args{});
+        vec->at(arg_number) = buffer_tracing_args{arg_type, arg_name, arg_value_str};
+
+        return 0;
+    };
+
+    auto ret    = std::vector<buffer_tracing_args>{};
+    auto record = rocprofiler_record_header_t{};
+    record.hash =
+        rocprofiler_record_header_compute_hash(ROCPROFILER_BUFFER_CATEGORY_TRACING, data.kind);
+    record.payload = &data;
+
+    rocprofiler_iterate_buffer_tracing_record_args(record, populate_args_array, &ret);
+
+    return ret;
+}
+}  // namespace serialization
+}  // namespace sdk
+}  // namespace rocprofiler
+
 ROCPROFILER_SDK_CEREAL_NAMESPACE_BEGIN
+
+namespace sdk = ::rocprofiler::sdk;
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, const sdk::serialization::buffer_tracing_args& data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(type);
+    ROCP_SDK_SAVE_DATA_FIELD(name);
+    ROCP_SDK_SAVE_DATA_FIELD(value);
+}
 
 template <typename ArchiveT>
 void
@@ -131,6 +193,15 @@ save(ArchiveT& ar, rocprofiler_counter_id_t data)
 template <typename ArchiveT>
 void
 save(ArchiveT& ar, rocprofiler_correlation_id_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(internal);
+    ROCP_SDK_SAVE_DATA_VALUE("external", external.value);
+    ROCP_SDK_SAVE_DATA_VALUE("ancestor", ancestor);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_async_correlation_id_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(internal);
     ROCP_SDK_SAVE_DATA_VALUE("external", external.value);
@@ -306,7 +377,7 @@ template <typename ArchiveT>
 void
 save(ArchiveT& ar, rocprofiler_hip_api_retval_t data)
 {
-    ROCP_SDK_SAVE_DATA_FIELD(hipError_t_retval);
+    ROCP_SDK_SAVE_DATA_FIELD(uint64_t_retval);
 }
 
 template <typename ArchiveT>
@@ -489,7 +560,7 @@ save(ArchiveT& ar, rocprofiler_buffer_tracing_hsa_api_record_t data)
 
 template <typename ArchiveT>
 void
-save(ArchiveT& ar, rocprofiler_record_counter_t data)
+save(ArchiveT& ar, rocprofiler_counter_record_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(id);
     ROCP_SDK_SAVE_DATA_FIELD(counter_value);
@@ -501,6 +572,16 @@ void
 save(ArchiveT& ar, rocprofiler_buffer_tracing_hip_api_record_t data)
 {
     save_buffer_tracing_api_record(ar, data);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_buffer_tracing_hip_api_ext_record_t data)
+{
+    save_buffer_tracing_api_record(ar, data);
+    auto args = sdk::serialization::get_buffer_tracing_args(data);
+    ROCP_SDK_SAVE_VALUE("args", args);
+    ROCP_SDK_SAVE_DATA_FIELD(retval);
 }
 
 template <typename ArchiveT>
@@ -923,6 +1004,93 @@ save(ArchiveT& ar, rocprofiler_pc_sampling_record_host_trap_v0_t data)
 
 template <typename ArchiveT>
 void
+save(ArchiveT& ar, rocprofiler_pc_sampling_record_stochastic_header_t data)
+{
+    ROCP_SDK_SAVE_DATA_BITFIELD("has_mem_cnt", has_memory_counter);
+}
+
+template <typename ArchiveT>
+void
+save_pc_sampling_inst_type(ArchiveT& ar, rocprofiler_pc_sampling_instruction_type_t inst_type)
+{
+    ar(make_nvp("inst_type",
+                std::string(rocprofiler_get_pc_sampling_instruction_type_name(inst_type))));
+}
+
+template <typename ArchiveT>
+void
+save_pc_sampling_stall_reason(ArchiveT&                                               ar,
+                              rocprofiler_pc_sampling_instruction_not_issued_reason_t stall_reason)
+{
+    ar(make_nvp(
+        "stall_reason",
+        std::string(rocprofiler_get_pc_sampling_instruction_not_issued_reason_name(stall_reason))));
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_pc_sampling_snapshot_v0_t data)
+{
+    save_pc_sampling_stall_reason(
+        ar,
+        static_cast<rocprofiler_pc_sampling_instruction_not_issued_reason_t>(
+            data.reason_not_issued));
+
+    ROCP_SDK_SAVE_DATA_BITFIELD("dual_issue_valu", dual_issue_valu);
+
+    // Arb state (pipe issued)
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_issue_valu", arb_state_issue_valu);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_issue_matrix", arb_state_issue_matrix);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_issue_lds", arb_state_issue_lds);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_issue_lds_direct", arb_state_issue_lds_direct);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_issue_scalar", arb_state_issue_scalar);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_issue_vmem_tex", arb_state_issue_vmem_tex);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_issue_flat", arb_state_issue_flat);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_issue_exp", arb_state_issue_exp);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_issue_misc", arb_state_issue_misc);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_issue_brmsg", arb_state_issue_brmsg);
+    // Arb state (pipe stalled)
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_stall_valu", arb_state_stall_valu);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_stall_matrix", arb_state_stall_matrix);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_stall_lds", arb_state_stall_lds);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_stall_lds_direct", arb_state_stall_lds_direct);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_stall_scalar", arb_state_stall_scalar);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_stall_vmem_tex", arb_state_stall_vmem_tex);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_stall_flat", arb_state_stall_flat);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_stall_exp", arb_state_stall_exp);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_stall_misc", arb_state_stall_misc);
+    ROCP_SDK_SAVE_DATA_BITFIELD("arb_state_stall_brmsg", arb_state_stall_brmsg);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_pc_sampling_record_stochastic_v0_t data)
+{
+    // flags specific for stochastic sampling
+    ROCP_SDK_SAVE_DATA_FIELD(flags);
+
+    // Common for host-trap and stochastic
+    ROCP_SDK_SAVE_DATA_FIELD(hw_id);
+    ROCP_SDK_SAVE_DATA_FIELD(pc);
+    ROCP_SDK_SAVE_DATA_FIELD(exec_mask);
+    ROCP_SDK_SAVE_DATA_FIELD(timestamp);
+    ROCP_SDK_SAVE_DATA_FIELD(dispatch_id);
+    ROCP_SDK_SAVE_DATA_VALUE("corr_id", correlation_id);
+    ROCP_SDK_SAVE_DATA_VALUE("wrkgrp_id", workgroup_id);
+    ROCP_SDK_SAVE_DATA_BITFIELD("wave_in_grp", wave_in_group);
+
+    // fields specific for stochastic
+    ROCP_SDK_SAVE_DATA_BITFIELD("wave_issued", wave_issued);
+    save_pc_sampling_inst_type(
+        ar, static_cast<rocprofiler_pc_sampling_instruction_type_t>(data.inst_type));
+    ROCP_SDK_SAVE_DATA_BITFIELD("wave_cnt", wave_count);
+    ROCP_SDK_SAVE_DATA_FIELD(snapshot);
+
+    // TODO: add memory counters
+}
+
+template <typename ArchiveT>
+void
 save(ArchiveT& ar, rocprofiler_agent_io_link_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(type);
@@ -1069,7 +1237,31 @@ save(ArchiveT& ar, rocprofiler_counter_info_v0_t data)
 
 template <typename ArchiveT>
 void
-save(ArchiveT& ar, rocprofiler_record_dimension_info_t data)
+save(ArchiveT& ar, rocprofiler_counter_info_v1_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(id);
+    ROCP_SDK_SAVE_DATA_BITFIELD("is_constant", is_constant);
+    ROCP_SDK_SAVE_DATA_BITFIELD("is_derived", is_derived);
+    ROCP_SDK_SAVE_DATA_CSTR(name);
+    ROCP_SDK_SAVE_DATA_CSTR(description);
+    ROCP_SDK_SAVE_DATA_CSTR(block);
+    ROCP_SDK_SAVE_DATA_CSTR(expression);
+
+    auto convert = [](const auto* val, uint64_t sz) {
+        using data_type = std::remove_cv_t<std::remove_pointer_t<decltype(val)>>;
+        auto retval     = std::vector<data_type>{};
+        for(uint64_t i = 0; i < sz; ++i)
+            retval.emplace_back(val[i]);
+        return retval;
+    };
+
+    ROCP_SDK_SAVE_VALUE("dims", convert(data.dimensions, data.dimensions_count));
+    ROCP_SDK_SAVE_VALUE("instances", convert(data.instance_ids, data.instance_ids_count));
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_counter_record_dimension_info_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(id);
     ROCP_SDK_SAVE_DATA_FIELD(instance_size);

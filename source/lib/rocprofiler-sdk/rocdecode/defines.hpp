@@ -180,6 +180,12 @@
             return std::vector<void*>{                                                             \
                 GET_ADDR_MEMBER_FIELDS(get_api_data_args(trace_data.args), __VA_ARGS__)};          \
         }                                                                                          \
+        static auto as_arg_list(callback_data_type trace_data, int32_t max_deref)                  \
+        {                                                                                          \
+            return utils::stringize(                                                               \
+                max_deref,                                                                         \
+                GET_NAMED_MEMBER_FIELDS(get_api_data_args(trace_data.args), __VA_ARGS__));         \
+        }                                                                                          \
     };                                                                                             \
     }                                                                                              \
     }

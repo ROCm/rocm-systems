@@ -49,17 +49,18 @@ ROCPROFILER_EXTERN_C_INIT
  */
 
 /**
- * @brief Callback type when a new runtime library is loaded. @see
+ * @brief (experimental) Callback type when a new runtime library is loaded. @see
  * rocprofiler_at_intercept_table_registration
  * @param [in] type Type of API table
  * @param [in] lib_version Major, minor, and patch version of library encoded into single number
- * similar to @ref ROCPROFILER_VERSION
+ * similar to ::ROCPROFILER_VERSION
  * @param [in] lib_instance The number of times this runtime library has been registered previously
  * @param [in] tables An array of pointers to the API tables
  * @param [in] num_tables The size of the array of pointers to the API tables
- * @param [in] user_data The pointer to the data provided to @ref
- * rocprofiler_at_intercept_table_registration
+ * @param [in] user_data The pointer to the data provided to
+ * ::rocprofiler_at_intercept_table_registration
  */
+ROCPROFILER_SDK_EXPERIMENTAL
 typedef void (*rocprofiler_intercept_library_cb_t)(rocprofiler_intercept_table_t type,
                                                    uint64_t                      lib_version,
                                                    uint64_t                      lib_instance,
@@ -68,10 +69,10 @@ typedef void (*rocprofiler_intercept_library_cb_t)(rocprofiler_intercept_table_t
                                                    void*                         user_data);
 
 /**
- * @brief Invoke this function to receive callbacks when a ROCm library registers its API
- * intercept table with rocprofiler. Use the @ref rocprofiler_intercept_table_t enumeration for
- * specifying which raw API tables the tool would like to have access to. E.g. including @ref
- * ROCPROFILER_HSA_TABLE in the @ref rocprofiler_at_intercept_table_registration function call
+ * @brief (experimental) Invoke this function to receive callbacks when a ROCm library registers its
+ * API intercept table with rocprofiler. Use the ::rocprofiler_intercept_table_t enumeration for
+ * specifying which raw API tables the tool would like to have access to. E.g. including
+ * ::ROCPROFILER_HSA_TABLE in the ::rocprofiler_at_intercept_table_registration function call
  * communicates to rocprofiler that, when rocprofiler receives a `HsaApiTable` instance, the tool
  * would like rocprofiler to provide it access too.
  *
@@ -79,23 +80,23 @@ typedef void (*rocprofiler_intercept_library_cb_t)(rocprofiler_intercept_table_t
  * invocation of one of their public API functions), these runtimes will provide a table of function
  * pointers to the rocprofiler library via the rocprofiler-register library if the
  * `rocprofiler_configure` symbol is visible in the application's symbol table. The vast majority of
- * tools will want to use the @ref CALLBACK_TRACING_SERVICE to trace these runtime APIs, however,
+ * tools will want to use the ::CALLBACK_TRACING_SERVICE to trace these runtime APIs, however,
  * some tools may want or require installing their own intercept functions in lieu of receiving
- * these callbacks and those tools should use the @ref rocprofiler_at_intercept_table_registration
+ * these callbacks and those tools should use the ::rocprofiler_at_intercept_table_registration
  * to install their intercept functions. There are no restrictions to where or how early this
  * function can be invoked but it will return ::ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED if it
  * is invoked after rocprofiler has requested all the tool configurations. Thus, it is highly
- * recommended to invoke this function within the @ref rocprofiler_configure function or the
- * callback passed to the @ref rocprofiler_force_configure function -- the reason for this
- * recommendation is that if @ref rocprofiler_at_intercept_table_registration is invoked in one of
+ * recommended to invoke this function within the ::rocprofiler_configure function or the
+ * callback passed to the ::rocprofiler_force_configure function -- the reason for this
+ * recommendation is that if ::rocprofiler_at_intercept_table_registration is invoked in one of
  * these locations, rocprofiler can guarantee that the tool will be passed the API table because, at
  * the first instance of a runtime registering it's API table, rocprofiler will ensure that, in the
- * case of the former, rocprofiler will invoke all of the @ref rocprofiler_configure symbols that
+ * case of the former, rocprofiler will invoke all of the ::rocprofiler_configure symbols that
  * are visible before checking the list of tools which want to receive the API tables and, in the
- * case of the latter, @ref rocprofiler_force_configure will fail with error code @ref
- * ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED if a runtime has already been registered (and,
- * therefore, already scanned and invoked the visible @ref rocprofiler_configure symbols and
- * completed the tool initialization). If @ref rocprofiler_at_intercept_table_registration is
+ * case of the latter, ::rocprofiler_force_configure will fail with error code
+ * ::ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED if a runtime has already been registered (and,
+ * therefore, already scanned and invoked the visible ::rocprofiler_configure symbols and
+ * completed the tool initialization). If ::rocprofiler_at_intercept_table_registration is
  * invoked outside of these recommended places, even if it is done before the `main` function starts
  * (e.g. in a library init/constructor function), it is possible that another library, such as
  * ROCm-aware MPI, caused the HIP and HSA runtime libraries to be initialized when that library was
@@ -212,8 +213,9 @@ typedef void (*rocprofiler_intercept_library_cb_t)(rocprofiler_intercept_table_t
  * @endcode
  *
  * @example intercept_table/client.cpp
- * Example demonstrating @ref rocprofiler_at_intercept_table_registration usage
+ * Example demonstrating ::rocprofiler_at_intercept_table_registration usage
  */
+ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
 rocprofiler_at_intercept_table_registration(rocprofiler_intercept_library_cb_t callback,
                                             int                                libs,

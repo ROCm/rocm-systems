@@ -22,11 +22,14 @@
 
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/common/defines.hpp"
+#include "lib/common/logging.hpp"
+#include "lib/common/mpl.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hip/utils.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
+#include "lib/rocprofiler-sdk/tracing/fwd.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
 #include <rocprofiler-sdk/buffer.h>
@@ -185,6 +188,7 @@ hip_api_impl<TableIdx, OpIdx>::functor(Args... args)
     using info_type           = hip_api_info<TableIdx, OpIdx>;
     using callback_api_data_t = typename hip_domain_info<TableIdx>::callback_data_type;
     using buffered_api_data_t = typename hip_domain_info<TableIdx>::buffered_data_type;
+    using buffered_ext_data_t = typename hip_domain_info<TableIdx>::buffered_ext_data_type;
 
     constexpr auto external_corr_id_domain_idx =
         hip_domain_info<TableIdx>::external_correlation_id_domain_idx;
@@ -202,6 +206,7 @@ hip_api_impl<TableIdx, OpIdx>::functor(Args... args)
     auto           thr_id            = common::get_tid();
     auto           callback_contexts = tracing::callback_context_data_vec_t{};
     auto           buffered_contexts = tracing::buffered_context_data_vec_t{};
+    auto           extended_contexts = tracing::buffered_context_data_vec_t{};
     auto           external_corr_ids = tracing::external_correlation_id_map_t{};
 
     tracing::populate_contexts(info_type::callback_domain_idx,
@@ -211,7 +216,12 @@ hip_api_impl<TableIdx, OpIdx>::functor(Args... args)
                                buffered_contexts,
                                external_corr_ids);
 
-    if(callback_contexts.empty() && buffered_contexts.empty())
+    tracing::populate_contexts(info_type::buffered_ext_domain_idx,
+                               info_type::operation_idx,
+                               extended_contexts,
+                               external_corr_ids);
+
+    if(callback_contexts.empty() && buffered_contexts.empty() && extended_contexts.empty())
     {
         [[maybe_unused]] auto _ret = exec(info_type::get_table_func(), std::forward<Args>(args)...);
         if constexpr(!std::is_void<RetT>::value)
@@ -221,9 +231,11 @@ hip_api_impl<TableIdx, OpIdx>::functor(Args... args)
     }
 
     auto  buffer_record    = common::init_public_api_struct(buffered_api_data_t{});
+    auto  extended_record  = common::init_public_api_struct(buffered_ext_data_t{});
     auto  tracer_data      = common::init_public_api_struct(callback_api_data_t{});
     auto* corr_id          = tracing::correlation_service::construct(ref_count);
     auto  internal_corr_id = corr_id->internal;
+    auto  ancestor_corr_id = corr_id->ancestor;
 
     tracing::populate_external_correlation_ids(external_corr_ids,
                                                thr_id,
@@ -231,16 +243,21 @@ hip_api_impl<TableIdx, OpIdx>::functor(Args... args)
                                                info_type::operation_idx,
                                                internal_corr_id);
 
-    // invoke the callbacks
-    if(!callback_contexts.empty())
+    // set the arguments
+    if(!callback_contexts.empty() || !extended_contexts.empty())
     {
         set_data_args(info_type::get_api_data_args(tracer_data.args),
                       convert_arg_type(std::forward<Args>(args))...);
+    }
 
+    // invoke the callbacks
+    if(!callback_contexts.empty())
+    {
         tracing::execute_phase_enter_callbacks(callback_contexts,
                                                thr_id,
                                                internal_corr_id,
                                                external_corr_ids,
+                                               ancestor_corr_id,
                                                info_type::callback_domain_idx,
                                                info_type::operation_idx,
                                                tracer_data);
@@ -251,7 +268,7 @@ hip_api_impl<TableIdx, OpIdx>::functor(Args... args)
         external_corr_ids, thr_id, external_corr_id_domain_idx);
 
     // record the start timestamp as close to the function call as possible
-    if(!buffered_contexts.empty())
+    if(!buffered_contexts.empty() || !extended_contexts.empty())
     {
         buffer_record.start_timestamp = common::timestamp_ns();
     }
@@ -262,15 +279,18 @@ hip_api_impl<TableIdx, OpIdx>::functor(Args... args)
     auto _ret = exec(info_type::get_table_func(), std::forward<Args>(args)...);
 
     // record the end timestamp as close to the function call as possible
-    if(!buffered_contexts.empty())
+    if(!buffered_contexts.empty() || !extended_contexts.empty())
     {
         buffer_record.end_timestamp = common::timestamp_ns();
     }
 
-    if(!callback_contexts.empty())
+    if(!callback_contexts.empty() || !extended_contexts.empty())
     {
         set_data_retval(tracer_data.retval, _ret);
+    }
 
+    if(!callback_contexts.empty())
+    {
         tracing::execute_phase_exit_callbacks(callback_contexts,
                                               external_corr_ids,
                                               info_type::callback_domain_idx,
@@ -284,9 +304,27 @@ hip_api_impl<TableIdx, OpIdx>::functor(Args... args)
                                                thr_id,
                                                internal_corr_id,
                                                external_corr_ids,
+                                               ancestor_corr_id,
                                                info_type::buffered_domain_idx,
                                                info_type::operation_idx,
                                                buffer_record);
+    }
+
+    if(!extended_contexts.empty())
+    {
+        extended_record.start_timestamp = buffer_record.start_timestamp;
+        extended_record.end_timestamp   = buffer_record.end_timestamp;
+        extended_record.args            = tracer_data.args;
+        extended_record.retval          = tracer_data.retval;
+
+        tracing::execute_buffer_record_emplace(extended_contexts,
+                                               thr_id,
+                                               internal_corr_id,
+                                               external_corr_ids,
+                                               ancestor_corr_id,
+                                               info_type::buffered_ext_domain_idx,
+                                               info_type::operation_idx,
+                                               extended_record);
     }
 
     // decrement the reference count after usage in the callback/buffers
@@ -357,13 +395,13 @@ get_names(std::vector<const char*>& _name_list, std::index_sequence<OpIdx, OpIdx
         get_names<TableIdx>(_name_list, std::index_sequence<OpIdxTail...>{});
 }
 
-template <size_t TableIdx, typename DataT, size_t OpIdx, size_t... OpIdxTail>
+template <size_t TableIdx, typename DataT, typename FuncT, size_t OpIdx, size_t... OpIdxTail>
 void
-iterate_args(const uint32_t                                   id,
-             const DataT&                                     data,
-             rocprofiler_callback_tracing_operation_args_cb_t func,
-             int32_t                                          max_deref,
-             void*                                            user_data,
+iterate_args(const uint32_t id,
+             const DataT&   data,
+             FuncT          func,
+             int32_t        max_deref,
+             void*          user_data,
              std::index_sequence<OpIdx, OpIdxTail...>)
 {
     if(OpIdx == id)
@@ -373,16 +411,42 @@ iterate_args(const uint32_t                                   id,
         auto&& arg_addr = info_type::as_arg_addr(data);
         for(size_t i = 0; i < std::min(arg_list.size(), arg_addr.size()); ++i)
         {
-            auto ret = func(info_type::callback_domain_idx,    // kind
-                            id,                                // operation
-                            i,                                 // arg_number
-                            arg_addr.at(i),                    // arg_value_addr
-                            arg_list.at(i).indirection_level,  // indirection
-                            arg_list.at(i).type,               // arg_type
-                            arg_list.at(i).name,               // arg_name
-                            arg_list.at(i).value.c_str(),      // arg_value_str
-                            arg_list.at(i).dereference_count,  // num deref in str
-                            user_data);
+            using return_type = typename common::mpl::function_traits<FuncT>::result_type;
+
+            auto ret = return_type{};
+            if constexpr(std::is_same<FuncT,
+                                      rocprofiler_callback_tracing_operation_args_cb_t>::value)
+            {
+                ret = func(info_type::callback_domain_idx,    // kind
+                           id,                                // operation
+                           i,                                 // arg_number
+                           arg_addr.at(i),                    // arg_value_addr
+                           arg_list.at(i).indirection_level,  // indirection
+                           arg_list.at(i).type,               // arg_type
+                           arg_list.at(i).name,               // arg_name
+                           arg_list.at(i).value.c_str(),      // arg_value_str
+                           arg_list.at(i).dereference_count,  // num deref in str
+                           user_data);
+            }
+            else if constexpr(std::is_same<FuncT,
+                                           rocprofiler_buffer_tracing_operation_args_cb_t>::value)
+            {
+                ret = func(info_type::buffered_ext_domain_idx,  // kind
+                           id,                                  // operation
+                           i,                                   // arg_number
+                           arg_addr.at(i),                      // arg_value_addr
+                           arg_list.at(i).indirection_level,    // indirection
+                           arg_list.at(i).type,                 // arg_type
+                           arg_list.at(i).name,                 // arg_name
+                           arg_list.at(i).value.c_str(),        // arg_value_str
+                           user_data);
+            }
+            else
+            {
+                static_assert(common::mpl::assert_false<FuncT>::value,
+                              "Error! unsupported callback type");
+            }
+
             if(ret != 0) break;
         }
         return;
@@ -395,6 +459,7 @@ iterate_args(const uint32_t                                   id,
 bool
 should_wrap_functor(rocprofiler_callback_tracing_kind_t _callback_domain,
                     rocprofiler_buffer_tracing_kind_t   _buffered_domain,
+                    rocprofiler_buffer_tracing_kind_t   _buffered_ext_domain,
                     int                                 _operation)
 {
     // we loop over all the *registered* contexts and see if any of them, at any point in time,
@@ -411,6 +476,11 @@ should_wrap_functor(rocprofiler_callback_tracing_kind_t _callback_domain,
         // if there is a buffered tracer enabled for the given domain and op, we need to wrap
         if(itr->buffered_tracer && itr->buffered_tracer->domains(_buffered_domain) &&
            itr->buffered_tracer->domains(_buffered_domain, _operation))
+            return true;
+
+        // if there is a buffered tracer enabled for the given domain and op, we need to wrap
+        if(itr->buffered_tracer && itr->buffered_tracer->domains(_buffered_ext_domain) &&
+           itr->buffered_tracer->domains(_buffered_ext_domain, _operation))
             return true;
     }
     return false;
@@ -470,8 +540,10 @@ update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
         if(_info.offset() >= _orig->size) return;
 
         // check to see if there are any contexts which enable this operation in the HIP API domain
-        if(!should_wrap_functor(
-               _info.callback_domain_idx, _info.buffered_domain_idx, _info.operation_idx))
+        if(!should_wrap_functor(_info.callback_domain_idx,
+                                _info.buffered_domain_idx,
+                                _info.buffered_ext_domain_idx,
+                                _info.operation_idx))
             return;
 
         ROCP_TRACE << "updating table entry for " << _info.name;
@@ -543,17 +615,33 @@ get_names()
 
 template <size_t TableIdx>
 void
-iterate_args(uint32_t                                           id,
-             const rocprofiler_callback_tracing_hip_api_data_t& data,
-             rocprofiler_callback_tracing_operation_args_cb_t   callback,
-             int32_t                                            max_deref,
-             void*                                              user_data)
+iterate_args(uint32_t                                         id,
+             const rocprofiler_hip_api_args_t&                data,
+             rocprofiler_callback_tracing_operation_args_cb_t callback,
+             int32_t                                          max_deref,
+             void*                                            user_data)
 {
     if(callback)
         iterate_args<TableIdx>(id,
                                data,
                                callback,
                                max_deref,
+                               user_data,
+                               std::make_index_sequence<hip_domain_info<TableIdx>::last>{});
+}
+
+template <size_t TableIdx>
+void
+iterate_args(uint32_t                                       id,
+             const rocprofiler_hip_api_args_t&              data,
+             rocprofiler_buffer_tracing_operation_args_cb_t callback,
+             void*                                          user_data)
+{
+    if(callback)
+        iterate_args<TableIdx>(id,
+                               data,
+                               callback,
+                               0,
                                user_data,
                                std::make_index_sequence<hip_domain_info<TableIdx>::last>{});
 }
@@ -577,8 +665,9 @@ update_table(TableT* _orig)
         update_table<TableIdx>(_orig, std::make_index_sequence<hip_domain_info<TableIdx>::last>{});
 }
 
-using hip_api_data_t   = rocprofiler_callback_tracing_hip_api_data_t;
+using hip_api_data_t   = rocprofiler_hip_api_args_t;
 using hip_op_args_cb_t = rocprofiler_callback_tracing_operation_args_cb_t;
+using hip_op_args_bf_t = rocprofiler_buffer_tracing_operation_args_cb_t;
 
 #define INSTANTIATE_HIP_TABLE_FUNC(TABLE_TYPE, TABLE_IDX)                                          \
     template void                     copy_table<TABLE_TYPE>(TABLE_TYPE * _tbl, uint64_t _instv);  \
@@ -588,7 +677,8 @@ using hip_op_args_cb_t = rocprofiler_callback_tracing_operation_args_cb_t;
     template std::vector<uint32_t>    get_ids<TABLE_IDX>();                                        \
     template std::vector<const char*> get_names<TABLE_IDX>();                                      \
     template void                     iterate_args<TABLE_IDX>(                                     \
-        uint32_t, const hip_api_data_t&, hip_op_args_cb_t, int32_t, void*);
+        uint32_t, const hip_api_data_t&, hip_op_args_cb_t, int32_t, void*);    \
+    template void iterate_args<TABLE_IDX>(uint32_t, const hip_api_data_t&, hip_op_args_bf_t, void*);
 
 INSTANTIATE_HIP_TABLE_FUNC(hip_runtime_api_table_t, ROCPROFILER_HIP_TABLE_ID_Runtime)
 INSTANTIATE_HIP_TABLE_FUNC(hip_compiler_api_table_t, ROCPROFILER_HIP_TABLE_ID_Compiler)

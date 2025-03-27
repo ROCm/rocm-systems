@@ -62,6 +62,7 @@ struct correlation_id
 
     rocprofiler_thread_id_t thread_idx = 0;
     uint64_t                internal   = 0;
+    uint64_t                ancestor   = 0;
 
     uint32_t get_ref_count() const { return m_ref_count.load(); }
     uint32_t add_ref_count();
@@ -75,9 +76,6 @@ private:
     std::atomic<uint32_t> m_kern_count = {0};
     std::atomic<uint32_t> m_ref_count  = {0};
 };
-
-correlation_id*
-get_correlation_id(rocprofiler_thread_id_t tid, uint64_t internal_id);
 
 // latest correlation id for thread
 correlation_id*
@@ -93,6 +91,9 @@ push_correlation_id(correlation_id*);
 // dump the cid stack for debugging
 void
 dump_correlation_stack(const char*);
+
+void
+correlation_id_finalize();
 
 /// permits tools opportunity to modify the correlation id based on the domain, op, and
 /// the rocprofiler generated correlation id

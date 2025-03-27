@@ -26,7 +26,6 @@
 #include "lib/rocprofiler-sdk/ompt/details/format.hpp"
 
 #include <rocprofiler-sdk/ompt/omp-tools.h>
-#include <rocprofiler-sdk/version.h>
 
 #include <fmt/core.h>
 #include <fmt/ranges.h>

@@ -52,7 +52,7 @@ ROCPROFILER_EXTERN_C_INIT
  * @brief ROCProfiler Enumeration for code object storage types (identical values to
  * `hsa_ven_amd_loader_code_object_storage_type_t` enumeration)
  */
-typedef enum
+typedef enum rocprofiler_code_object_storage_type_t
 {
     ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_NONE = HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_NONE,
     ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE = HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_FILE,
@@ -64,7 +64,7 @@ typedef enum
 /**
  * @brief ROCProfiler HSA API Callback Data.
  */
-typedef struct
+typedef struct rocprofiler_callback_tracing_hsa_api_data_t
 {
     uint64_t                     size;  ///< size of this struct
     rocprofiler_hsa_api_args_t   args;
@@ -74,7 +74,7 @@ typedef struct
 /**
  * @brief ROCProfiler HIP runtime and compiler API Tracer Callback Data.
  */
-typedef struct
+typedef struct rocprofiler_callback_tracing_hip_api_data_t
 {
     uint64_t                     size;  ///< size of this struct
     rocprofiler_hip_api_args_t   args;
@@ -89,7 +89,7 @@ typedef struct
 /**
  * @brief ROCProfiler OMPT Callback Data
  */
-typedef struct
+typedef struct rocprofiler_callback_tracing_ompt_data_t
 {
     uint64_t                size;  ///< size of this struct
     rocprofiler_ompt_args_t args;
@@ -98,7 +98,7 @@ typedef struct
 /**
  * @brief ROCProfiler Marker Tracer Callback Data.
  */
-typedef struct
+typedef struct rocprofiler_callback_tracing_marker_api_data_t
 {
     uint64_t                        size;  ///< size of this struct
     rocprofiler_marker_api_args_t   args;
@@ -108,7 +108,7 @@ typedef struct
 /**
  * @brief ROCProfiler RCCL API Callback Data.
  */
-typedef struct
+typedef struct rocprofiler_callback_tracing_rccl_api_data_t
 {
     uint64_t                      size;  ///< size of this struct
     rocprofiler_rccl_api_args_t   args;
@@ -138,7 +138,7 @@ typedef struct rocprofiler_callback_tracing_rocjpeg_api_data_t
 /**
  * @brief ROCProfiler Code Object Load Tracer Callback Record.
  */
-typedef struct
+typedef struct rocprofiler_callback_tracing_code_object_load_data_t
 {
     uint64_t size;            ///< size of this struct
     uint64_t code_object_id;  ///< unique code object identifier
@@ -245,7 +245,7 @@ typedef struct rocprofiler_callback_tracing_code_object_kernel_symbol_register_d
 } rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
 // rename struct
 
-typedef struct
+typedef struct rocprofiler_callback_tracing_code_object_host_kernel_symbol_register_data_t
 {
     uint64_t              size;              ///< size of this struct
     uint64_t              host_function_id;  ///< unique host function identifier value
@@ -283,7 +283,7 @@ typedef struct rocprofiler_callback_tracing_kernel_dispatch_data_t
  * The timestamps in this record will only be non-zero in the ::ROCPROFILER_CALLBACK_PHASE_EXIT
  * callback
  */
-typedef struct
+typedef struct rocprofiler_callback_tracing_memory_copy_data_t
 {
     uint64_t                size;             ///< size of this struct
     rocprofiler_timestamp_t start_timestamp;  ///< start time in nanoseconds
@@ -291,12 +291,14 @@ typedef struct
     rocprofiler_agent_id_t  dst_agent_id;     ///< destination agent of copy
     rocprofiler_agent_id_t  src_agent_id;     ///< source agent of copy
     uint64_t                bytes;            ///< bytes copied
+    rocprofiler_address_t   dst_address;      ///< destination address
+    rocprofiler_address_t   src_address;      ///< source address
 } rocprofiler_callback_tracing_memory_copy_data_t;
 
 /**
  * @brief ROCProfiler Memory Allocation Tracer Record.
  */
-typedef struct
+typedef struct rocprofiler_callback_tracing_memory_allocation_data_t
 {
     uint64_t                size;             ///< size of this struct
     rocprofiler_timestamp_t start_timestamp;  ///< start time in nanoseconds
@@ -337,11 +339,11 @@ typedef struct rocprofiler_callback_tracing_runtime_initialization_data_t
 /**
  * @brief ROCProfiler Stream Handle Callback Data.
  */
-typedef struct
+typedef struct rocprofiler_callback_tracing_hip_stream_data_t
 {
     uint64_t                size;       ///< size of this struct
     rocprofiler_stream_id_t stream_id;  ///< HIP stream ID
-} rocprofiler_callback_tracing_stream_handle_data_t;
+} rocprofiler_callback_tracing_hip_stream_data_t;
 
 /**
  * @brief API Tracing callback function. This function is invoked twice per API function: once

@@ -99,9 +99,12 @@ get_output_stream(const output_config& cfg, std::string_view fname, std::string_
         return {&std::clog, [](auto*&) {}};
 
     auto  output_file = get_output_filename(cfg, fname, ext);
-    auto* _ofs        = new std::ofstream{output_file};
+    auto* _ofs        = new(std::nothrow) std::ofstream{output_file};
 
-    LOG_IF(FATAL, !_ofs && !*_ofs) << fmt::format("Failed to open {} for output", output_file);
+    LOG_IF(FATAL, !_ofs) << fmt::format("Failed to allocate ofstream for output file '{}'",
+                                        output_file);
+    LOG_IF(FATAL, _ofs && !*_ofs) << fmt::format("Failed to open '{}' for output", output_file);
+
     ROCP_ERROR << "Opened result file: " << output_file;
 
     return {_ofs, [](std::ostream*& v) {

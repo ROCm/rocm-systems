@@ -610,12 +610,12 @@ set_external_correlation_id(rocprofiler_thread_id_t                            t
 
 void
 dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
-                  rocprofiler_profile_config_id_t*             config,
+                  rocprofiler_counter_config_id_t*             config,
                   rocprofiler_user_data_t* /*user_data*/,
                   void* /*callback_data_args*/)
 {
     static std::shared_mutex                                             m_mutex       = {};
-    static std::unordered_map<uint64_t, rocprofiler_profile_config_id_t> profile_cache = {};
+    static std::unordered_map<uint64_t, rocprofiler_counter_config_id_t> profile_cache = {};
 
     auto search_cache = [&]() {
         if(auto pos = profile_cache.find(dispatch_data.dispatch_info.agent_id.handle);
@@ -692,8 +692,8 @@ dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
     }
 
     // Create a colleciton profile for the counters
-    rocprofiler_profile_config_id_t profile = {.handle = 0};
-    ROCPROFILER_CALL(rocprofiler_create_profile_config(dispatch_data.dispatch_info.agent_id,
+    rocprofiler_counter_config_id_t profile = {.handle = 0};
+    ROCPROFILER_CALL(rocprofiler_create_counter_config(dispatch_data.dispatch_info.agent_id,
                                                        collect_counters.data(),
                                                        collect_counters.size(),
                                                        &profile),
@@ -1682,7 +1682,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         "buffer tracing service for ompt configure");
 
     ROCPROFILER_CALL(
-        rocprofiler_configure_buffered_dispatch_counting_service(
+        rocprofiler_configure_buffer_dispatch_counting_service(
             counter_collection_ctx, counter_collection_buffer, dispatch_callback, nullptr),
         "setup buffered service");
 

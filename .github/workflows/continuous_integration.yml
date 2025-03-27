@@ -30,13 +30,13 @@ env:
   mi300a_EXCLUDE_TESTS_REGEX: "^(test-page-migration-(execute|validate))$"
   mi325_EXCLUDE_TESTS_REGEX: "^(test-page-migration-(execute|validate)|counter-collection-buffer)$"
   navi4_EXCLUDE_TESTS_REGEX: "^(test-page-migration-(execute|validate))$"
-  navi3_EXCLUDE_LABEL_REGEX: "^(pc-sampling|pc_sampling|openmp-target)$"
-  vega20_EXCLUDE_LABEL_REGEX: "^(pc-sampling|pc_sampling|openmp-target)$"
-  mi200_EXCLUDE_LABEL_REGEX: ""
-  mi300_EXCLUDE_LABEL_REGEX: "^(pc-sampling|pc_sampling)$"
+  navi3_EXCLUDE_LABEL_REGEX: "^(pc-sampling)$"
+  vega20_EXCLUDE_LABEL_REGEX: "^(pc-sampling)$"
+  mi200_EXCLUDE_LABEL_REGEX: "^(stochastic)$"
+  mi300_EXCLUDE_LABEL_REGEX: "^(pc-sampling)$"
   mi300a_EXCLUDE_LABEL_REGEX: ""
-  mi325_EXCLUDE_LABEL_REGEX: "^(pc-sampling|pc_sampling)$"
-  navi4_EXCLUDE_LABEL_REGEX: "^(pc-sampling|pc_sampling|openmp-target)$"
+  mi325_EXCLUDE_LABEL_REGEX: "^(pc-sampling)$"
+  navi4_EXCLUDE_LABEL_REGEX: "^(pc-sampling)$"
 
 jobs:
   core-deb:
@@ -124,7 +124,7 @@ jobs:
 
     - name: Test Install Build
       if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
-      timeout-minutes: 10
+      timeout-minutes: 20
       shell: bash
       run: |
         CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-samples samples
@@ -249,7 +249,7 @@ jobs:
 
     - name: Test Install Build
       if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
-      timeout-minutes: 10
+      timeout-minutes: 20
       shell: bash
       run: |
         CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-samples samples

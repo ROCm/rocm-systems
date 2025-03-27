@@ -23,7 +23,7 @@
 #pragma once
 
 #include <rocprofiler-sdk/defines.h>
-#include <rocprofiler-sdk/version.h>
+#include <rocprofiler-sdk/rocdecode/api_trace.h>
 
 #include <rocprofiler-sdk/rocdecode/details/rocdecode_headers.h>
 

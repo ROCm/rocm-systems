@@ -34,6 +34,27 @@ def node_exists(name, data, min_len=1):
         assert len(data[name]) >= min_len, f"{name}:\n{data}"
 
 
+def get_operation(record, kind_name, op_name=None):
+    for idx, itr in enumerate(record["names"]):
+        if kind_name == itr["kind"]:
+            if op_name is None:
+                return idx, itr["operations"]
+            else:
+                for oidx, oname in enumerate(itr["operations"]):
+                    if op_name == oname:
+                        return oidx
+
+    return None
+
+
+def get_operation_name(record, kind_idx, op_idx):
+    for idx, itr in enumerate(record["names"]):
+        if idx == kind_idx:
+            return itr["operations"][op_idx]
+
+    return None
+
+
 def test_data_structure(input_data):
     """verify minimum amount of expected data is present"""
     data = input_data
@@ -334,9 +355,124 @@ def test_async_copy_direction(input_data):
         ) == 0, f"TID={tid}:\n\t{async_dir_cnt}"
 
 
+def test_ancestor_ids(input_data):
+    from rocprofiler_sdk.pytest_utils.dotdict import dotdict
+
+    data = input_data
+    sdk_data = data["rocprofiler-sdk-json-tool"]
+    buffer_records = sdk_data.buffer_records
+
+    hip_memcopy_id = get_operation(buffer_records, "HIP_RUNTIME_API", "hipMemcpyAsync")
+    has_async_memcopy_id = get_operation(
+        buffer_records, "HSA_AMD_EXT_API", "hsa_amd_memory_async_copy_on_engine"
+    )
+
+    def by_thread_id(trace_item, op_id, corr_id_name):
+        """
+        Returns a dict like so, where corr_id_name == "ancestor" or "internal"
+        {
+            tid: {
+                corr_id-1: [ list of objects with value of corr_id_name == corr_id-1 ]
+                corr_id-2: [ list of objects with value of corr_id_name == corr_id-2 ]
+                ...
+            }
+        }
+        """
+        ret = {}
+
+        for x in trace_item:
+            if x.operation == op_id:
+                corr_id = x.correlation_id[corr_id_name]
+
+                if x.thread_id not in ret.keys():
+                    ret[x.thread_id] = {}
+
+                if corr_id in ret[x.thread_id].keys():
+                    ret[x.thread_id][corr_id].append(x)
+                else:
+                    ret[x.thread_id][corr_id] = [x]
+        return dotdict(ret)
+
+    # dict with tid -> internal id -> record
+    hip_memcopies = by_thread_id(
+        buffer_records.hip_api_traces, hip_memcopy_id, "internal"
+    )
+    # dict with tid -> ancestor id -> record
+    hsa_memcopies = by_thread_id(
+        buffer_records.hsa_api_traces, has_async_memcopy_id, "ancestor"
+    )
+
+    # We expect the same keys in hip.thread_id and hsa.thread_id, because they are parent <-> child corr ids
+    # both must have same thread ids
+    # For each tid, hip.ancestor and hsa.internal keys must be same
+    assert (
+        hip_memcopies.keys() == hsa_memcopies.keys()
+    ), "TIDs are not same for hsa and hip calls"
+    for tid in hip_memcopies.keys():
+        assert (
+            hip_memcopies[tid].keys() == hsa_memcopies[tid].keys()
+        ), "Parent-child keys are not equal"
+
+    memcopies = buffer_records.memory_copies
+
+    num_hsa_memcopies = sum(
+        [
+            len(val)
+            for tid in hsa_memcopies.keys()
+            for _, val in hsa_memcopies[tid].items()
+        ]
+    )
+    assert (
+        len(memcopies) == num_hsa_memcopies
+    ), "Expected number of memcopies to be same as number of async HSA (hsa_amd_memory_async_copy_on_engine) calls"
+
+    for tid in hip_memcopies:
+        # We expect only 1 record with this internal id, per thread
+        for corr_id, records in hip_memcopies[tid].items():
+            assert (
+                len(records) == 1
+            ), "Expected only one record with this (thread_id, corr_id)"
+
+    for _, tid_records in hsa_memcopies.items():
+        for _, records in tid_records.items():
+            for record in records:
+                child_memcpy_record = [
+                    x
+                    for x in buffer_records.memory_copies
+                    if x.correlation_id.internal == record.correlation_id.internal
+                ]
+                assert (
+                    len(child_memcpy_record) == 1
+                ), "Expected only one memcpy record with this internal ID"
+                child_memcpy_record = child_memcpy_record[0]
+
+                assert record.thread_id in hsa_memcopies.keys()
+                assert record.thread_id in hip_memcopies.keys()
+                assert (
+                    record.correlation_id.ancestor
+                    in hip_memcopies[record.thread_id].keys()
+                )
+                # This is basically the same as the Expected only one record with this (thread_id, corr_id) test
+                assert (
+                    len(hip_memcopies[record.thread_id][record.correlation_id.ancestor])
+                    == 1
+                ), "Expected only one record with this (thread_id, corr_id)"
+
+                ancestor_hip_record = hip_memcopies[record.thread_id][
+                    record.correlation_id.ancestor
+                ][0]
+                assert (
+                    ancestor_hip_record.correlation_id.internal
+                    == record.correlation_id.ancestor
+                )
+                assert ancestor_hip_record.thread_id == record.thread_id
+
+
 def test_retired_correlation_ids(input_data):
     data = input_data
     sdk_data = data["rocprofiler-sdk-json-tool"]
+    buffer_records = sdk_data["buffer_records"]
+    api_name_info = {}
 
     def _sort_dict(inp):
         return dict(sorted(inp.items()))
@@ -345,8 +481,13 @@ def test_retired_correlation_ids(input_data):
     for titr in ["hsa_api_traces", "marker_api_traces", "hip_api_traces"]:
         for itr in sdk_data["buffer_records"][titr]:
             corr_id = itr["correlation_id"]["internal"]
+            name = get_operation_name(buffer_records, itr["kind"], itr["operation"])
+
             assert corr_id not in api_corr_ids.keys()
+            assert name is not None, f"{itr}"
+
             api_corr_ids[corr_id] = itr
+            api_name_info[corr_id] = name
 
     async_corr_ids = {}
     for titr in ["kernel_dispatch", "memory_copies"]:
@@ -365,19 +506,55 @@ def test_retired_correlation_ids(input_data):
     async_corr_ids = _sort_dict(async_corr_ids)
     retired_corr_ids = _sort_dict(retired_corr_ids)
 
-    for cid, itr in async_corr_ids.items():
-        assert cid in retired_corr_ids.keys()
-        retired_ts = retired_corr_ids[cid]["timestamp"]
-        end_ts = itr["end_timestamp"]
-        assert (retired_ts - end_ts) > 0, f"correlation-id: {cid}, data: {itr}"
+    #
+    # verify all the correlation ids were retired
+    #
+    num_api_corr_ids = len(api_corr_ids.keys())
+    num_retired_corr_ids = len(retired_corr_ids.keys())
 
+    missing_retired_corr_ids = [
+        itr for itr in api_corr_ids.keys() if itr not in retired_corr_ids.keys()
+    ]
+    # log in case of failure
+    sys.stderr.flush()
+    for itr in missing_retired_corr_ids:
+        name = api_name_info[itr]
+        info = api_corr_ids[itr]
+        sys.stderr.write(f"- unretired corr id: {itr} :: {name} :: {info}\n")
+    sys.stderr.flush()
+
+    assert (
+        num_api_corr_ids == num_retired_corr_ids
+    ), f"correlation ids not retired:\n\t{missing_retired_corr_ids}"
+
+    #
+    #   verify the retirement timestamp is >= the end timestamp of the records
+    #
     for cid, itr in api_corr_ids.items():
         assert cid in retired_corr_ids.keys()
         retired_ts = retired_corr_ids[cid]["timestamp"]
         end_ts = itr["end_timestamp"]
-        assert (retired_ts - end_ts) > 0, f"correlation-id: {cid}, data: {itr}"
+        name = api_name_info[cid]
+        assert (
+            retired_ts - end_ts
+        ) >= 0, f"\n\tcorr: {cid}\n\tname: {name}\n\tdata: {itr}"
 
-    assert len(api_corr_ids.keys()) == (len(retired_corr_ids.keys()))
+    # allow the retired timestamp to be 10 usec earlier than async end timestamp
+    # since the async timestamps undergo conversion from the GPU clock domain to
+    # the CPU clock domain. 10 microseconds was arbitrarily chosen to be an
+    # acceptable amount of inaccuracy -- in an ideal world, retired_ts should
+    # always be >= end_ts
+    usec = 1000
+    supported_fuzzing = 10 * usec
+
+    for cid, itr in async_corr_ids.items():
+        assert cid in retired_corr_ids.keys()
+        retired_ts = retired_corr_ids[cid]["timestamp"]
+        end_ts = itr["end_timestamp"]
+        name = api_name_info[cid]
+        assert (
+            retired_ts - end_ts
+        ) >= -supported_fuzzing, f"\n\tcorr: {cid}\n\tname: {name}\n\tdata: {itr}"
 
 
 if __name__ == "__main__":

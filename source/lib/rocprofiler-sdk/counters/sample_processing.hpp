@@ -35,7 +35,7 @@ struct completed_cb_params_t
     std::shared_ptr<counter_callback_info>            info;
     std::shared_ptr<hsa::Queue::queue_info_session_t> session;
     kernel_dispatch::profiling_time                   dispatch_time;
-    std::shared_ptr<profile_config>                   prof_config;
+    std::shared_ptr<counter_config>                   prof_config;
     std::unique_ptr<rocprofiler::hsa::AQLPacket>      pkt;
 };
 

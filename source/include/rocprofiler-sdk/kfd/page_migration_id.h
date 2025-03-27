@@ -26,7 +26,6 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>
 #include <rocprofiler-sdk/hsa/api_trace_version.h>
-#include <rocprofiler-sdk/version.h>
 
 #include <stdint.h>
 
@@ -36,7 +35,7 @@ ROCPROFILER_EXTERN_C_INIT
  * @brief Page migration triggers
  *
  */
-typedef enum
+typedef enum rocprofiler_page_migration_trigger_t
 {
     ROCPROFILER_PAGE_MIGRATION_TRIGGER_NONE = -1,
     ROCPROFILER_PAGE_MIGRATION_TRIGGER_PREFETCH,       ///< Migration triggered by a prefetch
@@ -51,7 +50,7 @@ typedef enum
  * @brief Page migration triggers causing the queue to suspend
  *
  */
-typedef enum
+typedef enum rocprofiler_page_migration_queue_suspend_trigger_t
 {
     ROCPROFILER_PAGE_MIGRATION_QUEUE_SUSPEND_TRIGGER_NONE = -1,
     ROCPROFILER_PAGE_MIGRATION_QUEUE_SUSPEND_TRIGGER_SVM,
@@ -71,7 +70,7 @@ typedef enum
  * @brief Page migration triggers causing an unmap from the GPU
  *
  */
-typedef enum
+typedef enum rocprofiler_page_migration_unmap_from_gpu_trigger_t
 {
     ROCPROFILER_PAGE_MIGRATION_UNMAP_FROM_GPU_TRIGGER_NONE = -1,
     ROCPROFILER_PAGE_MIGRATION_UNMAP_FROM_GPU_TRIGGER_MMU_NOTIFY,

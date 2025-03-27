@@ -13,14 +13,30 @@ ROCProfiler-SDK is AMD’s new and improved tooling infrastructure, providing a 
 ## GPU Metrics
 
 - GPU hardware counters
+- Dispatch Counter Collection
+- Device Counter Collection
+- PC Sampling (Host Trap)
+
+## API Trace Support
+
 - HIP API tracing
-- HIP kernel tracing
 - HSA API tracing
-- HSA operation tracing
-- Marker(ROCTx) tracing
-- PC Sampling (Beta)
-- RCCL tracing
-- Kokkoks tracing
+- Marker (ROCTx) tracing
+- Memory copy tracing
+- Memory allocation tracing
+- Page Migration Event tracing
+- Scratch Memory tracing
+- RCCL API tracing
+- rocDecode API tracing
+- rocjpeg API tracing
+
+## Parallelism API Support
+
+- HIP
+- HSA
+- MPI
+- Kokkos-Tools (KokkosP)
+- OpenMP-Tools (OMPT)
 
 ## Tool Support
 
@@ -83,7 +99,7 @@ Please report in the Github Issues.
 
   - Using PC sampling on multi-threaded applications might fail with `HSA_STATUS_ERROR_EXCEPTION`.Furthermore, if three or more threads launch operations to the same agent, and if PC sampling is enabled, the `HSA_STATUS_ERROR_EXCEPTION` might appear.
 
-- gfx11 and gfx12 requires a stable power state for counter collection. This includes Radeon 7000 GPUs.
+- gfx10, gfx11 and gfx12 requires a stable power state for counter collection. This includes Radeon 7000 GPUs.
   ```bash
   # For device <N>. Use 'rocm-smi' or 'amd-smi monitor' to see device number.
   sudo amd-smi set -g <N> -l stable_std
@@ -91,7 +107,7 @@ Please report in the Github Issues.
   sudo amd-smi set -g <N> -l auto
   ```
 
-  The gfx version can be found via `amd-smi static --asic -g <N>` in the `TARGET_GRAPHICS_VERSION` field: 
+  The gfx version can be found via `amd-smi static --asic -g <N>` in the `TARGET_GRAPHICS_VERSION` field:
 
   ```bash
   $ amd-smi static -a -g 2

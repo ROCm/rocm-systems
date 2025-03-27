@@ -85,7 +85,7 @@ write_json(json_output&                                                        j
            const output_config&                                                cfg,
            const metadata&                                                     tool_metadata,
            const domain_stats_vec_t&                                           domain_stats,
-           generator<rocprofiler_buffer_tracing_hip_api_record_t>&&            hip_api_gen,
+           generator<rocprofiler_buffer_tracing_hip_api_ext_record_t>&&        hip_api_gen,
            generator<rocprofiler_buffer_tracing_hsa_api_record_t>              hsa_api_gen,
            generator<tool_buffer_tracing_kernel_dispatch_with_stream_record_t> kernel_dispatch_gen,
            generator<tool_buffer_tracing_memory_copy_with_stream_record_t>     memory_copy_gen,
@@ -94,9 +94,9 @@ write_json(json_output&                                                        j
            generator<rocprofiler_buffer_tracing_scratch_memory_record_t>    scratch_memory_gen,
            generator<rocprofiler_buffer_tracing_rccl_api_record_t>          rccl_api_gen,
            generator<rocprofiler_buffer_tracing_memory_allocation_record_t> memory_allocation_gen,
-           generator<rocprofiler_tool_pc_sampling_host_trap_record_t>       pc_sampling_gen,
            generator<rocprofiler_buffer_tracing_rocdecode_api_record_t>     rocdecode_api_gen,
-           generator<rocprofiler_buffer_tracing_rocjpeg_api_record_t>       rocjpeg_api_gen);
-
+           generator<rocprofiler_buffer_tracing_rocjpeg_api_record_t>       rocjpeg_api_gen,
+           generator<rocprofiler_tool_pc_sampling_host_trap_record_t>  pc_sampling_host_trap_gen,
+           generator<rocprofiler_tool_pc_sampling_stochastic_record_t> pc_sampling_stochastic_gen);
 }  // namespace tool
 }  // namespace rocprofiler

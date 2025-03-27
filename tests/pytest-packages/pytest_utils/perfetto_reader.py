@@ -276,9 +276,72 @@ class PerfettoReader:
         """Extracts all the necessary data from the trace processor"""
         self.configure(**kwargs)
 
+        # generate empty dictionaries for each trace processor
+        self.track_ids = [{} for _ in range(len(self.trace_processor))]
+
         self.dataframe = self.query_tp(
             "SELECT slice_id, track_id, category, depth, stack_id, parent_stack_id, ts, dur, name FROM slice"
         )
+
+        counter_df = self.query_tp(
+            """SELECT
+                counter_track.id as slice_id,
+                counter.track_id,
+                counter_track.name as track_name,
+                'counter_collection' as category,
+                0 as depth,
+                0 as stack_id,
+                0 as parent_stack_id,
+                MIN(CASE WHEN counter.value > 0 THEN counter.ts ELSE NULL END) as ts,
+                0 as dur,
+                counter_track.name as name
+            FROM counter_track
+            JOIN counter ON counter.track_id = counter_track.id
+            WHERE counter_track.name LIKE 'AGENT%'
+            AND counter.value > 0
+            GROUP BY counter.track_id"""
+        )
+
+        # Transform counter data to match the main dataframe schema
+        if not counter_df.empty:
+            # Register counter track IDs in self.track_ids before adding to dataframe
+            for row in counter_df.itertuples():
+                if (
+                    row.tp_index < len(self.track_ids)
+                    and row.track_id not in self.track_ids[row.tp_index]
+                ):
+                    # Add the counter track to track_ids with reasonable default values
+                    self.track_ids[row.tp_index][row.track_id] = {
+                        "tp_index": row.tp_index,
+                        "pid": 0,
+                        "tid": 0,
+                        "rank": 0,
+                        "thread": 0,
+                        "prio": 2,
+                        "process_name": "counter_process",
+                        "thread_name": f"counter_track_{row.category}",
+                    }
+
+            # Create a new dataframe with the right columns
+            counter_collection_df = pd.DataFrame(
+                {
+                    "tp_index": counter_df["tp_index"],
+                    "slice_id": counter_df["slice_id"],
+                    "track_id": counter_df["track_id"],
+                    "category": "counter_collection",
+                    "depth": 0,
+                    "stack_id": 0,
+                    "parent_stack_id": 0,
+                    "ts": counter_df["ts"],
+                    "dur": 0,
+                    "name": counter_df["name"].astype(str),
+                }
+            )
+
+            # Concatenate with main dataframe
+            self.dataframe = pd.concat(
+                [self.dataframe, counter_collection_df], ignore_index=True
+            )
 
         self.df_categories = sorted(list(self.dataframe["category"].unique()))
 
@@ -348,9 +411,6 @@ class PerfettoReader:
         self.threads = self.query_tp(
             "SELECT thread.utid AS thread_utid, thread.id AS thread_id, thread.tid, thread.name as thread_name, thread.is_main_thread, thread_track.id AS track_id, thread_track.parent_id AS track_parent_id, thread_track.name AS track_name from thread JOIN thread_track ON thread_track.utid = thread.utid"
         )
-
-        # generate empty dictionaries for each trace processor
-        self.track_ids = [{} for _ in range(len(self.trace_processor))]
 
         # generate mapping from track IDs to process and thread info.
         # the "pid" and "tid" fields are the system value. we want to
@@ -720,7 +780,7 @@ class PerfettoReader:
             #         f"{_stack_id} already exists in track_id_dict[{_tp_index}][{_rank}][{_thread}]. failed to set:\n  {hnode.frame} (current)\n    {_existing.frame} (existing)"
             #     )
 
-            _hash = hash((_tp_index, _slice_id))
+            _hash = hash((_tp_index, _slice_id, _track_id))
             if _hash in callpath_to_node:
                 raise ValueError(f"{_hash} already exists in callpath_to_node dict")
 

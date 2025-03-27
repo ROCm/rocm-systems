@@ -24,12 +24,10 @@
 
 #pragma once
 
-#include <rocprofiler-sdk/version.h>
-
 /**
- * @brief ROCProfiler enumeration of HSA Core API tracing operations
+ * @brief ROCProfiler enumeration of RCCL API tracing operations
  */
-typedef enum  // NOLINT(performance-enum-size)
+typedef enum rocprofiler_rccl_api_id_t  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_RCCL_API_ID_NONE = -1,
 

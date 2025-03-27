@@ -23,6 +23,7 @@
 #pragma once
 
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/pc_sampling.h>
 #include <rocprofiler-sdk/cxx/codeobj/code_printing.hpp>
 #include <rocprofiler-sdk/cxx/serialization.hpp>
 
@@ -77,6 +78,33 @@ struct rocprofiler_tool_pc_sampling_host_trap_record_t
         ar(cereal::make_nvp("record", pc_sample_record));
         ar(cereal::make_nvp("inst_index", inst_index));
     }
+};
+
+// TODO:: Check if we can template this structure
+struct rocprofiler_tool_pc_sampling_stochastic_record_t
+{
+    rocprofiler_pc_sampling_record_stochastic_v0_t pc_sample_record;
+    int64_t                                        inst_index;
+
+    rocprofiler_tool_pc_sampling_stochastic_record_t(
+        rocprofiler_pc_sampling_record_stochastic_v0_t record,
+        int64_t                                        index)
+    : pc_sample_record(record)
+    , inst_index(index)
+    {}
+
+    template <typename ArchiveT>
+    void save(ArchiveT& ar) const
+    {
+        ar(cereal::make_nvp("record", pc_sample_record));
+        ar(cereal::make_nvp("inst_index", inst_index));
+    }
+};
+
+struct rocprofiler_tool_pc_sampling_stats
+{
+    uint64_t valid_samples   = 0;
+    uint64_t invalid_samples = 0;
 };
 
 }  // namespace tool

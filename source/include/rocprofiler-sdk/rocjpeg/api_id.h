@@ -22,12 +22,10 @@
 
 #pragma once
 
-#include <rocprofiler-sdk/version.h>
-
 /**
  * @brief ROCProfiler enumeration of rocJPEG API tracing operations
  */
-typedef enum  // NOLINT(performance-enum-size)
+typedef enum rocprofiler_rocjpeg_api_id_t  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_ROCJPEG_API_ID_NONE = -1,
 

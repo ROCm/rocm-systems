@@ -64,8 +64,8 @@ get_reduce_op_type_from_string(const std::string& op)
 
 void
 perform_reduction_to_single_instance(ReduceOperation                            reduce_op,
-                                     std::vector<rocprofiler_record_counter_t>* input_array,
-                                     rocprofiler_record_counter_t*              result)
+                                     std::vector<rocprofiler_counter_record_t>* input_array,
+                                     rocprofiler_counter_record_t*              result)
 {
     switch(reduce_op)
     {
@@ -92,13 +92,13 @@ perform_reduction_to_single_instance(ReduceOperation                            
             *result = std::accumulate(
                 input_array->begin(),
                 input_array->end(),
-                rocprofiler_record_counter_t{.id            = input_array->begin()->id,
+                rocprofiler_counter_record_t{.id            = input_array->begin()->id,
                                              .counter_value = 0,
                                              .dispatch_id   = input_array->begin()->dispatch_id,
                                              .user_data     = input_array->begin()->user_data,
                                              .agent_id      = input_array->begin()->agent_id},
                 [](auto& a, auto& b) {
-                    return rocprofiler_record_counter_t{
+                    return rocprofiler_counter_record_t{
                         .id            = a.id,
                         .counter_value = a.counter_value + b.counter_value,
                         .dispatch_id   = a.dispatch_id,
@@ -114,17 +114,17 @@ perform_reduction_to_single_instance(ReduceOperation                            
     }
 }
 
-std::vector<rocprofiler_record_counter_t>*
+std::vector<rocprofiler_counter_record_t>*
 perform_reduction(
     ReduceOperation                                                       reduce_op,
-    std::vector<rocprofiler_record_counter_t>*                            input_array,
+    std::vector<rocprofiler_counter_record_t>*                            input_array,
     const std::unordered_set<rocprofiler_profile_counter_instance_types>& _reduce_dimension_set)
 {
     if(input_array->empty()) return input_array;
     if(_reduce_dimension_set.empty() ||
        _reduce_dimension_set.size() == ROCPROFILER_DIMENSION_LAST - 1)
     {
-        rocprofiler_record_counter_t result{.id            = 0,
+        rocprofiler_counter_record_t result{.id            = 0,
                                             .counter_value = 0,
                                             .dispatch_id   = 0,
                                             .user_data     = {.value = 0},
@@ -136,7 +136,7 @@ perform_reduction(
         return input_array;
     }
 
-    std::unordered_map<int64_t, std::vector<rocprofiler_record_counter_t>> rec_groups;
+    std::unordered_map<int64_t, std::vector<rocprofiler_counter_record_t>> rec_groups;
     size_t bit_length = DIM_BIT_LENGTH / ROCPROFILER_DIMENSION_LAST;
 
     for(auto& rec : *input_array)
@@ -154,7 +154,7 @@ perform_reduction(
     input_array->clear();
     for(auto& rec_pair : rec_groups)
     {
-        rocprofiler_record_counter_t result{.id            = 0,
+        rocprofiler_counter_record_t result{.id            = 0,
                                             .counter_value = 0,
                                             .dispatch_id   = 0,
                                             .user_data     = {.value = 0},
@@ -208,9 +208,9 @@ get_int_encoded_dimensions_from_string(const std::string& rangeStr)
     return result;
 }
 
-std::vector<rocprofiler_record_counter_t>*
+std::vector<rocprofiler_counter_record_t>*
 perform_selection(std::map<rocprofiler_profile_counter_instance_types, std::string>& dimension_map,
-                  std::vector<rocprofiler_record_counter_t>*                         input_array)
+                  std::vector<rocprofiler_counter_record_t>*                         input_array)
 {
     if(input_array->empty()) return input_array;
     for(auto& dim_pair : dimension_map)
@@ -221,7 +221,7 @@ perform_selection(std::map<rocprofiler_profile_counter_instance_types, std::stri
 
         input_array->erase(std::remove_if(input_array->begin(),
                                           input_array->end(),
-                                          [&](rocprofiler_record_counter_t& rec) {
+                                          [&](rocprofiler_counter_record_t& rec) {
                                               bool should_remove =
                                                   (encoded_dim_values &
                                                    (1 << rocprofiler::counters::rec_to_dim_pos(
@@ -692,7 +692,7 @@ void
 EvaluateAST::read_special_counters(
     const rocprofiler_agent_t&        agent,
     const std::set<counters::Metric>& required_special_counters,
-    std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>>& out_map)
+    std::unordered_map<uint64_t, std::vector<rocprofiler_counter_record_t>>& out_map)
 {
     for(const auto& metric : required_special_counters)
     {
@@ -705,19 +705,19 @@ EvaluateAST::read_special_counters(
     }
 }
 
-std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>>
+std::unordered_map<uint64_t, std::vector<rocprofiler_counter_record_t>>
 EvaluateAST::read_pkt(const aql::CounterPacketConstruct* pkt_gen, hsa::AQLPacket& pkt)
 {
     struct it_data
     {
-        std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>>* data;
+        std::unordered_map<uint64_t, std::vector<rocprofiler_counter_record_t>>* data;
         const aql::CounterPacketConstruct*                                       pkt_gen;
         aqlprofile_agent_handle_t                                                agent;
     };
 
     auto aql_agent = *CHECK_NOTNULL(rocprofiler::agent::get_aql_agent(pkt_gen->agent()));
 
-    std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>> ret;
+    std::unordered_map<uint64_t, std::vector<rocprofiler_counter_record_t>> ret;
     if(pkt.empty) return ret;
     it_data aql_data{.data = &ret, .pkt_gen = pkt_gen, .agent = aql_agent};
 
@@ -730,7 +730,7 @@ EvaluateAST::read_pkt(const aql::CounterPacketConstruct* pkt_gen, hsa::AQLPacket
 
             if(!metric) return HSA_STATUS_SUCCESS;
 
-            auto& vec = it.data->emplace(metric->id(), std::vector<rocprofiler_record_counter_t>{})
+            auto& vec = it.data->emplace(metric->id(), std::vector<rocprofiler_counter_record_t>{})
                             .first->second;
             auto& next_rec = vec.emplace_back();
             set_counter_in_rec(next_rec.id, {.handle = metric->id()});
@@ -754,7 +754,7 @@ EvaluateAST::read_pkt(const aql::CounterPacketConstruct* pkt_gen, hsa::AQLPacket
 }
 
 void
-EvaluateAST::set_out_id(std::vector<rocprofiler_record_counter_t>& results) const
+EvaluateAST::set_out_id(std::vector<rocprofiler_counter_record_t>& results) const
 {
     for(auto& record : results)
     {
@@ -799,10 +799,10 @@ EvaluateAST::expand_derived(std::unordered_map<std::string, EvaluateAST>& asts)
 }
 
 // convert to buffer at some point
-std::vector<rocprofiler_record_counter_t>*
+std::vector<rocprofiler_counter_record_t>*
 EvaluateAST::evaluate(
-    std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>>& results_map,
-    std::vector<std::unique_ptr<std::vector<rocprofiler_record_counter_t>>>& cache)
+    std::unordered_map<uint64_t, std::vector<rocprofiler_counter_record_t>>& results_map,
+    std::vector<std::unique_ptr<std::vector<rocprofiler_counter_record_t>>>& cache)
 {
     auto perform_op = [&](auto&& op) {
         auto* r1 = _children.at(0).evaluate(results_map, cache);
@@ -842,13 +842,13 @@ EvaluateAST::evaluate(
         case RANGE_NODE: break;
         case NUMBER_NODE:
         {
-            cache.emplace_back(std::make_unique<std::vector<rocprofiler_record_counter_t>>());
+            cache.emplace_back(std::make_unique<std::vector<rocprofiler_counter_record_t>>());
             *cache.back() = _static_value;
             return cache.back().get();
         }
         case ADDITION_NODE:
             return perform_op([](auto& a, auto& b) {
-                return rocprofiler_record_counter_t{
+                return rocprofiler_counter_record_t{
                     .id            = a.id,
                     .counter_value = a.counter_value + b.counter_value,
                     .dispatch_id   = a.dispatch_id,
@@ -857,7 +857,7 @@ EvaluateAST::evaluate(
             });
         case SUBTRACTION_NODE:
             return perform_op([](auto& a, auto& b) {
-                return rocprofiler_record_counter_t{
+                return rocprofiler_counter_record_t{
                     .id            = a.id,
                     .counter_value = a.counter_value - b.counter_value,
                     .dispatch_id   = a.dispatch_id,
@@ -866,7 +866,7 @@ EvaluateAST::evaluate(
             });
         case MULTIPLY_NODE:
             return perform_op([](auto& a, auto& b) {
-                return rocprofiler_record_counter_t{
+                return rocprofiler_counter_record_t{
                     .id            = a.id,
                     .counter_value = a.counter_value * b.counter_value,
                     .dispatch_id   = a.dispatch_id,
@@ -875,7 +875,7 @@ EvaluateAST::evaluate(
             });
         case DIVIDE_NODE:
             return perform_op([](auto& a, auto& b) {
-                return rocprofiler_record_counter_t{
+                return rocprofiler_counter_record_t{
                     .id            = a.id,
                     .counter_value = (b.counter_value == 0 ? 0 : a.counter_value / b.counter_value),
                     .dispatch_id   = a.dispatch_id,
@@ -891,7 +891,7 @@ EvaluateAST::evaluate(
                 throw std::runtime_error(
                     fmt::format("Unable to lookup results for metric {}", _metric.name()));
 
-            cache.emplace_back(std::make_unique<std::vector<rocprofiler_record_counter_t>>());
+            cache.emplace_back(std::make_unique<std::vector<rocprofiler_counter_record_t>>());
             *cache.back() = *result;
             result        = cache.back().get();
             return result;

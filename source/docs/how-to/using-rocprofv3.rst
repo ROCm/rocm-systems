@@ -1,6 +1,6 @@
 .. meta::
   :description: ROCprofiler-SDK is a tooling infrastructure for profiling general-purpose GPU compute applications running on the ROCm software
-  :keywords: ROCprofiler-SDK tool usage, rocprofv3 user manual, rocprofv3 usage, rocprogv3 user guide, using rocprofv3, ROCprofiler-SDK tool user guide, ROCprofiler-SDK tool user manual, using ROCprofiler-SDK tool, ROCprofiler-SDK command-line tool, ROCprofiler-SDK CLI, ROCprofiler-SDK command line tool
+  :keywords: ROCprofiler-SDK tool usage, rocprofv3 user manual, rocprofv3 usage, rocprofv3 user guide, using rocprofv3, ROCprofiler-SDK tool user guide, ROCprofiler-SDK tool user manual, using ROCprofiler-SDK tool, ROCprofiler-SDK command-line tool, ROCprofiler-SDK CLI, ROCprofiler-SDK command line tool
 
 .. _using-rocprofv3:
 
@@ -649,32 +649,32 @@ Here is a sample input.json file for collecting tracing summary:
 
 Here is the input schema (properties) of JSON or YAML input files:
 
--  **``jobs``** *(array)*: ``rocprofv3`` input data per application run.
+-  **jobs** *(array)*: ``rocprofv3`` input data per application run.
 
    -  **Items** *(object)*: Data for ``rocprofv3``
 
-      -  **``hip_trace``** *(boolean)*
-      -  **``hip_runtime_trace``** *(boolean)*
-      -  **``hip_compiler_trace``** *(boolean)*
-      -  **``marker_trace``** *(boolean)*
-      -  **``kernel_trace``** *(boolean)*
-      -  **``memory_copy_trace``** *(boolean)*
-      -  **``memory_allocation_trace``** *(boolean)*
-      -  **``scratch_memory_trace``** *(boolean)*
-      -  **``stats``** *(boolean)*
-      -  **``hsa_trace``** *(boolean)*
-      -  **``hsa_core_trace``** *(boolean)*
-      -  **``hsa_amd_trace``** *(boolean)*
-      -  **``hsa_finalize_trace``** *(boolean)*
-      -  **``hsa_image_trace``** *(boolean)*
-      -  **``sys_trace``** *(boolean)*
-      -  **``mangled_kernels``** *(boolean)*
-      -  **``truncate_kernels``** *(boolean)*
-      -  **``output_file``** *(string)*
-      -  **``output_directory``** *(string)*
-      -  **``output_format``** *(array)*
-      -  **``log_level``** *(string)*
-      -  **``preload``** *(array)*
+      -  **hip_trace** *(boolean)*
+      -  **hip_runtime_trace** *(boolean)*
+      -  **hip_compiler_trace** *(boolean)*
+      -  **marker_trace** *(boolean)*
+      -  **kernel_trace** *(boolean)*
+      -  **memory_copy_trace** *(boolean)*
+      -  **memory_allocation_trace** *(boolean)*
+      -  **scratch_memory_trace** *(boolean)*
+      -  **stats** *(boolean)*
+      -  **hsa_trace** *(boolean)*
+      -  **hsa_core_trace** *(boolean)*
+      -  **hsa_amd_trace** *(boolean)*
+      -  **hsa_finalize_trace** *(boolean)*
+      -  **hsa_image_trace** *(boolean)*
+      -  **sys_trace** *(boolean)*
+      -  **mangled_kernels** *(boolean)*
+      -  **truncate_kernels** *(boolean)*
+      -  **output_file** *(string)*
+      -  **output_directory** *(string)*
+      -  **output_format** *(array)*
+      -  **log_level** *(string)*
+      -  **preload** *(array)*
 
 For description of the options specified under job items, see :ref:`cli-options`.
 
@@ -683,6 +683,33 @@ To supply the input file for collecting traces, use:
 .. code-block:: shell
 
    rocprofv3 -i input.yaml -- <application_path>
+
+Disabling specific tracing options
+++++++++++++++++++++++++++++++++++++
+
+When using aggregate tracing options like ``--runtime-trace`` or ``--sys-trace``, you can disable specific tracing options by setting them to ``False``. This allows fine-grained control over which traces are collected.
+
+.. code-block:: shell
+
+   rocprofv3 --runtime-trace --scratch-memory-trace=False -- <application_path>
+
+The above command enables all traces included in ``--runtime-trace`` except for scratch memory tracing.
+
+Similarly, for ``--sys-trace``:
+
+.. code-block:: shell
+
+   rocprofv3 --sys-trace --hsa-trace=False -- <application_path>
+
+This command enables all traces included in ``--sys-trace`` except for HSA API tracing.
+
+You can disable multiple specific tracing options:
+
+.. code-block:: shell
+
+   rocprofv3 --sys-trace --hsa-trace=False --scratch-memory-trace=False -- <application_path>
+
+This feature is particularly useful when you want to collect most traces but exclude specific ones that might be unnecessary for your analysis or that generate excessive data.
 
 Kernel counter collection
 --------------------------
@@ -725,26 +752,26 @@ While the input file in text format can only be used for counter collection, JSO
 
 Here is the input schema (properties) of JSON or YAML input files:
 
--  **``jobs``** *(array)*: ``rocprofv3`` input data per application run
+-  **jobs** *(array)*: ``rocprofv3`` input data per application run
 
    -  **Items** *(object)*: Data for ``rocprofv3``
 
-      -  **``pmc``** *(array)*: list of counters for collection
-      -  **``kernel_include_regex``** *(string)*
-      -  **``kernel_exclude_regex``** *(string)*
-      -  **``kernel_iteration_range``** *(string)*
-      -  **``mangled_kernels``** *(boolean)*
-      -  **``truncate_kernels``** *(boolean)*
-      -  **``output_file``** *(string)*
-      -  **``output_directory``** *(string)*
-      -  **``output_format``** *(array)*
-      -  **``list_avail``** *(boolean)*
-      -  **``log_level``** *(string)*
-      -  **``preload``** *(array)*
-      -  **``pc_sampling_unit``** *(string)*
-      -  **``pc_sampling_method``** *(string)*
-      -  **``pc_sampling_interval``** *(integer)*
-      -  **``pc_sampling_beta_enabled``** *(boolean)*
+      -  **pmc** *(array)*: list of counters for collection
+      -  **kernel_include_regex** *(string)*
+      -  **kernel_exclude_regex** *(string)*
+      -  **kernel_iteration_range** *(string)*
+      -  **mangled_kernels** *(boolean)*
+      -  **truncate_kernels** *(boolean)*
+      -  **output_file** *(string)*
+      -  **output_directory** *(string)*
+      -  **output_format** *(array)*
+      -  **list_avail** *(boolean)*
+      -  **log_level** *(string)*
+      -  **preload** *(array)*
+      -  **pc_sampling_unit** *(string)*
+      -  **pc_sampling_method** *(string)*
+      -  **pc_sampling_interval** *(integer)*
+      -  **pc_sampling_beta_enabled** *(boolean)*
 
 For description of the options specified under job items, see :ref:`cli-options`.
 
@@ -856,7 +883,7 @@ Here are the contents of ``counter_collection.csv`` file:
 
 .. csv-table:: Counter collection
    :file: /data/counter_collection.csv
-   :widths: 10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10
+   :widths: 10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10
    :header-rows: 1
 
 For the description of the fields in the output file, see :ref:`output-file-fields`.
@@ -901,6 +928,25 @@ Here is the same sample in JSON format:
          }
       ]
    }
+
+Perfetto visualization for counter collection
++++++++++++++++++++++++++++++++++++++++++++++
+
+When collecting performance counter data, you can visualize the counter tracks per agent in the Perfetto viewer by using the PFTrace output format. This allows you to see how counter values change over time during kernel execution.
+
+To generate a Perfetto trace file with counter data, use:
+
+.. code-block:: shell
+
+    rocprofv3 --pmc SQ_WAVES GRBM_GUI_ACTIVE --output-format pftrace -- <application_path>
+
+You can also combine this with other tracing options to correlate counter data with API and kernel execution:
+
+.. code-block:: shell
+
+    rocprofv3 -s --pmc SQ_WAVES --output-format pftrace -- <application_path>
+
+The generated Perfetto trace file can be opened in the Perfetto UI (https://ui.perfetto.dev/). In the viewer, performance counters will appear as counter tracks organized by agent, allowing you to visualize counter values changing over time alongside kernel executions and other traced activities.
 
 Agent info
 ++++++++++++
@@ -1164,324 +1210,324 @@ Properties
 
 Here are the properties of the JSON output schema:
 
-- **`rocprofiler-sdk-tool`** `(array)`: rocprofv3 data per process (each element represents a process).
+- **rocprofiler-sdk-tool** `(array)`: rocprofv3 data per process (each element represents a process).
    - **Items** `(object)`: Data for rocprofv3.
-      - **`metadata`** `(object, required)`: Metadata related to the profiler session.
-         - **`pid`** `(integer, required)`: Process ID.
-         - **`init_time`** `(integer, required)`: Initialization time in nanoseconds.
-         - **`fini_time`** `(integer, required)`: Finalization time in nanoseconds.
-      - **`agents`** `(array, required)`: List of agents.
+      - **metadata** `(object, required)`: Metadata related to the profiler session.
+         - **pid** `(integer, required)`: Process ID.
+         - **init_time** `(integer, required)`: Initialization time in nanoseconds.
+         - **fini_time** `(integer, required)`: Finalization time in nanoseconds.
+      - **agents** `(array, required)`: List of agents.
          - **Items** `(object)`: Data for an agent.
-            - **`size`** `(integer, required)`: Size of the agent data.
-            - **`id`** `(object, required)`: Identifier for the agent.
-               - **`handle`** `(integer, required)`: Handle for the agent.
-            - **`type`** `(integer, required)`: Type of the agent.
-            - **`cpu_cores_count`** `(integer)`: Number of CPU cores.
-            - **`simd_count`** `(integer)`: Number of SIMD units.
-            - **`mem_banks_count`** `(integer)`: Number of memory banks.
-            - **`caches_count`** `(integer)`: Number of caches.
-            - **`io_links_count`** `(integer)`: Number of I/O links.
-            - **`cpu_core_id_base`** `(integer)`: Base ID for CPU cores.
-            - **`simd_id_base`** `(integer)`: Base ID for SIMD units.
-            - **`max_waves_per_simd`** `(integer)`: Maximum waves per SIMD.
-            - **`lds_size_in_kb`** `(integer)`: Size of LDS in KB.
-            - **`gds_size_in_kb`** `(integer)`: Size of GDS in KB.
-            - **`num_gws`** `(integer)`: Number of GWS (global work size).
-            - **`wave_front_size`** `(integer)`: Size of the wave front.
-            - **`num_xcc`** `(integer)`: Number of XCC (execution compute units).
-            - **`cu_count`** `(integer)`: Number of compute units (CUs).
-            - **`array_count`** `(integer)`: Number of arrays.
-            - **`num_shader_banks`** `(integer)`: Number of shader banks.
-            - **`simd_arrays_per_engine`** `(integer)`: SIMD arrays per engine.
-            - **`cu_per_simd_array`** `(integer)`: CUs per SIMD array.
-            - **`simd_per_cu`** `(integer)`: SIMDs per CU.
-            - **`max_slots_scratch_cu`** `(integer)`: Maximum slots for scratch CU.
-            - **`gfx_target_version`** `(integer)`: GFX target version.
-            - **`vendor_id`** `(integer)`: Vendor ID.
-            - **`device_id`** `(integer)`: Device ID.
-            - **`location_id`** `(integer)`: Location ID.
-            - **`domain`** `(integer)`: Domain identifier.
-            - **`drm_render_minor`** `(integer)`: DRM render minor version.
-            - **`num_sdma_engines`** `(integer)`: Number of SDMA engines.
-            - **`num_sdma_xgmi_engines`** `(integer)`: Number of SDMA XGMI engines.
-            - **`num_sdma_queues_per_engine`** `(integer)`: Number of SDMA queues per engine.
-            - **`num_cp_queues`** `(integer)`: Number of CP queues.
-            - **`max_engine_clk_ccompute`** `(integer)`: Maximum engine clock for compute.
-            - **`max_engine_clk_fcompute`** `(integer)`: Maximum engine clock for F compute.
-            - **`sdma_fw_version`** `(object)`: SDMA firmware version.
-               - **`uCodeSDMA`** `(integer, required)`: SDMA microcode version.
-               - **`uCodeRes`** `(integer, required)`: Reserved microcode version.
-            - **`fw_version`** `(object)`: Firmware version.
-               - **`uCode`** `(integer, required)`: Microcode version.
-               - **`Major`** `(integer, required)`: Major version.
-               - **`Minor`** `(integer, required)`: Minor version.
-               - **`Stepping`** `(integer, required)`: Stepping version.
-            - **`capability`** `(object, required)`: Agent capability flags.
-               - **`HotPluggable`** `(integer, required)`: Hot pluggable capability.
-               - **`HSAMMUPresent`** `(integer, required)`: HSAMMU present capability.
-               - **`SharedWithGraphics`** `(integer, required)`: Shared with graphics capability.
-               - **`QueueSizePowerOfTwo`** `(integer, required)`: Queue size is power of two.
-               - **`QueueSize32bit`** `(integer, required)`: Queue size is 32-bit.
-               - **`QueueIdleEvent`** `(integer, required)`: Queue idle event.
-               - **`VALimit`** `(integer, required)`: VA limit.
-               - **`WatchPointsSupported`** `(integer, required)`: Watch points supported.
-               - **`WatchPointsTotalBits`** `(integer, required)`: Total bits for watch points.
-               - **`DoorbellType`** `(integer, required)`: Doorbell type.
-               - **`AQLQueueDoubleMap`** `(integer, required)`: AQL queue double map.
-               - **`DebugTrapSupported`** `(integer, required)`: Debug trap supported.
-               - **`WaveLaunchTrapOverrideSupported`** `(integer, required)`: Wave launch trap override supported.
-               - **`WaveLaunchModeSupported`** `(integer, required)`: Wave launch mode supported.
-               - **`PreciseMemoryOperationsSupported`** `(integer, required)`: Precise memory operations supported.
-               - **`DEPRECATED_SRAM_EDCSupport`** `(integer, required)`: Deprecated SRAM EDC support.
-               - **`Mem_EDCSupport`** `(integer, required)`: Memory EDC support.
-               - **`RASEventNotify`** `(integer, required)`: RAS event notify.
-               - **`ASICRevision`** `(integer, required)`: ASIC revision.
-               - **`SRAM_EDCSupport`** `(integer, required)`: SRAM EDC support.
-               - **`SVMAPISupported`** `(integer, required)`: SVM API supported.
-               - **`CoherentHostAccess`** `(integer, required)`: Coherent host access.
-               - **`DebugSupportedFirmware`** `(integer, required)`: Debug supported firmware.
-               - **`Reserved`** `(integer, required)`: Reserved field.
-      - **`counters`** `(array, required)`: Array of counter objects.
+            - **size** `(integer, required)`: Size of the agent data.
+            - **id** `(object, required)`: Identifier for the agent.
+               - **handle** `(integer, required)`: Handle for the agent.
+            - **type** `(integer, required)`: Type of the agent.
+            - **cpu_cores_count** `(integer)`: Number of CPU cores.
+            - **simd_count** `(integer)`: Number of SIMD units.
+            - **mem_banks_count** `(integer)`: Number of memory banks.
+            - **caches_count** `(integer)`: Number of caches.
+            - **io_links_count** `(integer)`: Number of I/O links.
+            - **cpu_core_id_base** `(integer)`: Base ID for CPU cores.
+            - **simd_id_base** `(integer)`: Base ID for SIMD units.
+            - **max_waves_per_simd** `(integer)`: Maximum waves per SIMD.
+            - **lds_size_in_kb** `(integer)`: Size of LDS in KB.
+            - **gds_size_in_kb** `(integer)`: Size of GDS in KB.
+            - **num_gws** `(integer)`: Number of GWS (global work size).
+            - **wave_front_size** `(integer)`: Size of the wave front.
+            - **num_xcc** `(integer)`: Number of XCC (execution compute units).
+            - **cu_count** `(integer)`: Number of compute units (CUs).
+            - **array_count** `(integer)`: Number of arrays.
+            - **num_shader_banks** `(integer)`: Number of shader banks.
+            - **simd_arrays_per_engine** `(integer)`: SIMD arrays per engine.
+            - **cu_per_simd_array** `(integer)`: CUs per SIMD array.
+            - **simd_per_cu** `(integer)`: SIMDs per CU.
+            - **max_slots_scratch_cu** `(integer)`: Maximum slots for scratch CU.
+            - **gfx_target_version** `(integer)`: GFX target version.
+            - **vendor_id** `(integer)`: Vendor ID.
+            - **device_id** `(integer)`: Device ID.
+            - **location_id** `(integer)`: Location ID.
+            - **domain** `(integer)`: Domain identifier.
+            - **drm_render_minor** `(integer)`: DRM render minor version.
+            - **num_sdma_engines** `(integer)`: Number of SDMA engines.
+            - **num_sdma_xgmi_engines** `(integer)`: Number of SDMA XGMI engines.
+            - **num_sdma_queues_per_engine** `(integer)`: Number of SDMA queues per engine.
+            - **num_cp_queues** `(integer)`: Number of CP queues.
+            - **max_engine_clk_ccompute** `(integer)`: Maximum engine clock for compute.
+            - **max_engine_clk_fcompute** `(integer)`: Maximum engine clock for F compute.
+            - **sdma_fw_version** `(object)`: SDMA firmware version.
+               - **uCodeSDMA** `(integer, required)`: SDMA microcode version.
+               - **uCodeRes** `(integer, required)`: Reserved microcode version.
+            - **fw_version** `(object)`: Firmware version.
+               - **uCode** `(integer, required)`: Microcode version.
+               - **Major** `(integer, required)`: Major version.
+               - **Minor** `(integer, required)`: Minor version.
+               - **Stepping** `(integer, required)`: Stepping version.
+            - **capability** `(object, required)`: Agent capability flags.
+               - **HotPluggable** `(integer, required)`: Hot pluggable capability.
+               - **HSAMMUPresent** `(integer, required)`: HSAMMU present capability.
+               - **SharedWithGraphics** `(integer, required)`: Shared with graphics capability.
+               - **QueueSizePowerOfTwo** `(integer, required)`: Queue size is power of two.
+               - **QueueSize32bit** `(integer, required)`: Queue size is 32-bit.
+               - **QueueIdleEvent** `(integer, required)`: Queue idle event.
+               - **VALimit** `(integer, required)`: VA limit.
+               - **WatchPointsSupported** `(integer, required)`: Watch points supported.
+               - **WatchPointsTotalBits** `(integer, required)`: Total bits for watch points.
+               - **DoorbellType** `(integer, required)`: Doorbell type.
+               - **AQLQueueDoubleMap** `(integer, required)`: AQL queue double map.
+               - **DebugTrapSupported** `(integer, required)`: Debug trap supported.
+               - **WaveLaunchTrapOverrideSupported** `(integer, required)`: Wave launch trap override supported.
+               - **WaveLaunchModeSupported** `(integer, required)`: Wave launch mode supported.
+               - **PreciseMemoryOperationsSupported** `(integer, required)`: Precise memory operations supported.
+               - **DEPRECATED_SRAM_EDCSupport** `(integer, required)`: Deprecated SRAM EDC support.
+               - **Mem_EDCSupport** `(integer, required)`: Memory EDC support.
+               - **RASEventNotify** `(integer, required)`: RAS event notify.
+               - **ASICRevision** `(integer, required)`: ASIC revision.
+               - **SRAM_EDCSupport** `(integer, required)`: SRAM EDC support.
+               - **SVMAPISupported** `(integer, required)`: SVM API supported.
+               - **CoherentHostAccess** `(integer, required)`: Coherent host access.
+               - **DebugSupportedFirmware** `(integer, required)`: Debug supported firmware.
+               - **Reserved** `(integer, required)`: Reserved field.
+      - **counters** `(array, required)`: Array of counter objects.
          - **Items** `(object)`
-            - **`agent_id`** *(object, required)*: Agent ID information.
-               - **`handle`** *(integer, required)*: Handle of the agent.
-            - **`id`** *(object, required)*: Counter ID information.
-               - **`handle`** *(integer, required)*: Handle of the counter.
-            - **`is_constant`** *(integer, required)*: Indicator if the counter value is constant.
-            - **`is_derived`** *(integer, required)*: Indicator if the counter value is derived.
-            - **`name`** *(string, required)*: Name of the counter.
-            - **`description`** *(string, required)*: Description of the counter.
-            - **`block`** *(string, required)*: Block information of the counter.
-            - **`expression`** *(string, required)*: Expression of the counter.
-            - **`dimension_ids`** *(array, required)*: Array of dimension IDs.
+            - **agent_id** *(object, required)*: Agent ID information.
+               - **handle** *(integer, required)*: Handle of the agent.
+            - **id** *(object, required)*: Counter ID information.
+               - **handle** *(integer, required)*: Handle of the counter.
+            - **is_constant** *(integer, required)*: Indicator if the counter value is constant.
+            - **is_derived** *(integer, required)*: Indicator if the counter value is derived.
+            - **name** *(string, required)*: Name of the counter.
+            - **description** *(string, required)*: Description of the counter.
+            - **block** *(string, required)*: Block information of the counter.
+            - **expression** *(string, required)*: Expression of the counter.
+            - **dimension_ids** *(array, required)*: Array of dimension IDs.
                - **Items** *(integer)*: Dimension ID.
-      - **`strings`** *(object, required)*: String records.
-         - **`callback_records`** *(array)*: Callback records.
+      - **strings** *(object, required)*: String records.
+         - **callback_records** *(array)*: Callback records.
             - **Items** *(object)*
-               - **`kind`** *(string, required)*: Kind of the record.
-               - **`operations`** *(array, required)*: Array of operations.
+               - **kind** *(string, required)*: Kind of the record.
+               - **operations** *(array, required)*: Array of operations.
                   - **Items** *(string)*: Operation.
-         - **`buffer_records`** *(array)*: Buffer records.
+         - **buffer_records** *(array)*: Buffer records.
             - **Items** *(object)*
-               - **`kind`** *(string, required)*: Kind of the record.
-               - **`operations`** *(array, required)*: Array of operations.
+               - **kind** *(string, required)*: Kind of the record.
+               - **operations** *(array, required)*: Array of operations.
                   - **Items** *(string)*: Operation.
-         - **`marker_api`** *(array)*: Marker API records.
+         - **marker_api** *(array)*: Marker API records.
             - **Items** *(object)*
-               - **`key`** *(integer, required)*: Key of the record.
-               - **`value`** *(string, required)*: Value of the record.
-         - **`counters`** *(object)*: Counter records.
-            - **`dimension_ids`** *(array, required)*: Array of dimension IDs.
+               - **key** *(integer, required)*: Key of the record.
+               - **value** *(string, required)*: Value of the record.
+         - **counters** *(object)*: Counter records.
+            - **dimension_ids** *(array, required)*: Array of dimension IDs.
                - **Items** *(object)*
-                  - **`id`** *(integer, required)*: Dimension ID.
-                  - **`instance_size`** *(integer, required)*: Size of the instance.
-                  - **`name`** *(string, required)*: Name of the dimension.
-         -  **``pc_sample_instructions``** *(array)*: Array of decoded
+                  - **id** *(integer, required)*: Dimension ID.
+                  - **instance_size** *(integer, required)*: Size of the instance.
+                  - **name** *(string, required)*: Name of the dimension.
+         -  **pc_sample_instructions** *(array)*: Array of decoded
             instructions matching sampled PCs from pc_sample_host_trap
             section.
-         -  **``pc_sample_comments``** *(array)*: Comments matching
+         -  **pc_sample_comments** *(array)*: Comments matching
             assembly instructions from pc_sample_instructions array. If
             debug symbols are available, comments provide instructions
             to source-line mapping. Otherwise, a comment is an empty
             string.
-      - **`code_objects`** *(array, required)*: Code object records.
+      - **code_objects** *(array, required)*: Code object records.
          - **Items** *(object)*
-            - **`size`** *(integer, required)*: Size of the code object.
-            - **`code_object_id`** *(integer, required)*: ID of the code object.
-            - **`rocp_agent`** *(object, required)*: ROCP agent information.
-               - **`handle`** *(integer, required)*: Handle of the ROCP agent.
-            - **`hsa_agent`** *(object, required)*: HSA agent information.
-               - **`handle`** *(integer, required)*: Handle of the HSA agent.
-            - **`uri`** *(string, required)*: URI of the code object.
-            - **`load_base`** *(integer, required)*: Base address for loading.
-            - **`load_size`** *(integer, required)*: Size for loading.
-            - **`load_delta`** *(integer, required)*: Delta for loading.
-            - **`storage_type`** *(integer, required)*: Type of storage.
-            - **`memory_base`** *(integer, required)*: Base address for memory.
-            - **`memory_size`** *(integer, required)*: Size of memory.
-      - **`kernel_symbols`** *(array, required)*: Kernel symbol records.
+            - **size** *(integer, required)*: Size of the code object.
+            - **code_object_id** *(integer, required)*: ID of the code object.
+            - **rocp_agent** *(object, required)*: ROCP agent information.
+               - **handle** *(integer, required)*: Handle of the ROCP agent.
+            - **hsa_agent** *(object, required)*: HSA agent information.
+               - **handle** *(integer, required)*: Handle of the HSA agent.
+            - **uri** *(string, required)*: URI of the code object.
+            - **load_base** *(integer, required)*: Base address for loading.
+            - **load_size** *(integer, required)*: Size for loading.
+            - **load_delta** *(integer, required)*: Delta for loading.
+            - **storage_type** *(integer, required)*: Type of storage.
+            - **memory_base** *(integer, required)*: Base address for memory.
+            - **memory_size** *(integer, required)*: Size of memory.
+      - **kernel_symbols** *(array, required)*: Kernel symbol records.
          - **Items** *(object)*
-            - **`size`** *(integer, required)*: Size of the kernel symbol.
-            - **`kernel_id`** *(integer, required)*: ID of the kernel.
-            - **`code_object_id`** *(integer, required)*: ID of the code object.
-            - **`kernel_name`** *(string, required)*: Name of the kernel.
-            - **`kernel_object`** *(integer, required)*: Object of the kernel.
-            - **`kernarg_segment_size`** *(integer, required)*: Size of the kernarg segment.
-            - **`kernarg_segment_alignment`** *(integer, required)*: Alignment of the kernarg segment.
-            - **`group_segment_size`** *(integer, required)*: Size of the group segment.
-            - **`private_segment_size`** *(integer, required)*: Size of the private segment.
-            - **`formatted_kernel_name`** *(string, required)*: Formatted name of the kernel.
-            - **`demangled_kernel_name`** *(string, required)*: Demangled name of the kernel.
-            - **`truncated_kernel_name`** *(string, required)*: Truncated name of the kernel.
-      - **`callback_records`** *(object, required)*: Callback record details.
-         - **`counter_collection`** *(array)*: Counter collection records.
+            - **size** *(integer, required)*: Size of the kernel symbol.
+            - **kernel_id** *(integer, required)*: ID of the kernel.
+            - **code_object_id** *(integer, required)*: ID of the code object.
+            - **kernel_name** *(string, required)*: Name of the kernel.
+            - **kernel_object** *(integer, required)*: Object of the kernel.
+            - **kernarg_segment_size** *(integer, required)*: Size of the kernarg segment.
+            - **kernarg_segment_alignment** *(integer, required)*: Alignment of the kernarg segment.
+            - **group_segment_size** *(integer, required)*: Size of the group segment.
+            - **private_segment_size** *(integer, required)*: Size of the private segment.
+            - **formatted_kernel_name** *(string, required)*: Formatted name of the kernel.
+            - **demangled_kernel_name** *(string, required)*: Demangled name of the kernel.
+            - **truncated_kernel_name** *(string, required)*: Truncated name of the kernel.
+      - **callback_records** *(object, required)*: Callback record details.
+         - **counter_collection** *(array)*: Counter collection records.
             - **Items** *(object)*
-               - **`dispatch_data`** *(object, required)*: Dispatch data details.
-                  - **`size`** *(integer, required)*: Size of the dispatch data.
-                  - **`correlation_id`** *(object, required)*: Correlation ID information.
-                     - **`internal`** *(integer, required)*: Internal correlation ID.
-                     - **`external`** *(integer, required)*: External correlation ID.
-                  - **`dispatch_info`** *(object, required)*: Dispatch information details.
-                     - **`size`** *(integer, required)*: Size of the dispatch information.
-                     - **`agent_id`** *(object, required)*: Agent ID information.
-                        - **`handle`** *(integer, required)*: Handle of the agent.
-                     - **`queue_id`** *(object, required)*: Queue ID information.
-                        - **`handle`** *(integer, required)*: Handle of the queue.
-                     - **`kernel_id`** *(integer, required)*: ID of the kernel.
-                     - **`dispatch_id`** *(integer, required)*: ID of the dispatch.
-                     - **`private_segment_size`** *(integer, required)*: Size of the private segment.
-                     - **`group_segment_size`** *(integer, required)*: Size of the group segment.
-                     - **`workgroup_size`** *(object, required)*: Workgroup size information.
-                        - **`x`** *(integer, required)*: X dimension.
-                        - **`y`** *(integer, required)*: Y dimension.
-                        - **`z`** *(integer, required)*: Z dimension.
-                     - **`grid_size`** *(object, required)*: Grid size information.
-                        - **`x`** *(integer, required)*: X dimension.
-                        - **`y`** *(integer, required)*: Y dimension.
-                        - **`z`** *(integer, required)*: Z dimension.
-               - **`records`** *(array, required)*: Records.
+               - **dispatch_data** *(object, required)*: Dispatch data details.
+                  - **size** *(integer, required)*: Size of the dispatch data.
+                  - **correlation_id** *(object, required)*: Correlation ID information.
+                     - **internal** *(integer, required)*: Internal correlation ID.
+                     - **external** *(integer, required)*: External correlation ID.
+                  - **dispatch_info** *(object, required)*: Dispatch information details.
+                     - **size** *(integer, required)*: Size of the dispatch information.
+                     - **agent_id** *(object, required)*: Agent ID information.
+                        - **handle** *(integer, required)*: Handle of the agent.
+                     - **queue_id** *(object, required)*: Queue ID information.
+                        - **handle** *(integer, required)*: Handle of the queue.
+                     - **kernel_id** *(integer, required)*: ID of the kernel.
+                     - **dispatch_id** *(integer, required)*: ID of the dispatch.
+                     - **private_segment_size** *(integer, required)*: Size of the private segment.
+                     - **group_segment_size** *(integer, required)*: Size of the group segment.
+                     - **workgroup_size** *(object, required)*: Workgroup size information.
+                        - **x** *(integer, required)*: X dimension.
+                        - **y** *(integer, required)*: Y dimension.
+                        - **z** *(integer, required)*: Z dimension.
+                     - **grid_size** *(object, required)*: Grid size information.
+                        - **x** *(integer, required)*: X dimension.
+                        - **y** *(integer, required)*: Y dimension.
+                        - **z** *(integer, required)*: Z dimension.
+               - **records** *(array, required)*: Records.
                   - **Items** *(object)*
-                     - **`counter_id`** *(object, required)*: Counter ID information.
-                        - **`handle`** *(integer, required)*: Handle of the counter.
-                     - **`value`** *(number, required)*: Value of the counter.
-               - **`thread_id`** *(integer, required)*: Thread ID.
-               - **`arch_vgpr_count`** *(integer, required)*: Count of Architected VGPRs.
-               - **`accum_vgpr_count`** *(integer, required)*: Count of Accumulation VGPRs.
-               - **`sgpr_count`** *(integer, required)*: Count of SGPRs.
-               - **`lds_block_size_v`** *(integer, required)*: Size of LDS block.
-      -  **``pc_sample_host_trap``** *(array)*: Host Trap PC Sampling records.
+                     - **counter_id** *(object, required)*: Counter ID information.
+                        - **handle** *(integer, required)*: Handle of the counter.
+                     - **value** *(number, required)*: Value of the counter.
+               - **thread_id** *(integer, required)*: Thread ID.
+               - **arch_vgpr_count** *(integer, required)*: Count of Architected VGPRs.
+               - **accum_vgpr_count** *(integer, required)*: Count of Accumulation VGPRs.
+               - **sgpr_count** *(integer, required)*: Count of SGPRs.
+               - **lds_block_size_v** *(integer, required)*: Size of LDS block.
+      -  **pc_sample_host_trap** *(array)*: Host Trap PC Sampling records.
             - **Items** *(object)*
-               - **``hw_id``** *(object)*: Describes hardware part on which sampled wave was running.
-                  -  **``chiplet``** *(integer)*: Chiplet index.
-                  -  **``wave_id``** *(integer)*: Wave slot index.
-                  -  **``simd_id``** *(integer)*: SIMD index.
-                  -  **``pipe_id``** *(integer)*: Pipe index.
-                  -  **``cu_or_wgp_id``** *(integer)*: Index of compute unit or workgroup processer.
-                  -  **``shader_array_id``** *(integer)*: Shader array index.
-                  -  **``shader_engine_id``** *(integer)*: Shader engine
+               - **hw_id** *(object)*: Describes hardware part on which sampled wave was running.
+                  -  **chiplet** *(integer)*: Chiplet index.
+                  -  **wave_id** *(integer)*: Wave slot index.
+                  -  **simd_id** *(integer)*: SIMD index.
+                  -  **pipe_id** *(integer)*: Pipe index.
+                  -  **cu_or_wgp_id** *(integer)*: Index of compute unit or workgroup processer.
+                  -  **shader_array_id** *(integer)*: Shader array index.
+                  -  **shader_engine_id** *(integer)*: Shader engine
                      index.
-                  -  **``workgroup_id``** *(integer)*: Workgroup position in the 3D.
-                  -  **``vm_id``** *(integer)*: Virtual memory ID.
-                  -  **``queue_id``** *(integer)*: Queue id.
-                  -  **``microengine_id``** *(integer)*: ACE
+                  -  **workgroup_id** *(integer)*: Workgroup position in the 3D.
+                  -  **vm_id** *(integer)*: Virtual memory ID.
+                  -  **queue_id** *(integer)*: Queue id.
+                  -  **microengine_id** *(integer)*: ACE
                      (microengine) index.
-               -  **``pc``** *(object)*: Encapsulates information about
+               -  **pc** *(object)*: Encapsulates information about
                   sampled PC.
-                  -  **``code_object_id``** *(integer)*: Code object id.
-                  -  **``code_object_offset``** *(integer)*: Offset within the object if the latter is known. Otherwise, virtual address of the PC.
-               -  **``exec_mask``** *(integer)*: Execution mask indicating active SIMD lanes of sampled wave.
-               -  **``timestamp``** *(integer)*: Timestamp.
-               -  **``dispatch_id``** *(integer)*: Dispatch id.
-               -  **``correlation_id``** *(object)*: Correlation ID information.
-                  -  **``internal``** *(integer)*: Internal correlation ID.
-                  -  **``external``** *(integer)*: External correlation ID.
-               - **``rocprofiler_dim3_t``** *(object)*: Position of the workgroup in 3D grid.
-                  -  **``x``** *(integer)*: Dimension x.
-                  -  **``y``** *(integer)*: Dimension y.
-                  -  **``z``** *(integer)*: Dimension z.
-               -  **``wave_in_group``** *(integer)*: Wave position within the workgroup (0-31).
-      - **`buffer_records`** *(object, required)*: Buffer record details.
-         - **`kernel_dispatch`** *(array)*: Kernel dispatch records.
+                  -  **code_object_id** *(integer)*: Code object id.
+                  -  **code_object_offset** *(integer)*: Offset within the object if the latter is known. Otherwise, virtual address of the PC.
+               -  **exec_mask** *(integer)*: Execution mask indicating active SIMD lanes of sampled wave.
+               -  **timestamp** *(integer)*: Timestamp.
+               -  **dispatch_id** *(integer)*: Dispatch id.
+               -  **correlation_id** *(object)*: Correlation ID information.
+                  -  **internal** *(integer)*: Internal correlation ID.
+                  -  **external** *(integer)*: External correlation ID.
+               - **rocprofiler_dim3_t** *(object)*: Position of the workgroup in 3D grid.
+                  -  **x** *(integer)*: Dimension x.
+                  -  **y** *(integer)*: Dimension y.
+                  -  **z** *(integer)*: Dimension z.
+               -  **wave_in_group** *(integer)*: Wave position within the workgroup (0-31).
+      - **buffer_records** *(object, required)*: Buffer record details.
+         - **kernel_dispatch** *(array)*: Kernel dispatch records.
             - **Items** *(object)*
-               - **`size`** *(integer, required)*: Size of the dispatch.
-               - **`kind`** *(integer, required)*: Kind of the dispatch.
-               - **`operation`** *(integer, required)*: Operation of the dispatch.
-               - **`thread_id`** *(integer, required)*: Thread ID.
-               - **`correlation_id`** *(object, required)*: Correlation ID information.
-                  - **`internal`** *(integer, required)*: Internal correlation ID.
-                  - **`external`** *(integer, required)*: External correlation ID.
-               - **`start_timestamp`** *(integer, required)*: Start timestamp.
-               - **`end_timestamp`** *(integer, required)*: End timestamp.
-               - **`dispatch_info`** *(object, required)*: Dispatch information details.
-                  - **`size`** *(integer, required)*: Size of the dispatch information.
-                  - **`agent_id`** *(object, required)*: Agent ID information.
-                     - **`handle`** *(integer, required)*: Handle of the agent.
-                  - **`queue_id`** *(object, required)*: Queue ID information.
-                     - **`handle`** *(integer, required)*: Handle of the queue.
-                  - **`kernel_id`** *(integer, required)*: ID of the kernel.
-                  - **`dispatch_id`** *(integer, required)*: ID of the dispatch.
-                  - **`private_segment_size`** *(integer, required)*: Size of the private segment.
-                  - **`group_segment_size`** *(integer, required)*: Size of the group segment.
-                  - **`workgroup_size`** *(object, required)*: Workgroup size information.
-                     - **`x`** *(integer, required)*: X dimension.
-                     - **`y`** *(integer, required)*: Y dimension.
-                     - **`z`** *(integer, required)*: Z dimension.
-                  - **`grid_size`** *(object, required)*: Grid size information.
-                     - **`x`** *(integer, required)*: X dimension.
-                     - **`y`** *(integer, required)*: Y dimension.
-                     - **`z`** *(integer, required)*: Z dimension.
-         - **`hip_api`** *(array)*: HIP API records.
+               - **size** *(integer, required)*: Size of the dispatch.
+               - **kind** *(integer, required)*: Kind of the dispatch.
+               - **operation** *(integer, required)*: Operation of the dispatch.
+               - **thread_id** *(integer, required)*: Thread ID.
+               - **correlation_id** *(object, required)*: Correlation ID information.
+                  - **internal** *(integer, required)*: Internal correlation ID.
+                  - **external** *(integer, required)*: External correlation ID.
+               - **start_timestamp** *(integer, required)*: Start timestamp.
+               - **end_timestamp** *(integer, required)*: End timestamp.
+               - **dispatch_info** *(object, required)*: Dispatch information details.
+                  - **size** *(integer, required)*: Size of the dispatch information.
+                  - **agent_id** *(object, required)*: Agent ID information.
+                     - **handle** *(integer, required)*: Handle of the agent.
+                  - **queue_id** *(object, required)*: Queue ID information.
+                     - **handle** *(integer, required)*: Handle of the queue.
+                  - **kernel_id** *(integer, required)*: ID of the kernel.
+                  - **dispatch_id** *(integer, required)*: ID of the dispatch.
+                  - **private_segment_size** *(integer, required)*: Size of the private segment.
+                  - **group_segment_size** *(integer, required)*: Size of the group segment.
+                  - **workgroup_size** *(object, required)*: Workgroup size information.
+                     - **x** *(integer, required)*: X dimension.
+                     - **y** *(integer, required)*: Y dimension.
+                     - **z** *(integer, required)*: Z dimension.
+                  - **grid_size** *(object, required)*: Grid size information.
+                     - **x** *(integer, required)*: X dimension.
+                     - **y** *(integer, required)*: Y dimension.
+                     - **z** *(integer, required)*: Z dimension.
+         - **hip_api** *(array)*: HIP API records.
             - **Items** *(object)*
-               - **`size`** *(integer, required)*: Size of the HIP API record.
-               - **`kind`** *(integer, required)*: Kind of the HIP API.
-               - **`operation`** *(integer, required)*: Operation of the HIP API.
-               - **`correlation_id`** *(object, required)*: Correlation ID information.
-                  - **`internal`** *(integer, required)*: Internal correlation ID.
-                  - **`external`** *(integer, required)*: External correlation ID.
-               - **`start_timestamp`** *(integer, required)*: Start timestamp.
-               - **`end_timestamp`** *(integer, required)*: End timestamp.
-               - **`thread_id`** *(integer, required)*: Thread ID.
-         - **`hsa_api`** *(array)*: HSA API records.
+               - **size** *(integer, required)*: Size of the HIP API record.
+               - **kind** *(integer, required)*: Kind of the HIP API.
+               - **operation** *(integer, required)*: Operation of the HIP API.
+               - **correlation_id** *(object, required)*: Correlation ID information.
+                  - **internal** *(integer, required)*: Internal correlation ID.
+                  - **external** *(integer, required)*: External correlation ID.
+               - **start_timestamp** *(integer, required)*: Start timestamp.
+               - **end_timestamp** *(integer, required)*: End timestamp.
+               - **thread_id** *(integer, required)*: Thread ID.
+         - **hsa_api** *(array)*: HSA API records.
             - **Items** *(object)*
-               - **`size`** *(integer, required)*: Size of the HSA API record.
-               - **`kind`** *(integer, required)*: Kind of the HSA API.
-               - **`operation`** *(integer, required)*: Operation of the HSA API.
-               - **`correlation_id`** *(object, required)*: Correlation ID information.
-                  - **`internal`** *(integer, required)*: Internal correlation ID.
-                  - **`external`** *(integer, required)*: External correlation ID.
-               - **`start_timestamp`** *(integer, required)*: Start timestamp.
-               - **`end_timestamp`** *(integer, required)*: End timestamp.
-               - **`thread_id`** *(integer, required)*: Thread ID.
-         - **`marker_api`** *(array)*: Marker (ROCTx) API records.
+               - **size** *(integer, required)*: Size of the HSA API record.
+               - **kind** *(integer, required)*: Kind of the HSA API.
+               - **operation** *(integer, required)*: Operation of the HSA API.
+               - **correlation_id** *(object, required)*: Correlation ID information.
+                  - **internal** *(integer, required)*: Internal correlation ID.
+                  - **external** *(integer, required)*: External correlation ID.
+               - **start_timestamp** *(integer, required)*: Start timestamp.
+               - **end_timestamp** *(integer, required)*: End timestamp.
+               - **thread_id** *(integer, required)*: Thread ID.
+         - **marker_api** *(array)*: Marker (ROCTx) API records.
             - **Items** *(object)*
-               - **`size`** *(integer, required)*: Size of the Marker API record.
-               - **`kind`** *(integer, required)*: Kind of the Marker API.
-               - **`operation`** *(integer, required)*: Operation of the Marker API.
-               - **`correlation_id`** *(object, required)*: Correlation ID information.
-                  - **`internal`** *(integer, required)*: Internal correlation ID.
-                  - **`external`** *(integer, required)*: External correlation ID.
-               - **`start_timestamp`** *(integer, required)*: Start timestamp.
-               - **`end_timestamp`** *(integer, required)*: End timestamp.
-               - **`thread_id`** *(integer, required)*: Thread ID.
-         - **`memory_copy`** *(array)*: Async memory copy records.
+               - **size** *(integer, required)*: Size of the Marker API record.
+               - **kind** *(integer, required)*: Kind of the Marker API.
+               - **operation** *(integer, required)*: Operation of the Marker API.
+               - **correlation_id** *(object, required)*: Correlation ID information.
+                  - **internal** *(integer, required)*: Internal correlation ID.
+                  - **external** *(integer, required)*: External correlation ID.
+               - **start_timestamp** *(integer, required)*: Start timestamp.
+               - **end_timestamp** *(integer, required)*: End timestamp.
+               - **thread_id** *(integer, required)*: Thread ID.
+         - **memory_copy** *(array)*: Async memory copy records.
             - **Items** *(object)*
-               - **`size`** *(integer, required)*: Size of the Marker API record.
-               - **`kind`** *(integer, required)*: Kind of the Marker API.
-               - **`operation`** *(integer, required)*: Operation of the Marker API.
-               - **`correlation_id`** *(object, required)*: Correlation ID information.
-                  - **`internal`** *(integer, required)*: Internal correlation ID.
-                  - **`external`** *(integer, required)*: External correlation ID.
-               - **`start_timestamp`** *(integer, required)*: Start timestamp.
-               - **`end_timestamp`** *(integer, required)*: End timestamp.
-               - **`thread_id`** *(integer, required)*: Thread ID.
-               - **`dst_agent_id`** *(object, required)*: Destination Agent ID.
-                  - **`handle`** *(integer, required)*: Handle of the agent.
-               - **`src_agent_id`** *(object, required)*: Source Agent ID.
-                  - **`handle`** *(integer, required)*: Handle of the agent.
-               - **`bytes`** *(integer, required)*: Bytes copied.
-         - **`memory_allocation`** *(array)*: Memory allocation records.
+               - **size** *(integer, required)*: Size of the Marker API record.
+               - **kind** *(integer, required)*: Kind of the Marker API.
+               - **operation** *(integer, required)*: Operation of the Marker API.
+               - **correlation_id** *(object, required)*: Correlation ID information.
+                  - **internal** *(integer, required)*: Internal correlation ID.
+                  - **external** *(integer, required)*: External correlation ID.
+               - **start_timestamp** *(integer, required)*: Start timestamp.
+               - **end_timestamp** *(integer, required)*: End timestamp.
+               - **thread_id** *(integer, required)*: Thread ID.
+               - **dst_agent_id** *(object, required)*: Destination Agent ID.
+                  - **handle** *(integer, required)*: Handle of the agent.
+               - **src_agent_id** *(object, required)*: Source Agent ID.
+                  - **handle** *(integer, required)*: Handle of the agent.
+               - **bytes** *(integer, required)*: Bytes copied.
+         - **memory_allocation** *(array)*: Memory allocation records.
             - **Items** *(object)*
-               - **`size`** *(integer, required)*: Size of the Marker API record.
-               - **`kind`** *(integer, required)*: Kind of the Marker API.
-               - **`operation`** *(integer, required)*: Operation of the Marker API.
-               - **`correlation_id`** *(object, required)*: Correlation ID information.
-                  - **`internal`** *(integer, required)*: Internal correlation ID.
-                  - **`external`** *(integer, required)*: External correlation ID.
-               - **`start_timestamp`** *(integer, required)*: Start timestamp.
-               - **`end_timestamp`** *(integer, required)*: End timestamp.
-               - **`thread_id`** *(integer, required)*: Thread ID.
-               - **`agent_id`** *(object, required)*: Agent ID.
-                  - **`handle`** *(integer, required)*: Handle of the agent.
-               - **`address`** *(string, required)*: Starting address of allocation.
-               - **`allocation_size`** *(integer, required)*: Size of allocation.
-         - **`rocDecode_api`** *(array)*: rocDecode API records.
+               - **size** *(integer, required)*: Size of the Marker API record.
+               - **kind** *(integer, required)*: Kind of the Marker API.
+               - **operation** *(integer, required)*: Operation of the Marker API.
+               - **correlation_id** *(object, required)*: Correlation ID information.
+                  - **internal** *(integer, required)*: Internal correlation ID.
+                  - **external** *(integer, required)*: External correlation ID.
+               - **start_timestamp** *(integer, required)*: Start timestamp.
+               - **end_timestamp** *(integer, required)*: End timestamp.
+               - **thread_id** *(integer, required)*: Thread ID.
+               - **agent_id** *(object, required)*: Agent ID.
+                  - **handle** *(integer, required)*: Handle of the agent.
+               - **address** *(string, required)*: Starting address of allocation.
+               - **allocation_size** *(integer, required)*: Size of allocation.
+         - **rocDecode_api** *(array)*: rocDecode API records.
             - **Items** *(object)*
-               - **`size`** *(integer, required)*: Size of the rocDecode API record.
-               - **`kind`** *(integer, required)*: Kind of the rocDecode API.
-               - **`operation`** *(integer, required)*: Operation of the rocDecode API.
-               - **`correlation_id`** *(object, required)*: Correlation ID information.
-                  - **`internal`** *(integer, required)*: Internal correlation ID.
-                  - **`external`** *(integer, required)*: External correlation ID.
-               - **`start_timestamp`** *(integer, required)*: Start timestamp.
-               - **`end_timestamp`** *(integer, required)*: End timestamp.
-               - **`thread_id`** *(integer, required)*: Thread ID.
+               - **size** *(integer, required)*: Size of the rocDecode API record.
+               - **kind** *(integer, required)*: Kind of the rocDecode API.
+               - **operation** *(integer, required)*: Operation of the rocDecode API.
+               - **correlation_id** *(object, required)*: Correlation ID information.
+                  - **internal** *(integer, required)*: Internal correlation ID.
+                  - **external** *(integer, required)*: External correlation ID.
+               - **start_timestamp** *(integer, required)*: Start timestamp.
+               - **end_timestamp** *(integer, required)*: End timestamp.
+               - **thread_id** *(integer, required)*: Thread ID.

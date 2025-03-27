@@ -3,3 +3,4 @@
 #
 
 add_subdirectory(host-trap)
+add_subdirectory(stochastic)

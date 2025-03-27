@@ -22,6 +22,9 @@
 
 #include "client.hpp"
 
+#include <rocprofiler-sdk/registration.h>
+#include <rocprofiler-sdk/rocprofiler.h>
+
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -31,9 +34,6 @@
 #include <sstream>
 #include <unordered_map>
 #include <vector>
-
-#include <rocprofiler-sdk/registration.h>
-#include <rocprofiler-sdk/rocprofiler.h>
 
 #define ROCPROFILER_CALL(result, msg)                                                              \
     {                                                                                              \
@@ -74,7 +74,7 @@ get_client_ctx()
 
 void
 record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
-                rocprofiler_record_counter_t*                record_data,
+                rocprofiler_counter_record_t*                record_data,
                 size_t                                       record_count,
                 rocprofiler_user_data_t /* user_data */,
                 void* callback_data_args)
@@ -96,13 +96,13 @@ record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
 
 /**
  * Callback from rocprofiler when an kernel dispatch is enqueued into the HSA queue.
- * rocprofiler_profile_config_id_t* is a return to specify what counters to collect
+ * rocprofiler_counter_config_id_t* is a return to specify what counters to collect
  * for this dispatch (dispatch_packet). This example function creates a profile
  * to collect the counter SQ_WAVES for all kernel dispatch packets.
  */
 void
 dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
-                  rocprofiler_profile_config_id_t*             config,
+                  rocprofiler_counter_config_id_t*             config,
                   rocprofiler_user_data_t* /*user_data*/,
                   void* /*callback_data_args*/)
 {
@@ -114,7 +114,7 @@ dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
      * set.
      */
     static std::shared_mutex                                             m_mutex       = {};
-    static std::unordered_map<uint64_t, rocprofiler_profile_config_id_t> profile_cache = {};
+    static std::unordered_map<uint64_t, rocprofiler_counter_config_id_t> profile_cache = {};
 
     auto search_cache = [&]() {
         if(auto pos = profile_cache.find(dispatch_data.dispatch_info.agent_id.handle);
@@ -161,21 +161,21 @@ dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
     // Look for the counters contained in counters_to_collect in gpu_counters
     for(auto& counter : gpu_counters)
     {
-        rocprofiler_counter_info_v0_t version;
+        rocprofiler_counter_info_v0_t info;
         ROCPROFILER_CALL(
             rocprofiler_query_counter_info(
-                counter, ROCPROFILER_COUNTER_INFO_VERSION_0, static_cast<void*>(&version)),
+                counter, ROCPROFILER_COUNTER_INFO_VERSION_0, static_cast<void*>(&info)),
             "Could not query info");
-        if(counters_to_collect.count(std::string(version.name)) > 0)
+        if(counters_to_collect.count(std::string(info.name)) > 0)
         {
-            std::clog << "Counter: " << counter.handle << " " << version.name << "\n";
+            std::clog << "Counter: " << counter.handle << " " << info.name << "\n";
             collect_counters.push_back(counter);
         }
     }
 
     // Create a colleciton profile for the counters
-    rocprofiler_profile_config_id_t profile = {.handle = 0};
-    ROCPROFILER_CALL(rocprofiler_create_profile_config(dispatch_data.dispatch_info.agent_id,
+    rocprofiler_counter_config_id_t profile = {.handle = 0};
+    ROCPROFILER_CALL(rocprofiler_create_counter_config(dispatch_data.dispatch_info.agent_id,
                                                        collect_counters.data(),
                                                        collect_counters.size(),
                                                        &profile),

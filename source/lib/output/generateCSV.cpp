@@ -316,10 +316,10 @@ generate_csv(const output_config& cfg,
 }
 
 void
-generate_csv(const output_config&                                          cfg,
-             const metadata&                                               tool_metadata,
-             const generator<rocprofiler_buffer_tracing_hip_api_record_t>& data,
-             const stats_entry_t&                                          stats)
+generate_csv(const output_config&                                              cfg,
+             const metadata&                                                   tool_metadata,
+             const generator<rocprofiler_buffer_tracing_hip_api_ext_record_t>& data,
+             const stats_entry_t&                                              stats)
 {
     if(data.empty()) return;
 
@@ -873,6 +873,79 @@ generate_csv(const output_config&                                              c
 
                 ofs << row_ss.str();
             }
+        }
+    }
+}
+
+void
+generate_csv(const output_config&                                               cfg,
+             const metadata&                                                    tool_metadata,
+             const generator<rocprofiler_tool_pc_sampling_stochastic_record_t>& data,
+             const stats_entry_t&                                               stats)
+{
+    if(data.empty()) return;
+
+    if(cfg.stats && stats)
+        write_stats(get_stats_output_file(cfg, domain_type::PC_SAMPLING_STOCHASTIC), stats.entries);
+
+    auto ofs = tool::csv_output_file{cfg,
+                                     domain_type::PC_SAMPLING_STOCHASTIC,
+                                     tool::csv::pc_sampling_stochastic_csv_encoder{},
+                                     {
+                                         "Sample_Timestamp",
+                                         "Exec_Mask",
+                                         "Dispatch_Id",
+                                         "Instruction",
+                                         "Instruction_Comment",
+                                         "Correlation_Id",
+                                         "Wave_Issued_Instruction",
+                                         "Instruction_Type",
+                                         "Stall_Reason",
+                                         "Wave_Count",
+                                     }};
+    for(auto ditr : data)
+    {
+        for(const auto& record : data.get(ditr))
+        {
+            std::string inst;
+            std::string inst_comment;
+            if(record.inst_index == -1)
+            {
+                // A sample originates from a blit kernel or self-modifying code,
+                // so instruction cannot be decoded
+                inst_comment = "Unrecognized code object id, physical virtual address of PC:" +
+                               std::to_string(record.pc_sample_record.pc.code_object_offset);
+            }
+            else
+            {
+                // Provide decoded instruction and comment
+                inst         = tool_metadata.get_instruction(record.inst_index);
+                inst_comment = tool_metadata.get_comment(record.inst_index);
+            }
+
+            auto row_ss = std::stringstream{};
+            rocprofiler::tool::csv::pc_sampling_stochastic_csv_encoder::write_row(
+                row_ss,
+                record.pc_sample_record.timestamp,
+                record.pc_sample_record.exec_mask,
+                record.pc_sample_record.dispatch_id,
+                inst,
+                inst_comment,
+                record.pc_sample_record.correlation_id.internal,
+                // As wave_issued is uint8_t of size 1, it can be dumped as char.
+                // To prevent that, explicitly cast it to integer, so that CSV output
+                // shows human-readable 0/1 values.
+                static_cast<unsigned int>(record.pc_sample_record.wave_issued),
+                std::string(rocprofiler_get_pc_sampling_instruction_type_name(
+                    static_cast<rocprofiler_pc_sampling_instruction_type_t>(
+                        record.pc_sample_record.inst_type))),
+                std::string(rocprofiler_get_pc_sampling_instruction_not_issued_reason_name(
+                    static_cast<rocprofiler_pc_sampling_instruction_not_issued_reason_t>(
+                        record.pc_sample_record.snapshot.reason_not_issued))),
+                // Similar reasoning as for wave_issued.
+                static_cast<unsigned int>(record.pc_sample_record.wave_count));
+
+            ofs << row_ss.str();
         }
     }
 }

@@ -309,6 +309,8 @@ public:
         ::memset(&uni, 0, sizeof(uni));
         uni.snap.pc             = dispatch->unique_id;
         uni.snap.correlation_id = dispatch->getMockId().raw;
+        // mark sample valid in case of stochastic sampling tests
+        uni.snap.perf_snapshot_data |= 0x1;  // stochastic sample is valid
         dispatch->submit(uni);
     };
     void print()

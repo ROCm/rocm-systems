@@ -116,6 +116,7 @@ struct config : output_config
     bool   list_metrics_output_file    = get_env("ROCPROF_OUTPUT_LIST_METRICS_FILE", false);
     bool   pc_sampling_host_trap       = false;
     bool   advanced_thread_trace       = get_env("ROCPROF_ADVANCED_THREAD_TRACE", false);
+    bool   pc_sampling_stochastic      = false;
     size_t pc_sampling_interval        = get_env("ROCPROF_PC_SAMPLING_INTERVAL", 1);
     bool   att_serialize_all           = get_env("ROCPROF_ATT_PARAM_SERIALIZE_ALL", false);
     rocprofiler_pc_sampling_method_t pc_sampling_method_value = ROCPROFILER_PC_SAMPLING_METHOD_NONE;

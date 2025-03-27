@@ -23,7 +23,7 @@
 #pragma once
 
 // NOLINTNEXTLINE(performance-enum-size)
-typedef enum
+typedef enum rocprofiler_rccl_table_id_t
 {
     ROCPROFILER_RCCL_TABLE_ID_NONE = -1,
     ROCPROFILER_RCCL_TABLE_ID      = 0,

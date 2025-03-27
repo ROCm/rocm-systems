@@ -37,9 +37,9 @@ generate_stats(const output_config& cfg,
                const generator<tool_buffer_tracing_kernel_dispatch_with_stream_record_t>& data);
 
 stats_entry_t
-generate_stats(const output_config&                                          cfg,
-               const metadata&                                               tool_metadata,
-               const generator<rocprofiler_buffer_tracing_hip_api_record_t>& data);
+generate_stats(const output_config&                                              cfg,
+               const metadata&                                                   tool_metadata,
+               const generator<rocprofiler_buffer_tracing_hip_api_ext_record_t>& data);
 
 stats_entry_t
 generate_stats(const output_config&                                          cfg,
@@ -90,6 +90,12 @@ stats_entry_t
 generate_stats(const output_config&                                              cfg,
                const metadata&                                                   tool_metadata,
                const generator<rocprofiler_tool_pc_sampling_host_trap_record_t>& data);
+
+stats_entry_t
+generate_stats(const output_config&                                               cfg,
+               const metadata&                                                    tool_metadata,
+               const generator<rocprofiler_tool_pc_sampling_stochastic_record_t>& data);
+
 void
 generate_stats(const output_config&      cfg,
                const metadata&           tool_metadata,

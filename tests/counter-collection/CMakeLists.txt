@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
 project(
-    rocprofiler-tests-counter-collection
+    rocprofiler-sdk-tests-counter-collection
     LANGUAGES CXX
     VERSION 0.0.0)
 

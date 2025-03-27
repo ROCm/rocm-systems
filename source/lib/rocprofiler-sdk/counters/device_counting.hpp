@@ -38,7 +38,7 @@ struct context;
 
 namespace counters
 {
-struct profile_config;
+struct counter_config;
 
 struct agent_callback_data
 {
@@ -56,12 +56,12 @@ struct agent_callback_data
     rocprofiler_user_data_t user_data     = {.value = 0};
     rocprofiler_user_data_t callback_data = {.value = 0};
 
-    std::shared_ptr<rocprofiler::counters::profile_config> profile         = {};
+    std::shared_ptr<rocprofiler::counters::counter_config> profile         = {};
     rocprofiler_agent_id_t                                 agent_id        = {.handle = 0};
-    rocprofiler_device_counting_service_callback_t         cb              = nullptr;
+    rocprofiler_device_counting_service_cb_t               cb              = nullptr;
     rocprofiler_buffer_id_t                                buffer          = {.handle = 0};
     bool                                                   set_profile     = false;
-    std::vector<rocprofiler_record_counter_t>*             cached_counters = nullptr;
+    std::vector<rocprofiler_counter_record_t>*             cached_counters = nullptr;
 
     agent_callback_data() = default;
     agent_callback_data(agent_callback_data&& rhs) noexcept
@@ -120,7 +120,7 @@ rocprofiler_status_t
 read_agent_ctx(const context::context*                    ctx,
                rocprofiler_user_data_t                    user_data,
                rocprofiler_counter_flag_t                 flags,
-               std::vector<rocprofiler_record_counter_t>* out_counters);
+               std::vector<rocprofiler_counter_record_t>* out_counters);
 
 uint64_t
 submitPacket(hsa_queue_t* queue, const void* packet);

@@ -26,7 +26,7 @@
  * @brief ROCProfiler enumeration of OMPT (OpenMP tools) tracing operations
  * NOTE: These are callbacks into the ROCProfiler SDK from the vendor-provided OMPT implementation
  */
-typedef enum  // NOLINT(performance-enum-size)
+typedef enum rocprofiler_ompt_operation_t  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_OMPT_ID_NONE         = -1,
     ROCPROFILER_OMPT_ID_thread_begin = 0,

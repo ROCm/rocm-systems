@@ -188,6 +188,7 @@ rocdecode_api_impl<TableIdx, OpIdx>::functor(Args... args)
     auto  tracer_data      = common::init_public_api_struct(callback_api_data_t{});
     auto* corr_id          = tracing::correlation_service::construct(ref_count);
     auto  internal_corr_id = corr_id->internal;
+    auto  ancestor_corr_id = corr_id->ancestor;
 
     tracing::populate_external_correlation_ids(external_corr_ids,
                                                thr_id,
@@ -204,6 +205,7 @@ rocdecode_api_impl<TableIdx, OpIdx>::functor(Args... args)
                                                thr_id,
                                                internal_corr_id,
                                                external_corr_ids,
+                                               ancestor_corr_id,
                                                info_type::callback_domain_idx,
                                                info_type::operation_idx,
                                                tracer_data);
@@ -247,6 +249,7 @@ rocdecode_api_impl<TableIdx, OpIdx>::functor(Args... args)
                                                thr_id,
                                                internal_corr_id,
                                                external_corr_ids,
+                                               ancestor_corr_id,
                                                info_type::buffered_domain_idx,
                                                info_type::operation_idx,
                                                buffer_record);
@@ -553,7 +556,9 @@ using rocdecode_op_args_cb_t = rocprofiler_callback_tracing_operation_args_cb_t;
     template const char*              name_by_id<TABLE_IDX>(uint32_t);                             \
     template uint32_t                 id_by_name<TABLE_IDX>(const char*);                          \
     template std::vector<uint32_t>    get_ids<TABLE_IDX>();                                        \
-    template std::vector<const char*> get_names<TABLE_IDX>();
+    template std::vector<const char*> get_names<TABLE_IDX>();                                      \
+    template void                     iterate_args<TABLE_IDX>(                                     \
+        uint32_t, const rocdecode_api_data_t&, rocdecode_op_args_cb_t, int32_t, void*);
 
 INSTANTIATE_ROCDECODE_TABLE_FUNC(rocdecode_api_func_table_t, ROCPROFILER_ROCDECODE_TABLE_ID_CORE)
 }  // namespace rocdecode

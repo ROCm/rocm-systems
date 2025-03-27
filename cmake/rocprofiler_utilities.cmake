@@ -968,7 +968,7 @@ function(rocprofiler_parse_hsa_api_table_versions _TARGET)
                         _VAL
                         "${_LINE}")
 
-                # used with cmakedefine in source/include/rocprofiler-sdk/version.h.in
+                # used with cmakedefine in source/include/rocprofiler-sdk/ext_version.h.in
                 if(_VAR AND _VAL)
                     set(ROCPROFILER_${_VAR}
                         "${_VAL}"

@@ -138,7 +138,7 @@ buffered_output<Tp, DomainT>::destroy()
 }
 
 using hip_buffered_output_t =
-    buffered_output<rocprofiler_buffer_tracing_hip_api_record_t, domain_type::HIP>;
+    buffered_output<rocprofiler_buffer_tracing_hip_api_ext_record_t, domain_type::HIP>;
 using hsa_buffered_output_t =
     buffered_output<rocprofiler_buffer_tracing_hsa_api_record_t, domain_type::HSA>;
 using marker_buffered_output_t =
@@ -168,5 +168,8 @@ using kernel_dispatch_buffered_output_with_stream_t =
                     domain_type::KERNEL_DISPATCH>;
 using memory_copy_buffered_output_with_stream_t =
     buffered_output<tool_buffer_tracing_memory_copy_with_stream_record_t, domain_type::MEMORY_COPY>;
+using pc_sampling_stochastic_buffered_output_t =
+    buffered_output<rocprofiler::tool::rocprofiler_tool_pc_sampling_stochastic_record_t,
+                    domain_type::PC_SAMPLING_STOCHASTIC>;
 }  // namespace tool
 }  // namespace rocprofiler

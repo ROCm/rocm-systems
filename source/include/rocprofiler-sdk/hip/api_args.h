@@ -24,7 +24,6 @@
 
 #include <rocprofiler-sdk/defines.h>
 #include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/version.h>
 
 #include <hip/hip_runtime.h>
 #include <hip/hip_runtime_api.h>
@@ -34,6 +33,8 @@
 
 #include <hip/amd_detail/amd_hip_gl_interop.h>
 #include <hip/amd_detail/hip_api_trace.hpp>
+
+#include <stdint.h>
 
 ROCPROFILER_EXTERN_C_INIT
 
@@ -52,6 +53,7 @@ typedef union rocprofiler_hip_api_retval_t
     ~rocprofiler_hip_api_retval_t() = default;
 #endif
 
+    uint64_t             uint64_t_retval;
     int                  int_retval;
     const char*          const_charp_retval;
     hipError_t           hipError_t_retval;

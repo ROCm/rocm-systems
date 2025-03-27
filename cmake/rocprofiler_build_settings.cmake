@@ -204,6 +204,19 @@ if(ROCPROFILER_BUILD_CI_STRICT_TIMESTAMPS)
 endif()
 
 # ----------------------------------------------------------------------------------------#
+# extra flags for compiling with experimental warnings
+#
+target_compile_definitions(rocprofiler-sdk-experimental-flags
+                           INTERFACE ROCPROFILER_SDK_EXPERIMENTAL_WARNINGS=1)
+rocprofiler_target_compile_options(rocprofiler-sdk-experimental-flags
+                                   INTERFACE "-Wno-deprecated-declarations")
+
+if(ROCPROFILER_BUILD_EXPERIMENTAL_WARNINGS)
+    target_link_libraries(rocprofiler-sdk-build-flags
+                          INTERFACE rocprofiler-sdk::rocprofiler-sdk-experimental-flags)
+endif()
+
+# ----------------------------------------------------------------------------------------#
 # user customization
 #
 get_property(LANGUAGES GLOBAL PROPERTY ENABLED_LANGUAGES)

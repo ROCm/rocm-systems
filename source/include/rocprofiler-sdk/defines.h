@@ -48,6 +48,40 @@
 
 /** @} */
 
+/**
+ * @def ROCPROFILER_SDK_BETA_COMPAT
+ * @brief rocprofiler-sdk clients (i.e. tool using rocprofiler-sdk) should set this definition to 1
+ * before including any rocprofiler-sdk header if it wants rocprofiler-sdk to provide preprocessor
+ * definitions to help with compilation support for tools prior to v1.0.0 release. Note: for v1.0.0
+ * release, rocprofiler-sdk sets the ppdef to 1 by default. Eventually, rocprofiler-sdk will remove
+ * defining this value and it will be up to the tools to define this value.
+ *
+ * For example in version 0.6.0, there was a function `rocprofiler_create_profile_config` and, prior
+ * to the 1.0.0 release, this function was renamed to `rocprofiler_create_counter_config`.
+ * @addtogroup VERSIONING_GROUP
+ *
+ * @def ROCPROFILER_SDK_BETA_COMPAT_SUPPORTED
+ * @brief rocprofiler-sdk will set this preprocessor definition to 1 if it can honor
+ * ::ROCPROFILER_SDK_BETA_COMPAT set to 1. Once backwards compatibility with the beta
+ * rocprofiler-sdk can no longer be supported, this will always be set to 0.
+ * @addtogroup VERSIONING_GROUP
+ *
+ * @def ROCPROFILER_SDK_DEPRECATED_WARNINGS
+ * @brief Set this preprocessor definition to 0 to silent compiler warnings when using features that
+ * are marked as deprecated. By default, rocprofiler-sdk defines this to equal to 1.
+ * @addtogroup VERSIONING_GROUP
+ *
+ * @def ROCPROFILER_SDK_EXPERIMENTAL_WARNINGS
+ * @brief Set this preprocessor definition to 1 to enable compiler warnings when using experimental
+ * features. @see ::ROCPROFILER_SDK_EXPERIMENTAL
+ * @addtogroup VERSIONING_GROUP
+ *
+ * @def ROCPROFILER_SDK_EXPERIMENTAL
+ * @brief When this attribute is added to a type, object, expression, etc., the developer should be
+ * aware that the API and/or ABI is subject to change in subsequent releases.
+ * @addtogroup VERSIONING_GROUP
+ */
+
 #if !defined(ROCPROFILER_ATTRIBUTE)
 #    if defined(_MSC_VER)
 #        define ROCPROFILER_ATTRIBUTE(...) __declspec(__VA_ARGS__)
@@ -136,4 +170,48 @@
 #    define ROCPROFILER_UINT64_C(value) uint64_t(value)
 #else
 #    define ROCPROFILER_UINT64_C(value) UINT64_C(value)
+#endif
+
+#if defined(__cplusplus) && __cplusplus >= 201402L
+#    define ROCPROFILER_SDK_DEPRECATED_MESSAGE(...) [[deprecated(__VA_ARGS__)]]
+#elif !defined(__cplusplus) && defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L
+#    define ROCPROFILER_SDK_DEPRECATED_MESSAGE(...) [[deprecated(__VA_ARGS__)]]
+#else
+#    define ROCPROFILER_SDK_DEPRECATED_MESSAGE(...) ROCPROFILER_ATTRIBUTE(deprecated)
+#endif
+
+// TODO(jomadsen): uncomment below code before v1.0.0
+// #if !defined(ROCPROFILER_SDK_DEPRECATED_WARNINGS)
+// #    define ROCPROFILER_SDK_DEPRECATED_WARNINGS 1
+// #endif
+
+#if defined(ROCPROFILER_SDK_DEPRECATED_WARNINGS) && ROCPROFILER_SDK_DEPRECATED_WARNINGS > 0
+#    define ROCPROFILER_SDK_DEPRECATED(...) ROCPROFILER_SDK_DEPRECATED_MESSAGE(__VA_ARGS__)
+#else
+#    define ROCPROFILER_SDK_DEPRECATED(...)
+#endif
+
+#define ROCPROFILER_SDK_EXPERIMENTAL_MESSAGE                                                       \
+    ROCPROFILER_SDK_DEPRECATED_MESSAGE(                                                            \
+        "Note: this feature has been marked as experimental. Define "                              \
+        "ROCPROFILER_SDK_EXPERIMENTAL_WARNINGS=0 to silence this message.")
+
+#if defined(ROCPROFILER_SDK_EXPERIMENTAL_WARNINGS) && ROCPROFILER_SDK_EXPERIMENTAL_WARNINGS > 0
+#    define ROCPROFILER_SDK_EXPERIMENTAL ROCPROFILER_SDK_EXPERIMENTAL_MESSAGE
+#else
+#    define ROCPROFILER_SDK_EXPERIMENTAL
+#endif
+
+//
+// if ROCPROFILER_SDK_BETA_COMPAT is > 0, provide some macros to help with compatibility.
+// For 1.0.0 release, we define this by default
+//
+#if !defined(ROCPROFILER_SDK_BETA_COMPAT)
+#    define ROCPROFILER_SDK_BETA_COMPAT 1
+#endif
+
+// rocprofiler-sdk will set ROCPROFILER_SDK_BETA_COMPAT_SUPPORTED to 1 if it can support
+// compatibility with rocprofiler-sdk < v1.0.0
+#if defined(ROCPROFILER_SDK_BETA_COMPAT) && ROCPROFILER_SDK_BETA_COMPAT > 0
+#    define ROCPROFILER_SDK_BETA_COMPAT_SUPPORTED 1
 #endif

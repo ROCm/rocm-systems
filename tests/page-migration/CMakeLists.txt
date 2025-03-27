@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
 project(
-    rocprofiler-tests-page-migration
+    rocprofiler-sdk-tests-page-migration
     LANGUAGES CXX
     VERSION 0.0.0)
 
@@ -21,6 +21,7 @@ add_test(NAME test-page-migration-execute COMMAND $<TARGET_FILE:page-migration> 
 
 set(page-migration-env
     "${PRELOAD_ENV}"
+    "ROCPROFILER_DISABLE_PERFETTO_ANNOTATIONS=1"
     "ROCPROFILER_TOOL_OUTPUT_FILE=page-migration-test.json"
     "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
     )

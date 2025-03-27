@@ -1,7 +1,7 @@
 #
 #   Tests for the common library
 #
-project(rocprofiler-tests-common LANGUAGES C CXX)
+project(rocprofiler-sdk-tests-common LANGUAGES C CXX)
 
 include(GoogleTest)
 

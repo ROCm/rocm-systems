@@ -22,6 +22,8 @@
 
 #include "lib/rocprofiler-sdk/pc_sampling/parser/pc_record_interface.hpp"
 
+#include "lib/common/utility.hpp"
+
 template <>
 uint64_t
 PCSamplingParserContext::alloc<rocprofiler_pc_sampling_record_host_trap_v0_t>(
@@ -128,6 +130,43 @@ PCSamplingParserContext::shouldFlipRocrBuffer(const dispatch_pkt_id_t& pkt) cons
 }
 
 template <typename PcSamplingRecordKindT>
+inline void
+emplace_records_in_buffer(rocprofiler::buffer::instance*        buff,
+                          const PcSamplingRecordKindT*          samples,
+                          size_t                                num_samples,
+                          rocprofiler_pc_sampling_record_kind_t record_kind)
+{
+    for(size_t i = 0; i < num_samples; i++)
+        buff->emplace(ROCPROFILER_BUFFER_CATEGORY_PC_SAMPLING, record_kind, samples[i]);
+}
+
+template <>
+inline void
+emplace_records_in_buffer<rocprofiler_pc_sampling_record_stochastic_v0_t>(
+    rocprofiler::buffer::instance*                        buff,
+    const rocprofiler_pc_sampling_record_stochastic_v0_t* samples,
+    size_t                                                num_samples,
+    rocprofiler_pc_sampling_record_kind_t                 record_kind)
+{
+    for(size_t i = 0; i < num_samples; i++)
+    {
+        if(samples[i].size == 0)
+        {
+            // `size == 0` internally means invalid sample, so generate it.
+            auto invalid_sample = rocprofiler::common::init_public_api_struct(
+                rocprofiler_pc_sampling_record_invalid_t{});
+            buff->emplace(ROCPROFILER_BUFFER_CATEGORY_PC_SAMPLING,
+                          ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE,
+                          invalid_sample);
+        }
+        else
+        {
+            buff->emplace(ROCPROFILER_BUFFER_CATEGORY_PC_SAMPLING, record_kind, samples[i]);
+        }
+    }
+}
+
+template <typename PcSamplingRecordKindT>
 void
 PCSamplingParserContext::generate_upcoming_pc_record(
     uint64_t                              agent_id_handle,
@@ -141,8 +180,7 @@ PCSamplingParserContext::generate_upcoming_pc_record(
     if(!buff)
         throw std::runtime_error(fmt::format("Buffer with id: {} does not exists", buff_id.handle));
 
-    for(size_t i = 0; i < num_samples; i++)
-        buff->emplace(ROCPROFILER_BUFFER_CATEGORY_PC_SAMPLING, record_kind, samples[i]);
+    emplace_records_in_buffer(buff, samples, num_samples, record_kind);
 }
 
 template <>

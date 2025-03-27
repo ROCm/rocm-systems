@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
 project(
-    rocprofiler-tests-rocprofv3-kernel-rename
+    rocprofiler-sdk-tests-rocprofv3-kernel-rename
     LANGUAGES CXX
     VERSION 0.0.0)
 

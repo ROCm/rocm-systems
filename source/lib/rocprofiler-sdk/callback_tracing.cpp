@@ -95,7 +95,7 @@ ROCPROFILER_CALLBACK_TRACING_KIND_STRING(OMPT)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(RUNTIME_INITIALIZATION)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(ROCDECODE_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(ROCJPEG_API)
-ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIP_STREAM_API)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIP_STREAM)
 
 template <size_t Idx, size_t... Tail>
 std::pair<const char*, size_t>
@@ -290,7 +290,7 @@ rocprofiler_query_callback_tracing_kind_operation_name(rocprofiler_callback_trac
             val = rocprofiler::rocjpeg::name_by_id<ROCPROFILER_ROCJPEG_TABLE_ID_CORE>(operation);
             break;
         }
-        case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM_API:
+        case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
         {
             val = rocprofiler::hip::stream::name_by_id(operation);
             break;
@@ -434,7 +434,7 @@ rocprofiler_iterate_callback_tracing_kind_operations(
             ops = rocprofiler::rocjpeg::get_ids<ROCPROFILER_ROCJPEG_TABLE_ID_CORE>();
             break;
         }
-        case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM_API:
+        case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
         {
             ops = rocprofiler::hip::stream::get_ids();
             break;
@@ -548,7 +548,7 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
         {
             rocprofiler::hip::iterate_args<ROCPROFILER_HIP_TABLE_ID_Compiler>(
                 record.operation,
-                *static_cast<rocprofiler_callback_tracing_hip_api_data_t*>(record.payload),
+                static_cast<rocprofiler_callback_tracing_hip_api_data_t*>(record.payload)->args,
                 callback,
                 max_deref,
                 user_data);
@@ -558,7 +558,7 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
         {
             rocprofiler::hip::iterate_args<ROCPROFILER_HIP_TABLE_ID_Runtime>(
                 record.operation,
-                *static_cast<rocprofiler_callback_tracing_hip_api_data_t*>(record.payload),
+                static_cast<rocprofiler_callback_tracing_hip_api_data_t*>(record.payload)->args,
                 callback,
                 max_deref,
                 user_data);
@@ -583,7 +583,7 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
         case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
         case ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API:
         case ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API:
-        case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM_API:
+        case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
         {
             return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
         }

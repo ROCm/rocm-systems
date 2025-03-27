@@ -36,7 +36,7 @@ ROCPROFILER_EXTERN_C_INIT
  * @{
  */
 
-typedef enum
+typedef enum rocprofiler_att_parameter_type_t
 {
     ROCPROFILER_ATT_PARAMETER_TARGET_CU = 0,       ///< Select the Target CU or WGP
     ROCPROFILER_ATT_PARAMETER_SHADER_ENGINE_MASK,  ///< Bitmask of shader engines.
@@ -48,7 +48,7 @@ typedef enum
     ROCPROFILER_ATT_PARAMETER_LAST
 } rocprofiler_att_parameter_type_t;
 
-typedef struct
+typedef struct rocprofiler_att_parameter_t
 {
     rocprofiler_att_parameter_type_t type;
     union

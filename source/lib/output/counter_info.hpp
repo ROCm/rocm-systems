@@ -43,9 +43,9 @@ constexpr uint32_t lds_block_size = 128 * 4;
 using counter_dimension_id_vec_t   = std::vector<rocprofiler_counter_dimension_id_t>;
 using counter_dimension_info_vec_t = std::vector<rocprofiler_record_dimension_info_t>;
 
-struct tool_counter_info : rocprofiler_counter_info_v0_t
+struct tool_counter_info : rocprofiler_counter_info_v1_t
 {
-    using parent_type = rocprofiler_counter_info_v0_t;
+    using parent_type = rocprofiler_counter_info_v1_t;
 
     tool_counter_info(rocprofiler_agent_id_t         _agent_id,
                       parent_type                    _info,
@@ -125,7 +125,7 @@ void
 save(ArchiveT& ar, const ::rocprofiler::tool::tool_counter_info& data)
 {
     SAVE_DATA_FIELD(agent_id);
-    cereal::save(ar, static_cast<const rocprofiler_counter_info_v0_t&>(data));
+    cereal::save(ar, static_cast<const rocprofiler_counter_info_v1_t&>(data));
     SAVE_DATA_FIELD(dimension_ids);
 }
 

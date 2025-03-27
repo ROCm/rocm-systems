@@ -17,7 +17,7 @@ if(NOT CMAKE_HIP_COMPILER)
     endif()
 endif()
 
-project(rocprofiler-tests-bin-transpose LANGUAGES CXX HIP)
+project(rocprofiler-sdk-tests-bin-pc-sampling-exec-mask-manipulation LANGUAGES CXX HIP)
 
 foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
     if("${CMAKE_HIP_FLAGS_${_TYPE}}" STREQUAL "")

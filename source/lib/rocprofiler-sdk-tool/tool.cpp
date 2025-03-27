@@ -147,10 +147,11 @@ struct buffer_ids
     rocprofiler_buffer_id_t pc_sampling_host_trap   = {};
     rocprofiler_buffer_id_t rocdecode_api_trace     = {};
     rocprofiler_buffer_id_t rocjpeg_api_trace       = {};
+    rocprofiler_buffer_id_t pc_sampling_stochastic  = {};
 
     auto as_array() const
     {
-        return std::array<rocprofiler_buffer_id_t, 11>{hsa_api_trace,
+        return std::array<rocprofiler_buffer_id_t, 12>{hsa_api_trace,
                                                        hip_api_trace,
                                                        kernel_trace,
                                                        memory_copy_trace,
@@ -160,7 +161,8 @@ struct buffer_ids
                                                        rccl_api_trace,
                                                        pc_sampling_host_trap,
                                                        rocdecode_api_trace,
-                                                       rocjpeg_api_trace};
+                                                       rocjpeg_api_trace,
+                                                       pc_sampling_stochastic};
     }
 };
 
@@ -195,7 +197,7 @@ as_pointer()
 using targeted_kernels_map_t =
     std::unordered_map<rocprofiler_kernel_id_t, std::unordered_set<size_t>>;
 using counter_dimension_info_map_t =
-    std::unordered_map<uint64_t, std::vector<rocprofiler_record_dimension_info_t>>;
+    std::unordered_map<uint64_t, std::vector<rocprofiler_counter_record_dimension_info_t>>;
 using agent_info_map_t      = std::unordered_map<rocprofiler_agent_id_t, rocprofiler_agent_t>;
 using kernel_iteration_t    = std::unordered_map<rocprofiler_kernel_id_t, size_t>;
 using kernel_rename_map_t   = std::unordered_map<uint64_t, uint64_t>;
@@ -529,22 +531,21 @@ hip_stream_display_callback(rocprofiler_callback_tracing_record_t record,
                             rocprofiler_user_data_t*              user_data,
                             void*                                 data)
 {
-    if(tool::get_config().group_by_queue ||
-       record.kind != ROCPROFILER_CALLBACK_TRACING_HIP_STREAM_API)
+    if(tool::get_config().group_by_queue || record.kind != ROCPROFILER_CALLBACK_TRACING_HIP_STREAM)
         return;
     // Extract stream ID from record
     auto* stream_handle_data =
-        static_cast<rocprofiler_callback_tracing_stream_handle_data_t*>(record.payload);
+        static_cast<rocprofiler_callback_tracing_hip_stream_data_t*>(record.payload);
     auto stream_id = stream_handle_data->stream_id;
     // STREAM_HANDLE_CREATE and DESTROY are no-ops
     if(record.operation == ROCPROFILER_HIP_STREAM_CREATE)
     {
-        ROCP_INFO
+        ROCP_TRACE
             << "Entered hip_stream_display_callback function for ROCPROFILER_HIP_STREAM_CREATE";
     }
     else if(record.operation == ROCPROFILER_HIP_STREAM_DESTROY)
     {
-        ROCP_INFO
+        ROCP_TRACE
             << "Entered hip_stream_display_callback function for ROCPROFILER_HIP_STREAM_DESTROY";
     }
     else if(record.operation == ROCPROFILER_HIP_STREAM_SET)
@@ -552,15 +553,15 @@ hip_stream_display_callback(rocprofiler_callback_tracing_record_t record,
         // Push the stream ID onto the stream stack when before underlying HIP function is called
         if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
         {
-            ROCP_INFO << "Entered hip_stream_display_callback function for "
-                         "ROCPROFILER_HIP_STREAM_SET with ROCPROFILER_CALLBACK_PHASE_ENTER";
+            ROCP_TRACE << "Entered hip_stream_display_callback function for "
+                          "ROCPROFILER_HIP_STREAM_SET with ROCPROFILER_CALLBACK_PHASE_ENTER";
             rocprofiler::tool::stream::push_stream_id(stream_id);
         }
         // Pop stream ID off of stream stack after underlying HIP function is completed
         else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
         {
-            ROCP_INFO << "Entered hip_stream_display_callback function for "
-                         "ROCPROFILER_HIP_STREAM_SET with ROCPROFILER_CALLBACK_PHASE_EXIT";
+            ROCP_TRACE << "Entered hip_stream_display_callback function for "
+                          "ROCPROFILER_HIP_STREAM_SET with ROCPROFILER_CALLBACK_PHASE_EXIT";
             rocprofiler::tool::stream::pop_stream_id();
         }
     }
@@ -726,7 +727,8 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
             auto* obj_data = static_cast<tool::rocprofiler_code_object_info_t*>(record.payload);
 
             CHECK_NOTNULL(tool_metadata)->add_code_object(*obj_data);
-            if(tool::get_config().pc_sampling_host_trap)
+            if(tool::get_config().pc_sampling_host_trap ||
+               tool::get_config().pc_sampling_stochastic)
             {
                 CHECK_NOTNULL(tool_metadata)->add_decoder(obj_data);
             }
@@ -945,11 +947,11 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
 
                 tool::write_ring_buffer(*record, domain_type::SCRATCH_MEMORY);
             }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API ||
-                    header->kind == ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API)
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT ||
+                    header->kind == ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT)
             {
                 auto* record =
-                    static_cast<rocprofiler_buffer_tracing_hip_api_record_t*>(header->payload);
+                    static_cast<rocprofiler_buffer_tracing_hip_api_ext_record_t*>(header->payload);
 
                 tool::write_ring_buffer(*record, domain_type::HIP);
             }
@@ -976,16 +978,24 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
             }
             else
             {
-                ROCP_FATAL << fmt::format(
-                    "unsupported category + kind: {} + {}", header->category, header->kind);
+                ROCP_CI_LOG(WARNING) << fmt::format(
+                    "unsupported ROCPROFILER_BUFFER_CATEGORY_TRACING kind: {} :: {}",
+                    header->kind,
+                    tool_metadata->get_kind_name(
+                        static_cast<rocprofiler_buffer_tracing_kind_t>(header->kind)));
             }
+        }
+        else
+        {
+            ROCP_CI_LOG(WARNING) << fmt::format(
+                "unsupported category + kind: {} + {}", header->category, header->kind);
         }
     }
 }
 
 using counter_vec_t = std::vector<rocprofiler_counter_id_t>;
 using agent_counter_map_t =
-    std::unordered_map<rocprofiler_agent_id_t, std::optional<rocprofiler_profile_config_id_t>>;
+    std::unordered_map<rocprofiler_agent_id_t, std::optional<rocprofiler_counter_config_id_t>>;
 
 auto
 get_gpu_agents()
@@ -1003,16 +1013,16 @@ struct agent_profiles
 {
     std::unordered_map<rocprofiler_agent_id_t, std::atomic<uint64_t>> current_iter;
     const uint64_t                                                    rotation;
-    const std::unordered_map<rocprofiler_agent_id_t, std::vector<rocprofiler_profile_config_id_t>>
+    const std::unordered_map<rocprofiler_agent_id_t, std::vector<rocprofiler_counter_config_id_t>>
         profiles;
 };
 
-std::optional<rocprofiler_profile_config_id_t>
+std::optional<rocprofiler_counter_config_id_t>
 construct_counter_collection_profile(rocprofiler_agent_id_t       agent_id,
                                      const std::set<std::string>& counters)
 {
     static const auto gpu_agents_counter_info = get_agent_counter_info();
-    auto              profile                 = std::optional<rocprofiler_profile_config_id_t>{};
+    auto              profile                 = std::optional<rocprofiler_counter_config_id_t>{};
     auto              counters_v              = counter_vec_t{};
     auto              found_v                 = std::vector<std::string_view>{};
     const auto*       agent_v                 = tool_metadata->get_agent(agent_id);
@@ -1067,8 +1077,8 @@ construct_counter_collection_profile(rocprofiler_agent_id_t       agent_id,
 
     if(!counters_v.empty())
     {
-        auto profile_v = rocprofiler_profile_config_id_t{};
-        ROCPROFILER_CALL(rocprofiler_create_profile_config(
+        auto profile_v = rocprofiler_counter_config_id_t{};
+        ROCPROFILER_CALL(rocprofiler_create_counter_config(
                              agent_id, counters_v.data(), counters_v.size(), &profile_v),
                          "Could not construct profile cfg");
         profile = profile_v;
@@ -1079,7 +1089,7 @@ construct_counter_collection_profile(rocprofiler_agent_id_t       agent_id,
 agent_profiles
 generate_agent_profiles()
 {
-    std::unordered_map<rocprofiler_agent_id_t, std::vector<rocprofiler_profile_config_id_t>>
+    std::unordered_map<rocprofiler_agent_id_t, std::vector<rocprofiler_counter_config_id_t>>
                                                                       profiles;
     std::unordered_map<rocprofiler_agent_id_t, std::atomic<uint64_t>> pos;
     for(const auto& agent : get_gpu_agents())
@@ -1099,7 +1109,7 @@ generate_agent_profiles()
 }
 
 // this function creates a rocprofiler profile config on the first entry
-std::optional<rocprofiler_profile_config_id_t>
+std::optional<rocprofiler_counter_config_id_t>
 get_device_counting_service(rocprofiler_agent_id_t agent_id)
 {
     static auto agent_profiles = generate_agent_profiles();
@@ -1178,6 +1188,10 @@ rocprofiler_pc_sampling_callback(rocprofiler_context_id_t /* context_id*/,
 {
     if(!headers) return;
 
+    // count number of valid VS invalid samples delivered by this callback
+    uint64_t valid_samples_cnt   = 0;
+    uint64_t invalid_samples_cnt = 0;
+
     for(size_t i = 0; i < num_headers; i++)
     {
         auto* cur_header = headers[i];
@@ -1202,6 +1216,25 @@ rocprofiler_pc_sampling_callback(rocprofiler_context_id_t /* context_id*/,
 
                 rocprofiler::tool::write_ring_buffer(pc_sample_tool_record,
                                                      domain_type::PC_SAMPLING_HOST_TRAP);
+
+                valid_samples_cnt++;
+            }
+            else if(cur_header->kind == ROCPROFILER_PC_SAMPLING_RECORD_STOCHASTIC_V0_SAMPLE)
+            {
+                auto* pc_sample = static_cast<rocprofiler_pc_sampling_record_stochastic_v0_t*>(
+                    cur_header->payload);
+
+                auto pc_sample_tool_record =
+                    rocprofiler::tool::rocprofiler_tool_pc_sampling_stochastic_record_t(
+                        *pc_sample, get_instruction_index(pc_sample->pc));
+
+                rocprofiler::tool::write_ring_buffer(pc_sample_tool_record,
+                                                     domain_type::PC_SAMPLING_STOCHASTIC);
+                valid_samples_cnt++;
+            }
+            else if(cur_header->kind == ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE)
+            {
+                invalid_samples_cnt++;
             }
         }
         else
@@ -1209,6 +1242,13 @@ rocprofiler_pc_sampling_callback(rocprofiler_context_id_t /* context_id*/,
             ROCP_FATAL << "unexpected rocprofiler_record_header_t category + kind";
         }
     }
+
+    // sum up number of valid/invalid samples for pc sampling stats
+    tool_metadata->pc_sampling_stats.wlock(
+        [valid_samples_cnt, invalid_samples_cnt](auto& pc_sampling_stats) {
+            pc_sampling_stats.valid_samples += valid_samples_cnt;
+            pc_sampling_stats.invalid_samples += invalid_samples_cnt;
+        });
 }
 
 void
@@ -1234,7 +1274,7 @@ att_shader_data_callback(rocprofiler_agent_id_t  agent,
 rocprofiler_att_control_flags_t
 att_dispatch_callback(rocprofiler_agent_id_t /* agent_id  */,
                       rocprofiler_queue_id_t /* queue_id  */,
-                      rocprofiler_correlation_id_t /* correlation_id */,
+                      rocprofiler_async_correlation_id_t /* correlation_id */,
                       rocprofiler_kernel_id_t   kernel_id,
                       rocprofiler_dispatch_id_t dispatch_id,
                       void* /*userdata_config*/,
@@ -1251,7 +1291,7 @@ att_dispatch_callback(rocprofiler_agent_id_t /* agent_id  */,
 
 void
 dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
-                  rocprofiler_profile_config_id_t*             config,
+                  rocprofiler_counter_config_id_t*             config,
                   rocprofiler_user_data_t*                     user_data,
                   void* /*callback_data_args*/)
 {
@@ -1273,7 +1313,7 @@ dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
 
 void
 counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
-                        rocprofiler_record_counter_t*                record_data,
+                        rocprofiler_counter_record_t*                record_data,
                         size_t                                       record_count,
                         rocprofiler_user_data_t                      user_data,
                         void* /*callback_data_args*/)
@@ -1375,6 +1415,52 @@ if_pc_sample_config_match(rocprofiler_agent_id_t           agent_id,
         }
     }
     return false;
+}
+
+void
+configure_pc_sampling_on_all_agents(uint64_t buffer_size,
+                                    uint64_t buffer_watermark,
+                                    void*    tool_data)
+{
+    auto method = tool::get_config().pc_sampling_method_value;
+    auto unit   = tool::get_config().pc_sampling_unit_value;
+
+    // Find the proper buffer_id based on the method
+    auto* buffer_id = (method == ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP)
+                          ? &get_buffers().pc_sampling_host_trap
+                          : &get_buffers().pc_sampling_stochastic;
+
+    ROCPROFILER_CALL(rocprofiler_create_buffer(get_client_ctx(),
+                                               buffer_size,
+                                               buffer_watermark,
+                                               ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                               rocprofiler_pc_sampling_callback,
+                                               tool_data,
+                                               buffer_id),
+                     "buffer creation");
+
+    bool config_match_found = false;
+    auto agent_ptr_vec      = get_gpu_agents();
+    for(auto& itr : agent_ptr_vec)
+    {
+        if(if_pc_sample_config_match(
+               itr->id, method, unit, tool::get_config().pc_sampling_interval))
+        {
+            config_match_found = true;
+            int flags          = 0;
+            ROCPROFILER_CALL(
+                rocprofiler_configure_pc_sampling_service(get_client_ctx(),
+                                                          itr->id,
+                                                          method,
+                                                          unit,
+                                                          tool::get_config().pc_sampling_interval,
+                                                          *buffer_id,
+                                                          flags),
+                "configure PC sampling");
+        }
+    }
+    if(!config_match_found)
+        ROCP_FATAL << "Given PC sampling configuration is not supported on any of the agents";
 }
 
 int
@@ -1603,7 +1689,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         {
             ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
                                  get_client_ctx(),
-                                 ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API,
+                                 ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT,
                                  nullptr,
                                  0,
                                  get_buffers().hip_api_trace),
@@ -1614,7 +1700,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         {
             ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
                                  get_client_ctx(),
-                                 ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API,
+                                 ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT,
                                  nullptr,
                                  0,
                                  get_buffers().hip_api_trace),
@@ -1717,14 +1803,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         ROCPROFILER_CALL(rocprofiler_create_context(&hip_stream_display_ctx),
                          "failed to create context");
 
-        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
-                             hip_stream_display_ctx,
-                             ROCPROFILER_CALLBACK_TRACING_HIP_STREAM_API,
-                             nullptr,
-                             0,
-                             hip_stream_display_callback,
-                             nullptr),
-                         "stream tracing configure failed");
+        ROCPROFILER_CALL(
+            rocprofiler_configure_callback_tracing_service(hip_stream_display_ctx,
+                                                           ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
+                                                           nullptr,
+                                                           0,
+                                                           hip_stream_display_callback,
+                                                           nullptr),
+            "stream tracing configure failed");
         ROCPROFILER_CALL(rocprofiler_start_context(hip_stream_display_ctx), "start context failed");
     }
     if(tool::get_config().kernel_rename || !tool::get_config().group_by_queue)
@@ -1745,38 +1831,11 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     if(tool::get_config().pc_sampling_host_trap)
     {
-        ROCPROFILER_CALL(rocprofiler_create_buffer(get_client_ctx(),
-                                                   buffer_size,
-                                                   buffer_watermark,
-                                                   ROCPROFILER_BUFFER_POLICY_LOSSLESS,
-                                                   rocprofiler_pc_sampling_callback,
-                                                   tool_data,
-                                                   &get_buffers().pc_sampling_host_trap),
-                         "buffer creation");
-        bool config_match_found = false;
-        auto agent_ptr_vec      = get_gpu_agents();
-        for(auto& itr : agent_ptr_vec)
-        {
-            auto method = tool::get_config().pc_sampling_method_value;
-            auto unit   = tool::get_config().pc_sampling_unit_value;
-            if(if_pc_sample_config_match(
-                   itr->id, method, unit, tool::get_config().pc_sampling_interval))
-            {
-                config_match_found = true;
-                int flags          = 0;
-                ROCPROFILER_CALL(rocprofiler_configure_pc_sampling_service(
-                                     get_client_ctx(),
-                                     itr->id,
-                                     method,
-                                     unit,
-                                     tool::get_config().pc_sampling_interval,
-                                     get_buffers().pc_sampling_host_trap,
-                                     flags),
-                                 "configure PC sampling");
-            }
-        }
-        if(!config_match_found)
-            ROCP_FATAL << "Given PC sampling configuration is not supported on any of the agents";
+        configure_pc_sampling_on_all_agents(buffer_size, buffer_watermark, tool_data);
+    }
+    else if(tool::get_config().pc_sampling_stochastic)
+    {
+        configure_pc_sampling_on_all_agents(buffer_size, buffer_watermark, tool_data);
     }
 
     for(auto itr : get_buffers().as_array())
@@ -1897,6 +1956,8 @@ tool_fini(void* /*tool_data*/)
     auto rocdecode_output =
         tool::rocdecode_buffered_output_t{tool::get_config().rocdecode_api_trace};
     auto rocjpeg_output = tool::rocjpeg_buffered_output_t{tool::get_config().rocjpeg_api_trace};
+    auto pc_sampling_stochastic_output =
+        tool::pc_sampling_stochastic_buffered_output_t{tool::get_config().pc_sampling_stochastic};
 
     auto node_id_sort  = [](const auto& lhs, const auto& rhs) { return lhs.node_id < rhs.node_id; };
     auto agents_output = CHECK_NOTNULL(tool_metadata)->agents;
@@ -1917,6 +1978,7 @@ tool_fini(void* /*tool_data*/)
     generate_output(rocdecode_output, num_output, contributions);
     generate_output(pc_sampling_host_trap_output, num_output, contributions);
     generate_output(rocjpeg_output, num_output, contributions);
+    generate_output(pc_sampling_stochastic_output, num_output, contributions);
 
     if(tool::get_config().advanced_thread_trace && !tool::get_config().att_capability.empty() &&
        !tool_metadata->att_filenames.empty())
@@ -1955,9 +2017,10 @@ tool_fini(void* /*tool_data*/)
                          scratch_memory_output.get_generator(),
                          rccl_output.get_generator(),
                          memory_allocation_output.get_generator(),
-                         pc_sampling_host_trap_output.get_generator(),
                          rocdecode_output.get_generator(),
-                         rocjpeg_output.get_generator());
+                         rocjpeg_output.get_generator(),
+                         pc_sampling_host_trap_output.get_generator(),
+                         pc_sampling_stochastic_output.get_generator());
         json_ar.finish_process();
 
         tool::close_json(json_ar);
@@ -1972,6 +2035,7 @@ tool_fini(void* /*tool_data*/)
                              hsa_output.get_generator(),
                              kernel_dispatch_with_stream_output.get_generator(),
                              memory_copy_output_with_stream_output.get_generator(),
+                             counters_output.get_generator(),
                              marker_output.get_generator(),
                              scratch_memory_output.get_generator(),
                              rccl_output.get_generator(),
@@ -2073,6 +2137,7 @@ tool_fini(void* /*tool_data*/)
     destroy_output(pc_sampling_host_trap_output);
     destroy_output(rocdecode_output);
     destroy_output(rocjpeg_output);
+    destroy_output(pc_sampling_stochastic_output);
 
     if(kernel_rename_and_stream_display_pair_dtors != nullptr)
     {
@@ -2098,11 +2163,11 @@ tool_fini(void* /*tool_data*/)
 #endif
 }
 
-std::vector<rocprofiler_record_dimension_info_t>
+std::vector<rocprofiler_counter_record_dimension_info_t>
 get_tool_counter_dimension_info()
 {
     auto _data = get_agent_counter_info();
-    auto _ret  = std::vector<rocprofiler_record_dimension_info_t>{};
+    auto _ret  = std::vector<rocprofiler_counter_record_dimension_info_t>{};
     for(const auto& itr : _data)
     {
         for(const auto& iitr : itr.second)
@@ -2110,12 +2175,12 @@ get_tool_counter_dimension_info()
                 _ret.emplace_back(ditr);
     }
 
-    auto _sorter = [](const rocprofiler_record_dimension_info_t& lhs,
-                      const rocprofiler_record_dimension_info_t& rhs) {
+    auto _sorter = [](const rocprofiler_counter_record_dimension_info_t& lhs,
+                      const rocprofiler_counter_record_dimension_info_t& rhs) {
         return std::tie(lhs.id, lhs.instance_size) < std::tie(rhs.id, rhs.instance_size);
     };
-    auto _equiv = [](const rocprofiler_record_dimension_info_t& lhs,
-                     const rocprofiler_record_dimension_info_t& rhs) {
+    auto _equiv = [](const rocprofiler_counter_record_dimension_info_t& lhs,
+                     const rocprofiler_counter_record_dimension_info_t& rhs) {
         return std::tie(lhs.id, lhs.instance_size) == std::tie(rhs.id, rhs.instance_size);
     };
 

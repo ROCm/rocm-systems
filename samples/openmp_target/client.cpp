@@ -33,11 +33,6 @@
 
 #include "client.hpp"
 
-#include <rocprofiler-sdk/callback_tracing.h>
-#include <rocprofiler-sdk/context.h>
-#include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/marker/api_id.h>
-#include <rocprofiler-sdk/ompt.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 

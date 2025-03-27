@@ -3,7 +3,7 @@
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
-project(rocprofiler-tests-bin-hip-in-libraries LANGUAGES CXX)
+project(rocprofiler-sdk-tests-bin-hip-in-libraries LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)

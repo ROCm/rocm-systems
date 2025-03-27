@@ -7,7 +7,7 @@ if(COMMAND rocprofiler_deactivate_clang_tidy)
     rocprofiler_deactivate_clang_tidy()
 endif()
 
-project(rocprofiler-tests LANGUAGES C CXX)
+project(rocprofiler-sdk-tests LANGUAGES C CXX)
 
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "tests")
 set(ROCPROFILER_SDK_TESTS_SOURCE_DIR "${PROJECT_SOURCE_DIR}")
@@ -41,6 +41,12 @@ endif()
 
 # needed for validation
 find_package(Python3 REQUIRED)
+
+# generally needed
+find_package(rocprofiler-sdk REQUIRED)
+
+# get the gfx architectures that are present on the system
+rocprofiler_sdk_get_gfx_architectures(rocprofiler-sdk-tests-gfx-info ECHO)
 
 # configure python module <BINARY_DIR>/rocprofiler_sdk/pytest_utils
 add_subdirectory(pytest-packages)

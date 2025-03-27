@@ -39,6 +39,7 @@
 #include "lib/rocprofiler-sdk/rocjpeg/rocjpeg.hpp"
 #include "lib/rocprofiler-sdk/runtime_initialization.hpp"
 
+#include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hip/table_id.h>
 #include <rocprofiler-sdk/hsa/table_id.h>
@@ -98,7 +99,9 @@ ROCPROFILER_BUFFER_TRACING_KIND_STRING(OMPT)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(RUNTIME_INITIALIZATION)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(ROCDECODE_API)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(ROCJPEG_API)
-ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIP_STREAM_API)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIP_STREAM)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIP_RUNTIME_API_EXT)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIP_COMPILER_API_EXT)
 
 template <size_t Idx, size_t... Tail>
 std::pair<const char*, size_t>
@@ -263,11 +266,13 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
             break;
         }
         case ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API:
+        case ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT:
         {
             val = rocprofiler::hip::name_by_id<ROCPROFILER_HIP_TABLE_ID_Runtime>(operation);
             break;
         }
         case ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API:
+        case ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT:
         {
             val = rocprofiler::hip::name_by_id<ROCPROFILER_HIP_TABLE_ID_Compiler>(operation);
             break;
@@ -307,7 +312,7 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
             val = rocprofiler::rocjpeg::name_by_id<ROCPROFILER_ROCJPEG_TABLE_ID_CORE>(operation);
             break;
         }
-        case ROCPROFILER_BUFFER_TRACING_HIP_STREAM_API:
+        case ROCPROFILER_BUFFER_TRACING_HIP_STREAM:
         {
             val = rocprofiler::hip::stream::name_by_id(operation);
             break;
@@ -410,11 +415,13 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
             break;
         }
         case ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API:
+        case ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT:
         {
             ops = rocprofiler::hip::get_ids<ROCPROFILER_HIP_TABLE_ID_Runtime>();
             break;
         }
         case ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API:
+        case ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT:
         {
             ops = rocprofiler::hip::get_ids<ROCPROFILER_HIP_TABLE_ID_Compiler>();
             break;
@@ -453,7 +460,7 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
             ops = rocprofiler::rocjpeg::get_ids<ROCPROFILER_ROCJPEG_TABLE_ID_CORE>();
             break;
         }
-        case ROCPROFILER_BUFFER_TRACING_HIP_STREAM_API:
+        case ROCPROFILER_BUFFER_TRACING_HIP_STREAM:
         {
             ops = rocprofiler::hip::stream::get_ids();
             break;
@@ -466,6 +473,54 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
         if(_success != 0) break;
     }
     return ROCPROFILER_STATUS_SUCCESS;
+}
+
+rocprofiler_status_t
+rocprofiler_iterate_buffer_tracing_record_args(
+    rocprofiler_record_header_t                    record,
+    rocprofiler_buffer_tracing_operation_args_cb_t callback,
+    void*                                          user_data)
+{
+    switch(record.kind)
+    {
+        case ROCPROFILER_BUFFER_TRACING_NONE:
+        case ROCPROFILER_BUFFER_TRACING_LAST:
+        {
+            return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+        }
+        case ROCPROFILER_BUFFER_TRACING_HSA_CORE_API:
+        case ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API:
+        case ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API:
+        case ROCPROFILER_BUFFER_TRACING_HSA_FINALIZE_EXT_API:
+        case ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API:
+        case ROCPROFILER_BUFFER_TRACING_MARKER_CONTROL_API:
+        case ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API:
+        case ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY:
+        case ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH:
+        case ROCPROFILER_BUFFER_TRACING_MEMORY_COPY:
+        case ROCPROFILER_BUFFER_TRACING_RCCL_API:
+        {
+            return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+        }
+        case ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT:
+        {
+            auto* _payload =
+                static_cast<rocprofiler_buffer_tracing_hip_api_ext_record_t*>(record.payload);
+            rocprofiler::hip::iterate_args<ROCPROFILER_HIP_TABLE_ID_Compiler>(
+                _payload->operation, _payload->args, callback, user_data);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
+        case ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT:
+        {
+            auto* _payload =
+                static_cast<rocprofiler_buffer_tracing_hip_api_ext_record_t*>(record.payload);
+            rocprofiler::hip::iterate_args<ROCPROFILER_HIP_TABLE_ID_Runtime>(
+                _payload->operation, _payload->args, callback, user_data);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
+    }
+
+    return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
 }
 }
 

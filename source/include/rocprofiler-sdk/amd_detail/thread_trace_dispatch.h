@@ -37,7 +37,7 @@ ROCPROFILER_EXTERN_C_INIT
  * @{
  */
 
-typedef enum
+typedef enum rocprofiler_att_control_flags_t
 {
     ROCPROFILER_ATT_CONTROL_NONE           = 0,
     ROCPROFILER_ATT_CONTROL_START_AND_STOP = 3
@@ -55,13 +55,13 @@ typedef enum
  * @param [out] userdata_shader Userdata to be passed in shader_callback
  */
 typedef rocprofiler_att_control_flags_t (*rocprofiler_att_dispatch_callback_t)(
-    rocprofiler_agent_id_t       agent_id,
-    rocprofiler_queue_id_t       queue_id,
-    rocprofiler_correlation_id_t correlation_id,
-    rocprofiler_kernel_id_t      kernel_id,
-    rocprofiler_dispatch_id_t    dispatch_id,
-    void*                        userdata_config,
-    rocprofiler_user_data_t*     userdata_shader);
+    rocprofiler_agent_id_t             agent_id,
+    rocprofiler_queue_id_t             queue_id,
+    rocprofiler_async_correlation_id_t correlation_id,
+    rocprofiler_kernel_id_t            kernel_id,
+    rocprofiler_dispatch_id_t          dispatch_id,
+    void*                              userdata_config,
+    rocprofiler_user_data_t*           userdata_shader);
 
 /**
  * @brief Enables the advanced thread trace service for dispatch-based tracing.

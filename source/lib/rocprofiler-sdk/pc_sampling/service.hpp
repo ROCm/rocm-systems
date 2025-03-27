@@ -67,6 +67,12 @@ is_pc_sample_service_configured(rocprofiler_agent_id_t agent_id);
 
 rocprofiler_status_t
 flush_internal_agent_buffers(rocprofiler_buffer_id_t buffer_id);
+
+void
+service_sync();
+
+void
+service_fini();
 }  // namespace pc_sampling
 }  // namespace rocprofiler
 

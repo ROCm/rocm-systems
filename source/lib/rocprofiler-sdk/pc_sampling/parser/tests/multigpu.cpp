@@ -250,6 +250,7 @@ multithread_codeobj(size_t tid, Latch* latch)
         for(int s = 0; s < NUM_SAMPLES; s++)
         {
             uni.snap.pc = pc_base_addr + s;
+            uni.snap.perf_snapshot_data |= 0x1;  // sample is valid
             dispatch->submit(uni);
         }
 

@@ -33,5 +33,19 @@ get_output_stream()
     static std::ostream* _v = nullptr;
     return _v;
 }
+
+/**
+ * @brief Shows @p error_msg and aborts if @p condition is false.
+ *
+ */
+void
+pcs_assert(bool condition, std::string_view error_msg)
+{
+    if(!condition)
+    {
+        std::cerr << "PC Sampling Assertion Error: " << error_msg << "\n";
+        abort();
+    }
+}
 }  // namespace utils
 }  // namespace client

@@ -39,11 +39,11 @@ extern "C" {
  * @return ::rocprofiler_status_t
  */
 rocprofiler_status_t
-rocprofiler_configure_buffered_dispatch_counting_service(
-    rocprofiler_context_id_t                         context_id,
-    rocprofiler_buffer_id_t                          buffer_id,
-    rocprofiler_dispatch_counting_service_callback_t callback,
-    void*                                            callback_data_args)
+rocprofiler_configure_buffer_dispatch_counting_service(
+    rocprofiler_context_id_t                   context_id,
+    rocprofiler_buffer_id_t                    buffer_id,
+    rocprofiler_dispatch_counting_service_cb_t callback,
+    void*                                      callback_data_args)
 {
     return rocprofiler::counters::configure_buffered_dispatch(
         context_id, buffer_id, callback, callback_data_args);
@@ -63,11 +63,11 @@ rocprofiler_configure_buffered_dispatch_counting_service(
  */
 rocprofiler_status_t
 rocprofiler_configure_callback_dispatch_counting_service(
-    rocprofiler_context_id_t                         context_id,
-    rocprofiler_dispatch_counting_service_callback_t dispatch_callback,
-    void*                                            dispatch_callback_args,
-    rocprofiler_profile_counting_record_callback_t   record_callback,
-    void*                                            record_callback_args)
+    rocprofiler_context_id_t                   context_id,
+    rocprofiler_dispatch_counting_service_cb_t dispatch_callback,
+    void*                                      dispatch_callback_args,
+    rocprofiler_dispatch_counting_record_cb_t  record_callback,
+    void*                                      record_callback_args)
 {
     return rocprofiler::counters::configure_callback_dispatch(context_id,
                                                               dispatch_callback,

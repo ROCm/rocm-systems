@@ -75,6 +75,7 @@ dispatch_complete(queue_info_session_t& session, profiling_time dispatch_time)
     const auto& _extern_corr_ids  = session.tracing_data.external_correlation_ids;
     auto        _tid              = session.tid;
     auto        _internal_corr_id = (_corr_id) ? _corr_id->internal : 0;
+    auto        _ancestor_corr_id = (_corr_id) ? _corr_id->ancestor : 0;
 
     if(dispatch_time.status == HSA_STATUS_SUCCESS)
     {
@@ -88,6 +89,7 @@ dispatch_complete(queue_info_session_t& session, profiling_time dispatch_time)
                                                   _tid,
                                                   _internal_corr_id,
                                                   _extern_corr_ids,
+                                                  _ancestor_corr_id,
                                                   ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
                                                   ROCPROFILER_KERNEL_DISPATCH_COMPLETE,
                                                   tracer_data);
@@ -98,7 +100,7 @@ dispatch_complete(queue_info_session_t& session, profiling_time dispatch_time)
             auto record = kernel_dispatch_record_t{sizeof(kernel_dispatch_record_t),
                                                    ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
                                                    ROCPROFILER_KERNEL_DISPATCH_COMPLETE,
-                                                   rocprofiler_correlation_id_t{},
+                                                   rocprofiler_async_correlation_id_t{},
                                                    _tid,
                                                    callback_record.start_timestamp,
                                                    callback_record.end_timestamp,
@@ -108,6 +110,7 @@ dispatch_complete(queue_info_session_t& session, profiling_time dispatch_time)
                                                    _tid,
                                                    _internal_corr_id,
                                                    _extern_corr_ids,
+                                                   _ancestor_corr_id,
                                                    ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
                                                    ROCPROFILER_KERNEL_DISPATCH_COMPLETE,
                                                    record);

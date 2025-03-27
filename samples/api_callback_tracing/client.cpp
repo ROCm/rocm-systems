@@ -33,11 +33,10 @@
 
 #include "client.hpp"
 
-#include <rocprofiler-sdk/context.h>
-#include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/marker/api_id.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
+#include <rocprofiler-sdk/cxx/operators.hpp>
+#include <rocprofiler-sdk/cxx/version.hpp>
 
 #include "common/call_stack.hpp"
 #include "common/defines.hpp"
@@ -318,7 +317,7 @@ stop()
 
 extern "C" rocprofiler_tool_configure_result_t*
 rocprofiler_configure(uint32_t                 version,
-                      const char*              runtime_version,
+                      const char*              version_string,
                       uint32_t                 priority,
                       rocprofiler_client_id_t* id)
 {
@@ -336,20 +335,25 @@ rocprofiler_configure(uint32_t                 version,
     // generate info string
     auto info = std::stringstream{};
     info << id->name << " (priority=" << priority << ") is using rocprofiler-sdk v" << major << "."
-         << minor << "." << patch << " (" << runtime_version << ")";
+         << minor << "." << patch << " (" << version_string << ")";
 
     std::clog << info.str() << std::endl;
 
     // demonstration of alternative way to get the version info
     {
-        auto version_info = std::array<uint32_t, 3>{};
-        ROCPROFILER_CALL(
-            rocprofiler_get_version(&version_info.at(0), &version_info.at(1), &version_info.at(2)),
-            "failed to get version info");
+        auto runtime_version = rocprofiler_version_triplet_t{};
+        ROCPROFILER_CALL(rocprofiler_get_version_triplet(&runtime_version),
+                         "failed to get version info");
 
-        if(std::array<uint32_t, 3>{major, minor, patch} != version_info)
+        if(rocprofiler_version_triplet_t{major, minor, patch} != runtime_version)
         {
             throw std::runtime_error{"version info mismatch"};
+        }
+
+        if(rocprofiler_version_triplet_t{major, minor, patch} !=
+           rocprofiler::sdk::version::compute_version_triplet<100>(version))
+        {
+            throw std::runtime_error{"version triplet incorrectly calculated"};
         }
     }
 

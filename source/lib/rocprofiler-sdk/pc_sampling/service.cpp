@@ -263,6 +263,7 @@ flush_internal_agent_buffers(rocprofiler_buffer_id_t buffer_id)
     auto* service = get_configured_pc_sampling_service().load();
     if(service && ctx->pc_sampler.get() == service)
     {
+        rocprofiler_status_t status = ROCPROFILER_STATUS_SUCCESS;
         // The context `ctx` (that holds the buffer with `buffer_id`)
         // is the one containing PC sampling service.
         // The HSA interception table is registered.
@@ -272,13 +273,51 @@ flush_internal_agent_buffers(rocprofiler_buffer_id_t buffer_id)
             if(agent_session->buffer_id.handle == buffer_id.handle)
             {
                 // Flush internal PC sampling buffers filled by the agent
-                return hsa::flush_internal_agent_buffers(agent_session.get());
+                // NOTE: one rocprofiler-SDK PC sampling buffer can be tied
+                // to multiple agent (agent sessions).
+                status = hsa::flush_internal_agent_buffers(agent_session.get());
+                if(status != ROCPROFILER_STATUS_SUCCESS) return status;
             }
         }
     }
 
     // PC sampling service not configured.
     return ROCPROFILER_STATUS_SUCCESS;
+}
+
+rocprofiler_status_t
+flush_all_agent_buffers()
+{
+    auto* service = get_configured_pc_sampling_service().load();
+    if(!service) return ROCPROFILER_STATUS_ERROR;
+
+    rocprofiler_status_t status = ROCPROFILER_STATUS_SUCCESS;
+    // Loop over all agents that have PC sampling service configured
+    // and drain their internal buffers.
+    // NOTE: one SDK buffer can consume data from multiple agents
+    // (multiple HSA runtime buffers)
+    for(const auto& [_, agent_session] : service->agent_sessions)
+    {
+        status = flush_internal_agent_buffers(agent_session->buffer_id);
+        if(status != ROCPROFILER_STATUS_SUCCESS)
+        {
+            ROCP_ERROR << "Failed to flush internal HSA buffers tied to rocp buffer "
+                       << agent_session->buffer_id.handle;
+        }
+    }
+    return status;
+}
+
+void
+service_sync()
+{
+    flush_all_agent_buffers();
+}
+
+void
+service_fini()
+{
+    flush_all_agent_buffers();
 }
 
 }  // namespace pc_sampling

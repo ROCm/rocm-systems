@@ -146,7 +146,20 @@ parse_cpu_info()
                     if(itr.find("vendor_id") == 0)
                         info_v.vendor_id = value.str();
                     else if(itr.find("model name") == 0)
-                        info_v.model_name = value.str();
+                    {
+                        info_v.model_name      = value.str();
+                        size_t first_colon_pos = match.str().find(':');
+                        // This handles the case where the model name has multiple colons
+                        // Example "model name : AMD EPYC : 100-000000248"
+                        if(first_colon_pos != std::string::npos)
+                        {
+                            // Extract the model name after the first colon
+                            info_v.model_name = match.str().substr(first_colon_pos + 1);
+                            // Remove leading and trailing whitespaces
+                            info_v.model_name = std::regex_replace(
+                                info_v.model_name, std::regex("^\\s+|\\s+$"), "");
+                        }
+                    }
                     else if(itr.find("processor") == 0)
                         info_v.processor = std::stol(value.str());
                     else if(itr.find("cpu family") == 0)

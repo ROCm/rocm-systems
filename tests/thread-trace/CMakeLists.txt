@@ -18,7 +18,7 @@ if(NOT CMAKE_HIP_COMPILER)
 endif()
 
 project(
-    rocprofiler-tests-thread-trace
+    rocprofiler-sdk-tests-thread-trace
     LANGUAGES CXX HIP
     VERSION 0.0.0)
 

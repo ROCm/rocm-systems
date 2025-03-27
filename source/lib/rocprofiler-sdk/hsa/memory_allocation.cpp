@@ -362,7 +362,8 @@ memory_allocation_data::get_buffered_record(const context_t* _ctx,
 {
     auto _external_corr_id =
         (_ctx) ? tracing_data.external_correlation_ids.at(_ctx) : context::null_user_data;
-    auto _corr_id = rocprofiler_correlation_id_t{correlation_id->internal, _external_corr_id};
+    auto _corr_id = rocprofiler_correlation_id_t{
+        correlation_id->internal, _external_corr_id, correlation_id->ancestor};
 
     return common::init_public_api_struct(buffered_data_t{},
                                           ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
@@ -490,14 +491,20 @@ memory_allocation_impl(Args... args)
     _data.func           = rocprofiler_enum;
     _data.correlation_id = context::get_latest_correlation_id();
 
+    bool _constructed_corr_id = false;
     if(!_data.correlation_id)
     {
         constexpr auto ref_count = 1;
         _data.correlation_id     = context::correlation_tracing_service::construct(ref_count);
+        _constructed_corr_id     = true;
+    }
+    else
+    {
+        // increase the reference count to prevent this correlation ID from being retired by another
+        // service
+        _data.correlation_id->add_ref_count();
     }
 
-    // increase the reference count to denote that this correlation id is being used in a kernel
-    _data.correlation_id->add_ref_count();
     auto thr_id = _data.correlation_id->thread_idx;
     tracing::populate_external_correlation_ids(
         tracing_data.external_correlation_ids,
@@ -514,6 +521,7 @@ memory_allocation_impl(Args... args)
                                                thr_id,
                                                _data.correlation_id->internal,
                                                tracing_data.external_correlation_ids,
+                                               _data.correlation_id->ancestor,
                                                ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION,
                                                rocprofiler_enum,
                                                _tracer_data);
@@ -555,6 +563,7 @@ memory_allocation_impl(Args... args)
                                                    _data.tid,
                                                    _data.correlation_id->internal,
                                                    _data.tracing_data.external_correlation_ids,
+                                                   _data.correlation_id->ancestor,
                                                    ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
                                                    rocprofiler_enum,
                                                    record);
@@ -563,6 +572,9 @@ memory_allocation_impl(Args... args)
 
     // decrement the reference count after usage in the callback/buffers
     _data.correlation_id->sub_ref_count();
+
+    if(_constructed_corr_id) context::pop_latest_correlation_id(_data.correlation_id);
+
     return _ret;
 }
 
@@ -605,14 +617,20 @@ memory_free_impl(Args... args)
     _data.correlation_id = context::get_latest_correlation_id();
     _data.address        = handle_starting_addr(std::get<address_idx>(_tied_args));
 
+    bool _constructed_corr_id = false;
     if(!_data.correlation_id)
     {
         constexpr auto ref_count = 1;
         _data.correlation_id     = context::correlation_tracing_service::construct(ref_count);
+        _constructed_corr_id     = true;
+    }
+    else
+    {
+        // increase the reference count to prevent this correlation ID from being retired by another
+        // service
+        _data.correlation_id->add_ref_count();
     }
 
-    // increase the reference count to denote that this correlation id is being used in a kernel
-    _data.correlation_id->add_ref_count();
     auto thr_id = _data.correlation_id->thread_idx;
     tracing::populate_external_correlation_ids(
         tracing_data.external_correlation_ids,
@@ -629,6 +647,7 @@ memory_free_impl(Args... args)
                                                thr_id,
                                                _data.correlation_id->internal,
                                                tracing_data.external_correlation_ids,
+                                               _data.correlation_id->ancestor,
                                                ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION,
                                                rocprofiler_enum,
                                                _tracer_data);
@@ -664,6 +683,7 @@ memory_free_impl(Args... args)
                                                    _data.tid,
                                                    _data.correlation_id->internal,
                                                    _data.tracing_data.external_correlation_ids,
+                                                   _data.correlation_id->ancestor,
                                                    ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
                                                    rocprofiler_enum,
                                                    record);
@@ -672,6 +692,9 @@ memory_free_impl(Args... args)
 
     // decrement the reference count after usage in the callback/buffers
     _data.correlation_id->sub_ref_count();
+
+    if(_constructed_corr_id) context::pop_latest_correlation_id(_data.correlation_id);
+
     return _ret;
 }
 
