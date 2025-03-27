@@ -503,7 +503,12 @@ amdsmi_status_t smi_amdgpu_get_ecc_error_count(amd::smi::AMDSmiGPUDevice* device
     std::ifstream f(fullpath.c_str());
 
     if (f.fail()) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
+        //fall back to aca file
+        fullpath = "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/ras/aca_umc");
+        f.open(fullpath.c_str());
+        if (f.fail()) {
+            return AMDSMI_STATUS_NOT_SUPPORTED;
+        }
     }
 
     std::string line;
