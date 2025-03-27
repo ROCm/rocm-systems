@@ -1818,6 +1818,17 @@ get_use_amd_smi()
 #endif
 }
 
+bool
+get_use_rocm()
+{
+#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
+    static auto _v = get_config()->find("ROCPROFSYS_USE_ROCM");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+#else
+    return false;
+#endif
+}
+
 bool&
 get_use_sampling()
 {

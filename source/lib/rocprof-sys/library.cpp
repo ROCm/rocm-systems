@@ -820,7 +820,7 @@ rocprofsys_finalize_hidden(void)
     }
 
 #if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
-    // TODO: option for rocm
+    if(get_use_rocm())
     {
         ROCPROFSYS_VERBOSE_F(1, "Shutting down ROCm...\n");
         rocprofiler_sdk::shutdown();

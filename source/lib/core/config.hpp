@@ -205,6 +205,9 @@ bool&
 get_use_causal() ROCPROFSYS_HOT;
 
 bool
+get_use_rocm() ROCPROFSYS_HOT;
+
+bool
 get_use_amd_smi() ROCPROFSYS_HOT;
 
 bool&

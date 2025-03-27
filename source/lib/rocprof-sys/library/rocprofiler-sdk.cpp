@@ -1297,6 +1297,11 @@ rocprofiler_configure(uint32_t version, const char* runtime_version, uint32_t pr
        rocprofsys::get_state() < rocprofsys::State::Active)
         rocprofsys_init_tooling_hidden();
 
+    if(!rocprofsys::config::get_use_rocm())
+    {
+        return nullptr;
+    }
+
     // set the client name
     id->name = "rocprofsys";
 
