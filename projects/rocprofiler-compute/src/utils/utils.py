@@ -451,6 +451,7 @@ def v3_counter_csv_to_v2_csv(counter_file, agent_info_filepath, converted_csv_fi
         )
     )
     if result["Agent_Id"].dtype == "object":
+        # Apply the function to the 'Agent_Id' column and store it as int64
         try:
             result["Agent_Id"] = (
                 result["Agent_Id"]
@@ -560,7 +561,7 @@ def run_prof(
     # standard rocprof options
     default_options = ["-i", fname]
     options = default_options + profiler_options
-    if path_counter_config_yaml.exists():
+    if using_v3() and path_counter_config_yaml.exists():
         options = ["-E", str(path_counter_config_yaml)] + options
 
     # set required env var for mi300
