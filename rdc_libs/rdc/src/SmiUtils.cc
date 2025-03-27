@@ -23,6 +23,7 @@ THE SOFTWARE.
 #include "rdc_lib/impl/SmiUtils.h"
 
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
@@ -79,44 +80,59 @@ rdc_status_t Smi2RdcError(amdsmi_status_t rsmi) {
 
 amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,
                                              amdsmi_processor_handle* processor_handle) {
-  uint32_t socket_count;
-  uint32_t processor_count;
-  auto ret = amdsmi_get_socket_handles(&socket_count, nullptr);
+  uint32_t socket_count = 0;
+  amdsmi_status_t ret = amdsmi_get_socket_handles(&socket_count, nullptr);
   if (ret != AMDSMI_STATUS_SUCCESS) {
     return ret;
   }
-  std::vector<amdsmi_socket_handle> sockets(socket_count);
-  std::vector<amdsmi_processor_handle> all_processors{};
-  ret = amdsmi_get_socket_handles(&socket_count, sockets.data());
-  for (auto& socket : sockets) {
-    ret = amdsmi_get_processor_handles(socket, &processor_count, nullptr);
-    if (ret != AMDSMI_STATUS_SUCCESS) {
-      return ret;
-    }
-    std::vector<amdsmi_processor_handle> processors(processor_count);
-    ret = amdsmi_get_processor_handles(socket, &processor_count, processors.data());
-    if (ret != AMDSMI_STATUS_SUCCESS) {
-      return ret;
-    }
 
-    for (auto& processor : processors) {
-      processor_type_t processor_type = {};
-      ret = amdsmi_get_processor_type(processor, &processor_type);
-      if (processor_type != AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
-        RDC_LOG(RDC_ERROR, "Expect AMD_GPU device type!");
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-      }
-      all_processors.push_back(processor);
-    }
+  std::vector<amdsmi_socket_handle> sockets(socket_count);
+  ret = amdsmi_get_socket_handles(&socket_count, sockets.data());
+  if (ret != AMDSMI_STATUS_SUCCESS) {
+    return ret;
   }
 
-  if (gpu_id >= all_processors.size()) {
+  std::vector<std::vector<amdsmi_processor_handle>> procs_by_socket;
+  procs_by_socket.resize(socket_count);
+
+  for (size_t s = 0; s < sockets.size(); s++) {
+    uint32_t proc_count = 0;
+    ret = amdsmi_get_processor_handles(sockets[s], &proc_count, nullptr);
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+      return ret;
+    }
+
+    std::vector<amdsmi_processor_handle> procs(proc_count);
+    ret = amdsmi_get_processor_handles(sockets[s], &proc_count, procs.data());
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+      return ret;
+    }
+
+    for (auto& proc : procs) {
+      processor_type_t proc_type = {};
+      ret = amdsmi_get_processor_type(proc, &proc_type);
+      if (proc_type != AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
+        return AMDSMI_STATUS_NOT_SUPPORTED;
+      }
+    }
+
+    procs_by_socket[s] = procs;
+  }
+
+  rdc_entity_info_t info = rdc_get_info_from_entity_index(gpu_id);
+  uint32_t socket_index = info.device_index;
+  uint32_t instance_index = info.instance_index;
+
+  if (socket_index >= procs_by_socket.size()) {
     return AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS;
   }
 
-  // Get processor handle from GPU id
-  *processor_handle = all_processors[gpu_id];
+  const auto& handles = procs_by_socket[socket_index];
+  if (instance_index >= handles.size()) {
+    return AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS;
+  }
 
+  *processor_handle = handles[instance_index];
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -139,6 +155,70 @@ amdsmi_status_t get_processor_count(uint32_t& all_processor_count) {
   }
   all_processor_count = total_processor_count;
   return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t get_socket_handles(std::vector<amdsmi_socket_handle>& sockets) {
+  uint32_t socket_count = 0;
+  amdsmi_status_t ret = amdsmi_get_socket_handles(&socket_count, nullptr);
+  if (ret != AMDSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  sockets.resize(socket_count);
+
+  ret = amdsmi_get_socket_handles(&socket_count, sockets.data());
+
+  return ret;
+}
+
+amdsmi_status_t get_processor_handles(amdsmi_socket_handle socket,
+                                      std::vector<amdsmi_processor_handle>& processors) {
+  uint32_t processor_count = 0;
+  amdsmi_status_t ret = amdsmi_get_processor_handles(socket, &processor_count, nullptr);
+  if (ret != AMDSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  processors.resize(processor_count);
+
+  ret = amdsmi_get_processor_handles(socket, &processor_count, processors.data());
+
+  return ret;
+}
+
+amdsmi_status_t get_kfd_partition_id(amdsmi_processor_handle proc, uint32_t* partition_id) {
+  amdsmi_kfd_info_t kfd_info = {};
+  amdsmi_status_t ret = amdsmi_get_gpu_kfd_info(proc, &kfd_info);
+  if (ret != AMDSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+  *partition_id = kfd_info.current_partition_id;
+  return ret;
+}
+
+amdsmi_status_t get_metrics_info(amdsmi_processor_handle proc, amdsmi_gpu_metrics_t* metrics) {
+  amdsmi_status_t ret = amdsmi_get_gpu_metrics_info(proc, metrics);
+  return ret;
+}
+
+amdsmi_status_t get_num_partition(uint32_t index, uint16_t* num_partition) {
+  // Get the processor handle for the physical device.
+  amdsmi_processor_handle proc_handle;
+  amdsmi_status_t ret = get_processor_handle_from_id(index, &proc_handle);
+  if (ret != AMDSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  amdsmi_gpu_metrics_t metrics;
+  memset(&metrics, 0, sizeof(metrics));
+  ret = get_metrics_info(proc_handle, &metrics);
+  if (ret != AMDSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  *num_partition = metrics.num_partition;
+
+  return ret;
 }
 
 }  // namespace rdc

@@ -532,8 +532,26 @@ rdc_status_t rdc_link_status_get(rdc_handle_t p_rdc_handle, rdc_link_status_t* r
   if (!p_rdc_handle) {
     return RDC_ST_INVALID_HANDLER;
   }
+  return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->rdc_link_status_get(results);
+}
+
+rdc_status_t rdc_get_num_partition(rdc_handle_t p_rdc_handle, uint32_t index,
+                                   uint16_t* num_partition) {
+  if (!p_rdc_handle || !num_partition) {
+    return RDC_ST_INVALID_HANDLER;
+  }
   return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
-      ->rdc_link_status_get(results);
+    ->rdc_get_num_partition(index, num_partition);
+}
+
+rdc_status_t rdc_instance_profile_get(rdc_handle_t p_rdc_handle, uint32_t entity_index,
+  rdc_instance_resource_type_t resource_type,
+  rdc_resource_profile_t* profile) {
+  if (!p_rdc_handle || !profile) {
+    return RDC_ST_INVALID_HANDLER;
+  }
+  return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
+    ->rdc_instance_profile_get(entity_index, resource_type, profile);
 }
 
 const char * get_rocm_path(const char * search_string) {
@@ -573,4 +591,3 @@ const char * get_rocm_path(const char * search_string) {
 
   return rocm_path.c_str();
 }
-

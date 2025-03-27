@@ -126,8 +126,14 @@ class RdcStandaloneHandler : public RdcHandler {
   rdc_status_t rdc_health_check(rdc_gpu_group_t group_id, rdc_health_response_t* response) override;
   rdc_status_t rdc_health_clear(rdc_gpu_group_t group_id) override;
   rdc_status_t rdc_device_topology_get(uint32_t gpu_index, rdc_device_topology_t* results) override;
-  
+
   rdc_status_t rdc_link_status_get(rdc_link_status_t* results) override;
+
+  rdc_status_t rdc_get_num_partition(uint32_t index, uint16_t* num_partition) override;
+
+  rdc_status_t rdc_instance_profile_get(uint32_t entity_index,
+                                        rdc_instance_resource_type_t resource_type,
+                                        rdc_resource_profile_t* profile) override;
 
   explicit RdcStandaloneHandler(const char* ip_and_port, const char* root_ca,
                                 const char* client_cert, const char* client_key);

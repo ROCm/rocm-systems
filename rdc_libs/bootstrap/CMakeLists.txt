@@ -12,12 +12,14 @@ set(BOOTSTRAP_LIB_SRC_LIST
     "${COMMON_DIR}/rdc_fields_supported.cc"
     "${SRC_DIR}/RdcBootStrap.cc"
     "${SRC_DIR}/RdcLibraryLoader.cc"
-    "${SRC_DIR}/RdcLogger.cc")
+    "${SRC_DIR}/RdcLogger.cc"
+    "${SRC_DIR}/RdcEntityCodec.cc")
 set(BOOTSTRAP_LIB_INC_LIST
     "${COMMON_DIR}/rdc_fields_supported.h"
     "${INC_DIR}/RdcHandler.h"
     "${INC_DIR}/RdcLibraryLoader.h"
     "${INC_DIR}/RdcLogger.h"
+    "${INC_DIR}/RdcEntityCodec.h"
     "${INC_DIR}/rdc_common.h"
     "${PROJECT_SOURCE_DIR}/include/rdc/rdc.h")
 message("BOOTSTRAP_LIB_INC_LIST=${BOOTSTRAP_LIB_INC_LIST}")

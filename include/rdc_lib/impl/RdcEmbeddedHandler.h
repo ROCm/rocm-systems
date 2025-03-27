@@ -32,6 +32,7 @@ THE SOFTWARE.
 #include "rdc_lib/RdcMetricsUpdater.h"
 #include "rdc_lib/RdcModuleMgr.h"
 #include "rdc_lib/RdcNotification.h"
+#include "rdc_lib/RdcPartition.h"
 #include "rdc_lib/RdcPolicy.h"
 #include "rdc_lib/RdcTopologyLink.h"
 #include "rdc_lib/RdcWatchTable.h"
@@ -121,7 +122,7 @@ class RdcEmbeddedHandler final : public RdcHandler {
   rdc_status_t rdc_health_check(rdc_gpu_group_t group_id, rdc_health_response_t* response) override;
   rdc_status_t rdc_health_clear(rdc_gpu_group_t group_id) override;
   rdc_status_t rdc_device_topology_get(uint32_t gpu_index, rdc_device_topology_t* results) override;
-  
+
   rdc_status_t rdc_link_status_get(rdc_link_status_t* results) override;
 
   // Set one configure
@@ -134,11 +135,18 @@ class RdcEmbeddedHandler final : public RdcHandler {
   // Clear the setting
   rdc_status_t rdc_config_clear(rdc_gpu_group_t group_id) override;
 
+  rdc_status_t rdc_get_num_partition(uint32_t index, uint16_t* num_partition) override;
+
+  rdc_status_t rdc_instance_profile_get(uint32_t entity_index,
+                                        rdc_instance_resource_type_t resource_type,
+                                        rdc_resource_profile_t* profile) override;
+
   explicit RdcEmbeddedHandler(rdc_operation_mode_t op_mode);
   ~RdcEmbeddedHandler() final;
 
  private:
   rdc_status_t get_gpu_gauges(rdc_gpu_gauges_t* gpu_gauges);
+  RdcPartitionPtr partition_;
   RdcGroupSettingsPtr group_settings_;
   RdcCacheManagerPtr cache_mgr_;
   RdcMetricFetcherPtr metric_fetcher_;
@@ -150,7 +158,6 @@ class RdcEmbeddedHandler final : public RdcHandler {
   RdcTopologyLinkPtr topologylink_;
   RdcConfigSettingsPtr config_handler_;
   std::future<void> updater_;
-  
 };
 
 }  // namespace rdc

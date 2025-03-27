@@ -1071,7 +1071,7 @@ int RdcAPIServiceImpl::PolicyCallback(rdc_policy_callback_response_t* userData) 
         static_cast<::rdc::TopologyLinkInfo_LinkType>(topology_results.link_infos[i].link_type));
     linkinfos->set_p2p_accessible(topology_results.link_infos[i].is_p2p_accessible);
   }
-    return ::grpc::Status::OK;
+  return ::grpc::Status::OK;
 }
 
 ::grpc::Status RdcAPIServiceImpl::SetConfig(::grpc::ServerContext* context,
@@ -1140,11 +1140,54 @@ int RdcAPIServiceImpl::PolicyCallback(rdc_policy_callback_response_t* userData) 
     gpulinkstatus->set_link_types(
         static_cast<::rdc::GpuLinkStatus_LinkTypes>(link_status_results.gpus[i].link_types));
     for (uint32_t n = 0; n < link_status_results.gpus[i].num_of_links; n++) {
-      gpulinkstatus->add_link_states(static_cast<::rdc::GpuLinkStatus_LinkState>(
-                                            link_status_results.gpus[i].link_states[n]));
+      gpulinkstatus->add_link_states(
+          static_cast<::rdc::GpuLinkStatus_LinkState>(link_status_results.gpus[i].link_states[n]));
     }
   }
 
+  return ::grpc::Status::OK;
+}
+
+::grpc::Status RdcAPIServiceImpl::GetNumPartition(::grpc::ServerContext* context,
+                                                  const ::rdc::GetNumPartitionRequest* request,
+                                                  ::rdc::GetNumPartitionResponse* reply) {
+  (void)context;
+  if (!request || !reply) {
+    return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty request or reply");
+  }
+
+  uint32_t gpu_index = request->gpu_index();
+  uint16_t num_partition = 0;
+  rdc_status_t result = rdc_get_num_partition(rdc_handle_, gpu_index, &num_partition);
+  reply->set_status(result);
+  if (result == RDC_ST_OK) {
+    reply->set_num_partition(num_partition);
+  }
+  return ::grpc::Status::OK;
+}
+
+::grpc::Status RdcAPIServiceImpl::GetInstanceProfile(
+    ::grpc::ServerContext* context, const ::rdc::GetInstanceProfileRequest* request,
+    ::rdc::GetInstanceProfileResponse* reply) {
+  (void)context;
+  if (!request || !reply) {
+    return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty request or reply");
+  }
+
+  uint32_t entity_index = request->entity_index();
+  uint32_t resource_type = request->resource_type();
+  rdc_resource_profile_t profile;
+  memset(&profile, 0, sizeof(profile));
+
+  // Call the RDC API that (in embedded mode) uses AMD SMI
+  rdc_status_t result =
+      rdc_instance_profile_get(rdc_handle_, entity_index,
+                               static_cast<rdc_instance_resource_type_t>(resource_type), &profile);
+  reply->set_status(result);
+  if (result == RDC_ST_OK) {
+    reply->set_partition_resource(profile.partition_resource);
+    reply->set_num_partitions_share_resource(profile.num_partitions_share_resource);
+  }
   return ::grpc::Status::OK;
 }
 

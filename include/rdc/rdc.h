@@ -130,6 +130,11 @@ typedef enum { INTEGER = 0, DOUBLE, STRING, BLOB } rdc_field_type_t;
 #define RDC_MAX_NUM_DEVICES 128
 
 /**
+ * @brief Max number of partitions
+ */
+#define RDC_MAX_NUM_PARTITIONS 8
+
+/**
  * @brief The max fields in a field group
  */
 #define RDC_MAX_FIELD_IDS_PER_FIELD_GROUP 128
@@ -1616,6 +1621,139 @@ rdc_status_t rdc_config_get(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
 rdc_status_t rdc_config_clear(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id);
 
 const char* get_rocm_path(const char* search_string);
+
+/**
+ * @brief The device role
+ */
+typedef enum {
+  RDC_DEVICE_ROLE_PHYSICAL,
+  RDC_DEVICE_ROLE_PARTITION_INSTANCE  //!< The partition instance
+} rdc_device_role_t;
+
+/**
+ * @brief The device type
+ */
+typedef enum { RDC_DEVICE_TYPE_GPU, RDC_DEVICE_TYPE_CPU } rdc_device_type_t;
+
+typedef struct {
+  uint32_t device_index;          //!< Physical device index
+  uint32_t instance_index;        //!< Instance or core index
+  rdc_device_role_t entity_role;  //!< Physical device or partition instance
+  rdc_device_type_t device_type;  //!< Type
+} rdc_entity_info_t;
+
+/**
+ * @brief The function to decode the entity info from entity index
+ * @details
+ * | 31 30 29| 28 27 | 21 20 19 ... 12 11 |    10 9 8 7 6 5 4 3 2 1 0 |
+ * |---------|-------|--------------------|---------------------------|
+ * | Type    | Role  |     Instance       |     Device                |
+ * |---------|-------|--------------------|---------------------------|
+ *  the 32 bit entity index is crafted based on above structure, this function
+ *  will decode them into a data structure
+ *
+ *  @param[in] entity_index The entity index.
+ *
+ *  @retval rdc_entity_info_t is returned for decode structure
+ */
+
+rdc_entity_info_t rdc_get_info_from_entity_index(uint32_t entity_index);
+
+/**
+ * @brief The function to encode the entity info to entity index
+ * @details
+ * | 31 30 29| 28 27 | 21 20 19 ... 12 11 |    10 9 8 7 6 5 4 3 2 1 0 |
+ * |---------|-------|--------------------|---------------------------|
+ * | Type    | Role  |     Instance       |     Device                |
+ * |---------|-------|--------------------|---------------------------|
+ *  the 32 bit entity index is crafted based on above structure, this function
+ *  will encode them to index
+ *
+ *  @param[in] info The entity info to encode.
+ *
+ *  @retval entity_index is returned
+ */
+uint32_t rdc_get_entity_index_from_info(rdc_entity_info_t info);
+
+// map from amdsmi_accelerator_partition_resource_type_t
+typedef enum {
+  RDC_ACCELERATOR_XCC = 0,
+  RDC_ACCELERATOR_ENCODER,
+  RDC_ACCELERATOR_DECODER,
+  RDC_ACCELERATOR_DMA,
+  RDC_ACCELERATOR_JPEG,
+  RDC_ACCELERATOR_RESOURCE_MAX,
+  RDC_ACCELERATOR_LAST = RDC_ACCELERATOR_RESOURCE_MAX
+} rdc_instance_resource_type_t;
+
+// map from amdsmi_accelerator_partition_resource_profile_t
+typedef struct {
+  rdc_instance_resource_type_t resource_type;
+  uint32_t partition_resource;  // The resources a partition can be used, which may be shared
+  uint32_t num_partitions_share_resource;  // If it is greater than 1, then resource is shared.
+} rdc_resource_profile_t;
+
+/**
+ *  @brief Query the resource allocation for a device/instance
+ *
+ *  @details The profile contains detail information how resource is allocated.
+ *
+ *  As an example, MI300X has 8 XCCs and 4 Decoders, in DPX mode, the physical device is
+ *  partitioned to 2 instances, so each instance will have 4 XCC and 2 Decoder and they are
+ *  not shared.
+ *  [XCC, 4, 0], [DECODER, 2, 0]
+ *
+ *  If it is CPX mode, the physical device is partitioned to 8 instances, and each instance
+ *  have 1 XCC and 2 instances are sharing the same decoder.
+ *  [XCC, 1, 0], [DECODER, 1, 1]
+ *
+ *  If entity_index is the physical device, it should return all resources of the device:
+ *  [XCC, 8, 0], [DECODER, 4, 0]
+ *
+ *  @param[in] p_rdc_handle The RDC handler.
+ *
+ *  @param[in] entity_index The GPU index to query. It can be physical device or instance.
+ *
+ *  @param[in] resource_type Which resource type to query
+ *
+ *  @param[out] profile  The details how the resource is allocated.
+ *
+ *  @retval ::RDC_ST_OK is returned upon successful call.
+ */
+rdc_status_t rdc_instance_profile_get(rdc_handle_t p_rdc_handle, uint32_t entity_index,
+                                      rdc_instance_resource_type_t resource_type,
+                                      rdc_resource_profile_t* profile);
+
+/**
+ * @brief Get the number of partitions for the specified GPU index.
+ *
+ * @param[in] p_rdc_handle The RDC handler.
+ * @param[in] index The GPU index to query.
+ * @param[out] num_partition Pointer to a variable to receive the number of partitions.
+ *
+ * @retval ::RDC_ST_OK on success.
+ */
+rdc_status_t rdc_get_num_partition(rdc_handle_t p_rdc_handle, uint32_t index,
+                                   uint16_t* num_partition);
+
+/**
+ * @brief Check if gpuid is partition string
+ *
+ * @param[in] s - singular partition string
+ * @retval bool - if partition string or not
+ */
+bool rdc_is_partition_string(const char* s);
+
+/**
+ * @brief Parse partition id into physical gpu and partition
+ *
+ * @param[in] s - singular partition string
+ * @param[out] physicalGpu - socket id
+ * @param[out] partition - partition id
+ *
+ * @retval bool - success
+ */
+bool rdc_parse_partition_string(const char* s, uint32_t* physicalGpu, uint32_t* partition);
 
 #ifdef __cplusplus
 }

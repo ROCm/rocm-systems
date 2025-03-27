@@ -471,9 +471,18 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
 
   amdsmi_processor_handle processor_handle = {};
 
-  amdsmi_status_t ret = get_processor_handle_from_id(gpu_index, &processor_handle);
+  rdc_entity_info_t info = rdc_get_info_from_entity_index(gpu_index);
+
+  amdsmi_status_t ret = get_processor_handle_from_id(info.device_index, &processor_handle);
   if (ret != AMDSMI_STATUS_SUCCESS) {
-    RDC_LOG(RDC_ERROR, "Failed to get processor handle for GPU " << gpu_index << " error: " << ret);
+    std::string info_str;
+    if (info.entity_role == RDC_DEVICE_ROLE_PARTITION_INSTANCE) {
+      info_str =
+          "g" + std::to_string(info.device_index) + "." + std::to_string(info.instance_index);
+    } else {
+      info_str = std::to_string(info.device_index);
+    }
+    RDC_LOG(RDC_ERROR, "Failed to get processor handle for GPU " << info_str << " error: " << ret);
     return Smi2RdcError(ret);
   }
 
@@ -485,6 +494,138 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
   value->ts = now();
   value->field_id = field_id;
   value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+
+  if (info.entity_role == RDC_DEVICE_ROLE_PARTITION_INSTANCE) {
+    uint16_t num_partitions = 0;
+    amdsmi_status_t st = get_num_partition(info.device_index, &num_partitions);
+    if (st != AMDSMI_STATUS_SUCCESS) {
+      RDC_LOG(RDC_ERROR, "Failed to get partition info for GPU " << info.device_index);
+      return RDC_ST_UNKNOWN_ERROR;
+    }
+
+    amdsmi_processor_handle processor_handle = {};
+    amdsmi_status_t ret = get_processor_handle_from_id(gpu_index, &processor_handle);
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+      RDC_LOG(RDC_ERROR, "Cannot get processor handle for partition " << info.instance_index);
+      return Smi2RdcError(ret);
+    }
+
+    amdsmi_gpu_metrics_t gpu_metrics = {};
+    ret = amdsmi_get_gpu_metrics_info(processor_handle, &gpu_metrics);
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+      RDC_LOG(RDC_ERROR, "Failed to get GPU metrics info for partition " << info.instance_index);
+      return Smi2RdcError(ret);
+    }
+
+    switch (field_id) {
+      case RDC_FI_GPU_CLOCK: {
+        const uint16_t* clock_array = gpu_metrics.current_gfxclks;
+        std::vector<uint16_t> valid_clocks;
+        valid_clocks.reserve(8);
+
+        for (uint32_t i = 0; i < 8; i++) {
+          uint16_t clk = clock_array[i];
+          if (clk != 0 && clk != 0xFFFF) {
+            valid_clocks.push_back(clk);
+          }
+        }
+
+        uint32_t vc = static_cast<uint32_t>(valid_clocks.size());
+        uint32_t pCount = static_cast<uint32_t>(num_partitions);
+        uint32_t partIdx = info.instance_index;
+
+        if (valid_clocks.empty() || vc < num_partitions) {
+          RDC_LOG(RDC_ERROR, "No valid clocks, or less than total partitions");
+          return RDC_ST_NO_DATA;
+        }
+
+        if (vc == num_partitions) {
+          value->value.l_int = clock_array[info.instance_index] * 1000000;
+          value->type = INTEGER;
+          value->status = RDC_ST_OK;
+          return RDC_ST_OK;
+        }
+
+        uint32_t chunk_size = vc / pCount;
+        uint32_t start_idx = partIdx * chunk_size;
+        uint32_t end_idx = start_idx + chunk_size;
+
+        // Average partition clocks
+        uint64_t sum = 0;
+        for (uint32_t i = start_idx; i < end_idx; i++) {
+          sum += valid_clocks[i];
+        }
+        uint32_t count = end_idx - start_idx;
+        if (count == 0) {
+          return RDC_ST_NO_DATA;
+        }
+        uint64_t avg_clock = sum / count;
+
+        value->value.l_int = avg_clock * 1000000;
+        value->type = INTEGER;
+        value->status = RDC_ST_OK;
+        return RDC_ST_OK;
+      }
+
+      case RDC_FI_GPU_UTIL: {
+        uint32_t p = info.instance_index;
+        if (p >= AMDSMI_MAX_NUM_XCP) {
+          return RDC_ST_NO_DATA;
+        }
+        const amdsmi_gpu_xcp_metrics_t& xcp = gpu_metrics.xcp_stats[p];
+
+        uint64_t sum = 0;
+        uint32_t count = 0;
+        for (uint32_t i = 0; i < AMDSMI_MAX_NUM_XCC; i++) {
+          uint32_t busy = xcp.gfx_busy_inst[i];
+          if (busy != UINT32_MAX) {
+            sum += busy;
+            count++;
+          }
+        }
+        if (count == 0) {
+          return RDC_ST_NO_DATA;
+        }
+        uint64_t avg_busy = sum / count;
+        value->value.l_int = avg_busy;
+        value->type = INTEGER;
+        value->status = RDC_ST_OK;
+        return RDC_ST_OK;
+      }
+
+      case RDC_FI_GPU_MM_DEC_UTIL: {
+        uint32_t p = info.instance_index;
+        if (p >= AMDSMI_MAX_NUM_XCP) {
+          return RDC_ST_NO_DATA;
+        }
+        const amdsmi_gpu_xcp_metrics_t& xcp = gpu_metrics.xcp_stats[p];
+
+        uint64_t sum = 0;
+        uint32_t count = 0;
+        for (uint32_t i = 0; i < AMDSMI_MAX_NUM_VCN; i++) {
+          uint16_t vcn = xcp.vcn_busy[i];
+          if (vcn != UINT16_MAX) {
+            sum += vcn;
+            count++;
+          }
+        }
+        if (count == 0) {
+          return RDC_ST_NO_DATA;
+        }
+        uint64_t avg_decode = sum / count;
+        value->value.l_int = avg_decode;
+        value->type = INTEGER;
+        value->status = RDC_ST_OK;
+        return RDC_ST_OK;
+      }
+
+      default:
+        // All other fields => N/A for partition
+        RDC_LOG(RDC_DEBUG, "Partition " << gpu_index << ": Field " << field_id_string(field_id)
+                                        << " not supported => NO_DATA.");
+        return RDC_ST_NO_DATA;
+    }
+  }  // end if partition
 
   auto read_smi_counter = [&](void) {
     RdcFieldKey f_key(gpu_index, field_id);
@@ -600,12 +741,11 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
       break;
     }
     case RDC_FI_GPU_COUNT: {
-      uint32_t processor_count = 0;
-      // amdsmi is initialized in AMDSMI_INIT_AMD_GPUS mode -> returned sockets are GPUs
-      value->status = get_processor_count(processor_count);
+      uint32_t socket_count = 0;
+      value->status = amdsmi_get_socket_handles(&socket_count, nullptr);
       value->type = INTEGER;
       if (value->status == AMDSMI_STATUS_SUCCESS) {
-        value->value.l_int = static_cast<int64_t>(processor_count);
+        value->value.l_int = static_cast<int64_t>(socket_count);
       }
     } break;
     case RDC_FI_POWER_USAGE: {
@@ -913,8 +1053,9 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
             value->value.l_int = static_cast<int64_t>(pending_page_num);
           }
         }
-      } else
+      } else {
         value->status = Smi2RdcError(ret);
+      }
       break;
     }
 

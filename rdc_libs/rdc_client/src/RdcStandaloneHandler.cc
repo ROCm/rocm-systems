@@ -1075,5 +1075,41 @@ rdc_status_t RdcStandaloneHandler::rdc_link_status_get(rdc_link_status_t* result
   return RDC_ST_OK;
 }
 
+rdc_status_t RdcStandaloneHandler::rdc_get_num_partition(uint32_t index, uint16_t* num_partition) {
+  ::rdc::GetNumPartitionRequest request;
+  request.set_gpu_index(index);
+  ::rdc::GetNumPartitionResponse reply;
+  ::grpc::ClientContext context;
+
+  ::grpc::Status status = stub_->GetNumPartition(&context, request, &reply);
+  rdc_status_t err_status = error_handle(status, reply.status());
+  if (err_status != RDC_ST_OK) {
+    return err_status;
+  }
+  *num_partition = reply.num_partition();
+  return RDC_ST_OK;
+}
+
+rdc_status_t RdcStandaloneHandler::rdc_instance_profile_get(
+    uint32_t entity_index, rdc_instance_resource_type_t resource_type,
+    rdc_resource_profile_t* profile) {
+  ::rdc::GetInstanceProfileRequest request;
+  request.set_entity_index(entity_index);
+  request.set_resource_type(static_cast<uint32_t>(resource_type));
+
+  ::rdc::GetInstanceProfileResponse reply;
+  ::grpc::ClientContext context;
+
+  ::grpc::Status status = stub_->GetInstanceProfile(&context, request, &reply);
+  rdc_status_t err_status = error_handle(status, reply.status());
+  if (err_status != RDC_ST_OK) {
+    return err_status;
+  }
+
+  profile->partition_resource = reply.partition_resource();
+  profile->num_partitions_share_resource = reply.num_partitions_share_resource();
+  return RDC_ST_OK;
+}
+
 }  // namespace rdc
 }  // namespace amd

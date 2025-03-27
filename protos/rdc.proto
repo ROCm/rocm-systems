@@ -219,6 +219,13 @@ service RdcAPI {
 
   // rdc_status_t GetLinkStatus()
   rpc GetLinkStatus(Empty) returns (GetLinkStatusResponse) {}
+  
+  // Get number of partitions
+  rpc GetNumPartition(GetNumPartitionRequest) returns (GetNumPartitionResponse);
+
+  // Get instance profile of gpu
+  rpc GetInstanceProfile(GetInstanceProfileRequest) returns (GetInstanceProfileResponse);
+
 }
 
 message Empty {
@@ -803,4 +810,29 @@ message ClearConfigRequest {
 
 message ClearConfigResponse {
   uint32 status = 1;
+}
+
+// Request for getting the number of partitions for a given GPU index.
+message GetNumPartitionRequest {
+  // The GPU index for which to query the number of partitions.
+  uint32 gpu_index = 1;
+}
+
+// Response for getting the number of partitions.
+message GetNumPartitionResponse {
+  // Status of the operation, following RDC_ST_* codes.
+  uint32 status = 1;
+  // Number of partitions for the given GPU.
+  uint32 num_partition = 2;
+}
+
+message GetInstanceProfileRequest {
+  uint32 entity_index = 1;
+  uint32 resource_type = 2;
+}
+
+message GetInstanceProfileResponse {
+  uint32 status = 1;
+  uint32 partition_resource = 2;
+  uint32 num_partitions_share_resource = 3;
 }
