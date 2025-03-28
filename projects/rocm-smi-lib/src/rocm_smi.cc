@@ -659,8 +659,6 @@ rsmi_dev_ecc_count_get(uint32_t dv_ind, rsmi_gpu_block_t block,
   TRY
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
-  CHK_SUPPORT_VAR(ec, block)
-
 
   amd::smi::DevInfoTypes type;
   switch (block) {
@@ -718,6 +716,10 @@ rsmi_dev_ecc_count_get(uint32_t dv_ind, rsmi_gpu_block_t block,
        << " -> reporting " << amd::smi::getRSMIStatusString(ret);
     LOG_ERROR(ss);
     return ret;
+  }
+
+  if (ec == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
   }
 
   std::string junk;
