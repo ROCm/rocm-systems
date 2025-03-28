@@ -321,40 +321,14 @@ typedef enum {
  */
 typedef struct hsa_amd_aie_ert_start_kernel_data_s {
   /**
-   * Mandatory CU mask.
+   * Address to the PDI.
    */
-  uint32_t cu_mask;
+  void* pdi_addr;
   /**
-   * Since the CU mask takes up one DWORD this is count - 1 number of DWORDs
-   * (i.e., the remainder of the start kernel payload data).
+   * Opcode, instructions and kernel arguments.
    */
   uint32_t data[];
 } hsa_amd_aie_ert_start_kernel_data_t;
-
-/**
- * Payload data for AIE ERT command chain packets (i.e., when the opcode is
- * HSA_AMD_AIE_ERT_CMD_CHAIN). A command chain is a buffer of commands parsed
- * by the ERT.
- */
-typedef struct hsa_amd_aie_ert_command_chain_data_s {
-  /**
-   * Number of commands in the chain.
-   */
-  uint32_t command_count;
-  /**
-   * Index of last successfully submitted command in the chain.
-   */
-  uint32_t submit_index;
-  /**
-   * Index of failing command if command status is not completed.
-   */
-  uint32_t error_index;
-  uint32_t reserved[3];
-  /**
-   * Address of each command in the chain.
-   */
-  uint64_t data[];
-} hsa_amd_aie_ert_command_chain_data_t;
 
 /**
  * AMD AIE ERT packet. Used for sending a command to an AIE agent.

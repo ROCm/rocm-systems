@@ -42,6 +42,8 @@
 #ifndef HSA_RUNTIME_CORE_INC_AMD_XDNA_DRIVER_H_
 #define HSA_RUNTIME_CORE_INC_AMD_XDNA_DRIVER_H_
 
+#include <array>
+#include <climits>
 #include <map>
 #include <memory>
 #include <unordered_map>
@@ -93,8 +95,7 @@ class Queue;
 
 namespace AMD {
 
-/// @brief: The number of arguments in the packet payload before we start passing operands
-constexpr uint32_t NON_OPERAND_COUNT = 6;
+class AieAqlQueue;
 
 // @brief: Used to transform an address into a device address
 constexpr uint32_t DEV_ADDR_BASE = 0x04000000;
@@ -119,14 +120,6 @@ constexpr uint32_t CMD_PKT_PAYLOAD_INSTRUCTION_SEQUENCE_SIZE_IDX = 4;
 /// @brief Environment variable to define job submission timeout
 constexpr uint32_t DEFAULT_TIMEOUT_VAL = 50;
 
-/// @brief: Calculates the number of operands in a packet
-/// given the number of arguments in the packet
-/// @param: arg_count(Input), Number of arguments in the packet
-/// @return: uint32_t, The number of operands in the packet
-inline uint32_t GetOperandCount(uint32_t arg_count) {
-  return ((arg_count - NON_OPERAND_COUNT) / 2);
-}
-
 class XdnaDriver final : public core::Driver {
   /// @brief BO handle information.
   struct BOHandle {
@@ -141,6 +134,48 @@ class XdnaDriver final : public core::Driver {
     constexpr BOHandle(void* vaddr, uint32_t handle, size_t size)
         : vaddr{vaddr}, handle{handle}, size{size} {}
     constexpr bool IsValid() const { return handle != AMDXDNA_INVALID_BO_HANDLE; }
+  };
+
+  /// @brief CU mask size.
+  static constexpr size_t cu_mask_size = sizeof(uint32_t) * CHAR_BIT;
+
+  /// @brief Per hardware context PDI cache.
+  class PDICache {
+    std::array<BOHandle, cu_mask_size> entries = {};
+    size_t entry_count = 0;
+
+   public:
+    /// @brief Sentinel value for entries not found.
+    constexpr static size_t NotFound = cu_mask_size;
+
+    /// @brief Returns the size of the cache.
+    constexpr size_t size() const { return entry_count; }
+
+    /// @brief Returns the index of the BO handle if it is the cache, otherwise @ref NotFound.
+    ///
+    /// This function does a linear search because the mask is small (32 elements).
+    size_t GetIndex(uint32_t pdi_handle) const {
+      for (size_t i = 0; i < entry_count; ++i) {
+        if (entries[i].handle == pdi_handle) {
+          return i;
+        }
+      }
+      return NotFound;
+    }
+
+    /// @brief Sets the next cache entry.
+    hsa_status_t SetNext(const BOHandle& pdi_bo_handle, size_t& index) {
+      if (entry_count == entries.size()) {
+        // cache is full
+        return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+      }
+
+      index = entry_count++;
+      entries[index] = pdi_bo_handle;
+      return HSA_STATUS_SUCCESS;
+    }
+
+    constexpr const BOHandle& operator[](size_t index) const { return entries[index]; }
   };
 
 public:
@@ -188,7 +223,7 @@ public:
 
   /// @brief Submits @p num_pkts packets in a command chain.
   hsa_status_t SubmitCmdChain(hsa_amd_aie_ert_packet_t* first_pkt, uint32_t num_pkts,
-                              uint32_t num_operands, uint32_t hw_ctx_handle);
+                              AieAqlQueue& aie_queue);
 
   hsa_status_t SPMAcquire(uint32_t preferred_node_id) const override;
   hsa_status_t SPMRelease(uint32_t preferred_node_id) const override;
@@ -199,8 +234,16 @@ public:
   hsa_status_t IsModelEnabled(bool* enable) const override;
 
  private:
+  /// @brief Destroys @p bo_handle.
+  ///
+  /// This function will unmap the virtual address and close the BO, but will not return any status.
+  void DestroyBOHandle(BOHandle& bo_handle);
+
   /// @brief Finds the BO associated with the address.
   BOHandle FindBOHandle(void* mem) const;
+
+  /// @brief Creates a new hardware context with the given PDI BO handles.
+  hsa_status_t ConfigHwCtx(const PDICache& pdi_bo_handles, AieAqlQueue& aie_queue);
 
   hsa_status_t QueryDriverVersion();
 
@@ -210,35 +253,28 @@ public:
   hsa_status_t InitDeviceHeap();
   hsa_status_t FreeDeviceHeap();
 
-  /// @brief Creates a command BO and returns a pointer to the memory and
-  //          the corresponding handle
+  /// @brief Creates a command BO and returns it to @p bo_info.
   ///
   /// @param size size of memory to allocate
-  /// @param handle A pointer to the BO handle
-  /// @param cmd A pointer to the buffer
-  hsa_status_t CreateCmd(uint32_t size, uint32_t* handle, amdxdna_cmd** cmd);
+  /// @param bo_info allocated BO
+  hsa_status_t CreateCmdBO(uint32_t size, BOHandle& bo_info);
 
-  /// @brief Adds all BOs in a command packet payload to a vector
-  ///         and replaces the handles with a virtual address
+  /// @brief Gets all BOs from a command packet payload, flushes the caches associated with them and
+  /// replaces the instruction virtual address with the device address.
   ///
   /// @param count Number of entries in the command
-  /// @param bo_args A pointer to a vector that contains all bo handles
   /// @param cmd_pkt_payload A pointer to the payload of the command
-  hsa_status_t RegisterCmdBOs(uint32_t count, std::vector<uint32_t>& bo_args,
-                              std::vector<uint32_t>& bo_sizes, std::vector<uint64_t>& bo_addrs,
-                              hsa_amd_aie_ert_start_kernel_data_t* cmd_pkt_payload);
-
-  /// @brief Syncs all BOs referenced in bo_args
-  ///
-  /// @param bo_args vector containing handles of BOs to sync
-  hsa_status_t SyncBos(const std::vector<uint64_t>& bo_args, const std::vector<uint32_t>& bo_sizes);
+  /// @param bo_handles vector that contains all BO handles
+  hsa_status_t PrepareBOs(uint32_t count, hsa_amd_aie_ert_start_kernel_data_t* cmd_pkt_payload,
+                          std::vector<uint32_t>& bo_handles);
 
   /// @brief Executes a command and waits for its completion
   ///
-  /// @param exec_cmd Structure containing the details of the command to execute
-  /// @param hw_ctx_handle the handle of the hardware context to run this
-  /// command
-  hsa_status_t ExecCmdAndWait(amdxdna_drm_exec_cmd* exec_cmd, uint32_t hw_ctx_handle);
+  /// @param cmd_chain_bo_handle command to execute
+  /// @param bo_handles handles associated with the command
+  /// @param aie_queue queue to submit to
+  hsa_status_t ExecCmdAndWait(const BOHandle& cmd_chain_bo_handle,
+                              const std::vector<uint32_t>& bo_handles, AieAqlQueue& aie_queue);
 
   /// TODO: Remove this in the future and rely on the core Runtime
   /// object to track handle allocations. Using the VMEM API for mapping XDNA
@@ -246,6 +282,9 @@ public:
   /// to manage some of this for now.
   std::unordered_map<uint32_t, void *> vmem_handle_mappings;
   std::map<void*, BOHandle> vmem_addr_mappings;
+
+  /// @brief Hardware context to PDI cache mapping.
+  std::unordered_map<uint32_t, PDICache> hw_ctx_pdi_cache_map;
 
   /// @brief Virtual address range allocated for the device heap.
   ///

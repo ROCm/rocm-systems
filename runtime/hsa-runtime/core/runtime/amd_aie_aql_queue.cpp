@@ -218,20 +218,18 @@ hsa_status_t AieAqlQueue::SubmitCmd(void* queue_base, uint64_t read_dispatch_id,
         // Iterating over future packets and seeing how many contiguous HSA_AMD_AIE_ERT_START_CU
         // packets there are. All can be combined into a single chain.
         int num_cont_start_cu_pkts = 1;
-        int num_operands = 0;
         for (int peak_pkt_id = cur_id + 1; peak_pkt_id < write_dispatch_id; peak_pkt_id++) {
           hsa_amd_aie_ert_packet_t* peak_pkt =
               static_cast<hsa_amd_aie_ert_packet_t*>(queue_base) + peak_pkt_id;
           if (peak_pkt->opcode != HSA_AMD_AIE_ERT_START_CU) {
             break;
           }
-          num_operands += GetOperandCount(peak_pkt->count);
           num_cont_start_cu_pkts++;
         }
 
-        // Call into the driver to submit from cur_id to write_dispatch_id
-        hsa_status_t status =
-            driver.SubmitCmdChain(pkt, num_cont_start_cu_pkts, num_operands, hw_ctx_handle_);
+        // Call into the driver to submit from cur_id to write_dispatch_id.
+        // Submitting the command chain might create a new hardware context.
+        hsa_status_t status = driver.SubmitCmdChain(pkt, num_cont_start_cu_pkts, *this);
         if (status != HSA_STATUS_SUCCESS) {
           return status;
         }
@@ -239,13 +237,12 @@ hsa_status_t AieAqlQueue::SubmitCmd(void* queue_base, uint64_t read_dispatch_id,
         cur_id += num_cont_start_cu_pkts;
         break;
       }
-      default: {
+      default:
         return HSA_STATUS_ERROR;
-      }
     }
   }
 
-  return HSA_STATUS_SUCCESS;
+  return HSA_STATUS_ERROR;
 }
 
 void AieAqlQueue::StoreRelease(hsa_signal_value_t value) {
