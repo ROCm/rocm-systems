@@ -26,7 +26,6 @@ THE SOFTWARE.
 
 #include <cstddef>
 #include <cstdio>
-#include <filesystem>
 #include <map>
 #include <string>
 #include <vector>
@@ -56,8 +55,14 @@ static const std::map<uint64_t, std::string> gfx_to_rvs_conf = {
     {0x1103, "nv31"},   // ?
 };
 static const std::map<rdc_diag_test_cases_t, std::string> test_to_name = {
-    {RDC_DIAG_RVS_GST_TEST, "gst_single.conf"},     {RDC_DIAG_RVS_MEMBW_TEST, "babel.conf"},
-    {RDC_DIAG_RVS_H2DD2H_TEST, "pebb_single.conf"}, {RDC_DIAG_RVS_IET_TEST, "iet_stress.conf"},
+    {RDC_DIAG_RVS_GST_TEST, "gst_single.conf"},
+    {RDC_DIAG_RVS_MEMBW_TEST, "babel.conf"},
+    {RDC_DIAG_RVS_H2DD2H_TEST, "pebb_single.conf"},
+    {RDC_DIAG_RVS_IET_TEST, "iet_stress.conf"},
+    {RDC_DIAG_RVS_GST_LONG_TEST, "gst_single_long.conf"},
+    {RDC_DIAG_RVS_MEMBW_LONG_TEST, "babel_long.conf"},
+    {RDC_DIAG_RVS_H2DD2H_LONG_TEST, "pebb_single_long.conf"},
+    {RDC_DIAG_RVS_IET_LONG_TEST, "iet_stress_long.conf"},
     {RDC_DIAG_RVS_CUSTOM, "CUSTOM_CONFIG"},
 };
 

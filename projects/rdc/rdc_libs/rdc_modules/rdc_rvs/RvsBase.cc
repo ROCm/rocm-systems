@@ -23,6 +23,7 @@ THE SOFTWARE.
 
 #include <string.h>
 
+#include <filesystem>
 #include <string>
 
 #include "rdc/rdc.h"
@@ -132,8 +133,8 @@ rvs_status_t RdcRVSBase::run_rvs_app(const char* config, const size_t config_siz
                                      rdc_diag_callback_t* callback) {
   char active_config[MAX_CONFIG_LENGTH];
   rvs_session_property_t session_property = {RVS_SESSION_TYPE_DEFAULT_CONF, {{RVS_MODULE_GST}}};
-  rvs_session_id_t session_id;
-  rvs_status_t status;
+  rvs_session_id_t session_id = 0;
+  rvs_status_t status = RVS_STATUS_FAILED;
   // NOTE: device_index is NOT set by RDC unless a custom config is provided.
   // Meaning RDC index has no impact on RVS index.
 
