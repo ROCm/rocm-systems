@@ -421,6 +421,11 @@ def v3_counter_csv_to_v2_csv(counter_file, agent_info_filepath, converted_csv_fi
     """
     pd_counter_collections = pd.read_csv(counter_file)
     pd_agent_info = pd.read_csv(agent_info_filepath)
+
+    # For backwards compatability. Older rocprof versions do not provide this.
+    if not "Accum_VGPR_Count" in pd_counter_collections.columns:
+        pd_counter_collections["Accum_VGPR_Count"] = 0
+
     result = pd_counter_collections.pivot_table(
         index=[
             "Correlation_Id",
@@ -436,6 +441,7 @@ def v3_counter_csv_to_v2_csv(counter_file, agent_info_filepath, converted_csv_fi
             "LDS_Block_Size",
             "Scratch_Size",
             "VGPR_Count",
+            "Accum_VGPR_Count",
             "SGPR_Count",
             "Start_Timestamp",
             "End_Timestamp",
@@ -487,12 +493,8 @@ def v3_counter_csv_to_v2_csv(counter_file, agent_info_filepath, converted_csv_fi
         agent_id = result.at[idx, "Agent_Id"]
         result.at[idx, "Agent_Id"] = gpu_id_map[agent_id]
 
-    # Accum_VGPR is currently missing in rocprofv3 output
-    result["Accum_VGPR"] = 0
-
     # Drop the 'Node_Id' column if you don't need it in the final DataFrame
     result.drop(columns="Node_Id", inplace=True)
-    result["Accum_VGPR"] = 0
 
     name_mapping = {
         "Dispatch_Id": "Dispatch_ID",
@@ -505,7 +507,7 @@ def v3_counter_csv_to_v2_csv(counter_file, agent_info_filepath, converted_csv_fi
         "LDS_Block_Size": "LDS_Per_Workgroup",
         "Scratch_Size": "Scratch_Per_Workitem",
         "VGPR_Count": "Arch_VGPR",
-        # "":"Accum_VGPR",
+        "Accum_VGPR_Count": "Accum_VGPR",
         "SGPR_Count": "SGPR",
         "Wave_Front_Size": "Wave_Size",
         "Kernel_Name": "Kernel_Name",
