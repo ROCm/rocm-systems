@@ -248,10 +248,14 @@ def show_all(args, runs, archConfigs, output, profiling_config):
                     )
                     # Do not print the table if any column is empty
                     if is_empty_columns_exist:
-                        console_log(
-                            f"Not showing table with empty column(s): {table_id_str} {table_config['title']}"
-                        )
-
+                        if "title" in table_config:
+                            console_log(
+                                f"Not showing table with empty column(s): {table_id_str} {table_config['title']}"
+                            )
+                        else:
+                            console_log(
+                                f"Not showing table with empty column(s): {table_id_str}"
+                            )
                     if (
                         "title" in table_config
                         and table_config["title"]

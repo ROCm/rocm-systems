@@ -45,6 +45,7 @@ from utils.logger import (
 from utils.utils import (
     capture_subprocess_output,
     gen_sysinfo,
+    pc_sampling_prof,
     print_status,
     run_prof,
     run_rocscope,
@@ -63,6 +64,8 @@ class RocProfCompute_Base:
         self.__filter_metric_ids = [
             name for name, type in args.filter_blocks.items() if type == "metric_id"
         ]
+        # Fixme: remove the hack code "21" after we could enable pc sampling as default
+        self.__pc_sampling = True if "21" in self.__filter_metric_ids else False
 
     def get_args(self):
         return self.__args
@@ -419,6 +422,21 @@ class RocProfCompute_Base:
             else:
                 # TODO: Finish logic
                 console_error("Profiler not supported")
+
+        if self.__pc_sampling == True and self.__profiler == "rocprofv3":
+            start_run_prof = time.time()
+            pc_sampling_prof(
+                interval=self.get_args().pc_sampling_interval,
+                workload_dir=self.get_args().path,
+                appcmd=self.get_args().remaining,
+            )
+            end_run_prof = time.time()
+            console_debug(
+                "The time of pc sampling profiling is {} m {} sec".format(
+                    int((end_run_prof - start_run_prof) / 60),
+                    str((end_run_prof - start_run_prof) % 60),
+                )
+            )
 
     @abstractmethod
     def post_processing(self):

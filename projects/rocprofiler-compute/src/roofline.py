@@ -33,12 +33,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from dash import dcc, html
 
-from utils.logger import (
-    console_debug,
-    console_error,
-    console_log,
-    demarcate,
-)
+from utils.logger import console_debug, console_error, console_log, demarcate
 from utils.roofline_calc import (
     MFMA_DATATYPES,
     PEAK_OPS_DATATYPES,

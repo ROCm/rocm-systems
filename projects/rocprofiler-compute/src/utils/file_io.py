@@ -116,7 +116,9 @@ def create_df_kernel_top_stats(
     Create top stats info by grouping kernels with user's filters.
     """
 
+    # NB: think about df = pd.DataFrame(df_in["pmc_perf"].copy())
     df = df_in["pmc_perf"]
+
     # Demangle original KernelNames
     kernel_name_shortener(df, kernel_verbose)
 

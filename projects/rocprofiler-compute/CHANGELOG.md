@@ -20,6 +20,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Additional datatypes for roofline profiling
   * Now supports FP8, FP16, BF16, FP32, FP64, I8, I32, I64 (dependent on gpu architecture)
 
+* Support host-trap PC Sampling on CLI (beta version)
+
 ### Changed
 
 * Change normal_unit default to per_kernel

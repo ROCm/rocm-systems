@@ -324,6 +324,15 @@ Examples:
         help="\t\t\tSet the format of output file of rocprof.",
     )
 
+    profile_group.add_argument(
+        "--pc-sampling-interval",
+        required=False,
+        metavar="",
+        dest="pc_sampling_interval",
+        default=1,
+        help="\t\t\tSet the interval of pc sampling in microsecond (DEFAULT: 1).",
+    )
+
     ## Roofline Command Line Options
     roofline_group.add_argument(
         "--roof-only",
