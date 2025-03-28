@@ -64,11 +64,14 @@ function(get_version_from_tag DEFAULT_VERSION_STRING VERSION_PREFIX GIT)
     parse_version ( ${DEFAULT_VERSION_STRING} )
 
     if ( GIT )
-        execute_process ( COMMAND git describe --tags --dirty --long --match ${VERSION_PREFIX}-[0-9.]*
+        execute_process ( COMMAND git tag --list --sort=-version:refname "${VERSION_PREFIX}*" | head -n 1 ${VERSION_PREFIX}-[0-9.]*
                           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
                           OUTPUT_VARIABLE GIT_TAG_STRING
                           OUTPUT_STRIP_TRAILING_WHITESPACE
                           RESULT_VARIABLE RESULT )
+        if ( GIT_TAG_STRING STREQUAL "" )
+                set ( RESULT "1" )
+        endif()
         if ( ${RESULT} EQUAL 0 )
             parse_version ( ${GIT_TAG_STRING} )
         endif ()
