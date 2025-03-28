@@ -33,7 +33,7 @@ if(BUILD_PROFILER)
         CONFIGURE REQUIRED)
     set(RDC_LIB_MODULES ${RDC_LIB_MODULES} ${RDC_ROCP_LIB} PARENT_SCOPE)
     add_library(${RDC_ROCP_LIB} SHARED ${RDC_ROCP_LIB_SRC_LIST} ${RDC_ROCP_LIB_INC_LIST})
-    target_link_libraries(${RDC_ROCP_LIB} PRIVATE ${RDC_LIB} ${BOOTSTRAP_LIB} hsa-runtime64::hsa-runtime64 rocprofiler-sdk::rocprofiler-sdk pthread dl)
+    target_link_libraries(${RDC_ROCP_LIB} PRIVATE hsa-runtime64::hsa-runtime64 rocprofiler-sdk::rocprofiler-sdk pthread dl)
     target_include_directories(${RDC_ROCP_LIB} PRIVATE
         "${PROJECT_SOURCE_DIR}"
         "${PROJECT_SOURCE_DIR}/include"
