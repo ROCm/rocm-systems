@@ -572,15 +572,19 @@ typedef enum {
   RDC_DIAG_TEST_FIRST = 0,
   //!< The diagnostic test pass
   RDC_DIAG_COMPUTE_PROCESS = RDC_DIAG_TEST_FIRST,
-  RDC_DIAG_COMPUTE_QUEUE,    //!< The Compute Queue is ready
-  RDC_DIAG_SYS_MEM_CHECK,    //!< Check System memory
-  RDC_DIAG_NODE_TOPOLOGY,    //!< Report node topology
-  RDC_DIAG_GPU_PARAMETERS,   //!< GPU parameters in range
-  RDC_DIAG_RVS_GST_TEST,     //!< RVS GST test
-  RDC_DIAG_RVS_MEMBW_TEST,   //!< RVS bandwidth test
-  RDC_DIAG_RVS_H2DD2H_TEST,  //!< RVS Host<->Device transfer speed test
-  RDC_DIAG_RVS_IET_TEST,     //!< RVS IET test
-  RDC_DIAG_RVS_CUSTOM,       //!< RVS custom test
+  RDC_DIAG_COMPUTE_QUEUE,         //!< The Compute Queue is ready
+  RDC_DIAG_SYS_MEM_CHECK,         //!< Check System memory
+  RDC_DIAG_NODE_TOPOLOGY,         //!< Report node topology
+  RDC_DIAG_GPU_PARAMETERS,        //!< GPU parameters in range
+  RDC_DIAG_RVS_GST_TEST,          //!< RVS GST test
+  RDC_DIAG_RVS_MEMBW_TEST,        //!< RVS bandwidth test
+  RDC_DIAG_RVS_H2DD2H_TEST,       //!< RVS Host<->Device transfer speed test
+  RDC_DIAG_RVS_IET_TEST,          //!< RVS IET test
+  RDC_DIAG_RVS_GST_LONG_TEST,     //!< RVS GST test
+  RDC_DIAG_RVS_MEMBW_LONG_TEST,   //!< RVS bandwidth test
+  RDC_DIAG_RVS_H2DD2H_LONG_TEST,  //!< RVS Host<->Device transfer speed test
+  RDC_DIAG_RVS_IET_LONG_TEST,     //!< RVS IET test
+  RDC_DIAG_RVS_CUSTOM,            //!< RVS custom test
   RDC_DIAG_TEST_LAST,
 } rdc_diag_test_cases_t;
 

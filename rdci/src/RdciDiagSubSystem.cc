@@ -23,24 +23,16 @@ THE SOFTWARE.
 
 #include <assert.h>
 #include <getopt.h>
-#include <signal.h>
 #include <string.h>
 #include <unistd.h>
 
 #include <ctime>
 #include <iomanip>
-#include <limits>
-#include <queue>
-#include <sstream>
 #include <string>
-#include <unordered_map>
-#include <vector>
 
-#include "common/rdc_fields_supported.h"
 #include "common/rdc_utils.h"
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcException.h"
-#include "rdc_lib/rdc_common.h"
 
 namespace amd {
 namespace rdc {
@@ -113,8 +105,7 @@ void RdciDiagSubSystem::show_help() const {
   //            ***** 20 Chars ****
   std::cout << " diag -- Used to run diagnostic for GPUs.\n\n";
   std::cout << "Usage\n";
-  std::cout << "    rdci diag [--host <IP/FQDN>:port] [-u] [-t] -g <groupId>"
-            << " -r <runLevel>\n";
+  std::cout << "    rdci diag [--host <IP/FQDN>:port] [-u] [-t] -g <groupId>" << " -r <runLevel>\n";
   std::cout << "\nFlags:\n";
   show_common_usage();
   std::cout << "  -g  --group-id                 The GPU group to diagnose"
@@ -122,12 +113,10 @@ void RdciDiagSubSystem::show_help() const {
   std::cout << "  -c  --config-test              Set custom test config (RVS)\n";
   std::cout << "  -r  --run-level   level        Integer representing test"
             << " run levels [default = 1].\n"
-            << "                                 level 1: Tests take a "
-            << "few seconds to run.\n"
-            << "                                 level 2: Tests take a "
-            << "few minutes to run (To be implemented).\n"
+            << "                                 level 1: Tests take a " << "few seconds to run.\n"
+            << "                                 level 2: Tests take a " << "few minutes to run.\n"
             << "                                 level 3: Tests take "
-            << "half an hour to run (To be implemented).\n";
+            << "30 minutes and longer to run.\n";
 }
 
 std::string RdciDiagSubSystem::get_test_name(rdc_diag_test_cases_t test_case) const {
@@ -141,6 +130,10 @@ std::string RdciDiagSubSystem::get_test_name(rdc_diag_test_cases_t test_case) co
       {RDC_DIAG_RVS_MEMBW_TEST, "RVS babel memory bandwidth test"},
       {RDC_DIAG_RVS_H2DD2H_TEST, "RVS Host<->Device transfer speed test"},
       {RDC_DIAG_RVS_IET_TEST, "RVS IET test"},
+      {RDC_DIAG_RVS_GST_LONG_TEST, "RVS GST long test"},
+      {RDC_DIAG_RVS_MEMBW_LONG_TEST, "RVS babel memory bandwidth long test"},
+      {RDC_DIAG_RVS_H2DD2H_LONG_TEST, "RVS Host<->Device transfer speed long test"},
+      {RDC_DIAG_RVS_IET_LONG_TEST, "RVS IET long test"},
       {RDC_DIAG_TEST_LAST, "Unknown"}};
 
   auto test_name = test_desc.find(test_case);
@@ -158,7 +151,6 @@ void RdciDiagSubSystem::process() {
 
   rdc_status_t result;
   rdc_diag_response_t response;
-  //rdc_diag_callback_t callback;
   result = rdc_diagnostic_run(rdc_handle_, group_id_, run_level_, config_test_.c_str(),
                               config_test_.length(), &response, nullptr);
 
