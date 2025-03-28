@@ -57,7 +57,7 @@ public:
 
   int m_fd;
 
-  cached_ordered_vector<DSourceLine> m_line_number_map;
+  std::map<address_range_t, std::string> m_line_number_map{};
   std::map<uint64_t, SymbolInfo> m_symbol_map{};
 
   std::string m_uri;
@@ -176,7 +176,7 @@ public:
   {
     this->Super::addDecoder(filepath, id, loadbase, memsize, gpu_id);
     auto ptr = decoders.at(id);
-    table.insert({ptr->begin(), static_cast<uint32_t>(ptr->size()), id, 0});
+    table.insert(address_range_t{ptr->begin(), static_cast<uint32_t>(ptr->size()), id});
   }
 
   virtual bool removeDecoder(uint32_t id, uint64_t loadbase)
@@ -186,8 +186,8 @@ public:
 
   instruction_info_t get(uint64_t vaddr)
   {
-    auto& addr_range = table.find_codeobj_in_range(vaddr);
-    return get(addr_range.id, vaddr - addr_range.vbegin);
+    auto addr_range = table.find_codeobj_in_range(vaddr);
+    return get(addr_range.id, vaddr - addr_range.addr);
   }
   instruction_info_t get(uint32_t id, uint64_t offset) { return this->Super::get(id, offset); }
 

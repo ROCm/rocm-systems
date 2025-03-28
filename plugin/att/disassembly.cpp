@@ -303,7 +303,8 @@ std::optional<uint64_t> DisassemblyInstance::va2fo(uint64_t va)
 
   CHECK_VA2FO(
     e_ident[EI_ABIVERSION] == 2 || // ELFABIVERSION_AMDGPU_HSA_V4
-    e_ident[EI_ABIVERSION] == 3, "unexpected ei_abiversion"); // ELFABIVERSION_AMDGPU_HSA_V5
+    e_ident[EI_ABIVERSION] == 3 || // ELFABIVERSION_AMDGPU_HSA_V5
+    e_ident[EI_ABIVERSION] == 4, "unexpected ei_abiversion"); // ELFABIVERSION_AMDGPU_HSA_V6
 
   Elf64_Ehdr *ehdr = (Elf64_Ehdr*)buffer.data();
   CHECK_VA2FO(ehdr, "ehdr is nullptr");
@@ -356,7 +357,8 @@ std::vector<std::pair<uint64_t, uint64_t>> DisassemblyInstance::getSegments()
 
   CHECK_VA2FO(
     e_ident[EI_ABIVERSION] == 2 || // ELFABIVERSION_AMDGPU_HSA_V4
-    e_ident[EI_ABIVERSION] == 3, "unexpected ei_abiversion"); // ELFABIVERSION_AMDGPU_HSA_V5
+    e_ident[EI_ABIVERSION] == 3 || // ELFABIVERSION_AMDGPU_HSA_V5
+    e_ident[EI_ABIVERSION] == 4, "unexpected ei_abiversion"); // ELFABIVERSION_AMDGPU_HSA_V6
 
   Elf64_Ehdr *ehdr = (Elf64_Ehdr*)buffer.data();
   CHECK_VA2FO(ehdr, "ehdr is nullptr");

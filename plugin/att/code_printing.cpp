@@ -119,7 +119,7 @@ CodeObjDecoderComponent::CodeObjDecoderComponent(
     Dwarf_Off cu_offset{0}, next_offset;
     size_t header_size;
 
-    std::unordered_set<uint64_t> used_addrs;
+    std::map<uint64_t, std::string> used_addrs;
 
     while (!dwarf_nextcu(dbg.get(), cu_offset, &next_offset, &header_size, nullptr, nullptr,
                          nullptr)) {
@@ -142,32 +142,33 @@ CodeObjDecoderComponent::CodeObjDecoderComponent(
 
           if (used_addrs.find(addr) != used_addrs.end())
           {
-            size_t pos = m_line_number_map.lower_bound(addr);
-            m_line_number_map.data()[pos].str += ' ' + dwarf_line;
+            used_addrs.at(addr) += ' ' + dwarf_line;
             continue;
           }
 
-          used_addrs.insert(addr);
-          m_line_number_map.insert(DSourceLine{addr, 0, std::move(dwarf_line)});
+          used_addrs.emplace(addr, std::move(dwarf_line));
         }
       }
       cu_offset = next_offset;
+    }
+
+    auto it = used_addrs.begin();
+    if(it != used_addrs.end())
+    {
+      while(std::next(it) != used_addrs.end())
+      {
+        uint64_t delta   = std::next(it)->first - it->first;
+        auto     segment = address_range_t{it->first, delta, 0};
+        m_line_number_map.emplace(segment, std::move(it->second));
+        it++;
+      }
+      auto segment = address_range_t{it->first, codeobj_size - it->first, 0};
+      m_line_number_map.emplace(segment, std::move(it->second));
     }
   }
 
   // Can throw
   disassembly = std::make_unique<DisassemblyInstance>(codeobj_data, codeobj_size, gpu_id);
-  if (m_line_number_map.size())
-  {
-    size_t total_size = 0;
-    for (size_t i=0; i<m_line_number_map.size()-1; i++)
-    {
-      size_t s = m_line_number_map.get(i+1).vaddr - m_line_number_map.get(i).vaddr;
-      m_line_number_map.data()[i].size = s;
-      total_size += s;
-    }
-    m_line_number_map.back().size = std::max(total_size, codeobj_size) - total_size;
-  }
   try {
     m_symbol_map = disassembly->GetKernelMap(); // Can throw
   } catch(...) {}
@@ -209,10 +210,8 @@ CodeObjDecoderComponent::disassemble_instruction(uint64_t faddr, uint64_t vaddr)
 
   const char* cpp_line = nullptr;
 
-  try {
-    const DSourceLine& it = m_line_number_map.find_obj(vaddr);
-    cpp_line = it.str.data();
-  } catch(...) {}
+  auto it = m_line_number_map.find({vaddr, 0, 0});
+  if(it != m_line_number_map.end()) cpp_line = it->second.data();
 
   size_t size = disassembly->ReadInstruction(faddr, vaddr, cpp_line);
   return {disassembly->last_instruction, size};
