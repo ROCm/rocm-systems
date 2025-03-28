@@ -1,6 +1,6 @@
 CompileFlags:
     Remove: -W*
-    Add: [-Wall, -pedantic, -I/opt/rocm/include, -I/opt/rocm/include/hsa, -I/opt/rocm/include/rocprofiler]
+    Add: [-Wall, -Wno-c++20-designator, -pedantic, -I/opt/rocm/include, -I/opt/rocm/include/hsa, -I/opt/rocm/include/rocprofiler]
     Compiler: clang++
 
 # list here: https://clang.llvm.org/extra/clang-tidy/checks/list.html
