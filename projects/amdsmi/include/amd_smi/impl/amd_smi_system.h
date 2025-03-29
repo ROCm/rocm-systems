@@ -61,7 +61,8 @@ class AMDSmiSystem {
     amdsmi_status_t clean_up_drm() { return drm_.cleanup();}
 
     amdsmi_status_t init_drm() { return drm_.init();}
-
+    
+    amdsmi_status_t get_cpu_model_name(uint32_t socket_id, std::string *model_name);
  private:
     AMDSmiSystem() : init_flag_(AMDSMI_INIT_AMD_GPUS) {}
 
