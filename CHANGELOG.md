@@ -8,6 +8,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added cpu model name for RDC**.  
+  - Added new C and Python API `amdsmi_get_cpu_model_name`
+  - Not sourced from esmi library.
+
 - **Added support for GPU metrics 1.8**.  
   - Added new fields for `amdsmi_gpu_xcp_metrics_t` including:  
     - Adding the following metrics to allow new calculations for violation status:
@@ -22,6 +26,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Added Power Cap to amd-smi monitor**.  
   - 'amd-smi monitor -p' will display the power cap along with power.
+
     ```shell
     $ amd-smi monitor -p
     GPU  POWER  PWR_CAP

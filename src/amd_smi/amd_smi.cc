@@ -1520,6 +1520,7 @@ amdsmi_status_t amdsmi_get_gpu_vendor_name(
                         name, len);
 }
 
+
 amdsmi_status_t amdsmi_get_gpu_vram_vendor(amdsmi_processor_handle processor_handle,
                                      char *brand, uint32_t len) {
     return rsmi_wrapper(rsmi_dev_vram_vendor_get, processor_handle, 0,
@@ -5224,6 +5225,30 @@ amdsmi_status_t amdsmi_get_cpu_model(uint32_t *cpu_model)
     return AMDSMI_STATUS_SUCCESS;
 }
 
+amdsmi_status_t amdsmi_get_cpu_model_name(amdsmi_processor_handle processor_handle, amdsmi_cpu_info_t *cpu_info)
+{
+    amdsmi_status_t status;
+    uint32_t sock_ind;
+    std::string model_name;
+
+    if (processor_handle == nullptr)
+        return AMDSMI_STATUS_INVAL;
+
+    amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
+    if (r != AMDSMI_STATUS_SUCCESS)
+        return r;
+
+    sock_ind = (uint8_t)std::stoi(proc_id, NULL, 0);
+
+    status = amd::smi::AMDSmiSystem::getInstance().get_cpu_model_name(sock_ind, &model_name);
+    if (status != AMDSMI_STATUS_SUCCESS)
+        return amdsmi_errno_to_esmi_status(status);
+
+    strncpy(cpu_info->model_name, model_name.c_str(), AMDSMI_MAX_STRING_LENGTH -1);
+
+    return AMDSMI_STATUS_SUCCESS;
+}
+
 amdsmi_status_t amdsmi_get_cpu_handles(uint32_t *cpu_count,
                                        amdsmi_processor_handle *processor_handles)
 {
@@ -5349,4 +5374,5 @@ amdsmi_status_t amdsmi_get_esmi_err_msg(amdsmi_status_t status, const char **sta
     }
     return AMDSMI_STATUS_SUCCESS;
 }
+
 #endif

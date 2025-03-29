@@ -34,9 +34,6 @@
 #ifdef __cplusplus
 extern "C" {
 #include <cstdint>
-#ifdef ENABLE_ESMI_LIB
-    #include <e_smi/e_smi.h>
-#endif
 #else  // __cplusplus
 #include <stdint.h>
 #endif // __cplusplus
@@ -934,6 +931,19 @@ typedef enum {
     AMDSMI_LINK_TYPE_NOT_APPLICABLE,
     AMDSMI_LINK_TYPE_UNKNOWN
 } amdsmi_link_type_t;
+
+/**
+ * @brief This structure holds CPU utilization information.
+ *
+ * @cond @tag{cpu_bm} @endcond
+ */
+typedef struct {
+  uint32_t cpu_util_total;
+  uint32_t cpu_util_user;
+  uint32_t cpu_util_nice;
+  uint32_t cpu_util_sys;
+  uint32_t cpu_util_irq;
+} amdsmi_cpu_util_t;
 
 /**
  * @brief Link Metrics
@@ -2221,6 +2231,32 @@ static char* const amdsmi_hsmp_freqlimit_src_names[] = {
     "HSMP Agent"
 };
 
+/**
+ * @brief cpu info data
+ *
+ * @cond @tag{cpu_bm} @endcond
+ */
+typedef struct {
+  char  model_name[AMDSMI_MAX_STRING_LENGTH];
+  uint32_t cpu_family_id;
+  uint32_t model_id;
+  uint32_t threads_per_core;
+  uint32_t cores_per_socket;
+  bool frequency_boost;
+  uint32_t vendor_id;   //< Use 32 bit to be compatible with other platform.
+  char vendor_name[AMDSMI_MAX_STRING_LENGTH];
+  uint32_t subvendor_id;   //< The subsystem vendor id
+  uint64_t device_id;   //< The device id of a GPU
+  uint32_t rev_id;
+  char asic_serial[AMDSMI_MAX_STRING_LENGTH];
+  uint32_t socket_id;   //< 0xFFFF if not supported
+  uint32_t core_id;
+  uint32_t num_of_cpu_cores;   //< 0xFFFFFFFF if not supported
+  uint32_t socket_count;
+  uint32_t core_count;
+  uint32_t reserved[17];
+} amdsmi_cpu_info_t;
+
 #endif
 
 /*****************************************************************************/
@@ -2437,6 +2473,7 @@ amdsmi_status_t amdsmi_get_processor_handles_by_type(amdsmi_socket_handle socket
                                                      processor_type_t processor_type,
                                                      amdsmi_processor_handle* processor_handles,
                                                      uint32_t* processor_count);
+
 #endif
 
 /**
@@ -6804,6 +6841,30 @@ amdsmi_status_t amdsmi_get_cpu_family(uint32_t *cpu_family);
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_cpu_model(uint32_t *cpu_model);
+
+ /**
+ *  @brief Retrieve the CPU processor model name based on the processor index.
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @details
+ *  This function obtains the CPU model name associated with the specified processor index
+ *  from the list of available processor handles. Before invoking this function, ensure that
+ *  the list of processor handles is properly initialized and that the processor type is specified.
+ *  This function is to be utilized for RDC and is not part of ESMI library.
+ *
+ *  @param[in]      processor_handle Cpu socket which to query
+ *
+ *  @param[out] cpu_info
+ *      A pointer to an `amdsmi_cpu_info_t` structure that will be populated with the
+ *      CPU processor model information upon successful execution of the function.
+ *
+ *  @return
+ *      ::amdsmi_status_t indicating the result of the operation.
+ *      - ::AMDSMI_STATUS_SUCCESS on successful retrieval of the model name.
+ *      - A non-zero error code if the operation fails.
+ */
+amdsmi_status_t amdsmi_get_cpu_model_name(amdsmi_processor_handle processor_handle, amdsmi_cpu_info_t *cpu_info);
 
 /**
  *  @brief Get a description of provided AMDSMI error status for esmi errors.

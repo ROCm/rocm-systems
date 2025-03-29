@@ -5127,6 +5127,26 @@ except AmdSmiException as e:
     print(e)
 ```
 
+### amdsmi_get_cpu_model_name
+
+Description: Get cpu model name.
+
+Output: cpu model name
+
+Exceptions that can be thrown by `amdsmi_get_cpu_model_name` function:
+
+* `AmdSmiLibraryException`
+
+Example:
+
+```python
+try:
+     cpu_model_name = amdsmi_get_cpu_model_name()
+     print(cpu_model_name)
+except AmdSmiException as e:
+    print(e)
+```
+
 ## No amdsmi_init APIs
 
 ### amdsmi_get_lib_version
