@@ -43,7 +43,6 @@
 #include <functional>
 
 #include "amd_smi/amdsmi.h"
-#include "amd_smi/amd_smiConfig.h"
 #include "amd_smi/impl/fdinfo.h"
 #include "amd_smi/impl/amd_smi_common.h"
 #include "amd_smi/impl/amd_smi_system.h"
@@ -3239,10 +3238,10 @@ amdsmi_status_t amdsmi_get_lib_version(amdsmi_version_t *version) {
         return AMDSMI_STATUS_INVAL;
 
     version->year = AMDSMI_LIB_VERSION_YEAR;
-    version->major = amd_smi_VERSION_MAJOR;
-    version->minor = amd_smi_VERSION_MINOR;
-    version->release = amd_smi_VERSION_PATCH;
-    version->build = amd_smi_VERSION_BUILD;
+    version->major = AMDSMI_LIB_VERSION_MAJOR;
+    version->minor = AMDSMI_LIB_VERSION_MINOR;
+    version->release = AMDSMI_LIB_VERSION_RELEASE;
+    version->build = AMDSMI_LIB_VERSION_STRING;
 
     return AMDSMI_STATUS_SUCCESS;
 }
