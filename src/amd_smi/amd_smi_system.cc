@@ -29,6 +29,9 @@
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_main.h"
+#include <fstream>
+#include <cerrno>
+#include <cstring>
 
 namespace amd {
 namespace smi {
@@ -92,24 +95,59 @@ static amdsmi_status_t get_nr_cpu_sockets(uint32_t *num_socks) {
     }
     return AMDSMI_STATUS_SUCCESS;
 }
+
+amdsmi_status_t AMDSmiSystem::get_cpu_model_name(uint32_t socket_id, std::string *model_name) {
+    std::ifstream cpu_info("/proc/cpuinfo");
+    std::string info;
+    std::map<uint32_t, std::string> socket_model_map;
+
+    if (!cpu_info.is_open()) {
+      std::cerr << "Failed to open /proc/cpuinfo:" << strerror(errno) << std::endl;
+      return AMDSMI_STATUS_FILE_ERROR;
+    } else { 
+      uint32_t current_socket_id = -1;
+      while (std::getline(cpu_info, info)) {
+        if (info.find("processor") != std::string::npos) {
+          current_socket_id = std::stoi(info.substr(info.find(':') + 1));
+        }
+        if (info.find("model name") != std::string::npos) {
+          *model_name = info.substr(info.find(':') + 2);
+          if (current_socket_id != -1) {
+            socket_model_map[current_socket_id] = *model_name;
+          }
+        }
+      }
+      cpu_info.close();
+    }
+
+    if (socket_model_map.find(socket_id) != socket_model_map.end()) {
+      *model_name = socket_model_map[socket_id];
+    } else {
+      return AMDSMI_STATUS_NO_DATA;
+    }
+    return AMDSMI_STATUS_SUCCESS;
+}
 #endif
 
 amdsmi_status_t AMDSmiSystem::init(uint64_t flags) {
     init_flag_ = flags;
     amdsmi_status_t amd_smi_status;
-    // populate sockets and processors
+
+    // populate GPU sockets and processors
     if (flags & AMDSMI_INIT_AMD_GPUS) {
         amd_smi_status = populate_amd_gpu_devices();
         if (amd_smi_status != AMDSMI_STATUS_SUCCESS)
             return amd_smi_status;
     }
 #ifdef ENABLE_ESMI_LIB
+    // populate CPU sockets and processors
     if (flags & AMDSMI_INIT_AMD_CPUS) {
         amd_smi_status = populate_amd_cpus();
         if (amd_smi_status != AMDSMI_STATUS_SUCCESS)
             return amd_smi_status;
     }
 #endif
+
     return AMDSMI_STATUS_SUCCESS;
 }
 

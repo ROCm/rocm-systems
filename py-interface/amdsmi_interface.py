@@ -1676,6 +1676,23 @@ def amdsmi_get_cpu_model():
     )
     return model.value
 
+def amdsmi_get_cpu_model_name(
+    processor_handle: amdsmi_wrapper.amdsmi_processor_handle
+):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    cpu_info = amdsmi_wrapper.amdsmi_cpu_info_t()
+
+    _check_res(
+            amdsmi_wrapper.amdsmi_get_cpu_model_name(
+                   processor_handle, cpu_info
+            )
+    )
+    return f"{cpu_info.model_name}"
+
 def amdsmi_init(flag=AmdSmiInitFlags.INIT_AMD_GPUS):
     if not isinstance(flag, AmdSmiInitFlags):
         raise AmdSmiParameterException(flag, AmdSmiInitFlags)
