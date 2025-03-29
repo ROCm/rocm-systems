@@ -27,6 +27,13 @@
 #include "rocm_smi/rocm_smi.h"
 #include "amd_smi/amdsmi.h"
 
+#ifdef ENABLE_ESMI_LIB
+extern "C" {
+    #include <cstdint>
+    #include <e_smi/e_smi.h>
+}
+#endif
+
 namespace amd {
 namespace smi {
 

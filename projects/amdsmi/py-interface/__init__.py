@@ -77,6 +77,7 @@ try:
     from .amdsmi_interface import amdsmi_first_online_core_on_cpu_socket
     from .amdsmi_interface import amdsmi_get_cpu_family
     from .amdsmi_interface import amdsmi_get_cpu_model
+    from .amdsmi_interface import amdsmi_get_cpu_model_name
 except AttributeError:
     pass
 
