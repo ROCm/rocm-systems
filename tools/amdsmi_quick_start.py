@@ -27,7 +27,21 @@ import signal
 import sys
 
 from amdsmi import *
+
 from pathlib import Path
+
+sys.path.append(str(Path('/opt/rocm/libexec/')))
+sys.path.append(str(Path('/opt/rocm/libexec/amdsmi_cli/')))
+
+from amdsmi_commands import AMDSMICommands
+from amdsmi_helpers import AMDSMIHelpers
+from amdsmi_logger import AMDSMILogger
+from amdsmi_parser import AMDSMIParser
+import amdsmi_cli_exceptions
+
+helpers = AMDSMIHelpers()
+
+
 
 # Make exit & quit work without parens because it's annoying
 type(exit).__repr__ = sys.exit
