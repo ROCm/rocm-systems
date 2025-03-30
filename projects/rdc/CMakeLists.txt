@@ -38,6 +38,17 @@ set(CMAKE_INSTALL_LIBDIR "lib" CACHE STRING "Library install directory")
 # Usually ROCM tools are installed into /opt/rocm
 set(CMAKE_INSTALL_PREFIX ${ROCM_DIR} CACHE PATH "Default installation directory.")
 
+set(CMAKE_BUILD_TYPE "RelWithDebInfo" CACHE STRING "Choose the type of build to perform: Debug, Release, RelWithDebInfo, MinSizeRel")
+# Set the possible values of build type
+set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "RelWithDebInfo" "MinSizeRel")
+
+# Set compile flags
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -m64 -msse -msse2")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -ggdb -DDEBUG" CACHE STRING "Flags for Debug builds")
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O2 -s -DNDEBUG" CACHE STRING "Flags for Release builds")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -O2 -g -DNDEBUG" CACHE STRING "Flags for RelWithDebInfo builds")
+set(CMAKE_CXX_FLAGS_MINSIZEREL "${CMAKE_CXX_FLAGS_MINSIZEREL} -Os -DNDEBUG" CACHE STRING "Flags for MinSizeRel builds")
+
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/" CACHE INTERNAL "Default module path.")
 # Include common cmake modules
 include(utils)
