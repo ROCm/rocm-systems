@@ -36,18 +36,6 @@ message("----------SMI Inc Dir: " ${AMD_SMI_INCLUDE_DIR})
 message("---------GRPC Root Dir: " ${GRPC_ROOT})
 message("")
 
-## Compiler flags
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -m64")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -msse -msse2")
-# Use this instead of above for 32 bit
-# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m32")
-
-if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -s")
-else()
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ggdb -O0 -DDEBUG")
-endif()
-
 # Issue with ABI compatibility and gRPC.
 # See:
 # - https://github.com/llvm/llvm-project/issues/102443
