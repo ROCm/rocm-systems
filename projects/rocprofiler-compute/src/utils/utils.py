@@ -54,7 +54,10 @@ def is_tcc_channel_counter(counter):
 
 
 def using_v1():
-    return "ROCPROF" in os.environ.keys() and os.environ["ROCPROF"].endswith("rocprof")
+
+    return "ROCPROF" not in os.environ.keys() or (
+        "ROCPROF" in os.environ.keys() and os.environ["ROCPROF"].endswith("rocprof")
+    )
 
 
 def using_v3():
