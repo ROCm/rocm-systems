@@ -139,7 +139,7 @@ trap_entry:
   // - EXCP_FLAG_PRIV.ADDR_WATCH && TRAP_CTL.WATCH   -> WAVE_TRAP
   // - (EXCP_FLAG_USER[ALU] & TRAP_CTRL[ALU]) != 0   -> WAVE_MATH_ERROR
 .check_exceptions:
-  s_getreg_b32	       ttmp2, hwreg(HW_REG_EXCP_FLAG_PRIV)
+  s_getreg_b32         ttmp2, hwreg(HW_REG_EXCP_FLAG_PRIV)
   s_getreg_b32         ttmp13, hwreg(HW_REG_TRAP_CTRL)
 
   s_bitcmp1_b32        ttmp2, SQ_WAVE_EXCP_FLAG_PRIV_XNACK_ERROR_SHIFT
