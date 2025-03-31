@@ -8,6 +8,10 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 - Added profiling and metric collection capabilities for VCN engine activity, JPEG engine activity and API tracing for rocDecode, rocJPEG and VA-APIs.
 
+### Changed
+
+- Replaced ROCm-SMI backend with AMD-SMI backend for collecting GPU metrics.
+
 ### Resolved issues
 
 - Fixed application hang when enabling the RCCL backend

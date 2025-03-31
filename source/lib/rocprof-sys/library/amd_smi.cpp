@@ -83,6 +83,22 @@ is_initialized()
     return _v;
 }
 
+amdsmi_version_t&
+get_version()
+{
+    static amdsmi_version_t _v = {};
+
+    if(_v.major == 0 && _v.minor == 0)
+    {
+        auto _err = amdsmi_get_lib_version(&_v);
+        if(_err != AMDSMI_STATUS_SUCCESS)
+            ROCPROFSYS_THROW(
+                "amdsmi_get_version failed. No version information available.");
+    }
+
+    return _v;
+}
+
 void
 check_error(const char* _file, int _line, amdsmi_status_t _code, bool* _option = nullptr)
 {
@@ -157,8 +173,15 @@ data::sample(uint32_t _dev_id)
     ROCPROFSYS_AMDSMI_GET(get_settings(m_dev_id).temp, amdsmi_get_temp_metric,
                           sample_handle, AMDSMI_TEMPERATURE_TYPE_JUNCTION,
                           AMDSMI_TEMP_CURRENT, &m_temp);
+#if(AMDSMI_LIB_VERSION_MAJOR == 2 && AMDSMI_LIB_VERSION_MINOR == 0) ||                   \
+    (AMDSMI_LIB_VERSION_MAJOR == 25 && AMDSMI_LIB_VERSION_MINOR == 2)
+    // This was a transient change in the AMD SMI API. It was never officially released.
+    ROCPROFSYS_AMDSMI_GET(get_settings(m_dev_id).power, amdsmi_get_power_info,
+                          sample_handle, 0, &m_power)
+#else
     ROCPROFSYS_AMDSMI_GET(get_settings(m_dev_id).power, amdsmi_get_power_info,
                           sample_handle, &m_power)
+#endif
     ROCPROFSYS_AMDSMI_GET(get_settings(m_dev_id).mem_usage, amdsmi_get_gpu_memory_usage,
                           sample_handle, AMDSMI_MEM_TYPE_VRAM, &m_mem_usage);
     ROCPROFSYS_AMDSMI_GET(get_settings(m_dev_id).vcn_activity,
@@ -220,6 +243,8 @@ config()
 void
 sample()
 {
+    auto_lock_t _lk{ type_mutex<category::amd_smi>() };
+
     for(auto itr : data::device_list)
     {
         if(amd_smi::get_state() != State::Active) continue;
@@ -255,7 +280,6 @@ data::setup()
 bool
 data::shutdown()
 {
-    ROCPROFSYS_DEBUG("Shutting down amd-smi...\n");
     amd_smi::set_state(State::Finalized);
     return true;
 }
@@ -453,6 +477,11 @@ setup()
         return;
     }
 
+    amdsmi_version_t _version = get_version();
+    ROCPROFSYS_VERBOSE_F(0, "AMD SMI version: %u.%u.%u.%u - str: %s.\n", _version.year,
+                         _version.major, _version.minor, _version.release,
+                         _version.build);
+
     data::device_count = gpu::get_processor_count();
 
     auto _devices_v = get_sampling_gpus();
@@ -561,6 +590,7 @@ shutdown()
     auto_lock_t _lk{ type_mutex<category::amd_smi>() };
 
     if(!is_initialized()) return;
+    ROCPROFSYS_VERBOSE_F(1, "Shutting down amd-smi...\n");
 
     try
     {
