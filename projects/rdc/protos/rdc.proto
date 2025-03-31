@@ -53,8 +53,15 @@ service RdcAPI {
   // Discovery API
   // rdc_status_t rdc_get_all_devices(uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES], uint32_t* count)
   rpc GetAllDevices(Empty) returns (GetAllDevicesResponse) {}
+  
+  // rdc_status_t rdc_get_all_devices(uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES], uint32_t* count)
+  rpc GetAllCpuDevices(Empty) returns (GetAllCpuDevicesResponse) {}
+
   // rdc_status_t rdc_get_device_attributes(uint32_t gpu_index, rdc_device_attributes_t* p_rdc_attr)
   rpc GetDeviceAttributes(GetDeviceAttributesRequest) returns (GetDeviceAttributesResponse) {}
+
+  // rdc_status_t rdc_get_device_attributes(uint32_t gpu_index, rdc_device_attributes_t* p_rdc_attr)
+  rpc GetDeviceCpuAttributes(GetCpuDeviceAttributesRequest) returns (GetCpuDeviceAttributesResponse) {}
 
   //rdc_status_t rdc_device_get_component_version(rdc_component_t component, rdc_component_version_t* p_rdc_compv);
   rpc GetComponentVersion(GetComponentVersionRequest) returns (GetComponentVersionResponse) {}
@@ -240,11 +247,25 @@ message GetDeviceAttributesRequest {
   uint32 gpu_index = 1;
 }
 
+message GetAllCpuDevicesResponse {
+  uint32 status = 1;
+  repeated uint32 cpus = 2;
+}
+
+message GetCpuDeviceAttributesRequest {
+  uint32 cpu_index = 1;
+}
+
 message DeviceAttributes {
   string device_name = 1;
 }
 
 message GetDeviceAttributesResponse {
+  uint32 status = 1;
+  DeviceAttributes attributes = 2;
+}
+
+message GetCpuDeviceAttributesResponse {
   uint32 status = 1;
   DeviceAttributes attributes = 2;
 }

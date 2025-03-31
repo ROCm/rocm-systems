@@ -47,7 +47,11 @@ class RdcStandaloneHandler : public RdcHandler {
   // Discovery RdcAPI
   rdc_status_t rdc_device_get_all(uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES],
                                   uint32_t* count) override;
+  rdc_status_t rdc_device_get_all_cpu(uint32_t cpu_index_list[RDC_MAX_NUM_DEVICES],
+                                  uint32_t* count) override;
   rdc_status_t rdc_device_get_attributes(uint32_t gpu_index,
+                                         rdc_device_attributes_t* p_rdc_attr) override;
+  rdc_status_t rdc_device_get_cpu_attributes(uint32_t cpu_index,
                                          rdc_device_attributes_t* p_rdc_attr) override;
   rdc_status_t rdc_device_get_component_version(rdc_component_t component,
                                                 rdc_component_version_t* p_rdc_compv) override;
