@@ -49,7 +49,11 @@ class smi_initializer {
   smi_initializer() {
     // Make sure smi will not be initialized multiple times
     amdsmi_shut_down();
-    amdsmi_status_t ret = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
+    amdsmi_status_t ret;
+    uint64_t init_flag_;
+    //initialize CPU and GPU instances
+    init_flag_ = AMDSMI_INIT_AMD_GPUS | AMDSMI_INIT_AMD_CPUS;
+    ret = amdsmi_init(init_flag_);
     if (ret != AMDSMI_STATUS_SUCCESS) {
       throw amd::rdc::RdcException(RDC_ST_FAIL_LOAD_MODULE, "SMI initialize fail");
     }
@@ -193,6 +197,28 @@ rdc_status_t RdcEmbeddedHandler::rdc_device_get_all(uint32_t gpu_index_list[RDC_
   return RDC_ST_OK;
 }
 
+// Discovery API
+rdc_status_t RdcEmbeddedHandler::rdc_device_get_all_cpu(uint32_t cpu_index_list[RDC_MAX_NUM_DEVICES],
+                                                    uint32_t* count) {
+  if (!count) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+
+  rdc_field_value device_count;
+  rdc_status_t status = metric_fetcher_->fetch_smi_cpu_field(0, RDC_FI_DEV_CPU_COUNT, &device_count);
+  if (status != RDC_ST_OK) {
+    std::cout << "rdc_device_get_all_cpu failed to get cpu count";
+    return status;
+  }
+
+  // Assign the index to the index list
+  *count = device_count.value.l_int;
+  for (uint32_t i = 0; i < *count; i++) {
+    cpu_index_list[i] = i;
+  }
+
+  return RDC_ST_OK;
+}
 rdc_status_t RdcEmbeddedHandler::rdc_device_get_attributes(uint32_t gpu_index,
                                                            rdc_device_attributes_t* p_rdc_attr) {
   if (!p_rdc_attr) {
@@ -201,6 +227,19 @@ rdc_status_t RdcEmbeddedHandler::rdc_device_get_attributes(uint32_t gpu_index,
   rdc_field_value device_name;
   rdc_status_t status = metric_fetcher_->fetch_smi_field(gpu_index, RDC_FI_DEV_NAME, &device_name);
   strncpy_with_null(p_rdc_attr->device_name, device_name.value.str, RDC_MAX_STR_LENGTH);
+  return status;
+}
+
+rdc_status_t RdcEmbeddedHandler::rdc_device_get_cpu_attributes(uint32_t cpu_index,
+                                                           rdc_device_attributes_t* p_rdc_attr) {
+  if (!p_rdc_attr) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+  rdc_field_value device_name;
+
+  rdc_status_t status = metric_fetcher_->fetch_smi_cpu_field(cpu_index, RDC_FI_DEV_CPU_MODEL, &device_name);
+  strncpy_with_null(p_rdc_attr->device_name, device_name.value.str, RDC_MAX_STR_LENGTH);
+
   return status;
 }
 

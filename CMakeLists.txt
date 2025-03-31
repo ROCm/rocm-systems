@@ -85,6 +85,11 @@ option(BUILD_EXAMPLES "Build examples" OFF)
 # Enable shared libraries for gtest
 option(BUILD_SHARED_LIBS "Build shared library (.so) or not." ON)
 
+option(ENABLE_ESMI_LIB "Enable AMDSMI ESMI Library" ON)
+if(ENABLE_ESMI_LIB)
+    add_definitions("-DENABLE_ESMI_LIB=1")
+endif()
+
 # Enable address sanitizer
 set(ADDRESS_SANITIZER_DEFAULT OFF)
 if(DEFINED ENV{ADDRESS_SANITIZER})
@@ -165,7 +170,7 @@ if(BUILD_STANDALONE AND GRPC_ROOT STREQUAL GRPC_ROOT_DEFAULT)
     Continuing without gRPC install")
 endif()
 
-find_package(amd_smi
+find_package(amd_smi 25.4.0
     NAMES amd_smi
     HINTS ${ROCM_DIR}/lib/cmake
     CONFIGURE REQUIRED)

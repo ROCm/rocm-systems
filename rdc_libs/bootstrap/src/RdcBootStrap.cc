@@ -174,6 +174,16 @@ rdc_status_t rdc_device_get_all(rdc_handle_t p_rdc_handle,
       ->rdc_device_get_all(gpu_index_list, count);
 }
 
+rdc_status_t rdc_device_get_all_cpu(rdc_handle_t p_rdc_handle,
+                                uint32_t cpu_index_list[RDC_MAX_NUM_DEVICES], uint32_t* count) {
+  if (!p_rdc_handle || !count) {
+    std::cout << "p_rdc_handle or count is NULL\n";
+    return RDC_ST_INVALID_HANDLER;
+  }
+
+  return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
+      ->rdc_device_get_all_cpu(cpu_index_list, count);
+}
 rdc_status_t rdc_device_get_attributes(rdc_handle_t p_rdc_handle, uint32_t gpu_index,
                                        rdc_device_attributes_t* p_rdc_attr) {
   if (!p_rdc_handle || !p_rdc_attr) {
@@ -184,8 +194,17 @@ rdc_status_t rdc_device_get_attributes(rdc_handle_t p_rdc_handle, uint32_t gpu_i
       ->rdc_device_get_attributes(gpu_index, p_rdc_attr);
 }
 
-rdc_status_t rdc_device_get_component_version(rdc_handle_t p_rdc_handle, rdc_component_t component,
-                                              rdc_component_version_t* p_rdc_compv) {
+rdc_status_t rdc_device_get_cpu_attributes(rdc_handle_t p_rdc_handle, uint32_t cpu_index,
+                                       rdc_device_attributes_t* p_rdc_attr) {
+  if (!p_rdc_handle || !p_rdc_attr) {
+    return RDC_ST_INVALID_HANDLER;
+  }
+
+  return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
+      ->rdc_device_get_cpu_attributes(cpu_index, p_rdc_attr);
+}
+
+rdc_status_t rdc_device_get_component_version(rdc_handle_t p_rdc_handle, rdc_component_t component, rdc_component_version_t* p_rdc_compv) {
   if (!p_rdc_handle || !p_rdc_compv) {
     return RDC_ST_INVALID_HANDLER;
   }

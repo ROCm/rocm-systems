@@ -148,6 +148,48 @@ void RdciDiscoverySubSystem::show_attributes() {
       std::cout << i << "\t\t" << attribute.device_name << std::endl;
     }
   }
+  std::cout << "====================================================="
+              << "============\n";
+  uint32_t cpu_index_list[RDC_MAX_NUM_DEVICES];
+  uint32_t cpu_count = 0;
+
+  rdc_status_t cpu_result = rdc_device_get_all_cpu(rdc_handle_, cpu_index_list, &cpu_count);
+  if (cpu_result != RDC_ST_OK) {
+    throw RdcException(cpu_result, "Fail to get CPU device information");
+  }
+  if (cpu_count == 0) {
+    if (is_json_output()) {
+      std::cout << "\"cpus\" : [], \"status\": \"ok\"";
+    } else {
+      std::cout << "No CPUs find on the system\n";
+    }
+    return;
+  }
+
+  if (is_json_output()) {
+    std::cout << "\"cpus\" : [";
+  } else {
+    std::cout << cpu_count << " CPUs found.\n";
+    std::cout << "------------------------------------------------"
+              << "-----------------\n";
+    std::cout << "CPU Index\t Device Information\n";
+  }
+  for (uint32_t i = 0; i < cpu_count; i++) {
+    rdc_device_attributes_t cpu_attribute;
+    cpu_result = rdc_device_get_cpu_attributes(rdc_handle_, cpu_index_list[i], &cpu_attribute);
+    if (cpu_result != RDC_ST_OK) {
+      return;
+    }
+    if (is_json_output()) {
+      std::cout << "{\"cpu_index\": \"" << i << "\", \"device_name\": \"" << cpu_attribute.device_name
+                << "\"}";
+      if (i != cpu_count - 1) {
+        std::cout << ",";
+      }
+    } else {
+      std::cout << i << "\t\t" << cpu_attribute.device_name << std::endl;
+    }
+  }
   if (is_json_output()) {
     std::cout << ']';
   } else {
