@@ -1,7 +1,10 @@
 # ROCprofiler-SDK:  Application Profiling, Tracing, and Performance Analysis
 
 > [!IMPORTANT]
-We are phasing out development and support for ``roctracer/rocprofiler/rocprof/rocprofv2`` in favor of ``rocprofiler-sdk/rocprofv3`` in upcoming ROCm releases. Going forward, only critical defect fixes will be addressed for older versions of profiling tools and libraries. We encourage all users to upgrade to the latest version, rocprofiler-sdk library and rocprofv3 tool, to ensure continued support and access to new features.
+We are phasing out development and support for `ROCTracer, ROCprofiler, rocprof, and rocprofv2` in favour of `ROCprofiler-SDK` and `rocprofv3` in upcoming ROCm releases. Starting with the `ROCm 6.4` release, only critical defect fixes will be addressed for older versions of the profiling tools and libraries. We encourage all users to upgrade to the latest version of the `ROCprofiler-SDK` library and the `rocprofv3` tool to ensure continued support and access to new features. `ROCprofiler SDK` is still in beta today and will be production-ready by `ROCm 6.5`.
+
+    Please note that we anticipate the end of life for ROCprofiler V1/V2 and ROCTracer within nine months after the ROCm 6.5 release, aligning with the Q1 2026.
+
 
 ## Overview
 
@@ -79,7 +82,7 @@ Please see the detailed section on build and installation here: [Click Here](sou
 
 ## Support
 
-Please report in the Github Issues.
+Please report in the Github Issues OR send an email to <dl.ROCm-Profiler.support@amd.com>
 
 ## Limitations
 

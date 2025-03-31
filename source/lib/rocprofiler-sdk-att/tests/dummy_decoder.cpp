@@ -120,6 +120,14 @@ rocprofiler_att_decoder_parse_data(rocprofiler_att_decoder_se_data_callback_t se
         trace_callback(ROCPROFILER_ATT_DECODER_TYPE_WAVE, 0, waves.data(), waves.size(), userdata);
     }
 
+    {
+        std::vector<att_perfevent_t> vec{};
+        att_perfevent_t              perf{.events0 = 1, .CU = 1, .bank = 1};
+        vec.push_back(perf);
+        vec.push_back(perf);
+        trace_callback(ROCPROFILER_ATT_DECODER_TYPE_PERFEVENT, 0, vec.data(), vec.size(), userdata);
+    }
+
     return ROCPROFILER_ATT_DECODER_STATUS_SUCCESS;
 }
 

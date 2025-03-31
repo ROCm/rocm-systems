@@ -139,6 +139,8 @@ ATTDecoder::parse(const Fspath&                       input_dir,
 
     for(const auto& file : codeobj_files)
     {
+        if(file.id == 0 && file.name.empty()) continue;
+
         if(file.name.find("memory://") == 0)
         {
             ROCP_WARNING << file.name << " was not loaded";
