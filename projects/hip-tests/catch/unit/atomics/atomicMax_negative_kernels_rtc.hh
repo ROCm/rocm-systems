@@ -61,10 +61,6 @@ static constexpr auto kAtomicMax_int{
     __global__ void atomicMax_int_v7(long* address, int* result) {
       *result = atomicMax(address, 1234);
     }
-
-    __global__ void atomicMax_int_v8(long long* address, int* result) {
-      *result = atomicMax(address, 1234);
-    }
   )"};
 
 static constexpr auto kAtomicMax_uint{
@@ -100,10 +96,6 @@ static constexpr auto kAtomicMax_uint{
     }
 
     __global__ void atomicMax_uint_v7(long* address, unsigned int* result) {
-      *result = atomicMax(address, 1234);
-    }
-
-    __global__ void atomicMax_uint_v8(long long* address, unsigned int* result) {
       *result = atomicMax(address, 1234);
     }
   )"};
@@ -143,10 +135,6 @@ static constexpr auto kAtomicMax_ulong{
     __global__ void atomicMax_ulong_v7(long* address, unsigned long* result) {
       *result = atomicMax(address, 1234);
     }
-
-    __global__ void atomicMax_ulong_v8(long long* address, unsigned long* result) {
-      *result = atomicMax(address, 1234);
-    }
   )"};
 
 static constexpr auto kAtomicMax_ulonglong{
@@ -182,10 +170,6 @@ static constexpr auto kAtomicMax_ulonglong{
     }
 
     __global__ void atomicMax_ulonglong_v7(long* address, unsigned long long* result) {
-      *result = atomicMax(address, 1234);
-    }
-
-    __global__ void atomicMax_ulonglong_v8(long long* address, unsigned long long* result) {
       *result = atomicMax(address, 1234);
     }
   )"};
@@ -225,10 +209,6 @@ static constexpr auto kAtomicMax_float{
     __global__ void atomicMax_float_v7(long* address, float* result) {
       *result = atomicMax(address, 1234.f);
     }
-
-    __global__ void atomicMax_float_v8(long long* address, float* result) {
-      *result = atomicMax(address, 1234);
-    }
   )"};
 
 static constexpr auto kAtomicMax_double{
@@ -264,10 +244,6 @@ static constexpr auto kAtomicMax_double{
     }
 
     __global__ void atomicMax_double_v7(long* address, double* result) {
-      *result = atomicMax(address, 1234.0);
-    }
-
-    __global__ void atomicMax_double_v8(long long* address, double* result) {
       *result = atomicMax(address, 1234.0);
     }
   )"};

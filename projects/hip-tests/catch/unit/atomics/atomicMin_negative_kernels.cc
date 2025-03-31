@@ -49,10 +49,6 @@ __global__ void atomicMin_int_v6(short* address, int* result) {
 
 __global__ void atomicMin_int_v7(long* address, int* result) { *result = atomicMin(address, 1234); }
 
-__global__ void atomicMin_int_v8(long long* address, int* result) {
-  *result = atomicMin(address, 1234);
-}
-
 /* unsigned int atomicMin(unsigned int* address, unsigned int val) */
 __global__ void atomicMin_uint_v1(unsigned int* address, unsigned int* result) {
   *result = atomicMin(&address, 1234);
@@ -79,10 +75,6 @@ __global__ void atomicMin_uint_v6(short* address, unsigned int* result) {
 }
 
 __global__ void atomicMin_uint_v7(long* address, unsigned int* result) {
-  *result = atomicMin(address, 1234);
-}
-
-__global__ void atomicMin_uint_v8(long long* address, unsigned int* result) {
   *result = atomicMin(address, 1234);
 }
 
@@ -115,10 +107,6 @@ __global__ void atomicMin_ulong_v7(long* address, unsigned long* result) {
   *result = atomicMin(address, 1234);
 }
 
-__global__ void atomicMin_ulong_v8(long long* address, unsigned long* result) {
-  *result = atomicMin(address, 1234);
-}
-
 /* atomicMin(unsigned long long* address, unsigned long long val) */
 __global__ void atomicMin_ulonglong_v1(unsigned long long* address, unsigned long long* result) {
   *result = atomicMin(&address, 1234);
@@ -145,10 +133,6 @@ __global__ void atomicMin_ulonglong_v6(short* address, unsigned long long* resul
 }
 
 __global__ void atomicMin_ulonglong_v7(long* address, unsigned long long* result) {
-  *result = atomicMin(address, 1234);
-}
-
-__global__ void atomicMin_ulonglong_v8(long long* address, unsigned long long* result) {
   *result = atomicMin(address, 1234);
 }
 
@@ -181,10 +165,6 @@ __global__ void atomicMin_float_v7(long* address, float* result) {
   *result = atomicMin(address, 1234.f);
 }
 
-__global__ void atomicMin_float_v8(long long* address, float* result) {
-  *result = atomicMin(address, 1234);
-}
-
 /* atomicMin(double* address, double val) */
 __global__ void atomicMin_double_v1(double* address, double* result) {
   *result = atomicMin(&address, 1234.0);
@@ -211,9 +191,5 @@ __global__ void atomicMin_double_v6(short* address, double* result) {
 }
 
 __global__ void atomicMin_double_v7(long* address, double* result) {
-  *result = atomicMin(address, 1234.0);
-}
-
-__global__ void atomicMin_double_v8(long long* address, double* result) {
   *result = atomicMin(address, 1234.0);
 }

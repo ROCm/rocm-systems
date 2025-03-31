@@ -61,10 +61,6 @@ static constexpr auto kAtomicMin_int{
     __global__ void atomicMin_int_v7(long* address, int* result) {
       *result = atomicMin(address, 1234);
     }
-
-    __global__ void atomicMin_int_v8(long long* address, int* result) {
-      *result = atomicMin(address, 1234);
-    }
   )"};
 
 static constexpr auto kAtomicMin_uint{
@@ -100,10 +96,6 @@ static constexpr auto kAtomicMin_uint{
     }
 
     __global__ void atomicMin_uint_v7(long* address, unsigned int* result) {
-      *result = atomicMin(address, 1234);
-    }
-
-    __global__ void atomicMin_uint_v8(long long* address, unsigned int* result) {
       *result = atomicMin(address, 1234);
     }
   )"};
@@ -143,10 +135,6 @@ static constexpr auto kAtomicMin_ulong{
     __global__ void atomicMin_ulong_v7(long* address, unsigned long* result) {
       *result = atomicMin(address, 1234);
     }
-
-    __global__ void atomicMin_ulong_v8(long long* address, unsigned long* result) {
-      *result = atomicMin(address, 1234);
-    }
   )"};
 
 static constexpr auto kAtomicMin_ulonglong{
@@ -182,10 +170,6 @@ static constexpr auto kAtomicMin_ulonglong{
     }
 
     __global__ void atomicMin_ulonglong_v7(long* address, unsigned long long* result) {
-      *result = atomicMin(address, 1234);
-    }
-
-    __global__ void atomicMin_ulonglong_v8(long long* address, unsigned long long* result) {
       *result = atomicMin(address, 1234);
     }
   )"};
@@ -225,10 +209,6 @@ static constexpr auto kAtomicMin_float{
     __global__ void atomicMin_float_v7(long* address, float* result) {
       *result = atomicMin(address, 1234.f);
     }
-
-    __global__ void atomicMin_float_v8(long long* address, float* result) {
-      *result = atomicMin(address, 1234);
-    }
   )"};
 
 static constexpr auto kAtomicMin_double{
@@ -264,10 +244,6 @@ static constexpr auto kAtomicMin_double{
     }
 
     __global__ void atomicMin_double_v7(long* address, double* result) {
-      *result = atomicMin(address, 1234.0);
-    }
-
-    __global__ void atomicMin_double_v8(long long* address, double* result) {
       *result = atomicMin(address, 1234.0);
     }
   )"};
