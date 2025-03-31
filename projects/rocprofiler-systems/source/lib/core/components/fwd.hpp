@@ -217,7 +217,7 @@ TIMEMORY_METADATA_SPECIALIZATION(rocprofsys::component::sampling_gpu_vcn,
                                  "Derived from sampling")
 TIMEMORY_METADATA_SPECIALIZATION(rocprofsys::component::sampling_gpu_jpeg,
                                  "sampling_gpu_jpeg",
-                                 "GPU JPEG Utilization (% activity) via ROCm-SMI",
+                                 "GPU JPEG Utilization (% activity) via AMD SMI",
                                  "Derived from sampling")
 
 // statistics type

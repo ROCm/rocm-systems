@@ -220,20 +220,20 @@ The following example:
 Exploring GPU Metrics
 ---------------------
 
-ROCm Systems Profiler supports GPU metrics collection, sampling, and API tracing via `ROCprofiler-SDK <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/index.html>`_ and `ROCm-SMI <https://rocm.docs.amd.com/projects/rocm_smi_lib/en/latest/>`_.
+ROCm Systems Profiler supports GPU metrics collection, sampling, and API tracing via `ROCprofiler-SDK <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/index.html>`_ and `AMD-SMI <https://rocm.docs.amd.com/projects/amdsmi/en/latest/>`_.
 ROCprofiler-SDK supports application tracing to provide a big picture of the GPU application execution and kernel profiling to provide low-level hardware details from the performance counters.
-The ROCm-SMI library offers a unified tool for managing, monitoring, and retrieving information about the system's drivers and GPUs.
+The AMD-SMI library offers a unified tool for managing, monitoring, and retrieving information about the system's drivers and GPUs.
 
-Sampling GPU metrics like utilization, temperature, power consumption, memory usage, etc., can be configured with ``ROCPROFSYS_ROCM_SMI_METRICS``.
-The ``ROCPROFSYS_USE_ROCM_SMI`` setting should be enabled for GPU metric collection.
+Sampling GPU metrics like utilization, temperature, power consumption, memory usage, etc., can be configured with ``ROCPROFSYS_AMD_SMI_METRICS``.
+The ``ROCPROFSYS_USE_AMD_SMI`` setting should be enabled for GPU metric collection.
 
 For example, the following is a valid configuration:
 
 .. code-block:: shell
 
-   ROCPROFSYS_ROCM_SMI_METRICS=busy,temp,power,vcn_activity,mem_usage
+   ROCPROFSYS_AMD_SMI_METRICS=busy,temp,power,vcn_activity,mem_usage
 
-Supported values for ``ROCPROFSYS_ROCM_SMI_METRICS`` are: ``busy``, ``temp``, ``power``, ``vcn_activity``, ``mem_usage``, ``jpeg_activity``.
+Supported values for ``ROCPROFSYS_AMD_SMI_METRICS`` are: ``busy``, ``temp``, ``power``, ``vcn_activity``, ``mem_usage``, ``jpeg_activity``.
 
 API tracing is configured with the ``ROCPROFSYS_ROCM_DOMAINS`` setting. The domains are used to filter the events that are captured during profiling.
 Supported values for this setting are those supported by ROCprofiler-SDK, which are returned by the API ``get_callback_tracing_names()`` and ``get_buffer_tracing_names()``. See the `ROCprofiler-SDK developer API documentation <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/_doxygen/html/namespacerocprofiler_1_1sdk.html>`_ to learn more about ROCprofiler-SDK APIs.
