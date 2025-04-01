@@ -53,8 +53,15 @@ service RdcAPI {
   // Discovery API
   // rdc_status_t rdc_get_all_devices(uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES], uint32_t* count)
   rpc GetAllDevices(Empty) returns (GetAllDevicesResponse) {}
+  
+  // rdc_status_t rdc_get_all_devices(uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES], uint32_t* count)
+  rpc GetAllCpuDevices(Empty) returns (GetAllCpuDevicesResponse) {}
+
   // rdc_status_t rdc_get_device_attributes(uint32_t gpu_index, rdc_device_attributes_t* p_rdc_attr)
   rpc GetDeviceAttributes(GetDeviceAttributesRequest) returns (GetDeviceAttributesResponse) {}
+
+  // rdc_status_t rdc_get_device_attributes(uint32_t gpu_index, rdc_device_attributes_t* p_rdc_attr)
+  rpc GetDeviceCpuAttributes(GetCpuDeviceAttributesRequest) returns (GetCpuDeviceAttributesResponse) {}
 
   //rdc_status_t rdc_device_get_component_version(rdc_component_t component, rdc_component_version_t* p_rdc_compv);
   rpc GetComponentVersion(GetComponentVersionRequest) returns (GetComponentVersionResponse) {}
@@ -219,6 +226,13 @@ service RdcAPI {
 
   // rdc_status_t GetLinkStatus()
   rpc GetLinkStatus(Empty) returns (GetLinkStatusResponse) {}
+  
+  // Get number of partitions
+  rpc GetNumPartition(GetNumPartitionRequest) returns (GetNumPartitionResponse);
+
+  // Get instance profile of gpu
+  rpc GetInstanceProfile(GetInstanceProfileRequest) returns (GetInstanceProfileResponse);
+
 }
 
 message Empty {
@@ -233,11 +247,25 @@ message GetDeviceAttributesRequest {
   uint32 gpu_index = 1;
 }
 
+message GetAllCpuDevicesResponse {
+  uint32 status = 1;
+  repeated uint32 cpus = 2;
+}
+
+message GetCpuDeviceAttributesRequest {
+  uint32 cpu_index = 1;
+}
+
 message DeviceAttributes {
   string device_name = 1;
 }
 
 message GetDeviceAttributesResponse {
+  uint32 status = 1;
+  DeviceAttributes attributes = 2;
+}
+
+message GetCpuDeviceAttributesResponse {
   uint32 status = 1;
   DeviceAttributes attributes = 2;
 }
@@ -803,4 +831,29 @@ message ClearConfigRequest {
 
 message ClearConfigResponse {
   uint32 status = 1;
+}
+
+// Request for getting the number of partitions for a given GPU index.
+message GetNumPartitionRequest {
+  // The GPU index for which to query the number of partitions.
+  uint32 gpu_index = 1;
+}
+
+// Response for getting the number of partitions.
+message GetNumPartitionResponse {
+  // Status of the operation, following RDC_ST_* codes.
+  uint32 status = 1;
+  // Number of partitions for the given GPU.
+  uint32 num_partition = 2;
+}
+
+message GetInstanceProfileRequest {
+  uint32 entity_index = 1;
+  uint32 resource_type = 2;
+}
+
+message GetInstanceProfileResponse {
+  uint32 status = 1;
+  uint32 partition_resource = 2;
+  uint32 num_partitions_share_resource = 3;
 }

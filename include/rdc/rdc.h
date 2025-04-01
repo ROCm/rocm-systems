@@ -130,6 +130,11 @@ typedef enum { INTEGER = 0, DOUBLE, STRING, BLOB } rdc_field_type_t;
 #define RDC_MAX_NUM_DEVICES 128
 
 /**
+ * @brief Max number of partitions
+ */
+#define RDC_MAX_NUM_PARTITIONS 8
+
+/**
  * @brief The max fields in a field group
  */
 #define RDC_MAX_FIELD_IDS_PER_FIELD_GROUP 128
@@ -285,21 +290,56 @@ typedef enum {
   RDC_FI_PROF_ELAPSED_CYCLES,
   RDC_FI_PROF_TENSOR_ACTIVE_PERCENT,
   RDC_FI_PROF_GPU_UTIL_PERCENT,
-  // metrics below are divided by time passed
+  // metrics with EVAL are divided by time passed
   RDC_FI_PROF_EVAL_MEM_R_BW,
   RDC_FI_PROF_EVAL_MEM_W_BW,
   RDC_FI_PROF_EVAL_FLOPS_16,
   RDC_FI_PROF_EVAL_FLOPS_32,
   RDC_FI_PROF_EVAL_FLOPS_64,
-  // metrics below are not divided by time passed
   RDC_FI_PROF_VALU_PIPE_ISSUE_UTIL,
   RDC_FI_PROF_SM_ACTIVE,
   RDC_FI_PROF_OCC_PER_ACTIVE_CU,
   RDC_FI_PROF_OCC_ELAPSED,
-  // metrics below are divided by time passed
   RDC_FI_PROF_EVAL_FLOPS_16_PERCENT,
   RDC_FI_PROF_EVAL_FLOPS_32_PERCENT,
   RDC_FI_PROF_EVAL_FLOPS_64_PERCENT,
+  // CPC
+  RDC_FI_PROF_CPC_CPC_STAT_BUSY,
+  RDC_FI_PROF_CPC_CPC_STAT_IDLE,
+  RDC_FI_PROF_CPC_CPC_STAT_STALL,
+  RDC_FI_PROF_CPC_CPC_TCIU_BUSY,
+  RDC_FI_PROF_CPC_CPC_TCIU_IDLE,
+  RDC_FI_PROF_CPC_CPC_UTCL2IU_BUSY,
+  RDC_FI_PROF_CPC_CPC_UTCL2IU_IDLE,
+  RDC_FI_PROF_CPC_CPC_UTCL2IU_STALL,
+  RDC_FI_PROF_CPC_ME1_BUSY_FOR_PACKET_DECODE,
+  RDC_FI_PROF_CPC_ME1_DC0_SPI_BUSY,
+  RDC_FI_PROF_CPC_UTCL1_STALL_ON_TRANSLATION,
+  RDC_FI_PROF_CPC_ALWAYS_COUNT,
+  RDC_FI_PROF_CPC_ADC_VALID_CHUNK_NOT_AVAIL,
+  RDC_FI_PROF_CPC_ADC_DISPATCH_ALLOC_DONE,
+  RDC_FI_PROF_CPC_ADC_VALID_CHUNK_END,
+  RDC_FI_PROF_CPC_SYNC_FIFO_FULL_LEVEL,
+  RDC_FI_PROF_CPC_SYNC_FIFO_FULL,
+  RDC_FI_PROF_CPC_GD_BUSY,
+  RDC_FI_PROF_CPC_TG_SEND,
+  RDC_FI_PROF_CPC_WALK_NEXT_CHUNK,
+  RDC_FI_PROF_CPC_STALLED_BY_SE0_SPI,
+  RDC_FI_PROF_CPC_STALLED_BY_SE1_SPI,
+  RDC_FI_PROF_CPC_STALLED_BY_SE2_SPI,
+  RDC_FI_PROF_CPC_STALLED_BY_SE3_SPI,
+  RDC_FI_PROF_CPC_LTE_ALL,
+  RDC_FI_PROF_CPC_SYNC_WRREQ_FIFO_BUSY,
+  RDC_FI_PROF_CPC_CANE_BUSY,
+  RDC_FI_PROF_CPC_CANE_STALL,
+  // CPF
+  RDC_FI_PROF_CPF_CMP_UTCL1_STALL_ON_TRANSLATION,
+  RDC_FI_PROF_CPF_CPF_STAT_BUSY,
+  RDC_FI_PROF_CPF_CPF_STAT_IDLE,
+  RDC_FI_PROF_CPF_CPF_STAT_STALL,
+  RDC_FI_PROF_CPF_CPF_TCIU_BUSY,
+  RDC_FI_PROF_CPF_CPF_TCIU_IDLE,
+  RDC_FI_PROF_CPF_CPF_TCIU_STALL,
 
   /**
    * @brief Raw XGMI counter events
@@ -370,6 +410,21 @@ typedef enum {
   RDC_HEALTH_EEPROM_CONFIG_VALID,    //!< Reads the EEPROM and verifies the checksums
   RDC_HEALTH_POWER_THROTTLE_TIME,    //!< Power throttle status counter
   RDC_HEALTH_THERMAL_THROTTLE_TIME,  //!< Total time in thermal throttle status (microseconds)
+  /**
+   * @brief RDC CPU related fields
+   */
+  RDC_FI_DEV_CPU_UTIL_TOTAL = 10001,  //!< CPU total percentage of time in use
+  RDC_FI_DEV_CPU_UTIL_USER,           //!< The percentage of time in use by the user
+  RDC_FI_DEV_CPU_UTIL_NICE,           //!< The percentage of time in use by low priority (high nice score) programs
+  RDC_FI_DEV_CPU_UTIL_SYS,            //!< The percentage of time in use by the system
+  RDC_FI_DEV_CPU_UTIL_IRQ,            //!< The percentage of time in use by interrupts
+  RDC_FI_DEV_CPU_TEMP_CURRENT,        //!< Instantaneous temperature (Celsius)
+  RDC_FI_DEV_CPU_CLOCK_CURRENT,       //!< Instantaneous clock speed (KHz)
+  RDC_FI_DEV_CPU_POWER_UTIL_CURRENT,  //!< Instantaneous power usage (watts)
+  RDC_FI_DEV_CPU_POWER_LIMIT,         //!< Instantaneous power limit (watts)
+  RDC_FI_DEV_CPU_VENDOR,              //!< The name of the vendor
+  RDC_FI_DEV_CPU_MODEL,               //!< The name of the model
+  RDC_FI_DEV_CPU_COUNT,
 } rdc_field_t;
 
 // even and odd numbers are used for correctable and uncorrectable errors
@@ -532,15 +587,19 @@ typedef enum {
   RDC_DIAG_TEST_FIRST = 0,
   //!< The diagnostic test pass
   RDC_DIAG_COMPUTE_PROCESS = RDC_DIAG_TEST_FIRST,
-  RDC_DIAG_COMPUTE_QUEUE,    //!< The Compute Queue is ready
-  RDC_DIAG_SYS_MEM_CHECK,    //!< Check System memory
-  RDC_DIAG_NODE_TOPOLOGY,    //!< Report node topology
-  RDC_DIAG_GPU_PARAMETERS,   //!< GPU parameters in range
-  RDC_DIAG_RVS_GST_TEST,     //!< RVS GST test
-  RDC_DIAG_RVS_MEMBW_TEST,   //!< RVS bandwidth test
-  RDC_DIAG_RVS_H2DD2H_TEST,  //!< RVS Host<->Device transfer speed test
-  RDC_DIAG_RVS_IET_TEST,     //!< RVS IET test
-  RDC_DIAG_RVS_CUSTOM,       //!< RVS custom test
+  RDC_DIAG_COMPUTE_QUEUE,         //!< The Compute Queue is ready
+  RDC_DIAG_SYS_MEM_CHECK,         //!< Check System memory
+  RDC_DIAG_NODE_TOPOLOGY,         //!< Report node topology
+  RDC_DIAG_GPU_PARAMETERS,        //!< GPU parameters in range
+  RDC_DIAG_RVS_GST_TEST,          //!< RVS GST test
+  RDC_DIAG_RVS_MEMBW_TEST,        //!< RVS bandwidth test
+  RDC_DIAG_RVS_H2DD2H_TEST,       //!< RVS Host<->Device transfer speed test
+  RDC_DIAG_RVS_IET_TEST,          //!< RVS IET test
+  RDC_DIAG_RVS_GST_LONG_TEST,     //!< RVS GST test
+  RDC_DIAG_RVS_MEMBW_LONG_TEST,   //!< RVS bandwidth test
+  RDC_DIAG_RVS_H2DD2H_LONG_TEST,  //!< RVS Host<->Device transfer speed test
+  RDC_DIAG_RVS_IET_LONG_TEST,     //!< RVS IET test
+  RDC_DIAG_RVS_CUSTOM,            //!< RVS custom test
   RDC_DIAG_TEST_LAST,
 } rdc_diag_test_cases_t;
 
@@ -998,6 +1057,25 @@ rdc_status_t rdc_device_get_all(rdc_handle_t p_rdc_handle,
                                 uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES], uint32_t* count);
 
 /**
+ *  @brief Get indexes corresponding to all the devices on the system.
+ *
+ *  @details Indexes represents RDC CPU Id corresponding to each CPU on the
+ * system and is immutable during the lifespan of the engine. The list
+ * should be queried again if the engine is restarted.
+ *
+ *  @param[in] p_rdc_handle The RDC handler.
+ *
+ *  @param[out] cpu_index_list Array reference to fill CPU indexes present on
+ *  the system.
+ *
+ *  @param[out] count Number of CPUs returned in cpu_index_list.
+ *
+ *  @retval ::RDC_ST_OK is returned upon successful call.
+ */
+rdc_status_t rdc_device_get_all_cpu(rdc_handle_t p_rdc_handle,
+                                uint32_t cpu_index_list[RDC_MAX_NUM_DEVICES], uint32_t* count);
+
+/**
  *  @brief Gets device attributes corresponding to the gpu_index.
  *
  *  @details Fetch the attributes, such as device name, of a GPU.
@@ -1013,6 +1091,23 @@ rdc_status_t rdc_device_get_all(rdc_handle_t p_rdc_handle,
  */
 rdc_status_t rdc_device_get_attributes(rdc_handle_t p_rdc_handle, uint32_t gpu_index,
                                        rdc_device_attributes_t* p_rdc_attr);
+
+/**
+ *  @brief Gets device attributes corresponding to the cpu_index.
+ *
+ *  @details Fetch the attributes, such as device name, of a CPU.
+ *
+ *  @param[in] p_rdc_handle The RDC handler.
+ *
+ *  @param[in] cpu_index CPU index corresponding to which the attributes
+ *  should be fetched
+ *
+ *  @param[out] p_rdc_attr CPU attribute corresponding to the cpu_index.
+ *
+ *  @retval ::RDC_ST_OK is returned upon successful call.
+ */
+rdc_status_t rdc_device_get_cpu_attributes(rdc_handle_t p_rdc_handle, uint32_t cpu_index,
+                                      rdc_device_attributes_t* p_rdc_attr);
 
 /**
  *  @brief Get version information of components used by rdc.
@@ -1616,6 +1711,139 @@ rdc_status_t rdc_config_get(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
 rdc_status_t rdc_config_clear(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id);
 
 const char* get_rocm_path(const char* search_string);
+
+/**
+ * @brief The device role
+ */
+typedef enum {
+  RDC_DEVICE_ROLE_PHYSICAL,
+  RDC_DEVICE_ROLE_PARTITION_INSTANCE  //!< The partition instance
+} rdc_device_role_t;
+
+/**
+ * @brief The device type
+ */
+typedef enum { RDC_DEVICE_TYPE_GPU, RDC_DEVICE_TYPE_CPU } rdc_device_type_t;
+
+typedef struct {
+  uint32_t device_index;          //!< Physical device index
+  uint32_t instance_index;        //!< Instance or core index
+  rdc_device_role_t entity_role;  //!< Physical device or partition instance
+  rdc_device_type_t device_type;  //!< Type
+} rdc_entity_info_t;
+
+/**
+ * @brief The function to decode the entity info from entity index
+ * @details
+ * | 31 30 29| 28 27 | 21 20 19 ... 12 11 |    10 9 8 7 6 5 4 3 2 1 0 |
+ * |---------|-------|--------------------|---------------------------|
+ * | Type    | Role  |     Instance       |     Device                |
+ * |---------|-------|--------------------|---------------------------|
+ *  the 32 bit entity index is crafted based on above structure, this function
+ *  will decode them into a data structure
+ *
+ *  @param[in] entity_index The entity index.
+ *
+ *  @retval rdc_entity_info_t is returned for decode structure
+ */
+
+rdc_entity_info_t rdc_get_info_from_entity_index(uint32_t entity_index);
+
+/**
+ * @brief The function to encode the entity info to entity index
+ * @details
+ * | 31 30 29| 28 27 | 21 20 19 ... 12 11 |    10 9 8 7 6 5 4 3 2 1 0 |
+ * |---------|-------|--------------------|---------------------------|
+ * | Type    | Role  |     Instance       |     Device                |
+ * |---------|-------|--------------------|---------------------------|
+ *  the 32 bit entity index is crafted based on above structure, this function
+ *  will encode them to index
+ *
+ *  @param[in] info The entity info to encode.
+ *
+ *  @retval entity_index is returned
+ */
+uint32_t rdc_get_entity_index_from_info(rdc_entity_info_t info);
+
+// map from amdsmi_accelerator_partition_resource_type_t
+typedef enum {
+  RDC_ACCELERATOR_XCC = 0,
+  RDC_ACCELERATOR_ENCODER,
+  RDC_ACCELERATOR_DECODER,
+  RDC_ACCELERATOR_DMA,
+  RDC_ACCELERATOR_JPEG,
+  RDC_ACCELERATOR_RESOURCE_MAX,
+  RDC_ACCELERATOR_LAST = RDC_ACCELERATOR_RESOURCE_MAX
+} rdc_instance_resource_type_t;
+
+// map from amdsmi_accelerator_partition_resource_profile_t
+typedef struct {
+  rdc_instance_resource_type_t resource_type;
+  uint32_t partition_resource;  // The resources a partition can be used, which may be shared
+  uint32_t num_partitions_share_resource;  // If it is greater than 1, then resource is shared.
+} rdc_resource_profile_t;
+
+/**
+ *  @brief Query the resource allocation for a device/instance
+ *
+ *  @details The profile contains detail information how resource is allocated.
+ *
+ *  As an example, MI300X has 8 XCCs and 4 Decoders, in DPX mode, the physical device is
+ *  partitioned to 2 instances, so each instance will have 4 XCC and 2 Decoder and they are
+ *  not shared.
+ *  [XCC, 4, 0], [DECODER, 2, 0]
+ *
+ *  If it is CPX mode, the physical device is partitioned to 8 instances, and each instance
+ *  have 1 XCC and 2 instances are sharing the same decoder.
+ *  [XCC, 1, 0], [DECODER, 1, 1]
+ *
+ *  If entity_index is the physical device, it should return all resources of the device:
+ *  [XCC, 8, 0], [DECODER, 4, 0]
+ *
+ *  @param[in] p_rdc_handle The RDC handler.
+ *
+ *  @param[in] entity_index The GPU index to query. It can be physical device or instance.
+ *
+ *  @param[in] resource_type Which resource type to query
+ *
+ *  @param[out] profile  The details how the resource is allocated.
+ *
+ *  @retval ::RDC_ST_OK is returned upon successful call.
+ */
+rdc_status_t rdc_instance_profile_get(rdc_handle_t p_rdc_handle, uint32_t entity_index,
+                                      rdc_instance_resource_type_t resource_type,
+                                      rdc_resource_profile_t* profile);
+
+/**
+ * @brief Get the number of partitions for the specified GPU index.
+ *
+ * @param[in] p_rdc_handle The RDC handler.
+ * @param[in] index The GPU index to query.
+ * @param[out] num_partition Pointer to a variable to receive the number of partitions.
+ *
+ * @retval ::RDC_ST_OK on success.
+ */
+rdc_status_t rdc_get_num_partition(rdc_handle_t p_rdc_handle, uint32_t index,
+                                   uint16_t* num_partition);
+
+/**
+ * @brief Check if gpuid is partition string
+ *
+ * @param[in] s - singular partition string
+ * @retval bool - if partition string or not
+ */
+bool rdc_is_partition_string(const char* s);
+
+/**
+ * @brief Parse partition id into physical gpu and partition
+ *
+ * @param[in] s - singular partition string
+ * @param[out] physicalGpu - socket id
+ * @param[out] partition - partition id
+ *
+ * @retval bool - success
+ */
+bool rdc_parse_partition_string(const char* s, uint32_t* physicalGpu, uint32_t* partition);
 
 #ifdef __cplusplus
 }

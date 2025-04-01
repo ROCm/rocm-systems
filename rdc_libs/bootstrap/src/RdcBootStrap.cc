@@ -174,6 +174,16 @@ rdc_status_t rdc_device_get_all(rdc_handle_t p_rdc_handle,
       ->rdc_device_get_all(gpu_index_list, count);
 }
 
+rdc_status_t rdc_device_get_all_cpu(rdc_handle_t p_rdc_handle,
+                                uint32_t cpu_index_list[RDC_MAX_NUM_DEVICES], uint32_t* count) {
+  if (!p_rdc_handle || !count) {
+    std::cout << "p_rdc_handle or count is NULL\n";
+    return RDC_ST_INVALID_HANDLER;
+  }
+
+  return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
+      ->rdc_device_get_all_cpu(cpu_index_list, count);
+}
 rdc_status_t rdc_device_get_attributes(rdc_handle_t p_rdc_handle, uint32_t gpu_index,
                                        rdc_device_attributes_t* p_rdc_attr) {
   if (!p_rdc_handle || !p_rdc_attr) {
@@ -184,8 +194,17 @@ rdc_status_t rdc_device_get_attributes(rdc_handle_t p_rdc_handle, uint32_t gpu_i
       ->rdc_device_get_attributes(gpu_index, p_rdc_attr);
 }
 
-rdc_status_t rdc_device_get_component_version(rdc_handle_t p_rdc_handle, rdc_component_t component,
-                                              rdc_component_version_t* p_rdc_compv) {
+rdc_status_t rdc_device_get_cpu_attributes(rdc_handle_t p_rdc_handle, uint32_t cpu_index,
+                                       rdc_device_attributes_t* p_rdc_attr) {
+  if (!p_rdc_handle || !p_rdc_attr) {
+    return RDC_ST_INVALID_HANDLER;
+  }
+
+  return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
+      ->rdc_device_get_cpu_attributes(cpu_index, p_rdc_attr);
+}
+
+rdc_status_t rdc_device_get_component_version(rdc_handle_t p_rdc_handle, rdc_component_t component, rdc_component_version_t* p_rdc_compv) {
   if (!p_rdc_handle || !p_rdc_compv) {
     return RDC_ST_INVALID_HANDLER;
   }
@@ -532,8 +551,26 @@ rdc_status_t rdc_link_status_get(rdc_handle_t p_rdc_handle, rdc_link_status_t* r
   if (!p_rdc_handle) {
     return RDC_ST_INVALID_HANDLER;
   }
+  return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->rdc_link_status_get(results);
+}
+
+rdc_status_t rdc_get_num_partition(rdc_handle_t p_rdc_handle, uint32_t index,
+                                   uint16_t* num_partition) {
+  if (!p_rdc_handle || !num_partition) {
+    return RDC_ST_INVALID_HANDLER;
+  }
   return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
-      ->rdc_link_status_get(results);
+    ->rdc_get_num_partition(index, num_partition);
+}
+
+rdc_status_t rdc_instance_profile_get(rdc_handle_t p_rdc_handle, uint32_t entity_index,
+  rdc_instance_resource_type_t resource_type,
+  rdc_resource_profile_t* profile) {
+  if (!p_rdc_handle || !profile) {
+    return RDC_ST_INVALID_HANDLER;
+  }
+  return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
+    ->rdc_instance_profile_get(entity_index, resource_type, profile);
 }
 
 const char * get_rocm_path(const char * search_string) {
@@ -573,4 +610,3 @@ const char * get_rocm_path(const char * search_string) {
 
   return rocm_path.c_str();
 }
-

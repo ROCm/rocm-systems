@@ -36,6 +36,7 @@ THE SOFTWARE.
 #include "rdc_lib/impl/RdcMetricsUpdaterImpl.h"
 #include "rdc_lib/impl/RdcModuleMgrImpl.h"
 #include "rdc_lib/impl/RdcNotificationImpl.h"
+#include "rdc_lib/impl/RdcPartitionImpl.h"
 #include "rdc_lib/impl/RdcPolicyImpl.h"
 #include "rdc_lib/impl/RdcTopologyLinkImpl.h"
 #include "rdc_lib/impl/RdcWatchTableImpl.h"
@@ -48,7 +49,11 @@ class smi_initializer {
   smi_initializer() {
     // Make sure smi will not be initialized multiple times
     amdsmi_shut_down();
-    amdsmi_status_t ret = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
+    amdsmi_status_t ret;
+    uint64_t init_flag_;
+    //initialize CPU and GPU instances
+    init_flag_ = AMDSMI_INIT_AMD_GPUS | AMDSMI_INIT_AMD_CPUS;
+    ret = amdsmi_init(init_flag_);
     if (ret != AMDSMI_STATUS_SUCCESS) {
       throw amd::rdc::RdcException(RDC_ST_FAIL_LOAD_MODULE, "SMI initialize fail");
     }
@@ -76,7 +81,8 @@ namespace rdc {
 const uint32_t METIC_UPDATE_FREQUENCY = 1000;  // 1000 microseconds by default
 
 RdcEmbeddedHandler::RdcEmbeddedHandler(rdc_operation_mode_t mode)
-    : group_settings_(new RdcGroupSettingsImpl()),
+    : partition_(new RdcPartitionImpl()),
+      group_settings_(new RdcGroupSettingsImpl(partition_)),
       cache_mgr_(new RdcCacheManagerImpl()),
       metric_fetcher_(new RdcMetricFetcherImpl()),
       rdc_module_mgr_(new RdcModuleMgrImpl(metric_fetcher_)),
@@ -191,6 +197,28 @@ rdc_status_t RdcEmbeddedHandler::rdc_device_get_all(uint32_t gpu_index_list[RDC_
   return RDC_ST_OK;
 }
 
+// Discovery API
+rdc_status_t RdcEmbeddedHandler::rdc_device_get_all_cpu(uint32_t cpu_index_list[RDC_MAX_NUM_DEVICES],
+                                                    uint32_t* count) {
+  if (!count) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+
+  rdc_field_value device_count;
+  rdc_status_t status = metric_fetcher_->fetch_smi_cpu_field(0, RDC_FI_DEV_CPU_COUNT, &device_count);
+  if (status != RDC_ST_OK) {
+    std::cout << "rdc_device_get_all_cpu failed to get cpu count";
+    return status;
+  }
+
+  // Assign the index to the index list
+  *count = device_count.value.l_int;
+  for (uint32_t i = 0; i < *count; i++) {
+    cpu_index_list[i] = i;
+  }
+
+  return RDC_ST_OK;
+}
 rdc_status_t RdcEmbeddedHandler::rdc_device_get_attributes(uint32_t gpu_index,
                                                            rdc_device_attributes_t* p_rdc_attr) {
   if (!p_rdc_attr) {
@@ -199,6 +227,19 @@ rdc_status_t RdcEmbeddedHandler::rdc_device_get_attributes(uint32_t gpu_index,
   rdc_field_value device_name;
   rdc_status_t status = metric_fetcher_->fetch_smi_field(gpu_index, RDC_FI_DEV_NAME, &device_name);
   strncpy_with_null(p_rdc_attr->device_name, device_name.value.str, RDC_MAX_STR_LENGTH);
+  return status;
+}
+
+rdc_status_t RdcEmbeddedHandler::rdc_device_get_cpu_attributes(uint32_t cpu_index,
+                                                           rdc_device_attributes_t* p_rdc_attr) {
+  if (!p_rdc_attr) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+  rdc_field_value device_name;
+
+  rdc_status_t status = metric_fetcher_->fetch_smi_cpu_field(cpu_index, RDC_FI_DEV_CPU_MODEL, &device_name);
+  strncpy_with_null(p_rdc_attr->device_name, device_name.value.str, RDC_MAX_STR_LENGTH);
+
   return status;
 }
 
@@ -261,9 +302,14 @@ rdc_status_t RdcEmbeddedHandler::rdc_group_gpu_add(rdc_gpu_group_t group_id, uin
   if (status != RDC_ST_OK) {
     return status;
   }
+
+  rdc_entity_info_t info = rdc_get_info_from_entity_index(gpu_index);
+
+  uint32_t physical_gpu = info.device_index;
+
   bool is_gpu_exist = false;
   for (uint32_t i = 0; i < count; i++) {
-    if (gpu_index_list[i] == gpu_index) {
+    if (gpu_index_list[i] == physical_gpu) {
       is_gpu_exist = true;
       break;
     }
@@ -527,5 +573,14 @@ rdc_status_t RdcEmbeddedHandler::rdc_config_clear(rdc_gpu_group_t group_id) {
   return config_handler_->rdc_config_clear(group_id);
 }
 
+rdc_status_t RdcEmbeddedHandler::rdc_get_num_partition(uint32_t index, uint16_t* num_partition) {
+  return partition_->rdc_get_num_partition_impl(index, num_partition);
+}
+
+rdc_status_t RdcEmbeddedHandler::rdc_instance_profile_get(
+    uint32_t entity_index, rdc_instance_resource_type_t resource_type,
+    rdc_resource_profile_t* profile) {
+  return partition_->rdc_instance_profile_get_impl(entity_index, resource_type, profile);
+}
 }  // namespace rdc
 }  // namespace amd
