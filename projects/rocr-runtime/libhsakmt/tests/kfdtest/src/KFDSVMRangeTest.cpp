@@ -2110,4 +2110,106 @@ TEST_P(KFDSVMRangeTest, VAHighAddr) {
     TEST_END
 }
 
+/*
+ * To test entire 56bit VA range, not conflict with Scratch and LDS space
+ * Test 4GB above 48bit, and 4GB below 56bit mapping with 1GB step on GPU using 5-level page table
+ */
+TEST_P(KFDSVMRangeTest, MapAllHighAddr) {
+    TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
+    TEST_START(TESTPROFILE_RUNALL);
+
+    if (!SVMAPISupported())
+        return;
+
+    int defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
+    ASSERT_GE(defaultGPUNode, 0) << "failed to get default GPU Node";
+
+    if (m_FamilyId < FAMILY_GFX125X) {
+        LOG() << std::hex << "Skipping test: 57bit VA does not support on family ID 0x" << m_FamilyId << "." << std::endl;
+        return;
+    }
+
+    void *ptr = mmap((void *)(1UL << 50), PAGE_SIZE, PROT_READ | PROT_WRITE,
+                    MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+    if (ptr == MAP_FAILED) {
+        LOG() << "Skipping test: system does not support 57bit VA" << std::endl;
+        return;
+    }
+    munmap(ptr, PAGE_SIZE);
+
+    HsaSVMRange DataBuffer(PAGE_SIZE, defaultGPUNode);
+    HSAuint64 *pData = DataBuffer.As<HSAuint64 *>();
+    memset(pData, 0x65, PAGE_SIZE);
+
+    #define HIGH_ADDR_256TB (1UL << 48)
+    #define HIGH_ADDR_END   (1UL << 56)
+    #define SIZE_TO_TEST    (4UL << 30)
+
+    unsigned long map_size = PAGE_SIZE * 2;
+    unsigned long step_size = (1UL << 30);
+    unsigned long addr;
+
+    for (addr = HIGH_ADDR_256TB; addr < HIGH_ADDR_256TB + SIZE_TO_TEST; addr += step_size) {
+        void *pBuf = mmap((void *)addr, map_size, PROT_READ | PROT_WRITE,
+                            MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+
+        if (pBuf == MAP_FAILED) {
+            LOG() << std::hex << "mmap at 0x" << addr << " FAILED" << std::endl;
+            continue;
+        }
+
+        LOG() << std::hex << "Mmap at 0x" << addr << " OK" << std::endl;
+        memset(pBuf, 0, map_size);
+
+        EXPECT_SUCCESS(RegisterSVMRange(defaultGPUNode, pBuf, map_size, 0, 0));
+
+        HsaMemoryBuffer isaBuffer(PAGE_SIZE, defaultGPUNode, true, false, true);
+        PM4Queue queue;
+
+        ASSERT_SUCCESS(m_pAsm->RunAssembleBuf(CopyDwordIsa, isaBuffer.As<char*>()));
+        ASSERT_SUCCESS(queue.Create(defaultGPUNode));
+        Dispatch dispatch(isaBuffer);
+        dispatch.SetArgs(pData, pBuf);
+        dispatch.Submit(queue);
+        dispatch.Sync();
+
+        ASSERT_EQ(0x65, ((char *)pBuf)[0]);
+
+        ASSERT_SUCCESS(queue.Destroy());
+        munmap(pBuf, map_size);
+    }
+
+    for (addr = HIGH_ADDR_END - SIZE_TO_TEST; addr < HIGH_ADDR_END; addr += step_size) {
+        void *pBuf = mmap((void *)addr, map_size, PROT_READ | PROT_WRITE,
+                            MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+
+        if (pBuf == MAP_FAILED) {
+            LOG() << std::hex << "mmap at 0x" << addr << " FAILED" << std::endl;
+            continue;
+        }
+
+        LOG() << std::hex << "Mmap at 0x" << addr << " OK" << std::endl;
+        memset(pBuf, 0, map_size);
+
+        EXPECT_SUCCESS(RegisterSVMRange(defaultGPUNode, pBuf, map_size, 0, 0));
+
+        HsaMemoryBuffer isaBuffer(PAGE_SIZE, defaultGPUNode, true, false, true);
+        PM4Queue queue;
+
+        ASSERT_SUCCESS(m_pAsm->RunAssembleBuf(CopyDwordIsa, isaBuffer.As<char*>()));
+        ASSERT_SUCCESS(queue.Create(defaultGPUNode));
+        Dispatch dispatch(isaBuffer);
+        dispatch.SetArgs(pData, pBuf);
+        dispatch.Submit(queue);
+        dispatch.Sync();
+
+        ASSERT_EQ(0x65, ((char *)pBuf)[0]);
+
+        ASSERT_SUCCESS(queue.Destroy());
+        munmap(pBuf, map_size);
+    }
+
+    TEST_END
+}
+
 INSTANTIATE_TEST_CASE_P(, KFDSVMRangeTest,::testing::Values(0, 1));
