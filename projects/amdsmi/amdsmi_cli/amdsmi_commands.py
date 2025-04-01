@@ -5352,11 +5352,13 @@ class AMDSMICommands():
 
         if args.vram_usage and not args.default_output:
             try:
-                vram_usage = amdsmi_interface.amdsmi_get_gpu_vram_usage(args.gpu)
-                monitor_values['vram_used'] = vram_usage['vram_used']
-                monitor_values['vram_free'] = vram_usage['vram_total'] - vram_usage['vram_used']
-                monitor_values['vram_total'] = vram_usage['vram_total']
-                monitor_values['vram_percent'] = round ((vram_usage['vram_used'] / vram_usage['vram_total']), 2)
+                vram_used = amdsmi_interface.amdsmi_get_gpu_memory_usage(args.gpu, amdsmi_interface.AmdSmiMemoryType.VRAM) // (1024*1024)
+                vram_total = amdsmi_interface.amdsmi_get_gpu_memory_total(args.gpu, amdsmi_interface.AmdSmiMemoryType.VRAM) // (1024*1024)
+                monitor_values['vram_used'] = vram_used
+                monitor_values['vram_free'] = vram_total - vram_used
+                monitor_values['vram_total'] = vram_total
+                monitor_values['vram_percent'] = round ((vram_used / vram_total), 2)
+
                 vram_usage_unit = "MB"
                 vram_percent_unit = "%"
                 if self.logger.is_human_readable_format():
@@ -5387,18 +5389,19 @@ class AMDSMICommands():
 
         if args.vram_usage and args.default_output:
             try:
-                vram_usage = amdsmi_interface.amdsmi_get_gpu_vram_usage(args.gpu)
+                vram_used = amdsmi_interface.amdsmi_get_gpu_memory_usage(args.gpu, amdsmi_interface.AmdSmiMemoryType.VRAM) // (1024*1024)
+                vram_total = amdsmi_interface.amdsmi_get_gpu_memory_total(args.gpu, amdsmi_interface.AmdSmiMemoryType.VRAM) // (1024*1024)
                 vram_usage_unit = "GB"
                 if self.logger.is_json_format():
-                    monitor_values['vram_used'] = {"value" : round(vram_usage['vram_used']/1024,1),
+                    monitor_values['vram_used'] = {"value" : round(vram_used/1024,1),
                                                    "unit" : vram_usage_unit}
-                    monitor_values['vram_total'] = {"value" : round(vram_usage['vram_total']/1024,1),
+                    monitor_values['vram_total'] = {"value" : round(vram_total/1024,1),
                                                     "unit" : vram_usage_unit}
                 elif self.logger.is_csv_format():
-                    monitor_values['vram_used'] = round(vram_usage['vram_used']/1024,1)
-                    monitor_values['vram_total'] = round(vram_usage['vram_total']/1024,1)
+                    monitor_values['vram_used'] = round(vram_used/1024,1)
+                    monitor_values['vram_total'] = round(vram_total/1024,1)
                 else:
-                    monitor_values['vram_usage'] = f"{vram_usage['vram_used']/1024:5.1f}/{vram_usage['vram_total']/1024:5.1f} {vram_usage_unit}".rjust(16,' ')
+                    monitor_values['vram_usage'] = f"{vram_used/1024:5.1f}/{vram_total/1024:5.1f} {vram_usage_unit}".rjust(16,' ')
             except amdsmi_exception.AmdSmiLibraryException as e:
                 if self.logger.is_json_format():
                     monitor_values['vram_used'] = "N/A"
