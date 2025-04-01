@@ -52,7 +52,8 @@ main(int argc, char** argv)
 
     auto _print_usage = [argv]() {
         std::cerr << tim::log::color::fatal() << "Usage: " << argv[0]
-                  << " <OPTIONS> -- <COMMAND> <ARGS>" << std::endl;
+                  << " <OPTIONS> -- <COMMAND> <ARGS>" << tim::log::color::end()
+                  << std::endl;
     };
 
     if(argc == 1)
