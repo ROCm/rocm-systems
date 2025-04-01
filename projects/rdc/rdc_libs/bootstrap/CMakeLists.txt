@@ -12,12 +12,14 @@ set(BOOTSTRAP_LIB_SRC_LIST
     "${COMMON_DIR}/rdc_fields_supported.cc"
     "${SRC_DIR}/RdcBootStrap.cc"
     "${SRC_DIR}/RdcLibraryLoader.cc"
-    "${SRC_DIR}/RdcLogger.cc")
+    "${SRC_DIR}/RdcLogger.cc"
+    "${SRC_DIR}/RdcEntityCodec.cc")
 set(BOOTSTRAP_LIB_INC_LIST
     "${COMMON_DIR}/rdc_fields_supported.h"
     "${INC_DIR}/RdcHandler.h"
     "${INC_DIR}/RdcLibraryLoader.h"
     "${INC_DIR}/RdcLogger.h"
+    "${INC_DIR}/RdcEntityCodec.h"
     "${INC_DIR}/rdc_common.h"
     "${PROJECT_SOURCE_DIR}/include/rdc/rdc.h")
 message("BOOTSTRAP_LIB_INC_LIST=${BOOTSTRAP_LIB_INC_LIST}")
@@ -33,7 +35,8 @@ target_include_directories(${BOOTSTRAP_LIB} PRIVATE
 
 target_include_directories(${BOOTSTRAP_LIB}
     PUBLIC
-    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
 # Set the VERSION and SOVERSION values
 set_property(TARGET ${BOOTSTRAP_LIB} PROPERTY

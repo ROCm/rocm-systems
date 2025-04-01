@@ -38,6 +38,17 @@ set(CMAKE_INSTALL_LIBDIR "lib" CACHE STRING "Library install directory")
 # Usually ROCM tools are installed into /opt/rocm
 set(CMAKE_INSTALL_PREFIX ${ROCM_DIR} CACHE PATH "Default installation directory.")
 
+set(CMAKE_BUILD_TYPE "RelWithDebInfo" CACHE STRING "Choose the type of build to perform: Debug, Release, RelWithDebInfo, MinSizeRel")
+# Set the possible values of build type
+set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "RelWithDebInfo" "MinSizeRel")
+
+# Set compile flags
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -m64 -msse -msse2")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -ggdb -DDEBUG" CACHE STRING "Flags for Debug builds")
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O2 -s -DNDEBUG" CACHE STRING "Flags for Release builds")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -O2 -g -DNDEBUG" CACHE STRING "Flags for RelWithDebInfo builds")
+set(CMAKE_CXX_FLAGS_MINSIZEREL "${CMAKE_CXX_FLAGS_MINSIZEREL} -Os -DNDEBUG" CACHE STRING "Flags for MinSizeRel builds")
+
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/" CACHE INTERNAL "Default module path.")
 # Include common cmake modules
 include(utils)
@@ -68,8 +79,16 @@ option(BUILD_RVS "Build targets for librdc_rvs.so" ON)
 # When cmake -DBUILD_TESTS=off, it will not build RDC tests.
 option(BUILD_TESTS "Build test suite" OFF)
 
+# When cmake -DBUILD_EXAMPLES=off, it will not build RDC examples
+option(BUILD_EXAMPLES "Build examples" OFF)
+
 # Enable shared libraries for gtest
 option(BUILD_SHARED_LIBS "Build shared library (.so) or not." ON)
+
+option(ENABLE_ESMI_LIB "Enable AMDSMI ESMI Library" ON)
+if(ENABLE_ESMI_LIB)
+    add_definitions("-DENABLE_ESMI_LIB=1")
+endif()
 
 # Enable address sanitizer
 set(ADDRESS_SANITIZER_DEFAULT OFF)
@@ -151,7 +170,7 @@ if(BUILD_STANDALONE AND GRPC_ROOT STREQUAL GRPC_ROOT_DEFAULT)
     Continuing without gRPC install")
 endif()
 
-find_package(amd_smi
+find_package(amd_smi 25.4.0
     NAMES amd_smi
     HINTS ${ROCM_DIR}/lib/cmake
     CONFIGURE REQUIRED)
@@ -315,6 +334,10 @@ endif()
 
 # Folders for both standalone and embedded
 add_subdirectory("rdc_libs")
+
+if(BUILD_EXAMPLES)
+    add_subdirectory("example")
+endif()
 
 # Export the package for use from the build-tree
 # (this registers the build-tree with a global CMake-registry)

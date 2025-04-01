@@ -28,6 +28,7 @@ set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST}
     "${SRC_DIR}/RdcConfigSettingsImpl.cc"
     "${SRC_DIR}/RdcTelemetryModule.cc"
     "${SRC_DIR}/RdcWatchTableImpl.cc"
+    "${SRC_DIR}/RdcPartitionImpl.cc"
     "${SRC_DIR}/SmiUtils.cc")
 
 # TODO: remove all headers? Will just dir be ok after install?
@@ -60,6 +61,7 @@ set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST}
     "${INC_DIR}/impl/RdcSmiLib.h"
     "${INC_DIR}/impl/RdcTelemetryModule.h"
     "${INC_DIR}/impl/RdcWatchTableImpl.h"
+    "${INC_DIR}/impl/RdcPartitionImpl.h"
     "${INC_DIR}/impl/SmiUtils.h")
 
 message("RDC_LIB_INC_LIST=${RDC_LIB_INC_LIST}")

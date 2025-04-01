@@ -234,6 +234,30 @@ rdc_status_t RdcStandaloneHandler::rdc_device_get_all(uint32_t gpu_index_list[RD
   return RDC_ST_OK;
 }
 
+rdc_status_t RdcStandaloneHandler::rdc_device_get_all_cpu(uint32_t cpu_index_list[RDC_MAX_NUM_DEVICES],
+                                    uint32_t* count) {
+  if (!count) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+  ::rdc::Empty request;
+  ::rdc::GetAllCpuDevicesResponse reply;
+  ::grpc::ClientContext context;
+
+  ::grpc::Status status = stub_->GetAllCpuDevices(&context, request, &reply);
+  rdc_status_t err_status = error_handle(status, reply.status());
+  if (err_status != RDC_ST_OK) return err_status;
+
+  if (reply.cpus_size() > RDC_MAX_NUM_DEVICES) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+
+  *count = reply.cpus_size();
+  for (uint32_t i = 0; i < *count; i++) {
+    cpu_index_list[i] = reply.cpus(i);
+  }
+
+  return RDC_ST_OK;
+}
 rdc_status_t RdcStandaloneHandler::rdc_device_get_attributes(uint32_t gpu_index,
                                                              rdc_device_attributes_t* p_rdc_attr) {
   if (!p_rdc_attr) {
@@ -245,6 +269,27 @@ rdc_status_t RdcStandaloneHandler::rdc_device_get_attributes(uint32_t gpu_index,
 
   request.set_gpu_index(gpu_index);
   ::grpc::Status status = stub_->GetDeviceAttributes(&context, request, &reply);
+  rdc_status_t err_status = error_handle(status, reply.status());
+  if (err_status != RDC_ST_OK) return err_status;
+
+  strncpy_with_null(p_rdc_attr->device_name, reply.attributes().device_name().c_str(),
+                    RDC_MAX_STR_LENGTH);
+
+  return RDC_ST_OK;
+}
+
+rdc_status_t RdcStandaloneHandler::rdc_device_get_cpu_attributes(uint32_t cpu_index,
+                                                             rdc_device_attributes_t* p_rdc_attr) {
+  if (!p_rdc_attr) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+  ::rdc::GetCpuDeviceAttributesRequest request;
+  ::rdc::GetCpuDeviceAttributesResponse reply;
+  ::grpc::ClientContext context;
+
+  request.set_cpu_index(cpu_index);
+
+  ::grpc::Status status = stub_->GetDeviceCpuAttributes(&context, request, &reply);
   rdc_status_t err_status = error_handle(status, reply.status());
   if (err_status != RDC_ST_OK) return err_status;
 
@@ -1072,6 +1117,42 @@ rdc_status_t RdcStandaloneHandler::rdc_link_status_get(rdc_link_status_t* result
     }
   }
 
+  return RDC_ST_OK;
+}
+
+rdc_status_t RdcStandaloneHandler::rdc_get_num_partition(uint32_t index, uint16_t* num_partition) {
+  ::rdc::GetNumPartitionRequest request;
+  request.set_gpu_index(index);
+  ::rdc::GetNumPartitionResponse reply;
+  ::grpc::ClientContext context;
+
+  ::grpc::Status status = stub_->GetNumPartition(&context, request, &reply);
+  rdc_status_t err_status = error_handle(status, reply.status());
+  if (err_status != RDC_ST_OK) {
+    return err_status;
+  }
+  *num_partition = reply.num_partition();
+  return RDC_ST_OK;
+}
+
+rdc_status_t RdcStandaloneHandler::rdc_instance_profile_get(
+    uint32_t entity_index, rdc_instance_resource_type_t resource_type,
+    rdc_resource_profile_t* profile) {
+  ::rdc::GetInstanceProfileRequest request;
+  request.set_entity_index(entity_index);
+  request.set_resource_type(static_cast<uint32_t>(resource_type));
+
+  ::rdc::GetInstanceProfileResponse reply;
+  ::grpc::ClientContext context;
+
+  ::grpc::Status status = stub_->GetInstanceProfile(&context, request, &reply);
+  rdc_status_t err_status = error_handle(status, reply.status());
+  if (err_status != RDC_ST_OK) {
+    return err_status;
+  }
+
+  profile->partition_resource = reply.partition_resource();
+  profile->num_partitions_share_resource = reply.num_partitions_share_resource();
   return RDC_ST_OK;
 }
 

@@ -34,8 +34,8 @@ THE SOFTWARE.
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/impl/RdcMetricFetcherImpl.h"
-#include "rdc_lib/rdc_common.h"
 #include "rdc_lib/impl/SmiUtils.h"
+#include "rdc_lib/rdc_common.h"
 
 namespace amd {
 namespace rdc {
@@ -207,6 +207,42 @@ rdc_status_t RdcWatchTableImpl::rdc_field_watch(rdc_gpu_group_t group_id,
   rdc_status_t result = get_fields_from_group(group_id, field_group_id, fields_in_watch);
   if (result != RDC_ST_OK) {
     return result;
+  }
+
+  // Check for rocprof fields in partitions
+  rdc_group_info_t ginfo;
+  result = group_settings_->rdc_group_gpu_get_info(group_id, &ginfo);
+  if (result != RDC_ST_OK) {
+    return result;
+  }
+  bool groupHasPartition = false;
+  for (unsigned int i = 0; i < ginfo.count; i++) {
+    uint32_t entityId = ginfo.entity_ids[i];
+    rdc_entity_info_t info = rdc_get_info_from_entity_index(entityId);
+    if (info.entity_role == RDC_DEVICE_ROLE_PARTITION_INSTANCE) {
+      groupHasPartition = true;
+      break;
+    }
+  }
+
+  rdc_field_group_info_t field_info;
+  result = group_settings_->rdc_group_field_get_info(field_group_id, &field_info);
+  if (result != RDC_ST_OK) {
+    return result;
+  }
+  bool groupHasRocprof = false;
+  if (result == RDC_ST_OK) {
+    for (unsigned int i = 0; i < field_info.count; i++) {
+      rdc_field_t fid = field_info.field_ids[i];
+      if (fid >= 800 && fid < 900) {  // Rocprof fields in the 800's
+        groupHasRocprof = true;
+        break;
+      }
+    }
+  }
+
+  if (groupHasPartition && groupHasRocprof) {
+    return RDC_ST_NOT_SUPPORTED;
   }
 
   // See if any of the fields are notification fields, and
@@ -381,30 +417,30 @@ rdc_status_t RdcWatchTableImpl::create_health_field_group(unsigned int component
   // set filed ids
   std::vector<rdc_field_t> field_ids{};
   if (components & RDC_HEALTH_WATCH_PCIE) {
-      field_ids.push_back(RDC_HEALTH_PCIE_REPLAY_COUNT);
+    field_ids.push_back(RDC_HEALTH_PCIE_REPLAY_COUNT);
   }
 
   if (components & RDC_HEALTH_WATCH_XGMI) {
-      field_ids.push_back(RDC_HEALTH_XGMI_ERROR);
+    field_ids.push_back(RDC_HEALTH_XGMI_ERROR);
   }
 
   if (components & RDC_HEALTH_WATCH_MEM) {
-      field_ids.push_back(RDC_FI_ECC_UNCORRECT_TOTAL);
-      field_ids.push_back(RDC_HEALTH_RETIRED_PAGE_NUM);
-      field_ids.push_back(RDC_HEALTH_PENDING_PAGE_NUM);
-      field_ids.push_back(RDC_HEALTH_RETIRED_PAGE_LIMIT);
+    field_ids.push_back(RDC_FI_ECC_UNCORRECT_TOTAL);
+    field_ids.push_back(RDC_HEALTH_RETIRED_PAGE_NUM);
+    field_ids.push_back(RDC_HEALTH_PENDING_PAGE_NUM);
+    field_ids.push_back(RDC_HEALTH_RETIRED_PAGE_LIMIT);
   }
 
   if (components & RDC_HEALTH_WATCH_EEPROM) {
-      field_ids.push_back(RDC_HEALTH_EEPROM_CONFIG_VALID);
+    field_ids.push_back(RDC_HEALTH_EEPROM_CONFIG_VALID);
   }
 
   if (components & RDC_HEALTH_WATCH_THERMAL) {
-      field_ids.push_back(RDC_HEALTH_THERMAL_THROTTLE_TIME);
+    field_ids.push_back(RDC_HEALTH_THERMAL_THROTTLE_TIME);
   }
 
   if (components & RDC_HEALTH_WATCH_POWER) {
-      field_ids.push_back(RDC_HEALTH_POWER_THROTTLE_TIME);
+    field_ids.push_back(RDC_HEALTH_POWER_THROTTLE_TIME);
   }
 
   if (0 == field_ids.size()) {
@@ -417,8 +453,7 @@ rdc_status_t RdcWatchTableImpl::create_health_field_group(unsigned int component
                                                  field_group_name.c_str(), field_group_id);
 }
 
-rdc_status_t RdcWatchTableImpl::rdc_health_set(rdc_gpu_group_t group_id,
-                                               unsigned int components) {
+rdc_status_t RdcWatchTableImpl::rdc_health_set(rdc_gpu_group_t group_id, unsigned int components) {
   // remove old health for same group_id
   rdc_health_clear(group_id);
 
@@ -447,13 +482,11 @@ rdc_status_t RdcWatchTableImpl::rdc_health_set(rdc_gpu_group_t group_id,
     // get initial values
     rdc_field_value value;
     result = metric_fetcher_->fetch_smi_field(fields->first, fields->second, &value);
-    if (result != RDC_ST_OK)
-      break;
+    if (result != RDC_ST_OK) break;
 
     // set initial values to cache
     result = cache_mgr_->rdc_health_set(group_id, fields->first, value);
-    if (result != RDC_ST_OK)
-      break;
+    if (result != RDC_ST_OK) break;
   }
 
   // Start to watch the fields and update fields per 1 second.
@@ -461,10 +494,8 @@ rdc_status_t RdcWatchTableImpl::rdc_health_set(rdc_gpu_group_t group_id,
   return result;
 }
 
-rdc_status_t RdcWatchTableImpl::rdc_health_get(rdc_gpu_group_t group_id,
-                                               unsigned int *components) {
-  if (nullptr == components)
-    return RDC_ST_BAD_PARAMETER;
+rdc_status_t RdcWatchTableImpl::rdc_health_get(rdc_gpu_group_t group_id, unsigned int* components) {
+  if (nullptr == components) return RDC_ST_BAD_PARAMETER;
 
   std::lock_guard<std::mutex> guard(watch_mutex_);
   auto table_iter = health_watch_table_.find(group_id);
@@ -478,23 +509,19 @@ rdc_status_t RdcWatchTableImpl::rdc_health_get(rdc_gpu_group_t group_id,
   return RDC_ST_OK;
 }
 
-bool RdcWatchTableImpl::add_health_incident(uint32_t gpu_index,
-                                            rdc_health_system_t component,
-                                            rdc_health_result_t  health,
-                                            uint32_t err_code,
-                                            std::string err_msg,
-                                            rdc_health_incidents_t* incident,
+bool RdcWatchTableImpl::add_health_incident(uint32_t gpu_index, rdc_health_system_t component,
+                                            rdc_health_result_t health, uint32_t err_code,
+                                            std::string err_msg, rdc_health_incidents_t* incident,
                                             rdc_health_response_t* response) {
   bool result = false;
 
-  incident->gpu_index  = gpu_index;
-  incident->component  = component;
-  incident->health     = health;
+  incident->gpu_index = gpu_index;
+  incident->component = component;
+  incident->health = health;
   incident->error.code = err_code;
   strncpy_with_null(incident->error.msg, err_msg.c_str(), MAX_HEALTH_MSG_LENGTH);
 
-  if (incident->health > response->overall_health)
-    response->overall_health = incident->health;
+  if (incident->health > response->overall_health) response->overall_health = incident->health;
   response->incidents_count++;
   if (response->incidents_count >= HEALTH_MAX_ERROR_ITEMS) {
     RDC_LOG(RDC_INFO, "Health incidents are full!");
@@ -504,24 +531,20 @@ bool RdcWatchTableImpl::add_health_incident(uint32_t gpu_index,
   return (result);
 }
 
-rdc_status_t RdcWatchTableImpl::get_start_end_values(rdc_gpu_group_t group_id,
-                                                     uint32_t gpu_index,
-                                                     rdc_field_t field,
-                                                     uint64_t start_timestamp,
-                                                     rdc_field_value *start_value,
-                                                     rdc_field_value *end_value) {
-  if ((nullptr == start_value) && (nullptr == end_value))
-    return RDC_ST_BAD_PARAMETER;
+rdc_status_t RdcWatchTableImpl::get_start_end_values(rdc_gpu_group_t group_id, uint32_t gpu_index,
+                                                     rdc_field_t field, uint64_t start_timestamp,
+                                                     rdc_field_value* start_value,
+                                                     rdc_field_value* end_value) {
+  if ((nullptr == start_value) && (nullptr == end_value)) return RDC_ST_BAD_PARAMETER;
 
   rdc_status_t result = RDC_ST_OK;
   if (nullptr != start_value) {
-    //get the values of the field at the start_timestamp/end_timestampe
-    result = cache_mgr_->rdc_health_get_values(group_id,
-                                            gpu_index, field,
-                                            start_timestamp, 0,
-                                            start_value, nullptr);
+    // get the values of the field at the start_timestamp/end_timestampe
+    result = cache_mgr_->rdc_health_get_values(group_id, gpu_index, field, start_timestamp, 0,
+                                               start_value, nullptr);
     if (result != RDC_ST_OK) {
-      RDC_LOG(RDC_ERROR, "Error get gpu: " << gpu_index << " field: " << field << " history data. Return: " << result);
+      RDC_LOG(RDC_ERROR, "Error get gpu: " << gpu_index << " field: " << field
+                                           << " history data. Return: " << result);
       return result;
     }
   }
@@ -529,30 +552,25 @@ rdc_status_t RdcWatchTableImpl::get_start_end_values(rdc_gpu_group_t group_id,
   // get end values
   result = metric_fetcher_->fetch_smi_field(gpu_index, field, end_value);
   if (result != RDC_ST_OK)
-    RDC_LOG(RDC_ERROR, "Error get gpu: " << gpu_index << " field: " << field << " current data. Return: " << result);
+    RDC_LOG(RDC_ERROR, "Error get gpu: " << gpu_index << " field: " << field
+                                         << " current data. Return: " << result);
 
   return result;
 }
 
-rdc_status_t RdcWatchTableImpl::pcie_check(rdc_gpu_group_t group_id,
-                                           uint32_t gpu_index,
+rdc_status_t RdcWatchTableImpl::pcie_check(rdc_gpu_group_t group_id, uint32_t gpu_index,
                                            rdc_health_response_t* response) {
-  //get field start/end values
+  // get field start/end values
   rdc_field_value start = {}, end = {};
   uint64_t start_timestamp = static_cast<uint64_t>(time(nullptr) - 60) * 1000;
-  //get the history data last 1 minute
-  rdc_status_t result = get_start_end_values(group_id,
-                                             gpu_index,
-                                             RDC_HEALTH_PCIE_REPLAY_COUNT,
-                                             start_timestamp,
-                                             &start,
-                                             &end);
-  if (result != RDC_ST_OK)
-    return result;
+  // get the history data last 1 minute
+  rdc_status_t result = get_start_end_values(group_id, gpu_index, RDC_HEALTH_PCIE_REPLAY_COUNT,
+                                             start_timestamp, &start, &end);
+  if (result != RDC_ST_OK) return result;
 
   uint64_t pcie_replay_count = end.value.l_int - start.value.l_int;
   if (pcie_replay_count > PCIE_MAX_REPLAYS_PERMIN) {
-    rdc_health_incidents_t *incident = &response->incidents[response->incidents_count];
+    rdc_health_incidents_t* incident = &response->incidents[response->incidents_count];
 
     std::string err_msg = "Detected ";
     err_msg += std::to_string(pcie_replay_count);
@@ -560,37 +578,26 @@ rdc_status_t RdcWatchTableImpl::pcie_check(rdc_gpu_group_t group_id,
     err_msg += std::to_string(PCIE_MAX_REPLAYS_PERMIN);
     err_msg += ".";
 
-    //add incident
-    if (add_health_incident(gpu_index,
-                            RDC_HEALTH_WATCH_PCIE,
-                            RDC_HEALTH_RESULT_WARN,
-                            RDC_FR_PCI_REPLAY_RATE,
-                            err_msg,
-                            incident,
-                            response))
+    // add incident
+    if (add_health_incident(gpu_index, RDC_HEALTH_WATCH_PCIE, RDC_HEALTH_RESULT_WARN,
+                            RDC_FR_PCI_REPLAY_RATE, err_msg, incident, response))
       return RDC_ST_MAX_LIMIT;
   }
 
   return RDC_ST_OK;
 }
 
-rdc_status_t RdcWatchTableImpl::xgmi_check(rdc_gpu_group_t group_id,
-                                           uint32_t gpu_index,
+rdc_status_t RdcWatchTableImpl::xgmi_check(rdc_gpu_group_t group_id, uint32_t gpu_index,
                                            rdc_health_response_t* response) {
-  //get field start/end values
+  // get field start/end values
   rdc_field_value end = {};
-  rdc_status_t result = get_start_end_values(group_id,
-                                             gpu_index,
-                                             RDC_HEALTH_XGMI_ERROR,
-                                             0,
-                                             nullptr,
-                                             &end);
-  if (result != RDC_ST_OK)
-    return result;
+  rdc_status_t result =
+      get_start_end_values(group_id, gpu_index, RDC_HEALTH_XGMI_ERROR, 0, nullptr, &end);
+  if (result != RDC_ST_OK) return result;
 
   amdsmi_xgmi_status_t status = static_cast<amdsmi_xgmi_status_t>(end.value.l_int);
   if (AMDSMI_XGMI_STATUS_NO_ERRORS != status) {
-    rdc_health_incidents_t *incident = &response->incidents[response->incidents_count];
+    rdc_health_incidents_t* incident = &response->incidents[response->incidents_count];
 
     uint32_t err_code;
     std::string err_msg = "Detected ";
@@ -603,106 +610,68 @@ rdc_status_t RdcWatchTableImpl::xgmi_check(rdc_gpu_group_t group_id,
     }
     err_msg += ".";
 
-    //add incident
-    if (add_health_incident(gpu_index,
-                            RDC_HEALTH_WATCH_XGMI,
-                            RDC_HEALTH_RESULT_FAIL,
-                            err_code,
-                            err_msg,
-                            incident,
-                            response))
+    // add incident
+    if (add_health_incident(gpu_index, RDC_HEALTH_WATCH_XGMI, RDC_HEALTH_RESULT_FAIL, err_code,
+                            err_msg, incident, response))
       return RDC_ST_MAX_LIMIT;
   }
 
   return RDC_ST_OK;
 }
 
-rdc_status_t RdcWatchTableImpl::memory_check(rdc_gpu_group_t group_id,
-                                             uint32_t gpu_index,
+rdc_status_t RdcWatchTableImpl::memory_check(rdc_gpu_group_t group_id, uint32_t gpu_index,
                                              rdc_health_response_t* response) {
-  //get field start/end values
-  rdc_field_value start= {}, end = {};
-  rdc_status_t result = get_start_end_values(group_id,
-                                             gpu_index,
-                                             RDC_FI_ECC_UNCORRECT_TOTAL,
-                                             0,
-                                             nullptr,
-                                             &end);
-  if (result != RDC_ST_OK)
-    return result;
+  // get field start/end values
+  rdc_field_value start = {}, end = {};
+  rdc_status_t result =
+      get_start_end_values(group_id, gpu_index, RDC_FI_ECC_UNCORRECT_TOTAL, 0, nullptr, &end);
+  if (result != RDC_ST_OK) return result;
 
   uint64_t ecc_uncorrectable_count = 0;
   ecc_uncorrectable_count = end.value.l_int;
   if (ecc_uncorrectable_count > 0) {
-    rdc_health_incidents_t *incident = &response->incidents[response->incidents_count];
+    rdc_health_incidents_t* incident = &response->incidents[response->incidents_count];
 
     std::string err_msg = "Detected ";
     err_msg += std::to_string(ecc_uncorrectable_count);
     err_msg += " uncorrectable ECC error(s) since last GPU reset.";
 
-    //add incident
-    if (add_health_incident(gpu_index,
-                            RDC_HEALTH_WATCH_MEM,
-                            RDC_HEALTH_RESULT_FAIL,
-                            RDC_FR_ECC_UNCORRECTABLE_DETECTED,
-                            err_msg,
-                            incident,
-                            response))
+    // add incident
+    if (add_health_incident(gpu_index, RDC_HEALTH_WATCH_MEM, RDC_HEALTH_RESULT_FAIL,
+                            RDC_FR_ECC_UNCORRECTABLE_DETECTED, err_msg, incident, response))
       return RDC_ST_MAX_LIMIT;
   }
 
-  result = get_start_end_values(group_id,
-                                gpu_index,
-                                RDC_HEALTH_PENDING_PAGE_NUM,
-                                0,
-                                nullptr,
-                                &end);
-  if (result != RDC_ST_OK)
-    return result;
+  result = get_start_end_values(group_id, gpu_index, RDC_HEALTH_PENDING_PAGE_NUM, 0, nullptr, &end);
+  if (result != RDC_ST_OK) return result;
 
   uint64_t num_pages = end.value.l_int;
   if (num_pages > 0) {
-    rdc_health_incidents_t *incident = &response->incidents[response->incidents_count];
+    rdc_health_incidents_t* incident = &response->incidents[response->incidents_count];
 
     std::string err_msg = "Detected ";
     err_msg += std::to_string(num_pages);
     err_msg += " pending retired page(s).";
 
-    //add incident
-    if (add_health_incident(gpu_index,
-                            RDC_HEALTH_WATCH_MEM,
-                            RDC_HEALTH_RESULT_WARN,
-                            RDC_FR_PENDING_PAGE_RETIREMENTS,
-                            err_msg,
-                            incident,
-                            response))
+    // add incident
+    if (add_health_incident(gpu_index, RDC_HEALTH_WATCH_MEM, RDC_HEALTH_RESULT_WARN,
+                            RDC_FR_PENDING_PAGE_RETIREMENTS, err_msg, incident, response))
       return RDC_ST_MAX_LIMIT;
   }
 
-  //get retired page number
-  result = get_start_end_values(group_id,
-                                gpu_index,
-                                RDC_HEALTH_RETIRED_PAGE_NUM,
-                                0,
-                                nullptr,
-                                &end);
-  if (result != RDC_ST_OK)
-    return result;
+  // get retired page number
+  result = get_start_end_values(group_id, gpu_index, RDC_HEALTH_RETIRED_PAGE_NUM, 0, nullptr, &end);
+  if (result != RDC_ST_OK) return result;
   uint64_t retired_page = end.value.l_int;
 
-  //get retired page threshold
-  result = get_start_end_values(group_id,
-                                gpu_index,
-                                RDC_HEALTH_RETIRED_PAGE_LIMIT,
-                                0,
-                                nullptr,
-                                &end);
-  if (result != RDC_ST_OK)
-    return result;
+  // get retired page threshold
+  result =
+      get_start_end_values(group_id, gpu_index, RDC_HEALTH_RETIRED_PAGE_LIMIT, 0, nullptr, &end);
+  if (result != RDC_ST_OK) return result;
   uint32_t retired_page_threshold = end.value.l_int;
 
   if (retired_page > retired_page_threshold) {
-    rdc_health_incidents_t *incident = &response->incidents[response->incidents_count];
+    rdc_health_incidents_t* incident = &response->incidents[response->incidents_count];
 
     std::string err_msg = "Detected ";
     err_msg += std::to_string(retired_page);
@@ -710,14 +679,9 @@ rdc_status_t RdcWatchTableImpl::memory_check(rdc_gpu_group_t group_id,
     err_msg += std::to_string(retired_page_threshold);
     err_msg += ".";
 
-    //add incident
-    if (add_health_incident(gpu_index,
-                            RDC_HEALTH_WATCH_MEM,
-                            RDC_HEALTH_RESULT_FAIL,
-                            RDC_FR_RETIRED_PAGES_LIMIT,
-                            err_msg,
-                            incident,
-                            response))
+    // add incident
+    if (add_health_incident(gpu_index, RDC_HEALTH_WATCH_MEM, RDC_HEALTH_RESULT_FAIL,
+                            RDC_FR_RETIRED_PAGES_LIMIT, err_msg, incident, response))
       return RDC_ST_MAX_LIMIT;
 
     return RDC_ST_OK;
@@ -725,31 +689,22 @@ rdc_status_t RdcWatchTableImpl::memory_check(rdc_gpu_group_t group_id,
 
   if (retired_page > 0) {
     uint64_t start_timestamp = static_cast<uint64_t>(time(nullptr) - 604800) * 1000;
-    //get retired page number last 1 week
-    result = get_start_end_values(group_id,
-                                  gpu_index,
-                                  RDC_HEALTH_RETIRED_PAGE_NUM,
-                                  start_timestamp,
-                                  &start,
-                                  &end);
-    if (result != RDC_ST_OK)
-      return result;
+    // get retired page number last 1 week
+    result = get_start_end_values(group_id, gpu_index, RDC_HEALTH_RETIRED_PAGE_NUM, start_timestamp,
+                                  &start, &end);
+    if (result != RDC_ST_OK) return result;
 
     retired_page = end.value.l_int - start.value.l_int;
     if (retired_page > 1) {
-      rdc_health_incidents_t *incident = &response->incidents[response->incidents_count];
+      rdc_health_incidents_t* incident = &response->incidents[response->incidents_count];
 
       std::string err_msg = "Detected ";
       err_msg += std::to_string(retired_page);
       err_msg += " retired pages more than one in the last week.";
 
-      //add incident
-      if (add_health_incident(gpu_index,
-                              RDC_HEALTH_WATCH_MEM,
-                              RDC_HEALTH_RESULT_FAIL,
-                              RDC_FR_RETIRED_PAGES_UNCORRECTABLE_LIMIT,
-                              err_msg,
-                              incident,
+      // add incident
+      if (add_health_incident(gpu_index, RDC_HEALTH_WATCH_MEM, RDC_HEALTH_RESULT_FAIL,
+                              RDC_FR_RETIRED_PAGES_UNCORRECTABLE_LIMIT, err_msg, incident,
                               response))
         return RDC_ST_MAX_LIMIT;
     }
@@ -758,194 +713,150 @@ rdc_status_t RdcWatchTableImpl::memory_check(rdc_gpu_group_t group_id,
   return RDC_ST_OK;
 }
 
-rdc_status_t RdcWatchTableImpl::eeprom_check(rdc_gpu_group_t group_id,
-                                             uint32_t gpu_index,
+rdc_status_t RdcWatchTableImpl::eeprom_check(rdc_gpu_group_t group_id, uint32_t gpu_index,
                                              rdc_health_response_t* response) {
   rdc_field_value end = {};
-  rdc_status_t result = get_start_end_values(group_id,
-                                             gpu_index,
-                                             RDC_FI_ECC_UNCORRECT_TOTAL,
-                                             0,
-                                             nullptr,
-                                             &end);
-  if (result != RDC_ST_OK && result != RDC_ST_CORRUPTED_EEPROM)
-    return result;
+  rdc_status_t result =
+      get_start_end_values(group_id, gpu_index, RDC_FI_ECC_UNCORRECT_TOTAL, 0, nullptr, &end);
+  if (result != RDC_ST_OK && result != RDC_ST_CORRUPTED_EEPROM) return result;
 
   if (result == RDC_ST_CORRUPTED_EEPROM) {
-    rdc_health_incidents_t *incident = &response->incidents[response->incidents_count];
+    rdc_health_incidents_t* incident = &response->incidents[response->incidents_count];
 
     std::string err_msg = "Detected a corrupt EEPROM since last GPU reset.";
 
-    //add incident
-    if (add_health_incident(gpu_index,
-                            RDC_HEALTH_WATCH_EEPROM,
-                            RDC_HEALTH_RESULT_WARN,
-                            RDC_FR_CORRUPT_EEPROM,
-                            err_msg,
-                            incident,
-                            response))
+    // add incident
+    if (add_health_incident(gpu_index, RDC_HEALTH_WATCH_EEPROM, RDC_HEALTH_RESULT_WARN,
+                            RDC_FR_CORRUPT_EEPROM, err_msg, incident, response))
       return RDC_ST_MAX_LIMIT;
   }
 
   return RDC_ST_OK;
 }
 
-rdc_status_t RdcWatchTableImpl::thermal_check(rdc_gpu_group_t group_id,
-                                              uint32_t gpu_index,
+rdc_status_t RdcWatchTableImpl::thermal_check(rdc_gpu_group_t group_id, uint32_t gpu_index,
                                               rdc_health_response_t* response) {
-  //get field start/end values
+  // get field start/end values
   rdc_field_value start = {}, end = {};
   uint64_t start_timestamp = static_cast<uint64_t>(time(nullptr) - 60) * 1000;
-  //get the history data last 1 minute
-  rdc_status_t result = get_start_end_values(group_id,
-                                             gpu_index,
-                                             RDC_HEALTH_THERMAL_THROTTLE_TIME,
-                                             start_timestamp,
-                                             &start,
-                                             &end);
-  if (result != RDC_ST_OK)
-    return result;
+  // get the history data last 1 minute
+  rdc_status_t result = get_start_end_values(group_id, gpu_index, RDC_HEALTH_THERMAL_THROTTLE_TIME,
+                                             start_timestamp, &start, &end);
+  if (result != RDC_ST_OK) return result;
 
   uint64_t acc_socket_thrm = end.value.l_int - start.value.l_int;
   if (0 < acc_socket_thrm) {
-    rdc_health_incidents_t *incident = &response->incidents[response->incidents_count];
+    rdc_health_incidents_t* incident = &response->incidents[response->incidents_count];
 
     std::string err_msg = "Detected ";
     err_msg += std::to_string(acc_socket_thrm);
     err_msg += " clock throttling due to thermal violation in the last minute.";
 
-    //add incident
-    if (add_health_incident(gpu_index,
-                            RDC_HEALTH_WATCH_THERMAL,
-                            RDC_HEALTH_RESULT_WARN,
-                            RDC_FR_CLOCKS_THROTTLE_THERMAL,
-                            err_msg,
-                            incident,
-                            response))
+    // add incident
+    if (add_health_incident(gpu_index, RDC_HEALTH_WATCH_THERMAL, RDC_HEALTH_RESULT_WARN,
+                            RDC_FR_CLOCKS_THROTTLE_THERMAL, err_msg, incident, response))
       return RDC_ST_MAX_LIMIT;
   }
 
   return RDC_ST_OK;
 }
 
-rdc_status_t RdcWatchTableImpl::power_check(rdc_gpu_group_t group_id,
-                                            uint32_t gpu_index,
+rdc_status_t RdcWatchTableImpl::power_check(rdc_gpu_group_t group_id, uint32_t gpu_index,
                                             rdc_health_response_t* response) {
-  //get field start/end values
+  // get field start/end values
   rdc_field_value start = {}, end = {};
   uint64_t start_timestamp = static_cast<uint64_t>(time(nullptr) - 60) * 1000;
-  //get the history data last 1 minute
-  rdc_status_t result = get_start_end_values(group_id,
-                                             gpu_index,
-                                             RDC_HEALTH_POWER_THROTTLE_TIME,
-                                             start_timestamp,
-                                             &start,
-                                             &end);
-  if (result != RDC_ST_OK)
-    return result;
+  // get the history data last 1 minute
+  rdc_status_t result = get_start_end_values(group_id, gpu_index, RDC_HEALTH_POWER_THROTTLE_TIME,
+                                             start_timestamp, &start, &end);
+  if (result != RDC_ST_OK) return result;
 
   uint64_t acc_ppt_pwr = end.value.l_int - start.value.l_int;
   if (0 < acc_ppt_pwr) {
-    rdc_health_incidents_t *incident = &response->incidents[response->incidents_count];
+    rdc_health_incidents_t* incident = &response->incidents[response->incidents_count];
 
     std::string err_msg = "Detected ";
     err_msg += std::to_string(acc_ppt_pwr);
     err_msg += " Detected clock throttling due to power violation in the last minute.";
 
-    //add incident
-    if (add_health_incident(gpu_index,
-                            RDC_HEALTH_WATCH_POWER,
-                            RDC_HEALTH_RESULT_WARN,
-                            RDC_FR_CLOCKS_THROTTLE_POWER,
-                            err_msg,
-                            incident,
-                            response))
+    // add incident
+    if (add_health_incident(gpu_index, RDC_HEALTH_WATCH_POWER, RDC_HEALTH_RESULT_WARN,
+                            RDC_FR_CLOCKS_THROTTLE_POWER, err_msg, incident, response))
       return RDC_ST_MAX_LIMIT;
   }
 
   return RDC_ST_OK;
 }
 rdc_status_t RdcWatchTableImpl::rdc_health_check(rdc_gpu_group_t group_id,
-                                                 rdc_health_response_t *response) {
-  if (nullptr == response)
-    return RDC_ST_BAD_PARAMETER;
+                                                 rdc_health_response_t* response) {
+  if (nullptr == response) return RDC_ST_BAD_PARAMETER;
 
   unsigned int components = 0;
   std::vector<RdcFieldKey> fields_in_watch;
   do {  //< lock guard for thread safe
     std::lock_guard<std::mutex> guard(watch_mutex_);
     auto health = health_watch_table_.find(group_id);
-    if (health == health_watch_table_.end())
-      return RDC_ST_NOT_FOUND;
+    if (health == health_watch_table_.end()) return RDC_ST_NOT_FOUND;
     components = health->second.components;
     fields_in_watch = health->second.fields;
   } while (0);
 
   rdc_group_info_t ginfo;
   rdc_status_t result = group_settings_->rdc_group_gpu_get_info(group_id, &ginfo);
-  if (result != RDC_ST_OK)
-    return result;
+  if (result != RDC_ST_OK) return result;
 
   for (auto fields = fields_in_watch.begin(); fields != fields_in_watch.end(); fields++) {
     // get current values
     rdc_field_value value;
     result = metric_fetcher_->fetch_smi_field(fields->first, fields->second, &value);
-    if (result != RDC_ST_OK)
-      break;
+    if (result != RDC_ST_OK) break;
 
     // set current values to cache
     result = cache_mgr_->rdc_update_health_stats(group_id, fields->first, value);
-    if (result != RDC_ST_OK)
-      break;
+    if (result != RDC_ST_OK) break;
   }
 
-  //init response
+  // init response
   response->overall_health = RDC_HEALTH_RESULT_PASS;
   response->incidents_count = 0;
 
   for (uint32_t gindex = 0; gindex < ginfo.count; gindex++) {
-    //PCIe
+    // PCIe
     if (components & RDC_HEALTH_WATCH_PCIE) {
       result = pcie_check(group_id, ginfo.entity_ids[gindex], response);
-      if (result == RDC_ST_MAX_LIMIT)
-        return result;
+      if (result == RDC_ST_MAX_LIMIT) return result;
     }
 
-    //XGMI
+    // XGMI
     if (components & RDC_HEALTH_WATCH_XGMI) {
       result = xgmi_check(group_id, ginfo.entity_ids[gindex], response);
-      if (result == RDC_ST_MAX_LIMIT)
-        return result;
+      if (result == RDC_ST_MAX_LIMIT) return result;
     }
 
-    //Memory
+    // Memory
     if (components & RDC_HEALTH_WATCH_MEM) {
       result = memory_check(group_id, ginfo.entity_ids[gindex], response);
-      if (result == RDC_ST_MAX_LIMIT)
-        return result;
+      if (result == RDC_ST_MAX_LIMIT) return result;
     }
 
-    //EEPROM
+    // EEPROM
     if (components & RDC_HEALTH_WATCH_EEPROM) {
       result = eeprom_check(group_id, ginfo.entity_ids[gindex], response);
-      if (result == RDC_ST_MAX_LIMIT)
-        return result;
+      if (result == RDC_ST_MAX_LIMIT) return result;
     }
 
-    //Thermal
+    // Thermal
     if (components & RDC_HEALTH_WATCH_THERMAL) {
       result = thermal_check(group_id, ginfo.entity_ids[gindex], response);
-      if (result == RDC_ST_MAX_LIMIT)
-        return result;
+      if (result == RDC_ST_MAX_LIMIT) return result;
     }
 
-    //Power
+    // Power
     if (components & RDC_HEALTH_WATCH_POWER) {
       result = power_check(group_id, ginfo.entity_ids[gindex], response);
-      if (result == RDC_ST_MAX_LIMIT)
-        return result;
+      if (result == RDC_ST_MAX_LIMIT) return result;
     }
-  } //end of for gindex
+  }  // end of for gindex
 
   return RDC_ST_OK;
 }
@@ -953,7 +864,7 @@ rdc_status_t RdcWatchTableImpl::rdc_health_check(rdc_gpu_group_t group_id,
 rdc_status_t RdcWatchTableImpl::rdc_health_clear(rdc_gpu_group_t group_id) {
   rdc_field_grp_t field_group_id;
 
-  do { //< lock guard for thread safe
+  do {  //< lock guard for thread safe
     std::lock_guard<std::mutex> guard(watch_mutex_);
     auto health = health_watch_table_.find(group_id);
     if (health == health_watch_table_.end()) {
@@ -1219,8 +1130,8 @@ void RdcWatchTableImpl::debug_status() {
     for (const auto& p : hite->second.fields) {
       strstream << "<" << p.first << "," << p.second << "> ";
     }
-    RDC_LOG(RDC_DEBUG,
-            "group id : " << hite->first << " components : " << hite->second.components << " fields : " << strstream.str());
+    RDC_LOG(RDC_DEBUG, "group id : " << hite->first << " components : " << hite->second.components
+                                     << " fields : " << strstream.str());
   }
 
   if (fields_to_watch_.size() > 0) {

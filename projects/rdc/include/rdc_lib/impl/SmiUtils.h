@@ -23,6 +23,8 @@ THE SOFTWARE.
 #ifndef INCLUDE_RDC_LIB_IMPL_RSMIUTILS_H_
 #define INCLUDE_RDC_LIB_IMPL_RSMIUTILS_H_
 
+#include <vector>
+
 #include "amd_smi/amdsmi.h"
 #include "rdc/rdc.h"
 
@@ -33,6 +35,12 @@ rdc_status_t Smi2RdcError(amdsmi_status_t rsmi);
 amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,
                                              amdsmi_processor_handle* processor_handle);
 amdsmi_status_t get_processor_count(uint32_t& all_processor_count);
+amdsmi_status_t get_socket_handles(std::vector<amdsmi_socket_handle>& sockets);
+amdsmi_status_t get_processor_handles(amdsmi_socket_handle socket,
+                                      std::vector<amdsmi_processor_handle>& processors);
+amdsmi_status_t get_kfd_partition_id(amdsmi_processor_handle proc, uint32_t* partition_id);
+amdsmi_status_t get_metrics_info(amdsmi_processor_handle proc, amdsmi_gpu_metrics_t* metrics);
+amdsmi_status_t get_num_partition(uint32_t index, uint16_t* num_partition);
 
 }  // namespace rdc
 }  // namespace amd

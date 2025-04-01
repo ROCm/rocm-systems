@@ -43,9 +43,16 @@ class RdcAPIServiceImpl final : public ::rdc::RdcAPI::Service {
   ::grpc::Status GetAllDevices(::grpc::ServerContext* context, const ::rdc::Empty* request,
                                ::rdc::GetAllDevicesResponse* reply) override;
 
+  ::grpc::Status GetAllCpuDevices(::grpc::ServerContext* context, const ::rdc::Empty* request,
+                               ::rdc::GetAllCpuDevicesResponse* reply) override;
+
   ::grpc::Status GetDeviceAttributes(::grpc::ServerContext* context,
                                      const ::rdc::GetDeviceAttributesRequest* request,
                                      ::rdc::GetDeviceAttributesResponse* reply) override;
+
+  ::grpc::Status GetDeviceCpuAttributes(::grpc::ServerContext* context,
+                                      const ::rdc::GetCpuDeviceAttributesRequest* request,
+                                      ::rdc::GetCpuDeviceAttributesResponse* reply) override;
 
   ::grpc::Status GetComponentVersion(::grpc::ServerContext* context,
                                      const ::rdc::GetComponentVersionRequest* request,
@@ -183,6 +190,14 @@ class RdcAPIServiceImpl final : public ::rdc::RdcAPI::Service {
   ::grpc::Status ClearConfig(::grpc::ServerContext* context,
                              const ::rdc::ClearConfigRequest* request,
                              ::rdc::ClearConfigResponse* reply) override;
+
+  ::grpc::Status GetNumPartition(::grpc::ServerContext* context,
+                                 const ::rdc::GetNumPartitionRequest* request,
+                                 ::rdc::GetNumPartitionResponse* reply) override;
+
+  ::grpc::Status GetInstanceProfile(::grpc::ServerContext* context,
+                                    const ::rdc::GetInstanceProfileRequest* request,
+                                    ::rdc::GetInstanceProfileResponse* reply) override;
 
  private:
   bool copy_gpu_usage_info(const rdc_gpu_usage_info_t& src, ::rdc::GpuUsageInfo* target);

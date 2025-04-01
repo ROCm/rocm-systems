@@ -99,6 +99,13 @@ rdc_status_t RdcDiagnosticModule::rdc_diagnostic_run(const rdc_group_info_t& gpu
     tests_to_search_for.push_back(RDC_DIAG_RVS_IET_TEST);
   }
 
+  if (level >= RDC_DIAG_LVL_LONG) {  // Medium run and above
+    tests_to_search_for.push_back(RDC_DIAG_RVS_GST_LONG_TEST);
+    tests_to_search_for.push_back(RDC_DIAG_RVS_MEMBW_LONG_TEST);
+    tests_to_search_for.push_back(RDC_DIAG_RVS_H2DD2H_LONG_TEST);
+    tests_to_search_for.push_back(RDC_DIAG_RVS_IET_LONG_TEST);
+  }
+
   std::vector<rdc_diag_test_cases_t> tests_to_run;
   if (is_custom) {
     // respect custom config
