@@ -180,11 +180,11 @@ class OmniSoC_Base:
         self._mspec.cur_sclk = self._mspec.max_sclk
         self._mspec.cur_mclk = self._mspec.max_mclk
 
-        self._mspec.gpu_series = get_gpu_series(self._mspec.gpu_arch).upper()
+        self._mspec.gpu_series = get_gpu_series(self._mspec.gpu_arch)
         # specify gpu model name for gfx942 hardware
         self._mspec.gpu_model = get_gpu_model(
             self._mspec.gpu_arch, self._mspec.gpu_chip_id
-        ).upper()
+        )
         self._mspec.num_xcd = str(
             total_xcds(self._mspec.gpu_model, self._mspec.compute_partition)
         )

@@ -11,10 +11,9 @@
 #       |-- architecture: currently, only mi300 gpus hold different architectures
 #           |-- models
 #               |-- chip_ids: chip id is specific to the environment the gpu is being used on
-#               |-- mi300_arch: mi300 specific architectures; mi300a, mi300x
-#                   |-- partition_mode: currently, only mi300 gpus hold partition mode information
-#                                       two types: compute partition mode, memory partition mode,
-#                                       currently only mi300 gpus contains compute partition mode information on number of xcds
+#               |-- partition_mode: currently, only mi300 gpus hold partition mode information
+#                                   two types: compute partition mode, memory partition mode,
+#                                   currently only mi300 gpus contains compute partition mode information on number of xcds
 #
 # --------------------------------------------------------------------------------
 
@@ -24,141 +23,130 @@ mi_gpu_spec:
       - gpu_arch: gfx906
         models:
           - gpu_model: mi50
-            mi300_arch:
-              architecture: null
-              partition_mode: null
+            partition_mode: null
             chip_ids:
-              local: null
+              physical: null
+              virtual: null
           - gpu_model: mi60
-            mi300_arch:
-              architecture: null
-              partition_mode: null
+            partition_mode: null
             chip_ids:
-              local: null
+              physical: null
+              virtual: null
 
   - gpu_series: mi100
     gpu_archs:
       - gpu_arch: gfx908
         models:
           - gpu_model: mi100
-            mi300_arch:
-              architecture: null
-              partition_mode: null
+            partition_mode: null
             chip_ids:
-              local: null
+              physical: 29580
+              virtual: null
 
   - gpu_series: mi200
     gpu_archs:
       - gpu_arch: gfx90a
         models:
           - gpu_model: mi210
-            mi300_arch:
-              architecture: null
-              partition_mode: null
+            partition_mode: null
             chip_ids:
-              local: null
+              physical: 29711
+              virtual: null
           - gpu_model: mi250
-            mi300_arch:
-              architecture: null
-              partition_mode: null
+            partition_mode: null
             chip_ids:
-              local: null
+              physical: 29708
+              virtual: null
           - gpu_model: mi250x
-            mi300_arch:
-              architecture: null
-              partition_mode: null
+            partition_mode: null
             chip_ids:
-              local: null
+              physical: 29704
+              virtual: null
 
   - gpu_series: mi300
     gpu_archs:
       - gpu_arch: gfx940
         models:
           - gpu_model: mi300a_a0
-            mi300_arch:
-              architecture: mi300a
-              partition_mode:
-                compute_partition_mode:
-                  num_xcds:
-                    spx: 6
-                    dpx: null
-                    tpx: 2
-                    qpx: null
-                    cpx: null
-                memory_partition_mode:
-                  nps4: {tpx}
-                  nps1: {spx, tpx}
+            partition_mode:
+              compute_partition_mode:
+                num_xcds:
+                  spx: 6
+                  dpx: null
+                  tpx: 2
+                  qpx: null
+                  cpx: null
+              memory_partition_mode:
+                nps4: [tpx]
+                nps1: [spx, tpx]
             chip_ids:
-              local: null
+              physical: null
+              virtual: null
 
       - gpu_arch: gfx941
         models:
           - gpu_model: mi300x_a0
-            mi300_arch:
-              architecture: mi300x
-              partition_mode:
-                compute_partition_mode:
-                  num_xcds:
-                    spx: 8
-                    dpx: 4
-                    tpx: null
-                    qpx: 2
-                    cpx: 1
-                memory_partition_mode:
-                  nps4: {qpx, cpx}
-                  nps1: {spx, qpx, cpx}
+            partition_mode:
+              compute_partition_mode:
+                num_xcds:
+                  spx: 8
+                  dpx: 4
+                  tpx: null
+                  qpx: 2
+                  cpx: 1
+              memory_partition_mode:
+                nps4: [qpx, cpx]
+                nps1: [spx, qpx, cpx]
             chip_ids:
-              local: null
+              physical: null
+              virtual: null
 
       - gpu_arch: gfx942
         models:
           - gpu_model: mi300a_a1
-            mi300_arch:
-              architecture: mi300a
-              partition_mode:
-                compute_partition_mode:
-                  num_xcds:
-                    spx: 6
-                    dpx: null
-                    tpx: 2
-                    qpx: null
-                    cpx: null
-                memory_partition_mode:
-                  nps4: {tpx}
-                  nps1: {spx, tpx}
+            partition_mode:
+              compute_partition_mode:
+                num_xcds:
+                  spx: 6
+                  dpx: null
+                  tpx: 2
+                  qpx: null
+                  cpx: null
+              memory_partition_mode:
+                nps4: [tpx]
+                nps1: [spx, tpx]
             chip_ids:
-              local: 29856
+              physical: 29856
+              virtual: 29876
 
           - gpu_model: mi300x_a1
-            mi300_arch:
-              architecture: mi300x
-              partition_mode:
-                compute_partition_mode:
-                  num_xcds:
-                    spx: 8
-                    dpx: 4
-                    tpx: null
-                    qpx: 2
-                    cpx: 1
-                memory_partition_mode:
-                  nps4: {qpx, cpx}
-                  nps1: {spx, qpx, cpx}
+            partition_mode:
+              compute_partition_mode:
+                num_xcds:
+                  spx: 8
+                  dpx: 4
+                  tpx: null
+                  qpx: 2
+                  cpx: 1
+              memory_partition_mode:
+                nps4: [qpx, cpx]
+                nps1: [spx, qpx, cpx]
             chip_ids:
-              local: 29857
+              physical: 29857
+              virtual: 29877
 
           - gpu_model: mi308x
-            mi300_arch:
-              architecture: mi308x
-              partition_mode:
-                compute_partition_mode:
-                  num_xcds:
-                    spx: 4
-                    dpx: 2
-                    tpx: null
-                    qpx: null
-                    cpx: 1
-                memory_partition_mode:
-                  nps4: {cpx}
-                  nps1: {spx, dpx, cpx}
+            partition_mode:
+              compute_partition_mode:
+                num_xcds:
+                  spx: 4
+                  dpx: 2
+                  tpx: null
+                  qpx: null
+                  cpx: 1
+              memory_partition_mode:
+                nps4: [cpx]
+                nps1: [spx, dpx, cpx]
             chip_ids:
-              local: 29858
+              physical: 29858
+              virtual: 29878
