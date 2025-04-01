@@ -86,7 +86,7 @@ class AMDSMIHelpers():
                 if self.is_amdgpu_initialized() and not self._is_passthrough:
                     device_handles = amdsmi_interface.amdsmi_get_processor_handles()
                     for dev in device_handles:
-                        virtualization_info = amdsmi_interface.amdsmi_get_gpu_virtualization_mode_info(dev)
+                        virtualization_info = amdsmi_interface.amdsmi_get_gpu_virtualization_mode(dev)
                         if virtualization_info['mode'] == amdsmi_interface.AmdSmiVirtualizationMode.PASSTHROUGH:
                             self._is_baremetal = True
                             self._is_virtual_os = False
