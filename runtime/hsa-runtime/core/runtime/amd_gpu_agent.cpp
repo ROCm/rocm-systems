@@ -3101,8 +3101,11 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
 
   if (properties_.NumXcc > 1) {
     pred_exec_cmd_sz = 2;
-    cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz, isa_->GetMajorVersion());
-    cmd_data[i++] = PM4_PRED_EXEC_DW2_EXEC_COUNT(0xF) | PM4_PRED_EXEC_DW2_VIRTUALXCCID_SELECT(0x1);
+    const uint64_t command_bytes = atomic_ex_cmd_sz + copy_data_cmd_sz;
+    cmd_data[i++] =
+      PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz, isa_->GetMajorVersion());
+    cmd_data[i++] =
+      PM4_PRED_EXEC_DW2_EXEC_COUNT(command_bytes) | PM4_PRED_EXEC_DW2_VIRTUALXCCID_SELECT(0x1);
   }
 
   /*
@@ -3169,10 +3172,12 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
 
   if (properties_.NumXcc > 1) {
     const uint64_t n = ceil(to_copy / (32 * 1024 * 1024));
+    const uint64_t command_bytes = wait_reg_mem_cmd_sz + write_data_cmd_sz + dma_data_cmd_sz * n;
     pred_exec_cmd_sz = 2;
-    cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz, isa_->GetMajorVersion());
     cmd_data[i++] =
-        PM4_PRED_EXEC_DW2_EXEC_COUNT(0x13 + 7 * n) | PM4_PRED_EXEC_DW2_VIRTUALXCCID_SELECT(0x1);
+      PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz, isa_->GetMajorVersion());
+    cmd_data[i++] =
+      PM4_PRED_EXEC_DW2_EXEC_COUNT(command_bytes) | PM4_PRED_EXEC_DW2_VIRTUALXCCID_SELECT(0x1);
   }
 
   /*
