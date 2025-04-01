@@ -4065,7 +4065,7 @@ finally:
 ```
 
 
-### amdsmi_get_gpu_virtualization_mode_info
+### amdsmi_get_gpu_virtualization_mode
 
 Description: Retrieve the virtualization mode for the selected GPU.
 
@@ -4082,7 +4082,7 @@ Field | Description
 `GUEST` | Guest/Virtual Machine detected
 `PASSTHROUGH` | GPU Passthrough mode detected
 
-Exceptions that can be thrown by `amdsmi_get_gpu_virtualization_mode_info` function:
+Exceptions that can be thrown by `amdsmi_get_gpu_virtualization_mode` function:
 
 * `AmdSmiLibraryException`
 
@@ -4092,7 +4092,7 @@ Example:
 try:
     device_handles = amdsmi_interface.amdsmi_get_processor_handles()
     for dev in device_handles:
-        virtualization_info = amdsmi_interface.amdsmi_get_gpu_virtualization_mode_info(dev)
+        virtualization_info = amdsmi_interface.amdsmi_get_gpu_virtualization_mode(dev)
         print(virtualization_info['mode'])
 except AmdSmiException as e:
     print(e)

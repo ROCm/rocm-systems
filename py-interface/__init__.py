@@ -237,7 +237,7 @@ from .amdsmi_interface import amdsmi_get_gpu_reg_table_info
 from .amdsmi_interface import amdsmi_get_gpu_pm_metrics_info
 
 # # Virtualization Mode Detection
-from .amdsmi_interface import amdsmi_get_gpu_virtualization_mode_info
+from .amdsmi_interface import amdsmi_get_gpu_virtualization_mode
 
 # # Functions where library initialization is not needed
 # # Version information
