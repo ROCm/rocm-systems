@@ -18,8 +18,6 @@
         "Unit_hipDeviceGetSharedMemConfig_Positive_Threaded",
         "Unit_hipGetDeviceFlags_Positive_Context",
         "Unit_hipInit_Negative",
-        "Unit_hipDeviceReset_Positive_Basic",
-        "Unit_hipDeviceReset_Positive_Threaded",
         "Unit_hipFuncSetCacheConfig_Positive_Basic",
         "Unit_hipFuncSetCacheConfig_Negative_Parameters",
         "Unit_hipFuncSetSharedMemConfig_Positive_Basic",
