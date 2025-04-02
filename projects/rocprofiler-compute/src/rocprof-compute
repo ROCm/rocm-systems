@@ -28,6 +28,7 @@
 
 import re
 import sys
+import os
 
 # import logging
 from pathlib import Path
@@ -38,9 +39,20 @@ try:
     from rocprof_compute_base import RocProfCompute
     from utils.logger import console_error
 except ImportError as e:
-    # print("Failed to import required modules: " + str(e))
-    pass
+    # In wheel package, softlink is not supported.
+    # rocprof-compute will get installed in bin and libexec/rocprofiler-compute.
+    # When invoked from bin folder, the extra paths are required to import the dependent scripts
+    try:
+        current_path = os.path.dirname(os.path.abspath(__file__))
+        additional_path = f"{current_path}/../libexec/rocprofiler-compute"
+        sys.path.append(os.path.abspath(additional_path))
 
+        from importlib import metadata
+        from rocprof_compute_base import RocProfCompute
+        from utils.utils import console_error
+    except ImportError as e:
+        # print("Failed to import required modules: " + str(e))
+        pass
 
 def verify_deps_version(localVer, desiredVer, operator):
     """Check package version strings with simple operators used in companion
