@@ -20,27 +20,31 @@ Panel Config:
           tips: Tips
         metric:
           VALU:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
+            avg: AVG(((SQ_INSTS_VALU - SQ_INSTS_MFMA) / $denom))
+            min: MIN(((SQ_INSTS_VALU - SQ_INSTS_MFMA) / $denom))
+            max: MAX(((SQ_INSTS_VALU - SQ_INSTS_MFMA) / $denom))
             unit: (instr + $normUnit)
             tips:
           VMEM:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
+            # TODO: need to fix this when the new FLAT/LDS counts
+            # are present in ROCm
+            avg: AVG(((SQ_INSTS_VMEM) / $denom))
+            min: MIN(((SQ_INSTS_VMEM) / $denom))
+            max: MAX(((SQ_INSTS_VMEM) / $denom))
             unit: (instr + $normUnit)
             tips:
           LDS:
+            # TODO: need to fix this when the new FLAT/LDS counts
+            # are present in ROCm
             avg: AVG((SQ_INSTS_LDS / $denom))
             min: MIN((SQ_INSTS_LDS / $denom))
             max: MAX((SQ_INSTS_LDS / $denom))
             unit: (instr + $normUnit)
             tips:
           MFMA:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
+            avg: AVG((SQ_INSTS_MFMA / $denom))
+            min: MIN((SQ_INSTS_MFMA / $denom))
+            max: MAX((SQ_INSTS_MFMA / $denom))
             unit: (instr + $normUnit)
             tips:
           SALU:
@@ -73,94 +77,94 @@ Panel Config:
           unit: Unit
           tips: Tips
         metric:
-          INT-32:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
+          INT32:
+            avg: AVG((SQ_INSTS_VALU_INT32 / $denom))
+            min: MIN((SQ_INSTS_VALU_INT32 / $denom))
+            max: MAX((SQ_INSTS_VALU_INT32 / $denom))
             unit: (instr + $normUnit)
             tips:
-          INT-64:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
+          INT64:
+            avg: AVG((SQ_INSTS_VALU_INT64 / $denom))
+            min: MIN((SQ_INSTS_VALU_INT64 / $denom))
+            max: MAX((SQ_INSTS_VALU_INT64 / $denom))
             unit: (instr + $normUnit)
             tips:
           F16-ADD:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
+            avg: AVG((SQ_INSTS_VALU_ADD_F16 / $denom))
+            min: MIN((SQ_INSTS_VALU_ADD_F16 / $denom))
+            max: MAX((SQ_INSTS_VALU_ADD_F16 / $denom))
             unit: (instr + $normUnit)
             tips:
           F16-MUL:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
+            avg: AVG((SQ_INSTS_VALU_MUL_F16 / $denom))
+            min: MIN((SQ_INSTS_VALU_MUL_F16 / $denom))
+            max: MAX((SQ_INSTS_VALU_MUL_F16 / $denom))
             unit: (instr + $normUnit)
             tips:
           F16-FMA:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
+            avg: AVG((SQ_INSTS_VALU_FMA_F16 / $denom))
+            min: MIN((SQ_INSTS_VALU_FMA_F16 / $denom))
+            max: MAX((SQ_INSTS_VALU_FMA_F16 / $denom))
             unit: (instr + $normUnit)
             tips:
           F16-Trans:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
+            avg: AVG((SQ_INSTS_VALU_TRANS_F16 / $denom))
+            min: MIN((SQ_INSTS_VALU_TRANS_F16 / $denom))
+            max: MAX((SQ_INSTS_VALU_TRANS_F16 / $denom))
             unit: (instr + $normUnit)
             tips:
           F32-ADD:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
+            avg: AVG((SQ_INSTS_VALU_ADD_F32 / $denom))
+            min: MIN((SQ_INSTS_VALU_ADD_F32 / $denom))
+            max: MAX((SQ_INSTS_VALU_ADD_F32 / $denom))
             unit: (instr + $normUnit)
             tips:
           F32-MUL:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
+            avg: AVG((SQ_INSTS_VALU_MUL_F32 / $denom))
+            min: MIN((SQ_INSTS_VALU_MUL_F32 / $denom))
+            max: MAX((SQ_INSTS_VALU_MUL_F32 / $denom))
             unit: (instr + $normUnit)
             tips:
           F32-FMA:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
+            avg: AVG((SQ_INSTS_VALU_FMA_F32 / $denom))
+            min: MIN((SQ_INSTS_VALU_FMA_F32 / $denom))
+            max: MAX((SQ_INSTS_VALU_FMA_F32 / $denom))
             unit: (instr + $normUnit)
             tips:
           F32-Trans:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
+            avg: AVG((SQ_INSTS_VALU_TRANS_F32 / $denom))
+            min: MIN((SQ_INSTS_VALU_TRANS_F32 / $denom))
+            max: MAX((SQ_INSTS_VALU_TRANS_F32 / $denom))
             unit: (instr + $normUnit)
             tips:
           F64-ADD:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
+            avg: AVG((SQ_INSTS_VALU_ADD_F64 / $denom))
+            min: MIN((SQ_INSTS_VALU_ADD_F64 / $denom))
+            max: MAX((SQ_INSTS_VALU_ADD_F64 / $denom))
             unit: (instr + $normUnit)
             tips:
           F64-MUL:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
+            avg: AVG((SQ_INSTS_VALU_MUL_F64 / $denom))
+            min: MIN((SQ_INSTS_VALU_MUL_F64 / $denom))
+            max: MAX((SQ_INSTS_VALU_MUL_F64 / $denom))
             unit: (instr + $normUnit)
             tips:
           F64-FMA:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
+            avg: AVG((SQ_INSTS_VALU_FMA_F64 / $denom))
+            min: MIN((SQ_INSTS_VALU_FMA_F64 / $denom))
+            max: MAX((SQ_INSTS_VALU_FMA_F64 / $denom))
             unit: (instr + $normUnit)
             tips:
           F64-Trans:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
+            avg: AVG((SQ_INSTS_VALU_TRANS_F64 / $denom))
+            min: MIN((SQ_INSTS_VALU_TRANS_F64 / $denom))
+            max: MAX((SQ_INSTS_VALU_TRANS_F64 / $denom))
             unit: (instr + $normUnit)
             tips:
           Conversion:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
+            avg: AVG((SQ_INSTS_VALU_CVT / $denom))
+            min: MIN((SQ_INSTS_VALU_CVT / $denom))
+            max: MAX((SQ_INSTS_VALU_CVT / $denom))
             unit: (instr + $normUnit)
             tips:
 
@@ -182,9 +186,12 @@ Panel Config:
             unit: (instr + $normUnit)
             tips:
           Global/Generic Coalesceable Instr:
-            avg: None # No perf counter
-            min: None # No perf counter
-            max: None # No perf counter
+            avg: None
+            # AVG((TA_FLAT_COALESCEABLE_WAVEFRONTS_sum / $denom))
+            min: None
+            # MIN((TA_FLAT_COALESCEABLE_WAVEFRONTS_sum / $denom))
+            max: None
+            # MAX((TA_FLAT_COALESCEABLE_WAVEFRONTS_sum / $denom))
             unit: (instr + $normUnit)
             tips:
           Global/Generic Read:
@@ -212,9 +219,9 @@ Panel Config:
             unit: (instr + $normUnit)
             tips:
           Spill/Stack Coalesceable Instr:
-            avg: None # No perf counter
-            min: None # No perf counter
-            max: None # No perf counter
+            avg: AVG((TA_BUFFER_COALESCEABLE_WAVEFRONTS_sum / $denom))
+            min: MIN((TA_BUFFER_COALESCEABLE_WAVEFRONTS_sum / $denom))
+            max: MAX((TA_BUFFER_COALESCEABLE_WAVEFRONTS_sum / $denom))
             unit: (instr + $normUnit)
             tips:
           Spill/Stack Read:
@@ -248,38 +255,38 @@ Panel Config:
           tips: Tips
         metric:
           MFMA-I8:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
+            avg: AVG((SQ_INSTS_VALU_MFMA_I8 / $denom))
+            min: MIN((SQ_INSTS_VALU_MFMA_I8 / $denom))
+            max: MAX((SQ_INSTS_VALU_MFMA_I8 / $denom))
             unit: (instr + $normUnit)
             tips:
           MFMA-F8:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module None # No HW module
+            avg: AVG((SQ_INSTS_VALU_MFMA_F8 / $denom))
+            min: MIN((SQ_INSTS_VALU_MFMA_F8 / $denom))
+            max: MAX((SQ_INSTS_VALU_MFMA_F8 / $denom))
             unit: (instr + $normUnit)
             tips:
           MFMA-F16:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
+            avg: AVG((SQ_INSTS_VALU_MFMA_F16 / $denom))
+            min: MIN((SQ_INSTS_VALU_MFMA_F16 / $denom))
+            max: MAX((SQ_INSTS_VALU_MFMA_F16 / $denom))
             unit: (instr + $normUnit)
             tips:
           MFMA-BF16:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
+            avg: AVG((SQ_INSTS_VALU_MFMA_BF16 / $denom))
+            min: MIN((SQ_INSTS_VALU_MFMA_BF16 / $denom))
+            max: MAX((SQ_INSTS_VALU_MFMA_BF16 / $denom))
             unit: (instr + $normUnit)
             tips:
           MFMA-F32:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
+            avg: AVG((SQ_INSTS_VALU_MFMA_F32 / $denom))
+            min: MIN((SQ_INSTS_VALU_MFMA_F32 / $denom))
+            max: MAX((SQ_INSTS_VALU_MFMA_F32 / $denom))
             unit: (instr + $normUnit)
             tips:
           MFMA-F64:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
+            avg: AVG((SQ_INSTS_VALU_MFMA_F64 / $denom))
+            min: MIN((SQ_INSTS_VALU_MFMA_F64 / $denom))
+            max: MAX((SQ_INSTS_VALU_MFMA_F64 / $denom))
             unit: (instr + $normUnit)
             tips:

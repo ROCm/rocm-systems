@@ -26,9 +26,9 @@
 # SOFTWARE.
 ##############################################################################el
 
+import os
 import re
 import sys
-import os
 
 # import logging
 from pathlib import Path
@@ -48,11 +48,13 @@ except ImportError as e:
         sys.path.append(os.path.abspath(additional_path))
 
         from importlib import metadata
+
         from rocprof_compute_base import RocProfCompute
         from utils.utils import console_error
     except ImportError as e:
         # print("Failed to import required modules: " + str(e))
         pass
+
 
 def verify_deps_version(localVer, desiredVer, operator):
     """Check package version strings with simple operators used in companion

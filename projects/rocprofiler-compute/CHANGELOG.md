@@ -22,6 +22,12 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Support host-trap PC Sampling on CLI (beta version)
 
+* Add support for tuned performance counters for gfx950 GPUs
+  * Add L1 latencies
+  * Add L2 latencies
+  * Add L2 to EA stalls
+  * Add L2 to EA stalls per channel
+
 ### Changed
 
 * Change normal_unit default to per_kernel
