@@ -1516,7 +1516,7 @@ class AMDSMICommands():
                 gpu_metric_version_str = json.dumps(gpu_metric_version_info, indent=4)
                 logging.debug("GPU Metrics table Version for GPU %s | %s", gpu_id, gpu_metric_version_str)
             except amdsmi_exception.AmdSmiLibraryException as e:
-                logging.debug("Unable to load GPU Metrics table version for %s | %s", gpu_id, e.err_info)
+                logging.debug("Unable to load GPU Metrics table version for GPU %s | %s", gpu_id, e.err_info)
 
             try:
                 # Get GPU Metrics table
@@ -1844,7 +1844,7 @@ class AMDSMICommands():
                                 clocks[gfx_index]["clk_locked"] = "ENABLED"
                             else:
                                 clocks[gfx_index]["clk_locked"] = "DISABLED"
-                except KeyError as e:
+                except Exception as e:
                     logging.debug("Failed to get current_gfxclks for gpu %s | %s", gpu_id, e)
 
                 # Populate MEM clock value
@@ -1854,7 +1854,7 @@ class AMDSMICommands():
                         clocks["mem_0"]["clk"] = self.helpers.unit_format(self.logger,
                                                                           current_mem_clock,
                                                                           clock_unit)
-                except KeyError as e:
+                except Exception as e:
                     logging.debug("Failed to get current_uclk for gpu %s | %s", gpu_id, e)
 
                 # Populate VCLK clock values
@@ -1869,7 +1869,7 @@ class AMDSMICommands():
                         clocks[vclk_index]["clk"] = self.helpers.unit_format(self.logger,
                                                                              current_vclk_clock,
                                                                              clock_unit)
-                except KeyError as e:
+                except Exception as e:
                     logging.debug("Failed to get current_vclk0s for gpu %s | %s", gpu_id, e)
 
                 # Populate DCLK clock values
@@ -1884,7 +1884,7 @@ class AMDSMICommands():
                         clocks[dclk_index]["clk"] = self.helpers.unit_format(self.logger,
                                                                              current_dclk_clock,
                                                                              clock_unit)
-                except KeyError as e:
+                except Exception as e:
                     logging.debug("Failed to get current_dclk0s for gpu %s | %s", gpu_id, e)
 
                 # Populate FCLK clock value; fclk not present in gpu_metrics so use amdsmi_get_clk_freq
@@ -1904,7 +1904,7 @@ class AMDSMICommands():
                     clocks["socclk_0"]["clk"] = self.helpers.unit_format(self.logger,
                                                                          current_socclk_clock,
                                                                          clock_unit)
-                except KeyError as e:
+                except Exception as e:
                     logging.debug("Failed to get current_socclk for gpu %s | %s", gpu_id, e)
 
                 # Populate the max and min clock values from sysfs
@@ -5063,7 +5063,7 @@ class AMDSMICommands():
                 gpu_metric_version_str = json.dumps(gpu_metric_version_info, indent=4)
                 logging.debug("GPU Metrics table Version for GPU %s | %s", gpu_id, gpu_metric_version_str)
             except amdsmi_exception.AmdSmiLibraryException as e:
-                logging.debug("Unable to load GPU Metrics table version for %s | %s", gpu_id, e.err_info)
+                logging.debug("Unable to load GPU Metrics table version for GPU %s | %s", gpu_id, e.err_info)
 
             try:
                 # Get GPU Metrics table
@@ -5352,11 +5352,13 @@ class AMDSMICommands():
 
         if args.vram_usage and not args.default_output:
             try:
-                vram_usage = amdsmi_interface.amdsmi_get_gpu_vram_usage(args.gpu)
-                monitor_values['vram_used'] = vram_usage['vram_used']
-                monitor_values['vram_free'] = vram_usage['vram_total'] - vram_usage['vram_used']
-                monitor_values['vram_total'] = vram_usage['vram_total']
-                monitor_values['vram_percent'] = round ((vram_usage['vram_used'] / vram_usage['vram_total']), 2)
+                vram_used = amdsmi_interface.amdsmi_get_gpu_memory_usage(args.gpu, amdsmi_interface.AmdSmiMemoryType.VRAM) // (1024*1024)
+                vram_total = amdsmi_interface.amdsmi_get_gpu_memory_total(args.gpu, amdsmi_interface.AmdSmiMemoryType.VRAM) // (1024*1024)
+                monitor_values['vram_used'] = vram_used
+                monitor_values['vram_free'] = vram_total - vram_used
+                monitor_values['vram_total'] = vram_total
+                monitor_values['vram_percent'] = round ((vram_used / vram_total), 2)
+
                 vram_usage_unit = "MB"
                 vram_percent_unit = "%"
                 if self.logger.is_human_readable_format():
@@ -5387,18 +5389,19 @@ class AMDSMICommands():
 
         if args.vram_usage and args.default_output:
             try:
-                vram_usage = amdsmi_interface.amdsmi_get_gpu_vram_usage(args.gpu)
+                vram_used = amdsmi_interface.amdsmi_get_gpu_memory_usage(args.gpu, amdsmi_interface.AmdSmiMemoryType.VRAM) // (1024*1024)
+                vram_total = amdsmi_interface.amdsmi_get_gpu_memory_total(args.gpu, amdsmi_interface.AmdSmiMemoryType.VRAM) // (1024*1024)
                 vram_usage_unit = "GB"
                 if self.logger.is_json_format():
-                    monitor_values['vram_used'] = {"value" : round(vram_usage['vram_used']/1024,1),
+                    monitor_values['vram_used'] = {"value" : round(vram_used/1024,1),
                                                    "unit" : vram_usage_unit}
-                    monitor_values['vram_total'] = {"value" : round(vram_usage['vram_total']/1024,1),
+                    monitor_values['vram_total'] = {"value" : round(vram_total/1024,1),
                                                     "unit" : vram_usage_unit}
                 elif self.logger.is_csv_format():
-                    monitor_values['vram_used'] = round(vram_usage['vram_used']/1024,1)
-                    monitor_values['vram_total'] = round(vram_usage['vram_total']/1024,1)
+                    monitor_values['vram_used'] = round(vram_used/1024,1)
+                    monitor_values['vram_total'] = round(vram_total/1024,1)
                 else:
-                    monitor_values['vram_usage'] = f"{vram_usage['vram_used']/1024:5.1f}/{vram_usage['vram_total']/1024:5.1f} {vram_usage_unit}".rjust(16,' ')
+                    monitor_values['vram_usage'] = f"{vram_used/1024:5.1f}/{vram_total/1024:5.1f} {vram_usage_unit}".rjust(16,' ')
             except amdsmi_exception.AmdSmiLibraryException as e:
                 if self.logger.is_json_format():
                     monitor_values['vram_used'] = "N/A"

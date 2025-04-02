@@ -4597,7 +4597,8 @@ def amdsmi_get_link_topology_nearest(
         'processor_list': device_list
     }
 
-def amdsmi_get_gpu_virtualization_mode_info(
+
+def amdsmi_get_gpu_virtualization_mode(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle
     ) -> Dict[str, AmdSmiVirtualizationMode]:
 

@@ -196,7 +196,7 @@ GPU_ID  MEMORY  ACCELERATOR_TYPE  ACCELERATOR_PROFILE_INDEX  PARTITION_ID
     ```
 
 - **Added dynamic virtualization mode detection**.  
-  - Added new C and Python API `amdsmi_get_gpu_virtualization_mode_info`
+  - Added new C and Python API `amdsmi_get_gpu_virtualization_mode`
   - Added new C and Python enum `amdsmi_virtualization_mode_t`
 
 - **Added TVIOL_ACTIVE to `amd-smi monitor`**.  
