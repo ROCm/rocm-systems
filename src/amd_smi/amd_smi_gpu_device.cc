@@ -42,6 +42,64 @@ uint32_t AMDSmiGPUDevice::get_gpu_id() const {
     return gpu_id_;
 }
 
+uint32_t AMDSmiGPUDevice::get_card_id() {
+    std::ostringstream ss;
+    // Should never return not_supported, but just in case
+    rsmi_status_t ret = rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED;
+    uint32_t gpu_index = this->get_gpu_id();
+    rsmi_device_identifiers_t identifiers = rsmi_device_identifiers_t{};
+    ret = rsmi_dev_device_identifiers_get(gpu_index, &identifiers);
+    if (ret != rsmi_status_t::RSMI_STATUS_SUCCESS) {
+        this->card_index_ = std::numeric_limits<uint32_t>::max();
+    } else {
+        this->card_index_ = identifiers.card_index;
+    }
+
+    ss << __PRETTY_FUNCTION__
+       << " | rsmi_dev_identifiers_get status: " << getRSMIStatusString(ret, false) << "\n"
+       << " | gpu_id_: " << gpu_id_ << "\n"
+       << " | identifiers.card_index: " << identifiers.card_index  << "\n"
+       << " | identifiers.drm_render_minor: " << identifiers.drm_render_minor  << "\n"
+       << " | identifiers.bdfid: " << std::hex << "0x" << identifiers.bdfid  << "\n"
+       << " | identifiers.kfd_gpu_id: " << std::dec << identifiers.kfd_gpu_id  << "\n"
+       << " | identifiers.partition_id: " << identifiers.partition_id  << "\n"
+       << " | identifiers.smi_device_id: " << identifiers.smi_device_id  << "\n"
+       << " | returning card_index_: "
+       << this->card_index_ << std::endl;
+    // std::cout << ss.str();
+    LOG_DEBUG(ss);
+    return this->card_index_;
+}
+
+uint32_t AMDSmiGPUDevice::get_drm_render_minor() {
+    std::ostringstream ss;
+    // Should never return not_supported, but just in case
+    rsmi_status_t ret = rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED;
+    uint32_t gpu_index = this->get_gpu_id();
+    rsmi_device_identifiers_t identifiers = rsmi_device_identifiers_t{};
+    ret = rsmi_dev_device_identifiers_get(gpu_index, &identifiers);
+    if (ret != rsmi_status_t::RSMI_STATUS_SUCCESS) {
+        this->drm_render_minor_ = std::numeric_limits<uint32_t>::max();
+    } else {
+        this->drm_render_minor_ = identifiers.drm_render_minor;
+    }
+
+    ss << __PRETTY_FUNCTION__
+       << " | rsmi_dev_identifiers_get status: " << getRSMIStatusString(ret, false) << "\n"
+       << " | gpu_id_: " << gpu_id_ << "\n"
+       << " | identifiers.card_index: " << identifiers.card_index  << "\n"
+       << " | identifiers.drm_render_minor: " << identifiers.drm_render_minor  << "\n"
+       << " | identifiers.bdfid: " << std::hex << "0x" << identifiers.bdfid  << "\n"
+       << " | identifiers.kfd_gpu_id: " << std::dec << identifiers.kfd_gpu_id  << "\n"
+       << " | identifiers.partition_id: " << identifiers.partition_id  << "\n"
+       << " | identifiers.smi_device_id: " << identifiers.smi_device_id  << "\n"
+       << " | returning drm_render_minor_: "
+       << this->drm_render_minor_ << std::endl;
+    // std::cout << ss.str();
+    LOG_DEBUG(ss);
+    return this->drm_render_minor_;
+}
+
 uint32_t AMDSmiGPUDevice::get_gpu_fd() const {
     return fd_;
 }
@@ -320,81 +378,6 @@ std::string AMDSmiGPUDevice::bdf_to_string() const {
         << std::setw(2) << static_cast<int>(bdf_.device_number) << "."  // Device (2 digits)
         << static_cast<int>(bdf_.function_number);  // Function (1 digit)
     return oss.str();
-}
-
-
-uint32_t AMDSmiGPUDevice::get_card_from_bdf() const {
-    const std::string drm_path = "/sys/class/drm/";
-
-    DIR* dir = opendir(drm_path.c_str());
-    if (!dir) {
-        return std::numeric_limits<uint32_t>::max();
-    }
-
-    struct dirent* entry;
-    while ((entry = readdir(dir)) != nullptr) {
-        std::string device_name = entry->d_name;
-
-        // Check if the entry starts with "card"
-        if (device_name.find("card") == 0) {
-            const std::string card_path = drm_path + device_name + "/device";
-
-            // Open the uevent file for the device
-            std::ifstream uevent_file(card_path + "/uevent");
-            if (!uevent_file) {
-                continue;  // Skip if the file is not found
-            }
-
-            std::string line;
-            while (std::getline(uevent_file, line)) {
-                // Check for the PCI_SLOT_NAME and if it contains the BDF
-                if (line.rfind("PCI_SLOT_NAME", 0) == 0 && line.find(bdf_to_string()) != std::string::npos) {
-                    closedir(dir);
-                    return std::stoi(device_name.substr(4));  // Convert extracted number to int
-                }
-            }
-        }
-    }
-
-    closedir(dir);
-    return std::numeric_limits<uint32_t>::max();  // Return -1 if no matching card is found
-}
-
-uint32_t AMDSmiGPUDevice::get_render_id() const {
-    const std::string drm_path = "/sys/class/drm/";
-
-    DIR* dir = opendir(drm_path.c_str());
-    if (!dir) {
-        return std::numeric_limits<uint32_t>::max();
-    }
-
-    struct dirent* entry;
-    while ((entry = readdir(dir)) != nullptr) {
-        std::string device_name = entry->d_name;
-
-        // Check if the entry starts with "renderD"
-        if (device_name.find("renderD") == 0) {
-            const std::string render_path = drm_path + device_name + "/device";
-
-            // Open the uevent file for the device
-            std::ifstream uevent_file(render_path + "/uevent");
-            if (!uevent_file) {
-                continue;  // Skip if the file is not found
-            }
-
-            std::string line;
-            while (std::getline(uevent_file, line)) {
-                // Check for the PCI_SLOT_NAME and if it contains the BDF
-                if (line.rfind("PCI_SLOT_NAME", 0) == 0 && line.find(bdf_to_string()) != std::string::npos) {
-                    closedir(dir);
-                    return std::stoi(device_name.substr(7));  // Extract only the number after "renderD"
-                }
-            }
-        }
-    }
-
-    closedir(dir);
-    return std::numeric_limits<uint32_t>::max();  // Return -1 if no matching render ID is found
 }
 
 

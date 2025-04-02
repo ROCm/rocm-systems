@@ -741,12 +741,25 @@ class AMDSMIHelpers():
                     accelerator_partition_profiles['memory_caps'].append(profile['profiles'][p]['memory_caps'])
                 break # Only need to get the profiles for one device
             except amdsmi_interface.AmdSmiLibraryException as e:
+                logging.debug(f"AMDSMIHelpers.get_accelerator_partition_profile_config - Unable to get accelerator partition profile config for device {dev}: {str(e)}")
+                if e.err_code == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
+                    logging.debug(f"AMDSMIHelpers.get_accelerator_partition_profile_config - Device {dev} does not support accelerator partition profiles")
+                    return accelerator_partition_profiles
+                break
+            except Exception as e:
+                logging.debug(f"AMDSMIHelpers.get_accelerator_partition_profile_config - Unexpected error occured --> Unable to get accelerator partition profile config for device {dev}: {str(e)}")
                 break
         return accelerator_partition_profiles
 
 
     def get_accelerator_choices_types_indices(self):
         return_val = ("N/A", {'profile_indices':[], 'profile_types':[]})
+        if os.geteuid() != 0:
+            logging.debug("AMDSMIHelpers.get_accelerator_choices_types_indices - Not root, unable to get accelerator partition profiles")
+            # If not root, we can't get the accelerator partition profiles
+            return return_val
+        else:
+            logging.debug("AMDSMIHelpers.get_accelerator_choices_types_indices - Root, getting accelerator partition profiles")
         accelerator_partition_profiles = self.get_accelerator_partition_profile_config()
         if len(accelerator_partition_profiles['profile_types']) != 0:
             compute_partitions_str = accelerator_partition_profiles['profile_types'] + accelerator_partition_profiles['profile_indices']
@@ -787,11 +800,15 @@ class AMDSMIHelpers():
         power_cap_min = amdsmi_interface.MaxUIntegerTypes.UINT64_T # start out at max and min and then find real min and max
         power_cap_max = 0
         for dev in device_handles:
-            power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(dev)
-            if power_cap_info['max_power_cap'] > power_cap_max:
-                power_cap_max = power_cap_info['max_power_cap']
-            if power_cap_info['min_power_cap'] < power_cap_max:
-                power_cap_min = power_cap_info['min_power_cap']
+            try:
+                power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(dev)
+                if power_cap_info['max_power_cap'] > power_cap_max:
+                    power_cap_max = power_cap_info['max_power_cap']
+                if power_cap_info['min_power_cap'] < power_cap_max:
+                    power_cap_min = power_cap_info['min_power_cap']
+            except amdsmi_interface.AmdSmiLibraryException as e:
+                logging.debug(f"AMDSMIHelpers.get_power_caps - Unable to get power cap info for device {dev}: {str(e)}")
+                continue
         return (power_cap_min, power_cap_max)
 
 

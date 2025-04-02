@@ -619,10 +619,10 @@ amdsmi_get_gpu_enumeration_info(amdsmi_processor_handle processor_handle,
     }
 
     // Retrieve DRM Card ID
-    info->drm_card = gpu_device->get_card_from_bdf();
+    info->drm_card = gpu_device->get_card_id();
 
     // Retrieve DRM Render ID
-    info->drm_render = gpu_device->get_render_id();
+    info->drm_render = gpu_device->get_drm_render_minor();
 
     // Retrieve HIP ID (difference from the smallest node ID) and HSA ID
     std::map<uint64_t, std::shared_ptr<amd::smi::KFDNode>> nodes;
@@ -2267,6 +2267,7 @@ amdsmi_get_gpu_accelerator_partition_profile_config(amdsmi_processor_handle proc
                     << "\n profile_config->profiles[i].num_resources: "
                     << profile_config->profiles[i].num_resources
                     << std::endl;
+                // std::cout << ss.str() << std::endl;
                 LOG_DEBUG(ss);
             }
 
@@ -2425,6 +2426,7 @@ amdsmi_get_gpu_accelerator_partition_profile_config(amdsmi_processor_handle proc
     }
     ss << __PRETTY_FUNCTION__
        << " | END returning " << smi_amdgpu_get_status_string(return_status, false);
+    // std::cout << ss.str() << std::endl;
     LOG_INFO(ss);
 
     return return_status;
@@ -2791,6 +2793,9 @@ amdsmi_get_gpu_metrics_header_info(amdsmi_processor_handle processor_handle,
 {
     AMDSMI_CHECK_INIT();
     // nullptr api supported
+    if (header_value != nullptr) {
+        *header_value = amd_metrics_table_header_t{};  // Use a default initializer for the struct
+    }
 
     return rsmi_wrapper(rsmi_dev_metrics_header_info_get, processor_handle, 0,
                     reinterpret_cast<metrics_table_header_t*>(header_value));
@@ -2802,7 +2807,7 @@ amdsmi_status_t  amdsmi_get_gpu_metrics_info(
     AMDSMI_CHECK_INIT();
     // nullptr api supported
     if (pgpu_metrics != nullptr) {
-        *pgpu_metrics = {};
+        *pgpu_metrics = amdsmi_gpu_metrics_t{};  // Use a default initializer for the struct
     }
     return rsmi_wrapper(rsmi_dev_gpu_metrics_info_get, processor_handle, 0,
                        reinterpret_cast<rsmi_gpu_metrics_t*>(pgpu_metrics));
@@ -3805,7 +3810,7 @@ amdsmi_get_gpu_cper_entries(
         return status;
     }
     std::string path = std::string("/sys/kernel/debug/dri/") +
-        std::to_string(gpu_device->get_card_from_bdf()) +
+        std::to_string(gpu_device->get_card_id()) +
         "/amdgpu_ring_cper";
     
     
@@ -3957,6 +3962,7 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
 
 amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle, amdsmi_pcie_info_t *info) {
     AMDSMI_CHECK_INIT();
+    std::ostringstream ss;
 
     if (info == nullptr) {
         return AMDSMI_STATUS_INVAL;
@@ -3984,7 +3990,10 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle, a
         fscanf(fp, "%d", &pcie_width);
         fclose(fp);
     } else {
-        printf("Failed to open file: %s \n", path_max_link_width.c_str());
+        ss << __PRETTY_FUNCTION__
+           << " | Failed to open file: " << path_max_link_width
+           << " | returning AMDSMI_STATUS_API_FAILED";
+        LOG_ERROR(ss);
         return AMDSMI_STATUS_API_FAILED;
     }
     info->pcie_static.max_pcie_width = (uint16_t)pcie_width;

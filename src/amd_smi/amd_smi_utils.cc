@@ -115,7 +115,7 @@ int openFileAndModifyBuffer(std::string path, char *buff, size_t sizeOfBuff,
     bool errorDiscovered = false;
     std::ifstream file(path, std::ifstream::in);
     std::string contents = {std::istreambuf_iterator<char>{file}, std::istreambuf_iterator<char>{}};
-    clearCharBufferAndReinitialize(buff, sizeOfBuff, contents);
+    clearCharBufferAndReinitialize(buff, static_cast<uint32_t>(sizeOfBuff), contents);
     if (!file.is_open()) {
         errorDiscovered = true;
     } else {
@@ -453,21 +453,12 @@ amdsmi_status_t smi_amdgpu_get_bad_page_info(amd::smi::AMDSmiGPUDevice* device,
     return AMDSMI_STATUS_SUCCESS;
 }
 
-static uint32_t GetDeviceIndex(const std::string s) {
-  std::string t = s;
-  size_t tmp = t.find_last_not_of("0123456789");
-  t.erase(0, tmp+1);
-
-  assert(stoi(t) >= 0);
-  return static_cast<uint32_t>(stoi(t));
-}
-
 amdsmi_status_t smi_amdgpu_get_bad_page_threshold(amd::smi::AMDSmiGPUDevice* device,
         uint32_t *threshold) {
     SMIGPUDEVICE_MUTEX(device->get_mutex())
 
     //TODO: Accessing the node requires root privileges, and its interface may need to be exposed in another path
-    uint32_t index = GetDeviceIndex(device->get_gpu_path());
+    uint32_t index = device->get_card_id();
     std::string fullpath = "/sys/kernel/debug/dri/" + std::to_string(index) + std::string("/ras/bad_page_cnt_threshold");
     std::ifstream fs(fullpath.c_str());
 
@@ -489,7 +480,6 @@ amdsmi_status_t smi_amdgpu_get_bad_page_threshold(amd::smi::AMDSmiGPUDevice* dev
 amdsmi_status_t smi_amdgpu_validate_ras_eeprom(amd::smi::AMDSmiGPUDevice* device) {
     SMIGPUDEVICE_MUTEX(device->get_mutex())
 
-    //uint32_t index = GetDeviceIndex(device->get_gpu_path());
     //TODO: need to expose the corresponding interface to validate the checksum of ras eeprom table.
     //verify fail: return AMDSMI_STATUS_CORRUPTED_EEPROM
     return AMDSMI_STATUS_NOT_SUPPORTED;
