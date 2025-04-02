@@ -2049,6 +2049,12 @@ SQ_INSTS_VALU_MFMA_F8:
       event: 48
   description: The number of MFMA (Matrix-Fused-Multiply-Add) operating on F8 format
     (V_MFMA or V_SMFMAC). See AMD CDNA3 ISA for more informations.
+SQ_INSTS_VALU_MFMA_XF32:
+  architectures:
+    gfx950:
+      block: SQ
+      event: 47
+  description: Number of VALU V_MFMA_*_XF32 instructions.
 SQ_INSTS_VALU_MFMA_MOPS_BF16:
   architectures:
     gfx90a:
@@ -2138,6 +2144,18 @@ SQ_INSTS_VALU_MFMA_MOPS_F8:
       event: 56
   description: The number of math operation on F8 datatype. Captures add or mul ops performed divided by 512. The value
     is returned per-SE (aggregate of values in SIMDs in the SE). See AMD CDNA3 ISA for more information on MFMA F8 instructions.
+SQ_INSTS_VALU_MFMA_MOPS_XF32:
+  architectures:
+    gfx950:
+      block: SQ
+      event: 55
+  description: Number of VALU matrix math operations (add or mul) performed dividied by 512, assuming a full EXEC mask, of data type XF32. (per-simd, emulated)
+SQ_VALU_MFMA_COEXEC_CYCLES:
+  architectures:
+    gfx950:
+      block: SQ
+      event: 94
+  description: Number of cycles in which MFMA VALU was busy and a normal VALU instruction was issued (co-execution) (per-simd, nondeterministic)
 SQ_INSTS_VALU_MUL_F16:
   architectures:
     gfx950/gfx942/gfx941/gfx940/gfx90a:
@@ -2912,6 +2930,30 @@ SQ_VMEM_WR_TA_DATA_FIFO_FULL:
       block: SQ
       event: 157
   description: Number of cycles texture writes are stalled due to full data fifo in TA. (nondeterministic, unwindowed)
+SQ_INSTS_FLAT_FLATSEG:
+  architectures:
+    gfx950:
+      block: SQ
+      event: 65
+  description: Number of FLAT-FLAT instructions issued. (per-simd, emulated)
+SQ_INSTS_FLAT_NO_LDS:
+  architectures:
+    gfx950:
+      block: SQ
+      event: 66
+  description: Number of FLAT instructions issued with no lds thread. (per-simd, emulated)
+SQ_INSTS_EXP:
+  architectures:
+    gfx950:
+      block: SQ
+      event: 69
+  description: Number of EXP instructions issued, excluding skipped export instructions. (per-simd, emulated)
+SQ_EVENTS:
+  architectures:
+    gfx950:
+      block: SQ
+      event: 16
+  description: Number of events. (unwindowed, emulated, global)
 ScaPipeIssueUtil:
   architectures:
     gfx90a:
@@ -3235,6 +3277,28 @@ TA_FLAT_READ_LDS_WAVEFRONTS:
       block: TA
       event: 71
   description: Number of flat opcode reads for lds return processed by the TA.
+TA_BUFFER_COALESCEABLE_WAVEFRONTS:
+  architectures:
+    gfx950:
+      block: TA
+      event: 36
+  description: Number of buffer coalesceable wavefronts processed by TA.
+TA_FLAT_COALESCEABLE_WAVEFRONTS:
+  architectures:
+    gfx950:
+      block: TA
+      event: 55
+  description: Number of flat opcode coalesceale ops processed by the TA.
+TA_FLAT_READ_LDS_WAVEFRONTS_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TA_FLAT_READ_LDS_WAVEFRONTS, sum)
+  description: Number of flat opcode reads for lds return processed by the TA. Sum over TA instances.
+TA_BUFFER_READ_LDS_WAVEFRONTS_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TA_BUFFER_READ_LDS_WAVEFRONTS, sum)
+  description: Number of buffer read wavefronts for lds return processed by TA. Sum over TA instances.
 # TCA block(The Texture Cache Arbiter)
 TCA_BUSY:
   architectures:
@@ -4381,6 +4445,101 @@ TCC_EA0_WRREQ_ATOMIC_DRAM_32B:
       block: TCC
       event: 116
   description: Number of 32-byte TCC/EA atomic requests due to DRAM traffic, 1 64-byte request will be counted to 2. 
+TCC_EA0_RDREQ_64B_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCC_EA0_RDREQ_64B,sum)
+  description: Number of 64-byte TCC/EA read requests. Sum over TCP instances.
+TCC_EA0_RDREQ_128B_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCC_EA0_RDREQ_128B,sum)
+  description: Number of 128-byte TCC/EA read requests. Sum over TCP instances.
+TCC_READ_SECTORS_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCC_READ_SECTORS,sum)
+  description: Total number of 32B data sectors in read requests. Sum over TCP instances.
+TCC_WRITE_SECTORS_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCC_WRITE_SECTORS,sum)
+  description: Total number of 32B data sectors in write requests. Sum over TCP instances.
+TCC_ATOMIC_SECTORS_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCC_ATOMIC_SECTORS,sum)
+  description: Total number of 32B data sectors in atomic requests. Sum over TCP instances.
+TCC_BYPASS_REQ_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCC_BYPASS_REQ,sum)
+  description: Number of bypass requests. This is measured at the tag block. Sum over TCP instances.
+TCC_IB_REQ_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCC_IB_REQ,sum)
+  description: Number of requests through the IB. This measures the raw request count from graphics clients going to this TCC. Sum over TCP instances.
+TCC_LATENCY_FIFO_FULL_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCC_LATENCY_FIFO_FULL,sum)
+  description: Number of cycles the latency fifo was full. Sum over TCP instances.
+TCC_SRC_FIFO_FULL_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCC_SRC_FIFO_FULL,sum)
+  description: Number of cycles the src fifo was expected to be full as measured at the IB block. Sum over TCP instances.
+TCC_IB_STALL_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCC_IB_STALL,sum)
+  description: Number of cycles the IB output was stalled. Sum over TCP instances.
+TCC_EA0_WRREQ_WRITE_DRAM_32B_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCC_EA0_WRREQ_WRITE_DRAM_32B,sum)
+  description: Number of 32-byte TCC/EA write requests due to DRAM traffic, 1 64-byte request will be counted to 2. Sum over TCP instances.
+TCC_EA0_WRREQ_WRITE_DRAM_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCC_EA0_WRREQ_WRITE_DRAM,sum)
+  description: Number of TCC/EA write requests (either 32-byte of 64-byte) destined for DRAM (MC). Sum over TCP instances.
+TCC_EA0_WRREQ_WRITE_ATOMIC_32B_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCC_EA0_WRREQ_WRITE_ATOMIC_32B,sum)
+  description: Number of 32-byte TCC/EA atomic requests due to DRAM traffic, 1 64-byte request will be counted to 2. Sum over TCP instances.
+TCC_EA0_WRREQ_WRITE_GMI_32B_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCC_EA0_WRREQ_WRITE_GMI_32B,sum)
+  description: Number of 32-byte TCC/EA write requests due to GMI traffic, 1 64-byte request will be counted to 2. Sum over TCP instances.
+TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCC_EA0_WRREQ_ATOMIC_GMI_32B,sum)
+  description: Number of 32-byte TCC/EA atomic requests due to GMI traffic, 1 64-byte request will be counted to 2. Sum over TCP instances.
+TCC_EA0_WRREQ_WRITE_IO_32B_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCC_EA0_WRREQ_WRITE_IO_32B,sum)
+  description: Number of 32-byte TCC/EA write requests due to IO traffic, 1 64-byte request will be counted to 2. Sum over TCP instances.
+TCC_EA0_WRREQ_ATOMIC_DRAM_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCC_EA0_WRREQ_ATOMIC_DRAM,sum)
+  description: Number of TCC/EA atomic requests (either 32-byte of 64-byte) destined for DRAM (MC). Sum over TCP instances.
+TCC_EA0_WRREQ_ATOMIC_IO_32B_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCC_EA0_WRREQ_ATOMIC_IO_32B,sum)
+  description: Number of 32-byte TCC/EA atomic requests due to IO traffic, 1 64-byte request will be counted to 2. Sum over TCP instances.
+TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCC_EA0_WRREQ_ATOMIC_DRAM_32B,sum)
+  description: Number of 32-byte TCC/EA atomic requests due to DRAM traffic, 1 64-byte request will be counted to 2. Sum over TCP instances.
 # TCP Block (Texture Cache per Pipe)
 TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES:
   architectures:
@@ -5142,6 +5301,117 @@ TCP_TCC_WRITE_REQ_HOLE_LATENCY:
       block: TCP
       event: 67
   description: Total TCP req ->TCC hole latency for writes and atomics. Not Windowed.
+TCP_TOTAL_WBINVL1_VOL:
+  architectures:
+    gfx950:
+      block: TCP
+      event: 38
+  description: Total number of wbinvl1/inv transactions from TA (from shader WBINVL/INV instructions)
+TCP_SQ_TCP_INVALIDATE_VOL:
+  architectures:
+    gfx950:
+      block: TCP
+      event: 39
+  description: Number of cache invalidates from the SQ. Not Windowed.
+TCP_CP_TCP_INVALIDATE_VOL:
+  architectures:
+    gfx950:
+      block: TCP
+      event: 40
+  description: Number of cache invalidates from the CP. Not Windowed. 
+TCP_UTCL1_STALL_LFIFO_NO_RES:
+  architectures:
+    gfx950:
+      block: TCP
+      event: 53
+  description: Total utcl1 stalls due to utcl2 latency hiding fifo output not resident
+TCP_TCP_TA_ADDR_STALL_CYCLES_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCP_TCP_TA_ADDR_STALL_CYCLES,sum)
+  description: TCP stalls TA addr interface. Sum over TCP instances.
+TCP_LFIFO_STALL_CYCLES_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCP_LFIFO_STALL_CYCLES,sum)
+  description: Memory Latency fifos full stall. Sum over TCP instances.
+TCP_RFIFO_STALL_CYCLES_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCP_RFIFO_STALL_CYCLES,sum)
+  description: Memory Request fifos full stall. Sum over TCP instances.
+TCP_TCR_RDRET_STALL_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCP_TCR_RDRET_STALL,sum)
+  description: Write into cache stalled by read return from tcr. Sum over TCP instances.
+TCP_TAGRAM0_REQ_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCP_TAGRAM0_REQ,sum)
+  description: Total L2 requests that mapped to tagram 0 from this TCP to all TCCs. Sum over TCP instances.
+TCP_TAGRAM1_REQ_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCP_TAGRAM1_REQ,sum)
+  description: Total L2 requests that mapped to tagram 1 from this TCP to all TCCs. Sum over TCP instances.
+TCP_TAGRAM2_REQ_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCP_TAGRAM2_REQ,sum)
+  description: Total L2 requests that mapped to tagram 2 from this TCP to all TCCs. Sum over TCP instances.
+TCP_TAGRAM3_REQ_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCP_TAGRAM3_REQ,sum)
+  description: Total L2 requests that mapped to tagram 3 from this TCP to all TCCs. Sum over TCP instances.
+TCP_CLIENT_UTCL1_INFLIGHT_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCP_CLIENT_UTCL1_INFLIGHT,sum)
+  description: The sum of inflight client to UTCL1 requests per cycle. Sum over TCP instances.
+TCP_UTCL1_TRANSLATION_MISS_UNDER_MISS_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCP_UTCL1_TRANSLATION_MISS_UNDER_MISS,sum)
+  description: Translation miss_under_miss. Sum over TCP instances.
+TCP_UTCL1_STALL_INFLIGHT_MAX_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCP_UTCL1_STALL_INFLIGHT_MAX,sum)
+  description: Total utcl1 stalls due to inflight counter saturation. Sum over TCP instances.
+TCP_UTCL1_STALL_MULTI_MISS_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCP_UTCL1_STALL_MULTI_MISS,sum)
+  description: Total utcl1 stalls due to arbitrated multiple misses. Sum over TCP instances.
+TCP_UTCL1_SERIALIZATION_STALL_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCP_UTCL1_SERIALIZATION_STALL,sum)
+  description: Total number of stalls due to serializing translation requests through the UTCL1. Sum over TCP instances.
+TCP_UTCL1_THRASHING_STALL_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCP_UTCL1_THRASHING_STALL,sum)
+  description: Stall caused by thrashing feature in any probes. Not accurate when the stall signal has 
+    overlap between probe0 and probe1. Even worse with MECO of thrashing deadlock:DEMI350-4489. Some event
+    of probe0 could miss to count in with MECO on. Anyway this perf count can be a rough estimation of thrashing. Sum over TCP instances.
+TCP_UTCL1_LFIFO_FULL_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCP_UTCL1_LFIFO_FULL,sum)
+  description: Total utcl1 utcl2 latency hiding fifo full cycles. Sum over TCP instances.
+TCP_UTCL1_STALL_LFIFO_NO_RES_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCP_UTCL1_STALL_LFIFO_NO_RES,sum)
+  description: Total utcl1 stalls due to utcl2 latency hiding fifo output not resident. Sum over TCP instances.
+TCP_UTCL1_STALL_UTCL2_REQ_OUT_OF_CREDITS_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCP_UTCL1_STALL_UTCL2_REQ_OUT_OF_CREDITS,sum)
+  description: Total utcl1 stalls due to utcl2_req out of credits. Sum over TCP instances.
 # Block TD (Texture Data Block)
 TD_ATOMIC_WAVEFRONT:
   architectures:
@@ -5239,7 +5509,7 @@ TD_TD_BUSY_sum:
       expression: reduce(TD_TD_BUSY,sum)
   description: TD is processing or waiting for data. Perf_Windowing not supported for this counter. Sum
     over TD instances.
-TD_WRITE_ACK_WAVEFRONT:
+TD_WRITE_ACKT_WAVEFRONT:
   architectures:
     gfx950:
       block: TD
