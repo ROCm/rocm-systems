@@ -1328,7 +1328,7 @@ void KFDQMTest::extendedCuMasking(int gpuNode) {
             }
 
             // Check if what we detected is consistent with info from KFD
-            EXPECT_TRUE_GPU((activeCU + inactiveCount) == maxCU, gpuNode);
+            EXPECT_TRUE_GPU(g_IsEmuMode || (activeCU + inactiveCount) == maxCU, gpuNode);
 
             maskConfig.pInactiveMask = inactiveMask;
 
