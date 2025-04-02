@@ -548,6 +548,7 @@ class AMDSMICommands():
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     power_limit_error = True
                     max_power_limit = "N/A"
+                    min_power_limit = "N/A"
                     socket_power_limit = "N/A"
                     logging.debug("Failed to get power cap info for gpu %s | %s", gpu_id, e.get_error_info())
 
@@ -1517,7 +1518,7 @@ class AMDSMICommands():
                 gpu_metric_version_str = json.dumps(gpu_metric_version_info, indent=4)
                 logging.debug("GPU Metrics table Version for GPU %s | %s", gpu_id, gpu_metric_version_str)
             except amdsmi_exception.AmdSmiLibraryException as e:
-                logging.debug("Unable to load GPU Metrics table version for GPU %s | %s", gpu_id, e.err_info)
+                logging.debug("#1 - Unable to load GPU Metrics table version for %s | %s", gpu_id, e.err_info)
 
             try:
                 # Get GPU Metrics table
@@ -1525,7 +1526,7 @@ class AMDSMICommands():
                 gpu_metric_str = json.dumps(gpu_metric_debug_info, indent=4)
                 logging.debug("GPU Metrics table for GPU %s | %s", gpu_id, str(gpu_metric_str))
             except amdsmi_exception.AmdSmiLibraryException as e:
-                logging.debug("Unable to load GPU Metrics table for %s | %s", gpu_id, e.err_info)
+                logging.debug("#2 - Unable to load GPU Metrics table for %s | %s", gpu_id, e.err_info)
 
         logging.debug(f"Metric Arg information for GPU {gpu_id} on {self.helpers.os_info()}")
         logging.debug(f"Args:   {current_platform_args}")
@@ -1544,7 +1545,85 @@ class AMDSMICommands():
             # Get GPU Metrics table
             gpu_metric = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)
         except amdsmi_exception.AmdSmiLibraryException as e:
-            logging.debug("Unable to load GPU Metrics table for %s | %s", gpu_id, e.err_info)
+            logging.debug("#3 - Unable to load GPU Metrics table for %s | %s", gpu_id, e.err_info)
+            gpu_metric = {
+                "temperature_edge": "N/A",
+                "temperature_hotspot": "N/A",
+                "temperature_mem": "N/A",
+                "temperature_vrgfx": "N/A",
+                "temperature_vrsoc": "N/A",
+                "temperature_vrmem": "N/A",
+                "average_gfx_activity": "N/A",
+                "average_umc_activity": "N/A",
+                "average_mm_activity": "N/A",
+                "average_socket_power": "N/A",
+                "energy_accumulator": "N/A",
+                "system_clock_counter": "N/A",
+                "average_gfxclk_frequency": "N/A",
+                "average_socclk_frequency": "N/A",
+                "average_uclk_frequency": "N/A",
+                "average_vclk0_frequency": "N/A",
+                "average_dclk0_frequency": "N/A",
+                "average_vclk1_frequency": "N/A",
+                "average_dclk1_frequency": "N/A",
+                "current_gfxclk": "N/A",
+                "current_socclk": "N/A",
+                "current_uclk": "N/A",
+                "current_vclk0": "N/A",
+                "current_dclk0": "N/A",
+                "current_vclk1": "N/A",
+                "current_dclk1": "N/A",
+                "throttle_status": "N/A",
+                "current_fan_speed": "N/A",
+                "pcie_link_width": "N/A",
+                "pcie_link_speed": "N/A",
+                "gfx_activity_acc": "N/A",
+                "mem_activity_acc": "N/A",
+                "temperature_hbm": "N/A",
+                "firmware_timestamp": "N/A",
+                "voltage_soc": "N/A",
+                "voltage_gfx": "N/A",
+                "voltage_mem": "N/A",
+                "indep_throttle_status": "N/A",
+                "current_socket_power": "N/A",
+                "vcn_activity": "N/A",
+                "gfxclk_lock_status": "N/A",
+                "xgmi_link_width": "N/A",
+                "xgmi_link_speed": "N/A",
+                "pcie_bandwidth_acc": "N/A",
+                "pcie_bandwidth_inst": "N/A",
+                "pcie_l0_to_recov_count_acc": "N/A",
+                "pcie_replay_count_acc": "N/A",
+                "pcie_replay_rover_count_acc": "N/A",
+                "xgmi_read_data_acc": "N/A",
+                "xgmi_write_data_acc": "N/A",
+                "current_gfxclks": "N/A",
+                "current_socclks": "N/A",
+                "current_vclk0s": "N/A",
+                "current_dclk0s": "N/A",
+                "jpeg_activity": "N/A",
+                "pcie_nak_sent_count_acc": "N/A",
+                "pcie_nak_rcvd_count_acc": "N/A",
+                "accumulation_counter": "N/A",
+                "prochot_residency_acc": "N/A",
+                "ppt_residency_acc": "N/A",
+                "socket_thm_residency_acc": "N/A",
+                "vr_thm_residency_acc": "N/A",
+                "hbm_thm_residency_acc": "N/A",
+                "num_partition": "N/A",
+                "xcp_stats.gfx_busy_inst": "N/A",
+                "xcp_stats.jpeg_busy": "N/A",
+                "xcp_stats.vcn_busy": "N/A",
+                "xcp_stats.gfx_busy_acc": "N/A",
+                "xcp_stats.gfx_below_host_limit_acc": "N/A",
+                "xcp_stats.gfx_below_host_limit_ppt_acc": "N/A",
+                "xcp_stats.gfx_below_host_limit_thm_acc": "N/A",
+                "xcp_stats.gfx_low_utilization_acc": "N/A",
+                "xcp_stats.gfx_below_host_limit_total_acc": "N/A",
+                "pcie_lc_perf_other_end_recovery": "N/A",
+                "vram_max_bandwidth": "N/A",
+                "xgmi_link_status": "N/A",
+            }
 
         # Populate the pcie_dict first due to multiple gpu metrics calls incorrectly increasing bandwidth
         if "pcie" in current_platform_args:
@@ -1828,24 +1907,35 @@ class AMDSMICommands():
                 # Populate GFX clock values
                 try:
                     current_gfx_clocks = gpu_metric["current_gfxclks"]
-                    for clock_index, current_gfx_clock in enumerate(current_gfx_clocks):
-                        # If the current clock is N/A then nothing else applies
-                        if current_gfx_clock == "N/A":
-                            continue
+                    if current_gfx_clocks == "N/A":
+                        # If the current gfx clocks are not available, we cannot proceed further
+                        for clock_index in range(amdsmi_interface.AMDSMI_MAX_NUM_GFX_CLKS):
+                            gfx_index = f"gfx_{clock_index}"
+                            clocks[gfx_index]["clk"] = "N/A"
+                            clocks[gfx_index]["min_clk"] = "N/A"
+                            clocks[gfx_index]["max_clk"] = "N/A"
+                            clocks[gfx_index]["clk_locked"] = "N/A"
+                            clocks[gfx_index]["deep_sleep"] = "N/A"  # assume deep sleep if no clocks are available 
 
-                        gfx_index = f"gfx_{clock_index}"
-                        clocks[gfx_index]["clk"] = self.helpers.unit_format(self.logger,
-                                                                            current_gfx_clock,
-                                                                            clock_unit)
-
-                        # Populate clock locked status
-                        if gpu_metric["gfxclk_lock_status"] != "N/A":
-                            gfx_clock_lock_flag = 1 << clock_index # This is the position of the clock lock flag
-                            if gpu_metric["gfxclk_lock_status"] & gfx_clock_lock_flag:
-                                clocks[gfx_index]["clk_locked"] = "ENABLED"
-                            else:
-                                clocks[gfx_index]["clk_locked"] = "DISABLED"
-                except Exception as e:
+                    else:
+                        for clock_index, current_gfx_clock in enumerate(current_gfx_clocks):
+                            # If the current clock is N/A then nothing else applies
+                            if current_gfx_clock == "N/A":
+                                continue
+                            
+                            gfx_index = f"gfx_{clock_index}"
+                            clocks[gfx_index]["clk"] = self.helpers.unit_format(self.logger,
+                                                                                current_gfx_clock,
+                                                                                clock_unit)
+    
+                            # Populate clock locked status
+                            if gpu_metric["gfxclk_lock_status"] != "N/A":
+                                gfx_clock_lock_flag = 1 << clock_index # This is the position of the clock lock flag
+                                if gpu_metric["gfxclk_lock_status"] & gfx_clock_lock_flag:
+                                    clocks[gfx_index]["clk_locked"] = "ENABLED"
+                                else:
+                                    clocks[gfx_index]["clk_locked"] = "DISABLED"
+                except KeyError as e:
                     logging.debug("Failed to get current_gfxclks for gpu %s | %s", gpu_id, e)
 
                 # Populate MEM clock value
@@ -1861,31 +1951,51 @@ class AMDSMICommands():
                 # Populate VCLK clock values
                 try:
                     current_vclk_clocks = gpu_metric["current_vclk0s"]
-                    for clock_index, current_vclk_clock in enumerate(current_vclk_clocks):
-                        # If the current clock is N/A then nothing else applies
-                        if current_vclk_clock == "N/A":
-                            continue
+                    if current_vclk_clocks == "N/A":
+                        # If the current vclk clocks are not available, we cannot proceed further
+                        for clock_index in range(kMAX_NUM_VCLKS):
+                            vclk_index = f"vclk_{clock_index}"
+                            clocks[vclk_index]["clk"] = "N/A"
+                            clocks[vclk_index]["min_clk"] = "N/A"
+                            clocks[vclk_index]["max_clk"] = "N/A"
+                            clocks[vclk_index]["clk_locked"] = "N/A"
+                            clocks[vclk_index]["deep_sleep"] = "N/A"
+                    else:
+                        for clock_index, current_vclk_clock in enumerate(current_vclk_clocks):
+                            # If the current clock is N/A then nothing else applies
+                            if current_vclk_clock == "N/A":
+                                continue
 
-                        vclk_index = f"vclk_{clock_index}"
-                        clocks[vclk_index]["clk"] = self.helpers.unit_format(self.logger,
-                                                                             current_vclk_clock,
-                                                                             clock_unit)
-                except Exception as e:
+                            vclk_index = f"vclk_{clock_index}"
+                            clocks[vclk_index]["clk"] = self.helpers.unit_format(self.logger,
+                                                                                 current_vclk_clock,
+                                                                                 clock_unit)
+                except KeyError as e:
                     logging.debug("Failed to get current_vclk0s for gpu %s | %s", gpu_id, e)
 
                 # Populate DCLK clock values
                 try:
                     current_dclk_clocks = gpu_metric["current_dclk0s"]
-                    for clock_index, current_dclk_clock in enumerate(current_dclk_clocks):
-                        # If the current clock is N/A then nothing else applies
-                        if current_dclk_clock == "N/A":
-                            continue
+                    if current_dclk_clocks == "N/A":
+                        # If the current dclk clocks are not available, we cannot proceed further
+                        for clock_index in range(kMAX_NUM_DCLKS):
+                            dclk_index = f"dclk_{clock_index}"
+                            clocks[dclk_index]["clk"] = "N/A"
+                            clocks[dclk_index]["min_clk"] = "N/A"
+                            clocks[dclk_index]["max_clk"] = "N/A"
+                            clocks[dclk_index]["clk_locked"] = "N/A"
+                            clocks[dclk_index]["deep_sleep"] = "N/A"
+                    else:
+                        for clock_index, current_dclk_clock in enumerate(current_dclk_clocks):
+                            # If the current clock is N/A then nothing else applies
+                            if current_dclk_clock == "N/A":
+                                continue
 
-                        dclk_index = f"dclk_{clock_index}"
-                        clocks[dclk_index]["clk"] = self.helpers.unit_format(self.logger,
-                                                                             current_dclk_clock,
-                                                                             clock_unit)
-                except Exception as e:
+                            dclk_index = f"dclk_{clock_index}"
+                            clocks[dclk_index]["clk"] = self.helpers.unit_format(self.logger,
+                                                                                 current_dclk_clock,
+                                                                                 clock_unit)
+                except KeyError as e:
                     logging.debug("Failed to get current_dclk0s for gpu %s | %s", gpu_id, e)
 
                 # Populate FCLK clock value; fclk not present in gpu_metrics so use amdsmi_get_clk_freq
@@ -1902,10 +2012,19 @@ class AMDSMICommands():
                 # Populate SOCCLK clock value
                 try:
                     current_socclk_clock = gpu_metric["current_socclk"]
-                    clocks["socclk_0"]["clk"] = self.helpers.unit_format(self.logger,
-                                                                         current_socclk_clock,
-                                                                         clock_unit)
-                except Exception as e:
+                    if current_socclk_clock == "N/A":
+                        # If the current socclk clocks are not available, we cannot proceed further
+                        clocks["socclk_0"]["clk"] = "N/A"
+                        clocks["socclk_0"]["min_clk"] = "N/A"
+                        clocks["socclk_0"]["max_clk"] = "N/A"
+                        clocks["socclk_0"]["clk_locked"] = "N/A"
+                        clocks["socclk_0"]["deep_sleep"] = "N/A"
+                    else:
+                        # If the current clock is N/A then nothing else applies
+                        clocks["socclk_0"]["clk"] = self.helpers.unit_format(self.logger,
+                                                                             current_socclk_clock,
+                                                                             clock_unit)
+                except KeyError as e:
                     logging.debug("Failed to get current_socclk for gpu %s | %s", gpu_id, e)
 
                 # Populate the max and min clock values from sysfs
@@ -1971,17 +2090,19 @@ class AMDSMICommands():
                             logging.debug("Failed to get vclk1 and/or dclk1 clock info for gpu %s | %s", gpu_id, e.get_error_info())
 
                     # if the current clock is N/A then we shouldn't populate the max and min values
-                    if (vclk_clock_info_dict["min_clk"] != "N/A" or vclk_clock_info_dict["max_clk"] != "N/A") and clock_index == 0:
+                    if vclk_clock_info_dict["min_clk"] != "N/A" and clock_index == 0:
                         clocks[vclk_index]["min_clk"] = self.helpers.unit_format(self.logger,
                                                                                  vclk_clock_info_dict["min_clk"],
                                                                                  clock_unit)
+                    if vclk_clock_info_dict["max_clk"] != "N/A" and clock_index == 0:
                         clocks[vclk_index]["max_clk"] = self.helpers.unit_format(self.logger,
                                                                                  vclk_clock_info_dict["max_clk"],
                                                                                  clock_unit)
-                    if (dclk_clock_info_dict["min_clk"] != "N/A" or dclk_clock_info_dict["max_clk"] != "N/A") and clock_index == 1:
+                    if dclk_clock_info_dict["min_clk"] != "N/A" and clock_index == 1:
                         clocks[dclk_index]["min_clk"] = self.helpers.unit_format(self.logger,
                                                                                  dclk_clock_info_dict["min_clk"],
                                                                                  clock_unit)
+                    if dclk_clock_info_dict["max_clk"] != "N/A" and clock_index == 1:
                         clocks[dclk_index]["max_clk"] = self.helpers.unit_format(self.logger,
                                                                                  dclk_clock_info_dict["max_clk"],
                                                                                  clock_unit)
@@ -4234,7 +4355,10 @@ class AMDSMICommands():
 
                 self.logger.store_output(args.gpu, 'perfdeterminism', f"Successfully enabled performance determinism and set GFX clock frequency to {args.perf_determinism}")
             if args.compute_partition:
+                current_set_count = self.helpers.get_set_count()
+                future_set_count = 0
                 attempted_to_set = "N/A"
+                user_requested_partition_args = "N/A"
                 try:
                     (accelerator_set_choices, accelerator_profiles) = self.helpers.get_accelerator_choices_types_indices()
                     logging.debug("args.compute_partition: %s; Accelerator_set_choices: %s", str(args.compute_partition), str(json.dumps(accelerator_set_choices, indent=4)))
@@ -4242,20 +4366,30 @@ class AMDSMICommands():
                         compute_partition = amdsmi_interface.AmdSmiComputePartitionType[args.compute_partition]
                         index = accelerator_profiles['profile_types'].index(args.compute_partition)
                         attempted_to_set = f"Attempted to set accelerator partition to {args.compute_partition} (profile #{accelerator_profiles['profile_indices'][int(index)]}) on {gpu_string}"
+                        user_requested_partition_args = f"{args.compute_partition} (profile #{accelerator_profiles['profile_indices'][int(index)]})"
                         amdsmi_interface.amdsmi_set_gpu_compute_partition(args.gpu, compute_partition)
-                        self.logger.store_output(args.gpu, 'accelerator_partition', f"Successfully set accelerator partition to {args.compute_partition} (profile #{accelerator_profiles['profile_indices'][int(index)]})")
                     elif args.compute_partition in accelerator_profiles['profile_indices']:
                         compute_partition = int(args.compute_partition)
                         index = accelerator_profiles['profile_indices'].index(args.compute_partition)
                         attempted_to_set = f"Attempted to set accelerator partition to {accelerator_profiles['profile_types'][int(index)]} (profile #{args.compute_partition}) on {gpu_string}"
+                        user_requested_partition_args = f"{accelerator_profiles['profile_types'][int(index)]} (profile #{args.compute_partition})"
                         amdsmi_interface.amdsmi_set_gpu_accelerator_partition_profile(args.gpu, compute_partition)
-                        self.logger.store_output(args.gpu, 'accelerator_partition', f"Successfully set accelerator partition to {accelerator_profiles['profile_types'][int(index)]} (profile #{args.compute_partition})")
                     else:
                         raise ValueError(f"Invalid accelerator configuration {args.compute_partition} on {gpu_string}")
+                    self.helpers.increment_set_count()
+                    future_set_count = self.helpers.get_set_count()
+                    if current_set_count == future_set_count-1:
+                        self.logger.store_output(args.gpu, 'accelerator_partition', f"Successfully set accelerator partition to {user_requested_partition_args}")
                         
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError('Command requires elevation') from e
+                    elif e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
+                            self.helpers.increment_set_count()
+                            future_set_count = self.helpers.get_set_count()
+                            if current_set_count == future_set_count-1:
+                                out = f"[AMDSMI_STATUS_NOT_SUPPORTED] Device does not support setting compute partition to {user_requested_partition_args}"
+                                self.logger.store_output(args.gpu, 'accelerator_partition', out)
                     elif e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_SETTING_UNAVAILABLE:
                         print(f"\n{attempted_to_set}\n"
                               f"\n[AMDSMI_STATUS_SETTING_UNAVAILABLE] Please check amd-smi partition --memory --accelerator for available profiles.\n"
@@ -4327,7 +4461,7 @@ class AMDSMICommands():
                         if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                             raise PermissionError('Command requires elevation') from e
                         if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL:
-                            out = f"[AMDSMI_STATUS_INVAL] Unable to set memory partition to {args.memory_partition} on {gpu_string}"
+                            out = f"[AMDSMI_STATUS_INVAL] Unable to set memory partition to {args.memory_partition}"
                             print(f"Valid Memory partition Modes: {memory_dict['caps']}\n")
                             self.logger.store_output(args.gpu, 'memory_partition', out)
                             self.logger.print_output()
@@ -4335,7 +4469,7 @@ class AMDSMICommands():
                             lock.release()
                             return
                         if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
-                            out = f"[AMDSMI_STATUS_NOT_SUPPORTED] Device does not support setting memory partition to {args.memory_partition} on {gpu_string}"
+                            out = f"[AMDSMI_STATUS_NOT_SUPPORTED] Device does not support setting memory partition to {args.memory_partition}"
                             self.logger.store_output(args.gpu, 'memory_partition', out)
                             self.logger.print_output()
                             self.logger.clear_multiple_devices_output()
@@ -4348,7 +4482,7 @@ class AMDSMICommands():
                                 thread.terminate()
                                 thread.join()
                             if timesToRetryRestartErr < 0:
-                                out = f"[AMDSMI_STATUS_AMDGPU_RESTART_ERR] Could not successfully restart driver after applying {args.memory_partition} on {gpu_string}"
+                                out = f"[AMDSMI_STATUS_AMDGPU_RESTART_ERR] Could not successfully restart driver after applying {args.memory_partition}"
                                 self.logger.store_output(args.gpu, 'memory_partition', out)
                                 self.logger.print_output()
                                 self.logger.clear_multiple_devices_output()
@@ -5064,7 +5198,7 @@ class AMDSMICommands():
                 gpu_metric_version_str = json.dumps(gpu_metric_version_info, indent=4)
                 logging.debug("GPU Metrics table Version for GPU %s | %s", gpu_id, gpu_metric_version_str)
             except amdsmi_exception.AmdSmiLibraryException as e:
-                logging.debug("Unable to load GPU Metrics table version for GPU %s | %s", gpu_id, e.err_info)
+                logging.debug("#4 - Unable to load GPU Metrics table version for %s | %s", gpu_id, e.err_info)
 
             try:
                 # Get GPU Metrics table
@@ -5072,7 +5206,7 @@ class AMDSMICommands():
                 gpu_metric_str = json.dumps(gpu_metric_debug_info, indent=4)
                 logging.debug("GPU Metrics table for GPU %s | %s", gpu_id, str(gpu_metric_str))
             except amdsmi_exception.AmdSmiLibraryException as e:
-                logging.debug("Unable to load GPU Metrics table for %s | %s", gpu_id, e.err_info)
+                logging.debug("#5 - Unable to load GPU Metrics table for %s | %s", gpu_id, e.err_info)
 
         # Store the pcie_bw values due to possible increase in bandwidth due to repeated gpu_metrics calls
         if args.pcie:
@@ -5892,13 +6026,13 @@ class AMDSMICommands():
                 gpu_id = self.helpers.get_gpu_id_from_device_handle(gpu)
                 try:
                     partition_dict = amdsmi_interface.amdsmi_get_gpu_accelerator_partition_profile(gpu)
+                    partition_id = str(partition_dict['partition_id']).replace("[", "").replace("]", "").replace(" ", "")
                     profile_type = partition_dict['partition_profile']['profile_type']
                     profile_index = partition_dict['partition_profile']['profile_index']
-                    partition_id = str(partition_dict['partition_id']).replace("[", "").replace("]", "").replace(" ", "")
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     profile_type = "N/A"
                     profile_index = "N/A"
-                    partition_id = "0"
+                    partition_id = str(partition_dict['partition_id']).replace("[", "").replace("]", "").replace(" ", "")
                     logging.debug("Failed to get accelerator partition profile for GPU %s | %s", gpu_id, e.get_error_info())
                 try:
                     current_mem_cap = amdsmi_interface.amdsmi_get_gpu_memory_partition(gpu)
@@ -5975,7 +6109,7 @@ class AMDSMICommands():
             prev_gpu_id = "N/A"
             for gpu in args.gpu:
                 gpu_id = self.helpers.get_gpu_id_from_device_handle(gpu)
-                tabular_output_dict = {"gpu_id": "N/A",
+                tabular_output_dict = {"gpu_id": gpu_id,
                                        "profile_index": "N/A",
                                        "memory_partition_caps": "N/A",
                                        "accelerator_type": "N/A",
@@ -5990,6 +6124,7 @@ class AMDSMICommands():
                     partition_dict = amdsmi_interface.amdsmi_get_gpu_accelerator_partition_profile(gpu)
                     partition_id = str(partition_dict['partition_id']).replace("[", "").replace("]", "").replace(" ", "")
                     current_accelerator_type = partition_dict['partition_profile']['profile_type']
+                    tabular_output_dict["partition_id"] = partition_id
 
                     # save only the primary GPU node's partition_id (the 1st listed device; non N/A one)
                     # else keep current_partition_id unchanged for displaying in accelerator resource's output

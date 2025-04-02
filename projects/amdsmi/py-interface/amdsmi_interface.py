@@ -2173,13 +2173,17 @@ def amdsmi_get_clock_info(
         )
     )
 
-    return {
-        "clk": clock_measure.clk,
-        "min_clk": clock_measure.min_clk,
-        "max_clk": clock_measure.max_clk,
-        "clk_locked": clock_measure.clk_locked,
-        "clk_deep_sleep" : clock_measure.clk_deep_sleep,
+    clk_type_str = AmdSmiClkType(clock_type).name
+
+    dict_ret = {
+        "clk": _validate_if_max_uint(clock_measure.clk, MaxUIntegerTypes.UINT32_T),
+        "min_clk": _validate_if_max_uint(clock_measure.min_clk, MaxUIntegerTypes.UINT32_T),
+        "max_clk": _validate_if_max_uint(clock_measure.max_clk, MaxUIntegerTypes.UINT32_T),
+        "clk_locked": _validate_if_max_uint(clock_measure.clk_locked, MaxUIntegerTypes.UINT8_T, isBool=True),
+        "clk_deep_sleep" : _validate_if_max_uint(clock_measure.clk_deep_sleep, MaxUIntegerTypes.UINT8_T, isBool=True),
     }
+    logging.debug("amdsmi_interface.py | amdsmi_get_clock_info | clk_type = " + clk_type_str + " | return_dictionary = \n" + str(json.dumps(dict_ret, indent=4)))
+    return dict_ret
 
 
 def amdsmi_get_gpu_bad_page_info(
@@ -3129,51 +3133,76 @@ def amdsmi_get_gpu_accelerator_partition_profile(
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
+    exception_caught = False
     length = 8
     partition_id = [0, 0, 0, 0, 0, 0, 0, 0]
     partition_id_list = (ctypes.c_uint32 * length)(*partition_id)
     profile = amdsmi_wrapper.amdsmi_accelerator_partition_profile_t()
-
-    _check_res(
-        amdsmi_wrapper.amdsmi_get_gpu_accelerator_partition_profile(processor_handle,
-                                ctypes.byref(profile), partition_id_list)
-    )
-    profile_type_ret = amdsmi_wrapper.amdsmi_accelerator_partition_type_t__enumvalues[profile.profile_type].replace("AMDSMI_ACCELERATOR_PARTITION_", "")
-    profile_type_ret = profile_type_ret.replace("INVALID", "N/A")
-
-    length = profile.num_partitions
     partition_ids = []
-
-    #partition_id[0] will contain the partition id of each device
-    #BM/Guest will include this logic. Host will only display primary partition ids.
     kPOSITION_OF_PARTITION_ID = 0
-    partition_ids.append(partition_id_list[kPOSITION_OF_PARTITION_ID])
 
-    mem_caps_list = []
-    if profile.memory_caps.nps_flags.nps1_cap == 1:
-        mem_caps_list.append("NPS1")
-    if profile.memory_caps.nps_flags.nps2_cap == 1:
-        mem_caps_list.append("NPS2")
-    if profile.memory_caps.nps_flags.nps4_cap == 1:
-        mem_caps_list.append("NPS4")
-    if profile.memory_caps.nps_flags.nps8_cap == 1:
-        mem_caps_list.append("NPS8")
+    ret = amdsmi_wrapper.amdsmi_get_gpu_accelerator_partition_profile(processor_handle,
+                                    ctypes.byref(profile), partition_id_list)
+    if ret == amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
+        #partition_id[0] will contain the partition id of each device
+        #BM/Guest will include this logic. Host will only display primary partition ids.
+        partition_ids.append(partition_id_list[kPOSITION_OF_PARTITION_ID])
 
-    partition_profile_dict = {
-        "profile_type" : profile_type_ret,
-        "num_partitions" : profile.num_partitions,
-        "profile_index" : profile.profile_index,
-        "memory_caps": mem_caps_list,
-        "num_resources" : profile.num_resources,
-        "resources" : "N/A"
-    }
-    return_dictionary = {
-        "partition_id" : partition_ids,
-        "partition_profile" : partition_profile_dict
-    }
-
-    logging.debug("amdsmi_interface.py | amdsmi_get_gpu_accelerator_partition_profile | return_dictionary = \n" + str(json.dumps(return_dictionary, indent=4)))
-    return return_dictionary
+    try:
+        _check_res(ret)
+    except AmdSmiException as e:
+        logging.debug("amdsmi_interface.py | amdsmi_get_gpu_accelerator_partition_profile | exception_caught >> " + str(e))
+        partition_profile_dict = {
+            "profile_type" : "N/A",
+            "num_partitions" : "N/A",
+            "profile_index" : "N/A",
+            "memory_caps": "N/A",
+            "num_resources" : "N/A",
+            "resources" : "N/A"
+        }
+        return_dictionary = {
+            "partition_id" : partition_ids,
+            "partition_profile" : partition_profile_dict
+        }
+        if ret == amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
+            exception_caught = True
+        else:
+            _check_res(ret) # re-raise the exception if error is anything other than AMDSMI_STATUS_NOT_SUPPORTED
+                            # this ensures we can get partition ID even if the profile is not supported.
+    finally:
+        if exception_caught:
+            logging.debug("amdsmi_interface.py | exception_caught >> amdsmi_get_gpu_accelerator_partition_profile | return_dictionary = \n" + str(json.dumps(return_dictionary, indent=4)))
+            return return_dictionary
+        else:
+            profile_type_ret = amdsmi_wrapper.amdsmi_accelerator_partition_type_t__enumvalues[profile.profile_type].replace("AMDSMI_ACCELERATOR_PARTITION_", "")
+            profile_type_ret = profile_type_ret.replace("INVALID", "N/A")
+            length = profile.num_partitions
+            #partition_id[0] will contain the partition id of each device
+            #BM/Guest will include this logic. Host will only display primary partition ids.
+            partition_ids.append(partition_id_list[kPOSITION_OF_PARTITION_ID])
+            mem_caps_list = []
+            if profile.memory_caps.nps_flags.nps1_cap == 1:
+                mem_caps_list.append("NPS1")
+            if profile.memory_caps.nps_flags.nps2_cap == 1:
+                mem_caps_list.append("NPS2")
+            if profile.memory_caps.nps_flags.nps4_cap == 1:
+                mem_caps_list.append("NPS4")
+            if profile.memory_caps.nps_flags.nps8_cap == 1:
+                mem_caps_list.append("NPS8")
+            partition_profile_dict = {
+                "profile_type" : profile_type_ret,
+                "num_partitions" : profile.num_partitions,
+                "profile_index" : profile.profile_index,
+                "memory_caps": mem_caps_list,
+                "num_resources" : profile.num_resources,
+                "resources" : "N/A"
+            }
+            return_dictionary = {
+                "partition_id" : partition_ids,
+                "partition_profile" : partition_profile_dict
+            }
+            logging.debug("amdsmi_interface.py | amdsmi_get_gpu_accelerator_partition_profile | return_dictionary = \n" + str(json.dumps(return_dictionary, indent=4)))
+            return return_dictionary
 
 def amdsmi_get_gpu_accelerator_partition_profile_config(processor_handle: amdsmi_wrapper.amdsmi_processor_handle) -> Dict:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
@@ -4131,11 +4160,14 @@ def amdsmi_get_clk_freq(
         )
     )
 
+    clk_type_str = AmdSmiClkType(clk_type).name
+
     dict_ret = {
         "num_supported": freq.num_supported,
         "current": freq.current,
         "frequency": list(freq.frequency)[: freq.num_supported],
     }
+    logging.debug("amdsmi_interface.py | amdsmi_get_clk_freq | clk_type = " + clk_type_str + " | return_dictionary = \n" + str(json.dumps(dict_ret, indent=4)))
     return dict_ret
 
 
