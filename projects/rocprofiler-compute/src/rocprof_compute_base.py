@@ -79,8 +79,9 @@ class RocProfCompute:
         self.set_version()
         self.parse_args()
         self.__mode = self.__args.mode
+        gui_value = getattr(self.__args, "gui", None)
         self.__loglevel = setup_logging_priority(
-            self.__args.verbose, self.__args.quiet, self.__mode
+            self.__args.verbose, self.__args.quiet, self.__mode, gui_value
         )
         setattr(self.__args, "loglevel", self.__loglevel)
         set_locale_encoding()

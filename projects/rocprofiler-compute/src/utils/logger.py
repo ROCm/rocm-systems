@@ -168,7 +168,7 @@ def setup_file_handler(loglevel, workload_dir):
 
 
 # Setup logger priority - called after argument parsing
-def setup_logging_priority(verbosity, quietmode, appmode):
+def setup_logging_priority(verbosity, quietmode, appmode, guimode):
 
     # set loglevel based on selected verbosity and quietmode
     levels = [logging.INFO, logging.DEBUG, logging.TRACE]
@@ -177,6 +177,11 @@ def setup_logging_priority(verbosity, quietmode, appmode):
         loglevel = logging.ERROR
     else:
         loglevel = levels[min(verbosity, len(levels) - 1)]  # cap to last level index
+
+    # optional: suppress Werkzeug's messages in analyze GUIs.
+    if quietmode and "analyze" in appmode and guimode:
+        werkzeug_logger = logging.getLogger("werkzeug")
+        werkzeug_logger.setLevel(logging.ERROR)
 
     # optional: override of default loglevel via env variable which takes precedence
     if "ROCPROFCOMPUTE_LOGLEVEL" in os.environ.keys():
