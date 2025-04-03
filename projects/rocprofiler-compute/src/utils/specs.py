@@ -39,9 +39,9 @@ import pandas as pd
 
 import config
 from utils.logger import console_debug, console_error, console_log, console_warning
-from utils.mi_gpu_spec import get_gpu_series_dict, get_mi300_chip_id_dict
+from utils.mi_gpu_spec import get_chip_id_dict, get_gpu_series_dict, get_num_xcds
 from utils.tty import get_table_string
-from utils.utils import get_version, total_xcds
+from utils.utils import get_version
 
 VERSION_LOC = [
     "version",
@@ -72,7 +72,6 @@ def detect_arch(_rocminfo):
 
 def detect_gpu_chip_id(_rocminfo):
     gpu_chip_id = None
-    mi300_chip_id_dict = get_mi300_chip_id_dict().keys()
 
     for idx1, linetext in enumerate(_rocminfo):
         # NOTE: current supported socs only have numbers in Chip ID
@@ -84,8 +83,8 @@ def detect_gpu_chip_id(_rocminfo):
     if not gpu_chip_id:
         console_warning("No Chip ID detected: " + str(gpu_chip_id))
     elif (
-        gpu_chip_id not in mi300_chip_id_dict
-        and int(gpu_chip_id) not in mi300_chip_id_dict
+        gpu_chip_id not in get_chip_id_dict().keys()
+        and int(gpu_chip_id) not in get_chip_id_dict().keys()
     ):
         console_warning("Unknown Chip ID detected: " + str(gpu_chip_id))
     return gpu_chip_id
@@ -214,7 +213,7 @@ def generate_machine_specs(args, sysinfo: dict = None):
     specs.total_l2_chan: str = total_l2_banks(
         specs.gpu_model, int(specs._l2_banks), specs.compute_partition
     )
-    specs.hbm_bw: str = str(int(specs.max_mclk) / 1000 * 32 * specs.get_hbm_channels())
+    specs.num_hbm_channels: str = str(specs.get_hbm_channels())
     return specs
 
 
@@ -518,15 +517,6 @@ class MachineSpecs:
             "name": "Pipes per GPU",
         },
     )
-    hbm_bw: str = field(
-        default=None,
-        metadata={
-            "doc": "The peak theoretical HBM bandwidth for the accelerators/GPUs in the system. On systems with\n"
-            "configurable partitioning, (e.g., MI300) this is the peak theoretical HBM bandwidth for a partition.",
-            "name": "HBM BW",
-            "unit": "GB/s",
-        },
-    )
     num_xcd: str = field(
         default=None,
         metadata={
@@ -536,14 +526,13 @@ class MachineSpecs:
             "unit": "XCDs",
         },
     )
+    num_hbm_channels: str = field(
+        default=None,
+        metadata={"doc": "Number of HBM channels", "name": "HBM channels"},
+    )
 
     def get_hbm_channels(self):
-        # check MI300 has a valid compute partition
-        mi300a_archs = ["mi300a_a0", "mi300a_a1"]
-        mi300x_archs = ["mi300x_a0", "mi300x_a1"]
-        mi308x_archs = ["mi308x"]
-
-        if self.gpu_model.lower() in mi300a_archs + mi300x_archs + mi308x_archs:
+        if self.memory_partition.lower().startswith("nps"):
             hbmchannels = 128
             if self.memory_partition.lower() == "nps2":
                 hbmchannels /= 2
@@ -551,10 +540,9 @@ class MachineSpecs:
                 hbmchannels /= 4
             elif self.memory_partition.lower() == "nps8":
                 hbmchannels /= 8
-            return int(hbmchannels)
+            return hbmchannels
         else:
-            hbmchannels = int(self.total_l2_chan)
-        return hbmchannels
+            return int(self.total_l2_chan)
 
     def get_class_members(self):
         all_populated = True
@@ -581,7 +569,7 @@ class MachineSpecs:
                 data[name] = value
 
         if not all_populated:
-            console_error("Missing specs fields for %s" % self.gpu_arch)
+            console_warning("Missing specs fields for %s" % self.gpu_arch)
         return pd.DataFrame(data, index=[0])
 
     def __repr__(self):
@@ -682,7 +670,7 @@ def total_sqc(archname, numCUs, numSEs):
 
 
 def total_l2_banks(archname, L2Banks, compute_partition):
-    xcds = total_xcds(archname, compute_partition)
+    xcds = get_num_xcds(archname, compute_partition)
     totalL2Banks = L2Banks * xcds
     return totalL2Banks
 

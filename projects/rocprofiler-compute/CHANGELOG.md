@@ -22,17 +22,33 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Support host-trap PC Sampling on CLI (beta version)
 
-* Add support for tuned performance counters for gfx950 GPUs
-  * Add L1 latencies
-  * Add L2 latencies
-  * Add L2 to EA stalls
-  * Add L2 to EA stalls per channel
+* Support for AMD Instinct MI350 series GPUs with the addition of the following counters:
+  * VALU co-issue (Two VALUs are issued instructions) efficiency
+  * Stream Processor Instruction (SPI) Wave Occupancy
+  * Scheduler-Pipe Wave Utilization
+  * Scheduler FIFO Full Rate
+  * CPC ADC Utilization
+  * F6F4 datatype metrics
+  * Update formula for total FLOPs while taking into account F6F4 ops
+  * LDS STORE, LDS LOAD, LDS ATOMIC instruction count metrics
+  * LDS STORE, LDS LOAD, LDS ATOMIC bandwidth metrics
+  * LDS FIFO full rate
+  * Sequencer -> TA ADDR Stall rates
+  * Sequencer -> TA CMD Stall rates
+  * Sequencer -> TA DATA Stall rates
+  * L1 latencies
+  * L2 latencies
+  * L2 to EA stalls
+  * L2 to EA stalls per channel
 
 ### Changed
 
 * Change normal_unit default to per_kernel
 * Change dependency from rocm-smi to amd-smi
 * Decrease profiling time by not collecting counters not used in post analysis
+* Update definition of following metrics for MI 350:
+  * VGPR Writes
+  * Total FLOPs (consider fp6 and fp4 ops)
 
 ### Resolved issues
 
@@ -43,6 +59,14 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Known issues
 
 * GPU id filtering is not supported when using rocprof v3
+
+* Analysis of previously collected workload data will not work due to sysinfo.csv schema change
+  * As a workaround, run the profiling operation again for the workload and interrupt the process after ten seconds.
+    Followed by copying the `sysinfo.csv` file from the new data folder to the old one.
+    This assumes your system specification hasn't changed since the creation of the previous workload data.
+
+* Analysis of new workloads might require providing shader/memory clock speed using
+--specs-correction operation if `amd-smi` or `rocminfo` does not provide clock speeds.
 
 ## ROCm Compute Profiler 3.1.0 for ROCm 6.4.0
 

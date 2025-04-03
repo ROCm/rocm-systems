@@ -42,15 +42,16 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.mi_gpu_spec import get_gpu_model, get_gpu_series
+from utils.mi_gpu_spec import get_gpu_model, get_gpu_series, get_num_xcds
 from utils.parser import build_in_vars, supported_denom
 from utils.utils import (
     capture_subprocess_output,
     convert_metric_id_to_panel_idx,
     detect_rocprof,
+    get_base_spi_pipe_counter,
     get_submodules,
+    is_spi_pipe_counter,
     is_tcc_channel_counter,
-    total_xcds,
     using_v3,
 )
 
@@ -186,7 +187,7 @@ class OmniSoC_Base:
             self._mspec.gpu_arch, self._mspec.gpu_chip_id
         )
         self._mspec.num_xcd = str(
-            total_xcds(self._mspec.gpu_model, self._mspec.compute_partition)
+            get_num_xcds(self._mspec.gpu_model, self._mspec.compute_partition)
         )
 
     @demarcate
@@ -316,10 +317,10 @@ class OmniSoC_Base:
             counters = counters - {"SQ_INSTS_VALU_MFMA_F8", "SQ_INSTS_VALU_MFMA_MOPS_F8"}
 
         # Following counters are not supported
-        # TCP_TCP_LATENCY_sum (except for gfx908 and gfx90a)
+        # TCP_TCP_LATENCY_sum (except for gfx950)
         # SQC_DCACHE_INFLIGHT_LEVEL
         counters = counters - {"SQC_DCACHE_INFLIGHT_LEVEL"}
-        if self.__arch not in ("gfx908", "gfx90a"):
+        if self.__arch != "gfx950":
             counters = counters - {"TCP_TCP_LATENCY_sum"}
 
         # SQ_ACCUM_PREV_HIRES will be injected for level counters later on
@@ -510,10 +511,20 @@ class OmniSoC_Base:
         file_count = 0
         # Store all channels for a TCC channel counter in the same file
         tcc_channel_counter_file_map = dict()
+        # Store all pipes for SPI pipe counters in the same file
+        spi_pipe_counter_file_map = dict()
         for ctr in counters:
             # Store all channels for a TCC channel counter in the same file
             if is_tcc_channel_counter(ctr):
                 output_file = tcc_channel_counter_file_map.get(ctr.split("[")[0])
+                if output_file:
+                    output_file.add(ctr)
+                    continue
+            # Store all pipes for SPI pipe counters in the same file
+            if is_spi_pipe_counter(ctr):
+                output_file = spi_pipe_counter_file_map.get(
+                    get_base_spi_pipe_counter(ctr)
+                )
                 if output_file:
                     output_file.add(ctr)
                     continue
@@ -522,8 +533,14 @@ class OmniSoC_Base:
             for i in range(len(output_files)):
                 if output_files[i].add(ctr):
                     added = True
+                    # Store all channels for a TCC channel counter in the same file
                     if is_tcc_channel_counter(ctr):
                         tcc_channel_counter_file_map[ctr.split("[")[0]] = output_files[i]
+                    # Store all pipes for SPI pipe counters in the same file
+                    if is_spi_pipe_counter(ctr):
+                        spi_pipe_counter_file_map[get_base_spi_pipe_counter(ctr)] = (
+                            output_files[i]
+                        )
                     break
 
             # All files are full, create a new file
@@ -711,8 +728,18 @@ class LimitedSet:
         if e.split("[")[0] in {element.split("[")[0] for element in self.elements}:
             self.elements.append(e)
             return True
+        # Store all pipes for SPI pipe counters in the same file
+        if is_spi_pipe_counter(e) and get_base_spi_pipe_counter(e) in {
+            get_base_spi_pipe_counter(element) for element in self.elements
+        }:
+            self.elements.append(e)
+            return True
         if self.avail > 0:
-            self.avail -= 1
+            # SPI pipe counters take space of 2 counters
+            if is_spi_pipe_counter(e):
+                self.avail -= 2
+            else:
+                self.avail -= 1
             self.elements.append(e)
             return True
         return False

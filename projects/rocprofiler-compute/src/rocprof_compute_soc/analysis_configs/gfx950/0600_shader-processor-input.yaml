@@ -1,0 +1,188 @@
+---
+# Add description/tips for each metric in this section.
+# So it could be shown in hover.
+Metric Description:
+
+# Define the panel properties and properties of each metric in the panel.
+Panel Config:
+  id: 600
+  title: Workgroup Manager (SPI)
+  data source:
+    - metric_table:
+        id: 601
+        title: Workgroup Manager Utilizations
+        header:
+          metric: Metric
+          avg: Avg
+          min: Min
+          max: Max
+          unit: Unit
+          tips: Tips
+        metric:
+          Schedule-Pipe Wave Occupancy:
+            avg: AVG(SPI_CSQ_P0_OCCUPANCY + SPI_CSQ_P1_OCCUPANCY + SPI_CSQ_P2_OCCUPANCY + SPI_CSQ_P3_OCCUPANCY)
+            min: MIN(SPI_CSQ_P0_OCCUPANCY + SPI_CSQ_P1_OCCUPANCY + SPI_CSQ_P2_OCCUPANCY + SPI_CSQ_P3_OCCUPANCY)
+            max: MAX(SPI_CSQ_P0_OCCUPANCY + SPI_CSQ_P1_OCCUPANCY + SPI_CSQ_P2_OCCUPANCY + SPI_CSQ_P3_OCCUPANCY)
+            unit: Wave
+            tips:
+          Accelerator Utilization:
+            avg: AVG(100 * $GRBM_GUI_ACTIVE_PER_XCD / $GRBM_COUNT_PER_XCD)
+            min: MIN(100 * $GRBM_GUI_ACTIVE_PER_XCD / $GRBM_COUNT_PER_XCD)
+            max: MAX(100 * $GRBM_GUI_ACTIVE_PER_XCD / $GRBM_COUNT_PER_XCD)
+            unit: Pct
+            tips:
+          Scheduler-Pipe Utilization:
+            avg: AVG(100 * (SPI_CS0_BUSY + SPI_CS1_BUSY + SPI_CS2_BUSY + SPI_CS3_BUSY) / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
+            min: MIN(100 * (SPI_CS0_BUSY + SPI_CS1_BUSY + SPI_CS2_BUSY + SPI_CS3_BUSY) / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
+            max: MAX(100 * (SPI_CS0_BUSY + SPI_CS1_BUSY + SPI_CS2_BUSY + SPI_CS3_BUSY) / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
+            unit: Pct
+            tips:
+          Scheduler-Pipe Wave Utilization:
+            avg: AVG(100 * (SPI_CSC_WAVE_CNT_BUSY) / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
+            min: MIN(100 * (SPI_CSC_WAVE_CNT_BUSY) / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
+            max: MAX(100 * (SPI_CSC_WAVE_CNT_BUSY) / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
+            unit: Pct
+            tips:
+          Workgroup Manager Utilization:
+            avg: AVG(100 * $GRBM_SPI_BUSY_PER_XCD / $GRBM_GUI_ACTIVE_PER_XCD)
+            min: MIN(100 * $GRBM_SPI_BUSY_PER_XCD / $GRBM_GUI_ACTIVE_PER_XCD)
+            max: MAX(100 * $GRBM_SPI_BUSY_PER_XCD / $GRBM_GUI_ACTIVE_PER_XCD)
+            unit: Pct
+            tips:
+          Shader Engine Utilization:
+            avg: AVG(100 * SQ_BUSY_CYCLES / ($GRBM_GUI_ACTIVE_PER_XCD * $se_per_gpu))
+            min: MIN(100 * SQ_BUSY_CYCLES / ($GRBM_GUI_ACTIVE_PER_XCD * $se_per_gpu))
+            max: MAX(100 * SQ_BUSY_CYCLES / ($GRBM_GUI_ACTIVE_PER_XCD * $se_per_gpu))
+            unit: Pct
+            tips:
+          SIMD Utilization:
+            avg: AVG(100 * SQ_BUSY_CU_CYCLES / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+            min: MIN(100 * SQ_BUSY_CU_CYCLES / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+            max: MAX(100 * SQ_BUSY_CU_CYCLES / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+            unit: Pct
+            tips:
+          Dispatched Workgroups:
+            avg: AVG(SPI_CS0_NUM_THREADGROUPS + SPI_CS1_NUM_THREADGROUPS + SPI_CS2_NUM_THREADGROUPS + SPI_CS3_NUM_THREADGROUPS)
+            min: MIN(SPI_CS0_NUM_THREADGROUPS + SPI_CS1_NUM_THREADGROUPS + SPI_CS2_NUM_THREADGROUPS + SPI_CS3_NUM_THREADGROUPS)
+            max: MAX(SPI_CS0_NUM_THREADGROUPS + SPI_CS1_NUM_THREADGROUPS + SPI_CS2_NUM_THREADGROUPS + SPI_CS3_NUM_THREADGROUPS)
+            unit: Workgroups
+            tips:
+          Dispatched Wavefronts:
+            avg: AVG(SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)
+            min: MIN(SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)
+            max: MAX(SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)
+            unit: Wavefronts
+            tips:
+          VGPR Writes:
+            avg: AVG((((SPI_VWC0_VDATA_VALID_WR + SPI_VWC1_VDATA_VALID_WR) / (SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)) if ((SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE) != 0) else
+              None))
+            min: MIN((((SPI_VWC0_VDATA_VALID_WR + SPI_VWC1_VDATA_VALID_WR) / (SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)) if ((SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE) != 0) else
+              None))
+            max: MAX((((SPI_VWC0_VDATA_VALID_WR + SPI_VWC1_VDATA_VALID_WR) / (SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)) if ((SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE) != 0) else
+              None))
+            unit: Cycles/wave
+            tips:
+          SGPR Writes:
+            avg: AVG((((1 * SPI_SWC_CSC_WR) / (SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)) if ((SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE) != 0) else
+              None))
+            min: MIN((((1 * SPI_SWC_CSC_WR) / (SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)) if ((SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE) != 0) else
+              None))
+            max: MAX((((1 * SPI_SWC_CSC_WR) / (SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)) if ((SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE) != 0) else
+              None))
+            unit: Cycles/wave
+            tips:
+    - metric_table:
+        id: 602
+        title: Workgroup Manager - Resource Allocation
+        header:
+          metric: Metric
+          avg: Avg
+          min: Min
+          max: Max
+          unit: Unit
+          tips: Tips
+        metric:
+          Not-scheduled Rate (Workgroup Manager):
+            avg: AVG((100 * SPI_RA_REQ_NO_ALLOC_CSN / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)) if ($GRBM_SPI_BUSY_PER_XCD !=
+              0) else None)
+            min: MIN((100 * SPI_RA_REQ_NO_ALLOC_CSN / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)) if ($GRBM_SPI_BUSY_PER_XCD !=
+              0) else None)
+            max: MAX((100 * SPI_RA_REQ_NO_ALLOC_CSN / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)) if ($GRBM_SPI_BUSY_PER_XCD !=
+              0) else None)
+            unit: Pct
+            tips:
+          Not-scheduled Rate (Scheduler-Pipe):
+            avg: AVG((100 * SPI_RA_REQ_NO_ALLOC / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)) if ($GRBM_SPI_BUSY_PER_XCD !=
+              0) else None)
+            min: MIN((100 * SPI_RA_REQ_NO_ALLOC / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)) if ($GRBM_SPI_BUSY_PER_XCD !=
+              0) else None)
+            max: MAX((100 * SPI_RA_REQ_NO_ALLOC / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)) if ($GRBM_SPI_BUSY_PER_XCD !=
+              0) else None)
+            unit: Pct
+            tips:
+          Scheduler-Pipe FIFO Full Rate:
+            avg: AVG((100 * (SPI_CS0_CRAWLER_STALL + SPI_CS1_CRAWLER_STALL + SPI_CS2_CRAWLER_STALL + SPI_CS3_CRAWLER_STALL) / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)) if ($GRBM_SPI_BUSY_PER_XCD !=
+              0) else None)
+            min: MIN((100 * (SPI_CS0_CRAWLER_STALL + SPI_CS1_CRAWLER_STALL + SPI_CS2_CRAWLER_STALL + SPI_CS3_CRAWLER_STALL) / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)) if ($GRBM_SPI_BUSY_PER_XCD !=
+              0) else None)
+            max: MAX((100 * (SPI_CS0_CRAWLER_STALL + SPI_CS1_CRAWLER_STALL + SPI_CS2_CRAWLER_STALL + SPI_CS3_CRAWLER_STALL) / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)) if ($GRBM_SPI_BUSY_PER_XCD !=
+              0) else None)
+            unit: Pct
+            tips:
+          Scheduler-Pipe Stall Rate:
+            avg: AVG((((100 * SPI_RA_RES_STALL_CSN) / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)) if ($GRBM_SPI_BUSY_PER_XCD !=
+              0) else None))
+            min: MIN((((100 * SPI_RA_RES_STALL_CSN) / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)) if ($GRBM_SPI_BUSY_PER_XCD !=
+              0) else None))
+            max: MAX((((100 * SPI_RA_RES_STALL_CSN) / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)) if ($GRBM_SPI_BUSY_PER_XCD !=
+              0) else None))
+            unit: Pct
+            tips:
+          Scratch Stall Rate:
+            avg: AVG((100 * SPI_RA_TMP_STALL_CSN / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)) if ($GRBM_SPI_BUSY_PER_XCD != 0) else None)
+            min: MIN((100 * SPI_RA_TMP_STALL_CSN / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)) if ($GRBM_SPI_BUSY_PER_XCD != 0) else None)
+            max: MAX((100 * SPI_RA_TMP_STALL_CSN / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)) if ($GRBM_SPI_BUSY_PER_XCD != 0) else None)
+            unit: Pct
+            tips:
+          Insufficient SIMD Waveslots:
+            avg: AVG(100 * SPI_RA_WAVE_SIMD_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+            min: MIN(100 * SPI_RA_WAVE_SIMD_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+            max: MAX(100 * SPI_RA_WAVE_SIMD_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+            unit: Pct
+            tips:
+          Insufficient SIMD VGPRs:
+            avg: AVG(100 * SPI_RA_VGPR_SIMD_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+            min: MIN(100 * SPI_RA_VGPR_SIMD_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+            max: MAX(100 * SPI_RA_VGPR_SIMD_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+            unit: Pct
+            tips:
+          Insufficient SIMD SGPRs:
+            avg: AVG(100 * SPI_RA_SGPR_SIMD_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+            min: MIN(100 * SPI_RA_SGPR_SIMD_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+            max: MAX(100 * SPI_RA_SGPR_SIMD_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+            unit: Pct
+            tips:
+          Insufficient CU LDS:
+            avg: AVG(400 * SPI_RA_LDS_CU_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+            min: MIN(400 * SPI_RA_LDS_CU_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+            max: MAX(400 * SPI_RA_LDS_CU_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+            unit: Pct
+            tips:
+          Insufficient CU Barriers:
+            avg: AVG(400 * SPI_RA_BAR_CU_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+            min: MIN(400 * SPI_RA_BAR_CU_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+            max: MAX(400 * SPI_RA_BAR_CU_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+            unit: Pct
+            tips:
+          Reached CU Workgroup Limit:
+            avg: AVG(400 * SPI_RA_TGLIM_CU_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+            min: MIN(400 * SPI_RA_TGLIM_CU_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+            max: MAX(400 * SPI_RA_TGLIM_CU_FULL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+            unit: Pct
+            tips:
+          Reached CU Wavefront Limit:
+            avg: AVG(400 * SPI_RA_WVLIM_STALL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+            min: MIN(400 * SPI_RA_WVLIM_STALL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+            max: MAX(400 * SPI_RA_WVLIM_STALL_CSN / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+            unit: Pct
+            tips:

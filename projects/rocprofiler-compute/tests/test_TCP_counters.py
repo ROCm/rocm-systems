@@ -136,7 +136,7 @@ def test_L1_cache_counters(
             options,
             check_success=False,
             roof=False,
-            app_name=app_name
+            app_name=app_name,
         )
         assert return_code == 0
 

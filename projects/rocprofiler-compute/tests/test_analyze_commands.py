@@ -15,6 +15,7 @@ indirs = [
     "tests/workloads/vcopy/MI200",
     "tests/workloads/vcopy/MI300A_A1",
     "tests/workloads/vcopy/MI300X_A1",
+    "tests/workloads/vcopy/MI350",
 ]
 
 
@@ -255,9 +256,13 @@ def test_dispatch_5(binary_handler_analyze_rocprof_compute):
 @pytest.mark.misc
 def test_gpu_ids(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
+        if dir.endswith("MI350"):
+            gpu_id = "0"
+        else:
+            gpu_id = "2"
         workload_dir = test_utils.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--gpu-id", "2"]
+            ["analyze", "--path", workload_dir, "--gpu-id", gpu_id]
         )
         assert code == 0
 

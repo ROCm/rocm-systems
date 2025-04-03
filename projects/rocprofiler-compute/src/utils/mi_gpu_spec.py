@@ -1,7 +1,5 @@
 import os
-import sys
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict
 
 import yaml
 
@@ -13,14 +11,20 @@ MI50 = 0
 MI100 = 1
 MI200 = 2
 MI300 = 3
+MI350 = 4
 
-MI_CONSTANS = {MI50: "mi50", MI100: "mi100", MI200: "mi200", MI300: "mi300"}
+MI_CONSTANS = {
+    MI50: "mi50",
+    MI100: "mi100",
+    MI200: "mi200",
+    MI300: "mi300",
+    MI350: "mi350",
+}
 
 gpu_series_dict = {}  # key: gpu arch
 gpu_model_dict = {}  # key: gpu_arch
-mi300_num_xcds_dict = {}  # key: gpu model
-mi300_nps_dict = {}  # key: gpu model
-mi300_chip_id_dict = {}  # key: chip id (int)
+num_xcds_dict = {}  # key: gpu model
+chip_id_dict = {}  # key: chip id (int)
 
 
 # ----------------------------
@@ -60,10 +64,9 @@ def parse_mi_gpu_spec():
     MI GPUs
       |-- series
           |-- architecture (list)
-              |-- models
-                  |-- chip_ids
-                  |-- mi300_arch
-                  |-- partition_mode
+                |-- gpu model
+                |-- chip_ids
+                |-- partition_mode
     """
 
     current_dir = os.path.dirname(__file__)
@@ -71,61 +74,26 @@ def parse_mi_gpu_spec():
 
     # Load the YAML data
     yaml_data = load_yaml(yaml_file_path)
-    mi300_models_dict = {}
 
-    for mi_index, mi_series in MI_CONSTANS.items():
-        if mi_series != MI_CONSTANS[MI300]:
-            console_debug("[parse_mi_gpu_spec] Processing series: %s" % mi_series)
-            for key, value in yaml_data.items():
-                # parse out gpu series and gpu model information for mi50, 100, 200
-                curr_gpu_arch = value[mi_index]["gpu_archs"][0]["gpu_arch"]
-                gpu_series_dict[curr_gpu_arch] = mi_series
-                gpu_model_dict[curr_gpu_arch] = []
-                for models in value[mi_index]["gpu_archs"][0]["models"]:
-                    gpu_model_dict[curr_gpu_arch].append(models["gpu_model"])
-        elif mi_series == MI_CONSTANS[MI300]:
-            # MI300 requires specific processing
-            for key, value in yaml_data.items():
-                mi300_gpu_archs_list = []
-                # NOTE: only MI300 have multiple architectures
-                for archs in value[MI300]["gpu_archs"]:
-                    curr_gpu_arch = archs["gpu_arch"]
-                    mi300_gpu_archs_list.append(curr_gpu_arch)
-                    gpu_series_dict[curr_gpu_arch] = mi_series
-
-                for idx, arch in enumerate(mi300_gpu_archs_list):
-                    mi300_models_dict[arch] = []
-                    for models in value[MI300]["gpu_archs"][idx]["models"]:
-                        gpu_model = models["gpu_model"]
-
-                        # 1. Parse compute partition. NOTE: compute partition mode num xcds is available for all mi300 gpu models
-                        mi300_num_xcds_dict[gpu_model] = models["partition_mode"][
-                            "compute_partition_mode"
-                        ]["num_xcds"]
-
-                        # 2. Parse memory_partition. NOTE: memory partition mode nps is available for all mi300 gpu models
-                        mi300_nps_dict[gpu_model] = models["partition_mode"][
-                            "memory_partition_mode"
-                        ]
-
-                        # 3. Parse chip id (physical and virtual).
-                        if models["chip_ids"]["physical"]:
-                            # save chip_id, gpu_model pair if chip id is available
-                            # NOTE: chip id is available for all gfx942 machines
-                            mi300_chip_id_dict[models["chip_ids"]["physical"]] = models[
-                                "gpu_model"
-                            ]
-
-                        if models["chip_ids"]["virtual"]:
-                            # save chip_id, gpu_model pair if chip id is available
-                            # NOTE: chip id is available for all gfx942 machines
-                            mi300_chip_id_dict[models["chip_ids"]["virtual"]] = models[
-                                "gpu_model"
-                            ]
-
-                        mi300_models_dict[arch].append(gpu_model)
-
-    gpu_model_dict.update(mi300_models_dict)
+    for series in yaml_data["mi_gpu_spec"]:
+        curr_gpu_series = series["gpu_series"]
+        console_debug("[parse_mi_gpu_spec] Processing series: %s" % curr_gpu_series)
+        for archs in series["gpu_archs"]:
+            curr_gpu_arch = archs["gpu_arch"]
+            gpu_series_dict[curr_gpu_arch] = curr_gpu_series
+            gpu_model_dict[curr_gpu_arch] = []
+            for models in archs["models"]:
+                curr_gpu_model = models["gpu_model"]
+                gpu_model_dict[curr_gpu_arch].append(curr_gpu_model)
+                num_xcds_dict[curr_gpu_model] = (
+                    models.get("partition_mode", {})
+                    .get("compute_partition_mode", {})
+                    .get("num_xcds", {})
+                )
+                if "chip_ids" in models and "physical" in models["chip_ids"]:
+                    chip_id_dict[models["chip_ids"]["physical"]] = curr_gpu_model
+                if "chip_ids" in models and "virtual" in models["chip_ids"]:
+                    chip_id_dict[models["chip_ids"]["virtual"]] = curr_gpu_model
 
 
 def get_gpu_series_dict():
@@ -164,9 +132,9 @@ def get_gpu_model(gpu_arch_, chip_id_):
     gpu_arch_lower = gpu_arch_.lower()
 
     # Handle gfx942 with chip_id mapping
-    if gpu_arch_lower == "gfx942":
-        if chip_id_ and int(chip_id_) in mi300_chip_id_dict:
-            gpu_model = mi300_chip_id_dict.get(int(chip_id_))
+    if gpu_arch_lower not in ("gfx906", "gfx908", "gfx90a"):
+        if chip_id_ and int(chip_id_) in chip_id_dict:
+            gpu_model = chip_id_dict.get(int(chip_id_))
         else:
             console_warning(f"No gpu model found for chip id: {chip_id_}")
             return None
@@ -186,8 +154,12 @@ def get_gpu_model(gpu_arch_, chip_id_):
     return gpu_model.upper()
 
 
-def get_mi300_num_xcds(gpu_model_, compute_partition_):
-    if not mi300_num_xcds_dict:
+def get_num_xcds(gpu_model_, compute_partition_):
+    # Only gpu in and above mi 300 series have more than one XCDs
+    if gpu_model_.lower() in ("mi50", "mi60", "mi100", "mi210", "mi250", "mi250x"):
+        return 1
+
+    if not num_xcds_dict:
         console_error(
             "mi300_num_xcds_dict not yet populated, did you run parse_mi_gpu_spec()?"
         )
@@ -196,10 +168,10 @@ def get_mi300_num_xcds(gpu_model_, compute_partition_):
     gpu_model_lower = gpu_model_.lower()
     partition_lower = compute_partition_.lower()
 
-    if gpu_model_lower not in mi300_num_xcds_dict:
+    if gpu_model_lower not in num_xcds_dict:
         return None
 
-    model_dict = mi300_num_xcds_dict[gpu_model_lower]
+    model_dict = num_xcds_dict[gpu_model_lower]
     if partition_lower not in model_dict:
         console_log(f"Unknown compute partition: {compute_partition_}")
         return None
@@ -214,9 +186,9 @@ def get_mi300_num_xcds(gpu_model_, compute_partition_):
     return num_xcds
 
 
-def get_mi300_chip_id_dict():
-    if mi300_chip_id_dict:
-        return mi300_chip_id_dict
+def get_chip_id_dict():
+    if chip_id_dict:
+        return chip_id_dict
     else:
         console_error(
             "mi300_chip_id_dict not yet populated, did you run parse_mi_gpu_spec()?"

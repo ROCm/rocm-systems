@@ -112,6 +112,13 @@ def test_analyze_ipblocks_TCC_MI200(binary_handler_analyze_rocprof_compute):
     assert code == 0
 
 
+def test_analyze_no_roof_MI350(binary_handler_analyze_rocprof_compute):
+    code = binary_handler_analyze_rocprof_compute(
+        ["analyze", "--path", "tests/workloads/no_roof/MI350"]
+    )
+    assert code == 0
+
+
 def test_analyze_no_roof_MI300X_A1(binary_handler_analyze_rocprof_compute):
     code = binary_handler_analyze_rocprof_compute(
         ["analyze", "--path", "tests/workloads/no_roof/MI300X_A1"]

@@ -43,6 +43,24 @@ Panel Config:
             max: MAX(((100 * TA_ADDR_STALLED_BY_TD_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             unit: pct
             tips:
+          Sequencer → TA Address Stall:
+            avg: AVG((SQ_VMEM_TA_ADDR_FIFO_FULL / $denom))
+            min: MIN((SQ_VMEM_TA_ADDR_FIFO_FULL / $denom))
+            max: MAX((SQ_VMEM_TA_ADDR_FIFO_FULL / $denom))
+            unit: (Cycles + $normUnit)
+            tips:
+          Sequencer → TA Command Stall:
+            avg: AVG((SQ_VMEM_TA_CMD_FIFO_FULL / $denom))
+            min: MIN((SQ_VMEM_TA_CMD_FIFO_FULL / $denom))
+            max: MAX((SQ_VMEM_TA_CMD_FIFO_FULL / $denom))
+            unit: (Cycles + $normUnit)
+            tips:
+          Sequencer → TA Data Stall:
+            avg: AVG((SQ_VMEM_WR_TA_DATA_FIFO_FULL / $denom))
+            min: MIN((SQ_VMEM_WR_TA_DATA_FIFO_FULL / $denom))
+            max: MAX((SQ_VMEM_WR_TA_DATA_FIFO_FULL / $denom))
+            unit: (Cycles + $normUnit)
+            tips:
           Total Instructions:
             avg: AVG((TA_TOTAL_WAVEFRONTS_sum / $denom))
             min: MIN((TA_TOTAL_WAVEFRONTS_sum / $denom))

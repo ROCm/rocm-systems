@@ -77,6 +77,13 @@ Panel Config:
             pop: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) / (End_Timestamp - Start_Timestamp))))
               / ((($max_sclk * $cu_per_gpu) * 256) / 1000))
             tips:
+          # TODO: Fix baseline comparision logic to handle non existent metrics, then remove this
+          MFMA FLOPs (F6F4):
+            value: None
+            unit: GFLOP
+            peak: None
+            pop: None
+            tips:
           MFMA IOPs (Int8):
             value: AVG(((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / (End_Timestamp - Start_Timestamp)))
             unit: GIOP
@@ -198,18 +205,18 @@ Panel Config:
                         64 * (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) +
                         32 * TCC_EA0_RDREQ_32B_sum) / (End_Timestamp - Start_Timestamp))
             unit: GB/s
-            peak: $hbm_bw
+            peak: $hbmBandwidth
             pop: ((100 * (AVG((128 * TCC_BUBBLE_sum +
                         64 * (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) +
-                        32 * TCC_EA0_RDREQ_32B_sum) / (End_Timestamp - Start_Timestamp)))) / $hbm_bw)
+                        32 * TCC_EA0_RDREQ_32B_sum) / (End_Timestamp - Start_Timestamp)))) / $hbmBandwidth)
             tips:
           L2-Fabric Write BW:
             value: AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
               * 32)) / (End_Timestamp - Start_Timestamp)))
             unit: GB/s
-            peak: $hbm_bw
+            peak: $hbmBandwidth
             pop: ((100 * AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
-              * 32)) / (End_Timestamp - Start_Timestamp)))) / $hbm_bw)
+              * 32)) / (End_Timestamp - Start_Timestamp)))) / $hbmBandwidth)
             tips:
           L2-Fabric Read Latency:
             value: AVG(((TCC_EA0_RDREQ_LEVEL_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum

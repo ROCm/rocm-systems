@@ -185,15 +185,6 @@ Panel Config:
             max: MAX((TA_FLAT_WAVEFRONTS_sum / $denom))
             unit: (instr + $normUnit)
             tips:
-          Global/Generic Coalesceable Instr:
-            avg: None
-            # AVG((TA_FLAT_COALESCEABLE_WAVEFRONTS_sum / $denom))
-            min: None
-            # MIN((TA_FLAT_COALESCEABLE_WAVEFRONTS_sum / $denom))
-            max: None
-            # MAX((TA_FLAT_COALESCEABLE_WAVEFRONTS_sum / $denom))
-            unit: (instr + $normUnit)
-            tips:
           Global/Generic Read:
             avg: AVG((TA_FLAT_READ_WAVEFRONTS_sum / $denom))
             min: MIN((TA_FLAT_READ_WAVEFRONTS_sum / $denom))
@@ -288,5 +279,11 @@ Panel Config:
             avg: AVG((SQ_INSTS_VALU_MFMA_F64 / $denom))
             min: MIN((SQ_INSTS_VALU_MFMA_F64 / $denom))
             max: MAX((SQ_INSTS_VALU_MFMA_F64 / $denom))
+            unit: (instr + $normUnit)
+            tips:
+          MFMA-F6F4:
+            avg: AVG((SQ_INSTS_VALU_MFMA_F6F4 / $denom))
+            min: MIN((SQ_INSTS_VALU_MFMA_F6F4 / $denom))
+            max: MAX((SQ_INSTS_VALU_MFMA_F6F4 / $denom))
             unit: (instr + $normUnit)
             tips:

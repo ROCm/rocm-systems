@@ -673,7 +673,7 @@ Examples:
         "--specs-correction",
         type=str,
         metavar="",
-        help="\t\tSpecify the specs to correct.",
+        help="\t\tSpecify the specs to correct. e.g. --specs-correction='specname1:specvalue1,specname2:specvalue2'",
     )
     analyze_advanced_group.add_argument(
         "--list-nodes",

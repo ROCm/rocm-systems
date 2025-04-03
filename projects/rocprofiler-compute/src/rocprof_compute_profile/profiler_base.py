@@ -311,6 +311,21 @@ class RocProfCompute_Base:
         if self.__args.name.find(".") != -1 or self.__args.name.find("-") != -1:
             console_error("'-' and '.' are not permitted in -n/--name")
 
+        gen_sysinfo(
+            workload_name=self.__args.name,
+            workload_dir=self.get_args().path,
+            ip_blocks=[
+                name
+                for name, type in self.__args.filter_blocks.items()
+                if type == "hardware_block"
+            ],
+            app_cmd=self.__args.remaining,
+            skip_roof=self.__args.no_roof,
+            roof_only=self.__args.roof_only,
+            mspec=self._soc._mspec,
+            soc=self._soc,
+        )
+
     @abstractmethod
     def run_profiling(self, version: str, prog: str):
         """Run profiling."""
@@ -444,21 +459,6 @@ class RocProfCompute_Base:
         console_debug(
             "profiling",
             "performing post-processing using %s profiler" % self.__profiler,
-        )
-
-        gen_sysinfo(
-            workload_name=self.__args.name,
-            workload_dir=self.get_args().path,
-            ip_blocks=[
-                name
-                for name, type in self.__args.filter_blocks.items()
-                if type == "hardware_block"
-            ],
-            app_cmd=self.__args.remaining,
-            skip_roof=self.__args.no_roof,
-            roof_only=self.__args.roof_only,
-            mspec=self._soc._mspec,
-            soc=self._soc,
         )
 
 

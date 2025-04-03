@@ -1,0 +1,2565 @@
+SQ_INST_LEVEL_SMEM_ACCUM:
+  architectures:
+    gfx942/gfx941/gfx940/gfx90a:
+      expression: accumulate(SQ_INST_LEVEL_SMEM, HIGH_RES)
+  description: SQ_INST_LEVEL_SMEM accumulation
+TCC_ATOMIC[0]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[0]])
+  description: TCC_ATOMIC on 0th XCC and 0th channel
+TCC_ATOMIC[100]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[4]])
+  description: TCC_ATOMIC on 6th XCC and 4th channel
+TCC_ATOMIC[101]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[5]])
+  description: TCC_ATOMIC on 6th XCC and 5th channel
+TCC_ATOMIC[102]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[6]])
+  description: TCC_ATOMIC on 6th XCC and 6th channel
+TCC_ATOMIC[103]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[7]])
+  description: TCC_ATOMIC on 6th XCC and 7th channel
+TCC_ATOMIC[104]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[8]])
+  description: TCC_ATOMIC on 6th XCC and 8th channel
+TCC_ATOMIC[105]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[9]])
+  description: TCC_ATOMIC on 6th XCC and 9th channel
+TCC_ATOMIC[106]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[10]])
+  description: TCC_ATOMIC on 6th XCC and 10th channel
+TCC_ATOMIC[107]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[11]])
+  description: TCC_ATOMIC on 6th XCC and 11th channel
+TCC_ATOMIC[108]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[12]])
+  description: TCC_ATOMIC on 6th XCC and 12th channel
+TCC_ATOMIC[109]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[13]])
+  description: TCC_ATOMIC on 6th XCC and 13th channel
+TCC_ATOMIC[10]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[10]])
+  description: TCC_ATOMIC on 0th XCC and 10th channel
+TCC_ATOMIC[110]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[14]])
+  description: TCC_ATOMIC on 6th XCC and 14th channel
+TCC_ATOMIC[111]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[15]])
+  description: TCC_ATOMIC on 6th XCC and 15th channel
+TCC_ATOMIC[112]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[0]])
+  description: TCC_ATOMIC on 7th XCC and 0th channel
+TCC_ATOMIC[113]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[1]])
+  description: TCC_ATOMIC on 7th XCC and 1th channel
+TCC_ATOMIC[114]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[2]])
+  description: TCC_ATOMIC on 7th XCC and 2th channel
+TCC_ATOMIC[115]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[3]])
+  description: TCC_ATOMIC on 7th XCC and 3th channel
+TCC_ATOMIC[116]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[4]])
+  description: TCC_ATOMIC on 7th XCC and 4th channel
+TCC_ATOMIC[117]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[5]])
+  description: TCC_ATOMIC on 7th XCC and 5th channel
+TCC_ATOMIC[118]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[6]])
+  description: TCC_ATOMIC on 7th XCC and 6th channel
+TCC_ATOMIC[119]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[7]])
+  description: TCC_ATOMIC on 7th XCC and 7th channel
+TCC_ATOMIC[11]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[11]])
+  description: TCC_ATOMIC on 0th XCC and 11th channel
+TCC_ATOMIC[120]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[8]])
+  description: TCC_ATOMIC on 7th XCC and 8th channel
+TCC_ATOMIC[121]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[9]])
+  description: TCC_ATOMIC on 7th XCC and 9th channel
+TCC_ATOMIC[122]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[10]])
+  description: TCC_ATOMIC on 7th XCC and 10th channel
+TCC_ATOMIC[123]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[11]])
+  description: TCC_ATOMIC on 7th XCC and 11th channel
+TCC_ATOMIC[124]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[12]])
+  description: TCC_ATOMIC on 7th XCC and 12th channel
+TCC_ATOMIC[125]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[13]])
+  description: TCC_ATOMIC on 7th XCC and 13th channel
+TCC_ATOMIC[126]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[14]])
+  description: TCC_ATOMIC on 7th XCC and 14th channel
+TCC_ATOMIC[127]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[15]])
+  description: TCC_ATOMIC on 7th XCC and 15th channel
+TCC_ATOMIC[12]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[12]])
+  description: TCC_ATOMIC on 0th XCC and 12th channel
+TCC_ATOMIC[13]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[13]])
+  description: TCC_ATOMIC on 0th XCC and 13th channel
+TCC_ATOMIC[14]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[14]])
+  description: TCC_ATOMIC on 0th XCC and 14th channel
+TCC_ATOMIC[15]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[15]])
+  description: TCC_ATOMIC on 0th XCC and 15th channel
+TCC_ATOMIC[16]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[0]])
+  description: TCC_ATOMIC on 1th XCC and 0th channel
+TCC_ATOMIC[17]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[1]])
+  description: TCC_ATOMIC on 1th XCC and 1th channel
+TCC_ATOMIC[18]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[2]])
+  description: TCC_ATOMIC on 1th XCC and 2th channel
+TCC_ATOMIC[19]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[3]])
+  description: TCC_ATOMIC on 1th XCC and 3th channel
+TCC_ATOMIC[1]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[1]])
+  description: TCC_ATOMIC on 0th XCC and 1th channel
+TCC_ATOMIC[20]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[4]])
+  description: TCC_ATOMIC on 1th XCC and 4th channel
+TCC_ATOMIC[21]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[5]])
+  description: TCC_ATOMIC on 1th XCC and 5th channel
+TCC_ATOMIC[22]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[6]])
+  description: TCC_ATOMIC on 1th XCC and 6th channel
+TCC_ATOMIC[23]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[7]])
+  description: TCC_ATOMIC on 1th XCC and 7th channel
+TCC_ATOMIC[24]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[8]])
+  description: TCC_ATOMIC on 1th XCC and 8th channel
+TCC_ATOMIC[25]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[9]])
+  description: TCC_ATOMIC on 1th XCC and 9th channel
+TCC_ATOMIC[26]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[10]])
+  description: TCC_ATOMIC on 1th XCC and 10th channel
+TCC_ATOMIC[27]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[11]])
+  description: TCC_ATOMIC on 1th XCC and 11th channel
+TCC_ATOMIC[28]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[12]])
+  description: TCC_ATOMIC on 1th XCC and 12th channel
+TCC_ATOMIC[29]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[13]])
+  description: TCC_ATOMIC on 1th XCC and 13th channel
+TCC_ATOMIC[2]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[2]])
+  description: TCC_ATOMIC on 0th XCC and 2th channel
+TCC_ATOMIC[30]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[14]])
+  description: TCC_ATOMIC on 1th XCC and 14th channel
+TCC_ATOMIC[31]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[15]])
+  description: TCC_ATOMIC on 1th XCC and 15th channel
+TCC_ATOMIC[32]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[0]])
+  description: TCC_ATOMIC on 2th XCC and 0th channel
+TCC_ATOMIC[33]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[1]])
+  description: TCC_ATOMIC on 2th XCC and 1th channel
+TCC_ATOMIC[34]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[2]])
+  description: TCC_ATOMIC on 2th XCC and 2th channel
+TCC_ATOMIC[35]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[3]])
+  description: TCC_ATOMIC on 2th XCC and 3th channel
+TCC_ATOMIC[36]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[4]])
+  description: TCC_ATOMIC on 2th XCC and 4th channel
+TCC_ATOMIC[37]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[5]])
+  description: TCC_ATOMIC on 2th XCC and 5th channel
+TCC_ATOMIC[38]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[6]])
+  description: TCC_ATOMIC on 2th XCC and 6th channel
+TCC_ATOMIC[39]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[7]])
+  description: TCC_ATOMIC on 2th XCC and 7th channel
+TCC_ATOMIC[3]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[3]])
+  description: TCC_ATOMIC on 0th XCC and 3th channel
+TCC_ATOMIC[40]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[8]])
+  description: TCC_ATOMIC on 2th XCC and 8th channel
+TCC_ATOMIC[41]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[9]])
+  description: TCC_ATOMIC on 2th XCC and 9th channel
+TCC_ATOMIC[42]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[10]])
+  description: TCC_ATOMIC on 2th XCC and 10th channel
+TCC_ATOMIC[43]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[11]])
+  description: TCC_ATOMIC on 2th XCC and 11th channel
+TCC_ATOMIC[44]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[12]])
+  description: TCC_ATOMIC on 2th XCC and 12th channel
+TCC_ATOMIC[45]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[13]])
+  description: TCC_ATOMIC on 2th XCC and 13th channel
+TCC_ATOMIC[46]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[14]])
+  description: TCC_ATOMIC on 2th XCC and 14th channel
+TCC_ATOMIC[47]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[15]])
+  description: TCC_ATOMIC on 2th XCC and 15th channel
+TCC_ATOMIC[48]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[0]])
+  description: TCC_ATOMIC on 3th XCC and 0th channel
+TCC_ATOMIC[49]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[1]])
+  description: TCC_ATOMIC on 3th XCC and 1th channel
+TCC_ATOMIC[4]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[4]])
+  description: TCC_ATOMIC on 0th XCC and 4th channel
+TCC_ATOMIC[50]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[2]])
+  description: TCC_ATOMIC on 3th XCC and 2th channel
+TCC_ATOMIC[51]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[3]])
+  description: TCC_ATOMIC on 3th XCC and 3th channel
+TCC_ATOMIC[52]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[4]])
+  description: TCC_ATOMIC on 3th XCC and 4th channel
+TCC_ATOMIC[53]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[5]])
+  description: TCC_ATOMIC on 3th XCC and 5th channel
+TCC_ATOMIC[54]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[6]])
+  description: TCC_ATOMIC on 3th XCC and 6th channel
+TCC_ATOMIC[55]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[7]])
+  description: TCC_ATOMIC on 3th XCC and 7th channel
+TCC_ATOMIC[56]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[8]])
+  description: TCC_ATOMIC on 3th XCC and 8th channel
+TCC_ATOMIC[57]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[9]])
+  description: TCC_ATOMIC on 3th XCC and 9th channel
+TCC_ATOMIC[58]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[10]])
+  description: TCC_ATOMIC on 3th XCC and 10th channel
+TCC_ATOMIC[59]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[11]])
+  description: TCC_ATOMIC on 3th XCC and 11th channel
+TCC_ATOMIC[5]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[5]])
+  description: TCC_ATOMIC on 0th XCC and 5th channel
+TCC_ATOMIC[60]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[12]])
+  description: TCC_ATOMIC on 3th XCC and 12th channel
+TCC_ATOMIC[61]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[13]])
+  description: TCC_ATOMIC on 3th XCC and 13th channel
+TCC_ATOMIC[62]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[14]])
+  description: TCC_ATOMIC on 3th XCC and 14th channel
+TCC_ATOMIC[63]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[15]])
+  description: TCC_ATOMIC on 3th XCC and 15th channel
+TCC_ATOMIC[64]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[0]])
+  description: TCC_ATOMIC on 4th XCC and 0th channel
+TCC_ATOMIC[65]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[1]])
+  description: TCC_ATOMIC on 4th XCC and 1th channel
+TCC_ATOMIC[66]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[2]])
+  description: TCC_ATOMIC on 4th XCC and 2th channel
+TCC_ATOMIC[67]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[3]])
+  description: TCC_ATOMIC on 4th XCC and 3th channel
+TCC_ATOMIC[68]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[4]])
+  description: TCC_ATOMIC on 4th XCC and 4th channel
+TCC_ATOMIC[69]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[5]])
+  description: TCC_ATOMIC on 4th XCC and 5th channel
+TCC_ATOMIC[6]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[6]])
+  description: TCC_ATOMIC on 0th XCC and 6th channel
+TCC_ATOMIC[70]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[6]])
+  description: TCC_ATOMIC on 4th XCC and 6th channel
+TCC_ATOMIC[71]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[7]])
+  description: TCC_ATOMIC on 4th XCC and 7th channel
+TCC_ATOMIC[72]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[8]])
+  description: TCC_ATOMIC on 4th XCC and 8th channel
+TCC_ATOMIC[73]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[9]])
+  description: TCC_ATOMIC on 4th XCC and 9th channel
+TCC_ATOMIC[74]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[10]])
+  description: TCC_ATOMIC on 4th XCC and 10th channel
+TCC_ATOMIC[75]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[11]])
+  description: TCC_ATOMIC on 4th XCC and 11th channel
+TCC_ATOMIC[76]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[12]])
+  description: TCC_ATOMIC on 4th XCC and 12th channel
+TCC_ATOMIC[77]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[13]])
+  description: TCC_ATOMIC on 4th XCC and 13th channel
+TCC_ATOMIC[78]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[14]])
+  description: TCC_ATOMIC on 4th XCC and 14th channel
+TCC_ATOMIC[79]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[15]])
+  description: TCC_ATOMIC on 4th XCC and 15th channel
+TCC_ATOMIC[7]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[7]])
+  description: TCC_ATOMIC on 0th XCC and 7th channel
+TCC_ATOMIC[80]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[0]])
+  description: TCC_ATOMIC on 5th XCC and 0th channel
+TCC_ATOMIC[81]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[1]])
+  description: TCC_ATOMIC on 5th XCC and 1th channel
+TCC_ATOMIC[82]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[2]])
+  description: TCC_ATOMIC on 5th XCC and 2th channel
+TCC_ATOMIC[83]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[3]])
+  description: TCC_ATOMIC on 5th XCC and 3th channel
+TCC_ATOMIC[84]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[4]])
+  description: TCC_ATOMIC on 5th XCC and 4th channel
+TCC_ATOMIC[85]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[5]])
+  description: TCC_ATOMIC on 5th XCC and 5th channel
+TCC_ATOMIC[86]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[6]])
+  description: TCC_ATOMIC on 5th XCC and 6th channel
+TCC_ATOMIC[87]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[7]])
+  description: TCC_ATOMIC on 5th XCC and 7th channel
+TCC_ATOMIC[88]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[8]])
+  description: TCC_ATOMIC on 5th XCC and 8th channel
+TCC_ATOMIC[89]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[9]])
+  description: TCC_ATOMIC on 5th XCC and 9th channel
+TCC_ATOMIC[8]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[8]])
+  description: TCC_ATOMIC on 0th XCC and 8th channel
+TCC_ATOMIC[90]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[10]])
+  description: TCC_ATOMIC on 5th XCC and 10th channel
+TCC_ATOMIC[91]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[11]])
+  description: TCC_ATOMIC on 5th XCC and 11th channel
+TCC_ATOMIC[92]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[12]])
+  description: TCC_ATOMIC on 5th XCC and 12th channel
+TCC_ATOMIC[93]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[13]])
+  description: TCC_ATOMIC on 5th XCC and 13th channel
+TCC_ATOMIC[94]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[14]])
+  description: TCC_ATOMIC on 5th XCC and 14th channel
+TCC_ATOMIC[95]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[15]])
+  description: TCC_ATOMIC on 5th XCC and 15th channel
+TCC_ATOMIC[96]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[0]])
+  description: TCC_ATOMIC on 6th XCC and 0th channel
+TCC_ATOMIC[97]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[1]])
+  description: TCC_ATOMIC on 6th XCC and 1th channel
+TCC_ATOMIC[98]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[2]])
+  description: TCC_ATOMIC on 6th XCC and 2th channel
+TCC_ATOMIC[99]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[3]])
+  description: TCC_ATOMIC on 6th XCC and 3th channel
+TCC_ATOMIC[9]:
+  architectures:
+    gfx950:
+      expression: select(TCC_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[9]])
+  description: TCC_ATOMIC on 0th XCC and 9th channel
+TCC_BUBBLE[0]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[0]])
+  description: TCC_BUBBLE on 0th XCC and 0th channel
+TCC_BUBBLE[100]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[4]])
+  description: TCC_BUBBLE on 6th XCC and 4th channel
+TCC_BUBBLE[101]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[5]])
+  description: TCC_BUBBLE on 6th XCC and 5th channel
+TCC_BUBBLE[102]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[6]])
+  description: TCC_BUBBLE on 6th XCC and 6th channel
+TCC_BUBBLE[103]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[7]])
+  description: TCC_BUBBLE on 6th XCC and 7th channel
+TCC_BUBBLE[104]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[8]])
+  description: TCC_BUBBLE on 6th XCC and 8th channel
+TCC_BUBBLE[105]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[9]])
+  description: TCC_BUBBLE on 6th XCC and 9th channel
+TCC_BUBBLE[106]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[10]])
+  description: TCC_BUBBLE on 6th XCC and 10th channel
+TCC_BUBBLE[107]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[11]])
+  description: TCC_BUBBLE on 6th XCC and 11th channel
+TCC_BUBBLE[108]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[12]])
+  description: TCC_BUBBLE on 6th XCC and 12th channel
+TCC_BUBBLE[109]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[13]])
+  description: TCC_BUBBLE on 6th XCC and 13th channel
+TCC_BUBBLE[10]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[10]])
+  description: TCC_BUBBLE on 0th XCC and 10th channel
+TCC_BUBBLE[110]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[14]])
+  description: TCC_BUBBLE on 6th XCC and 14th channel
+TCC_BUBBLE[111]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[15]])
+  description: TCC_BUBBLE on 6th XCC and 15th channel
+TCC_BUBBLE[112]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[0]])
+  description: TCC_BUBBLE on 7th XCC and 0th channel
+TCC_BUBBLE[113]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[1]])
+  description: TCC_BUBBLE on 7th XCC and 1th channel
+TCC_BUBBLE[114]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[2]])
+  description: TCC_BUBBLE on 7th XCC and 2th channel
+TCC_BUBBLE[115]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[3]])
+  description: TCC_BUBBLE on 7th XCC and 3th channel
+TCC_BUBBLE[116]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[4]])
+  description: TCC_BUBBLE on 7th XCC and 4th channel
+TCC_BUBBLE[117]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[5]])
+  description: TCC_BUBBLE on 7th XCC and 5th channel
+TCC_BUBBLE[118]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[6]])
+  description: TCC_BUBBLE on 7th XCC and 6th channel
+TCC_BUBBLE[119]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[7]])
+  description: TCC_BUBBLE on 7th XCC and 7th channel
+TCC_BUBBLE[11]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[11]])
+  description: TCC_BUBBLE on 0th XCC and 11th channel
+TCC_BUBBLE[120]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[8]])
+  description: TCC_BUBBLE on 7th XCC and 8th channel
+TCC_BUBBLE[121]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[9]])
+  description: TCC_BUBBLE on 7th XCC and 9th channel
+TCC_BUBBLE[122]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[10]])
+  description: TCC_BUBBLE on 7th XCC and 10th channel
+TCC_BUBBLE[123]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[11]])
+  description: TCC_BUBBLE on 7th XCC and 11th channel
+TCC_BUBBLE[124]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[12]])
+  description: TCC_BUBBLE on 7th XCC and 12th channel
+TCC_BUBBLE[125]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[13]])
+  description: TCC_BUBBLE on 7th XCC and 13th channel
+TCC_BUBBLE[126]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[14]])
+  description: TCC_BUBBLE on 7th XCC and 14th channel
+TCC_BUBBLE[127]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[15]])
+  description: TCC_BUBBLE on 7th XCC and 15th channel
+TCC_BUBBLE[12]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[12]])
+  description: TCC_BUBBLE on 0th XCC and 12th channel
+TCC_BUBBLE[13]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[13]])
+  description: TCC_BUBBLE on 0th XCC and 13th channel
+TCC_BUBBLE[14]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[14]])
+  description: TCC_BUBBLE on 0th XCC and 14th channel
+TCC_BUBBLE[15]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[15]])
+  description: TCC_BUBBLE on 0th XCC and 15th channel
+TCC_BUBBLE[16]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[0]])
+  description: TCC_BUBBLE on 1th XCC and 0th channel
+TCC_BUBBLE[17]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[1]])
+  description: TCC_BUBBLE on 1th XCC and 1th channel
+TCC_BUBBLE[18]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[2]])
+  description: TCC_BUBBLE on 1th XCC and 2th channel
+TCC_BUBBLE[19]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[3]])
+  description: TCC_BUBBLE on 1th XCC and 3th channel
+TCC_BUBBLE[1]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[1]])
+  description: TCC_BUBBLE on 0th XCC and 1th channel
+TCC_BUBBLE[20]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[4]])
+  description: TCC_BUBBLE on 1th XCC and 4th channel
+TCC_BUBBLE[21]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[5]])
+  description: TCC_BUBBLE on 1th XCC and 5th channel
+TCC_BUBBLE[22]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[6]])
+  description: TCC_BUBBLE on 1th XCC and 6th channel
+TCC_BUBBLE[23]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[7]])
+  description: TCC_BUBBLE on 1th XCC and 7th channel
+TCC_BUBBLE[24]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[8]])
+  description: TCC_BUBBLE on 1th XCC and 8th channel
+TCC_BUBBLE[25]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[9]])
+  description: TCC_BUBBLE on 1th XCC and 9th channel
+TCC_BUBBLE[26]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[10]])
+  description: TCC_BUBBLE on 1th XCC and 10th channel
+TCC_BUBBLE[27]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[11]])
+  description: TCC_BUBBLE on 1th XCC and 11th channel
+TCC_BUBBLE[28]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[12]])
+  description: TCC_BUBBLE on 1th XCC and 12th channel
+TCC_BUBBLE[29]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[13]])
+  description: TCC_BUBBLE on 1th XCC and 13th channel
+TCC_BUBBLE[2]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[2]])
+  description: TCC_BUBBLE on 0th XCC and 2th channel
+TCC_BUBBLE[30]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[14]])
+  description: TCC_BUBBLE on 1th XCC and 14th channel
+TCC_BUBBLE[31]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[15]])
+  description: TCC_BUBBLE on 1th XCC and 15th channel
+TCC_BUBBLE[32]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[0]])
+  description: TCC_BUBBLE on 2th XCC and 0th channel
+TCC_BUBBLE[33]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[1]])
+  description: TCC_BUBBLE on 2th XCC and 1th channel
+TCC_BUBBLE[34]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[2]])
+  description: TCC_BUBBLE on 2th XCC and 2th channel
+TCC_BUBBLE[35]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[3]])
+  description: TCC_BUBBLE on 2th XCC and 3th channel
+TCC_BUBBLE[36]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[4]])
+  description: TCC_BUBBLE on 2th XCC and 4th channel
+TCC_BUBBLE[37]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[5]])
+  description: TCC_BUBBLE on 2th XCC and 5th channel
+TCC_BUBBLE[38]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[6]])
+  description: TCC_BUBBLE on 2th XCC and 6th channel
+TCC_BUBBLE[39]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[7]])
+  description: TCC_BUBBLE on 2th XCC and 7th channel
+TCC_BUBBLE[3]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[3]])
+  description: TCC_BUBBLE on 0th XCC and 3th channel
+TCC_BUBBLE[40]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[8]])
+  description: TCC_BUBBLE on 2th XCC and 8th channel
+TCC_BUBBLE[41]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[9]])
+  description: TCC_BUBBLE on 2th XCC and 9th channel
+TCC_BUBBLE[42]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[10]])
+  description: TCC_BUBBLE on 2th XCC and 10th channel
+TCC_BUBBLE[43]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[11]])
+  description: TCC_BUBBLE on 2th XCC and 11th channel
+TCC_BUBBLE[44]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[12]])
+  description: TCC_BUBBLE on 2th XCC and 12th channel
+TCC_BUBBLE[45]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[13]])
+  description: TCC_BUBBLE on 2th XCC and 13th channel
+TCC_BUBBLE[46]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[14]])
+  description: TCC_BUBBLE on 2th XCC and 14th channel
+TCC_BUBBLE[47]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[15]])
+  description: TCC_BUBBLE on 2th XCC and 15th channel
+TCC_BUBBLE[48]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[0]])
+  description: TCC_BUBBLE on 3th XCC and 0th channel
+TCC_BUBBLE[49]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[1]])
+  description: TCC_BUBBLE on 3th XCC and 1th channel
+TCC_BUBBLE[4]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[4]])
+  description: TCC_BUBBLE on 0th XCC and 4th channel
+TCC_BUBBLE[50]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[2]])
+  description: TCC_BUBBLE on 3th XCC and 2th channel
+TCC_BUBBLE[51]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[3]])
+  description: TCC_BUBBLE on 3th XCC and 3th channel
+TCC_BUBBLE[52]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[4]])
+  description: TCC_BUBBLE on 3th XCC and 4th channel
+TCC_BUBBLE[53]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[5]])
+  description: TCC_BUBBLE on 3th XCC and 5th channel
+TCC_BUBBLE[54]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[6]])
+  description: TCC_BUBBLE on 3th XCC and 6th channel
+TCC_BUBBLE[55]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[7]])
+  description: TCC_BUBBLE on 3th XCC and 7th channel
+TCC_BUBBLE[56]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[8]])
+  description: TCC_BUBBLE on 3th XCC and 8th channel
+TCC_BUBBLE[57]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[9]])
+  description: TCC_BUBBLE on 3th XCC and 9th channel
+TCC_BUBBLE[58]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[10]])
+  description: TCC_BUBBLE on 3th XCC and 10th channel
+TCC_BUBBLE[59]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[11]])
+  description: TCC_BUBBLE on 3th XCC and 11th channel
+TCC_BUBBLE[5]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[5]])
+  description: TCC_BUBBLE on 0th XCC and 5th channel
+TCC_BUBBLE[60]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[12]])
+  description: TCC_BUBBLE on 3th XCC and 12th channel
+TCC_BUBBLE[61]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[13]])
+  description: TCC_BUBBLE on 3th XCC and 13th channel
+TCC_BUBBLE[62]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[14]])
+  description: TCC_BUBBLE on 3th XCC and 14th channel
+TCC_BUBBLE[63]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[15]])
+  description: TCC_BUBBLE on 3th XCC and 15th channel
+TCC_BUBBLE[64]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[0]])
+  description: TCC_BUBBLE on 4th XCC and 0th channel
+TCC_BUBBLE[65]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[1]])
+  description: TCC_BUBBLE on 4th XCC and 1th channel
+TCC_BUBBLE[66]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[2]])
+  description: TCC_BUBBLE on 4th XCC and 2th channel
+TCC_BUBBLE[67]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[3]])
+  description: TCC_BUBBLE on 4th XCC and 3th channel
+TCC_BUBBLE[68]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[4]])
+  description: TCC_BUBBLE on 4th XCC and 4th channel
+TCC_BUBBLE[69]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[5]])
+  description: TCC_BUBBLE on 4th XCC and 5th channel
+TCC_BUBBLE[6]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[6]])
+  description: TCC_BUBBLE on 0th XCC and 6th channel
+TCC_BUBBLE[70]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[6]])
+  description: TCC_BUBBLE on 4th XCC and 6th channel
+TCC_BUBBLE[71]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[7]])
+  description: TCC_BUBBLE on 4th XCC and 7th channel
+TCC_BUBBLE[72]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[8]])
+  description: TCC_BUBBLE on 4th XCC and 8th channel
+TCC_BUBBLE[73]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[9]])
+  description: TCC_BUBBLE on 4th XCC and 9th channel
+TCC_BUBBLE[74]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[10]])
+  description: TCC_BUBBLE on 4th XCC and 10th channel
+TCC_BUBBLE[75]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[11]])
+  description: TCC_BUBBLE on 4th XCC and 11th channel
+TCC_BUBBLE[76]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[12]])
+  description: TCC_BUBBLE on 4th XCC and 12th channel
+TCC_BUBBLE[77]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[13]])
+  description: TCC_BUBBLE on 4th XCC and 13th channel
+TCC_BUBBLE[78]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[14]])
+  description: TCC_BUBBLE on 4th XCC and 14th channel
+TCC_BUBBLE[79]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[15]])
+  description: TCC_BUBBLE on 4th XCC and 15th channel
+TCC_BUBBLE[7]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[7]])
+  description: TCC_BUBBLE on 0th XCC and 7th channel
+TCC_BUBBLE[80]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[0]])
+  description: TCC_BUBBLE on 5th XCC and 0th channel
+TCC_BUBBLE[81]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[1]])
+  description: TCC_BUBBLE on 5th XCC and 1th channel
+TCC_BUBBLE[82]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[2]])
+  description: TCC_BUBBLE on 5th XCC and 2th channel
+TCC_BUBBLE[83]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[3]])
+  description: TCC_BUBBLE on 5th XCC and 3th channel
+TCC_BUBBLE[84]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[4]])
+  description: TCC_BUBBLE on 5th XCC and 4th channel
+TCC_BUBBLE[85]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[5]])
+  description: TCC_BUBBLE on 5th XCC and 5th channel
+TCC_BUBBLE[86]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[6]])
+  description: TCC_BUBBLE on 5th XCC and 6th channel
+TCC_BUBBLE[87]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[7]])
+  description: TCC_BUBBLE on 5th XCC and 7th channel
+TCC_BUBBLE[88]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[8]])
+  description: TCC_BUBBLE on 5th XCC and 8th channel
+TCC_BUBBLE[89]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[9]])
+  description: TCC_BUBBLE on 5th XCC and 9th channel
+TCC_BUBBLE[8]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[8]])
+  description: TCC_BUBBLE on 0th XCC and 8th channel
+TCC_BUBBLE[90]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[10]])
+  description: TCC_BUBBLE on 5th XCC and 10th channel
+TCC_BUBBLE[91]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[11]])
+  description: TCC_BUBBLE on 5th XCC and 11th channel
+TCC_BUBBLE[92]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[12]])
+  description: TCC_BUBBLE on 5th XCC and 12th channel
+TCC_BUBBLE[93]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[13]])
+  description: TCC_BUBBLE on 5th XCC and 13th channel
+TCC_BUBBLE[94]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[14]])
+  description: TCC_BUBBLE on 5th XCC and 14th channel
+TCC_BUBBLE[95]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[15]])
+  description: TCC_BUBBLE on 5th XCC and 15th channel
+TCC_BUBBLE[96]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[0]])
+  description: TCC_BUBBLE on 6th XCC and 0th channel
+TCC_BUBBLE[97]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[1]])
+  description: TCC_BUBBLE on 6th XCC and 1th channel
+TCC_BUBBLE[98]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[2]])
+  description: TCC_BUBBLE on 6th XCC and 2th channel
+TCC_BUBBLE[99]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[3]])
+  description: TCC_BUBBLE on 6th XCC and 3th channel
+TCC_BUBBLE[9]:
+  architectures:
+    gfx950:
+      expression: select(TCC_BUBBLE,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[9]])
+  description: TCC_BUBBLE on 0th XCC and 9th channel
+TCC_EA0_ATOMIC[0]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[0]])
+  description: TCC_EA0_ATOMIC on 0th XCC and 0th channel
+TCC_EA0_ATOMIC[100]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[4]])
+  description: TCC_EA0_ATOMIC on 6th XCC and 4th channel
+TCC_EA0_ATOMIC[101]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[5]])
+  description: TCC_EA0_ATOMIC on 6th XCC and 5th channel
+TCC_EA0_ATOMIC[102]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[6]])
+  description: TCC_EA0_ATOMIC on 6th XCC and 6th channel
+TCC_EA0_ATOMIC[103]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[7]])
+  description: TCC_EA0_ATOMIC on 6th XCC and 7th channel
+TCC_EA0_ATOMIC[104]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[8]])
+  description: TCC_EA0_ATOMIC on 6th XCC and 8th channel
+TCC_EA0_ATOMIC[105]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[9]])
+  description: TCC_EA0_ATOMIC on 6th XCC and 9th channel
+TCC_EA0_ATOMIC[106]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[10]])
+  description: TCC_EA0_ATOMIC on 6th XCC and 10th channel
+TCC_EA0_ATOMIC[107]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[11]])
+  description: TCC_EA0_ATOMIC on 6th XCC and 11th channel
+TCC_EA0_ATOMIC[108]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[12]])
+  description: TCC_EA0_ATOMIC on 6th XCC and 12th channel
+TCC_EA0_ATOMIC[109]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[13]])
+  description: TCC_EA0_ATOMIC on 6th XCC and 13th channel
+TCC_EA0_ATOMIC[10]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[10]])
+  description: TCC_EA0_ATOMIC on 0th XCC and 10th channel
+TCC_EA0_ATOMIC[110]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[14]])
+  description: TCC_EA0_ATOMIC on 6th XCC and 14th channel
+TCC_EA0_ATOMIC[111]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[15]])
+  description: TCC_EA0_ATOMIC on 6th XCC and 15th channel
+TCC_EA0_ATOMIC[112]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[0]])
+  description: TCC_EA0_ATOMIC on 7th XCC and 0th channel
+TCC_EA0_ATOMIC[113]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[1]])
+  description: TCC_EA0_ATOMIC on 7th XCC and 1th channel
+TCC_EA0_ATOMIC[114]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[2]])
+  description: TCC_EA0_ATOMIC on 7th XCC and 2th channel
+TCC_EA0_ATOMIC[115]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[3]])
+  description: TCC_EA0_ATOMIC on 7th XCC and 3th channel
+TCC_EA0_ATOMIC[116]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[4]])
+  description: TCC_EA0_ATOMIC on 7th XCC and 4th channel
+TCC_EA0_ATOMIC[117]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[5]])
+  description: TCC_EA0_ATOMIC on 7th XCC and 5th channel
+TCC_EA0_ATOMIC[118]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[6]])
+  description: TCC_EA0_ATOMIC on 7th XCC and 6th channel
+TCC_EA0_ATOMIC[119]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[7]])
+  description: TCC_EA0_ATOMIC on 7th XCC and 7th channel
+TCC_EA0_ATOMIC[11]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[11]])
+  description: TCC_EA0_ATOMIC on 0th XCC and 11th channel
+TCC_EA0_ATOMIC[120]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[8]])
+  description: TCC_EA0_ATOMIC on 7th XCC and 8th channel
+TCC_EA0_ATOMIC[121]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[9]])
+  description: TCC_EA0_ATOMIC on 7th XCC and 9th channel
+TCC_EA0_ATOMIC[122]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[10]])
+  description: TCC_EA0_ATOMIC on 7th XCC and 10th channel
+TCC_EA0_ATOMIC[123]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[11]])
+  description: TCC_EA0_ATOMIC on 7th XCC and 11th channel
+TCC_EA0_ATOMIC[124]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[12]])
+  description: TCC_EA0_ATOMIC on 7th XCC and 12th channel
+TCC_EA0_ATOMIC[125]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[13]])
+  description: TCC_EA0_ATOMIC on 7th XCC and 13th channel
+TCC_EA0_ATOMIC[126]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[14]])
+  description: TCC_EA0_ATOMIC on 7th XCC and 14th channel
+TCC_EA0_ATOMIC[127]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[15]])
+  description: TCC_EA0_ATOMIC on 7th XCC and 15th channel
+TCC_EA0_ATOMIC[12]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[12]])
+  description: TCC_EA0_ATOMIC on 0th XCC and 12th channel
+TCC_EA0_ATOMIC[13]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[13]])
+  description: TCC_EA0_ATOMIC on 0th XCC and 13th channel
+TCC_EA0_ATOMIC[14]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[14]])
+  description: TCC_EA0_ATOMIC on 0th XCC and 14th channel
+TCC_EA0_ATOMIC[15]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[15]])
+  description: TCC_EA0_ATOMIC on 0th XCC and 15th channel
+TCC_EA0_ATOMIC[16]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[0]])
+  description: TCC_EA0_ATOMIC on 1th XCC and 0th channel
+TCC_EA0_ATOMIC[17]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[1]])
+  description: TCC_EA0_ATOMIC on 1th XCC and 1th channel
+TCC_EA0_ATOMIC[18]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[2]])
+  description: TCC_EA0_ATOMIC on 1th XCC and 2th channel
+TCC_EA0_ATOMIC[19]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[3]])
+  description: TCC_EA0_ATOMIC on 1th XCC and 3th channel
+TCC_EA0_ATOMIC[1]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[1]])
+  description: TCC_EA0_ATOMIC on 0th XCC and 1th channel
+TCC_EA0_ATOMIC[20]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[4]])
+  description: TCC_EA0_ATOMIC on 1th XCC and 4th channel
+TCC_EA0_ATOMIC[21]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[5]])
+  description: TCC_EA0_ATOMIC on 1th XCC and 5th channel
+TCC_EA0_ATOMIC[22]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[6]])
+  description: TCC_EA0_ATOMIC on 1th XCC and 6th channel
+TCC_EA0_ATOMIC[23]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[7]])
+  description: TCC_EA0_ATOMIC on 1th XCC and 7th channel
+TCC_EA0_ATOMIC[24]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[8]])
+  description: TCC_EA0_ATOMIC on 1th XCC and 8th channel
+TCC_EA0_ATOMIC[25]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[9]])
+  description: TCC_EA0_ATOMIC on 1th XCC and 9th channel
+TCC_EA0_ATOMIC[26]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[10]])
+  description: TCC_EA0_ATOMIC on 1th XCC and 10th channel
+TCC_EA0_ATOMIC[27]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[11]])
+  description: TCC_EA0_ATOMIC on 1th XCC and 11th channel
+TCC_EA0_ATOMIC[28]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[12]])
+  description: TCC_EA0_ATOMIC on 1th XCC and 12th channel
+TCC_EA0_ATOMIC[29]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[13]])
+  description: TCC_EA0_ATOMIC on 1th XCC and 13th channel
+TCC_EA0_ATOMIC[2]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[2]])
+  description: TCC_EA0_ATOMIC on 0th XCC and 2th channel
+TCC_EA0_ATOMIC[30]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[14]])
+  description: TCC_EA0_ATOMIC on 1th XCC and 14th channel
+TCC_EA0_ATOMIC[31]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[15]])
+  description: TCC_EA0_ATOMIC on 1th XCC and 15th channel
+TCC_EA0_ATOMIC[32]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[0]])
+  description: TCC_EA0_ATOMIC on 2th XCC and 0th channel
+TCC_EA0_ATOMIC[33]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[1]])
+  description: TCC_EA0_ATOMIC on 2th XCC and 1th channel
+TCC_EA0_ATOMIC[34]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[2]])
+  description: TCC_EA0_ATOMIC on 2th XCC and 2th channel
+TCC_EA0_ATOMIC[35]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[3]])
+  description: TCC_EA0_ATOMIC on 2th XCC and 3th channel
+TCC_EA0_ATOMIC[36]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[4]])
+  description: TCC_EA0_ATOMIC on 2th XCC and 4th channel
+TCC_EA0_ATOMIC[37]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[5]])
+  description: TCC_EA0_ATOMIC on 2th XCC and 5th channel
+TCC_EA0_ATOMIC[38]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[6]])
+  description: TCC_EA0_ATOMIC on 2th XCC and 6th channel
+TCC_EA0_ATOMIC[39]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[7]])
+  description: TCC_EA0_ATOMIC on 2th XCC and 7th channel
+TCC_EA0_ATOMIC[3]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[3]])
+  description: TCC_EA0_ATOMIC on 0th XCC and 3th channel
+TCC_EA0_ATOMIC[40]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[8]])
+  description: TCC_EA0_ATOMIC on 2th XCC and 8th channel
+TCC_EA0_ATOMIC[41]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[9]])
+  description: TCC_EA0_ATOMIC on 2th XCC and 9th channel
+TCC_EA0_ATOMIC[42]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[10]])
+  description: TCC_EA0_ATOMIC on 2th XCC and 10th channel
+TCC_EA0_ATOMIC[43]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[11]])
+  description: TCC_EA0_ATOMIC on 2th XCC and 11th channel
+TCC_EA0_ATOMIC[44]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[12]])
+  description: TCC_EA0_ATOMIC on 2th XCC and 12th channel
+TCC_EA0_ATOMIC[45]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[13]])
+  description: TCC_EA0_ATOMIC on 2th XCC and 13th channel
+TCC_EA0_ATOMIC[46]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[14]])
+  description: TCC_EA0_ATOMIC on 2th XCC and 14th channel
+TCC_EA0_ATOMIC[47]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[15]])
+  description: TCC_EA0_ATOMIC on 2th XCC and 15th channel
+TCC_EA0_ATOMIC[48]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[0]])
+  description: TCC_EA0_ATOMIC on 3th XCC and 0th channel
+TCC_EA0_ATOMIC[49]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[1]])
+  description: TCC_EA0_ATOMIC on 3th XCC and 1th channel
+TCC_EA0_ATOMIC[4]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[4]])
+  description: TCC_EA0_ATOMIC on 0th XCC and 4th channel
+TCC_EA0_ATOMIC[50]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[2]])
+  description: TCC_EA0_ATOMIC on 3th XCC and 2th channel
+TCC_EA0_ATOMIC[51]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[3]])
+  description: TCC_EA0_ATOMIC on 3th XCC and 3th channel
+TCC_EA0_ATOMIC[52]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[4]])
+  description: TCC_EA0_ATOMIC on 3th XCC and 4th channel
+TCC_EA0_ATOMIC[53]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[5]])
+  description: TCC_EA0_ATOMIC on 3th XCC and 5th channel
+TCC_EA0_ATOMIC[54]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[6]])
+  description: TCC_EA0_ATOMIC on 3th XCC and 6th channel
+TCC_EA0_ATOMIC[55]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[7]])
+  description: TCC_EA0_ATOMIC on 3th XCC and 7th channel
+TCC_EA0_ATOMIC[56]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[8]])
+  description: TCC_EA0_ATOMIC on 3th XCC and 8th channel
+TCC_EA0_ATOMIC[57]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[9]])
+  description: TCC_EA0_ATOMIC on 3th XCC and 9th channel
+TCC_EA0_ATOMIC[58]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[10]])
+  description: TCC_EA0_ATOMIC on 3th XCC and 10th channel
+TCC_EA0_ATOMIC[59]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[11]])
+  description: TCC_EA0_ATOMIC on 3th XCC and 11th channel
+TCC_EA0_ATOMIC[5]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[5]])
+  description: TCC_EA0_ATOMIC on 0th XCC and 5th channel
+TCC_EA0_ATOMIC[60]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[12]])
+  description: TCC_EA0_ATOMIC on 3th XCC and 12th channel
+TCC_EA0_ATOMIC[61]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[13]])
+  description: TCC_EA0_ATOMIC on 3th XCC and 13th channel
+TCC_EA0_ATOMIC[62]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[14]])
+  description: TCC_EA0_ATOMIC on 3th XCC and 14th channel
+TCC_EA0_ATOMIC[63]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[15]])
+  description: TCC_EA0_ATOMIC on 3th XCC and 15th channel
+TCC_EA0_ATOMIC[64]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[0]])
+  description: TCC_EA0_ATOMIC on 4th XCC and 0th channel
+TCC_EA0_ATOMIC[65]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[1]])
+  description: TCC_EA0_ATOMIC on 4th XCC and 1th channel
+TCC_EA0_ATOMIC[66]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[2]])
+  description: TCC_EA0_ATOMIC on 4th XCC and 2th channel
+TCC_EA0_ATOMIC[67]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[3]])
+  description: TCC_EA0_ATOMIC on 4th XCC and 3th channel
+TCC_EA0_ATOMIC[68]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[4]])
+  description: TCC_EA0_ATOMIC on 4th XCC and 4th channel
+TCC_EA0_ATOMIC[69]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[5]])
+  description: TCC_EA0_ATOMIC on 4th XCC and 5th channel
+TCC_EA0_ATOMIC[6]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[6]])
+  description: TCC_EA0_ATOMIC on 0th XCC and 6th channel
+TCC_EA0_ATOMIC[70]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[6]])
+  description: TCC_EA0_ATOMIC on 4th XCC and 6th channel
+TCC_EA0_ATOMIC[71]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[7]])
+  description: TCC_EA0_ATOMIC on 4th XCC and 7th channel
+TCC_EA0_ATOMIC[72]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[8]])
+  description: TCC_EA0_ATOMIC on 4th XCC and 8th channel
+TCC_EA0_ATOMIC[73]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[9]])
+  description: TCC_EA0_ATOMIC on 4th XCC and 9th channel
+TCC_EA0_ATOMIC[74]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[10]])
+  description: TCC_EA0_ATOMIC on 4th XCC and 10th channel
+TCC_EA0_ATOMIC[75]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[11]])
+  description: TCC_EA0_ATOMIC on 4th XCC and 11th channel
+TCC_EA0_ATOMIC[76]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[12]])
+  description: TCC_EA0_ATOMIC on 4th XCC and 12th channel
+TCC_EA0_ATOMIC[77]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[13]])
+  description: TCC_EA0_ATOMIC on 4th XCC and 13th channel
+TCC_EA0_ATOMIC[78]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[14]])
+  description: TCC_EA0_ATOMIC on 4th XCC and 14th channel
+TCC_EA0_ATOMIC[79]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[15]])
+  description: TCC_EA0_ATOMIC on 4th XCC and 15th channel
+TCC_EA0_ATOMIC[7]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[7]])
+  description: TCC_EA0_ATOMIC on 0th XCC and 7th channel
+TCC_EA0_ATOMIC[80]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[0]])
+  description: TCC_EA0_ATOMIC on 5th XCC and 0th channel
+TCC_EA0_ATOMIC[81]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[1]])
+  description: TCC_EA0_ATOMIC on 5th XCC and 1th channel
+TCC_EA0_ATOMIC[82]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[2]])
+  description: TCC_EA0_ATOMIC on 5th XCC and 2th channel
+TCC_EA0_ATOMIC[83]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[3]])
+  description: TCC_EA0_ATOMIC on 5th XCC and 3th channel
+TCC_EA0_ATOMIC[84]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[4]])
+  description: TCC_EA0_ATOMIC on 5th XCC and 4th channel
+TCC_EA0_ATOMIC[85]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[5]])
+  description: TCC_EA0_ATOMIC on 5th XCC and 5th channel
+TCC_EA0_ATOMIC[86]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[6]])
+  description: TCC_EA0_ATOMIC on 5th XCC and 6th channel
+TCC_EA0_ATOMIC[87]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[7]])
+  description: TCC_EA0_ATOMIC on 5th XCC and 7th channel
+TCC_EA0_ATOMIC[88]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[8]])
+  description: TCC_EA0_ATOMIC on 5th XCC and 8th channel
+TCC_EA0_ATOMIC[89]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[9]])
+  description: TCC_EA0_ATOMIC on 5th XCC and 9th channel
+TCC_EA0_ATOMIC[8]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[8]])
+  description: TCC_EA0_ATOMIC on 0th XCC and 8th channel
+TCC_EA0_ATOMIC[90]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[10]])
+  description: TCC_EA0_ATOMIC on 5th XCC and 10th channel
+TCC_EA0_ATOMIC[91]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[11]])
+  description: TCC_EA0_ATOMIC on 5th XCC and 11th channel
+TCC_EA0_ATOMIC[92]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[12]])
+  description: TCC_EA0_ATOMIC on 5th XCC and 12th channel
+TCC_EA0_ATOMIC[93]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[13]])
+  description: TCC_EA0_ATOMIC on 5th XCC and 13th channel
+TCC_EA0_ATOMIC[94]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[14]])
+  description: TCC_EA0_ATOMIC on 5th XCC and 14th channel
+TCC_EA0_ATOMIC[95]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[15]])
+  description: TCC_EA0_ATOMIC on 5th XCC and 15th channel
+TCC_EA0_ATOMIC[96]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[0]])
+  description: TCC_EA0_ATOMIC on 6th XCC and 0th channel
+TCC_EA0_ATOMIC[97]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[1]])
+  description: TCC_EA0_ATOMIC on 6th XCC and 1th channel
+TCC_EA0_ATOMIC[98]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[2]])
+  description: TCC_EA0_ATOMIC on 6th XCC and 2th channel
+TCC_EA0_ATOMIC[99]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[3]])
+  description: TCC_EA0_ATOMIC on 6th XCC and 3th channel
+TCC_EA0_ATOMIC[9]:
+  architectures:
+    gfx950:
+      expression: select(TCC_EA0_ATOMIC,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[9]])
+  description: TCC_EA0_ATOMIC on 0th XCC and 9th channel
+TCC_HIT[0]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[0]])
+  description: TCC_HIT on 0th XCC and 0th channel
+TCC_HIT[100]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[4]])
+  description: TCC_HIT on 6th XCC and 4th channel
+TCC_HIT[101]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[5]])
+  description: TCC_HIT on 6th XCC and 5th channel
+TCC_HIT[102]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[6]])
+  description: TCC_HIT on 6th XCC and 6th channel
+TCC_HIT[103]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[7]])
+  description: TCC_HIT on 6th XCC and 7th channel
+TCC_HIT[104]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[8]])
+  description: TCC_HIT on 6th XCC and 8th channel
+TCC_HIT[105]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[9]])
+  description: TCC_HIT on 6th XCC and 9th channel
+TCC_HIT[106]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[10]])
+  description: TCC_HIT on 6th XCC and 10th channel
+TCC_HIT[107]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[11]])
+  description: TCC_HIT on 6th XCC and 11th channel
+TCC_HIT[108]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[12]])
+  description: TCC_HIT on 6th XCC and 12th channel
+TCC_HIT[109]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[13]])
+  description: TCC_HIT on 6th XCC and 13th channel
+TCC_HIT[10]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[10]])
+  description: TCC_HIT on 0th XCC and 10th channel
+TCC_HIT[110]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[14]])
+  description: TCC_HIT on 6th XCC and 14th channel
+TCC_HIT[111]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[15]])
+  description: TCC_HIT on 6th XCC and 15th channel
+TCC_HIT[112]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[0]])
+  description: TCC_HIT on 7th XCC and 0th channel
+TCC_HIT[113]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[1]])
+  description: TCC_HIT on 7th XCC and 1th channel
+TCC_HIT[114]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[2]])
+  description: TCC_HIT on 7th XCC and 2th channel
+TCC_HIT[115]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[3]])
+  description: TCC_HIT on 7th XCC and 3th channel
+TCC_HIT[116]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[4]])
+  description: TCC_HIT on 7th XCC and 4th channel
+TCC_HIT[117]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[5]])
+  description: TCC_HIT on 7th XCC and 5th channel
+TCC_HIT[118]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[6]])
+  description: TCC_HIT on 7th XCC and 6th channel
+TCC_HIT[119]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[7]])
+  description: TCC_HIT on 7th XCC and 7th channel
+TCC_HIT[11]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[11]])
+  description: TCC_HIT on 0th XCC and 11th channel
+TCC_HIT[120]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[8]])
+  description: TCC_HIT on 7th XCC and 8th channel
+TCC_HIT[121]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[9]])
+  description: TCC_HIT on 7th XCC and 9th channel
+TCC_HIT[122]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[10]])
+  description: TCC_HIT on 7th XCC and 10th channel
+TCC_HIT[123]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[11]])
+  description: TCC_HIT on 7th XCC and 11th channel
+TCC_HIT[124]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[12]])
+  description: TCC_HIT on 7th XCC and 12th channel
+TCC_HIT[125]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[13]])
+  description: TCC_HIT on 7th XCC and 13th channel
+TCC_HIT[126]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[14]])
+  description: TCC_HIT on 7th XCC and 14th channel
+TCC_HIT[127]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[7], DIMENSION_INSTANCE=[15]])
+  description: TCC_HIT on 7th XCC and 15th channel
+TCC_HIT[12]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[12]])
+  description: TCC_HIT on 0th XCC and 12th channel
+TCC_HIT[13]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[13]])
+  description: TCC_HIT on 0th XCC and 13th channel
+TCC_HIT[14]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[14]])
+  description: TCC_HIT on 0th XCC and 14th channel
+TCC_HIT[15]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[15]])
+  description: TCC_HIT on 0th XCC and 15th channel
+TCC_HIT[16]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[0]])
+  description: TCC_HIT on 1th XCC and 0th channel
+TCC_HIT[17]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[1]])
+  description: TCC_HIT on 1th XCC and 1th channel
+TCC_HIT[18]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[2]])
+  description: TCC_HIT on 1th XCC and 2th channel
+TCC_HIT[19]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[3]])
+  description: TCC_HIT on 1th XCC and 3th channel
+TCC_HIT[1]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[1]])
+  description: TCC_HIT on 0th XCC and 1th channel
+TCC_HIT[20]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[4]])
+  description: TCC_HIT on 1th XCC and 4th channel
+TCC_HIT[21]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[5]])
+  description: TCC_HIT on 1th XCC and 5th channel
+TCC_HIT[22]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[6]])
+  description: TCC_HIT on 1th XCC and 6th channel
+TCC_HIT[23]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[7]])
+  description: TCC_HIT on 1th XCC and 7th channel
+TCC_HIT[24]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[8]])
+  description: TCC_HIT on 1th XCC and 8th channel
+TCC_HIT[25]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[9]])
+  description: TCC_HIT on 1th XCC and 9th channel
+TCC_HIT[26]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[10]])
+  description: TCC_HIT on 1th XCC and 10th channel
+TCC_HIT[27]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[11]])
+  description: TCC_HIT on 1th XCC and 11th channel
+TCC_HIT[28]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[12]])
+  description: TCC_HIT on 1th XCC and 12th channel
+TCC_HIT[29]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[13]])
+  description: TCC_HIT on 1th XCC and 13th channel
+TCC_HIT[2]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[2]])
+  description: TCC_HIT on 0th XCC and 2th channel
+TCC_HIT[30]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[14]])
+  description: TCC_HIT on 1th XCC and 14th channel
+TCC_HIT[31]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[1], DIMENSION_INSTANCE=[15]])
+  description: TCC_HIT on 1th XCC and 15th channel
+TCC_HIT[32]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[0]])
+  description: TCC_HIT on 2th XCC and 0th channel
+TCC_HIT[33]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[1]])
+  description: TCC_HIT on 2th XCC and 1th channel
+TCC_HIT[34]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[2]])
+  description: TCC_HIT on 2th XCC and 2th channel
+TCC_HIT[35]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[3]])
+  description: TCC_HIT on 2th XCC and 3th channel
+TCC_HIT[36]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[4]])
+  description: TCC_HIT on 2th XCC and 4th channel
+TCC_HIT[37]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[5]])
+  description: TCC_HIT on 2th XCC and 5th channel
+TCC_HIT[38]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[6]])
+  description: TCC_HIT on 2th XCC and 6th channel
+TCC_HIT[39]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[7]])
+  description: TCC_HIT on 2th XCC and 7th channel
+TCC_HIT[3]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[3]])
+  description: TCC_HIT on 0th XCC and 3th channel
+TCC_HIT[40]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[8]])
+  description: TCC_HIT on 2th XCC and 8th channel
+TCC_HIT[41]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[9]])
+  description: TCC_HIT on 2th XCC and 9th channel
+TCC_HIT[42]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[10]])
+  description: TCC_HIT on 2th XCC and 10th channel
+TCC_HIT[43]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[11]])
+  description: TCC_HIT on 2th XCC and 11th channel
+TCC_HIT[44]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[12]])
+  description: TCC_HIT on 2th XCC and 12th channel
+TCC_HIT[45]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[13]])
+  description: TCC_HIT on 2th XCC and 13th channel
+TCC_HIT[46]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[14]])
+  description: TCC_HIT on 2th XCC and 14th channel
+TCC_HIT[47]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[2], DIMENSION_INSTANCE=[15]])
+  description: TCC_HIT on 2th XCC and 15th channel
+TCC_HIT[48]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[0]])
+  description: TCC_HIT on 3th XCC and 0th channel
+TCC_HIT[49]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[1]])
+  description: TCC_HIT on 3th XCC and 1th channel
+TCC_HIT[4]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[4]])
+  description: TCC_HIT on 0th XCC and 4th channel
+TCC_HIT[50]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[2]])
+  description: TCC_HIT on 3th XCC and 2th channel
+TCC_HIT[51]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[3]])
+  description: TCC_HIT on 3th XCC and 3th channel
+TCC_HIT[52]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[4]])
+  description: TCC_HIT on 3th XCC and 4th channel
+TCC_HIT[53]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[5]])
+  description: TCC_HIT on 3th XCC and 5th channel
+TCC_HIT[54]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[6]])
+  description: TCC_HIT on 3th XCC and 6th channel
+TCC_HIT[55]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[7]])
+  description: TCC_HIT on 3th XCC and 7th channel
+TCC_HIT[56]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[8]])
+  description: TCC_HIT on 3th XCC and 8th channel
+TCC_HIT[57]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[9]])
+  description: TCC_HIT on 3th XCC and 9th channel
+TCC_HIT[58]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[10]])
+  description: TCC_HIT on 3th XCC and 10th channel
+TCC_HIT[59]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[11]])
+  description: TCC_HIT on 3th XCC and 11th channel
+TCC_HIT[5]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[5]])
+  description: TCC_HIT on 0th XCC and 5th channel
+TCC_HIT[60]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[12]])
+  description: TCC_HIT on 3th XCC and 12th channel
+TCC_HIT[61]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[13]])
+  description: TCC_HIT on 3th XCC and 13th channel
+TCC_HIT[62]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[14]])
+  description: TCC_HIT on 3th XCC and 14th channel
+TCC_HIT[63]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[3], DIMENSION_INSTANCE=[15]])
+  description: TCC_HIT on 3th XCC and 15th channel
+TCC_HIT[64]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[0]])
+  description: TCC_HIT on 4th XCC and 0th channel
+TCC_HIT[65]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[1]])
+  description: TCC_HIT on 4th XCC and 1th channel
+TCC_HIT[66]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[2]])
+  description: TCC_HIT on 4th XCC and 2th channel
+TCC_HIT[67]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[3]])
+  description: TCC_HIT on 4th XCC and 3th channel
+TCC_HIT[68]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[4]])
+  description: TCC_HIT on 4th XCC and 4th channel
+TCC_HIT[69]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[5]])
+  description: TCC_HIT on 4th XCC and 5th channel
+TCC_HIT[6]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[6]])
+  description: TCC_HIT on 0th XCC and 6th channel
+TCC_HIT[70]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[6]])
+  description: TCC_HIT on 4th XCC and 6th channel
+TCC_HIT[71]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[7]])
+  description: TCC_HIT on 4th XCC and 7th channel
+TCC_HIT[72]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[8]])
+  description: TCC_HIT on 4th XCC and 8th channel
+TCC_HIT[73]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[9]])
+  description: TCC_HIT on 4th XCC and 9th channel
+TCC_HIT[74]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[10]])
+  description: TCC_HIT on 4th XCC and 10th channel
+TCC_HIT[75]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[11]])
+  description: TCC_HIT on 4th XCC and 11th channel
+TCC_HIT[76]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[12]])
+  description: TCC_HIT on 4th XCC and 12th channel
+TCC_HIT[77]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[13]])
+  description: TCC_HIT on 4th XCC and 13th channel
+TCC_HIT[78]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[14]])
+  description: TCC_HIT on 4th XCC and 14th channel
+TCC_HIT[79]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[4], DIMENSION_INSTANCE=[15]])
+  description: TCC_HIT on 4th XCC and 15th channel
+TCC_HIT[7]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[7]])
+  description: TCC_HIT on 0th XCC and 7th channel
+TCC_HIT[80]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[0]])
+  description: TCC_HIT on 5th XCC and 0th channel
+TCC_HIT[81]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[1]])
+  description: TCC_HIT on 5th XCC and 1th channel
+TCC_HIT[82]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[2]])
+  description: TCC_HIT on 5th XCC and 2th channel
+TCC_HIT[83]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[3]])
+  description: TCC_HIT on 5th XCC and 3th channel
+TCC_HIT[84]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[4]])
+  description: TCC_HIT on 5th XCC and 4th channel
+TCC_HIT[85]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[5]])
+  description: TCC_HIT on 5th XCC and 5th channel
+TCC_HIT[86]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[6]])
+  description: TCC_HIT on 5th XCC and 6th channel
+TCC_HIT[87]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[7]])
+  description: TCC_HIT on 5th XCC and 7th channel
+TCC_HIT[88]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[8]])
+  description: TCC_HIT on 5th XCC and 8th channel
+TCC_HIT[89]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[9]])
+  description: TCC_HIT on 5th XCC and 9th channel
+TCC_HIT[8]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[8]])
+  description: TCC_HIT on 0th XCC and 8th channel
+TCC_HIT[90]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[10]])
+  description: TCC_HIT on 5th XCC and 10th channel
+TCC_HIT[91]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[11]])
+  description: TCC_HIT on 5th XCC and 11th channel
+TCC_HIT[92]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[12]])
+  description: TCC_HIT on 5th XCC and 12th channel
+TCC_HIT[93]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[13]])
+  description: TCC_HIT on 5th XCC and 13th channel
+TCC_HIT[94]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[14]])
+  description: TCC_HIT on 5th XCC and 14th channel
+TCC_HIT[95]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[5], DIMENSION_INSTANCE=[15]])
+  description: TCC_HIT on 5th XCC and 15th channel
+TCC_HIT[96]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[0]])
+  description: TCC_HIT on 6th XCC and 0th channel
+TCC_HIT[97]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[1]])
+  description: TCC_HIT on 6th XCC and 1th channel
+TCC_HIT[98]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[2]])
+  description: TCC_HIT on 6th XCC and 2th channel
+TCC_HIT[99]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[6], DIMENSION_INSTANCE=[3]])
+  description: TCC_HIT on 6th XCC and 3th channel
+TCC_HIT[9]:
+  architectures:
+    gfx950:
+      expression: select(TCC_HIT,[DIMENSION_XCC=[0], DIMENSION_INSTANCE=[9]])
+  description: TCC_HIT on 0th XCC and 9th channel

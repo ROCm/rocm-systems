@@ -9,11 +9,11 @@
 # MI GPUs
 #   |-- series: the specific MI series; mi50, mi100, mi200, mi300
 #       |-- architecture: currently, only mi300 gpus hold different architectures
-#           |-- models
-#               |-- chip_ids: chip id is specific to the environment the gpu is being used on
-#               |-- partition_mode: currently, only mi300 gpus hold partition mode information
-#                                   two types: compute partition mode, memory partition mode,
-#                                   currently only mi300 gpus contains compute partition mode information on number of xcds
+#           |-- gpu model
+#           |-- chip_ids: chip id is specific to the environment the gpu is being used on
+#           |-- partition_mode
+#               | -- compute partition mode
+#               | -- memory partition mode
 #
 # --------------------------------------------------------------------------------
 
@@ -23,45 +23,31 @@ mi_gpu_spec:
       - gpu_arch: gfx906
         models:
           - gpu_model: mi50
-            partition_mode: null
-            chip_ids:
-              physical: null
-              virtual: null
           - gpu_model: mi60
-            partition_mode: null
-            chip_ids:
-              physical: null
-              virtual: null
 
   - gpu_series: mi100
     gpu_archs:
       - gpu_arch: gfx908
         models:
           - gpu_model: mi100
-            partition_mode: null
             chip_ids:
               physical: 29580
-              virtual: null
 
   - gpu_series: mi200
     gpu_archs:
       - gpu_arch: gfx90a
         models:
           - gpu_model: mi210
-            partition_mode: null
             chip_ids:
               physical: 29711
-              virtual: null
           - gpu_model: mi250
-            partition_mode: null
             chip_ids:
               physical: 29708
-              virtual: null
           - gpu_model: mi250x
-            partition_mode: null
             chip_ids:
               physical: 29704
-              virtual: null
+          - gpu_model: mi250
+          - gpu_model: mi250x
 
   - gpu_series: mi300
     gpu_archs:
@@ -72,16 +58,10 @@ mi_gpu_spec:
               compute_partition_mode:
                 num_xcds:
                   spx: 6
-                  dpx: null
                   tpx: 2
-                  qpx: null
-                  cpx: null
               memory_partition_mode:
                 nps4: [tpx]
                 nps1: [spx, tpx]
-            chip_ids:
-              physical: null
-              virtual: null
 
       - gpu_arch: gfx941
         models:
@@ -91,15 +71,11 @@ mi_gpu_spec:
                 num_xcds:
                   spx: 8
                   dpx: 4
-                  tpx: null
                   qpx: 2
                   cpx: 1
               memory_partition_mode:
                 nps4: [qpx, cpx]
                 nps1: [spx, qpx, cpx]
-            chip_ids:
-              physical: null
-              virtual: null
 
       - gpu_arch: gfx942
         models:
@@ -108,10 +84,7 @@ mi_gpu_spec:
               compute_partition_mode:
                 num_xcds:
                   spx: 6
-                  dpx: null
                   tpx: 2
-                  qpx: null
-                  cpx: null
               memory_partition_mode:
                 nps4: [tpx]
                 nps1: [spx, tpx]
@@ -125,7 +98,6 @@ mi_gpu_spec:
                 num_xcds:
                   spx: 8
                   dpx: 4
-                  tpx: null
                   qpx: 2
                   cpx: 1
               memory_partition_mode:
@@ -141,8 +113,6 @@ mi_gpu_spec:
                 num_xcds:
                   spx: 4
                   dpx: 2
-                  tpx: null
-                  qpx: null
                   cpx: 1
               memory_partition_mode:
                 nps4: [cpx]
@@ -150,3 +120,21 @@ mi_gpu_spec:
             chip_ids:
               physical: 29858
               virtual: 29878
+
+  - gpu_series: mi350
+    gpu_archs:
+      - gpu_arch: gfx950
+        models:
+          - gpu_model: mi350
+            partition_mode:
+              compute_partition_mode:
+                num_xcds:
+                  spx: 8
+                  dpx: 4
+                  qpx: 2
+                  cpx: 1
+              memory_partition_mode:
+                  nps1: [spx, dpx, qpx, cpx]
+                  nps4: [qpx, cpx]
+            chip_ids:
+              physical: 30112

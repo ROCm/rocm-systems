@@ -32,12 +32,12 @@ Panel Config:
             tips:
           L2-Fabric Read BW:
             value: AVG((((TCC_EA0_RDREQ_32B_sum * 32) + (TCC_EA0_RDREQ_64B_sum * 64) + (TCC_EA0_RDREQ_128B_sum
-              * 128)) / (End_Timestamp - Start_Timestamp))
+              * 128)) / (End_Timestamp - Start_Timestamp)))
             unit: GB/s
             tips:
           L2-Fabric Write and Atomic BW:
             value: AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
-              * 32)) / (End_Timestamp - Start_Timestamp))
+              * 32)) / (End_Timestamp - Start_Timestamp)))
             unit: GB/s
             tips:
 
@@ -52,6 +52,15 @@ Panel Config:
           unit: Unit
           tips: Tips
         metric:
+          Read BW:
+            avg: AVG((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)
+              * 64)) / $denom))
+            min: MIN((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)
+              * 64)) / $denom))
+            max: MAX((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)
+              * 64)) / $denom))
+            unit: (Bytes  + $normUnit)
+            tips:
           Read BW:
             avg: AVG((((TCC_EA0_RDREQ_32B_sum * 32) + (TCC_EA0_RDREQ_64B_sum * 64) + (TCC_EA0_RDREQ_128B_sum * 128)) / $denom))
             min: MIN((((TCC_EA0_RDREQ_32B_sum * 32) + (TCC_EA0_RDREQ_64B_sum * 64) + (TCC_EA0_RDREQ_128B_sum * 128)) / $denom))
@@ -457,13 +466,13 @@ Panel Config:
             max: MAX((TCC_EA0_RD_UNCACHED_32B_sum / $denom))
             unit: (Req  + $normUnit)
             tips:
-          Read - HBM:
+          HBM Read:
             avg: AVG((TCC_EA0_RDREQ_DRAM_sum / $denom))
             min: MIN((TCC_EA0_RDREQ_DRAM_sum / $denom))
             max: MAX((TCC_EA0_RDREQ_DRAM_sum / $denom))
             unit: (Req  + $normUnit)
             tips:
-          Read - Remote:
+          Remote Read:
             avg: AVG((MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / $denom))
             min: MIN((MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / $denom))
             max: MAX((MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / $denom))
@@ -505,13 +514,13 @@ Panel Config:
             max: MAX((TCC_EA0_WRREQ_64B_sum / $denom))
             unit: (Req  + $normUnit)
             tips:
-          Write - HBM:
+          HBM Write and Atomic:
             avg: AVG((TCC_EA0_WRREQ_WRITE_DRAM_sum / $denom))
             min: MIN((TCC_EA0_WRREQ_WRITE_DRAM_sum / $denom))
             max: MAX((TCC_EA0_WRREQ_WRITE_DRAM_sum / $denom))
             unit: (Req  + $normUnit)
             tips:
-          Write and Atomic - Remote:
+          Remote Write and Atomic:
             avg: AVG((MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), 0) / $denom))
             min: MIN((MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), 0) / $denom))
             max: MAX((MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), 0) / $denom))
