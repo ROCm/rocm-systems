@@ -52,11 +52,9 @@ DecodeImages(DecodeInfo& decode_info, RocJpegUtils rocjpeg_utils,
              RocJpegDecodeParams& decode_params, bool save_images,
              std::string& output_file_path, int batch_size, int device_id)
 {
-    bool     is_roi_valid = false;
-    uint32_t roi_width;
-    uint32_t roi_height;
-    roi_width  = decode_params.crop_rectangle.right - decode_params.crop_rectangle.left;
-    roi_height = decode_params.crop_rectangle.bottom - decode_params.crop_rectangle.top;
+    bool                               is_roi_valid = false;
+    uint32_t                           roi_width;
+    uint32_t                           roi_height;
     uint8_t                            num_components;
     uint32_t                           channel_sizes[ROCJPEG_MAX_COMPONENT] = {};
     std::string                        chroma_sub_sampling                  = "";
@@ -73,6 +71,7 @@ DecodeImages(DecodeInfo& decode_info, RocJpegUtils rocjpeg_utils,
         batch_size, std::vector<uint32_t>(ROCJPEG_MAX_COMPONENT, 0));
     std::vector<RocJpegChromaSubsampling> subsamplings(batch_size);
     std::vector<RocJpegImage>             output_images(batch_size);
+    std::vector<RocJpegDecodeParams>      decode_params_batch(batch_size, decode_params);
     std::vector<std::string>              base_file_names(batch_size);
     std::vector<RocJpegStreamHandle>      rocjpeg_stream_handles(batch_size);
     std::vector<uint32_t>                 temp_widths(ROCJPEG_MAX_COMPONENT, 0);
@@ -130,11 +129,6 @@ DecodeImages(DecodeInfo& decode_info, RocJpegUtils rocjpeg_utils,
                                               decode_info.rocjpeg_stream_handles[index],
                                               &num_components, &temp_subsampling,
                                               temp_widths.data(), temp_heights.data()));
-            if(roi_width > 0 && roi_height > 0 && roi_width <= temp_widths[0] &&
-               roi_height <= temp_heights[0])
-            {
-                is_roi_valid = true;
-            }
 
             rocjpeg_utils.GetChromaSubsamplingStr(temp_subsampling, chroma_sub_sampling);
             if(temp_widths[0] < 64 || temp_heights[0] < 64)
@@ -158,7 +152,7 @@ DecodeImages(DecodeInfo& decode_info, RocJpegUtils rocjpeg_utils,
             }
 
             if(rocjpeg_utils.GetChannelPitchAndSizes(
-                   decode_params, temp_subsampling, temp_widths.data(),
+                   decode_params_batch[index], temp_subsampling, temp_widths.data(),
                    temp_heights.data(), num_channels, output_images[current_batch_size],
                    channel_sizes))
             {
@@ -200,7 +194,7 @@ DecodeImages(DecodeInfo& decode_info, RocJpegUtils rocjpeg_utils,
             auto start_time = std::chrono::high_resolution_clock::now();
             CHECK_ROCJPEG(rocJpegDecodeBatched(
                 decode_info.rocjpeg_handle, rocjpeg_stream_handles.data(),
-                current_batch_size, &decode_params, output_images.data()));
+                current_batch_size, decode_params_batch.data(), output_images.data()));
             auto end_time = std::chrono::high_resolution_clock::now();
             time_per_batch_in_milli_sec =
                 std::chrono::duration<double, std::milli>(end_time - start_time).count();
@@ -221,6 +215,14 @@ DecodeImages(DecodeInfo& decode_info, RocJpegUtils rocjpeg_utils,
             {
                 std::string image_save_path = output_file_path;
                 // if ROI is present, need to pass roi_width and roi_height
+                roi_width = decode_params_batch[b].crop_rectangle.right -
+                            decode_params_batch[b].crop_rectangle.left;
+                roi_height = decode_params_batch[b].crop_rectangle.bottom -
+                             decode_params_batch[b].crop_rectangle.top;
+                is_roi_valid    = (roi_width > 0 && roi_height > 0 &&
+                                roi_width <= widths[b][0] && roi_height <= heights[b][0])
+                                      ? true
+                                      : false;
                 uint32_t width  = is_roi_valid ? roi_width : widths[b][0];
                 uint32_t height = is_roi_valid ? roi_height : heights[b][0];
                 rocjpeg_utils.GetOutputFileExt(decode_params.output_format,
