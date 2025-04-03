@@ -1,19 +1,17 @@
-.. ---
-.. myst:
-..     html_meta:
-..         "description": "ROCprofiler-SDK is a tooling infrastructure for profiling general-purpose GPU compute applications running on the ROCm software."
-..         "keywords": "ROCprofiler-SDK API reference, ROCprofiler-SDK intercept table, Intercept table API"
-.. ---
 
-.. _ROCprofiler-SDK runtime intercept tables:
+.. meta::
+    :description: ROCprofiler-SDK is a tooling infrastructure for profiling general-purpose GPU compute applications running on the ROCm software
+    :keywords: ROCprofiler-SDK API reference, ROCprofiler-SDK intercept table, Intercept table API
 
-Runtime Intercept Tables
+.. _runtime-intercept-tables:
+
+Runtime intercept tables
 =========================
 
 While tools commonly leverage the callback or buffer tracing services for tracing the HIP, HSA, and ROCTx
 APIs, ROCprofiler-SDK also provides access to the raw API dispatch tables.
 
-Forward declaration of public C API function:
+Forward declaration of public C API function
 ----------------------------------------------
 
 All the aforementioned APIs are designed similar to the following sample:
@@ -27,7 +25,7 @@ All the aforementioned APIs are designed similar to the following sample:
     foo(int) __attribute__((visibility("default")));
     }
 
-Internal implementation of API function:
+Internal implementation of API function
 -----------------------------------------
 
 .. code-block:: cpp
@@ -42,7 +40,7 @@ Internal implementation of API function:
     }
     }
 
-Dispatch table implementation:
+Dispatch table implementation
 -------------------------------
 
 .. code-block:: cpp
@@ -77,7 +75,7 @@ Dispatch table implementation:
     }
     }  // namespace impl
 
-Implementation of public C API function:
+Implementation of public C API function
 -----------------------------------------
 
 .. code-block:: cpp
@@ -92,10 +90,10 @@ Implementation of public C API function:
     }
     }
 
-Dispatch table chaining:
+Dispatch table chaining
 -------------------------
 
-ROCprofiler-SDK can save the original values of the function pointers such as ``foo_fn`` in ``impl::construct_dispatch_table()`` and install its own function pointers in its place. This results in the public C API function `foo` calling into the ROCprofiler-SDK function pointer, which in turn, calls the original function pointer to ``impl::foo``. This phenomenon is named chaining. Once ROCprofiler-SDK
-makes necessary modifications to the dispatch table, tools requesting access to the raw dispatch table via ``rocprofiler_at_intercept_table_registration``, are provided the pointer to the dispatch table.
+ROCprofiler-SDK can save the original values of the function pointers such as ``foo_fn`` in ``impl::construct_dispatch_table()`` and install its own function pointers in its place. This results in the public C API function ``foo`` calling into the ROCprofiler-SDK function pointer, which in turn, calls the original function pointer to ``impl::foo``. This phenomenon is named chaining. Once ROCprofiler-SDK
+makes necessary modifications to the dispatch table, tools requesting access to the raw dispatch table via ``rocprofiler_at_intercept_table_registration`` are provided the pointer to the dispatch table.
 
-For an example of dispatch table chaining, see `samples/intercept_table <https://github.com/ROCm/rocprofiler-sdk-internal/tree/amd-staging/samples/intercept_table>`_.
+For examples on dispatch table chaining, see `samples/intercept_table <https://github.com/ROCm/rocprofiler-sdk/tree/amd-staging/samples/intercept_table>`_.

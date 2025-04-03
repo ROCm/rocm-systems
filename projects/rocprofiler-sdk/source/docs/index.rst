@@ -42,7 +42,7 @@ The documentation is structured as follows:
     * :doc:`Buffered services <api-reference/buffered_services>`
     * :doc:`Callback services <api-reference/callback_services>`
     * :doc:`Counter collection services <api-reference/counter_collection_services>`
-    * :doc:`Intercept table <api-reference/intercept_table>`
+    * :ref:`runtime-intercept-tables`
     * :doc:`PC sampling <api-reference/pc_sampling>`
     * :doc:`Tool library <api-reference/tool_library>`
     * :doc:`ROCprofiler-SDK API library <_doxygen/rocprofiler-sdk/html/index>`

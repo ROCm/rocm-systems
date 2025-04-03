@@ -1,9 +1,9 @@
-.. ---
-.. myst:
-..    html_meta:
-..        "description": "ROCprofiler-SDK is a tooling infrastructure for profiling general-purpose GPU compute applications running on the ROCm software."
-..        "keywords": "ROCprofiler-SDK API reference, Program counter sampling, PC sampling"
-.. ---
+
+.. meta::
+    :description: ROCprofiler-SDK is a tooling infrastructure for profiling general-purpose GPU compute applications running on the ROCm software
+    :keywords: ROCprofiler-SDK API reference, Program counter sampling, PC sampling
+
+.. _pc-sampling:
 
 ROCprofiler-SDK PC sampling method
 ===================================
@@ -43,7 +43,7 @@ Here are the steps to set up ``tool_init()``:
                                                 &buff),
                         "buffer creation failed");
 
-For more details on buffer creation, see `buffered services <buffered_services.md>`_.
+For more details on buffer creation, see :ref:`buffered-services`.
 
 The PC sampling service is tied to a GPU agent. To extract the list of available agents, use the ``rocprofiler_query_available_agents`` as shown in the following code snippet:
 
@@ -169,8 +169,6 @@ The PC sampling service asynchronously delivers samples via a dedicated callback
             }
         }
     }
-
-
 
 For more information on the data comprising a single sample, see `pc_sampling.h <https://github.com/ROCm/rocprofiler-sdk/blob/amd-mainline/source/include/rocprofiler-sdk/pc_sampling.h>`_.
 
