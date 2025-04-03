@@ -70,4 +70,5 @@ markers = [
 	"col",
 	"kernel_verbose",
 	"serial",
+	"L1_cache",
 ]

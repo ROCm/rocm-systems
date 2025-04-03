@@ -18,13 +18,15 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def binary_handler_profile_rocprof_compute(request):
-    def _handler(config, workload_dir, options=[], check_success=True, roof=False):
+    def _handler(
+        config, workload_dir, options=[], check_success=True, roof=False, app_name="app_1"
+    ):
         if request.config.getoption("--call-binary"):
             baseline_opts = [
                 "build/rocprof-compute.bin",
                 "profile",
                 "-n",
-                "app_1",
+                app_name,
                 "-VVV",
             ]
             if not roof:
@@ -33,7 +35,7 @@ def binary_handler_profile_rocprof_compute(request):
                 baseline_opts
                 + options
                 + ["--path", workload_dir, "--"]
-                + config["app_1"],
+                + config[app_name],
                 text=True,
             )
             # verify run status
@@ -41,7 +43,7 @@ def binary_handler_profile_rocprof_compute(request):
                 assert process.returncode == 0
             return process.returncode
         else:
-            baseline_opts = ["rocprof-compute", "profile", "-n", "app_1", "-VVV"]
+            baseline_opts = ["rocprof-compute", "profile", "-n", app_name, "-VVV"]
             if not roof:
                 baseline_opts.append("--no-roof")
             with pytest.raises(SystemExit) as e:
@@ -50,7 +52,7 @@ def binary_handler_profile_rocprof_compute(request):
                     baseline_opts
                     + options
                     + ["--path", workload_dir, "--"]
-                    + config["app_1"],
+                    + config[app_name],
                 ):
                     rocprof_compute.main()
             # verify run status
