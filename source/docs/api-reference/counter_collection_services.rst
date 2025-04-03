@@ -1,6 +1,10 @@
+.. meta::
+    :description: ROCprofiler-SDK is a tooling infrastructure for profiling general-purpose GPU compute applications running on the ROCm software
+    :keywords: ROCprofiler-SDK API reference, ROCprofiler-SDK counter collection
+
 .. _rocprofiler_sdk_counter_collection_services:
 
-ROCprofiler-SDK Counter Collection Services
+ROCprofiler-SDK counter collection services
 ===========================================
 
 There are two modes of counter collection service:
