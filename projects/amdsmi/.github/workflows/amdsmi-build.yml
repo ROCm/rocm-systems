@@ -189,6 +189,7 @@ jobs:
           - SLES
           - RHEL8
           - RHEL9
+          - RHEL10
           - Mariner2
           - AzureLinux3
           - AlmaLinux8
@@ -204,26 +205,37 @@ jobs:
         run: |
           echo "DOCKER_IMAGE=${{ secrets.SLES_DOCKER_IMAGE }}" >> $GITHUB_ENV
           echo "PACKAGE_MANAGER=zypper" >> $GITHUB_ENV
+
       - name: Set Docker Image and Package Manager for RHEL8
         if: matrix.os == 'RHEL8'
         run: |
           echo "DOCKER_IMAGE=${{ secrets.RHEL8_DOCKER_IMAGE }}" >> $GITHUB_ENV
           echo "PACKAGE_MANAGER=dnf" >> $GITHUB_ENV
+
       - name: Set Docker Image and Package Manager for RHEL9
         if: matrix.os == 'RHEL9'
         run: |
           echo "DOCKER_IMAGE=${{ secrets.RHEL9_DOCKER_IMAGE }}" >> $GITHUB_ENV
           echo "PACKAGE_MANAGER=dnf" >> $GITHUB_ENV
+
+      - name: Set Docker Image and Package Manager for RHEL10
+        if: matrix.os == 'RHEL10'
+        run: |
+          echo "DOCKER_IMAGE=${{ secrets.RHEL10_DOCKER_IMAGE }}" >> $GITHUB_ENV
+          echo "PACKAGE_MANAGER=dnf" >> $GITHUB_ENV
+
       - name: Set Docker Image and Package Manager for Mariner2
         if: matrix.os == 'Mariner2'
         run: |
           echo "DOCKER_IMAGE=${{ secrets.MARINER2_DOCKER_IMAGE }}" >> $GITHUB_ENV
           echo "PACKAGE_MANAGER=tdnf" >> $GITHUB_ENV
+
       - name: Set Docker Image and Package Manager for AzureLinux3
         if: matrix.os == 'AzureLinux3'
         run: |
           echo "DOCKER_IMAGE=${{ secrets.AZURELINUX3_DOCKER_IMAGE }}" >> $GITHUB_ENV
           echo "PACKAGE_MANAGER=tdnf" >> $GITHUB_ENV
+
       - name: Set Docker Image and Package Manager for AlmaLinux8
         if: matrix.os == 'AlmaLinux8'
         run: |
