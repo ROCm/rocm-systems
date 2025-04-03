@@ -2015,7 +2015,7 @@ class AMDSMICommands():
                                                                                 gfx_clock_info_dict["max_clk"],
                                                                                 clock_unit)
                 except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
-                    logging.debug("Failed to get gfx clock info for gpu %s | %s", gpu_id, e.get_error_info())
+                    logging.debug("Failed to get gfx clock info for gpu %s | %s", gpu_id, e)
 
                 # MEM min and max clocks
                 try:
@@ -2030,7 +2030,7 @@ class AMDSMICommands():
                                                                                 mem_clock_info_dict["max_clk"],
                                                                                 clock_unit)
                 except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
-                    logging.debug("Failed to get mem clock info for gpu %s | %s", gpu_id, e.get_error_info())
+                    logging.debug("Failed to get mem clock info for gpu %s | %s", gpu_id, e)
 
                 # VCLK min and max clocks
                 try:
@@ -2047,7 +2047,7 @@ class AMDSMICommands():
                                                                                     vclk_clock_info_dict["max_clk"],
                                                                                     clock_unit)
                 except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
-                    logging.debug("Failed to get vclk clock info for gpu %s | %s", gpu_id, e.get_error_info())
+                    logging.debug("Failed to get vclk clock info for gpu %s | %s", gpu_id, e)
 
                 # DCLK min and max clocks
                 try:
@@ -2064,7 +2064,7 @@ class AMDSMICommands():
                                                                                     dclk_clock_info_dict["max_clk"],
                                                                                     clock_unit)
                 except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
-                    logging.debug("Failed to get dclk clock info for gpu %s | %s", gpu_id, e.get_error_info())
+                    logging.debug("Failed to get dclk clock info for gpu %s | %s", gpu_id, e)
 
                 # FCLK min and max clocks
                 try:
@@ -5164,10 +5164,20 @@ class AMDSMICommands():
             try:
                 # Get GPU Metrics table
                 gpu_metric_debug_info = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)
-                gpu_metric_str = json.dumps(gpu_metric_debug_info, indent=4)
-                logging.debug("GPU Metrics table for GPU %s | %s", gpu_id, str(gpu_metric_str))
+
             except amdsmi_exception.AmdSmiLibraryException as e:
                 logging.debug("#5 - Unable to load GPU Metrics table for %s | %s", gpu_id, e.err_info)
+
+        #get metric info only once per gpu, this will speed up data output
+        try:
+            # Get GPU Metrics table
+            gpu_metrics_info = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)
+            if args.loglevel == "DEBUG":
+                gpu_metric_debug_info = json.dumps(gpu_metrics_info, indent=4)
+                logging.debug("GPU Metrics table for GPU %s | %s", gpu_id, gpu_metric_debug_info)
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            gpu_metrics_info = {} # Empty dict to avoid NameError
+            logging.debug("Unable to load GPU Metrics table for %s | %s", gpu_id, e.err_info)
 
         # Store the pcie_bw values due to possible increase in bandwidth due to repeated gpu_metrics calls
         if args.pcie:
@@ -5177,26 +5187,25 @@ class AMDSMICommands():
                 pcie_info = "N/A"
                 logging.debug("Failed to get pci bandwidth on gpu %s | %s", gpu_id, e.get_error_info())
 
+        power_unit = 'W'
+
         # Resume regular ordering of values
         if args.power_usage:
             try:
-                gpu_metrics_info = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)
-
                 if gpu_metrics_info['current_socket_power'] != "N/A":
                     monitor_values['power_usage'] = gpu_metrics_info['current_socket_power']
                 else: # Fallback to average_socket_power for older gpu_metrics versions
                     monitor_values['power_usage'] = gpu_metrics_info['average_socket_power']
 
-                power_unit = 'W'
                 if self.logger.is_human_readable_format() and monitor_values['power_usage'] != "N/A":
                     monitor_values['power_usage'] = f"{monitor_values['power_usage']} {power_unit}"
                 if self.logger.is_json_format() and monitor_values['power_usage'] != "N/A":
                     monitor_values['power_usage'] = {"value" : monitor_values['power_usage'],
                                                      "unit" : power_unit}
 
-            except amdsmi_exception.AmdSmiLibraryException as e:
+            except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
                 monitor_values['power_usage'] = "N/A"
-                logging.debug("Failed to get power usage on gpu %s | %s", gpu_id, e.get_error_info())
+                logging.debug("Failed to get power usage on gpu %s | %s", gpu_id, e)
 
             self.logger.table_header += 'POWER'.rjust(7)
 
@@ -5220,18 +5229,18 @@ class AMDSMICommands():
 
         if args.temperature:
             try:
-                temperature = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)['temperature_hotspot']
+                temperature = gpu_metrics_info['temperature_hotspot']
                 monitor_values['hotspot_temperature'] = temperature
-            except amdsmi_exception.AmdSmiLibraryException as e:
+            except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
                 monitor_values['hotspot_temperature'] = "N/A"
-                logging.debug("Failed to get hotspot temperature on gpu %s | %s", gpu_id, e.get_error_info())
+                logging.debug("Failed to get hotspot temperature on gpu %s | %s", gpu_id, e)
 
             try:
-                temperature = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)['temperature_mem']
+                temperature = gpu_metrics_info['temperature_mem']
                 monitor_values['memory_temperature'] = temperature
-            except amdsmi_exception.AmdSmiLibraryException as e:
+            except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
                 monitor_values['memory_temperature'] = "N/A"
-                logging.debug("Failed to get memory temperature on gpu %s | %s", gpu_id, e.get_error_info())
+                logging.debug("Failed to get memory temperature on gpu %s | %s", gpu_id, e)
 
             temp_unit_human_readable = '\N{DEGREE SIGN}C'
             temp_unit_json = 'C'
@@ -5253,7 +5262,7 @@ class AMDSMICommands():
 
         if args.gfx:
             try:
-                gfx_clk = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)['current_gfxclk']
+                gfx_clk = gpu_metrics_info['current_gfxclk']
                 monitor_values['gfx_clk'] = gfx_clk
                 freq_unit = 'MHz'
                 if gfx_clk != "N/A":
@@ -5263,14 +5272,14 @@ class AMDSMICommands():
                         monitor_values['gfx_clk'] = {"value" : monitor_values['gfx_clk'],
                                                        "unit" : freq_unit}
 
-            except amdsmi_exception.AmdSmiLibraryException as e:
+            except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
                 monitor_values['gfx_clk'] = "N/A"
-                logging.debug("Failed to get gfx clock on gpu %s | %s", gpu_id, e.get_error_info())
+                logging.debug("Failed to get gfx clock on gpu %s | %s", gpu_id, e)
 
             self.logger.table_header += 'GFX_CLK'.rjust(10)
 
             try:
-                gfx_util = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)['average_gfx_activity']
+                gfx_util = gpu_metrics_info['average_gfx_activity']
                 monitor_values['gfx'] = round(gfx_util)
                 activity_unit = '%'
                 if gfx_util != "N/A":
@@ -5279,15 +5288,15 @@ class AMDSMICommands():
                     if self.logger.is_json_format():
                         monitor_values['gfx'] = {"value" : monitor_values['gfx'],
                                                  "unit" : activity_unit}
-            except amdsmi_exception.AmdSmiLibraryException as e:
+            except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
                 monitor_values['gfx'] = "N/A"
-                logging.debug("Failed to get gfx utilization on gpu %s | %s", gpu_id, e.get_error_info())
+                logging.debug("Failed to get gfx utilization on gpu %s | %s", gpu_id, e)
 
             self.logger.table_header += 'GFX%'.rjust(7)
 
         if args.mem:
             try:
-                mem_util = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)['average_umc_activity']
+                mem_util = gpu_metrics_info['average_umc_activity']
                 monitor_values['mem'] = round(mem_util)
                 activity_unit = '%'
                 if mem_util != "N/A":
@@ -5296,16 +5305,16 @@ class AMDSMICommands():
                     if self.logger.is_json_format():
                         monitor_values['mem'] = {"value" : monitor_values['mem'],
                                                  "unit" : activity_unit}
-            except amdsmi_exception.AmdSmiLibraryException as e:
+            except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
                 monitor_values['mem'] = "N/A"
-                logging.debug("Failed to get mem utilization on gpu %s | %s", gpu_id, e.get_error_info())
+                logging.debug("Failed to get mem utilization on gpu %s | %s", gpu_id, e)
 
             self.logger.table_header += 'MEM%'.rjust(7)
 
             # don't populate mem clock on default output 
             if not args.default_output:
                 try:
-                    mem_clock = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)['current_uclk']
+                    mem_clock = gpu_metrics_info['current_uclk']
                     monitor_values['mem_clock'] = mem_clock
                     freq_unit = 'MHz'
                     if mem_clock != "N/A":
@@ -5314,9 +5323,9 @@ class AMDSMICommands():
                         if self.logger.is_json_format():
                             monitor_values['mem_clock'] = {"value" : monitor_values['mem_clock'],
                                                         "unit" : freq_unit}
-                except amdsmi_exception.AmdSmiLibraryException as e:
+                except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
                     monitor_values['mem_clock'] = "N/A"
-                    logging.debug("Failed to get mem clock on gpu %s | %s", gpu_id, e.get_error_info())
+                    logging.debug("Failed to get mem clock on gpu %s | %s", gpu_id, e)
 
                 self.logger.table_header += 'MEM_CLOCK'.rjust(11)
 
@@ -5355,7 +5364,7 @@ class AMDSMICommands():
             try:
                 # Get List of vcn activity values
                 # Note: MI3x ASICs only support decoding, so the vcn_activity is used for decoding activity.
-                decoder_util = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)['vcn_activity']
+                decoder_util = gpu_metrics_info['vcn_activity']
                 decoding_activity_avg = []
                 for value in decoder_util:
                     if isinstance(value, int):
@@ -5376,15 +5385,15 @@ class AMDSMICommands():
                     if self.logger.is_json_format():
                         monitor_values['decoder'] = {"value" : monitor_values['decoder'],
                                                     "unit" : activity_unit}
-            except amdsmi_exception.AmdSmiLibraryException as e:
+            except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
                 monitor_values['decoder'] = "N/A"
-                logging.debug("Failed to get decoder utilization on gpu %s | %s", gpu_id, e.get_error_info())
+                logging.debug("Failed to get decoder utilization on gpu %s | %s", gpu_id, e)
 
             self.logger.table_header += 'DEC%'.rjust(7)
 
         if (args.encoder or args.decoder) and not args.default_output:
             try:
-                vclock = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)['current_vclk0']
+                vclock = gpu_metrics_info['current_vclk0']
                 monitor_values['vclock'] = vclock
 
                 freq_unit = 'MHz'
@@ -5394,14 +5403,14 @@ class AMDSMICommands():
                     if self.logger.is_json_format():
                         monitor_values['vclock'] = {"value" : monitor_values['vclock'],
                                                            "unit" : freq_unit}
-            except amdsmi_exception.AmdSmiLibraryException as e:
+            except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
                 monitor_values['vclock'] = "N/A"
-                logging.debug("Failed to get dclock on gpu %s | %s", gpu_id, e.get_error_info())
+                logging.debug("Failed to get dclock on gpu %s | %s", gpu_id, e)
 
             self.logger.table_header += 'VCLOCK'.rjust(10)
 
             try:
-                dclock = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)['current_dclk0']
+                dclock = gpu_metrics_info['current_dclk0']
                 monitor_values['dclock'] = dclock
 
                 freq_unit = 'MHz'
@@ -5411,9 +5420,9 @@ class AMDSMICommands():
                     if self.logger.is_json_format():
                         monitor_values['dclock'] = {"value" : monitor_values['dclock'],
                                                            "unit" : freq_unit}
-            except amdsmi_exception.AmdSmiLibraryException as e:
+            except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
                 monitor_values['dclock'] = "N/A"
-                logging.debug("Failed to get vclock on gpu %s | %s", gpu_id, e.get_error_info())
+                logging.debug("Failed to get vclock on gpu %s | %s", gpu_id, e)
 
             self.logger.table_header += 'DCLOCK'.rjust(10)
 
