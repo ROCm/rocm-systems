@@ -4,7 +4,7 @@ on:
     branches: [amd-staging, amd-npi, release/rocm-rel-*, amd-master]  
     types: [opened, reopened, synchronize]  
   push:  
-    branches: [amd-master]  
+    branches: [amd-mainline]  
   workflow_dispatch:  
   issue_comment:  
     types: [created]  
