@@ -62,9 +62,9 @@ Panel Config:
             unit: (Instructions  + $normUnit)
             tips:
           Global/Generic Read Instructions for LDS:
-            avg: None # Missing perfmon
-            min: None # Missing perfmon
-            max: None # Missing perfmon
+            avg: AVG((TA_FLAT_READ_LDS_WAVEFRONTS_sum / $denom))
+            min: MIN((TA_FLAT_READ_LDS_WAVEFRONTS_sum / $denom))
+            max: MAX((TA_FLAT_READ_LDS_WAVEFRONTS_sum / $denom))
             unit: (Instructions  + $normUnit)
             tips:
           Global/Generic Write Instructions:
@@ -92,9 +92,9 @@ Panel Config:
             unit: (Instructions  + $normUnit)
             tips:
           Spill/Stack Read Instructions for LDS:
-            avg: None # Missing perfmon
-            min: None # Missing perfmon
-            max: None # Missing perfmon
+            avg: AVG((TA_BUFFER_READ_LDS_WAVEFRONTS_sum / $denom))
+            min: MIN((TA_BUFFER_READ_LDS_WAVEFRONTS_sum / $denom))
+            max: MAX((TA_BUFFER_READ_LDS_WAVEFRONTS_sum / $denom))
             unit: (Instructions  + $normUnit)
             tips:
           Spill/Stack Write Instructions:
@@ -152,9 +152,9 @@ Panel Config:
             unit: pct
             tips:
           Workgroup manager → Data-Return Stall:
-            avg: None # No perf counter
-            min: None # No perf counter
-            max: None # No perf counter
+            avg: AVG(((100 * TD_SPI_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
+            min: MIN(((100 * TD_SPI_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
+            max: MAX(((100 * TD_SPI_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             unit: pct
             tips:
           Coalescable Instructions:
@@ -185,8 +185,8 @@ Panel Config:
             unit: (Instructions  + $normUnit)
             tips:
           Write Ack Instructions:
-            avg: None # Missing perfmon
-            min: None # Missing perfmon
-            max: None # Missing perfmon
+            avg: None # AVG((TD_WRITE_ACKT_WAVEFRONT_sum / $denom))
+            min: None # MIN((TD_WRITE_ACKT_WAVEFRONT_sum / $denom))
+            max: None # MAX((TD_WRITE_ACKT_WAVEFRONT_sum / $denom))
             unit: (Instructions  + $normUnit)
             tips:

@@ -61,6 +61,12 @@ Panel Config:
             max: MAX((TA_FLAT_READ_WAVEFRONTS_sum / $denom))
             unit: (Instructions  + $normUnit)
             tips:
+          Global/Generic Read Instructions for LDS:
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
+            unit: (Instructions  + $normUnit)
+            tips:
           Global/Generic Write Instructions:
             avg: AVG((TA_FLAT_WRITE_WAVEFRONTS_sum / $denom))
             min: MIN((TA_FLAT_WRITE_WAVEFRONTS_sum / $denom))
@@ -83,6 +89,12 @@ Panel Config:
             avg: AVG((TA_BUFFER_READ_WAVEFRONTS_sum / $denom))
             min: MIN((TA_BUFFER_READ_WAVEFRONTS_sum / $denom))
             max: MAX((TA_BUFFER_READ_WAVEFRONTS_sum / $denom))
+            unit: (Instructions  + $normUnit)
+            tips:
+          Spill/Stack Read Instructions for LDS:
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
             unit: (Instructions  + $normUnit)
             tips:
           Spill/Stack Write Instructions:
@@ -170,5 +182,11 @@ Panel Config:
             avg: AVG((TD_ATOMIC_WAVEFRONT_sum / $denom))
             min: MIN((TD_ATOMIC_WAVEFRONT_sum / $denom))
             max: MAX((TD_ATOMIC_WAVEFRONT_sum / $denom))
+            unit: (Instructions  + $normUnit)
+            tips:
+          Write Ack Instructions:
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
             unit: (Instructions  + $normUnit)
             tips:
