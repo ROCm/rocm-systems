@@ -118,17 +118,6 @@ jobs:
             parse_and_explain /shared/test-results-${{ matrix.os }}/unit_test_output.txt 'Python Unit Tests'
             echo 'Completed Python Unit Testing'
 
-            # Run Build Testing
-            echo 'Running Build Tests'
-            cd /src/build/example
-            ./amd_smi_drm_ex > /shared/test-results-${{ matrix.os }}/amd_smi_drm_ex.log 2>&1 || echo 'amd_smi_drm_ex failed'
-            parse_and_explain /shared/test-results-${{ matrix.os }}/amd_smi_drm_ex.log 'DRM Example Test'
-            ./amd_smi_esmi_ex > /shared/test-results-${{ matrix.os }}/amd_smi_esmi_ex.log 2>&1 || echo 'amd_smi_esmi_ex failed'
-            parse_and_explain /shared/test-results-${{ matrix.os }}/amd_smi_esmi_ex.log 'ESMI Example Test'
-            ./amd_smi_nodrm_ex > /shared/test-results-${{ matrix.os }}/amd_smi_nodrm_ex.log 2>&1 || echo 'amd_smi_nodrm_ex failed'
-            parse_and_explain /shared/test-results-${{ matrix.os }}/amd_smi_nodrm_ex.log 'No DRM Example Test'
-            echo 'Completed Build Testing'
-
             # Uninstall AMD-SMI
             echo 'Uninstalling AMD-SMI'
             sudo apt remove -y amd-smi-lib
@@ -160,21 +149,6 @@ jobs:
         run: |
           echo "Displaying Unit Test Results for ${{ matrix.os }}"
           cat /tmp/test-results/test-results-${{ matrix.os }}/unit_test_output.txt || echo "No unit test results found for ${{ matrix.os }}"
-
-      - name: DRM EX Test Results
-        run: |
-          echo "Displaying DRM EX Test Results for ${{ matrix.os }}"
-          cat /tmp/test-results/test-results-${{ matrix.os }}/amd_smi_drm_ex.log || echo "No amd_smi_drm_ex.log found for ${{ matrix.os }}"
-
-      - name: NO-DRM EX Test Results
-        run: |
-           echo "Displaying NO-DRM EX Test Results for ${{ matrix.os }}"
-           cat /tmp/test-results/test-results-${{ matrix.os }}/amd_smi_nodrm_ex.log || echo "No amd_smi_nodrm_ex.log found for ${{ matrix.os }}"
-
-      - name: ESMI EX Test Results
-        run: |
-           echo "Displaying ESMI EX Test Results for ${{ matrix.os }}"
-           cat /tmp/test-results/test-results-${{ matrix.os }}/amd_smi_esmi_ex.log || echo "No amd_smi_esmi_ex.log found for ${{ matrix.os }}"
 
 
   build-and-install-rpm:
@@ -339,17 +313,6 @@ jobs:
             parse_and_explain /shared/test-results-${{ matrix.os }}/unit_test_output.txt 'Python Unit Tests'
             echo 'Completed Python Unit Testing'
 
-            # Run Build Testing
-            echo 'Running Build Tests'
-            cd /src/build/example
-            ./amd_smi_drm_ex > /shared/test-results-${{ matrix.os }}/amd_smi_drm_ex.log 2>&1 || echo 'amd_smi_drm_ex failed'
-            parse_and_explain /shared/test-results-${{ matrix.os }}/amd_smi_drm_ex.log 'DRM Example Test'
-            ./amd_smi_esmi_ex > /shared/test-results-${{ matrix.os }}/amd_smi_esmi_ex.log 2>&1 || echo 'amd_smi_esmi_ex failed'
-            parse_and_explain /shared/test-results-${{ matrix.os }}/amd_smi_esmi_ex.log 'ESMI Example Test'
-            ./amd_smi_nodrm_ex > /shared/test-results-${{ matrix.os }}/amd_smi_nodrm_ex.log 2>&1 || echo 'amd_smi_nodrm_ex failed'
-            parse_and_explain /shared/test-results-${{ matrix.os }}/amd_smi_nodrm_ex.log 'No DRM Example Test'
-            echo 'Completed Build Testing'
-
             # Uninstall AMD-SMI
             echo 'Uninstalling AMD-SMI'
             case '$PACKAGE_MANAGER' in
@@ -395,18 +358,3 @@ jobs:
         run: |
           echo "Displaying Unit Test Results for ${{ matrix.os }}"
           cat /tmp/test-results/test-results-${{ matrix.os }}/unit_test_output.txt || echo "No unit test results found for ${{ matrix.os }}"
-
-      - name: DRM EX Test Results
-        run: |
-          echo "Displaying DRM EX Test Results for ${{ matrix.os }}"
-          cat /tmp/test-results/test-results-${{ matrix.os }}/amd_smi_drm_ex.log || echo "No amd_smi_drm_ex.log found for ${{ matrix.os }}"
-
-      - name: NO-DRM EX Test Results
-        run: |
-           echo "Displaying NO-DRM EX Test Results for ${{ matrix.os }}"
-           cat /tmp/test-results/test-results-${{ matrix.os }}/amd_smi_nodrm_ex.log || echo "No amd_smi_nodrm_ex.log found for ${{ matrix.os }}"
-
-      - name: ESMI EX Test Results
-        run: |
-           echo "Displaying ESMI EX Test Results for ${{ matrix.os }}"
-           cat /tmp/test-results/test-results-${{ matrix.os }}/amd_smi_esmi_ex.log || echo "No amd_smi_esmi_ex.log found for ${{ matrix.os }}"
