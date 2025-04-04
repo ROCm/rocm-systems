@@ -47,6 +47,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
       ...
     ```
 
+### Resolved issues
+
+- **Deduplicated GPU IDs when receiving events using the `amd-smi event` command**.  
+
 ## amd_smi_lib for ROCm 6.4.1
 
 ### Added

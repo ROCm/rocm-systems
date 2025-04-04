@@ -6184,7 +6184,7 @@ class AMDSMICommands():
                             item_list = item.split(": ")
                             message_dict.update({item_list[0]: item_list[1]})
                     values_dict["message"] = message_dict
-                    commands.logger.store_output(device, 'values', values_dict)
+                    commands.logger.store_output(event['processor_handle'], 'values', values_dict)
                     commands.logger.print_output()
             except amdsmi_exception.AmdSmiLibraryException as e:
                 if e.err_code != amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_DATA:
