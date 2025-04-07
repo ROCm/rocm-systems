@@ -1,0 +1,503 @@
++ LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_ctest
+# INIT #############################
+# START (99) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (98) #############################
+PASSED!
+# START (97) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (96) #############################
+PASSED!
+# START (95) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (94) #############################
+PASSED!
+# START (93) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (92) #############################
+PASSED!
+# START (91) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (90) #############################
+PASSED!
+# START (89) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (88) #############################
+PASSED!
+# START (87) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (86) #############################
+PASSED!
+# START (85) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (84) #############################
+PASSED!
+# START (83) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (82) #############################
+PASSED!
+# START (81) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (80) #############################
+PASSED!
+# START (79) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (78) #############################
+PASSED!
+# START (77) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (76) #############################
+PASSED!
+# START (75) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (74) #############################
+PASSED!
+# START (73) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (72) #############################
+PASSED!
+# START (71) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (70) #############################
+PASSED!
+# START (69) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (68) #############################
+PASSED!
+# START (67) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (66) #############################
+PASSED!
+# START (65) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (64) #############################
+PASSED!
+# START (63) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (62) #############################
+PASSED!
+# START (61) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (60) #############################
+PASSED!
+# START (59) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (58) #############################
+PASSED!
+# START (57) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (56) #############################
+PASSED!
+# START (55) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (54) #############################
+PASSED!
+# START (53) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (52) #############################
+PASSED!
+# START (51) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (50) #############################
+PASSED!
+# START (49) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (48) #############################
+PASSED!
+# START (47) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (46) #############################
+PASSED!
+# START (45) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (44) #############################
+PASSED!
+# START (43) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (42) #############################
+PASSED!
+# START (41) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (40) #############################
+PASSED!
+# START (39) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (38) #############################
+PASSED!
+# START (37) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (36) #############################
+PASSED!
+# START (35) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (34) #############################
+PASSED!
+# START (33) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (32) #############################
+PASSED!
+# START (31) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (30) #############################
+PASSED!
+# START (29) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (28) #############################
+PASSED!
+# START (27) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (26) #############################
+PASSED!
+# START (25) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (24) #############################
+PASSED!
+# START (23) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (22) #############################
+PASSED!
+# START (21) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (20) #############################
+PASSED!
+# START (19) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (18) #############################
+PASSED!
+# START (17) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (16) #############################
+PASSED!
+# START (15) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (14) #############################
+PASSED!
+# START (13) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (12) #############################
+PASSED!
+# START (11) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (10) #############################
+PASSED!
+# START (9) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (8) #############################
+PASSED!
+# START (7) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (6) #############################
+PASSED!
+# START (5) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (4) #############################
+PASSED!
+# START (3) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (2) #############################
+PASSED!
+# START (1) #############################
+rocTX <"before hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"after hipLaunchKernel pid(22834) tid(22834)">
+rocTX <"hipMemcpy pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+rocTX <"(null) pid(22834) tid(22834)">
+PASSED!
+# START (0) #############################
+PASSED!
+# STOP  #############################

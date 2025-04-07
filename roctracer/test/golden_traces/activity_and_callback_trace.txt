@@ -1,0 +1,65 @@
+<hipSetDevice id(186)	correlation_id(1) on-enter pid(877336) tid(877336)>
+<hipSetDevice id(186)	correlation_id(1) on-exit pid(877336) tid(877336)>
+<__hipPushCallConfiguration id(2)	correlation_id(2) on-enter pid(877336) tid(877336)>
+<__hipPushCallConfiguration id(2)	correlation_id(2) on-exit pid(877336) tid(877336)>
+<__hipPopCallConfiguration id(1)	correlation_id(3) on-enter pid(877336) tid(877336)>
+<__hipPopCallConfiguration id(1)	correlation_id(3) on-exit pid(877336) tid(877336)>
+<hipLaunchKernel id(107)	correlation_id(4) on-enter pid(877336) tid(877336)>
+<hipLaunchKernel id(107)	correlation_id(4) on-exit pid(877336) tid(877336)>
+<hipDeviceSynchronize id(48)	correlation_id(5) on-enter pid(877336) tid(877336)>
+<hipDeviceSynchronize id(48)	correlation_id(5) on-exit pid(877336) tid(877336)>
+<hipSetDevice id(186)	correlation_id(6) on-enter pid(877336) tid(877336)>
+<hipSetDevice id(186)	correlation_id(6) on-exit pid(877336) tid(877336)>
+<__hipPushCallConfiguration id(2)	correlation_id(7) on-enter pid(877336) tid(877336)>
+<__hipPushCallConfiguration id(2)	correlation_id(7) on-exit pid(877336) tid(877336)>
+<__hipPopCallConfiguration id(1)	correlation_id(8) on-enter pid(877336) tid(877336)>
+<__hipPopCallConfiguration id(1)	correlation_id(8) on-exit pid(877336) tid(877336)>
+<hipLaunchKernel id(107)	correlation_id(9) on-enter pid(877336) tid(877336)>
+<hipLaunchKernel id(107)	correlation_id(9) on-exit pid(877336) tid(877336)>
+<hipDeviceSynchronize id(48)	correlation_id(10) on-enter pid(877336) tid(877336)>
+<hipDeviceSynchronize id(48)	correlation_id(10) on-exit pid(877336) tid(877336)>
+	hipSetDevice	correlation_id(6) time_ns(861794298279896:861794298283613)
+	__hipPushCallConfiguration	correlation_id(7) time_ns(861794298290125:861794298293211)
+	__hipPopCallConfiguration	correlation_id(8) time_ns(861794298293903:861794298295325)
+	hipLaunchKernel	correlation_id(9) time_ns(861794298296377:861794298313029)
+	hipDeviceSynchronize	correlation_id(10) time_ns(861794298313470:861794298331113)
+	hipSetDevice	correlation_id(11) time_ns(861794298565986:861794298566277)
+	__hipPushCallConfiguration	correlation_id(12) time_ns(861794298566738:861794298567148)
+	__hipPopCallConfiguration	correlation_id(13) time_ns(861794298567569:861794298568010)
+	hipLaunchKernel	correlation_id(14) time_ns(861794298568391:861794298577638)
+	hipDeviceSynchronize	correlation_id(15) time_ns(861794298578069:861794298594841)
+<hipSetDevice id(186)	correlation_id(16) on-enter pid(877336) tid(877336)>
+<hipSetDevice id(186)	correlation_id(16) on-exit pid(877336) tid(877336)>
+<__hipPushCallConfiguration id(2)	correlation_id(17) on-enter pid(877336) tid(877336)>
+<__hipPushCallConfiguration id(2)	correlation_id(17) on-exit pid(877336) tid(877336)>
+<__hipPopCallConfiguration id(1)	correlation_id(18) on-enter pid(877336) tid(877336)>
+<__hipPopCallConfiguration id(1)	correlation_id(18) on-exit pid(877336) tid(877336)>
+<hipLaunchKernel id(107)	correlation_id(19) on-enter pid(877336) tid(877336)>
+<hipLaunchKernel id(107)	correlation_id(19) on-exit pid(877336) tid(877336)>
+<hipDeviceSynchronize id(48)	correlation_id(20) on-enter pid(877336) tid(877336)>
+<hipDeviceSynchronize id(48)	correlation_id(20) on-exit pid(877336) tid(877336)>
+<hipSetDevice id(186)	correlation_id(21) on-enter pid(877336) tid(877336)>
+<hipSetDevice id(186)	correlation_id(21) on-exit pid(877336) tid(877336)>
+<__hipPushCallConfiguration id(2)	correlation_id(22) on-enter pid(877336) tid(877336)>
+<__hipPushCallConfiguration id(2)	correlation_id(22) on-exit pid(877336) tid(877336)>
+<__hipPopCallConfiguration id(1)	correlation_id(23) on-enter pid(877336) tid(877336)>
+<__hipPopCallConfiguration id(1)	correlation_id(23) on-exit pid(877336) tid(877336)>
+<hipLaunchKernel id(107)	correlation_id(24) on-enter pid(877336) tid(877336)>
+<hipLaunchKernel id(107)	correlation_id(24) on-exit pid(877336) tid(877336)>
+<hipDeviceSynchronize id(48)	correlation_id(25) on-enter pid(877336) tid(877336)>
+<hipDeviceSynchronize id(48)	correlation_id(25) on-exit pid(877336) tid(877336)>
+	hipSetDevice	correlation_id(21) time_ns(861794299364583:861794299365585)
+	__hipPushCallConfiguration	correlation_id(22) time_ns(861794299366106:861794299367329)
+	__hipPopCallConfiguration	correlation_id(23) time_ns(861794299367830:861794299369082)
+	hipLaunchKernel	correlation_id(24) time_ns(861794299369523:861794299377227)
+	hipDeviceSynchronize	correlation_id(25) time_ns(861794299377748:861794299394730)
+<hipSetDevice id(186)	correlation_id(26) on-enter pid(877336) tid(877336)>
+<hipSetDevice id(186)	correlation_id(26) on-exit pid(877336) tid(877336)>
+<__hipPushCallConfiguration id(2)	correlation_id(27) on-enter pid(877336) tid(877336)>
+<__hipPushCallConfiguration id(2)	correlation_id(27) on-exit pid(877336) tid(877336)>
+<__hipPopCallConfiguration id(1)	correlation_id(28) on-enter pid(877336) tid(877336)>
+<__hipPopCallConfiguration id(1)	correlation_id(28) on-exit pid(877336) tid(877336)>
+<hipLaunchKernel id(107)	correlation_id(29) on-enter pid(877336) tid(877336)>
+<hipLaunchKernel id(107)	correlation_id(29) on-exit pid(877336) tid(877336)>
+<hipDeviceSynchronize id(48)	correlation_id(30) on-enter pid(877336) tid(877336)>
+<hipDeviceSynchronize id(48)	correlation_id(30) on-exit pid(877336) tid(877336)>

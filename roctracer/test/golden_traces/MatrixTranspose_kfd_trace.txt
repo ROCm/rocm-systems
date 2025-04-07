@@ -1,0 +1,205 @@
++ LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose
+ROCTracer (pid=1963): 
+    KFD-trace()
+3802694735152956
+Device name Device 687f
+## Iteration (99) #################
+PASSED!
+## Iteration (98) #################
+PASSED!
+## Iteration (97) #################
+PASSED!
+## Iteration (96) #################
+PASSED!
+## Iteration (95) #################
+PASSED!
+## Iteration (94) #################
+PASSED!
+## Iteration (93) #################
+PASSED!
+## Iteration (92) #################
+PASSED!
+## Iteration (91) #################
+PASSED!
+## Iteration (90) #################
+PASSED!
+## Iteration (89) #################
+PASSED!
+## Iteration (88) #################
+PASSED!
+## Iteration (87) #################
+PASSED!
+## Iteration (86) #################
+PASSED!
+## Iteration (85) #################
+PASSED!
+## Iteration (84) #################
+PASSED!
+## Iteration (83) #################
+PASSED!
+## Iteration (82) #################
+PASSED!
+## Iteration (81) #################
+PASSED!
+## Iteration (80) #################
+PASSED!
+## Iteration (79) #################
+PASSED!
+## Iteration (78) #################
+PASSED!
+## Iteration (77) #################
+PASSED!
+## Iteration (76) #################
+PASSED!
+## Iteration (75) #################
+PASSED!
+## Iteration (74) #################
+PASSED!
+## Iteration (73) #################
+PASSED!
+## Iteration (72) #################
+PASSED!
+## Iteration (71) #################
+PASSED!
+## Iteration (70) #################
+PASSED!
+## Iteration (69) #################
+PASSED!
+## Iteration (68) #################
+PASSED!
+## Iteration (67) #################
+PASSED!
+## Iteration (66) #################
+PASSED!
+## Iteration (65) #################
+PASSED!
+## Iteration (64) #################
+PASSED!
+## Iteration (63) #################
+PASSED!
+## Iteration (62) #################
+PASSED!
+## Iteration (61) #################
+PASSED!
+## Iteration (60) #################
+PASSED!
+## Iteration (59) #################
+PASSED!
+## Iteration (58) #################
+PASSED!
+## Iteration (57) #################
+PASSED!
+## Iteration (56) #################
+PASSED!
+## Iteration (55) #################
+PASSED!
+## Iteration (54) #################
+PASSED!
+## Iteration (53) #################
+PASSED!
+## Iteration (52) #################
+PASSED!
+## Iteration (51) #################
+PASSED!
+## Iteration (50) #################
+PASSED!
+## Iteration (49) #################
+PASSED!
+## Iteration (48) #################
+PASSED!
+## Iteration (47) #################
+PASSED!
+## Iteration (46) #################
+PASSED!
+## Iteration (45) #################
+PASSED!
+## Iteration (44) #################
+PASSED!
+## Iteration (43) #################
+PASSED!
+## Iteration (42) #################
+PASSED!
+## Iteration (41) #################
+PASSED!
+## Iteration (40) #################
+PASSED!
+## Iteration (39) #################
+PASSED!
+## Iteration (38) #################
+PASSED!
+## Iteration (37) #################
+PASSED!
+## Iteration (36) #################
+PASSED!
+## Iteration (35) #################
+PASSED!
+## Iteration (34) #################
+PASSED!
+## Iteration (33) #################
+PASSED!
+## Iteration (32) #################
+PASSED!
+## Iteration (31) #################
+PASSED!
+## Iteration (30) #################
+PASSED!
+## Iteration (29) #################
+PASSED!
+## Iteration (28) #################
+PASSED!
+## Iteration (27) #################
+PASSED!
+## Iteration (26) #################
+PASSED!
+## Iteration (25) #################
+PASSED!
+## Iteration (24) #################
+PASSED!
+## Iteration (23) #################
+PASSED!
+## Iteration (22) #################
+PASSED!
+## Iteration (21) #################
+PASSED!
+## Iteration (20) #################
+PASSED!
+## Iteration (19) #################
+PASSED!
+## Iteration (18) #################
+PASSED!
+## Iteration (17) #################
+PASSED!
+## Iteration (16) #################
+PASSED!
+## Iteration (15) #################
+PASSED!
+## Iteration (14) #################
+PASSED!
+## Iteration (13) #################
+PASSED!
+## Iteration (12) #################
+PASSED!
+## Iteration (11) #################
+PASSED!
+## Iteration (10) #################
+PASSED!
+## Iteration (9) #################
+PASSED!
+## Iteration (8) #################
+PASSED!
+## Iteration (7) #################
+PASSED!
+## Iteration (6) #################
+PASSED!
+## Iteration (5) #################
+PASSED!
+## Iteration (4) #################
+PASSED!
+## Iteration (3) #################
+PASSED!
+## Iteration (2) #################
+PASSED!
+## Iteration (1) #################
+PASSED!
+## Iteration (0) #################
+PASSED!
