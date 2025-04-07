@@ -17,15 +17,15 @@ jobs:
         uses: actions/checkout@v3
         with:
           fetch-depth: 0 # needed for git subtree pull/push
-
+          token: ${{ secrets.MONOREPO_BOT_TOKEN }}
       - name: Set up Git user
         run: |
           git config --global user.name "${{ github.actor }}"
           git config --global user.email "${{ github.actor }}@users.noreply.github.com"
 
-      - name: Update Repositories in the EMU Monorepo  
-        run: |  
-          has_errors=false  
+      - name: Update Repositories in the EMU Monorepo
+        run: |
+          has_errors=false
           for repo in $(cat .github/repos-config.json | jq -r '.repositories[].name'); do
             url=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .url")
             branch=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .branch")

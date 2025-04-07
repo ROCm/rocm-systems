@@ -1,10 +1,11 @@
+* @ROCm/rocm-devops
 /amd-smi/* @marifamd @bill-shuzhou-liu @dmitrii-galantsev @charis-poag-amd @oliveiradan
 /rdc/* @dmitrii-galantsev @bill-shuzhou-liu
 /rocm_smi_lib/* @bill-shuzhou-liu @dmitrii-galantsev @charis-poag-amd @oliveiradan
 /rocprofiler/* @ammarwa @bgopesh
 /rocprofiler-compute/* @coleramos425 @feizheng10 @vedithal-amd @xuchen-amd @cfallows-amd @ywang103-amd
 /rocprofiler-sdk/* @jrmadsen @t-tye
-/rocprofiler-systems/* @ROCm/rocprof-sys @jrmadsen 
+/rocprofiler-systems/* @ROCm/rocprof-sys @jrmadsen
 /ROCR-Runtime/* @kentrussell @fxkamd @dayatsin-amd
 /roctracer/* @ammarwa @bgopesh
 
@@ -22,6 +23,8 @@
 /rocprofiler-sdk/source/lib/rocprofiler-sdk/rccl             @MythreyaK
 /rocprofiler-sdk/source/lib/rocprofiler-sdk-tool             @SrirakshaNag
 /rocprofiler-sdk/source/lib/rocprofiler-sdk-codeobj          @ApoKalipse-V
+
+*/.azuredevops/ @ROCm/external-ci
 
 # Documentation files
 */docs/* @ROCm/rocm-documentation
