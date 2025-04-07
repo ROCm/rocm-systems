@@ -1,6 +1,6 @@
-# ROCmSystemsSoftware Quick Start Guide for Developers
+# ROCm System Quick Start Guide for Developers
 
-Welcome to the monorepo for ROCm systems software!
+Welcome to the monorepo for ROCm system software!
 
 This quick start guide includes tips on how to work efficiently with this monorepo style.
 

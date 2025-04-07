@@ -1,0 +1,41 @@
+/amd-smi/* @marifamd @bill-shuzhou-liu @dmitrii-galantsev @charis-poag-amd @oliveiradan
+/rdc/* @dmitrii-galantsev @bill-shuzhou-liu
+/rocm_smi_lib/* @bill-shuzhou-liu @dmitrii-galantsev @charis-poag-amd @oliveiradan
+/rocprofiler/* @ammarwa @bgopesh
+/rocprofiler-compute/* @coleramos425 @feizheng10 @vedithal-amd @xuchen-amd @cfallows-amd @ywang103-amd
+/rocprofiler-sdk/* @jrmadsen @t-tye
+/rocprofiler-systems/* @ROCm/rocprof-sys @jrmadsen 
+/ROCR-Runtime/* @kentrussell @fxkamd @dayatsin-amd
+/roctracer/* @ammarwa @bgopesh
+
+# rocprofiler-sdk section-specific code owners
+/rocprofiler-sdk/source/docs                                 @bgopesh
+/rocprofiler-sdk/source/include                              @jrmadsen      @bwelton     @ammarwa
+/rocprofiler-sdk/source/include/rocprofiler-sdk/rccl         @MythreyaK
+/rocprofiler-sdk/source/include/rocprofiler-sdk/cxx/codeobj  @ApoKalipse-V
+/rocprofiler-sdk/source/bin                                  @SrirakshaNag  @bgopesh
+/rocprofiler-sdk/source/libexec                              @SrirakshaNag
+/rocprofiler-sdk/source/lib/rocprofiler-sdk/counters         @bwelton
+/rocprofiler-sdk/source/lib/rocprofiler-sdk/pc_sampling      @vlaindic
+/rocprofiler-sdk/source/lib/rocprofiler-sdk/thread_trace     @ApoKalipse-V
+/rocprofiler-sdk/source/lib/rocprofiler-sdk/page_migration   @MythreyaK
+/rocprofiler-sdk/source/lib/rocprofiler-sdk/rccl             @MythreyaK
+/rocprofiler-sdk/source/lib/rocprofiler-sdk-tool             @SrirakshaNag
+/rocprofiler-sdk/source/lib/rocprofiler-sdk-codeobj          @ApoKalipse-V
+
+# Documentation files
+*/docs/* @ROCm/rocm-documentation
+*/*.md @ROCm/rocm-documentation
+*/*.rst @ROCm/rocm-documentation
+*/.readthedocs.yaml @ROCm/rocm-documentation
+/ROCR-Runtime/*.md @ROCm/rocm-documentation @kentrussell @dayatsin-amd
+/ROCR-Runtime/*.rst @ROCm/rocm-documentation @kentrussell @dayatsin-amd
+
+# ROCR-Runtime header directory for Doxygen documentation
+/ROCR-Runtime/inc/* @ROCm/rocm-documentation @kentrussell @fxkamd @dayatsin-amd
+
+# rocprofiler-compute Packaging
+/rocprofiler-compute/cmake/ @koomie
+/rocprofiler-compute/tests/ @koomie
+/rocprofiler-compute/CMakeLists.txt @koomie
+/rocprofiler-compute/utils/ @koomie
