@@ -1,0 +1,90 @@
+#
+# OpenSSL configuration file.
+#
+
+# Establish working directory.
+
+dir			= .
+
+[ ca ]
+default_ca		= CA_default
+
+[ CA_default ]
+serial			= $dir/serial
+database		= $dir/index.txt
+new_certs_dir		= $dir/newcerts
+certificate		= $dir/rdc_cacert.pem
+private_key		= $dir/private/rdc_cakey.pem
+default_days		= 365
+default_md		= sha512
+preserve		= no
+email_in_dn		= no
+nameopt			= default_ca
+certopt			= default_ca
+policy			= policy_match
+unique_subject		= no
+copy_extensions = copyall
+
+[ policy_match ]
+countryName		= match
+stateOrProvinceName	= match
+organizationName	= match
+organizationalUnitName	= optional
+commonName		= supplied
+emailAddress		= optional
+
+[ req ]
+default_bits		= 4096			# Size of keys
+default_keyfile		= key.pem		# name of generated keys
+default_md		= sha512		# message digest algorithm
+string_mask		= nombstr		# permitted characters
+distinguished_name	= req_distinguished_name
+req_extensions		= v3_req
+
+[ req_distinguished_name ]
+# Variable name		  Prompt string
+#----------------------	  ----------------------------------
+0.organizationName	= Organization Name (company)
+organizationalUnitName	= Organizational Unit Name (department, division)
+emailAddress		= Email Address
+emailAddress_max	= 40
+localityName		= Locality Name (city, district)
+stateOrProvinceName	= State or Province Name (full name)
+countryName		= Country Name (2 letter code)
+countryName_min		= 2
+countryName_max		= 2
+commonName		= Common Name (hostname, IP, or your name)
+commonName_max		= 64
+
+#-------------------------------------------------------------------------------
+# Specify default values below for the fields above. This speeds things up if
+# and is more consistent if you have to run the openssl commands repeatedly.
+#-------------------------------------------------------------------------------
+# < ** REPLACE VALUES IN THIS SECTION WITH APPROPRIATE VALUES FOR YOUR ORG. **>
+0.organizationName_default	= MyCompany
+organizationalUnitName_default  = MyCompanyUnit
+emailAddress_default            = MyEmailAddress
+localityName_default		= MyCity
+stateOrProvinceName_default	= MyStateProvince
+countryName_default		= MC
+# wildcards are acceptable for domain; e.g., *.amd.com
+commonName_default              = Mydomain
+
+[ v3_ca ]
+basicConstraints	= CA:TRUE
+subjectKeyIdentifier	= hash
+authorityKeyIdentifier	= keyid:always,issuer:always
+
+[ v3_req ]
+basicConstraints	= CA:FALSE
+subjectKeyIdentifier	= hash
+subjectAltName = @alt_names
+
+[ req_ext ]
+subjectAltName = @alt_names
+
+[alt_names]
+# < ** MODIFY BELOW TO YOUR NEEDS. WILDCARDS ARE ACCEPTED. **>
+DNS.1   = localhost
+DNS.2   = *.amd.com
+

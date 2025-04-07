@@ -1,0 +1,42 @@
+declare -A FILTER
+
+# FILTER is meant to be used with a negative gtest filter
+
+# Permanent exclusions
+# These tests are included for debugging, but are not executed in normal
+# execution on any ASIC:
+PERMANENT_BLACKLIST_ALL_ASICS=
+
+# This is the temporary blacklist for all ASICs. This is to be used when a test
+# is failing consistently
+TEMPORARY_BLACKLIST_ALL_ASICS=
+
+if [ -z $PERMANENT_BLACKLIST_ALL_ASICS -a -z $TEMPORARY_BLACKLIST_ALL_ASICS ]; then
+  BLACKLIST_ALL_ASICS=
+else
+  BLACKLIST_ALL_ASICS=\
+    "$PERMANENT_BLACKLIST_ALL_ASICS:"\
+    "$TEMPORARY_BLACKLIST_ALL_ASICS"
+fi
+
+# ASIC specific blacklists
+FILTER[vega10]=\
+$BLACKLIST_ALL_ASICS
+
+# Leave the remaining commands in this RDC version of a blacklist
+# as an example, until there are actual tests to blacklist.
+return 0
+
+# SWDEV-207510
+FILTER[vega20]=\
+$BLACKLIST_ALL_ASICS\
+"rsmitstReadOnly.TestFrequenciesRead:"\
+"rsmitstReadOnly.TestProcInfoRead"
+
+# SWDEV-207510
+FILTER[arcturus]=\
+$BLACKLIST_ALL_ASICS\
+"rsmitstReadOnly.TestFrequenciesRead:"\
+"rsmitstReadWrite.TestFrequenciesReadWrite:"\
+"rsmitstReadOnly.TestProcInfoRead"
+

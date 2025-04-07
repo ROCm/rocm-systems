@@ -1,0 +1,9 @@
+---
+Language: Cpp
+BasedOnStyle: Google
+ColumnLimit: 100
+
+# Force pointers to the type for C++.
+# For some reason Google style doesn't specify this..
+DerivePointerAlignment: false
+PointerAlignment: Left

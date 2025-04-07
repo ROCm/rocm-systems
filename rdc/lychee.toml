@@ -1,0 +1,2 @@
+exclude = ['^file://.*', '.*localhost.*']
+exclude_path = ["./build"]
