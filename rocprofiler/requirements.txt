@@ -1,0 +1,10 @@
+barectf
+bcrypt
+CppHeaderParser
+lxml
+matplotlib
+pandas
+protobuf
+pycparser
+pyparsing
+websockets

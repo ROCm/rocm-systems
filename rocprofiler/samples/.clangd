@@ -1,0 +1,10 @@
+---
+If:
+  PathMatch: common/common.h
+
+CompileFlags:
+  Add: ['-x', 'hip']
+
+# Local Variables:
+# mode: yaml
+# End:

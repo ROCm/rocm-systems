@@ -1,0 +1,22 @@
+#!/bin/bash
+
+set -e
+
+rm_ldconfig() {
+  # left-hand term originates from ENABLE_LDCONFIG = ON/OFF at package build
+  if [ "@ENABLE_LDCONFIG@" == "ON" ]; then
+    rm -f /@CMAKE_INSTALL_SYSCONFDIR@/ld.so.conf.d/librocprofiler64.conf
+    ldconfig
+  fi
+}
+
+case "$1" in
+  ( remove | upgrade )
+    rm_ldconfig
+  ;;
+  ( purge )
+  ;;
+  ( * )
+    exit 0
+  ;;
+esac
