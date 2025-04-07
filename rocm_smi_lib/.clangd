@@ -1,0 +1,37 @@
+CompileFlags:
+    Remove: -W*
+    Add: [-Wall, -pedantic, -I/opt/rocm/include, -I/opt/rocm/include/hsa, -I/opt/rocm/include/rocprofiler]
+    Compiler: clang++
+
+# list here: https://clang.llvm.org/extra/clang-tidy/checks/list.html
+Diagnostics:
+    UnusedIncludes: Strict
+    # rules below are copied into .clang-tidy using ./.update-clang-tidy.sh
+    # please keep the rules sorted alphabetically
+    ClangTidy:
+        Add: [
+          bugprone*,
+          clang-analyzer*,
+          google*,
+          misc*,
+          modernize*,
+        ]
+        Remove: [
+          abseil*,
+          bugprone-easily-swappable-parameters,
+          bugprone-reserved-identifier,
+          clang-analyzer-security.insecureAPI.strcpy,
+          cppcoreguidelines*,
+          cppcoreguidelines-pro*,
+          misc-non-copyable-objects,
+          misc-use-anonymous-namespace,
+          modernize-avoid-c-arrays,
+          modernize-redundant-void-arg,
+          modernize-use-auto,
+          modernize-use-nodiscard,
+          modernize-use-noexcept,
+          modernize-use-trailing-return-type,
+          modernize-use-using,
+          performance*,
+          readability*,
+        ]

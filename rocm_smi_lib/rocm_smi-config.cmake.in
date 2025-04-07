@@ -1,0 +1,27 @@
+# - Config file for the rocm_smi package
+# It defines the following variables
+#  ROCM_SMI_INCLUDE_DIRS - include directories for rocm_smi
+#  ROCM_SMI_LIBRARIES    - libraries to link against
+
+# Compute paths
+@PACKAGE_INIT@
+get_filename_component(ROCM_SMI_CMAKE_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
+
+set_and_check( rocm_smi_INCLUDE_DIR "@PACKAGE_INCLUDE_INSTALL_DIR@" )
+set_and_check( ROCM_SMI_INCLUDE_DIR "@PACKAGE_INCLUDE_INSTALL_DIR@" )
+set_and_check( ROCM_SMI_INCLUDE_DIRS "@PACKAGE_INCLUDE_INSTALL_DIR@" )
+set_and_check( rocm_smi_LIB_DIR "@PACKAGE_LIB_INSTALL_DIR@" )
+set_and_check( ROCM_SMI_LIB_DIR "@PACKAGE_LIB_INSTALL_DIR@" )
+set_and_check( ROCM_SMI_LIB_DIRS "@PACKAGE_LIB_INSTALL_DIR@" )
+
+# Our library dependencies (contains definitions for IMPORTED targets)
+if(NOT TARGET rocm_smi AND NOT rocm_smi_BINARY_DIR)
+    include("${ROCM_SMI_CMAKE_DIR}/rocm_smiTargets.cmake")
+endif()
+
+# These are IMPORTED targets created by RocmSmiTargets.cmake
+# TODO: Need to check if OAM libraries are needed here!
+set(ROCM_SMI_LIBRARIES rocm_smi64)
+set(ROCM_SMI_LIBRARY rocm_smi64)
+
+check_required_components(rocm_smi)
