@@ -61,6 +61,9 @@ class webui_analysis(OmniAnalyze_Base):
         # define any elements which will have full width
         self.__full_width_elements = {1801}
 
+        if hasattr(args, "roofline_data_type") and args.roofline_data_type != ["FP32"]:
+            self.__roofline_data_type = args.roofline_data_type
+
     @demarcate
     def build_layout(self, input_filters, arch_configs):
         """
@@ -186,6 +189,7 @@ class webui_analysis(OmniAnalyze_Base):
                         "mem_level": "ALL",
                         "include_kernel_names": False,
                         "is_standalone": False,
+                        "roofline_data_type": self.__roofline_data_type,
                     }
                 )
                 roof_obj = self.get_socs()[self.arch].roofline_obj

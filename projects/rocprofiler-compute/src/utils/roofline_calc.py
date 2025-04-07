@@ -153,13 +153,21 @@ def calc_ceilings(roofline_parameters, dtype, benchmark_data):
             x2_mfma = peakMFMA / peakBw
             y2_mfma = peakMFMA
 
+        # Check which peak is higher for formatting bandwidth lines
+        if y2_mfma > y1_mfma:  # peakMFMA
+            peakX = x2_mfma
+            peakY = y2_mfma
+        else:  # peakVALU
+            peakX = x1_mfma
+            peakY = y1_mfma
+
         # These are the points to use:
         console_debug("roofline", "coordinate points:")
-        console_debug("x = [{}, {}]".format(x1, x2_mfma))
-        console_debug("y = [{}, {}]".format(y1, y2_mfma))
+        console_debug("x = [{}, {}]".format(x1, peakX))
+        console_debug("y = [{}, {}]".format(y1, peakY))
 
-        graphPoints[cacheHierarchy[i].lower()].append([x1, x2_mfma])
-        graphPoints[cacheHierarchy[i].lower()].append([y1, y2_mfma])
+        graphPoints[cacheHierarchy[i].lower()].append([x1, peakX])
+        graphPoints[cacheHierarchy[i].lower()].append([y1, peakY])
         graphPoints[cacheHierarchy[i].lower()].append(peakBw)
 
     # -------------------------------------------------------------------------------------
@@ -177,7 +185,7 @@ def calc_ceilings(roofline_parameters, dtype, benchmark_data):
         graphPoints["valu"].append(peakOps)
 
     # Plot MFMA roof
-    if x1_mfma != -1 and (dtype in MFMA_DATATYPES):  # assert that mfma has been assigned
+    if dtype in MFMA_DATATYPES:  # assert that mfma has been assigned
         x0_mfma = XMAX
         if x2_mfma < x0_mfma:
             x0_mfma = x2_mfma

@@ -302,7 +302,7 @@ class Roofline:
                             None
                             if self.__run_parameters["is_standalone"]
                             else "{} G{}/s".format(
-                                to_int(self.__ceiling_data["valu"][2], ops_flops)
+                                to_int(self.__ceiling_data["valu"][2]), ops_flops
                             )
                         ),
                         "{} G{}/s".format(
