@@ -1,0 +1,19 @@
+@PACKAGE_INIT@
+
+include( CMakeFindDependencyMacro )
+
+# Locate dependent packages here.  Finding them propagates usage requirements,
+# if any, to our clients and ensures that their target names are in scope for
+# the build.  hsakmt has no cmake project dependencies so there is nothing to
+# find.  If we switch to use find_package with external (to ROCm) library
+# dependencies (ie libnuma) then those packages should be located here using
+# find_dependencies as shown below.
+#find_dependency(Bar, 2.0)
+
+# If the option is ON link other dependent libraries dynamically
+# If the option is OFF, then link libdrm and libdrm_amdgpu statically
+if(@BUILD_SHARED_LIBS@)
+  include( "${CMAKE_CURRENT_LIST_DIR}/@HSAKMT_TARGET@Targets.cmake" )
+else()
+  include( "${CMAKE_CURRENT_LIST_DIR}/@HSAKMT_STATIC_DRM_TARGET@Targets.cmake" )
+endif()

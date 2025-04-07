@@ -1,0 +1,21 @@
+# Anywhere {branch} is used, the branch name will be substituted.
+# These comments will also be removed.
+root: index
+subtrees:
+  - caption: Install
+    entries:
+    - file: install/installation
+
+  - caption: API reference
+    entries:
+    - file: api-reference/c-interface-adaptors
+    - file: api-reference/environment_variables
+    - file: api-reference/api
+    
+  - caption: Contribution
+    entries:
+    - file: contribution/contributing-to-rocr
+
+  - caption: About
+    entries:
+    - file: license

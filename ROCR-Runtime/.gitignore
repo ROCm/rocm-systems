@@ -1,0 +1,22 @@
+.*
+
+#
+# git files that we don't want to ignore even it they are dot-files
+#
+!.gitignore
+!.mailmap
+.github*
+patches-*
+build/
+outgoing/
+Makefile
+
+# documentation artifacts
+_build/
+_doxygen/
+_images/
+_static/
+_templates/
+_toc.yml
+doxygen
+

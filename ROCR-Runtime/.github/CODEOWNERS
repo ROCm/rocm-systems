@@ -1,0 +1,8 @@
+# Default code owners
+@kentrussell @fxkamd @dayatsin-amd
+
+*.md @ROCm/rocm-documentation @kentrussell @dayatsin-amd
+*.rst @ROCm/rocm-documentation @kentrussell @dayatsin-amd
+
+# Header directory for Doxygen documentation
+inc/* @ROCm/rocm-documentation @kentrussell @fxkamd @dayatsin-amd
