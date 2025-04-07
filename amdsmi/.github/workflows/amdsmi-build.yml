@@ -1,0 +1,360 @@
+name: Build and Install AMDSMI
+
+on:
+  pull_request:
+    branches: [amd-staging, amd-mainline, release/rocm-rel-*]
+  push:
+    branches: [amd-staging, amd-mainline, release/rocm-rel-*]
+  workflow_dispatch:
+
+jobs:
+  build-and-install-deb:
+    name: Build on Debian-based Systems
+    runs-on:
+      - self-hosted
+      - ${{ vars.RUNNER_TYPE }}
+    continue-on-error: true
+    strategy:
+      matrix:
+        os:
+          - Ubuntu20
+          - Ubuntu22
+          - Debian10
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          clean: false
+
+      - name: Set Docker Image for Ubuntu20
+        if: matrix.os == 'Ubuntu20'
+        run: echo "DOCKER_IMAGE=${{ secrets.UBUNTU20_DOCKER_IMAGE }}" >> $GITHUB_ENV
+
+      - name: Set Docker Image for Ubuntu22
+        if: matrix.os == 'Ubuntu22'
+        run: echo "DOCKER_IMAGE=${{ secrets.UBUNTU22_DOCKER_IMAGE }}" >> $GITHUB_ENV
+
+      - name: Set Docker Image for Debian10
+        if: matrix.os == 'Debian10'
+        run: echo "DOCKER_IMAGE=${{ secrets.DEBIAN10_DOCKER_IMAGE }}" >> $GITHUB_ENV
+
+      - name: Generate Timestamp
+        id: timestamp
+        run: echo "TIMESTAMP=$(date +'%b %d %Y %-I:%M %p')" >> $GITHUB_ENV
+
+      - name: Build, Install & Uninstall on ${{ matrix.os }} at ${{ env.TIMESTAMP }}
+        run: |
+          # Define a host directory for test results
+          HOST_TEST_RESULTS_DIR=/tmp/test-results
+
+          # Ensure the host directory exists
+          mkdir -p $HOST_TEST_RESULTS_DIR
+          docker run --privileged -v ${{ github.workspace }}:/src:rw -v $HOST_TEST_RESULTS_DIR:/shared:rw $DOCKER_IMAGE /bin/bash -c "
+            set -e
+            cd /src
+            echo 'Inside Docker Container on ${{ matrix.os }}'
+
+            # Build AMD-SMI
+            BUILD_FOLDER=/src/build
+            DEB_BUILD='amd-smi-lib*99999-local_amd64.deb'
+            DEB_BUILD_TEST='amd-smi-lib-tests*99999-local_amd64.deb'
+            rm -rf \$BUILD_FOLDER
+            mkdir -p \$BUILD_FOLDER
+            cd \$BUILD_FOLDER
+            cmake .. -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON
+            make -j \$(nproc)
+            make package
+
+            # Install AMD-SMI
+            apt update
+            apt install -y \$BUILD_FOLDER/\$DEB_BUILD
+            ln -s /opt/rocm/bin/amd-smi /usr/local/bin
+
+            # Check If Installed
+            echo 'Listing installed packages:'
+            amd-smi version
+            python3 -m pip list | grep amd
+            python3 -m pip list | grep pip
+            python3 -m pip list | grep setuptools
+            echo 'Completed build and installation on ${{ matrix.os }}'
+
+            # Create the directory for test results
+            mkdir -p /shared/test-results-${{ matrix.os }}
+
+            # Parse and explain test results
+            parse_and_explain() {
+              local log_file=\$1
+              local test_name=\$2
+
+              if grep -q 'FAILED' \"\$log_file\"; then
+                echo \"\$test_name failed. Check the log file for details: \$log_file\"
+                # Add more specific parsing and explanations here
+                if grep -q 'specific error message' \"\$log_file\"; then
+                  echo 'Explanation: Specific error message encountered.'
+                fi
+              else
+                echo \"\$test_name passed.\"
+              fi
+            }
+
+            # Run AMDSMI Tests
+            echo 'Running AMDSMI Tests'
+            /opt/rocm/share/amd_smi/tests/amdsmitst > /shared/test-results-${{ matrix.os }}/amdsmi_tests.log 2>&1
+            if [ \$? -ne 0 ]; then
+              echo \"AMDSMI Tests failed. Check the log file for details: /shared/test-results-${{ matrix.os }}/amdsmi_tests.log\"
+              exit 1
+            else
+              parse_and_explain /shared/test-results-${{ matrix.os }}/amdsmi_tests.log 'AMDSMI Tests'
+              echo 'Completed AMDSMI Testing'
+            fi
+
+            # Run Python Unit Tests
+            echo 'Running Python Unit Testing'
+            cd /opt/rocm/share/amd_smi/tests/python_unittest
+            ./integration_test.py -v > /shared/test-results-${{ matrix.os }}/integration_test_output.txt 2>&1
+            parse_and_explain /shared/test-results-${{ matrix.os }}/integration_test_output.txt 'Python Integration Tests'
+            ./unit_tests.py -v > /shared/test-results-${{ matrix.os }}/unit_test_output.txt 2>&1
+            parse_and_explain /shared/test-results-${{ matrix.os }}/unit_test_output.txt 'Python Unit Tests'
+            echo 'Completed Python Unit Testing'
+
+            # Uninstall AMD-SMI
+            echo 'Uninstalling AMD-SMI'
+            sudo apt remove -y amd-smi-lib
+            sudo rm -f /usr/local/bin/amd-smi
+            if [ -d /opt/rocm/share/amd_smi ]; then
+              echo '/opt/rocm/share/amd_smi directory still exists. Failing the job.'
+              exit 1
+            else
+              echo 'Successfully Completed uninstallation on ${{ matrix.os }}'
+            fi
+          "
+
+      - name: Debug Test Results Directory
+        run: |
+          echo "Checking test results directory for ${{ matrix.os }}"
+          ls -R /tmp/test-results || echo "Test results directory not found"
+
+      - name: AMDSMI Test Results
+        run: |
+          echo "Displaying AMDSMI test results for ${{ matrix.os }}"
+          cat /tmp/test-results/test-results-${{ matrix.os }}/amdsmi_tests.log || echo "No amdsmi test results found for ${{ matrix.os }}"
+
+      - name: Integration Test Results
+        run: |
+          echo "Displaying Integration test results for ${{ matrix.os }}"
+          cat /tmp/test-results/test-results-${{ matrix.os }}/integration_test_output.txt || echo "No integration test results found for ${{ matrix.os }}"
+
+      - name: Unit Test Results
+        run: |
+          echo "Displaying Unit Test Results for ${{ matrix.os }}"
+          cat /tmp/test-results/test-results-${{ matrix.os }}/unit_test_output.txt || echo "No unit test results found for ${{ matrix.os }}"
+
+
+  build-and-install-rpm:
+    name: Build on RPM-based Systems
+    runs-on:
+      - self-hosted
+      - ${{ vars.RUNNER_TYPE }}
+    continue-on-error: true
+    strategy:
+      matrix:
+        os:
+          - SLES
+          - RHEL8
+          - RHEL9
+          - RHEL10
+          - Mariner2
+          - AzureLinux3
+          - AlmaLinux8
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          clean: false
+
+      - name: Set Docker Image and Package Manager for SLES
+        if: matrix.os == 'SLES'
+        run: |
+          echo "DOCKER_IMAGE=${{ secrets.SLES_DOCKER_IMAGE }}" >> $GITHUB_ENV
+          echo "PACKAGE_MANAGER=zypper" >> $GITHUB_ENV
+
+      - name: Set Docker Image and Package Manager for RHEL8
+        if: matrix.os == 'RHEL8'
+        run: |
+          echo "DOCKER_IMAGE=${{ secrets.RHEL8_DOCKER_IMAGE }}" >> $GITHUB_ENV
+          echo "PACKAGE_MANAGER=dnf" >> $GITHUB_ENV
+
+      - name: Set Docker Image and Package Manager for RHEL9
+        if: matrix.os == 'RHEL9'
+        run: |
+          echo "DOCKER_IMAGE=${{ secrets.RHEL9_DOCKER_IMAGE }}" >> $GITHUB_ENV
+          echo "PACKAGE_MANAGER=dnf" >> $GITHUB_ENV
+
+      - name: Set Docker Image and Package Manager for RHEL10
+        if: matrix.os == 'RHEL10'
+        run: |
+          echo "DOCKER_IMAGE=${{ secrets.RHEL10_DOCKER_IMAGE }}" >> $GITHUB_ENV
+          echo "PACKAGE_MANAGER=dnf" >> $GITHUB_ENV
+
+      - name: Set Docker Image and Package Manager for Mariner2
+        if: matrix.os == 'Mariner2'
+        run: |
+          echo "DOCKER_IMAGE=${{ secrets.MARINER2_DOCKER_IMAGE }}" >> $GITHUB_ENV
+          echo "PACKAGE_MANAGER=tdnf" >> $GITHUB_ENV
+
+      - name: Set Docker Image and Package Manager for AzureLinux3
+        if: matrix.os == 'AzureLinux3'
+        run: |
+          echo "DOCKER_IMAGE=${{ secrets.AZURELINUX3_DOCKER_IMAGE }}" >> $GITHUB_ENV
+          echo "PACKAGE_MANAGER=tdnf" >> $GITHUB_ENV
+
+      - name: Set Docker Image and Package Manager for AlmaLinux8
+        if: matrix.os == 'AlmaLinux8'
+        run: |
+          echo "DOCKER_IMAGE=${{ secrets.ALMALINUX8_DOCKER_IMAGE }}" >> $GITHUB_ENV
+          echo "PACKAGE_MANAGER=dnf" >> $GITHUB_ENV
+
+      - name: Generate Timestamp
+        id: timestamp
+        run: echo "TIMESTAMP=$(date +'%b %d %Y %-I:%M %p')" >> $GITHUB_ENV
+
+      - name: Build and Install on ${{ matrix.os }} at ${{ env.TIMESTAMP }}
+        run: |
+          # Define a host directory for test results
+          HOST_TEST_RESULTS_DIR=/tmp/test-results
+
+          # Ensure the host directory exists
+          mkdir -p $HOST_TEST_RESULTS_DIR
+          docker run --privileged -v ${{ github.workspace }}:/src:rw -v $HOST_TEST_RESULTS_DIR:/shared:rw $DOCKER_IMAGE /bin/bash -c "
+            set -e
+            cd /src
+            echo 'Inside Docker Container on ${{ matrix.os }}'
+
+            # Build AMD-SMI
+            BUILD_FOLDER=/src/build
+            RPM_BUILD='amd-smi-lib-*99999-local*.rpm'
+            rm -rf \$BUILD_FOLDER
+            mkdir -p \$BUILD_FOLDER
+            cd \$BUILD_FOLDER
+            cmake .. -DCPACK_RPM_PACKAGE_RELOCATABLE=ON -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON
+            make -j \$(nproc)
+            make package
+
+            # Adjust permissions of the build directory
+            chmod -R a+rw \$BUILD_FOLDER
+
+            # Install AMD-SMI
+            case '$PACKAGE_MANAGER' in
+              zypper)
+                timeout 10m sudo zypper --no-refresh --no-gpg-checks install -y \$BUILD_FOLDER/\$RPM_BUILD
+                ;;
+              dnf)
+                dnf install python3-setuptools python3-wheel -y
+                timeout 10m dnf install -y --skip-broken --disablerepo=* \$BUILD_FOLDER/\$RPM_BUILD
+                ;;
+              tdnf)
+                tdnf install python3-setuptools python3-wheel -y
+                python3 -m pip install more_itertools
+                timeout 10m tdnf install -y --skip-broken --disablerepo=* \$BUILD_FOLDER/\$RPM_BUILD
+                ;;
+              *)
+                echo 'Unsupported package manager: $PACKAGE_MANAGER'
+                exit 1
+                ;;
+            esac
+            ln -s /opt/rocm/bin/amd-smi /usr/local/bin
+
+            # Check If Installed
+            echo 'Listing installed packages:'
+            amd-smi version
+            python3 -m pip list | grep amd
+            python3 -m pip list | grep pip
+            python3 -m pip list | grep setuptools
+            echo 'Completed build and installation on ${{ matrix.os }}'
+
+            # Create the directory for test results
+            mkdir -p /shared/test-results-${{ matrix.os }}
+
+            # Parse and explain test results
+            parse_and_explain() {
+              local log_file=\$1
+              local test_name=\$2
+
+              if grep -q 'FAILED' \"\$log_file\"; then
+                echo \"\$test_name failed. Check the log file for details: \$log_file\"
+                # Add more specific parsing and explanations here
+                if grep -q 'specific error message' \"\$log_file\"; then
+                  echo 'Explanation: Specific error message encountered.'
+                fi
+              else
+                echo \"\$test_name passed.\"
+              fi
+            }
+
+            # Run AMDSMI Tests
+            echo 'Running AMDSMI Tests'
+            /opt/rocm/share/amd_smi/tests/amdsmitst > /shared/test-results-${{ matrix.os }}/amdsmi_tests.log 2>&1
+            if [ \$? -ne 0 ]; then
+              echo \"AMDSMI Tests failed. Check the log file for details: /shared/test-results-${{ matrix.os }}/amdsmi_tests.log\"
+              exit 1
+            else
+              parse_and_explain /shared/test-results-${{ matrix.os }}/amdsmi_tests.log 'AMDSMI Tests'
+              echo 'Completed AMDSMI Testing'
+            fi
+
+            # Run Python Unit Tests
+            echo 'Running Python Unit Testing'
+            cd /opt/rocm/share/amd_smi/tests/python_unittest
+            ./integration_test.py -v > /shared/test-results-${{ matrix.os }}/integration_test_output.txt 2>&1
+            parse_and_explain /shared/test-results-${{ matrix.os }}/integration_test_output.txt 'Python Integration Tests'
+            ./unit_tests.py -v > /shared/test-results-${{ matrix.os }}/unit_test_output.txt 2>&1
+            parse_and_explain /shared/test-results-${{ matrix.os }}/unit_test_output.txt 'Python Unit Tests'
+            echo 'Completed Python Unit Testing'
+
+            # Uninstall AMD-SMI
+            echo 'Uninstalling AMD-SMI'
+            case '$PACKAGE_MANAGER' in
+              zypper)
+                zypper remove -y amd-smi-lib
+                ;;
+              dnf)
+                dnf remove -y amd-smi-lib
+                ;;
+              tdnf)
+                tdnf remove -y amd-smi-lib
+                ;;
+              *)
+                echo 'Unsupported package manager: $PACKAGE_MANAGER'
+                exit 1
+                ;;
+            esac
+            rm -f /usr/local/bin/amd-smi
+            if [ -d /opt/rocm/share/amd_smi ]; then
+              echo '/opt/rocm/share/amd_smi directory still exists. Failing the job.'
+              exit 1
+            else
+              echo 'Successfully Completed uninstallation on ${{ matrix.os }}'
+            fi
+          "
+
+      - name: Debug Test Results Directory
+        run: |
+          echo "Checking test results directory for ${{ matrix.os }}"
+          ls -R /tmp/test-results || echo "Test results directory not found"
+
+      - name: AMDSMI Test Results
+        run: |
+          echo "Displaying AMDSMI test results for ${{ matrix.os }}"
+          cat /tmp/test-results/test-results-${{ matrix.os }}/amdsmi_tests.log || echo "No amdsmi test results found for ${{ matrix.os }}"
+
+      - name: Python Integration Test Results
+        run: |
+          echo "Displaying Integration test results for ${{ matrix.os }}"
+          cat /tmp/test-results/test-results-${{ matrix.os }}/integration_test_output.txt || echo "No integration test results found for ${{ matrix.os }}"
+
+      - name: Python Unit Test Results
+        run: |
+          echo "Displaying Unit Test Results for ${{ matrix.os }}"
+          cat /tmp/test-results/test-results-${{ matrix.os }}/unit_test_output.txt || echo "No unit test results found for ${{ matrix.os }}"
