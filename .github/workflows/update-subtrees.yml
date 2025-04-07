@@ -6,7 +6,7 @@ on:
     - cron: '0 * * * *'  # Trigger four times a day (00:00, 06:00, 12:00, 18:00 UTC)
 
 env:
-  MONOREPO_URL: github.com/ROCm/ROCmSystemsSoftware.git
+  MONOREPO_URL: github.com/ROCm/rocm-system.git
   MONOREPO_BRANCH: develop
 
 jobs:
