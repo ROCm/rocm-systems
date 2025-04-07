@@ -41,9 +41,6 @@ The projects in scope will be imported into the monorepo under a dedicated subdi
 
 Continue using the current branching models.
 
-Automatic updates from the monorepo to these repositories is disabled in the beginning.
-Updates must be done manually through `git subtree push` commands.
-
 ### Monorepo
 
 Use trunk-based development:
@@ -119,7 +116,7 @@ Updates from this monorepo to the individual legacy repositories must be done ma
   - Monorepo CI and build tools
   - Maintain channels for questions, feedback, and issue reporting
 
-11. Known Limitations and Risks
+## Known Limitations and Risks
 
 - Subtree operations are slower on large histories
 - Cannot do shallow clones or partial history fetches with git subtree
