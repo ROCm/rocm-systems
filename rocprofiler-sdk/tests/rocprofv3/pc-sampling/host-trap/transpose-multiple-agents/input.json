@@ -1,0 +1,15 @@
+{
+    "jobs": [
+        {
+            "kernel_trace": true,
+            "pc_sampling_unit": "time",
+            "pc_sampling_method": "host_trap",
+            "pc_sampling_interval": 1,
+            "output_file": "out",
+            "output_format": [
+                "csv"
+            ],
+            "agent_index": "type-relative" 
+        }
+    ]
+}

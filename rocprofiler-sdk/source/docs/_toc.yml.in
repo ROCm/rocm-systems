@@ -1,0 +1,43 @@
+# Anywhere {branch} is used, the branch name will be substituted.
+# These comments will also be removed.
+defaults:
+  numbered: false
+  maxdepth: 4
+
+root: index
+subtrees:
+  - caption: Install
+    entries:
+    - file: install/installation
+  - caption: How to
+    entries:
+    - file: how-to/using-rocprofv3
+    - file: how-to/using-rocprofiler-sdk-roctx
+    - file: how-to/samples
+      title: Samples
+    - file: how-to/using-pc-sampling
+    - file: how-to/using-rocprofv3-with-mpi
+  - caption: API reference
+    entries:
+    - file: api-reference/buffered_services
+      title: Buffered services
+    - file: api-reference/callback_services
+      title: Callback tracing services
+    - file: api-reference/counter_collection_services
+      title: Counter collection services
+    - file: api-reference/intercept_table
+      title: Runtime intercept tables
+    - file: api-reference/pc_sampling
+      title: PC sampling
+    - file: api-reference/tool_library
+      title: Tool library
+    - file: _doxygen/rocprofiler-sdk/html/index
+      title: ROCprofiler-SDK API library
+    - file: _doxygen/roctx/html/index
+      title: ROCTx API library
+  - caption: Conceptual
+    entries:
+    - file: conceptual/comparing-with-legacy-tools
+  - caption: License
+    entries:
+    - file: license

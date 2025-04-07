@@ -1,0 +1,17 @@
+{
+    "jobs": [
+        {
+            "kernel_include_regex": "addition",
+            "kernel_exclude_regex": "subtract",
+            "hip_runtime_trace": true,
+            "kernel_trace": true,
+            "output_file": "out",
+            "output_format": [
+                "csv",
+                "json",
+                "pftrace"
+            ],
+            "truncate_kernels": true
+        }
+    ]
+}

@@ -1,0 +1,14 @@
+name: Documentation Fixes
+description: Documentation errors can be reported here.
+title: "[Documentation]: "
+body:
+- type: textarea
+  attributes:
+    label: Description of errors
+  validations:
+    required: true
+- type: textarea
+  attributes:
+    label: Attach any links, screenshots, or additional evidence you think will be helpful.
+  validations:
+    required: false

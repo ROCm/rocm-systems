@@ -1,0 +1,1772 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "description": "Schema for the rocprofv3 JSON output",
+    "properties": {
+        "rocprofiler-sdk-tool": {
+            "type": "array",
+            "description": "rocprofv3 data per process (each element represents a process)",
+            "items": {
+                "type": "object",
+                "description": "Data for rocprofv3",
+                "properties": {
+                    "metadata": {
+                        "type": "object",
+                        "description": "Metadata related to the profiler session",
+                        "properties": {
+                            "pid": {
+                                "type": "integer",
+                                "description": "Process ID"
+                            },
+                            "init_time": {
+                                "type": "integer",
+                                "description": "Initialization time in nanoseconds"
+                            },
+                            "fini_time": {
+                                "type": "integer",
+                                "description": "Finalization time in nanoseconds"
+                            }
+                        },
+                        "required": [
+                            "pid",
+                            "init_time",
+                            "fini_time"
+                        ]
+                    },
+                    "agents": {
+                        "type": "array",
+                        "description": "List of agents",
+                        "items": {
+                            "type": "object",
+                            "description": "Data for an agent",
+                            "properties": {
+                                "size": {
+                                    "type": "integer",
+                                    "description": "Size of the agent data"
+                                },
+                                "id": {
+                                    "type": "object",
+                                    "description": "Identifier for the agent",
+                                    "properties": {
+                                        "handle": {
+                                            "type": "integer",
+                                            "description": "Handle for the agent"
+                                        }
+                                    },
+                                    "required": [
+                                        "handle"
+                                    ]
+                                },
+                                "type": {
+                                    "type": "integer",
+                                    "description": "Type of the agent"
+                                },
+                                "cpu_cores_count": {
+                                    "type": "integer",
+                                    "description": "Number of CPU cores"
+                                },
+                                "simd_count": {
+                                    "type": "integer",
+                                    "description": "Number of SIMD units"
+                                },
+                                "mem_banks_count": {
+                                    "type": "integer",
+                                    "description": "Number of memory banks"
+                                },
+                                "caches_count": {
+                                    "type": "integer",
+                                    "description": "Number of caches"
+                                },
+                                "io_links_count": {
+                                    "type": "integer",
+                                    "description": "Number of I/O links"
+                                },
+                                "cpu_core_id_base": {
+                                    "type": "integer",
+                                    "description": "Base ID for CPU cores"
+                                },
+                                "simd_id_base": {
+                                    "type": "integer",
+                                    "description": "Base ID for SIMD units"
+                                },
+                                "max_waves_per_simd": {
+                                    "type": "integer",
+                                    "description": "Maximum waves per SIMD"
+                                },
+                                "lds_size_in_kb": {
+                                    "type": "integer",
+                                    "description": "Size of LDS in KB"
+                                },
+                                "gds_size_in_kb": {
+                                    "type": "integer",
+                                    "description": "Size of GDS in KB"
+                                },
+                                "num_gws": {
+                                    "type": "integer",
+                                    "description": "Number of GWS (global work size)"
+                                },
+                                "wave_front_size": {
+                                    "type": "integer",
+                                    "description": "Size of the wave front"
+                                },
+                                "num_xcc": {
+                                    "type": "integer",
+                                    "description": "Number of XCC (execution compute units)"
+                                },
+                                "cu_count": {
+                                    "type": "integer",
+                                    "description": "Number of compute units (CUs)"
+                                },
+                                "array_count": {
+                                    "type": "integer",
+                                    "description": "Number of arrays"
+                                },
+                                "num_shader_banks": {
+                                    "type": "integer",
+                                    "description": "Number of shader banks"
+                                },
+                                "simd_arrays_per_engine": {
+                                    "type": "integer",
+                                    "description": "SIMD arrays per engine"
+                                },
+                                "cu_per_simd_array": {
+                                    "type": "integer",
+                                    "description": "CUs per SIMD array"
+                                },
+                                "simd_per_cu": {
+                                    "type": "integer",
+                                    "description": "SIMDs per CU"
+                                },
+                                "max_slots_scratch_cu": {
+                                    "type": "integer",
+                                    "description": "Maximum slots for scratch CU"
+                                },
+                                "gfx_target_version": {
+                                    "type": "integer",
+                                    "description": "GFX target version"
+                                },
+                                "vendor_id": {
+                                    "type": "integer",
+                                    "description": "Vendor ID"
+                                },
+                                "device_id": {
+                                    "type": "integer",
+                                    "description": "Device ID"
+                                },
+                                "location_id": {
+                                    "type": "integer",
+                                    "description": "Location ID"
+                                },
+                                "domain": {
+                                    "type": "integer",
+                                    "description": "Domain identifier"
+                                },
+                                "drm_render_minor": {
+                                    "type": "integer",
+                                    "description": "DRM render minor version"
+                                },
+                                "num_sdma_engines": {
+                                    "type": "integer",
+                                    "description": "Number of SDMA engines"
+                                },
+                                "num_sdma_xgmi_engines": {
+                                    "type": "integer",
+                                    "description": "Number of SDMA XGMI engines"
+                                },
+                                "num_sdma_queues_per_engine": {
+                                    "type": "integer",
+                                    "description": "Number of SDMA queues per engine"
+                                },
+                                "num_cp_queues": {
+                                    "type": "integer",
+                                    "description": "Number of CP queues"
+                                },
+                                "max_engine_clk_ccompute": {
+                                    "type": "integer",
+                                    "description": "Maximum engine clock for compute"
+                                },
+                                "max_engine_clk_fcompute": {
+                                    "type": "integer",
+                                    "description": "Maximum engine clock for F compute"
+                                },
+                                "sdma_fw_version": {
+                                    "type": "object",
+                                    "description": "SDMA firmware version",
+                                    "properties": {
+                                        "uCodeSDMA": {
+                                            "type": "integer",
+                                            "description": "SDMA microcode version"
+                                        },
+                                        "uCodeRes": {
+                                            "type": "integer",
+                                            "description": "Reserved microcode version"
+                                        }
+                                    },
+                                    "required": [
+                                        "uCodeSDMA",
+                                        "uCodeRes"
+                                    ]
+                                },
+                                "fw_version": {
+                                    "type": "object",
+                                    "description": "Firmware version",
+                                    "properties": {
+                                        "uCode": {
+                                            "type": "integer",
+                                            "description": "Microcode version"
+                                        },
+                                        "Major": {
+                                            "type": "integer",
+                                            "description": "Major version"
+                                        },
+                                        "Minor": {
+                                            "type": "integer",
+                                            "description": "Minor version"
+                                        },
+                                        "Stepping": {
+                                            "type": "integer",
+                                            "description": "Stepping version"
+                                        }
+                                    },
+                                    "required": [
+                                        "uCode",
+                                        "Major",
+                                        "Minor",
+                                        "Stepping"
+                                    ]
+                                },
+                                "capability": {
+                                    "type": "object",
+                                    "description": "Agent capability flags",
+                                    "properties": {
+                                        "HotPluggable": {
+                                            "type": "integer",
+                                            "description": "Hot pluggable capability"
+                                        },
+                                        "HSAMMUPresent": {
+                                            "type": "integer",
+                                            "description": "HSAMMU present capability"
+                                        },
+                                        "SharedWithGraphics": {
+                                            "type": "integer",
+                                            "description": "Shared with graphics capability"
+                                        },
+                                        "QueueSizePowerOfTwo": {
+                                            "type": "integer",
+                                            "description": "Queue size is power of two"
+                                        },
+                                        "QueueSize32bit": {
+                                            "type": "integer",
+                                            "description": "Queue size is 32-bit"
+                                        },
+                                        "QueueIdleEvent": {
+                                            "type": "integer",
+                                            "description": "Queue idle event"
+                                        },
+                                        "VALimit": {
+                                            "type": "integer",
+                                            "description": "VA limit"
+                                        },
+                                        "WatchPointsSupported": {
+                                            "type": "integer",
+                                            "description": "Watch points supported"
+                                        },
+                                        "WatchPointsTotalBits": {
+                                            "type": "integer",
+                                            "description": "Total bits for watch points"
+                                        },
+                                        "DoorbellType": {
+                                            "type": "integer",
+                                            "description": "Doorbell type"
+                                        },
+                                        "AQLQueueDoubleMap": {
+                                            "type": "integer",
+                                            "description": "AQL queue double map"
+                                        },
+                                        "DebugTrapSupported": {
+                                            "type": "integer",
+                                            "description": "Debug trap supported"
+                                        },
+                                        "WaveLaunchTrapOverrideSupported": {
+                                            "type": "integer",
+                                            "description": "Wave launch trap override supported"
+                                        },
+                                        "WaveLaunchModeSupported": {
+                                            "type": "integer",
+                                            "description": "Wave launch mode supported"
+                                        },
+                                        "PreciseMemoryOperationsSupported": {
+                                            "type": "integer",
+                                            "description": "Precise memory operations supported"
+                                        },
+                                        "DEPRECATED_SRAM_EDCSupport": {
+                                            "type": "integer",
+                                            "description": "Deprecated SRAM EDC support"
+                                        },
+                                        "Mem_EDCSupport": {
+                                            "type": "integer",
+                                            "description": "Memory EDC support"
+                                        },
+                                        "RASEventNotify": {
+                                            "type": "integer",
+                                            "description": "RAS event notify"
+                                        },
+                                        "ASICRevision": {
+                                            "type": "integer",
+                                            "description": "ASIC revision"
+                                        },
+                                        "SRAM_EDCSupport": {
+                                            "type": "integer",
+                                            "description": "SRAM EDC support"
+                                        },
+                                        "SVMAPISupported": {
+                                            "type": "integer",
+                                            "description": "SVM API supported"
+                                        },
+                                        "CoherentHostAccess": {
+                                            "type": "integer",
+                                            "description": "Coherent host access"
+                                        },
+                                        "DebugSupportedFirmware": {
+                                            "type": "integer",
+                                            "description": "Debug supported firmware"
+                                        },
+                                        "Reserved": {
+                                            "type": "integer",
+                                            "description": "Reserved field"
+                                        }
+                                    },
+                                    "required": [
+                                        "HotPluggable",
+                                        "HSAMMUPresent",
+                                        "SharedWithGraphics",
+                                        "QueueSizePowerOfTwo",
+                                        "QueueSize32bit",
+                                        "QueueIdleEvent",
+                                        "VALimit",
+                                        "WatchPointsSupported",
+                                        "WatchPointsTotalBits",
+                                        "DoorbellType",
+                                        "AQLQueueDoubleMap",
+                                        "DebugTrapSupported",
+                                        "WaveLaunchTrapOverrideSupported",
+                                        "WaveLaunchModeSupported",
+                                        "PreciseMemoryOperationsSupported",
+                                        "DEPRECATED_SRAM_EDCSupport",
+                                        "Mem_EDCSupport",
+                                        "RASEventNotify",
+                                        "ASICRevision",
+                                        "SRAM_EDCSupport",
+                                        "SVMAPISupported",
+                                        "CoherentHostAccess",
+                                        "DebugSupportedFirmware",
+                                        "Reserved"
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "size",
+                                "id",
+                                "type",
+                                "capability"
+                            ]
+                        }
+                    },
+                    "counters": {
+                        "type": "array",
+                        "description": "Array of counter objects.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "agent_id": {
+                                    "type": "object",
+                                    "description": "Agent ID information.",
+                                    "properties": {
+                                        "handle": {
+                                            "type": "integer",
+                                            "description": "Handle of the agent."
+                                        }
+                                    },
+                                    "required": [
+                                        "handle"
+                                    ]
+                                },
+                                "id": {
+                                    "type": "object",
+                                    "description": "Counter ID information.",
+                                    "properties": {
+                                        "handle": {
+                                            "type": "integer",
+                                            "description": "Handle of the counter."
+                                        }
+                                    },
+                                    "required": [
+                                        "handle"
+                                    ]
+                                },
+                                "is_constant": {
+                                    "type": "integer",
+                                    "description": "Indicator if the counter value is constant."
+                                },
+                                "is_derived": {
+                                    "type": "integer",
+                                    "description": "Indicator if the counter value is derived."
+                                },
+                                "name": {
+                                    "type": "string",
+                                    "description": "Name of the counter."
+                                },
+                                "description": {
+                                    "type": "string",
+                                    "description": "Description of the counter."
+                                },
+                                "block": {
+                                    "type": "string",
+                                    "description": "Block information of the counter."
+                                },
+                                "expression": {
+                                    "type": "string",
+                                    "description": "Expression of the counter."
+                                },
+                                "dimension_ids": {
+                                    "type": "array",
+                                    "description": "Array of dimension IDs.",
+                                    "items": {
+                                        "type": "integer",
+                                        "description": "Dimension ID."
+                                    }
+                                }
+                            },
+                            "required": [
+                                "agent_id",
+                                "id",
+                                "is_constant",
+                                "is_derived",
+                                "name",
+                                "description",
+                                "block",
+                                "expression",
+                                "dimension_ids"
+                            ]
+                        }
+                    },
+                    "strings": {
+                        "type": "object",
+                        "description": "String records.",
+                        "properties": {
+                            "callback_records": {
+                                "type": "array",
+                                "description": "Callback records.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "kind": {
+                                            "type": "string",
+                                            "description": "Kind of the record."
+                                        },
+                                        "operations": {
+                                            "type": "array",
+                                            "description": "Array of operations.",
+                                            "items": {
+                                                "type": "string",
+                                                "description": "Operation."
+                                            }
+                                        }
+                                    },
+                                    "required": [
+                                        "kind",
+                                        "operations"
+                                    ]
+                                }
+                            },
+                            "buffer_records": {
+                                "type": "array",
+                                "description": "Buffer records.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "kind": {
+                                            "type": "string",
+                                            "description": "Kind of the record."
+                                        },
+                                        "operations": {
+                                            "type": "array",
+                                            "description": "Array of operations.",
+                                            "items": {
+                                                "type": "string",
+                                                "description": "Operation."
+                                            }
+                                        }
+                                    },
+                                    "required": [
+                                        "kind",
+                                        "operations"
+                                    ]
+                                }
+                            },
+                            "marker_api": {
+                                "type": "array",
+                                "description": "Marker API records.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "key": {
+                                            "type": "integer",
+                                            "description": "Key of the record."
+                                        },
+                                        "value": {
+                                            "type": "string",
+                                            "description": "Value of the record."
+                                        }
+                                    },
+                                    "required": [
+                                        "key",
+                                        "value"
+                                    ]
+                                }
+                            },
+                            "counters": {
+                                "type": "object",
+                                "description": "Counter records.",
+                                "properties": {
+                                    "dimension_ids": {
+                                        "type": "array",
+                                        "description": "Array of dimension IDs.",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {
+                                                    "type": "integer",
+                                                    "description": "Dimension ID."
+                                                },
+                                                "instance_size": {
+                                                    "type": "integer",
+                                                    "description": "Size of the instance."
+                                                },
+                                                "name": {
+                                                    "type": "string",
+                                                    "description": "Name of the dimension."
+                                                }
+                                            },
+                                            "required": [
+                                                "id",
+                                                "instance_size",
+                                                "name"
+                                            ]
+                                        }
+                                    }
+                                },
+                                "required": [
+                                    "dimension_ids"
+                                ]
+                            },
+                            "pc_sample_instructions": {
+                                "type": "array",
+                                "description": "Array of decoded instructions matching sampled PCs from pc_sample_host_trap section."
+                            },
+                            "pc_sample_comments": {
+                                "type": "array",
+                                "description": "Comments matching assembly instructions from pc_sample_instructions array. If debug symbols are available, comments provide instructions to source-line mapping. Otherwise, a comment is an empty string."
+                            },
+                            "att_filenames" : {
+                                "type": "array",
+                                "items": {
+                                    "type": "string",
+                                    "description": "Filename of saved .att data in the form name_shader_engine_seId_dispatchId.att"
+                                }
+                            },
+                            "code_object_snapshot_filenames": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "key": {
+                                            "type": "integer",
+                                            "description": "Code object load id."
+                                        },
+                                        "value": {
+                                            "type": "string",
+                                            "description": "Saved code object filename"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "code_objects": {
+                        "type": "array",
+                        "description": "Code object records.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "size": {
+                                    "type": "integer",
+                                    "description": "Size of the code object."
+                                },
+                                "code_object_id": {
+                                    "type": "integer",
+                                    "description": "ID of the code object."
+                                },
+                                "agent_id": {
+                                    "type": "object",
+                                    "description": "Rocprofiler-SDK agent information.",
+                                    "properties": {
+                                        "handle": {
+                                            "type": "integer",
+                                            "description": "Handle of the Rocprofiler-SDK agent."
+                                        }
+                                    },
+                                    "required": [
+                                        "handle"
+                                    ]
+                                },
+                                "uri": {
+                                    "type": "string",
+                                    "description": "URI of the code object."
+                                },
+                                "load_base": {
+                                    "type": "integer",
+                                    "description": "Base address for loading."
+                                },
+                                "load_size": {
+                                    "type": "integer",
+                                    "description": "Size for loading."
+                                },
+                                "load_delta": {
+                                    "type": "integer",
+                                    "description": "Delta for loading."
+                                },
+                                "storage_type": {
+                                    "type": "integer",
+                                    "description": "Type of storage."
+                                },
+                                "memory_base": {
+                                    "type": "integer",
+                                    "description": "Base address for memory."
+                                },
+                                "memory_size": {
+                                    "type": "integer",
+                                    "description": "Size of memory."
+                                }
+                            },
+                            "required": [
+                                "size",
+                                "code_object_id",
+                                "rocp_agent",
+                                "hsa_agent",
+                                "uri",
+                                "load_base",
+                                "load_size",
+                                "load_delta",
+                                "storage_type",
+                                "memory_base",
+                                "memory_size"
+                            ]
+                        }
+                    },
+                    "kernel_symbols": {
+                        "type": "array",
+                        "description": "Kernel symbol records.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "size": {
+                                    "type": "integer",
+                                    "description": "Size of the kernel symbol."
+                                },
+                                "kernel_id": {
+                                    "type": "integer",
+                                    "description": "ID of the kernel."
+                                },
+                                "code_object_id": {
+                                    "type": "integer",
+                                    "description": "ID of the code object."
+                                },
+                                "kernel_name": {
+                                    "type": "string",
+                                    "description": "Name of the kernel."
+                                },
+                                "kernel_object": {
+                                    "type": "integer",
+                                    "description": "Object of the kernel."
+                                },
+                                "kernarg_segment_size": {
+                                    "type": "integer",
+                                    "description": "Size of the kernarg segment."
+                                },
+                                "kernarg_segment_alignment": {
+                                    "type": "integer",
+                                    "description": "Alignment of the kernarg segment."
+                                },
+                                "group_segment_size": {
+                                    "type": "integer",
+                                    "description": "Size of the group segment."
+                                },
+                                "private_segment_size": {
+                                    "type": "integer",
+                                    "description": "Size of the private segment."
+                                },
+                                "formatted_kernel_name": {
+                                    "type": "string",
+                                    "description": "Formatted name of the kernel."
+                                },
+                                "demangled_kernel_name": {
+                                    "type": "string",
+                                    "description": "Demangled name of the kernel."
+                                },
+                                "truncated_kernel_name": {
+                                    "type": "string",
+                                    "description": "Truncated name of the kernel."
+                                }
+                            },
+                            "required": [
+                                "size",
+                                "kernel_id",
+                                "code_object_id",
+                                "kernel_name",
+                                "kernel_object",
+                                "kernarg_segment_size",
+                                "kernarg_segment_alignment",
+                                "group_segment_size",
+                                "private_segment_size",
+                                "formatted_kernel_name",
+                                "demangled_kernel_name",
+                                "truncated_kernel_name"
+                            ]
+                        }
+                    },
+                    "host_functions": {
+                        "type": "array",
+                        "description": "Host function records.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "size": {
+                                    "type": "integer",
+                                    "description": "Size of the host function record."
+                                },
+                                "host_function_id": {
+                                    "type": "integer",
+                                    "description": "ID of the HIP host function."
+                                },
+                                "kernel_id": {
+                                    "type": "integer",
+                                    "description": "ID of the corressponding kernel."
+                                },
+                                "code_object_id": {
+                                    "type": "integer",
+                                    "description": "ID of the corressponding code object."
+                                },
+                                "host_function_address": {
+                                    "type": "integer",
+                                    "description": "Address of the host function registered."
+                                },
+                                "modules_address": {
+                                    "type": "integer",
+                                    "description": "Address of the hip fat binary registered"
+                                },
+                                "device_function": {
+                                    "type": "string",
+                                    "description": "Device function name registered"
+                                },
+                                "thread_limit": {
+                                    "type": "integer",
+                                    "description": "Size of the thread limit."
+                                },
+                                "thread_id_address": {
+                                    "type": "integer",
+                                    "description": "Address of thread Id."
+                                },
+                                "block_id_address": {
+                                    "type": "string",
+                                    "description": "Address of Block Id."
+                                },
+                                "block_dim_address": {
+                                    "type": "string",
+                                    "description": "Address of Block Dimension"
+                                },
+                                "grid_dim_address": {
+                                    "type": "string",
+                                    "description": "Address of the Grid Dimension."
+                                },
+                                "workgroup_size_address": {
+                                    "type": "string",
+                                    "description": "Address of the work group size."
+                                },
+                                "formatted_host_function_name": {
+                                    "type": "string",
+                                    "description": "Formatted name of the device function."
+                                },
+                                "demangled_host_function_name": {
+                                    "type": "string",
+                                    "description": "Demangled name of device function."
+                                },
+                                "truncated_host_function_name": {
+                                    "type": "string",
+                                    "description": "Truncated name of device function."
+                                }
+                            },
+                            "required": [
+                                "size",
+                                "host_function_id",
+                                "kernel_id",
+                                "code_object_id",
+                                "host_function_address",
+                                "modules_address",
+                                "device_function",
+                                "thread_limit",
+                                "thread_id_address",
+                                "block_id_address",
+                                "block_dim_address",
+                                "grid_dim_address",
+                                "workgroup_size_address",
+                                "formatted_host_function_name",
+                                "demangled_host_function_name",
+                                "truncated_host_function_name"
+                            ]
+                        }
+                    },
+                    "callback_records": {
+                        "type": "object",
+                        "description": "Callback record details.",
+                        "properties": {
+                            "counter_collection": {
+                                "type": "array",
+                                "description": "Counter collection records.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "dispatch_data": {
+                                            "type": "object",
+                                            "description": "Dispatch data details.",
+                                            "properties": {
+                                                "size": {
+                                                    "type": "integer",
+                                                    "description": "Size of the dispatch data."
+                                                },
+                                                "correlation_id": {
+                                                    "type": "object",
+                                                    "description": "Correlation ID information.",
+                                                    "properties": {
+                                                        "internal": {
+                                                            "type": "integer",
+                                                            "description": "Internal correlation ID."
+                                                        },
+                                                        "external": {
+                                                            "type": "integer",
+                                                            "description": "External correlation ID."
+                                                        }
+                                                    },
+                                                    "required": [
+                                                        "internal",
+                                                        "external"
+                                                    ]
+                                                },
+                                                "dispatch_info": {
+                                                    "type": "object",
+                                                    "description": "Dispatch information details.",
+                                                    "properties": {
+                                                        "size": {
+                                                            "type": "integer",
+                                                            "description": "Size of the dispatch information."
+                                                        },
+                                                        "agent_id": {
+                                                            "type": "object",
+                                                            "description": "Agent ID information.",
+                                                            "properties": {
+                                                                "handle": {
+                                                                    "type": "integer",
+                                                                    "description": "Handle of the agent."
+                                                                }
+                                                            },
+                                                            "required": [
+                                                                "handle"
+                                                            ]
+                                                        },
+                                                        "queue_id": {
+                                                            "type": "object",
+                                                            "description": "Queue ID information.",
+                                                            "properties": {
+                                                                "handle": {
+                                                                    "type": "integer",
+                                                                    "description": "Handle of the queue."
+                                                                }
+                                                            },
+                                                            "required": [
+                                                                "handle"
+                                                            ]
+                                                        },
+                                                        "kernel_id": {
+                                                            "type": "integer",
+                                                            "description": "ID of the kernel."
+                                                        },
+                                                        "dispatch_id": {
+                                                            "type": "integer",
+                                                            "description": "ID of the dispatch."
+                                                        },
+                                                        "private_segment_size": {
+                                                            "type": "integer",
+                                                            "description": "Size of the private segment."
+                                                        },
+                                                        "group_segment_size": {
+                                                            "type": "integer",
+                                                            "description": "Size of the group segment."
+                                                        },
+                                                        "workgroup_size": {
+                                                            "type": "object",
+                                                            "description": "Workgroup size information.",
+                                                            "properties": {
+                                                                "x": {
+                                                                    "type": "integer",
+                                                                    "description": "X dimension."
+                                                                },
+                                                                "y": {
+                                                                    "type": "integer",
+                                                                    "description": "Y dimension."
+                                                                },
+                                                                "z": {
+                                                                    "type": "integer",
+                                                                    "description": "Z dimension."
+                                                                }
+                                                            },
+                                                            "required": [
+                                                                "x",
+                                                                "y",
+                                                                "z"
+                                                            ]
+                                                        },
+                                                        "grid_size": {
+                                                            "type": "object",
+                                                            "description": "Grid size information.",
+                                                            "properties": {
+                                                                "x": {
+                                                                    "type": "integer",
+                                                                    "description": "X dimension."
+                                                                },
+                                                                "y": {
+                                                                    "type": "integer",
+                                                                    "description": "Y dimension."
+                                                                },
+                                                                "z": {
+                                                                    "type": "integer",
+                                                                    "description": "Z dimension."
+                                                                }
+                                                            },
+                                                            "required": [
+                                                                "x",
+                                                                "y",
+                                                                "z"
+                                                            ]
+                                                        }
+                                                    },
+                                                    "required": [
+                                                        "size",
+                                                        "agent_id",
+                                                        "queue_id",
+                                                        "kernel_id",
+                                                        "dispatch_id",
+                                                        "private_segment_size",
+                                                        "group_segment_size",
+                                                        "workgroup_size",
+                                                        "grid_size"
+                                                    ]
+                                                }
+                                            },
+                                            "required": [
+                                                "size",
+                                                "correlation_id",
+                                                "dispatch_info"
+                                            ]
+                                        },
+                                        "records": {
+                                            "type": "array",
+                                            "description": "Records.",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "counter_id": {
+                                                        "type": "object",
+                                                        "description": "Counter ID information.",
+                                                        "properties": {
+                                                            "handle": {
+                                                                "type": "integer",
+                                                                "description": "Handle of the counter."
+                                                            }
+                                                        },
+                                                        "required": [
+                                                            "handle"
+                                                        ]
+                                                    },
+                                                    "value": {
+                                                        "type": "number",
+                                                        "description": "Value of the counter."
+                                                    }
+                                                },
+                                                "required": [
+                                                    "counter_id",
+                                                    "value"
+                                                ]
+                                            }
+                                        },
+                                        "thread_id": {
+                                            "type": "integer",
+                                            "description": "Thread ID."
+                                        },
+                                        "arch_vgpr_count": {
+                                            "type": "integer",
+                                            "description": "Count of VGPRs."
+                                        },
+                                        "sgpr_count": {
+                                            "type": "integer",
+                                            "description": "Count of SGPRs."
+                                        },
+                                        "lds_block_size_v": {
+                                            "type": "integer",
+                                            "description": "Size of LDS block."
+                                        }
+                                    },
+                                    "required": [
+                                        "dispatch_data",
+                                        "records",
+                                        "thread_id",
+                                        "arch_vgpr_count",
+                                        "sgpr_count",
+                                        "lds_block_size_v"
+                                    ]
+                                }
+                            },
+                            "pc_sample_host_trap": {
+                                "type": "array",
+                                "description": "Host Trap PC Sampling records.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "hw_id": {
+                                            "type": "object",
+                                            "description" : "Describes hardware part on which sampled wave was running.",
+                                            "properties": {
+                                                "chiplet":{
+                                                    "type": "integer",
+                                                    "description": "Chiplet index."
+                                                },
+                                                "wave_id ":{
+                                                    "type": "integer",
+                                                    "description": "Wave slot index."
+                                                },
+                                                "simd_id":{
+                                                    "type": "integer",
+                                                    "description": "SIMD index."
+                                                },
+                                                "pipe_id ":{
+                                                    "type": "integer",
+                                                    "description":  "Pipe index."
+                                                },
+                                                "cu_or_wgp_id":{
+                                                    "type": "integer",
+                                                    "description": "Index of compute unit or workgroup processer."
+                                                },
+                                                "shader_array_id":{
+                                                    "type": "integer",
+                                                    "description": "Shader array index."
+                                                },
+                                                "shader_engine_id":{
+                                                    "type": "integer",
+                                                    "description": "Shader engine index."
+                                                },
+                                                "workgroup_id":{
+                                                    "type": "integer",
+                                                    "description": "Workgroup position in the 3D."
+                                                },
+                                                "vm_id":{
+                                                    "type": "integer",
+                                                    "description": "Virtual memory ID."
+                                                },
+                                                "queue_id":{
+                                                    "type": "integer",
+                                                    "description": "Queue id."
+                                                },
+                                                "microengine_id":{
+                                                    "type": "integer",
+                                                    "description": "ACE (microengine) index."
+                                                }
+                                            }
+                                           },
+                                            "pc": {
+                                            "type": "object",
+                                            "description": "Encapsulates information about sampled PC.",
+                                            "properties": {
+                                                "code_object_id":{
+                                                    "type": "integer",
+                                                    "description": "Code object id"
+                                                },
+                                                "code_object_offset":{
+                                                    "type": "integer",
+                                                    "description": "Offset within the object if the latter is known. Otherwise, virtual address of the PC."
+                                                }
+                                            }
+                                        },
+                                            "exec_mask":{
+                                                "type": "integer",
+                                                "description": "Execution mask indicating active SIMD lanes of sampled wave."
+                                            },
+                                            "timestamp":{
+                                                "type": "integer",
+                                                "description": "Timestamp."
+                                            },
+                                            "dispatch_id":{
+                                                "type": "integer",
+                                                "description": "Dispatch id."
+                                            },
+                                            "correlation_id": {
+                                                    "type": "object",
+                                                    "description": "Correlation ID information.",
+                                                    "properties": {
+                                                        "internal": {
+                                                            "type": "integer",
+                                                            "description": "Internal correlation ID."
+                                                        },
+                                                        "external": {
+                                                            "type": "integer",
+                                                            "description": "External correlation ID."
+                                                        }
+                                                    }
+                                                },
+                                            "rocprofiler_dim3_t": {
+                                                "type": "object",
+                                                "description": " Position of the workgroup in 3D grid.",
+                                                "properties": {
+                                                     "x": {
+                                                        "type": "integer",
+                                                        "description": "Dimension x."
+                                                     },
+                                                     "y": {
+                                                        "type": "integer",
+                                                        "description": "Dimension y."
+                                                     },
+                                                     "z": {
+                                                        "type": "integer",
+                                                        "description": "Dimension z."
+                                                     }
+                                                }
+                                            },
+                                            "wave_in_group": {
+                                                "type": "integer",
+                                                "description": "Wave position within the workgroup (0-31)."
+                                            }
+                                        }
+                                    }
+                                }
+
+                        }
+                    },
+                    "buffer_records": {
+                        "type": "object",
+                        "description": "Buffer record details.",
+                        "properties": {
+                            "kernel_dispatch": {
+                                "type": "array",
+                                "description": "Kernel dispatch records.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "size": {
+                                            "type": "integer",
+                                            "description": "Size of the dispatch."
+                                        },
+                                        "kind": {
+                                            "type": "integer",
+                                            "description": "Kind of the dispatch."
+                                        },
+                                        "operation": {
+                                            "type": "integer",
+                                            "description": "Operation of the dispatch."
+                                        },
+                                        "thread_id": {
+                                            "type": "integer",
+                                            "description": "Thread ID."
+                                        },
+                                        "correlation_id": {
+                                            "type": "object",
+                                            "description": "Correlation ID information.",
+                                            "properties": {
+                                                "internal": {
+                                                    "type": "integer",
+                                                    "description": "Internal correlation ID."
+                                                },
+                                                "external": {
+                                                    "type": "integer",
+                                                    "description": "External correlation ID."
+                                                }
+                                            },
+                                            "required": [
+                                                "internal",
+                                                "external"
+                                            ]
+                                        },
+                                        "start_timestamp": {
+                                            "type": "integer",
+                                            "description": "Start timestamp."
+                                        },
+                                        "end_timestamp": {
+                                            "type": "integer",
+                                            "description": "End timestamp."
+                                        },
+                                        "dispatch_info": {
+                                            "type": "object",
+                                            "description": "Dispatch information details.",
+                                            "properties": {
+                                                "size": {
+                                                    "type": "integer",
+                                                    "description": "Size of the dispatch information."
+                                                },
+                                                "agent_id": {
+                                                    "type": "object",
+                                                    "description": "Agent ID information.",
+                                                    "properties": {
+                                                        "handle": {
+                                                            "type": "integer",
+                                                            "description": "Handle of the agent."
+                                                        }
+                                                    },
+                                                    "required": [
+                                                        "handle"
+                                                    ]
+                                                },
+                                                "queue_id": {
+                                                    "type": "object",
+                                                    "description": "Queue ID information.",
+                                                    "properties": {
+                                                        "handle": {
+                                                            "type": "integer",
+                                                            "description": "Handle of the queue."
+                                                        }
+                                                    },
+                                                    "required": [
+                                                        "handle"
+                                                    ]
+                                                },
+                                                "kernel_id": {
+                                                    "type": "integer",
+                                                    "description": "ID of the kernel."
+                                                },
+                                                "dispatch_id": {
+                                                    "type": "integer",
+                                                    "description": "ID of the dispatch."
+                                                },
+                                                "private_segment_size": {
+                                                    "type": "integer",
+                                                    "description": "Size of the private segment."
+                                                },
+                                                "group_segment_size": {
+                                                    "type": "integer",
+                                                    "description": "Size of the group segment."
+                                                },
+                                                "workgroup_size": {
+                                                    "type": "object",
+                                                    "description": "Workgroup size information.",
+                                                    "properties": {
+                                                        "x": {
+                                                            "type": "integer",
+                                                            "description": "X dimension."
+                                                        },
+                                                        "y": {
+                                                            "type": "integer",
+                                                            "description": "Y dimension."
+                                                        },
+                                                        "z": {
+                                                            "type": "integer",
+                                                            "description": "Z dimension."
+                                                        }
+                                                    },
+                                                    "required": [
+                                                        "x",
+                                                        "y",
+                                                        "z"
+                                                    ]
+                                                },
+                                                "grid_size": {
+                                                    "type": "object",
+                                                    "description": "Grid size information.",
+                                                    "properties": {
+                                                        "x": {
+                                                            "type": "integer",
+                                                            "description": "X dimension."
+                                                        },
+                                                        "y": {
+                                                            "type": "integer",
+                                                            "description": "Y dimension."
+                                                        },
+                                                        "z": {
+                                                            "type": "integer",
+                                                            "description": "Z dimension."
+                                                        }
+                                                    },
+                                                    "required": [
+                                                        "x",
+                                                        "y",
+                                                        "z"
+                                                    ]
+                                                }
+                                            },
+                                            "required": [
+                                                "size",
+                                                "agent_id",
+                                                "queue_id",
+                                                "kernel_id",
+                                                "dispatch_id",
+                                                "private_segment_size",
+                                                "group_segment_size",
+                                                "workgroup_size",
+                                                "grid_size"
+                                            ]
+                                        }
+                                    },
+                                    "required": [
+                                        "size",
+                                        "kind",
+                                        "operation",
+                                        "thread_id",
+                                        "correlation_id",
+                                        "start_timestamp",
+                                        "end_timestamp",
+                                        "dispatch_info"
+                                    ]
+                                }
+                            },
+                            "hip_api": {
+                                "type": "array",
+                                "description": "HIP API records.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "size": {
+                                            "type": "integer",
+                                            "description": "Size of the HIP API record."
+                                        },
+                                        "kind": {
+                                            "type": "integer",
+                                            "description": "Kind of the HIP API."
+                                        },
+                                        "operation": {
+                                            "type": "integer",
+                                            "description": "Operation of the HIP API."
+                                        },
+                                        "correlation_id": {
+                                            "type": "object",
+                                            "description": "Correlation ID information.",
+                                            "properties": {
+                                                "internal": {
+                                                    "type": "integer",
+                                                    "description": "Internal correlation ID."
+                                                },
+                                                "external": {
+                                                    "type": "integer",
+                                                    "description": "External correlation ID."
+                                                }
+                                            },
+                                            "required": [
+                                                "internal",
+                                                "external"
+                                            ]
+                                        },
+                                        "start_timestamp": {
+                                            "type": "integer",
+                                            "description": "Start timestamp."
+                                        },
+                                        "end_timestamp": {
+                                            "type": "integer",
+                                            "description": "End timestamp."
+                                        },
+                                        "thread_id": {
+                                            "type": "integer",
+                                            "description": "Thread ID."
+                                        }
+                                    },
+                                    "required": [
+                                        "size",
+                                        "kind",
+                                        "operation",
+                                        "correlation_id",
+                                        "start_timestamp",
+                                        "end_timestamp",
+                                        "thread_id"
+                                    ]
+                                }
+                            },
+                            "hsa_api": {
+                                "type": "array",
+                                "description": "HSA API records.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "size": {
+                                            "type": "integer",
+                                            "description": "Size of the HSA API record."
+                                        },
+                                        "kind": {
+                                            "type": "integer",
+                                            "description": "Kind of the HSA API."
+                                        },
+                                        "operation": {
+                                            "type": "integer",
+                                            "description": "Operation of the HSA API."
+                                        },
+                                        "correlation_id": {
+                                            "type": "object",
+                                            "description": "Correlation ID information.",
+                                            "properties": {
+                                                "internal": {
+                                                    "type": "integer",
+                                                    "description": "Internal correlation ID."
+                                                },
+                                                "external": {
+                                                    "type": "integer",
+                                                    "description": "External correlation ID."
+                                                }
+                                            },
+                                            "required": [
+                                                "internal",
+                                                "external"
+                                            ]
+                                        },
+                                        "start_timestamp": {
+                                            "type": "integer",
+                                            "description": "Start timestamp."
+                                        },
+                                        "end_timestamp": {
+                                            "type": "integer",
+                                            "description": "End timestamp."
+                                        },
+                                        "thread_id": {
+                                            "type": "integer",
+                                            "description": "Thread ID."
+                                        }
+                                    },
+                                    "required": [
+                                        "size",
+                                        "kind",
+                                        "operation",
+                                        "correlation_id",
+                                        "start_timestamp",
+                                        "end_timestamp",
+                                        "thread_id"
+                                    ]
+                                }
+                            },
+                            "marker_api": {
+                                "type": "array",
+                                "description": "Marker (ROCTx) API records.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "size": {
+                                            "type": "integer",
+                                            "description": "Size of the Marker API record."
+                                        },
+                                        "kind": {
+                                            "type": "integer",
+                                            "description": "Kind of the Marker API."
+                                        },
+                                        "operation": {
+                                            "type": "integer",
+                                            "description": "Operation of the Marker API."
+                                        },
+                                        "correlation_id": {
+                                            "type": "object",
+                                            "description": "Correlation ID information.",
+                                            "properties": {
+                                                "internal": {
+                                                    "type": "integer",
+                                                    "description": "Internal correlation ID."
+                                                },
+                                                "external": {
+                                                    "type": "integer",
+                                                    "description": "External correlation ID."
+                                                }
+                                            },
+                                            "required": [
+                                                "internal",
+                                                "external"
+                                            ]
+                                        },
+                                        "start_timestamp": {
+                                            "type": "integer",
+                                            "description": "Start timestamp."
+                                        },
+                                        "end_timestamp": {
+                                            "type": "integer",
+                                            "description": "End timestamp."
+                                        },
+                                        "thread_id": {
+                                            "type": "integer",
+                                            "description": "Thread ID."
+                                        }
+                                    },
+                                    "required": [
+                                        "size",
+                                        "kind",
+                                        "operation",
+                                        "correlation_id",
+                                        "start_timestamp",
+                                        "end_timestamp",
+                                        "thread_id"
+                                    ]
+                                }
+                            },
+                            "memory_copy": {
+                                "type": "array",
+                                "description": "Async memory copy records.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "size": {
+                                            "type": "integer",
+                                            "description": "Size of the Marker API record."
+                                        },
+                                        "kind": {
+                                            "type": "integer",
+                                            "description": "Kind of the Marker API."
+                                        },
+                                        "operation": {
+                                            "type": "integer",
+                                            "description": "Operation of the Marker API."
+                                        },
+                                        "correlation_id": {
+                                            "type": "object",
+                                            "description": "Correlation ID information.",
+                                            "properties": {
+                                                "internal": {
+                                                    "type": "integer",
+                                                    "description": "Internal correlation ID."
+                                                },
+                                                "external": {
+                                                    "type": "integer",
+                                                    "description": "External correlation ID."
+                                                }
+                                            },
+                                            "required": [
+                                                "internal",
+                                                "external"
+                                            ]
+                                        },
+                                        "start_timestamp": {
+                                            "type": "integer",
+                                            "description": "Start timestamp."
+                                        },
+                                        "end_timestamp": {
+                                            "type": "integer",
+                                            "description": "End timestamp."
+                                        },
+                                        "thread_id": {
+                                            "type": "integer",
+                                            "description": "Thread ID."
+                                        },
+                                        "dst_agent_id": {
+                                            "type": "object",
+                                            "description": "Destination Agent ID.",
+                                            "properties": {
+                                                "handle": {
+                                                    "type": "integer",
+                                                    "description": "Handle of the agent."
+                                                }
+                                            },
+                                            "required": [
+                                                "handle"
+                                            ]
+                                        },
+                                        "src_agent_id": {
+                                            "type": "object",
+                                            "description": "Source Agent ID.",
+                                            "properties": {
+                                                "handle": {
+                                                    "type": "integer",
+                                                    "description": "Handle of the agent."
+                                                }
+                                            },
+                                            "required": [
+                                                "handle"
+                                            ]
+                                        },
+                                        "bytes": {
+                                            "type": "integer",
+                                            "description": "Bytes copied."
+                                        }
+                                    },
+                                    "required": [
+                                        "size",
+                                        "kind",
+                                        "operation",
+                                        "correlation_id",
+                                        "start_timestamp",
+                                        "end_timestamp",
+                                        "thread_id",
+                                        "dst_agent_id",
+                                        "src_agent_id",
+                                        "bytes"
+                                    ]
+                                }
+                            },
+                            "memory_allocation": {
+                                "type": "array",
+                                "description": "Memory allocation records.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "size": {
+                                            "type": "integer",
+                                            "description": "Size of the Marker API record."
+                                        },
+                                        "kind": {
+                                            "type": "integer",
+                                            "description": "Kind of the Marker API."
+                                        },
+                                        "operation": {
+                                            "type": "integer",
+                                            "description": "Operation of the Marker API."
+                                        },
+                                        "correlation_id": {
+                                            "type": "object",
+                                            "description": "Correlation ID information.",
+                                            "properties": {
+                                                "internal": {
+                                                    "type": "integer",
+                                                    "description": "Internal correlation ID."
+                                                },
+                                                "external": {
+                                                    "type": "integer",
+                                                    "description": "External correlation ID."
+                                                }
+                                            },
+                                            "required": [
+                                                "internal",
+                                                "external"
+                                            ]
+                                        },
+                                        "start_timestamp": {
+                                            "type": "integer",
+                                            "description": "Start timestamp."
+                                        },
+                                        "end_timestamp": {
+                                            "type": "integer",
+                                            "description": "End timestamp."
+                                        },
+                                        "thread_id": {
+                                            "type": "integer",
+                                            "description": "Thread ID."
+                                        },
+                                        "agent_id": {
+                                            "type": "object",
+                                            "description": "Agent ID.",
+                                            "properties": {
+                                                "handle": {
+                                                    "type": "integer",
+                                                    "description": "Handle of the agent."
+                                                }
+                                            },
+                                            "required": [
+                                                "handle"
+                                            ]
+                                        },
+                                        "address": {
+                                            "type": "string",
+                                            "description": "Starting address for allocation or freeing memory."
+                                        },
+                                        "allocation_size": {
+                                            "type": "integer",
+                                            "description": "Size of memory allocation. Free operations not tracked currently."
+                                        }
+                                    },
+                                    "required": [
+                                        "size",
+                                        "kind",
+                                        "operation",
+                                        "correlation_id",
+                                        "start_timestamp",
+                                        "end_timestamp",
+                                        "thread_id",
+					"agent_id",
+                                        "address",
+                                        "allocation_size"
+                                    ]
+				}
+			    },
+			"rocdecoder_api": {
+                                "type": "array",
+                                "description": "ROCDecode API records.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "size": {
+                                            "type": "integer",
+                                            "description": "Size of the rocDecode API record."
+                                        },
+                                        "kind": {
+                                            "type": "integer",
+                                            "description": "Kind of the rocDecode API."
+                                        },
+                                        "operation": {
+                                            "type": "integer",
+                                            "description": "Operation of the rocDecode API."
+                                        },
+                                        "correlation_id": {
+                                            "type": "object",
+                                            "description": "Correlation ID information.",
+                                            "properties": {
+                                                "internal": {
+                                                    "type": "integer",
+                                                    "description": "Internal correlation ID."
+                                                },
+                                                "external": {
+                                                    "type": "integer",
+                                                    "description": "External correlation ID."
+                                                }
+                                            },
+                                            "required": [
+                                                "internal",
+                                                "external"
+                                            ]
+                                        },
+                                        "start_timestamp": {
+                                            "type": "integer",
+                                            "description": "Start timestamp."
+                                        },
+                                        "end_timestamp": {
+                                            "type": "integer",
+                                            "description": "End timestamp."
+                                        },
+                                        "thread_id": {
+                                            "type": "integer",
+                                            "description": "Thread ID."
+                                        }
+                                    },
+                                    "required": [
+                                        "size",
+                                        "kind",
+                                        "operation",
+                                        "correlation_id",
+                                        "start_timestamp",
+                                        "end_timestamp",
+                                        "thread_id"
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                },
+                "required": [
+                    "metadata",
+                    "agents",
+                    "counters",
+                    "strings",
+                    "code_objects",
+                    "kernel_symbols",
+                    "callback_records",
+                    "buffer_records"
+                ]
+            }
+        }
+    },
+    "required": [
+        "rocprofiler-sdk-tool"
+    ]
+}

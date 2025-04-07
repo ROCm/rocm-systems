@@ -1,0 +1,160 @@
+// MIT License
+//
+// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
+#pragma once
+
+#include <rocprofiler-sdk/ext_version.h>
+
+/**
+ * @brief ROCProfiler enumeration of HSA Core API tracing operations
+ */
+typedef enum rocprofiler_hsa_core_api_id_t  // NOLINT(performance-enum-size)
+{
+    ROCPROFILER_HSA_CORE_API_ID_NONE     = -1,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_init = 0,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_shut_down,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_system_get_info,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_system_extension_supported,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_system_get_extension_table,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_iterate_agents,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_agent_get_info,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_queue_create,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_soft_queue_create,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_queue_destroy,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_queue_inactivate,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_queue_load_read_index_scacquire,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_queue_load_read_index_relaxed,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_queue_load_write_index_scacquire,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_queue_load_write_index_relaxed,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_queue_store_write_index_relaxed,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_queue_store_write_index_screlease,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_queue_cas_write_index_scacq_screl,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_queue_cas_write_index_scacquire,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_queue_cas_write_index_relaxed,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_queue_cas_write_index_screlease,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_queue_add_write_index_scacq_screl,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_queue_add_write_index_scacquire,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_queue_add_write_index_relaxed,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_queue_add_write_index_screlease,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_queue_store_read_index_relaxed,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_queue_store_read_index_screlease,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_agent_iterate_regions,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_region_get_info,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_agent_get_exception_policies,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_agent_extension_supported,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_memory_register,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_memory_deregister,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_memory_allocate,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_memory_free,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_memory_copy,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_memory_assign_agent,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_create,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_destroy,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_load_relaxed,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_load_scacquire,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_store_relaxed,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_store_screlease,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_wait_relaxed,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_wait_scacquire,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_and_relaxed,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_and_scacquire,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_and_screlease,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_and_scacq_screl,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_or_relaxed,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_or_scacquire,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_or_screlease,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_or_scacq_screl,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_xor_relaxed,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_xor_scacquire,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_xor_screlease,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_xor_scacq_screl,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_exchange_relaxed,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_exchange_scacquire,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_exchange_screlease,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_exchange_scacq_screl,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_add_relaxed,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_add_scacquire,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_add_screlease,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_add_scacq_screl,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_subtract_relaxed,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_subtract_scacquire,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_subtract_screlease,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_subtract_scacq_screl,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_cas_relaxed,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_cas_scacquire,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_cas_screlease,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_cas_scacq_screl,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_isa_from_name,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_isa_get_info,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_isa_compatible,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_code_object_serialize,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_code_object_deserialize,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_code_object_destroy,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_code_object_get_info,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_code_object_get_symbol,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_code_symbol_get_info,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_code_object_iterate_symbols,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_executable_create,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_executable_destroy,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_executable_load_code_object,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_executable_freeze,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_executable_get_info,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_executable_global_variable_define,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_executable_agent_global_variable_define,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_executable_readonly_variable_define,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_executable_validate,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_executable_get_symbol,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_executable_symbol_get_info,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_executable_iterate_symbols,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_status_string,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_extension_get_name,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_system_major_extension_supported,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_system_get_major_extension_table,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_agent_major_extension_supported,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_cache_get_info,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_agent_iterate_caches,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_silent_store_relaxed,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_silent_store_screlease,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_group_create,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_group_destroy,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_group_wait_any_scacquire,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_group_wait_any_relaxed,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_agent_iterate_isas,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_isa_get_info_alt,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_isa_get_exception_policies,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_isa_get_round_method,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_wavefront_get_info,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_isa_iterate_wavefronts,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_code_object_get_symbol_from_name,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_code_object_reader_create_from_file,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_code_object_reader_create_from_memory,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_code_object_reader_destroy,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_executable_create_alt,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_executable_load_program_code_object,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_executable_load_agent_code_object,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_executable_validate_alt,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_executable_get_symbol_by_name,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_executable_iterate_agent_symbols,
+    ROCPROFILER_HSA_CORE_API_ID_hsa_executable_iterate_program_symbols,
+
+    ROCPROFILER_HSA_CORE_API_ID_LAST,
+} rocprofiler_hsa_core_api_id_t;

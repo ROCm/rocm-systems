@@ -1,0 +1,8 @@
+# multi block counters
+
+pmc: GRBM_COUNT
+pmc: GRBM_GUI_ACTIVE
+pmc: TA_BUSY_avr
+
+# below line expects that no system has >= 16384 GPUs so they should never be collected
+pmc: SQ_WAVES           SQ_CYCLES:device=16384      SQ_BUSY_CYCLES:device=65536

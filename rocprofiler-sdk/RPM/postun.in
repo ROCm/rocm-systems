@@ -1,0 +1,4 @@
+# left-hand term originates from ENABLE_LDCONFIG = ON/OFF at package build
+if [ "@ENABLE_LDCONFIG@" == "ON" ]; then
+  rm -f /@CMAKE_INSTALL_SYSCONFDIR@/ld.so.conf.d/librocprofiler-sdk.conf && ldconfig
+fi

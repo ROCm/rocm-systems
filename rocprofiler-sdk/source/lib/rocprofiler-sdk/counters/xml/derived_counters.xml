@@ -1,0 +1,581 @@
+<common_derived>
+  # GPUBusy         The percentage of time GPU was busy.
+  <metric
+    name="GPUBusy"
+    descr="The percentage of time GPU was busy."
+    expr=100*GRBM_GUI_ACTIVE/GRBM_COUNT
+  ></metric>
+
+  # Wavefronts      Total wavefronts.
+  <metric
+    name="Wavefronts"
+    descr="Total wavefronts."
+    expr=SQ_WAVES
+  ></metric>
+
+  # VALUInsts       The average number of vector ALU instructions executed per work-item (affected by flow control).
+  <metric
+    name="VALUInsts"
+    descr="The average number of vector ALU instructions executed per work-item (affected by flow control)."
+    expr=SQ_INSTS_VALU/SQ_WAVES
+  ></metric>
+
+  # SALUInsts       The average number of scalar ALU instructions executed per work-item (affected by flow control).
+  <metric
+    name="SALUInsts"
+    descr="The average number of scalar ALU instructions executed per work-item (affected by flow control)."
+    expr=SQ_INSTS_SALU/SQ_WAVES
+  ></metric>
+
+  # SFetchInsts     The average number of scalar fetch instructions from the video memory executed per work-item (affected by flow control).
+  <metric
+    name="SFetchInsts"
+    descr="The average number of scalar fetch instructions from the video memory executed per work-item (affected by flow control)."
+    expr=SQ_INSTS_SMEM/SQ_WAVES
+  ></metric>
+
+  # GDSInsts        The average number of GDS read or GDS write instructions executed per work item (affected by flow control).
+  <metric
+    name="GDSInsts"
+    descr="The average number of GDS read or GDS write instructions executed per work item (affected by flow control)."
+    expr=SQ_INSTS_GDS/SQ_WAVES
+  ></metric>
+
+  # MemUnitBusy     The percentage of GPUTime the memory unit is active. The result includes the stall time (MemUnitStalled). This is measured with all extra fetches and writes and any cache or memory effects taken into account. Value range: 0% to 100% (fetch-bound).
+  <metric
+    name="MemUnitBusy"
+    descr="The percentage of GPUTime the memory unit is active. The result includes the stall time (MemUnitStalled). This is measured with all extra fetches and writes and any cache or memory effects taken into account. Value range: 0% to 100% (fetch-bound)."
+    expr=100*reduce(TA_TA_BUSY,max)/GRBM_GUI_ACTIVE/SE_NUM
+  ></metric>
+
+  # ALUStalledByLDS The percentage of GPUTime ALU units are stalled by the LDS input queue being full or the output queue being not ready. If there are LDS bank conflicts, reduce them. Otherwise, try reducing the number of LDS accesses if possible. Value range: 0% (optimal) to 100% (bad).
+  <metric
+    name="ALUStalledByLDS"
+    descr="The percentage of GPUTime ALU units are stalled by the LDS input queue being full or the output queue being not ready. If there are LDS bank conflicts, reduce them. Otherwise, try reducing the number of LDS accesses if possible. Value range: 0% (optimal) to 100% (bad)."
+    expr=400*SQ_WAIT_INST_LDS/SQ_WAVES/GRBM_GUI_ACTIVE
+  ></metric>
+
+</common_derived>
+
+<gfx8 base="common_derived">
+  <metric name="SQ_WAVES_sum" expr=reduce(SQ_WAVES,sum) descr="Count number of waves sent to SQs. (per-simd, emulated, global). Sum over SQ instances."></metric>
+  <metric name="TA_BUSY_avr" expr=reduce(TA_TA_BUSY,avr) descr="TA block is busy. Average over TA instances."></metric>
+  <metric name="TA_BUSY_max" expr=reduce(TA_TA_BUSY,max) descr="TA block is busy. Max over TA instances."></metric>
+  <metric name="TA_BUSY_min" expr=reduce(TA_TA_BUSY,min) descr="TA block is busy. Min over TA instances."></metric>
+  <metric name="TA_FLAT_READ_WAVEFRONTS_sum" expr=reduce(TA_FLAT_READ_WAVEFRONTS,sum) descr="Number of flat opcode reads processed by the TA. Sum over TA instances."></metric>
+  <metric name="TA_FLAT_WRITE_WAVEFRONTS_sum" expr=reduce(TA_FLAT_WRITE_WAVEFRONTS,sum) descr="Number of flat opcode writes processed by the TA. Sum over TA instances."></metric>
+
+  <metric name="TCC_HIT_sum" expr=reduce(TCC_HIT,sum) descr="Number of cache hits. Sum over TCC instances."></metric>
+  <metric name="TCC_MISS_sum" expr=reduce(TCC_MISS,sum) descr="Number of cache misses. Sum over TCC instances."></metric>
+  <metric name="TCC_MC_RDREQ_sum" expr=reduce(TCC_MC_RDREQ,sum) descr="Number of 32-byte reads. Sum over TCC instaces."></metric>
+  <metric name="TCC_MC_WRREQ_sum" expr=reduce(TCC_MC_WRREQ,sum) descr="Number of 32-byte transactions going over the TC_MC_wrreq interface. Sum over TCC instaces."></metric>
+  <metric name="TCC_WRREQ_STALL_max" expr=reduce(TCC_MC_WRREQ_STALL,max) descr="Number of cycles a write request was stalled. Max over TCC instances."></metric>
+
+  <metric name="FETCH_SIZE" expr=(TCC_MC_RDREQ_sum*32)/1024 descr="The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
+  <metric name="WRITE_SIZE" expr=(TCC_MC_WRREQ_sum*32)/1024 descr="The total kilobytes written to the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
+  <metric name="WRITE_REQ_32B" expr=TCC_MC_WRREQ_sum descr="The total number of 32-byte effective memory writes."></metric>
+  <metric name="VFetchInsts" expr=(SQ_INSTS_VMEM_RD-TA_FLAT_READ_WAVEFRONTS_sum)/SQ_WAVES descr="The average number of vector fetch instructions from the video memory executed per work-item (affected by flow control). Excludes FLAT instructions that fetch from video memory."></metric>
+  <metric name="VWriteInsts" expr=(SQ_INSTS_VMEM_WR-TA_FLAT_WRITE_WAVEFRONTS_sum)/SQ_WAVES descr="The average number of vector write instructions to the video memory executed per work-item (affected by flow control). Excludes FLAT instructions that write to video memory."></metric>
+  <metric name="FlatVMemInsts" expr=(SQ_INSTS_FLAT-SQ_INSTS_FLAT_LDS_ONLY)/SQ_WAVES descr="The average number of FLAT instructions that read from or write to the video memory executed per work item (affected by flow control). Includes FLAT instructions that read from or write to scratch."></metric>
+  <metric name="LDSInsts" expr=(SQ_INSTS_LDS-SQ_INSTS_FLAT_LDS_ONLY)/SQ_WAVES descr="The average number of LDS read or LDS write instructions executed per work item (affected by flow control).  Excludes FLAT instructions that read from or write to LDS."></metric>
+  <metric name="FlatLDSInsts" expr=SQ_INSTS_FLAT_LDS_ONLY/SQ_WAVES descr="The average number of FLAT instructions that read or write to LDS executed per work item (affected by flow control)."></metric>
+  <metric name="VALUUtilization" expr=100*SQ_THREAD_CYCLES_VALU/(SQ_ACTIVE_INST_VALU*MAX_WAVE_SIZE) descr="The percentage of active vector ALU threads in a wave. A lower number can mean either more thread divergence in a wave or that the work-group size is not a multiple of 64. Value range: 0% (bad), 100% (ideal - no thread divergence)."></metric>
+  <metric name="VALUBusy" expr=100*SQ_ACTIVE_INST_VALU*4/SIMD_NUM/GRBM_GUI_ACTIVE descr="The percentage of GPUTime vector ALU instructions are processed. Value range: 0% (bad) to 100% (optimal)."></metric>
+  <metric name="SALUBusy" expr=100*SQ_INST_CYCLES_SALU*4/SIMD_NUM/GRBM_GUI_ACTIVE descr="The percentage of GPUTime scalar ALU instructions are processed. Value range: 0% (bad) to 100% (optimal)."></metric>
+  <metric name="FetchSize" expr=FETCH_SIZE descr="The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
+  <metric name="WriteSize" expr=WRITE_SIZE descr="The total kilobytes written to the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
+  <metric name="MemWrites32B" expr=WRITE_REQ_32B descr="The total number of effective 32B write transactions to the memory"></metric>
+  <metric name="L2CacheHit" expr=100*reduce(TCC_HIT,sum)/(reduce(TCC_HIT,sum)+reduce(TCC_MISS,sum)) descr="The percentage of fetch, write, atomic, and other instructions that hit the data in L2 cache. Value range: 0% (no hit) to 100% (optimal)."></metric>
+  <metric name="MemUnitStalled" expr=100*reduce(TCP_TCP_TA_DATA_STALL_CYCLES,max)/GRBM_GUI_ACTIVE/SE_NUM descr="The percentage of GPUTime the memory unit is stalled. Try reducing the number or size of fetches and writes if possible. Value range: 0% (optimal) to 100% (bad)."></metric>
+  <metric name="WriteUnitStalled" expr=100*TCC_WRREQ_STALL_max/GRBM_GUI_ACTIVE descr="The percentage of GPUTime the Write unit is stalled. Value range: 0% to 100% (bad)."></metric>
+  # LDSBankConflict The percentage of GPUTime LDS is stalled by bank conflicts. Value range: 0% (optimal) to 100% (bad).
+  <metric name="LDSBankConflict" expr=100*SQ_LDS_BANK_CONFLICT/GRBM_GUI_ACTIVE/CU_NUM descr="The percentage of GPUTime LDS is stalled by bank conflicts. Value range: 0% (optimal) to 100% (bad)."></metric>
+</gfx8>
+
+<gfx9 base="common_derived">
+  <metric name="SQ_WAVES_sum" expr=reduce(SQ_WAVES,sum) descr="Count number of waves sent to SQs. (per-simd, emulated, global). Sum over SQ instances."></metric>
+  <metric name="TA_BUSY_avr" expr=reduce(TA_TA_BUSY,avr) descr="TA block is busy. Average over TA instances."></metric>
+  <metric name="TA_BUSY_max" expr=reduce(TA_TA_BUSY,max) descr="TA block is busy. Max over TA instances."></metric>
+  <metric name="TA_BUSY_min" expr=reduce(TA_TA_BUSY,min) descr="TA block is busy. Min over TA instances."></metric>
+  <metric name="TA_FLAT_READ_WAVEFRONTS_sum" expr=reduce(TA_FLAT_READ_WAVEFRONTS,sum) descr="Number of flat opcode reads processed by the TA. Sum over TA instances."></metric>
+  <metric name="TA_FLAT_WRITE_WAVEFRONTS_sum" expr=reduce(TA_FLAT_WRITE_WAVEFRONTS,sum) descr="Number of flat opcode writes processed by the TA. Sum over TA instances."></metric>
+
+  <metric name="TCC_HIT_sum" expr=reduce(TCC_HIT,sum) descr="Number of cache hits. Sum over TCC instances."></metric>
+  <metric name="TCC_MISS_sum" expr=reduce(TCC_MISS,sum) descr="Number of cache misses. Sum over TCC instances."></metric>
+  <metric name="TCC_EA_RDREQ_32B_sum" expr=reduce(TCC_EA_RDREQ_32B,sum) descr="Number of 32-byte TCC/EA read requests. Sum over TCC instances."></metric>
+  <metric name="TCC_EA_RDREQ_sum" expr=reduce(TCC_EA_RDREQ,sum) descr="Number of TCC/EA read requests (either 32-byte or 64-byte). Sum over TCC instances."></metric>
+  <metric name="TCC_EA_WRREQ_sum" expr=reduce(TCC_EA_WRREQ,sum) descr="Number of transactions (either 32-byte or 64-byte) going over the TC_EA_wrreq interface. Sum over TCC instances."></metric>
+  <metric name="TCC_EA_WRREQ_64B_sum" expr=reduce(TCC_EA_WRREQ_64B,sum) descr="Number of 64-byte transactions going (64-byte write or CMPSWAP) over the TC_EA_wrreq interface. Sum over TCC instances."></metric>
+  <metric name="TCC_WRREQ_STALL_max" expr=reduce(TCC_EA_WRREQ_STALL,max) descr="Number of cycles a write request was stalled. Max over TCC instances."></metric>
+  <metric name="GPU_UTIL" expr=100*GRBM_GUI_ACTIVE/GRBM_COUNT descr="Percentage of the time that GUI is active"></metric>
+  <metric name="TCP_TCP_TA_DATA_STALL_CYCLES_sum" expr=reduce(TCP_TCP_TA_DATA_STALL_CYCLES,sum) descr="Total number of TCP stalls TA data interface."></metric>
+  <metric name="TCP_TCP_TA_DATA_STALL_CYCLES_max" expr=reduce(TCP_TCP_TA_DATA_STALL_CYCLES,max) descr="Maximum number of TCP stalls TA data interface."></metric>
+
+  <metric name="FETCH_SIZE" expr=(TCC_EA_RDREQ_32B_sum*32+(TCC_EA_RDREQ_sum-TCC_EA_RDREQ_32B_sum)*64)/1024 descr="The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
+  <metric name="WRITE_SIZE" expr=((TCC_EA_WRREQ_sum-TCC_EA_WRREQ_64B_sum)*32+TCC_EA_WRREQ_64B_sum*64)/1024 descr="The total kilobytes written to the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
+  <metric name="WRITE_REQ_32B" expr=TCC_EA_WRREQ_64B_sum*2+(TCC_EA_WRREQ_sum-TCC_EA_WRREQ_64B_sum) descr="The total number of 32-byte effective memory writes."></metric>
+  <metric name="VFetchInsts" expr=(SQ_INSTS_VMEM_RD-TA_FLAT_READ_WAVEFRONTS_sum)/SQ_WAVES descr="The average number of vector fetch instructions from the video memory executed per work-item (affected by flow control). Excludes FLAT instructions that fetch from video memory."></metric>
+  <metric name="VWriteInsts" expr=(SQ_INSTS_VMEM_WR-TA_FLAT_WRITE_WAVEFRONTS_sum)/SQ_WAVES descr="The average number of vector write instructions to the video memory executed per work-item (affected by flow control). Excludes FLAT instructions that write to video memory."></metric>
+  <metric name="FlatVMemInsts" expr=(SQ_INSTS_FLAT-SQ_INSTS_FLAT_LDS_ONLY)/SQ_WAVES descr="The average number of FLAT instructions that read from or write to the video memory executed per work item (affected by flow control). Includes FLAT instructions that read from or write to scratch."></metric>
+  <metric name="LDSInsts" expr=(SQ_INSTS_LDS-SQ_INSTS_FLAT_LDS_ONLY)/SQ_WAVES descr="The average number of LDS read or LDS write instructions executed per work item (affected by flow control).  Excludes FLAT instructions that read from or write to LDS."></metric>
+  <metric name="FlatLDSInsts" expr=SQ_INSTS_FLAT_LDS_ONLY/SQ_WAVES descr="The average number of FLAT instructions that read or write to LDS executed per work item (affected by flow control)."></metric>
+  <metric name="VALUUtilization" expr=100*SQ_THREAD_CYCLES_VALU/(SQ_ACTIVE_INST_VALU*MAX_WAVE_SIZE) descr="The percentage of active vector ALU threads in a wave. A lower number can mean either more thread divergence in a wave or that the work-group size is not a multiple of 64. Value range: 0% (bad), 100% (ideal - no thread divergence)."></metric>
+  <metric name="VALUBusy" expr=100*SQ_ACTIVE_INST_VALU*4/SIMD_NUM/GRBM_GUI_ACTIVE descr="The percentage of GPUTime vector ALU instructions are processed. Value range: 0% (bad) to 100% (optimal)."></metric>
+  <metric name="SALUBusy" expr=100*SQ_INST_CYCLES_SALU*4/SIMD_NUM/GRBM_GUI_ACTIVE descr="The percentage of GPUTime scalar ALU instructions are processed. Value range: 0% (bad) to 100% (optimal)."></metric>
+  <metric name="FetchSize" expr=FETCH_SIZE descr="The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
+  <metric name="WriteSize" expr=WRITE_SIZE descr="The total kilobytes written to the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
+  <metric name="MemWrites32B" expr=WRITE_REQ_32B descr="The total number of effective 32B write transactions to the memory"></metric>
+  <metric name="L2CacheHit" expr=100*reduce(TCC_HIT,sum)/(reduce(TCC_HIT,sum)+reduce(TCC_MISS,sum)) descr="The percentage of fetch, write, atomic, and other instructions that hit the data in L2 cache. Value range: 0% (no hit) to 100% (optimal)."></metric>
+  <metric name="MemUnitStalled" expr=100*TCP_TCP_TA_DATA_STALL_CYCLES_max/GRBM_GUI_ACTIVE/SE_NUM descr="The percentage of GPUTime the memory unit is stalled. Try reducing the number or size of fetches and writes if possible. Value range: 0% (optimal) to 100% (bad)."></metric>
+  <metric name="WriteUnitStalled" expr=100*TCC_WRREQ_STALL_max/GRBM_GUI_ACTIVE descr="The percentage of GPUTime the Write unit is stalled. Value range: 0% to 100% (bad)."></metric>
+  # LDSBankConflict The percentage of GPUTime LDS is stalled by bank conflicts. Value range: 0% (optimal) to 100% (bad).
+  <metric name="LDSBankConflict" expr=100*SQ_LDS_BANK_CONFLICT/GRBM_GUI_ACTIVE/CU_NUM descr="The percentage of GPUTime LDS is stalled by bank conflicts. Value range: 0% (optimal) to 100% (bad)."></metric>
+</gfx9>
+
+<gfx900 base="gfx9">
+</gfx900>
+
+<gfx906 base="gfx9">
+  # EA1
+  <metric name="TCC_EA1_RDREQ_32B_sum" expr=reduce(TCC_EA1_RDREQ_32B,sum) descr="Number of 32-byte TCC/EA read requests. Sum over TCC EA1s."></metric>
+  <metric name="TCC_EA1_RDREQ_sum" expr=reduce(TCC_EA1_RDREQ,sum) descr="Number of TCC/EA read requests (either 32-byte or 64-byte). Sum over TCC EA1s."></metric>
+  <metric name="TCC_EA1_WRREQ_sum" expr=reduce(TCC_EA1_WRREQ,sum) descr="Number of transactions (either 32-byte or 64-byte) going over the TC_EA_wrreq interface. Sum over TCC EA1s."></metric>
+  <metric name="TCC_EA1_WRREQ_64B_sum" expr=reduce(TCC_EA1_WRREQ_64B,sum) descr="Number of 64-byte transactions going (64-byte write or CMPSWAP) over the TC_EA_wrreq interface. Sum over TCC EA1s."></metric>
+  <metric name="TCC_WRREQ1_STALL_max" expr=reduce(TCC_EA1_WRREQ_STALL,max) descr="Number of cycles a write request was stalled. Max over TCC instances."></metric>
+
+  <metric name="RDATA1_SIZE" expr=(TCC_EA1_RDREQ_32B_sum*32+(TCC_EA1_RDREQ_sum-TCC_EA1_RDREQ_32B_sum)*64) descr="The total kilobytes fetched from the video memory. This is measured on EA1s."></metric>
+  <metric name="WDATA1_SIZE" expr=((TCC_EA1_WRREQ_sum-TCC_EA1_WRREQ_64B_sum)*32+TCC_EA1_WRREQ_64B_sum*64) descr="The total kilobytes written to the video memory. This is measured on EA1s."></metric>
+
+  # both EA0 and EA1 should be included
+  <metric name="FETCH_SIZE" expr=(TCC_EA_RDREQ_32B_sum*32+(TCC_EA_RDREQ_sum-TCC_EA_RDREQ_32B_sum)*64+RDATA1_SIZE)/1024 descr="The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
+  <metric name="WRITE_SIZE" expr=((TCC_EA_WRREQ_sum-TCC_EA_WRREQ_64B_sum)*32+TCC_EA_WRREQ_64B_sum*64+WDATA1_SIZE)/1024 descr="The total kilobytes written to the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
+  <metric name="WRITE_REQ_32B" expr=(TCC_EA_WRREQ_sum-TCC_EA_WRREQ_64B_sum)+(TCC_EA1_WRREQ_sum-TCC_EA1_WRREQ_64B_sum)+(TCC_EA_WRREQ_64B_sum+TCC_EA1_WRREQ_64B_sum)*2 descr="The total number of 32-byte effective memory writes."></metric>
+</gfx906>
+
+<gfx908 base="gfx9">
+  <metric name="TCC_HIT_sum" expr=reduce(TCC_HIT,sum) descr="Number of cache hits. Sum over TCC instances."></metric>
+  <metric name="TCC_MISS_sum" expr=reduce(TCC_MISS,sum) descr="Number of cache misses. Sum over TCC instances."></metric>
+  <metric name="TCC_EA_RDREQ_32B_sum" expr=reduce(TCC_EA_RDREQ_32B,sum) descr="Number of 32-byte TCC/EA read requests. Sum over TCC instances."></metric>
+  <metric name="TCC_EA_RDREQ_sum" expr=reduce(TCC_EA_RDREQ,sum) descr="Number of TCC/EA read requests (either 32-byte or 64-byte). Sum over TCC instances."></metric>
+  <metric name="TCC_EA_WRREQ_sum" expr=reduce(TCC_EA_WRREQ,sum) descr="Number of transactions (either 32-byte or 64-byte) going over the TC_EA_wrreq interface. Sum over TCC instances."></metric>
+  <metric name="TCC_EA_WRREQ_64B_sum" expr=reduce(TCC_EA_WRREQ_64B,sum) descr="Number of 64-byte transactions going (64-byte write or CMPSWAP) over the TC_EA_wrreq interface. Sum over TCC instances."></metric>
+  <metric name="TCC_WRREQ_STALL_max" expr=reduce(TCC_EA_WRREQ_STALL,max) descr="Number of cycles a write request was stalled. Max over TCC instances."></metric>
+
+  <metric name="CU_UTILIZATION"                                         expr=GRBM_GUI_ACTIVE/GRBM_COUNT descr="The total number of active cycles divided by total number of elapsed cycles"></metric>
+</gfx908>
+
+<gfx90a base="gfx9">
+  <metric name="SQ_WAVES_sum" expr=reduce(SQ_WAVES,sum) descr="Count number of waves sent to SQs. (per-simd, emulated, global). Sum over SQ instances."></metric>
+  <metric name="MeanOccupancyPerCU" expr=SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES/GRBM_GUI_ACTIVE/CU_NUM descr="Mean occupancy per compute unit."></metric>
+  <metric name="MeanOccupancyPerActiveCU" expr=SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES*4/SQ_BUSY_CYCLES/CU_NUM descr="Mean occupancy per active compute unit."></metric>
+  <metric name="TA_BUSY_avr"                                            expr=reduce(TA_TA_BUSY,avr) descr="TA block is busy. Average over TA instances."></metric>
+  <metric name="TA_BUSY_max"                                            expr=reduce(TA_TA_BUSY,max) descr="TA block is busy. Max over TA instances."></metric>
+  <metric name="TA_BUSY_min"                                            expr=reduce(TA_TA_BUSY,min) descr="TA block is busy. Min over TA instances."></metric>
+  <metric name="TA_TA_BUSY_sum"                                         expr=reduce(TA_TA_BUSY,sum) descr="TA block is busy. Perf_Windowing not supported for this counter. Sum over TA instances."></metric>
+  <metric name="TA_TOTAL_WAVEFRONTS_sum"                                expr=reduce(TA_TOTAL_WAVEFRONTS,sum) descr="Total number of wavefronts processed by TA. Sum over TA instances."></metric>
+  <metric name="TA_ADDR_STALLED_BY_TC_CYCLES_sum"                       expr=reduce(TA_ADDR_STALLED_BY_TC_CYCLES,sum) descr="Number of cycles addr path stalled by TC. Perf_Windowing not supported for this counter. Sum over TA instances."></metric>
+  <metric name="TA_ADDR_STALLED_BY_TD_CYCLES_sum"                       expr=reduce(TA_ADDR_STALLED_BY_TD_CYCLES,sum) descr="Number of cycles addr path stalled by TD. Perf_Windowing not supported for this counter. Sum over TA instances."></metric>
+  <metric name="TA_DATA_STALLED_BY_TC_CYCLES_sum"                       expr=reduce(TA_DATA_STALLED_BY_TC_CYCLES,sum) descr="Number of cycles data path stalled by TC. Perf_Windowing not supported for this counter. Sum over TA instances."></metric>
+  <metric name="TA_FLAT_WAVEFRONTS_sum"                                 expr=reduce(TA_FLAT_WAVEFRONTS,sum) descr="Number of flat opcode wavfronts processed by the TA. Sum over TA instances."></metric>
+  <metric name="TA_FLAT_READ_WAVEFRONTS_sum"                            expr=reduce(TA_FLAT_READ_WAVEFRONTS,sum) descr="Number of flat opcode reads processed by the TA. Sum over TA instances."></metric>
+  <metric name="TA_FLAT_WRITE_WAVEFRONTS_sum"                           expr=reduce(TA_FLAT_WRITE_WAVEFRONTS,sum) descr="Number of flat opcode writes processed by the TA. Sum over TA instances."></metric>
+  <metric name="TA_FLAT_ATOMIC_WAVEFRONTS_sum"                          expr=reduce(TA_FLAT_ATOMIC_WAVEFRONTS,sum) descr="Number of flat opcode atomics processed by the TA. Sum over TA instances."></metric>
+  <metric name="TA_BUFFER_WAVEFRONTS_sum"                               expr=reduce(TA_BUFFER_WAVEFRONTS,sum) descr="Number of buffer wavefronts processed by TA. Sum over TA instances."></metric>
+  <metric name="TA_BUFFER_READ_WAVEFRONTS_sum"                          expr=reduce(TA_BUFFER_READ_WAVEFRONTS,sum) descr="Number of buffer read wavefronts processed by TA. Sum over TA instances."></metric>
+  <metric name="TA_BUFFER_WRITE_WAVEFRONTS_sum"                         expr=reduce(TA_BUFFER_WRITE_WAVEFRONTS,sum) descr="Number of buffer write wavefronts processed by TA. Sum over TA instances."></metric>
+  <metric name="TA_BUFFER_ATOMIC_WAVEFRONTS_sum"                        expr=reduce(TA_BUFFER_ATOMIC_WAVEFRONTS,sum) descr="Number of buffer atomic wavefronts processed by TA. Sum over TA instances."></metric>
+  <metric name="TA_BUFFER_TOTAL_CYCLES_sum"                             expr=reduce(TA_BUFFER_TOTAL_CYCLES,sum) descr="Number of buffer cycles issued to TC. Sum over TA instances."></metric>
+  <metric name="TA_BUFFER_COALESCED_READ_CYCLES_sum"                    expr=reduce(TA_BUFFER_COALESCED_READ_CYCLES,sum) descr="Number of buffer coalesced read cycles issued to TC. Sum over TA instances."></metric>
+  <metric name="TA_BUFFER_COALESCED_WRITE_CYCLES_sum"                   expr=reduce(TA_BUFFER_COALESCED_WRITE_CYCLES,sum) descr="Number of buffer coalesced write cycles issued to TC. Sum over TA instances."></metric>
+  <metric name="TD_TD_BUSY_sum"                                         expr=reduce(TD_TD_BUSY,sum) descr="TD is processing or waiting for data. Perf_Windowing not supported for this counter. Sum over TD instances."></metric>
+  <metric name="TD_TC_STALL_sum"                                        expr=reduce(TD_TC_STALL,sum) descr="TD is stalled waiting for TC data. Sum over TD instances."></metric>
+  <metric name="TD_LOAD_WAVEFRONT_sum"                                  expr=reduce(TD_LOAD_WAVEFRONT,sum) descr="Count the wavefronts with opcode = load, include atomics and store. Sum over TD instances."></metric>
+  <metric name="TD_ATOMIC_WAVEFRONT_sum"                                expr=reduce(TD_ATOMIC_WAVEFRONT,sum) descr="Count the wavefronts with opcode = atomic. Sum over TD instances."></metric>
+  <metric name="TD_STORE_WAVEFRONT_sum"                                 expr=reduce(TD_STORE_WAVEFRONT,sum) descr="Count the wavefronts with opcode = store. Sum over TD instances."></metric>
+  <metric name="TD_COALESCABLE_WAVEFRONT_sum"                           expr=reduce(TD_COALESCABLE_WAVEFRONT,sum) descr="Count wavefronts that TA finds coalescable. Sum over TD instances."></metric>
+  <metric name="TD_SPI_STALL_sum"                                       expr=reduce(TD_SPI_STALL,sum) descr="TD is stalled SPI vinit, sum of TCP instances"></metric>
+  <metric name="TCP_GATE_EN1_sum"                                       expr=reduce(TCP_GATE_EN1,sum) descr="TCP interface clocks are turned on. Not Windowed. Sum over TCP instances."></metric>
+  <metric name="TCP_GATE_EN2_sum"                                       expr=reduce(TCP_GATE_EN2,sum) descr="TCP core clocks are turned on. Not Windowed. Sum over TCP instances."></metric>
+  <metric name="TCP_TD_TCP_STALL_CYCLES_sum"                            expr=reduce(TCP_TD_TCP_STALL_CYCLES,sum) descr="TD stalls TCP. Sum over TCP instances."></metric>
+  <metric name="TCP_TCR_TCP_STALL_CYCLES_sum"                           expr=reduce(TCP_TCR_TCP_STALL_CYCLES,sum) descr="TCR stalls TCP_TCR_req interface. Sum over TCP instances."></metric>
+  <metric name="TCP_READ_TAGCONFLICT_STALL_CYCLES_sum"                  expr=reduce(TCP_READ_TAGCONFLICT_STALL_CYCLES,sum) descr="Tagram conflict stall on a read. Sum over TCP instances."></metric>
+  <metric name="TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum"                 expr=reduce(TCP_WRITE_TAGCONFLICT_STALL_CYCLES,sum) descr="Tagram conflict stall on a write. Sum over TCP instances."></metric>
+  <metric name="TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum"                expr=reduce(TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES,sum) descr="Tagram conflict stall on an atomic. Sum over TCP instances."></metric>
+  <metric name="TCP_VOLATILE_sum"                                       expr=reduce(TCP_VOLATILE,sum) descr="Total number of L1 volatile pixels/buffers from TA. Sum over TCP instances."></metric>
+  <metric name="TCP_TOTAL_ACCESSES_sum"                                 expr=reduce(TCP_TOTAL_ACCESSES,sum) descr="Total number of pixels/buffers from TA. Equals TCP_PERF_SEL_TOTAL_READ+TCP_PERF_SEL_TOTAL_NONREAD. Sum over TCP instances."></metric>
+  <metric name="TCP_TOTAL_READ_sum"                                     expr=reduce(TCP_TOTAL_READ,sum) descr="Total number of read pixels/buffers from TA. Equals TCP_PERF_SEL_TOTAL_HIT_LRU_READ + TCP_PERF_SEL_TOTAL_MISS_LRU_READ + TCP_PERF_SEL_TOTAL_MISS_EVICT_READ. Sum over TCP instances."></metric>
+  <metric name="TCP_TOTAL_WRITE_sum"                                    expr=reduce(TCP_TOTAL_WRITE,sum) descr="Total number of local write pixels/buffers from TA. Equals TCP_PERF_SEL_TOTAL_MISS_LRU_WRITE+ TCP_PERF_SEL_TOTAL_MISS_EVICT_WRITE. Sum over TCP instances."></metric>
+  <metric name="TCP_TOTAL_ATOMIC_WITH_RET_sum"                          expr=reduce(TCP_TOTAL_ATOMIC_WITH_RET,sum) descr="Total number of atomic with return pixels/buffers from TA. Sum over TCP instances."></metric>
+  <metric name="TCP_TOTAL_ATOMIC_WITHOUT_RET_sum"                       expr=reduce(TCP_TOTAL_ATOMIC_WITHOUT_RET,sum) descr="Total number of atomic without return pixels/buffers from TA Sum over TCP instances."></metric>
+  <metric name="TCP_TOTAL_WRITEBACK_INVALIDATES_sum"                    expr=reduce(TCP_TOTAL_WRITEBACK_INVALIDATES,sum) descr="Total number of cache invalidates. Equals TCP_PERF_SEL_TOTAL_WBINVL1+ TCP_PERF_SEL_TOTAL_WBINVL1_VOL+ TCP_PERF_SEL_CP_TCP_INVALIDATE+ TCP_PERF_SEL_SQ_TCP_INVALIDATE_VOL. Not Windowed. Sum over TCP instances."></metric>
+  <metric name="TCP_UTCL1_REQUEST_sum"                                  expr=reduce(TCP_UTCL1_REQUEST,sum) descr="Total CLIENT_UTCL1 NORMAL requests Sum over TCP instances."></metric>
+  <metric name="TCP_UTCL1_TRANSLATION_MISS_sum"                         expr=reduce(TCP_UTCL1_TRANSLATION_MISS,sum) descr="Total utcl1 translation misses Sum over TCP instances."></metric>
+  <metric name="TCP_UTCL1_TRANSLATION_HIT_sum"                          expr=reduce(TCP_UTCL1_TRANSLATION_HIT,sum) descr="Total utcl1 translation hits Sum over TCP instances."></metric>
+  <metric name="TCP_UTCL1_PERMISSION_MISS_sum"                          expr=reduce(TCP_UTCL1_PERMISSION_MISS,sum) descr="Total utcl1 permission misses Sum over TCP instances."></metric>
+  <metric name="TCP_TOTAL_CACHE_ACCESSES_sum"                           expr=reduce(TCP_TOTAL_CACHE_ACCESSES,sum) descr="Count of total cache line (tag) accesses (includes hits and misses). Sum over TCP instances."></metric>
+  <metric name="TCP_TCP_LATENCY_sum"                                    expr=reduce(TCP_TCP_LATENCY,sum) descr="Total TCP wave latency (from first clock of wave entering to first clock of wave leaving), divide by TA_TCP_STATE_READ to avg wave latency Sum over TCP instances."></metric>
+  <metric name="TCP_TA_TCP_STATE_READ_sum"                              expr=reduce(TCP_TA_TCP_STATE_READ,sum) descr="Number of state reads Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_READ_REQ_LATENCY_sum"                           expr=reduce(TCP_TCC_READ_REQ_LATENCY,sum) descr="Total TCP->TCC request latency for reads and atomics with return. Not Windowed. Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_WRITE_REQ_LATENCY_sum"                          expr=reduce(TCP_TCC_WRITE_REQ_LATENCY,sum) descr="Total TCP->TCC request latency for writes and atomics without return. Not Windowed. Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_READ_REQ_sum"                                   expr=reduce(TCP_TCC_READ_REQ,sum) descr="Total read requests from TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_WRITE_REQ_sum"                                  expr=reduce(TCP_TCC_WRITE_REQ,sum) descr="Total write requests from TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_ATOMIC_WITH_RET_REQ_sum"                        expr=reduce(TCP_TCC_ATOMIC_WITH_RET_REQ,sum) descr="Total atomic with return requests from TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum"                     expr=reduce(TCP_TCC_ATOMIC_WITHOUT_RET_REQ,sum) descr="Total atomic without return requests from TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_NC_READ_REQ_sum"                                expr=reduce(TCP_TCC_NC_READ_REQ,sum) descr="Total read requests with NC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_NC_WRITE_REQ_sum"                               expr=reduce(TCP_TCC_NC_WRITE_REQ,sum) descr="Total write requests with NC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_NC_ATOMIC_REQ_sum"                              expr=reduce(TCP_TCC_NC_ATOMIC_REQ,sum) descr="Total atomic requests with NC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_UC_READ_REQ_sum"                                expr=reduce(TCP_TCC_UC_READ_REQ,sum) descr="Total read requests with UC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_UC_WRITE_REQ_sum"                               expr=reduce(TCP_TCC_UC_WRITE_REQ,sum) descr="Total write requests with UC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_UC_ATOMIC_REQ_sum"                              expr=reduce(TCP_TCC_UC_ATOMIC_REQ,sum) descr="Total atomic requests with UC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_CC_READ_REQ_sum"                                expr=reduce(TCP_TCC_CC_READ_REQ,sum) descr="Total write requests with CC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_CC_WRITE_REQ_sum"                               expr=reduce(TCP_TCC_CC_WRITE_REQ,sum) descr="Total write requests with CC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_CC_ATOMIC_REQ_sum"                              expr=reduce(TCP_TCC_CC_ATOMIC_REQ,sum) descr="Total atomic requests with CC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_RW_READ_REQ_sum"                                expr=reduce(TCP_TCC_RW_READ_REQ,sum) descr="Total write requests with RW mtype from this TCP to all TCCs. Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_RW_WRITE_REQ_sum"                               expr=reduce(TCP_TCC_RW_WRITE_REQ,sum) descr="Total write requests with RW mtype from this TCP to all TCCs. Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_RW_ATOMIC_REQ_sum"                              expr=reduce(TCP_TCC_RW_ATOMIC_REQ,sum) descr="Total atomic requests with RW mtype from this TCP to all TCCs. Sum over TCP instances."></metric>
+  <metric name="TCP_PENDING_STALL_CYCLES_sum"                           expr=reduce(TCP_PENDING_STALL_CYCLES,sum) descr="Stall due to data pending from L2. Sum over TCP instances."></metric>
+  <metric name="TCA_CYCLE_sum"                                          expr=reduce(TCA_CYCLE,sum)  descr="Number of cycles. Sum over all TCA instances "></metric>
+  <metric name="TCA_BUSY_sum"                                           expr=reduce(TCA_BUSY,sum)   descr="Number of cycles we have a request pending. Sum over all TCA instances."></metric>
+  <metric name="TCC_BUSY_avr"                                           expr=reduce(TCC_BUSY,avr) descr="TCC_BUSY avr over all memory channels."></metric>
+  <metric name="TCC_WRREQ_STALL_max"                                    expr=reduce(TCC_EA_WRREQ_STALL,max) descr="Number of cycles a write request was stalled. Max over TCC instances."></metric>
+  <metric name="TCC_CYCLE_sum"                                          expr=reduce(TCC_CYCLE,sum) descr="Number of cycles. Not windowable. Sum over TCC instances."></metric>
+  <metric name="TCC_BUSY_sum"                                           expr=reduce(TCC_BUSY,sum) descr="Number of cycles we have a request pending. Not windowable. Sum over TCC instances."></metric>
+  <metric name="TCC_REQ_sum"                                            expr=reduce(TCC_REQ,sum) descr="Number of requests of all types. This is measured at the tag block. This may be more than the number of requests arriving at the TCC, but it is a good indication of the total amount of work that needs to be performed. Sum over TCC instances."></metric>
+  <metric name="TCC_STREAMING_REQ_sum"                                  expr=reduce(TCC_STREAMING_REQ,sum) descr="Number of streaming requests. This is measured at the tag block. Sum over TCC instances."></metric>
+  <metric name="TCC_NC_REQ_sum"                                         expr=reduce(TCC_NC_REQ,sum) descr="The number of noncoherently cached requests. This is measured at the tag block. Sum over TCC instances."></metric>
+  <metric name="TCC_UC_REQ_sum"                                         expr=reduce(TCC_UC_REQ,sum) descr="The number of uncached requests. This is measured at the tag block. Sum over TCC instances."></metric>
+  <metric name="TCC_CC_REQ_sum"                                         expr=reduce(TCC_CC_REQ,sum) descr="The number of coherently cached requests. This is measured at the tag block. Sum over TCC instances."></metric>
+  <metric name="TCC_RW_REQ_sum"                                         expr=reduce(TCC_RW_REQ,sum) descr="The number of RW requests. This is measured at the tag block. Sum over TCC instances."></metric>
+  <metric name="TCC_PROBE_sum"                                          expr=reduce(TCC_PROBE,sum) descr="Number of probe requests. Not windowable. Sum over TCC instances."></metric>
+  <metric name="TCC_PROBE_ALL_sum"                                      expr=reduce(TCC_PROBE_ALL,sum) descr="Number of external probe requests with with EA_TCC_preq_all== 1. Not windowable. Sum over TCC instances."></metric>
+  <metric name="TCC_READ_sum"                                           expr=reduce(TCC_READ,sum) descr="Number of read requests. Compressed reads are included in this, but metadata reads are not included. Sum over TCC instances."></metric>
+  <metric name="TCC_WRITE_sum"                                          expr=reduce(TCC_WRITE,sum) descr="Number of write requests. Sum over TCC instances."></metric>
+  <metric name="TCC_ATOMIC_sum"                                         expr=reduce(TCC_ATOMIC,sum) descr="Number of atomic requests of all types. Sum over TCC instances."></metric>
+  <metric name="TCC_HIT_sum"                                            expr=reduce(TCC_HIT,sum) descr="Number of cache hits. Sum over TCC instances."></metric>
+  <metric name="TCC_MISS_sum"                                           expr=reduce(TCC_MISS,sum) descr="Number of cache misses. UC reads count as misses. Sum over TCC instances."></metric>
+  <metric name="TCC_WRITEBACK_sum"                                      expr=reduce(TCC_WRITEBACK,sum) descr="Number of lines written back to main memory. This includes writebacks of dirty lines and uncached write/atomic requests. Sum over TCC instances."></metric>
+  <metric name="TCC_EA_WRREQ_sum"                                       expr=reduce(TCC_EA_WRREQ,sum) descr="Number of transactions (either 32-byte or 64-byte) going over the TC_EA_wrreq interface. Atomics may travel over the same interface and are generally classified as write requests. This does not include probe commands. Sum over TCC instances."></metric>
+  <metric name="TCC_EA_WRREQ_64B_sum"                                   expr=reduce(TCC_EA_WRREQ_64B,sum) descr="Number of 64-byte transactions going (64-byte write or CMPSWAP) over the TC_EA_wrreq interface. Sum over TCC instances."></metric>
+  <metric name="TCC_EA_WR_UNCACHED_32B_sum"                             expr=reduce(TCC_EA_WR_UNCACHED_32B,sum) descr="Number of 32-byte write/atomic going over the TC_EA_wrreq interface due to uncached traffic. Note that CC mtypes can produce uncached requests, and those are included in this. A 64-byte request will be counted as 2. Sum over TCC instances."></metric>
+  <metric name="TCC_EA_WRREQ_STALL_sum"                                 expr=reduce(TCC_EA_WRREQ_STALL,sum) descr="Number of cycles a write request was stalled. Sum over TCC instances."></metric>
+  <metric name="TCC_EA_WRREQ_IO_CREDIT_STALL_sum"                       expr=reduce(TCC_EA_WRREQ_IO_CREDIT_STALL,sum) descr="Number of cycles a EA write request was stalled because the interface was out of IO credits. Sum over TCC instances."></metric>
+  <metric name="TCC_EA_WRREQ_GMI_CREDIT_STALL_sum"                      expr=reduce(TCC_EA_WRREQ_GMI_CREDIT_STALL,sum) descr="Number of cycles a EA write request was stalled because the interface was out of GMI credits. Sum over TCC instances."></metric>
+  <metric name="TCC_EA_WRREQ_DRAM_CREDIT_STALL_sum"                     expr=reduce(TCC_EA_WRREQ_DRAM_CREDIT_STALL,sum) descr="Number of cycles a EA write request was stalled because the interface was out of DRAM credits. Sum over TCC instances."></metric>
+  <metric name="TCC_TOO_MANY_EA_WRREQS_STALL_sum"                       expr=reduce(TCC_TOO_MANY_EA_WRREQS_STALL,sum) descr="Number of cycles the TCC could not send a EA write request because it already reached its maximum number of pending EA write requests. Sum over TCC instances."></metric>
+  <metric name="TCC_EA_WRREQ_LEVEL_sum"                                 expr=reduce(TCC_EA_WRREQ_LEVEL,sum) descr="The sum of the number of EA write requests in flight. This is primarily meant for measure average EA write latency. Average write latency = TCC_PERF_SEL_EA_WRREQ_LEVEL/TCC_PERF_SEL_EA_WRREQ. Sum over TCC instances."></metric>
+  <metric name="TCC_EA_RDREQ_LEVEL_sum"                                 expr=reduce(TCC_EA_RDREQ_LEVEL,sum) descr="The sum of the number of TCC/EA read requests in flight. This is primarily meant for measure average EA read latency. Average read latency = TCC_PERF_SEL_EA_RDREQ_LEVEL/TCC_PERF_SEL_EA_RDREQ. Sum over TCC instances."></metric>
+  <metric name="TCC_EA_ATOMIC_sum"                                      expr=reduce(TCC_EA_ATOMIC,sum) descr="Number of transactions going over the TC_EA_wrreq interface that are actually atomic requests. Sum over TCC instances."></metric>
+  <metric name="TCC_EA_ATOMIC_LEVEL_sum"                                expr=reduce(TCC_EA_ATOMIC_LEVEL,sum) descr="The sum of the number of EA atomics in flight. This is primarily meant for measure average EA atomic latency. Average atomic latency = TCC_PERF_SEL_EA_WRREQ_ATOMIC_LEVEL/TCC_PERF_SEL_EA_WRREQ_ATOMIC. Sum over TCC instances."></metric>
+  <metric name="TCC_EA_RDREQ_sum"                                       expr=reduce(TCC_EA_RDREQ,sum) descr="Number of TCC/EA read requests (either 32-byte or 64-byte) Sum over TCC instances."></metric>
+  <metric name="TCC_EA_RDREQ_32B_sum"                                   expr=reduce(TCC_EA_RDREQ_32B,sum) descr="Number of 32-byte TCC/EA read requests Sum over TCC instances."></metric>
+  <metric name="TCC_EA_RD_UNCACHED_32B_sum"                             expr=reduce(TCC_EA_RD_UNCACHED_32B,sum) descr="Number of 32-byte TCC/EA read due to uncached traffic. A 64-byte request will be counted as 2 Sum over TCC instances."></metric>
+  <metric name="TCC_EA_RDREQ_IO_CREDIT_STALL_sum"                       expr=reduce(TCC_EA_RDREQ_IO_CREDIT_STALL,sum) descr="Number of cycles there was a stall because the read request interface was out of IO credits. Stalls occur regardless of whether a read needed to be performed or not. Sum over TCC instances."></metric>
+  <metric name="TCC_EA_RDREQ_GMI_CREDIT_STALL_sum"                      expr=reduce(TCC_EA_RDREQ_GMI_CREDIT_STALL,sum) descr="Number of cycles there was a stall because the read request interface was out of GMI credits. Stalls occur regardless of whether a read needed to be performed or not. Sum over TCC instances."></metric>
+  <metric name="TCC_EA_RDREQ_DRAM_CREDIT_STALL_sum"                     expr=reduce(TCC_EA_RDREQ_DRAM_CREDIT_STALL,sum) descr="Number of cycles there was a stall because the read request interface was out of DRAM credits. Stalls occur regardless of whether a read needed to be performed or not. Sum over TCC instances."></metric>
+  <metric name="TCC_TAG_STALL_sum"                                      expr=reduce(TCC_TAG_STALL,sum) descr="Total number of cycles the normal request pipeline in the tag is stalled for any reason."></metric>
+  <metric name="TCC_NORMAL_WRITEBACK_sum"                               expr=reduce(TCC_NORMAL_WRITEBACK,sum) descr="Number of writebacks due to requests that are not writeback requests. Sum over TCC instances."></metric>
+  <metric name="TCC_ALL_TC_OP_WB_WRITEBACK_sum"                         expr=reduce(TCC_ALL_TC_OP_WB_WRITEBACK,sum) descr="Number of writebacks due to all TC_OP writeback requests. Sum over TCC instances."></metric>
+  <metric name="TCC_NORMAL_EVICT_sum"                                   expr=reduce(TCC_NORMAL_EVICT,sum) descr="Number of evictions due to requests that are not invalidate or probe requests. Sum over TCC instances."></metric>
+  <metric name="TCC_ALL_TC_OP_INV_EVICT_sum"                            expr=reduce(TCC_ALL_TC_OP_INV_EVICT,sum) descr="Number of evictions due to all TC_OP invalidate requests. Sum over TCC instances."></metric>
+  <metric name="TCC_EA_RDREQ_DRAM_sum"                                  expr=reduce(TCC_EA_RDREQ_DRAM,sum) descr="Number of TCC/EA read requests (either 32-byte or 64-byte) destined for DRAM (MC). Sum over TCC instances."></metric>
+  <metric name="TCC_EA_WRREQ_DRAM_sum"                                  expr=reduce(TCC_EA_WRREQ_DRAM,sum) descr="Number of TCC/EA write requests (either 32-byte of 64-byte) destined for DRAM (MC). Sum over TCC instances."></metric>
+
+  <metric name="FETCH_SIZE"                                             expr=(TCC_EA_RDREQ_32B_sum*32+(TCC_EA_RDREQ_sum-TCC_EA_RDREQ_32B_sum)*64)/1024 descr="The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
+  <metric name="WRITE_SIZE"                                             expr=((TCC_EA_WRREQ_sum-TCC_EA_WRREQ_64B_sum)*32+TCC_EA_WRREQ_64B_sum*64)/1024 descr="The total kilobytes written to the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
+  <metric name="WRITE_REQ_32B"                                          expr=TCC_EA_WRREQ_64B_sum*2+(TCC_EA_WRREQ_sum-TCC_EA_WRREQ_64B_sum) descr="The total number of 32-byte effective memory writes."></metric>
+  <metric name="CU_OCCUPANCY"                                           expr=(SQ_CYCLES/(SQ_WAVE_CYCLES*4))/MAX_WAVE_SIZE descr="The ratio of active waves on a CU to the maximum number of active waves supported by the CU"></metric>
+  <metric name="CU_UTILIZATION"                                         expr=GRBM_GUI_ACTIVE/GRBM_COUNT descr="The total number of active cycles divided by total number of elapsed cycles"></metric>
+  <metric name="TOTAL_16_OPS"                                           expr=(SQ_INSTS_VALU_FMA_F16*2+SQ_INSTS_VALU_ADD_F16+SQ_INSTS_VALU_MUL_F16+SQ_INSTS_VALU_TRANS_F16)*64+((SQ_INSTS_VALU_MFMA_MOPS_F16+SQ_INSTS_VALU_MFMA_MOPS_BF16)*512) descr="The number of 16 bits OPS executed"></metric>
+  <metric name="TOTAL_32_OPS"                                           expr=(SQ_INSTS_VALU_FMA_F32*2+SQ_INSTS_VALU_INT32+SQ_INSTS_VALU_ADD_F32+SQ_INSTS_VALU_MUL_F32+SQ_INSTS_VALU_TRANS_F32)*64+(SQ_INSTS_VALU_MFMA_MOPS_F32*512) descr="The number of 32 bits OPS executed"></metric>
+  <metric name="TOTAL_64_OPS"                                           expr=(SQ_INSTS_VALU_FMA_F64*2+SQ_INSTS_VALU_INT64+SQ_INSTS_VALU_ADD_F64+SQ_INSTS_VALU_MUL_F64)*64+(SQ_INSTS_VALU_MFMA_MOPS_F64*512) descr="The number of 64 bits OPS executed"></metric>
+
+  <metric name="AggSysCycles"                                           expr=GRBM_GUI_ACTIVE*CU_NUM                                   descr="Unit: cycles"></metric>
+  ## IP Block Utilization Metrics
+  <metric name="GpuUtil"                                                expr=100*GRBM_GUI_ACTIVE/GRBM_COUNT                           descr="Unit: percent"></metric>
+  <metric name="CpUtil"                                                 expr=100*GRBM_CP_BUSY/GRBM_GUI_ACTIVE                         descr="Unit: percent"></metric>
+  <metric name="SpiUtil"                                                expr=100*GRBM_SPI_BUSY/GRBM_GUI_ACTIVE                        descr="Unit: percent"></metric>
+  <metric name="TaUtil"                                                 expr=100*GRBM_TA_BUSY/GRBM_GUI_ACTIVE                         descr="Unit: percent"></metric>
+  <metric name="TcUtil"                                                 expr=100*GRBM_TC_BUSY/GRBM_GUI_ACTIVE                         descr="Unit: percent"></metric>
+  <metric name="EaUtil"                                                 expr=100*GRBM_EA_BUSY/GRBM_GUI_ACTIVE                         descr="Unit: percent"></metric>
+  ## Instruction Fetch Metrics
+  <metric name="InstrFetchLatency"                                      expr=SQ_ACCUM_PREV_HIRES/SQ_IFETCH                            descr="Unit: cycles"></metric>
+  ## Wavefront Metrics
+  <metric name="WaveOccupancy"                                          expr=SQ_ACCUM_PREV_HIRES/GRBM_GUI_ACTIVE                      descr="Unit: wavefronts"></metric>
+  <metric name="WaveDuration"                                           expr=4*SQ_WAVE_CYCLES/SQ_WAVES                                descr="Unit: cycles"></metric>
+  <metric name="WaveDepWait"                                            expr=100*SQ_WAIT_ANY/SQ_WAVE_CYCLES                           descr="Unit: percent"></metric>
+  <metric name="WaveIssueWait"                                          expr=100*SQ_WAIT_INST_ANY/SQ_WAVE_CYCLES                      descr="Unit: percent"></metric>
+  <metric name="WaveExec"                                               expr=100*SQ_ACTIVE_INST_ANY/SQ_WAVE_CYCLES                    descr="Unit: percent"></metric>
+  ## Compute Unit Metrics
+  <metric name="ValuIops"                                               expr=(SQ_INSTS_VALU_INT32+SQ_INSTS_VALU_INT64)*64             descr="Unit: IOP"></metric>
+  <metric name="MfmaFlops"                                              expr=(SQ_INSTS_VALU_MFMA_MOPS_F16+SQ_INSTS_VALU_MFMA_MOPS_BF16+SQ_INSTS_VALU_MFMA_MOPS_F32+SQ_INSTS_VALU_MFMA_MOPS_F64)*512      descr="Unit: FLOP"></metric>
+  <metric name="MfmaFlopsF16"                                           expr=SQ_INSTS_VALU_MFMA_MOPS_F16*512                          descr="Unit: FLOP"></metric>
+  <metric name="MfmaFlopsBF16"                                          expr=SQ_INSTS_VALU_MFMA_MOPS_BF16*512                         descr="Unit: FLOP"></metric>
+  <metric name="MfmaFlopsF32"                                           expr=SQ_INSTS_VALU_MFMA_MOPS_F32*512                          descr="Unit: FLOP"></metric>
+  <metric name="MfmaFlopsF64"                                           expr=SQ_INSTS_VALU_MFMA_MOPS_F64*512                          descr="Unit: IOP"></metric>
+  <metric name="ScaPipeIssueUtil"                                       expr=100*SQ_ACTIVE_INST_SCA/(GRBM_GUI_ACTIVE*CU_NUM)          descr="Unit: percent"></metric>
+  <metric name="ValuPipeIssueUtil"                                      expr=100*SQ_ACTIVE_INST_VALU/(GRBM_GUI_ACTIVE*CU_NUM)         descr="Unit: percent"></metric>
+  <metric name="VmemPipeIssueUtil"                                      expr=400*(SQ_ACTIVE_INST_VMEM+SQ_ACTIVE_INST_FLAT)/(GRBM_GUI_ACTIVE*CU_NUM)      descr="Unit: percent"></metric>
+  <metric name="MfmaUtil"                                               expr=100*SQ_VALU_MFMA_BUSY_CYCLES/(GRBM_GUI_ACTIVE*CU_NUM*4)                       descr="Unit: percent"></metric>
+  <metric name="AvgNumActiveThreads"                                    expr=SQ_THREAD_CYCLES_VALU/SQ_ACTIVE_INST_VALU                descr="Unit: percent"></metric>
+  <metric name="VmemLatency"                                            expr=SQ_ACCUM_PREV_HIRES/SQ_INSTS_VMEM                        descr="Unit: cycles"></metric>
+  <metric name="SmemLatency"                                            expr=SQ_ACCUM_PREV_HIRES/SQ_INSTS_SMEM_NORM                   descr="Unit: cycles"></metric>
+  ## Local Data Share (LDS) Metrics
+  <metric name="LdsUtil"                                                expr=100*SQ_LDS_IDX_ACTIVE/(GRBM_GUI_ACTIVE*CU_NUM)                       descr="Unit: percent"></metric>
+  <metric name="LdsPipeIssueUtil"                                       expr=400*SQ_ACTIVE_INST_LDS/(GRBM_GUI_ACTIVE*CU_NUM*2)                  descr="Unit: percent"></metric>
+  <metric name="LdsLatency"                                             expr=SQ_ACCUM_PREV_HIRES/SQ_INSTS_LDS                                     descr="Unit: cycles"></metric>
+  <metric name="LdsBankConflict"                                        expr=SQ_LDS_BANK_CONFLICT/(SQ_LDS_IDX_ACTIVE-SQ_LDS_BANK_CONFLICT)        descr="Unit: conflicts/access"></metric>
+  ## L1I and sL1D Cache Metrics
+  <metric name="L1iCacheHitRate"                                        expr=100*SQC_ICACHE_HITS/SQC_ICACHE_REQ                               descr="Unit: percent"></metric>
+  <metric name="sL1dCacheHitRate"                                       expr=100*SQC_DCACHE_HITS/SQC_DCACHE_REQ                               descr="Unit: percent"></metric>
+  ## vL1D Cache Metrics
+  <metric name="vL1dBufCoalesceRate"                                    expr=6400*TA_TOTAL_WAVEFRONTS_sum/(TCP_TOTAL_ACCESSES_sum*4)        descr="Unit: percent"></metric>
+  <metric name="vL1dCacheUtil"                                          expr=100*TCP_GATE_EN2_sum/TCP_GATE_EN1_sum                            descr="Unit: percent"></metric>
+  <metric name="vL1dCacheTcbHitRate"                                    expr=100*TCP_UTCL1_TRANSLATION_HIT_sum/TCP_UTCL1_REQUEST_sum          descr="Unit: percent"></metric>
+  <metric name="vL1dCacheWaveLatency"                                   expr=TCP_TCP_LATENCY_sum/TCP_TA_TCP_STATE_READ_sum                    descr="Unit: cycles"></metric>
+  <metric name="vL1dReadFromL2Latency"                                  expr=TCP_TCC_READ_REQ_LATENCY_sum/(TCP_TCC_READ_REQ_sum+TCP_TCC_ATOMIC_WITH_RET_REQ_sum)            descr="Unit: cycles"></metric>
+  <metric name="vL1dWriteToL2Latency"                                   expr=TCP_TCC_WRITE_REQ_LATENCY_sum/(TCP_TCC_WRITE_REQ_sum+TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)       descr="Unit: cycles"></metric>
+  <metric name="vL1dRdTagConfStallRate"                                 expr=100*TCP_READ_TAGCONFLICT_STALL_CYCLES_sum/TCP_GATE_EN2_sum       descr="Unit: percent"></metric>
+  <metric name="vL1dWrTagConfStallRate"                                 expr=100*TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum/TCP_GATE_EN2_sum      descr="Unit: percent"></metric>
+  <metric name="vL1dAtomicTagConfStallRate"                             expr=100*TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum/TCP_GATE_EN2_sum     descr="Unit: percent"></metric>
+  <metric name="vL1dMissReqStallRate"                                   expr=100*TCP_TCR_TCP_STALL_CYCLES_sum/TCP_GATE_EN2_sum                descr="Unit: percent"></metric>
+  <metric name="vL1dDataPendRate"                                       expr=100*TCP_PENDING_STALL_CYCLES_sum/TCP_GATE_EN2_sum                descr="Unit: percent"></metric>
+  <metric name="vL1dDataRetStallRate"                                   expr=100*TD_TC_STALL_sum/TD_TD_BUSY_sum                               descr="Unit: percent"></metric>
+  ## L2 Cache Metrics
+  <metric name="L2CacheHitRate"                                         expr=100*TCC_HIT_sum/(TCC_HIT_sum+TCC_MISS_sum)                       descr="Unit: percent"></metric>
+  <metric name="L2CacheTagRamStallRate"                                 expr=100*TCC_TAG_STALL_sum/TCC_BUSY_sum                               descr="Unit: percent"></metric>
+  <metric name="EaRdLatency"                                            expr=TCC_EA_RDREQ_LEVEL_sum/TCC_EA_RDREQ_sum                          descr="Unit: cycles"></metric>
+  <metric name="EaRdIoStallRate"                                        expr=100*TCC_EA_RDREQ_IO_CREDIT_STALL_sum/TCC_BUSY_sum                descr="Unit: percent"></metric>
+  <metric name="EaRdGmiStallRate"                                       expr=100*TCC_EA_RDREQ_GMI_CREDIT_STALL_sum/TCC_BUSY_sum               descr="Unit: percent"></metric>
+  <metric name="EaRdDramStallRate"                                      expr=100*TCC_EA_RDREQ_DRAM_CREDIT_STALL_sum/TCC_BUSY_sum              descr="Unit: percent"></metric>
+  <metric name="EaWrLatency"                                            expr=TCC_EA_WRREQ_LEVEL_sum/TCC_EA_WRREQ_sum                          descr="Unit: cycles"></metric>
+  <metric name="EaWrIoStallRate"                                        expr=100*TCC_EA_WRREQ_IO_CREDIT_STALL_sum/TCC_BUSY_sum                descr="Unit: percent"></metric>
+  <metric name="EaWrGmiStallRate"                                       expr=100*TCC_EA_WRREQ_GMI_CREDIT_STALL_sum/TCC_BUSY_sum               descr="Unit: percent"></metric>
+  <metric name="EaWrDramStallRate"                                      expr=100*TCC_EA_WRREQ_DRAM_CREDIT_STALL_sum/TCC_BUSY_sum              descr="Unit: percent"></metric>
+  <metric name="EaWrStarveRate"                                         expr=100*TCC_TOO_MANY_EA_WRREQS_STALL_sum/TCC_BUSY_sum                descr="Unit: percent"></metric>
+  <metric name="EaAtomicLatency"                                        expr=TCC_EA_ATOMIC_LEVEL_sum/TCC_EA_ATOMIC_sum                        descr="Unit: cycles"></metric>
+</gfx90a>
+
+<gfx940>
+  <metric name="SQ_WAVES_sum" expr=reduce(SQ_WAVES,sum) descr="Count number of waves sent to SQs. (per-simd, emulated, global). Sum over SQ instances."></metric>
+  <metric name="TCP_TCP_TA_DATA_STALL_CYCLES_sum" expr=reduce(TCP_TCP_TA_DATA_STALL_CYCLES,sum) descr="Total number of TCP stalls TA data interface."></metric>
+  <metric name="TCP_TCP_TA_DATA_STALL_CYCLES_max" expr=reduce(TCP_TCP_TA_DATA_STALL_CYCLES,max) descr="Maximum number of TCP stalls TA data interface."></metric>
+
+  <metric name="MeanOccupancyPerCU" expr=reduce(SQ_LEVEL_WAVES,sum)*0+reduce(SQ_ACCUM_PREV_HIRES,sum)/reduce(GRBM_GUI_ACTIVE,sum)/CU_NUM descr="Mean occupancy per compute unit."></metric>
+  <metric name="MeanOccupancyPerActiveCU" expr=SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES*4/SQ_BUSY_CYCLES/CU_NUM descr="Mean occupancy per active compute unit."></metric>
+  <metric name="VFetchInsts" expr=(SQ_INSTS_VMEM_RD-TA_FLAT_READ_WAVEFRONTS_sum)/SQ_WAVES descr="The average number of vector fetch instructions from the video memory executed per work-item (affected by flow control). Excludes FLAT instructions that fetch from video memory."></metric>
+  <metric name="VWriteInsts" expr=(SQ_INSTS_VMEM_WR-TA_FLAT_WRITE_WAVEFRONTS_sum)/SQ_WAVES descr="The average number of vector write instructions to the video memory executed per work-item (affected by flow control). Excludes FLAT instructions that write to video memory."></metric>
+  <metric name="VALUUtilization" expr=100*SQ_THREAD_CYCLES_VALU/(SQ_ACTIVE_INST_VALU*MAX_WAVE_SIZE) descr="The percentage of active vector ALU threads in a wave. A lower number can mean either more thread divergence in a wave or that the work-group size is not a multiple of 64. Value range: 0% (bad), 100% (ideal - no thread divergence)."></metric>
+  <metric name="VALUBusy" expr=100*reduce(SQ_ACTIVE_INST_VALU,sum)*4/SIMD_NUM/reduce(GRBM_GUI_ACTIVE,sum) descr="The percentage of GPUTime vector ALU instructions are processed. Value range: 0% (bad) to 100% (optimal)."></metric>
+  <metric name="SALUBusy" expr=100*reduce(SQ_INST_CYCLES_SALU,sum)*4/SIMD_NUM/reduce(GRBM_GUI_ACTIVE,sum) descr="The percentage of GPUTime scalar ALU instructions are processed. Value range: 0% (bad) to 100% (optimal)."></metric>
+  <metric name="FetchSize" expr=FETCH_SIZE descr="The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
+  <metric name="WriteSize" expr=WRITE_SIZE descr="The total kilobytes written to the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
+  <metric name="MemWrites32B" expr=WRITE_REQ_32B descr="The total number of effective 32B write transactions to the memory"></metric>
+  <metric name="MemUnitStalled" expr=100*TCP_TCP_TA_DATA_STALL_CYCLES_max/GRBM_GUI_ACTIVE/SE_NUM descr="The percentage of GPUTime the memory unit is stalled. Try reducing the number or size of fetches and writes if possible. Value range: 0% (optimal) to 100% (bad)."></metric>
+  <metric name="TA_BUSY_avr"                                            expr=reduce(TA_TA_BUSY,avr) descr="TA block is busy. Average over TA instances."></metric>
+  <metric name="TA_BUSY_max"                                            expr=reduce(TA_TA_BUSY,max) descr="TA block is busy. Max over TA instances."></metric>
+  <metric name="TA_BUSY_min"                                            expr=reduce(TA_TA_BUSY,min) descr="TA block is busy. Min over TA instances."></metric>
+  <metric name="TA_TA_BUSY_sum"                                         expr=reduce(TA_TA_BUSY,sum) descr="TA block is busy. Perf_Windowing not supported for this counter. Sum over TA instances."></metric>
+  <metric name="TA_TOTAL_WAVEFRONTS_sum"                                expr=reduce(TA_TOTAL_WAVEFRONTS,sum) descr="Total number of wavefronts processed by TA. Sum over TA instances."></metric>
+  <metric name="TA_ADDR_STALLED_BY_TC_CYCLES_sum"                       expr=reduce(TA_ADDR_STALLED_BY_TC_CYCLES,sum) descr="Number of cycles addr path stalled by TC. Perf_Windowing not supported for this counter. Sum over TA instances."></metric>
+  <metric name="TA_ADDR_STALLED_BY_TD_CYCLES_sum"                       expr=reduce(TA_ADDR_STALLED_BY_TD_CYCLES,sum) descr="Number of cycles addr path stalled by TD. Perf_Windowing not supported for this counter. Sum over TA instances."></metric>
+  <metric name="TA_DATA_STALLED_BY_TC_CYCLES_sum"                       expr=reduce(TA_DATA_STALLED_BY_TC_CYCLES,sum) descr="Number of cycles data path stalled by TC. Perf_Windowing not supported for this counter. Sum over TA instances."></metric>
+  <metric name="TA_FLAT_WAVEFRONTS_sum"                                 expr=reduce(TA_FLAT_WAVEFRONTS,sum) descr="Number of flat opcode wavfronts processed by the TA. Sum over TA instances."></metric>
+  <metric name="TA_FLAT_READ_WAVEFRONTS_sum"                            expr=reduce(TA_FLAT_READ_WAVEFRONTS,sum) descr="Number of flat opcode reads processed by the TA. Sum over TA instances."></metric>
+  <metric name="TA_FLAT_WRITE_WAVEFRONTS_sum"                           expr=reduce(TA_FLAT_WRITE_WAVEFRONTS,sum) descr="Number of flat opcode writes processed by the TA. Sum over TA instances."></metric>
+  <metric name="TA_FLAT_ATOMIC_WAVEFRONTS_sum"                          expr=reduce(TA_FLAT_ATOMIC_WAVEFRONTS,sum) descr="Number of flat opcode atomics processed by the TA. Sum over TA instances."></metric>
+  <metric name="TA_BUFFER_WAVEFRONTS_sum"                               expr=reduce(TA_BUFFER_WAVEFRONTS,sum) descr="Number of buffer wavefronts processed by TA. Sum over TA instances."></metric>
+  <metric name="TA_BUFFER_READ_WAVEFRONTS_sum"                          expr=reduce(TA_BUFFER_READ_WAVEFRONTS,sum) descr="Number of buffer read wavefronts processed by TA. Sum over TA instances."></metric>
+  <metric name="TA_BUFFER_WRITE_WAVEFRONTS_sum"                         expr=reduce(TA_BUFFER_WRITE_WAVEFRONTS,sum) descr="Number of buffer write wavefronts processed by TA. Sum over TA instances."></metric>
+  <metric name="TA_BUFFER_ATOMIC_WAVEFRONTS_sum"                        expr=reduce(TA_BUFFER_ATOMIC_WAVEFRONTS,sum) descr="Number of buffer atomic wavefronts processed by TA. Sum over TA instances."></metric>
+  <metric name="TA_BUFFER_TOTAL_CYCLES_sum"                             expr=reduce(TA_BUFFER_TOTAL_CYCLES,sum) descr="Number of buffer cycles issued to TC. Sum over TA instances."></metric>
+  <metric name="TA_BUFFER_COALESCED_READ_CYCLES_sum"                    expr=reduce(TA_BUFFER_COALESCED_READ_CYCLES,sum) descr="Number of buffer coalesced read cycles issued to TC. Sum over TA instances."></metric>
+  <metric name="TA_BUFFER_COALESCED_WRITE_CYCLES_sum"                   expr=reduce(TA_BUFFER_COALESCED_WRITE_CYCLES,sum) descr="Number of buffer coalesced write cycles issued to TC. Sum over TA instances."></metric>
+  <metric name="TD_TD_BUSY_sum"                                         expr=reduce(TD_TD_BUSY,sum) descr="TD is processing or waiting for data. Perf_Windowing not supported for this counter. Sum over TD instances."></metric>
+  <metric name="TD_TC_STALL_sum"                                        expr=reduce(TD_TC_STALL,sum) descr="TD is stalled waiting for TC data. Sum over TD instances."></metric>
+  <metric name="TD_LOAD_WAVEFRONT_sum"                                  expr=reduce(TD_LOAD_WAVEFRONT,sum) descr="Count the wavefronts with opcode = load, include atomics and store. Sum over TD instances."></metric>
+  <metric name="TD_ATOMIC_WAVEFRONT_sum"                                expr=reduce(TD_ATOMIC_WAVEFRONT,sum) descr="Count the wavefronts with opcode = atomic. Sum over TD instances."></metric>
+  <metric name="TD_STORE_WAVEFRONT_sum"                                 expr=reduce(TD_STORE_WAVEFRONT,sum) descr="Count the wavefronts with opcode = store. Sum over TD instances."></metric>
+  <metric name="TD_COALESCABLE_WAVEFRONT_sum"                           expr=reduce(TD_COALESCABLE_WAVEFRONT,sum) descr="Count wavefronts that TA finds coalescable. Sum over TD instances."></metric>
+  <metric name="TD_SPI_STALL_sum"                                       expr=reduce(TD_SPI_STALL,sum) descr="TD is stalled SPI vinit, sum of TCP instances"></metric>
+  <metric name="TCP_GATE_EN1_sum"                                       expr=reduce(TCP_GATE_EN1,sum) descr="TCP interface clocks are turned on. Not Windowed. Sum over TCP instances."></metric>
+  <metric name="TCP_GATE_EN2_sum"                                       expr=reduce(TCP_GATE_EN2,sum) descr="TCP core clocks are turned on. Not Windowed. Sum over TCP instances."></metric>
+  <metric name="TCP_TD_TCP_STALL_CYCLES_sum"                            expr=reduce(TCP_TD_TCP_STALL_CYCLES,sum) descr="TD stalls TCP. Sum over TCP instances."></metric>
+  <metric name="TCP_TCR_TCP_STALL_CYCLES_sum"                           expr=reduce(TCP_TCR_TCP_STALL_CYCLES,sum) descr="TCR stalls TCP_TCR_req interface. Sum over TCP instances."></metric>
+  <metric name="TCP_READ_TAGCONFLICT_STALL_CYCLES_sum"                  expr=reduce(TCP_READ_TAGCONFLICT_STALL_CYCLES,sum) descr="Tagram conflict stall on a read. Sum over TCP instances."></metric>
+  <metric name="TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum"                 expr=reduce(TCP_WRITE_TAGCONFLICT_STALL_CYCLES,sum) descr="Tagram conflict stall on a write. Sum over TCP instances."></metric>
+  <metric name="TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum"                expr=reduce(TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES,sum) descr="Tagram conflict stall on an atomic. Sum over TCP instances."></metric>
+  <metric name="TCP_VOLATILE_sum"                                       expr=reduce(TCP_VOLATILE,sum) descr="Total number of L1 volatile pixels/buffers from TA. Sum over TCP instances."></metric>
+  <metric name="TCP_TOTAL_ACCESSES_sum"                                 expr=reduce(TCP_TOTAL_ACCESSES,sum) descr="Total number of pixels/buffers from TA. Equals TCP_PERF_SEL_TOTAL_READ+TCP_PERF_SEL_TOTAL_NONREAD. Sum over TCP instances."></metric>
+  <metric name="TCP_TOTAL_READ_sum"                                     expr=reduce(TCP_TOTAL_READ,sum) descr="Total number of read pixels/buffers from TA. Equals TCP_PERF_SEL_TOTAL_HIT_LRU_READ + TCP_PERF_SEL_TOTAL_MISS_LRU_READ + TCP_PERF_SEL_TOTAL_MISS_EVICT_READ. Sum over TCP instances."></metric>
+  <metric name="TCP_TOTAL_WRITE_sum"                                    expr=reduce(TCP_TOTAL_WRITE,sum) descr="Total number of local write pixels/buffers from TA. Equals TCP_PERF_SEL_TOTAL_MISS_LRU_WRITE+ TCP_PERF_SEL_TOTAL_MISS_EVICT_WRITE. Sum over TCP instances."></metric>
+  <metric name="TCP_TOTAL_ATOMIC_WITH_RET_sum"                          expr=reduce(TCP_TOTAL_ATOMIC_WITH_RET,sum) descr="Total number of atomic with return pixels/buffers from TA. Sum over TCP instances."></metric>
+  <metric name="TCP_TOTAL_ATOMIC_WITHOUT_RET_sum"                       expr=reduce(TCP_TOTAL_ATOMIC_WITHOUT_RET,sum) descr="Total number of atomic without return pixels/buffers from TA Sum over TCP instances."></metric>
+  <metric name="TCP_TOTAL_WRITEBACK_INVALIDATES_sum"                    expr=reduce(TCP_TOTAL_WRITEBACK_INVALIDATES,sum) descr="Total number of cache invalidates. Equals TCP_PERF_SEL_TOTAL_WBINVL1+ TCP_PERF_SEL_TOTAL_WBINVL1_VOL+ TCP_PERF_SEL_CP_TCP_INVALIDATE+ TCP_PERF_SEL_SQ_TCP_INVALIDATE_VOL. Not Windowed. Sum over TCP instances."></metric>
+  <metric name="TCP_UTCL1_REQUEST_sum"                                  expr=reduce(TCP_UTCL1_REQUEST,sum) descr="Total CLIENT_UTCL1 NORMAL requests Sum over TCP instances."></metric>
+  <metric name="TCP_UTCL1_TRANSLATION_MISS_sum"                         expr=reduce(TCP_UTCL1_TRANSLATION_MISS,sum) descr="Total utcl1 translation misses Sum over TCP instances."></metric>
+  <metric name="TCP_UTCL1_TRANSLATION_HIT_sum"                          expr=reduce(TCP_UTCL1_TRANSLATION_HIT,sum) descr="Total utcl1 translation hits Sum over TCP instances."></metric>
+  <metric name="TCP_UTCL1_PERMISSION_MISS_sum"                          expr=reduce(TCP_UTCL1_PERMISSION_MISS,sum) descr="Total utcl1 permission misses Sum over TCP instances."></metric>
+  <metric name="TCP_TOTAL_CACHE_ACCESSES_sum"                           expr=reduce(TCP_TOTAL_CACHE_ACCESSES,sum) descr="Count of total cache line (tag) accesses (includes hits and misses). Sum over TCP instances."></metric>
+  <metric name="TCP_TA_TCP_STATE_READ_sum"                              expr=reduce(TCP_TA_TCP_STATE_READ,sum) descr="Number of state reads Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_READ_REQ_sum"                                   expr=reduce(TCP_TCC_READ_REQ,sum) descr="Total read requests from TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_WRITE_REQ_sum"                                  expr=reduce(TCP_TCC_WRITE_REQ,sum) descr="Total write requests from TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_ATOMIC_WITH_RET_REQ_sum"                        expr=reduce(TCP_TCC_ATOMIC_WITH_RET_REQ,sum) descr="Total atomic with return requests from TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum"                     expr=reduce(TCP_TCC_ATOMIC_WITHOUT_RET_REQ,sum) descr="Total atomic without return requests from TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_NC_READ_REQ_sum"                                expr=reduce(TCP_TCC_NC_READ_REQ,sum) descr="Total read requests with NC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_NC_WRITE_REQ_sum"                               expr=reduce(TCP_TCC_NC_WRITE_REQ,sum) descr="Total write requests with NC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_NC_ATOMIC_REQ_sum"                              expr=reduce(TCP_TCC_NC_ATOMIC_REQ,sum) descr="Total atomic requests with NC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_UC_READ_REQ_sum"                                expr=reduce(TCP_TCC_UC_READ_REQ,sum) descr="Total read requests with UC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_UC_WRITE_REQ_sum"                               expr=reduce(TCP_TCC_UC_WRITE_REQ,sum) descr="Total write requests with UC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_UC_ATOMIC_REQ_sum"                              expr=reduce(TCP_TCC_UC_ATOMIC_REQ,sum) descr="Total atomic requests with UC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_CC_READ_REQ_sum"                                expr=reduce(TCP_TCC_CC_READ_REQ,sum) descr="Total write requests with CC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_CC_WRITE_REQ_sum"                               expr=reduce(TCP_TCC_CC_WRITE_REQ,sum) descr="Total write requests with CC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_CC_ATOMIC_REQ_sum"                              expr=reduce(TCP_TCC_CC_ATOMIC_REQ,sum) descr="Total atomic requests with CC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_RW_READ_REQ_sum"                                expr=reduce(TCP_TCC_RW_READ_REQ,sum) descr="Total write requests with RW mtype from this TCP to all TCCs. Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_RW_WRITE_REQ_sum"                               expr=reduce(TCP_TCC_RW_WRITE_REQ,sum) descr="Total write requests with RW mtype from this TCP to all TCCs. Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_RW_ATOMIC_REQ_sum"                              expr=reduce(TCP_TCC_RW_ATOMIC_REQ,sum) descr="Total atomic requests with RW mtype from this TCP to all TCCs. Sum over TCP instances."></metric>
+  <metric name="TCP_PENDING_STALL_CYCLES_sum"                           expr=reduce(TCP_PENDING_STALL_CYCLES,sum) descr="Stall due to data pending from L2. Sum over TCP instances."></metric>
+  <metric name="TCA_CYCLE_sum"                                          expr=reduce(TCA_CYCLE,sum)  descr="Number of cycles. Sum over all TCA instances "></metric>
+  <metric name="TCA_BUSY_sum"                                           expr=reduce(TCA_BUSY,sum)   descr="Number of cycles we have a request pending. Sum over all TCA instances."></metric>
+  <metric name="TCC_BUSY_avr"                                           expr=reduce(TCC_BUSY,avr) descr="TCC_BUSY avr over all memory channels."></metric>
+  <metric name="TCC_WRREQ_STALL_max"                                    expr=reduce(TCC_EA0_WRREQ_STALL,max) descr="Number of cycles a write request was stalled. Max over TCC instances."></metric>
+  <metric name="TCC_CYCLE_sum"                                          expr=reduce(TCC_CYCLE,sum) descr="Number of cycles. Not windowable. Sum over TCC instances."></metric>
+  <metric name="TCC_BUSY_sum"                                           expr=reduce(TCC_BUSY,sum) descr="Number of cycles we have a request pending. Not windowable. Sum over TCC instances."></metric>
+  <metric name="TCC_REQ_sum"                                            expr=reduce(TCC_REQ,sum) descr="Number of requests of all types. This is measured at the tag block. This may be more than the number of requests arriving at the TCC, but it is a good indication of the total amount of work that needs to be performed. Sum over TCC instances."></metric>
+  <metric name="TCC_STREAMING_REQ_sum"                                  expr=reduce(TCC_STREAMING_REQ,sum) descr="Number of streaming requests. This is measured at the tag block. Sum over TCC instances."></metric>
+  <metric name="TCC_NC_REQ_sum"                                         expr=reduce(TCC_NC_REQ,sum) descr="The number of noncoherently cached requests. This is measured at the tag block. Sum over TCC instances."></metric>
+  <metric name="TCC_UC_REQ_sum"                                         expr=reduce(TCC_UC_REQ,sum) descr="The number of uncached requests. This is measured at the tag block. Sum over TCC instances."></metric>
+  <metric name="TCC_CC_REQ_sum"                                         expr=reduce(TCC_CC_REQ,sum) descr="The number of coherently cached requests. This is measured at the tag block. Sum over TCC instances."></metric>
+  <metric name="TCC_RW_REQ_sum"                                         expr=reduce(TCC_RW_REQ,sum) descr="The number of RW requests. This is measured at the tag block. Sum over TCC instances."></metric>
+  <metric name="TCC_PROBE_sum"                                          expr=reduce(TCC_PROBE,sum) descr="Number of probe requests. Not windowable. Sum over TCC instances."></metric>
+  <metric name="TCC_PROBE_ALL_sum"                                      expr=reduce(TCC_PROBE_ALL,sum) descr="Number of external probe requests with with EA_TCC_preq_all== 1. Not windowable. Sum over TCC instances."></metric>
+  <metric name="TCC_READ_sum"                                           expr=reduce(TCC_READ,sum) descr="Number of read requests. Compressed reads are included in this, but metadata reads are not included. Sum over TCC instances."></metric>
+  <metric name="TCC_WRITE_sum"                                          expr=reduce(TCC_WRITE,sum) descr="Number of write requests. Sum over TCC instances."></metric>
+  <metric name="TCC_ATOMIC_sum"                                         expr=reduce(TCC_ATOMIC,sum) descr="Number of atomic requests of all types. Sum over TCC instances."></metric>
+  <metric name="TCC_HIT_sum"                                            expr=reduce(TCC_HIT,sum) descr="Number of cache hits. Sum over TCC instances."></metric>
+  <metric name="TCC_MISS_sum"                                           expr=reduce(TCC_MISS,sum) descr="Number of cache misses. UC reads count as misses. Sum over TCC instances."></metric>
+  <metric name="TCC_WRITEBACK_sum"                                      expr=reduce(TCC_WRITEBACK,sum) descr="Number of lines written back to main memory. This includes writebacks of dirty lines and uncached write/atomic requests. Sum over TCC instances."></metric>
+  <metric name="TCC_EA0_WRREQ_sum"                                       expr=reduce(TCC_EA0_WRREQ,sum) descr="Number of transactions (either 32-byte or 64-byte) going over the TC_EA_wrreq interface. Atomics may travel over the same interface and are generally classified as write requests. This does not include probe commands. Sum over TCC instances."></metric>
+  <metric name="TCC_EA0_WRREQ_64B_sum"                                   expr=reduce(TCC_EA0_WRREQ_64B,sum) descr="Number of 64-byte transactions going (64-byte write or CMPSWAP) over the TC_EA_wrreq interface. Sum over TCC instances."></metric>
+  <metric name="TCC_EA0_WR_UNCACHED_32B_sum"                             expr=reduce(TCC_EA0_WR_UNCACHED_32B,sum) descr="Number of 32-byte write/atomic going over the TC_EA_wrreq interface due to uncached traffic. Note that CC mtypes can produce uncached requests, and those are included in this. A 64-byte request will be counted as 2. Sum over TCC instances."></metric>
+  <metric name="TCC_EA0_WRREQ_STALL_sum"                                 expr=reduce(TCC_EA0_WRREQ_STALL,sum) descr="Number of cycles a write request was stalled. Sum over TCC instances."></metric>
+  <metric name="TCC_EA0_WRREQ_IO_CREDIT_STALL_sum"                       expr=reduce(TCC_EA0_WRREQ_IO_CREDIT_STALL,sum) descr="Number of cycles a EA write request was stalled because the interface was out of IO credits. Sum over TCC instances."></metric>
+  <metric name="TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum"                      expr=reduce(TCC_EA0_WRREQ_GMI_CREDIT_STALL,sum) descr="Number of cycles a EA write request was stalled because the interface was out of GMI credits. Sum over TCC instances."></metric>
+  <metric name="TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum"                     expr=reduce(TCC_EA0_WRREQ_DRAM_CREDIT_STALL,sum) descr="Number of cycles a EA write request was stalled because the interface was out of DRAM credits. Sum over TCC instances."></metric>
+  <metric name="TCC_TOO_MANY_EA_WRREQS_STALL_sum"                       expr=reduce(TCC_TOO_MANY_EA_WRREQS_STALL,sum) descr="Number of cycles the TCC could not send a EA write request because it already reached its maximum number of pending EA write requests. Sum over TCC instances."></metric>
+  <metric name="TCC_EA0_WRREQ_LEVEL_sum"                                 expr=reduce(TCC_EA0_WRREQ_LEVEL,sum) descr="The sum of the number of EA write requests in flight. This is primarily meant for measure average EA write latency. Average write latency = TCC_PERF_SEL_EA_WRREQ_LEVEL/TCC_PERF_SEL_EA_WRREQ. Sum over TCC instances."></metric>
+  <metric name="TCC_EA0_RDREQ_LEVEL_sum"                                 expr=reduce(TCC_EA0_RDREQ_LEVEL,sum) descr="The sum of the number of TCC/EA read requests in flight. This is primarily meant for measure average EA read latency. Average read latency = TCC_PERF_SEL_EA_RDREQ_LEVEL/TCC_PERF_SEL_EA_RDREQ. Sum over TCC instances."></metric>
+  <metric name="TCC_EA0_ATOMIC_sum"                                      expr=reduce(TCC_EA0_ATOMIC,sum) descr="Number of transactions going over the TC_EA_wrreq interface that are actually atomic requests. Sum over TCC instances."></metric>
+  <metric name="TCC_EA0_ATOMIC_LEVEL_sum"                                expr=reduce(TCC_EA0_ATOMIC_LEVEL,sum) descr="The sum of the number of EA atomics in flight. This is primarily meant for measure average EA atomic latency. Average atomic latency = TCC_PERF_SEL_EA_WRREQ_ATOMIC_LEVEL/TCC_PERF_SEL_EA_WRREQ_ATOMIC. Sum over TCC instances."></metric>
+  <metric name="TCC_EA0_RDREQ_sum"                                       expr=reduce(TCC_EA0_RDREQ,sum) descr="Number of TCC/EA read requests (either 32-byte or 64-byte) Sum over TCC instances."></metric>
+  <metric name="TCC_EA0_RDREQ_32B_sum"                                   expr=reduce(TCC_EA0_RDREQ_32B,sum) descr="Number of 32-byte TCC/EA read requests Sum over TCC instances."></metric>
+  <metric name="TCC_EA0_RD_UNCACHED_32B_sum"                             expr=reduce(TCC_EA0_RD_UNCACHED_32B,sum) descr="Number of 32-byte TCC/EA read due to uncached traffic. A 64-byte request will be counted as 2 Sum over TCC instances."></metric>
+  <metric name="TCC_EA0_RDREQ_IO_CREDIT_STALL_sum"                       expr=reduce(TCC_EA0_RDREQ_IO_CREDIT_STALL,sum) descr="Number of cycles there was a stall because the read request interface was out of IO credits. Stalls occur regardless of whether a read needed to be performed or not. Sum over TCC instances."></metric>
+  <metric name="TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum"                      expr=reduce(TCC_EA0_RDREQ_GMI_CREDIT_STALL,sum) descr="Number of cycles there was a stall because the read request interface was out of GMI credits. Stalls occur regardless of whether a read needed to be performed or not. Sum over TCC instances."></metric>
+  <metric name="TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum"                     expr=reduce(TCC_EA0_RDREQ_DRAM_CREDIT_STALL,sum) descr="Number of cycles there was a stall because the read request interface was out of DRAM credits. Stalls occur regardless of whether a read needed to be performed or not. Sum over TCC instances."></metric>
+  <metric name="TCC_TAG_STALL_sum"                                      expr=reduce(TCC_TAG_STALL,sum) descr="Total number of cycles the normal request pipeline in the tag is stalled for any reason."></metric>
+  <metric name="TCC_NORMAL_WRITEBACK_sum"                               expr=reduce(TCC_NORMAL_WRITEBACK,sum) descr="Number of writebacks due to requests that are not writeback requests. Sum over TCC instances."></metric>
+  <metric name="TCC_ALL_TC_OP_WB_WRITEBACK_sum"                         expr=reduce(TCC_ALL_TC_OP_WB_WRITEBACK,sum) descr="Number of writebacks due to all TC_OP writeback requests. Sum over TCC instances."></metric>
+  <metric name="TCC_NORMAL_EVICT_sum"                                   expr=reduce(TCC_NORMAL_EVICT,sum) descr="Number of evictions due to requests that are not invalidate or probe requests. Sum over TCC instances."></metric>
+  <metric name="TCC_ALL_TC_OP_INV_EVICT_sum"                            expr=reduce(TCC_ALL_TC_OP_INV_EVICT,sum) descr="Number of evictions due to all TC_OP invalidate requests. Sum over TCC instances."></metric>
+  <metric name="TCC_EA0_RDREQ_DRAM_sum"                                  expr=reduce(TCC_EA0_RDREQ_DRAM,sum) descr="Number of TCC/EA read requests (either 32-byte or 64-byte) destined for DRAM (MC). Sum over TCC instances."></metric>
+  <metric name="TCC_EA0_WRREQ_DRAM_sum"                                  expr=reduce(TCC_EA0_WRREQ_DRAM,sum) descr="Number of TCC/EA write requests (either 32-byte of 64-byte) destined for DRAM (MC). Sum over TCC instances."></metric>
+  <metric name="FETCH_SIZE"                                             expr=(TCC_EA0_RDREQ_32B_sum*32+(TCC_EA0_RDREQ_sum-TCC_EA0_RDREQ_32B_sum)*64)/1024 descr="The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
+  <metric name="WRITE_SIZE"                                             expr=((TCC_EA0_WRREQ_sum-TCC_EA0_WRREQ_64B_sum)*32+TCC_EA0_WRREQ_64B_sum*64)/1024 descr="The total kilobytes written to the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
+  <metric name="WRITE_REQ_32B"                                          expr=TCC_EA0_WRREQ_64B_sum*2+(TCC_EA0_WRREQ_sum-TCC_EA0_WRREQ_64B_sum) descr="The total number of 32-byte effective memory writes."></metric>
+  <metric name="CU_OCCUPANCY"                                           expr=(SQ_CYCLES/(SQ_WAVE_CYCLES*4))/MAX_WAVE_SIZE descr="The ratio of active waves on a CU to the maximum number of active waves supported by the CU"></metric>
+  <metric name="CU_UTILIZATION"                                         expr=GRBM_GUI_ACTIVE/GRBM_COUNT descr="The total number of active cycles divided by total number of elapsed cycles"></metric>
+  <metric name="TOTAL_16_OPS"                                           expr=(SQ_INSTS_VALU_FMA_F16*2+SQ_INSTS_VALU_ADD_F16+SQ_INSTS_VALU_MUL_F16+SQ_INSTS_VALU_TRANS_F16)*64+((SQ_INSTS_VALU_MFMA_MOPS_F16+SQ_INSTS_VALU_MFMA_MOPS_BF16)*512) descr="The number of 16 bits OPS executed"></metric>
+  <metric name="TOTAL_32_OPS"                                           expr=(SQ_INSTS_VALU_FMA_F32*2+SQ_INSTS_VALU_INT32+SQ_INSTS_VALU_ADD_F32+SQ_INSTS_VALU_MUL_F32+SQ_INSTS_VALU_TRANS_F32)*64+(SQ_INSTS_VALU_MFMA_MOPS_F32*512) descr="The number of 32 bits OPS executed"></metric>
+  <metric name="TOTAL_64_OPS"                                           expr=(SQ_INSTS_VALU_FMA_F64*2+SQ_INSTS_VALU_INT64+SQ_INSTS_VALU_ADD_F64+SQ_INSTS_VALU_MUL_F64)*64+(SQ_INSTS_VALU_MFMA_MOPS_F64*512) descr="The number of 64 bits OPS executed"></metric>
+  <metric name="GPU_UTIL" expr=100*GRBM_GUI_ACTIVE/GRBM_COUNT descr="Percentage of the time that GUI is active"></metric>
+</gfx940>
+
+<gfx10 base="common_derived">
+  <metric name="SQ_WAVES_sum" expr=reduce(SQ_WAVES,sum) descr="Count number of waves sent to SQs. (per-simd, emulated, global). Sum over SQ instances."></metric>
+  <metric name="MeanOccupancyPerCU" expr=GRBM_COUNT*0+SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV/GRBM_GUI_ACTIVE/CU_NUM descr="Mean occupancy per compute unit."></metric>
+  <metric name="MeanOccupancyPerActiveCU" expr=GRBM_COUNT*0+SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV*4/SQ_BUSY_CYCLES/CU_NUM descr="Mean occupancy per active compute unit."></metric>
+
+  <metric name="GPU_UTIL" expr=100*GRBM_GUI_ACTIVE/GRBM_COUNT descr="Percentage of the time that GUI is active"></metric>
+  <metric name="CP_UTIL" expr=100*GRBM_CP_BUSY/GRBM_GUI_ACTIVE descr="Percentage of the GRBM_GUI_ACTIVE time that any of the Command Processor (CPG/CPC/CPF) blocks are busy"></metric>
+  <metric name="SPI_UTIL" expr=100*GRBM_SPI_BUSY/GRBM_GUI_ACTIVE descr="Percentage of the GRBM_GUI_ACTIVE time that any of the Shader Pipe Interpolators (SPI) are busy in the shader engine(s)"></metric>
+  <metric name="TA_UTIL" expr=100*GRBM_TA_BUSY/GRBM_GUI_ACTIVE descr="Percentage of the GRBM_GUI_ACTIVE time that any of the Texture Pipes (TA) are busy in the shader engine(s)."></metric>
+  <metric name="GDS_UTIL" expr=100*GRBM_GDS_BUSY/GRBM_GUI_ACTIVE descr="Percentage of the GRBM_GUI_ACTIVE time that the Global Data Share (GDS) is busy."></metric>
+  <metric name="EA_UTIL" expr=100*GRBM_EA_BUSY/GRBM_GUI_ACTIVE descr="Percentage of the GRBM_GUI_ACTIVE time that the Efficiency Arbiter (EA) block is busy."></metric>
+  <metric name="WAVE_DEP_WAIT" expr=100*SQ_WAIT_ANY/SQ_WAVE_CYCLES descr="Percentage of the SQ_WAVE_CYCLE time spent waiting for anything."></metric>
+  <metric name="WAVE_ISSUE_WAIT" expr=100*SQ_WAIT_INST_ANY/SQ_WAVE_CYCLES descr="Percentage of the SQ_WAVE_CYCLE time spent waiting for any instruction issue."></metric>
+
+  <metric name="TA_BUSY_avr" expr=reduce(TA_TA_BUSY,avr) descr="TA block is busy. Average over TA instances."></metric>
+  <metric name="TA_BUSY_max" expr=reduce(TA_TA_BUSY,max) descr="TA block is busy. Max over TA instances."></metric>
+  <metric name="TA_BUSY_min" expr=reduce(TA_TA_BUSY,min) descr="TA block is busy. Min over TA instances."></metric>
+  <metric name="TA_FLAT_LOAD_WAVEFRONTS_sum" expr=reduce(TA_FLAT_LOAD_WAVEFRONTS,sum) descr="Number of flat load vec32 packets processed by the TA. Sum over TA instances."></metric>
+  <metric name="TA_FLAT_STORE_WAVEFRONTS_sum" expr=reduce(TA_FLAT_STORE_WAVEFRONTS,sum) descr="Number of flat store vec32 packets processed by the TA. Sum over TA instances."></metric>
+
+  <metric name="GL2C_HIT_sum" expr=reduce(GL2C_HIT,sum) descr="Number of cache hits. Sum over GL2C instances."></metric>
+  <metric name="GL2C_MISS_sum" expr=reduce(GL2C_MISS,sum) descr="Number of cache misses. Sum over GL2C instances."></metric>
+  <metric name="GL2C_EA_RDREQ_32B_sum" expr=reduce(GL2C_EA_RDREQ_32B,sum) descr="Number of 32-byte GL2C/EA read requests. Sum over GL2C instances."></metric>
+  <metric name="GL2C_EA_RDREQ_64B_sum" expr=reduce(GL2C_EA_RDREQ_64B,sum) descr="Number of 64-byte GL2C/EA read requests. Sum over GL2C instances."></metric>
+  <metric name="GL2C_EA_RDREQ_96B_sum" expr=reduce(GL2C_EA_RDREQ_96B,sum) descr="Number of 96-byte GL2C/EA read requests. Sum over GL2C instances."></metric>
+  <metric name="GL2C_EA_RDREQ_128B_sum" expr=reduce(GL2C_EA_RDREQ_128B,sum) descr="Number of 128-byte GL2C/EA read requests. Sum over GL2C instances."></metric>
+  <metric name="GL2C_MC_RDREQ_sum" expr=reduce(GL2C_MC_RDREQ,sum) descr="Number of GL2C/EA read requests (either 32-byte or 64-byte or 128-byte). Sum over GL2C instances."></metric>
+  <metric name="GL2C_MC_WRREQ_sum" expr=reduce(GL2C_MC_WRREQ,sum) descr="Number of transactions (either 32-byte or 64-byte) going over the GL2C_MC_wrreq interface. Sum over GL2C instances."></metric>
+  <metric name="GL2C_EA_WRREQ_64B_sum" expr=reduce(GL2C_EA_WRREQ_64B,sum) descr="Number of 64-byte transactions going (64-byte write or CMPSWAP) over the GL2C_EA_wrreq interface. Sum over GL2C instances."></metric>
+  <metric name="GL2C_WRREQ_STALL_max" expr=reduce(GL2C_MC_WRREQ_STALL,max) descr="Number of cycles a write request was stalled. Max over GL2C instances."></metric>
+  <metric name="L2CacheHit" expr=100*reduce(GL2C_HIT,sum)/(reduce(GL2C_HIT,sum)+reduce(GL2C_MISS,sum)) descr="The percentage of fetch, write, atomic, and other instructions that hit the data in L2 cache. Value range: 0% (no hit) to 100% (optimal)."></metric>
+  <metric name="FETCH_SIZE" expr=(GL2C_EA_RDREQ_32B_sum*32+GL2C_EA_RDREQ_64B_sum*64+GL2C_EA_RDREQ_96B_sum*96+GL2C_EA_RDREQ_128B_sum*128)/1024 descr="The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
+  <metric name="WriteUnitStalled" expr=100*GL2C_WRREQ_STALL_max/GRBM_GUI_ACTIVE descr="The percentage of GPUTime the Write unit is stalled. Value range: 0% to 100% (bad)."></metric>
+  <metric name="LDSBankConflict" expr=100*SQC_LDS_BANK_CONFLICT/SQC_LDS_IDX_ACTIVE descr="The percentage of GPUTime LDS is stalled by bank conflicts. Value range: 0% (optimal) to 100% (bad)."></metric>
+</gfx10>
+
+<gfx1030 base="gfx10">
+</gfx1030>
+
+<gfx1031 base="gfx10">
+</gfx1031>
+
+<gfx1010 base="gfx10">
+</gfx1010>
+
+<gfx1032 base="gfx10">
+</gfx1032>
+
+<gfx11 base="common_derived">
+  <metric name="SQ_WAVES_sum" expr=reduce(SQ_WAVES,sum) descr="Count number of waves sent to SQs. (per-simd, emulated, global). Sum over SQ instances."></metric>
+  <metric name="GPU_UTIL" expr=100*GRBM_GUI_ACTIVE/GRBM_COUNT descr="Percentage of the time that GUI is active"></metric>
+  <metric name="WAVE_DEP_WAIT" expr=100*SQ_WAIT_ANY/SQ_WAVE_CYCLES descr="Percentage of the SQ_WAVE_CYCLE time spent waiting for anything."></metric>
+  <metric name="WAVE_ISSUE_WAIT" expr=100*SQ_WAIT_INST_ANY/SQ_WAVE_CYCLES descr="Percentage of the SQ_WAVE_CYCLE time spent waiting for any instruction issue."></metric>
+  <metric name="TA_BUSY_avr" expr=reduce(TA_TA_BUSY,avr) descr="TA block is busy. Average over TA instances."></metric>
+  <metric name="TA_BUSY_max" expr=reduce(TA_TA_BUSY,max) descr="TA block is busy. Max over TA instances."></metric>
+  <metric name="TA_BUSY_min" expr=reduce(TA_TA_BUSY,min) descr="TA block is busy. Min over TA instances."></metric>
+  <metric name="TA_BUFFER_LOAD_WAVEFRONTS_sum" expr=reduce(TA_BUFFER_LOAD_WAVEFRONTS,sum) descr="Number of buffer load vec32 packets processed by the TA. Sum over TA instances."></metric>
+  <metric name="TA_BUFFER_STORE_WAVEFRONTS_sum" expr=reduce(TA_BUFFER_STORE_WAVEFRONTS,sum) descr="Number of buffer store vec32 packets processed by the TA. Sum over TA instances."></metric>
+  <metric name="GL2C_HIT_sum" expr=reduce(GL2C_HIT,sum) descr="Number of cache hits. Sum over GL2C instances."></metric>
+  <metric name="GL2C_MISS_sum" expr=reduce(GL2C_MISS,sum) descr="Number of cache misses. Sum over GL2C instances."></metric>
+  <metric name="GL2C_EA_RDREQ_32B_sum" expr=reduce(GL2C_EA_RDREQ_32B,sum) descr="Number of 32-byte GL2C/EA read requests. Sum over GL2C instances."></metric>
+  <metric name="GL2C_EA_RDREQ_64B_sum" expr=reduce(GL2C_EA_RDREQ_64B,sum) descr="Number of 64-byte GL2C/EA read requests. Sum over GL2C instances."></metric>
+  <metric name="GL2C_EA_RDREQ_96B_sum" expr=reduce(GL2C_EA_RDREQ_96B,sum) descr="Number of 96-byte GL2C/EA read requests. Sum over GL2C instances."></metric>
+  <metric name="GL2C_EA_RDREQ_128B_sum" expr=reduce(GL2C_EA_RDREQ_128B,sum) descr="Number of 128-byte GL2C/EA read requests. Sum over GL2C instances."></metric>
+  <metric name="GL2C_MC_RDREQ_sum" expr=reduce(GL2C_MC_RDREQ,sum) descr="Number of GL2C/EA read requests (either 32-byte or 64-byte or 128-byte). Sum over GL2C instances."></metric>
+  <metric name="GL2C_MC_WRREQ_sum" expr=reduce(GL2C_MC_WRREQ,sum) descr="Number of transactions (either 32-byte or 64-byte) going over the GL2C_MC_wrreq interface. Sum over GL2C instances."></metric>
+  <metric name="GL2C_EA_WRREQ_64B_sum" expr=reduce(GL2C_EA_WRREQ_64B,sum) descr="Number of 64-byte transactions going (64-byte write or CMPSWAP) over the GL2C_EA_wrreq interface. Sum over GL2C instances."></metric>
+  <metric name="GL2C_WRREQ_STALL_max" expr=reduce(GL2C_MC_WRREQ_STALL,max) descr="Number of cycles a write request was stalled. Max over GL2C instances."></metric>
+  <metric name="L2CacheHit" expr=100*reduce(GL2C_HIT,sum)/(reduce(GL2C_HIT,sum)+reduce(GL2C_MISS,sum)) descr="The percentage of fetch, write, atomic, and other instructions that hit the data in L2 cache. Value range: 0% (no hit) to 100% (optimal)."></metric>
+  <metric name="FETCH_SIZE" expr=(GL2C_EA_RDREQ_32B_sum*32+GL2C_EA_RDREQ_64B_sum*64+GL2C_EA_RDREQ_96B_sum*96+GL2C_EA_RDREQ_128B_sum*128)/1024 descr="The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
+  <metric name="WriteUnitStalled" expr=100*GL2C_WRREQ_STALL_max/GRBM_GUI_ACTIVE descr="The percentage of GPUTime the Write unit is stalled. Value range: 0% to 100% (bad)."></metric>
+  <metric name="LDSBankConflict" expr=100*SQC_LDS_BANK_CONFLICT/SQC_LDS_IDX_ACTIVE descr="The percentage of GPUTime LDS is stalled by bank conflicts. Value range: 0% (optimal) to 100% (bad)."></metric>
+</gfx11>
+
+<gfx1100 base="gfx11">
+</gfx1100>
+
+<gfx1101 base="gfx11">
+</gfx1101>
+
+<gfx1102 base="gfx11">
+</gfx1102>
+
+<gfx11 base="gfx11"></gfx11>
+#Mi300
+<gfx941 base="gfx940"></gfx941>
+<gfx942 base="gfx940"></gfx942>
+#Navi21
+<gfx1032 base="gfx1032"></gfx1032>
