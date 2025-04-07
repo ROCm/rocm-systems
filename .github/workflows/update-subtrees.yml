@@ -1,0 +1,46 @@
+name: Synchronize Subtrees
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 * * * *'  # Trigger four times a day (00:00, 06:00, 12:00, 18:00 UTC)
+
+env:
+  MONOREPO_URL: github.com/ROCm/ROCmSystemsSoftware.git
+  MONOREPO_BRANCH: develop
+
+jobs:
+  synchronize-subtrees:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the EMU Monorepo
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # needed for git subtree pull/push
+
+      - name: Set up Git user
+        run: |
+          git config --global user.name "${{ github.actor }}"
+          git config --global user.email "${{ github.actor }}@users.noreply.github.com"
+
+      - name: Update Repositories in the EMU Monorepo  
+        run: |  
+          has_errors=false  
+          for repo in $(cat .github/repos-config.json | jq -r '.repositories[].name'); do
+            url=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .url")
+            branch=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .branch")
+            git subtree pull --prefix $repo https://github.com/${url}.git $branch || {
+              has_errors=true
+            }
+            # git subtree push --prefix $repo https://github.com/${url}.git $branch || {
+            #  has_errors=true
+            # }
+          done
+
+          if [ "$has_errors" = true ]; then
+            echo "One or more errors occurred during the repository update."
+            exit 1 # This will mark the job as failed
+          else
+            git push https://${{ env.MONOREPO_URL }} ${{ env.MONOREPO_BRANCH }}
+            echo "All repositories updated successfully!"
+          fi

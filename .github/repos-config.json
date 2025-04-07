@@ -1,0 +1,54 @@
+{
+  "repositories": [
+    {
+      "name": "amdsmi",
+      "url": "ROCm/amdsmi",
+      "branch": "amd-staging"
+    },
+    {
+      "name": "rdc",
+      "url": "ROCm/rdc",
+      "branch": "amd-staging"
+    },
+    {
+      "name": "rocm_smi_lib",
+      "url": "ROCm/rocm_smi_lib",
+      "branch": "amd-staging"
+    },
+    {
+      "name": "rocprofiler",
+      "url": "ROCm/rocprofiler",
+      "branch": "amd-staging"
+    },
+    {
+      "name": "rocprofiler-compute",
+      "url": "ROCm/rocprofiler-compute",
+      "branch": "develop"
+    },
+    {
+      "name": "rocprofiler-register",
+      "url": "ROCm/rocprofiler-register",
+      "branch": "amd-staging"
+    },
+    {
+      "name": "rocprofiler-sdk",
+      "url": "ROCm/rocprofiler-sdk",
+      "branch": "amd-staging"
+    },
+    {
+      "name": "rocprofiler-systems",
+      "url": "ROCm/rocprofiler-systems",
+      "branch": "amd-staging"
+    },
+    {
+      "name": "ROCR-Runtime",
+      "url": "ROCm/ROCR-Runtime",
+      "branch": "amd-staging"
+    },
+    {
+      "name": "roctracer",
+      "url": "ROCm/roctracer",
+      "branch": "amd-staging"
+    }
+  ]
+}

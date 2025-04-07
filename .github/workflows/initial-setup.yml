@@ -1,0 +1,32 @@
+name: Setup EMU Monorepo
+
+on:
+  workflow_dispatch:
+
+env:
+  MONOREPO_URL: github.com/ROCm/ROCmSystemsSoftware.git
+  MONOREPO_BRANCH: develop
+
+jobs:
+  setup-monorepo:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the EMU Monorepo
+        uses: actions/checkout@v3
+
+      - name: Set up Git user
+        run: |
+          git config --global user.name "${{ github.actor }}"
+          git config --global user.email "${{ github.actor }}@users.noreply.github.com"
+
+      - name: Add Repositories to the EMU Monorepo
+        run: |
+          for repo in $(cat .github/repos-config.json | jq -r '.repositories[].name'); do
+            url=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .url")
+            branch=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .branch")
+            git subtree add --prefix $repo https://github.com/${url}.git $branch
+          done
+
+      - name: Push changes to EMU Monorepo
+        run: |
+          git push https://${{ env.MONOREPO_URL }} ${{ env.MONOREPO_BRANCH }}
