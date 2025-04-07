@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+export PYTHONPATH=$(cd $(dirname ${BASH_SOURCE[0]})/../@CMAKE_INSTALL_PYTHONDIR@ && pwd):${PYTHONPATH}
+
+: ${PYTHON_EXECUTABLE:=@PYTHON_EXECUTABLE@}
+
+if [ ! -f ${PYTHON_EXECUTABLE} ]; then PYTHON_EXECUTABLE=$(basename ${PYTHON_EXECUTABLE}); fi
+
+set -e
+
+run-script()
+{
+    echo -e "\n##### ${PROJECT_NAME} :: executing '${@}'... #####\n"
+    eval $@
+}
+
+run-script ${PYTHON_EXECUTABLE} -m @SCRIPT_SUBMODULE@ "$(printf ' %q' "$@")"

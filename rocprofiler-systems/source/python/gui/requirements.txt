@@ -1,0 +1,12 @@
+numpy
+matplotlib
+pandas
+dash
+dash_daq
+dash_svg
+dash_bootstrap_components
+pyparsing
+tabulate
+jsondiff
+plotly
+pyyaml
