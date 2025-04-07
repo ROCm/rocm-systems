@@ -1,0 +1,163 @@
+#include "gfx908_metrics.xml"
+
+<gfx9_expr>
+  <metric name="TA_BUSY_avr" expr=avr(TA_TA_BUSY,16) descr="TA block is busy. Average over TA instances."></metric>
+  <metric name="TA_BUSY_max" expr=max(TA_TA_BUSY,16) descr="TA block is busy. Max over TA instances."></metric>
+  <metric name="TA_BUSY_min" expr=min(TA_TA_BUSY,16) descr="TA block is busy. Min over TA instances."></metric>
+  <metric name="TA_FLAT_READ_WAVEFRONTS_sum" expr=sum(TA_FLAT_READ_WAVEFRONTS,16) descr="Number of flat opcode reads processed by the TA. Sum over TA instances."></metric>
+  <metric name="TA_FLAT_WRITE_WAVEFRONTS_sum" expr=sum(TA_FLAT_WRITE_WAVEFRONTS,16) descr="Number of flat opcode writes processed by the TA. Sum over TA instances."></metric>
+
+  <metric name="TCC_BUSY_avr" expr=avr(TCC_BUSY,16) descr="TCC_BUSY avr over all memory channels."></metric>
+  <metric name="TCC_REQ_sum" expr=sum(TCC_REQ,16) descr="TCC_REQ sum over all memory channels."></metric>
+  <metric name="TCC_HIT_sum" expr=sum(TCC_HIT,16) descr="Number of cache hits. Sum over TCC instances."></metric>
+  <metric name="TCC_MISS_sum" expr=sum(TCC_MISS,16) descr="Number of cache misses. Sum over TCC instances."></metric>
+  <metric name="TCC_EA_RDREQ_32B_sum" expr=sum(TCC_EA_RDREQ_32B,16) descr="Number of 32-byte TCC/EA read requests. Sum over TCC instances."></metric>
+  <metric name="TCC_EA_RDREQ_sum" expr=sum(TCC_EA_RDREQ,16) descr="Number of TCC/EA read requests (either 32-byte or 64-byte). Sum over TCC instances."></metric>
+  <metric name="TCC_EA_WRREQ_sum" expr=sum(TCC_EA_WRREQ,16) descr="Number of transactions (either 32-byte or 64-byte) going over the TC_EA_wrreq interface. Sum over TCC instances."></metric>
+  <metric name="TCC_EA_WRREQ_64B_sum" expr=sum(TCC_EA_WRREQ_64B,16) descr="Number of 64-byte transactions going (64-byte write or CMPSWAP) over the TC_EA_wrreq interface. Sum over TCC instances."></metric>
+  <metric name="TCC_WRREQ_STALL_max" expr=max(TCC_EA_WRREQ_STALL,16) descr="Number of cycles a write request was stalled. Max over TCC instances."></metric>
+
+  <metric name="FETCH_SIZE" expr=(TCC_EA_RDREQ_32B_sum*32+(TCC_EA_RDREQ_sum-TCC_EA_RDREQ_32B_sum)*64)/1024 descr="The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
+  <metric name="WRITE_SIZE" expr=((TCC_EA_WRREQ_sum-TCC_EA_WRREQ_64B_sum)*32+TCC_EA_WRREQ_64B_sum*64)/1024 descr="The total kilobytes written to the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
+  <metric name="WRITE_REQ_32B" expr=TCC_EA_WRREQ_64B_sum*2+(TCC_EA_WRREQ_sum-TCC_EA_WRREQ_64B_sum) descr="The total number of 32-byte effective memory writes."></metric>
+
+
+
+ #xlu - TA
+  <metric name="TA_TA_BUSY_sum"                                        expr=sum(TA_TA_BUSY,16) descr="."></metric>
+
+  <metric name="TA_TOTAL_WAVEFRONTS_sum"                               expr=sum(TA_TOTAL_WAVEFRONTS,16) descr="."></metric>
+  <metric name="TA_ADDR_STALLED_BY_TC_CYCLES_sum"                      expr=sum(TA_ADDR_STALLED_BY_TC_CYCLES,16) descr="."></metric>
+  <metric name="TA_ADDR_STALLED_BY_TD_CYCLES_sum"                      expr=sum(TA_ADDR_STALLED_BY_TD_CYCLES,16) descr="."></metric>
+  <metric name="TA_DATA_STALLED_BY_TC_CYCLES_sum"                      expr=sum(TA_DATA_STALLED_BY_TC_CYCLES,16) descr="."></metric>
+
+
+
+  <metric name="TA_FLAT_WAVEFRONTS_sum"                                expr=sum(TA_FLAT_WAVEFRONTS,16) descr="."></metric>
+  <metric name="TA_FLAT_READ_WAVEFRONTS_sum"                           expr=sum(TA_FLAT_READ_WAVEFRONTS,16) descr="."></metric>
+  <metric name="TA_FLAT_WRITE_WAVEFRONTS_sum"                          expr=sum(TA_FLAT_WRITE_WAVEFRONTS,16) descr="."></metric>
+  <metric name="TA_FLAT_ATOMIC_WAVEFRONTS_sum"                         expr=sum(TA_FLAT_ATOMIC_WAVEFRONTS,16) descr="."></metric>
+
+  <metric name="TA_BUFFER_WAVEFRONTS_sum"                              expr=sum(TA_BUFFER_WAVEFRONTS,16) descr="."></metric>
+  <metric name="TA_BUFFER_READ_WAVEFRONTS_sum"                         expr=sum(TA_BUFFER_READ_WAVEFRONTS,16) descr="."></metric>
+  <metric name="TA_BUFFER_WRITE_WAVEFRONTS_sum"                        expr=sum(TA_BUFFER_WRITE_WAVEFRONTS,16) descr="."></metric>
+  <metric name="TA_BUFFER_ATOMIC_WAVEFRONTS_sum"                       expr=sum(TA_BUFFER_ATOMIC_WAVEFRONTS,16) descr="."></metric>
+  <metric name="TA_BUFFER_TOTAL_CYCLES_sum"                            expr=sum(TA_BUFFER_TOTAL_CYCLES,16) descr="."></metric>
+
+  <metric name="TA_BUFFER_COALESCED_READ_CYCLES_sum"                   expr=sum(TA_BUFFER_COALESCED_READ_CYCLES,16) descr="."></metric>
+  <metric name="TA_BUFFER_COALESCED_WRITE_CYCLES_sum"                  expr=sum(TA_BUFFER_COALESCED_WRITE_CYCLES,16) descr="."></metric>
+
+  #xlu -TD
+  <metric name="TD_TD_BUSY_sum"                                         expr=sum(TD_TD_BUSY,16) descr="."></metric>
+  <metric name="TD_TC_STALL_sum"                                        expr=sum(TD_TC_STALL,16) descr="."></metric>
+  <metric name="TD_LOAD_WAVEFRONT_sum"                                  expr=sum(TD_LOAD_WAVEFRONT,16) descr="."></metric>
+  <metric name="TD_ATOMIC_WAVEFRONT_sum"                                expr=sum(TD_ATOMIC_WAVEFRONT,16) descr="."></metric>
+  <metric name="TD_STORE_WAVEFRONT_sum"                                 expr=sum(TD_STORE_WAVEFRONT,16) descr="."></metric>
+
+  <metric name="TD_COALESCABLE_WAVEFRONT_sum"                             expr=sum(TD_COALESCABLE_WAVEFRONT,16) descr="."></metric>
+
+    #xlu -TCP
+  <metric name="TCP_GATE_EN1_sum"                                       expr=sum(TCP_GATE_EN1,16) descr="."></metric>
+  <metric name="TCP_GATE_EN2_sum"                                       expr=sum(TCP_GATE_EN2,16) descr="."></metric>
+  <metric name="TCP_TCP_TA_DATA_STALL_CYCLES_sum"                       expr=sum(TCP_TCP_TA_DATA_STALL_CYCLES,16) descr="."></metric>
+  <metric name="TCP_TD_TCP_STALL_CYCLES_sum"                            expr=sum(TCP_TD_TCP_STALL_CYCLES,16) descr="."></metric>
+  <metric name="TCP_TCR_TCP_STALL_CYCLES_sum"                           expr=sum(TCP_TCR_TCP_STALL_CYCLES,16) descr="."></metric>
+  <metric name="TCP_READ_TAGCONFLICT_STALL_CYCLES_sum"                  expr=sum(TCP_READ_TAGCONFLICT_STALL_CYCLES,16) descr="."></metric>
+  <metric name="TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum"                 expr=sum(TCP_WRITE_TAGCONFLICT_STALL_CYCLES,16) descr="."></metric>
+  <metric name="TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum"                expr=sum(TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES,16) descr="."></metric>
+  <metric name="TCP_PENDING_STALL_CYCLES_sum"                           expr=sum(TCP_PENDING_STALL_CYCLES,16) descr="."></metric>
+  <metric name="TCP_VOLATILE_sum"                                       expr=sum(TCP_VOLATILE,16) descr="."></metric>
+  <metric name="TCP_TOTAL_ACCESSES_sum"                                 expr=sum(TCP_TOTAL_ACCESSES,16) descr="."></metric>
+  <metric name="TCP_TOTAL_READ_sum"                                     expr=sum(TCP_TOTAL_READ,16) descr="."></metric>
+  <metric name="TCP_TOTAL_WRITE_sum"                                    expr=sum(TCP_TOTAL_WRITE,16) descr="."></metric>
+  <metric name="TCP_TOTAL_ATOMIC_WITH_RET_sum"                          expr=sum(TCP_TOTAL_ATOMIC_WITH_RET,16) descr="."></metric>
+  <metric name="TCP_TOTAL_ATOMIC_WITHOUT_RET_sum"                       expr=sum(TCP_TOTAL_ATOMIC_WITHOUT_RET,16) descr="."></metric>
+  <metric name="TCP_TOTAL_WRITEBACK_INVALIDATES_sum"                    expr=sum(TCP_TOTAL_WRITEBACK_INVALIDATES,16) descr="."></metric>
+  <metric name="TCP_UTCL1_REQUEST_sum"                                  expr=sum(TCP_UTCL1_REQUEST,16) descr="."></metric>
+  <metric name="TCP_UTCL1_TRANSLATION_MISS_sum"                         expr=sum(TCP_UTCL1_TRANSLATION_MISS,16) descr="."></metric>
+  <metric name="TCP_UTCL1_TRANSLATION_HIT_sum"                          expr=sum(TCP_UTCL1_TRANSLATION_HIT,16) descr="."></metric>
+  <metric name="TCP_UTCL1_PERMISSION_MISS_sum"                          expr=sum(TCP_UTCL1_PERMISSION_MISS,16) descr="."></metric>
+  <metric name="TCP_TOTAL_CACHE_ACCESSES_sum"                           expr=sum(TCP_TOTAL_CACHE_ACCESSES,16) descr="."></metric>
+  <metric name="TCP_TCP_LATENCY_sum"                                    expr=sum(TCP_TCP_LATENCY,16) descr="."></metric>
+  <metric name="TCP_TA_TCP_STATE_READ_sum"                              expr=sum(TCP_TA_TCP_STATE_READ,16) descr="."></metric>
+  <metric name="TCP_TCC_READ_REQ_LATENCY_sum"                           expr=sum(TCP_TCC_READ_REQ_LATENCY,16) descr="."></metric>
+  <metric name="TCP_TCC_WRITE_REQ_LATENCY_sum"                          expr=sum(TCP_TCC_WRITE_REQ_LATENCY,16) descr="."></metric>
+  <metric name="TCP_TCC_READ_REQ_sum"                                   expr=sum(TCP_TCC_READ_REQ,16) descr="."></metric>
+  <metric name="TCP_TCC_WRITE_REQ_sum"                                  expr=sum(TCP_TCC_WRITE_REQ,16) descr="."></metric>
+  <metric name="TCP_TCC_ATOMIC_WITH_RET_REQ_sum"                        expr=sum(TCP_TCC_ATOMIC_WITH_RET_REQ,16) descr="."></metric>
+  <metric name="TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum"                     expr=sum(TCP_TCC_ATOMIC_WITHOUT_RET_REQ,16) descr="."></metric>
+  <metric name="TCP_TCC_NC_READ_REQ_sum"                                expr=sum(TCP_TCC_NC_READ_REQ,16) descr="."></metric>
+  <metric name="TCP_TCC_NC_WRITE_REQ_sum"                               expr=sum(TCP_TCC_NC_WRITE_REQ,16) descr="."></metric>
+  <metric name="TCP_TCC_NC_ATOMIC_REQ_sum"                              expr=sum(TCP_TCC_NC_ATOMIC_REQ,16) descr="."></metric>
+  <metric name="TCP_TCC_UC_READ_REQ_sum"                                expr=sum(TCP_TCC_UC_READ_REQ,16) descr="."></metric>
+  <metric name="TCP_TCC_UC_WRITE_REQ_sum"                               expr=sum(TCP_TCC_UC_WRITE_REQ,16) descr="."></metric>
+  <metric name="TCP_TCC_UC_ATOMIC_REQ_sum"                              expr=sum(TCP_TCC_UC_ATOMIC_REQ,16) descr="."></metric>
+  <metric name="TCP_TCC_CC_READ_REQ_sum"                                expr=sum(TCP_TCC_CC_READ_REQ,16) descr="."></metric>
+  <metric name="TCP_TCC_CC_WRITE_REQ_sum"                               expr=sum(TCP_TCC_CC_WRITE_REQ,16) descr="."></metric>
+  <metric name="TCP_TCC_CC_ATOMIC_REQ_sum"                              expr=sum(TCP_TCC_CC_ATOMIC_REQ,16) descr="."></metric>
+
+</gfx9_expr>
+
+<gfx908_expr base="gfx9_expr">
+  <metric name="TCC_BUSY_avr" expr=avr(TCC_BUSY,32) descr="TCC_BUSY avr over all memory channels."></metric>
+  <metric name="TCC_REQ_sum" expr=sum(TCC_REQ,32) descr="TCC_REQ sum over all memory channels."></metric>
+  <metric name="TCC_HIT_sum" expr=sum(TCC_HIT,32) descr="Number of cache hits. Sum over TCC instances."></metric>
+  <metric name="TCC_MISS_sum" expr=sum(TCC_MISS,32) descr="Number of cache misses. Sum over TCC instances."></metric>
+  <metric name="TCC_EA_RDREQ_32B_sum" expr=sum(TCC_EA_RDREQ_32B,32) descr="Number of 32-byte TCC/EA read requests. Sum over TCC instances."></metric>
+  <metric name="TCC_EA_RDREQ_sum" expr=sum(TCC_EA_RDREQ,32) descr="Number of TCC/EA read requests (either 32-byte or 64-byte). Sum over TCC instances."></metric>
+  <metric name="TCC_EA_WRREQ_sum" expr=sum(TCC_EA_WRREQ,32) descr="Number of transactions (either 32-byte or 64-byte) going over the TC_EA_wrreq interface. Sum over TCC instances."></metric>
+  <metric name="TCC_EA_WRREQ_64B_sum" expr=sum(TCC_EA_WRREQ_64B,32) descr="Number of 64-byte transactions going (64-byte write or CMPSWAP) over the TC_EA_wrreq interface. Sum over TCC instances."></metric>
+  <metric name="TCC_WRREQ_STALL_max" expr=max(TCC_EA_WRREQ_STALL,32) descr="Number of cycles a write request was stalled. Max over TCC instances."></metric>
+
+  #xlu - TCP
+  <metric name="TCP_TCC_RW_READ_REQ_sum"                                expr=sum(TCP_TCC_RW_READ_REQ,16) descr="."></metric>
+  <metric name="TCP_TCC_RW_WRITE_REQ_sum"                               expr=sum(TCP_TCC_RW_WRITE_REQ,16) descr="."></metric>
+  <metric name="TCP_TCC_RW_ATOMIC_REQ_sum"                              expr=sum(TCP_TCC_RW_ATOMIC_REQ,16) descr="."></metric>
+
+    #xlu - TCC
+  <metric name="TCC_CYCLE_sum"                                          expr=sum(TCC_CYCLE,32) descr="."></metric>
+  <metric name="TCC_BUSY_sum"                                           expr=sum(TCC_BUSY,32) descr="."></metric>
+  <metric name="TCC_REQ_sum"                                            expr=sum(TCC_REQ,32) descr="."></metric>
+  <metric name="TCC_STREAMING_REQ_sum"                                  expr=sum(TCC_STREAMING_REQ,32) descr="."></metric>
+  <metric name="TCC_NC_REQ_sum"                                         expr=sum(TCC_NC_REQ,32) descr="."></metric>
+  <metric name="TCC_UC_REQ_sum"                                         expr=sum(TCC_UC_REQ,32) descr="."></metric>
+  <metric name="TCC_CC_REQ_sum"                                         expr=sum(TCC_CC_REQ,32) descr="."></metric>
+  <metric name="TCC_RW_REQ_sum"                                         expr=sum(TCC_RW_REQ,32) descr="."></metric>
+  <metric name="TCC_PROBE_sum"                                          expr=sum(TCC_PROBE,32) descr="."></metric>
+  <metric name="TCC_PROBE_ALL_sum"                                      expr=sum(TCC_PROBE_ALL,32) descr="."></metric>
+  <metric name="TCC_READ_sum"                                           expr=sum(TCC_READ,32) descr="."></metric>
+  <metric name="TCC_WRITE_sum"                                          expr=sum(TCC_WRITE,32) descr="."></metric>
+  <metric name="TCC_ATOMIC_sum"                                         expr=sum(TCC_ATOMIC,32) descr="."></metric>
+  <metric name="TCC_HIT_sum"                                            expr=sum(TCC_HIT,32) descr="."></metric>
+  <metric name="TCC_MISS_sum"                                           expr=sum(TCC_MISS,32) descr="."></metric>
+  <metric name="TCC_TAG_STALL_sum"                                      expr=sum(TCC_TAG_STALL,32) descr="."></metric>
+  <metric name="TCC_WRITEBACK_sum"                                      expr=sum(TCC_WRITEBACK,32) descr="."></metric>
+  <metric name="TCC_EA_WRREQ_sum"                                       expr=sum(TCC_EA_WRREQ,32) descr="."></metric>
+  <metric name="TCC_EA_WRREQ_64B_sum"                                   expr=sum(TCC_EA_WRREQ_64B,32) descr="."></metric>
+  <metric name="TCC_EA_WR_UNCACHED_32B_sum"                             expr=sum(TCC_EA_WR_UNCACHED_32B,32) descr="."></metric>
+  <metric name="TCC_EA_WRREQ_STALL_sum"                                 expr=sum(TCC_EA_WRREQ_STALL,32) descr="."></metric>
+  <metric name="TCC_EA_WRREQ_IO_CREDIT_STALL_sum"                       expr=sum(TCC_EA_WRREQ_IO_CREDIT_STALL,32) descr="."></metric>
+  <metric name="TCC_EA_WRREQ_GMI_CREDIT_STALL_sum"                      expr=sum(TCC_EA_WRREQ_GMI_CREDIT_STALL,32) descr="."></metric>
+  <metric name="TCC_EA_WRREQ_DRAM_CREDIT_STALL_sum"                     expr=sum(TCC_EA_WRREQ_DRAM_CREDIT_STALL,32) descr="."></metric>
+  <metric name="TCC_TOO_MANY_EA_WRREQS_STALL_sum"                       expr=sum(TCC_TOO_MANY_EA_WRREQS_STALL,32) descr="."></metric>
+  <metric name="TCC_EA_WRREQ_LEVEL_sum"                                 expr=sum(TCC_EA_WRREQ_LEVEL,32) descr="."></metric>
+  <metric name="TCC_EA_RDREQ_LEVEL_sum"                                 expr=sum(TCC_EA_RDREQ_LEVEL,32) descr="."></metric>
+  <metric name="TCC_EA_ATOMIC_sum"                                      expr=sum(TCC_EA_ATOMIC,32) descr="."></metric>
+  <metric name="TCC_EA_ATOMIC_LEVEL_sum"                                expr=sum(TCC_EA_ATOMIC_LEVEL,32) descr="."></metric>
+  <metric name="TCC_EA_RDREQ_sum"                                       expr=sum(TCC_EA_RDREQ,32) descr="."></metric>
+  <metric name="TCC_EA_RDREQ_32B_sum"                                   expr=sum(TCC_EA_RDREQ_32B,32) descr="."></metric>
+  <metric name="TCC_EA_RD_UNCACHED_32B_sum"                             expr=sum(TCC_EA_RD_UNCACHED_32B,32) descr="."></metric>
+  <metric name="TCC_EA_RDREQ_IO_CREDIT_STALL_sum"                       expr=sum(TCC_EA_RDREQ_IO_CREDIT_STALL,32) descr="."></metric>
+  <metric name="TCC_EA_RDREQ_GMI_CREDIT_STALL_sum"                      expr=sum(TCC_EA_RDREQ_GMI_CREDIT_STALL,32) descr="."></metric>
+  <metric name="TCC_EA_RDREQ_DRAM_CREDIT_STALL_sum"                     expr=sum(TCC_EA_RDREQ_DRAM_CREDIT_STALL,32) descr="."></metric>
+  <metric name="TCC_NORMAL_WRITEBACK_sum"                               expr=sum(TCC_NORMAL_WRITEBACK,32) descr="."></metric>
+  <metric name="TCC_ALL_TC_OP_WB_WRITEBACK_sum"                         expr=sum(TCC_ALL_TC_OP_WB_WRITEBACK,32) descr="."></metric>
+  <metric name="TCC_NORMAL_EVICT_sum"                                   expr=sum(TCC_NORMAL_EVICT,32) descr="."></metric>
+  <metric name="TCC_ALL_TC_OP_INV_EVICT_sum"                            expr=sum(TCC_ALL_TC_OP_INV_EVICT,32) descr="."></metric>
+  <metric name="TCC_EA_RDREQ_DRAM_sum"                                  expr=sum(TCC_EA_RDREQ_DRAM,32) descr="."></metric>
+  <metric name="TCC_EA_WRREQ_DRAM_sum"                                  expr=sum(TCC_EA_WRREQ_DRAM,32) descr="."></metric>
+
+</gfx908_expr>
+
+<gfx9 base="gfx9_expr"></gfx9>
+<gfx908 base="gfx908_expr"> </gfx908>

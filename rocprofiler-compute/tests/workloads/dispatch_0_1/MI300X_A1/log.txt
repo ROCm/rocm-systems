@@ -1,0 +1,229 @@
+Omniperf version: 2.0.0
+Profiler choice: rocprofv2
+Path: /home/colramos/omniperf/tests/workloads/dispatch_0_1/MI300X_A1
+Target: MI300X_A1
+Command: ./tests/vcopy -n 1048576 -b 256 -i 3
+Kernel Selection: None
+Dispatch Selection: ['0:2']
+Hardware Blocks: All
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Collecting Performance Counters
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+[profiling] Current input file: tests/workloads/dispatch_0_1/MI300X_A1/perfmon/SQ_IFETCH_LEVEL.txt
+   |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
+   |-> [/opt/rocm/bin/rocprofv2] - GRBM_COUNT
+   |-> [/opt/rocm/bin/rocprofv2] - GRBM_GUI_ACTIVE
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_WAVES
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_IFETCH
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_IFETCH_LEVEL
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_ACCUM_PREV_HIRES
+
+[profiling] Current input file: tests/workloads/dispatch_0_1/MI300X_A1/perfmon/SQ_INST_LEVEL_LDS.txt
+   |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INSTS_LDS
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INST_LEVEL_LDS
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_ACCUM_PREV_HIRES
+
+[profiling] Current input file: tests/workloads/dispatch_0_1/MI300X_A1/perfmon/SQ_INST_LEVEL_SMEM.txt
+   |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INSTS_SMEM
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INST_LEVEL_SMEM
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_ACCUM_PREV_HIRES
+   |-> [/opt/rocm/bin/rocprofv2] Enabling Counter Collection
+
+[profiling] Current input file: tests/workloads/dispatch_0_1/MI300X_A1/perfmon/SQ_INST_LEVEL_VMEM.txt
+   |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INSTS_VMEM
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INST_LEVEL_VMEM
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_ACCUM_PREV_HIRES
+   |-> [/opt/rocm/bin/rocprofv2] Enabling Counter Collection
+   |-> [/opt/rocm/bin/rocprofv2] vcopy testing on GCD 0
+   |-> [/opt/rocm/bin/rocprofv2] Finished allocating vectors on the CPU
+
+[profiling] Current input file: tests/workloads/dispatch_0_1/MI300X_A1/perfmon/SQ_LEVEL_WAVES.txt
+   |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
+   |-> [/opt/rocm/bin/rocprofv2] - GRBM_COUNT
+   |-> [/opt/rocm/bin/rocprofv2] - GRBM_GUI_ACTIVE
+   |-> [/opt/rocm/bin/rocprofv2] - CPC_ME1_BUSY_FOR_PACKET_DECODE
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_CYCLES
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_WAVES
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_WAVE_CYCLES
+
+[profiling] Current input file: tests/workloads/dispatch_0_1/MI300X_A1/perfmon/pmc_perf_0.txt
+   |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_CYCLES
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_BUSY_CYCLES
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_BUSY_CU_CYCLES
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_WAVES
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_WAVE_CYCLES
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INSTS_VALU_CVT
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INSTS_VMEM_WR
+
+[profiling] Current input file: tests/workloads/dispatch_0_1/MI300X_A1/perfmon/pmc_perf_1.txt
+   |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INSTS_VMEM
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INSTS_SALU
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INSTS_VSKIPPED
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INSTS
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INSTS_VALU
+
+[profiling] Current input file: tests/workloads/dispatch_0_1/MI300X_A1/perfmon/pmc_perf_10.txt
+   |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
+   |-> [/opt/rocm/bin/rocprofv2] - SQC_TC_DATA_ATOMIC_REQ
+   |-> [/opt/rocm/bin/rocprofv2] - SQC_TC_STALL
+   |-> [/opt/rocm/bin/rocprofv2] - SQC_TC_REQ
+   |-> [/opt/rocm/bin/rocprofv2] - SQC_DCACHE_REQ_READ_16
+   |-> [/opt/rocm/bin/rocprofv2] - SQC_ICACHE_REQ
+   |-> [/opt/rocm/bin/rocprofv2] - SQC_ICACHE_HITS
+
+[profiling] Current input file: tests/workloads/dispatch_0_1/MI300X_A1/perfmon/pmc_perf_11.txt
+   |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
+   |-> [/opt/rocm/bin/rocprofv2] - SQC_DCACHE_INPUT_VALID_READYB
+   |-> [/opt/rocm/bin/rocprofv2] - SQC_DCACHE_ATOMIC
+   |-> [/opt/rocm/bin/rocprofv2] - SQC_DCACHE_REQ_READ_8
+   |-> [/opt/rocm/bin/rocprofv2] - SQC_DCACHE_REQ
+   |-> [/opt/rocm/bin/rocprofv2] - SQC_DCACHE_HITS
+   |-> [/opt/rocm/bin/rocprofv2] - SQC_DCACHE_MISSES
+   |-> [/opt/rocm/bin/rocprofv2] - SQC_DCACHE_MISSES_DUPLICATE
+
+[profiling] Current input file: tests/workloads/dispatch_0_1/MI300X_A1/perfmon/pmc_perf_12.txt
+   |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
+   |-> [/opt/rocm/bin/rocprofv2] - SQC_DCACHE_REQ_READ_2
+   |-> [/opt/rocm/bin/rocprofv2] - SQC_DCACHE_REQ_READ_4
+   |-> [/opt/rocm/bin/rocprofv2] Enabling Counter Collection
+   |-> [/opt/rocm/bin/rocprofv2] vcopy testing on GCD 0
+   |-> [/opt/rocm/bin/rocprofv2] Finished allocating vectors on the CPU
+   |-> [/opt/rocm/bin/rocprofv2] Finished allocating vectors on the GPU
+   |-> [/opt/rocm/bin/rocprofv2] Finished copying vectors to the GPU
+   |-> [/opt/rocm/bin/rocprofv2] sw thinks it moved 1.000000 KB per wave
+
+[profiling] Current input file: tests/workloads/dispatch_0_1/MI300X_A1/perfmon/pmc_perf_13.txt
+   |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_ATOMIC[0]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_BUBBLE[0]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_CYCLE[0]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_EA0_ATOMIC[0]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_ATOMIC[1]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_BUBBLE[1]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_CYCLE[1]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_EA0_ATOMIC[1]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_ATOMIC[2]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_BUBBLE[2]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_CYCLE[2]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_EA0_ATOMIC[2]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_ATOMIC[3]
+
+[profiling] Current input file: tests/workloads/dispatch_0_1/MI300X_A1/perfmon/pmc_perf_14.txt
+   |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_EA0_ATOMIC_LEVEL[0]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_EA0_RDREQ[0]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_EA0_RDREQ_32B[0]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_EA0_RDREQ_LEVEL[0]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_EA0_ATOMIC_LEVEL[1]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_EA0_RDREQ[1]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_EA0_RDREQ_32B[1]
+
+[profiling] Current input file: tests/workloads/dispatch_0_1/MI300X_A1/perfmon/pmc_perf_15.txt
+   |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_EA0_WRREQ[0]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_EA0_WRREQ_64B[0]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_EA0_WRREQ_LEVEL[0]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_HIT[0]
+
+[profiling] Current input file: tests/workloads/dispatch_0_1/MI300X_A1/perfmon/pmc_perf_16.txt
+   |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_MISS[0]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_READ[0]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_REQ[0]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_RW_REQ[0]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_MISS[1]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_READ[1]
+
+[profiling] Current input file: tests/workloads/dispatch_0_1/MI300X_A1/perfmon/pmc_perf_17.txt
+   |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_TAG_STALL[0]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_TOO_MANY_EA_WRREQS_STALL[0]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_WRITE[0]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_TAG_STALL[1]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_TOO_MANY_EA_WRREQS_STALL[1]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_WRITE[1]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_TAG_STALL[2]
+   |-> [/opt/rocm/bin/rocprofv2] - TCC_TOO_MANY_EA_WRREQS_STALL[2]
+
+[profiling] Current input file: tests/workloads/dispatch_0_1/MI300X_A1/perfmon/pmc_perf_2.txt
+   |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INSTS_VALU_TRANS_F16
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INSTS_VALU_ADD_F32
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INSTS_VALU_MUL_F32
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INSTS_VALU_FMA_F32
+
+[profiling] Current input file: tests/workloads/dispatch_0_1/MI300X_A1/perfmon/pmc_perf_3.txt
+   |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INSTS_VALU_TRANS_F64
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INSTS_VALU_INT32
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INSTS_VALU_INT64
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INSTS_SMEM
+
+[profiling] Current input file: tests/workloads/dispatch_0_1/MI300X_A1/perfmon/pmc_perf_4.txt
+   |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INSTS_BRANCH
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INSTS_SENDMSG
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_WAIT_ANY
+
+[profiling] Current input file: tests/workloads/dispatch_0_1/MI300X_A1/perfmon/pmc_perf_5.txt
+   |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_ACTIVE_INST_SCA
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_ACTIVE_INST_EXP_GDS
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_ACTIVE_INST_MISC
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_ACTIVE_INST_FLAT
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INST_CYCLES_VMEM_WR
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INST_CYCLES_VMEM_RD
+
+[profiling] Current input file: tests/workloads/dispatch_0_1/MI300X_A1/perfmon/pmc_perf_6.txt
+   |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_THREAD_CYCLES_VALU
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_IFETCH
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_LDS_BANK_CONFLICT
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_LDS_ADDR_CONFLICT
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_LDS_UNALIGNED_STALL
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_WAVES_EQ_64
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_WAVES_LT_64
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_WAVES_LT_48
+
+[profiling] Current input file: tests/workloads/dispatch_0_1/MI300X_A1/perfmon/pmc_perf_7.txt
+   |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_WAVES_LT_32
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_WAVES_LT_16
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_ITEMS
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_LDS_MEM_VIOLATIONS
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_LDS_ATOMIC_RETURN
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_LDS_IDX_ACTIVE
+
+[profiling] Current input file: tests/workloads/dispatch_0_1/MI300X_A1/perfmon/pmc_perf_8.txt
+   |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INSTS_SMEM_NORM
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INSTS_MFMA
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INSTS_VALU_MFMA_I8
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INSTS_VALU_MFMA_F16
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INSTS_VALU_MFMA_BF16
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INSTS_VALU_MFMA_F32
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INSTS_VALU_MFMA_F64
+
+[profiling] Current input file: tests/workloads/dispatch_0_1/MI300X_A1/perfmon/pmc_perf_9.txt
+   |-> [/opt/rocm/bin/rocprofv2] ROCProfilerV2: Collecting the following counters:
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INSTS_VALU_MFMA_MOPS_I8
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INSTS_VALU_MFMA_MOPS_F16
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INSTS_VALU_MFMA_MOPS_BF16
+   |-> [/opt/rocm/bin/rocprofv2] - SQ_INSTS_VALU_MFMA_MOPS_F32
+
+[profiling] Current input file: tests/workloads/dispatch_0_1/MI300X_A1/perfmon/timestamps.txt
+   |-> [/opt/rocm/bin/rocprofv2] vcopy testing on GCD 0
+   |-> [/opt/rocm/bin/rocprofv2] Finished allocating vectors on the CPU
+   |-> [/opt/rocm/bin/rocprofv2] Finished allocating vectors on the GPU
+   |-> [/opt/rocm/bin/rocprofv2] Finished copying vectors to the GPU
+   |-> [/opt/rocm/bin/rocprofv2] sw thinks it moved 1.000000 KB per wave
+   |-> [/opt/rocm/bin/rocprofv2] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+[roofline] Roofline temporarily disabled in MI300

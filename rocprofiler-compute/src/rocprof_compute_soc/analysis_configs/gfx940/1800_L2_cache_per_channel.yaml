@@ -1,0 +1,298 @@
+---
+# Add description/tips for each metric in this section.
+# So it could be shown in hover.
+Metric Description:
+
+# Define the panel properties and properties of each metric in the panel.
+Panel Config:
+  id: 1800
+  title: L2 Cache (per Channel)
+  data source:
+    - metric_table:
+        id: 1801
+        title: Aggregate Stats (All channels)
+        header:
+          metric: Metric
+          avg: Avg
+          std dev: Std Dev
+          min: Min
+          max: Max
+          unit: Unit
+          tips: Tips
+        metric:
+          L2 Cache Hit Rate:
+            avg: AVG(((((((((((((((((100 * TCC_HIT[0]) + (100 * TCC_HIT[1]))
+              + (100 * TCC_HIT[2])) + (100 * TCC_HIT[3])) + (100 * TCC_HIT[4])) + (100 *
+              TCC_HIT[5])) + (100 * TCC_HIT[6])) + (100 * TCC_HIT[7])) + (100 * TCC_HIT[8]))
+              + (100 * TCC_HIT[9])) + (100 * TCC_HIT[10])) + (100 * TCC_HIT[11])) + (100
+              * TCC_HIT[12])) + (100 * TCC_HIT[13])) + (100 * TCC_HIT[14])) + (100 * TCC_HIT[15]))
+              / (((((((((((((((((TCC_MISS[0]
+              + TCC_HIT[0]) + (TCC_MISS[1] + TCC_HIT[1])) + (TCC_MISS[2] + TCC_HIT[2]))
+              + (TCC_MISS[3] + TCC_HIT[3])) + (TCC_MISS[4] + TCC_HIT[4])) + (TCC_MISS[5]
+              + TCC_HIT[5])) + (TCC_MISS[6] + TCC_HIT[6])) + (TCC_MISS[7] + TCC_HIT[7]))
+              + (TCC_MISS[8] + TCC_HIT[8])) + (TCC_MISS[9] + TCC_HIT[9])) + (TCC_MISS[10]
+              + TCC_HIT[10])) + (TCC_MISS[11] + TCC_HIT[11])) + (TCC_MISS[12] + TCC_HIT[12]))
+              + (TCC_MISS[13] + TCC_HIT[13])) + (TCC_MISS[14] + TCC_HIT[14])) + (TCC_MISS[15]
+              + TCC_HIT[15]))) if (((((((((((((((((TCC_MISS[0]
+              + TCC_HIT[0]) + (TCC_MISS[1] + TCC_HIT[1])) + (TCC_MISS[2] + TCC_HIT[2]))
+              + (TCC_MISS[3] + TCC_HIT[3])) + (TCC_MISS[4] + TCC_HIT[4])) + (TCC_MISS[5]
+              + TCC_HIT[5])) + (TCC_MISS[6] + TCC_HIT[6])) + (TCC_MISS[7] + TCC_HIT[7]))
+              + (TCC_MISS[8] + TCC_HIT[8])) + (TCC_MISS[9] + TCC_HIT[9])) + (TCC_MISS[10]
+              + TCC_HIT[10])) + (TCC_MISS[11] + TCC_HIT[11])) + (TCC_MISS[12] + TCC_HIT[12]))
+              + (TCC_MISS[13] + TCC_HIT[13])) + (TCC_MISS[14] + TCC_HIT[14])) + (TCC_MISS[15]
+              + TCC_HIT[15])) != 0) else None)
+            std dev: STD(((((((((((((((((100 * TCC_HIT[0]) + (100 * TCC_HIT[1]))
+              + (100 * TCC_HIT[2])) + (100 * TCC_HIT[3])) + (100 * TCC_HIT[4])) + (100 *
+              TCC_HIT[5])) + (100 * TCC_HIT[6])) + (100 * TCC_HIT[7])) + (100 * TCC_HIT[8]))
+              + (100 * TCC_HIT[9])) + (100 * TCC_HIT[10])) + (100 * TCC_HIT[11])) + (100
+              * TCC_HIT[12])) + (100 * TCC_HIT[13])) + (100 * TCC_HIT[14])) + (100 * TCC_HIT[15]))
+              / (((((((((((((((((TCC_MISS[0]
+              + TCC_HIT[0]) + (TCC_MISS[1] + TCC_HIT[1])) + (TCC_MISS[2] + TCC_HIT[2]))
+              + (TCC_MISS[3] + TCC_HIT[3])) + (TCC_MISS[4] + TCC_HIT[4])) + (TCC_MISS[5]
+              + TCC_HIT[5])) + (TCC_MISS[6] + TCC_HIT[6])) + (TCC_MISS[7] + TCC_HIT[7]))
+              + (TCC_MISS[8] + TCC_HIT[8])) + (TCC_MISS[9] + TCC_HIT[9])) + (TCC_MISS[10]
+              + TCC_HIT[10])) + (TCC_MISS[11] + TCC_HIT[11])) + (TCC_MISS[12] + TCC_HIT[12]))
+              + (TCC_MISS[13] + TCC_HIT[13])) + (TCC_MISS[14] + TCC_HIT[14])) + (TCC_MISS[15]
+              + TCC_HIT[15]))) if (((((((((((((((((TCC_MISS[0]
+              + TCC_HIT[0]) + (TCC_MISS[1] + TCC_HIT[1])) + (TCC_MISS[2] + TCC_HIT[2]))
+              + (TCC_MISS[3] + TCC_HIT[3])) + (TCC_MISS[4] + TCC_HIT[4])) + (TCC_MISS[5]
+              + TCC_HIT[5])) + (TCC_MISS[6] + TCC_HIT[6])) + (TCC_MISS[7] + TCC_HIT[7]))
+              + (TCC_MISS[8] + TCC_HIT[8])) + (TCC_MISS[9] + TCC_HIT[9])) + (TCC_MISS[10]
+              + TCC_HIT[10])) + (TCC_MISS[11] + TCC_HIT[11])) + (TCC_MISS[12] + TCC_HIT[12]))
+              + (TCC_MISS[13] + TCC_HIT[13])) + (TCC_MISS[14] + TCC_HIT[14])) + (TCC_MISS[15]
+              + TCC_HIT[15])) != 0) else None)
+            min: MIN(((((((((((((((((100 * TCC_HIT[0]) + (100 * TCC_HIT[1]))
+              + (100 * TCC_HIT[2])) + (100 * TCC_HIT[3])) + (100 * TCC_HIT[4])) + (100 *
+              TCC_HIT[5])) + (100 * TCC_HIT[6])) + (100 * TCC_HIT[7])) + (100 * TCC_HIT[8]))
+              + (100 * TCC_HIT[9])) + (100 * TCC_HIT[10])) + (100 * TCC_HIT[11])) + (100
+              * TCC_HIT[12])) + (100 * TCC_HIT[13])) + (100 * TCC_HIT[14])) + (100 * TCC_HIT[15]))
+              / (((((((((((((((((TCC_MISS[0]
+              + TCC_HIT[0]) + (TCC_MISS[1] + TCC_HIT[1])) + (TCC_MISS[2] + TCC_HIT[2]))
+              + (TCC_MISS[3] + TCC_HIT[3])) + (TCC_MISS[4] + TCC_HIT[4])) + (TCC_MISS[5]
+              + TCC_HIT[5])) + (TCC_MISS[6] + TCC_HIT[6])) + (TCC_MISS[7] + TCC_HIT[7]))
+              + (TCC_MISS[8] + TCC_HIT[8])) + (TCC_MISS[9] + TCC_HIT[9])) + (TCC_MISS[10]
+              + TCC_HIT[10])) + (TCC_MISS[11] + TCC_HIT[11])) + (TCC_MISS[12] + TCC_HIT[12]))
+              + (TCC_MISS[13] + TCC_HIT[13])) + (TCC_MISS[14] + TCC_HIT[14])) + (TCC_MISS[15]
+              + TCC_HIT[15]))) if (((((((((((((((((TCC_MISS[0]
+              + TCC_HIT[0]) + (TCC_MISS[1] + TCC_HIT[1])) + (TCC_MISS[2] + TCC_HIT[2]))
+              + (TCC_MISS[3] + TCC_HIT[3])) + (TCC_MISS[4] + TCC_HIT[4])) + (TCC_MISS[5]
+              + TCC_HIT[5])) + (TCC_MISS[6] + TCC_HIT[6])) + (TCC_MISS[7] + TCC_HIT[7]))
+              + (TCC_MISS[8] + TCC_HIT[8])) + (TCC_MISS[9] + TCC_HIT[9])) + (TCC_MISS[10]
+              + TCC_HIT[10])) + (TCC_MISS[11] + TCC_HIT[11])) + (TCC_MISS[12] + TCC_HIT[12]))
+              + (TCC_MISS[13] + TCC_HIT[13])) + (TCC_MISS[14] + TCC_HIT[14])) + (TCC_MISS[15]
+              + TCC_HIT[15])) != 0) else None)
+            max: MAX(((((((((((((((((100 * TCC_HIT[0]) + (100 * TCC_HIT[1]))
+              + (100 * TCC_HIT[2])) + (100 * TCC_HIT[3])) + (100 * TCC_HIT[4])) + (100 *
+              TCC_HIT[5])) + (100 * TCC_HIT[6])) + (100 * TCC_HIT[7])) + (100 * TCC_HIT[8]))
+              + (100 * TCC_HIT[9])) + (100 * TCC_HIT[10])) + (100 * TCC_HIT[11])) + (100
+              * TCC_HIT[12])) + (100 * TCC_HIT[13])) + (100 * TCC_HIT[14])) + (100 * TCC_HIT[15]))
+              / (((((((((((((((((TCC_MISS[0]
+              + TCC_HIT[0]) + (TCC_MISS[1] + TCC_HIT[1])) + (TCC_MISS[2] + TCC_HIT[2]))
+              + (TCC_MISS[3] + TCC_HIT[3])) + (TCC_MISS[4] + TCC_HIT[4])) + (TCC_MISS[5]
+              + TCC_HIT[5])) + (TCC_MISS[6] + TCC_HIT[6])) + (TCC_MISS[7] + TCC_HIT[7]))
+              + (TCC_MISS[8] + TCC_HIT[8])) + (TCC_MISS[9] + TCC_HIT[9])) + (TCC_MISS[10]
+              + TCC_HIT[10])) + (TCC_MISS[11] + TCC_HIT[11])) + (TCC_MISS[12] + TCC_HIT[12]))
+              + (TCC_MISS[13] + TCC_HIT[13])) + (TCC_MISS[14] + TCC_HIT[14])) + (TCC_MISS[15]
+              + TCC_HIT[15]))) if (((((((((((((((((TCC_MISS[0]
+              + TCC_HIT[0]) + (TCC_MISS[1] + TCC_HIT[1])) + (TCC_MISS[2] + TCC_HIT[2]))
+              + (TCC_MISS[3] + TCC_HIT[3])) + (TCC_MISS[4] + TCC_HIT[4])) + (TCC_MISS[5]
+              + TCC_HIT[5])) + (TCC_MISS[6] + TCC_HIT[6])) + (TCC_MISS[7] + TCC_HIT[7]))
+              + (TCC_MISS[8] + TCC_HIT[8])) + (TCC_MISS[9] + TCC_HIT[9])) + (TCC_MISS[10]
+              + TCC_HIT[10])) + (TCC_MISS[11] + TCC_HIT[11])) + (TCC_MISS[12] + TCC_HIT[12]))
+              + (TCC_MISS[13] + TCC_HIT[13])) + (TCC_MISS[14] + TCC_HIT[14])) + (TCC_MISS[15]
+              + TCC_HIT[15])) != 0) else None)
+            unit: pct
+            tips:
+        # FIXME: other arggr metrics!!
+
+    - metric_table:
+        id: 1802
+        title: L2 Cache Hit Rate (pct)
+        header:
+          metric: Channel
+          expr: Expression
+        metric:
+          "::_1":
+            expr:
+              (((100 * TCC_HIT[::_1]) / (TCC_HIT[::_1] + TCC_MISS[::_1])) if ((TCC_HIT[::_1]
+              + TCC_MISS[::_1]) != 0) else None)
+          placeholder_range:
+            "::_1": $total_l2_chan
+        cli_style: simple_box
+
+    - metric_table:
+        id: 1803
+        title: L2 Requests (per normUnit)
+        header:
+          metric: Channel
+          expr: Expression
+        metric:
+          "::_1":
+            expr: (TO_INT(TCC_REQ[::_1]) / $denom)
+          placeholder_range:
+            "::_1": $total_l2_chan
+        cli_style: simple_box
+
+    - metric_table:
+        id: 1804
+        title: L2 Requests (per normUnit)
+        header:
+          metric: Channel
+          read req: L2 Read
+          write req: L2 Write
+          atomic req: L2 Atomic
+        metric:
+          "::_1":
+            read req: AVG((TO_INT(TCC_READ[::_1]) / $denom))
+            write req: AVG((TO_INT(TCC_WRITE[::_1]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[::_1]) / $denom))
+          placeholder_range:
+            "::_1": $total_l2_chan
+        cli_style: simple_multiple_bar
+
+    - metric_table:
+        id: 1805
+        title: L2-Fabric Requests (per normUnit)
+        header:
+          metric: Channel
+          read req: L2-Fabric Read
+          write req: L2-Fabric Write and Atomic
+          atomic req: L2-Fabric Atomic
+        metric:
+          "::_1":
+            read req: AVG((TO_INT(TCC_EA0_RDREQ[::_1]) / $denom))
+            write req: AVG((TO_INT(TCC_EA0_WRREQ[::_1]) / $denom))
+            atomic req: AVG((TO_INT(TCC_EA0_ATOMIC[::_1]) / $denom))
+          placeholder_range:
+            "::_1": $total_l2_chan
+        cli_style: simple_multiple_bar
+
+    # - metric_table:
+    #     id: 1806
+    #     title: L2-Fabric Latency (Cycles)
+    #     header:
+    #       metric: Metric
+    #       read lat: L2-Fabric Read
+    #       write lat: L2-Fabric Write
+    #       atomic lat: L2-Fabric Atomic
+    #     metric:
+    #       "::_1":
+    #         read lat:
+    #           AVG(((TCC_EA0_RDREQ_LEVEL[::_1] / TCC_EA0_RDREQ[::_1]) if (TCC_EA0_RDREQ[::_1]
+    #           != 0) else None))
+    #         write lat:
+    #           AVG(((TCC_EA0_WRREQ_LEVEL[::_1] / TCC_EA0_WRREQ[::_1]) if (TCC_EA0_WRREQ[::_1]
+    #           != 0) else None))
+    #         atomic lat:
+    #           AVG(((TCC_EA0_ATOMIC_LEVEL[::_1] / TCC_EA0_ATOMIC[::_1]) if
+    #           (TCC_EA0_ATOMIC[::_1] != 0) else 0))
+    #       placeholder_range:
+    #         "::_1": $total_l2_chan
+    #     cli_style: simple_multiple_bar
+
+    - metric_table:
+        id: 1806
+        title: L2-Fabric Read Latency (Cycles)
+        header:
+          metric: Channel
+          expr: Expression
+        metric:
+          "::_1":
+            expr:
+              ((TCC_EA0_RDREQ_LEVEL[::_1] / TCC_EA0_RDREQ[::_1]) if (TCC_EA0_RDREQ[::_1]
+              != 0) else None)
+          placeholder_range:
+            "::_1": $total_l2_chan
+        cli_style: simple_box
+
+    - metric_table:
+        id: 1807
+        title: L2-Fabric Write and Atomic Latency (Cycles)
+        header:
+          metric: Channel
+          expr: Expression
+        metric:
+          "::_1":
+            expr:
+              ((TCC_EA0_WRREQ_LEVEL[::_1] / TCC_EA0_WRREQ[::_1]) if (TCC_EA0_WRREQ[::_1]
+              != 0) else None)
+          placeholder_range:
+            "::_1": $total_l2_chan
+        cli_style: simple_box
+
+    - metric_table:
+        id: 1808
+        title: L2-Fabric Atomic Latency (Cycles)
+        header:
+          metric: Channel
+          expr: Expression
+        metric:
+          "::_1":
+            expr: ((TCC_EA0_ATOMIC_LEVEL[::_1] / TCC_EA0_ATOMIC[::_1]) if
+              (TCC_EA0_ATOMIC[::_1] != 0) else 0)
+          placeholder_range:
+            "::_1": $total_l2_chan
+        cli_style: simple_box
+
+    - metric_table:
+        id: 1809
+        title: L2-Fabric Read Stall (Cycles per normUnit)
+        header:
+          metric: Channel
+          ea read stall - pcie: L2-Fabric Read Stall (PCIe)
+          ea read stall - if: L2-Fabric Read Stall (Infinity Fabric™)
+          ea read stall - hbm: L2-Fabric Read Stall (HBM)
+        metric:
+          "::_1":
+            ea read stall - pcie: None # Missing perfmon
+            ea read stall - if: None # Missing perfmon
+            ea read stall - hbm: None # Missing perfmon
+          placeholder_range:
+            "::_1": $total_l2_chan
+        cli_style: simple_multiple_bar
+
+    - metric_table:
+        id: 1810
+        title: L2-Fabric Write and Atomic Stall (Cycles per normUnit)
+        header:
+          metric: Channel
+          ea write stall - pcie: L2-Fabric Write Stall (PCIe)
+          ea write stall - gmi: L2-Fabric Write Stall (Infinity Fabric™)
+          ea write stall - dram: L2-Fabric Write Stall (HBM)
+          ea write stall - starve: L2-Fabric Write Starve
+        metric:
+          "::_1":
+            ea write stall - pcie: None # Missing perfmon
+            ea write stall - if: None # Missing perfmon
+            ea write stall - hbm: None # Missing perfmon
+            ea write stall - starve: AVG((TO_INT(TCC_TOO_MANY_EA_WRREQS_STALL[::_1]) / $denom))
+          placeholder_range:
+            "::_1": $total_l2_chan
+        cli_style: simple_multiple_bar
+
+    # - metric_table:
+    #     id: 1811
+    #     title: L2 Tag Stall (cycles)
+    #     header:
+    #       metric: Metric
+    #       expr: Expression
+    #     metric:
+    #       "::_1":
+    #         expr: TCC_TAG_STALL[::_1]
+    #       placeholder_range:
+    #         "::_1": $total_l2_chan
+    #     cli_style: simple_box
+
+    - metric_table:
+        id: 1812
+        title: L2-Fabric (128B read requests per normUnit)
+        header:
+          metric: Channel
+          expr: Expression
+        metric:
+          "::_1":
+            expr: (TO_INT(TCC_BUBBLE[::_1]) / $denom)
+          placeholder_range:
+            "::_1": $total_l2_chan
+          # tips: Number of 128-byte read requests sent to EA
+        cli_style: simple_box

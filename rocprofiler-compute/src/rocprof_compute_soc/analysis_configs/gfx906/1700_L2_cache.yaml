@@ -1,0 +1,556 @@
+---
+# Add description/tips for each metric in this section.
+# So it could be shown in hover.
+Metric Description:
+
+# Define the panel properties and properties of each metric in the panel.
+Panel Config:
+  id: 1700
+  title: L2 Cache
+  data source:
+    - metric_table:
+        id: 1701
+        title: Speed-of-Light
+        header:
+          metric: Metric
+          value: Avg
+          unit: Unit
+          tips: Tips
+        metric:
+          Utilization:
+            value: AVG(((TCC_BUSY_sum * 100) / (TO_INT($total_l2_chan) * $GRBM_GUI_ACTIVE_PER_XCD)))
+            unit: pct
+            tips:
+          Bandwidth:
+            value: ((100 * AVG(((TCC_REQ_sum * 64) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk / 1000) * 64) * TO_INT($total_l2_chan)))
+            unit: pct
+            tips:
+          Hit Rate:
+            value: AVG((((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum)) if ((TCC_HIT_sum
+              + TCC_MISS_sum) != 0) else 0))
+            unit: pct
+            tips:
+          L2-Fabric Read BW:
+            value: AVG((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
+              * 64)) / (End_Timestamp - Start_Timestamp)))
+            unit: GB/s
+            tips:
+          L2-Fabric Write and Atomic BW:
+            value: AVG((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
+              * 32)) / (End_Timestamp - Start_Timestamp)))
+            unit: GB/s
+            tips:
+          HBM Bandwidth:
+            value: $hbmBandwidth
+            unit: GB/s
+            tips:
+
+    - metric_table:
+        id: 1702
+        title: L2 - Fabric Transactions
+        header:
+          metric: Metric
+          avg: Avg
+          min: Min
+          max: Max
+          unit: Unit
+          tips: Tips
+        metric:
+          Read BW:
+            avg: AVG((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
+              * 64)) / $denom))
+            min: MIN((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
+              * 64)) / $denom))
+            max: MAX((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
+              * 64)) / $denom))
+            unit: (Bytes  + $normUnit)
+            tips:
+          HBM Read Traffic:
+            avg: AVG((100 * (TCC_EA_RDREQ_DRAM_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum != 0) else None))
+            min: MIN((100 * (TCC_EA_RDREQ_DRAM_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum != 0) else None))
+            max: MAX((100 * (TCC_EA_RDREQ_DRAM_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum != 0) else None))
+            unit: pct
+            tips:
+          Remote Read Traffic:
+            avg: AVG((100 * ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum) / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum != 0) else None))
+            min: MIN((100 * ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum) / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum != 0) else None))
+            max: MAX((100 * ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum) / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum != 0) else None))
+            unit: pct
+            tips:
+          Uncached Read Traffic:
+            avg: AVG((100 * (TCC_EA_RD_UNCACHED_32B_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum != 0) else None))
+            min: MIN((100 * (TCC_EA_RD_UNCACHED_32B_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum != 0) else None))
+            max: MAX((100 * (TCC_EA_RD_UNCACHED_32B_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum != 0) else None))
+            unit: pct
+            tips:
+          Write and Atomic BW:
+            avg: AVG((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
+              * 32)) / $denom))
+            min: MIN((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
+              * 32)) / $denom))
+            max: MAX((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
+              * 32)) / $denom))
+            unit: (Bytes  + $normUnit)
+            tips:
+          HBM Write and Atomic Traffic:
+            avg: AVG((100 * (TCC_EA_WRREQ_DRAM_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum != 0) else None))
+            min: MIN((100 * (TCC_EA_WRREQ_DRAM_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum != 0) else None))
+            max: MAX((100 * (TCC_EA_WRREQ_DRAM_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum != 0) else None))
+            unit: pct
+            tips:
+          Remote Write and Atomic Traffic:
+            avg: AVG((100 * ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum) / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum != 0) else None))
+            min: MIN((100 * ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum) / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum != 0) else None))
+            max: MAX((100 * ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum) / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum != 0) else None))
+            unit: pct
+            tips:
+          Atomic Traffic:
+            avg: AVG((100 * (TCC_EA_ATOMIC_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum != 0) else None))
+            min: MIN((100 * (TCC_EA_ATOMIC_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum != 0) else None))
+            max: MAX((100 * (TCC_EA_ATOMIC_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum != 0) else None))
+            unit: pct
+            tips:
+          Uncached Write and Atomic Traffic:
+            avg: AVG((100 * (TCC_EA_WR_UNCACHED_32B_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum != 0) else None))
+            min: MIN((100 * (TCC_EA_WR_UNCACHED_32B_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum != 0) else None))
+            max: MAX((100 * (TCC_EA_WR_UNCACHED_32B_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum != 0) else None))
+            unit: pct
+            tips:
+          Read Latency:
+            avg: AVG(((TCC_EA_RDREQ_LEVEL_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum !=
+              0) else None))
+            min: MIN(((TCC_EA_RDREQ_LEVEL_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum !=
+              0) else None))
+            max: MAX(((TCC_EA_RDREQ_LEVEL_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum !=
+              0) else None))
+            unit: Cycles
+            tips:
+          Write and Atomic Latency:
+            avg: AVG(((TCC_EA_WRREQ_LEVEL_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum !=
+              0) else None))
+            min: MIN(((TCC_EA_WRREQ_LEVEL_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum !=
+              0) else None))
+            max: MAX(((TCC_EA_WRREQ_LEVEL_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum !=
+              0) else None))
+            unit: Cycles
+            tips:
+          Atomic Latency:
+            avg: AVG(((TCC_EA_ATOMIC_LEVEL_sum / TCC_EA_ATOMIC_sum) if (TCC_EA_ATOMIC_sum
+              != 0) else None))
+            min: MIN(((TCC_EA_ATOMIC_LEVEL_sum / TCC_EA_ATOMIC_sum) if (TCC_EA_ATOMIC_sum
+              != 0) else None))
+            max: MAX(((TCC_EA_ATOMIC_LEVEL_sum / TCC_EA_ATOMIC_sum) if (TCC_EA_ATOMIC_sum
+              != 0) else None))
+            unit: Cycles
+            tips:
+          Read Stall:
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
+            unit: pct
+            tips:
+          Write Stall:
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
+            unit: pct
+            tips:
+
+    - metric_table:
+        id: 1703
+        title: L2 Cache Accesses
+        header:
+          metric: Metric
+          avg: Avg
+          min: Min
+          max: Max
+          unit: Unit
+          tips: Tips
+        metric:
+          Bandwidth:
+            avg: AVG((TCC_REQ_sum * 64) / $denom)
+            min: MIN((TCC_REQ_sum * 64) / $denom)
+            max: MAX((TCC_REQ_sum * 64) / $denom)
+            unit: (Bytes + $normUnit)
+            tips:
+          Read Bandwidth:
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
+            unit: (Bytes + $normUnit)
+            tips:
+          Write Bandwidth:
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
+            unit: (Bytes + $normUnit)
+            tips:
+          Atomic Bandwidth:
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
+            unit: (Bytes + $normUnit)
+            tips:
+          Req:
+            avg: AVG((TCC_REQ_sum / $denom))
+            min: MIN((TCC_REQ_sum / $denom))
+            max: MAX((TCC_REQ_sum / $denom))
+            unit: (Req  + $normUnit)
+            tips:
+          Read Req:
+            avg: AVG((TCC_READ_sum / $denom))
+            min: MIN((TCC_READ_sum / $denom))
+            max: MAX((TCC_READ_sum / $denom))
+            unit: (Req  + $normUnit)
+            tips:
+          Write Req:
+            avg: AVG((TCC_WRITE_sum / $denom))
+            min: MIN((TCC_WRITE_sum / $denom))
+            max: MAX((TCC_WRITE_sum / $denom))
+            unit: (Req  + $normUnit)
+            tips:
+          Atomic Req:
+            avg: AVG((TCC_ATOMIC_sum / $denom))
+            min: MIN((TCC_ATOMIC_sum / $denom))
+            max: MAX((TCC_ATOMIC_sum / $denom))
+            unit: (Req  + $normUnit)
+            tips:
+          Streaming Req:
+            avg: AVG((TCC_STREAMING_REQ_sum / $denom))
+            min: MIN((TCC_STREAMING_REQ_sum / $denom))
+            max: MAX((TCC_STREAMING_REQ_sum / $denom))
+            unit: (Req  + $normUnit)
+            tips:
+          Bypasss Req:
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
+            unit: (Req  + $normUnit)
+            tips:
+          Probe Req:
+            avg: AVG((TCC_PROBE_sum / $denom))
+            min: MIN((TCC_PROBE_sum / $denom))
+            max: MAX((TCC_PROBE_sum / $denom))
+            unit: (Req  + $normUnit)
+            tips:
+          Input Buffer Req:
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
+            unit: (Req  + $normUnit)
+            tips:
+          Cache Hit:
+            avg: AVG((((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum)) if ((TCC_HIT_sum
+              + TCC_MISS_sum) != 0) else None))
+            min: MIN((((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum)) if ((TCC_HIT_sum
+              + TCC_MISS_sum) != 0) else None))
+            max: MAX((((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum)) if ((TCC_HIT_sum
+              + TCC_MISS_sum) != 0) else None))
+            unit: pct
+            tips:
+          Hits:
+            avg: AVG((TCC_HIT_sum / $denom))
+            min: MIN((TCC_HIT_sum / $denom))
+            max: MAX((TCC_HIT_sum / $denom))
+            unit: (Hits  + $normUnit)
+            tips:
+          Misses:
+            avg: AVG((TCC_MISS_sum / $denom))
+            min: MIN((TCC_MISS_sum / $denom))
+            max: MAX((TCC_MISS_sum / $denom))
+            unit: (Misses  + $normUnit)
+            tips:
+          Writeback:
+            avg: AVG((TCC_WRITEBACK_sum / $denom))
+            min: MIN((TCC_WRITEBACK_sum / $denom))
+            max: MAX((TCC_WRITEBACK_sum / $denom))
+            unit: (Cachelines + $normUnit)
+            tips:
+          Writeback (Internal):
+            avg: AVG((TCC_NORMAL_WRITEBACK_sum / $denom))
+            min: MIN((TCC_NORMAL_WRITEBACK_sum / $denom))
+            max: MAX((TCC_NORMAL_WRITEBACK_sum / $denom))
+            unit: (Cachelines + $normUnit)
+            tips:
+          Writeback (vL1D Req):
+            avg: AVG((TCC_ALL_TC_OP_WB_WRITEBACK_sum / $denom))
+            min: MIN((TCC_ALL_TC_OP_WB_WRITEBACK_sum / $denom))
+            max: MAX((TCC_ALL_TC_OP_WB_WRITEBACK_sum / $denom))
+            unit: (Cachelines + $normUnit)
+            tips:
+          Evict (Internal):
+            avg: AVG((TCC_NORMAL_EVICT_sum / $denom))
+            min: MIN((TCC_NORMAL_EVICT_sum / $denom))
+            max: MAX((TCC_NORMAL_EVICT_sum / $denom))
+            unit: (Cachelines + $normUnit)
+            tips:
+          Evict (vL1D Req):
+            avg: AVG((TCC_ALL_TC_OP_INV_EVICT_sum / $denom))
+            min: MIN((TCC_ALL_TC_OP_INV_EVICT_sum / $denom))
+            max: MAX((TCC_ALL_TC_OP_INV_EVICT_sum / $denom))
+            unit: (Cachelines + $normUnit)
+            tips:
+          NC Req:
+            avg: AVG((TCC_NC_REQ_sum / $denom))
+            min: MIN((TCC_NC_REQ_sum / $denom))
+            max: MAX((TCC_NC_REQ_sum / $denom))
+            unit: (Req  + $normUnit)
+            tips:
+          UC Req:
+            avg: AVG((TCC_UC_REQ_sum / $denom))
+            min: MIN((TCC_UC_REQ_sum / $denom))
+            max: MAX((TCC_UC_REQ_sum / $denom))
+            unit: (Req  + $normUnit)
+            tips:
+          CC Req:
+            avg: AVG((TCC_CC_REQ_sum / $denom))
+            min: MIN((TCC_CC_REQ_sum / $denom))
+            max: MAX((TCC_CC_REQ_sum / $denom))
+            unit: (Req  + $normUnit)
+            tips:
+          RW Req:
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
+            unit: (Req  + $normUnit)
+            tips:
+
+    - metric_table:
+        id: 1704
+        title: L2 Cache Stalls
+        header:
+          metric: Metric
+          avg: Avg
+          min: Min
+          max: Max
+          unit: Unit
+          tips: Tips
+        metric:
+          Stalled on Latency FIFO:
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
+            unit: (Cycles + $normUnit)
+            tips:
+          Stalled on Write Data FIFO:
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
+            unit: (Cycles + $normUnit)
+            tips:
+          Input Buffer Stalled on L2:
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
+            unit: (Cycles + $normUnit)
+            tips:
+
+    - metric_table:
+        id: 1705
+        title: L2 - Fabric Interface Stalls
+        header:
+          metric: Metric
+          type: Type
+          transaction: Transaction
+          avg: Avg
+          min: Min
+          max: Max
+          unit: Unit
+          tips: Tips
+        style:
+          type: simple_multi_bar
+        metric:
+          Read - PCIe Stall:
+            type: PCIe Stall
+            transaction: Read
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
+            unit: pct
+            tips:
+          Read - Infinity Fabric™ Stall:
+            type: Infinity Fabric™ Stall
+            transaction: Read
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
+            unit: pct
+            tips:
+          Read - HBM Stall:
+            type: HBM Stall
+            transaction: Read
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
+            unit: pct
+            tips:
+          Write - PCIe Stall:
+            type: PCIe Stall
+            transaction: Write
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
+            unit: pct
+            tips:
+          Write - Infinity Fabric™ Stall:
+            type: Infinity Fabric™ Stall
+            transaction: Write
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
+            unit: pct
+            tips:
+          Write - HBM Stall:
+            type: HBM Stall
+            transaction: Write
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
+            unit: pct
+            tips:
+          Write - Credit Starvation:
+            type: Credit Starvation
+            transaction: Write
+            avg: AVG(((100 * (TCC_TOO_MANY_EA_WRREQS_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
+            min: MIN(((100 * (TCC_TOO_MANY_EA_WRREQS_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
+            max: MAX(((100 * (TCC_TOO_MANY_EA_WRREQS_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
+            unit: pct
+            tips:
+
+    - metric_table:
+        id: 1706
+        title: L2 - Fabric Detailed Transaction Breakdown
+        header:
+          metric: Metric
+          avg: Avg
+          min: Min
+          max: Max
+          unit: Unit
+          tips: Tips
+        metric:
+          Read (32B):
+            avg: AVG((TCC_EA_RDREQ_32B_sum / $denom))
+            min: MIN((TCC_EA_RDREQ_32B_sum / $denom))
+            max: MAX((TCC_EA_RDREQ_32B_sum / $denom))
+            unit: (Req  + $normUnit)
+            tips:
+          Read (64B):
+            avg: AVG(((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) / $denom))
+            min: MIN(((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) / $denom))
+            max: MAX(((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) / $denom))
+            unit: (Req  + $normUnit)
+            tips:
+          Read (Uncached):
+            avg: AVG((TCC_EA_RD_UNCACHED_32B_sum / $denom))
+            min: MIN((TCC_EA_RD_UNCACHED_32B_sum / $denom))
+            max: MAX((TCC_EA_RD_UNCACHED_32B_sum / $denom))
+            unit: (Req  + $normUnit)
+            tips:
+          HBM Read:
+            avg: AVG((TCC_EA_RDREQ_DRAM_sum / $denom))
+            min: MIN((TCC_EA_RDREQ_DRAM_sum / $denom))
+            max: MAX((TCC_EA_RDREQ_DRAM_sum / $denom))
+            unit: (Req  + $normUnit)
+            tips:
+          Remote Read:
+            avg: AVG((MAX((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum), 0) / $denom))
+            min: MIN((MAX((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum), 0) / $denom))
+            max: MAX((MAX((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum), 0) / $denom))
+            unit: (Req  + $normUnit)
+            tips:
+          Read Bandwidth - PCIe:
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
+            unit: (Bytes + $normUnit)
+            tips:
+          Read Bandwidth - Infinity Fabric™:
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
+            unit: (Bytes + $normUnit)
+            tips:
+          Read Bandwidth - HBM:
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
+            unit: (Bytes + $normUnit)
+            tips:
+          Write and Atomic (32B):
+            avg: AVG(((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) / $denom))
+            min: MIN(((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) / $denom))
+            max: MAX(((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) / $denom))
+            unit: (Req  + $normUnit)
+            tips:
+          Write and Atomic (Uncached):
+            avg: AVG((TCC_EA_WR_UNCACHED_32B_sum / $denom))
+            min: MIN((TCC_EA_WR_UNCACHED_32B_sum / $denom))
+            max: MAX((TCC_EA_WR_UNCACHED_32B_sum / $denom))
+            unit: (Req  + $normUnit)
+            tips:
+          Write and Atomic (64B):
+            avg: AVG((TCC_EA_WRREQ_64B_sum / $denom))
+            min: MIN((TCC_EA_WRREQ_64B_sum / $denom))
+            max: MAX((TCC_EA_WRREQ_64B_sum / $denom))
+            unit: (Req  + $normUnit)
+            tips:
+          HBM Write and Atomic:
+            avg: AVG((TCC_EA_WRREQ_DRAM_sum / $denom))
+            min: MIN((TCC_EA_WRREQ_DRAM_sum / $denom))
+            max: MAX((TCC_EA_WRREQ_DRAM_sum / $denom))
+            unit: (Req  + $normUnit)
+            tips:
+          Remote Write and Atomic:
+            avg: AVG((MAX((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum), 0) / $denom))
+            min: MIN((MAX((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum), 0) / $denom))
+            max: MAX((MAX((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum), 0) / $denom))
+            unit: (Req  + $normUnit)
+            tips:
+          Write Bandwidth - PCIe:
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
+            unit: (Bytes + $normUnit)
+            tips:
+          Write Bandwidth - Infinity Fabric™:
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
+            unit: (Bytes + $normUnit)
+            tips:
+          Write Bandwidth - HBM:
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
+            unit: (Bytes + $normUnit)
+            tips:
+          Atomic:
+            avg: AVG((TCC_EA_ATOMIC_sum / $denom))
+            min: MIN((TCC_EA_ATOMIC_sum / $denom))
+            max: MAX((TCC_EA_ATOMIC_sum / $denom))
+            unit: (Req  + $normUnit)
+            tips:
+          Atomic - HBM:
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
+            unit: (Req  + $normUnit)
+            tips:
+          Atomic Bandwidth - PCIe:
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
+            unit: (Bytes + $normUnit)
+            tips:
+          Atomic Bandwidth - Infinity Fabric™:
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
+            unit: (Bytes + $normUnit)
+            tips:
+          Atomic Bandwidth - HBM:
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
+            unit: (Bytes + $normUnit)
+            tips:

@@ -1,0 +1,13 @@
+* @coleramos425 @feizheng10 @vedithal-amd @xuchen-amd @cfallows-amd @ywang103-amd
+
+# Documentation files
+docs/ @ROCm/rocm-documentation
+*.md @ROCm/rocm-documentation
+*.rst @ROCm/rocm-documentation
+.readthedocs.yaml @ROCm/rocm-documentation
+
+# Packaging
+cmake/ @koomie
+tests/ @koomie
+CMakeLists.txt @koomie
+utils/ @koomie

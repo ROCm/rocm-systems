@@ -1,0 +1,5 @@
+pmc:  TCC_REQ_sum TCC_STREAMING_REQ_sum TCC_HIT_sum TCC_MISS_sum
+
+gpu:
+range:
+kernel:

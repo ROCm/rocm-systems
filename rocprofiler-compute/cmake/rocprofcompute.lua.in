@@ -1,0 +1,31 @@
+local help_message = [[
+
+ROCm Compute Profiler is an open-source performance analysis tool for profiling
+machine learning/HPC workloads running on AMD MI GPUs.
+
+Version @ROCPROFCOMPUTE_FULL_VERSION@
+]]
+
+help(help_message,"\n")
+
+whatis("Name: @PROJECT_NAME@")
+whatis("Version: @ROCPROFCOMPUTE_FULL_VERSION@")
+whatis("Keywords: Profiling, Performance, GPU")
+whatis("Description: tool for GPU performance profiling")
+whatis("URL: https://github.com/ROCm/rocprofiler-compute")
+
+-- Export environmental variables
+local topDir="@CMAKE_INSTALL_PREFIX@"
+local binDir="@CMAKE_INSTALL_FULL_BINDIR@"
+local shareDir="@CMAKE_INSTALL_FULL_DATADIR@"
+local pythonDeps="@PYTHON_DEPS@"
+
+setenv("ROCPROFCOMPUTE_DIR",topDir)
+setenv("ROCPROFCOMPUTE_BIN",binDir)
+setenv("ROCPROFCOMPUTE_SHARE",shareDir)
+
+-- Update relevant PATH variables
+prepend_path("PATH",binDir)
+if ( pythonDeps  ~= "" ) then
+   prepend_path("PYTHONPATH",pythonDeps)
+end

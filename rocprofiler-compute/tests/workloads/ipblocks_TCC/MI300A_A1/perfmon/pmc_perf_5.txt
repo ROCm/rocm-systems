@@ -1,0 +1,5 @@
+pmc:  TCC_EA0_RDREQ_sum TCC_EA0_RDREQ_32B_sum TCC_BUBBLE_sum TCC_EA0_RD_UNCACHED_32B_sum
+
+gpu:
+range:
+kernel:
