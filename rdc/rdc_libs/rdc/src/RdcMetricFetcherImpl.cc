@@ -1338,6 +1338,8 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_cpu_field(uint32_t cpu_index, rdc_f
       value->status = Smi2RdcError(ret);
       break;
     }
+#ifdef ENABLE_ESMI_LIB
+// amdsmi_cpu_info_t is only defined if ENABLE_ESMI_LIB is set
     case RDC_FI_DEV_CPU_MODEL: {
       amdsmi_cpu_info_t cpu_info;
       value->status = amdsmi_get_cpu_model_name(processor_handle, &cpu_info);
@@ -1347,6 +1349,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_cpu_field(uint32_t cpu_index, rdc_f
       }
       break;
     }
+#endif
     default: {
       RDC_LOG(RDC_ERROR, "field_id is not supported: " << field_id);
       break;
