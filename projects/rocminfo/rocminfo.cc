@@ -590,8 +590,7 @@ AcquireAgentInfo(hsa_agent_t agent, agent_info_t *agent_i) {
 
 static void DisplayAgentInfo(agent_info_t *agent_i) {
   printLabelStr("Name:", agent_i->name, 1);
-  if (!wsl_env || HSA_DEVICE_TYPE_CPU == agent_i->device_type)
-    printLabelStr("Uuid:", agent_i->uuid, 1);
+  printLabelStr("Uuid:", agent_i->uuid, 1);
   printLabelStr("Marketing Name:", agent_i->device_mkt_name, 1);
   printLabelStr("Vendor Name:", agent_i->vendor_name, 1);
 
@@ -673,8 +672,7 @@ static void DisplayAgentInfo(agent_info_t *agent_i) {
   printLabelStr("Cacheline Size:", int_to_string(agent_i->cacheline_size), 1);
   if (!wsl_env || HSA_DEVICE_TYPE_GPU == agent_i->device_type)
     printLabelInt("Max Clock Freq. (MHz):", agent_i->max_clock_freq, 1);
-  if (!wsl_env)
-    printLabelInt("BDFID:", agent_i->bdf_id, 1);
+  printLabelInt("BDFID:", agent_i->bdf_id, 1);
   printLabelInt("Internal Node ID:", agent_i->internal_node_id, 1);
   printLabelInt("Compute Unit:", agent_i->compute_unit, 1);
   printLabelInt("SIMDs per CU:", agent_i->simds_per_cu, 1);

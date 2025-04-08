@@ -21,7 +21,7 @@ trigger:
   branches:
     include:
     - amd-staging
-    - amd-master
+    - amd-mainline
   paths:
     exclude:
     - .github
@@ -33,7 +33,7 @@ pr:
   branches:
     include:
     - amd-staging
-    - amd-master
+    - amd-mainline
   paths:
     exclude:
     - .github

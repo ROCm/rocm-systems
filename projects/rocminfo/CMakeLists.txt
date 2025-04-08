@@ -46,13 +46,16 @@ if(WIN32)
   return()
 endif()
 
+# Debug by default
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE "Debug")
+endif()
+
 # Generate static package, when BUILD_SHARED_LIBS is set to OFF.
 # Default to ON
 option(BUILD_SHARED_LIBS "Build using shared libraries" ON)
 ## Set default module path if not already set
-if(NOT DEFINED CMAKE_MODULE_PATH)
-    set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/")
-endif()
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/")
 ## Include common cmake modules
 include(utils)
 
@@ -62,13 +65,15 @@ include(utils)
 
 find_package(hsa-runtime64 1.0 REQUIRED )
 
-string(TOLOWER "${ROCRTST_BLD_TYPE}" tmp)
-if("${tmp}" STREQUAL release)
-  set(BUILD_TYPE "Release")
-  set(ISDEBUG 0)
-else()
-  set(BUILD_TYPE "Debug")
-  set(ISDEBUG 1)
+if(DEFINED ROCRTST_BLD_TYPE)
+  string(TOLOWER "${ROCRTST_BLD_TYPE}" tmp)
+  if("${tmp}" STREQUAL release)
+    set(CMAKE_BUILD_TYPE "Release")
+    set(ISDEBUG 0)
+  else()
+    set(CMAKE_BUILD_TYPE "Debug")
+    set(ISDEBUG 1)
+  endif()
 endif()
 
 # The following default version values should be updated as appropriate for
@@ -100,7 +105,7 @@ message("Package version: ${PKG_VERSION_STR}")
 #
 message("")
 message("Build Configuration:")
-message("-----------BuildType: " ${BUILD_TYPE})
+message("-----------BuildType: " ${CMAKE_BUILD_TYPE})
 message("------------Compiler: " ${CMAKE_CXX_COMPILER})
 message("-------------Version: " ${CMAKE_CXX_COMPILER_VERSION})
 message("--------Proj Src Dir: " ${PROJECT_SOURCE_DIR})
@@ -111,10 +116,6 @@ message("")
 
 
 #
-# Set the build type based on user input
-#
-set(CMAKE_BUILD_TYPE ${BUILD_TYPE})
-#
 # Flag to enable / disable verbose output.
 #
 SET( CMAKE_VERBOSE_MAKEFILE on )
@@ -122,7 +123,7 @@ SET( CMAKE_VERBOSE_MAKEFILE on )
 # Compiler pre-processor definitions.
 #
 # Define MACRO "DEBUG" if build type is "Debug"
-if(${BUILD_TYPE} STREQUAL "Debug")
+if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
 add_definitions(-DDEBUG)
 endif()
 
