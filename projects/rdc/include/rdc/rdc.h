@@ -410,21 +410,6 @@ typedef enum {
   RDC_HEALTH_EEPROM_CONFIG_VALID,    //!< Reads the EEPROM and verifies the checksums
   RDC_HEALTH_POWER_THROTTLE_TIME,    //!< Power throttle status counter
   RDC_HEALTH_THERMAL_THROTTLE_TIME,  //!< Total time in thermal throttle status (microseconds)
-  /**
-   * @brief RDC CPU related fields
-   */
-  RDC_FI_DEV_CPU_UTIL_TOTAL = 10001,  //!< CPU total percentage of time in use
-  RDC_FI_DEV_CPU_UTIL_USER,           //!< The percentage of time in use by the user
-  RDC_FI_DEV_CPU_UTIL_NICE,           //!< The percentage of time in use by low priority (high nice score) programs
-  RDC_FI_DEV_CPU_UTIL_SYS,            //!< The percentage of time in use by the system
-  RDC_FI_DEV_CPU_UTIL_IRQ,            //!< The percentage of time in use by interrupts
-  RDC_FI_DEV_CPU_TEMP_CURRENT,        //!< Instantaneous temperature (Celsius)
-  RDC_FI_DEV_CPU_CLOCK_CURRENT,       //!< Instantaneous clock speed (KHz)
-  RDC_FI_DEV_CPU_POWER_UTIL_CURRENT,  //!< Instantaneous power usage (watts)
-  RDC_FI_DEV_CPU_POWER_LIMIT,         //!< Instantaneous power limit (watts)
-  RDC_FI_DEV_CPU_VENDOR,              //!< The name of the vendor
-  RDC_FI_DEV_CPU_MODEL,               //!< The name of the model
-  RDC_FI_DEV_CPU_COUNT,
 } rdc_field_t;
 
 // even and odd numbers are used for correctable and uncorrectable errors
@@ -1057,25 +1042,6 @@ rdc_status_t rdc_device_get_all(rdc_handle_t p_rdc_handle,
                                 uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES], uint32_t* count);
 
 /**
- *  @brief Get indexes corresponding to all the devices on the system.
- *
- *  @details Indexes represents RDC CPU Id corresponding to each CPU on the
- * system and is immutable during the lifespan of the engine. The list
- * should be queried again if the engine is restarted.
- *
- *  @param[in] p_rdc_handle The RDC handler.
- *
- *  @param[out] cpu_index_list Array reference to fill CPU indexes present on
- *  the system.
- *
- *  @param[out] count Number of CPUs returned in cpu_index_list.
- *
- *  @retval ::RDC_ST_OK is returned upon successful call.
- */
-rdc_status_t rdc_device_get_all_cpu(rdc_handle_t p_rdc_handle,
-                                uint32_t cpu_index_list[RDC_MAX_NUM_DEVICES], uint32_t* count);
-
-/**
  *  @brief Gets device attributes corresponding to the gpu_index.
  *
  *  @details Fetch the attributes, such as device name, of a GPU.
@@ -1091,23 +1057,6 @@ rdc_status_t rdc_device_get_all_cpu(rdc_handle_t p_rdc_handle,
  */
 rdc_status_t rdc_device_get_attributes(rdc_handle_t p_rdc_handle, uint32_t gpu_index,
                                        rdc_device_attributes_t* p_rdc_attr);
-
-/**
- *  @brief Gets device attributes corresponding to the cpu_index.
- *
- *  @details Fetch the attributes, such as device name, of a CPU.
- *
- *  @param[in] p_rdc_handle The RDC handler.
- *
- *  @param[in] cpu_index CPU index corresponding to which the attributes
- *  should be fetched
- *
- *  @param[out] p_rdc_attr CPU attribute corresponding to the cpu_index.
- *
- *  @retval ::RDC_ST_OK is returned upon successful call.
- */
-rdc_status_t rdc_device_get_cpu_attributes(rdc_handle_t p_rdc_handle, uint32_t cpu_index,
-                                      rdc_device_attributes_t* p_rdc_attr);
 
 /**
  *  @brief Get version information of components used by rdc.
