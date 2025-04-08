@@ -121,6 +121,21 @@ mi_gpu_spec:
               physical: 29858
               virtual: 29878
 
+          - gpu_model: mi325x
+            partition_mode:
+              compute_partition_mode:
+                num_xcds:
+                  spx: 8
+                  dpx: 4
+                  qpx: 2
+                  cpx: 1
+              memory_partition_mode:
+                nps4: [qpx, cpx]
+                nps1: [spx, qpx, cpx]
+            chip_ids:
+              physical: 29861
+              virtual: 29881
+
   - gpu_series: mi350
     gpu_archs:
       - gpu_arch: gfx950
