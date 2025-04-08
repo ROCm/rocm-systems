@@ -767,8 +767,7 @@ remote accelerators or CPUs.
    `Infinity Fabric <https://www.amd.com/en/technologies/infinity-architecture>`_
    technology can be used to connect multiple accelerators to achieve advanced
    peer-to-peer connectivity and enhanced bandwidths over traditional PCIe
-   connections. Some AMD Instinct MI-series accelerators like the MI250X
-   `feature coherent CPU↔accelerator connections built using AMD Infinity Fabric <https://www.amd.com/system/files/documents/amd-cdna2-white-paper.pdf>`_.
+   connections. Some AMD Instinct MI-series accelerators like the MI250X feature coherent CPU-to-accelerator connections are built using AMD Infinity Fabric. For more information, see the `AMD CDNA2 white paper <https://www.amd.com/content/dam/amd/en/documents/instinct-business-docs/white-papers/amd-cdna2-white-paper.pdf>`_.
 
 .. rubric:: Disclaimer
 
