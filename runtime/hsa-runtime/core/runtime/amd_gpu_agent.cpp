@@ -3062,8 +3062,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
   const uint32_t dma_data_cmd_sz = 7;
   const uint32_t copy_data_cmd_sz = 6;
   const uint32_t write_data_cmd_sz = 5;
-
-  uint32_t pred_exec_cmd_sz = 0;
+  const uint32_t pred_exec_cmd_sz = 2;
 
   uint64_t buf_write_val;
   uint64_t buf_written_val[2];
@@ -3097,16 +3096,8 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
   reset_write_val = (uint64_t)next_buffer << 63;
 
   unsigned int i = 0;
+  if (properties_.NumXcc > 1) i+= pred_exec_cmd_sz;
   memset(cmd_data, 0, cmd_data_sz);
-
-  if (properties_.NumXcc > 1) {
-    pred_exec_cmd_sz = 2;
-    const uint64_t command_bytes = atomic_ex_cmd_sz + copy_data_cmd_sz;
-    cmd_data[i++] =
-      PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz, isa_->GetMajorVersion());
-    cmd_data[i++] =
-      PM4_PRED_EXEC_DW2_EXEC_COUNT(command_bytes) | PM4_PRED_EXEC_DW2_VIRTUALXCCID_SELECT(0x1);
-  }
 
   /*
    * ATOMIC_MEM, perform atomic_exchange
@@ -3137,11 +3128,17 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
   cmd_data[i++] = PM4_COPY_DATA_DW4_DST_ADDR_LO((uint64_t)old_val);
   cmd_data[i++] = PM4_COPY_DATA_DW5_DST_ADDR_HI(((uint64_t)old_val) >> 32);
 
+  if (properties_.NumXcc > 1) {
+    cmd_data[0] =
+      PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz, isa_->GetMajorVersion());
+    cmd_data[1] =
+      PM4_PRED_EXEC_DW2_EXEC_COUNT(i - pred_exec_cmd_sz) | PM4_PRED_EXEC_DW2_VIRTUALXCCID_SELECT(0x1);
+  }
+
   HSA::hsa_signal_store_screlease(exec_pm4_signal, 1);
 
   queues_[QueuePCSampling]->ExecutePM4(
-      cmd_data, (pred_exec_cmd_sz + atomic_ex_cmd_sz + copy_data_cmd_sz) * sizeof(uint32_t),
-      HSA_FENCE_SCOPE_NONE, HSA_FENCE_SCOPE_SYSTEM, &exec_pm4_signal);
+      cmd_data, i * sizeof(uint32_t), HSA_FENCE_SCOPE_NONE, HSA_FENCE_SCOPE_SYSTEM, &exec_pm4_signal);
   do {
     hsa_signal_value_t val = HSA::hsa_signal_wait_scacquire(
         exec_pm4_signal, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
@@ -3168,17 +3165,8 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
   }
 
   i = 0;
+  if (properties_.NumXcc > 1) i+= pred_exec_cmd_sz;
   memset(cmd_data, 0, cmd_data_sz);
-
-  if (properties_.NumXcc > 1) {
-    const uint64_t n = ceil(to_copy / (32 * 1024 * 1024));
-    const uint64_t command_bytes = wait_reg_mem_cmd_sz + write_data_cmd_sz + dma_data_cmd_sz * n;
-    pred_exec_cmd_sz = 2;
-    cmd_data[i++] =
-      PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz, isa_->GetMajorVersion());
-    cmd_data[i++] =
-      PM4_PRED_EXEC_DW2_EXEC_COUNT(command_bytes) | PM4_PRED_EXEC_DW2_VIRTUALXCCID_SELECT(0x1);
-  }
 
   /*
    * Do the WAIT_REG_MEM, DMA_DATA(s) and WRITE_DATA
@@ -3203,12 +3191,10 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
   cmd_data[i++] = PM4_WAIT_REG_MEM_DW6(PM4_WAIT_REG_MEM_POLL_INTERVAL(4) |
                                        PM4_WAIT_REG_MEM_OPTIMIZE_ACE_OFFLOAD_MODE);
 
-  unsigned int num_copy_command = 0;
   uint8_t* buffer_temp = buffer[which_buffer];
 
   for (copy_bytes = std::min(to_copy, (uint32_t)CP_DMA_DATA_TRANSFER_CNT_MAX); 0 < to_copy;
        to_copy -= copy_bytes) {
-    num_copy_command++;
 
     /* DMA_DATA PACKETS, copy buffer using CPDMA */
     cmd_data[i++] = PM4_HDR(PM4_HDR_IT_OPCODE_DMA_DATA, dma_data_cmd_sz, isa_->GetMajorVersion());
@@ -3237,11 +3223,15 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
   cmd_data[i++] = PM4_WRITE_DATA_DW3_DST_MEM_ADDR_HI((buf_written_val[which_buffer]) >> 32);
   cmd_data[i++] = PM4_WRITE_DATA_DW4_DATA(0);
 
-  unsigned int cmd_sz = pred_exec_cmd_sz + wait_reg_mem_cmd_sz +
-      (num_copy_command * dma_data_cmd_sz) + write_data_cmd_sz;
+  if (properties_.NumXcc > 1) {
+    cmd_data[0] =
+      PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz, isa_->GetMajorVersion());
+    cmd_data[1] =
+      PM4_PRED_EXEC_DW2_EXEC_COUNT(i - pred_exec_cmd_sz) | PM4_PRED_EXEC_DW2_VIRTUALXCCID_SELECT(0x1);
+  }
 
   HSA::hsa_signal_store_screlease(exec_pm4_signal, 1);
-  queues_[QueuePCSampling]->ExecutePM4(cmd_data, cmd_sz * sizeof(uint32_t), HSA_FENCE_SCOPE_NONE,
+  queues_[QueuePCSampling]->ExecutePM4(cmd_data, i * sizeof(uint32_t), HSA_FENCE_SCOPE_NONE,
                                        HSA_FENCE_SCOPE_SYSTEM, &exec_pm4_signal);
   do {
     hsa_signal_value_t val = HSA::hsa_signal_wait_scacquire(
