@@ -99,28 +99,6 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
   return ::grpc::Status::OK;
 }
 
-::grpc::Status RdcAPIServiceImpl::GetAllCpuDevices(::grpc::ServerContext* context,
-  const ::rdc::Empty* request,
-  ::rdc::GetAllCpuDevicesResponse* reply) {
-(void)(context);
-(void)(request);
-if (!reply) {
-return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty reply");
-}
-uint32_t cpu_index_list[RDC_MAX_NUM_DEVICES];
-uint32_t count = 0;
-rdc_status_t result = rdc_device_get_all_cpu(rdc_handle_, cpu_index_list, &count);
-reply->set_status(result);
-if (result != RDC_ST_OK) {
-return ::grpc::Status::OK;
-}
-for (uint32_t i = 0; i < count; i++) {
-reply->add_cpus(cpu_index_list[i]);
-}
-
-return ::grpc::Status::OK;
-}
-
 ::grpc::Status RdcAPIServiceImpl::GetDeviceAttributes(
     ::grpc::ServerContext* context, const ::rdc::GetDeviceAttributesRequest* request,
     ::rdc::GetDeviceAttributesResponse* reply) {
@@ -138,25 +116,6 @@ return ::grpc::Status::OK;
   reply->set_status(result);
 
   return ::grpc::Status::OK;
-}
-
-::grpc::Status RdcAPIServiceImpl::GetDeviceCpuAttributes(
-  ::grpc::ServerContext* context, const ::rdc::GetCpuDeviceAttributesRequest* request,
-  ::rdc::GetCpuDeviceAttributesResponse* reply) {
-(void)(context);
-if (!reply || !request) {
-  return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
-}
-uint32_t cpu_index = request->cpu_index();
-rdc_device_attributes_t attribute;
-rdc_status_t result = rdc_device_get_cpu_attributes(rdc_handle_, cpu_index, &attribute);
-
-::rdc::DeviceAttributes* attr = reply->mutable_attributes();
-attr->set_device_name(attribute.device_name);
-
-reply->set_status(result);
-
-return ::grpc::Status::OK;
 }
 
 ::grpc::Status RdcAPIServiceImpl::GetComponentVersion(
