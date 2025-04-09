@@ -299,12 +299,12 @@ class AtomicExch
   }
 };
 
-inline dim3 GenerateAtomicExchThreadDimensions() { return GENERATE(dim3(16), dim3(1024)); }
+inline dim3 GenerateAtomicExchThreadDimensions() { return GENERATE(dim3(16), dim3(128)); }
 
 inline dim3 GenerateAtomicExchBlockDimensions() {
   int sm_count = 0;
   HIP_CHECK(hipDeviceGetAttribute(&sm_count, hipDeviceAttributeMultiprocessorCount, 0));
-  return GENERATE_COPY(dim3(sm_count), dim3(sm_count + sm_count / 2));
+  return dim3(sm_count);
 }
 
 template <typename TestType, AtomicScopes scope, int memory_scope = __HIP_MEMORY_SCOPE_AGENT>

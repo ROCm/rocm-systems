@@ -479,7 +479,7 @@ void TestCore(const TestParams& p) {
   Verify<TestType, operation>(p, res_vals, old_vals);
 }
 
-inline dim3 GenerateThreadDimensions() { return dim3(16); }
+inline dim3 GenerateThreadDimensions() { return GENERATE(dim3(16), dim3(128)); }
 
 inline dim3 GenerateBlockDimensions() {
   int sm_count = 0;
