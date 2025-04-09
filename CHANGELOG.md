@@ -7,6 +7,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 ### Added
 
 - Added profiling and metric collection capabilities for VCN engine activity, JPEG engine activity and API tracing for rocDecode, rocJPEG and VA-APIs.
+- Added a "how-to" document for network performance profiling for standard Network Interface Cards (NICs).
 
 ### Changed
 
