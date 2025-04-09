@@ -42,6 +42,8 @@
 /* Captures user specified time (seconds) to sleep */
 extern unsigned int g_SleepTime;
 
+static pthread_mutex_t ptrace_mtx;
+
 void KFDMemoryTest::SetUp() {
     ROUTINE_START
 
@@ -1353,6 +1355,8 @@ static void PtraceAccess(KFDTEST_PARAMETERS* pTestParamters) {
     prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY, 0, 0, 0);
 #endif
 
+    pthread_mutex_lock(&ptrace_mtx);
+
     // Find current pid so the child can trace it
     pid_t tracePid = getpid();
 
@@ -1413,6 +1417,8 @@ static void PtraceAccess(KFDTEST_PARAMETERS* pTestParamters) {
         EXPECT_NE_GPU(0, WIFEXITED(childStatus), gpuNode);
         EXPECT_EQ_GPU(0, WEXITSTATUS(childStatus), gpuNode);
     }
+
+    pthread_mutex_unlock(&ptrace_mtx);
 
     // Clear gaps in the source that should not have been copied
     (reinterpret_cast<uint8_t*>(mem[0]))[  sizeof(long)    ] = 0;
@@ -1508,6 +1514,8 @@ static void PtraceAccessInvisibleVram(KFDTEST_PARAMETERS* pTestParamters) {
     prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY, 0, 0, 0);
 #endif
 
+    pthread_mutex_lock(&ptrace_mtx);
+
     // Find out my pid so the child can trace it
     pid_t tracePid = getpid();
 
@@ -1563,6 +1571,8 @@ static void PtraceAccessInvisibleVram(KFDTEST_PARAMETERS* pTestParamters) {
         EXPECT_NE_GPU(0, WIFEXITED(childStatus), gpuNode);
         EXPECT_EQ_GPU(0, WEXITSTATUS(childStatus), gpuNode);
     }
+
+    pthread_mutex_unlock(&ptrace_mtx);
 
     /* Use shader to read back data to check poke results */
     HsaMemoryBuffer isaBuffer(PAGE_SIZE, gpuNode, true/*zero*/, false/*local*/, true/*exec*/);
