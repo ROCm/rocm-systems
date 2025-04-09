@@ -508,8 +508,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                                             user_data, ts);
                 break;
             }
-#if(ROCPROFILER_VERSION_MAJOR == 0 && ROCPROFILER_VERSION_MINOR >= 7) ||                 \
-    ROCPROFILER_VERSION_MAJOR >= 1
+#if(ROCPROFILER_VERSION >= 700)
             case ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API:
             {
                 tool_tracing_callback_start(category::rocm_rocdecode_api{}, record,
@@ -593,8 +592,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                                            ts, _bt_data);
                 break;
             }
-#if(ROCPROFILER_VERSION_MAJOR == 0 && ROCPROFILER_VERSION_MINOR >= 7) ||                 \
-    ROCPROFILER_VERSION_MAJOR >= 1
+#if(ROCPROFILER_VERSION >= 700)
             case ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API:
             {
                 tool_tracing_callback_stop(category::rocm_rocdecode_api{}, record,
@@ -1039,8 +1037,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
                 ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API,
                 ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
                 ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
-#if(ROCPROFILER_VERSION_MAJOR == 0 && ROCPROFILER_VERSION_MINOR >= 7) ||                 \
-    ROCPROFILER_VERSION_MAJOR >= 1
+#if(ROCPROFILER_VERSION >= 700)
                 ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API,
                 ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API,
 #endif

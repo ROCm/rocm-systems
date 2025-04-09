@@ -40,6 +40,7 @@ profiling, how it supports performance analysis, and how to leverage its capabil
       * :doc:`Instrumenting and rewriting a binary application <./how-to/instrumenting-rewriting-binary-application>`
       * :doc:`Performing causal profiling <./how-to/performing-causal-profiling>`
       * :doc:`Profiling Python scripts <./how-to/profiling-python-scripts>`
+      * :doc:`Network performance profiling <./how-to/nic-profiling>`
      
     * :doc:`Understanding the output <./how-to/understanding-rocprof-sys-output>`
     * :doc:`Using the ROCm Systems Profiler API <./how-to/using-rocprof-sys-api>`    

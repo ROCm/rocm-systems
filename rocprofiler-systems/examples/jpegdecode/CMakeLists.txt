@@ -42,7 +42,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED On)
 
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/../../cmake)
-list(APPEND CMAKE_PREFIX_PATH ${ROCmVersion_DIR}/hip ${ROCmVersion_DIR})
+list(APPEND CMAKE_PREFIX_PATH ${ROCmVersion_DIR}/lib/cmake ${ROCmVersion_DIR})
 list(APPEND CMAKE_MODULE_PATH ${ROCmVersion_DIR}/share/rocjpeg/cmake)
 
 set(CMAKE_BUILD_TYPE "RelWithDebInfo")
@@ -57,7 +57,7 @@ if(ROCPROFSYS_DISABLE_EXAMPLES)
     endif()
 endif()
 
-find_package(rocJPEG QUIET)
+find_package(ROCJPEG QUIET)
 find_package(rocprofiler-register QUIET)
 
 # Copy image files to build directory
@@ -104,6 +104,7 @@ if(HIP_FOUND
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocprofiler-register::rocprofiler-register)
 
     # rocJPEG
+    message(STATUS "RocJPEG library found: ${ROCJPEG_LIBRARY}")
     include_directories(${ROCJPEG_INCLUDE_DIR})
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${ROCJPEG_LIBRARY})
     list(APPEND SOURCES ${PROJECT_SOURCE_DIR} jpegdecodeperf.cpp)

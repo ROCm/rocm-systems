@@ -35,6 +35,8 @@ subtrees:
           title: Performing causal profiling
         - file: how-to/profiling-python-scripts.rst
           title: Profiling Python scripts
+        - file: how-to/nic-profiling.rst
+          title: Network performance profiling
     - file: how-to/understanding-rocprof-sys-output.rst
       title: Understanding the output
     - file: how-to/using-rocprof-sys-api.rst
