@@ -162,6 +162,8 @@ jobs:
           -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;videodecode;jpegdecode"
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
           -DMPI_HEADERS_ALLOW_MPICH=OFF
+          --
+          -LE "transpose|rccl|videodecode|jpegdecode|network"
 
     - name: Test Build-Tree Module
       timeout-minutes: 45
@@ -250,7 +252,7 @@ jobs:
         rocm-version: ['6.3']
         mpi-headers: ['OFF']
         build-jobs: ['3']
-        ctest-exclude: ['-LE "transpose|videodecode|jpegdecode"']
+        ctest-exclude: ['-LE "transpose|videodecode|jpegdecode|network"']
 
     env:
       BUILD_TYPE: MinSizeRel
@@ -465,3 +467,5 @@ jobs:
           -DROCPROFSYS_MAX_THREADS=64
           -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;videodecode;jpegdecode"
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
+          --
+          -LE "transpose|rccl|videodecode|jpegdecode|network"
