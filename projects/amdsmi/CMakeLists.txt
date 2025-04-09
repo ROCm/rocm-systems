@@ -16,12 +16,6 @@ set(BUILD_SHARED_LIBS
 set(CMAKE_MODULE_PATH
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/"
     CACHE INTERNAL "Default module path.")
-
-# Default libdir to "lib", this skips GNUInstallDirs from trying to take a guess if it's unset
-set(CMAKE_INSTALL_LIBDIR
-    "lib"
-    CACHE STRING "Library install directory")
-
 ## Include common cmake modules
 include(utils)
 include(help_package)
