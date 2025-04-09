@@ -77,8 +77,10 @@ class RdcRocpBase {
 
   // these fields must be divided by time passed
   std::unordered_set<rdc_field_t> eval_fields = {
-      RDC_FI_PROF_EVAL_MEM_R_BW, RDC_FI_PROF_EVAL_MEM_W_BW, RDC_FI_PROF_EVAL_FLOPS_16,
-      RDC_FI_PROF_EVAL_FLOPS_32, RDC_FI_PROF_EVAL_FLOPS_64,
+      RDC_FI_PROF_EVAL_MEM_R_BW,         RDC_FI_PROF_EVAL_MEM_W_BW,
+      RDC_FI_PROF_EVAL_FLOPS_16,         RDC_FI_PROF_EVAL_FLOPS_32,
+      RDC_FI_PROF_EVAL_FLOPS_64,         RDC_FI_PROF_EVAL_FLOPS_16_PERCENT,
+      RDC_FI_PROF_EVAL_FLOPS_32_PERCENT, RDC_FI_PROF_EVAL_FLOPS_64_PERCENT,
   };
 
   /**
