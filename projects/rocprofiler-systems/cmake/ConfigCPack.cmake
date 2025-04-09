@@ -122,6 +122,14 @@ set(ROCPROFSYS_PACKAGE_FILE_NAME
     )
 rocprofiler_systems_add_feature(ROCPROFSYS_PACKAGE_FILE_NAME "CPack filename")
 
+if(ROCM_DEP_ROCMCORE OR ROCPROFILER_DEP_ROCMCORE)
+    set(_DEBIAN_PACKAGE_DEPENDS "rocm-core")
+    set(_RPM_PACKAGE_REQUIRES "rocm-core")
+else()
+    set(_DEBIAN_PACKAGE_DEPENDS "")
+    set(_RPM_PACKAGE_REQUIRES "")
+endif()
+
 # -------------------------------------------------------------------------------------- #
 #
 # Debian package specific variables
@@ -135,7 +143,6 @@ string(REGEX REPLACE "([a-zA-Z])-([0-9])" "\\1\\2" CPACK_DEBIAN_PACKAGE_RELEASE
                      "${CPACK_DEBIAN_PACKAGE_RELEASE}")
 string(REPLACE "-" "~" CPACK_DEBIAN_PACKAGE_RELEASE "${CPACK_DEBIAN_PACKAGE_RELEASE}")
 
-set(_DEBIAN_PACKAGE_DEPENDS "")
 if(DYNINST_USE_OpenMP)
     list(APPEND _DEBIAN_PACKAGE_DEPENDS libgomp1)
 endif()
@@ -221,10 +228,35 @@ set(CPACK_RPM_PACKAGE_PROVIDES
     "${CPACK_RPM_PACKAGE_PROVIDES}"
     CACHE STRING "RPM package provides" FORCE)
 
+if(ROCPROFSYS_USE_MPI)
+    if("${ROCPROFSYS_MPI_IMPL}" STREQUAL "openmpi")
+        list(APPEND _RPM_PACKAGE_REQUIRES "libopenmpi-devel")
+    elseif("${ROCPROFSYS_MPI_IMPL}" STREQUAL "mpich")
+        list(APPEND _RPM_PACKAGE_REQUIRES "libmpich-devel")
+    endif()
+endif()
+
+if(ROCPROFSYS_USE_ROCM)
+    list(APPEND _RPM_PACKAGE_REQUIRES "amd-smi-lib")
+    list(APPEND _RPM_PACKAGE_REQUIRES "rocprofiler-sdk >= ${rocprofiler-sdk_VERSION}")
+
+    if(ROCPROFSYS_BUILD_TESTING)
+        list(APPEND _RPM_PACKAGE_REQUIRES "rocdecode-test")
+        list(APPEND _RPM_PACKAGE_REQUIRES "rocjpeg-test")
+    endif()
+endif()
+
+string(REPLACE ";" ", " _RPM_PACKAGE_REQUIRES "${_RPM_PACKAGE_REQUIRES}")
+set(CPACK_RPM_PACKAGE_REQUIRES
+    ${_RPM_PACKAGE_REQUIRES}
+    CACHE STRING "RPM package requires" FORCE)
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
 set(CPACK_RPM_PACKAGE_RELEASE_DIST ON)
-set(CPACK_RPM_PACKAGE_AUTOREQPROV ON)
+set(CPACK_RPM_PACKAGE_AUTOPROV ON)
+
+# Temporarily disable auto-requires. This is a workaround for AMD-SMI requirement
+set(CPACK_RPM_PACKAGE_AUTOREQ OFF)
 
 # -------------------------------------------------------------------------------------- #
 #
@@ -263,7 +295,6 @@ rocprofiler_systems_add_feature(CPACK_DEBIAN_PACKAGE_SHLIBDEPS
 
 rocprofiler_systems_add_feature(CPACK_RPM_FILE_NAME "RPM file name")
 rocprofiler_systems_add_feature(CPACK_RPM_PACKAGE_RELEASE "RPM package release version")
-rocprofiler_systems_add_feature(CPACK_RPM_PACKAGE_REQUIRES "RPM package dependencies")
 rocprofiler_systems_add_feature(CPACK_RPM_PACKAGE_AUTOREQPROV
                                 "RPM package auto generate requires and provides")
 rocprofiler_systems_add_feature(CPACK_RPM_PACKAGE_REQUIRES "RPM package requires")
