@@ -89,9 +89,6 @@
         "SWDEV-446588 - Disable graph multi gpu testcases until graph has support for it",
         "=== Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/210 ===",
         "Unit_Assert_Positive_Basic_KernelFail",
-        "Unit_Coalesced_Group_Tiled_Partition_Sync_Positive_Basic - uint8_t",
-        "Unit_Coalesced_Group_Tiled_Partition_Sync_Positive_Basic - uint16_t",
-        "Unit_Coalesced_Group_Tiled_Partition_Sync_Positive_Basic - uint32_t",
         "=== SWDEV-444987 - Below tests fail in stress testing on 25/01/2023 ===",
         "Unit_atomicAnd_Negative_Parameters_RTC",
         "Unit_atomicOr_Negative_Parameters_RTC",
@@ -209,8 +206,6 @@
         "Unit_Device___hfma2_Accuracy_Positive",
     #endif
     #if defined gfx90a || defined gfx942 || defined gfx950
-        "=== SWDEV-443630 : Below test failed in stress test on 19/01/24 ===",
-        "Unit_Multi_Grid_Group_Positive_Sync",
         "Unit_Warp_Shfl_Up_Positive_Basic - int",
         "Unit_Warp_Shfl_Up_Positive_Basic - unsigned int",
         "Unit_Warp_Shfl_Up_Positive_Basic - long",

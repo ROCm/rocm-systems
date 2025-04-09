@@ -28,7 +28,8 @@ THE SOFTWARE.
 struct CmdOptions {
   int iterations = 10;
   int warmups = 100;
-  int cg_iterations = 5;
+  int cg_iterations = 1;
+  double cg_reduction_factor = 6.25;
   bool no_display = false;
   bool progress = false;
   uint64_t accuracy_iterations = std::numeric_limits<uint32_t>::max() + 1ull;

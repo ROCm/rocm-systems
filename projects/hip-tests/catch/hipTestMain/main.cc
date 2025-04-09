@@ -54,6 +54,9 @@ int main(int argc, char** argv) {
     | Opt(cmd_options.cg_iterations, "cg_iterations")
         ["-C"]["--cg-iterations"]
         ("Number of iterations used for cooperative groups sync tests (default: 5)")
+    | Opt(cmd_options.cg_reduction_factor, "cg_reduction_factor")
+        ["-C"]["--cg-reduction-factor"]
+        ("Percentage of warp sizes for shuffle tests to be actually tested (default: 10)") // TODO
     | Opt(cmd_options.accuracy_iterations, "accuracy_iterations")
         ["-A"]["--accuracy-iterations"]
         ("Number of iterations used for math accuracy tests with randomly generated inputs (default: 2^32)")
