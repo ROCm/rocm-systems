@@ -1091,6 +1091,16 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
       break;
     }
 
+    case RDC_FI_GPU_BUSY_PERCENT: {
+      uint32_t gpu_busy_percent = 0;
+      ret = amdsmi_get_gpu_busy_percent(processor_handle, &gpu_busy_percent);
+      value->status = Smi2RdcError(ret);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(gpu_busy_percent);
+      }
+    }
+
     default:
       break;
   }
