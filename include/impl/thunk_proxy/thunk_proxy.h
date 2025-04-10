@@ -29,12 +29,6 @@ enum SchedLevel {
   kHigh = 2,
 };
 
-enum AsicFamilyType {
-  kPlumBONITO,
-  kNavi44,
-  kNavi48
-};
-
 struct HwsInfo {
   union {
     struct {
@@ -56,7 +50,7 @@ typedef struct {
   bool is_dgpu;
   char product_name[MAX_PATH];
   uint64_t uuid;
-  AsicFamilyType family;
+  uint32_t family;
   uint32_t device_id;
   uint32_t wavefront_size;
   uint32_t compute_unit_count;
