@@ -20,6 +20,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+// clang-format off
+
 // Description Fields:
 //   Arg #   Type              Meaning
 //  -------------------------------------------------
@@ -54,7 +56,7 @@ FLD_DESC_ENT(RDC_FI_GPU_MM_DEC_UTIL,     "Mutilmedia decoder busy percentage",  
 FLD_DESC_ENT(RDC_FI_GPU_MEMORY_ACTIVITY, "Memory busy percentage",                      "GPU_MEM_UTIL",     true)
 FLD_DESC_ENT(RDC_FI_GPU_MEMORY_MAX_BANDWIDTH,       "Memory max bandwidth",             "GPU_MEM_MAX_BANDWIDTH",   true)
 FLD_DESC_ENT(RDC_FI_GPU_MEMORY_CUR_BANDWIDTH,       "Memory current bandwidth",         "GPU_MEM_CUR_BANDWIDTH",   true)
-
+FLD_DESC_ENT(RDC_FI_GPU_BUSY_PERCENT,    "GPU busy percentage",                         "GPU_BUSY_PERCENT", true)
 FLD_DESC_ENT(RDC_FI_GPU_PAGE_RETRIED,    "Retried page of the GPU instance",            "GPU_PAGE_RETRIED", true)
 
 // ECC totals
