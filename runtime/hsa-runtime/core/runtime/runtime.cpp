@@ -614,6 +614,18 @@ hsa_status_t Runtime::CopyMemoryStatus(core::Agent* dst_agent, core::Agent* src_
   return copy_agent->DmaCopyStatus(*dst_agent, *src_agent, engine_ids_mask);
 }
 
+hsa_status_t Runtime::GetPreferredEngine(core::Agent* dst_agent, core::Agent* src_agent,
+                                         uint32_t* recommended_ids_mask) {
+  const bool src_gpu = (src_agent->device_type() == core::Agent::DeviceType::kAmdGpuDevice);
+  core::Agent* copy_agent = (src_gpu) ? src_agent : dst_agent;
+
+  if (dst_agent == src_agent) {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  return copy_agent->DmaPreferredEngine(*dst_agent, *src_agent, recommended_ids_mask);
+}
+
 hsa_status_t Runtime::FillMemory(void* ptr, uint32_t value, size_t count) {
   // Choose blit agent from pointer info
   hsa_amd_pointer_info_t info = {};
