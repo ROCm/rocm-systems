@@ -3738,6 +3738,25 @@ amdsmi_status_t amdsmi_set_gpu_fan_speed(amdsmi_processor_handle processor_handl
  */
 
 /**
+ *  @brief Get GPU busy percent from gpu_busy_percent sysfs file
+ *
+ *  @ingroup tagClkPowerPerfQuery
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details Given a processor handle @p processor_handle, this function returns GPU busy
+ *  percentage.
+ *
+ *  @param[in] processor_handle a processor handle
+ *
+ *  @param[in,out] gpu_busy_percent Direct output from the gpu_busy_percent sysfs file
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_gpu_busy_percent(amdsmi_processor_handle processor_handle,
+                                            uint32_t *gpu_busy_percent);
+
+/**
  *  @brief Get coarse grain utilization counter of the specified device
  *
  *  @ingroup tagClkPowerPerfQuery

@@ -2467,6 +2467,9 @@ amdsmi_reset_gpu_fan.argtypes = [amdsmi_processor_handle, uint32_t]
 amdsmi_set_gpu_fan_speed = _libraries['libamd_smi.so'].amdsmi_set_gpu_fan_speed
 amdsmi_set_gpu_fan_speed.restype = amdsmi_status_t
 amdsmi_set_gpu_fan_speed.argtypes = [amdsmi_processor_handle, uint32_t, uint64_t]
+amdsmi_get_gpu_busy_percent = _libraries['libamd_smi.so'].amdsmi_get_gpu_busy_percent
+amdsmi_get_gpu_busy_percent.restype = amdsmi_status_t
+amdsmi_get_gpu_busy_percent.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint32)]
 amdsmi_get_utilization_count = _libraries['libamd_smi.so'].amdsmi_get_utilization_count
 amdsmi_get_utilization_count.restype = amdsmi_status_t
 amdsmi_get_utilization_count.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_utilization_counter_t), uint32_t, ctypes.POINTER(ctypes.c_uint64)]
@@ -3212,8 +3215,8 @@ __all__ = \
     'amdsmi_get_gpu_available_counters',
     'amdsmi_get_gpu_bad_page_info',
     'amdsmi_get_gpu_bad_page_threshold', 'amdsmi_get_gpu_bdf_id',
-    'amdsmi_get_gpu_board_info', 'amdsmi_get_gpu_cache_info',
-    'amdsmi_get_gpu_compute_partition',
+    'amdsmi_get_gpu_board_info', 'amdsmi_get_gpu_busy_percent',
+    'amdsmi_get_gpu_cache_info', 'amdsmi_get_gpu_compute_partition',
     'amdsmi_get_gpu_compute_process_gpus',
     'amdsmi_get_gpu_compute_process_info',
     'amdsmi_get_gpu_compute_process_info_by_pid',

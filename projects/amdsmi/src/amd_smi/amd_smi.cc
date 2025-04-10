@@ -3213,6 +3213,11 @@ amdsmi_status_t amdsmi_reset_gpu(amdsmi_processor_handle processor_handle) {
     return rsmi_wrapper(rsmi_dev_gpu_reset, processor_handle, 0);
 }
 
+amdsmi_status_t amdsmi_get_gpu_busy_percent(amdsmi_processor_handle processor_handle,
+                                            uint32_t *gpu_busy_percent) {
+    return rsmi_wrapper(rsmi_dev_busy_percent_get, processor_handle, 0, gpu_busy_percent);
+}
+
 amdsmi_status_t amdsmi_get_utilization_count(amdsmi_processor_handle processor_handle,
                 amdsmi_utilization_counter_t utilization_counters[],
                 uint32_t count,
