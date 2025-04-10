@@ -50,28 +50,24 @@ namespace rdc {
 double RdcRocpBase::run_profiler(uint32_t gpu_index, rdc_field_t field) {
   thread_local std::vector<rocprofiler_record_counter_t> records;
 
-  // initialize hsa. hsa_init() will also load the profiler libs under the hood
-  hsa_status_t status = HSA_STATUS_SUCCESS;
-
   auto counter_sampler = CounterSampler::get_samplers()[gpu_index];
   if (!counter_sampler) {
-    RDC_LOG(RDC_ERROR, "Error: Counter sampler not found for GPU index " << gpu_index << std::endl);
-    throw std::runtime_error("Counter sampler not found");
+    RDC_LOG(RDC_ERROR, "Error: Counter sampler not found for GPU index " << gpu_index);
+    return RDC_ST_BAD_PARAMETER;
   }
 
   auto field_it = field_to_metric.find(field);
   if (field_it == field_to_metric.end()) {
-    RDC_LOG(RDC_ERROR,
-            "Error: Field " << field << " not found in field_to_metric map." << std::endl);
-    throw std::out_of_range("Field not found in field_to_metric map");
+    RDC_LOG(RDC_ERROR, "Error: Field " << field << " not found in field_to_metric map.");
+    return RDC_ST_BAD_PARAMETER;
   }
   const std::string& metric_id = field_it->second;
 
   try {
     counter_sampler->sample_counter_values({metric_id}, records, collection_duration_us_k);
   } catch (const std::exception& e) {
-    RDC_LOG(RDC_ERROR, "Error while sampling counter values: " << e.what() << std::endl);
-    throw;
+    RDC_LOG(RDC_ERROR, "Error while sampling counter values: " << e.what());
+    return RDC_ST_BAD_PARAMETER;
   }
 
   // Aggregate counter values. Rocprof v1/v2 summed values across dimensions.
@@ -86,9 +82,8 @@ double RdcRocpBase::run_profiler(uint32_t gpu_index, rdc_field_t field) {
 const char* RdcRocpBase::get_field_id_from_name(rdc_field_t field) {
   auto it = field_to_metric.find(field);
   if (it == field_to_metric.end()) {
-    RDC_LOG(RDC_ERROR,
-            "Error: Field ID " << field << " not found in field_to_metric map." << std::endl);
-    throw std::out_of_range("Field ID not found in field_to_metric map");
+    RDC_LOG(RDC_ERROR, "Error: Field ID " << field << " not found in field_to_metric map.");
+    return "";
   }
 
   return field_to_metric.at(field);
@@ -111,7 +106,7 @@ RdcRocpBase::RdcRocpBase() {
       {RDC_FI_PROF_ELAPSED_CYCLES, "GRBM_COUNT"},
       {RDC_FI_PROF_TENSOR_ACTIVE_PERCENT,
        "MfmaUtil"},  // same as TENSOR_ACTIVE but available for more GPUs
-      {RDC_FI_PROF_GPU_UTIL_PERCENT, "GPU_UTIL"},
+      {RDC_FI_PROF_GPU_UTIL_PERCENT, "GPU_UTIL"},  // metric is divided by 100 to get percent
       // metrics below are divided by time passed
       {RDC_FI_PROF_EVAL_MEM_R_BW, "FETCH_SIZE"},
       {RDC_FI_PROF_EVAL_MEM_W_BW, "WRITE_SIZE"},
@@ -125,7 +120,8 @@ RdcRocpBase::RdcRocpBase() {
       {RDC_FI_PROF_VALU_PIPE_ISSUE_UTIL, "ValuPipeIssueUtil"},
       {RDC_FI_PROF_SM_ACTIVE, "VALUBusy"},
       {RDC_FI_PROF_OCC_PER_ACTIVE_CU, "MeanOccupancyPerActiveCU"},
-      // RDC_FI_PROF_OCC_ELAPSED is derived from OCC_PER_ACTIVE_CU and ACTIVE_CYCLES
+      {RDC_FI_PROF_OCC_ELAPSED,
+       "GRBM_GUI_ACTIVE"},  // this metric is derived from OCC_PER_ACTIVE_CU and ACTIVE_CYCLES
       {RDC_FI_PROF_CPC_CPC_STAT_BUSY, "CPC_CPC_STAT_BUSY"},
       {RDC_FI_PROF_CPC_CPC_STAT_IDLE, "CPC_CPC_STAT_IDLE"},
       {RDC_FI_PROF_CPC_CPC_STAT_STALL, "CPC_CPC_STAT_STALL"},
@@ -187,8 +183,8 @@ RdcRocpBase::RdcRocpBase() {
   samplers = CounterSampler::get_samplers();
 
   // populate fields
-  for (auto& [k, v] : temp_field_map_k) {
-    all_fields.push_back(v);
+  for (const auto& [k, v] : temp_field_map_k) {
+    all_fields.emplace_back(v);
   }
 
   // find intersection of supported and requested fields
@@ -196,11 +192,11 @@ RdcRocpBase::RdcRocpBase() {
     auto& cs = *samplers[gpu_index];
     RDC_LOG(RDC_DEBUG,
             "gpu_index[" << gpu_index << "] = node_id[" << agents[gpu_index].node_id << "]");
-    for (auto& [str, id] : cs.get_supported_counters(cs.get_agent())) {
+    for (auto& [str, id] : CounterSampler::get_supported_counters(cs.get_agent())) {
       checked_fields.emplace_back(str);
     }
 
-    for (auto& [k, v] : temp_field_map_k) {
+    for (const auto& [k, v] : temp_field_map_k) {
       auto found = std::find(checked_fields.begin(), checked_fields.end(), v);
       if (found != checked_fields.end()) {
         field_to_metric.insert({k, v});
@@ -227,56 +223,85 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, double* value) 
     return RDC_ST_BAD_PARAMETER;
   }
 
-  const auto start_time = std::chrono::high_resolution_clock::now();
-  *value = run_profiler(gpu_index, field);
-  const auto stop_time = std::chrono::high_resolution_clock::now();
-  // extra processing required
-  if (eval_fields.find(field) != eval_fields.end()) {
-    const auto elapsed =
-        std::chrono::duration_cast<std::chrono::milliseconds>(stop_time - start_time).count();
-    *value = *value / elapsed;
-  }
+  const bool is_eval_field = (eval_fields.find(field) != eval_fields.end());
 
-  auto simd_to_cu = [this, gpu_index](double prof_value, double matrix_fp) {
-    // profiler result of RDC_OPS_*_PER_SIMDCYCLE is per SIMD, RDC needs it per CU
-    //
-    return prof_value / (matrix_fp / static_cast<double>(agents[gpu_index].simd_per_cu));
-  };
+  const auto start_time = std::chrono::high_resolution_clock::now();
+  const double read_value = run_profiler(gpu_index, field);
+  const auto stop_time = std::chrono::high_resolution_clock::now();
+  const double elapsed = std::chrono::duration<double, std::milli>(stop_time - start_time).count();
+  double divided_value = NAN;
+  double final_value = NAN;
+
+  if (is_eval_field) {
+    if (elapsed != 0.0) {
+      divided_value = read_value / (elapsed / 1000.0);
+    } else {
+      RDC_LOG(RDC_ERROR, "Error: Elapsed time is zero. Cannot divide by zero.");
+      return RDC_ST_BAD_PARAMETER;
+    }
+  }
 
   switch (field) {
     case RDC_FI_PROF_GPU_UTIL_PERCENT:
+      // RDC_FI_PROF_GPU_UTIL_PERCENT is mapped to GPU_UTIL
       // GPU_UTIL metric is available on more GPUs than ENGINE_ACTIVE.
       // ENGINE_ACTIVE = GPU_UTIL/100, so do the math ourselves
-      *value = *value / 100.0F;
+      final_value = read_value / 100.0F;
       break;
     case RDC_FI_PROF_OCC_ELAPSED: {
-      const double occupancy_val = run_profiler(gpu_index, RDC_FI_PROF_OCC_PER_ACTIVE_CU);
-      const double active_cycles_val = run_profiler(gpu_index, RDC_FI_PROF_ACTIVE_CYCLES);
+      // RDC_FI_PROF_OCC_ELAPSED is mapped to GRBM_GUI_ACTIVE, the read happens earlier in this
+      // function
+      const double active_cycles_val = read_value;
       if (active_cycles_val != 0.0) {
-        *value = occupancy_val / active_cycles_val;
-        return RDC_ST_OK;
+        // read second value from rocprofiler
+        const double occupancy_val = run_profiler(gpu_index, RDC_FI_PROF_OCC_PER_ACTIVE_CU);
+        final_value = occupancy_val / active_cycles_val;
       } else {
         return RDC_ST_BAD_PARAMETER;
       }
     } break;
     case RDC_FI_PROF_EVAL_FLOPS_16_PERCENT: {
+      if (!is_eval_field) {
+        RDC_LOG(RDC_ERROR, "Field expected to be in the eval_fields list but it isn't!");
+        return RDC_ST_BAD_PARAMETER;
+      }
       // 1024, 2048, and 256 are taken from "INTRODUCING AMD CDNA 3 ARCHITECTURE" white paper
       const std::string target_version = agents[gpu_index].name;
       // TODO: Design a lookup table for other GPUs
       const bool isMI200 = (target_version.find("gfx90a") != std::string::npos);
+      // FLOPS/clock/CU
       if (isMI200) {
-        *value = simd_to_cu(*value, 1024.0F);  // FLOPS/clock/CU
-      } else {                                 // Assume mi300
-        *value = simd_to_cu(*value, 2048.0F);  // FLOPS/clock/CU
+        final_value =
+            divided_value / (1024.0F / static_cast<double>(agents[gpu_index].simd_per_cu));
+      } else {  // Assume mi300
+        final_value =
+            divided_value / (2048.0F / static_cast<double>(agents[gpu_index].simd_per_cu));
       }
     } break;
     case RDC_FI_PROF_EVAL_FLOPS_32_PERCENT:
     case RDC_FI_PROF_EVAL_FLOPS_64_PERCENT:
-      *value = simd_to_cu(*value, 256.0F);  // FLOPS/clock/CU
+      if (!is_eval_field) {
+        RDC_LOG(RDC_ERROR, "Field expected to be in the eval_fields list but it isn't!");
+        return RDC_ST_BAD_PARAMETER;
+      }
+      // FLOPS/clock/CU
+      final_value = divided_value / (256.0F / static_cast<double>(agents[gpu_index].simd_per_cu));
       break;
     default:
+      if (is_eval_field) {
+        final_value = divided_value;
+      } else {
+        final_value = read_value;
+      }
       break;
   }
+
+  if (final_value == NAN) {
+    RDC_LOG(RDC_ERROR, "Error: Final value is NaN.");
+    return RDC_ST_BAD_PARAMETER;
+  }
+
+  *value = final_value;
 
   return RDC_ST_OK;
 }
