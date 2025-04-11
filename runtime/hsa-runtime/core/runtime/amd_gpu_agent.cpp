@@ -117,7 +117,8 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
       trap_handler_tma_region_(NULL),
       pcs_hosttrap_data_(),
       pcs_stochastic_data_(),
-      xgmi_cpu_gpu_(false) {
+      xgmi_cpu_gpu_(false),
+      rec_sdma_eng_override_(false) {
   const bool is_apu_node = (properties_.NumCPUCores > 0);
   profile_ = (is_apu_node) ? HSA_PROFILE_FULL : HSA_PROFILE_BASE;
 
@@ -1160,7 +1161,7 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
     bool limit_h2d_blit = isa_->GetVersion() == core::Isa::Version(9, 0, 10);
 
     // Ensure engine selection is within proper range based on transfer type
-    if ((is_xgmi && engine_offset <= properties_.NumSdmaEngines) ||
+    if ((is_xgmi && !rec_sdma_eng_override_ && engine_offset <= properties_.NumSdmaEngines) ||
         (!is_xgmi && engine_offset > (properties_.NumSdmaEngines +
                                       properties_.NumSdmaXgmiEngines)) ||
           (!is_h2d_blit && !is_same_gpu && limit_h2d_blit &&
