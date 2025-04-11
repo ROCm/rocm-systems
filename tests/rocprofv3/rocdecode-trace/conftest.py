@@ -15,25 +15,25 @@ def pytest_addoption(parser):
     parser.addoption(
         "--json-input",
         action="store",
-        default="rocdecode-tracing/out_results.json",
+        default="rocdecode-trace/rocdecode-demo-trace/out_results.json",
         help="Input JSON",
     )
     parser.addoption(
         "--otf2-input",
         action="store",
-        default="rocdecode-tracing/out_results.otf2",
+        default="rocdecode-trace/rocdecode-demo-trace/out_results.otf2",
         help="Input OTF2",
     )
     parser.addoption(
         "--pftrace-input",
         action="store",
-        default="rocdecode-tracing/out_results.pftrace",
+        default="rocdecode-trace/rocdecode-demo-trace/out_results.pftrace",
         help="Input pftrace file",
     )
     parser.addoption(
         "--csv-input",
         action="store",
-        default="rocdecode-tracing/out_rocdecode_api_trace.csv",
+        default="rocdecode-trace/rocdecode-demo-trace/out_rocdecode_api_trace.csv",
         help="Input CSV",
     )
 

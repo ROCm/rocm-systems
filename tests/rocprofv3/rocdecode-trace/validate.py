@@ -32,9 +32,14 @@ def test_rocdeocde(json_data):
     buffer_records = data["buffer_records"]
 
     rocdecode_data = buffer_records["rocdecode_api"]
-    # If rocDecode tracing is not supported, end early
-    if len(rocdecode_data) == 0:
-        return pytest.skip("rocdecode tracing unavailable")
+    assert len(rocdecode_data) > 0
+    # Ensure that the input file path has the correct string saved
+    assert len(rocdecode_data[0].args) > 1
+    assert rocdecode_data[0].args[1].name == "input_file_path"
+    assert (
+        rocdecode_data[0].args[1].value.split("/")[-1]
+        == "AMD_driving_virtual_20-H265.265"
+    )
 
     _, bf_op_names = get_operation(data, "ROCDECODE_API")
 
@@ -50,14 +55,21 @@ def test_rocdeocde(json_data):
         assert "end_timestamp" in node
         assert "start_timestamp" in node
         assert "thread_id" in node
+        assert "args" in node
+        assert "retval" in node
 
         assert node.size > 0
         assert node.thread_id > 0
         assert node.start_timestamp > 0
         assert node.end_timestamp > 0
         assert node.start_timestamp < node.end_timestamp
+        assert len(node.args) > 0
+        assert node.retval.uint64_t_retval in [0, 1], "Unexpected return values"
 
-        assert data.strings.buffer_records[node.kind].kind == "ROCDECODE_API"
+        assert (
+            data.strings.buffer_records[node.kind].kind == "ROCDECODE_API"
+            or data.strings.buffer_records[node.kind].kind == "ROCDECODE_API_EXT"
+        )
         assert (
             data.strings.buffer_records[node.kind].operations[node.operation]
             in bf_op_names
@@ -65,9 +77,6 @@ def test_rocdeocde(json_data):
 
 
 def test_csv_data(csv_data):
-    # If rocDecode tracing is not supported, end early
-    if len(csv_data) == 0:
-        return pytest.skip("rocdecode tracing unavailable")
     assert len(csv_data) > 0, "Expected non-empty csv data"
 
     api_calls = []
@@ -95,7 +104,7 @@ def test_csv_data(csv_data):
 
         api_calls.append(row["Function"])
 
-        assert row["Domain"] == "ROCDECODE_API"
+        assert row["Domain"] in ("ROCDECODE_API", "ROCDECODE_API_EXT")
         assert int(row["Process_Id"]) > 0
         assert int(row["Thread_Id"]) > 0
         assert int(row["Start_Timestamp"]) > 0
@@ -122,13 +131,6 @@ def test_csv_data(csv_data):
 def test_perfetto_data(pftrace_data, json_data):
     import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
 
-    # If rocDecode tracing is not supported, end early
-    if (
-        pftrace_data == None
-        or len(json_data["rocprofiler-sdk-tool"]["buffer_records"]["rocdecode_api"]) == 0
-    ):
-        return pytest.skip("rocdecode tracing unavailable")
-
     rocprofv3.test_perfetto_data(
         pftrace_data,
         json_data,
@@ -138,13 +140,6 @@ def test_perfetto_data(pftrace_data, json_data):
 
 def test_otf2_data(otf2_data, json_data):
     import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
-
-    # If rocDecode tracing is not supported, end early
-    if (
-        otf2_data == None
-        or len(json_data["rocprofiler-sdk-tool"]["buffer_records"]["rocdecode_api"]) == 0
-    ):
-        return pytest.skip("rocdecode tracing unavailable")
 
     rocprofv3.test_otf2_data(
         otf2_data,

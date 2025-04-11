@@ -160,7 +160,7 @@ using pc_sampling_host_trap_buffered_output_t =
     buffered_output<rocprofiler::tool::rocprofiler_tool_pc_sampling_host_trap_record_t,
                     domain_type::PC_SAMPLING_HOST_TRAP>;
 using rocdecode_buffered_output_t =
-    buffered_output<rocprofiler_buffer_tracing_rocdecode_api_record_t, domain_type::ROCDECODE>;
+    buffered_output<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t, domain_type::ROCDECODE>;
 using rocjpeg_buffered_output_t =
     buffered_output<rocprofiler_buffer_tracing_rocjpeg_api_record_t, domain_type::ROCJPEG>;
 using kernel_dispatch_buffered_output_with_stream_t =

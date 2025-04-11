@@ -32,12 +32,11 @@ def test_data_structure(input_data):
     node_exists("buffer_records", sdk_data)
 
     node_exists("names", sdk_data["callback_records"])
-    # Uncomment when rocprofiler register mainline supports rocdecode
-    # node_exists("rocdecode_api_traces", sdk_data["callback_records"])
+    node_exists("rocdecode_api_traces", sdk_data["callback_records"])
 
     node_exists("names", sdk_data["buffer_records"])
-    # Uncomment when rocprofiler register mainline supports rocdecode
-    # node_exists("rocdecode_api_traces", sdk_data["buffer_records"])
+    node_exists("rocdecode_api_traces", sdk_data["buffer_records"])
+    node_exists("rocdecode_api_ext_traces", sdk_data["buffer_records"])
 
 
 def test_size_entries(input_data):
@@ -88,6 +87,11 @@ def test_timestamps(input_data):
         for itr in sdk_data["buffer_records"][titr]:
             assert itr["start_timestamp"] <= itr["end_timestamp"]
 
+    for itr in sdk_data["buffer_records"]["rocdecode_api_ext_traces"]:
+        assert itr["start_timestamp"] < itr["end_timestamp"]
+        assert itr["start_timestamp"] > 0
+        assert itr["end_timestamp"] > 0
+
 
 def test_internal_correlation_ids(input_data):
     """Assure correlation ids are unique"""
@@ -135,12 +139,11 @@ def test_rocdecode_traces(input_data):
     rocdecode_bf_traces = sdk_data["buffer_records"]["rocdecode_api_traces"]
     rocdecode_api_bf_ops = get_operation(buffer_records, "ROCDECODE_API")
     assert len(rocdecode_api_bf_ops[1]) == 16
+    assert len(rocdecode_bf_traces) > 0
 
     rocdecode_cb_traces = sdk_data["callback_records"]["rocdecode_api_traces"]
     rocdecode_api_cb_ops = get_operation(callback_records, "ROCDECODE_API")
-    # If rocDecode tracing is not supported, end early
-    if len(rocdecode_bf_traces) == 0:
-        return pytest.skip("rocdecode tracing unavailable")
+
     assert (
         rocdecode_api_bf_ops[1] == rocdecode_api_cb_ops[1]
         and len(rocdecode_api_cb_ops[1]) == 16
@@ -176,6 +179,19 @@ def test_rocdecode_traces(input_data):
         "rocDecDestroyBitstreamReader",
     ]:
         assert call in api_calls
+
+    rocdecode_ext_bf_traces = sdk_data["buffer_records"]["rocdecode_api_ext_traces"]
+    assert len(rocdecode_ext_bf_traces) > 0
+    # Ensure that the input file path has the correct string saved
+    assert len(rocdecode_ext_bf_traces[0].args) > 1
+    assert rocdecode_ext_bf_traces[0].args[1].name == "input_file_path"
+    assert (
+        rocdecode_ext_bf_traces[0].args[1].value.split("/")[-1]
+        == "AMD_driving_virtual_20-H265.265"
+    )
+    for api_call in rocdecode_ext_bf_traces:
+        assert len(api_call["args"]) > 0
+        assert (api_call.retval.uint64_t_retval in [0, 1], "Unexpected return values")
 
 
 def test_retired_correlation_ids(input_data):
