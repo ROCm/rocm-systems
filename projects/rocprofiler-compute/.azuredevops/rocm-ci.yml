@@ -15,7 +15,6 @@ trigger:
     include:
     - develop
     - amd-staging
-    - amd-mainline
   paths:
     exclude:
     - .github
@@ -32,7 +31,6 @@ pr:
     include:
     - develop
     - amd-staging
-    - amd-mainline
   paths:
     exclude:
     - .github
@@ -44,5 +42,6 @@ pr:
     - VERSION
   drafts: false
 
+# For changes to develop and staging, build & test against both staging and mainline ROCm
 jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/rocprofiler-compute.yml@pipelines_repo

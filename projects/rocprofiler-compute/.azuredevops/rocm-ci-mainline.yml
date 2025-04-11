@@ -1,0 +1,65 @@
+resources:
+  repositories:
+  - repository: pipelines_repo
+    type: github
+    endpoint: ROCm
+    name: ROCm/ROCm
+
+variables:
+- group: common
+- template: /.azuredevops/variables-global.yml@pipelines_repo
+
+trigger:
+  batch: true
+  branches:
+    include:
+    - amd-mainline
+  paths:
+    exclude:
+    - .github
+    - docs
+    - '.*.y*ml'
+    - '*.md'
+    - AUTHORS
+    - LICENSE
+    - VERSION
+
+pr:
+  autoCancel: true
+  branches:
+    include:
+    - amd-mainline
+  paths:
+    exclude:
+    - .github
+    - docs
+    - '.*.y*ml'
+    - '*.md'
+    - AUTHORS
+    - LICENSE
+    - VERSION
+  drafts: false
+
+# For changes to mainline, only build & test against mainline ROCm
+jobs:
+  - template: ${{ variables.CI_COMPONENT_PATH }}/rocprofiler-compute.yml@pipelines_repo
+    parameters:
+      jobMatrix:
+        buildJobs:
+          - gfx942-mainline:
+            name: gfx942_mainline
+            target: gfx942
+            dependencySource: mainline
+          - gfx90a-mainline:
+            name: gfx90a_mainline
+            target: gfx90a
+            dependencySource: mainline
+        testJobs:
+          - gfx942-mainline:
+            name: gfx942_mainline
+            target: gfx942
+            dependencySource: mainline
+          - gfx90a-mainline:
+            name: gfx90a_mainline
+            target: gfx90a
+            dependencySource: mainline
