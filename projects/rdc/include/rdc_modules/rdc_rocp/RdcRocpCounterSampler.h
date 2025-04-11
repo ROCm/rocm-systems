@@ -67,7 +67,6 @@ class CounterSampler {
  private:
   rocprofiler_agent_id_t agent_ = {};
   rocprofiler_context_id_t ctx_ = {};
-  rocprofiler_buffer_id_t buf_ = {};
   rocprofiler_profile_config_id_t profile_ = {.handle = 0};
 
   std::map<std::vector<std::string>, rocprofiler_profile_config_id_t> cached_profiles_;
