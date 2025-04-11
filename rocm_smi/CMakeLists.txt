@@ -57,10 +57,6 @@ set(rocm_smi_VERSION_MINOR "${VERSION_MINOR}")
 set(rocm_smi_VERSION_PATCH "0")
 set(rocm_smi_VERSION_BUILD "0")
 
-set(SMI_EXAMPLE_EXE "rocm_smi_ex")
-
-add_executable(${SMI_EXAMPLE_EXE} "example/rocm_smi_example.cc")
-target_link_libraries(${SMI_EXAMPLE_EXE} ${ROCM_SMI_TARGET})
 add_library(${ROCM_SMI_TARGET} ${CMN_SRC_LIST} ${CMN_INC_LIST})
 target_link_libraries(${ROCM_SMI_TARGET} pthread rt dl)
 target_include_directories(${ROCM_SMI_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}

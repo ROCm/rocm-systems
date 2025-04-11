@@ -5,7 +5,7 @@
 set -eu
 
 # get current dir
-DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )/.." &> /dev/null && pwd )
 
 # override by calling this script with:
 # DOCKER_NAME=yourdockername ./update_wrapper.sh

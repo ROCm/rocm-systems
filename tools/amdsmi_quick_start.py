@@ -26,18 +26,28 @@ import logging
 import signal
 import sys
 
-from amdsmi import *
+try:
+    from amdsmi import *
+except ImportError as e:
+    print(f"Failed to import 'amdsmi': {e}")
+    print("Ensure that the 'amdsmi' library is installed and accessible.")
+    raise
 
 from pathlib import Path
 
 sys.path.append(str(Path('/opt/rocm/libexec/')))
 sys.path.append(str(Path('/opt/rocm/libexec/amdsmi_cli/')))
 
-from amdsmi_commands import AMDSMICommands
-from amdsmi_helpers import AMDSMIHelpers
-from amdsmi_logger import AMDSMILogger
-from amdsmi_parser import AMDSMIParser
-import amdsmi_cli_exceptions
+try:
+    from amdsmi_commands import AMDSMICommands
+    from amdsmi_helpers import AMDSMIHelpers
+    from amdsmi_logger import AMDSMILogger
+    from amdsmi_parser import AMDSMIParser
+    import amdsmi_cli_exceptions
+except ImportError as e:
+    print(f"Failed to import amdsmi cli libs: {e}")
+    print("Ensure that you have installed amdsmi's package.")
+
 
 helpers = AMDSMIHelpers()
 
