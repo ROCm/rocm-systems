@@ -6,6 +6,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* Add support to be able to acquire from rocprofv3 every single channle on each XCD of TCC counters
+
 * Add Docker files to package the application and dependencies into a single portable and executable standalone binary file
 
 * Analysis report based filtering
@@ -45,6 +47,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* Change the rocprof version for unit tests to rocprofv3 on all SoCs except MI100
 * Change normal_unit default to per_kernel
 * Change dependency from rocm-smi to amd-smi
 * Decrease profiling time by not collecting counters not used in post analysis
