@@ -476,7 +476,7 @@ configure_settings(bool _init)
         "CPUs to collect frequency information for. Values should be separated by commas "
         "and can be explicit or ranges, e.g. 0,1,5-8. An empty value implies 'all' and "
         "'none' suppresses all CPU frequency sampling",
-        std::string{}, "process_sampling");
+        std::string{ "none" }, "process_sampling");
 
     ROCPROFSYS_CONFIG_SETTING(
         std::string, "ROCPROFSYS_SAMPLING_GPUS",
