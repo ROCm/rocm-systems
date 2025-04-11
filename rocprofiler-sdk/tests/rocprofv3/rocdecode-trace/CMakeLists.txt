@@ -30,8 +30,8 @@ add_test(
     NAME rocprofv3-test-rocdecode-tracing-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --rocdecode-trace -d
-        ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format json csv
-        --log-level env --
+        ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format json csv pftrace
+        otf2 --log-level env --
         $<IF:$<TARGET_EXISTS:rocdecode-demo>,$<$<TARGET_EXISTS:rocdecode-demo>:$<TARGET_FILE:rocdecode-demo>>,rocdecode-demo>
         -i ${ROCDECODE_VIDEO_FILE})
 
@@ -52,10 +52,10 @@ add_test(
     NAME rocprofv3-test-rocdecode-tracing-validate
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
-        ${CMAKE_CURRENT_BINARY_DIR}/rocdecode-trace/out_results.json --otf2-input
-        ${CMAKE_CURRENT_BINARY_DIR}/rocdecode-trace/out_results.otf2 --pftrace-input
-        ${CMAKE_CURRENT_BINARY_DIR}/rocdecode-trace/out_results.pftrace --csv-input
-        ${CMAKE_CURRENT_BINARY_DIR}/rocdecode-trace/out_rocdecode_api_trace.csv)
+        ${CMAKE_CURRENT_BINARY_DIR}/rocdecode-demo-trace/out_results.json --otf2-input
+        ${CMAKE_CURRENT_BINARY_DIR}/rocdecode-demo-trace/out_results.otf2 --pftrace-input
+        ${CMAKE_CURRENT_BINARY_DIR}/rocdecode-demo-trace/out_results.pftrace --csv-input
+        ${CMAKE_CURRENT_BINARY_DIR}/rocdecode-demo-trace/out_rocdecode_api_trace.csv)
 
 set_tests_properties(
     rocprofv3-test-rocdecode-tracing-validate

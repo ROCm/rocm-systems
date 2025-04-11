@@ -27,6 +27,8 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hip/api_args.h>
 #include <rocprofiler-sdk/kfd/page_migration_args.h>
+#include <rocprofiler-sdk/rocdecode/api_args.h>
+#include <rocprofiler-sdk/rocdecode/api_id.h>
 
 #include <stdint.h>
 
@@ -213,7 +215,7 @@ typedef struct rocprofiler_buffer_tracing_rocdecode_api_record_t
 {
     uint64_t                          size;  ///< size of this struct
     rocprofiler_buffer_tracing_kind_t kind;
-    rocprofiler_tracing_operation_t   operation;
+    rocprofiler_rocdecode_api_id_t    operation;
     rocprofiler_correlation_id_t      correlation_id;   ///< correlation ids for record
     rocprofiler_timestamp_t           start_timestamp;  ///< start time in nanoseconds
     rocprofiler_timestamp_t           end_timestamp;    ///< end time in nanoseconds
@@ -224,6 +226,29 @@ typedef struct rocprofiler_buffer_tracing_rocdecode_api_record_t
     /// @var operation
     /// @brief Specification of the API function, e.g., ::rocprofiler_rocdecode_api_id_t
 } rocprofiler_buffer_tracing_rocdecode_api_record_t;
+
+/**
+ * @brief An extended ROCProfiler rocDecode API Tracer Record which includes function arguments.
+ * Pointers are not dereferenced.
+ */
+typedef struct rocprofiler_buffer_tracing_rocdecode_api_ext_record_t
+{
+    uint64_t                           size;  ///< size of this struct
+    rocprofiler_buffer_tracing_kind_t  kind;
+    rocprofiler_rocdecode_api_id_t     operation;
+    rocprofiler_correlation_id_t       correlation_id;   ///< correlation ids for record
+    rocprofiler_timestamp_t            start_timestamp;  ///< start time in nanoseconds
+    rocprofiler_timestamp_t            end_timestamp;    ///< end time in nanoseconds
+    rocprofiler_thread_id_t            thread_id;        ///< id for thread generating this record
+    rocprofiler_rocdecode_api_args_t   args;             ///< arguments of function call
+    rocprofiler_rocdecode_api_retval_t retval;           ///< return value of function call
+
+    /// @var kind
+    /// @brief ::ROCPROFILER_BUFFER_TRACING_ROCDECODE_API_EXT
+    /// @var operation
+    /// @brief Specification of the API function (@see
+    /// ::rocprofiler_rocdecode_api_id_t)
+} rocprofiler_buffer_tracing_rocdecode_api_ext_record_t;
 
 /**
  * @brief ROCProfiler Buffer rocJPEG API Record.
@@ -241,7 +266,8 @@ typedef struct rocprofiler_buffer_tracing_rocjpeg_api_record_t
     /// @var kind
     /// @brief ::ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API
     /// @var operation
-    /// @brief Specification of the API function, e.g., ::rocprofiler_rocjpeg_api_id_t
+    /// @brief Specification of the API function (@see
+    /// ::rocprofiler_rocjpeg_api_id_t)
 } rocprofiler_buffer_tracing_rocjpeg_api_record_t;
 
 /**

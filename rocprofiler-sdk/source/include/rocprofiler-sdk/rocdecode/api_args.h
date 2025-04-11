@@ -51,6 +51,7 @@ typedef struct rocprofiler_rocdecode_api_no_args
 
 typedef union rocprofiler_rocdecode_api_retval_t
 {
+    uint64_t    uint64_t_retval;
     int32_t     rocDecStatus_retval;
     const char* const_charp_retval;
 } rocprofiler_rocdecode_api_retval_t;

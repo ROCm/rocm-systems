@@ -962,9 +962,9 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
 
                 tool::write_ring_buffer(*record, domain_type::RCCL);
             }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_ROCDECODE_API)
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_ROCDECODE_API_EXT)
             {
-                auto* record = static_cast<rocprofiler_buffer_tracing_rocdecode_api_record_t*>(
+                auto* record = static_cast<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t*>(
                     header->payload);
 
                 tool::write_ring_buffer(*record, domain_type::ROCDECODE);
@@ -1747,13 +1747,13 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                    &get_buffers().rocdecode_api_trace),
                          "buffer creation");
 
-        ROCPROFILER_CALL(
-            rocprofiler_configure_buffer_tracing_service(get_client_ctx(),
-                                                         ROCPROFILER_BUFFER_TRACING_ROCDECODE_API,
-                                                         nullptr,
-                                                         0,
-                                                         get_buffers().rocdecode_api_trace),
-            "buffer tracing service for ROCDecode api configure");
+        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
+                             get_client_ctx(),
+                             ROCPROFILER_BUFFER_TRACING_ROCDECODE_API_EXT,
+                             nullptr,
+                             0,
+                             get_buffers().rocdecode_api_trace),
+                         "buffer tracing service for ROCDecode api configure");
     }
 
     if(tool::get_config().rocjpeg_api_trace)
