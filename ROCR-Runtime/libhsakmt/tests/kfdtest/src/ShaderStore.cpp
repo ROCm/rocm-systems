@@ -1134,6 +1134,14 @@ const char *TrapHandlerIsa =
             s_getreg_b32 ttmp14, hwreg(HW_REG_EXCP_FLAG_PRIV)
             s_and_b32 ttmp2, ttmp14, 0x300
             s_cbranch_scc1 RESTORE_AND_EXIT
+         .elseif (.amdgcn.gfx_generation_number == 11)
+            s_getreg_b32 ttmp14, hwreg(HW_REG_TRAPSTS)
+            s_and_b32 ttmp2, ttmp14, 0x30000
+            s_cbranch_scc1 RESTORE_AND_EXIT
+         .else
+            s_getreg_b32 ttmp14, hwreg(HW_REG_TRAPSTS)
+            s_and_b32 ttmp2, ttmp14, 0x1800000
+            s_cbranch_scc1 RESTORE_AND_EXIT
          .endif
         /* restore and increment program counter to skip shader trap jump*/
         s_add_u32 ttmp0, ttmp0, 4
