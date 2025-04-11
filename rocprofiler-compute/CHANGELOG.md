@@ -41,6 +41,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * L2 to EA stalls
   * L2 to EA stalls per channel
 
+* Roofline support for RHEL 10
+
 ### Changed
 
 * Change normal_unit default to per_kernel

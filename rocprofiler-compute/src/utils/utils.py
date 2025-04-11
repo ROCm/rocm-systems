@@ -902,6 +902,7 @@ def detect_roofline(mspec):
     elif (
         rhel_distro == "platform:el8"
         or rhel_distro == "platform:el9"
+        or rhel_distro == "platform:el10"
         or rhel_distro == "platform:al8"
     ):
         # Must be a valid RHEL machine
