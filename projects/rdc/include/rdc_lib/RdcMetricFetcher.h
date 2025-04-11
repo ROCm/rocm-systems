@@ -39,8 +39,7 @@ class RdcMetricFetcher {
 
   virtual rdc_status_t fetch_smi_field(uint32_t gpu_index, rdc_field_t field_id,
                                        rdc_field_value* value) = 0;
-  virtual rdc_status_t fetch_smi_cpu_field(uint32_t cpu_index, rdc_field_t field_id,
-                               rdc_field_value* value) = 0;
+
   virtual rdc_status_t bulk_fetch_smi_fields(
       rdc_gpu_field_t* fields, uint32_t fields_count,
       std::vector<rdc_gpu_field_value_t>& results) = 0;  // NOLINT

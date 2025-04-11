@@ -43,16 +43,9 @@ class RdcAPIServiceImpl final : public ::rdc::RdcAPI::Service {
   ::grpc::Status GetAllDevices(::grpc::ServerContext* context, const ::rdc::Empty* request,
                                ::rdc::GetAllDevicesResponse* reply) override;
 
-  ::grpc::Status GetAllCpuDevices(::grpc::ServerContext* context, const ::rdc::Empty* request,
-                               ::rdc::GetAllCpuDevicesResponse* reply) override;
-
   ::grpc::Status GetDeviceAttributes(::grpc::ServerContext* context,
                                      const ::rdc::GetDeviceAttributesRequest* request,
                                      ::rdc::GetDeviceAttributesResponse* reply) override;
-
-  ::grpc::Status GetDeviceCpuAttributes(::grpc::ServerContext* context,
-                                      const ::rdc::GetCpuDeviceAttributesRequest* request,
-                                      ::rdc::GetCpuDeviceAttributesResponse* reply) override;
 
   ::grpc::Status GetComponentVersion(::grpc::ServerContext* context,
                                      const ::rdc::GetComponentVersionRequest* request,

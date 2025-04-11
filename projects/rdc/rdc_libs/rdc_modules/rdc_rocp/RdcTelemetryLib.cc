@@ -64,7 +64,7 @@ rdc_status_t rdc_module_init(uint64_t /*flags*/) {
     // before the tests are. Utilize an env var instead.
     return RDC_ST_DISABLED_MODULE;
   }
-  rocp_p = std::unique_ptr<amd::rdc::RdcRocpBase>(new amd::rdc::RdcRocpBase);
+  rocp_p = std::make_unique<amd::rdc::RdcRocpBase>();
   return RDC_ST_OK;
 }
 rdc_status_t rdc_module_destroy() {
@@ -98,7 +98,7 @@ rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields, const uint3
   // Bulk fetch fields
   std::vector<rdc_gpu_field_value_t> bulk_results;
 
-  struct timeval tv {};
+  struct timeval tv{};
   gettimeofday(&tv, nullptr);
   const uint64_t curTime = static_cast<uint64_t>(tv.tv_sec) * 1000 + tv.tv_usec / 1000;
 
