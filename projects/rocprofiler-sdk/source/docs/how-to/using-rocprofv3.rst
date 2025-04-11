@@ -503,6 +503,8 @@ Here are the contents of ``rocdecode_api_trace.csv`` file:
    :widths: 10,10,10,10,10,20,20
    :header-rows: 1
 
+Perfetto will also show rocDeocde API arguments. Pointers will not be dereferenced and only the address will be displayed.
+
 rocJPEG trace
 +++++++++++++++
 

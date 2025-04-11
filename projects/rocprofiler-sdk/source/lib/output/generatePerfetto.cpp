@@ -77,7 +77,7 @@ write_perfetto(
     const generator<rocprofiler_buffer_tracing_scratch_memory_record_t>& /*scratch_memory_gen*/,
     const generator<rocprofiler_buffer_tracing_rccl_api_record_t>&          rccl_api_gen,
     const generator<rocprofiler_buffer_tracing_memory_allocation_record_t>& memory_allocation_gen,
-    const generator<rocprofiler_buffer_tracing_rocdecode_api_record_t>&     rocdecode_api_gen,
+    const generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>& rocdecode_api_gen,
     const generator<rocprofiler_buffer_tracing_rocjpeg_api_record_t>&       rocjpeg_api_gen)
 {
     namespace sdk = ::rocprofiler::sdk;
@@ -493,8 +493,9 @@ write_perfetto(
         for(auto ditr : rocdecode_api_gen)
             for(auto itr : rocdecode_api_gen.get(ditr))
             {
-                auto  name  = buffer_names.at(itr.kind, itr.operation);
-                auto& track = thread_tracks.at(itr.thread_id);
+                auto  name           = buffer_names.at(itr.kind, itr.operation);
+                auto& track          = thread_tracks.at(itr.thread_id);
+                auto  rocdecode_args = sdk::serialization::get_buffer_tracing_args(itr);
 
                 TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::rocdecode_api>::name,
                                   ::perfetto::StaticString(name.data()),
@@ -516,7 +517,14 @@ write_perfetto(
                                   "corr_id",
                                   itr.correlation_id.internal,
                                   "ancestor_id",
-                                  itr.correlation_id.ancestor);
+                                  itr.correlation_id.ancestor,
+                                  [&](::perfetto::EventContext ctx) {
+                                      for(const auto& rocdecode_arg : rocdecode_args)
+                                      {
+                                          sdk::add_perfetto_annotation(
+                                              ctx, rocdecode_arg.name, rocdecode_arg.value);
+                                      }
+                                  });
                 TRACE_EVENT_END(sdk::perfetto_category<sdk::category::rocdecode_api>::name,
                                 track,
                                 itr.end_timestamp);

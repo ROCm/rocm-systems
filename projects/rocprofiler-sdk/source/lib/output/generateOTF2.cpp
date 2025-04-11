@@ -368,7 +368,7 @@ write_otf2(
     std::deque<rocprofiler_buffer_tracing_scratch_memory_record_t>* /*scratch_memory_data*/,
     std::deque<rocprofiler_buffer_tracing_rccl_api_record_t>*          rccl_api_data,
     std::deque<rocprofiler_buffer_tracing_memory_allocation_record_t>* memory_allocation_data,
-    std::deque<rocprofiler_buffer_tracing_rocdecode_api_record_t>*     rocdecode_api_data,
+    std::deque<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>* rocdecode_api_data,
     std::deque<rocprofiler_buffer_tracing_rocjpeg_api_record_t>*       rocjpeg_api_data)
 {
     namespace sdk = ::rocprofiler::sdk;
@@ -618,8 +618,29 @@ write_otf2(
         add_event_data(hip_api_data, sdk::category::hip_api{});
         add_event_data(marker_api_data, sdk::category::marker_api{});
         add_event_data(rccl_api_data, sdk::category::rccl_api{});
-        add_event_data(rocdecode_api_data, sdk::category::rocdecode_api{});
         add_event_data(rocjpeg_api_data, sdk::category::rocjpeg_api{});
+    }
+
+    for(auto itr : *rocdecode_api_data)
+    {
+        auto name = buffer_names.at(itr.kind, itr.operation);
+        _hash_data.emplace(
+            get_hash_id(name),
+            region_info{std::string{name}, OTF2_REGION_ROLE_FUNCTION, OTF2_PARADIGM_USER});
+
+        auto& _evt_info = thread_event_info.at(itr.thread_id);
+        _evt_info.event_count += 1;
+
+        _data.emplace_back(evt_data{ROCPROFILER_CALLBACK_PHASE_ENTER,
+                                    name,
+                                    _evt_info.get_location(),
+                                    itr.start_timestamp,
+                                    get_attr(sdk::category::rocdecode_api{})});
+        _data.emplace_back(evt_data{ROCPROFILER_CALLBACK_PHASE_EXIT,
+                                    name,
+                                    _evt_info.get_location(),
+                                    itr.end_timestamp,
+                                    nullptr});
     }
 
     for(auto itr : *memory_copy_data)

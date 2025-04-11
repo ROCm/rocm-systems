@@ -102,6 +102,7 @@ ROCPROFILER_BUFFER_TRACING_KIND_STRING(ROCJPEG_API)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIP_STREAM)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIP_RUNTIME_API_EXT)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIP_COMPILER_API_EXT)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(ROCDECODE_API_EXT)
 
 template <size_t Idx, size_t... Tail>
 std::pair<const char*, size_t>
@@ -302,6 +303,7 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
             return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
         }
         case ROCPROFILER_BUFFER_TRACING_ROCDECODE_API:
+        case ROCPROFILER_BUFFER_TRACING_ROCDECODE_API_EXT:
         {
             val =
                 rocprofiler::rocdecode::name_by_id<ROCPROFILER_ROCDECODE_TABLE_ID_CORE>(operation);
@@ -451,6 +453,7 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
             return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
         }
         case ROCPROFILER_BUFFER_TRACING_ROCDECODE_API:
+        case ROCPROFILER_BUFFER_TRACING_ROCDECODE_API_EXT:
         {
             ops = rocprofiler::rocdecode::get_ids<ROCPROFILER_ROCDECODE_TABLE_ID_CORE>();
             break;
@@ -515,6 +518,14 @@ rocprofiler_iterate_buffer_tracing_record_args(
             auto* _payload =
                 static_cast<rocprofiler_buffer_tracing_hip_api_ext_record_t*>(record.payload);
             rocprofiler::hip::iterate_args<ROCPROFILER_HIP_TABLE_ID_Runtime>(
+                _payload->operation, _payload->args, callback, user_data);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
+        case ROCPROFILER_BUFFER_TRACING_ROCDECODE_API_EXT:
+        {
+            auto* _payload =
+                static_cast<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t*>(record.payload);
+            rocprofiler::rocdecode::iterate_args<ROCPROFILER_ROCDECODE_TABLE_ID_CORE>(
                 _payload->operation, _payload->args, callback, user_data);
             return ROCPROFILER_STATUS_SUCCESS;
         }

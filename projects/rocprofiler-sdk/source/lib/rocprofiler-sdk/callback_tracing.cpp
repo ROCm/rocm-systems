@@ -574,6 +574,17 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
                 user_data);
             return ROCPROFILER_STATUS_SUCCESS;
         }
+        case ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API:
+        {
+            rocprofiler::rocdecode::iterate_args<ROCPROFILER_ROCDECODE_TABLE_ID_CORE>(
+                record.operation,
+                static_cast<rocprofiler_callback_tracing_rocdecode_api_data_t*>(record.payload)
+                    ->args,
+                callback,
+                max_deref,
+                user_data);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
         case ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY:
         case ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT:
         case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
@@ -581,7 +592,6 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
         case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION:
         case ROCPROFILER_CALLBACK_TRACING_RCCL_API:
         case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
-        case ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API:
         case ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API:
         case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
         {
