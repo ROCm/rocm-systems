@@ -47,6 +47,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
       ...
     ```
 
+### Resolved issues
+
+- **Deduplicated GPU IDs when receiving events using the `amd-smi event` command**.  
+
 ## amd_smi_lib for ROCm 6.4.1
 
 ### Added
@@ -627,6 +631,9 @@ Updated structure `amdsmi_vram_info_t`:
     2) ***Update your OS' kernel***  
     3) ***Building and installing your own kernel***  
 
+- **ModuleNotFoundError: No module named 'more_itertools' issue on Azure Linux 3 and Mariner2.0**  
+ With the reintroduction of python3-wheel and python3-setuptools dependencies in the CMake of amdsmi, Azure Linux 3 and Mariner2.0 now require more_itertools to build the Python library successfully. 
+  - **Workaround:** Execute `sudo python3 -m pip install more_itertools` before installation to resolve this issue.
 ## amd_smi_lib for ROCm 6.3.1
 
 ### Added

@@ -1,0 +1,86 @@
+name: ABI Compliance Check
+
+on:
+  pull_request:
+    branches:
+      - amd-staging
+      - amd-mainline
+      - release/rocm-rel-*
+    paths:
+      - 'include/amd_smi/amdsmi.h'
+  push:
+    branches:
+      - amd-staging
+      - amd-mainline
+      - release/rocm-rel-*
+    paths:
+      - 'include/amd_smi/amdsmi.h'
+  workflow_dispatch:
+
+jobs:
+  check-abi:
+    runs-on: lstt5
+    steps:
+      - name: Setup Environment
+        run: |
+          sudo rm -rf $GITHUB_WORKSPACE/* || true
+          sudo rm -rf $GITHUB_WORKSPACE/.[!.]* || true
+          sudo apt-get update
+          sudo apt-get install -y perl build-essential git universal-ctags
+          git clone https://github.com/lvc/abi-compliance-checker.git
+          cd abi-compliance-checker
+          sudo make install
+          abi-compliance-checker --version
+
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+          submodules: true
+
+      - name: Copy feature branch file as new
+        run: |
+          cp include/amd_smi/amdsmi.h amdsmi_new.h
+
+      - name: Fetch old file
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref_name }}" = "amd-mainline" ]; then
+            # Push to amd-mainline: use amd-mainline as old
+            git fetch origin amd-mainline:amd-mainline
+            git checkout amd-mainline -- include/amd_smi/amdsmi.h
+            mv include/amd_smi/amdsmi.h amdsmi_old.h
+            # Overwrite new with amd-staging
+            git fetch origin amd-staging:amd-staging
+            git checkout amd-staging -- include/amd_smi/amdsmi.h
+            mv include/amd_smi/amdsmi.h amdsmi_new.h
+          else
+            # Default: use amd-staging as old
+            git fetch origin amd-staging:amd-staging
+            git checkout amd-staging -- include/amd_smi/amdsmi.h
+            mv include/amd_smi/amdsmi.h amdsmi_old.h
+          fi
+
+      - name: Run ABI Compliance Check
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref_name }}" = "amd-mainline" ]; then
+            abi-compliance-checker -lib amdsmi -old amdsmi_old.h -new amdsmi_new.h -v1 amd-mainline -v2 amd-staging -report-path abi-report.html
+          else
+            abi-compliance-checker -lib amdsmi -old amdsmi_old.h -new amdsmi_new.h -v1 amd-staging -v2 ${{ github.ref_name }} -report-path abi-report.html
+          fi
+
+      - name: Display ABI Check Logs
+        if: always()
+        run: |
+          echo "Displaying ABI compliance check logs for ${{ github.ref_name }}"
+          if [ -f logs/amdsmi/${{ github.ref_name }}/log.txt ]; then
+            cat logs/amdsmi/${{ github.ref_name }}/log.txt
+          else
+            echo "No ABI check log found at logs/amdsmi/${{ github.ref_name }}/log.txt"
+          fi
+
+      - name: Upload ABI Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: abi-report
+          path: abi-report.html
