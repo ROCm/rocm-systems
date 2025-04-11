@@ -22,10 +22,10 @@ THE SOFTWARE.
 
 #include "rdc_lib/impl/RdcTopologyLinkImpl.h"
 
+#include <assert.h>
 #include <sys/time.h>
 #include <unistd.h>
 
-#include <assert.h>
 #include <algorithm>
 #include <ctime>
 #include <map>
@@ -85,11 +85,15 @@ rdc_status_t RdcTopologyLinkImpl::rdc_device_topology_get(uint32_t gpu_index,
   results->numa_node = numa_node;
 
   for (uint32_t i = 0; i < count; i++) {
+    std::pair<amdsmi_processor_handle, amdsmi_processor_handle> ph;
+    err = get_processor_handle_from_id(gpu_index_list[i], &ph.first);
+    if (err != AMDSMI_STATUS_SUCCESS) {
+      RDC_LOG(RDC_INFO, "Fail to get process GPUs processor handle information: " << err);
+      return status;
+    }
     for (uint32_t j = 0; j < count; j++) {
       if (gpu_index_list[i] == gpu_index_list[j]) continue;
-      std::pair<amdsmi_processor_handle, amdsmi_processor_handle> ph;
-      err = get_processor_handle_from_id(gpu_index_list[i], &ph.first);
-      err = get_processor_handle_from_id(gpu_index_list[i], &ph.second);
+      err = get_processor_handle_from_id(gpu_index_list[j], &ph.second);
       if (err != AMDSMI_STATUS_SUCCESS) {
         RDC_LOG(RDC_INFO, "Fail to get process GPUs processor handle information: " << err);
         return status;
@@ -116,7 +120,7 @@ rdc_status_t RdcTopologyLinkImpl::rdc_device_topology_get(uint32_t gpu_index,
         RDC_LOG(RDC_INFO, "Fail to get process GPUs hops and type information: " << err);
       }
 
-      bool accessible;
+      bool accessible = false;
       err = amdsmi_is_P2P_accessible(ph.first, ph.second, &accessible);
       if (err != AMDSMI_STATUS_SUCCESS) {
         RDC_LOG(RDC_INFO, "Fail to get process GPUs P2P accessible information: " << err);
@@ -128,9 +132,9 @@ rdc_status_t RdcTopologyLinkImpl::rdc_device_topology_get(uint32_t gpu_index,
       results->link_infos[i].max_bandwidth = max_bandwidth;
       results->link_infos[i].hops = hops;
       results->link_infos[i].link_type = static_cast<rdc_topology_link_type_t>(type);
+      results->link_infos[i].is_p2p_accessible = accessible;
     }
   }
-
   return RDC_ST_OK;
 }
 
