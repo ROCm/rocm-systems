@@ -69,7 +69,7 @@ class AMDSMIParser(argparse.ArgumentParser):
     """
     def __init__(self, version, list, static, firmware, bad_pages, metric,
                  process, profile, event, topology, set_value, reset, monitor,
-                 rocmsmi, xgmi, partition):
+                 rocmsmi, xgmi, partition, ras):
 
         # Helper variables
         self.helpers = AMDSMIHelpers()
@@ -115,7 +115,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Store possible subcommands & aliases for later errors
         self.possible_commands = ['version', 'list', 'static', 'firmware', 'ucode', 'bad-pages',
                                   'metric', 'process', 'profile', 'event', 'topology', 'set',
-                                  'reset', 'monitor', 'dmon', 'xgmi', 'partition']
+                                  'reset', 'monitor', 'dmon', 'xgmi', 'partition', 'ras']
 
         # Add all subparsers
         self._add_version_parser(self.subparsers, version)
@@ -134,6 +134,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_rocm_smi_parser(self.subparsers, rocmsmi)
         self._add_xgmi_parser(self.subparsers, xgmi)
         self._add_partition_parser(self.subparsers, partition)
+        self._add_ras_parser(self.subparsers, ras)
 
 
     def _not_negative_int(self, int_value, sub_arg=None):
@@ -239,6 +240,24 @@ class AMDSMIParser(argparse.ArgumentParser):
                 clk_level_args = collections.namedtuple('clk_level_args', ['clk_type', 'perf_levels'])
                 setattr(namespace, self.dest, clk_level_args(clk_type, perf_levels))
         return AMDSMIFreqArgs
+
+
+    def _check_folder_path(self):
+        """ Argument action validator:
+            Returns a path to folder from the folder path provided.
+            If the path doesn't exist create it.
+        """
+        class CheckOutputFilePath(argparse.Action):
+            outputformat = self.helpers.get_output_format()
+            # Checks the values
+            def __call__(self, parser, args, values, option_string=None):
+                path = Path(values)
+                path.mkdir(parents=True, exist_ok=True)
+                if not path.exists():
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidFilePathException(path, CheckOutputFilePath.outputformat)
+                elif path.is_dir():
+                    setattr(args, self.dest, path)
+        return CheckOutputFilePath
 
 
     def _check_output_file_path(self):
@@ -408,7 +427,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         return _CoreSelectAction
 
 
-    def _add_command_modifiers(self, subcommand_parser: argparse.ArgumentParser):
+    def _add_command_modifiers(self, subcommand_parser: argparse.ArgumentParser, logging_only=False):
         json_help = "Displays output in JSON format (human readable by default)."
         csv_help = "Displays output in CSV format (human readable by default)."
         file_help = "Saves output into a file on the provided path (stdout by default)."
@@ -418,12 +437,14 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         command_modifier_group = subcommand_parser.add_argument_group('Command Modifiers')
 
-        # Output Format options
-        logging_args = command_modifier_group.add_mutually_exclusive_group()
-        logging_args.add_argument('--json', action='store_true', required=False, help=json_help)
-        logging_args.add_argument('--csv', action='store_true', required=False, help=csv_help)
+        if not logging_only:
+            # Output Format options
+            logging_args = command_modifier_group.add_mutually_exclusive_group()
+            logging_args.add_argument('--json', action='store_true', required=False, help=json_help)
+            logging_args.add_argument('--csv', action='store_true', required=False, help=csv_help)
 
-        command_modifier_group.add_argument('--file', action=self._check_output_file_path(), type=str, required=False, help=file_help)
+            command_modifier_group.add_argument('--file', action=self._check_output_file_path(), type=str, required=False, help=file_help)
+
         # Placing loglevel outside the subcommands so it can be used with any subcommand
         command_modifier_group.add_argument('--loglevel', action='store', type=str.upper, required=False, help=loglevel_help, default='ERROR', metavar='LEVEL',
                                             choices=loglevel_choices)
@@ -1396,6 +1417,49 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Add command modifiers to the bottom
         self._add_command_modifiers(partition_parser)
+
+
+    def _add_ras_parser(self, subparsers: argparse._SubParsersAction, func):
+        """
+        Adds the 'ras' subcommand.
+
+        Expected command:
+            amd-smi ras --cper --severity=nonfatal-uncorrected,fatal --folder <folder_name> --file_limit=1000 --follow
+
+        All parameters are provided via options; no positional arguments or optional --file/--gpu are used.
+        """
+        # Subparser help text
+        ras_help = "Retrieve CPER (RAS) entries from the driver"
+        ras_description = (
+            "Retrieve and decode CPER (RAS) entries from the kernel driver.\n"
+            "Supports filtering by severity, exporting to different formats, and continuous monitoring.\n"
+            "This command accepts options only; no positional arguments are required."
+        )
+
+        # Help text for RAS arguments
+        cper_help = "Trigger CPER data retrieval"
+
+        severity_choices = ["nonfatal-uncorrected", "fatal", "nonfatal-corrected", "all"]
+        severity_choices_str = ", ".join(severity_choices)
+        severity_help = f"Set the SEVERITY filters from the following:\n    {severity_choices_str}"
+        folder_help = "Folder to dump CPER report files"
+        file_limit_help = "Maximum number of entries per output file"
+        follow_help = "Continuously monitor for new entries"
+
+        ras_parser = subparsers.add_parser("ras", help=ras_help, description=ras_description)
+        ras_parser.formatter_class = lambda prog: AMDSMISubparserHelpFormatter(prog)
+        ras_parser.set_defaults(func=func)
+
+        # Required flags and arguments:
+        ras_parser.add_argument("--cper", action="store_true", required=True, help=cper_help)
+        ras_parser.add_argument("--severity", type=str.lower, nargs='+', default=['all'], help=severity_help, choices=severity_choices, metavar='SEVERITY')
+        ras_parser.add_argument("--folder", type=str, action=self._check_folder_path(), default=False, help=folder_help)
+        ras_parser.add_argument("--file_limit", type=self._positive_int, action='store', default=1000, help=file_limit_help)
+        ras_parser.add_argument("--follow", action="store_true", default=False, help=follow_help)
+
+        # Add common modifiers and device selection arguments.
+        self._add_device_arguments(ras_parser, required=False)
+        self._add_command_modifiers(ras_parser, logging_only=True)
 
 
     def error(self, message):

@@ -55,50 +55,96 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
-- N/A
+- **Added dumping CPER entries from RAS tool `amdsmi_get_gpu_cper_entries()` to Python & C APIs.**  
+  - CPER entries consist of `amdsmi_cper_hdr_t`
 
+    ```shell
+    typedef struct {
+        char                   signature[4];       /* "CPER" */
+        uint16_t               revision;
+        uint32_t               signature_end;      /* 0xFFFFFFFF */
+        uint16_t               sec_cnt;
+        amdsmi_cper_sev_t      error_severity;
+        //valid_bits_t          valid_bits;
+        //uint32_t              valid_mask;    
+        amdsmi_cper_valid_bits_t cper_valid_bits; 
+        uint32_t                record_length;     /* Total size of CPER Entry */
+        amdsmi_cper_timestamp_t timestamp;
+        char                    platform_id[16];
+        amdsmi_cper_guid_t      partition_id;      /* Reserved */
+        char                  creator_id[16];
+        amdsmi_cper_guid_t    notify_type;         /* CMC, MCE, can use amdsmi_cper_notifiy_type_t to decode*/
+        char                  record_id[8];        /* Unique CPER Entry ID */
+        uint32_t              flags;               /* Reserved */
+        uint64_t              persistence_info;    /* Reserved */
+        uint8_t               reserved[12];        /* Reserved */
+    } amdsmi_cper_hdr_t;
+    ```
+
+  - Dumping CPER entires is also enabled in the CLI interface via `sudo amd-smi ras --cper`
+
+    ```shell
+    $ sudo amd-smi ras --cper
+    Dumping CPER file header entries for GPU 0:
+    "0": {
+       "error_severity": "non_fatal_corrected",
+       "notify_type": "CMC",
+       "timestamp": "2025/04/08 18:23:44",
+       "signature": "CPER",
+       "revision": 256,
+       "signature_end": "0xffffffff",
+       "sec_cnt": 1,
+       "record_length": 472,
+       "platform_id": "0x1002:0x74A2",
+       "creator_id": "amdgpu",
+       "record_id": "5:1",
+       "flags": 0,
+       "persistence_info": 0
+       }
+    ```
 ### Changed
 
 - **Changed amd-smi partition --accelerator & `amdsmi_get_gpu_accelerator_partition_profile_config()` detect users running without root/sudo privledges**
      - Updated  `amdsmi_get_gpu_accelerator_partition_profile_config()` to return `AMDSMI_STATUS_NO_PERM` immediately
        if users run without root/sudo permissions.
      - Updated `amd-smi partition --accelerator` to provide a warning for users without root/sudo permissions (see example below, ***output subject to change***).
-```shell
-$ amd-smi partition --accelerator
 
-ACCELERATOR_PARTITION_PROFILES:
+    ```shell
+    $ amd-smi partition --accelerator
 
-***************************************************************************
-** WARNING:                                                              **
-** ACCELERATOR_PARTITION_PROFILES requires sudo/root permissions to run. **
-** Please run the command with sudo permissions to get accurate results. **
-***************************************************************************
+    ACCELERATOR_PARTITION_PROFILES:
 
-GPU_ID  PROFILE_INDEX  MEMORY_PARTITION_CAPS  ACCELERATOR_TYPE  PARTITION_ID     NUM_PARTITIONS  NUM_RESOURCES  RESOURCE_INDEX  RESOURCE_TYPE  RESOURCE_INSTANCES  RESOURCES_SHARED
-N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
-N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
-N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
-N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
-N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
-N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
-N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
-N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
+    ***************************************************************************
+    ** WARNING:                                                              **
+    ** ACCELERATOR_PARTITION_PROFILES requires sudo/root permissions to run. **
+    ** Please run the command with sudo permissions to get accurate results. **
+    ***************************************************************************
 
-ACCELERATOR_PARTITION_RESOURCES:
-RESOURCE_INDEX  RESOURCE_TYPE  RESOURCE_INSTANCES  RESOURCES_SHARED
-N/A             N/A            N/A                 N/A
-N/A             N/A            N/A                 N/A
-N/A             N/A            N/A                 N/A
-N/A             N/A            N/A                 N/A
-N/A             N/A            N/A                 N/A
-N/A             N/A            N/A                 N/A
-N/A             N/A            N/A                 N/A
-N/A             N/A            N/A                 N/A
+    GPU_ID  PROFILE_INDEX  MEMORY_PARTITION_CAPS  ACCELERATOR_TYPE  PARTITION_ID     NUM_PARTITIONS  NUM_RESOURCES  RESOURCE_INDEX  RESOURCE_TYPE  RESOURCE_INSTANCES  RESOURCES_SHARED
+    N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
+    N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
+    N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
+    N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
+    N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
+    N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
+    N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
+    N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
+
+    ACCELERATOR_PARTITION_RESOURCES:
+    RESOURCE_INDEX  RESOURCE_TYPE  RESOURCE_INSTANCES  RESOURCES_SHARED
+    N/A             N/A            N/A                 N/A
+    N/A             N/A            N/A                 N/A
+    N/A             N/A            N/A                 N/A
+    N/A             N/A            N/A                 N/A
+    N/A             N/A            N/A                 N/A
+    N/A             N/A            N/A                 N/A
+    N/A             N/A            N/A                 N/A
+    N/A             N/A            N/A                 N/A
 
 
-Legend:
-  * = Current mode
-```
+    Legend:
+    * = Current mode
+    ```
 
 - **Changed `amd-smi partition --current`, `amd-smi partition --accelerator`, and `amdsmi_get_gpu_accelerator_partition_profile()` to display partition ID for each individual partition**
     - Host will continue to display in the full array format, they do not display the individual partitions as Baremetal/Guest setups.
@@ -106,44 +152,46 @@ Legend:
 reflect each individual partition ID, now provided in `partition_id[0]` location (as seen in other amd-smi CLI commands).  
 This change was needed for BM/Guest setups due to other related partition outputs seen in (`amd-smi list` and `amd-smi static --partition`) and individual logical partition devices displayed. ***See examples below for reference.***  
 
-Previous output:
-```shell
-$ amd-smi partition --current
+    Previous output:
 
-CURRENT_PARTITION:
-GPU_ID  MEMORY  ACCELERATOR_TYPE  ACCELERATOR_PROFILE_INDEX  PARTITION_ID
-0       NPS1    CPX               3                          0,1,2,3,4,5,6,7
-1       NPS1    CPX               3                          N/A
-2       NPS1    CPX               3                          N/A
-3       NPS1    CPX               3                          N/A
-4       NPS1    CPX               3                          N/A
-5       NPS1    CPX               3                          N/A
-6       NPS1    CPX               3                          N/A
-7       NPS1    CPX               3                          N/A
-8       NPS1    CPX               3                          0,1,2,3,4,5,6,7
-9       NPS1    CPX               3                          N/A
-10      NPS1    CPX               3                          N/A
-...
-```
+    ```shell
+    $ amd-smi partition --current
 
-New output:
-```shell
-amd-smi partition --current
-CURRENT_PARTITION:
-GPU_ID  MEMORY  ACCELERATOR_TYPE  ACCELERATOR_PROFILE_INDEX  PARTITION_ID
-0       NPS1    CPX               3                          0
-1       NPS1    CPX               3                          1
-2       NPS1    CPX               3                          2
-3       NPS1    CPX               3                          3
-4       NPS1    CPX               3                          4
-5       NPS1    CPX               3                          5
-6       NPS1    CPX               3                          6
-7       NPS1    CPX               3                          7
-8       NPS1    CPX               3                          0
-9       NPS1    CPX               3                          1
-10      NPS1    CPX               3                          2
-...
-```
+    CURRENT_PARTITION:
+    GPU_ID  MEMORY  ACCELERATOR_TYPE  ACCELERATOR_PROFILE_INDEX  PARTITION_ID
+    0       NPS1    CPX               3                          0,1,2,3,4,5,6,7
+    1       NPS1    CPX               3                          N/A
+    2       NPS1    CPX               3                          N/A
+    3       NPS1    CPX               3                          N/A
+    4       NPS1    CPX               3                          N/A
+    5       NPS1    CPX               3                          N/A
+    6       NPS1    CPX               3                          N/A
+    7       NPS1    CPX               3                          N/A
+    8       NPS1    CPX               3                          0,1,2,3,4,5,6,7
+    9       NPS1    CPX               3                          N/A
+    10      NPS1    CPX               3                          N/A
+    ...
+    ```
+
+    New output:
+
+    ```shell
+    amd-smi partition --current
+    CURRENT_PARTITION:
+    GPU_ID  MEMORY  ACCELERATOR_TYPE  ACCELERATOR_PROFILE_INDEX  PARTITION_ID
+    0       NPS1    CPX               3                          0
+    1       NPS1    CPX               3                          1
+    2       NPS1    CPX               3                          2
+    3       NPS1    CPX               3                          3
+    4       NPS1    CPX               3                          4
+    5       NPS1    CPX               3                          5
+    6       NPS1    CPX               3                          6
+    7       NPS1    CPX               3                          7
+    8       NPS1    CPX               3                          0
+    9       NPS1    CPX               3                          1
+    10      NPS1    CPX               3                          2
+    ...
+    ```
 
 ### Removed
 
@@ -164,6 +212,7 @@ GPU_ID  MEMORY  ACCELERATOR_TYPE  ACCELERATOR_PROFILE_INDEX  PARTITION_ID
 ### Known issues
 
 - N/A
+
 
 ## amd_smi_lib for ROCm 6.4.0
 

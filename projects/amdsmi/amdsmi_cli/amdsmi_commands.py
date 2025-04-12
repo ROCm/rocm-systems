@@ -34,12 +34,12 @@ from amdsmi_helpers import AMDSMIHelpers
 from amdsmi_logger import AMDSMILogger
 from amdsmi import amdsmi_exception, amdsmi_interface
 
-
 class AMDSMICommands():
     """This class contains all the commands corresponding to AMDSMIParser
     Each command function will interact with AMDSMILogger to handle
     displaying the output to the specified format and destination.
     """
+    
     def __init__(self, format='human_readable', destination='stdout') -> None:
         self.helpers = AMDSMIHelpers()
         self.logger = AMDSMILogger(format=format, destination=destination)
@@ -174,6 +174,7 @@ class AMDSMICommands():
                     output_file.write(human_readable_output + '\n')
         elif self.logger.is_json_format() or self.logger.is_csv_format():
             self.logger.print_output()
+
 
     def list(self, args, multiple_devices=False, gpu=None):
         """List information for target gpu
@@ -6159,6 +6160,108 @@ class AMDSMICommands():
             else:
                 with self.logger.destination.open('a', encoding="utf-8") as output_file:
                     output_file.write(legend_output + '\n')
+
+
+    def ras(self, args, multiple_devices=False, gpu=None, cper=None,
+            severity=None, folder=None, file_limit=None, follow=None):
+        """
+        Retrieve and process CPER (RAS) entries for a target GPU.
+
+        Expected command (all options only):
+        amd-smi ras --cper --severity=nonfatal-uncorrected,fatal --folder <folder_name> --file_limit=1000 --follow
+
+        Since no timestamp is provided on the command line, the function starts from a default cursor of 0.
+        The output file name is auto-generated using the timestamp from the CPER header data (converted from
+        the header’s "YYYY/MM/DD HH:MM:SS" format), along with the GPU/platform ID and error severity.
+        """
+        # GPU handle logic.
+        if gpu:
+            args.gpu = gpu
+        if cper:
+            args.cper = cper
+        if severity:
+            args.severity = severity
+        if folder:
+            args.folder = folder
+        if file_limit:
+            args.file_limit = file_limit
+        if follow:
+            args.follow = follow
+
+        if args.gpu == None:
+            args.gpu = self.device_handles
+
+        self.helpers.check_required_groups()
+        handled_multiple_gpus, device_handle = self.helpers.handle_gpus(args, self.logger, self.ras)
+        if handled_multiple_gpus:
+            return
+
+        args.gpu = device_handle
+
+        # Parse severity mask dynamically from the --severity option.
+        severity_mask = 0
+        # drop duplicates of args
+        logging.debug(args)
+        for sev in list(set(args.severity)):
+            if sev == "all":
+                # Set bits for NON_FATAL_UNCORRECTED (0), FATAL (1), and NON_FATAL_CORRECTED (2)
+                severity_mask |= ((1 << 0) | (1 << 1) | (1 << 2))
+            elif sev == "fatal":
+                # Set bit corresponding to AMDSMI_CPER_SEV_FATAL (which is 1)
+                severity_mask |= (1 << 1)
+            elif sev in ("nonfatal", "nonfatal-uncorrected"):
+                # Set bit corresponding to AMDSMI_CPER_SEV_NON_FATAL_UNCORRECTED (which is 0)
+                severity_mask |= (1 << 0)
+            elif sev in ("nonfatal-corrected", "corrected"):
+                # Set bit corresponding to AMDSMI_CPER_SEV_NON_FATAL_CORRECTED (which is 2)
+                severity_mask |= (1 << 2)
+
+        if args.cper:
+            # Start from cursor 0 (no timestamp argument provided).
+            cursor = 0
+            buffer_size = 1048576
+            file_limit = int(args.file_limit) if args.file_limit else 1000
+
+            # Print exit message only once and only when follow is set
+            if self.logger.cper_exit_message() and args.follow:
+                print('Press q and hit ENTER when you want to stop.')
+                self.logger.set_cper_exit_message(False)
+
+            # Main loop: continuously retrieve CPER entries if --follow is set.
+            gpu_id = self.helpers.get_gpu_id_from_device_handle(args.gpu)
+            if args.folder:
+                print(f'Dumping CPER file header entries for GPU {gpu_id} in folder {args.folder}\n')
+            else:
+                print(f'Dumping CPER file header entries for GPU {gpu_id}:\n')
+
+            self.stop = False
+            while True:
+                try:
+                    entries, new_cursor, cper_data = amdsmi_interface.amdsmi_get_gpu_cper_entries(
+                        args.gpu, severity_mask, buffer_size, cursor)
+                    logging.debug(f"cper_entries | entries: {entries}")
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                        raise PermissionError('Error opening CPER file. This command requires elevation') from e
+                    if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_FILE_NOT_FOUND:
+                        raise FileNotFoundError('Error opening CPER file. This command requires a CPER to be enabled.') from e
+                    if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_FILE_ERROR:
+                        raise FileExistsError('Error opening CPER file. Unable to read CPER File') from e
+                    else:
+                        logging.debug(f"Error retrieving CPER entries: {e}")
+                        break
+                if entries:
+                    self.helpers.dump_entries(args.folder, entries, cper_data)
+                if len(entries) == 0 or not args.follow:
+                    break
+                cursor = new_cursor
+                time.sleep(5)
+                user_input = input()
+                if user_input == 'q':
+                    print("Escape Sequence Detected; Exiting")
+                    self.stop = True
+                    break
+
 
     def _event_thread(self, commands, i):
         devices = commands.device_handles
