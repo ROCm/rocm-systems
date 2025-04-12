@@ -105,7 +105,6 @@ static void RunGenericTest(TestBase *test) {
   RunCustomTestEpilog(test);
 }
 
-
 // TEST ENTRY TEMPLATE:
 // TEST(rocrtst, Perf_<test name>) {
 //  <Test Implementation class> <test_obj>;
