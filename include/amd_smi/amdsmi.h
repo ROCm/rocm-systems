@@ -333,6 +333,7 @@ typedef enum {
     AMDSMI_STATUS_AMDGPU_RESTART_ERR = 54,  //!< AMDGPU restart failed
     AMDSMI_STATUS_SETTING_UNAVAILABLE = 55, //!< Setting is not available
     AMDSMI_STATUS_CORRUPTED_EEPROM = 56,    //!< EEPROM is corrupted
+    AMDSMI_STATUS_MORE_DATA = 57,           //!< There is more data than the buffer size the user passed
     // General errors
     AMDSMI_STATUS_MAP_ERROR = 0xFFFFFFFE,     //!< The internal library error did not map to a status code
     AMDSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF, //!< An unknown error occurred
@@ -1407,6 +1408,29 @@ typedef enum  {
     CLK_LIMIT_MIN,  //!< Clock values in MHz
     CLK_LIMIT_MAX   //!< Clock values in MHz
 } amdsmi_clk_limit_type_t;
+
+typedef enum {
+    AMDSMI_CPER_SEV_NON_FATAL_UNCORRECTED = 0,
+    AMDSMI_CPER_SEV_FATAL                 = 1,
+    AMDSMI_CPER_SEV_NON_FATAL_CORRECTED   = 2,
+    AMDSMI_CPER_SEV_NUM                   = 3,
+    AMDSMI_CPER_SEV_UNUSED = 10,
+} amdsmi_cper_sev_t;
+
+typedef enum {
+    AMDSMI_CPER_NOTIFY_TYPE_CMC = 0x450eBDD72DCE8BB1,
+    AMDSMI_CPER_NOTIFY_TYPE_CPE = 0x4a55D8434E292F96,
+    AMDSMI_CPER_NOTIFY_TYPE_MCE = 0x4cc5919CE8F56FFE,
+    AMDSMI_CPER_NOTIFY_TYPE_PCIE = 0x4dfc1A16CF93C01F,
+    AMDSMI_CPER_NOTIFY_TYPE_INIT = 0x454a9308CC5263E8,
+    AMDSMI_CPER_NOTIFY_TYPE_NMI = 0x42c9B7E65BAD89FF,
+    AMDSMI_CPER_NOTIFY_TYPE_BOOT = 0x409aAB403D61A466,
+    AMDSMI_CPER_NOTIFY_TYPE_DMAR = 0x4c27C6B3667DD791,
+    AMDSMI_CPER_NOTIFY_TYPE_SEA = 0x11E4BBE89A78788A,
+    AMDSMI_CPER_NOTIFY_TYPE_SEI = 0x4E87B0AE5C284C81,
+    AMDSMI_CPER_NOTIFY_TYPE_PEI = 0x4214520409A9D5AC,
+    AMDSMI_CPER_NOTIFY_TYPE_CXL_COMPONENT = 0x49A341DF69293BC9,
+} amdsmi_cper_notify_type_t;
 
 /**
  * @brief The current ECC state
@@ -3360,6 +3384,7 @@ amdsmi_get_gpu_bad_page_info(amdsmi_processor_handle processor_handle, uint32_t 
 amdsmi_status_t
 amdsmi_get_gpu_bad_page_threshold(amdsmi_processor_handle processor_handle, uint32_t *threshold);
 
+
 /**
  *  @brief Verify the checksum of RAS EEPROM. It is not supported on virtual
  *  machine guest
@@ -4645,6 +4670,104 @@ amdsmi_status_t amdsmi_get_gpu_ecc_enabled(amdsmi_processor_handle processor_han
 amdsmi_status_t
 amdsmi_get_gpu_total_ecc_count(amdsmi_processor_handle processor_handle, amdsmi_error_count_t *ec);
 
+
+#pragma pack(push, 1)
+typedef struct {
+    unsigned char b[16];
+} amdsmi_cper_guid_t;
+
+typedef struct {
+    uint8_t seconds;
+    uint8_t minutes;
+    uint8_t hours;
+    uint8_t flag;
+    uint8_t day;
+    uint8_t month;
+    uint8_t year;
+    uint8_t century;
+} amdsmi_cper_timestamp_t;
+
+typedef struct {
+    uint32_t platform_id  : 1;
+    uint32_t timestamp    : 1;
+    uint32_t partition_id : 1;
+    uint32_t reserved     : 29;
+} valid_bits_t;
+
+typedef union {
+    struct valid_bits_ {
+        uint32_t platform_id  : 1;
+        uint32_t timestamp    : 1;
+        uint32_t partition_id : 1;
+        uint32_t reserved     : 29;
+    } valid_bits;
+    uint32_t valid_mask;
+} amdsmi_cper_valid_bits_t;
+
+typedef struct {
+    char                  signature[4];       /* "CPER" */
+    uint16_t              revision;
+    uint32_t              signature_end;     /* 0xFFFFFFFF */
+    uint16_t              sec_cnt;
+    amdsmi_cper_sev_t     error_severity;
+
+    // valid_bits_t          valid_bits;
+    // uint32_t              valid_mask;    
+    amdsmi_cper_valid_bits_t cper_valid_bits; 
+    
+    uint32_t                record_length;     /* Total size of CPER Entry */
+    amdsmi_cper_timestamp_t timestamp;
+    char                    platform_id[16];
+    amdsmi_cper_guid_t      partition_id;      /* Reserved */
+    char                  creator_id[16];
+    amdsmi_cper_guid_t    notify_type;       /* CMC, MCE, can use amdsmi_cper_notifiy_type_t to decode*/
+    char                  record_id[8];      /* Unique CPER Entry ID */
+    uint32_t              flags;            /* Reserved */
+    uint64_t              persistence_info; /* Reserved */
+    uint8_t               reserved[12];     /* Reserved */
+} amdsmi_cper_hdr_t;
+ 
+#pragma pack(pop)
+/**
+ * @brief Retrieve CPER entries cached in the driver.
+ *
+ * The user will pass buffers to hold the CPER data and CPER headers. The library will
+ * fill the buffer based on the severity_mask user passed. It will also parse the CPER header
+ * and stored in the cper_hdrs array. The user can use the cper_hdrs to get the timestamp and other header information.
+ * A cursor is also returned to the user, which can be used to get the next set of CPER entries.
+ *
+ * If there are more data than any of the buffers user pass, the library will return AMDSMI_STATUS_MORE_DATA.
+ * User can call the API again with the cursor returned at previous call to get more data.
+ * If the buffer size is too small to even hold one entry, the library
+ * will return AMDSMI_STATUS_OUT_OF_RESOURCES.
+ *
+ * Even if the API returns AMDSMI_STATUS_MORE_DATA, the 2nd call may still get the entry_count == 0 as the driver
+ * cache may not contain the serverity user is interested in. The API should return AMDSMI_STATUS_SUCCESS in this case
+ * so that user can ignore that call.
+ *
+ *  @ingroup tagECCInfo
+ * 
+ *  @platform{gpu_bm_linux} @platform{host} @platform{guest_1vf}
+ * 
+ * @param[in] processor_handle Handle to the processor for which CPER entries are to be retrieved.
+ * @param[in] severity_mask The severity mask of the entries to be retrieved.
+ * @param[in,out] cper_data Pointer to a buffer where the CPER data will be stored. User must allocate the buffer
+ *                and set the buf_size correctly.
+ * @param[in,out] buf_size Pointer to a variable that specifies the size of the cper_data.
+ *                         On return, it will contain the actual size of the data written to the cper_data.
+ * @param[in,out] cper_hdrs Array of the parsed headers of the cper_data. The user must allocate
+ *             the array of pointers to cper_hdr. The library will fill the array with the pointers to the parsed
+ *            headers. The underlying data is in the cper_data buffer and only pointer is stored in this array.
+ * @param[in,out] entry_count Pointer to a variable that specifies the array length of the cper_hdrs user allocated.
+ *              On return, it will contain the actual entries written to the cper_hdrs.
+ * @param[in,out] cursor Pointer to a variable that will contain the  cursor  for the next call.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t
+amdsmi_get_gpu_cper_entries(amdsmi_processor_handle processor_handle, uint32_t severity_mask, char *cper_data,
+    uint64_t *buf_size, amdsmi_cper_hdr_t** cper_hdrs, uint64_t *entry_count, uint64_t *cursor);
+
 /** @} End tagECCInfo */
 
 /*****************************************************************************/
@@ -5904,7 +6027,7 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle, a
  *  @brief Returns the 'xcd_counter' from the GPU metrics associated with the device
  *
  *  @ingroup tagAsicBoardInfo
- * 
+ *
  *  @platform{gpu_bm_linux}  @platform{guest_1vf}  @platform{guest_mvf}
  *
  *  @param[in] processor_handle Device which to query

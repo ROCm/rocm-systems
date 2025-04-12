@@ -54,14 +54,15 @@ include_directories(${TEST} ${CMAKE_CURRENT_SOURCE_DIR}/.. ${ROCM_INC_DIR}/..)
 
 # Build rules
 add_executable(${TEST} ${tstSources} ${functionalSources})
-
-#AMD_SMI_TARGET?
 target_link_libraries(${TEST}
                       ${AMD_SMI_TARGET}
                       GTest::gtest_main
                       c
                       stdc++
                       pthread)
+
+target_compile_definitions(${TEST} PRIVATE
+    CPER_SYS_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/cper")
 
 # Install tests
 install(
