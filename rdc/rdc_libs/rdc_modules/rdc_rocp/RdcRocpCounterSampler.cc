@@ -63,31 +63,13 @@ std::vector<std::shared_ptr<CounterSampler>>& CounterSampler::get_samplers() { r
 
 CounterSampler::CounterSampler(rocprofiler_agent_id_t agent) : agent_(agent) {
   // Setup context (should only be done once per agent)
-  auto client_thread = rocprofiler_callback_thread_t{};
   RocprofilerCall([&]() { return rocprofiler_create_context(&ctx_); }, "context creation failed",
                   __FILE__, __LINE__);
 
   RocprofilerCall(
       [&]() {
-        // 4096 is total buffer size
-        // 2048 is size for callback buffer, not likely used as rdc reads results immediately, not
-        // from buffer feature will drop in future
-        return rocprofiler_create_buffer(
-            ctx_, 4096, 2048, ROCPROFILER_BUFFER_POLICY_LOSSLESS,
-            [](rocprofiler_context_id_t, rocprofiler_buffer_id_t, rocprofiler_record_header_t**,
-               size_t, void*, uint64_t) {},
-            nullptr, &buf_);
-      },
-      "buffer creation failed", __FILE__, __LINE__);
-  RocprofilerCall([&]() { return rocprofiler_create_callback_thread(&client_thread); },
-                  "failure creating callback thread", __FILE__, __LINE__);
-  RocprofilerCall([&]() { return rocprofiler_assign_callback_thread(buf_, client_thread); },
-                  "failed to assign thread for buffer", __FILE__, __LINE__);
-
-  RocprofilerCall(
-      [&]() {
         return rocprofiler_configure_device_counting_service(
-            ctx_, buf_, agent,
+            ctx_, {.handle = 0}, agent,
             [](rocprofiler_context_id_t context_id, rocprofiler_agent_id_t,
                rocprofiler_agent_set_profile_callback_t set_config, void* user_data) {
               if (user_data) {
