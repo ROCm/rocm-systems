@@ -381,6 +381,32 @@ bool BuildTopology() {
   }
   const_cast<Flag&>(rt->flag()).parse_masks(maxGpu, maxCu);
 
+  // Front load the rec_sdma_eng_id_mask to check whether needs to override old mask
+  bool rec_sdma_engine_override = false;
+  for (auto& src_gpu : rt->gpu_agents()) {
+    uint32_t src_id = src_gpu->node_id();
+
+    // skip the pre-loop if NumSdmaXgmiEngines != 6
+    if (((AMD::GpuAgent*)src_gpu)->properties().NumSdmaXgmiEngines != 6)
+      break;
+
+    for (auto& dst_gpu : rt->gpu_agents()) {
+      uint32_t dst_id = dst_gpu->node_id();
+      if (src_id != dst_id) {
+        auto linfo = rt->GetLinkInfo(src_id, dst_id);
+        if (IsPowerOfTwo(linfo.rec_sdma_eng_id_mask)) {
+          rec_sdma_engine_override = true;
+          ((AMD::GpuAgent*)src_gpu)->SetRecSdmaEngOverride(rec_sdma_engine_override);
+          break;
+        }
+      }
+    }
+
+    // skip the pre-loop if RecSdmaEngOverride is true
+    if (rec_sdma_engine_override)
+      break;
+  }
+
   // Register destination agents that can SDMA gang copy for source agents
   for (auto& src_gpu : rt->gpu_agents()) {
     uint32_t src_id = src_gpu->node_id();
@@ -406,6 +432,15 @@ bool BuildTopology() {
           else gang_factor = 1;
 
           rec_sdma_eng_id_mask = linfo.rec_sdma_eng_id_mask;
+
+          // Override the old mask if rec sdma eng verride is true
+          // Using one pcie sdma for device to device copy with limited XGMI SDMA engine.
+          // This will help improve all to all copy with limited XGMI SDMA engine.
+          if (rec_sdma_engine_override) {
+            uint32_t sdma_engine_mask = (1 << ((AMD::GpuAgent*)src_gpu)->properties().NumSdmaEngines - 1);
+            rec_sdma_eng_id_mask = !IsPowerOfTwo(rec_sdma_eng_id_mask) ?
+              sdma_engine_mask : rec_sdma_eng_id_mask;
+          }
         }
       }
 
