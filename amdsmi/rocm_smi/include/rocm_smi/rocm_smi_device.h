@@ -200,14 +200,6 @@ class Device {
  public:
     explicit Device(std::string path, RocmSMI_env_vars const *e);
     ~Device(void);
-    typedef struct {
-      uint32_t card_index;
-      uint32_t drm_render_minor;
-      uint64_t bdfid;
-      uint64_t kfd_gpu_id;
-      uint32_t partition_id;
-      uint32_t smi_device_id;
-    } rsmi_device_identifiers_t;
 
     void set_monitor(std::shared_ptr<Monitor> m) {monitor_ = m;}
     std::string path(void) const {return path_;}

@@ -297,7 +297,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
                   << "\n\t\tcurrent_profile.num_resources: " << current_profile.num_resources
                   << std::endl;
       }
-      for (auto j = 0; j < current_profile.num_resources; j++) {
+      for (uint32_t j = 0; j < current_profile.num_resources; j++) {
         auto rp = profile_config.resource_profiles[resource_index];
 
         IF_VERB(STANDARD) {
