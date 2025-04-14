@@ -21,6 +21,7 @@ import _thread
 import time
 import multiprocessing
 import trace
+from os.path import exists
 from io import StringIO
 from time import ctime
 from subprocess import check_output
@@ -3919,6 +3920,24 @@ def checkAmdGpus(deviceList):
     return False
 
 
+def check_runtime_status()->bool:
+    """Check the runtime status of all paths along /sys/bus/pci/drivers/amdgpu/*/power/runtime_status.
+
+    Returns:
+        bool: True if any status is "active", False if any status is "unsupported".
+    """
+    base_path = "/sys/bus/pci/drivers/amdgpu"
+    for device in os.listdir(base_path):
+        if os.path.isdir(os.path.join(base_path, device)):
+            runtime_status_path = os.path.join(base_path, device, "power", "runtime_status")
+            if os.path.exists(runtime_status_path):
+                with open(runtime_status_path, 'r') as file:
+                    status = file.read().strip()
+                    if status == "active":
+                        return True
+    return False
+
+
 def component_str(component):
     """ Returns the component String value
 
@@ -4485,7 +4504,8 @@ if __name__ == '__main__':
 
     if not checkAmdGpus(deviceList):
         logging.warning('No AMD GPUs specified')
-
+    if not check_runtime_status():
+        logging.warning('AMD GPUs visible, but data is inaccessible. Check power control/runtime_status\n')
     if isConciseInfoRequested(args):
         showAllConcise(deviceList)
     if args.showhw:

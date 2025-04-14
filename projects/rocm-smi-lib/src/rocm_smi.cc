@@ -368,10 +368,31 @@ static rsmi_status_t get_dev_mon_value(amd::smi::MonitorTypes type,
     return amd::smi::ErrnoToRsmiStatus(ret);
   }
 
+  if (val_str.empty()) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__
+    << " | ======= end ======= "
+    << " | Fail "
+    << " | Device #: " << dv_ind
+    << " | Type: " << monitorTypesToString.at(type)
+    << " | Cause: SYSFS read was empty"
+    << " | Returning = "
+    << getRSMIStatusString(RSMI_STATUS_UNEXPECTED_DATA) << " |";
+    LOG_INFO(ss);
+    return RSMI_STATUS_UNEXPECTED_DATA;
+  }
+
   if (!amd::smi::IsInteger(val_str)) {
     std::ostringstream ss;
-    ss << "Expected integer value from monitor, but got \"" << val_str << "\"";
-    LOG_ERROR(ss);
+    ss << __PRETTY_FUNCTION__
+    << " | ======= end ======= "
+    << " | Fail "
+    << " | Device #: " << dv_ind
+    << " | Type: " << monitorTypesToString.at(type)
+    << " | Cause: Expected integer value from monitor, but got "<< val_str
+    << " | Returning = "
+    << getRSMIStatusString(RSMI_STATUS_UNEXPECTED_DATA) << " |";
+    LOG_INFO(ss);
     return RSMI_STATUS_UNEXPECTED_DATA;
   }
 
@@ -398,10 +419,31 @@ static rsmi_status_t get_dev_mon_value(amd::smi::MonitorTypes type,
     return amd::smi::ErrnoToRsmiStatus(ret);
   }
 
+  if (val_str.empty()) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__
+    << " | ======= end ======= "
+    << " | Fail "
+    << " | Device #: " << dv_ind
+    << " | Type: " << monitorTypesToString.at(type)
+    << " | Cause: SYSFS read was empty"
+    << " | Returning = "
+    << getRSMIStatusString(RSMI_STATUS_UNEXPECTED_DATA) << " |";
+    LOG_INFO(ss);
+    return RSMI_STATUS_UNEXPECTED_DATA;
+  }
+
   if (!amd::smi::IsInteger(val_str)) {
     std::ostringstream ss;
-    ss << "Expected integer value from monitor, but got \"" << val_str << "\"";
-    LOG_ERROR(ss);
+    ss << __PRETTY_FUNCTION__
+    << " | ======= end ======= "
+    << " | Fail "
+    << " | Device #: " << dv_ind
+    << " | Type: " << monitorTypesToString.at(type)
+    << " | Cause: Expected integer value from monitor, but got "<< val_str
+    << " | Returning = "
+    << getRSMIStatusString(RSMI_STATUS_UNEXPECTED_DATA) << " |";
+    LOG_INFO(ss);
     return RSMI_STATUS_UNEXPECTED_DATA;
   }
 
