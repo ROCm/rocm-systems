@@ -64,10 +64,10 @@ static_assert((sizeof(core::ShareableHandle::handle) >= sizeof(uint32_t)) &&
                   (alignof(core::ShareableHandle::handle) >= alignof(uint32_t)),
               "ShareableHandle cannot store a XDNA handle");
 
-/// @brief The number of arguments in the packet payload before we start passing operands
+/// @brief The number of arguments in the packet payload before the operands.
 constexpr uint32_t non_operand_count = 6;
 
-// Index where the operand addresses start in a command.
+/// @brief Index of the first operand in a command.
 constexpr uint32_t operand_starting_index = non_operand_count - 1;
 
 /// @brief Default amdxdna_cu_config::cu_func when configuring a CU.
@@ -634,10 +634,10 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_amd_aie_ert_packet_t* first_pkt, uin
     auto pdi_bo_handle = FindBOHandle(cmd_pkt_payload->pdi_addr);
     if (!pdi_bo_handle.IsValid()) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
-    // Determining if the PDI is cached
+    // Determine if the PDI is cached, if not it will be added to the PDI cache.
     auto cached_pdi_index = pdi_cache.GetIndex(pdi_bo_handle.handle);
     if (cached_pdi_index == PDICache::NotFound) {
-      // PDI does not exist in the cache.
+      FlushCpuCache(pdi_bo_handle.vaddr, 0, pdi_bo_handle.size);
       status = pdi_cache.SetNext(pdi_bo_handle, cached_pdi_index);
       if (status != HSA_STATUS_SUCCESS) {
         return status;
@@ -714,8 +714,6 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_amd_aie_ert_packet_t* first_pkt, uin
         reinterpret_cast<hsa_amd_aie_ert_start_kernel_data_t*>(pkt->payload_data);
     FlushOperands(pkt->count, cmd_pkt_payload);
   }
-
-  status = HSA_STATUS_SUCCESS;
 
   // Unmapping and closing the cmd BOs
   cmd_bo_handles_guard.Dismiss();
@@ -817,9 +815,6 @@ hsa_status_t XdnaDriver::ConfigHwCtx(const PDICache& pdi_bo_handles, AieAqlQueue
   for (size_t i = 0; i < pdi_bo_handles.size(); i++) {
     xdna_config_cu_param->cu_configs[i].cu_bo = pdi_bo_handles[i].handle;
     xdna_config_cu_param->cu_configs[i].cu_func = default_cu_func;
-
-    // Flush the PDI out of the cache
-    FlushCpuCache(pdi_bo_handles[i].vaddr, 0, pdi_bo_handles[i].size);
   }
 
   if (aie_queue.GetHwCtxHandle() != AMDXDNA_INVALID_BO_HANDLE) {
