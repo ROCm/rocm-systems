@@ -24,6 +24,8 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 #include <hip/hip_runtime_api.h>
 
+#if CUDA_VERSION < CUDA_12000
+
 static hipModule_t GetModule() {
   HIP_CHECK(hipFree(nullptr));
   static const auto mg = ModuleGuard::LoadModule("get_tex_ref_module.code");
@@ -32,11 +34,9 @@ static hipModule_t GetModule() {
 
 TEST_CASE("Unit_hipModuleGetTexRef_Positive_Basic") {
   CHECK_IMAGE_SUPPORT
-  CTX_CREATE();
   hipTexRef tex_ref = nullptr;
   HIP_CHECK(hipModuleGetTexRef(&tex_ref, GetModule(), "tex"));
   REQUIRE(tex_ref != nullptr);
-  CTX_DESTROY();
 }
 
 TEST_CASE("Unit_hipModuleGetTexRef_Negative_Parameters") {
@@ -71,3 +71,5 @@ TEST_CASE("Unit_hipModuleGetTexRef_Negative_Name_Is_Empty_String") {
 
   HIP_CHECK_ERROR(hipModuleGetTexRef(&tex_ref, module, ""), hipErrorInvalidValue);
 }
+
+#endif
