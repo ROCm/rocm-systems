@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
@@ -42,14 +42,16 @@ static constexpr std::initializer_list<tupletype> tableItems {
                std::make_tuple(100, 100,  0,  0),
                };
 
-
-
+enum MemsetType {
+  hipMemsetTypeDefault,
+  hipMemsetTypeDefaultSpt
+};
 /**
  * Basic Functionality of hipMemset2D
  */
 TEST_CASE("Unit_hipMemset2D_BasicFunctional") {
   CHECK_IMAGE_SUPPORT
-
+  enum MemsetType type = GENERATE(hipMemsetTypeDefault, hipMemsetTypeDefaultSpt);
   constexpr int memsetval = 0x24;
   constexpr size_t numH = 256;
   constexpr size_t numW = 256;
@@ -67,8 +69,15 @@ TEST_CASE("Unit_hipMemset2D_BasicFunctional") {
   for (size_t i = 0; i < elements; i++) {
     A_h[i] = 1;
   }
-
-  HIP_CHECK(hipMemset2D(A_d, pitch_A, memsetval, numW, numH));
+  if (type == hipMemsetTypeDefault) {
+    HIP_CHECK(hipMemset2D(A_d, pitch_A, memsetval, numW, numH));
+  } else {
+    #if HT_AMD
+      HIP_CHECK(hipMemset2D_spt(A_d, pitch_A, memsetval, numW, numH));
+    #else
+      HIP_CHECK(hipMemset2D(A_d, pitch_A, memsetval, numW, numH));
+    #endif
+  }
   HIP_CHECK(hipMemcpy2D(A_h, width, A_d, pitch_A, numW, numH,
                        hipMemcpyDeviceToHost));
 
@@ -90,7 +99,7 @@ TEST_CASE("Unit_hipMemset2D_BasicFunctional") {
  */
 TEST_CASE("Unit_hipMemset2DAsync_BasicFunctional") {
   CHECK_IMAGE_SUPPORT
-
+  enum MemsetType type = GENERATE(hipMemsetTypeDefault, hipMemsetTypeDefaultSpt);
   constexpr int memsetval = 0x26;
   constexpr size_t numH = 256;
   constexpr size_t numW = 256;
@@ -108,10 +117,17 @@ TEST_CASE("Unit_hipMemset2DAsync_BasicFunctional") {
   for (size_t i = 0; i < elements; i++) {
       A_h[i] = 1;
   }
-
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipMemset2DAsync(A_d, pitch_A, memsetval, numW, numH, stream));
+  if (type == hipMemsetTypeDefault) {
+    HIP_CHECK(hipMemset2DAsync(A_d, pitch_A, memsetval, numW, numH, stream));
+  } else {
+    #if HT_AMD
+      HIP_CHECK(hipMemset2DAsync_spt(A_d, pitch_A, memsetval, numW, numH, stream));
+    #else
+      HIP_CHECK(hipMemset2DAsync(A_d, pitch_A, memsetval, numW, numH, stream));
+    #endif
+  }
   HIP_CHECK(hipStreamSynchronize(stream));
   HIP_CHECK(hipMemcpy2D(A_h, width, A_d, pitch_A, numW, numH,
                        hipMemcpyDeviceToHost));
@@ -135,7 +151,7 @@ TEST_CASE("Unit_hipMemset2DAsync_BasicFunctional") {
  */
 TEST_CASE("Unit_hipMemset2D_UniqueWidthHeight") {
   CHECK_IMAGE_SUPPORT
-
+  enum MemsetType type = GENERATE(hipMemsetTypeDefault, hipMemsetTypeDefaultSpt);
   int width2D, height2D;
   int memsetWidth, memsetHeight;
   char *A_d, *A_h;
@@ -160,8 +176,15 @@ TEST_CASE("Unit_hipMemset2D_UniqueWidthHeight") {
 
   INFO("2D Dimension: Width:" << width2D << " Height:" << height2D <<
            " MemsetWidth:" << memsetWidth << " MemsetHeight:" << memsetHeight);
-
-  HIP_CHECK(hipMemset2D(A_d, pitch_A, memsetval, memsetWidth, memsetHeight));
+  if (type == hipMemsetTypeDefault) {
+    HIP_CHECK(hipMemset2D(A_d, pitch_A, memsetval, memsetWidth, memsetHeight));
+  } else {
+    #if HT_AMD
+      HIP_CHECK(hipMemset2D_spt(A_d, pitch_A, memsetval, memsetWidth, memsetHeight));
+    #else
+      HIP_CHECK(hipMemset2D(A_d, pitch_A, memsetval, memsetWidth, memsetHeight));
+    #endif
+  }
   HIP_CHECK(hipMemcpy2D(A_h, width, A_d, pitch_A, width2D, height2D,
                        hipMemcpyDeviceToHost));
 
@@ -196,6 +219,7 @@ TEST_CASE("Unit_hipMemset2DAsync_capturehipMemset2DAsync") {
   hipGraph_t graph{nullptr};
   hipGraphExec_t graphExec{nullptr};
   int rows, cols;
+  enum MemsetType type = GENERATE(hipMemsetTypeDefault, hipMemsetTypeDefaultSpt);
   rows = GENERATE(3, 4, 100);
   cols = GENERATE(3, 4, 100);
   hipStream_t stream;
@@ -216,8 +240,18 @@ TEST_CASE("Unit_hipMemset2DAsync_capturehipMemset2DAsync") {
 
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipMemset2DAsync(A_d, devPitch, 'b', sizeof(char) * cols, rows,
-                             stream));
+  if (type == hipMemsetTypeDefault) {
+    HIP_CHECK(hipMemset2DAsync(A_d, devPitch, 'b', sizeof(char) * cols, rows,
+                               stream));
+  } else {
+    #if HT_AMD
+      HIP_CHECK(hipMemset2DAsync_spt(A_d, devPitch, 'b', sizeof(char) * cols, rows,
+                               stream));
+    #else
+      HIP_CHECK(hipMemset2DAsync(A_d, devPitch, 'b', sizeof(char) * cols, rows,
+                               stream));
+    #endif
+  }
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
   HIP_CHECK(hipDeviceSynchronize());
 
