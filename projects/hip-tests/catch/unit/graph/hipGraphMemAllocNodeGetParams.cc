@@ -51,11 +51,24 @@ THE SOFTWARE.
  *  - HIP_VERSION >= 6.0
  */
 
-static bool validateAllocParam(hipMemAllocNodeParams in, hipMemAllocNodeParams out) {
+static bool validateAllocParam(hipMemAllocNodeParams in, hipMemAllocNodeParams out,
+                               bool accessDesc = false) {
   if (in.bytesize != out.bytesize) return false;
   if (in.poolProps.allocType != out.poolProps.allocType) return false;
   if (in.poolProps.location.id != out.poolProps.location.id) return false;
   if (in.poolProps.location.type != out.poolProps.location.type) return false;
+
+  if (accessDesc) {
+    if (in.accessDescs->location.type != out.accessDescs->location.type) {
+      return false;
+    }
+    if (in.accessDescs->location.id != out.accessDescs->location.id) {
+      return false;
+    }
+    if (in.accessDescs->flags != out.accessDescs->flags) {
+      return false;
+    }
+  }
 
   return true;
 }
@@ -299,7 +312,7 @@ TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_3") {
 
   hipMemAllocNodeParams get_alloc_params;
   HIP_CHECK(hipGraphMemAllocNodeGetParams(alloc_node, &get_alloc_params));
-  REQUIRE(memcmp(&alloc_param, &get_alloc_params, sizeof(hipMemAllocNodeParams)) == 0);
+  REQUIRE(validateAllocParam(alloc_param, get_alloc_params, true) == true);
 
   constexpr int fill_value = 11;
   hipGraphNode_t memset_node;

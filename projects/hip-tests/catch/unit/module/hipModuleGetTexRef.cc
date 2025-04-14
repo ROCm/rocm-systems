@@ -32,9 +32,11 @@ static hipModule_t GetModule() {
 
 TEST_CASE("Unit_hipModuleGetTexRef_Positive_Basic") {
   CHECK_IMAGE_SUPPORT
+  CTX_CREATE();
   hipTexRef tex_ref = nullptr;
   HIP_CHECK(hipModuleGetTexRef(&tex_ref, GetModule(), "tex"));
   REQUIRE(tex_ref != nullptr);
+  CTX_DESTROY();
 }
 
 TEST_CASE("Unit_hipModuleGetTexRef_Negative_Parameters") {
