@@ -2214,6 +2214,22 @@ def amdsmi_get_gpu_bad_page_info(
 
     return _format_bad_page_info(bad_pages, num_pages)
 
+def amdsmi_get_gpu_bad_page_threshold(
+    processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
+) -> Dict[str, Any]:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    threshold = ctypes.c_uint32()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_gpu_bad_page_threshold(
+            processor_handle, ctypes.byref(threshold)
+        )
+    )
+
+    return threshold.value
 
 def amdsmi_get_violation_status(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
