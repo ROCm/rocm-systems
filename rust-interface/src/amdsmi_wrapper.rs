@@ -2557,6 +2557,12 @@ extern "C" {
     ) -> AmdsmiStatusT;
 }
 extern "C" {
+    pub fn amdsmi_get_gpu_busy_percent(
+        processor_handle: AmdsmiProcessorHandle,
+        gpu_busy_percent: *mut u32,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
     pub fn amdsmi_get_utilization_count(
         processor_handle: AmdsmiProcessorHandle,
         utilization_counters: *mut AmdsmiUtilizationCounterT,

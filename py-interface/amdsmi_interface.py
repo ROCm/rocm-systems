@@ -25,7 +25,7 @@ import os
 import re
 import sys
 from collections.abc import Iterable
-from enum import IntEnum
+from enum import IntEnum, Enum
 from pathlib import Path
 from time import asctime, localtime, time
 from typing import Any, Dict, List, Tuple, Union
@@ -386,6 +386,21 @@ class AmdSmiRasErrState(IntEnum):
     INVALID = amdsmi_wrapper.AMDSMI_RAS_ERR_STATE_INVALID
 
 
+class AmdSmiCperNotifyType(Enum):
+    CMC = amdsmi_wrapper.AMDSMI_CPER_NOTIFY_TYPE_CMC
+    CPE = amdsmi_wrapper.AMDSMI_CPER_NOTIFY_TYPE_CPE
+    MCE = amdsmi_wrapper.AMDSMI_CPER_NOTIFY_TYPE_MCE
+    PCIE = amdsmi_wrapper.AMDSMI_CPER_NOTIFY_TYPE_PCIE
+    INIT = amdsmi_wrapper.AMDSMI_CPER_NOTIFY_TYPE_INIT
+    NMI = amdsmi_wrapper.AMDSMI_CPER_NOTIFY_TYPE_NMI
+    BOOT = amdsmi_wrapper.AMDSMI_CPER_NOTIFY_TYPE_BOOT
+    DMAr = amdsmi_wrapper.AMDSMI_CPER_NOTIFY_TYPE_DMAR
+    SEA =  amdsmi_wrapper.AMDSMI_CPER_NOTIFY_TYPE_SEA
+    SEI = amdsmi_wrapper.AMDSMI_CPER_NOTIFY_TYPE_SEI
+    PEI = amdsmi_wrapper.AMDSMI_CPER_NOTIFY_TYPE_PEI
+    CXL_COMPONENT = amdsmi_wrapper.AMDSMI_CPER_NOTIFY_TYPE_CXL_COMPONENT
+
+
 class AmdSmiMemoryType(IntEnum):
     VRAM = amdsmi_wrapper.AMDSMI_MEM_TYPE_VRAM
     VIS_VRAM = amdsmi_wrapper.AMDSMI_MEM_TYPE_VIS_VRAM
@@ -460,6 +475,7 @@ class AmdSmiVirtualizationMode(IntEnum):
     GUEST = amdsmi_wrapper.AMDSMI_VIRTUALIZATION_MODE_GUEST
     PASSTHROUGH = amdsmi_wrapper.AMDSMI_VIRTUALIZATION_MODE_PASSTHROUGH
 
+
 class AmdSmiVramType(IntEnum):
     UNKNOWN = amdsmi_wrapper.AMDSMI_VRAM_TYPE_UNKNOWN
     HBM = amdsmi_wrapper.AMDSMI_VRAM_TYPE_HBM
@@ -478,6 +494,7 @@ class AmdSmiVramType(IntEnum):
     GDDR7 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_GDDR7
     MAX = amdsmi_wrapper.AMDSMI_VRAM_TYPE__MAX
 
+
 class AmdSmiVramVendor(IntEnum):
     SAMSUNG = amdsmi_wrapper.AMDSMI_VRAM_VENDOR_SAMSUNG
     INFINEON = amdsmi_wrapper.AMDSMI_VRAM_VENDOR_INFINEON
@@ -490,6 +507,7 @@ class AmdSmiVramVendor(IntEnum):
     ESMT = amdsmi_wrapper.AMDSMI_VRAM_VENDOR_ESMT
     MICRON = amdsmi_wrapper.AMDSMI_VRAM_VENDOR_MICRON
     UNKNOWN = amdsmi_wrapper.AMDSMI_VRAM_VENDOR_UNKNOWN
+
 
 class AmdSmiEventReader:
     def __init__(
@@ -698,6 +716,21 @@ def _validate_if_max_uint(value, uint_type: MaxUIntegerTypes, isActivity=False, 
         return bool(return_val)
     else:
         return return_val
+
+
+def _notifyTypeToString(notify_type_b):
+    guid = []
+    # Iterate over only the first 8 bytes, but backwards
+    for i in notify_type_b[7::-1]:
+        guid.append(format(i, '02x'))
+    hex_string = "".join(guid)
+    hex_value = int(hex_string, 16)
+    if hex_value in AmdSmiCperNotifyType._value2member_map_:
+        # Convert to the corresponding enum name
+        return AmdSmiCperNotifyType(hex_value).name
+    else:
+        return "Unknown"
+
 
 def amdsmi_get_socket_handles() -> List[amdsmi_wrapper.amdsmi_socket_handle]:
     """
@@ -1782,7 +1815,7 @@ def amdsmi_get_gpu_enumeration_info(processor_handle: amdsmi_wrapper.amdsmi_proc
 
     # Call the C function to populate the struct
     status = amdsmi_wrapper.amdsmi_get_gpu_enumeration_info(processor_handle, ctypes.byref(enumeration_info))
-    
+
     # Validate the status result
     _check_res(status)
 
@@ -2140,13 +2173,17 @@ def amdsmi_get_clock_info(
         )
     )
 
-    return {
-        "clk": clock_measure.clk,
-        "min_clk": clock_measure.min_clk,
-        "max_clk": clock_measure.max_clk,
-        "clk_locked": clock_measure.clk_locked,
-        "clk_deep_sleep" : clock_measure.clk_deep_sleep,
+    clk_type_str = AmdSmiClkType(clock_type).name
+
+    dict_ret = {
+        "clk": _validate_if_max_uint(clock_measure.clk, MaxUIntegerTypes.UINT32_T),
+        "min_clk": _validate_if_max_uint(clock_measure.min_clk, MaxUIntegerTypes.UINT32_T),
+        "max_clk": _validate_if_max_uint(clock_measure.max_clk, MaxUIntegerTypes.UINT32_T),
+        "clk_locked": _validate_if_max_uint(clock_measure.clk_locked, MaxUIntegerTypes.UINT8_T, isBool=True),
+        "clk_deep_sleep" : _validate_if_max_uint(clock_measure.clk_deep_sleep, MaxUIntegerTypes.UINT8_T, isBool=True),
     }
+    logging.debug("amdsmi_interface.py | amdsmi_get_clock_info | clk_type = " + clk_type_str + " | return_dictionary = \n" + str(json.dumps(dict_ret, indent=4)))
+    return dict_ret
 
 
 def amdsmi_get_gpu_bad_page_info(
@@ -2177,6 +2214,22 @@ def amdsmi_get_gpu_bad_page_info(
 
     return _format_bad_page_info(bad_pages, num_pages)
 
+def amdsmi_get_gpu_bad_page_threshold(
+    processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
+) -> Dict[str, Any]:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    threshold = ctypes.c_uint32()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_gpu_bad_page_threshold(
+            processor_handle, ctypes.byref(threshold)
+        )
+    )
+
+    return threshold.value
 
 def amdsmi_get_violation_status(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
@@ -2237,6 +2290,96 @@ def amdsmi_get_gpu_total_ecc_count(
         "uncorrectable_count": ec.uncorrectable_count,
         "deferred_count": ec.deferred_count,
     }
+
+def notifyTypeToString(notify_type_b):
+    idx = 0
+    guid = []
+    for i in notify_type_b:
+        guid.append(format(i, '02x'))
+        if idx == 7:
+            break
+        idx = idx +1
+    return "".join(guid[::-1])
+
+def amdsmi_get_gpu_cper_entries(processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
+    severity_mask: int,
+    buffer_size: int = 4*1048576,
+    cursor: int = 0
+) -> Tuple[List[Dict[str, Any]], int]:
+
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    # Allocate a buffer for CPER data.
+    buf = ctypes.create_string_buffer(buffer_size)
+    buf_size = ctypes.c_uint64(buffer_size)
+    entry_count = ctypes.c_uint64(20)
+    cur = ctypes.c_uint64(cursor)
+    # Allocate a pointer for the CPER header array.
+    cper_hdrs_array = (ctypes.POINTER(amdsmi_wrapper.amdsmi_cper_hdr_t) * 20)()
+    cper_hdrs = ctypes.cast(cper_hdrs_array, ctypes.POINTER(ctypes.POINTER(amdsmi_wrapper.amdsmi_cper_hdr_t)))
+
+    # Call the underlying AMD-SMI API.
+    ret = amdsmi_wrapper.amdsmi_get_gpu_cper_entries(
+        processor_handle,
+        ctypes.c_uint32(severity_mask),
+        buf,
+        ctypes.byref(buf_size),
+        cper_hdrs,
+        ctypes.byref(entry_count),
+        ctypes.byref(cur)
+    )
+    if ret != amdsmi_wrapper.AMDSMI_STATUS_SUCCESS:
+        raise AmdSmiLibraryException(ret)
+
+    entries = {}
+    cper_data = []
+    offset = 0
+    # Iterate over each entry using its variable record_length.
+    for i in range(entry_count.value):
+        entry_address = ctypes.addressof(buf) + offset
+        entry_ptr = ctypes.cast(entry_address, ctypes.POINTER(amdsmi_wrapper.amdsmi_cper_hdr_t))
+        cper_data.append({
+            "bytes":list((entry_ptr.contents.record_length * ctypes.c_byte).from_address(entry_address)),
+            "size":entry_ptr.contents.record_length
+        })
+        # Extract the timestamp fields.
+        year = entry_ptr.contents.timestamp.year
+        # Adjust the year if it's less than 100. You can tweak this logic based on your expected data.
+        if year < 100:
+             year += 2000
+        formatted_timestamp = (
+           f"{year:04d}/"
+           f"{entry_ptr.contents.timestamp.month:02d}/"
+           f"{entry_ptr.contents.timestamp.day:02d} "
+           f"{entry_ptr.contents.timestamp.hours:02d}:"
+           f"{entry_ptr.contents.timestamp.minutes:02d}:"
+           f"{entry_ptr.contents.timestamp.seconds:02d}"
+        )
+        cper_entry = {
+            "error_severity": amdsmi_wrapper.amdsmi_cper_sev_t__enumvalues.get(entry_ptr.contents.error_severity, "AMDSMI_CPER_SEV_UNUSED").replace("AMDSMI_CPER_SEV_", "").lower(),
+            "notify_type": _notifyTypeToString(entry_ptr.contents.notify_type.b),
+            "timestamp": formatted_timestamp,
+            "signature" : entry_ptr.contents.signature,
+            "revision" : entry_ptr.contents.revision,
+            "signature_end" : hex(entry_ptr.contents.signature_end),
+            "sec_cnt" : entry_ptr.contents.sec_cnt,
+            "record_length" : entry_ptr.contents.record_length,
+            "platform_id" : entry_ptr.contents.platform_id,
+            "creator_id" : entry_ptr.contents.creator_id,
+            "record_id" : entry_ptr.contents.record_id,
+            "flags" : entry_ptr.contents.flags,
+            "persistence_info" : entry_ptr.contents.persistence_info,
+            #"reserved" : entry_ptr.contents.reserved
+            #"cper_valid_bit" : entry_ptr.contents.cper_valid_bits,
+            #"partition_id" : entry_ptr.contents.partition_id,
+        }
+        entries[i] = cper_entry.copy()
+        offset += entry_ptr.contents.record_length  # Use the actual record length to advance the offset
+
+    return entries, cur.value, cper_data
 
 
 def amdsmi_get_gpu_board_info(
@@ -2938,7 +3081,7 @@ def amdsmi_get_gpu_memory_partition_config(processor_handle: amdsmi_wrapper.amds
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
-    
+
     config = amdsmi_wrapper.amdsmi_memory_partition_config_t()
 
     _check_res(
@@ -3006,51 +3149,76 @@ def amdsmi_get_gpu_accelerator_partition_profile(
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
+    exception_caught = False
     length = 8
     partition_id = [0, 0, 0, 0, 0, 0, 0, 0]
     partition_id_list = (ctypes.c_uint32 * length)(*partition_id)
     profile = amdsmi_wrapper.amdsmi_accelerator_partition_profile_t()
-
-    _check_res(
-        amdsmi_wrapper.amdsmi_get_gpu_accelerator_partition_profile(processor_handle,
-                                ctypes.byref(profile), partition_id_list)
-    )
-    profile_type_ret = amdsmi_wrapper.amdsmi_accelerator_partition_type_t__enumvalues[profile.profile_type].replace("AMDSMI_ACCELERATOR_PARTITION_", "")
-    profile_type_ret = profile_type_ret.replace("INVALID", "N/A")
- 
-    length = profile.num_partitions
     partition_ids = []
- 
-    #partition_id[0] will contain the partition id of each device
-    #BM/Guest will include this logic. Host will only display primary partition ids.
     kPOSITION_OF_PARTITION_ID = 0
-    partition_ids.append(partition_id_list[kPOSITION_OF_PARTITION_ID])
 
-    mem_caps_list = []
-    if profile.memory_caps.nps_flags.nps1_cap == 1:
-        mem_caps_list.append("NPS1")
-    if profile.memory_caps.nps_flags.nps2_cap == 1:
-        mem_caps_list.append("NPS2")
-    if profile.memory_caps.nps_flags.nps4_cap == 1:
-        mem_caps_list.append("NPS4")
-    if profile.memory_caps.nps_flags.nps8_cap == 1:
-        mem_caps_list.append("NPS8")
+    ret = amdsmi_wrapper.amdsmi_get_gpu_accelerator_partition_profile(processor_handle,
+                                    ctypes.byref(profile), partition_id_list)
+    if ret == amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
+        #partition_id[0] will contain the partition id of each device
+        #BM/Guest will include this logic. Host will only display primary partition ids.
+        partition_ids.append(partition_id_list[kPOSITION_OF_PARTITION_ID])
 
-    partition_profile_dict = {
-        "profile_type" : profile_type_ret,
-        "num_partitions" : profile.num_partitions,
-        "profile_index" : profile.profile_index,
-        "memory_caps": mem_caps_list,
-        "num_resources" : profile.num_resources,
-        "resources" : "N/A"
-    }
-    return_dictionary = {
-        "partition_id" : partition_ids,
-        "partition_profile" : partition_profile_dict
-    }
-
-    logging.debug("amdsmi_interface.py | amdsmi_get_gpu_accelerator_partition_profile | return_dictionary = \n" + str(json.dumps(return_dictionary, indent=4)))
-    return return_dictionary
+    try:
+        _check_res(ret)
+    except AmdSmiException as e:
+        logging.debug("amdsmi_interface.py | amdsmi_get_gpu_accelerator_partition_profile | exception_caught >> " + str(e))
+        partition_profile_dict = {
+            "profile_type" : "N/A",
+            "num_partitions" : "N/A",
+            "profile_index" : "N/A",
+            "memory_caps": "N/A",
+            "num_resources" : "N/A",
+            "resources" : "N/A"
+        }
+        return_dictionary = {
+            "partition_id" : partition_ids,
+            "partition_profile" : partition_profile_dict
+        }
+        if ret == amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
+            exception_caught = True
+        else:
+            _check_res(ret) # re-raise the exception if error is anything other than AMDSMI_STATUS_NOT_SUPPORTED
+                            # this ensures we can get partition ID even if the profile is not supported.
+    finally:
+        if exception_caught:
+            logging.debug("amdsmi_interface.py | exception_caught >> amdsmi_get_gpu_accelerator_partition_profile | return_dictionary = \n" + str(json.dumps(return_dictionary, indent=4)))
+            return return_dictionary
+        else:
+            profile_type_ret = amdsmi_wrapper.amdsmi_accelerator_partition_type_t__enumvalues[profile.profile_type].replace("AMDSMI_ACCELERATOR_PARTITION_", "")
+            profile_type_ret = profile_type_ret.replace("INVALID", "N/A")
+            length = profile.num_partitions
+            #partition_id[0] will contain the partition id of each device
+            #BM/Guest will include this logic. Host will only display primary partition ids.
+            partition_ids.append(partition_id_list[kPOSITION_OF_PARTITION_ID])
+            mem_caps_list = []
+            if profile.memory_caps.nps_flags.nps1_cap == 1:
+                mem_caps_list.append("NPS1")
+            if profile.memory_caps.nps_flags.nps2_cap == 1:
+                mem_caps_list.append("NPS2")
+            if profile.memory_caps.nps_flags.nps4_cap == 1:
+                mem_caps_list.append("NPS4")
+            if profile.memory_caps.nps_flags.nps8_cap == 1:
+                mem_caps_list.append("NPS8")
+            partition_profile_dict = {
+                "profile_type" : profile_type_ret,
+                "num_partitions" : profile.num_partitions,
+                "profile_index" : profile.profile_index,
+                "memory_caps": mem_caps_list,
+                "num_resources" : profile.num_resources,
+                "resources" : "N/A"
+            }
+            return_dictionary = {
+                "partition_id" : partition_ids,
+                "partition_profile" : partition_profile_dict
+            }
+            logging.debug("amdsmi_interface.py | amdsmi_get_gpu_accelerator_partition_profile | return_dictionary = \n" + str(json.dumps(return_dictionary, indent=4)))
+            return return_dictionary
 
 def amdsmi_get_gpu_accelerator_partition_profile_config(processor_handle: amdsmi_wrapper.amdsmi_processor_handle) -> Dict:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
@@ -3079,7 +3247,7 @@ def amdsmi_get_gpu_accelerator_partition_profile_config(processor_handle: amdsmi
         profile_type_ret = profile_type_ret.replace("INVALID", "N/A")
         resources = []
 
-        
+
         mem_caps_list = []
         if profile.memory_caps.nps_flags.nps1_cap == 1:
             mem_caps_list.append("NPS1")
@@ -3104,7 +3272,7 @@ def amdsmi_get_gpu_accelerator_partition_profile_config(processor_handle: amdsmi
             logging.debug("\namdsmi_interface.py | amdsmi_get_gpu_accelerator_partition_profile_config | resource_profile_dict = " + str(resource_profile_dict))
             resources.append(resource_profile_dict)
             resource_idx += 1
-        
+
         profile_dict = {
             "profile_type": profile_type_ret,
             "num_partitions": profile.num_partitions,
@@ -4008,11 +4176,14 @@ def amdsmi_get_clk_freq(
         )
     )
 
+    clk_type_str = AmdSmiClkType(clk_type).name
+
     dict_ret = {
         "num_supported": freq.num_supported,
         "current": freq.current,
         "frequency": list(freq.frequency)[: freq.num_supported],
     }
+    logging.debug("amdsmi_interface.py | amdsmi_get_clk_freq | clk_type = " + clk_type_str + " | return_dictionary = \n" + str(json.dumps(dict_ret, indent=4)))
     return dict_ret
 
 
