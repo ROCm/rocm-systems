@@ -6383,8 +6383,9 @@ class AMDSMICommands():
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError('Error opening CPER file. This command requires elevation') from e
-                    if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_FILE_NOT_FOUND:
-                        raise FileNotFoundError('Error opening CPER file. This command requires a CPER to be enabled.') from e
+                    if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED or \
+                            e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_FILE_NOT_FOUND:
+                        raise FileNotFoundError('Error accessing CPER files. This command requires CPER to be enabled.') from e
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_FILE_ERROR:
                         raise FileExistsError('Error opening CPER file. Unable to read CPER File') from e
                     else:
