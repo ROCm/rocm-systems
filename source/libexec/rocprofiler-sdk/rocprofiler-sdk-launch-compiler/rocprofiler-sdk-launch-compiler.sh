@@ -1,3 +1,25 @@
+# MIT License
+#
+# Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 #!/bin/bash -e
 #
 #   This script allows CMAKE_CXX_COMPILER to be a standard
@@ -17,7 +39,7 @@
 : ${DEBUG:=0}
 : ${ROCPROFILER_SDK_LAUNCH_COMPILER_DEBUG:=${DEBUG}}
 
-debug-message()
+debug_message()
 {
     if [ "${ROCPROFILER_SDK_LAUNCH_COMPILER_DEBUG}" -ne 0 ]; then
         echo -e "##### $(basename ${BASH_SOURCE[0]}) executing: \"$@\"... #####"
@@ -80,7 +102,7 @@ if [ "$(basename ${1})" = "cmake" ] && [ "${2}" = "-E" ] && [ "${3}" = "__run_co
 fi
 
 if [[ "${CXX_COMPILER}" != "${1}" ]]; then
-    debug-message $@
+    debug_message $@
     # the command does not depend on rocprofiler-sdk so just execute the command w/o re-directing to ${ROCPROFILER_SDK_COMPILER}
     exec $@
 else
@@ -96,11 +118,11 @@ else
     if [ -n "$(basename ${ROCPROFILER_SDK_COMPILER} | egrep 'amdclang|amdllvm')" ]; then
         # this ensures the libomptarget-amdgpu-gfx*.bc files are found
         LLVM_LIB_DIR=$(cd $(dirname $(realpath ${ROCPROFILER_SDK_COMPILER}))/../lib && pwd)
-        debug-message export LIBRARY_PATH=${LLVM_LIB_DIR}:${LIBRARY_PATH}
+        debug_message export LIBRARY_PATH=${LLVM_LIB_DIR}:${LIBRARY_PATH}
         export LIBRARY_PATH=${LLVM_LIB_DIR}:${LIBRARY_PATH}
     fi
 
-    debug-message ${ROCPROFILER_SDK_COMPILER} $@
+    debug_message ${ROCPROFILER_SDK_COMPILER} $@
     # execute ${ROCPROFILER_SDK_COMPILER}
     exec ${ROCPROFILER_SDK_COMPILER} $@
 fi
