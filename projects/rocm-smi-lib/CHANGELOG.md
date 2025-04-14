@@ -4,7 +4,7 @@ Full documentation for rocm_smi_lib is available at [https://rocm.docs.amd.com/]
 
 ***All information listed below is for reference and subject to change.***
 
-## amd_smi_lib for ROCm 6.5.0
+## rocm_smi_lib for ROCm 6.5.0
 
 ### Added
 
@@ -33,6 +33,86 @@ Full documentation for rocm_smi_lib is available at [https://rocm.docs.amd.com/]
 ### Resolved issues
 
 - N/A
+
+### Upcoming changes
+
+- N/A
+
+### Known issues
+
+- N/A
+
+## rocm_smi_lib for ROCm 6.4.1
+
+### Added
+
+- N/A
+
+### Changed
+
+- N/A
+
+### Removed
+
+- N/A
+
+### Optimized
+
+- N/A
+
+### Resolved issues
+
+- **Fixed partition enumeration - now refer to correct DRM Render and Card paths**
+    Previously, partitions incorrectly reflected the primary node (1st GPU) and showed the DRM Render Minor as renderD128. Partition nodes mirrored renderD128's information, which was incorrect. See the "<i>Previous Outputs in CPX</i>" example below.
+
+    Device enumeration was updated to correctly map DRM Render Minor paths. See the "<i>Corrected Outputs in CPX</i>" example below.
+
+    These changes impact what information is readable/writable for the partition nodes.
+
+    <b><i>Example: Previous Outputs in CPX</b></i>  
+    ```shell
+    $ rocm-smi
+
+    ============================================ ROCm System Management Interface ============================================
+    ====================================================== Concise Info ======================================================
+    Device  Node  IDs              Temp        Power     Partitions          SCLK    MCLK    Fan  Perf  PwrCap  VRAM%  GPU%
+                  (DID,     GUID)  (Junction)  (Socket)  (Mem, Compute, ID)
+    ==========================================================================================================================
+    0       2     0x74a1,   18421  45.0°C      152.0W    NPS1, CPX, 0        133Mhz  900Mhz  0%   auto  750.0W  0%     0%
+    1       3     0x74a1,   48116  45.0°C      152.0W    NPS1, CPX, 1        133Mhz  900Mhz  0%   auto  750.0W  0%     0%
+    2       4     0x74a1,   65524  45.0°C      152.0W    NPS1, CPX, 2        138Mhz  900Mhz  0%   auto  750.0W  0%     0%
+    3       5     0x74a1,   1013   45.0°C      152.0W    NPS1, CPX, 3        138Mhz  900Mhz  0%   auto  750.0W  0%     0%
+    4       6     0x74a1,   30708  45.0°C      152.0W    NPS1, CPX, 4        138Mhz  900Mhz  0%   auto  750.0W  0%     0%
+    5       7     0x74a1,   35829  45.0°C      152.0W    NPS1, CPX, 5        153Mhz  900Mhz  0%   auto  750.0W  0%     0%
+    6       8     0x74a1,   53237  45.0°C      152.0W    NPS1, CPX, 6        153Mhz  900Mhz  0%   auto  750.0W  0%     0%
+    7       9     0x74a1,   13300  45.0°C      152.0W    NPS1, CPX, 7        153Mhz  900Mhz  0%   auto  750.0W  0%     0%
+    8       10    0x74a1,   64360  44.0°C      158.0W    NPS1, CPX, 0        144Mhz  900Mhz  0%   auto  750.0W  0%     0%
+    ...
+    ==========================================================================================================================
+    ================================================== End of ROCm SMI Log ===================================================
+    ```  
+    <b><i>Example: Corrected outputs in CPX</i></b>
+    ```shell
+    $ rocm-smi
+
+    ============================================ ROCm System Management Interface ============================================
+    ====================================================== Concise Info ======================================================
+    Device  Node  IDs              Temp        Power     Partitions          SCLK    MCLK    Fan  Perf  PwrCap  VRAM%  GPU%
+                  (DID,     GUID)  (Junction)  (Socket)  (Mem, Compute, ID)
+    ==========================================================================================================================
+    0       2     0x74a1,   18421  44.0°C      151.0W    NPS1, CPX, 0        132Mhz  900Mhz  0%   auto  750.0W  0%     0%
+    1       3     N/A,      48116  N/A         N/A       N/A, N/A, 1         N/A     N/A     0%   n/a   N/A     2%     N/A
+    2       4     N/A,      65524  N/A         N/A       N/A, N/A, 2         N/A     N/A     0%   n/a   N/A     2%     N/A
+    3       5     N/A,      1013   N/A         N/A       N/A, N/A, 3         N/A     N/A     0%   n/a   N/A     2%     N/A
+    4       6     N/A,      30708  N/A         N/A       N/A, N/A, 4         N/A     N/A     0%   n/a   N/A     2%     N/A
+    5       7     N/A,      35829  N/A         N/A       N/A, N/A, 5         N/A     N/A     0%   n/a   N/A     2%     N/A
+    6       8     N/A,      53237  N/A         N/A       N/A, N/A, 6         N/A     N/A     0%   n/a   N/A     2%     N/A
+    7       9     N/A,      13300  N/A         N/A       N/A, N/A, 7         N/A     N/A     0%   n/a   N/A     2%     N/A
+    8       10    0x74a1,   64360  44.0°C      158.0W    NPS1, CPX, 0        132Mhz  900Mhz  0%   auto  750.0W  0%     0%
+    ...
+    ==========================================================================================================================
+    ================================================== End of ROCm SMI Log ===================================================
+    ```
 
 ### Upcoming changes
 

@@ -1297,6 +1297,34 @@ typedef union id {
         };
 } rsmi_func_id_value_t;
 
+/**
+ * @struct rsmi_device_identifiers_t
+ * @brief Structure to hold various identifiers for a GPU device.
+ *
+ * @details This structure contains fields that uniquely identify a GPU device,
+ * including its card index, DRM render minor, PCI Bus/Device/Function ID (BDFID),
+ * KFD GPU ID, partition ID, and SMI device ID.
+ */
+typedef struct {
+  //!< The card index of the device.
+  uint32_t card_index;
+  //!< The DRM render minor number of the device.
+  uint32_t drm_render_minor;
+
+  //!< The PCI Bus/Device/Function identifier (BDFID) of the device.
+  uint64_t bdfid;
+
+  //!< The KFD (Kernel Fusion Driver) GPU ID of the device.
+  uint64_t kfd_gpu_id;
+
+  //!< The partition ID of the device.
+  uint32_t partition_id;
+
+  //!< The SMI (System Management Interface) device ID.
+  uint32_t smi_device_id;
+
+  uint32_t reserved[10];
+} rsmi_device_identifiers_t;
 
 /*****************************************************************************/
 /** @defgroup InitShutAdmin Initialization and Shutdown
@@ -1824,6 +1852,35 @@ rsmi_status_t rsmi_dev_guid_get(uint32_t dv_ind, uint64_t *guid);
  */
 rsmi_status_t rsmi_dev_node_id_get(uint32_t dv_ind, uint32_t *node_id);
 
+/**
+ * @brief Retrieves the device identifiers for a specific GPU device.
+ *
+ * @details This function retrieves various identifiers for a GPU device, such as
+ * the card index, DRM render minor, BDFID, KFD GPU ID, partition ID, and SMI device ID.
+ * The identifiers are written to the provided `rsmi_device_identifiers_t` structure.
+ *
+ * @param[in] dv_ind a device index.
+ *
+ * @param[out] identifiers A pointer to a structure of type `rsmi_device_identifiers_t`
+ *                         where the device identifiers will be stored. The structure
+ *                         contains fields such as:
+ *                         - `card_index`: The card index of the device.
+ *                         - `drm_render_minor`: The DRM render minor number.
+ *                         - `bdfid`: The Bus/Device/Function PCI identifier.
+ *                         - `kfd_gpu_id`: The KFD GPU ID.
+ *                         - `partition_id`: The partition ID of the device.
+ *                         - `smi_device_id`: The SMI device ID.
+ *
+ * @retval ::RSMI_STATUS_SUCCESS The call was successful, and the device identifiers were retrieved.
+ * @retval ::RSMI_STATUS_NOT_SUPPORTED The installed software or hardware does not support this function
+ *                                     with the given arguments.
+ * @retval ::RSMI_STATUS_INVALID_ARGS The provided arguments are invalid.
+ *
+ * @note Ensure that the `identifiers` pointer is valid and points to a properly allocated structure
+ *       before calling this function.
+ */
+rsmi_status_t rsmi_dev_device_identifiers_get(uint32_t dv_ind,
+                                              rsmi_device_identifiers_t *identifiers);
 
 /** @} */  // end of IDQuer
 
