@@ -1940,6 +1940,57 @@ pub fn amdsmi_set_gpu_fan_speed(
     Ok(())
 }
 
+/// Get the GPU busy percent of the device with the specified processor handle.
+///
+/// Given a processor handle `processor_handle`, this function returns the GPU busy percent
+/// for the specified processor.
+///
+/// # Arguments
+///
+/// * `processor_handle` - A handle to the processor which is being queried.
+///
+/// # Returns
+///
+/// * `AmdsmiResult<u32>` - Returns `Ok(u32)` containing the GPU busy percent if successful, or an error if it fails.
+///
+/// # Example
+///
+/// ```rust
+/// # use amdsmi::*;
+/// #
+/// # fn main() {
+/// #   // Initialize the AMD SMI library
+/// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdGpus).expect("Failed to initialize AMD SMI");
+/// #
+///     // Example processor_handle, assuming the number of processors is greater than zero
+///     let processor_handle = amdsmi_get_processor_handles!()[0];
+///
+///     // Retrieve the GPU busy percent
+///     match amdsmi_get_gpu_busy_percent(processor_handle) {
+///         Ok(gpu_busy_percent) => println!("GPU Busy Percent: {}", gpu_busy_percent),
+///         Err(AmdsmiStatusT::AmdsmiStatusNotSupported) => println!("amdsmi_get_gpu_busy_percent() not supported on this device"),
+///         Err(e) => panic!("Failed to get GPU busy_percent level: {}", e),
+///     }
+/// #
+/// #   // Shut down the AMD SMI library
+/// #   amdsmi_shut_down().expect("Failed to shut down AMD SMI");
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_gpu_busy_percent` call fails.
+pub fn amdsmi_get_gpu_busy_percent(
+    processor_handle: AmdsmiProcessorHandle
+) -> AmdsmiResult<(u32)> {
+    let mut gpu_busy_percent = 0;
+    call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_busy_percent(
+        processor_handle,
+        &mut gpu_busy_percent
+    ));
+    Ok(gpu_busy_percent)
+}
+
 ///
 /// Retrieves the utilization count for the specified processor handle and counter types.
 ///

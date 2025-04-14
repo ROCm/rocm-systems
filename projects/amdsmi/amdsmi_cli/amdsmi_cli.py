@@ -96,7 +96,8 @@ if __name__ == "__main__":
                                     amd_smi_commands.monitor,
                                     amd_smi_commands.rocm_smi,
                                     amd_smi_commands.xgmi,
-                                    amd_smi_commands.partition)
+                                    amd_smi_commands.partition,
+                                    amd_smi_commands.ras)
     try:
         try:
             argcomplete.autocomplete(amd_smi_parser)
@@ -105,7 +106,7 @@ if __name__ == "__main__":
 
         valid_commands = ['version', 'list', 'static', 'firmware', 'bad-pages',
                           'metric', 'process', 'profile', 'event', 'topology', 'set',
-                          'reset', 'monitor', 'xgmi', 'partition', '--help', '-h']
+                          'reset', 'monitor', 'xgmi', 'partition', 'ras', '--help', '-h']
 
         sys.argv = [arg.lower() if arg.startswith('--') or not arg.startswith('-')
                     else arg for arg in sys.argv]
@@ -117,11 +118,12 @@ if __name__ == "__main__":
             raise amdsmi_cli_exceptions.AmdSmiInvalidSubcommandException(sys.argv[1],amd_smi_commands.logger.destination)
 
         # Handle command modifiers before subcommand execution
-        if args.json:
+            # human readable is the default output format
+        if hasattr(args, 'json') and args.json:
             amd_smi_commands.logger.format = amd_smi_commands.logger.LoggerFormat.json.value
-        if args.csv:
+        if hasattr(args, 'csv') and args.csv:
             amd_smi_commands.logger.format = amd_smi_commands.logger.LoggerFormat.csv.value
-        if args.file:
+        if hasattr(args, 'file') and args.file:
             amd_smi_commands.logger.destination = args.file
 
         # Remove previous log handlers

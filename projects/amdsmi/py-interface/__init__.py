@@ -109,6 +109,7 @@ from .amdsmi_interface import amdsmi_get_clock_info
 
 from .amdsmi_interface import amdsmi_get_pcie_info
 from .amdsmi_interface import amdsmi_get_gpu_bad_page_info
+from .amdsmi_interface import amdsmi_get_gpu_bad_page_threshold
 from .amdsmi_interface import amdsmi_get_violation_status
 from .amdsmi_interface import amdsmi_get_gpu_xgmi_link_status
 
@@ -124,6 +125,7 @@ from .amdsmi_interface import amdsmi_get_gpu_board_info
 # # Ras Information
 from .amdsmi_interface import amdsmi_get_gpu_ras_feature_info
 from .amdsmi_interface import amdsmi_get_gpu_ras_block_features_enabled
+from .amdsmi_interface import amdsmi_get_gpu_cper_entries
 
 # # Unsupported Functions In Virtual Environment
 from .amdsmi_interface import amdsmi_set_gpu_pci_bandwidth

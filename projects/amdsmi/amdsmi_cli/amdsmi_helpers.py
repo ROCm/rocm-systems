@@ -19,18 +19,19 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+import grp
+import json
 import logging
 import math
+import multiprocessing
 import os
-import grp
 import platform
+import re
 import sys
 import time
-import re
-import multiprocessing
-import json
 
 from enum import Enum
+from pathlib import Path
 from typing import List, Set, Union
 
 from amdsmi_init import *
@@ -55,7 +56,11 @@ class AMDSMIHelpers():
 
         self._is_linux = False
         self._is_windows = False
+
+        # Counts and Tracking variables
         self._count_of_sets_called = 0
+        self._count_of_cper_files = 0
+
 
         # Check if the system is a virtual OS
         if self.operating_system.startswith("Linux"):
@@ -95,12 +100,21 @@ class AMDSMIHelpers():
             except amdsmi_exception.AmdSmiLibraryException as e:
                 logging.debug("Unable to determine virtualization status: " + str(e.get_error_code()))
 
+
     def increment_set_count(self):
         self._count_of_sets_called += 1
 
 
     def get_set_count(self):
         return self._count_of_sets_called
+
+
+    def increment_cper_count(self):
+        self._count_of_cper_files += 1
+
+
+    def get_cper_count(self):
+        return self._count_of_cper_files
 
 
     def is_virtual_os(self):
@@ -115,6 +129,7 @@ class AMDSMIHelpers():
     def is_baremetal(self):
         # Returns True if system is baremetal, if system is hypervisor this should return False
         return self._is_baremetal
+
 
     def is_passthrough(self):
         return self._is_passthrough
@@ -197,7 +212,7 @@ class AMDSMIHelpers():
         """
         cpu_choices = {}
         cpu_choices_str = ""
-        #import pdb;pdb.set_trace()
+
         try:
             cpu_handles = []
             # amdsmi_get_cpusocket_handles() returns the cpu socket handles stored for cpu_id
@@ -229,6 +244,7 @@ class AMDSMIHelpers():
             cpu_choices_str += f"  all{' ' * max_padding}| Selects all devices\n"
 
         return (cpu_choices, cpu_choices_str)
+
 
     def get_core_choices(self):
         """Return dictionary of possible Core choices and string of the output:
@@ -705,10 +721,12 @@ class AMDSMIHelpers():
         except:
             return False
 
+
     def get_perf_levels(self):
         perf_levels_str = [clock.name for clock in amdsmi_interface.AmdSmiDevPerfLevel]
         perf_levels_int = list(set(clock.value for clock in amdsmi_interface.AmdSmiDevPerfLevel))
         return perf_levels_str, perf_levels_int
+
 
     def get_accelerator_partition_profile_config(self):
         device_handles = amdsmi_interface.amdsmi_get_processor_handles()
@@ -723,17 +741,32 @@ class AMDSMIHelpers():
                     accelerator_partition_profiles['memory_caps'].append(profile['profiles'][p]['memory_caps'])
                 break # Only need to get the profiles for one device
             except amdsmi_interface.AmdSmiLibraryException as e:
+                logging.debug(f"AMDSMIHelpers.get_accelerator_partition_profile_config - Unable to get accelerator partition profile config for device {dev}: {str(e)}")
+                if e.err_code == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
+                    logging.debug(f"AMDSMIHelpers.get_accelerator_partition_profile_config - Device {dev} does not support accelerator partition profiles")
+                    return accelerator_partition_profiles
+                break
+            except Exception as e:
+                logging.debug(f"AMDSMIHelpers.get_accelerator_partition_profile_config - Unexpected error occured --> Unable to get accelerator partition profile config for device {dev}: {str(e)}")
                 break
         return accelerator_partition_profiles
 
+
     def get_accelerator_choices_types_indices(self):
         return_val = ("N/A", {'profile_indices':[], 'profile_types':[]})
+        if os.geteuid() != 0:
+            logging.debug("AMDSMIHelpers.get_accelerator_choices_types_indices - Not root, unable to get accelerator partition profiles")
+            # If not root, we can't get the accelerator partition profiles
+            return return_val
+        else:
+            logging.debug("AMDSMIHelpers.get_accelerator_choices_types_indices - Root, getting accelerator partition profiles")
         accelerator_partition_profiles = self.get_accelerator_partition_profile_config()
         if len(accelerator_partition_profiles['profile_types']) != 0:
             compute_partitions_str = accelerator_partition_profiles['profile_types'] + accelerator_partition_profiles['profile_indices']
             accelerator_choices = ", ".join(compute_partitions_str)
             return_val = (accelerator_choices, accelerator_partition_profiles)
         return return_val
+
 
     def get_memory_partition_types(self):
         memory_partitions_str = [partition.name for partition in amdsmi_interface.AmdSmiMemoryPartitionType]
@@ -767,11 +800,15 @@ class AMDSMIHelpers():
         power_cap_min = amdsmi_interface.MaxUIntegerTypes.UINT64_T # start out at max and min and then find real min and max
         power_cap_max = 0
         for dev in device_handles:
-            power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(dev)
-            if power_cap_info['max_power_cap'] > power_cap_max:
-                power_cap_max = power_cap_info['max_power_cap']
-            if power_cap_info['min_power_cap'] < power_cap_max:
-                power_cap_min = power_cap_info['min_power_cap']
+            try:
+                power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(dev)
+                if power_cap_info['max_power_cap'] > power_cap_max:
+                    power_cap_max = power_cap_info['max_power_cap']
+                if power_cap_info['min_power_cap'] < power_cap_max:
+                    power_cap_min = power_cap_info['min_power_cap']
+            except amdsmi_interface.AmdSmiLibraryException as e:
+                logging.debug(f"AMDSMIHelpers.get_power_caps - Unable to get power cap info for device {dev}: {str(e)}")
+                continue
         return (power_cap_min, power_cap_max)
 
 
@@ -854,6 +891,7 @@ class AMDSMIHelpers():
         else:
             sys.exit('Confirmation not given. Exiting without setting value')
 
+
     def confirm_changing_memory_partition_gpu_reload_warning(self, auto_respond=False):
         """ Print the warning for running outside of specification and prompt user to accept the terms.
 
@@ -878,6 +916,7 @@ class AMDSMIHelpers():
         else:
             print('Confirmation not given. Exiting without setting value')
             sys.exit(1)
+
 
     def is_valid_profile(self, profile):
         profile_presets = amdsmi_interface.amdsmi_wrapper.amdsmi_power_profile_preset_masks_t__enumvalues
@@ -924,6 +963,7 @@ class AMDSMIHelpers():
             return f"{value} {unit}".rstrip()
         return f"{value}"
 
+
     class SI_Unit(float, Enum):
         GIGA = 1000000000  # 10^9
         MEGA = 1000000     # 10^6
@@ -936,6 +976,7 @@ class AMDSMIHelpers():
         MILLI = 0.001      # 10^-3
         MICRO = 0.000001   # 10^-6
         NANO = 0.000000001 # 10^-9
+
 
     def convert_SI_unit(self, val: Union[int, float], unit_in: SI_Unit, unit_out = SI_Unit.BASE) -> Union[int, float]:
         """This function will convert a value into another
@@ -956,6 +997,7 @@ class AMDSMIHelpers():
         else:
             raise TypeError("val must be an int or float")
 
+
     def get_pci_device_ids(self) -> Set[str]:
         pci_devices_path = "/sys/bus/pci/devices"
         pci_devices: set[str] = set()
@@ -968,6 +1010,7 @@ class AMDSMIHelpers():
             except Exception as _:
                 continue
         return pci_devices
+
 
     def progressbar(self, it, prefix="", size=60, out=sys.stdout, add_newline=False):
         count = len(it)
@@ -985,11 +1028,13 @@ class AMDSMIHelpers():
             show(i+1)
         print("\n\n", end='\r', flush=True, file=out)
 
+
     def showProgressbar(self, title="", timeInSeconds=13, add_newline=False):
         if title != "":
             title += " "
         for i in self.progressbar(range(timeInSeconds), title, 40, add_newline=add_newline):
             time.sleep(1)
+
 
     def check_required_groups(self):
         """
@@ -1016,3 +1061,60 @@ class AMDSMIHelpers():
             ) % ", ".join(sorted(missing_groups))
             print(msg)
             logging.warning(msg)
+
+    def hexdump(self, data, size, filepath):
+        """
+        Converts binary data to a hex dump string, similar to the hexdump utility.
+        """
+        def to_printable_ascii(byte):
+            return chr(byte) if 32 <= byte <= 126 else "."
+
+        with open(filepath, 'w') as f:
+            offset = 0
+            while offset < size:
+                chunk = data[offset:offset + 16]
+                hex_values = " ".join(f"{byte:02x}" for byte in chunk)
+                ascii_values = "".join(to_printable_ascii(byte) for byte in chunk)
+                print(f"{offset:08x} {hex_values:<48} |{ascii_values}|", file=f)
+                offset += 16
+
+    def dump_entries(self, folder, entries, cper_data):
+        if folder:
+            folder = Path(folder)
+            folder.mkdir(parents=True, exist_ok=True)  # Ensure folder exists
+
+            # Loop through all entries in the dictionary.
+            for entry_index, entry in enumerate(entries.values()):
+                # Assume 'entry' is a dictionary with keys: "error_severity" and "notify_type".
+                error_severity = entry.get("error_severity", "Unknown")
+                notify_type = entry.get("notify_type", "Unknown")
+
+                if error_severity == "non_fatal_uncorrected":
+                    prefix = "uncorrected"
+                elif error_severity == "non_fatal_corrected":
+                    prefix = "corrected"
+                elif error_severity == "fatal":
+                    prefix = "fatal"
+                    if notify_type == "BOOT":
+                        prefix = "boot"
+
+                # Construct a unique file name using the key to avoid overwriting
+                entry_file = f"{prefix}_{self.get_cper_count()}.json"
+                output_path = folder / entry_file
+
+                cper_data_file = f"{prefix}_{self.get_cper_count()}.cper"
+                cper_data_file_path = folder / cper_data_file
+                self.hexdump(cper_data[entry_index]["bytes"], cper_data[entry_index]["size"], cper_data_file_path)
+
+                try:
+                    with output_path.open("w") as f:
+                        logging.debug(f"Writing entry {self.get_cper_count()}: {entry} to {output_path}")
+                        # Dump the single entry as JSON, handling bytes via the lambda.
+                        f.write(json.dumps(entry, indent=2,
+                                           default=lambda o: o.decode('utf-8') if isinstance(o, bytes) else o))
+                except Exception as e:
+                    logging.error(f"Failed to write entry {self.get_cper_count()} to {output_path}: {e}")
+        else:
+            print(json.dumps(entries, indent=2,
+                             default=lambda o: o.decode('utf-8') if isinstance(o, bytes) else o))
+        self.increment_cper_count()
