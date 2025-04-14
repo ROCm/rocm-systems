@@ -682,7 +682,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         clock_help = f"Show one or more valid clock frequency levels. Available options:\n\t{clk_option_str}"
 
         # Options arguments help text for Hypervisors and Baremetal
-        ras_help = "Displays RAS features information"
+        # Might be able to remove Sudo requirement in ROCm 7.0
+        ras_help = "Displays RAS features information;\n\tSudo may be required for some features"
         numa_help = "All numa node information" # Linux Baremetal only
         partition_help = "Partition information"
 

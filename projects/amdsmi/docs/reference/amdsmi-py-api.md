@@ -990,6 +990,38 @@ except AmdSmiException as e:
     print(e)
 ```
 
+### amdsmi_get_gpu_bad_page_threshold
+
+Description:  Returns bad page threshold for the given GPU; Requires root level access to display bad page threshold count; otherwise will return "N/A".
+It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Bad page threshold value
+
+Exceptions that can be thrown by `amdsmi_get_gpu_bad_page_threshold` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiRetryException`
+* `AmdSmiParameterException`
+
+Example:
+
+```python
+try:
+    devices = amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            threshold = amdsmi_get_gpu_bad_page_threshold(device)
+            print(bad_page["threshold"])
+except AmdSmiException as e:
+    print(e)
+```
+
 ### amdsmi_get_gpu_memory_reserved_pages
 
 Description: Returns reserved memory page info for the given GPU.

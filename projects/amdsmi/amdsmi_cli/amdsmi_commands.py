@@ -712,6 +712,7 @@ class AMDSMICommands():
         if 'ras' in current_platform_args:
             if args.ras:
                 ras_dict = {"eeprom_version": "N/A",
+                            "bad_page_threshold": "N/A",
                             "parity_schema" : "N/A",
                             "single_bit_schema" : "N/A",
                             "double_bit_schema" : "N/A",
@@ -735,6 +736,10 @@ class AMDSMICommands():
                     ras_dict.update(ras_info)
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     logging.debug("Failed to get ras info for gpu %s | %s", gpu_id, e.get_error_info())
+                try:
+                    ras_dict["bad_page_threshold"] = amdsmi_interface.amdsmi_get_gpu_bad_page_threshold(args.gpu)
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    logging.debug("Failed to get bad page threshold count for gpu %s | %s", gpu_id, e.get_error_info())
 
                 try:
                     ras_states = amdsmi_interface.amdsmi_get_gpu_ras_block_features_enabled(args.gpu)

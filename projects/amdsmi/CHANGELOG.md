@@ -8,6 +8,21 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added bad page threshold count**.  
+  - Added `amdsmi_get_gpu_bad_page_threshold` to Python API and CLI; root/sudo permissions required to display the count.
+
+### Changed
+
+### Removed
+
+### Optimized
+
+### Resolved issues
+
+### Upcoming changes
+
+### Known issues
+
 - **Added cpu model name for RDC**.  
   - Added new C and Python API `amdsmi_get_cpu_model_name`
   - Not sourced from esmi library.
