@@ -1062,6 +1062,7 @@ class AMDSMIHelpers():
             print(msg)
             logging.warning(msg)
 
+
     def hexdump(self, data, size, filepath):
         """
         Converts binary data to a hex dump string, similar to the hexdump utility.
@@ -1077,6 +1078,7 @@ class AMDSMIHelpers():
                 ascii_values = "".join(to_printable_ascii(byte) for byte in chunk)
                 print(f"{offset:08x} {hex_values:<48} |{ascii_values}|", file=f)
                 offset += 16
+
 
     def dump_entries(self, folder, entries, cper_data):
         if folder:

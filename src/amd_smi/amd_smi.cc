@@ -3627,7 +3627,7 @@ static auto amdsmi_read_cper_file(const std::string &filepath) {
     } else {
         ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[CPER] file does not exist: "
             << filepath << ", errno: " << errno << "): " << strerror(errno);
-        ctx.status = AMDSMI_STATUS_FILE_NOT_FOUND;
+        ctx.status = AMDSMI_STATUS_NOT_SUPPORTED;
         return ctx;
     }
 
