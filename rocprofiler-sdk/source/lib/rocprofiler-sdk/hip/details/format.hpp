@@ -152,6 +152,7 @@ ROCP_SDK_HIP_FORMATTER(hipGraphEdgeData,
                        v.to_port,
                        v.type,
                        '}')
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION < 12
 ROCP_SDK_HIP_FORMATTER(HIP_MEMSET_NODE_PARAMS,
                        "{}dst={}, pitch={}, value={}, elementSize={}, width={}, height={}{}",
                        '{',
@@ -162,6 +163,7 @@ ROCP_SDK_HIP_FORMATTER(HIP_MEMSET_NODE_PARAMS,
                        v.width,
                        v.height,
                        '}')
+#endif
 ROCP_SDK_HIP_FORMATTER(hipMemLocation, "{}type={}, id={}{}", '{', v.type, v.id, '}')
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 7
 ROCP_SDK_HIP_FORMATTER(
