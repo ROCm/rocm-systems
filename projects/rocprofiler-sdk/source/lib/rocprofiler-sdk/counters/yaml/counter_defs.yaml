@@ -3299,6 +3299,16 @@ TA_BUFFER_READ_LDS_WAVEFRONTS_sum:
     gfx950:
       expression: reduce(TA_BUFFER_READ_LDS_WAVEFRONTS, sum)
   description: Number of buffer read wavefronts for lds return processed by TA. Sum over TA instances.
+TA_BUFFER_COALESCEABLE_WAVEFRONTS_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TA_BUFFER_COALESCEABLE_WAVEFRONTS, sum)
+  description: Number of buffer coalesceable wavefronts processed by TA. Sum over TA instances.
+TA_FLAT_COALESCEABLE_WAVEFRONTS_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TA_FLAT_COALESCEABLE_WAVEFRONTS, sum)
+  description: Number of flat opcode coalesceale ops processed by the TA. Sum over TA instances.
 # TCA block(The Texture Cache Arbiter)
 TCA_BUSY:
   architectures:
@@ -4540,6 +4550,21 @@ TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum:
     gfx950:
       expression: reduce(TCC_EA0_WRREQ_ATOMIC_DRAM_32B,sum)
   description: Number of 32-byte TCC/EA atomic requests due to DRAM traffic, 1 64-byte request will be counted to 2. Sum over TCP instances.
+TCC_EA0_RDREQ_IO_32B_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCC_EA0_RDREQ_IO_32B,sum)
+  description: Number of 32-byte TCC/EA read requests due to IO traffic, 1 64-byte request will be counted to 2, 128-byte as 4. Sum over TCP instances.
+TCC_EA0_RDREQ_GMI_32B_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCC_EA0_RDREQ_GMI_32B,sum)
+  description: Number of 32-byte TCC/EA read requests due to GMI traffic, 1 64-byte request will be counted to 2, 128-byte as 4. Sum over TCP instances.
+TCC_EA0_RDREQ_DRAM_32B_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TCC_EA0_RDREQ_DRAM_32B,sum)
+  description: Number of 32-byte TCC/EA read requests due to DRAM traffic, 1 64-byte request will be counted to 2, 128-byte as 4. Sum over TCP instances.
 # TCP Block (Texture Cache per Pipe)
 TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES:
   architectures:
@@ -5514,7 +5539,12 @@ TD_WRITE_ACKT_WAVEFRONT:
     gfx950:
       block: TD
       event: 27
-  description: Count write acknowledgments, sent to SQ and not to SP. 
+  description: Count write acknowledgments, sent to SQ and not to SP.
+TD_WRITE_ACKT_WAVEFRONT_sum:
+  architectures:
+    gfx950:
+      expression: reduce(TD_WRITE_ACKT_WAVEFRONT,sum)
+  description: Count write acknowledgments, sent to SQ and not to SP. Sum over TD instances.
 TD_TD_SP_TRAFFIC:
   architectures:
     gfx950:
