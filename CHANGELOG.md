@@ -172,9 +172,11 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Added perfetto support for counter collection.
 - Added support for negating rocprofv3 tracing options when using aggregate options, e.g. `--sys-trace --hsa-trace=no`
 - Added `--agent-index` option in rocprofv3 to specify the agent naming convention in the output
-  - absolute == node_id
-  - relative == logical_node_id
-  - type-relative == logical_node_type_id
+    - absolute == node_id
+    - relative == logical_node_id
+    - type-relative == logical_node_type_id
+- Added MI300 stochastic (hardware-based) PC sampling support in ROCProfiler-SDK and ROCProfV3
+
 
 ### Changed
 

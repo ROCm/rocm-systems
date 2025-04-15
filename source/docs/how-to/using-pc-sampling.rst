@@ -180,3 +180,128 @@ The preceding command generates a JSON file with the comprehensive output. Here 
   }
 
 For description of the fields in the JSON output, see :ref:`output-file-fields`.
+
+
+Hardware-Based (Stochastic) PC Sampling Method
+===============================================
+
+The new ``ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC`` has been introduced for gfx942 architecture.
+It employes a specific hardware for probing waves actively running on GPU.
+Beside information already provided with ``ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP`` useful for determining hot-spots within the kernel,
+it delivers additional information that tells whether a sampled wave issued an instruction represented with particular PC.
+If not, it tells what is the reason for not issuing the instruction (stall reason).
+This type of information is particularly useful for understanding stalls during the kernel execution.
+
+To use this method on gfx942, we recommend listing available PC sampling configurations to verify if the latest ROCm stack is installed
+on the system by running:
+
+.. code-block:: bash
+
+  rocprofv3 -L
+
+Outputi similar to the following indicates that the ``ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC`` method is available:
+
+.. code-block:: bash
+
+  Method: ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC
+  Unit:   ROCPROFILER_PC_SAMPLING_UNIT_CYCLES
+  Minimum_Interval:       256
+  Maximum_Interval:       2147483648
+
+Please note that on gfx942, ``ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC`` requires intervals to be specified in cycles whose value are power of 2.
+
+To profile a gfx942 accelarated application with ``ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC`` PC sampling, one can use the following command:
+
+.. code-block:: bash
+
+  rocprofv3 --pc-sampling-beta-enabled --pc-sampling-method stochastic --pc-sampling-unit cycles --pc-sampling-interval 1048576 --output-format csv, json -- <application_path>
+
+The previous command serializes samples in both CSV and JSON output formats in the ``pc_sampling_stochastic.csv`` and ``out_results.json`` files, respectively.
+
+Comparing the ``pc_sampling_stochastic.csv`` to ``pc_sampling_host_trap`` from previous section, one can notice that the ``ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC`` method
+generates additional fields:
+- ``Wave_Issued_Instruction``: Indicates whether the wave issued an instruction (value 1) represented with particular PC or not (value 0)
+- ``Instruction_Type``: If the value of ``Wave_Issued_Instruction`` is 1, this fields indicates the type of the issued instruction. Otherwise, this fields irrelevant.
+- ``Stall_Reason``: If the value of ``Wave_Issued_Instruction`` is 0, this fields indicates the reason for not issuing the instruction (stall reason). Otherwise, this field is irrelevant.
+- ``Wave_Count``: Total number of waves actively running on a compute unit when the sample was generated.
+
+.. csv-table:: PC sampling stochastic with debug symbols
+   :file: /data/pc_sampling_stochastic_debug.csv
+   :widths: 20,10,10,10,10,20,10,20,20,10
+   :header-rows: 1
+
+Similarly, ``ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC`` method delievers additional information to every sample in the JSON output.
+The following snippet shows one sample from ``out_results.json`` file.
+
+.. code-block:: text
+
+  {
+    "record": {
+      "flags": {
+        "has_mem_cnt": 0
+      },
+      "hw_id": {
+        "chiplet": 4,
+        "wave_id": 0,
+        "simd_id": 2,
+        "pipe_id": 3,
+        "cu_or_wgp_id": 1,
+        "shader_array_id": 0,
+        "shader_engine_id": 3,
+        "workgroup_id": 0,
+        "vm_id": 3,
+        "queue_id": 2,
+        "microengine_id": 1
+      },
+      "pc": {
+        "code_object_id": 2,
+        "code_object_offset": 13880
+      },
+      "exec_mask": 18446744073709551615,
+      "timestamp": 390705261924637,
+      "dispatch_id": 29,
+      "corr_id": {
+        "internal": 29,
+        "external": 0
+      },
+      "wrkgrp_id": {
+        "x": 9,
+        "y": 489,
+        "z": 0
+      },
+      "wave_in_grp": 0,
+      "wave_issued": 1,
+      "inst_type": "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_VALU",
+      "wave_cnt": 6,
+      "snapshot": {
+        "stall_reason": "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_OTHER_WAIT",
+        "dual_issue_valu": 0,
+        "arb_state_issue_valu": 1,
+        "arb_state_issue_matrix": 0,
+        "arb_state_issue_lds": 0,
+        "arb_state_issue_lds_direct": 0,
+        "arb_state_issue_scalar": 0,
+        "arb_state_issue_vmem_tex": 0,
+        "arb_state_issue_flat": 0,
+        "arb_state_issue_exp": 0,
+        "arb_state_issue_misc": 0,
+        "arb_state_issue_brmsg": 0,
+        "arb_state_stall_valu": 0,
+        "arb_state_stall_matrix": 0,
+        "arb_state_stall_lds": 0,
+        "arb_state_stall_lds_direct": 0,
+        "arb_state_stall_scalar": 0,
+        "arb_state_stall_vmem_tex": 0,
+        "arb_state_stall_flat": 0,
+        "arb_state_stall_exp": 0,
+        "arb_state_stall_misc": 0,
+        "arb_state_stall_brmsg": 0
+      }
+    },
+    "inst_index": 1
+  },
+
+Fields starting with ``arb_state_`` are of particular interest as they indicate the state of the arbiter at the time of sampling.
+Namely, ``arb_state_issue_`` fields indicate what type of instructions arbiter issued at the time of sampling.
+On the other hand, ``arb_state_stall_`` fields indicate what type of instructions were stalled at the time of sampling.
+This information is useful for understanding how many instructions per cycle (IPC) are issued.
