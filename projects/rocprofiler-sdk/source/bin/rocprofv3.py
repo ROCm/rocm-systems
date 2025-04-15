@@ -361,7 +361,7 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
     add_parser_bool_argument(
         extended_tracing_options,
         "--hsa-image-trace",
-        help="For collecting HSA API Traces (Image-extenson API), e.g. HSA functions prefixed with only 'hsa_ext_image_' (i.e. hsa_ext_image_get_capability).",
+        help="For collecting HSA API Traces (Image-extension API), e.g. HSA functions prefixed with only 'hsa_ext_image_' (i.e. hsa_ext_image_get_capability).",
     )
     add_parser_bool_argument(
         extended_tracing_options,
