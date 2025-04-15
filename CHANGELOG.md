@@ -158,8 +158,10 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - SDK: `rocprofiler_agent_v0_t` support for agent UUIDs
 - SDK: `rocprofiler_agent_v0_t` support for agent visibility based on gpu isolation environment variables such as `ROCR_VISIBLE_DEVICES` and so on.
 - Accumulation VGPR support for `rocprofv3`.
+- Host-trap based PC sampling support for rocprofv3.
+- Support for OpenMP tool.
 
-## ROCprofiler-SDK 0.7.0 for ROCm release 6.5
+## ROCprofiler-SDK 1.0.0 for ROCm release 6.5
 
 ### Added
 
@@ -170,9 +172,9 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Added perfetto support for counter collection.
 - Added support for negating rocprofv3 tracing options when using aggregate options, e.g. `--sys-trace --hsa-trace=no`
 - Added `--agent-index` option in rocprofv3 to specify the agent naming convention in the output
-    - absolute == node_id
-    - relative == logical_node_id
-    - type-relative == logical_node_type_id
+  - absolute == node_id
+  - relative == logical_node_id
+  - type-relative == logical_node_type_id
 
 ### Changed
 
