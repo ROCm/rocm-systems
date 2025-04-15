@@ -131,6 +131,15 @@ class RocmSMI {
       io_link_map_;
     std::map<uint32_t, uint32_t> dev_ind_to_node_ind_map_;
     void AddToDeviceList(std::string dev_name, uint64_t bdfid = 0);
+    typedef struct {
+      uint32_t card_index = std::numeric_limits<uint32_t>::max();
+      std::string dev_name = "";
+      std::string drm_render_path = "";
+      std::string drm_card_path = "";
+      uint32_t drm_render_minor = std::numeric_limits<uint32_t>::max();
+      uint64_t bdfid = std::numeric_limits<uint64_t>::max();
+    } rsmi_device_enumeration_t;
+    rsmi_status_t AddToDeviceList2(rsmi_device_enumeration_t device);
     void GetEnvVariables(void);
     std::shared_ptr<Monitor> FindMonitor(std::string monitor_path);
 

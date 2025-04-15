@@ -368,10 +368,31 @@ static rsmi_status_t get_dev_mon_value(amd::smi::MonitorTypes type,
     return amd::smi::ErrnoToRsmiStatus(ret);
   }
 
+  if (val_str.empty()) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__
+    << " | ======= end ======= "
+    << " | Fail "
+    << " | Device #: " << dv_ind
+    << " | Type: " << monitorTypesToString.at(type)
+    << " | Cause: SYSFS read was empty"
+    << " | Returning = "
+    << getRSMIStatusString(RSMI_STATUS_UNEXPECTED_DATA) << " |";
+    LOG_INFO(ss);
+    return RSMI_STATUS_UNEXPECTED_DATA;
+  }
+
   if (!amd::smi::IsInteger(val_str)) {
     std::ostringstream ss;
-    ss << "Expected integer value from monitor, but got \"" << val_str << "\"";
-    LOG_ERROR(ss);
+    ss << __PRETTY_FUNCTION__
+    << " | ======= end ======= "
+    << " | Fail "
+    << " | Device #: " << dv_ind
+    << " | Type: " << monitorTypesToString.at(type)
+    << " | Cause: Expected integer value from monitor, but got "<< val_str
+    << " | Returning = "
+    << getRSMIStatusString(RSMI_STATUS_UNEXPECTED_DATA) << " |";
+    LOG_INFO(ss);
     return RSMI_STATUS_UNEXPECTED_DATA;
   }
 
@@ -398,10 +419,31 @@ static rsmi_status_t get_dev_mon_value(amd::smi::MonitorTypes type,
     return amd::smi::ErrnoToRsmiStatus(ret);
   }
 
+  if (val_str.empty()) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__
+    << " | ======= end ======= "
+    << " | Fail "
+    << " | Device #: " << dv_ind
+    << " | Type: " << monitorTypesToString.at(type)
+    << " | Cause: SYSFS read was empty"
+    << " | Returning = "
+    << getRSMIStatusString(RSMI_STATUS_UNEXPECTED_DATA) << " |";
+    LOG_INFO(ss);
+    return RSMI_STATUS_UNEXPECTED_DATA;
+  }
+
   if (!amd::smi::IsInteger(val_str)) {
     std::ostringstream ss;
-    ss << "Expected integer value from monitor, but got \"" << val_str << "\"";
-    LOG_ERROR(ss);
+    ss << __PRETTY_FUNCTION__
+    << " | ======= end ======= "
+    << " | Fail "
+    << " | Device #: " << dv_ind
+    << " | Type: " << monitorTypesToString.at(type)
+    << " | Cause: Expected integer value from monitor, but got "<< val_str
+    << " | Returning = "
+    << getRSMIStatusString(RSMI_STATUS_UNEXPECTED_DATA) << " |";
+    LOG_INFO(ss);
     return RSMI_STATUS_UNEXPECTED_DATA;
   }
 
@@ -5360,8 +5402,10 @@ rsmi_dev_partition_id_get(uint32_t dv_ind, uint32_t *partition_id) {
   std::string strCompPartition = "UNKNOWN";
   const uint32_t PARTITION_LEN = 10;
   char compute_partition[PARTITION_LEN];
+  compute_partition[0] = '\0';
   rsmi_status_t ret = rsmi_dev_compute_partition_get(dv_ind, compute_partition, PARTITION_LEN);
   if (ret == RSMI_STATUS_SUCCESS) {
+    strCompPartition.clear();
     strCompPartition = compute_partition;
   }
   uint64_t pci_id = UINT64_MAX;
@@ -5370,6 +5414,17 @@ rsmi_dev_partition_id_get(uint32_t dv_ind, uint32_t *partition_id) {
   if (ret == RSMI_STATUS_SUCCESS) {
     *partition_id = static_cast<uint32_t>((pci_id >> 28) & 0xf);
   }
+  std::ostringstream bdf_sstream;
+  bdf_sstream << std::hex << std::setfill('0') << std::setw(4)
+  << ((pci_id >> 32) & 0xFFFFFFFF) << ":";
+  bdf_sstream << std::hex << std::setfill('0') << std::setw(2) << ((pci_id >> 8) & 0xFF) << ":";
+  bdf_sstream << std::hex << std::setfill('0') << std::setw(2) << ((pci_id >> 3) & 0x1F) << ".";
+  bdf_sstream << std::hex << std::setfill('0') << +(pci_id & 0x7);
+  bdf_sstream << "\n[Option 1] Partition ID ((pci_id >> 28) & 0xf): " << std::dec
+  << static_cast<int>((pci_id >> 28) & 0xf);
+  bdf_sstream << "\n[Option 2] Partition ID (pci_id & 0x7): " << std::dec
+  << static_cast<int>(pci_id & 0x7);
+  // std::cout << __PRETTY_FUNCTION__ << " BDF: " << bdf_sstream.str() << std::endl;
 
   /**
    * Fall back is required due to driver changes within KFD.
@@ -5386,19 +5441,24 @@ rsmi_dev_partition_id_get(uint32_t dv_ind, uint32_t *partition_id) {
    * bits [7:3] = Device
    * bits [2:0] = Function (partition id maybe in bits [2:0]) <-- Fallback for non SPX modes
    */
+
+  // If the partition_id is still not set (bits [31:28]), we will use the fallback
+  // in function bits. We will use bits [2:0] as the partition ID.
   if (*partition_id != UINT32_MAX && *partition_id == 0 &&
-     (strCompPartition == "DPX" || strCompPartition == "TPX"
-     || strCompPartition == "CPX" || strCompPartition == "QPX")) {
+     static_cast<uint32_t>(pci_id & 0x7) != 0) {
     *partition_id = static_cast<uint32_t>(pci_id & 0x7);
   }
   ss << __PRETTY_FUNCTION__
      << " | ======= end ======= "
      << " | Success"
      << " | Device #: " << dv_ind
+     << " | Compute Partition: " << strCompPartition
      << " | Type: partition_id"
-     << " | Data: " << *partition_id
+     << " | Data: " << static_cast<int>(*partition_id)
      << " | Returning = "
-     << getRSMIStatusString(RSMI_STATUS_SUCCESS) << " |";
+     << getRSMIStatusString(RSMI_STATUS_SUCCESS) << " |"
+     << "\n BDF: " << bdf_sstream.str() << std::endl;
+  // std::cout << ss.str() << std::endl;
   LOG_INFO(ss);
   return ret;
   CATCH
@@ -6262,6 +6322,21 @@ rsmi_dev_metrics_log_get(uint32_t dv_ind)
   LOG_INFO(ostrstream);
 
   return status_code;
+  CATCH
+}
+
+rsmi_status_t rsmi_dev_device_identifiers_get(uint32_t dv_ind,
+                  rsmi_device_identifiers_t *smi_device_identifiers) {
+  TRY
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
+  LOG_TRACE(ss);
+  GET_DEV_FROM_INDX
+  if (smi_device_identifiers == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  rsmi_status_t ret = RSMI_STATUS_NOT_SUPPORTED;
+  return ret = dev->get_smi_device_identifiers(dv_ind, smi_device_identifiers);
   CATCH
 }
 

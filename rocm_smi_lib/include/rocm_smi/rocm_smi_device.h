@@ -248,6 +248,8 @@ class Device {
     void set_smi_device_id(uint32_t i) { m_device_id = i; }
     void set_smi_partition_id(uint32_t i) { m_partition_id = i; }
     static const char* get_type_string(DevInfoTypes type);
+    rsmi_status_t get_smi_device_identifiers(uint32_t device_id,
+                  rsmi_device_identifiers_t *device_identifiers);
 
  private:
     std::shared_ptr<Monitor> monitor_;
