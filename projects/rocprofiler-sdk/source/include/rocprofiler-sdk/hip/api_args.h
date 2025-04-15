@@ -2778,12 +2778,17 @@ typedef union rocprofiler_hip_api_args_t
     } hipGetStreamDeviceId;
     struct
     {
-        hipGraphNode_t*               phGraphNode;
-        hipGraph_t                    hGraph;
-        const hipGraphNode_t*         dependencies;
-        size_t                        numDependencies;
+        hipGraphNode_t*       phGraphNode;
+        hipGraph_t            hGraph;
+        const hipGraphNode_t* dependencies;
+        size_t                numDependencies;
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION < 12
         const HIP_MEMSET_NODE_PARAMS* memsetParams;
-        hipCtx_t                      ctx;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 12
+        const hipMemsetParams* memsetParams;
+#endif
+        hipCtx_t ctx;
     } hipDrvGraphAddMemsetNode;
     struct
     {
@@ -2964,10 +2969,15 @@ typedef union rocprofiler_hip_api_args_t
     } hipDrvGraphExecMemcpyNodeSetParams;
     struct
     {
-        hipGraphExec_t                hGraphExec;
-        hipGraphNode_t                hNode;
+        hipGraphExec_t hGraphExec;
+        hipGraphNode_t hNode;
+#    if HIP_RUNTIME_API_TABLE_STEP_VERSION < 12
         const HIP_MEMSET_NODE_PARAMS* memsetParams;
-        hipCtx_t                      ctx;
+#    endif
+#    if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 12
+        const hipMemsetParams* memsetParams;
+#    endif
+        hipCtx_t ctx;
     } hipDrvGraphExecMemsetNodeSetParams;
     struct
     {
