@@ -3627,7 +3627,7 @@ static auto amdsmi_read_cper_file(const std::string &filepath) {
     } else {
         ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[CPER] file does not exist: "
             << filepath << ", errno: " << errno << "): " << strerror(errno);
-        ctx.status = AMDSMI_STATUS_FILE_NOT_FOUND;
+        ctx.status = AMDSMI_STATUS_NOT_SUPPORTED;
         return ctx;
     }
 
@@ -5383,16 +5383,23 @@ amdsmi_status_t amdsmi_get_cpu_current_xgmi_bw(amdsmi_processor_handle processor
     amdsmi_status_t status;
     uint32_t bw;
     struct link_id_bw_type io_link;
+    uint8_t sock_ind;
 
     AMDSMI_CHECK_INIT();
 
     if (processor_handle == nullptr)
         return AMDSMI_STATUS_INVAL;
 
+    amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
+    if (r != AMDSMI_STATUS_SUCCESS)
+        return r;
+
+    sock_ind = (uint8_t)std::stoi(proc_id, NULL, 0);
+
     io_link.link_name = link.link_name;
     io_link.bw_type= static_cast<io_bw_encoding>(link.bw_type);
 
-    status = static_cast<amdsmi_status_t>(esmi_current_xgmi_bw_get(io_link, &bw));
+    status = static_cast<amdsmi_status_t>(esmi_current_xgmi_bw_get(sock_ind, io_link, &bw));
     if (status != AMDSMI_STATUS_SUCCESS)
         return amdsmi_errno_to_esmi_status(status);
 

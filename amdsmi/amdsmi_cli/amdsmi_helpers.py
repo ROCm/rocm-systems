@@ -1062,21 +1062,28 @@ class AMDSMIHelpers():
             print(msg)
             logging.warning(msg)
 
-    def hexdump(self, data, size, filepath):
-        """
-        Converts binary data to a hex dump string, similar to the hexdump utility.
-        """
-        def to_printable_ascii(byte):
-            return chr(byte) if 32 <= byte <= 126 else "."
 
-        with open(filepath, 'w') as f:
-            offset = 0
-            while offset < size:
-                chunk = data[offset:offset + 16]
-                hex_values = " ".join(f"{byte:02x}" for byte in chunk)
-                ascii_values = "".join(to_printable_ascii(byte) for byte in chunk)
-                print(f"{offset:08x} {hex_values:<48} |{ascii_values}|", file=f)
-                offset += 16
+    def write_binary(self, data, size, filepath):
+        """
+        Writes binary data directly to a file.
+
+        Parameters:
+        data: Either a bytes object or a list of integers representing binary data.
+        size (int): The number of bytes to write.
+        filepath: The path to the output file.
+        """
+        with open(filepath, 'wb') as f:
+             if isinstance(data, list):
+                try:
+                    # Attempt to convert the list to a bytes object.
+                    data_bytes = bytes(data[:size])
+                except ValueError:
+                    # If any value is out of range, force them into 0-255.
+                    data_bytes = bytes(x % 256 for x in data[:size])
+             else:
+                 data_bytes = data[:size]
+             f.write(data_bytes)
+
 
     def dump_entries(self, folder, entries, cper_data):
         if folder:
@@ -1104,7 +1111,7 @@ class AMDSMIHelpers():
 
                 cper_data_file = f"{prefix}_{self.get_cper_count()}.cper"
                 cper_data_file_path = folder / cper_data_file
-                self.hexdump(cper_data[entry_index]["bytes"], cper_data[entry_index]["size"], cper_data_file_path)
+                self.write_binary(cper_data[entry_index]["bytes"], cper_data[entry_index]["size"], cper_data_file_path)
 
                 try:
                     with output_path.open("w") as f:
