@@ -22,8 +22,6 @@
 
 #pragma once
 
-#include <rocprofiler-sdk/rocprofiler.h>
-
 #include "lib/common/mpl.hpp"
 #include "lib/rocprofiler-sdk/external_correlation.hpp"
 

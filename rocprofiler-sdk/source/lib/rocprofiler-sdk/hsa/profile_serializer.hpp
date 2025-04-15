@@ -22,11 +22,12 @@
 
 #pragma once
 
-#include <rocprofiler-sdk/rocprofiler.h>
-
 #include "lib/common/container/small_vector.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa_barrier.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
+
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/hsa.h>
 
 #include <deque>
 #include <unordered_map>

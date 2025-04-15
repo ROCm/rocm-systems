@@ -35,7 +35,7 @@ def build_doxyfile():
         [
             "cmake",
             f"-DSOURCE_DIR={_srcdir}",
-            "-DPROJECT_NAME='Rocprofiler SDK'",
+            "-DPROJECT_NAME='ROCprofiler-SDK'",
             f"-P {_srcdir}/source/docs/generate-doxyfile.cmake",
         ]
     )

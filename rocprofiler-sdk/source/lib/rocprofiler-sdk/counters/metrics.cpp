@@ -22,8 +22,6 @@
 
 #include "metrics.hpp"
 
-#include <rocprofiler-sdk/rocprofiler.h>
-
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
@@ -31,9 +29,9 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 
-#include "glog/logging.h"
+#include <rocprofiler-sdk/fwd.h>
 
-#include "rocprofiler-sdk/fwd.h"
+#include "glog/logging.h"
 #include "yaml-cpp/exceptions.h"
 #include "yaml-cpp/node/convert.h"
 #include "yaml-cpp/node/detail/impl.h"

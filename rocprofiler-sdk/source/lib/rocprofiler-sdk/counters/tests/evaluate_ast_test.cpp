@@ -20,22 +20,23 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "lib/rocprofiler-sdk/counters/evaluate_ast.hpp"
+#include "lib/rocprofiler-sdk/agent.hpp"
+#include "lib/rocprofiler-sdk/counters/id_decode.hpp"
+#include "lib/rocprofiler-sdk/counters/metrics.hpp"
+#include "lib/rocprofiler-sdk/counters/parser/reader.hpp"
+
+#include <rocprofiler-sdk/fwd.h>
+
+#include <fmt/core.h>
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
-
-#include <fmt/core.h>
-#include <gtest/gtest.h>
-
-#include "lib/rocprofiler-sdk/agent.hpp"
-#include "lib/rocprofiler-sdk/counters/evaluate_ast.hpp"
-#include "lib/rocprofiler-sdk/counters/id_decode.hpp"
-#include "lib/rocprofiler-sdk/counters/metrics.hpp"
-#include "lib/rocprofiler-sdk/counters/parser/reader.hpp"
-#include "rocprofiler-sdk/fwd.h"
 
 namespace
 {

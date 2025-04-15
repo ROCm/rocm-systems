@@ -33,7 +33,6 @@
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/rocprofiler.h>
 
 #include <atomic>
 #include <exception>

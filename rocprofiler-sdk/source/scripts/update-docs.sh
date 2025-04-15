@@ -21,7 +21,7 @@ message "Changing directory to ${WORK_DIR}"
 cd ${WORK_DIR}
 
 message "Generating rocprofiler-sdk.dox"
-cmake -DSOURCE_DIR=${SOURCE_DIR} -DPROJECT_NAME="Rocprofiler SDK" -P ${WORK_DIR}/generate-doxyfile.cmake
+cmake -DSOURCE_DIR=${SOURCE_DIR} -DPROJECT_NAME="ROCprofiler-SDK" -P ${WORK_DIR}/generate-doxyfile.cmake
 
 message "Generating doxygen xml files"
 mkdir -p _doxygen

@@ -23,6 +23,16 @@
 #include "lib/rocprofiler-sdk/counters/evaluate_ast.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/synchronized.hpp"
+#include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/counters/dimensions.hpp"
+#include "lib/rocprofiler-sdk/counters/id_decode.hpp"
+#include "lib/rocprofiler-sdk/counters/parser/reader.hpp"
+
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/rocprofiler.h>
+
+#include <fmt/core.h>
+#include <fmt/ranges.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -32,16 +42,6 @@
 #include <stdexcept>
 #include <unordered_map>
 #include <vector>
-
-#include <fmt/core.h>
-#include <fmt/ranges.h>
-#include <rocprofiler-sdk/rocprofiler.h>
-
-#include "lib/common/utility.hpp"
-#include "lib/rocprofiler-sdk/counters/dimensions.hpp"
-#include "lib/rocprofiler-sdk/counters/id_decode.hpp"
-#include "lib/rocprofiler-sdk/counters/parser/reader.hpp"
-#include "rocprofiler-sdk/fwd.h"
 
 namespace rocprofiler
 {

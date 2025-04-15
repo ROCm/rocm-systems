@@ -47,7 +47,6 @@
 #include <rocprofiler-sdk/rccl/table_id.h>
 #include <rocprofiler-sdk/rocdecode/table_id.h>
 #include <rocprofiler-sdk/rocjpeg/table_id.h>
-#include <rocprofiler-sdk/rocprofiler.h>
 
 #include <atomic>
 #include <limits>

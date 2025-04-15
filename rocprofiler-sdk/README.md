@@ -31,7 +31,7 @@ ROCProfiler-SDK is AMD’s new and improved tooling infrastructure, providing a 
 - Scratch Memory tracing
 - RCCL API tracing
 - rocDecode API tracing
-- rocjpeg API tracing
+- rocJPEG API tracing
 
 ## Parallelism API Support
 

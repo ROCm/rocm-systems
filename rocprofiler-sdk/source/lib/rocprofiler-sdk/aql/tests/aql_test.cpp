@@ -26,14 +26,15 @@
 #include "lib/rocprofiler-sdk/counters/tests/hsa_tables.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
-#include "rocprofiler-sdk/fwd.h"
 
-#include <unordered_set>
+#include <rocprofiler-sdk/fwd.h>
 
 #include <gtest/gtest.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
 #include <hsa/hsa_ven_amd_aqlprofile.h>
+
+#include <unordered_set>
 
 using namespace rocprofiler::counters::test_constants;
 

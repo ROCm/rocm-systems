@@ -21,16 +21,14 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/counters/controller.hpp"
-
-#include <rocprofiler-sdk/agent.h>
-#include <rocprofiler-sdk/dispatch_counting_service.h>
-#include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/rocprofiler.h>
-
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/ioctl.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
+
+#include <rocprofiler-sdk/agent.h>
+#include <rocprofiler-sdk/dispatch_counting_service.h>
+#include <rocprofiler-sdk/fwd.h>
 
 namespace rocprofiler
 {

@@ -17,8 +17,15 @@ ROCprofiler-SDK is supported only on Linux. The following distributions are test
 
 - Ubuntu 20.04
 - Ubuntu 22.04
-- OpenSUSE 15.4
-- RedHat 8.8
+- Ubuntu 24.04
+- OpenSUSE 15.5
+- OpenSUSE 15.6
+- Red Hat 8.8
+- Red Hat 8.9
+- Red Hat 8.10
+- Red Hat 9.2
+- Red Hat 9.3
+- Red Hat 9.4
 
 ROCprofiler-SDK might operate as expected on other `Linux distributions <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-operating-systems>`_, but has not been tested.
 
@@ -56,8 +63,8 @@ Install `CMake <https://cmake.org/>`_ version 3.21 (or later).
     export PATH=${HOME}/.local/bin:${PATH}
 
 
-Building ROCprofiler-SDK
-------------------------
+Building ROCprofiler-SDK from source
+-------------------------------------
 
 .. code-block:: bash
 
@@ -96,3 +103,29 @@ To run the built tests, ``cd`` into the ``rocprofiler-sdk-build`` directory and 
 .. code-block:: bash
 
     /usr/local/bin/python -m pip install -r requirements.txt
+
+
+Install via package manager
+----------------------------
+
+If you have ROCm version 6.2 or higher installed, you can use the package manager to install a pre-built copy of ROCProfiler-SDK.
+
+.. tab-set::
+
+   .. tab-item:: Ubuntu
+
+      .. code-block:: shell
+
+         $ sudo apt install rocprofiler-sdk
+
+   .. tab-item:: Red Hat Enterprise Linux
+
+      .. code-block:: shell
+
+         $ sudo dnf install rocprofiler-sdk
+
+   .. tab-item:: SUSE Linux Enterprise Server
+
+      .. code-block:: shell
+
+         $ sudo zypper install rocprofiler-sdk

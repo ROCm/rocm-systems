@@ -32,7 +32,6 @@
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/rocprofiler.h>
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 
 #include <fmt/core.h>

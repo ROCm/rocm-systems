@@ -22,8 +22,6 @@
 
 #pragma once
 
-#include <rocprofiler-sdk/rocprofiler.h>
-
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
 namespace rocprofiler

@@ -4,7 +4,7 @@
 # Project related configuration options
 #---------------------------------------------------------------------------
 DOXYFILE_ENCODING      = UTF-8
-PROJECT_NAME           = @PROJECT_NAME@ Developer API
+PROJECT_NAME           = @PROJECT_NAME@ developer API
 PROJECT_NUMBER         = @ROCPROFILER_VERSION@
 PROJECT_BRIEF          = "ROCm Profiling API and tools"
 PROJECT_LOGO           =

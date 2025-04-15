@@ -22,9 +22,9 @@
 
 #pragma once
 
-#include <rocprofiler-sdk/rocprofiler.h>
-
 #include "lib/common/mpl.hpp"
+
+#include <rocprofiler-sdk/fwd.h>
 
 #include <bitset>
 #include <cstddef>
