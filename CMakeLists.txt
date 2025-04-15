@@ -114,7 +114,7 @@ set(ROCM_INC_DIR "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi")
 set(SHR_MUTEX_DIR "${PROJECT_SOURCE_DIR}/third_party/shared_mutex")
 if(ENABLE_ESMI_LIB)
     # Supported esmi library version tag
-    set(current_esmi_tag "esmi_pkg_ver-4.1.2")
+    set(current_esmi_tag "esmi_pkg_ver-4.2")
 
     if(NOT EXISTS ${PROJECT_SOURCE_DIR}/esmi_ib_library/src)
         # TODO: use ExternalProject_Add instead or a submodule
