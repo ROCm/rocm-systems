@@ -27,9 +27,10 @@ namespace cg = cooperative_groups;
 
 static constexpr size_t kBufferLen = 1024 * 1024;
 
-__global__ void test_gws(int* buf, size_t buf_size, unsigned long* tmp_buf, unsigned long* result) {
-  extern __shared__ unsigned long tmp[];
-  
+__global__ void test_gws(int* buf, size_t buf_size, unsigned long long* tmp_buf,
+                         unsigned long long* result) {
+  extern __shared__ unsigned long long tmp[];
+
   cg::thread_block tb = cg::this_thread_block();
   cg::grid_group gg = cg::this_grid();
 
@@ -40,7 +41,7 @@ __global__ void test_gws(int* buf, size_t buf_size, unsigned long* tmp_buf, unsi
   const auto workgroup_size = tb.size();
   const auto grid_size = gridDim.x;
 
-  unsigned long sum = 0;
+  unsigned long long sum = 0;
   for (size_t i = tid; i < buf_size; i += stride) {
     sum += buf[i];
   }
@@ -78,8 +79,8 @@ TEST_CASE("Unit_hipLaunchCooperativeKernel_Basic") {
 
   int* A_h = nullptr;
   int* A_d = nullptr;
-  unsigned long* B_d = nullptr;
-  unsigned long* C_d = nullptr;
+  unsigned long long* B_d = nullptr;
+  unsigned long long* C_d = nullptr;
   hipStream_t stream;
 
   A_h = reinterpret_cast<int*>(malloc(buffer_size));
@@ -89,7 +90,7 @@ TEST_CASE("Unit_hipLaunchCooperativeKernel_Basic") {
 
   HIP_CHECK(hipMalloc(&A_d, buffer_size));
   HIP_CHECK(hipMemcpy(A_d, A_h, buffer_size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipHostMalloc(&C_d, sizeof(unsigned long)));
+  HIP_CHECK(hipHostMalloc(&C_d, sizeof(unsigned long long)));
 
   HIPCHECK(hipStreamCreate(&stream));
 
@@ -102,10 +103,10 @@ TEST_CASE("Unit_hipLaunchCooperativeKernel_Basic") {
   // Calculate the device occupancy to know how many blocks can be run concurrently
   HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(&numBlocks, test_gws,
                                                          dimBlock.x * dimBlock.y * dimBlock.z,
-                                                         dimBlock.x * sizeof(unsigned long)));
+                                                         dimBlock.x * sizeof(unsigned long long)));
 
   dimGrid.x = device_properties.multiProcessorCount * std::min(numBlocks, 32);
-  HIP_CHECK(hipMalloc(&B_d, dimGrid.x * sizeof(unsigned long)));
+  HIP_CHECK(hipMalloc(&B_d, dimGrid.x * sizeof(unsigned long long)));
 
   void* params[4];
   params[0] = (void*)&A_d;
@@ -115,11 +116,11 @@ TEST_CASE("Unit_hipLaunchCooperativeKernel_Basic") {
 
   INFO("Testing with grid size = " << dimGrid.x << " and block size = " << dimBlock.x << "\n");
   HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(test_gws), dimGrid, dimBlock, params,
-                                       dimBlock.x * sizeof(unsigned long), stream));
+                                       dimBlock.x * sizeof(unsigned long long), stream));
 
   HIP_CHECK(hipStreamSynchronize(stream));
 
-  REQUIRE((*C_d) == (((unsigned long)(kBufferLen) * (kBufferLen - 1)) / 2));
+  REQUIRE((*C_d) == (((unsigned long long)(kBufferLen) * (kBufferLen - 1)) / 2));
 
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipHostFree(C_d));
