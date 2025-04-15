@@ -22,10 +22,12 @@ set(TEST_SRC
     hipMemGetAllocationGranularity.cc
     hipMemRetainAllocationHandle.cc)
 
-if(HIP_PLATFORM MATCHES "nvidia")
-set(TEST_SRC
-    ${TEST_SRC}
-    hipMemMapArrayAsync.cc)
+if(WIN32)
+  if(HIP_PLATFORM MATCHES "nvidia")
+    set(TEST_SRC
+        ${TEST_SRC}
+        hipMemMapArrayAsync.cc)
+    endif()
 endif()
 
 if(UNIX)

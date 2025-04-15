@@ -31,8 +31,6 @@
         "Unit_hipModuleLoadDataEx_Negative_Parameters",
         "Unit_hipLaunchKernel_Negative_Parameters",
         "Unit_Assert_Positive_Basic_KernelFail",
-        "=== Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/210 ===",
-        "Unit_hipMemMapArrayAsync_Positive_Basic",
         "=== Disabling tests which no longer behave the same on nvidia platform ===",
         "Unit_hipGraphInstantiateWithParams_Negative",
         "Unit_hipGraphAddChildGraphNode_OrgGraphAsChildGraph",
