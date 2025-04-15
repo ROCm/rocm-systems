@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include <rocprofiler-sdk/rocprofiler.h>
+#include <rocprofiler-sdk/hsa.h>
 
 #include <iostream>
 #include <string>

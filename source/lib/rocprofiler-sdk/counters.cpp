@@ -20,13 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <rocprofiler-sdk/experimental/counters.h>
-#include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/rocprofiler.h>
-#include <rocprofiler-sdk/cxx/operators.hpp>
-
-#include <fmt/core.h>
-
 #include "lib/common/container/small_vector.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
@@ -40,6 +33,13 @@
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+
+#include <rocprofiler-sdk/counters.h>
+#include <rocprofiler-sdk/experimental/counters.h>
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/cxx/operators.hpp>
+
+#include <fmt/core.h>
 
 namespace rocprofiler
 {

@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include <rocprofiler-sdk/rocprofiler.h>
+#include <rocprofiler-sdk/hip.h>
 
 #include <hip/hip_runtime_api.h>
 // must be included after runtime api

@@ -22,11 +22,11 @@
 
 #pragma once
 
-#include <rocprofiler-sdk/rocprofiler.h>
-#include <rocprofiler-sdk/cxx/hash.hpp>
-
 #include "lib/rocprofiler-sdk/hsa/profile_serializer.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
+
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/cxx/hash.hpp>
 
 #include <cstdint>
 #include <functional>

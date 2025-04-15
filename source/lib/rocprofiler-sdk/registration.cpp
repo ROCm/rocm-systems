@@ -53,15 +53,14 @@
 #include "lib/rocprofiler-sdk/runtime_initialization.hpp"
 
 #include <rocprofiler-sdk/context.h>
+#include <rocprofiler-sdk/ext_version.h>
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/hip.h>
 #include <rocprofiler-sdk/hsa.h>
 #include <rocprofiler-sdk/marker.h>
 #include <rocprofiler-sdk/ompt.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/version.h>
-
-#include <hsa/hsa_api_trace.h>
-#include <hip/amd_detail/hip_api_trace.hpp>
 
 #include <fmt/format.h>
 

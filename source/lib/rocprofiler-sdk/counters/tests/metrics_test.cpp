@@ -22,20 +22,20 @@
 
 #include "metrics_test.h"
 
-#include <gtest/gtest.h>
-
-#include <algorithm>
-#include <cstddef>
-#include <cstdint>
-
-#include <rocprofiler-sdk/rocprofiler.h>
-
 #include "lib/common/logging.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/counters/dimensions.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
-#include "rocprofiler-sdk/fwd.h"
+
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/rocprofiler.h>
+
+#include <gtest/gtest.h>
+
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
 
 namespace
 {

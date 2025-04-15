@@ -22,10 +22,6 @@
 
 #pragma once
 
-#include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/registration.h>
-#include <rocprofiler-sdk/rocprofiler.h>
-
 #include "lib/common/container/small_vector.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
@@ -35,7 +31,9 @@
 #include "lib/rocprofiler-sdk/external_correlation.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/types.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/att_core.hpp"
-#include "rocprofiler-sdk/agent.h"
+
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/registration.h>
 
 #include <array>
 #include <cstddef>

@@ -24,7 +24,9 @@
 
 #include "lib/rocprofiler-sdk/pc_sampling/defines.hpp"
 
-#include <rocprofiler-sdk/rocprofiler.h>
+#include <rocprofiler-sdk/callback_tracing.h>
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/hsa.h>
 
 #include <hsa/hsa_api_trace.h>
 

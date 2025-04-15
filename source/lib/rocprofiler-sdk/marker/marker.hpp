@@ -22,9 +22,8 @@
 
 #pragma once
 
-#include <rocprofiler-sdk/rocprofiler.h>
-
 #include <rocprofiler-sdk-roctx/api_trace.h>
+#include <rocprofiler-sdk/callback_tracing.h>
 
 #include <cstdint>
 #include <vector>

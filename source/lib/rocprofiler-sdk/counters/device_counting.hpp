@@ -24,9 +24,10 @@
 
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 
+#include <rocprofiler-sdk/device_counting_service.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>
-#include <rocprofiler-sdk/rocprofiler.h>
+
 #include <cstddef>
 
 namespace rocprofiler

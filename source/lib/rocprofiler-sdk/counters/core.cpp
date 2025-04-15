@@ -33,7 +33,6 @@
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/rocprofiler.h>
 
 namespace rocprofiler
 {

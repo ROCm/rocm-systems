@@ -28,7 +28,6 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/rocprofiler.h>
 
 namespace rocprofiler
 {

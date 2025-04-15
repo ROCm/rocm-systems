@@ -20,22 +20,20 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/intercept_table.h>
-#include <rocprofiler-sdk/rocprofiler.h>
-
 #include "lib/common/container/stable_vector.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
-#include "lib/rocprofiler-sdk/registration.hpp"
-
-#include <hsa/hsa_api_trace.h>
-#include <hip/amd_detail/hip_api_trace.hpp>
 #include "lib/rocprofiler-sdk/rccl/rccl.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/rocdecode/rocdecode.hpp"
 #include "lib/rocprofiler-sdk/rocjpeg/rocjpeg.hpp"
+
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/hip.h>
+#include <rocprofiler-sdk/hsa.h>
+#include <rocprofiler-sdk/intercept_table.h>
 
 #include <cstdint>
 #include <mutex>

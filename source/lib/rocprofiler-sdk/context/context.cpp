@@ -20,20 +20,19 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <rocprofiler-sdk/buffer_tracing.h>
-#include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/rocprofiler.h>
-
+#include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/common/container/small_vector.hpp"
 #include "lib/common/container/stable_vector.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
-#include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/att_core.hpp"
+
+#include <rocprofiler-sdk/buffer_tracing.h>
+#include <rocprofiler-sdk/fwd.h>
 
 #include <unistd.h>
 #include <atomic>

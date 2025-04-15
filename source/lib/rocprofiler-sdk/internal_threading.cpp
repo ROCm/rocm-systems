@@ -20,17 +20,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/internal_threading.h>
-#include <rocprofiler-sdk/rocprofiler.h>
-
+#include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/common/container/stable_vector.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
-#include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
+
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/internal_threading.h>
 
 #include <pthread.h>
 

@@ -113,6 +113,3 @@
 #define ROCPROFILER_VERSION                                                                        \
     ((10000 * ROCPROFILER_VERSION_MAJOR) + (100 * ROCPROFILER_VERSION_MINOR) +                     \
      ROCPROFILER_VERSION_PATCH)
-
-// include the external version info
-#include "ext_version.h"

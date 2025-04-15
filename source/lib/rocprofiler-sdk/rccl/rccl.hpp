@@ -42,7 +42,7 @@
 #    include <rocprofiler-sdk/rccl/details/rccl.h>
 #endif
 
-#include <rocprofiler-sdk/rocprofiler.h>
+#include <rocprofiler-sdk/callback_tracing.h>
 
 #include <cstdint>
 #include <vector>

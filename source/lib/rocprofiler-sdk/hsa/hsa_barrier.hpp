@@ -25,7 +25,7 @@
 #include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler-sdk/hsa/rocprofiler_packet.hpp"
 
-#include <rocprofiler-sdk/rocprofiler.h>
+#include <rocprofiler-sdk/fwd.h>
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>

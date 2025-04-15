@@ -83,5 +83,4 @@ rocprofiler_query_counter_instance_count(rocprofiler_agent_id_t   agent_id,
                                          size_t*                  instance_count) ROCPROFILER_API
     ROCPROFILER_NONNULL(3);
 
-/** @} */
 ROCPROFILER_EXTERN_C_FINI

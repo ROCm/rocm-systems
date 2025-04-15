@@ -25,7 +25,7 @@
 #include "lib/common/container/small_vector.hpp"
 #include "lib/rocprofiler-sdk/aql/aql_profile_v2.h"
 
-#include <rocprofiler-sdk/rocprofiler.h>
+#include <rocprofiler-sdk/hsa.h>
 
 #include <hsa/hsa_ext_amd.h>
 #include <hsa/hsa_ven_amd_aqlprofile.h>

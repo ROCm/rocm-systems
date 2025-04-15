@@ -24,7 +24,7 @@
 
 #include "lib/common/container/small_vector.hpp"
 
-#include <rocprofiler-sdk/rocprofiler.h>
+#include <rocprofiler-sdk/fwd.h>
 
 namespace rocprofiler
 {

@@ -21,7 +21,6 @@
 // SOFTWARE.
 
 #include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/rocprofiler.h>
 #include <cstdint>
 #include <unordered_set>
 
