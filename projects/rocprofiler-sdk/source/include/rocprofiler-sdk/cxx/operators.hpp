@@ -28,7 +28,6 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>
 #include <rocprofiler-sdk/internal_threading.h>
-#include <rocprofiler-sdk/rocprofiler.h>
 
 #include <tuple>
 

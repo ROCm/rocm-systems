@@ -24,7 +24,7 @@
 
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
-#include <rocprofiler-sdk/rocprofiler.h>
+#include <rocprofiler-sdk/fwd.h>
 
 #include <cstdint>
 #include <vector>

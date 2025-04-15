@@ -23,13 +23,23 @@
 
 #pragma once
 
+#include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/buffer.h>
+#include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/callback_tracing.h>
+#include <rocprofiler-sdk/context.h>
+#include <rocprofiler-sdk/counter_config.h>
+#include <rocprofiler-sdk/counters.h>
+#include <rocprofiler-sdk/device_counting_service.h>
+#include <rocprofiler-sdk/dispatch_counting_service.h>
 #include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/hip.h>
+#include <rocprofiler-sdk/hsa.h>
+#include <rocprofiler-sdk/intercept_table.h>
 #include <rocprofiler-sdk/internal_threading.h>
+#include <rocprofiler-sdk/marker.h>
 #include <rocprofiler-sdk/pc_sampling.h>
-#include <rocprofiler-sdk/rocprofiler.h>
 #include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <rocprofiler-sdk/cxx/perfetto.hpp>
 #include <rocprofiler-sdk/cxx/utility.hpp>

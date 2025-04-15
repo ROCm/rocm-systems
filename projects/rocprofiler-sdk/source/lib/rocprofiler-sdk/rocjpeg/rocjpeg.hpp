@@ -32,7 +32,7 @@
 #    include <rocprofiler-sdk/rocjpeg/details/rocjpeg_api_trace.h>
 #endif
 
-#include <rocprofiler-sdk/rocprofiler.h>
+#include <rocprofiler-sdk/callback_tracing.h>
 
 #include <cstdint>
 #include <vector>

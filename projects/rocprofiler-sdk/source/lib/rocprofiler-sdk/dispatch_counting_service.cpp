@@ -23,7 +23,7 @@
 #include "lib/rocprofiler-sdk/counters/controller.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
 
-#include <rocprofiler-sdk/rocprofiler.h>
+#include <rocprofiler-sdk/dispatch_counting_service.h>
 
 extern "C" {
 /**

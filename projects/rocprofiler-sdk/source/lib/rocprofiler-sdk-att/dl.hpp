@@ -21,8 +21,10 @@
 // SOFTWARE.
 
 #pragma once
-#include <memory>
+
 #include "att_decoder.h"
+
+#include <memory>
 
 namespace rocprofiler
 {

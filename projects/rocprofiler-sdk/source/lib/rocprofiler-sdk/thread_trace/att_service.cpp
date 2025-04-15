@@ -20,15 +20,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <glog/logging.h>
-#include <rocprofiler-sdk/rocprofiler.h>
-#include <cstdint>
-
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
-#include "rocprofiler-sdk/amd_detail/thread_trace.h"
+
+#include <rocprofiler-sdk/amd_detail/thread_trace.h>
+
+#include <glog/logging.h>
+
+#include <cstdint>
 
 using DispatchThreadTracer = rocprofiler::thread_trace::DispatchThreadTracer;
 using DeviceThreadTracer   = rocprofiler::thread_trace::DeviceThreadTracer;

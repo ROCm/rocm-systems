@@ -22,9 +22,9 @@
 
 #pragma once
 
-#include <rocprofiler-sdk/rocprofiler.h>
-
 #include "lib/common/container/ring_buffer.hpp"
+
+#include <rocprofiler-sdk/fwd.h>
 
 #include <atomic>
 #include <limits>

@@ -20,13 +20,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <rocprofiler-sdk/rocprofiler.h>
-
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
 #include "lib/rocprofiler-sdk/counters/device_counting.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
-#include "rocprofiler-sdk/fwd.h"
+
+#include <rocprofiler-sdk/context.h>
+#include <rocprofiler-sdk/device_counting_service.h>
+#include <rocprofiler-sdk/fwd.h>
 
 #include <string.h>
 

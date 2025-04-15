@@ -23,7 +23,6 @@
 #include "lib/rocprofiler-sdk/context/domain.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/rocprofiler.h>
 
 #include <limits>
 

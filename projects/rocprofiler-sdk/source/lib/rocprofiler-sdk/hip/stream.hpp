@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include <rocprofiler-sdk/rocprofiler.h>
+#include <rocprofiler-sdk/hip.h>
 
 #include <hip/hip_version.h>
 #include <hip/amd_detail/hip_api_trace.hpp>

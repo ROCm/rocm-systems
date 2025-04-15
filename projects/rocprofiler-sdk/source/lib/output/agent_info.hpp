@@ -23,11 +23,11 @@
 #pragma once
 
 #include <rocprofiler-sdk/agent.h>
+#include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/cxx/serialization.hpp>
 
 #include <unordered_map>
 #include <vector>
-#include "rocprofiler-sdk/fwd.h"
 
 namespace rocprofiler
 {

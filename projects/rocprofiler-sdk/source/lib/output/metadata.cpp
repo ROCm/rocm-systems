@@ -32,13 +32,13 @@
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
-#include <cstdint>
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 
 #include <fmt/core.h>
 #include <fmt/format.h>
 
 #include <unistd.h>
+#include <cstdint>
 #include <memory>
 #include <vector>
 

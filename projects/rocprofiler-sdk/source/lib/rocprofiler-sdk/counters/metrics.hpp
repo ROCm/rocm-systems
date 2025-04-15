@@ -22,7 +22,11 @@
 
 #pragma once
 
-#include "rocprofiler-sdk/fwd.h"
+#include <rocprofiler-sdk/fwd.h>
+
+#include <fmt/core.h>
+#include <fmt/ranges.h>
+#include <hsa/hsa_ven_amd_aqlprofile.h>
 
 #include <cstdint>
 #include <optional>
@@ -30,10 +34,6 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-
-#include <fmt/core.h>
-#include <fmt/ranges.h>
-#include <hsa/hsa_ven_amd_aqlprofile.h>
 
 namespace rocprofiler
 {
