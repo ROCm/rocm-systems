@@ -2148,8 +2148,9 @@ class AMDSMICommands():
                         # Default to Disabled
                         clocks[clock]["deep_sleep"] = "DISABLED"
                         if self.logger.is_json_format():
-                            if clocks[clock]["clk"]["value"] < clocks[clock]["min_clk"]["value"]:
-                                clocks[clock]["deep_sleep"] = "ENABLED"
+                            if clocks[clock]["clk"]["value"] != "N/A" and clocks[clock]["min_clk"]["value"] != "N/A":
+                                if clocks[clock]["clk"]["value"] < clocks[clock]["min_clk"]["value"]:
+                                    clocks[clock]["deep_sleep"] = "ENABLED"
                         else:
                             if clocks[clock]["clk"] < clocks[clock]["min_clk"]:
                                 clocks[clock]["deep_sleep"] = "ENABLED"
