@@ -40,11 +40,11 @@ THE SOFTWARE.
 #include <vector>
 extern "C"
 {
-#include "libavutil/md5.h"
-#include "libavutil/mem.h"
+#include <libavutil/md5.h>
+#include <libavutil/mem.h>
 }
-#include "rocdecode.h"
-#include "rocparser.h"
+#include <rocdecode/rocdecode.h>
+#include <rocdecode/rocparser.h>
 
 /*!
  * \file
