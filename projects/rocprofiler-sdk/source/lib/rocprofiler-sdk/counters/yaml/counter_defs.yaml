@@ -5798,3 +5798,4 @@ SerializedAtomicRatio:
   description: Ratio of cycles spent waiting on serialized atomic accesses caused by contention 
     (access to the same atomic) over total number of cycles spent on atomic operations. Values 
     greater than 0.10 indicate contention is high and might be worth addressing.
+
