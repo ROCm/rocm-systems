@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2021i-2025 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -26,14 +26,16 @@ THE SOFTWARE.
 
 
 #include <hip_test_common.hh>
-
-
+enum MemsetType {
+  hipMemsetTypeDefault,
+  hipMemsetTypeDefaultSpt
+};
 /**
  * Basic Functional test of hipMemset3D
  */
 TEST_CASE("Unit_hipMemset3D_BasicFunctional") {
   CHECK_IMAGE_SUPPORT
-
+  enum MemsetType type = GENERATE(hipMemsetTypeDefault, hipMemsetTypeDefaultSpt);
   constexpr int memsetval = 0x22;
   constexpr size_t numH = 256;
   constexpr size_t numW = 256;
@@ -53,7 +55,15 @@ TEST_CASE("Unit_hipMemset3D_BasicFunctional") {
   for (size_t i = 0; i < elements; i++) {
       A_h[i] = 1;
   }
-  HIP_CHECK(hipMemset3D(devPitchedPtr, memsetval, extent));
+  if (type == hipMemsetTypeDefault) {
+    HIP_CHECK(hipMemset3D(devPitchedPtr, memsetval, extent));
+  } else {
+    #if HT_AMD
+      HIP_CHECK(hipMemset3D_spt(devPitchedPtr, memsetval, extent));
+    #else
+      HIP_CHECK(hipMemset3D(devPitchedPtr, memsetval, extent));
+    #endif
+  }
   hipMemcpy3DParms myparms{};
   myparms.srcPos = make_hipPos(0, 0, 0);
   myparms.dstPos = make_hipPos(0, 0, 0);
@@ -83,7 +93,7 @@ TEST_CASE("Unit_hipMemset3D_BasicFunctional") {
  */
 TEST_CASE("Unit_hipMemset3DAsync_BasicFunctional") {
   CHECK_IMAGE_SUPPORT
-
+  enum MemsetType type = GENERATE(hipMemsetTypeDefault, hipMemsetTypeDefaultSpt);
   constexpr int memsetval = 0x22;
   constexpr size_t numH = 256;
   constexpr size_t numW = 256;
@@ -105,7 +115,15 @@ TEST_CASE("Unit_hipMemset3DAsync_BasicFunctional") {
 
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipMemset3DAsync(devPitchedPtr, memsetval, extent, stream));
+  if (type == hipMemsetTypeDefault) {
+    HIP_CHECK(hipMemset3DAsync(devPitchedPtr, memsetval, extent, stream));
+  } else {
+    #if HT_AMD
+      HIP_CHECK(hipMemset3DAsync_spt(devPitchedPtr, memsetval, extent, stream));
+    #else
+      HIP_CHECK(hipMemset3DAsync(devPitchedPtr, memsetval, extent, stream));
+    #endif
+  }
   HIP_CHECK(hipStreamSynchronize(stream));
   hipMemcpy3DParms myparms{};
   myparms.srcPos = make_hipPos(0, 0, 0);
@@ -144,6 +162,7 @@ TEST_CASE("Unit_hipMemset3DAsync_BasicFunctional") {
 *  - HIP_VERSION >= 6.0
 */
 TEST_CASE("Unit_hipMemset3DAsync_capturehipMemset3DAsync") {
+  enum MemsetType type = GENERATE(hipMemsetTypeDefault, hipMemsetTypeDefaultSpt);
   char *A_h;
   hipPitchedPtr A_d;
   hipGraph_t graph{nullptr};
@@ -160,7 +179,15 @@ TEST_CASE("Unit_hipMemset3DAsync_capturehipMemset3DAsync") {
   HIP_CHECK(hipStreamCreate(&stream));
 
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipMemset3DAsync(A_d, 'a', extent, stream));
+  if (type == hipMemsetTypeDefault) {
+    HIP_CHECK(hipMemset3DAsync(A_d, 'a', extent, stream));
+  } else {
+    #if HT_AMD
+      HIP_CHECK(hipMemset3DAsync_spt(A_d, 'a', extent, stream));
+    #else
+      HIP_CHECK(hipMemset3DAsync(A_d, 'a', extent, stream));
+    #endif
+  }
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
 
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));

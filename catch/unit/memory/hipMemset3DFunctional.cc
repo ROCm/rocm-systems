@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
@@ -85,11 +85,14 @@ Testcase Scenarios :
 #define XSET_LEN 10
 #define XPOS_END 19
 
-
+enum MemsetType {
+  hipMemsetTypeDefault,
+  hipMemsetTypeDefaultSpt
+};
 /**
  * Memset with extent passed and verify data to be intact
  */
-static void testMemsetWithExtent(bool bAsync, hipExtent tstExtent) {
+static void testMemsetWithExtent(bool bAsync, hipExtent tstExtent, enum MemsetType type) {
   hipPitchedPtr devPitchedPtr;
   hipError_t ret;
   char *A_h;
@@ -104,39 +107,88 @@ static void testMemsetWithExtent(bool bAsync, hipExtent tstExtent) {
   REQUIRE(A_h != nullptr);
   memset(A_h, 0, sizeElements);
   HIP_CHECK(hipMalloc3D(&devPitchedPtr, extent));
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
   if (bAsync) {
-    hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
-
-    ret = hipMemset3DAsync(devPitchedPtr, MEMSETVAL, extent, stream);
-    INFO("testMemsetWithExtent(" << extent.width << "," << extent.height
-                                 << "," << extent.depth << ") memset "
-                                 << MEMSETVAL << ", ret : " << ret);
-    REQUIRE(ret == hipSuccess);
-
-    ret = hipMemset3DAsync(devPitchedPtr, TESTVAL, tstExtent, stream);
-    INFO("testMemsetWithExtent(" << tstExtent.width << "," << tstExtent.height
-                                 << "," << tstExtent.depth << ") memset "
-                                 << TESTVAL << "ret : " << ret);
-    REQUIRE(ret == hipSuccess);
-
+    /*hipStream_t stream;
+    HIP_CHECK(hipStreamCreate(&stream));*/
+     if (type == hipMemsetTypeDefault) {
+      ret = hipMemset3DAsync(devPitchedPtr, MEMSETVAL, extent, stream);
+      INFO("testMemsetWithExtent(" << extent.width << "," << extent.height
+                                   << "," << extent.depth << ") memset "
+                                   << MEMSETVAL << ", ret : " << ret);
+      REQUIRE(ret == hipSuccess);
+      ret = hipMemset3DAsync(devPitchedPtr, TESTVAL, tstExtent, stream);
+      INFO("testMemsetWithExtent(" << tstExtent.width << "," << tstExtent.height
+                                   << "," << tstExtent.depth << ") memset "
+                                   << TESTVAL << "ret : " << ret);
+      REQUIRE(ret == hipSuccess);
+    } else {
+      #if HT_AMD
+      ret = hipMemset3DAsync_spt(devPitchedPtr, MEMSETVAL, extent, stream);
+      INFO("testMemsetWithExtent(" << extent.width << "," << extent.height
+                                   << "," << extent.depth << ") memset "
+                                   << MEMSETVAL << ", ret : " << ret);
+      REQUIRE(ret == hipSuccess);
+      ret = hipMemset3DAsync_spt(devPitchedPtr, TESTVAL, tstExtent, stream);
+      INFO("testMemsetWithExtent(" << tstExtent.width << "," << tstExtent.height
+                                   << "," << tstExtent.depth << ") memset "
+                                   << TESTVAL << "ret : " << ret);
+      REQUIRE(ret == hipSuccess);
+      #else
+      ret = hipMemset3DAsync(devPitchedPtr, MEMSETVAL, extent, stream);
+      INFO("testMemsetWithExtent(" << extent.width << "," << extent.height
+                                   << "," << extent.depth << ") memset "
+                                   << MEMSETVAL << ", ret : " << ret);
+      REQUIRE(ret == hipSuccess);
+      ret = hipMemset3DAsync(devPitchedPtr, TESTVAL, tstExtent, stream);
+      INFO("testMemsetWithExtent(" << tstExtent.width << "," << tstExtent.height
+                                   << "," << tstExtent.depth << ") memset "
+                                   << TESTVAL << "ret : " << ret);
+      REQUIRE(ret == hipSuccess);
+      #endif
+    }
     HIP_CHECK(hipStreamSynchronize(stream));
-    HIP_CHECK(hipStreamDestroy(stream));
+    //HIP_CHECK(hipStreamDestroy(stream));
   } else {
-    ret = hipMemset3D(devPitchedPtr, MEMSETVAL, extent);
-    INFO("testMemsetWithExtent(" << extent.width << "," << extent.height
-                                 << "," << extent.depth << ") memset "
-                                 << MEMSETVAL << ",ret : " << ret);
-    REQUIRE(ret == hipSuccess);
-
-    ret = hipMemset3D(devPitchedPtr, TESTVAL, tstExtent);
-    INFO("testMemsetWithExtent(" << tstExtent.width << "," << tstExtent.height
-                                 << "," << tstExtent.depth << ") memset "
-                                 << TESTVAL << ",ret : " << ret);
-    REQUIRE(ret == hipSuccess);
+     if (type == hipMemsetTypeDefault) {
+      ret = hipMemset3DAsync(devPitchedPtr, MEMSETVAL, extent, stream);
+      INFO("testMemsetWithExtent(" << extent.width << "," << extent.height
+                                   << "," << extent.depth << ") memset "
+                                   << MEMSETVAL << ", ret : " << ret);
+      REQUIRE(ret == hipSuccess);
+      ret = hipMemset3DAsync(devPitchedPtr, TESTVAL, tstExtent, stream);
+      INFO("testMemsetWithExtent(" << tstExtent.width << "," << tstExtent.height
+                                   << "," << tstExtent.depth << ") memset "
+                                   << TESTVAL << "ret : " << ret);
+      REQUIRE(ret == hipSuccess);
+    } else {
+      #if HT_AMD
+      ret = hipMemset3DAsync_spt(devPitchedPtr, MEMSETVAL, extent, stream);
+      INFO("testMemsetWithExtent(" << extent.width << "," << extent.height
+                                   << "," << extent.depth << ") memset "
+                                   << MEMSETVAL << ", ret : " << ret);
+      REQUIRE(ret == hipSuccess);
+      ret = hipMemset3DAsync_spt(devPitchedPtr, TESTVAL, tstExtent, stream);
+      INFO("testMemsetWithExtent(" << tstExtent.width << "," << tstExtent.height
+                                   << "," << tstExtent.depth << ") memset "
+                                   << TESTVAL << "ret : " << ret);
+      REQUIRE(ret == hipSuccess);
+      #else
+      ret = hipMemset3DAsync(devPitchedPtr, MEMSETVAL, extent, stream);
+      INFO("testMemsetWithExtent(" << extent.width << "," << extent.height
+                                   << "," << extent.depth << ") memset "
+                                   << MEMSETVAL << ", ret : " << ret);
+      REQUIRE(ret == hipSuccess);
+      ret = hipMemset3DAsync(devPitchedPtr, TESTVAL, tstExtent, stream);
+      INFO("testMemsetWithExtent(" << tstExtent.width << "," << tstExtent.height
+                                   << "," << tstExtent.depth << ") memset "
+                                   << TESTVAL << "ret : " << ret);
+      REQUIRE(ret == hipSuccess);
+      #endif
+    }
   }
-
-
+  HIP_CHECK(hipStreamDestroy(stream));
   hipMemcpy3DParms myparms{};
   myparms.srcPos = make_hipPos(0, 0, 0);
   myparms.dstPos = make_hipPos(0, 0, 0);
@@ -168,7 +220,7 @@ static void testMemsetWithExtent(bool bAsync, hipExtent tstExtent) {
 /**
  * Validates data after performing memory set operation with max memset value
  */
-static void testMemsetMaxValue(bool bAsync) {
+static void testMemsetMaxValue(bool bAsync, enum MemsetType type) {
   hipPitchedPtr devPitchedPtr;
   unsigned char *A_h;
   int memsetval = std::numeric_limits<unsigned char>::max();
@@ -187,16 +239,40 @@ static void testMemsetMaxValue(bool bAsync) {
     SECTION("Using user created stream") {
       hipStream_t stream;
       HIP_CHECK(hipStreamCreate(&stream));
-      HIP_CHECK(hipMemset3DAsync(devPitchedPtr, memsetval, extent, stream));
+      if (type == hipMemsetTypeDefault) {
+        HIP_CHECK(hipMemset3DAsync(devPitchedPtr, memsetval, extent, stream));
+      } else {
+        #if HT_AMD
+        HIP_CHECK(hipMemset3DAsync_spt(devPitchedPtr, memsetval, extent, stream));
+        #else
+        HIP_CHECK(hipMemset3DAsync(devPitchedPtr, memsetval, extent, stream));
+        #endif
+      }
       HIP_CHECK(hipStreamSynchronize(stream));
       HIP_CHECK(hipStreamDestroy(stream));
     }
     SECTION("Using hipStreamPerThread") {
-      HIP_CHECK(hipMemset3DAsync(devPitchedPtr, memsetval, extent, hipStreamPerThread));
+      if (type == hipMemsetTypeDefault) {
+        HIP_CHECK(hipMemset3DAsync(devPitchedPtr, memsetval, extent, hipStreamPerThread));
+      } else {
+        #if HT_AMD
+        HIP_CHECK(hipMemset3DAsync_spt(devPitchedPtr, memsetval, extent, hipStreamPerThread));
+        #else
+        HIP_CHECK(hipMemset3DAsync(devPitchedPtr, memsetval, extent, hipStreamPerThread));
+        #endif
+      }
       HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
     }
   } else {
-    HIP_CHECK(hipMemset3D(devPitchedPtr, memsetval, extent));
+    if (type == hipMemsetTypeDefault) {
+      HIP_CHECK(hipMemset3D(devPitchedPtr, memsetval, extent));
+    } else {
+      #if HT_AMD
+      HIP_CHECK(hipMemset3D_spt(devPitchedPtr, memsetval, extent));
+      #else
+      HIP_CHECK(hipMemset3D(devPitchedPtr, memsetval, extent));
+      #endif
+    }
   }
 
   hipMemcpy3DParms myparms{};
@@ -229,7 +305,7 @@ static void testMemsetMaxValue(bool bAsync) {
  * Function seeks device ptr to random slice and performs Memset operation
  * on the slice selected.
  */
-static void seekAndSet3DArraySlice(bool bAsync) {
+static void seekAndSet3DArraySlice(bool bAsync, enum MemsetType type) {
   char array3D[ZSIZE_S][YSIZE_S][XSIZE_S]{};
   dim3 arr_dimensions = dim3(ZSIZE_S, YSIZE_S, XSIZE_S);
   hipExtent extent = make_hipExtent(sizeof(char) * arr_dimensions.x,
@@ -238,8 +314,15 @@ static void seekAndSet3DArraySlice(bool bAsync) {
   int memsetval = MEMSETVAL, memsetval4seeked = TESTVAL;
 
   HIP_CHECK(hipMalloc3D(&devicePitchedPointer, extent));
-  HIP_CHECK(hipMemset3D(devicePitchedPointer, memsetval, extent));
-
+  if (type == hipMemsetTypeDefault) {
+    HIP_CHECK(hipMemset3D(devicePitchedPointer, memsetval, extent));
+  } else {
+    #if HT_AMD
+    HIP_CHECK(hipMemset3D_spt(devicePitchedPointer, memsetval, extent));
+    #else
+    HIP_CHECK(hipMemset3D(devicePitchedPointer, memsetval, extent));
+    #endif
+  }
   // select random slice for memset
   unsigned int seed = time(nullptr);
   int slice_index = HipTest::RAND_R(&seed) % ZSIZE_S;
@@ -262,13 +345,31 @@ static void seekAndSet3DArraySlice(bool bAsync) {
     // Memset selected slice (Async)
     hipStream_t stream;
     HIP_CHECK(hipStreamCreate(&stream));
-    HIP_CHECK(hipMemset3DAsync(modDevPitchedPtr, memsetval4seeked,
-                              extentSlice, stream));
+    if (type == hipMemsetTypeDefault) {
+      HIP_CHECK(hipMemset3DAsync(modDevPitchedPtr, memsetval4seeked,
+                                 extentSlice, stream));
+    } else {
+      #if HT_AMD
+      HIP_CHECK(hipMemset3DAsync_spt(modDevPitchedPtr, memsetval4seeked,
+                                     extentSlice, stream));
+      #else
+      HIP_CHECK(hipMemset3DAsync(modDevPitchedPtr, memsetval4seeked,
+                                 extentSlice, stream));
+      #endif
+    }
     HIP_CHECK(hipStreamSynchronize(stream));
     HIP_CHECK(hipStreamDestroy(stream));
   } else {
     // Memset selected slice
-    HIP_CHECK(hipMemset3D(modDevPitchedPtr, memsetval4seeked, extentSlice));
+    if (type == hipMemsetTypeDefault) {
+      HIP_CHECK(hipMemset3D(modDevPitchedPtr, memsetval4seeked, extentSlice));
+    } else {
+      #if HT_AMD
+      HIP_CHECK(hipMemset3D_spt(modDevPitchedPtr, memsetval4seeked, extentSlice));
+      #else
+      HIP_CHECK(hipMemset3D(modDevPitchedPtr, memsetval4seeked, extentSlice));
+      #endif
+    }
   }
 
   // Copy result back to host buffer
@@ -318,7 +419,7 @@ static void seekAndSet3DArraySlice(bool bAsync) {
  * Function seeks device ptr to selected portion of 3d array
  * and performs Memset operation on the portion.
  */
-static void seekAndSet3DArrayPortion(bool bAsync) {
+static void seekAndSet3DArrayPortion(bool bAsync, enum MemsetType type) {
   char array3D[ZSIZE_P][YSIZE_P][XSIZE_P]{};
   dim3 arr_dimensions = dim3(ZSIZE_P, YSIZE_P, XSIZE_P);
   hipExtent extent = make_hipExtent(sizeof(char) * arr_dimensions.x,
@@ -327,8 +428,15 @@ static void seekAndSet3DArrayPortion(bool bAsync) {
   int memsetval = MEMSETVAL, memsetval4seeked = TESTVAL;
 
   HIP_CHECK(hipMalloc3D(&devicePitchedPointer, extent));
-  HIP_CHECK(hipMemset3D(devicePitchedPointer, memsetval, extent));
-
+  if (type == hipMemsetTypeDefault) {
+    HIP_CHECK(hipMemset3D(devicePitchedPointer, memsetval, extent));
+  } else {
+    #if HT_AMD
+    HIP_CHECK(hipMemset3D_spt(devicePitchedPointer, memsetval, extent));
+    #else
+    HIP_CHECK(hipMemset3D(devicePitchedPointer, memsetval, extent));
+    #endif
+  }
   // For memsetting extent/size(10,10,10) in the mid portion of cube(30,30,30),
   // seek device ptr to (10,10,10) and then memset 10 bytes across x,y,z axis.
   size_t pitch = devicePitchedPointer.pitch;
@@ -355,13 +463,31 @@ static void seekAndSet3DArrayPortion(bool bAsync) {
     // Memset selected portion (Async)
     hipStream_t stream;
     HIP_CHECK(hipStreamCreate(&stream));
-    HIP_CHECK(hipMemset3DAsync(modDevPitchedPtr, memsetval4seeked,
-                              setExtent, stream));
+    if (type == hipMemsetTypeDefault) {
+      HIP_CHECK(hipMemset3DAsync(modDevPitchedPtr, memsetval4seeked,
+                                setExtent, stream));
+    } else {
+      #if HT_AMD
+      HIP_CHECK(hipMemset3DAsync_spt(modDevPitchedPtr, memsetval4seeked,
+                                setExtent, stream));
+      #else
+      HIP_CHECK(hipMemset3DAsync(modDevPitchedPtr, memsetval4seeked,
+                                setExtent, stream));
+      #endif
+    }
     HIP_CHECK(hipStreamSynchronize(stream));
     HIP_CHECK(hipStreamDestroy(stream));
   } else {
     // Memset selected portion
-    HIP_CHECK(hipMemset3D(modDevPitchedPtr, memsetval4seeked, setExtent));
+    if (type == hipMemsetTypeDefault) {
+      HIP_CHECK(hipMemset3D(modDevPitchedPtr, memsetval4seeked, setExtent));
+    } else {
+      #if HT_AMD
+      HIP_CHECK(hipMemset3D_spt(modDevPitchedPtr, memsetval4seeked, setExtent));
+      #else
+      HIP_CHECK(hipMemset3D(modDevPitchedPtr, memsetval4seeked, setExtent));
+      #endif
+    }
   }
 
   // Copy result back to host buffer
@@ -417,32 +543,32 @@ static void seekAndSet3DArrayPortion(bool bAsync) {
  */
 TEST_CASE("Unit_hipMemset3D_MemsetWithExtent") {
   CHECK_IMAGE_SUPPORT
-
+  enum MemsetType type = GENERATE(hipMemsetTypeDefault, hipMemsetTypeDefaultSpt);
   hipExtent testExtent;
   size_t numH = NUMH_EXT, numW = NUMW_EXT, depth = DEPTH_EXT;
 
   SECTION("Memset with extent width(0)") {
     // Memset with extent width(0) and verify data to be intact
     testExtent = make_hipExtent(0, numH, depth);
-    testMemsetWithExtent(0, testExtent);
+    testMemsetWithExtent(0, testExtent, type);
   }
 
   SECTION("Memset with extent height(0)") {
     // Memset with extent height(0) and verify data to be intact
     testExtent = make_hipExtent(numW, 0, depth);
-    testMemsetWithExtent(0, testExtent);
+    testMemsetWithExtent(0, testExtent, type);
   }
 
   SECTION("Memset with extent depth(0)") {
     // Memset with extent depth(0) and verify data to be intact
     testExtent = make_hipExtent(numW, numH, 0);
-    testMemsetWithExtent(0, testExtent);
+    testMemsetWithExtent(0, testExtent, type);
   }
 
   SECTION("Memset with extent width,height,depth as 0") {
     // Memset with extent width,height,depth as 0 and verify data to be intact
     testExtent = make_hipExtent(0, 0, 0);
-    testMemsetWithExtent(0, testExtent);
+    testMemsetWithExtent(0, testExtent, type);
   }
 }
 
@@ -453,32 +579,32 @@ TEST_CASE("Unit_hipMemset3D_MemsetWithExtent") {
  */
 TEST_CASE("Unit_hipMemset3DAsync_MemsetWithExtent") {
   CHECK_IMAGE_SUPPORT
-
+  enum MemsetType type = GENERATE(hipMemsetTypeDefault, hipMemsetTypeDefaultSpt);
   hipExtent testExtent;
   size_t numH = NUMH_EXT, numW = NUMW_EXT, depth = DEPTH_EXT;
 
   SECTION("Memset with extent width(0)") {
     // Memset with extent width(0) and verify data to be intact
     testExtent = make_hipExtent(0, numH, depth);
-    testMemsetWithExtent(1, testExtent);
+    testMemsetWithExtent(1, testExtent, type);
   }
 
   SECTION("Memset with extent height(0)") {
     // Memset with extent height(0) and verify data to be intact
     testExtent = make_hipExtent(numW, 0, depth);
-    testMemsetWithExtent(1, testExtent);
+    testMemsetWithExtent(1, testExtent, type);
   }
 
   SECTION("Memset with extent depth(0)") {
     // Memset with extent depth(0) and verify data to be intact
     testExtent = make_hipExtent(numW, numH, 0);
-    testMemsetWithExtent(1, testExtent);
+    testMemsetWithExtent(1, testExtent, type);
   }
 
   SECTION("Memset with extent width,height,depth as 0") {
     // Memset with extent width,height,depth as 0 and verify data to be intact
     testExtent = make_hipExtent(0, 0, 0);
-    testMemsetWithExtent(1, testExtent);
+    testMemsetWithExtent(1, testExtent, type);
   }
 }
 
@@ -487,8 +613,8 @@ TEST_CASE("Unit_hipMemset3DAsync_MemsetWithExtent") {
  */
 TEST_CASE("Unit_hipMemset3D_MemsetMaxValue") {
   CHECK_IMAGE_SUPPORT
-
-  testMemsetMaxValue(0);
+  enum MemsetType type = GENERATE(hipMemsetTypeDefault, hipMemsetTypeDefaultSpt);
+  testMemsetMaxValue(0, type);
 }
 
 /**
@@ -496,8 +622,8 @@ TEST_CASE("Unit_hipMemset3D_MemsetMaxValue") {
  */
 TEST_CASE("Unit_hipMemset3DAsync_MemsetMaxValue") {
   CHECK_IMAGE_SUPPORT
-
-  testMemsetMaxValue(1);
+  enum MemsetType type = GENERATE(hipMemsetTypeDefault, hipMemsetTypeDefaultSpt);
+  testMemsetMaxValue(1, type);
 }
 
 /**
@@ -505,8 +631,8 @@ TEST_CASE("Unit_hipMemset3DAsync_MemsetMaxValue") {
  */
 TEST_CASE("Unit_hipMemset3D_SeekSetSlice") {
   CHECK_IMAGE_SUPPORT
-
-  seekAndSet3DArraySlice(0);
+  enum MemsetType type = GENERATE(hipMemsetTypeDefault, hipMemsetTypeDefaultSpt);
+  seekAndSet3DArraySlice(0, type);
 }
 
 /**
@@ -514,8 +640,8 @@ TEST_CASE("Unit_hipMemset3D_SeekSetSlice") {
  */
 TEST_CASE("Unit_hipMemset3DAsync_SeekSetSlice") {
   CHECK_IMAGE_SUPPORT
-
-  seekAndSet3DArraySlice(1);
+  enum MemsetType type = GENERATE(hipMemsetTypeDefault, hipMemsetTypeDefaultSpt);
+  seekAndSet3DArraySlice(1, type);
 }
 
 /**
@@ -523,8 +649,8 @@ TEST_CASE("Unit_hipMemset3DAsync_SeekSetSlice") {
  */
 TEST_CASE("Unit_hipMemset3D_SeekSetArrayPortion") {
   CHECK_IMAGE_SUPPORT
-
-  seekAndSet3DArrayPortion(0);
+  enum MemsetType type = GENERATE(hipMemsetTypeDefault, hipMemsetTypeDefaultSpt);
+  seekAndSet3DArrayPortion(0, type);
 }
 
 /**
@@ -532,6 +658,6 @@ TEST_CASE("Unit_hipMemset3D_SeekSetArrayPortion") {
  */
 TEST_CASE("Unit_hipMemset3DAsync_SeekSetArrayPortion") {
   CHECK_IMAGE_SUPPORT
-
-  seekAndSet3DArrayPortion(1);
+  enum MemsetType type = GENERATE(hipMemsetTypeDefault, hipMemsetTypeDefaultSpt);
+  seekAndSet3DArrayPortion(1, type);
 }

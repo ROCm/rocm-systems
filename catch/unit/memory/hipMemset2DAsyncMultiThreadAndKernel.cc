@@ -35,12 +35,24 @@
 #define NUM_H 256
 #define NUM_W 256
 
-
+enum MemsetType {
+  hipMemsetTypeDefault,
+  hipMemsetTypeDefaultSpt
+};
 
 void queueJobsForhipMemset2DAsync(char* A_d, char* A_h, size_t pitch,
-                                  size_t width, hipStream_t stream) {
+                                  size_t width, hipStream_t stream,
+                                  enum MemsetType type) {
   constexpr int memsetval = 0x22;
-  HIPCHECK(hipMemset2DAsync(A_d, pitch, memsetval, NUM_W, NUM_H, stream));
+  if (type == hipMemsetTypeDefault) {
+    HIPCHECK(hipMemset2DAsync(A_d, pitch, memsetval, NUM_W, NUM_H, stream));
+  } else {
+    #if HT_AMD
+    HIPCHECK(hipMemset2DAsync_spt(A_d, pitch, memsetval, NUM_W, NUM_H, stream));
+    #else
+    HIPCHECK(hipMemset2DAsync(A_d, pitch, memsetval, NUM_W, NUM_H, stream));
+    #endif
+  }
   HIPCHECK(hipMemcpy2DAsync(A_h, width, A_d, pitch, NUM_W, NUM_H,
                             hipMemcpyDeviceToHost, stream));
 }
@@ -51,7 +63,7 @@ void queueJobsForhipMemset2DAsync(char* A_d, char* A_h, size_t pitch,
  */
 TEST_CASE("Unit_hipMemset2DAsync_WithKernel") {
   CHECK_IMAGE_SUPPORT
-
+  enum MemsetType type = GENERATE(hipMemsetTypeDefault, hipMemsetTypeDefaultSpt);
   constexpr auto N = 4 * 1024 * 1024;
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;
@@ -89,8 +101,18 @@ TEST_CASE("Unit_hipMemset2DAsync_WithKernel") {
       hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks),
                      dim3(threadsPerBlock), 0, stream, B_d, C_d, elements);
       HIP_CHECK(hipStreamSynchronize(stream));
-      HIP_CHECK(hipMemset2DAsync(C_d, pitch_C, memsetval, NUM_W, NUM_H,
-                stream));
+      if (type == hipMemsetTypeDefault) {
+        HIP_CHECK(hipMemset2DAsync(C_d, pitch_C, memsetval, NUM_W, NUM_H,
+                  stream));
+      } else {
+        #if HT_AMD
+        HIP_CHECK(hipMemset2DAsync_spt(C_d, pitch_C, memsetval, NUM_W, NUM_H,
+                  stream));
+        #else
+        HIP_CHECK(hipMemset2DAsync(C_d, pitch_C, memsetval, NUM_W, NUM_H,
+                  stream));
+        #endif
+      }
       HIP_CHECK(hipStreamSynchronize(stream)); 
       HIP_CHECK(hipMemcpy2D(A_h, width, C_d, pitch_C, NUM_W, NUM_H,
                            hipMemcpyDeviceToHost));
@@ -109,8 +131,18 @@ TEST_CASE("Unit_hipMemset2DAsync_WithKernel") {
                    dim3(threadsPerBlock), 0, hipStreamPerThread, B_d, C_d, elements);
       HIP_CHECK(hipGetLastError());
       HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
-      HIP_CHECK(hipMemset2DAsync(C_d, pitch_C, memsetval, NUM_W, NUM_H,
-                hipStreamPerThread));
+      if (type == hipMemsetTypeDefault) {
+        HIP_CHECK(hipMemset2DAsync(C_d, pitch_C, memsetval, NUM_W, NUM_H,
+                  hipStreamPerThread));
+      } else {
+        #if HT_AMD
+        HIP_CHECK(hipMemset2DAsync_spt(C_d, pitch_C, memsetval, NUM_W, NUM_H,
+                  hipStreamPerThread));
+        #else
+        HIP_CHECK(hipMemset2DAsync(C_d, pitch_C, memsetval, NUM_W, NUM_H,
+                  hipStreamPerThread));
+        #endif
+      }
       HIP_CHECK(hipStreamSynchronize(hipStreamPerThread)); 
       HIP_CHECK(hipMemcpy2D(A_h, width, C_d, pitch_C, NUM_W, NUM_H,
                            hipMemcpyDeviceToHost));
@@ -135,7 +167,7 @@ TEST_CASE("Unit_hipMemset2DAsync_WithKernel") {
  */
 TEST_CASE("Unit_hipMemset2DAsync_MultiThread") {
   CHECK_IMAGE_SUPPORT
-
+  enum MemsetType type = GENERATE(hipMemsetTypeDefault, hipMemsetTypeDefaultSpt);
   constexpr auto memPerThread = 200;
   constexpr int memsetval = 0x22;
   char *A_d, *A_h, *B_d, *B_h, *C_d;
@@ -177,10 +209,10 @@ TEST_CASE("Unit_hipMemset2DAsync_MultiThread") {
     for (size_t k = 0 ; k < thread_count; k++) {
       if (k%2) {
         t[k] = std::thread(queueJobsForhipMemset2DAsync, A_d, A_h, pitch_A,
-                           width, stream);
+                           width, stream, type);
       } else {
         t[k] = std::thread(queueJobsForhipMemset2DAsync, A_d, B_h, pitch_A,
-                           width, stream);
+                           width, stream, type);
       }
     }
     for (size_t j = 0 ; j < thread_count; j++) {
