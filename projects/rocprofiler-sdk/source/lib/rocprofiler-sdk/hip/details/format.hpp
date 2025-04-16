@@ -152,7 +152,7 @@ ROCP_SDK_HIP_FORMATTER(hipGraphEdgeData,
                        v.to_port,
                        v.type,
                        '}')
-#if HIP_RUNTIME_API_TABLE_STEP_VERSION < 12
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION < 13
 ROCP_SDK_HIP_FORMATTER(HIP_MEMSET_NODE_PARAMS,
                        "{}dst={}, pitch={}, value={}, elementSize={}, width={}, height={}{}",
                        '{',
