@@ -43,6 +43,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED On)
 
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/../../cmake)
 list(APPEND CMAKE_PREFIX_PATH ${ROCmVersion_DIR}/lib/cmake ${ROCmVersion_DIR})
+list(APPEND CMAKE_PREFIX_PATH ${ROCmVersion_DIR}/hip ${ROCmVersion_DIR})
 list(APPEND CMAKE_MODULE_PATH ${ROCmVersion_DIR}/share/rocjpeg/cmake)
 
 set(CMAKE_BUILD_TYPE "RelWithDebInfo")

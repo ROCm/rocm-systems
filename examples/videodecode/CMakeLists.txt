@@ -20,6 +20,7 @@ endif()
 set(CMAKE_CXX_STANDARD 17)
 
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/../../cmake)
+list(APPEND CMAKE_PREFIX_PATH ${ROCmVersion_DIR}/lib/cmake ${ROCmVersion_DIR})
 list(APPEND CMAKE_PREFIX_PATH ${ROCmVersion_DIR}/hip ${ROCmVersion_DIR})
 list(APPEND CMAKE_MODULE_PATH ${ROCmVersion_DIR}/share/rocdecode/cmake)
 
@@ -49,27 +50,10 @@ function(videodecode_message _MSG_TYPE)
 endfunction()
 
 # Find RocDecode
-find_package(rocDecode QUIET)
+find_package(ROCDECODE QUIET)
 if(NOT ROCDECODE_FOUND)
     videodecode_message(AUTHOR_WARNING "${PROJECT_NAME} skipped. Missing RocDecode...")
     return()
-endif()
-
-find_path(
-    ROCDECODE_INCLUDE_DIR
-    NAMES rocdecode.h
-    PATHS ${ROCmVersion_DIR}/include/rocdecode)
-find_library(
-    ROCDECODE_LIBRARY
-    NAMES rocdecode
-    HINTS ${ROCmVersion_DIR}/lib)
-
-mark_as_advanced(ROCDECODE_INCLUDE_DIR ROCDECODE_LIBRARY)
-
-if(ROCDECODE_INCLUDE_DIR AND ROCDECODE_LIBRARY)
-    set(ROCDECODE_FOUND TRUE)
-else()
-    videodecode_message(AUTHOR_WARNING "${PROJECT_NAME} skipped. Missing RocDecode ...")
 endif()
 
 # Copy video files to build directory
