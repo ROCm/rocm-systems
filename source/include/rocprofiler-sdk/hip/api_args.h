@@ -2782,10 +2782,10 @@ typedef union rocprofiler_hip_api_args_t
         hipGraph_t            hGraph;
         const hipGraphNode_t* dependencies;
         size_t                numDependencies;
-#if HIP_RUNTIME_API_TABLE_STEP_VERSION < 12
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION < 13
         const HIP_MEMSET_NODE_PARAMS* memsetParams;
 #endif
-#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 12
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 13
         const hipMemsetParams* memsetParams;
 #endif
         hipCtx_t ctx;
@@ -2971,10 +2971,10 @@ typedef union rocprofiler_hip_api_args_t
     {
         hipGraphExec_t hGraphExec;
         hipGraphNode_t hNode;
-#    if HIP_RUNTIME_API_TABLE_STEP_VERSION < 12
+#    if HIP_RUNTIME_API_TABLE_STEP_VERSION < 13
         const HIP_MEMSET_NODE_PARAMS* memsetParams;
 #    endif
-#    if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 12
+#    if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 13
         const hipMemsetParams* memsetParams;
 #    endif
         hipCtx_t ctx;
