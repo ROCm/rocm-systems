@@ -232,8 +232,6 @@
         "Unit_hipGraphAddChildGraphNode_OrgGraphAsChildGraph",
         "Unit_hipDeviceSynchronize_Positive_Nullstream",
         "Unit_hipDeviceSynchronize_Functional",
-        "Unit_hipDeviceReset_Positive_Basic",
-        "Unit_hipDeviceReset_Positive_Threaded",
         "Unit_hipModuleGetTexRef_Positive_Basic"
     ]
 }
