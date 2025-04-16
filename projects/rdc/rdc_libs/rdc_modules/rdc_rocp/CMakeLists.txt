@@ -9,8 +9,12 @@ set(RDC_ROCP_LIB_COMPONENT "lib${RDC_ROCP_LIB}")
 set(RDC_ROCP_LIB_SRC_LIST "${BOOTSTRAP_LIB_SRC_DIR}/RdcLogger.cc" "${SRC_DIR}/RdcTelemetryLib.cc"
                           "${SRC_DIR}/RdcRocpCounterSampler.cc" "${SRC_DIR}/RdcRocpBase.cc")
 set(RDC_ROCP_LIB_INC_LIST
-    "${PROJECT_SOURCE_DIR}/include/rdc/rdc.h" "${RDC_LIB_INC_DIR}/RdcDiagnosticLibInterface.h"
-    "${RDC_LIB_INC_DIR}/rdc_common.h" "${RDC_LIB_INC_DIR}/RdcLogger.h" "${INC_DIR}/RdcRocpBase.h"
+    "${PROJECT_SOURCE_DIR}/include/rdc/rdc.h"
+    "${RDC_LIB_INC_DIR}/RdcDiagnosticLibInterface.h"
+    "${RDC_LIB_INC_DIR}/rdc_common.h"
+    "${RDC_LIB_INC_DIR}/RdcLogger.h"
+    "${SRC_DIR}/../../rdc/src/SmiUtils.cc"
+    "${INC_DIR}/RdcRocpBase.h"
     "${INC_DIR}/RdcRocpCounterSampler.h")
 
 if(BUILD_PROFILER)
@@ -31,8 +35,9 @@ if(BUILD_PROFILER)
         ${RDC_LIB_MODULES} ${RDC_ROCP_LIB}
         PARENT_SCOPE)
     add_library(${RDC_ROCP_LIB} SHARED ${RDC_ROCP_LIB_SRC_LIST} ${RDC_ROCP_LIB_INC_LIST})
-    target_link_libraries(${RDC_ROCP_LIB} PRIVATE hsa-runtime64::hsa-runtime64
-                                                  rocprofiler-sdk::rocprofiler-sdk pthread dl)
+    target_link_libraries(
+        ${RDC_ROCP_LIB} PRIVATE hsa-runtime64::hsa-runtime64 rocprofiler-sdk::rocprofiler-sdk
+                                pthread dl amd_smi)
     target_include_directories(
         ${RDC_ROCP_LIB}
         PRIVATE "${PROJECT_SOURCE_DIR}" "${PROJECT_SOURCE_DIR}/include" "${COMMON_DIR}"

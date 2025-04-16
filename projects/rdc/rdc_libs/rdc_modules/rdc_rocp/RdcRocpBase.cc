@@ -35,13 +35,17 @@ THE SOFTWARE.
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <iomanip>
 #include <stdexcept>
 #include <vector>
 
 // #include "hsa.h"
+#include "amd_smi/amdsmi.h"
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/RdcTelemetryLibInterface.h"
+#include "rdc_lib/impl/SmiUtils.h"
+#include "rdc_lib/rdc_common.h"
 #include "rdc_modules/rdc_rocp/RdcRocpCounterSampler.h"
 
 namespace amd {
@@ -97,6 +101,70 @@ const std::vector<rdc_field_t> RdcRocpBase::get_field_ids() {
   return field_ids;
 }
 
+rocprofiler_uuid_t asic_serial_to_uuid(const char* asic_serial) {
+  rocprofiler_uuid_t uuid = {0};
+  // have to cast to stoull as a workaround for amdsmi ignoring leading zeroes
+  uuid.value = std::stoull(asic_serial, nullptr, 16);
+  return uuid;
+}
+
+std::string uuid_to_string(const uint64_t uuid) {
+  std::ostringstream oss;
+  oss << "0x" << std::hex << std::setw(16) << std::setfill('0') << uuid;
+  return oss.str();
+}
+
+std::string uuid_to_string(const rocprofiler_uuid_t& uuid) { return uuid_to_string(uuid.value); }
+
+void RdcRocpBase::map_smi_to_profiler_by_uuid() {
+  std::map<uint32_t, rocprofiler_uuid_t> index_to_prof_map;
+  std::map<uint32_t, rocprofiler_uuid_t> index_to_smi_map;
+
+  // find intersection of supported and requested fields
+  for (uint32_t gpu_index = 0; gpu_index < agents.size(); gpu_index++) {
+    index_to_prof_map.insert({gpu_index, agents[gpu_index].uuid});
+
+    amdsmi_processor_handle processor_handle = nullptr;
+    auto amdsmi_status = get_processor_handle_from_id(gpu_index, &processor_handle);
+    if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
+      continue;
+    }
+    amdsmi_asic_info_t asic_info;
+    amdsmi_status = amdsmi_get_gpu_asic_info(processor_handle, &asic_info);
+    if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
+      continue;
+    }
+    rocprofiler_uuid_t temp_id = asic_serial_to_uuid(asic_info.asic_serial);
+    index_to_smi_map.insert({gpu_index, temp_id});
+
+    // clang-format off
+    RDC_LOG(RDC_DEBUG, "\n"
+        "ID[" << gpu_index << "]:\n"
+        "  PROF: " << uuid_to_string(index_to_prof_map[gpu_index]) << "\n"
+        "  SMI:  " << uuid_to_string(index_to_smi_map[gpu_index]));
+    // clang-format on
+  }
+
+  // Create a mapping from SMI to ROCProfiler by comparing uuid
+  for (const auto& [smi_index, smi_uuid] : index_to_smi_map) {
+    for (const auto& [prof_index, prof_uuid] : index_to_prof_map) {
+      if (std::memcmp(&smi_uuid, &prof_uuid, sizeof(rocprofiler_uuid_t)) == 0) {
+        // match found
+        smi_to_profiler_map[smi_index] = prof_index;
+        break;
+      }
+    }
+  }
+
+  for (const auto& [smi_index, prof_index] : smi_to_profiler_map) {
+    const auto& prof_uuid = index_to_prof_map[prof_index];
+    const auto& smi_uuid = index_to_smi_map[smi_index];
+    RDC_LOG(RDC_DEBUG, "SMI index " << smi_index << " maps to ROCProfiler index " << prof_index
+                                    << " with UUID: " << uuid_to_string(prof_uuid) << " = "
+                                    << uuid_to_string(smi_uuid));
+  }
+}
+
 RdcRocpBase::RdcRocpBase() {
   // all fields
   static const std::map<rdc_field_t, const char*> temp_field_map_k = {
@@ -120,8 +188,8 @@ RdcRocpBase::RdcRocpBase() {
       {RDC_FI_PROF_VALU_PIPE_ISSUE_UTIL, "ValuPipeIssueUtil"},
       {RDC_FI_PROF_SM_ACTIVE, "VALUBusy"},
       {RDC_FI_PROF_OCC_PER_ACTIVE_CU, "MeanOccupancyPerActiveCU"},
-      {RDC_FI_PROF_OCC_ELAPSED,
-       "GRBM_GUI_ACTIVE"},  // this metric is derived from OCC_PER_ACTIVE_CU and ACTIVE_CYCLES
+      {RDC_FI_PROF_OCC_ELAPSED, "GRBM_GUI_ACTIVE"},  // this metric is derived from
+                                                     // OCC_PER_ACTIVE_CU and ACTIVE_CYCLES
       {RDC_FI_PROF_CPC_CPC_STAT_BUSY, "CPC_CPC_STAT_BUSY"},
       {RDC_FI_PROF_CPC_CPC_STAT_IDLE, "CPC_CPC_STAT_IDLE"},
       {RDC_FI_PROF_CPC_CPC_STAT_STALL, "CPC_CPC_STAT_STALL"},
@@ -158,7 +226,7 @@ RdcRocpBase::RdcRocpBase() {
       {RDC_FI_PROF_CPF_CPF_TCIU_IDLE, "CPF_CPF_TCIU_IDLE"},
       {RDC_FI_PROF_CPF_CPF_TCIU_STALL, "CPF_CPF_TCIU_STALL"},
       {RDC_FI_PROF_SIMD_UTILIZATION, "SIMD_UTILIZATION"},
-
+      {RDC_FI_PROF_UUID, "SQ_WAVES"},  // dummy value,
   };
 
   hsa_status_t status = hsa_init();
@@ -183,16 +251,14 @@ RdcRocpBase::RdcRocpBase() {
   RDC_LOG(RDC_DEBUG, "Agent count: " << agents.size());
   samplers = CounterSampler::get_samplers();
 
-  // populate fields
-  for (const auto& [k, v] : temp_field_map_k) {
-    all_fields.emplace_back(v);
-  }
+  map_smi_to_profiler_by_uuid();
 
   // find intersection of supported and requested fields
   for (uint32_t gpu_index = 0; gpu_index < agents.size(); gpu_index++) {
     auto& cs = *samplers[gpu_index];
-    RDC_LOG(RDC_DEBUG,
-            "gpu_index[" << gpu_index << "] = node_id[" << agents[gpu_index].node_id << "]");
+    RDC_LOG(RDC_DEBUG, "gpu_index[" << gpu_index << "] = node_id[" << agents[gpu_index].node_id
+                                    << "] agent_id[" << agents[gpu_index].id.handle << "]");
+
     for (auto& [str, id] : CounterSampler::get_supported_counters(cs.get_agent())) {
       checked_fields.emplace_back(str);
     }
@@ -203,6 +269,11 @@ RdcRocpBase::RdcRocpBase() {
         field_to_metric.insert({k, v});
       }
     }
+  }
+
+  // populate fields
+  for (const auto& [k, v] : temp_field_map_k) {
+    all_fields.emplace_back(v);
   }
 
   RDC_LOG(RDC_DEBUG, "Rocprofiler supports " << field_to_metric.size() << " fields");
@@ -216,26 +287,31 @@ RdcRocpBase::~RdcRocpBase() {
   assert(status == HSA_STATUS_ERROR_NOT_INITIALIZED);
 }
 
-rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, double* value) {
-  const auto& gpu_index = gpu_field.gpu_index;
+rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value_data* data,
+                                      rdc_field_type_t* type) {
+  // default type
+  *type = DOUBLE;
+
+  const auto& gpu_index = smi_to_profiler_map[gpu_field.gpu_index];
   const auto& field = gpu_field.field_id;
 
-  if (value == nullptr) {
+  if (data == nullptr) {
     return RDC_ST_BAD_PARAMETER;
   }
 
   const bool is_eval_field = (eval_fields.find(field) != eval_fields.end());
 
   const auto start_time = std::chrono::high_resolution_clock::now();
-  const double read_value = run_profiler(gpu_index, field);
+  // direct read from rocprofiler
+  const double read_dbl = run_profiler(gpu_index, field);
   const auto stop_time = std::chrono::high_resolution_clock::now();
   const double elapsed = std::chrono::duration<double, std::milli>(stop_time - start_time).count();
-  double divided_value = NAN;
-  double final_value = NAN;
+  // divide by elapsed time if needed
+  double divided_dbl = NAN;
 
   if (is_eval_field) {
     if (elapsed != 0.0) {
-      divided_value = read_value / (elapsed / 1000.0);
+      divided_dbl = read_dbl / (elapsed / 1000.0);
     } else {
       RDC_LOG(RDC_ERROR, "Error: Elapsed time is zero. Cannot divide by zero.");
       return RDC_ST_BAD_PARAMETER;
@@ -247,16 +323,16 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, double* value) 
       // RDC_FI_PROF_GPU_UTIL_PERCENT is mapped to GPU_UTIL
       // GPU_UTIL metric is available on more GPUs than ENGINE_ACTIVE.
       // ENGINE_ACTIVE = GPU_UTIL/100, so do the math ourselves
-      final_value = read_value / 100.0F;
+      data->dbl = read_dbl / 100.0F;
       break;
     case RDC_FI_PROF_OCC_ELAPSED: {
       // RDC_FI_PROF_OCC_ELAPSED is mapped to GRBM_GUI_ACTIVE, the read happens earlier in this
       // function
-      const double active_cycles_val = read_value;
+      const double active_cycles_val = read_dbl;
       if (active_cycles_val != 0.0) {
         // read second value from rocprofiler
         const double occupancy_val = run_profiler(gpu_index, RDC_FI_PROF_OCC_PER_ACTIVE_CU);
-        final_value = occupancy_val / active_cycles_val;
+        data->dbl = occupancy_val / active_cycles_val;
       } else {
         return RDC_ST_BAD_PARAMETER;
       }
@@ -272,11 +348,9 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, double* value) 
       const bool isMI200 = (target_version.find("gfx90a") != std::string::npos);
       // FLOPS/clock/CU
       if (isMI200) {
-        final_value =
-            divided_value / (1024.0F / static_cast<double>(agents[gpu_index].simd_per_cu));
+        data->dbl = divided_dbl / (1024.0F / static_cast<double>(agents[gpu_index].simd_per_cu));
       } else {  // Assume mi300
-        final_value =
-            divided_value / (2048.0F / static_cast<double>(agents[gpu_index].simd_per_cu));
+        data->dbl = divided_dbl / (2048.0F / static_cast<double>(agents[gpu_index].simd_per_cu));
       }
     } break;
     case RDC_FI_PROF_EVAL_FLOPS_32_PERCENT:
@@ -286,23 +360,25 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, double* value) 
         return RDC_ST_BAD_PARAMETER;
       }
       // FLOPS/clock/CU
-      final_value = divided_value / (256.0F / static_cast<double>(agents[gpu_index].simd_per_cu));
+      data->dbl = divided_dbl / (256.0F / static_cast<double>(agents[gpu_index].simd_per_cu));
       break;
+    case RDC_FI_PROF_UUID: {
+      // do not care what RDC_FI_PROF_UUID is mapped to. read value from agents
+      *type = STRING;
+      std::string uuid_str = uuid_to_string(agents[gpu_index].uuid);
+      strncpy_with_null(data->str, uuid_str.c_str(), uuid_str.length());
+      break;
+    }
     default:
+      // only support default fallback for doubles
+      assert(*type == DOUBLE);
       if (is_eval_field) {
-        final_value = divided_value;
+        data->dbl = divided_dbl;
       } else {
-        final_value = read_value;
+        data->dbl = read_dbl;
       }
       break;
   }
-
-  if (final_value == NAN) {
-    RDC_LOG(RDC_ERROR, "Error: Final value is NaN.");
-    return RDC_ST_BAD_PARAMETER;
-  }
-
-  *value = final_value;
 
   return RDC_ST_OK;
 }

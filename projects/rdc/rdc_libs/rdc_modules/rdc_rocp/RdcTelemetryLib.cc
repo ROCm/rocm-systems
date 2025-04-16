@@ -98,7 +98,7 @@ rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields, const uint3
   // Bulk fetch fields
   std::vector<rdc_gpu_field_value_t> bulk_results;
 
-  struct timeval tv{};
+  struct timeval tv {};
   gettimeofday(&tv, nullptr);
   const uint64_t curTime = static_cast<uint64_t>(tv.tv_sec) * 1000 + tv.tv_usec / 1000;
 
@@ -107,7 +107,8 @@ rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields, const uint3
   rdc_gpu_field_value_t values[BULK_FIELDS_MAX];
   uint32_t bulk_count = 0;
   rdc_status_t status = RDC_ST_UNKNOWN_ERROR;
-  double data = NAN;
+  rdc_field_value_data data;
+  rdc_field_type_t type = DOUBLE;
 
   for (uint32_t i = 0; i < fields_count; i++) {
     if (bulk_count >= BULK_FIELDS_MAX) {
@@ -119,14 +120,27 @@ rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields, const uint3
       bulk_count = 0;
     }
 
-    status = rocp_p->rocp_lookup(fields[i], &data);
+    status = rocp_p->rocp_lookup(fields[i], &data, &type);
     // get value
     values[bulk_count].gpu_index = fields[i].gpu_index;
-    values[bulk_count].field_value.type = DOUBLE;
     values[bulk_count].field_value.status = status;
     values[bulk_count].field_value.ts = curTime;
-    values[bulk_count].field_value.value.dbl = data;
+    values[bulk_count].field_value.type = type;
     values[bulk_count].field_value.field_id = fields[i].field_id;
+    switch (type) {
+      case DOUBLE:
+        values[bulk_count].field_value.value.dbl = data.dbl;
+        break;
+      case INTEGER:
+        values[bulk_count].field_value.value.l_int = data.l_int;
+        break;
+      case STRING:
+      case BLOB:
+        strncpy_with_null(values[bulk_count].field_value.value.str, data.str, RDC_MAX_STR_LENGTH);
+        break;
+      default:
+        break;
+    }
     bulk_count++;
   }
   if (bulk_count != 0) {
