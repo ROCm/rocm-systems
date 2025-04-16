@@ -34,6 +34,7 @@
 #    include <rocprofiler-sdk/rocdecode/details/rocparser.h>
 #endif
 
+#include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/callback_tracing.h>
 
 #include <cstdint>
