@@ -41,8 +41,8 @@ namespace fs = std::filesystem;
 #    include <experimental/filesystem>
 namespace fs = std::experimental::filesystem;
 #endif
-#include "rocjpeg.h"
 #include <chrono>
+#include <rocjpeg/rocjpeg.h>
 
 #define CHECK_ROCJPEG(call)                                                              \
     {                                                                                    \
