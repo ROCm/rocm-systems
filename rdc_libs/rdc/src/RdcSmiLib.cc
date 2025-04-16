@@ -184,7 +184,9 @@ rdc_status_t RdcSmiLib::rdc_telemetry_fields_query(uint32_t field_ids[MAX_NUM_FI
       RDC_HEALTH_PENDING_PAGE_NUM,     RDC_HEALTH_RETIRED_PAGE_LIMIT, RDC_HEALTH_EEPROM_CONFIG_VALID,
       RDC_HEALTH_POWER_THROTTLE_TIME,  RDC_HEALTH_THERMAL_THROTTLE_TIME,
       RDC_FI_GPU_MEMORY_MAX_BANDWIDTH, RDC_FI_GPU_MEMORY_CUR_BANDWIDTH,
-      RDC_FI_GPU_BUSY_PERCENT,         RDC_FI_GPU_PAGE_RETRIED
+      RDC_FI_GPU_BUSY_PERCENT,         RDC_FI_GPU_PAGE_RETRIED,
+      RDC_FI_DEV_ID,                   RDC_FI_REV_ID,                 RDC_FI_TARGET_GRAPHICS_VERSION,
+      RDC_FI_NUM_OF_COMPUTE_UNITS,     RDC_FI_UUID,
   };
   // clang-format on
   std::copy(fields.begin(), fields.end(), field_ids);
