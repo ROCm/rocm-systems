@@ -73,8 +73,6 @@ static const char *kPathDRMRoot = "/sys/class/drm";
 static const char *kPathHWMonRoot = "/sys/class/hwmon";
 static const char *kPathPowerRoot = "/sys/kernel/debug/dri";
 
-static const char *kDeviceNamePrefix = "card";
-
 static const char *kAMDMonitorTypes[] = {"radeon", "amdgpu", ""};
 
 namespace amd {
@@ -125,6 +123,44 @@ static uint32_t  GetDrmRenderMinor(const std::string s) {
      << std::to_string(drm_minor) << " | For drm_path = " << drm_path << " | ";
   LOG_DEBUG(ss);
   return static_cast<uint32_t>(drm_minor);
+}
+
+// Find the drm minor from from sysfs path "/sys/class/drm/renderDX/device/drm".
+// From the directory cardN in that sysfs path, the card number can be
+// computed for renderDX.
+// On success, return drm_minor which is >= 128 otherwise return 0xFFFFFFFF
+static uint32_t  GetCard(const std::string s) {
+  std::ostringstream ss;
+  std::string drm_path = s;
+  int card_num = -1;
+  const std::string card_file_prefix = "card";
+  const uint64_t prefix_size = card_file_prefix.size();
+  drm_path += "/device/drm";
+
+  auto card_dir = opendir(drm_path.c_str());
+  if (card_dir == nullptr)
+    return static_cast<uint32_t>(-1);
+
+  auto dentry = readdir(card_dir);
+
+  while (dentry != nullptr) {
+    std::string card_file = dentry->d_name;
+    if (!card_file.compare(0, prefix_size, card_file_prefix)) {
+      card_num = stoi(card_file.substr(prefix_size));
+      if (card_num)
+        break;
+    }
+    dentry = readdir(card_dir);
+  }
+
+  if (closedir(card_dir)) {
+    return static_cast<uint32_t>(-1);
+  }
+
+  ss << __PRETTY_FUNCTION__ << " | Discovered card = "
+     << std::to_string(card_num) << " | For drm_path = " << drm_path << " | ";
+  LOG_DEBUG(ss);
+  return static_cast<uint32_t>(card_num);
 }
 
 //  Determine if provided string is a bdfid pci path directory of the form
@@ -190,12 +226,13 @@ static bool bdfid_from_path(const std::string in_name, uint64_t *bdfid) {
 
 // 0 = successful bdfid found
 // 1 = not a good bdfid found
-static uint32_t ConstructBDFID(std::string path, uint64_t *bdfid) {
+[[maybe_unused]] static uint32_t ConstructBDFID(std::string path, uint64_t *bdfid) {
+  std::ostringstream ss;
   assert(bdfid != nullptr);
   const unsigned int MAX_BDF_LENGTH = 512;
   char tpath[MAX_BDF_LENGTH] = {'\0'};
   ssize_t ret;
-  memset(tpath,0,MAX_BDF_LENGTH);
+  memset(tpath, 0, MAX_BDF_LENGTH);
 
   ret = readlink(path.c_str(), tpath, MAX_BDF_LENGTH);
 
@@ -203,6 +240,12 @@ static uint32_t ConstructBDFID(std::string path, uint64_t *bdfid) {
   assert(ret < MAX_BDF_LENGTH);
 
   if (ret <= 0 || ret >= MAX_BDF_LENGTH) {
+    ss << __PRETTY_FUNCTION__ << " | readlink failed for path = "
+       << path << " | ret = " << ret
+       << " | errno = " << errno
+       << " | error = " << strerror(errno);
+    // std::cout << ss.str() << std::endl;
+    LOG_ERROR(ss);
     return 1;
   }
 
@@ -220,11 +263,19 @@ static uint32_t ConstructBDFID(std::string path, uint64_t *bdfid) {
     tmp = tpath_str.substr(slash_i + 1, end_i - slash_i);
 
     if (bdfid_from_path(tmp, bdfid)) {
+      ss << __PRETTY_FUNCTION__ << " | Found bdfid = "
+         << print_int_as_hex(*bdfid, true, 8) << " | from path = "
+         << path << " | tmp = " << tmp << std::endl;
+      LOG_INFO(ss);
       return 0;
     }
     end_i = slash_i - 1;
   }
-
+  ss << __PRETTY_FUNCTION__ << " | No valid bdfid found in path = "
+     << path << " | tpath = " << tpath
+     << " | errno = " << errno
+     << " | error = " << strerror(errno) << std::endl;
+  LOG_ERROR(ss);
   return 1;
 }
 
@@ -273,41 +324,8 @@ RocmSMI::Initialize(uint64_t flags) {
             "DiscoverAmdgpuDevices() failed.");
   }
 
-  uint64_t bdfid;
-  for (auto & device : devices_) {
-    if (ConstructBDFID(device->path(), &bdfid) != 0) {
-      std::cerr << "Failed to construct BDFID." << std::endl;
-      ret = 1;
-    } else if (device->bdfid() != UINT64_MAX && device->bdfid() != bdfid) {
-      // handles secondary partitions - compute partition feature nodes
-      ss << __PRETTY_FUNCTION__
-         << " | [before] device->path() = " << device->path()
-         << "\n | bdfid = " << bdfid
-         << "\n | device->bdfid() = " << device->bdfid()
-         << " (" << print_int_as_hex(device->bdfid()) << ")"
-         << "\n | (xgmi node) setting to setting "
-         << "device->set_bdfid(device->bdfid())";
-      LOG_TRACE(ss);
-      device->set_bdfid(device->bdfid());
-    } else {
-      // legacy & pcie card updates
-      ss << __PRETTY_FUNCTION__
-         << " | [before] device->path() = " << device->path()
-         << "\n | bdfid = " << bdfid
-         << "\n | device->bdfid() = " << device->bdfid()
-         << " (" << print_int_as_hex(device->bdfid()) << ")"
-         << "\n | (legacy/pcie card) setting device->set_bdfid(bdfid)";
-      LOG_TRACE(ss);
-      device->set_bdfid(bdfid);
-    }
-      ss << __PRETTY_FUNCTION__
-         << " | [after] device->path() = " << device->path()
-         << "\n | bdfid = " << bdfid
-         << "\n | device->bdfid() = " << device->bdfid()
-         << " (" << print_int_as_hex(device->bdfid()) << ")"
-         << "\n | final update: device->bdfid() holds correct device bdf";
-      LOG_TRACE(ss);
-  }
+  ss << __PRETTY_FUNCTION__ << " | about to sort by BDF..." << std::endl;
+  LOG_DEBUG(ss);
 
   std::shared_ptr<amd::smi::Device> dev;
   // Sort index based on the BDF, collect BDF id firstly.
@@ -402,6 +420,7 @@ RocmSMI::Initialize(uint64_t flags) {
   // displayAppTmpFilesContent();
   std::string amdGPUDeviceList = displayAllDevicePaths(devices_);
   ss << __PRETTY_FUNCTION__ << " | current device paths = " << amdGPUDeviceList;
+  // std::cout << ss.str() << std::endl;
   LOG_DEBUG(ss);
 }
 
@@ -643,9 +662,11 @@ RocmSMI::FindMonitor(std::string monitor_path) {
 }
 
 void RocmSMI::AddToDeviceList(std::string dev_name, uint64_t bdfid) {
+  static const int BYTE = 8;
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
+
   auto dev_path = std::string(kPathDRMRoot);
   dev_path += "/";
   dev_path += dev_name;
@@ -657,7 +678,8 @@ void RocmSMI::AddToDeviceList(std::string dev_name, uint64_t bdfid) {
 
   const std::string& d_name = dev_name;
   uint32_t card_indx = GetDeviceIndex(d_name);
-  dev->set_drm_render_minor(GetDrmRenderMinor(dev_path));
+  uint32_t drmRenderMinor = GetDrmRenderMinor(dev_path);
+  dev->set_drm_render_minor(drmRenderMinor);
   dev->set_card_index(card_indx);
   GetSupportedEventGroups(card_indx, dev->supported_event_groups());
   if (bdfid != 0) {
@@ -666,16 +688,120 @@ void RocmSMI::AddToDeviceList(std::string dev_name, uint64_t bdfid) {
 
   devices_.push_back(dev);
   ss << __PRETTY_FUNCTION__
-     << " | Adding to device list dev_name = " << dev_name
-     << " | path = " << dev_path
-     << " | bdfid = " << bdfid
-     << " | card index = " << std::to_string(card_indx) << " | ";
+     << " | Adding to device list dev_name = " << dev_name << "\n"
+     << " | path = " << dev_path << "\n"
+     << " | dName = " << d_name << "\n"
+     << " | bdfid = " << (bdfid == UINT64_MAX ?
+      "N/A" : print_int_as_hex(bdfid, true, 2*BYTE)) << "\n"
+     << " | card index = " << std::to_string(card_indx) << "\n"
+     << " | drmRenderMinor = " << std::to_string(drmRenderMinor) << "\n"
+     << " | supported_event_groups = " << dev->supported_event_groups() << "\n";
+  // std::cout << ss.str() << std::endl;
   LOG_DEBUG(ss);
+}
+
+// AddToDeviceList2 is used to add a device to the device list.
+// [precondition] a. Iterate through KFD to find all accessible devices.
+// [precondition] b. Provide BDFID of the device & the device path (card or render path)
+// 1. Provide to function:
+//    [optional; Will populate] rsmi_device_enumeration_t->card_index
+//    [optional; Will populate
+//     if card or render path provided] rsmi_device_enumeration_t->dev_name
+//    [optional; Will populate] rsmi_device_enumeration_t->drm_render_path
+//    [optional; Will populate] rsmi_device_enumeration_t->drm_card_path
+//    [optional; Will populate] rsmi_device_enumeration_t->drm_render_minor
+//    [Required] rsmi_device_enumeration_t->bdfid
+rsmi_status_t RocmSMI::AddToDeviceList2(RocmSMI::rsmi_device_enumeration_t device) {
+  static const int BYTE = 8;
+  std::ostringstream ss;
+
+  ss << __PRETTY_FUNCTION__ << " | ======= start ======="
+     << "\n | card index = [" << std::to_string(device.card_index) << "]\n"
+     << " | dev_name = [" << device.dev_name << "]\n"
+     << " | drm_render_path = [" << device.drm_render_path << "]\n"
+     << " | drm_card_path = [" << device.drm_card_path << "]\n"
+     << " | drm_render_minor = [" << std::to_string(device.drm_render_minor)
+     << "]\n | bdfid (value) = [" << (device.bdfid == UINT64_MAX ?
+       "N/A" : print_int_as_hex(device.bdfid, true, 4*BYTE)) << "]\n"
+     << " | bdfid (str) = ["
+     << std::hex << std::setfill('0') << std::setw(4)
+     << ((device.bdfid >> 32) & static_cast<uint64_t>(0xFFFFFFFF)) << ":"
+     << std::hex << std::setfill('0') << std::setw(2) << ((device.bdfid >> 8)
+                                                          & static_cast<uint64_t>(0xFF)) << ":"
+     << std::hex << std::setfill('0') << std::setw(2) << ((device.bdfid >> 3)
+                                                          & static_cast<uint64_t>(0x1F)) << "."
+     << std::hex << std::setfill('0') << std::setw(1) << +(device.bdfid
+                                                          & static_cast<uint64_t>(0x7)) << "]\n";
+  // std::cout << ss.str() << std::endl;
+  LOG_TRACE(ss);
+  auto dev_path = std::string(kPathDRMRoot);
+
+  if (device.dev_name.empty()) {
+    ss << __PRETTY_FUNCTION__ << " | dev_name is empty";
+    // std::cout << ss.str() << std::endl;
+    LOG_DEBUG(ss);
+
+    dev_path += "/";
+    dev_path += ("renderD" + std::to_string(device.drm_render_minor));
+    uint32_t card_num = GetCard(dev_path);
+    device.dev_name = "card" + std::to_string(card_num);
+    device.drm_render_path = dev_path;
+    device.drm_card_path = std::string(kPathDRMRoot) + "/card" +
+      std::to_string(card_num);
+    device.card_index = card_num;
+  }
+
+  auto dev = std::make_shared<Device>(dev_path, &env_vars_);
+
+  std::shared_ptr<Monitor> m = FindMonitor(dev_path + "/device/hwmon");
+  dev->set_monitor(m);
+
+  const std::string& d_name = device.dev_name;
+  uint32_t card_indx = GetDeviceIndex(d_name);
+  uint32_t drmRenderMinor = GetDrmRenderMinor(dev_path);
+  dev->set_drm_render_minor(drmRenderMinor);
+  dev->set_card_index(card_indx);
+  GetSupportedEventGroups(card_indx, dev->supported_event_groups());
+  if (device.bdfid != 0) {
+    dev->set_bdfid(device.bdfid);
+  }
+
+  devices_.push_back(dev);
+  ss << __PRETTY_FUNCTION__
+     << " | Adding to device list dev_name = " << device.dev_name << "\n"
+     << " | path = " << dev_path << "\n"
+     << " | dName = " << d_name << "\n"
+     << " | bdfid = " << (device.bdfid == UINT64_MAX ?
+      "N/A" : print_int_as_hex(device.bdfid, true, 8*BYTE)) << "\n"
+     << " | card index = " << std::to_string(card_indx) << "\n"
+     << " | drmRenderMinor = " << std::to_string(drmRenderMinor) << "\n"
+     << " | supported_event_groups = " << dev->supported_event_groups() << "\n";
+  ss << " | ======= rsmi_device_enumeration_t details =======\n"
+     << " | card index = [" << std::to_string(device.card_index) << "]\n"
+     << " | dev_name = [" << device.dev_name << "]\n"
+     << " | drm_render_path = [" << device.drm_render_path << "]\n"
+     << " | drm_card_path = [" << device.drm_card_path << "]\n"
+     << " | drm_render_minor = [" << std::to_string(device.drm_render_minor)
+     << "]\n | bdfid (value) = [" << (device.bdfid == UINT64_MAX ?
+       "N/A" : print_int_as_hex(device.bdfid, true, 8*BYTE)) << "]\n"
+     << " | bdfid (str) = ["
+     << std::hex << std::setfill('0') << std::setw(4)
+     << ((device.bdfid >> 32) & static_cast<uint64_t>(0xFFFFFFFF)) << ":"
+     << std::hex << std::setfill('0') << std::setw(2) << ((device.bdfid >> 8)
+                                                          & static_cast<uint64_t>(0xFF)) << ":"
+     << std::hex << std::setfill('0') << std::setw(2) << ((device.bdfid >> 3)
+                                                          & static_cast<uint64_t>(0x1F)) << "."
+     << std::hex << std::setfill('0') << std::setw(1) << +(device.bdfid
+                                                          & static_cast<uint64_t>(0x7)) << "]\n"
+     << " | END";
+  // std::cout << ss.str() << std::endl;
+  LOG_DEBUG(ss);
+  return RSMI_STATUS_SUCCESS;
 }
 
 static const uint32_t kAmdGpuId = 0x1002;
 
-static bool isAMDGPU(std::string dev_path) {
+[[maybe_unused]] static bool isAMDGPU(std::string dev_path) {
   bool isAmdGpu = false;
   std::ostringstream ss;
   std::string vend_path = dev_path + "/device/vendor";
@@ -711,44 +837,73 @@ static bool isAMDGPU(std::string dev_path) {
   return isAmdGpu;
 }
 
+uint32_t GetLargestNodeNumber(const std::string& path = "/sys/class/kfd/kfd/topology/nodes/") {
+  std::ostringstream ss;
+  uint32_t largest_node_number = 0;
+
+  // Open the directory
+  DIR* dir = opendir(path.c_str());
+  if (!dir) {
+      // Return UINT32_MAX on error
+      ss << __PRETTY_FUNCTION__ << " | Failed to open directory: " << path
+         << " | errno = " << errno
+         << " | error = " << strerror(errno);
+      // std::cout << ss.str() << std::endl;
+      LOG_ERROR(ss);
+      return UINT32_MAX;
+  }
+
+  struct dirent* entry;
+  while ((entry = readdir(dir)) != nullptr) {
+      // Skip "." and ".."
+      if (entry->d_name[0] == '.') {
+          continue;
+      }
+
+      // Check if the directory name is a number
+      std::string dir_name(entry->d_name);
+      if (std::all_of(dir_name.begin(), dir_name.end(), ::isdigit)) {
+          uint32_t node_number = static_cast<uint32_t>(std::stoul(dir_name));
+          largest_node_number = std::max(largest_node_number, node_number);
+      }
+  }
+
+  if (closedir(dir)) {
+      // Return UINT32_MAX on error
+      ss << __PRETTY_FUNCTION__ << " | Failed to close directory: " << path
+         << " | errno = " << errno
+         << " | error = " << strerror(errno);
+      // std::cout << ss.str() << std::endl;
+      LOG_ERROR(ss);
+      return UINT32_MAX;
+  }
+
+  return largest_node_number;
+}
+
 uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
   std::string err_msg;
-  uint32_t count = 0;
-  int32_t cardId = 0;
-  int32_t max_cardId = -1;
   std::ostringstream ss;
 
   // If this gets called more than once, clear previous findings.
   devices_.clear();
   monitors_.clear();
 
-  auto drm_dir = opendir(kPathDRMRoot);
-  if (drm_dir == nullptr) {
-    err_msg = "Failed to open drm root directory ";
-    err_msg += kPathDRMRoot;
-    err_msg += ".";
-    perror(err_msg.c_str());
+  uint32_t max_nodes = GetLargestNodeNumber();
+  ss << __PRETTY_FUNCTION__ << " | Discovered a potential of "
+     << std::to_string(max_nodes) << " kfd nodes";
+  // std::cout << ss.str() << std::endl;
+  LOG_DEBUG(ss);
+  if (max_nodes == UINT32_MAX) {
+    ss << __PRETTY_FUNCTION__ << " | Failed to get largest node number";
+    // std::cout << ss.str() << std::endl;
+    LOG_ERROR(ss);
     return 1;
   }
-
-  auto dentry = readdir(drm_dir);
-
-  while (dentry != nullptr) {
-    if (memcmp(dentry->d_name, kDeviceNamePrefix, strlen(kDeviceNamePrefix))
-                                                                       == 0) {
-        if ((strcmp(dentry->d_name, ".") == 0) ||
-           (strcmp(dentry->d_name, "..") == 0))
-           continue;
-        sscanf(&dentry->d_name[strlen(kDeviceNamePrefix)], "%d", &cardId);
-        if (cardId > max_cardId)
-          max_cardId = cardId;
-        count++;
-    }
-    dentry = readdir(drm_dir);
-  }
-  ss << __PRETTY_FUNCTION__ << " | Discovered a potential of "
-     << std::to_string(count) << " cards" << " | ";
-  LOG_DEBUG(ss);
+  // Iterate through all nodes
+  // and read all properties
+  // under /sys/class/kfd/kfd/topology/nodes/
+  // and add to systemNodes vector
 
   struct systemNode {
     uint32_t s_node_id = 0;
@@ -761,24 +916,44 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
     uint8_t  s_device = 0;
     uint8_t  s_function = 0;
     uint8_t  s_partition_id = 0;
+    uint32_t s_drm_render_minor = 0;
     uint64_t padding = 0;  // padding added in case new changes in future
   };
-  // allSystemNodes[key = unique_id] => {node_id, gpu_id, unique_id,
-  //                                     location_id, bdf, domain, bus, device,
-  //                                     partition_id}
   std::multimap<uint64_t, systemNode> allSystemNodes;
+  std::set<uint32_t> gpuNodeIdsFound;
+  std::vector<systemNode> systemNodes;
   uint32_t node_id = 0;
   static const int BYTE = 8;
-  while (true) {
-    uint64_t gpu_id = 0, unique_id = 0, location_id = 0, domain = 0;
+  while (node_id <= max_nodes) {
+    ss << __PRETTY_FUNCTION__ << " | node_id = " << std::to_string(node_id);
+    // std::cout << ss.str() << std::endl;
+    LOG_DEBUG(ss);
+    uint64_t gpu_id = 0, unique_id = 0, location_id = 0, domain = 0, render_d = 0;
     int ret_gpu_id = get_gpu_id(node_id, &gpu_id);
     int ret_unique_id = read_node_properties(node_id, "unique_id", &unique_id);
     int ret_loc_id =
       read_node_properties(node_id, "location_id", &location_id);
-    int ret_domain =
-      read_node_properties(node_id, "domain", &domain);
-    if (ret_gpu_id == 0 &&
-      ~(ret_unique_id != 0 || ret_loc_id != 0 || ret_unique_id != 0)) {
+    int ret_domain = read_node_properties(node_id, "domain", &domain);
+    int ret_renderd = read_node_properties(node_id, "drm_render_minor", &render_d);
+    bool isANode = (ret_gpu_id == 0 &&
+      (ret_domain == 0 && ret_loc_id == 0 && ret_renderd == 0));
+    ss << __PRETTY_FUNCTION__ << " | isAGpuNode: "
+       << (isANode ? "TRUE" : "FALSE") << "; is_vm_guest(): "
+       << (is_vm_guest() ? "TRUE" : "FALSE")
+       << "\nret_gpu_id: " << ret_gpu_id
+       << "; ret_domain: " << ret_domain
+       << "; ret_loc_id: " << ret_loc_id
+       << "; ret_unique_id: " << ret_unique_id
+       << "\nret_renderd: " << ret_renderd
+       << "\n[node_id = " << print_unsigned_hex_and_int(node_id) << "\n"
+       << "; gpu_id = " << print_unsigned_hex_and_int(gpu_id) << "\n"
+       << "; unique_id = " << print_unsigned_hex_and_int(unique_id) << "\n"
+       << "; location_id = " << print_unsigned_hex_and_int(location_id) << "\n"
+       << "; domain = " << print_unsigned_hex_and_int(domain) << "\n"
+       << "; drm_render_minor = " << print_unsigned_hex_and_int(render_d)
+       << "]\n";
+    LOG_DEBUG(ss);
+    if (isANode || (is_vm_guest() && ret_gpu_id == 0)) {
         // Do not try to build a node if one of these fields
         // do not exist in KFD (0 as values okay)
       systemNode myNode;
@@ -788,292 +963,66 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
       myNode.s_location_id = location_id;
       myNode.s_domain = domain & 0xFFFFFFFF;
       myNode.s_bdf = (myNode.s_domain << 32) | (myNode.s_location_id);
-      myNode.s_location_id = myNode.s_bdf;
-      myNode.s_bdf |= ((domain & 0xFFFFFFFF) << 32);
-      myNode.s_location_id = myNode.s_bdf;
-      myNode.s_domain = myNode.s_location_id >> 32;
       myNode.s_bus = ((myNode.s_location_id >> 8) & 0xFF);
       myNode.s_device = ((myNode.s_location_id >> 3) & 0x1F);
       myNode.s_function = myNode.s_location_id & 0x7;
       myNode.s_partition_id = ((myNode.s_location_id >> 28) & 0xF);
+      myNode.s_drm_render_minor = static_cast<uint32_t>((ret_renderd == 0) ? render_d : 0);
       if (gpu_id != 0) {  // only add gpu nodes, 0 = CPU
-        allSystemNodes.emplace(unique_id, myNode);
+        auto ret = gpuNodeIdsFound.insert(node_id);
+        if (ret.second != false) {
+          // only print out nodes which do not already exist
+          ss << __PRETTY_FUNCTION__ << " | isAGpuNode: "
+             << (isANode ? "TRUE" : "FALSE") << "; is_vm_guest(): "
+             << (is_vm_guest() ? "TRUE" : "FALSE")
+             << "\nret_gpu_id: " << ret_gpu_id
+             << "; ret_domain: " << ret_domain
+             << "; ret_loc_id: " << ret_loc_id
+             << "; ret_unique_id: " << ret_unique_id
+             << "\n[node_id = " << print_unsigned_hex_and_int(node_id) << "\n"
+             << "; gpu_id = " << print_unsigned_hex_and_int(gpu_id) << "\n"
+             << "; unique_id = " << print_unsigned_hex_and_int(unique_id) << "\n"
+             << "; location_id = " << print_unsigned_hex_and_int(location_id) << "\n"
+             << "; domain = " << print_unsigned_hex_and_int(domain) << "\n"
+             << "; bus = " << print_unsigned_hex_and_int(myNode.s_bus) << "\n"
+             << "; device = " << print_unsigned_hex_and_int(myNode.s_device) << "\n"
+             << "; function = " << print_unsigned_hex_and_int(myNode.s_function) << "\n"
+             << "; partition_id = " << print_unsigned_hex_and_int(myNode.s_partition_id) << "\n"
+             << "; bdf = " << print_unsigned_hex_and_int(myNode.s_bdf) << "\n"
+             << "; drm_render_minor = " << print_unsigned_hex_and_int(myNode.s_drm_render_minor)
+             << "]\n";
+          LOG_DEBUG(ss);
+        }
+        systemNodes.push_back(myNode);
       }
-    } else {
-      break;
     }
     node_id++;
   }
 
   ss << __PRETTY_FUNCTION__ << " | Ordered system nodes found = {";
-  for (auto i : allSystemNodes) {
-    ss << "\n[node_id = " << std::to_string(i.second.s_node_id)
-       << "; gpu_id = " << std::to_string(i.second.s_gpu_id)
-       << "; unique_id = " << std::to_string(i.second.s_unique_id)
-       << "; location_id = " << std::to_string(i.second.s_location_id)
-       << "; bdf = " << print_int_as_hex(i.second.s_bdf)
-       << "; domain = " << print_int_as_hex(i.second.s_domain, true, 2*BYTE)
-       << "; bus = " << print_int_as_hex(i.second.s_bus, true, BYTE)
-       << "; device = " << print_int_as_hex(i.second.s_device, true, BYTE)
-       << "; function = " << std::to_string(i.second.s_function)
-       << "; partition_id = " << std::to_string(i.second.s_partition_id)
-       << "], ";
+
+  for (auto i : systemNodes) {
+    ss << "\n[node_id = " << std::to_string(i.s_node_id) << "\n"
+       << "; gpu_id = " << std::to_string(i.s_gpu_id) << "\n"
+       << "; unique_id = " << std::to_string(i.s_unique_id) << "\n"
+       << "; location_id = " << std::to_string(i.s_location_id) << "\n"
+       << "; bdf = " << print_int_as_hex(i.s_bdf) << "\n"
+       << "; domain = " << print_int_as_hex(i.s_domain, true, 2*BYTE) << "\n"
+       << "; bus = " << print_int_as_hex(i.s_bus, true, BYTE) << "\n"
+       << "; device = " << print_int_as_hex(i.s_device, true, BYTE) << "\n"
+       << "; function = " << std::to_string(i.s_function) << "\n"
+       << "; partition_id = " << std::to_string(i.s_partition_id) << "\n"
+       << "; drm_render_minor = " << std::to_string(i.s_drm_render_minor)
+       << "], \n";
+    rsmi_device_enumeration_t rsmi_device;
+    rsmi_device.dev_name = "";
+    rsmi_device.bdfid = i.s_bdf;
+    rsmi_device.drm_render_minor = i.s_drm_render_minor;
+    AddToDeviceList2(rsmi_device);
   }
   ss << "}";
+  // std::cout << ss.str() << std::endl;
   LOG_DEBUG(ss);
-
-  uint32_t cardAdded = 0;
-  // Discover all root cards & gpu partitions associated with each
-  for (uint32_t cardId = 0; cardId <= max_cardId; cardId++) {
-    std::string path = kPathDRMRoot;
-    path += "/card";
-    path += std::to_string(cardId);
-    uint64_t primary_unique_id = 0;
-    uint64_t device_uuid = 0;
-    bool doesDeviceSupportPartitions = false;
-    // get current partition
-    int kSize = 256;
-    char computePartition[kSize];
-    std::string strCompPartition = "UNKNOWN";
-    uint32_t numMonDevices = 0;
-    rsmi_num_monitor_devices(&numMonDevices);
-
-    // each identified gpu card node is a primary node for
-    // potential matching unique ids
-    if (isAMDGPU(path) ||
-        (init_options_ & RSMI_INIT_FLAG_ALL_GPUS)) {
-      std::string d_name = "card";
-      d_name += std::to_string(cardId);
-      uint32_t numMonDevices = 0;
-      rsmi_num_monitor_devices(&numMonDevices);
-      if (rsmi_dev_compute_partition_get(cardAdded, computePartition, kSize)
-          == RSMI_STATUS_SUCCESS) {
-        strCompPartition = computePartition;
-        doesDeviceSupportPartitions = true;
-      }
-      rsmi_status_t ret_unique_id =
-          rsmi_dev_unique_id_get(cardAdded, &device_uuid);
-      auto temp_numb_nodes = allSystemNodes.count(device_uuid);
-      auto primaryBdfId =
-          allSystemNodes.lower_bound(device_uuid)->second.s_location_id;
-      auto i = allSystemNodes.lower_bound(device_uuid);
-      if (doesDeviceSupportPartitions && temp_numb_nodes > 1
-          && ret_unique_id == RSMI_STATUS_SUCCESS) {
-        // helps identify xgmi nodes (secondary nodes) easier
-        ss << __PRETTY_FUNCTION__ << " | secondary node add ; "
-           << " BDF = " << std::to_string(primaryBdfId)
-           << " (" << print_int_as_hex(primaryBdfId) << ")";
-        LOG_DEBUG(ss);
-        if (doesDeviceSupportPartitions && strCompPartition != "SPX"
-           && i->second.s_partition_id == 0) {
-          i->second.s_partition_id = i->second.s_function;
-          ss << __PRETTY_FUNCTION__ << " | (secondary node add) fall back - "
-            << "detected !SPX && partition_id == 0"
-            << "; function = " << std::to_string(i->second.s_function)
-            << "; partition_id = " << std::to_string(i->second.s_partition_id);
-          LOG_DEBUG(ss);
-        }
-        ss << __PRETTY_FUNCTION__
-           << " | (secondary node add) B4 AddToDeviceList() -->"
-           << "\n[node_id = " << std::to_string(i->second.s_node_id)
-           << "; gpu_id = " << std::to_string(i->second.s_gpu_id)
-           << "; unique_id = " << std::to_string(i->second.s_unique_id)
-           << "; location_id = " << std::to_string(i->second.s_location_id)
-           << "; bdf = " << print_int_as_hex(i->second.s_bdf)
-           << "; domain = " << print_int_as_hex(i->second.s_domain, true, 2*BYTE)
-           << "; bus = " << print_int_as_hex(i->second.s_bus, true, BYTE)
-           << "; device = " << print_int_as_hex(i->second.s_device, true, BYTE)
-           << "; function = " << std::to_string(i->second.s_function)
-           << "; partition_id = " << std::to_string(i->second.s_partition_id)
-           << "], ";
-        LOG_DEBUG(ss);
-        AddToDeviceList(d_name, primaryBdfId);
-      } else {
-        ss << __PRETTY_FUNCTION__ << " | primary node add ; "
-           << " BDF = " << std::to_string(UINT64_MAX);
-        if (doesDeviceSupportPartitions && strCompPartition != "SPX"
-           && i->second.s_partition_id == 0) {
-          i->second.s_partition_id = i->second.s_function;
-          ss << __PRETTY_FUNCTION__ << " | (primary node add) fall back - "
-            << "detected !SPX && partition_id == 0"
-            << "; function = " << std::to_string(i->second.s_function)
-            << "; partition_id = " << std::to_string(i->second.s_partition_id);
-          LOG_DEBUG(ss);
-        }
-        LOG_DEBUG(ss);
-        ss << __PRETTY_FUNCTION__
-           << " | (primary node add) After AddToDeviceList() -->"
-           << "\n[node_id = " << std::to_string(i->second.s_node_id)
-           << "; gpu_id = " << std::to_string(i->second.s_gpu_id)
-           << "; unique_id = " << std::to_string(i->second.s_unique_id)
-           << "; location_id = " << std::to_string(i->second.s_location_id)
-           << "; bdf = " << print_int_as_hex(i->second.s_bdf)
-           << "; domain = " << print_int_as_hex(i->second.s_domain, true, 2*BYTE)
-           << "; bus = " << print_int_as_hex(i->second.s_bus, true, BYTE)
-           << "; device = " << print_int_as_hex(i->second.s_device, true, BYTE)
-           << "; function = " << std::to_string(i->second.s_function)
-           << "; partition_id = " << std::to_string(i->second.s_partition_id)
-           << "], ";
-        LOG_DEBUG(ss);
-        AddToDeviceList(d_name, UINT64_MAX);
-      }
-
-      ss << __PRETTY_FUNCTION__
-         << " | Ordered system nodes seen in lookup = {";
-      for (auto i : allSystemNodes) {
-        ss << "\n[node_id = " << std::to_string(i.second.s_node_id)
-           << "; gpu_id = " << std::to_string(i.second.s_gpu_id)
-           << "; unique_id = " << std::to_string(i.second.s_unique_id)
-           << "; location_id = " << std::to_string(i.second.s_location_id)
-           << "; bdf = " << print_int_as_hex(i.second.s_bdf)
-           << "; domain = " << print_int_as_hex(i.second.s_domain, true, 2*BYTE)
-           << "; bus = " << print_int_as_hex(i.second.s_bus, true, BYTE)
-           << "; device = " << print_int_as_hex(i.second.s_device, true, BYTE)
-           << "; function = " << std::to_string(i.second.s_function)
-           << "; partition_id = " << std::to_string(i.second.s_partition_id)
-           << "], ";
-      }
-      ss << "}";
-      LOG_DEBUG(ss);
-
-      uint64_t temp_primary_unique_id = 0;
-      uint64_t primary_location_id = 0;
-      if (allSystemNodes.empty()) {
-        cardAdded++;
-        ss << __PRETTY_FUNCTION__
-           << " | allSystemNodes.empty() = true, continue...";
-        LOG_DEBUG(ss);
-        continue;
-      }
-
-      // get current partition
-      rsmi_num_monitor_devices(&numMonDevices);
-      if (rsmi_dev_compute_partition_get(cardAdded, computePartition, kSize)
-          == RSMI_STATUS_SUCCESS) {
-        strCompPartition = computePartition;
-      }
-      if (rsmi_dev_unique_id_get(cardAdded, &device_uuid)
-          != RSMI_STATUS_SUCCESS) {
-        cardAdded++;
-        allSystemNodes.erase(device_uuid);
-        ss << __PRETTY_FUNCTION__
-           << " | rsmi_dev_unique_id_get(cardId, &device_uuid)"
-           << " was not successful, continue.. ";
-        LOG_DEBUG(ss);
-        continue;
-      }
-
-      temp_primary_unique_id =
-          allSystemNodes.find(device_uuid)->second.s_unique_id;
-      temp_numb_nodes = allSystemNodes.count(temp_primary_unique_id);
-
-      ss << __PRETTY_FUNCTION__
-         << " | device/node id (cardId) = " << std::to_string(cardId)
-         << " | card id (cardAdded) = " << std::to_string(cardAdded)
-         << " | numMonDevices = " << std::to_string(numMonDevices)
-         << " | compute partition = " << strCompPartition
-         << " | temp_primary_unique_id = "
-         << std::to_string(temp_primary_unique_id)
-         << " | Num of nodes matching temp_primary_unique_id = "
-         << temp_numb_nodes
-         << " | device_uuid (hex/uint) = "
-         << print_unsigned_hex_and_int(device_uuid)
-         << " | device_uuid (uint64_t) = " << device_uuid;
-      LOG_DEBUG(ss);
-
-      if (temp_primary_unique_id != 0) {
-        primary_unique_id = temp_primary_unique_id;
-      } else {
-        cardAdded++;
-        // remove already added nodes associated with current card
-        auto erasedNodes = allSystemNodes.erase(0);
-        continue;
-      }
-
-      auto numb_nodes = allSystemNodes.count(primary_unique_id);
-      ss << __PRETTY_FUNCTION__ << " | REFRESH - primary_unique_id = "
-         << std::to_string(primary_unique_id) << " has "
-         << std::to_string(numb_nodes) << " known gpu nodes";
-      LOG_DEBUG(ss);
-      while (numb_nodes > 1) {
-        std::string secNode = "card";
-        secNode += std::to_string(cardId);  // maps the primary node card to
-                                            // secondary - allows get/sets
-        auto it = allSystemNodes.lower_bound(device_uuid);
-        auto it_end = allSystemNodes.upper_bound(device_uuid);
-        if (numb_nodes == temp_numb_nodes) {
-          auto removalNodeId = it->second.s_node_id;
-          auto removalGpuId = it->second.s_gpu_id;
-          auto removalUniqueId = it->second.s_unique_id;
-          auto removalLocId = it->second.s_location_id;
-          auto removaldomain = it->second.s_domain;
-          auto nodesErased = 1;
-          primary_location_id = removalLocId;
-          allSystemNodes.erase(it++);
-          ss << __PRETTY_FUNCTION__
-             << "\nPRIMARY --> num_nodes == temp_numb_nodes; ERASING "
-             << std::to_string(nodesErased) << " node -> [node_id = "
-             << std::to_string(removalNodeId)
-             << "; gpu_id = " << std::to_string(removalGpuId)
-             << "; unique_id = " << std::to_string(removalUniqueId)
-             << "; location_id = " << std::to_string(removalLocId)
-             << "; removaldomain = " << std::to_string(removaldomain)
-             << "]";
-          LOG_DEBUG(ss);
-        }
-        if (it == it_end) {
-          break;
-        }
-        auto myBdfId = it->second.s_location_id;
-        ss << __PRETTY_FUNCTION__ << " | secondary node add #2; "
-           << " BDF = " << std::to_string(myBdfId)
-           << " (" << print_int_as_hex(myBdfId) << ")";
-        LOG_DEBUG(ss);
-        if (doesDeviceSupportPartitions && strCompPartition != "SPX"
-           && it->second.s_partition_id == 0) {
-          it->second.s_partition_id = it->second.s_function;
-          ss << __PRETTY_FUNCTION__ << " | (secondary node add #2) fall back - "
-            << "detected !SPX && partition_id == 0"
-            << "; function = " << std::to_string(it->second.s_function)
-            << "; partition_id = " << std::to_string(it->second.s_partition_id);
-          LOG_DEBUG(ss);
-        }
-        ss << __PRETTY_FUNCTION__
-           << " | (secondary node add #2) B4 AddToDeviceList() -->"
-           << "\n[node_id = " << std::to_string(it->second.s_node_id)
-           << "; gpu_id = " << std::to_string(it->second.s_gpu_id)
-           << "; unique_id = " << std::to_string(it->second.s_unique_id)
-           << "; location_id = " << std::to_string(it->second.s_location_id)
-           << "; bdf = " << print_int_as_hex(it->second.s_bdf)
-           << "; domain = " << print_int_as_hex(it->second.s_domain, true, 2*BYTE)
-           << "; bus = " << print_int_as_hex(it->second.s_bus, true, BYTE)
-           << "; device = " << print_int_as_hex(it->second.s_device, true, BYTE)
-           << "; function = " << std::to_string(it->second.s_function)
-           << "; partition_id = " << std::to_string(it->second.s_partition_id)
-           << "], ";
-        LOG_DEBUG(ss);
-        AddToDeviceList(secNode, myBdfId);
-        allSystemNodes.erase(it++);
-        numb_nodes--;
-        cardAdded++;
-      }
-      // remove any remaining nodes associated with current card
-      auto erasedNodes = allSystemNodes.erase(primary_unique_id);
-      ss << __PRETTY_FUNCTION__ << " | After finding primary_unique_id = "
-         << std::to_string(primary_unique_id) << " erased "
-         << std::to_string(erasedNodes) << " nodes";
-      LOG_DEBUG(ss);
-      cardAdded++;
-    }
-  }
-
-  if (closedir(drm_dir)) {
-    err_msg = "Failed to close drm root directory ";
-    err_msg += kPathDRMRoot;
-    err_msg += ".";
-    perror(err_msg.c_str());
-    return 1;
-  }
   return 0;
 }
 
