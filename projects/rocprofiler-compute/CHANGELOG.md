@@ -47,6 +47,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* Change the default rocprof version to v3 when environment variable "ROCPROF" is not set
 * Change the rocprof version for unit tests to rocprofv3 on all SoCs except MI100
 * Change normal_unit default to per_kernel
 * Change dependency from rocm-smi to amd-smi
