@@ -24,7 +24,7 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 #include <hip/hip_runtime_api.h>
 
-#if CUDA_VERSION < CUDA_12000
+#if defined(__HIP_PLATFORM_AMD__) || CUDA_VERSION < CUDA_12000
 
 static hipModule_t GetModule() {
   HIP_CHECK(hipFree(nullptr));
