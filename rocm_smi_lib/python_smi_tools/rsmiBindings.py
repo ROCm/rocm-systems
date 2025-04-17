@@ -55,6 +55,8 @@ class rsmi_status_t(c_int):
     RSMI_STATUS_SETTING_UNAVAILABLE = 0x12
     RSMI_STATUS_AMDGPU_RESTART_ERR = 0x13
     RSMI_STATUS_DRM_ERROR = 0x14
+    RSMI_STATUS_FAIL_LOAD_MODULE = 0x15
+    RSMI_STATUS_FAIL_LOAD_SYMBOL = 0x16
     RSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF
 
 
@@ -81,6 +83,8 @@ rsmi_status_verbose_err_out = {
     rsmi_status_t.RSMI_STATUS_SETTING_UNAVAILABLE: 'Requested setting is unavailable for current device',
     rsmi_status_t.RSMI_STATUS_AMDGPU_RESTART_ERR: 'Could not successfully restart the amdgpu driver',
     rsmi_status_t.RSMI_STATUS_DRM_ERROR: 'Error when calling libdrm',
+    rsmi_status_t.RSMI_STATUS_FAIL_LOAD_MODULE: 'Failed to load a library',
+    rsmi_status_t.RSMI_STATUS_FAIL_LOAD_SYMBOL: 'Failed to load a library symbol',
     rsmi_status_t.RSMI_STATUS_UNKNOWN_ERROR: 'Unknown error occured'
 }
 

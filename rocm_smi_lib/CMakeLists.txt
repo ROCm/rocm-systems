@@ -1,6 +1,9 @@
 #
 # Minimum version of cmake and C++ required
 #
+message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
+message("                    CMake ROCm SMI (Library) [root]                ")
+message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 cmake_minimum_required(VERSION 3.14)
 
 set(ROCM_SMI_LIBS_TARGET "rocm_smi_libraries")
@@ -38,8 +41,6 @@ set(SHARE_INSTALL_PREFIX
 # provide git to utilities
 find_program (GIT NAMES git)
 
-pkg_check_modules(DRM REQUIRED libdrm)
-pkg_check_modules(AMDGPU_DRM REQUIRED libdrm_amdgpu)
 
 ## Setup the package version based on git tags.
 set(PKG_VERSION_GIT_TAG_PREFIX "rsmi_pkg_ver")
@@ -165,6 +166,7 @@ set(CMN_SRC_LIST ${CMN_SRC_LIST} "${COMMON_SRC_DIR}/rocm_smi_gpu_metrics.cc")
 set(CMN_SRC_LIST ${CMN_SRC_LIST} "${COMMON_SRC_DIR}/rocm_smi.cc")
 set(CMN_SRC_LIST ${CMN_SRC_LIST} "${COMMON_SRC_DIR}/rocm_smi_logger.cc")
 set(CMN_SRC_LIST ${CMN_SRC_LIST} "${COMMON_SRC_DIR}/rocm_smi_properties.cc")
+set(CMN_SRC_LIST ${CMN_SRC_LIST} "${COMMON_SRC_DIR}/rocm_smi_lib_loader.cc")
 set(CMN_SRC_LIST ${CMN_SRC_LIST} "${SHR_MUTEX_DIR}/shared_mutex.cc")
 
 set(CMN_INC_LIST "${COMMON_INC_DIR}/rocm_smi_device.h")
@@ -181,6 +183,7 @@ set(CMN_INC_LIST ${CMN_INC_LIST} "${COMMON_INC_DIR}/rocm_smi_gpu_metrics.h")
 set(CMN_INC_LIST ${CMN_INC_LIST} "${COMMON_INC_DIR}/rocm_smi.h")
 set(CMN_INC_LIST ${CMN_INC_LIST} "${COMMON_INC_DIR}/rocm_smi_logger.h")
 set(CMN_INC_LIST ${CMN_INC_LIST} "${COMMON_INC_DIR}/rocm_smi_properties.h")
+set(CMN_INC_LIST ${CMN_INC_LIST} "${COMMON_INC_DIR}/rocm_smi_lib_loader.h")
 set(CMN_INC_LIST ${CMN_INC_LIST} "${SHR_MUTEX_DIR}/shared_mutex.h")
 
 ## set components
@@ -335,7 +338,8 @@ if(DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
 else()
    set(CPACK_DEBIAN_PACKAGE_RELEASE "local")
 endif()
-set(CPACK_DEBIAN_PACKAGE_SUGGESTS "sudo, libdrm-dev")
+set(CPACK_DEBIAN_PACKAGE_SUGGESTS "sudo, libdrm-dev, libdrm-amdgpu-dev")
+set(CPACK_RPM_PACKAGE_SUGGESTS "sudo, libdrm-dev, libdrm-amdgpu-dev")
 
 ## Process the Debian install/remove scripts to update the CPACK variables
 configure_file ( ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/postinst.in DEBIAN/postinst @ONLY )
@@ -399,3 +403,7 @@ if(NOT BUILD_SHARED_LIBS)
   cpack_add_component_group("static")
   cpack_add_component(dev GROUP static)
 endif()
+
+message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
+message("                    CMake ROCm SMI (Library) [root] END            ")
+message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")

@@ -72,7 +72,7 @@ target_include_directories(${OAM_EXAMPLE_EXE} PRIVATE ${OAM_INC_LIST})
 target_link_libraries(${OAM_EXAMPLE_EXE} ${OAM_TARGET})
 add_library(${OAM_TARGET} ${CMN_SRC_LIST} ${OAM_SRC_LIST}
                                               ${CMN_INC_LIST} ${OAM_INC_LIST})
-target_link_libraries(${OAM_TARGET} pthread rt dl ${DRM_LIBRARIES} ${AMDGPU_DRM_LIBRARIES})
+target_link_libraries(${OAM_TARGET} PRIVATE pthread rt dl)
 target_include_directories(${OAM_TARGET} PRIVATE
    ${CMAKE_CURRENT_SOURCE_DIR}/include ${COMMON_PROJ_ROOT}/common/shared_mutex)
 

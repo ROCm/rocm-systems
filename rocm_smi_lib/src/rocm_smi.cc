@@ -77,6 +77,7 @@
 #include "rocm_smi/rocm_smi_io_link.h"
 #include "rocm_smi/rocm_smi64Config.h"
 #include "rocm_smi/rocm_smi_logger.h"
+#include "rocm_smi/rocm_smi_lib_loader.h"
 
 using amd::smi::monitorTypesToString;
 using amd::smi::getRSMIStatusString;
@@ -2392,6 +2393,7 @@ rsmi_status_t rsmi_dev_market_name_get(uint32_t dv_ind, char *market_name, uint3
   GET_DEV_FROM_INDX
   dev->index();
   std::string render_file_name;
+  market_name[0] = '\0';
 
   const std::string regex("renderD([0-9]+)");
   const std::string renderD_folder = "/sys/class/drm/card"
@@ -2404,17 +2406,61 @@ rsmi_status_t rsmi_dev_market_name_get(uint32_t dv_ind, char *market_name, uint3
   if (render_name != "") {
     gpu_fd = open(drm_path.c_str(), O_RDWR | O_CLOEXEC);
   } else {
-    market_name[0] = '\0';
     return RSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  rsmi_status_t status = RSMI_STATUS_NOT_SUPPORTED;
+  amd::smi::ROCmSmiLibraryLoader libdrm_amdgpu_;
+  status = libdrm_amdgpu_.load("libdrm_amdgpu.so");
+  if (status != RSMI_STATUS_SUCCESS) {
+    close(gpu_fd);
+    libdrm_amdgpu_.ROCmSmiLibraryLoader::unload();
+    return status;
+  }
+
+  // Function pointer typedefs
+  typedef int (*amdgpu_device_initialize_t)(int fd, uint32_t *major_version,
+                                            uint32_t *minor_version,
+                                            amdgpu_device_handle *device_handle);
+  typedef int (*amdgpu_device_deinitialize_t)(amdgpu_device_handle device_handle);
+  typedef const char* (*amdgpu_get_marketing_name_t)(amdgpu_device_handle device_handle);
+  amdgpu_device_initialize_t amdgpu_device_initialize = nullptr;
+  amdgpu_device_deinitialize_t amdgpu_device_deinitialize = nullptr;
+  amdgpu_get_marketing_name_t amdgpu_get_marketing_name = nullptr;
+
+  status = libdrm_amdgpu_.load_symbol(
+                          reinterpret_cast<amdgpu_device_initialize_t *>(&amdgpu_device_initialize),
+                          "amdgpu_device_initialize");
+  if (status != RSMI_STATUS_SUCCESS) {
+    close(gpu_fd);
+    libdrm_amdgpu_.ROCmSmiLibraryLoader::unload();
+    return status;
   }
 
   amdgpu_device_handle device_handle = nullptr;
   uint32_t major_version, minor_version;
   int ret = amdgpu_device_initialize(gpu_fd, &major_version, &minor_version, &device_handle);
   if (ret != 0) {
-    market_name[0] = '\0';
     close(gpu_fd);
+    libdrm_amdgpu_.ROCmSmiLibraryLoader::unload();
     return RSMI_STATUS_DRM_ERROR;
+  }
+
+  status = libdrm_amdgpu_.load_symbol(
+                          reinterpret_cast<amdgpu_get_marketing_name_t *>(
+                            &amdgpu_get_marketing_name), "amdgpu_get_marketing_name");
+  if (status != RSMI_STATUS_SUCCESS) {
+    close(gpu_fd);
+    libdrm_amdgpu_.ROCmSmiLibraryLoader::unload();
+    return status;
+  }
+
+  status = libdrm_amdgpu_.load_symbol(reinterpret_cast<amdgpu_device_deinitialize_t *>(
+                                      &amdgpu_device_deinitialize), "amdgpu_device_deinitialize");
+  if (status != RSMI_STATUS_SUCCESS) {
+    close(gpu_fd);
+    libdrm_amdgpu_.ROCmSmiLibraryLoader::unload();
+    return status;
   }
 
   // Get the marketing name using libdrm's API
@@ -2427,6 +2473,7 @@ rsmi_status_t rsmi_dev_market_name_get(uint32_t dv_ind, char *market_name, uint3
     market_name[std::min(len - 1, ln)] = '\0';
     amdgpu_device_deinitialize(device_handle);
     close(gpu_fd);
+    libdrm_amdgpu_.ROCmSmiLibraryLoader::unload();
     if (len < (temp_market_name.size() + 1)) {
       return RSMI_STATUS_INSUFFICIENT_SIZE;
     }
@@ -2434,6 +2481,7 @@ rsmi_status_t rsmi_dev_market_name_get(uint32_t dv_ind, char *market_name, uint3
   }
   amdgpu_device_deinitialize(device_handle);
   close(gpu_fd);
+  libdrm_amdgpu_.ROCmSmiLibraryLoader::unload();
   return RSMI_STATUS_DRM_ERROR;
 }
 
