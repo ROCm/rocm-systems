@@ -28,11 +28,11 @@
 #include "kernel_symbol_info.hpp"
 #include "pc_sample_transform.hpp"
 
+#include "lib/att-tool/att_lib_wrapper.hpp"
 #include "lib/common/container/small_vector.hpp"
 #include "lib/common/demangle.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/synchronized.hpp"
-#include "lib/rocprofiler-sdk-att/att_lib_wrapper.hpp"
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/buffer_tracing.h>

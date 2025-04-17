@@ -22,9 +22,9 @@
 
 #pragma once
 
-#include <rocprofiler-sdk/amd_detail/thread_trace.h>
 #include <rocprofiler-sdk/buffer.h>
 #include <rocprofiler-sdk/callback_tracing.h>
+#include <rocprofiler-sdk/experimental/thread_trace.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>

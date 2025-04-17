@@ -22,6 +22,6 @@
 
 #pragma once
 
-#include <rocprofiler-sdk/amd_detail/thread_trace_agent.h>
-#include <rocprofiler-sdk/amd_detail/thread_trace_core.h>
-#include <rocprofiler-sdk/amd_detail/thread_trace_dispatch.h>
+#include <rocprofiler-sdk/experimental/thread-trace/agent.h>
+#include <rocprofiler-sdk/experimental/thread-trace/core.h>
+#include <rocprofiler-sdk/experimental/thread-trace/dispatch.h>

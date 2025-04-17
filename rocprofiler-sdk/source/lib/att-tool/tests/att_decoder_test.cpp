@@ -20,10 +20,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "lib/att-tool/att_lib_wrapper.hpp"
+#include "lib/att-tool/code.hpp"
+#include "lib/att-tool/outputfile.hpp"
 #include "lib/common/logging.hpp"
-#include "lib/rocprofiler-sdk-att/att_lib_wrapper.hpp"
-#include "lib/rocprofiler-sdk-att/code.hpp"
-#include "lib/rocprofiler-sdk-att/outputfile.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <gtest/gtest.h>

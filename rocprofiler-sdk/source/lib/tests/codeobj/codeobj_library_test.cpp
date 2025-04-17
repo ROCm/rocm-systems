@@ -29,7 +29,7 @@
 
 #ifndef CODEOBJ_BINARY_DIR
 static_assert(false && "Please define CODEOBJ_BINARY_DIR to codeobj tests binary, "
-                       "e.g. ../source/lib/rocprofiler-sdk-codeobj/tests/");
+                       "e.g. ../source/lib/tests/codeobj/");
 #endif
 
 namespace rocprofiler

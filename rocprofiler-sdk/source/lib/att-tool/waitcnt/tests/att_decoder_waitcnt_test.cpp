@@ -20,8 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "lib/att-tool/waitcnt/analysis.hpp"
 #include "lib/common/logging.hpp"
-#include "lib/rocprofiler-sdk-att/waitcnt/analysis.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <gtest/gtest.h>

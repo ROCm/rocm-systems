@@ -29,7 +29,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/code_object.hpp"
 
-#include <rocprofiler-sdk/amd_detail/thread_trace.h>
+#include <rocprofiler-sdk/experimental/thread_trace.h>
 #include <rocprofiler-sdk/intercept_table.h>
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
