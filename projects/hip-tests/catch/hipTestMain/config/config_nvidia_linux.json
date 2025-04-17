@@ -78,7 +78,6 @@
         "Performance_hipMemsetD16Async",
         "Performance_hipMemsetD32",
         "Performance_hipMemsetD32Async",
-        "Unit_hipMemcpy_Positive_Synchronization_Behavior",
         "Unit_tex1Dfetch_Positive_ReadModeElementType - char",
         "Unit_tex1Dfetch_Positive_ReadModeElementType - unsigned char",
         "Unit_tex1Dfetch_Positive_ReadModeElementType - short",
