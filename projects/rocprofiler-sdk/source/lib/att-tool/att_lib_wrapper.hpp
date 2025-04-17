@@ -22,8 +22,8 @@
 
 #pragma once
 
+#include "lib/att-tool/util.hpp"
 #include "lib/common/filesystem.hpp"
-#include "lib/rocprofiler-sdk-att/util.hpp"
 
 #include <algorithm>
 #include <fstream>

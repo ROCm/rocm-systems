@@ -24,8 +24,8 @@
 
 #pragma once
 
+#include "lib/att-tool/att_lib_wrapper.hpp"
 #include "lib/common/logging.hpp"
-#include "lib/rocprofiler-sdk-att/att_lib_wrapper.hpp"
 
 #include <fstream>
 #include <iostream>

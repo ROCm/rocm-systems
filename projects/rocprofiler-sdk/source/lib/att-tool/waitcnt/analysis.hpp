@@ -22,9 +22,9 @@
 
 #pragma once
 
-#include "lib/rocprofiler-sdk-att/att_decoder.h"
-#include "lib/rocprofiler-sdk-att/att_lib_wrapper.hpp"
-#include "lib/rocprofiler-sdk-att/code.hpp"
+#include "lib/att-tool/att_decoder.h"
+#include "lib/att-tool/att_lib_wrapper.hpp"
+#include "lib/att-tool/code.hpp"
 
 #include <atomic>
 #include <map>

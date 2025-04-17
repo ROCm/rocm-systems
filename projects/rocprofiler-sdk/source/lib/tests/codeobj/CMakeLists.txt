@@ -15,7 +15,9 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-common-library
             GTest::gtest
             GTest::gtest_main
-            rocprofiler-sdk::rocprofiler-sdk-codeobj)
+            rocprofiler-sdk::rocprofiler-sdk-amd-comgr
+            rocprofiler-sdk::rocprofiler-sdk-dw
+            rocprofiler-sdk::rocprofiler-sdk-elf)
 
 gtest_add_tests(
     TARGET codeobj-library-test

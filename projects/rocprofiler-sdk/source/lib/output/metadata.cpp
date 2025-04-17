@@ -22,13 +22,13 @@
 
 #include "metadata.hpp"
 
+#include "lib/att-tool/att_lib_wrapper.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/string_entry.hpp"
 #include "lib/output/agent_info.hpp"
 #include "lib/output/host_symbol_info.hpp"
 #include "lib/output/kernel_symbol_info.hpp"
-#include "lib/rocprofiler-sdk-att/att_lib_wrapper.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>

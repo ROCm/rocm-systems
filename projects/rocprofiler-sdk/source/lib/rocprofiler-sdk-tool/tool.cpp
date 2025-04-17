@@ -24,6 +24,7 @@
 #include "helper.hpp"
 #include "stream_stack.hpp"
 
+#include "lib/att-tool/att_lib_wrapper.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
@@ -48,14 +49,12 @@
 #include "lib/output/stream_info.hpp"
 #include "lib/output/tmp_file.hpp"
 #include "lib/output/tmp_file_buffer.hpp"
-#include "lib/rocprofiler-sdk-att/att_lib_wrapper.hpp"
 
 #include <rocprofiler-sdk/agent.h>
-#include <rocprofiler-sdk/amd_detail/thread_trace_core.h>
-#include <rocprofiler-sdk/amd_detail/thread_trace_dispatch.h>
 #include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/experimental/counters.h>
+#include <rocprofiler-sdk/experimental/thread_trace.h>
 #include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/internal_threading.h>
