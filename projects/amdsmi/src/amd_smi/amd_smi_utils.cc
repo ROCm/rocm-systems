@@ -313,13 +313,14 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
         return AMDSMI_STATUS_NOT_SUPPORTED;
     }
 
-    unsigned int max, min, dpm, sleep_freq;
+    unsigned int max, min, dpm, sleep_freq, current_freq;
     char str[10];
     char single_char;
     max = 0;
     min = UINT_MAX;
     dpm = 0;
     sleep_freq = UINT_MAX;
+    current_freq = 0;
 
     for (std::string line; getline(ranges, line);) {
         unsigned int dpm_level, freq;
@@ -331,21 +332,38 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
                 return AMDSMI_STATUS_NO_DATA;
             }
         } else {
-            // skip this line if it contains a * which indicates the current level
-            const char *current_indicator = strstr(line.c_str(), "*");
-            if (current_indicator != nullptr){
-                continue;
-            }
+            /**
+             * if the first line contains '*', then
+             * we are saving that value as current_freq then checking 
+             * for other dpm levels if none are found then we
+             * set min and max to current_freq as per Driver 
+             * We then skip to the next line to avoid getting
+             * incorrect min value.
+             */
+
             if (sscanf(line.c_str(), "%u: %d%c", &dpm_level, &freq, str) <= 2){
                 ranges.close();
                 return AMDSMI_STATUS_IO;
             }
+
+            char lastChar = line.back();
+            if (lastChar == '*'){
+                current_freq = freq;
+                continue;
+            }
+
+            // not * was detected so check for the min max
             max = freq > max ? freq : max;
-            min = freq < min ? freq: min;
+            min = freq < min ? freq : min;
             dpm = dpm_level > dpm ? dpm_level : dpm;
         }
+    
     }
-
+    if (dpm == 0 && current_freq > 0) {
+        // if the dpm level is 0, then the current frequency is the min/max frequency
+        max = current_freq;
+        min = current_freq;
+    }
     if (num_dpm)
         *num_dpm = dpm;
     if (max_freq)
