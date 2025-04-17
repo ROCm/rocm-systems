@@ -25,7 +25,7 @@
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
-#include <rocprofiler-sdk/amd_detail/thread_trace.h>
+#include <rocprofiler-sdk/experimental/thread_trace.h>
 
 #include <glog/logging.h>
 

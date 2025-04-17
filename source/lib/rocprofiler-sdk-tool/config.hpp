@@ -23,13 +23,13 @@
 
 #pragma once
 
+#include "lib/att-tool/att_lib_wrapper.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/mpl.hpp"
 #include "lib/common/units.hpp"
 #include "lib/output/format_path.hpp"
 #include "lib/output/output_config.hpp"
-#include "lib/rocprofiler-sdk-att/att_lib_wrapper.hpp"
 
 #include <rocprofiler-sdk/cxx/serialization.hpp>
 

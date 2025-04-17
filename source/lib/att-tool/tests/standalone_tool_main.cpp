@@ -20,9 +20,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "lib/att-tool/att_lib_wrapper.hpp"
+#include "lib/att-tool/outputfile.hpp"
 #include "lib/common/logging.hpp"
-#include "lib/rocprofiler-sdk-att/att_lib_wrapper.hpp"
-#include "lib/rocprofiler-sdk-att/outputfile.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <iostream>
@@ -118,9 +118,9 @@ main(int argc, char** argv)
         std::vector<Fspath>                                    att_files{};
         std::vector<rocprofiler::att_wrapper::CodeobjLoadInfo> codeobj_files{};
 
-        std::map<size_t, std::string> snapshot_files{};
+        std::vector<std::string> snapshot_files{};
         for(auto elem : sdk_json["strings"]["code_object_snapshot_filenames"])
-            snapshot_files[elem["key"]] = elem["value"];
+            snapshot_files.push_back(elem);
 
         for(auto& codeobj : sdk_json["code_objects"])
             if(!std::string{codeobj["uri"]}.empty())

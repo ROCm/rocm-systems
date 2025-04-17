@@ -20,7 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "lib/rocprofiler-sdk-att/waitcnt/analysis.hpp"
+#include "lib/att-tool/waitcnt/analysis.hpp"
+
 #include <map>
 
 namespace rocprofiler

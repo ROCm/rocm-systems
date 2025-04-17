@@ -37,20 +37,6 @@ namespace att_wrapper
 {
 namespace
 {
-union occupancy_data_v1
-{
-    struct
-    {
-        uint64_t kernel_id : 12;
-        uint64_t simd      : 2;
-        uint64_t slot      : 4;
-        uint64_t enable    : 1;
-        uint64_t cu        : 4;
-        uint64_t time      : 41;
-    };
-    uint64_t raw;
-};
-
 std::map<pcinfo_t, int> kernel_ids{{pcinfo_t{0, 0}, 0}};
 std::atomic<int>        current_id{1};
 
@@ -60,19 +46,6 @@ get_kernel_id(pcinfo_t pc)
     if(kernel_ids.find(pc) != kernel_ids.end()) return kernel_ids.at(pc);
 
     return kernel_ids.emplace(pc, current_id.fetch_add(1)).first->second;
-}
-
-uint64_t
-convert(const att_occupancy_info_v2_t& v2)
-{
-    occupancy_data_v1 v1{};
-    v1.time      = v2.time / OCCUPANCY_RES;
-    v1.simd      = v2.simd;
-    v1.slot      = v2.slot;
-    v1.enable    = v2.start;
-    v1.cu        = v2.cu;
-    v1.kernel_id = get_kernel_id(v2.pc);
-    return v1.raw;
 }
 }  // namespace
 
@@ -90,7 +63,16 @@ OccupancyFile(const Fspath&                                                 dir,
     {
         nlohmann::json list;
         for(const auto& event : eventlist)
-            list.push_back(convert(event));
+        {
+            nlohmann::json json_event;
+            json_event.push_back(event.time);
+            json_event.push_back(event.cu);
+            json_event.push_back(event.simd);
+            json_event.push_back(event.slot);
+            json_event.push_back(event.start);
+            json_event.push_back(get_kernel_id(event.pc));
+            list.push_back(json_event);
+        }
         jocc[std::to_string(se)] = list;
     }
 
@@ -106,6 +88,8 @@ OccupancyFile(const Fspath&                                                 dir,
         }
         jocc["dispatches"][std::to_string(id)] = ss.str();
     }
+
+    jocc["version"] = "3.0.0";
 
     OutputFile(dir / "occupancy.json") << jocc;
 }
