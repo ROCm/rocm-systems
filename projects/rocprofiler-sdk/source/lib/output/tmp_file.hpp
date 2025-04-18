@@ -44,6 +44,7 @@ struct tmp_file
     bool flush();
     bool close();
     bool remove();
+    bool exists() const;
 
     explicit operator bool() const;
 

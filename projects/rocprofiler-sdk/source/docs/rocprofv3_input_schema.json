@@ -166,6 +166,14 @@
                       "type": "array",
                       "description": "Libraries to prepend to LD_PRELOAD (usually for sanitizers)"
                      },
+                     "minimum-output-data":{
+                      "type": "integer",
+                      "description": "Minimum output data, the output files are generated only if output data size is greater than minimum output data size. It can be used for controlling the generation of output files so that user don't recieve empty files. The input is in KB units"
+                     },
+                     "disable-signal-handlers":{
+                         "type": "boolean",
+                         "description": "Disables the signal handlers in the rocprofv3 tool. When --disable-signal-handlers is set to true, and application has its signal handler on SIGSEGV or similar installed, then its signal handler will be used not the rocprofv3 signal handler. Note: glog still installs signal handlers which provide backtraces"
+                     },
                      "pc_sampling_unit": {
                       "type": "string",
                       "description": "pc sampling unit"

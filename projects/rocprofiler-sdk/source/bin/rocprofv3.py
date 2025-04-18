@@ -620,6 +620,26 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         help=argparse.SUPPRESS,
     )
 
+    add_parser_bool_argument(
+        advanced_options,
+        "--disable-signal-handlers",
+        help="""Enables the signal handlers in the rocprofv3 tool.
+        When --disable-signal-handlers is set to true,
+        and application has its signal handler on SIGSEGV or similar installed,
+        then its signal handler will be used, not the rocprofv3 signal handler.
+        Note: glog still installs signal handlers which provide backtraces""",
+    )
+
+    advanced_options.add_argument(
+        "--minimum-output-data",
+        help="""Output files are generated only if output data size > minimum output data".
+        It can be used for controlling the generation of output files so that user don't recieve empty files.
+        The input is in KB units.""",
+        default=None,
+        type=int,
+        metavar="KB",
+    )
+
     if args is None:
         args = sys.argv[1:]
 
@@ -1358,6 +1378,12 @@ def run(app_args, args, **kwargs):
         update_env("ROCPROF_PC_SAMPLING_UNIT", args.pc_sampling_unit)
         update_env("ROCPROF_PC_SAMPLING_METHOD", args.pc_sampling_method)
         update_env("ROCPROF_PC_SAMPLING_INTERVAL", args.pc_sampling_interval)
+
+    if args.disable_signal_handlers is not None:
+        update_env("ROCPROF_SIGNAL_HANDLERS", not args.disable_signal_handlers)
+
+    if args.minimum_output_data:
+        update_env("ROCPROF_MINIMUM_OUTPUT_BYTES", args.minimum_output_data * 1024)
 
     if args.advanced_thread_trace:
 

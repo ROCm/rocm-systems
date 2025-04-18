@@ -117,8 +117,9 @@ struct config : output_config
     bool   pc_sampling_host_trap       = false;
     bool   advanced_thread_trace       = get_env("ROCPROF_ADVANCED_THREAD_TRACE", false);
     bool   pc_sampling_stochastic      = false;
-    size_t pc_sampling_interval        = get_env("ROCPROF_PC_SAMPLING_INTERVAL", 1);
     bool   att_serialize_all           = get_env("ROCPROF_ATT_PARAM_SERIALIZE_ALL", false);
+    bool   enable_signal_handlers      = get_env("ROCPROF_SIGNAL_HANDLERS", true);
+    size_t pc_sampling_interval        = get_env("ROCPROF_PC_SAMPLING_INTERVAL", 1);
     rocprofiler_pc_sampling_method_t pc_sampling_method_value = ROCPROFILER_PC_SAMPLING_METHOD_NONE;
     rocprofiler_pc_sampling_unit_t   pc_sampling_unit_value   = ROCPROFILER_PC_SAMPLING_UNIT_NONE;
 
@@ -145,6 +146,7 @@ struct config : output_config
     std::queue<CollectionPeriod> collection_periods = {};
     uint64_t counter_groups_random_seed = get_env("ROCPROF_COUNTER_GROUPS_RANDOM_SEED", 0);
     uint64_t counter_groups_interval    = get_env("ROCPROF_COUNTER_GROUPS_INTERVAL", 1);
+    uint64_t minimum_output_bytes       = get_env("ROCPROF_MINIMUM_OUTPUT_BYTES", 0);
 
     template <typename ArchiveT>
     void save(ArchiveT&) const;
@@ -203,6 +205,8 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(kernel_filter_range);
     CFG_SERIALIZE_MEMBER(demangle);
     CFG_SERIALIZE_MEMBER(truncate);
+    CFG_SERIALIZE_MEMBER(minimum_output_bytes);
+    CFG_SERIALIZE_MEMBER(enable_signal_handlers);
 
     CFG_SERIALIZE_MEMBER(pc_sampling_method);
     CFG_SERIALIZE_MEMBER(pc_sampling_unit);

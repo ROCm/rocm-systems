@@ -168,6 +168,10 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
    * - Other
      - ``--preload`` [PRELOAD ...]
      - Specifies libraries to prepend to ``LD_PRELOAD``. It is useful for sanitizer libraries.
+     - ``--minimum-output-data``
+     - Output files are generated only if output data size is greater than minimum output data size. It can be used for controlling the generation of output files so that user don't recieve empty files. The input is in KB units.
+     - ``--disable-signal-handlers``
+     - Disables the signal handlers in the rocprofv3 tool. It disables the prioritizing of rocprofv3 signal handler over application installed signal handler. When --disable-signal-handlers is set to true, and application has its signal handler on SIGSEGV or similar installed, then its signal handler will be used not the rocprofv3 signal handler. Note: glog still installs signal handlers which provide backtraces.
 
 To see exhaustive list of ``rocprofv3`` options:
 
@@ -702,6 +706,8 @@ Here is the input schema (properties) of JSON or YAML input files:
       -  **hsa_finalize_trace** *(boolean)*
       -  **hsa_image_trace** *(boolean)*
       -  **sys_trace** *(boolean)*
+      -  **minimum-output-data** *(integer)*
+      -  **disable-signal-handlers** *(boolean)*
       -  **mangled_kernels** *(boolean)*
       -  **truncate_kernels** *(boolean)*
       -  **output_file** *(string)*
@@ -802,6 +808,8 @@ Here is the input schema (properties) of JSON or YAML input files:
       -  **list_avail** *(boolean)*
       -  **log_level** *(string)*
       -  **preload** *(array)*
+      -  **minimum-output-data** *(integer)*
+      -  **disable-signal-handlers** *(boolean)*
       -  **pc_sampling_unit** *(string)*
       -  **pc_sampling_method** *(string)*
       -  **pc_sampling_interval** *(integer)*

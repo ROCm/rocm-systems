@@ -100,7 +100,7 @@ if(NOT TARGET rocprofiler-sdk::rocprofiler-sdk-perfetto)
     # perfetto
     fetchcontent_declare(
         perfetto
-        GIT_REPOSITORY https://android.googlesource.com/platform/external/perfetto
+        GIT_REPOSITORY https://github.com/google/perfetto
         GIT_TAG v44.0
         SOURCE_DIR ${PROJECT_BINARY_DIR}/external/perfetto BINARY_DIR
         ${PROJECT_BINARY_DIR}/external/build/perfetto-build SUBBUILD_DIR

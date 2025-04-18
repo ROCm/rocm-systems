@@ -63,6 +63,7 @@ struct buffered_output
     void clear();
     void destroy();
 
+    uint64_t       get_num_bytes() const;
     generator<Tp>  get_generator() const { return generator<Tp>{get_tmp_file_buffer<Tp>(DomainT)}; }
     std::deque<Tp> load_all();
 
@@ -130,11 +131,28 @@ buffered_output<Tp, DomainT>::destroy()
     if(!enabled) return;
 
     clear();
-    auto*&             filebuf = get_tmp_file_buffer<type>(buffer_type_v);
-    file_buffer<type>* tmp     = nullptr;
-    std::swap(filebuf, tmp);
-    tmp->buffer.destroy();
-    delete tmp;
+    auto*& filebuf = get_tmp_file_buffer<type>(buffer_type_v);
+    if(filebuf)
+    {
+        file_buffer<type>* tmp = nullptr;
+        std::swap(filebuf, tmp);
+        tmp->buffer.destroy();
+        if(tmp->file)
+        {
+            tmp->file.close();
+            tmp->file.remove();
+        }
+        delete tmp;
+    }
+}
+
+template <typename Tp, domain_type DomainT>
+uint64_t
+buffered_output<Tp, DomainT>::get_num_bytes() const
+{
+    if(auto*& filebuf = get_tmp_file_buffer<type>(buffer_type_v); filebuf) return filebuf->nbytes;
+
+    return 0;
 }
 
 using hip_buffered_output_t =
