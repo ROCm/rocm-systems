@@ -47,6 +47,9 @@ jobs:
           - os-distro: "ubuntu"
             os-version: "22.04"
             rocm-version: "6.3"
+          - os-distro: "ubuntu"
+            os-version: "22.04"
+            rocm-version: "6.4"
           # ubuntu 24.04
           - os-distro: "ubuntu"
             os-version: "24.04"
@@ -54,6 +57,9 @@ jobs:
           - os-distro: "ubuntu"
             os-version: "24.04"
             rocm-version: "6.3"
+          - os-distro: "ubuntu"
+            os-version: "24.04"
+            rocm-version: "6.4"
           # opensuse 15.5
           - os-distro: "opensuse"
             os-version: "15.5"
@@ -68,6 +74,9 @@ jobs:
           - os-distro: "opensuse"
             os-version: "15.6"
             rocm-version: "6.3"
+          - os-distro: "opensuse"
+            os-version: "15.6"
+            rocm-version: "6.4"
           # RHEL 8.10
           - os-distro: "rhel"
             os-version: "8.10"
@@ -75,6 +84,9 @@ jobs:
           - os-distro: "rhel"
             os-version: "8.10"
             rocm-version: "6.3"
+          - os-distro: "rhel"
+            os-version: "8.10"
+            rocm-version: "6.4"
           # RHEL 9.4
           - os-distro: "rhel"
             os-version: "9.4"
@@ -82,6 +94,9 @@ jobs:
           - os-distro: "rhel"
             os-version: "9.4"
             rocm-version: "6.3"
+          - os-distro: "rhel"
+            os-version: "9.4"
+            rocm-version: "6.4"
           # RHEL 9.5
           - os-distro: "rhel"
             os-version: "9.5"
@@ -89,6 +104,9 @@ jobs:
           - os-distro: "rhel"
             os-version: "9.5"
             rocm-version: "6.3"
+          - os-distro: "rhel"
+            os-version: "9.5"
+            rocm-version: "6.4"
 
     steps:
       - name: Free Disk Space

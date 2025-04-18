@@ -51,7 +51,7 @@ jobs:
         build-type: ['Release', 'Debug']
         strip: ['OFF']
         build-dyninst: ['OFF']
-        rocm-version: ['0.0', '6.3']
+        rocm-version: ['0.0','6.3','6.4']
 
     env:
       ROCPROFSYS_CI: 'ON'
@@ -102,7 +102,7 @@ jobs:
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \
           -DROCPROFSYS_BUILD_TESTING=ON \
-          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl" \
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target" \
           -DROCPROFSYS_USE_ROCM=${USE_ROCM} \
           -DRCOPROFSYS_USE_PYTHON=ON \
           -DROCPROFSYS_STRIP_LIBRARIES=${{ matrix.strip }} \

@@ -17,7 +17,7 @@ jobs:
   call-workflow-passing-data:
     name: Documentation
     uses: ROCm/rocm-docs-core/.github/workflows/linting.yml@develop
-  
+
   python:
     runs-on: ubuntu-22.04
     strategy:
