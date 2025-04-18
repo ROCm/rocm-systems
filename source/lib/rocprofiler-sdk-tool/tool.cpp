@@ -20,6 +20,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#define _GNU_SOURCE     1
+#define _DEFAULT_SOURCE 1
+
 #include "config.hpp"
 #include "helper.hpp"
 #include "stream_stack.hpp"
@@ -65,7 +68,6 @@
 
 #include <fmt/core.h>
 
-#include <sys/mman.h>
 #include <unistd.h>
 #include <algorithm>
 #include <cassert>
@@ -85,6 +87,11 @@
 #include <unordered_set>
 #include <vector>
 
+#include <dlfcn.h>
+#include <sys/mman.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+
 #if defined(CODECOV) && CODECOV > 0
 extern "C" {
 extern void
@@ -95,8 +102,22 @@ __gcov_dump(void);
 namespace common = ::rocprofiler::common;
 namespace tool   = ::rocprofiler::tool;
 
+extern "C" {
+void
+rocprofv3_error_signal_handler(int signo, siginfo_t*, void*);
+}
+
 namespace
 {
+using sigaction_t      = struct sigaction;
+using signal_func_t    = sighandler_t (*)(int signum, sighandler_t handler);
+using sigaction_func_t = int (*)(int signum,
+                                 const struct sigaction* __restrict__ act,
+                                 struct sigaction* __restrict__ oldact);
+
+constexpr auto rocprofv3_num_signals     = NSIG;
+constexpr auto rocprofv3_handled_signals = std::array<int, 4>{SIGINT, SIGQUIT, SIGABRT, SIGTERM};
+
 auto destructors = new std::vector<std::function<void()>>{};
 
 template <typename Tp>
@@ -132,6 +153,29 @@ add_destructor(Tp*& ptr)
     }
 
 #undef ADD_DESTRUCTOR
+
+struct chained_siginfo
+{
+    int                        signo   = 0;
+    sighandler_t               handler = nullptr;
+    std::optional<sigaction_t> action  = {};
+};
+
+auto&
+get_chained_signals()
+{
+    using data_type  = std::array<std::optional<chained_siginfo>, rocprofv3_num_signals>;
+    static auto*& _v = common::static_object<data_type>::construct();
+    return *CHECK_NOTNULL(_v);
+}
+
+bool
+is_handled_signal(int signum)
+{
+    for(auto itr : rocprofv3_handled_signals)
+        if(itr == signum) return true;
+    return false;
+}
 
 struct buffer_ids
 {
@@ -1357,9 +1401,13 @@ rocprofiler_client_id_t*      client_identifier = nullptr;
 void
 initialize_logging()
 {
-    auto logging_cfg = rocprofiler::common::logging_config{.install_failure_handler = true};
-    common::init_logging("ROCPROF", logging_cfg);
-    FLAGS_colorlogtostderr = true;
+    static auto _once = std::atomic<uint64_t>{0};
+    if(_once++ == 0)
+    {
+        auto logging_cfg = rocprofiler::common::logging_config{.install_failure_handler = true};
+        common::init_logging("ROCPROF", logging_cfg);
+        FLAGS_colorlogtostderr = true;
+    }
 }
 
 void
@@ -1377,6 +1425,34 @@ initialize_rocprofv3()
     ROCP_FATAL_IF(!client_identifier) << "nullptr to client identifier!";
     ROCP_FATAL_IF(!client_finalizer && !tool::get_config().list_metrics)
         << "nullptr to client finalizer!";  // exception for listing metrics
+}
+
+void
+initialize_signal_handler(sigaction_func_t sigaction_func)
+{
+    if(sigaction_func == nullptr) sigaction_func = &sigaction;
+
+    struct sigaction sig_act = {};
+    sigemptyset(&sig_act.sa_mask);
+    sig_act.sa_flags     = (SA_SIGINFO | SA_RESETHAND | SA_NOCLDSTOP);
+    sig_act.sa_sigaction = &rocprofv3_error_signal_handler;
+    for(auto signal_v : rocprofv3_handled_signals)
+    {
+        if(get_chained_signals().at(signal_v))
+        {
+            ROCP_INFO << "Skipping install of signal handler for signal " << signal_v
+                      << " (already wrapped)";
+            continue;
+        }
+
+        ROCP_INFO << "Installing signal handler for signal " << signal_v;
+        if(sigaction_func(signal_v, &sig_act, nullptr) != 0)
+        {
+            auto _errno_v = errno;
+            ROCP_ERROR << "error setting signal handler for " << signal_v
+                       << " :: " << strerror(_errno_v);
+        }
+    }
 }
 
 void
@@ -1467,8 +1543,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 {
     client_finalizer = fini_func;
 
-    constexpr uint64_t buffer_size      = 32 * common::units::KiB;
-    constexpr uint64_t buffer_watermark = 31 * common::units::KiB;
+    const uint64_t buffer_size      = 16 * common::units::get_page_size();
+    const uint64_t buffer_watermark = 15 * common::units::get_page_size();
 
     tool_metadata->init(tool::metadata::inprocess{});
 
@@ -1881,13 +1957,23 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 using stats_data_t       = tool::stats_data_t;
 using stats_entry_t      = tool::stats_entry_t;
 using domain_stats_vec_t = tool::domain_stats_vec_t;
+using cleanup_vec_t      = std::vector<std::function<void()>>;
+
+struct output_data
+{
+    uint64_t num_output = 0;
+    uint64_t num_bytes  = 0;
+};
 
 template <typename Tp, domain_type DomainT>
 void
 generate_output(tool::buffered_output<Tp, DomainT>& output_v,
-                uint64_t&                           num_output_v,
-                domain_stats_vec_t&                 contributions_v)
+                output_data&                        output_data_v,
+                domain_stats_vec_t&                 contributions_v,
+                cleanup_vec_t&                      cleanups_v)
 {
+    cleanups_v.emplace_back([&output_v]() { output_v.destroy(); });
+
     if(!output_v) return;
 
     // opens temporary file and sets read position to beginning
@@ -1896,7 +1982,9 @@ generate_output(tool::buffered_output<Tp, DomainT>& output_v,
     if(output_v.get_generator().empty()) return;
 
     // if it has reached this point, the generator is not empty
-    num_output_v += 1;
+    auto _num_bytes = output_v.get_num_bytes();
+    output_data_v.num_output += 1;
+    output_data_v.num_bytes += _num_bytes;
 
     if(tool::get_config().stats || tool::get_config().summary_output)
     {
@@ -1909,7 +1997,7 @@ generate_output(tool::buffered_output<Tp, DomainT>& output_v,
         contributions_v.emplace_back(output_v.buffer_type_v, output_v.stats);
     }
 
-    if(tool::get_config().csv_output)
+    if(tool::get_config().csv_output && _num_bytes >= tool::get_config().minimum_output_bytes)
     {
         tool::generate_csv(
             tool::get_config(), *tool_metadata, output_v.get_generator(), output_v.stats);
@@ -1929,16 +2017,15 @@ tool_fini(void* /*tool_data*/)
     rocprofiler_stop_context(get_client_ctx());
     flush();
 
-    auto kernel_dispatch_with_stream_output =
-        rocprofiler::tool::kernel_dispatch_buffered_output_with_stream_t{
-            tool::get_config().kernel_trace};
+    auto kernel_dispatch_output = rocprofiler::tool::kernel_dispatch_buffered_output_with_stream_t{
+        tool::get_config().kernel_trace};
     auto hsa_output = tool::hsa_buffered_output_t{tool::get_config().hsa_core_api_trace ||
                                                   tool::get_config().hsa_amd_ext_api_trace ||
                                                   tool::get_config().hsa_image_ext_api_trace ||
                                                   tool::get_config().hsa_finalizer_ext_api_trace};
     auto hip_output = tool::hip_buffered_output_t{tool::get_config().hip_runtime_api_trace ||
                                                   tool::get_config().hip_compiler_api_trace};
-    auto memory_copy_output_with_stream_output =
+    auto memory_copy_output_output =
         tool::memory_copy_buffered_output_with_stream_t{tool::get_config().memory_copy_trace};
     auto marker_output = tool::marker_buffered_output_t{tool::get_config().marker_api_trace};
     auto counters_output =
@@ -1962,42 +2049,58 @@ tool_fini(void* /*tool_data*/)
     auto agents_output = CHECK_NOTNULL(tool_metadata)->agents;
     std::sort(agents_output.begin(), agents_output.end(), node_id_sort);
 
-    uint64_t num_output    = 0;
-    auto     contributions = domain_stats_vec_t{};
+    auto outdata       = output_data{};
+    auto contributions = domain_stats_vec_t{};
+    auto cleanups      = cleanup_vec_t{};
 
-    generate_output(kernel_dispatch_with_stream_output, num_output, contributions);
-    generate_output(hsa_output, num_output, contributions);
-    generate_output(hip_output, num_output, contributions);
-    generate_output(memory_copy_output_with_stream_output, num_output, contributions);
-    generate_output(memory_allocation_output, num_output, contributions);
-    generate_output(marker_output, num_output, contributions);
-    generate_output(rccl_output, num_output, contributions);
-    generate_output(counters_output, num_output, contributions);
-    generate_output(scratch_memory_output, num_output, contributions);
-    generate_output(rocdecode_output, num_output, contributions);
-    generate_output(pc_sampling_host_trap_output, num_output, contributions);
-    generate_output(rocjpeg_output, num_output, contributions);
-    generate_output(pc_sampling_stochastic_output, num_output, contributions);
+    auto run_cleanup = [&cleanups]() {
+        for(const auto& itr : cleanups)
+        {
+            if(itr) itr();
+        }
+        cleanups.clear();
+    };
+
+    auto _dtor = common::scope_destructor{run_cleanup};
+
+    generate_output(kernel_dispatch_output, outdata, contributions, cleanups);
+    generate_output(hsa_output, outdata, contributions, cleanups);
+    generate_output(hip_output, outdata, contributions, cleanups);
+    generate_output(memory_copy_output_output, outdata, contributions, cleanups);
+    generate_output(memory_allocation_output, outdata, contributions, cleanups);
+    generate_output(marker_output, outdata, contributions, cleanups);
+    generate_output(rccl_output, outdata, contributions, cleanups);
+    generate_output(counters_output, outdata, contributions, cleanups);
+    generate_output(scratch_memory_output, outdata, contributions, cleanups);
+    generate_output(rocdecode_output, outdata, contributions, cleanups);
+    generate_output(pc_sampling_host_trap_output, outdata, contributions, cleanups);
+    generate_output(rocjpeg_output, outdata, contributions, cleanups);
+    generate_output(pc_sampling_stochastic_output, outdata, contributions, cleanups);
 
     if(tool::get_config().advanced_thread_trace && !tool::get_config().att_capability.empty() &&
        !tool_metadata->att_filenames.empty())
     {
-        num_output += 1;
+        outdata.num_output += 1;
     }
 
-    ROCP_INFO << "Number of services generating output: " << num_output;
+    ROCP_INFO << fmt::format("Number of services generating output: {} ({} kB)",
+                             outdata.num_output,
+                             (outdata.num_bytes / 1024));
 
-    if(tool::get_config().csv_output && num_output > 0)
+    if(tool::get_config().csv_output && outdata.num_output > 0 &&
+       outdata.num_bytes >= tool::get_config().minimum_output_bytes)
     {
         tool::generate_csv(tool::get_config(), *tool_metadata, agents_output);
     }
 
-    if(tool::get_config().stats && tool::get_config().csv_output && num_output > 0)
+    if(tool::get_config().stats && tool::get_config().csv_output && outdata.num_output > 0 &&
+       outdata.num_bytes >= tool::get_config().minimum_output_bytes)
     {
         tool::generate_csv(tool::get_config(), *tool_metadata, contributions);
     }
 
-    if(tool::get_config().json_output && num_output > 0)
+    if(tool::get_config().json_output && outdata.num_output > 0 &&
+       outdata.num_bytes >= tool::get_config().minimum_output_bytes)
     {
         auto json_ar = tool::open_json(tool::get_config());
 
@@ -2009,8 +2112,8 @@ tool_fini(void* /*tool_data*/)
                          contributions,
                          hip_output.get_generator(),
                          hsa_output.get_generator(),
-                         kernel_dispatch_with_stream_output.get_generator(),
-                         memory_copy_output_with_stream_output.get_generator(),
+                         kernel_dispatch_output.get_generator(),
+                         memory_copy_output_output.get_generator(),
                          counters_output.get_generator(),
                          marker_output.get_generator(),
                          scratch_memory_output.get_generator(),
@@ -2025,15 +2128,16 @@ tool_fini(void* /*tool_data*/)
         tool::close_json(json_ar);
     }
 
-    if(tool::get_config().pftrace_output && num_output > 0)
+    if(tool::get_config().pftrace_output && outdata.num_output > 0 &&
+       outdata.num_bytes >= tool::get_config().minimum_output_bytes)
     {
         tool::write_perfetto(tool::get_config(),
                              *tool_metadata,
                              agents_output,
                              hip_output.get_generator(),
                              hsa_output.get_generator(),
-                             kernel_dispatch_with_stream_output.get_generator(),
-                             memory_copy_output_with_stream_output.get_generator(),
+                             kernel_dispatch_output.get_generator(),
+                             memory_copy_output_output.get_generator(),
                              counters_output.get_generator(),
                              marker_output.get_generator(),
                              scratch_memory_output.get_generator(),
@@ -2043,12 +2147,13 @@ tool_fini(void* /*tool_data*/)
                              rocjpeg_output.get_generator());
     }
 
-    if(tool::get_config().otf2_output && num_output > 0)
+    if(tool::get_config().otf2_output && outdata.num_output > 0 &&
+       outdata.num_bytes >= tool::get_config().minimum_output_bytes)
     {
         auto hip_elem_data               = hip_output.load_all();
         auto hsa_elem_data               = hsa_output.load_all();
-        auto kernel_dispatch_elem_data   = kernel_dispatch_with_stream_output.load_all();
-        auto memory_copy_elem_data       = memory_copy_output_with_stream_output.load_all();
+        auto kernel_dispatch_elem_data   = kernel_dispatch_output.load_all();
+        auto memory_copy_elem_data       = memory_copy_output_output.load_all();
         auto marker_elem_data            = marker_output.load_all();
         auto scratch_memory_elem_data    = scratch_memory_output.load_all();
         auto rccl_elem_data              = rccl_output.load_all();
@@ -2072,7 +2177,8 @@ tool_fini(void* /*tool_data*/)
                          &rocjpeg_elem_data);
     }
 
-    if(tool::get_config().summary_output && num_output > 0)
+    if(tool::get_config().summary_output && outdata.num_output > 0 &&
+       outdata.num_bytes >= tool::get_config().minimum_output_bytes)
     {
         tool::generate_stats(tool::get_config(), *tool_metadata, contributions);
     }
@@ -2121,22 +2227,7 @@ tool_fini(void* /*tool_data*/)
         }
     }
 
-    auto destroy_output = [](auto& _buffered_output_v) { _buffered_output_v.destroy(); };
-
-    destroy_output(kernel_dispatch_with_stream_output);
-    destroy_output(hsa_output);
-    destroy_output(hip_output);
-    destroy_output(memory_copy_output_with_stream_output);
-    destroy_output(memory_allocation_output);
-    destroy_output(marker_output);
-    destroy_output(counters_output);
-    destroy_output(scratch_memory_output);
-    destroy_output(rccl_output);
-    destroy_output(counters_records_output);
-    destroy_output(pc_sampling_host_trap_output);
-    destroy_output(rocdecode_output);
-    destroy_output(rocjpeg_output);
-    destroy_output(pc_sampling_stochastic_output);
+    run_cleanup();
 
     if(kernel_rename_and_stream_display_pair_dtors != nullptr)
     {
@@ -2200,21 +2291,304 @@ get_main_function()
     return user_main;
 }
 
-bool signal_handler_exit = tool::get_env("ROCPROF_INTERNAL_TEST_SIGNAL_HANDLER_VIA_EXIT", false);
+signal_func_t&
+get_signal_function()
+{
+    static signal_func_t user_signal = nullptr;
+    return user_signal;
+}
+
+sigaction_func_t&
+get_sigaction_function()
+{
+    static sigaction_func_t user_sigaction = (sigaction_func_t) dlsym(RTLD_NEXT, "sigaction");
+    return user_sigaction;
+}
+
+bool signal_handler_exit =
+    rocprofiler::tool::get_env("ROCPROF_INTERNAL_TEST_SIGNAL_HANDLER_VIA_EXIT", false);
 }  // namespace
 
 #define ROCPROFV3_INTERNAL_API __attribute__((visibility("internal")));
+
+std::optional<int>
+wait_pid(pid_t _pid, int _opts = 0)
+{
+    auto this_pid  = getpid();
+    auto this_ppid = getppid();
+    auto this_tid  = common::get_tid();
+    auto this_func = std::string_view{__FUNCTION__};
+
+    ROCP_INFO << fmt::format("[PPID={}][PID={}][TID={}][{}] rocprofv3 waiting for child {}",
+                             this_ppid,
+                             this_pid,
+                             this_tid,
+                             this_func,
+                             _pid);
+
+    int   _status = 0;
+    pid_t _pid_v  = -1;
+    _opts |= WUNTRACED;
+    do
+    {
+        if((_opts & WNOHANG) > 0)
+        {
+            std::this_thread::yield();
+            std::this_thread::sleep_for(std::chrono::milliseconds{100});
+        }
+        _pid_v = waitpid(_pid, &_status, _opts);
+    } while(_pid_v == 0);
+
+    if(_pid_v < 0) return std::nullopt;
+    return _status;
+}
 
 extern "C" {
 void
 rocprofv3_set_main(main_func_t main_func) ROCPROFV3_INTERNAL_API;
 
-void
-rocprofv3_error_signal_handler(int signo)
+int
+diagnose_status(pid_t _pid, int _status)
 {
-    ROCP_WARNING << __FUNCTION__ << " caught signal " << signo << "...";
+    auto this_pid  = getpid();
+    auto this_ppid = getppid();
+    auto this_tid  = common::get_tid();
+    auto this_func = std::string_view{__FUNCTION__};
 
-    finalize_rocprofv3(__FUNCTION__);
+    bool _normal_exit      = (WIFEXITED(_status) > 0);
+    bool _unhandled_signal = (WIFSIGNALED(_status) > 0);
+    bool _core_dump        = (WCOREDUMP(_status) > 0);
+    bool _stopped          = (WIFSTOPPED(_status) > 0);
+    int  _exit_status      = WEXITSTATUS(_status);
+    int  _stop_signal      = (_stopped) ? WSTOPSIG(_status) : 0;
+    int  _ec               = (_unhandled_signal) ? WTERMSIG(_status) : 0;
+
+    ROCP_TRACE << fmt::format("[PPID={}][PID={}][TID={}][{}] diagnosing status for process {} :: "
+                              "status: {}, normal exit: {}, unhandled signal: {}, core dump: {}, "
+                              "stopped: {}, exit status: {}, stop signal: {}, exit code: {}",
+                              this_ppid,
+                              this_pid,
+                              this_tid,
+                              this_func,
+                              _pid,
+                              _status,
+                              std::to_string(static_cast<int>(_normal_exit)),
+                              std::to_string(static_cast<int>(_unhandled_signal)),
+                              std::to_string(static_cast<int>(_core_dump)),
+                              std::to_string(static_cast<int>(_stopped)),
+                              _exit_status,
+                              _stop_signal,
+                              _ec);
+
+    if(!_normal_exit)
+    {
+        if(_ec == 0) _ec = EXIT_FAILURE;
+        ROCP_INFO << fmt::format(
+            "[PPID={}][PID={}][TID={}][{}] process {} terminated abnormally. exit code: {}",
+            this_ppid,
+            this_pid,
+            this_tid,
+            this_func,
+            _pid,
+            _ec);
+    }
+
+    if(_stopped)
+    {
+        ROCP_INFO << fmt::format(
+            "[PPID={}][PID={}][TID={}][{}] process {} stopped with signal {}. exit code: {}",
+            this_ppid,
+            this_pid,
+            this_tid,
+            this_func,
+            _pid,
+            _stop_signal,
+            _ec);
+    }
+
+    if(_core_dump)
+    {
+        ROCP_INFO << fmt::format("[PPID={}][PID={}][TID={}][{}] process {} terminated and "
+                                 "produced a core dump. exit code: {}",
+                                 this_ppid,
+                                 this_pid,
+                                 this_tid,
+                                 this_func,
+                                 _pid,
+                                 _ec);
+    }
+
+    if(_unhandled_signal)
+    {
+        ROCP_INFO << fmt::format(
+            "[PPID={}][PID={}][TID={}][{}] process {} terminated because it received a signal "
+            "({}) that was not handled. exit code: {}",
+            this_ppid,
+            this_pid,
+            this_tid,
+            this_func,
+            _pid,
+            _ec,
+            _ec);
+    }
+
+    if(!_normal_exit && _exit_status > 0)
+    {
+        if(_exit_status == 127)
+        {
+            ROCP_INFO << fmt::format(
+                "[PPID={}][PID={}][TID={}][{}] execv in process {} failed. exit code: {}",
+                this_ppid,
+                this_pid,
+                this_tid,
+                this_func,
+                _pid,
+                _ec);
+        }
+        else
+        {
+            ROCP_INFO << fmt::format("[PPID={}][PID={}][TID={}][{}] process {} terminated with "
+                                     "a non-zero status. exit code: {}",
+                                     this_ppid,
+                                     this_pid,
+                                     this_tid,
+                                     this_func,
+                                     _pid,
+                                     _ec);
+        }
+    }
+
+    return _ec;
+}
+
+void
+rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
+{
+    auto this_pid  = getpid();
+    auto this_ppid = getppid();
+    auto this_tid  = common::get_tid();
+    auto this_func = std::string_view{__FUNCTION__};
+
+    ROCP_WARNING << fmt::format("[PPID={}][PID={}][TID={}][{}] rocprofv3 caught signal {}...",
+                                this_ppid,
+                                this_pid,
+                                this_tid,
+                                this_func,
+                                signo);
+
+    static auto _once = std::once_flag{};
+    std::call_once(_once, [&]() {
+        auto get_children = [&this_pid]() {
+            auto fname    = fmt::format("/proc/{}/task/{}/children", this_pid, this_pid);
+            auto ifs      = std::ifstream{fname};
+            auto children = std::vector<pid_t>{};
+            while(ifs)
+            {
+                pid_t val = 0;
+                ifs >> val;
+                if(ifs && !ifs.eof() && val > 0) children.emplace_back(val);
+            }
+            return children;
+        };
+
+        auto _children = get_children();
+        ROCP_WARNING << fmt::format(
+            "[PPID={}][PID={}][TID={}][{}] rocprofv3 will wait for {} children to exit",
+            this_ppid,
+            this_pid,
+            this_tid,
+            this_func,
+            _children.size());
+
+        // wait for children
+        for(auto itr : _children)
+        {
+            auto status = wait_pid(itr, WUNTRACED | WNOHANG);
+            if(status) diagnose_status(itr, status.value());
+        }
+
+        ROCP_WARNING << fmt::format(
+            "[PPID={}][PID={}][TID={}][{}] rocprofv3 finalizing after signal {}...",
+            this_ppid,
+            this_pid,
+            this_tid,
+            this_func,
+            signo);
+
+        finalize_rocprofv3(this_func);
+
+        ROCP_INFO << fmt::format(
+            "[PPID={}][PID={}][TID={}][{}] rocprofv3 finalizing after signal {}... complete",
+            this_ppid,
+            this_pid,
+            this_tid,
+            this_func,
+            signo);
+
+        if(get_chained_signals().at(signo))
+        {
+            ROCP_INFO << fmt::format(
+                "[PPID={}][PID={}][TID={}][{}] rocprofv3 found chained signal for {}",
+                this_ppid,
+                this_pid,
+                this_tid,
+                this_func,
+                signo);
+            auto& _chained = *get_chained_signals().at(signo);
+            if(_chained.action)
+            {
+                ROCP_TRACE << fmt::format("[PPID={}][PID={}][TID={}][{}] rocprofv3 found chained "
+                                          "signal for {}... executing chained sigaction",
+                                          this_ppid,
+                                          this_pid,
+                                          this_tid,
+                                          this_func,
+                                          signo);
+                if((_chained.action->sa_flags & SA_SIGINFO) == SA_SIGINFO &&
+                   _chained.action->sa_sigaction)
+                {
+                    ROCP_TRACE << fmt::format(
+                        "[PPID={}][PID={}][TID={}][{}] rocprofv3 found chained "
+                        "signal for {}... executing chained sigaction (SIGINFO)",
+                        this_ppid,
+                        this_pid,
+                        this_tid,
+                        this_func,
+                        signo);
+                    _chained.action->sa_sigaction(signo, info, ucontext);
+                }
+                else if((_chained.action->sa_flags & SA_SIGINFO) != SA_SIGINFO &&
+                        _chained.action->sa_handler)
+                {
+                    ROCP_TRACE << fmt::format(
+                        "[PPID={}][PID={}][TID={}][{}] rocprofv3 found chained "
+                        "signal for {}... executing chained sigaction (HANDLER)",
+                        this_ppid,
+                        this_pid,
+                        this_tid,
+                        this_func,
+                        signo);
+                    _chained.action->sa_handler(signo);
+                }
+            }
+            else
+            {
+                if(_chained.handler)
+                {
+                    ROCP_TRACE << fmt::format(
+                        "[PPID={}][PID={}][TID={}][{}] rocprofv3 found chained "
+                        "signal for {}... executing chained handler",
+                        this_ppid,
+                        this_pid,
+                        this_tid,
+                        this_func,
+                        signo);
+                    _chained.handler(signo);
+                }
+            }
+        }
+    });
+
     // below is for testing purposes. re-raising the signal causes CTest to ignore WILL_FAIL ON
     if(signal_handler_exit) ::quick_exit(signo);
     ::raise(signo);
@@ -2222,6 +2596,14 @@ rocprofv3_error_signal_handler(int signo)
 
 int
 rocprofv3_main(int argc, char** argv, char** envp) ROCPROFV3_INTERNAL_API;
+
+sighandler_t
+rocprofv3_signal(int signum, sighandler_t handler) ROCPROFV3_INTERNAL_API;
+
+int
+rocprofv3_sigaction(int signum,
+                    const struct sigaction* __restrict__ act,
+                    struct sigaction* __restrict__ oldact) ROCPROFV3_INTERNAL_API;
 
 rocprofiler_tool_configure_result_t*
 rocprofiler_configure(uint32_t                 version,
@@ -2283,26 +2665,79 @@ rocprofv3_set_main(main_func_t main_func)
     get_main_function() = main_func;
 }
 
+#define LOG_FUNCTION_ENTRY(MSG, ...)                                                               \
+    {                                                                                              \
+        ROCP_INFO << fmt::format("[PPID={}][PID={}][TID={}][rocprofv3] {}" MSG,                    \
+                                 getppid(),                                                        \
+                                 getpid(),                                                         \
+                                 gettid(),                                                         \
+                                 __FUNCTION__,                                                     \
+                                 __VA_ARGS__);                                                     \
+    }
+
+sighandler_t
+rocprofv3_signal(int signum, sighandler_t handler)
+{
+    static auto _once = std::once_flag{};
+    std::call_once(_once,
+                   []() { get_signal_function() = (signal_func_t) dlsym(RTLD_NEXT, "signal"); });
+
+    if(!is_handled_signal(signum) || !tool::get_config().enable_signal_handlers)
+        return CHECK_NOTNULL(get_signal_function())(signum, handler);
+
+    get_chained_signals().at(signum) = chained_siginfo{signum, handler, std::nullopt};
+
+    return get_signal_function()(
+        signum, [](int signum_v) { rocprofv3_error_signal_handler(signum_v, nullptr, nullptr); });
+}
+
+int
+rocprofv3_sigaction(int signum,
+                    const struct sigaction* __restrict__ act,
+                    struct sigaction* __restrict__ oldact)
+{
+    static auto _once = std::once_flag{};
+    std::call_once(_once, []() {
+        get_sigaction_function() = (sigaction_func_t) dlsym(RTLD_NEXT, "sigaction");
+    });
+
+    if(!is_handled_signal(signum) || !act || !tool::get_config().enable_signal_handlers)
+        return CHECK_NOTNULL(get_sigaction_function())(signum, act, oldact);
+
+    get_chained_signals().at(signum) = chained_siginfo{signum, nullptr, *act};
+
+    struct sigaction _upd_act = *act;
+    _upd_act.sa_flags |= (SA_SIGINFO | SA_RESETHAND | SA_NOCLDSTOP);
+    _upd_act.sa_sigaction = &rocprofv3_error_signal_handler;
+
+    return get_sigaction_function()(signum, &_upd_act, oldact);
+}
+
 int
 rocprofv3_main(int argc, char** argv, char** envp)
 {
+    auto convert_to_vec = [](char** inp) {
+        auto        _data = std::vector<std::string_view>{};
+        size_t      n     = 0;
+        const char* p     = nullptr;
+        do
+        {
+            p = inp[n++];
+            if(p != nullptr) _data.emplace_back(p);
+        } while(p != nullptr);
+        return _data;
+    };
+
+    auto _argv = convert_to_vec(argv);
+    // auto _envp = convect_to_vec(envp);
+
+    LOG_FUNCTION_ENTRY("({}, '{}', ...)", argc, fmt::join(_argv.begin(), _argv.end(), " "));
+
     initialize_logging();
 
     initialize_rocprofv3();
 
-    struct sigaction sig_act = {};
-    sigemptyset(&sig_act.sa_mask);
-    sig_act.sa_flags   = SA_RESETHAND | SA_NODEFER;
-    sig_act.sa_handler = &rocprofv3_error_signal_handler;
-    for(auto signal_v : {SIGTERM, SIGSEGV, SIGINT, SIGILL, SIGABRT, SIGFPE})
-    {
-        if(sigaction(signal_v, &sig_act, nullptr) != 0)
-        {
-            auto _errno_v = errno;
-            ROCP_ERROR << "error setting signal handler for " << signal_v
-                       << " :: " << strerror(_errno_v);
-        }
-    }
+    initialize_signal_handler(get_sigaction_function());
 
     ROCP_INFO << "rocprofv3: main function wrapper will be invoked...";
 

@@ -26,6 +26,7 @@
 #define ROCPROFV3_INTERNAL_API __attribute__((visibility("internal")));
 
 #include <dlfcn.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,10 +44,6 @@ typedef int (*start_main_t)(int (*)(int, char**, char**),
                             void (*)(void),
                             void (*)(void),
                             void*);
-
-//
-// local function declarations
-//
 int
 rocprofv3_libc_start_main(int (*)(int, char**, char**),
                           int,
@@ -65,14 +62,27 @@ __libc_start_main(int (*)(int, char**, char**),
                   void (*)(void),
                   void*) ROCPROFV3_PUBLIC_API;
 
-//
-// external function declarations
-//
+sighandler_t
+signal(int signum, sighandler_t handler) ROCPROFV3_PUBLIC_API;
+
+int
+sigaction(int                              signum,
+          const struct sigaction* restrict act,
+          struct sigaction* restrict       oldact) ROCPROFV3_PUBLIC_API;
+
 extern void
 rocprofv3_set_main(main_func_t main_func) ROCPROFV3_INTERNAL_API;
 
 extern int
 rocprofv3_main(int argc, char** argv, char** envp) ROCPROFV3_INTERNAL_API;
+
+extern sighandler_t
+rocprofv3_signal(int signum, sighandler_t handler) ROCPROFV3_INTERNAL_API;
+
+extern int
+rocprofv3_sigaction(int                              signum,
+                    const struct sigaction* restrict act,
+                    struct sigaction* restrict       oldact) ROCPROFV3_INTERNAL_API;
 
 int
 rocprofv3_libc_start_main(int (*_main)(int, char**, char**),
@@ -128,6 +138,18 @@ rocprofv3_libc_start_main(int (*_main)(int, char**, char**),
     fflush(stderr);
 
     return -1;
+}
+
+sighandler_t
+signal(int signum, sighandler_t handler)
+{
+    return rocprofv3_signal(signum, handler);
+}
+
+int
+sigaction(int signum, const struct sigaction* restrict act, struct sigaction* restrict oldact)
+{
+    return rocprofv3_sigaction(signum, act, oldact);
 }
 
 int
