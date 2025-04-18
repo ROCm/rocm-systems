@@ -71,6 +71,7 @@ struct file_buffer
     file_buffer& operator=(file_buffer&&) noexcept = default;
 
     domain_type       domain = {};
+    uint64_t          nbytes = 0;
     ring_buffer_t<Tp> buffer = {};
     tmp_file          file;
 };
@@ -110,7 +111,13 @@ offload_buffer(domain_type type)
     ROCP_CI_LOG_IF(WARNING, _fs.tellg() != _fs.tellp())  // this should always be true
         << "tellg=" << _fs.tellg() << ", tellp=" << _fs.tellp();
 
+    auto _nbytes = (filebuf->buffer.count() * filebuf->buffer.data_size());
+
+    ROCP_TRACE << fmt::format(
+        "offloading {} B from {} buffer to tmp file", _nbytes, get_domain_column_name(type));
+
     filebuf->file.file_pos.emplace(_fs.tellp());
+    filebuf->nbytes += _nbytes;
     filebuf->buffer.save(_fs);
     filebuf->buffer.clear();
 
@@ -206,10 +213,13 @@ read_tmp_file(domain_type type)
         return;
     }
 
-    auto  _lk = std::lock_guard<std::mutex>{filebuf->file.file_mutex};
-    auto& _fs = filebuf->file.stream;
-    if(_fs.is_open()) _fs.close();
-    filebuf->file.open(std::ios::binary | std::ios::in);
+    auto _lk = std::lock_guard<std::mutex>{filebuf->file.file_mutex};
+    if(filebuf->file.exists())
+    {
+        auto& _fs = filebuf->file.stream;
+        if(_fs.is_open()) _fs.close();
+        filebuf->file.open(std::ios::binary | std::ios::in);
+    }
 }
 }  // namespace tool
 }  // namespace rocprofiler

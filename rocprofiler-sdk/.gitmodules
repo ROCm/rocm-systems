@@ -21,7 +21,7 @@
 	url = https://github.com/gulrak/filesystem.git
 [submodule "external/perfetto"]
 	path = external/perfetto
-	url = https://android.googlesource.com/platform/external/perfetto
+	url = https://github.com/google/perfetto
 [submodule "external/elfio"]
 	path = external/elfio
 	url = https://github.com/serge1/ELFIO.git

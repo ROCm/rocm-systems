@@ -300,7 +300,7 @@ struct ring_buffer : private base::ring_buffer
     ~ring_buffer() = default;
 
     explicit ring_buffer(size_t _size)
-    : base_type{_size * sizeof(Tp)}
+    : base_type{_size * aligned_data_size()}
     {}
 
     ring_buffer(const ring_buffer&);
@@ -313,16 +313,19 @@ struct ring_buffer : private base::ring_buffer
     bool is_initialized() const { return base_type::is_initialized(); }
 
     /// Get the total number of Tp instances supported
-    size_t capacity() const { return (base_type::capacity()) / sizeof(Tp); }
+    size_t capacity() const { return (base_type::capacity()) / aligned_data_size(); }
 
     /// Creates new ring buffer.
-    void init(size_t _size) { base_type::init(_size * sizeof(Tp)); }
+    void init(size_t _size) { base_type::init(_size * aligned_data_size()); }
 
     /// Destroy ring buffer.
     void destroy() { base_type::destroy(); }
 
-    /// Write data to buffer.
-    size_t data_size() const { return sizeof(Tp); }
+    /// Size of the data type
+    static constexpr size_t data_size() { return sizeof(Tp); }
+
+    /// Size of the data type + padding
+    static constexpr size_t aligned_data_size();
 
     /// Write data to buffer. Return pointer to location of write
     Tp* write(Tp* in) { return base_type::write<Tp>(in).second; }
@@ -337,16 +340,16 @@ struct ring_buffer : private base::ring_buffer
     Tp* retrieve() { return base_type::retrieve<Tp>(); }
 
     /// Returns number of Tp instances currently held by the buffer.
-    size_t count() const { return (base_type::count()) / sizeof(Tp); }
+    size_t count() const { return (base_type::count()) / aligned_data_size(); }
 
     /// Returns how many Tp instances are availiable in the buffer.
-    size_t free() const { return (base_type::free()) / sizeof(Tp); }
+    size_t free() const { return (base_type::free()) / aligned_data_size(); }
 
     /// Returns if the buffer is empty.
     bool is_empty() const { return base_type::is_empty(); }
 
     /// Returns if the buffer is full.
-    bool is_full() const { return (base_type::free() < sizeof(Tp)); }
+    bool is_full() const { return (base_type::free() < aligned_data_size()); }
 
     bool clear() { return base_type::clear(); }
 
@@ -365,6 +368,7 @@ struct ring_buffer : private base::ring_buffer
         std::ostringstream ss{};
         size_t             _w = std::log10(base_type::capacity()) + 1;
         ss << std::boolalpha << std::right << "data size: " << std::setw(_w) << data_size()
+           << "B, aligned data size: " << std::setw(_w) << aligned_data_size()
            << " B, is_initialized: " << std::setw(5) << is_initialized()
            << ", is_empty: " << std::setw(5) << is_empty() << ", is_full: " << std::setw(5)
            << is_full() << ", capacity: " << std::setw(_w) << capacity()
@@ -389,6 +393,22 @@ size_t
 ring_buffer<Tp>::get_items_per_page()
 {
     return std::max<size_t>(units::get_page_size() / sizeof(Tp), 1);
+}
+//
+template <typename Tp>
+constexpr size_t
+ring_buffer<Tp>::aligned_data_size()
+{
+    constexpr auto _data_size    = sizeof(Tp);
+    constexpr auto _data_align   = alignof(Tp);
+    constexpr auto _align_modulo = _data_size % _data_align;
+    constexpr auto _result =
+        (_align_modulo == 0) ? _data_size : (_data_size + (_data_align - _align_modulo));
+
+    static_assert(_result >= _data_size && _result < (_data_size + _data_align),
+                  "should neither be < sizeof(Tp) nor > sizeof(Tp) + alignof(Tp)");
+
+    return _result;
 }
 //
 template <typename Tp>

@@ -132,11 +132,26 @@ tmp_file::remove()
     if(fs::exists(filename))
     {
         ROCP_INFO << "removing temporary file: '" << filename << "'...";
-        auto _ret = ::remove(filename.c_str());
-        return (_ret == 0);
+        auto _ec  = std::error_code{};
+        auto _ret = fs::remove(filename, _ec);
+
+        if(_ec)
+            ROCP_WARNING << fmt::format(
+                "Error removing temporary file '{}' :: {}", filename, _ec.message());
+        else if(!_ret)
+            ROCP_WARNING << fmt::format("Error removing temporary file '{}' :: Unknown error",
+                                        filename);
+
+        return _ret;
     }
 
     return true;
+}
+
+bool
+tmp_file::exists() const
+{
+    return fs::exists(filename);
 }
 
 tmp_file::operator bool() const

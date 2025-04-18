@@ -94,8 +94,11 @@ GetChromaPlaneCount(rocDecVideoSurfaceFormat surface_format)
     {
         case rocDecVideoSurfaceFormat_NV12:
         case rocDecVideoSurfaceFormat_P016: num_planes = 1; break;
+        // All YUV formats have 2 planes (to my knowledge).
         case rocDecVideoSurfaceFormat_YUV444:
         case rocDecVideoSurfaceFormat_YUV444_16Bit: num_planes = 2; break;
+        case rocDecVideoSurfaceFormat_YUV422:
+        case rocDecVideoSurfaceFormat_YUV422_16Bit:
         case rocDecVideoSurfaceFormat_YUV420:
         case rocDecVideoSurfaceFormat_YUV420_16Bit: num_planes = 2; break;
     }
@@ -109,10 +112,17 @@ GetChromaHeightFactor(rocDecVideoSurfaceFormat surface_format)
     float factor = 0.5;
     switch(surface_format)
     {
+        // NV12 and P016 have 1/2 vertical resolution, 1/2 horizontal resolution
+        // (different 420 sampling techniques across a single plane)
         case rocDecVideoSurfaceFormat_NV12:
         case rocDecVideoSurfaceFormat_P016:
+        // 420 pulldown has 1/2 vertical resolution, 1/2 horizontal resolution
         case rocDecVideoSurfaceFormat_YUV420:
         case rocDecVideoSurfaceFormat_YUV420_16Bit: factor = 0.5; break;
+        // 422 pulldown has full vertical resolution, 1/2 horizontal resolution
+        case rocDecVideoSurfaceFormat_YUV422:
+        case rocDecVideoSurfaceFormat_YUV422_16Bit:
+        // 444 pulldown has full vertical and horizontal resolution
         case rocDecVideoSurfaceFormat_YUV444:
         case rocDecVideoSurfaceFormat_YUV444_16Bit: factor = 1.0; break;
     }

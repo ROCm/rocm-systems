@@ -274,6 +274,14 @@ GetSurfaceStrideInternal(rocDecVideoSurfaceFormat surface_format,
             *pitch   = align(width, 128) * 2;
             *vstride = align(height, 16);
             break;
+        case rocDecVideoSurfaceFormat_YUV422:
+            *pitch   = align(width, 256);
+            *vstride = align(height, 16);
+            break;
+        case rocDecVideoSurfaceFormat_YUV422_16Bit:
+            *pitch   = align(width, 128) * 2;
+            *vstride = align(height, 16);
+            break;
     }
     return;
 }

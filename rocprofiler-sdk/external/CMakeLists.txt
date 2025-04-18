@@ -172,7 +172,7 @@ rocprofiler_checkout_git_submodule(
     RELATIVE_PATH external/perfetto
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     TEST_FILE meson.build
-    REPO_URL https://android.googlesource.com/platform/external/perfetto external/perfetto
+    REPO_URL https://github.com/google/perfetto
     REPO_BRANCH "v44.0")
 
 add_library(rocprofiler-sdk-perfetto-static-library STATIC)
