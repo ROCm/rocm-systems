@@ -1178,7 +1178,7 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
             violation_status->active_gfx_clk_below_host_limit = 0;
         }
         ss << __PRETTY_FUNCTION__ << " | "
-           << "ENTERED gfx_clk_below_host_residency_acc | per_gfx_clk_below_host_limit: " << std::dec
+           << "ENTERED gfx_below_host_limit_acc | per_gfx_clk_below_host_limit: " << std::dec
            << violation_status->per_gfx_clk_below_host_limit
            << "%; active_ppt_pwr = " << std::dec
            << violation_status->active_gfx_clk_below_host_limit << "\n";
