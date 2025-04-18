@@ -957,11 +957,30 @@ class AMDSMIHelpers():
         return:
             str or dict : formatted output
         """
+        if value == "N/A":
+            return "N/A"
         if logger.is_json_format():
             return {"value": value, "unit": unit}
         if logger.is_human_readable_format():
             return f"{value} {unit}".rstrip()
         return f"{value}"
+
+    def unit_unformat(self, logger, formatted_value):
+        """
+        This function will unformat output with unit based on the logger output format
+        params:
+            logger (AMDSMILogger) - Logger to print out output
+            formatted_value - the value to be unformatted
+        return:
+            str or dict : unformatted output
+        """
+        if logger.is_json_format():
+            if isinstance(formatted_value, dict):
+                return formatted_value['value']
+            return formatted_value
+        if logger.is_human_readable_format():
+            return formatted_value.split()[0]
+        return formatted_value
 
 
     class SI_Unit(float, Enum):
