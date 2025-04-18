@@ -28,12 +28,16 @@ RUN zypper --non-interactive update -y && \
     python3 -m pip install 'cmake==3.21'
 
 ARG ROCM_VERSION=0.0
-ARG AMDGPU_RPM=6.2/sle/15.6/amdgpu-install-6.2.60200-1.noarch.rpm
 
 RUN if [ "${ROCM_VERSION}" != "0.0" ]; then \
-        OS_VERSION_MINOR=$(cat /etc/os-release | grep 'VERSION_ID' | sed 's/=/ /1' | awk '{print $NF}' | sed 's/"//g' | sed 's/\./ /g' | awk '{print $2}') && \
-        zypper --non-interactive addrepo https://download.opensuse.org/repositories/devel:languages:perl/15.${OS_VERSION_MINOR}/devel:languages:perl.repo && \
-        zypper --non-interactive --no-gpg-checks install -y https://repo.radeon.com/amdgpu-install/${AMDGPU_RPM} && \
+        OS_VERSION=$(grep '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"') && \
+        OS_VERSION_MAJOR=$(echo "$OS_VERSION" | cut -d'.' -f1) && \
+        OS_VERSION_MINOR=$(echo "$OS_VERSION" | cut -d'.' -f2) && \
+        ROCM_MAJOR=$(echo "${ROCM_VERSION}" | sed 's/\./ /g' | awk '{print $1}') && \
+        ROCM_MINOR=$(echo "${ROCM_VERSION}" | sed 's/\./ /g' | awk '{print $2}') && \
+        ROCM_VERSN=$(( ("${ROCM_MAJOR}"*10000)+("${ROCM_MINOR}"*100) )) && \
+        zypper --non-interactive addrepo https://download.opensuse.org/repositories/devel:languages:perl/15.6/devel:languages:perl.repo && \
+        zypper --non-interactive --no-gpg-checks install -y https://repo.radeon.com/amdgpu-install/${ROCM_VERSION}/sle/${OS_VERSION}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.noarch.rpm && \
         zypper --non-interactive --gpg-auto-import-keys refresh && \
         zypper --non-interactive install -y rocm-dev rccl-devel libpciaccess0 && \
         zypper --non-interactive clean --all; \
