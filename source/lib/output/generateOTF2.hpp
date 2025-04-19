@@ -45,7 +45,7 @@ write_otf2(const output_config&                                            cfg,
            std::deque<tool_buffer_tracing_memory_copy_ext_record_t>*       memory_copy_data,
            std::deque<rocprofiler_buffer_tracing_marker_api_record_t>*     marker_api_data,
            std::deque<rocprofiler_buffer_tracing_scratch_memory_record_t>* scratch_memory_data,
-           std::deque<rocprofiler_buffer_tracing_rccl_api_record_t>*       rccl_api_data,
+           std::deque<rocprofiler_buffer_tracing_rccl_api_ext_record_t>*   rccl_api_ext_data,
            std::deque<tool_buffer_tracing_memory_allocation_ext_record_t>* memory_allocation_data,
            std::deque<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>* rocdecode_api_data,
            std::deque<rocprofiler_buffer_tracing_rocjpeg_api_record_t>*       rocjpeg_api_data);

@@ -190,7 +190,7 @@ struct buffer_ids
     rocprofiler_buffer_id_t memory_allocation_trace = {};
     rocprofiler_buffer_id_t counter_collection      = {};
     rocprofiler_buffer_id_t scratch_memory          = {};
-    rocprofiler_buffer_id_t rccl_api_trace          = {};
+    rocprofiler_buffer_id_t rccl_api_ext_trace      = {};
     rocprofiler_buffer_id_t pc_sampling_host_trap   = {};
     rocprofiler_buffer_id_t rocdecode_api_trace     = {};
     rocprofiler_buffer_id_t rocjpeg_api_trace       = {};
@@ -205,7 +205,7 @@ struct buffer_ids
                                                        memory_allocation_trace,
                                                        counter_collection,
                                                        scratch_memory,
-                                                       rccl_api_trace,
+                                                       rccl_api_ext_trace,
                                                        pc_sampling_host_trap,
                                                        rocdecode_api_trace,
                                                        rocjpeg_api_trace,
@@ -1058,10 +1058,10 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                     tool::tool_buffer_tracing_hip_api_ext_record_t{*record, stream_id},
                     domain_type::HIP);
             }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_RCCL_API)
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_RCCL_API_EXT)
             {
                 auto* record =
-                    static_cast<rocprofiler_buffer_tracing_rccl_api_record_t*>(header->payload);
+                    static_cast<rocprofiler_buffer_tracing_rccl_api_ext_record_t*>(header->payload);
 
                 tool::write_ring_buffer(*record, domain_type::RCCL);
             }
@@ -1802,8 +1802,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                             ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT,
                                             get_buffers().hip_api_trace},
                       buffer_service_config{tool::get_config().rccl_api_trace,
-                                            ROCPROFILER_BUFFER_TRACING_RCCL_API,
-                                            get_buffers().rccl_api_trace},
+                                            ROCPROFILER_BUFFER_TRACING_RCCL_API_EXT,
+                                            get_buffers().rccl_api_ext_trace},
                       buffer_service_config{tool::get_config().memory_allocation_trace,
                                             ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
                                             get_buffers().memory_allocation_trace},
