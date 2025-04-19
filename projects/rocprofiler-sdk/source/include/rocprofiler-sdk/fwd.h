@@ -228,6 +228,7 @@ typedef enum rocprofiler_buffer_tracing_kind_t  // NOLINT(performance-enum-size)
     ROCPROFILER_BUFFER_TRACING_KFD_QUEUE,         ///< @see rocprofiler_kfd_queue_operation_t
     ROCPROFILER_BUFFER_TRACING_MARKER_CORE_RANGE_API,  ///< @see
                                                        ///< ::rocprofiler_marker_core_range_api_id_t
+    ROCPROFILER_BUFFER_TRACING_RCCL_API_EXT,
     ROCPROFILER_BUFFER_TRACING_LAST,
 
     /// @var ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT
@@ -238,6 +239,8 @@ typedef enum rocprofiler_buffer_tracing_kind_t  // NOLINT(performance-enum-size)
     /// contains the function argument(s) and return value
     /// @var ROCPROFILER_BUFFER_TRACING_ROCDECODE_API_EXT
     /// @brief Similar to ROCPROFILER_BUFFER_TRACING_ROCDECODE_API except the buffer record
+    /// @var ROCPROFILER_BUFFER_TRACING_RCCL_API_EXT
+    /// @brief Similar to ROCPROFILER_BUFFER_TRACING_RCCL_API except the buffer record
     /// contains the function argument(s) and return value
 } rocprofiler_buffer_tracing_kind_t;
 

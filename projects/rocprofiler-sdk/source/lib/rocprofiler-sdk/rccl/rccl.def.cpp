@@ -35,21 +35,23 @@ namespace rccl
 template <>
 struct rccl_domain_info<ROCPROFILER_RCCL_TABLE_ID_LAST>
 {
-    using args_type          = rocprofiler_rccl_api_args_t;
-    using retval_type        = rocprofiler_rccl_api_retval_t;
-    using callback_data_type = rocprofiler_callback_tracing_rccl_api_data_t;
-    using buffer_data_type   = rocprofiler_buffer_tracing_rccl_api_record_t;
+    using args_type              = rocprofiler_rccl_api_args_t;
+    using retval_type            = rocprofiler_rccl_api_retval_t;
+    using callback_data_type     = rocprofiler_callback_tracing_rccl_api_data_t;
+    using buffer_data_type       = rocprofiler_buffer_tracing_rccl_api_record_t;
+    using buffered_ext_data_type = rocprofiler_buffer_tracing_rccl_api_ext_record_t;
 };
 
 template <>
 struct rccl_domain_info<ROCPROFILER_RCCL_TABLE_ID>
 : rccl_domain_info<ROCPROFILER_RCCL_TABLE_ID_LAST>
 {
-    using enum_type                           = rocprofiler_marker_core_api_id_t;
-    static constexpr auto callback_domain_idx = ROCPROFILER_CALLBACK_TRACING_RCCL_API;
-    static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_RCCL_API;
-    static constexpr auto none                = ROCPROFILER_RCCL_API_ID_NONE;
-    static constexpr auto last                = ROCPROFILER_RCCL_API_ID_LAST;
+    using enum_type                               = rocprofiler_marker_core_api_id_t;
+    static constexpr auto callback_domain_idx     = ROCPROFILER_CALLBACK_TRACING_RCCL_API;
+    static constexpr auto buffered_domain_idx     = ROCPROFILER_BUFFER_TRACING_RCCL_API;
+    static constexpr auto buffered_ext_domain_idx = ROCPROFILER_BUFFER_TRACING_RCCL_API_EXT;
+    static constexpr auto none                    = ROCPROFILER_RCCL_API_ID_NONE;
+    static constexpr auto last                    = ROCPROFILER_RCCL_API_ID_LAST;
     static constexpr auto external_correlation_id_domain_idx =
         ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_RCCL_API;
 };

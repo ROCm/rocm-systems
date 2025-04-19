@@ -46,6 +46,8 @@
         using domain_type::retval_type;                                                            \
         using domain_type::callback_data_type;                                                     \
                                                                                                    \
+        static constexpr auto get_args_type() { return common::mpl::type_list<>{}; }               \
+                                                                                                   \
         static constexpr auto offset()                                                             \
         {                                                                                          \
             return offsetof(rccl_table_lookup<table_idx>::type, RCCL_FUNC_PTR);                    \
@@ -68,8 +70,7 @@
         {                                                                                          \
             if constexpr(std::is_pointer<TableT>::value)                                           \
             {                                                                                      \
-                assert(_table != nullptr && "nullptr to MARKER table for " #RCCL_FUNC              \
-                                            " function");                                          \
+                assert(_table != nullptr && "nullptr to RCCL table for " #RCCL_FUNC " function");  \
                 return _table->RCCL_FUNC_PTR;                                                      \
             }                                                                                      \
             else                                                                                   \
@@ -92,9 +93,13 @@
             return &base_type::functor<RetT, Args...>;                                             \
         }                                                                                          \
                                                                                                    \
-        static std::vector<void*> as_arg_addr(callback_data_type) { return std::vector<void*>{}; } \
+        static std::vector<void*> as_arg_addr(rocprofiler_rccl_api_args_t)                         \
+        {                                                                                          \
+            return std::vector<void*>{};                                                           \
+        }                                                                                          \
                                                                                                    \
-        static std::vector<common::stringified_argument> as_arg_list(callback_data_type, int32_t)  \
+        static std::vector<common::stringified_argument> as_arg_list(rocprofiler_rccl_api_args_t,  \
+                                                                     int32_t)                      \
         {                                                                                          \
             return {};                                                                             \
         }                                                                                          \
@@ -147,8 +152,7 @@
         {                                                                                          \
             if constexpr(std::is_pointer<TableT>::value)                                           \
             {                                                                                      \
-                assert(_table != nullptr && "nullptr to MARKER table for " #RCCL_FUNC              \
-                                            " function");                                          \
+                assert(_table != nullptr && "nullptr to RCCL table for " #RCCL_FUNC " function");  \
                 return _table->RCCL_FUNC_PTR;                                                      \
             }                                                                                      \
             else                                                                                   \
@@ -171,10 +175,16 @@
             return &base_type::functor<RetT, Args...>;                                             \
         }                                                                                          \
                                                                                                    \
-        static std::vector<void*> as_arg_addr(callback_data_type trace_data)                       \
+        static std::vector<void*> as_arg_addr(rocprofiler_rccl_api_args_t args)                    \
         {                                                                                          \
             return std::vector<void*>{                                                             \
-                GET_ADDR_MEMBER_FIELDS(get_api_data_args(trace_data.args), __VA_ARGS__)};          \
+                GET_ADDR_MEMBER_FIELDS(get_api_data_args(args), __VA_ARGS__)};                     \
+        }                                                                                          \
+                                                                                                   \
+        static auto as_arg_list(rocprofiler_rccl_api_args_t args, int32_t max_deref)               \
+        {                                                                                          \
+            return utils::stringize(                                                               \
+                max_deref, GET_NAMED_MEMBER_FIELDS(get_api_data_args(args), __VA_ARGS__));         \
         }                                                                                          \
     };                                                                                             \
     }                                                                                              \
