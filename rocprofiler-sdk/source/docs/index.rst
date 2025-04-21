@@ -17,8 +17,6 @@ You can utilize the ROCprofiler-SDK to develop a tool for profiling and tracing 
 
 The code is open and hosted at `<https://github.com/ROCm/rocprofiler-sdk>`_.
 
-.. note::
-  ROCprofiler-SDK is in beta and subject to change in future releases.
 
 The documentation is structured as follows:
 
