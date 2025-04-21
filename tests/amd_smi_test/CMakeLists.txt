@@ -61,9 +61,6 @@ target_link_libraries(${TEST}
                       stdc++
                       pthread)
 
-target_compile_definitions(${TEST} PRIVATE
-    CPER_SYS_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/cper")
-
 # Install tests
 install(
     TARGETS ${TEST}
@@ -79,4 +76,3 @@ install(
 install(TARGETS gtest gtest_main
     DESTINATION ${SHARE_INSTALL_PREFIX}/tests
     COMPONENT ${TESTS_COMPONENT})
-
