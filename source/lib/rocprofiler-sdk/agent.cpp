@@ -689,6 +689,9 @@ read_topology()
         {
             constexpr auto workgrp_max = 1024;
             constexpr auto grid_max    = std::numeric_limits<uint32_t>::max();
+            constexpr auto grid_max_x  = std::numeric_limits<int32_t>::max();
+            constexpr auto grid_max_y  = std::numeric_limits<uint16_t>::max();
+            constexpr auto grid_max_z  = std::numeric_limits<uint16_t>::max();
 
             read_property(properties, "unique_id", agent_info.uuid.value);
             read_property(
@@ -702,7 +705,7 @@ read_topology()
             agent_info.workgroup_max_size = workgrp_max;  // hardcoded in hsa-runtime
             agent_info.workgroup_max_dim  = {workgrp_max, workgrp_max, workgrp_max};
             agent_info.grid_max_size      = grid_max;  // hardcoded in hsa-runtime
-            agent_info.grid_max_dim       = {grid_max, grid_max, grid_max};
+            agent_info.grid_max_dim       = {grid_max_x, grid_max_y, grid_max_z};
             agent_info.cu_count           = agent_info.simd_count / agent_info.simd_per_cu;
 
             if(int drm_fd = 0; (drm_fd = drmOpenRender(agent_info.drm_render_minor)) >= 0)
