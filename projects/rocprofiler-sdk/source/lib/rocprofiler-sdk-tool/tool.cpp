@@ -2670,7 +2670,7 @@ rocprofv3_set_main(main_func_t main_func)
         ROCP_INFO << fmt::format("[PPID={}][PID={}][TID={}][rocprofv3] {}" MSG,                    \
                                  getppid(),                                                        \
                                  getpid(),                                                         \
-                                 gettid(),                                                         \
+                                 rocprofiler::common::get_tid(),                                   \
                                  __FUNCTION__,                                                     \
                                  __VA_ARGS__);                                                     \
     }
