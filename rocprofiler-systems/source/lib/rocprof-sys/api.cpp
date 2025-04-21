@@ -122,7 +122,7 @@ rocprofsys_init_library(void)
 extern "C" void
 rocprofsys_init_tooling(void)
 {
-    rocprofsys_init_tooling_hidden(true);
+    rocprofsys_init_tooling_hidden();
 }
 
 extern "C" void
