@@ -1,5 +1,5 @@
 .. meta::
-  :description: Documentation of the mpi usage for rocprofv3
+  :description: Documentation of the MPI usage for rocprofv3
   :keywords: ROCprofiler-SDK tool, mpirun, rocprofv3, rocprofv3 tool usage, mpich, ROCprofiler-SDK command line tool, ROCprofiler-SDK CLI
 
 
@@ -9,9 +9,9 @@ Using rocprofv3 with MPI
 +++++++++++++++++++++++++++++
 
 Message Passing Interface (MPI) is a standardized and portable message-passing system designed to function on a wide variety of parallel computing architectures. MPI is widely used for developing parallel applications and is considered the de facto standard for communication in high-performance computing (HPC) environments.
-MPI applications are parallel applications running across multiple processes that can be distributed over one or more nodes.
+MPI applications are parallel programs that run across multiple processes, which can be distributed over one or more nodes.
 
-For MPI applications or other job launchers such as SLURM, place ``rocprofv3`` inside the job launcher. The following example demonstrates how to use ``rocprofv3`` with MPI:
+For MPI applications or other job launchers such as `SLURM <https://slurm.schedmd.com/documentation.html>`_, place ``rocprofv3`` inside the job launcher. The following example demonstrates how to use ``rocprofv3`` with MPI:
 
 .. code-block:: bash
 
@@ -30,7 +30,7 @@ The preceding command runs the application with ``rocprofv3`` and generates the 
     2293215_agent_info.csv
     2293215_hip_api_trace.csv
 
-Since the data collection is performed in-process, it's ideal to collect data from within the process(es) launched by MPI. Outside of ``mpirun``, the tool library is loaded into the ``mpirun`` executable.
+Since the data collection is performed in-process, it's ideal to collect data from within the processes launched by MPI. When ``rocprofv3`` is run outside of ``mpirun``, the tool library is loaded into the `mpirun` executable..
 Collecting data outside of ``mpirun`` works but fetches agent info for the ``mpirun`` process too. For example:
 
 .. code-block:: bash

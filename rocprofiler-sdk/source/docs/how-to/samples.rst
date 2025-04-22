@@ -1,9 +1,8 @@
-.. ---
-.. myst:
-..    html_meta:
-..        "description": "ROCprofiler-SDK is a tooling infrastructure for profiling general-purpose GPU compute applications running on the ROCm software."
-..        "keywords": "ROCprofiler-SDK, ROCProfiler-SDK samples"
-.. ---
+.. meta::
+    :description: "ROCprofiler-SDK is a tooling infrastructure for profiling general-purpose GPU compute applications running on the ROCm software."
+    :keywords: "ROCprofiler-SDK, ROCProfiler-SDK samples"
+
+.. _rocprofiler-sdk-samples:
 
 ROCprofiler-SDK samples
 ========================
@@ -47,3 +46,4 @@ To run the built samples, ``cd`` into the ``build-rocprofiler-sdk-samples`` dire
     
     ctest -V
 
+The `-V` option enables verbose output, providing detailed information about the test execution.
