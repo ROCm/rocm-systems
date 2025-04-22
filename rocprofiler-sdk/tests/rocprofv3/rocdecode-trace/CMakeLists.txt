@@ -18,12 +18,16 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 
 set(rocdecode-tracing-env "${PRELOAD_ENV}")
 
-set(ROCDECODE_VIDEO_FILE
-    "${rocDecode_ROOT_DIR}/share/rocdecode/video/AMD_driving_virtual_20-H265.265")
+file(GLOB_RECURSE ROCDECODE_VIDEO_FILE
+     "${rocDecode_ROOT_DIR}/share/rocdecode/video/*AMD_driving_virtual_20-H265.265")
 if(TARGET rocdecode-demo AND NOT EXISTS "${ROCDECODE_VIDEO_FILE}")
     message(
-        FATAL_ERROR
-            "Unable to find video file for rocdecode tests: ${ROCDECODE_VIDEO_FILE}")
+        WARNING "Unable to find video file for rocdecode tests: ${ROCDECODE_VIDEO_FILE}")
+    set(IS_DISABLED ON)
+endif()
+
+if(NOT TARGET rocdecode-demo)
+    set(IS_DISABLED ON)
 endif()
 
 add_test(
@@ -46,7 +50,7 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "threw an exception"
                DISABLED
-               $<NOT:$<TARGET_EXISTS:rocdecode-demo>>)
+               "${IS_DISABLED}")
 
 add_test(
     NAME rocprofv3-test-rocdecode-tracing-validate
@@ -68,4 +72,4 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "AssertionError"
                DISABLED
-               $<NOT:$<TARGET_EXISTS:rocdecode-demo>>)
+               "${IS_DISABLED}")

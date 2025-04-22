@@ -18,12 +18,16 @@ else()
     set(PRELOAD_ENV "LD_PRELOAD=$<TARGET_FILE:rocprofiler-sdk-json-tool>")
 endif()
 
-set(ROCDECODE_VIDEO_FILE
-    "${rocDecode_ROOT_DIR}/share/rocdecode/video/AMD_driving_virtual_20-H265.265")
+file(GLOB_RECURSE ROCDECODE_VIDEO_FILE
+     "${rocDecode_ROOT_DIR}/share/rocdecode/video/*AMD_driving_virtual_20-H265.265")
 if(TARGET rocdecode-demo AND NOT EXISTS "${ROCDECODE_VIDEO_FILE}")
     message(
-        FATAL_ERROR
-            "Unable to find video file for rocdecode tests: ${ROCDECODE_VIDEO_FILE}")
+        WARNING "Unable to find video file for rocdecode tests: ${ROCDECODE_VIDEO_FILE}")
+    set(IS_DISABLED ON)
+endif()
+
+if(NOT TARGET rocdecode-demo)
+    set(IS_DISABLED ON)
 endif()
 
 add_test(

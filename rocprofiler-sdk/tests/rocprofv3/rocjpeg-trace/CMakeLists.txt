@@ -38,11 +38,15 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 
 set(rocjpeg-tracing-env "${PRELOAD_ENV}")
 
-set(ROCJPEG_IMAGE_DIR "${ROCM_PATH}/share/rocjpeg/images")
-if(TARGET rocjpeg-demo AND NOT EXISTS "${ROCJPEG_IMAGE_DIR}")
+set(rocJPEG_IMAGE_DIR "${ROCM_PATH}/share/rocjpeg/images")
+if(TARGET rocjpeg-demo AND NOT EXISTS "${rocJPEG_IMAGE_DIR}")
     message(
-        FATAL_ERROR
-            "Unable to find image directory for rocjpeg tests: ${ROCJPEG_IMAGE_DIR}")
+        WARNING "Unable to find image directory for rocjpeg tests: ${rocJPEG_IMAGE_DIR}")
+    set(IS_DISABLED ON)
+endif()
+
+if(NOT TARGET rocjpeg-demo)
+    set(IS_DISABLED ON)
 endif()
 
 # CI Sanitizer run gives the following error: No target "rocjpeg-demo" Adding if-statement
@@ -54,7 +58,7 @@ add_test(
         ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format json csv
         --log-level env --
         $<IF:$<TARGET_EXISTS:rocjpeg-demo>,$<$<TARGET_EXISTS:rocjpeg-demo>:$<TARGET_FILE:rocjpeg-demo>>,rocjpeg-demo>
-        -i ${ROCJPEG_IMAGE_DIR})
+        -i ${rocJPEG_IMAGE_DIR})
 
 set_tests_properties(
     rocprofv3-test-rocjpeg-tracing-execute
@@ -67,7 +71,7 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "threw an exception"
                DISABLED
-               $<NOT:$<TARGET_EXISTS:rocjpeg-demo>>)
+               "${IS_DISABLED}")
 
 add_test(
     NAME rocprofv3-test-rocjpeg-tracing-validate
@@ -89,4 +93,4 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "AssertionError"
                DISABLED
-               $<NOT:$<TARGET_EXISTS:rocjpeg-demo>>)
+               "${IS_DISABLED}")
