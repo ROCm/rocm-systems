@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2021-25 Advanced Micro Devices, Inc. All rights reserved.
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
@@ -102,9 +102,12 @@ TEST_CASE("Unit_hipMemset2DAsync_BasicFunctional") {
     A_h[i] = 1;
   }
 
+  GENERATE_CAPTURE();
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
+  BEGIN_CAPTURE(stream);
   HIP_CHECK(hipMemset2DAsync(A_d, pitch_A, memsetval, numW, numH, stream));
+  END_CAPTURE(stream);
   HIP_CHECK(hipStreamSynchronize(stream));
   HIP_CHECK(hipMemcpy2D(A_h, width, A_d, pitch_A, numW, numH, hipMemcpyDeviceToHost));
 

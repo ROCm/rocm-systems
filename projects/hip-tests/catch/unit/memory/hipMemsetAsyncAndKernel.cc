@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2021-25 Advanced Micro Devices, Inc. All rights reserved.
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
@@ -88,18 +88,24 @@ static bool testhipMemsetAsyncWithKernel(bool UseStrmPerThrd) {
   constexpr char memsetval = 0x42;
 
   obj.memAllocate(memsetval);
-  for (int k = 0; k < ITER; ++k) {
+  GENERATE_CAPTURE();
+  for (int k = 0 ; k < ITER ; ++k) {
     if (UseStrmPerThrd) {  // will use hipStreamPerThread stream object
       hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0,
                          hipStreamPerThread, obj.B_d, obj.C_d, N);
       HIP_CHECK(hipGetLastError());
       HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
-      HIP_CHECK(hipMemsetAsync(obj.C_d, obj.memSetVal, N, hipStreamPerThread));
+      BEGIN_CAPTURE(hipStreamPerThread);
+      HIP_CHECK(hipMemsetAsync(obj.C_d , obj.memSetVal, N, hipStreamPerThread));
+      END_CAPTURE(hipStreamPerThread);
       HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
     } else {
-      hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0, obj.stream,
-                         obj.B_d, obj.C_d, N);
-      HIP_CHECK(hipMemsetAsync(obj.C_d, obj.memSetVal, N, obj.stream));
+      BEGIN_CAPTURE(obj.stream);
+      hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks),
+                      dim3(threadsPerBlock), 0, obj.stream, obj.B_d, obj.C_d,
+                      N);
+      HIP_CHECK(hipMemsetAsync(obj.C_d , obj.memSetVal , N , obj.stream));
+      END_CAPTURE(obj.stream);
       HIP_CHECK(hipStreamSynchronize(obj.stream));
     }
     HIP_CHECK(hipMemcpy(obj.A_h, obj.C_d, obj.Nbytes, hipMemcpyDeviceToHost));
@@ -114,11 +120,15 @@ static bool testhipMemsetD32AsyncWithKernel() {
   constexpr int memsetD32val = 0xDEADBEEF;
 
   obj.memAllocate(memsetD32val);
-  for (int k = 0; k < ITER; k++) {
-    hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0, obj.stream,
-                       obj.B_d, obj.C_d, N);
+  GENERATE_CAPTURE();
+  for (int k = 0 ; k < ITER ; k++) {
+    hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks),
+                    dim3(threadsPerBlock), 0, obj.stream, obj.B_d, obj.C_d, N);
     HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipMemsetD32Async((hipDeviceptr_t)obj.C_d, obj.memSetVal, N, obj.stream));
+    BEGIN_CAPTURE(obj.stream);
+    HIP_CHECK(hipMemsetD32Async((hipDeviceptr_t)obj.C_d , obj.memSetVal,
+                                N, obj.stream));
+    END_CAPTURE(obj.stream);
     HIP_CHECK(hipStreamSynchronize(obj.stream));
     HIP_CHECK(hipMemcpy(obj.A_h, obj.C_d, obj.Nbytes, hipMemcpyDeviceToHost));
 
@@ -132,11 +142,15 @@ static bool testhipMemsetD16AsyncWithKernel() {
   constexpr int16_t memsetD16val = 0xDEAD;
 
   obj.memAllocate(memsetD16val);
-  for (int k = 0; k < ITER; k++) {
-    hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0, obj.stream,
-                       obj.B_d, obj.C_d, N);
+  GENERATE_CAPTURE();
+  for (int k = 0 ; k < ITER ; k++) {
+    hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks),
+                    dim3(threadsPerBlock), 0, obj.stream, obj.B_d, obj.C_d, N);
     HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipMemsetD16Async((hipDeviceptr_t)obj.C_d, obj.memSetVal, N, obj.stream));
+    BEGIN_CAPTURE(obj.stream);
+    HIP_CHECK(hipMemsetD16Async((hipDeviceptr_t)obj.C_d , obj.memSetVal,
+                                                              N, obj.stream));
+    END_CAPTURE(obj.stream);
     HIP_CHECK(hipStreamSynchronize(obj.stream));
     HIP_CHECK(hipMemcpy(obj.A_h, obj.C_d, obj.Nbytes, hipMemcpyDeviceToHost));
 
@@ -150,11 +164,15 @@ static bool testhipMemsetD8AsyncWithKernel() {
   constexpr char memsetD8val = 0xDE;
 
   obj.memAllocate(memsetD8val);
+  GENERATE_CAPTURE();
   for (int k = 0; k < ITER; k++) {
     hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0, obj.stream,
                        obj.B_d, obj.C_d, N);
     HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipMemsetD8Async((hipDeviceptr_t)obj.C_d, obj.memSetVal, N, obj.stream));
+    BEGIN_CAPTURE(obj.stream);
+    HIP_CHECK(hipMemsetD8Async((hipDeviceptr_t)obj.C_d, obj.memSetVal,
+                                                              N, obj.stream));
+    END_CAPTURE(obj.stream);
     HIP_CHECK(hipStreamSynchronize(obj.stream));
     HIP_CHECK(hipMemcpy(obj.A_h, obj.C_d, obj.Nbytes, hipMemcpyDeviceToHost));
 
@@ -207,3 +225,4 @@ TEST_CASE("Unit_hipMemsetAsync_VerifyExecutionWithKernel") {
     REQUIRE(ret == true);
   }
 }
+

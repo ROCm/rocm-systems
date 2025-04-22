@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2021-25 Advanced Micro Devices, Inc. All rights reserved.
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
@@ -130,7 +130,7 @@ bool loopRegression(bool bAsync) {
     HIP_CHECK(hipMalloc3D(&pitchedPtr, extent));
     devPitchedPtrlist.push_back(pitchedPtr);
   }
-
+  GENERATE_CAPTURE();
   for (int itern = 0; itern < MAX_REGRESS_ITERS; itern++) {
     // Validate hipMemset3D data consistency in multiple iters
     for (int i = 0; i < numGpu; i++) {
@@ -149,7 +149,9 @@ bool loopRegression(bool bAsync) {
         if (bAsync) {
           hipStream_t stream;
           HIP_CHECK(hipStreamCreate(&stream));
+          BEGIN_CAPTURE(stream);
           HIP_CHECK(hipMemset3DAsync(devpPtr, memsetval, extent, stream));
+          END_CAPTURE(stream);
           HIP_CHECK(hipStreamSynchronize(stream));
           HIP_CHECK(hipStreamDestroy(stream));
         } else {

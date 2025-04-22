@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2021-25 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -102,10 +102,12 @@ TEST_CASE("Unit_hipMemset3DAsync_BasicFunctional") {
   for (size_t i = 0; i < elements; i++) {
     A_h[i] = 1;
   }
-
+  GENERATE_CAPTURE();
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
+  BEGIN_CAPTURE(stream);
   HIP_CHECK(hipMemset3DAsync(devPitchedPtr, memsetval, extent, stream));
+  END_CAPTURE(stream);
   HIP_CHECK(hipStreamSynchronize(stream));
   hipMemcpy3DParms myparms{};
   myparms.srcPos = make_hipPos(0, 0, 0);

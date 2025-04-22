@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2022-25 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of intge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -45,8 +45,11 @@ template <typename T> void runAsyncTests(hipStream_t stream, allocType type, mem
   data1.pitch = totalRange.pitch;
   data2.pitch = totalRange.pitch;
 
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
   memsetCheck(aPtr.first, testValue1, memType, data1, stream);
   memsetCheck(aPtr.first, testValue2, memType, data2, stream);
+  END_CAPTURE(stream);
 
   HIP_CHECK(hipStreamSynchronize(stream));
   verifyData(aPtr.first, testValue1, data1, type, memType);

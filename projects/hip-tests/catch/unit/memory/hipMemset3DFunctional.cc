@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2021-25 Advanced Micro Devices, Inc. All rights reserved.
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
@@ -104,10 +104,12 @@ static void testMemsetWithExtent(bool bAsync, hipExtent tstExtent) {
   REQUIRE(A_h != nullptr);
   memset(A_h, 0, sizeElements);
   HIP_CHECK(hipMalloc3D(&devPitchedPtr, extent));
+
+  GENERATE_CAPTURE();
   if (bAsync) {
     hipStream_t stream;
     HIP_CHECK(hipStreamCreate(&stream));
-
+    BEGIN_CAPTURE(stream);
     ret = hipMemset3DAsync(devPitchedPtr, MEMSETVAL, extent, stream);
     INFO("testMemsetWithExtent(" << extent.width << "," << extent.height << "," << extent.depth
                                  << ") memset " << MEMSETVAL << ", ret : " << ret);
@@ -117,7 +119,7 @@ static void testMemsetWithExtent(bool bAsync, hipExtent tstExtent) {
     INFO("testMemsetWithExtent(" << tstExtent.width << "," << tstExtent.height << ","
                                  << tstExtent.depth << ") memset " << TESTVAL << "ret : " << ret);
     REQUIRE(ret == hipSuccess);
-
+    END_CAPTURE(stream);
     HIP_CHECK(hipStreamSynchronize(stream));
     HIP_CHECK(hipStreamDestroy(stream));
   } else {
@@ -178,17 +180,22 @@ static void testMemsetMaxValue(bool bAsync) {
   REQUIRE(A_h != nullptr);
   memset(A_h, 0, sizeElements);
 
+  GENERATE_CAPTURE();
   HIP_CHECK(hipMalloc3D(&devPitchedPtr, extent));
   if (bAsync) {
     SECTION("Using user created stream") {
       hipStream_t stream;
       HIP_CHECK(hipStreamCreate(&stream));
+      BEGIN_CAPTURE(stream);
       HIP_CHECK(hipMemset3DAsync(devPitchedPtr, memsetval, extent, stream));
+      END_CAPTURE(stream);
       HIP_CHECK(hipStreamSynchronize(stream));
       HIP_CHECK(hipStreamDestroy(stream));
     }
     SECTION("Using hipStreamPerThread") {
+      BEGIN_CAPTURE(hipStreamPerThread);
       HIP_CHECK(hipMemset3DAsync(devPitchedPtr, memsetval, extent, hipStreamPerThread));
+      END_CAPTURE(hipStreamPerThread);
       HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
     }
   } else {
@@ -246,17 +253,22 @@ static void seekAndSet3DArraySlice(bool bAsync) {
   size_t slicePitch = pitch * extent.height;
 
   // Point devptr to selected slice
-  char* devPtrSlice =
-      (reinterpret_cast<char*>(devicePitchedPointer.ptr)) + slice_index * slicePitch;
-  hipExtent extentSlice = make_hipExtent(sizeof(char) * arr_dimensions.x, arr_dimensions.y, 1);
-  hipPitchedPtr modDevPitchedPtr =
-      make_hipPitchedPtr(devPtrSlice, pitch, arr_dimensions.x, arr_dimensions.y);
-
+  char *devPtrSlice = (reinterpret_cast<char *>(devicePitchedPointer.ptr))
+                       + slice_index * slicePitch;
+  hipExtent extentSlice = make_hipExtent(sizeof(char) * arr_dimensions.x,
+                                         arr_dimensions.y, 1);
+  hipPitchedPtr modDevPitchedPtr = make_hipPitchedPtr(devPtrSlice, pitch,
+                                         arr_dimensions.x, arr_dimensions.y);
+  
   if (bAsync) {
+    GENERATE_CAPTURE();
     // Memset selected slice (Async)
     hipStream_t stream;
     HIP_CHECK(hipStreamCreate(&stream));
-    HIP_CHECK(hipMemset3DAsync(modDevPitchedPtr, memsetval4seeked, extentSlice, stream));
+    BEGIN_CAPTURE(stream);
+    HIP_CHECK(hipMemset3DAsync(modDevPitchedPtr, memsetval4seeked,
+                              extentSlice, stream));
+    END_CAPTURE(stream);
     HIP_CHECK(hipStreamSynchronize(stream));
     HIP_CHECK(hipStreamDestroy(stream));
   } else {
@@ -341,11 +353,15 @@ static void seekAndSet3DArrayPortion(bool bAsync) {
       make_hipPitchedPtr(devPtrIndexed, pitch, arr_dimensions.x, arr_dimensions.y);
   hipExtent setExtent = make_hipExtent(sizeof(char) * XSET_LEN, YSET_LEN, ZSET_LEN);
 
+  GENERATE_CAPTURE();
   if (bAsync) {
     // Memset selected portion (Async)
     hipStream_t stream;
     HIP_CHECK(hipStreamCreate(&stream));
-    HIP_CHECK(hipMemset3DAsync(modDevPitchedPtr, memsetval4seeked, setExtent, stream));
+    BEGIN_CAPTURE(stream);
+    HIP_CHECK(hipMemset3DAsync(modDevPitchedPtr, memsetval4seeked,
+                              setExtent, stream));
+    END_CAPTURE(stream);
     HIP_CHECK(hipStreamSynchronize(stream));
     HIP_CHECK(hipStreamDestroy(stream));
   } else {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2021-25 Advanced Micro Devices, Inc. All rights reserved.
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
@@ -62,6 +62,7 @@ TEST_CASE("Unit_hipMemset2DAsync_WithKernel") {
   unsigned blocks{};
   int validateCount{};
 
+  GENERATE_CAPTURE();
   blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
   HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, NUM_H));
   HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&B_d), &pitch_B, width, NUM_H));
@@ -83,10 +84,13 @@ TEST_CASE("Unit_hipMemset2DAsync_WithKernel") {
       hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0, stream,
                          B_d, C_d, elements);
       HIP_CHECK(hipStreamSynchronize(stream));
-      HIP_CHECK(hipMemset2DAsync(C_d, pitch_C, memsetval, NUM_W, NUM_H, stream));
+      BEGIN_CAPTURE(stream);
+      HIP_CHECK(hipMemset2DAsync(C_d, pitch_C, memsetval, NUM_W, NUM_H,
+                stream));
+      END_CAPTURE(stream);
       HIP_CHECK(hipStreamSynchronize(stream));
-      HIP_CHECK(hipMemcpy2D(A_h, width, C_d, pitch_C, NUM_W, NUM_H, hipMemcpyDeviceToHost));
-
+      HIP_CHECK(hipMemcpy2D(A_h, width, C_d, pitch_C, NUM_W, NUM_H,
+                           hipMemcpyDeviceToHost));
       for (size_t p = 0; p < elements; p++) {
         if (A_h[p] == memsetval) {
           validateCount += 1;
@@ -101,9 +105,13 @@ TEST_CASE("Unit_hipMemset2DAsync_WithKernel") {
                          hipStreamPerThread, B_d, C_d, elements);
       HIP_CHECK(hipGetLastError());
       HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
-      HIP_CHECK(hipMemset2DAsync(C_d, pitch_C, memsetval, NUM_W, NUM_H, hipStreamPerThread));
+      BEGIN_CAPTURE(hipStreamPerThread);
+      HIP_CHECK(hipMemset2DAsync(C_d, pitch_C, memsetval, NUM_W, NUM_H,
+                hipStreamPerThread));
+      END_CAPTURE(hipStreamPerThread);
       HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
-      HIP_CHECK(hipMemcpy2D(A_h, width, C_d, pitch_C, NUM_W, NUM_H, hipMemcpyDeviceToHost));
+      HIP_CHECK(hipMemcpy2D(A_h, width, C_d, pitch_C, NUM_W, NUM_H,
+                           hipMemcpyDeviceToHost));
 
       for (size_t p = 0; p < elements; p++) {
         if (A_h[p] == memsetval) {
@@ -114,7 +122,7 @@ TEST_CASE("Unit_hipMemset2DAsync_WithKernel") {
   }
 
   REQUIRE(static_cast<size_t>(validateCount) == (ITER * elements));
-
+  
   HIP_CHECK(hipFree(A_d));
   HIP_CHECK(hipFree(B_d));
   HIP_CHECK(hipFree(C_d));

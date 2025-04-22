@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2021-25 Advanced Micro Devices, Inc. All rights reserved.
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
@@ -77,14 +77,15 @@ static bool testMemset(allocator_fn_t allocator, deallocator_fn_t deallocator) {
   bool result = true;
 
   HIP_CHECK(hipStreamCreate(&stream));
-
+  GENERATE_CAPTURE();
   for (size_t size : buffer_nelems) {
     void* ptr = nullptr;
 
     HIP_CHECK(allocator(&ptr, size * sizeof(test_target_t)));
 
+    BEGIN_CAPTURE(stream);
     HIP_CHECK(memset_fn((hipDeviceptr_t)(ptr), pattern, size, stream));
-
+    END_CAPTURE(stream);
     HIP_CHECK(hipStreamSynchronize(stream));
 
     result = checkBuffer(static_cast<test_target_t*>(ptr), size, pattern);
@@ -184,6 +185,8 @@ TEST_CASE("Unit_hipMemsetD16Async_KernelBuffer") {
   HIP_CHECK(hipMalloc(&dest_ptr, nbytes));
   HIP_CHECK(hipStreamCreate(&stream));
 
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
   HIP_CHECK(memset_fn((hipDeviceptr_t)(src_ptr), pattern, ptr_test_nelem, stream));
   HIP_CHECK(memset_fn((hipDeviceptr_t)(add_by_one_src_ptr), 1, ptr_test_nelem, stream));
 
@@ -191,7 +194,7 @@ TEST_CASE("Unit_hipMemsetD16Async_KernelBuffer") {
 
   hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, stream, src_ptr,
                      add_by_one_src_ptr, dest_ptr, ptr_test_nelem);
-
+  END_CAPTURE(stream);
   HIP_CHECK(hipStreamSynchronize(stream));
 
   bool result = checkBuffer(dest_ptr, ptr_test_nelem, pattern + 1);
