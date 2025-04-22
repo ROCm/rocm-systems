@@ -4706,13 +4706,6 @@ typedef struct {
     uint8_t century;
 } amdsmi_cper_timestamp_t;
 
-typedef struct {
-    uint32_t platform_id  : 1;
-    uint32_t timestamp    : 1;
-    uint32_t partition_id : 1;
-    uint32_t reserved     : 29;
-} valid_bits_t;
-
 typedef union {
     struct valid_bits_ {
         uint32_t platform_id  : 1;
@@ -4729,11 +4722,7 @@ typedef struct {
     uint32_t              signature_end;     /* 0xFFFFFFFF */
     uint16_t              sec_cnt;
     amdsmi_cper_sev_t     error_severity;
-
-    // valid_bits_t          valid_bits;
-    // uint32_t              valid_mask;    
     amdsmi_cper_valid_bits_t cper_valid_bits; 
-    
     uint32_t                record_length;     /* Total size of CPER Entry */
     amdsmi_cper_timestamp_t timestamp;
     char                    platform_id[16];
@@ -4783,6 +4772,7 @@ typedef struct {
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
+
 amdsmi_status_t
 amdsmi_get_gpu_cper_entries(amdsmi_processor_handle processor_handle, uint32_t severity_mask, char *cper_data,
     uint64_t *buf_size, amdsmi_cper_hdr_t** cper_hdrs, uint64_t *entry_count, uint64_t *cursor);
