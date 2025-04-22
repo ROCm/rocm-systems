@@ -203,8 +203,8 @@ Panel Config:
             unit: (Instructions  + $normUnit)
             tips:
           Write Ack Instructions:
-            avg: None # AVG((TD_WRITE_ACKT_WAVEFRONT_sum / $denom))
-            min: None # MIN((TD_WRITE_ACKT_WAVEFRONT_sum / $denom))
-            max: None # MAX((TD_WRITE_ACKT_WAVEFRONT_sum / $denom))
+            avg: AVG((TD_WRITE_ACKT_WAVEFRONT_sum / $denom))
+            min: MIN((TD_WRITE_ACKT_WAVEFRONT_sum / $denom))
+            max: MAX((TD_WRITE_ACKT_WAVEFRONT_sum / $denom))
             unit: (Instructions  + $normUnit)
             tips:
