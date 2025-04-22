@@ -220,3 +220,20 @@ TEST_CASE("Unit_hipHostGetFlags_InvalidArgs") {
     }
   }
 }
+
+TEST_CASE("Unit_hipHostGetFlags_StreamCaptureBehavior") {
+  unsigned int flag = 0;
+  void *ptr = nullptr;
+  size_t size = 1024;
+  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&ptr), size));
+
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(hipHostGetFlags(&flag, ptr));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+}

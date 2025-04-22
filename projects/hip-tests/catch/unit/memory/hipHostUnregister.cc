@@ -94,4 +94,22 @@ TEST_CASE("Unit_hipHostUnregister_AlreadyUnregisteredPointer") {
   }
 }
 
+TEST_CASE("Unit_hipHostUnregister_StreamCaptureBehaviour") {
+  hipError_t err = hipSuccess;
+  bool rlx_mode_allowed = true;
+  size_t size = 1024;
+  int *ptr = (int*)malloc(size);
+  HIP_CHECK_ERROR(hipHostRegister(ptr, size, 0), err);
+
+  BEGIN_CAPTURE_SYNC(err, rlx_mode_allowed);
+  HIP_CHECK_ERROR(hipHostUnregister(ptr), err);
+  END_CAPTURE_SYNC(err);
+
+  if (err != hipSuccess) {
+    HIP_CHECK(hipHostUnregister(ptr));
+  }
+
+  free(ptr);
+}
+
 }  // namespace hipHostUnregisterTests

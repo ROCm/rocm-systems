@@ -980,6 +980,22 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_Negative", "", int, float, double) {
   }
 }
 
+TEST_CASE("Unit_hipHostRegister_StreamCaptureBehavior") {
+  hipError_t err = hipSuccess;
+  bool rlx_mode_allowed = true;
+  size_t size = 1024;
+  int *ptr = (int*)malloc(size);
+  BEGIN_CAPTURE_SYNC(err, rlx_mode_allowed);
+  HIP_CHECK_ERROR(hipHostRegister(ptr, size, 0), err);
+  END_CAPTURE_SYNC(err);
+
+  if (err == hipSuccess) {
+    HIP_CHECK(hipHostUnregister(ptr));
+  }
+
+  free(ptr);
+}
+
 /**
  * End doxygen group MemoryTest.
  * @}

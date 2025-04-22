@@ -100,3 +100,25 @@ TEST_CASE("Unit_hipHostGetDevicePointer_UseCase") {
 
   HIP_CHECK(hipHostFree(hPtr));
 }
+
+TEST_CASE("Unit_hipHostGetDevicePointer_StreamCaptureBehavior") {
+  if(!DeviceAttributesSupport(0, hipDeviceAttributeCanMapHostMemory)) {
+    HipTest::HIP_SKIP_TEST("Device does not support mapping host memory");
+    return;
+  }
+
+  int* dPtr{nullptr};
+  int* hPtr{nullptr};
+  HIP_CHECK(hipHostMalloc(&hPtr, sizeof(int)));
+
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&dPtr), hPtr, 0));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipHostFree(hPtr));
+}

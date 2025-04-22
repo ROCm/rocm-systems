@@ -384,3 +384,19 @@ TEST_CASE("Unit_hipHostAlloc_ArgValidation") {
     REQUIRE(ptr == nullptr);
   }
 }
+
+TEST_CASE("Unit_hipHostAlloc_StreamCaptureBehavior") {
+  int *host_memory = nullptr;
+  int flags = get_flags();
+
+  hipError_t err = hipSuccess;
+  bool rlx_mode_allowed = true;
+  BEGIN_CAPTURE_SYNC(err, rlx_mode_allowed);
+  HIP_CHECK_ERROR(hipHostAlloc(reinterpret_cast<void**>(&host_memory), sizeof(int), flags), err);
+  END_CAPTURE_SYNC(err);
+
+  if (err == hipSuccess) {
+    REQUIRE(host_memory != nullptr);
+    HIP_CHECK(hipFreeHost(host_memory));
+  }
+}
