@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   python:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
 
     steps:
     - name: Checkout
@@ -35,7 +35,7 @@ jobs:
       uses: isort/isort-action@master
 
   cmake:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
 
     steps:
     - uses: actions/checkout@v4
@@ -58,7 +58,7 @@ jobs:
         fi
 
   python-bytecode:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
 
     steps:
     - uses: actions/checkout@v4
