@@ -54,6 +54,8 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice
 amdsmi_status_t smi_amdgpu_is_gpu_power_management_enabled(amd::smi::AMDSmiGPUDevice* device, bool *enabled);
 std::string smi_split_string(std::string str, char delim);
 std::string smi_amdgpu_get_status_string(amdsmi_status_t ret, bool fullStatus);
+amdsmi_status_t smi_clear_char_and_reinitialize(char buffer[], uint32_t len,
+                                                    std::string newString);
 amdsmi_status_t amdsmi_get_gpu_cper_entries_by_path(const char *amdgpu_ring_cper_file, uint32_t severity_mask, char *cper_data, uint64_t *buf_size, amdsmi_cper_hdr_t **cper_hdrs, uint64_t *entry_count, uint64_t *cursor);
 
 /**

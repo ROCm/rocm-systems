@@ -1341,16 +1341,7 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
             amd::smi::AMDSmiSystem::getInstance().clean_up_drm();
             return status;
         }
-
         SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
-
-        std::string path = "/sys/class/drm/" + gpu_device->get_gpu_path() + "/device/unique_id";
-        FILE *fp = fopen(path.c_str(), "r");
-        if (fp) {
-            fscanf(fp, "%s", info->asic_serial);
-            fclose(fp);
-        }
-
         status = smi_amdgpu_get_market_name_from_dev_id(gpu_device, info->market_name);
         if (status != AMDSMI_STATUS_SUCCESS) {
             rsmi_wrapper(rsmi_dev_brand_get, processor_handle, 0,
@@ -1361,13 +1352,6 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
         info->rev_id = dev_info.pci_rev;
         info->vendor_id = gpu_device->get_vendor_id();
     } else {
-        uint64_t dv_uid = 0;
-        status = rsmi_wrapper(rsmi_dev_unique_id_get, processor_handle, 0,
-                              &dv_uid);
-        if (status == AMDSMI_STATUS_SUCCESS) {
-            snprintf(info->asic_serial, sizeof(info->asic_serial), "%lu", dv_uid);
-        }
-
         status = rsmi_wrapper(rsmi_dev_brand_get, processor_handle, 0,
                 info->market_name, AMDSMI_256_LENGTH);
 
@@ -1376,6 +1360,28 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
         if (status == AMDSMI_STATUS_SUCCESS) info->vendor_id = vendor_id;
     }
     // For other sysfs related information, get from rocm-smi
+
+    // Ensure asic_serial defaults to an unsupported value
+    std::string max_uint64_str = "ffffffffffffffff";
+    smi_clear_char_and_reinitialize(info->asic_serial, AMDSMI_MAX_STRING_LENGTH, max_uint64_str);
+    uint64_t dv_uid = 0;
+    status = rsmi_wrapper(rsmi_dev_unique_id_get, processor_handle, 0, &dv_uid);
+    if (status == AMDSMI_STATUS_SUCCESS) {
+        ss.clear();
+        ss << std::hex << dv_uid;
+        std::string asic_serial_str = ss.str();
+        ss.clear();
+        smi_clear_char_and_reinitialize(info->asic_serial, AMDSMI_MAX_STRING_LENGTH,
+                                        asic_serial_str);
+        ss << __PRETTY_FUNCTION__
+           << " | Retrieved unique_id from rsmi: " << processor_handle << "\n"
+           << " ; Successfully fell back to KFD's unique_id... \n"
+           << " ; info->asic_serial (hex): " << info->asic_serial << "\n"
+           << " ; info->asic_serial (dec): " << std::dec
+           << static_cast<uint64_t>(std::stoull(asic_serial_str, nullptr, 16));
+        LOG_INFO(ss);
+    }
+
     status = rsmi_wrapper(rsmi_dev_subsystem_vendor_id_get, processor_handle, 0,
                           &subvendor_id);
     if (status == AMDSMI_STATUS_SUCCESS) info->subvendor_id = subvendor_id;
