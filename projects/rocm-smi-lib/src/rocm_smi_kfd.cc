@@ -1051,6 +1051,7 @@ int KFDNode::get_node_id(uint32_t *node_id) {
   int ret = 0;
   std::string nodeid_path = "/sys/class/kfd/kfd/topology/nodes/"
     + std::to_string(this->node_indx_);
+  *node_id = this->node_indx_;
   ss << __PRETTY_FUNCTION__
      << " | File: " << nodeid_path
      << " | Read node #: " << std::to_string(this->node_indx_)
@@ -1058,7 +1059,6 @@ int KFDNode::get_node_id(uint32_t *node_id) {
      << " | Return: "
      << getRSMIStatusString(amd::smi::ErrnoToRsmiStatus(ret), false)
      << " | ";
-  *node_id = this->node_indx_;
   LOG_DEBUG(ss);
   return ret;
 }
