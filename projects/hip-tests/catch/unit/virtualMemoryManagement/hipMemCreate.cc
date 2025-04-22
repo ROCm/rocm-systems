@@ -460,6 +460,35 @@ TEST_CASE("Unit_hipMemCreate_Negative") {
   CTX_DESTROY();
 }
 
+TEST_CASE("Unit_hipMemCreate_StreamCaptureBehavior") {
+  hipMemGenericAllocationHandle_t handle;
+  size_t granularity = 0;
+  int deviceId = 0;
+  hipDevice_t device;
+  CTX_CREATE();
+  HIP_CHECK(hipDeviceGet(&device, deviceId));
+
+
+  hipMemAllocationProp prop{};
+  prop.type = hipMemAllocationTypePinned;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id = device;  // Current Devices
+
+  HIP_CHECK(
+      hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
+
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(hipMemCreate(&handle, granularity, &prop, 0));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipMemRelease(handle));
+}
+
+
 /**
  * End doxygen group VirtualMemoryManagementTest.
  * @}

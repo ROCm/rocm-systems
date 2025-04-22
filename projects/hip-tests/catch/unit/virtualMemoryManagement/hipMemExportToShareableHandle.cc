@@ -133,6 +133,43 @@ TEST_CASE("Unit_hipMemExportToShareableHandle_Negative_Parameters") {
   HIP_CHECK(hipMemRelease(handle));
 }
 
+TEST_CASE("Unit_hipMemExportToShareableHandle_StreamCaptureBehavior") {
+  CTX_CREATE();
+
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, 0));
+  checkVMMSupported(device);
+
+  hipMemAllocationProp prop = {};
+  prop.type = hipMemAllocationTypePinned;
+  prop.requestedHandleTypes = hipMemHandleTypePosixFileDescriptor;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id = device;
+
+  size_t granularity;
+  HIP_CHECK(
+      hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
+
+  hipMemGenericAllocationHandle_t handle;
+  HIP_CHECK(hipMemCreate(&handle, granularity * 2, &prop, 0));
+
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  void* shareable_handle = nullptr;
+  HIP_CHECK(hipMemExportToShareableHandle(&shareable_handle, handle,
+                                          hipMemHandleTypePosixFileDescriptor, 0));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  REQUIRE(shareable_handle != nullptr);
+  HIP_CHECK(hipMemRelease(handle));
+
+  CTX_DESTROY();
+}
+
 /**
  * End doxygen group VirtualMemoryManagementTest.
  * @}

@@ -75,6 +75,39 @@ TEST_CASE("Unit_hipMemAddressFree_negative") {
   CTX_DESTROY();
 }
 
+TEST_CASE("Unit_hipMemAddressFree_StreamCaptureBehavior") {
+  CTX_CREATE();
+  size_t granularity = 0;
+  constexpr int N = DATA_SIZE;
+  size_t buffer_size = N * sizeof(int);
+  int deviceId = 0;
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, deviceId));
+  checkVMMSupported(device);
+  hipMemAllocationProp prop{};
+  prop.type = hipMemAllocationTypePinned;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id = device;
+  HIP_CHECK(
+      hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
+  REQUIRE(granularity > 0);
+  size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
+
+  hipDeviceptr_t ptrA;
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
+
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  CTX_DESTROY();
+}
+
 /**
  * End doxygen group VirtualMemoryManagementTest.
  * @}

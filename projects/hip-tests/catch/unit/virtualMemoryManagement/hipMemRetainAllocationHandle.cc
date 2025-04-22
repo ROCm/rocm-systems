@@ -140,6 +140,44 @@ TEST_CASE("Unit_hipMemRetainAllocationHandle_NegTst") {
   HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
 }
 
+TEST_CASE("Unit_hipMemRetainAllocationHandle_StreamCaptureBehavior") {
+  CTX_CREATE();
+  size_t granularity = 0;
+  constexpr int N = DATA_SIZE;
+  size_t buffer_size = N * sizeof(int);
+  int deviceId = 0;
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, deviceId));
+  checkVMMSupported(device);
+  hipMemAllocationProp prop{};
+  prop.type = hipMemAllocationTypePinned;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id = device;
+  HIP_CHECK(
+      hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
+  REQUIRE(granularity > 0);
+  size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
+  hipMemGenericAllocationHandle_t handle;
+  hipDeviceptr_t ptrA;
+  HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
+  HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0));
+  hipMemGenericAllocationHandle_t gethandle;
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(hipMemRetainAllocationHandle(&gethandle, reinterpret_cast<void*>(ptrA)));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipMemRelease(handle));
+  HIP_CHECK(hipMemUnmap(ptrA, size_mem));
+  HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
+  CTX_DESTROY();
+}
+
 /**
  * End doxygen group VirtualMemoryManagementTest.
  * @}

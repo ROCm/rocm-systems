@@ -121,6 +121,41 @@ TEST_CASE("Unit_hipMemGetAllocationPropertiesFromHandle_Negative") {
   CTX_DESTROY();
 }
 
+TEST_CASE("Unit_hipMemGetAllocationPropertiesFromHandle_StreamCaptureBehavior") {
+  CTX_CREATE();
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, 0));
+  checkVMMSupported(device);
+  hipMemGenericAllocationHandle_t handle;
+  hipMemAllocationProp prop = {};
+  prop.type = hipMemAllocationTypePinned;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id = device;
+
+  hipMemAllocationProp prop_temp = {};
+  size_t granularity = 0;
+  int N = DATA_SIZE;
+  size_t buffer_size = N * sizeof(int);
+  HIP_CHECK(
+      hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
+  REQUIRE(granularity > 0);
+  size_t mem_size = ((granularity + buffer_size - 1) / granularity) * granularity;
+
+  HIP_CHECK(hipMemCreate(&handle, mem_size, &prop, 0));
+
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(hipMemGetAllocationPropertiesFromHandle(&prop_temp, handle));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipMemRelease(handle));
+  CTX_DESTROY();
+}
+
 /**
  * End doxygen group VirtualMemoryManagementTest.
  * @}
