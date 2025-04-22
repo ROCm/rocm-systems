@@ -97,7 +97,8 @@ std::string removeString(const std::string origStr,
   return modifiedStr;
 }
 
-static void clearCharBufferAndReinitialize(char buffer[], uint32_t len, std::string newString) {
+amdsmi_status_t smi_clear_char_and_reinitialize(char buffer[], uint32_t len,
+                                                    std::string newString) {
     char *begin = &buffer[0];
     char *end = &buffer[len];
     std::fill(begin, end, 0);
@@ -108,14 +109,15 @@ static void clearCharBufferAndReinitialize(char buffer[], uint32_t len, std::str
         std::memcpy(buffer, newString.c_str(), copy_len);
     }
     buffer[copy_len] = '\0';
-  }
+    return AMDSMI_STATUS_SUCCESS;
+}
 
 int openFileAndModifyBuffer(std::string path, char *buff, size_t sizeOfBuff,
                             bool trim_whitespace = true) {
     bool errorDiscovered = false;
     std::ifstream file(path, std::ifstream::in);
     std::string contents = {std::istreambuf_iterator<char>{file}, std::istreambuf_iterator<char>{}};
-    clearCharBufferAndReinitialize(buff, static_cast<uint32_t>(sizeOfBuff), contents);
+    smi_clear_char_and_reinitialize(buff, static_cast<uint32_t>(sizeOfBuff), contents);
     if (!file.is_open()) {
         errorDiscovered = true;
     } else {
