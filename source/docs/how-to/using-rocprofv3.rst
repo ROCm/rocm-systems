@@ -8,18 +8,18 @@
 Using rocprofv3
 ======================
 
-``rocprofv3`` is a CLI tool that helps you quickly optimize applications and understand the low-level kernel details without requiring any modification in the source code.
-It's backward compatible with its predecessor, ``rocprof``, and provides more features for application profiling with better accuracy.
+``rocprofv3`` is a CLI tool that helps you optimize applications and analyze the low-level kernel details without requiring any modification in the source code.
+It's backward compatible with its predecessor, `rocprof <https://rocm.docs.amd.com/projects/rocprofiler/en/latest/index.html>`_, and provides enhanced features for application profiling with better accuracy.
 
 The following sections demonstrate the use of ``rocprofv3`` for application tracing and kernel counter collection using various command-line options.
 
-``rocprofv3`` is installed with ROCm under ``/opt/rocm/bin``. To use the tool from anywhere in the system, export ``PATH`` variable:
+``rocprofv3`` is installed with ROCm under ``/opt/rocm/bin``. To use the tool from anywhere in the system, export the ``PATH`` variable:
 
 .. code-block:: bash
 
    export PATH=$PATH:/opt/rocm/bin
 
-Before you start tracing or profiling your HIP application using ``rocprofv3``, build the application using:
+Before tracing or profiling your HIP application using ``rocprofv3``, build it using:
 
 .. code-block:: bash
 
@@ -55,7 +55,7 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
      - | Specifies the path to the input file. JSON and YAML formats support configuration of all command-line options for tracing and profiling whereas the text format supports only the specification of HW counters. |br| |br|
        | Specifies output file name. If nothing is specified, the default path is ``%hostname%/%pid%``. |br| |br|
        | Specifies the output path for saving the output files. If nothing is specified, the default path is ``%hostname%/%pid%``. |br| |br|
-       | Specifies output format. Supported formats: CSV, JSON, and PFTrace. |br| |br| |br|
+       | Specifies output format. Supported formats: CSV, JSON, PFTrace, and OTF2. |br| |br| |br|
        | Sets the desired log level. |br| |br| |br|
        | Specifies the path to a YAML file consisting of extra counter definitions.
 
@@ -85,7 +85,7 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
        | ``--hsa-trace`` [BOOL] |br| |br| |br| |br| |br| |br| |br| |br|
        | ``--rccl-trace`` [BOOL] |br| |br| |br| |br|
        | ``--kokkos-trace`` [BOOL] |br| |br| |br| |br|
-       | ``--rocdecode-trace`` [BOOL]
+       | ``--rocdecode-trace`` [BOOL] |br| |br| |br| |br|
      - | Combination of ``--hip-runtime-trace`` and ``--hip-compiler-trace``. This option only enables the HIP API tracing. Unlike previous iterations of ``rocprof``, this option doesn't enable kernel tracing, memory copy tracing, and so on. |br| |br|
        | Collects marker (ROCTx) traces. Similar to ``--roctx-trace`` option in earlier ``rocprof`` versions, but with improved ``ROCTx`` library with more features. |br| |br|
        | Collects kernel dispatch traces. |br| |br|
@@ -95,7 +95,7 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
        | Collects ``--hsa-core-trace``, ``--hsa-amd-trace``, ``--hsa-image-trace``, and ``--hsa-finalizer-trace``. This option only enables the HSA API tracing. Unlike previous iterations of ``rocprof``, this doesn't enable kernel tracing, memory copy tracing, and so on. |br| |br|
        | Collects traces for RCCL (ROCm Communication Collectives Library), which is also pronounced as 'Rickle'. |br| |br|
        | Enables builtin Kokkos tools support, which implies enabling ``--marker-trace`` collection and ``--kernel-rename``. |br| |br|
-       | Collects traces for rocDecode APIs.
+       | Collects traces for rocDecode APIs. |br| |br|
 
    * - Granular tracing
      - | ``--hip-runtime-trace`` [BOOL] |br| |br| |br| |br|
@@ -321,9 +321,9 @@ Marker trace
 Kokkos trace
 ++++++++++++++
 
-`Kokkos <https://github.com/kokkos/kokkos>`_ is a C++ library for writing performance portable applications. Kokkos is used in many scientific applications for writing performance portable code that can run on CPUs, GPUs, and other accelerators.
+`Kokkos <https://github.com/kokkos/kokkos>`_ is a C++ library for writing performance portable applications. Kokkos is widely used in scientific applications to write performance-portable code for CPUs, GPUs, and other accelerators.
 ``rocprofv3`` loads an inbuilt `Kokkos Tools library <https://github.com/kokkos/kokkos-tools>`_, which emits roctx ranges with the labels passed using Kokkos APIs. For example, ``Kokkos::parallel_for(“MyParallelForLabel”, …)`` calls ``roctxRangePush`` internally and enables the kernel renaming option to replace the highly templated kernel names with the Kokkos labels.
-To enable the inbuilt marker support, use the ``kokkos-trace`` option. Internally, this option enables ``marker-trace`` and ``kernel-rename``:
+To enable the inbuilt marker support, use the ``kokkos-trace`` option. Internally, this option automatically enables ``marker-trace`` and ``kernel-rename``:
 
 .. code-block:: bash
 
@@ -429,7 +429,7 @@ For the description of the fields in the output file, see :ref:`output-file-fiel
 Runtime trace
 +++++++++++++++
 
-This is a short-hand option that targets the most relevant tracing options for a standard user by
+This is a shorthand option that targets the most relevant tracing options for a standard user by
 excluding traces for HSA runtime API and HIP compiler API.
 
 The HSA runtime API is excluded because it is a lower-level API upon which HIP and OpenMP target are built and
@@ -525,7 +525,7 @@ Here are the contents of ``rocdecode_api_trace.csv`` file:
    :widths: 10,10,10,10,10,20,20
    :header-rows: 1
 
-Perfetto will also show rocDeocde API arguments. Pointers will not be dereferenced and only the address will be displayed.
+Perfetto will also show rocDecode API arguments. Pointers will not be dereferenced and only the address will be displayed.
 
 rocJPEG trace
 +++++++++++++++
@@ -724,6 +724,8 @@ To supply the input file for collecting traces, use:
 
    rocprofv3 -i input.yaml -- <application_path>
 
+Please note that input file format must be a valid `YAML` or `JSON` file.
+
 Disabling specific tracing options
 ++++++++++++++++++++++++++++++++++++
 
@@ -775,9 +777,9 @@ For a comprehensive list of counters available on MI200, see `MI200 performance 
 Counter collection using input file
 +++++++++++++++++++++++++++++++++++++
 
-You can use an input file in text (.txt), YAML (.yaml/.yml), or JSON (.json) format to collect the desired counters.
+Input files can be in text (.txt), YAML (.yaml/.yml), or JSON (.json) format to specify the the desired counters for collection.
 
-When using input file in text format, the line consisting of the counter names must begin with ``pmc``. The number of counters that can be collected in one run of profiling are limited by the GPU hardware resources. If too many counters are selected, the kernels need to be executed multiple times to collect them. For multi-pass execution, include multiple ``pmc`` rows in the input file. Counters in each ``pmc`` row can be collected in each application run.
+When using input file in text format, the line consisting of the counter names must begin with ``pmc``. The number of counters that can be collected in one profiling run are limited by the GPU hardware resources. If too many counters are selected, the kernels need to be executed multiple times(multi-pass execution) to collect all the counters. For multi-pass execution, include multiple ``pmc`` rows in the input file. Counters in each ``pmc`` row can be collected in each application run.
 
 Here is a sample input.txt file for specifying counters for collection:
 
@@ -978,14 +980,14 @@ Perfetto visualization for traces
 +++++++++++++++++++++++++++++++++++++++++++++
 
 Users can generate Perfetto trace files using the ``--output-format pftrace`` option. This allows users to visualize the traces in the Perfetto viewer.
-Perfetto is a powerful open-source tracing tool that provides a comprehensive view of system performance. It allows you to visualize the collected traces in a user-friendly interface, making it easier to analyze and understand the performance characteristics of your application.
+Perfetto is an open-source tracing tool that provides a detailed view of system performance. It allows you to visualize the collected traces in a user-friendly interface, making it easier to analyze and understand the performance characteristics of your application.
 To generate a Perfetto trace file, use the ``--output-format pftrace`` option along with the desired tracing options. For example, to collect system traces and generate a Perfetto trace file, use:
 
 .. code-block:: bash
 
   rocprofv3 --sys-trace --output-format pftrace -- <application_path>
 
-The generated Perfetto trace file can be opened in the Perfetto UI (https://ui.perfetto.dev/).
+The generated Perfetto trace file can be opened in the `Perfetto UI <https://ui.perfetto.dev/>`_.
 
 **Figure 1:** Generic perfetto visualization
 
@@ -1012,9 +1014,9 @@ To generate a Perfetto trace file with counter data, use:
 
     rocprofv3 --pmc SQ_WAVES GRBM_COUNT --output-format pftrace -- <application_path>
 
-The generated Perfetto trace file can be opened in the Perfetto UI (https://ui.perfetto.dev/). In the viewer, performance counters will appear as counter tracks organized by agent, allowing you to visualize counter values changing over time alongside kernel executions and other traced activities.
+The generated Perfetto trace file can be opened in the `Perfetto UI <https://ui.perfetto.dev/>`_. In the viewer, performance counters will appear as counter tracks organized by agent, allowing you to visualize counter values changing over time alongside kernel executions and other traced activities.
 
-you can also combine this with the system trace option to get a more comprehensive view of the system's performance. For example, you can use the following command to collect both system trace and performance counter data:
+You can also combine this with the system trace option to get a more comprehensive view of the system's performance. For example, you can use the following command to collect both system trace and performance counter data:
 
 .. code-block:: bash
   rocprofv3 --pmc SQ_WAVES GRBM_COUNT --sys-trace --output-format pftrace -- <application_path>
@@ -1053,7 +1055,7 @@ The agent index is a unique identifier for each agent in the system. It is used 
 - **type-relative** == *logical_node_type_id* - relative index of the agent accounting for cgroups masking where indexing starts at zero for each agent type. e.g. CPU-0, GPU-0, GPU-1
  
 
-To set the agent index in the output files, use the ``--agent-index`` option. The default value is ``absolute``.
+To set the agent index in the output files, use the ``--agent-index`` option. The default value is ``relative``.
 
 The following example shows how to set the agent index on a system with multiple GPUs and CPUs:
 

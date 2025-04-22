@@ -8,8 +8,8 @@
 Using ROCTx
 ============
 
-ROCTx is AMD tools extension library, a cross platform API for annotating code with markers and ranges. The ROCTx API is written in C++.
-In certain situations, such as debugging performance issues in large-scale GPU programs, API-level tracing might be too fine-grained to provide a big picture of the program execution.
+ROCTx is an AMD tools extension library, a cross platform API for annotating code with markers and ranges. The ROCTx API is written in C++.
+In certain situations, such as debugging performance issues in large-scale GPU programs, API-level tracing might be too fine-grained to provide an overview of the program execution.
 In such cases, it is helpful to define specific tasks to be traced. To specify the tasks for tracing, enclose the respective source code with the API calls provided by the ROCTx library.
 This process is also known as instrumentation.
 
@@ -21,14 +21,14 @@ ROCTx provides two types of annotations: markers and ranges.
 Markers
 ========
 
-Markers are used to insert a marker in the code with a message. Creating markers help you see when a line of code is executed.
+Markers are used to insert a marker in the code with a message. Creating markers helps you see when a line of code is executed.
 
 Ranges
 =======
 
 Ranges are used to define the scope of code for instrumentation using enclosing API calls.
 A range is a programmer-defined task that has a well-defined start and end code scope.
-You can also refine the scope specified within a range using further nested ranges. ``rocprofv3`` also reports the timelines for these nested ranges.
+You can further refine the scope specified within a range using nested ranges. ``rocprofv3`` also reports the timelines for these nested ranges.
 
 These are the two types of ranges:
 
@@ -139,7 +139,7 @@ To trace the preceding code, use:
 
     rocprofv3 --marker-trace --hip-trace -- <application_path>
 
-The preceding command generates a ``hip_api_trace.csv`` file prefixed with the process ID. The file has only two ``hipMemcpy`` calls with the in-between ``hipMemcpyDeviceToHost`` hidden .
+The preceding command generates a ``hip_api_trace.csv`` file prefixed with the process ID. The file contains two ``hipMemcpy`` calls with the in-between ``hipMemcpyDeviceToHost`` call hidden .
 
 .. code-block:: shell
 

@@ -8,7 +8,7 @@
 Using PC sampling
 ==================
 
-PC (Program Counter) sampling service for GPU profiling is a profiling technique to periodically sample the program counter during GPU kernel execution. PC sampling helps to understand code execution patterns and hotspots.
+PC (Program Counter) sampling service for GPU profiling is a profiling technique to periodically sample the program counter during GPU kernel execution. PC sampling helps in understanding code execution patterns and identifying hotspot(s).
 
 Here are the benefits of using PC sampling:
 
@@ -55,7 +55,7 @@ Based on the preceding configuration, you can use the following command to profi
 
   rocprofv3 --pc-sampling-beta-enabled --pc-sampling-method host_trap --pc-sampling-unit time --pc-sampling-interval 1 -- <application_path>
 
-The preceding command enables PC sampling with the ``host_trap`` method, ``time`` unit, and an interval of ``1`` μs (micro second). Replace ``<application_path>`` with the path to the application you want to profile.
+The preceding command enables PC sampling with the ``host_trap`` method, ``time`` unit, and an interval of ``1`` μs (microsecond). Replace ``<application_path>`` with the path to the application you want to profile.
 
 This generates two files, ``agent_info.csv`` and ``pc_sampling_host_trap.csv``. Both files are prefixed with the process ID.
 
@@ -186,10 +186,10 @@ Hardware-Based (Stochastic) PC Sampling Method
 ===============================================
 
 The new ``ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC`` has been introduced for gfx942 architecture.
-It employes a specific hardware for probing waves actively running on GPU.
+It employs a specific hardware for probing waves actively running on GPU.
 Beside information already provided with ``ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP`` useful for determining hot-spots within the kernel,
 it delivers additional information that tells whether a sampled wave issued an instruction represented with particular PC.
-If not, it tells what is the reason for not issuing the instruction (stall reason).
+If not, it provides the reason for not issuing the instruction (stall reason).
 This type of information is particularly useful for understanding stalls during the kernel execution.
 
 To use this method on gfx942, we recommend listing available PC sampling configurations to verify if the latest ROCm stack is installed
@@ -199,7 +199,7 @@ on the system by running:
 
   rocprofv3 -L
 
-Outputi similar to the following indicates that the ``ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC`` method is available:
+Output similar to the following indicates that the ``ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC`` method is available:
 
 .. code-block:: bash
 
@@ -208,9 +208,9 @@ Outputi similar to the following indicates that the ``ROCPROFILER_PC_SAMPLING_ME
   Minimum_Interval:       256
   Maximum_Interval:       2147483648
 
-Please note that on gfx942, ``ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC`` requires intervals to be specified in cycles whose value are power of 2.
+Please note that on gfx942, `ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC` requires intervals to be specified in cycles, whose values are powers of 2
 
-To profile a gfx942 accelarated application with ``ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC`` PC sampling, one can use the following command:
+To profile a gfx942 accelerated application with ``ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC`` PC sampling, one can use the following command:
 
 .. code-block:: bash
 
@@ -230,7 +230,7 @@ generates additional fields:
    :widths: 20,10,10,10,10,20,10,20,20,10
    :header-rows: 1
 
-Similarly, ``ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC`` method delievers additional information to every sample in the JSON output.
+Similarly, ``ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC`` method delivers additional information to every sample in the JSON output.
 The following snippet shows one sample from ``out_results.json`` file.
 
 .. code-block:: text
