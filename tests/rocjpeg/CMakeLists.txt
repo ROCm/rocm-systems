@@ -38,8 +38,12 @@ set(rocjpeg-tracing-env "${PRELOAD_ENV}")
 set(rocJPEG_IMAGE_DIR "${rocJPEG_ROOT_DIR}/share/rocjpeg/images")
 if(TARGET rocjpeg-demo AND NOT EXISTS "${rocJPEG_IMAGE_DIR}")
     message(
-        FATAL_ERROR
-            "Unable to find image directory for rocjpeg tests: ${rocJPEG_IMAGE_DIR}")
+        WARNING "Unable to find image directory for rocjpeg tests: ${rocJPEG_IMAGE_DIR}")
+    set(IS_DISABLED ON)
+endif()
+
+if(NOT TARGET rocjpeg-demo)
+    set(IS_DISABLED ON)
 endif()
 
 add_test(
@@ -65,7 +69,7 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                DISABLED
-               $<NOT:$<TARGET_EXISTS:rocjpeg-demo>>)
+               "${IS_DISABLED}")
 
 # copy to binary directory
 rocprofiler_configure_pytest_files(COPY validate.py conftest.py CONFIG pytest.ini)
@@ -85,4 +89,4 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                DISABLED
-               $<NOT:$<TARGET_EXISTS:rocjpeg-demo>>)
+               "${IS_DISABLED}")
