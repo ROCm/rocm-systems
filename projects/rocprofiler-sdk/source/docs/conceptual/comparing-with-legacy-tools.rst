@@ -1,5 +1,5 @@
 .. meta::
-  :description: Documentation of the installation, configuration, use of the ROCprofiler-SDK, and rocprofv3 command-line tool 
+  :description: ROCprofiler-SDK is a tooling infrastructure for profiling general-purpose GPU compute applications running on the ROCm software
   :keywords: ROCprofiler-SDK tool, ROCprofiler-SDK library, rocprofv3, ROCm, API, reference
 
 .. _comparing-with-legacy-tools:
@@ -134,7 +134,7 @@ ROCprofiler-SDK introduces a new command-line tool, `rocprofv3`, which is a more
      - Part of `--hsa-trace` option
      - Part of `--hsa-trace` option
      - `--hsa-image-trace`
-     - New option for collecting HSA API Traces (Image-extenson API), e.g. HSA functions prefixed with only `hsa_ext_image_` (i.e. hsa_ext_image_get_capability).
+     - New option for collecting HSA API Traces (Image-extension API), e.g. HSA functions prefixed with only `hsa_ext_image_` (i.e. hsa_ext_image_get_capability).
      - 
    * - Granular tracing options
      - HSA Finalizer trace
@@ -266,9 +266,9 @@ ROCprofiler-SDK introduces a new command-line tool, `rocprofv3`, which is a more
      - Perfetto data collection backend
      - *Not available*
      - *Not available*
-     - `--perfetto-backend` {inprocess,system}
+     - `--perfetto-backend` {in-process,system}
      - New option for perfetto data collection backend. 'system' mode requires starting traced and perfetto daemons
-     - `rocprofv2` used only in-process collection for perfetto plugin, However, `rocprofv3` give the option to the user
+     - `rocprofv2` used only in-process collection for perfetto plugin, However, `rocprofv3` gives the user the option.
    * - Perfetto-specific options
      - Perfetto Buffer Size
      - *Not available*
@@ -338,7 +338,7 @@ ROCprofiler-SDK introduces a new command-line tool, `rocprofv3`, which is a more
      - Supports input text and XML format
      - Only supports input text format
      - Input support for text, YAML and JSON formats
-     - | # Its not possible to check for valid text file. Hence rocprofv3 supports strongly typed input formats.
+     - | # It's not possible to check for valid text file. Hence rocprofv3 supports strongly typed input formats.
        | # YAML and JSON formats are more readable and easy to maintain.
        | # Allows flexibility to add more features for the tool input
      -
