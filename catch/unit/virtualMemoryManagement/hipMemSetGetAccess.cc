@@ -788,6 +788,11 @@ TEST_CASE("Unit_hipMemSetAccess_Vmm2PeerPeerMemCpy") {
       WARN("Machine does not support Virtual Memory Management\n");
       break;
     }
+    /*accessDesc.location.type = hipMemLocationTypeDevice;
+    accessDesc.location.id = deviceId;
+    accessDesc.flags = hipMemAccessFlagsProtReadWrite;
+    // Make the address accessible to GPU 0
+    HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));*/
     HIP_CHECK(hipSetDevice(deviceId));
     hipDeviceptr_t dptr_peer;
     HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dptr_peer), buffer_size));
