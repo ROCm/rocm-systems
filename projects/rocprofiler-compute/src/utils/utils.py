@@ -42,7 +42,13 @@ from pathlib import Path as path
 import pandas as pd
 
 import config
-from utils.logger import console_debug, console_error, console_log, console_warning
+from utils.logger import (
+    console_debug,
+    console_error,
+    console_log,
+    console_warning,
+    demarcate,
+)
 from utils.mi_gpu_spec import get_num_xcds
 
 rocprof_cmd = ""
@@ -641,14 +647,12 @@ def run_prof(
         results_files = process_rocprofv3_output(
             format_rocprof_output, workload_dir, is_timestamps
         )
-        # kokkos trace output processing for --kokkos-trace
-        # TODO: as rocprofv3 --kokkos-trace feature improves, rocprof-compute should make updates accordingly
+
         if "--kokkos-trace" in options:
-            console_debug(
-                "[run_prof] --kokkos-trace detected, handling *_marker_api_trace.csv outputs."
-            )
+            # TODO: as rocprofv3 --kokkos-trace feature improves, rocprof-compute should make updates accordingly
             process_kokkos_trace_output(workload_dir, fbase)
-        # TODO: add hip trace output processing
+        elif "--hip-trace" in options:
+            process_hip_trace_output(workload_dir, fbase)
 
         # Combine results into single CSV file
         if results_files:
@@ -810,6 +814,7 @@ def process_rocprofv3_output(rocprof_output, workload_dir, is_timestamps):
     return results_files_csv
 
 
+@demarcate
 def process_kokkos_trace_output(workload_dir, fbase):
     # marker api trace csv files are generated for each process
     marker_api_trace_csvs = glob.glob(
@@ -831,6 +836,29 @@ def process_kokkos_trace_output(workload_dir, fbase):
         shutil.copyfile(
             workload_dir + "/out/pmc_1/results_" + fbase + "_marker_api_trace.csv",
             workload_dir + "/" + fbase + "_marker_api_trace.csv",
+        )
+
+
+@demarcate
+def process_hip_trace_output(workload_dir, fbase):
+    # marker api trace csv files are generated for each process
+    hip_api_trace_csvs = glob.glob(workload_dir + "/out/pmc_1/*/*_hip_api_trace.csv")
+    existing_hip_files_csv = [d for d in hip_api_trace_csvs if path(d).is_file()]
+
+    # concate and output marker api trace info
+    combined_results = pd.concat(
+        [pd.read_csv(f) for f in existing_hip_files_csv], ignore_index=True
+    )
+
+    combined_results.to_csv(
+        workload_dir + "/out/pmc_1/results_" + fbase + "_hip_api_trace.csv",
+        index=False,
+    )
+
+    if path(workload_dir + "/out").exists():
+        shutil.copyfile(
+            workload_dir + "/out/pmc_1/results_" + fbase + "_hip_api_trace.csv",
+            workload_dir + "/" + fbase + "_hip_api_trace.csv",
         )
 
 
