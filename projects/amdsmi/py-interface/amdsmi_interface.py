@@ -2045,8 +2045,8 @@ def amdsmi_get_gpu_xgmi_link_status(
         count += 1
 
     return_dict = {
-    "status"     : link_status,
-    "total_links": status_info.total_links,
+        "status"     : link_status,
+        "total_links": status_info.total_links,
     }
     return return_dict
 
