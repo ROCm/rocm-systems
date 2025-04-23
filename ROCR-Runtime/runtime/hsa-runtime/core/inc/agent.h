@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -198,6 +198,18 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
   // @retval HSA_STATUS_ERROR_OUT_OF_RESOURCES DMA engines are not available
   virtual hsa_status_t DmaCopyStatus(core::Agent& dst_agent, core::Agent& src_agent,
                                      uint32_t *engine_ids_mask) {
+    return HSA_STATUS_ERROR;
+  }
+
+  // @brief Return DMA availability status for copy direction.
+  //
+  // @param [in] dst_agent Destination agent.
+  // @param [in] src_agent Source agent.
+  // @param [out] recommended_ids_mask Mask of recommended engine ids.
+  //
+  // @retval HSA_STATUS_SUCCESS For mask returned
+  virtual hsa_status_t DmaPreferredEngine(core::Agent& dst_agent, core::Agent& src_agent,
+                                          uint32_t* recommended_ids_mask) {
     return HSA_STATUS_ERROR;
   }
 

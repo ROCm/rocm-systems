@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -310,6 +310,10 @@ class GpuAgent : public GpuAgentInt {
   // @brief Override from core::Agent.
   hsa_status_t DmaCopyStatus(core::Agent& dst_agent, core::Agent& src_agent,
                              uint32_t *engine_ids_mask) override;
+
+  // @brief Override from core::Agent.
+  hsa_status_t DmaPreferredEngine(core::Agent& dst_agent, core::Agent& src_agent,
+                                  uint32_t* recommended_ids_mask) override;
 
   // @brief Override from core::Agent.
   hsa_status_t DmaCopyRect(const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset,

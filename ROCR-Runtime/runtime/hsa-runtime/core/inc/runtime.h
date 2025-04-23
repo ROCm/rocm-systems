@@ -283,6 +283,16 @@ class Runtime {
   hsa_status_t CopyMemoryStatus(core::Agent* dst_agent, core::Agent* src_agent,
                                 uint32_t *engine_ids_mask);
 
+  /// @brief Get preferred SDMA engine for the copy direction
+  ///
+  /// @param [in] dst_agent Destination agent.
+  /// @param [in] src_agent Source agent.
+  /// @param [out] recommended_ids_mask Mask of recommended_ids.
+  ///
+  /// @retval HSA_STATUS_SUCCESS For mask returned
+  hsa_status_t GetPreferredEngine(core::Agent* dst_agent, core::Agent* src_agent,
+                                  uint32_t* recommended_ids_mask);
+
   /// @brief Fill the first @p count of uint32_t in ptr with value.
   ///
   /// @param [in] ptr Memory address to be filled.

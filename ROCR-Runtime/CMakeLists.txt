@@ -3,7 +3,7 @@
 ## The University of Illinois/NCSA
 ## Open Source License (NCSA)
 ##
-## Copyright (c) 2014-2024, Advanced Micro Devices, Inc. All rights reserved.
+## Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 ##
 ## Developed by:
 ##
@@ -87,7 +87,7 @@ include(utils)
 
 
 ## Get version strings
-get_version("1.15.0")
+get_version("1.16.0")
 if (${ROCM_PATCH_VERSION})
   set(VERSION_PATCH ${ROCM_PATCH_VERSION})
 endif()

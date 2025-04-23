@@ -1246,6 +1246,17 @@ hsa_status_t GpuAgent::DmaCopyStatus(core::Agent& dst_agent, core::Agent& src_ag
   return !!(*engine_ids_mask) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 }
 
+hsa_status_t GpuAgent::DmaPreferredEngine(core::Agent& dst_agent, core::Agent& src_agent,
+                                          uint32_t *recommended_ids_mask) {
+  assert(((src_agent.device_type() == core::Agent::kAmdGpuDevice) ||
+          (dst_agent.device_type() == core::Agent::kAmdGpuDevice)) &&
+         ("Both devices are CPU agents which is not expected"));
+
+  *recommended_ids_mask = rec_sdma_eng_id_peers_info_[dst_agent.public_handle().handle];
+
+  return HSA_STATUS_SUCCESS;
+}
+
 hsa_status_t GpuAgent::DmaCopyRect(const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset,
                                    const hsa_pitched_ptr_t* src, const hsa_dim3_t* src_offset,
                                    const hsa_dim3_t* range, hsa_amd_copy_direction_t dir,

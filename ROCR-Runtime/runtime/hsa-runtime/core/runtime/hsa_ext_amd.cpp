@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -296,7 +296,8 @@ hsa_status_t hsa_amd_memory_async_copy(void* dst, hsa_agent_t dst_agent_handle, 
 hsa_status_t hsa_amd_memory_async_copy_on_engine(void* dst, hsa_agent_t dst_agent_handle,
                                        const void* src, hsa_agent_t src_agent_handle, size_t size,
                                        uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
-                                       hsa_signal_t completion_signal, hsa_amd_sdma_engine_id_t engine_id,
+                                       hsa_signal_t completion_signal,
+                                       hsa_amd_sdma_engine_id_t engine_id,
                                        bool force_copy_on_sdma) {
   TRY;
   IS_BAD_PTR(dst);
@@ -337,7 +338,8 @@ hsa_status_t hsa_amd_memory_async_copy_on_engine(void* dst, hsa_agent_t dst_agen
   CATCH;
 }
 
-hsa_status_t hsa_amd_memory_copy_engine_status(hsa_agent_t dst_agent_handle, hsa_agent_t src_agent_handle,
+hsa_status_t hsa_amd_memory_copy_engine_status(hsa_agent_t dst_agent_handle,
+                                               hsa_agent_t src_agent_handle,
                                                uint32_t *engine_ids_mask) {
   core::Agent* dst_agent = core::Agent::Convert(dst_agent_handle);
   IS_VALID(dst_agent);
@@ -345,7 +347,21 @@ hsa_status_t hsa_amd_memory_copy_engine_status(hsa_agent_t dst_agent_handle, hsa
   core::Agent* src_agent = core::Agent::Convert(src_agent_handle);
   IS_VALID(src_agent);
 
-  return core::Runtime::runtime_singleton_->CopyMemoryStatus(dst_agent, src_agent, engine_ids_mask);
+  return core::Runtime::runtime_singleton_->CopyMemoryStatus(dst_agent, src_agent,
+                                                             engine_ids_mask);
+}
+
+hsa_status_t hsa_amd_memory_get_preferred_copy_engine(hsa_agent_t dst_agent_handle,
+                                                      hsa_agent_t src_agent_handle,
+                                                      uint32_t* recommended_ids_mask) {
+  core::Agent* dst_agent = core::Agent::Convert(dst_agent_handle);
+  IS_VALID(dst_agent);
+
+  core::Agent* src_agent = core::Agent::Convert(src_agent_handle);
+  IS_VALID(src_agent);
+
+  return core::Runtime::runtime_singleton_->GetPreferredEngine(dst_agent, src_agent,
+                                                               recommended_ids_mask);
 }
 
 hsa_status_t hsa_amd_memory_async_copy_rect(
@@ -648,7 +664,7 @@ uint32_t hsa_amd_signal_wait_any(uint32_t signal_count, hsa_signal_t* hsa_signal
   uint32_t satisfying_signal_idx =
       core::Signal::WaitMultiple(valid_signals.size(), valid_signals.data(), conds, values, timeout_hint, wait_hint,
                                  satisfying_value_vec, false);
-                                 
+
   //  Map back the index
   satisfying_signal_idx = valid_signal_ids[satisfying_signal_idx];
 

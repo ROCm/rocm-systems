@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -269,6 +269,7 @@ struct AmdExtTable {
   decltype(hsa_amd_vmem_address_reserve_align)* hsa_amd_vmem_address_reserve_align_fn;
   decltype(hsa_amd_enable_logging)* hsa_amd_enable_logging_fn;
   decltype(hsa_amd_signal_wait_all)* hsa_amd_signal_wait_all_fn;
+  decltype(hsa_amd_memory_get_preferred_copy_engine)* hsa_amd_memory_get_preferred_copy_engine_fn;
 };
 
 // Table to export HSA Core Runtime Apis

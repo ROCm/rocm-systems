@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -165,6 +165,11 @@ hsa_status_t
 hsa_status_t
     hsa_amd_memory_copy_engine_status(hsa_agent_t dst_agent, hsa_agent_t src_agent,
                                       uint32_t *engine_ids_mask);
+
+// Mirrors Amd Extension Apis
+hsa_status_t
+    hsa_amd_memory_get_preferred_copy_engine(hsa_agent_t dst_agent, hsa_agent_t src_agent,
+                                             uint32_t* recommended_ids_mask);
 
 // Mirrors Amd Extension Apis
 hsa_status_t hsa_amd_memory_async_copy_rect(
