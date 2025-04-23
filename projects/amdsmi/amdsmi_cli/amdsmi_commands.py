@@ -309,6 +309,8 @@ class AMDSMICommands():
         logging.debug(f"Static Arg information for CPU {cpu_id} on {self.helpers.os_info()}")
 
         static_dict = {}
+        if self.logger.is_json_format():
+            static_dict['cpu'] = int(cpu_id)
 
         if args.smu:
             try:
@@ -329,11 +331,15 @@ class AMDSMICommands():
                 logging.debug("Failed to get proto version for cpu %s | %s", cpu_id, e.get_error_info())
 
         multiple_devices_csv_override = False
-        self.logger.store_cpu_output(args.cpu, 'values', static_dict)
+        if not self.logger.is_json_format():
+            self.logger.store_cpu_output(args.cpu, 'values', static_dict)
+        else:
+            self.logger.store_cpu_json_output.append(static_dict)
         if multiple_devices:
             self.logger.store_multiple_device_output()
             return # Skip printing when there are multiple devices
-        self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
+        if not self.logger.is_json_format():
+            self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
 
 
     def static_gpu(self, args, multiple_devices=False, gpu=None, asic=None, bus=None, vbios=None,
@@ -452,6 +458,8 @@ class AMDSMICommands():
 
         # Populate static dictionary for each enabled argument
         static_dict = {}
+        if self.logger.is_json_format():
+            static_dict['gpu'] = int(gpu_id)
         if args.asic:
             asic_dict = {
                 "market_name" : "N/A",
@@ -1016,14 +1024,20 @@ class AMDSMICommands():
                         for key, value in ecc_block_dict.items():
                             self.logger.store_output(args.gpu, key, value)
                         self.logger.store_output(args.gpu, 'values', static_dict)
+                        self.logger.store_gpu_json_output.append(static_dict)
                         self.logger.store_multiple_device_output()
                 else:
                     # Store values if ras has an error
                     self.logger.store_output(args.gpu, 'values', static_dict)
+                    self.logger.store_gpu_json_output.append(static_dict)
                 if self.helpers.is_linux() and self.helpers.is_virtual_os():
                     self.logger.store_output(args.gpu, 'values', static_dict)
+                    self.logger.store_gpu_json_output.append(static_dict)
             else:
                 self.logger.store_output(args.gpu, 'values', static_dict)
+                self.logger.store_gpu_json_output.append(static_dict)
+        elif self.logger.is_json_format():
+            self.logger.store_gpu_json_output.append(static_dict)
         else:
             # Store values in logger.output
             self.logger.store_output(args.gpu, 'values', static_dict)
@@ -1031,7 +1045,8 @@ class AMDSMICommands():
         if multiple_devices:
             self.logger.store_multiple_device_output()
             return # Skip printing when there are multiple devices
-        self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
+        if not self.logger.is_json_format():
+            self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
 
 
     def static(self, args, multiple_devices=False, gpu=None, asic=None,
@@ -1138,6 +1153,8 @@ class AMDSMICommands():
                                 board, numa, vram, cache, partition,
                                 dfc_ucode, fb_info, num_vf, soc_pstate, xgmi_plpd,
                                 process_isolation, clock)
+        if self.logger.is_json_format():
+            self.logger.combine_arrays_to_json()
 
 
     def firmware(self, args, multiple_devices=False, gpu=None, fw_list=True):
@@ -1501,7 +1518,8 @@ class AMDSMICommands():
                 args.gpu = stored_gpus
 
                 # Print multiple device output
-                self.logger.print_output(multiple_device_enabled=True, watching_output=watching_output)
+                if not self.logger.is_json_format():
+                    self.logger.print_output(multiple_device_enabled=True, watching_output=watching_output)
 
                 # Add output to total watch output and clear multiple device output
                 if watching_output:
@@ -1632,7 +1650,8 @@ class AMDSMICommands():
                 "vram_max_bandwidth": "N/A",
                 "xgmi_link_status": "N/A",
             }
-
+        if self.logger.is_json_format():
+            values_dict['gpu'] = int(gpu_id)
         # Populate the pcie_dict first due to multiple gpu metrics calls incorrectly increasing bandwidth
         if "pcie" in current_platform_args:
             if args.pcie:
@@ -2521,12 +2540,14 @@ class AMDSMICommands():
         if watching_output:
             self.logger.store_output(args.gpu, 'timestamp', int(time.time()))
         self.logger.store_output(args.gpu, 'values', values_dict)
+        self.logger.store_gpu_json_output.append(values_dict)
 
         if multiple_devices:
             self.logger.store_multiple_device_output()
             return # Skip printing when there are multiple devices
 
-        self.logger.print_output(watching_output=watching_output)
+        if not self.logger.is_json_format():
+            self.logger.print_output(watching_output=watching_output)
 
         if watching_output: # End of single gpu add to watch_output
             self.logger.store_watch_output(multiple_device_enabled=False)
@@ -2635,6 +2656,8 @@ class AMDSMICommands():
         logging.debug(f"Metric Arg information for CPU {cpu_id} on {self.helpers.os_info()}")
 
         static_dict = {}
+        if self.logger.is_json_format():
+            static_dict['cpu'] = int(cpu_id)
         if args.cpu_power_metrics:
             static_dict["power_metrics"] = {}
             try:
@@ -2817,11 +2840,15 @@ class AMDSMICommands():
                 logging.debug("Failed to get dimm temperature range and refresh rate for cpu %s | %s", cpu_id, e.get_error_info())
 
         multiple_devices_csv_override = False
-        self.logger.store_cpu_output(args.cpu, 'values', static_dict)
+        if not self.logger.is_json_format():
+            self.logger.store_cpu_output(args.cpu, 'values', static_dict)
+        else:
+            self.logger.store_cpu_json_output.append(static_dict)
         if multiple_devices:
             self.logger.store_multiple_device_output()
             return # Skip printing when there are multiple devices
-        self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
+        if not self.logger.is_json_format():
+            self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
 
 
     def metric_core(self, args, multiple_devices=False, core=None, core_boost_limit=None,
@@ -2870,6 +2897,8 @@ class AMDSMICommands():
         logging.debug(f"Static Arg information for Core {core_id} on {self.helpers.os_info()}")
 
         static_dict = {}
+        if self.logger.is_json_format():
+            static_dict['core'] = int(core_id)
         if args.core_boost_limit:
             static_dict["boost_limit"] ={}
 
@@ -2898,11 +2927,15 @@ class AMDSMICommands():
                 logging.debug("Failed to get core energy for core %s | %s", core_id, e.get_error_info())
 
         multiple_devices_csv_override = False
-        self.logger.store_core_output(args.core, 'values', static_dict)
+        if not self.logger.is_json_format():
+            self.logger.store_core_output(args.core, 'values', static_dict)
+        else:
+            self.logger.store_core_json_output.append(static_dict)
         if multiple_devices:
             self.logger.store_multiple_device_output()
             return # Skip printing when there are multiple devices
-        self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
+        if not self.logger.is_json_format():
+            self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
 
 
     def metric(self, args, multiple_devices=False, watching_output=False, gpu=None,
@@ -3102,6 +3135,8 @@ class AMDSMICommands():
                                 fan, voltage_curve, overdrive, perf_level,
                                 xgmi_err, energy, mem_usage, schedule, throttle,
                                 )
+        if self.logger.is_json_format():
+            self.logger.combine_arrays_to_json()
 
 
     def process(self, args, multiple_devices=False, watching_output=False,

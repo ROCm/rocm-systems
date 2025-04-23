@@ -43,6 +43,9 @@ class AMDSMILogger():
         self.warning_message = ""
         self.helpers = AMDSMIHelpers()
         self._cper_exit_message = True
+        self.store_cpu_json_output = []
+        self.store_core_json_output = []
+        self.store_gpu_json_output = []
 
 
     class LoggerFormat(Enum):
@@ -563,6 +566,17 @@ class AMDSMILogger():
             else:
                 with self.destination.open('a', encoding="utf-8") as output_file:
                     json.dump(json_output, output_file, indent=4)
+
+
+    def combine_arrays_to_json(self):
+        combined_json = {
+            "cpu_data": self.store_cpu_json_output,
+            "core_data": self.store_core_json_output,
+            "gpu_data": self.store_gpu_json_output
+        }
+        self.destination == 'stdout'
+        json_std_output = json.dumps(combined_json, indent=4)
+        print(json_std_output)
 
 
     def _print_csv_output(self, multiple_device_enabled=False, watching_output=False):
