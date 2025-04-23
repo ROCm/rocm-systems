@@ -29,11 +29,18 @@ import os
 
 from pathlib import Path
 
-sys.path.append(f"{Path(__file__).resolve().parent}/../../share/amd_smi")
-
+current_path = os.path.dirname(os.path.abspath(__file__))
+python_lib_path = f"{current_path}/../../share/amd_smi"
+sys.path.append(python_lib_path)
 # If the python library is installed, it will overwrite the path above
-from amdsmi import amdsmi_interface
-from amdsmi import amdsmi_exception
+
+try:
+    from amdsmi import amdsmi_interface, amdsmi_exception
+except ImportError as e:
+    print(f"Unhandled import error: {e}")
+    print("Failed to import the amdsmi Python library. Ensure it is installed in Python.")
+    print(f"Alternatively, verify that the library is in the path:\n{python_lib_path}")
+    sys.exit(1)
 
 # Using basic python logging for user errors and development
 logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.ERROR) # User level logging
