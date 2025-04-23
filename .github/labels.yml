@@ -1,0 +1,81 @@
+- name: approved for ci
+  color: A9CD67
+  description: ''
+- name: bug
+  color: d73a4a
+  description: Something isn't working
+- name: ci
+  color: 667BB8
+  description: Continuous Integration
+- name: "component: rocprofiler"
+  color: B51F7A
+  description: ''
+- name: customer req
+  color: fef2c0
+  description: ''
+- name: dependencies
+  color: 0366d6
+  description: Pull requests that update a dependency file
+- name: documentation
+  color: 0075ca
+  description: Improvements or additions to documentation
+- name: duplicate
+  color: cfd3d7
+  description: This issue or pull request already exists
+- name: enhancement
+  color: a2eeef
+  description: New feature or request
+- name: github actions
+  color: '000000'
+  description: Pull requests that update GitHub Actions code
+- name: good first issue
+  color: 7057ff
+  description: Good for newcomers
+- name: help wanted
+  color: 008672
+  description: Extra attention is needed
+- name: invalid
+  color: e4e669
+  description: This doesn't seem right
+- name: packaging
+  color: EEB48C
+  description: ''
+- name: question
+  color: d876e3
+  description: Further information is requested
+- name: rejected
+  color: e4e669
+  description: Invalid or incorrectly reported issue
+- name: release promotion
+  color: 84B9D9
+  description: Tagged pull request is a candidate for cherry picking to a release branch
+- name: "rocprofiler-compute: analysis"
+  color: bfdadc
+  description: Related to Omniperf's analyze mode
+- name: "rocprofiler-compute: grafana gui"
+  color: d93f0b
+  description: Related to rocprofiler-compute's Grafana GUI
+- name: "rocprofiler-compute: metric definition"
+  color: 8A8976
+  description: Related to the definition of a metric in rocprofiler-compute
+- name: "rocprofiler-compute: profiling"
+  color: ebc934
+  description: Related to the profiling done in rocprofiler-compute
+- name: "rocprofiler-compute: revamp"
+  color: e7aff0
+  description: Ticket related to the redesign of rocprofiler-compute
+- name: "rocprofiler-compute: roofline"
+  color: 0D1C35
+  description: Related to rocprofiler-compute's Roofline Analysis
+- name: "rocprofiler-compute: standalone gui"
+  color: 3FE871
+  description: Related to rocprofiler-compute's standalone GUI
+- name: testing
+  color: bfd4f2
+  description: Adding an addition test or example
+- name: triage
+  color: 54A38D
+  description: ''
+- name: wontfix
+  color: ffffff
+  description: This will not be worked on
