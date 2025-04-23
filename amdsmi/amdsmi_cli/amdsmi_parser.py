@@ -69,7 +69,7 @@ class AMDSMIParser(argparse.ArgumentParser):
     """
     def __init__(self, version, list, static, firmware, bad_pages, metric,
                  process, profile, event, topology, set_value, reset, monitor,
-                 rocmsmi, xgmi, partition, ras):
+                 xgmi, partition, ras):
 
         # Helper variables
         self.helpers = AMDSMIHelpers()
@@ -131,12 +131,12 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_set_value_parser(self.subparsers, set_value)
         self._add_reset_parser(self.subparsers, reset)
         self._add_monitor_parser(self.subparsers, monitor)
-        self._add_rocm_smi_parser(self.subparsers, rocmsmi)
         self._add_xgmi_parser(self.subparsers, xgmi)
         self._add_partition_parser(self.subparsers, partition)
         self._add_ras_parser(self.subparsers, ras)
 
 
+### Parser Validators and Helpers###
     def _not_negative_int(self, int_value, sub_arg=None):
         # Argument type validator
         if int_value.isdigit():  # Is digit doesn't work on negative numbers
@@ -147,6 +147,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(sub_arg, outputformat)
         else:
             raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(int_value, outputformat)
+
 
     def _positive_int(self, int_value, sub_arg=None):
         # Argument type validator
@@ -173,6 +174,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         else:
             raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(string_value, outputformat)
 
+
     def _is_command_supported(self, user_input, acceptable_values, command_name):
         if acceptable_values == "N/A":
             raise amdsmi_cli_exceptions.AmdSmiCommandNotSupportedException(command_name, self.helpers.get_output_format())
@@ -181,6 +183,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(str(user_input).upper(), self.helpers.get_output_format())
         else:
             return str(user_input).upper()
+
 
     def _limit_select(self):
         """Custom action for setting clock limits"""
@@ -427,29 +430,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         return _CoreSelectAction
 
 
-    def _add_command_modifiers(self, subcommand_parser: argparse.ArgumentParser, logging_only=False):
-        json_help = "Displays output in JSON format (human readable by default)."
-        csv_help = "Displays output in CSV format (human readable by default)."
-        file_help = "Saves output into a file on the provided path (stdout by default)."
-        loglevel_choices = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
-        loglevel_choices_str = ", ".join(loglevel_choices)
-        loglevel_help = f"Set the logging level from the possible choices:\n\t{loglevel_choices_str}"
-
-        command_modifier_group = subcommand_parser.add_argument_group('Command Modifiers')
-
-        if not logging_only:
-            # Output Format options
-            logging_args = command_modifier_group.add_mutually_exclusive_group()
-            logging_args.add_argument('--json', action='store_true', required=False, help=json_help)
-            logging_args.add_argument('--csv', action='store_true', required=False, help=csv_help)
-
-            command_modifier_group.add_argument('--file', action=self._check_output_file_path(), type=str, required=False, help=file_help)
-
-        # Placing loglevel outside the subcommands so it can be used with any subcommand
-        command_modifier_group.add_argument('--loglevel', action='store', type=str.upper, required=False, help=loglevel_help, default='ERROR', metavar='LEVEL',
-                                            choices=loglevel_choices)
-
-
     def _add_watch_arguments(self, subcommand_parser):
         # Device arguments help text
         watch_help = "Reprint the command in a loop of INTERVAL seconds"
@@ -486,36 +466,6 @@ class AMDSMIParser(argparse.ArgumentParser):
                 raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(value, outputformat)
 
         return value
-
-
-    def _add_device_arguments(self, subcommand_parser: argparse.ArgumentParser, required=False):
-        # Device arguments help text
-        gpu_help = f"Select a GPU ID, BDF, or UUID from the possible choices:\n{self.gpu_choices_str}"
-        vf_help = "Gets general information about the specified VF (timeslice, fb info, …).\
-                    \nAvailable only on virtualization OSs"
-        cpu_help = f"Select a CPU ID from the possible choices:\n{self.cpu_choices_str}"
-        core_help = f"Select a Core ID from the possible choices:\n{self.core_choices_str}"
-
-
-        # Mutually Exclusive Args within the subparser
-        device_args = subcommand_parser.add_mutually_exclusive_group(required=required)
-
-        if self.helpers.is_amdgpu_initialized():
-            device_args.add_argument('-g', '--gpu', action=self._gpu_select(self.gpu_choices),
-                                        nargs='+', help=gpu_help)
-
-        if self.helpers.is_amd_hsmp_initialized():
-            device_args.add_argument('-U', '--cpu', type=self._validate_cpu_core,
-                                        action=self._cpu_select(self.cpu_choices),
-                                        nargs='+', help=cpu_help)
-            if subcommand_parser._optionals.title != "Static Arguments":
-                device_args.add_argument('-O', '--core', type=self._validate_cpu_core,
-                                            action=self._core_select(self.core_choices),
-                                            nargs='+', help=core_help)
-
-        if self.helpers.is_hypervisor():
-            device_args.add_argument('-v', '--vf', action='store', nargs='+',
-                                        help=vf_help, choices=self.vf_choices)
 
 
     def _validate_set_clock(self, validate_clock_type=True):
@@ -611,6 +561,84 @@ class AMDSMIParser(argparse.ArgumentParser):
         return _ValidateOverdrivePercent
 
 
+### Building parsers ###
+    def _add_device_arguments(self, subcommand_parser: argparse.ArgumentParser, required=False):
+        # Device arguments help text
+        gpu_help = f"Select a GPU ID, BDF, or UUID from the possible choices:\n{self.gpu_choices_str}"
+        vf_help = "Gets general information about the specified VF (timeslice, fb info, …).\
+                    \nAvailable only on virtualization OSs"
+        cpu_help = f"Select a CPU ID from the possible choices:\n{self.cpu_choices_str}"
+        core_help = f"Select a Core ID from the possible choices:\n{self.core_choices_str}"
+
+        # Create argument group for all the devices
+        device_group = subcommand_parser.add_argument_group('Device Arguments')
+
+        # Mutually Exclusive Args within the subparser
+        device_args = device_group.add_mutually_exclusive_group(required=required)
+
+        if self.helpers.is_amdgpu_initialized():
+            device_args.add_argument('-g', '--gpu', action=self._gpu_select(self.gpu_choices),
+                                        nargs='+', help=gpu_help)
+
+        if self.helpers.is_amd_hsmp_initialized():
+            device_args.add_argument('-U', '--cpu', type=self._validate_cpu_core,
+                                        action=self._cpu_select(self.cpu_choices),
+                                        nargs='+', help=cpu_help)
+            if subcommand_parser._optionals.title != "Static Arguments":
+                device_args.add_argument('-O', '--core', type=self._validate_cpu_core,
+                                            action=self._core_select(self.core_choices),
+                                            nargs='+', help=core_help)
+
+        if self.helpers.is_hypervisor():
+            device_args.add_argument('-v', '--vf', action='store', nargs='+',
+                                        help=vf_help, choices=self.vf_choices)
+
+
+    def _add_command_modifiers(self, subcommand_parser: argparse.ArgumentParser):
+        json_help = "Displays output in JSON format"
+        csv_help = "Displays output in CSV format"
+        file_help = "Saves output into a file on the provided path"
+        loglevel_choices = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+        loglevel_choices_str = ", ".join(loglevel_choices)
+        loglevel_help = (
+            f"Set the logging level from the possible choices:\n    "
+            f"{loglevel_choices_str}"
+        )
+
+        command_modifier_group = subcommand_parser.add_argument_group('Command Modifiers')
+
+        # Output Format options
+        logging_args = command_modifier_group.add_mutually_exclusive_group()
+        logging_args.add_argument('--json', action='store_true', required=False, help=json_help)
+        logging_args.add_argument('--csv', action='store_true', required=False, help=csv_help)
+
+        command_modifier_group.add_argument('--file', action=self._check_output_file_path(), type=str, required=False, help=file_help)
+        # Placing loglevel outside the subcommands so it can be used with any subcommand
+        command_modifier_group.add_argument('--loglevel', action='store', type=str.upper, required=False, help=loglevel_help, default='ERROR', metavar='LEVEL',
+                                            choices=loglevel_choices)
+
+        return command_modifier_group
+
+
+    def _add_watch_arguments(self, subcommand_parser: argparse.ArgumentParser):
+        # Device arguments help text
+        watch_help = "Reprint the command in a loop of INTERVAL seconds"
+        watch_time_help = "The total duration of TIME to watch the command"
+        iterations_help = "The total number of ITERATIONS to repeat the command"
+
+        watch_arguments_group = subcommand_parser.add_argument_group('Watch Arguments')
+
+        # Mutually Exclusive Args within the subparser
+        watch_arguments_group.add_argument('-w', '--watch', action='store', metavar='INTERVAL',
+             type=lambda value: self._positive_int(value, '--watch'), required=False, help=watch_help)
+        watch_arguments_group.add_argument('-W', '--watch_time', action=self._check_watch_selected(), metavar='TIME',
+            type=lambda value: self._positive_int(value, '--watch_time'), required=False, help=watch_time_help)
+        watch_arguments_group.add_argument('-i', '--iterations', action=self._check_watch_selected(), metavar='ITERATIONS',
+            type=lambda value: self._positive_int(value, '--iterations'), required=False, help=iterations_help)
+
+        return watch_arguments_group
+
+
     def _add_version_parser(self, subparsers: argparse._SubParsersAction, func):
         # Subparser help text
         version_help = "Display version information"
@@ -640,21 +668,26 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Subparser help text
         list_help = "List GPU information"
+        list_optionals_title = "List Arguments"
         list_subcommand_help = "Lists all detected devices on the system.\
-                            \nLists the BDF, UUID, KFD_ID, and NODE_ID for each GPU and/or CPUs.\
+                            \nLists the BDF, UUID, KFD_ID, NODE_ID, and Partition ID for each GPU and/or CPUs.\
                             \nIn virtualization environments, it can also list VFs associated to each\
                             \nGPU with some basic information for each VF."
+        enumeration_help = "Enumeration mapping to other features.\
+                            \n    Includes CARD, RENDER, HSA_ID, HIP_ID, and HIP_UUID."
 
         # Create list subparser
         list_parser = subparsers.add_parser('list', help=list_help, description=list_subcommand_help)
-        # Create -e subparser
-        list_parser.add_argument("-e", action="store_true", help="Enumeration mapping to other features.\n    Lists the BDF, UUID, KFD_ID, CARD, RENDER, HIP_ID, HIP_UUID and HSA_ID for each GPU.")
+        list_parser._optionals.title = list_optionals_title
         list_parser.formatter_class=lambda prog: AMDSMISubparserHelpFormatter(prog)
         list_parser.set_defaults(func=func)
 
+        # Create -e subparser
+        list_parser.add_argument("-e", action="store_true", help=enumeration_help)
+
         # Add Universal Arguments
-        self._add_command_modifiers(list_parser)
         self._add_device_arguments(list_parser, required=False)
+        self._add_command_modifiers(list_parser)
 
 
     def _add_static_parser(self, subparsers: argparse._SubParsersAction, func):
@@ -702,9 +735,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         static_parser.formatter_class=lambda prog: AMDSMISubparserHelpFormatter(prog)
         static_parser.set_defaults(func=func)
 
-        # Add Universal Arguments
-        self._add_device_arguments(static_parser, required=False)
-
         # Handle GPU Options
         if self.helpers.is_amdgpu_initialized():
             static_parser.add_argument('-a', '--asic', action='store_true', required=False, help=asic_help)
@@ -740,11 +770,12 @@ class AMDSMIParser(argparse.ArgumentParser):
             cpu_group.add_argument('-s', '--smu', action='store_true', required=False, help=smu_help)
             cpu_group.add_argument('-i', '--interface-ver', action='store_true', required=False, help=interface_help)
 
-        # Add command modifiers to the bottom
+        # Add Universal Arguments
+        self._add_device_arguments(static_parser, required=False)
         self._add_command_modifiers(static_parser)
 
 
-    def _add_firmware_parser(self, subparsers, func):
+    def _add_firmware_parser(self, subparsers: argparse._SubParsersAction, func):
         if not self.helpers.is_amdgpu_initialized():
             # The firmware subcommand is only applicable to systems with amdgpu initialized
             return
@@ -764,10 +795,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         firmware_parser.formatter_class=lambda prog: AMDSMISubparserHelpFormatter(prog)
         firmware_parser.set_defaults(func=func)
 
-        # Add Universal Arguments
-        self._add_command_modifiers(firmware_parser)
-        self._add_device_arguments(firmware_parser, required=False)
-
         # Optional Args
         firmware_parser.add_argument('-f', '--ucode-list', '--fw-list', dest='fw_list', action='store_true', required=False, help=fw_list_help, default=True)
 
@@ -775,8 +802,12 @@ class AMDSMIParser(argparse.ArgumentParser):
         if self.helpers.is_hypervisor():
             firmware_parser.add_argument('-e', '--error-records', action='store_true', required=False, help=err_records_help)
 
+        # Add Universal Arguments
+        self._add_device_arguments(firmware_parser, required=False)
+        self._add_command_modifiers(firmware_parser)
 
-    def _add_bad_pages_parser(self, subparsers, func):
+
+    def _add_bad_pages_parser(self, subparsers: argparse._SubParsersAction, func):
         if not (self.helpers.is_baremetal() and self.helpers.is_linux()):
             # The bad_pages subcommand is only applicable to Linux Baremetal systems
             return
@@ -802,17 +833,17 @@ class AMDSMIParser(argparse.ArgumentParser):
         bad_pages_parser.formatter_class=lambda prog: AMDSMISubparserHelpFormatter(prog)
         bad_pages_parser.set_defaults(func=func)
 
-        # Add Universal Arguments
-        self._add_command_modifiers(bad_pages_parser)
-        self._add_device_arguments(bad_pages_parser, required=False)
-
         # Optional Args
         bad_pages_parser.add_argument('-p', '--pending', action='store_true', required=False, help=pending_help)
         bad_pages_parser.add_argument('-r', '--retired', action='store_true', required=False, help=retired_help)
         bad_pages_parser.add_argument('-u', '--un-res', action='store_true', required=False, help=un_res_help)
 
+        # Add Universal Arguments
+        self._add_device_arguments(bad_pages_parser, required=False)
+        self._add_command_modifiers(bad_pages_parser)
 
-    def _add_metric_parser(self, subparsers, func):
+
+    def _add_metric_parser(self, subparsers: argparse._SubParsersAction, func):
         # Subparser help text
         metric_help = "Gets metric/performance information about the specified GPU"
         metric_subcommand_help = "If no GPU is specified, returns metric information for all GPUs on the system.\
@@ -836,7 +867,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Help text for Arguments only on Linux Baremetal platforms
         fan_help = "Current fan speed"
         vc_help = "Display voltage curve"
-        overdrive_help = "Current GPU clock overdrive and GPU memory clock overdrive level"
+        overdrive_help = "Current GFX and MEM clock overdrive level"
         perf_level_help = "Current DPM performance level"
         xgmi_err_help = "XGMI error information since last read"
         energy_help = "Amount of energy consumed"
@@ -882,12 +913,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         metric_parser._optionals.title = metric_optionals_title
         metric_parser.formatter_class=lambda prog: AMDSMISubparserHelpFormatter(prog)
         metric_parser.set_defaults(func=func)
-
-        # Add Universal Arguments
-        self._add_device_arguments(metric_parser, required=False)
-
-        # Add Watch args
-        self._add_watch_arguments(metric_parser)
 
         # Optional Args for Linux Virtual OS and Baremetal systems
         if not self.helpers.is_hypervisor() and not self.helpers.is_windows():
@@ -960,7 +985,9 @@ class AMDSMIParser(argparse.ArgumentParser):
                                     help=core_curr_active_freq_core_limit_help)
             core_group.add_argument('--core-energy', action='store_true', required=False, help=core_energy_help)
 
-        # Add command modifiers to the bottom
+        # Add Universal Arguments & watch Args
+        self._add_watch_arguments(metric_parser)
+        self._add_device_arguments(metric_parser, required=False)
         self._add_command_modifiers(metric_parser)
 
 
@@ -994,18 +1021,16 @@ class AMDSMIParser(argparse.ArgumentParser):
         process_parser.formatter_class=lambda prog: AMDSMISubparserHelpFormatter(prog)
         process_parser.set_defaults(func=func)
 
-        # Add Universal Arguments
-        self._add_command_modifiers(process_parser)
-        self._add_device_arguments(process_parser, required=False)
-
-        # Add Watch args
-        self._add_watch_arguments(process_parser)
-
         # Optional Args
         process_parser.add_argument('-G', '--general', action='store_true', required=False, help=general_help)
         process_parser.add_argument('-e', '--engine', action='store_true', required=False, help=engine_help)
         process_parser.add_argument('-p', '--pid', action='store', type=lambda value: self._not_negative_int(value, '--pid'), required=False, help=pid_help)
         process_parser.add_argument('-n', '--name', action='store', type=lambda value: self._is_valid_string(value, '--name'), required=False, help=name_help)
+
+        # Add Universal Arguments & watch Args
+        self._add_watch_arguments(process_parser)
+        self._add_device_arguments(process_parser, required=False)
+        self._add_command_modifiers(process_parser)
 
 
     def _add_profile_parser(self, subparsers: argparse._SubParsersAction, func):
@@ -1025,8 +1050,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         profile_parser.set_defaults(func=func)
 
         # Add Universal Arguments
-        self._add_command_modifiers(profile_parser)
         self._add_device_arguments(profile_parser, required=False)
+        self._add_command_modifiers(profile_parser)
 
 
     def _add_event_parser(self, subparsers: argparse._SubParsersAction, func):
@@ -1046,8 +1071,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         event_parser.set_defaults(func=func)
 
         # Add Universal Arguments
-        self._add_command_modifiers(event_parser)
         self._add_device_arguments(event_parser, required=False)
+        self._add_command_modifiers(event_parser)
 
 
     def _add_topology_parser(self, subparsers: argparse._SubParsersAction, func):
@@ -1082,10 +1107,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         topology_parser.formatter_class=lambda prog: AMDSMISubparserHelpFormatter(prog)
         topology_parser.set_defaults(func=func)
 
-        # Add Universal Arguments
-        self._add_command_modifiers(topology_parser)
-        self._add_device_arguments(topology_parser, required=False)
-
         # Optional Args
         topology_parser.add_argument('-a', '--access', action='store_true', required=False, help=access_help)
         topology_parser.add_argument('-w', '--weight', action='store_true', required=False, help=weight_help)
@@ -1096,6 +1117,10 @@ class AMDSMIParser(argparse.ArgumentParser):
         topology_parser.add_argument('-n', '--atomics', action='store_true', required=False, help=atomics_help)
         topology_parser.add_argument('-d', '--dma', action='store_true', required=False, help=dma_help)
         topology_parser.add_argument('-z', '--bi-dir', action='store_true', required=False, help=bi_dir_help)
+
+        # Add Universal Arguments
+        self._add_device_arguments(topology_parser, required=False)
+        self._add_command_modifiers(topology_parser)
 
 
     def _add_set_value_parser(self, subparsers: argparse._SubParsersAction, func):
@@ -1122,7 +1147,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 set_perf_det_help = f"Set performance determinism and select one of the corresponding performance levels:\n\t{perf_det_choices_str}"
                 (accelerator_set_choices, _) = self.helpers.get_accelerator_choices_types_indices()
                 memory_partition_choices_str = ", ".join(self.helpers.get_memory_partition_types())
-                set_compute_partition_help = f"Set one of the following the accelerator type or profile index:\n\t{accelerator_set_choices}.\n\tUse `sudo amd-smi partition --accelerator` to find acceptable values."
+                set_compute_partition_help = f"Set one of the following the accelerator TYPE or profile INDEX:\n\t{accelerator_set_choices}.\n\tUse `sudo amd-smi partition --accelerator` to find acceptable values."
                 set_memory_partition_help = f"Set one of the following the memory partition modes:\n\t{memory_partition_choices_str}"
                 power_cap_min, power_cap_max = self.helpers.get_power_caps()
                 power_cap_max = self.helpers.convert_SI_unit(power_cap_max, AMDSMIHelpers.SI_Unit.MICRO)
@@ -1158,9 +1183,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         set_value_parser.formatter_class=lambda prog: AMDSMISubparserHelpFormatter(prog)
         set_value_parser.set_defaults(func=func)
 
-        # Providing no -g 0 or -g all, is not required
-        self._add_device_arguments(set_value_parser, required=False)
-
         if self.helpers.is_amdgpu_initialized():
             # set value should only take one of these at a time so args below will be mutually exclusive
             set_value_exclusive_group = set_value_parser.add_mutually_exclusive_group()
@@ -1168,9 +1190,10 @@ class AMDSMIParser(argparse.ArgumentParser):
                 # Optional GPU Args
                 set_value_exclusive_group.add_argument('-f', '--fan', action=self._validate_fan_speed(), required=False, help=set_fan_help, metavar='%')
                 set_value_exclusive_group.add_argument('-l', '--perf-level', action='store', choices=self.helpers.get_perf_levels()[0], type=str.upper, required=False, help=set_perf_level_help, metavar='LEVEL')
-                set_value_exclusive_group.add_argument('-P', '--profile', action='store', required=False, help=set_profile_help, metavar='SETPROFILE')
+                set_value_exclusive_group.add_argument('-P', '--profile', action='store', required=False, help=set_profile_help, metavar='PROFILE_LEVEL')
                 set_value_exclusive_group.add_argument('-d', '--perf-determinism', action='store', type=lambda value: self._not_negative_int(value, '--perf-determinism'), required=False, help=set_perf_det_help, metavar='SCLKMAX')
-                set_value_exclusive_group.add_argument('-C', '--compute-partition', action='store', choices=accelerator_set_choices, type=lambda value: self._is_command_supported(value, accelerator_set_choices, '--compute-partition'), required=False, help=set_compute_partition_help, metavar='<ACCELERATOR_TYPE> or <PROFILE_INDEX>')
+                set_value_exclusive_group.add_argument('-C', '--compute-partition', action='store', choices=accelerator_set_choices, type=lambda value: self._is_command_supported(value, accelerator_set_choices, '--compute-partition'),
+                                                       required=False, help=set_compute_partition_help, metavar=('TYPE/INDEX'))
                 set_value_exclusive_group.add_argument('-M', '--memory-partition', action='store', choices=self.helpers.get_memory_partition_types(), type=str.upper, required=False, help=set_memory_partition_help, metavar='PARTITION')
                 set_value_exclusive_group.add_argument('-o', '--power-cap', action='store', type=lambda value: self._positive_int(value, '--power-cap'), required=False, help=set_power_cap_help, metavar='WATTS')
                 set_value_exclusive_group.add_argument('-p', '--soc-pstate', action='store', required=False, type=lambda value: self._not_negative_int(value, '--soc-pstate'), help=set_soc_pstate_help, metavar='POLICY_ID')
@@ -1178,7 +1201,6 @@ class AMDSMIParser(argparse.ArgumentParser):
                 set_value_exclusive_group.add_argument('-c', '--clk-level', action=self._level_select(), nargs='+', required=False, help=set_clock_freq_help, metavar=('CLK_TYPE', 'FREQ_LEVELS'))
             set_value_exclusive_group.add_argument('-L', '--clk-limit', action=self._limit_select(), nargs=3, required=False, help=set_clk_limit_help, metavar=('CLK_TYPE', 'LIM_TYPE', 'VALUE'))
             set_value_exclusive_group.add_argument('-R', '--process-isolation', action='store', choices=[0,1], type=lambda value: self._not_negative_int(value, '--process-isolation'), required=False, help=set_process_isolation_help, metavar='STATUS')
-
 
         if self.helpers.is_amd_hsmp_initialized():
             if self.helpers.is_baremetal():
@@ -1199,7 +1221,9 @@ class AMDSMIParser(argparse.ArgumentParser):
                 core_group = set_value_parser.add_argument_group("CPU Core Arguments")
                 core_group.add_argument('--core-boost-limit', action='append', required=False, type=self._positive_int, nargs=1, metavar=("BOOST_LIMIT"), help=set_core_boost_limit_help)
 
-        # Add command modifiers to the bottom
+        # Set accepts default devices of all
+        self._add_device_arguments(set_value_parser, required=False)
+        # Add Universal Arguments
         self._add_command_modifiers(set_value_parser)
 
 
@@ -1235,11 +1259,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         reset_parser.formatter_class=lambda prog: AMDSMISubparserHelpFormatter(prog)
         reset_parser.set_defaults(func=func)
 
-        # Add Universal Arguments
-        self._add_command_modifiers(reset_parser)
-        # Providing no -g 0 or -g all, is not required
-        self._add_device_arguments(reset_parser, required=False)
-
         # make reset args mutually exclusive
         reset_exclusive_group = reset_parser.add_mutually_exclusive_group()
 
@@ -1255,6 +1274,11 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Add Baremetal and Virtual OS reset arguments
         reset_exclusive_group.add_argument('-l', '--clean-local-data', action='store_true', required=False, help=reset_gpu_clean_local_data_help)
+
+        # Reset accepts default devices of all
+        self._add_device_arguments(reset_parser, required=False)
+        # Add Universal Arguments
+        self._add_command_modifiers(reset_parser)
 
 
     def _add_monitor_parser(self, subparsers: argparse._SubParsersAction, func):
@@ -1292,11 +1316,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         monitor_parser.formatter_class=lambda prog: AMDSMISubparserHelpFormatter(prog)
         monitor_parser.set_defaults(func=func)
 
-        # Add Universal Arguments
-        self._add_command_modifiers(monitor_parser)
-        self._add_device_arguments(monitor_parser, required=False)
-        self._add_watch_arguments(monitor_parser)
-
         # Add monitor arguments
         monitor_parser.add_argument('-p', '--power-usage', action='store_true', required=False, help=power_usage_help)
         monitor_parser.add_argument('-t', '--temperature', action='store_true', required=False, help=temperature_help)
@@ -1310,50 +1329,10 @@ class AMDSMIParser(argparse.ArgumentParser):
         monitor_parser.add_argument('-q', '--process', action='store_true', required=False, help=process_help)
         monitor_parser.add_argument('-V', '--violation', action='store_true', required=False, help=violation_help)
 
-
-    def _add_rocm_smi_parser(self, subparsers, func):
-        return
-        # Subparser help text
-        rocm_smi_help = "Legacy rocm_smi commands ported for backward compatibility"
-        rocm_smi_subcommand_help = "If no GPU is specified, returns showall and print the information for all\
-                                  GPUs on the system."
-        rocm_smi_optionals_title = "rocm_smi Arguments"
-
-        # Optional arguments help text
-        load_help = "Load clock, fan, performance, and profile settings from a given file."
-        save_help = "Save clock, fan, performance, and profile settings to a given file."
-        showtempgraph_help = "Show Temperature Graph"
-        showmclkrange_help = "Show mclk range"
-        showsclkrange_help = "Show sclk range"
-        showmaxpower_help = "Show maximum graphics package power this GPU will consume"
-        showmemvendor_help = "Show GPU memory vendor"
-        showproductname_help = "Show SKU/Vendor name"
-        showclkvolt_help = "Show supported GPU and Memory Clocks and Voltages"
-        showclkfrq_help = "Show supported GPU and Memory Clock"
-
-        # Create rocm_smi subparser
-        rocm_smi_parser = subparsers.add_parser('rocm-smi', help=rocm_smi_help, description=rocm_smi_subcommand_help)
-        rocm_smi_parser._optionals.title = rocm_smi_optionals_title
-        rocm_smi_parser.formatter_class=lambda prog: AMDSMISubparserHelpFormatter(prog)
-        rocm_smi_parser.set_defaults(func=func)
-        self._add_command_modifiers(rocm_smi_parser)
-
-        # Add Device args
-        self._add_device_arguments(rocm_smi_parser, required=False)
-
-        # Optional Args
-        rocm_smi_parser.add_argument('-l', '--load', action=self._check_input_file_path(), type=str, required=False, help=load_help)
-        rocm_smi_parser.add_argument('-s', '--save', action=self._check_output_file_path(), type=str, required=False, help=save_help)
-
-        rocm_smi_parser.add_argument('-b', '--showbw', action='store_true', required=False, help=showbw_help)
-        rocm_smi_parser.add_argument('-t', '--showtempgraph', action='store_true', required=False, help=showtempgraph_help)
-        rocm_smi_parser.add_argument('-m', '--showmclkrange', action='store_true', required=False, help=showmclkrange_help)
-        rocm_smi_parser.add_argument('-c', '--showsclkrange', action='store_true', required=False, help=showsclkrange_help)
-        rocm_smi_parser.add_argument('-P', '--showmaxpower', action='store_true', required=False, help=showmaxpower_help)
-        rocm_smi_parser.add_argument('-M', '--showmemvendor', action='store_true', required=False, help=showmemvendor_help)
-        rocm_smi_parser.add_argument('-p', '--showproductname', action='store_true', required=False, help=showproductname_help)
-        rocm_smi_parser.add_argument('-v', '--showclkvolt', action='store_true', required=False, help=showclkvolt_help)
-        rocm_smi_parser.add_argument('-f', '--showclkfrq', action='store_true', required=False, help=showclkfrq_help)
+        # Add Universal Arguments & Watch Args
+        self._add_watch_arguments(monitor_parser)
+        self._add_device_arguments(monitor_parser, required=False)
+        self._add_command_modifiers(monitor_parser)
 
 
     def _add_xgmi_parser(self, subparsers: argparse._SubParsersAction, func):
@@ -1377,13 +1356,13 @@ class AMDSMIParser(argparse.ArgumentParser):
         xgmi_parser.formatter_class=lambda prog: AMDSMISubparserHelpFormatter(prog)
         xgmi_parser.set_defaults(func=func)
 
-        # Add Universal Arguments
-        self._add_command_modifiers(xgmi_parser)
-        self._add_device_arguments(xgmi_parser, required=False)
-
         # Optional Args
         xgmi_parser.add_argument('-m', '--metric', action='store_true', required=False, help=metrics_help)
         xgmi_parser.add_argument('-l', '--link-status', action='store_true', required=False, help=xgmi_link_status_help)
+
+        # Add Universal Arguments
+        self._add_device_arguments(xgmi_parser, required=False)
+        self._add_command_modifiers(xgmi_parser)
 
 
     def _add_partition_parser(self, subparsers: argparse._SubParsersAction, func):
@@ -1408,15 +1387,13 @@ class AMDSMIParser(argparse.ArgumentParser):
         partition_parser.formatter_class=lambda prog: AMDSMISubparserHelpFormatter(prog)
         partition_parser.set_defaults(func=func)
 
-        # Add Universal Arguments
-        self._add_device_arguments(partition_parser, required=False)
-
         # Handle GPU Options
         partition_parser.add_argument('-c', '--current', action='store_true', required=False, help=current_help)
         partition_parser.add_argument('-m', '--memory', action='store_true', required=False, help=memory_help)
         partition_parser.add_argument('-a', '--accelerator', action='store_true', required=False, help=accelerator_help)
 
-        # Add command modifiers to the bottom
+        # Add Universal Arguments
+        self._add_device_arguments(partition_parser, required=False)
         self._add_command_modifiers(partition_parser)
 
 
@@ -1460,7 +1437,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Add common modifiers and device selection arguments.
         self._add_device_arguments(ras_parser, required=False)
-        self._add_command_modifiers(ras_parser, logging_only=True)
+        self._add_command_modifiers(ras_parser)
 
 
     def error(self, message):
