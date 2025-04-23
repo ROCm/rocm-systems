@@ -209,3 +209,37 @@ TEST_CASE("Unit_hipMemcpyParam2DAsync_Negative_Parameters") {
                   dst_alloc.width(), dst_alloc.height(), hipMemcpyDeviceToDevice);
   }
 }
+
+static constexpr size_t NUM_W{10};
+static constexpr size_t NUM_H{10};
+
+TEST_CASE("Unit_hipMemcpyParam2DAsync_Capture") {
+  void *A_d{nullptr};
+  void *B_d{nullptr};
+  size_t pitch_A, pitch_B;
+  size_t width{NUM_W * sizeof(int)};
+  HIP_CHECK(hipMallocPitch(&A_d, &pitch_A, width, NUM_H));
+  HIP_CHECK(hipMallocPitch(&B_d, &pitch_B, width, NUM_H));
+
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  hip_Memcpy2D desc = {};
+  desc.srcMemoryType = hipMemoryTypeDevice;
+  desc.srcDevice = hipDeviceptr_t(A_d);
+  desc.srcPitch = pitch_A;
+  desc.dstMemoryType = hipMemoryTypeDevice;
+  desc.dstDevice = hipDeviceptr_t(B_d);
+  desc.dstPitch = pitch_B;
+  desc.WidthInBytes = NUM_W * sizeof(int);
+  desc.Height = NUM_H;
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(hipMemcpyParam2DAsync(&desc, stream));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipFree(B_d));
+}

@@ -73,6 +73,28 @@ TEST_CASE("Unit_hipMemcpyAtoHAsync_Basic") {
 #endif
 }
 
+TEST_CASE("Unit_hipMemcpyAtoHAsync_Capture") {
+  CHECK_IMAGE_SUPPORT
+
+  int row = 1, col = 1;
+  int* host = reinterpret_cast<int*>(malloc(sizeof(int) * row * col));
+
+  hipArray_t array;
+  hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
+  HIP_CHECK(hipMallocArray(&array, &desc, col, row, hipArrayDefault));
+
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(hipMemcpyAtoHAsync(host, array, 0, sizeof(int) * col * row, 0));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipFreeArray(array));
+  free(host);
+}
+
 /**
  * End doxygen group MemoryTest.
  * @}

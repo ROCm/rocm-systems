@@ -276,3 +276,28 @@ TEST_CASE("Unit_hipMemcpy2DToArrayAsync_Negative_Parameters") {
 #endif
   }
 }
+
+static constexpr auto NUM_W{10};
+static constexpr auto NUM_H{10};
+
+TEST_CASE("Unit_hipMemcpy2DToArrayAsync_Capture") {
+  CHECK_IMAGE_SUPPORT
+  hipArray_t A_d{nullptr};
+  size_t width{sizeof(float) * NUM_W};
+  float* hData = (float*)malloc(width * NUM_H);
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  hipChannelFormatDesc desc = hipCreateChannelDesc<float>();
+  HIP_CHECK(hipMallocArray(&A_d, &desc, NUM_W, NUM_H, hipArrayDefault));
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(hipMemcpy2DToArrayAsync(A_d, 0, 0, hData, width, width, NUM_H, hipMemcpyHostToDevice,
+                                    stream));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  free(hData);
+}
