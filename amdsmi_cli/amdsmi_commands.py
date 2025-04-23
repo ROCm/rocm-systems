@@ -6320,26 +6320,28 @@ class AMDSMICommands():
             elif sev in ("nonfatal-corrected", "corrected"):
                 # Set bit corresponding to AMDSMI_CPER_SEV_NON_FATAL_CORRECTED (which is 2)
                 severity_mask |= (1 << 2)
-
+        
         if args.cper:
             # Start from cursor 0 (no timestamp argument provided).
             cursor = 0
             buffer_size = 1048576
             file_limit = int(args.file_limit) if args.file_limit else 1000
-
-            # Print exit message only once and only when follow is set
-            if self.logger.cper_exit_message() and args.follow:
-                print('Press q and hit ENTER when you want to stop.')
-                self.logger.set_cper_exit_message(False)
-
+            
             # Main loop: continuously retrieve CPER entries if --follow is set.
             gpu_id = self.helpers.get_gpu_id_from_device_handle(args.gpu)
-            if args.folder:
-                print(f'Dumping CPER file header entries for GPU {gpu_id} in folder {args.folder}\n')
-            else:
-                print(f'Dumping CPER file header entries for GPU {gpu_id}:\n')
 
+            # Print header only when dumping to a folder
+            if args.follow and not getattr(self, "_cper_follow_prompted", False):
+               print("Press CTRL + C to stop.")
+               self._cper_follow_prompted = True
+            if args.folder and args.gpu:
+               print(f"Dumping CPER file header entries for GPU {gpu_id} in folder {args.folder}")
+            elif args.folder:
+                 print(f"Dumping CPER file header entries in folder {args.folder}")
+
+            self.logger.set_cper_exit_message(False)
             self.stop = False
+
             while True:
                 try:
                     entries, new_cursor, cper_data = amdsmi_interface.amdsmi_get_gpu_cper_entries(
@@ -6356,17 +6358,30 @@ class AMDSMICommands():
                     else:
                         logging.debug(f"Error retrieving CPER entries: {e}")
                         break
-                if entries:
-                    self.helpers.dump_entries(args.folder, entries, cper_data)
+                # Dump or display
+                if args.folder:
+                   if args.gpu and not args.follow:
+                       self.helpers.dump_gpu_entries(args.folder, entries, cper_data, args.gpu)
+                       break
+                   elif not args.gpu and not args.follow:
+                       self.helpers.dump_all_entries(args.folder, entries, cper_data, args.gpu)
+                       break
+                   elif args.follow and args.gpu:
+                       self.helpers.dump_gpu_entries_follow(args.folder, entries, cper_data, args.gpu)
+                       break
+                   elif args.follow and not args.gpu:
+                       self.helpers.dump_all_entries_follow(args.folder, entries, cper_data, args.gpu)
+                       break
+                if args.follow:
+                    self.helpers.display_cper_files_generated_follow(entries, args.gpu)
+                    break
+                else:
+                    self.helpers.display_cper_files_generated(entries, args.gpu)
+                    break
                 if len(entries) == 0 or not args.follow:
                     break
                 cursor = new_cursor
                 time.sleep(5)
-                user_input = input()
-                if user_input == 'q':
-                    print("Escape Sequence Detected; Exiting")
-                    self.stop = True
-                    break
 
 
     def _event_thread(self, commands, i):
