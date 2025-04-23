@@ -34,6 +34,7 @@ from enum import Enum
 from pathlib import Path
 from typing import List, Set, Union
 
+# Import amdsmi library
 from amdsmi_init import *
 from BDF import BDF
 
