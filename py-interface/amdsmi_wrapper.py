@@ -178,7 +178,7 @@ from pathlib import Path
 #    - current directory
 def find_smi_library():
     err = OSError("Could not load libamd_smi.so")
-    possible_locations = list()
+    possible_locations = []
     # 1.
     rocm_path = os.getenv("ROCM_HOME", os.getenv("ROCM_PATH"))
     if rocm_path:

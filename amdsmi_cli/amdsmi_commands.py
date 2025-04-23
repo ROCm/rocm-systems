@@ -5690,10 +5690,6 @@ class AMDSMICommands():
         self.logger.print_output(multiple_device_enabled=False, watching_output=watching_output, tabular=True, dual_csv_output=dual_csv_output)
 
 
-    def rocm_smi(self, args):
-        print("Placeholder for rocm-smi legacy commands")
-
-
     def xgmi(self, args, multiple_devices=False, gpu=None, metric=None, xgmi_link_status=None):
         """ Get topology information for target gpus
             params:
