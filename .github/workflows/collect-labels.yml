@@ -29,3 +29,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           python .github/scripts/collect-labels.py "${{ github.event.inputs.repoListFile }}"
+
+      - name: Print generated labels.yml
+        run: |
+          echo "Contents of labels.yml:"
+          cat .github/labels.yml
