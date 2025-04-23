@@ -40,7 +40,8 @@ def main(file_path):
                 }
 
     sorted_labels = sorted(all_labels.values(), key=lambda l: l["name"].lower())
-    with open("labels.yaml", "w") as out:
+    os.makedirs(".github", exist_ok=True)  # Ensure the .github directory exists
+    with open(".github/labels.yml", "w") as out:
         yaml.dump(sorted_labels, out, sort_keys=False)
 
 if __name__ == "__main__":
