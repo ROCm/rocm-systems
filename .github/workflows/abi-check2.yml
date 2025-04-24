@@ -44,23 +44,41 @@ jobs:
       - name: Copy feature branch file as new
         run: |
           cp include/amd_smi/amdsmi.h amdsmi_new.h
+
       - name: Fetch old file
         run: |
-          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref_name }}" = "amd-mainline" ]; then
-            # Push to amd-mainline: use amd-mainline as old
-            git fetch origin amd-mainline:amd-mainline
-            git checkout amd-mainline -- include/amd_smi/amdsmi.h
-            mv include/amd_smi/amdsmi.h amdsmi_old.h
-            # Overwrite new with amd-staging
-            git fetch origin amd-staging:amd-staging
-            git checkout amd-staging -- include/amd_smi/amdsmi.h
-            mv include/amd_smi/amdsmi.h amdsmi_new.h
-          else
-            # Default: use amd-staging as old
-            git fetch origin amd-staging:amd-staging
-            git checkout amd-staging -- include/amd_smi/amdsmi.h
-            mv include/amd_smi/amdsmi.h amdsmi_old.h
+          # Print debug info
+          echo "Pull request base branch: ${{ github.base_ref }}"
+          echo "Pull request head branch: ${{ github.head_ref }}"
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # For pull requests, use the target branch as the old file
+            if [ "${{ github.base_ref }}" = "amd-mainline" ]; then
+              # Pull request to amd-mainline: use amd-mainline as old
+              git fetch origin amd-mainline
+              git checkout FETCH_HEAD -- include/amd_smi/amdsmi.h
+              mv include/amd_smi/amdsmi.h amdsmi_old.h
+            elif [ "${{ github.base_ref }}" = "amd-staging" ]; then
+              # Pull request to amd-staging: use amd-staging as old
+              git fetch origin amd-staging
+              git checkout FETCH_HEAD -- include/amd_smi/amdsmi.h
+              mv include/amd_smi/amdsmi.h amdsmi_old.h
+            fi
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            # For pushes, determine which branch was pushed to
+            if [ "${{ github.ref_name }}" = "amd-mainline" ]; then
+              # Push to amd-mainline: use amd-mainline as old
+              git fetch origin amd-mainline
+              git checkout FETCH_HEAD -- include/amd_smi/amdsmi.h
+              mv include/amd_smi/amdsmi.h amdsmi_old.h
+            elif [ "${{ github.ref_name }}" = "amd-staging" ]; then
+              # Push to amd-staging: use amd-staging as old
+              git fetch origin amd-staging
+              git checkout FETCH_HEAD -- include/amd_smi/amdsmi.h
+              mv include/amd_smi/amdsmi.h amdsmi_old.h
+            fi
           fi
+
       - name: Run ABI Compliance Check
         id: abi-check
         run: |
@@ -80,14 +98,26 @@ jobs:
               </libs>
           </descriptor>
           EOF
-          # Run checker and capture exit code in a single step
-          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref_name }}" = "amd-mainline" ]; then
-            COMPARE_MSG="amd-mainline vs amd-staging"
-            abi-compliance-checker -l amdsmi -old amdsmi_old.h -new amdsmi_new.h -v1 amd-mainline -v2 amd-staging -report-path abi-report.html -strict || { EXIT_CODE=$?; echo "abi_exit_code=$EXIT_CODE" > $GITHUB_WORKSPACE/abi_status.txt; exit $EXIT_CODE; }
-          else
-            COMPARE_MSG="amd-staging vs ${{ github.ref_name }}"
-            abi-compliance-checker -l amdsmi -old amdsmi_old.h -new amdsmi_new.h -v1 amd-staging -v2 ${{ github.ref_name }} -report-path abi-report.html -strict || { EXIT_CODE=$?; echo "abi_exit_code=$EXIT_CODE" > $GITHUB_WORKSPACE/abi_status.txt; exit $EXIT_CODE; }
+
+          # Set comparison message and run the appropriate check
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            if [ "${{ github.base_ref }}" = "amd-mainline" ]; then
+              COMPARE_MSG="amd-mainline vs ${{ github.head_ref }}"
+              abi-compliance-checker -l amdsmi -old amdsmi_old.h -new amdsmi_new.h -v1 amd-mainline -v2 ${{ github.head_ref }} -report-path abi-report.html -strict || { EXIT_CODE=$?; echo "abi_exit_code=$EXIT_CODE" > $GITHUB_WORKSPACE/abi_status.txt; exit $EXIT_CODE; }
+            elif [ "${{ github.base_ref }}" = "amd-staging" ]; then
+              COMPARE_MSG="amd-staging vs ${{ github.head_ref }}"
+              abi-compliance-checker -l amdsmi -old amdsmi_old.h -new amdsmi_new.h -v1 amd-staging -v2 ${{ github.head_ref }} -report-path abi-report.html -strict || { EXIT_CODE=$?; echo "abi_exit_code=$EXIT_CODE" > $GITHUB_WORKSPACE/abi_status.txt; exit $EXIT_CODE; }
+            fi
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            if [ "${{ github.ref_name }}" = "amd-mainline" ]; then
+              COMPARE_MSG="amd-mainline vs amd-staging"
+              abi-compliance-checker -l amdsmi -old amdsmi_old.h -new amdsmi_new.h -v1 amd-mainline -v2 amd-staging -report-path abi-report.html -strict || { EXIT_CODE=$?; echo "abi_exit_code=$EXIT_CODE" > $GITHUB_WORKSPACE/abi_status.txt; exit $EXIT_CODE; }
+            elif [ "${{ github.ref_name }}" = "amd-staging" ]; then
+              COMPARE_MSG="amd-staging vs ${{ github.ref_name }}"
+              abi-compliance-checker -l amdsmi -old amdsmi_old.h -new amdsmi_new.h -v1 amd-staging -v2 ${{ github.ref_name }} -report-path abi-report.html -strict || { EXIT_CODE=$?; echo "abi_exit_code=$EXIT_CODE" > $GITHUB_WORKSPACE/abi_status.txt; exit $EXIT_CODE; }
+            fi
           fi
+
           # If the report was generated, check for ANY changes
           if [ -f abi-report.html ]; then
             echo "Report generated successfully"
