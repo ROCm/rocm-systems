@@ -236,6 +236,13 @@ TEST_P(KFDSVMEvictTest, BasicTest) {
     if (!SVMAPISupported())
         return;
 
+    HSAint32 xnack_enable = 0;
+    EXPECT_SUCCESS(hsaKmtGetXNACKMode(&xnack_enable));
+    if (!xnack_enable) {
+	    LOG() << std::hex << "Test is skipped with xnack off" << std::endl;
+            return;
+    }
+
     HSAuint32 defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
     ASSERT_GE(defaultGPUNode, 0) << "failed to get default GPU Node";
     HSAuint64 vramBufSize = ALLOCATE_BUF_SIZE_MB * 1024 * 1024;
@@ -303,6 +310,13 @@ TEST_P(KFDSVMEvictTest, QueueTest) {
     if (!SVMAPISupported())
         return;
 
+    HSAint32 xnack_enable = 0;
+    EXPECT_SUCCESS(hsaKmtGetXNACKMode(&xnack_enable));
+    if (!xnack_enable) {
+	LOG() << std::hex << "Test is skipped with xnack off" << std::endl;
+        return;
+    }
+
     HSAuint32 defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
     ASSERT_GE(defaultGPUNode, 0) << "failed to get default GPU Node";
     unsigned int count = MAX_WAVEFRONTS;
@@ -338,8 +352,6 @@ TEST_P(KFDSVMEvictTest, QueueTest) {
         LOG() << "Found VRAM of " << std::dec << (vramSize >> 20) << "MB." << std::endl;
     }
 
-    HSAint32 xnack_enable = 0;
-    EXPECT_SUCCESS(hsaKmtGetXNACKMode(&xnack_enable));
     HSAuint64 vramBufSize = GetBufferSize(vramSize, count, xnack_enable);
     if (vramBufSize == 0) {
         LOG() << "Not enough system memory, skipping the test" << std::endl;
