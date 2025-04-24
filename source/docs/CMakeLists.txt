@@ -22,10 +22,11 @@ find_program(CHMOD_CMD NAMES chmod)
 if(NOT EXISTS ${PROJECT_BINARY_DIR}/external/miniconda.sh)
     message(
         STATUS
-            "Downloading https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh"
+            "Downloading https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh"
         )
     file(
-        DOWNLOAD https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh
+        DOWNLOAD
+        https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
         ${PROJECT_BINARY_DIR}/external/miniconda.sh
         STATUS MINICONDA_DOWNLOAD_RET
         INACTIVITY_TIMEOUT 60
@@ -34,7 +35,7 @@ if(NOT EXISTS ${PROJECT_BINARY_DIR}/external/miniconda.sh)
     if(NOT MINICONDA_DOWNLOAD_RET EQUAL 0)
         message(
             FATAL_ERROR
-                "Download to ${PROJECT_BINARY_DIR}/external/miniconda.sh from https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh failed"
+                "Download to ${PROJECT_BINARY_DIR}/external/miniconda.sh from https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh failed"
             )
     endif()
 endif()
@@ -89,7 +90,7 @@ export PATH
 source ${CONDA_ROOT}/bin/activate
 
 conda config --set always_yes yes
-conda update -c defaults -n base conda
+conda update -n base conda
 
 if [ ! -d '${CONDA_ROOT}/envs/rocprofiler-docs' ]; then
     ${CONDA_ROOT}/bin/conda env create -n rocprofiler-docs -f ${CMAKE_CURRENT_LIST_DIR}/environment.yml
