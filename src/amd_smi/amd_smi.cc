@@ -577,32 +577,41 @@ amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_handle,
     uint64_t device_uuid = 0;
     uint16_t device_id = std::numeric_limits<uint16_t>::max();
     amdsmi_status_t status;
+    std::ostringstream ss;
 
     status = rsmi_wrapper(rsmi_dev_id_get, processor_handle, 0, &device_id);
     if (status != AMDSMI_STATUS_SUCCESS) {
-        std::ostringstream ss;
         ss << __PRETTY_FUNCTION__
         << " | rsmi_dev_id_get(): "
-        << smi_amdgpu_get_status_string(status, true);
+        << smi_amdgpu_get_status_string(status, false);
         LOG_INFO(ss);
         device_id = std::numeric_limits<uint16_t>::max();
     }
+    ss << __PRETTY_FUNCTION__
+       << " | device_id (dec): " << device_id << "\n"
+       << "; device_id (hex): 0x" << std::hex << device_id << std::dec << "\n"
+       << "; rsmi_dev_id_get() status: "
+       << smi_amdgpu_get_status_string(status, false) << "\n";
 
     status = rsmi_wrapper(rsmi_dev_unique_id_get, processor_handle, 0,
                             &device_uuid);
     if (status != AMDSMI_STATUS_SUCCESS) {
-        std::ostringstream ss;
-        ss << __PRETTY_FUNCTION__
-        << " | rsmi_dev_unique_id_get(): "
-        << smi_amdgpu_get_status_string(status, true);
         LOG_INFO(ss);
         return status;
     }
+    ss << "; device_uuid (dec): " << device_uuid << "\n"
+       << "; device_uuid (hex): 0x" << std::hex << device_uuid << std::dec << "\n"
+       << "; rsmi_dev_unique_id_get() status: "
+       << smi_amdgpu_get_status_string(status, false) << "\n";
 
     const uint8_t fcn = 0xff;
 
     /* generate random UUID */
     status = amdsmi_uuid_gen(uuid, device_uuid, device_id, fcn);
+    ss << "; uuid: " << uuid << "\n"
+       << "; amdsmi_uuid_gen() status: "
+       << smi_amdgpu_get_status_string(status, false) << "\n";
+    LOG_INFO(ss);
     return status;
 }
 
@@ -618,6 +627,7 @@ amdsmi_get_gpu_enumeration_info(amdsmi_processor_handle processor_handle,
     }
 
     amdsmi_status_t status;
+    std::ostringstream ss;
 
     // Retrieve GPU device from the processor handle
     amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
@@ -655,14 +665,19 @@ amdsmi_get_gpu_enumeration_info(amdsmi_processor_handle processor_handle,
     }
 
     // Retrieve HIP UUID
-    std::string hip_uuid_str = "GPU-";
-    char asic_serial[AMDSMI_GPU_UUID_SIZE];
-    status = amdsmi_get_gpu_device_uuid(processor_handle, 0, asic_serial);
-    if (status == AMDSMI_STATUS_SUCCESS) {
-        hip_uuid_str += std::string(asic_serial).substr(0, sizeof(info->hip_uuid) - hip_uuid_str.size() - 1);
-        std::strncpy(info->hip_uuid, hip_uuid_str.c_str(), sizeof(info->hip_uuid) - 1);
-        info->hip_uuid[sizeof(info->hip_uuid) - 1] = '\0'; // Ensure null termination
-    }
+    std::ostringstream ss_uuid;
+    uint64_t device_uuid = 0;
+    std::string hip_uuid_str;
+    status = rsmi_wrapper(rsmi_dev_unique_id_get, processor_handle, 0, &device_uuid);
+    ss_uuid << "GPU-" << std::hex << device_uuid;
+    hip_uuid_str = ss_uuid.str();
+    smi_clear_char_and_reinitialize(info->hip_uuid, AMDSMI_MAX_STRING_LENGTH, hip_uuid_str);
+
+    ss << "; device_uuid (dec): " << device_uuid << "\n"
+       << "; device_uuid (hex): 0x" << std::hex << device_uuid << std::dec << "\n"
+       << "; rsmi_dev_unique_id_get() status: "
+       << smi_amdgpu_get_status_string(status, false) << "\n";
+    LOG_INFO(ss);
 
     return AMDSMI_STATUS_SUCCESS;
 }
