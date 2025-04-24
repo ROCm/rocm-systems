@@ -6,36 +6,47 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Added
 
-- Added profiling and metric collection capabilities for VCN engine activity, JPEG engine activity and API tracing for rocDecode, rocJPEG and VA-APIs.
-- Added a "how-to" document for network performance profiling for standard Network Interface Cards (NICs).
+- Profiling and metric collection capabilities for VCN engine activity, JPEG engine activity, and API tracing for rocDecode, rocJPEG and VA-APIs.
 
 ### Changed
 
-- Replaced ROCm-SMI backend with AMD-SMI backend for collecting GPU metrics.
+- Replaced ROCm SMI backend with AMD SMI backend for collecting GPU metrics.
 
 ### Resolved issues
 
-- Fixed application hang when enabling the RCCL backend
+- Fixed an issue where enabling the RCCL backend caused the application to stop responding.
 
-## ROCm Systems Profiler 1.0.0 for ROCm 6.4
+## ROCm Systems Profiler 1.0.0 for ROCm 6.4.1
+
+### Added
+
+- "How-to" document for network performance profiling for standard Network Interface Cards (NICs).
+
+## ROCm Systems Profiler 1.0.0 for ROCm 6.4.0
 
 ### Added
 
 - Support for VA-API and rocDecode tracing.
 
+- Aggregation of MPI data collected across distributed nodes and ranks. The data is concatenated into a single proto file.
+
 ### Changed
 
-- Backend refactored to use rocprofiler-sdk rather than rocprofiler and roctracer.
+- Backend refactored to use ROCprofiler-SDK rather than ROCProfiler and ROCTracer.
 
 ### Resolved issues
 
 - Fixed hardware counter summary files not being generated after profiling.
 
-- Fixed an application crash when collecting performance counters with rocprofiler.
+- Fixed an application crash when collecting performance counters with ROCProfiler.
 
 - Fixed interruption in config file generation.
 
-- Fixed segmentation fault while running rocprof-sys-instrument.
+- Fixed segmentation fault while running `rocprof-sys-instrument`.
+
+- Fixed an issue where running `rocprof-sys-causal` or using the `-I all` option with `rocprof-sys-sample` caused the system to become non-responsive.
+
+- Fixed an issue where sampling multi-GPU Python workloads caused the system to stop responding.
 
 ## ROCm Systems Profiler 0.1.1 for ROCm 6.3.2
 
