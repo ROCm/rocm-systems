@@ -29,20 +29,20 @@ The documentation is structured as follows:
 
   .. grid-item-card:: How to
 
+    * :doc:`Samples <how-to/samples>`
     * :ref:`using-rocprofv3`
     * :ref:`using-rocprofiler-sdk-roctx`
-    * :ref:`using-pc-sampling`
-    * :doc:`Samples <how-to/samples>`
     * :ref:`using-rocprofv3-with-mpi`
+    * :ref:`using-pc-sampling`
 
   .. grid-item-card:: API reference
 
+    * :doc:`Tool library <api-reference/tool_library>`
+    * :ref:`runtime-intercept-tables`
     * :doc:`Buffered services <api-reference/buffered_services>`
     * :doc:`Callback services <api-reference/callback_services>`
     * :doc:`Counter collection services <api-reference/counter_collection_services>`
-    * :ref:`runtime-intercept-tables`
     * :doc:`PC sampling <api-reference/pc_sampling>`
-    * :doc:`Tool library <api-reference/tool_library>`
     * :doc:`ROCprofiler-SDK API library <_doxygen/rocprofiler-sdk/html/index>`
     * :doc:`ROCTx API library <_doxygen/roctx/html/index>`
 
