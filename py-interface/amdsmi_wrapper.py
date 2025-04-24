@@ -307,6 +307,7 @@ amdsmi_status_t__enumvalues = {
     32: 'AMDSMI_STATUS_NOT_INIT',
     33: 'AMDSMI_STATUS_NO_SLOT',
     34: 'AMDSMI_STATUS_DRIVER_NOT_LOADED',
+    39: 'AMDSMI_STATUS_MORE_DATA',
     40: 'AMDSMI_STATUS_NO_DATA',
     41: 'AMDSMI_STATUS_INSUFFICIENT_SIZE',
     42: 'AMDSMI_STATUS_UNEXPECTED_SIZE',
@@ -324,7 +325,6 @@ amdsmi_status_t__enumvalues = {
     54: 'AMDSMI_STATUS_AMDGPU_RESTART_ERR',
     55: 'AMDSMI_STATUS_SETTING_UNAVAILABLE',
     56: 'AMDSMI_STATUS_CORRUPTED_EEPROM',
-    57: 'AMDSMI_STATUS_MORE_DATA',
     4294967294: 'AMDSMI_STATUS_MAP_ERROR',
     4294967295: 'AMDSMI_STATUS_UNKNOWN_ERROR',
 }
@@ -353,6 +353,7 @@ AMDSMI_STATUS_NOT_FOUND = 31
 AMDSMI_STATUS_NOT_INIT = 32
 AMDSMI_STATUS_NO_SLOT = 33
 AMDSMI_STATUS_DRIVER_NOT_LOADED = 34
+AMDSMI_STATUS_MORE_DATA = 39
 AMDSMI_STATUS_NO_DATA = 40
 AMDSMI_STATUS_INSUFFICIENT_SIZE = 41
 AMDSMI_STATUS_UNEXPECTED_SIZE = 42
@@ -370,7 +371,6 @@ AMDSMI_STATUS_ARG_PTR_NULL = 53
 AMDSMI_STATUS_AMDGPU_RESTART_ERR = 54
 AMDSMI_STATUS_SETTING_UNAVAILABLE = 55
 AMDSMI_STATUS_CORRUPTED_EEPROM = 56
-AMDSMI_STATUS_MORE_DATA = 57
 AMDSMI_STATUS_MAP_ERROR = 4294967294
 AMDSMI_STATUS_UNKNOWN_ERROR = 4294967295
 amdsmi_status_t = ctypes.c_uint32 # enum
@@ -858,6 +858,21 @@ amdsmi_card_form_factor_t = ctypes.c_uint32 # enum
 class struct_amdsmi_pcie_info_t(Structure):
     pass
 
+class struct_pcie_static_(Structure):
+    pass
+
+struct_pcie_static_._pack_ = 1 # source:False
+struct_pcie_static_._fields_ = [
+    ('max_pcie_width', ctypes.c_uint16),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('max_pcie_speed', ctypes.c_uint32),
+    ('pcie_interface_version', ctypes.c_uint32),
+    ('slot_type', amdsmi_card_form_factor_t),
+    ('max_pcie_interface_version', ctypes.c_uint32),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+    ('reserved', ctypes.c_uint64 * 9),
+]
+
 class struct_pcie_metric_(Structure):
     pass
 
@@ -876,21 +891,6 @@ struct_pcie_metric_._fields_ = [
     ('pcie_lc_perf_other_end_recovery_count', ctypes.c_uint32),
     ('PADDING_2', ctypes.c_ubyte * 4),
     ('reserved', ctypes.c_uint64 * 12),
-]
-
-class struct_pcie_static_(Structure):
-    pass
-
-struct_pcie_static_._pack_ = 1 # source:False
-struct_pcie_static_._fields_ = [
-    ('max_pcie_width', ctypes.c_uint16),
-    ('PADDING_0', ctypes.c_ubyte * 2),
-    ('max_pcie_speed', ctypes.c_uint32),
-    ('pcie_interface_version', ctypes.c_uint32),
-    ('slot_type', amdsmi_card_form_factor_t),
-    ('max_pcie_interface_version', ctypes.c_uint32),
-    ('PADDING_1', ctypes.c_ubyte * 4),
-    ('reserved', ctypes.c_uint64 * 9),
 ]
 
 struct_amdsmi_pcie_info_t._pack_ = 1 # source:False
@@ -1256,6 +1256,16 @@ amdsmi_process_handle_t = ctypes.c_uint32
 class struct_amdsmi_proc_info_t(Structure):
     pass
 
+class struct_engine_usage_(Structure):
+    pass
+
+struct_engine_usage_._pack_ = 1 # source:False
+struct_engine_usage_._fields_ = [
+    ('gfx', ctypes.c_uint64),
+    ('enc', ctypes.c_uint64),
+    ('reserved', ctypes.c_uint32 * 12),
+]
+
 class struct_memory_usage_(Structure):
     pass
 
@@ -1265,16 +1275,6 @@ struct_memory_usage_._fields_ = [
     ('cpu_mem', ctypes.c_uint64),
     ('vram_mem', ctypes.c_uint64),
     ('reserved', ctypes.c_uint32 * 10),
-]
-
-class struct_engine_usage_(Structure):
-    pass
-
-struct_engine_usage_._pack_ = 1 # source:False
-struct_engine_usage_._fields_ = [
-    ('gfx', ctypes.c_uint64),
-    ('enc', ctypes.c_uint64),
-    ('reserved', ctypes.c_uint32 * 12),
 ]
 
 struct_amdsmi_proc_info_t._pack_ = 1 # source:False
@@ -2594,18 +2594,6 @@ struct_amdsmi_cper_timestamp_t._fields_ = [
 ]
 
 amdsmi_cper_timestamp_t = struct_amdsmi_cper_timestamp_t
-class struct_valid_bits_t(Structure):
-    pass
-
-struct_valid_bits_t._pack_ = 1 # source:False
-struct_valid_bits_t._fields_ = [
-    ('platform_id', ctypes.c_uint32, 1),
-    ('timestamp', ctypes.c_uint32, 1),
-    ('partition_id', ctypes.c_uint32, 1),
-    ('reserved', ctypes.c_uint32, 29),
-]
-
-valid_bits_t = struct_valid_bits_t
 class union_amdsmi_cper_valid_bits_t(Union):
     pass
 
@@ -3376,8 +3364,7 @@ __all__ = \
     'struct_engine_usage_', 'struct_fw_info_list_',
     'struct_memory_usage_', 'struct_nps_flags_', 'struct_numa_range_',
     'struct_pcie_metric_', 'struct_pcie_static_',
-    'struct_amdsmi_bdf_t', 'struct_valid_bits_',
-    'struct_valid_bits_t', 'uint32_t', 'uint64_t', 'uint8_t',
-    'union_amdsmi_bdf_t', 'union_amdsmi_cper_valid_bits_t',
-    'union_amdsmi_nps_caps_t', 'valid_bits_t']
+    'struct_amdsmi_bdf_t', 'struct_valid_bits_', 'uint32_t',
+    'uint64_t', 'uint8_t', 'union_amdsmi_bdf_t',
+    'union_amdsmi_cper_valid_bits_t', 'union_amdsmi_nps_caps_t']
 
