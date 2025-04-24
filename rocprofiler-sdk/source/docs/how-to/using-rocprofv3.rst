@@ -85,7 +85,7 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
        | ``--hsa-trace`` [BOOL] |br| |br| |br| |br| |br| |br| |br| |br|
        | ``--rccl-trace`` [BOOL] |br| |br| |br| |br|
        | ``--kokkos-trace`` [BOOL] |br| |br| |br| |br|
-       | ``--rocdecode-trace`` [BOOL] |br| |br| |br| |br|
+       | ``--rocdecode-trace`` [BOOL] 
      - | Combination of ``--hip-runtime-trace`` and ``--hip-compiler-trace``. This option only enables the HIP API tracing. Unlike previous iterations of ``rocprof``, this option doesn't enable kernel tracing, memory copy tracing, and so on. |br| |br|
        | Collects marker (ROCTx) traces. Similar to ``--roctx-trace`` option in earlier ``rocprof`` versions, but with improved ``ROCTx`` library with more features. |br| |br|
        | Collects kernel dispatch traces. |br| |br|
@@ -95,7 +95,7 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
        | Collects ``--hsa-core-trace``, ``--hsa-amd-trace``, ``--hsa-image-trace``, and ``--hsa-finalizer-trace``. This option only enables the HSA API tracing. Unlike previous iterations of ``rocprof``, this doesn't enable kernel tracing, memory copy tracing, and so on. |br| |br|
        | Collects traces for RCCL (ROCm Communication Collectives Library), which is also pronounced as 'Rickle'. |br| |br|
        | Enables builtin Kokkos tools support, which implies enabling ``--marker-trace`` collection and ``--kernel-rename``. |br| |br|
-       | Collects traces for rocDecode APIs. |br| |br|
+       | Collects traces for rocDecode APIs.
 
    * - Granular tracing
      - | ``--hip-runtime-trace`` [BOOL] |br| |br| |br| |br|
@@ -162,16 +162,16 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
        | Specifies Perfetto shared memory size hint in KB. Default: 64 KB.
 
    * - Display
-     - ``-L`` [BOOL] \| ``--list-avail`` [BOOL]
-     - Lists the PC sampling configurations and metrics available in the counter_defs.yaml file for counter collection. In earlier ``rocprof`` versions, this was known as ``--list-basic``, ``--list-derived``, and ``--list-counters``.
+     - | ``-L`` [BOOL] \| ``--list-avail`` [BOOL] |br|
+     - | Lists the PC sampling configurations and metrics available in the counter_defs.yaml file for counter collection. In earlier ``rocprof`` versions, this was known as ``--list-basic``, ``--list-derived``, and ``--list-counters``.
 
    * - Other
-     - ``--preload`` [PRELOAD ...]
-     - Specifies libraries to prepend to ``LD_PRELOAD``. It is useful for sanitizer libraries.
-     - ``--minimum-output-data``
-     - Output files are generated only if output data size is greater than minimum output data size. It can be used for controlling the generation of output files so that user don't recieve empty files. The input is in KB units.
-     - ``--disable-signal-handlers``
-     - Disables the signal handlers in the rocprofv3 tool. It disables the prioritizing of rocprofv3 signal handler over application installed signal handler. When --disable-signal-handlers is set to true, and application has its signal handler on SIGSEGV or similar installed, then its signal handler will be used not the rocprofv3 signal handler. Note: glog still installs signal handlers which provide backtraces.
+     - | ``--preload`` PRELOAD  |br| |br|
+       | ``--minimum-output-data`` |br| |br|
+       | ``--disable-signal-handlers`` 
+     - | Specifies libraries to prepend to ``LD_PRELOAD``. It is useful for sanitizer libraries. |br| |br|
+       | Output files are generated only if output data size is greater than minimum output data size. It can be used for controlling the generation of output files so that user don't recieve empty files. The input is in KB units. |br| |br|
+       | Disables the signal handlers in the rocprofv3 tool. It disables the prioritizing of rocprofv3 signal handler over application installed signal handler. When --disable-signal-handlers is set to true, and application has its signal handler on SIGSEGV or similar installed, then its signal handler will be used not the rocprofv3 signal handler. Note: glog still installs signal handlers which provide backtraces.
 
 To see exhaustive list of ``rocprofv3`` options:
 
@@ -1019,6 +1019,7 @@ The generated Perfetto trace file can be opened in the `Perfetto UI <https://ui.
 You can also combine this with the system trace option to get a more comprehensive view of the system's performance. For example, you can use the following command to collect both system trace and performance counter data:
 
 .. code-block:: bash
+   
   rocprofv3 --pmc SQ_WAVES GRBM_COUNT --sys-trace --output-format pftrace -- <application_path>
 
 .. image:: /data/perfetto_counters.png
