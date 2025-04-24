@@ -56,6 +56,7 @@ namespace AMD {
 
 // Tracks aggregate size of system memory available on platform
 size_t MemoryRegion::max_sysmem_alloc_size_ = 0;
+const size_t MemoryRegion::kPageSize_ = sysconf(_SC_PAGESIZE);
 
 bool MemoryRegion::RegisterMemory(void* ptr, size_t size, const HsaMemFlags& MemFlags) {
   assert(ptr != NULL);
@@ -123,7 +124,7 @@ MemoryRegion::MemoryRegion(bool fine_grain, bool kernarg, bool full_profile,
     virtual_size_ = kGpuVmSize;
 
   } else if (IsSystem()) {
-    mem_flag_.ui32.PageSize = MemoryRegion::kPageSize();
+    mem_flag_.ui32.PageSize = GetPageSize();
     mem_flag_.ui32.NoSubstitute = 0;
     mem_flag_.ui32.HostAccess = 1;
     mem_flag_.ui32.CachePolicy = HSA_CACHING_CACHED;
@@ -136,7 +137,7 @@ MemoryRegion::MemoryRegion(bool fine_grain, bool kernarg, bool full_profile,
 
 
   // Adjust allocatable size per page align
-  max_single_alloc_size_ = AlignDown(static_cast<size_t>(GetPhysicalSize()), kPageSize());
+  max_single_alloc_size_ = AlignDown(static_cast<size_t>(GetPhysicalSize()), GetPageSize());
 
   // Keep track of total system memory available
   // @note: System memory is surfaced as both coarse
@@ -148,7 +149,7 @@ MemoryRegion::MemoryRegion(bool fine_grain, bool kernarg, bool full_profile,
   }
 
   assert(GetVirtualSize() != 0);
-  assert(IsMultipleOf(max_single_alloc_size_, kPageSize()));
+  assert(IsMultipleOf(max_single_alloc_size_, GetPageSize()));
 }
 
 MemoryRegion::~MemoryRegion() {}
@@ -175,7 +176,7 @@ hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags,
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
 
-  size = AlignUp(size, kPageSize());
+  size = AlignUp(size, GetPageSize());
 
   return owner()->driver().AllocateMemory(*this, alloc_flags, address, size,
                                           agent_node_id);
@@ -276,7 +277,7 @@ hsa_status_t MemoryRegion::GetInfo(hsa_region_info_t attribute,
         case HSA_HEAPTYPE_DEVICE_SVM:
         case HSA_HEAPTYPE_FRAME_BUFFER_PRIVATE:
         case HSA_HEAPTYPE_FRAME_BUFFER_PUBLIC:
-          *((size_t*)value) = kPageSize();
+          *((size_t*)value) = GetPageSize();
           break;
         default:
           *((size_t*)value) = 0;
@@ -289,7 +290,7 @@ hsa_status_t MemoryRegion::GetInfo(hsa_region_info_t attribute,
         case HSA_HEAPTYPE_DEVICE_SVM:
         case HSA_HEAPTYPE_FRAME_BUFFER_PRIVATE:
         case HSA_HEAPTYPE_FRAME_BUFFER_PUBLIC:
-          *((size_t*)value) = kPageSize();
+          *((size_t*)value) = GetPageSize();
           break;
         default:
           *((size_t*)value) = 0;
@@ -358,12 +359,12 @@ hsa_status_t MemoryRegion::GetPoolInfo(hsa_amd_memory_pool_info_t attribute,
     case HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE:
       switch (mem_props_.HeapType) {
         case HSA_HEAPTYPE_SYSTEM:
-          *((size_t*)value) = kPageSize();
+          *((size_t*)value) = GetPageSize();
           break;
         case HSA_HEAPTYPE_FRAME_BUFFER_PRIVATE:
         case HSA_HEAPTYPE_FRAME_BUFFER_PUBLIC:
           *((size_t*)value) = core::Runtime::runtime_singleton_->flag().disable_fragment_alloc()
-              ? kPageSize()
+              ? GetPageSize()
               : fragment_allocator_.default_block_size();
           break;
         default:

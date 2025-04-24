@@ -424,10 +424,9 @@ hsa_status_t CpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t CpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type,
-                                   core::HsaEventCallback event_callback,
-                                   void* data, uint32_t private_segment_size,
-                                   uint32_t group_segment_size,
+hsa_status_t CpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
+                                   core::HsaEventCallback event_callback, void* data,
+                                   uint32_t private_segment_size, uint32_t group_segment_size,
                                    core::Queue** queue) {
   // No HW AQL packet processor on CPU device.
   return HSA_STATUS_ERROR;

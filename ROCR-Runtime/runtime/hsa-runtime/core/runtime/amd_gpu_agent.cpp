@@ -232,10 +232,13 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
 
 #endif
 
-  auto& firstCpu = core::Runtime::runtime_singleton_->cpu_agents()[0];
-  auto linkInfo = core::Runtime::runtime_singleton_->GetLinkInfo(firstCpu->node_id(),
-                                                                node_id());
-  xgmi_cpu_gpu_ = (linkInfo.info.link_type == HSA_AMD_LINK_INFO_TYPE_XGMI);
+  auto& first_cpu = core::Runtime::runtime_singleton_->cpu_agents()[0];
+  auto link_info = core::Runtime::runtime_singleton_->GetLinkInfo(first_cpu->node_id(), node_id());
+  xgmi_cpu_gpu_ = (link_info.info.link_type == HSA_AMD_LINK_INFO_TYPE_XGMI);
+
+  if (link_info.num_hop >= 1) {
+    large_bar_enabled_ = true;
+  }
 
   // Populate region list.
   InitRegionList();
@@ -706,7 +709,8 @@ core::Queue* GpuAgent::CreateInterceptibleQueue(void (*callback)(hsa_status_t st
   uint32_t size = std::max(in_size, minAqlSize_);
   size = std::min(size, maxAqlSize_);
 
-  QueueCreate(size, HSA_QUEUE_TYPE_MULTI, callback, data, 0, 0, &queue);
+  QueueCreate(size, HSA_QUEUE_TYPE_MULTI, HSA_AMD_QUEUE_CREATE_SYSTEM_MEM, callback, data, 0, 0,
+              &queue);
   if (queue != nullptr)
     core::Runtime::runtime_singleton_->InternalQueueCreateNotify(core::Queue::Convert(queue),
                                                                  this->public_handle());
@@ -1666,10 +1670,9 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type,
-                                   core::HsaEventCallback event_callback,
-                                   void* data, uint32_t private_segment_size,
-                                   uint32_t group_segment_size,
+hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
+                                   core::HsaEventCallback event_callback, void* data,
+                                   uint32_t private_segment_size, uint32_t group_segment_size,
                                    core::Queue** queue) {
   // Handle GWS queues.
   if (queue_type == HSA_QUEUE_TYPE_COOPERATIVE) {
@@ -1739,9 +1742,26 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type,
   // ensured.
   queues_[QueueUtility].touch();
 
+  bool dev_mem_queue_descriptor = (flags & HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR) != 0;
+
   // Create an HW AQL queue
-  auto aql_queue =
-      new AqlQueue(this, size, node_id(), scratch, event_callback, data, is_kv_device_);
+  core::SharedQueue* shared_queue = nullptr;
+
+  if (dev_mem_queue_descriptor) {
+    shared_queue = static_cast<core::SharedQueue*>(
+        finegrain_allocator()(sizeof(core::SharedQueue), core::MemoryRegion::AllocateUncached));
+  } else {
+    shared_queue =
+        static_cast<core::SharedQueue*>(core::Runtime::runtime_singleton_->system_allocator()(
+            sizeof(core::SharedQueue), MemoryRegion::GetPageSize(),
+            isMES() ? (MemoryRegion::AllocateGTTAccess | MemoryRegion::AllocateNonPaged) : 0,
+            node_id()));
+  }
+
+  if (!shared_queue) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+  auto aql_queue = new AqlQueue(shared_queue, this, size, node_id(), scratch, event_callback, data,
+                                flags, is_kv_device_);
   *queue = aql_queue;
   aql_queues_.push_back(aql_queue);
 
@@ -2456,25 +2476,32 @@ void GpuAgent::InitAllocators() {
   }
   assert(system_allocator_ && "Nearest NUMA node did not have a kernarg pool.");
 
-  // Setup fine-grain allocator
+  // Setup this GPU's fine-grain and coarse-grain allocators.
   for (auto region : regions()) {
-    const AMD::MemoryRegion* amd_region = (const AMD::MemoryRegion*)region;
-    if (amd_region->IsLocalMemory() && amd_region->fine_grain()) {
-      finegrain_allocator_ = [region](size_t size,
-                                      MemoryRegion::AllocateFlags alloc_flags) -> void* {
-        void* ptr = nullptr;
-        return (HSA_STATUS_SUCCESS ==
-                core::Runtime::runtime_singleton_->AllocateMemory(region, size, alloc_flags, &ptr))
-            ? ptr
-            : nullptr;
-      };
+    const AMD::MemoryRegion* amd_region = static_cast<const AMD::MemoryRegion*>(region);
 
-      finegrain_deallocator_ = [](void* ptr) {
-        core::Runtime::runtime_singleton_->FreeMemory(ptr);
-      };
+    auto region_allocator = [region](size_t size,
+                                     MemoryRegion::AllocateFlags alloc_flags) -> void* {
+      void* ptr = nullptr;
+       return (HSA_STATUS_SUCCESS ==
+               core::Runtime::runtime_singleton_->AllocateMemory(region, size, alloc_flags, &ptr))
+           ? ptr
+           : nullptr;
+    };
+
+    auto region_deallocator = [](void* ptr) { core::Runtime::runtime_singleton_->FreeMemory(ptr); };
+
+    if (amd_region->IsLocalMemory() && amd_region->fine_grain()) {
+      finegrain_allocator_ = region_allocator;
+      finegrain_deallocator_ = region_deallocator;
+    } else if (amd_region->IsLocalMemory() &&
+               !(amd_region->fine_grain() || amd_region->extended_scope_fine_grain())) {
+      coarsegrain_allocator_ = region_allocator;
+      coarsegrain_deallocator_ = region_deallocator;
     }
   }
-  assert(finegrain_deallocator_ && "Agent does not have a fine-grain allocator");
+  assert(finegrain_allocator_ && "GPU agent does not have a fine-grain allocator");
+  assert(coarsegrain_allocator_ && "GPU agent does not have a coarse-grain allocator");
 }
 
 core::Agent* GpuAgent::GetNearestCpuAgent() const {

@@ -150,7 +150,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAllocMemoryAlign(HSAuint32 PreferredNode,
 		*MemoryAddress = NULL;
 
 	if ((MemFlags.ui32.CoarseGrain && MemFlags.ui32.ExtendedCoherent) ||
-	    (MemFlags.ui32.CoarseGrain && MemFlags.ui32.Uncached) ||
 	    (MemFlags.ui32.ExtendedCoherent && MemFlags.ui32.Uncached))
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 

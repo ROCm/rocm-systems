@@ -158,16 +158,6 @@ struct SharedQueue {
   Queue* core_queue;
 };
 
-class LocalQueue {
- public:
-  LocalQueue(int mem_flags) : local_queue_(mem_flags) {}
-  LocalQueue(int agent_node_id, int mem_flags) : local_queue_(agent_node_id, mem_flags) {}
-  SharedQueue* queue() const { return local_queue_.shared_object(); }
-
- private:
-  Shared<SharedQueue> local_queue_;
-};
-
 /// @brief Class Queue which encapsulate user mode queues and
 /// provides Api to access its Read, Write indices using Acquire,
 /// Release and Relaxed semantics.
@@ -176,18 +166,18 @@ Queue is intended to be an pure interface class and may be wrapped or replaced
 by tools.
 All funtions other than Convert and public_handle must be virtual.
 */
-class Queue : public Checked<0xFA3906A679F9DB49>, private LocalQueue {
+class Queue : public Checked<0xFA3906A679F9DB49> {
  public:
-  Queue(int mem_flags = 0) : LocalQueue(mem_flags), amd_queue_(queue()->amd_queue) {
-    queue()->core_queue = this;
-    public_handle_ = Convert(this);
-    pcie_write_ordering_ = false;
-  }
+  Queue(SharedQueue* shared_queue, uint64_t queue_flags)
+      : Queue(shared_queue, queue_flags, false) {}
 
-  Queue(int agent_node_id, int mem_flags) : LocalQueue(agent_node_id, mem_flags), amd_queue_(queue()->amd_queue) {
-    queue()->core_queue = this;
+  Queue(SharedQueue* shared_queue, uint64_t queue_flags, bool pcie_write_ordering)
+      : amd_queue_(shared_queue->amd_queue),
+        shared_queue_(shared_queue),
+        flags_(queue_flags),
+        pcie_write_ordering_(pcie_write_ordering) {
     public_handle_ = Convert(this);
-    pcie_write_ordering_ = false;
+    shared_queue->core_queue = this;
   }
 
   virtual ~Queue() {}
@@ -386,9 +376,18 @@ class Queue : public Checked<0xFA3906A679F9DB49>, private LocalQueue {
 
   bool IsType(rtti_t id) { return _IsA(id); }
 
-  bool needsPcieOrdering() const { return pcie_write_ordering_; }
+  /// @brief Used to determine if the queue's packet buffer was allocated
+  /// in the agent's local device memory.
+  bool IsDeviceMemRingBuf() const {
+    return (flags_ & HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF) != 0;
+  }
+  /// @brief Used to determine if the queue descriptor was allocated in
+  /// the agent's local device memory.
+  bool IsDeviceMemQueueDescriptor() const {
+    return (flags_ & HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR) != 0;
+  }
 
-  void setPcieOrdering(bool val) { pcie_write_ordering_ = val; }
+  bool needsPcieOrdering() const { return pcie_write_ordering_; }
 
  protected:
   static void set_public_handle(Queue* ptr, hsa_queue_t* handle) {
@@ -400,6 +399,8 @@ class Queue : public Checked<0xFA3906A679F9DB49>, private LocalQueue {
 
   virtual bool _IsA(rtti_t id) const = 0;
 
+  SharedQueue* shared_queue_;
+
   hsa_queue_t* public_handle_;
 
   /// Next available queue id.
@@ -410,7 +411,8 @@ class Queue : public Checked<0xFA3906A679F9DB49>, private LocalQueue {
   // HSA Queue ID - used to bind a unique ID
   static std::atomic<uint64_t> hsa_queue_counter_;
 
-  bool pcie_write_ordering_;
+  const uint64_t flags_;
+  bool pcie_write_ordering_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(Queue);
 };

@@ -890,7 +890,7 @@ void BlitKernel::PopulateQueue(uint64_t index, uint64_t code_handle, void* args,
   std::atomic_thread_fence(std::memory_order_acquire);
   queue_buffer[index & queue_bitmask_] = packet;
   std::atomic_thread_fence(std::memory_order_release);
-  if (core::Runtime::runtime_singleton_->flag().dev_mem_queue() && !queue_->needsPcieOrdering()) {
+  if (queue_->IsDeviceMemRingBuf() && queue_->needsPcieOrdering()) {
     // Ensure the packet body is written as header may get reordered when writing over PCIE
     _mm_sfence();
   }

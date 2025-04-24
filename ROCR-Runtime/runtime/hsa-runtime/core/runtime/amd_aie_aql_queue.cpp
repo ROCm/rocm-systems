@@ -65,10 +65,13 @@
 namespace rocr {
 namespace AMD {
 
-AieAqlQueue::AieAqlQueue(AieAgent *agent, size_t req_size_pkts,
-                         uint32_t node_id)
-    : Queue(0, 0), LocalSignal(0, false), DoorbellSignal(signal()),
-      agent_(*agent), active_(false) {
+AieAqlQueue::AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_t req_size_pkts,
+                         uint32_t node_id, uint64_t flags)
+    : Queue(shared_queue, flags),
+      LocalSignal(0, false),
+      DoorbellSignal(signal()),
+      agent_(*agent),
+      active_(false) {
   if (agent_.device_type() != core::Agent::DeviceType::kAmdAieDevice) {
     throw AMD::hsa_exception(
         HSA_STATUS_ERROR_INVALID_AGENT,
@@ -105,9 +108,10 @@ AieAqlQueue::AieAqlQueue(AieAgent *agent, size_t req_size_pkts,
 
 AieAqlQueue::~AieAqlQueue() {
   AieAqlQueue::Inactivate();
-  if (ring_buf_) {
-    agent_.system_deallocator()(ring_buf_);
-  }
+
+  if (ring_buf_) agent_.system_deallocator()(ring_buf_);
+
+  if (shared_queue_) core::Runtime::runtime_singleton_->system_deallocator()(shared_queue_);
 }
 
 hsa_status_t AieAqlQueue::Inactivate() {

@@ -73,12 +73,12 @@
 namespace rocr {
 namespace AMD {
 
-
 #define SCRATCH_ALT_RATIO 4
 
-AqlQueue::AqlQueue(GpuAgent* agent, size_t req_size_pkts, HSAuint32 node_id, ScratchInfo& scratch,
-                   core::HsaEventCallback callback, void* err_data, bool is_kv)
-    : Queue(agent->node_id(), agent->isMES() ? (MemoryRegion::AllocateGTTAccess | MemoryRegion::AllocateNonPaged) : 0),
+AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_size_pkts,
+                   HSAuint32 node_id, ScratchInfo& scratch, core::HsaEventCallback callback,
+                   void* err_data, uint64_t flags, bool is_kv)
+    : Queue(shared_queue, flags, !agent->is_xgmi_cpu_gpu()),
       LocalSignal(0, false),
       DoorbellSignal(signal()),
       ring_buf_(nullptr),
@@ -129,7 +129,7 @@ AqlQueue::AqlQueue(GpuAgent* agent, size_t req_size_pkts, HSAuint32 node_id, Scr
   // Allocate the AQL packet ring buffer.
   AllocRegisteredRingBuffer(queue_size_pkts);
   if (ring_buf_ == nullptr) throw std::bad_alloc();
-  MAKE_NAMED_SCOPE_GUARD(RingGuard, [&]() { FreeRegisteredRingBuffer(); });
+  MAKE_NAMED_SCOPE_GUARD(RingGuard, [&]() { FreeQueueMemory(); });
 
   // Fill the ring buffer with invalid packet headers.
   // Leave packet content uninitialized to help track errors.
@@ -350,7 +350,6 @@ AqlQueue::AqlQueue(GpuAgent* agent, size_t req_size_pkts, HSAuint32 node_id, Scr
   if (!core::Runtime::runtime_singleton_->flag().cu_mask_skip_init()) SetCUMasking(0, nullptr);
 
   active_ = true;
-  setPcieOrdering(agent->is_xgmi_cpu_gpu());
 
   PM4IBGuard.Dismiss();
   RingGuard.Dismiss();
@@ -386,10 +385,11 @@ AqlQueue::~AqlQueue() {
   if (queue_scratch_.main_queue_base) agent_->ReleaseQueueMainScratch(queue_scratch_);
   if (queue_scratch_.alt_queue_base) agent_->ReleaseQueueAltScratch(queue_scratch_);
 
-  FreeRegisteredRingBuffer();
   exception_signal_->WaitingDec();
   exception_signal_->DestroySignal();
   HSA::hsa_signal_destroy(amd_queue_.queue_inactive_signal);
+  FreeQueueMemory();
+
   if (core::g_use_interrupt_wait) {
     ScopedAcquire<KernelMutex> lock(&queue_lock());
     queue_count()--;
@@ -737,9 +737,15 @@ void AqlQueue::AllocRegisteredRingBuffer(uint32_t queue_size_pkts) {
     ring_buf_alloc_bytes_ = queue_size_pkts * sizeof(core::AqlPacket);
     assert(IsMultipleOf(ring_buf_alloc_bytes_, 4096) && "Ring buffer sizes must be 4KiB aligned.");
 
-    if (core::Runtime::runtime_singleton_->flag().dev_mem_queue()) {
-      ring_buf_ = agent_->finegrain_allocator()(ring_buf_alloc_bytes_,
-                                                core::MemoryRegion::AllocateUncached);
+    if (IsDeviceMemRingBuf()) {
+      if (!agent_->LargeBarEnabled()) {
+        throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_QUEUE_CREATION,
+                                 "Trying to allocate an AQL ring buffer in device memory without "
+                                 "large BAR PCIe enabled.");
+      }
+      ring_buf_ = agent_->coarsegrain_allocator()(
+          ring_buf_alloc_bytes_,
+          core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateUncached);
     } else {
       ring_buf_ = agent_->system_allocator()(
           ring_buf_alloc_bytes_, 0x1000,
@@ -755,7 +761,16 @@ void AqlQueue::AllocRegisteredRingBuffer(uint32_t queue_size_pkts) {
   }
 }
 
-void AqlQueue::FreeRegisteredRingBuffer() {
+void AqlQueue::FreeQueueMemory() {
+  if (shared_queue_) {
+    if (IsDeviceMemQueueDescriptor())
+      agent_->coarsegrain_deallocator()(shared_queue_);
+    else
+      core::Runtime::runtime_singleton_->system_deallocator()(shared_queue_);
+
+    shared_queue_ = nullptr;
+  }
+
   if ((agent_->profile() == HSA_PROFILE_FULL) && queue_full_workaround_) {
 #ifdef __linux__
     munmap(ring_buf_, ring_buf_alloc_bytes_);
@@ -767,8 +782,8 @@ void AqlQueue::FreeRegisteredRingBuffer() {
 #endif
   } else {
     if (ring_buf_) {
-      if (core::Runtime::runtime_singleton_->flag().dev_mem_queue()) {
-        agent_->finegrain_deallocator()(ring_buf_);
+      if (IsDeviceMemRingBuf()) {
+        agent_->coarsegrain_deallocator()(ring_buf_);
       } else {
         agent_->system_deallocator()(ring_buf_);
       }
@@ -1664,7 +1679,7 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
   // Overwrite the AQL invalid header (first dword) last.
   // This prevents the slot from being read until it's fully written.
   memcpy(&queue_slot[1], &slot_data[1], slot_size_b - sizeof(uint32_t));
-  if (core::Runtime::runtime_singleton_->flag().dev_mem_queue() && !agent_->is_xgmi_cpu_gpu()) {
+  if (IsDeviceMemRingBuf() && needsPcieOrdering()) {
     // Ensure the packet body is written as header may get reordered when writing over PCIE
     _mm_sfence();
   }

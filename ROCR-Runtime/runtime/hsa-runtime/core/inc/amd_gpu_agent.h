@@ -328,10 +328,9 @@ class GpuAgent : public GpuAgentInt {
   hsa_status_t GetInfo(hsa_agent_info_t attribute, void* value) const override;
 
   // @brief Override from core::Agent.
-  hsa_status_t QueueCreate(size_t size, hsa_queue_type32_t queue_type,
+  hsa_status_t QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
                            core::HsaEventCallback event_callback, void* data,
-                           uint32_t private_segment_size,
-                           uint32_t group_segment_size,
+                           uint32_t private_segment_size, uint32_t group_segment_size,
                            core::Queue** queue) override;
 
   // @brief Decrement GWS ref count.
@@ -436,8 +435,10 @@ class GpuAgent : public GpuAgentInt {
     if (t0_.GPUClockCounter == t1_.GPUClockCounter) SyncClocks();
   }
 
-  // @brief Override from AMD::GpuAgentInt.
+  /// @brief Override from AMD::GpuAgentInt.
   __forceinline bool is_xgmi_cpu_gpu() const { return xgmi_cpu_gpu_; }
+  /// @brief Is large BAR support enabled for this GPU.
+  __forceinline bool LargeBarEnabled() const { return large_bar_enabled_; }
 
   const size_t MAX_SCRATCH_APERTURE_PER_XCC = (1ULL << 32);
   size_t MaxScratchDevice() const { return properties_.NumXcc * MAX_SCRATCH_APERTURE_PER_XCC; }
@@ -478,6 +479,18 @@ class GpuAgent : public GpuAgentInt {
   }
 
   const std::function<void(void*)>& finegrain_deallocator() const { return finegrain_deallocator_; }
+
+  /// @brief Allocate coarse grain device memory on this GPU agent.
+  const std::function<void*(size_t size, core::MemoryRegion::AllocateFlags flags)>&
+  coarsegrain_allocator() const {
+    return coarsegrain_allocator_;
+  }
+
+  /// @brief Deallocate memory allocated from the coarsegrain_allocator
+  /// on this GPU agent.
+  const std::function<void(void*)>& coarsegrain_deallocator() const {
+    return coarsegrain_deallocator_;
+  }
 
  protected:
   // Sizes are in packets.
@@ -731,16 +744,19 @@ class GpuAgent : public GpuAgentInt {
 
   ScratchCache scratch_cache_;
 
-  // System memory allocator in the nearest NUMA node.
+  /// @brief System memory allocator in the nearest NUMA node.
   std::function<void*(size_t size, size_t align, core::MemoryRegion::AllocateFlags flags)>
       system_allocator_;
-
+  /// @brief System memory deallocator in the nearest NUMA node.
   std::function<void(void*)> system_deallocator_;
-
-  // Fine grain allocator on this device
+  /// @brief Fine-grain allocator on this GPU.
   std::function<void*(size_t size, core::MemoryRegion::AllocateFlags flags)> finegrain_allocator_;
-
+  /// @brief Fine-grain deallocator on this GPU.
   std::function<void(void*)> finegrain_deallocator_;
+  /// @brief Coarse-grain allocator on this GPU.
+  std::function<void*(size_t size, core::MemoryRegion::AllocateFlags flags)> coarsegrain_allocator_;
+  /// @brief Coarse-grain deallocator on this GPU.
+  std::function<void(void*)> coarsegrain_deallocator_;
 
   void* trap_handler_tma_region_;
 
@@ -815,8 +831,10 @@ class GpuAgent : public GpuAgentInt {
   // structure for stochastic sampling
   pcs_data_t pcs_stochastic_data_;
 
-  // @bried XGMI CPU<->GPU
-  bool xgmi_cpu_gpu_;
+  /// @brief XGMI CPU<->GPU
+  bool xgmi_cpu_gpu_ = false;
+  /// @brief Is PCIe large BAR enabled.
+  bool large_bar_enabled_ = false;
 };
 
 }  // namespace amd
