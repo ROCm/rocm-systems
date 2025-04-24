@@ -1243,57 +1243,6 @@ I/O control options
 
 ``rocprofv3`` provides the following options to control the output.
 
-Output file
-++++++++++++
-
-To specify the output file name, use ``--output-file`` or ``-o`` option. If not specified, the output file is prefixed with the process ID by default.
-
-.. code-block:: shell
-
-   rocprofv3 --hip-trace --output-file output -- <application_path>
-
-The preceding command generates an ``output_hip_api_trace.csv`` file.
-
-Output directory
-+++++++++++++++++
-
-To specify the output directory, use ``--output-directory`` or ``-d`` option. If not specified, the default output path is ``%hostname%/%pid%``.
-
-.. code-block:: shell
-
-   rocprofv3 --hip-trace --output-directory output_dir -- <application_path>
-
-The above command generates an ``output_dir/%hostname%/%pid%_hip_api_trace.csv`` file.
-
-.. _output_field_format:
-
-The output directory option supports many placeholders such as:
-
-- ``%hostname%``: Machine host name
-- ``%pid%``: Process ID
-- ``%env{NAME}%``: Consistent with other output key formats (starts and ends with `%`)
-- ``$ENV{NAME}``: Similar to CMake
-- ``%q{NAME}%``: Compatibility with NVIDIA
-
-To see the complete list, refer to :ref:`output-prefix-keys`.
-
-The following example shows how to use the output directory option with placeholders:
-
-.. code-block:: bash
-
-   mpirun -n 2 rocprofv3 --hip-trace -d %h.%p.%env{OMPI_COMM_WORLD_RANK}%  -- <application_path>
-
-The preceding command runs the application with ``rocprofv3`` and generates the trace file for each rank. The trace files are prefixed with hostname, process ID, and MPI rank.
-
-Assuming the hostname as `ubuntu-latest` and the process IDs as 3000020 and 3000019, the output file names are:
-
-.. code-block:: bash
-
-    ubuntu-latest.3000020.1/ubuntu-latest/3000020_agent_info.csv
-    ubuntu-latest.3000019.0/ubuntu-latest/3000019_agent_info.csv
-    ubuntu-latest.3000020.1/ubuntu-latest/3000020_hip_api_trace.csv
-    ubuntu-latest.3000019.0/ubuntu-latest/3000019_hip_api_trace.csv
-
 .. _output-prefix-keys:
 
 Output prefix keys
@@ -1348,6 +1297,65 @@ Output prefix keys are useful in multiple use cases but are most helpful when de
      - Shorthand for ``%rank%``
    * - ``%s``
      - Shorthand for ``%size%``
+
+Output directory
++++++++++++++++++
+
+To specify the output directory, use ``--output-directory`` or ``-d`` option. If not specified, the default output path is ``%hostname%/%pid%``.
+
+.. code-block:: shell
+
+   rocprofv3 --hip-trace --output-directory output_dir -- <application_path>
+
+The above command generates an ``output_dir/%hostname%/%pid%_hip_api_trace.csv`` file.
+
+.. _output_field_format:
+
+The output directory option supports many placeholders such as:
+
+- ``%hostname%``: Machine host name
+- ``%pid%``: Process ID
+- ``%env{NAME}%``: Consistent with other output key formats (starts and ends with `%`)
+- ``$ENV{NAME}``: Similar to CMake
+- ``%q{NAME}%``: Compatibility with NVIDIA
+
+To see the complete list, refer to :ref:`output-prefix-keys`.
+
+The following example shows how to use the output directory option with placeholders:
+
+.. code-block:: bash
+
+   mpirun -n 2 rocprofv3 --hip-trace -d %h.%p.%env{OMPI_COMM_WORLD_RANK}%  -- <application_path>
+
+The preceding command runs the application with ``rocprofv3`` and generates the trace file for each rank. The trace files are prefixed with hostname, process ID, and MPI rank.
+
+Assuming the hostname as `ubuntu-latest` and the process IDs as 3000020 and 3000019, the output file names are:
+
+.. code-block:: bash
+
+    ubuntu-latest.3000020.1/ubuntu-latest/3000020_agent_info.csv
+    ubuntu-latest.3000019.0/ubuntu-latest/3000019_agent_info.csv
+    ubuntu-latest.3000020.1/ubuntu-latest/3000020_hip_api_trace.csv
+    ubuntu-latest.3000019.0/ubuntu-latest/3000019_hip_api_trace.csv
+
+Output file
+++++++++++++
+
+To specify the output file name, use ``--output-file`` or ``-o`` option. If not specified, the output file is prefixed with the process ID by default.
+
+.. code-block:: shell
+
+   rocprofv3 --hip-trace --output-file output -- <application_path>
+
+The preceding command generates an ``output_hip_api_trace.csv`` file.
+
+The output file name can also include placeholders such as ``%hostname%`` and ``%pid%``. For example:
+
+.. code-block:: shell
+
+   rocprofv3 --hip-trace --output-file %hostname%/%pid%_hip_api_trace.csv -- <application_path>
+
+The above command generates an ``%hostname%/%pid%_hip_api_trace.csv`` file.
 
 
 Collection period

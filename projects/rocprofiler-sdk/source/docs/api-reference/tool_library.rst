@@ -18,13 +18,13 @@ The ROCm runtimes are designed to directly communicate with a helper library nam
 Tool library design
 --------------------
 
-When ROCprofiler-SDK detects ``rocprofiler_configure`` in a tool's symbol table, ROCprofiler-SDK invokes ``rocprofiler-configure`` with parameters such as ROCprofiler-SDK version that invokes the function, number of tools already invoked, and a unique identifier for the tool. The tool returns a pointer to a ``rocprofiler_tool_configure_result_t`` struct, which, if non-null, provides ROCprofiler-SDK with:
+When ROCprofiler-SDK detects ``rocprofiler_configure`` in a tool's symbol table, ROCprofiler-SDK invokes ``rocprofiler_configure`` with parameters such as ROCprofiler-SDK version that invokes the function, number of tools already invoked, and a unique identifier for the tool. The tool returns a pointer to a ``rocprofiler_tool_configure_result_t`` struct, which, if non-null, provides ROCprofiler-SDK with:
 
 - Function to be called for tool initialization, which is also the opportunity for context creation.
 - Function to be called when ROCprofiler-SDK is finalized.
 - A pointer to data to be provided to the tool when ROCprofiler-SDK calls the initialization and finalization functions.
 
-ROCprofiler-SDK provides a ``rocprofiler-sdk/registration.h`` header file, which forward declares the ``rocprofiler_configure`` function with the necessary compiler function attributes to ensure that the ``rocprofiler-configure`` symbol is publicly visible.
+ROCprofiler-SDK provides a ``rocprofiler-sdk/registration.h`` header file, which forward declares the ``rocprofiler_configure`` function with the necessary compiler function attributes to ensure that the ``rocprofiler_configure`` symbol is publicly visible.
 
 .. code-block:: cpp
 
@@ -150,7 +150,7 @@ The tool can invoke this function pointer to explicitly invoke the `finalize` ca
 
 Otherwise, ROCprofiler-SDK invokes the `finalize` callback via an `atexit` handler.
 
-Full rocprofiler-configure sample
+Full rocprofiler_configure sample
 ----------------------------------
 
 All the code snippets from the previous sections are combined here to demonstrate complete ROCProfiler configuration.
