@@ -34,6 +34,7 @@ from enum import Enum
 from pathlib import Path
 from typing import List, Set, Union
 
+# Import amdsmi library
 from amdsmi_init import *
 from BDF import BDF
 
@@ -1081,7 +1082,6 @@ class AMDSMIHelpers():
             print(msg)
             logging.warning(msg)
 
-
     def write_binary(self, data, size, filepath):
         """
         Writes binary data directly to a file.
@@ -1103,8 +1103,93 @@ class AMDSMIHelpers():
                  data_bytes = data[:size]
              f.write(data_bytes)
 
+    def display_cper_files_generated_follow(self, entries, device_handle):
+        device_handles = amdsmi_interface.amdsmi_get_processor_handles()
+        # One‐time initialization: print warning & header only once
+        if not getattr(self, "_cper_display_initialized", False):
+            # Warning if no folder was specified elsewhere
+            if not getattr(self, "_cper_warning_printed", False):
+               YELLOW = "\033[33m"
+               RED    = "\033[31m"
+               RESET  = "\033[0m"
+               print(f"{YELLOW}WARNING:{RESET} {RED}No{RESET} cper files will be dumped unless --folder=<folder_name> is specified.")
+               self._cper_warning_printed = True
 
-    def dump_entries(self, folder, entries, cper_data):
+            # Header
+            print(f"{'timestamp':<20} {'gpu_id':<6} {'severity':<10} {'file_name'}")
+            self._cper_display_initialized = True
+
+        for entry_index, entry in enumerate(entries.values()):
+            # Assume 'entry' is a dictionary with keys: "error_severity" and "notify_type".
+            error_severity = entry.get("error_severity", "Unknown")
+            notify_type = entry.get("notify_type", "Unknown")
+
+            if error_severity == "non_fatal_uncorrected":
+                prefix = "uncorrected"
+            elif error_severity == "non_fatal_corrected":
+                prefix = "corrected"
+            elif error_severity == "fatal":
+                prefix = "fatal"
+                if notify_type == "BOOT":
+                    prefix = "boot"
+            
+            entry_file = f"{prefix}_{self.get_cper_count()}.json"
+            cper_data_file = f"{prefix}_{self.get_cper_count()}.cper"
+
+            timestamp = entry.get("timestamp", "unknown")
+            gpu_id = self.get_gpu_id_from_device_handle(device_handle)
+            print(f"{timestamp:<20} {gpu_id:<6} {prefix:<10} {cper_data_file}")
+            self.increment_cper_count()
+            time.sleep(1)
+
+    
+    def display_cper_files_generated(self, entries, device_handle):
+        device_handles = amdsmi_interface.amdsmi_get_processor_handles()
+        # One‐time initialization: print warning & header only once
+        if not getattr(self, "_cper_display_initialized", False):
+            # Warning if no folder was specified elsewhere
+            if not getattr(self, "_cper_warning_printed", False):
+               YELLOW = "\033[33m"
+               RED    = "\033[31m"
+               RESET  = "\033[0m"
+               print(f"{YELLOW}WARNING:{RESET} {RED}No{RESET} cper files will be dumped unless --folder=<folder_name> is specified.")
+               self._cper_warning_printed = True
+
+            # Header
+            print(f"{'timestamp':<20} {'gpu_id':<6} {'severity':<10} {'file_name'}")
+            self._cper_display_initialized = True
+
+        # Loop through all entries in the dictionary.
+        for entry_index, entry in enumerate(entries.values()):
+            
+            # Assume 'entry' is a dictionary with keys: "error_severity" and "notify_type".
+            error_severity = entry.get("error_severity", "Unknown")
+            notify_type = entry.get("notify_type", "Unknown")
+
+            if error_severity == "non_fatal_uncorrected":
+                prefix = "uncorrected"
+            elif error_severity == "non_fatal_corrected":
+                prefix = "corrected"
+            elif error_severity == "fatal":
+                prefix = "fatal"
+                if notify_type == "BOOT":
+                    prefix = "boot"
+            
+            entry_file = f"{prefix}_{self.get_cper_count()}.json"
+            cper_data_file = f"{prefix}_{self.get_cper_count()}.cper"
+
+            timestamp = entry.get("timestamp", "unknown")
+            gpu_id = self.get_gpu_id_from_device_handle(device_handle)
+            print(f"{timestamp:<20} {gpu_id:<6} {prefix:<10} {cper_data_file}")
+            self.increment_cper_count()
+
+
+    def dump_gpu_entries(self, folder, entries, cper_data, device_handle):
+        # Header
+        print(f"{'timestamp':<20} {'gpu_id':<6} {'severity':<10} {'file_name'}")
+        self._cper_display_initialized = True
+
+
         if folder:
             folder = Path(folder)
             folder.mkdir(parents=True, exist_ok=True)  # Ensure folder exists
@@ -1132,6 +1217,68 @@ class AMDSMIHelpers():
                 cper_data_file_path = folder / cper_data_file
                 self.write_binary(cper_data[entry_index]["bytes"], cper_data[entry_index]["size"], cper_data_file_path)
 
+                #print header
+                timestamp = entry.get("timestamp", "unknown")
+                gpu_id = self.get_gpu_id_from_device_handle(device_handle)
+                print(f"{timestamp:<20} {gpu_id:<6} {prefix:<10} {cper_data_file}")
+                self.increment_cper_count()
+                
+
+                try:
+                    with output_path.open("w") as f:
+                        logging.debug(f"Writing entry {self.get_cper_count()}: {entry} to {output_path}")
+                        # Dump the single entry as JSON, handling bytes via the lambda.
+                        f.write(json.dumps(entry, indent=2,
+                                           default=lambda o: o.decode('utf-8') if isinstance(o, bytes) else o))
+                        
+                    
+                    
+                except Exception as e:
+                    logging.error(f"Failed to write entry {self.get_cper_count()} to {output_path}: {e}")
+        else:
+            print(json.dumps(entries, indent=2,
+                             default=lambda o: o.decode('utf-8') if isinstance(o, bytes) else o))
+
+
+    def dump_all_entries(self, folder, entries, cper_data, device_handle):
+        # Header
+        print(f"{'timestamp':<20} {'gpu_id':<6} {'severity':<10} {'file_name'}")
+        self._cper_display_initialized = True
+
+        
+        if folder:
+            folder = Path(folder)
+            folder.mkdir(parents=True, exist_ok=True)  # Ensure folder exists
+
+            # Loop through all entries in the dictionary.
+            for entry_index, entry in enumerate(entries.values()):
+                # Assume 'entry' is a dictionary with keys: "error_severity" and "notify_type".
+                error_severity = entry.get("error_severity", "Unknown")
+                notify_type = entry.get("notify_type", "Unknown")
+
+                if error_severity == "non_fatal_uncorrected":
+                    prefix = "uncorrected"
+                elif error_severity == "non_fatal_corrected":
+                    prefix = "corrected"
+                elif error_severity == "fatal":
+                    prefix = "fatal"
+                    if notify_type == "BOOT":
+                        prefix = "boot"
+
+                # Construct a unique file name using the key to avoid overwriting
+                entry_file = f"{prefix}_{self.get_cper_count()}.json"
+                output_path = folder / entry_file
+
+                cper_data_file = f"{prefix}_{self.get_cper_count()}.cper"
+                cper_data_file_path = folder / cper_data_file
+                self.write_binary(cper_data[entry_index]["bytes"], cper_data[entry_index]["size"], cper_data_file_path)
+
+                #print header
+                timestamp = entry.get("timestamp", "unknown")
+                gpu_id = self.get_gpu_id_from_device_handle(device_handle)
+                print(f"{timestamp:<20} {gpu_id:<6} {prefix:<10} {cper_data_file}")
+                self.increment_cper_count()
+
                 try:
                     with output_path.open("w") as f:
                         logging.debug(f"Writing entry {self.get_cper_count()}: {entry} to {output_path}")
@@ -1143,4 +1290,109 @@ class AMDSMIHelpers():
         else:
             print(json.dumps(entries, indent=2,
                              default=lambda o: o.decode('utf-8') if isinstance(o, bytes) else o))
-        self.increment_cper_count()
+
+
+    def dump_all_entries_follow(self, folder, entries, cper_data, device_handle):
+        # Header
+        print(f"{'timestamp':<20} {'gpu_id':<6} {'severity':<10} {'file_name'}")
+        self._cper_display_initialized = True
+
+
+        if folder:
+            folder = Path(folder)
+            folder.mkdir(parents=True, exist_ok=True)  # Ensure folder exists
+
+            # Loop through all entries in the dictionary.
+            for entry_index, entry in enumerate(entries.values()):
+                # Assume 'entry' is a dictionary with keys: "error_severity" and "notify_type".
+                error_severity = entry.get("error_severity", "Unknown")
+                notify_type = entry.get("notify_type", "Unknown")
+
+                if error_severity == "non_fatal_uncorrected":
+                    prefix = "uncorrected"
+                elif error_severity == "non_fatal_corrected":
+                    prefix = "corrected"
+                elif error_severity == "fatal":
+                    prefix = "fatal"
+                    if notify_type == "BOOT":
+                        prefix = "boot"
+
+                # Construct a unique file name using the key to avoid overwriting
+                entry_file = f"{prefix}_{self.get_cper_count()}.json"
+                output_path = folder / entry_file
+
+                cper_data_file = f"{prefix}_{self.get_cper_count()}.cper"
+                cper_data_file_path = folder / cper_data_file
+                self.write_binary(cper_data[entry_index]["bytes"], cper_data[entry_index]["size"], cper_data_file_path)
+
+                #print header
+                timestamp = entry.get("timestamp", "unknown")
+                gpu_id = self.get_gpu_id_from_device_handle(device_handle)
+                print(f"{timestamp:<20} {gpu_id:<6} {prefix:<10} {cper_data_file}")
+                self.increment_cper_count()
+                time.sleep(1)
+
+                try:
+                    with output_path.open("w") as f:
+                        logging.debug(f"Writing entry {self.get_cper_count()}: {entry} to {output_path}")
+                        # Dump the single entry as JSON, handling bytes via the lambda.
+                        f.write(json.dumps(entry, indent=2,
+                                           default=lambda o: o.decode('utf-8') if isinstance(o, bytes) else o))
+                except Exception as e:
+                    logging.error(f"Failed to write entry {self.get_cper_count()} to {output_path}: {e}")
+        else:
+            print(json.dumps(entries, indent=2,
+                             default=lambda o: o.decode('utf-8') if isinstance(o, bytes) else o))
+
+
+    def dump_gpu_entries_follow(self, folder, entries, cper_data, device_handle):
+        # Header
+        print(f"{'timestamp':<20} {'gpu_id':<6} {'severity':<10} {'file_name'}")
+        self._cper_display_initialized = True
+
+
+        if folder:
+            folder = Path(folder)
+            folder.mkdir(parents=True, exist_ok=True)  # Ensure folder exists
+
+            # Loop through all entries in the dictionary.
+            for entry_index, entry in enumerate(entries.values()):
+                # Assume 'entry' is a dictionary with keys: "error_severity" and "notify_type".
+                error_severity = entry.get("error_severity", "Unknown")
+                notify_type = entry.get("notify_type", "Unknown")
+
+                if error_severity == "non_fatal_uncorrected":
+                    prefix = "uncorrected"
+                elif error_severity == "non_fatal_corrected":
+                    prefix = "corrected"
+                elif error_severity == "fatal":
+                    prefix = "fatal"
+                    if notify_type == "BOOT":
+                        prefix = "boot"
+
+                # Construct a unique file name using the key to avoid overwriting
+                entry_file = f"{prefix}_{self.get_cper_count()}.json"
+                output_path = folder / entry_file
+
+                cper_data_file = f"{prefix}_{self.get_cper_count()}.cper"
+                cper_data_file_path = folder / cper_data_file
+                self.write_binary(cper_data[entry_index]["bytes"], cper_data[entry_index]["size"], cper_data_file_path)
+
+                #print header
+                timestamp = entry.get("timestamp", "unknown")
+                gpu_id = self.get_gpu_id_from_device_handle(device_handle)
+                print(f"{timestamp:<20} {gpu_id:<6} {prefix:<10} {cper_data_file}")
+                self.increment_cper_count()
+                time.sleep(1)
+
+                try:
+                    with output_path.open("w") as f:
+                        logging.debug(f"Writing entry {self.get_cper_count()}: {entry} to {output_path}")
+                        # Dump the single entry as JSON, handling bytes via the lambda.
+                        f.write(json.dumps(entry, indent=2,
+                                           default=lambda o: o.decode('utf-8') if isinstance(o, bytes) else o))
+                except Exception as e:
+                    logging.error(f"Failed to write entry {self.get_cper_count()} to {output_path}: {e}")
+        else:
+            print(json.dumps(entries, indent=2,
+                             default=lambda o: o.decode('utf-8') if isinstance(o, bytes) else o))

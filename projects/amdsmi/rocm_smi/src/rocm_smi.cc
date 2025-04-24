@@ -799,6 +799,9 @@ rsmi_topo_numa_affinity_get(uint32_t dv_ind, int32_t *numa_node) {
   DEVICE_MUTEX
   std::string str_val;
   ret = get_dev_value_str(amd::smi::kDevNumaNode, dv_ind, &str_val);
+  if (ret != RSMI_STATUS_SUCCESS){
+    return ret;
+  }
   *numa_node = std::stoi(str_val, nullptr);
 
   return ret;
@@ -913,11 +916,41 @@ rsmi_dev_id_get(uint32_t dv_ind, uint16_t *id) {
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   CHK_SUPPORT_NAME_ONLY(id)
+  *id = std::numeric_limits<uint16_t>::max();
 
+  // Get the device ID from KGD
   ret = get_id(dv_ind, amd::smi::kDevDevID, id);
-  ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-     << ", reporting " << amd::smi::getRSMIStatusString(ret);
   LOG_TRACE(ss);
+  ss << __PRETTY_FUNCTION__
+     << (ret == RSMI_STATUS_SUCCESS ?
+          " | No fall back needed retrieved from KGD" : " | fall back needed")
+     << " | Device #: " << std::to_string(dv_ind)
+     << " | Data: device_id = " << std::to_string(*id)
+     << " | ret = " << getRSMIStatusString(ret, false);
+  LOG_DEBUG(ss);
+  // If the device ID is not supported, use KFD's device ID
+  if (ret != RSMI_STATUS_SUCCESS) {
+    GET_DEV_AND_KFDNODE_FROM_INDX
+    uint32_t node_id;
+    uint64_t kfd_device_id;
+    int ret_kfd = kfd_node->get_node_id(&node_id);
+    ret_kfd = amd::smi::read_node_properties(node_id, "device_id", &kfd_device_id);
+    if (ret_kfd == 0) {
+      *id = kfd_device_id;
+      ret = RSMI_STATUS_SUCCESS;
+    } else {
+      *id = std::numeric_limits<uint16_t>::max();
+      ret = RSMI_STATUS_NOT_SUPPORTED;
+    }
+    ss << __PRETTY_FUNCTION__
+       << " | Issue: Could not read device from sysfs, falling back to KFD" << "\n"
+       << " ; Device #: " << std::to_string(dv_ind) << "\n"
+       << " ; ret_kfd: " << std::to_string(ret_kfd) << "\n"
+       << " ; node: " << std::to_string(node_id) << "\n"
+       << " ; Data: device_id (from KFD)= " << std::to_string(*id) << "\n"
+       << " ; ret = " << getRSMIStatusString(ret, false);
+    LOG_DEBUG(ss);
+  }
   return ret;
 }
 
@@ -4523,11 +4556,47 @@ rsmi_dev_unique_id_get(uint32_t dv_ind, uint64_t *unique_id) {
   CHK_SUPPORT_NAME_ONLY(unique_id)
 
   DEVICE_MUTEX
+  if (unique_id == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  *unique_id = std::numeric_limits<uint64_t>::max();
   ret = get_dev_value_int(amd::smi::kDevUniqueId, dv_ind, unique_id);
+
+  ss << __PRETTY_FUNCTION__
+     << (ret == RSMI_STATUS_SUCCESS ?
+      " | No fall back needed retrieved from KGD" : " | fall back needed")
+     << " | Device #: " << std::to_string(dv_ind)
+     << " | Data: unique_id = " << std::to_string(*unique_id)
+     << " | ret = " << getRSMIStatusString(ret, false);
+  LOG_DEBUG(ss);
+  // If the unique ID is not supported, use KFD's unique ID
+  if (ret != RSMI_STATUS_SUCCESS) {
+    GET_DEV_AND_KFDNODE_FROM_INDX
+    uint32_t node_id;
+    uint64_t kfd_unique_id;
+    int ret_kfd = kfd_node->get_node_id(&node_id);
+    ret_kfd = amd::smi::read_node_properties(node_id, "unique_id", &kfd_unique_id);
+    if (ret_kfd == 0) {
+      *unique_id = kfd_unique_id;
+      ret = RSMI_STATUS_SUCCESS;
+    } else {
+      *unique_id = std::numeric_limits<uint64_t>::max();
+      ret = RSMI_STATUS_NOT_SUPPORTED;
+    }
+    ss << __PRETTY_FUNCTION__
+       << " | Issue: Could not read unique_id from sysfs, falling back to KFD" << "\n"
+       << " ; Device #: " << std::to_string(dv_ind) << "\n"
+       << " ; ret_kfd: " << std::to_string(ret_kfd) << "\n"
+       << " ; node: " << std::to_string(node_id) << "\n"
+       << " ; Data: unique_id (from KFD)= " << std::to_string(*unique_id) << "\n"
+       << " ; ret = " << getRSMIStatusString(ret, false);
+    LOG_DEBUG(ss);
+  }
   return ret;
 
   CATCH
 }
+
 rsmi_status_t
 rsmi_dev_counter_create(uint32_t dv_ind, rsmi_event_type_t type,
                                            rsmi_event_handle_t *evnt_handle) {
