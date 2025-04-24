@@ -177,3 +177,22 @@ TEST_CASE("Unit_hipLaunchCooperativeKernel_Negative_Parameters") {
                     hipErrorCooperativeLaunchTooLarge);
   }
 }
+
+TEST_CASE("Unit_hipLaunchCooperativeKernel_Verify_Capture") {
+  if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
+    HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
+    return;
+  }
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(coop_kernel), dim3{2, 2, 1},
+                                       dim3{1, 1, 1}, nullptr, 0, stream));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipStreamDestroy(stream));
+}
