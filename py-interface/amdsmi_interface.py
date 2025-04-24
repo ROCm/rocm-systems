@@ -1675,7 +1675,6 @@ def amdsmi_get_hsmp_metrics_table(
         "mtbl_socket_thm_residency_acc": mtbl.socket_thm_residency_acc,
         "mtbl_vr_thm_residency_acc": mtbl.vr_thm_residency_acc,
         "mtbl_hbm_thm_residency_acc": mtbl.hbm_thm_residency_acc,
-        "mtbl_gfxclk_frequency": f"{[round(x*fraction_uq10 ,3) for x in list(mtbl.gfxclk_frequency)]} MHz"
     }
 
 def amdsmi_first_online_core_on_cpu_socket(
@@ -2045,8 +2044,8 @@ def amdsmi_get_gpu_xgmi_link_status(
         count += 1
 
     return_dict = {
-    "status"     : link_status,
-    "total_links": status_info.total_links,
+        "status"     : link_status,
+        "total_links": status_info.total_links,
     }
     return return_dict
 

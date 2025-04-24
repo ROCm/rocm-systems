@@ -1,4 +1,4 @@
-name: ABI Compliance Check
+name: Strict ABI Compliance Check
 
 on:
   pull_request:
@@ -19,7 +19,7 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write 
+  pull-requests: write
 
 jobs:
   check-abi:
@@ -35,7 +35,6 @@ jobs:
           cd abi-compliance-checker
           sudo make install
           abi-compliance-checker --version
-
       - name: Checkout feature branch
         uses: actions/checkout@v4
         with:
@@ -45,7 +44,6 @@ jobs:
       - name: Copy feature branch file as new
         run: |
           cp include/amd_smi/amdsmi.h amdsmi_new.h
-
       - name: Fetch old file
         run: |
           if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref_name }}" = "amd-mainline" ]; then
@@ -63,15 +61,68 @@ jobs:
             git checkout amd-staging -- include/amd_smi/amdsmi.h
             mv include/amd_smi/amdsmi.h amdsmi_old.h
           fi
-
       - name: Run ABI Compliance Check
         id: abi-check
         run: |
+          # Create a custom descriptor with strict options
+          cat > strict_descriptor.xml << EOF
+          <descriptor>
+              <libs>
+                  <lib>
+                      <name>amdsmi</name>
+                      <headers>
+                          <path>amdsmi_old.h</path>
+                      </headers>
+                      <skip_headers>
+                          <symbol>assert.h</symbol>
+                      </skip_headers>
+                  </lib>
+              </libs>
+          </descriptor>
+          EOF
           # Run checker and capture exit code in a single step
           if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref_name }}" = "amd-mainline" ]; then
-            abi-compliance-checker -lib amdsmi -old amdsmi_old.h -new amdsmi_new.h -v1 amd-mainline -v2 amd-staging -report-path abi-report.html || { EXIT_CODE=$?; echo "abi_exit_code=$EXIT_CODE" > $GITHUB_WORKSPACE/abi_status.txt; exit $EXIT_CODE; }
+            COMPARE_MSG="amd-mainline vs amd-staging"
+            abi-compliance-checker -l amdsmi -old amdsmi_old.h -new amdsmi_new.h -v1 amd-mainline -v2 amd-staging -report-path abi-report.html -strict || { EXIT_CODE=$?; echo "abi_exit_code=$EXIT_CODE" > $GITHUB_WORKSPACE/abi_status.txt; exit $EXIT_CODE; }
           else
-            abi-compliance-checker -lib amdsmi -old amdsmi_old.h -new amdsmi_new.h -v1 amd-staging -v2 ${{ github.ref_name }} -report-path abi-report.html || { EXIT_CODE=$?; echo "abi_exit_code=$EXIT_CODE" > $GITHUB_WORKSPACE/abi_status.txt; exit $EXIT_CODE; }
+            COMPARE_MSG="amd-staging vs ${{ github.ref_name }}"
+            abi-compliance-checker -l amdsmi -old amdsmi_old.h -new amdsmi_new.h -v1 amd-staging -v2 ${{ github.ref_name }} -report-path abi-report.html -strict || { EXIT_CODE=$?; echo "abi_exit_code=$EXIT_CODE" > $GITHUB_WORKSPACE/abi_status.txt; exit $EXIT_CODE; }
+          fi
+          # If the report was generated, check for ANY changes
+          if [ -f abi-report.html ]; then
+            echo "Report generated successfully"
+            # Check for ANY changes in the ABI by examining specific patterns in the report
+            CHANGED=0
+            # Check for added symbols
+            if grep -q "Added Symbols.*[1-9]" abi-report.html; then
+              echo "::error::STRICT ABI CHECK FAILED: Found added symbols comparing $COMPARE_MSG"
+              CHANGED=1
+            fi
+            # Check for removed symbols
+            if grep -q "Removed Symbols.*[1-9]" abi-report.html; then
+              echo "::error::STRICT ABI CHECK FAILED: Found removed symbols comparing $COMPARE_MSG"
+              CHANGED=1
+            fi
+            # Check for problems with data types
+            if grep -q "Problems with.*Data Types.*[1-9]" abi-report.html; then
+              echo "::error::STRICT ABI CHECK FAILED: Found problems with data types comparing $COMPARE_MSG"
+              CHANGED=1
+            fi
+            # Check for problems with symbols
+            if grep -q "Problems with.*Symbols.*[1-9]" abi-report.html; then
+              echo "::error::STRICT ABI CHECK FAILED: Found problems with symbols comparing $COMPARE_MSG"
+              CHANGED=1
+            fi
+            # Check for problems with constants
+            if grep -q "Problems with.*Constants.*[1-9]" abi-report.html; then
+              echo "::error::STRICT ABI CHECK FAILED: Found problems with constants comparing $COMPARE_MSG"
+              CHANGED=1
+            fi
+            # Fail if any changes were found
+            if [ "$CHANGED" -eq 1 ]; then
+              echo "abi_exit_code=1" > $GITHUB_WORKSPACE/abi_status.txt
+              exit 1
+            fi
           fi
           # If successful, write exit code 0
           echo "abi_exit_code=0" > $GITHUB_WORKSPACE/abi_status.txt
@@ -87,7 +138,6 @@ jobs:
           else
             echo "No ABI check log found at logs/amdsmi/${{ github.ref_name }}/log.txt"
           fi
-
       - name: Label PR as ABI BREAKAGE
         if: github.event_name == 'pull_request' && steps.abi-check.outcome == 'failure'
         run: |

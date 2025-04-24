@@ -198,7 +198,9 @@ class AMDSMICommands():
         if args.gpu == None:
             args.gpu = self.device_handles
 
-        self.helpers.check_required_groups()
+        if not self.group_check_printed:
+            self.helpers.check_required_groups()
+            self.group_check_printed = True
 
         # Handle multiple GPUs
         handled_multiple_gpus, device_handle = self.helpers.handle_gpus(args, self.logger, self.list)
@@ -218,15 +220,6 @@ class AMDSMICommands():
             uuid = amdsmi_interface.amdsmi_get_gpu_device_uuid(args.gpu)
         except amdsmi_exception.AmdSmiLibraryException as e:
             uuid = e.get_error_info()
-
-        try:
-            enumeration_info = amdsmi_interface.amdsmi_get_gpu_enumeration_info(args.gpu)
-        except:
-            enumeration_info = {"drm_render": "N/A",
-                                "drm_card": "N/A",
-                                "hip_id": "N/A",
-                                "hip_uuid": "N/A",
-                                "hsa_id": "N/A"}
 
         try:
             kfd_info = amdsmi_interface.amdsmi_get_gpu_kfd_info(args.gpu)
@@ -250,6 +243,14 @@ class AMDSMICommands():
         self.logger.store_output(args.gpu, 'partition_id', partition_id)
 
         if args.e:
+            try:
+                enumeration_info = amdsmi_interface.amdsmi_get_gpu_enumeration_info(args.gpu)
+            except:
+                enumeration_info = {"drm_render": "N/A",
+                                    "drm_card": "N/A",
+                                    "hip_id": "N/A",
+                                    "hip_uuid": "N/A",
+                                    "hsa_id": "N/A"}
             if enumeration_info['drm_render'] == "N/A":
                 self.logger.store_output(args.gpu, 'render', enumeration_info['drm_render'])
             else:
@@ -308,6 +309,8 @@ class AMDSMICommands():
         logging.debug(f"Static Arg information for CPU {cpu_id} on {self.helpers.os_info()}")
 
         static_dict = {}
+        if self.logger.is_json_format():
+            static_dict['cpu'] = int(cpu_id)
 
         if args.smu:
             try:
@@ -328,11 +331,15 @@ class AMDSMICommands():
                 logging.debug("Failed to get proto version for cpu %s | %s", cpu_id, e.get_error_info())
 
         multiple_devices_csv_override = False
-        self.logger.store_cpu_output(args.cpu, 'values', static_dict)
+        if not self.logger.is_json_format():
+            self.logger.store_cpu_output(args.cpu, 'values', static_dict)
+        else:
+            self.logger.store_cpu_json_output.append(static_dict)
         if multiple_devices:
             self.logger.store_multiple_device_output()
             return # Skip printing when there are multiple devices
-        self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
+        if not self.logger.is_json_format():
+            self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
 
 
     def static_gpu(self, args, multiple_devices=False, gpu=None, asic=None, bus=None, vbios=None,
@@ -404,7 +411,9 @@ class AMDSMICommands():
                                    args.vram, args.cache, args.board, args.process_isolation,
                                    args.clock, args.partition]
 
-        self.helpers.check_required_groups()
+        if not self.group_check_printed:
+            self.helpers.check_required_groups()
+            self.group_check_printed = True
 
         if self.helpers.is_linux() and self.helpers.is_baremetal():
             if limit:
@@ -449,6 +458,8 @@ class AMDSMICommands():
 
         # Populate static dictionary for each enabled argument
         static_dict = {}
+        if self.logger.is_json_format():
+            static_dict['gpu'] = int(gpu_id)
         if args.asic:
             asic_dict = {
                 "market_name" : "N/A",
@@ -1013,14 +1024,20 @@ class AMDSMICommands():
                         for key, value in ecc_block_dict.items():
                             self.logger.store_output(args.gpu, key, value)
                         self.logger.store_output(args.gpu, 'values', static_dict)
+                        self.logger.store_gpu_json_output.append(static_dict)
                         self.logger.store_multiple_device_output()
                 else:
                     # Store values if ras has an error
                     self.logger.store_output(args.gpu, 'values', static_dict)
+                    self.logger.store_gpu_json_output.append(static_dict)
                 if self.helpers.is_linux() and self.helpers.is_virtual_os():
                     self.logger.store_output(args.gpu, 'values', static_dict)
+                    self.logger.store_gpu_json_output.append(static_dict)
             else:
                 self.logger.store_output(args.gpu, 'values', static_dict)
+                self.logger.store_gpu_json_output.append(static_dict)
+        elif self.logger.is_json_format():
+            self.logger.store_gpu_json_output.append(static_dict)
         else:
             # Store values in logger.output
             self.logger.store_output(args.gpu, 'values', static_dict)
@@ -1028,7 +1045,8 @@ class AMDSMICommands():
         if multiple_devices:
             self.logger.store_multiple_device_output()
             return # Skip printing when there are multiple devices
-        self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
+        if not self.logger.is_json_format():
+            self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
 
 
     def static(self, args, multiple_devices=False, gpu=None, asic=None,
@@ -1135,6 +1153,8 @@ class AMDSMICommands():
                                 board, numa, vram, cache, partition,
                                 dfc_ucode, fb_info, num_vf, soc_pstate, xgmi_plpd,
                                 process_isolation, clock)
+        if self.logger.is_json_format():
+            self.logger.combine_arrays_to_json()
 
 
     def firmware(self, args, multiple_devices=False, gpu=None, fw_list=True):
@@ -1498,7 +1518,8 @@ class AMDSMICommands():
                 args.gpu = stored_gpus
 
                 # Print multiple device output
-                self.logger.print_output(multiple_device_enabled=True, watching_output=watching_output)
+                if not self.logger.is_json_format():
+                    self.logger.print_output(multiple_device_enabled=True, watching_output=watching_output)
 
                 # Add output to total watch output and clear multiple device output
                 if watching_output:
@@ -1629,7 +1650,8 @@ class AMDSMICommands():
                 "vram_max_bandwidth": "N/A",
                 "xgmi_link_status": "N/A",
             }
-
+        if self.logger.is_json_format():
+            values_dict['gpu'] = int(gpu_id)
         # Populate the pcie_dict first due to multiple gpu metrics calls incorrectly increasing bandwidth
         if "pcie" in current_platform_args:
             if args.pcie:
@@ -2518,12 +2540,14 @@ class AMDSMICommands():
         if watching_output:
             self.logger.store_output(args.gpu, 'timestamp', int(time.time()))
         self.logger.store_output(args.gpu, 'values', values_dict)
+        self.logger.store_gpu_json_output.append(values_dict)
 
         if multiple_devices:
             self.logger.store_multiple_device_output()
             return # Skip printing when there are multiple devices
 
-        self.logger.print_output(watching_output=watching_output)
+        if not self.logger.is_json_format():
+            self.logger.print_output(watching_output=watching_output)
 
         if watching_output: # End of single gpu add to watch_output
             self.logger.store_watch_output(multiple_device_enabled=False)
@@ -2632,6 +2656,8 @@ class AMDSMICommands():
         logging.debug(f"Metric Arg information for CPU {cpu_id} on {self.helpers.os_info()}")
 
         static_dict = {}
+        if self.logger.is_json_format():
+            static_dict['cpu'] = int(cpu_id)
         if args.cpu_power_metrics:
             static_dict["power_metrics"] = {}
             try:
@@ -2814,11 +2840,15 @@ class AMDSMICommands():
                 logging.debug("Failed to get dimm temperature range and refresh rate for cpu %s | %s", cpu_id, e.get_error_info())
 
         multiple_devices_csv_override = False
-        self.logger.store_cpu_output(args.cpu, 'values', static_dict)
+        if not self.logger.is_json_format():
+            self.logger.store_cpu_output(args.cpu, 'values', static_dict)
+        else:
+            self.logger.store_cpu_json_output.append(static_dict)
         if multiple_devices:
             self.logger.store_multiple_device_output()
             return # Skip printing when there are multiple devices
-        self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
+        if not self.logger.is_json_format():
+            self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
 
 
     def metric_core(self, args, multiple_devices=False, core=None, core_boost_limit=None,
@@ -2867,6 +2897,8 @@ class AMDSMICommands():
         logging.debug(f"Static Arg information for Core {core_id} on {self.helpers.os_info()}")
 
         static_dict = {}
+        if self.logger.is_json_format():
+            static_dict['core'] = int(core_id)
         if args.core_boost_limit:
             static_dict["boost_limit"] ={}
 
@@ -2895,11 +2927,15 @@ class AMDSMICommands():
                 logging.debug("Failed to get core energy for core %s | %s", core_id, e.get_error_info())
 
         multiple_devices_csv_override = False
-        self.logger.store_core_output(args.core, 'values', static_dict)
+        if not self.logger.is_json_format():
+            self.logger.store_core_output(args.core, 'values', static_dict)
+        else:
+            self.logger.store_core_json_output.append(static_dict)
         if multiple_devices:
             self.logger.store_multiple_device_output()
             return # Skip printing when there are multiple devices
-        self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
+        if not self.logger.is_json_format():
+            self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
 
 
     def metric(self, args, multiple_devices=False, watching_output=False, gpu=None,
@@ -3099,6 +3135,8 @@ class AMDSMICommands():
                                 fan, voltage_curve, overdrive, perf_level,
                                 xgmi_err, energy, mem_usage, schedule, throttle,
                                 )
+        if self.logger.is_json_format():
+            self.logger.combine_arrays_to_json()
 
 
     def process(self, args, multiple_devices=False, watching_output=False,
@@ -3409,7 +3447,9 @@ class AMDSMICommands():
         # Clear the table header
         self.logger.table_header = ''.rjust(12)
 
-        self.helpers.check_required_groups()
+        if not self.group_check_printed:
+            self.helpers.check_required_groups()
+            self.group_check_printed = True
 
         # Populate the possible gpus
         topo_values = []
@@ -4698,7 +4738,9 @@ class AMDSMICommands():
         if core:
             args.core = core
 
-        self.helpers.check_required_groups()
+        if not self.group_check_printed:
+            self.helpers.check_required_groups()
+            self.group_check_printed = True
 
         # Check if a GPU argument has been set
         gpu_args_enabled = False
@@ -4844,7 +4886,9 @@ class AMDSMICommands():
         if args.gpu == None:
             args.gpu = self.device_handles
 
-        self.helpers.check_required_groups()
+        if not self.group_check_printed:
+            self.helpers.check_required_groups()
+            self.group_check_printed = True
 
         # Handle multiple GPUs
         handled_multiple_gpus, device_handle = self.helpers.handle_gpus(args, self.logger, self.reset)
@@ -5681,10 +5725,6 @@ class AMDSMICommands():
         self.logger.print_output(multiple_device_enabled=False, watching_output=watching_output, tabular=True, dual_csv_output=dual_csv_output)
 
 
-    def rocm_smi(self, args):
-        print("Placeholder for rocm-smi legacy commands")
-
-
     def xgmi(self, args, multiple_devices=False, gpu=None, metric=None, xgmi_link_status=None):
         """ Get topology information for target gpus
             params:
@@ -5722,7 +5762,9 @@ class AMDSMICommands():
         # Clear the table header
         self.logger.table_header = ''.rjust(7)
 
-        self.helpers.check_required_groups()
+        if not self.group_check_printed:
+            self.helpers.check_required_groups()
+            self.group_check_printed = True
 
         # Populate the possible gpus and their bdfs
         xgmi_values = []
@@ -5968,7 +6010,9 @@ class AMDSMICommands():
         if accelerator:
             args.accelerator = accelerator
 
-        self.helpers.check_required_groups()
+        if not self.group_check_printed:
+            self.helpers.check_required_groups()
+            self.group_check_printed = True
 
         ###########################################
         # amd-smi partition (no args)             #
@@ -6296,7 +6340,10 @@ class AMDSMICommands():
         if args.gpu == None:
             args.gpu = self.device_handles
 
-        self.helpers.check_required_groups()
+        if not self.group_check_printed:
+            self.helpers.check_required_groups()
+            self.group_check_printed = True
+
         handled_multiple_gpus, device_handle = self.helpers.handle_gpus(args, self.logger, self.ras)
         if handled_multiple_gpus:
             return
@@ -6320,26 +6367,28 @@ class AMDSMICommands():
             elif sev in ("nonfatal-corrected", "corrected"):
                 # Set bit corresponding to AMDSMI_CPER_SEV_NON_FATAL_CORRECTED (which is 2)
                 severity_mask |= (1 << 2)
-
+        
         if args.cper:
             # Start from cursor 0 (no timestamp argument provided).
             cursor = 0
             buffer_size = 1048576
             file_limit = int(args.file_limit) if args.file_limit else 1000
-
-            # Print exit message only once and only when follow is set
-            if self.logger.cper_exit_message() and args.follow:
-                print('Press q and hit ENTER when you want to stop.')
-                self.logger.set_cper_exit_message(False)
-
+            
             # Main loop: continuously retrieve CPER entries if --follow is set.
             gpu_id = self.helpers.get_gpu_id_from_device_handle(args.gpu)
-            if args.folder:
-                print(f'Dumping CPER file header entries for GPU {gpu_id} in folder {args.folder}\n')
-            else:
-                print(f'Dumping CPER file header entries for GPU {gpu_id}:\n')
 
+            # Print header only when dumping to a folder
+            if args.follow and not getattr(self, "_cper_follow_prompted", False):
+               print("Press CTRL + C to stop.")
+               self._cper_follow_prompted = True
+            if args.folder and args.gpu:
+               print(f"Dumping CPER file header entries for GPU {gpu_id} in folder {args.folder}")
+            elif args.folder:
+                 print(f"Dumping CPER file header entries in folder {args.folder}")
+
+            self.logger.set_cper_exit_message(False)
             self.stop = False
+
             while True:
                 try:
                     entries, new_cursor, cper_data = amdsmi_interface.amdsmi_get_gpu_cper_entries(
@@ -6356,17 +6405,30 @@ class AMDSMICommands():
                     else:
                         logging.debug(f"Error retrieving CPER entries: {e}")
                         break
-                if entries:
-                    self.helpers.dump_entries(args.folder, entries, cper_data)
+                # Dump or display
+                if args.folder:
+                   if args.gpu and not args.follow:
+                       self.helpers.dump_gpu_entries(args.folder, entries, cper_data, args.gpu)
+                       break
+                   elif not args.gpu and not args.follow:
+                       self.helpers.dump_all_entries(args.folder, entries, cper_data, args.gpu)
+                       break
+                   elif args.follow and args.gpu:
+                       self.helpers.dump_gpu_entries_follow(args.folder, entries, cper_data, args.gpu)
+                       break
+                   elif args.follow and not args.gpu:
+                       self.helpers.dump_all_entries_follow(args.folder, entries, cper_data, args.gpu)
+                       break
+                if args.follow:
+                    self.helpers.display_cper_files_generated_follow(entries, args.gpu)
+                    break
+                else:
+                    self.helpers.display_cper_files_generated(entries, args.gpu)
+                    break
                 if len(entries) == 0 or not args.follow:
                     break
                 cursor = new_cursor
                 time.sleep(5)
-                user_input = input()
-                if user_input == 'q':
-                    print("Escape Sequence Detected; Exiting")
-                    self.stop = True
-                    break
 
 
     def _event_thread(self, commands, i):
