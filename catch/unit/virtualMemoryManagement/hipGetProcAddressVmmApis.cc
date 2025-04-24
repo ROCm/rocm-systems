@@ -32,7 +32,7 @@ THE SOFTWARE.
  *  - using the funtion pointer.
  * Test source
  * ------------------------
- *  - unit/virtualMemoryManagement/hipGetProcAddress_VMMAPIs.cc
+ *  - unit/virtualMemoryManagement/hipGetProcAddressVmmApis.cc
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 6.2
@@ -257,5 +257,111 @@ TEST_CASE("Unit_hipGetProcAddress_VMM") {
     REQUIRE(hipMemcpy(ptr, hostMem, Nbytes, hipMemcpyHostToDevice)
           == hipErrorInvalidValue);
   }
+  free(hostMem);
+}
+
+ /**
+ * Test Description
+ * ------------------------
+ *  - This test will get the function pointer of different
+ *  - VMM APIs related to Export and Import from the
+ *  - hipGetProcAddress API and then validates the basic functionality of
+ *  - that particular APIs using the funtion pointer.
+ * Test source
+ * ------------------------
+ *  - unit/virtualMemoryManagement/hipGetProcAddressVmmApis.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.2
+ */
+TEST_CASE("Unit_hipGetProcAddress_VMM_ExportImportSharableHandle") {
+  int value = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&value,
+            hipDeviceAttributeVirtualMemoryManagementSupported, 0));
+  if (value == 0) {
+    HipTest::HIP_SKIP_TEST("Machine does not support VMM. Skipping Test..");
+    return;
+  }
+
+  void* hipMemExportToShareableHandle_ptr = nullptr;
+  void* hipMemImportFromShareableHandle_ptr = nullptr;
+
+  int currentHipVersion = 0;
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+
+  HIP_CHECK(hipGetProcAddress("hipMemExportToShareableHandle",
+                              &hipMemExportToShareableHandle_ptr,
+                              currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemImportFromShareableHandle",
+                              &hipMemImportFromShareableHandle_ptr,
+                              currentHipVersion, 0, nullptr));
+
+  hipError_t (*dyn_hipMemExportToShareableHandle_ptr)(void *,
+    hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
+    uint64_t) =
+    reinterpret_cast<hipError_t (*)(void *,
+    hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
+    uint64_t)>(hipMemExportToShareableHandle_ptr);
+
+  hipError_t (*dyn_hipMemImportFromShareableHandle_ptr)(
+    hipMemGenericAllocationHandle_t *, void *,
+    hipMemAllocationHandleType) =
+    reinterpret_cast<hipError_t (*)(hipMemGenericAllocationHandle_t *, void *,
+    hipMemAllocationHandleType)>(hipMemImportFromShareableHandle_ptr);
+
+  const int N = 10;
+  const int Nbytes = 10 * sizeof(int);
+  int *hostMem = reinterpret_cast<int *>(malloc(Nbytes));
+  REQUIRE(hostMem != nullptr);
+  fillHostArray(hostMem, N, 10);
+
+  hipMemAllocationProp prop{};
+  prop.type = hipMemAllocationTypePinned;
+  prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id = 0;
+
+  size_t granularity = 0;
+  HIP_CHECK(hipMemGetAllocationGranularity(&granularity,
+            &prop, hipMemAllocationGranularityMinimum));
+  REQUIRE(granularity > 0);
+
+  hipMemGenericAllocationHandle_t handle = nullptr;
+  HIP_CHECK(hipMemCreate(&handle, granularity, &prop, 0));
+  REQUIRE(handle != nullptr);
+
+  // Validating hipMemExportToShareableHandle
+  int shareableHandle;
+  HIP_CHECK(dyn_hipMemExportToShareableHandle_ptr(&shareableHandle, handle,
+            hipMemHandleTypePosixFileDescriptor, 0));
+
+  // Validating hipMemImportFromShareableHandle
+  hipMemGenericAllocationHandle_t importedHandle;
+  HIP_CHECK(dyn_hipMemImportFromShareableHandle_ptr(&importedHandle,
+            &shareableHandle, hipMemHandleTypePosixFileDescriptor));
+
+  void* ptr = nullptr;
+  HIP_CHECK(hipMemAddressReserve(&ptr, granularity, 0, 0, 0));
+  REQUIRE(ptr != nullptr);
+
+  HIP_CHECK(hipMemMap(ptr, granularity, 0, importedHandle, 0));
+  REQUIRE(ptr != nullptr);
+
+  hipMemAccessDesc desc;
+  desc.location.type = hipMemLocationTypeDevice;
+  desc.location.id = 0;
+  desc.flags = hipMemAccessFlagsProtReadWrite;
+  HIP_CHECK(hipMemSetAccess(ptr, granularity, &desc, 1));
+  REQUIRE(ptr != nullptr);
+
+  HIP_CHECK(hipMemcpy(ptr, hostMem, Nbytes, hipMemcpyHostToDevice));
+  addOneKernel<<< 1, 1 >>>(reinterpret_cast<int *>(ptr), N);
+  HIP_CHECK(hipMemcpy(hostMem, ptr, Nbytes, hipMemcpyDeviceToHost));
+  validateHostArray(hostMem, N, 11);
+
+  HIP_CHECK(hipMemUnmap(ptr, granularity));
+  HIP_CHECK(hipMemAddressFree(ptr, granularity));
+
+  HIP_CHECK(hipMemRelease(handle));
   free(hostMem);
 }

@@ -30,6 +30,12 @@ set(TEST_SRC
     surfCubemap.cc
 )
 
+if(HIP_PLATFORM MATCHES "amd")
+set(TEST_SRC
+    ${TEST_SRC}
+    hipGetProcAddressSurfaceApis.cc)
+endif()
+
 if(HIP_PLATFORM MATCHES "nvidia") # Disabled on AMD due to defect EXSWHTEC-377
 set(TEST_SRC
     ${TEST_SRC}

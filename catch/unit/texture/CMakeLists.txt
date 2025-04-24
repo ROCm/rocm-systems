@@ -66,6 +66,13 @@ set(TEST_SRC
     hipTexRefGetAddressMode.cc
 )
 
+if(HIP_PLATFORM MATCHES "amd")
+  set(AMD_SRC
+    hipGetProcAddressTextureApis.cc
+  )
+  set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
+endif()
+
 # tests not for gfx90a+
 set(NOT_FOR_gfx90a_AND_ABOVE_TEST
     tex1D.cc
