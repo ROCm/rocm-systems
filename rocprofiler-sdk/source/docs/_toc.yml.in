@@ -11,26 +11,26 @@ subtrees:
     - file: install/installation
   - caption: How to
     entries:
-    - file: how-to/using-rocprofv3
-    - file: how-to/using-rocprofiler-sdk-roctx
     - file: how-to/samples
       title: Samples
-    - file: how-to/using-pc-sampling
+    - file: how-to/using-rocprofv3
+    - file: how-to/using-rocprofiler-sdk-roctx
     - file: how-to/using-rocprofv3-with-mpi
+    - file: how-to/using-pc-sampling
   - caption: API reference
     entries:
+    - file: api-reference/tool_library
+      title: Tool library
+    - file: api-reference/intercept_table
+      title: Runtime intercept tables
     - file: api-reference/buffered_services
       title: Buffered services
     - file: api-reference/callback_services
       title: Callback tracing services
     - file: api-reference/counter_collection_services
       title: Counter collection services
-    - file: api-reference/intercept_table
-      title: Runtime intercept tables
     - file: api-reference/pc_sampling
       title: PC sampling
-    - file: api-reference/tool_library
-      title: Tool library
     - file: _doxygen/rocprofiler-sdk/html/index
       title: ROCprofiler-SDK API library
     - file: _doxygen/roctx/html/index
