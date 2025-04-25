@@ -33,7 +33,6 @@
 #include <cxxabi.h>
 #include <cstring>
 #include <fstream>
-#include <shared_mutex>
 
 namespace rocprofiler
 {
@@ -87,7 +86,8 @@ get_trace_data(rocprofiler_att_decoder_record_type_t trace_id,
     bool bInvalid = false;
     for(size_t wave_n = 0; wave_n < trace_size; wave_n++)
     {
-        auto& wave = reinterpret_cast<att_wave_data_t*>(trace_events)[wave_n];
+        auto&   wave           = reinterpret_cast<att_wave_data_t*>(trace_events)[wave_n];
+        int64_t prev_inst_time = wave.begin_time;
 
         WaveFile(tool.config, wave);
 
@@ -102,12 +102,15 @@ get_trace_data(rocprofiler_att_decoder_record_type_t trace_id,
             try
             {
                 auto& line = tool.get(inst.pc);
-                line.hitcount.fetch_add(1, std::memory_order_relaxed);
-                line.latency.fetch_add(inst.duration, std::memory_order_relaxed);
+                line.hitcount += 1;
+                line.latency += inst.duration;
+                line.stall += inst.stall;
+                line.idle += std::max<int64_t>(inst.time - prev_inst_time, 0);
             } catch(...)
             {
                 bInvalid = true;
             }
+            prev_inst_time = std::max(prev_inst_time, inst.time + inst.duration);
         }
     }
     if(bInvalid) ROCP_WARNING << "Could not fetch some instructions!";
@@ -191,7 +194,7 @@ ToolData::~ToolData() = default;
 std::string
 demangle(std::string_view line)
 {
-    int   status;
+    int   status{0};
     char* c_name = abi::__cxa_demangle(line.data(), nullptr, nullptr, &status);
 
     if(c_name == nullptr) return "";

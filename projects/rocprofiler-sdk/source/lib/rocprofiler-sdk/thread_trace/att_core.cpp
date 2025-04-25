@@ -295,7 +295,11 @@ DispatchThreadTracer::resource_init()
         if(it == params.end()) continue;
 
         auto cache = rocprofiler::agent::get_hsa_agent(rocp_agent);
-        CHECK(cache.has_value());
+        if(!cache.has_value())
+        {
+            ROCP_CI_LOG(TRACE) << "Could not find HSA Agent for " << rocp_agent->id.handle;
+            continue;
+        }
         agents[*cache] = std::make_unique<ThreadTracerQueue>(it->second, rocp_agent->id);
     }
 }

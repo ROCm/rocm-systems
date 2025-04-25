@@ -30,7 +30,6 @@
 
 #include "att_lib_wrapper.hpp"
 
-#include <atomic>
 #include <map>
 #include <unordered_map>
 #include <vector>
@@ -45,7 +44,7 @@ constexpr size_t SIMD_SIZE = 32;
 class WaveConfig
 {
     using WavestateArray = std::array<std::shared_ptr<WstatesFile>, ATT_WAVE_STATE_LAST>;
-    using SIMD           = std::array<std::atomic<int>, SIMD_SIZE>;
+    using SIMD           = std::array<size_t, SIMD_SIZE>;
 
 public:
     WaveConfig(int                           se_id,

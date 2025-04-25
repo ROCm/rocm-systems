@@ -64,6 +64,7 @@ union MemoryInst
         int ldcnt : 1;
         int stcnt : 1;
         int sampl : 1;
+        int idle  : 1;
     };
     int raw = 0;
 };
@@ -80,6 +81,13 @@ classify(const std::string& inst)
     if(inst.find("s_wait") == 0)
     {
         if(inst.find("s_wait_alu") != npos) return MemoryInstType::TYPE_NOT_MEM;
+
+        if(inst.find("s_wait_idle") != npos)
+        {
+            MemoryInst type = MemoryInstType::TYPE_WAITCNT;
+            type.idle       = true;
+            return type;
+        }
 
         MemoryInst type = MemoryInstType::TYPE_WAITCNT;
         if(inst.find("dscnt") != npos) type.dscnt = true;
@@ -233,31 +241,26 @@ WaitcntList::gfx12_construct(const wave_t& wave, isa_map_t& isa_map)
                 if(auto joined = expcnt.handle_mem_op(inst_str, empty_list))
                     mem_unroll.emplace_back(LineWaitcnt{line_number, std::move(*joined)});
             }
-
             if(type.sampl)
             {
                 if(auto joined = samplecnt.handle_mem_op(inst_str, empty_list))
                     mem_unroll.emplace_back(LineWaitcnt{line_number, std::move(*joined)});
             }
-
             if(type.kmcnt)
             {
                 if(auto joined = kmcnt.handle_mem_op(inst_str, empty_list))
                     mem_unroll.emplace_back(LineWaitcnt{line_number, std::move(*joined)});
             }
-
             if(type.stcnt)
             {
                 if(auto joined = storecnt.handle_mem_op(inst_str, flat_stor))
                     mem_unroll.emplace_back(LineWaitcnt{line_number, std::move(*joined)});
             }
-
             if(type.ldcnt)
             {
                 if(auto joined = loadcnt.handle_mem_op(inst_str, flat_load))
                     mem_unroll.emplace_back(LineWaitcnt{line_number, std::move(*joined)});
             }
-
             if(type.dscnt)
             {
                 if(auto joined = dscnt.handle_mem_op(inst_str, flat_load))
@@ -270,6 +273,20 @@ WaitcntList::gfx12_construct(const wave_t& wave, isa_map_t& isa_map)
 
                     mem_unroll.emplace_back(LineWaitcnt{line_number, std::move(*joined)});
                 }
+            }
+
+            if(type.idle)
+            {
+                std::vector<int> all{};
+                loadcnt.clearTo(all);
+                storecnt.clearTo(all);
+                samplecnt.clearTo(all);
+                dscnt.clearTo(all);
+                kmcnt.clearTo(all);
+                expcnt.clearTo(all);
+                bvhcnt.clearTo(all);
+
+                mem_unroll.emplace_back(LineWaitcnt{line_number, std::move(all)});
             }
         }
     }

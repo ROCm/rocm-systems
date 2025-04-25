@@ -28,7 +28,6 @@
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 
 #include <dlfcn.h>
-#include <atomic>
 #include <cassert>
 #include <cstdlib>
 #include <mutex>

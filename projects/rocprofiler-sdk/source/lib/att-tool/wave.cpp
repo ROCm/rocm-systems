@@ -42,7 +42,7 @@ WaveFile::WaveFile(WaveConfig& config, const att_wave_data_t& wave)
 
     assert(config.filemgr);
 
-    int assigned_id = config.id_count.at(wave.simd).at(wave.wave_id).fetch_add(1);
+    int assigned_id = config.id_count.at(wave.simd).at(wave.wave_id)++;
     {
         std::stringstream namess;
         namess << "se" << config.shader_engine << "_sm" << (int) wave.simd << "_sl"
@@ -87,8 +87,7 @@ WaveFile::WaveFile(WaveConfig& config, const att_wave_data_t& wave)
 
     try
     {
-        const WaitcntList& wait_list =
-            WaitcntList::Get(config.filemgr->gfxip, wave, config.code->isa_map);
+        auto wait_list = WaitcntList(config.filemgr->gfxip, wave, config.code->isa_map);
 
         for(const auto& line : wait_list.mem_unroll)
             if(!line.dependencies.empty())
