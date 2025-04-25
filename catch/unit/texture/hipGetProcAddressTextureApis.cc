@@ -165,22 +165,35 @@ TEST_CASE("Unit_hipGetProcAddress_Texture_TextureObject") {
           hipDestroyTextureObject_ptr);
   REQUIRE(dyn_hipDestroyTextureObject_ptr != nullptr);
 
+  int width = 128;
+  size_t size = width * sizeof(float);
+
+  float *hostData = reinterpret_cast<float *>(malloc(size));
+  memset(hostData, 0, size);
+  for (int i = 0; i < width; i++) {
+    hostData[i] = i;
+  }
+
   // Create Channel Format Descriptor
   hipChannelFormatDesc channelFormatDesc;
-  channelFormatDesc =
-      hipCreateChannelDesc(16, 0, 0, 0, hipChannelFormatKindFloat);
+  channelFormatDesc = hipCreateChannelDesc(32, 0, 0, 0,
+                                           hipChannelFormatKindFloat);
 
   // Create array
   hipArray_t array;
-  HIP_CHECK(hipMallocArray(&array, &channelFormatDesc, 8, 2, 0));
+  HIP_CHECK(hipMallocArray(&array, &channelFormatDesc, width));
+  HIP_CHECK(hipMemcpy2DToArray(array, 0, 0, hostData, size, size, 1,
+                               hipMemcpyHostToDevice));
 
   // Create Resource Descriptor
   hipResourceDesc resourceDesc;
+  memset(&resourceDesc, 0, sizeof(resourceDesc));
   resourceDesc.resType = hipResourceTypeArray;
   resourceDesc.res.array.array = array;
 
   // Create Texture Descriptor
   hipTextureDesc textureDesc;
+  memset(&textureDesc, 0, sizeof(textureDesc));
   textureDesc.addressMode[0] = hipAddressModeClamp;
   textureDesc.filterMode = hipFilterModePoint;
   textureDesc.readMode = hipReadModeElementType;
@@ -188,8 +201,9 @@ TEST_CASE("Unit_hipGetProcAddress_Texture_TextureObject") {
 
   // Create Resource View Descriptor
   hipResourceViewDesc resourceViewDesc;
+  memset(&resourceViewDesc, 0, sizeof(resourceViewDesc));
   resourceViewDesc.format = hipResViewFormatFloat1;
-  resourceViewDesc.width = 8;
+  resourceViewDesc.width = size;
 
   // Create Texture Object
   hipTextureObject_t textureObject = nullptr;
@@ -226,7 +240,7 @@ TEST_CASE("Unit_hipGetProcAddress_Texture_TextureObject") {
         &resourceViewDescToCheck, textureObject));
 
     REQUIRE(resourceViewDescToCheck.format == hipResViewFormatFloat1);
-    REQUIRE(resourceViewDescToCheck.width == 8);
+    REQUIRE(resourceViewDescToCheck.width == size);
   }
 
   // Destroy Texture Object
