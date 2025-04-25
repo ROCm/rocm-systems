@@ -219,7 +219,30 @@ def test_summary_data(json_data):
             # HIP may decompose memory copies into more than one HSA memory copy
             assert itr.stats.count >= 4 and (itr.stats.count % 4) == 0
         elif itr.domain == "MEMORY_ALLOCATION":
-            assert itr.stats.count >= 10 and itr.stats.count <= 30
+            memory_allocation_allocate_count = 0
+            memory_allocation_free_count = 0
+            memory_allocation_vmem_allocate_count = 0
+            memory_allocation_vmem_free_count = 0
+            for operation in itr.stats.operations:
+                if operation.key == "MEMORY_ALLOCATION_ALLOCATE":
+                    memory_allocation_allocate_count = operation.value.count
+                elif operation.key == "MEMORY_ALLOCATION_FREE":
+                    memory_allocation_free_count = operation.value.count
+                elif operation.key == "MEMORY_ALLOCATION_VMEM_ALLOCATE":
+                    memory_allocation_vmem_allocate_count = operation.value.count
+                elif operation.key == "MEMORY_ALLOCATION_VMEM_FREE":
+                    memory_allocation_vmem_free_count = operation.value.count
+            memory_allocation_allocate_and_free_count = (
+                memory_allocation_allocate_count + memory_allocation_free_count
+            )
+            assert (
+                memory_allocation_allocate_and_free_count >= 10
+                and memory_allocation_allocate_and_free_count <= 30
+            )
+            # check if hip-runtime memory management pools through virtual memory allocation count is equal to free count.
+            assert (
+                memory_allocation_vmem_allocate_count == memory_allocation_vmem_free_count
+            )
         elif itr.domain == "MARKER_API":
             assert itr.stats.count == 1106
             expected = dict(
