@@ -2253,6 +2253,8 @@ write_perfetto()
                               itr.operation,
                               "corr_id",
                               itr.correlation_id.internal,
+                              "ancestor_id",
+                              itr.correlation_id.ancestor,
                               [&](::perfetto::EventContext ctx) {
                                   for(const auto& aitr : _args)
                                       sdk::add_perfetto_annotation(ctx, aitr.first, aitr.second);
@@ -2296,6 +2298,8 @@ write_perfetto()
                               itr.operation,
                               "corr_id",
                               itr.correlation_id.internal,
+                              "ancestor_id",
+                              itr.correlation_id.ancestor,
                               [&](::perfetto::EventContext ctx) {
                                   for(const auto& aitr : _args)
                                       sdk::add_perfetto_annotation(ctx, aitr.first, aitr.second);
@@ -2340,6 +2344,8 @@ write_perfetto()
                               itr.operation,
                               "corr_id",
                               itr.correlation_id.internal,
+                              "ancestor_id",
+                              itr.correlation_id.ancestor,
                               [&](::perfetto::EventContext ctx) {
                                   for(const auto& aitr : _args)
                                       sdk::add_perfetto_annotation(ctx, aitr.first, aitr.second);
@@ -2384,6 +2390,8 @@ write_perfetto()
                               itr.operation,
                               "corr_id",
                               itr.correlation_id.internal,
+                              "ancestor_id",
+                              itr.correlation_id.ancestor,
                               [&](::perfetto::EventContext ctx) {
                                   for(const auto& aitr : _args)
                                       sdk::add_perfetto_annotation(ctx, aitr.first, aitr.second);
@@ -2428,6 +2436,8 @@ write_perfetto()
                               itr.operation,
                               "corr_id",
                               itr.correlation_id.internal,
+                              "ancestor_id",
+                              itr.correlation_id.ancestor,
                               [&](::perfetto::EventContext ctx) {
                                   for(const auto& aitr : _args)
                                       sdk::add_perfetto_annotation(ctx, aitr.first, aitr.second);
@@ -2471,6 +2481,8 @@ write_perfetto()
                               itr.operation,
                               "corr_id",
                               itr.correlation_id.internal,
+                              "ancestor_id",
+                              itr.correlation_id.ancestor,
                               [&](::perfetto::EventContext ctx) {
                                   for(const auto& aitr : _args)
                                       sdk::add_perfetto_annotation(ctx, aitr.first, aitr.second);

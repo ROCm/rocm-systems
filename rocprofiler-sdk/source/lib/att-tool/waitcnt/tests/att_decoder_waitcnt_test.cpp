@@ -93,7 +93,7 @@ TEST(att_decoder_waitcnt_test, gfx9)
     wave.instructions_array = insts.data();
     wave.instructions_size  = insts.size();
 
-    const auto& data = WaitcntList::Get(9, wave, isa_map);
+    auto data = WaitcntList(9, wave, isa_map);
 
     std::map<int, std::set<int>> dependencies{};
 
@@ -183,7 +183,7 @@ TEST(att_decoder_waitcnt_test, gfx10)
     wave.instructions_array = insts.data();
     wave.instructions_size  = insts.size();
 
-    const auto& data = WaitcntList::Get(10, wave, isa_map);
+    auto data = WaitcntList(10, wave, isa_map);
 
     std::map<int, std::set<int>> dependencies{};
 
@@ -285,7 +285,11 @@ TEST(att_decoder_waitcnt_test, gfx12)
     append_isa(37, "s_waitcnt dscnt(1)");
     append_isa(38, "s_waitcnt expcnt(0) bvhcnt(0)");
     append_isa(39, "s_waitcnt dscnt(0)");
-    append_isa(40, "invalid");
+
+    append_isa(40, "ds_store");
+    append_isa(41, "global_load");
+    append_isa(42, "s_wait_idle");
+    append_isa(43, "invalid");
 
     std::vector<att_wave_instruction_t> insts{};
     for(size_t i = 0; i < isa_map.size(); i++)
@@ -300,7 +304,7 @@ TEST(att_decoder_waitcnt_test, gfx12)
     wave.instructions_array = insts.data();
     wave.instructions_size  = insts.size();
 
-    const auto& data = WaitcntList::Get(12, wave, isa_map);
+    auto data = WaitcntList(12, wave, isa_map);
 
     std::map<int, std::set<int>> dependencies{};
 
@@ -317,7 +321,7 @@ TEST(att_decoder_waitcnt_test, gfx12)
         ASSERT_EQ(dependencies.at(dep).size(), set.size());
     };
 
-    ASSERT_EQ(dependencies.size(), 11);
+    ASSERT_EQ(dependencies.size(), 12);
     set_equal(6, {2, 3});
     set_equal(7, {4});
     set_equal(8, {5});
@@ -329,6 +333,7 @@ TEST(att_decoder_waitcnt_test, gfx12)
     set_equal(37, {31});
     set_equal(38, {32, 33, 34, 35});
     set_equal(39, {36});
+    set_equal(42, {40, 41});
 }
 
 TEST(att_decoder_waitcnt_test, fail_conditions)
@@ -347,22 +352,18 @@ TEST(att_decoder_waitcnt_test, fail_conditions)
     }
 
     WaitcntList::wave_t wave{};
-    wave.traceID            = 4;
     wave.instructions_array = insts.data();
     wave.instructions_size  = insts.size();
 
     // It should give warning and return
-    ASSERT_TRUE(WaitcntList::Get(9, wave, isa_map).mem_unroll.empty());
-    wave.traceID++;
-    ASSERT_TRUE(WaitcntList::Get(10, wave, isa_map).mem_unroll.empty());
-    wave.traceID++;
-    ASSERT_TRUE(WaitcntList::Get(12, wave, isa_map).mem_unroll.empty());
-    wave.traceID++;
+    ASSERT_TRUE(WaitcntList(9, wave, isa_map).mem_unroll.empty());
+    ASSERT_TRUE(WaitcntList(10, wave, isa_map).mem_unroll.empty());
+    ASSERT_TRUE(WaitcntList(12, wave, isa_map).mem_unroll.empty());
 
     // it cant operate on invalid gfxip
     try
     {
-        WaitcntList::Get(-1, wave, isa_map);
+        WaitcntList(-1, wave, isa_map);
         // fail
         ASSERT_TRUE(false);
     } catch(std::runtime_error& e)

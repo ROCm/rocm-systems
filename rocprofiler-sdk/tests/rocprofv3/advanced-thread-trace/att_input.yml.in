@@ -22,31 +22,10 @@
 
 jobs:
   - advanced_thread_trace: True
-    att_parse: testing2
-    att_library_path:
-    - @LIBRARY_OUTPUT_DIR@/att
-
-  - advanced_thread_trace: True
-    att_parse: testing2
     att_library_path:
     - @LIBRARY_OUTPUT_DIR@/att
     - @LIBRARY_OUTPUT_DIR@
 
   - advanced_thread_trace: True
-    att_parse: testing1
-    att_library_path:
-    - @LIBRARY_OUTPUT_DIR@/att
-    - @LIBRARY_OUTPUT_DIR@
-
-  - advanced_thread_trace: True
-    att_parse: testing1
-
-  - advanced_thread_trace: True
-    att_parse: testing1
-    att_library_path:
-    - @LIBRARY_OUTPUT_DIR@
-
-  - advanced_thread_trace: True
-    att_parse: testing1
     att_library_path:
     - @LIBRARY_OUTPUT_DIR@

@@ -656,89 +656,79 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
     default_att_lib_path, att_support_args, att_support_inp = check_att_capability(
         rocp_args
     )
-    if att_support_args or len(att_support_inp) != 0:
-        choice_list = []
-        for keys, values in att_support_inp.items():
-            choice_list.extend(values)
-        if att_support_args:
-            choice_list.extend(list(att_support_args))
 
-        # remove duplicates
-        choice_list = list(set(choice_list))
+    choice_list = []
+    for keys, values in att_support_inp.items():
+        choice_list.extend(values)
+    if att_support_args:
+        choice_list.extend(list(att_support_args))
 
-        att_options = parser.add_argument_group("Advanced Thread Trace (ATT) options")
+    # remove duplicates
+    choice_list = list(set(choice_list))
 
-        add_parser_bool_argument(
-            att_options,
-            "--advanced-thread-trace",
-            "--att",
-            help="Enable ATT",
-        )
+    att_options = parser.add_argument_group("Advanced Thread Trace (ATT) options")
 
-        att_options.add_argument(
-            "--att-library-path",
-            help="Search path(s) to decoder library/libraries",
-            default=default_att_lib_path if not att_support_inp else None,
-            nargs="+",
-        )
+    add_parser_bool_argument(
+        att_options,
+        "--advanced-thread-trace",
+        "--att",
+        help="Enable ATT",
+    )
 
-        att_options.add_argument(
-            "--att-target-cu",
-            help="ATT target compute unit",
-            default=None,
-        )
+    att_options.add_argument(
+        "--att-library-path",
+        help="Search path(s) to decoder library/libraries",
+        default=default_att_lib_path if not att_support_inp else None,
+        nargs="+",
+    )
 
-        att_options.add_argument(
-            "--att-simd-select",
-            help="Select ATT SIMD",
-            default=None,
-            type=str,
-        )
+    att_options.add_argument(
+        "--att-target-cu",
+        help="ATT target compute unit",
+        default=None,
+    )
 
-        att_options.add_argument(
-            "--att-buffer-size",
-            help="Buffer Size",
-            default=None,
-            type=str,
-        )
+    att_options.add_argument(
+        "--att-simd-select",
+        help="Select ATT SIMD",
+        default=None,
+        type=str,
+    )
 
-        att_options.add_argument(
-            "--att-shader-engine-mask",
-            help="att shader engine mask",
-            default=None,
-            type=str,
-        )
+    att_options.add_argument(
+        "--att-buffer-size",
+        help="Buffer Size",
+        default=None,
+        type=str,
+    )
 
-        att_options.add_argument(
-            "--att-parse",
-            type=str.lower,
-            default=(
-                choice_list[0] if len(choice_list) == 1 and not att_support_inp else None
-            ),
-            help="Select ATT Parse method from the choices",
-            choices=set(choice_list),
-        )
+    att_options.add_argument(
+        "--att-shader-engine-mask",
+        help="att shader engine mask",
+        default=None,
+        type=str,
+    )
 
-        att_options.add_argument(
-            "--att-perfcounters",
-            help="Set performance counters, and optionally their mask",
-            default=None,
-            type=str.upper,
-        )
+    att_options.add_argument(
+        "--att-perfcounters",
+        help="Set performance counters, and optionally their mask. gfx9 only.",
+        default=None,
+        type=str.upper,
+    )
 
-        att_options.add_argument(
-            "--att-perfcounter-ctrl",
-            help="Integer in [0,32] range specifying collection period.",
-            default=None,
-            type=int,
-        )
+    att_options.add_argument(
+        "--att-perfcounter-ctrl",
+        help="Integer in [0,32] range specifying collection period. gfx9 only.",
+        default=None,
+        type=int,
+    )
 
-        add_parser_bool_argument(
-            att_options,
-            "--att-serialize-all",
-            default=False,
-            help="Serialize all kernels",
-        )
+    add_parser_bool_argument(
+        att_options,
+        "--att-serialize-all",
+        default=False,
+        help="Serialize all kernels",
+    )
 
     return (parser.parse_args(rocp_args), app_args, att_support_args, att_support_inp)
 
@@ -1408,11 +1398,7 @@ def run(app_args, args, **kwargs):
         ):
             fatal_error("Advanced thread trace cannot be enabled with pc sampling")
 
-        if not args.att_parse:
-            fatal_error("provide the parser choice")
-
         update_env("ROCPROF_ADVANCED_THREAD_TRACE", True, overwrite=True)
-        update_env("ROCPROF_ATT_CAPABILITY", args.att_parse, overwrite=True)
 
         if args.att_target_cu is not None:
             update_env(

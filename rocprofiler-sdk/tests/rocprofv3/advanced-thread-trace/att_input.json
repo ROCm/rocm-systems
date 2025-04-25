@@ -9,7 +9,6 @@
             ],
             "truncate_kernels": true,
             "advanced_thread_trace": true,
-            "att_parse": "testing1",
             "att_target_cu": 1,
             "att_shader_engine_mask": "0x11",
             "att_simd_select": "0x3",

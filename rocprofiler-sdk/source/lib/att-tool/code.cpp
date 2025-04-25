@@ -22,6 +22,7 @@
 
 #include "code.hpp"
 #include <nlohmann/json.hpp>
+#include "lib/output/csv.hpp"
 #include "outputfile.hpp"
 
 #include <fstream>
@@ -33,7 +34,7 @@ namespace rocprofiler
 {
 namespace att_wrapper
 {
-#define ATT_CSV_NAME "att_output.csv"
+using csv_encoder = rocprofiler::tool::csv::csv_encoder<8>;
 
 // Builds a json filetree by recursively inserting "path" into the json object.
 void
@@ -48,10 +49,9 @@ navigate(nlohmann::json& json, std::vector<std::string>& path, const std::string
     navigate(j, path, filename);
 }
 
-CodeFile::CodeFile(const Fspath& _dir, std::shared_ptr<AddressTable>& _table)
-: dir(_dir)
-, filename(_dir / "code.json")
-, table(_table)
+CodeFile::CodeFile(Fspath _dir, std::shared_ptr<AddressTable> _table)
+: dir(std::move(_dir))
+, table(std::move(_table))
 {}
 
 CodeFile::~CodeFile()
@@ -76,20 +76,44 @@ CodeFile::~CodeFile()
                       return a.first.marker_id < b.first.marker_id;
                   });
 
-        OutputFile file(dir / ATT_CSV_NAME);
+        std::stringstream ofs;
+        csv_encoder::write_row(ofs,
+                               "CodeObj",
+                               "Vaddr",
+                               "Instruction",
+                               "Hitcount",
+                               "Latency",
+                               "Stall",
+                               "Idle",
+                               "Source");
 
-        file << "CodeObj, Vaddr, Instruction, Hitcount, Latency, Source\n";
         for(auto& [pc, line] : vec)
         {
             if(kernel_names.find(pc) != kernel_names.end())
             {
-                file << pc.marker_id << ',' << pc.addr << ",\"; " << kernel_names.at(pc).name
-                     << "\",0,0,\"" << kernel_names.at(pc).demangled << "\"\n";
+                csv_encoder::write_row(ofs,
+                                       pc.marker_id,
+                                       pc.addr,
+                                       "; " + kernel_names.at(pc).name,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       kernel_names.at(pc).demangled);
             }
-            file << pc.marker_id << ',' << pc.addr << ",\"" << line->code_line->inst << "\","
-                 << line->hitcount << ',' << line->latency << ',' << line->code_line->comment
-                 << '\n';
+            csv_encoder::write_row(ofs,
+                                   pc.marker_id,
+                                   pc.addr,
+                                   line->code_line->inst,
+                                   line->hitcount,
+                                   line->latency,
+                                   line->stall,
+                                   line->idle,
+                                   line->code_line->comment);
         }
+
+        OutputFile file(dir.parent_path() / ("stats_" + dir.filename().string() + ".csv"));
+        file << ofs.str();
     }
 
     if(!GlobalDefs::get().has_format("json")) return;
@@ -113,17 +137,17 @@ CodeFile::~CodeFile()
         if(kernel_names.find(line.first) != kernel_names.end())
         {
             std::stringstream code;
-            code << "[\"; " << kernel_names.at(line.first).name << "\", 100, "
-                 << (isa.line_number - 1) << ", \"" << kernel_names.at(line.first).demangled
-                 << "\", " << line.first.marker_id << ", " << line.first.addr << ", 0, 0]";
-
+            code << "[\"; " << kernel_names.at(line.first).name << "\",0," << (isa.line_number - 1)
+                 << ",\"" << kernel_names.at(line.first).demangled << "\"," << line.first.marker_id
+                 << "," << line.first.addr << ",0,0,0,0]";
             jcode.push_back(nlohmann::json::parse(code.str()));
         }
 
         std::stringstream code;
-        code << "[\"" << isa.code_line->inst << "\", 0, " << isa.line_number << ", \""
-             << isa.code_line->comment << "\", " << line.first.marker_id << ", " << line.first.addr
-             << ", " << isa.hitcount << ", " << isa.latency << "]";
+        code << "[\"" << isa.code_line->inst << "\",0," << isa.line_number << ",\""
+             << isa.code_line->comment << "\"," << line.first.marker_id << "," << line.first.addr
+             << "," << isa.hitcount << "," << isa.latency << "," << isa.stall << "," << isa.idle
+             << "]";
 
         jcode.push_back(nlohmann::json::parse(code.str()));
 
@@ -139,8 +163,9 @@ CodeFile::~CodeFile()
     nlohmann::json json;
     json["code"]    = jcode;
     json["version"] = TOOL_VERSION;
+    json["header"]  = "ISA, _, LineNumber, Source, Codeobj, Vaddr, Hit, Latency, Stall, Idle";
 
-    OutputFile(filename) << json;
+    OutputFile(dir / "code.json") << json;
 
     nlohmann::json jsnapfiletree;
     size_t         num_snap = 0;
