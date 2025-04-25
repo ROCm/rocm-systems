@@ -168,11 +168,11 @@ TEST_CASE("Unit_hipGetProcAddress_Texture_TextureObject") {
   // Create Channel Format Descriptor
   hipChannelFormatDesc channelFormatDesc;
   channelFormatDesc =
-      hipCreateChannelDesc(32, 32, 32, 32, hipChannelFormatKindFloat);
+      hipCreateChannelDesc(16, 0, 0, 0, hipChannelFormatKindFloat);
 
   // Create array
   hipArray_t array;
-  HIP_CHECK(hipMallocArray(&array, &channelFormatDesc, 8, 8, 0));
+  HIP_CHECK(hipMallocArray(&array, &channelFormatDesc, 8, 2, 0));
 
   // Create Resource Descriptor
   hipResourceDesc resourceDesc;
