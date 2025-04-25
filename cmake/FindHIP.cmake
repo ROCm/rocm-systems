@@ -82,8 +82,8 @@ elseif (HIP_CXX_COMPILER MATCHES ".*clang\\+\\+")
 endif()
 
 if(WIN32)
-    # In windows FindHIP.cmake is installed in <Install_Prefix>/cmake
-    get_filename_component(_IMPORT_PREFIX "${CMAKE_CURRENT_LIST_DIR}/../" REALPATH)
+    # In windows FindHIP.cmake is installed in <Install_Prefix>/lib/cmake/hip
+    get_filename_component(_IMPORT_PREFIX "${CMAKE_CURRENT_LIST_DIR}/../../../" REALPATH)
 else()
     # In Linux FindHIP.cmake is installed in <Install_Prefix>/lib/cmake/hip
     # RealPath: <Install_Prefix>/lib/cmake/hip/FindHIP.cmake
@@ -94,12 +94,19 @@ endif()
 
 # HIP is currently not supported for apple
 if(NOT APPLE)
+    if(WIN32)
+        set(hipconfig "hipconfig.exe")
+        set(hipcc "hipcc.exe")
+    else()
+        set(hipconfig "hipconfig")
+        set(hipcc "hipcc")
+    endif()
     # Search for HIP installation
     if(NOT HIP_ROOT_DIR)
         # Search in user specified path first
         find_path(
             HIP_ROOT_DIR
-            NAMES bin/hipconfig
+            NAMES bin/${hipconfig}
             PATHS
             "$ENV{ROCM_PATH}"
             "$ENV{ROCM_PATH}/hip"
@@ -122,7 +129,7 @@ if(NOT APPLE)
     # Find HIPCC executable
     find_program(
         HIP_HIPCC_EXECUTABLE
-        NAMES hipcc
+        NAMES ${hipcc}
         PATHS
         "${HIP_ROOT_DIR}"
         ENV ROCM_PATH
@@ -132,13 +139,13 @@ if(NOT APPLE)
         )
     if(NOT HIP_HIPCC_EXECUTABLE)
         # Now search in default paths
-        find_program(HIP_HIPCC_EXECUTABLE hipcc)
+        find_program(HIP_HIPCC_EXECUTABLE ${hipcc})
     endif()
 
     # Find HIPCONFIG executable
     find_program(
         HIP_HIPCONFIG_EXECUTABLE
-        NAMES hipconfig
+        NAMES ${hipconfig}
         PATHS
         "${HIP_ROOT_DIR}"
         ENV ROCM_PATH
@@ -148,14 +155,7 @@ if(NOT APPLE)
         )
     if(NOT HIP_HIPCONFIG_EXECUTABLE)
         # Now search in default paths
-        find_program(HIP_HIPCONFIG_EXECUTABLE hipconfig)
-    endif()
-    if(NOT UNIX)
-        get_filename_component(HIPCONFIG_EXECUTABLE_EXT ${HIP_HIPCONFIG_EXECUTABLE} EXT)
-        if(NOT HIPCONFIG_EXECUTABLE_EXT STREQUAL ".bat")
-          set(HIP_HIPCONFIG_EXECUTABLE "${HIP_HIPCONFIG_EXECUTABLE}.bat")
-          set(HIP_HIPCC_EXECUTABLE "${HIP_HIPCC_EXECUTABLE}.bat")
-        endif()
+        find_program(HIP_HIPCONFIG_EXECUTABLE ${hipconfig})
     endif()
     mark_as_advanced(HIP_HIPCONFIG_EXECUTABLE)
     mark_as_advanced(HIP_HIPCC_EXECUTABLE)
@@ -704,22 +704,38 @@ macro(HIP_ADD_EXECUTABLE hip_target)
             if(DEFINED ENV{HIP_CLANG_PATH})
                 set(HIP_CLANG_PATH $ENV{HIP_CLANG_PATH})
             elseif(DEFINED ENV{ROCM_PATH})
-                set(HIP_CLANG_PATH "$ENV{ROCM_PATH}/llvm/bin")
-            elseif(DEFINED ENV{HIP_PATH})
-                if(EXISTS "$ENV{HIP_PATH}/llvm/bin") #file reorg backward compatibility
-                    set(HIP_CLANG_PATH "$ENV{HIP_PATH}/llvm/bin")
+                if(WIN32)
+                    set(HIP_CLANG_PATH "$ENV{ROCM_PATH}/bin")
                 else()
-                    set(HIP_CLANG_PATH "$ENV{HIP_PATH}/../llvm/bin")
+                    set(HIP_CLANG_PATH "$ENV{ROCM_PATH}/llvm/bin")
+                endif()
+            elseif(DEFINED ENV{HIP_PATH})
+                if(WIN32)
+                    set(HIP_CLANG_PATH "$ENV{HIP_PATH}/bin")
+                else()
+                    if(EXISTS "$ENV{HIP_PATH}/llvm/bin") #file reorg backward compatibility
+                        set(HIP_CLANG_PATH "$ENV{HIP_PATH}/llvm/bin")
+                    else()
+                        set(HIP_CLANG_PATH "$ENV{HIP_PATH}/../llvm/bin")
+                    endif()
                 endif()
             elseif(DEFINED HIP_PATH)
-                if(EXISTS "${HIP_PATH}/llvm/bin") #file reorg backward compatibility
-                    set(HIP_CLANG_PATH "${HIP_PATH}/llvm/bin")
+                if(WIN32)
+                    set(HIP_CLANG_PATH "${HIP_PATH}/bin")
                 else()
-                    set(HIP_CLANG_PATH "${HIP_PATH}/../llvm/bin")
+                    if(EXISTS "${HIP_PATH}/llvm/bin") #file reorg backward compatibility
+                        set(HIP_CLANG_PATH "${HIP_PATH}/llvm/bin")
+                    else()
+                        set(HIP_CLANG_PATH "${HIP_PATH}/../llvm/bin")
+                    endif()
                 endif()
             # Handle  the case where ROCM_PATH is defined and not set in ENV
             elseif(DEFINED ROCM_PATH)
-                set(HIP_CLANG_PATH "${ROCM_PATH}/llvm/bin")
+                if(WIN32)
+                    set(HIP_CLANG_PATH "${ROCM_PATH}/bin")
+                else()
+                    set(HIP_CLANG_PATH "${ROCM_PATH}/llvm/bin")
+                endif()
             else()
                 message(FATAL_ERROR "Unable to find the clang compiler path. Set ROCM_PATH or HIP_PATH in env")
             endif()
