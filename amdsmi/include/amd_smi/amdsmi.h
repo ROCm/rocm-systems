@@ -195,7 +195,8 @@ typedef enum {
 //! Year should follow the IP driver package version: 22.40/23.10 and similar
 #define AMDSMI_LIB_VERSION_YEAR 25  //!< To Be Deprecated
 
-//! Major version should be changed for every header change (adding/deleting APIs, changing names, fields of structures, etc.)
+//! Major version should be changed for every header change that breaks ABI
+//! Such as adding/deleting APIs, changing names, fields of structures, etc.
 #define AMDSMI_LIB_VERSION_MAJOR 25
 
 //! Minor version should be updated for each API change, but without changing headers
@@ -315,6 +316,7 @@ typedef enum {
     AMDSMI_STATUS_NO_SLOT = 33,             //!< No more free slot
     AMDSMI_STATUS_DRIVER_NOT_LOADED = 34,   //!< Processor driver not loaded
     // Data and size errors
+    AMDSMI_STATUS_MORE_DATA = 39,           //!< There is more data than the buffer size the user passed
     AMDSMI_STATUS_NO_DATA = 40,             //!< No data was found for a given input
     AMDSMI_STATUS_INSUFFICIENT_SIZE = 41,   //!< Not enough resources were available for the operation
     AMDSMI_STATUS_UNEXPECTED_SIZE = 42,     //!< An unexpected amount of data was read
@@ -333,7 +335,6 @@ typedef enum {
     AMDSMI_STATUS_AMDGPU_RESTART_ERR = 54,  //!< AMDGPU restart failed
     AMDSMI_STATUS_SETTING_UNAVAILABLE = 55, //!< Setting is not available
     AMDSMI_STATUS_CORRUPTED_EEPROM = 56,    //!< EEPROM is corrupted
-    AMDSMI_STATUS_MORE_DATA = 57,           //!< There is more data than the buffer size the user passed
     // General errors
     AMDSMI_STATUS_MAP_ERROR = 0xFFFFFFFE,     //!< The internal library error did not map to a status code
     AMDSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF, //!< An unknown error occurred
@@ -687,7 +688,7 @@ typedef union {
 /**
  * @brief Structure holds enumeration information
  *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ * @cond @tag{gpu_bm_linux} @tag{guest_windows} @tag{guest_1vf} @tag{guest_mvf} @endcond
  */
 typedef struct {
     uint32_t drm_render; // the render node under /sys/class/drm/renderD*
@@ -1409,6 +1410,11 @@ typedef enum  {
     CLK_LIMIT_MAX   //!< Clock values in MHz
 } amdsmi_clk_limit_type_t;
 
+/**
+ * @brief Cper sev
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
 typedef enum {
     AMDSMI_CPER_SEV_NON_FATAL_UNCORRECTED = 0,
     AMDSMI_CPER_SEV_FATAL                 = 1,
@@ -1417,6 +1423,11 @@ typedef enum {
     AMDSMI_CPER_SEV_UNUSED = 10,
 } amdsmi_cper_sev_t;
 
+/**
+ * @brief Cper notify
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
 typedef enum {
     AMDSMI_CPER_NOTIFY_TYPE_CMC = 0x450eBDD72DCE8BB1,
     AMDSMI_CPER_NOTIFY_TYPE_CPE = 0x4a55D8434E292F96,
@@ -1728,11 +1739,11 @@ typedef struct {
      * @brief v1.6 additions
      * The max uint32_t will be used if that information is N/A
      */
-    uint32_t gfx_busy_inst[AMDSMI_MAX_NUM_XCC];       //!< Utilization Instantaneous in %
-    uint16_t jpeg_busy[AMDSMI_MAX_NUM_JPEG_ENG_V1];   //!< Utilization Instantaneous in % (UPDATED: to 40 in v1.8)
-    uint16_t vcn_busy[AMDSMI_MAX_NUM_VCN];            //!< Utilization Instantaneous in %
+    uint32_t gfx_busy_inst[AMDSMI_MAX_NUM_XCC];      //!< Utilization Instantaneous in %
+    uint16_t jpeg_busy[AMDSMI_MAX_NUM_JPEG_ENG_V1];  //!< Utilization Instantaneous in % (UPDATED: to 40 in v1.8)
+    uint16_t vcn_busy[AMDSMI_MAX_NUM_VCN];           //!< Utilization Instantaneous in %
 
-    uint64_t gfx_busy_acc[AMDSMI_MAX_NUM_XCC];   //!< Utilization Accumulated in %
+    uint64_t gfx_busy_acc[AMDSMI_MAX_NUM_XCC];       //!< Utilization Accumulated in %
 
    /**
     * @brief v1.7 additions
@@ -2656,8 +2667,7 @@ amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_handle, unsigned in
  *
  *  @ingroup tagProcDiscovery
  *
- *  @platform{gpu_bm_linux} @platform{host} @platform{guest_1vf}  @platform{guest_mvf}
- *  @platform{guest_windows}
+ *  @platform{gpu_bm_linux} @platform{guest_1vf}  @platform{guest_mvf} @platform{guest_windows}
  *
  *  @details        This function returns Enumeration information of the corresponding
  *                  processor_handle. It will return the render number, card number,
@@ -3142,7 +3152,8 @@ amdsmi_get_energy_count(amdsmi_processor_handle processor_handle, uint64_t *ener
  *  @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
  *  If a processor has more than one sensor, it could be greater than 0.
  *
- *  @param[in] cap a uint64_t that indicates the desired power cap
+ *  @param[in] cap a uint64_t that indicates the desired power cap.
+ *  The @p cap value must be greater than 0.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
@@ -4689,8 +4700,13 @@ amdsmi_status_t amdsmi_get_gpu_ecc_enabled(amdsmi_processor_handle processor_han
 amdsmi_status_t
 amdsmi_get_gpu_total_ecc_count(amdsmi_processor_handle processor_handle, amdsmi_error_count_t *ec);
 
-
 #pragma pack(push, 1)
+
+/**
+ *  @brief Cper
+ *
+ *  @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
 typedef struct {
     unsigned char b[16];
 } amdsmi_cper_guid_t;
@@ -4722,7 +4738,7 @@ typedef struct {
     uint32_t              signature_end;     /* 0xFFFFFFFF */
     uint16_t              sec_cnt;
     amdsmi_cper_sev_t     error_severity;
-    amdsmi_cper_valid_bits_t cper_valid_bits; 
+    amdsmi_cper_valid_bits_t cper_valid_bits;
     uint32_t                record_length;     /* Total size of CPER Entry */
     amdsmi_cper_timestamp_t timestamp;
     char                    platform_id[16];
@@ -4734,8 +4750,9 @@ typedef struct {
     uint64_t              persistence_info; /* Reserved */
     uint8_t               reserved[12];     /* Reserved */
 } amdsmi_cper_hdr_t;
- 
+
 #pragma pack(pop)
+
 /**
  * @brief Retrieve CPER entries cached in the driver.
  *
@@ -4754,9 +4771,9 @@ typedef struct {
  * so that user can ignore that call.
  *
  *  @ingroup tagECCInfo
- * 
+ *
  *  @platform{gpu_bm_linux} @platform{host} @platform{guest_1vf}
- * 
+ *
  * @param[in] processor_handle Handle to the processor for which CPER entries are to be retrieved.
  * @param[in] severity_mask The severity mask of the entries to be retrieved.
  * @param[in,out] cper_data Pointer to a buffer where the CPER data will be stored. User must allocate the buffer
@@ -4772,7 +4789,6 @@ typedef struct {
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-
 amdsmi_status_t
 amdsmi_get_gpu_cper_entries(amdsmi_processor_handle processor_handle, uint32_t severity_mask, char *cper_data,
     uint64_t *buf_size, amdsmi_cper_hdr_t** cper_hdrs, uint64_t *entry_count, uint64_t *cursor);
@@ -5704,8 +5720,8 @@ amdsmi_set_gpu_memory_partition_mode(amdsmi_processor_handle processor_handle,
 
 /**
  *  @brief Version 2.0: Returns gpu accelerator partition caps as currently configured in the system
- *  User must use admin/sudo privledges to run this API, or API will not be able to
- *  read resources.
+ *  User must use admin/sudo privledges to run this API, or API will not be able to read resources.
+ *  Otherwise, API will fill in the structure with as much information as possible.
  *
  *  @ingroup tagAcceleratorPartition
  *
@@ -6123,7 +6139,7 @@ amdsmi_get_gpu_activity(amdsmi_processor_handle processor_handle, amdsmi_engine_
  *
  *  @ingroup tagGPUMonitor
  *
- *  @platform{gpu_bm_linux} @platform{host} @platform{guest_windows}
+ *  @platform{gpu_bm_linux} @platform{guest_windows}
  *
  *  @note amdsmi_power_info_t::socket_power metric can rarely spike above the socket power limit in some cases
  *
@@ -6888,6 +6904,8 @@ amdsmi_status_t amdsmi_get_cpu_current_io_bandwidth(amdsmi_processor_handle proc
 amdsmi_status_t amdsmi_get_cpu_current_xgmi_bw(amdsmi_processor_handle processor_handle,
                                                amdsmi_link_id_bw_type_t link, uint32_t *xgmi_bw);
 
+/** @} tagBandwidthMon*/
+
 /*****************************************************************************/
 /** @defgroup tagHSMPMetricsTable HSMP Metrics Table
  *  @{
@@ -6977,6 +6995,8 @@ amdsmi_status_t amdsmi_get_cpu_model(uint32_t *cpu_model);
  /**
  *  @brief Retrieve the CPU processor model name based on the processor index.
  *
+ *  @ingroup tagAuxillary
+ *
  *  @platform{cpu_bm}
  *
  *  @details
@@ -7017,12 +7037,13 @@ amdsmi_status_t amdsmi_get_cpu_model_name(amdsmi_processor_handle processor_hand
  */
 amdsmi_status_t amdsmi_get_esmi_err_msg(amdsmi_status_t status, const char **status_string);
 
-#endif
-
 /** @} tagAuxillary */
+
+#endif
 
 #ifdef __cplusplus
 }
 #endif  // __cplusplus
 
 #endif  // __AMDSMI_H__
+
