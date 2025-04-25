@@ -137,10 +137,10 @@ struct config : output_config
     std::string pc_sampling_method      = get_env("ROCPROF_PC_SAMPLING_METHOD", "none");
     std::string pc_sampling_unit        = get_env("ROCPROF_PC_SAMPLING_UNIT", "none");
     std::string extra_counters_contents = get_env("ROCPROF_EXTRA_COUNTERS_CONTENTS", "");
+    std::string att_capability          = get_env("ROCPROF_ATT_CAPABILITY", "trace");
 
-    std::unordered_set<size_t>         kernel_filter_range = {};
-    std::vector<std::set<std::string>> counters            = {};
-    std::string                        att_capability      = get_env("ROCPROF_ATT_CAPABILITY", "");
+    std::unordered_set<size_t>         kernel_filter_range    = {};
+    std::vector<std::set<std::string>> counters               = {};
     std::vector<att_perfcounter>       att_param_perfcounters = {};
 
     std::queue<CollectionPeriod> collection_periods = {};

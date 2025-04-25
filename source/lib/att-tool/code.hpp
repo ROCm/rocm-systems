@@ -24,7 +24,6 @@
 
 #include "att_lib_wrapper.hpp"
 
-#include <atomic>
 #include <map>
 #include <unordered_map>
 #include <vector>
@@ -39,12 +38,14 @@ struct CodeLine
 {
     using Instruction = rocprofiler::sdk::codeobj::disassembly::Instruction;
 
-    int line_number = 0;
-    int type        = 0;
-
-    std::atomic<size_t>          hitcount{0};
-    std::atomic<size_t>          latency{0};
+    int                          line_number{0};
+    int                          type{0};
     std::shared_ptr<Instruction> code_line{nullptr};
+
+    size_t hitcount{0};
+    size_t latency{0};
+    size_t stall{0};
+    size_t idle{0};
 };
 
 class CodeFile
@@ -53,11 +54,10 @@ class CodeFile
 
 public:
     CodeFile() = default;
-    CodeFile(const Fspath& dir, std::shared_ptr<AddressTable>& table);
+    CodeFile(Fspath dir, std::shared_ptr<AddressTable> table);
     ~CodeFile();
 
-    Fspath                                        dir{};
-    Fspath                                        filename{};
+    const Fspath                                  dir{};
     std::unordered_map<pcinfo_t, int>             line_numbers{};
     std::map<pcinfo_t, std::unique_ptr<CodeLine>> isa_map{};
     std::map<pcinfo_t, KernelName>                kernel_names{};

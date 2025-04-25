@@ -28,8 +28,6 @@ namespace rocprofiler
 {
 namespace att_wrapper
 {
-std::map<size_t, std::unique_ptr<WaitcntList>> WaitcntList::_cache;
-
 int64_t
 MemoryCounter::extract_waitcnt(const std::string& str) const
 {

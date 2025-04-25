@@ -28,7 +28,6 @@
 
 #include <cxxabi.h>
 #include <array>
-#include <atomic>
 #include <cstdint>
 #include <iostream>
 #include <map>

@@ -26,7 +26,6 @@
 #include "lib/att-tool/att_lib_wrapper.hpp"
 #include "lib/att-tool/code.hpp"
 
-#include <atomic>
 #include <map>
 #include <memory>
 #include <unordered_map>
@@ -47,25 +46,16 @@ struct WaitcntList
     using isa_map_t = std::map<pcinfo_t, std::unique_ptr<CodeLine>>;
     using wave_t    = att_wave_data_t;
 
-    WaitcntList() = default;
-
-    static const WaitcntList& Get(int gfxip, const wave_t& wave, isa_map_t& isa_map)
+    WaitcntList(int gfxip, const wave_t& wave, isa_map_t& isa_map)
     {
-        auto it = _cache.find(wave.traceID);
-        if(it != _cache.end()) return *it->second;
-
-        auto ptr = std::make_unique<WaitcntList>();
-
         if(gfxip == 9)
-            ptr->mem_unroll = gfx9_construct(wave, isa_map);
+            mem_unroll = gfx9_construct(wave, isa_map);
         else if(gfxip == 10 || gfxip == 11)
-            ptr->mem_unroll = gfx10_construct(wave, isa_map);
+            mem_unroll = gfx10_construct(wave, isa_map);
         else if(gfxip == 12)
-            ptr->mem_unroll = gfx12_construct(wave, isa_map);
+            mem_unroll = gfx12_construct(wave, isa_map);
         else
             throw std::runtime_error("Invalid gfxip: " + std::to_string(gfxip));
-
-        return *_cache.emplace(wave.traceID, std::move(ptr)).first->second;
     }
 
     static std::vector<LineWaitcnt> gfx9_construct(const wave_t& wave, isa_map_t& isa_map);
@@ -73,9 +63,6 @@ struct WaitcntList
     static std::vector<LineWaitcnt> gfx12_construct(const wave_t& wave, isa_map_t& isa_map);
 
     std::vector<LineWaitcnt> mem_unroll{};
-
-private:
-    static std::map<size_t, std::unique_ptr<WaitcntList>> _cache;
 };
 
 class MemoryCounter
@@ -97,6 +84,12 @@ public:
 
     std::optional<std::vector<int>> handle_mem_op(const std::string& inst,
                                                   std::vector<int>&  flat_list);
+
+    void clearTo(std::vector<int>& out)
+    {
+        out.insert(out.end(), list.begin(), list.end());
+        list.clear();
+    };
 
     const std::string name;
     Ordering          order = Ordering::MEMORY_SEQUENTIAL;
