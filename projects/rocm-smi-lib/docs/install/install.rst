@@ -37,7 +37,7 @@ To build the ROCm SMI library, the following components are required.
 
 The following software versions are what was used in development. Earlier versions are not guaranteed to work:
 
-* CMake (v3.5.0)
+* CMake (v3.14.0)
 * g++ (5.4.0)
 
 To build the latest documentation, the following are required:

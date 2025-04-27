@@ -134,6 +134,8 @@ typedef enum {
   RSMI_STATUS_AMDGPU_RESTART_ERR,        //!< Could not successfully restart
                                          //!< the amdgpu driver
   RSMI_STATUS_DRM_ERROR,                 //!< Error when call libdrm
+  RSMI_STATUS_FAIL_LOAD_MODULE,          //!< Fail to load lib
+  RSMI_STATUS_FAIL_LOAD_SYMBOL,          //!< Fail to load symbol
 
   RSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF,  //!< An unknown error occurred
 } rsmi_status_t;

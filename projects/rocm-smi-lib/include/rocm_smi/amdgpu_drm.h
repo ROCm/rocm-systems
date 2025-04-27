@@ -29,10 +29,15 @@
  *    Keith Whitwell <keith@tungstengraphics.com>
  */
 
-#ifndef __AMDGPU_DRM_H__
-#define __AMDGPU_DRM_H__
+#ifndef __LIBDRM_AMDGPU__
+#define __LIBDRM_AMDGPU__
+#include <libdrm/amdgpu.h>
+#endif
 
-#include "drm.h"
+#ifndef __LIBDRM__
+#define __LIBDRM__
+#include <libdrm/drm.h>
+#endif
 
 #if defined(__cplusplus)
 extern "C" {
@@ -1294,6 +1299,4 @@ struct drm_color_ctm_3x4 {
 
 #if defined(__cplusplus)
 }
-#endif
-
 #endif

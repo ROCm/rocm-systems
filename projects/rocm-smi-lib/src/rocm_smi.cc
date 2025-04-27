@@ -77,6 +77,7 @@
 #include "rocm_smi/rocm_smi_io_link.h"
 #include "rocm_smi/rocm_smi64Config.h"
 #include "rocm_smi/rocm_smi_logger.h"
+#include "rocm_smi/rocm_smi_lib_loader.h"
 
 using amd::smi::monitorTypesToString;
 using amd::smi::getRSMIStatusString;
@@ -2392,6 +2393,7 @@ rsmi_status_t rsmi_dev_market_name_get(uint32_t dv_ind, char *market_name, uint3
   GET_DEV_FROM_INDX
   dev->index();
   std::string render_file_name;
+  market_name[0] = '\0';
 
   const std::string regex("renderD([0-9]+)");
   const std::string renderD_folder = "/sys/class/drm/card"
@@ -2404,17 +2406,61 @@ rsmi_status_t rsmi_dev_market_name_get(uint32_t dv_ind, char *market_name, uint3
   if (render_name != "") {
     gpu_fd = open(drm_path.c_str(), O_RDWR | O_CLOEXEC);
   } else {
-    market_name[0] = '\0';
     return RSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  rsmi_status_t status = RSMI_STATUS_NOT_SUPPORTED;
+  amd::smi::ROCmSmiLibraryLoader libdrm_amdgpu_;
+  status = libdrm_amdgpu_.load("libdrm_amdgpu.so");
+  if (status != RSMI_STATUS_SUCCESS) {
+    close(gpu_fd);
+    libdrm_amdgpu_.ROCmSmiLibraryLoader::unload();
+    return status;
+  }
+
+  // Function pointer typedefs
+  typedef int (*amdgpu_device_initialize_t)(int fd, uint32_t *major_version,
+                                            uint32_t *minor_version,
+                                            amdgpu_device_handle *device_handle);
+  typedef int (*amdgpu_device_deinitialize_t)(amdgpu_device_handle device_handle);
+  typedef const char* (*amdgpu_get_marketing_name_t)(amdgpu_device_handle device_handle);
+  amdgpu_device_initialize_t amdgpu_device_initialize = nullptr;
+  amdgpu_device_deinitialize_t amdgpu_device_deinitialize = nullptr;
+  amdgpu_get_marketing_name_t amdgpu_get_marketing_name = nullptr;
+
+  status = libdrm_amdgpu_.load_symbol(
+                          reinterpret_cast<amdgpu_device_initialize_t *>(&amdgpu_device_initialize),
+                          "amdgpu_device_initialize");
+  if (status != RSMI_STATUS_SUCCESS) {
+    close(gpu_fd);
+    libdrm_amdgpu_.ROCmSmiLibraryLoader::unload();
+    return status;
   }
 
   amdgpu_device_handle device_handle = nullptr;
   uint32_t major_version, minor_version;
   int ret = amdgpu_device_initialize(gpu_fd, &major_version, &minor_version, &device_handle);
   if (ret != 0) {
-    market_name[0] = '\0';
     close(gpu_fd);
+    libdrm_amdgpu_.ROCmSmiLibraryLoader::unload();
     return RSMI_STATUS_DRM_ERROR;
+  }
+
+  status = libdrm_amdgpu_.load_symbol(
+                          reinterpret_cast<amdgpu_get_marketing_name_t *>(
+                            &amdgpu_get_marketing_name), "amdgpu_get_marketing_name");
+  if (status != RSMI_STATUS_SUCCESS) {
+    close(gpu_fd);
+    libdrm_amdgpu_.ROCmSmiLibraryLoader::unload();
+    return status;
+  }
+
+  status = libdrm_amdgpu_.load_symbol(reinterpret_cast<amdgpu_device_deinitialize_t *>(
+                                      &amdgpu_device_deinitialize), "amdgpu_device_deinitialize");
+  if (status != RSMI_STATUS_SUCCESS) {
+    close(gpu_fd);
+    libdrm_amdgpu_.ROCmSmiLibraryLoader::unload();
+    return status;
   }
 
   // Get the marketing name using libdrm's API
@@ -2427,6 +2473,7 @@ rsmi_status_t rsmi_dev_market_name_get(uint32_t dv_ind, char *market_name, uint3
     market_name[std::min(len - 1, ln)] = '\0';
     amdgpu_device_deinitialize(device_handle);
     close(gpu_fd);
+    libdrm_amdgpu_.ROCmSmiLibraryLoader::unload();
     if (len < (temp_market_name.size() + 1)) {
       return RSMI_STATUS_INSUFFICIENT_SIZE;
     }
@@ -2434,6 +2481,7 @@ rsmi_status_t rsmi_dev_market_name_get(uint32_t dv_ind, char *market_name, uint3
   }
   amdgpu_device_deinitialize(device_handle);
   close(gpu_fd);
+  libdrm_amdgpu_.ROCmSmiLibraryLoader::unload();
   return RSMI_STATUS_DRM_ERROR;
 }
 
@@ -3963,11 +4011,47 @@ rsmi_dev_unique_id_get(uint32_t dv_ind, uint64_t *unique_id) {
   CHK_SUPPORT_NAME_ONLY(unique_id)
 
   DEVICE_MUTEX
+  if (unique_id == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  *unique_id = std::numeric_limits<uint64_t>::max();
   ret = get_dev_value_int(amd::smi::kDevUniqueId, dv_ind, unique_id);
+
+  ss << __PRETTY_FUNCTION__
+     << (ret == RSMI_STATUS_SUCCESS ?
+      " | No fall back needed retrieved from KGD" : " | fall back needed")
+     << " | Device #: " << std::to_string(dv_ind)
+     << " | Data: unique_id = " << std::to_string(*unique_id)
+     << " | ret = " << getRSMIStatusString(ret, false);
+  LOG_DEBUG(ss);
+  // If the unique ID is not supported, use KFD's unique ID
+  if (ret != RSMI_STATUS_SUCCESS) {
+    GET_DEV_AND_KFDNODE_FROM_INDX
+    uint32_t node_id;
+    uint64_t kfd_unique_id;
+    int ret_kfd = kfd_node->get_node_id(&node_id);
+    ret_kfd = amd::smi::read_node_properties(node_id, "unique_id", &kfd_unique_id);
+    if (ret_kfd == 0) {
+      *unique_id = kfd_unique_id;
+      ret = RSMI_STATUS_SUCCESS;
+    } else {
+      *unique_id = std::numeric_limits<uint64_t>::max();
+      ret = RSMI_STATUS_NOT_SUPPORTED;
+    }
+    ss << __PRETTY_FUNCTION__
+       << " | Issue: Could not read unique_id from sysfs, falling back to KFD" << "\n"
+       << " ; Device #: " << std::to_string(dv_ind) << "\n"
+       << " ; ret_kfd: " << std::to_string(ret_kfd) << "\n"
+       << " ; node: " << std::to_string(node_id) << "\n"
+       << " ; Data: unique_id (from KFD)= " << std::to_string(*unique_id) << "\n"
+       << " ; ret = " << getRSMIStatusString(ret, false);
+    LOG_DEBUG(ss);
+  }
   return ret;
 
   CATCH
 }
+
 rsmi_status_t
 rsmi_dev_counter_create(uint32_t dv_ind, rsmi_event_type_t type,
                                            rsmi_event_handle_t *evnt_handle) {

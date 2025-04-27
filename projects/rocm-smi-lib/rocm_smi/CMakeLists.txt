@@ -81,7 +81,7 @@ add_executable(${SMI_EXAMPLE_EXE} "example/rocm_smi_example.cc")
 target_link_libraries(${SMI_EXAMPLE_EXE} ${ROCM_SMI_TARGET})
 add_library(${ROCM_SMI_TARGET}  ${CMN_SRC_LIST} ${SMI_SRC_LIST}
                                               ${CMN_INC_LIST} ${SMI_INC_LIST})
-target_link_libraries(${ROCM_SMI_TARGET} pthread rt dl ${DRM_LIBRARIES} ${AMDGPU_DRM_LIBRARIES})
+target_link_libraries(${ROCM_SMI_TARGET} PRIVATE pthread rt dl)
 target_include_directories(${ROCM_SMI_TARGET} PRIVATE
           ${CMAKE_CURRENT_SOURCE_DIR} ${COMMON_PROJ_ROOT}/common/shared_mutex)
 
