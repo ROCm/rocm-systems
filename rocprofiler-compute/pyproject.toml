@@ -71,4 +71,6 @@ markers = [
 	"kernel_verbose",
 	"serial",
 	"L1_cache",
+	"num_xcds_spec_class",
+	"num_xcds_cli_output",
 ]

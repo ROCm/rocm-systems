@@ -38,8 +38,14 @@ from pathlib import Path as path
 import pandas as pd
 
 import config
-from utils.logger import console_debug, console_error, console_log, console_warning
-from utils.mi_gpu_spec import get_chip_id_dict, get_gpu_series_dict, get_num_xcds
+from utils.logger import (
+    console_debug,
+    console_error,
+    console_log,
+    console_warning,
+    demarcate,
+)
+from utils.mi_gpu_spec import mi_gpu_specs
 from utils.tty import get_table_string
 from utils.utils import get_version
 
@@ -59,12 +65,12 @@ def detect_arch(_rocminfo):
     for idx1, linetext in enumerate(_rocminfo):
         # NOTE: currently supported socs are gfx archs only
         gpu_arch = search(r"^\s*Name\s*:\s* ([Gg][Ff][Xx][a-zA-Z0-9]+).*\s*$", linetext)
-        if gpu_arch in get_gpu_series_dict().keys():
+        if gpu_arch in mi_gpu_specs.get_gpu_series_dict().keys():
             break
-        if str(gpu_arch) in get_gpu_series_dict().keys():
+        if str(gpu_arch) in mi_gpu_specs.get_gpu_series_dict().keys():
             gpu_arch = str(gpu_arch)
             break
-    if not gpu_arch in get_gpu_series_dict().keys():
+    if not gpu_arch in mi_gpu_specs.get_gpu_series_dict().keys():
         console_error("Cannot find a supported arch in rocminfo: " + str(gpu_arch))
     else:
         return (gpu_arch, idx1)
@@ -83,8 +89,8 @@ def detect_gpu_chip_id(_rocminfo):
     if not gpu_chip_id:
         console_warning("No Chip ID detected: " + str(gpu_chip_id))
     elif (
-        gpu_chip_id not in get_chip_id_dict().keys()
-        and int(gpu_chip_id) not in get_chip_id_dict().keys()
+        gpu_chip_id not in mi_gpu_specs.get_chip_id_dict().keys()
+        and int(gpu_chip_id) not in mi_gpu_specs.get_chip_id_dict().keys()
     ):
         console_warning("Unknown Chip ID detected: " + str(gpu_chip_id))
     return gpu_chip_id
@@ -534,9 +540,7 @@ class MachineSpecs:
     def get_hbm_channels(self):
         if self.memory_partition.lower().startswith("nps"):
             hbmchannels = 128
-            if self.memory_partition.lower() == "nps2":
-                hbmchannels /= 2
-            elif self.memory_partition.lower() == "nps4":
+            if self.memory_partition.lower() == "nps4":
                 hbmchannels /= 4
             elif self.memory_partition.lower() == "nps8":
                 hbmchannels /= 8
@@ -670,7 +674,7 @@ def total_sqc(archname, numCUs, numSEs):
 
 
 def total_l2_banks(archname, L2Banks, compute_partition):
-    xcds = get_num_xcds(archname, compute_partition)
+    xcds = mi_gpu_specs.get_num_xcds(archname, compute_partition)
     totalL2Banks = L2Banks * xcds
     return totalL2Banks
 
