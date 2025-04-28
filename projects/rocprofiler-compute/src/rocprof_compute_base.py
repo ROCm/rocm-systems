@@ -47,7 +47,7 @@ from utils.logger import (
     setup_file_handler,
     setup_logging_priority,
 )
-from utils.mi_gpu_spec import get_gpu_series_dict, parse_mi_gpu_spec
+from utils.mi_gpu_spec import mi_gpu_specs
 from utils.specs import MachineSpecs, generate_machine_specs
 from utils.utils import (
     detect_rocprof,
@@ -72,8 +72,7 @@ class RocProfCompute:
             "ver_pretty": None,
         }
         self.__options = {}
-        parse_mi_gpu_spec()
-        self.__supported_archs = get_gpu_series_dict()
+        self.__supported_archs = mi_gpu_specs.get_gpu_series_dict()
         self.__mspec: MachineSpecs = None  # to be initalized in load_soc_specs()
         setup_console_handler()
         self.set_version()

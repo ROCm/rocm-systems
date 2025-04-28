@@ -42,7 +42,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.mi_gpu_spec import get_gpu_model, get_gpu_series, get_num_xcds
+from utils.mi_gpu_spec import mi_gpu_specs
 from utils.parser import build_in_vars, supported_denom
 from utils.utils import (
     capture_subprocess_output,
@@ -104,7 +104,6 @@ class OmniSoC_Base:
     def get_compatible_profilers(self):
         return self.__compatible_profilers
 
-    @demarcate
     def populate_mspec(self):
         from utils.specs import run, search, total_sqc
 
@@ -181,13 +180,15 @@ class OmniSoC_Base:
         self._mspec.cur_sclk = self._mspec.max_sclk
         self._mspec.cur_mclk = self._mspec.max_mclk
 
-        self._mspec.gpu_series = get_gpu_series(self._mspec.gpu_arch)
+        self._mspec.gpu_series = mi_gpu_specs.get_gpu_series(self._mspec.gpu_arch)
         # specify gpu model name for gfx942 hardware
-        self._mspec.gpu_model = get_gpu_model(
+        self._mspec.gpu_model = mi_gpu_specs.get_gpu_model(
             self._mspec.gpu_arch, self._mspec.gpu_chip_id
         )
         self._mspec.num_xcd = str(
-            get_num_xcds(self._mspec.gpu_model, self._mspec.compute_partition)
+            mi_gpu_specs.get_num_xcds(
+                self._mspec.gpu_model, self._mspec.compute_partition
+            )
         )
 
     @demarcate
