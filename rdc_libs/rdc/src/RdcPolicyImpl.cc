@@ -82,7 +82,7 @@ rdc_status_t RdcPolicyImpl::rdc_policy_set(rdc_gpu_group_t group_id, rdc_policy_
       gpu_index = group_info.entity_ids[i];
 
       status = metric_fetcher_->fetch_smi_field(gpu_index, RDC_FI_GPU_PAGE_RETRIED, &value);
-      if (status == RDC_ST_MSI_ERROR) return RDC_ST_NOT_SUPPORTED;
+      if (status == RDC_ST_SMI_ERROR) return RDC_ST_NOT_SUPPORTED;
     }
   }
 

@@ -44,8 +44,7 @@ void RdcConfigSettingsImpl::monitorSettings() {
   rdc_status_t rdc_status;
   rdc_group_info_t rdc_group_info = {};
   amdsmi_power_cap_info_t cap_info = {};
-  amdsmi_dev_perf_level_t perf_info = {};
-  uint32_t od;
+  amdsmi_frequencies_t freqs = {};
   uint64_t cached_value;
 
   while (true) {
@@ -103,19 +102,18 @@ void RdcConfigSettingsImpl::monitorSettings() {
           }
 
           // Mem clock
-          status = amdsmi_get_gpu_overdrive_level(processor_handle, &od);
+          status = amdsmi_get_clk_freq(processor_handle, AMDSMI_CLK_TYPE_MEM, &freqs);
           if (status != AMDSMI_STATUS_SUCCESS) {
             RDC_LOG(
                 RDC_ERROR,
-                "RdcConfigSettingsImpl::monitorSettings(); amdsmi_get_gpu_overdrive_level failed: "
-                    << status);
+                "RdcConfigSettingsImpl::monitorSettings(); amdsmi_get_clk_freq failed: " << status);
             continue;
           }
 
           auto mem_clk_it = cached_settings.find(RDC_CFG_MEMORY_CLOCK_LIMIT);
           if (mem_clk_it != cached_settings.end()) {
             cached_value = mem_clk_it->second.target_value;
-            if (od == cached_value) {
+            if (freqs.frequency[freqs.current] == cached_value) {
               status = amdsmi_set_gpu_clk_limit(processor_handle, AMDSMI_CLK_TYPE_MEM,
                                                 CLK_LIMIT_MAX, cached_value);
               if (status != AMDSMI_STATUS_SUCCESS) {
@@ -129,18 +127,18 @@ void RdcConfigSettingsImpl::monitorSettings() {
           }
 
           // GFX clock
-          status = amdsmi_get_gpu_perf_level(processor_handle, &perf_info);
+          status = amdsmi_get_clk_freq(processor_handle, AMDSMI_CLK_TYPE_GFX, &freqs);
           if (status != AMDSMI_STATUS_SUCCESS) {
-            RDC_LOG(RDC_ERROR,
-                    "RdcConfigSettingsImpl::monitorSettings(); amdsmi_get_gpu_perf_level failed: "
-                        << status);
+            RDC_LOG(
+                RDC_ERROR,
+                "RdcConfigSettingsImpl::monitorSettings(); amdsmi_get_clk_freq failed: " << status);
             continue;
           }
 
           auto gfx_clk_it = cached_settings.find(RDC_CFG_GFX_CLOCK_LIMIT);
           if (gfx_clk_it != cached_settings.end()) {
             cached_value = gfx_clk_it->second.target_value;
-            if (od == cached_value) {
+            if (freqs.frequency[freqs.current] == cached_value) {
               status = amdsmi_set_gpu_clk_limit(processor_handle, AMDSMI_CLK_TYPE_GFX,
                                                 CLK_LIMIT_MAX, cached_value);
               if (status != AMDSMI_STATUS_SUCCESS) {
@@ -313,31 +311,40 @@ rdc_status_t RdcConfigSettingsImpl::rdc_config_clear(rdc_gpu_group_t group_id) {
 
     // Reset GFX clock limit if it was set
     if (group_iter->second.find(RDC_CFG_GFX_CLOCK_LIMIT) != group_iter->second.end()) {
-      amdsmi_dev_perf_level_t perf_info = {};
-      amd_ret = amdsmi_get_gpu_perf_level(processor_handle, &perf_info);
-      if (amd_ret == AMDSMI_STATUS_SUCCESS && perf_info != AMDSMI_DEV_PERF_LEVEL_AUTO) {
-        amd_ret = amdsmi_set_gpu_clk_limit(processor_handle, AMDSMI_CLK_TYPE_GFX, CLK_LIMIT_MAX,
-                                           AMDSMI_DEV_PERF_LEVEL_AUTO);
-        if (amd_ret != AMDSMI_STATUS_SUCCESS) {
-          RDC_LOG(RDC_ERROR,
-                  "RdcConfigSettingsImpl::rdc_config_clear: Failed to reset GFX clock limit : "
-                      << amd_ret);
-          break;
+      amdsmi_frequencies_t freqs = {};
+      amd_ret = amdsmi_get_clk_freq(processor_handle, AMDSMI_CLK_TYPE_GFX, &freqs);
+      if (amd_ret == AMDSMI_STATUS_SUCCESS) {
+        uint64_t curr = freqs.frequency[freqs.current];
+        uint64_t maxf = freqs.frequency[freqs.num_supported - 1];
+        if (curr != maxf) {
+          amd_ret = amdsmi_set_gpu_clk_limit(processor_handle, AMDSMI_CLK_TYPE_GFX, CLK_LIMIT_MAX,
+                                             AMDSMI_DEV_PERF_LEVEL_AUTO);
+          if (amd_ret != AMDSMI_STATUS_SUCCESS) {
+            RDC_LOG(RDC_ERROR,
+                    "RdcConfigSettingsImpl::rdc_config_clear: Failed to reset GFX clock limit : "
+                        << amd_ret);
+            break;
+          }
         }
       }
     }
 
     // Reset memory clock limit if it was set
     if (group_iter->second.find(RDC_CFG_MEMORY_CLOCK_LIMIT) != group_iter->second.end()) {
-      uint32_t od = 0;
-      amd_ret = amdsmi_get_gpu_overdrive_level(processor_handle, &od);
-      if (amd_ret == AMDSMI_STATUS_SUCCESS && od != 0) {
-        amd_ret = amdsmi_set_gpu_clk_limit(processor_handle, AMDSMI_CLK_TYPE_MEM, CLK_LIMIT_MAX, 0);
-        if (amd_ret != AMDSMI_STATUS_SUCCESS) {
-          RDC_LOG(RDC_ERROR,
-                  "RdcConfigSettingsImpl::rdc_config_clear: Failed to reset memory clock limit:"
-                      << amd_ret);
-          break;
+      amdsmi_frequencies_t freqs = {};
+      amd_ret = amdsmi_get_clk_freq(processor_handle, AMDSMI_CLK_TYPE_MEM, &freqs);
+      if (amd_ret == AMDSMI_STATUS_SUCCESS) {
+        uint64_t curr = freqs.frequency[freqs.current];
+        uint64_t maxf = freqs.frequency[freqs.num_supported - 1];
+        if (curr != maxf) {
+          amd_ret =
+              amdsmi_set_gpu_clk_limit(processor_handle, AMDSMI_CLK_TYPE_MEM, CLK_LIMIT_MAX, 0);
+          if (amd_ret != AMDSMI_STATUS_SUCCESS) {
+            RDC_LOG(RDC_ERROR,
+                    "RdcConfigSettingsImpl::rdc_config_clear: Failed to reset memory clock limit:"
+                        << amd_ret);
+            break;
+          }
         }
       }
     }

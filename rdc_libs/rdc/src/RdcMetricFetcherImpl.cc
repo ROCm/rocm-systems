@@ -1125,7 +1125,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
                                 << value->value.str << ", latency " << latency);
   }
 
-  return value->status == AMDSMI_STATUS_SUCCESS ? RDC_ST_OK : RDC_ST_MSI_ERROR;
+  return value->status == AMDSMI_STATUS_SUCCESS ? RDC_ST_OK : RDC_ST_SMI_ERROR;
 }
 
 std::shared_ptr<FieldSMIData> RdcMetricFetcherImpl::get_smi_data(RdcFieldKey key) {
