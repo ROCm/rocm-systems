@@ -1,10 +1,5 @@
 #!/bin/bash
 
-do_updatepciids() {
-  update-pciids >/dev/null 2>&1 || true
-  return
-}
-
 do_configureLogrotate() {
   local IS_SYSTEMD=0
   local packageName="amd-smi-lib"
@@ -199,7 +194,6 @@ case "$1" in
   ( configure )
     do_install_amdsmi_python_lib
     do_ldconfig
-    do_updatepciids
     do_configureLogrotate || exit 0
   ;;
   ( abort-upgrade | abort-remove | abort-deconfigure )
