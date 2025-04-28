@@ -1076,10 +1076,6 @@ class AMDSMIParser(argparse.ArgumentParser):
 
 
     def _add_topology_parser(self, subparsers: argparse._SubParsersAction, func):
-        if not(self.helpers.is_baremetal() and self.helpers.is_linux()):
-            # This subparser is only applicable to Baremetal Linux
-            return
-
         if not self.helpers.is_amdgpu_initialized():
             # The topology subcommand is only applicable to systems with amdgpu initialized
             return
@@ -1107,6 +1103,10 @@ class AMDSMIParser(argparse.ArgumentParser):
         topology_parser.formatter_class=lambda prog: AMDSMISubparserHelpFormatter(prog)
         topology_parser.set_defaults(func=func)
 
+        # Add Universal Arguments
+        self._add_command_modifiers(topology_parser)
+        self._add_device_arguments(topology_parser, required=False)
+
         # Optional Args
         topology_parser.add_argument('-a', '--access', action='store_true', required=False, help=access_help)
         topology_parser.add_argument('-w', '--weight', action='store_true', required=False, help=weight_help)
@@ -1117,10 +1117,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         topology_parser.add_argument('-n', '--atomics', action='store_true', required=False, help=atomics_help)
         topology_parser.add_argument('-d', '--dma', action='store_true', required=False, help=dma_help)
         topology_parser.add_argument('-z', '--bi-dir', action='store_true', required=False, help=bi_dir_help)
-
-        # Add Universal Arguments
-        self._add_device_arguments(topology_parser, required=False)
-        self._add_command_modifiers(topology_parser)
 
 
     def _add_set_value_parser(self, subparsers: argparse._SubParsersAction, func):
