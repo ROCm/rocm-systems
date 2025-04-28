@@ -1354,43 +1354,43 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
     amdsmi_status_t status;
     amd::smi::AMDSmiSystem::getInstance().init_drm();
     // removing drm check for now due to drm issues
-    // if (gpu_device->check_if_drm_is_supported()) {
-    //     status = gpu_device->amdgpu_query_info(AMDGPU_INFO_DEV_INFO,
-    //         sizeof(struct drm_amdgpu_info_device), &dev_info);
-    //     ss << __PRETTY_FUNCTION__
-    //     << " | amdgpu_query_info(): "
-    //     << smi_amdgpu_get_status_string(status, true);
-    //     LOG_INFO(ss);
-    //     if (status != AMDSMI_STATUS_SUCCESS) {
-    //         amd::smi::AMDSmiSystem::getInstance().clean_up_drm();
-    //         return status;
-    //     }
-    //     SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
-    //     status = smi_amdgpu_get_market_name_from_dev_id(gpu_device, info->market_name);
-    //     if (status != AMDSMI_STATUS_SUCCESS) {
-    //         rsmi_wrapper(rsmi_dev_brand_get, processor_handle, 0,
-    //                      info->market_name, AMDSMI_256_LENGTH);
-    //     }
+    if (gpu_device->check_if_drm_is_supported()) {
+        status = gpu_device->amdgpu_query_info(AMDGPU_INFO_DEV_INFO,
+            sizeof(struct drm_amdgpu_info_device), &dev_info);
+        ss << __PRETTY_FUNCTION__
+        << " | amdgpu_query_info(): "
+        << smi_amdgpu_get_status_string(status, true);
+        LOG_INFO(ss);
+        if (status != AMDSMI_STATUS_SUCCESS) {
+            amd::smi::AMDSmiSystem::getInstance().clean_up_drm();
+            return status;
+        }
+        SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
+        status = smi_amdgpu_get_market_name_from_dev_id(gpu_device, info->market_name);
+        if (status != AMDSMI_STATUS_SUCCESS) {
+            rsmi_wrapper(rsmi_dev_brand_get, processor_handle, 0,
+                         info->market_name, AMDSMI_256_LENGTH);
+        }
 
-    //     info->device_id = dev_info.device_id;
-    //     info->rev_id = dev_info.pci_rev;
-    //     info->vendor_id = gpu_device->get_vendor_id();
-    // } else {
+        // info->device_id = dev_info.device_id;
+        // info->rev_id = dev_info.pci_rev;
+        // info->vendor_id = gpu_device->get_vendor_id();
+    }
+    else {
+        status = rsmi_wrapper(rsmi_dev_brand_get, processor_handle, 0,
+            info->market_name, AMDSMI_256_LENGTH);
+    }
     uint16_t device_id = std::numeric_limits<uint16_t>::max();
     status = rsmi_wrapper(rsmi_dev_id_get, processor_handle, 0, &device_id);
-    info->device_id = static_cast<uint64_t>(device_id);
+    if (status == AMDSMI_STATUS_SUCCESS) info->device_id = static_cast<uint64_t>(device_id);
 
     uint16_t rev_id = std::numeric_limits<uint16_t>::max();
     status = rsmi_wrapper(rsmi_dev_revision_get, processor_handle, 0, &rev_id);
-    info->rev_id = static_cast<uint32_t>(rev_id);
-
-    status = rsmi_wrapper(rsmi_dev_brand_get, processor_handle, 0,
-            info->market_name, AMDSMI_256_LENGTH);
+    if (status == AMDSMI_STATUS_SUCCESS) info->rev_id = static_cast<uint32_t>(rev_id);
 
     status = rsmi_wrapper(rsmi_dev_vendor_id_get, processor_handle, 0,
                             &vendor_id);
     if (status == AMDSMI_STATUS_SUCCESS) info->vendor_id = vendor_id;
-    // }
     // For other sysfs related information, get from rocm-smi
 
     // Ensure asic_serial defaults to an unsupported value
