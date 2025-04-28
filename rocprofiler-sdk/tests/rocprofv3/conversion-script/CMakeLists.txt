@@ -24,7 +24,7 @@
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
 project(
-    rocprofiler-sdk-tests-conversion-script
+    rocprofiler-sdk-tests-rocprofv3-conversion-script
     LANGUAGES CXX
     VERSION 0.0.0)
 
@@ -34,7 +34,7 @@ rocprofiler_configure_pytest_files(COPY validate.py input.txt conftest.py
                                    CONFIG pytest.ini)
 
 add_test(
-    NAME test-conversion-script-execute
+    NAME rocprofv3-test-conversion-script-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
         ${CMAKE_CURRENT_BINARY_DIR}/input.txt -T -d
@@ -47,15 +47,15 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 set(cc-env-pmc "${PRELOAD_ENV}")
 
 set_tests_properties(
-    test-conversion-script-execute
+    rocprofv3-test-conversion-script-execute
     PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT "${cc-env-pmc}"
                FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
-set(convert_tests test-conversion-script-convert-no-agent-prefix
-                  test-conversion-script-convert-agent-prefix)
+set(convert_tests rocprofv3-test-conversion-script-convert-no-agent-prefix
+                  rocprofv3-test-conversion-script-convert-agent-prefix)
 
-set(validate_tests test-conversion-script-validate-no-agent-prefix
-                   test-conversion-script-validate-agent-prefix)
+set(validate_tests rocprofv3-test-conversion-script-validate-no-agent-prefix
+                   rocprofv3-test-conversion-script-validate-agent-prefix)
 
 set(output_dir ${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script_no_agent_prefix
                ${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script_agent_prefix)
@@ -100,7 +100,7 @@ foreach(i RANGE 0 ${convert_test_length})
     set_tests_properties(
         ${test_name}
         PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
-                   test-conversion-script-execute FAIL_REGULAR_EXPRESSION
+                   rocprofv3-test-conversion-script-execute FAIL_REGULAR_EXPRESSION
                    "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
     set_tests_properties(
         ${validate_test_name}
