@@ -547,8 +547,8 @@ TEST(evaulate_ast, evaulate_hybrid_counters)
 
     std::unordered_map<std::string, Metric> metrics = {
         {"VOORHEES", Metric("gfx9", "VOORHEES", "a", "a", "a", "", "", 0)},
-        {"KRUEGER", Metric("gfx9", "KRUEGER", "a", "a", "a", "", "", 1)},
-        {"MYERS", Metric("gfx9", "MYERS", "a", "a", "a", "", "", 2)},
+        {"KRUEGER", Metric("gfx9", "KRUEGER", "SQ", "a", "a", "", "", 1)},
+        {"MYERS", Metric("gfx9", "MYERS", "SQ", "a", "a", "", "", 2)},
         {"BATES", Metric("gfx9", "BATES", "a", "a", "a", "accumulate(VOORHEES,NONE)", "", 3)},
         {"KRAMER", Metric("gfx9", "KRAMER", "a", "a", "a", "accumulate(KRUEGER,LOW_RES)", "", 4)},
         {"TORRANCE",
@@ -563,7 +563,7 @@ TEST(evaulate_ast, evaulate_hybrid_counters)
     for(const auto& [val, metric] : metrics)
     {
         RawAST* ast = nullptr;
-        auto    buf = yy_scan_string(metric.expression().empty() ? metric.name().c_str()
+        auto*   buf = yy_scan_string(metric.expression().empty() ? metric.name().c_str()
                                                                  : metric.expression().c_str());
         yyparse(&ast);
         ASSERT_TRUE(ast) << metric.expression() << " " << metric.name();
