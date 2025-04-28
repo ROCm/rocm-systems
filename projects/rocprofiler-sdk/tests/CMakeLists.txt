@@ -77,7 +77,6 @@ add_subdirectory(counter-collection)
 add_subdirectory(openmp-tools)
 add_subdirectory(rocdecode)
 add_subdirectory(rocjpeg)
-add_subdirectory(conversion-script)
 
 # rocprofv3 validation tests
 add_subdirectory(rocprofv3)
