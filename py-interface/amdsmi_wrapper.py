@@ -2642,6 +2642,9 @@ amdsmi_cper_hdr_t = struct_amdsmi_cper_hdr_t
 amdsmi_get_gpu_cper_entries = _libraries['libamd_smi.so'].amdsmi_get_gpu_cper_entries
 amdsmi_get_gpu_cper_entries.restype = amdsmi_status_t
 amdsmi_get_gpu_cper_entries.argtypes = [amdsmi_processor_handle, uint32_t, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.POINTER(struct_amdsmi_cper_hdr_t)), ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_uint64)]
+amdsmi_get_afids_from_cper = _libraries['libamd_smi.so'].amdsmi_get_afids_from_cper
+amdsmi_get_afids_from_cper.restype = amdsmi_status_t
+amdsmi_get_afids_from_cper.argtypes = [ctypes.POINTER(ctypes.c_char), uint32_t, ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_uint32)]
 amdsmi_get_gpu_ecc_status = _libraries['libamd_smi.so'].amdsmi_get_gpu_ecc_status
 amdsmi_get_gpu_ecc_status.restype = amdsmi_status_t
 amdsmi_get_gpu_ecc_status.argtypes = [amdsmi_processor_handle, amdsmi_gpu_block_t, ctypes.POINTER(amdsmi_ras_err_state_t)]
@@ -3171,9 +3174,9 @@ __all__ = \
     'amdsmi_free_name_value_pairs', 'amdsmi_freq_ind_t',
     'amdsmi_freq_volt_region_t', 'amdsmi_frequencies_t',
     'amdsmi_frequency_range_t', 'amdsmi_fw_block_t',
-    'amdsmi_fw_info_t', 'amdsmi_get_clk_freq',
-    'amdsmi_get_clock_info', 'amdsmi_get_cpu_cclk_limit',
-    'amdsmi_get_cpu_core_boostlimit',
+    'amdsmi_fw_info_t', 'amdsmi_get_afids_from_cper',
+    'amdsmi_get_clk_freq', 'amdsmi_get_clock_info',
+    'amdsmi_get_cpu_cclk_limit', 'amdsmi_get_cpu_core_boostlimit',
     'amdsmi_get_cpu_core_current_freq_limit',
     'amdsmi_get_cpu_core_energy',
     'amdsmi_get_cpu_current_io_bandwidth',
