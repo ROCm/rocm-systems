@@ -14,6 +14,8 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
+- Fixed application hang when enabling the RCCL backend
+- Fixed GPU metric collection settings with ROCPROFSYS_AMD_SMI_METRICS.
 - Fixed an issue where enabling the RCCL backend caused the application to stop responding.
 
 ## ROCm Systems Profiler 1.0.0 for ROCm 6.4.1

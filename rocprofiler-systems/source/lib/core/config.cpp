@@ -623,7 +623,8 @@ configure_settings(bool _init)
 
     ROCPROFSYS_CONFIG_SETTING(std::string, "ROCPROFSYS_AMD_SMI_METRICS",
                               "amd-smi metrics to collect: busy, temp, power, "
-                              "vcn_activity, jpeg_activity, mem_usage",
+                              "vcn_activity, jpeg_activity, mem_usage."
+                              "An empty value implies 'all' and 'none' suppresses all.",
                               "busy, temp, power, mem_usage", "backend", "amd_smi",
                               "rocm", "process_sampling", "advanced");
 

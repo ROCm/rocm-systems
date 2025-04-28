@@ -541,34 +541,37 @@ setup()
     {
         for(auto itr : _devices)
         {
-            uint16_t dev_id = 0;
-            ROCPROFSYS_AMD_SMI_CALL(
-                amdsmi_get_gpu_id(gpu::get_handle_from_id(itr), &dev_id));
-            // dev_id holds the device ID of device i, upon a successful call
-
-            if(_metrics && !_metrics->empty())
+            // Enable selected metrics only
+            if((_metrics && !_metrics->empty()) && (*_metrics != "all"))
             {
                 using key_pair_t     = std::pair<std::string_view, bool&>;
                 const auto supported = std::unordered_map<std::string_view, bool&>{
-                    key_pair_t{ "busy", get_settings(dev_id).busy },
-                    key_pair_t{ "temp", get_settings(dev_id).temp },
-                    key_pair_t{ "power", get_settings(dev_id).power },
-                    key_pair_t{ "mem_usage", get_settings(dev_id).mem_usage },
-                    key_pair_t{ "vcn_activity", get_settings(dev_id).vcn_activity },
-                    key_pair_t{ "jpeg_activity", get_settings(dev_id).jpeg_activity },
+                    key_pair_t{ "busy", get_settings(itr).busy },
+                    key_pair_t{ "temp", get_settings(itr).temp },
+                    key_pair_t{ "power", get_settings(itr).power },
+                    key_pair_t{ "mem_usage", get_settings(itr).mem_usage },
+                    key_pair_t{ "vcn_activity", get_settings(itr).vcn_activity },
+                    key_pair_t{ "jpeg_activity", get_settings(itr).jpeg_activity },
                 };
 
-                get_settings(dev_id) = { false, false, false, false, false, false };
-                for(const auto& metric : tim::delimit(*_metrics, ",;:\t\n "))
-                {
-                    auto iitr = supported.find(metric);
-                    if(iitr == supported.end())
-                        ROCPROFSYS_FAIL_F("unsupported amd-smi metric: %s\n",
-                                          metric.c_str());
+                // Initialize all metrics to false
+                for(auto& it : supported)
+                    it.second = false;
 
-                    ROCPROFSYS_VERBOSE_F(1, "Enabling amd-smi metric '%s'\n",
-                                         metric.c_str());
-                    iitr->second = true;
+                // Parse list of metrics enabled by the user
+                if(*_metrics != "none")
+                {
+                    for(const auto& metric : tim::delimit(*_metrics, ",;:\t\n "))
+                    {
+                        auto iitr = supported.find(metric);
+                        if(iitr == supported.end())
+                            ROCPROFSYS_FAIL_F("unsupported amd-smi metric: %s\n",
+                                              metric.c_str());
+                        ROCPROFSYS_VERBOSE_F(
+                            1, "Enabling amd-smi metric '%s' on device [%u]\n",
+                            metric.c_str(), itr);
+                        iitr->second = true;
+                    }
                 }
             }
         }
