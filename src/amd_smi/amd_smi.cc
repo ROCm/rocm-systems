@@ -1931,6 +1931,8 @@ amdsmi_set_gpu_memory_partition(amdsmi_processor_handle processor_handle,
     } else if (it == nps_amdsmi_to_RSMI.end()) {
         return AMDSMI_STATUS_INVAL;
     }
+
+    amd::smi::AMDSmiSystem::getInstance().clean_up_drm();
     amdsmi_status_t ret = rsmi_wrapper(rsmi_dev_memory_partition_set, processor_handle, 0,
                                         rsmi_type);
 
