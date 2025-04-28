@@ -46,7 +46,8 @@ install(
 
 install(
     FILES ${PROJECT_SOURCE_DIR}/cmake/Modules/rocprofiler-sdk-custom-compilation.cmake
-    FILES ${PROJECT_SOURCE_DIR}/cmake/Modules/rocprofiler-sdk-utilities.cmake
+          ${PROJECT_SOURCE_DIR}/cmake/Modules/rocprofiler-sdk-utilities.cmake
+          ${PROJECT_SOURCE_DIR}/cmake/Modules/Findlibdw.cmake
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}/Modules
     COMPONENT development)
 
@@ -94,7 +95,8 @@ configure_file(
     ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}/${PACKAGE_NAME}-config-nolink-target.cmake
     COPYONLY)
 
-foreach(_FILE rocprofiler-sdk-custom-compilation.cmake rocprofiler-sdk-utilities.cmake)
+foreach(_FILE rocprofiler-sdk-custom-compilation.cmake rocprofiler-sdk-utilities.cmake
+              Findlibdw.cmake)
     configure_file(
         ${PROJECT_SOURCE_DIR}/cmake/Modules/${_FILE}
         ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}/Modules/${_FILE}
@@ -118,7 +120,7 @@ set(${PACKAGE_NAME}_BUILD_TREE
     ON
     CACHE BOOL "" FORCE)
 
-set(PROJECT_BUILD_TREE_TARGETS headers shared-library build-flags stack-protector)
+set(PROJECT_BUILD_TREE_TARGETS headers shared-library build-flags stack-protector dw)
 
 configure_file(
     ${PROJECT_SOURCE_DIR}/cmake/Templates/${PACKAGE_NAME}/build-config.cmake.in

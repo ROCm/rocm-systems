@@ -10,7 +10,8 @@ target_link_libraries(
     att-parser-tool-v3
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-att-parser
             rocprofiler-sdk::rocprofiler-sdk-json
-            rocprofiler-sdk::rocprofiler-sdk-common-library)
+            rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-dw)
 
 add_executable(att-decoder-test)
 target_sources(att-decoder-test PRIVATE att_decoder_test.cpp)
@@ -21,6 +22,7 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-common-library
             rocprofiler-sdk::rocprofiler-sdk-glog
             rocprofiler-sdk::rocprofiler-sdk-static-library
+            rocprofiler-sdk::rocprofiler-sdk-dw
             GTest::gtest
             GTest::gtest_main)
 

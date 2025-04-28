@@ -26,6 +26,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 
@@ -63,7 +64,8 @@ correlation_id::add_ref_count()
 {
     auto _ret = m_ref_count.fetch_add(1);
 
-    ROCP_FATAL_IF(_ret == 0) << "correlation id already retired";
+    ROCP_CI_LOG_IF(WARNING, _ret == 0)
+        << fmt::format("correlation id {} already retired", internal);
 
     return _ret;
 }
@@ -71,9 +73,19 @@ correlation_id::add_ref_count()
 uint32_t
 correlation_id::sub_ref_count()
 {
+    if(m_ref_count == 0)
+    {
+        ROCP_CI_LOG(WARNING) << fmt::format(
+            "attempt to decrement correlation id {} reference count but reference count is zero",
+            internal);
+        return 0;
+    }
+
     auto _ret = m_ref_count.fetch_sub(1);
 
-    ROCP_FATAL_IF(_ret == 0) << "correlation id underflow";
+    if(registration::get_fini_status() > 0) return 0;
+
+    ROCP_CI_LOG_IF(WARNING, _ret == 0) << fmt::format("correlation id underflow on {}", internal);
 
     if(_ret == 1)
     {
@@ -101,7 +113,8 @@ correlation_id::sub_ref_count()
                     ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT,
                     record);
 
-                ROCP_FATAL_IF(!success) << "failed to emplace correlation id retirement";
+                ROCP_CI_LOG_IF(WARNING, !success)
+                    << fmt::format("failed to emplace correlation id retirement for {}", internal);
             }
         }
     }

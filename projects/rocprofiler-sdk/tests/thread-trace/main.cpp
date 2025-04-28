@@ -63,7 +63,7 @@ public:
 };
 
 int
-main(int argc, char** argv)
+main(int /*argc*/, char** /*argv*/)
 {
     hipMemory src1(DATA_SIZE);
     hipMemory src2(DATA_SIZE);
