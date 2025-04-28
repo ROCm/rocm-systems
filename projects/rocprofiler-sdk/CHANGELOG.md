@@ -177,11 +177,11 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
     - type-relative == logical_node_type_id
 - Added MI300 stochastic (hardware-based) PC sampling support in ROCProfiler-SDK and ROCProfV3
 
-
 ### Changed
 
 - SDK no longer creates a background thread when every tool returns a nullptr from `rocprofiler_configure`.
 - Updated disassembly.hpp's vaddr-to-file-offset mapping to use the dedicated comgr API.
+- rocprofv3 shorthand argument for `--collection-period` is now `-P` (upper-case) as `-p` (lower-case) is reserved for later use
 
 ### Resolved issues
 
