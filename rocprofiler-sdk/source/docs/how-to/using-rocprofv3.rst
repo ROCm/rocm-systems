@@ -143,13 +143,13 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
      - | ``--kernel-include-regex`` REGULAR_EXPRESSION |br| |br| |br| |br|
        | ``--kernel-exclude-regex`` REGULAR_EXPRESSION |br| |br| |br| |br|
        | ``--kernel-iteration-range`` KERNEL_ITERATION_RANGE [KERNEL_ITERATION_RANGE ...] |br| |br|
-       | ``-p`` (START_DELAY_TIME):(COLLECTION_TIME):(REPEAT) [(START_DELAY_TIME):(COLLECTION_TIME):(REPEAT) ...] \| ``--collection-period`` (START_DELAY_TIME):(COLLECTION_TIME):(REPEAT) [(START_DELAY_TIME):(COLLECTION_TIME):(REPEAT) ...] |br| |br| |br| |br| |br| |br| |br| |br| |br| |br| |br| |br| |br| |br| |br|
+       | ``-P`` (START_DELAY_TIME):(COLLECTION_TIME):(REPEAT) [(START_DELAY_TIME):(COLLECTION_TIME):(REPEAT) ...] \| ``--collection-period`` (START_DELAY_TIME):(COLLECTION_TIME):(REPEAT) [(START_DELAY_TIME):(COLLECTION_TIME):(REPEAT) ...] |br| |br| |br| |br| |br| |br| |br| |br| |br| |br| |br| |br| |br| |br| |br|
        | ``--collection-period-unit`` {hour,min,sec,msec,usec,nsec}
      - | Filters counter-collection and thread-trace data to include the kernels matching the specified regular expression. Non-matching kernels are excluded. |br| |br|
        | Filters counter-collection and thread-trace data to exclude the kernels matching the specified regular expression. It is applied after ``--kernel-include-regex`` option. |br| |br|
        | Specifies iteration range for each kernel matching the filter [start-stop]. |br| |br| |br|
-       | START_DELAY_TIME\: Time in seconds before the data collection begins. |br| COLLECTION_TIME\: Duration of data collection in seconds. |br| REPEAT\: Number of times the data collection cycle is repeated. |br| The default unit for time is seconds, which can be changed using the ``--collection-period-unit`` or ``-pu`` option. To repeat the cycle indefinitely, specify ``repeat`` as 0. You can specify multiple configurations, each defined by a triplet in the format ``start_delay_time:collection_time:repeat``. For example, the command ``-p 10:10:1 5:3:0`` specifies two configurations, the first one with a start delay time of 10 seconds, a collection time of 10 seconds, and a repeat of 1 (the cycle repeats once), and the second with a start delay time of 5 seconds, a collection time of 3 seconds, and a repeat of 0 (the cycle repeats indefinitely). |br| |br| |br|
-       | To change the unit of time used in ``--collection-period`` or ``-p``, specify the desired unit using the ``--collection-period-unit`` or ``-pu`` option. The available units are ``hour`` for hours, ``min`` for minutes, ``sec`` for seconds, ``msec`` for milliseconds, ``usec`` for microseconds, and ``nsec`` for nanoseconds.
+       | START_DELAY_TIME\: Time in seconds before the data collection begins. |br| COLLECTION_TIME\: Duration of data collection in seconds. |br| REPEAT\: Number of times the data collection cycle is repeated. |br| The default unit for time is seconds, which can be changed using the ``--collection-period-unit`` option. To repeat the cycle indefinitely, specify ``repeat`` as 0. You can specify multiple configurations, each defined by a triplet in the format ``start_delay_time:collection_time:repeat``. For example, the command ``-P 10:10:1 5:3:0`` specifies two configurations, the first one with a start delay time of 10 seconds, a collection time of 10 seconds, and a repeat of 1 (the cycle repeats once), and the second with a start delay time of 5 seconds, a collection time of 3 seconds, and a repeat of 0 (the cycle repeats indefinitely). |br| |br| |br|
+       | To change the unit of time used in ``--collection-period`` or ``-P``, specify the desired unit using the ``--collection-period-unit`` option. The available units are ``hour`` for hours, ``min`` for minutes, ``sec`` for seconds, ``msec`` for milliseconds, ``usec`` for microseconds, and ``nsec`` for nanoseconds.
 
    * - Perfetto-specific
      - | ``--perfetto-backend`` {inprocess,system} |br| |br| |br| |br| |br|
@@ -935,14 +935,14 @@ For the description of the fields in the output file, see :ref:`output-file-fiel
 Iteration based counter multiplexing
 ++++++++++++++++++++++++++++++++++++
 
-Counter multiplexing allows a single run of the program to collect groups of counters. This is useful when the counters you want to collect exceed the hardware limits and you cannot run the program multiple times for collection. 
+Counter multiplexing allows a single run of the program to collect groups of counters. This is useful when the counters you want to collect exceed the hardware limits and you cannot run the program multiple times for collection.
 
 This feature is available when using YAML (.yaml/.yml) or JSON (.json) input formats. Two new fields are introduced,  ``pmc_groups`` and ``pmc_group_interval``. The ``pmc_groups`` field is used to specify the groups of counters to be collected in each run. The ``pmc_group_interval`` field is used to specify the interval between each group of counters. Interval is per-device and increments per dispatch on the device (i.e. dispatch_id). When the interval is reached the next group is selected.
 
 Here is a sample input.yaml file for specifying counter multiplexing:
 
 .. code-block:: yaml
-   
+
    jobs:
    - pmc_groups: [["SQ_WAVES", "GRBM_COUNT"], ["GRBM_GUI_ACTIVE"]]
       pmc_group_interval: 4
@@ -952,7 +952,7 @@ This sample input will collect the first group of counters (``SQ_WAVES``, ``GRBM
 An example of the interval period for this input is given below:
 
 .. code-block:: shell
-    
+
     Device 1, <Kernel A>, Collect SQ_WAVES, GRBM_COUNT
     Device 1, <Kernel A>, Collect SQ_WAVES, GRBM_COUNT
     Device 1, <Kernel B>, Collect SQ_WAVES, GRBM_COUNT
@@ -1054,7 +1054,7 @@ The agent index is a unique identifier for each agent in the system. It is used 
 - **absolute** == *node_id* - absolute index of the agent regardless of cgroups masking. This is a monotonically increasing number that is incremented for every folder in `/sys/class/kfd/kfd/topology/nodes`. e.g. Agent-0, Agent-2, Agent-4.
 - **relative** == *logical_node_id* - relative index of the agent accounting for cgroups masking. This is a monotonically increasing number which is incremented for every folder in `/sys/class/kfd/kfd/topology/nodes/` whose properties file was non-empty.e.g. Agent-0, Agent-1, Agent-2
 - **type-relative** == *logical_node_type_id* - relative index of the agent accounting for cgroups masking where indexing starts at zero for each agent type. e.g. CPU-0, GPU-0, GPU-1
- 
+
 
 To set the agent index in the output files, use the ``--agent-index`` option. The default value is ``relative``.
 
@@ -1071,19 +1071,19 @@ Here is the `rocm-smi` output:
 
 .. code-block:: shell
 
-   $ cat kernel_trace.csv 
- 
+   $ cat kernel_trace.csv
+
    "Kind","Agent_Id","Queue_Id","Stream_Id","Thread_Id","Dispatch_Id","Kernel_Id","Kernel_Name","Correlation_Id","Start_Timestamp","End_Timestamp","Private_Segment_Size","Group_Segment_Size","Workgroup_Size_X","Workgroup_Size_Y","Workgroup_Size_Z","Grid_Size_X","Grid_Size_Y","Grid_Size_Z"
    "KERNEL_DISPATCH","Agent 7",1,2,15044,1,17,"void addition_kernel<float>(float*, float const*, float const*, int, int)",1,1671247151691610,1671247151718010,0,0,64,1,1,1024,1024,1
- 
+
 .. code-block:: shell
 
    rocprofv3 --kernel-trace --agent-index=type-relative -- <application_path>
 
 .. code-block:: shell
 
-   $ cat kernel_trace.csv 
- 
+   $ cat kernel_trace.csv
+
    "Kind","Agent_Id","Queue_Id","Stream_Id","Thread_Id","Dispatch_Id","Kernel_Id","Kernel_Name","Correlation_Id","Start_Timestamp","End_Timestamp","Private_Segment_Size","Group_Segment_Size","Workgroup_Size_X","Workgroup_Size_Y","Workgroup_Size_Z","Grid_Size_X","Grid_Size_Y","Grid_Size_Z"
    "KERNEL_DISPATCH","GPU 3",1,2,15056,1,17,"void addition_kernel<float>(float*, float const*, float const*, int, int)",1,1671390884499766,1671390884525686,0,0,64,1,1,1024,1024,1
 
@@ -1154,7 +1154,7 @@ To enable kernel name truncation, use the ``--truncate-kernels`` option.
 
     rocprofv3 --truncate-kernels --kernel-trace -- <application_path>
 
-The above command generates a ``kernel_trace.csv`` file with truncated kernel names. 
+The above command generates a ``kernel_trace.csv`` file with truncated kernel names.
 
 .. csv-table:: Kernel trace truncated
    :file: /data/kernel_trace_truncated.csv
@@ -1361,7 +1361,7 @@ The above command generates an ``%hostname%/%pid%_hip_api_trace.csv`` file.
 Collection period
 +++++++++++++++++++
 
-The collection period is the time interval during which the profiling data is collected. You can specify the collection period using the ``--collection-period`` or ``-p`` option.
+The collection period is the time interval during which the profiling data is collected. You can specify the collection period using the ``--collection-period`` or ``-P`` option.
 Users can specify multiple configurations, each defined by a triplet in the format `start_delay:collection_time:repeat`.
 
 The triplet is defined as follows:
@@ -1399,7 +1399,7 @@ The following options are specific to Perfetto tracing and are used to control t
   - **DISCARD**: The buffer stops accepting data once full. Further write attempts are dropped.
 
 - **--perfetto-buffer-size KB**: Size of buffer for perfetto output in KB. default: 1 GB. If set, stops the tracing session after N bytes have been written. Used to cap the size of the trace.
-     
+
 - **--perfetto-backend {inprocess,system}**: Perfetto data collection backend. 'system' mode requires starting traced and perfetto daemons.By default Perfetto keeps the full trace buffer(s) in memory.
 
 - **--perfetto-shmem-size-hint KB**: Perfetto shared memory size hint in KB. default: 64 KB. This option gives you control over shared memory buffer sizing. Thisoption can be tweaked to avoid data loses when data is produced at a higher rate.

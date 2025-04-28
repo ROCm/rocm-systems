@@ -200,6 +200,7 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         description="ROCProfilerV3 Run Script",
         usage="%(prog)s [options] -- <application> [application options]",
         epilog=usage_examples,
+        allow_abbrev=False,
         formatter_class=format_help(argparse.RawTextHelpFormatter),
     )
 
@@ -501,7 +502,7 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         type=str,
     )
     filter_options.add_argument(
-        "-p",
+        "-P",
         "--collection-period",
         help="The times are specified in seconds by default, but the unit can be changed using the `--collection-period-unit` option. Start Delay Time is the time in seconds before the collection begins, Collection Time is the duration in seconds for which data is collected, and Rate is the number of times the cycle is repeated. A repeat of 0 indicates that the cycle will repeat indefinitely. Users can specify multiple configurations, each defined by a triplet in the format `start_delay:collection_time:repeat`",
         nargs="+",
@@ -511,7 +512,7 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
     )
     filter_options.add_argument(
         "--collection-period-unit",
-        help="To change the unit used in `--collection-period` or `-p`, you can specify the desired unit using the `--collection-period-unit` option. The available units are `hour` for hours, `min` for minutes, `sec` for seconds, `msec` for milliseconds, `usec` for microseconds, and `nsec` for nanoseconds",
+        help="To change the unit used in `--collection-period` or `-P`, you can specify the desired unit using the `--collection-period-unit` option. The available units are `hour` for hours, `min` for minutes, `sec` for seconds, `msec` for milliseconds, `usec` for microseconds, and `nsec` for nanoseconds",
         nargs=1,
         default=["sec"],
         type=str,
@@ -638,6 +639,16 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         default=None,
         type=int,
         metavar="KB",
+    )
+
+    reserved_options = parser.add_argument_group("Reserved options")
+    reserved_options.add_argument(
+        "-p",
+        "--pid",
+        help=argparse.SUPPRESS,
+        type=str,
+        nargs="+",
+        default=None,
     )
 
     if args is None:
@@ -885,6 +896,13 @@ def run(app_args, args, **kwargs):
     app_env = dict(os.environ)
     use_execv = kwargs.get("use_execv", True)
     app_pass = kwargs.get("pass_id", None)
+
+    if args.pid is not None:
+        fatal_error(
+            """The -p shorthand option for --collection-period is now an upper-case -P
+                    In the future, rocprofv3 plans to support debugger-like process attachment and -p
+                    is de-facto standard shorthand option for this feature"""
+        )
 
     def setattrifnone(obj, attr, value):
         if getattr(obj, f"{attr}") is None:

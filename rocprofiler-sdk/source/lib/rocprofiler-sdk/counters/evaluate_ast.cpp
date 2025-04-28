@@ -21,11 +21,13 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/counters/evaluate_ast.hpp"
+#include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/counters/dimensions.hpp"
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
+#include "lib/rocprofiler-sdk/counters/parser/raw_ast.hpp"
 #include "lib/rocprofiler-sdk/counters/parser/reader.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
@@ -408,6 +410,11 @@ EvaluateAST::EvaluateAST(rocprofiler_counter_id_t                       out_id,
             _metric = metrics.at(std::get<std::string>(ast.value));
             if(_type == NodeType::ACCUMULATE_NODE)
             {
+                ROCP_FATAL_IF(ast.accumulate_op != ACCUMULATE_OP_TYPE::NONE &&
+                              _metric.block() != "SQ")
+                    << fmt::format("Accumulate High_RES/Low_RES only works for counters from SQ "
+                                   "block: invalid operation on {} counter.",
+                                   _metric.name());
                 _metric.setflags(static_cast<int>(ast.accumulate_op));
             }
         } catch(std::exception& e)

@@ -267,7 +267,7 @@ TEST(rocprofiler_lib, agent)
         EXPECT_EQ(agent->workgroup_max_dim.z, hsa_agent->workgroup_max_dim[2]) << msg;
         EXPECT_EQ(agent->grid_max_size, hsa_agent->grid_max_size) << msg;
         // Skip the checks for older grid x, y, z dimension values.
-        if(hsa_agent->grid_max_dim.x == std::numeric_limits<int32_t>::max())
+        if(hsa_agent->grid_max_dim.x != std::numeric_limits<uint32_t>::max())
         {
             EXPECT_EQ(agent->grid_max_dim.x, hsa_agent->grid_max_dim.x) << msg;
             EXPECT_EQ(agent->grid_max_dim.y, hsa_agent->grid_max_dim.y) << msg;

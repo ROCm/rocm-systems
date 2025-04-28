@@ -30,13 +30,24 @@ if(PkgConfig_FOUND)
 
     if(DW_FOUND
        AND DW_INCLUDE_DIRS
-       AND DW_LIBRARIES)
+       AND DW_LINK_LIBRARIES)
         set(libdw_INCLUDE_DIR
             "${DW_INCLUDE_DIRS}"
             CACHE FILEPATH "libdw include directory")
         set(libdw_LIBRARY
-            "${DW_LIBRARIES}"
+            "${DW_LINK_LIBRARIES}"
             CACHE FILEPATH "libdw libraries")
+        if(DW_PREFIX)
+            set(libdw_ROOT_DIR
+                "${DW_PREFIX}"
+                CACHE FILEPATH "libdw root directory")
+        endif()
+
+        if(DW_VERSION)
+            set(libdw_VERSION
+                "${DW_VERSION}"
+                CACHE FILEPATH "libdw version")
+        endif()
     endif()
 endif()
 
@@ -70,13 +81,13 @@ find_package_handle_standard_args(libdw DEFAULT_MSG libdw_LIBRARY libdw_INCLUDE_
 if(libdw_FOUND)
     if(NOT TARGET libdw::libdw)
         add_library(libdw::libdw INTERFACE IMPORTED)
-    endif()
 
-    if(TARGET PkgConfig::DW AND DW_FOUND)
-        target_link_libraries(libdw::libdw INTERFACE PkgConfig::DW)
-    else()
-        target_link_libraries(libdw::libdw INTERFACE ${libdw_LIBRARY})
-        target_include_directories(libdw::libdw SYSTEM INTERFACE ${libdw_INCLUDE_DIR})
+        if(TARGET PkgConfig::DW AND DW_FOUND)
+            target_link_libraries(libdw::libdw INTERFACE PkgConfig::DW)
+        else()
+            target_link_libraries(libdw::libdw INTERFACE ${libdw_LIBRARY})
+            target_include_directories(libdw::libdw SYSTEM INTERFACE ${libdw_INCLUDE_DIR})
+        endif()
     endif()
 endif()
 

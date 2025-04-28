@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # MIT License
 #
 # Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
@@ -20,7 +21,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-#!/usr/bin/env python3
 import os
 import pandas as pd
 import argparse
@@ -69,6 +69,10 @@ def write_to_file(df, args):
     directory, file_path = os.path.split(args.output)
     if directory:
         os.makedirs(directory, exist_ok=True)
+
+    if not args.retain_agent_prefix:
+        df["Agent_Id"] = df["Agent_Id"].apply(lambda x: x.split(" ")[-1])
+
     df.to_csv(args.output, index=False)
 
 
@@ -100,15 +104,6 @@ def main(args):
         if col not in columns:
             logging.debug(f"Unexpected column {col} found in rocprofv3 input file")
 
-    non_index_columns = [
-        "Correlation_Id",
-        "Start_Timestamp",
-        "End_Timestamp",
-        "Process_Id",
-        "Thread_Id",
-        "Kernel_Id",
-    ]
-
     # Convert
     indexes = [
         "Dispatch_Id",
@@ -136,7 +131,51 @@ def main(args):
     write_to_file(pivoted_data, args)
 
 
+def strtobool(val):
+    """Convert a string representation of truth to true or false.
+    True values are 'y', 'yes', 't', 'true', 'on', and '1'; false values
+    are 'n', 'no', 'f', 'false', 'off', and '0'.  Raises ValueError if
+    'val' is anything else.
+    """
+    if isinstance(val, (list, tuple)):
+        if len(val) > 1:
+            val_type = type(val).__name__
+            raise ValueError(f"invalid truth value {val} (type={val_type})")
+        else:
+            val = val[0]
+
+    if isinstance(val, bool):
+        return val
+    elif isinstance(val, str) and val.lower() in ("y", "yes", "t", "true", "on", "1"):
+        return True
+    elif isinstance(val, str) and val.lower() in ("n", "no", "f", "false", "off", "0"):
+        return False
+    else:
+        val_type = type(val).__name__
+        raise ValueError(f"invalid truth value {val} (type={val_type})")
+
+
+class booleanArgAction(argparse.Action):
+    def __call__(self, parser, args, value, option_string=None):
+        setattr(args, self.dest, strtobool(value))
+
+
+def add_parser_bool_argument(gparser, *args, **kwargs):
+    gparser.add_argument(
+        *args,
+        **kwargs,
+        action=booleanArgAction,
+        nargs="?",
+        const=True,
+        type=str,
+        required=False,
+        metavar="BOOL",
+        default=False,
+    )
+
+
 def parse_args():
+
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "-i",
@@ -171,6 +210,13 @@ def parse_args():
         dest="loglevel",
         const=logging.INFO,
     )
+    advanced_options = parser.add_argument_group("Advanced options")
+    add_parser_bool_argument(
+        advanced_options,
+        "--retain-agent-prefix",
+        help="retains the agent prefix",
+    )
+
     return parser.parse_args()
 
 
