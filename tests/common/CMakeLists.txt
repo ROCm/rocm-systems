@@ -42,6 +42,11 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.30)
     cmake_policy(SET CMP0167 NEW)
 endif()
 
+find_package(rocprofiler-sdk REQUIRED)
+
+# rocprofiler-sdk provides a Findlibdw.cmake
+find_package(libdw REQUIRED)
+
 # build flags
 add_library(rocprofiler-sdk-tests-build-flags INTERFACE)
 add_library(rocprofiler-sdk::tests-build-flags ALIAS rocprofiler-sdk-tests-build-flags)
@@ -138,7 +143,8 @@ add_library(rocprofiler-sdk::tests-common-library ALIAS
             rocprofiler-sdk-tests-common-library)
 target_link_libraries(
     rocprofiler-sdk-tests-common-library
-    INTERFACE rocprofiler-sdk::tests-build-flags rocprofiler-sdk::rocprofiler-sdk-cereal)
+    INTERFACE rocprofiler-sdk::tests-build-flags rocprofiler-sdk::rocprofiler-sdk-cereal
+              libdw::libdw)
 target_compile_features(rocprofiler-sdk-tests-common-library INTERFACE cxx_std_17)
 target_include_directories(rocprofiler-sdk-tests-common-library
                            INTERFACE ${COMMON_LIBRARY_INCLUDE_DIR})

@@ -129,6 +129,17 @@ else()
         endforeach()
     endif()
 
+    if(EXISTS ${@PACKAGE_NAME@_CMAKE_DIR}/Modules)
+        list(INSERT CMAKE_MODULE_PATH 0 ${@PACKAGE_NAME@_CMAKE_DIR}/Modules)
+        find_package(libdw)
+        list(REMOVE_AT CMAKE_MODULE_PATH 0)
+    endif()
+
+    if(libdw_FOUND AND TARGET libdw::libdw)
+        rocprofiler_config_nolink_target(@PACKAGE_NAME@::@PACKAGE_NAME@-external-nolink
+                                         libdw::libdw)
+    endif()
+
     target_link_libraries(@PACKAGE_NAME@::@PACKAGE_NAME@
                           INTERFACE @PACKAGE_NAME@::@PACKAGE_NAME@-external-nolink)
 endif()
@@ -136,7 +147,8 @@ endif()
 add_executable(@PACKAGE_NAME@::rocprofv3 IMPORTED)
 set_property(
     TARGET @PACKAGE_NAME@::rocprofv3
-    PROPERTY IMPORTED_LOCATION ${@PACKAGE_NAME@_ROOT_DIR}/@CMAKE_INSTALL_BINDIR@/rocprofv3)
+    PROPERTY IMPORTED_LOCATION
+             ${@PACKAGE_NAME@_ROOT_DIR}/@CMAKE_INSTALL_BINDIR@/rocprofv3)
 
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(
@@ -155,4 +167,7 @@ endif()
 add_executable(@PACKAGE_NAME@::convert-counters-collection-format IMPORTED)
 set_property(
     TARGET @PACKAGE_NAME@::convert-counters-collection-format
-    PROPERTY IMPORTED_LOCATION ${@PACKAGE_NAME@_ROOT_DIR}/share/@PACKAGE_NAME@/convert-counters-collection-format.py)
+    PROPERTY
+        IMPORTED_LOCATION
+        ${@PACKAGE_NAME@_ROOT_DIR}/share/@PACKAGE_NAME@/convert-counters-collection-format.py
+    )

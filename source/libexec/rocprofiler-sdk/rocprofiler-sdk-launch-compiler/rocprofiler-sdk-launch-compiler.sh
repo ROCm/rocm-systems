@@ -1,3 +1,4 @@
+#!/bin/bash -e
 # MIT License
 #
 # Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
@@ -20,7 +21,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-#!/bin/bash -e
 #
 #   This script allows CMAKE_CXX_COMPILER to be a standard
 #   C++ compiler and rocprofiler-sdk sets RULE_LAUNCH_COMPILE and

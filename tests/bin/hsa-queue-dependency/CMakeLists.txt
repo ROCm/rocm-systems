@@ -54,19 +54,6 @@ target_compile_options(multiqueue_testapp PRIVATE -W -Wall -Wextra -Wshadow -Wer
 find_package(Threads REQUIRED)
 target_link_libraries(multiqueue_testapp PRIVATE stdc++fs Threads::Threads)
 
-find_package(
-    amd_comgr
-    REQUIRED
-    CONFIG
-    HINTS
-    ${CMAKE_INSTALL_PREFIX}
-    PATHS
-    ${ROCM_PATH}
-    PATH_SUFFIXES
-    lib/cmake/amd_comgr)
-
-target_link_libraries(multiqueue_testapp PRIVATE amd_comgr)
-
 find_package(rocprofiler-sdk REQUIRED)
 target_link_libraries(multiqueue_testapp PRIVATE rocprofiler-sdk::rocprofiler-sdk
                                                  rocprofiler-sdk::tests-common-library)

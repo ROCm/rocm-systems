@@ -77,19 +77,6 @@ target_compile_options(hsa_code_object_testapp PRIVATE -W -Wall -Wextra -Wshadow
 find_package(Threads REQUIRED)
 target_link_libraries(hsa_code_object_testapp PRIVATE stdc++fs Threads::Threads)
 
-find_package(
-    amd_comgr
-    REQUIRED
-    CONFIG
-    HINTS
-    ${CMAKE_INSTALL_PREFIX}
-    PATHS
-    ${ROCM_PATH}
-    PATH_SUFFIXES
-    lib/cmake/amd_comgr)
-
-target_link_libraries(hsa_code_object_testapp PRIVATE amd_comgr)
-
 find_package(rocprofiler-sdk REQUIRED)
 target_link_libraries(
     hsa_code_object_testapp PRIVATE rocprofiler-sdk::rocprofiler-sdk

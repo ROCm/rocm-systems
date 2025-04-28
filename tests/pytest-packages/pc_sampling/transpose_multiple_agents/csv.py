@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # MIT License
 #
 # Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
@@ -20,10 +21,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-
 from __future__ import absolute_import
-
-#!/usr/bin/env python3
 
 import itertools
 import sys
