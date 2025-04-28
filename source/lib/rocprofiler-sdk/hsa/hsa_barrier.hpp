@@ -50,22 +50,35 @@ public:
     hsa_barrier(std::function<void()>&& finished, CoreApiTable core_api);
     ~hsa_barrier();
 
+    // If a queue in q currently has active async packets, sets the barrier and saves how many
+    // packets are currently in each queue to track barrier completion. If there are no queues with
+    // packets, clears the barrier and marks it as complete.
     void set_barrier(const queue_map_ptr_t& q);
 
+    // Returns the packets needed to place this barrier in a queue.
+    // If the barrier has already been enqueued in the queue given or the barrier is complete, no
+    // packets are returned.
     std::optional<rocprofiler_packet> enqueue_packet(const Queue* queue);
-    bool                              register_completion(const Queue* queue);
 
-    bool complete() const { return _core_api.hsa_signal_load_scacquire_fn(_barrier_signal) == 0; }
+    // To be called when 1 async packet is finished in the given queue to decrement the remaining
+    // packets counter. If all packets in all queues given in set_barrier are completed, clears the
+    // barrier and marks it as complete. Returns true if the given queue had async packets waiting.
+    bool register_completion(const Queue* queue);
 
-    // Removes a queue from the barrier dependency list
+    // Checks if this barrier is complete
+    bool complete() const;
+
+    // Removes a queue from the barrier dependency list.
+    // If this is the last queue waiting, clears the barrier and marks it as complete.
     void remove_queue(const Queue* queue);
 
 private:
-    std::function<void()>                                      _barried_finished = {};
+    std::function<void()>                                      _barrier_finished = {};
     CoreApiTable                                               _core_api         = {};
     common::Synchronized<std::unordered_map<int64_t, int64_t>> _queue_waiting    = {};
     common::Synchronized<std::unordered_set<int64_t>>          _barrier_enqueued = {};
-    std::atomic<bool>                                          _complete         = {false};
+
+    void clear_barrier();
 
     // Blocks all queues from executing until the barrier is lifted
     hsa_signal_t _barrier_signal = {};
