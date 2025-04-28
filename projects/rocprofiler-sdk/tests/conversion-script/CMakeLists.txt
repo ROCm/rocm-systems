@@ -51,26 +51,59 @@ set_tests_properties(
     PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT "${cc-env-pmc}"
                FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
-add_test(
-    NAME test-conversion-script-convert
-    COMMAND
-        ${Python3_EXECUTABLE}
-        $<TARGET_FILE:rocprofiler-sdk::convert-counters-collection-format> --input
-        ${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script --output
-        ${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script/converted.csv)
+set(convert_tests test-conversion-script-convert-no-agent-prefix
+                  test-conversion-script-convert-agent-prefix)
 
-set_tests_properties(
-    test-conversion-script-convert
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
-               test-conversion-script-execute FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+set(validate_tests test-conversion-script-validate-no-agent-prefix
+                   test-conversion-script-validate-agent-prefix)
 
-add_test(NAME test-conversion-script-validate
-         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --input
-                 ${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script/converted.csv)
+set(output_dir ${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script_no_agent_prefix
+               ${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script_agent_prefix)
 
-set_tests_properties(
-    test-conversion-script-validate
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
-               test-conversion-script-convert FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+set(agent_index_flag false true)
+
+list(LENGTH convert_tests convert_test_length)
+
+foreach(i RANGE 0 ${convert_test_length})
+    if(${i} EQUAL ${convert_test_length})
+        break()
+    endif()
+    list(GET convert_tests ${i} test_name)
+    list(GET output_dir ${i} output)
+    list(GET agent_index_flag ${i} flag)
+    list(GET validate_tests ${i} validate_test_name)
+    if(${flag})
+        add_test(
+            NAME ${test_name}
+            COMMAND
+                ${Python3_EXECUTABLE}
+                $<TARGET_FILE:rocprofiler-sdk::convert-counters-collection-format>
+                --input ${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script --output
+                ${output} --retain-agent-prefix)
+
+        add_test(NAME ${validate_test_name}
+                 COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py
+                         --input ${output} --retain-agent-prefix true)
+    else()
+        add_test(
+            NAME ${test_name}
+            COMMAND
+                ${Python3_EXECUTABLE}
+                $<TARGET_FILE:rocprofiler-sdk::convert-counters-collection-format>
+                --input ${CMAKE_CURRENT_BINARY_DIR}/out_conversion_script --output
+                ${output})
+
+        add_test(NAME ${validate_test_name}
+                 COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py
+                         --input ${output} --retain-agent-prefix false)
+    endif()
+    set_tests_properties(
+        ${test_name}
+        PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
+                   test-conversion-script-execute FAIL_REGULAR_EXPRESSION
+                   "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    set_tests_properties(
+        ${validate_test_name}
+        PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS ${test_name}
+                   FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+endforeach()

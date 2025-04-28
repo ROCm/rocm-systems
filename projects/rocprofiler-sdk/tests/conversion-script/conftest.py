@@ -29,6 +29,9 @@ import pandas as pd
 
 def pytest_addoption(parser):
     parser.addoption("--input", action="store", help="Path to csv file.")
+    parser.addoption(
+        "--retain-agent-prefix", action="store", help="retain agent prefix flag."
+    )
 
 
 @pytest.fixture
@@ -36,3 +39,8 @@ def input_data(request):
     filename = request.config.getoption("--input")
     with open(filename, "r") as inp:
         return pd.read_csv(inp)
+
+
+@pytest.fixture
+def retain_agent_prefix_flag(request):
+    return request.config.getoption("--retain-agent-prefix")
