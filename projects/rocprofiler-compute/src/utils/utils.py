@@ -587,8 +587,10 @@ def run_prof(
     # standard rocprof options
     default_options = ["-i", fname]
     options = default_options + profiler_options
-    if using_v3() and path_counter_config_yaml.exists():
-        options = ["-E", str(path_counter_config_yaml)] + options
+    if using_v3():
+        options = ["-A", "absolute"] + options
+        if path_counter_config_yaml.exists():
+            options = ["-E", str(path_counter_config_yaml)] + options
 
     # set required env var for mi300
     new_env = None
