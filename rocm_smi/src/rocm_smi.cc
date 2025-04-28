@@ -1012,7 +1012,6 @@ rsmi_dev_subsystem_id_get(uint32_t dv_ind, uint16_t *id) {
 
 rsmi_status_t
 rsmi_dev_vendor_id_get(uint32_t dv_ind, uint16_t *id) {
-    // need to get this to fall back to kfd if sysfs doesn't work
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
