@@ -46,17 +46,6 @@ class gfx950_soc(OmniSoC_Base):
                     )
                 )
             )
-        else:
-            # NB: We're using generalized Mi300 perfmon configs
-            self.set_perfmon_dir(
-                str(
-                    Path(str(config.rocprof_compute_home)).joinpath(
-                        "rocprof_compute_soc",
-                        "profile_configs",
-                        "gfx950",
-                    )
-                )
-            )
         self.set_compatible_profilers(["rocprofv3"])
         # Per IP block max number of simultaneous counters. GFX IP Blocks
         self.set_perfmon_config(

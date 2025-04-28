@@ -939,14 +939,14 @@ def detect_roofline(mspec):
     elif (
         (type(sles_distro) == str and len(sles_distro) >= 3)
         and sles_distro[:2] == "15"  # confirm string and len
-        and int(sles_distro[3]) >= 3  # SLES15 and SP >= 3
+        and int(sles_distro[3]) >= 6  # SLES15 and SP >= 6
     ):
         # Must be a valid SLES machine
-        # Use SP3 binary for all forward compatible service pack versions
-        distro = "15.3"
-    elif ubuntu_distro == "20.04" or ubuntu_distro == "22.04" or ubuntu_distro == "24.04":
+        # Use SP6 binary for all forward compatible service pack versions
+        distro = "15.6"
+    elif ubuntu_distro == "22.04" or ubuntu_distro == "24.04":
         # Must be a valid Ubuntu machine
-        distro = ubuntu_distro
+        distro = "22.04"
     else:
         console_error("roofline", "Cannot find a valid binary for your operating system")
 
@@ -984,10 +984,8 @@ def mibench(args, mspec):
 
     distro_map = {
         "platform:el8": "rhel8",
-        "15.3": "sles15sp5",
-        "20.04": "ubuntu20_04",
-        "22.04": "ubuntu20_04",
-        "24.04": "ubuntu20_04",
+        "15.6": "sles15sp6",
+        "22.04": "ubuntu22_04",
     }
 
     binary_paths = []
@@ -1008,8 +1006,6 @@ def mibench(args, mspec):
                 dir
                 + "-"
                 + distro_map[target_binary["distro"]]
-                + "-"
-                + mspec.gpu_series.lower()
                 + "-rocm"
                 + target_binary["rocm_ver"]
             )

@@ -542,7 +542,7 @@ def test_path(binary_handler_profile_rocprof_compute):
 
 @pytest.mark.misc
 def test_roof_kernel_names(binary_handler_profile_rocprof_compute):
-    if soc in ("MI100", "MI350"):
+    if soc in ("MI100"):
         # roofline is not supported on MI100
         assert True
         # Do not continue testing
@@ -557,7 +557,9 @@ def test_roof_kernel_names(binary_handler_profile_rocprof_compute):
     # assert successful run
     assert returncode == 0
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
-    if soc == "MI200" in soc or "MI300" in soc:
+    if soc == "MI100":
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI100
+    else:
         assert sorted(list(file_dict.keys())) == sorted(
             (
                 [f for f in ROOF_ONLY_FILES if f != "timestamps.csv"]
@@ -566,8 +568,6 @@ def test_roof_kernel_names(binary_handler_profile_rocprof_compute):
             )
             + ["kernelName_legend.pdf"]
         )
-    else:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI100
 
     validate(
         inspect.stack()[0][3],
@@ -1816,7 +1816,7 @@ def test_join_type_kernel(binary_handler_profile_rocprof_compute):
 @pytest.mark.sort
 def test_roof_sort_dispatches(binary_handler_profile_rocprof_compute):
     # only test 1 device for roofline
-    if soc in ("MI100", "MI350"):
+    if soc in ("MI100"):
         # roofline is not supported on MI100
         assert True
         # Do not continue testing
@@ -1851,7 +1851,7 @@ def test_roof_sort_dispatches(binary_handler_profile_rocprof_compute):
 @pytest.mark.sort
 def test_roof_sort_kernels(binary_handler_profile_rocprof_compute):
     # only test 1 device for roofline
-    if soc in ("MI100", "MI350"):
+    if soc in ("MI100"):
         # roofline is not supported on MI100
         assert True
         # Do not continue testing
@@ -1886,7 +1886,7 @@ def test_roof_sort_kernels(binary_handler_profile_rocprof_compute):
 @pytest.mark.mem
 def test_roof_mem_levels_vL1D(binary_handler_profile_rocprof_compute):
     # only test 1 device for roofline
-    if soc in ("MI100", "MI350"):
+    if soc in ("MI100"):
         # roofline is not supported on MI100
         assert True
         # Do not continue testing
@@ -1921,7 +1921,7 @@ def test_roof_mem_levels_vL1D(binary_handler_profile_rocprof_compute):
 @pytest.mark.mem
 def test_roof_mem_levels_LDS(binary_handler_profile_rocprof_compute):
     # only test 1 device for roofline
-    if soc in ("MI100", "MI350"):
+    if soc in ("MI100"):
         # roofline is not supported on MI100
         assert True
         # Do not continue testing

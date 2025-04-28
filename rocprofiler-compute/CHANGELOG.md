@@ -45,6 +45,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Roofline support for RHEL 10
 
+* Roofline support for MI350 series architecture
+
 ### Changed
 
 * Change the default rocprof version to v3 when environment variable "ROCPROF" is not set
@@ -73,6 +75,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Analysis of new workloads might require providing shader/memory clock speed using
 --specs-correction operation if `amd-smi` or `rocminfo` does not provide clock speeds.
+
+### Removed
+
+* Roofline support for Ubuntu 20.04 and SLES below 15.6
 
 ## ROCm Compute Profiler 3.1.0 for ROCm 6.4.0
 

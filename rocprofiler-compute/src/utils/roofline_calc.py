@@ -48,6 +48,7 @@ SUPPORTED_DATATYPES = {
     "gfx940": ["FP8", "FP16", "BF16", "FP32", "FP64", "I8", "I32", "I64"],  # Unsupported:
     "gfx941": ["FP8", "FP16", "BF16", "FP32", "FP64", "I8", "I32", "I64"],  # Unsupported:
     "gfx942": ["FP8", "FP16", "BF16", "FP32", "FP64", "I8", "I32", "I64"],  # Unsupported:
+    "gfx950": ["FP8", "FP16", "BF16", "FP32", "FP64", "I8", "I32", "I64"],  # Unsupported:
 }
 
 PEAK_OPS_DATATYPES = ["FP8", "FP16", "BF16", "FP32", "FP64", "I8", "I32", "I64"]
