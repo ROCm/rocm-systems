@@ -478,7 +478,7 @@ jobs:
         $(get-base-md-contents samples)
 
         ## Tests + Samples
-        $(get-full-md-contents all)
+        $(get-base-md-contents all)
 
         <!-- code-coverage-comment-identifier -->
         EOF
