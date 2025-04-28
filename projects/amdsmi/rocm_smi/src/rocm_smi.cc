@@ -1020,7 +1020,6 @@ rsmi_dev_vendor_id_get(uint32_t dv_ind, uint16_t *id) {
   rsmi_status_t status = get_id(dv_ind, amd::smi::kDevVendorID, id);
   if (status != RSMI_STATUS_SUCCESS)
   {
-    // /sys/class/kfd/kfd/topology/nodes/*/properties
     GET_DEV_AND_KFDNODE_FROM_INDX
     uint32_t node_id;
     uint64_t kfd_vendor_id;
