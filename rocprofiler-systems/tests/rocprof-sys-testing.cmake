@@ -308,13 +308,15 @@ endmacro()
 function(check_gpu gpu_name return_var)
     # Run the rocminfo command and capture the output
     execute_process(
-        COMMAND rocminfo | grep ${gpu_name}
+        COMMAND bash -c "rocminfo | grep ${gpu_name}"
         OUTPUT_VARIABLE ROCMINFO_OUTPUT
         RESULT_VARIABLE ROCMINFO_RESULT
         OUTPUT_STRIP_TRAILING_WHITESPACE)
 
+    string(REGEX MATCH "${gpu_name}" gpu_matches "${ROCMINFO_OUTPUT}")
+
     # Check if the specified GPU is present
-    if(ROCMINFO_RESULT EQUAL 0)
+    if(ROCMINFO_RESULT EQUAL 0 AND gpu_matches)
         message(STATUS "${gpu_name} GPU detected")
         set(${return_var}
             TRUE
