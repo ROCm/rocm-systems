@@ -89,7 +89,7 @@ high level.
   * :ref:`Memory Chart Analysis panel <grafana-panel-memory-chart-analysis>`
 
   * :ref:`Roofline Analysis panel <grafana-panel-roofline-analysis>`
-    (*Supported on MI200 and MI300 only, Ubuntu 20.04/22.04/24.04, SLES 15 SP3 or RHEL8*)
+    (*Supported on MI200 and above architectures only)
 
   * :ref:`Command Processor (CP) panel <grafana-panel-cp>`
 
