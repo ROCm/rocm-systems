@@ -272,9 +272,9 @@ class AMDSMILogger():
                             }
                             if non_na:
                                 valid_clock_data[clock_key] = non_na
-                        elif clock_data != "N/A":  # Handle single-tier clock_data
+                        else:   # Handle single-tier clock_data
                             valid_clock_data[clock_key] = clock_data
-                elif value != "N/A":  # Handle non-dictionary clock data
+                else:   # Handle non-dictionary clock data
                     valid_clock_data = value
                 tabbed_dictionary[key] = valid_clock_data
 
