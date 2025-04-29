@@ -21,6 +21,7 @@ jobs:
       - ${{ vars.RUNNER_TYPE }}
     continue-on-error: true
     strategy:
+      max-parallel: 10
       matrix:
         os: [Ubuntu20, Ubuntu22, Debian10]
     container:
@@ -121,22 +122,25 @@ jobs:
             "amd-smi list"
             "amd-smi static"
             "amd-smi firmware"
+            "amd-smi ucode"
             "amd-smi bad-pages"
             "amd-smi metric"
             "amd-smi process"
             "amd-smi topology"
             "amd-smi monitor"
+            "amd-smi dmon"
             "amd-smi xgmi"
             "amd-smi partition"
           )
           for cmd in "${commands[@]}"; do
-            echo "Running: $cmd"
-            if ! $cmd > /tmp/test-results-${{ matrix.os }}/$(echo $cmd | tr ' ' '_').log 2>&1; then
-              echo "Command '$cmd' failed."
+            debug_cmd="$cmd --loglevel debug"
+            echo "Running: $debug_cmd"
+            if ! eval "$debug_cmd" > /tmp/test-results-${{ matrix.os }}/$(echo $cmd | tr ' ' '_').log 2>&1; then
+              echo "Command '$debug_cmd' failed."
               cat /tmp/test-results-${{ matrix.os }}/$(echo $cmd | tr ' ' '_').log
               exit 1
             else
-              echo "$cmd passed."
+              echo "$debug_cmd passed."
             fi
           done
           echo "AMDSMI commands done on ${{ matrix.os }}"
@@ -148,25 +152,37 @@ jobs:
           echo 'Running other tests on ${{ matrix.os }}'
 
           # AMDSMI Tests
-          echo 'AMDSMI tests'
+          echo 'Running AMDSMI tests'
           cd /opt/rocm/share/amd_smi/tests
           source amdsmitst.exclude
           ./amdsmitst --gtest_filter="-$(echo ${BLACKLIST_ALL_ASICS})" > /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log 2>&1
-          if [ $? -ne 0 ]; then
+          TEST_EXIT_CODE=$?
+
+          # Always show the test output (last 10 lines)
+          if [ $TEST_EXIT_CODE -ne 0 ]; then
+            echo "AMDSMI tests failed with exit code $TEST_EXIT_CODE."
+            echo "=============== TEST OUTPUT ==============="
+            cat /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log | grep -E "\[==========\]|\[  PASSED  \]|\[  SKIPPED \]|\[  FAILED  \]"
+            echo "=============================================="
             echo "AMDSMI tests failed"
-            exit 1
+            exit $TEST_EXIT_CODE
+          else
+            echo "AMDSMI tests passed"
+            echo "=============== TEST OUTPUT ==============="
+            cat /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log | grep -E "\[==========\]|\[  PASSED  \]|\[  SKIPPED \]|\[  FAILED  \]"
+            echo "=============================================="
+            echo "AMDSMI tests done"
           fi
-          echo "AMDSMI tests done"
 
           # Python Tests
-          echo 'Python tests'
+          echo 'Running Python tests'
           cd /opt/rocm/share/amd_smi/tests/python_unittest
           ./integration_test.py -v > /tmp/test-results-${{ matrix.os }}/integration_test_output.txt 2>&1
           ./unit_tests.py -v > /tmp/test-results-${{ matrix.os }}/unit_test_output.txt 2>&1
           echo "Python tests done"
 
           # Example Tests
-          echo 'Example tests'
+          echo 'Running Example tests'
           cd $GITHUB_WORKSPACE/example
           rm -rf build
           cmake -B build -DENABLE_ESMI_LIB=OFF
@@ -213,6 +229,7 @@ jobs:
       - ${{ vars.RUNNER_TYPE }}
     continue-on-error: true
     strategy:
+      max-parallel: 10
       matrix:
         os:
           - SLES
@@ -249,8 +266,8 @@ jobs:
           echo 'Installing more_itertools on ${{ matrix.os }}'
           python3 -m pip install more_itertools
 
-      - name: Build AMDSMI for RHEL10
-        if: matrix.os == 'RHEL10'
+      - name: Build AMDSMI(RHEL10 & AlmaLinux8)
+        if: matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8'
         run: |
           set -e
           echo 'Building on RHEL10 with retries'
@@ -279,7 +296,7 @@ jobs:
           done
           echo "Build completed on RHEL10"
 
-      - name: Build AMDSMI for other RPM distros
+      - name: Build AMDSMI
         if: matrix.os != 'RHEL10'
         run: |
           set -e
@@ -293,8 +310,8 @@ jobs:
           make package
           echo "Build completed on ${{ matrix.os }}"
 
-      - name: Install AMDSMI on RHEL10
-        if: matrix.os == 'RHEL10'
+      - name: Install AMDSMI(RHEL10 & AlmaLinux8)
+        if: matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8'
         run: |
           cd $GITHUB_WORKSPACE/build
           dnf install python3-setuptools python3-wheel -y
@@ -323,8 +340,8 @@ jobs:
             fi
           done
 
-      - name: Install AMDSMI on other RPM distros
-        if: matrix.os != 'RHEL10'
+      - name: Install AMDSMI
+        if: matrix.os != 'RHEL10' && matrix.os != 'AlmaLinux8'
         run: |
           cd $GITHUB_WORKSPACE/build
           case ${{ env.PACKAGE_MANAGER }} in
@@ -424,8 +441,8 @@ jobs:
           echo 'Installing more_itertools on ${{ matrix.os }}'
           python3 -m pip install more_itertools
 
-      - name: Build and Install for RHEL10 Test
-        if: matrix.os == 'RHEL10'
+      - name: Build and Install for Tests (RHEL10 & AlmaLinux8)
+        if: matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8'
         run: |
           set -e
           echo 'Building for test on RHEL10 with retries'
@@ -473,8 +490,8 @@ jobs:
             fi
           done
 
-      - name: Build and Install for other RPM distros Test
-        if: matrix.os != 'RHEL10'
+      - name: Build and Install for Tests
+        if: matrix.os != 'RHEL10' && matrix.os != 'AlmaLinux8'
         run: |
           set -e
           echo 'Building for test on ${{ matrix.os }}'
@@ -524,22 +541,25 @@ jobs:
             "amd-smi list"
             "amd-smi static"
             "amd-smi firmware"
+            "amd-smi ucode"
             "amd-smi bad-pages"
             "amd-smi metric"
             "amd-smi process"
             "amd-smi topology"
             "amd-smi monitor"
+            "amd-smi dmon"
             "amd-smi xgmi"
             "amd-smi partition"
           )
           for cmd in "${commands[@]}"; do
-            echo "Running: $cmd"
-            if ! $cmd > /tmp/test-results-${{ matrix.os }}/$(echo $cmd | tr ' ' '_').log 2>&1; then
-              echo "Command '$cmd' failed."
+            debug_cmd="$cmd --loglevel debug"
+            echo "Running: $debug_cmd"
+            if ! eval "$debug_cmd" > /tmp/test-results-${{ matrix.os }}/$(echo $cmd | tr ' ' '_').log 2>&1; then
+              echo "Command '$debug_cmd' failed."
               cat /tmp/test-results-${{ matrix.os }}/$(echo $cmd | tr ' ' '_').log
               exit 1
             else
-              echo "$cmd passed."
+              echo "$debug_cmd passed."
             fi
           done
           echo "AMDSMI commands done on ${{ matrix.os }}"
@@ -551,25 +571,37 @@ jobs:
           echo 'Running other tests on ${{ matrix.os }}'
 
           # AMDSMI Tests
-          echo 'AMDSMI tests'
+          echo 'Running AMDSMI tests'
           cd /opt/rocm/share/amd_smi/tests
           source amdsmitst.exclude
           ./amdsmitst --gtest_filter="-$(echo ${BLACKLIST_ALL_ASICS})" > /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log 2>&1
-          if [ $? -ne 0 ]; then
+          TEST_EXIT_CODE=$?
+
+          # Always show the test output (last 10 lines)
+          if [ $TEST_EXIT_CODE -ne 0 ]; then
+            echo "AMDSMI tests failed with exit code $TEST_EXIT_CODE."
+            echo "=============== TEST OUTPUT ==============="
+            cat /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log | grep -E "\[==========\]|\[  PASSED  \]|\[  SKIPPED \]|\[  FAILED  \]"
+            echo "=============================================="
             echo "AMDSMI tests failed"
-            exit 1
+            exit $TEST_EXIT_CODE
+          else
+            echo "AMDSMI tests passed"
+            echo "=============== TEST OUTPUT ==============="
+            cat /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log | grep -E "\[==========\]|\[  PASSED  \]|\[  SKIPPED \]|\[  FAILED  \]"
+            echo "=============================================="
+            echo "AMDSMI tests done"
           fi
-          echo "AMDSMI tests done"
 
           # Python Tests
-          echo 'Python tests'
+          echo 'Running Python tests'
           cd /opt/rocm/share/amd_smi/tests/python_unittest
           ./integration_test.py -v > /tmp/test-results-${{ matrix.os }}/integration_test_output.txt 2>&1
           ./unit_tests.py -v > /tmp/test-results-${{ matrix.os }}/unit_test_output.txt 2>&1
           echo "Python tests done"
 
           # Example Tests
-          echo 'Example tests'
+          echo 'Running Example tests'
           cd $GITHUB_WORKSPACE/example
           rm -rf build
           cmake -B build -DENABLE_ESMI_LIB=OFF
