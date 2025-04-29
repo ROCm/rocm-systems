@@ -653,6 +653,87 @@ void AqlQueue::FreeMainScratchSpace() {
 }
 
 void AqlQueue::AsyncReclaimMainScratch() {
+  /*
+   * Pseudocode for scratch memory management when asynchronous scratch is
+   * supported
+   *
+   * Notes:
+   * - CP FW only updates its copy of amd_queue_ (scratch_copy) on queue_connect
+   * so changes to amd_queue_ by ROCr are only visible to CP FW after a queue
+   * re-map.
+   *
+   * - CP sets AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM bit to indicate that this version
+   * of CP FW supports asynchronous scratch reclaim. But CP will only update
+   * amd_queue_.caps on queue-connect so ROCr assumes that async scratch reclaim
+   * is supported based on the CP FW version.
+   *
+   * - ROCR sets AMD_QUEUE_CAPS_SW_ASYNC_RECLAIM bit to indicate to CP that this
+   * version of FW supports asynchronous scratch and therefore CP is allowed to
+   * access the extra fields that exist in amd_queue_v2.
+   *
+   * CP FW Pseudocode:
+   * On doorbell-ring:
+   * <start>
+   *    Start processing AQL dispatch packet at read_index
+   *    if (packet->private_segment_size > 0) {
+   *      // This dispatch needs scratch
+   *      if (packet->private_segment_size <= scratch_copy.scratch_wave64_lane_byte_size) {
+   *         if (read_index <= scratch_max_use_index) {
+   *           scratch_copy->scratch_last_used_index = current_index
+   *           dispatch-uses-primary-scratch
+   *           goto proceed-with-dispatch
+   *         }
+   *      } else if (packet->private_segment_size <= scratch_copy.alt_scratch_wave64_lane_byte_size
+   *              && packet->grid_size_x <= scratch_copy.alt_scratch_dispatch_limit_x
+   *              && packet->grid_size_y <= scratch_copy.alt_scratch_dispatch_limit_y
+   *              && packet->grid_size_z <= scratch_copy.alt_scratch_dispatch_limit_z) {
+   *         if (read_index <= alt_scratch_max_use_index) {
+   *           scratch_copy->alt_scratch_last_used_index = current_index
+   *           dispatch-uses-alternate-scratch
+   *           goto proceed-with-dispatch
+   *         }
+   *      }
+   *      request-more-scratch
+   *    }
+   *    goto proceed-with-dispatch
+   * <end>
+   *
+   * On queue-connect:
+   * <start>
+   *    set AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM to indicate that this version of CP
+   *    FW supports asynchronous scratch reclaim
+   * <end>
+   *
+   * On queue-disconnect:
+   * <start>
+   *     // This guarantees that ROCr sees updated values of scratch_last_used_index
+   *     // and alt_scratch_last_used_index after queue is unmapped.
+   *     queue->scratch_last_used_index= scratch_copy->scratch_last_used_index
+   *     queue->alt_scratch_last_used_index= scratch_copy->alt_scratch_last_used_index
+   * <end>
+   *
+   * ROCr Pseudocode:
+   * On init:
+   *     queue->scratch_max_use_index = UINT64_MAX
+   *     queue->alt_scratch_max_use_index = UINT64_MAX
+   *
+   * To reclaim scratch:
+   * <start>
+   *      // mutex blocks async-thread in case CP raises signal to request more scratch
+   *     acquire(scratch-mutex)
+   *     queue-unmap
+   *     // Tell CP that it cannot use scratch after current packet
+   *     queue->scratch_last_used_index = max(amd_queue_->scratch_last_used_index_per_xcc[])
+   *
+   *     queue-map
+   *     // wait for CP to finish current packet
+   *     while (queue->max_scratch_use_index >= queue->read_dispatch_id)
+   *         sched_yield();
+   *
+   *     free-scratch
+   *     release(scratch-mutex)
+   * <end>
+   */
   auto getMaxMainScratchUseIndex = [&]() {
     uint64_t max = 0;
     for (int i = 0; i < agent_->properties().NumXcc; i++) {
@@ -681,7 +762,7 @@ void AqlQueue::AsyncReclaimMainScratch() {
   /*
    * amd_queue_.scratch_last_used_index[*].main is updated by CP FW every time a
    * dispatch packet is launched and it needs scratch memory.
-   * If amd_queue_.scratch_last_used_index[*].main > amd_queue_.read_dispatch_id
+   * If amd_queue_.scratch_last_used_index[*].main >= amd_queue_.read_dispatch_id
    * then this XCC is currently running a dispatch that uses scratch.
    * Setting max_scratch_use_index to max(amd_queue_.scratch_last_used_index[*].main)
    * prevents CP from trying to use main-scratch after
