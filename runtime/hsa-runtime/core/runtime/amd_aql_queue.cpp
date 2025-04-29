@@ -934,11 +934,10 @@ void AqlQueue::AsyncReclaimMainScratch() {
    */
   amd_queue_.scratch_max_use_index = getMaxMainScratchUseIndex();
 
-
   Resume();
 
   // If current dispatch is using scratch, wait for it to finish
-  while (amd_queue_.scratch_max_use_index > amd_queue_.read_dispatch_id) {
+  while (amd_queue_.scratch_max_use_index >= LoadReadIndexRelaxed()) {
     //TODO: if mwaitx supported, //mwaitx(amd_queue_.read_dispatch_id);
     os::YieldThread();
   }
@@ -994,8 +993,8 @@ void AqlQueue::AsyncReclaimAltScratch() {
   Resume();
 
   // If current dispatch is using alt scratch, wait for it to finish
-  while (amd_queue_.alt_scratch_max_use_index > amd_queue_.read_dispatch_id) {
-    //DYSDEBUG TODO: if mwaitx supported, //mwaitx(amd_queue_.read_dispatch_id);
+  while (amd_queue_.alt_scratch_max_use_index >= LoadReadIndexRelaxed()) {
+    //TODO: if mwaitx supported, //mwaitx(amd_queue_.read_dispatch_id);
     os::YieldThread();
   }
 
