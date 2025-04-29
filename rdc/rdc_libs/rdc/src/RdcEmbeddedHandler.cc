@@ -210,7 +210,7 @@ rdc_status_t RdcEmbeddedHandler::rdc_device_get_component_version(
     return RDC_ST_BAD_PARAMETER;
   }
 
-  if (component == RDC_AMDMSI_COMPONENT) {
+  if (component == RDC_AMDSMI_COMPONENT) {
     amdsmi_status_t ret;
     amdsmi_version_t ver = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, nullptr};
 
@@ -219,7 +219,7 @@ rdc_status_t RdcEmbeddedHandler::rdc_device_get_component_version(
     if (ret != AMDSMI_STATUS_SUCCESS) {
       RDC_LOG(RDC_ERROR, "Failed to obtain the version of the server's amd-smi library. reason: "
                              << (ret == AMDSMI_STATUS_INVAL ? "Invalid parameters" : "unknown"));
-      return RDC_ST_MSI_ERROR;
+      return RDC_ST_SMI_ERROR;
     }
 
     strncpy_with_null(p_rdc_compv->version, ver.build, RDC_MAX_VERSION_STR_LENGTH);

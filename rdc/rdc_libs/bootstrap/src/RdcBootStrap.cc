@@ -21,8 +21,8 @@ THE SOFTWARE.
 */
 #include <dlfcn.h>
 #include <string.h>
-#include <fstream>
 
+#include <fstream>
 #include <map>
 
 #include "common/rdc_fields_supported.h"
@@ -352,7 +352,7 @@ const char* rdc_status_string(rdc_status_t result) {
       return "Cannot find the value";
     case RDC_ST_BAD_PARAMETER:
       return "Invalid parameters";
-    case RDC_ST_MSI_ERROR:
+    case RDC_ST_SMI_ERROR:
       return "SMI error";
     case RDC_ST_MAX_LIMIT:
       return "The max limit reached";
@@ -477,7 +477,6 @@ char* strncpy_with_null(char* dest, const char* src, size_t n) {
   return dest;
 }
 
-
 rdc_status_t rdc_policy_set(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                             rdc_policy_t policy) {
   if (!p_rdc_handle) {
@@ -541,20 +540,20 @@ rdc_status_t rdc_get_num_partition(rdc_handle_t p_rdc_handle, uint32_t index,
     return RDC_ST_INVALID_HANDLER;
   }
   return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
-    ->rdc_get_num_partition(index, num_partition);
+      ->rdc_get_num_partition(index, num_partition);
 }
 
 rdc_status_t rdc_instance_profile_get(rdc_handle_t p_rdc_handle, uint32_t entity_index,
-  rdc_instance_resource_type_t resource_type,
-  rdc_resource_profile_t* profile) {
+                                      rdc_instance_resource_type_t resource_type,
+                                      rdc_resource_profile_t* profile) {
   if (!p_rdc_handle || !profile) {
     return RDC_ST_INVALID_HANDLER;
   }
   return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
-    ->rdc_instance_profile_get(entity_index, resource_type, profile);
+      ->rdc_instance_profile_get(entity_index, resource_type, profile);
 }
 
-const char * get_rocm_path(const char * search_string) {
+const char* get_rocm_path(const char* search_string) {
   // set default rocm path in case lookup fails
   static std::string rocm_path("/opt/rocm");
   const char* rocm_path_env = getenv("ROCM_PATH");
