@@ -1016,7 +1016,31 @@ rsmi_dev_vendor_id_get(uint32_t dv_ind, uint16_t *id) {
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   CHK_SUPPORT_NAME_ONLY(id)
-  return get_id(dv_ind, amd::smi::kDevVendorID, id);
+  rsmi_status_t status = get_id(dv_ind, amd::smi::kDevVendorID, id);
+  if (status != RSMI_STATUS_SUCCESS)
+  {
+    GET_DEV_AND_KFDNODE_FROM_INDX
+    uint32_t node_id;
+    uint64_t kfd_vendor_id;
+    int ret_kfd = kfd_node->get_node_id(&node_id);
+    ret_kfd = amd::smi::read_node_properties(node_id, "vendor_id", &kfd_vendor_id);
+    if (ret_kfd == 0) {
+      *id = kfd_vendor_id;
+      status = RSMI_STATUS_SUCCESS;
+    } else {
+      *id = std::numeric_limits<uint16_t>::max();
+      status = RSMI_STATUS_NOT_SUPPORTED;
+    }
+    ss << __PRETTY_FUNCTION__
+       << " | Issue: Could not read device from sysfs, falling back to KFD" << "\n"
+       << " ; Device #: " << std::to_string(dv_ind) << "\n"
+       << " ; ret_kfd: " << std::to_string(ret_kfd) << "\n"
+       << " ; node: " << std::to_string(node_id) << "\n"
+       << " ; Data: vendor_id (from KFD)= " << std::to_string(*id) << "\n"
+       << " ; ret = " << getRSMIStatusString(status, false);
+    LOG_DEBUG(ss);
+  }
+  return status;
 }
 
 rsmi_status_t

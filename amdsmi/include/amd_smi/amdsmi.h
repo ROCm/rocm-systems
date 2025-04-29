@@ -4795,6 +4795,33 @@ amdsmi_get_gpu_cper_entries(amdsmi_processor_handle processor_handle, uint32_t s
 
 /** @} End tagECCInfo */
 
+#define MAX_NUMBER_OF_AFIDS_PER_RECORD 12
+/**
+ *  @brief Get the AFIDs from CPER buffer
+ *
+ *  @platform{gpu_bm_linux}  @platform{host}  @platform{guest_1vf}
+ *  @platform{guest_mvf} @platform{guest_windows}
+ *
+ *  @details A utility function which retrieves the AFIDs from the CPER record.
+ *
+ *  @param[in] cper_buffer a pointer to the buffer with one CPER record. The caller must make sure the whole CPER record is loaded into the buffer.
+ *
+ *  @param[in] buf_size is the size of the cper_buffer.
+ *
+ *  @param[out] afids a pointer to an array of uint64_t to which the AF IDs will be written
+ *
+ *  @param[in,out] num_afids As input, the value passed through this parameter is the number of
+ *  uint64_t that may be safely written to the memory pointed to by @p afids. This is the limit
+ *  on how many AF IDs will be written to @p afids. On return, @p num_afids will contain the
+ *  number of AF IDs written to @p afids, or the number of AF IDs that could have been written
+ *  if enough memory had been provided. It is suggest to pass MAX_NUMBER_OF_AFIDS_PER_RECORD for all
+ *  AF Ids.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_afids_from_cper(
+            char* cper_buffer, uint32_t buf_size, uint64_t* afids, uint32_t* num_afids);
+
 /*****************************************************************************/
 /** @defgroup tagErrorQuery Error Queries
  *  These functions provide error information about AMDSMI calls as well as

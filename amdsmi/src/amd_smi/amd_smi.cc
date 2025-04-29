@@ -46,6 +46,7 @@
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/fdinfo.h"
 #include "amd_smi/impl/amd_smi_common.h"
+#include "amd_smi/impl/amd_smi_cper.h"
 #include "amd_smi/impl/amd_smi_system.h"
 #include "amd_smi/impl/amd_smi_socket.h"
 #include "amd_smi/impl/amd_smi_gpu_device.h"
@@ -1353,6 +1354,7 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
 
     amdsmi_status_t status;
     amd::smi::AMDSmiSystem::getInstance().init_drm();
+    // removing drm check for now due to drm issues
     if (gpu_device->check_if_drm_is_supported()) {
         status = gpu_device->amdgpu_query_info(AMDGPU_INFO_DEV_INFO,
             sizeof(struct drm_amdgpu_info_device), &dev_info);
@@ -1371,17 +1373,25 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
                          info->market_name, AMDSMI_256_LENGTH);
         }
 
-        info->device_id = dev_info.device_id;
-        info->rev_id = dev_info.pci_rev;
-        info->vendor_id = gpu_device->get_vendor_id();
-    } else {
-        status = rsmi_wrapper(rsmi_dev_brand_get, processor_handle, 0,
-                info->market_name, AMDSMI_256_LENGTH);
-
-        status = rsmi_wrapper(rsmi_dev_vendor_id_get, processor_handle, 0,
-                              &vendor_id);
-        if (status == AMDSMI_STATUS_SUCCESS) info->vendor_id = vendor_id;
+        // info->device_id = dev_info.device_id;
+        // info->rev_id = dev_info.pci_rev;
+        // info->vendor_id = gpu_device->get_vendor_id();
     }
+    else {
+        status = rsmi_wrapper(rsmi_dev_brand_get, processor_handle, 0,
+            info->market_name, AMDSMI_256_LENGTH);
+    }
+    uint16_t device_id = std::numeric_limits<uint16_t>::max();
+    status = rsmi_wrapper(rsmi_dev_id_get, processor_handle, 0, &device_id);
+    if (status == AMDSMI_STATUS_SUCCESS) info->device_id = static_cast<uint64_t>(device_id);
+
+    uint16_t rev_id = std::numeric_limits<uint16_t>::max();
+    status = rsmi_wrapper(rsmi_dev_revision_get, processor_handle, 0, &rev_id);
+    if (status == AMDSMI_STATUS_SUCCESS) info->rev_id = static_cast<uint32_t>(rev_id);
+
+    status = rsmi_wrapper(rsmi_dev_vendor_id_get, processor_handle, 0,
+                            &vendor_id);
+    if (status == AMDSMI_STATUS_SUCCESS) info->vendor_id = vendor_id;
     // For other sysfs related information, get from rocm-smi
 
     // Ensure asic_serial defaults to an unsupported value
@@ -1930,6 +1940,8 @@ amdsmi_set_gpu_memory_partition(amdsmi_processor_handle processor_handle,
     } else if (it == nps_amdsmi_to_RSMI.end()) {
         return AMDSMI_STATUS_INVAL;
     }
+
+    amd::smi::AMDSmiSystem::getInstance().clean_up_drm();
     amdsmi_status_t ret = rsmi_wrapper(rsmi_dev_memory_partition_set, processor_handle, 0,
                                         rsmi_type);
 
@@ -3621,6 +3633,66 @@ amdsmi_get_gpu_cper_entries(
         cper_hdrs,
         entry_count,
         cursor);
+}
+
+amdsmi_status_t amdsmi_get_afids_from_cper(
+            char* cper_buffer, uint32_t buf_size, uint64_t* afids, uint32_t* num_afids) {
+
+    AMDSMI_CHECK_INIT();
+
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] begin\n";
+    LOG_DEBUG(ss);
+
+    if(!cper_buffer) {
+        ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] cper_buffer should be a valid memory address\n";
+        LOG_ERROR(ss);
+        return AMDSMI_STATUS_INVAL;
+    }
+    else if(!buf_size) {
+        ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] buf_size should be greater than 0\n";
+        LOG_ERROR(ss);
+        return AMDSMI_STATUS_INVAL;
+    }
+    else if(!afids) {
+        ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] afids should be a valid memory address\n";
+        LOG_ERROR(ss);
+        return AMDSMI_STATUS_INVAL;
+    }
+    else if(!num_afids) {
+        ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] num_afids should be a valid memory address\n";
+        LOG_ERROR(ss);
+        return AMDSMI_STATUS_INVAL;
+    }
+    else if(!*num_afids) {
+        ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] num_afids should be greater than 0\n";
+        LOG_ERROR(ss);
+        return AMDSMI_STATUS_INVAL;
+    }
+
+    const amdsmi_cper_hdr_t *cper = reinterpret_cast<const amdsmi_cper_hdr_t *>(cper_buffer);
+    if(cper->record_length > buf_size) {
+        ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] cper buffer size " << std::dec << buf_size << " is smaller than cper record length " << std::dec << cper->record_length << "\n";
+        LOG_ERROR(ss);
+        return AMDSMI_STATUS_INVAL;
+    }
+    else if(cper->signature[0] != 'C' || cper->signature[1] != 'P' || 
+        cper->signature[2] != 'E' || cper->signature[3] != 'R') {
+        ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] cper buffer does not have the correct signature\n";
+        LOG_ERROR(ss);
+        return AMDSMI_STATUS_INVAL;
+    }
+
+    int i = 0;
+    for(int afid: cper_decode(cper)) {
+        if(i < *num_afids) {
+            afids[i] = afid;
+        }
+        ++i;
+    }
+    *num_afids = i;
+
+    return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t

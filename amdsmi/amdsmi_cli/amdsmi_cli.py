@@ -102,9 +102,9 @@ if __name__ == "__main__":
         except NameError:
             logging.debug("argcomplete module not found. Autocomplete will not work.")
 
-        valid_commands = ['version', 'list', 'static', 'firmware', 'bad-pages',
-                          'metric', 'process', 'profile', 'event', 'topology', 'set',
-                          'reset', 'monitor', 'xgmi', 'partition', 'ras', '--help', '-h']
+        # Store possible subcommands & aliases for later errors
+        valid_commands = amd_smi_parser.possible_commands
+        valid_commands += ['--help', '-h']
 
         sys.argv = [arg.lower() if arg.startswith('--') or not arg.startswith('-')
                     else arg for arg in sys.argv]
