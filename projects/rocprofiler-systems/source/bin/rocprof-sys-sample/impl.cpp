@@ -431,6 +431,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             auto _d = p.get<bool>("device");
             update_env(_env, "ROCPROFSYS_USE_PROCESS_SAMPLING", _h || _d);
             update_env(_env, "ROCPROFSYS_CPU_FREQ_ENABLED", _h);
+            if(_h) update_env(_env, "ROCPROFSYS_USE_AMD_SMI", _d);
         });
     parser
         .add_argument({ "-D", "--device" },
@@ -442,6 +443,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             auto _d = p.get<bool>("device");
             update_env(_env, "ROCPROFSYS_USE_PROCESS_SAMPLING", _h || _d);
             update_env(_env, "ROCPROFSYS_USE_AMD_SMI", _d);
+            if(_d) update_env(_env, "ROCPROFSYS_CPU_FREQ_ENABLED", _h);
         });
     parser
         .add_argument({ "-w", "--wait" },
