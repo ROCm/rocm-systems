@@ -34,7 +34,7 @@ get_cmake_property(ROCPROFILER_REGISTER_PACKAGING_COMPONENTS COMPONENTS)
 rocprofiler_register_add_feature(ROCPROFILER_REGISTER_PACKAGING_COMPONENTS
                                  "Packaging components")
 list(REMOVE_ITEM ROCPROFILER_REGISTER_PACKAGING_COMPONENTS "Development" "Unspecified"
-     "external")
+     "external" "fmt-core")
 list(LENGTH ROCPROFILER_REGISTER_PACKAGING_COMPONENTS
      NUM_ROCPROFILER_REGISTER_PACKAGING_COMPONENTS)
 
