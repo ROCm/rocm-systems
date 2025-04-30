@@ -217,6 +217,9 @@ bool&
 get_use_process_sampling() ROCPROFSYS_HOT;
 
 bool&
+get_cpu_freq_enabled();
+
+bool&
 get_use_pid();
 
 bool&

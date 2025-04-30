@@ -150,12 +150,15 @@ sampler::setup()
         _amd_smi->sample       = []() { amd_smi::sample(); };
     }
 
-    auto& _cpu_freq         = instances.emplace_back(std::make_unique<instance>());
-    _cpu_freq->setup        = []() { cpu_freq::setup(); };
-    _cpu_freq->shutdown     = []() { cpu_freq::shutdown(); };
-    _cpu_freq->post_process = []() { cpu_freq::post_process(); };
-    _cpu_freq->config       = []() { cpu_freq::config(); };
-    _cpu_freq->sample       = []() { cpu_freq::sample(); };
+    if(get_cpu_freq_enabled())
+    {
+        auto& _cpu_freq         = instances.emplace_back(std::make_unique<instance>());
+        _cpu_freq->setup        = []() { cpu_freq::setup(); };
+        _cpu_freq->shutdown     = []() { cpu_freq::shutdown(); };
+        _cpu_freq->post_process = []() { cpu_freq::post_process(); };
+        _cpu_freq->config       = []() { cpu_freq::config(); };
+        _cpu_freq->sample       = []() { cpu_freq::sample(); };
+    }
 
     for(auto& itr : instances)
         itr->setup();
