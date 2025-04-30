@@ -419,7 +419,7 @@ configure_settings(bool _init)
 
     ROCPROFSYS_CONFIG_SETTING(
         double, "ROCPROFSYS_SAMPLING_FREQ",
-        "Number of software interrupts per second when OMNITTRACE_USE_SAMPLING=ON", 300.0,
+        "Number of software interrupts per second when ROCPROFSYS_USE_SAMPLING=ON", 300.0,
         "sampling", "process_sampling");
 
     ROCPROFSYS_CONFIG_SETTING(double, "ROCPROFSYS_SAMPLING_CPUTIME_FREQ",
@@ -460,9 +460,15 @@ configure_settings(bool _init)
                               "If > 0.0, time (in seconds) to sample before stopping",
                               0.0, "sampling", "process_sampling");
 
+    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_CPU_FREQ_ENABLED",
+                              "Enable tracking for CPU frequency, memory usage, virtual "
+                              "memory usage, peak memory, context switches, page faults, "
+                              "user time, and kernel time",
+                              false, "process_sampling");
+
     ROCPROFSYS_CONFIG_SETTING(
         double, "ROCPROFSYS_PROCESS_SAMPLING_FREQ",
-        "Number of measurements per second when OMNITTRACE_USE_PROCESS_SAMPLING=ON. If "
+        "Number of measurements per second when ROCPROFSYS_USE_PROCESS_SAMPLING=ON. If "
         "set to zero, uses ROCPROFSYS_SAMPLING_FREQ value",
         0.0, "process_sampling");
 
@@ -1168,6 +1174,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         _set("ROCPROFSYS_USE_SAMPLING", false);
         _set("ROCPROFSYS_USE_PROCESS_SAMPLING", false);
         _set("ROCPROFSYS_USE_CODE_COVERAGE", false);
+        _set("ROCPROFSYS_CPU_FREQ_ENABLED", false);
         set_setting_value("ROCPROFSYS_TIMEMORY_COMPONENTS", std::string{});
         set_setting_value("ROCPROFSYS_PAPI_EVENTS", std::string{});
     }
@@ -1848,6 +1855,13 @@ bool&
 get_use_process_sampling()
 {
     static auto _v = get_config()->find("ROCPROFSYS_USE_PROCESS_SAMPLING");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
+bool&
+get_cpu_freq_enabled()
+{
+    static auto _v = get_config()->find("ROCPROFSYS_CPU_FREQ_ENABLED");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
