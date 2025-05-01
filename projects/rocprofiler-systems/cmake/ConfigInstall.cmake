@@ -48,7 +48,7 @@ configure_file(
     ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprof-sys-causal-print COPYONLY)
 
 install(PROGRAMS ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprof-sys-causal-print
-        DESTINATION ${CMAKE_INSTALL_BINDIR})
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME})
 
 # ------------------------------------------------------------------------------#
 # build tree
