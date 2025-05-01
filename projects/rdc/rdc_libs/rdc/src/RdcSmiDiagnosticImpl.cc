@@ -212,7 +212,7 @@ rdc_status_t RdcSmiDiagnosticImpl::check_smi_topo_info(uint32_t gpu_index[RDC_MA
         err_info += " fail";
         strncpy_with_null(result->details.msg, err_info.c_str(), MAX_DIAG_MSG_LENGTH);
         strncpy_with_null(result->info, err_info.c_str(), MAX_DIAG_MSG_LENGTH);
-        return RDC_ST_MSI_ERROR;
+        return RDC_ST_SMI_ERROR;
       }
 
       info += std::to_string(i) + "=>";

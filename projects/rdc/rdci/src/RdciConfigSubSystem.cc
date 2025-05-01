@@ -228,7 +228,7 @@ void RdciConfigSubSystem::process() {
         if (is_json_output()) {
           json_ss << "\"group_id\": \"" << group_id_ << "\", \"status\": \"ok\"";
         } else {
-          std::cout << "Successfully cleared all configurationbelongs for group: " << group_id_
+          std::cout << "Successfully cleared all configuration for group: " << group_id_
                     << std::endl;
         }
         std::cout << json_ss.str() << std::endl;
@@ -292,11 +292,13 @@ void RdciConfigSubSystem::display_config_settings(rdc_config_setting_list_t& rdc
               json_ss << "\"N/A\"";
             } else {
               if (value.type == INTEGER) {
-                ss << value.value.l_int;
-                json_ss << value.value.l_int;
+                double mhz = static_cast<double>(value.value.l_int) / 1'000'000.0;
+                ss << std::fixed << std::setprecision(0) << mhz;
+                json_ss << mhz;
               } else if (value.type == DOUBLE) {
-                ss << std::fixed << std::setprecision(3) << value.value.dbl;
-                json_ss << value.value.dbl;
+                double mhz = value.value.dbl / 1'000'000.0;
+                ss << std::fixed << std::setprecision(0) << mhz;
+                json_ss << mhz;
               } else {
                 ss << value.value.str;
                 json_ss << value.value.str;
@@ -320,11 +322,13 @@ void RdciConfigSubSystem::display_config_settings(rdc_config_setting_list_t& rdc
               json_ss << "\"N/A\"";
             } else {
               if (value.type == INTEGER) {
-                ss << value.value.l_int;
-                json_ss << value.value.l_int;
+                double mhz = static_cast<double>(value.value.l_int) / 1'000'000.0;
+                ss << std::fixed << std::setprecision(0) << mhz;
+                json_ss << mhz;
               } else if (value.type == DOUBLE) {
-                ss << std::fixed << std::setprecision(3) << value.value.dbl;
-                json_ss << value.value.dbl;
+                double mhz = value.value.dbl / 1'000'000.0;
+                ss << std::fixed << std::setprecision(0) << mhz;
+                json_ss << mhz;
               } else {
                 ss << value.value.str;
                 json_ss << value.value.str;
