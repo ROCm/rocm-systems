@@ -858,9 +858,6 @@ rocprofiler_set_api_table(const char* name,
         // install rocprofiler API wrappers
         rocprofiler::hip::update_table(hip_compiler_api_table);
 
-        // install HIP stream deduction wrappers
-        rocprofiler::hip::stream::update_table(hip_compiler_api_table);
-
         // allow tools to install API wrappers
         rocprofiler::intercept_table::notify_intercept_table_registration(
             ROCPROFILER_HIP_COMPILER_TABLE,

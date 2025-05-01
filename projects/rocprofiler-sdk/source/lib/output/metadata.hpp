@@ -90,6 +90,8 @@ using synced_map = common::Synchronized<Tp, true>;
 template <typename Tp>
 using synced_obj          = common::Synchronized<Tp, true>;
 using pc_sampling_stats_t = rocprofiler_tool_pc_sampling_stats;
+using runtime_initialization_set_t =
+    std::unordered_set<rocprofiler_runtime_initialization_operation_t>;
 
 enum class agent_indexing
 {
@@ -126,17 +128,18 @@ struct metadata
     agent_counter_info_map_t          agent_counter_info          = {};
     agent_pc_sample_config_info_map_t agent_pc_sample_config_info = {};
 
-    sdk::buffer_name_info                   buffer_names      = {};
-    sdk::callback_name_info                 callback_names    = {};
-    synced_map<code_object_data_map_t>      code_objects      = {};
-    synced_map<kernel_symbol_data_map_t>    kernel_symbols    = {};
-    synced_map<marker_message_map_t>        marker_messages   = {};
-    synced_map<string_entry_map_t>          string_entries    = {};
-    synced_map<external_corr_id_set_t>      external_corr_ids = {};
-    synced_map<host_function_info_map_t>    host_functions    = {};
-    synced_map<code_object_load_info_vec_t> code_object_load  = {};
-    att_filenames_map_t                     att_filenames     = {};
-    synced_obj<pc_sampling_stats_t>         pc_sampling_stats = {};
+    sdk::buffer_name_info                    buffer_names               = {};
+    sdk::callback_name_info                  callback_names             = {};
+    synced_map<code_object_data_map_t>       code_objects               = {};
+    synced_map<kernel_symbol_data_map_t>     kernel_symbols             = {};
+    synced_map<marker_message_map_t>         marker_messages            = {};
+    synced_map<string_entry_map_t>           string_entries             = {};
+    synced_map<external_corr_id_set_t>       external_corr_ids          = {};
+    synced_map<host_function_info_map_t>     host_functions             = {};
+    synced_map<code_object_load_info_vec_t>  code_object_load           = {};
+    att_filenames_map_t                      att_filenames              = {};
+    synced_obj<pc_sampling_stats_t>          pc_sampling_stats          = {};
+    synced_obj<runtime_initialization_set_t> runtime_initialization_set = {};
 
     metadata() = default;
     metadata(inprocess);
@@ -182,6 +185,7 @@ struct metadata
     bool add_host_function(host_function_info&& func);
     bool add_string_entry(size_t key, std::string_view str);
     bool add_external_correlation_id(uint64_t);
+    bool add_runtime_initialization(rocprofiler_runtime_initialization_operation_t);
 
     std::string_view   get_marker_message(uint64_t corr_id) const;
     std::string_view   get_kernel_name(uint64_t kernel_id, uint64_t rename_id) const;
@@ -193,6 +197,7 @@ struct metadata
                                           rocprofiler_tracing_operation_t   op) const;
     agent_index        get_agent_index(rocprofiler_agent_id_t agent, agent_indexing index) const;
     const std::string* get_string_entry(size_t key) const;
+    bool               is_runtime_initialized(rocprofiler_runtime_initialization_operation_t) const;
 
 private:
     bool                           inprocess_init = false;

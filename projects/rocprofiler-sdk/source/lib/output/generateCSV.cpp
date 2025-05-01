@@ -249,10 +249,10 @@ generate_csv(const output_config& cfg,
 }
 
 void
-generate_csv(const output_config& cfg,
-             const metadata&      tool_metadata,
-             const generator<tool_buffer_tracing_kernel_dispatch_with_stream_record_t>& data,
-             const stats_entry_t&                                                       stats)
+generate_csv(const output_config&                                               cfg,
+             const metadata&                                                    tool_metadata,
+             const generator<tool_buffer_tracing_kernel_dispatch_ext_record_t>& data,
+             const stats_entry_t&                                               stats)
 {
     if(data.empty()) return;
 
@@ -399,10 +399,10 @@ generate_csv(const output_config&                                          cfg,
 }
 
 void
-generate_csv(const output_config&                                                   cfg,
-             const metadata&                                                        tool_metadata,
-             const generator<tool_buffer_tracing_memory_copy_with_stream_record_t>& data,
-             const stats_entry_t&                                                   stats)
+generate_csv(const output_config&                                           cfg,
+             const metadata&                                                tool_metadata,
+             const generator<tool_buffer_tracing_memory_copy_ext_record_t>& data,
+             const stats_entry_t&                                           stats)
 {
     if(data.empty()) return;
 

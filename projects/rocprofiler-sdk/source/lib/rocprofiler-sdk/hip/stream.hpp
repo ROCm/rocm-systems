@@ -36,8 +36,7 @@ namespace hip
 {
 namespace stream
 {
-using hip_compiler_api_table_t = HipCompilerDispatchTable;
-using hip_runtime_api_table_t  = HipDispatchTable;
+using hip_runtime_api_table_t = HipDispatchTable;
 
 rocprofiler_stream_id_t
 get_stream_id();

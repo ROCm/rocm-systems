@@ -60,7 +60,8 @@ pop_stream_id()
 rocprofiler_stream_id_t
 get_stream_id()
 {
-    return CHECK_NOTNULL(get_stream_stack())->back();
+    return (CHECK_NOTNULL(get_stream_stack())->empty()) ? rocprofiler_stream_id_t{.handle = 0}
+                                                        : get_stream_stack()->back();
 }
 
 bool

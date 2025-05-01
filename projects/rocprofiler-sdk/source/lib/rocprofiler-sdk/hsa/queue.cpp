@@ -253,6 +253,14 @@ WriteInterceptor(const void* packets,
     tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
                                ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
                                tracing_data_v);
+    // these are for the services (dispatch counter collection, pc sampling, ATT) which use
+    // the queue/queue_controller callback mechanism
+    const auto queue_callback_context_filter = [](const context::context* ctx) {
+        return (ctx->counter_collection || ctx->pc_sampler || ctx->dispatch_thread_trace);
+    };
+
+    for(const auto* itr : context::get_active_contexts(queue_callback_context_filter))
+        tracing_data_v.external_correlation_ids.emplace(itr, tracing::empty_user_data);
 
     const auto* packets_arr         = static_cast<const rocprofiler_packet*>(packets);
     auto        transformed_packets = std::vector<rocprofiler_packet>{};

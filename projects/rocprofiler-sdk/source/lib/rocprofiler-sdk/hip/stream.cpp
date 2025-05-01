@@ -34,7 +34,6 @@
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
-#include "rocprofiler-sdk/hip/compiler_api_id.h"
 
 #include <rocprofiler-sdk/buffer.h>
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -367,28 +366,11 @@ enable_stream_stack()
     {
         if(itr->is_tracing_one_of(ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY,
                                   ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
-                                  ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
                                   ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
                                   ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
                                   ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API,
-                                  ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API,
                                   ROCPROFILER_BUFFER_TRACING_HIP_STREAM,
-                                  ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT,
-                                  ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT))
-            return true;
-    }
-
-    return false;
-}
-
-bool
-enable_compiler_stream_stack()
-{
-    for(const auto& itr : context::get_registered_contexts())
-    {
-        if(itr->is_tracing_one_of(ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
-                                  ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API,
-                                  ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT))
+                                  ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT))
             return true;
     }
 
@@ -415,11 +397,6 @@ update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
         ROCP_TRACE << "updating table entry for " << _info.name;
 
         constexpr auto num_args = function_args_type::size();
-        constexpr auto is_hip_pop_call_config_func =
-            std::is_same<decltype(info_type::operation_idx),
-                         rocprofiler_hip_compiler_api_id_t>::value &&
-            (static_cast<rocprofiler_hip_compiler_api_id_t>(info_type::operation_idx) ==
-             ROCPROFILER_HIP_COMPILER_API_ID___hipPopCallConfiguration);
 
         if constexpr(common::mpl::is_one_of<hipStream_t, function_args_type>::value)
         {
@@ -432,12 +409,6 @@ update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
             // arg of the given type and make sure it resolves to the same distance
             static_assert(stream_idx == (num_args - rstream_idx - 1),
                           "function has more than one stream argument");
-
-            // don't wrap the compiler API functions unless HIP compiler API tracing is enabled
-            if constexpr(TableIdx == ROCPROFILER_HIP_TABLE_ID_Compiler)
-            {
-                if(!enable_compiler_stream_stack()) return;
-            }
 
             // 1. get the sub-table containing the function pointer in original table
             // 2. get reference to function pointer in sub-table in original table
@@ -460,8 +431,7 @@ update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
                 _func = create_read_functor<TableIdx, OpIdx>(_func);
             }
         }
-        else if constexpr(common::mpl::is_one_of<hipStream_t*, function_args_type>::value &&
-                          !is_hip_pop_call_config_func)
+        else if constexpr(common::mpl::is_one_of<hipStream_t*, function_args_type>::value)
         {
             constexpr auto stream_idx =
                 common::mpl::index_of<hipStream_t*, function_args_type>::value;
@@ -473,12 +443,6 @@ update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
             // arg of the given type and make sure it resolves to the same distance
             static_assert(stream_idx == (num_args - rstream_idx - 1),
                           "function has more than one stream argument");
-
-            // don't wrap the compiler API functions unless HIP compiler API tracing is enabled
-            if constexpr(TableIdx == ROCPROFILER_HIP_TABLE_ID_Compiler)
-            {
-                if(!enable_compiler_stream_stack()) return;
-            }
 
             ROCP_INFO << _info.name << " has been designated as a stream create function";
 
@@ -541,7 +505,6 @@ using hip_op_args_cb_t = rocprofiler_callback_tracing_operation_args_cb_t;
     template void update_table<TABLE_TYPE>(TABLE_TYPE * _tbl);
 
 INSTANTIATE_HIP_TABLE_FUNC(hip_runtime_api_table_t, ROCPROFILER_HIP_TABLE_ID_Runtime)
-INSTANTIATE_HIP_TABLE_FUNC(hip_compiler_api_table_t, ROCPROFILER_HIP_TABLE_ID_Compiler)
 }  // namespace stream
 }  // namespace hip
 }  // namespace rocprofiler
