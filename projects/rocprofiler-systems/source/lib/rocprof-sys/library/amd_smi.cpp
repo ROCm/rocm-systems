@@ -191,11 +191,11 @@ data::sample(uint32_t _dev_id)
 
     for(const auto& v_activity : _gpu_metrics.vcn_activity)
     {
-        if(v_activity != UINT16_MAX) m_vcn_metrics[_dev_id].push_back(v_activity);
+        if(v_activity != UINT16_MAX) m_vcn_metrics.push_back(v_activity);
     }
     for(const auto& j_activity : _gpu_metrics.jpeg_activity)
     {
-        if(j_activity != UINT16_MAX) m_jpeg_metrics[_dev_id].push_back(j_activity);
+        if(j_activity != UINT16_MAX) m_jpeg_metrics.push_back(j_activity);
     }
 
 #undef ROCPROFSYS_AMDSMI_GET
@@ -378,25 +378,15 @@ data::post_process(uint32_t _dev_id)
                                            "megabytes");
                 if(_settings.vcn_activity)
                 {
-                    for(const auto& [dev_id, metrics] : itr.m_vcn_metrics)
-                    {
-                        for(std::size_t i = 0; i < std::size(metrics); ++i)
-                        {
-                            counter_track::emplace(
-                                _dev_id, addendum_blk(i, "  VCN Activity"), "%");
-                        }
-                    }
+                    for(std::size_t i = 0; i < std::size(itr.m_vcn_metrics); ++i)
+                        counter_track::emplace(_dev_id, addendum_blk(i, "  VCN Activity"),
+                                               "%");
                 }
                 if(_settings.jpeg_activity)
                 {
-                    for(const auto& [dev_id, metrics] : itr.m_jpeg_metrics)
-                    {
-                        for(std::size_t i = 0; i < std::size(metrics); ++i)
-                        {
-                            counter_track::emplace(_dev_id,
-                                                   addendum_blk(i, "JPEG Activity"), "%");
-                        }
-                    }
+                    for(std::size_t i = 0; i < std::size(itr.m_jpeg_metrics); ++i)
+                        counter_track::emplace(_dev_id, addendum_blk(i, "JPEG Activity"),
+                                               "%");
                 }
             }
             uint64_t _ts = itr.m_ts;
@@ -429,28 +419,23 @@ data::post_process(uint32_t _dev_id)
                               counter_track::at(_dev_id, _idx.at(5)), _ts, _usage);
             if(_settings.vcn_activity)
             {
-                for(const auto& [dev_id, metrics] : itr.m_vcn_metrics)
+                uint64_t idx = _idx.at(6);
+                for(const auto& temp : itr.m_vcn_metrics)
                 {
-                    for(std::size_t i = 0; i < std::size(metrics); ++i)
-                    {
-                        double _vcn_activity = metrics[i];
-                        TRACE_COUNTER("device_vcn_activity",
-                                      counter_track::at(_dev_id, _idx.at(6) + i), _ts,
-                                      _vcn_activity);
-                    }
+                    TRACE_COUNTER("device_vcn_activity", counter_track::at(_dev_id, idx),
+                                  _ts, temp);
+                    ++idx;
                 }
             }
             if(_settings.jpeg_activity)
             {
-                for(const auto& [dev_id, metrics] : itr.m_jpeg_metrics)
+                uint64_t idx = _idx.at(7);
+                if(_settings.vcn_activity) idx += (itr.m_vcn_metrics.size() - 1);
+                for(const auto& temp : itr.m_jpeg_metrics)
                 {
-                    for(std::size_t i = 0; i < std::size(metrics); ++i)
-                    {
-                        double _jpeg_activity = metrics[i];
-                        TRACE_COUNTER("device_jpeg_activity",
-                                      counter_track::at(_dev_id, _idx.at(7) + i), _ts,
-                                      _jpeg_activity);
-                    }
+                    TRACE_COUNTER("device_jpeg_activity", counter_track::at(_dev_id, idx),
+                                  _ts, temp);
+                    ++idx;
                 }
             }
         }
