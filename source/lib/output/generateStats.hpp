@@ -32,9 +32,9 @@ namespace rocprofiler
 namespace tool
 {
 stats_entry_t
-generate_stats(const output_config& cfg,
-               const metadata&      tool_metadata,
-               const generator<tool_buffer_tracing_kernel_dispatch_with_stream_record_t>& data);
+generate_stats(const output_config&                                               cfg,
+               const metadata&                                                    tool_metadata,
+               const generator<tool_buffer_tracing_kernel_dispatch_ext_record_t>& data);
 
 stats_entry_t
 generate_stats(const output_config&                                              cfg,
@@ -47,9 +47,9 @@ generate_stats(const output_config&                                          cfg
                const generator<rocprofiler_buffer_tracing_hsa_api_record_t>& data);
 
 stats_entry_t
-generate_stats(const output_config&                                                   cfg,
-               const metadata&                                                        tool_metadata,
-               const generator<tool_buffer_tracing_memory_copy_with_stream_record_t>& data);
+generate_stats(const output_config&                                           cfg,
+               const metadata&                                                tool_metadata,
+               const generator<tool_buffer_tracing_memory_copy_ext_record_t>& data);
 
 stats_entry_t
 generate_stats(const output_config&                                             cfg,

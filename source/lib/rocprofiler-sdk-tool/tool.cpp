@@ -249,6 +249,7 @@ using kernel_rename_stack_t = std::stack<uint64_t>;
 auto*      tool_metadata  = as_pointer<tool::metadata>(tool::metadata::inprocess{});
 auto       target_kernels = common::Synchronized<targeted_kernels_map_t>{};
 std::mutex att_shader_data;
+auto       counter_collection_ctx = rocprofiler_context_id_t{0};
 
 thread_local auto thread_dispatch_rename      = as_pointer<kernel_rename_stack_t>();
 thread_local auto thread_dispatch_rename_dtor = common::scope_destructor{[]() {
@@ -262,25 +263,6 @@ struct kernel_rename_and_stream_display_pair
     uint64_t                kernel_rename_val{0};
     rocprofiler_stream_id_t stream_id{.handle = 0};
 };
-auto kernel_rename_and_stream_display_pair_dtors =
-    new std::vector<kernel_rename_and_stream_display_pair*>{};
-
-auto
-get_kernel_rename_and_stream_display_pair_lock()
-{
-    static auto _mutex = std::mutex{};
-    return std::unique_lock<std::mutex>{_mutex};
-}
-
-void
-add_kernel_rename_and_stream_display_pairs(kernel_rename_and_stream_display_pair* ptr)
-{
-    auto lock = get_kernel_rename_and_stream_display_pair_lock();
-    if(ptr != nullptr && kernel_rename_and_stream_display_pair_dtors != nullptr)
-    {
-        kernel_rename_and_stream_display_pair_dtors->emplace_back(ptr);
-    }
-}
 
 bool
 add_kernel_target(uint64_t _kern_id, const std::unordered_set<size_t>& range)
@@ -455,10 +437,19 @@ set_kernel_rename_and_stream_display_correlation_id(
         tool::get_config().kernel_rename && thread_dispatch_rename != nullptr &&
         !thread_dispatch_rename->empty() &&
         kind == ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH;
-    const bool hip_stream_display_enabled =
-        !tool::get_config().group_by_queue &&
-        kernel_rename_and_stream_display_pair_dtors != nullptr &&
-        !rocprofiler::tool::stream::stream_stack_empty();
+    const bool hip_stream_display_enabled = !tool::get_config().group_by_queue;
+    if(kernel_rename_service_enabled && ctx_id == counter_collection_ctx)
+    {
+        auto val = thread_dispatch_rename->top();
+        if(tool_metadata) tool_metadata->add_external_correlation_id(val);
+        external_corr_id->value = val;
+        return 0;
+    }
+    // End early if counter collection context and no kernel rename service is enabled
+    if(ctx_id == counter_collection_ctx)
+    {
+        return 0;
+    }
 
     kernel_rename_and_stream_display_pair* kernel_rename_and_stream_display_vals = nullptr;
     if(kernel_rename_service_enabled || hip_stream_display_enabled)
@@ -475,12 +466,11 @@ set_kernel_rename_and_stream_display_correlation_id(
     // Get stream ID from stream HIP display service
     if(hip_stream_display_enabled && kernel_rename_and_stream_display_vals != nullptr)
     {
-        auto stream_id = rocprofiler::tool::stream::get_stream_id();
+        auto stream_id                                   = tool::stream::get_stream_id();
         kernel_rename_and_stream_display_vals->stream_id = stream_id;
     }
     // Set the external correlation id service to point to struct
     external_corr_id->ptr = kernel_rename_and_stream_display_vals;
-    add_kernel_rename_and_stream_display_pairs(kernel_rename_and_stream_display_vals);
 
     common::consume_args(thr_id, ctx_id, kind, op, internal_corr_id, user_data);
 
@@ -611,6 +601,24 @@ hip_stream_display_callback(rocprofiler_callback_tracing_record_t record,
     else
     {
         ROCP_FATAL << "Unsupported operation for ROCPROFILER_HIP_STREAM";
+    }
+    common::consume_args(user_data, data);
+}
+
+// Stores which runtimes have been initialized in metadata
+void
+runtime_initialization_callback(rocprofiler_callback_tracing_record_t record,
+                                rocprofiler_user_data_t*              user_data,
+                                void*                                 data)
+{
+    if(record.kind != ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION) return;
+    ROCP_CI_LOG_IF(WARNING, tool_metadata == nullptr)
+        << fmt::format("tool cannot record runtime initialization for {}",
+                       tool_metadata->get_operation_name(record.kind, record.operation));
+    if(tool_metadata)
+    {
+        tool_metadata->add_runtime_initialization(
+            static_cast<rocprofiler_runtime_initialization_operation_t>(record.operation));
     }
     common::consume_args(user_data, data);
 }
@@ -942,8 +950,10 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                             record->correlation_id.external.ptr);
                     stream_id         = kernel_stream_pair_ptr->stream_id;
                     kernel_rename_val = kernel_stream_pair_ptr->kernel_rename_val;
+                    delete kernel_stream_pair_ptr;
+                    record->correlation_id.external.value = kernel_rename_val;
                 }
-                rocprofiler::tool::tool_buffer_tracing_kernel_dispatch_with_stream_record_t
+                rocprofiler::tool::tool_buffer_tracing_kernel_dispatch_ext_record_t
                     record_with_stream{*record, stream_id, kernel_rename_val};
                 tool::write_ring_buffer(record_with_stream, domain_type::KERNEL_DISPATCH);
             }
@@ -971,9 +981,11 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                         static_cast<kernel_rename_and_stream_display_pair*>(
                             record->correlation_id.external.ptr);
                     stream_id = kernel_stream_pair_ptr->stream_id;
+                    delete kernel_stream_pair_ptr;
+                    record->correlation_id.external.ptr = nullptr;
                 }
-                rocprofiler::tool::tool_buffer_tracing_memory_copy_with_stream_record_t
-                    record_with_stream{*record, stream_id};
+                rocprofiler::tool::tool_buffer_tracing_memory_copy_ext_record_t record_with_stream{
+                    *record, stream_id};
                 tool::write_ring_buffer(record_with_stream, domain_type::MEMORY_COPY);
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION)
@@ -1366,16 +1378,10 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
 
     auto counter_record = tool::tool_counter_record_t{};
 
-    counter_record.dispatch_data = dispatch_data;
-    counter_record.thread_id     = user_data.value;
-    if(dispatch_data.correlation_id.external.ptr != nullptr)
-    {
-        // Extract the kernel id
-        auto* kernel_stream_pair_ptr = static_cast<kernel_rename_and_stream_display_pair*>(
-            dispatch_data.correlation_id.external.ptr);
-        counter_record.kernel_rename_val = kernel_stream_pair_ptr->kernel_rename_val;
-    }
-
+    counter_record.dispatch_data     = dispatch_data;
+    counter_record.thread_id         = user_data.value;
+    counter_record.kernel_rename_val = dispatch_data.correlation_id.external.value;
+    counter_record.dispatch_data.correlation_id.external.value = counter_record.kernel_rename_val;
     auto serialized_records = std::vector<tool::tool_counter_value_t>{};
     serialized_records.reserve(record_count);
 
@@ -1805,10 +1811,16 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     if(tool::get_config().counter_collection)
     {
+        ROCPROFILER_CALL(rocprofiler_create_context(&counter_collection_ctx),
+                         "failed to create context");
         ROCPROFILER_CALL(
-            rocprofiler_configure_callback_dispatch_counting_service(
-                get_client_ctx(), dispatch_callback, nullptr, counter_record_callback, nullptr),
+            rocprofiler_configure_callback_dispatch_counting_service(counter_collection_ctx,
+                                                                     dispatch_callback,
+                                                                     nullptr,
+                                                                     counter_record_callback,
+                                                                     nullptr),
             "Could not setup counting service");
+        ROCPROFILER_CALL(rocprofiler_start_context(counter_collection_ctx), "start context failed");
     }
 
     if(tool::get_config().rocdecode_api_trace)
@@ -1873,6 +1885,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     }
     if(!tool::get_config().group_by_queue)
     {
+        // Track stream ID information via callback service
         auto hip_stream_display_ctx = rocprofiler_context_id_t{0};
 
         ROCPROFILER_CALL(rocprofiler_create_context(&hip_stream_display_ctx),
@@ -1887,6 +1900,21 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                            nullptr),
             "stream tracing configure failed");
         ROCPROFILER_CALL(rocprofiler_start_context(hip_stream_display_ctx), "start context failed");
+
+        // Track if HIP runtime has been initialized via runtime_intialization service
+        auto runtime_initialization_ctx = rocprofiler_context_id_t{0};
+        ROCPROFILER_CALL(rocprofiler_create_context(&runtime_initialization_ctx),
+                         "failed to create context");
+        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
+                             runtime_initialization_ctx,
+                             ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION,
+                             nullptr,
+                             0,
+                             runtime_initialization_callback,
+                             nullptr),
+                         "stream tracing configure failed");
+        ROCPROFILER_CALL(rocprofiler_start_context(runtime_initialization_ctx),
+                         "start context failed");
     }
     if(tool::get_config().kernel_rename || !tool::get_config().group_by_queue)
     {
@@ -1902,6 +1930,21 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                              set_kernel_rename_and_stream_display_correlation_id,
                              nullptr),
                          "Could not configure external correlation id request service");
+
+        if(tool::get_config().counter_collection)
+        {
+            auto counter_external_corr_id_request_kinds =
+                std::array<rocprofiler_external_correlation_id_request_kind_t, 1>{
+                    ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH};
+
+            ROCPROFILER_CALL(rocprofiler_configure_external_correlation_id_request_service(
+                                 counter_collection_ctx,
+                                 counter_external_corr_id_request_kinds.data(),
+                                 counter_external_corr_id_request_kinds.size(),
+                                 set_kernel_rename_and_stream_display_correlation_id,
+                                 nullptr),
+                             "Could not configure external correlation id request service");
+        }
     }
 
     if(tool::get_config().pc_sampling_host_trap)
@@ -2228,17 +2271,6 @@ tool_fini(void* /*tool_data*/)
     }
 
     run_cleanup();
-
-    if(kernel_rename_and_stream_display_pair_dtors != nullptr)
-    {
-        for(auto& itr : *kernel_rename_and_stream_display_pair_dtors)
-        {
-            delete itr;
-            itr = nullptr;
-        }
-        delete kernel_rename_and_stream_display_pair_dtors;
-        kernel_rename_and_stream_display_pair_dtors = nullptr;
-    }
 
     if(destructors)
     {

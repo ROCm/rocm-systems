@@ -475,6 +475,26 @@ metadata::add_external_correlation_id(uint64_t val)
         [](auto& _data, uint64_t _val) { return _data.emplace(_val).second; }, val);
 }
 
+bool
+metadata::add_runtime_initialization(rocprofiler_runtime_initialization_operation_t runtime_op)
+{
+    return runtime_initialization_set.wlock(
+        [](auto& _data, rocprofiler_runtime_initialization_operation_t _runtime_op) {
+            return _data.emplace(_runtime_op).second;
+        },
+        runtime_op);
+}
+
+bool
+metadata::is_runtime_initialized(rocprofiler_runtime_initialization_operation_t runtime_op) const
+{
+    return runtime_initialization_set.rlock(
+        [](const auto& _data, rocprofiler_runtime_initialization_operation_t _runtime_op) {
+            return _data.count(_runtime_op) > 0;
+        },
+        runtime_op);
+}
+
 std::string_view
 metadata::get_marker_message(uint64_t corr_id) const
 {
