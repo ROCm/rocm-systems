@@ -48,6 +48,8 @@ install(
     FILES ${PROJECT_SOURCE_DIR}/cmake/Modules/rocprofiler-sdk-custom-compilation.cmake
           ${PROJECT_SOURCE_DIR}/cmake/Modules/rocprofiler-sdk-utilities.cmake
           ${PROJECT_SOURCE_DIR}/cmake/Modules/Findlibdw.cmake
+          ${PROJECT_SOURCE_DIR}/cmake/Modules/FindrocDecode.cmake
+          ${PROJECT_SOURCE_DIR}/cmake/Modules/FindrocJPEG.cmake
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}/Modules
     COMPONENT development)
 
