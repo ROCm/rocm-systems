@@ -237,9 +237,6 @@ if(ROCPROFSYS_USE_MPI)
 endif()
 
 if(ROCPROFSYS_USE_ROCM)
-    list(APPEND _RPM_PACKAGE_REQUIRES "amd-smi-lib")
-    list(APPEND _RPM_PACKAGE_REQUIRES "rocprofiler-sdk >= ${rocprofiler-sdk_VERSION}")
-
     if(ROCPROFSYS_BUILD_TESTING)
         list(APPEND _RPM_PACKAGE_REQUIRES "rocdecode-test")
         list(APPEND _RPM_PACKAGE_REQUIRES "rocjpeg-test")
@@ -255,9 +252,7 @@ set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
 set(CPACK_RPM_PACKAGE_RELEASE_DIST ON)
 set(CPACK_RPM_PACKAGE_AUTOPROV ON)
-
-# Temporarily disable auto-requires. This is a workaround for AMD-SMI requirement
-set(CPACK_RPM_PACKAGE_AUTOREQ OFF)
+set(CPACK_RPM_PACKAGE_AUTOREQ ON)
 
 # -------------------------------------------------------------------------------------- #
 #
