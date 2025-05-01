@@ -295,12 +295,18 @@ def test_summary_display_data(json_data, summary_data):
 
     assert get_dims(marker) == [7, 9], f"{marker}"
     assert get_dims(memcpy) == [2, 9], f"{memcpy}"
-    assert get_dims(memalloc) == [2, 9], f"{memalloc}"
+    assert get_dims(memalloc) in (
+        [2, 9],  # [2,9] when hip-runtime doesn't use vmem.
+        [4, 9],
+    ), f"{memalloc}"
     assert get_dims(dispatch) == [3, 9], f"{dispatch}"
     assert get_dims(dispatch_and_copy) == [5, 9], f"{dispatch_and_copy}"
     assert get_dims(hip) == [14, 9], f"{hip}"
     assert get_dims(hip_and_marker) == expected_hip_and_marker_dims, f"{hip_and_marker}"
-    assert get_dims(total) == [25, 9], f"{total}"
+    if get_dims(memalloc) == [2, 9]:  # [2,9] when hip-runtime doesn't use vmem alloc.
+        assert get_dims(total) == [25, 9], f"{total}"
+    elif get_dims(memalloc) == [4, 9]:
+        assert get_dims(total) == [27, 9], f"{total}"
 
 
 def test_perfetto_data(pftrace_data, json_data):
