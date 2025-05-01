@@ -92,6 +92,8 @@ target_include_directories(${ROCM_SMI_TARGET}
                            "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 
+target_include_directories(${ROCM_SMI_TARGET} INTERFACE ${DRM_INCLUDE_DIRS})
+
 ## Set the VERSION and SOVERSION values
 set_property(TARGET ${ROCM_SMI_TARGET} PROPERTY
              SOVERSION "${VERSION_MAJOR}")

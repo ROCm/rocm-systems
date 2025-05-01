@@ -41,6 +41,8 @@ set(SHARE_INSTALL_PREFIX
 # provide git to utilities
 find_program (GIT NAMES git)
 
+# sets DRM_INCLUDE_DIRS
+pkg_check_modules(DRM REQUIRED libdrm)
 
 ## Setup the package version based on git tags.
 set(PKG_VERSION_GIT_TAG_PREFIX "rsmi_pkg_ver")
