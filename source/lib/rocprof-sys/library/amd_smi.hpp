@@ -102,12 +102,12 @@ struct data
 
     static void post_process(uint32_t _dev_id);
 
-    uint32_t    m_dev_id    = std::numeric_limits<uint32_t>::max();
-    timestamp_t m_ts        = 0;
-    temp_t      m_temp      = 0;
-    mem_usage_t m_mem_usage = 0;
-    std::unordered_map<uint32_t, std::vector<double>> m_vcn_metrics  = {};
-    std::unordered_map<uint32_t, std::vector<double>> m_jpeg_metrics = {};
+    uint32_t              m_dev_id       = std::numeric_limits<uint32_t>::max();
+    timestamp_t           m_ts           = 0;
+    temp_t                m_temp         = 0;
+    mem_usage_t           m_mem_usage    = 0;
+    std::vector<uint16_t> m_vcn_metrics  = {};
+    std::vector<uint16_t> m_jpeg_metrics = {};
 #if ROCPROFSYS_USE_ROCM > 0
     amdsmi_engine_usage_t m_busy_perc = {};
     amdsmi_power_info_t   m_power     = {};
