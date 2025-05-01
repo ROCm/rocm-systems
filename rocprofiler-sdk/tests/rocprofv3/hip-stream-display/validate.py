@@ -54,15 +54,17 @@ def test_stream_trace(json_data):
     buffer_records = data["buffer_records"]
 
     kernel_dispatch_data = buffer_records["kernel_dispatch"]
-    memory_copies_data = buffer_records["memory_copies"]
+    memory_copies_data = buffer_records["memory_copy"]
     assert len(kernel_dispatch_data) > 0
     assert len(memory_copies_data) > 0
 
-    # Expect stream ids to be set to 1 or 2 for transpose executable
-    expected_stream_ids = set((1, 2))
+    # Expect stream ids to be set between 1 and 8 inclusive for transpose executable
+    expected_stream_ids = set([i for i in range(1, 9)])
+
     # check buffering data
     for titr in (kernel_dispatch_data, memory_copies_data):
-        for node in rocdecode_data:
+        stream_id_set = set()
+        for node in titr:
             assert "size" in node
             assert "kind" in node
             assert "operation" in node
@@ -70,7 +72,7 @@ def test_stream_trace(json_data):
             assert "end_timestamp" in node
             assert "start_timestamp" in node
             assert "thread_id" in node
-            assert "_stream_id" in node
+            assert "stream_id" in node
 
             assert node.size > 0
             assert node.thread_id > 0
@@ -78,13 +80,15 @@ def test_stream_trace(json_data):
             assert node.end_timestamp > 0
             assert node.start_timestamp < node.end_timestamp
 
-            assert node._stream_id.handle in expected_stream_ids
+            stream_id = node.stream_id.handle
+            stream_id_set.add(stream_id)
+        assert stream_id_set == expected_stream_ids
 
 
 def test_perfetto_data(pftrace_data, json_data):
     import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
 
-    assert pftrace_data != None
+    assert pftrace_data.empty == False
     rocprofv3.test_perfetto_data(
         pftrace_data,
         json_data,
