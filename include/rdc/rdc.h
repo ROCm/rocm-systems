@@ -64,7 +64,7 @@ extern "C" {
 typedef enum {
   RDC_ST_OK = 0,            //!< Success
   RDC_ST_NOT_SUPPORTED,     //!< Not supported feature
-  RDC_ST_MSI_ERROR,         //!< The MSI library error
+  RDC_ST_SMI_ERROR,         //!< The SMI library error
   RDC_ST_FAIL_LOAD_MODULE,  //!< Fail to load the library
   RDC_ST_INVALID_HANDLER,   //!< Invalid handler
   RDC_ST_BAD_PARAMETER,     //!< A parameter is invalid
@@ -593,7 +593,7 @@ typedef enum {
  * @brief Type of Components
  */
 typedef enum {
-  RDC_AMDMSI_COMPONENT
+  RDC_AMDSMI_COMPONENT
   // If needed later, add them one by one
 } rdc_component_t;
 

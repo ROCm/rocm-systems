@@ -42,7 +42,7 @@ class rdc_status_t(Enum):
           return int(obj)
      RDC_ST_OK = 0
      RDC_ST_NOT_SUPPORTED = 1
-     RDC_ST_MSI_ERROR = 2
+     RDC_ST_SMI_ERROR = 2
      RDC_ST_FAIL_LOAD_MODULE = 3
      RDC_ST_INVALID_HANDLER = 4
      RDC_ST_BAD_PARAMETER = 5

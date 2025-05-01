@@ -297,7 +297,7 @@ void RdciDiscoverySubSystem::show_attributes_with_partitions() {
 
 void RdciDiscoverySubSystem::show_version() {
   rdc_component_version_t smiv;
-  rdc_status_t result = rdc_device_get_component_version(rdc_handle_, RDC_AMDMSI_COMPONENT, &smiv);
+  rdc_status_t result = rdc_device_get_component_version(rdc_handle_, RDC_AMDSMI_COMPONENT, &smiv);
   if (result != RDC_ST_OK) {
     return;
   }
