@@ -8,7 +8,7 @@
 Job stats sample code
 **********************
 
-The following pseudocode shows how RDC API can be directly used to record GPU statistics associated with any job or workload. Refer to the `example code <https://github.com/AMD-ROCm-Internal/rdc/tree/amd-staging/example>`_ on how to build it.
+The following pseudocode shows how RDC API can be directly used to record GPU statistics associated with any job or workload. Refer to the `example code <https://github.com/ROCm/rdc/tree/amd-staging/example>`_ on how to build it.
 
 For more information on Job stats, see :ref:`Job stats <job-stats>`.
 
