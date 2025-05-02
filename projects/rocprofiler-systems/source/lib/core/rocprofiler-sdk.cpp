@@ -317,11 +317,14 @@ config_settings(const std::shared_ptr<settings>& _config)
     auto _domain_description =
         JOIN("", "Specification of ROCm domains to trace/profile. Choices: ",
              join::join(join::array_config{ ", ", "", "" }, _domain_choices));
+    auto _domain_defaults = std::string{ "hip_runtime_api,marker_api,kernel_dispatch,"
+                                         "memory_copy,scratch_memory" };
+#    if(ROCPROFILER_VERSION < 10000)
+    _domain_defaults.append(",page_migration");
+#    endif
 
     ROCPROFSYS_CONFIG_SETTING(std::string, "ROCPROFSYS_ROCM_DOMAINS", _domain_description,
-                              std::string{ "hip_runtime_api,marker_api,kernel_dispatch,"
-                                           "memory_copy,scratch_memory,page_migration" },
-                              "rocm", "rocprofiler-sdk")
+                              _domain_defaults, "rocm", "rocprofiler-sdk")
         ->set_choices(_domain_choices);
 
     ROCPROFSYS_CONFIG_SETTING(
@@ -428,11 +431,14 @@ std::unordered_set<rocprofiler_buffer_tracing_kind_t>
 get_buffered_domains()
 {
     const auto buffer_tracing_info = rocprofiler::sdk::get_buffer_tracing_names();
-    const auto supported = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{
+    const auto supported           = std::unordered_set<rocprofiler_buffer_tracing_kind_t>
+    {
         ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
-        ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
-        ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION,
-        ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
+            ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
+#    if(ROCPROFILER_VERSION < 10000)
+            ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION,
+#    endif
+            ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
     };
 
     auto _data = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{};
