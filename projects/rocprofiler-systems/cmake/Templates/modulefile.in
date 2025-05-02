@@ -11,7 +11,7 @@ set ROOT [file normalize [file dirname [file normalize ${ModulesCurrentModulefil
 setenv @PROJECT_NAME_UNDERSCORED@_ROOT "${ROOT}"
 prepend-path CMAKE_PREFIX_PATH "${ROOT}"
 prepend-path PATH "${ROOT}/bin"
-prepend-path PATH "${ROOT}/@CMAKE_INSTALL_DATAROOTDIR@/@PROJECT_NAME@/bin"
+prepend-path PATH "${ROOT}/@CMAKE_INSTALL_LIBEXECDIR@/@PROJECT_NAME@"
 prepend-path LD_LIBRARY_PATH "${ROOT}/@CMAKE_INSTALL_LIBDIR@"
 prepend-path PYTHONPATH "${ROOT}/@CMAKE_INSTALL_PYTHONDIR@"
 setenv @PROJECT_NAME_UNDERSCORED@_DIR "${ROOT}/@CMAKE_INSTALL_DATAROOTDIR@/cmake/@PROJECT_NAME@"
