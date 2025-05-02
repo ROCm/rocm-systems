@@ -276,6 +276,9 @@ class AMDSMILogger():
                             valid_clock_data[clock_key] = clock_data
                 else:   # Handle non-dictionary clock data
                     valid_clock_data = value
+                # Add a single "N/A" if valid_clock_data is empty
+                if not valid_clock_data:
+                    valid_clock_data = "N/A"
                 tabbed_dictionary[key] = valid_clock_data
 
         for key, value in tabbed_dictionary.items():
