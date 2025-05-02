@@ -49,6 +49,9 @@ get_initial_environment();
 std::string
 get_internal_libpath(const std::string& _lib);
 
+std::string
+get_internal_script_path(void);
+
 template <typename Tp>
 void
 update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_val,

@@ -352,8 +352,14 @@ main(int argc, char** argv)
     lib_search_paths.emplace_back(
         JOIN('/', _omni_lib_path, "rocprofiler-systems", "lib64"));
 
+    auto _omni_internal_libexec_path =
+        JOIN('/', filepath::dirname(filepath::dirname(_omni_exe_path)), "libexec",
+             "rocprofiler-systems");
+
     ROCPROFSYS_ADD_LOG_ENTRY(argv[0], "::", "rocprofsys bin path: ", _omni_exe_path);
     ROCPROFSYS_ADD_LOG_ENTRY(argv[0], "::", "rocprofsys lib path: ", _omni_lib_path);
+    ROCPROFSYS_ADD_LOG_ENTRY(
+        argv[0], "::", "rocprofsys libexec path: ", _omni_internal_libexec_path);
 
     for(const auto& itr : rocprofsys_get_link_map(nullptr))
     {
@@ -1442,7 +1448,6 @@ main(int argc, char** argv)
     env_vars.emplace_back(TIMEMORY_JOIN('=', "ROCPROFSYS_MPI_FINALIZE", "OFF"));
     env_vars.emplace_back(TIMEMORY_JOIN('=', "ROCPROFSYS_USE_CODE_COVERAGE",
                                         (coverage_mode != CODECOV_NONE) ? "ON" : "OFF"));
-
     addr_space = rocprofsys_get_address_space(bpatch, _cmdc, _cmdv, env_vars,
                                               binary_rewrite, _pid, mutname);
 
@@ -1969,6 +1974,9 @@ main(int argc, char** argv)
     env_vars.emplace_back(TIMEMORY_JOIN('=', "ROCPROFSYS_USE_MPIP",
                                         (binary_rewrite && use_mpi) ? "ON" : "OFF"));
     if(use_mpi) env_vars.emplace_back(TIMEMORY_JOIN('=', "ROCPROFSYS_USE_PID", "ON"));
+
+    env_vars.emplace_back(
+        TIMEMORY_JOIN('=', "ROCPROFSYS_SCRIPT_PATH", _omni_internal_libexec_path));
 
     for(auto& itr : env_vars)
     {

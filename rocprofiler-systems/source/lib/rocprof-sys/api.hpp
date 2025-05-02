@@ -95,7 +95,7 @@ extern "C"
 
     // these are the real implementations for internal calling convention
     void rocprofsys_init_library_hidden(void) ROCPROFSYS_HIDDEN_API;
-    bool rocprofsys_init_tooling_hidden(void) ROCPROFSYS_HIDDEN_API;
+    bool rocprofsys_init_tooling_hidden(bool postinit = false) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_init_hidden(const char*, bool, const char*) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_finalize_hidden(void) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_reset_preload_hidden(void) ROCPROFSYS_HIDDEN_API;

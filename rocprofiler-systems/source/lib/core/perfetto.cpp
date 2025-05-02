@@ -263,31 +263,47 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
                 _timemory_manager->add_file_output("protobuf", "perfetto", _filename);
         }
         ofs.close();
-
-        if(dmp::rank() == 0)
-        {
-            const char* file_path   = _filename.c_str();
-            auto        folder_path = [](std::string_view _v) {
-                return tim::filepath::dirname(std::string(_v));
-            };
-            // Execute the merge script
-            std::string command =
-                "merge-multiprocess-output.sh '" + folder_path(file_path) + "'";
-            int result = system(command.c_str());
-            if(result != 0)
-            {
-                ROCPROFSYS_VERBOSE(0,
-                                   "Failed to execute merge-multiprocess-output.sh with "
-                                   "folder path: %s\n",
-                                   folder_path(file_path).c_str());
-            }
-        }
     }
     else if(dmp::rank() == 0)
     {
         ROCPROFSYS_VERBOSE(
             0, "perfetto trace data is empty. File '%s' will not be written...\n",
             _filename.c_str());
+    }
+
+    // Merge the output files, if rank 0
+    if(dmp::rank() == 0)
+    {
+        auto _output_folder = filepath::dirname(_filename);
+        auto _script_path   = std::string{ "rocprof-sys-merge-output.sh" };
+        auto _script_dir    = get_env("ROCPROFSYS_SCRIPT_PATH", std::string{}, false);
+
+        if(!_script_dir.empty())
+        {
+            _script_path = rocprofsys::common::join("/", _script_dir, _script_path);
+        }
+
+        // Test that the script exists
+        if(!filepath::exists(_script_path))
+        {
+            ROCPROFSYS_VERBOSE(0, "Script not found: %s\n", _script_path.c_str());
+        }
+        else
+        {
+            auto _command = _script_path + " '" + _output_folder + "'";
+
+            // Execute the merge script
+            int result = system(_command.c_str());
+
+            if(result != 0)
+            {
+                ROCPROFSYS_VERBOSE(0, "Failed to execute: %s\n", _command.c_str());
+            }
+            else
+            {
+                ROCPROFSYS_VERBOSE(0, "Successfully executed: %s\n", _command.c_str());
+            }
+        }
     }
 
     auto& _tmp_file = get_perfetto_tmp_file();

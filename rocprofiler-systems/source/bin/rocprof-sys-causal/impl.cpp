@@ -246,6 +246,7 @@ prepare_environment_for_run(std::vector<char*>& _env)
                    join(":", LIBPTHREAD_SO,
                         get_realpath(get_internal_libpath("librocprof-sys-dl.so"))),
                    true);
+        update_env(_env, "ROCPROFSYS_SCRIPT_DIR", get_internal_script_path());
     }
 }
 
@@ -257,6 +258,20 @@ get_internal_libpath(const std::string& _lib)
     auto _dir = std::string{ "./" };
     if(_pos != std::string_view::npos) _dir = _exe.substr(0, _pos);
     return rocprofsys::common::join("/", _dir, "..", "lib", _lib);
+}
+
+std::string
+get_internal_script_path(void)
+{
+    auto _exe = std::string_view{ realpath("/proc/self/exe", nullptr) };
+    auto _pos = _exe.find_last_of('/');
+    auto _dir = std::string{ "./" };
+    if(_pos != std::string_view::npos) _dir = _exe.substr(0, _pos);
+
+    auto _script_dir = get_realpath(
+        rocprofsys::common::join("/", _dir, "..", "libexec", "rocprofiler-systems"));
+
+    return _script_dir;
 }
 
 void
