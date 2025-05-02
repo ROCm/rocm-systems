@@ -24,7 +24,8 @@ RUN zypper --non-interactive update -y && \
     zypper --non-interactive dist-upgrade -y && \
     zypper --non-interactive install -y -t pattern devel_basis && \
     zypper --non-interactive install -y binutils-gold cmake curl dpkg-devel \
-        gcc-c++ git libnuma-devel openmpi3-devel python3-pip rpm-build wget && \
+        gcc-c++ git libdrm-devel libnuma-devel openmpi3-devel python3-pip rpm-build \
+        wget && \
     python3 -m pip install 'cmake==3.21'
 
 ARG ROCM_VERSION=0.0
@@ -43,7 +44,7 @@ RUN if [ "${ROCM_VERSION}" != "0.0" ]; then \
         zypper --non-interactive clean --all; \
     fi
 
-ARG PYTHON_VERSIONS="6 7 8 9 10 11 12"
+ARG PYTHON_VERSIONS="6 7 8 9 10 11 12 13"
 
 RUN wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && \
     bash miniconda.sh -b -p /opt/conda && \

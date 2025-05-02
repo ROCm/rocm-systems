@@ -15,8 +15,8 @@ ENV LIBRARY_PATH ${LIBRARY_PATH}:/opt/amdgpu/lib64
 
 RUN yum groupinstall -y "Development Tools" && \
     yum install -y epel-release && crb enable && \
-    yum install -y --allowerasing cmake curl dpkg-devel numactl-devel openmpi-devel \
-        papi-devel python3-pip texinfo wget which zlib-devel && \
+    yum install -y --allowerasing cmake curl dpkg-devel libdrm-devel numactl-devel \
+        openmpi-devel papi-devel python3-pip texinfo wget which zlib-devel && \
     yum clean all && \
     python3 -m pip install 'cmake==3.21' && \
     python3 -m pip install 'perfetto'
@@ -37,7 +37,7 @@ RUN if [ "${ROCM_VERSION}" != "0.0" ]; then \
         yum clean all; \
     fi
 
-ARG PYTHON_VERSIONS="6 7 8 9 10 11 12"
+ARG PYTHON_VERSIONS="6 7 8 9 10 11 12 13"
 
 RUN wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && \
     bash miniconda.sh -b -p /opt/conda && \

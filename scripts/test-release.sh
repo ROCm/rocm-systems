@@ -118,10 +118,21 @@ setup-env()
 
 test-install()
 {
+    ROCPROFSYS_MODULE_PATH="${1}/lib/python/site-packages/rocprofsys"
     verbose-run rocprof-sys-instrument --help
     verbose-run rocprof-sys-avail --help
     verbose-run rocprof-sys-avail --all
-    if [ -d "${1}/lib/python/site-packages/rocprofsys" ]; then
+
+    if [ -d $ROCPROFSYS_MODULE_PATH ]; then
+        verbose-run which python3
+        verbose-run python3 --version
+        PYTHON_VERSION=$(python3 -c "import sys; print(f'python-{sys.version_info.major}{sys.version_info.minor}')")
+
+        if [ -z "$(find $ROCPROFSYS_MODULE_PATH -name "*${PYTHON_VERSION}*" -print -quit)" ]; then
+            echo "Error: No library found for Python version ${PYTHON_VERSION} in $ROCPROFSYS_MODULE_PATH"
+            exit 1
+        fi
+
         verbose-run rocprof-sys-python --help
     fi
 }
