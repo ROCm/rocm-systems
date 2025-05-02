@@ -44,7 +44,7 @@ endif()
 set ( CPACK_PACKAGE_VERSION_MAJOR "1" )
 set ( CPACK_PACKAGE_VERSION_MINOR "0" )
 set ( CPACK_PACKAGE_VERSION_PATCH "0" )
-set ( CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/ROCm/ROCT-Thunk-Interface" )
+set ( CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/ROCm/ROCR-Runtime/" )
 set ( CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 set ( CPACK_RPM_FILE_NAME "RPM-DEFAULT")
 
@@ -82,8 +82,8 @@ set ( CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}"  CACHE STRING "De
 set ( CPACK_GENERATOR "DEB;RPM"  CACHE STRING "Default packaging generators." )
 
 # Debian package specific variables
-set ( CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/ROCm/ROCT-Thunk-Interface" )
-set (CPACK_DEBIAN_PACKAGE_DEPENDS "rocm-core")
+set ( CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/ROCm/ROCR-Runtime/" )
+set ( CPACK_DEBIAN_PACKAGE_DEPENDS "rocm-core" )
 
 # RPM package specific variables
 set (CPACK_RPM_PACKAGE_REQUIRES "rocm-core")
