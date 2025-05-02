@@ -136,7 +136,7 @@ AgentCache::init_device_counting_service_queue(const CoreApiTable& api,
     }();
 
     if(!agent_ctx || m_profile_queue) return;
-    ROCP_ERROR << "Creating Profile Queue";
+
     // create the queue and set it to high_priority
     CHECK(api.hsa_queue_create_fn) << "no hsa_queue_create_fn in api table";
     auto status = api.hsa_queue_create_fn(get_hsa_agent(),
