@@ -184,6 +184,7 @@ global:
 	hsa_amd_memory_async_copy;
 	hsa_amd_memory_async_copy_on_engine;
 	hsa_amd_memory_copy_engine_status;
+	hsa_amd_memory_get_preferred_copy_engine;
 	hsa_amd_memory_async_copy_rect;
 	hsa_amd_memory_lock;
 	hsa_amd_memory_lock_to_pool;
