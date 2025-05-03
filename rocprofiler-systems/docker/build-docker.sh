@@ -4,7 +4,7 @@
 : ${ROCM_VERSIONS:="6.2"}
 : ${DISTRO:=ubuntu}
 : ${VERSIONS:=20.04}
-: ${PYTHON_VERSIONS:="6 7 8 9 10 11 12"}
+: ${PYTHON_VERSIONS:="6 7 8 9 10 11 12 13"}
 : ${BUILD_CI:=""}
 : ${PUSH:=0}
 : ${PULL:=--pull}
