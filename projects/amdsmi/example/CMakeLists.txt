@@ -1,3 +1,4 @@
+set(CMAKE_VERBOSE_MAKEFILE on)
 cmake_minimum_required(VERSION 3.15)
 
 option(ENABLE_ESMI_LIB "Build ESMI Library" ON)

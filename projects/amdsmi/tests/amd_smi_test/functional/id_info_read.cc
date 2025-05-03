@@ -139,8 +139,9 @@ void TestIdInfoRead::Run(void) {
     IF_VERB(STANDARD) {
       std::cout << "\t**Device Vram type id: "
                 << vram_info.vram_type << std::endl;
-      std::cout << "\t**Device Vram vendor id: "
-                << vram_info.vram_vendor << std::endl;
+      std::cout << "\t**Device Vram vendor id: 0x"
+                << std::hex << std::setw(4) << std::setfill('0') << vram_info.vram_vendor
+                << " (" << std::dec << vram_info.vram_vendor << ")" << std::endl;
       std::cout << "\t**Device Vram size: 0x"
                 << std::hex << vram_info.vram_size
                 << " (" << std::dec << vram_info.vram_size << ")"
@@ -242,7 +243,8 @@ void TestIdInfoRead::Run(void) {
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
     amdsmi_virtualization_mode_t vmode;
     err = amdsmi_get_gpu_virtualization_mode(processor_handles_[i], &vmode);
-    ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
+    ASSERT_TRUE(err == AMDSMI_STATUS_SUCCESS ||
+                err == AMDSMI_STATUS_NOT_SUPPORTED);
     IF_VERB(STANDARD) {
       auto it = virtualization_mode_map.find(vmode);
       if (it != virtualization_mode_map.end()) {

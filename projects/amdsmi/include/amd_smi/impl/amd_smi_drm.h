@@ -24,12 +24,16 @@
 #define AMD_SMI_INCLUDE_IMPL_AMD_SMI_DRM_H_
 
 #include <unistd.h>
-#include <xf86drm.h>
+
 #include <vector>
 #include <memory>
 #include <mutex>  // NOLINT
+#include <string>
+
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_lib_loader.h"
+#include "amd_smi/impl/amdgpu_drm.h"
+#include "amd_smi/impl/xf86drm.h"
 
 namespace amd {
 namespace smi {
@@ -44,35 +48,18 @@ class AMDSmiDrm {
     std::vector<amdsmi_bdf_t> get_bdfs();
     std::vector<std::string>& get_drm_paths();
     bool check_if_drm_is_supported();
-
-   uint32_t get_vendor_id();
-
-    amdsmi_status_t amdgpu_query_info(int fd, unsigned info_id,
-                    unsigned size, void *value);
-    amdsmi_status_t  amdgpu_query_fw(int fd, unsigned info_id, unsigned fw_type,
-                unsigned size, void *value);
-    amdsmi_status_t amdgpu_query_hw_ip(int fd, unsigned info_id,
-               unsigned hw_ip_type, unsigned size, void *value);
-    amdsmi_status_t amdgpu_query_vbios(int fd, void *info);
-    amdsmi_status_t amdgpu_query_driver_name(int fd, std::string& driver_name);
-    amdsmi_status_t amdgpu_query_driver_date(int fd, std::string& driver_date);
+    uint32_t get_vendor_id();
 
  private:
     // when file is not found, the empty string will be returned
     std::string find_file_in_folder(const std::string& folder,
                   const std::string& regex);
-    using DrmCmdWriteFunc = int (*)(int, unsigned long, void *, unsigned long);
     std::vector<int> drm_fds_;  // drm file descriptor by gpu_index
-    std::vector<std::string> drm_paths_; // drm path (renderD128 for example)
-    std::vector<amdsmi_bdf_t> drm_bdfs_; // bdf
+    std::vector<std::string> drm_paths_;  // drm path (renderD128 for example)
+    std::vector<amdsmi_bdf_t> drm_bdfs_;  // bdf
     uint32_t vendor_id;
 
     AMDSmiLibraryLoader lib_loader_;  // lazy load libdrm
-    DrmCmdWriteFunc drm_cmd_write_;   // drmCommandWrite
-    using drmGetVersionFunc = drmVersionPtr (*)(int);    // drmGetVersion
-    using drmFreeVersionFunc = void (*)(drmVersionPtr);  // drmFreeVersion
-    drmGetVersionFunc drm_get_version_;
-    drmFreeVersionFunc drm_free_version_;
 
     std::mutex drm_mutex_;
 };

@@ -1,5 +1,6 @@
 # Generate py-interface and package targets
 
+set(CMAKE_VERBOSE_MAKEFILE on)
 # CLANG installed must be 16.0 or above
 # CLANG is only needed for generating new amdsmi_wrapper.py
 # this is normally done in a docker container with a controlled clang and python-clang versions

@@ -1,4 +1,5 @@
 # Generate rust-wrapper and package targets
+set(CMAKE_VERBOSE_MAKEFILE on)
 
 # This string is the installation directory containing all rust files
 set(RUST_WRAPPER_INSTALL_DIR "${SHARE_INSTALL_PREFIX}/rust-wrapper" CACHE STRING "Rust wrapper installation directory")

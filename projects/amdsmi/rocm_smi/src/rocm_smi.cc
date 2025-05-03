@@ -915,7 +915,11 @@ rsmi_dev_id_get(uint32_t dv_ind, uint16_t *id) {
   rsmi_status_t ret;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
+  if (id == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
   CHK_SUPPORT_NAME_ONLY(id)
+  // Set the device ID to max value
   *id = std::numeric_limits<uint16_t>::max();
 
   // Get the device ID from KGD
@@ -936,7 +940,7 @@ rsmi_dev_id_get(uint32_t dv_ind, uint16_t *id) {
     int ret_kfd = kfd_node->get_node_id(&node_id);
     ret_kfd = amd::smi::read_node_properties(node_id, "device_id", &kfd_device_id);
     if (ret_kfd == 0) {
-      *id = kfd_device_id;
+      *id = static_cast<uint16_t>(kfd_device_id);
       ret = RSMI_STATUS_SUCCESS;
     } else {
       *id = std::numeric_limits<uint16_t>::max();
@@ -1012,35 +1016,42 @@ rsmi_dev_subsystem_id_get(uint32_t dv_ind, uint16_t *id) {
 
 rsmi_status_t
 rsmi_dev_vendor_id_get(uint32_t dv_ind, uint16_t *id) {
+  TRY
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   CHK_SUPPORT_NAME_ONLY(id)
-  rsmi_status_t status = get_id(dv_ind, amd::smi::kDevVendorID, id);
-  if (status != RSMI_STATUS_SUCCESS)
-  {
+  int ret_kfd = 0;
+  uint32_t node_id;
+  rsmi_status_t ret = get_id(dv_ind, amd::smi::kDevVendorID, id);
+  bool need_fallback = false;
+  if (ret != RSMI_STATUS_SUCCESS) {
+    need_fallback = true;
+  }
+  if (ret != RSMI_STATUS_SUCCESS) {
     GET_DEV_AND_KFDNODE_FROM_INDX
-    uint32_t node_id;
     uint64_t kfd_vendor_id;
-    int ret_kfd = kfd_node->get_node_id(&node_id);
+    ret_kfd = kfd_node->get_node_id(&node_id);
     ret_kfd = amd::smi::read_node_properties(node_id, "vendor_id", &kfd_vendor_id);
     if (ret_kfd == 0) {
-      *id = kfd_vendor_id;
-      status = RSMI_STATUS_SUCCESS;
+      *id = static_cast<uint16_t>(kfd_vendor_id);
+      ret = RSMI_STATUS_SUCCESS;
     } else {
       *id = std::numeric_limits<uint16_t>::max();
-      status = RSMI_STATUS_NOT_SUPPORTED;
+      ret = RSMI_STATUS_NOT_SUPPORTED;
     }
-    ss << __PRETTY_FUNCTION__
-       << " | Issue: Could not read device from sysfs, falling back to KFD" << "\n"
-       << " ; Device #: " << std::to_string(dv_ind) << "\n"
-       << " ; ret_kfd: " << std::to_string(ret_kfd) << "\n"
-       << " ; node: " << std::to_string(node_id) << "\n"
-       << " ; Data: vendor_id (from KFD)= " << std::to_string(*id) << "\n"
-       << " ; ret = " << getRSMIStatusString(status, false);
-    LOG_DEBUG(ss);
   }
-  return status;
+  ss << __PRETTY_FUNCTION__
+     << (need_fallback ? " | Needed to fallback to use KFD to read vendor_id" :
+      " | Read through SYSFS to read vendor_id") << "\n"
+     << " ; Device #: " << std::to_string(dv_ind) << "\n"
+     << " ; ret_kfd: " << std::to_string(ret_kfd) << "\n"
+     << " ; node: " << std::to_string(node_id) << "\n"
+     << " ; Data: vendor_id: " << std::to_string(*id) << "\n"
+     << " ; ret = " << getRSMIStatusString(ret, false);
+  LOG_INFO(ss);
+  return ret;
+  CATCH
 }
 
 rsmi_status_t
@@ -2922,12 +2933,12 @@ rsmi_dev_vendor_name_get(uint32_t dv_ind, char *name, size_t len) {
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
+  if (name == nullptr || len == 0) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
   CHK_SUPPORT_NAME_ONLY(name)
 
   assert(len > 0);
-  if (len == 0) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
 
   DEVICE_MUTEX
   ret = get_dev_name_from_id(dv_ind, name, len, NAME_STR_VENDOR);
@@ -3526,6 +3537,9 @@ rsmi_dev_gpu_reset(uint32_t dv_ind) {
 
   // Read amdgpu_gpu_recover to reset it
   ret = get_dev_value_int(amd::smi::kDevGpuReset, dv_ind, &status_code);
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= | returning "
+     << getRSMIStatusString(ret, false);
+  LOG_INFO(ss);
   return ret;
 
   CATCH

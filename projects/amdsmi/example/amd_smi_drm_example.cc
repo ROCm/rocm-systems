@@ -255,6 +255,26 @@ mapStringToSMIMemoryPartitionTypes {
   {"N/A", AMDSMI_MEMORY_PARTITION_UNKNOWN}
 };
 
+static const std::map<amdsmi_virtualization_mode_t, std::string>
+  virtualization_mode_map = {
+  {AMDSMI_VIRTUALIZATION_MODE_UNKNOWN,      "UNKNOWN"},
+  {AMDSMI_VIRTUALIZATION_MODE_BAREMETAL,    "BAREMETAL"},
+  { AMDSMI_VIRTUALIZATION_MODE_HOST,        "HOST"},
+  { AMDSMI_VIRTUALIZATION_MODE_GUEST,       "GUEST"},
+  {AMDSMI_VIRTUALIZATION_MODE_PASSTHROUGH,  "PASSTHROUGH"}
+};
+
+static const std::map<processor_type_t, std::string>
+  processor_type_map = {
+  {AMDSMI_PROCESSOR_TYPE_UNKNOWN, "UNKNOWN"},
+  {AMDSMI_PROCESSOR_TYPE_AMD_GPU, "AMD_GPU"},
+  {AMDSMI_PROCESSOR_TYPE_AMD_CPU, "AMD_CPU"},
+  {AMDSMI_PROCESSOR_TYPE_NON_AMD_GPU, "NON_AMD_GPU"},
+  {AMDSMI_PROCESSOR_TYPE_NON_AMD_CPU, "NON_AMD_CPU"},
+  {AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE, "AMD_CPU_CORE"},
+  {AMDSMI_PROCESSOR_TYPE_AMD_APU, "AMD_APU"}
+};
+
 int main() {
     amdsmi_status_t ret, ret_set;
     const char *err_str;
@@ -304,7 +324,10 @@ int main() {
         // For each device of the socket, get name and temperature.
         for (uint32_t device_index = 0; device_index < device_count; device_index++) {
             std::cout << "Device Index: " << device_index << std::endl;
-#ifdef ENABLE_ESMI_LIB
+
+// Commenting out the code to get CPU socket count and GPU count
+// Doesn't work on system with no supported CPU sockets
+#if 0
             uint32_t cpu_sockets = 0;
             uint32_t gpus = 0;
             ret = amdsmi_get_processor_count_from_handles(&processor_handles[device_index], &device_count, &cpu_sockets, nullptr, &gpus);
@@ -318,6 +341,13 @@ int main() {
             processor_type_t processor_type = {};
             ret = amdsmi_get_processor_type(processor_handles[device_index], &processor_type);
             CHK_AMDSMI_RET(ret)
+
+            auto it = processor_type_map.find(processor_type);
+            if (it != processor_type_map.end()) {
+              std::cout << "\t**Processor Type: " << it->second << std::endl;
+            } else {
+              std::cout << "\t**Processor Type: MAP TYPE UNKNOWN?" << std::endl;
+            }
             if (processor_type != AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
                 std::cout << "Expect AMDSMI_PROCESSOR_TYPE_AMD_GPU device type!\n";
                 return AMDSMI_STATUS_NOT_SUPPORTED;
@@ -358,6 +388,19 @@ int main() {
             printf("    Output of amdsmi_is_gpu_power_management_enabled:\n");
             printf("\tPower Management Enabled: %s\n\n",
                     (is_power_management_enabled ? "TRUE" : "FALSE"));
+
+            amdsmi_virtualization_mode_t vmode;
+            ret = amdsmi_get_gpu_virtualization_mode(processor_handles[device_index], &vmode);
+            if (ret != AMDSMI_STATUS_NOT_SUPPORTED) {
+              CHK_AMDSMI_RET(ret)
+            }
+
+            auto it2 = virtualization_mode_map.find(vmode);
+            if (it2 != virtualization_mode_map.end()) {
+              std::cout << "\t**Virtualization Mode: " << it2->second << std::endl;
+            } else {
+              std::cout << "\t**Virtualization Mode: MAP TYPE UNKNOWN?" << std::endl;
+            }
 
             std::cout << "    **Version 1: Accelerator/Compute Partition API Examples**\n";
             char original_compute_partition[AMDSMI_MAX_STRING_LENGTH];
@@ -1376,7 +1419,9 @@ int main() {
                 for (uint32_t k = 0; k < topology_nearest_info.count; k++) {
                     amdsmi_bdf_t bdf = {};
                     ret = amdsmi_get_gpu_device_bdf(topology_nearest_info.processor_list[k], &bdf);
-                    CHK_AMDSMI_RET(ret)
+                    if (ret != AMDSMI_STATUS_INVAL) {
+                      CHK_AMDSMI_RET(ret);
+                    }
                     printf("\t\tGPU BDF %04" PRIx64 ":%02" PRIx32 ":%02" PRIx32 ".%" PRIu32 "\n",
                         static_cast<uint64_t>(bdf.domain_number),
                         static_cast<uint32_t>(bdf.bus_number),

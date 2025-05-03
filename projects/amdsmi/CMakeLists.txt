@@ -1,6 +1,12 @@
+message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
+message("                    CMake AMD SMI (Library) [root]                ")
+message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 #
 # Minimum version of cmake required
 #
+## Verbose output.
+set(CMAKE_VERBOSE_MAKEFILE on)
+
 cmake_minimum_required(VERSION 3.20)
 
 set(AMD_SMI "amd_smi")
@@ -169,27 +175,26 @@ if(ENABLE_ESMI_LIB)
 endif()
 
 # sets DRM_LIBRARIES and DRM_INCLUDE_DIRS
-pkg_check_modules(DRM REQUIRED libdrm)
 # sets AMDGPU_DRM_LIBRARIES and AMDGPU_DRM_INCLUDE_DIRS
-pkg_check_modules(AMDGPU_DRM REQUIRED libdrm_amdgpu)
+
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/third_party/shared_mutex
-                    ${CMAKE_CURRENT_SOURCE_DIR}/include/amd_smi ${ESMI_INC_DIR} ${DRM_INCLUDE_DIRS})
+                    ${CMAKE_CURRENT_SOURCE_DIR}/include/amd_smi ${ESMI_INC_DIR})
 
 set(CMN_SRC_LIST
-    "${ROCM_SRC_DIR}/rocm_smi.cc"
-    "${ROCM_SRC_DIR}/rocm_smi_counters.cc"
     "${ROCM_SRC_DIR}/rocm_smi_device.cc"
-    "${ROCM_SRC_DIR}/rocm_smi_gpu_metrics.cc"
-    "${ROCM_SRC_DIR}/rocm_smi_binary_parser.cc"
-    "${ROCM_SRC_DIR}/rocm_smi_io_link.cc"
-    "${ROCM_SRC_DIR}/rocm_smi_kfd.cc"
     "${ROCM_SRC_DIR}/rocm_smi_main.cc"
     "${ROCM_SRC_DIR}/rocm_smi_monitor.cc"
     "${ROCM_SRC_DIR}/rocm_smi_power_mon.cc"
     "${ROCM_SRC_DIR}/rocm_smi_utils.cc"
+    "${ROCM_SRC_DIR}/rocm_smi_counters.cc"
+    "${ROCM_SRC_DIR}/rocm_smi_kfd.cc"
+    "${ROCM_SRC_DIR}/rocm_smi_io_link.cc"
+    "${ROCM_SRC_DIR}/rocm_smi_gpu_metrics.cc"
+    "${ROCM_SRC_DIR}/rocm_smi.cc"
     "${ROCM_SRC_DIR}/rocm_smi_logger.cc"
-    "${SHR_MUTEX_DIR}/shared_mutex.cc")
+    "${SHR_MUTEX_DIR}/shared_mutex.cc"
+    "${ROCM_SRC_DIR}/rocm_smi_binary_parser.cc")
 
 if(ENABLE_ESMI_LIB)
 	list(APPEND CMN_SRC_LIST ${ESMI_SRC_DIR}/e_smi.c)
@@ -199,21 +204,21 @@ if(ENABLE_ESMI_LIB)
 endif()
 
 set(CMN_INC_LIST
-    "${ROCM_INC_DIR}/rocm_smi.h"
-    "${ROCM_INC_DIR}/rocm_smi_common.h"
-    "${ROCM_INC_DIR}/rocm_smi_counters.h"
     "${ROCM_INC_DIR}/rocm_smi_device.h"
-    "${ROCM_INC_DIR}/rocm_smi_gpu_metrics.h"
-    "${ROCM_INC_DIR}/rocm_smi_binary_parser.h"
-    "${ROCM_INC_DIR}/rocm_smi_exception.h"
-    "${ROCM_INC_DIR}/rocm_smi_io_link.h"
-    "${ROCM_INC_DIR}/rocm_smi_kfd.h"
     "${ROCM_INC_DIR}/rocm_smi_main.h"
     "${ROCM_INC_DIR}/rocm_smi_monitor.h"
     "${ROCM_INC_DIR}/rocm_smi_power_mon.h"
     "${ROCM_INC_DIR}/rocm_smi_utils.h"
+    "${ROCM_INC_DIR}/rocm_smi_common.h"
+    "${ROCM_INC_DIR}/rocm_smi_exception.h"
+    "${ROCM_INC_DIR}/rocm_smi_counters.h"
+    "${ROCM_INC_DIR}/rocm_smi_kfd.h"
+    "${ROCM_INC_DIR}/rocm_smi_io_link.h"
+    "${ROCM_INC_DIR}/rocm_smi_gpu_metrics.h"
+    "${ROCM_INC_DIR}/rocm_smi.h"
     "${ROCM_INC_DIR}/rocm_smi_logger.h"
-    "${SHR_MUTEX_DIR}/shared_mutex.h")
+    "${SHR_MUTEX_DIR}/shared_mutex.h"
+    "${ROCM_INC_DIR}/rocm_smi_binary_parser.h")
 
 add_subdirectory("rocm_smi")
 add_subdirectory("src")
@@ -301,7 +306,7 @@ install(
 add_subdirectory(goamdsmi_shim)
 
 #Debian package specific variables
-set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "python3-argcomplete, libdrm-dev")
+set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "python3-argcomplete, libdrm-dev, libdrm-amdgpu-dev")
 set(CPACK_DEBIAN_ASAN_PACKAGE_RECOMMENDS ${CPACK_DEBIAN_PACKAGE_RECOMMENDS})
 set(CPACK_DEBIAN_DEV_PACKAGE_RECOMMENDS ${CPACK_DEBIAN_PACKAGE_RECOMMENDS})
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "sudo, python3 (>= 3.6.8), python3-pip, python3-setuptools, python3-wheel")
@@ -326,7 +331,7 @@ if(CPACK_RPM_PACKAGE_RELEASE)
     set(CPACK_RPM_PACKAGE_RELEASE_DIST ON)
 endif()
 # NOTE: RPM SUGGESTS DO NOT WORK! https://bugzilla.redhat.com/show_bug.cgi?id=1811358
-set(CPACK_RPM_PACKAGE_SUGGESTS "python3-argcomplete")
+set(CPACK_RPM_PACKAGE_SUGGESTS "python3-argcomplete, libdrm-dev, libdrm-amdgpu-dev")
 set(CPACK_RPM_DEV_PACKAGE_SUGGESTS ${CPACK_RPM_PACKAGE_SUGGESTS})
 set(CPACK_RPM_ASAN_PACKAGE_SUGGESTS ${CPACK_RPM_PACKAGE_SUGGESTS})
 # python version gated by rhel8 :(
@@ -385,3 +390,7 @@ set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
 include(CPack)
 
 generic_package_post()
+
+message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
+message("                    CMake AMD SMI (Library) [root] END            ")
+message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")

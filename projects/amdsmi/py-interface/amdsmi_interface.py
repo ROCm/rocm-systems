@@ -1888,6 +1888,7 @@ def amdsmi_get_gpu_asic_info(
     # Remove commas from vendor name for clean output
     asic_info["vendor_name"] = asic_info["vendor_name"].replace(',', '')
 
+    logging.debug("amdsmi_interface.py | amdsmi_get_gpu_asic_info | return_dictionary = \n" + str(json.dumps(asic_info, indent=4)))
     return asic_info
 
 
