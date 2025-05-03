@@ -342,8 +342,7 @@ int main() {
             ret = amdsmi_get_processor_type(processor_handles[device_index], &processor_type);
             CHK_AMDSMI_RET(ret)
 
-            auto it = processor_type_map.find(processor_type);
-            if (it != processor_type_map.end()) {
+            if (auto it = processor_type_map.find(processor_type); it != processor_type_map.end()) {
               std::cout << "\t**Processor Type: " << it->second << std::endl;
             } else {
               std::cout << "\t**Processor Type: MAP TYPE UNKNOWN?" << std::endl;
@@ -395,9 +394,9 @@ int main() {
               CHK_AMDSMI_RET(ret)
             }
 
-            auto it2 = virtualization_mode_map.find(vmode);
-            if (it2 != virtualization_mode_map.end()) {
-              std::cout << "\t**Virtualization Mode: " << it2->second << std::endl;
+            if (auto it = virtualization_mode_map.find(vmode);
+                it != virtualization_mode_map.end()) {
+              std::cout << "\t**Virtualization Mode: " << it->second << std::endl;
             } else {
               std::cout << "\t**Virtualization Mode: MAP TYPE UNKNOWN?" << std::endl;
             }

@@ -212,7 +212,6 @@ amdsmi_status_t AMDSmiDrm::init() {
         bdf.bus_number = static_cast<uint64_t>(((bdf_rocm >> 8) & 0xFF));
         bdf.device_number = static_cast<uint64_t>(((bdf_rocm >> 3) & 0x1F));
         bdf.function_number = static_cast<uint64_t>((bdf_rocm & 0x7));
-        bdf.as_uint = bdf_rocm;
 
         drm_bdfs_.push_back(bdf);
         drm_free_device(&device);
@@ -278,7 +277,7 @@ std::vector<std::string>& AMDSmiDrm::get_drm_paths() {
 }
 
 bool AMDSmiDrm::check_if_drm_is_supported() {
-    return (drm_bdfs_.size() >0) ? true : false;
+    return drm_bdfs_.size() > 0;
 }
 
 std::vector<amdsmi_bdf_t> AMDSmiDrm::get_bdfs() {
