@@ -27,9 +27,9 @@ Here are the steps to start RDC using ``systemctl`` command, which runs RDC in t
 
 1. Copy the service file:
 
-.. code-block:: shell
+   .. code-block:: shell
 
-  sudo cp /opt/rocm/libexec/rdc/rdc.service /etc/systemd/system/
+    sudo cp /opt/rocm/libexec/rdc/rdc.service /etc/systemd/system/
 
 2. Configure capabilities:
 
@@ -44,30 +44,30 @@ Here are the steps to start RDC using ``systemctl`` command, which runs RDC in t
 
 3. Start the service:
 
-.. code-block:: shell
+   .. code-block:: shell
 
-  sudo systemctl start rdc
-  sudo systemctl status rdc
+    sudo systemctl start rdc
+    sudo systemctl status rdc
 
 4. Modify RDCD options:
 
-Edit ``/opt/rocm/etc/rdc_options`` to append any additional RDCD parameters.
+   Edit ``/opt/rocm/etc/rdc_options`` to append any additional RDCD parameters.
 
-.. code-block:: shell
+   .. code-block:: shell
 
-  sudo nano /opt/rocm/etc/rdc_options
+    sudo nano /opt/rocm/etc/rdc_options
 
-Example configuration:
+   Example configuration:
 
-.. code-block:: shell
+   .. code-block:: shell
 
-  RDC_OPTS="-p 50051 -u -d"
+    RDC_OPTS="-p 50051 -u -d"
 
-Flags:
+   Flags:
 
-- `-p 50051` : Use port 50051
-- `-u` : Unauthenticated mode
-- `-d` : Enable debug messages
+   - `-p 50051` : Use port 50051
+   - `-u` : Unauthenticated mode
+   - `-d` : Enable debug messages
 
 Starting RDC using command line as a user
 ------------------------------------------
@@ -240,7 +240,7 @@ The embedded mode is especially useful for a monitoring agent running on the com
 
 The RDC daemon ``rdcd`` can be used as a reference code for this purpose. The dependency on ``gRPC`` is also eliminated, if the RDC library is directly used.
 
-- To run RDC in embedded mode, use:
+To run RDC in embedded mode, use:
 
 .. code-block:: shell
 
@@ -261,25 +261,25 @@ The RDCD logs provide useful status and debugging information. The logs can also
 
 - View logs:
 
-When ``rdcd`` is started using ``systemctl``, you can view the logs using:
+  When ``rdcd`` is started using ``systemctl``, you can view the logs using:
 
-.. code-block:: shell
+  .. code-block:: shell
 
-  $ journalctl -u rdc
+    $ journalctl -u rdc
 
 - Run RDCD with debug logs:
 
-.. code-block:: shell
+  .. code-block:: shell
 
-  RDC_LOG=DEBUG /opt/rocm/bin/rdcd
+    RDC_LOG=DEBUG /opt/rocm/bin/rdcd
 
-Logging levels supported: `ERROR`, `INFO`, `DEBUG`.
+  Logging levels supported: `ERROR`, `INFO`, `DEBUG`.
 
 - Enable additional logging messages:
 
-.. code-block:: shell
+  .. code-block:: shell
 
-  export RSMI_LOGGING=3
+    export RSMI_LOGGING=3
 
 If the GPU reset fails, restart the server. Note that restarting the server also initiates ``rdcd``. You might then encounter the following two scenarios:
 
@@ -311,50 +311,50 @@ Known issues
 
 - dmon RocProfiler fields return zeros
 
-**Solution:**
+  **Solution:**
 
-Set the ``HSA_TOOLS_LIB`` environment variable before running a compute job.
+  Set the ``HSA_TOOLS_LIB`` environment variable before running a compute job.
 
-.. code-block:: shell
+  .. code-block:: shell
 
-  export HSA_TOOLS_LIB=/opt/rocm/lib/librocprofiler64.so.1
+    export HSA_TOOLS_LIB=/opt/rocm/lib/librocprofiler64.so.1
 
-**Example:**
+  **Example:**
 
-.. code-block:: shell
+  .. code-block:: shell
 
-  # Terminal 1
-  rdcd -u
+    # Terminal 1
+    rdcd -u
 
-  # Terminal 2
-  export HSA_TOOLS_LIB=/opt/rocm/lib/librocprofiler64.so.1
-  gpu-burn
+    # Terminal 2
+    export HSA_TOOLS_LIB=/opt/rocm/lib/librocprofiler64.so.1
+    gpu-burn
 
-  # Terminal 3
-  rdci dmon -u -e 800,801 -i 0 -c 1
+    # Terminal 3
+    rdci dmon -u -e 800,801 -i 0 -c 1
 
-  # Output:
-  GPU   OCCUPANCY_PERCENT   ACTIVE_WAVES
-  0     001.000             32640.000
+    # Output:
+    GPU   OCCUPANCY_PERCENT   ACTIVE_WAVES
+    0     001.000             32640.000
 
 - HSA_STATUS_ERROR_OUT_OF_RESOURCES
 
-**Error message:**
+  **Error message:**
 
-.. code-block:: shell
+  .. code-block:: shell
 
-  terminate called after throwing an instance of 'std::runtime_error'
-  what():  hsa error code: 4104 HSA_STATUS_ERROR_OUT_OF_RESOURCES: The runtime failed to allocate the necessary resources. This error may also occur when the core runtime library needs to spawn threads or create internal OS-specific events.
-  Aborted (core dumped)
+    terminate called after throwing an instance of 'std::runtime_error'
+    what():  hsa error code: 4104 HSA_STATUS_ERROR_OUT_OF_RESOURCES: The runtime failed to allocate the necessary resources. This error may also occur when the core runtime library needs to spawn threads or create internal OS-specific events.
+    Aborted (core dumped)
 
-**Solution:**
+  **Solution:**
 
-Follow these steps to check for missing groups:
+  Follow these steps to check for missing groups:
 
-1. Ensure video and render groups exist.
+  1. Ensure video and render groups exist.
 
-.. code-block:: shell
+     .. code-block:: shell
 
-  sudo usermod -aG video,render $USER
+      sudo usermod -aG video,render $USER
 
-2. Logout and login to apply group changes.
+  2. Logout and login to apply group changes.
