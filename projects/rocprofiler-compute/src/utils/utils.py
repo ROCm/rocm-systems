@@ -633,6 +633,9 @@ def run_prof(
         # rocprofv2 has separate csv files for each process
         results_files = glob.glob(workload_dir + "/out/pmc_1/results_*.csv")
 
+        if len(results_files) == 0:
+            return
+
         # Combine results into single CSV file
         combined_results = pd.concat(
             [pd.read_csv(f) for f in results_files], ignore_index=True
@@ -808,7 +811,6 @@ def process_rocprofv3_output(rocprof_output, workload_dir, is_timestamps):
         else:
             # when the input is not for timestamps, and counter csv file is not generated, we assume failed rocprof run and will completely bypass the file generation and merging for current pmc
             results_files_csv = []
-            console_warning("No counter csv files generated, rocprofv3 run failed!!!")
 
     else:
         console_error("The output file of rocprofv3 can only support json or csv!!!")
@@ -865,6 +867,10 @@ def process_hip_trace_output(workload_dir, fbase):
 
 
 def replace_timestamps(workload_dir):
+
+    if not path(workload_dir, "timestamps.csv").is_file():
+        return
+
     df_stamps = pd.read_csv(workload_dir + "/timestamps.csv")
     if "Start_Timestamp" in df_stamps.columns and "End_Timestamp" in df_stamps.columns:
         # Update timestamps for all *.csv output files
@@ -1133,7 +1139,7 @@ def is_workload_empty(path):
             )
 
     else:
-        console_error("profiling", "Cannot find pmc_perf.csv in %s" % path)
+        console_error("analysis", "No profiling data found.")
 
 
 def print_status(msg):

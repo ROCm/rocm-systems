@@ -137,6 +137,9 @@ class RocProfCompute_Base:
                 # join by unique index of kernel
                 df = pd.merge(df, _df, how="inner", on="key", suffixes=("", f"_{i}"))
 
+        if df is None or df.empty:
+            return
+
         # TODO: check for any mismatch in joins
         duplicate_cols = {
             "GPU_ID": [col for col in df.columns if col.startswith("GPU_ID")],
