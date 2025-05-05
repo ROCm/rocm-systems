@@ -1,4 +1,4 @@
-name: ABI Compliance Check
+name: Major ABI Compliance Check
 
 on:
   pull_request:
@@ -83,7 +83,7 @@ jobs:
             source $GITHUB_WORKSPACE/abi_status.txt
             if [ "$abi_exit_code" -ne 0 ]; then
               echo "ABI check failed, adding ABI BREAKAGE label to PR #${{ github.event.pull_request.number }}"
-              gh pr edit ${{ github.event.pull_request.number }} --add-label "ABI BREAKAGE"
+              gh pr edit ${{ github.event.pull_request.number }} --add-label "MAJOR ABI BREAKAGE"
             fi
           fi
         env:

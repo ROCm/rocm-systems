@@ -1,4 +1,4 @@
-name: Strict ABI Compliance Check
+name: Minor ABI Compliance Check
 
 on:
   pull_request:
@@ -154,7 +154,7 @@ jobs:
         if: github.event_name == 'pull_request' && steps.abi-check.outcome == 'failure'
         run: |
           echo "ABI check failed, adding ABI BREAKAGE label to PR #${{ github.event.pull_request.number }}"
-          gh pr edit ${{ github.event.pull_request.number }} --add-label "ABI BREAKAGE"
+          gh pr edit ${{ github.event.pull_request.number }} --add-label "MINOR ABI BREAKAGE"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
