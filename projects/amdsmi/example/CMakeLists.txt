@@ -1,5 +1,4 @@
-set(CMAKE_VERBOSE_MAKEFILE on)
-cmake_minimum_required(VERSION 3.15)
+cmake_minimum_required(VERSION 3.20)
 
 option(ENABLE_ESMI_LIB "Build ESMI Library" ON)
 option(CMAKE_VERBOSE_MAKEFILE "Enable verbose output" ON)

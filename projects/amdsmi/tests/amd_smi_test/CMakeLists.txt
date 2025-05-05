@@ -1,4 +1,3 @@
-set(CMAKE_VERBOSE_MAKEFILE on)
 # Required Defines first:
 option(INSTALL_GTEST "Install GTest (only useful if GTest is not already installed)" OFF)
 

@@ -169,7 +169,7 @@ This section describes the prerequisites and steps to build AMD SMI from source.
 To build the AMD SMI library, the following components are required. Note that the software versions specified were used
 during development; earlier versions are not guaranteed to work.
 
-* CMake (v3.15.0 or later) -- `python3 -m pip install cmake`
+* CMake (v3.20.0 or later) -- `python3 -m pip install cmake`
 * g++ (v5.4.0 or later)
 * libdrm-dev (for Ubuntu and Debian)
 * libdrm-devel (for RPM-based distributions)

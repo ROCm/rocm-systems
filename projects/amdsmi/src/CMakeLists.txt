@@ -1,7 +1,3 @@
-#
-# Minimum version of cmake required
-#
-set(CMAKE_VERBOSE_MAKEFILE on)
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                  CMake AMD SMI C/C++ Library                      ")
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")

@@ -1,12 +1,6 @@
-message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
-message("                    CMake AMD SMI (Library) [root]                ")
-message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 #
 # Minimum version of cmake required
 #
-## Verbose output.
-set(CMAKE_VERBOSE_MAKEFILE on)
-
 cmake_minimum_required(VERSION 3.20)
 
 set(AMD_SMI "amd_smi")
@@ -173,10 +167,6 @@ if(ENABLE_ESMI_LIB)
     # esmi has a lot of write-strings warnings - silence them
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-write-strings")
 endif()
-
-# sets DRM_LIBRARIES and DRM_INCLUDE_DIRS
-# sets AMDGPU_DRM_LIBRARIES and AMDGPU_DRM_INCLUDE_DIRS
-
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/third_party/shared_mutex
                     ${CMAKE_CURRENT_SOURCE_DIR}/include/amd_smi ${ESMI_INC_DIR})
@@ -390,7 +380,3 @@ set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
 include(CPack)
 
 generic_package_post()
-
-message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
-message("                    CMake AMD SMI (Library) [root] END            ")
-message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")

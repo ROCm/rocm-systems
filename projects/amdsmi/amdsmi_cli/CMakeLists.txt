@@ -2,7 +2,6 @@ message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                     CMake AMDSMI CLI Install                      ")
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 
-set(CMAKE_VERBOSE_MAKEFILE on)
 # Set CLI Build Directory
 set(PY_PACKAGE_DIR "amdsmi_cli")
 set(PY_CLI_INSTALL_DIR

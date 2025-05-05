@@ -61,8 +61,6 @@ if (NOT GOAMDSMI_SHIM_PACKAGE)
 endif()
 
 set(CPACK_PACKAGE_FILE_NAME "${GOAMDSMI_SHIM_PACKAGE}-${SO_VERSION_STRING}")
-## Verbose output.
-set(CMAKE_VERBOSE_MAKEFILE on)
 
 ## Compiler flags
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -fpic -fno-rtti -m64")
