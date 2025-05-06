@@ -82,27 +82,27 @@ Here are the steps to install Prometheus:
 
 1. Install Prometheus client:
 
-.. code-block:: shell
+   .. code-block:: shell
 
-  $ pip install prometheus_client
+    $ pip install prometheus_client
 
 2. Run the Prometheus plugin:
 
-.. code-block:: shell
+   .. code-block:: shell
 
-  $ python rdc_prometheus.py
+    $ python rdc_prometheus.py
 
 3. Verify plugin:
 
-.. code-block:: shell
+   .. code-block:: shell
 
-  $ curl localhost:5000
+    $ curl localhost:5000
 
-  gpu_util{gpu_index="0"} 0.0
-  gpu_clock{gpu_index="0"} 300.0
-  gpu_memory_total{gpu_index="0"} 4294.0
-  power_usage{gpu_index="0"} 9.0
-  gpu_memory_usage{gpu_index="0"} 134.0
+    gpu_util{gpu_index="0"} 0.0
+    gpu_clock{gpu_index="0"} 300.0
+    gpu_memory_total{gpu_index="0"} 4294.0
+    power_usage{gpu_index="0"} 9.0
+    gpu_memory_usage{gpu_index="0"} 134.0
 
 By default, the plugin runs in the standalone mode and connects to ``rdcd`` at ``localhost:50051`` to fetch fields. Ensure that the plugin uses the same authentication mode as ``rdcd``, for example, if ``rdcd`` runs with ``-u/--unauth`` option, the plugin must also use ``--rdc_unauth`` option.
 
@@ -179,11 +179,10 @@ To integrate Prometheus plugin in RDC, follow these steps:
 
 2. Configure Prometheus targets:
 
-Use the example configuration file ``rdc_prometheus_example.yml`` in the ``python_binding`` folder. This file refers to ``prometheus_targets.json``.
-Modify `prometheus_targets.json` to point to your compute nodes.
-Ensure that this is modified to point to the correct compute nodes.
+   Use the example configuration file ``rdc_prometheus_example.yml`` in the ``python_binding`` folder. This file refers to ``prometheus_targets.json``. Modify ``prometheus_targets.json`` to point to your compute nodes.
+   Ensure that this is modified to point to the correct compute nodes.
 
-.. code-block:: shell
+   .. code-block:: shell
 
     // Sample file: prometheus_targets.json
     // Replace rdc_test*.amd.com to point the correct compute nodes
@@ -197,15 +196,15 @@ Ensure that this is modified to point to the correct compute nodes.
       }
     ]
 
-.. note::
+   .. note::
 
-  In the above example, there are two compute nodes, ``rdc_test1.adm.com`` and ``rdc_test2.adm.com``. Ensure that the Prometheus plugin is running on those compute nodes.
+    In the above example, there are two compute nodes, ``rdc_test1.adm.com`` and ``rdc_test2.adm.com``. Ensure that the Prometheus plugin is running on those compute nodes.
 
 3. Start the Prometheus plugin.
 
-.. code-block:: shell
+   .. code-block:: shell
 
-  % prometheus --config.file=<full path of the rdc_prometheus_example.yml>
+    % prometheus --config.file=<full path of the rdc_prometheus_example.yml>
 
 4. From the management node, open the URL http://localhost:9090 in the browser.
 
@@ -231,7 +230,7 @@ To install Grafana plugin, follow these steps:
 
 3. To start Grafana, use:
 
-.. code-block:: shell
+   .. code-block:: shell
 
     $ sudo systemctl start grafana-server
     $ sudo systemctl status grafana-server
@@ -241,7 +240,6 @@ To install Grafana plugin, follow these steps:
 5. Login using the default username and password (``admin``/``admin``) as shown in the following image:
 
 .. figure:: ../data/integration_login.png
-
 
 Grafana integration
 --------------------
@@ -256,21 +254,21 @@ Grafana configuration
 
 Firstly, add Prometheus as data source using the following steps:
 
-1. Go to `Configuration`.
+1. Go to "Configuration".
 
-.. image:: ../data/integration_config1.png
+   .. image:: ../data/integration_config1.png
 
-2. Select `Data Sources`.
+2. Select "Data Sources".
 
-.. image:: ../data/integration_config2.png
+   .. image:: ../data/integration_config2.png
 
-3. Go to `Add data source`.
+3. Go to "Add data source".
 
-.. image:: ../data/integration_config3.png
+   .. image:: ../data/integration_config3.png
 
-4. Select `Prometheus`.
+4. Select "Prometheus".
 
-.. image:: ../data/integration_config4.png
+   .. image:: ../data/integration_config4.png
 
 .. note::
 
@@ -280,45 +278,45 @@ Firstly, add Prometheus as data source using the following steps:
 
 Then, import RDC dashboard using the following steps:
 
-1. Go to `+` and select `Import`.
+1. Go to "+" and select "Import".
 
 2. Upload ``rdc_grafana_dashboard_example.json`` from the ``python_binding`` folder.
 
 3. Select the desired compute node for visualization.
 
-.. image:: ../data/integration_config6.png
+   .. image:: ../data/integration_config6.png
 
 Prometheus (Grafana) integration with automatic node detection
 ==============================================================
 
-RDC provides `Consul` to discover the ``rdc_prometheus`` service automatically. `Consul` is a service mesh solution providing a fully featured control plane with service discovery, configuration, and segmentation functionality. For more information, see `Consul <https://developer.hashicorp.com/consul/docs/intro>`_.
+RDC provides Consul to discover the ``rdc_prometheus`` service automatically. Consul is a service mesh solution providing a fully featured control plane with service discovery, configuration, and segmentation functionality. For more information, see `Consul <https://developer.hashicorp.com/consul/docs/intro>`_.
 
-RDC uses `Consul` for health checks of RDC's integration with the `Prometheus` plugin (``rdc_prometheus``). These checks provide information on its efficiency.
+RDC uses Consul for health checks of RDC's integration with the Prometheus plugin (``rdc_prometheus``). These checks provide information on its efficiency.
 
-With the `Consul` agent integration, a new compute node can be discovered automatically, which saves users from manually changing ``prometheus_targets.json`` to use `Consul`.
+With the Consul agent integration, a new compute node can be discovered automatically, which saves users from manually changing ``prometheus_targets.json`` to use Consul.
 
 Installing the Consul agent for compute and management nodes
 ------------------------------------------------------------
 
-To install the latest `Consul` agent for compute and management nodes, follow these steps:
+To install the latest Consul agent for compute and management nodes, follow these steps:
 
-1. To download and install the ``Consul`` agent, set up the ``apt`` repository:
+1. To download and install the Consul agent, set up the ``apt`` repository:
 
-.. code-block:: shell
+   .. code-block:: shell
 
     $ curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -
     $ sudo apt-add-repository "deb [arch=amd64]   https://apt.releases.hashicorp.com $(lsb_release -cs) main"
     $ sudo apt-get update && sudo apt-get install consul
 
-2. Generate a key to encrypt the communication between `Consul` agents. The same key is used by both the compute and management nodes for communication.
+2. Generate a key to encrypt the communication between Consul agents. The same key is used by both the compute and management nodes for communication.
 
-.. code-block:: shell
+   .. code-block:: shell
 
     $ consul keygen
 
-For demonstration purposes, the following key is used in the configuration file:
+   For demonstration purposes, the following key is used in the configuration file:
 
-.. code-block:: shell
+   .. code-block:: shell
 
     $ consul keygen
     4lgGQXr3/R2QeTi5vEp7q5Xs1KoYBhCsk9+VgJZZHAo=
@@ -326,7 +324,7 @@ For demonstration purposes, the following key is used in the configuration file:
 Setting up the Consul server in management nodes
 -------------------------------------------------
 
-While ``Consul`` can function with one server, it's recommended to use three to five servers to avoid failure scenarios leading to data loss.
+While Consul can function with one server, it's recommended to use three to five servers to avoid failure scenarios leading to data loss.
 
 .. note::
   For demonstration purposes, the configuration settings documented below are for a single server.
@@ -335,40 +333,40 @@ To set up ``Consul`` server, follow these steps:
 
 1. Create a configuration file ``/etc/consul.d/server.hcl``.
 
-.. code-block:: shell
+   .. code-block:: shell
 
-  server = true
-  encrypt = "<CONSUL_ENCRYPTION_KEY>"
-  bootstrap_expect = 1
-  ui = true
-  client_addr = "0.0.0.0"
-  bind_addr = "<The IP address can be reached by client>"
+    server = true
+    encrypt = "<CONSUL_ENCRYPTION_KEY>"
+    bootstrap_expect = 1
+    ui = true
+    client_addr = "0.0.0.0"
+    bind_addr = "<The IP address can be reached by client>"
 
-Here is how to use the variables in the configuration file:
+   Here is how to use the variables in the configuration file:
 
    * Run the agent in server mode by setting ``server`` to ``true``.
    * Set ``encrypt`` to the key generated in the first step.
-   * The ``bootstrap_expect`` variable indicates the number of servers required to form the first `Consul` cluster. Set this variable to ``1`` to allow a cluster with a single server.
+   * The ``bootstrap_expect`` variable indicates the number of servers required to form the first Consul cluster. Set this variable to ``1`` to allow a cluster with a single server.
    * The User Interface (``ui``) variable when set to ``true`` enables the Consul web UI.
    * The ``client_addr`` variable is used to connect the API and UI.
    * The ``bind_addr`` variable is used to connect the client to the server. If you have multiple private IP addresses, use the address that can connect to a client.
 
 2. Start the agent.
 
-.. code-block:: shell
+   .. code-block:: shell
 
-  $ sudo consul agent -config-dir=/etc/consul.d/
+    $ sudo consul agent -config-dir=/etc/consul.d/
 
 3. Browse to http://localhost:8500/ on the management node to see a single instance running.
 
 Setting up the Consul client in compute nodes
 ---------------------------------------------
 
-To set up `Consul` client, follow these steps:
+To set up Consul client, follow these steps:
 
 1. Create a configuration file ``/etc/consul.d/client.hcl``.
 
-.. code-block:: shell
+   .. code-block:: shell
 
     server = false
     encrypt = "<CONSUL_ENCRYPTION_KEY>"
@@ -376,35 +374,36 @@ To set up `Consul` client, follow these steps:
     client_addr = "0.0.0.0"
     bind_addr = "<The IP address can reach server>"
 
-.. note::
-  Use the same ``CONSUL_ENCRYPTION_KEY`` as the servers. In the ``retry_join``, use the IP address of the management nodes.
+   .. note::
+
+    Use the same ``CONSUL_ENCRYPTION_KEY`` as the servers. In the ``retry_join``, use the IP address of the management nodes.
 
 2. Start the Consul agent.
 
-.. code-block:: shell
+   .. code-block:: shell
 
-  $ sudo consul agent -config-dir=/etc/consul.d/
+    $ sudo consul agent -config-dir=/etc/consul.d/
 
-To see if the client has joined the `Consul`, use:
+   To see if the client has joined the Consul, use:
 
-.. code-block:: shell
+   .. code-block:: shell
 
     $ consul members
     Node              Address           Status  Type    Build  Protocol  DC   Segment
     management-node   10.4.22.70:8301   alive   server  1.9.3  2    dc1  <all>
     compute-node      10.4.22.112:8301  alive   client  1.9.3  2    dc1  <default>
 
-3. Set up the `Consul` client to monitor the health of the RDC Prometheus plugin.
+3. Set up the Consul client to monitor the health of the RDC Prometheus plugin.
 
 4. Start the RDC Prometheus plugin.
 
-.. code-block:: shell
+   .. code-block:: shell
 
-  $ python rdc_prometheus.py --rdc_embedded
+    $ python rdc_prometheus.py --rdc_embedded
 
 5. Add the configuration file ``/etc/consul.d/rdc_prometheus.hcl``.
 
-.. code-block:: shell
+   .. code-block:: shell
 
     {
       "service": {
@@ -425,30 +424,30 @@ To see if the client has joined the `Consul`, use:
       }
     }
 
-.. note::
+   .. note::
 
-  By default, the `Prometheus` plugin uses port 5000. If you don't use the default setting, change the configuration file accordingly.
+    By default, the Prometheus plugin uses port 5000. If you don't use the default setting, change the configuration file accordingly.
 
-6. After updating the configuration file, restart the `Consul` client agent.
+6. After updating the configuration file, restart the Consul client agent.
 
-.. code-block:: shell
+   .. code-block:: shell
 
-  $ sudo consul agent -config-dir=/etc/consul.d/
+    $ sudo consul agent -config-dir=/etc/consul.d/
 
 7. Enable the :ref:`Prometheus <prometheus>` integration in the management node.
 
 8. In the management node, inspect the service.
 
-.. code-block:: shell
+   .. code-block:: shell
 
-  $ consul catalog nodes -service=rdc_prometheus
+    $ consul catalog nodes -service=rdc_prometheus
 
-  Node              ID        Address      DC
-  compute-node      76694ab1  10.4.22.112  dc1
+    Node              ID        Address      DC
+    compute-node      76694ab1  10.4.22.112  dc1
 
-9. Create a new `Prometheus` configuration ``rdc_prometheus_consul.yml`` file for the `Consul` integration.
+9. Create a new Prometheus configuration ``rdc_prometheus_consul.yml`` file for the Consul integration.
 
-.. code-block:: shell
+   .. code-block:: shell
 
     global:
       scrape_interval:     15s # Set the scrape interval to every 15 seconds. Default is every 1 minute.
@@ -464,16 +463,17 @@ To see if the client has joined the `Consul`, use:
           - source_labels: [__meta_consul_service]
             target_label: job
 
-.. note::
-  When running the `Consul` server and `Prometheus` on the same machine, change the server under ``consul_sd_configs`` to your `Consul` server address.
+   .. note::
+
+    When running the Consul server and Prometheus on the same machine, change the server under ``consul_sd_configs`` to your Consul server address.
 
 10. Start Prometheus.
 
-.. code-block:: shell
+    .. code-block:: shell
 
-  $ ./prometheus --config.file="rdc_prometheus_consul.yml"
+      $ ./prometheus --config.file="rdc_prometheus_consul.yml"
 
-11. Browse the `Prometheus` UI at http://localhost:9090 on the management node and query RDC `Prometheus` metrics. Ensure that the plugin starts before running the query.
+11. Browse the Prometheus UI at http://localhost:9090 on the management node and query RDC Prometheus metrics. Ensure that the plugin starts before running the query.
 
 Reliability, Availability, and Serviceability plugin
 =====================================================
@@ -490,13 +490,13 @@ Prerequisite
 
 - Ensure that the GPU supports RAS.
 
-.. note::
+  .. note::
 
-  The RAS library is installed as part of the RDC installation. No additional configuration is required for RDC.
+    The RAS library is installed as part of the RDC installation. No additional configuration is required for RDC.
 
 - RDC installation dynamically loads the RAS library ``librdc_ras.so``. The configuration files required by the RAS library are installed in the ``sp3`` and ``config`` folders.
 
-.. code-block:: shell
+  .. code-block:: shell
 
     % ls /opt/rocm-4.2.0/rdc/lib
     ... librdc_ras.so ...
