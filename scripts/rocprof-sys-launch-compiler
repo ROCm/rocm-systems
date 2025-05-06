@@ -93,6 +93,13 @@ else
     # discard the compiler from the command
     shift
 
+    if [ -n "$(basename ${ROCPROFSYS_COMPILER} | egrep 'amdclang|amdllvm')" ]; then
+        # this ensures the libomptarget-amdgpu-gfx*.bc files are found
+        LLVM_LIB_DIR=$(cd $(dirname $(realpath ${ROCPROFSYS_COMPILER}))/../lib && pwd)
+        debug-message export LIBRARY_PATH=${LLVM_LIB_DIR}:${LIBRARY_PATH}
+        export LIBRARY_PATH=${LLVM_LIB_DIR}:${LIBRARY_PATH}
+    fi
+
     debug-message ${ROCPROFSYS_COMPILER} $@
     # execute ${ROCPROFSYS_COMPILER} (again, usually nvcc_wrapper)
     ${ROCPROFSYS_COMPILER} $@
