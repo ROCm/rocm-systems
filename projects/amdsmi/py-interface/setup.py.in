@@ -3,7 +3,7 @@ import os
 
 setup(
     name="amdsmi",
-    version="@amd_smi_libraries_VERSION_STRING@",
+    version="@amd_smi_lib_VERSION_STRING@",
     author="AMD",
     author_email="amd-smi.support@amd.com",
     description="AMDSMI Python LIB - AMD GPU Monitoring Library",

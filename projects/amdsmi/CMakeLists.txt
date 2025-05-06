@@ -4,10 +4,8 @@
 cmake_minimum_required(VERSION 3.20)
 
 set(AMD_SMI "amd_smi")
-set(AMD_SMI_COMPONENT "lib${AMD_SMI}")
-set(AMD_SMI_TARGET "${AMD_SMI}")
-set(AMD_SMI_LIB_NAME "lib${AMD_SMI_TARGET}")
-set(AMD_SMI_LIBS_TARGET "amd_smi_libraries")
+set(AMD_SMI_LIBS_TARGET "${AMD_SMI}_lib")
+set(CPACK_PACKAGE_NAME amd-smi-lib CACHE STRING "")
 
 set(BUILD_SHARED_LIBS ON CACHE BOOL "Build shared library (.so) or not.")
 
@@ -31,7 +29,6 @@ set(${AMD_SMI_LIBS_TARGET}_VERSION_MINOR "${CPACK_PACKAGE_VERSION_MINOR}")
 set(${AMD_SMI_LIBS_TARGET}_VERSION_PATCH "${CPACK_PACKAGE_VERSION_PATCH}")
 set(${AMD_SMI_LIBS_TARGET}_VERSION_BUILD "0")
 set(${AMD_SMI_LIBS_TARGET}_VERSION_HASH "${PKG_VERSION_HASH}")
-
 set(${AMD_SMI_LIBS_TARGET}_VERSION_STRING
     "${${AMD_SMI_LIBS_TARGET}_VERSION_MAJOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_MINOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_PATCH}+${${AMD_SMI_LIBS_TARGET}_VERSION_HASH}"
 )
@@ -56,9 +53,9 @@ set(PKG_VERSION_MINOR "${CPACK_PACKAGE_VERSION_MINOR}")
 set(PKG_VERSION_PATCH "${CPACK_PACKAGE_VERSION_PATCH}")
 set(PKG_VERSION_NUM_COMMIT 0)
 
-set(AMD_SMI_PACKAGE amd-smi-lib CACHE STRING "")
+project(${AMD_SMI_LIBS_TARGET} DESCRIPTION "AMD System Management libraries"
+        HOMEPAGE_URL "https://github.com/ROCm/amdsmi")
 
-project(${AMD_SMI_LIBS_TARGET})
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -81,10 +78,7 @@ cmake_dependent_option(ENABLE_LDCONFIG "Set library links and caches using ldcon
 set(SHARE_INSTALL_PREFIX "${CMAKE_INSTALL_DATAROOTDIR}/${AMD_SMI}" CACHE STRING "Tests and Example install directory")
 
 # Packaging directives
-set(CPACK_PACKAGE_NAME ${AMD_SMI_PACKAGE} CACHE STRING "")
-
 set(CPACK_PACKAGE_CONTACT "AMD-SMILib Support <amd-smi.support@amd.com>" CACHE STRING "")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "AMD System Management libraries" CACHE STRING "")
 
 generic_package()
 
@@ -240,11 +234,11 @@ install(
 
 # Create cmake target
 # Add all targets to the build-tree export set
-export(TARGETS ${AMD_SMI_TARGET} FILE "${PROJECT_BINARY_DIR}/amd_smi_target.cmake")
+export(TARGETS ${AMD_SMI} FILE "${PROJECT_BINARY_DIR}/amd_smi_target.cmake")
 
 # Export the package for use from the build-tree
 # (this registers the build-tree with a global CMake-registry)
-export(PACKAGE amd_smi)
+export(PACKAGE ${AMD_SMI})
 
 # Create the amd_smiConfig.cmake and amd_smiConfigVersion files
 # ... for the build tree
@@ -283,19 +277,66 @@ add_subdirectory(goamdsmi_shim)
 set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "python3-argcomplete, libdrm-dev, libdrm-amdgpu-dev")
 set(CPACK_DEBIAN_ASAN_PACKAGE_RECOMMENDS ${CPACK_DEBIAN_PACKAGE_RECOMMENDS})
 set(CPACK_DEBIAN_DEV_PACKAGE_RECOMMENDS ${CPACK_DEBIAN_PACKAGE_RECOMMENDS})
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "sudo, python3 (>= 3.6.8), python3-pip, python3-setuptools, python3-wheel")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "sudo, libc6, python3 (>= 3.6.8), python3-pip, python3-setuptools, python3-wheel")
 set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
 set(CPACK_DEBIAN_DEV_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
 
+# $CURRENT_YEAR is used by copyright.in
+string(TIMESTAMP CURRENT_YEAR "%Y")
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/copyright.in DEBIAN/copyright @ONLY)
+
 ## Process the Debian install/remove scripts to update the CPACK variables
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/postinst.in DEBIAN/postinst @ONLY)
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/amd-smi-lib/prerm.in DEBIAN/prerm @ONLY)
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/amd-smi-lib-tests/prerm.in DEBIAN/prerm @ONLY)
-set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "DEBIAN/postinst;DEBIAN/prerm")
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/postinst.in
+    DEBIAN/postinst
+    @ONLY
+    FILE_PERMISSIONS
+    OWNER_READ
+    OWNER_WRITE
+    OWNER_EXECUTE
+    GROUP_READ
+    GROUP_EXECUTE
+    WORLD_READ
+    WORLD_EXECUTE)
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/prerm.in
+    DEBIAN/prerm
+    @ONLY
+    FILE_PERMISSIONS
+    OWNER_READ
+    OWNER_WRITE
+    OWNER_EXECUTE
+    GROUP_READ
+    GROUP_EXECUTE
+    WORLD_READ
+    WORLD_EXECUTE)
+list(APPEND CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/postinst"
+     "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/prerm")
+
+# Configure pre-rm for tests only
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/${CPACK_PACKAGE_NAME}-tests/prerm.in
+    DEBIAN/${CPACK_PACKAGE_NAME}-tests/prerm
+    @ONLY
+    FILE_PERMISSIONS
+    OWNER_READ
+    OWNER_WRITE
+    OWNER_EXECUTE
+    GROUP_READ
+    GROUP_EXECUTE
+    WORLD_READ
+    WORLD_EXECUTE)
 
 # Assign control scripts to the AMDSMI Lib & Tests packages
-set(CPACK_DEBIAN_DEV_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/amd-smi-lib/prerm")
-set(CPACK_DEBIAN_TESTS_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/amd-smi-lib-tests/prerm")
+set(CPACK_DEBIAN_DEV_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/prerm")
+set(CPACK_DEBIAN_TESTS_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/${CPACK_PACKAGE_NAME}-tests/prerm")
+
+# install copyright file into share/doc/amd_smi/copyright
+# required for debian package compliance
+install(
+    FILES "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/copyright"
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/${AMD_SMI}
+    COMPONENT dev)
 
 # RPM package specific variables
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
@@ -331,13 +372,13 @@ endif()
 
 ## Enable Component Mode and set component specific flags
 set(CPACK_DEB_COMPONENT_INSTALL ON)
-set(CPACK_DEBIAN_DEV_PACKAGE_NAME "${AMD_SMI_PACKAGE}")
-set(CPACK_DEBIAN_TESTS_PACKAGE_NAME "${AMD_SMI_PACKAGE}-tests")
-set(CPACK_DEBIAN_ASAN_PACKAGE_NAME "${AMD_SMI_PACKAGE}-asan")
+set(CPACK_DEBIAN_DEV_PACKAGE_NAME "${CPACK_PACKAGE_NAME}")
+set(CPACK_DEBIAN_TESTS_PACKAGE_NAME "${CPACK_PACKAGE_NAME}-tests")
+set(CPACK_DEBIAN_ASAN_PACKAGE_NAME "${CPACK_PACKAGE_NAME}-asan")
 set(CPACK_RPM_COMPONENT_INSTALL ON)
-set(CPACK_RPM_DEV_PACKAGE_NAME "${AMD_SMI_PACKAGE}")
-set(CPACK_RPM_TESTS_PACKAGE_NAME "${AMD_SMI_PACKAGE}-tests")
-set(CPACK_RPM_ASAN_PACKAGE_NAME "${AMD_SMI_PACKAGE}-asan")
+set(CPACK_RPM_DEV_PACKAGE_NAME "${CPACK_PACKAGE_NAME}")
+set(CPACK_RPM_TESTS_PACKAGE_NAME "${CPACK_PACKAGE_NAME}-tests")
+set(CPACK_RPM_ASAN_PACKAGE_NAME "${CPACK_PACKAGE_NAME}-asan")
 if(ENABLE_ASAN_PACKAGING)
     # ASAN Package requires only asan component with libraries and license file
     set(CPACK_COMPONENTS_ALL asan)

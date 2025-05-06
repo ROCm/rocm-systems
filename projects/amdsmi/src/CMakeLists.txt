@@ -4,19 +4,11 @@ message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 
 message("")
 message("Build Configuration:")
-# message("-----------BuildType: " ${CMAKE_BUILD_TYPE})
-# message("------------Compiler: " ${CMAKE_CXX_COMPILER})
-# message("-------------Version: " ${CMAKE_CXX_COMPILER_VERSION})
 message("--------Proj Src Dir: " ${PROJECT_SOURCE_DIR})
-# message("--------Proj Bld Dir: " ${PROJECT_BINARY_DIR})
-# message("--------Proj Lib Dir: " ${PROJECT_BINARY_DIR}/lib)
-# message("--------Proj Exe Dir: " ${PROJECT_BINARY_DIR}/bin)
-# message("")
 
 ## Include common cmake modules
 include(utils)
 
-################# Determine the library version #########################
 set(SO_VERSION_GIT_TAG_PREFIX "amdsmi_so_ver")
 
 set(SRC_DIR "amd_smi")
@@ -73,48 +65,38 @@ set(${AMD_SMI}_VERSION_BUILD "0")
 message("SOVERSION: ${SO_VERSION_STRING}")
 
 # Create a configure file to get version info from within library
-configure_file("${AMD_SMI_TARGET}Config.in" "${PROJECT_SOURCE_DIR}/include/amd_smi/${AMD_SMI_TARGET}Config.h")
+configure_file("amd_smiConfig.in" "${PROJECT_SOURCE_DIR}/include/amd_smi/amd_smiConfig.h")
 
 add_executable(amd_smi_ex "../example/amd_smi_drm_example.cc")
-target_link_libraries(amd_smi_ex ${AMD_SMI_TARGET})
-add_library(${AMD_SMI_TARGET} ${SRC_LIST} ${INC_LIST})
-target_link_libraries(${AMD_SMI_TARGET} pthread rt dl)
-target_include_directories(${AMD_SMI_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/rocm_smi/include
-                                                     ${PROJECT_SOURCE_DIR}/common/shared_mutex)
+target_link_libraries(amd_smi_ex ${AMD_SMI})
+add_library(${AMD_SMI} ${SRC_LIST} ${INC_LIST})
+target_link_libraries(${AMD_SMI} pthread rt dl ${DRM_LIBRARIES} ${AMDGPU_DRM_LIBRARIES})
+target_include_directories(${AMD_SMI} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/rocm_smi/include
+                                              ${PROJECT_SOURCE_DIR}/common/shared_mutex)
 
 # use the target_include_directories() command to specify the include directories for the target
-target_include_directories(${AMD_SMI_TARGET} PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-                                                    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
+target_include_directories(${AMD_SMI} PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+                                             "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 
 ## Set the VERSION and SOVERSION values
-set_property(TARGET ${AMD_SMI_TARGET} PROPERTY SOVERSION "${VERSION_MAJOR}")
-set_property(TARGET ${AMD_SMI_TARGET} PROPERTY VERSION "${SO_VERSION_STRING}")
+set_property(TARGET ${AMD_SMI} PROPERTY SOVERSION "${VERSION_MAJOR}")
+set_property(TARGET ${AMD_SMI} PROPERTY VERSION "${SO_VERSION_STRING}")
 
 ## If the library is a release, strip the target library
 if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
     if(${BUILD_SHARED_LIBS}) #stripping only for .so
-        add_custom_command(TARGET ${AMD_SMI_TARGET} POST_BUILD COMMAND ${CMAKE_STRIP}
-                                                                       lib${AMD_SMI_TARGET}.so.${SO_VERSION_STRING})
+        add_custom_command(TARGET ${AMD_SMI} POST_BUILD COMMAND ${CMAKE_STRIP} lib${AMD_SMI}.so.${SO_VERSION_STRING})
     endif()
 endif()
 
-#file reorganization changes
-#amd_smi.py moved to libexec/amd_smi. so creating amd-smi symlink
-#file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/bin)
-#add_custom_target(
-#    link-amd-smi ALL
-#    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-#    COMMAND ${CMAKE_COMMAND} -E create_symlink ../libexec/${AMD_SMI}/amd_smi.py ${CMAKE_CURRENT_BINARY_DIR}/bin/amd-smi)
-
 ## Add the install directives for the runtime library.
 install(
-    TARGETS ${AMD_SMI_TARGET}
+    TARGETS ${AMD_SMI}
     EXPORT amd_smiTargets
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev)
-#COMPONENT ${AMD_SMI_COMPONENT})
 
 install(
-    TARGETS ${AMD_SMI_TARGET}
+    TARGETS ${AMD_SMI}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan)
 
 install(
@@ -122,18 +104,10 @@ install(
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi
     COMPONENT dev)
 install(
-    FILES ${PROJECT_SOURCE_DIR}/include/amd_smi/${AMD_SMI_TARGET}Config.h
+    FILES ${PROJECT_SOURCE_DIR}/include/amd_smi/amd_smiConfig.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi
     COMPONENT dev)
 install(
     FILES ${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi/kfd_ioctl.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi
     COMPONENT dev)
-#install(FILES ${PROJECT_SOURCE_DIR}/rocm_smi/python_smi_tools/rsmiBindings.py
-#                                        DESTINATION libexec/${AMD_SMI})
-#install(FILES ${PROJECT_SOURCE_DIR}/rocm_smi/python_smi_tools/rocm_smi.py
-#       PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ
-#                         GROUP_WRITE GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
-#                                        DESTINATION libexec/${AMD_SMI})
-#install(FILES ${CMAKE_CURRENT_BINARY_DIR}/bin/rocm-smi
-#                                        DESTINATION bin)

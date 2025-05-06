@@ -50,7 +50,7 @@ include_directories(${TEST} ${CMAKE_CURRENT_SOURCE_DIR}/.. ${ROCM_INC_DIR}/..)
 
 # Build rules
 add_executable(${TEST} ${tstSources} ${functionalSources})
-target_link_libraries(${TEST} ${AMD_SMI_TARGET} GTest::gtest_main c stdc++ pthread)
+target_link_libraries(${TEST} ${AMD_SMI} GTest::gtest_main c stdc++ pthread)
 
 # Install tests
 install(

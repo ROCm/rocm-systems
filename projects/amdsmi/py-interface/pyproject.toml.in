@@ -10,7 +10,7 @@ name = "amdsmi"
 authors = [
     {name = "AMD", email = "amd-smi.support@amd.com"},
 ]
-version = "@amd_smi_libraries_VERSION_STRING@"
+version = "@amd_smi_lib_VERSION_STRING@"
 license = {file = "amdsmi/LICENSE"}
 readme = {file = "amdsmi/README.md", content-type = "text/markdown"}
 description = "AMDSMI Python LIB - AMD GPU Monitoring Library"

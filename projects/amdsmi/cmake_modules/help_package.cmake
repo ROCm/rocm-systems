@@ -76,23 +76,15 @@ function(generic_package)
     # cpack version is populated with CMAKE_PROJECT_VERSION implicitly
     set(CPACK_PACKAGE_NAME ${CMAKE_PROJECT_NAME} CACHE STRING "")
     set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc." CACHE STRING "")
-    set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Placeholder Tool" CACHE STRING "")
-    set(CPACK_PACKAGE_DESCRIPTION "This package contains the AMD ${CPACK_PACKAGE_DESCRIPTION_SUMMARY}." CACHE STRING "")
     set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}" CACHE STRING "Default packaging prefix.")
     set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" CACHE STRING "")
     set(CPACK_RPM_PACKAGE_LICENSE "MIT" CACHE STRING "")
     set(CPACK_GENERATOR "DEB;RPM" CACHE STRING "Default packaging generators.")
+    set(CPACK_VERBATIM_VARIABLES ON CACHE BOOL "Escape strings passed to CPACK.")
     set(CPACK_DEB_COMPONENT_INSTALL ON PARENT_SCOPE)
     set(CPACK_RPM_COMPONENT_INSTALL ON PARENT_SCOPE)
-    mark_as_advanced(
-        CPACK_PACKAGE_NAME
-        CPACK_PACKAGE_VENDOR
-        CPACK_PACKAGE_CONTACT
-        CPACK_PACKAGE_DESCRIPTION_SUMMARY
-        CPACK_PACKAGE_DESCRIPTION
-        CPACK_RESOURCE_FILE_LICENSE
-        CPACK_RPM_PACKAGE_LICENSE
-        CPACK_GENERATOR)
+    mark_as_advanced(CPACK_PACKAGE_NAME CPACK_PACKAGE_VENDOR CPACK_PACKAGE_CONTACT CPACK_RESOURCE_FILE_LICENSE
+                     CPACK_RPM_PACKAGE_LICENSE CPACK_GENERATOR)
 
     # Debian package specific variables
     if(DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
@@ -138,10 +130,12 @@ endfunction()
 function(generic_package_post)
     # PACKAGE package, no postfix
     cpack_add_component_group("runtime")
-    cpack_add_component(dev GROUP runtime)
+    cpack_add_component(dev GROUP runtime DESCRIPTION "Development components of the library")
     cpack_add_component(unspecified GROUP runtime)
+    # not quite sure why this is the only way to populate cpack description
+    cpack_add_component(runtime GROUP runtime DESCRIPTION "Runtime components of the library")
 
     # PACKAGE-tests package, -tests postfix
     cpack_add_component_group("tests")
-    cpack_add_component(tests GROUP tests)
+    cpack_add_component(tests GROUP tests DESCRIPTION "Test components of the library")
 endfunction()
