@@ -5,5 +5,6 @@ Panel Config:
   data source:
     - pc_sampling_table:
         id: 2101
+        title: PC Sampling
         source: ps_file
         comparable: false # enable it later
