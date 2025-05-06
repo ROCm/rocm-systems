@@ -19,7 +19,7 @@
 
 import ctypes
 import json
-import logging
+# import logging
 import math
 import os
 import re
@@ -1888,7 +1888,7 @@ def amdsmi_get_gpu_asic_info(
     # Remove commas from vendor name for clean output
     asic_info["vendor_name"] = asic_info["vendor_name"].replace(',', '')
 
-    logging.debug("amdsmi_interface.py | amdsmi_get_gpu_asic_info | return_dictionary = \n" + str(json.dumps(asic_info, indent=4)))
+    # logging.debug("amdsmi_interface.py | amdsmi_get_gpu_asic_info | return_dictionary = \n" + str(json.dumps(asic_info, indent=4)))
     return asic_info
 
 
@@ -2181,7 +2181,7 @@ def amdsmi_get_clock_info(
         "clk_locked": _validate_if_max_uint(clock_measure.clk_locked, MaxUIntegerTypes.UINT8_T, isBool=True),
         "clk_deep_sleep" : _validate_if_max_uint(clock_measure.clk_deep_sleep, MaxUIntegerTypes.UINT8_T, isBool=True),
     }
-    logging.debug("amdsmi_interface.py | amdsmi_get_clock_info | clk_type = " + clk_type_str + " | return_dictionary = \n" + str(json.dumps(dict_ret, indent=4)))
+    # logging.debug("amdsmi_interface.py | amdsmi_get_clock_info | clk_type = " + clk_type_str + " | return_dictionary = \n" + str(json.dumps(dict_ret, indent=4)))
     return dict_ret
 
 
@@ -3105,7 +3105,7 @@ def amdsmi_get_gpu_memory_partition_config(processor_handle: amdsmi_wrapper.amds
         "num_numa_ranges": "N/A",
         "numa_range": "N/A",
     }
-    logging.debug("amdsmi_interface.py | amdsmi_get_gpu_memory_partition_config | return_dictionary = \n" + str(json.dumps(return_dict, indent=4)))
+    # logging.debug("amdsmi_interface.py | amdsmi_get_gpu_memory_partition_config | return_dictionary = \n" + str(json.dumps(return_dict, indent=4)))
     return return_dict
 
 
@@ -3166,7 +3166,7 @@ def amdsmi_get_gpu_accelerator_partition_profile(
     try:
         _check_res(ret)
     except AmdSmiException as e:
-        logging.debug("amdsmi_interface.py | amdsmi_get_gpu_accelerator_partition_profile | exception_caught >> " + str(e))
+        # logging.debug("amdsmi_interface.py | amdsmi_get_gpu_accelerator_partition_profile | exception_caught >> " + str(e))
         partition_profile_dict = {
             "profile_type" : "N/A",
             "num_partitions" : "N/A",
@@ -3186,7 +3186,7 @@ def amdsmi_get_gpu_accelerator_partition_profile(
                             # this ensures we can get partition ID even if the profile is not supported.
     finally:
         if exception_caught:
-            logging.debug("amdsmi_interface.py | exception_caught >> amdsmi_get_gpu_accelerator_partition_profile | return_dictionary = \n" + str(json.dumps(return_dictionary, indent=4)))
+            # logging.debug("amdsmi_interface.py | exception_caught >> amdsmi_get_gpu_accelerator_partition_profile | return_dictionary = \n" + str(json.dumps(return_dictionary, indent=4)))
             return return_dictionary
         else:
             profile_type_ret = amdsmi_wrapper.amdsmi_accelerator_partition_type_t__enumvalues[profile.profile_type].replace("AMDSMI_ACCELERATOR_PARTITION_", "")
@@ -3216,7 +3216,7 @@ def amdsmi_get_gpu_accelerator_partition_profile(
                 "partition_id" : partition_ids,
                 "partition_profile" : partition_profile_dict
             }
-            logging.debug("amdsmi_interface.py | amdsmi_get_gpu_accelerator_partition_profile | return_dictionary = \n" + str(json.dumps(return_dictionary, indent=4)))
+            # logging.debug("amdsmi_interface.py | amdsmi_get_gpu_accelerator_partition_profile | return_dictionary = \n" + str(json.dumps(return_dictionary, indent=4)))
             return return_dictionary
 
 def amdsmi_get_gpu_accelerator_partition_profile_config(processor_handle: amdsmi_wrapper.amdsmi_processor_handle) -> Dict:
@@ -3229,18 +3229,18 @@ def amdsmi_get_gpu_accelerator_partition_profile_config(processor_handle: amdsmi
 
     _check_res(amdsmi_wrapper.amdsmi_get_gpu_accelerator_partition_profile_config(processor_handle,
                                                                     ctypes.byref(config)))
-    logging.debug("\namdsmi_interface.py | amdsmi_get_gpu_accelerator_partition_profile_config | START - "
-          + "config.num_profiles = " + str(config.num_profiles)
-          + "\n; config.num_resource_profiles = " + str(config.num_resource_profiles)
-          + "\n; config.resource_profiles = " + str(config.resource_profiles)
-          + "\n; config.default_profile_index = " + str(config.default_profile_index)
-          + "\n; config.profiles = " + str(config.profiles))
+    # logging.debug("\namdsmi_interface.py | amdsmi_get_gpu_accelerator_partition_profile_config | START - "
+    #       + "config.num_profiles = " + str(config.num_profiles)
+    #       + "\n; config.num_resource_profiles = " + str(config.num_resource_profiles)
+    #       + "\n; config.resource_profiles = " + str(config.resource_profiles)
+    #       + "\n; config.default_profile_index = " + str(config.default_profile_index)
+    #       + "\n; config.profiles = " + str(config.profiles))
 
     profiles = []
     resource_idx = 0
     for i in range(config.num_profiles):
         profile = config.profiles[i]
-        logging.debug("\namdsmi_interface.py | amdsmi_get_gpu_accelerator_partition_profile_config | profile = " + str(profile))
+        # logging.debug("\namdsmi_interface.py | amdsmi_get_gpu_accelerator_partition_profile_config | profile = " + str(profile))
         profile_type_ret = amdsmi_wrapper.amdsmi_accelerator_partition_type_t__enumvalues[
             config.profiles[i].profile_type].replace("AMDSMI_ACCELERATOR_PARTITION_", "")
         profile_type_ret = profile_type_ret.replace("INVALID", "N/A")
@@ -3258,7 +3258,7 @@ def amdsmi_get_gpu_accelerator_partition_profile_config(processor_handle: amdsmi
             mem_caps_list.append("NPS8")
 
         for r in range(config.num_resource_profiles):
-            logging.debug("\namdsmi_interface.py | amdsmi_get_gpu_accelerator_partition_profile_config | i = " + str(i) + "; r = " + str(r) + "; resource_idx = " + str(resource_idx))
+            # logging.debug("\namdsmi_interface.py | amdsmi_get_gpu_accelerator_partition_profile_config | i = " + str(i) + "; r = " + str(r) + "; resource_idx = " + str(resource_idx))
             res_profile = config.resource_profiles[resource_idx]
             resource_profiles_ret = amdsmi_wrapper.amdsmi_accelerator_partition_resource_type_t__enumvalues[
                 res_profile.resource_type].replace("AMDSMI_ACCELERATOR_", "")
@@ -3268,7 +3268,7 @@ def amdsmi_get_gpu_accelerator_partition_profile_config(processor_handle: amdsmi
                 "partition_resource": res_profile.partition_resource,
                 "num_partitions_share_resource": res_profile.num_partitions_share_resource,
             }
-            logging.debug("\namdsmi_interface.py | amdsmi_get_gpu_accelerator_partition_profile_config | resource_profile_dict = " + str(resource_profile_dict))
+            # logging.debug("\namdsmi_interface.py | amdsmi_get_gpu_accelerator_partition_profile_config | resource_profile_dict = " + str(resource_profile_dict))
             resources.append(resource_profile_dict)
             resource_idx += 1
 
@@ -3289,7 +3289,7 @@ def amdsmi_get_gpu_accelerator_partition_profile_config(processor_handle: amdsmi
         "default_profile_index": config.default_profile_index,
         "profiles": profiles,
     }
-    logging.debug("\namdsmi_interface.py | amdsmi_get_gpu_accelerator_partition_profile_config | END - config_dict = \n" + str(json.dumps(config_dict, indent=4)))
+    # logging.debug("\namdsmi_interface.py | amdsmi_get_gpu_accelerator_partition_profile_config | END - config_dict = \n" + str(json.dumps(config_dict, indent=4)))
 
     return config_dict
 
@@ -4182,7 +4182,7 @@ def amdsmi_get_clk_freq(
         "current": freq.current,
         "frequency": list(freq.frequency)[: freq.num_supported],
     }
-    logging.debug("amdsmi_interface.py | amdsmi_get_clk_freq | clk_type = " + clk_type_str + " | return_dictionary = \n" + str(json.dumps(dict_ret, indent=4)))
+    # logging.debug("amdsmi_interface.py | amdsmi_get_clk_freq | clk_type = " + clk_type_str + " | return_dictionary = \n" + str(json.dumps(dict_ret, indent=4)))
     return dict_ret
 
 
