@@ -15,6 +15,7 @@ set(rocprofiler_lib_sources
     agent.cpp
     buffer.cpp
     contexts.cpp
+    enum_string.cpp
     hsa.cpp
     naming.cpp
     timestamp.cpp
