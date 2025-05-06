@@ -34,35 +34,40 @@ if(BUILD_RUNTIME)
 
     message("RDC_ROCR_LIB_INC_LIST=${RDC_ROCR_LIB_INC_LIST}")
 
-    find_package(hsa-runtime64
-        NAMES hsa-runtime64
-        HINTS ${ROCM_DIR}/lib/cmake
-        CONFIGURE REQUIRED)
-    set(RDC_LIB_MODULES ${RDC_LIB_MODULES} ${RDC_ROCR_LIB} PARENT_SCOPE)
+    find_package(
+        hsa-runtime64
+        NAMES
+        hsa-runtime64
+        HINTS
+        ${ROCM_DIR}/lib/cmake
+        CONFIGURE
+        REQUIRED)
+    set(RDC_LIB_MODULES
+        ${RDC_LIB_MODULES} ${RDC_ROCR_LIB}
+        PARENT_SCOPE)
     add_library(${RDC_ROCR_LIB} SHARED ${RDC_ROCR_LIB_SRC_LIST} ${RDC_ROCR_LIB_INC_LIST})
-    target_link_libraries(${RDC_ROCR_LIB} ${RDC_LIB} ${BOOTSTRAP_LIB} hsa-runtime64::hsa-runtime64 pthread dl)
-    target_include_directories(${RDC_ROCR_LIB} PRIVATE
-        "${PROJECT_SOURCE_DIR}"
-        "${PROJECT_SOURCE_DIR}/include"
-        "${COMMON_DIR}"
-        "${AMD_SMI_INCLUDE_DIR}"
-        "${ROCM_DIR}/include")
+    target_link_libraries(${RDC_ROCR_LIB} ${RDC_LIB} ${BOOTSTRAP_LIB} hsa-runtime64::hsa-runtime64
+                          pthread dl)
+    target_include_directories(
+        ${RDC_ROCR_LIB} PRIVATE "${PROJECT_SOURCE_DIR}" "${PROJECT_SOURCE_DIR}/include"
+                                "${COMMON_DIR}" "${AMD_SMI_INCLUDE_DIR}" "${ROCM_DIR}/include")
 
     # let bootstrap find this module at build time
     # at install-time the directory structure is a lot simpler
-    set_property(TARGET ${BOOTSTRAP_LIB} APPEND PROPERTY
-        BUILD_RPATH "\$ORIGIN/../rdc_modules/${RDC_ROCR_LIB}")
+    set_property(
+        TARGET ${BOOTSTRAP_LIB}
+        APPEND
+        PROPERTY BUILD_RPATH "\$ORIGIN/../rdc_modules/${RDC_ROCR_LIB}")
 
     # Set the VERSION and SOVERSION values
-    set_property(TARGET ${RDC_ROCR_LIB} PROPERTY
-        SOVERSION "${VERSION_MAJOR}")
-    set_property(TARGET ${RDC_ROCR_LIB} PROPERTY
-        VERSION "${SO_VERSION_STRING}")
+    set_property(TARGET ${RDC_ROCR_LIB} PROPERTY SOVERSION "${VERSION_MAJOR}")
+    set_property(TARGET ${RDC_ROCR_LIB} PROPERTY VERSION "${SO_VERSION_STRING}")
 
     # If the library is a release, strip the target library
     if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
         add_custom_command(
             TARGET ${RDC_ROCR_LIB}
-            POST_BUILD COMMAND ${CMAKE_STRIP} ${RDC_ROCR_LIB_COMPONENT}.so)
+            POST_BUILD
+            COMMAND ${CMAKE_STRIP} ${RDC_ROCR_LIB_COMPONENT}.so)
     endif()
 endif()

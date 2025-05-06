@@ -6,7 +6,8 @@ set(SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
 set(INC_DIR "${RDC_LIB_INC_DIR}")
 
 set(RDC_LIB_COMPONENT "lib${RDC_LIB}")
-set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST}
+set(RDC_LIB_SRC_LIST
+    ${RDC_LIB_SRC_LIST}
     "${COMMON_DIR}/rdc_capabilities.cc"
     "${COMMON_DIR}/rdc_fields_supported.cc"
     "${SRC_DIR}/RdcCacheManagerImpl.cc"
@@ -32,7 +33,8 @@ set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST}
     "${SRC_DIR}/SmiUtils.cc")
 
 # TODO: remove all headers? Will just dir be ok after install?
-set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST}
+set(RDC_LIB_INC_LIST
+    ${RDC_LIB_INC_LIST}
     "${COMMON_DIR}/rdc_capabilities.h"
     "${COMMON_DIR}/rdc_fields_supported.h"
     "${INC_DIR}/RdcCacheManager.h"
@@ -68,24 +70,21 @@ message("RDC_LIB_INC_LIST=${RDC_LIB_INC_LIST}")
 
 add_library(${RDC_LIB} SHARED ${RDC_LIB_SRC_LIST} ${RDC_LIB_INC_LIST})
 target_link_libraries(${RDC_LIB} ${BOOTSTRAP_LIB} pthread amd_smi cap)
-target_include_directories(${RDC_LIB} PRIVATE
-    "${PROJECT_SOURCE_DIR}"
-    "${PROJECT_SOURCE_DIR}/include"
-    "${AMD_SMI_INCLUDE_DIR}")
+target_include_directories(
+    ${RDC_LIB} PRIVATE "${PROJECT_SOURCE_DIR}" "${PROJECT_SOURCE_DIR}/include"
+                       "${AMD_SMI_INCLUDE_DIR}")
 
 # Set the VERSION and SOVERSION values
-set_property(TARGET ${RDC_LIB} PROPERTY
-    SOVERSION "${VERSION_MAJOR}")
-set_property(TARGET ${RDC_LIB} PROPERTY
-    VERSION "${SO_VERSION_STRING}")
-set_target_properties(${RDC_LIB}
-    PROPERTIES INSTALL_RPATH "\$ORIGIN")
+set_property(TARGET ${RDC_LIB} PROPERTY SOVERSION "${VERSION_MAJOR}")
+set_property(TARGET ${RDC_LIB} PROPERTY VERSION "${SO_VERSION_STRING}")
+set_target_properties(${RDC_LIB} PROPERTIES INSTALL_RPATH "\$ORIGIN")
 
 # If the library is a release, strip the target library
 if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
     add_custom_command(
         TARGET ${RDC_LIB}
-        POST_BUILD COMMAND ${CMAKE_STRIP} ${RDC_LIB_COMPONENT}.so)
+        POST_BUILD
+        COMMAND ${CMAKE_STRIP} ${RDC_LIB_COMPONENT}.so)
 endif()
 
 # pass ROCM_DIR to compiler
