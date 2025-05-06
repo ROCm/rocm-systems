@@ -185,6 +185,7 @@ FLD_DESC_ENT(RDC_FI_PROF_CPF_CPF_STAT_STALL,                 "", "CPF_CPF_STAT_S
 FLD_DESC_ENT(RDC_FI_PROF_CPF_CPF_TCIU_BUSY,                  "", "CPF_CPF_TCIU_BUSY",                  false)
 FLD_DESC_ENT(RDC_FI_PROF_CPF_CPF_TCIU_IDLE,                  "", "CPF_CPF_TCIU_IDLE",                  false)
 FLD_DESC_ENT(RDC_FI_PROF_CPF_CPF_TCIU_STALL,                 "", "CPF_CPF_TCIU_STALL",                 false)
+FLD_DESC_ENT(RDC_FI_PROF_SIMD_UTILIZATION, "Fraction of time the SIMDs are being utilized", "SIMD_UTIL", false)
 
 // Events
 FLD_DESC_ENT(RDC_EVNT_XGMI_0_NOP_TX,     "NOPs sent to neighbor 0",                     "XGMI_NOP_0",       false)
