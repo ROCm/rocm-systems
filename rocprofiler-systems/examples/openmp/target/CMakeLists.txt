@@ -92,8 +92,8 @@ set_target_properties(
                OUTPUT_NAME "openmp-target"
                POSITION_INDEPENDENT_CODE ON)
 
-rocprofiler_systems_custom_compilation(TARGET openmp-target-lib COMPILER
-                                       ${OMP_TARGET_COMPILER})
+rocprofiler_systems_custom_compilation(TARGET openmp-target-lib
+                                       COMPILER ${OMP_TARGET_COMPILER})
 
 add_executable(openmp-target)
 target_sources(openmp-target PRIVATE main.cpp)
@@ -106,5 +106,5 @@ set_target_properties(
                "${OMP_TARGET_COMPILER_DIR}/llvm/lib:${OMP_TARGET_COMPILER_DIR}/lib"
                POSITION_INDEPENDENT_CODE ON)
 
-rocprofiler_systems_custom_compilation(TARGET openmp-target COMPILER
-                                       ${OMP_TARGET_COMPILER})
+rocprofiler_systems_custom_compilation(TARGET openmp-target
+                                       COMPILER ${OMP_TARGET_COMPILER})
