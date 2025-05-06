@@ -69,11 +69,12 @@ def gpu_soc():
 
     ## 3) Deduce gpu model name from arch
     gpu_model = list(SUPPORTED_ARCHS[gpu_arch].keys())[0].upper()
-    if gpu_model == "MI300":
-        if chip_id in MI300_CHIP_IDS:
-            gpu_model = MI300_CHIP_IDS[chip_id]
-    else:
-        return None
+    # For testing purposes we only care about gpu model series not the specific model
+    # if gpu_model == "MI300":
+    #     if chip_id in MI300_CHIP_IDS:
+    #         gpu_model = MI300_CHIP_IDS[chip_id]
+    # else:
+    #     return None
 
     return gpu_model
 
