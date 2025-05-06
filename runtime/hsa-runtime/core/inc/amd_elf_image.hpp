@@ -47,6 +47,7 @@
 #include <sstream>
 #include <vector>
 #include <memory>
+#include <cstdint>
 
 namespace rocr {
 namespace amd {
