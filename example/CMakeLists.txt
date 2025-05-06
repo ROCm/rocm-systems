@@ -33,13 +33,23 @@ option(CMAKE_EXPORT_COMPILE_COMMANDS "Export compile commands for linters and au
 
 # Set compile flags
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -m64 -msse -msse2")
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -ggdb -DDEBUG" CACHE STRING "Flags for Debug builds")
+set(CMAKE_CXX_FLAGS_DEBUG
+    "${CMAKE_CXX_FLAGS_DEBUG} -O0 -ggdb -DDEBUG"
+    CACHE STRING "Flags for Debug builds")
 # note: no '-s' here unlike other CMakeLists.txt
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O2 -DNDEBUG" CACHE STRING "Flags for Release builds")
-set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -O2 -g -DNDEBUG" CACHE STRING "Flags for RelWithDebInfo builds")
-set(CMAKE_CXX_FLAGS_MINSIZEREL "${CMAKE_CXX_FLAGS_MINSIZEREL} -Os -DNDEBUG" CACHE STRING "Flags for MinSizeRel builds")
+set(CMAKE_CXX_FLAGS_RELEASE
+    "${CMAKE_CXX_FLAGS_RELEASE} -O2 -DNDEBUG"
+    CACHE STRING "Flags for Release builds")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO
+    "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -O2 -g -DNDEBUG"
+    CACHE STRING "Flags for RelWithDebInfo builds")
+set(CMAKE_CXX_FLAGS_MINSIZEREL
+    "${CMAKE_CXX_FLAGS_MINSIZEREL} -Os -DNDEBUG"
+    CACHE STRING "Flags for MinSizeRel builds")
 
-set(CMAKE_CXX_STANDARD 17 CACHE STRING "The C++ standard to use")
+set(CMAKE_CXX_STANDARD
+    17
+    CACHE STRING "The C++ standard to use")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -55,25 +65,21 @@ include(CMakePrintHelpers)
 
 # required variables
 if(DEFINED ENV{ROCM_PATH})
-    set(ROCM_DIR "$ENV{ROCM_PATH}" CACHE STRING "ROCm directory.")
+    set(ROCM_DIR
+        "$ENV{ROCM_PATH}"
+        CACHE STRING "ROCm directory.")
 else()
-    set(ROCM_DIR "/opt/rocm" CACHE STRING "ROCm directory.")
+    set(ROCM_DIR
+        "/opt/rocm"
+        CACHE STRING "ROCm directory.")
 endif()
 
 # add package search paths
-set(CMAKE_PREFIX_PATH
-    ${CMAKE_PREFIX_PATH}
-    ${ROCM_DIR}
-    )
-set(CMAKE_LIBRARY_PATH
-    ${CMAKE_LIBRARY_PATH}
-    ${ROCM_DIR}/lib
-    ${ROCM_DIR}/lib64
-    )
+set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} ${ROCM_DIR})
+set(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH} ${ROCM_DIR}/lib ${ROCM_DIR}/lib64)
 
 # RDC provides librdc_bootstrap
-find_package(rdc
-    CONFIG REQUIRED)
+find_package(rdc CONFIG REQUIRED)
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                             Cmake Example                                 ")
@@ -110,7 +116,6 @@ cmake_print_variables(ROCPROFILER_EXAMPLE_SRC_LIST)
 set(ROCPROFILER_EXAMPLE_EXE "rocprofiler")
 add_executable(${ROCPROFILER_EXAMPLE_EXE} "${ROCPROFILER_EXAMPLE_SRC_LIST}")
 target_link_libraries(${ROCPROFILER_EXAMPLE_EXE} pthread dl rdc_bootstrap)
-
 
 set(POLICY_EXAMPLE_SRC_LIST "policy_example.cc")
 cmake_print_variables(POLICY_EXAMPLE_SRC_LIST)
