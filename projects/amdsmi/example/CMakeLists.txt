@@ -32,24 +32,14 @@ else()
 endif()
 
 # add package search paths
-set(CMAKE_PREFIX_PATH
-    ${CMAKE_PREFIX_PATH}
-    ${ROCM_DIR}
-    ../../../
-    )
-set(CMAKE_LIBRARY_PATH
-    ${CMAKE_LIBRARY_PATH}
-    ${ROCM_DIR}/lib
-    ${ROCM_DIR}/lib64
-    )
+set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} ${ROCM_DIR} ../../../)
+set(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH} ${ROCM_DIR}/lib ${ROCM_DIR}/lib64)
 
-find_package(amd_smi
-    CONFIG REQUIRED)
+find_package(amd_smi CONFIG REQUIRED)
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                    Finished Cmake Example                         ")
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
-
 
 # compile example files but do not install
 # this is only useful if running from build directory

@@ -47,16 +47,17 @@ set(INC_LIST
     "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi/rocm_smi_utils.h")
 
 if(ENABLE_ESMI_LIB)
-	list(APPEND INC_LIST ${ESMI_INC_DIR}/e_smi/e_smi.h)
-	list(APPEND INC_LIST ${ESMI_INC_DIR}/e_smi/e_smi_monitor.h)
-	list(APPEND INC_LIST ${ESMI_INC_DIR}/e_smi/e_smi_utils.h)
+    list(APPEND INC_LIST ${ESMI_INC_DIR}/e_smi/e_smi.h)
+    list(APPEND INC_LIST ${ESMI_INC_DIR}/e_smi/e_smi_monitor.h)
+    list(APPEND INC_LIST ${ESMI_INC_DIR}/e_smi/e_smi_utils.h)
 endif()
 # VERSION_* variables should be set by get_version_from_tag
 message("Package version: ${PKG_VERSION_STR}")
 
 # Debian package specific variables
 # Set a default value for the package version
-get_version_from_tag("${${AMD_SMI_LIBS_TARGET}_VERSION_MAJOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_MINOR}.0.0" ${SO_VERSION_GIT_TAG_PREFIX} GIT)
+get_version_from_tag("${${AMD_SMI_LIBS_TARGET}_VERSION_MAJOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_MINOR}.0.0"
+                     ${SO_VERSION_GIT_TAG_PREFIX} GIT)
 
 # VERSION_* variables should be set by get_version_from_tag
 if(${ROCM_PATCH_VERSION})
@@ -92,10 +93,8 @@ set_property(TARGET ${AMD_SMI_TARGET} PROPERTY VERSION "${SO_VERSION_STRING}")
 ## If the library is a release, strip the target library
 if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
     if(${BUILD_SHARED_LIBS}) #stripping only for .so
-        add_custom_command(
-            TARGET ${AMD_SMI_TARGET}
-            POST_BUILD
-            COMMAND ${CMAKE_STRIP} lib${AMD_SMI_TARGET}.so.${SO_VERSION_STRING})
+        add_custom_command(TARGET ${AMD_SMI_TARGET} POST_BUILD COMMAND ${CMAKE_STRIP}
+                                                                       lib${AMD_SMI_TARGET}.so.${SO_VERSION_STRING})
     endif()
 endif()
 
@@ -112,12 +111,11 @@ install(
     TARGETS ${AMD_SMI_TARGET}
     EXPORT amd_smiTargets
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev)
-    #COMPONENT ${AMD_SMI_COMPONENT})
+#COMPONENT ${AMD_SMI_COMPONENT})
 
 install(
     TARGETS ${AMD_SMI_TARGET}
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    COMPONENT asan)
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan)
 
 install(
     FILES ${PROJECT_SOURCE_DIR}/include/amd_smi/amdsmi.h

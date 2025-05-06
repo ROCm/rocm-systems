@@ -9,13 +9,9 @@ set(AMD_SMI_TARGET "${AMD_SMI}")
 set(AMD_SMI_LIB_NAME "lib${AMD_SMI_TARGET}")
 set(AMD_SMI_LIBS_TARGET "amd_smi_libraries")
 
-set(BUILD_SHARED_LIBS
-    ON
-    CACHE BOOL "Build shared library (.so) or not.")
+set(BUILD_SHARED_LIBS ON CACHE BOOL "Build shared library (.so) or not.")
 
-set(CMAKE_MODULE_PATH
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/"
-    CACHE INTERNAL "Default module path.")
+set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/" CACHE INTERNAL "Default module path.")
 ## Include common cmake modules
 include(utils)
 include(help_package)
@@ -36,7 +32,9 @@ set(${AMD_SMI_LIBS_TARGET}_VERSION_PATCH "${CPACK_PACKAGE_VERSION_PATCH}")
 set(${AMD_SMI_LIBS_TARGET}_VERSION_BUILD "0")
 set(${AMD_SMI_LIBS_TARGET}_VERSION_HASH "${PKG_VERSION_HASH}")
 
-set(${AMD_SMI_LIBS_TARGET}_VERSION_STRING "${${AMD_SMI_LIBS_TARGET}_VERSION_MAJOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_MINOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_PATCH}+${${AMD_SMI_LIBS_TARGET}_VERSION_HASH}")
+set(${AMD_SMI_LIBS_TARGET}_VERSION_STRING
+    "${${AMD_SMI_LIBS_TARGET}_VERSION_MAJOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_MINOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_PATCH}+${${AMD_SMI_LIBS_TARGET}_VERSION_HASH}"
+)
 
 # Make proper version for appending
 # Default Value is 99999
@@ -46,7 +44,8 @@ if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
 endif()
 #Prepare final version for the CPACK use
 set(CPACK_PACKAGE_VERSION
-    "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}.${ROCM_VERSION_FOR_PACKAGE}")
+    "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}.${ROCM_VERSION_FOR_PACKAGE}"
+)
 
 # The following default version values should be updated as appropriate for
 # ABI breaks (update MAJOR and MINOR), and ABI/API additions (update MINOR).
@@ -57,9 +56,7 @@ set(PKG_VERSION_MINOR "${CPACK_PACKAGE_VERSION_MINOR}")
 set(PKG_VERSION_PATCH "${CPACK_PACKAGE_VERSION_PATCH}")
 set(PKG_VERSION_NUM_COMMIT 0)
 
-set(AMD_SMI_PACKAGE
-    amd-smi-lib
-    CACHE STRING "")
+set(AMD_SMI_PACKAGE amd-smi-lib CACHE STRING "")
 
 project(${AMD_SMI_LIBS_TARGET})
 set(CMAKE_CXX_STANDARD 17)
@@ -84,24 +81,17 @@ cmake_dependent_option(ENABLE_LDCONFIG "Set library links and caches using ldcon
 set(SHARE_INSTALL_PREFIX "${CMAKE_INSTALL_DATAROOTDIR}/${AMD_SMI}" CACHE STRING "Tests and Example install directory")
 
 # Packaging directives
-set(CPACK_PACKAGE_NAME
-    ${AMD_SMI_PACKAGE}
-    CACHE STRING "")
+set(CPACK_PACKAGE_NAME ${AMD_SMI_PACKAGE} CACHE STRING "")
 
-set(CPACK_PACKAGE_CONTACT
-    "AMD-SMILib Support <amd-smi.support@amd.com>"
-    CACHE STRING "")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
-    "AMD System Management libraries"
-    CACHE STRING "")
+set(CPACK_PACKAGE_CONTACT "AMD-SMILib Support <amd-smi.support@amd.com>" CACHE STRING "")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "AMD System Management libraries" CACHE STRING "")
 
 generic_package()
 
 ## Compiler flags
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -fno-rtti")
-if (${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "x86_64")
-    set(CMAKE_CXX_FLAGS
-     "${CMAKE_CXX_FLAGS} -m64 -msse -msse2")
+if(${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "x86_64")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m64 -msse -msse2")
 endif()
 # Security options
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wconversion -Wcast-align")
@@ -119,7 +109,8 @@ if(ENABLE_ESMI_LIB)
     if(NOT EXISTS ${PROJECT_SOURCE_DIR}/esmi_ib_library/src)
         # TODO: use ExternalProject_Add instead or a submodule
         message(STATUS "Adding esmi_ib_library...")
-        execute_process(COMMAND git clone --depth=1 -b ${current_esmi_tag} https://github.com/amd/esmi_ib_library.git ${PROJECT_SOURCE_DIR}/esmi_ib_library)
+        execute_process(COMMAND git clone --depth=1 -b ${current_esmi_tag} https://github.com/amd/esmi_ib_library.git
+                                ${PROJECT_SOURCE_DIR}/esmi_ib_library)
     else()
         message(STATUS "esmi_ib_library already installed, checking version...")
 
@@ -128,22 +119,19 @@ if(ENABLE_ESMI_LIB)
             COMMAND git rev-list --tags --max-count=1
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/esmi_ib_library
             OUTPUT_VARIABLE latest_commit
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-        )
+            OUTPUT_STRIP_TRAILING_WHITESPACE)
         execute_process(
             COMMAND git describe --tags ${latest_commit} --match "*pkg*"
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/esmi_ib_library
             OUTPUT_VARIABLE latest_esmi_tag
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-        )
+            OUTPUT_STRIP_TRAILING_WHITESPACE)
 
         # Update to latest tags if not matched
         if(NOT latest_esmi_tag STREQUAL current_esmi_tag)
             message(STATUS "Updating esmi_ib_library...")
             execute_process(
-                COMMAND git clone --depth=1 -b ${current_esmi_tag} https://github.com/amd/esmi_ib_library.git ${PROJECT_SOURCE_DIR}/esmi_ib_library_temp
-                RESULT_VARIABLE clone_result
-            )
+                COMMAND git clone --depth=1 -b ${current_esmi_tag} https://github.com/amd/esmi_ib_library.git
+                        ${PROJECT_SOURCE_DIR}/esmi_ib_library_temp RESULT_VARIABLE clone_result)
             if(clone_result EQUAL 0)
                 file(REMOVE_RECURSE ${PROJECT_SOURCE_DIR}/esmi_ib_library)
                 file(RENAME ${PROJECT_SOURCE_DIR}/esmi_ib_library_temp ${PROJECT_SOURCE_DIR}/esmi_ib_library)
@@ -187,10 +175,10 @@ set(CMN_SRC_LIST
     "${ROCM_SRC_DIR}/rocm_smi_binary_parser.cc")
 
 if(ENABLE_ESMI_LIB)
-	list(APPEND CMN_SRC_LIST ${ESMI_SRC_DIR}/e_smi.c)
-	list(APPEND CMN_SRC_LIST ${ESMI_SRC_DIR}/e_smi_monitor.c)
-	list(APPEND CMN_SRC_LIST ${ESMI_SRC_DIR}/e_smi_plat.c)
-	list(APPEND CMN_SRC_LIST ${ESMI_SRC_DIR}/e_smi_utils.c)
+    list(APPEND CMN_SRC_LIST ${ESMI_SRC_DIR}/e_smi.c)
+    list(APPEND CMN_SRC_LIST ${ESMI_SRC_DIR}/e_smi_monitor.c)
+    list(APPEND CMN_SRC_LIST ${ESMI_SRC_DIR}/e_smi_plat.c)
+    list(APPEND CMN_SRC_LIST ${ESMI_SRC_DIR}/e_smi_utils.c)
 endif()
 
 set(CMN_INC_LIST
@@ -235,7 +223,6 @@ if(BUILD_EXAMPLES)
     add_subdirectory("example")
 endif()
 
-
 include(CMakePackageConfigHelpers)
 
 configure_package_config_file(
@@ -243,11 +230,8 @@ configure_package_config_file(
     INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${AMD_SMI}
     PATH_VARS CMAKE_INSTALL_LIBDIR CMAKE_INSTALL_INCLUDEDIR CMAKE_INSTALL_BINDIR)
 
-write_basic_package_version_file(
-    ${CMAKE_CURRENT_BINARY_DIR}/amd_smi-config-version.cmake
-    VERSION
-    "${CPACK_PACKAGE_VERSION}"
-    COMPATIBILITY SameMajorVersion)
+write_basic_package_version_file(${CMAKE_CURRENT_BINARY_DIR}/amd_smi-config-version.cmake
+                                 VERSION "${CPACK_PACKAGE_VERSION}" COMPATIBILITY SameMajorVersion)
 
 install(
     FILES ${CMAKE_CURRENT_BINARY_DIR}/amd_smi-config.cmake ${CMAKE_CURRENT_BINARY_DIR}/amd_smi-config-version.cmake
@@ -333,7 +317,7 @@ set(CPACK_RPM_ASAN_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
 set(CPACK_RPM_SPEC_MORE_DEFINE "%define _python_bytecompile_errors_terminate_build 0")
 # Cpack converts !/usr/bin/env python3 to /usr/libexec/platform-python in RHEL8.
 # prevent the BRP(buildroot policy) script from checking and modifying interpreter directives
-string( APPEND CPACK_RPM_SPEC_MORE_DEFINE "\n%undefine __brp_mangle_shebangs")
+string(APPEND CPACK_RPM_SPEC_MORE_DEFINE "\n%undefine __brp_mangle_shebangs")
 
 # Add rocm-core dependency if -DROCM_DEP_ROCMCORE=ON is passed
 if(ROCM_DEP_ROCMCORE)
@@ -355,10 +339,10 @@ set(CPACK_RPM_DEV_PACKAGE_NAME "${AMD_SMI_PACKAGE}")
 set(CPACK_RPM_TESTS_PACKAGE_NAME "${AMD_SMI_PACKAGE}-tests")
 set(CPACK_RPM_ASAN_PACKAGE_NAME "${AMD_SMI_PACKAGE}-asan")
 if(ENABLE_ASAN_PACKAGING)
-  # ASAN Package requires only asan component with libraries and license file
-  set(CPACK_COMPONENTS_ALL asan)
+    # ASAN Package requires only asan component with libraries and license file
+    set(CPACK_COMPONENTS_ALL asan)
 else()
-  set(CPACK_COMPONENTS_ALL dev tests )
+    set(CPACK_COMPONENTS_ALL dev tests)
 endif()
 
 # The line below doesn't currently work; it may be this issue:

@@ -32,7 +32,7 @@ if(${ROCM_PATCH_VERSION})
     set(SO_VERSION_STRING "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}")
 else()
     set(SO_VERSION_STRING "${VERSION_MAJOR}.${VERSION_MINOR}")
-endif ()
+endif()
 set(${ROCM_SMI}_VERSION_MAJOR "${CPACK_PACKAGE_VERSION_MAJOR}")
 set(${ROCM_SMI}_VERSION_MINOR "${CPACK_PACKAGE_VERSION_MINOR}")
 set(${ROCM_SMI}_VERSION_PATCH "${CPACK_PACKAGE_VERSION_PATCH}")
@@ -60,9 +60,7 @@ set_property(TARGET ${ROCM_SMI_TARGET} PROPERTY VERSION "${SO_VERSION_STRING}")
 ## If the library is a release, strip the target library
 if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
     if(${BUILD_SHARED_LIBS}) #stripping only for .so
-        add_custom_command(
-            TARGET ${ROCM_SMI_TARGET}
-            POST_BUILD
-            COMMAND ${CMAKE_STRIP} lib${ROCM_SMI_TARGET}.so.${SO_VERSION_STRING})
+        add_custom_command(TARGET ${ROCM_SMI_TARGET} POST_BUILD COMMAND ${CMAKE_STRIP}
+                                                                        lib${ROCM_SMI_TARGET}.so.${SO_VERSION_STRING})
     endif()
 endif()

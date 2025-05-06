@@ -9,7 +9,7 @@ FILES=$(find . -type f \( -name "CMakeLists.txt" -o -name "*.cmake" -o -name "*.
     -not -path "*/\.*" \
     -not -path "*/build/*")
 
-declare -a failed_files
+failed_files=()
 
 # Check if files are formatted correctly
 for file in $FILES; do

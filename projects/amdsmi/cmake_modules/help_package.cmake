@@ -5,9 +5,7 @@ option(CMAKE_VERBOSE_MAKEFILE "Enable verbose output" ON)
 option(CMAKE_EXPORT_COMPILE_COMMANDS "Export compile commands for linters and autocompleters" ON)
 
 function(generic_add_rocm)
-    set(ROCM_DIR
-        "/opt/rocm"
-        CACHE STRING "ROCm directory.")
+    set(ROCM_DIR "/opt/rocm" CACHE STRING "ROCm directory.")
     if(DEFINED ENV{ROCM_RPATH} AND NOT DEFINED LIB_RUNPATH)
         set(LIB_RUNPATH "\$ORIGIN:\$ORIGIN/../lib:\$ORIGIN/../lib64" PARENT_SCOPE)
     endif()
@@ -56,8 +54,7 @@ function(generic_package)
         ## Security breach mitigation flags
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DFORTIFY_SOURCE=2 -fstack-protector-all -Wcast-align" PARENT_SCOPE)
         ## More security breach mitigation flags
-        set(HARDENING_LDFLAGS
-            "${HARDENING_LDFLAGS} -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now")
+        set(HARDENING_LDFLAGS "${HARDENING_LDFLAGS} -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now")
         set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${HARDENING_LDFLAGS}" PARENT_SCOPE)
         set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${HARDENING_LDFLAGS}" PARENT_SCOPE)
 
@@ -77,34 +74,25 @@ function(generic_package)
 
     # configure packaging
     # cpack version is populated with CMAKE_PROJECT_VERSION implicitly
-    set(CPACK_PACKAGE_NAME
-        ${CMAKE_PROJECT_NAME}
-        CACHE STRING "")
-    set(CPACK_PACKAGE_VENDOR
-        "Advanced Micro Devices, Inc."
-        CACHE STRING "")
-    set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
-        "Placeholder Tool"
-        CACHE STRING "")
-    set(CPACK_PACKAGE_DESCRIPTION
-        "This package contains the AMD ${CPACK_PACKAGE_DESCRIPTION_SUMMARY}."
-        CACHE STRING "")
-    set(CPACK_PACKAGING_INSTALL_PREFIX
-        "${CMAKE_INSTALL_PREFIX}"
-        CACHE STRING "Default packaging prefix.")
-    set(CPACK_RESOURCE_FILE_LICENSE
-        "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
-        CACHE STRING "")
-    set(CPACK_RPM_PACKAGE_LICENSE
-        "MIT"
-        CACHE STRING "")
-    set(CPACK_GENERATOR
-        "DEB;RPM"
-        CACHE STRING "Default packaging generators.")
+    set(CPACK_PACKAGE_NAME ${CMAKE_PROJECT_NAME} CACHE STRING "")
+    set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc." CACHE STRING "")
+    set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Placeholder Tool" CACHE STRING "")
+    set(CPACK_PACKAGE_DESCRIPTION "This package contains the AMD ${CPACK_PACKAGE_DESCRIPTION_SUMMARY}." CACHE STRING "")
+    set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}" CACHE STRING "Default packaging prefix.")
+    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" CACHE STRING "")
+    set(CPACK_RPM_PACKAGE_LICENSE "MIT" CACHE STRING "")
+    set(CPACK_GENERATOR "DEB;RPM" CACHE STRING "Default packaging generators.")
     set(CPACK_DEB_COMPONENT_INSTALL ON PARENT_SCOPE)
     set(CPACK_RPM_COMPONENT_INSTALL ON PARENT_SCOPE)
-    mark_as_advanced(CPACK_PACKAGE_NAME CPACK_PACKAGE_VENDOR CPACK_PACKAGE_CONTACT CPACK_PACKAGE_DESCRIPTION_SUMMARY
-        CPACK_PACKAGE_DESCRIPTION CPACK_RESOURCE_FILE_LICENSE CPACK_RPM_PACKAGE_LICENSE CPACK_GENERATOR)
+    mark_as_advanced(
+        CPACK_PACKAGE_NAME
+        CPACK_PACKAGE_VENDOR
+        CPACK_PACKAGE_CONTACT
+        CPACK_PACKAGE_DESCRIPTION_SUMMARY
+        CPACK_PACKAGE_DESCRIPTION
+        CPACK_RESOURCE_FILE_LICENSE
+        CPACK_RPM_PACKAGE_LICENSE
+        CPACK_GENERATOR)
 
     # Debian package specific variables
     if(DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})

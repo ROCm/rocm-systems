@@ -4,9 +4,7 @@ message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 
 # Set CLI Build Directory
 set(PY_PACKAGE_DIR "amdsmi_cli")
-set(PY_CLI_INSTALL_DIR
-    "${CMAKE_INSTALL_LIBEXECDIR}" CACHE STRING
-    "CLI tool installation directory")
+set(PY_CLI_INSTALL_DIR "${CMAKE_INSTALL_LIBEXECDIR}" CACHE STRING "CLI tool installation directory")
 
 # populate version string
 configure_file(_version.py.in ${PY_PACKAGE_DIR}/_version.py @ONLY)
@@ -73,8 +71,7 @@ add_custom_target(
     DEPENDS amdsmi_cli
     BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/bin/amd-smi
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    COMMAND ${CMAKE_COMMAND} -E create_symlink
-            ../${PY_CLI_INSTALL_DIR}/${PY_PACKAGE_DIR}/amdsmi_cli.py
+    COMMAND ${CMAKE_COMMAND} -E create_symlink ../${PY_CLI_INSTALL_DIR}/${PY_PACKAGE_DIR}/amdsmi_cli.py
             ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/amd-smi)
 
 install(
