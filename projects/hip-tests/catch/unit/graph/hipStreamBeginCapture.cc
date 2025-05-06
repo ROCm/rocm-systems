@@ -1568,6 +1568,17 @@ TEST_CASE("Unit_hipStreamBeginCapture_StreamSync_OngoingCapture_MThread") {
   }
 }
 
+/**
+ * Test Description
+ * ------------------------
+ *    - Test to verify behavior when event is recorded multiple times while capture is active
+ * Test source
+ * ------------------------
+ *    - catch\unit\graph\hipStreamBeginCapture.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.6
+ */
 TEST_CASE("Unit_hipStreamBeginCapture_MultipleStreams_ReuseEvent") {
   // Allocate streams
   hipStream_t str0, str1, str2;
@@ -1578,12 +1589,12 @@ TEST_CASE("Unit_hipStreamBeginCapture_MultipleStreams_ReuseEvent") {
   // Instantiate graph for str1
   hipGraph_t graph1;
   hipGraphExec_t graphExec1;
- 
+
   // Create streams
   HIP_CHECK(hipStreamCreate(&str0));
   HIP_CHECK(hipStreamCreate(&str1));
   HIP_CHECK(hipStreamCreate(&str2));
- 
+
   // Create events
   HIP_CHECK(hipEventCreate(&ev0));
   HIP_CHECK(hipEventCreate(&ev1));
@@ -1595,41 +1606,44 @@ TEST_CASE("Unit_hipStreamBeginCapture_MultipleStreams_ReuseEvent") {
   HIP_CHECK(hipStreamBeginCapture(str1, hipStreamCaptureModeRelaxed));
 
   dummyKernel<<<1, 1, 0, str0>>>();
+  HIP_CHECK(hipPeekAtLastError());
   HIP_CHECK(hipEventRecord(ev0, str0));
- 
   HIP_CHECK(hipEventRecord(ev1, str1));
- 
   HIP_CHECK(hipStreamWaitEvent(str2, ev0, 0));
   dummyKernel<<<1, 1, 0, str2>>>();
+  HIP_CHECK(hipPeekAtLastError());
   HIP_CHECK(hipEventRecord(ev2, str2));
 
   HIP_CHECK(hipStreamWaitEvent(str0, ev2, 0));
   dummyKernel<<<1, 1, 0, str0>>>();
- 
+  HIP_CHECK(hipPeekAtLastError());
+
   // Instantiate graph for str0
   HIP_CHECK(hipStreamEndCapture(str0, &graph0));
   HIP_CHECK(hipGraphInstantiate(&graphExec0, graph0, nullptr, nullptr, 0));
   HIP_CHECK(hipGraphDestroy(graph0));
- 
+
   HIP_CHECK(hipStreamWaitEvent(str2, ev1, 0));
   HIP_CHECK(hipEventRecord(ev2, str2));
 
   HIP_CHECK(hipStreamWaitEvent(str1, ev2, 0));
   dummyKernel<<<1, 1, 0, str1>>>();
-  HIP_CHECK(hipGetLastError());
- 
+  HIP_CHECK(hipPeekAtLastError());
+
   HIP_CHECK(hipStreamEndCapture(str1, &graph1));
 
+  // Launch graph0
   HIP_CHECK(hipGraphLaunch(graphExec0, str0));
   HIP_CHECK(hipStreamSynchronize(str0));
   HIP_CHECK(hipGraphExecDestroy(graphExec0));
 
+  // Instantiate and launch graph for str1
   HIP_CHECK(hipGraphInstantiate(&graphExec1, graph1, nullptr, nullptr, 0));
   HIP_CHECK(hipGraphLaunch(graphExec1, str1));
   HIP_CHECK(hipStreamSynchronize(str1));
   HIP_CHECK(hipGraphExecDestroy(graphExec1));
   HIP_CHECK(hipGraphDestroy(graph1));
- 
+
   // Clean up resources
   HIP_CHECK(hipEventDestroy(ev0));
   HIP_CHECK(hipEventDestroy(ev1));
