@@ -33,8 +33,6 @@ THE SOFTWARE.
 
 static int gCbackIter = 0;
 
-__device__ int kernel_cnt = 0;
-
 static __global__ void dummyKernel() { return; }
 
 static __global__ void incrementKernel(int* data) {
@@ -1594,7 +1592,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_MultipleStreams_ReuseEvent") {
   // Enable capture on streams str0 and str1
   HIP_CHECK(hipStreamBeginCapture(str0, hipStreamCaptureModeGlobal));
   // str1 in relaxed mode so hipGraphInstantiate can be called on cuda without error
-  HIP_CHECK(hipStreamBeginCapture(str1, hipStreamCaptureModeGlobal));
+  HIP_CHECK(hipStreamBeginCapture(str1, hipStreamCaptureModeRelaxed));
 
   dummyKernel<<<1, 1, 0, str0>>>();
   HIP_CHECK(hipEventRecord(ev0, str0));
