@@ -231,6 +231,15 @@ parse:
         TIMEMORY_FILE: '*'
         TIMEMORY_METRIC: '*'
         EXIST_FILES: '*'
+    rocprofiler_systems_custom_compilation:
+      flags:
+        - GLOBAL
+        - PROJECT
+      kwargs:
+        COMPILER: '*'
+        DIRECTORY: '*'
+        TARGET: '*'
+        SOURCE: '*'
   override_spec: {}
   vartags: []
   proptags: []
