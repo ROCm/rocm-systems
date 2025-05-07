@@ -220,15 +220,25 @@ if(USE_PROF_API)
   set(PROF_API_NEWHDR "${PROJECT_BINARY_DIR}/new_header.h")
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
-  execute_process(COMMAND ${Python3_EXECUTABLE} -c "import CppHeaderParser"
+  execute_process(COMMAND ${Python3_EXECUTABLE} -c "import cxxheaderparser"
                   RESULT_VARIABLE CPP_HEADER_PARSER
                   OUTPUT_QUIET)
 
   if(NOT ${CPP_HEADER_PARSER} EQUAL 0)
     message(FATAL_ERROR "\
-    The \"CppHeaderParser\" Python3 package is not installed. \
-    Please install it using the following command: \"pip3 install CppHeaderParser\".\
+    The \"cxxheaderparser\" Python3 package is not installed. \
+    Please install it using the following command: \"pip3 install cxxheaderparser\".\
   ")
+  endif()
+
+  execute_process(COMMAND ${Python3_EXECUTABLE} -c "import pcpp"
+                  RESULT_VARIABLE CPP_HEADER_PARSER
+                  OUTPUT_QUIET)
+
+  if(NOT ${CPP_HEADER_PARSER} EQUAL 0)
+    message(FATAL_ERROR "\
+    The \"pcpp\" Python package is not installed. \
+    Please install it using the following command: \"pip install pcpp")
   endif()
 
   add_custom_command(OUTPUT ${PROF_API_NEWHDR}.i

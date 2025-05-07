@@ -21,8 +21,10 @@
 # THE SOFTWARE.
 
 import os, sys, re
-import CppHeaderParser
+import cxxheaderparser.simple
+import cxxheaderparser.preprocessor
 import filecmp
+import pathlib
 
 PROF_HEADER = "hip_prof_str.h"
 OUTPUT = PROF_HEADER
@@ -642,7 +644,7 @@ if (len(sys.argv) < 4):
          "\n" +
          "  Example:\n" +
          "  $ " + sys.argv[0] + " -v -p -t --priv ../hip/include/hip/hip_runtime_api.h" +
-         " ./src ./include/hip/amd_detail/hip_prof_str.h ./include/hip/amd_detail/hip_prof_str.h.new");
+         " ./src $HIP_PATH/include ./include/hip/amd_detail/hip_prof_str.h ./include/hip/amd_detail/hip_prof_str.h.new");
 
 # API header file given as an argument
 src_pat = "\.cpp$"
@@ -655,12 +657,19 @@ src_dir = sys.argv[2]
 if not os.path.isdir(src_dir):
   fatal("src directory " + src_dir + "' not found")
 
+# hip include directory given as an argument
+include_path = sys.argv[3]
+if not os.path.isdir(src_dir):
+  fatal("hip include directory " + src_dir + "' not found")
+print('include path', include_path)
+
 # Current hip_prof_str include
-INPUT = sys.argv[3]
+INPUT = sys.argv[4]
 if not os.path.isfile(INPUT):
   fatal("input file '" + INPUT + "' not found")
 
-if len(sys.argv) > 4: OUTPUT = sys.argv[4]
+if len(sys.argv) > 5: OUTPUT = sys.argv[5]
+print("Output:",  OUTPUT)
 
 # API declaration map
 api_map = {
@@ -697,27 +706,32 @@ parse_api(api_hfile, api_map)
 # Parsing sources
 parse_src(api_map, src_dir, src_pat, opts_map)
 
+# use the cxxheaderparser
+# setup preprocess
+cxx_preprocess = cxxheaderparser.preprocessor.make_pcpp_preprocessor(include_paths=[include_path])
+cxx_options = cxxheaderparser.options.ParserOptions(preprocessor=cxx_preprocess)
 try:
-  cppHeader = CppHeaderParser.CppHeader(INPUT)
-except CppHeaderParser.CppParseError as e:
+  cppHeader = cxxheaderparser.simple.parse_file(INPUT, options=cxx_options)
+except Exception as e:
   print(e)
   sys.exit(1)
 
 # Callback IDs
 api_callback_ids = []
 
-for enum in cppHeader.enums:
-  if enum['name'] == 'hip_api_id_t':
+
+for enum in cppHeader.namespace.enums:
+  if enum.typename.segments[0].name == 'hip_api_id_t':
     for value in enum['values']:
-      if value['name'] == 'HIP_API_ID_NONE' or value['name'] == 'HIP_API_ID_FIRST':
+      if value.name == 'HIP_API_ID_NONE' or value.name == 'HIP_API_ID_FIRST':
         continue
-      if value['name'] == 'HIP_API_ID_LAST':
+      if value.name == 'HIP_API_ID_LAST':
         break
-      if type(value['value']) == str:
+      if type(enum.value.tokens[0].value) == str:
         continue
-      m = re.match(r'HIP_API_ID_(\S*)', value['name'])
+      m = re.match(r'HIP_API_ID_(\S*)', value.name)
       if m:
-        api_callback_ids.append((m.group(1), value['value']))
+        api_callback_ids.append((m.group(1), enum.value.tokens[0].value))
     break
 
 # Checking for non-conformant APIs with missing HIP_INIT macro
