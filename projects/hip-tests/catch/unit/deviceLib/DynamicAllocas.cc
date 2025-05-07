@@ -30,8 +30,8 @@ using namespace std;
 ////////////////////////////////////////////////////////////////////////////////
 // Auto-Verification Code
 ////////////////////////////////////////////////////////////////////////////////
-// Auto-verification API
 
+// Auto-verification API
 template <typename T>
 bool verifyResult(T* output, T* expected){
     int expected_length = sizeof(*expected) / sizeof(expected[0]);
@@ -356,7 +356,7 @@ static void runKernelDynamicAllocasTest() {
 }
 
 // kernels and device functions exercizing dynamic allocations
-__noinline__ extern "C" __device__ void baz(int *a, int *b, int *c, int *d, int X){
+__noinline__ extern "C" __device__ void process_array_with_aligned_32_byte_buffer(int *a, int *b, int *c, int *d, int X){
     alignas(32) volatile int tmp[X];
     uintptr_t addr = reinterpret_cast<std::uintptr_t>(tmp);
     for (int i = 0; i < (X + 0); i++){
@@ -368,7 +368,7 @@ __noinline__ extern "C" __device__ void baz(int *a, int *b, int *c, int *d, int 
     }
 }
 
-__noinline__ extern "C" __device__ void bar(int *a, int *b, int *c, int *d, int X, int N){
+__noinline__ extern "C" __device__ void process_array_with_aligned_1024_byte_buffer(int *a, int *b, int *c, int *d, int X, int N){
     alignas(1024) volatile int tmp[N];
     uintptr_t addr = reinterpret_cast<std::uintptr_t>(tmp);
     for (int i = 0; i < (N + 0); i++){
@@ -384,7 +384,7 @@ extern "C" __global__ void test_multiple_device_functions_nested(int *a, int *b,
     int X = threadIdx.x + 10;
     alignas(1024) volatile int tmp[X];
     uintptr_t addr = reinterpret_cast<std::uintptr_t>(tmp);
-    bar(a, b, c, d, X, N);
+    process_array_with_aligned_1024_byte_buffer(a, b, c, d, X, N);
     for (int i = 0; i < X; i++){
         tmp[i] = a[b[i]];
     }
@@ -392,7 +392,7 @@ extern "C" __global__ void test_multiple_device_functions_nested(int *a, int *b,
         a[i] = tmp[i];
         d[i] += addr % 1024;
     }
-    baz(a, b, c, d, X);
+    process_array_with_aligned_32_byte_buffer(a, b, c, d, X);
 }
 
 extern "C" __global__ void validate_multiple_device_functions_nested(int *a, int *b, int *c){
@@ -420,10 +420,10 @@ extern "C" __global__ void validate_multiple_device_functions_nested(int *a, int
     }
 }
 
-__noinline__ extern "C" __device__ void foo(int *a, int *b, int *c, int *d, int X, int N){
+__noinline__ extern "C" __device__ void process_array_with_nested_1024_byte_alignment(int *a, int *b, int *c, int *d, int X, int N){
     alignas(1024) volatile int tmp[X];
     uintptr_t addr = reinterpret_cast<std::uintptr_t>(tmp);
-    baz(a, b, c, d, X);
+    process_array_with_aligned_32_byte_buffer(a, b, c, d, X);
     for (int i = 0; i < X; i++){
         tmp[i] = a[b[i]];
     }
@@ -437,7 +437,7 @@ extern "C" __global__ void test_multiple_device_functions(int *a, int *b, int *c
     int X = threadIdx.x + 10;
     alignas(1024) volatile int tmp[X];
     uintptr_t addr = reinterpret_cast<std::uintptr_t>(tmp);
-    foo(a, b, c, d, X, N);
+    process_array_with_nested_1024_byte_alignment(a, b, c, d, X, N);
     for (int i = 0; i < X; i++){
         tmp[i] = a[b[i]];
     }
@@ -472,7 +472,7 @@ extern "C" __global__ void validate_multiple_device_functions(int *a, int *b, in
     }
 }
 
-__noinline__ extern "C" __device__ void quxx(int *a, int *b, int *c, int X, int a0, int a1, int a2, int a3, int a4, int a5, int a6, int a7, int a8, int a9, int a10, int a11, int a12, int a13, int a14, int a15, int a16, int a17, int a18, int a19, int a20, int a21, int a22, int a23, int a24, int a25, int a26, int a27, int a28, int a29, int a30, int a31, int a32, int a33, int a34, int a35, int a36, int a37, int a38, int a39, int a40){
+__noinline__ extern "C" __device__ void process_array_with_aligned_128_byte_buffer(int *a, int *b, int *c, int X, int a0, int a1, int a2, int a3, int a4, int a5, int a6, int a7, int a8, int a9, int a10, int a11, int a12, int a13, int a14, int a15, int a16, int a17, int a18, int a19, int a20, int a21, int a22, int a23, int a24, int a25, int a26, int a27, int a28, int a29, int a30, int a31, int a32, int a33, int a34, int a35, int a36, int a37, int a38, int a39, int a40){
     int *tmp = (int *)__builtin_alloca(X * 4);
     int sum = 0;
     sum += a0 + a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8 + a9;
@@ -487,10 +487,10 @@ __noinline__ extern "C" __device__ void quxx(int *a, int *b, int *c, int X, int 
     }
 }
 
-__noinline__ extern "C" __device__ void qux(int *a, int *b, int *c, int *d, int X, int N){
+__noinline__ extern "C" __device__ void process_array_with_aligned_64_byte_buffer(int *a, int *b, int *c, int *d, int X, int N){
     alignas(64) volatile int tmp[X];
     uintptr_t addr = reinterpret_cast<std::uintptr_t>(tmp);
-    quxx(a, b, c, X, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9], a[10], a[11], a[12], a[13], a[14], a[15], a[16], a[17], a[18], a[19], a[20], a[21], a[22], a[23], a[24], a[25], a[26], a[27], a[28], a[29], a[30], a[31], a[32], a[33], a[34], a[35], a[36], a[37], a[38], a[39], a[40]);
+    process_array_with_aligned_128_byte_buffer(a, b, c, X, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9], a[10], a[11], a[12], a[13], a[14], a[15], a[16], a[17], a[18], a[19], a[20], a[21], a[22], a[23], a[24], a[25], a[26], a[27], a[28], a[29], a[30], a[31], a[32], a[33], a[34], a[35], a[36], a[37], a[38], a[39], a[40]);
     for (int i = 0; i < X; i++){
         tmp[i] = a[b[i]];
     }
@@ -507,7 +507,7 @@ extern "C" __global__ void test_function_calls_parameter_passing(int *a, int *b,
     for (int i = 0; i < X; i++){
         tmp[i] = a[b[i]];
     }
-    qux(a, b, c, d, X, N);
+    process_array_with_aligned_64_byte_buffer(a, b, c, d, X, N);
     for (int i = 0; i < X; i++){
         a[i] = tmp[i];
         d[i] += addr % 32;
@@ -541,7 +541,7 @@ extern "C" __global__ void validate_function_calls_parameter_passing(int *a, int
     }
 }
 
-__noinline__ extern "C" __device__ void grault(int *a, int *b, int *c, int *d, int X, int a0, int a1, int a2, int a3, int a4, int a5, int a6, int a7, int a8, int a9, int a10, int a11, int a12, int a13, int a14, int a15, int a16, int a17, int a18, int a19, int a20, int a21, int a22, int a23, int a24, int a25, int a26, int a27, int a28, int a29, int a30, int a31, int a32, int a33, int a34, int a35, int a36, int a37, int a38, int a39, int a40){
+__noinline__ extern "C" __device__ void process_array_with_aligned_128_byte_buffer(int *a, int *b, int *c, int *d, int X, int a0, int a1, int a2, int a3, int a4, int a5, int a6, int a7, int a8, int a9, int a10, int a11, int a12, int a13, int a14, int a15, int a16, int a17, int a18, int a19, int a20, int a21, int a22, int a23, int a24, int a25, int a26, int a27, int a28, int a29, int a30, int a31, int a32, int a33, int a34, int a35, int a36, int a37, int a38, int a39, int a40){
     alignas(128) volatile int tmp[X];
     uintptr_t addr = reinterpret_cast<std::uintptr_t>(tmp);
     int sum = 0;
@@ -558,10 +558,10 @@ __noinline__ extern "C" __device__ void grault(int *a, int *b, int *c, int *d, i
     }
 }
 
-__noinline__ extern "C" __device__ void corge(int *a, int *b, int *c, int *d, int X, int N){
+__noinline__ extern "C" __device__ void process_nested_dynamic_allocas(int *a, int *b, int *c, int *d, int X, int N){
     alignas(64) volatile int tmp[X];
     uintptr_t addr = reinterpret_cast<std::uintptr_t>(tmp);
-    grault(a, b, c, d, X, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9], a[10], a[11], a[12], a[13], a[14], a[15], a[16], a[17], a[18], a[19], a[20], a[21], a[22], a[23], a[24], a[25], a[26], a[27], a[28], a[29], a[30], a[31], a[32], a[33], a[34], a[35], a[36], a[37], a[38], a[39], a[40]);
+    process_array_with_aligned_128_byte_buffer(a, b, c, d, X, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9], a[10], a[11], a[12], a[13], a[14], a[15], a[16], a[17], a[18], a[19], a[20], a[21], a[22], a[23], a[24], a[25], a[26], a[27], a[28], a[29], a[30], a[31], a[32], a[33], a[34], a[35], a[36], a[37], a[38], a[39], a[40]);
     for (int i = 0; i < X; i++){
         tmp[i] = a[b[i]];
     }
@@ -578,7 +578,7 @@ extern "C" __global__ void test_function_calls_parameter_passing_over_aligned(in
     for (int i = 0; i < X; i++){
         tmp[i] = a[b[i]];
     }
-    corge(a, b, c, d, X, N);
+    process_nested_dynamic_allocas(a, b, c, d, X, N);
     for (int i = 0; i < X; i++){
         a[i] = tmp[i];
         d[i] += addr % 32;
@@ -614,13 +614,13 @@ extern "C" __global__ void validate_function_calls_parameter_passing_over_aligne
 
 extern "C" __global__ void test_function_calls_parameter_passing_sandwiched(int *a, int *b, int *c, int *d, int N){
     int X = threadIdx.x + 10;
-    grault(a, b, c, d, X, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9], a[10], a[11], a[12], a[13], a[14], a[15], a[16], a[17], a[18], a[19], a[20], a[21], a[22], a[23], a[24], a[25], a[26], a[27], a[28], a[29], a[30], a[31], a[32], a[33], a[34], a[35], a[36], a[37], a[38], a[39], a[40]);
+    process_array_with_aligned_128_byte_buffer(a, b, c, d, X, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9], a[10], a[11], a[12], a[13], a[14], a[15], a[16], a[17], a[18], a[19], a[20], a[21], a[22], a[23], a[24], a[25], a[26], a[27], a[28], a[29], a[30], a[31], a[32], a[33], a[34], a[35], a[36], a[37], a[38], a[39], a[40]);
     alignas(32) volatile int tmp[X];
     uintptr_t addr = reinterpret_cast<std::uintptr_t>(tmp);
     for (int i = 0; i < X; i++){
         tmp[i] = a[b[i]];
     }
-    baz(a, b, c, d, X);
+    process_array_with_aligned_32_byte_buffer(a, b, c, d, X);
     for (int i = 0; i < X; i++){
         a[i] = tmp[i];
         d[i] += addr % 32;
