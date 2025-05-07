@@ -388,9 +388,9 @@ get_callback_domains()
         ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,
     };
 
+#    if ROCPROFILER_VERSION >= 600
     auto _version = get_version();
 
-#    if ROCPROFILER_VERSION >= 600
     if(_version.formatted >= 600)
     {
         supported.emplace(ROCPROFILER_CALLBACK_TRACING_OMPT);  // OMPT API
@@ -410,11 +410,13 @@ get_callback_domains()
                          .value_or(std::string{}),
                      " ,;:\t\n");
 
+#    if ROCPROFILER_VERSION >= 600
     // Translate some configuration settings to rocprofiler domains
     if(config::get_use_ompt() && _version.formatted >= 600)
     {
         _data.emplace(ROCPROFILER_CALLBACK_TRACING_OMPT);
     }
+#    endif
 
     // Check that the domains are valid
     const auto valid_choices =
