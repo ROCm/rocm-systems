@@ -39,8 +39,19 @@ namespace rocprofsys
 {
 namespace rocprofiler_sdk
 {
+struct version_info
+{
+    uint32_t major     = 0;
+    uint32_t minor     = 0;
+    uint32_t patch     = 0;
+    uint32_t formatted = 0;  // major * 10000 + minor * 100 + patch
+};
+
 void
 config_settings(const std::shared_ptr<settings>&);
+
+version_info&
+get_version();
 
 #if defined(ROCPROFSYS_USE_ROCM)
 

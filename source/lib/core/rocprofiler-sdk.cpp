@@ -218,6 +218,30 @@ get_operations_impl(const std::unordered_set<int32_t>& _complete,
 
 }  // namespace
 
+/// @brief Return the version of the rocprofiler-sdk
+/// @return The version of the rocprofiler-sdk or 0 if not initialized
+version_info&
+get_version()
+{
+    static auto _version = version_info{ 0 };
+
+    if(_version.formatted == 0)
+    {
+        uint32_t _major = 0;
+        uint32_t _minor = 0;
+        uint32_t _patch = 0;
+
+        ROCPROFILER_CALL(rocprofiler_get_version(&_major, &_minor, &_patch));
+
+        _version.major     = _major;
+        _version.minor     = _minor;
+        _version.patch     = _patch;
+        _version.formatted = _major * 10000 + _minor * 100 + _patch;
+    }
+
+    return _version;
+}
+
 void
 config_settings(const std::shared_ptr<settings>& _config)
 {
@@ -318,7 +342,7 @@ config_settings(const std::shared_ptr<settings>& _config)
         JOIN("", "Specification of ROCm domains to trace/profile. Choices: ",
              join::join(join::array_config{ ", ", "", "" }, _domain_choices));
     auto _domain_defaults = std::string{ "hip_runtime_api,marker_api,kernel_dispatch,"
-                                         "memory_copy,scratch_memory" };
+                                         "memory_copy,scratch_memory,ompt" };
 #    if(ROCPROFILER_VERSION < 10000)
     _domain_defaults.append(",page_migration");
 #    endif
@@ -353,21 +377,32 @@ std::unordered_set<rocprofiler_callback_tracing_kind_t>
 get_callback_domains()
 {
     const auto callback_tracing_info = rocprofiler::sdk::get_callback_tracing_names();
-    const auto supported = std::unordered_set<rocprofiler_callback_tracing_kind_t>
-    {
+    auto       supported = std::unordered_set<rocprofiler_callback_tracing_kind_t>{
         ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API,
-            ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API,
-            ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API,
-            ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API,
-            ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
-            ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
-            ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
-            ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,
-#    if(ROCPROFILER_VERSION >= 700)
-            ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API,
-            ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API,
-#    endif
+        ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API,
+        ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API,
+        ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API,
+        ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
+        ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
+        ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
+        ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,
     };
+
+    auto _version = get_version();
+
+#    if ROCPROFILER_VERSION >= 600
+    if(_version.formatted >= 600)
+    {
+        supported.emplace(ROCPROFILER_CALLBACK_TRACING_OMPT);  // OMPT API
+        supported.emplace(ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API);
+    }
+#    endif
+#    if ROCPROFILER_VERSION >= 700
+    if(_version.formatted >= 700)
+    {
+        supported.emplace(ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API);
+    }
+#    endif
 
     auto _data = std::unordered_set<rocprofiler_callback_tracing_kind_t>{};
     auto _domains =
@@ -375,6 +410,13 @@ get_callback_domains()
                          .value_or(std::string{}),
                      " ,;:\t\n");
 
+    // Translate some configuration settings to rocprofiler domains
+    if(config::get_use_ompt() && _version.formatted >= 600)
+    {
+        _data.emplace(ROCPROFILER_CALLBACK_TRACING_OMPT);
+    }
+
+    // Check that the domains are valid
     const auto valid_choices =
         settings::instance()->at("ROCPROFSYS_ROCM_DOMAINS")->get_choices();
 
@@ -415,6 +457,7 @@ get_callback_domains()
             {
                 auto ditr = callback_tracing_info[idx];
                 auto dval = static_cast<rocprofiler_callback_tracing_kind_t>(idx);
+
                 if(itr == to_lower(ditr.name) && supported.count(dval) > 0)
                 {
                     _data.emplace(dval);
@@ -581,6 +624,13 @@ namespace rocprofiler_sdk
 void
 config_settings(const std::shared_ptr<settings>&)
 {}
+
+version_info&
+get_version()
+{
+    static version_info _version{ 0, 0, 0, 0 };
+    return _version;
+}
 
 }  // namespace rocprofiler_sdk
 }  // namespace rocprofsys
