@@ -109,7 +109,7 @@ std::string& AMDSmiGPUDevice::get_gpu_path() {
 }
 
 amdsmi_bdf_t AMDSmiGPUDevice::get_bdf() {
-    return bdf_;
+    return this->bdf_;
 }
 
 uint32_t AMDSmiGPUDevice::get_vendor_id() {
@@ -157,63 +157,6 @@ amdsmi_status_t AMDSmiGPUDevice::get_drm_data() {
 
 pthread_mutex_t* AMDSmiGPUDevice::get_mutex() {
     return amd::smi::GetMutex(gpu_id_);
-}
-
-amdsmi_status_t AMDSmiGPUDevice::amdgpu_query_info(unsigned info_id,
-                    unsigned size, void *value) const {
-    amdsmi_status_t ret;
-    uint32_t fd = 0;
-    ret = drm_.get_drm_fd_by_index(gpu_id_, &fd);
-    if (ret != AMDSMI_STATUS_SUCCESS) return AMDSMI_STATUS_NOT_SUPPORTED;
-
-    return drm_.amdgpu_query_info(fd, info_id, size, value);
-}
-
-amdsmi_status_t AMDSmiGPUDevice::amdgpu_query_driver_name(std::string& name) const {
-    amdsmi_status_t ret;
-    uint32_t fd = 0;
-    ret = drm_.get_drm_fd_by_index(gpu_id_, &fd);
-    if (ret != AMDSMI_STATUS_SUCCESS) return AMDSMI_STATUS_NOT_SUPPORTED;
-
-    return drm_.amdgpu_query_driver_name(fd, name);
-}
-
-amdsmi_status_t AMDSmiGPUDevice::amdgpu_query_driver_date(std::string& date) const {
-    amdsmi_status_t ret;
-    uint32_t fd = 0;
-    ret = drm_.get_drm_fd_by_index(gpu_id_, &fd);
-    if (ret != AMDSMI_STATUS_SUCCESS) return AMDSMI_STATUS_NOT_SUPPORTED;
-
-    return drm_.amdgpu_query_driver_date(fd, date);
-}
-
-amdsmi_status_t AMDSmiGPUDevice::amdgpu_query_hw_ip(unsigned info_id,
-            unsigned hw_ip_type, unsigned size, void *value) const {
-    amdsmi_status_t ret;
-    uint32_t fd = 0;
-    ret = drm_.get_drm_fd_by_index(gpu_id_, &fd);
-    if (ret != AMDSMI_STATUS_SUCCESS) return AMDSMI_STATUS_NOT_SUPPORTED;
-
-    return drm_.amdgpu_query_hw_ip(fd, info_id, hw_ip_type, size, value);
-}
-
-amdsmi_status_t AMDSmiGPUDevice::amdgpu_query_fw(unsigned info_id,
-        unsigned fw_type, unsigned size, void *value) const {
-    amdsmi_status_t ret;
-    uint32_t fd = 0;
-    ret = drm_.get_drm_fd_by_index(gpu_id_, &fd);
-    if (ret != AMDSMI_STATUS_SUCCESS) return AMDSMI_STATUS_NOT_SUPPORTED;
-
-    return drm_.amdgpu_query_fw(fd, info_id, fw_type, size, value);
-}
-
-amdsmi_status_t AMDSmiGPUDevice::amdgpu_query_vbios(void *info) const {
-    amdsmi_status_t ret;
-    uint32_t fd = 0;
-    ret = drm_.get_drm_fd_by_index(gpu_id_, &fd);
-    if (ret != AMDSMI_STATUS_SUCCESS) return AMDSMI_STATUS_NOT_SUPPORTED;
-
-    return drm_.amdgpu_query_vbios(fd, info);
 }
 
 
