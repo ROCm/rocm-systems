@@ -57,6 +57,19 @@ std::string smi_amdgpu_get_status_string(amdsmi_status_t ret, bool fullStatus);
 amdsmi_status_t smi_clear_char_and_reinitialize(char buffer[], uint32_t len,
                                                     std::string newString);
 amdsmi_status_t amdsmi_get_gpu_cper_entries_by_path(const char *amdgpu_ring_cper_file, uint32_t severity_mask, char *cper_data, uint64_t *buf_size, amdsmi_cper_hdr_t **cper_hdrs, uint64_t *entry_count, uint64_t *cursor);
+/**
+ * @brief Wait for user input, a debugging function to pause the program
+ * 
+ * @details This function will wait for user input before continuing.
+ * It is useful for debugging purposes to allow the user to inspect the state of the program
+ * before it continues. The function will print a message to the console and then wait for
+ * the user to press Enter. Once Enter is pressed, the function will return and the program
+ * will continue executing.
+ * 
+ * @note This function is intended for debugging purposes only and should not be used in production code.
+ * It will block the program execution and cause it to wait indefinitely for user input.
+ */
+void amdsmi_wait_for_user_input(void);
 
 /**
  *  @brief Get the device index given the processor handle.

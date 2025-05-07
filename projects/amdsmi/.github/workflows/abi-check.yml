@@ -1,17 +1,15 @@
-name: ABI Compliance Check
+name: Major ABI Compliance Check
 
 on:
   pull_request:
     branches:
       - amd-staging
-      - amd-mainline
       - release/rocm-rel-*
     paths:
       - 'include/amd_smi/amdsmi.h'
   push:
     branches:
       - amd-staging
-      - amd-mainline
       - release/rocm-rel-*
     paths:
       - 'include/amd_smi/amdsmi.h'
@@ -19,7 +17,7 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write 
+  pull-requests: write
 
 jobs:
   check-abi:
@@ -39,7 +37,7 @@ jobs:
       - name: Checkout feature branch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.head_ref || github.ref_name }}
+          ref: ${{ github.head_ref }}
           submodules: true
 
       - name: Copy feature branch file as new
@@ -48,51 +46,46 @@ jobs:
 
       - name: Fetch old file
         run: |
-          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref_name }}" = "amd-mainline" ]; then
-            # Push to amd-mainline: use amd-mainline as old
-            git fetch origin amd-mainline:amd-mainline
-            git checkout amd-mainline -- include/amd_smi/amdsmi.h
-            mv include/amd_smi/amdsmi.h amdsmi_old.h
-            # Overwrite new with amd-staging
-            git fetch origin amd-staging:amd-staging
-            git checkout amd-staging -- include/amd_smi/amdsmi.h
-            mv include/amd_smi/amdsmi.h amdsmi_new.h
-          else
-            # Default: use amd-staging as old
-            git fetch origin amd-staging:amd-staging
-            git checkout amd-staging -- include/amd_smi/amdsmi.h
+          # Print debug info
+          echo "Pull request base branch: ${{ github.base_ref }}"
+          echo "Pull request head branch: ${{ github.head_ref }}"
+
+          # Fetch the appropriate base branch
+          if [ "${{ github.base_ref }}" = "amd-staging" ]; then
+            # Pull request to amd-staging: use amd-staging as old
+            git fetch origin amd-staging
+            git checkout FETCH_HEAD -- include/amd_smi/amdsmi.h
             mv include/amd_smi/amdsmi.h amdsmi_old.h
           fi
 
       - name: Run ABI Compliance Check
         id: abi-check
         run: |
-          # Run checker and capture exit code in a single step
-          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref_name }}" = "amd-mainline" ]; then
-            abi-compliance-checker -lib amdsmi -old amdsmi_old.h -new amdsmi_new.h -v1 amd-mainline -v2 amd-staging -report-path abi-report.html || { EXIT_CODE=$?; echo "abi_exit_code=$EXIT_CODE" > $GITHUB_WORKSPACE/abi_status.txt; exit $EXIT_CODE; }
-          else
-            abi-compliance-checker -lib amdsmi -old amdsmi_old.h -new amdsmi_new.h -v1 amd-staging -v2 ${{ github.ref_name }} -report-path abi-report.html || { EXIT_CODE=$?; echo "abi_exit_code=$EXIT_CODE" > $GITHUB_WORKSPACE/abi_status.txt; exit $EXIT_CODE; }
+          # Create a status file with default failure
+          echo "abi_exit_code=1" > $GITHUB_WORKSPACE/abi_status.txt
+
+          if [ "${{ github.base_ref }}" = "amd-staging" ]; then
+            echo "Comparing amd-staging (old) with ${{ github.head_ref }} (new)"
+            abi-compliance-checker -lib amdsmi -old amdsmi_old.h -new amdsmi_new.h -v1 amd-staging -v2 ${{ github.head_ref }} -report-path abi-report.html && echo "abi_exit_code=0" > $GITHUB_WORKSPACE/abi_status.txt
           fi
-          # If successful, write exit code 0
-          echo "abi_exit_code=0" > $GITHUB_WORKSPACE/abi_status.txt
-          echo "ABI check wrote exit code to $GITHUB_WORKSPACE/abi_status.txt"
         continue-on-error: true
 
       - name: Display ABI Check Logs
         if: always()
         run: |
-          echo "Displaying ABI compliance check logs for ${{ github.ref_name }}"
-          if [ -f logs/amdsmi/${{ github.ref_name }}/log.txt ]; then
-            cat logs/amdsmi/${{ github.ref_name }}/log.txt
-          else
-            echo "No ABI check log found at logs/amdsmi/${{ github.ref_name }}/log.txt"
-          fi
+          echo "Displaying ABI compliance check logs"
+          find logs -type f -name "*.txt" -exec cat {} \;
 
       - name: Label PR as ABI BREAKAGE
-        if: github.event_name == 'pull_request' && steps.abi-check.outcome == 'failure'
+        if: always() && github.event_name == 'pull_request'
         run: |
-          echo "ABI check failed, adding ABI BREAKAGE label to PR #${{ github.event.pull_request.number }}"
-          gh pr edit ${{ github.event.pull_request.number }} --add-label "ABI BREAKAGE"
+          if [ -f $GITHUB_WORKSPACE/abi_status.txt ]; then
+            source $GITHUB_WORKSPACE/abi_status.txt
+            if [ "$abi_exit_code" -ne 0 ]; then
+              echo "ABI check failed, adding ABI BREAKAGE label to PR #${{ github.event.pull_request.number }}"
+              gh pr edit ${{ github.event.pull_request.number }} --add-label "MAJOR ABI BREAKAGE"
+            fi
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -111,10 +104,11 @@ jobs:
             source $GITHUB_WORKSPACE/abi_status.txt
             echo "ABI check exit code: $abi_exit_code"
             if [ "$abi_exit_code" -ne 0 ]; then
-              echo "ABI check failed with exit code $abi_exit_code. Check logs for more Details."
+              echo "::error::⚠️ ABI BREAKAGE FOUND ⚠️ CHECK \"Run ABI Compliance Check\" LOGS OR THE abi-report ARTIFACT ATTACHED TO THIS WORKFLOW FOR MORE DETAILS"
+              echo "::error::View the HTML report in the Artifacts section of this workflow run for detailed ABI compatibility analysis"
               exit 1
             else
-              echo "ABI check succeeded"
+              echo "✅ ABI check succeeded"
             fi
           else
             echo "ABI status file not found at $GITHUB_WORKSPACE/abi_status.txt, assuming failure"

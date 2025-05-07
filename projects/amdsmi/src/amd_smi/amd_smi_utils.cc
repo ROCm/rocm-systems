@@ -23,6 +23,7 @@
 #include <limits.h>
 #include <sys/ioctl.h>
 #include <libdrm/amdgpu.h>
+#include <libdrm/drm.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
@@ -32,8 +33,6 @@
 #include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
-#include <xf86drm.h>
-#include <xf86drmMode.h>
 #include <dirent.h>
 #include <sys/types.h>
 
@@ -582,21 +581,13 @@ amdsmi_status_t smi_amdgpu_get_pcie_speed_from_pcie_type(uint16_t pcie_type, uin
     return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice* device, char *market_name) {
+amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice* device,
+                                                        char *market_name) {
     if (market_name == nullptr || device == nullptr) {
         return AMDSMI_STATUS_ARG_PTR_NULL;
     }
 
     std::ostringstream ss;
-    // requires libdrm being active
-    if (!device->check_if_drm_is_supported()) {
-        ss << __PRETTY_FUNCTION__ << " | DRM is not supported";
-        LOG_ERROR(ss);
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
-
-    uint32_t major_version, minor_version;
-    amdgpu_device_handle device_handle = nullptr;
     std::string render_name = device->get_gpu_path();
     int fd = -1;
     std::string path = "/dev/dri/" + render_name;
@@ -612,7 +603,60 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice
     << render_name << "; path: " << path << "; fd: " << fd;
     LOG_DEBUG(ss);
 
+    amd::smi::AMDSmiLibraryLoader libdrm_amdgpu_;
+    amdsmi_status_t status = libdrm_amdgpu_.load("libdrm_amdgpu.so");
+    if (status != AMDSMI_STATUS_SUCCESS) {
+      close(fd);
+      libdrm_amdgpu_.AMDSmiLibraryLoader::unload();
+      return status;
+    }
+
+    // Function pointer typedefs
+    typedef int (*amdgpu_device_initialize_t)(int fd, uint32_t *major_version,
+                                              uint32_t *minor_version,
+                                              amdgpu_device_handle *device_handle);
+    typedef int (*amdgpu_device_deinitialize_t)(amdgpu_device_handle device_handle);
+    typedef const char* (*amdgpu_get_marketing_name_t)(amdgpu_device_handle device_handle);
+    amdgpu_device_initialize_t amdgpu_device_initialize = nullptr;
+    amdgpu_device_deinitialize_t amdgpu_device_deinitialize = nullptr;
+    amdgpu_get_marketing_name_t amdgpu_get_marketing_name = nullptr;
+
+    status = libdrm_amdgpu_.load_symbol(
+                          reinterpret_cast<amdgpu_device_initialize_t *>(&amdgpu_device_initialize),
+                          "amdgpu_device_initialize");
+    if (status != AMDSMI_STATUS_SUCCESS) {
+      close(fd);
+      libdrm_amdgpu_.AMDSmiLibraryLoader::unload();
+      return status;
+    }
+
+    amdgpu_device_handle device_handle = nullptr;
+    uint32_t major_version, minor_version;
     int ret = amdgpu_device_initialize(fd, &major_version, &minor_version, &device_handle);
+    if (ret != 0) {
+      close(fd);
+      libdrm_amdgpu_.AMDSmiLibraryLoader::unload();
+      return AMDSMI_STATUS_DRM_ERROR;
+    }
+
+    status = libdrm_amdgpu_.load_symbol(
+                            reinterpret_cast<amdgpu_get_marketing_name_t *>(
+                              &amdgpu_get_marketing_name), "amdgpu_get_marketing_name");
+    if (status != AMDSMI_STATUS_SUCCESS) {
+      close(fd);
+      libdrm_amdgpu_.AMDSmiLibraryLoader::unload();
+      return status;
+    }
+
+    status = libdrm_amdgpu_.load_symbol(reinterpret_cast<amdgpu_device_deinitialize_t *>(
+                                        &amdgpu_device_deinitialize), "amdgpu_device_deinitialize");
+    if (status != AMDSMI_STATUS_SUCCESS) {
+      close(fd);
+      libdrm_amdgpu_.AMDSmiLibraryLoader::unload();
+      return status;
+    }
+
+    ret = amdgpu_device_initialize(fd, &major_version, &minor_version, &device_handle);
     if (ret != 0) {
         std::string empty = "";
         std::strncpy(market_name, empty.c_str(), AMDSMI_256_LENGTH - 1);
@@ -628,11 +672,25 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice
         market_name[AMDSMI_256_LENGTH - 1] = '\0';
         amdgpu_device_deinitialize(device_handle);
         close(fd);
+        libdrm_amdgpu_.AMDSmiLibraryLoader::unload();
+        ss << __PRETTY_FUNCTION__ << " | path: " << path << "\n"
+           << " | fd: "<< std::dec << fd << "\n"
+           << " | Marketing Name: " << market_name << "\n"
+           << " | Returning: "
+           << smi_amdgpu_get_status_string(AMDSMI_STATUS_SUCCESS, false) << "\n";
+        LOG_INFO(ss);
         return AMDSMI_STATUS_SUCCESS;
     }
 
     amdgpu_device_deinitialize(device_handle);
     close(fd);
+    libdrm_amdgpu_.AMDSmiLibraryLoader::unload();
+    ss << __PRETTY_FUNCTION__ << " | path: " << path << "\n"
+       << " | fd: "<< std::dec << fd << "\n"
+       << " | Marketing Name: " << market_name << "\n"
+       << " | Returning: "
+       << smi_amdgpu_get_status_string(AMDSMI_STATUS_DRM_ERROR, false) << "\n";
+    LOG_INFO(ss);
     return AMDSMI_STATUS_DRM_ERROR;
 }
 
@@ -1109,3 +1167,18 @@ amdsmi_status_t amdsmi_get_gpu_cper_entries_by_path(
     return AMDSMI_STATUS_SUCCESS;
 }
 
+void amdsmi_wait_for_user_input(void) {
+  for (;;) {
+    std::cout << "\n\t**Press any key to continue**" << std::endl;
+    int input = std::cin.get();
+    if (input == EOF) {
+      std::cout << "EOF detected. Exiting." << std::endl;
+      return;
+    }
+    char input_char = static_cast<char>(input);
+    std::cout << "User entered: " << input_char << std::endl;
+    if (input_char == '\n') {
+      return;
+    }
+  }
+}

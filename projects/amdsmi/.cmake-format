@@ -4,8 +4,20 @@
 with section("parse"):
 
   # Specify structure for custom cmake functions
-  additional_commands = { 'foo': { 'flags': ['BAR', 'BAZ'],
-             'kwargs': {'DEPENDS': '*', 'HEADERS': '*', 'SOURCES': '*'}}}
+  additional_commands = {
+    'parse_version': {
+      'kwargs': {
+        'VERSION_STRING': '*'
+      }
+    },
+    'get_version_from_tag': {
+      'kwargs': {
+        'DEFAULT_VERSION_STRING': '*',
+        'VERSION_PREFIX': '*',
+        'GIT': '*'
+      }
+    }
+  }
 
   # Override configurations per-command where available
   override_spec = {}
@@ -45,7 +57,7 @@ with section("format"):
 
   # If an argument group contains more than this many sub-groups (parg or kwarg
   # groups) then force it to a vertical layout.
-  max_subgroups_hwrap = 2
+  max_subgroups_hwrap = 3
 
   # If a positional argument group contains more than this many arguments, then
   # force it to a vertical layout.
@@ -94,7 +106,7 @@ with section("format"):
   keyword_case = 'unchanged'
 
   # A list of command names which should always be wrapped
-  always_wrap = []
+  always_wrap = ['install']
 
   # If true, the argument lists which are known to be sortable will be sorted
   # lexicographicall

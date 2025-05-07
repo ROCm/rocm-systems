@@ -71,16 +71,6 @@ class AMDSmiGPUDevice: public AMDSmiProcessor {
         return amdgpu_get_compute_process_list(ComputeProcessListType_t::kAllProcesses);
     }
 
-    amdsmi_status_t amdgpu_query_info(unsigned info_id,
-                    unsigned size, void *value) const;
-    amdsmi_status_t amdgpu_query_hw_ip(unsigned info_id, unsigned hw_ip_type,
-            unsigned size, void *value) const;
-    amdsmi_status_t amdgpu_query_fw(unsigned info_id, unsigned fw_type,
-            unsigned size, void *value) const;
-    amdsmi_status_t amdgpu_query_vbios(void *info) const;
-    amdsmi_status_t amdgpu_query_driver_name(std::string& name) const;
-    amdsmi_status_t amdgpu_query_driver_date(std::string& date) const;
-
 // New methods for -e feature
     std::string bdf_to_string() const;     // -e feature
 

@@ -23,15 +23,14 @@
 #include <sstream>
 #include <iomanip>
 #include <fstream>
+#include <cerrno>
+#include <cstring>
 #include "amd_smi/impl/amd_smi_system.h"
 #include "amd_smi/impl/amd_smi_gpu_device.h"
 #include "amd_smi/impl/amd_smi_common.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_main.h"
-#include <fstream>
-#include <cerrno>
-#include <cstring>
 
 namespace amd {
 namespace smi {
@@ -304,7 +303,6 @@ amdsmi_status_t AMDSmiSystem::cleanup() {
         if (!processors_.empty()) {processors_.clear();}
         if (!sockets_.empty()) {sockets_.clear();}
         init_flag_ &= ~AMDSMI_INIT_AMD_GPUS;
-        amd::smi::AMDSmiSystem::getInstance().clean_up_drm();
         rsmi_status_t ret = rsmi_shut_down();
         if (ret != RSMI_STATUS_SUCCESS) {
             return amd::smi::rsmi_to_amdsmi_status(ret);

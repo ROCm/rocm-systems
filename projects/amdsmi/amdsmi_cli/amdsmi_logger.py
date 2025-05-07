@@ -259,6 +259,27 @@ class AMDSMILogger():
         for key, value in capitalized_json.items():
             if key not in ["GPU", "CPU", "CORE"]:
                 tabbed_dictionary[key] = value
+            # Filter out N/A values under clock
+            if key == "CLOCK":
+                valid_clock_data = {}
+                if isinstance(value, dict):  # Ensure value is a dictionary
+                    for clock_key, clock_data in value.items():
+                        if isinstance(clock_data, dict):  # Ensure clock_data is a dictionary
+                            non_na = {
+                                clock_key: clock_value
+                                for clock_key, clock_value in clock_data.items()
+                                if clock_value != "N/A"
+                            }
+                            if non_na:
+                                valid_clock_data[clock_key] = non_na
+                        else:   # Handle single-tier clock_data
+                            valid_clock_data[clock_key] = clock_data
+                else:   # Handle non-dictionary clock data
+                    valid_clock_data = value
+                # Add a single "N/A" if valid_clock_data is empty
+                if not valid_clock_data:
+                    valid_clock_data = "N/A"
+                tabbed_dictionary[key] = valid_clock_data
 
         for key, value in tabbed_dictionary.items():
             del capitalized_json[key]

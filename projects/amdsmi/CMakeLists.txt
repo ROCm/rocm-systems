@@ -4,18 +4,12 @@
 cmake_minimum_required(VERSION 3.20)
 
 set(AMD_SMI "amd_smi")
-set(AMD_SMI_COMPONENT "lib${AMD_SMI}")
-set(AMD_SMI_TARGET "${AMD_SMI}")
-set(AMD_SMI_LIB_NAME "lib${AMD_SMI_TARGET}")
-set(AMD_SMI_LIBS_TARGET "amd_smi_libraries")
+set(AMD_SMI_LIBS_TARGET "${AMD_SMI}_lib")
+set(CPACK_PACKAGE_NAME amd-smi-lib CACHE STRING "")
 
-set(BUILD_SHARED_LIBS
-    ON
-    CACHE BOOL "Build shared library (.so) or not.")
+set(BUILD_SHARED_LIBS ON CACHE BOOL "Build shared library (.so) or not.")
 
-set(CMAKE_MODULE_PATH
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/"
-    CACHE INTERNAL "Default module path.")
+set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/" CACHE INTERNAL "Default module path.")
 ## Include common cmake modules
 include(utils)
 include(help_package)
@@ -35,8 +29,9 @@ set(${AMD_SMI_LIBS_TARGET}_VERSION_MINOR "${CPACK_PACKAGE_VERSION_MINOR}")
 set(${AMD_SMI_LIBS_TARGET}_VERSION_PATCH "${CPACK_PACKAGE_VERSION_PATCH}")
 set(${AMD_SMI_LIBS_TARGET}_VERSION_BUILD "0")
 set(${AMD_SMI_LIBS_TARGET}_VERSION_HASH "${PKG_VERSION_HASH}")
-
-set(${AMD_SMI_LIBS_TARGET}_VERSION_STRING "${${AMD_SMI_LIBS_TARGET}_VERSION_MAJOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_MINOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_PATCH}+${${AMD_SMI_LIBS_TARGET}_VERSION_HASH}")
+set(${AMD_SMI_LIBS_TARGET}_VERSION_STRING
+    "${${AMD_SMI_LIBS_TARGET}_VERSION_MAJOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_MINOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_PATCH}+${${AMD_SMI_LIBS_TARGET}_VERSION_HASH}"
+)
 
 # Make proper version for appending
 # Default Value is 99999
@@ -46,7 +41,8 @@ if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
 endif()
 #Prepare final version for the CPACK use
 set(CPACK_PACKAGE_VERSION
-    "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}.${ROCM_VERSION_FOR_PACKAGE}")
+    "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}.${ROCM_VERSION_FOR_PACKAGE}"
+)
 
 # The following default version values should be updated as appropriate for
 # ABI breaks (update MAJOR and MINOR), and ABI/API additions (update MINOR).
@@ -57,11 +53,9 @@ set(PKG_VERSION_MINOR "${CPACK_PACKAGE_VERSION_MINOR}")
 set(PKG_VERSION_PATCH "${CPACK_PACKAGE_VERSION_PATCH}")
 set(PKG_VERSION_NUM_COMMIT 0)
 
-set(AMD_SMI_PACKAGE
-    amd-smi-lib
-    CACHE STRING "")
+project(${AMD_SMI_LIBS_TARGET} DESCRIPTION "AMD System Management libraries"
+        HOMEPAGE_URL "https://github.com/ROCm/amdsmi")
 
-project(${AMD_SMI_LIBS_TARGET})
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -84,24 +78,14 @@ cmake_dependent_option(ENABLE_LDCONFIG "Set library links and caches using ldcon
 set(SHARE_INSTALL_PREFIX "${CMAKE_INSTALL_DATAROOTDIR}/${AMD_SMI}" CACHE STRING "Tests and Example install directory")
 
 # Packaging directives
-set(CPACK_PACKAGE_NAME
-    ${AMD_SMI_PACKAGE}
-    CACHE STRING "")
-
-set(CPACK_PACKAGE_CONTACT
-    "AMD-SMILib Support <amd-smi.support@amd.com>"
-    CACHE STRING "")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
-    "AMD System Management libraries"
-    CACHE STRING "")
+set(CPACK_PACKAGE_CONTACT "AMD-SMILib Support <amd-smi.support@amd.com>" CACHE STRING "")
 
 generic_package()
 
 ## Compiler flags
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -fno-rtti")
-if (${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "x86_64")
-    set(CMAKE_CXX_FLAGS
-     "${CMAKE_CXX_FLAGS} -m64 -msse -msse2")
+if(${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "x86_64")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m64 -msse -msse2")
 endif()
 # Security options
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wconversion -Wcast-align")
@@ -119,7 +103,8 @@ if(ENABLE_ESMI_LIB)
     if(NOT EXISTS ${PROJECT_SOURCE_DIR}/esmi_ib_library/src)
         # TODO: use ExternalProject_Add instead or a submodule
         message(STATUS "Adding esmi_ib_library...")
-        execute_process(COMMAND git clone --depth=1 -b ${current_esmi_tag} https://github.com/amd/esmi_ib_library.git ${PROJECT_SOURCE_DIR}/esmi_ib_library)
+        execute_process(COMMAND git clone --depth=1 -b ${current_esmi_tag} https://github.com/amd/esmi_ib_library.git
+                                ${PROJECT_SOURCE_DIR}/esmi_ib_library)
     else()
         message(STATUS "esmi_ib_library already installed, checking version...")
 
@@ -128,22 +113,19 @@ if(ENABLE_ESMI_LIB)
             COMMAND git rev-list --tags --max-count=1
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/esmi_ib_library
             OUTPUT_VARIABLE latest_commit
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-        )
+            OUTPUT_STRIP_TRAILING_WHITESPACE)
         execute_process(
             COMMAND git describe --tags ${latest_commit} --match "*pkg*"
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/esmi_ib_library
             OUTPUT_VARIABLE latest_esmi_tag
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-        )
+            OUTPUT_STRIP_TRAILING_WHITESPACE)
 
         # Update to latest tags if not matched
         if(NOT latest_esmi_tag STREQUAL current_esmi_tag)
             message(STATUS "Updating esmi_ib_library...")
             execute_process(
-                COMMAND git clone --depth=1 -b ${current_esmi_tag} https://github.com/amd/esmi_ib_library.git ${PROJECT_SOURCE_DIR}/esmi_ib_library_temp
-                RESULT_VARIABLE clone_result
-            )
+                COMMAND git clone --depth=1 -b ${current_esmi_tag} https://github.com/amd/esmi_ib_library.git
+                        ${PROJECT_SOURCE_DIR}/esmi_ib_library_temp RESULT_VARIABLE clone_result)
             if(clone_result EQUAL 0)
                 file(REMOVE_RECURSE ${PROJECT_SOURCE_DIR}/esmi_ib_library)
                 file(RENAME ${PROJECT_SOURCE_DIR}/esmi_ib_library_temp ${PROJECT_SOURCE_DIR}/esmi_ib_library)
@@ -168,52 +150,47 @@ if(ENABLE_ESMI_LIB)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-write-strings")
 endif()
 
-# sets DRM_LIBRARIES and DRM_INCLUDE_DIRS
-pkg_check_modules(DRM REQUIRED libdrm)
-# sets AMDGPU_DRM_LIBRARIES and AMDGPU_DRM_INCLUDE_DIRS
-pkg_check_modules(AMDGPU_DRM REQUIRED libdrm_amdgpu)
-
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/third_party/shared_mutex
-                    ${CMAKE_CURRENT_SOURCE_DIR}/include/amd_smi ${ESMI_INC_DIR} ${DRM_INCLUDE_DIRS})
+                    ${CMAKE_CURRENT_SOURCE_DIR}/include/amd_smi ${ESMI_INC_DIR})
 
 set(CMN_SRC_LIST
-    "${ROCM_SRC_DIR}/rocm_smi.cc"
-    "${ROCM_SRC_DIR}/rocm_smi_counters.cc"
     "${ROCM_SRC_DIR}/rocm_smi_device.cc"
-    "${ROCM_SRC_DIR}/rocm_smi_gpu_metrics.cc"
-    "${ROCM_SRC_DIR}/rocm_smi_binary_parser.cc"
-    "${ROCM_SRC_DIR}/rocm_smi_io_link.cc"
-    "${ROCM_SRC_DIR}/rocm_smi_kfd.cc"
     "${ROCM_SRC_DIR}/rocm_smi_main.cc"
     "${ROCM_SRC_DIR}/rocm_smi_monitor.cc"
     "${ROCM_SRC_DIR}/rocm_smi_power_mon.cc"
     "${ROCM_SRC_DIR}/rocm_smi_utils.cc"
+    "${ROCM_SRC_DIR}/rocm_smi_counters.cc"
+    "${ROCM_SRC_DIR}/rocm_smi_kfd.cc"
+    "${ROCM_SRC_DIR}/rocm_smi_io_link.cc"
+    "${ROCM_SRC_DIR}/rocm_smi_gpu_metrics.cc"
+    "${ROCM_SRC_DIR}/rocm_smi.cc"
     "${ROCM_SRC_DIR}/rocm_smi_logger.cc"
-    "${SHR_MUTEX_DIR}/shared_mutex.cc")
+    "${SHR_MUTEX_DIR}/shared_mutex.cc"
+    "${ROCM_SRC_DIR}/rocm_smi_binary_parser.cc")
 
 if(ENABLE_ESMI_LIB)
-	list(APPEND CMN_SRC_LIST ${ESMI_SRC_DIR}/e_smi.c)
-	list(APPEND CMN_SRC_LIST ${ESMI_SRC_DIR}/e_smi_monitor.c)
-	list(APPEND CMN_SRC_LIST ${ESMI_SRC_DIR}/e_smi_plat.c)
-	list(APPEND CMN_SRC_LIST ${ESMI_SRC_DIR}/e_smi_utils.c)
+    list(APPEND CMN_SRC_LIST ${ESMI_SRC_DIR}/e_smi.c)
+    list(APPEND CMN_SRC_LIST ${ESMI_SRC_DIR}/e_smi_monitor.c)
+    list(APPEND CMN_SRC_LIST ${ESMI_SRC_DIR}/e_smi_plat.c)
+    list(APPEND CMN_SRC_LIST ${ESMI_SRC_DIR}/e_smi_utils.c)
 endif()
 
 set(CMN_INC_LIST
-    "${ROCM_INC_DIR}/rocm_smi.h"
-    "${ROCM_INC_DIR}/rocm_smi_common.h"
-    "${ROCM_INC_DIR}/rocm_smi_counters.h"
     "${ROCM_INC_DIR}/rocm_smi_device.h"
-    "${ROCM_INC_DIR}/rocm_smi_gpu_metrics.h"
-    "${ROCM_INC_DIR}/rocm_smi_binary_parser.h"
-    "${ROCM_INC_DIR}/rocm_smi_exception.h"
-    "${ROCM_INC_DIR}/rocm_smi_io_link.h"
-    "${ROCM_INC_DIR}/rocm_smi_kfd.h"
     "${ROCM_INC_DIR}/rocm_smi_main.h"
     "${ROCM_INC_DIR}/rocm_smi_monitor.h"
     "${ROCM_INC_DIR}/rocm_smi_power_mon.h"
     "${ROCM_INC_DIR}/rocm_smi_utils.h"
+    "${ROCM_INC_DIR}/rocm_smi_common.h"
+    "${ROCM_INC_DIR}/rocm_smi_exception.h"
+    "${ROCM_INC_DIR}/rocm_smi_counters.h"
+    "${ROCM_INC_DIR}/rocm_smi_kfd.h"
+    "${ROCM_INC_DIR}/rocm_smi_io_link.h"
+    "${ROCM_INC_DIR}/rocm_smi_gpu_metrics.h"
+    "${ROCM_INC_DIR}/rocm_smi.h"
     "${ROCM_INC_DIR}/rocm_smi_logger.h"
-    "${SHR_MUTEX_DIR}/shared_mutex.h")
+    "${SHR_MUTEX_DIR}/shared_mutex.h"
+    "${ROCM_INC_DIR}/rocm_smi_binary_parser.h")
 
 add_subdirectory("rocm_smi")
 add_subdirectory("src")
@@ -240,7 +217,6 @@ if(BUILD_EXAMPLES)
     add_subdirectory("example")
 endif()
 
-
 include(CMakePackageConfigHelpers)
 
 configure_package_config_file(
@@ -248,11 +224,8 @@ configure_package_config_file(
     INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${AMD_SMI}
     PATH_VARS CMAKE_INSTALL_LIBDIR CMAKE_INSTALL_INCLUDEDIR CMAKE_INSTALL_BINDIR)
 
-write_basic_package_version_file(
-    ${CMAKE_CURRENT_BINARY_DIR}/amd_smi-config-version.cmake
-    VERSION
-    "${CPACK_PACKAGE_VERSION}"
-    COMPATIBILITY SameMajorVersion)
+write_basic_package_version_file(${CMAKE_CURRENT_BINARY_DIR}/amd_smi-config-version.cmake
+                                 VERSION "${CPACK_PACKAGE_VERSION}" COMPATIBILITY SameMajorVersion)
 
 install(
     FILES ${CMAKE_CURRENT_BINARY_DIR}/amd_smi-config.cmake ${CMAKE_CURRENT_BINARY_DIR}/amd_smi-config-version.cmake
@@ -261,11 +234,11 @@ install(
 
 # Create cmake target
 # Add all targets to the build-tree export set
-export(TARGETS ${AMD_SMI_TARGET} FILE "${PROJECT_BINARY_DIR}/amd_smi_target.cmake")
+export(TARGETS ${AMD_SMI} FILE "${PROJECT_BINARY_DIR}/amd_smi_target.cmake")
 
 # Export the package for use from the build-tree
 # (this registers the build-tree with a global CMake-registry)
-export(PACKAGE amd_smi)
+export(PACKAGE ${AMD_SMI})
 
 # Create the amd_smiConfig.cmake and amd_smiConfigVersion files
 # ... for the build tree
@@ -301,22 +274,69 @@ install(
 add_subdirectory(goamdsmi_shim)
 
 #Debian package specific variables
-set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "python3-argcomplete, libdrm-dev")
+set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "python3-argcomplete, libdrm-dev, libdrm-amdgpu-dev")
 set(CPACK_DEBIAN_ASAN_PACKAGE_RECOMMENDS ${CPACK_DEBIAN_PACKAGE_RECOMMENDS})
 set(CPACK_DEBIAN_DEV_PACKAGE_RECOMMENDS ${CPACK_DEBIAN_PACKAGE_RECOMMENDS})
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "sudo, python3 (>= 3.6.8), python3-pip, python3-setuptools, python3-wheel")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "sudo, libc6, python3 (>= 3.6.8), python3-pip, python3-setuptools, python3-wheel")
 set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
 set(CPACK_DEBIAN_DEV_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
 
+# $CURRENT_YEAR is used by copyright.in
+string(TIMESTAMP CURRENT_YEAR "%Y")
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/copyright.in DEBIAN/copyright @ONLY)
+
 ## Process the Debian install/remove scripts to update the CPACK variables
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/postinst.in DEBIAN/postinst @ONLY)
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/amd-smi-lib/prerm.in DEBIAN/prerm @ONLY)
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/amd-smi-lib-tests/prerm.in DEBIAN/prerm @ONLY)
-set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "DEBIAN/postinst;DEBIAN/prerm")
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/postinst.in
+    DEBIAN/postinst
+    @ONLY
+    FILE_PERMISSIONS
+    OWNER_READ
+    OWNER_WRITE
+    OWNER_EXECUTE
+    GROUP_READ
+    GROUP_EXECUTE
+    WORLD_READ
+    WORLD_EXECUTE)
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/prerm.in
+    DEBIAN/prerm
+    @ONLY
+    FILE_PERMISSIONS
+    OWNER_READ
+    OWNER_WRITE
+    OWNER_EXECUTE
+    GROUP_READ
+    GROUP_EXECUTE
+    WORLD_READ
+    WORLD_EXECUTE)
+list(APPEND CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/postinst"
+     "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/prerm")
+
+# Configure pre-rm for tests only
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/${CPACK_PACKAGE_NAME}-tests/prerm.in
+    DEBIAN/${CPACK_PACKAGE_NAME}-tests/prerm
+    @ONLY
+    FILE_PERMISSIONS
+    OWNER_READ
+    OWNER_WRITE
+    OWNER_EXECUTE
+    GROUP_READ
+    GROUP_EXECUTE
+    WORLD_READ
+    WORLD_EXECUTE)
 
 # Assign control scripts to the AMDSMI Lib & Tests packages
-set(CPACK_DEBIAN_DEV_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/amd-smi-lib/prerm")
-set(CPACK_DEBIAN_TESTS_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/amd-smi-lib-tests/prerm")
+set(CPACK_DEBIAN_DEV_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/prerm")
+set(CPACK_DEBIAN_TESTS_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/${CPACK_PACKAGE_NAME}-tests/prerm")
+
+# install copyright file into share/doc/amd_smi/copyright
+# required for debian package compliance
+install(
+    FILES "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/copyright"
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/${AMD_SMI}
+    COMPONENT dev)
 
 # RPM package specific variables
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
@@ -326,7 +346,7 @@ if(CPACK_RPM_PACKAGE_RELEASE)
     set(CPACK_RPM_PACKAGE_RELEASE_DIST ON)
 endif()
 # NOTE: RPM SUGGESTS DO NOT WORK! https://bugzilla.redhat.com/show_bug.cgi?id=1811358
-set(CPACK_RPM_PACKAGE_SUGGESTS "python3-argcomplete")
+set(CPACK_RPM_PACKAGE_SUGGESTS "python3-argcomplete, libdrm-dev, libdrm-amdgpu-dev")
 set(CPACK_RPM_DEV_PACKAGE_SUGGESTS ${CPACK_RPM_PACKAGE_SUGGESTS})
 set(CPACK_RPM_ASAN_PACKAGE_SUGGESTS ${CPACK_RPM_PACKAGE_SUGGESTS})
 # python version gated by rhel8 :(
@@ -338,7 +358,7 @@ set(CPACK_RPM_ASAN_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
 set(CPACK_RPM_SPEC_MORE_DEFINE "%define _python_bytecompile_errors_terminate_build 0")
 # Cpack converts !/usr/bin/env python3 to /usr/libexec/platform-python in RHEL8.
 # prevent the BRP(buildroot policy) script from checking and modifying interpreter directives
-string( APPEND CPACK_RPM_SPEC_MORE_DEFINE "\n%undefine __brp_mangle_shebangs")
+string(APPEND CPACK_RPM_SPEC_MORE_DEFINE "\n%undefine __brp_mangle_shebangs")
 
 # Add rocm-core dependency if -DROCM_DEP_ROCMCORE=ON is passed
 if(ROCM_DEP_ROCMCORE)
@@ -352,18 +372,18 @@ endif()
 
 ## Enable Component Mode and set component specific flags
 set(CPACK_DEB_COMPONENT_INSTALL ON)
-set(CPACK_DEBIAN_DEV_PACKAGE_NAME "${AMD_SMI_PACKAGE}")
-set(CPACK_DEBIAN_TESTS_PACKAGE_NAME "${AMD_SMI_PACKAGE}-tests")
-set(CPACK_DEBIAN_ASAN_PACKAGE_NAME "${AMD_SMI_PACKAGE}-asan")
+set(CPACK_DEBIAN_DEV_PACKAGE_NAME "${CPACK_PACKAGE_NAME}")
+set(CPACK_DEBIAN_TESTS_PACKAGE_NAME "${CPACK_PACKAGE_NAME}-tests")
+set(CPACK_DEBIAN_ASAN_PACKAGE_NAME "${CPACK_PACKAGE_NAME}-asan")
 set(CPACK_RPM_COMPONENT_INSTALL ON)
-set(CPACK_RPM_DEV_PACKAGE_NAME "${AMD_SMI_PACKAGE}")
-set(CPACK_RPM_TESTS_PACKAGE_NAME "${AMD_SMI_PACKAGE}-tests")
-set(CPACK_RPM_ASAN_PACKAGE_NAME "${AMD_SMI_PACKAGE}-asan")
+set(CPACK_RPM_DEV_PACKAGE_NAME "${CPACK_PACKAGE_NAME}")
+set(CPACK_RPM_TESTS_PACKAGE_NAME "${CPACK_PACKAGE_NAME}-tests")
+set(CPACK_RPM_ASAN_PACKAGE_NAME "${CPACK_PACKAGE_NAME}-asan")
 if(ENABLE_ASAN_PACKAGING)
-  # ASAN Package requires only asan component with libraries and license file
-  set(CPACK_COMPONENTS_ALL asan)
+    # ASAN Package requires only asan component with libraries and license file
+    set(CPACK_COMPONENTS_ALL asan)
 else()
-  set(CPACK_COMPONENTS_ALL dev tests )
+    set(CPACK_COMPONENTS_ALL dev tests)
 endif()
 
 # The line below doesn't currently work; it may be this issue:
