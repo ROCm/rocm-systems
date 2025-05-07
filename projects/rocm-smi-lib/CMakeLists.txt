@@ -201,7 +201,7 @@ set(CPACK_RPM_COMPONENT_INSTALL ON)
 # Add dependencies
 # no rocm-core
 # python doesn't need to be asan
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "python3")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6, python3")
 set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS "${CPACK_DEBIAN_PACKAGE_DEPENDS}")
 # Only add dependency on rocm-core if -DROCM_DEP_ROCMCORE=ON is given
 if(ROCM_DEP_ROCMCORE)
@@ -342,9 +342,33 @@ set(CPACK_DEBIAN_PACKAGE_SUGGESTS "sudo, libdrm-dev, libdrm-amdgpu-dev")
 set(CPACK_RPM_PACKAGE_SUGGESTS "sudo, libdrm-dev, libdrm-amdgpu-dev")
 
 ## Process the Debian install/remove scripts to update the CPACK variables
-configure_file ( ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/postinst.in DEBIAN/postinst @ONLY )
-configure_file ( ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/prerm.in DEBIAN/prerm @ONLY )
-set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "DEBIAN/postinst;DEBIAN/prerm")
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/postinst.in
+    DEBIAN/postinst
+    @ONLY
+    FILE_PERMISSIONS
+    OWNER_READ
+    OWNER_WRITE
+    OWNER_EXECUTE
+    GROUP_READ
+    GROUP_EXECUTE
+    WORLD_READ
+    WORLD_EXECUTE)
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/prerm.in
+    DEBIAN/prerm
+    @ONLY
+    FILE_PERMISSIONS
+    OWNER_READ
+    OWNER_WRITE
+    OWNER_EXECUTE
+    GROUP_READ
+    GROUP_EXECUTE
+    WORLD_READ
+    WORLD_EXECUTE)
+
+list(APPEND CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/postinst"
+     "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/prerm")
 
 # RPM package specific variables
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "${CPACK_PACKAGING_INSTALL_PREFIX} ${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}" )
