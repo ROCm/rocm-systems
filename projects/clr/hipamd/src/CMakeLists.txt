@@ -257,7 +257,7 @@ if(USE_PROF_API)
     COMMENT "Generating new header from hip_runtime_api.h")
 
   add_custom_command(OUTPUT ${PROF_API_STR}
-    COMMAND ${Python3_EXECUTABLE} ${PROF_API_GEN} -v -t --priv ${PROF_API_NEWHDR}.i ${PROF_API_SRC} ${PROF_API_STR_IN} ${PROF_API_STR}
+    COMMAND ${Python3_EXECUTABLE} ${PROF_API_GEN} -v -t --priv ${PROF_API_NEWHDR}.i ${PROF_API_SRC} ${HIP_COMMON_INCLUDE_DIR} ${PROF_API_STR_IN} ${PROF_API_STR}
     DEPENDS ${PROF_API_STR_IN} ${PROF_API_NEWHDR}.i ${PROF_API_GEN}
     COMMENT "Generating profiling primitives: ${PROF_API_STR}")
 

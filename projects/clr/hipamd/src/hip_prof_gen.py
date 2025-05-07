@@ -708,7 +708,7 @@ parse_src(api_map, src_dir, src_pat, opts_map)
 
 # use the cxxheaderparser
 # setup preprocess
-cxx_preprocess = cxxheaderparser.preprocessor.make_pcpp_preprocessor(include_paths=[include_path])
+cxx_preprocess = cxxheaderparser.preprocessor.make_pcpp_preprocessor(defines=['__HIP_PLATFORM_AMD__'], include_paths=[include_path])
 cxx_options = cxxheaderparser.options.ParserOptions(preprocessor=cxx_preprocess)
 try:
   cppHeader = cxxheaderparser.simple.parse_file(INPUT, options=cxx_options)
@@ -722,16 +722,16 @@ api_callback_ids = []
 
 for enum in cppHeader.namespace.enums:
   if enum.typename.segments[0].name == 'hip_api_id_t':
-    for value in enum['values']:
+    for value in enum.values:
       if value.name == 'HIP_API_ID_NONE' or value.name == 'HIP_API_ID_FIRST':
         continue
       if value.name == 'HIP_API_ID_LAST':
         break
-      if type(enum.value.tokens[0].value) == str:
+      if type(value.value.tokens[0].value) == str:
         continue
       m = re.match(r'HIP_API_ID_(\S*)', value.name)
       if m:
-        api_callback_ids.append((m.group(1), enum.value.tokens[0].value))
+        api_callback_ids.append((m.group(1), value.value.tokens[0].value))
     break
 
 # Checking for non-conformant APIs with missing HIP_INIT macro
