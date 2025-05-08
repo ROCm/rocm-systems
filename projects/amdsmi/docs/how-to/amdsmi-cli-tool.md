@@ -35,7 +35,7 @@ detected:
 ~$ amd-smi
 usage: amd-smi [-h]  ...
 
-AMD System Management Interface | Version: 25.4.0 | ROCm version: 6.4.0 | Platform: Linux Baremetal
+AMD System Management Interface | Version: 25.5.0 | ROCm version: 6.4.1 | Platform: Linux Baremetal
 
 options:
   -h, --help          show this help message and exit
@@ -56,6 +56,7 @@ AMD-SMI Commands:
     monitor (dmon)    Monitor metrics for target devices
     xgmi              Displays xgmi information of the devices
     partition         Displays partition information of the devices
+    ras               Retrieve CPER (RAS) entries from the driver
 ```
 
 Example commands:
@@ -738,7 +739,7 @@ usage: amd-smi partition [-h] [-g GPU [GPU ...]] [-c] [-m] [-a] [--json | --csv]
 If no GPU is specified, returns information for all GPUs on the system.
 If no partition argument is provided, all partition information will be displayed.
 
-partition arguments:
+Partition arguments:
   -h, --help               show this help message and exit
   -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, or UUID from the possible choices:
                            ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
@@ -755,6 +756,56 @@ Command Modifiers:
   --csv                    Displays output in CSV format (human readable by default).
   --file FILE              Saves output into a file on the provided path (stdout by default).
   --loglevel LEVEL         Set the logging level from the possible choices:
+```
+
+(cmd-ras)=
+
+### amd-smi ras
+
+Displays RAS information of specified devices.
+
+```shell-session
+~$ amd-smi ras --help
+usage: amd-smi ras [-h] --cper [--severity SEVERITY [SEVERITY ...]] [--folder FOLDER]
+                   [--file_limit FILE_LIMIT] [--follow]
+                   [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]]
+                   [--json | --csv] [--file FILE] [--loglevel LEVEL]
+
+Retrieve and decode CPER (RAS) entries from the kernel driver.
+Supports filtering by severity, exporting to different formats, and continuous monitoring.
+This command accepts options only; no positional arguments are required.
+
+RAS arguments:
+  -h, --help                          show this help message and exit
+  --cper                              Trigger CPER data retrieval
+  --severity SEVERITY [SEVERITY ...]  Set the SEVERITY filters from the following:
+                                          nonfatal-uncorrected, fatal, nonfatal-corrected, all
+  --folder FOLDER                     Folder to dump CPER report files
+  --file_limit FILE_LIMIT             Maximum number of entries per output file
+  --follow                            Continuously monitor for new entries
+
+Device arguments:
+  -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, or UUID from the possible choices:
+                              ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                              ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                              ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                              ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                                all | Selects all devices
+  -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
+                              ID: 0
+                              ID: 1
+                              ID: 2
+                              ID: 3
+                                all | Selects all devices
+  -O, --core CORE [CORE ...]  Select a Core ID from the possible choices:
+                              ID: 0 - 95
+                                all  | Selects all devices
+
+Command Modifiers:
+  --json                      Displays output in JSON format (human readable by default).
+  --csv                       Displays output in CSV format (human readable by default).
+  --file FILE                 Saves output into a file on the provided path (stdout by default).
+  --loglevel LEVEL            Set the logging level from the possible choices:
                                 DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
