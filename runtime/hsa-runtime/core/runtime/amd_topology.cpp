@@ -386,6 +386,12 @@ bool BuildTopology() {
   for (auto& src_gpu : rt->gpu_agents()) {
     uint32_t src_id = src_gpu->node_id();
 
+    // Set RecSdmaEngOverride to true for all gpus
+    if (rec_sdma_engine_override) {
+      ((AMD::GpuAgent*)src_gpu)->SetRecSdmaEngOverride(rec_sdma_engine_override);
+      continue;
+    }
+
     // skip the pre-loop if NumSdmaXgmiEngines != 6
     if (((AMD::GpuAgent*)src_gpu)->properties().NumSdmaXgmiEngines != 6)
       break;
@@ -401,10 +407,6 @@ bool BuildTopology() {
         }
       }
     }
-
-    // skip the pre-loop if RecSdmaEngOverride is true
-    if (rec_sdma_engine_override)
-      break;
   }
 
   // Register destination agents that can SDMA gang copy for source agents
