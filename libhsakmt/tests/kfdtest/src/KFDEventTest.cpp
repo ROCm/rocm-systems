@@ -334,7 +334,7 @@ exit:
     }
 };
 
-TEST_F(KFDEventTest, MeasureInterruptConsumption) {
+TEST_F(KFDEventTest, DISABLED_MeasureInterruptConsumption) {
     TEST_START(TESTPROFILE_RUNALL);
     QueueAndSignalBenchmark latencyBench(128);
     QueueAndSignalBenchmark sustainedBench(4095);

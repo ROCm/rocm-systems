@@ -34,10 +34,6 @@ FILTER[core]=\
 # FILTER[pm] need human intervention, so put it here. Developers can run them
 # manually through "-p pm" option.
 #
-# Fragmentation test fails intermittently on different systems (see KFD-344). It
-# stresses memory management in unusual ways by having lots of memory allocated but
-# not mapped, which is not relevant to compute applications over ROCr.
-#
 # CU Masking Linear are not working correctly due to how the HW distributes work over CUs.
 # They are available for testing but are not currently expected to pass on CI/VI/AI.
 #
@@ -48,9 +44,7 @@ FILTER[core]=\
 # The CheckZeroInitializationVram test is no longer expected to pass as KFD no longer
 # clears memory at allocation time.
 PERMANENT_BLACKLIST_ALL_ASICS=\
-"-KFDEventTest.MeasureInterruptConsumption:"\
-"${FILTER[pm]}:"\
-"KFDLocalMemoryTest.Fragmentation:"\
+"-${FILTER[pm]}:"\
 "KFDQMTest.BasicCuMaskingLinear:"\
 "KFDQMTest.BasicCuMaskingEven:"\
 "RDMATest.GPUDirect:"\

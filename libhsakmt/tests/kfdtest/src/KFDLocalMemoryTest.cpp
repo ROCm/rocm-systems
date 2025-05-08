@@ -435,7 +435,7 @@ static void Fragmentation(KFDTEST_PARAMETERS* pTestParamters){
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 }
 
-TEST_F(KFDLocalMemoryTest, Fragmentation) {
+TEST_F(KFDLocalMemoryTest, DISABLED_Fragmentation) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
