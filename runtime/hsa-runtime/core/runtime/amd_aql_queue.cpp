@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -478,7 +478,9 @@ void AqlQueue::StoreRelaxed(hsa_signal_value_t value) {
       HSAKMT_CALL(hsaKmtQueueRingDoorbell(queue_id_));
     } else {
       // Hardware doorbell supports AQL semantics.
-      atomic::Store(signal_.hardware_doorbell_ptr, uint64_t(value), std::memory_order_release);
+      _mm_sfence();
+      *(signal_.hardware_doorbell_ptr) = uint64_t(value);
+      /* signal_ is allocated as uncached so we do not need read-back to flush WC */
     }
     return;
   }

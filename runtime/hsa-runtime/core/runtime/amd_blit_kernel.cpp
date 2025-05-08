@@ -894,7 +894,8 @@ void BlitKernel::PopulateQueue(uint64_t index, uint64_t code_handle, void* args,
     // Ensure the packet body is written as header may get reordered when writing over PCIE
     _mm_sfence();
   }
-  queue_buffer[index & queue_bitmask_].header = kDispatchPacketHeader;
+  __atomic_store_n(&(queue_buffer[index & queue_bitmask_].full_header),
+                    kDispatchPacketHeader | packet.setup << 16, __ATOMIC_RELEASE);
 
   LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS,
     "HWq=%p, id=%d, Dispatch Header = "
