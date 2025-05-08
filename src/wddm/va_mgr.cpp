@@ -18,9 +18,9 @@ VaMgr::VaMgr(uint64_t start, uint64_t size, uint64_t min_align) {
 VaMgr::~VaMgr() {
 
   if (free_list_.size() != 1)
-    pr_err("free_list_ size is not 1.\n");
+    pr_warn("free_list_ size:%ld which should be 1.\n", free_list_.size());
   if (frag_map_.size() != 1)
-    pr_err("frag_map_ size is not 1.\n");
+    pr_warn("frag_map_ size:%ld which should be 1.\n", frag_map_.size());
 
   free_list_.clear();
   frag_map_.clear();
