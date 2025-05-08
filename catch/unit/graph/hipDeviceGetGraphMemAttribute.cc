@@ -132,7 +132,10 @@ TEST_CASE("Unit_hipDeviceGetGraphMemAttribute_Positive_DoubleMemory") {
 
   HIP_CHECK(hipGraphExecDestroy(graph_exec1));
   HIP_CHECK(hipGraphExecDestroy(graph_exec2));
+
   HIP_CHECK(hipDeviceGraphMemTrim(0));
+  HIP_CHECK(hipStreamSynchronize(0));
+
   checkGraphMemAttribute(0, 2 * element_count * sizeof(int));
   ResetGraphMemAttribute();
 }
@@ -170,7 +173,10 @@ TEST_CASE("Unit_hipDeviceGetGraphMemAttribute_Positive_ReuseMemory") {
 
   HIP_CHECK(hipGraphExecDestroy(graph_exec1));
   HIP_CHECK(hipGraphExecDestroy(graph_exec2));
+
   HIP_CHECK(hipDeviceGraphMemTrim(0));
+  HIP_CHECK(hipStreamSynchronize(0));
+
   checkGraphMemAttribute(0, element_count * sizeof(int));
   ResetGraphMemAttribute();
 #endif
