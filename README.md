@@ -29,7 +29,7 @@ For building HIP from source, please check instructions on the [HIP page](https:
 
 HIP catch tests can be built via the following instructions:
 
-1 .Clone the hip-tests source code from the repository, with definition of branch. The default branch is `develop`, as an example,
+1 .Clone the hip-tests source code from the repository, with definition of branch. The default branch is `amd-staging`, as an example,
 ```bash
 $ git clone -b develop https://github.com/ROCm/hip-tests.git
 $ export HIP_TESTS_DIR="$(readlink -f hip-tests)"
