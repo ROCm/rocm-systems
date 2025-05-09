@@ -13,11 +13,16 @@ rocprof_compute = SourceFileLoader("rocprof-compute", "src/rocprof-compute").loa
 
 
 # NOTE: Only testing gfx942 for now.
-GFX942_CHIP_IDS = ["29856", "29876", "29857", "29877", "29858", "29878", "29861", "29881"]
-
-# Expected result
-GFX942_NUM_XCDS = {"spx": 8, "dpx": 4, "qpx": 2, "cpx": 1}
-
+GFX942_CHIP_IDS_TO_NUM_XCDS = {
+    "29856": {"spx": 6, "tpx": 2},
+    "29876": {"spx": 6, "tpx": 2},
+    "29857": {"spx": 8, "dpx": 4, "qpx": 2, "cpx": 1},
+    "29877": {"spx": 8, "dpx": 4, "qpx": 2, "cpx": 1},
+    "29858": {"spx": 4, "dpx": 2, "cpx": 1},
+    "29878": {"spx": 4, "dpx": 2, "cpx": 1},
+    "29861": {"spx": 8, "dpx": 4, "qpx": 2, "cpx": 1},
+    "29881": {"spx": 8, "dpx": 4, "qpx": 2, "cpx": 1},
+}
 
 # helper to strip ANSI color codes if your app uses them
 ANSI_ESCAPE = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
@@ -66,8 +71,8 @@ def run(cmd):
     return p.stdout.decode("utf-8")
 
 
-def gpu_arch():
-    gpu_arch = None
+def get_num_xcds():
+    num_xcds = None
 
     ## 1) Parse arch details from rocminfo
     rocminfo = str(
@@ -77,29 +82,24 @@ def gpu_arch():
         ).stdout.decode("utf-8")
     )
     rocminfo = rocminfo.split("\n")
-    soc_regex = re.compile(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", re.MULTILINE)
-    devices = list(filter(soc_regex.match, rocminfo))
-    gpu_arch = devices[0].split()[1]
 
-    if not gpu_arch:
-        ## 2) Try parse arch details from chip id.
-        chip_id = re.compile(r"^\s*Chip ID:\s+ ([a-zA-Z0-9]+)\s*", re.MULTILINE)
-        ids = list(filter(chip_id.match, rocminfo))
-        for id in ids:
-            chip_id = re.match(r"^[^()]+", id.split()[2]).group(0)
+    chip_id = re.compile(r"^\s*Chip ID:\s+ ([a-zA-Z0-9]+)\s*", re.MULTILINE)
+    ids = list(filter(chip_id.match, rocminfo))
+    for id in ids:
+        chip_id = re.match(r"^[^()]+", id.split()[2]).group(0)
 
-        if chip_id in GFX942_CHIP_IDS:
-            gpu_arch = "gfx942"
+    if str(chip_id) in GFX942_CHIP_IDS_TO_NUM_XCDS.keys():
+        num_xcds = GFX942_CHIP_IDS_TO_NUM_XCDS[str(chip_id)]
 
-    return gpu_arch
+    return num_xcds
 
 
 @pytest.mark.num_xcds_spec_class
 def test_num_xcds_spec_class(monkeypatch):
-    arch = gpu_arch()
+    num_xcds = get_num_xcds()
 
     # 1. Check if gfx942 soc
-    if not arch or "gfx942" not in arch.lower():
+    if not num_xcds:
         pytest.skip("Skipping num xcds test for non-gfx942 socs.")
 
     # 2. load machine specs
@@ -107,17 +107,17 @@ def test_num_xcds_spec_class(monkeypatch):
 
     # 3. check results are expected
     assert machine_spec.compute_partition is not None
-    assert int(machine_spec.num_xcd) == GFX942_NUM_XCDS.get(
+    assert int(machine_spec.num_xcd) == num_xcds.get(
         machine_spec.compute_partition.lower(), -1
     )
 
 
 @pytest.mark.num_xcds_cli_output
 def test_num_xcds_cli_output():
-    arch = gpu_arch()
+    num_xcds = get_num_xcds()
 
     # 1. Check if gfx942 soc
-    if not arch or "gfx942" not in arch.lower():
+    if not num_xcds:
         pytest.skip("Skipping num xcds test for non-gfx942 socs.")
 
     # 2. Run rocprof-compute -s and grab rocprof-compute num_xcd
@@ -145,6 +145,4 @@ def test_num_xcds_cli_output():
     num_xcd_actual = return_dict["Num XCDs"]
 
     assert compute_partition_actual is not None
-    assert int(num_xcd_actual) == GFX942_NUM_XCDS.get(
-        compute_partition_actual.lower(), -1
-    )
+    assert int(num_xcd_actual) == num_xcds.get(compute_partition_actual.lower(), -1)
