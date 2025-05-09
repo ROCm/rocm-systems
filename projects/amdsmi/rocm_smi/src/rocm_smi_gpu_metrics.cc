@@ -516,6 +516,8 @@ rsmi_status_t GpuMetricsBase_v18_t::populate_metrics_dynamic_tbl() {
     LOG_DEBUG(ss);
   };
 
+  run_metric_adjustments_v18();
+
   // Temperature Info
   m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricTemperature]
     .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricTempHotspot,
