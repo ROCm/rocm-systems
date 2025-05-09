@@ -327,7 +327,7 @@ int main() {
             }
 
             // Get nearest GPUs
-            char *topology_link_type_str[] = {
+            const char *topology_link_type_str[] = {
                 "AMDSMI_LINK_TYPE_INTERNAL",
                 "AMDSMI_LINK_TYPE_XGMI",
                 "AMDSMI_LINK_TYPE_PCIE",
