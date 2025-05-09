@@ -2038,23 +2038,6 @@ AMGpuMetricsPublicLatestTupl_t GpuMetricsBase_v18_t::copy_internal_to_external_m
 
     metrics_public_init.current_dclk1 = metrics_public_init.current_dclk0s[1];
 
-    // separate by XCP
-    if (this->m_partition_id < kRSMI_MAX_NUM_XCP
-        && m_gpu_metrics_tbl.m_xcp_stats[this->m_partition_id].vcn_busy[0] != UINT16_MAX) {
-       std::copy(std::begin(m_gpu_metrics_tbl.m_xcp_stats[this->m_partition_id].vcn_busy),
-              std::end(m_gpu_metrics_tbl.m_xcp_stats[this->m_partition_id].vcn_busy),
-              std::begin(metrics_public_init.vcn_activity));
-    }
-    if (this->m_partition_id < kRSMI_MAX_NUM_XCP
-      && m_gpu_metrics_tbl.m_xcp_stats[this->m_partition_id].jpeg_busy[0] != UINT16_MAX) {
-      auto src_size = std::size(m_gpu_metrics_tbl.m_xcp_stats[this->m_partition_id].jpeg_busy);
-      auto dest_size = std::size(metrics_public_init.jpeg_activity);
-      auto copy_size = std::min(src_size, dest_size);
-      std::copy_n(std::begin(m_gpu_metrics_tbl.m_xcp_stats[this->m_partition_id].jpeg_busy),
-                  copy_size,
-                  std::begin(metrics_public_init.jpeg_activity));
-    }
-
     return metrics_public_init;
   }();
 
@@ -2259,20 +2242,6 @@ AMGpuMetricsPublicLatestTupl_t GpuMetricsBase_v17_t::copy_internal_to_external_m
 
     metrics_public_init.current_dclk1 = metrics_public_init.current_dclk0s[1];
 
-    // separate by XCP
-    if (this->m_partition_id < kRSMI_MAX_NUM_XCP
-        && m_gpu_metrics_tbl.m_xcp_stats[this->m_partition_id].vcn_busy[0] != UINT16_MAX) {
-       std::copy(std::begin(m_gpu_metrics_tbl.m_xcp_stats[this->m_partition_id].vcn_busy),
-              std::end(m_gpu_metrics_tbl.m_xcp_stats[this->m_partition_id].vcn_busy),
-              std::begin(metrics_public_init.vcn_activity));
-    }
-    if (this->m_partition_id < kRSMI_MAX_NUM_XCP
-        && m_gpu_metrics_tbl.m_xcp_stats[this->m_partition_id].jpeg_busy[0] != UINT16_MAX) {
-      std::copy(std::begin(m_gpu_metrics_tbl.m_xcp_stats[this->m_partition_id].jpeg_busy),
-              std::end(m_gpu_metrics_tbl.m_xcp_stats[this->m_partition_id].jpeg_busy),
-              std::begin(metrics_public_init.jpeg_activity));
-    }
-
     return metrics_public_init;
   }();
 
@@ -2464,20 +2433,6 @@ AMGpuMetricsPublicLatestTupl_t GpuMetricsBase_v16_t::copy_internal_to_external_m
     metrics_public_init.current_dclk0 = metrics_public_init.current_dclk0s[0];
 
     metrics_public_init.current_dclk1 = metrics_public_init.current_dclk0s[1];
-
-    // separate by XCP
-    if (this->m_partition_id < kRSMI_MAX_NUM_XCP
-        && m_gpu_metrics_tbl.m_xcp_stats[this->m_partition_id].vcn_busy[0] != UINT16_MAX) {
-       std::copy(std::begin(m_gpu_metrics_tbl.m_xcp_stats[this->m_partition_id].vcn_busy),
-              std::end(m_gpu_metrics_tbl.m_xcp_stats[this->m_partition_id].vcn_busy),
-              std::begin(metrics_public_init.vcn_activity));
-    }
-    if (this->m_partition_id < kRSMI_MAX_NUM_XCP
-        && m_gpu_metrics_tbl.m_xcp_stats[this->m_partition_id].jpeg_busy[0] != UINT16_MAX) {
-      std::copy(std::begin(m_gpu_metrics_tbl.m_xcp_stats[this->m_partition_id].jpeg_busy),
-              std::end(m_gpu_metrics_tbl.m_xcp_stats[this->m_partition_id].jpeg_busy),
-              std::begin(metrics_public_init.jpeg_activity));
-    }
 
     return metrics_public_init;
   }();
