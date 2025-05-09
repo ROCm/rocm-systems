@@ -137,7 +137,7 @@ struct context
     template <typename... Args>
     bool is_tracing_one_of(Args... _args) const
     {
-        return ((false || is_tracing(_args)), ...);
+        return (is_tracing(_args) || ...);
     }
 };
 
