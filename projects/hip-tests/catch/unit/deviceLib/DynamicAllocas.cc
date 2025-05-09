@@ -227,20 +227,20 @@ extern "C" __global__ void validate_kernel_multiple_dynamic_alloca_over_aligned(
 
 static void runKernelDynamicAllocasTest() {
     size_t size = 20*sizeof(int);
-    int *num_elements = (int *)malloc(sizeof(int));
+    std::unique_ptr<int> num_elements = std::make_unique<int>();
     // allocate mem for the result on host side
     size_t no_array_elements = 20;
-    std::unique_ptr<int[]> h1(new int[no_array_elements]);
-    std::unique_ptr<int[]> h2(new int[no_array_elements]);
-    std::unique_ptr<int[]> h3(new int[no_array_elements]);
-    std::unique_ptr<int[]> r1(new int[no_array_elements]);
-    std::unique_ptr<int[]> r2(new int[no_array_elements]);
-    std::unique_ptr<int[]> r3(new int[no_array_elements]);
-    std::unique_ptr<int[]> r4(new int[no_array_elements]);
-    std::unique_ptr<int[]> r5(new int[no_array_elements]);
-    std::unique_ptr<int[]> r6(new int[no_array_elements]);
-    std::unique_ptr<int[]> r7(new int[no_array_elements]);
-    std::unique_ptr<int[]> align(new int[no_array_elements]);
+    std::unique_ptr<int[]> h1 = std::make_unique<int[]>(no_array_elements);
+    std::unique_ptr<int[]> h2 = std::make_unique<int[]>(no_array_elements);
+    std::unique_ptr<int[]> h3 = std::make_unique<int[]>(no_array_elements);
+    std::unique_ptr<int[]> r1 = std::make_unique<int[]>(no_array_elements);
+    std::unique_ptr<int[]> r2 = std::make_unique<int[]>(no_array_elements);
+    std::unique_ptr<int[]> r3 = std::make_unique<int[]>(no_array_elements);
+    std::unique_ptr<int[]> r4 = std::make_unique<int[]>(no_array_elements);
+    std::unique_ptr<int[]> r5 = std::make_unique<int[]>(no_array_elements);
+    std::unique_ptr<int[]> r6 = std::make_unique<int[]>(no_array_elements);
+    std::unique_ptr<int[]> r7 = std::make_unique<int[]>(no_array_elements);
+    std::unique_ptr<int[]> align = std::make_unique<int[]>(no_array_elements);
     // initialize the memory
     for(int i = 0; i < 20; i++){
         *(h1.get() + i) = i;
@@ -265,7 +265,7 @@ static void runKernelDynamicAllocasTest() {
     // kernel uniform dynamic alloca
     HIP_CHECK(hipMemcpy(d1, h1.get(), size, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d2, h2.get(), size, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(size_kernel, num_elements, sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(size_kernel, num_elements.get(), sizeof(int), hipMemcpyHostToDevice));
     hipLaunchKernelGGL(test_kernel_uniform_dynamic_alloca, dim3(1), dim3(1), 0, 0, d1, d2, *size_kernel);
     HIP_CHECK(hipMemcpy(r1.get(), d1, size, hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(d1, h1.get(), size, hipMemcpyHostToDevice));
@@ -276,7 +276,7 @@ static void runKernelDynamicAllocasTest() {
     // kernel uniform dynamic alloca over-aligned
     HIP_CHECK(hipMemcpy(d1, h1.get(), size, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d2, h2.get(), size, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(size_kernel, num_elements, sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(size_kernel, num_elements.get(), sizeof(int), hipMemcpyHostToDevice));
     hipLaunchKernelGGL(test_kernel_uniform_dynamic_alloca_over_aligned, dim3(1), dim3(1), 0, 0, d1, d2, *size_kernel);
     HIP_CHECK(hipMemcpy(r1.get(), d1, size, hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(r2.get(), d2, size, hipMemcpyDeviceToHost));
@@ -312,7 +312,7 @@ static void runKernelDynamicAllocasTest() {
     HIP_CHECK(hipMemcpy(d1, h1.get(), size, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d2, h2.get(), size, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d3, h3.get(), size, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(size_kernel, num_elements, sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(size_kernel, num_elements.get(), sizeof(int), hipMemcpyHostToDevice));
     hipLaunchKernelGGL(test_kernel_multiple_dynamic_alloca, dim3(1), dim3(1), 0, 0, d1, d2, d3, *size_kernel);
     HIP_CHECK(hipMemcpy(r1.get(), d1, size, hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(r2.get(), d2, size, hipMemcpyDeviceToHost));
@@ -331,7 +331,7 @@ static void runKernelDynamicAllocasTest() {
     HIP_CHECK(hipMemcpy(d1, h1.get(), size, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d2, h2.get(), size, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d3, h3.get(), size, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(size_kernel, num_elements, sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(size_kernel, num_elements.get(), sizeof(int), hipMemcpyHostToDevice));
     hipLaunchKernelGGL(test_kernel_multiple_dynamic_alloca_over_aligned, dim3(1), dim3(1), 0, 0, d1, d2, d3, d4, *size_kernel);
     HIP_CHECK(hipMemcpy(r1.get(), d1, size, hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(r2.get(), d2, size, hipMemcpyDeviceToHost));
@@ -348,7 +348,6 @@ static void runKernelDynamicAllocasTest() {
     REQUIRE(verifyResult(r2.get(), r6.get()));
     REQUIRE(verifyResult(r3.get(), r7.get()));
     REQUIRE(verifyResult(r4.get(), align.get()));
-    free(num_elements);
     HIP_CHECK(hipFree(d1));
     HIP_CHECK(hipFree(d2));
     HIP_CHECK(hipFree(d3));
@@ -472,7 +471,7 @@ extern "C" __global__ void validate_multiple_device_functions(int *a, int *b, in
     }
 }
 
-__noinline__ extern "C" __device__ void process_array_with_aligned_128_byte_buffer(int *a, int *b, int *c, int X, int a0, int a1, int a2, int a3, int a4, int a5, int a6, int a7, int a8, int a9, int a10, int a11, int a12, int a13, int a14, int a15, int a16, int a17, int a18, int a19, int a20, int a21, int a22, int a23, int a24, int a25, int a26, int a27, int a28, int a29, int a30, int a31, int a32, int a33, int a34, int a35, int a36, int a37, int a38, int a39, int a40){
+__noinline__ extern "C" __device__ void process_array_with_unaligned_buffer(int *a, int *b, int *c, int X, int a0, int a1, int a2, int a3, int a4, int a5, int a6, int a7, int a8, int a9, int a10, int a11, int a12, int a13, int a14, int a15, int a16, int a17, int a18, int a19, int a20, int a21, int a22, int a23, int a24, int a25, int a26, int a27, int a28, int a29, int a30, int a31, int a32, int a33, int a34, int a35, int a36, int a37, int a38, int a39, int a40){
     int *tmp = (int *)__builtin_alloca(X * 4);
     int sum = 0;
     sum += a0 + a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8 + a9;
@@ -490,7 +489,7 @@ __noinline__ extern "C" __device__ void process_array_with_aligned_128_byte_buff
 __noinline__ extern "C" __device__ void process_array_with_aligned_64_byte_buffer(int *a, int *b, int *c, int *d, int X, int N){
     alignas(64) volatile int tmp[X];
     uintptr_t addr = reinterpret_cast<std::uintptr_t>(tmp);
-    process_array_with_aligned_128_byte_buffer(a, b, c, X, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9], a[10], a[11], a[12], a[13], a[14], a[15], a[16], a[17], a[18], a[19], a[20], a[21], a[22], a[23], a[24], a[25], a[26], a[27], a[28], a[29], a[30], a[31], a[32], a[33], a[34], a[35], a[36], a[37], a[38], a[39], a[40]);
+    process_array_with_unaligned_buffer(a, b, c, X, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9], a[10], a[11], a[12], a[13], a[14], a[15], a[16], a[17], a[18], a[19], a[20], a[21], a[22], a[23], a[24], a[25], a[26], a[27], a[28], a[29], a[30], a[31], a[32], a[33], a[34], a[35], a[36], a[37], a[38], a[39], a[40]);
     for (int i = 0; i < X; i++){
         tmp[i] = a[b[i]];
     }
@@ -656,20 +655,20 @@ extern "C" __global__ void validate_function_calls_parameter_passing_sandwiched(
 
 static void runDeviceDynamicAllocasTest() {
     size_t size = 50*sizeof(int);
-    int *num_elements = (int *)malloc(sizeof(int));
+    std::unique_ptr<int> num_elements = std::make_unique<int>();
     // allocate mem for the result on host side
     size_t no_array_elements = 50;
-    std::unique_ptr<int[]> h1(new int[no_array_elements]);
-    std::unique_ptr<int[]> h2(new int[no_array_elements]);
-    std::unique_ptr<int[]> h3(new int[no_array_elements]);
-    std::unique_ptr<int[]> r1(new int[no_array_elements]);
-    std::unique_ptr<int[]> r2(new int[no_array_elements]);
-    std::unique_ptr<int[]> r3(new int[no_array_elements]);
-    std::unique_ptr<int[]> r4(new int[no_array_elements]);
-    std::unique_ptr<int[]> r5(new int[no_array_elements]);
-    std::unique_ptr<int[]> r6(new int[no_array_elements]);
-    std::unique_ptr<int[]> r7(new int[no_array_elements]);
-    std::unique_ptr<int[]> align(new int[no_array_elements]);
+    std::unique_ptr<int[]> h1 = std::make_unique<int[]>(no_array_elements);
+    std::unique_ptr<int[]> h2 = std::make_unique<int[]>(no_array_elements);
+    std::unique_ptr<int[]> h3 = std::make_unique<int[]>(no_array_elements);
+    std::unique_ptr<int[]> r1 = std::make_unique<int[]>(no_array_elements);
+    std::unique_ptr<int[]> r2 = std::make_unique<int[]>(no_array_elements);
+    std::unique_ptr<int[]> r3 = std::make_unique<int[]>(no_array_elements);
+    std::unique_ptr<int[]> r4 = std::make_unique<int[]>(no_array_elements);
+    std::unique_ptr<int[]> r5 = std::make_unique<int[]>(no_array_elements);
+    std::unique_ptr<int[]> r6 = std::make_unique<int[]>(no_array_elements);
+    std::unique_ptr<int[]> r7 = std::make_unique<int[]>(no_array_elements);
+    std::unique_ptr<int[]> align = std::make_unique<int[]>(no_array_elements);
     // initialize the memory
     for(int i = 0; i < 50; i++){
         *(h1.get() + i) = i;
@@ -696,7 +695,7 @@ static void runDeviceDynamicAllocasTest() {
     HIP_CHECK(hipMemcpy(d2, h2.get(), size, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d3, h3.get(), size, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d4, align.get(), size, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(size_kernel, num_elements, sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(size_kernel, num_elements.get(), sizeof(int), hipMemcpyHostToDevice));
     hipLaunchKernelGGL(test_multiple_device_functions_nested, dim3(1), dim3(1), 0, 0, d1, d2, d3, d4, *size_kernel);
     HIP_CHECK(hipMemcpy(r1.get(), d1, size, hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(r2.get(), d2, size, hipMemcpyDeviceToHost));
@@ -717,7 +716,7 @@ static void runDeviceDynamicAllocasTest() {
     HIP_CHECK(hipMemcpy(d1, h1.get(), size, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d2, h2.get(), size, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d3, h3.get(), size, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(size_kernel, num_elements, sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(size_kernel, num_elements.get(), sizeof(int), hipMemcpyHostToDevice));
     hipLaunchKernelGGL(test_multiple_device_functions, dim3(1), dim3(1), 0, 0, d1, d2, d3, d4, *size_kernel);
     HIP_CHECK(hipMemcpy(r1.get(), d1, size, hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(r2.get(), d2, size, hipMemcpyDeviceToHost));
@@ -738,7 +737,7 @@ static void runDeviceDynamicAllocasTest() {
     HIP_CHECK(hipMemcpy(d1, h1.get(), size, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d2, h2.get(), size, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d3, h3.get(), size, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(size_kernel, num_elements, sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(size_kernel, num_elements.get(), sizeof(int), hipMemcpyHostToDevice));
     hipLaunchKernelGGL(test_function_calls_parameter_passing, dim3(1), dim3(1), 0, 0, d1, d2, d3, d4, *size_kernel);
     HIP_CHECK(hipMemcpy(r1.get(), d1, size, hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(r2.get(), d2, size, hipMemcpyDeviceToHost));
@@ -759,7 +758,7 @@ static void runDeviceDynamicAllocasTest() {
     HIP_CHECK(hipMemcpy(d1, h1.get(), size, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d2, h2.get(), size, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d3, h3.get(), size, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(size_kernel, num_elements, sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(size_kernel, num_elements.get(), sizeof(int), hipMemcpyHostToDevice));
     hipLaunchKernelGGL(test_function_calls_parameter_passing_over_aligned, dim3(1), dim3(1), 0, 0, d1, d2, d3, d4, *size_kernel);
     HIP_CHECK(hipMemcpy(r1.get(), d1, size, hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(r2.get(), d2, size, hipMemcpyDeviceToHost));
@@ -780,7 +779,7 @@ static void runDeviceDynamicAllocasTest() {
     HIP_CHECK(hipMemcpy(d1, h1.get(), size, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d2, h2.get(), size, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d3, h3.get(), size, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(size_kernel, num_elements, sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(size_kernel, num_elements.get(), sizeof(int), hipMemcpyHostToDevice));
     hipLaunchKernelGGL(test_function_calls_parameter_passing_sandwiched, dim3(1), dim3(1), 0, 0, d1, d2, d3, d4, *size_kernel);
     HIP_CHECK(hipMemcpy(r1.get(), d1, size, hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(r2.get(), d2, size, hipMemcpyDeviceToHost));
@@ -797,7 +796,6 @@ static void runDeviceDynamicAllocasTest() {
     REQUIRE(verifyResult(r2.get(), r6.get()));
     REQUIRE(verifyResult(r3.get(), r7.get()));
     REQUIRE(verifyResult(r4.get(), align.get()));
-    free(num_elements);
     HIP_CHECK(hipFree(d1));
     HIP_CHECK(hipFree(d2));
     HIP_CHECK(hipFree(d3));
