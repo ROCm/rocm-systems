@@ -37,7 +37,6 @@ message("---------SMI Lib Dir: " ${AMD_SMI_LIB_DIR})
 message("---------SMI Inc Dir: " ${AMD_SMI_INCLUDE_DIR})
 message("")
 
-
 set(COMMON_DIR "${PROJECT_SOURCE_DIR}/common")
 set(SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(INC_DIR "${PROJECT_SOURCE_DIR}/include/rdc_lib")
@@ -89,37 +88,38 @@ add_subdirectory(rdc_modules/rdc_rvs)
 
 # Create cmake target
 # Add all targets to the build-tree export set
-export(TARGETS ${BOOTSTRAP_LIB} ${RDC_LIB}
-    FILE "${PROJECT_BINARY_DIR}/rdc_libs.cmake")
+export(TARGETS ${BOOTSTRAP_LIB} ${RDC_LIB} FILE "${PROJECT_BINARY_DIR}/rdc_libs.cmake")
 
 ## Add the install directives for the runtime library.
-install(TARGETS ${BOOTSTRAP_LIB} ${RDC_LIB}
+install(
+    TARGETS ${BOOTSTRAP_LIB} ${RDC_LIB}
     EXPORT rdcTargets
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    COMPONENT ${CLIENT_COMPONENT})
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT ${CLIENT_COMPONENT})
 
 if(BUILD_STANDALONE)
     # add librdc_client.so
     add_subdirectory(rdc_client)
-    install(TARGETS ${RDCCLIENT_LIB}
+    install(
+        TARGETS ${RDCCLIENT_LIB}
         EXPORT rdcTargets
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        COMPONENT ${CLIENT_COMPONENT})
-    export(TARGETS ${RDCCLIENT_LIB}
-        APPEND FILE "${PROJECT_BINARY_DIR}/rdc_libs.cmake")
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT ${CLIENT_COMPONENT})
+    export(
+        TARGETS ${RDCCLIENT_LIB}
+        APPEND
+        FILE "${PROJECT_BINARY_DIR}/rdc_libs.cmake")
 endif()
 
 # Add module directives if those exist
 if(RDC_LIB_MODULES)
-    install(TARGETS ${RDC_LIB_MODULES}
+    install(
+        TARGETS ${RDC_LIB_MODULES}
         EXPORT rdcTargets
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC}
-        COMPONENT ${CLIENT_COMPONENT})
-    set_target_properties(${RDC_LIB_MODULES}
-        PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC} COMPONENT ${CLIENT_COMPONENT})
+    set_target_properties(${RDC_LIB_MODULES} PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
 endif()
 
-install(FILES ${PROJECT_SOURCE_DIR}/include/rdc/rdc.h
+install(
+    FILES ${PROJECT_SOURCE_DIR}/include/rdc/rdc.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${RDC}
     COMPONENT ${CLIENT_COMPONENT})
 
@@ -127,13 +127,13 @@ install(FILES ${PROJECT_SOURCE_DIR}/include/rdc/rdc.h
 set(OLD_CMAKE_INSTALL_MESSAGE ${CMAKE_INSTALL_MESSAGE})
 set(CMAKE_INSTALL_MESSAGE NEVER)
 # Install the kernel files
-install(DIRECTORY ${SRC_DIR}/rdc_modules/kernels/hsaco
+install(
+    DIRECTORY ${SRC_DIR}/rdc_modules/kernels/hsaco
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC}
     COMPONENT ${CLIENT_COMPONENT})
 # Restore printing verbosity
 set(CMAKE_INSTALL_MESSAGE ${OLD_CMAKE_INSTALL_MESSAGE})
 unset(OLD_CMAKE_INSTALL_MESSAGE)
-
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                    Finished Cmake RDC Lib                      ")

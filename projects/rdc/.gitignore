@@ -21,6 +21,8 @@ docs/_doxygen/
 # do NOT ignore these files
 !.clang-format
 !.editorconfig
+!.cmake-format
+!.pre-commit-config.yaml
 
 # misc
 __pycache__/

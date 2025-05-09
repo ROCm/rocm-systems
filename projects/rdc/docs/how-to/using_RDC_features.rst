@@ -56,33 +56,33 @@ With the GPU groups feature, you can create, delete, and list logical groups of 
 
 - To create a group, use:
 
-.. code-block:: shell
+  .. code-block:: shell
 
-  $ rdci group -c GPU_GROUP
-  Successfully created a group with a group ID 1
+    $ rdci group -c GPU_GROUP
+    Successfully created a group with a group ID 1
 
 - To add GPUs to a group, use:
 
-.. code-block:: shell
+  .. code-block:: shell
 
-  $ rdci group -g 1 -a 0,1
-  Successfully added the GPU 0,1 to group 1
+    $ rdci group -g 1 -a 0,1
+    Successfully added the GPU 0,1 to group 1
 
 - To delete a group, use:
 
-.. code-block:: shell
+  .. code-block:: shell
 
-  $ rdci group -d 1
-  Successfully removed group 1
+    $ rdci group -d 1
+    Successfully removed group 1
 
 - To list groups, use:
 
-.. code-block:: shell
+  .. code-block:: shell
 
-  $ rdci group –l
-  1 group found
+    $ rdci group –l
+    1 group found
 
-.. list-table::
+  .. list-table::
 
     * - **Group ID**
       - **Group name**
@@ -99,19 +99,19 @@ The field groups feature provides you the options to create, delete, list field 
 
 - To create a field group, use:
 
-.. code-block:: shell
+  .. code-block:: shell
 
     $ rdci fieldgroup -c <fgroup> -f 150,155
     Successfully created a field group with a group ID 1
 
 - To list field groups, use:
 
-.. code-block:: shell
+  .. code-block:: shell
 
-  $ rdci fieldgroup -l
-  1 group found
+    $ rdci fieldgroup -l
+    1 group found
 
-.. list-table::
+  .. list-table::
 
     * - **Group ID**
       - **Group Name**
@@ -123,10 +123,10 @@ The field groups feature provides you the options to create, delete, list field 
 
 - To delete a field group, use:
 
-.. code-block:: shell
+  .. code-block:: shell
 
-  $ rdci fieldgroup -d 1
-  Successfully removed field group 1
+    $ rdci fieldgroup -d 1
+    Successfully removed field group 1
 
 Monitor errors
 ===============
@@ -135,15 +135,15 @@ To get the Reliability, Availability, and Serviceability (RAS) Error-Correcting 
 
 - Correctable ECC errors:
 
-.. code-block:: shell
+  .. code-block:: shell
 
-  312 ``RDC_FI_ECC_CORRECT_TOTAL``
+    312 ``RDC_FI_ECC_CORRECT_TOTAL``
 
 - Uncorrectable ECC errors:
 
-.. code-block:: shell
+  .. code-block:: shell
 
-  313 ``RDC_FI_ECC_UNCORRECT_TOTAL``
+    313 ``RDC_FI_ECC_UNCORRECT_TOTAL``
 
 Device monitoring
 ==================
@@ -174,25 +174,25 @@ The job stats is used to display GPU statistics for any given workload.
 
 - To start recording stats, use:
 
-.. code-block:: shell
+  .. code-block:: shell
 
-  $ rdci stats -s 2 -g 1
-  Successfully started recording job 2 with a group ID 1
+    $ rdci stats -s 2 -g 1
+    Successfully started recording job 2 with a group ID 1
 
 - To stop recording stats, use:
 
-.. code-block:: shell
+  .. code-block:: shell
 
-  $ rdci stats -x 2
-  Successfully stopped recording job 2
+    $ rdci stats -x 2
+    Successfully stopped recording job 2
 
 - To display job stats, use:
 
-.. code-block:: shell
+  .. code-block:: shell
 
-  $ rdci stats -j 2
+    $ rdci stats -j 2
 
-.. list-table::
+  .. list-table::
 
     * - **Summary**
       - **Executive status**
