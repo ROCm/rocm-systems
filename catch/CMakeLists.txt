@@ -347,7 +347,6 @@ cmake_policy(POP)
 
 # packaging the tests
 # make package_test to generate packages for test
-set(BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/packages/)
 add_subdirectory(packaging)
 if(UNIX)
 add_custom_target(package_test COMMAND ${CMAKE_COMMAND} .
