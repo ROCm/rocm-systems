@@ -122,6 +122,7 @@ TEST(amdsmitstReadOnly, FanRead) {
   RunGenericTest(&tst);
 }
 TEST(amdsmitstReadWrite, FanReadWrite) {
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestFanReadWrite tst;
   RunGenericTest(&tst);
 }
@@ -144,6 +145,7 @@ TEST(amdsmitstReadOnly, TestPerfLevelRead) {
 }
 TEST(amdsmitstReadWrite, TestPerfLevelReadWrite) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestPerfLevelReadWrite tst;
   RunGenericTest(&tst);
 }
@@ -152,6 +154,7 @@ TEST(amdsmitstReadOnly, TestOverdriveRead) {
   RunGenericTest(&tst);
 }
 TEST(amdsmitstReadWrite, TestOverdriveReadWrite) {
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestOverdriveReadWrite tst;
   RunGenericTest(&tst);
 }
@@ -160,11 +163,13 @@ TEST(amdsmitstReadOnly, TestFrequenciesRead) {
   RunGenericTest(&tst);
 }
 TEST(amdsmitstReadWrite, TestFrequenciesReadWrite) {
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestFrequenciesReadWrite tst;
   RunGenericTest(&tst);
 }
 TEST(amdsmitstReadWrite, TestPciReadWrite) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestPciReadWrite tst;
   RunGenericTest(&tst);
 }
@@ -184,11 +189,13 @@ TEST(amdsmitstReadOnly, TestPowerRead) {
 }
 TEST(amdsmitstReadWrite, TestPowerReadWrite) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestPowerReadWrite tst;
   RunGenericTest(&tst);
 }
 TEST(amdsmitstReadWrite, TestPowerCapReadWrite) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestPowerCapReadWrite tst;
   RunGenericTest(&tst);
 }
@@ -206,6 +213,7 @@ TEST(amdsmitstReadOnly, TestIdInfoRead) {
   RunGenericTest(&tst);
 }
 TEST(amdsmitstReadWrite, TestPerfCntrReadWrite) {
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestPerfCntrReadWrite tst;
   RunGenericTest(&tst);
 }
@@ -226,10 +234,12 @@ TEST(amdsmitstReadOnly, TestMetricsCounterRead) {
   RunGenericTest(&tst);
 }
 TEST(amdsmitstReadWrite, TestPerfDeterminism) {
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestPerfDeterminism tst;
   RunGenericTest(&tst);
 }
 TEST(amdsmitstReadWrite, TestXGMIReadWrite) {
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestXGMIReadWrite tst;
   RunGenericTest(&tst);
 }
@@ -253,16 +263,19 @@ TEST(amdsmitstReadOnly, TestMutualExclusion) {
 */
 
 TEST(amdsmitstReadWrite, TestComputePartitionReadWrite) {
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestComputePartitionReadWrite tst;
   RunGenericTest(&tst);
 }
 
 TEST(amdsmitstReadWrite, TestMemoryPartitionReadWrite) {
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestMemoryPartitionReadWrite tst;
   RunGenericTest(&tst);
 }
 
 TEST(amdsmitstReadWrite, TestEvtNotifReadWrite) {
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestEvtNotifReadWrite tst;
   RunGenericTest(&tst);
 }

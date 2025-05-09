@@ -26,6 +26,7 @@
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_utils.h"
+#include "rocm_smi/rocm_smi_utils.h"
 #include "test_base.h"
 #include "test_common.h"
 
@@ -39,6 +40,14 @@ static const char kResultsLabel[] = "TEST RESULTS";
 
 // This one is used outside this file
 const char kSetupLabel[] = "TEST SETUP";
+
+static bool CheckModule(const std::string &fileName, const std::string &cond) {
+  std::string state;
+  int rc = amd::smi::ReadSysfsStr(fileName, &state);
+  if (!rc && !state.compare(cond))
+      return (true);
+  return (false);
+}
 
 TestBase::TestBase() : setup_failed_(false) {
 }
@@ -79,6 +88,29 @@ void TestBase::SetUp(uint64_t init_flags) {
 
   if (err != AMDSMI_STATUS_SUCCESS) {
     setup_failed_ = true;
+
+    // Returns true if amdgpu is found in the list of initialized modules
+    bool found_amdgpu = CheckModule("/sys/module/amdgpu/initstate", "live");
+    if (!found_amdgpu) {
+      IF_VERB(STANDARD) {
+        std::cerr << "ERROR: Unable to get devices, driver not initialized (amdgpu not found in modules)" << std::endl;
+        std::cerr << "ERROR: Unable to detect any GPU devices, check amdgpu version and module status (sudo modprobe amdgpu)" << std::endl;
+      }
+    }
+
+    // Returns true if amd_hsmp is found in the list of initialized modules
+    bool found_amd_hsmp = CheckModule("/sys/module/amd_hsmp/initstate", "live");
+    if (!found_amd_hsmp) {
+      IF_VERB(STANDARD) {
+        std::cerr << "ERROR: Unable to get devices, driver not initialized (amd_hsmp not found in modules)" << std::endl;
+        std::cerr << "ERROR: Unable to detect any CPU devices, check amd_hsmp version and module status (sudo modprobe amd_hsmp)" << std::endl;
+      }
+    }
+
+    if (!found_amdgpu || !found_amd_hsmp) {
+      ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
+      exit(err);
+    }
   }
   ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
 
