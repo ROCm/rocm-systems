@@ -136,16 +136,12 @@ void BlockAllocator::free(void* ptr, size_t length) const {
 }
 
 static wsl::SimpleHeap<BlockAllocator> fragment_allocator_;
-static std::unique_ptr<std::mutex> fragment_allocator_lock_ = std::make_unique<std::mutex>();
 
 void reset_suballocator(void) {
-  fragment_allocator_lock_ = std::make_unique<std::mutex>();
-  std::lock_guard<std::mutex> lock(*fragment_allocator_lock_);
   fragment_allocator_.reset();
 }
 
 void trim_suballocator(void) {
-  std::lock_guard<std::mutex> lock(*fragment_allocator_lock_);
   fragment_allocator_.trim();
 }
 
@@ -223,8 +219,6 @@ HSAKMT_STATUS hsaKmtAllocMemoryAlignInternal(HSAuint32 PreferredNode,
   /* Only allow using the suballocator for ordinary VRAM.*/
   bool trim_safe = false;
   if (!SkipSubAlloc && create_info.domain == thunk_proxy::AllocDomain::kLocal) {
-    std::lock_guard<std::mutex> gard(*fragment_allocator_lock_);
-
     /* just quickly skip SA if size is bigger than SA block size.*/
     gpusize real_size;
     if (create_info.size > GPU_HUGE_PAGE_SIZE)
@@ -262,7 +256,6 @@ after_trim:
     return HSAKMT_STATUS_SUCCESS;
   } else if (trim_safe) {
     /* attempt to release memory from the block allocator and retry */
-    std::lock_guard<std::mutex> gard(*fragment_allocator_lock_);
     fragment_allocator_.trim();
     trim_safe = false;
     goto after_trim;
@@ -291,7 +284,6 @@ HSAKMT_STATUS hsaKmtFreeMemoryInternal(void *MemoryAddress,
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
   if (!SkipSubAlloc) {
-    std::lock_guard<std::mutex> gard(*fragment_allocator_lock_);
     if (fragment_allocator_.free(MemoryAddress))
       return HSAKMT_STATUS_SUCCESS;
   }
@@ -645,7 +637,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPU(void *MemoryAddress,
   size_t aligned_size = end - start;
 
   {
-    std::lock_guard<std::mutex> gard(*fragment_allocator_lock_);
     if (nullptr != fragment_allocator_.block_base(aligned_ptr))
       return HSAKMT_STATUS_SUCCESS;
   }
@@ -755,7 +746,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUnmapMemoryToGPU(void *MemoryAddress) {
   pr_debug("address %p\n", MemoryAddress);
 
   {
-    std::lock_guard<std::mutex> gard(*fragment_allocator_lock_);
     if (nullptr != fragment_allocator_.block_base(MemoryAddress))
       return HSAKMT_STATUS_SUCCESS;
   }
