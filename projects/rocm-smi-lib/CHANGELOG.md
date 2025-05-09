@@ -24,7 +24,58 @@ Full documentation for rocm_smi_lib is available at [https://rocm.docs.amd.com/]
 
 ### Removed
 
-- N/A
+- **Removed backwards compatibility `rsmi_dev_gpu_metrics_info_get()`'s `jpeg_activity` or `vcn_activity` fields: use `xcp_stats.jpeg_busy` or `xcp_stats.vcn_busy`**  
+  - Backwards compability is removed for `jpeg_activity` and `vcn_activity` fields, if the `jpeg_busy` or `vcn_busy` field is available.
+    - <i>Reasons for this change</i>:
+      - Providing both `vcn_activity`/`jpeg_activity` and XCP (partition) stats `vcn_busy`/`jpeg_busy` caused confusion for users about which field to use. By removing backward compatibility, it is easier to identify the relevant field.
+      - The `jpeg_busy` field increased in size (for supported ASICs), making backward compatibility unable to fully copy the structure into `jpeg_activity`.
+
+    See below for comparison of updated CLI outputs:
+
+    Original output:
+    ```shell
+    $ rocm-smi --showmetrics
+    GPU[0]          : vcn_activity (%): [0, 'N/A', 'N/A', 'N/A']
+    GPU[0]          : jpeg_activity (%): [0, 0, 0, 0, 0, 0, 0, 0, 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[0]   : xcp_stats.jpeg_busy (%): [0, 0, 0, 0, 0, 0, 0, 0, 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[1]   : xcp_stats.jpeg_busy (%): [0, 0, 0, 0, 0, 0, 0, 0, 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[2]   : xcp_stats.jpeg_busy (%): [0, 0, 0, 0, 0, 0, 0, 0, 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[3]   : xcp_stats.jpeg_busy (%): [0, 0, 0, 0, 0, 0, 0, 0, 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[4]   : xcp_stats.jpeg_busy (%): [0, 0, 0, 0, 0, 0, 0, 0, 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[5]   : xcp_stats.jpeg_busy (%): [0, 0, 0, 0, 0, 0, 0, 0, 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[6]   : xcp_stats.jpeg_busy (%): [0, 0, 0, 0, 0, 0, 0, 0, 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[7]   : xcp_stats.jpeg_busy (%): [0, 0, 0, 0, 0, 0, 0, 0, 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[0]   : xcp_stats.vcn_busy (%): [0, 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[1]   : xcp_stats.vcn_busy (%): [0, 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[2]   : xcp_stats.vcn_busy (%): [0, 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[3]   : xcp_stats.vcn_busy (%): [0, 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[4]   : xcp_stats.vcn_busy (%): [0, 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[5]   : xcp_stats.vcn_busy (%): [0, 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[6]   : xcp_stats.vcn_busy (%): [0, 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[7]   : xcp_stats.vcn_busy (%): [0, 'N/A', 'N/A', 'N/A']
+    ```
+    New output:
+    ```shell
+    $ rocm-smi --showmetrics
+    GPU[0]          : vcn_activity (%): ['N/A', 'N/A', 'N/A', 'N/A']
+    GPU[0]          : jpeg_activity (%): ['N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[0]   : xcp_stats.jpeg_busy (%): [0, 0, 0, 0, 0, 0, 0, 0, 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[1]   : xcp_stats.jpeg_busy (%): [0, 0, 0, 0, 0, 0, 0, 0, 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[2]   : xcp_stats.jpeg_busy (%): [0, 0, 0, 0, 0, 0, 0, 0, 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[3]   : xcp_stats.jpeg_busy (%): [0, 0, 0, 0, 0, 0, 0, 0, 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[4]   : xcp_stats.jpeg_busy (%): [0, 0, 0, 0, 0, 0, 0, 0, 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[5]   : xcp_stats.jpeg_busy (%): [0, 0, 0, 0, 0, 0, 0, 0, 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[6]   : xcp_stats.jpeg_busy (%): [0, 0, 0, 0, 0, 0, 0, 0, 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[7]   : xcp_stats.jpeg_busy (%): [0, 0, 0, 0, 0, 0, 0, 0, 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[0]   : xcp_stats.vcn_busy (%): [0, 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[1]   : xcp_stats.vcn_busy (%): [0, 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[2]   : xcp_stats.vcn_busy (%): [0, 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[3]   : xcp_stats.vcn_busy (%): [0, 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[4]   : xcp_stats.vcn_busy (%): [0, 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[5]   : xcp_stats.vcn_busy (%): [0, 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[6]   : xcp_stats.vcn_busy (%): [0, 'N/A', 'N/A', 'N/A']
+    GPU[0] XCP[7]   : xcp_stats.vcn_busy (%): [0, 'N/A', 'N/A', 'N/A']
+    ```
 
 ### Optimized
 
