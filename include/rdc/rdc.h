@@ -341,6 +341,7 @@ typedef enum {
   RDC_FI_PROF_CPF_CPF_TCIU_BUSY,
   RDC_FI_PROF_CPF_CPF_TCIU_IDLE,
   RDC_FI_PROF_CPF_CPF_TCIU_STALL,
+  RDC_FI_PROF_SIMD_UTILIZATION,
 
   /**
    * @brief Raw XGMI counter events

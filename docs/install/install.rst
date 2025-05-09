@@ -18,16 +18,24 @@ To install RDC from source, ensure that your system meets the following requirem
 - **Supported platforms:** AMD ROCm-supported platform. See the `list of supported operating systems <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-operating-systems>`_.
 
 - **Dependencies:**
+
   - CMake >= 3.15
+
   - g++ (5.4.0)
+
   - gRPC and protoc
+
   - libcap-dev
+
   - :doc:`AMD ROCm platform <rocm:index>` including:
+
     - :doc:`AMDSMI library <amdsmi:index>`
     - `ROCK kernel driver <https://github.com/ROCm/ROCK-Kernel-Driver>`_
 
   For building latest documentation:
+
   - Doxygen (1.8.11)
+
   - LaTeX (pdfTeX 3.14159265-2.6-1.40.16)
 
   .. code-block:: shell
@@ -47,14 +55,14 @@ gRPC and Protoc must be built from source as the prebuilt packages are not avail
 
 1. Install the required tools:
 
-.. code-block:: shell
+   .. code-block:: shell
 
     sudo apt-get update
     sudo apt-get install automake make g++ unzip build-essential autoconf libtool pkg-config libgflags-dev libgtest-dev clang libc++-dev curl
 
 2. Clone and build gRPC:
 
-.. code-block:: shell
+   .. code-block:: shell
 
     git clone -b v1.61.0 https://github.com/grpc/grpc --depth=1 --shallow-submodules --recurse-submodules
     cd grpc
@@ -77,14 +85,14 @@ Build RDC
 
 1. Clone the RDC repository:
 
-.. code-block:: shell
+   .. code-block:: shell
 
     git clone https://github.com/ROCm/rdc
     cd rdc
 
 2. Configure the build:
 
-.. code-block:: shell
+   .. code-block:: shell
 
     cmake -B build -DGRPC_ROOT="$GRPC_ROOT"
 
@@ -116,14 +124,14 @@ Build RDC
 
 4. Build and install:
 
-.. code-block:: shell
+   .. code-block:: shell
 
     make -C build -j $(nproc)
     sudo make -C build install
 
 5. Update system library path:
 
-.. code-block:: shell
+   .. code-block:: shell
 
     export RDC_LIB_DIR=/opt/rocm/lib/rdc
     export GRPC_LIB_DIR="/opt/grpc/lib"

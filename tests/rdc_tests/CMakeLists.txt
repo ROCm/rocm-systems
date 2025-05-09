@@ -12,14 +12,9 @@ option(INSTALL_GTEST "Install GTest (only useful if GTest is not already install
 
 # Hack to find libraries after installation
 # /opt/rocm/share/rdc/rdctst_tests/../../../ = /opt/rocm
-set(RDCTST_RPATH
-    "\$ORIGIN"
-    "\$ORIGIN/../../../lib"
-    "\$ORIGIN/../../../lib/rdc")
+set(RDCTST_RPATH "\$ORIGIN" "\$ORIGIN/../../../lib" "\$ORIGIN/../../../lib/rdc")
 # combine lists
-set(CMAKE_INSTALL_RPATH
-    ${CMAKE_INSTALL_RPATH}
-    ${RDCTST_RPATH})
+set(CMAKE_INSTALL_RPATH ${CMAKE_INSTALL_RPATH} ${RDCTST_RPATH})
 
 #
 # Print out the build configuration being used:
@@ -73,7 +68,8 @@ target_include_directories(
     PUBLIC ${AMD_SMI_INCLUDE_DIR}
     PUBLIC ${SRC_DIR}/..)
 
-target_link_libraries(${RDCTST}
+target_link_libraries(
+    ${RDCTST}
     PUBLIC rdc_bootstrap
     PUBLIC rdc
     PUBLIC GTest::gtest_main
@@ -81,10 +77,12 @@ target_link_libraries(${RDCTST}
     PUBLIC stdc++
     PUBLIC pthread)
 
-install(TARGETS ${RDCTST} gtest gtest_main
+install(
+    TARGETS ${RDCTST} gtest gtest_main
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
     COMPONENT ${TESTS_COMPONENT})
 
-install(FILES ${RDCTST}.exclude
+install(
+    FILES ${RDCTST}.exclude
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
     COMPONENT ${TESTS_COMPONENT})
