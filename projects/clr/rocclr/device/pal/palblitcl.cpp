@@ -120,7 +120,7 @@ const char* TrapHandlerCode = RUNTIME_KERNEL(
 \ntrap_entry:
 \n  // Extract trap_id from ttmp2
 \n  s_bfe_u32                             ttmp2, ttmp1, SQ_WAVE_PC_HI_TRAP_ID_BFE
-\n  s_cbranch_scc0                        .not_s_trap                      // If trap_id == 0, it's not an s_trap nor host trap
+\n  s_cbranch_scc0                        .no_skip_debugtrap            // If trap_id == 0, it's not an s_trap nor host trap
 \n
 \n  // Check if the it was an host trap.
 \n  s_bitcmp1_b32                         ttmp1, SQ_WAVE_PC_HI_HT_SHIFT
