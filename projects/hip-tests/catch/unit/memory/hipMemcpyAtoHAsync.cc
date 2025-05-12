@@ -88,7 +88,7 @@ TEST_CASE("Unit_hipMemcpyAtoHAsync_Capture") {
 
   GENERATE_CAPTURE();
   BEGIN_CAPTURE(stream);
-  HIP_CHECK(hipMemcpyAtoHAsync(host, array, 0, sizeof(int) * col * row, 0));
+  HIP_CHECK(hipMemcpyAtoHAsync(host, array, 0, sizeof(int) * col * row, stream));
   END_CAPTURE(stream);
 
   HIP_CHECK(hipFreeArray(array));
