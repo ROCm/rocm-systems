@@ -52,6 +52,7 @@ set(DEFAULT_GPU_TARGETS
     "gfx940"
     "gfx941"
     "gfx942"
+    "gfx950"
     "gfx1030"
     "gfx1010"
     "gfx1100"
