@@ -248,35 +248,12 @@ rocprofiler_config_nolink_target(rocprofiler-sdk-hsakmt-nolink hsakmt::hsakmt)
 #
 # ----------------------------------------------------------------------------------------#
 
-find_path(
-    drm_INCLUDE_DIR
-    NAMES drm.h
-    HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-    PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-    PATH_SUFFIXES include/drm include/libdrm include REQUIRED)
+pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
+pkg_check_modules(DRM_AMDGPU REQUIRED IMPORTED_TARGET libdrm_amdgpu)
 
-find_path(
-    xf86drm_INCLUDE_DIR
-    NAMES xf86drm.h
-    HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-    PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-    PATH_SUFFIXES include/drm include/libdrm include REQUIRED)
-
-find_library(
-    drm_LIBRARY
-    NAMES drm
-    HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-    PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu REQUIRED)
-
-find_library(
-    drm_amdgpu_LIBRARY
-    NAMES drm_amdgpu
-    HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
-    PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu REQUIRED)
-
-target_include_directories(rocprofiler-sdk-drm SYSTEM INTERFACE ${drm_INCLUDE_DIR}
-                                                                ${xf86drm_INCLUDE_DIR})
-target_link_libraries(rocprofiler-sdk-drm INTERFACE ${drm_LIBRARY} ${drm_amdgpu_LIBRARY})
+target_include_directories(rocprofiler-sdk-drm SYSTEM INTERFACE ${DRM_INCLUDE_DIRS}
+                                                                ${DRM_AMDGPU_INCLUDE_DIRS})
+target_link_libraries(rocprofiler-sdk-drm INTERFACE PkgConfig::DRM PkgConfig::DRM_AMDGPU)
 
 # ----------------------------------------------------------------------------------------#
 #
