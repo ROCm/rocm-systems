@@ -3,8 +3,7 @@
 > [!IMPORTANT]
 We are phasing out development and support for `ROCTracer, ROCprofiler, rocprof, and rocprofv2` in favour of `ROCprofiler-SDK` and `rocprofv3` in upcoming ROCm releases. Starting with the `ROCm 6.4` release, only critical defect fixes will be addressed for older versions of the profiling tools and libraries. We encourage all users to upgrade to the latest version of the `ROCprofiler-SDK` library and the `rocprofv3` tool to ensure continued support and access to new features.
 
-    Please note that we anticipate the end of life for ROCprofiler V1/V2 and ROCTracer within nine months after the ROCm 6.5 release, aligning with the Q1 2026.
-
+    Please note that we anticipate the end of life for ROCprofiler V1/V2 and ROCTracer within nine months after the ROCm 7.0 release, aligning with the Q1 2026.
 
 ## Overview
 

@@ -100,7 +100,6 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
   - `Dispatch_Id`
 - CSV column for counter collection
 
-
 ## ROCprofiler-SDK 0.5.0 for ROCm release 6.3 (AFAR VII)
 
 ### Added
@@ -161,7 +160,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Host-trap based PC sampling support for rocprofv3.
 - Support for OpenMP tool.
 
-## ROCprofiler-SDK 1.0.0 for ROCm release 6.5
+## ROCprofiler-SDK 1.0.0 for ROCm release 7.0
 
 ### Added
 
@@ -172,9 +171,9 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Added perfetto support for counter collection.
 - Added support for negating rocprofv3 tracing options when using aggregate options, e.g. `--sys-trace --hsa-trace=no`
 - Added `--agent-index` option in rocprofv3 to specify the agent naming convention in the output
-    - absolute == node_id
-    - relative == logical_node_id
-    - type-relative == logical_node_type_id
+  - absolute == node_id
+  - relative == logical_node_id
+  - type-relative == logical_node_type_id
 - Added MI300 stochastic (hardware-based) PC sampling support in ROCProfiler-SDK and ROCProfV3
 
 ### Changed
