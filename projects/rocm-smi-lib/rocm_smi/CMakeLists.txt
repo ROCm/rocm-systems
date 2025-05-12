@@ -88,6 +88,8 @@ target_include_directories(${ROCM_SMI_TARGET} PRIVATE
 # use the target_include_directories() command to specify the include directories for the target
 target_include_directories(${ROCM_SMI_TARGET}
                            PUBLIC
+                           "$<BUILD_INTERFACE:${DRM_INCLUDE_DIRS}>"
+                           "$<BUILD_INTERFACE:${AMDGPU_DRM_INCLUDE_DIRS}>"
                            "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
                            "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
