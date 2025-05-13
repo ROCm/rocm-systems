@@ -416,6 +416,7 @@ class RocProfCompute_Base:
                 self.__profiler == "rocprofv1"
                 or self.__profiler == "rocprofv2"
                 or self.__profiler == "rocprofv3"
+                or self.__profiler == "rocprofiler-sdk"
             ):
                 start_run_prof = time.time()
                 run_prof(
@@ -441,12 +442,16 @@ class RocProfCompute_Base:
                 # TODO: Finish logic
                 console_error("Profiler not supported")
 
-        if self.__pc_sampling == True and self.__profiler == "rocprofv3":
+        if self.__pc_sampling == True and self.__profiler in (
+            "rocprofv3",
+            "rocprofiler-sdk",
+        ):
             start_run_prof = time.time()
             pc_sampling_prof(
                 interval=self.get_args().pc_sampling_interval,
                 workload_dir=self.get_args().path,
                 appcmd=self.get_args().remaining,
+                rocprofiler_sdk_library_path=self.get_args().rocprofiler_sdk_library_path,
             )
             end_run_prof = time.time()
             console_debug(

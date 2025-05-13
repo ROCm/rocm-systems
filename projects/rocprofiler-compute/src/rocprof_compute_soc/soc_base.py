@@ -22,6 +22,7 @@
 # SOFTWARE.
 ##############################################################################el
 
+import ctypes
 import glob
 import math
 import os
@@ -377,8 +378,8 @@ class OmniSoC_Base:
         return hw_counter_matches, variable_matches
 
     def get_rocprof_supported_counters(self):
-        rocprof_cmd = detect_rocprof()
-        rorcprof_counters = set()
+        rocprof_cmd = detect_rocprof(self.get_args())
+        rocprof_counters = set()
 
         if str(rocprof_cmd).endswith("rocprof"):
             command = [rocprof_cmd, "--list-basic"]
@@ -391,7 +392,7 @@ class OmniSoC_Base:
             for line in output.splitlines():
                 if "gpu-agent" in line:
                     counters, _ = self.parse_counters_text(line.split(":")[1].strip())
-                    rorcprof_counters.update(counters)
+                    rocprof_counters.update(counters)
 
             command = [rocprof_cmd, "--list-derived"]
             success, output = capture_subprocess_output(command, enable_logging=False)
@@ -403,7 +404,7 @@ class OmniSoC_Base:
             for line in output.splitlines():
                 if "gpu-agent" in line:
                     counters, _ = self.parse_counters_text(line.split(":")[1].strip())
-                    rorcprof_counters.update(counters)
+                    rocprof_counters.update(counters)
 
         elif str(rocprof_cmd).endswith("rocprofv2"):
             command = [rocprof_cmd, "--list-counters"]
@@ -416,7 +417,7 @@ class OmniSoC_Base:
             for line in output.splitlines():
                 if "gfx" in line:
                     counters, _ = self.parse_counters_text(line.split(":")[2].strip())
-                    rorcprof_counters.update(counters)
+                    rocprof_counters.update(counters)
 
         elif str(rocprof_cmd).endswith("rocprofv3"):
             command = [rocprof_cmd, "--list-avail"]
@@ -429,7 +430,68 @@ class OmniSoC_Base:
             for line in output.splitlines():
                 if "Name:" in line:
                     counters, _ = self.parse_counters_text(line.split(":")[1].strip())
-                    rorcprof_counters.update(counters)
+                    rocprof_counters.update(counters)
+
+        elif str(rocprof_cmd) == "rocprofiler-sdk":
+            MAX_STR = 256
+
+            # rocprofiler sdk list avail library
+            libname = str(
+                Path(self.get_args().rocprofiler_sdk_library_path).parent.parent.joinpath(
+                    "libexec/rocprofiler-sdk/librocprofv3-list-avail.so"
+                )
+            )
+            c_lib = ctypes.CDLL(libname)
+            if c_lib is None:
+                console_error(f"Error opening {libname}")
+
+            # Intialize the library and set data types for arguments and variables
+            c_lib.avail_tool_init()
+            c_lib.get_number_of_agents.restype = ctypes.c_size_t
+            c_lib.get_agent_node_id.restype = ctypes.c_ulong
+            c_lib.get_agent_node_id.argtypes = [ctypes.c_int]
+            c_lib.get_number_of_counters.restype = ctypes.c_ulong
+            c_lib.get_number_of_counters.argtypes = [ctypes.c_int]
+            c_lib.get_counters_info.argtypes = [
+                ctypes.c_ulong,
+                ctypes.c_int,
+                ctypes.POINTER(ctypes.c_ulong),
+                ctypes.POINTER(ctypes.POINTER(ctypes.c_char * MAX_STR)),
+                ctypes.POINTER(ctypes.POINTER(ctypes.c_char * MAX_STR)),
+                ctypes.POINTER(ctypes.c_int),
+            ]
+            c_lib.get_counter_block.argtypes = [
+                ctypes.c_ulong,
+                ctypes.c_ulong,
+                ctypes.POINTER(ctypes.POINTER(ctypes.c_char * MAX_STR)),
+            ]
+
+            # Iterate through each counter index and get its information
+            for idx in range(c_lib.get_number_of_agents()):
+                node_id = c_lib.get_agent_node_id(idx)
+                for counter_idx in range(c_lib.get_number_of_counters(node_id)):
+                    # Counter information will be stored in these variables
+                    name_args = ctypes.POINTER(ctypes.c_char * MAX_STR)()
+                    description_args = ctypes.POINTER(ctypes.c_char * MAX_STR)()
+                    is_derived_args = ctypes.c_int()
+                    counter_id_args = ctypes.c_ulong()
+                    block_args = ctypes.POINTER(ctypes.c_char * MAX_STR)()
+                    # Get the counter information
+                    c_lib.get_counters_info(
+                        node_id,
+                        counter_idx,
+                        ctypes.byref(counter_id_args),
+                        name_args,
+                        description_args,
+                        ctypes.byref(is_derived_args),
+                    )
+                    c_lib.get_counter_block(node_id, counter_idx, block_args)
+                    block = ctypes.cast(block_args, ctypes.c_char_p).value.decode("utf-8")
+                    if not is_derived_args.value and block:
+                        # Only consider raw hardware counters from IP blocks
+                        rocprof_counters.add(
+                            ctypes.cast(name_args, ctypes.c_char_p).value.decode("utf-8")
+                        )
 
         else:
             console_error(
@@ -437,7 +499,7 @@ class OmniSoC_Base:
                 % (rocprof_cmd, get_submodules("rocprof_compute_profile"))
             )
 
-        return rorcprof_counters
+        return rocprof_counters
 
     @demarcate
     def perfmon_coalesce(self, counters):

@@ -33,7 +33,9 @@ class gfx908_soc(OmniSoC_Base):
     def __init__(self, args, mspec):
         super().__init__(args, mspec)
         self.set_arch("gfx908")
-        self.set_compatible_profilers(["rocprofv1", "rocscope", "rocprofv3"])
+        self.set_compatible_profilers(
+            ["rocprofv1", "rocscope", "rocprofv3", "rocprofiler-sdk"]
+        )
         # Per IP block max number of simultaneous counters. GFX IP Blocks
         self.set_perfmon_config(
             {

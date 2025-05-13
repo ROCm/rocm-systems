@@ -15,12 +15,26 @@ def pytest_addoption(parser):
         help="Call standalone binary instead of main function during tests",
     )
 
+    parser.addoption(
+        "--rocprofiler-sdk-library-path",
+        type=str,
+        default="/opt/rocm/lib/librocprofiler-sdk.so",
+        help="Path to the rocprofiler-sdk library",
+    )
+
 
 @pytest.fixture
 def binary_handler_profile_rocprof_compute(request):
     def _handler(
         config, workload_dir, options=[], check_success=True, roof=False, app_name="app_1"
     ):
+        if request.config.getoption("--rocprofiler-sdk-library-path"):
+            options.extend(
+                [
+                    "--rocprofiler-sdk-library-path",
+                    request.config.getoption("--rocprofiler-sdk-library-path"),
+                ],
+            )
         if request.config.getoption("--call-binary"):
             baseline_opts = [
                 "build/rocprof-compute.bin",

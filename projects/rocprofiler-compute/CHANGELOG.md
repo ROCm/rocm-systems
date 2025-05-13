@@ -47,6 +47,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Roofline support for MI350 series architecture
 
+* Setting ROCPROF=rocprofiler-sdk environment variable will use rocprofiler-sdk C++ library instead of rocprofv3 python script
+  * Add --rocprofiler-sdk-library-path runtime option to choose the path to rocprofiler-sdk library to be used
+
 ### Changed
 
 * Change the default rocprof version to v3 when environment variable "ROCPROF" is not set

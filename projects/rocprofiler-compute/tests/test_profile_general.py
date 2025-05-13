@@ -323,15 +323,22 @@ def gpu_soc():
 soc = gpu_soc()
 
 # Set rocprofv2 as profiler if MI300
-if soc == "MI100":
-    os.environ["ROCPROF"] = "rocprof"
+if "ROCPROF" not in os.environ.keys():
+    if soc == "MI100":
+        os.environ["ROCPROF"] = "rocprof"
 
-else:
-    os.environ["ROCPROF"] = "rocprofv3"
+    else:
+        os.environ["ROCPROF"] = "rocprofv3"
 
 
 def using_v3():
-    return "ROCPROF" in os.environ.keys() and os.environ["ROCPROF"].endswith("rocprofv3")
+    return "ROCPROF" not in os.environ.keys() or (
+        "ROCPROF" in os.environ.keys()
+        and (
+            os.environ["ROCPROF"].endswith("rocprofv3")
+            or os.environ["ROCPROF"] == "rocprofiler-sdk"
+        )
+    )
 
 
 Baseline_dir = str(Path("tests/workloads/vcopy/" + soc).resolve())

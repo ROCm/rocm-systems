@@ -333,6 +333,15 @@ Examples:
         help="\t\t\tSet the interval of pc sampling in microsecond (DEFAULT: 1).",
     )
 
+    profile_group.add_argument(
+        "--rocprofiler-sdk-library-path",
+        type=str,
+        dest="rocprofiler_sdk_library_path",
+        required=False,
+        default="/opt/rocm/lib/librocprofiler-sdk.so",
+        help="\t\t\tSet the path to rocprofiler SDK library.",
+    )
+
     ## Roofline Command Line Options
     roofline_group.add_argument(
         "--roof-only",
