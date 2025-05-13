@@ -227,31 +227,10 @@ set(CPACK_RPM_STATIC_PACKAGE_NAME ${ROCM_SMI_PACKAGE}-static-devel)
 add_subdirectory("rocm_smi")
 add_subdirectory("oam")
 
-option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compatibility" OFF)
-
 # Add tests
 if(BUILD_TESTS)
     set(TESTS_COMPONENT "tests")
     add_subdirectory("tests/rocm_smi_test")
-endif()
-
-if(FILE_REORG_BACKWARD_COMPATIBILITY)
-# To enable/disable #error in wrapper header files
-  if(NOT DEFINED ROCM_HEADER_WRAPPER_WERROR)
-      if(DEFINED ENV{ROCM_HEADER_WRAPPER_WERROR})
-          set(ROCM_HEADER_WRAPPER_WERROR "$ENV{ROCM_HEADER_WRAPPER_WERROR}"
-                  CACHE STRING "Header wrapper warnings as errors.")
-      else()
-          set(ROCM_HEADER_WRAPPER_WERROR "OFF" CACHE STRING "Header wrapper warnings as errors.")
-      endif()
-  endif()
-  if(ROCM_HEADER_WRAPPER_WERROR)
-      set(deprecated_error 1)
-  else()
-      set(deprecated_error 0)
-  endif()
-
-  include(rocm_smi-backward-compat.cmake)
 endif()
 
 include(CMakePackageConfigHelpers)
