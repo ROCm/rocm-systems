@@ -53,7 +53,7 @@ namespace component
 {
 struct vaapi_gotcha : tim::component::base<vaapi_gotcha, void>
 {
-    static constexpr size_t gotcha_capacity = 20;
+    static constexpr size_t gotcha_capacity = 30;
 
     using gotcha_data  = tim::component::gotcha_data;
     using exit_func_t  = void (*)(int);
@@ -88,6 +88,12 @@ struct vaapi_gotcha : tim::component::base<vaapi_gotcha, void>
                       unsigned int format, unsigned int width, unsigned int height,
                       VASurfaceID* surfaces, unsigned int num_surfaces,
                       VASurfaceAttrib* attrib_list, unsigned int num_attribs);
+    static void audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+                      VAImageFormat* format, int width, int height, VAImage* image);
+    static void audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+                      VASurfaceID surface, VAImageID image, int src_x, int src_y,
+                      unsigned int src_width, unsigned int src_height, int dest_x,
+                      int dest_y, unsigned int dest_width, unsigned int dest_height);
     static void audit(const gotcha_data&, audit::incoming, VADisplay dpy,
                       VASurfaceID* surfaces, int num_surfaces);
     static void audit(const gotcha_data&, audit::incoming, VADisplay dpy,
@@ -96,10 +102,15 @@ struct vaapi_gotcha : tim::component::base<vaapi_gotcha, void>
                       VASurfaceID surface_id, uint32_t mem_type, uint32_t flags,
                       void* descriptor);
     static void audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+                      VASurfaceID surface, int x, int y, unsigned int width,
+                      unsigned int height, VAImageID image);
+    static void audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
                       VAProfile profile, VAEntrypoint entrypoint,
                       VAConfigAttrib* attrib_list, int num_attribs);
     static void audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
                       int* major_version, int* minor_version);
+    static void audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+                      VAImageFormat* format_list, int* num_formats);
     static void audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
                       VAProfile profile, VAEntrypoint* entrypoint_list,
                       int* num_entrypoints);
@@ -108,6 +119,12 @@ struct vaapi_gotcha : tim::component::base<vaapi_gotcha, void>
                       unsigned int* num_attribs);
     static void audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
                       VASurfaceID render_target, VASurfaceStatus* status);
+    static void audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+                      VASurfaceID surface, VAImage* image);
+    static void audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+                      VABufferID buf_id, void** pbuf);
+    static void audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+                      VABufferID buf_id, VABufferInfo* buf_info);
     static void audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
                       VAContextID context, VABufferID* buffers, int num_buffers);
     static void audit(const gotcha_data& _data, audit::incoming, VADisplay dpy);

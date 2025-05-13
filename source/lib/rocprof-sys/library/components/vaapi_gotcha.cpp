@@ -100,6 +100,25 @@ vaapi_gotcha::configure()
             "vaRenderPicture");
         vaapi_gotcha_t::configure<18, VAStatus, VADisplay>("vaTerminate");
         vaapi_gotcha_t::configure<19, int, VADisplay>("vaDisplayIsValid");
+        vaapi_gotcha_t::configure<20, VAStatus, VADisplay, VAImageFormat*, int, int,
+                                  VAImage*>("vaCreateImage");
+        vaapi_gotcha_t::configure<21, VAStatus, VADisplay, VAImageID>("vaDestroyImage");
+        vaapi_gotcha_t::configure<22, VAStatus, VADisplay, VASurfaceID, int, int,
+                                  unsigned int, unsigned int, VAImageID>("vaGetImage");
+        vaapi_gotcha_t::configure<23, VAStatus, VADisplay, VASurfaceID, VAImage*>(
+            "vaDeriveImage");
+        vaapi_gotcha_t::configure<24, VAStatus, VADisplay, VAImageFormat*, int*>(
+            "vaQueryImageFormats");
+        vaapi_gotcha_t::configure<25, VAStatus, VADisplay, VABufferID, void**>(
+            "vaMapBuffer");
+        vaapi_gotcha_t::configure<26, VAStatus, VADisplay, VABufferID>("vaUnmapBuffer");
+        vaapi_gotcha_t::configure<27, VAStatus, VADisplay, VABufferID, VABufferInfo*>(
+            "vaAcquireBufferHandle");
+        vaapi_gotcha_t::configure<28, VAStatus, VADisplay, VABufferID>(
+            "vaReleaseBufferHandle");
+        vaapi_gotcha_t::configure<29, VAStatus, VADisplay, VASurfaceID, VAImageID, int,
+                                  int, unsigned int, unsigned int, int, int, unsigned int,
+                                  unsigned int>("vaPutImage");
     };
 }
 
@@ -184,11 +203,39 @@ vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
                                             num_surfaces, "num_attribs", num_attribs);
 }
 
+// vaCreateImage
+void
+vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+                    VAImageFormat* format, int width, int height, VAImage* image)
+{
+    (void) format;  // unused
+    (void) image;   // unused
+    category_region<category::vaapi>::start(std::string_view{ _data.tool_id }, "dpy", dpy,
+                                            "width", width, "height", height);
+}
+
+// vaPutImage
+void
+vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+                    VASurfaceID surface, VAImageID image, int src_x, int src_y,
+                    unsigned int src_width, unsigned int src_height, int dest_x,
+                    int dest_y, unsigned int dest_width, unsigned int dest_height)
+{
+    category_region<category::vaapi>::start(
+        std::string_view{ _data.tool_id }, "dpy", dpy, "surfaceID", surface, "imageID",
+        image, "x-cordinate", src_x, "y-cordinate", src_y, "src_width", src_width,
+        "src_height", src_height, "dest_x", dest_x, "dest_y", dest_y, "dest_width",
+        dest_width, "dest_height", dest_height);
+}
+
 // vaDestroyBuffer
 // vaDestroyConfig
 // vaDestroyContext
 // vaEndPicture
 // vaSyncSurface
+// vaDestroyImage
+// vaUnmapBuffer
+// vaReleaseBufferHandle
 void
 vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
                     VAContextID context)
@@ -208,6 +255,15 @@ vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
     else if(_data.tool_id == "vaSyncSurface")
         category_region<category::vaapi>::start(std::string_view{ _data.tool_id }, "dpy",
                                                 dpy, "render_target", context);
+    else if(_data.tool_id == "vaDestroyImage")
+        category_region<category::vaapi>::start(std::string_view{ _data.tool_id }, "dpy",
+                                                dpy, "image_id", context);
+    else if(_data.tool_id == "vaUnmapBuffer" || _data.tool_id == "vaReleaseBufferHandle")
+        category_region<category::vaapi>::start(std::string_view{ _data.tool_id }, "dpy",
+                                                dpy, "buffer_id", context);
+    else
+        category_region<category::vaapi>::start(std::string_view{ _data.tool_id }, "dpy",
+                                                dpy, "id", context);
 }
 
 // vaDestroySurfaces
@@ -231,6 +287,18 @@ vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
         "mem_type", mem_type, "flags", flags, "descriptor", descriptor);
 }
 
+// vaGetImage
+void
+vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+                    VASurfaceID surface, int x, int y, unsigned int width,
+                    unsigned int height, VAImageID image)
+{
+    category_region<category::vaapi>::start(std::string_view{ _data.tool_id }, "dpy", dpy,
+                                            "surfaceID", surface, "x-cordinate", x,
+                                            "y-cordinate", y, "width", width, "height",
+                                            height, "imageID", image);
+}
+
 // vaGetConfigAttributes
 void
 vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
@@ -251,6 +319,16 @@ vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
     category_region<category::vaapi>::start(std::string_view{ _data.tool_id }, "dpy", dpy,
                                             "major_version", major_version,
                                             "minor_version", minor_version);
+}
+
+// vaQueryImageFormats
+void
+vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+                    VAImageFormat* format_list, int* num_formats)
+{
+    (void) format_list;  // unused
+    category_region<category::vaapi>::start(std::string_view{ _data.tool_id }, "dpy", dpy,
+                                            "num_formats", num_formats);
 }
 
 // vaQueryConfigEntrypoints
@@ -283,6 +361,35 @@ vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
     category_region<category::vaapi>::start(std::string_view{ _data.tool_id }, "dpy", dpy,
                                             "render_target", render_target, "status",
                                             status);
+}
+
+// vaDeriveImage
+void
+vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+                    VASurfaceID surface, VAImage* image)
+{
+    (void) image;  // unused
+    category_region<category::vaapi>::start(std::string_view{ _data.tool_id }, "dpy", dpy,
+                                            "surfaceID", surface);
+}
+
+// vaMapBuffer
+void
+vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+                    VABufferID buf_id, void** pbuf)
+{
+    category_region<category::vaapi>::start(std::string_view{ _data.tool_id }, "dpy", dpy,
+                                            "bufferID", buf_id, "pbuf", pbuf);
+}
+
+// vaAcquireBufferHandle
+void
+vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
+                    VABufferID buf_id, VABufferInfo* buf_info)
+{
+    (void) buf_info;  // unused
+    category_region<category::vaapi>::start(std::string_view{ _data.tool_id }, "dpy", dpy,
+                                            "bufferID", buf_id);
 }
 
 // vaRenderPicture
