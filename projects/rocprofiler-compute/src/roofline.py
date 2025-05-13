@@ -60,7 +60,6 @@ class Roofline:
                 "mem_level": "ALL",
                 "include_kernel_names": False,
                 "is_standalone": False,
-                "roofline_data_type": ["FP32"],
             }
         )
         self.__ai_data = None
@@ -77,10 +76,7 @@ class Roofline:
             self.__run_parameters["mem_level"] = self.__args.mem_level
         if hasattr(self.__args, "sort") and self.__args.sort != "ALL":
             self.__run_parameters["sort_type"] = self.__args.sort
-        if hasattr(
-            self.__args, "roofline_data_type"
-        ) and self.__args.roofline_data_type != ["FP32"]:
-            self.__run_parameters["roofline_data_type"] = self.__args.roofline_data_type
+        self.__run_parameters["roofline_data_type"] = self.__args.roofline_data_type
         self.validate_parameters()
 
     def validate_parameters(self):
