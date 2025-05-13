@@ -57,7 +57,11 @@ TEST_CASE("Unit_hipFreeAsync_Negative_Parameters") {
   StreamGuard stream(Streams::created);
 
   SECTION("dev_ptr is nullptr") {
+#if HT_AMD
     HIP_CHECK_ERROR(hipFreeAsync(nullptr, stream.stream()), hipErrorInvalidValue);
+#else
+    HIP_CHECK(hipFreeAsync(nullptr, stream.stream()));
+#endif
   }
 
   SECTION("Invalid stream handle") {

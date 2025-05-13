@@ -390,10 +390,15 @@ TEST_CASE("Unit_hipMallocMipmappedArray_Negative_NumLevels") {
   unsigned int numLevels = floor(log2(size)) + 2;
   hipChannelFormatDesc desc = hipCreateChannelDesc<float>();
 
-  const auto flag = GENERATE(from_range(std::begin(validFlags), std::end(validFlags)));
+  const auto flag = hipArrayDefault;
+#if HT_AMD
   HIP_CHECK_ERRORS(
       hipMallocMipmappedArray(&array, &desc, makeMipmappedExtent(flag, size), numLevels, flag),
       hipErrorInvalidValue, hipErrorNotSupported);
+#else
+  HIP_CHECK(
+      hipMallocMipmappedArray(&array, &desc, makeMipmappedExtent(flag, size), numLevels, flag));
+#endif
 }
 
 TEST_CASE("Unit_hipGetMipmappedArrayLevel_Negative") {

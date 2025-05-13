@@ -79,8 +79,6 @@
         "Unit_atomicInc_Negative_Parameters_RTC",
         "Unit_atomicDec_Negative_Parameters_RTC",
         "Unit_atomicCAS_Negative_Parameters_RTC",
-        "SWDEV-447384, SWDEV-447932: These tests fail in gfx1100, gfx1101 & gfx1102",
-        "Unit_hipFreeAsync_Negative_Parameters",
         "SWDEV-445928: These tests fail in PSDB stress test on 09/02/2024",
         "Unit_hipDestroySurfaceObject_Negative_Parameters",
         "=== These tests fail on linux PSDB 21/11/24 ===",
