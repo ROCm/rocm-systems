@@ -20,13 +20,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <rocprofiler-sdk/external_correlation.h>
-#include <rocprofiler-sdk/fwd.h>
-
+#include "lib/rocprofiler-sdk/external_correlation.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
-#include "lib/rocprofiler-sdk/external_correlation.hpp"
+
+#include <rocprofiler-sdk/external_correlation.h>
+#include <rocprofiler-sdk/fwd.h>
 
 #include <unistd.h>
 
@@ -36,6 +36,50 @@ namespace external_correlation
 {
 namespace
 {
+#define ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KIND_STRING(CODE)                                 \
+    template <>                                                                                    \
+    struct external_correlation_id_request_kind_string<                                            \
+        ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_##CODE>                                           \
+    {                                                                                              \
+        static constexpr auto value =                                                              \
+            std::pair<const char*, size_t>{#CODE, std::string_view{#CODE}.length()};               \
+    };
+
+template <size_t Idx>
+struct external_correlation_id_request_kind_string;
+
+ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KIND_STRING(NONE)
+ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KIND_STRING(HSA_CORE_API)
+ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KIND_STRING(HSA_AMD_EXT_API)
+ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KIND_STRING(HSA_IMAGE_EXT_API)
+ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KIND_STRING(HSA_FINALIZE_EXT_API)
+ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KIND_STRING(HIP_RUNTIME_API)
+ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KIND_STRING(HIP_COMPILER_API)
+ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KIND_STRING(MARKER_CORE_API)
+ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KIND_STRING(MARKER_CONTROL_API)
+ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KIND_STRING(MARKER_NAME_API)
+ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KIND_STRING(MEMORY_COPY)
+ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KIND_STRING(MEMORY_ALLOCATION)
+ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KIND_STRING(KERNEL_DISPATCH)
+ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KIND_STRING(SCRATCH_MEMORY)
+ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KIND_STRING(RCCL_API)
+ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KIND_STRING(OMPT)
+ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KIND_STRING(ROCDECODE_API)
+ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KIND_STRING(ROCJPEG_API)
+
+#undef ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KIND_STRING
+
+template <size_t Idx, size_t... Tail>
+std::pair<const char*, size_t>
+get_kind_name(rocprofiler_external_correlation_id_request_kind_t kind,
+              std::index_sequence<Idx, Tail...>)
+{
+    if(kind == Idx) return external_correlation_id_request_kind_string<Idx>::value;
+    // recursion until tail empty
+    if constexpr(sizeof...(Tail) > 0) return get_kind_name(kind, std::index_sequence<Tail...>{});
+    return {nullptr, 0};
+}
+
 auto
 get_default_tid()
 {
@@ -247,6 +291,21 @@ rocprofiler_configure_external_correlation_id_request_service(
 
     return ctx->correlation_tracer.external_correlator.configure_request(
         callback, callback_args, kinds_v);
+}
+
+rocprofiler_status_t
+rocprofiler_query_external_correlation_id_request_kind_name(
+    rocprofiler_external_correlation_id_request_kind_t kind,
+    const char**                                       name,
+    uint64_t*                                          name_len)
+{
+    auto&& val = rocprofiler::external_correlation::get_kind_name(
+        kind, std::make_index_sequence<ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_LAST>{});
+
+    if(name) *name = val.first;
+    if(name_len) *name_len = val.second;
+
+    return (val.first) ? ROCPROFILER_STATUS_SUCCESS : ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND;
 }
 
 rocprofiler_status_t

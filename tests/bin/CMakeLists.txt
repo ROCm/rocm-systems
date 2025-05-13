@@ -15,6 +15,7 @@ find_package(rocJPEG)
 
 # applications used by integration tests which DO link to rocprofiler-sdk-roctx
 add_subdirectory(reproducible-runtime)
+add_subdirectory(reproducible-dispatch-count)
 add_subdirectory(transpose)
 add_subdirectory(openmp)
 

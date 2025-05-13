@@ -60,8 +60,8 @@ list(LENGTH ROCPROFILER_PACKAGING_COMPONENTS NUM_ROCPROFILER_PACKAGING_COMPONENT
 # the packages we will generate
 set(ROCPROFILER_COMPONENT_GROUPS "core" "docs" "tests" "roctx")
 
-set(COMPONENT_GROUP_core_COMPONENTS "core" "development" "samples" "tools" "Development"
-                                    "Unspecified")
+set(COMPONENT_GROUP_core_COMPONENTS "core" "development" "samples" "tools" "benchmark"
+                                    "Development" "Unspecified")
 set(COMPONENT_GROUP_docs_COMPONENTS "docs")
 set(COMPONENT_GROUP_tests_COMPONENTS "tests")
 set(COMPONENT_GROUP_roctx_COMPONENTS "roctx")
@@ -87,7 +87,10 @@ set(COMPONENT_DESC_roctx "ROCm Tools Extension library and headers")
 
 set(EXPECTED_PACKAGING_COMPONENTS 6)
 if(ROCPROFILER_BUILD_DOCS)
-    set(EXPECTED_PACKAGING_COMPONENTS 7)
+    math(EXPR EXPECTED_PACKAGING_COMPONENTS "${EXPECTED_PACKAGING_COMPONENTS} + 1")
+endif()
+if(ROCPROFILER_BUILD_BENCHMARK)
+    math(EXPR EXPECTED_PACKAGING_COMPONENTS "${EXPECTED_PACKAGING_COMPONENTS} + 1")
 endif()
 
 if(NOT NUM_ROCPROFILER_PACKAGING_COMPONENTS EQUAL EXPECTED_PACKAGING_COMPONENTS)

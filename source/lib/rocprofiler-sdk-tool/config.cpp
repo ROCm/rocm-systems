@@ -319,6 +319,23 @@ config::config()
                                                         std::stoull(_config_params.at(2))});
         }
     }
+
+    // Benchmarking Enable/Disable
+    if(!benchmark_mode_env.empty())
+    {
+        const auto valid_options = std::unordered_map<std::string_view, config::benchmark>{
+            {"disabled-sdk-contexts", benchmark::disabled_contexts_overhead},
+            {"sdk-buffer-overhead", benchmark::sdk_buffered_overhead},
+            {"sdk-callback-overhead", benchmark::sdk_callback_overhead},
+            {"tool-runtime-overhead", benchmark::tool_runtime_overhead},
+            {"execution-profile", benchmark::execution_profile},
+        };
+
+        ROCP_FATAL_IF(valid_options.count(benchmark_mode_env) == 0)
+            << fmt::format("Invalid value for ROCPROF_BENCHMARK_MODE: {}", benchmark_mode_env);
+
+        benchmark_mode = valid_options.at(benchmark_mode_env);
+    }
 }
 
 std::string

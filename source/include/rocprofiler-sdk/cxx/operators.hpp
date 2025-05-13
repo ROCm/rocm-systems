@@ -55,7 +55,7 @@
     }
 
 #define ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(TYPE)                                             \
-    inline bool operator>(TYPE lhs, TYPE rhs) { return (lhs == rhs || !(lhs < rhs)); }             \
+    inline bool operator>(TYPE lhs, TYPE rhs) { return !(lhs == rhs || lhs < rhs); }               \
     inline bool operator<=(TYPE lhs, TYPE rhs) { return (lhs == rhs || lhs < rhs); }               \
     inline bool operator>=(TYPE lhs, TYPE rhs) { return !(lhs < rhs); }
 

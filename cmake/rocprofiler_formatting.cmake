@@ -74,7 +74,7 @@ if(ROCPROFILER_CLANG_FORMAT_EXE
     set(rocp_cmake_files ${PROJECT_SOURCE_DIR}/CMakeLists.txt
                          ${PROJECT_SOURCE_DIR}/external/CMakeLists.txt)
 
-    foreach(_DIR cmake samples source tests)
+    foreach(_DIR cmake samples source tests benchmark)
         foreach(_TYPE header_files source_files cmake_files python_files)
             set(${_TYPE})
         endforeach()

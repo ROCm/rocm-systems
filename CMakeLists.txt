@@ -54,6 +54,7 @@ if(Git_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
 
     execute_process(
         COMMAND ${GIT_EXECUTABLE} rev-parse HEAD
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
         OUTPUT_VARIABLE ROCPROFILER_SDK_GIT_REVISION
         OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
 else()
@@ -117,6 +118,10 @@ endif()
 
 if(ROCPROFILER_BUILD_SAMPLES)
     add_subdirectory(samples)
+endif()
+
+if(ROCPROFILER_BUILD_BENCHMARK)
+    add_subdirectory(benchmark)
 endif()
 
 include(rocprofiler_config_packaging)

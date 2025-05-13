@@ -42,6 +42,7 @@ namespace context
 {
 struct context;
 }
+
 namespace external_correlation
 {
 static constexpr bool enable_const_wlock_v = true;

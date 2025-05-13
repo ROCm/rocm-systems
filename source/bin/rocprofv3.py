@@ -248,6 +248,11 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         choices=("csv", "json", "pftrace", "otf2"),
         type=str.lower,
     )
+    add_parser_bool_argument(
+        io_options,
+        "--output-config",
+        help="Generate a output file of the rocprofv3 configuration, e.g. out_config.json",
+    )
     io_options.add_argument(
         "--log-level",
         help="Set the desired log level",
@@ -518,6 +523,11 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         type=str,
         choices=("hour", "min", "sec", "msec", "usec", "nsec"),
     )
+    add_parser_bool_argument(
+        filter_options,
+        "--selected-regions",
+        help="If set, rocprofv3 will only profile regions of code surrounded by roctxProfilerResume(0) and roctxProfilerPause(0)",
+    )
 
     perfetto_options = parser.add_argument_group("Perfetto-specific options")
 
@@ -591,6 +601,19 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         advanced_options,
         "--realpath",
         help=argparse.SUPPRESS,
+    )
+    advanced_options.add_argument(
+        "--benchmark-mode",
+        choices=(
+            "disabled-sdk-contexts",
+            "sdk-buffer-overhead",
+            "sdk-callback-overhead",
+            "tool-runtime-overhead",
+            "execution-profile",
+        ),
+        help=argparse.SUPPRESS,
+        default=None,
+        type=str.lower,
     )
     advanced_options.add_argument(
         "-A",
@@ -1034,6 +1057,7 @@ def run(app_args, args, **kwargs):
 
     update_env("ROCPROF_OUTPUT_FILE_NAME", _output_file)
     update_env("ROCPROF_OUTPUT_PATH", _output_path)
+    update_env("ROCPROF_OUTPUT_CONFIG_FILE", args.output_config, overwrite_if_true=True)
     if app_pass is not None and args.sub_directory is not None:
         app_env["ROCPROF_OUTPUT_PATH"] = os.path.join(
             f"{_output_path}", f"{args.sub_directory}{app_pass}"
@@ -1198,6 +1222,11 @@ def run(app_args, args, **kwargs):
         args.truncate_kernels,
         overwrite_if_true=True,
     )
+    update_env(
+        "ROCPROF_SELECTED_REGIONS",
+        args.selected_regions,
+        overwrite_if_true=True,
+    )
 
     if args.list_avail:
         update_env(
@@ -1240,6 +1269,24 @@ def run(app_args, args, **kwargs):
                 f"{itr}_LOG_LEVEL",
                 args.log_level,
             )
+
+    if args.benchmark_mode:
+        if args.benchmark_mode == "execution-profile":
+            if args.group_by_queue is None:
+                update_env(
+                    "ROCPROF_GROUP_BY_QUEUE",
+                    False,
+                    overwrite=True,
+                )
+            elif args.group_by_queue:
+                fatal_error(
+                    "rocprofv3 requires --group-by-queue=false for --benchmark-mode=execution-profile"
+                )
+
+        update_env(
+            "ROCPROF_BENCHMARK_MODE",
+            args.benchmark_mode,
+        )
 
     for opt, env_val in dict(
         [
