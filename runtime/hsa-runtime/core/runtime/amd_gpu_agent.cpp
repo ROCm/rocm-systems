@@ -1215,9 +1215,17 @@ hsa_status_t GpuAgent::DmaCopyStatus(core::Agent& dst_agent, core::Agent& src_ag
                      dst_agent.HiveId() && src_agent.HiveId() == dst_agent.HiveId() &&
                        properties_.NumSdmaXgmiEngines) {
     //Find a free xGMI SDMA engine
-    for (int i = 0; i < properties_.NumSdmaXgmiEngines; i++) {
-      if (DmaEngineIsFree(DefaultBlitCount + i)) {
-        *engine_ids_mask |= (HSA_AMD_SDMA_ENGINE_2 << i);
+    if (rec_sdma_eng_override_) {
+      for (int i = 0; i < (properties_.NumSdmaEngines + properties_.NumSdmaXgmiEngines); i++) {
+        if (DmaEngineIsFree(BlitHostToDev + i)) {
+          *engine_ids_mask |= (HSA_AMD_SDMA_ENGINE_0 << i);
+        }
+      }
+    } else {
+      for (int i = 0; i < properties_.NumSdmaXgmiEngines; i++) {
+        if (DmaEngineIsFree(DefaultBlitCount + i)) {
+          *engine_ids_mask |= (HSA_AMD_SDMA_ENGINE_2 << i);
+        }
       }
     }
   } else {
