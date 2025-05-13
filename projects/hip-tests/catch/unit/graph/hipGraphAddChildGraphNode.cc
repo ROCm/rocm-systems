@@ -119,13 +119,14 @@ and verify the number of the nodes in the original graph
 TEST_CASE("Unit_hipGraphAddChildGraphNode_OrgGraphAsChildGraph") {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
-  hipGraph_t graph;
+  hipGraph_t graph, childGraph;
   hipGraphExec_t graphExec;
   int *A_d{nullptr}, *B_d{nullptr};
   int *A_h{nullptr}, *B_h{nullptr};
   HipTest::initArrays<int>(&A_d, &B_d, nullptr, &A_h, &B_h, nullptr, N, false);
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
+  HIP_CHECK(hipGraphCreate(&childGraph, 0));
   hipGraphNode_t memcpyH2D_A, memcpyH2D_B, childGraphNode1;
   size_t numNodes;
   hipStream_t streamForGraph;
@@ -134,7 +135,7 @@ TEST_CASE("Unit_hipGraphAddChildGraphNode_OrgGraphAsChildGraph") {
                                     hipMemcpyHostToDevice));
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_h, B_d, Nbytes,
                                     hipMemcpyDeviceToHost));
-  HIP_CHECK(hipGraphAddChildGraphNode(&childGraphNode1, graph, nullptr, 0, graph));
+  HIP_CHECK(hipGraphAddChildGraphNode(&childGraphNode1, graph, nullptr, 0, childGraph));
 
   HIP_CHECK(hipGraphAddDependencies(graph, &memcpyH2D_B, &memcpyH2D_A, 1));
 
