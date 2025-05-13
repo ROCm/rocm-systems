@@ -87,6 +87,16 @@ struct config : output_config
         void save(ArchiveT& ar) const;
     };
 
+    enum class benchmark
+    {
+        none = 0,
+        disabled_contexts_overhead,
+        sdk_callback_overhead,
+        sdk_buffered_overhead,
+        tool_runtime_overhead,
+        execution_profile,
+    };
+
     config();
 
     ~config()                 = default;
@@ -114,11 +124,13 @@ struct config : output_config
     bool   rocjpeg_api_trace           = get_env("ROCPROF_ROCJPEG_API_TRACE", false);
     bool   list_metrics                = get_env("ROCPROF_LIST_METRICS", false);
     bool   list_metrics_output_file    = get_env("ROCPROF_OUTPUT_LIST_METRICS_FILE", false);
-    bool   pc_sampling_host_trap       = false;
     bool   advanced_thread_trace       = get_env("ROCPROF_ADVANCED_THREAD_TRACE", false);
-    bool   pc_sampling_stochastic      = false;
     bool   att_serialize_all           = get_env("ROCPROF_ATT_PARAM_SERIALIZE_ALL", false);
     bool   enable_signal_handlers      = get_env("ROCPROF_SIGNAL_HANDLERS", true);
+    bool   selected_regions            = get_env("ROCPROF_SELECTED_REGIONS", false);
+    bool   output_config_file          = get_env("ROCPROF_OUTPUT_CONFIG_FILE", false);
+    bool   pc_sampling_host_trap       = false;
+    bool   pc_sampling_stochastic      = false;
     size_t pc_sampling_interval        = get_env("ROCPROF_PC_SAMPLING_INTERVAL", 1);
     rocprofiler_pc_sampling_method_t pc_sampling_method_value = ROCPROFILER_PC_SAMPLING_METHOD_NONE;
     rocprofiler_pc_sampling_unit_t   pc_sampling_unit_value   = ROCPROFILER_PC_SAMPLING_UNIT_NONE;
@@ -147,6 +159,9 @@ struct config : output_config
     uint64_t counter_groups_random_seed = get_env("ROCPROF_COUNTER_GROUPS_RANDOM_SEED", 0);
     uint64_t counter_groups_interval    = get_env("ROCPROF_COUNTER_GROUPS_INTERVAL", 1);
     uint64_t minimum_output_bytes       = get_env("ROCPROF_MINIMUM_OUTPUT_BYTES", 0);
+
+    std::string benchmark_mode_env = get_env("ROCPROF_BENCHMARK_MODE", "");
+    benchmark   benchmark_mode     = benchmark::none;
 
     template <typename ArchiveT>
     void save(ArchiveT&) const;
@@ -180,6 +195,8 @@ template <typename ArchiveT>
 void
 config::save(ArchiveT& ar) const
 {
+    CFG_SERIALIZE_NAMED_MEMBER("benchmark_mode", benchmark_mode_env);
+
     CFG_SERIALIZE_MEMBER(kernel_trace);
     CFG_SERIALIZE_MEMBER(hsa_core_api_trace);
     CFG_SERIALIZE_MEMBER(hsa_amd_ext_api_trace);
@@ -194,6 +211,7 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(hip_compiler_api_trace);
     CFG_SERIALIZE_MEMBER(rccl_api_trace);
     CFG_SERIALIZE_MEMBER(rocdecode_api_trace);
+    CFG_SERIALIZE_MEMBER(rocjpeg_api_trace);
 
     CFG_SERIALIZE_MEMBER(mpi_rank);
     CFG_SERIALIZE_MEMBER(mpi_size);
@@ -207,7 +225,13 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(truncate);
     CFG_SERIALIZE_MEMBER(minimum_output_bytes);
     CFG_SERIALIZE_MEMBER(enable_signal_handlers);
+    CFG_SERIALIZE_MEMBER(selected_regions);
 
+    CFG_SERIALIZE_MEMBER(counter_groups_random_seed);
+    CFG_SERIALIZE_MEMBER(counter_groups_interval);
+
+    CFG_SERIALIZE_MEMBER(pc_sampling_host_trap);
+    CFG_SERIALIZE_MEMBER(pc_sampling_stochastic);
     CFG_SERIALIZE_MEMBER(pc_sampling_method);
     CFG_SERIALIZE_MEMBER(pc_sampling_unit);
     CFG_SERIALIZE_MEMBER(pc_sampling_interval);
@@ -222,8 +246,10 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(att_param_target_cu);
     CFG_SERIALIZE_MEMBER(att_capability);
     CFG_SERIALIZE_MEMBER(att_param_perfcounters);
+    CFG_SERIALIZE_MEMBER(att_param_perf_ctrl);
 
-    static_cast<const base_type&>(*this).save(ar);
+    // serialize the base class
+    static_cast<const base_type*>(this)->save(ar);
 }
 
 #undef CFG_SERIALIZE_MEMBER

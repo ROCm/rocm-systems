@@ -688,6 +688,33 @@ initialize()
         if(get_num_clients() > 0) internal_threading::initialize();
         // initialization is no longer available
         set_init_status(1);
+
+        if(get_num_clients() > 0)
+        {
+            for(const auto& itr : *get_clients())
+            {
+                if(!itr) continue;
+                size_t _client_registered_ctx = 0;
+                for(const auto* citr : context::get_registered_contexts())
+                {
+                    if(citr->client_idx == itr->internal_client_id.handle) ++_client_registered_ctx;
+                }
+
+                size_t _client_activated_ctx = 0;
+                for(const auto* citr : context::get_active_contexts())
+                {
+                    if(citr->client_idx == itr->internal_client_id.handle) ++_client_activated_ctx;
+                }
+
+                ROCP_INFO << fmt::format("rocprofiler-sdk client '{}' registered {} context(s) and "
+                                         "started {} context(s)",
+                                         (itr->mutable_client_id.name)
+                                             ? std::string_view{itr->mutable_client_id.name}
+                                             : std::string_view{"unspecified"},
+                                         _client_registered_ctx,
+                                         _client_activated_ctx);
+            }
+        }
     });
 }
 

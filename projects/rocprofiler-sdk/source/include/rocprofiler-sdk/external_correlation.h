@@ -136,6 +136,29 @@ rocprofiler_configure_external_correlation_id_request_service(
     void* callback_args) ROCPROFILER_API ROCPROFILER_NONNULL(4);
 
 /**
+ * @brief Query the name of the external correlation request kind. The name retrieved from this
+ * function is a string literal that is encoded in the read-only section of the binary (i.e. it is
+ * always "allocated" and never "deallocated").
+ *
+ * @param [in] kind External correlation id request domain
+ * @param [out] name If non-null and the name is a constant string that does not require dynamic
+ * allocation, this paramter will be set to the address of the string literal, otherwise it will
+ * be set to nullptr
+ * @param [out] name_len If non-null, this will be assigned the length of the name (regardless of
+ * the name is a constant string or requires dynamic allocation)
+ * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND Returned if the domain id is not valid
+ * @retval ::ROCPROFILER_STATUS_SUCCESS Returned if a valid domain, regardless if there is a
+ * constant string or not.
+ */
+ROCPROFILER_SDK_EXPERIMENTAL
+rocprofiler_status_t
+rocprofiler_query_external_correlation_id_request_kind_name(
+    rocprofiler_external_correlation_id_request_kind_t kind,
+    const char**                                       name,
+    uint64_t*                                          name_len) ROCPROFILER_API;
+
+/**
  * @brief Push default value for `external` field in ::rocprofiler_correlation_id_t onto stack.
  *
  * External correlation ids are thread-local values. However, if rocprofiler internally requests an

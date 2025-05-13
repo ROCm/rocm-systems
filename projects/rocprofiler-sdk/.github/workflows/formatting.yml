@@ -70,7 +70,7 @@ jobs:
     - name: Run clang-format
       run: |
         set +e
-        FILES=$(find samples source tests -type f | egrep '\.(h|hpp|hh|c|cc|cpp)(|\.in)$')
+        FILES=$(find samples source tests benchmark -type f | egrep '\.(h|hpp|hh|c|cc|cpp)(|\.in)$')
         FORMAT_OUT=$(clang-format-11 -i ${FILES})
         if [ $(git diff | wc -l) -ne 0 ]; then
           echo -e "\nError! Code not formatted. Run clang-format (version 11)...\n"
@@ -130,7 +130,7 @@ jobs:
       shell: bash
       run: |
         OUTFILE=missing_newline.txt
-        for i in $(find source/lib source/include tests samples cmake -type f | egrep -v '\.bin$'); do VAL=$(tail -c 1 ${i}); if [ -n "${VAL}" ]; then echo "- ${i}" >> ${OUTFILE}; fi; done
+        for i in $(find source tests samples benchmark docker cmake -type f | egrep -v '\.(bin|png|csv)$|source/docs/_(build|doxygen)'); do VAL=$(tail -c 1 ${i}); if [ -n "${VAL}" ]; then echo "- ${i}" >> ${OUTFILE}; fi; done
         if [[ -f ${OUTFILE} && $(cat ${OUTFILE} | wc -l) -gt 0 ]]; then
           echo -e "\nError! Source code missing new line at end of file...\n"
           echo -e "\nFiles:\n"

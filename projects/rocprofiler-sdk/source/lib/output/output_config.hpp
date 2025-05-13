@@ -130,6 +130,7 @@ output_config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(otf2_output);
     CFG_SERIALIZE_MEMBER(summary_output);
     CFG_SERIALIZE_MEMBER(kernel_rename);
+    CFG_SERIALIZE_MEMBER(group_by_queue);
 
 #undef CFG_SERIALIZE_MEMBER
 #undef CFG_SERIALIZE_NAMED_MEMBER
