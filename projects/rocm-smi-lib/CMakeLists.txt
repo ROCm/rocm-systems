@@ -199,20 +199,17 @@ set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_RPM_COMPONENT_INSTALL ON)
 
 # Add dependencies
-# no rocm-core
-# python doesn't need to be asan
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6, python3")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6, python3, libdrm-amdgpu-dev | libdrm-dev")
 set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS "${CPACK_DEBIAN_PACKAGE_DEPENDS}")
+set(CPACK_RPM_PACKAGE_REQUIRES "python3, libdrm-amdgpu-dev | libdrm-dev")
+set(CPACK_RPM_ASAN_PACKAGE_REQUIRES "${CPACK_RPM_PACKAGE_REQUIRES}")
 # Only add dependency on rocm-core if -DROCM_DEP_ROCMCORE=ON is given
 if(ROCM_DEP_ROCMCORE)
-    set(CPACK_DEBIAN_PACKAGE_DEPENDS "${CPACK_DEBIAN_PACKAGE_DEPENDS}, rocm-core")
-    # rocm-core needs to be asan
-    # override original variable because CPACK_DEBIAN_PACKAGE_DEPENDS changed
-    set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS "${CPACK_DEBIAN_PACKAGE_DEPENDS}-asan")
+    string(APPEND CPACK_DEBIAN_PACKAGE_DEPENDS ", rocm-core")
+    string(APPEND CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS ", rocm-core-asan")
+    string(APPEND CPACK_RPM_PACKAGE_REQUIRES ", rocm-core")
+    string(APPEND CPACK_RPM_ASAN_PACKAGE_REQUIRES ", rocm-core-asan")
 endif()
-# carefully reuse DEB's "DEPENDS" for RPM's "REQUIRES"
-set(CPACK_RPM_PACKAGE_REQUIRES "python3")
-set(CPACK_RPM_ASAN_PACKAGE_REQUIRES "${CPACK_RPM_PACKAGE_REQUIRES}")
 
 #Component Specific Configuration/Flags
 set(CPACK_DEBIAN_DEV_PACKAGE_NAME ${ROCM_SMI_PACKAGE})
@@ -317,8 +314,8 @@ if(DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
 else()
    set(CPACK_DEBIAN_PACKAGE_RELEASE "local")
 endif()
-set(CPACK_DEBIAN_PACKAGE_SUGGESTS "sudo, libdrm-dev, libdrm-amdgpu-dev")
-set(CPACK_RPM_PACKAGE_SUGGESTS "sudo, libdrm-dev, libdrm-amdgpu-dev")
+set(CPACK_DEBIAN_PACKAGE_SUGGESTS "sudo")
+set(CPACK_RPM_PACKAGE_SUGGESTS "sudo")
 
 ## Process the Debian install/remove scripts to update the CPACK variables
 configure_file(
