@@ -32,7 +32,7 @@ jobs:
 
     - name: Set up apt repos
       run: |
-        test "$AMDGPU_REPO_URL" == "" && echo "Error! AMDGPU_REPO_URL is EMPTY!" && exit 1
+        test "$AMDGPU_REPO_URL" = "" && echo "Error! AMDGPU_REPO_URL is EMPTY!" && exit 1
         cat /etc/os-release
         apt update -y
         # provides add-apt-repository and support for caching actions
@@ -50,7 +50,7 @@ jobs:
       id: build_number
       run: |
         curl -Ls "${ROCM_CI_URL}/${JOB_NAME}/lastStableBuild/api/json?depth=1" -o /tmp/build_info.json
-        cat /tmp/build_info.json | jq '.actions[] | .buildsByBranchName."refs/remotes/origin/amd-master".buildNumber | select(. != null)' > /tmp/build_num.txt
+        cat /tmp/build_info.json | jq '.actions[] | .buildsByBranchName."refs/remotes/origin/amd-mainline".buildNumber | select(. != null)' > /tmp/build_num.txt
         BUILD_NUM="$(cat /tmp/build_num.txt)"
         echo "BUILD_NUM=$BUILD_NUM" >> "$GITHUB_ENV"
         echo "BUILD_NUM=$BUILD_NUM" >> "$GITHUB_OUTPUT"
