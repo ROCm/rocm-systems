@@ -18,6 +18,7 @@ THE SOFTWARE.
 */
 
 #include "warp_shfl_common.hh"
+#include "warp_common.hh"
 
 #include <bitset>
 
