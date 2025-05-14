@@ -33,7 +33,7 @@ doxysphinx build ${WORK_DIR} ${WORK_DIR}/_build/html ${WORK_DIR}/_doxygen/rocpro
 doxysphinx build ${WORK_DIR} ${WORK_DIR}/_build/html ${WORK_DIR}/_doxygen/roctx/html
 
 message "Building html documentation"
-make html SPHINXOPTS="--keep-going -n"
+make html SPHINXOPTS="--keep-going -n -q -T"
 
 if [ -d ${SOURCE_DIR}/docs ]; then
     message "Removing stale documentation in ${SOURCE_DIR}/docs/"

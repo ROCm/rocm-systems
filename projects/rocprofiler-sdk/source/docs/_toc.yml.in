@@ -31,8 +31,35 @@ subtrees:
       title: Counter collection services
     - file: api-reference/pc_sampling
       title: PC sampling
-    - file: _doxygen/rocprofiler-sdk/html/index
-      title: ROCprofiler-SDK API library
+    - file: api-reference/rocprofiler-sdk_api_reference
+      subtrees:
+      - entries:
+        - file: api-reference/rocprofiler-sdk_api/modules
+          subtrees:
+          - entries:
+            - file: api-reference/rocprofiler-sdk_api/modules/agent_information
+            - file: api-reference/rocprofiler-sdk_api/modules/buffer_handling
+            - file: api-reference/rocprofiler-sdk_api/modules/buffer_tracing
+            - file: api-reference/rocprofiler-sdk_api/modules/callback_tracing
+            - file: api-reference/rocprofiler-sdk_api/modules/context_management
+            - file: api-reference/rocprofiler-sdk_api/modules/counter_config
+            - file: api-reference/rocprofiler-sdk_api/modules/counters
+            - file: api-reference/rocprofiler-sdk_api/modules/device_counting_service
+            - file: api-reference/rocprofiler-sdk_api/modules/dispatch_counting_service
+            - file: api-reference/rocprofiler-sdk_api/modules/external_correalation
+            - file: api-reference/rocprofiler-sdk_api/modules/intercept_table
+            - file: api-reference/rocprofiler-sdk_api/modules/internal_threading_management
+            - file: api-reference/rocprofiler-sdk_api/modules/ompt_registration
+            - file: api-reference/rocprofiler-sdk_api/modules/pc_sampling_service
+            - file: api-reference/rocprofiler-sdk_api/modules/thread_trace
+            - file: api-reference/rocprofiler-sdk_api/modules/tool_registration
+        - file: api-reference/rocprofiler-sdk_api/global_data_structures_topics_files
+          subtrees:
+            - entries:
+              - file: api-reference/rocprofiler-sdk_api/global_data_structures_topics_files/global_basic_data_types
+              - file: _doxygen/rocprofiler-sdk/html/topics
+              - file: _doxygen/rocprofiler-sdk/html/annotated
+              - file: _doxygen/rocprofiler-sdk/html/files
     - file: _doxygen/roctx/html/index
       title: ROCTx API library
   - caption: Conceptual

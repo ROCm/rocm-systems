@@ -175,19 +175,19 @@ typedef struct rocprofiler_callback_tracing_code_object_load_data_t
         struct
         {
             int storage_file;  ///< file descriptor of the code object that was loaded. Access this
-                               ///< field if @ref rocprofiler_code_object_storage_type_t is
-                               ///< @ref ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE
+                               ///< field if ::rocprofiler_code_object_storage_type_t is
+                               ///< ::ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE
         };
         struct
         {
             uint64_t memory_base;  ///< The memory address of the first byte of the code object that
                                    ///< was loaded. Access this
-                                   ///< field if @ref rocprofiler_code_object_storage_type_t is
-                                   ///< @ref ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY
-            uint64_t memory_size;  ///< The memory size in bytes of the code object that was loaded.
-                                   ///< Access this field if @ref
-                                   ///< rocprofiler_code_object_storage_type_t is
-                                   ///< @ref ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY
+                                   ///< field if ::rocprofiler_code_object_storage_type_t is
+                                   ///< ::ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY
+            uint64_t
+                memory_size;  ///< The memory size in bytes of the code object that was loaded.
+                              ///< Access this field if ::rocprofiler_code_object_storage_type_t is
+                              ///< ::ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY
         };
     };
 } rocprofiler_callback_tracing_code_object_load_data_t;
@@ -349,7 +349,7 @@ typedef struct rocprofiler_callback_tracing_hip_stream_data_t
  * @brief API Tracing callback function. This function is invoked twice per API function: once
  * before the function is invoked and once after the function is invoked.  The external correlation
  * id value within the record is assigned the value at the top of the external correlation id stack.
- * It is permissible to invoke @ref rocprofiler_push_external_correlation_id within the enter phase;
+ * It is permissible to invoke ::rocprofiler_push_external_correlation_id within the enter phase;
  * when a new external correlation id is pushed during the enter phase, rocprofiler will use that
  * external correlation id for any async events and provide the new external correlation id during
  * the exit callback... In other words, pushing a new external correlation id within the enter
@@ -368,15 +368,15 @@ typedef void (*rocprofiler_callback_tracing_cb_t)(rocprofiler_callback_tracing_r
                                                   void* callback_data) ROCPROFILER_NONNULL(2);
 
 /**
- * @brief Callback function for mapping @ref rocprofiler_callback_tracing_kind_t ids to
+ * @brief Callback function for mapping ::rocprofiler_callback_tracing_kind_t ids to
  * string names. @see rocprofiler_iterate_callback_tracing_kind_names.
  */
 typedef int (*rocprofiler_callback_tracing_kind_cb_t)(rocprofiler_callback_tracing_kind_t kind,
                                                       void*                               data);
 
 /**
- * @brief Callback function for mapping the operations of a given @ref
- * rocprofiler_callback_tracing_kind_t to string names. @see
+ * @brief Callback function for mapping the operations of a given
+ * ::rocprofiler_callback_tracing_kind_t to string names. @see
  * rocprofiler_iterate_callback_tracing_kind_operation_names.
  */
 typedef int (*rocprofiler_callback_tracing_kind_operation_cb_t)(
@@ -417,12 +417,12 @@ typedef int (*rocprofiler_callback_tracing_operation_args_cb_t)(
 /**
  * @brief Configure Callback Tracing Service. The callback tracing service provides two synchronous
  * callbacks around an API function on the same thread as the application which is invoking the API
- * function. This function can only be invoked once per @ref
- * rocprofiler_callback_tracing_kind_t value, i.e. it can be invoked once for the HSA API,
- * once for the HIP API, and so on but it will fail if it is invoked for the HSA API twice. Please
- * note, the callback API does have the potentially non-trivial overhead of copying the function
- * arguments into the record. If you are willing to let rocprofiler record the timestamps, do not
- * require synchronous notifications of the API calls, and want to lowest possible overhead, use the
+ * function. This function can only be invoked once per ::rocprofiler_callback_tracing_kind_t value,
+ * i.e. it can be invoked once for the HSA API, once for the HIP API, and so on but it will fail if
+ * it is invoked for the HSA API twice. Please note, the callback API does have the potentially
+ * non-trivial overhead of copying the function arguments into the record. If you are willing to let
+ * rocprofiler record the timestamps, do not require synchronous notifications of the API calls, and
+ * want to lowest possible overhead, use the
  * @see BUFFER_TRACING_SERVICE.
  *
  * @param [in] context_id Context to associate the service with
@@ -435,12 +435,12 @@ typedef int (*rocprofiler_callback_tracing_operation_args_cb_t)(
  * @param [in] callback_args Data provided to every invocation of the callback function
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED Invoked outside of the initialization
- * function in @ref rocprofiler_tool_configure_result_t provided to rocprofiler via @ref
- * rocprofiler_configure function
+ * function in ::rocprofiler_tool_configure_result_t provided to rocprofiler via
+ * ::rocprofiler_configure function
  * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND The provided context is not valid/registered
- * @retval ::ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED if the same @ref
- * rocprofiler_callback_tracing_kind_t value is provided more than once (per context) -- in
- * other words, we do not support overriding or combining the operations in separate function calls.
+ * @retval ::ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED if the same
+ * ::rocprofiler_callback_tracing_kind_t value is provided more than once (per context) -- in other
+ * words, we do not support overriding or combining the operations in separate function calls.
  *
  */
 rocprofiler_status_t
@@ -496,8 +496,8 @@ rocprofiler_query_callback_tracing_kind_operation_name(rocprofiler_callback_trac
  * @brief Iterate over all the mappings of the callback tracing kinds and get a callback for each
  * kind.
  *
- * @param [in] callback Callback function invoked for each enumeration value in @ref
- * rocprofiler_callback_tracing_kind_t with the exception of the `NONE` and `LAST` values.
+ * @param [in] callback Callback function invoked for each enumeration value in
+ * ::rocprofiler_callback_tracing_kind_t with the exception of the `NONE` and `LAST` values.
  * @param [in] data User data passed back into the callback
  * @return ::rocprofiler_status_t
  */
@@ -506,13 +506,13 @@ rocprofiler_iterate_callback_tracing_kinds(rocprofiler_callback_tracing_kind_cb_
                                            void* data) ROCPROFILER_API ROCPROFILER_NONNULL(1);
 
 /**
- * @brief Iterates over all the mappings of the operations for a given @ref
- * rocprofiler_callback_tracing_kind_t and invokes the callback with the kind id, operation
- * id, and user-provided data.
+ * @brief Iterates over all the mappings of the operations for a given
+ * ::rocprofiler_callback_tracing_kind_t and invokes the callback with the kind id, operation id,
+ * and user-provided data.
  *
  * @param [in] kind which tracing callback kind operations to iterate over
- * @param [in] callback Callback function invoked for each operation associated with @ref
- * rocprofiler_callback_tracing_kind_t with the exception of the `NONE` and `LAST` values.
+ * @param [in] callback Callback function invoked for each operation associated with
+ * ::rocprofiler_callback_tracing_kind_t with the exception of the `NONE` and `LAST` values.
  * @param [in] data User data passed back into the callback
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND Invalid domain id

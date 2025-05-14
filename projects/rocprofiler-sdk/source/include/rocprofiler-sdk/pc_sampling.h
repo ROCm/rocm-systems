@@ -255,10 +255,10 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_t
     /// @var code_object_offset
     /// @brief If @ref code_object_id is different than ::ROCPROFILER_CODE_OBJECT_ID_NONE,
     /// then this field contains the offset of the sampled PC relative to the
-    /// ::rocprofiler_callback_tracing_code_object_load_data_t::load_base
+    /// ::rocprofiler_callback_tracing_code_object_load_data_t.load_base
     /// of the code object instance with @ref code_object_id.
     /// To calculate the original virtual address of the sampled PC, one can add the value
-    /// of this field to the ::rocprofiler_callback_tracing_code_object_load_data_t::load_base.
+    /// of this field to the ::rocprofiler_callback_tracing_code_object_load_data_t.load_base.
     /// The value of @ref code_object_offset matches
     /// the virtual address of the sampled instruction (PC), only if the
     /// @ref code_object_id is equal to the ::ROCPROFILER_CODE_OBJECT_ID_NONE.
@@ -270,7 +270,7 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_t
 typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_record_host_trap_v0_t
 {
     uint64_t                           size;         ///< Size of this struct
-    rocprofiler_pc_sampling_hw_id_v0_t hw_id;        ///< @see ::rocprofiler_pc_sampling_hw_id_0_t
+    rocprofiler_pc_sampling_hw_id_v0_t hw_id;        ///< @see ::rocprofiler_pc_sampling_hw_id_v0_t
     rocprofiler_pc_t                   pc;           ///< information about sampled program counter
     uint64_t                           exec_mask;    ///< active SIMD lanes when sampled
     uint64_t                           timestamp;    ///< timestamp when sample is generated
@@ -355,7 +355,6 @@ typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_pc_sampling_instruction_no
     /// @brief Arbiter issued an instruction, but the execution pipe pushed it back from execution.
     /// @var ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_OTHER_WAIT
     /// @brief Other types of wait (e.g., wait for XNACK acknowledgment).
-
 } rocprofiler_pc_sampling_instruction_not_issued_reason_t;
 
 /**

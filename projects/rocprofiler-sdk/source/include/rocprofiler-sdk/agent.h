@@ -72,8 +72,8 @@ typedef struct rocprofiler_agent_io_link_t
     HSA_IOLINKTYPE type;                 ///< Discoverable IoLink Properties (optional)
     uint32_t       version_major;        ///< Bus interface version (optional)
     uint32_t       version_minor;        ///< Bus interface version (optional)
-    uint32_t       node_from;            ///< See @ref rocprofiler_agent_id_t
-    uint32_t       node_to;              ///< See @ref rocprofiler_agent_id_t
+    uint32_t       node_from;            ///< See ::rocprofiler_agent_id_t
+    uint32_t       node_to;              ///< See ::rocprofiler_agent_id_t
     uint32_t       weight;               ///< weight factor (derived from CDIT)
     uint32_t       min_latency;          ///< minimum cost of time to transfer (rounded to ns)
     uint32_t       max_latency;          ///< maximum cost of time to transfer (rounded to ns)
@@ -183,27 +183,25 @@ typedef struct rocprofiler_agent_v0_t
     uint32_t max_engine_clk_fcompute;    ///< GPU only. Maximum engine clocks for GPU, including any
                                          ///< boost capabilities
     HSA_ENGINE_VERSION sdma_fw_version;  ///< GPU only
-    HSA_ENGINE_ID
-    fw_version;  ///< GPU only. Identifier (rev) of the GPU uEngine or Firmware, may be 0
-    HSA_CAPABILITY capability;        ///< GPU only
-    uint32_t       cu_per_engine;     ///< computed
-    uint32_t       max_waves_per_cu;  ///< computed
-    uint32_t       family_id;         ///< Family code
+    HSA_ENGINE_ID      fw_version;
+    HSA_CAPABILITY     capability;        ///< GPU only
+    uint32_t           cu_per_engine;     ///< computed
+    uint32_t           max_waves_per_cu;  ///< computed
+    uint32_t           family_id;         ///< Family code
     uint32_t workgroup_max_size;  ///< GPU only. Maximum total number of work-items in a work-group.
-    uint32_t grid_max_size;   ///< GPU only. Maximum number of fbarriers per work-group. Must be at
-                              ///< least 32.
-    uint64_t local_mem_size;  ///< GPU only. Local memory size
-    uint64_t hive_id;  ///< XGMI Hive the GPU node belongs to in the system. It is an opaque and
-                       ///< static number hash created by the PSP
+    uint32_t grid_max_size;  ///< GPU only. Maximum number of fbarriers per work-group. Must be at
+                             ///< least 32.
+    uint64_t           local_mem_size;  ///< GPU only. Local memory size
+    uint64_t           hive_id;
     uint64_t           gpu_id;             ///< GPU only. KFD identifier
     rocprofiler_dim3_t workgroup_max_dim;  ///< GPU only.  Maximum number of work-items of each
                                            ///< dimension of a work-group.
     rocprofiler_dim3_t grid_max_dim;  ///< GPU only. Maximum number of work-items of each dimension
                                       ///< of a grid.
-    const rocprofiler_agent_mem_bank_t*   mem_banks;
-    const rocprofiler_agent_cache_t*      caches;
-    const rocprofiler_agent_io_link_t*    io_links;
-    const char*                           name;
+    const rocprofiler_agent_mem_bank_t*   mem_banks;     ///< array of memory bank info
+    const rocprofiler_agent_cache_t*      caches;        ///< array of cache info
+    const rocprofiler_agent_io_link_t*    io_links;      ///< array of IO link info
+    const char*                           name;          ///< name of the agent
     const char*                           vendor_name;   ///< Vendor of agent (will be AMD)
     const char*                           product_name;  ///< Marketing name
     const char*                           model_name;
@@ -213,6 +211,13 @@ typedef struct rocprofiler_agent_v0_t
     rocprofiler_agent_runtime_visiblity_t runtime_visibility;
     rocprofiler_uuid_t                    uuid;  ///< GPU only. Universally unique identifier.
 
+    /// @var fw_version
+    /// @brief GPU only. Identifier (rev) of the GPU uEngine or Firmware, may be 0
+    ///
+    /// @var hive_id
+    /// @brief XGMI Hive the GPU node belongs to in the system. It is an opaque and
+    /// static number hash created by the PSP
+    ///
     /// @var name
     /// @brief Name of the agent. Will be identical to product name for CPU
     ///
@@ -234,7 +239,8 @@ typedef struct rocprofiler_agent_v0_t
     /// at runtime (i.e. HIP_VISIBLE_DEVICES and ROCR_VISIBLE_DEVICES) which start at zero and only
     /// apply to GPUs, e.g., logical_node_type_id value for first GPU will be 0, second GPU will
     /// have value of 1, etc., regardless of however many agents of a different type preceeded (and
-    /// thus increased the ::node_id or ::logical_node_id).
+    /// thus increased the ::rocprofiler_agent_v0_t.node_id or
+    /// ::rocprofiler_agent_v0_t.logical_node_id).
     ///
     /// Example: a system with 2 CPUs and 2 GPUs, where the node ids are 0=CPU, 1=GPU, 2=CPU, 3=GPU,
     /// then then CPU node_ids 0 and 2 would have logical_node_type_id values of 0 and 1,
@@ -242,13 +248,17 @@ typedef struct rocprofiler_agent_v0_t
     /// and 1.
     ///
     /// @var runtime_visibility
-    /// @brief See @rocprofiler_runtime_library_t. This is an estimate about whether this agent will
-    /// be visible for the runtimes, e.g. if (agent.runtime_visibility & ROCPROFILER_HIP_LIBRARY) !=
-    /// 0 then we believe this agent will be visible to the HIP library. However, this is an
-    /// estimate and we cannot be certain until the HIP runtime is initialized. This will always be
-    /// true for CPU agents.
+    /// @brief See ::rocprofiler_runtime_library_t. This is an estimate about whether this agent
+    /// will be visible for the runtimes, e.g. if (`::rocprofiler_agent_t.runtime_visibility &
+    /// ::ROCPROFILER_HIP_LIBRARY) != 0` then we believe this agent will be visible to the HIP
+    /// library. However, this is an estimate and we cannot be certain until the HIP runtime is
+    /// initialized. This will always be true for CPU agents.
 } rocprofiler_agent_v0_t;
 
+/**
+ * @brief Typedef for the current ::rocprofiler_agent_version_t
+ *
+ */
 typedef rocprofiler_agent_v0_t rocprofiler_agent_t;
 
 /**

@@ -40,7 +40,7 @@ ROCPROFILER_EXTERN_C_INIT
  *        be used across many contexts. The config has a fixed set of counters
  *        that are collected (and specified by counter_list). The available
  *        counters for an agent can be queried using
- *        @ref rocprofiler_iterate_agent_supported_counters. An existing config
+ *        ::rocprofiler_iterate_agent_supported_counters. An existing config
  *        may be supplied via config_id to use as a base for the new config.
  *        All counters in the existing config will be copied over to the new
  *        config. The existing config will remain unmodified and usable with

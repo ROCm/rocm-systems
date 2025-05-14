@@ -65,7 +65,7 @@ TIMESTAMP              = NO
 #---------------------------------------------------------------------------
 # Build related configuration options
 #---------------------------------------------------------------------------
-EXTRACT_ALL            = YES
+EXTRACT_ALL            = NO
 EXTRACT_PRIVATE        = NO
 EXTRACT_PRIV_VIRTUAL   = NO
 EXTRACT_PACKAGE        = NO
@@ -73,9 +73,9 @@ EXTRACT_STATIC         = NO
 EXTRACT_LOCAL_CLASSES  = YES
 EXTRACT_LOCAL_METHODS  = NO
 EXTRACT_ANON_NSPACES   = NO
-RESOLVE_UNNAMED_PARAMS = YES
+RESOLVE_UNNAMED_PARAMS = NO
 HIDE_UNDOC_MEMBERS     = NO
-HIDE_UNDOC_CLASSES     = YES
+HIDE_UNDOC_CLASSES     = NO
 HIDE_FRIEND_COMPOUNDS  = NO
 HIDE_IN_BODY_DOCS      = NO
 INTERNAL_DOCS          = NO
@@ -84,8 +84,8 @@ HIDE_SCOPE_NAMES       = NO
 HIDE_COMPOUND_REFERENCE= NO
 SHOW_HEADERFILE        = YES
 SHOW_INCLUDE_FILES     = YES
-SHOW_GROUPED_MEMB_INC  = NO
-FORCE_LOCAL_INCLUDES   = YES
+SHOW_GROUPED_MEMB_INC  = YES
+FORCE_LOCAL_INCLUDES   = NO
 INLINE_INFO            = YES
 SORT_MEMBER_DOCS       = YES
 SORT_BRIEF_DOCS        = NO
@@ -110,12 +110,12 @@ CITE_BIB_FILES         =
 #---------------------------------------------------------------------------
 QUIET                  = YES
 WARNINGS               = YES
-WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_UNDOCUMENTED   = NO
 WARN_IF_DOC_ERROR      = YES
 WARN_IF_INCOMPLETE_DOC = YES
 WARN_NO_PARAMDOC       = YES
 WARN_IF_UNDOC_ENUM_VAL = NO
-WARN_AS_ERROR          = NO
+WARN_AS_ERROR          = YES
 WARN_FORMAT            = "---> WARNING! $file:$line: $text"
 WARN_LINE_FORMAT       = "at line $line of file $file"
 WARN_LOGFILE           =
@@ -148,21 +148,22 @@ EXCLUDE_PATTERNS       = */.git/* \
                          @SOURCE_DIR@/**/cmake/* \
                          @SOURCE_DIR@/**/external/* \
                          @SOURCE_DIR@/**/RPM/* \
-                         @SOURCE_DIR@/**/ISSUE_TEMPLATE/*
-
+                         @SOURCE_DIR@/**/ISSUE_TEMPLATE/* \
+                         @SOURCE_DIR@/**/rocprofiler-sdk/**/* \
+                         @SOURCE_DIR@/**/rocprofiler-sdk-roctx/api_trace.h
 EXCLUDE_SYMBOLS        = "std::*" \
-                         "ROCPROFILER_ATTRIBUTE" \
-                         "ROCPROFILER_API" \
-                         "ROCPROFILER_NONNULL" \
-                         "ROCPROFILER_PUBLIC_API" \
-                         "ROCPROFILER_HIDDEN_API" \
-                         "ROCPROFILER_EXPORT_DECORATOR" \
-                         "ROCPROFILER_IMPORT_DECORATOR" \
-                         "ROCPROFILER_EXPORT" \
-                         "ROCPROFILER_IMPORT" \
-                         "ROCPROFILER_HANDLE_LITERAL" \
-                         "ROCPROFILER_EXTERN_C_INIT" \
-                         "ROCPROFILER_EXTERN_C_FINI"
+                         "ROCTX_ATTRIBUTE" \
+                         "ROCTX_API" \
+                         "ROCTX_NONNULL" \
+                         "ROCTX_PUBLIC_API" \
+                         "ROCTX_HIDDEN_API" \
+                         "ROCTX_EXPORT_DECORATOR" \
+                         "ROCTX_IMPORT_DECORATOR" \
+                         "ROCTX_EXPORT" \
+                         "ROCTX_IMPORT" \
+                         "ROCTX_HANDLE_LITERAL" \
+                         "ROCTX_EXTERN_C_INIT" \
+                         "ROCTX_EXTERN_C_FINI"
 EXAMPLE_PATH           = @SOURCE_DIR@/samples
 EXAMPLE_PATTERNS       = *.h \
                          *.hh \
@@ -177,7 +178,7 @@ INPUT_FILTER           =
 FILTER_PATTERNS        =
 FILTER_SOURCE_FILES    = NO
 FILTER_SOURCE_PATTERNS =
-USE_MDFILE_AS_MAINPAGE = 
+USE_MDFILE_AS_MAINPAGE =
 FORTRAN_COMMENT_AFTER  = 72
 #---------------------------------------------------------------------------
 # Configuration options related to source browsing
@@ -202,10 +203,10 @@ IGNORE_PREFIX          =
 GENERATE_HTML          = YES
 HTML_OUTPUT            = html
 HTML_FILE_EXTENSION    = .html
-HTML_HEADER            = 
-HTML_FOOTER            = 
-HTML_STYLESHEET        = 
-HTML_EXTRA_STYLESHEET  = 
+HTML_HEADER            =
+HTML_FOOTER            =
+HTML_STYLESHEET        =
+HTML_EXTRA_STYLESHEET  =
 HTML_EXTRA_FILES       =
 HTML_COLORSTYLE        = LIGHT
 HTML_COLORSTYLE_HUE    = 220
@@ -339,17 +340,17 @@ SEARCH_INCLUDES        = NO
 INCLUDE_PATH           = @SOURCE_DIR@/source/include
 INCLUDE_FILE_PATTERNS  = *.h \
                          *.hpp
-PREDEFINED             = "ROCPROFILER_API=" \
-                         "ROCPROFILER_EXPORT=" \
-                         "ROCPROFILER_IMPORT=" \
-                         "ROCPROFILER_NONNULL(...)=" \
-                         "ROCPROFILER_PUBLIC_API=" \
-                         "ROCPROFILER_HIDDEN_API=" \
-                         "ROCPROFILER_EXPORT_DECORATOR=" \
-                         "ROCPROFILER_IMPORT_DECORATOR=" \
-                         "ROCPROFILER_HANDLE_LITERAL=" \
-                         "ROCPROFILER_EXTERN_C_INIT=" \
-                         "ROCPROFILER_EXTERN_C_FINI=" \
+PREDEFINED             = "ROCTX_API=" \
+                         "ROCTX_EXPORT=" \
+                         "ROCTX_IMPORT=" \
+                         "ROCTX_NONNULL(...)=" \
+                         "ROCTX_PUBLIC_API=" \
+                         "ROCTX_HIDDEN_API=" \
+                         "ROCTX_EXPORT_DECORATOR=" \
+                         "ROCTX_IMPORT_DECORATOR=" \
+                         "ROCTX_HANDLE_LITERAL=" \
+                         "ROCTX_EXTERN_C_INIT=" \
+                         "ROCTX_EXTERN_C_FINI=" \
                          "__attribute__(x)=" \
                          "__declspec(x)=" \
                          "size_t=unsigned long" \

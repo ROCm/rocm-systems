@@ -99,7 +99,7 @@ rocprofiler_query_record_counter_id(rocprofiler_counter_instance_id_t id,
  * @brief (experimental) Query dimension position from record_id. If the dimension does not exist
  *        in the counter, the return will be 0.
  *
- * @param [in] id record id from @ref rocprofiler_counter_record_t
+ * @param [in] id record id from ::rocprofiler_counter_record_t
  * @param [in]  dim dimension for which positional info is requested (currently only
  *              0 is allowed, i.e. flat array without dimension).
  * @param [out] pos value of the dimension in id
@@ -115,7 +115,7 @@ rocprofiler_query_record_dimension_position(rocprofiler_counter_instance_id_t  i
  * @brief (experimental) Query Counter info such as name or description.
  *
  * @param [in] counter_id counter to get info for
- * @param [in] version Version of struct in info, see @ref rocprofiler_counter_info_version_id_t for
+ * @param [in] version Version of struct in info, see ::rocprofiler_counter_info_version_id_t for
  * available types
  * @param [out] info rocprofiler_counter_info_{version}_t struct to write info to.
  * @return ::rocprofiler_status_t
@@ -134,10 +134,10 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
  *
  * @param [in] agent_id Agent ID of the current callback
  * @param [in] counters An array of counters that are avialable on the agent
- *      @ref rocprofiler_iterate_agent_supported_counters was called on.
+ *      ::rocprofiler_iterate_agent_supported_counters was called on.
  * @param [in] num_counters Number of counters contained in counters
  * @param [in] user_data User data supplied by
- *      @ref rocprofiler_iterate_agent_supported_counters
+ *      ::rocprofiler_iterate_agent_supported_counters
  */
 ROCPROFILER_SDK_EXPERIMENTAL typedef rocprofiler_status_t (*rocprofiler_available_counters_cb_t)(
     rocprofiler_agent_id_t    agent_id,
