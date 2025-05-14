@@ -71,8 +71,7 @@ void TestEvtNotifReadWrite::Run(void) {
 
   if (setup_failed_) {
      IF_VERB(STANDARD) {
-        std::cout << "** SetUp Failed for this test. Skipping.**" <<
-                                                                    std::endl;
+        std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
      }
     return;
   }

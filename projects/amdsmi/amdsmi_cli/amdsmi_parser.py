@@ -1370,7 +1370,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         partition_help = "Displays partition information of the devices"
         partition_subcommand_help = "If no GPU is specified, returns information for all GPUs on the system.\
                                 \nIf no partition argument is provided, all partition information will be displayed."
-        partition_optionals_title = "partition arguments"
+        partition_optionals_title = "Partition arguments"
 
         # Options help text
         current_help = "display the current partition information"
@@ -1403,12 +1403,13 @@ class AMDSMIParser(argparse.ArgumentParser):
         All parameters are provided via options; no positional arguments or optional --file/--gpu are used.
         """
         # Subparser help text
-        ras_help = "Retrieve CPER (RAS) entries from the driver"
+        ras_help = "Retrieve RAS (CPER) entries from the driver"
         ras_description = (
-            "Retrieve and decode CPER (RAS) entries from the kernel driver.\n"
+            "Retrieve and decode RAS (CPER) entries from the kernel driver.\n"
             "Supports filtering by severity, exporting to different formats, and continuous monitoring.\n"
             "This command accepts options only; no positional arguments are required."
         )
+        ras_optionals_title = "RAS arguments"
 
         # Help text for RAS arguments
         cper_help = "Trigger CPER data retrieval"
@@ -1421,6 +1422,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         follow_help = "Continuously monitor for new entries"
 
         ras_parser = subparsers.add_parser("ras", help=ras_help, description=ras_description)
+        ras_parser._optionals.title = ras_optionals_title
         ras_parser.formatter_class = lambda prog: AMDSMISubparserHelpFormatter(prog)
         ras_parser.set_defaults(func=func)
 

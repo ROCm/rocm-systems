@@ -16,6 +16,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **The `amd-smi topology` command has been enabled for Guest environments**.  
   - `amd-smi topology` is now availabe in Guest environments. This includes full functionality so users can use the command just as they would in Bare Metal environments.
 
+- **Updated `amdsmi_get_clock_info` in `amdsmi_interface.py`**.  
+  - The `clk_deep_sleep` field now returns the sleep integer value.  
+
 ### Removed
 
 ### Optimized
