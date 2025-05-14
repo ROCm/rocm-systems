@@ -360,7 +360,7 @@ bool RegionMemory::Freeze() {
 
   // Invalidate agent caches which may hold lines of the new allocation.
   if (is_code_ && (region_->owner()->device_type() == core::Agent::kAmdGpuDevice))
-    ((AMD::GpuAgent*)region_->owner())->InvalidateCodeCaches();
+    ((AMD::GpuAgent*)region_->owner())->InvalidateCodeCaches(ptr_, size_);
 
   return true;
 }

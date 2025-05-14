@@ -81,6 +81,8 @@
 #  define PM4_ACQUIRE_MEM_COHER_CNTL_SH_ICACHE_ACTION_ENA  (1 << 29)
 #define PM4_ACQUIRE_MEM_DW2_COHER_SIZE(x)                  (((x) & 0xFFFFFFFF) << 0)
 #define PM4_ACQUIRE_MEM_DW3_COHER_SIZE_HI(x)               (((x) & 0xFF) << 0)
+#define PM4_ACQUIRE_MEM_DW4_COHER_BASE(x)                  ((x >> 8) & 0xFFFFFFFF)
+#define PM4_ACQUIRE_MEM_DW4_COHER_BASE_HI(x)               ((x >> 40) & 0xFFFFFF)
 #define PM4_ACQUIRE_MEM_DW7_GCR_CNTL(x)                    (((x) & 0x7FFFF) << 0)
 #  define PM4_ACQUIRE_MEM_GCR_CNTL_GLI_INV(x)              (((x) & 0x3) << 0)
 #  define PM4_ACQUIRE_MEM_GCR_CNTL_GLK_INV                 (1 << 7)
