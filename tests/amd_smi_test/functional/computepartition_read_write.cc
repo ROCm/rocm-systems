@@ -386,6 +386,7 @@ void TestComputePartitionReadWrite::Run(void) {
     std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
     return;
   }
+
   bool isVerbose = (this->verbosity() &&
         this->verbosity() >= (this->TestBase::VERBOSE_STANDARD)) ? true: false;
   // Confirm system supports compute partition, before executing wait
