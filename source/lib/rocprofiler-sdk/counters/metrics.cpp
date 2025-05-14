@@ -107,6 +107,7 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
 {
     // Stores metrics that are added via the API
     static MetricMap added_metrics;
+    YAML::Node       append_yaml;
 
     MetricMap ret;
     auto      override = getCustomCounterDefinition().wlock([&](auto& data) {
@@ -121,62 +122,53 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
         std::ifstream file(filename);
         counter_data << file.rdbuf();
     }
-
-    if(!override.data.empty())
+    else
     {
         ROCP_INFO << "Adding Override Config Data: " << override.data;
         counter_data << override.data;
     }
 
     auto     yaml       = YAML::Load(counter_data.str());
+    auto     header     = yaml["rocprofiler-sdk"]["counters"];
     uint64_t current_id = 0;
-
-    for(auto it = yaml.begin(); it != yaml.end(); ++it)
+    if(!override.data.empty() && override.append)
     {
-        auto counter_name = it->first.as<std::string>();
-        if(counter_name == "schema-version") continue;
-        auto counter_def  = it->second;
-        auto def_iterator = counter_def["architectures"];
-
-        for(auto def_it = def_iterator.begin(); def_it != def_iterator.end(); ++def_it)
+        append_yaml = YAML::Load(override.data);
+        if(append_yaml["rocprofiler-sdk"] && append_yaml["rocprofiler-sdk"]["counters"])
         {
-            auto archs = def_it->first.as<std::string>();
-            auto def   = def_it->second;
-            // To save space in the YAML file, we combine architectures with the same
-            // definition into a single entry. Split these out into separate entries.
-            // architectures:
-            //     gfx10/gfx1010/gfx1030/gfx1031/.....9:
-            //     expression: 400*SQ_WAIT_INST_LDS/SQ_WAVES/GRBM_GUI_ACTIVE
-            std::vector<std::string> result;
-            std::stringstream        ss(archs);
-            std::string              arch_name;
-
-            while(std::getline(ss, arch_name, '/'))
+            for(const auto& counter : append_yaml["rocprofiler-sdk"]["counters"])
             {
-                auto& metricVec = ret.emplace(arch_name, std::vector<Metric>()).first->second;
+                header.push_back(counter);
+            }
+        }
+    }
+
+    for(const auto& counter : header)
+    {
+        auto counter_name = counter["name"].as<std::string>();
+        auto description  = counter["description"].as<std::string>();
+        for(const auto& definition : counter["definitions"])
+        {
+            for(const auto& arch : definition["architectures"])
+            {
+                auto& metricVec =
+                    ret.emplace(arch.as<std::string>(), std::vector<Metric>()).first->second;
                 if(metricVec.empty())
                 {
                     const auto constants = get_constants(current_id);
                     metricVec.insert(metricVec.end(), constants.begin(), constants.end());
                     current_id += constants.size();
                 }
-
-                std::string description;
-                if(def["description"])
-                    description = def["description"].as<std::string>();
-                else if(counter_def["description"])
-                    description = counter_def["description"].as<std::string>();
                 metricVec.emplace_back(
-                    arch_name,
+                    arch.as<std::string>(),
                     counter_name,
-                    (def["block"] ? def["block"].as<std::string>() : ""),
-                    (def["event"] ? def["event"].as<std::string>() : ""),
+                    (definition["block"] ? definition["block"].as<std::string>() : ""),
+                    (definition["event"] ? definition["event"].as<std::string>() : ""),
                     description,
-                    (def["expression"] ? def["expression"].as<std::string>() : ""),
+                    (definition["expression"] ? definition["expression"].as<std::string>() : ""),
                     "",
                     current_id);
                 current_id++;
-                ROCP_TRACE << fmt::format("Inserted info {}: {}", arch_name, metricVec.back());
             }
         }
     }

@@ -85,7 +85,7 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
        | ``--hsa-trace`` [BOOL] |br| |br| |br| |br| |br| |br| |br| |br|
        | ``--rccl-trace`` [BOOL] |br| |br| |br| |br|
        | ``--kokkos-trace`` [BOOL] |br| |br| |br| |br|
-       | ``--rocdecode-trace`` [BOOL] 
+       | ``--rocdecode-trace`` [BOOL]
      - | Combination of ``--hip-runtime-trace`` and ``--hip-compiler-trace``. This option only enables the HIP API tracing. Unlike previous iterations of ``rocprof``, this option doesn't enable kernel tracing, memory copy tracing, and so on. |br| |br|
        | Collects marker (ROCTx) traces. Similar to ``--roctx-trace`` option in earlier ``rocprof`` versions, but with improved ``ROCTx`` library with more features. |br| |br|
        | Collects kernel dispatch traces. |br| |br|
@@ -170,7 +170,7 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
    * - Other
      - | ``--preload`` PRELOAD  |br| |br|
        | ``--minimum-output-data`` |br| |br|
-       | ``--disable-signal-handlers`` 
+       | ``--disable-signal-handlers``
      - | Specifies libraries to prepend to ``LD_PRELOAD``. It is useful for sanitizer libraries. |br| |br|
        | Output files are generated only if output data size is greater than minimum output data size. It can be used for controlling the generation of output files so that user don't recieve empty files. The input is in KB units. |br| |br|
        | Disables the signal handlers in the rocprofv3 tool. It disables the prioritizing of rocprofv3 signal handler over application installed signal handler. When --disable-signal-handlers is set to true, and application has its signal handler on SIGSEGV or similar installed, then its signal handler will be used not the rocprofv3 signal handler. Note: glog still installs signal handlers which provide backtraces.
@@ -894,17 +894,47 @@ While the basic counters and derived metrics are available for collection by def
 
 You can define the extra counters in a YAML file as shown:
 
-.. code-block:: shell
+.. code-block:: yaml
 
-   $ cat extra_counters.yaml
+    rocprofiler-sdk:
+      counters-schema-version: 1
+      counters:
+        - name: GRBM_GUI_ACTIVE_SUM
+          description: "Unit: cycles"
+          properties: []
+          definitions:
+            - architectures:
+                - gfx10
+                - gfx1010
+                - gfx1030
+                - gfx1031
+                - gfx1032
+                - gfx11
+                - gfx1100
+                - gfx1101
+                - gfx1102
+                - gfx9
+                - gfx906
+                - gfx908
+                - gfx90a
+                - gfx942
+              expression: reduce(GRBM_GUI_ACTIVE,max)*CU_NUM
+        - name: CPC_CPC_STAT_BUSY
+          description: CPC Busy.
+          properties: []
+          definitions:
+            - architectures:
+                - gfx940
+                - gfx941
+              block: CPC
+              event: 25
 
-   GRBM_GUI_ACTIVE_SUM:
-      architectures:
-         gfx942/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx90a/gfx9:
-      expression: reduce(GRBM_GUI_ACTIVE,max)*CU_NUM
-      description: 'Unit: cycles'
+Please note, the above sample uses the ``CPC_CPC_STAT_BUSY`` counter definition for the ``gfx940``
+and ``gfx941`` architectures to demonstrate the YAML schema when counters have different
+architecture-specific definitions.
 
-To collect the extra counters defined in the `extra_counters.yaml` file , use:
+If this YAML is placed in a ``extra_counters.yaml`` file, to collect the extra counters defined
+in the ``extra_counters.yaml`` file, use the ``-E`` / ``--extra-counters`` option:
 
 .. code-block:: shell
 
@@ -1021,7 +1051,7 @@ The generated Perfetto trace file can be opened in the `Perfetto UI <https://ui.
 You can also combine this with the system trace option to get a more comprehensive view of the system's performance. For example, you can use the following command to collect both system trace and performance counter data:
 
 .. code-block:: bash
-   
+
   rocprofv3 --pmc SQ_WAVES GRBM_COUNT --sys-trace --output-format pftrace -- <application_path>
 
 .. image:: /data/perfetto_counters.png
