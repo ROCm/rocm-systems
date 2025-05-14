@@ -672,12 +672,12 @@ amdsmi_get_gpu_enumeration_info(amdsmi_processor_handle processor_handle,
     uint64_t device_uuid = 0;
     std::string hip_uuid_str;
     status = rsmi_wrapper(rsmi_dev_unique_id_get, processor_handle, 0, &device_uuid);
-    ss_uuid << "GPU-" << std::hex << device_uuid;
+    ss_uuid << "GPU-" << std::hex << std::setw(16) << std::setfill('0') << device_uuid;
     hip_uuid_str = ss_uuid.str();
     smi_clear_char_and_reinitialize(info->hip_uuid, AMDSMI_MAX_STRING_LENGTH, hip_uuid_str);
 
     ss << "; device_uuid (dec): " << device_uuid << "\n"
-       << "; device_uuid (hex): 0x" << std::hex << device_uuid << std::dec << "\n"
+       << "; device_uuid (hex): 0x" << std::hex << std::setw(16) << std::setfill('0') << device_uuid << std::dec << "\n"
        << "; rsmi_dev_unique_id_get() status: "
        << smi_amdgpu_get_status_string(status, false) << "\n";
     LOG_INFO(ss);
@@ -1520,11 +1520,11 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
     // Ensure asic_serial defaults to an unsupported value
     std::string max_uint64_str = "ffffffffffffffff";
     smi_clear_char_and_reinitialize(info->asic_serial, AMDSMI_MAX_STRING_LENGTH, max_uint64_str);
-    uint64_t dv_uid = 0;
-    status = rsmi_wrapper(rsmi_dev_unique_id_get, processor_handle, 0, &dv_uid);
+    uint64_t device_uuid = 0;
+    status = rsmi_wrapper(rsmi_dev_unique_id_get, processor_handle, 0, &device_uuid);
     if (status == AMDSMI_STATUS_SUCCESS) {
         ss.clear();
-        ss << std::hex << dv_uid;
+        ss << std::hex << std::setw(16) << std::setfill('0') << device_uuid;
         std::string asic_serial_str = ss.str();
         ss.clear();
         smi_clear_char_and_reinitialize(info->asic_serial, AMDSMI_MAX_STRING_LENGTH,
