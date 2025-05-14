@@ -422,7 +422,7 @@ typedef struct rocprofiler_buffer_tracing_runtime_initialization_record_t
 } rocprofiler_buffer_tracing_runtime_initialization_record_t;
 
 /**
- * @brief Callback function for mapping @ref rocprofiler_buffer_tracing_kind_t ids to
+ * @brief Callback function for mapping ::rocprofiler_buffer_tracing_kind_t ids to
  * string names. @see rocprofiler_iterate_buffer_trace_kind_names.
  */
 typedef int (*rocprofiler_buffer_tracing_kind_cb_t)(rocprofiler_buffer_tracing_kind_t kind,
@@ -522,6 +522,7 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
  * @param [in] callback Callback function invoked for each enumeration value in @ref
  * rocprofiler_buffer_tracing_kind_t with the exception of the `NONE` and `LAST` values.
  * @param [in] data User data passed back into the callback
+ * @return ::rocprofiler_status_t
  */
 rocprofiler_status_t
 rocprofiler_iterate_buffer_tracing_kinds(rocprofiler_buffer_tracing_kind_cb_t callback,
@@ -537,6 +538,7 @@ rocprofiler_iterate_buffer_tracing_kinds(rocprofiler_buffer_tracing_kind_cb_t ca
  * @param [in] callback Callback function invoked for each operation associated with @ref
  * rocprofiler_buffer_tracing_kind_t with the exception of the `NONE` and `LAST` values.
  * @param [in] data User data passed back into the callback
+ * @return ::rocprofiler_status_t
  */
 rocprofiler_status_t
 rocprofiler_iterate_buffer_tracing_kind_operations(
@@ -574,16 +576,17 @@ typedef int (*rocprofiler_buffer_tracing_operation_args_cb_t)(
 /**
  * @brief Iterates over all the arguments for the traced function (when available). This is
  * particularly useful when tools want to annotate traces with the function arguments. See
- * @example samples/api_buffer_tracing/client.cpp for a usage example.
+ * @example samples/api_buffered_tracing/client.cpp for a usage example.
  *
  * In contrast to ::rocprofiler_iterate_callback_tracing_kind_operation_args, this function
  * cannot dereference pointer arguments since there is a high probability that the pointer
  * address references the stack and the buffer tracing record is delivered after the
  * stack variables of the corresponding function have been destroyed.
  *
- * @param[in] record Buffer record
- * @param[in] callback The callback function which will be invoked for each argument
- * @param[in] user_data Data to be passed to each invocation of the callback
+ * @param [in] record Buffer record
+ * @param [in] callback The callback function which will be invoked for each argument
+ * @param [in] user_data Data to be passed to each invocation of the callback
+ * @return ::rocprofiler_status_t
  */
 rocprofiler_status_t
 rocprofiler_iterate_buffer_tracing_record_args(

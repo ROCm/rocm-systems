@@ -69,7 +69,7 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_dispatch_counting_servic
  * @brief (experimental) Kernel Dispatch Callback. This is a callback that is invoked before the
  * kernel is enqueued into the HSA queue. What counters to collect for a kernel are set via passing
  * back a profile config (config) in this callback. These counters will be collected and emplaced in
- * the buffer with @ref rocprofiler_buffer_id_t used when setting up this callback.
+ * the buffer with ::rocprofiler_buffer_id_t used when setting up this callback.
  *
  * @param [in] dispatch_data      @see ::rocprofiler_dispatch_counting_service_data_t
  * @param [out] config            Profile config detailing the counters to collect for this kernel
@@ -86,8 +86,8 @@ typedef void (*rocprofiler_dispatch_counting_service_cb_t)(
 /**
  * @brief (experimental) Counting record callback. This is a callback is invoked when the kernel
  *        execution is complete and contains the counter profile data requested in
- *        @ref rocprofiler_dispatch_counting_service_cb_t. Only used with
- *        @ref rocprofiler_configure_callback_dispatch_counting_service.
+ *        ::rocprofiler_dispatch_counting_service_cb_t. Only used with
+ *        ::rocprofiler_configure_callback_dispatch_counting_service.
  *
  * @param [in] dispatch_data      @see ::rocprofiler_dispatch_counting_service_data_t
  * @param [in] record_data        Counter record data.
@@ -113,14 +113,14 @@ typedef void (*rocprofiler_dispatch_counting_record_cb_t)(
  *        NOTE: Interface is up for comment as to whether restrictions
  *        on agent should be made here (limiting the CB based on agent)
  *        or if the restriction should be performed by the tool in
- *        @ref rocprofiler_dispatch_counting_service_cb_t (i.e.
+ *        ::rocprofiler_dispatch_counting_service_cb_t (i.e.
  *        tool code checking the agent param to see if they want to profile
  *        it).
  *
  *        Interface is up for comment as to whether restrictions
  *        on agent should be made here (limiting the CB based on agent)
  *        or if the restriction should be performed by the tool in
- *        @ref rocprofiler_dispatch_counting_service_cb_t (i.e.
+ *        ::rocprofiler_dispatch_counting_service_cb_t (i.e.
  *        tool code checking the agent param to see if they want to profile
  *        it).
  *

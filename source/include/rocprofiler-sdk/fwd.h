@@ -634,7 +634,7 @@ typedef struct rocprofiler_correlation_id_t
     /// @brief An ID specified by tools to associate external events.
     /// See include/rocprofiler-sdk/external_correlation.h
     /// @var ancestor
-    /// @brief Stores the ::internal value of the API call that generated this
+    /// @brief Stores the @ref internal value of the API call that generated this
     /// API call.
 } rocprofiler_correlation_id_t;
 
@@ -694,7 +694,7 @@ typedef struct rocprofiler_counter_id_t
  */
 typedef struct rocprofiler_counter_config_id_t
 {
-    uint64_t handle;  // Opaque handle
+    uint64_t handle;  ///< Opaque handle
 } rocprofiler_counter_config_id_t;
 
 /**
@@ -757,12 +757,16 @@ typedef struct rocprofiler_record_header_t
     {
         struct
         {
-            uint32_t category;  ///< ::rocprofiler_buffer_category_t
-            uint32_t kind;      ///< domain
+            /** @brief ::rocprofiler_buffer_category_t */
+            uint32_t category;
+            /** @brief domain */
+            uint32_t kind;
         };
-        uint64_t hash;  ///< generic identifier. You can compute this via: `uint64_t hash = category
-                        ///< | ((uint64_t)(kind) << 32)`, e.g.
+        /** @brief generic identifier. You can compute this via: `uint64_t hash = category |
+         * ((uint64_t)(kind) << 32)` */
+        uint64_t hash;
     };
+    /** @brief Pointer to data. Should be casted to data type based on category + kind */
     void* payload;
 } rocprofiler_record_header_t;
 

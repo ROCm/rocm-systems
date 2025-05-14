@@ -80,7 +80,7 @@ typedef void (*rocprofiler_intercept_library_cb_t)(rocprofiler_intercept_table_t
  * invocation of one of their public API functions), these runtimes will provide a table of function
  * pointers to the rocprofiler library via the rocprofiler-register library if the
  * `rocprofiler_configure` symbol is visible in the application's symbol table. The vast majority of
- * tools will want to use the ::CALLBACK_TRACING_SERVICE to trace these runtime APIs, however,
+ * tools will want to use the @ref CALLBACK_TRACING_SERVICE to trace these runtime APIs, however,
  * some tools may want or require installing their own intercept functions in lieu of receiving
  * these callbacks and those tools should use the ::rocprofiler_at_intercept_table_registration
  * to install their intercept functions. There are no restrictions to where or how early this

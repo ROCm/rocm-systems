@@ -24,12 +24,12 @@
 
 /**
  *
- * \file rocprofiler.h
- * \brief ROCProfiler-SDK API interface.
+ * @file rocprofiler.h
+ * @brief ROCProfiler-SDK API interface.
  *
- * \mainpage ROCProfiler-SDK API Specification
+ * @mainpage ROCProfiler-SDK API Specification
  *
- * \section introduction Introduction
+ * @section introduction Introduction
  * ROCprofiler-SDK is a library that implements the profiling and performance monitoring
  * capabilities for AMD's ROCm platform. It provides a comprehensive set of APIs for:
  *
@@ -84,6 +84,8 @@ ROCPROFILER_EXTERN_C_INIT
  * @param [out] major The major version number is stored if non-NULL.
  * @param [out] minor The minor version number is stored if non-NULL.
  * @param [out] patch The patch version number is stored if non-NULL.
+ * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_SUCCESS Always returned
  */
 rocprofiler_status_t
 rocprofiler_get_version(uint32_t* major, uint32_t* minor, uint32_t* patch) ROCPROFILER_API;
@@ -96,6 +98,8 @@ rocprofiler_get_version(uint32_t* major, uint32_t* minor, uint32_t* patch) ROCPR
  * compilation time. This function can be invoked before tool initialization.
  *
  * @param [out] info Pointer to version triplet struct which will be populated by the function call.
+ * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_SUCCESS Always returned
  */
 rocprofiler_status_t
 rocprofiler_get_version_triplet(rocprofiler_version_triplet_t* info) ROCPROFILER_API
@@ -142,6 +146,8 @@ ROCPROFILER_EXTERN_C_INIT
  * @fn rocprofiler_status_t rocprofiler_get_timestamp(rocprofiler_timestamp_t* ts)
  * @brief Get the timestamp value that rocprofiler uses
  * @param [out] ts Output address of the rocprofiler timestamp value
+ * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_SUCCESS Always returned
  */
 rocprofiler_status_t
 rocprofiler_get_timestamp(rocprofiler_timestamp_t* ts) ROCPROFILER_API ROCPROFILER_NONNULL(1);
@@ -150,24 +156,26 @@ rocprofiler_get_timestamp(rocprofiler_timestamp_t* ts) ROCPROFILER_API ROCPROFIL
  * @fn rocprofiler_status_t rocprofiler_get_thread_id(rocprofiler_thread_id_t* tid)
  * @brief Get the identifier value of the current thread that is used by rocprofiler
  * @param [out] tid Output address of the rocprofiler thread id value
+ * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_SUCCESS Always returned
  */
 rocprofiler_status_t
 rocprofiler_get_thread_id(rocprofiler_thread_id_t* tid) ROCPROFILER_API ROCPROFILER_NONNULL(1);
 
 /**
  * @fn const char* rocprofiler_get_status_name(rocprofiler_status_t status)
- * @brief Return the string encoding of @ref rocprofiler_status_t value
+ * @brief Return the string encoding of ::rocprofiler_status_t value
  * @param [in] status error code value
- * @return Will return a nullptr if invalid/unsupported @ref rocprofiler_status_t value is provided.
+ * @return Will return a nullptr if invalid/unsupported ::rocprofiler_status_t value is provided.
  */
 const char*
 rocprofiler_get_status_name(rocprofiler_status_t status) ROCPROFILER_API;
 
 /**
  * @fn const char* rocprofiler_get_status_string(rocprofiler_status_t status)
- * @brief Return the message associated with @ref rocprofiler_status_t value
+ * @brief Return the message associated with ::rocprofiler_status_t value
  * @param [in] status error code value
- * @return Will return a nullptr if invalid/unsupported @ref rocprofiler_status_t value is provided.
+ * @return Will return a nullptr if invalid/unsupported ::rocprofiler_status_t value is provided.
  */
 const char*
 rocprofiler_get_status_string(rocprofiler_status_t status) ROCPROFILER_API;

@@ -41,17 +41,6 @@ def build_doxyfile():
     )
 
 
-def configure_version_header():
-    sp.run(
-        [
-            "cmake",
-            f"-S {_srcdir}/source/include/rocprofiler-sdk",
-            f"-B {_srcdir}/source/include/rocprofiler-sdk",
-        ]
-    )
-
-
-configure_version_header()
 build_doxyfile()
 
 # -- Project information -----------------------------------------------------
@@ -78,7 +67,7 @@ doxygen_root = "."
 doxysphinx_enabled = True
 doxygen_project = {
     "name": "rocprofiler-sdk",
-    "path": "_doxygen",
+    "path": "_doxygen/rocprofiler-sdk/xml",
 }
 doxyfile = "rocprofiler-sdk.dox"
 

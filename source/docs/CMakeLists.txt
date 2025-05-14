@@ -5,7 +5,7 @@ if(NOT ROCPROFILER_BUILD_DOCS)
     return()
 endif()
 
-set(PACKAGE_NAME ${PROJECT_NAME}-sdk)
+set(PACKAGE_NAME ${PROJECT_NAME})
 
 include(FetchContent)
 
@@ -124,23 +124,23 @@ doxygen rocprofiler-sdk-roctx.dox
 doxysphinx build \${WORK_DIR} \${WORK_DIR}/_build/html \${WORK_DIR}/_doxygen/rocprofiler-sdk/html
 doxysphinx build \${WORK_DIR} \${WORK_DIR}/_build/html \${WORK_DIR}/_doxygen/roctx/html
 
-make html SPHINXOPTS=\"-W --keep-going ${DOCS_BUILD_JOBS} -n\"
+make html SPHINXOPTS=\"--keep-going -n -q -T ${DOCS_BUILD_JOBS}\"
 
 rm -rf ${PROJECT_SOURCE_DIR}/build-docs
 ")
 
 if(CHMOD_CMD)
     docs_execute_process(${CHMOD_CMD} +x ${CMAKE_CURRENT_BINARY_DIR}/build-docs.sh)
-    add_custom_target(docs ALL ${CMAKE_COMMAND} -E env HOME=${DOCS_WD}
-                               ${CMAKE_CURRENT_BINARY_DIR}/build-docs.sh)
+    add_custom_target(docs ${CMAKE_COMMAND} -E env HOME=${DOCS_WD}
+                           ${CMAKE_CURRENT_BINARY_DIR}/build-docs.sh)
 else()
-    add_custom_target(docs ALL ${CMAKE_COMMAND} -E env HOME=${DOCS_WD} ${SHELL_CMD}
-                               ${CMAKE_CURRENT_BINARY_DIR}/build-docs.sh)
+    add_custom_target(docs ${CMAKE_COMMAND} -E env HOME=${DOCS_WD} ${SHELL_CMD}
+                           ${CMAKE_CURRENT_BINARY_DIR}/build-docs.sh)
 endif()
 
 install(
     DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/_build/html/
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/html/${PACKAGE_NAME}
     COMPONENT docs
-    USE_SOURCE_PERMISSIONS FILES_MATCHING
+    OPTIONAL USE_SOURCE_PERMISSIONS FILES_MATCHING
     PATTERN "*")

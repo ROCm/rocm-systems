@@ -23,12 +23,12 @@
 #pragma once
 
 /**
- * \file roctx.h
- * \brief ROCTx API interface for AMD code annotation and profiling
+ * @file roctx.h
+ * @brief ROCTx API interface for AMD code annotation and profiling
  *
- * \mainpage ROCTx API Specification
+ * @mainpage ROCTx API Specification
  *
- * \section introduction Introduction
+ * @section introduction Introduction
  * ROCTx is a comprehensive library that implements the AMD code annotation API. It provides
  * essential functionality for:
  * - Event annotation and marking
@@ -64,8 +64,8 @@
  * - Thread-local storage for efficient range stacking
  * - Lightweight profiler control mechanisms
  *
- * \note All string parameters must be null-terminated
- * \warning Proper nesting of range push/pop operations is user's responsibility
+ * @note All string parameters must be null-terminated
+ * @warning Proper nesting of range push/pop operations is user's responsibility
  */
 
 #include <stddef.h>
@@ -77,7 +77,7 @@
 
 ROCTX_EXTERN_C_INIT
 
-/** \defgroup marker_group ROCTx Markers
+/** @defgroup marker_group ROCTx Markers
  *
  * Marker annotations are used to describe events in a ROCm application.
  *
@@ -87,14 +87,14 @@ ROCTX_EXTERN_C_INIT
 /**
  * Mark an event.
  *
- * \param[in] message The message associated with the event.
+ * @param[in] message The message associated with the event.
  */
 void
 roctxMarkA(const char* message) ROCTX_API ROCTX_NONNULL(1);
 
 /** @} */
 
-/** \defgroup range_group ROCTx Ranges
+/** @defgroup range_group ROCTx Ranges
  *
  * Range annotations are used to describe events in a ROCm application.
  *
@@ -106,9 +106,9 @@ roctxMarkA(const char* message) ROCTX_API ROCTX_NONNULL(1);
  *
  * Nested ranges are stacked and local to the current CPU thread.
  *
- * \param[in] message The message associated with this range.
+ * @param[in] message The message associated with this range.
  *
- * \return Returns the level this nested range is started at. Nested range
+ * @return Returns the level this nested range is started at. Nested range
  * levels are 0 based.
  */
 int
@@ -121,7 +121,7 @@ roctxRangePushA(const char* message) ROCTX_API ROCTX_NONNULL(1);
  * was active before the last one was started, it becomes again the current
  * nested range.
  *
- * \return Returns the level the stopped nested range was started at, or a
+ * @return Returns the level the stopped nested range was started at, or a
  * negative value if there was no nested range active.
  */
 int
@@ -142,13 +142,15 @@ roctxRangeStartA(const char* message) ROCTX_API ROCTX_NONNULL(1);
 
 /**
  * Stop a process range.
+ *
+ * @param [in] id ::roctx_range_id_t returned from ::roctxRangeStartA to stop
  */
 void
 roctxRangeStop(roctx_range_id_t id) ROCTX_API;
 
 /** @} */
 
-/** \defgroup PROFILER_COMM ROCTx Application control/customization of profiling tools
+/** @defgroup PROFILER_COMM ROCTx Application control/customization of profiling tools
  *
  * Applications can invoke these functions to control/customize profiling tool behavior.
  *
@@ -204,7 +206,7 @@ roctxProfilerResume(roctx_thread_id_t tid) ROCTX_API;
  * failure while executing the request or lack of support
  */
 int
-roctxNameOsThread(const char*) ROCTX_API ROCTX_NONNULL(1);
+roctxNameOsThread(const char* name) ROCTX_API ROCTX_NONNULL(1);
 
 /**
  * @brief Indicate to a profiling tool that, where possible, you would like the given HSA agent
@@ -214,13 +216,13 @@ roctxNameOsThread(const char*) ROCTX_API ROCTX_NONNULL(1);
  * support for this capability is tool specific.
  *
  * @param [in] name Name for the specified agent
- * @param [in] stream Pointer to a HSA agent identifier
+ * @param [in] agent Pointer to a HSA agent identifier
  *
  * @return int A profiling tool may choose to set this value to a non-zero value to indicate a
  * failure while executing the request or lack of support
  */
 int
-roctxNameHsaAgent(const char* name, const struct hsa_agent_s*) ROCTX_API ROCTX_NONNULL(1, 2);
+roctxNameHsaAgent(const char* name, const struct hsa_agent_s* agent) ROCTX_API ROCTX_NONNULL(1, 2);
 
 /**
  * @brief Indicate to a profiling tool that, where possible, you would like the given HIP device id
@@ -256,7 +258,7 @@ roctxNameHipStream(const char* name, const struct ihipStream_t* stream) ROCTX_AP
 
 /** @} */
 
-/** \defgroup UTILITIES ROCTx Utility functions
+/** @defgroup UTILITIES ROCTx Utility functions
  *
  * @{
  */
@@ -278,13 +280,16 @@ roctxGetThreadId(roctx_thread_id_t* tid) ROCTX_API ROCTX_NONNULL(1);
 ROCTX_EXTERN_C_FINI
 
 #if !defined(roctxRangeStart)
+/** @brief For future compatibility */
 #    define roctxRangeStart(message) roctxRangeStartA(message)
 #endif
 
 #if !defined(roctxMark)
+/** @brief For future compatibility */
 #    define roctxMark(message) roctxMarkA(message)
 #endif
 
 #if !defined(roctxRangePush)
+/** @brief For future compatibility */
 #    define roctxRangePush(message) roctxRangePushA(message)
 #endif

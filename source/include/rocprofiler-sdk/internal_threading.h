@@ -33,7 +33,7 @@ ROCPROFILER_EXTERN_C_INIT
  *
  * @{
  * @example api_buffered_tracing/client.cpp
- * Example demonstrating ::BUFFER_TRACING_SERVICE that includes usage of
+ * Example demonstrating @ref BUFFER_TRACING_SERVICE that includes usage of
  * ::rocprofiler_at_internal_thread_create, ::rocprofiler_create_callback_thread, and
  * ::rocprofiler_assign_callback_thread.
  */
