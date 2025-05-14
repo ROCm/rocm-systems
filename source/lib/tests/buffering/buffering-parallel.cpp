@@ -212,6 +212,11 @@ TEST(buffering, parallel)
     // wait for all the threads to complete
     pthread_barrier_wait(&_emplaced_barrier);
 
+    // designates that buffer should be cleared after invoking functor
+    using clear_buffer_t = std::true_type;
+
     // verify the data pulled out the buffer matches the data put in by the threads
-    validate(_buffer.get_record_headers(), test_data_types{}, test_data_sizes);
+    _buffer.process_record_headers(clear_buffer_t{}, [](auto&& _records) {
+        validate(_records, test_data_types{}, test_data_sizes);
+    });
 }

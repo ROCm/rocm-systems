@@ -23,13 +23,16 @@
 #pragma once
 
 #include "lib/common/container/ring_buffer.hpp"
+#include "lib/common/scope_destructor.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 
 #include <atomic>
+#include <functional>
 #include <limits>
 #include <mutex>
 #include <shared_mutex>
+#include <type_traits>
 #include <vector>
 
 namespace rocprofiler
@@ -75,9 +78,13 @@ struct record_header_buffer
     template <typename Tp>
     bool emplace(uint32_t, uint32_t, Tp&);
 
-    /// this function will return a vector of pointers to the record headers
-    /// at the time of invocation.
-    record_ptr_vec_t get_record_headers(size_t _n = std::numeric_limits<size_t>::max());
+    /// this function will return the number of record headers
+    size_t get_num_record_headers();
+
+    /// this function will invoke functor with a vector of pointers to the record headers.
+    /// if ClearRecordsV is true, the container will be cleared after invoking the functor
+    template <typename ClearRecordsT, typename FuncT, typename... Args>
+    size_t process_record_headers(ClearRecordsT, FuncT&& functor, Args&&... args);
 
     /// record_header_buffer is a multiple writer, single reader data structure so
     /// this function prevents writing via emplace
@@ -321,6 +328,34 @@ record_header_buffer::emplace(Tp& _v)
 {
     // if enumerations are not used, use the typeid hash code
     return emplace(typeid(Tp).hash_code(), _v);
+}
+
+template <typename ClearRecordsT, typename FuncT, typename... Args>
+size_t
+record_header_buffer::process_record_headers(ClearRecordsT, FuncT&& _functor, Args&&... _args)
+{
+    // RAII for lock/unlock
+    auto _lk = scope_destructor{[&]() { unlock(); }, [&]() { lock(); }};
+
+    auto _n       = m_index.load(std::memory_order_acquire);
+    auto _records = record_ptr_vec_t{};
+    _records.reserve(_n);
+    for(size_t i = 0; i < _n; ++i)
+    {
+        if(auto& itr = m_headers.at(i); itr.hash > 0 && itr.payload != nullptr)
+            _records.emplace_back(&itr);
+    }
+
+    // get number of records before vector is moved
+    auto _num_records = _records.size();
+
+    // invoke the callback
+    std::forward<FuncT>(_functor)(std::move(_records), std::forward<Args>(_args)...);
+
+    // clear the container
+    if constexpr(ClearRecordsT::value) clear();
+
+    return _num_records;
 }
 }  // namespace container
 }  // namespace common

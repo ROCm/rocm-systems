@@ -55,10 +55,7 @@ TEST(rocprofiler_lib, buffer)
     EXPECT_EQ(buffer_v->buffer_id, buffer_id->handle);
 
     buffer_v->watermark = common::units::get_page_size();
-    {
-        auto records = buffer_v->get_internal_buffer().get_record_headers();
-        EXPECT_EQ(records.size(), 0);
-    }
+    EXPECT_EQ(buffer_v->get_internal_buffer().get_num_record_headers(), 0);
 
     EXPECT_TRUE(buffer_v->get_internal_buffer().allocate(sizeof(rocprofiler_buffer_id_t)));
 
@@ -67,8 +64,7 @@ TEST(rocprofiler_lib, buffer)
     auto data = *buffer_id;
     buffer_v->emplace(1, 1, data);
 
-    auto records = buffer_v->get_internal_buffer().get_record_headers();
-    EXPECT_EQ(records.size(), 1);
+    EXPECT_EQ(buffer_v->get_internal_buffer().get_num_record_headers(), 1);
 
     auto flush_status = buffer::flush(*buffer_id, true);
     EXPECT_EQ(flush_status, ROCPROFILER_STATUS_SUCCESS);

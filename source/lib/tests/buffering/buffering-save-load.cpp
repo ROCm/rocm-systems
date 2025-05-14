@@ -180,8 +180,10 @@ TEST(buffering, save_load)
     // and move it to another object and ensure that the data after the save + load + move matches
     // the original data placed into the buffer without any data corruption or loss
 
-    constexpr auto num_variants = test_data_types::size() * test_data_sizes.size();
-    constexpr auto data_size    = get_data_size(test_data_types{}, test_data_sizes);
+    // designates that buffer should not be cleared after invoking functor
+    constexpr auto clear_buffer_v = std::false_type{};
+    constexpr auto num_variants   = test_data_types::size() * test_data_sizes.size();
+    constexpr auto data_size      = get_data_size(test_data_types{}, test_data_sizes);
 
     EXPECT_EQ(num_variants, 120);
 
@@ -224,7 +226,9 @@ TEST(buffering, save_load)
     EXPECT_FALSE(_buffer.is_empty());
 
     // verify the data pulled out the buffer matches the data put in
-    validate(_buffer.get_record_headers(), test_data_types{}, test_data_sizes);
+    _buffer.process_record_headers(clear_buffer_v, [](auto&& _records) {
+        validate(_records, test_data_types{}, test_data_sizes);
+    });
 
     // save the data to a binary file and clear the buffer so it can "receive" new data (in theory)
     {
@@ -235,7 +239,7 @@ TEST(buffering, save_load)
     }
 
     // verify that the buffer is empty
-    EXPECT_EQ(_buffer.get_record_headers().size(), 0) << "buffer was not cleared properly";
+    EXPECT_EQ(_buffer.get_num_record_headers(), 0) << "buffer was not cleared properly";
 
     // load the data back from the binary file
     {
@@ -245,23 +249,26 @@ TEST(buffering, save_load)
     }
 
     // verify that, at a high level, all the data was preserved
-    ASSERT_EQ(_buffer.get_record_headers().size(), num_variants)
+    ASSERT_EQ(_buffer.get_num_record_headers(), num_variants)
         << "buffer was not saved/loaded properly";
 
     // verify the data is entirely correct
-    validate(_buffer.get_record_headers(), test_data_types{}, test_data_sizes);
+    _buffer.process_record_headers(clear_buffer_v, [](auto&& _records) {
+        validate(_records, test_data_types{}, test_data_sizes);
+    });
 
     // move the data into another instance of record_header_buffer_t
     auto _buffer_v = record_header_buffer_t{std::move(_buffer)};
 
     // make sure the move emptied out the old object and populated the new object
-    ASSERT_EQ(_buffer.get_record_headers().size(), 0) << "buffer was not moved properly";
-    ASSERT_EQ(_buffer_v.get_record_headers().size(), num_variants)
-        << "buffer was not moved properly";
+    ASSERT_EQ(_buffer.get_num_record_headers(), 0) << "buffer was not moved properly";
+    ASSERT_EQ(_buffer_v.get_num_record_headers(), num_variants) << "buffer was not moved properly";
 
     // validate the data in the new object
     // verify the data pulled out the buffer matches the data put in by the threads
-    validate(_buffer_v.get_record_headers(), test_data_types{}, test_data_sizes);
+    _buffer.process_record_headers(clear_buffer_v, [](auto&& _records) {
+        validate(_records, test_data_types{}, test_data_sizes);
+    });
 
     // make sure reset works when empty and when full
     EXPECT_EQ(_buffer.reset(), 0) << "buffer should be empty after move";
