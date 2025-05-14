@@ -34,6 +34,10 @@ TEST_CASE("Unit_hipLaunchCooperativeKernelMultiDevice_Positive_Basic") {
   }
 
   const auto device_count = HipTest::getDeviceCount();
+  if (device_count < 2) {
+    SUCCEED("Test requires at least 2 devices");
+    return;
+  }
 
   std::vector<hipLaunchParams> params_list(device_count);
 
@@ -66,6 +70,10 @@ TEST_CASE("Unit_hipLaunchCooperativeKernelMultiDevice_Negative_Parameters") {
   }
 
   const auto device_count = HipTest::getDeviceCount();
+  if (device_count < 2) {
+    SUCCEED("Test requires at least 2 devices");
+    return;
+  }
 
   std::vector<hipLaunchParams> params_list(device_count);
 
@@ -134,6 +142,12 @@ TEST_CASE("Unit_hipLaunchCooperativeKernelMultiDevice_Negative_Parameters") {
 TEST_CASE("Unit_hipLaunchCooperativeKernelMultiDevice_Negative_MultiKernelSameDevice") {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
     HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
+    return;
+  }
+
+  const auto device_count = HipTest::getDeviceCount();
+  if (device_count < 2) {
+    SUCCEED("Test requires at least 2 devices");
     return;
   }
 
