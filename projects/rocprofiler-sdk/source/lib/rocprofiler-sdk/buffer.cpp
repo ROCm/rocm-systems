@@ -183,27 +183,52 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait)
 
         if(!buff_internal_v.is_empty())
         {
-            // get the array of record headers
-            auto buff_data = buff_internal_v.get_record_headers();
+            // designates that buffer should be cleared after functor is invoked
+            constexpr auto clear_buffer_v = std::true_type{};
 
-            // invoke buffer callback
-            try
-            {
-                if(buff_v->callback)
-                {
-                    buff_v->callback(rocprofiler_context_id_t{buff_v->context_id},
-                                     rocprofiler_buffer_id_t{buff_v->buffer_id},
-                                     buff_data.data(),
-                                     buff_data.size(),
-                                     buff_v->callback_data,
-                                     buff_v->drop_count);
-                }
-            } catch(std::exception& e)
-            {
-                ROCP_ERROR << "buffer callback threw an exception: " << e.what();
-            }
-            // clear the buffer
-            buff_internal_v.clear();
+            // invoke the callback within the scoped lock of process_record_headers.
+            auto num_processed = buff_internal_v.process_record_headers(
+                clear_buffer_v, [&buffer_id, &idx, &offset, &buff_v](auto&& _headers) {
+                    // invoke buffer callback
+                    try
+                    {
+                        if(buff_v->callback)
+                        {
+                            ROCP_INFO << fmt::format("invoking buffer callback for {} records "
+                                                     "[buffer_id={}, idx={}, offset={}]",
+                                                     _headers.size(),
+                                                     buffer_id.handle,
+                                                     idx,
+                                                     offset);
+                            buff_v->callback(rocprofiler_context_id_t{buff_v->context_id},
+                                             rocprofiler_buffer_id_t{buff_v->buffer_id},
+                                             _headers.data(),
+                                             _headers.size(),
+                                             buff_v->callback_data,
+                                             buff_v->drop_count);
+                        }
+                        else
+                        {
+                            ROCP_TRACE << fmt::format("no buffer callback for {} records "
+                                                      "[buffer_id={}, idx={}, offset={}]",
+                                                      _headers.size(),
+                                                      buffer_id.handle,
+                                                      idx,
+                                                      offset);
+                        }
+
+                    } catch(std::exception& e)
+                    {
+                        ROCP_CI_LOG(ERROR) << "buffer callback threw an exception: " << e.what();
+                    }
+                });
+
+            ROCP_INFO << fmt::format(
+                "completed buffer callback for {} records [buffer_id={}, idx={}, offset={}]",
+                num_processed,
+                buffer_id.handle,
+                idx,
+                offset);
         }
         else
         {

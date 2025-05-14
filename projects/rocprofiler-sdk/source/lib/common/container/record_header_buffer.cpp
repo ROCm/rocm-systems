@@ -82,20 +82,18 @@ record_header_buffer::allocate(size_t num_bytes)
     return true;
 }
 
-record_header_buffer::record_ptr_vec_t
-record_header_buffer::get_record_headers(size_t _n)
+size_t
+record_header_buffer::get_num_record_headers()
 {
     auto _lk = rhb_raii_lock{*this};
 
-    auto _sz  = m_index.load(std::memory_order_acquire);
-    _n        = std::min(_n, _sz);
-    auto _ret = record_ptr_vec_t{};
-    _ret.reserve(_n);
-    for(size_t i = 0; i < _n; ++i)
+    auto   _size = m_index.load(std::memory_order_acquire);
+    size_t _ret  = 0;
+    for(size_t i = 0; i < _size; ++i)
     {
-        if(auto& itr = m_headers.at(i); itr.hash > 0 && itr.payload != nullptr)
-            _ret.emplace_back(&itr);
+        if(auto& itr = m_headers.at(i); itr.hash > 0 && itr.payload != nullptr) ++_ret;
     }
+
     return _ret;
 }
 

@@ -185,6 +185,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 ### Resolved issues
 
 - Fixed missing callbacks around internal thread creation within counter collection service
+- Fixed potential data race in rocprofiler-sdk double buffering scheme
 
 ### Removed
 

@@ -123,26 +123,37 @@ TEST(buffering, serial)
         EXPECT_EQ(_f, _fp_history.back()) << "float not equal after emplace_back";
     }
 
+    // designates that buffer should be cleared after invoking functor
+    constexpr auto clear_buffer_v = std::true_type{};
+
     // get the records out of the buffer
-    auto _headers = _buffer.get_record_headers();
-    for(auto* itr : _headers)
-    {
-        ASSERT_TRUE(itr->payload) << "nullptr to payload not expected";
+    auto _num_headers = _buffer.process_record_headers(
+        clear_buffer_v,
+        [](auto&& _headers, auto& _ui_result_v, auto& _fp_result_v) {
+            for(auto* itr : _headers)
+            {
+                ASSERT_TRUE(itr->payload) << "nullptr to payload not expected";
 
-        if(itr->hash == typeid(uint_raw_array_t).hash_code())
-        {
-            extract_header(_ui_result, itr);
-        }
-        else if(itr->hash == typeid(flt_raw_array_t).hash_code())
-        {
-            extract_header(_fp_result, itr);
-        }
-        else
-        {
-            GTEST_FAIL() << "unknown type id hash code: " << std::to_string(itr->hash);
-        }
-    }
+                if(itr->hash == typeid(uint_raw_array_t).hash_code())
+                {
+                    extract_header(_ui_result_v, itr);
+                }
+                else if(itr->hash == typeid(flt_raw_array_t).hash_code())
+                {
+                    extract_header(_fp_result_v, itr);
+                }
+                else
+                {
+                    GTEST_FAIL() << "unknown type id hash code: " << std::to_string(itr->hash);
+                }
+            }
+        },
+        _ui_result,
+        _fp_result);
 
+    ASSERT_EQ(_ui_history.size() + _fp_history.size(), _num_headers)
+        << "UINT: " << _ui_history.size() << " + FLOAT: " << _fp_history.size()
+        << " != HEADERS: " << _num_headers;
     // validate that we got the same number of records out that we put in
     ASSERT_EQ(_ui_history.size(), _ui_result.size())
         << "UINT: " << _ui_history.size() << " vs. " << _ui_result.size();
