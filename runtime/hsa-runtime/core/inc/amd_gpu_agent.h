@@ -440,6 +440,16 @@ class GpuAgent : public GpuAgentInt {
   /// @brief Is large BAR support enabled for this GPU.
   __forceinline bool LargeBarEnabled() const { return large_bar_enabled_; }
 
+  /// @brief Force a WC flush on PCIe devices by doing a write and then read-back
+  __forceinline void PcieWcFlush(void *ptr, size_t size) const {
+    if (!xgmi_cpu_gpu_) {
+      _mm_sfence();
+      *((uint8_t*)ptr + size - 1) = *((uint8_t*)ptr + size - 1);
+      _mm_mfence();
+      auto readback = *reinterpret_cast<volatile uint8_t*>(ptr + size - 1);
+    }
+  }
+
   const size_t MAX_SCRATCH_APERTURE_PER_XCC = (1ULL << 32);
   size_t MaxScratchDevice() const { return properties_.NumXcc * MAX_SCRATCH_APERTURE_PER_XCC; }
 

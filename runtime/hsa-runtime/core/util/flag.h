@@ -290,6 +290,9 @@ class Flag {
     // HSA_DTIF_ENABLED = 0 will disable DTIF backend.
     var = os::GetEnvVar("HSA_ENABLE_DTIF");
     enable_dtif_ = (var == "1") ? true : false;
+
+    var = os::GetEnvVar("HSA_CO_DMACOPY_SIZE");
+    co_dmacopy_size_ = var.empty() ? 1024*1024 : atoi(var.c_str());
   }
 
   void parse_masks(uint32_t maxGpu, uint32_t maxCU) {
@@ -402,6 +405,8 @@ class Flag {
 
   size_t pc_sampling_max_device_buffer_size() const { return pc_sampling_max_device_buffer_size_; }
 
+  size_t co_dmacopy_size() const { return co_dmacopy_size_; }
+
   bool dev_mem_queue_buf() const { return dev_mem_queue_buf_; }
 
   uint32_t signal_abort_timeout() const { return signal_abort_timeout_; }
@@ -474,6 +479,8 @@ class Flag {
   SRAMECC_ENABLE sramecc_enable_;
 
   size_t pc_sampling_max_device_buffer_size_;
+
+  size_t co_dmacopy_size_;
 
   // Map GPU index post RVD to its default cu mask.
   std::map<uint32_t, std::vector<uint32_t>> cu_mask_;

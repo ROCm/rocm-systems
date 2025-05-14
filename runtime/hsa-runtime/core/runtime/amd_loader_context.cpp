@@ -350,17 +350,25 @@ bool RegionMemory::Freeze() {
   assert(this->Allocated() && nullptr != host_ptr_);
 
   core::Agent* agent = region_->owner();
-  if (agent != NULL && agent->device_type() == core::Agent::kAmdGpuDevice) {
-    if (HSA_STATUS_SUCCESS != agent->DmaCopy(ptr_, host_ptr_, size_)) {
-      return false;
-    }
+
+  const size_t& code_object_dmacopy_size =
+    core::Runtime::runtime_singleton_->flag().co_dmacopy_size();
+
+  const bool isGpuDevice = (agent->device_type() == core::Agent::kAmdGpuDevice);
+  const bool isLargeBarDisabled = isGpuDevice && !reinterpret_cast<AMD::GpuAgent*>(agent)->LargeBarEnabled();
+  const bool shouldDmaCopy = isGpuDevice && (isLargeBarDisabled || size_ > code_object_dmacopy_size);
+
+  if (shouldDmaCopy) {
+      if (HSA_STATUS_SUCCESS != agent->DmaCopy(ptr_, host_ptr_, size_)) return false;
   } else {
-    memcpy(ptr_, host_ptr_, size_);
+      memcpy(ptr_, host_ptr_, size_);
+      if (is_code_ && isGpuDevice)
+        reinterpret_cast<AMD::GpuAgent*>(agent)->PcieWcFlush(ptr_, size_);
   }
 
-  // Invalidate agent caches which may hold lines of the new allocation.
-  if (is_code_ && (region_->owner()->device_type() == core::Agent::kAmdGpuDevice))
-    ((AMD::GpuAgent*)region_->owner())->InvalidateCodeCaches(ptr_, size_);
+  // Invalidate agent caches if needed
+  if (is_code_ && isGpuDevice)
+      reinterpret_cast<AMD::GpuAgent*>(agent)->InvalidateCodeCaches(ptr_, size_);
 
   return true;
 }
