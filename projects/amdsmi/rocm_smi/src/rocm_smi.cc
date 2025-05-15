@@ -1985,6 +1985,7 @@ rsmi_dev_firmware_version_get(uint32_t dv_ind, rsmi_fw_block_t block,
     { RSMI_FW_BLOCK_UVD, amd::smi::kDevFwVersionUvd },
     { RSMI_FW_BLOCK_VCE, amd::smi::kDevFwVersionVce },
     { RSMI_FW_BLOCK_VCN, amd::smi::kDevFwVersionVcn },
+    { RSMI_FW_BLOCK_PLDM, amd::smi::kDevFwVersionPldm},
   };
 
   const auto & dev_type_it = kFWBlockTypeMap.find(block);

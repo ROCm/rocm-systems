@@ -29,6 +29,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Added bad page threshold count**.  
   - Added `amdsmi_get_gpu_bad_page_threshold` to Python API and CLI; root/sudo permissions required to display the count.
 
+- **Added new firmware PLDM**.  
+
 ### Changed
 
 - **The `amd-smi topology` command has been enabled for Guest environments**.  

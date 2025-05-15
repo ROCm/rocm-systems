@@ -582,7 +582,8 @@ amdsmi_fw_block_t__enumvalues = {
     76: 'AMDSMI_FW_ID_RLC_SRLS',
     77: 'AMDSMI_FW_ID_PM',
     78: 'AMDSMI_FW_ID_DMCU',
-    79: 'AMDSMI_FW_ID__MAX',
+    79: 'AMDSMI_FW_ID_PLDM',
+    80: 'AMDSMI_FW_ID__MAX',
 }
 AMDSMI_FW_ID_SMU = 1
 AMDSMI_FW_ID_FIRST = 1
@@ -663,7 +664,8 @@ AMDSMI_FW_ID_RLC_SRLG = 75
 AMDSMI_FW_ID_RLC_SRLS = 76
 AMDSMI_FW_ID_PM = 77
 AMDSMI_FW_ID_DMCU = 78
-AMDSMI_FW_ID__MAX = 79
+AMDSMI_FW_ID_PLDM = 79
+AMDSMI_FW_ID__MAX = 80
 amdsmi_fw_block_t = ctypes.c_uint32 # enum
 
 # values for enumeration 'amdsmi_vram_type_t'
@@ -985,7 +987,7 @@ struct_amdsmi_fw_info_t._pack_ = 1 # source:False
 struct_amdsmi_fw_info_t._fields_ = [
     ('num_fw_info', ctypes.c_ubyte),
     ('PADDING_0', ctypes.c_ubyte * 7),
-    ('fw_info_list', struct_fw_info_list_ * 79),
+    ('fw_info_list', struct_fw_info_list_ * 80),
     ('reserved', ctypes.c_uint32 * 7),
     ('PADDING_1', ctypes.c_ubyte * 4),
 ]
@@ -3055,7 +3057,8 @@ __all__ = \
     'AMDSMI_FW_ID_ISP', 'AMDSMI_FW_ID_MC', 'AMDSMI_FW_ID_MES_KIQ',
     'AMDSMI_FW_ID_MES_STACK', 'AMDSMI_FW_ID_MES_THREAD1',
     'AMDSMI_FW_ID_MES_THREAD1_STACK', 'AMDSMI_FW_ID_MMSCH',
-    'AMDSMI_FW_ID_PM', 'AMDSMI_FW_ID_PPTABLE', 'AMDSMI_FW_ID_PSP_BL',
+    'AMDSMI_FW_ID_PLDM', 'AMDSMI_FW_ID_PM',
+    'AMDSMI_FW_ID_PPTABLE', 'AMDSMI_FW_ID_PSP_BL',
     'AMDSMI_FW_ID_PSP_DBG', 'AMDSMI_FW_ID_PSP_INTF',
     'AMDSMI_FW_ID_PSP_KEYDB', 'AMDSMI_FW_ID_PSP_SOC',
     'AMDSMI_FW_ID_PSP_SOSDRV', 'AMDSMI_FW_ID_PSP_SPL',

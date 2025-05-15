@@ -198,6 +198,7 @@ class AmdSmiFwBlock(IntEnum):
     AMDSMI_FW_ID_RLC_SRLS = amdsmi_wrapper.AMDSMI_FW_ID_RLC_SRLS
     AMDSMI_FW_ID_PM = amdsmi_wrapper.AMDSMI_FW_ID_PM
     AMDSMI_FW_ID_DMCU = amdsmi_wrapper.AMDSMI_FW_ID_DMCU
+    AMDSMI_FW_ID_PLDM = amdsmi_wrapper.AMDSMI_FW_ID_PLDM
 
 
 class AmdSmiClkType(IntEnum):
@@ -2737,7 +2738,8 @@ def amdsmi_get_fw_info(
                      AmdSmiFwBlock.AMDSMI_FW_ID_TA_XGMI,
                      AmdSmiFwBlock.AMDSMI_FW_ID_UVD,
                      AmdSmiFwBlock.AMDSMI_FW_ID_VCE,
-                     AmdSmiFwBlock.AMDSMI_FW_ID_VCN]
+                     AmdSmiFwBlock.AMDSMI_FW_ID_VCN,
+                     AmdSmiFwBlock.AMDSMI_FW_ID_PLDM]
 
     # PM(AKA: SMC) firmware's hex value looks like 0x12345678
     # However, they are parsed as: int(0x12).int(0x34).int(0x56).int(0x78)
