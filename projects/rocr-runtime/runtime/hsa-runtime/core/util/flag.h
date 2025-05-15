@@ -292,6 +292,10 @@ class Flag {
     var = os::GetEnvVar("HSA_ENABLE_DTIF");
     enable_dtif_ = (var == "1") ? true : false;
 
+    // This allows detecting if the dxg driver is loaded.
+    var = os::GetEnvVar("HSA_ENABLE_DXG_DETECTION");
+    enable_dxg_detection_ = (var == "1") ? true : false;
+
     var = os::GetEnvVar("HSA_CO_DMACOPY_SIZE");
     co_dmacopy_size_ = var.empty() ? 1024*1024 : atoi(var.c_str());
   }
@@ -417,6 +421,8 @@ class Flag {
   bool enable_3d_swizzle() const { return enable_3d_swizzle_; }
 
   bool enable_dtif() const { return enable_dtif_; }
+
+  bool enable_dxg_detection() const { return enable_dxg_detection_; }
  private:
   bool check_flat_scratch_;
   bool enable_vm_fault_message_;
@@ -451,6 +457,7 @@ class Flag {
   int  async_events_thread_priority_;
   bool enable_3d_swizzle_ = false;
   bool enable_dtif_;
+  bool enable_dxg_detection_;
 
   SDMA_OVERRIDE enable_sdma_;
   SDMA_OVERRIDE enable_peer_sdma_;
