@@ -629,10 +629,10 @@ configure_settings(bool _init)
 
     ROCPROFSYS_CONFIG_SETTING(std::string, "ROCPROFSYS_AMD_SMI_METRICS",
                               "amd-smi metrics to collect: busy, temp, power, "
-                              "vcn_activity, jpeg_activity, mem_usage."
+                              "vcn_activity, jpeg_activity, mem_usage. "
                               "An empty value implies 'all' and 'none' suppresses all.",
                               "busy, temp, power, mem_usage", "backend", "amd_smi",
-                              "rocm", "process_sampling", "advanced");
+                              "rocm", "process_sampling");
 
     ROCPROFSYS_CONFIG_SETTING(size_t, "ROCPROFSYS_PERFETTO_SHMEM_SIZE_HINT_KB",
                               "Hint for shared-memory buffer size in perfetto (in KB)",
