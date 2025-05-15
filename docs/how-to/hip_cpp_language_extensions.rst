@@ -598,6 +598,11 @@ evaluates to non-zero for all threads.
 ``int __syncthreads_or(int predicate)`` returns non-zero if any of the
 predicates evaluates to non-zero.
 
+``void __syncwarp()`` simply synchronizes the threads of a warp. If a mask
+is passed, then only threads which correspond to an on bit lane will be
+synchronized. On AMD targets the mask is ignored and all threads in the warp
+are synchronized.
+
 The Cooperative Groups API offers options to synchronize threads on a developer
 defined set of thread groups. For further information, check the
 :ref:`Cooperative Groups API reference <cooperative_groups_reference>` or the
