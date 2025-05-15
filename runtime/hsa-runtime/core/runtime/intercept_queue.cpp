@@ -136,7 +136,7 @@ InterceptQueue::InterceptQueue(std::unique_ptr<Queue> queue)
   // Match the queue's signal ABI block to async_doorbell_'s
   // This allows us to use the queue's signal ABI block from devices to trigger async_doorbell while
   // host side use jumps directly to the queue's signal implementation.
-  if (core::Runtime::runtime_singleton_->flag().enable_dtif())
+  if (!core::g_use_interrupt_wait)
     async_doorbell_ = new DefaultSignal(DOORBELL_MAX);
   else
     async_doorbell_ = new InterruptSignal(DOORBELL_MAX);
