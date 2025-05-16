@@ -8,27 +8,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
-- **Added bad page threshold count**.  
-  - Added `amdsmi_get_gpu_bad_page_threshold` to Python API and CLI; root/sudo permissions required to display the count.
-
-### Changed
-
-- **The `amd-smi topology` command has been enabled for Guest environments**.  
-  - `amd-smi topology` is now availabe in Guest environments. This includes full functionality so users can use the command just as they would in Bare Metal environments.
-
-- **Updated `amdsmi_get_clock_info` in `amdsmi_interface.py`**.  
-  - The `clk_deep_sleep` field now returns the sleep integer value.  
-
-### Removed
-
-### Optimized
-
-### Resolved issues
-
-### Upcoming changes
-
-### Known issues
-
 - **Added cpu model name for RDC**.  
   - Added new C and Python API `amdsmi_get_cpu_model_name`
   - Not sourced from esmi library.
@@ -43,10 +22,19 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Increasing available JPEG engines to 40.  
   Current ASICs may not support all 40. These will be indicated as UINT16_MAX or N/A in CLI.
 
+- **Added bad page threshold count**.  
+  - Added `amdsmi_get_gpu_bad_page_threshold` to Python API and CLI; root/sudo permissions required to display the count.
+
 ### Changed
 
+- **The `amd-smi topology` command has been enabled for Guest environments**.  
+  - `amd-smi topology` is now available in Guest environments. This includes full functionality so users can use the command just as they would in Bare Metal environments.
+
+- **Updated `amdsmi_get_clock_info` in `amdsmi_interface.py`**.  
+  - The `clk_deep_sleep` field now returns the sleep integer value.  
+
 - **Added Power Cap to amd-smi monitor**.  
-  - 'amd-smi monitor -p' will display the power cap along with power.
+  - `amd-smi monitor -p` will display the power cap along with power.
 
     ```shell
     $ amd-smi monitor -p
@@ -68,9 +56,89 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
       ...
     ```
 
+
+### Removed
+
+- N/A
+
+### Optimized
+
+- N/A
+
 ### Resolved issues
 
-- **Deduplicated GPU IDs when receiving events using the `amd-smi event` command**.  
+- **Removed duplicate GPU IDs when receiving events using the `amd-smi event` command**.  
+
+### Upcoming changes
+
+- N/A
+
+### Known issues
+
+- N/A
+
+
+## amd_smi_lib for ROCm 6.4.2
+
+### Added
+
+- N/A
+
+### Changed
+
+- N/A
+
+### Removed
+
+- **Renamed `amd-smi --partition`'s field `COMPUTE_PARTITION` to `ACCELERATOR_PARTITION`**.  
+  We are changing the field named `COMPUTE_PARTITION` to `ACCELERATOR_PARTITION`. Refer to example outputs provided below.  
+
+  API and associated struct naming will remain the same:
+  - `amdsmi_status_t amdsmi_get_gpu_compute_partition(amdsmi_processor_handle processor_handle, char *compute_partition, uint32_t len)`
+  - `amdsmi_status_t amdsmi_set_gpu_compute_partition(amdsmi_processor_handle processor_handle, amdsmi_compute_partition_type_t compute_partition)`  
+  - `amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile_config(amdsmi_processor_handle processor_handle, amdsmi_accelerator_partition_profile_config_t *profile_config)`  
+  - `amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(amdsmi_processor_handle processor_handle, amdsmi_accelerator_partition_profile_t *profile, uint32_t *partition_id)`  
+  - `amdsmi_status_t amdsmi_set_gpu_accelerator_partition_profile(amdsmi_processor_handle processor_handle, uint32_t profile_index)`
+
+  Reason(s) for this change:
+  - Align with host AMD SMI's `static --partition` field naming
+  - Align with naming seen in `amd-smi partition`  
+
+  <i>Previous Output</i>:  
+  ```shell
+  $ amd-smi static --partition
+    GPU: 0
+        PARTITION:
+            COMPUTE_PARTITION: SPX
+            MEMORY_PARTITION: NPS1
+            PARTITION_ID: 0
+  ```
+  <i>New Output</i>:  
+  ```shell
+  $ amd-smi static --partition
+    GPU: 0
+        PARTITION:
+            ACCELERATOR_PARTITION: SPX
+            MEMORY_PARTITION: NPS1
+            PARTITION_ID: 0
+  ```
+
+### Optimized
+
+- N/A
+
+### Resolved issues
+
+- N/A
+
+### Upcoming changes
+
+- N/A
+
+### Known issues
+
+- N/A
+
 
 ## amd_smi_lib for ROCm 6.4.1
 

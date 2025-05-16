@@ -784,7 +784,7 @@ class AMDSMICommands():
                     partition_id = "N/A"
                     logging.debug("Failed to get partition ID for gpu %s | %s", gpu_id, e.get_error_info())
 
-                static_dict['partition'] = {"compute_partition": compute_partition,
+                static_dict['partition'] = {"accelerator_partition": compute_partition,
                                             "memory_partition": memory_partition,
                                             "partition_id": partition_id}
         if 'soc_pstate' in current_platform_args:
