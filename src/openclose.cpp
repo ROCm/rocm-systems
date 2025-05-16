@@ -132,6 +132,10 @@ static HSAKMT_STATUS init_vars_from_env(void) {
   if (envvar)
     check_avail_sysram = !strcmp(envvar, "1");
 
+  envvar = getenv("WSL_ENABLE_THUNK_SUB_ALLOCATOR");
+  if (envvar)
+    enable_thunk_sub_allocator = atoi(envvar);
+
   return HSAKMT_STATUS_SUCCESS;
 }
 

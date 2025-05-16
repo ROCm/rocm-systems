@@ -49,5 +49,7 @@ int vendor_packet_process;
 int enable_vendor_packet;
 /* check available system memory before allocation */
 bool check_avail_sysram = false;
+/* enable 128MB sub-allocator in libhsakmt, default: disable */
+int enable_thunk_sub_allocator = 0;
 
 size_t max_single_alloc_size = 0;

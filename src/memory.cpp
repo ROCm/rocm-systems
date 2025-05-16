@@ -278,7 +278,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAllocMemoryAlign(HSAuint32 PreferredNode,
                                                void **MemoryAddress) {
   return hsaKmtAllocMemoryAlignInternal(PreferredNode, SizeInBytes,
                                         Alignment, MemFlags,
-                                        MemoryAddress);
+                                        MemoryAddress,
+                                        !enable_thunk_sub_allocator);
 }
 
 HSAKMT_STATUS hsaKmtFreeMemoryInternal(void *MemoryAddress,

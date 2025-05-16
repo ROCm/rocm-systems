@@ -48,6 +48,7 @@ extern int vendor_packet_process;
 extern int enable_vendor_packet;
 extern bool check_avail_sysram;
 extern size_t max_single_alloc_size;
+extern int enable_thunk_sub_allocator;
 
 #undef HSAKMTAPI
 #define HSAKMTAPI __attribute__((visibility ("default")))
