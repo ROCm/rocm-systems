@@ -858,21 +858,6 @@ amdsmi_card_form_factor_t = ctypes.c_uint32 # enum
 class struct_amdsmi_pcie_info_t(Structure):
     pass
 
-class struct_pcie_static_(Structure):
-    pass
-
-struct_pcie_static_._pack_ = 1 # source:False
-struct_pcie_static_._fields_ = [
-    ('max_pcie_width', ctypes.c_uint16),
-    ('PADDING_0', ctypes.c_ubyte * 2),
-    ('max_pcie_speed', ctypes.c_uint32),
-    ('pcie_interface_version', ctypes.c_uint32),
-    ('slot_type', amdsmi_card_form_factor_t),
-    ('max_pcie_interface_version', ctypes.c_uint32),
-    ('PADDING_1', ctypes.c_ubyte * 4),
-    ('reserved', ctypes.c_uint64 * 9),
-]
-
 class struct_pcie_metric_(Structure):
     pass
 
@@ -891,6 +876,21 @@ struct_pcie_metric_._fields_ = [
     ('pcie_lc_perf_other_end_recovery_count', ctypes.c_uint32),
     ('PADDING_2', ctypes.c_ubyte * 4),
     ('reserved', ctypes.c_uint64 * 12),
+]
+
+class struct_pcie_static_(Structure):
+    pass
+
+struct_pcie_static_._pack_ = 1 # source:False
+struct_pcie_static_._fields_ = [
+    ('max_pcie_width', ctypes.c_uint16),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('max_pcie_speed', ctypes.c_uint32),
+    ('pcie_interface_version', ctypes.c_uint32),
+    ('slot_type', amdsmi_card_form_factor_t),
+    ('max_pcie_interface_version', ctypes.c_uint32),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+    ('reserved', ctypes.c_uint64 * 9),
 ]
 
 struct_amdsmi_pcie_info_t._pack_ = 1 # source:False
@@ -1256,16 +1256,6 @@ amdsmi_process_handle_t = ctypes.c_uint32
 class struct_amdsmi_proc_info_t(Structure):
     pass
 
-class struct_engine_usage_(Structure):
-    pass
-
-struct_engine_usage_._pack_ = 1 # source:False
-struct_engine_usage_._fields_ = [
-    ('gfx', ctypes.c_uint64),
-    ('enc', ctypes.c_uint64),
-    ('reserved', ctypes.c_uint32 * 12),
-]
-
 class struct_memory_usage_(Structure):
     pass
 
@@ -1275,6 +1265,16 @@ struct_memory_usage_._fields_ = [
     ('cpu_mem', ctypes.c_uint64),
     ('vram_mem', ctypes.c_uint64),
     ('reserved', ctypes.c_uint32 * 10),
+]
+
+class struct_engine_usage_(Structure):
+    pass
+
+struct_engine_usage_._pack_ = 1 # source:False
+struct_engine_usage_._fields_ = [
+    ('gfx', ctypes.c_uint64),
+    ('enc', ctypes.c_uint64),
+    ('reserved', ctypes.c_uint32 * 12),
 ]
 
 struct_amdsmi_proc_info_t._pack_ = 1 # source:False
@@ -1418,16 +1418,17 @@ amdsmi_evt_notification_type_t__enumvalues = {
     2: 'AMDSMI_EVT_NOTIF_THERMAL_THROTTLE',
     3: 'AMDSMI_EVT_NOTIF_GPU_PRE_RESET',
     4: 'AMDSMI_EVT_NOTIF_GPU_POST_RESET',
-    5: 'AMDSMI_EVT_NOTIF_EVENT_MIGRATE_START',
-    6: 'AMDSMI_EVT_NOTIF_EVENT_MIGRATE_END',
-    7: 'AMDSMI_EVT_NOTIF_EVENT_PAGE_FAULT_START',
-    8: 'AMDSMI_EVT_NOTIF_EVENT_PAGE_FAULT_END',
-    9: 'AMDSMI_EVT_NOTIF_EVENT_QUEUE_EVICTION',
-    10: 'AMDSMI_EVT_NOTIF_EVENT_QUEUE_RESTORE',
-    11: 'AMDSMI_EVT_NOTIF_EVENT_UNMAP_FROM_GPU',
+    5: 'AMDSMI_EVT_NOTIF_RING_HANG',
+    5: 'AMDSMI_EVT_NOTIF_MIGRATE_START',
+    6: 'AMDSMI_EVT_NOTIF_MIGRATE_END',
+    7: 'AMDSMI_EVT_NOTIF_PAGE_FAULT_START',
+    8: 'AMDSMI_EVT_NOTIF_PAGE_FAULT_END',
+    9: 'AMDSMI_EVT_NOTIF_QUEUE_EVICTION',
+    10: 'AMDSMI_EVT_NOTIF_QUEUE_RESTORE',
+    11: 'AMDSMI_EVT_NOTIF_UNMAP_FROM_GPU',
     12: 'AMDSMI_EVT_NOTIF_PROCESS_START',
     13: 'AMDSMI_EVT_NOTIF_PROCESS_END',
-    1: 'AMDSMI_EVT_NOTIF_LAST',
+    13: 'AMDSMI_EVT_NOTIF_LAST',
 }
 AMDSMI_EVT_NOTIF_NONE = 0
 AMDSMI_EVT_NOTIF_VMFAULT = 1
@@ -1435,13 +1436,14 @@ AMDSMI_EVT_NOTIF_FIRST = 1
 AMDSMI_EVT_NOTIF_THERMAL_THROTTLE = 2
 AMDSMI_EVT_NOTIF_GPU_PRE_RESET = 3
 AMDSMI_EVT_NOTIF_GPU_POST_RESET = 4
-AMDSMI_EVT_NOTIF_EVENT_MIGRATE_START = 5
-AMDSMI_EVT_NOTIF_EVENT_MIGRATE_END = 6
-AMDSMI_EVT_NOTIF_EVENT_PAGE_FAULT_START = 7
-AMDSMI_EVT_NOTIF_EVENT_PAGE_FAULT_END = 8
-AMDSMI_EVT_NOTIF_EVENT_QUEUE_EVICTION = 9
-AMDSMI_EVT_NOTIF_EVENT_QUEUE_RESTORE = 10
-AMDSMI_EVT_NOTIF_EVENT_UNMAP_FROM_GPU = 11
+AMDSMI_EVT_NOTIF_RING_HANG = 5
+AMDSMI_EVT_NOTIF_MIGRATE_START = 5
+AMDSMI_EVT_NOTIF_MIGRATE_END = 6
+AMDSMI_EVT_NOTIF_PAGE_FAULT_START = 7
+AMDSMI_EVT_NOTIF_PAGE_FAULT_END = 8
+AMDSMI_EVT_NOTIF_QUEUE_EVICTION = 9
+AMDSMI_EVT_NOTIF_QUEUE_RESTORE = 10
+AMDSMI_EVT_NOTIF_UNMAP_FROM_GPU = 11
 AMDSMI_EVT_NOTIF_PROCESS_START = 12
 AMDSMI_EVT_NOTIF_PROCESS_END = 13
 AMDSMI_EVT_NOTIF_LAST = 13
@@ -3002,12 +3004,14 @@ __all__ = \
     'AMDSMI_EVNT_XGMI_LAST', 'AMDSMI_EVT_NOTIF_FIRST',
     'AMDSMI_EVT_NOTIF_GPU_POST_RESET',
     'AMDSMI_EVT_NOTIF_GPU_PRE_RESET', 'AMDSMI_EVT_NOTIF_LAST',
-    'AMDSMI_EVT_NOTIF_NONE', 'AMDSMI_EVT_NOTIF_EVENT_MIGRATE_START',
-    'AMDSMI_EVT_NOTIF_EVENT_MIGRATE_END', 'AMDSMI_EVT_NOTIF_EVENT_PAGE_FAULT_START',
-    'AMDSMI_EVT_NOTIF_EVENT_PAGE_FAULT_END', 'AMDSMI_EVT_NOTIF_EVENT_QUEUE_EVICTION',
-    'AMDSMI_EVT_NOTIF_EVENT_QUEUE_RESTORE', 'AMDSMI_EVT_NOTIF_EVENT_UNMAP_FROM_GPU',
-    'AMDSMI_EVT_NOTIF_PROCESS_START', 'AMDSMI_EVT_NOTIF_PROCESS_END'
-    'AMDSMI_EVT_NOTIF_THERMAL_THROTTLE', 'AMDSMI_EVT_NOTIF_VMFAULT',
+    'AMDSMI_EVT_NOTIF_MIGRATE_END', 'AMDSMI_EVT_NOTIF_MIGRATE_START',
+    'AMDSMI_EVT_NOTIF_NONE', 'AMDSMI_EVT_NOTIF_PAGE_FAULT_END',
+    'AMDSMI_EVT_NOTIF_PAGE_FAULT_START',
+    'AMDSMI_EVT_NOTIF_PROCESS_END', 'AMDSMI_EVT_NOTIF_PROCESS_START',
+    'AMDSMI_EVT_NOTIF_QUEUE_EVICTION',
+    'AMDSMI_EVT_NOTIF_QUEUE_RESTORE', 'AMDSMI_EVT_NOTIF_RING_HANG',
+    'AMDSMI_EVT_NOTIF_THERMAL_THROTTLE',
+    'AMDSMI_EVT_NOTIF_UNMAP_FROM_GPU', 'AMDSMI_EVT_NOTIF_VMFAULT',
     'AMDSMI_FINE_DECODER_ACTIVITY', 'AMDSMI_FINE_GRAIN_GFX_ACTIVITY',
     'AMDSMI_FINE_GRAIN_MEM_ACTIVITY', 'AMDSMI_FREQ_IND_INVALID',
     'AMDSMI_FREQ_IND_MAX', 'AMDSMI_FREQ_IND_MIN', 'AMDSMI_FW_ID_ASD',
