@@ -27,7 +27,7 @@ RUN set +e; \
 RUN zypper --non-interactive update -y && \
     zypper --non-interactive dist-upgrade -y && \
     zypper --non-interactive install -y -t pattern devel_basis && \
-    zypper --non-interactive install -y binutils-gold cmake curl dpkg-devel \
+    zypper --non-interactive install -y binutils-gold chrpath cmake curl dpkg-devel \
         gcc-c++ git libnuma-devel openmpi3-devel papi-devel python3-pip \
         rpm-build vim wget && \
     zypper --non-interactive clean --all && \
