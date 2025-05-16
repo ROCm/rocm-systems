@@ -64,7 +64,9 @@ class gfx90a_soc(OmniSoC_Base):
                 "GDS": 4,
             }
         )
-        self.roofline_obj = Roofline(args, self._mspec)
+        # Create roofline object if mode is provided; skip for --specs
+        if hasattr(self.get_args(), "mode") and self.get_args().mode:
+            self.roofline_obj = Roofline(args, self._mspec)
 
         # Set arch specific specs
         self._mspec._l2_banks = 32
