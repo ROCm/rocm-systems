@@ -3339,15 +3339,16 @@ static int _fmm_unmap_from_gpu(manageable_aperture_t *aperture, void *address,
 			      args.n_devices * sizeof(uint32_t));
 	ret = hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &args);
 
-	remove_device_ids_from_mapped_array(object,
-			(uint32_t *)args.device_ids_array_ptr,
-			args.n_success * sizeof(uint32_t));
+	if (!ret) {
+		remove_device_ids_from_mapped_array(object,
+				(uint32_t *)args.device_ids_array_ptr,
+				args.n_success * sizeof(uint32_t));
 
-	if (object->mapped_node_id_array)
-		free(object->mapped_node_id_array);
-	object->mapped_node_id_array = NULL;
-	object->mapping_count = 0;
-
+		if (object->mapped_node_id_array)
+			free(object->mapped_node_id_array);
+		object->mapped_node_id_array = NULL;
+		object->mapping_count = 0;
+	}
 out:
 	if (!obj)
 		pthread_mutex_unlock(&aperture->fmm_mutex);
