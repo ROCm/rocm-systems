@@ -284,4 +284,5 @@ HSAKMT_STATUS import_dmabuf_fd(int DMABufFd,
                                        bool is_ipc_memfd,
                                        wsl::thunk::GpuMemoryHandle *GpuMemHandle);
 
+bool hsakmt_hsa_loader_init();
 #endif

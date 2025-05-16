@@ -2,23 +2,13 @@
 #include "impl/hsa/hsa.h"
 #include "impl/hsa/hsa_ven_amd_loader.h"
 
-static std::unique_ptr<std::mutex> lock_ = std::make_unique<std::mutex>();
-static hsa_status_t (*fn_hsa_ven_amd_loader_query_host_address)(
-    const void *device_address, const void **host_address);
+static std::mutex* lock_ = new std::mutex();
 
-#if 0
-static hsa_signal_value_t (*fn_hsa_signal_load_relaxed)(hsa_signal_t signal);
-static hsa_signal_value_t (*fn_hsa_signal_wait_relaxed)(
-    hsa_signal_t signal, hsa_signal_condition_t condition,
-    hsa_signal_value_t compare_value, uint64_t timeout_hint,
-    hsa_wait_state_t wait_state_hint);
-static void (*fn_hsa_signal_store_screlease)(hsa_signal_t hsa_signal,
-                                      hsa_signal_value_t value);
-
+#if 1
 #define _HSAKMT_LOOKUP_SYMS(_sym)                                              \
-if (_sym == nullptr) {                                                         \
+if (fn_##_sym == nullptr) {                                                    \
     std::lock_guard<std::mutex> gard(*lock_);                                  \
-    if (_sym == nullptr) {                                                     \
+    if (fn_##_sym == nullptr) {                                                \
       fn_##_sym =                                                              \
         reinterpret_cast<decltype(fn_##_sym)>(dlsym(RTLD_DEFAULT, #_sym));     \
       if (!fn_##_sym) {                                                        \
@@ -34,9 +24,22 @@ do { \
     } \
 } while(0);
 
+bool hsakmt_hsa_loader_init() {
+  void *hsa_loader_handle = dlopen("libhsa-runtime64.so", RTLD_NOW | RTLD_GLOBAL);
+  if (hsa_loader_handle == nullptr) {
+    pr_err("dlopen libhsa-runtime64.so failed - %s\n", dlerror());
+    return false;
+  }
+  dlclose(hsa_loader_handle);
+  return true;
+}
+
 hsa_signal_value_t hsakmt_hsa_signal_load_relaxed(hsa_signal_t signal) {
+  static hsa_signal_value_t (*fn_hsa_signal_load_relaxed)(hsa_signal_t signal) = nullptr;
+
   _HSAKMT_LOOKUP_SYMS(hsa_signal_load_relaxed);
   _HSAKMT_EXEC_API(hsa_signal_load_relaxed, signal);
+
   return 0;
 }
 
@@ -44,20 +47,32 @@ hsa_signal_value_t hsakmt_hsa_signal_wait_relaxed(
     hsa_signal_t signal, hsa_signal_condition_t condition,
     hsa_signal_value_t compare_value, uint64_t timeout_hint,
     hsa_wait_state_t wait_state_hint) {
+static hsa_signal_value_t (*fn_hsa_signal_wait_relaxed)(
+    hsa_signal_t signal, hsa_signal_condition_t condition,
+    hsa_signal_value_t compare_value, uint64_t timeout_hint,
+    hsa_wait_state_t wait_state_hint) = nullptr;
+
   _HSAKMT_LOOKUP_SYMS(hsa_signal_wait_relaxed);
   _HSAKMT_EXEC_API(hsa_signal_wait_relaxed, signal, condition, compare_value,
                    timeout_hint, wait_state_hint);
+
   return 0;
 }
 
 void hsakmt_hsa_signal_store_screlease(hsa_signal_t hsa_signal,
                                       hsa_signal_value_t value){
+static void (*fn_hsa_signal_store_screlease)(hsa_signal_t hsa_signal,
+                                      hsa_signal_value_t value) = nullptr;
+
   _HSAKMT_LOOKUP_SYMS(hsa_signal_store_screlease);
   _HSAKMT_EXEC_API(hsa_signal_store_screlease, hsa_signal, value);
 }
 
 hsa_status_t hsakmt_hsa_ven_amd_loader_query_host_address(
     const void *device_address, const void **host_address) {
+  static hsa_status_t (*fn_hsa_ven_amd_loader_query_host_address)(
+    const void *device_address, const void **host_address) = nullptr;
+
   if (fn_hsa_ven_amd_loader_query_host_address == nullptr) {
     std::lock_guard<std::mutex> gard(*lock_);
     if (fn_hsa_ven_amd_loader_query_host_address == nullptr) {
@@ -101,6 +116,9 @@ void hsakmt_hsa_signal_store_screlease(hsa_signal_t hsa_signal,
 
 hsa_status_t hsakmt_hsa_ven_amd_loader_query_host_address(
     const void *device_address, const void **host_address) {
+  static hsa_status_t (*fn_hsa_ven_amd_loader_query_host_address)(
+    const void *device_address, const void **host_address) = nullptr;
+
   if (fn_hsa_ven_amd_loader_query_host_address == nullptr) {
     std::lock_guard<std::mutex> gard(*lock_);
     if (fn_hsa_ven_amd_loader_query_host_address == nullptr) {

@@ -557,6 +557,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
       dxg_runtime->dxg_fd = fd;
     }
 
+    hsakmt_hsa_loader_init();
     init_page_size();
 
     char *useSvmStr = getenv("HSA_USE_SVM");
