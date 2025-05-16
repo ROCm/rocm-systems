@@ -47,8 +47,8 @@
 #include "impl/wddm/queue.h"
 #include "impl/registers.h"
 
-#include "hsa-runtime/inc/hsa.h"
-#include "hsa-runtime/inc/hsa_ven_amd_loader.h"
+#include "impl/hsa/hsa.h"
+#include "impl/hsa/hsa_ven_amd_loader.h"
 extern hsa_signal_value_t hsakmt_hsa_signal_load_relaxed(hsa_signal_t signal);
 extern hsa_signal_value_t hsakmt_hsa_signal_wait_relaxed(
     hsa_signal_t signal, hsa_signal_condition_t condition,

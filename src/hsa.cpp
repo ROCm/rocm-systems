@@ -1,6 +1,6 @@
 #include <dlfcn.h>
-#include "hsa-runtime/inc/hsa.h"
-#include "hsa-runtime/inc/hsa_ven_amd_loader.h"
+#include "impl/hsa/hsa.h"
+#include "impl/hsa/hsa_ven_amd_loader.h"
 
 static std::unique_ptr<std::mutex> lock_ = std::make_unique<std::mutex>();
 static hsa_status_t (*fn_hsa_ven_amd_loader_query_host_address)(

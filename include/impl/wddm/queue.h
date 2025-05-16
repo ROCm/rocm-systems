@@ -50,9 +50,9 @@
 #include "impl/wddm/types.h"
 #include "impl/wddm/device.h"
 #include "impl/wddm/gpu_memory.h"
-#include "hsa-runtime/inc/hsa_ext_amd.h"
-#include "hsa-runtime/inc/amd_hsa_queue.h"
-#include "hsa-runtime/inc/amd_hsa_signal.h"
+#include "impl/hsa/hsa_ext_amd.h"
+#include "impl/hsa/amd_hsa_queue.h"
+#include "impl/hsa/amd_hsa_signal.h"
 #include "impl/wddm/cmd_util.h"
 
 namespace wsl {

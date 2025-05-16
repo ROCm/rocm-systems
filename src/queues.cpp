@@ -25,7 +25,7 @@
 #include <cinttypes>
 #include "impl/wddm/device.h"
 #include "impl/wddm/queue.h"
-#include "hsa-runtime/inc/amd_hsa_signal.h"
+#include "impl/hsa/amd_hsa_signal.h"
 
 uint32_t get_vgpr_size_per_cu(HSA_ENGINE_ID id) {
   uint32_t vgpr_size = 0x40000;
