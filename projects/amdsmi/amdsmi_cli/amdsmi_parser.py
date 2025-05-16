@@ -300,7 +300,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         return CheckOutputFilePath
 
 
-    def _check_input_file_path(self):
+    def _check_cper_file_path(self):
         """ Argument action validator:
             Returns a path to a file from the input file path provided.
             If the file doesn't exist or is empty raise error
@@ -310,8 +310,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             def __call__(self, parser, args, values, option_string=None):
                 path = Path(values)
                 if not path.exists():
-                    raise FileNotFoundError(
-                        errno.ENOENT, os.strerror(errno.ENOENT), values)
+                    raise FileNotFoundError(f"CPER file could not be read. Make sure the path '{path}' is correct. ")
 
                 if path.is_dir():
                     raise argparse.ArgumentTypeError(
@@ -1413,12 +1412,13 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Help text for RAS arguments
         cper_help = "Trigger CPER data retrieval"
-
+        afid_help = "Generate an AFID (AMD Field ID) using CPER record, which is similar to XID."
         severity_choices = ["nonfatal-uncorrected", "fatal", "nonfatal-corrected", "all"]
         severity_choices_str = ", ".join(severity_choices)
         severity_help = f"Set the SEVERITY filters from the following:\n    {severity_choices_str}"
         folder_help = "Folder to dump CPER report files"
         file_limit_help = "Maximum number of entries per output file"
+        cper_file_help = "Full path of the cper record file to generate the AFID"
         follow_help = "Continuously monitor for new entries"
 
         ras_parser = subparsers.add_parser("ras", help=ras_help, description=ras_description)
@@ -1427,10 +1427,12 @@ class AMDSMIParser(argparse.ArgumentParser):
         ras_parser.set_defaults(func=func)
 
         # Required flags and arguments:
-        ras_parser.add_argument("--cper", action="store_true", required=True, help=cper_help)
+        ras_parser.add_argument("--cper", action="store_true", required=False, help=cper_help)
+        ras_parser.add_argument("--afid", action="store_true", required=False, help=afid_help)
         ras_parser.add_argument("--severity", type=str.lower, nargs='+', default=['all'], help=severity_help, choices=severity_choices, metavar='SEVERITY')
         ras_parser.add_argument("--folder", type=str, action=self._check_folder_path(), default=False, help=folder_help)
         ras_parser.add_argument("--file_limit", type=self._positive_int, action='store', default=1000, help=file_limit_help)
+        ras_parser.add_argument("--cper_file", action=self._check_cper_file_path(), metavar="CPER_FILE", help=cper_file_help)
         ras_parser.add_argument("--follow", action="store_true", default=False, help=follow_help)
 
         # Add common modifiers and device selection arguments.

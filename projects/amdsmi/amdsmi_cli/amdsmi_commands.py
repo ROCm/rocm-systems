@@ -33,6 +33,7 @@ from amdsmi_cli_exceptions import AmdSmiInvalidParameterException, AmdSmiRequire
 from amdsmi_helpers import AMDSMIHelpers
 from amdsmi_logger import AMDSMILogger
 from amdsmi import amdsmi_exception, amdsmi_interface
+from pathlib import Path
 
 class AMDSMICommands():
     """This class contains all the commands corresponding to AMDSMIParser
@@ -6325,9 +6326,35 @@ class AMDSMICommands():
                 with self.logger.destination.open('a', encoding="utf-8") as output_file:
                     output_file.write(legend_output + '\n')
 
+    def __pvtDumpAfids(self, cper_file):
+        # 1) Fetch the CPER “file” and ensure we have raw bytes
+        raw_data = cper_file
+        if hasattr(raw_data, "read"):
+            # fetch_cper_file returned a file‐object
+            raw = raw_data.read()
+        elif isinstance(raw_data, Path):
+            # Path: read the bytes directly
+            raw = raw_data.read_bytes()
+        elif isinstance(raw_data, str):
+            # fetch_cper_file returned a filename
+            with open(raw_data, "rb") as f:
+                    raw = f.read()
+        else:
+            # assume it's already bytes
+            raw = raw_data
+        size = len(raw)
+        self.helpers.hexdump_to_string(raw)
+        afids, num_afids = amdsmi_interface.amdsmi_get_afids_from_cper(raw)
+        print(f"AFIDS: ", end="")
+        for afid in afids:
+            print(afid, end=" ")
+        print("")
 
-    def ras(self, args, multiple_devices=False, gpu=None, cper=None,
-            severity=None, folder=None, file_limit=None, follow=None):
+
+        
+
+    def ras(self, args, multiple_devices=False, gpu=None, cper=None, afid=None,
+            severity=None, folder=None, file_limit=None, cper_file=None, follow=None):
         """
         Retrieve and process CPER (RAS) entries for a target GPU.
 
@@ -6338,22 +6365,31 @@ class AMDSMICommands():
         The output file name is auto-generated using the timestamp from the CPER header data (converted from
         the header’s "YYYY/MM/DD HH:MM:SS" format), along with the GPU/platform ID and error severity.
         """
+
         # GPU handle logic.
         if gpu:
             args.gpu = gpu
         if cper:
             args.cper = cper
+        if afid:
+            args.afid = afid
         if severity:
             args.severity = severity
         if folder:
             args.folder = folder
         if file_limit:
             args.file_limit = file_limit
+        if cper_file:
+            args.cper_file = cper_file
         if follow:
             args.follow = follow
-
         if args.gpu == None:
             args.gpu = self.device_handles
+
+        #Fetching AFID
+        if args.afid and args.cper_file:
+            self.__pvtDumpAfids(args.cper_file)
+            return
 
         if not self.group_check_printed:
             self.helpers.check_required_groups()
@@ -6362,7 +6398,6 @@ class AMDSMICommands():
         handled_multiple_gpus, device_handle = self.helpers.handle_gpus(args, self.logger, self.ras)
         if handled_multiple_gpus:
             return
-
         args.gpu = device_handle
 
         # Parse severity mask dynamically from the --severity option.
@@ -6381,17 +6416,15 @@ class AMDSMICommands():
                 severity_mask |= (1 << 0)
             elif sev in ("nonfatal-corrected", "corrected"):
                 # Set bit corresponding to AMDSMI_CPER_SEV_NON_FATAL_CORRECTED (which is 2)
-                severity_mask |= (1 << 2)
-        
+                severity_mask |= (1 << 2)               
+
+        cursor = 0
+        buffer_size = 1048576
         if args.cper:
             # Start from cursor 0 (no timestamp argument provided).
-            cursor = 0
-            buffer_size = 1048576
             file_limit = int(args.file_limit) if args.file_limit else 1000
-            
             # Main loop: continuously retrieve CPER entries if --follow is set.
             gpu_id = self.helpers.get_gpu_id_from_device_handle(args.gpu)
-
             # Print header only when dumping to a folder
             if args.follow and not getattr(self, "_cper_follow_prompted", False):
                print("Press CTRL + C to stop.")
@@ -6409,12 +6442,11 @@ class AMDSMICommands():
             if partition_id != 0:
                 logging.debug(f"Skipping gpu {gpu_id} on non zero partition {partition_id}")
                 return
-            
-            if args.folder and args.gpu:
-               print(f"Dumping CPER file header entries for GPU {gpu_id} in folder {args.folder}")
-            elif args.folder:
+                
+            if args.folder and not getattr(self, "_cper_folder_prompted", False):
                  print(f"Dumping CPER file header entries in folder {args.folder}")
-
+                 self._cper_folder_prompted = True
+                 
             self.logger.set_cper_exit_message(False)
             self.stop = False
 
