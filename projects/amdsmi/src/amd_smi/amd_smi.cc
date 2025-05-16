@@ -1926,8 +1926,10 @@ amdsmi_get_gpu_event_notification(int timeout_ms,
         rsmi_evt_notification_data_t rsmi_data = r_data[i];
         data[i].event = static_cast<amdsmi_evt_notification_type_t>(
                 rsmi_data.event);
-        strncpy(data[i].message, rsmi_data.message,
-                MAX_EVENT_NOTIFICATION_MSG_SIZE);
+        snprintf(data[i].message, 
+                MAX_EVENT_NOTIFICATION_MSG_SIZE,
+                "%s", 
+                rsmi_data.message);
         amdsmi_status_t r = amd::smi::AMDSmiSystem::getInstance()
             .gpu_index_to_handle(rsmi_data.dv_ind, &(data[i].processor_handle));
         if (r != AMDSMI_STATUS_SUCCESS) return r;

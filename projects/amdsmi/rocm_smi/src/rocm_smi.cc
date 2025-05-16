@@ -7434,6 +7434,21 @@ rsmi_event_notification_get(int timeout_ms,
             strcpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str());
           }
           break;
+          case RSMI_EVT_NOTIF_EVENT_PROCESS_START:
+          case RSMI_EVT_NOTIF_EVENT_PROCESS_END:
+          {
+            uint32_t pid; char task[MAX_EVENT_NOTIFICATION_MSG_SIZE];
+            int rc = sscanf(message, "%x %s", &pid, task);
+            std::stringstream msg;
+            if (rc == 2){
+              msg << "PID: " << pid << "  task: " << task;
+            } else{
+              LOG_ERROR("Failed to parse process event payload");
+              msg << "PID:UNKNOWN  task:UNKNOWN";
+            }
+            snprintf(data_item->message, MAX_EVENT_NOTIFICATION_MSG_SIZE, "%s", msg.str().c_str());
+          }
+          break;
           default:
             strcpy(reinterpret_cast<char *>(&data_item->message), "Unknown event received");
             break;

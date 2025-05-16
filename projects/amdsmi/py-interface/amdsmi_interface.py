@@ -88,7 +88,7 @@ AMDSMI_MAX_CACHE_TYPES = 10
 AMDSMI_MAX_NUM_XGMI_PHYSICAL_LINK = 64
 AMDSMI_GPU_UUID_SIZE = 38
 MAX_AMDSMI_NAME_LENGTH = 64
-MAX_EVENT_NOTIFICATION_MSG_SIZE = 96
+MAX_EVENT_NOTIFICATION_MSG_SIZE = 256
 _AMDSMI_STRING_LENGTH = 80
 
 
@@ -273,7 +273,15 @@ class AmdSmiEvtNotificationType(IntEnum):
     THERMAL_THROTTLE = amdsmi_wrapper.AMDSMI_EVT_NOTIF_THERMAL_THROTTLE
     GPU_PRE_RESET = amdsmi_wrapper.AMDSMI_EVT_NOTIF_GPU_PRE_RESET
     GPU_POST_RESET = amdsmi_wrapper.AMDSMI_EVT_NOTIF_GPU_POST_RESET
-    RING_HANG = amdsmi_wrapper.AMDSMI_EVT_NOTIF_RING_HANG
+    MIGRATE_START = amdsmi_wrapper.AMDSMI_EVT_NOTIF_EVENT_MIGRATE_START
+    MIGRATE_END = amdsmi_wrapper.AMDSMI_EVT_NOTIF_EVENT_MIGRATE_END
+    PAGE_FAULT_START = amdsmi_wrapper.AMDSMI_EVT_NOTIF_EVENT_PAGE_FAULT_END
+    PAGE_FAULT_END = amdsmi_wrapper.AMDSMI_EVT_NOTIF_EVENT_PAGE_FAULT_END
+    QUEUE_EVICTION = amdsmi_wrapper.AMDSMI_EVT_NOTIF_EVENT_QUEUE_EVICTION
+    QUEUE_RESTORE = amdsmi_wrapper.AMDSMI_EVT_NOTIF_EVENT_QUEUE_RESTORE
+    UNMAP_FROM_GPU = amdsmi_wrapper.AMDSMI_EVT_NOTIF_EVENT_UNMAP_FROM_GPU
+    PROCESS_START = amdsmi_wrapper.AMDSMI_EVT_NOTIF_PROCESS_START
+    PROCESS_END = amdsmi_wrapper.AMDSMI_EVT_NOTIF_PROCESS_END
 
 
 class AmdSmiTemperatureMetric(IntEnum):
@@ -543,17 +551,18 @@ class AmdSmiEventReader:
             processor_handle, ctypes.c_uint64(mask)))
 
     def read(self, timestamp, num_elem=10):
+        c_count = ctypes.c_uint32(num_elem)
         self.event_info = (amdsmi_wrapper.amdsmi_evt_notification_data_t * num_elem)()
         _check_res(
             amdsmi_wrapper.amdsmi_get_gpu_event_notification(
                 ctypes.c_int(timestamp),
-                ctypes.byref(ctypes.c_uint32(num_elem)),
+                ctypes.byref(c_count),
                 self.event_info,
             )
         )
 
         ret = []
-        for i in range(0, num_elem):
+        for i in range(c_count.value):
             unique_event_values = set(event.value for event in AmdSmiEvtNotificationType)
             if self.event_info[i].event in unique_event_values:
                 if AmdSmiEvtNotificationType(self.event_info[i].event).name != "NONE":
