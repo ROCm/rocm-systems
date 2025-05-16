@@ -92,12 +92,6 @@ target_include_directories(${ROCM_SMI_TARGET}
                            "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 
-if(FILE_REORG_BACKWARD_COMPATIBILITY)
-    target_include_directories(${ROCM_SMI_TARGET}
-                           PUBLIC
-                           "$<INSTALL_INTERFACE:${ROCM_SMI}/include>")
-endif()
-
 ## Set the VERSION and SOVERSION values
 set_property(TARGET ${ROCM_SMI_TARGET} PROPERTY
              SOVERSION "${VERSION_MAJOR}")

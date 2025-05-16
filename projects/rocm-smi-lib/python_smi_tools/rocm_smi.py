@@ -3920,23 +3920,40 @@ def checkAmdGpus(deviceList):
     return False
 
 
-def check_runtime_status()->bool:
-    """Check the runtime status of all paths along /sys/bus/pci/drivers/amdgpu/*/power/runtime_status.
+def check_runtime_status() -> bool:
+    """Check the runtime status of all AMD GPU devices managed by the amdgpu driver.
 
-    Returns:
-        bool: True if any status is "active", False if any status is "unsupported".
+    This function scans the directories under the specified path to verify the
+    runtime power management status of each device. It checks the "runtime_status"
+    file for each device to determine if the device is in an "active" state. If any
+    device is not in an "active" state it returns False. If the file is inaccessible,
+    this may be due to a system that does not support runtime power management.
+    Some GPUs support runtime power management, while others may not. This is why the default status
+    is set to True.
+
+    bool: False if any device is not in "active" state, True otherwise.
     """
     base_path = "/sys/bus/pci/drivers/amdgpu"
+    status = True  # Default to True, assuming active unless proven otherwise
     for device in os.listdir(base_path):
         if os.path.isdir(os.path.join(base_path, device)):
             runtime_status_path = os.path.join(base_path, device, "power", "runtime_status")
-            if os.path.exists(runtime_status_path):
-                with open(runtime_status_path, 'r') as file:
-                    status = file.read().strip()
-                    if status == "active":
-                        return True
-    return False
-
+            try:
+                if os.path.exists(runtime_status_path):
+                    with open(runtime_status_path, 'r') as file:
+                        current_status = file.read().strip()
+                        if current_status != "active":
+                            status = False
+                            continue
+                        else:
+                            logging.debug(f"Runtime status for {device}: {current_status}")
+            except PermissionError as e:
+                # Handle permission errors gracefully
+                logging.debug(f"Permission denied while accessing {runtime_status_path} \nError: {e}")
+                continue
+        else:
+            logging.debug(f"Path {os.path.join(base_path, device)} is not a directory.")
+    return status
 
 def component_str(component):
     """ Returns the component String value
