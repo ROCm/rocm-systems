@@ -17,6 +17,13 @@ else()
     set(PRELOAD_ENV "LD_PRELOAD=$<TARGET_FILE:rocprofiler-sdk-json-tool>")
 endif()
 
+list(GET rocprofiler-sdk-tests-gfx-info 0 page-migration-gpu-0-gfx-info)
+
+# disabled on all architectures
+if("${page-migration-gpu-0-gfx-info}" MATCHES "^gfx([0-9a-fA-F]+)$")
+    set(IS_DISABLED ON)
+endif()
+
 add_test(NAME test-page-migration-execute COMMAND $<TARGET_FILE:page-migration> 4 1024)
 
 set(page-migration-env
@@ -40,8 +47,8 @@ set_tests_properties(
                "KFD does not support SVM event reporting"
                WORKING_DIRECTORY
                ${CMAKE_CURRENT_BINARY_DIR}
-               ATTACHED_FILES
-               ${CMAKE_CURRENT_BINARY_DIR}/page-migration-test.json)
+               DISABLED
+               "${IS_DISABLED}")
 
 # copy to binary directory
 rocprofiler_configure_pytest_files(COPY validate.py conftest.py CONFIG pytest.ini)
@@ -64,5 +71,5 @@ set_tests_properties(
                "KFD does not support SVM event reporting"
                WORKING_DIRECTORY
                ${CMAKE_CURRENT_BINARY_DIR}
-               ATTACHED_FILES
-               ${CMAKE_CURRENT_BINARY_DIR}/page-migration-test.json)
+               DISABLED
+               "${IS_DISABLED}")

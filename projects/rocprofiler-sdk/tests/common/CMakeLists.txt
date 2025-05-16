@@ -40,6 +40,7 @@ endif()
 
 if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.30)
     cmake_policy(SET CMP0167 NEW)
+    cmake_policy(SET CMP0169 OLD)
 endif()
 
 find_package(rocprofiler-sdk REQUIRED)
