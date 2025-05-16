@@ -252,6 +252,9 @@ class RocProfCompute:
         elif self.__args.name is None:
             sys.exit("Either --list-name or --name is required")
 
+        if self.__args.name.find("/") != -1:
+            console_error("'/' not permitted in profile name")
+
         # Deprecation warning for hardware blocks
         if [
             name

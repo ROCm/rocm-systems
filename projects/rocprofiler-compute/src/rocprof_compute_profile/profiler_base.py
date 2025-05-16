@@ -308,12 +308,6 @@ class RocProfCompute_Base:
                 "Profiling command required. Pass application executable after -- at the end of options.\n\t\ti.e. rocprof-compute profile -n vcopy -- ./vcopy -n 1048576 -b 256"
             )
 
-        # verify name meets MongoDB length requirements and no illegal chars
-        if len(self.__args.name) > 35:
-            console_error("-n/--name exceeds 35 character limit. Try again.")
-        if self.__args.name.find(".") != -1 or self.__args.name.find("-") != -1:
-            console_error("'-' and '.' are not permitted in -n/--name")
-
         gen_sysinfo(
             workload_name=self.__args.name,
             workload_dir=self.get_args().path,
