@@ -5310,6 +5310,7 @@ Output: link id and bw type to which io bandwidth to be obtained
 Exceptions that can be thrown by `amdsmi_get_cpu_current_io_bandwidth` function:
 
 * `AmdSmiLibraryException`
+* `AmdSmiParameterException`
 
 Example:
 
