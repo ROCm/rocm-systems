@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include <rocprofiler-sdk/experimental/thread-trace/trace_decoder.h>
+
 #include "lib/att-tool/util.hpp"
 #include "lib/common/filesystem.hpp"
 
@@ -45,25 +47,11 @@ struct CodeobjLoadInfo
     size_t      size{0};
 };
 
-enum tool_att_capability_t
-{
-    ATT_CAPABILITIES_TESTING1 = 0,  // used for code coverage testing
-    ATT_CAPABILITIES_TESTING2,      // used for code coverage testing
-    ATT_CAPABILITIES_TRACE,         // used for all outputs
-    ATT_CAPABILITIES_DEBUG,
-    ATT_CAPABILITIES_LAST = ATT_CAPABILITIES_DEBUG,
-};
-
-/**
- * Query decoder library capability. Returns list of supported capabilities.
- */
-std::vector<tool_att_capability_t>
-query_att_decode_capability();
-
 class ATTDecoder
 {
 public:
-    ATTDecoder(tool_att_capability_t cap);
+    ATTDecoder(const std::string& path);
+    ~ATTDecoder();
 
     /**
      * Parse a list of att files
@@ -83,7 +71,7 @@ public:
     bool valid() const;
 
 protected:
-    std::shared_ptr<class DL> dl{nullptr};
+    rocprofiler_thread_trace_decoder_handle_t decoder{};
 };
 
 class ATTFileMgr
@@ -91,20 +79,26 @@ class ATTFileMgr
     using AddressTable = rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate;
 
 public:
-    ATTFileMgr(Fspath _dir, std::shared_ptr<DL> _dl, std::vector<std::string> _counters);
+    ATTFileMgr(Fspath                                    _dir,
+               std::vector<std::string>                  _counters,
+               rocprofiler_thread_trace_decoder_handle_t _decoder);
     ~ATTFileMgr();
 
-    void parseShader(int se_id, const std::vector<char>& data);
+    void addDecoder(const char* filepath, uint64_t id, uint64_t load_addr, uint64_t memsize);
+
+    void parseShader(int se_id, std::vector<char>& data);
 
     Fspath dir{};
 
-    std::shared_ptr<class DL>          dl{nullptr};
-    std::shared_ptr<class CodeFile>    codefile{nullptr};
-    std::shared_ptr<class FilenameMgr> filenames{nullptr};
-    std::shared_ptr<AddressTable>      table{nullptr};
+    std::shared_ptr<class CodeFile>            codefile{nullptr};
+    std::shared_ptr<class FilenameMgr>         filenames{nullptr};
+    std::shared_ptr<AddressTable>              table{nullptr};
+    std::map<size_t, std::vector<occupancy_t>> occupancy{};
+    std::vector<uint64_t>                      codeobjs_to_delete{};
+    rocprofiler_thread_trace_decoder_handle_t  decoder{};
 
-    std::map<size_t, std::vector<att_occupancy_info_v2_t>>              occupancy;
-    std::array<std::shared_ptr<class WstatesFile>, ATT_WAVE_STATE_LAST> wstates;
+    std::array<std::shared_ptr<class WstatesFile>, ROCPROFILER_THREAD_TRACE_DECODER_WSTATE_LAST>
+        wstates;
 };
 
 }  // namespace att_wrapper

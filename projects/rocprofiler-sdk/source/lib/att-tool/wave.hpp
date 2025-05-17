@@ -22,7 +22,6 @@
 
 #pragma once
 
-#include "att_decoder.h"
 #include "code.hpp"
 #include "filenames.hpp"
 #include "waitcnt/analysis.hpp"
@@ -43,8 +42,9 @@ constexpr size_t SIMD_SIZE = 32;
 
 class WaveConfig
 {
-    using WavestateArray = std::array<std::shared_ptr<WstatesFile>, ATT_WAVE_STATE_LAST>;
-    using SIMD           = std::array<size_t, SIMD_SIZE>;
+    using WavestateArray =
+        std::array<std::shared_ptr<WstatesFile>, ROCPROFILER_THREAD_TRACE_DECODER_WSTATE_LAST>;
+    using SIMD = std::array<size_t, SIMD_SIZE>;
 
 public:
     WaveConfig(int                           se_id,
@@ -64,14 +64,14 @@ public:
     std::shared_ptr<CodeFile>    code;
     std::shared_ptr<FilenameMgr> filemgr;
 
-    std::map<pcinfo_t, KernelName>       kernel_names{};
-    std::vector<att_occupancy_info_v2_t> occupancy{};
+    std::map<pcinfo_t, KernelName> kernel_names{};
+    std::vector<occupancy_t>       occupancy{};
 };
 
 class WaveFile
 {
 public:
-    WaveFile(WaveConfig& config, const att_wave_data_t& wave);
+    WaveFile(WaveConfig& config, const wave_t& wave);
     Fspath filename{};
 };
 

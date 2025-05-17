@@ -26,9 +26,9 @@
 #endif
 
 #include "profile_interface.hpp"
-#include "att_decoder.h"
-#include "dl.hpp"
 #include "perfcounter.hpp"
+
+#include <rocprofiler-sdk/experimental/thread-trace/trace_decoder.h>
 
 #include <cxxabi.h>
 #include <cstring>
@@ -38,66 +38,49 @@ namespace rocprofiler
 {
 namespace att_wrapper
 {
-struct trace_data_t
-{
-    int64_t   id{0};
-    uint8_t*  data{nullptr};
-    uint64_t  size{0};
-    ToolData* tool{nullptr};
-};
-
-rocprofiler_att_decoder_status_t
-get_trace_data(rocprofiler_att_decoder_record_type_t trace_id,
-               int /* shader_id */,
-               void*  trace_events,
-               size_t trace_size,
-               void*  userdata)
+void
+get_trace_data(rocprofiler_thread_trace_decoder_record_type_t trace_id,
+               void*                                          trace_events,
+               size_t                                         trace_size,
+               void*                                          userdata)
 {
     C_API_BEGIN
 
     CHECK_NOTNULL(userdata);
-    trace_data_t& trace_data = *reinterpret_cast<trace_data_t*>(userdata);
-    CHECK_NOTNULL(trace_data.tool);
-    ToolData& tool = *trace_data.tool;
+    ToolData& tool = *static_cast<ToolData*>(userdata);
 
-    if(trace_id == ROCPROFILER_ATT_DECODER_TYPE_INFO)
+    if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INFO)
     {
-        auto* infos = (rocprofiler_att_decoder_info_t*) trace_events;
+        auto* infos = (rocprofiler_thread_trace_decoder_info_t*) trace_events;
         for(size_t i = 0; i < trace_size; i++)
-            ROCP_WARNING << tool.dl->att_info_fn(infos[i]);
+            ROCP_WARNING << rocprofiler_thread_trace_decoder_info_string(tool.decoder, infos[i]);
     }
-    else if(trace_id == ROCPROFILER_ATT_DECODER_TYPE_GFXIP)
+    else if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_GFXIP)
     {
         tool.config.filemgr->gfxip = reinterpret_cast<size_t>(trace_events);
     }
-    else if(trace_id == ROCPROFILER_ATT_DECODER_TYPE_OCCUPANCY)
+    else if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_OCCUPANCY)
     {
         for(size_t i = 0; i < trace_size; i++)
-            tool.config.occupancy.push_back(
-                reinterpret_cast<const att_occupancy_info_v2_t*>(trace_events)[i]);
+            tool.config.occupancy.push_back(reinterpret_cast<const occupancy_t*>(trace_events)[i]);
     }
-    else if(trace_id == ROCPROFILER_ATT_DECODER_TYPE_PERFEVENT)
+    else if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_PERFEVENT)
     {
-        PerfcounterFile(tool.config, reinterpret_cast<att_perfevent_t*>(trace_events), trace_size);
+        PerfcounterFile(tool.config, reinterpret_cast<perfevent_t*>(trace_events), trace_size);
     }
 
-    if(trace_id != ROCPROFILER_ATT_DECODER_TYPE_WAVE) return ROCPROFILER_ATT_DECODER_STATUS_SUCCESS;
+    if(trace_id != ROCPROFILER_THREAD_TRACE_DECODER_RECORD_WAVE) return;
 
     bool bInvalid = false;
     for(size_t wave_n = 0; wave_n < trace_size; wave_n++)
     {
-        auto&   wave           = reinterpret_cast<att_wave_data_t*>(trace_events)[wave_n];
+        auto&   wave           = reinterpret_cast<wave_t*>(trace_events)[wave_n];
         int64_t prev_inst_time = wave.begin_time;
-
-        WaveFile(tool.config, wave);
 
         for(size_t j = 0; j < wave.instructions_size; j++)
         {
             auto& inst = wave.instructions_array[j];
-            if(inst.pc.marker_id == 0 && inst.pc.addr == 0)
-                continue;
-            else if(inst.category >= att_wave_inst_category_t::ATT_INST_LAST)
-                continue;
+            if(inst.pc.marker_id == 0 && inst.pc.addr == 0) continue;
 
             try
             {
@@ -112,81 +95,24 @@ get_trace_data(rocprofiler_att_decoder_record_type_t trace_id,
             }
             prev_inst_time = std::max(prev_inst_time, inst.time + inst.duration);
         }
+
+        WaveFile(tool.config, wave);
     }
     if(bInvalid) ROCP_WARNING << "Could not fetch some instructions!";
 
-    return ROCPROFILER_ATT_DECODER_STATUS_SUCCESS;
-
     C_API_END
-
-    return ROCPROFILER_ATT_DECODER_STATUS_ERROR;
 }
 
-uint64_t
-copy_trace_data(int* seid, uint8_t** buffer, uint64_t* buffer_size, void* userdata)
-{
-    trace_data_t& data = *reinterpret_cast<trace_data_t*>(userdata);
-    *seid              = data.id;
-    *buffer_size       = data.size;
-    *buffer            = data.data;
-    data.size          = 0;
-    return *buffer_size;
-}
-
-rocprofiler_att_decoder_status_t
-isa_callback(char*     isa_instruction,
-             uint64_t* isa_memory_size,
-             uint64_t* isa_size,
-             pcinfo_t  pc,
-             void*     userdata)
-{
-    C_API_BEGIN
-    CHECK_NOTNULL(userdata);
-    trace_data_t& trace_data = *reinterpret_cast<trace_data_t*>(userdata);
-    CHECK_NOTNULL(trace_data.tool);
-    ToolData& tool = *trace_data.tool;
-
-    std::shared_ptr<Instruction> instruction{nullptr};
-
-    try
-    {
-        CodeLine& line = tool.get(pc);
-        instruction    = line.code_line;
-    } catch(std::exception& e)
-    {
-        ROCP_WARNING << pc.marker_id << ":" << pc.addr << ' ' << e.what();
-        return ROCPROFILER_ATT_DECODER_STATUS_ERROR;
-    }
-
-    if(!instruction.get()) return ROCPROFILER_ATT_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
-
-    {
-        size_t tmp_isa_size = *isa_size;
-        *isa_size           = instruction->inst.size();
-
-        if(*isa_size > tmp_isa_size) return ROCPROFILER_ATT_DECODER_STATUS_ERROR_OUT_OF_RESOURCES;
-    }
-
-    memcpy(isa_instruction, instruction->inst.data(), *isa_size);
-    *isa_memory_size = instruction->size;
-
-    C_API_END
-    return ROCPROFILER_ATT_DECODER_STATUS_SUCCESS;
-}
-
-ToolData::ToolData(const std::vector<char>& _data, WaveConfig& _config, std::shared_ptr<DL> _dl)
+ToolData::ToolData(std::vector<char>&                        _data,
+                   WaveConfig&                               _config,
+                   rocprofiler_thread_trace_decoder_handle_t _decoder)
 : cfile(_config.code)
 , config(_config)
-, dl(std::move(_dl))
+, decoder(_decoder)
 {
-    trace_data_t data{.id   = config.shader_engine,
-                      .data = (uint8_t*) _data.data(),
-                      .size = _data.size(),
-                      .tool = this};
-
-    auto status = dl->att_parse_data_fn(copy_trace_data, get_trace_data, isa_callback, &data);
-    if(status != ROCPROFILER_ATT_DECODER_STATUS_SUCCESS)
-        ROCP_ERROR << "Callback failed with status " << dl->att_status_fn(status);
+    auto status =
+        rocprofiler_trace_decode(decoder, get_trace_data, _data.data(), _data.size(), this);
+    ROCP_ERROR_IF(status != ROCPROFILER_STATUS_SUCCESS) << ": " << status;
 }
 
 ToolData::~ToolData() = default;

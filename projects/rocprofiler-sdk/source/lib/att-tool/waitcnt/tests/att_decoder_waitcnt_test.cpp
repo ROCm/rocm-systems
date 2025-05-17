@@ -76,20 +76,19 @@ TEST(att_decoder_waitcnt_test, gfx9)
     append_isa(20, "s_waitcnt vmcnt(  0) lgkmcnt(0x0)");  // some weird strings
     append_isa(21, "invalid");
 
-    std::vector<att_wave_instruction_t> insts{};
+    std::vector<wave_instruction_t> insts{};
 
     for(size_t j = 0; j < LOOP_CNT; j++)
     {
         for(size_t i = 0; i < isa_map.size(); i++)
         {
-            att_wave_instruction_t inst{};
+            wave_instruction_t inst{};
             inst.pc.addr = i;
             insts.push_back(inst);
         }
     }
 
     WaitcntList::wave_t wave{};
-    wave.traceID            = 1;
     wave.instructions_array = insts.data();
     wave.instructions_size  = insts.size();
 
@@ -170,16 +169,15 @@ TEST(att_decoder_waitcnt_test, gfx10)
     append_isa(26, "s_waitcnt lgkmcnt 0");
     append_isa(27, "invalid");
 
-    std::vector<att_wave_instruction_t> insts{};
+    std::vector<wave_instruction_t> insts{};
     for(size_t i = 0; i < isa_map.size(); i++)
     {
-        att_wave_instruction_t inst{};
+        wave_instruction_t inst{};
         inst.pc.addr = i;
         insts.push_back(inst);
     }
 
     WaitcntList::wave_t wave{};
-    wave.traceID            = 2;
     wave.instructions_array = insts.data();
     wave.instructions_size  = insts.size();
 
@@ -291,16 +289,15 @@ TEST(att_decoder_waitcnt_test, gfx12)
     append_isa(42, "s_wait_idle");
     append_isa(43, "invalid");
 
-    std::vector<att_wave_instruction_t> insts{};
+    std::vector<wave_instruction_t> insts{};
     for(size_t i = 0; i < isa_map.size(); i++)
     {
-        att_wave_instruction_t inst{};
+        wave_instruction_t inst{};
         inst.pc.addr = i;
         insts.push_back(inst);
     }
 
     WaitcntList::wave_t wave{};
-    wave.traceID            = 3;
     wave.instructions_array = insts.data();
     wave.instructions_size  = insts.size();
 
@@ -342,11 +339,11 @@ TEST(att_decoder_waitcnt_test, fail_conditions)
 
     WaitcntList::isa_map_t isa_map{};
 
-    std::vector<att_wave_instruction_t> insts{};
+    std::vector<wave_instruction_t> insts{};
 
     for(size_t i = 0; i < 10; i++)
     {
-        att_wave_instruction_t inst{};
+        wave_instruction_t inst{};
         inst.pc.addr = i;
         insts.push_back(inst);
     }

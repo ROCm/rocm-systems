@@ -27,13 +27,19 @@
 #define TOOL_VERSION_REV   0
 #define TOOL_VERSION       "3.0.0"
 
+#include <rocprofiler-sdk/experimental/thread-trace/trace_decoder_types.h>
 #include <rocprofiler-sdk/cxx/codeobj/code_printing.hpp>
-#include "att_decoder.h"
 #include "lib/common/logging.hpp"
 
 #include <memory>
 #include <string>
 #include <string_view>
+
+using pcinfo_t           = rocprofiler_thread_trace_decoder_pc_t;
+using occupancy_t        = rocprofiler_thread_trace_decoder_occupancy_t;
+using wave_t             = rocprofiler_thread_trace_decoder_wave_t;
+using perfevent_t        = rocprofiler_thread_trace_decoder_perfevent_t;
+using wave_instruction_t = rocprofiler_thread_trace_decoder_inst_t;
 
 template <>
 struct std::hash<pcinfo_t>

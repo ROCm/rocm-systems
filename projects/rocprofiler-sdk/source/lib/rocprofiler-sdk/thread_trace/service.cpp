@@ -37,13 +37,13 @@ using DeviceThreadTracer   = rocprofiler::thread_trace::DeviceThreadTracer;
 extern "C" {
 rocprofiler_status_t
 rocprofiler_configure_dispatch_thread_trace_service(
-    rocprofiler_context_id_t               context_id,
-    rocprofiler_agent_id_t                 agent_id,
-    rocprofiler_att_parameter_t*           parameters,
-    size_t                                 num_parameters,
-    rocprofiler_att_dispatch_callback_t    dispatch_callback,
-    rocprofiler_att_shader_data_callback_t shader_callback,
-    void*                                  callback_userdata)
+    rocprofiler_context_id_t                        context_id,
+    rocprofiler_agent_id_t                          agent_id,
+    rocprofiler_thread_trace_parameter_t*           parameters,
+    size_t                                          num_parameters,
+    rocprofiler_thread_trace_dispatch_callback_t    dispatch_callback,
+    rocprofiler_thread_trace_shader_data_callback_t shader_callback,
+    void*                                           callback_userdata)
 {
     ROCP_TRACE << "Configuring Dispatch ATT for agent " << agent_id.handle;
 
@@ -69,30 +69,37 @@ rocprofiler_configure_dispatch_thread_trace_service(
     auto id_map = rocprofiler::counters::getPerfCountersIdMap();
     for(size_t p = 0; p < num_parameters; p++)
     {
-        const rocprofiler_att_parameter_t& param = parameters[p];
-        if(param.type > ROCPROFILER_ATT_PARAMETER_LAST)
+        const rocprofiler_thread_trace_parameter_t& param = parameters[p];
+        if(param.type > ROCPROFILER_THREAD_TRACE_PARAMETER_LAST)
             return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
         switch(param.type)
         {
-            case ROCPROFILER_ATT_PARAMETER_TARGET_CU: pack.target_cu = param.value; break;
-            case ROCPROFILER_ATT_PARAMETER_SHADER_ENGINE_MASK:
+            case ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU: pack.target_cu = param.value; break;
+            case ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK:
                 pack.shader_engine_mask = param.value;
                 break;
-            case ROCPROFILER_ATT_PARAMETER_BUFFER_SIZE: pack.buffer_size = param.value; break;
-            case ROCPROFILER_ATT_PARAMETER_SIMD_SELECT: pack.simd_select = param.value; break;
-            case ROCPROFILER_ATT_PARAMETER_PERFCOUNTER:
+            case ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE:
+                pack.buffer_size = param.value;
+                break;
+            case ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT:
+                pack.simd_select = param.value;
+                break;
+            case ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTER:
             {
                 auto event_it = id_map.find(param.counter_id.handle);
                 if(event_it != id_map.end())
                     pack.perfcounters.push_back({event_it->second, param.simd_mask});
             }
             break;
-            case ROCPROFILER_ATT_PARAMETER_PERFCOUNTERS_CTRL:
+            case ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTERS_CTRL:
                 pack.perfcounter_ctrl = param.value;
                 break;
-            case ROCPROFILER_ATT_PARAMETER_SERIALIZE_ALL: pack.bSerialize = param.value != 0; break;
-            case ROCPROFILER_ATT_PARAMETER_LAST: return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+            case ROCPROFILER_THREAD_TRACE_PARAMETER_SERIALIZE_ALL:
+                pack.bSerialize = param.value != 0;
+                break;
+            case ROCPROFILER_THREAD_TRACE_PARAMETER_LAST:
+                return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
         }
     }
 
@@ -104,12 +111,12 @@ rocprofiler_configure_dispatch_thread_trace_service(
 
 rocprofiler_status_t
 rocprofiler_configure_device_thread_trace_service(
-    rocprofiler_context_id_t               context_id,
-    rocprofiler_agent_id_t                 agent_id,
-    rocprofiler_att_parameter_t*           parameters,
-    size_t                                 num_parameters,
-    rocprofiler_att_shader_data_callback_t shader_callback,
-    rocprofiler_user_data_t                userdata)
+    rocprofiler_context_id_t                        context_id,
+    rocprofiler_agent_id_t                          agent_id,
+    rocprofiler_thread_trace_parameter_t*           parameters,
+    size_t                                          num_parameters,
+    rocprofiler_thread_trace_shader_data_callback_t shader_callback,
+    rocprofiler_user_data_t                         userdata)
 {
     ROCP_TRACE << "Configuring Device ATT for agent " << agent_id.handle;
 
@@ -131,32 +138,37 @@ rocprofiler_configure_device_thread_trace_service(
     auto id_map = rocprofiler::counters::getPerfCountersIdMap();
     for(size_t p = 0; p < num_parameters; p++)
     {
-        const rocprofiler_att_parameter_t& param = parameters[p];
-        if(param.type > ROCPROFILER_ATT_PARAMETER_LAST)
+        const rocprofiler_thread_trace_parameter_t& param = parameters[p];
+        if(param.type > ROCPROFILER_THREAD_TRACE_PARAMETER_LAST)
             return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
         switch(param.type)
         {
-            case ROCPROFILER_ATT_PARAMETER_TARGET_CU: pack.target_cu = param.value; break;
-            case ROCPROFILER_ATT_PARAMETER_SHADER_ENGINE_MASK:
+            case ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU: pack.target_cu = param.value; break;
+            case ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK:
                 pack.shader_engine_mask = param.value;
                 break;
-            case ROCPROFILER_ATT_PARAMETER_BUFFER_SIZE: pack.buffer_size = param.value; break;
-            case ROCPROFILER_ATT_PARAMETER_SIMD_SELECT: pack.simd_select = param.value; break;
-            case ROCPROFILER_ATT_PARAMETER_PERFCOUNTER:
+            case ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE:
+                pack.buffer_size = param.value;
+                break;
+            case ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT:
+                pack.simd_select = param.value;
+                break;
+            case ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTER:
             {
                 auto event_it = id_map.find(param.counter_id.handle);
                 if(event_it != id_map.end())
                     pack.perfcounters.push_back({event_it->second, param.simd_mask});
             }
             break;
-            case ROCPROFILER_ATT_PARAMETER_PERFCOUNTERS_CTRL:
+            case ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTERS_CTRL:
                 pack.perfcounter_ctrl = param.value;
                 break;
-            case ROCPROFILER_ATT_PARAMETER_SERIALIZE_ALL:
+            case ROCPROFILER_THREAD_TRACE_PARAMETER_SERIALIZE_ALL:
                 if(param.value != 0) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
                 break;
-            case ROCPROFILER_ATT_PARAMETER_LAST: return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+            case ROCPROFILER_THREAD_TRACE_PARAMETER_LAST:
+                return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
         }
     }
 

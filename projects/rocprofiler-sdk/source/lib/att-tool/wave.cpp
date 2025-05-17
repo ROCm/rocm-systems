@@ -32,7 +32,7 @@ namespace rocprofiler
 {
 namespace att_wrapper
 {
-WaveFile::WaveFile(WaveConfig& config, const att_wave_data_t& wave)
+WaveFile::WaveFile(WaveConfig& config, const wave_t& wave)
 {
     ROCP_WARNING_IF(wave.contexts != 0u)
         << "Wave had " << wave.contexts << " context save-restores";

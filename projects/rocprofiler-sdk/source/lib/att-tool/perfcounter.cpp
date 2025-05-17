@@ -34,7 +34,7 @@ namespace rocprofiler
 namespace att_wrapper
 {
 void
-PerfcounterFile(WaveConfig& config, const att_perfevent_t* events, size_t event_count)
+PerfcounterFile(WaveConfig& config, const perfevent_t* events, size_t event_count)
 {
     nlohmann::json data;
     for(size_t i = 0; i < event_count; i++)

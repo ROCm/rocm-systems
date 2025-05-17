@@ -35,7 +35,7 @@ namespace Single
 {
 rocprofiler_client_id_t* client_id = nullptr;
 
-rocprofiler_att_control_flags_t
+rocprofiler_thread_trace_control_flags_t
 dispatch_callback(rocprofiler_agent_id_t /* agent */,
                   rocprofiler_queue_id_t /* queue_id */,
                   rocprofiler_async_correlation_id_t /* correlation_id */,
@@ -55,16 +55,16 @@ dispatch_callback(rocprofiler_agent_id_t /* agent */,
     {
         auto& kernel_name = tool.kernel_id_to_kernel_name.at(kernel_id);
         if(kernel_name.find(desired_func_name) == std::string::npos)
-            return ROCPROFILER_ATT_CONTROL_NONE;
+            return ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
 
-        return ROCPROFILER_ATT_CONTROL_START_AND_STOP;
+        return ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP;
     } catch(...)
     {
         std::cerr << "Could not find kernel id: " << kernel_id << std::endl;
     }
 
     C_API_END
-    return ROCPROFILER_ATT_CONTROL_NONE;
+    return ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
 }
 
 int

@@ -365,9 +365,17 @@ public:
         table.insert({ptr->begin(), ptr->size(), id});
     }
 
-    virtual bool removeDecoder(marker_id_t id, uint64_t load_addr)
+    bool removeDecoder(marker_id_t id, uint64_t load_addr)
     {
         return table.remove(load_addr) && this->Super::removeDecoderbyId(id);
+    }
+
+    bool removeDecoder(marker_id_t id)
+    {
+        uint64_t addr = 0;
+        if(decoders.find(id) != decoders.end()) addr = decoders.at(id)->begin();
+
+        return removeDecoder(id, addr);
     }
 
     std::unique_ptr<Instruction> get(uint64_t vaddr)

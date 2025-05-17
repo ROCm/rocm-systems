@@ -25,3 +25,4 @@
 #include <rocprofiler-sdk/experimental/thread-trace/agent.h>
 #include <rocprofiler-sdk/experimental/thread-trace/core.h>
 #include <rocprofiler-sdk/experimental/thread-trace/dispatch.h>
+#include <rocprofiler-sdk/experimental/thread-trace/trace_decoder.h>

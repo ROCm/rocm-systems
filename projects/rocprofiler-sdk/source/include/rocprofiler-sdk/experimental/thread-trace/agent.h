@@ -54,16 +54,17 @@ ROCPROFILER_EXTERN_C_INIT
  * @retval ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED for configuration locked
  * @retval ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID for conflicting configurations in the same ctx
  * @retval ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND for invalid context id
- * @retval ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT for invalid rocprofiler_att_parameter_t
+ * @retval ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT for invalid
+ * rocprofiler_thread_trace_parameter_t
  */
 rocprofiler_status_t
 rocprofiler_configure_device_thread_trace_service(
-    rocprofiler_context_id_t               context_id,
-    rocprofiler_agent_id_t                 agent_id,
-    rocprofiler_att_parameter_t*           parameters,
-    size_t                                 num_parameters,
-    rocprofiler_att_shader_data_callback_t shader_callback,
-    rocprofiler_user_data_t                callback_userdata) ROCPROFILER_API;
+    rocprofiler_context_id_t                        context_id,
+    rocprofiler_agent_id_t                          agent_id,
+    rocprofiler_thread_trace_parameter_t*           parameters,
+    size_t                                          num_parameters,
+    rocprofiler_thread_trace_shader_data_callback_t shader_callback,
+    rocprofiler_user_data_t                         callback_userdata) ROCPROFILER_API;
 
 /** @} */
 

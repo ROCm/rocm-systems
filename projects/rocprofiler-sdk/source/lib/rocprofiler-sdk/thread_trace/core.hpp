@@ -56,10 +56,10 @@ namespace thread_trace
 {
 struct thread_trace_parameter_pack
 {
-    rocprofiler_context_id_t               context_id{0};
-    rocprofiler_att_dispatch_callback_t    dispatch_cb_fn{nullptr};
-    rocprofiler_att_shader_data_callback_t shader_cb_fn{nullptr};
-    rocprofiler_user_data_t                callback_userdata{};
+    rocprofiler_context_id_t                        context_id{0};
+    rocprofiler_thread_trace_dispatch_callback_t    dispatch_cb_fn{nullptr};
+    rocprofiler_thread_trace_shader_data_callback_t shader_cb_fn{nullptr};
+    rocprofiler_user_data_t                         callback_userdata{};
 
     // Parameters
     uint8_t  target_cu          = 1;

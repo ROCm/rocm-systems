@@ -52,9 +52,9 @@ get_kernel_id(pcinfo_t pc)
 namespace OccupancyFile
 {
 void
-OccupancyFile(const Fspath&                                                 dir,
-              std::shared_ptr<AddressTable>&                                table,
-              const std::map<size_t, std::vector<att_occupancy_info_v2_t>>& occ)
+OccupancyFile(const Fspath&                                     dir,
+              std::shared_ptr<AddressTable>&                    table,
+              const std::map<size_t, std::vector<occupancy_t>>& occ)
 {
     if(!GlobalDefs::get().has_format("json")) return;
     nlohmann::json jocc;

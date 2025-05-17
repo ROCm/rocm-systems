@@ -29,7 +29,7 @@
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
-#include "lib/rocprofiler-sdk/thread_trace/att_core.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
 #include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/fwd.h>

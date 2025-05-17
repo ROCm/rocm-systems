@@ -36,7 +36,7 @@ namespace Multi
 {
 rocprofiler_client_id_t* client_id = nullptr;
 
-rocprofiler_att_control_flags_t
+rocprofiler_thread_trace_control_flags_t
 dispatch_callback(rocprofiler_agent_id_t /* agent */,
                   rocprofiler_queue_id_t /* queue_id  */,
                   rocprofiler_async_correlation_id_t /* correlation_id  */,
@@ -46,12 +46,12 @@ dispatch_callback(rocprofiler_agent_id_t /* agent */,
                   rocprofiler_user_data_t* dispatch_userdata)
 {
     static std::atomic<size_t> count{0};
-    if(count.fetch_add(1) > NUM_KERNELS) return ROCPROFILER_ATT_CONTROL_NONE;
+    if(count.fetch_add(1) > NUM_KERNELS) return ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
 
     assert(userdata && "Dispatch callback passed null!");
     dispatch_userdata->ptr = userdata;
 
-    return ROCPROFILER_ATT_CONTROL_START_AND_STOP;
+    return ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP;
 }
 
 int
@@ -70,8 +70,8 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* tool_data)
                                                        tool_data),
         "code object tracing service configure");
 
-    std::vector<rocprofiler_att_parameter_t> params{};
-    params.push_back({ROCPROFILER_ATT_PARAMETER_SERIALIZE_ALL, 1});
+    std::vector<rocprofiler_thread_trace_parameter_t> params{};
+    params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SERIALIZE_ALL, 1});
 
     std::vector<rocprofiler_agent_id_t> agents{};
 
