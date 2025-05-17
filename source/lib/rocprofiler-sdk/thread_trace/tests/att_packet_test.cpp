@@ -31,7 +31,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
-#include "lib/rocprofiler-sdk/thread_trace/att_core.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
 #include <glog/logging.h>
 #include <gtest/gtest.h>
@@ -134,11 +134,11 @@ TEST(thread_trace, configure_test)
     rocprofiler_context_id_t ctx{0};
     ROCPROFILER_CALL(rocprofiler_create_context(&ctx), "context creation failed");
 
-    std::vector<rocprofiler_att_parameter_t> params;
-    params.push_back({ROCPROFILER_ATT_PARAMETER_TARGET_CU, {1}});
-    params.push_back({ROCPROFILER_ATT_PARAMETER_SHADER_ENGINE_MASK, {0xF}});
-    params.push_back({ROCPROFILER_ATT_PARAMETER_BUFFER_SIZE, {0x1000000}});
-    params.push_back({ROCPROFILER_ATT_PARAMETER_SIMD_SELECT, {0xF}});
+    std::vector<rocprofiler_thread_trace_parameter_t> params;
+    params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, {1}});
+    params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {0xF}});
+    params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, {0x1000000}});
+    params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT, {0xF}});
 
     auto agents = hsa::get_queue_controller()->get_supported_agents();
     ASSERT_GT(agents.size(), 0);
@@ -156,7 +156,7 @@ TEST(thread_trace, configure_test)
                rocprofiler_kernel_id_t,
                rocprofiler_dispatch_id_t,
                void*,
-               rocprofiler_user_data_t*) { return ROCPROFILER_ATT_CONTROL_NONE; },
+               rocprofiler_user_data_t*) { return ROCPROFILER_THREAD_TRACE_CONTROL_NONE; },
             [](rocprofiler_agent_id_t, int64_t, void*, size_t, rocprofiler_user_data_t) {},
             nullptr);
     }
@@ -180,17 +180,17 @@ TEST(thread_trace, perfcounters_configure_test)
     // Only GFX9 SQ Block counters are supported
     std::vector<std::pair<std::string, uint64_t>> perf_counters = {
         {"SQ_WAVES", 0x1}, {"SQ_WAVES", 0x2}, {"SQ_WAVES", 0x2}, {"GRBM_COUNT", 0x3}};
-    std::set<std::pair<uint32_t, uint32_t>>  expected;
-    std::vector<rocprofiler_att_parameter_t> params;
-    params.push_back({ROCPROFILER_ATT_PARAMETER_PERFCOUNTERS_CTRL, {1}});
+    std::set<std::pair<uint32_t, uint32_t>>           expected;
+    std::vector<rocprofiler_thread_trace_parameter_t> params;
+    params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTERS_CTRL, {1}});
     auto metrics = rocprofiler::counters::getMetricsForAgent("gfx90a");
 
     for(auto& [counter_name, simd_mask] : perf_counters)
         for(auto& metric : metrics)
             if(metric.name() == counter_name)
             {
-                rocprofiler_att_parameter_t att_param;
-                att_param.type       = ROCPROFILER_ATT_PARAMETER_PERFCOUNTER;
+                rocprofiler_thread_trace_parameter_t att_param;
+                att_param.type       = ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTER;
                 att_param.counter_id = rocprofiler_counter_id_t{.handle = metric.id()};
                 att_param.simd_mask  = simd_mask;
                 params.push_back(att_param);
@@ -213,7 +213,7 @@ TEST(thread_trace, perfcounters_configure_test)
                rocprofiler_kernel_id_t,
                rocprofiler_dispatch_id_t,
                void*,
-               rocprofiler_user_data_t*) { return ROCPROFILER_ATT_CONTROL_NONE; },
+               rocprofiler_user_data_t*) { return ROCPROFILER_THREAD_TRACE_CONTROL_NONE; },
             [](rocprofiler_agent_id_t, int64_t, void*, size_t, rocprofiler_user_data_t) {},
             nullptr);
     }
@@ -273,18 +273,18 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
         const auto* agent = static_cast<const rocprofiler_agent_v0_t*>(agents[idx]);
         if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
 
-        std::vector<rocprofiler_att_parameter_t> params;
-        params.push_back({ROCPROFILER_ATT_PARAMETER_TARGET_CU, {1}});
-        params.push_back({ROCPROFILER_ATT_PARAMETER_SHADER_ENGINE_MASK, {0xF}});
-        params.push_back({ROCPROFILER_ATT_PARAMETER_BUFFER_SIZE, {0x1000000}});
-        params.push_back({ROCPROFILER_ATT_PARAMETER_SIMD_SELECT, {0xF}});
-        params.push_back({ROCPROFILER_ATT_PARAMETER_PERFCOUNTERS_CTRL, {1}});
+        std::vector<rocprofiler_thread_trace_parameter_t> params;
+        params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, {1}});
+        params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {0xF}});
+        params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, {0x1000000}});
+        params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT, {0xF}});
+        params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTERS_CTRL, {1}});
 
         {
             auto metrics = rocprofiler::counters::getMetricsForAgent("gfx90a");
 
-            rocprofiler_att_parameter_t att_param;
-            att_param.type      = ROCPROFILER_ATT_PARAMETER_PERFCOUNTER;
+            rocprofiler_thread_trace_parameter_t att_param;
+            att_param.type      = ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTER;
             att_param.simd_mask = 0xF;
             for(auto& metric : metrics)
                 if(metric.name() == "SQ_WAVES") rocprofiler_counter_id_t{.handle = metric.id()};

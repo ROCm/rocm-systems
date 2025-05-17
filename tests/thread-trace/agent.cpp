@@ -65,8 +65,8 @@ dispatch_tracing_callback(rocprofiler_callback_tracing_record_t record,
         if(var) return atoi(var);
         return def;
     };
-    static int               begin_dispatch = get_int_var("ROCPROFILER_ATT_BEGIN", 1);
-    static int               end_dispatch   = get_int_var("ROCPROFILER_ATT_END", 4);
+    static int               begin_dispatch = get_int_var("ROCPROFILER_THREAD_TRACE_BEGIN", 1);
+    static int               end_dispatch   = get_int_var("ROCPROFILER_THREAD_TRACE_END", 4);
     static std::atomic<bool> isprofiling{false};
 
     static std::mutex    mut;
@@ -115,12 +115,12 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
         const auto* agent = static_cast<const rocprofiler_agent_v0_t*>(agents[idx]);
         if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
 
-        std::vector<rocprofiler_att_parameter_t> parameters;
-        parameters.push_back({ROCPROFILER_ATT_PARAMETER_TARGET_CU, 1});
-        parameters.push_back({ROCPROFILER_ATT_PARAMETER_SIMD_SELECT, 0xF});
-        parameters.push_back({ROCPROFILER_ATT_PARAMETER_BUFFER_SIZE, 0x6000000});
-        parameters.push_back({ROCPROFILER_ATT_PARAMETER_SHADER_ENGINE_MASK, 0x11});
-        parameters.push_back({ROCPROFILER_ATT_PARAMETER_SERIALIZE_ALL, 0});
+        std::vector<rocprofiler_thread_trace_parameter_t> parameters;
+        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, 1});
+        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT, 0xF});
+        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, 0x6000000});
+        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, 0x11});
+        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SERIALIZE_ALL, 0});
 
         ROCPROFILER_CALL(
             rocprofiler_configure_device_thread_trace_service(agent_ctx,

@@ -62,9 +62,9 @@ constexpr uint64_t MAX_BUFFER_SIZE = std::numeric_limits<int32_t>::max();  // aq
 
 struct cbdata_t
 {
-    rocprofiler_agent_id_t                 agent;
-    rocprofiler_att_shader_data_callback_t cb_fn;
-    const rocprofiler_user_data_t*         userdata;
+    rocprofiler_agent_id_t                          agent;
+    rocprofiler_thread_trace_shader_data_callback_t cb_fn;
+    const rocprofiler_user_data_t*                  userdata;
 };
 
 common::Synchronized<std::optional<int64_t>> client;
@@ -349,7 +349,8 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
                                                    parameters.callback_userdata.ptr,
                                                    user_data);
 
-    if(control_flags == ROCPROFILER_ATT_CONTROL_NONE) return {nullptr, parameters.bSerialize};
+    if(control_flags == ROCPROFILER_THREAD_TRACE_CONTROL_NONE)
+        return {nullptr, parameters.bSerialize};
 
     auto packet = agent.get_control(true);
     post_move_data.fetch_add(1);

@@ -20,31 +20,37 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#pragma once
+#include "lib/rocprofiler-sdk/thread_trace/dl.hpp"
+#include "lib/common/filesystem.hpp"
 
-#include "att_decoder.h"
-
-#include <memory>
+#include <dlfcn.h>
+#include <cassert>
+#include <cstdlib>
 
 namespace rocprofiler
 {
-namespace att_wrapper
+namespace thread_trace
 {
-class DL
+DL::DL(const char* libpath)
 {
-    using ParseFn  = decltype(rocprofiler_att_decoder_parse_data);
-    using InfoFn   = decltype(rocprofiler_att_decoder_get_info_string);
-    using StatusFn = decltype(rocprofiler_att_decoder_get_status_string);
+    if(libpath == nullptr) return;
 
-public:
-    DL(const char* libname);
-    ~DL();
+    auto path = common::filesystem::path(libpath) / "librocprof-trace-decoder.so";
 
-    ParseFn*  att_parse_data_fn = nullptr;
-    InfoFn*   att_info_fn       = nullptr;
-    StatusFn* att_status_fn     = nullptr;
-    void*     handle            = nullptr;
+    handle = dlopen(path.c_str(), RTLD_LAZY | RTLD_LOCAL);
+    if(!handle) return;
+
+    att_parse_data_fn =
+        reinterpret_cast<ParseFn*>(dlsym(handle, "rocprof_trace_decoder_parse_data"));
+    att_info_fn = reinterpret_cast<InfoFn*>(dlsym(handle, "rocprof_trace_decoder_get_info_string"));
+    att_status_fn =
+        reinterpret_cast<StatusFn*>(dlsym(handle, "rocprof_trace_decoder_get_status_string"));
 };
 
-}  // namespace att_wrapper
+DL::~DL()
+{
+    if(handle) dlclose(handle);
+}
+
+}  // namespace thread_trace
 }  // namespace rocprofiler

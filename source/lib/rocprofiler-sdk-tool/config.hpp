@@ -149,7 +149,7 @@ struct config : output_config
     std::string pc_sampling_method      = get_env("ROCPROF_PC_SAMPLING_METHOD", "none");
     std::string pc_sampling_unit        = get_env("ROCPROF_PC_SAMPLING_UNIT", "none");
     std::string extra_counters_contents = get_env("ROCPROF_EXTRA_COUNTERS_CONTENTS", "");
-    std::string att_capability          = get_env("ROCPROF_ATT_CAPABILITY", "trace");
+    std::string att_library_path        = get_env("ROCPROF_ATT_LIBRARY_PATH", "");
 
     std::unordered_set<size_t>         kernel_filter_range    = {};
     std::vector<std::set<std::string>> counters               = {};
@@ -244,7 +244,7 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(att_param_buffer_size);
     CFG_SERIALIZE_MEMBER(att_param_simd_select);
     CFG_SERIALIZE_MEMBER(att_param_target_cu);
-    CFG_SERIALIZE_MEMBER(att_capability);
+    CFG_SERIALIZE_MEMBER(att_library_path);
     CFG_SERIALIZE_MEMBER(att_param_perfcounters);
     CFG_SERIALIZE_MEMBER(att_param_perf_ctrl);
 

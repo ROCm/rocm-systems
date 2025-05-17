@@ -37,11 +37,11 @@ ROCPROFILER_EXTERN_C_INIT
  * @{
  */
 
-typedef enum rocprofiler_att_control_flags_t
+typedef enum rocprofiler_thread_trace_control_flags_t
 {
-    ROCPROFILER_ATT_CONTROL_NONE           = 0,
-    ROCPROFILER_ATT_CONTROL_START_AND_STOP = 3
-} rocprofiler_att_control_flags_t;
+    ROCPROFILER_THREAD_TRACE_CONTROL_NONE           = 0,
+    ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP = 3
+} rocprofiler_thread_trace_control_flags_t;
 
 /**
  * @brief Callback to be triggered every kernel dispatch, indicating to start and/or stop ATT
@@ -54,7 +54,7 @@ typedef enum rocprofiler_att_control_flags_t
  * rocprofiler_configure_dispatch_thread_trace_service.
  * @param [out] userdata_shader Userdata to be passed in shader_callback
  */
-typedef rocprofiler_att_control_flags_t (*rocprofiler_att_dispatch_callback_t)(
+typedef rocprofiler_thread_trace_control_flags_t (*rocprofiler_thread_trace_dispatch_callback_t)(
     rocprofiler_agent_id_t             agent_id,
     rocprofiler_queue_id_t             queue_id,
     rocprofiler_async_correlation_id_t correlation_id,
@@ -64,14 +64,14 @@ typedef rocprofiler_att_control_flags_t (*rocprofiler_att_dispatch_callback_t)(
     rocprofiler_user_data_t*           userdata_shader);
 
 /**
- * @brief Enables the advanced thread trace service for dispatch-based tracing.
+ * @brief Enables the thread trace service for dispatch-based tracing.
  * The tool has an option to enable/disable thread trace on every dispatch callback.
  * This service serializes all traced kernels, and optionally all non-traced kernels.
  * @param [in] context_id id of the context used for start/stop thread_trace.
  * @param [in] agent_id rocprofiler_agent_id_t to configure thread trace.
  * @param [in] parameters List of ATT-specific parameters.
  * @param [in] num_parameters Number of parameters. Zero is allowed.
- * @param [in] dispatch_callback Control fn which decides when ATT starts/stop collecting.
+ * @param [in] dispatch_callback Control fn which decides when TT starts/stop collecting.
  * @param [in] shader_callback Callback fn where the collected data will be sent to.
  * @param [in] callback_userdata Passed back to user in dispatch_callback.
  * @return ::rocprofiler_status_t
@@ -79,18 +79,19 @@ typedef rocprofiler_att_control_flags_t (*rocprofiler_att_dispatch_callback_t)(
  * @retval ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED for configuration locked
  * @retval ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID for conflicting configurations in the same ctx
  * @retval ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND for invalid context id
- * @retval ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT for invalid rocprofiler_att_parameter_t
+ * @retval ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT for invalid
+ * rocprofiler_thread_trace_parameter_t
  * @retval ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED if already configured
  */
 rocprofiler_status_t
 rocprofiler_configure_dispatch_thread_trace_service(
-    rocprofiler_context_id_t               context_id,
-    rocprofiler_agent_id_t                 agent_id,
-    rocprofiler_att_parameter_t*           parameters,
-    size_t                                 num_parameters,
-    rocprofiler_att_dispatch_callback_t    dispatch_callback,
-    rocprofiler_att_shader_data_callback_t shader_callback,
-    void*                                  callback_userdata) ROCPROFILER_API;
+    rocprofiler_context_id_t                        context_id,
+    rocprofiler_agent_id_t                          agent_id,
+    rocprofiler_thread_trace_parameter_t*           parameters,
+    size_t                                          num_parameters,
+    rocprofiler_thread_trace_dispatch_callback_t    dispatch_callback,
+    rocprofiler_thread_trace_shader_data_callback_t shader_callback,
+    void*                                           callback_userdata) ROCPROFILER_API;
 
 /** @} */
 

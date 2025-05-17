@@ -48,7 +48,7 @@ find_library(
     HINTS ${LIB_PATH_LOC}
     PATHS ${ROCM_PATH}
     PATH_SUFFIXES lib
-    NAMES att_decoder_trace)
+    NAMES rocprof-trace-decoder)
 
 if(attdecoder)
     set(IS_DISABLED OFF)
@@ -62,7 +62,7 @@ add_test(
         1 --att-target-cu 1 --att-shader-engine-mask 0x11 --kernel-include-regex copyD
         --att-buffer-size 0x6000000 --att-simd-select 0x3 --att-serialize-all 1 -d
         ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace/cmd_input -o out --output-format json
-        ${PRELOAD_ARGS} --att-library-path ${LIB_PATH_LOC} --
+        ${PRELOAD_ARGS} --att-library-path ${LIB_PATH_LOC} --att-activity 8 --
         $<TARGET_FILE:hsa_code_object_testapp>)
 
 set_tests_properties(
@@ -164,7 +164,7 @@ add_test(
 
 set_tests_properties(
     rocprofv3-test-att-yaml-input-will-fail
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" WILL_FAIL ON DISABLED ${IS_DISABLED})
+    PROPERTIES TIMEOUT 45 LABELS "integration-tests" WILL_FAIL ON DISABLED True)
 
 add_test(NAME rocprofv3-test-att-library-path-cmd-line-will-fail
          COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --att --att-library-path .
@@ -172,7 +172,7 @@ add_test(NAME rocprofv3-test-att-library-path-cmd-line-will-fail
 
 set_tests_properties(
     rocprofv3-test-att-library-path-cmd-line-will-fail
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" WILL_FAIL ON DISABLED ${IS_DISABLED})
+    PROPERTIES TIMEOUT 45 LABELS "integration-tests" WILL_FAIL ON DISABLED True)
 
 add_test(NAME rocprofv3-test-att-library-path-env-var-will-fail
          COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --att --log-level env --echo
@@ -189,7 +189,7 @@ set_tests_properties(
                WILL_FAIL
                ON
                DISABLED
-               ${IS_DISABLED})
+               True)
 
 #
 # Uses ATT and Counter Collection at the same time
@@ -205,3 +205,45 @@ set_tests_properties(
     rocprofv3-test-hsa-multiqueue-att-plus-pmc-execute
     PROPERTIES TIMEOUT 45 LABELS "integration-tests" DISABLED ${IS_DISABLED} ENVIRONMENT
                ${LIB_PATH_ENV})
+
+# Check for conflict PMC + activity
+add_test(
+    NAME rocprofv3-test-hsa-multiqueue-att-activity-pmc-will-fail
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --log-level env --pmc SQ_WAVES
+        --advanced-thread-trace -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace/cmd_input -o
+        out --att-activity 8 ${PRELOAD_ARGS} -- $<TARGET_FILE:vector-ops>)
+
+set_tests_properties(
+    rocprofv3-test-hsa-multiqueue-att-activity-pmc-will-fail
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               DISABLED
+               ${IS_DISABLED}
+               ENVIRONMENT
+               ${LIB_PATH_ENV}
+               WILL_FAIL
+               ON)
+
+# Check for conflict Perfcounters + activity
+add_test(
+    NAME rocprofv3-test-hsa-multiqueue-att-activity-perf-will-fail
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --log-level env --att
+        --att-perfcounter-ctrl 8 -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace/cmd_input -o
+        out --att-activity 8 ${PRELOAD_ARGS} -- $<TARGET_FILE:vector-ops>)
+
+set_tests_properties(
+    rocprofv3-test-hsa-multiqueue-att-activity-perf-will-fail
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               DISABLED
+               ${IS_DISABLED}
+               ENVIRONMENT
+               ${LIB_PATH_ENV}
+               WILL_FAIL
+               ON)

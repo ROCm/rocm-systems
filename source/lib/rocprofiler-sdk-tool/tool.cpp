@@ -1266,11 +1266,11 @@ get_instruction_index(rocprofiler_pc_t pc)
 
 }  // namespace
 
-std::vector<rocprofiler_att_parameter_t>
+std::vector<rocprofiler_thread_trace_parameter_t>
 get_att_perfcounter_params(rocprofiler_agent_id_t                           agent,
                            std::vector<rocprofiler::tool::att_perfcounter>& att_perf_counters)
 {
-    std::vector<rocprofiler_att_parameter_t> _data{};
+    std::vector<rocprofiler_thread_trace_parameter_t> _data{};
     if(att_perf_counters.empty()) return _data;
 
     static const auto agent_counter_info = get_agent_counter_info();
@@ -1283,8 +1283,8 @@ get_att_perfcounter_params(rocprofiler_agent_id_t                           agen
         {
             if(std::string_view(counter_info_.name) != att_perf_counter.counter_name) continue;
 
-            auto param       = rocprofiler_att_parameter_t{};
-            param.type       = ROCPROFILER_ATT_PARAMETER_PERFCOUNTER;
+            auto param       = rocprofiler_thread_trace_parameter_t{};
+            param.type       = ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTER;
             param.counter_id = counter_info_.id;
             param.simd_mask  = att_perf_counter.simd_mask;
             _data.emplace_back(param);
@@ -1392,7 +1392,7 @@ att_shader_data_callback(rocprofiler_agent_id_t  agent,
     tool_metadata->att_filenames[dispatch_id].second.emplace_back(output_filename);
 }
 
-rocprofiler_att_control_flags_t
+rocprofiler_thread_trace_control_flags_t
 att_dispatch_callback(rocprofiler_agent_id_t /* agent_id  */,
                       rocprofiler_queue_id_t /* queue_id  */,
                       rocprofiler_async_correlation_id_t /* correlation_id */,
@@ -1406,8 +1406,8 @@ att_dispatch_callback(rocprofiler_agent_id_t /* agent_id  */,
     userdata_shader->value = dispatch_id;
 
     if(is_targeted_kernel(kernel_id, kernel_iteration))
-        return ROCPROFILER_ATT_CONTROL_START_AND_STOP;
-    return ROCPROFILER_ATT_CONTROL_NONE;
+        return ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP;
+    return ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
 }
 
 void
@@ -1650,17 +1650,17 @@ struct tracing_callbacks_t
     , counter_record{dummy_counter_record_callback}
     {}
 
-    const rocprofiler_callback_tracing_cb_t          code_object_tracing = nullptr;
-    const rocprofiler_callback_tracing_cb_t          cntrl_tracing       = nullptr;
-    const rocprofiler_callback_tracing_cb_t          kernel_rename       = nullptr;
-    const rocprofiler_callback_tracing_cb_t          hip_stream          = nullptr;
-    const rocprofiler_callback_tracing_cb_t          callback_tracing    = nullptr;
-    const rocprofiler_buffer_tracing_cb_t            buffered_tracing    = nullptr;
-    const rocprofiler_buffer_tracing_cb_t            pc_sampling         = nullptr;
-    const rocprofiler_att_dispatch_callback_t        att_dispatch        = nullptr;
-    const rocprofiler_att_shader_data_callback_t     att_shader_data     = nullptr;
-    const rocprofiler_dispatch_counting_service_cb_t counter_dispatch    = nullptr;
-    const rocprofiler_dispatch_counting_record_cb_t  counter_record      = nullptr;
+    const rocprofiler_callback_tracing_cb_t               code_object_tracing = nullptr;
+    const rocprofiler_callback_tracing_cb_t               cntrl_tracing       = nullptr;
+    const rocprofiler_callback_tracing_cb_t               kernel_rename       = nullptr;
+    const rocprofiler_callback_tracing_cb_t               hip_stream          = nullptr;
+    const rocprofiler_callback_tracing_cb_t               callback_tracing    = nullptr;
+    const rocprofiler_buffer_tracing_cb_t                 buffered_tracing    = nullptr;
+    const rocprofiler_buffer_tracing_cb_t                 pc_sampling         = nullptr;
+    const rocprofiler_thread_trace_dispatch_callback_t    att_dispatch        = nullptr;
+    const rocprofiler_thread_trace_shader_data_callback_t att_shader_data     = nullptr;
+    const rocprofiler_dispatch_counting_service_cb_t      counter_dispatch    = nullptr;
+    const rocprofiler_dispatch_counting_record_cb_t       counter_record      = nullptr;
 };
 
 auto
@@ -1901,7 +1901,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     if(tool::get_config().advanced_thread_trace)
     {
-        auto     global_parameters = std::vector<rocprofiler_att_parameter_t>{};
+        auto     global_parameters = std::vector<rocprofiler_thread_trace_parameter_t>{};
         uint64_t target_cu         = tool::get_config().att_param_target_cu;
         uint64_t simd_select       = tool::get_config().att_param_simd_select;
         uint64_t buffer_sz         = tool::get_config().att_param_buffer_size;
@@ -1910,17 +1910,19 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         auto&    att_perf          = tool::get_config().att_param_perfcounters;
         bool     att_serialize_all = tool::get_config().att_serialize_all;
 
-        global_parameters.push_back({ROCPROFILER_ATT_PARAMETER_TARGET_CU, {target_cu}});
-        global_parameters.push_back({ROCPROFILER_ATT_PARAMETER_SIMD_SELECT, {simd_select}});
-        global_parameters.push_back({ROCPROFILER_ATT_PARAMETER_BUFFER_SIZE, {buffer_sz}});
-        global_parameters.push_back({ROCPROFILER_ATT_PARAMETER_SHADER_ENGINE_MASK, {shader_mask}});
+        global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, {target_cu}});
         global_parameters.push_back(
-            {ROCPROFILER_ATT_PARAMETER_SERIALIZE_ALL, {static_cast<uint64_t>(att_serialize_all)}});
+            {ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT, {simd_select}});
+        global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, {buffer_sz}});
+        global_parameters.push_back(
+            {ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {shader_mask}});
+        global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SERIALIZE_ALL,
+                                     {static_cast<uint64_t>(att_serialize_all)}});
 
         if(perfcounter_ctrl != 0 && !att_perf.empty())
         {
             global_parameters.push_back(
-                {ROCPROFILER_ATT_PARAMETER_PERFCOUNTERS_CTRL, {perfcounter_ctrl}});
+                {ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTERS_CTRL, {perfcounter_ctrl}});
         }
         else if(perfcounter_ctrl != 0 || !att_perf.empty())
         {
@@ -2335,8 +2337,7 @@ tool_fini(void* /*tool_data*/)
     generate_output(rocjpeg_output, outdata, contributions, cleanups);
     generate_output(pc_sampling_stochastic_output, outdata, contributions, cleanups);
 
-    if(tool::get_config().advanced_thread_trace && !tool::get_config().att_capability.empty() &&
-       !tool_metadata->att_filenames.empty())
+    if(tool::get_config().advanced_thread_trace && !tool_metadata->att_filenames.empty())
     {
         outdata.num_output += 1;
     }
@@ -2443,19 +2444,9 @@ tool_fini(void* /*tool_data*/)
 
     if(tool::get_config().advanced_thread_trace)
     {
-        const std::unordered_map<std::string_view, rocprofiler::att_wrapper::tool_att_capability_t>
-            tool_att_capability_map = {
-                {"testing1", rocprofiler::att_wrapper::ATT_CAPABILITIES_TESTING1},
-                {"testing2", rocprofiler::att_wrapper::ATT_CAPABILITIES_TESTING2},
-                {"trace", rocprofiler::att_wrapper::ATT_CAPABILITIES_TRACE},
-                {"debug", rocprofiler::att_wrapper::ATT_CAPABILITIES_DEBUG}};
+        auto decoder = rocprofiler::att_wrapper::ATTDecoder(tool::get_config().att_library_path);
+        ROCP_FATAL_IF(!decoder.valid()) << "Decoder library not found!";
 
-        ROCP_FATAL_IF(tool::get_config().att_capability.empty())
-            << "Provide the decoder parser method as input";
-
-        auto att_capability_value = tool_att_capability_map.at(tool::get_config().att_capability);
-        auto decoder              = rocprofiler::att_wrapper::ATTDecoder(att_capability_value);
-        ROCP_FATAL_IF(!decoder.valid()) << "Decoder library not found at ROCPROF_ATT_LIBRARY_PATH";
         auto codeobj     = tool_metadata->get_code_object_load_info();
         auto output_path = tool::format_path(tool::get_config().output_path);
 

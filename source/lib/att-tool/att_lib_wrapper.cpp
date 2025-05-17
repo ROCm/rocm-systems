@@ -21,7 +21,6 @@
 // SOFTWARE.
 
 #include "att_lib_wrapper.hpp"
-#include "dl.hpp"
 #include "filenames.hpp"
 #include "occupancy.hpp"
 #include "profile_interface.hpp"
@@ -42,39 +41,64 @@ namespace rocprofiler
 {
 namespace att_wrapper
 {
-auto
-get_lib_names()
-{
-    std::vector<std::pair<tool_att_capability_t, const char*>> lib_names = {
-        {tool_att_capability_t::ATT_CAPABILITIES_DEBUG, "libatt_decoder_debug.so"},
-        {tool_att_capability_t::ATT_CAPABILITIES_TRACE, "libatt_decoder_trace.so"},
-        {tool_att_capability_t::ATT_CAPABILITIES_TESTING1, "libatt_decoder_testing1.so"},
-        {tool_att_capability_t::ATT_CAPABILITIES_TESTING2, "libatt_decoder_testing2.so"},
-    };
-    return lib_names;
-}
-
-ATTFileMgr::ATTFileMgr(Fspath _dir, std::shared_ptr<DL> _dl, std::vector<std::string> _counters)
+ATTFileMgr::ATTFileMgr(Fspath                                    _dir,
+                       std::vector<std::string>                  _counters,
+                       rocprofiler_thread_trace_decoder_handle_t _decoder)
 : dir(std::move(_dir))
-, dl(std::move(_dl))
+, decoder(_decoder)
 {
     rocprofiler::common::filesystem::create_directories(dir);
     table     = std::make_shared<AddressTable>();
     codefile  = std::make_shared<CodeFile>(dir, table);
     filenames = std::make_shared<FilenameMgr>(dir);
 
-    for(size_t i = 0; i < ATT_WAVE_STATE_LAST; i++)
+    for(size_t i = 0; i < ROCPROFILER_THREAD_TRACE_DECODER_WSTATE_LAST; i++)
         wstates.at(i) = std::make_shared<WstatesFile>(i, dir);
     filenames->perfcounters = std::move(_counters);
 }
 
-ATTFileMgr::~ATTFileMgr() { OccupancyFile::OccupancyFile(dir, table, occupancy); }
+ATTFileMgr::~ATTFileMgr()
+{
+    for(auto id : codeobjs_to_delete)
+    {
+        auto status = rocprofiler_thread_trace_decoder_codeobj_unload(decoder, id);
+        ROCP_ERROR_IF(status != ROCPROFILER_STATUS_SUCCESS) << "unable to delete codeobj " << id;
+    }
+
+    OccupancyFile::OccupancyFile(dir, table, occupancy);
+}
 
 void
-ATTFileMgr::parseShader(int se_id, const std::vector<char>& data)
+ATTFileMgr::addDecoder(const char* filepath, uint64_t id, uint64_t load_addr, uint64_t memsize)
+{
+    if(filepath == nullptr) return;
+
+    std::vector<char> buffer{};
+
+    {
+        std::ifstream file(filepath, std::ios::in | std::ios::binary);
+
+        if(!file.is_open()) throw std::runtime_error("Invalid file " + std::string(filepath));
+
+        file.seekg(0, file.end);
+        buffer.resize(file.tellg());
+        file.seekg(0, file.beg);
+        file.read(buffer.data(), buffer.size());
+    }
+
+    auto status = rocprofiler_thread_trace_decoder_codeobj_load(
+        decoder, id, load_addr, memsize, buffer.data(), buffer.size());
+    ROCP_ERROR_IF(status != ROCPROFILER_STATUS_SUCCESS) << "Unable to load codeobj: " << filepath;
+
+    codeobjs_to_delete.push_back(id);
+    table->addDecoder(buffer.data(), buffer.size(), id, load_addr, memsize);
+}
+
+void
+ATTFileMgr::parseShader(int se_id, std::vector<char>& data)
 {
     WaveConfig config(se_id, filenames, codefile, wstates);
-    ToolData   tooldata(data, config, dl);
+    ToolData   tooldata(data, config, decoder);
 
     if(!config.occupancy.empty()) occupancy.emplace(se_id, std::move(config.occupancy));
 
@@ -96,30 +120,13 @@ get_shader_id(const std::string& name)
     return std::stoi(std::string(stripped.substr(se_number_pos + 1)));
 }
 
-std::vector<tool_att_capability_t>
-query_att_decode_capability()
+ATTDecoder::ATTDecoder(const std::string& path)
 {
-    auto ret = std::vector<tool_att_capability_t>{};
-
-    for(auto& [cap, libname] : get_lib_names())
-    {
-        if(DL(libname).handle != nullptr) ret.push_back(cap);
-    }
-
-    return ret;
-}
-
-ATTDecoder::ATTDecoder(tool_att_capability_t capability)
-{
-    for(auto& [cap, libname] : get_lib_names())
-    {
-        if(cap == capability)
-        {
-            dl = std::make_shared<DL>(libname);
-            return;
-        }
-    }
+    auto status = rocprofiler_thread_trace_decoder_create(&decoder, path.c_str());
+    ROCP_FATAL_IF(status != ROCPROFILER_STATUS_SUCCESS) << "Error loading decoder: " << status;
 };
+
+ATTDecoder::~ATTDecoder() { rocprofiler_thread_trace_decoder_destroy(decoder); }
 
 void
 ATTDecoder::parse(const Fspath&                       input_dir,
@@ -135,7 +142,7 @@ ATTDecoder::parse(const Fspath&                       input_dir,
         return std::tolower(c);
     });
 
-    ATTFileMgr mgr(output_dir, dl, counters_names);
+    ATTFileMgr mgr(output_dir, counters_names, decoder);
 
     for(const auto& file : codeobj_files)
     {
@@ -149,7 +156,7 @@ ATTDecoder::parse(const Fspath&                       input_dir,
 
         try
         {
-            mgr.table->addDecoder((input_dir / file.name).c_str(), file.id, file.addr, file.size);
+            mgr.addDecoder((input_dir / file.name).c_str(), file.id, file.addr, file.size);
         } catch(std::exception& e)
         {
             ROCP_ERROR << file.id << ':' << file.name << " - " << e.what();
@@ -191,8 +198,7 @@ ATTDecoder::parse(const Fspath&                       input_dir,
 bool
 ATTDecoder::valid() const
 {
-    return dl && (dl->att_parse_data_fn != nullptr) && (dl->att_info_fn != nullptr) &&
-           (dl->att_status_fn != nullptr);
+    return decoder.handle != 0;
 }
 
 }  // namespace att_wrapper

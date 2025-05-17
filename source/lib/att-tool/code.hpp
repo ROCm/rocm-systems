@@ -27,7 +27,6 @@
 #include <map>
 #include <unordered_map>
 #include <vector>
-#include "att_decoder.h"
 #include "util.hpp"
 
 namespace rocprofiler

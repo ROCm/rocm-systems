@@ -182,9 +182,9 @@ TEST(enum_string, fwd_h)
     TEST_STR(ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HSA_CORE_API);
     TEST_STR(ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_ROCDECODE_API);
 
-    // rocprofiler_att_parameter_type_t
-    TEST_STR(ROCPROFILER_ATT_PARAMETER_TARGET_CU);
-    TEST_STR(ROCPROFILER_ATT_PARAMETER_PERFCOUNTERS_CTRL);
+    // rocprofiler_thread_trace_parameter_type_t
+    TEST_STR(ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU);
+    TEST_STR(ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTERS_CTRL);
 }
 
 TEST(enum_string, hip_api_id)
@@ -386,7 +386,8 @@ TEST(enum_string, unsuported)
     using namespace std::string_view_literals;
 
     static_assert(!details::rocprofiler_enum_info<test_unsupported_enum>::supported);
-    static_assert(!details::rocprofiler_enum_info<rocprofiler_att_control_flags_t>::supported);
+    static_assert(
+        !details::rocprofiler_enum_info<rocprofiler_thread_trace_control_flags_t>::supported);
 
     TEST_API_ID_STR(TEST_ENUM_VALUE, V1);
     TEST_API_ID_STR(TEST_ENUM_VALUE, V3);

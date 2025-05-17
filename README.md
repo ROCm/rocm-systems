@@ -18,6 +18,7 @@ ROCProfiler-SDK is AMD’s new and improved tooling infrastructure, providing a 
 - Dispatch Counter Collection
 - Device Counter Collection
 - PC Sampling (Host Trap)
+- Thread trace and ROCprof trace decoder (SQTT, ATT).
 
 ## API Trace Support
 

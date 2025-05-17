@@ -22,29 +22,37 @@
 
 #pragma once
 
-#include "att_lib_wrapper.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/trace_decoder_api.h"
 
-#include <map>
-#include <vector>
-#include "util.hpp"
+#include <memory>
 
 namespace rocprofiler
 {
-namespace att_wrapper
+namespace thread_trace
 {
-class CountersFile
+class DL
 {
+    using ParseFn  = decltype(rocprof_trace_decoder_parse_data);
+    using InfoFn   = decltype(rocprof_trace_decoder_get_info_string);
+    using StatusFn = decltype(rocprof_trace_decoder_get_status_string);
+
 public:
-    CountersFile(const Fspath& dir, const std::vector<std::string>& names);
-    ~CountersFile();
+    DL(const char* libpath);
+    ~DL();
+    DL(DL&)        = delete;
+    DL(DL&& other) = delete;
 
-    void AddShaderEngine(int se, const att_perfevent_t* events, size_t num_events);
+    bool valid() const
+    {
+        return handle != nullptr && att_parse_data_fn != nullptr && att_info_fn != nullptr &&
+               att_status_fn != nullptr;
+    };
 
-private:
-    const Fspath             dir;
-    std::vector<std::string> names{};
-    std::vector<std::string> shaders{};
+    ParseFn*  att_parse_data_fn = nullptr;
+    InfoFn*   att_info_fn       = nullptr;
+    StatusFn* att_status_fn     = nullptr;
+    void*     handle            = nullptr;
 };
 
-}  // namespace att_wrapper
+}  // namespace thread_trace
 }  // namespace rocprofiler

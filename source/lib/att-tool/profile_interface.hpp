@@ -26,6 +26,8 @@
 #endif
 #pragma once
 
+#include <rocprofiler-sdk/experimental/thread-trace/trace_decoder.h>
+
 #include <cxxabi.h>
 #include <array>
 #include <cstdint>
@@ -35,7 +37,6 @@
 #include <string_view>
 #include <unordered_map>
 #include <vector>
-#include "att_decoder.h"
 #include "code.hpp"
 #include "wave.hpp"
 
@@ -59,17 +60,20 @@ using SymbolInfo  = rocprofiler::sdk::codeobj::disassembly::SymbolInfo;
 
 struct ToolData
 {
-    ToolData(const std::vector<char>& data, WaveConfig& config, std::shared_ptr<class DL> _dl);
+    ToolData(std::vector<char>&                        data,
+             WaveConfig&                               config,
+             rocprofiler_thread_trace_decoder_handle_t decoder);
     ~ToolData();
 
     CodeLine& get(pcinfo_t pc);
 
     std::shared_ptr<CodeFile> cfile{};
     WaveConfig&               config;
-    std::shared_ptr<DL>       dl{};
 
     std::vector<char> shader_data{};
     size_t            num_waves = 0;
+
+    rocprofiler_thread_trace_decoder_handle_t decoder{};
 };
 
 }  // namespace att_wrapper

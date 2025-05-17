@@ -26,7 +26,7 @@
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
-#include "lib/rocprofiler-sdk/thread_trace/att_core.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 

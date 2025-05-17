@@ -22,7 +22,6 @@
 
 #pragma once
 
-#include "lib/att-tool/att_decoder.h"
 #include "lib/att-tool/att_lib_wrapper.hpp"
 #include "lib/att-tool/code.hpp"
 
@@ -44,7 +43,7 @@ struct LineWaitcnt
 struct WaitcntList
 {
     using isa_map_t = std::map<pcinfo_t, std::unique_ptr<CodeLine>>;
-    using wave_t    = att_wave_data_t;
+    using wave_t    = rocprofiler_thread_trace_decoder_wave_t;
 
     WaitcntList(int gfxip, const wave_t& wave, isa_map_t& isa_map)
     {

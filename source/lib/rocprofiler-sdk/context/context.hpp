@@ -30,7 +30,7 @@
 #include "lib/rocprofiler-sdk/counters/device_counting.hpp"
 #include "lib/rocprofiler-sdk/external_correlation.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/types.hpp"
-#include "lib/rocprofiler-sdk/thread_trace/att_core.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>

@@ -29,6 +29,6 @@ namespace rocprofiler
 namespace att_wrapper
 {
 void
-PerfcounterFile(class WaveConfig& config, const att_perfevent_t* events, size_t event_count);
+PerfcounterFile(class WaveConfig& config, const perfevent_t* events, size_t event_count);
 }  // namespace att_wrapper
 }  // namespace rocprofiler
