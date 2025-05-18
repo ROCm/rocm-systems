@@ -201,7 +201,7 @@ set(CPACK_RPM_COMPONENT_INSTALL ON)
 # Add dependencies
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6, python3, libdrm-amdgpu-dev | libdrm-dev")
 set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS "${CPACK_DEBIAN_PACKAGE_DEPENDS}")
-set(CPACK_RPM_PACKAGE_REQUIRES "python3, libdrm-amdgpu-devel | libdrm-devel")
+set(CPACK_RPM_PACKAGE_REQUIRES "python3, libdrm-amdgpu-dev | libdrm-dev")
 set(CPACK_RPM_ASAN_PACKAGE_REQUIRES "${CPACK_RPM_PACKAGE_REQUIRES}")
 # Only add dependency on rocm-core if -DROCM_DEP_ROCMCORE=ON is given
 if(ROCM_DEP_ROCMCORE)
