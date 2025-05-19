@@ -64,22 +64,28 @@ static_assert((sizeof(core::ShareableHandle::handle) >= sizeof(uint32_t)) &&
                   (alignof(core::ShareableHandle::handle) >= alignof(uint32_t)),
               "ShareableHandle cannot store a XDNA handle");
 
-/// @brief The number of arguments in the packet payload before the operands.
-constexpr uint32_t non_operand_count = 6;
-
-/// @brief Index of the first operand in a command.
-constexpr uint32_t operand_starting_index = non_operand_count - 1;
+/**
+ * @brief Index of the first operand in a command.
+ *
+ * Before the operands there are:
+ * - 2 dwords for transaction op code
+ * - 2 dwords for the instructions BO address
+ * - 1 dword for the size of the instructions BO size
+ */
+constexpr uint32_t operand_starting_index = 5;
 
 /// @brief Default amdxdna_cu_config::cu_func when configuring a CU.
 constexpr uint32_t default_cu_func = 0;
 
 /// @brief Calculates the number of operands in a packet given the number of arguments in the
-/// packet.
+///        packet.
+///
+/// Each operand is 3 dwords (hi, lo address, and size). The op code is not counted in @p arg_count
+/// but the instructions are.
+///
 /// @param arg_count number of arguments in the packet
 /// @return number of operands in the packet
-static uint32_t GetOperandCount(uint32_t arg_count) {
-  return ((arg_count - non_operand_count) / 2);
-}
+constexpr uint32_t GetOperandCount(uint32_t arg_count) { return (arg_count / 3) - 1; }
 
 /// @brief Flushes operands.
 static void FlushOperands(uint32_t count, hsa_amd_aie_ert_start_kernel_data_t* cmd_pkt_payload) {
