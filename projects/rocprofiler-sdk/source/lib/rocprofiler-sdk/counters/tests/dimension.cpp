@@ -294,9 +294,9 @@ TEST(dimension, block_dim_test)
             rocprofiler_iterate_counter_dimensions(
                 {.handle = metric.id()},
                 [](rocprofiler_counter_id_t,
-                   const rocprofiler_record_dimension_info_t* dim_info,
-                   size_t                                     num_dims,
-                   void*                                      user_data) -> rocprofiler_status_t {
+                   const rocprofiler_counter_record_dimension_info_t* dim_info,
+                   size_t                                             num_dims,
+                   void* user_data) -> rocprofiler_status_t {
                     auto expected_dims = *static_cast<
                         std::unordered_map<counters::rocprofiler_profile_counter_instance_types,
                                            uint64_t>*>(user_data);

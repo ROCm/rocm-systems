@@ -56,6 +56,7 @@
 #include <map>
 #include <mutex>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -129,7 +130,8 @@ tool_code_object_callback(rocprofiler_callback_tracing_record_t record,
         }
         else if(record.phase == ROCPROFILER_CALLBACK_PHASE_UNLOAD)
         {
-            client_kernels.erase(data->kernel_id);
+            // do not erase just in case a buffer callback needs this
+            // client_kernels.erase(data->kernel_id);
         }
     }
 
@@ -177,6 +179,21 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
             }
         }
 
+        auto get_name = [](const auto* _record) -> std::string_view {
+            try
+            {
+                return client_name_info.at(_record->kind, _record->operation);
+            } catch(std::exception& e)
+            {
+                std::cerr << __FUNCTION__
+                          << " threw an exception for buffer tracing kind=" << _record->kind
+                          << ", operation=" << _record->operation << "\nException: " << e.what()
+                          << std::flush;
+                abort();
+            }
+            return std::string_view{"??"};
+        };
+
         if(header->category == ROCPROFILER_BUFFER_CATEGORY_TRACING &&
            (header->kind == ROCPROFILER_BUFFER_TRACING_HSA_CORE_API ||
             header->kind == ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API ||
@@ -192,7 +209,7 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
                  << ", extern_cid=" << record->correlation_id.external.value
                  << ", kind=" << record->kind << ", operation=" << record->operation
                  << ", start=" << record->start_timestamp << ", stop=" << record->end_timestamp
-                 << ", name=" << client_name_info.at(record->kind, record->operation);
+                 << ", name=" << get_name(record);
 
             if(record->start_timestamp > record->end_timestamp)
             {
@@ -242,6 +259,11 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
 
             auto info = std::stringstream{};
 
+            auto kernel_id   = record->dispatch_info.kernel_id;
+            auto kernel_name = (client_kernels.count(kernel_id) > 0)
+                                   ? std::string_view{client_kernels.at(kernel_id).kernel_name}
+                                   : std::string_view{"??"};
+
             info << "tid=" << record->thread_id << ", context=" << context.handle
                  << ", buffer_id=" << buffer_id.handle
                  << ", cid=" << record->correlation_id.internal
@@ -249,8 +271,7 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
                  << ", kind=" << record->kind << ", operation=" << record->operation
                  << ", agent_id=" << record->dispatch_info.agent_id.handle
                  << ", queue_id=" << record->dispatch_info.queue_id.handle
-                 << ", kernel_id=" << record->dispatch_info.kernel_id
-                 << ", kernel=" << client_kernels.at(record->dispatch_info.kernel_id).kernel_name
+                 << ", kernel_id=" << record->dispatch_info.kernel_id << ", kernel=" << kernel_name
                  << ", start=" << record->start_timestamp << ", stop=" << record->end_timestamp
                  << ", private_segment_size=" << record->dispatch_info.private_segment_size
                  << ", group_segment_size=" << record->dispatch_info.group_segment_size
@@ -282,8 +303,7 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
                  << ", src_agent_id=" << record->src_agent_id.handle
                  << ", dst_agent_id=" << record->dst_agent_id.handle
                  << ", direction=" << record->operation << ", start=" << record->start_timestamp
-                 << ", stop=" << record->end_timestamp
-                 << ", name=" << client_name_info.at(record->kind, record->operation);
+                 << ", stop=" << record->end_timestamp << ", name=" << get_name(record);
 
             if(record->start_timestamp > record->end_timestamp)
                 throw std::runtime_error("memory copy: start > end");
@@ -301,8 +321,7 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
 
             info << "kind=" << record->kind << ", operation=" << record->operation
                  << ", pid=" << record->pid << ", timestamp=" << record->timestamp
-                 << ", name=" << client_name_info.at(record->kind, record->operation)
-                 << std::boolalpha;
+                 << ", name=" << get_name(record) << std::boolalpha;
 
             switch(record->operation)
             {
@@ -382,8 +401,6 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
                 }
             }
 
-            if(record->timestamp == 0) throw std::runtime_error("page migration: timestamp == 0");
-
             static_cast<call_stack_t*>(user_data)->emplace_back(
                 source_location{__FUNCTION__, __FILE__, __LINE__, kind_name + info.str()});
         }
@@ -408,8 +425,7 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
                  << ", agent_id=" << record->agent_id.handle
                  << ", queue_id=" << record->queue_id.handle << ", thread_id=" << record->thread_id
                  << ", elapsed=" << std::setprecision(3) << std::fixed << _elapsed
-                 << " usec, flags=" << record->flags
-                 << ", name=" << client_name_info.at(record->kind, record->operation);
+                 << " usec, flags=" << record->flags << ", name=" << get_name(record);
 
             static_cast<call_stack_t*>(user_data)->emplace_back(
                 source_location{__FUNCTION__, __FILE__, __LINE__, kind_name + info.str()});

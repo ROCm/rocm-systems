@@ -38,9 +38,6 @@ namespace stream
 {
 using hip_runtime_api_table_t = HipDispatchTable;
 
-rocprofiler_stream_id_t
-get_stream_id();
-
 const char*
 name_by_id(uint32_t id);
 

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,54 +20,48 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "stream_stack.hpp"
+#pragma once
 
-#include "lib/common/container/small_vector.hpp"
-#include "lib/common/static_tl_object.hpp"
-#include "lib/rocprofiler-sdk/hip/stream.hpp"
+#include "lib/common/defines.hpp"
+
+#include <chrono>
+#include <cstdint>
+#include <string>
+#include <string_view>
+#include <type_traits>
 
 namespace rocprofiler
 {
-namespace tool
+namespace common
 {
-namespace stream
-{
-namespace
-{
-auto*
-get_stream_stack()
-{
-    static thread_local auto*& _v =
-        common::static_tl_object<common::container::small_vector<rocprofiler_stream_id_t>>::
-            construct(rocprofiler_stream_id_t{.handle = 0});
-    return _v;
-}
-}  // namespace
+struct defer_start
+{};
 
-void
-push_stream_id(rocprofiler_stream_id_t id)
+struct simple_timer
 {
-    CHECK_NOTNULL(get_stream_stack())->emplace_back(id);
-}
+    using duration_t = std::chrono::duration<double>;
 
-void
-pop_stream_id()
-{
-    CHECK_NOTNULL(get_stream_stack())->pop_back();
-}
+    explicit simple_timer(std::string&& label);
+    explicit simple_timer(std::string&& label, defer_start);
+    ~simple_timer();
 
-rocprofiler_stream_id_t
-get_stream_id()
-{
-    return (CHECK_NOTNULL(get_stream_stack())->empty()) ? rocprofiler_stream_id_t{.handle = 0}
-                                                        : get_stream_stack()->back();
-}
+    void             start();
+    void             stop();
+    double           get() const;
+    size_t           get_nsec() const;
+    std::string_view label() const { return std::string_view{m_label}; }
+    void             set_quiet(bool v) const { m_quiet = v; }
 
-bool
-stream_stack_empty()
-{
-    return CHECK_NOTNULL(get_stream_stack())->empty();
-}
-}  // namespace stream
-}  // namespace tool
+    friend std::ostream& operator<<(std::ostream& _os, const simple_timer& _val);
+
+private:
+    using clock_type   = std::chrono::steady_clock;
+    using time_point_t = std::chrono::time_point<clock_type, std::chrono::nanoseconds>;
+
+    std::string  m_label = {};
+    time_point_t m_beg   = {};
+    time_point_t m_end   = {};
+    mutable bool m_quiet = false;
+};
+}  // namespace common
 }  // namespace rocprofiler

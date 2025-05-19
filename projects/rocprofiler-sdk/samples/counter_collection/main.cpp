@@ -106,6 +106,7 @@ launchKernels(const long NUM_LAUNCH, const long SYNC_INTERVAL, const int DEV_ID)
     HIP_CALL(hipFree(gpuMem));
     HIP_CALL(hipFree(A_d));
     HIP_CALL(hipFree(C_d));
+    HIP_CALL(hipDeviceReset());
 }
 
 int
@@ -116,8 +117,8 @@ main(int argc, char** argv)
     int ntotdevice = 0;
     HIP_CALL(hipGetDeviceCount(&ntotdevice));
 
-    long nitr    = 50000;
-    long nsync   = 500;
+    long nitr    = 5000;
+    long nsync   = 50;
     long ndevice = 0;
 
     for(int i = 1; i < argc; ++i)
@@ -147,10 +148,11 @@ main(int argc, char** argv)
     printf("[%s] Number of devices used: %li\n", exe_name, ndevice);
     printf("[%s] Number of iterations: %li\n", exe_name, nitr);
     printf("[%s] Syncing every %li iterations\n", exe_name, nsync);
+    std::cout << std::flush;
 
     start();
     for(long devid = 0; devid < ndevice; ++devid)
         launchKernels(nitr, nsync, devid);
 
-    std::cerr << "Run complete\n";
+    std::cerr << "Run complete\n" << std::flush;
 }

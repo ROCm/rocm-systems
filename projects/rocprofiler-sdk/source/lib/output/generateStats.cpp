@@ -72,7 +72,7 @@ generate_stats(const output_config& /*cfg*/,
         for(auto record : data.get(ditr))
         {
             auto kernel_name = tool_metadata.get_kernel_name(record.dispatch_info.kernel_id,
-                                                             record.kernel_rename_val);
+                                                             record.correlation_id.external.value);
 
             kernel_stats[kernel_name] += (record.end_timestamp - record.start_timestamp);
         }
@@ -168,8 +168,8 @@ generate_stats(const output_config& /*cfg*/,
 
 stats_entry_t
 generate_stats(const output_config& /*cfg*/,
-               const metadata& tool_metadata,
-               const generator<rocprofiler_buffer_tracing_memory_allocation_record_t>& data)
+               const metadata&                                                      tool_metadata,
+               const generator<tool_buffer_tracing_memory_allocation_ext_record_t>& data)
 {
     auto memory_allocation_stats = stats_map_t{};
     for(auto ditr : data)

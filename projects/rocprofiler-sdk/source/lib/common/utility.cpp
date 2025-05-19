@@ -22,6 +22,7 @@
 //
 
 #include "lib/common/utility.hpp"
+#include "lib/common/defines.hpp"
 #include "lib/common/logging.hpp"
 
 #include <unistd.h>
@@ -32,7 +33,6 @@
 #include <sstream>
 #include <string>
 #include <vector>
-#include "lib/common/defines.hpp"
 
 namespace rocprofiler
 {
@@ -63,6 +63,8 @@ get_clock_name(clockid_t _id)
     return "CLOCK_UNKNOWN";
 #undef CLOCK_NAME_CASE_STATEMENT
 }
+
+auto _process_init_ns = timestamp_ns();
 }  // namespace
 
 uint64_t
@@ -87,6 +89,13 @@ get_clock_period_ns_impl(clockid_t _clk_id)
     }
 
     return (static_cast<uint64_t>(ts.tv_sec) * nanosec) + static_cast<uint64_t>(ts.tv_nsec);
+}
+
+uint64_t
+get_process_start_time_ns(pid_t _pid)
+{
+    if(_pid == getpid()) return _process_init_ns;
+    return 0;
 }
 
 std::vector<std::string>

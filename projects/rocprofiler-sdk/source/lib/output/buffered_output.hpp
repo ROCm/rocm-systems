@@ -63,9 +63,9 @@ struct buffered_output
     void clear();
     void destroy();
 
-    uint64_t       get_num_bytes() const;
-    generator<Tp>  get_generator() const { return generator<Tp>{get_tmp_file_buffer<Tp>(DomainT)}; }
-    std::deque<Tp> load_all();
+    uint64_t           get_num_bytes() const;
+    file_generator<Tp> get_generator() const;
+    std::deque<Tp>     load_all();
 
     stats_entry_t stats = {};
 
@@ -96,6 +96,13 @@ buffered_output<Tp, DomainT>::read()
     flush();
 
     read_tmp_file<type>(buffer_type_v);
+}
+
+template <typename Tp, domain_type DomainT>
+file_generator<Tp>
+buffered_output<Tp, DomainT>::get_generator() const
+{
+    return file_generator<Tp>{get_tmp_file_buffer<Tp>(DomainT)};
 }
 
 template <typename Tp, domain_type DomainT>
@@ -169,7 +176,7 @@ using scratch_memory_buffered_output_t =
     buffered_output<rocprofiler_buffer_tracing_scratch_memory_record_t,
                     domain_type::SCRATCH_MEMORY>;
 using memory_allocation_buffered_output_t =
-    buffered_output<rocprofiler_buffer_tracing_memory_allocation_record_t,
+    buffered_output<tool_buffer_tracing_memory_allocation_ext_record_t,
                     domain_type::MEMORY_ALLOCATION>;
 using counter_records_buffered_output_t =
     ::rocprofiler::tool::buffered_output<rocprofiler::tool::serialized_counter_record_t,
@@ -181,9 +188,9 @@ using rocdecode_buffered_output_t =
     buffered_output<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t, domain_type::ROCDECODE>;
 using rocjpeg_buffered_output_t =
     buffered_output<rocprofiler_buffer_tracing_rocjpeg_api_record_t, domain_type::ROCJPEG>;
-using kernel_dispatch_buffered_output_with_stream_t =
+using kernel_dispatch_buffered_output_ext_t =
     buffered_output<tool_buffer_tracing_kernel_dispatch_ext_record_t, domain_type::KERNEL_DISPATCH>;
-using memory_copy_buffered_output_with_stream_t =
+using memory_copy_buffered_output_ext_t =
     buffered_output<tool_buffer_tracing_memory_copy_ext_record_t, domain_type::MEMORY_COPY>;
 using pc_sampling_stochastic_buffered_output_t =
     buffered_output<rocprofiler::tool::rocprofiler_tool_pc_sampling_stochastic_record_t,

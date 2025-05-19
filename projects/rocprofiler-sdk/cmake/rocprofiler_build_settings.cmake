@@ -217,6 +217,19 @@ if(ROCPROFILER_BUILD_EXPERIMENTAL_WARNINGS)
 endif()
 
 # ----------------------------------------------------------------------------------------#
+# extra flags for compiling with deprecated warnings
+#
+target_compile_definitions(rocprofiler-sdk-deprecated-flags
+                           INTERFACE ROCPROFILER_SDK_DEPRECATED_WARNINGS=1)
+rocprofiler_target_compile_options(rocprofiler-sdk-deprecated-flags
+                                   INTERFACE "-Wdeprecated-declarations")
+
+if(ROCPROFILER_BUILD_DEPRECATED_WARNINGS)
+    target_link_libraries(rocprofiler-sdk-build-flags
+                          INTERFACE rocprofiler-sdk::rocprofiler-sdk-deprecated-flags)
+endif()
+
+# ----------------------------------------------------------------------------------------#
 # user customization
 #
 get_property(LANGUAGES GLOBAL PROPERTY ENABLED_LANGUAGES)

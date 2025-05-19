@@ -22,6 +22,12 @@ rocprofiler_add_interface_library(rocprofiler-sdk-perfetto "Enables Perfetto sup
 rocprofiler_add_interface_library(rocprofiler-sdk-otf2 "Enables OTF2 support" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-cereal "Enables Cereal support"
                                   INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-sdk-sqlite3 "Enables SQLite3 support"
+                                  INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-sdk-pybind11 "Enables PyBind11 support"
+                                  INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-sdk-gotcha "Enables GOTCHA support"
+                                  INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-compile-definitions
                                   "Compile definitions" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-static-libgcc
@@ -41,6 +47,9 @@ rocprofiler_add_interface_library(rocprofiler-sdk-memcheck INTERFACE INTERNAL)
 rocprofiler_add_interface_library(
     rocprofiler-sdk-experimental-flags
     "Compiler flags for experimental feature compilation" INTERNAL)
+rocprofiler_add_interface_library(
+    rocprofiler-sdk-deprecated-flags
+    "Compiler flags for deprecated feature usage warnings" INTERNAL)
 
 #
 # interfaces for libraries (general)

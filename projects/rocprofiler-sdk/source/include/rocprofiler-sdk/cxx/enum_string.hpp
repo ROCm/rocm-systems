@@ -115,6 +115,7 @@ get_enum_label(EnumT val, std::index_sequence<Idx, IdxTail...>)
         return get_enum_label(val, std::index_sequence<IdxTail...>{});
 
     return info::unsupported;
+    (void) val;  // suppress unused-but-set-parameter warning
 }
 
 // clang-format off

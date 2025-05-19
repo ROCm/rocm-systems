@@ -87,7 +87,10 @@ get_output_filename(const output_config& cfg, std::string_view fname, std::strin
 }
 
 output_stream
-get_output_stream(const output_config& cfg, std::string_view fname, std::string_view ext)
+get_output_stream(const output_config& cfg,
+                  std::string_view     fname,
+                  std::string_view     ext,
+                  std::ios::openmode   mode)
 {
     auto cfg_output_path = tool::format_path(cfg.output_path);
 
@@ -99,7 +102,7 @@ get_output_stream(const output_config& cfg, std::string_view fname, std::string_
         return {&std::clog, [](auto*&) {}};
 
     auto  output_file = get_output_filename(cfg, fname, ext);
-    auto* _ofs        = new(std::nothrow) std::ofstream{output_file};
+    auto* _ofs        = new(std::nothrow) std::ofstream{output_file, mode};
 
     LOG_IF(FATAL, !_ofs) << fmt::format("Failed to allocate ofstream for output file '{}'",
                                         output_file);

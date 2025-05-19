@@ -8,7 +8,7 @@ ARG BRANCH=amd-staging
 RUN git clone -b ${BRANCH} https://github.com/ROCm/rocprofiler-sdk.git rocprofiler-sdk-source && \
     python3 -m pip install -r rocprofiler-sdk-source/requirements.txt && \
     sudo apt update && \
-    sudo apt install -y libdw-dev && \
+    sudo apt install -y libdw-dev libsqlite3-dev && \
     cmake -B rocprofiler-sdk-build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DROCPROFILER_BUILD_{SAMPLES,TESTS,BENCHMARK}=ON -DPython3_EXECUTABLE=$(which python3) -DCMAKE_INSTALL_PREFIX=$(realpath /opt/rocm) rocprofiler-sdk-source && \
     cmake --build rocprofiler-sdk-build --target all --parallel 16 && \
     sudo cmake --build rocprofiler-sdk-build --target install && \

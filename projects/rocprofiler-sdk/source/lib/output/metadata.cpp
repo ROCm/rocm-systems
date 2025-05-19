@@ -21,14 +21,21 @@
 // SOFTWARE.
 
 #include "metadata.hpp"
+#include "agent_info.hpp"
+#include "host_symbol_info.hpp"
+#include "kernel_symbol_info.hpp"
+#include "node_info.hpp"
 
 #include "lib/att-tool/att_lib_wrapper.hpp"
+#include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/string_entry.hpp"
+#include "lib/common/utility.hpp"
 #include "lib/output/agent_info.hpp"
 #include "lib/output/host_symbol_info.hpp"
 #include "lib/output/kernel_symbol_info.hpp"
+#include "lib/output/node_info.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
@@ -37,6 +44,7 @@
 #include <fmt/core.h>
 #include <fmt/format.h>
 
+#include <dlfcn.h>
 #include <unistd.h>
 #include <cstdint>
 #include <memory>
@@ -46,9 +54,10 @@ namespace rocprofiler
 {
 namespace tool
 {
-namespace fs = common::filesystem;
 namespace
 {
+namespace fs = ::rocprofiler::common::filesystem;
+
 rocprofiler_status_t
 query_pc_sampling_configuration(const rocprofiler_pc_sampling_configuration_t* configs,
                                 long unsigned int                              num_config,
@@ -90,6 +99,8 @@ host_function_info::host_function_info()
 metadata::metadata(inprocess)
 : buffer_names{sdk::get_buffer_tracing_names()}
 , callback_names{sdk::get_callback_tracing_names()}
+, node_data{read_node_info()}
+, command_line{common::read_command_line(getpid())}
 {
     ROCPROFILER_CHECK(rocprofiler_query_available_agents(
         ROCPROFILER_AGENT_INFO_VERSION_0,
@@ -166,7 +177,7 @@ void metadata::init(inprocess)
                 {
                     auto _info     = rocprofiler_counter_info_v1_t{};
                     auto _dim_ids  = std::vector<rocprofiler_counter_dimension_id_t>{};
-                    auto _dim_info = std::vector<rocprofiler_record_dimension_info_t>{};
+                    auto _dim_info = std::vector<rocprofiler_counter_record_dimension_info_t>{};
 
                     ROCPROFILER_CHECK(rocprofiler_query_counter_info(
                         counters[i],
@@ -399,12 +410,12 @@ metadata::get_counter_dimension_info() const
                 _ret.emplace_back(ditr);
     }
 
-    auto _sorter = [](const rocprofiler_record_dimension_info_t& lhs,
-                      const rocprofiler_record_dimension_info_t& rhs) {
+    auto _sorter = [](const rocprofiler_counter_record_dimension_info_t& lhs,
+                      const rocprofiler_counter_record_dimension_info_t& rhs) {
         return std::tie(lhs.id, lhs.instance_size) < std::tie(rhs.id, rhs.instance_size);
     };
-    auto _equiv = [](const rocprofiler_record_dimension_info_t& lhs,
-                     const rocprofiler_record_dimension_info_t& rhs) {
+    auto _equiv = [](const rocprofiler_counter_record_dimension_info_t& lhs,
+                     const rocprofiler_counter_record_dimension_info_t& rhs) {
         return std::tie(lhs.id, lhs.instance_size) == std::tie(rhs.id, rhs.instance_size);
     };
 
@@ -495,12 +506,27 @@ metadata::is_runtime_initialized(rocprofiler_runtime_initialization_operation_t 
         runtime_op);
 }
 
+void
+metadata::set_process_id(pid_t _pid, pid_t _ppid, const std::vector<std::string>& _command_line)
+{
+    process_id        = _pid;
+    parent_process_id = _ppid;
+
+    if(!_command_line.empty())
+        command_line = _command_line;
+    else if(_pid == getpid())
+        command_line = common::read_command_line(_pid);
+
+    if(auto _start_ns = common::get_process_start_time_ns(_pid); _start_ns > 0)
+        process_start_ns = _start_ns;
+}
+
 std::string_view
 metadata::get_marker_message(uint64_t corr_id) const
 {
     return marker_messages.rlock(
         [](const auto& _data, uint64_t _corr_id_v) -> std::string_view {
-            return _data.at(_corr_id_v);
+            return (_data.count(_corr_id_v) > 0) ? _data.at(_corr_id_v) : std::string_view{};
         },
         corr_id);
 }

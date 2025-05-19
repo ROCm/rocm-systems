@@ -21,6 +21,7 @@ set(TOOL_OUTPUT_HEADERS
     kernel_symbol_info.hpp
     host_symbol_info.hpp
     metadata.hpp
+    node_info.hpp
     output_config.hpp
     output_key.hpp
     output_stream.hpp
@@ -41,6 +42,7 @@ set(TOOL_OUTPUT_SOURCES
     generatePerfetto.cpp
     generateStats.cpp
     metadata.cpp
+    node_info.cpp
     output_config.cpp
     output_key.cpp
     output_stream.cpp
@@ -64,4 +66,5 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-otf2
             rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             rocprofiler-sdk::rocprofiler-sdk-dw
-            rocprofiler-sdk::rocprofiler-sdk-elf)
+            rocprofiler-sdk::rocprofiler-sdk-elf
+            rocprofiler-sdk::rocprofiler-sdk-sqlite3)

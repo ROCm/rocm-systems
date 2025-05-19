@@ -33,6 +33,7 @@
 #include "lib/common/demangle.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/synchronized.hpp"
+#include "lib/output/node_info.hpp"
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/buffer_tracing.h>
@@ -78,7 +79,7 @@ namespace tool
 using marker_message_map_t         = std::unordered_map<uint64_t, std::string>;
 using marker_message_ordered_map_t = std::map<uint64_t, std::string>;
 using string_entry_map_t           = std::unordered_map<size_t, std::unique_ptr<std::string>>;
-using counter_dimension_vec_t      = std::vector<rocprofiler_record_dimension_info_t>;
+using counter_dimension_vec_t      = std::vector<rocprofiler_counter_record_dimension_info_t>;
 using external_corr_id_set_t       = std::unordered_set<uint64_t>;
 using code_obj_decoder_t    = rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate;
 using instruction_t         = rocprofiler::sdk::codeobj::disassembly::Instruction;
@@ -121,6 +122,7 @@ struct metadata
     {};
 
     pid_t                             process_id                  = 0;
+    pid_t                             parent_process_id           = 0;
     uint64_t                          process_start_ns            = 0;
     uint64_t                          process_end_ns              = 0;
     agent_info_vec_t                  agents                      = {};
@@ -140,6 +142,8 @@ struct metadata
     att_filenames_map_t                      att_filenames              = {};
     synced_obj<pc_sampling_stats_t>          pc_sampling_stats          = {};
     synced_obj<runtime_initialization_set_t> runtime_initialization_set = {};
+    node_info                                node_data                  = {};
+    std::vector<std::string>                 command_line               = {};
 
     metadata() = default;
     metadata(inprocess);
@@ -186,6 +190,10 @@ struct metadata
     bool add_string_entry(size_t key, std::string_view str);
     bool add_external_correlation_id(uint64_t);
     bool add_runtime_initialization(rocprofiler_runtime_initialization_operation_t);
+
+    void set_process_id(pid_t                           _pid,
+                        pid_t                           _ppid         = 0,
+                        const std::vector<std::string>& _command_line = {});
 
     std::string_view   get_marker_message(uint64_t corr_id) const;
     std::string_view   get_kernel_name(uint64_t kernel_id, uint64_t rename_id) const;

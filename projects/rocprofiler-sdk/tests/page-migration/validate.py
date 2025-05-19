@@ -23,9 +23,17 @@
 # THE SOFTWARE.
 
 from collections import defaultdict
-import os
 import sys
 import pytest
+
+
+test_api_traces = [
+    "hsa_api_traces",
+    "marker_api_traces",
+    "hip_api_traces",
+    "rccl_api_traces",
+    "scratch_memory_traces",
+]
 
 
 # helper function
@@ -105,15 +113,15 @@ def test_data_structure(input_data):
     node_exists("code_objects", sdk_data["callback_records"])
     node_exists("kernel_symbols", sdk_data["callback_records"])
     node_exists("host_functions", sdk_data["callback_records"])
-    node_exists("hsa_api_traces", sdk_data["callback_records"])
-    node_exists("hip_api_traces", sdk_data["callback_records"], 0)
+    node_exists("hsa_api_traces", sdk_data["callback_records"], 0)
+    node_exists("hip_api_traces", sdk_data["callback_records"])
     node_exists("marker_api_traces", sdk_data["callback_records"], 0)
 
     node_exists("names", sdk_data["buffer_records"])
     node_exists("kernel_dispatch", sdk_data["buffer_records"])
     node_exists("memory_copies", sdk_data["buffer_records"], 0)
-    node_exists("hsa_api_traces", sdk_data["buffer_records"])
-    node_exists("hip_api_traces", sdk_data["buffer_records"], 0)
+    node_exists("hsa_api_traces", sdk_data["buffer_records"], 0)
+    node_exists("hip_api_traces", sdk_data["buffer_records"])
     node_exists("marker_api_traces", sdk_data["buffer_records"], 0)
     node_exists("retired_correlation_ids", sdk_data["buffer_records"])
     node_exists("page_migration", sdk_data["buffer_records"])
@@ -125,7 +133,7 @@ def test_timestamps(input_data):
 
     cb_start = {}
     cb_end = {}
-    for titr in ["hsa_api_traces", "marker_api_traces", "hip_api_traces"]:
+    for titr in test_api_traces:
         for itr in sdk_data["callback_records"][titr]:
             cid = itr["correlation_id"]["internal"]
             phase = itr["phase"]
@@ -161,7 +169,7 @@ def test_internal_correlation_ids(input_data):
     sdk_data = data["rocprofiler-sdk-json-tool"]
 
     api_corr_ids = []
-    for titr in ["hsa_api_traces", "marker_api_traces", "hip_api_traces"]:
+    for titr in test_api_traces:
         for itr in sdk_data["callback_records"][titr]:
             api_corr_ids.append(itr["correlation_id"]["internal"])
 
@@ -187,14 +195,14 @@ def test_external_correlation_ids(input_data):
     sdk_data = data["rocprofiler-sdk-json-tool"]
 
     extern_corr_ids = []
-    for titr in ["hsa_api_traces", "marker_api_traces", "hip_api_traces"]:
+    for titr in test_api_traces:
         for itr in sdk_data["callback_records"][titr]:
             assert itr["correlation_id"]["external"] > 0
             assert itr["thread_id"] == itr["correlation_id"]["external"]
             extern_corr_ids.append(itr["correlation_id"]["external"])
 
     extern_corr_ids = list(set(sorted(extern_corr_ids)))
-    for titr in ["hsa_api_traces", "marker_api_traces", "hip_api_traces"]:
+    for titr in test_api_traces:
         for itr in sdk_data["buffer_records"][titr]:
             assert itr["correlation_id"]["external"] > 0
             assert itr["thread_id"] == itr["correlation_id"]["external"]

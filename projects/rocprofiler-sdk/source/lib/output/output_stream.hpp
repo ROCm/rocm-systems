@@ -80,6 +80,9 @@ std::string
 get_output_filename(const output_config& cfg, std::string_view fname, std::string_view ext);
 
 output_stream
-get_output_stream(const output_config& cfg, std::string_view fname, std::string_view ext);
+get_output_stream(const output_config& cfg,
+                  std::string_view     fname,
+                  std::string_view     ext,
+                  std::ios::openmode   mode = {});
 }  // namespace tool
 }  // namespace rocprofiler

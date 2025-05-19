@@ -101,7 +101,7 @@ jobs:
         run: |
           git config --global --add safe.directory '*'
           apt-get update
-          apt-get install -y cmake gcc g++ libdw-dev
+          apt-get install -y cmake gcc g++ libdw-dev libsqlite3-dev
           python3 -m pip install -r requirements.txt
 
       - name: Configure, Build, Install, and Package

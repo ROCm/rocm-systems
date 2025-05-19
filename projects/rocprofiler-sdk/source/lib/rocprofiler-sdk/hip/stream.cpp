@@ -185,9 +185,11 @@ FuncT create_write_functor(RetT (*func)(Args...))
                                    external_corr_ids);
         assert(buffered_contexts.empty() && "Stream tracing should not have any buffered contexts");
 
-        auto tracer_data      = common::init_public_api_struct(callback_api_data_t{});
         auto internal_corr_id = 0;
         auto ancestor_corr_id = 0;
+        auto tracer_data      = common::init_public_api_struct(callback_api_data_t{},
+                                                          rocprofiler_stream_id_t{.handle = 0},
+                                                          rocprofiler_address_t{.value = 0});
 
         constexpr auto stream_idx = common::mpl::index_of<hipStream_t*, function_args_type>::value;
         auto           stream = std::get<stream_idx>(std::make_tuple(std::forward<Args>(args)...));
@@ -200,7 +202,8 @@ FuncT create_write_functor(RetT (*func)(Args...))
         {
             if(stream)
             {
-                tracer_data.stream_id = add_stream(*stream);
+                tracer_data.stream_id        = add_stream(*stream);
+                tracer_data.stream_value.ptr = *stream;
             }
             tracing::execute_phase_none_callbacks(callback_contexts,
                                                   thr_id,
@@ -248,9 +251,11 @@ FuncT create_destroy_functor(RetT (*func)(Args...))
                                    external_corr_ids);
         assert(buffered_contexts.empty() && "Stream tracing should not have any buffered contexts");
 
-        auto tracer_data      = common::init_public_api_struct(callback_api_data_t{});
         auto internal_corr_id = 0;
         auto ancestor_corr_id = 0;
+        auto tracer_data      = common::init_public_api_struct(callback_api_data_t{},
+                                                          rocprofiler_stream_id_t{.handle = 0},
+                                                          rocprofiler_address_t{.value = 0});
 
         auto stream = std::get<stream_idx>(std::make_tuple(std::forward<Args>(args)...));
 
@@ -261,7 +266,8 @@ FuncT create_destroy_functor(RetT (*func)(Args...))
 
         if(!callback_contexts.empty())
         {
-            tracer_data.stream_id = get_stream_id(stream);
+            tracer_data.stream_id        = get_stream_id(stream);
+            tracer_data.stream_value.ptr = stream;
             tracing::execute_phase_none_callbacks(callback_contexts,
                                                   thr_id,
                                                   internal_corr_id,
@@ -309,15 +315,18 @@ FuncT create_read_functor(RetT (*func)(Args...))
 
         assert(buffered_contexts.empty() && "Stream tracing should not have any buffered contexts");
 
-        auto tracer_data      = common::init_public_api_struct(callback_api_data_t{});
         auto internal_corr_id = 0;
         auto ancestor_corr_id = 0;
+        auto tracer_data      = common::init_public_api_struct(callback_api_data_t{},
+                                                          rocprofiler_stream_id_t{.handle = 0},
+                                                          rocprofiler_address_t{.value = 0});
 
         auto stream = std::get<stream_idx>(std::make_tuple(std::forward<Args>(args)...));
 
         if(!callback_contexts.empty())
         {
-            tracer_data.stream_id = get_stream_id(stream);
+            tracer_data.stream_id        = get_stream_id(stream);
+            tracer_data.stream_value.ptr = stream;
             tracing::execute_phase_enter_callbacks(callback_contexts,
                                                    thr_id,
                                                    internal_corr_id,
@@ -385,6 +394,9 @@ update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
     using info_type          = hip_api_info<TableIdx, OpIdx>;
     using function_args_type = decltype(info_type::get_args_type());
 
+    static_assert(info_type::table_idx == ROCPROFILER_HIP_TABLE_ID_Runtime,
+                  "This function should only be instantiated for HIP runtime API");
+
     if constexpr(std::is_same<table_type, Tp>::value &&
                  (common::mpl::is_one_of<hipStream_t, function_args_type>::value ||
                   common::mpl::is_one_of<hipStream_t*, function_args_type>::value))
@@ -394,7 +406,7 @@ update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
         // make sure we don't access a field that doesn't exist in input table
         if(_info.offset() >= _orig->size) return;
 
-        ROCP_TRACE << "updating table entry for " << _info.name;
+        ROCP_TRACE << fmt::format("[hip stream] checking table entry for {}", _info.name);
 
         constexpr auto num_args = function_args_type::size();
 
@@ -404,6 +416,9 @@ update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
                 common::mpl::index_of<hipStream_t, function_args_type>::value;
             constexpr auto rstream_idx =
                 common::mpl::index_of<hipStream_t, common::mpl::reverse<function_args_type>>::value;
+            constexpr auto is_hip_stream_destroy_func =
+                info_type::table_idx == ROCPROFILER_HIP_TABLE_ID_Runtime &&
+                info_type::operation_idx == ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamDestroy;
 
             // index_of finds the first argument of that type. So find the first and last
             // arg of the given type and make sure it resolves to the same distance
@@ -413,21 +428,19 @@ update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
             // 1. get the sub-table containing the function pointer in original table
             // 2. get reference to function pointer in sub-table in original table
             // 3. update function pointer with wrapper
-            auto&          _table = _info.get_table(_orig);
-            auto&          _func  = _info.get_table_func(_table);
-            constexpr auto is_hip_destroy_func =
-                std::is_same<decltype(info_type::operation_idx),
-                             rocprofiler_hip_runtime_api_id_t>::value &&
-                (static_cast<rocprofiler_hip_runtime_api_id_t>(info_type::operation_idx) ==
-                 ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamDestroy);
-            if constexpr(is_hip_destroy_func)
+            auto& _table = _info.get_table(_orig);
+            auto& _func  = _info.get_table_func(_table);
+
+            if constexpr(is_hip_stream_destroy_func)
             {
-                ROCP_INFO << _info.name << " has been designated as a stream destroy function";
+                ROCP_INFO << fmt::format(
+                    "[hip stream] {} has been designated as a stream destroy function", _info.name);
                 _func = create_destroy_functor<TableIdx, OpIdx>(_func);
             }
             else
             {
-                ROCP_INFO << _info.name << " has been designated as a stream set function";
+                ROCP_INFO << fmt::format(
+                    "[hip stream] {} has been designated as a stream set function", _info.name);
                 _func = create_read_functor<TableIdx, OpIdx>(_func);
             }
         }
@@ -444,7 +457,8 @@ update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
             static_assert(stream_idx == (num_args - rstream_idx - 1),
                           "function has more than one stream argument");
 
-            ROCP_INFO << _info.name << " has been designated as a stream create function";
+            ROCP_INFO << fmt::format(
+                "[hip stream] {} has been designated as a stream create function", _info.name);
 
             // 1. get the sub-table containing the function pointer in original table
             // 2. get reference to function pointer in sub-table in original table

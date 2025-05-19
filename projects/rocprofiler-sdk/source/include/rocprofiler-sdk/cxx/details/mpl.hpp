@@ -249,6 +249,12 @@ reserve(ContainerT& _c, ArgT _arg)
 {
     return impl::reserve(_c, 0, _arg);
 }
+
+template <typename Tp>
+struct assert_false
+{
+    static constexpr auto value = false;
+};
 }  // namespace mpl
 }  // namespace sdk
 }  // namespace rocprofiler

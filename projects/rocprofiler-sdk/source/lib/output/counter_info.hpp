@@ -41,7 +41,7 @@ namespace tool
 constexpr uint32_t lds_block_size = 128 * 4;
 
 using counter_dimension_id_vec_t   = std::vector<rocprofiler_counter_dimension_id_t>;
-using counter_dimension_info_vec_t = std::vector<rocprofiler_record_dimension_info_t>;
+using counter_dimension_info_vec_t = std::vector<rocprofiler_counter_record_dimension_info_t>;
 
 struct tool_counter_info : rocprofiler_counter_info_v1_t
 {
@@ -93,10 +93,10 @@ struct tool_counter_record_t
 {
     using container_type = std::vector<tool_counter_value_t>;
 
-    uint64_t                                     thread_id         = 0;
-    rocprofiler_dispatch_counting_service_data_t dispatch_data     = {};
-    serialized_counter_record_t                  record            = {};
-    uint64_t                                     kernel_rename_val = {};
+    uint64_t                                     thread_id     = 0;
+    rocprofiler_dispatch_counting_service_data_t dispatch_data = {};
+    serialized_counter_record_t                  record        = {};
+    rocprofiler_stream_id_t                      stream_id     = {.handle = 0};
 
     template <typename ArchiveT>
     void save(ArchiveT& ar) const
@@ -107,7 +107,7 @@ struct tool_counter_record_t
         ar(cereal::make_nvp("thread_id", thread_id));
         ar(cereal::make_nvp("dispatch_data", dispatch_data));
         ar(cereal::make_nvp("records", tmp));
-        ar(cereal::make_nvp("kernel_rename_val", kernel_rename_val));
+        ar(cereal::make_nvp("stream_id", stream_id));
     }
 
     container_type read() const;
@@ -126,7 +126,6 @@ save(ArchiveT& ar, const ::rocprofiler::tool::tool_counter_info& data)
 {
     SAVE_DATA_FIELD(agent_id);
     cereal::save(ar, static_cast<const rocprofiler_counter_info_v1_t&>(data));
-    SAVE_DATA_FIELD(dimension_ids);
 }
 
 #undef SAVE_DATA_FIELD

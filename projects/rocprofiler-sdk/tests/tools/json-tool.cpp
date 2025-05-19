@@ -966,7 +966,8 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
 
                 marker_api_bf_records.emplace_back(*record);
             }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API)
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API ||
+                    header->kind == ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API)
             {
                 auto* record =
                     static_cast<rocprofiler_buffer_tracing_hip_api_record_t*>(header->payload);
@@ -1309,6 +1310,15 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                        nullptr),
         "hip runtime api callback tracing service configure");
 
+    // ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
+    //                      hip_api_callback_ctx,
+    //                      ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
+    //                      nullptr,
+    //                      0,
+    //                      tool_tracing_callback,
+    //                      nullptr),
+    //                  "hip compiler api callback tracing service configure");
+
     ROCPROFILER_CALL(
         rocprofiler_configure_callback_tracing_service(code_object_ctx,
                                                        ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,
@@ -1591,6 +1601,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                      0,
                                                      hip_api_buffered_buffer),
         "buffer tracing service configure");
+
+    // ROCPROFILER_CALL(
+    //     rocprofiler_configure_buffer_tracing_service(hip_api_buffered_ctx,
+    //                                                  ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API,
+    //                                                  nullptr,
+    //                                                  0,
+    //                                                  hip_api_buffered_buffer),
+    //     "buffer tracing service configure");
 
     ROCPROFILER_CALL(
         rocprofiler_configure_buffer_tracing_service(marker_api_buffered_ctx,

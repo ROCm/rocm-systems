@@ -54,6 +54,12 @@ rocprofiler_add_option(
 rocprofiler_add_option(ROCPROFILER_BUILD_FMT "Enable building fmt library internally" ON)
 rocprofiler_add_option(ROCPROFILER_BUILD_GLOG
                        "Enable building glog (Google logging) library internally" ON)
+rocprofiler_add_option(ROCPROFILER_BUILD_SQLITE3
+                       "Enable building sqlite3 library internally" OFF)
+rocprofiler_add_option(ROCPROFILER_BUILD_PYBIND11
+                       "Enable building pybind11 library internally" ON)
+rocprofiler_add_option(ROCPROFILER_BUILD_GOTCHA
+                       "Enable building gotcha library internally" ON)
 if(ROCPROFILER_BUILD_TESTS)
     rocprofiler_add_option(
         ROCPROFILER_BUILD_GTEST
@@ -87,6 +93,8 @@ rocprofiler_add_option(
     "Enable warnings for experimental features but hide with -Wno-deprecated-declarations (this ensures that experimental warning message does not break macros)"
     OFF
     ADVANCED)
+rocprofiler_add_option(ROCPROFILER_BUILD_DEPRECATED_WARNINGS
+                       "Enable warnings for use of deprecated features" OFF ADVANCED)
 
 # In the future, we will do this even with clang-tidy enabled
 foreach(_OPT ROCPROFILER_BUILD_DEVELOPER ROCPROFILER_BUILD_WERROR)

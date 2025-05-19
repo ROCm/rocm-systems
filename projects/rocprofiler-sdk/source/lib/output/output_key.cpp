@@ -223,22 +223,26 @@ output_keys(std::string _tag)
     }
 
     for(auto&& itr : std::initializer_list<output_key>{
-            {"%argv%", _argv_string, "Entire command-line condensed into a single string"},
-            {"%argt%",
+            {"argv", _argv_string, "Entire command-line condensed into a single string"},
+            {"argt",
              _argt_string,
              "Similar to `%argv%` except basename of first command line argument"},
-            {"%args%", _args_string, "All command line arguments condensed into a single string"},
-            {"%tag%", _tag0_string, "Basename of first command line argument"}})
+            {"args", _args_string, "All command line arguments condensed into a single string"},
+            {"tag", _tag0_string, "Basename of first command line argument"}})
     {
-        _options.emplace_back(itr);
+        _options.emplace_back(fmt::format("%{}%", itr.key), itr.value, itr.description);
+        _options.emplace_back(fmt::format("{}{}{}", '{', itr.key, '}'), itr.value, itr.description);
     }
 
     if(!_cmdline.empty())
     {
         for(size_t i = 0; i < _cmdline.size(); ++i)
         {
-            auto _v = _cmdline.at(i);
-            _options.emplace_back(fmt::format("%arg{}%", i), _v, fmt::format("Argument #{}", i));
+            auto _v  = _cmdline.at(i);
+            auto itr = output_key{fmt::format("arg{}", i), _v, fmt::format("Argument #{}", i)};
+            _options.emplace_back(fmt::format("%{}%", itr.key), itr.value, itr.description);
+            _options.emplace_back(
+                fmt::format("{}{}{}", '{', itr.key, '}'), itr.value, itr.description);
         }
     }
 
@@ -247,22 +251,23 @@ output_keys(std::string _tag)
     auto _hostname    = get_hostname();
 
     for(auto&& itr : std::initializer_list<output_key>{
-            {"%hostname%", _hostname, "Network hostname"},
-            {"%pid%", _proc_id, "Process identifier"},
-            {"%ppid%", _parent_id, "Parent process identifier"},
-            {"%pgid%", _pgroup_id, "Process group identifier"},
-            {"%psid%", _session_id, "Process session identifier"},
-            {"%psize%", _proc_size, "Number of sibling process"},
-            {"%job%", _slurm_job_id, "SLURM_JOB_ID env variable"},
-            {"%rank%", _slurm_proc_id, "MPI/UPC++ rank"},
-            {"%size%", _dmp_size, "MPI/UPC++ size"},
-            {"%nid%", _uniq_id, "%rank% if possible, otherwise %pid%"},
-            {"%cwd%", fs::current_path().string(), "Current working path"},
-            {"%launch_date%", _launch_date, "Date according to date format ROCPROF_DATE_FORMAT"},
-            {"%launch_time%", _launch_time, "Date and/or time according to ROCPROF_TIME_FORMAT"},
+            {"hostname", _hostname, "Network hostname"},
+            {"pid", _proc_id, "Process identifier"},
+            {"ppid", _parent_id, "Parent process identifier"},
+            {"pgid", _pgroup_id, "Process group identifier"},
+            {"psid", _session_id, "Process session identifier"},
+            {"psize", _proc_size, "Number of sibling process"},
+            {"job", _slurm_job_id, "SLURM_JOB_ID env variable"},
+            {"rank", _slurm_proc_id, "MPI/UPC++ rank"},
+            {"size", _dmp_size, "MPI/UPC++ size"},
+            {"nid", _uniq_id, "%rank% if possible, otherwise %pid%"},
+            {"cwd", fs::current_path().string(), "Current working path"},
+            {"launch_date", _launch_date, "Date according to date format ROCPROF_DATE_FORMAT"},
+            {"launch_time", _launch_time, "Date and/or time according to ROCPROF_TIME_FORMAT"},
         })
     {
-        _options.emplace_back(itr);
+        _options.emplace_back(fmt::format("%{}%", itr.key), itr.value, itr.description);
+        _options.emplace_back(fmt::format("{}{}{}", '{', itr.key, '}'), itr.value, itr.description);
     }
 
     for(auto&& itr : std::initializer_list<output_key>{

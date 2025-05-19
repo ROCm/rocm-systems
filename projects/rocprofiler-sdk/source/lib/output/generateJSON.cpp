@@ -100,16 +100,14 @@ write_json(json_output&         json_ar,
 {
     // metadata
     {
-        auto timestamps =
-            timestamps_t{tool_metadata.process_start_ns, tool_metadata.process_end_ns};
-
         json_ar.setNextName("metadata");
         json_ar.startNode();
+        json_ar(cereal::make_nvp("node", tool_metadata.node_data));
         json_ar(cereal::make_nvp("pid", pid));
-        json_ar(cereal::make_nvp("init_time", timestamps.app_start_time));
-        json_ar(cereal::make_nvp("fini_time", timestamps.app_end_time));
+        json_ar(cereal::make_nvp("init_time", tool_metadata.process_start_ns));
+        json_ar(cereal::make_nvp("fini_time", tool_metadata.process_end_ns));
+        json_ar(cereal::make_nvp("command", tool_metadata.command_line));
         json_ar(cereal::make_nvp("config", cfg));
-        json_ar(cereal::make_nvp("command", common::read_command_line(pid)));
         json_ar.finishNode();
     }
 
@@ -183,23 +181,24 @@ write_json(json_output&         json_ar,
 }
 
 void
-write_json(json_output& json_ar,
-           const output_config& /*cfg*/,
-           const metadata& /*tool_metadata*/,
-           const domain_stats_vec_t&                                        domain_stats,
-           generator<rocprofiler_buffer_tracing_hip_api_ext_record_t>&&     hip_api_gen,
-           generator<rocprofiler_buffer_tracing_hsa_api_record_t>           hsa_api_gen,
-           generator<tool_buffer_tracing_kernel_dispatch_ext_record_t>      kernel_dispatch_gen,
-           generator<tool_buffer_tracing_memory_copy_ext_record_t>          memory_copy_gen,
-           generator<tool_counter_record_t>                                 counter_collection_gen,
-           generator<rocprofiler_buffer_tracing_marker_api_record_t>        marker_api_gen,
-           generator<rocprofiler_buffer_tracing_scratch_memory_record_t>    scratch_memory_gen,
-           generator<rocprofiler_buffer_tracing_rccl_api_record_t>          rccl_api_gen,
-           generator<rocprofiler_buffer_tracing_memory_allocation_record_t> memory_allocation_gen,
-           generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t> rocdecode_api_gen,
-           generator<rocprofiler_buffer_tracing_rocjpeg_api_record_t>       rocjpeg_api_gen,
-           generator<rocprofiler_tool_pc_sampling_host_trap_record_t>  pc_sampling_host_trap_gen,
-           generator<rocprofiler_tool_pc_sampling_stochastic_record_t> pc_sampling_stochastic_gen)
+write_json(
+    json_output& json_ar,
+    const output_config& /*cfg*/,
+    const metadata& /*tool_metadata*/,
+    const domain_stats_vec_t&                                               domain_stats,
+    const generator<rocprofiler_buffer_tracing_hip_api_ext_record_t>&       hip_api_gen,
+    const generator<rocprofiler_buffer_tracing_hsa_api_record_t>&           hsa_api_gen,
+    const generator<tool_buffer_tracing_kernel_dispatch_ext_record_t>&      kernel_dispatch_gen,
+    const generator<tool_buffer_tracing_memory_copy_ext_record_t>&          memory_copy_gen,
+    const generator<tool_counter_record_t>&                                 counter_collection_gen,
+    const generator<rocprofiler_buffer_tracing_marker_api_record_t>&        marker_api_gen,
+    const generator<rocprofiler_buffer_tracing_scratch_memory_record_t>&    scratch_memory_gen,
+    const generator<rocprofiler_buffer_tracing_rccl_api_record_t>&          rccl_api_gen,
+    const generator<tool_buffer_tracing_memory_allocation_ext_record_t>&    memory_allocation_gen,
+    const generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>& rocdecode_api_gen,
+    const generator<rocprofiler_buffer_tracing_rocjpeg_api_record_t>&       rocjpeg_api_gen,
+    const generator<rocprofiler_tool_pc_sampling_host_trap_record_t>&  pc_sampling_host_trap_gen,
+    const generator<rocprofiler_tool_pc_sampling_stochastic_record_t>& pc_sampling_stochastic_gen)
 {
     // summary
     {

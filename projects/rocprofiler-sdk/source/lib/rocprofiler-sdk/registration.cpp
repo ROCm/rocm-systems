@@ -28,6 +28,7 @@
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
+#include "lib/common/static_tl_object.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -244,12 +245,12 @@ find_clients()
         return true;
     };
 
-    constexpr auto client_id_size = sizeof(rocprofiler_client_id_t);
-    auto           emplace_client = [&data, priority_offset](
+    auto emplace_client = [&data, priority_offset](
                               std::string_view _name,
                               void*            _dlhandle,
                               auto*            _cfg_func) -> std::optional<client_library>& {
-        uint32_t _prio = priority_offset + data.size();
+        constexpr auto client_id_size = sizeof(rocprofiler_client_id_t);
+        uint32_t       _prio          = priority_offset + data.size();
         return data.emplace_back(
             client_library{std::string{_name},
                            _dlhandle,
@@ -680,6 +681,7 @@ initialize()
         set_init_status(-1);
         std::atexit([]() {
             finalize();
+            common::destroy_static_tl_objects();
             common::destroy_static_objects();
         });
         init_logging();

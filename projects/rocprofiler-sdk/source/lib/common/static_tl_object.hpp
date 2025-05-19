@@ -39,6 +39,9 @@ namespace common
 void
 destroy_static_tl_objects();
 
+void
+register_static_tl_dtor(static_dtor_func_t&&);
+
 /**
  * @brief This struct is used to create static singleton objects which have the properties of a
  * heap-allocated static object without a memory leak.
@@ -97,7 +100,7 @@ static_tl_object<Tp, ContextT>::construct(Args&&... args)
     {
         static thread_local auto _once = std::once_flag{};
         std::call_once(_once, []() {
-            register_static_dtor([]() {
+            register_static_tl_dtor([]() {
                 if(static_tl_object<Tp, ContextT>::m_object)
                 {
                     static_tl_object<Tp, ContextT>::m_object->~Tp();

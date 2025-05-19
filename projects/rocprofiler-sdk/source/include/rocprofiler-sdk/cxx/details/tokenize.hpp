@@ -28,6 +28,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace rocprofiler
@@ -210,6 +211,24 @@ str_transform(std::string_view input,
         }
     }
     return _result;
+}
+
+inline std::string
+strip(std::string&& str, std::string_view characters)
+{
+    constexpr auto npos = std::string_view::npos;
+
+    auto bpos = str.find_first_not_of(characters);
+    auto epos = str.find_last_not_of(characters);
+
+    if(bpos != npos && epos != npos)
+        return str.substr(bpos, (epos - bpos + 1));
+    else if(bpos != npos)
+        return str.substr(bpos);
+    else if(epos != npos)
+        return str.substr(0, epos + 1);
+
+    return str;
 }
 }  // namespace parse
 }  // namespace sdk

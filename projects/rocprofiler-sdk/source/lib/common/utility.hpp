@@ -94,6 +94,10 @@ timestamp_ns()
     return get_ticks(_clk) / _clk_period;
 }
 
+// returns the process start time (in CLOCK_BOOTTIME nanoseconds) via /proc/<pid>/stat
+uint64_t
+get_process_start_time_ns(pid_t _pid);
+
 std::vector<std::string>
 read_command_line(pid_t _pid);
 

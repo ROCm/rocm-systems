@@ -5,6 +5,9 @@
 #
 include(rocprofiler_utilities)
 
+cmake_policy(PUSH)
+cmake_policy(SET CMP0077 NEW) # option() honors normal variables
+
 set(BUILD_TESTING OFF)
 set(BUILD_SHARED_LIBS OFF)
 set(BUILD_OBJECT_LIBS OFF) # Specific to PTL
@@ -207,7 +210,9 @@ if(TARGET rocprofiler-sdk-elfio)
                                INTERFACE ${ELFIO_INCLUDE_DIR})
 endif()
 
+#
 # OTF2
+#
 add_subdirectory(otf2)
 
 rocprofiler_checkout_git_submodule(
@@ -217,9 +222,123 @@ rocprofiler_checkout_git_submodule(
     REPO_URL https://github.com/nlohmann/json.git
     REPO_BRANCH "develop")
 
+#
+# JSON
+#
 add_subdirectory(json)
-
-# target_link_libraries(rocprofiler-sdk-json INTERFACE $<BUILD_INTERFACE:json::json>)
 target_include_directories(
     rocprofiler-sdk-json SYSTEM
     INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/json/include>)
+
+#
+# SQLite3
+#
+if(ROCPROFILER_BUILD_SQLITE3)
+    # checkout submodule if not already checked out or clone repo if no .gitmodules file
+    rocprofiler_checkout_git_submodule(
+        RECURSIVE
+        RELATIVE_PATH external/sqlite
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        TEST_FILE configure
+        REPO_URL https://github.com/sqlite/sqlite
+        REPO_BRANCH "version-3.47.0")
+
+    find_program(
+        MAKE_COMMAND
+        NAMES make gmake
+        PATH_SUFFIXES bin REQUIRED)
+
+    include(ExternalProject)
+    externalproject_add(
+        rocprofiler-sdk-sqlite-build
+        PREFIX ${PROJECT_BINARY_DIR}/external/sqlite/build
+        SOURCE_DIR ${PROJECT_SOURCE_DIR}/external/sqlite
+        BUILD_IN_SOURCE 0
+        CONFIGURE_COMMAND
+            <SOURCE_DIR>/configure --prefix=${PROJECT_BINARY_DIR}/external/sqlite/install
+            --libdir=${PROJECT_BINARY_DIR}/external/sqlite/install/lib
+            --enable-tempstore=yes --enable-all --disable-tcl --with-pic CFLAGS=-O3\ -g1
+        BUILD_COMMAND ${MAKE_COMMAND} install -s
+        INSTALL_COMMAND "")
+
+    target_link_libraries(
+        rocprofiler-sdk-sqlite3
+        INTERFACE
+            $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/external/sqlite/install/lib/libsqlite3.so>
+        )
+    target_include_directories(
+        rocprofiler-sdk-sqlite3 SYSTEM
+        INTERFACE $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/external/sqlite/install/include>
+        )
+    add_dependencies(rocprofiler-sdk-sqlite3 rocprofiler-sdk-sqlite-build)
+else()
+    # make it optional temporarily because ROCm CI does not have SQLite3 dev installed and
+    # cannot build from source (missing tclsh)
+    find_package(SQLite3)
+    if(SQLite3_FOUND)
+        target_link_libraries(rocprofiler-sdk-sqlite3 INTERFACE SQLite::SQLite3)
+    endif()
+endif()
+
+#
+# PyBind11
+#
+if(ROCPROFILER_BUILD_PYBIND11)
+    # checkout submodule if not already checked out or clone repo if no .gitmodules file
+    rocprofiler_checkout_git_submodule(
+        RECURSIVE
+        RELATIVE_PATH external/pybind11
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        REPO_URL https://github.com/pybind/pybind11.git
+        REPO_BRANCH "v2.9.2")
+
+    target_include_directories(
+        rocprofiler-sdk-pybind11 SYSTEM
+        INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/pybind11/include>)
+else()
+    find_package(pybind11 REQUIRED)
+    target_link_libraries(rocprofiler-sdk-pybind11 INTERFACE pybind11::pybind11)
+endif()
+
+#
+# GOTCHA
+#
+if(ROCPROFILER_BUILD_GOTCHA)
+    # checkout submodule if not already checked out or clone repo if no .gitmodules file
+    rocprofiler_checkout_git_submodule(
+        RECURSIVE
+        RELATIVE_PATH external/gotcha
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        REPO_URL https://github.com/jrmadsen/GOTCHA.git
+        REPO_BRANCH "rocprofiler")
+
+    function(add_gotcha_subdirectory)
+        set(GOTCHA_ENABLE_TESTS OFF)
+        set(GOTCHA_ENABLE_WARNING_ERROR OFF)
+        set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY
+            "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/rocprofiler-sdk")
+        set(CMAKE_LIBRARY_OUTPUT_DIRECTORY
+            "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/rocprofiler-sdk")
+        set(CMAKE_RUNTIME_OUTPUT_DIRECTORY
+            "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprofiler-sdk")
+        add_subdirectory(gotcha EXCLUDE_FROM_ALL)
+        add_dependencies(rocprofiler-sdk-gotcha gotcha)
+        install(
+            TARGETS gotcha
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}/rocprofiler-sdk"
+            OPTIONAL)
+    endfunction()
+
+    add_gotcha_subdirectory()
+
+    target_link_libraries(rocprofiler-sdk-gotcha INTERFACE gotcha::gotcha)
+else()
+    find_package(gotcha REQUIRED)
+    if(TARGET gotcha::gotcha)
+        target_link_libraries(rocprofiler-sdk-gotcha INTERFACE gotcha::gotcha)
+    elseif(TARGET gotcha)
+        target_link_libraries(rocprofiler-sdk-gotcha INTERFACE gotcha)
+    endif()
+endif()
+
+cmake_policy(POP)

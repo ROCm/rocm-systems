@@ -118,7 +118,7 @@ private:
 };
 
 int
-run_test(int num_iter)
+run_test(int dev_idx, int num_iter)
 {
     using namespace std::chrono_literals;
 
@@ -141,6 +141,7 @@ run_test(int num_iter)
            elem_count,
            data_v);
 
+    HIP_API_CALL(hipSetDevice(dev_idx));
     HIP_API_CALL(hipHostRegister(data, elem_count * sizeof(size_t), hipHostRegisterDefault));
 
     constexpr size_t MAPS_BUFFER_SIZE = 1024 * 1024;
@@ -221,8 +222,9 @@ run_test(int num_iter)
         }
     }
 
+    HIP_API_CALL(hipStreamSynchronize(stream));
     HIP_API_CALL(hipStreamDestroy(stream));
-    HIP_API_CALL(hipDeviceSynchronize());
+    HIP_API_CALL(hipHostUnregister(data));
 
     return 0;
 }
@@ -266,22 +268,32 @@ main(int argc, const char** argv)
         exit(EXIT_FAILURE);
     }
 
-    run_test(num_iter);
+    int ndevice = 0;
+    HIP_API_CALL(hipGetDeviceCount(&ndevice));
+
+    run_test(0, num_iter);
 
     std::vector<std::thread> threads;
     threads.reserve(num_threads);
 
     std::cerr << "Running " << num_iter << " iterations/thread on " << num_threads << " threads\n";
-
     for(auto i = 0; i < num_threads; ++i)
     {
-        threads.emplace_back([_num_iter = num_iter]() { run_test(_num_iter); });
+        auto _dev_idx = i % ndevice;
+        threads.emplace_back([_dev_idx, _num_iter = num_iter]() { run_test(_dev_idx, _num_iter); });
     }
 
     std::cerr << "Waiting for threads\n";
     for(auto& t : threads)
     {
         t.join();
+    }
+
+    for(int i = 0; i < ndevice; ++i)
+    {
+        HIP_API_CALL(hipSetDevice(i));
+        HIP_API_CALL(hipDeviceSynchronize());
+        HIP_API_CALL(hipDeviceReset());
     }
 
     return 0;

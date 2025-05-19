@@ -25,12 +25,14 @@
 #include "tmp_file_buffer.hpp"
 
 #include "lib/common/container/ring_buffer.hpp"
+#include "lib/common/demangle.hpp"
 #include "lib/common/logging.hpp"
 
 #include <fmt/format.h>
 
 #include <iosfwd>
 #include <mutex>
+#include <numeric>
 #include <set>
 #include <vector>
 
@@ -76,35 +78,78 @@ get_buffer_elements(common::container::ring_buffer<Tp>&& buf)
 template <typename Tp, domain_type DomainT>
 struct buffered_output;
 
+struct defer_size
+{};
+
 template <typename Tp>
 struct generator
+{
+    generator()          = delete;
+    virtual ~generator() = default;
+
+    generator(const generator&)     = delete;
+    generator(generator&&) noexcept = delete;
+    generator& operator=(const generator&) = delete;
+    generator& operator=(generator&&) noexcept = delete;
+
+    auto begin() { return m_pos.begin(); }
+    auto begin() const { return m_pos.begin(); }
+    auto cbegin() const { return m_pos.cbegin(); }
+
+    auto end() { return m_pos.end(); }
+    auto end() const { return m_pos.end(); }
+    auto cend() const { return m_pos.cend(); }
+
+    auto size() const { return m_pos.size(); }
+    auto empty() const { return m_pos.empty(); }
+
+    virtual std::vector<Tp> get(size_t) const = 0;
+
+protected:
+    explicit generator(defer_size);
+    explicit generator(size_t sz);
+
+    void resize(size_t sz);
+
+    std::vector<size_t> m_pos = {};
+};
+
+template <typename Tp>
+generator<Tp>::generator(defer_size)
+{}
+
+template <typename Tp>
+generator<Tp>::generator(size_t sz)
+{
+    resize(sz);
+}
+
+template <typename Tp>
+void
+generator<Tp>::resize(size_t sz)
+{
+    m_pos.resize(sz, 0);
+    std::iota(m_pos.begin(), m_pos.end(), 0);
+}
+
+template <typename Tp>
+struct file_generator : public generator<Tp>
 {
     template <typename Up, domain_type DomainT>
     friend struct buffered_output;
 
-    generator()  = delete;
-    ~generator() = default;
+    file_generator()           = delete;
+    ~file_generator() override = default;
 
-    generator(const generator&) = delete;
-    generator(generator&&)      = delete;
-    generator& operator=(const generator&) = delete;
-    generator& operator=(generator&&) = delete;
+    file_generator(const file_generator&)     = delete;
+    file_generator(file_generator&&) noexcept = delete;
+    file_generator& operator=(const file_generator&) = delete;
+    file_generator& operator=(file_generator&&) noexcept = delete;
 
-    auto begin() { return file_pos.begin(); }
-    auto begin() const { return file_pos.begin(); }
-    auto cbegin() const { return file_pos.cbegin(); }
-
-    auto end() { return file_pos.end(); }
-    auto end() const { return file_pos.end(); }
-    auto cend() const { return file_pos.cend(); }
-
-    auto size() const { return file_pos.size(); }
-    auto empty() const { return file_pos.empty(); }
-
-    std::vector<Tp> get(std::streampos itr) const;
+    std::vector<Tp> get(size_t itr) const override;
 
 private:
-    generator(file_buffer<Tp>* fbuf);
+    explicit file_generator(file_buffer<Tp>* fbuf);
 
     file_buffer<Tp>*            filebuf = nullptr;
     std::lock_guard<std::mutex> lk_guard;
@@ -112,19 +157,38 @@ private:
 };
 
 template <typename Tp>
-generator<Tp>::generator(file_buffer<Tp>* fbuf)
-: filebuf{fbuf}
+file_generator<Tp>::file_generator(file_buffer<Tp>* fbuf)
+: generator<Tp>{fbuf->file.file_pos.size()}
+, filebuf{fbuf}
 , lk_guard{filebuf->file.file_mutex}
 , file_pos{filebuf->file.file_pos}
 {}
 
 template <typename Tp>
 std::vector<Tp>
-generator<Tp>::get(std::streampos itr) const
+file_generator<Tp>::get(size_t idx) const
 {
     auto  _data = std::vector<Tp>{};
     auto& _fs   = filebuf->file.stream;
-    _fs.seekg(itr);  // set to the absolute position
+
+    if(idx >= file_pos.size())
+    {
+        ROCP_ERROR << fmt::format("file_generator has no file position at index {}", idx);
+        return _data;
+    }
+
+    auto itr = file_pos.begin();
+    std::advance(itr, idx);
+
+    if(itr == file_pos.end())
+    {
+        ROCP_ERROR << fmt::format("file_generator at index {} == end of file_pos set", idx);
+        return _data;
+    }
+
+    ROCP_TRACE << fmt::format("file_generator file position at index={} :: ", idx) << *itr;
+
+    _fs.seekg(*itr);  // set to the absolute position
     if(!_fs.eof())
     {
         auto _buffer = ring_buffer_t<Tp>{};
@@ -138,9 +202,11 @@ generator<Tp>::get(std::streampos itr) const
 
 namespace cereal
 {
+namespace tool = ::rocprofiler::tool;
+
 template <typename ArchiveT, typename Tp>
 void
-save(ArchiveT& ar, const rocprofiler::tool::generator<Tp>& data)
+save(ArchiveT& ar, const tool::file_generator<Tp>& data)
 {
     ar.makeArray();
     for(auto itr : data)
@@ -148,6 +214,22 @@ save(ArchiveT& ar, const rocprofiler::tool::generator<Tp>& data)
         auto dat = data.get(itr);
         for(const auto& ditr : dat)
             ar(ditr);
+    }
+}
+
+template <typename ArchiveT, typename Tp>
+void
+save(ArchiveT& ar, const tool::generator<Tp>& data)
+{
+    if(const auto* fdata = dynamic_cast<const tool::file_generator<Tp>*>(&data); fdata != nullptr)
+    {
+        save(ar, *fdata);
+    }
+    else
+    {
+        ROCP_CI_LOG(WARNING) << fmt::format(
+            "dynamic_cast failed for {}",
+            rocprofiler::common::cxx_demangle(typeid(tool::generator<Tp>).name()));
     }
 }
 }  // namespace cereal
