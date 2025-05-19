@@ -14,13 +14,13 @@ find_package(rocprofiler-sdk REQUIRED)
 rocprofiler_configure_pytest_files(COPY validate.py conftest.py input.txt
                                    CONFIG pytest.ini)
 
-# pmc3
+# pmc
 add_test(
     NAME rocprofv3-test-tracing-plus-counter-collection-execute
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hsa-trace -i
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hsa-trace --kernel-trace -i
         ${CMAKE_CURRENT_BINARY_DIR}/input.txt -d
-        ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace -o pmc3 --output-format
+        ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace -o pmc --output-format
         JSON PFTRACE CSV -- $<TARGET_FILE:simple-transpose>)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
@@ -39,15 +39,15 @@ foreach(_DIR "pmc_1" "pmc_2" "pmc_3" "pmc_4")
         NAME rocprofv3-test-tracing-plus-counter-collection-validate-${_DIR}
         COMMAND
             ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
-            "${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/${_DIR}/pmc3_results.json"
+            "${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/${_DIR}/pmc_results.json"
             --pftrace-input
-            "${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/${_DIR}/pmc3_results.pftrace"
+            "${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/${_DIR}/pmc_results.pftrace"
             --hsa-input
-            "${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/${_DIR}/pmc3_hsa_api_trace.csv"
+            "${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/${_DIR}/pmc_hsa_api_trace.csv"
             --agent-input
-            "${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/${_DIR}/pmc3_agent_info.csv"
+            "${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/${_DIR}/pmc_agent_info.csv"
             --counter-input
-            "${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/${_DIR}/pmc3_counter_collection.csv"
+            "${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/${_DIR}/pmc_counter_collection.csv"
         )
 
     set_tests_properties(
@@ -68,10 +68,10 @@ foreach(_GROUP "single" "multiple")
     add_test(
         NAME ${_TEST_NAME_PREFIX}-execute
         COMMAND
-            $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace --hsa-trace --pmc
+            $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --sys-trace --kernel-rename --pmc
             ${cmdl_${_GROUP}} -d ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace
             -o cmdl/${_GROUP} --output-format JSON PFTRACE CSV --
-            $<TARGET_FILE:simple-transpose>)
+            $<TARGET_FILE:transpose> 2 50 5)
 
     set_tests_properties(
         ${_TEST_NAME_PREFIX}-execute

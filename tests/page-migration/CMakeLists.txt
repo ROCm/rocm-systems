@@ -30,6 +30,7 @@ set(page-migration-env
     "${PRELOAD_ENV}"
     "ROCPROFILER_DISABLE_PERFETTO_ANNOTATIONS=1"
     "ROCPROFILER_TOOL_OUTPUT_FILE=page-migration-test.json"
+    "ROCPROFILER_TOOL_CONTEXTS_EXCLUDE=HSA_API_BUFFERED,HSA_API_CALLBACK"
     "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
     )
 

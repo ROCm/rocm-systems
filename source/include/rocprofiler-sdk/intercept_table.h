@@ -69,6 +69,28 @@ typedef void (*rocprofiler_intercept_library_cb_t)(rocprofiler_intercept_table_t
                                                    void*                         user_data);
 
 /**
+ * @brief (experimental) Query the name of the intercept table. The name retrieved from this
+ * function is a string literal that is encoded in the read-only section of the binary (i.e. it is
+ * always "allocated" and never "deallocated").
+ *
+ * @param [in] kind Intercept table kind
+ * @param [out] name If non-null and the name is a constant string that does not require dynamic
+ * allocation, this paramter will be set to the address of the string literal, otherwise it will
+ * be set to nullptr
+ * @param [out] name_len If non-null, this will be assigned the length of the name (regardless of
+ * the name is a constant string or requires dynamic allocation)
+ * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND Returned if the domain id is not valid
+ * @retval ::ROCPROFILER_STATUS_SUCCESS Returned if a valid domain, regardless if there is a
+ * constant string or not.
+ */
+ROCPROFILER_SDK_EXPERIMENTAL
+rocprofiler_status_t
+rocprofiler_query_intercept_table_name(rocprofiler_intercept_table_t kind,
+                                       const char**                  name,
+                                       uint64_t*                     name_len) ROCPROFILER_API;
+
+/**
  * @brief (experimental) Invoke this function to receive callbacks when a ROCm library registers its
  * API intercept table with rocprofiler. Use the ::rocprofiler_intercept_table_t enumeration for
  * specifying which raw API tables the tool would like to have access to. E.g. including

@@ -66,14 +66,27 @@ def test_perfetto_data(
         else:
             unique_counter_ids = set()
 
+            counter_info = {}
+            for itr in json_data["rocprofiler-sdk-tool"]["counters"]:
+                counter_info[itr["id"]["handle"]] = itr
+
+            agent_info = {}
+            for itr in json_data["rocprofiler-sdk-tool"]["agents"]:
+                agent_info[itr["id"]["handle"]] = itr
+
             for dispatch_entry in json_data["rocprofiler-sdk-tool"]["callback_records"][
                 js_category
             ]:
                 counter_records = dispatch_entry["records"]
+                agent_id = dispatch_entry["dispatch_data"]["dispatch_info"]["agent_id"][
+                    "handle"
+                ]
+                agent_node_id = agent_info[agent_id]["node_id"]
 
                 for record in counter_records:
                     counter_id = record["counter_id"]["handle"]
-                    unique_counter_ids.add(counter_id)
+                    counter_name = counter_info[counter_id]["name"]
+                    unique_counter_ids.add(f"Agent [{agent_node_id}] PMC {counter_name}")
 
             _js_data = [{"counter_id": id} for id in unique_counter_ids]
 

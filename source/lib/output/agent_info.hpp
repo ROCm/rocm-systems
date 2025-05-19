@@ -41,6 +41,7 @@ struct agent_info : rocprofiler_agent_v0_t
     : base_type{_base}
     {}
 
+    agent_info()                      = default;
     ~agent_info()                     = default;
     agent_info(const agent_info&)     = default;
     agent_info(agent_info&&) noexcept = default;
@@ -58,14 +59,19 @@ using agent_info_map_t = std::unordered_map<rocprofiler_agent_id_t, agent_info>;
 
 namespace cereal
 {
-#define SAVE_DATA_FIELD(FIELD) ar(make_nvp(#FIELD, data.FIELD))
-
 template <typename ArchiveT>
 void
 save(ArchiveT& ar, const ::rocprofiler::tool::agent_info& data)
 {
     cereal::save(ar, static_cast<const rocprofiler_agent_v0_t&>(data));
+    ar(cereal::make_nvp("gpu_index", data.gpu_index));
 }
 
-#undef SAVE_DATA_FIELD
+template <typename ArchiveT>
+void
+load(ArchiveT& ar, ::rocprofiler::tool::agent_info& data)
+{
+    cereal::load(ar, static_cast<rocprofiler_agent_v0_t&>(data));
+    ar(cereal::make_nvp("gpu_index", data.gpu_index));
+}
 }  // namespace cereal

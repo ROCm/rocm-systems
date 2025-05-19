@@ -38,10 +38,7 @@ namespace mpl
 {
 // dummy tuple with low instantiation cost
 template <typename... Tp>
-struct type_list
-{
-    static constexpr auto size() { return sizeof...(Tp); }
-};
+using type_list = impl::type_list<Tp...>;
 
 /// get the index of a type in expansion
 template <typename Tp, typename Type>

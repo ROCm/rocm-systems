@@ -49,7 +49,7 @@ jobs:
         apt-get update
         amdgpu-repo --rocm-build=${{ inputs.build-job-name }}/${{ inputs.build-number }}
         apt-get upgrade -y
-        apt-get install -y build-essential cmake rocm-llvm-dev python3-pip libdw-dev
+        apt-get install -y build-essential cmake rocm-llvm-dev python3-pip libdw-dev libsqlite3-dev
         python3 -m pip install -r ${{github.workspace}}/rocprofiler-sdk/requirements.txt
 
     - name: Building ROCProfiler-SDK Packages

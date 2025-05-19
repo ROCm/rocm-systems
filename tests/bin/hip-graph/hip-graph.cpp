@@ -153,8 +153,8 @@ run(uint64_t                        devid,
     for(uint64_t i = 0; i < nstream; ++i)
         checkHipErrors(hipGraphLaunch(execs.at(i), streams.at(i)));
 
-    log_message("synchronizing device");
-    checkHipErrors(hipDeviceSynchronize());
+    for(uint64_t i = 0; i < nstream; ++i)
+        checkHipErrors(hipStreamSynchronize(streams.at(i)));
 
     log_message("destroying graph");
     for(uint64_t i = 0; i < nstream; ++i)
@@ -206,6 +206,12 @@ main(int argc, char* argv[])
 
     for(auto& itr : threads)
         itr.join();
+
+    for(uint64_t i = 0; i < ndevice; ++i)
+    {
+        checkHipErrors(hipSetDevice(i));
+        checkHipErrors(hipDeviceSynchronize());
+    }
 
     std::cout << "[" << ::basename(argv[0]) << "] complete" << std::endl;
     return 0;

@@ -287,7 +287,7 @@ generate_csv(const output_config&                                               
         {
             auto row_ss      = std::stringstream{};
             auto kernel_name = tool_metadata.get_kernel_name(record.dispatch_info.kernel_id,
-                                                             record.kernel_rename_val);
+                                                             record.correlation_id.external.value);
             rocprofiler::tool::csv::kernel_trace_with_stream_csv_encoder::write_row(
                 row_ss,
                 tool_metadata.get_kind_name(record.kind),
@@ -445,10 +445,10 @@ generate_csv(const output_config&                                           cfg,
 }
 
 void
-generate_csv(const output_config&                                                    cfg,
-             const metadata&                                                         tool_metadata,
-             const generator<rocprofiler_buffer_tracing_memory_allocation_record_t>& data,
-             const stats_entry_t&                                                    stats)
+generate_csv(const output_config&                                                 cfg,
+             const metadata&                                                      tool_metadata,
+             const generator<tool_buffer_tracing_memory_allocation_ext_record_t>& data,
+             const stats_entry_t&                                                 stats)
 {
     if(data.empty()) return;
 
@@ -626,7 +626,7 @@ generate_csv(const output_config&                    cfg,
                     record.thread_id,
                     magnitude(record.dispatch_data.dispatch_info.grid_size),
                     record.dispatch_data.dispatch_info.kernel_id,
-                    tool_metadata.get_kernel_name(kernel_id, record.kernel_rename_val),
+                    tool_metadata.get_kernel_name(kernel_id, correlation_id.external.value),
                     magnitude(record.dispatch_data.dispatch_info.workgroup_size),
                     lds_block_size_v,
                     record.dispatch_data.dispatch_info.private_segment_size,

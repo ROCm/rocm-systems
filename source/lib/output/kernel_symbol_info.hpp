@@ -82,17 +82,32 @@ using kernel_symbol_data_map_t = std::unordered_map<rocprofiler_kernel_id_t, ker
 namespace cereal
 {
 #define SAVE_DATA_FIELD(FIELD) ar(make_nvp(#FIELD, data.FIELD))
+#define LOAD_DATA_FIELD(FIELD) ar(make_nvp(#FIELD, data.FIELD))
 
 template <typename ArchiveT>
 void
 save(ArchiveT& ar, const ::rocprofiler::tool::kernel_symbol_info& data)
 {
-    cereal::save(ar,
-                 static_cast<const ::rocprofiler::tool::rocprofiler_kernel_symbol_info_t&>(data));
+    using base_type = ::rocprofiler::tool::kernel_symbol_info::base_type;
+
+    cereal::save(ar, static_cast<const base_type&>(data));
     SAVE_DATA_FIELD(formatted_kernel_name);
     SAVE_DATA_FIELD(demangled_kernel_name);
     SAVE_DATA_FIELD(truncated_kernel_name);
 }
 
+template <typename ArchiveT>
+void
+load(ArchiveT& ar, ::rocprofiler::tool::kernel_symbol_info& data)
+{
+    using base_type = ::rocprofiler::tool::kernel_symbol_info::base_type;
+
+    cereal::load(ar, static_cast<base_type&>(data));
+    LOAD_DATA_FIELD(formatted_kernel_name);
+    LOAD_DATA_FIELD(demangled_kernel_name);
+    LOAD_DATA_FIELD(truncated_kernel_name);
+}
+
 #undef SAVE_DATA_FIELD
+#undef LOAD_DATA_FIELD
 }  // namespace cereal

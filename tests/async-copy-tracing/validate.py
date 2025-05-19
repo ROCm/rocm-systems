@@ -26,6 +26,15 @@ import sys
 import pytest
 
 
+test_api_traces = [
+    "hsa_api_traces",
+    "marker_api_traces",
+    "hip_api_traces",
+    "rccl_api_traces",
+    "scratch_memory_traces",
+]
+
+
 # helper function
 def node_exists(name, data, min_len=1):
     assert name in data
@@ -153,7 +162,7 @@ def test_timestamps(input_data):
 
     cb_start = {}
     cb_end = {}
-    for titr in ["hsa_api_traces", "marker_api_traces", "hip_api_traces"]:
+    for titr in test_api_traces:
         for itr in sdk_data["callback_records"][titr]:
             cid = itr["correlation_id"]["internal"]
             phase = itr["phase"]
@@ -197,7 +206,7 @@ def test_internal_correlation_ids(input_data):
     sdk_data = data["rocprofiler-sdk-json-tool"]
 
     api_corr_ids = []
-    for titr in ["hsa_api_traces", "marker_api_traces", "hip_api_traces"]:
+    for titr in test_api_traces:
         for itr in sdk_data["callback_records"][titr]:
             api_corr_ids.append(itr["correlation_id"]["internal"])
 
@@ -223,14 +232,14 @@ def test_external_correlation_ids(input_data):
     sdk_data = data["rocprofiler-sdk-json-tool"]
 
     extern_corr_ids = []
-    for titr in ["hsa_api_traces", "marker_api_traces", "hip_api_traces"]:
+    for titr in test_api_traces:
         for itr in sdk_data["callback_records"][titr]:
             assert itr["correlation_id"]["external"] > 0
             assert itr["thread_id"] == itr["correlation_id"]["external"]
             extern_corr_ids.append(itr["correlation_id"]["external"])
 
     extern_corr_ids = list(set(sorted(extern_corr_ids)))
-    for titr in ["hsa_api_traces", "marker_api_traces", "hip_api_traces"]:
+    for titr in test_api_traces:
         for itr in sdk_data["buffer_records"][titr]:
             assert itr["correlation_id"]["external"] > 0, f"[{titr}] {itr}"
             assert (
@@ -433,7 +442,7 @@ def test_retired_correlation_ids(input_data):
         return dict(sorted(inp.items()))
 
     api_corr_ids = {}
-    for titr in ["hsa_api_traces", "marker_api_traces", "hip_api_traces"]:
+    for titr in test_api_traces:
         for itr in sdk_data["buffer_records"][titr]:
             corr_id = itr["correlation_id"]["internal"]
             name = get_operation_name(buffer_records, itr["kind"], itr["operation"])

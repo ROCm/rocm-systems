@@ -50,6 +50,29 @@ namespace
 template <rocprofiler_intercept_table_t... Idx>
 using library_sequence_t = std::integer_sequence<rocprofiler_intercept_table_t, Idx...>;
 
+#define ROCPROFILER_INTERCEPT_TABLE_KIND_STRING(TABLE, NAME)                                       \
+    template <>                                                                                    \
+    struct intercept_table_info<ROCPROFILER_##TABLE##_TABLE>                                       \
+    {                                                                                              \
+        static constexpr auto value  = ROCPROFILER_##TABLE##_TABLE;                                \
+        static constexpr auto name   = NAME;                                                       \
+        static constexpr auto length = std::string_view{NAME}.length();                            \
+        static constexpr auto data   = std::pair<const char*, size_t>{name, length};               \
+    };
+
+template <rocprofiler_intercept_table_t Idx>
+struct intercept_table_info;
+
+ROCPROFILER_INTERCEPT_TABLE_KIND_STRING(HSA, "HSA")
+ROCPROFILER_INTERCEPT_TABLE_KIND_STRING(HIP_RUNTIME, "HIP (runtime)")
+ROCPROFILER_INTERCEPT_TABLE_KIND_STRING(HIP_COMPILER, "HIP (compiler)")
+ROCPROFILER_INTERCEPT_TABLE_KIND_STRING(MARKER_CORE, "MARKER (ROCTx)")
+ROCPROFILER_INTERCEPT_TABLE_KIND_STRING(MARKER_CONTROL, "MARKER (ROCTx Control)")
+ROCPROFILER_INTERCEPT_TABLE_KIND_STRING(MARKER_NAME, "MARKER (ROCTx Name)")
+ROCPROFILER_INTERCEPT_TABLE_KIND_STRING(RCCL, "RCCL")
+ROCPROFILER_INTERCEPT_TABLE_KIND_STRING(ROCDECODE, "rocDecode")
+ROCPROFILER_INTERCEPT_TABLE_KIND_STRING(ROCJPEG, "rocJPEG")
+
 // this is used to loop over the different libraries
 constexpr auto intercept_library_seq = library_sequence_t<ROCPROFILER_HSA_TABLE,
                                                           ROCPROFILER_HIP_RUNTIME_TABLE,
@@ -83,6 +106,25 @@ get_intercept()
 {
     static auto _v = intercept<LibT>{};
     return _v;
+}
+
+// adds callbacks to intercept instance(s)
+template <rocprofiler_intercept_table_t Idx, rocprofiler_intercept_table_t... Tail>
+auto
+get_intercept_table_info(rocprofiler_intercept_table_t kind, library_sequence_t<Idx, Tail...>)
+{
+    using info_type   = intercept_table_info<Idx>;
+    using return_type = decltype(info_type::data);
+
+    if(info_type::value == kind)
+    {
+        return info_type::data;
+    }
+
+    if constexpr(sizeof...(Tail) > 0)
+        return get_intercept_table_info(kind, library_sequence_t<Tail...>{});
+
+    return return_type{nullptr, 0};
 }
 
 // adds callbacks to intercept instance(s)
@@ -208,6 +250,20 @@ template void notify_intercept_table_registration(rocprofiler_intercept_table_t,
 }  // namespace rocprofiler
 
 extern "C" {
+rocprofiler_status_t
+rocprofiler_query_intercept_table_name(rocprofiler_intercept_table_t kind,
+                                       const char**                  name,
+                                       uint64_t*                     name_len)
+{
+    auto&& val = rocprofiler::intercept_table::get_intercept_table_info(
+        kind, rocprofiler::intercept_table::intercept_library_seq);
+
+    if(name) *name = val.first;
+    if(name_len) *name_len = val.second;
+
+    return (val.first) ? ROCPROFILER_STATUS_SUCCESS : ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND;
+}
+
 rocprofiler_status_t
 rocprofiler_at_intercept_table_registration(rocprofiler_intercept_library_cb_t callback,
                                             int                                libs,

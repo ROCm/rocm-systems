@@ -82,7 +82,8 @@ const auto env_regexes =
 std::string
 format_path_impl(std::string _fpath, const std::vector<output_key>& _keys)
 {
-    if(_fpath.find('%') == std::string::npos && _fpath.find('$') == std::string::npos)
+    if(_fpath.find('%') == std::string::npos && _fpath.find('{') == std::string::npos &&
+       _fpath.find('$') == std::string::npos)
         return _fpath;
 
     auto _replace = [](auto& _v, const output_key& pitr) {
@@ -133,9 +134,9 @@ format_path_impl(std::string _fpath, const std::vector<output_key>& _keys)
     // remove %arg<N>% where N >= argc
     try
     {
-        std::regex _re{"(.*)%(arg[0-9]+)%([-/_]*)(.*)"};
+        auto _re = std::regex{"(.*)(%|\\{)(arg[0-9]+)(%|\\})([-/_]*)(.*)"};
         while(std::regex_search(_fpath, _re))
-            _fpath = std::regex_replace(_fpath, _re, "$1$4");
+            _fpath = std::regex_replace(_fpath, _re, "$1$6");
     } catch(std::exception& _e)
     {
         ROCP_WARNING << "[rocprofiler] " << __FUNCTION__ << " threw an exception :: " << _e.what()
@@ -148,7 +149,8 @@ format_path_impl(std::string _fpath, const std::vector<output_key>& _keys)
 std::string
 format_path(std::string&& _fpath, const std::vector<output_key>& _keys)
 {
-    if(_fpath.find('%') == std::string::npos && _fpath.find('$') == std::string::npos)
+    if(_fpath.find('%') == std::string::npos && _fpath.find('{') == std::string::npos &&
+       _fpath.find('$') == std::string::npos)
         return _fpath;
 
     auto _ref = _fpath;
@@ -156,23 +158,40 @@ format_path(std::string&& _fpath, const std::vector<output_key>& _keys)
 
     return (_fpath == _ref) ? _fpath : format_path(std::move(_fpath), _keys);
 }
+
+template <typename Tp>
+Tp
+get_variable_env(Tp _default_v, std::initializer_list<std::string_view>&& _options)
+{
+    // set env variables towards end override preceding environment variables
+    auto _val = _default_v;
+    for(auto itr : _options)
+        _val = common::get_env<Tp>(itr, std::move(_val));
+    return _val;
+}
 }  // namespace
 
 int
 get_mpi_size()
 {
-    static int _v = common::get_env<int>(
-        "OMPI_COMM_WORLD_SIZE",
-        common::get_env<int>("MV2_COMM_WORLD_SIZE", common::get_env<int>("MPI_SIZE", 0)));
+    static int _v = get_variable_env<int>(0,
+                                          {"MPI_SIZE",  // most generic to most runtime-specific
+                                           "MPI_LOCALNRANKS",
+                                           "MPI_NRANKS",
+                                           "MV2_COMM_WORLD_SIZE",
+                                           "OMPI_COMM_WORLD_SIZE"});
     return _v;
 }
 
 int
 get_mpi_rank()
 {
-    static int _v = common::get_env<int>(
-        "OMPI_COMM_WORLD_RANK",
-        common::get_env<int>("MV2_COMM_WORLD_RANK", common::get_env<int>("MPI_RANK", -1)));
+    static int _v = get_variable_env<int>(0,
+                                          {"MPI_RANK",  // most generic to most runtime-specific
+                                           "MPI_LOCALRANKID",
+                                           "MPI_RANKID",
+                                           "MV2_COMM_WORLD_RANK",
+                                           "OMPI_COMM_WORLD_RANK"});
     return _v;
 }
 

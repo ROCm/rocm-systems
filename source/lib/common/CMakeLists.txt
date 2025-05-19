@@ -3,8 +3,17 @@
 #
 rocprofiler_activate_clang_tidy()
 
-set(common_sources demangle.cpp elf_utils.cpp environment.cpp logging.cpp
-                   static_object.cpp string_entry.cpp utility.cpp)
+set(common_sources
+    demangle.cpp
+    elf_utils.cpp
+    environment.cpp
+    logging.cpp
+    md5sum.cpp
+    simple_timer.cpp
+    static_object.cpp
+    static_tl_object.cpp
+    string_entry.cpp
+    utility.cpp)
 set(common_headers
     abi.hpp
     defines.hpp
@@ -12,9 +21,12 @@ set(common_headers
     elf_utils.hpp
     environment.hpp
     filesystem.hpp
+    hasher.hpp
     logging.hpp
+    md5sum.hpp
     mpl.hpp
     scope_destructor.hpp
+    simple_timer.hpp
     static_object.hpp
     static_tl_object.hpp
     string_entry.hpp
