@@ -137,12 +137,12 @@ write_json(json_output&         json_ar,
             auto _extern_corr_id_strings = std::map<size_t, std::string>{};
             if(cfg.kernel_rename)
             {
-                for(auto itr : tool_metadata.external_corr_ids.get())
+                for(const auto& itr : tool_metadata.kernel_rename_map.get())
                 {
-                    if(itr > 0)
+                    if(!itr.first.empty())
                     {
-                        const auto* _str = tool_metadata.get_string_entry(itr);
-                        if(_str) _extern_corr_id_strings.emplace(itr, *_str);
+                        const auto* _str = common::get_string_entry(itr.first);
+                        if(_str) _extern_corr_id_strings.emplace(itr.second, *_str);
                     }
                 }
             }

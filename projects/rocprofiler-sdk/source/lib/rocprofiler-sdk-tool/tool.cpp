@@ -569,19 +569,24 @@ kernel_rename_callback(rocprofiler_callback_tracing_record_t record,
     {
         auto* marker_data =
             static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
+        auto add_message = [](std::string_view val) {
+            auto _hash_v = common::add_string_entry(val);
+            return std::string_view{*common::get_string_entry(_hash_v)};
+        };
 
         if(record.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxMarkA &&
            record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT && marker_data->args.roctxMarkA.message)
         {
-            thread_dispatch_rename->emplace(
-                common::add_string_entry(marker_data->args.roctxMarkA.message));
+            thread_dispatch_rename->emplace(tool_metadata->add_kernel_rename_val(
+                add_message(marker_data->args.roctxMarkA.message), record.correlation_id.internal));
         }
         else if(record.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxRangePushA &&
                 record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT &&
                 marker_data->args.roctxRangePushA.message)
         {
-            thread_dispatch_rename->emplace(
-                common::add_string_entry(marker_data->args.roctxRangePushA.message));
+            thread_dispatch_rename->emplace(tool_metadata->add_kernel_rename_val(
+                add_message(marker_data->args.roctxRangePushA.message),
+                record.correlation_id.internal));
         }
         else if(record.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxRangePop &&
                 record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)

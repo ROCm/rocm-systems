@@ -93,6 +93,7 @@ using synced_obj          = common::Synchronized<Tp, true>;
 using pc_sampling_stats_t = rocprofiler_tool_pc_sampling_stats;
 using runtime_initialization_set_t =
     std::unordered_set<rocprofiler_runtime_initialization_operation_t>;
+using kernel_rename_map_t = std::unordered_map<std::string_view, uint64_t>;
 
 enum class agent_indexing
 {
@@ -139,6 +140,7 @@ struct metadata
     synced_map<external_corr_id_set_t>       external_corr_ids          = {};
     synced_map<host_function_info_map_t>     host_functions             = {};
     synced_map<code_object_load_info_vec_t>  code_object_load           = {};
+    synced_map<kernel_rename_map_t>          kernel_rename_map          = {};
     att_filenames_map_t                      att_filenames              = {};
     synced_obj<pc_sampling_stats_t>          pc_sampling_stats          = {};
     synced_obj<runtime_initialization_set_t> runtime_initialization_set = {};
@@ -183,13 +185,14 @@ struct metadata
     template <typename Tp>
     Tp get_marker_messages(Tp&&);
 
-    bool add_marker_message(uint64_t corr_id, std::string&& msg);
-    bool add_code_object(code_object_info obj);
-    bool add_kernel_symbol(kernel_symbol_info&& sym);
-    bool add_host_function(host_function_info&& func);
-    bool add_string_entry(size_t key, std::string_view str);
-    bool add_external_correlation_id(uint64_t);
-    bool add_runtime_initialization(rocprofiler_runtime_initialization_operation_t);
+    bool     add_marker_message(uint64_t corr_id, std::string&& msg);
+    bool     add_code_object(code_object_info obj);
+    bool     add_kernel_symbol(kernel_symbol_info&& sym);
+    bool     add_host_function(host_function_info&& func);
+    bool     add_string_entry(size_t key, std::string_view str);
+    bool     add_external_correlation_id(uint64_t);
+    bool     add_runtime_initialization(rocprofiler_runtime_initialization_operation_t);
+    uint64_t add_kernel_rename_val(std::string_view, uint64_t);
 
     void set_process_id(pid_t                           _pid,
                         pid_t                           _ppid         = 0,

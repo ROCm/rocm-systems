@@ -496,6 +496,17 @@ metadata::add_runtime_initialization(rocprofiler_runtime_initialization_operatio
         runtime_op);
 }
 
+uint64_t
+metadata::add_kernel_rename_val(std::string_view rename_string, uint64_t internal_corr_id)
+{
+    return kernel_rename_map.wlock(
+        [](auto& _data, std::string_view _str, uint64_t _val) {
+            return _data.emplace(_str, _val).first->second;
+        },
+        rename_string,
+        internal_corr_id);
+}
+
 bool
 metadata::is_runtime_initialized(rocprofiler_runtime_initialization_operation_t runtime_op) const
 {
@@ -534,9 +545,17 @@ metadata::get_marker_message(uint64_t corr_id) const
 std::string_view
 metadata::get_kernel_name(uint64_t kernel_id, uint64_t rename_id) const
 {
-    if(rename_id > 0)
+    auto string_entry = kernel_rename_map.rlock(
+        [](auto& _data, uint64_t _val) {
+            for(const auto& itr : _data)
+                if(itr.second == _val) return itr.first;
+            return std::string_view{};
+        },
+        rename_id);
+    if(!string_entry.empty())
     {
-        if(const auto* _name = common::get_string_entry(rename_id)) return std::string_view{*_name};
+        if(const auto* _name = common::get_string_entry(string_entry))
+            return std::string_view{*_name};
     }
 
     const auto* _kernel_data = get_kernel_symbol(kernel_id);
