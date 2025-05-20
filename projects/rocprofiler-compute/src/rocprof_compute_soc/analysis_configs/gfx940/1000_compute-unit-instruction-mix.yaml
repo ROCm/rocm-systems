@@ -281,11 +281,9 @@ Panel Config:
             min: MIN((SQ_INSTS_VALU_MFMA_F64 / $denom))
             max: MAX((SQ_INSTS_VALU_MFMA_F64 / $denom))
             unit: (instr + $normUnit)
-          # TODO: Fix baseline comparision logic to handle non existent metrics, then 
           MFMA-F6F4:
             avg: None
             min: None
             max: None
             unit: (instr + $normUnit)
-            tips:
             tips:

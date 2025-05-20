@@ -218,12 +218,6 @@ Panel Config:
             max: MAX((TA_BUFFER_WAVEFRONTS_sum / $denom))
             unit: (instr + $normUnit)
             tips:
-          Spill/Stack Coalesceable Instr:
-            avg: None # No perf counter
-            min: None # No perf counter
-            max: None # No perf counter
-            unit: (instr + $normUnit)
-            tips:
           Spill/Stack Read:
             avg: AVG((TA_BUFFER_READ_WAVEFRONTS_sum / $denom))
             min: MIN((TA_BUFFER_READ_WAVEFRONTS_sum / $denom))
@@ -290,7 +284,7 @@ Panel Config:
             max: None # No HW module
             unit: (instr + $normUnit)
             tips:
-          # TODO: Fix baseline comparision logic to handle non existent metrics, then 
+          # TODO: Fix baseline comparision logic to handle non existent metrics, then
           MFMA-F6F4:
             avg: None
             min: None
