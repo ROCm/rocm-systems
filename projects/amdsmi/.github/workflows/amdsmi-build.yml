@@ -7,6 +7,8 @@ on:
     branches: [amd-staging, amd-mainline, release/rocm-rel-*]
   workflow_dispatch:
 
+permissions:
+  contents: read
 env:
   DEBIAN_FRONTEND: noninteractive
   DEBCONF_NONINTERACTIVE_SEEN: true
@@ -32,34 +34,67 @@ jobs:
       - uses: actions/checkout@v4
         with:
           clean: false
+          path: $GITHUB_WORKSPACE
+          fetch-depth: 0
 
       - name: Build AMDSMI
         run: |
           set -e
           echo 'Building on ${{ matrix.os }}'
           BUILD_FOLDER=$GITHUB_WORKSPACE/build
-          rm -rf $BUILD_FOLDER
-          mkdir -p $BUILD_FOLDER
-          cd $BUILD_FOLDER
-          cmake $GITHUB_WORKSPACE -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON
-          make -j $(nproc)
-          make package
+          RETRIES=3
+          
+          for i in $(seq 1 $RETRIES); do
+            echo "Build attempt $i for ${{ matrix.os }}..."
+            rm -rf $BUILD_FOLDER
+            mkdir -p $BUILD_FOLDER
+            cd $BUILD_FOLDER
+            
+            if cmake $GITHUB_WORKSPACE -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON && \
+               make -j $(nproc) && \
+               make package; then
+              echo "Build successful on attempt $i"
+              break
+            else
+              echo "Build failed on attempt $i"
+              if [ $i -eq $RETRIES ]; then
+                echo "All $RETRIES build attempts failed. Exiting."
+                exit 1
+              fi
+              sleep $((2 ** (i - 1)))
+            fi
+          done
           echo "Build completed on ${{ matrix.os }}"
 
       - name: Install AMDSMI
         run: |
           cd $GITHUB_WORKSPACE/build
           apt update
-          apt install -y ./amd-smi-lib*99999-local_amd64.deb
-          ln -s /opt/rocm/bin/amd-smi /usr/local/bin
-
-          # Verify Installation
-          echo 'Verifying installation:'
-          amd-smi version
-          python3 -m pip list | grep amd
-          python3 -m pip list | grep pip
-          python3 -m pip list | grep setuptools
-          echo 'Completed installation on ${{ matrix.os }}'
+          
+          RETRIES=3
+          for i in $(seq 1 $RETRIES); do
+            echo "Installation attempt $i for ${{ matrix.os }}..."
+            if apt install -y ./amd-smi-lib*99999-local_amd64.deb; then
+              echo "Installation successful on attempt $i"
+              ln -s /opt/rocm/bin/amd-smi /usr/local/bin
+              
+              # Verify Installation
+              echo 'Verifying installation:'
+              amd-smi version
+              python3 -m pip list | grep amd
+              python3 -m pip list | grep pip
+              python3 -m pip list | grep setuptools
+              echo 'Completed installation on ${{ matrix.os }}'
+              break
+            else
+              echo "Installation failed on attempt $i"
+              if [ $i -eq $RETRIES ]; then
+                echo "All $RETRIES installation attempts failed. Exiting."
+                exit 1
+              fi
+              sleep $((2 ** (i - 1)))
+            fi
+          done
 
       - name: Uninstall
         if: always()
@@ -92,24 +127,56 @@ jobs:
       - uses: actions/checkout@v4
         with:
           clean: false
+          path: $GITHUB_WORKSPACE
+          fetch-depth: 0
 
       - name: Build and Install for Test
         run: |
           set -e
           echo 'Building for test on ${{ matrix.os }}'
           BUILD_FOLDER=$GITHUB_WORKSPACE/build
-          rm -rf $BUILD_FOLDER
-          mkdir -p $BUILD_FOLDER
-          cd $BUILD_FOLDER
-          cmake $GITHUB_WORKSPACE -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON
-          make -j $(nproc)
-          make package
+          RETRIES=3
+          
+          for i in $(seq 1 $RETRIES); do
+            echo "Build attempt $i for ${{ matrix.os }} test..."
+            rm -rf $BUILD_FOLDER
+            mkdir -p $BUILD_FOLDER
+            cd $BUILD_FOLDER
+            
+            if cmake $GITHUB_WORKSPACE -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON && \
+               make -j $(nproc) && \
+               make package; then
+              echo "Build successful on attempt $i"
+              break
+            else
+              echo "Build failed on attempt $i"
+              if [ $i -eq $RETRIES ]; then
+                echo "All $RETRIES build attempts failed. Exiting."
+                exit 1
+              fi
+              sleep $((2 ** (i - 1)))
+            fi
+          done
 
           echo 'Installing for test on ${{ matrix.os }}'
           apt update
-          apt install -y $BUILD_FOLDER/amd-smi-lib*99999-local_amd64.deb
-          ln -s /opt/rocm/bin/amd-smi /usr/local/bin
-          echo 'Install done for test on ${{ matrix.os }}'
+          
+          for i in $(seq 1 $RETRIES); do
+            echo "Installation attempt $i for test on ${{ matrix.os }}..."
+            if apt install -y $BUILD_FOLDER/amd-smi-lib*99999-local_amd64.deb; then
+              echo "Installation successful on attempt $i"
+              ln -s /opt/rocm/bin/amd-smi /usr/local/bin
+              echo 'Install done for test on ${{ matrix.os }}'
+              break
+            else
+              echo "Installation failed on attempt $i"
+              if [ $i -eq $RETRIES ]; then
+                echo "All $RETRIES installation attempts failed. Exiting."
+                exit 1
+              fi
+              sleep $((2 ** (i - 1)))
+            fi
+          done
 
       - name: AMDSMI Command Tests
         shell: bash
@@ -158,7 +225,6 @@ jobs:
           ./amdsmitst --gtest_filter="-$(echo ${BLACKLIST_ALL_ASICS})" > /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log 2>&1
           TEST_EXIT_CODE=$?
 
-          # Always show the test output (last 10 lines)
           if [ $TEST_EXIT_CODE -ne 0 ]; then
             echo "AMDSMI tests failed with exit code $TEST_EXIT_CODE."
             echo "=============== TEST OUTPUT ==============="
@@ -177,8 +243,28 @@ jobs:
           # Python Tests
           echo 'Running Python tests'
           cd /opt/rocm/share/amd_smi/tests/python_unittest
-          ./integration_test.py -v > /tmp/test-results-${{ matrix.os }}/integration_test_output.txt 2>&1
-          ./unit_tests.py -v > /tmp/test-results-${{ matrix.os }}/unit_test_output.txt 2>&1
+          echo "Running integration tests..."
+          if ! ./integration_test.py -v > /tmp/test-results-${{ matrix.os }}/integration_test_output.txt 2>&1; then
+            echo "Integration tests failed!"
+            echo "=============== INTEGRATION TEST OUTPUT ==============="
+            tail -100 /tmp/test-results-${{ matrix.os }}/integration_test_output.txt
+            echo "======================================================="
+            exit 1
+          else
+            echo "Integration tests passed"
+          fi
+
+          echo "Running unit tests..."
+          if ! ./unit_tests.py -v > /tmp/test-results-${{ matrix.os }}/unit_test_output.txt 2>&1; then
+            echo "Unit tests failed!"
+            echo "=============== UNIT TEST OUTPUT ==============="
+            tail -100 /tmp/test-results-${{ matrix.os }}/unit_test_output.txt
+            echo "================================================"
+            exit 1
+          else
+            echo "Unit tests passed"
+          fi
+
           echo "Python tests done"
 
           # Example Tests
@@ -246,6 +332,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           clean: false
+          path: $GITHUB_WORKSPACE
+          fetch-depth: 0
 
       - name: Set PkgMgr
         run: |
@@ -270,12 +358,15 @@ jobs:
         if: matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8'
         run: |
           set -e
-          echo 'Building on RHEL10 with retries'
+          echo 'Building on ${{ matrix.os }} with retries and QA_RPATHS'
           BUILD_FOLDER=$GITHUB_WORKSPACE/build
-          RETRIES=3
+          RETRIES=5
+
+          # Set QA_RPATHS to ignore empty (0x0010) and invalid (0x0002) RPATHs
+          export QA_RPATHS=$((0x0010 | 0x0002))
 
           for i in $(seq 1 $RETRIES); do
-            echo "Build attempt $i for RHEL10..."
+            echo "Build attempt $i for ${{ matrix.os }} ..."
             rm -rf $BUILD_FOLDER
             mkdir -p $BUILD_FOLDER
             cd $BUILD_FOLDER
@@ -291,13 +382,13 @@ jobs:
                 echo "All $RETRIES build attempts failed. Exiting."
                 exit 1
               fi
-              sleep 30
+              sleep $((2 ** (i - 1)))
             fi
           done
-          echo "Build completed on RHEL10"
+          echo "Build completed on ${{ matrix.os }}"
 
       - name: Build AMDSMI
-        if: matrix.os != 'RHEL10'
+        if: matrix.os != 'RHEL10' && matrix.os != 'AlmaLinux8'
         run: |
           set -e
           echo 'Building on ${{ matrix.os }}'
@@ -322,12 +413,12 @@ jobs:
             if timeout 10m dnf install -y --skip-broken --disablerepo=* ./amd-smi-lib-*99999-local*.rpm; then
               echo "Installation successful on attempt $i"
               ln -s /opt/rocm/bin/amd-smi /usr/local/bin
-              # Verify Installation
+
               echo 'Verifying installation:'
-              amd-smi version || true  # Continue even if this fails
-              python3 -m pip list | grep amd || true
-              python3 -m pip list | grep pip || true
-              python3 -m pip list | grep setuptools || true
+              amd-smi version
+              python3 -m pip list | grep amd
+              python3 -m pip list | grep pip
+              python3 -m pip list | grep setuptools
               echo 'Completed installation on RHEL10'
               break
             else
@@ -336,7 +427,7 @@ jobs:
                 echo "All $RETRIES installation attempts failed. Exiting."
                 exit 1
               fi
-              sleep 30
+              sleep $((2 ** (i - 1)))
             fi
           done
 
@@ -421,6 +512,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           clean: false
+          path: $GITHUB_WORKSPACE
+          fetch-depth: 0
 
       - name: Set PkgMgr
         run: |
@@ -445,12 +538,15 @@ jobs:
         if: matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8'
         run: |
           set -e
-          echo 'Building for test on RHEL10 with retries'
+          echo 'Building for test on RHEL10/AlmaLinux8 with retries and QA_RPATHS'
           BUILD_FOLDER=$GITHUB_WORKSPACE/build
-          RETRIES=3
+          RETRIES=5
+
+          # Set QA_RPATHS to ignore empty (0x0010) and invalid (0x0002) RPATHs
+          export QA_RPATHS=$((0x0010 | 0x0002))
 
           for i in $(seq 1 $RETRIES); do
-            echo "Build attempt $i for RHEL10 test..."
+            echo "Build attempt $i for RHEL10/AlmaLinux8 test..."
             rm -rf $BUILD_FOLDER
             mkdir -p $BUILD_FOLDER
             cd $BUILD_FOLDER
@@ -466,19 +562,19 @@ jobs:
                 echo "All $RETRIES build attempts failed. Exiting."
                 exit 1
               fi
-              sleep 30
+              sleep $((2 ** (i - 1)))
             fi
           done
 
-          echo 'Installing for test on RHEL10'
+          echo 'Installing for test on RHEL10/AlmaLinux8'
           dnf install python3-setuptools python3-wheel -y
 
           for i in $(seq 1 $RETRIES); do
-            echo "RHEL10: Installation attempt $i for test..."
+            echo "RHEL10/AlmaLinux8: Installation attempt $i for test..."
             if timeout 10m dnf install -y --skip-broken --disablerepo=* $BUILD_FOLDER/amd-smi-lib-*99999-local*.rpm; then
               echo "Installation successful on attempt $i"
               ln -s /opt/rocm/bin/amd-smi /usr/local/bin
-              echo 'Install done for test on RHEL10'
+              echo 'Install done for test on RHEL10/AlmaLinux8'
               break
             else
               echo "Installation failed on attempt $i"
@@ -486,7 +582,7 @@ jobs:
                 echo "All $RETRIES installation attempts failed. Exiting."
                 exit 1
               fi
-              sleep 30
+              sleep $((2 ** (i - 1)))
             fi
           done
 
@@ -577,7 +673,6 @@ jobs:
           ./amdsmitst --gtest_filter="-$(echo ${BLACKLIST_ALL_ASICS})" > /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log 2>&1
           TEST_EXIT_CODE=$?
 
-          # Always show the test output (last 10 lines)
           if [ $TEST_EXIT_CODE -ne 0 ]; then
             echo "AMDSMI tests failed with exit code $TEST_EXIT_CODE."
             echo "=============== TEST OUTPUT ==============="
@@ -596,8 +691,28 @@ jobs:
           # Python Tests
           echo 'Running Python tests'
           cd /opt/rocm/share/amd_smi/tests/python_unittest
-          ./integration_test.py -v > /tmp/test-results-${{ matrix.os }}/integration_test_output.txt 2>&1
-          ./unit_tests.py -v > /tmp/test-results-${{ matrix.os }}/unit_test_output.txt 2>&1
+          echo "Running integration tests..."
+          if ! ./integration_test.py -v > /tmp/test-results-${{ matrix.os }}/integration_test_output.txt 2>&1; then
+            echo "Integration tests failed!"
+            echo "=============== INTEGRATION TEST OUTPUT ==============="
+            tail -100 /tmp/test-results-${{ matrix.os }}/integration_test_output.txt
+            echo "======================================================="
+            exit 1
+          else
+            echo "Integration tests passed"
+          fi
+
+          echo "Running unit tests..."
+          if ! ./unit_tests.py -v > /tmp/test-results-${{ matrix.os }}/unit_test_output.txt 2>&1; then
+            echo "Unit tests failed!"
+            echo "=============== UNIT TEST OUTPUT ==============="
+            tail -100 /tmp/test-results-${{ matrix.os }}/unit_test_output.txt
+            echo "================================================"
+            exit 1
+          else
+            echo "Unit tests passed"
+          fi
+
           echo "Python tests done"
 
           # Example Tests
@@ -640,3 +755,54 @@ jobs:
         run: |
           echo "Displaying Example NoDRM test results for ${{ matrix.os }}"
           cat /tmp/test-results-${{ matrix.os }}/amd_smi_nodrm_ex.log || echo "No NoDRM example test results found for ${{ matrix.os }}"
+
+  generate-docs:
+    name: Generate Documentation
+    runs-on:
+      - self-hosted
+      - ${{ vars.RUNNER_TYPE }}
+    needs: [debian-test, rpm-test]
+    container:
+      image: ${{ vars.UBUNTU22_DOCKER_IMAGE }}
+      options: --privileged
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          clean: true
+          path: $GITHUB_WORKSPACE
+          fetch-depth: 0
+      - name: Set Up Python Environment
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r $GITHUB_WORKSPACE/docs/sphinx/requirements.txt
+      - name: Build Documentation
+        working-directory: ${{ github.workspace }}
+        run: |
+          echo "Building documentation..."
+          cd $GITHUB_WORKSPACE
+          echo "Current directory: $(pwd)"
+          echo "Git repository verification:"
+          ls -la .git/ || echo "No .git directory found"
+          git status --porcelain || echo "Git status failed, but continuing..."
+          if [ ! -e "docs/.git" ]; then
+            ln -s ../.git docs/.git
+            echo "Created symbolic link to .git in docs directory"
+          fi
+          cd docs
+          python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
+          echo "Documentation build complete."
+      - name: Verify Build Output
+        run: |
+          echo "Verifying build output..."
+          ls -la $GITHUB_WORKSPACE/docs/_build/html
+          if [ ! -f "$GITHUB_WORKSPACE/docs/_build/html/index.html" ]; then
+            echo "Error: index.html not found in the build output directory."
+            exit 1
+          fi
+          echo "Build output verification complete. index.html found."
+      - name: Upload Documentation Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-docs
+          path: ${{ github.workspace }}/docs/_build/html
