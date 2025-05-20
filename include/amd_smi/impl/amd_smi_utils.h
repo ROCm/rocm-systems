@@ -23,10 +23,12 @@
 #ifndef AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_
 #define AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_
 
+#include <dirent.h>
 #include <limits>
 #include <type_traits>
 #include <string>
 #include <utility>
+#include <functional>
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_gpu_device.h"
@@ -56,7 +58,6 @@ std::string smi_split_string(std::string str, char delim);
 std::string smi_amdgpu_get_status_string(amdsmi_status_t ret, bool fullStatus);
 amdsmi_status_t smi_clear_char_and_reinitialize(char buffer[], uint32_t len,
                                                     std::string newString);
-amdsmi_status_t amdsmi_get_gpu_cper_entries_by_path(const char *amdgpu_ring_cper_file, uint32_t severity_mask, char *cper_data, uint64_t *buf_size, amdsmi_cper_hdr_t **cper_hdrs, uint64_t *entry_count, uint64_t *cursor);
 /**
  * @brief Wait for user input, a debugging function to pause the program
  * 
@@ -177,4 +178,18 @@ constexpr T translate_umax_or_assign_value(U source_value, V target_value)
     return result;
 }
 
+/**
+ *  @brief Iterates all entires in a directory .
+ *
+ *  @details Given a directory in const std::string & base_path, and a callback function
+ *  entry_callback, this function will open the directory and iterate through all entires
+ *  in that directory. For each entry it will call the entry_callback function with the 
+ *  path of that entry 
+ *
+ *  @param[in] base_path the path of the directory to iterate in
+ *
+ *  @retval ::true if the iteration was successful
+ *          ::false if the iteration failed
+ */
+bool iterate_directory(const std::string &base_path, std::function<void(const std::string &)> entry_callback);
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_

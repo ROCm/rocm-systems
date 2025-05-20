@@ -31,6 +31,7 @@
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_main.h"
+#include <map>
 
 namespace amd {
 namespace smi {
@@ -103,7 +104,7 @@ amdsmi_status_t AMDSmiSystem::get_cpu_model_name(uint32_t socket_id, std::string
     if (!cpu_info.is_open()) {
       std::cerr << "Failed to open /proc/cpuinfo:" << strerror(errno) << std::endl;
       return AMDSMI_STATUS_FILE_ERROR;
-    } else { 
+    } else {
       uint32_t current_socket_id = -1;
       while (std::getline(cpu_info, info)) {
         if (info.find("processor") != std::string::npos) {
@@ -126,7 +127,85 @@ amdsmi_status_t AMDSmiSystem::get_cpu_model_name(uint32_t socket_id, std::string
     }
     return AMDSMI_STATUS_SUCCESS;
 }
+
 #endif
+std::map<uint32_t, uint32_t> AMDSmiSystem::get_sys_cpu_cores_per_socket() {
+    std::map<uint32_t, uint32_t> socket_core_count;
+    std::string base_path = "/sys/devices/system/cpu/";
+
+    iterate_directory(base_path, [&socket_core_count](const std::string &path) {
+        std::string filename(basename(path.c_str()));
+        if (filename.find("cpu") != std::string::npos) {
+            std::string cpuPath = path;
+            std::ifstream package_id_file(cpuPath + "/topology/physical_package_id");
+            std::ifstream core_id_file(cpuPath + "/topology/core_id");
+
+            if (package_id_file.is_open() && core_id_file.is_open()) {
+                uint32_t physical_id, core_id;
+                package_id_file >> physical_id;
+                core_id_file >> core_id;
+
+                socket_core_count[physical_id]++;
+            }
+        }
+    });
+
+    return socket_core_count;
+}
+
+amdsmi_status_t AMDSmiSystem::get_sys_num_of_cpu_sockets(uint32_t *sock_num) {
+    std::map<uint32_t, uint32_t> socket_count_map;
+    std::string base_path = "/sys/devices/system/cpu/";
+
+    iterate_directory(base_path, [&socket_count_map](std::string path) {
+        std::string filename(basename(path.c_str()));
+        if (filename.find("cpu") != std::string::npos) {
+            std::string cpu_path = path;
+            std::ifstream package_id_file(cpu_path + "/topology/physical_package_id");
+
+            if (package_id_file.is_open()) {
+                uint32_t physical_id;
+                package_id_file >> physical_id;
+
+                socket_count_map[physical_id]++;
+            }
+        }
+    });
+
+    *sock_num = static_cast<uint32_t>(socket_count_map.size());
+
+    return AMDSMI_STATUS_SUCCESS;
+}
+
+std::vector<uint32_t> AMDSmiSystem::get_cpu_sockets_from_numa_node(int32_t numa_node) {
+    std::vector<uint32_t> sockets;
+    if (numa_node < 0) {
+        sockets[0] = std::numeric_limits<int32_t>::max();
+        return sockets;
+    }
+    std::ifstream node_info("/sys/devices/system/node/node" + std::to_string(numa_node) + "/cpulist");
+    std::string info;
+
+    if (node_info.is_open()) {
+        std::getline(node_info, info);
+        std::istringstream iss(info);
+        uint32_t index;
+        while (iss >> index) {
+            std::ifstream cpu_info("/sys/devices/system/cpu/cpu" + std::to_string(index) + "/topology/physical_package_id");
+            if (cpu_info.is_open()) {
+                uint32_t socket;
+                cpu_info >> socket;
+                sockets.push_back(socket);
+            }
+        }
+    }
+
+    // Discarding duplicate socket entries
+    std::sort(sockets.begin(), sockets.end());
+    sockets.erase(std::unique(sockets.begin(), sockets.end()), sockets.end());
+
+    return sockets;
+}
 
 amdsmi_status_t AMDSmiSystem::init(uint64_t flags) {
     init_flag_ = flags;

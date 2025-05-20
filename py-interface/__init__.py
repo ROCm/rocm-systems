@@ -86,6 +86,11 @@ from .amdsmi_interface import amdsmi_get_gpu_device_bdf
 from .amdsmi_interface import amdsmi_get_gpu_device_uuid
 from .amdsmi_interface import amdsmi_get_gpu_enumeration_info
 
+# # Functions not dependent on ESMI library
+from .amdsmi_interface import amdsmi_get_cpu_socket_count
+from .amdsmi_interface import amdsmi_get_cpu_cores_per_socket
+from .amdsmi_interface import amdsmi_get_cpu_affinity_with_scope
+
 # # SW Version Information
 from .amdsmi_interface import amdsmi_get_gpu_driver_info
 
@@ -278,6 +283,7 @@ from .amdsmi_interface import AmdSmiProcessorType
 from .amdsmi_interface import AmdSmiVirtualizationMode
 from .amdsmi_interface import AmdSmiVramType
 from .amdsmi_interface import AmdSmiVramVendor
+from .amdsmi_interface import AmdSmiAffinityScope
 
 # Exceptions
 from .amdsmi_exception import AmdSmiLibraryException

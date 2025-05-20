@@ -278,6 +278,9 @@ test_fw_info (__main__.TestAmdSmiPythonInterface) ...
   FW version:        20.00.00.0F
   FW name:           AMDSMI_FW_ID_PM
   FW version:        00.58.90.00
+  FW name:           AMDSMI_FW_ID_PLDM
+  FW version:        00.xx.yy.zz
+
 
 ok
 test_gpu_activity (__main__.TestAmdSmiPythonInterface) ...
@@ -587,6 +590,8 @@ test_walkthrough (__main__.TestAmdSmiPythonInterface) ...
   FW version:        20.00.00.0F
   FW name:           AMDSMI_FW_ID_PM
   FW version:        00.58.90.00
+  FW name:           AMDSMI_FW_ID_PLDM
+  FW version:        00.xx.yy.zz
 
 
 
