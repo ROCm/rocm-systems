@@ -13,6 +13,8 @@ add_subdirectory(att-tool)
 add_subdirectory(rocprofiler-sdk-roctx)
 add_subdirectory(rocprofiler-sdk-tool)
 
+add_subdirectory(python)
+
 if(ROCPROFILER_BUILD_TESTS)
     add_subdirectory(tests)
 endif()

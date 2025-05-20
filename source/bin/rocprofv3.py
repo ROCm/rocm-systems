@@ -1212,7 +1212,7 @@ def run(app_args, args, **kwargs):
             overwrite_if_true=True,
         )
 
-    if args.log_level and args.log_level not in ("env"):
+    if args.log_level and args.log_level not in ("env", "config"):
         for itr in ("ROCPROF", "ROCPROFILER", "ROCTX"):
             update_env(
                 f"{itr}_LOG_LEVEL",

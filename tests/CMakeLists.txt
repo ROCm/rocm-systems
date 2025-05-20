@@ -80,3 +80,6 @@ add_subdirectory(rocjpeg)
 
 # rocprofv3 validation tests
 add_subdirectory(rocprofv3)
+
+# python bindings
+add_subdirectory(python-bindings)
