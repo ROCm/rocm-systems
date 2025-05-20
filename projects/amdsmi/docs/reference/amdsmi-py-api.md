@@ -4180,6 +4180,42 @@ except AmdSmiException as e:
     print(e)
 ```
 
+### amdsmi_get_cpu_affinity_with_scope
+
+Description: Returns list of bitmask information for the given GPU.
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: List with fields
+
+Field | Description
+---|---
+`array_size` |  array size = (num of sockets * num of cores)/ size of 64-bit
+`scope` | enum value for numa or socket affinity
+
+Exceptions that can be thrown by `amdsmi_get_gpu_vram_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiRetryException`
+* `AmdSmiParameterException`
+
+Example:
+
+```python
+try:
+    devices = amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            bitmask = amdsmi_get_cpu_affinity_with_scope(device)
+            print(bitmask['size'])
+except AmdSmiException as e:
+    print(e)
+```
+
 ## CPU APIs
 
 ### amdsmi_get_processor_info
@@ -5274,6 +5310,7 @@ try:
 except AmdSmiException as e:
     print(e)
 ```
+
 ### amdsmi_get_afids_from_cper
 
 Description: Get the AFIDs from CPER buffer

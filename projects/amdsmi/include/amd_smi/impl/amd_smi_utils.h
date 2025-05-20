@@ -23,10 +23,12 @@
 #ifndef AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_
 #define AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_
 
+#include <dirent.h>
 #include <limits>
 #include <type_traits>
 #include <string>
 #include <utility>
+#include <functional>
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_gpu_device.h"
@@ -176,4 +178,18 @@ constexpr T translate_umax_or_assign_value(U source_value, V target_value)
     return result;
 }
 
+/**
+ *  @brief Iterates all entires in a directory .
+ *
+ *  @details Given a directory in const std::string & base_path, and a callback function
+ *  entry_callback, this function will open the directory and iterate through all entires
+ *  in that directory. For each entry it will call the entry_callback function with the 
+ *  path of that entry 
+ *
+ *  @param[in] base_path the path of the directory to iterate in
+ *
+ *  @retval ::true if the iteration was successful
+ *          ::false if the iteration failed
+ */
+bool iterate_directory(const std::string &base_path, std::function<void(const std::string &)> entry_callback);
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_

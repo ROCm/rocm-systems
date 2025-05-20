@@ -2085,6 +2085,18 @@ typedef enum {
     AMDSMI_VIRTUALIZATION_MODE_PASSTHROUGH
 } amdsmi_virtualization_mode_t;
 
+
+/**
+ * @brief Scope for Numa affinity or Socket affinity
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef enum {
+    AMDSMI_AFFINITY_SCOPE_NODE = 0,      // Memory affinity as numa node
+    AMDSMI_AFFINITY_SCOPE_SOCKET = 1    // socket affinity
+} amdsmi_affinity_scope_t;
+
+
 #define AMDSMI_DEFAULT_VARIANT 0xFFFFFFFFFFFFFFFF
 
 #ifdef ENABLE_ESMI_LIB
@@ -2308,6 +2320,16 @@ typedef struct {
 } amdsmi_cpu_info_t;
 
 #endif
+
+/**
+ * @brief cpu socket info data
+ *
+ * @cond @tag{cpu_bm} @endcond
+ */
+typedef struct {
+  uint32_t socket_id;
+  uint32_t cores_per_socket;
+} amdsmi_sock_info_t;
 
 /*****************************************************************************/
 /** @defgroup tagInitShutdown Initialization and Shutdown
@@ -2697,6 +2719,34 @@ amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_handle, unsigned in
  */
 amdsmi_status_t
 amdsmi_get_gpu_enumeration_info(amdsmi_processor_handle processor_handle, amdsmi_enumeration_info_t *info);
+
+/**
+ *  @brief Retrieves an array of uint64_t (sized to cpu_set_size) of bitmasks with the
+ *   affinity within numa node or socket for the device.
+ *
+ *  @ingroup tagProcDiscovery
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details Given a processor handle @p processor_handle, the size of the cpu_set array @p cpu_set_size,
+ *  and a pointer to an array of int64_t @p cpu_set, and @p scope, this function will write the CPU affinity bitmask
+ *  to the array pointed to by @p cpu_set.
+ *
+ * User must allocate the enough memory for the cpu_set array. The size of the array is determined by the
+ * number of CPU cores in the system. As an example, if there are 2 CPUs and each has 112 cores, the size
+ * should be ceiling(2*112/64) = 4, where 64 is the bits of uint64_t. The function will write the CPU affinity bitmask
+ * to the array. For example, to describe the CPU cores 0-55,112-167, it will set the 0-55 and 112-167 bits
+ * to 1 and the reset of bits to 0 in the cpu_set array.
+ *
+ *  @param[in] processor_handle a processor handle
+ *  @param[in] cpu_set_size The size of the cpu_set array that is safe to access
+ *  @param[in,out] cpu_set Array reference in which to return a bitmask of CPU cores that this processor affinities with.
+ *  @param[in] scope Scope for socket or numa affinity.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_cpu_affinity_with_scope(amdsmi_processor_handle processor_handle,
+            uint32_t cpu_set_size, uint64_t *cpu_set, amdsmi_affinity_scope_t scope);
 
 /** @} End tagProcDiscovery */
 
@@ -6987,14 +7037,14 @@ amdsmi_status_t amdsmi_get_hsmp_metrics_table(amdsmi_processor_handle processor_
 /** @} tagHSMPMetricsTable */
 
 /*****************************************************************************/
-/** @defgroup tagAuxillary Auxillary functions
+/** @defgroup cpuAuxillary Auxillary functions
  *  @{
  */
 
 /**
  *  @brief Get first online core on socket.
  *
- *  @ingroup tagAuxillary
+ *  @ingroup cpuAuxillary
  *
  *  @platform{cpu_bm}
  *
@@ -7010,7 +7060,7 @@ amdsmi_status_t amdsmi_first_online_core_on_cpu_socket(amdsmi_processor_handle p
 /**
  *  @brief Get CPU family.
  *
- *  @ingroup tagAuxillary
+ *  @ingroup cpuAuxillary
  *
  *  @platform{cpu_bm}
  *
@@ -7023,7 +7073,7 @@ amdsmi_status_t amdsmi_get_cpu_family(uint32_t *cpu_family);
 /**
  *  @brief Get CPU model.
  *
- *  @ingroup tagAuxillary
+ *  @ingroup cpuAuxillary
  *
  *  @platform{cpu_bm}
  *
@@ -7036,7 +7086,7 @@ amdsmi_status_t amdsmi_get_cpu_model(uint32_t *cpu_model);
  /**
  *  @brief Retrieve the CPU processor model name based on the processor index.
  *
- *  @ingroup tagAuxillary
+ *  @ingroup cpuAuxillary
  *
  *  @platform{cpu_bm}
  *
@@ -7062,7 +7112,7 @@ amdsmi_status_t amdsmi_get_cpu_model_name(amdsmi_processor_handle processor_hand
 /**
  *  @brief Get a description of provided AMDSMI error status for esmi errors.
  *
- *  @ingroup tagAuxillary
+ *  @ingroup cpuAuxillary
  *
  *  @platform{cpu_bm}
  *
@@ -7078,7 +7128,33 @@ amdsmi_status_t amdsmi_get_cpu_model_name(amdsmi_processor_handle processor_hand
  */
 amdsmi_status_t amdsmi_get_esmi_err_msg(amdsmi_status_t status, const char **status_string);
 
-/** @} tagAuxillary */
+/**
+ *  @brief Get cpu cores per socket from sys filesystem.
+ *
+ *  @ingroup cpuAuxillary
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]  sock_count - cpu socket count
+ *  @param[in,out]  soc_info - Input buffer to return the cpu cores per socket
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_cpu_cores_per_socket(uint32_t sock_count, amdsmi_sock_info_t *soc_info);
+
+/**
+ *  @brief Get CPU socket count from sys filesystem.
+ *
+ *  @ingroup cpuAuxillary
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in,out]  sock_count - Input buffer to return the cpu socket count
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_cpu_socket_count(uint32_t *sock_count);
+/** @} cpuAuxillary */
 
 #endif
 
@@ -7087,4 +7163,3 @@ amdsmi_status_t amdsmi_get_esmi_err_msg(amdsmi_status_t status, const char **sta
 #endif  // __cplusplus
 
 #endif  // __AMDSMI_H__
-

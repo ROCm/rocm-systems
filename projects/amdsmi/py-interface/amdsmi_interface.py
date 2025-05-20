@@ -520,6 +520,9 @@ class AmdSmiVramVendor(IntEnum):
     MICRON = amdsmi_wrapper.AMDSMI_VRAM_VENDOR_MICRON
     UNKNOWN = amdsmi_wrapper.AMDSMI_VRAM_VENDOR_UNKNOWN
 
+class AmdSmiAffinityScope(IntEnum):
+    NUMA_SCOPE = amdsmi_wrapper.AMDSMI_AFFINITY_SCOPE_NODE
+    SOCKET_SCOPE = amdsmi_wrapper.AMDSMI_AFFINITY_SCOPE_SOCKET
 
 class AmdSmiEventReader:
     def __init__(
@@ -1738,6 +1741,23 @@ def amdsmi_get_cpu_model_name(
     )
     return f"{cpu_info.model_name}"
 
+def amdsmi_get_cpu_cores_per_socket(sock_count: ctypes.c_uint32()):
+    cps = amdsmi_wrapper.amdsmi_sock_info_t()
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_cpu_cores_per_socket(sock_count, cps)
+    )
+    return {"socket_id": cps.socket_id,
+            "cores_per_socket": cps.cores_per_socket
+           }
+
+def amdsmi_get_cpu_socket_count():
+    sock_count = ctypes.c_uint32()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_cpu_socket_count(ctypes.byref(sock_count))
+    )
+    return sock_count.value
+
 def amdsmi_init(flag=AmdSmiInitFlags.INIT_AMD_GPUS):
     if not isinstance(flag, AmdSmiInitFlags):
         raise AmdSmiParameterException(flag, AmdSmiInitFlags)
@@ -1840,6 +1860,35 @@ def amdsmi_get_gpu_enumeration_info(processor_handle: amdsmi_wrapper.amdsmi_proc
     }
 
     return enumeration_info
+
+def amdsmi_get_cpu_affinity_with_scope(
+    processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
+    scope: AmdSmiAffinityScope
+) -> List[int]:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    if not isinstance(scope, AmdSmiAffinityScope):
+        raise AmdSmiParameterException(scope, AmdSmiAffinityScope)
+
+    socket_count = amdsmi_get_cpu_socket_count()
+    sock_info = amdsmi_get_cpu_cores_per_socket(socket_count)
+    core_count = sock_info['cores_per_socket']
+
+    size = ctypes.c_uint32(0)
+    size = (socket_count * core_count)/ (ctypes.sizeof(ctypes.c_uint64) * 8)
+    size = int(math.ceil(size))
+    size = ctypes.c_uint32(size)
+    cpu_set = (ctypes.c_uint64 * size.value)()
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_cpu_affinity_with_scope(
+            processor_handle, size, cpu_set, scope)
+    )
+
+    return cpu_set
 
 def amdsmi_get_gpu_asic_info(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle,

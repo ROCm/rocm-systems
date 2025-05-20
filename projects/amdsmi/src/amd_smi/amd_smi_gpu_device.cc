@@ -323,7 +323,39 @@ std::string AMDSmiGPUDevice::bdf_to_string() const {
     return oss.str();
 }
 
+std::vector<uint64_t> AMDSmiGPUDevice::get_bitmask_from_numa_node(int32_t node_id, uint32_t size) const {
+    std::vector<uint64_t> bitmask(size, 0);
+
+    if (node_id < 0) {
+        bitmask[0] = std::numeric_limits<int32_t>::max();
+        return bitmask;
+    }
+
+    std::string path = "/sys/devices/system/node/node" + std::to_string(node_id) + "/cpulist";
+    std::ifstream file(path);
+
+    if (file.is_open()) {
+        std::string info;
+        while (std::getline(file, info)) {
+            std::istringstream sstr(info);
+            std::string node_cpus;
+            while (std::getline(sstr, node_cpus, ',')) {
+                size_t hyphen = node_cpus.find('-');
+                if (hyphen != std::string::npos) {
+                    int start = std::stoi(node_cpus.substr(0, hyphen));
+                    int end = std::stoi(node_cpus.substr(hyphen + 1));
+                    for (int i = start; i <= end; ++i) {
+                        bitmask[i / 64] |= (1ULL << (i % 64));
+                    }
+                } else {
+                    int core = std::stoi(node_cpus);
+                    bitmask[core / 64] |= (1ULL << (core % 64));
+                }
+            }
+        }
+    }
+    return bitmask;
+}
 
 }  // namespace smi
 }  // namespace amd
-

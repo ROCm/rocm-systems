@@ -3941,8 +3941,8 @@ amdsmi_get_gpu_cper_entries(
     std::string path = std::string("/sys/kernel/debug/dri/") +
         std::to_string(gpu_device->get_card_id()) +
         "/amdgpu_ring_cper";
-    
-    
+
+
     return amdsmi_get_gpu_cper_entries_by_path(
         path.c_str(),
         severity_mask,
@@ -4795,6 +4795,85 @@ amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle processor_handle,
     return status;
 }
 
+amdsmi_status_t amdsmi_get_cpu_affinity_with_scope(amdsmi_processor_handle processor_handle,
+            uint32_t cpu_set_size, uint64_t *cpu_set, amdsmi_affinity_scope_t scope)
+{
+    AMDSMI_CHECK_INIT();
+
+    if (processor_handle == nullptr || cpu_set == nullptr || cpu_set_size == 0) {
+        return AMDSMI_STATUS_INVAL;
+    }
+
+    // Retrieve GPU device from the processor handle
+    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+    amdsmi_status_t status = get_gpu_device_from_handle(processor_handle, &gpu_device);
+    if (status != AMDSMI_STATUS_SUCCESS) {
+        return status;
+    }
+
+    uint32_t numa_node;
+    status = amdsmi_topo_get_numa_node_number(processor_handle, &numa_node);
+    if (status != AMDSMI_STATUS_SUCCESS) {
+        return status;
+    }
+
+    int32_t node_id = static_cast<int32_t>(numa_node);
+
+    status = amdsmi_get_gpu_topo_numa_affinity(processor_handle, &node_id);
+    if (status != AMDSMI_STATUS_SUCCESS) {
+        return status;
+    }
+
+    if(node_id < 0) {
+       return AMDSMI_STATUS_NOT_FOUND;
+    }
+
+    std::memset(cpu_set, 0, cpu_set_size * sizeof(uint64_t));
+    switch(scope) {
+        case AMDSMI_AFFINITY_SCOPE_NODE:
+        {
+            std::vector<uint64_t> bitmask = gpu_device->get_bitmask_from_numa_node(node_id, cpu_set_size);
+            if(bitmask[0] == std::numeric_limits<int32_t>::max()){
+                return AMDSMI_STATUS_REFCOUNT_OVERFLOW;
+            } else {
+                std::memcpy(cpu_set, bitmask.data(), cpu_set_size * sizeof(uint64_t));
+            }
+            break;
+        }
+
+        case AMDSMI_AFFINITY_SCOPE_SOCKET:
+        {
+            std::vector<uint32_t> sockets = amd::smi::AMDSmiSystem::getInstance().get_cpu_sockets_from_numa_node(node_id);
+
+            if(sockets[0] == std::numeric_limits<int32_t>::max()){
+                return AMDSMI_STATUS_REFCOUNT_OVERFLOW;
+            } else {
+            for (uint32_t idx : sockets) {
+                cpu_set[idx] = idx;
+            }
+
+            std::sort(cpu_set, cpu_set + cpu_set_size);
+
+            // Discard duplicates
+            uint32_t temp_size = 0;
+            for (uint32_t i = 0; i < cpu_set_size; ++i) {
+                if (i == 0 || cpu_set[i] != cpu_set[i - 1]) {
+                    cpu_set[temp_size++] = cpu_set[i];
+                }
+            }
+
+            // Update the size to the temp size after discarding duplicates
+            cpu_set_size = temp_size;
+            }
+            break;
+        }
+
+        default:
+            return AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS;
+    }
+
+    return AMDSMI_STATUS_SUCCESS;
+}
 
 #ifdef ENABLE_ESMI_LIB
 static amdsmi_status_t amdsmi_errno_to_esmi_status(amdsmi_status_t status)
@@ -5901,6 +5980,35 @@ amdsmi_status_t amdsmi_get_cpu_model_name(amdsmi_processor_handle processor_hand
         return amdsmi_errno_to_esmi_status(status);
 
     strncpy(cpu_info->model_name, model_name.c_str(), AMDSMI_MAX_STRING_LENGTH -1);
+
+    return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_get_cpu_cores_per_socket(uint32_t sock_count, amdsmi_sock_info_t *sock_info)
+{
+    std::map<uint32_t, uint32_t> socket_core_count = amd::smi::AMDSmiSystem::getInstance().get_sys_cpu_cores_per_socket();
+
+    for (uint32_t i = 0; i < sock_count; ++i) {
+        auto it = socket_core_count.find(sock_info[i].socket_id);
+        if (it != socket_core_count.end()) {
+            sock_info[i].cores_per_socket = it->second;
+        } else {
+            sock_info[i].cores_per_socket = 0;
+        }
+    }
+
+    return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_get_cpu_socket_count(uint32_t *sock_count)
+{
+    amdsmi_status_t status;
+    uint32_t sock_num;
+    status = amd::smi::AMDSmiSystem::getInstance().get_sys_num_of_cpu_sockets(&sock_num);
+    if (status != AMDSMI_STATUS_SUCCESS)
+        return status;
+
+    *sock_count = sock_num;
 
     return AMDSMI_STATUS_SUCCESS;
 }

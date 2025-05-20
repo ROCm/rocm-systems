@@ -36,15 +36,15 @@
 #include <dirent.h>
 #include <sys/types.h>
 
-#include <memory>
-#include <random>
+#include <algorithm>
+#include <cstdio>
 #include <fstream>
 #include <iostream>
-#include <regex>
-#include <cstdio>
-#include <sstream>
 #include <iterator>
-#include <algorithm>
+#include <memory>
+#include <random>
+#include <regex>
+#include <sstream>
 
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/amd_smi_system.h"
@@ -1045,4 +1045,26 @@ void amdsmi_wait_for_user_input(void) {
       return;
     }
   }
+}
+
+bool iterate_directory(const std::string &base_path, 
+    std::function<void(const std::string &)> entry_callback) {
+
+    DIR *dir = opendir(base_path.c_str());
+    if (!dir) {
+        return false;
+    }
+
+    struct dirent *entry = nullptr;
+    while ((entry = readdir(dir)) != NULL) {
+        entry_callback(entry->d_name);
+    }
+
+    if (errno != 0) {
+        closedir(dir);
+        return false;
+    }
+
+    closedir(dir);
+    return true;
 }
