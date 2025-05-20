@@ -692,8 +692,14 @@ static hsa_status_t GetGPUAgents(hsa_agent_t agent, void* data) {
   err = hsa_agent_get_info(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_DOMAIN, &pci_domain_id);
   RET_IF_HSA_ERR(err);
 
+  bool is_dxg = false;
+  int fd = open("/dev/dxg", O_RDWR);
+  if (fd >= 0) {
+    close(fd);
+    is_dxg = true;
+  }
   hwloc_obj_t gpu_numa_node = nullptr;
-  if (agent_bdf_id != kDtifBdfId) {
+  if ((agent_bdf_id != kDtifBdfId) && !is_dxg) {
     hwloc_obj_t gpu_hwl_dev;
     gpu_hwl_dev = hwloc_get_pcidev_by_busid(ptr->topology(), pci_domain_id, bus, device,
                                                                       function);
