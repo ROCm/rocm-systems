@@ -1430,7 +1430,14 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       const size_t num_cache = cache_props_.size();
       for (size_t i = 0; i < num_cache; ++i) {
         const uint32_t line_level = cache_props_[i].CacheLevel;
-        if (reinterpret_cast<uint32_t*>(value)[line_level - 1] == 0)
+          /*
+           * L1 Cache is per CU.
+           * For L2 Cache and above, we report total for the partition so we sum
+           * all the node entries.
+           */
+        if (line_level >= 2)
+          reinterpret_cast<uint32_t*>(value)[line_level - 1] += cache_props_[i].CacheSize * 1024;
+        else if (reinterpret_cast<uint32_t*>(value)[line_level - 1] == 0)
           reinterpret_cast<uint32_t*>(value)[line_level - 1] = cache_props_[i].CacheSize * 1024;
       }
     } break;
