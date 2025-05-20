@@ -6492,20 +6492,17 @@ class AMDSMICommands():
                        break
                    elif args.follow and args.gpu:
                        self.helpers.dump_gpu_entries_follow(args.folder, entries, cper_data, args.gpu)
-                       break
                    elif args.follow and not args.gpu:
-                       self.helpers.dump_all_entries_follow(args.folder, entries, cper_data, args.gpu)
-                       break
+                       self.helpers.dump_all_entries_follow(args.folder, entries, cper_data, args.gpu)     
                 if args.follow:
-                    self.helpers.display_cper_files_generated_follow(entries, args.gpu)
-                    break
+                    self.helpers.display_cper_files_generated_follow(entries, args.gpu)  
                 else:
                     self.helpers.display_cper_files_generated(entries, args.gpu)
                     break
-                if len(entries) == 0 or not args.follow:
+                if len(entries) == 0 and not args.follow:
                     break
                 cursor = new_cursor
-                time.sleep(5)
+                time.sleep(1)
 
 
     def _event_thread(self, commands, i):
