@@ -64,14 +64,12 @@ static_assert((sizeof(core::ShareableHandle::handle) >= sizeof(uint32_t)) &&
                   (alignof(core::ShareableHandle::handle) >= alignof(uint32_t)),
               "ShareableHandle cannot store a XDNA handle");
 
-/**
- * @brief Index of the first operand in a command.
- *
- * Before the operands there are:
- * - 2 dwords for transaction op code
- * - 2 dwords for the instructions BO address
- * - 1 dword for the size of the instructions BO size
- */
+/// @brief Index of the first operand in a command.
+///
+/// Before the operands there are:
+/// - 2 dwords for transaction op code
+/// - 2 dwords for the instructions BO address
+/// - 1 dword for the size of the instructions BO size
 constexpr uint32_t operand_starting_index = 5;
 
 /// @brief Default amdxdna_cu_config::cu_func when configuring a CU.
