@@ -25,6 +25,7 @@
 
 #include <vector>
 #include <set>
+#include <map>
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_socket.h"
 #include "amd_smi/impl/amd_smi_processor.h"
@@ -60,6 +61,11 @@ class AMDSmiSystem {
 
     amdsmi_status_t get_cpu_model_name(uint32_t socket_id, std::string *model_name);
 
+    std::map<uint32_t, uint32_t> get_sys_cpu_cores_per_socket() ;
+
+    amdsmi_status_t get_sys_num_of_cpu_sockets(uint32_t *sock_num);
+
+    std::vector<uint32_t> get_cpu_sockets_from_numa_node(int32_t numa_node);
  private:
     AMDSmiSystem() : init_flag_(AMDSMI_INIT_AMD_GPUS) {}
 

@@ -188,6 +188,9 @@ void getFWNameFromId(int id, char *name)
     case AMDSMI_FW_ID_DMCU:
         strcpy(name, "ID_DMCU");
         break;
+    case AMDSMI_FW_ID_PLDM:
+        strcpy(name, "PLDM");
+        break;
     default:
         strcpy(name, "");
         break;

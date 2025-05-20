@@ -152,6 +152,7 @@ enum DevInfoTypes {
   kDevFwVersionUvd,
   kDevFwVersionVce,
   kDevFwVersionVcn,
+  kDevFwVersionPldm,
   kDevSerialNumber,
   kDevMemPageBad,
   kDevNumaNode,

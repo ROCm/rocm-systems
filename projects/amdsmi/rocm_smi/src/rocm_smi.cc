@@ -1985,6 +1985,7 @@ rsmi_dev_firmware_version_get(uint32_t dv_ind, rsmi_fw_block_t block,
     { RSMI_FW_BLOCK_UVD, amd::smi::kDevFwVersionUvd },
     { RSMI_FW_BLOCK_VCE, amd::smi::kDevFwVersionVce },
     { RSMI_FW_BLOCK_VCN, amd::smi::kDevFwVersionVcn },
+    { RSMI_FW_BLOCK_PLDM, amd::smi::kDevFwVersionPldm},
   };
 
   const auto & dev_type_it = kFWBlockTypeMap.find(block);
@@ -7432,6 +7433,21 @@ rsmi_event_notification_get(int timeout_ms,
                           << "  unmap_trigger: " << std::to_string(unmap_trigger).c_str();
 
             strcpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str());
+          }
+          break;
+          case RSMI_EVT_NOTIF_EVENT_PROCESS_START:
+          case RSMI_EVT_NOTIF_EVENT_PROCESS_END:
+          {
+            uint32_t pid; char task[MAX_EVENT_NOTIFICATION_MSG_SIZE];
+            int rc = sscanf(message, "%x %s", &pid, task);
+            std::stringstream msg;
+            if (rc == 2){
+              msg << "PID: " << pid << "  task: " << task;
+            } else{
+              LOG_ERROR("Failed to parse process event payload");
+              msg << "PID:UNKNOWN  task:UNKNOWN";
+            }
+            snprintf(data_item->message, MAX_EVENT_NOTIFICATION_MSG_SIZE, "%s", msg.str().c_str());
           }
           break;
           default:

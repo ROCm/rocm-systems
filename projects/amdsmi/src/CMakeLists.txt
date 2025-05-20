@@ -16,6 +16,7 @@ set(INC_DIR "${PROJECT_SOURCE_DIR}/include/amd_smi")
 
 set(SRC_LIST
     "${SRC_DIR}/amd_smi.cc"
+    "${SRC_DIR}/amd_smi_cper.cc"
     "${SRC_DIR}/amd_smi_common.cc"
     "${SRC_DIR}/amd_smi_drm.cc"
     "${SRC_DIR}/amd_smi_gpu_device.cc"
@@ -29,6 +30,7 @@ set(SRC_LIST
 set(INC_LIST
     "${INC_DIR}/amdsmi.h"
     "${INC_DIR}/impl/amd_smi_common.h"
+    "${INC_DIR}/impl/amd_smi_cper.h"
     "${INC_DIR}/impl/amd_smi_processor.h"
     "${INC_DIR}/impl/amd_smi_drm.h"
     "${INC_DIR}/impl/amd_smi_gpu_device.h"
@@ -37,6 +39,13 @@ set(INC_LIST
     "${INC_DIR}/impl/amd_smi_system.h"
     "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi/rocm_smi.h"
     "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi/rocm_smi_utils.h")
+
+set(ACA_SRC_DIR "aca-decode")
+set(SRC_LIST ${SRC_LIST} ${ACA_SRC_DIR}/aca_decode.c ${ACA_SRC_DIR}/aca_fields.c ${ACA_SRC_DIR}/aca_tables.c
+             ${ACA_SRC_DIR}/error_map.c)
+set(ACA_INC_DIR "${PROJECT_SOURCE_DIR}/include/aca-decode")
+set(INC_LIST ${INC_LIST} ${ACA_INC_DIR}/aca_decode.h ${ACA_INC_DIR}/aca_fields.h ${ACA_INC_DIR}/aca_tables.h
+             ${ACA_INC_DIR}/error_map.h)
 
 if(ENABLE_ESMI_LIB)
     list(APPEND INC_LIST ${ESMI_INC_DIR}/e_smi/e_smi.h)
@@ -72,7 +81,7 @@ target_link_libraries(amd_smi_ex ${AMD_SMI})
 add_library(${AMD_SMI} ${SRC_LIST} ${INC_LIST})
 target_link_libraries(${AMD_SMI} pthread rt dl ${DRM_LIBRARIES} ${AMDGPU_DRM_LIBRARIES})
 target_include_directories(${AMD_SMI} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/rocm_smi/include
-                                              ${PROJECT_SOURCE_DIR}/common/shared_mutex)
+                                              ${PROJECT_SOURCE_DIR}/common/shared_mutex ${ACA_INC_DIR})
 
 # use the target_include_directories() command to specify the include directories for the target
 target_include_directories(${AMD_SMI} PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"

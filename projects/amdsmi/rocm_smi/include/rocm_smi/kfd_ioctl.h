@@ -537,6 +537,8 @@ enum kfd_smi_event {
   KFD_SMI_EVENT_QUEUE_EVICTION = 9,
   KFD_SMI_EVENT_QUEUE_RESTORE = 10,
   KFD_SMI_EVENT_UNMAP_FROM_GPU = 11,
+  KFD_SMI_EVENT_PROCESS_START = 12,
+  KFD_SMI_EVENT_PROCESS_END = 13,
 
   /*
    * max event number, as a flag bit to get events from all processes,
