@@ -366,6 +366,11 @@ absolute path, then all ``ROCPROFSYS_OUTPUT_PATH`` and similar
 settings are ignored. Visit `ui.perfetto.dev <https://ui.perfetto.dev>`_ and open
 this file.
 
+.. important::
+   If you are using a version of ROCm prior to ROCm 6.3.1 and are experiencing problems viewing your
+   trace in the latest version of [Perfetto](http://ui.perfetto.dev), then try using
+   [Perfetto UI v46.0](https://ui.perfetto.dev/v46.0-35b3d9845/#!/).
+
 **Figure 1:** Visualization of a performance graph in Perfetto
 
 .. image:: ../data/rocprof-sys-perfetto.png
