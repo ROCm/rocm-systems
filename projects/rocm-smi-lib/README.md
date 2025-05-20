@@ -1,6 +1,6 @@
 # 🛠️ Maintenance Mode Notice 🛠️
 
-Starting with ROCm 6.5, only critical bug fixes will be applied to ROCm-SMI.
+Starting with ROCm 7.0, only critical bug fixes will be applied to ROCm-SMI.
 For a seamless experience and continued support, please switch to [AMD-SMI](https://github.com/ROCm/amdsmi).
 
 ## Use C++ in ROCm SMI
