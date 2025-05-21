@@ -240,6 +240,10 @@ amdsmi_status_t get_num_partition(uint32_t index, uint16_t* num_partition) {
     return ret;
   }
 
+  if (num_partition == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
   amdsmi_gpu_metrics_t metrics;
   memset(&metrics, 0, sizeof(metrics));
   ret = get_metrics_info(proc_handle, &metrics);

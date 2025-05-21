@@ -51,12 +51,12 @@ THE SOFTWARE.
 namespace amd {
 namespace rdc {
 
-double RdcRocpBase::run_profiler(uint32_t gpu_index, rdc_field_t field) {
+double RdcRocpBase::run_profiler(uint32_t agent_index, rdc_field_t field) {
   thread_local std::vector<rocprofiler_record_counter_t> records;
 
-  auto counter_sampler = CounterSampler::get_samplers()[gpu_index];
+  auto counter_sampler = CounterSampler::get_samplers()[agent_index];
   if (!counter_sampler) {
-    RDC_LOG(RDC_ERROR, "Error: Counter sampler not found for GPU index " << gpu_index);
+    RDC_LOG(RDC_ERROR, "Error: Counter sampler not found for GPU index " << agent_index);
     return RDC_ST_BAD_PARAMETER;
   }
 
@@ -116,53 +116,88 @@ std::string uuid_to_string(const uint64_t uuid) {
 
 std::string uuid_to_string(const rocprofiler_uuid_t& uuid) { return uuid_to_string(uuid.value); }
 
-void RdcRocpBase::map_smi_to_profiler_by_uuid() {
-  std::map<uint32_t, rocprofiler_uuid_t> index_to_prof_map;
-  std::map<uint32_t, rocprofiler_uuid_t> index_to_smi_map;
+rdc_status_t RdcRocpBase::map_entity_to_profiler() {
+  // std::map<uint32_t, uint32_t> entity_to_index_map;
+  // kfd_id_t is only used inside this function
+  typedef uint64_t kfd_id_t;
+  std::map<uint32_t, kfd_id_t> prof_kfd_map;
 
-  // find intersection of supported and requested fields
-  for (uint32_t gpu_index = 0; gpu_index < agents.size(); gpu_index++) {
-    index_to_prof_map.insert({gpu_index, agents[gpu_index].uuid});
-
-    amdsmi_processor_handle processor_handle = nullptr;
-    auto amdsmi_status = get_processor_handle_from_id(gpu_index, &processor_handle);
-    if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
-      continue;
-    }
-    amdsmi_asic_info_t asic_info;
-    amdsmi_status = amdsmi_get_gpu_asic_info(processor_handle, &asic_info);
-    if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
-      continue;
-    }
-    rocprofiler_uuid_t temp_id = asic_serial_to_uuid(asic_info.asic_serial);
-    index_to_smi_map.insert({gpu_index, temp_id});
-
-    // clang-format off
-    RDC_LOG(RDC_DEBUG, "\n"
-        "ID[" << gpu_index << "]:\n"
-        "  PROF: " << uuid_to_string(index_to_prof_map[gpu_index]) << "\n"
-        "  SMI:  " << uuid_to_string(index_to_smi_map[gpu_index]));
-    // clang-format on
+  // populate profiler map
+  for (uint32_t prof_gpu_index = 0; prof_gpu_index < agents.size(); prof_gpu_index++) {
+    prof_kfd_map.insert({prof_gpu_index, agents[prof_gpu_index].gpu_id});
   }
 
-  // Create a mapping from SMI to ROCProfiler by comparing uuid
-  for (const auto& [smi_index, smi_uuid] : index_to_smi_map) {
-    for (const auto& [prof_index, prof_uuid] : index_to_prof_map) {
-      if (std::memcmp(&smi_uuid, &prof_uuid, sizeof(rocprofiler_uuid_t)) == 0) {
-        // match found
-        smi_to_profiler_map[smi_index] = prof_index;
-        break;
+  std::vector<amdsmi_socket_handle> sockets;
+  auto amdsmi_status = get_socket_handles(sockets);
+  if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
+    RDC_LOG(RDC_ERROR, "Failed to get socket handles: " << amdsmi_status);
+    return Smi2RdcError(amdsmi_status);
+  }
+
+  for (int socket_index = 0; socket_index < sockets.size(); socket_index++) {
+    auto* socket = sockets[socket_index];
+    std::vector<amdsmi_processor_handle> processors;
+    amdsmi_status = get_processor_handles(socket, processors);
+    if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
+      RDC_LOG(RDC_ERROR, "Failed to get processor handles for socket " << socket_index << ": "
+                                                                       << amdsmi_status);
+      return Smi2RdcError(amdsmi_status);
+    }
+
+    for (int processor_index = 0; processor_index < processors.size(); processor_index++) {
+      auto* processor = processors[processor_index];
+      processor_type_t processor_type = AMDSMI_PROCESSOR_TYPE_UNKNOWN;
+      amdsmi_status = amdsmi_get_processor_type(processor, &processor_type);
+      if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
+        RDC_LOG(RDC_ERROR, "Failed to get processor type for processor "
+                               << processor_index << " on socket " << socket_index << ": "
+                               << amdsmi_status);
+        return Smi2RdcError(amdsmi_status);
+      }
+      if (processor_type != AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
+        continue;
+      }
+
+      amdsmi_kfd_info_t kfd_info;
+      amdsmi_status = amdsmi_get_gpu_kfd_info(processor, &kfd_info);
+      if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
+        RDC_LOG(RDC_ERROR, "Failed to get KFD info for processor "
+                               << processor_index << " on socket " << socket_index << ": "
+                               << amdsmi_status);
+        return Smi2RdcError(amdsmi_status);
+      }
+
+      rdc_entity_info_t entity_info = {
+          .device_index = static_cast<uint32_t>(socket_index),
+          .instance_index = static_cast<uint32_t>(processor_index),
+          .entity_role = RDC_DEVICE_ROLE_PHYSICAL,
+          .device_type = RDC_DEVICE_TYPE_GPU,
+      };
+
+      uint32_t entity_index = rdc_get_entity_index_from_info(entity_info);
+
+      for (const auto& [prof_index, prof_id] : prof_kfd_map) {
+        if (std::memcmp(&kfd_info.kfd_id, &prof_id, sizeof(kfd_id_t)) == 0) {
+          // match found
+          // clang-format off
+          RDC_LOG(RDC_DEBUG, "SMI[" << entity_index << "] <-> Profiler[" << prof_index << "] = KFD_ID[" << prof_id << "]");
+          // clang-format on
+          if (entity_info.entity_role == RDC_DEVICE_ROLE_PHYSICAL) {
+            entity_index = rdc_get_entity_index_from_info(entity_info);
+            entity_to_prof_map.insert({entity_index, prof_index});
+          }
+          if (processors.size() > 1) {
+            // if there are multiple processors, also add entity with partition instance type
+            entity_info.entity_role = RDC_DEVICE_ROLE_PARTITION_INSTANCE;
+            entity_index = rdc_get_entity_index_from_info(entity_info);
+            entity_to_prof_map.insert({entity_index, prof_index});
+          }
+          break;
+        }
       }
     }
   }
-
-  for (const auto& [smi_index, prof_index] : smi_to_profiler_map) {
-    const auto& prof_uuid = index_to_prof_map[prof_index];
-    const auto& smi_uuid = index_to_smi_map[smi_index];
-    RDC_LOG(RDC_DEBUG, "SMI index " << smi_index << " maps to ROCProfiler index " << prof_index
-                                    << " with UUID: " << uuid_to_string(prof_uuid) << " = "
-                                    << uuid_to_string(smi_uuid));
-  }
+  return RDC_ST_OK;
 }
 
 RdcRocpBase::RdcRocpBase() {
@@ -226,7 +261,8 @@ RdcRocpBase::RdcRocpBase() {
       {RDC_FI_PROF_CPF_CPF_TCIU_IDLE, "CPF_CPF_TCIU_IDLE"},
       {RDC_FI_PROF_CPF_CPF_TCIU_STALL, "CPF_CPF_TCIU_STALL"},
       {RDC_FI_PROF_SIMD_UTILIZATION, "SIMD_UTILIZATION"},
-      {RDC_FI_PROF_UUID, "SQ_WAVES"},  // dummy value,
+      {RDC_FI_PROF_UUID, "SQ_WAVES"},    // dummy value,
+      {RDC_FI_PROF_KFD_ID, "SQ_WAVES"},  // dummy value,
   };
 
   hsa_status_t status = hsa_init();
@@ -251,23 +287,22 @@ RdcRocpBase::RdcRocpBase() {
   RDC_LOG(RDC_DEBUG, "Agent count: " << agents.size());
   samplers = CounterSampler::get_samplers();
 
-  map_smi_to_profiler_by_uuid();
+  map_entity_to_profiler();
 
   // find intersection of supported and requested fields
-  for (uint32_t gpu_index = 0; gpu_index < agents.size(); gpu_index++) {
-    auto& cs = *samplers[gpu_index];
-    RDC_LOG(RDC_DEBUG, "gpu_index[" << gpu_index << "] = node_id[" << agents[gpu_index].node_id
-                                    << "] agent_id[" << agents[gpu_index].id.handle << "]");
+  uint32_t agent_index = 0;
+  auto& cs = *samplers[agent_index];
+  RDC_LOG(RDC_DEBUG, "agent_index[" << agent_index << "] location_id["
+                                    << agents[agent_index].location_id << "]");
 
-    for (auto& [str, id] : CounterSampler::get_supported_counters(cs.get_agent())) {
-      checked_fields.emplace_back(str);
-    }
+  for (auto& [str, id] : CounterSampler::get_supported_counters(cs.get_agent())) {
+    checked_fields.emplace_back(str);
+  }
 
-    for (const auto& [k, v] : temp_field_map_k) {
-      auto found = std::find(checked_fields.begin(), checked_fields.end(), v);
-      if (found != checked_fields.end()) {
-        field_to_metric.insert({k, v});
-      }
+  for (const auto& [k, v] : temp_field_map_k) {
+    auto found = std::find(checked_fields.begin(), checked_fields.end(), v);
+    if (found != checked_fields.end()) {
+      field_to_metric.insert({k, v});
     }
   }
 
@@ -276,7 +311,7 @@ RdcRocpBase::RdcRocpBase() {
     all_fields.emplace_back(v);
   }
 
-  RDC_LOG(RDC_DEBUG, "Rocprofiler supports " << field_to_metric.size() << " fields");
+  RDC_LOG(RDC_DEBUG, "Profiler supports " << field_to_metric.size() << " fields");
 }
 
 RdcRocpBase::~RdcRocpBase() {
@@ -292,7 +327,8 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value
   // default type
   *type = DOUBLE;
 
-  const auto& gpu_index = smi_to_profiler_map[gpu_field.gpu_index];
+  // convert from entity to flat index
+  uint32_t agent_index = entity_to_prof_map[gpu_field.gpu_index];
   const auto& field = gpu_field.field_id;
 
   if (data == nullptr) {
@@ -303,7 +339,7 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value
 
   const auto start_time = std::chrono::high_resolution_clock::now();
   // direct read from rocprofiler
-  const double read_dbl = run_profiler(gpu_index, field);
+  const double read_dbl = run_profiler(agent_index, field);
   const auto stop_time = std::chrono::high_resolution_clock::now();
   const double elapsed = std::chrono::duration<double, std::milli>(stop_time - start_time).count();
   // divide by elapsed time if needed
@@ -330,8 +366,8 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value
       // function
       const double active_cycles_val = read_dbl;
       if (active_cycles_val != 0.0) {
-        // read second value from rocprofiler
-        const double occupancy_val = run_profiler(gpu_index, RDC_FI_PROF_OCC_PER_ACTIVE_CU);
+        // read second value from profiler
+        const double occupancy_val = run_profiler(agent_index, RDC_FI_PROF_OCC_PER_ACTIVE_CU);
         data->dbl = occupancy_val / active_cycles_val;
       } else {
         return RDC_ST_BAD_PARAMETER;
@@ -343,14 +379,14 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value
         return RDC_ST_BAD_PARAMETER;
       }
       // 1024, 2048, and 256 are taken from "INTRODUCING AMD CDNA 3 ARCHITECTURE" white paper
-      const std::string target_version = agents[gpu_index].name;
+      const std::string target_version = agents[agent_index].name;
       // TODO: Design a lookup table for other GPUs
       const bool isMI200 = (target_version.find("gfx90a") != std::string::npos);
       // FLOPS/clock/CU
       if (isMI200) {
-        data->dbl = divided_dbl / (1024.0F / static_cast<double>(agents[gpu_index].simd_per_cu));
+        data->dbl = divided_dbl / (1024.0F / static_cast<double>(agents[agent_index].simd_per_cu));
       } else {  // Assume mi300
-        data->dbl = divided_dbl / (2048.0F / static_cast<double>(agents[gpu_index].simd_per_cu));
+        data->dbl = divided_dbl / (2048.0F / static_cast<double>(agents[agent_index].simd_per_cu));
       }
     } break;
     case RDC_FI_PROF_EVAL_FLOPS_32_PERCENT:
@@ -360,13 +396,19 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value
         return RDC_ST_BAD_PARAMETER;
       }
       // FLOPS/clock/CU
-      data->dbl = divided_dbl / (256.0F / static_cast<double>(agents[gpu_index].simd_per_cu));
+      data->dbl = divided_dbl / (256.0F / static_cast<double>(agents[agent_index].simd_per_cu));
       break;
     case RDC_FI_PROF_UUID: {
       // do not care what RDC_FI_PROF_UUID is mapped to. read value from agents
       *type = STRING;
-      std::string uuid_str = uuid_to_string(agents[gpu_index].uuid);
+      std::string uuid_str = uuid_to_string(agents[agent_index].uuid);
       strncpy_with_null(data->str, uuid_str.c_str(), uuid_str.length());
+      break;
+    }
+    case RDC_FI_PROF_KFD_ID: {
+      // do not care what RDC_FI_PROF_UUID is mapped to. read value from agents
+      *type = INTEGER;
+      data->l_int = agents[agent_index].gpu_id;
       break;
     }
     default:

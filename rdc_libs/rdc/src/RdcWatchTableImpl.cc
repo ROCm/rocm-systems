@@ -228,42 +228,6 @@ rdc_status_t RdcWatchTableImpl::rdc_field_watch(rdc_gpu_group_t group_id,
     return result;
   }
 
-  // Check for rocprof fields in partitions
-  rdc_group_info_t ginfo;
-  result = group_settings_->rdc_group_gpu_get_info(group_id, &ginfo);
-  if (result != RDC_ST_OK) {
-    return result;
-  }
-  bool groupHasPartition = false;
-  for (unsigned int i = 0; i < ginfo.count; i++) {
-    uint32_t entityId = ginfo.entity_ids[i];
-    rdc_entity_info_t info = rdc_get_info_from_entity_index(entityId);
-    if (info.entity_role == RDC_DEVICE_ROLE_PARTITION_INSTANCE) {
-      groupHasPartition = true;
-      break;
-    }
-  }
-
-  rdc_field_group_info_t field_info;
-  result = group_settings_->rdc_group_field_get_info(field_group_id, &field_info);
-  if (result != RDC_ST_OK) {
-    return result;
-  }
-  bool groupHasRocprof = false;
-  if (result == RDC_ST_OK) {
-    for (unsigned int i = 0; i < field_info.count; i++) {
-      rdc_field_t fid = field_info.field_ids[i];
-      if (fid >= 800 && fid < 900) {  // Rocprof fields in the 800's
-        groupHasRocprof = true;
-        break;
-      }
-    }
-  }
-
-  if (groupHasPartition && groupHasRocprof) {
-    return RDC_ST_NOT_SUPPORTED;
-  }
-
   // See if any of the fields are notification fields, and
   // set them up, if so.
   result = notifications_->set_listen_events(fields_in_watch);

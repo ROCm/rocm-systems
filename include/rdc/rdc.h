@@ -173,6 +173,7 @@ typedef enum {
   RDC_FI_TARGET_GRAPHICS_VERSION,  //!< Target graphics version
   RDC_FI_NUM_OF_COMPUTE_UNITS,     //!< Number of compute units
   RDC_FI_UUID,                     //!< Device UUID
+  RDC_FI_GPU_PARTITION_COUNT,
 
   /**
    * @brief Frequency related fields
@@ -344,6 +345,7 @@ typedef enum {
   RDC_FI_PROF_CPF_CPF_TCIU_STALL,
   RDC_FI_PROF_SIMD_UTILIZATION,
   RDC_FI_PROF_UUID,
+  RDC_FI_PROF_KFD_ID,
 
   /**
    * @brief Raw XGMI counter events

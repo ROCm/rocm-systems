@@ -69,18 +69,22 @@ class RdcRocpBase {
    */
   static const uint32_t collection_duration_us_k = 10000;
 
-  double read_feature(rocprofiler_record_counter_t* record, uint32_t gpu_index);
-
   /**
    * @brief By default all profiler values are read as doubles
    */
-  double run_profiler(uint32_t gpu_index, rdc_field_t field);
-  void map_smi_to_profiler_by_uuid();
+  double run_profiler(uint32_t agent_index, rdc_field_t field);
+
+  /**
+   * @description Create a map from entity_id to profiler agent_index.
+   * This is required due to different structure and ordering.
+   * Populates entity_to_prof_map.
+   */
+  rdc_status_t map_entity_to_profiler();
 
   std::vector<rocprofiler_agent_v0_t> agents = {};
   std::vector<std::shared_ptr<CounterSampler>> samplers = {};
   std::map<rdc_field_t, const char*> field_to_metric = {};
-  std::map<uint32_t, uint32_t> smi_to_profiler_map = {};
+  std::map<uint32_t, uint32_t> entity_to_prof_map = {};
 
   // these fields must be divided by time passed
   std::unordered_set<rdc_field_t> eval_fields = {
