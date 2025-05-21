@@ -1609,7 +1609,7 @@ unsigned int ReadSMIEventThread(void* p) {
         EXPECT_EQ_GPU(trigger, HSA_QUEUE_EVICTION_TRIGGER_SVM, pArgs->nodeid);
 
     } else if (event_id == HSA_SMI_EVENT_QUEUE_RESTORE) {
-      /* the message is HSA_SMI_EVENT_UNMAP_FROM_GPU */
+      /* the message is HSA_SMI_EVENT_QUEUE_RESTORE */
         EXPECT_EQ_GPU(sscanf(msg + sizeof(event_id), "%ld -%d %x\n", &timestamp, &pid, &id), 3, pArgs->nodeid);
         EXPECT_EQ_GPU(pid, getpid(), pArgs->nodeid);
 
