@@ -109,7 +109,7 @@ using list_derived_metrics_csv_encoder     = csv_encoder<5>;
 using scratch_memory_encoder               = csv_encoder<8>;
 using stats_csv_encoder                    = csv_encoder<8>;
 using pc_sampling_host_trap_csv_encoder    = csv_encoder<6>;
-using kernel_trace_with_stream_csv_encoder = csv_encoder<19>;
+using kernel_trace_with_stream_csv_encoder = csv_encoder<22>;
 using memory_copy_with_stream_csv_encoder  = csv_encoder<8>;
 using pc_sampling_stochastic_csv_encoder   = csv_encoder<10>;
 }  // namespace csv
