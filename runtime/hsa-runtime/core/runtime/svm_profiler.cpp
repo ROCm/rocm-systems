@@ -301,12 +301,10 @@ void SvmProfileControl::PollSmi() {
               // gpu_id
               case HSA_SMI_EVENT_QUEUE_RESTORE: {
                 uint32_t gpuid;
-                uint32_t trigger;
-                args = sscanf(cursor, "%x %u", &gpuid, &trigger);
-                assert(args == 2 && "Parsing error!");
+                args = sscanf(cursor, "%x", &gpuid);
+                assert(args == 1 && "Parsing error!");
                 std::string agent = format_agent(gpuid);
-                std::string cause = smi_eviction_string(trigger);
-                detail = cause + " " + agent;
+                detail = agent;
                 break;
               }
               //@addr(size) gpu_id
