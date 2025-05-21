@@ -1,13 +1,10 @@
 # ROCm Profiling Tools
 
-## DISCLAIMER
-
-The information presented in this document is for informational purposes only and may contain technical inaccuracies, omissions, and typographical errors. The information contained herein is subject to change and may be rendered inaccurate for many reasons, including but not limited to product and roadmap changes, component and motherboard version changes, new model and/or product releases, product differences between differing manufacturers, software changes, BIOS flashes, firmware upgrades, or the like. Any computer system has risks of security vulnerabilities that cannot be completely prevented or mitigated. AMD assumes no obligation to update or otherwise correct or revise this information. However, AMD reserves the right to revise this information and to make changes from time to time to the content hereof without obligation of AMD to notify any person of such revisions or changes.THIS INFORMATION IS PROVIDED ‘AS IS.” AMD MAKES NO REPRESENTATIONS OR WARRANTIES WITH RESPECT TO THE CONTENTS HEREOF AND ASSUMES NO RESPONSIBILITY FOR ANY INACCURACIES, ERRORS, OR OMISSIONS THAT MAY APPEAR IN THIS INFORMATION. AMD SPECIFICALLY DISCLAIMS ANY IMPLIED WARRANTIES OF NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR ANY PARTICULAR PURPOSE. IN NO EVENT WILL AMD BE LIABLE TO ANY PERSON FOR ANY RELIANCE, DIRECT, INDIRECT, SPECIAL, OR OTHER CONSEQUENTIAL DAMAGES ARISING FROM THE USE OF ANY INFORMATION CONTAINED HEREIN, EVEN IF AMD IS EXPRESSLY ADVISED OF THE POSSIBILITY OF SUCH DAMAGES. AMD, the AMD Arrow logo, and combinations thereof are trademarks of Advanced Micro Devices, Inc. Other product names used in this publication are for identification purposes only and may be trademarks of their respective companies.
-
-© 2022 Advanced Micro Devices, Inc. All Rights Reserved.
-
 > [!IMPORTANT]
 We are phasing out development and support for roctracer/rocprofiler/rocprof/rocprofv2 in favor of rocprofiler-sdk/rocprofv3 in upcoming ROCm releases. Going forward, only critical defect fixes will be addressed for older versions of profiling tools and libraries. We encourage all users to upgrade to the latest version, rocprofiler-sdk library and rocprofv3 tool, to ensure continued support and access to new features.
+
+> [!NOTE]
+> The published documentation is available at [ROCProfiler documentation](https://rocm.docs.amd.com/projects/rocprofiler/en/latest/index.html) in an organized, easy-to-read format, with search and a table of contents.
 
 [![Build Status](
 https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/status%2Frocprofiler?repoName=ROCm%2Frocprofiler&branchName=amd-staging)](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/latest?definitionId=143&repoName=ROCm%2Frocprofiler&branchName=amd-staging)
@@ -264,7 +261,7 @@ By default, rocprofv2 runs counter-collection mode with kernel serialization ena
 rocprofv2 -ns -i samples/input.txt <app_relative_path>
 ```
 
-or 
+or
 
 ```bash
 rocprofv2 --no-serialization -i samples/input.txt <app_relative_path>
