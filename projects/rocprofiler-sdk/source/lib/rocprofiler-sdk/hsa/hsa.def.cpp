@@ -476,6 +476,15 @@ HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
                           wait_hint,
                           satisfying_values)
 #        endif
+#        if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x06
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_get_preferred_copy_engine,
+                          hsa_amd_memory_get_preferred_copy_engine,
+                          hsa_amd_memory_get_preferred_copy_engine_fn,
+                          dst_agent,
+                          src_agent,
+                          recommended_ids_mask)
+#        endif
 #    endif
 
 #elif defined(ROCPROFILER_LIB_ROCPROFILER_HSA_ASYNC_COPY_CPP_IMPL) &&                              \
