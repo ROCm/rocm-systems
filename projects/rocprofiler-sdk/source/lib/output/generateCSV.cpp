@@ -272,8 +272,11 @@ generate_csv(const output_config&                                               
                                       "Correlation_Id",
                                       "Start_Timestamp",
                                       "End_Timestamp",
-                                      "Private_Segment_Size",
-                                      "Group_Segment_Size",
+                                      "LDS_Block_Size",
+                                      "Scratch_Size",
+                                      "VGPR_Count",
+                                      "Accum_VGPR_Count",
+                                      "SGPR_Count",
                                       "Workgroup_Size_X",
                                       "Workgroup_Size_Y",
                                       "Workgroup_Size_Z",
@@ -285,9 +288,14 @@ generate_csv(const output_config&                                               
     {
         for(auto record : data.get(ditr))
         {
-            auto row_ss      = std::stringstream{};
-            auto kernel_name = tool_metadata.get_kernel_name(record.dispatch_info.kernel_id,
+            auto        row_ss      = std::stringstream{};
+            auto        kernel_name = tool_metadata.get_kernel_name(record.dispatch_info.kernel_id,
                                                              record.correlation_id.external.value);
+            const auto* kernel_info =
+                tool_metadata.get_kernel_symbol(record.dispatch_info.kernel_id);
+            auto lds_block_size_v =
+                (kernel_info->group_segment_size + (lds_block_size - 1)) & ~(lds_block_size - 1);
+
             rocprofiler::tool::csv::kernel_trace_with_stream_csv_encoder::write_row(
                 row_ss,
                 tool_metadata.get_kind_name(record.kind),
@@ -302,8 +310,11 @@ generate_csv(const output_config&                                               
                 record.correlation_id.internal,
                 record.start_timestamp,
                 record.end_timestamp,
+                lds_block_size_v,
                 record.dispatch_info.private_segment_size,
-                record.dispatch_info.group_segment_size,
+                kernel_info->arch_vgpr_count,
+                kernel_info->accum_vgpr_count,
+                kernel_info->sgpr_count,
                 record.dispatch_info.workgroup_size.x,
                 record.dispatch_info.workgroup_size.y,
                 record.dispatch_info.workgroup_size.z,
