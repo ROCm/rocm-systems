@@ -1612,7 +1612,7 @@ rdc_status_t rdc_device_topology_get(rdc_handle_t p_rdc_handle, uint32_t gpu_ind
  *  @param[in] p_rdc_handle The RDC handler.
  *
  *
- *  @param[out] resu
+ *  @param[out] results
  * lts  The link up or down status
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
