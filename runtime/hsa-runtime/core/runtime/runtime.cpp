@@ -2012,7 +2012,7 @@ Runtime::Runtime()
   asyncExceptions_.monitor_exceptions = true;
   g_use_interrupt_wait = true;
   g_use_mwaitx = true;
-  ::_amdgpu_r_debug = {10,
+  ::_amdgpu_r_debug = {11,
                      nullptr,
                      reinterpret_cast<uintptr_t>(
                                 &_loader_debug_state),
