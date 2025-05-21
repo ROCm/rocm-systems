@@ -7222,7 +7222,7 @@ rsmi_event_notification_get(int timeout_ms,
 
       uint32_t event;
       char event_in[MAX_EVENT_NOTIFICATION_MSG_SIZE];
-      memcpy(reinterpret_cast<char *>(event_in), "\0", MAX_EVENT_NOTIFICATION_MSG_SIZE);
+      memset(event_in, '\0', MAX_EVENT_NOTIFICATION_MSG_SIZE);
       while (fgets(event_in, MAX_EVENT_NOTIFICATION_MSG_SIZE, anon_fp)) {
         /* Output is in format as "event_number message_information\n"
          * Both event are expressed in hex.
@@ -7241,7 +7241,7 @@ rsmi_event_notification_get(int timeout_ms,
           {
             uint32_t pid;
             char task_name[MAX_EVENT_NOTIFICATION_MSG_SIZE];
-            memcpy(reinterpret_cast<char *>(task_name), "\0", MAX_EVENT_NOTIFICATION_MSG_SIZE);
+            memset(task_name, '\0', MAX_EVENT_NOTIFICATION_MSG_SIZE);
 
             sscanf(message, "%x:%s\n", &pid, task_name);
             std::stringstream final_message;
@@ -7268,7 +7268,7 @@ rsmi_event_notification_get(int timeout_ms,
           {
             uint32_t reset_seq_num;
             char reset_cause[MAX_EVENT_NOTIFICATION_MSG_SIZE];
-            memcpy(reinterpret_cast<char *>(reset_cause), "\0", MAX_EVENT_NOTIFICATION_MSG_SIZE);
+            memset(reset_cause, '\0', MAX_EVENT_NOTIFICATION_MSG_SIZE);
 
             sscanf(message, "%x %[^\n]\n", &reset_seq_num, reset_cause);
             std::stringstream final_message;
@@ -7459,7 +7459,7 @@ rsmi_event_notification_get(int timeout_ms,
         ++(*num_elem);
 
         // zero out event_in after each use
-        memcpy(reinterpret_cast<char *>(event_in), "\0", MAX_EVENT_NOTIFICATION_MSG_SIZE);
+        memset(event_in, '\0', MAX_EVENT_NOTIFICATION_MSG_SIZE);
 
         if (*num_elem >= buffer_size) {
           break;
