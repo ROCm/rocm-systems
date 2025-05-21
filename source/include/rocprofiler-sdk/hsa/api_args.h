@@ -1426,6 +1426,14 @@ typedef union rocprofiler_hsa_api_args_t
         hsa_signal_value_t*     satisfying_values;
     } hsa_amd_signal_wait_all;
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x06
+    struct
+    {
+        hsa_agent_t dst_agent;
+        hsa_agent_t src_agent;
+        uint32_t*   recommended_ids_mask;
+    } hsa_amd_memory_get_preferred_copy_engine;
+#    endif
 #endif
 } rocprofiler_hsa_api_args_t;
 
