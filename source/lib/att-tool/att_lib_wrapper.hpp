@@ -22,10 +22,10 @@
 
 #pragma once
 
-#include <rocprofiler-sdk/experimental/thread-trace/trace_decoder.h>
-
 #include "lib/att-tool/util.hpp"
 #include "lib/common/filesystem.hpp"
+
+#include <rocprofiler-sdk/experimental/thread-trace/trace_decoder.h>
 
 #include <algorithm>
 #include <fstream>
