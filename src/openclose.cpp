@@ -33,32 +33,20 @@
 #include <cassert>
 #include "libhsakmt.h"
 
-static const char dxg_device_name[] = "/dev/dxg";
-static pid_t parent_pid = -1;
-int hsakmt_debug_level;
-bool hsakmt_forked;
-static int dxg_fd = -1;
-
+hsakmtRuntime *dxg_runtime = new hsakmtRuntime();
 /* is_forked_child detects when the process has forked since the last
  * time this function was called. We cannot rely on pthread_atfork
  * because the process can fork without calling the fork function in
  * libc (using clone or calling the system call directly).
  */
 bool is_forked_child(void) {
-  pid_t cur_pid;
-
-  if (hsakmt_forked)
+  if (dxg_runtime->is_forked)
     return true;
 
-  cur_pid = getpid();
-
-  if (parent_pid == -1) {
-    parent_pid = cur_pid;
-    return false;
-  }
-
-  if (parent_pid != cur_pid) {
-    hsakmt_forked = true;
+  pid_t cur_pid = getpid();
+  if (dxg_runtime->parent_pid != cur_pid) {
+    dxg_runtime->is_forked = true;
+    dxg_runtime->parent_pid = cur_pid;
     return true;
   }
 
@@ -66,11 +54,11 @@ bool is_forked_child(void) {
 }
 
 /* Callbacks from pthread_atfork */
-static void prepare_fork_handler(void) { pthread_mutex_lock(&hsakmt_mutex); }
-static void parent_fork_handler(void) { pthread_mutex_unlock(&hsakmt_mutex); }
+static void prepare_fork_handler(void) { pthread_mutex_lock(&dxg_runtime->hsakmt_mutex); }
+static void parent_fork_handler(void) { pthread_mutex_unlock(&dxg_runtime->hsakmt_mutex); }
 static void child_fork_handler(void) {
-  pthread_mutex_init(&hsakmt_mutex, NULL);
-  hsakmt_forked = true;
+  pthread_mutex_init(&dxg_runtime->hsakmt_mutex, NULL);
+  dxg_runtime->is_forked = true;
 }
 
 /* Call this from the child process after fork. This will clear all
@@ -82,13 +70,14 @@ static void child_fork_handler(void) {
 static void clear_after_fork(void) {
   reset_suballocator();
   clear_allocation_map();
-  if (dxg_fd) {
-    close(dxg_fd);
-    dxg_fd = -1;
+
+  if (dxg_runtime->dxg_fd >= 0) {
+    close(dxg_runtime->dxg_fd);
+    dxg_runtime->dxg_fd = -1;
   }
-  dxg_open_count = 0;
-  parent_pid = -1;
-  hsakmt_forked = false;
+  delete dxg_runtime;
+  dxg_runtime = new hsakmtRuntime();
+
 }
 
 static inline void init_page_size(void) {
@@ -105,36 +94,34 @@ static HSAKMT_STATUS init_vars_from_env(void) {
   /* Normally libraries don't print messages. For debugging purpose, we'll
    * print messages if an environment variable, HSAKMT_DEBUG_LEVEL, is set.
    */
-  hsakmt_debug_level = HSAKMT_DEBUG_LEVEL_DEFAULT;
-
   envvar = getenv("HSAKMT_DEBUG_LEVEL");
   if (envvar) {
-    hsakmt_debug_level = atoi(envvar);
+    dxg_runtime->hsakmt_debug_level = atoi(envvar);
   }
 
   /* Check whether to support Zero frame buffer */
   envvar = getenv("HSA_ZFB");
   if (envvar)
-    zfb_support = atoi(envvar);
+    dxg_runtime->zfb_support = atoi(envvar);
 
   /* Check whether to handle vendor specific aql packet */
   envvar = getenv("WSLKMT_VENDOR_PACKET");
   if (envvar)
-    vendor_packet_process = atoi(envvar);
+    dxg_runtime->vendor_packet_process = atoi(envvar);
 
   /* Decide whether hsa-runtime dispatch vendor packet */
   envvar = getenv("WSL_ENABLE_VENDOR_PACKET");
   if (envvar)
-    enable_vendor_packet = atoi(envvar);
+    dxg_runtime->enable_vendor_packet = atoi(envvar);
 
   /* Decide whether to check available system memory before allocation */
   envvar = getenv("WSL_CHECK_AVAIL_SYSRAM");
   if (envvar)
-    check_avail_sysram = !strcmp(envvar, "1");
+    dxg_runtime->check_avail_sysram = !strcmp(envvar, "1");
 
   envvar = getenv("WSL_ENABLE_THUNK_SUB_ALLOCATOR");
   if (envvar)
-    enable_thunk_sub_allocator = atoi(envvar);
+    dxg_runtime->enable_thunk_sub_allocator = atoi(envvar);
 
   return HSAKMT_STATUS_SUCCESS;
 }
@@ -144,9 +131,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
   int fd = -1;
   HsaSystemProperties sys_props;
   char *error;
-  char *useSvmStr;
 
-  pthread_mutex_lock(&hsakmt_mutex);
+  pthread_mutex_lock(&dxg_runtime->hsakmt_mutex);
 
   /* If the process has forked, the child process must re-initialize
    * it's connection to DXG. Any references tracked by dxg_open_count
@@ -155,34 +141,34 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
   if (is_forked_child())
     clear_after_fork();
 
-  if (dxg_open_count == 0) {
+  if (dxg_runtime->dxg_open_count == 0) {
     static bool atfork_installed = false;
 
     result = init_vars_from_env();
     if (result != HSAKMT_STATUS_SUCCESS)
       goto open_failed;
 
-    if (dxg_fd < 0) {
-      fd = open(dxg_device_name, O_RDWR | O_CLOEXEC);
+    if (dxg_runtime->dxg_fd < 0) {
+      fd = open(dxg_runtime->dxg_device_name, O_RDWR | O_CLOEXEC);
 
       if (fd == -1) {
         result = HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED;
         goto open_failed;
       }
 
-      dxg_fd = fd;
+      dxg_runtime->dxg_fd = fd;
     }
 
     init_page_size();
 
-    useSvmStr = getenv("HSA_USE_SVM");
-    is_svm_api_supported = !(useSvmStr && !strcmp(useSvmStr, "0")) && false;
+    char *useSvmStr = getenv("HSA_USE_SVM");
+    dxg_runtime->is_svm_api_supported = !(useSvmStr && !strcmp(useSvmStr, "0")) && false;
 
     // result = topology_sysfs_get_system_props(&sys_props);
     if (result != HSAKMT_STATUS_SUCCESS)
       goto topology_sysfs_failed;
 
-    dxg_open_count = 1;
+    dxg_runtime->dxg_open_count = 1;
 
     if (!atfork_installed) {
       /* Atfork handlers cannot be uninstalled and
@@ -195,17 +181,17 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
       atfork_installed = true;
     }
   } else {
-    dxg_open_count++;
+    dxg_runtime->dxg_open_count++;
     result = HSAKMT_STATUS_KERNEL_ALREADY_OPENED;
   }
 
   reset_suballocator();
-  pthread_mutex_unlock(&hsakmt_mutex);
+  pthread_mutex_unlock(&dxg_runtime->hsakmt_mutex);
   return result;
 topology_sysfs_failed:
   close(fd);
 open_failed:
-  pthread_mutex_unlock(&hsakmt_mutex);
+  pthread_mutex_unlock(&dxg_runtime->hsakmt_mutex);
 
   return result;
 }
@@ -213,18 +199,19 @@ open_failed:
 HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFD(void) {
   HSAKMT_STATUS result;
 
-  pthread_mutex_lock(&hsakmt_mutex);
+  pthread_mutex_lock(&dxg_runtime->hsakmt_mutex);
 
-  if (dxg_open_count > 0) {
-    if (--dxg_open_count == 0) {
-      close(dxg_fd);
+  if (dxg_runtime->dxg_open_count > 0) {
+    if (--dxg_runtime->dxg_open_count == 0) {
+      close(dxg_runtime->dxg_fd);
+      dxg_runtime->dxg_fd = -1;
     }
 
     result = HSAKMT_STATUS_SUCCESS;
   } else
     result = HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED;
 
-  pthread_mutex_unlock(&hsakmt_mutex);
+  pthread_mutex_unlock(&dxg_runtime->hsakmt_mutex);
 
   return result;
 }

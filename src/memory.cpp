@@ -179,15 +179,15 @@ HSAKMT_STATUS hsaKmtAllocMemoryAlignInternal(HSAuint32 PreferredNode,
   create_info.alignment = Alignment;
   create_info.va_hint = reinterpret_cast<gpusize>(*MemoryAddress);
   if ((PreferredNode == 0 && MemFlags.ui32.HostAccess)
-    || zfb_support || MemFlags.ui32.GTTAccess) {
-    if (SizeInBytes > max_single_alloc_size)
+    || dxg_runtime->zfb_support || MemFlags.ui32.GTTAccess) {
+    if (SizeInBytes > dxg_runtime->max_single_alloc_size)
       return HSAKMT_STATUS_NO_MEMORY;
 
-    if (check_avail_sysram && !isSystemMemoryAvailable(SizeInBytes))
+    if (dxg_runtime->check_avail_sysram && !isSystemMemoryAvailable(SizeInBytes))
       return HSAKMT_STATUS_NO_MEMORY;
 
     /* If allocate VRAM under ZFB mode */
-    if (zfb_support && MemFlags.ui32.NonPaged == 1)
+    if (dxg_runtime->zfb_support && MemFlags.ui32.NonPaged == 1)
       MemFlags.ui32.CoarseGrain = 1;
 
     // AllocateNonPaged == AllocateIPC
@@ -274,7 +274,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAllocMemoryAlign(HSAuint32 PreferredNode,
   return hsaKmtAllocMemoryAlignInternal(PreferredNode, SizeInBytes,
                                         Alignment, MemFlags,
                                         MemoryAddress,
-                                        !enable_thunk_sub_allocator);
+                                        !dxg_runtime->enable_thunk_sub_allocator);
 }
 
 HSAKMT_STATUS hsaKmtFreeMemoryInternal(void *MemoryAddress,
@@ -419,7 +419,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemoryWithFlags(
   if ((MemFlags.ui32.HostAccess != 1) || (MemFlags.ui32.NonPaged == 1))
     return HSAKMT_STATUS_NOT_SUPPORTED;
 
-  if (!hsakmt_is_dgpu)
+  if (!dxg_runtime->hsakmt_is_dgpu)
     /* TODO: support mixed APU and dGPU configurations */
     return HSAKMT_STATUS_NOT_SUPPORTED;
 

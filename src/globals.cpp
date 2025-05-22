@@ -27,29 +27,9 @@
 
 // HSAKMT global data
 
-int kfd_fd = -1;
-unsigned long dxg_open_count;
-unsigned long system_properties_count;
-pthread_mutex_t hsakmt_mutex = PTHREAD_MUTEX_INITIALIZER;
-bool hsakmt_is_dgpu;
-
 #ifndef PAGE_SIZE
 int PAGE_SIZE;
 #endif
 
 int PAGE_SHIFT;
 
-/* whether to check all dGPUs in the topology support SVM API */
-bool is_svm_api_supported;
-/* zfb is mainly used during emulation */
-int zfb_support;
-/* handle vendor specific packet. :1 process 0:skip */
-int vendor_packet_process;
-/* enable vendor packet in hsa-runtime*/
-int enable_vendor_packet;
-/* check available system memory before allocation */
-bool check_avail_sysram = false;
-/* enable 128MB sub-allocator in libhsakmt, default: disable */
-int enable_thunk_sub_allocator = 0;
-
-size_t max_single_alloc_size = 0;

@@ -38,17 +38,47 @@
 wsl::thunk::WDDMDevice* get_wddmdev(uint32_t node_id);
 wsl::thunk::GpuMemory *get_gpu_mem(void *MemoryAddress);
 
-extern unsigned long dxg_open_count;
-extern bool hsakmt_forked;
-extern pthread_mutex_t hsakmt_mutex;
-extern bool hsakmt_is_dgpu;
-extern bool is_svm_api_supported;
-extern int zfb_support;
-extern int vendor_packet_process;
-extern int enable_vendor_packet;
-extern bool check_avail_sysram;
-extern size_t max_single_alloc_size;
-extern int enable_thunk_sub_allocator;
+#define HSAKMT_DEBUG_LEVEL_ERR      -1
+#define HSAKMT_DEBUG_LEVEL_DEFAULT  3
+#define HSAKMT_DEBUG_LEVEL_WARNING  4
+#define HSAKMT_DEBUG_LEVEL_INFO     6
+#define HSAKMT_DEBUG_LEVEL_DEBUG    7
+
+struct hsakmtRuntime {
+  hsakmtRuntime()
+    : dxg_fd(-1),
+    parent_pid(getpid()),
+    is_forked(false),
+    hsakmt_debug_level(HSAKMT_DEBUG_LEVEL_DEFAULT),
+    dxg_open_count(0),
+    hsakmt_mutex(PTHREAD_MUTEX_INITIALIZER),
+    hsakmt_is_dgpu(false),
+    is_svm_api_supported(false),
+    zfb_support(0),
+    vendor_packet_process(0),
+    enable_vendor_packet(0),
+    check_avail_sysram(false),
+    max_single_alloc_size(0),
+    enable_thunk_sub_allocator(0) {}
+
+  pthread_mutex_t hsakmt_mutex;
+  const char *dxg_device_name = "/dev/dxg";
+  int dxg_fd = -1;
+  pid_t parent_pid = -1;
+  bool is_forked = false;
+  int hsakmt_debug_level = HSAKMT_DEBUG_LEVEL_DEFAULT;
+  unsigned long dxg_open_count;
+  bool hsakmt_is_dgpu;
+  bool is_svm_api_supported;
+  int zfb_support;
+  int vendor_packet_process;
+  int enable_vendor_packet;
+  bool check_avail_sysram;
+  size_t max_single_alloc_size;
+  int enable_thunk_sub_allocator;
+};
+
+extern hsakmtRuntime *dxg_runtime;
 
 #undef HSAKMTAPI
 #define HSAKMTAPI __attribute__((visibility ("default")))
@@ -66,7 +96,7 @@ extern int enable_thunk_sub_allocator;
 #define PORT_UINT64_TO_VPTR(v) ((void*)(unsigned long)(v))
 
 #define CHECK_DXG_OPEN() \
-	do { if (dxg_open_count == 0 || hsakmt_forked) return HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED; } while (0)
+	do { if (dxg_runtime->dxg_open_count == 0 || dxg_runtime->is_forked) return HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED; } while (0)
 
 /* Might be defined in limits.h on platforms where it is constant (used by musl) */
 /* See also: https://pubs.opengroup.org/onlinepubs/7908799/xsh/limits.h.html */
@@ -91,7 +121,6 @@ extern int PAGE_SHIFT;
 #define ARRAY_LEN(array) (sizeof(array) / sizeof(array[0]))
 
 /* HSA Thunk logging usage */
-extern int hsakmt_debug_level;
 #define get_thread_id()                                                                                                          \
     ([]() -> std::string {                                                                                                       \
         std::stringstream str_thrd_id;                                                                                           \
@@ -109,16 +138,12 @@ extern int hsakmt_debug_level;
 #else
 #define hsakmt_print(level, fmt, ...)                                                                                            \
     do {                                                                                                                         \
-        if (level <= hsakmt_debug_level) {                                                                                       \
+        if (level <= dxg_runtime->hsakmt_debug_level) {                                                                          \
             hsakmt_print_common(stdout, fmt, ##__VA_ARGS__);                                                                     \
         }                                                                                                                        \
     } while (false)
 #endif
-#define HSAKMT_DEBUG_LEVEL_ERR      -1
-#define HSAKMT_DEBUG_LEVEL_DEFAULT  3
-#define HSAKMT_DEBUG_LEVEL_WARNING  4
-#define HSAKMT_DEBUG_LEVEL_INFO     6
-#define HSAKMT_DEBUG_LEVEL_DEBUG    7
+
 #define pr_err(fmt, ...) \
 	hsakmt_print_common(stderr, fmt, ##__VA_ARGS__)
 #define pr_warn(fmt, ...) \

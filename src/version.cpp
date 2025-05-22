@@ -53,7 +53,7 @@ hsaKmtGetVersionCapInfo(HsaVersionCapability *VersionCapInfo) {
   VersionCapInfo->ui64.XNack = 0;
   VersionCapInfo->ui64.FineGrainPcie = 0;*/
 
-  VersionCapInfo->ui64.VendorPacket = enable_vendor_packet;
+  VersionCapInfo->ui64.VendorPacket = dxg_runtime->enable_vendor_packet;
 
   return HSAKMT_STATUS_SUCCESS;
 }
