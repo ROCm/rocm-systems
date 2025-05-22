@@ -276,7 +276,7 @@ static void printLabel(char const *l, bool newline = false,
     printf("\n");
   }
 }
-static void printValueStr(char const *s, bool newline = true) {
+static void printValueStr(char const *s, bool /*newline*/ = true) {
   printf("%-*s\n", kValueFieldSize, s);
 }
 
@@ -879,7 +879,7 @@ static void DisplayPoolInfo(pool_info_t *pool_i, uint32_t indent) {
 
 static hsa_status_t
 AcquireAndDisplayMemPoolInfo(const hsa_amd_memory_pool_t pool,
-                                                            uint32_t indent) {
+                                                            uint32_t /*indent*/) {
   hsa_status_t err;
   pool_info_t pool_i;
 
@@ -1030,7 +1030,7 @@ static void DisplayISAInfo(isa_info_t *isa_i, uint32_t indent) {
 }
 
 static hsa_status_t
-AcquireAndDisplayISAInfo(const hsa_isa_t isa, uint32_t indent) {
+AcquireAndDisplayISAInfo(const hsa_isa_t isa, uint32_t /*indent*/) {
   hsa_status_t err;
   isa_info_t isa_i;
 
@@ -1304,7 +1304,7 @@ int CheckInitialState(void) {
 // acccumulate information about those objects. Corresponding to each
 // Acquire-type function is a Display* function which display the
 // accumulated data in a formatted way.
-int main(int argc, char* argv[]) {
+int main() {
   hsa_status_t err;
 
   DetectWSLEnvironment();
