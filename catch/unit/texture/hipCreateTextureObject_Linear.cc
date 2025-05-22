@@ -117,42 +117,75 @@ TEST_CASE("Unit_hipCreateTextureObject_LinearResource") {
     REQUIRE(ret != hipSuccess);
   }
 
-  SECTION("hipResourceTypeLinear and valid resource view descriptor") {
+  SECTION("hipResourceTypeLinear and every resource view format") {
 #if HT_AMD
-    // Populate resource descriptor
+    // Populate common parts of the descriptors
     resDesc.res.linear.devPtr = texBuf;
-    resDesc.res.linear.desc = hipCreateChannelDesc(xsize, 0, 0, 0,
-                           hipChannelFormatKindFloat);
+    resDesc.res.linear.desc = hipCreateChannelDesc(xsize, 0, 0, 0, hipChannelFormatKindFloat);
     resDesc.res.linear.sizeInBytes = N * sizeof(float);
-
-    // Populate texture descriptor
     texDesc.readMode = hipReadModeElementType;
-
-    // Populate resourceview descriptor
     memset(&resViewDesc, 0, sizeof(resViewDesc));
-    resViewDesc.format = hipResViewFormatFloat1;
-    resViewDesc.width = N * sizeof(float);
-    ret = hipCreateTextureObject(&texObj, &resDesc, &texDesc, &resViewDesc);
-    REQUIRE(ret != hipSuccess);
+
+    // List every enum to test
+    const std::vector<hipResourceViewFormat> formats = {hipResViewFormatNone,
+                                                        hipResViewFormatUnsignedChar1,
+                                                        hipResViewFormatUnsignedChar2,
+                                                        hipResViewFormatUnsignedChar4,
+                                                        hipResViewFormatSignedChar1,
+                                                        hipResViewFormatSignedChar2,
+                                                        hipResViewFormatSignedChar4,
+                                                        hipResViewFormatUnsignedShort1,
+                                                        hipResViewFormatUnsignedShort2,
+                                                        hipResViewFormatUnsignedShort4,
+                                                        hipResViewFormatSignedShort1,
+                                                        hipResViewFormatSignedShort2,
+                                                        hipResViewFormatSignedShort4,
+                                                        hipResViewFormatUnsignedInt1,
+                                                        hipResViewFormatUnsignedInt2,
+                                                        hipResViewFormatUnsignedInt4,
+                                                        hipResViewFormatSignedInt1,
+                                                        hipResViewFormatSignedInt2,
+                                                        hipResViewFormatSignedInt4,
+                                                        hipResViewFormatHalf1,
+                                                        hipResViewFormatHalf2,
+                                                        hipResViewFormatHalf4,
+                                                        hipResViewFormatFloat1,
+                                                        hipResViewFormatFloat2,
+                                                        hipResViewFormatFloat4,
+                                                        hipResViewFormatUnsignedBlockCompressed1,
+                                                        hipResViewFormatUnsignedBlockCompressed2,
+                                                        hipResViewFormatUnsignedBlockCompressed3,
+                                                        hipResViewFormatUnsignedBlockCompressed4,
+                                                        hipResViewFormatSignedBlockCompressed4,
+                                                        hipResViewFormatUnsignedBlockCompressed5,
+                                                        hipResViewFormatSignedBlockCompressed5,
+                                                        hipResViewFormatUnsignedBlockCompressed6H,
+                                                        hipResViewFormatSignedBlockCompressed6H,
+                                                        hipResViewFormatUnsignedBlockCompressed7};
+
+    for (auto fmt : formats) {
+      resViewDesc.format = fmt;
+      resViewDesc.width = N * sizeof(float);
+      ret = hipCreateTextureObject(&texObj, &resDesc, &texDesc, &resViewDesc);
+      INFO("hipCreateTextureObject(format=" << fmt << ") returned " << ret);
+      REQUIRE(ret != hipSuccess);
+    }
 #else
-    // API expected to return error according to cuda documentation.
-    WARN("Resource view descriptor test skipped on nvidia");
+    WARN("Resource view descriptor tests skipped on NVIDIA");
 #endif
   }
 
   SECTION("hipResourceTypeLinear and devicePtr un-aligned") {
     if (devProp.textureAlignment > UNALIGN_OFFSET) {
-    // Populate resource descriptor
-    resDesc.res.linear.devPtr = reinterpret_cast<char *>(texBuf)
-                                                      + UNALIGN_OFFSET;
-    resDesc.res.linear.desc = hipCreateChannelDesc(xsize, 0, 0, 0,
-                                               hipChannelFormatKindFloat);
-    resDesc.res.linear.sizeInBytes = N * sizeof(float);
+      // Populate resource descriptor
+      resDesc.res.linear.devPtr = reinterpret_cast<char*>(texBuf) + UNALIGN_OFFSET;
+      resDesc.res.linear.desc = hipCreateChannelDesc(xsize, 0, 0, 0, hipChannelFormatKindFloat);
+      resDesc.res.linear.sizeInBytes = N * sizeof(float);
 
-    // Populate texture descriptor
-    texDesc.readMode = hipReadModeElementType;
-    ret = hipCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr);
-    REQUIRE(ret != hipSuccess);
+      // Populate texture descriptor
+      texDesc.readMode = hipReadModeElementType;
+      ret = hipCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr);
+      REQUIRE(ret != hipSuccess);
     }
   }
 
