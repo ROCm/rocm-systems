@@ -32,7 +32,7 @@
  * dynamically loading the shared library with @p dlopen, the address of each
  * function can be obtained using @p dlsym with the name of the function and
  * its corresponding symbol version string.  An error will be reported by @p
- * dlvsym if the installed library does not support the version for the
+ * dlsym if the installed library does not support the version for the
  * function specified in this version of the interface.
  *
  * @{

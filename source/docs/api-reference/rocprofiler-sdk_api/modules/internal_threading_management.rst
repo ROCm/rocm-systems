@@ -9,3 +9,4 @@ Internal threading management
 
 .. doxygengroup:: INTERNAL_THREADING
    :content-only:
+   :project: rocprofiler-sdk

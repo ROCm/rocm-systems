@@ -9,3 +9,4 @@ Buffer tracing
 
 .. doxygengroup:: BUFFER_TRACING_SERVICE
    :content-only:
+   :project: rocprofiler-sdk

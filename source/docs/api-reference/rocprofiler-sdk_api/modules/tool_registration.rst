@@ -9,3 +9,4 @@ Tool registration
 
 .. doxygengroup:: REGISTRATION_GROUP
    :content-only:
+   :project: rocprofiler-sdk

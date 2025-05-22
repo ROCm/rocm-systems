@@ -152,18 +152,20 @@ EXCLUDE_PATTERNS       = */.git/* \
                          @SOURCE_DIR@/**/rocprofiler-sdk/**/* \
                          @SOURCE_DIR@/**/rocprofiler-sdk-roctx/api_trace.h
 EXCLUDE_SYMBOLS        = "std::*" \
-                         "ROCTX_ATTRIBUTE" \
+                         "ROCPROFILER_ATTRIBUTE" \
+                         "ROCPROFILER_API" \
+                         "ROCPROFILER_NONNULL" \
+                         "ROCPROFILER_PUBLIC_API" \
+                         "ROCPROFILER_HIDDEN_API" \
+                         "ROCPROFILER_EXPORT_DECORATOR" \
+                         "ROCPROFILER_IMPORT_DECORATOR" \
+                         "ROCPROFILER_EXPORT" \
+                         "ROCPROFILER_IMPORT" \
+                         "ROCPROFILER_HANDLE_LITERAL" \
+                         "ROCPROFILER_EXTERN_C_INIT" \
+                         "ROCPROFILER_EXTERN_C_FINI" \
                          "ROCTX_API" \
-                         "ROCTX_NONNULL" \
-                         "ROCTX_PUBLIC_API" \
-                         "ROCTX_HIDDEN_API" \
-                         "ROCTX_EXPORT_DECORATOR" \
-                         "ROCTX_IMPORT_DECORATOR" \
-                         "ROCTX_EXPORT" \
-                         "ROCTX_IMPORT" \
-                         "ROCTX_HANDLE_LITERAL" \
-                         "ROCTX_EXTERN_C_INIT" \
-                         "ROCTX_EXTERN_C_FINI"
+                         "ROCTX_NONNULL"
 EXAMPLE_PATH           = @SOURCE_DIR@/samples
 EXAMPLE_PATTERNS       = *.h \
                          *.hh \

@@ -79,7 +79,7 @@ ROCTX_EXTERN_C_INIT
 
 /** @defgroup marker_group ROCTx Markers
  *
- * Marker annotations are used to describe events in a ROCm application.
+ * @brief Markers are used to annotate specific events in the code execution.
  *
  * @{
  */
@@ -96,8 +96,14 @@ roctxMarkA(const char* message) ROCTX_API ROCTX_NONNULL(1);
 
 /** @defgroup range_group ROCTx Ranges
  *
- * Range annotations are used to describe events in a ROCm application.
+ * @brief Ranges are used to describe a span of code execution in a ROCm application.
  *
+ * Ranges can be nested, and the API provides functions to start and stop ranges.
+ * Ranges are thread-local, meaning that each thread can have its own stack of
+ * ranges. The API provides functions to push and pop ranges from the stack.
+ * The API also provides functions to start and stop ranges, which are
+ * process-wide. Each range is assigned a unique ID, which can be used to
+ * identify the range when stopping it.
  * @{
  */
 
@@ -152,7 +158,7 @@ roctxRangeStop(roctx_range_id_t id) ROCTX_API;
 
 /** @defgroup PROFILER_COMM ROCTx Application control/customization of profiling tools
  *
- * Applications can invoke these functions to control/customize profiling tool behavior.
+ * @brief Applications can invoke these functions to control/customize profiling tool behavior.
  *
  * @{
  */
@@ -191,6 +197,15 @@ roctxProfilerPause(roctx_thread_id_t tid) ROCTX_API;
  */
 int
 roctxProfilerResume(roctx_thread_id_t tid) ROCTX_API;
+
+/** @} */
+
+/** \defgroup UTILITIES ROCTx Utility functions
+ *
+ * @brief Utility functions for profiling tools to customize their behavior.
+ *
+ * @{
+ */
 
 /**
  * @brief Indicate to a profiling tool that, where possible, you would like the current CPU OS

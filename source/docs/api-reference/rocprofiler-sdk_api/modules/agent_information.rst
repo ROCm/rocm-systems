@@ -8,4 +8,5 @@ Agent Information
 *******************************************************************************
 
 .. doxygengroup:: AGENTS
+   :project: rocprofiler-sdk
    :content-only:

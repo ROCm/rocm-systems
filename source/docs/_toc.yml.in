@@ -60,8 +60,22 @@ subtrees:
               - file: _doxygen/rocprofiler-sdk/html/topics
               - file: _doxygen/rocprofiler-sdk/html/annotated
               - file: _doxygen/rocprofiler-sdk/html/files
-    - file: _doxygen/roctx/html/index
-      title: ROCTx API library
+    - file: api-reference/rocprofiler-sdk-roctx_api_reference
+      subtrees:
+      - entries:
+        - file: api-reference/rocprofiler-sdk-roctx_api/roctx_modules
+          subtrees:
+          - entries:
+            - file: api-reference/rocprofiler-sdk-roctx_api/roctx_modules/markers
+            - file: api-reference/rocprofiler-sdk-roctx_api/roctx_modules/ranges
+            - file: api-reference/rocprofiler-sdk-roctx_api/roctx_modules/profiler-control
+            - file: api-reference/rocprofiler-sdk-roctx_api/roctx_modules/naming-utilities
+        - file: api-reference/rocprofiler-sdk-roctx_api/global_roctx_data_structures_topics_files
+          subtrees:
+          - entries:
+            - file: api-reference/rocprofiler-sdk-roctx_api/global_roctx_data_structures_topics_files/global_roctx_basic_data_types
+            - file: _doxygen/roctx/html/topics
+            - file: _doxygen/roctx/html/files
   - caption: Conceptual
     entries:
     - file: conceptual/comparing-with-legacy-tools

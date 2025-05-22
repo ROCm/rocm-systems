@@ -9,3 +9,4 @@ OMPT Registration
 
 .. doxygengroup:: OMPT_REGISTRATION
    :content-only:
+   :project: rocprofiler-sdk

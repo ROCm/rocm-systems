@@ -9,3 +9,4 @@ Dispatch counting service
 
 .. doxygengroup:: dispatch_counting_service
    :content-only:
+   :project: rocprofiler-sdk

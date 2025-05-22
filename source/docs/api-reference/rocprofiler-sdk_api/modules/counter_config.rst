@@ -9,3 +9,4 @@ Counter config
 
 .. doxygengroup:: COUNTER_CONFIG
    :content-only:
+   :project: rocprofiler-sdk

@@ -9,3 +9,4 @@ PC Sampling service
 
 .. doxygengroup:: PC_SAMPLING_SERVICE
    :content-only:
+   :project: rocprofiler-sdk

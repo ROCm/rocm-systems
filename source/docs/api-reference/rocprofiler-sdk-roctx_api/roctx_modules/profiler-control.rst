@@ -1,12 +1,12 @@
 .. meta::
-  :description: The counters reference page.
+  :description: Profiler Control Information reference page.
 
-.. _counters_reference:
+.. _profiler-control_information_reference:
 
 *******************************************************************************
-Counters
+Profiler Control Information
 *******************************************************************************
 
-.. doxygengroup:: COUNTERS
+.. doxygengroup:: PROFILER_COMM
    :content-only:
-   :project: rocprofiler-sdk   
+   :project: roctx

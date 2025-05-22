@@ -9,3 +9,4 @@ Thread trace
 
 .. doxygengroup:: THREAD_TRACE
    :content-only:
+   :project: rocprofiler-sdk

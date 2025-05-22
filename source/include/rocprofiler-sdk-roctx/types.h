@@ -26,9 +26,9 @@
 
 #include <stdint.h>
 
-/** @defgroup DATA_TYPE ROCTx Data types
+/** \defgroup BASIC_DATA_TYPES ROCTx Data types
  *
- * Data types defined or aliased by ROCTx
+ *  @brief Data types defined or aliased by ROCTx
  *
  * @{
  */
