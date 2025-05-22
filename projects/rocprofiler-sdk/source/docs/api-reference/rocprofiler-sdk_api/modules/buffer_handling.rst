@@ -9,3 +9,4 @@ Buffer handling
 
 .. doxygengroup:: BUFFER_HANDLING
    :content-only:
+   :project: rocprofiler-sdk

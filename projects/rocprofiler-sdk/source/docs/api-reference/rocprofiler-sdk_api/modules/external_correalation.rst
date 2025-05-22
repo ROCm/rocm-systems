@@ -9,3 +9,4 @@ External correlation
 
 .. doxygengroup:: EXTERNAL_CORRELATION
    :content-only:
+   :project: rocprofiler-sdk

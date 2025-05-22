@@ -169,7 +169,9 @@ EXCLUDE_SYMBOLS        = "std::*" \
                          "ROCPROFILER_EXTERN_C_FINI" \
                          "ROCPROFILER_SDK_DEPRECATED_WARNINGS" \
                          "ROCPROFILER_SDK_EXPERIMENTAL_WARNINGS" \
-                         "ROCPROFILER_*_LAST"
+                         "ROCPROFILER_*_LAST" \
+                         "ROCTX_API" \
+                         "ROCTX_NONNULL"
 EXAMPLE_PATH           = @SOURCE_DIR@/samples
 EXAMPLE_PATTERNS       = *.h \
                          *.hh \

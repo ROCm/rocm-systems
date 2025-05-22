@@ -1,12 +1,12 @@
 .. meta::
-  :description: The counters reference page.
+  :description: The global basic data types reference page.
 
-.. _counters_reference:
+.. _global_roctx_basic_data_types_reference:
 
 *******************************************************************************
-Counters
+Global Basic Data Types
 *******************************************************************************
 
-.. doxygengroup:: COUNTERS
+.. doxygengroup:: BASIC_DATA_TYPES
    :content-only:
-   :project: rocprofiler-sdk   
+   :project: roctx

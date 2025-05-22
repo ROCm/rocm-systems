@@ -9,3 +9,4 @@ Context management
 
 .. doxygengroup:: CONTEXT_OPERATIONS
    :content-only:
+   :project: rocprofiler-sdk

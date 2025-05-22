@@ -9,3 +9,4 @@ Intercept table
 
 .. doxygengroup:: INTERCEPT_TABLE
    :content-only:
+   :project: rocprofiler-sdk

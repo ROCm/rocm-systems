@@ -65,10 +65,13 @@ extensions = [
 
 doxygen_root = "."
 doxysphinx_enabled = True
-doxygen_project = {
-    "name": "rocprofiler-sdk",
-    "path": "_doxygen/rocprofiler-sdk/xml",
+
+breathe_projects = {
+    "rocprofiler-sdk": "_doxygen/rocprofiler-sdk/xml",
+    "roctx": "_doxygen/roctx/xml",
 }
+breathe_default_project = "rocprofiler-sdk"
+
 doxyfile = "rocprofiler-sdk.dox"
 
 external_projects_current_project = "rocprofiler-sdk"
@@ -81,6 +84,12 @@ external_toc_path = "./_toc.yml"
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]
 suppress_warnings = ["etoc.toctree"]
+nitpick_ignore = [
+    ("cpp:identifier", "uint32_t"),
+    ("cpp:identifier", "uint64_t"),
+    ("cpp:identifier", "hsa_agent_s"),
+    ("cpp:identifier", "ihipStream_t"),
+]
 
 # -- Options for HTML output -------------------------------------------------
 

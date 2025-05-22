@@ -1,12 +1,12 @@
 .. meta::
-  :description: The counters reference page.
+  :description: Markers Information reference page.
 
-.. _counters_reference:
+.. _markers_information_reference:
 
 *******************************************************************************
-Counters
+Markers Information
 *******************************************************************************
 
-.. doxygengroup:: COUNTERS
+.. doxygengroup:: marker_group
    :content-only:
-   :project: rocprofiler-sdk   
+   :project: roctx

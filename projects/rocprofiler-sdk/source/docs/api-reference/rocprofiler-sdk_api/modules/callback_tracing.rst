@@ -9,3 +9,4 @@ Callback tracing
 
 .. doxygengroup:: CALLBACK_TRACING_SERVICE
    :content-only:
+   :project: rocprofiler-sdk   

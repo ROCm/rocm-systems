@@ -1,12 +1,12 @@
 .. meta::
-  :description: The counters reference page.
+  :description: Ranges Information reference page.
 
-.. _counters_reference:
+.. _ranges_information_reference:
 
 *******************************************************************************
-Counters
+Ranges Information
 *******************************************************************************
 
-.. doxygengroup:: COUNTERS
+.. doxygengroup:: range_group
    :content-only:
-   :project: rocprofiler-sdk   
+   :project: roctx

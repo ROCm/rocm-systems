@@ -9,3 +9,4 @@ Device counting service
 
 .. doxygengroup:: device_counting_service
    :content-only:
+   :project: rocprofiler-sdk

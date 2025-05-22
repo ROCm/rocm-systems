@@ -1,12 +1,12 @@
 .. meta::
-  :description: The counters reference page.
+  :description: Naming utilities Information reference page.
 
-.. _counters_reference:
+.. _naming-utilities_information_reference:
 
 *******************************************************************************
-Counters
+Naming Information
 *******************************************************************************
 
-.. doxygengroup:: COUNTERS
+.. doxygengroup:: UTILITIES
    :content-only:
-   :project: rocprofiler-sdk   
+   :project: roctx
