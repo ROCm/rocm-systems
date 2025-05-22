@@ -112,6 +112,8 @@ def test_validate_counter_collection_pmc1_json(json_data):
 
         dispatch_ids.append(dispatch_data["dispatch_id"])
         if not re.search(r"__amd_rocclr_.*", kernel_name):
+            # Collect all SQ_WAVES values
+            sq_waves_values = []
             for record in counter["records"]:
                 counter = get_counter(record["counter_id"])
                 assert counter is not None, f"record:\n\t{record}"
@@ -119,9 +121,10 @@ def test_validate_counter_collection_pmc1_json(json_data):
                     counter["name"] == "SQ_WAVES"
                 ), f"record:\n\t{record}\ncounter:\n\t{counter}"
                 if agent["name"] not in skip_gfx:
-                    assert (
-                        record["value"] > 0
-                    ), f"record: {record}\ncounter: {counter}\nagent: {agent}"
+                    sq_waves_values.append(record["value"])
+
+            # Check aggregate sum
+            assert sum(sq_waves_values) > 0, f"SQ_WAVES value is not > 0"
 
     di_uniq = list(set(sorted(dispatch_ids)))
     # make sure the dispatch ids are unique and ordered

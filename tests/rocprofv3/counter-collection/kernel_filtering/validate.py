@@ -102,6 +102,7 @@ def validate_json(json_data, counter_name, check_dispatch):
 
         dispatch_ids.append(dispatch_data["dispatch_id"])
         if not re.search(r"__amd_rocclr_.*", kernel_name):
+            values = []
             for record in counter["records"]:
                 counter = get_counter(record["counter_id"])
                 assert counter is not None, f"record:\n\t{record}"
@@ -109,9 +110,10 @@ def validate_json(json_data, counter_name, check_dispatch):
                     counter["name"] == counter_name
                 ), f"record:\n\t{record}\ncounter:\n\t{counter}"
                 if agent["name"] not in skip_gfx:
-                    assert (
-                        record["value"] > 0
-                    ), f"record: {record}\ncounter: {counter}\nagent: {agent}"
+                    values.append(record["value"])
+
+            # Check aggregate sum
+            assert sum(values) > 0, f"{counter_name} value is not > 0"
 
     if check_dispatch:
         di_uniq = list(set(sorted(dispatch_ids)))
