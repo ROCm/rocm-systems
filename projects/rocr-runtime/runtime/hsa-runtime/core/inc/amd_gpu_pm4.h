@@ -60,7 +60,7 @@
 #define PM4_HDR_SHADER_TYPE(x)                            (((x) & 0x1) << 1)
 #define PM4_HDR_IT_OPCODE(x)                              (((x) & 0xFF) << 8)
 #define PM4_HDR_COUNT(x)                                  (((x) & 0x3FFF) << 16)
-#define PM4_HDR_TYPE(x)                                   (((x) & 0x3) << 30)
+#define PM4_HDR_TYPE(x)                                   (((x) & 0x3U) << 30)
 
 #define PM4_HDR(it_opcode, pkt_size_dw, gfxip_ver) (  \
   PM4_HDR_SHADER_TYPE((gfxip_ver) == 7 ? 1 : 0)    |  \
@@ -69,7 +69,7 @@
   PM4_HDR_TYPE(3)                                     \
 )
 
-#define PM4_INDIRECT_BUFFER_DW1_IB_BASE_LO(x)              (((x) & 0x3FFFFFFF) << 2)
+#define PM4_INDIRECT_BUFFER_DW1_IB_BASE_LO(x)              (((x) & 0x3FFFFFFFU) << 2)
 #define PM4_INDIRECT_BUFFER_DW2_IB_BASE_HI(x)              (((x) & 0xFFFF) << 0)
 #define PM4_INDIRECT_BUFFER_DW3_IB_SIZE(x)                 (((x) & 0xFFFFF) << 0)
 #define PM4_INDIRECT_BUFFER_DW3_IB_VALID(x)                (((x) & 0x1) << 23)
@@ -121,7 +121,7 @@
 #define PM4_WAIT_REG_MEM_DW4_REFERENCE(x)                  (((x) & 0xFFFFFFFF) << 0)
 #define PM4_WAIT_REG_MEM_DW6(x)                            (((x) & 0x8000FFFF) << 0)
 #  define PM4_WAIT_REG_MEM_POLL_INTERVAL(x)                (((x) & 0xFFFF) << 0)
-#  define PM4_WAIT_REG_MEM_OPTIMIZE_ACE_OFFLOAD_MODE       (1 << 31)
+#  define PM4_WAIT_REG_MEM_OPTIMIZE_ACE_OFFLOAD_MODE       (1U << 31)
 
 #define PM4_DMA_DATA_DW1(x)                            (((x) & 0xFFFFFFFF) << 0)
 #  define PM4_DMA_DATA_DST_SEL_DST_ADDR_USING_L2       (3 << 20)
@@ -132,8 +132,8 @@
 #define PM4_DMA_DATA_DW5_DST_ADDR_HI(x)                (((x) & 0xFFFFFFFF) << 0)
 #define PM4_DMA_DATA_DW6(x)                            (((x) & 0xFFFFFFFF) << 0)
 #  define PM4_DMA_DATA_BYTE_COUNT(x)                   (((x) & 0x3FFFFFF) << 0)
-#  define PM4_DMA_DATA_DIS_WC                          (1 << 31)
-#  define PM4_DMA_DATA_DIS_WC_LAST                     (0 << 31)
+#  define PM4_DMA_DATA_DIS_WC                          (1U << 31)
+#  define PM4_DMA_DATA_DIS_WC_LAST                     (0U << 31)
 
 #define PM4_WRITE_DATA_DW1(x)                          (((x) & 0xFFFFFF00) << 0)
 #  define PM4_WRITE_DATA_DST_SEL_TC_L2                 (2 << 8)
