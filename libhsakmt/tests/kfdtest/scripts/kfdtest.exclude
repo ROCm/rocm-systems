@@ -358,6 +358,7 @@ FILTER[gfx950]=\
 "KFDMemoryTest.FlatScratchAccess:"\
 "KFDIPCTest.BasicTest:"\
 "KFDQMTest.QueueLatency:"\
+"KFDSVMEvictTest.QueueTest*:"\
 "KFDGWSTest.Semaphore"
 
 FILTER[gfx1200]=\
