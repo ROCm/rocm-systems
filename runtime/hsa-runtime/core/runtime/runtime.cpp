@@ -3304,46 +3304,67 @@ hsa_status_t Runtime::VMemoryHandleMap(void* va, size_t size, size_t in_offset,
 
 hsa_status_t Runtime::VMemoryHandleUnmap(void* va, size_t size) {
   ScopedAcquire<KernelSharedMutex> lock(&memory_lock_);
+  std::list<std::pair<void*, MappedHandle*>> mappedHandles;
 
-  auto mappedHandleIt = mapped_handle_map_.find(va);
-  if (mappedHandleIt == mapped_handle_map_.end()) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  // va + size may consist of multiple MappedHandle's.
+  // Build a list lf MappedHandles within this VA range.
 
-  if (mappedHandleIt->second.size != size) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  uint8_t* va_ptr = reinterpret_cast<uint8_t*>(va);
+  uint8_t* va_chunk = va_ptr;
+  while (va_chunk < va_ptr + size) {
+    auto mappedHandleIt = mapped_handle_map_.find(va_chunk);
+    // Cannot find a contiguous list of MappedHandles for the full VA range
+    if (mappedHandleIt == mapped_handle_map_.end()) {
+      return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    }
 
-  // Remove access from all agents that were allowed access
-  for (auto agentPermsIt = mappedHandleIt->second.allowed_agents.begin();
-       agentPermsIt != mappedHandleIt->second.allowed_agents.end();) {
-    assert(va == agentPermsIt->second.va);
-
-    hsa_status_t status = agentPermsIt->second.RemoveAccess();
-    if (status != HSA_STATUS_SUCCESS)
-      return status;
-
-    agentPermsIt = mappedHandleIt->second.allowed_agents.erase(agentPermsIt);
+    mappedHandles.push_back(std::make_pair(va_chunk, &mappedHandleIt->second));
+    va_chunk += mappedHandleIt->second.size;
   }
-
-  if (mappedHandleIt->second.shareable_handle.IsValid()) {
-    hsa_status_t status = mappedHandleIt->second.agentOwner()->driver().ReleaseShareableHandle(
-        mappedHandleIt->second.shareable_handle);
-    if (status != HSA_STATUS_SUCCESS)
-      return status;
+  if (va_chunk != va_ptr + size) {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
+  hsa_status_t status;
 
-  assert(mappedHandleIt->second.address_handle->use_count >= 1);
-  mappedHandleIt->second.address_handle->use_count--;
-  assert(mappedHandleIt->second.mem_handle->use_count >= 1);
-  mappedHandleIt->second.mem_handle->use_count--;
+  for (auto mappedHandleIt : mappedHandles) {
+    // Remove access from all agents that were allowed access
+    for (auto agentPermsIt = mappedHandleIt.second->allowed_agents.begin();
+              agentPermsIt != mappedHandleIt.second->allowed_agents.end();) {
+      assert(mappedHandleIt.first == agentPermsIt->second.va);
+      hsa_status_t status = agentPermsIt->second.RemoveAccess();
+      if (status != HSA_STATUS_SUCCESS) {
+        return status;
+      }
+      agentPermsIt = mappedHandleIt.second->allowed_agents.erase(agentPermsIt);
+    }
 
-  if (!mappedHandleIt->second.mem_handle->use_count &&
-      !mappedHandleIt->second.mem_handle->ref_count) {
-    // User called VMemoryHandleRelease while this mapping was still outstanding. We need to delete
-    // the MemoryHandle as is the last MappedHandle that was using it
-    mappedHandleIt->second.mem_handle->region->Free(mappedHandleIt->second.mem_handle->thunk_handle,
-                                                    mappedHandleIt->second.mem_handle->size);
-    memory_handle_map_.erase(mappedHandleIt->second.mem_handle->thunk_handle);
+    if (mappedHandleIt.second->shareable_handle.IsValid()) {
+      hsa_status_t status =
+        mappedHandleIt.second->agentOwner()->driver().ReleaseShareableHandle(
+                                      mappedHandleIt.second->shareable_handle);
+      if (status != HSA_STATUS_SUCCESS) {
+        return status;
+      }
+    }
+
+    assert(mappedHandleIt.second->address_handle->use_count >= 1);
+    mappedHandleIt.second->address_handle->use_count--;
+    assert(mappedHandleIt.second->mem_handle->use_count >= 1);
+    mappedHandleIt.second->mem_handle->use_count--;
+
+    if (!mappedHandleIt.second->mem_handle->use_count &&
+        !mappedHandleIt.second->mem_handle->ref_count) {
+        // User called VMemoryHandleRelease while this mapping was still
+        // outstanding. We need to delete the MemoryHandle as it is the last
+        // MappedHandle that was using it.
+      mappedHandleIt.second->mem_handle->region->Free(mappedHandleIt.second->mem_handle->thunk_handle,
+                                                      mappedHandleIt.second->mem_handle->size);
+      memory_handle_map_.erase(mappedHandleIt.second->mem_handle->thunk_handle);
+    }
+
+    mapped_handle_map_.erase(mappedHandleIt.first);
+
   }
-
-  mapped_handle_map_.erase(mappedHandleIt);
   return HSA_STATUS_SUCCESS;
 }
 
