@@ -63,6 +63,8 @@ struct hsakmtRuntime {
 
   pthread_mutex_t hsakmt_mutex;
   const char *dxg_device_name = "/dev/dxg";
+  long page_size;
+  int page_shift;
   int dxg_fd = -1;
   pid_t parent_pid = -1;
   bool is_forked = false;
@@ -98,11 +100,6 @@ extern hsakmtRuntime *dxg_runtime;
 #define CHECK_DXG_OPEN() \
 	do { if (dxg_runtime->dxg_open_count == 0 || dxg_runtime->is_forked) return HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED; } while (0)
 
-/* Might be defined in limits.h on platforms where it is constant (used by musl) */
-/* See also: https://pubs.opengroup.org/onlinepubs/7908799/xsh/limits.h.html */
-#ifndef PAGE_SIZE
-extern int PAGE_SIZE;
-#endif
 extern int PAGE_SHIFT;
 
 /* 64KB BigK fragment size for TLB efficiency */
@@ -112,11 +109,11 @@ extern int PAGE_SHIFT;
 #define GPU_HUGE_PAGE_SIZE (2 << 20)
 
 #define CHECK_PAGE_MULTIPLE(x) \
-	do { if ((uint64_t)PORT_VPTR_TO_UINT64(x) % PAGE_SIZE) return HSAKMT_STATUS_INVALID_PARAMETER; } while(0)
+	do { if ((uint64_t)PORT_VPTR_TO_UINT64(x) % dxg_runtime->page_size) return HSAKMT_STATUS_INVALID_PARAMETER; } while(0)
 
 #define ALIGN_UP(x,align) (((uint64_t)(x) + (align) - 1) & ~(uint64_t)((align)-1))
 #define ALIGN_UP_32(x,align) (((uint32_t)(x) + (align) - 1) & ~(uint32_t)((align)-1))
-#define PAGE_ALIGN_UP(x) ALIGN_UP(x,PAGE_SIZE)
+#define PAGE_ALIGN_UP(x) ALIGN_UP(x,dxg_runtime->page_size)
 #define BITMASK(n) ((n) ? (UINT64_MAX >> (sizeof(UINT64_MAX) * CHAR_BIT - (n))) : 0)
 #define ARRAY_LEN(array) (sizeof(array) / sizeof(array[0]))
 

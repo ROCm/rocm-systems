@@ -261,7 +261,7 @@ ComputeQueue::ComputeQueue(WDDMDevice *device,
   assert(ret);
 
   GpuMemoryCreateInfo create_info{};
-  create_info.size = PAGE_SIZE;
+  create_info.size = dxg_runtime->page_size;
   create_info.domain = thunk_proxy::kSystem;
   GpuMemory *gpu_mem = nullptr;
   auto code = device->CreateGpuMemory(create_info, &gpu_mem);

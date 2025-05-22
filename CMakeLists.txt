@@ -118,7 +118,6 @@ endif ()
 ## Source files
 set ( HSAKMT_SRC "src/debug.cpp"
                  "src/events.cpp"
-                 "src/globals.cpp"
                  "src/memory.cpp"
                  "src/libdrm.cpp"
                  "src/hsa.cpp"

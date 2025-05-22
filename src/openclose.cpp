@@ -81,10 +81,8 @@ static void clear_after_fork(void) {
 }
 
 static inline void init_page_size(void) {
-#ifndef PAGE_SIZE
-  PAGE_SIZE = sysconf(_SC_PAGESIZE);
-#endif
-  PAGE_SHIFT = ffs(PAGE_SIZE) - 1;
+  dxg_runtime->page_size = sysconf(_SC_PAGESIZE);
+  dxg_runtime->page_shift = ffs(dxg_runtime->page_size) - 1;
 }
 
 static HSAKMT_STATUS init_vars_from_env(void) {
