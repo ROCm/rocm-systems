@@ -1215,13 +1215,8 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   if (PtrInfo(ptr, &info, nullptr, nullptr, nullptr, &block) != HSA_STATUS_SUCCESS)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
-  // Temporary: Previous versions of HIP will call hsa_amd_ipc_memory_create with the len aligned to
-  // granularity. We need to maintain backward compatibility for 2 releases so we temporarily allow
-  // this. After 2 releases, we will only allow info.sizeInBytes != len.
-  if ((info.agentBaseAddress != ptr) ||
-      (info.sizeInBytes != len && AlignUp(info.sizeInBytes, pageSize) != len)) {
+  if (info.agentBaseAddress != ptr || info.sizeInBytes != len)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
 
   bool useFrag = (block.base != ptr || block.length != len);
   // Assume all pointers and blocks are 4Kb aligned.
