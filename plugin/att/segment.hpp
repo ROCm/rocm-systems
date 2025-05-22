@@ -23,132 +23,55 @@
 #include <vector>
 #include <iostream>
 #include <random>
-#include <unordered_set>
+#include <set>
 #include <algorithm>
-
-template<typename Type>
-class ordered_vector : public std::vector<Type>
-{
-  using Super = std::vector<Type>;
-public:
-  void insert(const Type& elem)
-  {
-    size_t loc = lower_bound(elem.begin());
-    if (this->size() && get(loc).begin() < elem.begin())
-      loc ++;
-    this->Super::insert(this->begin()+loc, elem);
-  }
-  bool remove(const Type& elem)
-  {
-    if (!this->size()) return false;
-    size_t loc = lower_bound(elem.begin());
-    if (get(loc) != elem) return false;
-
-    this->Super::erase(this->begin()+loc);
-    return true;
-  }
-  bool remove(uint64_t elem_begin)
-  {
-    if (!this->size()) return false;
-    size_t loc = lower_bound(elem_begin);
-    if (get(loc).begin() != elem_begin) return false;
-
-    this->Super::erase(this->begin()+loc);
-    return true;
-  }
-  size_t lower_bound(size_t addr) const
-  {
-    if (!this->size()) return 0;
-    return binary_search(addr, 0, this->size()-1);
-  }
-
-  size_t binary_search(size_t addr, size_t s, size_t e) const
-  {
-    if (s >= e)
-      return s;
-    else if (s+1 == e)
-      return (get(e).begin() <= addr) ? e : s;
-
-    size_t mid = (s+e)/2;
-    if (get(mid).begin() <= addr)
-      return binary_search(addr, mid, e);
-    else
-      return binary_search(addr, s, mid);
-  }
-  const Type& get(size_t i) const { return this->operator[](i); }
-};
-
-/**
- * @brief Finds a candidate codeobj for the given vaddr
-*/
-template<typename Type>
-class cached_ordered_vector : public ordered_vector<Type>
-{
-  using Super = ordered_vector<Type>;
-public:
-  cached_ordered_vector<Type>() { reset(); }
-
-  const Type& find_obj(uint64_t addr)
-  {
-    if (testCache(addr))
-      return get(cached_segment);
-
-    size_t lb = this->lower_bound(addr);
-    if (lb >= this->size() || !get(lb).inrange(addr))
-      throw std::string("segment addr out of range");
-
-    cached_segment = lb;
-    return get(cached_segment);
-  }
-
-  uint64_t find_addr(uint64_t addr) {
-    return find_obj(addr).begin();
-  }
-
-  bool testCache(uint64_t addr) const {
-    return this->cached_segment < this->size() && get(cached_segment).inrange(addr);
-  }
-
-  const Type& get(size_t index) const { return this->data()[index]; }
-
-  void insert(const Type& elem) { this->Super::insert(elem); }
-  void insert_list(std::vector<Type> arange)
-  {
-    for (auto& elem : arange) push_back(elem);
-    std::sort(
-      this->begin(),
-      this->end(),
-      [](const Type& a, const Type& b) { return a.begin() < b.begin(); }
-    );
-  };
-
-  void reset() { cached_segment = ~0; }
-  void clear() { reset(); this->Super::clear(); }
-  bool remove(uint64_t addr) { reset(); return this->Super::remove(addr); }
-
-private:
-  size_t cached_segment = ~0;
-};
-
 
 struct address_range_t
 {
-  uint64_t vbegin;
-  uint32_t size;
-  uint32_t id;
-  uint32_t offset;
+    uint64_t addr{0};
+    uint64_t size{0};
+    uint64_t id{0};
 
-  bool operator<(const address_range_t& other) const { return vbegin < other.vbegin; }
-  bool inrange(uint64_t addr) const { return addr >= vbegin && addr < vbegin+size; };
-  uint64_t begin() const { return vbegin; }
+    bool operator==(const address_range_t& other) const
+    {
+        return (addr >= other.addr && addr < other.addr + other.size) ||
+               (other.addr >= addr && other.addr < addr + size);
+    }
+    bool operator<(const address_range_t& other) const
+    {
+        if(*this == other) return false;
+        return addr < other.addr;
+    }
+    bool inrange(uint64_t _addr) const { return addr <= _addr && addr + size > _addr; };
 };
-
 
 /**
  * @brief Finds a candidate codeobj for the given vaddr
-*/
-class CodeobjTableTranslator : public cached_ordered_vector<address_range_t>
+ */
+class CodeobjTableTranslator : public std::set<address_range_t>
 {
-  public:
-    const address_range_t& find_codeobj_in_range(uint64_t addr) { return this->find_obj(addr); }
+    using Super = std::set<address_range_t>;
+
+public:
+    address_range_t find_codeobj_in_range(uint64_t addr)
+    {
+        if(!cached_segment.inrange(addr))
+        {
+            auto it = this->find(address_range_t{addr, 0, 0});
+            if(it == this->end()) throw std::exception();
+            cached_segment = *it;
+        }
+        return cached_segment;
+    }
+
+    void clear_cache() { cached_segment = {}; }
+    bool remove(const address_range_t& range)
+    {
+        clear_cache();
+        return this->erase(range) != 0;
+    }
+    bool remove(uint64_t addr) { return remove(address_range_t{addr, 0, 0}); }
+
+private:
+    address_range_t cached_segment{};
 };

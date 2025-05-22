@@ -93,6 +93,7 @@ unset ROCPROFILER_SESS
 MY_HSA_TOOLS_LIB="$RPL_PATH/librocprofiler64.so.1"
 
 # Tool internal Preloads
+ROCPROFV1_LD_PRELOAD=$MY_HSA_TOOLS_LIB
 ROCPROFV1_TOOL_PRELOAD=$MY_HSA_TOOLS_LIB
 
 # Loading of the test tool by ROC Profiler

@@ -155,7 +155,7 @@ class RegisterWatchList:
 class PCTranslator:
     def __init__(self, insts, code, raw_code, reverse_map, codeservice):
         self.codeservice = codeservice
-    
+
         self.insts = insts
         self.addrmap = {c[-3] : (c, self.codeservice.GetInstruction(c[-3])[3]) for c in code if c[-3] > 0}
 

@@ -366,7 +366,7 @@ Example for file plugin output:
 
 - ROCProfiler Performance improved to reduce profiling time for large workloads of counter collection
 
-### Resolved issues
+
 
 - Fixed bandwidth measurement in MI300
 - Fixed Perfetto plugin issue of `roctx` trace not getting displayed
@@ -381,3 +381,15 @@ Example for file plugin output:
 - Fixed missing profiler records issue caused while running `--trace-period`
 - Fixed the hang issue of `ProfilerAPITest` of `runFeatureTests` on AMD Instinct MI300 accelerator
 - Fixed segment fault on Navi32
+  
+## ROCProfiler for ROCm 6.4
+
+### Added
+
+- README updated for kernel filtration
+- Tool deprecation message for rocprofiler v1,v2
+- Adding ops 16,32,64 metrics for rdc
+
+### Resolved issues
+
+- Fixed issue where invalid UTF-8 characters in a trace log would crash the program
