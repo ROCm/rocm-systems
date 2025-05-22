@@ -59,15 +59,18 @@ typedef struct {
   std::vector<HsaIoLinkProperties> link;
 } node_props_t;
 
-static HsaSystemProperties *g_system;
-static std::vector<node_props_t> g_props;
+struct _topology_props {
+  HsaSystemProperties *g_system = nullptr;
+  std::vector<node_props_t> g_props;
+  std::vector<wsl::thunk::WDDMDevice *> wdevices_;
+  uint32_t wdevice_num_ = 0;
+  uint32_t num_sysfs_nodes = 0;
+  int processor_vendor = -1;
+  double freq_max_ = 0.0;
+};
 
-static std::vector<wsl::thunk::WDDMDevice *> wdevices_;
-static uint32_t wdevice_num_;
-static uint32_t num_sysfs_nodes;
+static _topology_props* dxg_topology = new _topology_props();
 
-static int processor_vendor = -1;
-static double freq_max_ = 0;
 /* Supported System Vendors */
 enum SUPPORTED_PROCESSOR_VENDORS {
   GENUINE_INTEL = 0,
@@ -267,7 +270,7 @@ static int get_cpu_cache_info(const char *prefix,
   char path[256], str[256];
   bool is_power9 = false;
 
-  if (processor_vendor == IBM_POWER) {
+  if (dxg_topology->processor_vendor == IBM_POWER) {
     if (strcmp(cpuinfo[0].model_name, "POWER9") == 0) {
       is_power9 = true;
     }
@@ -344,12 +347,12 @@ static int get_cpu_cache_info(const char *prefix,
 static HSAKMT_STATUS topology_map_node_id(uint32_t node_id,
                                           wsl::thunk::WDDMDevice *&device) {
   uint32_t idx = node_id;
-  if ((!wdevices_.size()) || (!node_id) || (node_id >= num_sysfs_nodes)) {
+  if ((!dxg_topology->wdevices_.size()) || (!node_id) || (node_id >= dxg_topology->num_sysfs_nodes)) {
     device = nullptr;
     return HSAKMT_STATUS_ERROR;
   }
 
-  device = wdevices_[node_id - 1];
+  device = dxg_topology->wdevices_[node_id - 1];
   return HSAKMT_STATUS_SUCCESS;
 }
 
@@ -368,19 +371,19 @@ HSAKMT_STATUS topology_sysfs_get_system_props(HsaSystemProperties& props) {
     goto err;
   }
 
-  num_sysfs_nodes = num_adapters + 1;
+  dxg_topology->num_sysfs_nodes = num_adapters + 1;
 
-  for (auto device : wdevices_)
+  for (auto device : dxg_topology->wdevices_)
     delete device;
-  wdevices_.clear();
+  dxg_topology->wdevices_.clear();
 
   for (uint32_t i = 0; i < num_adapters; i++) {
     wsl::thunk::WDDMDevice *device = new wsl::thunk::WDDMDevice(
         adapters[i].hAdapter, adapters[i].AdapterLuid);
     assert(device && "Create WDDM Device fail");
-    wdevices_.push_back(device);
+    dxg_topology->wdevices_.push_back(device);
   }
-  props.NumNodes = num_sysfs_nodes;
+  props.NumNodes = dxg_topology->num_sysfs_nodes;
 
   delete[] adapters;
   return ret;
@@ -439,7 +442,7 @@ static HSAKMT_STATUS topology_parse_cpuinfo(std::vector<proc_cpuinfo>& cpuinfo) 
   if (cpuinfo_max_freq) {
     std::string line;
     std::getline(cpuinfo_max_freq, line);
-    freq_max_ = static_cast<uint32_t>(std::stod(line) / 1000);
+    dxg_topology->freq_max_ = static_cast<uint32_t>(std::stod(line) / 1000);
   }
 
   std::ifstream cpuinfo_file("/proc/cpuinfo");
@@ -460,9 +463,9 @@ static HSAKMT_STATUS topology_parse_cpuinfo(std::vector<proc_cpuinfo>& cpuinfo) 
       continue;
     }
 
-    if (line.substr(0, 9) == "vendor_id" && processor_vendor == -1) {
+    if (line.substr(0, 9) == "vendor_id" && dxg_topology->processor_vendor == -1) {
       std::string vendor = line.substr(line.find(':') + 2);
-      processor_vendor = topology_search_processor_vendor(vendor.c_str());
+      dxg_topology->processor_vendor = topology_search_processor_vendor(vendor.c_str());
       continue;
     }
 
@@ -482,17 +485,17 @@ static HSAKMT_STATUS topology_parse_cpuinfo(std::vector<proc_cpuinfo>& cpuinfo) 
     if (!cpuinfo_max_freq) {
       if (line.substr(0, 7) == "cpu MHz") {
         double freq = std::stod(line.substr(line.find(':') + 2));
-        if (freq > freq_max_) {
-          freq_max_ = freq;
+        if (freq > dxg_topology->freq_max_) {
+          dxg_topology->freq_max_ = freq;
         }
         continue;
       }
     }
   }
 
-  if (processor_vendor < 0) {
+  if (dxg_topology->processor_vendor < 0) {
     pr_err("Failed to get Processor Vendor. Setting to %s", supported_processor_vendor_name[GENUINE_INTEL]);
-    processor_vendor = GENUINE_INTEL;
+    dxg_topology->processor_vendor = GENUINE_INTEL;
   }
 
   return ret;
@@ -508,7 +511,7 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id,
   p2p_links = false;
   num_p2pLinks = 0;
 
-  props.MaxEngineClockMhzCCompute = freq_max_;
+  props.MaxEngineClockMhzCCompute = dxg_topology->freq_max_;
 
   if (node_id == 0) {
     /* CPU node */
@@ -686,7 +689,7 @@ static HSAKMT_STATUS topology_get_cpu_cache_props(int node,
 
   /* Get info from /sys/devices/system/node/nodeX/cpuY/cache */
   int node_real = node;
-  if (processor_vendor == IBM_POWER) {
+  if (dxg_topology->processor_vendor == IBM_POWER) {
     if (!strcmp(cpuinfo[0].model_name, "POWER9")) {
       node_real = node * 8;
     }
@@ -991,7 +994,7 @@ topology_create_indirect_gpu_links(const HsaSystemProperties& sys_props,
 HSAKMT_STATUS topology_take_snapshot(void) {
   uint32_t i, mem_id, cache_id;
   HsaSystemProperties sys_props;
-  std::vector<node_props_t>& temp_props = g_props;
+  std::vector<node_props_t>& temp_props = dxg_topology->g_props;
   HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
   const uint32_t num_procs = sysconf(_SC_NPROCESSORS_ONLN);
   std::vector<proc_cpuinfo> cpuinfo(num_procs);
@@ -1108,40 +1111,40 @@ HSAKMT_STATUS topology_take_snapshot(void) {
     topology_create_indirect_gpu_links(sys_props, temp_props);
   }
 
-  if (!g_system) {
-    g_system = (HsaSystemProperties *)malloc(sizeof(HsaSystemProperties));
-    if (!g_system) {
+  if (!dxg_topology->g_system) {
+    dxg_topology->g_system = (HsaSystemProperties *)malloc(sizeof(HsaSystemProperties));
+    if (!dxg_topology->g_system) {
       ret = HSAKMT_STATUS_NO_MEMORY;
       goto err;
     }
   }
 
-  *g_system = sys_props;
+  *dxg_topology->g_system = sys_props;
 err:
   return ret;
 }
 
 /* Drop the Snashot of the HSA topology information. Assume lock is held. */
 void topology_drop_snapshot(void) {
-  if (!!g_system != !!g_props.size())
+  if (!!dxg_topology->g_system != !!dxg_topology->g_props.size())
     pr_warn("Probably inconsistency?\n");
 
-  g_props.clear();
+  dxg_topology->g_props.clear();
 
-  free(g_system);
-  g_system = NULL;
+  free(dxg_topology->g_system);
+  dxg_topology->g_system = NULL;
 
   trim_suballocator();
-  for (auto device : wdevices_)
+  for (auto device : dxg_topology->wdevices_)
     delete device;
-  wdevices_.clear();
+  dxg_topology->wdevices_.clear();
 }
 
 HSAKMT_STATUS validate_nodeid(uint32_t nodeid, uint32_t *gpu_id) {
-  if (g_props.empty() || !g_system || g_system->NumNodes <= nodeid)
+  if (dxg_topology->g_props.empty() || !dxg_topology->g_system || dxg_topology->g_system->NumNodes <= nodeid)
     return HSAKMT_STATUS_INVALID_NODE_UNIT;
   if (gpu_id)
-    *gpu_id = g_props[nodeid].node.KFDGpuID;
+    *gpu_id = dxg_topology->g_props[nodeid].node.KFDGpuID;
 
   return HSAKMT_STATUS_SUCCESS;
 }
@@ -1149,8 +1152,8 @@ HSAKMT_STATUS validate_nodeid(uint32_t nodeid, uint32_t *gpu_id) {
 HSAKMT_STATUS gpuid_to_nodeid(uint32_t gpu_id, uint32_t *node_id) {
   uint64_t node_idx;
 
-  for (node_idx = 0; node_idx < g_system->NumNodes; node_idx++) {
-    if (g_props[node_idx].node.KFDGpuID == gpu_id) {
+  for (node_idx = 0; node_idx < dxg_topology->g_system->NumNodes; node_idx++) {
+    if (dxg_topology->g_props[node_idx].node.KFDGpuID == gpu_id) {
       *node_id = node_idx;
       return HSAKMT_STATUS_SUCCESS;
     }
@@ -1173,8 +1176,8 @@ hsaKmtAcquireSystemProperties(HsaSystemProperties *SystemProperties) {
   /* We already have a valid snapshot. Avoid double initialization that
    * would leak memory.
    */
-  if (g_system) {
-    *SystemProperties = *g_system;
+  if (dxg_topology->g_system) {
+    *SystemProperties = *dxg_topology->g_system;
     goto out;
   }
 
@@ -1182,17 +1185,17 @@ hsaKmtAcquireSystemProperties(HsaSystemProperties *SystemProperties) {
   if (err != HSAKMT_STATUS_SUCCESS)
     goto out;
 
-  assert(g_system);
+  assert(dxg_topology->g_system);
 
-  // err = fmm_init_process_apertures(g_system->NumNodes);
+  // err = fmm_init_process_apertures(dxg_topology->g_system->NumNodes);
   if (err != HSAKMT_STATUS_SUCCESS)
     goto init_process_apertures_failed;
 
-  // err = init_process_doorbells(g_system->NumNodes);
+  // err = init_process_doorbells(dxg_topology->g_system->NumNodes);
   if (err != HSAKMT_STATUS_SUCCESS)
     goto init_doorbells_failed;
 
-  *SystemProperties = *g_system;
+  *SystemProperties = *dxg_topology->g_system;
 
   goto out;
 
@@ -1218,10 +1221,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtReleaseSystemProperties(void) {
 
 HSAKMT_STATUS topology_get_node_props(HSAuint32 NodeId,
                                       HsaNodeProperties *NodeProperties) {
-  if (!g_system || g_props.empty() || NodeId >= g_system->NumNodes)
+  if (!dxg_topology->g_system || dxg_topology->g_props.empty() || NodeId >= dxg_topology->g_system->NumNodes)
     return HSAKMT_STATUS_ERROR;
 
-  *NodeProperties = g_props[NodeId].node;
+  *NodeProperties = dxg_topology->g_props[NodeId].node;
   return HSAKMT_STATUS_SUCCESS;
 }
 
@@ -1274,9 +1277,9 @@ hsaKmtGetNodeMemoryProperties(HSAuint32 NodeId, HSAuint32 NumBanks,
   pthread_mutex_lock(&hsakmt_mutex);
 
   memset(MemoryProperties, 0, NumBanks * sizeof(HsaMemoryProperties));
-  for (i = 0; i < wsl::Min(g_props[NodeId].node.NumMemoryBanks, NumBanks); i++) {
-    assert(g_props[NodeId].mem.size());
-    MemoryProperties[i] = g_props[NodeId].mem[i];
+  for (i = 0; i < wsl::Min(dxg_topology->g_props[NodeId].node.NumMemoryBanks, NumBanks); i++) {
+    assert(dxg_topology->g_props[NodeId].mem.size());
+    MemoryProperties[i] = dxg_topology->g_props[NodeId].mem[i];
   }
 
   /* The following memory banks does not apply to CPU only node */
@@ -1288,7 +1291,7 @@ hsaKmtGetNodeMemoryProperties(HSAuint32 NodeId, HSAuint32 NumBanks,
   if (i < NumBanks) {
     MemoryProperties[i].HeapType = HSA_HEAPTYPE_GPU_LDS;
     MemoryProperties[i].VirtualBaseAddress = device_->SharedApertureBase();
-    MemoryProperties[i].SizeInBytes = g_props[NodeId].node.LDSSizeInKB * 1024;
+    MemoryProperties[i].SizeInBytes = dxg_topology->g_props[NodeId].node.LDSSizeInKB * 1024;
     i++;
   }
 
@@ -1318,19 +1321,19 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeCacheProperties(
   pthread_mutex_lock(&hsakmt_mutex);
 
   /* KFD ADD page 18, snapshot protocol violation */
-  if (!g_system || NodeId >= g_system->NumNodes) {
+  if (!dxg_topology->g_system || NodeId >= dxg_topology->g_system->NumNodes) {
     err = HSAKMT_STATUS_INVALID_NODE_UNIT;
     goto out;
   }
 
-  if (NumCaches > g_props[NodeId].node.NumCaches) {
+  if (NumCaches > dxg_topology->g_props[NodeId].node.NumCaches) {
     err = HSAKMT_STATUS_INVALID_PARAMETER;
     goto out;
   }
 
-  for (i = 0; i < wsl::Min(g_props[NodeId].node.NumCaches, NumCaches); i++) {
-    assert(g_props[NodeId].cache.size());
-    CacheProperties[i] = g_props[NodeId].cache[i];
+  for (i = 0; i < wsl::Min(dxg_topology->g_props[NodeId].node.NumCaches, NumCaches); i++) {
+    assert(dxg_topology->g_props[NodeId].cache.size());
+    CacheProperties[i] = dxg_topology->g_props[NodeId].cache[i];
   }
 
   err = HSAKMT_STATUS_SUCCESS;
@@ -1342,10 +1345,10 @@ out:
 
 HSAKMT_STATUS topology_get_iolink_props(HSAuint32 NodeId, HSAuint32 NumIoLinks,
                                         HsaIoLinkProperties *IoLinkProperties) {
-  if (!g_system || g_props.empty() || NodeId >= g_system->NumNodes)
+  if (!dxg_topology->g_system || dxg_topology->g_props.empty() || NodeId >= dxg_topology->g_system->NumNodes)
     return HSAKMT_STATUS_ERROR;
 
-  memcpy(IoLinkProperties, g_props[NodeId].link.data(),
+  memcpy(IoLinkProperties, dxg_topology->g_props[NodeId].link.data(),
          NumIoLinks * sizeof(*IoLinkProperties));
 
   return HSAKMT_STATUS_SUCCESS;
@@ -1364,17 +1367,17 @@ hsaKmtGetNodeIoLinkProperties(HSAuint32 NodeId, HSAuint32 NumIoLinks,
   pthread_mutex_lock(&hsakmt_mutex);
 
   /* KFD ADD page 18, snapshot protocol violation */
-  if (!g_system || NodeId >= g_system->NumNodes) {
+  if (!dxg_topology->g_system || NodeId >= dxg_topology->g_system->NumNodes) {
     err = HSAKMT_STATUS_INVALID_NODE_UNIT;
     goto out;
   }
 
-  if (NumIoLinks > g_props[NodeId].node.NumIOLinks) {
+  if (NumIoLinks > dxg_topology->g_props[NodeId].node.NumIOLinks) {
     err = HSAKMT_STATUS_INVALID_PARAMETER;
     goto out;
   }
 
-  assert(g_props[NodeId].link.size());
+  assert(dxg_topology->g_props[NodeId].link.size());
   err = topology_get_iolink_props(NodeId, NumIoLinks, IoLinkProperties);
 
 out:
@@ -1383,27 +1386,27 @@ out:
 }
 
 uint16_t get_device_id_by_node_id(HSAuint32 node_id) {
-  if (g_props.empty() || !g_system || g_system->NumNodes <= node_id)
+  if (dxg_topology->g_props.empty() || !dxg_topology->g_system || dxg_topology->g_system->NumNodes <= node_id)
     return 0;
 
-  return g_props[node_id].node.DeviceId;
+  return dxg_topology->g_props[node_id].node.DeviceId;
 }
 
 bool prefer_ats(HSAuint32 node_id) {
-  return g_props[node_id].node.Capability.ui32.HSAMMUPresent &&
-         g_props[node_id].node.NumCPUCores &&
-         g_props[node_id].node.NumFComputeCores;
+  return dxg_topology->g_props[node_id].node.Capability.ui32.HSAMMUPresent &&
+         dxg_topology->g_props[node_id].node.NumCPUCores &&
+         dxg_topology->g_props[node_id].node.NumFComputeCores;
 }
 
 uint16_t get_device_id_by_gpu_id(HSAuint32 gpu_id) {
   unsigned int i;
 
-  if (g_props.empty() || !g_system)
+  if (dxg_topology->g_props.empty() || !dxg_topology->g_system)
     return 0;
 
-  for (i = 0; i < g_system->NumNodes; i++) {
-    if (g_props[i].node.KFDGpuID == gpu_id)
-      return g_props[i].node.DeviceId;
+  for (i = 0; i < dxg_topology->g_system->NumNodes; i++) {
+    if (dxg_topology->g_props[i].node.KFDGpuID == gpu_id)
+      return dxg_topology->g_props[i].node.DeviceId;
   }
 
   return 0;
@@ -1414,14 +1417,14 @@ uint32_t get_direct_link_cpu(uint32_t gpu_node) {
   int32_t cpu_id;
   HSAuint32 i;
 
-  cpu_id = gpu_get_direct_link_cpu(gpu_node, g_props);
+  cpu_id = gpu_get_direct_link_cpu(gpu_node, dxg_topology->g_props);
   if (cpu_id == -1)
     return INVALID_NODEID;
 
-  assert(g_props[cpu_id].mem.size());
+  assert(dxg_topology->g_props[cpu_id].mem.size());
 
-  for (i = 0; i < g_props[cpu_id].node.NumMemoryBanks; i++)
-    size += g_props[cpu_id].mem[i].SizeInBytes;
+  for (i = 0; i < dxg_topology->g_props[cpu_id].node.NumMemoryBanks; i++)
+    size += dxg_topology->g_props[cpu_id].mem[i].SizeInBytes;
 
   return size ? (uint32_t)cpu_id : INVALID_NODEID;
 }
@@ -1450,11 +1453,11 @@ HSAKMT_STATUS validate_nodeid_array(uint32_t **gpu_id_array,
   return ret;
 }
 
-uint32_t get_num_sysfs_nodes(void) { return num_sysfs_nodes; }
+uint32_t get_num_sysfs_nodes(void) { return dxg_topology->num_sysfs_nodes; }
 
 wsl::thunk::WDDMDevice *get_wddmdev(uint32_t node_id) {
-  if ((!wdevices_.size()) || (!node_id) || (node_id >= num_sysfs_nodes))
+  if ((!dxg_topology->wdevices_.size()) || (!node_id) || (node_id >= dxg_topology->num_sysfs_nodes))
     return nullptr;
 
-  return wdevices_[node_id - 1];
+  return dxg_topology->wdevices_[node_id - 1];
 }
