@@ -62,11 +62,11 @@ get_trace_data(rocprofiler_thread_trace_decoder_record_type_t trace_id,
     else if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_OCCUPANCY)
     {
         for(size_t i = 0; i < trace_size; i++)
-            tool.config.occupancy.push_back(reinterpret_cast<const occupancy_t*>(trace_events)[i]);
+            tool.config.occupancy.push_back(static_cast<const occupancy_t*>(trace_events)[i]);
     }
     else if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_PERFEVENT)
     {
-        PerfcounterFile(tool.config, reinterpret_cast<perfevent_t*>(trace_events), trace_size);
+        PerfcounterFile(tool.config, static_cast<perfevent_t*>(trace_events), trace_size);
     }
 
     if(trace_id != ROCPROFILER_THREAD_TRACE_DECODER_RECORD_WAVE) return;
@@ -74,12 +74,12 @@ get_trace_data(rocprofiler_thread_trace_decoder_record_type_t trace_id,
     bool bInvalid = false;
     for(size_t wave_n = 0; wave_n < trace_size; wave_n++)
     {
-        auto&   wave           = reinterpret_cast<wave_t*>(trace_events)[wave_n];
-        int64_t prev_inst_time = wave.begin_time;
+        const auto& wave           = static_cast<const wave_t*>(trace_events)[wave_n];
+        int64_t     prev_inst_time = wave.begin_time;
 
         for(size_t j = 0; j < wave.instructions_size; j++)
         {
-            auto& inst = wave.instructions_array[j];
+            const auto& inst = wave.instructions_array[j];
             if(inst.pc.marker_id == 0 && inst.pc.addr == 0) continue;
 
             try

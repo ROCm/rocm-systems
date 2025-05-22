@@ -236,6 +236,13 @@ rocprofiler_trace_decode(rocprofiler_thread_trace_decoder_handle_t   handle,
         const char* statustr = decoder->dl->att_status_fn(status);
         if(statustr == nullptr) statustr = "Unknown error";
         ROCP_ERROR << "Callback failed with status " << status << ": " << statustr;
+
+        if(status == ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT)
+            return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+        else if(status == ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_SHADER_DATA)
+            return ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED;
+        else
+            return ROCPROFILER_STATUS_ERROR;
     }
 
     return ROCPROFILER_STATUS_SUCCESS;
