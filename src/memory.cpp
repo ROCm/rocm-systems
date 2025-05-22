@@ -62,14 +62,16 @@ struct Allocation {
   int dmabuf_fd;
 };
 
-static std::map<const void *, Allocation> allocation_map_;
-static std::unique_ptr<std::mutex> allocation_map_lock_ = std::make_unique<std::mutex>();
+static std::map<const void *, Allocation>* allocation_map_ = new std::map<const void *, Allocation>();
+static std::mutex* allocation_map_lock_ = new std::mutex();
 
 void clear_allocation_map(void)
 {
-  allocation_map_lock_ = std::make_unique<std::mutex>();
+  //delete allocation_map_lock_;
+  allocation_map_lock_ = new std::mutex();
   std::lock_guard<std::mutex> lock(*allocation_map_lock_);
-  allocation_map_.clear();
+  delete allocation_map_;
+  allocation_map_ = new std::map<const void *, Allocation>();
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtSetMemoryPolicy(HSAuint32 Node,
@@ -249,7 +251,7 @@ after_trim:
     else
       *MemoryAddress = reinterpret_cast<void *>(gpu_mem->GpuAddress());
 
-    allocation_map_[*MemoryAddress] = Allocation(
+   (*allocation_map_)[*MemoryAddress] = Allocation(
         gpu_mem->GetGpuMemoryHandle(), *MemoryAddress, (uint64_t)*MemoryAddress,
         create_info.size, false, nullptr, SizeInBytes,
         MemFlags.ui32.GTTAccess ? 0 : PreferredNode, MemFlags.Value);
@@ -291,8 +293,8 @@ HSAKMT_STATUS hsaKmtFreeMemoryInternal(void *MemoryAddress,
   wsl::thunk::GpuMemory *gpu_mem = nullptr;
   {
     std::lock_guard<std::mutex> gard(*allocation_map_lock_);
-    auto it = allocation_map_.find(MemoryAddress);
-    if (it == allocation_map_.end()) {
+    auto it = allocation_map_->find(MemoryAddress);
+    if (it == allocation_map_->end()) {
       return HSAKMT_STATUS_ERROR;
     }
 
@@ -301,7 +303,7 @@ HSAKMT_STATUS hsaKmtFreeMemoryInternal(void *MemoryAddress,
       close(it->second.dmabuf_fd);
       it->second.dmabuf_fd = -1;
     }
-    allocation_map_.erase(it);
+    allocation_map_->erase(it);
   }
 
   if (gpu_mem->IsQueueReferenced())
@@ -323,8 +325,8 @@ bool queue_acquire_buffer(void *MemoryAddress) {
   wsl::thunk::GpuMemory *gpu_mem = nullptr;
   {
   std::lock_guard<std::mutex> gard(*allocation_map_lock_);
-  auto it = allocation_map_.find(MemoryAddress);
-  if (it == allocation_map_.end()) {
+  auto it = allocation_map_->find(MemoryAddress);
+  if (it == allocation_map_->end()) {
     return HSAKMT_STATUS_ERROR;
   }
 
@@ -344,8 +346,8 @@ bool queue_release_buffer(void *MemoryAddress) {
   wsl::thunk::GpuMemory *gpu_mem = nullptr;
   {
     std::lock_guard<std::mutex> gard(*allocation_map_lock_);
-    auto it = allocation_map_.find(MemoryAddress);
-    if (it == allocation_map_.end()) {
+    auto it = allocation_map_->find(MemoryAddress);
+    if (it == allocation_map_->end()) {
       return HSAKMT_STATUS_ERROR;
     }
 
@@ -360,8 +362,8 @@ bool queue_release_buffer(void *MemoryAddress) {
 
 wsl::thunk::GpuMemory *get_gpu_mem(void *MemoryAddress) {
   std::lock_guard<std::mutex> gard(*allocation_map_lock_);
-  auto it = allocation_map_.find(MemoryAddress);
-  if (it == allocation_map_.end()) {
+  auto it = allocation_map_->find(MemoryAddress);
+  if (it == allocation_map_->end()) {
     return nullptr;
   }
 
@@ -463,8 +465,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtExportDMABufHandle(void *MemoryAddress,
 
   std::lock_guard<std::mutex> gard(*allocation_map_lock_);
 
-  auto it = allocation_map_.upper_bound(MemoryAddress);
-  if (it != allocation_map_.begin()) {
+  auto it = allocation_map_->upper_bound(MemoryAddress);
+  if (it != allocation_map_->begin()) {
     --it;
     if (it->second.dmabuf_fd == -1) {
       auto gpu_mem = wsl::thunk::GpuMemory::Convert(it->second.handle);
@@ -524,7 +526,7 @@ HSAKMT_STATUS hsaKmtImportDMABufHandle(int DMABufFd,
      * the gpu_mem->Flags() need convert back from GpuMemoryCreateFlags to
      * HsaMemFlags, reference hsaKmtAllocMemoryAlign
      * */
-    allocation_map_[MemoryAddress] = Allocation(
+   (*allocation_map_)[MemoryAddress] = Allocation(
       gpu_mem->GetGpuMemoryHandle(), MemoryAddress, (uint64_t)MemoryAddress,
       gpu_mem->Size(), false, nullptr, gpu_mem->ClientSize(),
       1, gpu_mem->Flags());
@@ -602,14 +604,14 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDeregisterMemory(void *MemoryAddress) {
     std::lock_guard<std::mutex> gard(*allocation_map_lock_);
 
     // IPC mem(vram) and IPC signal(sys mem)
-    auto it_ipc = allocation_map_.find(MemoryAddress);
-    if (it_ipc != allocation_map_.end()) {
+    auto it_ipc = allocation_map_->find(MemoryAddress);
+    if (it_ipc != allocation_map_->end()) {
       wsl::thunk::GpuMemoryDescFlags flags;
       flags.reserved = it_ipc->second.mem_flags_value;
       if (flags.is_imported_vram_alloc_va || flags.is_imported_sys_memfd) {
         wsl::thunk::GpuMemory *gpu_mem;
         gpu_mem = wsl::thunk::GpuMemory::Convert(it_ipc->second.handle);
-        allocation_map_.erase(it_ipc);
+        allocation_map_->erase(it_ipc);
         delete gpu_mem;
         return HSAKMT_STATUS_SUCCESS;
       }
@@ -644,8 +646,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPU(void *MemoryAddress,
   {
     std::lock_guard<std::mutex> gard(*allocation_map_lock_);
     // IPC mem
-    auto it_ipc = allocation_map_.find(aligned_ptr);
-    if (it_ipc != allocation_map_.end()) {
+    auto it_ipc = allocation_map_->find(aligned_ptr);
+    if (it_ipc != allocation_map_->end()) {
       wsl::thunk::GpuMemoryDescFlags flags;
       flags.reserved = it_ipc->second.mem_flags_value;
       if (flags.is_imported_vram_alloc_va) {
@@ -669,8 +671,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPU(void *MemoryAddress,
     }
 
     // GTT mem
-    auto it_gtt = allocation_map_.find(aligned_ptr);
-    if (it_gtt != allocation_map_.end()) {
+    auto it_gtt = allocation_map_->find(aligned_ptr);
+    if (it_gtt != allocation_map_->end()) {
       if (!it_gtt->second.userptr) {
         if (it_gtt->second.size >= MemorySizeInBytes) {
           *AlternateVAGPU = (uint64_t)MemoryAddress;
@@ -682,8 +684,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPU(void *MemoryAddress,
     }
 
     // userptr mem
-    auto it = allocation_map_.find(MemoryAddress);
-    if (it != allocation_map_.end()) {
+    auto it = allocation_map_->find(MemoryAddress);
+    if (it != allocation_map_->end()) {
       if (it->second.userptr && it->second.size >= MemorySizeInBytes) {
         *AlternateVAGPU =
             (uintptr_t)it->second.gpu_addr +
@@ -715,10 +717,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPU(void *MemoryAddress,
 
   {
     std::lock_guard<std::mutex> guard(*allocation_map_lock_);
-    allocation_map_[MemoryAddress] =
+   (*allocation_map_)[MemoryAddress] =
         Allocation(handle, aligned_ptr, addr, aligned_size, true, MemoryAddress,
                    MemorySizeInBytes);
-    allocation_map_[(void *)addr] =
+    (*allocation_map_)[(void *)addr] =
         Allocation(handle, aligned_ptr, addr, aligned_size, true, nullptr,
                    MemorySizeInBytes);
   }
@@ -755,8 +757,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUnmapMemoryToGPU(void *MemoryAddress) {
     std::lock_guard<std::mutex> gard(*allocation_map_lock_);
 
     // IPC mem
-    auto it_ipc = allocation_map_.find(MemoryAddress);
-    if (it_ipc != allocation_map_.end()) {
+    auto it_ipc = allocation_map_->find(MemoryAddress);
+    if (it_ipc != allocation_map_->end()) {
       wsl::thunk::GpuMemoryDescFlags flags;
       flags.reserved = it_ipc->second.mem_flags_value;
       if (flags.is_imported_vram_alloc_va) {
@@ -772,8 +774,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUnmapMemoryToGPU(void *MemoryAddress) {
       }
     }
 
-    auto it = allocation_map_.find(MemoryAddress);
-    if (it == allocation_map_.end()) {
+    auto it = allocation_map_->find(MemoryAddress);
+    if (it == allocation_map_->end()) {
       return HSAKMT_STATUS_ERROR;
     }
 
@@ -783,8 +785,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUnmapMemoryToGPU(void *MemoryAddress) {
 
     handle = it->second.handle;
 
-    allocation_map_.erase((void *)it->second.gpu_addr);
-    allocation_map_.erase(it);
+    allocation_map_->erase((void *)it->second.gpu_addr);
+    allocation_map_->erase(it);
   }
   auto gpu_mem = wsl::thunk::GpuMemory::Convert(handle);
   if (gpu_mem->IsQueueReferenced())
@@ -842,8 +844,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtQueryPointerInfo(const void *Pointer,
   bool found = false;
   {
     std::lock_guard<std::mutex> gard(*allocation_map_lock_);
-    auto it = allocation_map_.upper_bound(Pointer);
-    if (it != allocation_map_.begin()) {
+    auto it = allocation_map_->upper_bound(Pointer);
+    if (it != allocation_map_->begin()) {
       --it;
       if (Pointer >= it->first &&
         (Pointer < reinterpret_cast<const uint8_t*>(it->first) + it->second.size_requested)) {
