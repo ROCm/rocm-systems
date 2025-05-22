@@ -48,7 +48,6 @@ PERMANENT_BLACKLIST_ALL_ASICS=\
 "KFDQMTest.BasicCuMaskingLinear:"\
 "KFDQMTest.BasicCuMaskingEven:"\
 "RDMATest.GPUDirect:"\
-"KFDRASTest.*:"\
 "KFDLocalMemoryTest.CheckZeroInitializationVram"
 
 # This is the temporary blacklist for all ASICs. This is to be used when a test is failing consistently

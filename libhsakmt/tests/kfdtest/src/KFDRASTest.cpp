@@ -131,7 +131,7 @@ void KFDRASTest::TearDown() {
     ROUTINE_END
 }
 
-TEST_F(KFDRASTest, BasicTest) {
+TEST_F(KFDRASTest, DISABLED_BasicTest) {
     TEST_START(TESTPROFILE_RUNALL);
 
     if (!m_setupStatus) {
@@ -149,7 +149,7 @@ TEST_F(KFDRASTest, BasicTest) {
     TEST_END;
 }
 
-TEST_F(KFDRASTest, MixEventsTest) {
+TEST_F(KFDRASTest, DISABLED_MixEventsTest) {
     TEST_START(TESTPROFILE_RUNALL);
 
     if (!m_setupStatus) {
