@@ -26,8 +26,6 @@
 #
 # -------------------------------------------------------------------------------------- #
 
-set(ROCPROFSYS_ROCM_EVENTS_TEST "GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TA_TA_BUSY:device=0")
-
 rocprofiler_systems_add_test(
     NAME transpose
     TARGET transpose
@@ -84,6 +82,23 @@ rocprofiler_systems_add_test(
     REWRITE_FAIL_REGEX "0 instrumented loops in procedure transpose")
 
 if(ROCPROFSYS_USE_ROCM)
+    set(NAVI_REGEX "gfx(10|11|12)[A-Fa-f0-9][A-Fa-f0-9]")
+    rocprofiler_systems_get_gfx_archs(NAVI_DETECTED GFX_MATCH ${NAVI_REGEX} ECHO)
+
+    if(NAVI_DETECTED)
+        set(ROCPROFSYS_ROCM_EVENTS_TEST "SQ_WAVES")
+        set(ROCPROFSYS_FILE_CHECKS "rocprof-device-0-SQ_WAVES.txt")
+        set(ROCPROFSYS_COUNTER_NAMES_ARG "SQ_WAVES")
+    else()
+        set(ROCPROFSYS_ROCM_EVENTS_TEST
+            "GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TA_TA_BUSY:device=0")
+        set(ROCPROFSYS_FILE_CHECKS
+            "rocprof-device-0-GRBM_COUNT.txt" "rocprof-device-0-SQ_WAVES.txt"
+            "rocprof-device-0-SQ_INSTS_VALU.txt" "rocprof-device-0-TA_TA_BUSY.txt")
+        set(ROCPROFSYS_COUNTER_NAMES_ARG "GRBM_COUNT" "SQ_WAVES" "SQ_INSTS_VALU"
+                                         "TA_TA_BUSY")
+    endif()
+
     rocprofiler_systems_add_test(
         SKIP_BASELINE SKIP_RUNTIME
         NAME transpose-rocprofiler
@@ -101,16 +116,14 @@ if(ROCPROFSYS_USE_ROCM)
     rocprofiler_systems_add_validation_test(
         NAME transpose-rocprofiler-sampling
         PERFETTO_FILE "perfetto-trace.proto"
-        ARGS --counter-names "TA_TA_BUSY" "SQ_WAVES" "GRBM_COUNT" "SQ_INSTS_VALU" -p
-        EXIST_FILES rocprof-device-0-GRBM_COUNT.txt rocprof-device-0-TA_TA_BUSY.txt
-                    rocprof-device-0-SQ_INSTS_VALU.txt rocprof-device-0-SQ_WAVES.txt
+        ARGS --counter-names ${ROCPROFSYS_COUNTER_NAMES_ARG} -p
+        EXIST_FILES ${ROCPROFSYS_FILE_CHECKS}
         LABELS "rocprofiler")
 
     rocprofiler_systems_add_validation_test(
         NAME transpose-rocprofiler-binary-rewrite
         PERFETTO_FILE "perfetto-trace.proto"
-        ARGS --counter-names "TA_TA_BUSY" "SQ_WAVES" "GRBM_COUNT" "SQ_INSTS_VALU" -p
-        EXIST_FILES rocprof-device-0-GRBM_COUNT.txt rocprof-device-0-TA_TA_BUSY.txt
-                    rocprof-device-0-SQ_INSTS_VALU.txt rocprof-device-0-SQ_WAVES.txt
+        ARGS --counter-names ${ROCPROFSYS_COUNTER_NAMES_ARG} -p
+        EXIST_FILES ${ROCPROFSYS_FILE_CHECKS}
         LABELS "rocprofiler")
 endif()
