@@ -7643,12 +7643,61 @@ protected:
   bool can_halt_at_endpgm () const override { return true; }
   bool can_halt_at_sendmsg_dealloc_vgprs () const override { return true; }
 
+  static bool is_ssrc_inline (uint8_t ssrc)
+  {
+    return (ssrc >= 128 && ssrc <= 208);
+  }
+
+  static bool is_ssrc_lit32 (uint8_t ssrc) { return (ssrc == 255); }
+
+  static bool is_ssrc_lit64 (uint8_t ssrc) { return (ssrc == 254); }
+
+  static bool is_ssrc_immediate (uint8_t ssrc)
+  {
+    return (is_ssrc_lit64 (ssrc) || is_ssrc_lit32 (ssrc)
+            || is_ssrc_inline (ssrc));
+  }
+
+  static int ssrc_inline_to_num (uint8_t ssrc)
+  {
+    if (ssrc >= 128 && ssrc <= 192)
+      return ssrc - 128;
+    else if (ssrc >= 193 && ssrc <= 208)
+      return 192 - ssrc;
+    dbgapi_assert_not_reached ("illegal instruction: invalid ssrc inline");
+  }
+
+  static int32_t simm32_operand (const instruction_t &instruction)
+  {
+    return static_cast<int32_t> (instruction.word<1> ());
+  }
+
+  static int64_t simm64_operand (const instruction_t &instruction)
+  {
+    uint32_t imm64_lo = instruction.word<1> ();
+    uint32_t imm64_hi = instruction.word<2> ();
+    return ((static_cast<int64_t> (imm64_hi) << 32) | imm64_lo);
+  }
+
+  virtual bool is_add_pc (const instruction_t &instruction) const;
   bool can_execute_displaced (wave_t &wave,
                               const instruction_t &instruction) const override;
   bool can_simulate (wave_t &wave,
                      const instruction_t &instruction) const override;
+  bool is_branch_taken (wave_t &wave,
+                        const instruction_t &instruction) const override;
+  agent_address_t
+  branch_target (wave_t &wave, agent_address_t pc,
+                 const instruction_t &instruction) const override;
   std::optional<agent_address_t>
   simulate_instruction (wave_t &wave, agent_address_t pc,
+                        const instruction_t &instruction) const override;
+
+  std::tuple<amd_dbgapi_instruction_kind_t,       /* instruction_kind  */
+             amd_dbgapi_instruction_properties_t, /* instruction_properties  */
+             size_t,                              /* instruction_size  */
+             std::vector<uint64_t> /* instruction_information  */>
+  classify_instruction (agent_address_t address,
                         const instruction_t &instruction) const override;
 
 public:
@@ -8002,9 +8051,30 @@ gfx12_5_architecture_t::simulate_trap_handler (
 }
 
 bool
+gfx12_5_architecture_t::is_add_pc (const instruction_t &instruction) const
+{
+  /* s_add_pc_i64: SOP1 Opcode 75  */
+  if (instruction.is_valid () && is_sop1_encoding<75> (instruction))
+    {
+      uint8_t ssrc0 = ssrc0_operand (instruction);
+      if (is_ssrc_immediate (ssrc0))
+        return true;
+
+      /* If dealing with a valid even register number (to represent a pair),
+         then it's a valid "s_add_pc_i64" instruction.  */
+      std::optional<amdgpu_regnum_t> reg = scalar_operand_to_regnum (ssrc0);
+      return (reg.has_value () && !(*reg & 1));
+    }
+  return false;
+}
+
+bool
 gfx12_5_architecture_t::can_execute_displaced (
   wave_t &wave, const instruction_t &instruction) const
 {
+  if (is_add_pc (instruction))
+    return false;
+
   /* Any "sendmsg", including DEALLOC_VGPRS, can be executed now.
      If we don't return "true" here, "can_execute_displaced" method
      of gfx11_architecture will return "false" for the DEALLOC_VGPRS
@@ -8022,6 +8092,9 @@ gfx12_5_architecture_t::can_simulate (wave_t &wave,
   if (!instruction.is_valid ())
     return false;
 
+  if (is_add_pc (instruction))
+    return true;
+
   /* No need to simulate "sendmsg dealloc_vgprs" anymore, because the driver
      sets up the configuration as such that the hardware treats it like a
      NOP.  */
@@ -8031,14 +8104,75 @@ gfx12_5_architecture_t::can_simulate (wave_t &wave,
   return gfx12_architecture_t::can_simulate (wave, instruction);
 }
 
+bool
+gfx12_5_architecture_t::is_branch_taken (
+  wave_t &wave, const instruction_t &instruction) const
+{
+  if (is_add_pc (instruction))
+    return true;
+  return gfx12_architecture_t::is_branch_taken (wave, instruction);
+}
+
+agent_address_t
+gfx12_5_architecture_t::branch_target (wave_t &wave,
+                                       agent_address_t pc,
+                                       const instruction_t &instruction) const
+{
+  dbgapi_assert (instruction.is_valid ());
+
+  if (is_add_pc (instruction))
+    {
+      /* OFFSET is declared signed, because we may relatively (PC + OFFSET)
+         jump forward or backward.  We don't need to concern ourselves about
+         adding an uint64_t (PC) with an int64_t (OFFSET) as it will be
+         absolved by the 2's complement system.  */
+      int64_t offset;
+      uint8_t ssrc0 = ssrc0_operand (instruction);
+      pc += instruction.size ();
+
+      /* Dealing with an immediate offset?  */
+      if (is_ssrc_immediate (ssrc0))
+        {
+          if (is_ssrc_lit64 (ssrc0))
+            offset = simm64_operand (instruction);
+          else if (is_ssrc_lit32 (ssrc0))
+            offset = simm32_operand (instruction);
+          else if (is_ssrc_inline (ssrc0))
+            offset = ssrc_inline_to_num (ssrc0);
+          else
+            dbgapi_assert_not_reached ("Invalid is_add_pc offset");
+
+          return pc + offset;
+        }
+      /* Dealing with a register pair.  */
+      else
+        {
+          auto regnum = scalar_operand_to_regnum (ssrc0);
+          dbgapi_assert (regnum.has_value ());
+
+          uint32_t reg_lo, reg_hi;
+          wave.read_register (*regnum + 0, &reg_lo);
+          wave.read_register (*regnum + 1, &reg_hi);
+          offset
+            = static_cast<int64_t> (static_cast<uint64_t> (reg_lo)
+                                    | (static_cast<uint64_t> (reg_hi) << 32));
+          return pc + offset;
+        }
+    }
+  else
+    return gfx12_architecture_t::branch_target (wave, pc, instruction);
+}
+
 std::optional<agent_address_t>
 gfx12_5_architecture_t::simulate_instruction (
   wave_t &wave, agent_address_t pc, const instruction_t &instruction) const
 {
   std::optional<agent_address_t> next_pc;
 
+  if (is_add_pc (instruction))
+    next_pc = branch_target (wave, pc, instruction);
   /* See the comments in "::can_simulate ()".  */
-  if (!is_sendmsg (instruction))
+  else if (!is_sendmsg (instruction))
     next_pc
       = gfx12_architecture_t::simulate_instruction (wave, pc, instruction);
 
@@ -8046,6 +8180,51 @@ gfx12_5_architecture_t::simulate_instruction (
     simulate_instruction_fixup (wave);
 
   return next_pc;
+}
+
+std::tuple<amd_dbgapi_instruction_kind_t, amd_dbgapi_instruction_properties_t,
+           size_t, std::vector<uint64_t>>
+gfx12_5_architecture_t::classify_instruction (
+  agent_address_t address, const instruction_t &instruction) const
+{
+  if (is_add_pc (instruction))
+    {
+      uint8_t ssrc0 = ssrc0_operand (instruction);
+      amd_dbgapi_instruction_kind_t instruction_kind;
+      std::vector<uint64_t> info;
+
+      /* Dealing with an immediate offset?  */
+      if (is_ssrc_immediate (ssrc0))
+        {
+          int64_t offset;
+          if (is_ssrc_lit64 (ssrc0))
+            offset = simm64_operand (instruction);
+          else if (is_ssrc_lit32 (ssrc0))
+            offset = simm32_operand (instruction);
+          else if (is_ssrc_inline (ssrc0))
+            offset = ssrc_inline_to_num (ssrc0);
+          else
+            dbgapi_assert_not_reached ("Invalid is_add_pc offset");
+          info.emplace_back (address + instruction.size () + offset);
+          instruction_kind = AMD_DBGAPI_INSTRUCTION_KIND_DIRECT_BRANCH;
+        }
+      /* Dealing with a register pair.  */
+      else
+        {
+          auto regnum = scalar_operand_to_regnum (ssrc0);
+          dbgapi_assert (regnum);
+
+          info.emplace_back (static_cast<uint64_t> (
+            regnum_to_register_id (*regnum + 0).handle));
+          info.emplace_back (static_cast<uint64_t> (
+            regnum_to_register_id (*regnum + 1).handle));
+          instruction_kind
+            = AMD_DBGAPI_INSTRUCTION_KIND_RELATIVE_BRANCH_REGISTER_PAIR;
+        }
+      return { instruction_kind, AMD_DBGAPI_INSTRUCTION_PROPERTY_NONE,
+               instruction.size (), std::move (info) };
+    }
+  return gfx12_architecture_t::classify_instruction (address, instruction);
 }
 
 class gfx1250_t final : public gfx12_5_architecture_t
