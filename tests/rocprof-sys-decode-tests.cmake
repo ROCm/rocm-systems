@@ -37,7 +37,8 @@ set(_jpeg_decode_environment
     "ROCPROFSYS_AMD_SMI_METRICS=busy,temp,power,jpeg_activity,mem_usage"
     "ROCPROFSYS_SAMPLING_CPUS=none")
 
-check_gpu("MI300" MI300_DETECTED)
+rocprofiler_systems_get_gfx_archs(MI300_DETECTED GFX_MATCH "gfx9[4-9][A-Fa-f0-9]" ECHO)
+
 if(MI300_DETECTED)
     list(APPEND VCN_COUNTER_NAMES_ARG --counter-names "VCN Activity")
     list(APPEND JPEG_COUNTER_NAMES_ARG --counter-names "JPEG Activity")
