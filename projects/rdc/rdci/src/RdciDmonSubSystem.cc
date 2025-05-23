@@ -560,13 +560,13 @@ void RdciDmonSubSystem::process() {
 
   if (notif_fields.size() > 0) {
     ss << "Listening for events: ";
-    uint32_t i;
+    uint32_t i = 0;
     for (i = 0; i < notif_fields.size() - 1; ++i) {
       ss << field_id_to_descript.at(notif_fields[i]).label << ", ";
     }
     ss << field_id_to_descript.at(notif_fields[i]).label << std::endl;
   }
-  ss << "GPU\t";
+  ss << std::left << std::setw(10) << "GPU";
   if (show_timpstamps_) {
     ss << std::left << std::setw(25) << "TIMESTAMP";
     ss << "  ";
@@ -597,8 +597,7 @@ void RdciDmonSubSystem::process() {
     print_and_clr_notif_pq(&notif_pq, show_timpstamps_);
 
     for (uint32_t gindex = 0; gindex < group_info.count; gindex++) {
-      std::cout << std::setw(12) << std::left << entity_to_string(group_info.entity_ids[gindex])
-                << "\t";
+      std::cout << std::left << std::setw(10) << entity_to_string(group_info.entity_ids[gindex]);
       for (uint32_t findex = 0; findex < reg_fields.size(); findex++) {
         rdc_field_value value;
 

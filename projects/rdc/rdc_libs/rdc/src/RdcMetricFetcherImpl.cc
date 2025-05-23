@@ -851,7 +851,8 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
     case RDC_FI_DEV_ID:
     case RDC_FI_REV_ID:
     case RDC_FI_TARGET_GRAPHICS_VERSION:
-    case RDC_FI_NUM_OF_COMPUTE_UNITS: {
+    case RDC_FI_NUM_OF_COMPUTE_UNITS:
+    case RDC_FI_UUID: {
       amdsmi_asic_info_t asic_info;
       value->status = amdsmi_get_gpu_asic_info(processor_handle, &asic_info);
       value->type = INTEGER;
@@ -881,6 +882,9 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
         } else {
           value->value.l_int = asic_info.num_of_compute_units;
         }
+      } else if (field_id == RDC_FI_UUID) {
+        value->type = STRING;
+        memcpy(value->value.str, asic_info.asic_serial, sizeof(asic_info.asic_serial));
       } else {
         // this should never happen as all fields are handled above
         RDC_LOG(RDC_ERROR, "Unexpected field id: " << field_id);
