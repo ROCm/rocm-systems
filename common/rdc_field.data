@@ -39,6 +39,13 @@ FLD_DESC_ENT(RDC_FI_INVALID,             "Unknown/Invalid field",               
 FLD_DESC_ENT(RDC_FI_GPU_COUNT,           "GPU count in the system",                     "GPU_COUNT",        true)
 FLD_DESC_ENT(RDC_FI_DEV_NAME,            "Name of the device",                          "DEV_NAME",         true)
 FLD_DESC_ENT(RDC_FI_OAM_ID,              "OAM ID of the device",                        "OAM_ID",           true)
+
+FLD_DESC_ENT(RDC_FI_DEV_ID,              "ID of the device",                            "DEV_ID",           true)
+FLD_DESC_ENT(RDC_FI_REV_ID,              "Revision ID of the device",                   "REV_ID",           true)
+FLD_DESC_ENT(RDC_FI_TARGET_GRAPHICS_VERSION, "GFX version of the device",               "GFX",              true)
+FLD_DESC_ENT(RDC_FI_NUM_OF_COMPUTE_UNITS, "Number of Compute Units",                    "COMPUTE_UNITS",    true)
+FLD_DESC_ENT(RDC_FI_UUID,                "Unique ID of the device AKA asic_serial",     "UUID",             true)
+
 FLD_DESC_ENT(RDC_FI_GPU_CLOCK,           "Current GPU clock frequencies",               "GPU_CLOCK",        true)
 FLD_DESC_ENT(RDC_FI_MEM_CLOCK,           "Current Memory clock frequencies",            "MEM_CLOCK",        true)
 FLD_DESC_ENT(RDC_FI_MEMORY_TEMP,         "Memory temperature in millidegrees Celsius",  "MEMORY_TEMP",      true)
@@ -185,7 +192,9 @@ FLD_DESC_ENT(RDC_FI_PROF_CPF_CPF_STAT_STALL,                 "", "CPF_CPF_STAT_S
 FLD_DESC_ENT(RDC_FI_PROF_CPF_CPF_TCIU_BUSY,                  "", "CPF_CPF_TCIU_BUSY",                  false)
 FLD_DESC_ENT(RDC_FI_PROF_CPF_CPF_TCIU_IDLE,                  "", "CPF_CPF_TCIU_IDLE",                  false)
 FLD_DESC_ENT(RDC_FI_PROF_CPF_CPF_TCIU_STALL,                 "", "CPF_CPF_TCIU_STALL",                 false)
+// Misc
 FLD_DESC_ENT(RDC_FI_PROF_SIMD_UTILIZATION, "Fraction of time the SIMDs are being utilized", "SIMD_UTILIZATION", false)
+FLD_DESC_ENT(RDC_FI_PROF_UUID,             "UUID from rocprofiler",                         "PROF_UUID",        false)
 
 // Events
 FLD_DESC_ENT(RDC_EVNT_XGMI_0_NOP_TX,     "NOPs sent to neighbor 0",                     "XGMI_NOP_0",       false)
