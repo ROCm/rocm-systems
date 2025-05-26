@@ -3526,6 +3526,10 @@ hsa_status_t hsa_amd_vmem_get_alloc_properties_from_handle(
  * of additional scratch memory. Decreasing this threshold will result in a release in scratch memory
  * on queues where the current amount of allocated scratch exceeds the new limit.
  *
+ * If this API call would result in a release in scratch memory and there are dispatches that are
+ * currently using scratch memory on this agent, this will result into a blocking call until the
+ * current dispatches are completed.
+ *
  * This API is only supported on devices that support asynchronous scratch reclaim.
  *
  * @param[in] agent A valid agent.
