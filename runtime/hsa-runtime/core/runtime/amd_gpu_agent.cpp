@@ -122,6 +122,9 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   const bool is_apu_node = (properties_.NumCPUCores > 0);
   profile_ = (is_apu_node) ? HSA_PROFILE_FULL : HSA_PROFILE_BASE;
 
+  if (node_props.Capability.ui32.DoorbellType != 2)
+    throw AMD::hsa_exception(HSA_STATUS_ERROR, "Agent creation failed.\nThe GPU node uses a deprecated doorbell type\n");
+
   HSAKMT_STATUS err = HSAKMT_CALL(hsaKmtGetClockCounters(node_id(), &t0_));
   t1_ = t0_;
   historical_clock_ratio_ = 0.0;

@@ -100,9 +100,6 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
 
   const core::Isa* isa = agent_->supported_isas()[0];
 
-  // Identify doorbell semantics for this agent.
-  doorbell_type_ = agent->properties().Capability.ui32.DoorbellType;
-
   // Queue size is a function of several restrictions.
   const uint32_t min_pkts = ComputeRingBufferMinPkts();
   const uint32_t max_pkts = ComputeRingBufferMaxPkts();
@@ -135,13 +132,8 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
   HsaQueueResource queue_rsrc = {0};
   queue_rsrc.Queue_read_ptr_aql = (uint64_t*)&amd_queue_.read_dispatch_id;
 
-  if (doorbell_type_ == 2) {
-    // Hardware write pointer supports AQL semantics.
-    queue_rsrc.Queue_write_ptr_aql = (uint64_t*)&amd_queue_.write_dispatch_id;
-  } else {
-    // Map hardware write pointer to a software proxy.
-    queue_rsrc.Queue_write_ptr_aql = (uint64_t*)&amd_queue_.max_legacy_doorbell_dispatch_id_plus_1;
-  }
+  // Hardware write pointer supports AQL semantics.
+  queue_rsrc.Queue_write_ptr_aql = (uint64_t*)&amd_queue_.write_dispatch_id;
 
   // Populate amd_queue_ structure.
   amd_queue_.hsa_queue.type = HSA_QUEUE_TYPE_MULTI;
@@ -154,8 +146,8 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
       uintptr_t(&amd_queue_.read_dispatch_id) - uintptr_t(&amd_queue_));
   // Initialize the doorbell signal structure.
   memset(&signal_, 0, sizeof(signal_));
-  signal_.kind = (doorbell_type_ == 2) ? AMD_SIGNAL_KIND_DOORBELL : AMD_SIGNAL_KIND_LEGACY_DOORBELL;
-  signal_.legacy_hardware_doorbell_ptr = nullptr;
+  signal_.kind = AMD_SIGNAL_KIND_DOORBELL;
+  signal_.hardware_doorbell_ptr = nullptr;
   signal_.queue_ptr = &amd_queue_;
 
   const auto& props = agent->properties();
@@ -286,7 +278,7 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
     throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
                              "Queue create failed at hsaKmtCreateQueue\n");
   // Complete populating the doorbell signal structure.
-  signal_.legacy_hardware_doorbell_ptr = (volatile uint32_t*)queue_rsrc.Queue_DoorBell;
+  signal_.hardware_doorbell_ptr = queue_rsrc.Queue_DoorBell_aql;
 
   // Bind Id of Queue such that is unique i.e. it is not re-used by another
   // queue (AQL, HOST) in the same process during its lifetime.
@@ -464,79 +456,15 @@ uint64_t AqlQueue::AddWriteIndexRelease(uint64_t value) {
 }
 
 void AqlQueue::StoreRelaxed(hsa_signal_value_t value) {
-  if (doorbell_type_ == 2) {
-    if (core::Runtime::runtime_singleton_->flag().enable_dtif()) {
-      HSAKMT_CALL(hsaKmtQueueRingDoorbell(queue_id_));
-    } else {
-      // Hardware doorbell supports AQL semantics.
-      _mm_sfence();
-      *(signal_.hardware_doorbell_ptr) = uint64_t(value);
-      /* signal_ is allocated as uncached so we do not need read-back to flush WC */
-    }
-    return;
+  if (core::Runtime::runtime_singleton_->flag().enable_dtif()) {
+    HSAKMT_CALL(hsaKmtQueueRingDoorbell(queue_id_));
+  } else {
+    // Hardware doorbell supports AQL semantics.
+    _mm_sfence();
+    *(signal_.hardware_doorbell_ptr) = uint64_t(value);
+    /* signal_ is allocated as uncached so we do not need read-back to flush WC */
   }
-
-  // Acquire spinlock protecting the legacy doorbell.
-  while (atomic::Cas(&amd_queue_.legacy_doorbell_lock, 1U, 0U,
-                     std::memory_order_acquire) != 0) {
-    os::YieldThread();
-  }
-
-#ifdef HSA_LARGE_MODEL
-  // AMD hardware convention expects the packet index to point beyond
-  // the last packet to be processed. Packet indices written to the
-  // max_legacy_doorbell_dispatch_id_plus_1 field must conform to this
-  // expectation, since this field is used as the HW-visible write index.
-  uint64_t legacy_dispatch_id = value + 1;
-#else
-  // In the small machine model it is difficult to distinguish packet index
-  // wrap at 2^32 packets from a backwards doorbell. Instead, ignore the
-  // doorbell value and submit the write index instead. It is OK to issue
-  // a doorbell for packets in the INVALID or ALWAYS_RESERVED state.
-  // The HW will stall on these packets until they enter a valid state.
-  uint64_t legacy_dispatch_id = amd_queue_.write_dispatch_id;
-
-  // The write index may extend more than a full queue of packets beyond
-  // the read index. The hardware can process at most a full queue of packets
-  // at a time. Clamp the write index appropriately. A doorbell for the
-  // remaining packets is guaranteed to be sent at a later time.
-  legacy_dispatch_id =
-      Min(legacy_dispatch_id,
-          uint64_t(amd_queue_.read_dispatch_id) + amd_queue_.hsa_queue.size);
-#endif
-
-  // Discard backwards and duplicate doorbells.
-  if (legacy_dispatch_id > amd_queue_.max_legacy_doorbell_dispatch_id_plus_1) {
-    // Record the most recent packet index used in a doorbell submission.
-    // This field will be interpreted as a write index upon HW queue connect.
-    // Make ring buffer visible to HW before updating write index.
-    atomic::Store(&amd_queue_.max_legacy_doorbell_dispatch_id_plus_1,
-                  legacy_dispatch_id, std::memory_order_release);
-
-    // Write the dispatch id to the hardware MMIO doorbell.
-    // Make write index visible to HW before sending doorbell.
-    if (doorbell_type_ == 0) {
-      // The legacy GFXIP 7 hardware doorbell expects:
-      //   1. Packet index wrapped to a point within the ring buffer
-      //   2. Packet index converted to DWORD count
-      uint64_t queue_size_mask = (1 * amd_queue_.hsa_queue.size) - 1;
-
-      atomic::Store(signal_.legacy_hardware_doorbell_ptr,
-                    uint32_t((legacy_dispatch_id & queue_size_mask) *
-                             (sizeof(core::AqlPacket) / sizeof(uint32_t))),
-                    std::memory_order_release);
-    } else if (doorbell_type_ == 1) {
-      atomic::Store(signal_.legacy_hardware_doorbell_ptr,
-                    uint32_t(legacy_dispatch_id), std::memory_order_release);
-    } else {
-      assert(false && "Agent has unsupported doorbell semantics");
-    }
-  }
-
-  // Release spinlock protecting the legacy doorbell.
-  // Also ensures timely delivery of (write-combined) doorbell to HW.
-  atomic::Store(&amd_queue_.legacy_doorbell_lock, 0U,
-                std::memory_order_release);
+  return;
 }
 
 void AqlQueue::StoreRelease(hsa_signal_value_t value) {
@@ -550,12 +478,8 @@ hsa_status_t AqlQueue::GetInfo(hsa_queue_info_attribute_t attribute, void* value
       *(reinterpret_cast<hsa_agent_t*>(value)) = agent_->public_handle();
       break;
     case HSA_AMD_QUEUE_INFO_DOORBELL_ID:
-      if (doorbell_type_ == 2)
-        // Hardware doorbell supports AQL semantics.
-        *(reinterpret_cast<uint64_t*>(value)) =
-            reinterpret_cast<uint64_t>(signal_.hardware_doorbell_ptr);
-      else
-        return HSA_STATUS_ERROR_INVALID_QUEUE;
+      *(reinterpret_cast<uint64_t*>(value)) =
+          reinterpret_cast<uint64_t>(signal_.hardware_doorbell_ptr);
       break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;

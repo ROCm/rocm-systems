@@ -293,9 +293,6 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   // Indicates if queue is active
   std::atomic<bool> active_;
 
-  // Cached value of HsaNodeProperties.HSA_CAPABILITY.DoorbellType
-  int doorbell_type_;
-
   // Handle of agent, which queue is attached to
   GpuAgent* agent_;
 
