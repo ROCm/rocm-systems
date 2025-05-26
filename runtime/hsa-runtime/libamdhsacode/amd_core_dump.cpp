@@ -127,6 +127,7 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     std::unique_ptr<void, decltype(std::free) *> runtime_info(runtime_ptr, std::free);
 
     if (HSAKMT_CALL(hsaKmtGetVersion(&versionInfo))) {
+      HSAKMT_CALL(hsaKmtDbgDisable());
       fprintf(stderr, "Failed to fetch driver ABI version.\n");
       return HSA_STATUS_ERROR;
     }
@@ -140,6 +141,7 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     note_package_builder_.Write<uint64_t>(runtime_size);
 
     if (HSAKMT_CALL(hsaKmtDbgGetDeviceData(&agents_ptr, &n_entries, &entry_size))) {
+       HSAKMT_CALL(hsaKmtDbgDisable());
        fprintf(stderr, "Failed to fetch agents snapshot.\n");
        return HSA_STATUS_ERROR;
     }
@@ -151,6 +153,7 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     note_package_builder_.Write<uint32_t>(entry_size);
 
     if (HSAKMT_CALL(hsaKmtDbgGetQueueData(&queues_ptr, &n_entries, &entry_size, true))) {
+       HSAKMT_CALL(hsaKmtDbgDisable());
        fprintf(stderr, "Failed to fetch queues snapshot.\n");
        return HSA_STATUS_ERROR;
     }
