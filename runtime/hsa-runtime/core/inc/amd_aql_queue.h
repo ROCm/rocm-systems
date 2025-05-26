@@ -299,8 +299,6 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   // Handle of agent, which queue is attached to
   GpuAgent* agent_;
 
-  uint32_t queue_full_workaround_;
-
   // Handle of scratch memory descriptor
   ScratchInfo queue_scratch_;
 

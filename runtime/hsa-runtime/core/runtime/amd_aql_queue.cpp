@@ -97,17 +97,8 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
       suspended_(false),
       priority_(HSA_QUEUE_PRIORITY_NORMAL),
       exception_signal_(nullptr) {
-  // When queue_full_workaround_ is set to 1, the ring buffer is internally
-  // doubled in size. Virtual addresses in the upper half of the ring allocation
-  // are mapped to the same set of pages backing the lower half.
-  // Values written to the HW doorbell are modulo the doubled size.
-  // This allows the HW to accept (doorbell == last_doorbell + queue_size).
-  // This workaround is required for GFXIP 7 and GFXIP 8 ASICs.
+
   const core::Isa* isa = agent_->supported_isas()[0];
-  queue_full_workaround_ =
-      (isa->GetMajorVersion() == 7 || isa->GetMajorVersion() == 8)
-          ? 1
-          : 0;
 
   // Identify doorbell semantics for this agent.
   doorbell_type_ = agent->properties().Capability.ui32.DoorbellType;
@@ -528,8 +519,7 @@ void AqlQueue::StoreRelaxed(hsa_signal_value_t value) {
       // The legacy GFXIP 7 hardware doorbell expects:
       //   1. Packet index wrapped to a point within the ring buffer
       //   2. Packet index converted to DWORD count
-      uint64_t queue_size_mask =
-          ((1 + queue_full_workaround_) * amd_queue_.hsa_queue.size) - 1;
+      uint64_t queue_size_mask = (1 * amd_queue_.hsa_queue.size) - 1;
 
       atomic::Store(signal_.legacy_hardware_doorbell_ptr,
                     uint32_t((legacy_dispatch_id & queue_size_mask) *
@@ -579,19 +569,6 @@ uint32_t AqlQueue::ComputeRingBufferMinPkts() {
   //   Min Size is 7 (2^8 = 256 DWs) and max size is 29 (2^30 = 1 G-DW)
   uint32_t min_bytes = 0x400;
 
-  if (queue_full_workaround_ == 1) {
-#ifdef __linux__
-    // Double mapping requires one page of backing store.
-    min_bytes = Max(min_bytes, 0x1000U);
-#endif
-#ifdef _WIN32
-    // Shared memory mapping is at system allocation granularity.
-    SYSTEM_INFO sys_info;
-    GetNativeSystemInfo(&sys_info);
-    min_bytes = Max(min_bytes, uint32_t(sys_info.dwAllocationGranularity));
-#endif
-  }
-
   return uint32_t(min_bytes / sizeof(core::AqlPacket));
 }
 
@@ -601,170 +578,30 @@ uint32_t AqlQueue::ComputeRingBufferMaxPkts() {
   //   Min Size is 7 (2^8 = 256 DWs) and max size is 29 (2^30 = 1 G-DW)
   uint64_t max_bytes = 0x100000000;
 
-  if (queue_full_workaround_ == 1) {
-    // Double mapping halves maximum size.
-    max_bytes /= 2;
-  }
-
   return uint32_t(max_bytes / sizeof(core::AqlPacket));
 }
 
 void AqlQueue::AllocRegisteredRingBuffer(uint32_t queue_size_pkts) {
-  if ((agent_->profile() == HSA_PROFILE_FULL) && queue_full_workaround_) {
-    // Compute the physical and virtual size of the queue.
-    uint32_t ring_buf_phys_size_bytes =
-        uint32_t(queue_size_pkts * sizeof(core::AqlPacket));
-    ring_buf_alloc_bytes_ = 2 * ring_buf_phys_size_bytes;
+  // Allocate storage for the ring buffer.
+  ring_buf_alloc_bytes_ = queue_size_pkts * sizeof(core::AqlPacket);
+  assert(IsMultipleOf(ring_buf_alloc_bytes_, 4096) && "Ring buffer sizes must be 4KiB aligned.");
 
-#ifdef __linux__
-    // Create a system-unique shared memory path for this thread.
-    char ring_buf_shm_path[16];
-    pid_t sys_unique_tid = pid_t(syscall(__NR_gettid));
-    sprintf(ring_buf_shm_path, "/%u", sys_unique_tid);
-
-    int ring_buf_shm_fd = -1;
-    void* reserve_va = NULL;
-
-    ring_buf_shm_fd = CreateRingBufferFD(ring_buf_shm_path, ring_buf_phys_size_bytes);
-
-    if (ring_buf_shm_fd == -1) {
-      return;
+  if (IsDeviceMemRingBuf()) {
+    if (!agent_->LargeBarEnabled()) {
+      throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_QUEUE_CREATION,
+                                "Trying to allocate an AQL ring buffer in device memory without "
+                                "large BAR PCIe enabled.");
     }
-
-    // Reserve a VA range twice the size of the physical backing store.
-    reserve_va = mmap(NULL, ring_buf_alloc_bytes_, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    assert(reserve_va != MAP_FAILED && "mmap failed");
-
-    // Remap the lower and upper halves of the VA range.
-    // Map both halves to the shared memory backing store.
-    // If the GPU device is KV, do not set PROT_EXEC flag.
-    void* ring_buf_lower_half = NULL;
-    void* ring_buf_upper_half = NULL;
-    if (is_kv_queue_) {
-      ring_buf_lower_half = mmap(reserve_va, ring_buf_phys_size_bytes, PROT_READ | PROT_WRITE,
-                                 MAP_SHARED | MAP_FIXED, ring_buf_shm_fd, 0);
-      assert(ring_buf_lower_half != MAP_FAILED && "mmap failed");
-
-      ring_buf_upper_half =
-          mmap((void*)(uintptr_t(reserve_va) + ring_buf_phys_size_bytes), ring_buf_phys_size_bytes,
-               PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, ring_buf_shm_fd, 0);
-      assert(ring_buf_upper_half != MAP_FAILED && "mmap failed");
-      } else {
-        ring_buf_lower_half = mmap(reserve_va, ring_buf_phys_size_bytes,
-                                   PROT_READ | PROT_WRITE | PROT_EXEC,
-                                   MAP_SHARED | MAP_FIXED, ring_buf_shm_fd, 0);
-        assert(ring_buf_lower_half != MAP_FAILED && "mmap failed");
-
-        ring_buf_upper_half =
-            mmap((void*)(uintptr_t(reserve_va) + ring_buf_phys_size_bytes),
-                 ring_buf_phys_size_bytes, PROT_READ | PROT_WRITE | PROT_EXEC,
-                 MAP_SHARED | MAP_FIXED, ring_buf_shm_fd, 0);
-        assert(ring_buf_upper_half != MAP_FAILED && "mmap failed");
-      }
-
-      // Successfully created mapping.
-      ring_buf_ = ring_buf_lower_half;
-
-      // Release explicit reference to shared memory object.
-      CloseRingBufferFD(ring_buf_shm_path, ring_buf_shm_fd);
-      return;
-#endif
-#ifdef _WIN32
-    HANDLE ring_buf_mapping = INVALID_HANDLE_VALUE;
-    void* ring_buf_lower_half = NULL;
-    void* ring_buf_upper_half = NULL;
-
-    do {
-      // Create a page file mapping to back the ring buffer.
-      ring_buf_mapping = CreateFileMapping(INVALID_HANDLE_VALUE, NULL,
-                                           PAGE_EXECUTE_READWRITE | SEC_COMMIT,
-                                           0, ring_buf_phys_size_bytes, NULL);
-      if (ring_buf_mapping == NULL) {
-        break;
-      }
-
-      // Retry until obtaining an appropriate virtual address mapping.
-      for (int num_attempts = 0; num_attempts < 1000; ++num_attempts) {
-        // Find a virtual address range twice the size of the file mapping.
-        void* reserve_va =
-            VirtualAllocEx(GetCurrentProcess(), NULL, ring_buf_alloc_bytes_,
-                           MEM_TOP_DOWN | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-        if (reserve_va == NULL) {
-          break;
-        }
-        VirtualFree(reserve_va, 0, MEM_RELEASE);
-
-        // Map the ring buffer into the free virtual range.
-        // This may fail: another thread can allocate in this range.
-        ring_buf_lower_half = MapViewOfFileEx(
-            ring_buf_mapping, FILE_MAP_ALL_ACCESS | FILE_MAP_EXECUTE, 0, 0,
-            ring_buf_phys_size_bytes, reserve_va);
-
-        if (ring_buf_lower_half == NULL) {
-          // Virtual range allocated by another thread, try again.
-          continue;
-        }
-
-        ring_buf_upper_half = MapViewOfFileEx(
-            ring_buf_mapping, FILE_MAP_ALL_ACCESS | FILE_MAP_EXECUTE, 0, 0,
-            ring_buf_phys_size_bytes,
-            (void*)(uintptr_t(reserve_va) + ring_buf_phys_size_bytes));
-
-        if (ring_buf_upper_half == NULL) {
-          // Virtual range allocated by another thread, try again.
-          UnmapViewOfFile(ring_buf_lower_half);
-          continue;
-        }
-
-        // Successfully created mapping.
-        ring_buf_ = ring_buf_lower_half;
-        break;
-      }
-
-      if (ring_buf_ == NULL) {
-        break;
-      }
-
-      // Release file mapping (reference counted by views).
-      CloseHandle(ring_buf_mapping);
-
-      // Don't register the memory: causes a failure in the KFD.
-      // Instead use implicit registration to access the ring buffer.
-      return;
-    } while (false);
-
-    // Resource cleanup on failure.
-    UnmapViewOfFile(ring_buf_upper_half);
-    UnmapViewOfFile(ring_buf_lower_half);
-    CloseHandle(ring_buf_mapping);
-#endif
+    ring_buf_ = agent_->coarsegrain_allocator()(
+        ring_buf_alloc_bytes_,
+        core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateUncached);
   } else {
-    // Allocate storage for the ring buffer.
-    ring_buf_alloc_bytes_ = queue_size_pkts * sizeof(core::AqlPacket);
-    assert(IsMultipleOf(ring_buf_alloc_bytes_, 4096) && "Ring buffer sizes must be 4KiB aligned.");
-
-    if (IsDeviceMemRingBuf()) {
-      if (!agent_->LargeBarEnabled()) {
-        throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_QUEUE_CREATION,
-                                 "Trying to allocate an AQL ring buffer in device memory without "
-                                 "large BAR PCIe enabled.");
-      }
-      ring_buf_ = agent_->coarsegrain_allocator()(
-          ring_buf_alloc_bytes_,
-          core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateUncached);
-    } else {
-      ring_buf_ = agent_->system_allocator()(
-          ring_buf_alloc_bytes_, 0x1000,
-          core::MemoryRegion::AllocateExecutable |
-          (queue_full_workaround_ ? core::MemoryRegion::AllocateDoubleMap : 0));
-    }
-
-    assert(ring_buf_ != NULL && "AQL queue memory allocation failure");
-
-    // The virtual ring allocation is twice as large as requested.
-    // Each half maps to the same set of physical pages.
-    if (queue_full_workaround_) ring_buf_alloc_bytes_ *= 2;
+    ring_buf_ = agent_->system_allocator()(
+        ring_buf_alloc_bytes_, 0x1000,
+        core::MemoryRegion::AllocateExecutable);
   }
+
+  assert(ring_buf_ != NULL && "AQL queue memory allocation failure");
 }
 
 void AqlQueue::FreeQueueMemory() {
@@ -777,22 +614,11 @@ void AqlQueue::FreeQueueMemory() {
     shared_queue_ = nullptr;
   }
 
-  if ((agent_->profile() == HSA_PROFILE_FULL) && queue_full_workaround_) {
-#ifdef __linux__
-    munmap(ring_buf_, ring_buf_alloc_bytes_);
-#endif
-#ifdef _WIN32
-    UnmapViewOfFile(ring_buf_);
-    UnmapViewOfFile(
-        (void*)(uintptr_t(ring_buf_) + (ring_buf_alloc_bytes_ / 2)));
-#endif
-  } else {
-    if (ring_buf_) {
-      if (IsDeviceMemRingBuf()) {
-        agent_->coarsegrain_deallocator()(ring_buf_);
-      } else {
-        agent_->system_deallocator()(ring_buf_);
-      }
+  if (ring_buf_) {
+    if (IsDeviceMemRingBuf()) {
+      agent_->coarsegrain_deallocator()(ring_buf_);
+    } else {
+      agent_->system_deallocator()(ring_buf_);
     }
   }
 
