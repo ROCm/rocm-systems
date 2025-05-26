@@ -48,6 +48,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
+#include <inttypes.h>
 
 #include <cstddef>
 #include <string>
@@ -2514,7 +2515,7 @@ rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t *b) {
     return ret;
   }
 
-  // Hardcode based on PCIe specification: https://en.wikipedia.org/wiki/PCI_Express
+  // Hardcode based on PCIe specification
   const uint32_t link_width[] = {1, 2, 4, 8, 12, 16};
   const uint32_t link_speed[] = {25, 50, 80, 160};  // 0.1 Ghz
   const uint32_t WIDTH_DATA_LENGTH = sizeof(link_width)/sizeof(uint32_t);
@@ -6031,7 +6032,7 @@ rsmi_event_notification_get(int timeout_ms,
 
       uint32_t event;
       char event_in[MAX_EVENT_NOTIFICATION_MSG_SIZE];
-      memcpy(reinterpret_cast<char *>(event_in), "\0", MAX_EVENT_NOTIFICATION_MSG_SIZE);
+      memset(event_in, '\0', MAX_EVENT_NOTIFICATION_MSG_SIZE);
       while (fgets(event_in, MAX_EVENT_NOTIFICATION_MSG_SIZE, anon_fp)) {
         /* Output is in format as "event_number message_information\n"
          * Both event are expressed in hex.
@@ -6050,11 +6051,11 @@ rsmi_event_notification_get(int timeout_ms,
           {
             uint32_t pid;
             char task_name[MAX_EVENT_NOTIFICATION_MSG_SIZE];
-            memcpy(reinterpret_cast<char *>(task_name), "\0", MAX_EVENT_NOTIFICATION_MSG_SIZE);
+            memset(task_name, '\0', MAX_EVENT_NOTIFICATION_MSG_SIZE);
 
             sscanf(message, "%x:%s\n", &pid, task_name);
             std::stringstream final_message;
-            final_message << "pid: " << std::to_string(pid).c_str()
+            final_message << "PID: " << std::to_string(pid).c_str()
                           << "  task name: " << task_name;
 
             strcpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str());
@@ -6065,7 +6066,7 @@ rsmi_event_notification_get(int timeout_ms,
             uint64_t bitmask;
             uint64_t counter;
 
-            sscanf(message, "%llx:%llx\n", &bitmask, &counter);
+            sscanf(message, "%" PRIx64 ":%" PRIx64 "\n", &bitmask, &counter);
             std::stringstream final_message;
             final_message << "bitmask: 0x" << std::hex << bitmask
                           << "  counter: 0x" << std::hex << counter;
@@ -6077,7 +6078,7 @@ rsmi_event_notification_get(int timeout_ms,
           {
             uint32_t reset_seq_num;
             char reset_cause[MAX_EVENT_NOTIFICATION_MSG_SIZE];
-            memcpy(reinterpret_cast<char *>(reset_cause), "\0", MAX_EVENT_NOTIFICATION_MSG_SIZE);
+            memset(reset_cause, '\0', MAX_EVENT_NOTIFICATION_MSG_SIZE);
 
             sscanf(message, "%x %[^\n]\n", &reset_seq_num, reset_cause);
             std::stringstream final_message;
@@ -6091,9 +6092,11 @@ rsmi_event_notification_get(int timeout_ms,
           {
             uint32_t reset_seq_num;
 
-            sscanf(message, "%x %[^\n]\n", &reset_seq_num);
+            char tmp[MAX_EVENT_NOTIFICATION_MSG_SIZE];
+            memset(tmp, '\0', MAX_EVENT_NOTIFICATION_MSG_SIZE);
+            sscanf(message, "%x %[^\n]\n", &reset_seq_num, tmp);
             std::stringstream final_message;
-            final_message << "  reset sequence number: " << std::to_string(reset_seq_num).c_str();
+            final_message << "reset sequence number: " << std::to_string(reset_seq_num).c_str();
 
             strcpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str());
           }
@@ -6104,15 +6107,15 @@ rsmi_event_notification_get(int timeout_ms,
             int32_t pid;
             uint32_t start;
             uint32_t size;
-            uint16_t from;
-            uint16_t to;
-            uint16_t prefetch_loc;
-            uint16_t preferred_loc;
+            uint32_t from;
+            uint32_t to;
+            uint32_t prefetch_loc;
+            uint32_t preferred_loc;
             int32_t migrate_trigger;
 
-            sscanf(message, "%lld -%d @%lx(%lx) %x->%x %x:%x %d\n", &ns, &pid, &start, &size, &from, &to, &prefetch_loc, &preferred_loc, &migrate_trigger);
+            sscanf(message, "%" PRId64 " -%d @%" PRIu32 "(%" PRIu32 ") %x->%x %x:%x %d\n", &ns, &pid, &start, &size, &from, &to, &prefetch_loc, &preferred_loc, &migrate_trigger);
             std::stringstream final_message;
-            final_message << "ns: " << std::to_string(ns).c_str() 
+            final_message << "nd: " << std::to_string(ns).c_str() 
                           << "  pid: " << std::to_string(pid).c_str()
                           << "  start: 0x" << std::hex << start
                           << "  size: 0x" << std::hex << size
@@ -6136,9 +6139,9 @@ rsmi_event_notification_get(int timeout_ms,
             uint32_t migrate_trigger;
             uint32_t error_code;
 
-            sscanf(message, "%lld -%d @%lx(%lx) %x->%x %d %d\n", &ns, &pid, &start, &size, &from, &to, &migrate_trigger, &error_code);
+            sscanf(message, "%" PRId64 " -%d @%" PRIu32 "(%" PRIu32 ") %x->%x %d %d\n", &ns, &pid, &start, &size, &from, &to, &migrate_trigger, &error_code);
             std::stringstream final_message;
-            final_message << "ns: " << std::to_string(ns).c_str() 
+            final_message << "nd: " << std::to_string(ns).c_str() 
                           << "  pid: " << std::to_string(pid).c_str()
                           << "  start: 0x" << std::hex << start
                           << "  size: 0x" << std::hex << size
@@ -6156,9 +6159,9 @@ rsmi_event_notification_get(int timeout_ms,
             int32_t pid;
             uint32_t addr;
             uint32_t node;
-            char *rw;
+            char *rw = "\0";
 
-            sscanf(message, "%lld -%d @%lx(%x) %c\n", &ns, &pid, &addr, &node, rw);
+            sscanf(message, "%" PRId64 " -%d @%" PRIx32 "(%x) %c\n", &ns, &pid, &addr, &node, rw);
             std::stringstream final_message;
             final_message << "ns: " << std::to_string(ns).c_str()
                           << "  pid: " << std::to_string(pid).c_str()
@@ -6175,9 +6178,9 @@ rsmi_event_notification_get(int timeout_ms,
             int32_t pid;
             uint32_t addr;
             uint32_t node;
-            char *migrate_update;
+            char *migrate_update = "\0";
 
-            sscanf(message, "%lld -%d @%lx(%x) %c\n", &ns, &pid, &addr, &node, migrate_update);
+            sscanf(message, "%" PRId64 " -%d @%" PRIx32 "(%x) %c\n", &ns, &pid, &addr, &node, migrate_update);
             std::stringstream final_message;
             final_message << "ns: " << std::to_string(ns).c_str()
                           << "  pid: " << std::to_string(pid).c_str()
@@ -6195,7 +6198,7 @@ rsmi_event_notification_get(int timeout_ms,
             uint32_t node;
             uint32_t evict_trigger;
 
-            sscanf(message, "%lld -%d %x %d\n", &ns, &pid, &node, &evict_trigger);
+            sscanf(message, "%" PRId64 "-%d %x %d\n", &ns, &pid, &node, &evict_trigger);
             std::stringstream final_message;
             final_message << "ns: " << std::to_string(ns).c_str()
                           << "  pid: " << std::to_string(pid).c_str()
@@ -6210,9 +6213,9 @@ rsmi_event_notification_get(int timeout_ms,
             int64_t ns;
             int32_t pid;
             uint32_t node;
-            char *rescheduled;
+            char *rescheduled = "\0";
 
-            sscanf(message, "%lld -%d %x %c\n", &ns, &pid, &node, rescheduled);
+            sscanf(message, "%" PRId64 "-%d %x %c\n", &ns, &pid, &node, rescheduled);
             std::stringstream final_message;
             final_message << "ns: " << std::to_string(ns).c_str()
                           << "  pid: " << std::to_string(pid).c_str()
@@ -6231,7 +6234,7 @@ rsmi_event_notification_get(int timeout_ms,
             uint32_t node;
             uint32_t unmap_trigger;
 
-            sscanf(message, "%lld -%d @%lx(%lx) %x %d\n", &ns, &pid, &addr, &size, &node, &unmap_trigger);
+            sscanf(message, "%" PRId64 " -%d @%" PRIx32 "(%" PRIx32 ") %x %d\n", &ns, &pid, &addr, &size, &node, &unmap_trigger);
             std::stringstream final_message;
             final_message << "ns: " << std::to_string(ns).c_str()
                           << "  pid: " << std::to_string(pid).c_str()
@@ -6252,8 +6255,7 @@ rsmi_event_notification_get(int timeout_ms,
         ++(*num_elem);
 
         // zero out event_in after each use
-        memcpy(reinterpret_cast<char *>(event_in), "\0", MAX_EVENT_NOTIFICATION_MSG_SIZE);
-
+        memset(event_in, '\0', MAX_EVENT_NOTIFICATION_MSG_SIZE);
         if (*num_elem >= buffer_size) {
           break;
         }
