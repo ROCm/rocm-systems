@@ -246,9 +246,6 @@ if(${IMAGE_SUPPORT})
                    image/addrlib/src/core/addrlib3.cpp
                    image/addrlib/src/core/addrobject.cpp
                    image/addrlib/src/core/addrelemlib.cpp
-                   image/addrlib/src/r800/ciaddrlib.cpp
-                   image/addrlib/src/r800/egbaddrlib.cpp
-                   image/addrlib/src/r800/siaddrlib.cpp
                    image/addrlib/src/gfx9/gfx9addrlib.cpp
                    image/addrlib/src/gfx10/gfx10addrlib.cpp
                    image/addrlib/src/gfx11/gfx11addrlib.cpp

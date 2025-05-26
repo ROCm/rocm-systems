@@ -185,23 +185,6 @@ ADDR_E_RETURNCODE Lib::Create(
 
         switch (pCreateIn->chipEngine)
         {
-            case CIASICIDGFXENGINE_SOUTHERNISLAND:
-                switch (pCreateIn->chipFamily)
-                {
-                    case FAMILY_SI:
-                        pLib = SiHwlInit(&client);
-                        break;
-                    case FAMILY_VI:
-                    case FAMILY_CZ: // VI based fusion
-                    case FAMILY_CI:
-                    case FAMILY_KV: // CI based fusion
-                        pLib = CiHwlInit(&client);
-                        break;
-                    default:
-                        ADDR_ASSERT_ALWAYS();
-                        break;
-                }
-                break;
             case CIASICIDGFXENGINE_ARCTICISLAND:
                 switch (pCreateIn->chipFamily)
                 {

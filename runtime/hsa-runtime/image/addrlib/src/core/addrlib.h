@@ -403,8 +403,6 @@ private:
     ElemLib*    m_pElemLib;             ///< Element Lib pointer
 };
 
-Lib* SiHwlInit   (const Client* pClient);
-Lib* CiHwlInit   (const Client* pClient);
 Lib* Gfx9HwlInit (const Client* pClient);
 Lib* Gfx10HwlInit(const Client* pClient);
 Lib* Gfx11HwlInit(const Client* pClient);
