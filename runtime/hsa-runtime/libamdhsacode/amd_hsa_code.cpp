@@ -145,6 +145,9 @@ namespace code {
         }
         case HSA_CODE_SYMBOL_INFO_MODULE_NAME: {
           std::string ModuleName = GetModuleName();
+          if (!value) {
+              return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+          }
           memset(value, 0x0, ModuleName.size());
           memcpy(value, ModuleName.c_str(), ModuleName.size());
           break;
