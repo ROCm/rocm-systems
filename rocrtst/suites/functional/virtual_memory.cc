@@ -1101,7 +1101,7 @@ void VirtMemoryTestBasic::NonContiguousChunks(hsa_agent_t cpuAgent, hsa_agent_t 
   ASSERT_SUCCESS(hsa_amd_vmem_set_access(addr, NUM_BUFFERS * alloc_size, permsAccess,
                                          ARRAY_SIZE(permsAccess)));
 
-  for (int i = 0; i < NUM_BUFFERS; i++) {
+  for (unsigned i = 0; i < NUM_BUFFERS; i++) {
     // TODO Map them in opposite order
     ASSERT_SUCCESS(hsa_amd_vmem_unmap(addr_chunks[i], alloc_size));
   }

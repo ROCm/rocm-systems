@@ -443,7 +443,7 @@ bool BuildTopology() {
           // Using one pcie sdma for device to device copy with limited XGMI SDMA engine.
           // This will help improve all to all copy with limited XGMI SDMA engine.
           if (rec_sdma_engine_override) {
-            uint32_t sdma_engine_mask = (1 << ((AMD::GpuAgent*)src_gpu)->properties().NumSdmaEngines - 1);
+            uint32_t sdma_engine_mask = (1 << (((AMD::GpuAgent*)src_gpu)->properties().NumSdmaEngines - 1));
             rec_sdma_eng_id_mask = !IsPowerOfTwo(rec_sdma_eng_id_mask) ?
               sdma_engine_mask : rec_sdma_eng_id_mask;
           }

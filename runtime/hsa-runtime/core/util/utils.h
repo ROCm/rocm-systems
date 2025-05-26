@@ -151,6 +151,8 @@ static __forceinline unsigned long long int strtoull(const char* str,
       rocr::log_printf(__FILENAME__, __LINE__, format, ##__VA_ARGS__);                             \
   } while (false);
 
+// A macro to remove unused variable warnings
+#define UNUSED(x) (void)(x)
 
 // A macro to disallow the copy and move constructor and operator= functions
 #define DISALLOW_COPY_AND_ASSIGN(TypeName)                                                         \

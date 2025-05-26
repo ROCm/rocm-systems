@@ -447,6 +447,7 @@ class GpuAgent : public GpuAgentInt {
       *((uint8_t*)ptr + size - 1) = *((uint8_t*)ptr + size - 1);
       _mm_mfence();
       auto readback = *(reinterpret_cast<volatile uint8_t*>(ptr) + size - 1);
+      UNUSED(readback);
     }
   }
 
@@ -845,9 +846,9 @@ class GpuAgent : public GpuAgentInt {
   pcs_data_t pcs_stochastic_data_;
 
   /// @brief XGMI CPU<->GPU
-  bool xgmi_cpu_gpu_ = false;
+  bool xgmi_cpu_gpu_;
   /// @brief Is PCIe large BAR enabled.
-  bool large_bar_enabled_ = false;
+  bool large_bar_enabled_;
 };
 
 }  // namespace amd
