@@ -137,6 +137,10 @@ void TestFanReadWrite::Run(void) {
     }
 
     ret = rsmi_dev_fan_speed_set(dv_ind, 0, new_speed);
+    if (ret == RSMI_STATUS_NOT_SUPPORTED) {
+      std::cout << "***System fan set is not supported." << std::endl;
+      continue;
+    }
     CHK_ERR_ASRT(ret)
 
     sleep(4);
