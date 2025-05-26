@@ -390,12 +390,12 @@ Examples:
         "-R",
         "--roofline-data-type",
         required=False,
-        choices=["FP8", "FP16", "BF16", "FP32", "FP64", "I8", "I32", "I64"],
+        choices=["FP4", "FP6", "FP8", "FP16", "BF16", "FP32", "FP64", "I8", "I32", "I64"],
         metavar="",
         nargs="+",
         type=str,
         default=["FP32"],
-        help="\t\t\tChoose datatypes to view roofline PDFs for: (DEFAULT: FP32)\n\t\t\t   FP8\n\t\t\t   FP16\n\t\t\t   BF16\n\t\t\t   FP32\n\t\t\t   FP64\n\t\t\t   I8\n\t\t\t  I32\n\t\t\t I64\n\t\t\t ",
+        help="Choose datatypes to view roofline PDFs for: (DEFAULT: FP32)\n\t\t\t   FP4\n\t\t\t FP6\n\t\t\t  FP8\n\t\t\t   FP16\n\t\t\t   BF16\n\t\t\t   FP32\n\t\t\t   FP64\n\t\t\t   I8\n\t\t\t  I32\n\t\t\t I64\n\t\t\t ",
     )
 
     # roofline_group.add_argument('-w', '--workgroups', required=False, default=-1, type=int, help="\t\t\tNumber of kernel workgroups (DEFAULT: 1024)")
@@ -605,12 +605,12 @@ Examples:
         "-R",
         "--roofline-data-type",
         required=False,
-        choices=["FP8", "FP16", "BF16", "FP32", "FP64", "I8", "I32", "I64"],
+        choices=["FP4", "FP6", "FP8", "FP16", "BF16", "FP32", "FP64", "I8", "I32", "I64"],
         metavar="",
         nargs="+",
         type=str,
         default=["FP32"],
-        help="\t\t\tChoose datatypes to view roofline PDFs for: (DEFAULT: FP32)\n\t\t\t   FP8\n\t\t\t   FP16\n\t\t\t   BF16\n\t\t\t   FP32\n\t\t\t   FP64\n\t\t\t   I8\n\t\t\t  I32\n\t\t\t I64\n\t\t\t ",
+        help="\t\t\tChoose datatypes to view roofline PDFs for: (DEFAULT: FP32)\n\t\t\t   FP4\n\t\t\t   FP6\n\t\t\t FP8\n\t\t\t   FP16\n\t\t\t   BF16\n\t\t\t   FP32\n\t\t\t   FP64\n\t\t\t   I8\n\t\t\t  I32\n\t\t\t I64\n\t\t\t ",
     )
 
     analyze_advanced_group.add_argument(
