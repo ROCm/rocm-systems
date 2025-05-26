@@ -209,8 +209,6 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
 
   kmt_alloc_flags.ui32.ExecuteAccess =
       (alloc_flags & core::MemoryRegion::AllocateExecutable ? 1 : 0);
-  kmt_alloc_flags.ui32.AQLQueueMemory =
-      (alloc_flags & core::MemoryRegion::AllocateDoubleMap ? 1 : 0);
 
   if (m_region.IsSystem() &&
       (alloc_flags & core::MemoryRegion::AllocateNonPaged)) {
