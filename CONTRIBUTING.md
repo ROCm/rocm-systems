@@ -79,6 +79,24 @@ By creating a pull request, you agree to the statements made in the [code licens
 * Group related files together and maintain a logical hierarchy.
 * Use `clang-format-11` and `cmake-format` formatters to ensure consistency.
 
+### Using pre-commit hooks ###
+
+Our project supports optional [*pre-commit hooks*](https://pre-commit.com/#introduction) which developers can leverage to verify formatting before publishing their code. Once enabled, any commits you propose to the repository will be automatically checked for formatting. Initial setup is as follows:
+
+```shell
+pip install pre-commit  # or: apt-get install pre-commit
+cd rocprofiler-systems
+pre-commit install
+```
+
+**Note:** pre-commit version **3.0.0 or higher** is required.
+
+Now, when you commit code to the repository you should see something like this:
+
+![A screen capture showing terminal output from a pre-commit hook](docs/data/pre-commit-hook.png)
+
+Please see the [pre-commit documentation](https://pre-commit.com/#quick-start) for additional information.
+
 ## Code License ##
 
 All code contributed to this project will be licensed under the license identified in the [License](LICENSE). Your contribution will be accepted under the same license.
