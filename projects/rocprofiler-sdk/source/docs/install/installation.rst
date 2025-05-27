@@ -1,10 +1,11 @@
 .. meta::
    :description: "ROCprofiler-SDK is a tooling infrastructure for profiling general-purpose GPU compute applications running on the ROCm software."
    :keywords: "Installing ROCprofiler-SDK, Install ROCprofiler-SDK, Build ROCprofiler-SDK"
-   
 
-ROCprofiler-SDK installation
-============================
+.. _installing-rocprofiler-sdk:
+
+Installing ROCprofiler-SDK
+=============================
 
 This document provides information required to install ROCprofiler-SDK from source.
 
@@ -47,8 +48,10 @@ The relevant fields are ``ID`` and the ``VERSION_ID``.
 Build requirements
 ------------------
 
+To build ROCprofiler-SDK, install ``CMake`` as explained in the following section.
+
 Install CMake
-==============
+++++++++++++++
 
 Install `CMake <https://cmake.org/>`_ version 3.21 (or later).
 
@@ -59,7 +62,6 @@ Install `CMake <https://cmake.org/>`_ version 3.21 (or later).
 
     /usr/local/bin/python -m pip install --user 'cmake==3.22.0'
     export PATH=${HOME}/.local/bin:${PATH}
-
 
 Building ROCprofiler-SDK from source
 -------------------------------------
@@ -77,7 +79,7 @@ Building ROCprofiler-SDK from source
     cmake --build rocprofiler-sdk-build --target all --parallel 8
 
 Installing ROCprofiler-SDK
---------------------------
+---------------------------
 
 To install ROCprofiler-SDK from the ``rocprofiler-sdk-build`` directory, run:
 
@@ -86,7 +88,7 @@ To install ROCprofiler-SDK from the ``rocprofiler-sdk-build`` directory, run:
     cmake --build rocprofiler-sdk-build --target install
 
 Testing ROCprofiler-SDK
------------------------
+------------------------
 
 To run the built tests, ``cd`` into the ``rocprofiler-sdk-build`` directory and run:
 
@@ -102,11 +104,10 @@ To run the built tests, ``cd`` into the ``rocprofiler-sdk-build`` directory and 
 
     /usr/local/bin/python -m pip install -r requirements.txt
 
+Install using package manager
+------------------------------
 
-Install via package manager
-----------------------------
-
-If you have ROCm version 6.2 or higher installed, you can use the package manager to install a pre-built copy of ROCProfiler-SDK.
+If you have ROCm version 6.2 or later installed, you can use the package manager to install a prebuilt copy of ROCprofiler-SDK.
 
 .. tab-set::
 
@@ -127,3 +128,4 @@ If you have ROCm version 6.2 or higher installed, you can use the package manage
       .. code-block:: shell
 
          $ sudo zypper install rocprofiler-sdk
+
