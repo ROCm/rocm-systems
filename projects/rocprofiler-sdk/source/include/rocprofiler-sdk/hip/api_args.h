@@ -3066,14 +3066,6 @@ typedef union rocprofiler_hip_api_args_t
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 9
     struct
     {
-        hipEvent_t   event;
-        hipStream_t  stream;
-        unsigned int flags;
-    } hipEventRecordWithFlags;
-#endif
-#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 10
-    struct
-    {
         hipLinkState_t  state;
         hipJitInputType type;
         void*           data;
@@ -3109,6 +3101,14 @@ typedef union rocprofiler_hip_api_args_t
     {
         hipLinkState_t state;
     } hipLinkDestroy;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 10
+    struct
+    {
+        hipEvent_t   event;
+        hipStream_t  stream;
+        unsigned int flags;
+    } hipEventRecordWithFlags;
 #endif
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 11
     struct
