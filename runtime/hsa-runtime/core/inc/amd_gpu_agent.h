@@ -461,11 +461,14 @@ class GpuAgent : public GpuAgentInt {
   // @brief Returns true if scratch reclaim is enabled
   __forceinline bool AsyncScratchReclaimEnabled() const override {
     const uint32_t GFX94X_MIN_CP_FW_VERSION_REQUIRED = 177;
-    // TODO: Need to update min CP FW ucode version once it is released
+    const uint32_t GFX95X_MIN_CP_FW_VERSION_REQUIRED = 24;
+
     return (core::Runtime::runtime_singleton_->flag().enable_scratch_async_reclaim() &&
-            supported_isas()[0]->GetMajorVersion() == 9 &&
-            supported_isas()[0]->GetMinorVersion() >= 4 &&
-            properties_.EngineId.ui32.uCode >= GFX94X_MIN_CP_FW_VERSION_REQUIRED);
+	    supported_isas()[0]->GetMajorVersion() == 9 &&
+	    ((supported_isas()[0]->GetMinorVersion() == 4 &&
+	      properties_.EngineId.ui32.uCode >= GFX94X_MIN_CP_FW_VERSION_REQUIRED) ||
+	     (supported_isas()[0]->GetMinorVersion() == 5 &&
+	      properties_.EngineId.ui32.uCode >= GFX95X_MIN_CP_FW_VERSION_REQUIRED)));
   };
 
   hsa_status_t SetAsyncScratchThresholds(size_t use_once_limit) override;
