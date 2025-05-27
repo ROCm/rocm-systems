@@ -550,6 +550,27 @@ ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipGraphBatchMemOpNodeSetParams_fn, 466
 ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipGraphExecBatchMemOpNodeSetParams_fn, 467)
 #endif
 
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 9
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipEventRecordWithFlags_fn, 468)
+#endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 10
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipLinkAddData_fn, 469)
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipLinkAddFile_fn, 470)
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipLinkComplete_fn, 471)
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipLinkCreate_fn, 472)
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipLinkDestroy_fn, 473)
+#endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 11
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipLaunchKernelExC_fn, 474)
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipDrvLaunchKernelEx_fn, 475)
+#endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 12
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipMemGetHandleForAddressRange_fn, 476)
+#endif
+
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION == 0
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 442)
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 1
@@ -568,6 +589,16 @@ ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 463)
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 464)
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 8
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 468)
+#elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 9
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 469)
+#elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 10
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 474)
+#elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 11
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 476)
+#elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 12
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 477)
+#elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 13
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 477)
 #else
 INTERNAL_CI_ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 0)
 #endif

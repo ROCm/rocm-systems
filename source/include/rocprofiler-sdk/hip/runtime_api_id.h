@@ -514,5 +514,22 @@ typedef enum rocprofiler_hip_runtime_api_id_t  // NOLINT(performance-enum-size)
     ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphBatchMemOpNodeSetParams,
     ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphExecBatchMemOpNodeSetParams,
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 9
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipEventRecordWithFlags,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 10
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipLinkAddData,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipLinkAddFile,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipLinkComplete,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipLinkCreate,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipLinkDestroy,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 11
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipLaunchKernelExC,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipDrvLaunchKernelEx,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 12
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemGetHandleForAddressRange,
+#endif
     ROCPROFILER_HIP_RUNTIME_API_ID_LAST,
 } rocprofiler_hip_runtime_api_id_t;

@@ -3063,6 +3063,78 @@ typedef union rocprofiler_hip_api_args_t
         const hipBatchMemOpNodeParams* nodeParams;
     } hipGraphExecBatchMemOpNodeSetParams;
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 9
+    struct
+    {
+        hipEvent_t   event;
+        hipStream_t  stream;
+        unsigned int flags;
+    } hipEventRecordWithFlags;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 10
+    struct
+    {
+        hipLinkState_t  state;
+        hipJitInputType type;
+        void*           data;
+        size_t          size;
+        const char*     name;
+        unsigned int    numOptions;
+        hipJitOption*   options;
+        void**          optionValues;
+    } hipLinkAddData;
+    struct
+    {
+        hipLinkState_t  state;
+        hipJitInputType type;
+        const char*     path;
+        unsigned int    numOptions;
+        hipJitOption*   options;
+        void**          optionValues;
+    } hipLinkAddFile;
+    struct
+    {
+        hipLinkState_t state;
+        void**         hipBinOut;
+        size_t*        sizeOut;
+    } hipLinkComplete;
+    struct
+    {
+        unsigned int    numOptions;
+        hipJitOption*   options;
+        void**          optionValues;
+        hipLinkState_t* stateOut;
+    } hipLinkCreate;
+    struct
+    {
+        hipLinkState_t state;
+    } hipLinkDestroy;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 11
+    struct
+    {
+        const hipLaunchConfig_t* config;
+        const void*              fPtr;
+        void**                   args;
+    } hipLaunchKernelExC;
+    struct
+    {
+        const HIP_LAUNCH_CONFIG* config;
+        hipFunction_t            f;
+        void**                   params;
+        void**                   extra;
+    } hipDrvLaunchKernelEx;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 12
+    struct
+    {
+        void*                 handle;
+        hipDeviceptr_t        dptr;
+        size_t                size;
+        hipMemRangeHandleType handleType;
+        unsigned long long    flags;
+    } hipMemGetHandleForAddressRange;
+#endif
 } rocprofiler_hip_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI

@@ -576,6 +576,27 @@ HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNT
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphBatchMemOpNodeSetParams, hipGraphBatchMemOpNodeSetParams, hipGraphBatchMemOpNodeSetParams_fn, hNode, nodeParams);
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphExecBatchMemOpNodeSetParams, hipGraphExecBatchMemOpNodeSetParams, hipGraphExecBatchMemOpNodeSetParams_fn, hGraphExec, hNode, nodeParams);
 #endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 9
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipEventRecordWithFlags, hipEventRecordWithFlags, hipEventRecordWithFlags_fn, event, stream, flags);
+#endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 10
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipLinkAddData, hipLinkAddData, hipLinkAddData_fn, state, type, data, size, name, numOptions, options, optionValues);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipLinkAddFile, hipLinkAddFile, hipLinkAddFile_fn, state, type, path, numOptions, options, optionValues);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipLinkComplete, hipLinkComplete, hipLinkComplete_fn, state, hipBinOut, sizeOut);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipLinkCreate, hipLinkCreate, hipLinkCreate_fn,  numOptions, options, optionValues, stateOut);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipLinkDestroy, hipLinkDestroy, hipLinkDestroy_fn, state);
+#endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 11
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipLaunchKernelExC, hipLaunchKernelExC, hipLaunchKernelExC_fn, config, fPtr, args);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipDrvLaunchKernelEx, hipDrvLaunchKernelEx, hipDrvLaunchKernelEx_fn, config, f, params, extra);
+#endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 12
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipMemGetHandleForAddressRange, hipMemGetHandleForAddressRange, hipMemGetHandleForAddressRange_fn, handle, dptr, size, handleType, flags);
+#endif
 // clang-format on
 
 #else
