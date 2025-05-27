@@ -1078,7 +1078,7 @@ class AMDSMIHelpers():
             msg = (
                 "WARNING: User is missing the following required groups: %s. "
                 "Please add user to these groups."
-            ) % ", ".join(sodurted(missing_groups))
+            ) % ", ".join(sorted(missing_groups))
             print(msg)
             logging.warning(msg)
 
