@@ -117,7 +117,6 @@ endif()
 
 find_package(
     hip
-    6.2
     REQUIRED
     CONFIG
     HINTS
@@ -126,6 +125,11 @@ find_package(
     PATHS
     ${rocm_version_DIR}
     ${ROCM_PATH})
+
+if(hip_VERSION VERSION_LESS "6.2")
+    message(FATAL_ERROR "HIP version is ${hip_VERSION}, requires at least 6.2")
+endif()
+
 target_link_libraries(rocprofiler-sdk-hip INTERFACE hip::host)
 rocprofiler_config_nolink_target(rocprofiler-sdk-hip-nolink hip::host)
 

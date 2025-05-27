@@ -398,6 +398,36 @@ struct formatter<hipStreamBatchMemOpType> : rocprofiler::hip::details::base_form
     }
 };
 #endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 11
+ROCP_SDK_HIP_FORMATTER(
+    hipLaunchConfig_st,
+    "{}gridDim={}, blockDim={}, dynamicSmemBytes={}, stream={}, attrs={}, numAttrs={}",
+    '{',
+    v.gridDim,
+    v.blockDim,
+    v.dynamicSmemBytes,
+    static_cast<void*>(v.stream),
+    static_cast<void*>(v.attrs),
+    v.numAttrs,
+    '}')
+
+ROCP_SDK_HIP_FORMATTER(HIP_LAUNCH_CONFIG_st,
+                       "{}gridDimX={}, gridDimY={}, gridDimZ={}, blockDimX={}, blockDimY={}, "
+                       "blockDimZ={}, sharedMemBytes={}, hStream={}, attrs={}, numAttrs={}",
+                       '{',
+                       v.gridDimX,
+                       v.gridDimY,
+                       v.gridDimZ,
+                       v.blockDimX,
+                       v.blockDimY,
+                       v.blockDimZ,
+                       v.sharedMemBytes,
+                       static_cast<void*>(v.hStream),
+                       static_cast<void*>(v.attrs),
+                       v.numAttrs,
+                       '}')
+#endif
 }  // namespace fmt
 
 #undef ROCP_SDK_HIP_FORMATTER
