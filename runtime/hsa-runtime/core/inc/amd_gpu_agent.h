@@ -446,7 +446,7 @@ class GpuAgent : public GpuAgentInt {
       _mm_sfence();
       *((uint8_t*)ptr + size - 1) = *((uint8_t*)ptr + size - 1);
       _mm_mfence();
-      auto readback = *reinterpret_cast<volatile uint8_t*>(ptr + size - 1);
+      auto readback = *(reinterpret_cast<volatile uint8_t*>(ptr) + size - 1);
     }
   }
 
