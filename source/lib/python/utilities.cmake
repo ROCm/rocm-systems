@@ -45,13 +45,37 @@ macro(rocprofiler_find_python3 _VERSION)
     endif()
 endmacro()
 
-function(get_default_python_version _VAR)
-    rocprofiler_reset_python3_cache()
-    find_package(Python3 3.6 ${_ARGN} REQUIRED MODULE COMPONENTS Interpreter Development)
+# make sure we have all python version candidates
+set(ROCPROFILER_PYTHON_VERSION_CANDIDATES
+    "3.20;3.19;3.18;3.17;3.16;3.15;3.14;3.13;3.12;3.11;3.10;3.9;3.8;3.7;3.6"
+    CACHE STRING "Python versions to search for, newest first")
 
-    if(Python3_FOUND)
+function(get_default_python_versions _VAR)
+    rocprofiler_reset_python3_cache()
+
+    set(_PYTHON_FOUND_VERSIONS)
+
+    foreach(_VER IN LISTS ROCPROFILER_PYTHON_VERSION_CANDIDATES)
+        find_package(Python3 ${_VER} EXACT COMPONENTS Interpreter Development)
+        if(Python3_FOUND)
+            list(APPEND _PYTHON_FOUND_VERSIONS
+                 "${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}")
+        endif()
+    endforeach()
+
+    # If none found, do one last check for 3.6 (no EXACT)
+    if(NOT _PYTHON_FOUND_VERSIONS)
+        find_package(Python3 3.6 COMPONENTS Interpreter Development)
+        if(Python3_FOUND)
+            list(APPEND _PYTHON_FOUND_VERSIONS
+                 "${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}")
+        endif()
+    endif()
+
+    # Set the output variable to the first found version, if any
+    if(_PYTHON_FOUND_VERSIONS)
         set(${_VAR}
-            ${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}
+            "${_PYTHON_FOUND_VERSIONS}"
             PARENT_SCOPE)
     endif()
 
