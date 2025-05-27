@@ -1677,7 +1677,7 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef struct {
-    uint32_t year;      //!< Last 2 digits of the Year released  -  To Be Depricated
+    uint32_t year;      //!< Last 2 digits of the Year released  -  To Be Deprecated
     uint32_t major;     //!< Major version
     uint32_t minor;     //!< Minor version
     uint32_t release;   //!< Patch, build or stepping version
