@@ -1234,23 +1234,25 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef enum {
-    AMDSMI_EVT_NOTIF_NONE = 0,     //!< Not used
-    AMDSMI_EVT_NOTIF_VMFAULT = 1,  //!< VM page fault
+    AMDSMI_EVT_NOTIF_NONE = 0,                                    //!< Not used
+    AMDSMI_EVT_NOTIF_VMFAULT = 1,                                 //!< VM page fault
     AMDSMI_EVT_NOTIF_FIRST = AMDSMI_EVT_NOTIF_VMFAULT,
-    AMDSMI_EVT_NOTIF_THERMAL_THROTTLE = 2,
-    AMDSMI_EVT_NOTIF_GPU_PRE_RESET = 3,
-    AMDSMI_EVT_NOTIF_GPU_POST_RESET = 4,
-    AMDSMI_EVT_NOTIF_RING_HANG = 5, // Ringhang now maps to AMDSMI_EVT_NOTIF_MIGRATE_START.
-                                          // Will be depreciated in 7.0
-    AMDSMI_EVT_NOTIF_MIGRATE_START = AMDSMI_EVT_NOTIF_RING_HANG,
-    AMDSMI_EVT_NOTIF_MIGRATE_END = 6,
-    AMDSMI_EVT_NOTIF_PAGE_FAULT_START = 7,
-    AMDSMI_EVT_NOTIF_PAGE_FAULT_END = 8,
-    AMDSMI_EVT_NOTIF_QUEUE_EVICTION = 9,
-    AMDSMI_EVT_NOTIF_QUEUE_RESTORE = 10,
-    AMDSMI_EVT_NOTIF_UNMAP_FROM_GPU = 11,
-    AMDSMI_EVT_NOTIF_PROCESS_START = 12,
-    AMDSMI_EVT_NOTIF_PROCESS_END = 13,
+    AMDSMI_EVT_NOTIF_THERMAL_THROTTLE = 2,                        //!< thermal throttle
+    AMDSMI_EVT_NOTIF_GPU_PRE_RESET = 3,                           //!< pre reset; event includes message indicating cause
+                                                                  //!< causes include job hang, RAS error,
+                                                                  //!< MES hang, HWS hang, user trigger, and unknown
+    AMDSMI_EVT_NOTIF_GPU_POST_RESET = 4,                          //!< post reset
+    AMDSMI_EVT_NOTIF_RING_HANG = 5,                               //!< Ringhang now maps to AMDSMI_EVT_NOTIF_MIGRATE_START.
+                                                                  //!< Will be deprecated in ROCm 7.0
+    AMDSMI_EVT_NOTIF_MIGRATE_START = AMDSMI_EVT_NOTIF_RING_HANG,  //!< migrate start
+    AMDSMI_EVT_NOTIF_MIGRATE_END = 6,                             //!< migrate end
+    AMDSMI_EVT_NOTIF_PAGE_FAULT_START = 7,                        //!< page fault start
+    AMDSMI_EVT_NOTIF_PAGE_FAULT_END = 8,                          //!< page fault end
+    AMDSMI_EVT_NOTIF_QUEUE_EVICTION = 9,                          //!< queue eviction
+    AMDSMI_EVT_NOTIF_QUEUE_RESTORE = 10,                          //!< queue restore
+    AMDSMI_EVT_NOTIF_UNMAP_FROM_GPU = 11,                         //!< unmap from GPU
+    AMDSMI_EVT_NOTIF_PROCESS_START = 12,                          //!< KFD process start
+    AMDSMI_EVT_NOTIF_PROCESS_END = 13,                            //!< KFD process end
 
     AMDSMI_EVT_NOTIF_LAST = AMDSMI_EVT_NOTIF_PROCESS_END
 } amdsmi_evt_notification_type_t;
