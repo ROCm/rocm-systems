@@ -551,15 +551,15 @@ ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipGraphExecBatchMemOpNodeSetParams_fn,
 #endif
 
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 9
-ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipEventRecordWithFlags_fn, 468)
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipLinkAddData_fn, 468)
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipLinkAddFile_fn, 469)
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipLinkComplete_fn, 470)
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipLinkCreate_fn, 471)
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipLinkDestroy_fn, 472)
 #endif
 
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 10
-ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipLinkAddData_fn, 469)
-ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipLinkAddFile_fn, 470)
-ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipLinkComplete_fn, 471)
-ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipLinkCreate_fn, 472)
-ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipLinkDestroy_fn, 473)
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipEventRecordWithFlags_fn, 473)
 #endif
 
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 11
@@ -590,7 +590,7 @@ ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 464)
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 8
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 468)
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 9
-ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 469)
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 473)
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 10
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 474)
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 11
