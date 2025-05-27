@@ -196,7 +196,7 @@ HIP trace
 +++++++++++
 
 HIP trace comprises execution traces for the entire application at the HIP level. This includes HIP API functions and their asynchronous activities at the runtime level. In general, HIP APIs directly interact with the user program. It is easier to analyze HIP traces as you can directly map them to the program.
-Unlike previous iterations of `rocprof`, this does not enable kernel tracing, memory copy tracing, etc. If you want to enable kernel tracing, memory copy tracing, they need to be provided explicitly.
+Unlike previous iterations of ``rocprof``, this does not enable kernel tracing, memory copy tracing, and so on. If you want to enable kernel tracing, memory copy tracing, they need to be provided explicitly.
 
 To trace HIP runtime APIs, use:
 
@@ -218,7 +218,7 @@ Here are the contents of ``hip_api_trace.csv`` file:
    :header-rows: 1
 
 
-`rocprofv3` provides options to collect traces at more granular level. For HIP, user can collect traces for HIP compile time APIs and runtime APIs separately.
+``rocprofv3`` provides options to collect traces at more granular level. For HIP, you can collect traces for HIP compile time APIs and runtime APIs separately.
 
 To collect HIP compile time API traces, use:
 
@@ -286,7 +286,7 @@ Here are the contents of ``hsa_api_trace.csv`` file:
    :header-rows: 1
 
 
-`rocprofv3` provides options to collect traces at more granular level. HSA traces can be collected separately for four API domains: `HSA_AMD_EXT_API`, `HSA_CORE_API`, `HSA_IMAGE_EXT_API` and `HSA_FINALIZE_EXT_API`.
+``rocprofv3`` provides options to collect HSA traces at more granular level. HSA traces can be collected separately for four API domains: ``HSA_AMD_EXT_API``, ``HSA_CORE_API``, ``HSA_IMAGE_EXT_API`` and ``HSA_FINALIZE_EXT_API``.
 
 To collect HSA core API traces, use:
 
@@ -369,7 +369,7 @@ For the description of the fields in the output file, see :ref:`output-file-fiel
 Memory copy trace
 +++++++++++++++++++
 
-Memory copy traces track `hipMemcpy` and `hipMemcpyAsync` functions, which uses the `hsa_amd_memory_async_copy_on_engine` HSA functions internally. To trace memory moves across the application, use:
+Memory copy traces track ``hipMemcpy`` and ``hipMemcpyAsync`` functions, which use the ``hsa_amd_memory_async_copy_on_engine`` HSA functions internally. To trace memory moves across the application, use:
 
 .. code-block:: shell
 
@@ -438,7 +438,7 @@ The HSA runtime API is excluded because it is a lower-level API upon which HIP a
 thus, tends to be an implementation detail irrelevant to most users. Similarly, the HIP compiler API is also excluded for being an implementation detail as these functions are automatically inserted during HIP compilation.
 
 ``--runtime-trace`` traces the HIP runtime API, marker API, kernel dispatches, and
-memory operations (copies, allocations and scratch).
+memory operations (copies, allocations, and scratch).
 
 .. code-block:: shell
 
@@ -455,12 +455,12 @@ This is an all-inclusive option to collect HIP, HSA, kernel, memory copy, memory
 
     rocprofv3 –-sys-trace -- <application_path>
 
-Running the above command generates ``hip_api_trace.csv``, ``hsa_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, ``scratch_memory_trace.csv``, ``memory_allocation_trace.csv``, and ``marker_api_trace.csv`` (if ``ROCTx`` APIs are specified in the application).
+Running the preceding command generates ``hip_api_trace.csv``, ``hsa_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, ``scratch_memory_trace.csv``, ``memory_allocation_trace.csv``, and ``marker_api_trace.csv`` if ``ROCTx`` APIs are specified in the application.
 
 Scratch memory trace
 ++++++++++++++++++++++
 
-This option collects scratch memory operation traces. Scratch is an address space on AMD GPUs roughly equivalent to the `local memory` in NVIDIA CUDA. The `local memory` in CUDA is a thread-local global memory with interleaved addressing, which is used for register spills or stack space. This option helps to trace when the ``rocr`` runtime allocates, frees, and tries to reclaim scratch memory.
+This option collects scratch memory operation traces. Scratch is an address space on AMD GPUs roughly equivalent to the local memory in NVIDIA CUDA. The local memory in CUDA is a thread-local global memory with interleaved addressing, which is used for register spills or stack space. This option helps to trace when the ``rocr`` runtime allocates, frees, and tries to reclaim scratch memory.
 
 To trace scratch memory allocations during the application run, use:
 
@@ -634,13 +634,13 @@ To see a summary for ``MEMORY_COPY`` and ``HIP_API`` domains, use:
 Summary output file
 ######################
 
-This option specifies the output file for the summary. By default, the summary is displayed on stderr. To specify a different output file, use:
+This option specifies the output file for the summary. By default, the summary is displayed on ``stderr``. To specify another output file for summary, use:
 
 .. code-block:: shell
 
-   rocprofv3 -S -D --summary-output-file summary --sys-trace -- <application_path>
+   rocprofv3 -S -D --summary-output-file filename --sys-trace -- <application_path>
 
-The preceding command generates a ``summary`` file displaying the summary of each domain. This also generates the files for the enabled tracing types under `-sys-trace` option.
+The preceding command generates an output file named "filename" consisting of the summary for each domain. This also generates the files for the enabled tracing types under ``-sys-trace`` option.
 
 .. include:: /data/summary.txt
    :literal:
@@ -726,18 +726,18 @@ To supply the input file for collecting traces, use:
 
    rocprofv3 -i input.yaml -- <application_path>
 
-Please note that input file format must be a valid `YAML` or `JSON` file.
+Please note that input file format must be a valid YAML or JSON file.
 
 Disabling specific tracing options
 ++++++++++++++++++++++++++++++++++++
 
-When using aggregate tracing options like ``--runtime-trace`` or ``--sys-trace``, you can disable specific tracing options by setting them to ``False``. This allows fine-grained control over which traces are collected.
+When using aggregate tracing options like ``--runtime-trace`` or ``--sys-trace``, you can disable specific tracing options by setting them to ``False``. This allows fine-grained control over the traces to be collected.
 
 .. code-block:: shell
 
    rocprofv3 --runtime-trace --scratch-memory-trace=False -- <application_path>
 
-The above command enables all traces included in ``--runtime-trace`` except for scratch memory tracing.
+The preceding command enables all traces included in ``--runtime-trace`` except for scratch memory tracing.
 
 Similarly, for ``--sys-trace``:
 
@@ -745,15 +745,15 @@ Similarly, for ``--sys-trace``:
 
    rocprofv3 --sys-trace --hsa-trace=False -- <application_path>
 
-This command enables all traces included in ``--sys-trace`` except for HSA API tracing.
+The preceding command enables all traces included in ``--sys-trace`` except for HSA API tracing.
 
-You can disable multiple specific tracing options:
+To disable multiple specific tracing options, use:
 
 .. code-block:: shell
 
    rocprofv3 --sys-trace --hsa-trace=False --scratch-memory-trace=False -- <application_path>
 
-This feature is particularly useful when you want to collect most traces but exclude specific ones that might be unnecessary for your analysis or that generate excessive data.
+This feature is particularly useful to collect most traces excluding specific ones that might be unnecessary for your analysis or that generate excessive data.
 
 Kernel counter collection
 --------------------------
@@ -1008,11 +1008,13 @@ Here is the same sample in JSON format:
 Perfetto visualization
 -----------------------
 
+`Perfetto <https://perfetto.dev/>`_ is an open-source tracing tool that provides a detailed view of system performance. You can use Perfetto to visualize traces and performance counter data as explained in the following sections.
+
 Perfetto visualization for traces
 +++++++++++++++++++++++++++++++++++++++++++++
 
-Users can generate Perfetto trace files using the ``--output-format pftrace`` option. This allows users to visualize the traces in the Perfetto viewer.
-Perfetto is an open-source tracing tool that provides a detailed view of system performance. It allows you to visualize the collected traces in a user-friendly interface, making it easier to analyze and understand the performance characteristics of your application.
+Perfetto helps you to visualize the collected traces in Perfetto viewer, which is a user-friendly interface that makes it easier to analyze and understand the performance characteristics of your application.
+
 To generate a Perfetto trace file, use the ``--output-format pftrace`` option along with the desired tracing options. For example, to collect system traces and generate a Perfetto trace file, use:
 
 .. code-block:: bash
@@ -1027,18 +1029,16 @@ The generated Perfetto trace file can be opened in the `Perfetto UI <https://ui.
    :width: 100%
    :align: center
 
-
 **Figure 2:** Visualization of ROCm flow data in Perfetto
 
 .. image:: /data/perfetto_flow.png
    :width: 100%
    :align: center
 
-
 Perfetto visualization for counter collection
 +++++++++++++++++++++++++++++++++++++++++++++
 
-When collecting performance counter data, you can visualize the counter tracks per agent in the Perfetto viewer by using the PFTrace output format. This allows you to see how counter values change over time during kernel execution.
+When collecting performance counter data, you can visualize the counter tracks per agent in the Perfetto viewer by using the PFTrace output format. This helps you see how counter values change over time during kernel execution.
 
 To generate a Perfetto trace file with counter data, use:
 
@@ -1078,28 +1078,33 @@ The ``agent_info.csv`` file contains information about the CPU or GPU the kernel
 Advanced options
 -----------------
 
-Agent Index
+``rocprofv3`` provides the following miscellaneous functionalities for improved control and flexibility.
+
+Agent index
 ++++++++++++++
 
-The agent index is a unique identifier for each agent in the system. It is used to identify the agent in the output files. Since, each runtime/tool has their own way to represent the agent's indices, `rocprofv3` provides a way to configure the agent index in the output files.
+The agent index is a unique identifier for each agent in the system. It is used to identify the agent in the output files. Since, each runtime or tool has an independent representation of the agent's indices, ``rocprofv3`` provides an option to configure the agent index in the output files.
 
-- **absolute** == *node_id* - absolute index of the agent regardless of cgroups masking. This is a monotonically increasing number that is incremented for every folder in `/sys/class/kfd/kfd/topology/nodes`. e.g. Agent-0, Agent-2, Agent-4.
-- **relative** == *logical_node_id* - relative index of the agent accounting for cgroups masking. This is a monotonically increasing number which is incremented for every folder in `/sys/class/kfd/kfd/topology/nodes/` whose properties file was non-empty.e.g. Agent-0, Agent-1, Agent-2
-- **type-relative** == *logical_node_type_id* - relative index of the agent accounting for cgroups masking where indexing starts at zero for each agent type. e.g. CPU-0, GPU-0, GPU-1
-
+- **absolute** == *node_id* - Absolute index of the agent, regardless of cgroups masking. This is a monotonically increasing number, which is incremented for every folder in ``/sys/class/kfd/kfd/topology/nodes``. For example, Agent-0, Agent-2, Agent-4.
+- **relative** == *logical_node_id* - Relative index of the agent accounting for cgroups masking. This is a monotonically increasing number, which is incremented for every folder in ``/sys/class/kfd/kfd/topology/nodes/``, whose properties file is non-empty. For example, Agent-0, Agent-1, Agent-2.
+- **type-relative** == *logical_node_type_id* - Relative index of the agent accounting for cgroups masking, where indexing starts at zero for each agent type. For example, CPU-0, GPU-0, GPU-1.
 
 To set the agent index in the output files, use the ``--agent-index`` option. The default value is ``relative``.
 
 The following example shows how to set the agent index on a system with multiple GPUs and CPUs:
 
-Here is the `rocm-smi` output:
+Here is the ``rocm-smi`` output:
 
 .. include:: /data/rocm-smi.txt
    :literal:
 
+To set the agent index to relative, use:
+
 .. code-block:: shell
 
    rocprofv3 --kernel-trace --agent-index=relative -- <application_path>
+
+Here is the generated ouput file with ``Agent_Id`` as "Agent 7":
 
 .. code-block:: shell
 
@@ -1108,9 +1113,13 @@ Here is the `rocm-smi` output:
    "Kind","Agent_Id","Queue_Id","Stream_Id","Thread_Id","Dispatch_Id","Kernel_Id","Kernel_Name","Correlation_Id","Start_Timestamp","End_Timestamp","Private_Segment_Size","Group_Segment_Size","Workgroup_Size_X","Workgroup_Size_Y","Workgroup_Size_Z","Grid_Size_X","Grid_Size_Y","Grid_Size_Z"
    "KERNEL_DISPATCH","Agent 7",1,2,15044,1,17,"void addition_kernel<float>(float*, float const*, float const*, int, int)",1,1671247151691610,1671247151718010,0,0,64,1,1,1024,1024,1
 
+To set the agent index to type-relative, use:
+
 .. code-block:: shell
 
    rocprofv3 --kernel-trace --agent-index=type-relative -- <application_path>
+
+Here is the generated ouput file with ``Agent_Id`` as "GPU 3":
 
 .. code-block:: shell
 
@@ -1119,11 +1128,10 @@ Here is the `rocm-smi` output:
    "Kind","Agent_Id","Queue_Id","Stream_Id","Thread_Id","Dispatch_Id","Kernel_Id","Kernel_Name","Correlation_Id","Start_Timestamp","End_Timestamp","Private_Segment_Size","Group_Segment_Size","Workgroup_Size_X","Workgroup_Size_Y","Workgroup_Size_Z","Grid_Size_X","Grid_Size_Y","Grid_Size_Z"
    "KERNEL_DISPATCH","GPU 3",1,2,15056,1,17,"void addition_kernel<float>(float*, float const*, float const*, int, int)",1,1671390884499766,1671390884525686,0,0,64,1,1,1024,1024,1
 
-
 Group by queue
 ++++++++++++++++++
 
-By default, `rocprofv3` shows which HIP streams kernel and memory copy operations were submitted to when outputting a perfetto trace. The ``--group-by-queue`` option allows users to display the HSA queues that these kernel and memory operations were submitted to instead.
+By default, ``rocprofv3`` shows the HIP streams to which the kernel and memory copy operations were submitted, when outputting a perfetto trace. Whereas, the ``--group-by-queue`` option displays the HSA queues to which these kernel and memory operations were submitted.
 
 .. image:: /data/streams_pftrace.png
 
@@ -1131,22 +1139,23 @@ By default, `rocprofv3` shows which HIP streams kernel and memory copy operation
 
    rocprofv3 -s --group-by-queue --output-format pftrace  -- <application_path>
 
-The above command generates a ``pftrace`` file with the kernel and memory copy operations grouped into HSA queues rather than HIP streams.
+The preceding command generates a ``pftrace`` file with the kernel and memory copy operations grouped into HSA queues instead of HIP streams.
 
 .. image:: /data/streams_pftrace_grouped.png
 
-
-Kernel naming and Filtering
+Kernel naming and filtering
 ----------------------------
+
+``rocprofv3`` provides the following functionalities to configure the kernel name in the output file or to filter the kernels based on requirement.
 
 Kernel name mangling
 ++++++++++++++++++++++
 
-In `rocprofv3` output, by default, the kernel names are demangled to exclude the kernel arguments. This improves readability of collected output.
+In ``rocprofv3`` output, by default, the kernel names are demangled to exclude the kernel arguments. This improves readability of the collected output.
 
-If you want to see the mangled kernel names, you can disable this feature by using the ``--mangled-kernels`` option.
+To see the mangled kernel names, disable this feature by using the ``--mangled-kernels`` option.
 
-By default the kernel trace would look like this:
+Here is an example of kernel trace by default:
 
 .. code-block:: shell
 
@@ -1159,11 +1168,12 @@ By default the kernel trace would look like this:
     "KERNEL_DISPATCH","Agent 4",1,2,123,4,12,"divide_kernel(float*, float const*, float const*, int)",4,1143263119866920,1143263119878960,0,0,64,1,1,1024,1024,1
 
 To disable kernel name demangling, use:
+
 .. code-block:: shell
 
     rocprofv3 --mangled-kernels --kernel-trace -- <application_path>
 
-The above command generates a ``kernel_trace.csv`` file with the mangled kernel names.
+The preceding command generates the following ``kernel_trace.csv`` file with mangled kernel names:
 
 .. code-block:: shell
 
@@ -1178,26 +1188,25 @@ The above command generates a ``kernel_trace.csv`` file with the mangled kernel 
 Kernel name truncation
 +++++++++++++++++++++++
 
-Kernel name truncation is a feature that allows you to limit the length of kernel names in the output files. This is useful when dealing with long kernel names that can make the output files difficult to read.
+The kernel name truncation feature allows you to limit the kernel name length in the output files. This is useful when dealing with long kernel names that can make the output files difficult to read.
 
-To enable kernel name truncation, use the ``--truncate-kernels`` option.
+To enable kernel name truncation, use the ``--truncate-kernels`` option:
 
 .. code-block:: shell
 
     rocprofv3 --truncate-kernels --kernel-trace -- <application_path>
 
-The above command generates a ``kernel_trace.csv`` file with truncated kernel names.
+The preceding command generates the following ``kernel_trace.csv`` file with truncated kernel names:
 
 .. csv-table:: Kernel trace truncated
    :file: /data/kernel_trace_truncated.csv
    :widths: 10,10,10,10,10,10,10,10,10,20,20,10,10,10,10,10,10,10,10
    :header-rows: 1
 
-
 Kernel filtering
 +++++++++++++++++
 
-Kernel filtering allows you to include or exclude the kernels for profiling by specifying a filter using a regex string. You can also specify an iteration range for profiling the included kernels. If the iteration range is not provided, then all iterations of the included kernels are profiled.
+Kernel filtering helps to include or exclude the kernels for profiling by specifying a filter using a regex string. You can also specify an iteration range for profiling the included kernels. If the iteration range is not provided, then all iterations of the included kernels are profiled.
 
 Here is an input file with kernel filters:
 
@@ -1255,7 +1264,7 @@ To rename the kernel, use:
 
     rocprofv3 --marker-trace --kernel-rename -- <application_path>
 
-The preceding command generates a ``marker-trace`` file prefixed with the process ID.
+The preceding command generates the following ``marker-trace`` file prefixed with the process ID:
 
 .. code-block:: shell
 
@@ -1339,7 +1348,7 @@ To specify the output directory, use ``--output-directory`` or ``-d`` option. If
 
    rocprofv3 --hip-trace --output-directory output_dir -- <application_path>
 
-The above command generates an ``output_dir/%hostname%/%pid%_hip_api_trace.csv`` file.
+The preceding command generates an ``output_dir/%hostname%/%pid%_hip_api_trace.csv`` file.
 
 .. _output_field_format:
 
@@ -1387,54 +1396,54 @@ The output file name can also include placeholders such as ``%hostname%`` and ``
 
    rocprofv3 --hip-trace --output-file %hostname%/%pid%_hip_api_trace.csv -- <application_path>
 
-The above command generates an ``%hostname%/%pid%_hip_api_trace.csv`` file.
-
+The preceding command generates an ``%hostname%/%pid%_hip_api_trace.csv`` file.
 
 Collection period
 +++++++++++++++++++
 
 The collection period is the time interval during which the profiling data is collected. You can specify the collection period using the ``--collection-period`` or ``-P`` option.
-Users can specify multiple configurations, each defined by a triplet in the format `start_delay:collection_time:repeat`.
+You can also specify multiple configurations, each defined by a triplet in the format ``start_delay:collection_time:repeat``.
 
 The triplet is defined as follows:
 
 - **Start delay time**: The time after which the profiling data collection starts.
-- **Collection time**: The time for which the profiling data is collected.
-- **Repeat**: Rate is the number of times the cycle is repeated. repeat of 0 indicates that the cycle will repeat indefinitely
+- **Collection time**: The time period during which the profiling data is collected.
+- **Repeat**: The number of times the cycle is repeated. A repeat value of 0 indicates that the cycle will repeat indefinitely.
 
 .. code-block:: shell
 
-   rocprofv3 --collection-period 5:1:0 --hip-trace -- <application_path>
+   rocprofv3 --collection-period 5:1:1 --hip-trace -- <application_path>
 
+The preceding command collects the profiling data for 1 second, starting 5 seconds after the application starts, and this cycle will be repeated once.
 
-The above command collects the profiling data for 1 seconds, starting after 5 seconds of the application starts, and this cycle will be repeated 1 time.
+The collection period can be specified in different units, such as seconds, milliseconds, microseconds, and nanoseconds. The default unit is "seconds". You can change the unit using the ``--collection-period-unit`` option.
 
-The collection period can be specified in different units, such as seconds, milliseconds, microseconds, and nanoseconds. The default unit is `seconds`. You can change the unit using the ``--collection-period-unit`` option.
-
-The available units are:
+The available time units are:
 
 `--collection-period-unit`: `hour`, `min`, `sec`, `msec`, `usec`, `nsec`
+
+To specify the time unit as milliseconds, use:
 
 .. code-block:: shell
 
    rocprofv3 --collection-period 5:1:0 --collection-period-unit msec --hip-trace -- <application_path>
 
-The above command collects the profiling data for 1 milliseconds, starting after 5 milliseconds of the application starts, and this cycle will be repeated 1 time.
-
 Perfetto-specific options
 ++++++++++++++++++++++++++
 
-The following options are specific to Perfetto tracing and are used to control the behavior of the Perfetto data collection:
+The following options are specific to Perfetto tracing and are used to control the Perfetto data collection behavior:
 
-- **--perfetto-buffer-fill-policy {discard,ring_buffer}**: Policy for handling new records when perfetto has reached the buffer limit.
-  - **RING_BUFFER (default)**: The buffer behaves like a ring buffer and writes when full will wrap over and replace the oldest trace data in the buffer.
+- **--perfetto-buffer-fill-policy {discard,ring_buffer}**: Policy for handling new records when Perfetto reaches the buffer limit.
+
+  - **RING_BUFFER (default)**: The buffer behaves like a ring buffer. Once full, writes wrap over and replace the oldest trace data in the buffer.
+
   - **DISCARD**: The buffer stops accepting data once full. Further write attempts are dropped.
 
-- **--perfetto-buffer-size KB**: Size of buffer for perfetto output in KB. default: 1 GB. If set, stops the tracing session after N bytes have been written. Used to cap the size of the trace.
+- **--perfetto-buffer-size KB**: The buffer size for Perfetto output in KB. Default: 1 GB. If set, stops the tracing session after N bytes have been written. Used to cap the trace size.
 
-- **--perfetto-backend {inprocess,system}**: Perfetto data collection backend. 'system' mode requires starting traced and perfetto daemons.By default Perfetto keeps the full trace buffer(s) in memory.
+- **--perfetto-backend {inprocess,system}**: Perfetto data collection backend. ``system`` mode requires starting traced and perfetto daemons. By default Perfetto keeps the full trace buffers in memory.
 
-- **--perfetto-shmem-size-hint KB**: Perfetto shared memory size hint in KB. default: 64 KB. This option gives you control over shared memory buffer sizing. Thisoption can be tweaked to avoid data loses when data is produced at a higher rate.
+- **--perfetto-shmem-size-hint KB**: Perfetto shared memory size hint in KB. Default: 64 KB. This option gives you control over shared memory buffer sizing. You can tweak this option to avoid data losses when data is produced at a higher rate.
 
 .. _output-file-fields:
 

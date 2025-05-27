@@ -25,7 +25,7 @@ The documentation is structured as follows:
 
   .. grid-item-card:: Install
 
-    * :doc:`Installation <install/installation>`
+    * :ref:`installing-rocprofiler-sdk`
 
   .. grid-item-card:: How to
 
