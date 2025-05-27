@@ -84,7 +84,7 @@ __forceinline uint64_t drm_perm(hsa_access_permission_t perm) {
 } // namespace
 
 KfdDriver::KfdDriver(std::string devnode_name)
-    : core::Driver(core::DriverType::KFD, devnode_name) {}
+    : core::Driver(core::DriverType::KFD, std::move(devnode_name)) {}
 
 hsa_status_t KfdDriver::Init() {
   HSAKMT_STATUS ret =

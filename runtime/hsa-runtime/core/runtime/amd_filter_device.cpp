@@ -118,7 +118,7 @@ void RvdFilter::BuildDeviceUuidList(uint32_t numNodes) {
            << props.UniqueID;
     std::string uuidVal(stream.str());
     std::transform(uuidVal.begin(), uuidVal.end(), uuidVal.begin(), ::toupper);
-    devUuidList_.push_back(uuidVal);
+    devUuidList_.push_back(std::move(uuidVal));
   }
 }
 
@@ -239,7 +239,7 @@ void RvdFilter::SetDeviceUuidList() {
            << dbgUuid[idx];
     std::string uuidVal(stream.str());
     std::transform(uuidVal.begin(), uuidVal.end(), uuidVal.begin(), ::toupper);
-    devUuidList_[idx] = uuidVal;
+    devUuidList_[idx] = std::move(uuidVal);
   }
 }
 

@@ -126,7 +126,7 @@ class ScratchCache {
   ScratchCache& operator=(const ScratchCache& rhs) = delete;
   ScratchCache& operator=(ScratchCache&& rhs) = delete;
 
-  ScratchCache(deallocator_t deallocator) : dealloc(deallocator), available_bytes_(0) {}
+  ScratchCache(deallocator_t deallocator) : dealloc(std::move(deallocator)), available_bytes_(0) {}
 
   ~ScratchCache() { assert(map.empty() && "ScratchCache not empty at shutdown."); }
 

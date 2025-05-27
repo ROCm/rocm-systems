@@ -76,7 +76,7 @@ template <typename T> class lazy_ptr {
 
   void reset(std::function<T*()> Constructor = nullptr) {
     obj.reset();
-    func = Constructor;
+    func = std::move(Constructor);
   }
 
   void reset(T* ptr) {

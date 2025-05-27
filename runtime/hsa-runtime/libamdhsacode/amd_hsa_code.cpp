@@ -175,7 +175,7 @@ namespace code {
     std::string Symbol::GetSymbolName() const {
       std::string FullName = Name();
       return FullName.rfind(":") != std::string::npos ?
-        FullName.substr(FullName.rfind(":") + 1) : FullName;
+        std::move(FullName.substr(FullName.rfind(":") + 1)) : std::move(FullName);
     }
 
     hsa_code_symbol_t Symbol::ToHandle(Symbol* sym)
@@ -1732,7 +1732,7 @@ namespace code {
     std::string AmdHsaCode::MangleSymbolName(const std::string& module_name, const std::string symbol_name)
     {
       if (module_name.empty()) {
-        return symbol_name;
+        return std::move(symbol_name);
       } else {
         return module_name + "::" + symbol_name;
       }
