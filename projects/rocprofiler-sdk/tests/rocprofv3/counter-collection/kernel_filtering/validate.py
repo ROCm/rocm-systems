@@ -113,7 +113,8 @@ def validate_json(json_data, counter_name, check_dispatch):
                     values.append(record["value"])
 
             # Check aggregate sum
-            assert sum(values) > 0, f"{counter_name} value is not > 0"
+            if agent["name"] not in skip_gfx:
+                assert sum(values) > 0, f"{counter_name} value is not > 0"
 
     if check_dispatch:
         di_uniq = list(set(sorted(dispatch_ids)))

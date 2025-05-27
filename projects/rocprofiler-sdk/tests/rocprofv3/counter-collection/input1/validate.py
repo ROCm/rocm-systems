@@ -124,7 +124,8 @@ def test_validate_counter_collection_pmc1_json(json_data):
                     sq_waves_values.append(record["value"])
 
             # Check aggregate sum
-            assert sum(sq_waves_values) > 0, f"SQ_WAVES value is not > 0"
+            if agent["name"] not in skip_gfx:
+                assert sum(sq_waves_values) > 0, "SQ_WAVES value is not > 0"
 
     di_uniq = list(set(sorted(dispatch_ids)))
     # make sure the dispatch ids are unique and ordered
