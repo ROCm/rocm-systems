@@ -5,15 +5,13 @@ message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                    CMake ROCm SMI (Library) [root]                ")
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 cmake_minimum_required(VERSION 3.14)
+project(rocm_smi_lib)
 
 set(ROCM_SMI_LIBS_TARGET "rocm_smi_libraries")
 
 set(BUILD_SHARED_LIBS ON CACHE BOOL "Build shared library (.so) or not.")
 
-## Set default module path if not already set
-if(NOT DEFINED CMAKE_MODULE_PATH)
-    set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/")
-endif()
+list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules")
 ## Include common cmake modules
 include(utils)
 
@@ -41,6 +39,8 @@ set(SHARE_INSTALL_PREFIX
 # provide git to utilities
 find_program (GIT NAMES git)
 
+# sets DRM_INCLUDE_DIRS
+pkg_check_modules(DRM REQUIRED libdrm)
 
 ## Setup the package version based on git tags.
 set(PKG_VERSION_GIT_TAG_PREFIX "rsmi_pkg_ver")
@@ -203,16 +203,15 @@ set(CPACK_RPM_COMPONENT_INSTALL ON)
 # python doesn't need to be asan
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6, python3")
 set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS "${CPACK_DEBIAN_PACKAGE_DEPENDS}")
-# Only add dependency on rocm-core if -DROCM_DEP_ROCMCORE=ON is given
-if(ROCM_DEP_ROCMCORE)
-    set(CPACK_DEBIAN_PACKAGE_DEPENDS "${CPACK_DEBIAN_PACKAGE_DEPENDS}, rocm-core")
-    # rocm-core needs to be asan
-    # override original variable because CPACK_DEBIAN_PACKAGE_DEPENDS changed
-    set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS "${CPACK_DEBIAN_PACKAGE_DEPENDS}-asan")
-endif()
-# carefully reuse DEB's "DEPENDS" for RPM's "REQUIRES"
 set(CPACK_RPM_PACKAGE_REQUIRES "python3")
 set(CPACK_RPM_ASAN_PACKAGE_REQUIRES "${CPACK_RPM_PACKAGE_REQUIRES}")
+# Only add dependency on rocm-core if -DROCM_DEP_ROCMCORE=ON is given
+if(ROCM_DEP_ROCMCORE)
+    string(APPEND CPACK_DEBIAN_PACKAGE_DEPENDS ", rocm-core")
+    string(APPEND CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS ", rocm-core-asan")
+    string(APPEND CPACK_RPM_PACKAGE_REQUIRES ", rocm-core")
+    string(APPEND CPACK_RPM_ASAN_PACKAGE_REQUIRES ", rocm-core-asan")
+endif()
 
 #Component Specific Configuration/Flags
 set(CPACK_DEBIAN_DEV_PACKAGE_NAME ${ROCM_SMI_PACKAGE})
