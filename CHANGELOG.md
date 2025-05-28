@@ -580,7 +580,7 @@ Updated `amdsmi_get_gpu_metrics_info()` and structure `amdsmi_gpu_metrics_t` to 
 - **Added `amdsmi_get_power_info_v2()` with `sensor_ind`**.
   - Python API now accepts `sensor_ind` as an optional argument, does not impact previous usage
 
-- **Depricated enum `AMDSMI_NORMAL_STRING_LENGTH` in favor of `AMDSMI_MAX_STRING_LENGTH`**.  
+- **Deprecated enum `AMDSMI_NORMAL_STRING_LENGTH` in favor of `AMDSMI_MAX_STRING_LENGTH`**.  
 
 - **Changed to use thread local mutex by default**.  
   - Most sysfs reads do not require cross-process level mutex, and writes to sysfs should be protected by the kernel already.

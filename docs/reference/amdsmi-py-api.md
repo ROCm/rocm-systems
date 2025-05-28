@@ -1341,9 +1341,18 @@ Event Type | Description
 ---|------
 `VMFAULT` | VM page fault
 `THERMAL_THROTTLE` | thermal throttle
-`GPU_PRE_RESET` | gpu pre reset
+`GPU_PRE_RESET` | gpu pre reset; this event includes a message which indicates the cause of the reset. They are as follows: `job hang`, `RAS error`, `MES hang`, `HWS hang`, `user trigger`, and `unknown`
 `GPU_POST_RESET` | gpu post reset
-`RING_HANG` | ring hang event
+`RING_HANG` | ring hang event; This event will be deprecated in ROCm 7.0
+`MIGRATE_START` | migrate start
+`MIGRATE_END` | migrate end
+`PAGE_FAULT_START` | page fault start
+`PAGE_FAULT_END` | page fault end
+`QUEUE_EVICTION` | queue eviction
+`QUEUE_RESTORE` | queue restore
+`UNMAP_FROM_GPU` | unmap from GPU
+`PROCESS_START` | KFD process start
+`PROCESS_END` | KFD process end
 
 #### read
 
