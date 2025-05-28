@@ -1524,19 +1524,6 @@ typedef enum {
 } amdsmi_memory_page_status_t;
 
 /**
- * @brief Types for IO Link
- *
- * @cond @tag{gpu_bm_linux} @endcond
- */
-typedef enum {
-    AMDSMI_IOLINK_TYPE_UNDEFINED  = 0,  //!< unknown type.
-    AMDSMI_IOLINK_TYPE_PCIEXPRESS = 1,  //!< PCI Express
-    AMDSMI_IOLINK_TYPE_XGMI       = 2,  //!< XGMI
-    AMDSMI_IOLINK_TYPE_NUMIOLINKTYPES,  //!< Number of IO Link types
-    AMDSMI_IOLINK_TYPE_SIZE       = 0xFFFFFFFF  //!< Max of IO Link types
-} amdsmi_io_link_type_t;
-
-/**
  * @brief The utilization counter type
  *
  * @cond @tag{gpu_bm_linux} @endcond
@@ -5495,7 +5482,7 @@ amdsmi_get_minmax_bandwidth_between_processors(amdsmi_processor_handle processor
  *
  *  @details Given a source processor handle @p processor_handle_src and
  *  a destination processor handle @p processor_handle_dst, and a pointer to an
- *  uint64_t @p hops and a pointer to an AMDSMI_IO_LINK_TYPE @p type,
+ *  uint64_t @p hops and a pointer to an AMDSMI_INK_TYPE @p type,
  *  this function will write the number of hops and the connection type
  *  between the device @p processor_handle_src and @p processor_handle_dst to the memory
  *  pointed to by @p hops and @p type.
@@ -5507,7 +5494,7 @@ amdsmi_get_minmax_bandwidth_between_processors(amdsmi_processor_handle processor
  *  @param[in,out] hops A pointer to an uint64_t to which the
  *  hops for the connection should be written.
  *
- *  @param[in,out] type A pointer to an ::AMDSMI_IO_LINK_TYPE to which the
+ *  @param[in,out] type A pointer to an ::AMDSMI_LINK_TYPE to which the
  *  type for the connection should be written.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
@@ -5515,7 +5502,7 @@ amdsmi_get_minmax_bandwidth_between_processors(amdsmi_processor_handle processor
 amdsmi_status_t
 amdsmi_topo_get_link_type(amdsmi_processor_handle processor_handle_src,
                           amdsmi_processor_handle processor_handle_dst,
-                          uint64_t *hops, amdsmi_io_link_type_t *type);
+                          uint64_t *hops, amdsmi_link_type_t *type);
 
 /**
  *  @brief          Retrieve the set of GPUs that are nearest to a given device
@@ -5581,7 +5568,7 @@ amdsmi_is_P2P_accessible(amdsmi_processor_handle processor_handle_src,
  *  @platform{gpu_bm_linux} @platform{host} @platform{guest_1vf}  @platform{guest_mvf}
  *
  *  @details Given a source processor handle @p processor_handle_src and
- *  a destination processor handle @p processor_handle_dst, a pointer to an amdsmi_io_link_type_t @p type,
+ *  a destination processor handle @p processor_handle_dst, a pointer to an amdsmi_link_type_t @p type,
  *  and a pointer to amdsmi_p2p_capability_t @p cap. This function will write the connection type,
  *  and io link capabilities between the device
  *  @p processor_handle_src and @p processor_handle_dst to the memory
@@ -5591,7 +5578,7 @@ amdsmi_is_P2P_accessible(amdsmi_processor_handle processor_handle_src,
  *
  *  @param[in] processor_handle_dst the destination processor handle
  *
- *  @param[in,out] type A pointer to an ::amdsmi_io_link_type_t to which the
+ *  @param[in,out] type A pointer to an ::amdsmi_link_type_t to which the
  *  type for the connection should be written.
  *
  *  @param[in,out] cap A pointer to an ::amdsmi_p2p_capability_t to which the
@@ -5602,7 +5589,7 @@ amdsmi_is_P2P_accessible(amdsmi_processor_handle processor_handle_src,
 amdsmi_status_t
 amdsmi_topo_get_p2p_status(amdsmi_processor_handle processor_handle_src,
                            amdsmi_processor_handle processor_handle_dst,
-                           amdsmi_io_link_type_t *type, amdsmi_p2p_capability_t *cap);
+                           amdsmi_link_type_t *type, amdsmi_p2p_capability_t *cap);
 
 /** @} End tagHWTopology */
 
@@ -7132,3 +7119,4 @@ amdsmi_status_t amdsmi_get_cpu_socket_count(uint32_t *sock_count);
 #endif  // __cplusplus
 
 #endif  // __AMDSMI_H__
+

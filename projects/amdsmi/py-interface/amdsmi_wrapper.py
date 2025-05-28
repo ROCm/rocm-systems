@@ -845,6 +845,21 @@ amdsmi_card_form_factor_t = ctypes.c_uint32 # enum
 class struct_amdsmi_pcie_info_t(Structure):
     pass
 
+class struct_pcie_static_(Structure):
+    pass
+
+struct_pcie_static_._pack_ = 1 # source:False
+struct_pcie_static_._fields_ = [
+    ('max_pcie_width', ctypes.c_uint16),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('max_pcie_speed', ctypes.c_uint32),
+    ('pcie_interface_version', ctypes.c_uint32),
+    ('slot_type', amdsmi_card_form_factor_t),
+    ('max_pcie_interface_version', ctypes.c_uint32),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+    ('reserved', ctypes.c_uint64 * 9),
+]
+
 class struct_pcie_metric_(Structure):
     pass
 
@@ -863,21 +878,6 @@ struct_pcie_metric_._fields_ = [
     ('pcie_lc_perf_other_end_recovery_count', ctypes.c_uint32),
     ('PADDING_2', ctypes.c_ubyte * 4),
     ('reserved', ctypes.c_uint64 * 12),
-]
-
-class struct_pcie_static_(Structure):
-    pass
-
-struct_pcie_static_._pack_ = 1 # source:False
-struct_pcie_static_._fields_ = [
-    ('max_pcie_width', ctypes.c_uint16),
-    ('PADDING_0', ctypes.c_ubyte * 2),
-    ('max_pcie_speed', ctypes.c_uint32),
-    ('pcie_interface_version', ctypes.c_uint32),
-    ('slot_type', amdsmi_card_form_factor_t),
-    ('max_pcie_interface_version', ctypes.c_uint32),
-    ('PADDING_1', ctypes.c_ubyte * 4),
-    ('reserved', ctypes.c_uint64 * 9),
 ]
 
 struct_amdsmi_pcie_info_t._pack_ = 1 # source:False
@@ -1724,21 +1724,6 @@ AMDSMI_MEM_PAGE_STATUS_RESERVED = 0
 AMDSMI_MEM_PAGE_STATUS_PENDING = 1
 AMDSMI_MEM_PAGE_STATUS_UNRESERVABLE = 2
 amdsmi_memory_page_status_t = ctypes.c_uint32 # enum
-
-# values for enumeration 'amdsmi_io_link_type_t'
-amdsmi_io_link_type_t__enumvalues = {
-    0: 'AMDSMI_IOLINK_TYPE_UNDEFINED',
-    1: 'AMDSMI_IOLINK_TYPE_PCIEXPRESS',
-    2: 'AMDSMI_IOLINK_TYPE_XGMI',
-    3: 'AMDSMI_IOLINK_TYPE_NUMIOLINKTYPES',
-    4294967295: 'AMDSMI_IOLINK_TYPE_SIZE',
-}
-AMDSMI_IOLINK_TYPE_UNDEFINED = 0
-AMDSMI_IOLINK_TYPE_PCIEXPRESS = 1
-AMDSMI_IOLINK_TYPE_XGMI = 2
-AMDSMI_IOLINK_TYPE_NUMIOLINKTYPES = 3
-AMDSMI_IOLINK_TYPE_SIZE = 4294967295
-amdsmi_io_link_type_t = ctypes.c_uint32 # enum
 
 # values for enumeration 'amdsmi_utilization_counter_type_t'
 amdsmi_utilization_counter_type_t__enumvalues = {
@@ -2732,7 +2717,7 @@ amdsmi_get_minmax_bandwidth_between_processors.restype = amdsmi_status_t
 amdsmi_get_minmax_bandwidth_between_processors.argtypes = [amdsmi_processor_handle, amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_uint64)]
 amdsmi_topo_get_link_type = _libraries['libamd_smi.so'].amdsmi_topo_get_link_type
 amdsmi_topo_get_link_type.restype = amdsmi_status_t
-amdsmi_topo_get_link_type.argtypes = [amdsmi_processor_handle, amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(amdsmi_io_link_type_t)]
+amdsmi_topo_get_link_type.argtypes = [amdsmi_processor_handle, amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(amdsmi_link_type_t)]
 amdsmi_get_link_topology_nearest = _libraries['libamd_smi.so'].amdsmi_get_link_topology_nearest
 amdsmi_get_link_topology_nearest.restype = amdsmi_status_t
 amdsmi_get_link_topology_nearest.argtypes = [amdsmi_processor_handle, amdsmi_link_type_t, ctypes.POINTER(struct_amdsmi_topology_nearest_t)]
@@ -2741,7 +2726,7 @@ amdsmi_is_P2P_accessible.restype = amdsmi_status_t
 amdsmi_is_P2P_accessible.argtypes = [amdsmi_processor_handle, amdsmi_processor_handle, ctypes.POINTER(ctypes.c_bool)]
 amdsmi_topo_get_p2p_status = _libraries['libamd_smi.so'].amdsmi_topo_get_p2p_status
 amdsmi_topo_get_p2p_status.restype = amdsmi_status_t
-amdsmi_topo_get_p2p_status.argtypes = [amdsmi_processor_handle, amdsmi_processor_handle, ctypes.POINTER(amdsmi_io_link_type_t), ctypes.POINTER(struct_amdsmi_p2p_capability_t)]
+amdsmi_topo_get_p2p_status.argtypes = [amdsmi_processor_handle, amdsmi_processor_handle, ctypes.POINTER(amdsmi_link_type_t), ctypes.POINTER(struct_amdsmi_p2p_capability_t)]
 amdsmi_get_gpu_compute_partition = _libraries['libamd_smi.so'].amdsmi_get_gpu_compute_partition
 amdsmi_get_gpu_compute_partition.restype = amdsmi_status_t
 amdsmi_get_gpu_compute_partition.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_char), uint32_t]
@@ -3081,14 +3066,12 @@ __all__ = \
     'AMDSMI_GPU_BLOCK_XGMI_WAFL', 'AMDSMI_INIT_ALL_PROCESSORS',
     'AMDSMI_INIT_AMD_APUS', 'AMDSMI_INIT_AMD_CPUS',
     'AMDSMI_INIT_AMD_GPUS', 'AMDSMI_INIT_NON_AMD_CPUS',
-    'AMDSMI_INIT_NON_AMD_GPUS', 'AMDSMI_IOLINK_TYPE_NUMIOLINKTYPES',
-    'AMDSMI_IOLINK_TYPE_PCIEXPRESS', 'AMDSMI_IOLINK_TYPE_SIZE',
-    'AMDSMI_IOLINK_TYPE_UNDEFINED', 'AMDSMI_IOLINK_TYPE_XGMI',
-    'AMDSMI_LINK_TYPE_INTERNAL', 'AMDSMI_LINK_TYPE_NOT_APPLICABLE',
-    'AMDSMI_LINK_TYPE_PCIE', 'AMDSMI_LINK_TYPE_UNKNOWN',
-    'AMDSMI_LINK_TYPE_XGMI', 'AMDSMI_MEMORY_PARTITION_NPS1',
-    'AMDSMI_MEMORY_PARTITION_NPS2', 'AMDSMI_MEMORY_PARTITION_NPS4',
-    'AMDSMI_MEMORY_PARTITION_NPS8', 'AMDSMI_MEMORY_PARTITION_UNKNOWN',
+    'AMDSMI_INIT_NON_AMD_GPUS', 'AMDSMI_LINK_TYPE_INTERNAL',
+    'AMDSMI_LINK_TYPE_NOT_APPLICABLE', 'AMDSMI_LINK_TYPE_PCIE',
+    'AMDSMI_LINK_TYPE_UNKNOWN', 'AMDSMI_LINK_TYPE_XGMI',
+    'AMDSMI_MEMORY_PARTITION_NPS1', 'AMDSMI_MEMORY_PARTITION_NPS2',
+    'AMDSMI_MEMORY_PARTITION_NPS4', 'AMDSMI_MEMORY_PARTITION_NPS8',
+    'AMDSMI_MEMORY_PARTITION_UNKNOWN',
     'AMDSMI_MEM_PAGE_STATUS_PENDING',
     'AMDSMI_MEM_PAGE_STATUS_RESERVED',
     'AMDSMI_MEM_PAGE_STATUS_UNRESERVABLE', 'AMDSMI_MEM_TYPE_FIRST',
@@ -3303,8 +3286,7 @@ __all__ = \
     'amdsmi_hsmp_driver_version_t', 'amdsmi_hsmp_freqlimit_src_names',
     'amdsmi_hsmp_metrics_table_t', 'amdsmi_init',
     'amdsmi_init_flags_t', 'amdsmi_init_gpu_event_notification',
-    'amdsmi_io_bw_encoding_t', 'amdsmi_io_link_type_t',
-    'amdsmi_is_P2P_accessible',
+    'amdsmi_io_bw_encoding_t', 'amdsmi_is_P2P_accessible',
     'amdsmi_is_gpu_power_management_enabled', 'amdsmi_kfd_info_t',
     'amdsmi_link_id_bw_type_t', 'amdsmi_link_metrics_t',
     'amdsmi_link_type_t', 'amdsmi_memory_page_status_t',

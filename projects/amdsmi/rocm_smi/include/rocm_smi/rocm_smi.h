@@ -4608,7 +4608,7 @@ rsmi_is_P2P_accessible(uint32_t dv_ind_src, uint32_t dv_ind_dst,
  *  @platform{gpu_bm_linux} @platform{host} @platform{guest_1vf}  @platform{guest_mvf}
  *
  *  @details Given a source processor handle @p processor_handle_src and
- *  a destination processor handle @p processor_handle_dst, a pointer to an amdsmi_io_link_type_t @p type,
+ *  a destination processor handle @p processor_handle_dst, a pointer to an amdsmi_link_type_t @p type,
  *  and a pointer to rsmi_p2p_capability_t @p cap. This function will write the connection type,
  *  and io link capabilities between the device
  *  @p processor_handle_src and @p processor_handle_dst to the memory

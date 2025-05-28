@@ -438,14 +438,6 @@ class AmdSmiMemoryPageStatus(IntEnum):
     UNRESERVABLE = amdsmi_wrapper.AMDSMI_MEM_PAGE_STATUS_UNRESERVABLE
 
 
-class AmdSmiIoLinkType(IntEnum):
-    UNDEFINED = amdsmi_wrapper.AMDSMI_IOLINK_TYPE_UNDEFINED
-    PCIEXPRESS = amdsmi_wrapper.AMDSMI_IOLINK_TYPE_PCIEXPRESS
-    XGMI = amdsmi_wrapper.AMDSMI_IOLINK_TYPE_XGMI
-    NUMIOLINKTYPES = amdsmi_wrapper.AMDSMI_IOLINK_TYPE_NUMIOLINKTYPES
-    SIZE = amdsmi_wrapper.AMDSMI_IOLINK_TYPE_SIZE
-
-
 class AmdSmiLinkType(IntEnum):
     AMDSMI_LINK_TYPE_INTERNAL = amdsmi_wrapper.AMDSMI_LINK_TYPE_INTERNAL
     AMDSMI_LINK_TYPE_XGMI = amdsmi_wrapper.AMDSMI_LINK_TYPE_XGMI

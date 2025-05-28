@@ -3516,11 +3516,11 @@ class AMDSMICommands():
                 if src_gpu != dest_gpu:
                     link_type = amdsmi_interface.amdsmi_topo_get_link_type(src_gpu, dest_gpu)['type']
                 if isinstance(link_type, int):
-                    if link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_IOLINK_TYPE_UNDEFINED:
+                    if link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_LINK_TYPE_INTERNAL:
                         link_type = "UNKNOWN"
-                    elif link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_IOLINK_TYPE_PCIEXPRESS:
+                    elif link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_LINK_TYPE_PCIE:
                         link_type = "PCIE"
-                    elif link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_IOLINK_TYPE_XGMI:
+                    elif link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_LINK_TYPE_XGMI:
                         link_type = "XGMI"
                     else:
                         link_type = "N/A"
@@ -3758,11 +3758,11 @@ class AMDSMICommands():
                     try:
                         link_type = amdsmi_interface.amdsmi_topo_get_link_type(src_gpu, dest_gpu)['type']
                         if isinstance(link_type, int):
-                            if link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_IOLINK_TYPE_UNDEFINED:
+                            if link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_LINK_TYPE_INTERNAL:
                                 src_gpu_link_type[dest_gpu_key] = "UNKNOWN"
-                            elif link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_IOLINK_TYPE_PCIEXPRESS:
+                            elif link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_LINK_TYPE_PCIE:
                                 src_gpu_link_type[dest_gpu_key] = "PCIE"
-                            elif link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_IOLINK_TYPE_XGMI:
+                            elif link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_LINK_TYPE_XGMI:
                                 src_gpu_link_type[dest_gpu_key] = "XGMI"
                     except amdsmi_exception.AmdSmiLibraryException as e:
                         src_gpu_link_type[dest_gpu_key] = "N/A"
@@ -5903,11 +5903,11 @@ class AMDSMICommands():
                     try:
                         link_type = amdsmi_interface.amdsmi_topo_get_link_type(src_gpu, dest_gpu)['type']
                         if xgmi_dict['link_metrics']['link_type'] != "XGMI" and isinstance(link_type, int):
-                            if link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_IOLINK_TYPE_UNDEFINED:
+                            if link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_LINK_TYPE_INTERNAL:
                                 xgmi_dict['link_metrics']['link_type'] = "UNKNOWN"
-                            elif link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_IOLINK_TYPE_PCIEXPRESS:
+                            elif link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_LINK_TYPE_PCIE:
                                 xgmi_dict['link_metrics']['link_type'] = "PCIE"
-                            elif link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_IOLINK_TYPE_XGMI:
+                            elif link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_LINK_TYPE_XGMI:
                                 xgmi_dict['link_metrics']['link_type'] = "XGMI"
                     except amdsmi_exception.AmdSmiLibraryException as e:
                         logging.debug("Failed to get link type for %s to %s | %s",

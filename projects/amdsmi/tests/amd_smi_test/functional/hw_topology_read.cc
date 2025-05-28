@@ -118,7 +118,7 @@ void TestHWTopologyRead::Run(void) {
         gpu_links[dv_ind_src][dv_ind_dst].cap =
           {UINT8_MAX, UINT8_MAX, UINT8_MAX, UINT8_MAX, UINT8_MAX};
       } else {
-        amdsmi_io_link_type_t type;
+        amdsmi_link_type_t type;
         err = amdsmi_topo_get_link_type(processor_handles_[dv_ind_src],
                 processor_handles_[dv_ind_dst],
                 &gpu_links[dv_ind_src][dv_ind_dst].hops, &type);
@@ -135,19 +135,18 @@ void TestHWTopologyRead::Run(void) {
           }
         } else {
           switch (type) {
-            case AMDSMI_IOLINK_TYPE_PCIEXPRESS:
+            case AMDSMI_LINK_TYPE_PCIE:
               gpu_links[dv_ind_src][dv_ind_dst].type = "PCIE";
               break;
 
-            case AMDSMI_IOLINK_TYPE_XGMI:
+            case AMDSMI_LINK_TYPE_XGMI:
               gpu_links[dv_ind_src][dv_ind_dst].type = "XGMI";
               break;
 
             default:
               gpu_links[dv_ind_src][dv_ind_dst].type = "XXXX";
               IF_VERB(STANDARD) {
-                std::cout << "\t**Invalid IO LINK type. type=" << type <<
-                                                                    std::endl;
+                std::cout << "\t**Invalid LINK type. type=" << type << std::endl;
               }
           }
         }
@@ -167,15 +166,14 @@ void TestHWTopologyRead::Run(void) {
           }
         } else {
           switch (type) {
-            case AMDSMI_IOLINK_TYPE_PCIEXPRESS:
-            case AMDSMI_IOLINK_TYPE_XGMI:
+            case AMDSMI_LINK_TYPE_PCIE:
+            case AMDSMI_LINK_TYPE_XGMI:
               // Do nothing, the type is printed by the previous test for amdsmi_topo_get_link_type
               break;
             default:
               gpu_links[dv_ind_src][dv_ind_dst].type = "XXXX";
               IF_VERB(STANDARD) {
-                std::cout << "\t**Invalid IO LINK type. type=" << type <<
-                                                                    std::endl;
+                std::cout << "\t**Invalid LINK type. type=" << type << std::endl;
               }
           }
         }

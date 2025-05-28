@@ -12,7 +12,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
-- N/A
+- **Removed `amdsmi_io_link_type_t` and replaced with amdsmi_link_type_t**.
+  - The IO Link type is no longer needed as the link type is sufficient.
 
 ### Removed
 
