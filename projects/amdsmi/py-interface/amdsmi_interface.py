@@ -2651,11 +2651,8 @@ def amdsmi_get_gpu_driver_info(
     return driver_info
 
 
-# NOTE: this uses amdsmi_get_power_info_v2 under the hood because the C api
-# needs to be backwards compatible
 def amdsmi_get_power_info(
-    processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
-    sensor_ind: int = 0
+    processor_handle: amdsmi_wrapper.amdsmi_processor_handle
 ) -> Dict[str, ctypes.c_uint32]:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(
@@ -2664,8 +2661,8 @@ def amdsmi_get_power_info(
 
     power_measure = amdsmi_wrapper.amdsmi_power_info_t()
     _check_res(
-        amdsmi_wrapper.amdsmi_get_power_info_v2(
-            processor_handle, sensor_ind, ctypes.byref(power_measure)
+        amdsmi_wrapper.amdsmi_get_power_info(
+            processor_handle, ctypes.byref(power_measure)
         )
     )
 

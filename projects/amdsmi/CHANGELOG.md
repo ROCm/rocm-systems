@@ -12,6 +12,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
+- N/A
+
+### Removed
+
+- **Removed `amdsmi_get_power_info_v2()` **.
+  - The amdsmi_get_power_info() has been unified and the v2 function is no longer needed/used.
 - **Updated `amdsmi_bdf_t` in `amdsmi.h`.**
   - The `amdsmi_bdf_t` union was changed to have an identical unnamed struct for backwards compatiblity
 - **The `amdsmi_get_gpu_vram_info` command gets the vendor name from the driver instead of using an emun to identify vendor.**  

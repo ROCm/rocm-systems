@@ -4038,10 +4038,8 @@ amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_handle, uint32_t *
     return (max_processes_original_size >= static_cast<uint32_t>(compute_process_list.size()))
             ? AMDSMI_STATUS_SUCCESS : amdsmi_status_t::AMDSMI_STATUS_OUT_OF_RESOURCES;
 }
-
 amdsmi_status_t
-amdsmi_get_power_info_v2(amdsmi_processor_handle processor_handle, __attribute__((unused)) uint32_t sensor_ind, amdsmi_power_info_t *info) {
-
+amdsmi_get_power_info(amdsmi_processor_handle processor_handle, amdsmi_power_info_t *info) {
     AMDSMI_CHECK_INIT();
 
     if (info == nullptr) {
@@ -4078,11 +4076,6 @@ amdsmi_get_power_info_v2(amdsmi_processor_handle processor_handle, __attribute__
     }
 
     return status;
-}
-
-amdsmi_status_t
-amdsmi_get_power_info(amdsmi_processor_handle processor_handle, amdsmi_power_info_t *info) {
-  return amdsmi_get_power_info_v2(processor_handle, 0, info);
 }
 
 amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_handle,

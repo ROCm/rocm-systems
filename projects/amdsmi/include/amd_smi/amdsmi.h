@@ -6220,27 +6220,6 @@ amdsmi_get_gpu_activity(amdsmi_processor_handle processor_handle, amdsmi_engine_
  *
  *  @ingroup tagGPUMonitor
  *
- *  @platform{gpu_bm_linux} @platform{guest_windows}
- *
- *  @note amdsmi_power_info_t::socket_power metric can rarely spike above the socket power limit in some cases
- *
- *  @param[in] processor_handle PF of a processor for which  to query
- *
- *  @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
- *  If a processor has more than one sensor, it could be greater than 0.
- *  Parameter @p sensor_ind is unused on @platform{host}.
- *
- *  @param[out] info Reference to the gpu power structure. Must be allocated by user.
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_power_info_v2(amdsmi_processor_handle processor_handle, uint32_t sensor_ind, amdsmi_power_info_t *info);
-
-/**
- *  @brief Returns the current power and voltage of the GPU.
- *
- *  @ingroup tagGPUMonitor
- *
  *  @platform{gpu_bm_linux} @platform{host} @platform{guest_windows}
  *
  *  @note amdsmi_power_info_t::socket_power metric can rarely spike above the socket power limit in some cases

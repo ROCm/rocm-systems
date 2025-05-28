@@ -3024,13 +3024,6 @@ extern "C" {
     ) -> AmdsmiStatusT;
 }
 extern "C" {
-    pub fn amdsmi_get_power_info_v2(
-        processor_handle: AmdsmiProcessorHandle,
-        sensor_ind: u32,
-        info: *mut AmdsmiPowerInfoT,
-    ) -> AmdsmiStatusT;
-}
-extern "C" {
     pub fn amdsmi_get_power_info(
         processor_handle: AmdsmiProcessorHandle,
         info: *mut AmdsmiPowerInfoT,
