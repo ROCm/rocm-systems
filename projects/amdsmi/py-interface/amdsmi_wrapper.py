@@ -785,6 +785,17 @@ amdsmi_frequency_range_t = struct_amdsmi_frequency_range_t
 class union_amdsmi_bdf_t(Union):
     pass
 
+class struct_bdf_(Structure):
+    pass
+
+struct_bdf_._pack_ = 1 # source:False
+struct_bdf_._fields_ = [
+    ('function_number', ctypes.c_uint64, 3),
+    ('device_number', ctypes.c_uint64, 5),
+    ('bus_number', ctypes.c_uint64, 8),
+    ('domain_number', ctypes.c_uint64, 48),
+]
+
 class struct_amdsmi_bdf_t(Structure):
     pass
 
@@ -799,6 +810,7 @@ struct_amdsmi_bdf_t._fields_ = [
 union_amdsmi_bdf_t._pack_ = 1 # source:False
 
 union_amdsmi_bdf_t._fields_ = [
+    ('bdf', struct_bdf_),
     ('struct_amdsmi_bdf_t', struct_amdsmi_bdf_t),
     ('as_uint', ctypes.c_uint64),
 ]
@@ -3031,14 +3043,13 @@ __all__ = \
     'AMDSMI_FW_ID_ISP', 'AMDSMI_FW_ID_MC', 'AMDSMI_FW_ID_MES_KIQ',
     'AMDSMI_FW_ID_MES_STACK', 'AMDSMI_FW_ID_MES_THREAD1',
     'AMDSMI_FW_ID_MES_THREAD1_STACK', 'AMDSMI_FW_ID_MMSCH',
-    'AMDSMI_FW_ID_PLDM', 'AMDSMI_FW_ID_PM',
-    'AMDSMI_FW_ID_PPTABLE', 'AMDSMI_FW_ID_PSP_BL',
-    'AMDSMI_FW_ID_PSP_DBG', 'AMDSMI_FW_ID_PSP_INTF',
-    'AMDSMI_FW_ID_PSP_KEYDB', 'AMDSMI_FW_ID_PSP_SOC',
-    'AMDSMI_FW_ID_PSP_SOSDRV', 'AMDSMI_FW_ID_PSP_SPL',
-    'AMDSMI_FW_ID_PSP_SYSDRV', 'AMDSMI_FW_ID_PSP_TOC',
-    'AMDSMI_FW_ID_REG_ACCESS_WHITELIST', 'AMDSMI_FW_ID_RLC',
-    'AMDSMI_FW_ID_RLCV_LX7', 'AMDSMI_FW_ID_RLC_P',
+    'AMDSMI_FW_ID_PLDM', 'AMDSMI_FW_ID_PM', 'AMDSMI_FW_ID_PPTABLE',
+    'AMDSMI_FW_ID_PSP_BL', 'AMDSMI_FW_ID_PSP_DBG',
+    'AMDSMI_FW_ID_PSP_INTF', 'AMDSMI_FW_ID_PSP_KEYDB',
+    'AMDSMI_FW_ID_PSP_SOC', 'AMDSMI_FW_ID_PSP_SOSDRV',
+    'AMDSMI_FW_ID_PSP_SPL', 'AMDSMI_FW_ID_PSP_SYSDRV',
+    'AMDSMI_FW_ID_PSP_TOC', 'AMDSMI_FW_ID_REG_ACCESS_WHITELIST',
+    'AMDSMI_FW_ID_RLC', 'AMDSMI_FW_ID_RLCV_LX7', 'AMDSMI_FW_ID_RLC_P',
     'AMDSMI_FW_ID_RLC_RESTORE_LIST_CNTL',
     'AMDSMI_FW_ID_RLC_RESTORE_LIST_GPM_MEM',
     'AMDSMI_FW_ID_RLC_RESTORE_LIST_SRM_MEM',
@@ -3199,8 +3210,7 @@ __all__ = \
     'amdsmi_free_name_value_pairs', 'amdsmi_freq_ind_t',
     'amdsmi_freq_volt_region_t', 'amdsmi_frequencies_t',
     'amdsmi_frequency_range_t', 'amdsmi_fw_block_t',
-    'amdsmi_fw_info_t', 'amdsmi_get_afids_from_cper', 
-     'amdsmi_get_cpu_affinity_with_scope',
+    'amdsmi_fw_info_t', 'amdsmi_get_afids_from_cper',
     'amdsmi_get_clk_freq', 'amdsmi_get_clock_info',
     'amdsmi_get_cpu_affinity_with_scope', 'amdsmi_get_cpu_cclk_limit',
     'amdsmi_get_cpu_core_boostlimit',
@@ -3391,8 +3401,8 @@ __all__ = \
     'struct_amdsmi_vbios_info_t', 'struct_amdsmi_version_t',
     'struct_amdsmi_violation_status_t', 'struct_amdsmi_vram_info_t',
     'struct_amdsmi_vram_usage_t', 'struct_amdsmi_xgmi_info_t',
-    'struct_amdsmi_xgmi_link_status_t', 'struct_cache_',
-    'struct_engine_usage_', 'struct_fw_info_list_',
+    'struct_amdsmi_xgmi_link_status_t', 'struct_bdf_',
+    'struct_cache_', 'struct_engine_usage_', 'struct_fw_info_list_',
     'struct_memory_usage_', 'struct_nps_flags_', 'struct_numa_range_',
     'struct_pcie_metric_', 'struct_pcie_static_',
     'struct_amdsmi_bdf_t', 'struct_valid_bits_', 'uint32_t',

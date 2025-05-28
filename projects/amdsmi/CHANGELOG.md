@@ -12,6 +12,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
+- **Updated `amdsmi_bdf_t` in `amdsmi.h`.**
+  - The `amdsmi_bdf_t` union was changed to have an identical unnamed struct for backwards compatiblity
 - **The `amdsmi_get_gpu_vram_info` command gets the vendor name from the driver instead of using an emun to identify vendor.**  
   - `amdsmi_vram_info_t` member named `amdsmi_vram_vendor_type_t` was changed to a character string
   - `amdsmi_vram_vendor_type_t` enum structure was removed

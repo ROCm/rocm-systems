@@ -663,6 +663,12 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef union {
+    struct bdf_ {
+        uint64_t function_number : 3;
+        uint64_t device_number : 5;
+        uint64_t bus_number : 8;
+        uint64_t domain_number : 48;
+    } bdf;
     struct {
         uint64_t function_number : 3;
         uint64_t device_number : 5;
