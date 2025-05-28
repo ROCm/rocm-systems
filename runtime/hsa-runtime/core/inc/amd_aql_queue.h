@@ -65,7 +65,7 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   // Acquires/releases queue resources and requests HW schedule/deschedule.
   AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_size_pkts,
            HSAuint32 node_id, ScratchInfo& scratch, core::HsaEventCallback callback, void* err_data,
-           uint64_t flags, bool is_kv = false);
+           uint64_t flags);
 
   ~AqlQueue();
 
@@ -302,9 +302,6 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   AMD::callback_t<core::HsaEventCallback> errors_callback_;
 
   void* errors_data_;
-
-  // Is KV device queue
-  bool is_kv_queue_;
 
   // GPU-visible indirect buffer holding PM4 commands.
   void* pm4_ib_buf_;

@@ -77,7 +77,7 @@ namespace AMD {
 
 AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_size_pkts,
                    HSAuint32 node_id, ScratchInfo& scratch, core::HsaEventCallback callback,
-                   void* err_data, uint64_t flags, bool is_kv)
+                   void* err_data, uint64_t flags)
     : Queue(shared_queue, flags, !agent->is_xgmi_cpu_gpu()),
       LocalSignal(0, false),
       DoorbellSignal(signal()),
@@ -89,7 +89,6 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
       queue_scratch_(scratch),
       errors_callback_(callback),
       errors_data_(err_data),
-      is_kv_queue_(is_kv),
       pm4_ib_buf_(nullptr),
       pm4_ib_size_b_(0x1000),
       dynamicScratchState(0),

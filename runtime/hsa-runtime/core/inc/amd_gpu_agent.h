@@ -173,11 +173,6 @@ class GpuAgentInt : public core::Agent {
 
    virtual void SetRecSdmaEngOverride(bool flag) = 0;
 
-   // @brief Query if agent represent Kaveri GPU.
-   //
-   // @retval true if agent is Kaveri GPU.
-   virtual bool is_kv_device() const = 0;
-
    // @brief Query the agent HSA profile.
    //
    // @retval HSA profile.
@@ -401,9 +396,6 @@ class GpuAgent : public GpuAgentInt {
 
   const std::vector<const core::Isa *>& supported_isas() const override {
                                                       return supported_isas_;}
-
-  // @brief Override from AMD::GpuAgentInt.
-  __forceinline bool is_kv_device() const override { return is_kv_device_; }
 
   // @brief Override from AMD::GpuAgentInt.
   __forceinline hsa_profile_t profile() const override { return profile_; }
@@ -648,8 +640,6 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief HSA profile.
   hsa_profile_t profile_;
-
-  bool is_kv_device_;
 
   void* trap_code_buf_;
 

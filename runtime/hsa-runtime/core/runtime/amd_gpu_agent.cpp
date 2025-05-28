@@ -99,7 +99,6 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
       current_coherency_type_(HSA_AMD_COHERENCY_TYPE_COHERENT),
       scratch_used_large_(0),
       queues_(),
-      is_kv_device_(false),
       trap_code_buf_(NULL),
       trap_code_buf_size_(0),
       doorbell_queue_map_(NULL),
@@ -188,12 +187,6 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   supported_isas_.push_back(isa_);
   if (!isa_->GetIsaGeneric().empty()) {
     supported_isas_.push_back(core::IsaRegistry::GetIsa(isa_->GetIsaGeneric()));
-  }
-
-  // Check if the device is Kaveri, only on GPU device.
-  if (isa_->GetMajorVersion() == 7 && isa_->GetMinorVersion() == 0 &&
-      isa_->GetStepping() == 0) {
-    is_kv_device_ = true;
   }
 
   current_coherency_type((profile_ == HSA_PROFILE_FULL)
@@ -1779,7 +1772,7 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
   if (!shared_queue) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
   auto aql_queue = new AqlQueue(shared_queue, this, size, node_id(), scratch, event_callback, data,
-                                flags, is_kv_device_);
+                                flags);
   *queue = aql_queue;
   aql_queues_.push_back(aql_queue);
 
@@ -2178,38 +2171,8 @@ uint64_t GpuAgent::TranslateTime(uint64_t tick) {
   return system_tick;
 }
 
+/* This function is deprecated */
 bool GpuAgent::current_coherency_type(hsa_amd_coherency_type_t type) {
-  if (!is_kv_device_) {
-    current_coherency_type_ = type;
-    return true;
-  }
-
-  ScopedAcquire<KernelMutex> Lock(&coherency_lock_);
-
-  if (ape1_base_ == 0 && ape1_size_ == 0) {
-    static const size_t kApe1Alignment = 64 * 1024;
-    ape1_size_ = kApe1Alignment;
-    ape1_base_ = reinterpret_cast<uintptr_t>(
-        _aligned_malloc(ape1_size_, kApe1Alignment));
-    assert((ape1_base_ != 0) && ("APE1 allocation failed"));
-  } else if (type == current_coherency_type_) {
-    return true;
-  }
-
-  HSA_CACHING_TYPE type0, type1;
-  if (type == HSA_AMD_COHERENCY_TYPE_COHERENT) {
-    type0 = HSA_CACHING_CACHED;
-    type1 = HSA_CACHING_NONCACHED;
-  } else {
-    type0 = HSA_CACHING_NONCACHED;
-    type1 = HSA_CACHING_CACHED;
-  }
-
-  if (HSAKMT_CALL(hsaKmtSetMemoryPolicy(node_id(), type0, type1,
-                            reinterpret_cast<void*>(ape1_base_),
-                            ape1_size_)) != HSAKMT_STATUS_SUCCESS) {
-    return false;
-  }
   current_coherency_type_ = type;
   return true;
 }
