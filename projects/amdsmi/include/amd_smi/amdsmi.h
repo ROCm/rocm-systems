@@ -814,14 +814,15 @@ typedef struct {
     char  market_name[AMDSMI_MAX_STRING_LENGTH];
     uint32_t vendor_id;    //!< Use 32 bit to be compatible with other platform.
     char vendor_name[AMDSMI_MAX_STRING_LENGTH];
-    uint32_t subvendor_id; //!< The subsystem vendor id
-    uint64_t device_id;    //!< The device id of a GPU
-    uint32_t rev_id;
+    uint32_t subvendor_id; //!< The subsystem vendor ID
+    uint64_t device_id;    //!< The device ID of a GPU
+    uint32_t rev_id;       //!< The revision ID of a GPU
     char asic_serial[AMDSMI_MAX_STRING_LENGTH];
     uint32_t oam_id;       //!< 0xFFFF if not supported
     uint32_t num_of_compute_units;     //!< 0xFFFFFFFF if not supported
     uint64_t target_graphics_version;  //!< 0xFFFFFFFFFFFFFFFF if not supported
-    uint32_t reserved[22];
+    uint32_t subsystem_id; //!> The subsystem ID
+    uint32_t reserved[21];
 } amdsmi_asic_info_t;
 
 

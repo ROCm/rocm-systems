@@ -102,6 +102,8 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
                 asic_info['device_id']))
             print("  asic_info['rev_id'] is: {}".format(
                 asic_info['rev_id']))
+            print("  asic_info['subsystem_id'] is: {}".format(
+                asic_info['subsystem_id']))
             print("  asic_info['asic_serial'] is: {}".format(
                 asic_info['asic_serial']))
             print("  asic_info['oam_id'] is: {}".format(

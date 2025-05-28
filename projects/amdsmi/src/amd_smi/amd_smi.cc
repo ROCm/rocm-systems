@@ -1431,6 +1431,7 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
     uint16_t vendor_id = 0;
     uint16_t subvendor_id = 0;
     uint16_t device_id = 0;
+    uint16_t subsystem_id = 0;
 
     std::ostringstream ss;
     amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
@@ -1542,6 +1543,10 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
     status = rsmi_wrapper(rsmi_dev_subsystem_vendor_id_get, processor_handle, 0,
                           &subvendor_id);
     if (status == AMDSMI_STATUS_SUCCESS) info->subvendor_id = subvendor_id;
+
+    status = rsmi_wrapper(rsmi_dev_subsystem_id_get, processor_handle, 0,
+                          &subsystem_id);
+    if (status == AMDSMI_STATUS_SUCCESS) info->subsystem_id = subsystem_id;
 
     status =  rsmi_wrapper(rsmi_dev_pcie_vendor_name_get, processor_handle, 0,
                            info->vendor_name, AMDSMI_MAX_STRING_LENGTH);

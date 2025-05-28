@@ -1895,7 +1895,8 @@ def amdsmi_get_gpu_asic_info(
         "asic_serial": asic_info_struct.asic_serial.decode("utf-8"),
         "oam_id": asic_info_struct.oam_id,
         "num_compute_units": asic_info_struct.num_of_compute_units,
-        "target_graphics_version": "gfx" + target_graphics_version
+        "target_graphics_version": "gfx" + target_graphics_version,
+        "subsystem_id": asic_info_struct.subsystem_id
     }
 
     string_values = ["market_name", "vendor_name"]
@@ -1903,7 +1904,7 @@ def amdsmi_get_gpu_asic_info(
         if not asic_info[value]:
             asic_info[value] = "N/A"
 
-    hex_values = ["vendor_id", "subvendor_id", "device_id"]
+    hex_values = ["vendor_id", "subvendor_id", "device_id", "subsystem_id"]
     for value in hex_values:
         if asic_info[value]:
             asic_info[value] = hex(asic_info[value])

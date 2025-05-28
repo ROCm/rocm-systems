@@ -366,6 +366,7 @@ Field | Content
 `oam_id` | oam id
 `num_of_compute_units` | number of compute units on asic
 `target_graphics_version` | hardware graphics version
+`subsystem_id` |  subsystem id
 
 Exceptions that can be thrown by `amdsmi_get_gpu_asic_info` function:
 

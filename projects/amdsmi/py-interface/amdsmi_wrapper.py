@@ -994,7 +994,8 @@ struct_amdsmi_asic_info_t._fields_ = [
     ('num_of_compute_units', ctypes.c_uint32),
     ('PADDING_0', ctypes.c_ubyte * 4),
     ('target_graphics_version', ctypes.c_uint64),
-    ('reserved', ctypes.c_uint32 * 22),
+    ('subsystem_id', ctypes.c_uint32),
+    ('reserved', ctypes.c_uint32 * 21),
 ]
 
 amdsmi_asic_info_t = struct_amdsmi_asic_info_t

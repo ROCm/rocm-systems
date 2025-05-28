@@ -12,6 +12,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
+- **Updated `amdsmi_get_gpu_asic_info` in `amdsmi.h`.**
+  - Added `subsystem_id` structure member.
 - **Removed `amdsmi_io_link_type_t` and replaced with amdsmi_link_type_t**.
   - The IO Link type is no longer needed as the link type is sufficient.
 

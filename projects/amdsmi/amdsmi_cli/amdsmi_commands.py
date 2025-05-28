@@ -483,12 +483,6 @@ class AMDSMICommands():
             except amdsmi_exception.AmdSmiLibraryException as e:
                 logging.debug("Failed to get asic info for gpu %s | %s", gpu_id, e.get_error_info())
 
-            try:
-                subsystem_id = amdsmi_interface.amdsmi_get_gpu_subsystem_id(args.gpu)
-                asic_dict["subsystem_id"] = subsystem_id
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                logging.debug("Failed to get asic info for gpu %s | %s", gpu_id, e.get_error_info())
-
             static_dict['asic'] = asic_dict
         if args.bus:
             bus_info = {
