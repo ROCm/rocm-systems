@@ -98,6 +98,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
+- **The char arrays in the following structures have been changed**.  
+  - `amdsmi_vbios_info_t` member `build_date` changed from AMDSMI_MAX_DATE_LENGTH to AMDSMI_MAX_STRING_LENGTH.
+  - `amdsmi_dpm_policy_entry_t` member `policy_description` changed from AMDSMI_MAX_NAME to AMDSMI_MAX_STRING_LENGTH.
+  - `amdsmi_name_value_t` member `name` changed from AMDSMI_MAX_NAME to AMDSMI_MAX_STRING_LENGTH.
+
 - **The `amd-smi topology` command has been enabled for Guest environments**.  
   - `amd-smi topology` is now available in Guest environments. This includes full functionality so users can use the command just as they would in Bare Metal environments.
 

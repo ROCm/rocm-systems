@@ -793,7 +793,7 @@ const _: () = {
 #[derive(Debug, Copy, Clone)]
 pub struct AmdsmiVbiosInfoT {
     pub name: [::std::os::raw::c_char; 256usize],
-    pub build_date: [::std::os::raw::c_char; 32usize],
+    pub build_date: [::std::os::raw::c_char; 256usize],
     pub part_number: [::std::os::raw::c_char; 256usize],
     pub version: [::std::os::raw::c_char; 256usize],
     pub reserved: [u64; 32usize],
@@ -807,11 +807,11 @@ const _: () = {
     ["Offset of field: AmdsmiVbiosInfoT::build_date"]
         [::std::mem::offset_of!(AmdsmiVbiosInfoT, build_date) - 256usize];
     ["Offset of field: AmdsmiVbiosInfoT::part_number"]
-        [::std::mem::offset_of!(AmdsmiVbiosInfoT, part_number) - 288usize];
+        [::std::mem::offset_of!(AmdsmiVbiosInfoT, part_number) - 512usize];
     ["Offset of field: AmdsmiVbiosInfoT::version"]
-        [::std::mem::offset_of!(AmdsmiVbiosInfoT, version) - 544usize];
+        [::std::mem::offset_of!(AmdsmiVbiosInfoT, version) - 768usize];
     ["Offset of field: AmdsmiVbiosInfoT::reserved"]
-        [::std::mem::offset_of!(AmdsmiVbiosInfoT, reserved) - 800usize];
+        [::std::mem::offset_of!(AmdsmiVbiosInfoT, reserved) - 1024usize];
 };
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
@@ -1833,7 +1833,7 @@ const _: () = {
 #[derive(Debug, Copy, Clone)]
 pub struct AmdsmiDpmPolicyEntryT {
     pub policy_id: u32,
-    pub policy_description: [::std::os::raw::c_char; 32usize],
+    pub policy_description: [::std::os::raw::c_char; 256usize],
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {

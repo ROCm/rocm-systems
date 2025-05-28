@@ -908,7 +908,7 @@ class struct_amdsmi_vbios_info_t(Structure):
 struct_amdsmi_vbios_info_t._pack_ = 1 # source:False
 struct_amdsmi_vbios_info_t._fields_ = [
     ('name', ctypes.c_char * 256),
-    ('build_date', ctypes.c_char * 32),
+    ('build_date', ctypes.c_char * 256),
     ('part_number', ctypes.c_char * 256),
     ('version', ctypes.c_char * 256),
     ('reserved', ctypes.c_uint64 * 32),
@@ -1804,7 +1804,7 @@ class struct_amdsmi_dpm_policy_entry_t(Structure):
 struct_amdsmi_dpm_policy_entry_t._pack_ = 1 # source:False
 struct_amdsmi_dpm_policy_entry_t._fields_ = [
     ('policy_id', ctypes.c_uint32),
-    ('policy_description', ctypes.c_char * 32),
+    ('policy_description', ctypes.c_char * 256),
 ]
 
 amdsmi_dpm_policy_entry_t = struct_amdsmi_dpm_policy_entry_t
@@ -2022,7 +2022,7 @@ class struct_amdsmi_name_value_t(Structure):
 
 struct_amdsmi_name_value_t._pack_ = 1 # source:False
 struct_amdsmi_name_value_t._fields_ = [
-    ('name', ctypes.c_char * 64),
+    ('name', ctypes.c_char * 256),
     ('value', ctypes.c_uint64),
 ]
 

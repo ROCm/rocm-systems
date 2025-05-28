@@ -1914,8 +1914,9 @@ amdsmi_get_gpu_event_notification(int timeout_ms,
         rsmi_evt_notification_data_t rsmi_data = r_data[i];
         data[i].event = static_cast<amdsmi_evt_notification_type_t>(
                 rsmi_data.event);
+        // Size is tied max event notification size
         snprintf(data[i].message, 
-                MAX_EVENT_NOTIFICATION_MSG_SIZE,
+                AMDSMI_MAX_STRING_LENGTH,
                 "%s", 
                 rsmi_data.message);
         amdsmi_status_t r = amd::smi::AMDSmiSystem::getInstance()
@@ -3637,7 +3638,8 @@ amdsmi_get_gpu_vbios_info(amdsmi_processor_handle processor_handle, amdsmi_vbios
 
     if (drm_write == 0) {
         strncpy(info->name, reinterpret_cast<char *>(vbios.name), AMDSMI_MAX_STRING_LENGTH);
-        strncpy(info->build_date, reinterpret_cast<char *>(vbios.date), AMDSMI_MAX_DATE_LENGTH);
+        strncpy(info->build_date, reinterpret_cast<char *>(vbios.date), AMDSMI_MAX_STRING_LENGTH - 1);
+        info->build_date[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
         strncpy(info->part_number, reinterpret_cast<char *>(vbios.vbios_pn),
                 AMDSMI_MAX_STRING_LENGTH);
         strncpy(info->version, reinterpret_cast<char *>(vbios.vbios_ver_str),

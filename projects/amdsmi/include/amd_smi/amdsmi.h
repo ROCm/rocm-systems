@@ -753,7 +753,7 @@ typedef struct {
  */
 typedef struct {
     char name[AMDSMI_MAX_STRING_LENGTH];
-    char build_date[AMDSMI_MAX_DATE_LENGTH];
+    char build_date[AMDSMI_MAX_STRING_LENGTH];
     char part_number[AMDSMI_MAX_STRING_LENGTH];
     char version[AMDSMI_MAX_STRING_LENGTH];
     uint64_t reserved[32];
@@ -1253,20 +1253,14 @@ typedef enum {
 #define AMDSMI_EVENT_MASK_FROM_INDEX(i) (1ULL << ((i) - 1))
 
 /**
- * @brief Maximum number of characters an event notification message will be
- * matches kfd message max size
- */
-#define MAX_EVENT_NOTIFICATION_MSG_SIZE 256
-
-/**
  * @brief Event notification data returned from event notification API
  *
  * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef struct {
-    amdsmi_processor_handle processor_handle;       //!< Handler of device that corresponds to the event
-    amdsmi_evt_notification_type_t event;           //!< Event type
-    char message[MAX_EVENT_NOTIFICATION_MSG_SIZE];  //!< Event message
+    amdsmi_processor_handle processor_handle;  //!< Handler of device that corresponds to the event
+    amdsmi_evt_notification_type_t event;      //!< Event type
+    char message[AMDSMI_MAX_STRING_LENGTH];    //!< Event message
 } amdsmi_evt_notification_data_t;
 
 /**
@@ -1614,7 +1608,7 @@ typedef struct {
  */
 typedef struct {
     uint32_t policy_id;
-    char policy_description[AMDSMI_MAX_NAME];
+    char policy_description[AMDSMI_MAX_STRING_LENGTH];
 } amdsmi_dpm_policy_entry_t;
 
 #define AMDSMI_MAX_NUM_PM_POLICIES 32
@@ -1982,7 +1976,7 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef struct {
-    char name[MAX_AMDSMI_NAME_LENGTH];  //!< Name
+    char name[AMDSMI_MAX_STRING_LENGTH];  //!< Name
     uint64_t value;                     //!< Use uint64_t to make it universal
 } amdsmi_name_value_t;
 
