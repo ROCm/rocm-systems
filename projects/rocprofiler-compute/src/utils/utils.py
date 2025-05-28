@@ -1023,8 +1023,6 @@ def gen_sysinfo(
 def detect_roofline(mspec):
     from utils import specs
 
-    rocm_ver = mspec.rocm_version[:1]
-
     os_release = path("/etc/os-release").read_text()
     ubuntu_distro = specs.search(r'VERSION_ID="(.*?)"', os_release)
     rhel_distro = specs.search(r'PLATFORM_ID="(.*?)"', os_release)
@@ -1035,7 +1033,6 @@ def detect_roofline(mspec):
         if path(rooflineBinary).exists():
             console_warning("roofline", "Detected user-supplied binary")
             return {
-                "rocm_ver": "override",
                 "distro": "override",
                 "path": rooflineBinary,
             }
@@ -1065,7 +1062,7 @@ def detect_roofline(mspec):
     else:
         console_error("roofline", "Cannot find a valid binary for your operating system")
 
-    target_binary = {"rocm_ver": rocm_ver, "distro": distro}
+    target_binary = {"distro": distro}
     return target_binary
 
 
@@ -1106,7 +1103,7 @@ def mibench(args, mspec):
     binary_paths = []
 
     target_binary = detect_roofline(mspec)
-    if target_binary["rocm_ver"] == "override":
+    if target_binary["distro"] == "override":
         binary_paths.append(target_binary["path"])
     else:
         # check two potential locations for roofline binaries due to differences in
@@ -1117,13 +1114,7 @@ def mibench(args, mspec):
         ]
 
         for dir in potential_paths:
-            path_to_binary = (
-                dir
-                + "-"
-                + distro_map[target_binary["distro"]]
-                + "-rocm"
-                + target_binary["rocm_ver"]
-            )
+            path_to_binary = dir + "-" + distro_map[target_binary["distro"]]
             binary_paths.append(path_to_binary)
 
     # Distro is valid but cant find rocm ver
