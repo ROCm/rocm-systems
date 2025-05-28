@@ -261,7 +261,7 @@ hsa_status_t BlitKernel::CopyBufferToImage(
 
   assert(dst_image_view != NULL);
 
-  hsa_kernel_dispatch_packet_t packet = {0};
+  hsa_kernel_dispatch_packet_t packet = { };
 
   const BlitCodeInfo& blit_code =
       blit_code_catalog.at(KERNEL_OP_COPY_BUFFER_TO_IMAGE);
@@ -369,7 +369,7 @@ hsa_status_t BlitKernel::CopyImageToBuffer(
 
   assert(src_image_view != NULL);
 
-  hsa_kernel_dispatch_packet_t packet = {0};
+  hsa_kernel_dispatch_packet_t packet = { };
 
   const BlitCodeInfo& blit_code =
       blit_code_catalog.at(KERNEL_OP_COPY_IMAGE_TO_BUFFER);
@@ -496,7 +496,7 @@ hsa_status_t BlitKernel::CopyImage(
     blit_code = &blit_code_catalog.at(copy_type);
   }
 
-  hsa_kernel_dispatch_packet_t packet = {0};
+  hsa_kernel_dispatch_packet_t packet = { };
 
   packet.kernel_object = blit_code->code_handle_;
   packet.group_segment_size = blit_code->group_segment_size_;
@@ -555,7 +555,7 @@ hsa_status_t BlitKernel::FillImage(
     BlitQueue& blit_queue, const std::vector<BlitCodeInfo>& blit_code_catalog,
     const Image& image, const void* pattern,
     const hsa_ext_image_region_t& region) {
-  hsa_kernel_dispatch_packet_t packet = {0};
+  hsa_kernel_dispatch_packet_t packet = { };
 
   const BlitCodeInfo& blit_code =
       (image.desc.geometry != HSA_EXT_IMAGE_GEOMETRY_1DB)

@@ -99,7 +99,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtModelEnabled(bool* enable)
 	return HSAKMT_STATUS_SUCCESS;
 }
 
-void model_init_env_vars()
+void model_init_env_vars(void)
 {
 	/* Check whether to use a model instead of real hardware */
 	hsakmt_model_topology = getenv("HSA_MODEL_TOPOLOGY");
@@ -262,7 +262,7 @@ static void model_set_event(void *data, unsigned event_id)
 	pthread_cond_broadcast(&model_event_condvar);
 }
 
-void model_init()
+void model_init(void)
 {
 	if (!hsakmt_use_model)
 		return;
@@ -637,7 +637,7 @@ static int model_kfd_ioctl_locked(unsigned long request, void *arg)
 			{
 				unsigned slot = events[i].event_id - 1;
 				struct model_event *event = &model_events[slot];
-				bool this_ready;
+				bool this_ready = false;
 				if (event->event_type == HSA_EVENTTYPE_SIGNAL)
 				{
 					uint64_t current_age = event->value;

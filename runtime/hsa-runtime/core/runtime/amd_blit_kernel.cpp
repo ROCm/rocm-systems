@@ -52,7 +52,6 @@
 
 namespace rocr {
 namespace AMD {
-static const uint16_t kInvalidPacketHeader = HSA_PACKET_TYPE_INVALID;
 
 static std::string& kBlitKernelSource() {
   static std::string kBlitKernelSource_(R"(
@@ -862,7 +861,7 @@ void BlitKernel::PopulateQueue(uint64_t index, uint64_t code_handle, void* args,
                                hsa_signal_t completion_signal) {
   assert(IsMultipleOf(args, 16));
 
-  hsa_kernel_dispatch_packet_t packet = {0};
+  hsa_kernel_dispatch_packet_t packet = { };
 
   static const uint16_t kDispatchPacketHeader =
       (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |

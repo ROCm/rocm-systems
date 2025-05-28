@@ -174,7 +174,7 @@ void CU_Masking::Run() {
     auto dispatch = [&]() {
       memset(args->hw_ids, 0, sizeof(uint32_t)*threads);
 
-      Aql pkt = {0};
+      Aql pkt = { };
       pkt.header.type = HSA_PACKET_TYPE_KERNEL_DISPATCH;
       pkt.header.acquire = HSA_FENCE_SCOPE_SYSTEM;
       pkt.header.release = HSA_FENCE_SCOPE_SYSTEM;

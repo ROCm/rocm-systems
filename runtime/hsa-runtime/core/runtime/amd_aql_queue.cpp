@@ -98,8 +98,6 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
       priority_(HSA_QUEUE_PRIORITY_NORMAL),
       exception_signal_(nullptr) {
 
-  const core::Isa* isa = agent_->supported_isas()[0];
-
   // Queue size is a function of several restrictions.
   const uint32_t min_pkts = ComputeRingBufferMinPkts();
   const uint32_t max_pkts = ComputeRingBufferMaxPkts();

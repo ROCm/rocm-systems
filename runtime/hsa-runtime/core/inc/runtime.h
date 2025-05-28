@@ -91,6 +91,7 @@
 #define HSA_ARGUMENT_ALIGN_BYTES 16
 #define HSA_QUEUE_ALIGN_BYTES 64
 #define HSA_PACKET_ALIGN_BYTES 64
+#define HSA_MAX_DEP_SIGNALS 5
 
 //Avoids include
 namespace rocr {

@@ -555,13 +555,13 @@ class GpuAgent : public GpuAgentInt {
 
   hsa_status_t PcSamplingIterateConfig(hsa_ven_amd_pcs_iterate_configuration_callback_t cb,
                                        void* cb_data) override;
-  hsa_status_t PcSamplingCreate(pcs::PcsRuntime::PcSamplingSession& session);
+  hsa_status_t PcSamplingCreate(pcs::PcsRuntime::PcSamplingSession& session) override;
   hsa_status_t PcSamplingCreateFromId(HsaPcSamplingTraceId pcsId,
-                            pcs::PcsRuntime::PcSamplingSession& session);
-  hsa_status_t PcSamplingDestroy(pcs::PcsRuntime::PcSamplingSession& session);
-  hsa_status_t PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& session);
-  hsa_status_t PcSamplingStop(pcs::PcsRuntime::PcSamplingSession& session);
-  hsa_status_t PcSamplingFlush(pcs::PcsRuntime::PcSamplingSession& session);
+                            pcs::PcsRuntime::PcSamplingSession& session) override;
+  hsa_status_t PcSamplingDestroy(pcs::PcsRuntime::PcSamplingSession& session) override;
+  hsa_status_t PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& session) override;
+  hsa_status_t PcSamplingStop(pcs::PcsRuntime::PcSamplingSession& session) override;
+  hsa_status_t PcSamplingFlush(pcs::PcsRuntime::PcSamplingSession& session) override;
   hsa_status_t PcSamplingFlushDeviceBuffers(pcs::PcsRuntime::PcSamplingSession& session);
 
   // @brief Node properties.
