@@ -83,8 +83,8 @@ __forceinline uint64_t drm_perm(hsa_access_permission_t perm) {
 
 } // namespace
 
-KfdDriver::KfdDriver(std::string devnode_name)
-    : core::Driver(core::DriverType::KFD, devnode_name) {}
+KfdDriver::KfdDriver(std::string& devnode_name)
+    : core::Driver(core::DriverType::KFD, std::move(devnode_name)) {}
 
 hsa_status_t KfdDriver::Init() {
   HSAKMT_STATUS ret =
@@ -128,7 +128,8 @@ hsa_status_t KfdDriver::ShutDown() {
 }
 
 hsa_status_t KfdDriver::DiscoverDriver(std::unique_ptr<core::Driver>& driver) {
-  auto tmp_driver = std::unique_ptr<core::Driver>(new KfdDriver("/dev/kfd"));
+  std::string devnode("/dev/kfd");
+  auto tmp_driver = std::unique_ptr<core::Driver>(new KfdDriver(devnode));
 
   if (tmp_driver->Open() == HSA_STATUS_SUCCESS) {
     driver = std::move(tmp_driver);

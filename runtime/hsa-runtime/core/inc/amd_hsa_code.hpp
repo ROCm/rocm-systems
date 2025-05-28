@@ -220,7 +220,7 @@ namespace code {
       void PrintRelocationData(std::ostream& out, RelocationSection* section);
       void PrintSymbol(std::ostream& out, Symbol* sym);
       void PrintDisassembly(std::ostream& out, const unsigned char *isa, size_t size, uint32_t isa_offset = 0);
-      std::string MangleSymbolName(const std::string& module_name, const std::string symbol_name);
+      std::string MangleSymbolName(const std::string& module_name, const std::string& symbol_name);
       bool ElfImageError();
 
     public:

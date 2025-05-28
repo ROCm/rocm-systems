@@ -175,7 +175,7 @@ namespace code {
     std::string Symbol::GetSymbolName() const {
       std::string FullName = Name();
       return FullName.rfind(":") != std::string::npos ?
-        std::move(FullName.substr(FullName.rfind(":") + 1)) : std::move(FullName);
+        FullName.substr(FullName.rfind(":") + 1) : std::move(FullName);
     }
 
     hsa_code_symbol_t Symbol::ToHandle(Symbol* sym)
@@ -920,7 +920,10 @@ namespace code {
 
     hsa_status_t AmdHsaCode::GetSymbol(const char *module_name, const char *symbol_name, hsa_code_symbol_t *s)
     {
-      std::string mname = MangleSymbolName(module_name ? module_name : "", symbol_name);
+      std::string mname = MangleSymbolName(
+        std::string(module_name ? module_name : ""),
+        std::string(symbol_name)
+      );
       for (Symbol* sym : symbols) {
         if (sym->Name() == mname) {
           *s = Symbol::ToHandle(sym);
@@ -1729,10 +1732,10 @@ namespace code {
       out << std::dec;
     }
 
-    std::string AmdHsaCode::MangleSymbolName(const std::string& module_name, const std::string symbol_name)
+    std::string AmdHsaCode::MangleSymbolName(const std::string& module_name, const std::string& symbol_name)
     {
       if (module_name.empty()) {
-        return std::move(symbol_name);
+        return symbol_name;
       } else {
         return module_name + "::" + symbol_name;
       }
