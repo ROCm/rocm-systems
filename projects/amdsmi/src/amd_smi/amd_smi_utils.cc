@@ -659,7 +659,7 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice
     ret = amdgpu_device_initialize(fd, &major_version, &minor_version, &device_handle);
     if (ret != 0) {
         std::string empty = "";
-        std::strncpy(market_name, empty.c_str(), AMDSMI_256_LENGTH - 1);
+        std::strncpy(market_name, empty.c_str(), AMDSMI_MAX_STRING_LENGTH - 1);
         amdgpu_device_deinitialize(device_handle);
         close(fd);
         return AMDSMI_STATUS_DRM_ERROR;
@@ -668,8 +668,8 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice
     // Get the marketing name using libdrm's API
     const char *name = amdgpu_get_marketing_name(device_handle);
     if (name != nullptr) {
-        std::strncpy(market_name, name, AMDSMI_256_LENGTH - 1);
-        market_name[AMDSMI_256_LENGTH - 1] = '\0';
+        std::strncpy(market_name, name, AMDSMI_MAX_STRING_LENGTH - 1);
+        market_name[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
         amdgpu_device_deinitialize(device_handle);
         close(fd);
         libdrm_amdgpu_.AMDSmiLibraryLoader::unload();

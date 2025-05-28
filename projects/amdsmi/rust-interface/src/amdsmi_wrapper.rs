@@ -102,11 +102,8 @@ where
     }
 }
 pub const AMDSMI_MAX_MM_IP_COUNT: u32 = 8;
-pub const AMDSMI_MAX_DATE_LENGTH: u32 = 32;
 pub const AMDSMI_MAX_STRING_LENGTH: u32 = 256;
-pub const AMDSMI_256_LENGTH: u32 = 256;
 pub const AMDSMI_MAX_DEVICES: u32 = 32;
-pub const AMDSMI_MAX_NAME: u32 = 32;
 pub const AMDSMI_MAX_DRIVER_VERSION_LENGTH: u32 = 80;
 pub const AMDSMI_MAX_CONTAINER_TYPE: u32 = 2;
 pub const AMDSMI_MAX_CACHE_TYPES: u32 = 10;
@@ -127,7 +124,6 @@ pub const AMDSMI_MAX_NUM_XCC: u32 = 8;
 pub const AMDSMI_MAX_NUM_XCP: u32 = 8;
 pub const AMDSMI_TIME_FORMAT: &[u8; 20] = b"%02d:%02d:%02d.%03d\0";
 pub const AMDSMI_DATE_FORMAT: &[u8; 35] = b"%04d-%02d-%02d:%02d:%02d:%02d.%03d\0";
-pub const AMDSMI_LIB_VERSION_YEAR: u32 = 25;
 pub const AMDSMI_LIB_VERSION_MAJOR: u32 = 25;
 pub const AMDSMI_LIB_VERSION_MINOR: u32 = 4;
 pub const AMDSMI_LIB_VERSION_RELEASE: u32 = 2;
@@ -136,7 +132,6 @@ pub const AMDSMI_MAX_FAN_SPEED: u32 = 255;
 pub const AMDSMI_NUM_VOLTAGE_CURVE_POINTS: u32 = 3;
 pub const AMDSMI_MAX_UTILIZATION_VALUES: u32 = 4;
 pub const AMDSMI_MAX_NUM_PM_POLICIES: u32 = 32;
-pub const AMDSMI_DEFAULT_VARIANT: i32 = -1;
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub enum AmdsmiInitFlagsT {

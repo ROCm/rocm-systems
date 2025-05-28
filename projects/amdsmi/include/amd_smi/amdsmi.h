@@ -60,7 +60,6 @@ typedef enum {
  * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
  */
 #define AMDSMI_MAX_MM_IP_COUNT       8
-#define AMDSMI_MAX_DATE_LENGTH       32 //!< YYYY-MM-DD:HH:MM:SS.MSC
 #define AMDSMI_MAX_STRING_LENGTH     256
 #define AMDSMI_MAX_DEVICES           32
 #define AMDSMI_MAX_DRIVER_VERSION_LENGTH 80
@@ -77,10 +76,8 @@ typedef enum {
  *
  * @cond @tag{gpu_bm_linux} @endcond
  */
-#define AMDSMI_MAX_NAME              32
 #define AMDSMI_MAX_NUM_XGMI_PHYSICAL_LINK 64
 #define AMDSMI_MAX_CONTAINER_TYPE    2
-#define AMDSMI_256_LENGTH            AMDSMI_MAX_STRING_LENGTH  //!< Deprecated
 
 /**
  * @brief The following structure holds the gpu metrics values for a device.
@@ -196,9 +193,6 @@ typedef enum {
  *
  * @cond @tag{gpu_bm_linux} @endcond
  */
-
-//! Year should follow the IP driver package version: 22.40/23.10 and similar
-#define AMDSMI_LIB_VERSION_YEAR 25  //!< To Be Deprecated
 
 //! Major version should be changed for every header change that breaks ABI
 //! Such as adding/deleting APIs, changing names, fields of structures, etc.
@@ -1569,13 +1563,6 @@ typedef struct {
 } amdsmi_retired_page_record_t;
 
 /**
- * @brief Number of possible power profiles that a system could support
- *
- * @cond @tag{gpu_bm_linux} @endcond
- */
-#define AMDSMI_MAX_NUM_POWER_PROFILES (sizeof(amdsmi_bit_field_t) * 8)
-
-/**
  * @brief This structure contains information about which power profiles are
  * supported by the system for a given device, and which power profile is
  * currently active.
@@ -1646,7 +1633,6 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef struct {
-    uint32_t year;      //!< Last 2 digits of the Year released  -  To Be Deprecated
     uint32_t major;     //!< Major version
     uint32_t minor;     //!< Minor version
     uint32_t release;   //!< Patch, build or stepping version
@@ -1968,8 +1954,6 @@ typedef struct {
     uint64_t reserved[7];
 } amdsmi_xgmi_link_status_t;
 
-#define  MAX_AMDSMI_NAME_LENGTH 64
-
 /**
  * @brief This structure holds the name value pairs
  *
@@ -2067,9 +2051,6 @@ typedef enum {
     AMDSMI_AFFINITY_SCOPE_NODE = 0,      // Memory affinity as numa node
     AMDSMI_AFFINITY_SCOPE_SOCKET = 1    // socket affinity
 } amdsmi_affinity_scope_t;
-
-
-#define AMDSMI_DEFAULT_VARIANT 0xFFFFFFFFFFFFFFFF
 
 #ifdef ENABLE_ESMI_LIB
 

@@ -1835,10 +1835,10 @@ class struct_amdsmi_version_t(Structure):
 
 struct_amdsmi_version_t._pack_ = 1 # source:False
 struct_amdsmi_version_t._fields_ = [
-    ('year', ctypes.c_uint32),
     ('major', ctypes.c_uint32),
     ('minor', ctypes.c_uint32),
     ('release', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
     ('build', ctypes.POINTER(ctypes.c_char)),
 ]
 

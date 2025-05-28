@@ -65,7 +65,7 @@ static const uint32_t kVerMaxStrLen = 80;
 
 void TestVersionRead::Run(void) {
   amdsmi_status_t err;
-  amdsmi_version_t ver = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, nullptr};
+  amdsmi_version_t ver = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, nullptr};
 
   TestBase::Run();
   if (setup_failed_) {

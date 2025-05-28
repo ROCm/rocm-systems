@@ -193,7 +193,7 @@ pub fn amdsmi_get_socket_handles() -> AmdsmiResult<Vec<AmdsmiSocketHandle>> {
 ///
 /// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_socket_info` call fails.
 pub fn amdsmi_get_socket_info(socket_handle: AmdsmiSocketHandle) -> AmdsmiResult<String> {
-    let (mut info, len) = define_cstr!(amdsmi_wrapper::AMDSMI_256_LENGTH);
+    let (mut info, len) = define_cstr!(amdsmi_wrapper::AMDSMI_MAX_STRING_LENGTH);
     call_unsafe!(amdsmi_wrapper::amdsmi_get_socket_info(
         socket_handle,
         len,
@@ -4776,7 +4776,7 @@ pub fn amdsmi_topo_get_p2p_status(
 pub fn amdsmi_get_gpu_compute_partition(
     processor_handle: AmdsmiProcessorHandle,
 ) -> AmdsmiResult<String> {
-    let (mut compute_partition, len) = define_cstr!(amdsmi_wrapper::AMDSMI_256_LENGTH);
+    let (mut compute_partition, len) = define_cstr!(amdsmi_wrapper::AMDSMI_MAX_STRING_LENGTH);
     call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_compute_partition(
         processor_handle,
         compute_partition.as_mut_ptr(),
@@ -4884,7 +4884,7 @@ pub fn amdsmi_set_gpu_compute_partition(
 pub fn amdsmi_get_gpu_memory_partition(
     processor_handle: AmdsmiProcessorHandle,
 ) -> AmdsmiResult<String> {
-    let (mut memory_partition, len) = define_cstr!(amdsmi_wrapper::AMDSMI_256_LENGTH);
+    let (mut memory_partition, len) = define_cstr!(amdsmi_wrapper::AMDSMI_MAX_STRING_LENGTH);
     call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_memory_partition(
         processor_handle,
         memory_partition.as_mut_ptr(),

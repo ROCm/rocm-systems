@@ -710,17 +710,17 @@ amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_handle, amdsmi_board
     }
     if (board_info->product_name[0] == '\0') {
         status = rsmi_wrapper(rsmi_dev_name_get, processor_handle, 0,
-                              board_info->product_name, AMDSMI_256_LENGTH);
+                              board_info->product_name, AMDSMI_MAX_STRING_LENGTH);
         // Check if the value is in hex format
         if (status == AMDSMI_STATUS_SUCCESS) {
             if (board_info->product_name[0] == '0' && board_info->product_name[1] == 'x') {
                 memset(board_info->product_name, 0,
-                        AMDSMI_256_LENGTH * sizeof(board_info->product_name[0]));
+                        AMDSMI_MAX_STRING_LENGTH * sizeof(board_info->product_name[0]));
             }
         }
         if (status != AMDSMI_STATUS_SUCCESS) {
             memset(board_info->product_name, 0,
-                    AMDSMI_256_LENGTH * sizeof(board_info->product_name[0]));
+                    AMDSMI_MAX_STRING_LENGTH * sizeof(board_info->product_name[0]));
         }
     }
 
@@ -749,17 +749,17 @@ amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_handle, amdsmi_board
     if (board_info->product_name[0] == '\0') {
         status = rsmi_wrapper(rsmi_dev_name_get, processor_handle, 0,
                               board_info->product_name,
-                              AMDSMI_256_LENGTH);
+                              AMDSMI_MAX_STRING_LENGTH);
         // Check if the value is in hex format
         if (status == AMDSMI_STATUS_SUCCESS) {
             if (board_info->product_name[0] == '0' && board_info->product_name[1] == 'x') {
                 memset(board_info->product_name, 0,
-                        AMDSMI_256_LENGTH * sizeof(board_info->product_name[0]));
+                        AMDSMI_MAX_STRING_LENGTH * sizeof(board_info->product_name[0]));
             }
         }
         if (status != AMDSMI_STATUS_SUCCESS) {
             memset(board_info->product_name, 0,
-                    AMDSMI_256_LENGTH * sizeof(board_info->product_name[0]));
+                    AMDSMI_MAX_STRING_LENGTH * sizeof(board_info->product_name[0]));
         }
         ss << __PRETTY_FUNCTION__ << " | [rsmi_correction] board_info->product_name= |"
         << board_info->product_name << "|";
@@ -1443,7 +1443,7 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
     amdsmi_status_t status = smi_amdgpu_get_market_name_from_dev_id(gpu_device, info->market_name);
     if (status != AMDSMI_STATUS_SUCCESS) {
         rsmi_wrapper(rsmi_dev_brand_get, processor_handle, 0,
-                     info->market_name, AMDSMI_256_LENGTH);
+                     info->market_name, AMDSMI_MAX_STRING_LENGTH);
     }
 
     std::string render_name = gpu_device->get_gpu_path();
@@ -3546,7 +3546,6 @@ amdsmi_status_t amdsmi_get_lib_version(amdsmi_version_t *version) {
     if (version == nullptr)
         return AMDSMI_STATUS_INVAL;
 
-    version->year = AMDSMI_LIB_VERSION_YEAR;
     version->major = AMDSMI_LIB_VERSION_MAJOR;
     version->minor = AMDSMI_LIB_VERSION_MINOR;
     version->release = AMDSMI_LIB_VERSION_RELEASE;
