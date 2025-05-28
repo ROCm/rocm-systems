@@ -188,3 +188,106 @@ The following table lists the APIs available for labeling the given resources:
     * - HSA runtime
       - ``roctxNameHsaAgent(const char* name, const struct hsa_agent_s*)``
       - Labels the given HSA agent with the given name in the output.
+
+Using ROCTx in the python application
+++++++++++++++++++++++++++++++++++++++
+
+ROCTx APIs can be used in a python application using the ``roctx`` module. The APIs are available as functions in the module. The API names are prefixed with ``roctx`` to avoid name conflicts with other libraries.
+
+The following sample code from the MatrixTranspose application shows the usage of ROCTx APIs in a python application:
+
+.. code-block:: python
+
+    import os
+    import roctx
+    import random
+    from roctx.context_decorators import RoctxRange
+
+    _prefix = os.path.basename(__file__)
+
+    @RoctxRange("matrix_transpose")
+    def matrix_transpose(matrix):
+        nrows = len(matrix)
+        ncols = len(matrix[0]) if nrows > 0 else 0
+        with RoctxRange(f"transpose(nrows={nrows}, ncols={ncols})"):
+            # Transpose the matrix
+            transposed = [[matrix[j][i] for j in range(nrows)] for i in range(ncols)]
+            return transposed
+
+    def generate_matrix(rows, cols):
+        with RoctxRange(f"generate_matrix(rows={rows}, cols={cols})"):
+            return [[random.randint(0, 100) for _ in range(cols)] for _ in range(rows)]
+
+    def run(rows, cols):
+        idx = roctx.rangeStart(f"run(rows={rows}, cols={cols})")
+        matrix = generate_matrix(rows, cols)
+        transposed = matrix_transpose(matrix)
+        roctx.rangeStop(idx)
+        return matrix, transposed
+
+    if __name__ == "__main__":
+        import argparse
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument("-r", "--rows", type=int, default=4, help="Number of rows")
+        parser.add_argument("-c", "--cols", type=int, default=5, help="Number of columns")
+        args = parser.parse_args()
+
+        roctx.mark(f"MatrixTranspose: rows={args.rows}, cols={args.cols}")
+        with RoctxRange("main"):
+            matrix, transposed = run(args.rows, args.cols)
+            print(f"[{_prefix}] Original matrix:")
+            for row in matrix:
+                print(row)
+            print(f"\n[{_prefix}] Transposed matrix:")
+            for row in transposed:
+                print(row)
+
+
+Before using the ``roctx`` module for python application, ensure that the ``roctx`` module is built, installed and available in your python environment.
+
+An example to build and install ``roctx`` module is as follows:    
+
+.. code-block:: shell
+
+   cmake -B build-sdk -DCMAKE_INSTALL_PREFIX=/opt/rocm -DROCPROFILER_PYTHON_VERSIONS="3.10" -DCMAKE_PREFIX_PATH=/opt/rocm
+
+If you are using a different python version, replace ``3.10`` with the appropriate version in the above command.
+Multiple python versions can be specified in the ``ROCPROFILER_PYTHON_VERSIONS`` variable. The roctx module will be built and installed for all the specified python versions.
+
+.. code-block:: shell
+
+    ``cmake -B build-sdk -DCMAKE_INSTALL_PREFIX=/opt/rocm -DROCPROFILER_PYTHON_VERSIONS="3.8;3.9;3.10;3.11;3.12" -DCMAKE_PREFIX_PATH=/opt/rocm``
+
+Based on the python major.minor version and the roctx module install path ("/opt/rocm" in above example), set the ``PYTHONPATH`` environment variable to include the path to the ``roctx`` module.
+    
+.. code-block:: shell
+
+   export PYTHONPATH="<install-path>/lib/pythonX.Y/site-packages:$PYTHONPATH"
+    
+Above example will install the roctx module in ``/opt/rocm/lib/python3.10/site-packages``, set the ``PYTHONPATH`` as follows:
+
+.. code-block:: shell
+
+    export PYTHONPATH=/opt/rocm/lib/python3.10/site-packages:$PYTHONPATH
+
+    
+Once the ``PYTHONPATH`` is set, user should be able to import the `roctx` package:
+
+.. code-block:: shell
+
+   python3 -c "import roctx"
+    
+User can profile the python application which is annotated with ROCTx markers using ``rocprofv3`` as follows:
+    
+.. code-block:: shell
+
+   rocprofv3 --marker-trace -- $(which python) <python_application_path>
+
+The preceding command generates a ``marker_api_trace.csv`` file prefixed with the process ID.
+
+.. csv-table:: Marker api trace for python application
+   :file: /data/python_bindings.csv
+   :widths: 10,10,10,10,10,20,20
+   :header-rows: 1
+
