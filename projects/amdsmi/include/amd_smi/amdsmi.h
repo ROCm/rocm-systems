@@ -581,25 +581,6 @@ typedef enum {
 } amdsmi_vram_type_t;
 
 /**
- * @brief VRam Vendor Types
- *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
- */
-typedef enum {
-    AMDSMI_VRAM_VENDOR_SAMSUNG,
-    AMDSMI_VRAM_VENDOR_INFINEON,
-    AMDSMI_VRAM_VENDOR_ELPIDA,
-    AMDSMI_VRAM_VENDOR_ETRON,
-    AMDSMI_VRAM_VENDOR_NANYA,
-    AMDSMI_VRAM_VENDOR_HYNIX,
-    AMDSMI_VRAM_VENDOR_MOSEL,
-    AMDSMI_VRAM_VENDOR_WINBOND,
-    AMDSMI_VRAM_VENDOR_ESMT,
-    AMDSMI_VRAM_VENDOR_MICRON,
-    AMDSMI_VRAM_VENDOR_UNKNOWN
-} amdsmi_vram_vendor_type_t;
-
-/**
  * @brief This structure represents a range (e.g., frequencies or voltages).
  *
  * @cond @tag{gpu_bm_linux} @endcond
@@ -979,7 +960,7 @@ typedef struct {
  */
 typedef struct {
     amdsmi_vram_type_t vram_type;
-    amdsmi_vram_vendor_type_t vram_vendor;
+    char  vram_vendor[AMDSMI_MAX_STRING_LENGTH];
     uint64_t vram_size;            //!< vram size in MB
     uint32_t vram_bit_width;       //!< In bits
     uint64_t vram_max_bandwidth;   //!< The VRAM max bandwidth at current memory clock (GB/s)

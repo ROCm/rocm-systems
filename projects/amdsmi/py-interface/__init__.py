@@ -282,7 +282,6 @@ from .amdsmi_interface import AmdSmiUtilizationCounterType
 from .amdsmi_interface import AmdSmiProcessorType
 from .amdsmi_interface import AmdSmiVirtualizationMode
 from .amdsmi_interface import AmdSmiVramType
-from .amdsmi_interface import AmdSmiVramVendor
 from .amdsmi_interface import AmdSmiAffinityScope
 
 # Exceptions

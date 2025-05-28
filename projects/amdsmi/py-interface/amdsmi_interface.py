@@ -507,20 +507,6 @@ class AmdSmiVramType(IntEnum):
     GDDR7 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_GDDR7
     MAX = amdsmi_wrapper.AMDSMI_VRAM_TYPE__MAX
 
-
-class AmdSmiVramVendor(IntEnum):
-    SAMSUNG = amdsmi_wrapper.AMDSMI_VRAM_VENDOR_SAMSUNG
-    INFINEON = amdsmi_wrapper.AMDSMI_VRAM_VENDOR_INFINEON
-    ELPIDA = amdsmi_wrapper.AMDSMI_VRAM_VENDOR_ELPIDA
-    ETRON = amdsmi_wrapper.AMDSMI_VRAM_VENDOR_ETRON
-    NANYA = amdsmi_wrapper.AMDSMI_VRAM_VENDOR_NANYA
-    HYNIX = amdsmi_wrapper.AMDSMI_VRAM_VENDOR_HYNIX
-    MOSEL = amdsmi_wrapper.AMDSMI_VRAM_VENDOR_MOSEL
-    WINBOND = amdsmi_wrapper.AMDSMI_VRAM_VENDOR_WINBOND
-    ESMT = amdsmi_wrapper.AMDSMI_VRAM_VENDOR_ESMT
-    MICRON = amdsmi_wrapper.AMDSMI_VRAM_VENDOR_MICRON
-    UNKNOWN = amdsmi_wrapper.AMDSMI_VRAM_VENDOR_UNKNOWN
-
 class AmdSmiAffinityScope(IntEnum):
     NUMA_SCOPE = amdsmi_wrapper.AMDSMI_AFFINITY_SCOPE_NODE
     SOCKET_SCOPE = amdsmi_wrapper.AMDSMI_AFFINITY_SCOPE_SOCKET
@@ -2071,7 +2057,7 @@ def amdsmi_get_gpu_vram_info(
     )
     return {
         "vram_type": vram_info.vram_type,
-        "vram_vendor": vram_info.vram_vendor,
+        "vram_vendor": vram_info.vram_vendor.decode("utf-8"),
         "vram_size": vram_info.vram_size,
         "vram_bit_width": _validate_if_max_uint(vram_info.vram_bit_width, MaxUIntegerTypes.UINT32_T),
         "vram_max_bandwidth": _validate_if_max_uint(vram_info.vram_max_bandwidth, MaxUIntegerTypes.UINT64_T),

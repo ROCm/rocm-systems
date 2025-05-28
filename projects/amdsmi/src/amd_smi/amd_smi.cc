@@ -1755,7 +1755,7 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(
     // init the info structure with default value
     info->vram_type = AMDSMI_VRAM_TYPE_UNKNOWN;
     info->vram_size = 0;
-    info->vram_vendor = AMDSMI_VRAM_VENDOR_UNKNOWN;
+    strncpy(info->vram_vendor, "UNKNOWN", AMDSMI_MAX_STRING_LENGTH);
     info->vram_bit_width = std::numeric_limits<decltype(info->vram_bit_width)>::max();
     info->vram_max_bandwidth = std::numeric_limits<decltype(info->vram_max_bandwidth)>::max();
 
@@ -1849,30 +1849,12 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(
         info->vram_type = AMDSMI_VRAM_TYPE_UNKNOWN;
 
     // map the vendor name to enum
-    char brand[256];
-    r = rsmi_wrapper(rsmi_dev_vram_vendor_get, processor_handle, 0,
-                     brand, 255);
+    char brand[256] = {'\0'};
+    r = rsmi_wrapper(rsmi_dev_vram_vendor_get, processor_handle, 0, brand, 255);
     if (r == AMDSMI_STATUS_SUCCESS) {
-        if (strcasecmp(brand, "SAMSUNG") == 0)
-            info->vram_vendor = AMDSMI_VRAM_VENDOR_SAMSUNG;
-        if (strcasecmp(brand, "INFINEON") == 0)
-            info->vram_vendor = AMDSMI_VRAM_VENDOR_INFINEON;
-        if (strcasecmp(brand, "ELPIDA") == 0)
-            info->vram_vendor = AMDSMI_VRAM_VENDOR_ELPIDA;
-        if (strcasecmp(brand, "ETRON") == 0)
-            info->vram_vendor = AMDSMI_VRAM_VENDOR_ETRON;
-        if (strcasecmp(brand, "NANYA") == 0)
-            info->vram_vendor = AMDSMI_VRAM_VENDOR_NANYA;
-        if (strcasecmp(brand, "HYNIX") == 0)
-            info->vram_vendor = AMDSMI_VRAM_VENDOR_HYNIX;
-        if (strcasecmp(brand, "MOSEL") == 0)
-            info->vram_vendor = AMDSMI_VRAM_VENDOR_MOSEL;
-        if (strcasecmp(brand, "WINBOND") == 0)
-            info->vram_vendor = AMDSMI_VRAM_VENDOR_WINBOND;
-        if (strcasecmp(brand, "ESMT") == 0)
-            info->vram_vendor = AMDSMI_VRAM_VENDOR_ESMT;
-        if (strcasecmp(brand, "MICRON") == 0)
-            info->vram_vendor = AMDSMI_VRAM_VENDOR_MICRON;
+        for (auto &x : brand)
+            x = static_cast<char>(toupper(x));
+        strncpy(info->vram_vendor, brand, AMDSMI_MAX_STRING_LENGTH);
     }
     uint64_t total = 0;
     r = rsmi_wrapper(rsmi_dev_memory_total_get, processor_handle, 0,

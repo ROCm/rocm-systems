@@ -704,33 +704,6 @@ AMDSMI_VRAM_TYPE_GDDR6 = 22
 AMDSMI_VRAM_TYPE_GDDR7 = 23
 AMDSMI_VRAM_TYPE__MAX = 23
 amdsmi_vram_type_t = ctypes.c_uint32 # enum
-
-# values for enumeration 'amdsmi_vram_vendor_type_t'
-amdsmi_vram_vendor_type_t__enumvalues = {
-    0: 'AMDSMI_VRAM_VENDOR_SAMSUNG',
-    1: 'AMDSMI_VRAM_VENDOR_INFINEON',
-    2: 'AMDSMI_VRAM_VENDOR_ELPIDA',
-    3: 'AMDSMI_VRAM_VENDOR_ETRON',
-    4: 'AMDSMI_VRAM_VENDOR_NANYA',
-    5: 'AMDSMI_VRAM_VENDOR_HYNIX',
-    6: 'AMDSMI_VRAM_VENDOR_MOSEL',
-    7: 'AMDSMI_VRAM_VENDOR_WINBOND',
-    8: 'AMDSMI_VRAM_VENDOR_ESMT',
-    9: 'AMDSMI_VRAM_VENDOR_MICRON',
-    10: 'AMDSMI_VRAM_VENDOR_UNKNOWN',
-}
-AMDSMI_VRAM_VENDOR_SAMSUNG = 0
-AMDSMI_VRAM_VENDOR_INFINEON = 1
-AMDSMI_VRAM_VENDOR_ELPIDA = 2
-AMDSMI_VRAM_VENDOR_ETRON = 3
-AMDSMI_VRAM_VENDOR_NANYA = 4
-AMDSMI_VRAM_VENDOR_HYNIX = 5
-AMDSMI_VRAM_VENDOR_MOSEL = 6
-AMDSMI_VRAM_VENDOR_WINBOND = 7
-AMDSMI_VRAM_VENDOR_ESMT = 8
-AMDSMI_VRAM_VENDOR_MICRON = 9
-AMDSMI_VRAM_VENDOR_UNKNOWN = 10
-amdsmi_vram_vendor_type_t = ctypes.c_uint32 # enum
 class struct_amdsmi_range_t(Structure):
     pass
 
@@ -1177,10 +1150,11 @@ class struct_amdsmi_vram_info_t(Structure):
 struct_amdsmi_vram_info_t._pack_ = 1 # source:False
 struct_amdsmi_vram_info_t._fields_ = [
     ('vram_type', amdsmi_vram_type_t),
-    ('vram_vendor', amdsmi_vram_vendor_type_t),
+    ('vram_vendor', ctypes.c_char * 256),
+    ('PADDING_0', ctypes.c_ubyte * 4),
     ('vram_size', ctypes.c_uint64),
     ('vram_bit_width', ctypes.c_uint32),
-    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('PADDING_1', ctypes.c_ubyte * 4),
     ('vram_max_bandwidth', ctypes.c_uint64),
     ('reserved', ctypes.c_uint64 * 4),
 ]
@@ -3191,14 +3165,9 @@ __all__ = \
     'AMDSMI_VRAM_TYPE_HBM', 'AMDSMI_VRAM_TYPE_HBM2',
     'AMDSMI_VRAM_TYPE_HBM2E', 'AMDSMI_VRAM_TYPE_HBM3',
     'AMDSMI_VRAM_TYPE_UNKNOWN', 'AMDSMI_VRAM_TYPE__MAX',
-    'AMDSMI_VRAM_VENDOR_ELPIDA', 'AMDSMI_VRAM_VENDOR_ESMT',
-    'AMDSMI_VRAM_VENDOR_ETRON', 'AMDSMI_VRAM_VENDOR_HYNIX',
-    'AMDSMI_VRAM_VENDOR_INFINEON', 'AMDSMI_VRAM_VENDOR_MICRON',
-    'AMDSMI_VRAM_VENDOR_MOSEL', 'AMDSMI_VRAM_VENDOR_NANYA',
-    'AMDSMI_VRAM_VENDOR_SAMSUNG', 'AMDSMI_VRAM_VENDOR_UNKNOWN',
-    'AMDSMI_VRAM_VENDOR_WINBOND', 'AMDSMI_XGMI_LINK_DISABLE',
-    'AMDSMI_XGMI_LINK_DOWN', 'AMDSMI_XGMI_LINK_UP',
-    'AMDSMI_XGMI_STATUS_ERROR', 'AMDSMI_XGMI_STATUS_MULTIPLE_ERRORS',
+    'AMDSMI_XGMI_LINK_DISABLE', 'AMDSMI_XGMI_LINK_DOWN',
+    'AMDSMI_XGMI_LINK_UP', 'AMDSMI_XGMI_STATUS_ERROR',
+    'AMDSMI_XGMI_STATUS_MULTIPLE_ERRORS',
     'AMDSMI_XGMI_STATUS_NO_ERRORS', 'CLK_LIMIT_MAX', 'CLK_LIMIT_MIN',
     'RD_BW0', 'WR_BW0', 'amd_metrics_table_header_t',
     'amdsmi_accelerator_partition_profile_config_t',
@@ -3233,7 +3202,8 @@ __all__ = \
     'amdsmi_fw_info_t', 'amdsmi_get_afids_from_cper', 
      'amdsmi_get_cpu_affinity_with_scope',
     'amdsmi_get_clk_freq', 'amdsmi_get_clock_info',
-    'amdsmi_get_cpu_cclk_limit', 'amdsmi_get_cpu_core_boostlimit',
+    'amdsmi_get_cpu_affinity_with_scope', 'amdsmi_get_cpu_cclk_limit',
+    'amdsmi_get_cpu_core_boostlimit',
     'amdsmi_get_cpu_core_current_freq_limit',
     'amdsmi_get_cpu_core_energy', 'amdsmi_get_cpu_cores_per_socket',
     'amdsmi_get_cpu_current_io_bandwidth',
@@ -3378,8 +3348,7 @@ __all__ = \
     'amdsmi_version_t', 'amdsmi_violation_status_t',
     'amdsmi_virtualization_mode_t', 'amdsmi_voltage_metric_t',
     'amdsmi_voltage_type_t', 'amdsmi_vram_info_t',
-    'amdsmi_vram_type_t', 'amdsmi_vram_usage_t',
-    'amdsmi_vram_vendor_type_t', 'amdsmi_xgmi_info_t',
+    'amdsmi_vram_type_t', 'amdsmi_vram_usage_t', 'amdsmi_xgmi_info_t',
     'amdsmi_xgmi_link_status_t', 'amdsmi_xgmi_link_status_type_t',
     'amdsmi_xgmi_status_t', 'processor_type_t', 'size_t',
     'struct__links', 'struct_amd_metrics_table_header_t',

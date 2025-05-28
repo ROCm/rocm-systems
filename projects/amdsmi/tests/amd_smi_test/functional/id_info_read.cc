@@ -139,9 +139,7 @@ void TestIdInfoRead::Run(void) {
     IF_VERB(STANDARD) {
       std::cout << "\t**Device Vram type id: "
                 << vram_info.vram_type << std::endl;
-      std::cout << "\t**Device Vram vendor id: 0x"
-                << std::hex << std::setw(4) << std::setfill('0') << vram_info.vram_vendor
-                << " (" << std::dec << vram_info.vram_vendor << ")" << std::endl;
+      std::cout << "\t**Device Vram vendor id: " << vram_info.vram_vendor << std::endl;
       std::cout << "\t**Device Vram size: 0x"
                 << std::hex << vram_info.vram_size
                 << " (" << std::dec << vram_info.vram_size << ")"

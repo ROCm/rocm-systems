@@ -152,25 +152,11 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
                 amdsmi.AmdSmiVramType.MAX:     "MAX"
             }
 
-            vram_vendors = {
-                amdsmi.AmdSmiVramVendor.SAMSUNG:  "SAMSUNG",
-                amdsmi.AmdSmiVramVendor.INFINEON: "INFINEON",
-                amdsmi.AmdSmiVramVendor.ELPIDA:   "ELPIDA",
-                amdsmi.AmdSmiVramVendor.ETRON:    "ETRON",
-                amdsmi.AmdSmiVramVendor.NANYA:    "NANYA",
-                amdsmi.AmdSmiVramVendor.HYNIX:    "HYNIX",
-                amdsmi.AmdSmiVramVendor.MOSEL:    "MOSEL",
-                amdsmi.AmdSmiVramVendor.WINBOND:  "WINBOND",
-                amdsmi.AmdSmiVramVendor.ESMT:     "ESMT",
-                amdsmi.AmdSmiVramVendor.MICRON:   "MICRON",
-                amdsmi.AmdSmiVramVendor.UNKNOWN:  "UNKNOWN"
-            }
-
             vram_info = amdsmi.amdsmi_get_gpu_vram_info(processors[i])
             print("  vram_info['vram_type'] is: {}".format(
                 vram_types[vram_info['vram_type']]))
             print("  vram_info['vram_vendor'] is: {}".format(
-                vram_vendors[vram_info['vram_vendor']]))
+                vram_info['vram_vendor']))
             print("  vram_info['vram_size'] is: {} MB".format(
                 vram_info['vram_size']))
             print("  vram_info['vram_bit_width'] is: {}".format(

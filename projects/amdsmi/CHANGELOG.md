@@ -4,9 +4,63 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ***All information listed below is for reference and subject to change.***
 
+## amd_smi_lib for ROCm 7.0.0
+
+### Added
+
+- N/A
+
+### Changed
+
+- **The `amdsmi_get_gpu_vram_info` command gets the vendor name from the driver instead of using an emun to identify vendor.**  
+  - `amdsmi_vram_info_t` member named `amdsmi_vram_vendor_type_t` was changed to a character string
+  - `amdsmi_vram_vendor_type_t` enum structure was removed
+
+### Removed
+
+- N/A
+
+### Optimized
+
+- N/A
+
+### Resolved issues
+
+- N/A
+
+### Upcoming changes
+
+- N/A
+
+### Known issues
+
+- N/A
+
+
 ## amd_smi_lib for ROCm 6.5.0
 
 ### Added
+
+- **Added bad page threshold count**.  
+  - Added `amdsmi_get_gpu_bad_page_threshold` to Python API and CLI; root/sudo permissions required to display the count.
+
+### Changed
+
+- **The `amd-smi topology` command has been enabled for Guest environments**.  
+  - `amd-smi topology` is now availabe in Guest environments. This includes full functionality so users can use the command just as they would in Bare Metal environments.
+
+- **Updated `amdsmi_get_clock_info` in `amdsmi_interface.py`**.  
+  - The `clk_deep_sleep` field now returns the sleep integer value.  
+
+### Removed
+
+### Optimized
+
+### Resolved issues
+
+### Upcoming changes
+
+### Known issues
 
 - **Added cpu model name for RDC**.  
   - Added new C and Python API `amdsmi_get_cpu_model_name`

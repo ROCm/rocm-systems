@@ -869,13 +869,9 @@ class AMDSMICommands():
                     vram_type = vram_type.replace('AMDSMI_VRAM_TYPE_', '').replace('_', '')
 
                 # Get vram vendor string
-                vram_vendor_enum = vram_info['vram_vendor']
-                vram_vendor = amdsmi_interface.amdsmi_wrapper.amdsmi_vram_vendor_type_t__enumvalues[vram_vendor_enum]
+                vram_vendor = vram_info['vram_vendor']
                 if "PLACEHOLDER" in vram_vendor:
                     vram_vendor = "N/A"
-                else:
-                    # Remove amdsmi enum prefix
-                    vram_vendor = vram_vendor.replace('AMDSMI_VRAM_VENDOR_', '')
 
                 # Assign cleaned values to vram_info_dict
                 vram_info_dict['type'] = vram_type
