@@ -21,8 +21,8 @@
  */
 
 #include <gtest/gtest.h>
+
 #include <cassert>
-#include <limits>
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_utils.h"
@@ -171,7 +171,6 @@ void TestBase::PrintDeviceHeader(amdsmi_processor_handle dv_ind) {
   amdsmi_status_t err;
   uint16_t val_ui16;
   uint32_t val_ui32;
-  amdsmi_asic_info_t info;
 
   err = smi_amdgpu_get_device_count(&val_ui32);
   CHK_ERR_ASRT(err)
@@ -189,16 +188,16 @@ void TestBase::PrintDeviceHeader(amdsmi_processor_handle dv_ind) {
     std::cout << "\t**Device handle: " << dv_ind << std::endl;
   }
   err = amdsmi_get_gpu_id(dv_ind, &val_ui16);
-  CHK_ERR_ASRT(err)
-  IF_VERB(STANDARD) {
-    std::cout << "\t**Device ID: 0x" << std::hex << val_ui16 << std::endl;
-  }
-
-  err = amdsmi_get_gpu_revision(dv_ind, &val_ui16);
-  CHK_ERR_ASRT(err)
-  IF_VERB(STANDARD) {
-      std::cout << "\t**Device Revision ID: 0x" << std::hex <<
-          val_ui16 << std::endl;
+  if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
+    IF_VERB(STANDARD) {
+      std::cout << "\t**Device ID: N/A" << std::endl;
+    }
+    ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
+  } else {
+    CHK_ERR_ASRT(err)
+    IF_VERB(STANDARD) {
+      std::cout << "\t**Device ID: 0x" << std::hex << val_ui16 << std::endl;
+    }
   }
 
   amdsmi_board_info_t board_info;
@@ -206,30 +205,82 @@ void TestBase::PrintDeviceHeader(amdsmi_processor_handle dv_ind) {
   CHK_ERR_ASRT(err)
   IF_VERB(STANDARD) {
     std::cout << "\t**Device name: " << board_info.product_name  << std::endl;
-
-    err = amdsmi_get_gpu_asic_info(dv_ind, &info);
-    CHK_ERR_ASRT(err)
-    IF_VERB(STANDARD) {
-      std::cout << "\t**Device Vendor ID: 0x" << std::hex <<
-          info.vendor_id << std::endl;
-    }
   }
 
   amdsmi_asic_info_t asic_info;
   err = amdsmi_get_gpu_asic_info(dv_ind, &asic_info);
-  CHK_ERR_ASRT(err)
+  if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
+    IF_VERB(STANDARD) {
+      std::cout << "\t**ASIC info: " << smi_amdgpu_get_status_string(err, false) << std::endl;
+    }
+    ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
+  } else if (err == AMDSMI_STATUS_FILE_ERROR) {  // File error can happen for partition switches,
+                                                 // if SMI is not re-initialized
+    IF_VERB(STANDARD) {
+      std::cout << "\t**ASIC info: " << smi_amdgpu_get_status_string(err, false) << std::endl;
+    }
+    ASSERT_EQ(err, AMDSMI_STATUS_FILE_ERROR);
+  } else {
+    CHK_ERR_ASRT(err)
+  }
+
+  // Print everything we can get from the ASIC info
   IF_VERB(STANDARD) {
     std::cout << "\t**Market name: " << asic_info.market_name  << std::endl;
     std::cout << "\t**ASIC serial: 0x" << std::hex << asic_info.asic_serial  << std::endl;
     std::cout << "\t**Target GFX Version: gfx" << asic_info.target_graphics_version  << std::endl;
+    std::cout << "\t**Device ID: 0x" << std::hex << std::setfill('0') << std::setw(4)
+              << asic_info.device_id << std::endl;
+    if (checkIfMaxValue(asic_info.num_of_compute_units)) {
+      std::cout << "\t**Num of Compute Units: N/A" << std::endl;
+    } else {
+      std::cout << "\t**Num of Compute Units: " << std::dec << asic_info.num_of_compute_units
+                << std::endl;
+    }
+    if (checkIfMaxValue(asic_info.oam_id)) {
+      std::cout << "\t**OAM ID: N/A" << std::endl;
+    } else {
+      std::cout << "\t**OAM ID: " << std::dec << asic_info.oam_id << std::endl;
+    }
+    std::cout << "\t**Revision ID: 0x" << std::hex << std::setfill('0') << std::setw(2)
+              << asic_info.rev_id << std::endl;
+    if (checkIfMaxValue(asic_info.subvendor_id)) {
+      std::cout << "\t**Subvendor ID: N/A" << std::endl;
+    } else {
+      std::cout << "\t**Subvendor ID: 0x" << std::hex << std::setfill('0') << std::setw(4)
+                << asic_info.subvendor_id << std::endl;
+    }
+    std::cout << "\t**Vendor ID: 0x" << std::hex << std::setfill('0') << std::setw(4)
+              << asic_info.vendor_id << std::endl;
+    std::cout << "\t**Vendor name: " << asic_info.vendor_name
+              << std::endl;
+  }
+
+  err = amdsmi_get_gpu_revision(dv_ind, &val_ui16);
+  if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
+    IF_VERB(STANDARD) {
+      std::cout << "\t**Device Revision ID: N/A" << std::endl;
+    }
+    ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
+  } else {
+    CHK_ERR_ASRT(err)
+    IF_VERB(STANDARD) {
+      std::cout << "\t**Device Revision ID: 0x" << std::hex << std::setfill('0') << std::setw(2)
+                << val_ui16 << std::endl;
+    }
   }
 
   err = amdsmi_get_gpu_subsystem_id(dv_ind, &val_ui16);
-  CHK_ERR_ASRT(err)
-  IF_VERB(STANDARD) {
-    std::cout << "\t**Subsystem ID: 0x" << std::hex << val_ui16 << std::endl;
-    std::cout << "\t**Subsystem Vendor ID: 0x" << std::hex
-          << info.subvendor_id << std::endl;
+  if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
+    IF_VERB(STANDARD) {
+      std::cout << "\t**Subsystem ID: N/A" << std::endl;
+    }
+  } else {
+    CHK_ERR_ASRT(err)
+    IF_VERB(STANDARD) {
+      std::cout << "\t**Subsystem ID: 0x" << std::hex << std::setfill('0') << std::setw(4)
+                << val_ui16 << std::endl;
+    }
   }
 
   std::cout << std::setbase(10);
@@ -347,22 +398,6 @@ TestBase::AcceleratorProfileConfig TestBase::getAvailableProfileConfigs(
     std::cout << available_profiles_str;
   }
   return profile_config;
-}
-
-void TestBase::waitForUserInput() {
-  for (;;) {
-    std::cout << "\n\t**Press any key to continue**" << std::endl;
-    int input = std::cin.get();
-    if (input == EOF) {
-      std::cout << "EOF detected. Exiting." << std::endl;
-      return;
-    }
-    char input_char = static_cast<char>(input);
-    std::cout << "User entered: " << input_char << std::endl;
-    if (input_char == '\n') {
-      return;
-    }
-  }
 }
 
 uint32_t TestBase::promptNumDevicesToTest(uint32_t current_num_devices) {

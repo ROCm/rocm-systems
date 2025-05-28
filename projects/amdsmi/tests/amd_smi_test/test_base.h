@@ -27,6 +27,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <limits>
 #include "amd_smi/amdsmi.h"
 
 // The max devices can be monitored
@@ -133,11 +134,20 @@ class TestBase {
                               amdsmi_accelerator_partition_profile_t current_profile,
                               amdsmi_accelerator_partition_profile_config_t config,
                               bool isVerbose);
-  void waitForUserInput();
 
   uint32_t promptNumDevicesToTest(uint32_t current_num_devices);
 
   std::string getResourceType(amdsmi_accelerator_partition_resource_type_t resource_type);
+
+  template <typename T>
+  bool checkIfMaxValue(T value) {
+    T max_value = std::numeric_limits<T>::max();
+    if (value == max_value) {
+      return true;
+    } else {
+      return false;
+    }
+  }
 
  protected:
   void MakeHeaderStr(const char *inStr, std::string *outStr) const;
@@ -163,9 +173,16 @@ class TestBase {
 
 // Macros to be used within TestBase classes
 #define CHK_ERR_ASRT(RET) { \
-    if (dont_fail() && ((RET) != AMDSMI_STATUS_SUCCESS)) { \
+    if ((RET) != AMDSMI_STATUS_SUCCESS) { \
         std::cout << std::endl << "\t===> TEST FAILURE." << std::endl; \
-        DISPLAY_AMDSMI_ERR(RET); \
+        const char *err_str; \
+        std::cout << "\t===> ERROR: AMDSMI call returned " << (RET) << std::endl; \
+        amdsmi_status_code_to_string((RET), &err_str); \
+        std::cout << "\t===> (" << err_str << ")" << std::endl; \
+        std::cout << "\t===> at " << __FILE__ << ":" << std::dec << __LINE__ << \
+                                                                  std::endl; \
+    } \
+    if (dont_fail() && ((RET) != AMDSMI_STATUS_SUCCESS)) { \
         std::cout << \
          "\t===> Abort is over-ridden due to dont_fail command line option." \
                                                                << std::endl; \

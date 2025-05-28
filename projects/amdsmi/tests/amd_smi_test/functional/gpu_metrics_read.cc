@@ -98,7 +98,7 @@ void TestGpuMetricsRead::Run(void) {
         IF_VERB(STANDARD) {
           std::cout << "\t**" <<
           "Not supported on this machine" << std::endl;
-          return;
+          continue;
         }
       }
     } else {

@@ -323,7 +323,10 @@ class AMDSMILogger():
             if isinstance(value, dict):
                 yaml_string += "  " * indent + f"{key}:\n" + self.custom_dump(value, indent + 1)
             elif isinstance(value, list):
-                yaml_string += "  " * indent + f"{key}:\n"
+                if not value:
+                    yaml_string += "  " * indent + f"{key}: N/A\n"
+                elif isinstance(value, dict):
+                    yaml_string += "  " * indent + f"{key}:\n"
                 for item in value:
                     if isinstance(item, dict):
                         yaml_string += self.custom_dump(item, indent + 1)

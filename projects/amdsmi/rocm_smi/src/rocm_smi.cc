@@ -344,10 +344,31 @@ static rsmi_status_t get_dev_mon_value(amd::smi::MonitorTypes type,
     return amd::smi::ErrnoToRsmiStatus(ret);
   }
 
+  if (val_str.empty()) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__
+    << " | ======= end ======= "
+    << " | Fail "
+    << " | Device #: " << dv_ind
+    << " | Type: " << monitorTypesToString.at(type)
+    << " | Cause: SYSFS read was empty"
+    << " | Returning = "
+    << getRSMIStatusString(RSMI_STATUS_UNEXPECTED_DATA) << " |";
+    LOG_INFO(ss);
+    return RSMI_STATUS_UNEXPECTED_DATA;
+  }
+
   if (!amd::smi::IsInteger(val_str)) {
     std::ostringstream ss;
-    ss << "Expected integer value from monitor, but got \"" << val_str << "\"";
-    LOG_ERROR(ss);
+    ss << __PRETTY_FUNCTION__
+    << " | ======= end ======= "
+    << " | Fail "
+    << " | Device #: " << dv_ind
+    << " | Type: " << monitorTypesToString.at(type)
+    << " | Cause: Expected integer value from monitor, but got "<< val_str
+    << " | Returning = "
+    << getRSMIStatusString(RSMI_STATUS_UNEXPECTED_DATA) << " |";
+    LOG_INFO(ss);
     return RSMI_STATUS_UNEXPECTED_DATA;
   }
 
@@ -374,10 +395,31 @@ static rsmi_status_t get_dev_mon_value(amd::smi::MonitorTypes type,
     return amd::smi::ErrnoToRsmiStatus(ret);
   }
 
+  if (val_str.empty()) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__
+    << " | ======= end ======= "
+    << " | Fail "
+    << " | Device #: " << dv_ind
+    << " | Type: " << monitorTypesToString.at(type)
+    << " | Cause: SYSFS read was empty"
+    << " | Returning = "
+    << getRSMIStatusString(RSMI_STATUS_UNEXPECTED_DATA) << " |";
+    LOG_INFO(ss);
+    return RSMI_STATUS_UNEXPECTED_DATA;
+  }
+
   if (!amd::smi::IsInteger(val_str)) {
     std::ostringstream ss;
-    ss << "Expected integer value from monitor, but got \"" << val_str << "\"";
-    LOG_ERROR(ss);
+    ss << __PRETTY_FUNCTION__
+    << " | ======= end ======= "
+    << " | Fail "
+    << " | Device #: " << dv_ind
+    << " | Type: " << monitorTypesToString.at(type)
+    << " | Cause: Expected integer value from monitor, but got "<< val_str
+    << " | Returning = "
+    << getRSMIStatusString(RSMI_STATUS_UNEXPECTED_DATA) << " |";
+    LOG_INFO(ss);
     return RSMI_STATUS_UNEXPECTED_DATA;
   }
 
@@ -806,12 +848,13 @@ rsmi_topo_numa_affinity_get(uint32_t dv_ind, int32_t *numa_node) {
   TRY
   rsmi_status_t ret;
 
-  CHK_SUPPORT_NAME_ONLY(numa_node)
-
   DEVICE_MUTEX
+  if (!numa_node) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
   std::string str_val;
   ret = get_dev_value_str(amd::smi::kDevNumaNode, dv_ind, &str_val);
-  if (ret != RSMI_STATUS_SUCCESS){
+  if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
   }
   *numa_node = std::stoi(str_val, nullptr);
@@ -1060,7 +1103,11 @@ rsmi_dev_subsystem_id_get(uint32_t dv_ind, uint16_t *id) {
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   CHK_SUPPORT_NAME_ONLY(id)
-  return get_id(dv_ind, amd::smi::kDevSubSysDevID, id);
+  auto ret = get_id(dv_ind, amd::smi::kDevSubSysDevID, id);
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======="
+     << ", reporting " << amd::smi::getRSMIStatusString(ret, false);
+  LOG_INFO(ss);
+  return ret;
 }
 
 rsmi_status_t
@@ -1069,6 +1116,9 @@ rsmi_dev_vendor_id_get(uint32_t dv_ind, uint16_t *id) {
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
+  if (!id) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
   CHK_SUPPORT_NAME_ONLY(id)
   int ret_kfd = 0;
   uint32_t node_id;
@@ -1143,8 +1193,11 @@ rsmi_dev_perf_level_get(uint32_t dv_ind, rsmi_dev_perf_level_t *perf) {
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
-  CHK_SUPPORT_NAME_ONLY(perf)
   DEVICE_MUTEX
+  if (!perf) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  CHK_SUPPORT_NAME_ONLY(perf)
 
   rsmi_status_t ret = get_dev_value_str(amd::smi::kDevPerfLevel, dv_ind,
                                                                     &val_str);
@@ -2811,17 +2864,17 @@ rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len) {
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
-  CHK_SUPPORT_NAME_ONLY(name)
 
-  if (len == 0) {
+  if (len == 0 || !name) {
     return RSMI_STATUS_INVALID_ARGS;
   }
+  CHK_SUPPORT_NAME_ONLY(name)
 
   DEVICE_MUTEX
 
   ret = get_dev_name_from_file(dv_ind, name, len);
 
-  if (ret || name[0] == '\0' || !isprint(name[0]) ) {
+  if (ret || name[0] == '\0' || !isprint(name[0])) {
     ret = get_dev_name_from_id(dv_ind, name, len, NAME_STR_DEVICE);
   }
 
@@ -3850,6 +3903,9 @@ rsmi_dev_power_cap_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *cap) {
   LOG_TRACE(ss);
 
   ++sensor_ind;  // power sysfs files have 1-based indices
+  if (!cap) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
   CHK_SUPPORT_SUBVAR_ONLY(cap, sensor_ind)
 
   rsmi_status_t ret;
@@ -3870,6 +3926,9 @@ rsmi_dev_power_cap_range_get(uint32_t dv_ind, uint32_t sensor_ind,
   LOG_TRACE(ss);
 
   ++sensor_ind;  // power sysfs files have 1-based indices
+  if (max == nullptr || min == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
   CHK_SUPPORT_SUBVAR_ONLY((min == nullptr || max == nullptr ?nullptr : min),
                                                                    sensor_ind)
   rsmi_status_t ret;
@@ -3993,6 +4052,8 @@ rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
   }
 
   DEVICE_MUTEX
+  *total = 0;  // Initialize total to 0
+  // This is needed to avoid returning garbage value in case of failure
   ret = get_dev_value_int(mem_type_file, dv_ind, total);
 
   // Fallback to KFD reported memory if VRAM total is 0 or sysfs read fails
@@ -4070,6 +4131,8 @@ rsmi_dev_memory_usage_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
   }
 
   DEVICE_MUTEX
+  *used = 0;  // Initialize used to 0
+  // This is needed to avoid returning garbage value in case of failure
   ret = get_dev_value_int(mem_type_file, dv_ind, used);
 
   // Fallback to KFD reported memory if no VRAM or sysfs read fails
@@ -4652,10 +4715,8 @@ rsmi_dev_unique_id_get(uint32_t dv_ind, uint64_t *unique_id) {
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
-  CHK_SUPPORT_NAME_ONLY(unique_id)
-
   DEVICE_MUTEX
-  if (unique_id == nullptr) {
+  if (!unique_id) {
     return RSMI_STATUS_INVALID_ARGS;
   }
   *unique_id = std::numeric_limits<uint64_t>::max();

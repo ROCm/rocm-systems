@@ -273,6 +273,7 @@ static void checkPartitionIdChanges(amdsmi_processor_handle* const processor_han
         "\"sudo rmmod amdgpu && sudo rmmod ast && sudo modprobe amdgpu\")."
         "\n\tCPX may not enumerate properly.\n";
       }
+      // amdsmi_wait_for_user_input();  // watch for any errors
       break;
     }
     amdsmi_kfd_info_t kfd_info;
@@ -432,7 +433,7 @@ void TestComputePartitionReadWrite::Run(void) {
                   << computePartitionString(updatePartition)
                   << " ===============" << std::endl;
       }
-      // waitForUserInput();  // watch for any errors
+      // amdsmi_wait_for_user_input();  // watch for any errors
 
       auto ret_set = amdsmi_set_gpu_compute_partition(processor_handles_[dv_ind], updatePartition);
       IF_VERB(STANDARD) {
@@ -463,6 +464,7 @@ void TestComputePartitionReadWrite::Run(void) {
                   << "\n\t Device might be in a static partition mode. "
                   << "With inability to change partition modes."
                   << std::endl;
+        // amdsmi_wait_for_user_input();  // watch for any errors
         break;
       }
 
@@ -491,7 +493,7 @@ void TestComputePartitionReadWrite::Run(void) {
          static_cast<amdsmi_compute_partition_type_t>(
           mapStringToSMIComputePartitionTypes.at(
             std::string(orig_char_computePartition)));
-    // waitForUserInput();  // watch for any errors on going back to original partition
+    // amdsmi_wait_for_user_input();  // watch for any errors on going back to original partition
     auto ret_set = amdsmi_set_gpu_compute_partition(processor_handles_[dv_ind], updatePartition);
     EXPECT_TRUE(ret_set == AMDSMI_STATUS_SETTING_UNAVAILABLE
       || ret_set== AMDSMI_STATUS_NO_PERM
@@ -510,6 +512,8 @@ void TestComputePartitionReadWrite::Run(void) {
 
   // TEST 2: Set/Get Compute Partition (new functionality)
   initial_num_devices = num_monitor_devs();
+  amdsmi_accelerator_partition_type_t primary_partition_type = AMDSMI_ACCELERATOR_PARTITION_INVALID;
+  uint32_t primary_index = 0;
   for (uint32_t dv_ind = 0; dv_ind < initial_num_devices; ++dv_ind) {
     if (dv_ind != 0) {
       std::cout << "\n";
@@ -518,11 +522,11 @@ void TestComputePartitionReadWrite::Run(void) {
       std::cout << "\n";
       std::cout << "\t**======================================================================\n";
       std::cout << "\t**Test #2: Get/Set Compute Partition (new functionality) ===============\n";
-      std::cout << "\t**DEVICE: #" << std::setw(2) << std::setfill('0') << dv_ind
+      std::cout << "\t**DEVICE: #" << std::dec << std::setw(2) << std::setfill('0') << dv_ind
                 << " ==========================================================\n";
       std::cout << "\t**======================================================================\n";
     }
-    // waitForUserInput();  // watch for any errors
+    // amdsmi_wait_for_user_input();  // watch for any errors
     PrintDeviceHeader(processor_handles_[dv_ind]);
     amdsmi_accelerator_partition_profile_t profile = {};
     uint32_t partition_id[8] = {0, 0, 0, 0, 0, 0, 0, 0};
@@ -563,6 +567,12 @@ void TestComputePartitionReadWrite::Run(void) {
       profile_type_str = "CPX";
     }
 
+    // save the primary partition type
+    if (profile.profile_type != AMDSMI_ACCELERATOR_PARTITION_INVALID) {
+      primary_partition_type = profile.profile_type;
+      primary_index = dv_ind;
+    }
+
     std::string partition_id_str = "";
     for (int i = 0; i < 8; i++) {
       partition_id_str += std::to_string(partition_id[i]);
@@ -570,7 +580,7 @@ void TestComputePartitionReadWrite::Run(void) {
         partition_id_str += ", ";
       }
 
-      switch (profile.profile_type) {
+      switch (primary_partition_type) {
         case AMDSMI_ACCELERATOR_PARTITION_SPX:
           EXPECT_LT(partition_id[i], MAX_SPX_PARTITIONS);
           break;
@@ -586,7 +596,7 @@ void TestComputePartitionReadWrite::Run(void) {
         case AMDSMI_ACCELERATOR_PARTITION_CPX: {
           uint16_t num_xcd;
           uint32_t max_xcps = 0;
-          ret = amdsmi_get_gpu_xcd_counter(processor_handles_[dv_ind], &num_xcd);
+          ret = amdsmi_get_gpu_xcd_counter(processor_handles_[primary_index], &num_xcd);
           if (ret == AMDSMI_STATUS_SUCCESS) {
             max_xcps = static_cast<uint32_t>(num_xcd);
           }
@@ -640,7 +650,7 @@ void TestComputePartitionReadWrite::Run(void) {
     AcceleratorProfileConfig original_profile_config = {};
     original_profile_config
       = getAvailableProfileConfigs(dv_ind, profile, profile_config, isVerbose);
-    // waitForUserInput();  // watch for any errors
+    // amdsmi_wait_for_user_input();  // watch for any errors
 
     IF_VERB(STANDARD) {
       std::cout << "\t**=========================================================\n";
@@ -762,7 +772,7 @@ void TestComputePartitionReadWrite::Run(void) {
                   << profile_config.profiles[config].profile_index << ")"
                   << " ===============" << std::endl;
       }
-      // waitForUserInput();  // watch for any errors
+      // amdsmi_wait_for_user_input();  // watch for any errors
 
       auto ret_set = amdsmi_set_gpu_accelerator_partition_profile(
                         processor_handles_[dv_ind],
@@ -789,6 +799,7 @@ void TestComputePartitionReadWrite::Run(void) {
                   << "\n\t Device might be in a static partition mode. "
                   << "With inability to change partition modes."
                   << std::endl;
+        // amdsmi_wait_for_user_input();  // watch for any errors
         break;
       }
       if (ret_set == AMDSMI_STATUS_NOT_SUPPORTED) {
@@ -872,6 +883,7 @@ void TestComputePartitionReadWrite::Run(void) {
         std::cout << "\t**" << "amdsmi_get_gpu_accelerator_partition_profile: "
                   << "Not supported on this machine, skipping remaining tests." << std::endl;
       }
+      // amdsmi_wait_for_user_input();  // watch for any errors
       break;
     }
 
@@ -911,7 +923,7 @@ void TestComputePartitionReadWrite::Run(void) {
     std::cout << "\t**Test #3: Check fluctuating # of devices & partition IDs ==============\n";
     std::cout << "\t**======================================================================\n";
   }
-  // waitForUserInput();  // watch for any errors on going back to original partition
+  // amdsmi_wait_for_user_input();  // watch for any errors on going back to original partition
 
   // ---------------------------------------------------------//
   // TEST 3: Check fluctuating # of devices & partition IDs   //
@@ -925,12 +937,12 @@ void TestComputePartitionReadWrite::Run(void) {
       std::cout << "\n";
       std::cout << "\t**======================================================================\n";
       std::cout << "\t**Test #3: Check fluctuating # of devices & partition IDs ==============\n";
-      std::cout << "\t**DEVICE: #" << std::setw(2) << std::setfill('0') << dv_ind
+      std::cout << "\t**DEVICE: #" << std::dec << std::setw(2) << std::setfill('0') << dv_ind
                 << " ========================================================\n";
       std::cout << "\t**======================================================================\n";
     }
     // Leaving for debug purposes
-    // waitForUserInput();  // watch for any errors on going back to original partition
+    // amdsmi_wait_for_user_input();  // watch for any errors on going back to original partition
     uint32_t device_index = 0;
     amdsmi_processor_handle p_handle = {};
     uint32_t current_num_devices = 0;
@@ -1013,6 +1025,7 @@ void TestComputePartitionReadWrite::Run(void) {
                   << "\n\t Device might be in a static partition mode. "
                   << "With inability to change partition modes."
                   << std::endl;
+        // amdsmi_wait_for_user_input();  // watch for any errors
         break;
       }
 
@@ -1039,7 +1052,7 @@ void TestComputePartitionReadWrite::Run(void) {
         EXPECT_NE(updatePartition, mapStringToSMIComputePartitionTypes.at(
           std::string(current_char_computePartition)));
       }
-      // waitForUserInput();  // watch for any errors on going back to original partition
+      // amdsmi_wait_for_user_input();  // watch for any errors on going back to original partition
     }
 
     uint32_t device_index3 = 0;
@@ -1055,7 +1068,7 @@ void TestComputePartitionReadWrite::Run(void) {
       std::cout << "\t**ABOUT TO GO BACK TO ORIGINAL PARTITION ("
                 << orig_char_computePartition << ")\n";
     }
-    // waitForUserInput();  // watch for any errors on going back to original partition
+    // amdsmi_wait_for_user_input();  // watch for any errors on going back to original partition
     auto ret_set = amdsmi_set_gpu_compute_partition(p_handle3, updatePartition);
     checkPartitionIdChanges(processor_handles_, dv_ind, std::string(orig_char_computePartition),
           isVerbose, true);
@@ -1076,8 +1089,8 @@ void TestComputePartitionReadWrite::Run(void) {
       }
     }
     IF_VERB(STANDARD) {
-      std::cout << "\t**Get/Set Test #3 (dev_ind: "
-      << dv_ind << "): Check fluctuating # of devices & partition IDs ===============\n";
+      std::cout << "\t**Get/Set Test #3 (dev_ind: " << std::dec
+                << dv_ind << "): Check fluctuating # of devices & partition IDs ===============\n";
     }
   }
 

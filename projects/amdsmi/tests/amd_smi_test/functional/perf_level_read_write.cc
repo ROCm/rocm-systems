@@ -22,11 +22,11 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <gtest/gtest.h>
 
 #include <iostream>
 #include <map>
 
-#include <gtest/gtest.h>
 #include "amd_smi/amdsmi.h"
 #include "perf_level_read_write.h"
 #include "../test_common.h"
@@ -79,11 +79,17 @@ void TestPerfLevelReadWrite::Run(void) {
     PrintDeviceHeader(processor_handles_[dv_ind]);
 
     ret = amdsmi_get_gpu_perf_level(processor_handles_[dv_ind], &orig_pfl);
-    CHK_ERR_ASRT(ret)
+    if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
+      IF_VERB(STANDARD) {
+        std::cout << "\t**amdsmi_get_gpu_perf_level(): Not supported on this machine" << std::endl;
+      }
+      ASSERT_EQ(ret, AMDSMI_STATUS_NOT_SUPPORTED);
+      continue;
+    }
 
     IF_VERB(STANDARD) {
-      std::cout << "\t**Original Perf Level:" <<
-                                       GetPerfLevelStr(orig_pfl) << std::endl;
+      std::cout << "\t**Original Perf Level:"
+                << GetPerfLevelStr(orig_pfl) << std::endl;
     }
 
     uint32_t pfl_i = static_cast<uint32_t>(AMDSMI_DEV_PERF_LEVEL_FIRST);
