@@ -1397,7 +1397,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         Adds the 'ras' subcommand.
 
         Expected command:
-            amd-smi ras --cper --severity=nonfatal-uncorrected,fatal --folder <folder_name> --file_limit=1000 --follow
+            amd-smi ras --cper --severity=nonfatal-uncorrected,fatal --folder <folder_name> --file-limit=1000 --follow
 
         All parameters are provided via options; no positional arguments or optional --file/--gpu are used.
         """
@@ -1431,8 +1431,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         ras_parser.add_argument("--afid", action="store_true", required=False, help=afid_help)
         ras_parser.add_argument("--severity", type=str.lower, nargs='+', default=['all'], help=severity_help, choices=severity_choices, metavar='SEVERITY')
         ras_parser.add_argument("--folder", type=str, action=self._check_folder_path(), default=False, help=folder_help)
-        ras_parser.add_argument("--file_limit", type=self._positive_int, action='store', default=1000, help=file_limit_help)
-        ras_parser.add_argument("--cper_file", action=self._check_cper_file_path(), metavar="CPER_FILE", help=cper_file_help)
+        ras_parser.add_argument("--file-limit", type=self._positive_int, action='store', default=1000, help=file_limit_help)
+        ras_parser.add_argument("--cper-file", action=self._check_cper_file_path(), metavar="CPER_FILE", help=cper_file_help)
         ras_parser.add_argument("--follow", action="store_true", default=False, help=follow_help)
 
         # Add common modifiers and device selection arguments.

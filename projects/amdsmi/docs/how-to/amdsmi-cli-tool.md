@@ -767,7 +767,7 @@ Displays RAS information of specified devices.
 ```shell-session
 ~$ amd-smi ras --help
 usage: amd-smi ras [-h] --cper [--severity SEVERITY [SEVERITY ...]] [--folder FOLDER]
-                   [--file_limit FILE_LIMIT] [--follow]
+                   [--file-limit FILE_LIMIT] [--follow]
                    [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]]
                    [--json | --csv] [--file FILE] [--loglevel LEVEL]
 
@@ -781,7 +781,7 @@ RAS arguments:
   --severity SEVERITY [SEVERITY ...]  Set the SEVERITY filters from the following:
                                           nonfatal-uncorrected, fatal, nonfatal-corrected, all
   --folder FOLDER                     Folder to dump CPER report files
-  --file_limit FILE_LIMIT             Maximum number of entries per output file
+  --file-limit FILE_LIMIT             Maximum number of entries per output file
   --follow                            Continuously monitor for new entries
 
 Device arguments:
