@@ -69,7 +69,7 @@ class AMDSMIParser(argparse.ArgumentParser):
     """
     def __init__(self, version, list, static, firmware, bad_pages, metric,
                  process, profile, event, topology, set_value, reset, monitor,
-                 xgmi, partition, ras):
+                 xgmi, partition, ras, default):
 
         # Helper variables
         self.helpers = AMDSMIHelpers()
@@ -115,7 +115,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Store possible subcommands & aliases for later errors
         self.possible_commands = ['version', 'list', 'static', 'firmware', 'ucode', 'bad-pages',
                                   'metric', 'process', 'profile', 'event', 'topology', 'set',
-                                  'reset', 'monitor', 'dmon', 'xgmi', 'partition', 'ras']
+                                  'reset', 'monitor', 'dmon', 'xgmi', 'partition', 'ras', 'default']
 
         # Add all subparsers
         self._add_version_parser(self.subparsers, version)
@@ -135,8 +135,9 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_partition_parser(self.subparsers, partition)
         self._add_ras_parser(self.subparsers, ras)
 
+        # the default command
+        self._add_default_parser(self.subparsers, default)
 
-### Parser Validators and Helpers###
     def _not_negative_int(self, int_value, sub_arg=None):
         # Argument type validator
         if int_value.isdigit():  # Is digit doesn't work on negative numbers
@@ -636,6 +637,17 @@ class AMDSMIParser(argparse.ArgumentParser):
             type=lambda value: self._positive_int(value, '--iterations'), required=False, help=iterations_help)
 
         return watch_arguments_group
+
+    def _add_default_parser(self, subparsers: argparse._SubParsersAction, func):
+        # there should be no args to parse here so let this be a dummy function to preserve later logic
+        default_help = "Display the default information panel?"
+        default_parser = subparsers.add_parser('default', help=default_help, description=None)
+        default_parser._optionals.title = None
+        default_parser.formatter_class=lambda prog: AMDSMISubparserHelpFormatter(prog)
+        default_parser.set_defaults(func=func)
+
+        # Add Universal Arguments
+        self._add_command_modifiers(default_parser)
 
 
     def _add_version_parser(self, subparsers: argparse._SubParsersAction, func):

@@ -72,6 +72,42 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Added bad page threshold count**.  
   - Added `amdsmi_get_gpu_bad_page_threshold` to Python API and CLI; root/sudo permissions required to display the count.
 
+- **Added the Default command**.  
+  - A default view has been added. The default view provides a snapshot of commonly requested information such as bdf, current partition mode, version information, and more. Users can access that information by simply typing `amd-smi` with no additional commands or arguments. Users may also obtain this information through laternate output formats such as json or csv by using the default command with the respective output format: `amd-smi default --json` or `amd-smi default --csv`.
+
+```shell
++------------------------------------------------------------------------------+
+| AMD SMI 25.4.1+a0ac51...   amdgpu version: 6.14.5     ROCm version: 7.0.0    |
+|--------------------------------------+---------------------------------------|
+| BDF                         GPU-Name | Mem-Util    Temp   UECC   Power-Usage |
+| GPU  HIP-ID   OAM-ID  Partition-Mode | GFX-Util     Fan         Memory-Usage |
+|======================================+=======================================|
+| 0000:0c:00.0     AMD Instinct MI300X |      0 %   37 °C      0     141/750 W |
+|   0       0        2        SPX/NPS1 |      0 %     N/A        283/196592 MB |
+|--------------------------------------+---------------------------------------|
+| 0000:22:00.0     AMD Instinct MI300X |      0 %   40 °C      0     155/750 W |
+|   1       1        1        SPX/NPS1 |      0 %     N/A        284/196592 MB |
+|--------------------------------------+---------------------------------------|
+| 0000:38:00.0     AMD Instinct MI300X |      0 %   37 °C      0     141/750 W |
+|   2       2        0        SPX/NPS1 |      0 %     N/A        283/196592 MB |
+|--------------------------------------+---------------------------------------|
+| 0000:5c:00.0     AMD Instinct MI300X |      0 %   37 °C      0     139/750 W |
+|   3       3        3        SPX/NPS1 |      0 %     N/A        283/196592 MB |
+|--------------------------------------+---------------------------------------|
+| 0000:9f:00.0     AMD Instinct MI300X |      0 %   37 °C      0     140/750 W |
+|   4       4        7        SPX/NPS1 |      0 %     N/A        283/196592 MB |
+|--------------------------------------+---------------------------------------|
+| 0000:af:00.0     AMD Instinct MI300X |      0 %   37 °C      0     142/750 W |
+|   5       5        5        SPX/NPS1 |      0 %     N/A        283/196592 MB |
+|--------------------------------------+---------------------------------------|
+| 0000:bf:00.0     AMD Instinct MI300X |      0 %   36 °C      0     138/750 W |
+|   6       6        4        SPX/NPS1 |      0 %     N/A        283/196592 MB |
+|--------------------------------------+---------------------------------------|
+| 0000:df:00.0     AMD Instinct MI300X |      0 %   40 °C      0     138/750 W |
+|   7       7        6        SPX/NPS1 |      0 %     N/A        283/196592 MB |
++--------------------------------------+---------------------------------------+
+```
+
 ### Changed
 
 - **The `amd-smi topology` command has been enabled for Guest environments**.  
