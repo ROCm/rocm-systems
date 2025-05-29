@@ -34,6 +34,7 @@ The documentation is structured as follows:
     * :ref:`using-rocprofiler-sdk-roctx`
     * :ref:`using-rocprofv3-with-mpi`
     * :ref:`using-pc-sampling`
+    * :ref:`using-thread-trace`
 
   .. grid-item-card:: API reference
 
