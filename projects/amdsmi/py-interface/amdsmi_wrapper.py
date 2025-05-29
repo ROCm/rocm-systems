@@ -785,22 +785,22 @@ amdsmi_frequency_range_t = struct_amdsmi_frequency_range_t
 class union_amdsmi_bdf_t(Union):
     pass
 
-class struct_bdf_(Structure):
+class struct_amdsmi_bdf_t(Structure):
     pass
 
-struct_bdf_._pack_ = 1 # source:False
-struct_bdf_._fields_ = [
+struct_amdsmi_bdf_t._pack_ = 1 # source:False
+struct_amdsmi_bdf_t._fields_ = [
     ('function_number', ctypes.c_uint64, 3),
     ('device_number', ctypes.c_uint64, 5),
     ('bus_number', ctypes.c_uint64, 8),
     ('domain_number', ctypes.c_uint64, 48),
 ]
 
-class struct_amdsmi_bdf_t(Structure):
+class struct_bdf_(Structure):
     pass
 
-struct_amdsmi_bdf_t._pack_ = 1 # source:False
-struct_amdsmi_bdf_t._fields_ = [
+struct_bdf_._pack_ = 1 # source:False
+struct_bdf_._fields_ = [
     ('function_number', ctypes.c_uint64, 3),
     ('device_number', ctypes.c_uint64, 5),
     ('bus_number', ctypes.c_uint64, 8),
@@ -845,21 +845,6 @@ amdsmi_card_form_factor_t = ctypes.c_uint32 # enum
 class struct_amdsmi_pcie_info_t(Structure):
     pass
 
-class struct_pcie_static_(Structure):
-    pass
-
-struct_pcie_static_._pack_ = 1 # source:False
-struct_pcie_static_._fields_ = [
-    ('max_pcie_width', ctypes.c_uint16),
-    ('PADDING_0', ctypes.c_ubyte * 2),
-    ('max_pcie_speed', ctypes.c_uint32),
-    ('pcie_interface_version', ctypes.c_uint32),
-    ('slot_type', amdsmi_card_form_factor_t),
-    ('max_pcie_interface_version', ctypes.c_uint32),
-    ('PADDING_1', ctypes.c_ubyte * 4),
-    ('reserved', ctypes.c_uint64 * 9),
-]
-
 class struct_pcie_metric_(Structure):
     pass
 
@@ -878,6 +863,21 @@ struct_pcie_metric_._fields_ = [
     ('pcie_lc_perf_other_end_recovery_count', ctypes.c_uint32),
     ('PADDING_2', ctypes.c_ubyte * 4),
     ('reserved', ctypes.c_uint64 * 12),
+]
+
+class struct_pcie_static_(Structure):
+    pass
+
+struct_pcie_static_._pack_ = 1 # source:False
+struct_pcie_static_._fields_ = [
+    ('max_pcie_width', ctypes.c_uint16),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('max_pcie_speed', ctypes.c_uint32),
+    ('pcie_interface_version', ctypes.c_uint32),
+    ('slot_type', amdsmi_card_form_factor_t),
+    ('max_pcie_interface_version', ctypes.c_uint32),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+    ('reserved', ctypes.c_uint64 * 9),
 ]
 
 struct_amdsmi_pcie_info_t._pack_ = 1 # source:False
@@ -911,7 +911,7 @@ struct_amdsmi_vbios_info_t._fields_ = [
     ('build_date', ctypes.c_char * 256),
     ('part_number', ctypes.c_char * 256),
     ('version', ctypes.c_char * 256),
-    ('reserved', ctypes.c_uint64 * 32),
+    ('reserved', ctypes.c_uint64 * 68),
 ]
 
 amdsmi_vbios_info_t = struct_amdsmi_vbios_info_t
@@ -1169,7 +1169,7 @@ struct_amdsmi_vram_info_t._fields_ = [
     ('vram_bit_width', ctypes.c_uint32),
     ('PADDING_1', ctypes.c_ubyte * 4),
     ('vram_max_bandwidth', ctypes.c_uint64),
-    ('reserved', ctypes.c_uint64 * 4),
+    ('reserved', ctypes.c_uint64 * 37),
 ]
 
 amdsmi_vram_info_t = struct_amdsmi_vram_info_t
@@ -1194,7 +1194,7 @@ struct_amdsmi_board_info_t._fields_ = [
     ('fru_id', ctypes.c_char * 256),
     ('product_name', ctypes.c_char * 256),
     ('manufacturer_name', ctypes.c_char * 256),
-    ('reserved', ctypes.c_uint64 * 32),
+    ('reserved', ctypes.c_uint64 * 64),
 ]
 
 amdsmi_board_info_t = struct_amdsmi_board_info_t

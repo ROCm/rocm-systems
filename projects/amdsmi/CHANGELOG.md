@@ -23,6 +23,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Removed unused definition `AMDSMI_LIB_VERSION_YEAR`**
 - **Removed unused definition `AMDSMI_DEFAULT_VARIANT`**
 - **Removed unused definition `AMDSMI_MAX_NUM_POWER_PROFILES`**
+- **Removed unused definition `AMDSMI_MAX_DRIVER_VERSION_LENGTH`**
 - **Removed unused member `year` in struct `amdsmi_version_t`**
 - **Updated `amdsmi_get_gpu_asic_info` in `amdsmi.h`.**
   - Added `subsystem_id` structure member.
