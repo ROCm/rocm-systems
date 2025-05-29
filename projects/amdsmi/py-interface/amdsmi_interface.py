@@ -2615,9 +2615,6 @@ def amdsmi_get_gpu_driver_info(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
 
-    length = ctypes.c_int()
-    length.value = AMDSMI_MAX_DRIVER_VERSION_LENGTH
-
     info = amdsmi_wrapper.amdsmi_driver_info_t()
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_driver_info(
