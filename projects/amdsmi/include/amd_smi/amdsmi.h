@@ -62,7 +62,7 @@ typedef enum {
 #define AMDSMI_MAX_MM_IP_COUNT       8
 #define AMDSMI_MAX_STRING_LENGTH     256
 #define AMDSMI_MAX_DEVICES           32
-#define AMDSMI_MAX_DRIVER_VERSION_LENGTH 80
+#define AMDSMI_MAX_DRIVER_VERSION_LENGTH  80
 #define AMDSMI_MAX_CACHE_TYPES       10
 #define AMDSMI_MAX_ACCELERATOR_PROFILE    32
 #define AMDSMI_MAX_CP_PROFILE_RESOURCES   32
@@ -86,69 +86,71 @@ typedef enum {
 /**
  * @brief Unit conversion factor for HBM temperatures
  *
- * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
+ * @cond @tag{gpu_bm_linux} @tag{guest_windows} @endcond
  */
 #define CENTRIGRADE_TO_MILLI_CENTIGRADE 1000
 
 /**
  * @brief This should match NUM_HBM_INSTANCES
  *
- * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
+ * @cond @tag{gpu_bm_linux} @tag{guest_windows} @endcond
  */
 #define AMDSMI_NUM_HBM_INSTANCES 4
 
 /**
  * @brief This should match MAX_NUM_VCN
  *
- * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
+ * @cond @tag{gpu_bm_linux} @tag{guest_windows} @endcond
  */
 #define AMDSMI_MAX_NUM_VCN 4
 
 /**
  * @brief This should match MAX_NUM_CLKS
  *
- * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
+ * @cond @tag{gpu_bm_linux} @tag{guest_windows} @endcond
  */
 #define AMDSMI_MAX_NUM_CLKS 4
 
 /**
  * @brief This should match MAX_NUM_XGMI_LINKS
  *
- * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
+ * @cond @tag{gpu_bm_linux} @tag{guest_windows} @endcond
  */
 #define AMDSMI_MAX_NUM_XGMI_LINKS 8
 
 /**
  * @brief This should match MAX_NUM_GFX_CLKS
  *
- * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
+ * @cond @tag{gpu_bm_linux} @tag{guest_windows} @endcond
  */
 #define AMDSMI_MAX_NUM_GFX_CLKS 8
 
 /**
  * @brief This should match AMDSMI_MAX_AID
  *
- * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
+ * @cond @tag{gpu_bm_linux} @tag{guest_windows} @endcond
  */
 #define AMDSMI_MAX_AID 4
 
 /**
  * @brief This should match AMDSMI_MAX_ENGINES
  *
- * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
+ * @cond @tag{gpu_bm_linux} @tag{guest_windows} @endcond
  */
 #define AMDSMI_MAX_ENGINES 8
 
 /**
  * @brief This should match AMDSMI_MAX_NUM_JPEG (8*4=32)
  *
- * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
+ * @cond @tag{gpu_bm_linux} @tag{guest_windows} @endcond
  */
 #define AMDSMI_MAX_NUM_JPEG 32
 
 /**
  * @brief Introduced in gpu metrics v1.8, document presents NUM_JPEG_ENG_V1
  * but will change to AMDSMI_MAX_NUM_JPEG_ENG_V1 for continuity
+ *
+ * @cond @tag{gpu_bm_linux} @tag{guest_windows} @endcond
  */
 #define AMDSMI_MAX_NUM_JPEG_ENG_V1 40
 
@@ -161,7 +163,7 @@ typedef enum {
  * Refer to amd.com documentation for more detail:
  * https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/white-papers/amd-cdna-3-white-paper.pdf
  *
- * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
+ * @cond @tag{gpu_bm_linux} @tag{guest_windows} @endcond
  */
 #define AMDSMI_MAX_NUM_XCC 8
 
@@ -175,7 +177,7 @@ typedef enum {
  * Refer to amd.com documentation for more detail:
  * https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/white-papers/amd-cdna-3-white-paper.pdf
  *
- * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
+ * @cond @tag{gpu_bm_linux} @tag{guest_windows} @endcond
  */
 #define AMDSMI_MAX_NUM_XCP 8
 
@@ -184,7 +186,11 @@ typedef enum {
  */
 #define MAX_NUMBER_OF_AFIDS_PER_RECORD 12
 
-/* string format */
+/**
+ * String format
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
+ */
 #define AMDSMI_TIME_FORMAT "%02d:%02d:%02d.%03d"
 #define AMDSMI_DATE_FORMAT "%04d-%02d-%02d:%02d:%02d:%02d.%03d"
 
@@ -613,7 +619,7 @@ typedef struct {
  * @brief This structure hold violation status information.
  *        Note: for MI3x asics and higher, older ASICs will show unsupported.
  *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef struct {
     uint64_t reference_timestamp;  //!< Represents CPU timestamp in microseconds (uS)
@@ -654,7 +660,7 @@ typedef struct {
 /**
  * @brief bdf types
  *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef union {
     struct bdf_ {
@@ -750,7 +756,7 @@ typedef struct {
     char build_date[AMDSMI_MAX_STRING_LENGTH];
     char part_number[AMDSMI_MAX_STRING_LENGTH];
     char version[AMDSMI_MAX_STRING_LENGTH];
-    uint64_t reserved[32];
+    uint64_t reserved[68];
 } amdsmi_vbios_info_t;
 
 /**
@@ -818,7 +824,6 @@ typedef struct {
     uint32_t subsystem_id; //!> The subsystem ID
     uint32_t reserved[21];
 } amdsmi_asic_info_t;
-
 
 /**
  * @brief Structure holds kfd information
@@ -965,7 +970,7 @@ typedef struct {
     uint64_t vram_size;            //!< vram size in MB
     uint32_t vram_bit_width;       //!< In bits
     uint64_t vram_max_bandwidth;   //!< The VRAM max bandwidth at current memory clock (GB/s)
-  uint64_t reserved[4];
+  uint64_t reserved[37];
 } amdsmi_vram_info_t;
 
 /**
@@ -974,9 +979,9 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef struct {
-    char  driver_version[AMDSMI_MAX_STRING_LENGTH];
-    char  driver_date[AMDSMI_MAX_STRING_LENGTH];
-    char  driver_name[AMDSMI_MAX_STRING_LENGTH];
+    char driver_version[AMDSMI_MAX_STRING_LENGTH];
+    char driver_date[AMDSMI_MAX_STRING_LENGTH];
+    char driver_name[AMDSMI_MAX_STRING_LENGTH];
 } amdsmi_driver_info_t;
 
 /**
@@ -985,12 +990,12 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef struct {
-    char  model_number[AMDSMI_MAX_STRING_LENGTH];
-    char  product_serial[AMDSMI_MAX_STRING_LENGTH];
-    char  fru_id[AMDSMI_MAX_STRING_LENGTH];
-    char  product_name[AMDSMI_MAX_STRING_LENGTH];
-    char  manufacturer_name[AMDSMI_MAX_STRING_LENGTH];
-    uint64_t reserved[32];
+    char model_number[AMDSMI_MAX_STRING_LENGTH];
+    char product_serial[AMDSMI_MAX_STRING_LENGTH];
+    char fru_id[AMDSMI_MAX_STRING_LENGTH];
+    char product_name[AMDSMI_MAX_STRING_LENGTH];
+    char manufacturer_name[AMDSMI_MAX_STRING_LENGTH];
+    uint64_t reserved[64];
 } amdsmi_board_info_t;
 
 /**
@@ -1073,7 +1078,7 @@ typedef struct {
 /**
  * @brief IO Link P2P Capability
  *
- * @cond @tag{gpu_bm_linux} @endcond
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef struct {
     uint8_t is_iolink_coherent;       //!< 1 = true, 0 = false, UINT8_MAX = Not defined
@@ -1084,13 +1089,16 @@ typedef struct {
 } amdsmi_p2p_capability_t;
 
 //! Guaranteed maximum possible number of supported frequencies
+//! @cond @tag{gpu_bm_linux} @endcond
 #define AMDSMI_MAX_NUM_FREQUENCIES 33
 
 //! Maximum possible value for fan speed. Should be used as the denominator
 //! when determining fan speed percentage.
+//! @cond @tag{gpu_bm_linux} @endcond
 #define AMDSMI_MAX_FAN_SPEED 255
 
 //! The number of points that make up a voltage-frequency curve definition
+//! @cond @tag{gpu_bm_linux} @endcond
 #define AMDSMI_NUM_VOLTAGE_CURVE_POINTS 3
 
 /**
@@ -1718,22 +1726,20 @@ typedef struct {
 
     uint64_t gfx_busy_acc[AMDSMI_MAX_NUM_XCC];       //!< Utilization Accumulated in %
 
-   /**
-    * @brief v1.7 additions
-    */
-  /* Total App Clock Counter Accumulated */
-  uint64_t gfx_below_host_limit_acc[AMDSMI_MAX_NUM_XCC]; //!< Total App Clock Counter Accumulated
+    /**
+     * @brief v1.7 additions
+     */
+    /* Total App Clock Counter Accumulated */
+    uint64_t gfx_below_host_limit_acc[AMDSMI_MAX_NUM_XCC]; //!< Total App Clock Counter Accumulated
 
-  /**
-   * @brief v1.8 additions
-   */
-  /* Total App Clock Counter Accumulated */
+    /**
+     * @brief v1.8 additions
+     */
+    /* Total App Clock Counter Accumulated */
     uint64_t gfx_below_host_limit_ppt_acc[AMDSMI_MAX_NUM_XCC];
     uint64_t gfx_below_host_limit_thm_acc[AMDSMI_MAX_NUM_XCC];
     uint64_t gfx_low_utilization_acc[AMDSMI_MAX_NUM_XCC];
     uint64_t gfx_below_host_limit_total_acc[AMDSMI_MAX_NUM_XCC];
-
-
 } amdsmi_gpu_xcp_metrics_t;
 
 /**
@@ -2258,15 +2264,15 @@ typedef struct {
   uint32_t threads_per_core;
   uint32_t cores_per_socket;
   bool frequency_boost;
-  uint32_t vendor_id;   //< Use 32 bit to be compatible with other platform.
+  uint32_t vendor_id;         //< Use 32 bit to be compatible with other platform.
   char vendor_name[AMDSMI_MAX_STRING_LENGTH];
-  uint32_t subvendor_id;   //< The subsystem vendor id
-  uint64_t device_id;   //< The device id of a GPU
+  uint32_t subvendor_id;      //< The subsystem vendor id
+  uint64_t device_id;         //< The device id of a GPU
   uint32_t rev_id;
   char asic_serial[AMDSMI_MAX_STRING_LENGTH];
-  uint32_t socket_id;   //< 0xFFFF if not supported
+  uint32_t socket_id;         //< 0xFFFF if not supported
   uint32_t core_id;
-  uint32_t num_of_cpu_cores;   //< 0xFFFFFFFF if not supported
+  uint32_t num_of_cpu_cores;  //< 0xFFFFFFFF if not supported
   uint32_t socket_count;
   uint32_t core_count;
   uint32_t reserved[17];
@@ -2890,7 +2896,7 @@ amdsmi_get_gpu_subsystem_name(amdsmi_processor_handle processor_handle, char *na
  *
  *  @ingroup tagIdentQuery
  *
- *  @platform{gpu_bm_linux}  @platform{host}
+ *  @platform{gpu_bm_linux}
  *
  *  @details        The virtualization mode is detected and returned as an enum.
  *
@@ -3370,7 +3376,7 @@ amdsmi_get_gpu_memory_usage(amdsmi_processor_handle processor_handle, amdsmi_mem
  *
  *  @ingroup tagMemoryQuery
  *
- *  @platform{gpu_bm_linux} @platform{host}
+ *  @platform{gpu_bm_linux}
  *
  *  @details This call will query the device @p processor_handle for the
  *  number of bad pages (written to @p num_pages address). The results are
@@ -3523,6 +3529,7 @@ amdsmi_get_gpu_memory_reserved_pages(amdsmi_processor_handle processor_handle,
 
 /** @} End tagMemoryQuery */
 
+/*****************************************************************************/
 /** @defgroup tagPhysicalStateQuery Physical State Queries
  *  These functions provide information about the physical characteristics of
  *  the device.
@@ -4491,7 +4498,7 @@ amdsmi_status_t amdsmi_set_soc_pstate(amdsmi_processor_handle processor_handle,
  *
  *  @ingroup tagClkPowerPerfControl
  *
- *  @platform{gpu_bm_linux} @platform{guest_1vf} @platform{host}
+ *  @platform{gpu_bm_linux} @platform{guest_1vf}
  *
  *  @details Given a processor handle @p processor_handle, this function will write
  *  current xgmi plpd settings to @p policy. All the processors at the same socket
@@ -4513,7 +4520,7 @@ amdsmi_status_t amdsmi_get_xgmi_plpd(amdsmi_processor_handle processor_handle,
  *
  *  @ingroup tagClkPowerPerfControl
  *
- *  @platform{gpu_bm_linux} @platform{guest_1vf} @platform{host}
+ *  @platform{gpu_bm_linux} @platform{guest_1vf}
  *
  *  @details Given a processor handle @p processor_handle and a dpm policy @p policy_id,
  *  this function will set the xgmi plpd for this processor. All the processors at
@@ -5329,7 +5336,7 @@ amdsmi_get_xgmi_info(amdsmi_processor_handle processor_handle, amdsmi_xgmi_info_
  *
  *  @ingroup tagXGMI
  *
- *  @platform{gpu_bm_linux} @platform{host}
+ *  @platform{gpu_bm_linux}
  *
  *  @details Given a processor handle @p processor_handle,  this function
  *  will return the link status for each XGMI link connect to this processor.
@@ -5341,9 +5348,8 @@ amdsmi_get_xgmi_info(amdsmi_processor_handle processor_handle, amdsmi_xgmi_info_
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t
-amdsmi_get_gpu_xgmi_link_status(amdsmi_processor_handle processor_handle,
-              amdsmi_xgmi_link_status_t* link_status);
+amdsmi_status_t amdsmi_get_gpu_xgmi_link_status(amdsmi_processor_handle processor_handle,
+                                                amdsmi_xgmi_link_status_t* link_status);
 
 /** @} End tagXGMI */
 
@@ -6109,7 +6115,7 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle, a
  *            does not exist for the given device.
  */
 amdsmi_status_t amdsmi_get_gpu_xcd_counter(amdsmi_processor_handle processor_handle,
-                                            uint16_t *xcd_count);
+                                           uint16_t *xcd_count);
 
 /** @} End tagAsicBoardInfo */
 
@@ -6261,7 +6267,7 @@ amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_handle, amdsmi_vram_
  *
  *  @ingroup tagGPUMonitor
  *
- *  @platform{gpu_bm_linux} @platform{host}
+ *  @platform{gpu_bm_linux}
  *
  *  @param[in]      processor_handle Device which to query
  *
@@ -6546,7 +6552,7 @@ amdsmi_status_t amdsmi_get_cpu_socket_freq_range(amdsmi_processor_handle process
 amdsmi_status_t amdsmi_get_cpu_core_current_freq_limit(amdsmi_processor_handle processor_handle,
                                                        uint32_t *freq);
 
-/** @} tagHSMPSystemStats */
+/** @} End tagHSMPSystemStats */
 
 /*****************************************************************************/
 /** @defgroup tagPerfBoostControl Performance (Boost limit) Control
@@ -6617,7 +6623,7 @@ amdsmi_status_t amdsmi_set_cpu_core_boostlimit(amdsmi_processor_handle processor
 amdsmi_status_t amdsmi_set_cpu_socket_boostlimit(amdsmi_processor_handle processor_handle,
                                                  uint32_t boostlimit);
 
-/** @} tagPerfBoostControl */
+/** @} End tagPerfBoostControl */
 
 /*****************************************************************************/
 /** @defgroup tagDDRBandwidthMonitor DDR bandwidth monitor
@@ -6640,7 +6646,7 @@ amdsmi_status_t amdsmi_set_cpu_socket_boostlimit(amdsmi_processor_handle process
 amdsmi_status_t amdsmi_get_cpu_ddr_bw(amdsmi_processor_handle processor_handle,
                                       amdsmi_ddr_bw_metrics_t *ddr_bw);
 
-/** @} tagDDRBandwidthMonitor */
+/** @} End tagDDRBandwidthMonitor */
 
 /*****************************************************************************/
 /** @defgroup  tagTempQuery Temperature Query
@@ -6663,7 +6669,7 @@ amdsmi_status_t amdsmi_get_cpu_ddr_bw(amdsmi_processor_handle processor_handle,
 amdsmi_status_t amdsmi_get_cpu_socket_temperature(amdsmi_processor_handle processor_handle,
                                                   uint32_t *ptmon);
 
-/** @} End tagTempQuery*/
+/** @} End tagTempQuery */
 
 /*****************************************************************************/
 /** @defgroup  tagDimmStatistics Dimm statistics
@@ -6725,7 +6731,7 @@ amdsmi_status_t amdsmi_get_cpu_dimm_thermal_sensor(amdsmi_processor_handle proce
                                                    uint8_t dimm_addr,
                                                    amdsmi_dimm_thermal_t *dimm_temp);
 
-/** @} tagDimmStatistics */
+/** @} End tagDimmStatistics */
 
 /*****************************************************************************/
 /** @defgroup tagXGMIBandwidthCont xGMI bandwidth control
@@ -6750,7 +6756,7 @@ amdsmi_status_t amdsmi_get_cpu_dimm_thermal_sensor(amdsmi_processor_handle proce
 amdsmi_status_t amdsmi_set_cpu_xgmi_width(amdsmi_processor_handle processor_handle,
                                           uint8_t min, uint8_t max);
 
-/** @} tagXGMIBandwidthCont*/
+/** @} End tagXGMIBandwidthCont */
 
 /*****************************************************************************/
 /** @defgroup tagGMI3WidthCont GMI3 width control
@@ -6775,7 +6781,7 @@ amdsmi_status_t amdsmi_set_cpu_xgmi_width(amdsmi_processor_handle processor_hand
 amdsmi_status_t amdsmi_set_cpu_gmi3_link_width_range(amdsmi_processor_handle processor_handle,
                                                      uint8_t min_link_width, uint8_t max_link_width);
 
-/** @} tagGMI3WidthCont */
+/** @} End tagGMI3WidthCont */
 
 /*****************************************************************************/
 /** @defgroup tagPstateSelect Pstate selection
@@ -6884,7 +6890,7 @@ amdsmi_status_t amdsmi_set_cpu_pcie_link_rate(amdsmi_processor_handle processor_
 amdsmi_status_t amdsmi_set_cpu_df_pstate_range(amdsmi_processor_handle processor_handle,
                                                uint8_t max_pstate, uint8_t min_pstate);
 
-/** @} tagPstateSelect */
+/** @} End tagPstateSelect */
 
 /*****************************************************************************/
 /** @defgroup tagBandwidthMon Bandwidth monitor
@@ -6927,7 +6933,7 @@ amdsmi_status_t amdsmi_get_cpu_current_io_bandwidth(amdsmi_processor_handle proc
 amdsmi_status_t amdsmi_get_cpu_current_xgmi_bw(amdsmi_processor_handle processor_handle,
                                                amdsmi_link_id_bw_type_t link, uint32_t *xgmi_bw);
 
-/** @} tagBandwidthMon*/
+/** @} End tagBandwidthMon */
 
 /*****************************************************************************/
 /** @defgroup tagHSMPMetricsTable HSMP Metrics Table
@@ -6966,7 +6972,7 @@ amdsmi_status_t amdsmi_get_hsmp_metrics_table_version(amdsmi_processor_handle pr
 amdsmi_status_t amdsmi_get_hsmp_metrics_table(amdsmi_processor_handle processor_handle,
                                               amdsmi_hsmp_metrics_table_t *metrics_table);
 
-/** @} tagHSMPMetricsTable */
+/** @} End tagHSMPMetricsTable */
 
 /*****************************************************************************/
 /** @defgroup cpuAuxillary Auxillary functions
