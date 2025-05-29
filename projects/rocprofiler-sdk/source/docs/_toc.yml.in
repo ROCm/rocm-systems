@@ -17,6 +17,7 @@ subtrees:
     - file: how-to/using-rocprofiler-sdk-roctx
     - file: how-to/using-rocprofv3-with-mpi
     - file: how-to/using-pc-sampling
+    - file: how-to/using-thread-trace
   - caption: API reference
     entries:
     - file: api-reference/tool_library
