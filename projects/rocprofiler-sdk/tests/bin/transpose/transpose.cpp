@@ -41,6 +41,7 @@
 #include <random>
 #include <sstream>
 #include <stdexcept>
+#include <thread>
 
 #define HIP_API_CALL(CALL)                                                                         \
     {                                                                                              \

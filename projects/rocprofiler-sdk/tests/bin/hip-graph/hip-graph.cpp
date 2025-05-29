@@ -30,6 +30,7 @@ THE SOFTWARE.
 
 #include <stdio.h>
 #include <unistd.h>
+#include <regex>
 #include <string>
 #include <thread>
 #include <vector>

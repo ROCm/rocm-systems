@@ -30,6 +30,7 @@
 #include <mutex>
 #include <random>
 #include <stdexcept>
+#include <thread>
 
 #if defined(USE_MPI)
 #    include <mpi.h>
