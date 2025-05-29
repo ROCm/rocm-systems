@@ -1058,6 +1058,21 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
     violation_status->active_hbm_thrm = std::numeric_limits<uint8_t>::max();
     violation_status->active_gfx_clk_below_host_limit = std::numeric_limits<uint8_t>::max();
 
+    fill_2d_array(violation_status->acc_gfx_clk_below_host_limit_pwr, std::numeric_limits<uint64_t>::max());
+    fill_2d_array(violation_status->acc_gfx_clk_below_host_limit_thm, std::numeric_limits<uint64_t>::max());
+    fill_2d_array(violation_status->acc_low_utilization, std::numeric_limits<uint64_t>::max());
+    fill_2d_array(violation_status->acc_gfx_clk_below_host_limit_total, std::numeric_limits<uint64_t>::max());
+
+    fill_2d_array(violation_status->per_gfx_clk_below_host_limit_pwr, std::numeric_limits<uint64_t>::max());
+    fill_2d_array(violation_status->per_gfx_clk_below_host_limit_thm, std::numeric_limits<uint64_t>::max());
+    fill_2d_array(violation_status->per_low_utilization, std::numeric_limits<uint64_t>::max());
+    fill_2d_array(violation_status->per_gfx_clk_below_host_limit_total, std::numeric_limits<uint64_t>::max());
+
+    fill_2d_array(violation_status->active_gfx_clk_below_host_limit_pwr, std::numeric_limits<uint8_t>::max());
+    fill_2d_array(violation_status->active_gfx_clk_below_host_limit_thm, std::numeric_limits<uint8_t>::max());
+    fill_2d_array(violation_status->active_low_utilization, std::numeric_limits<uint8_t>::max());
+    fill_2d_array(violation_status->active_gfx_clk_below_host_limit_total, std::numeric_limits<uint8_t>::max());
+
     const auto p1 = std::chrono::system_clock::now();
     auto current_time = std::chrono::duration_cast<std::chrono::microseconds>(
                                                 p1.time_since_epoch()).count();
@@ -1136,7 +1151,7 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
     violation_status->acc_socket_thrm = metric_info_b.socket_thm_residency_acc;
     violation_status->acc_vr_thrm = metric_info_b.vr_thm_residency_acc;
     violation_status->acc_hbm_thrm = metric_info_b.hbm_thm_residency_acc;
-    violation_status->acc_gfx_clk_below_host_limit
+    violation_status->acc_gfx_clk_below_host_limit //deprecated
         = metric_info_b.xcp_stats->gfx_below_host_limit_acc[partitition_id];
 
     ss << __PRETTY_FUNCTION__ << " | "
@@ -1166,9 +1181,45 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
        << metric_info_b.vr_thm_residency_acc << "\n"
        << "; metric_info_b.hbm_thm_residency_acc: " << std::dec
        << metric_info_b.hbm_thm_residency_acc << "\n"
-       << "; metric_info_b.xcp_stats->gfx_below_host_limit_acc[" << partitition_id << "]: "
+       << "; metric_info_b.xcp_stats->gfx_below_host_limit_acc[" << partitition_id << "]: " //deprecated
        << std::dec << metric_info_b.xcp_stats->gfx_below_host_limit_acc[partitition_id] << "\n";
     LOG_DEBUG(ss);
+
+    auto copy_gfx_acc = [](auto priv_it, auto priv_end, auto pub_it, auto gfx_acc_ptr) {
+        for (; priv_it != priv_end; ++priv_it, ++pub_it) {
+            std::copy(std::begin((*priv_it).*gfx_acc_ptr),
+                      std::end((*priv_it).*gfx_acc_ptr),
+                      std::begin(*pub_it));
+        }
+    };
+
+    copy_gfx_acc(
+        std::begin(metric_info_b.xcp_stats),
+        std::end(metric_info_b.xcp_stats),
+        std::begin(violation_status->acc_gfx_clk_below_host_limit_pwr),
+        &amdsmi_gpu_xcp_metrics_t::gfx_below_host_limit_ppt_acc
+    );
+
+    copy_gfx_acc(
+        std::begin(metric_info_b.xcp_stats),
+        std::end(metric_info_b.xcp_stats),
+        std::begin(violation_status->acc_gfx_clk_below_host_limit_thm),
+        &amdsmi_gpu_xcp_metrics_t::gfx_below_host_limit_thm_acc
+    );
+
+    copy_gfx_acc(
+        std::begin(metric_info_b.xcp_stats),
+        std::end(metric_info_b.xcp_stats),
+        std::begin(violation_status->acc_low_utilization),
+        &amdsmi_gpu_xcp_metrics_t::gfx_low_utilization_acc
+    );
+
+    copy_gfx_acc(
+        std::begin(metric_info_b.xcp_stats),
+        std::end(metric_info_b.xcp_stats),
+        std::begin(violation_status->acc_gfx_clk_below_host_limit_total),
+        &amdsmi_gpu_xcp_metrics_t::gfx_below_host_limit_total_acc
+    );
 
     if ( (metric_info_b.prochot_residency_acc != std::numeric_limits<uint64_t>::max()
         || metric_info_a.prochot_residency_acc != std::numeric_limits<uint64_t>::max())
@@ -1273,10 +1324,11 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
            << violation_status->active_hbm_thrm << "\n";
         LOG_DEBUG(ss);
     }
-    if ( (metric_info_b.xcp_stats->gfx_below_host_limit_acc[partitition_id] != std::numeric_limits<uint64_t>::max()
-        || metric_info_a.xcp_stats->gfx_below_host_limit_acc[partitition_id] != std::numeric_limits<uint64_t>::max())
-        && (metric_info_b.xcp_stats->gfx_below_host_limit_acc[partitition_id] >= metric_info_a.xcp_stats->gfx_below_host_limit_acc[partitition_id])
-        && ((metric_info_b.accumulation_counter - metric_info_a.accumulation_counter) > 0) ) {
+    /* //deprecated
+    if ((metric_info_b.xcp_stats->gfx_below_host_limit_acc[partitition_id] != std::numeric_limits<uint64_t>::max() ||
+         metric_info_a.xcp_stats->gfx_below_host_limit_acc[partitition_id] != std::numeric_limits<uint64_t>::max()) &&
+        (metric_info_b.xcp_stats->gfx_below_host_limit_acc[partitition_id] >= metric_info_a.xcp_stats->gfx_below_host_limit_acc[partitition_id]) &&
+        ((metric_info_b.accumulation_counter - metric_info_a.accumulation_counter) > 0)) {
         violation_status->per_gfx_clk_below_host_limit =
             (((metric_info_b.xcp_stats->gfx_below_host_limit_acc[partitition_id] -
                 metric_info_a.xcp_stats->gfx_below_host_limit_acc[partitition_id]) * 100) /
@@ -1294,6 +1346,64 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
            << violation_status->active_gfx_clk_below_host_limit << "\n";
         LOG_DEBUG(ss);
     }
+    */
+    uint64_t counter_delta = metric_info_b.accumulation_counter - metric_info_a.accumulation_counter;
+    auto calc_viol_actv_percent = [](auto priv_it1, auto end1, auto priv_it2, auto pub_it, auto act_it, auto viol_ptr, uint64_t counter_delta) {
+        for (; priv_it1 != end1; ++priv_it1, ++priv_it2, ++pub_it, ++act_it) {
+            auto& priv_it_arr2 = (*priv_it2).*viol_ptr;
+            auto& priv_it_arr1 = (*priv_it1).*viol_ptr;
+            for (size_t i = 0; i < AMDSMI_MAX_NUM_XCC; ++i) {
+                uint64_t value2 = priv_it_arr2[i];
+                uint64_t value1 = priv_it_arr1[i];
+                if ((value2 != std::numeric_limits<uint64_t>::max() ||
+                     value1 != std::numeric_limits<uint64_t>::max()) &&
+                    (value2 > value1) && (counter_delta > 0)) {
+                    (*pub_it)[i] = ((value2 - value1) * 100) / counter_delta;
+                    (*act_it)[i] = (((*pub_it)[i]) > 0) ? 1 : 0;
+                }
+            }
+        }
+    };
+
+    calc_viol_actv_percent(
+        std::begin(metric_info_a.xcp_stats),
+        std::end(metric_info_a.xcp_stats),
+        std::begin(metric_info_b.xcp_stats),
+        std::begin(violation_status->per_gfx_clk_below_host_limit_pwr),
+        std::begin(violation_status->active_gfx_clk_below_host_limit_pwr),
+        &amdsmi_gpu_xcp_metrics_t::gfx_below_host_limit_ppt_acc,
+        counter_delta
+    );
+
+    calc_viol_actv_percent(
+        std::begin(metric_info_a.xcp_stats),
+        std::end(metric_info_a.xcp_stats),
+        std::begin(metric_info_b.xcp_stats),
+        std::begin(violation_status->per_gfx_clk_below_host_limit_thm),
+        std::begin(violation_status->active_gfx_clk_below_host_limit_thm),
+        &amdsmi_gpu_xcp_metrics_t::gfx_below_host_limit_thm_acc,
+        counter_delta
+    );
+
+    calc_viol_actv_percent(
+        std::begin(metric_info_a.xcp_stats),
+        std::end(metric_info_a.xcp_stats),
+        std::begin(metric_info_b.xcp_stats),
+        std::begin(violation_status->per_low_utilization),
+        std::begin(violation_status->active_low_utilization),
+        &amdsmi_gpu_xcp_metrics_t::gfx_low_utilization_acc,
+        counter_delta
+    );
+
+    calc_viol_actv_percent(
+        std::begin(metric_info_a.xcp_stats),
+        std::end(metric_info_a.xcp_stats),
+        std::begin(metric_info_b.xcp_stats),
+        std::begin(violation_status->per_gfx_clk_below_host_limit_total),
+        std::begin(violation_status->active_gfx_clk_below_host_limit_total),
+        &amdsmi_gpu_xcp_metrics_t::gfx_below_host_limit_total_acc,
+        counter_delta
+    );
 
     ss << __PRETTY_FUNCTION__ << " | "
        << "RETURNING AMDSMI_STATUS_SUCCESS | "
@@ -1311,7 +1421,7 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
        << violation_status->per_vr_thrm
        << "; violation_status->per_hbm_thrm (%): " << std::dec
        << violation_status->per_hbm_thrm
-       << "; violation_status->per_gfx_clk_below_host_limit (%): " << std::dec
+       << "; violation_status->per_gfx_clk_below_host_limit (%): " << std::dec //deprecated
        << violation_status->per_gfx_clk_below_host_limit
        << "; violation_status->active_prochot_thrm (bool): " << std::dec
        << static_cast<int>(violation_status->active_prochot_thrm)
@@ -1323,7 +1433,7 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
        << static_cast<int>(violation_status->active_vr_thrm)
        << "; violation_status->active_hbm_thrm (bool): " << std::dec
        << static_cast<int>(violation_status->active_hbm_thrm)
-       << "; violation_status->active_gfx_clk_below_host_limit (bool): " << std::dec
+       << "; violation_status->active_gfx_clk_below_host_limit (bool): " << std::dec //deprecated
        << static_cast<int>(violation_status->active_gfx_clk_below_host_limit)
        << "\n";
     LOG_INFO(ss);

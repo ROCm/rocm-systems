@@ -12,7 +12,18 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
-- N/A
+- **Expanded Violation Status tracking for GPU metrics 1.8.**
+  - The driver will no longer be supporting existing single-value GFX Clk Below Host Limit fields (`acc_gfx_clk_below_host_limit`, `per_gfx_clk_below_host_limit`, `active_gfx_clk_below_host_limit`), they are now changed in favor of new per-XCP/XCC arrays.
+  - Added new fields to `amdsmi_violation_status_t` and related interfaces for enhanced violation breakdown:
+    - Per-XCP/XCC accumulators and status for:
+      - GFX Clock Below Host Limit (Power, Thermal, and Total)
+      - Low Utilization
+    - Added 2D arrays to track per-XCP/XCC accumulators, percentage, and active status:
+      - `acc_gfx_clk_below_host_limit_pwr`, `acc_gfx_clk_below_host_limit_thm`, `acc_gfx_clk_below_host_limit_total`
+      - `per_gfx_clk_below_host_limit_pwr`, `per_gfx_clk_below_host_limit_thm`, `per_gfx_clk_below_host_limit_total`
+      - `active_gfx_clk_below_host_limit_pwr`, `active_gfx_clk_below_host_limit_thm`, `active_gfx_clk_below_host_limit_total`
+      - `acc_low_utilization`, `per_low_utilization`, `active_low_utilization`
+  - Python API and CLI now report these expanded fields.
 
 ### Removed
 
@@ -29,9 +40,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Added `subsystem_id` structure member.
 - **Removed `amdsmi_io_link_type_t` and replaced with amdsmi_link_type_t**.
   - The IO Link type is no longer needed as the link type is sufficient.
-
-### Removed
-
 - **Removed `amdsmi_get_power_info_v2()` **.
   - The amdsmi_get_power_info() has been unified and the v2 function is no longer needed/used.
 - **Updated `amdsmi_bdf_t` in `amdsmi.h`.**
@@ -39,10 +47,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **The `amdsmi_get_gpu_vram_info` command gets the vendor name from the driver instead of using an emun to identify vendor.**  
   - `amdsmi_vram_info_t` member named `amdsmi_vram_vendor_type_t` was changed to a character string
   - `amdsmi_vram_vendor_type_t` enum structure was removed
-
-### Removed
-
-- N/A
 
 ### Optimized
 

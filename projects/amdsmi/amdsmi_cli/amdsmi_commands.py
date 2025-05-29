@@ -1376,6 +1376,9 @@ class AMDSMICommands():
         self.logger.print_output()
 
 
+    def build_xcp_dict(self, key, violation_status, num_partition):
+        return {f"xcp_{i}": violation_status[key][i] for i in range(num_partition)}
+
     def metric_gpu(self, args, multiple_devices=False, watching_output=False, gpu=None,
                 usage=None, watch=None, watch_time=None, iterations=None, power=None,
                 clock=None, temperature=None, ecc=None, ecc_blocks=None, pcie=None,
@@ -1653,6 +1656,10 @@ class AMDSMICommands():
                 "xcp_stats.gfx_below_host_limit_thm_acc": "N/A",
                 "xcp_stats.gfx_low_utilization_acc": "N/A",
                 "xcp_stats.gfx_below_host_limit_total_acc": "N/A",
+                "xcp_stats.gfx_below_host_limit_ppt_per": "N/A",
+                "xcp_stats.gfx_below_host_limit_thm_per": "N/A",
+                "xcp_stats.gfx_low_utilization_per": "N/A",
+                "xcp_stats.gfx_below_host_limit_total_per": "N/A",
                 "pcie_lc_perf_other_end_recovery": "N/A",
                 "vram_max_bandwidth": "N/A",
                 "xgmi_link_status": "N/A",
@@ -2479,7 +2486,11 @@ class AMDSMICommands():
                     'socket_thermal_accumulated': "N/A",
                     'vr_thermal_accumulated': "N/A",
                     'hbm_thermal_accumulated': "N/A",
-                    'gfx_clk_below_host_limit_accumulated': "N/A",
+                    'gfx_clk_below_host_limit_accumulated': "N/A", # deprecated
+                    'gfx_clk_below_host_limit_power_accumulated': "N/A",
+                    'gfx_clk_below_host_limit_thermal_violation_accumulated': "N/A",
+                    'gfx_clk_below_host_limit_violation_accumulated': "N/A",
+                    'low_utilization_violation_accumulated': "N/A",
 
                     # violation status values - active/not active
                     'prochot_violation_status': "N/A",
@@ -2487,7 +2498,10 @@ class AMDSMICommands():
                     'socket_thermal_violation_status': "N/A",
                     'vr_thermal_violation_status': "N/A",
                     'hbm_thermal_violation_status': "N/A",
+                    'gfx_clk_below_host_limit_power_violation_status': "N/A",
+                    'gfx_clk_below_host_limit_thermal_violation_status': "N/A",
                     'gfx_clk_below_host_limit_violation_status': "N/A",
+                    'low_utilization_violation_status': "N/A",
 
                     # violation activity values - percent
                     'prochot_violation_activity': "N/A",
@@ -2495,8 +2509,12 @@ class AMDSMICommands():
                     'socket_thermal_violation_activity': "N/A",
                     'vr_thermal_violation_activity': "N/A",
                     'hbm_thermal_violation_activity': "N/A",
+                    'gfx_clk_below_host_limit_power_violation_activity': "N/A",
+                    'gfx_clk_below_host_limit_thermal_violation_activity': "N/A",
                     'gfx_clk_below_host_limit_violation_activity': "N/A",
-                    }
+                    'low_utilization_violation_activity': "N/A",
+                }
+                num_partition = gpu_metric['num_partition']
 
                 try:
                     violation_status = amdsmi_interface.amdsmi_get_violation_status(args.gpu)
@@ -2506,21 +2524,31 @@ class AMDSMICommands():
                     throttle_status['socket_thermal_accumulated'] = violation_status['acc_socket_thrm']
                     throttle_status['vr_thermal_accumulated'] = violation_status['acc_vr_thrm']
                     throttle_status['hbm_thermal_accumulated'] = violation_status['acc_hbm_thrm']
-                    throttle_status['gfx_clk_below_host_limit_accumulated'] = violation_status['acc_gfx_clk_below_host_limit']
-
+                    throttle_status['gfx_clk_below_host_limit_accumulated'] = violation_status['acc_gfx_clk_below_host_limit'] #deprecated
+                    throttle_status['gfx_clk_below_host_limit_power_accumulated'] = self.build_xcp_dict('acc_gfx_clk_below_host_limit_pwr', violation_status, num_partition)
+                    throttle_status['gfx_clk_below_host_limit_thermal_violation_accumulated'] = self.build_xcp_dict('acc_gfx_clk_below_host_limit_thm', violation_status, num_partition)
+                    throttle_status['gfx_clk_below_host_limit_violation_accumulated'] = self.build_xcp_dict('acc_gfx_clk_below_host_limit_total', violation_status, num_partition)
+                    throttle_status['low_utilization_violation_accumulated'] = self.build_xcp_dict('acc_low_utilization', violation_status, num_partition)
                     throttle_status['prochot_violation_status'] = violation_status['active_prochot_thrm']
                     throttle_status['ppt_violation_status'] = violation_status['active_ppt_pwr']
                     throttle_status['socket_thermal_violation_status'] = violation_status['active_socket_thrm']
                     throttle_status['vr_thermal_violation_status'] = violation_status['active_vr_thrm']
                     throttle_status['hbm_thermal_violation_status'] = violation_status['active_hbm_thrm']
-                    throttle_status['gfx_clk_below_host_limit_violation_status'] = violation_status['active_gfx_clk_below_host_limit']
-
+                    throttle_status['gfx_clk_below_host_limit_violation_status'] = violation_status['active_gfx_clk_below_host_limit'] # deprecated
+                    throttle_status['gfx_clk_below_host_limit_power_violation_status'] = self.build_xcp_dict('active_gfx_clk_below_host_limit_pwr', violation_status, num_partition)
+                    throttle_status['gfx_clk_below_host_limit_thermal_violation_status'] = self.build_xcp_dict('active_gfx_clk_below_host_limit_thm', violation_status, num_partition)
+                    throttle_status['gfx_clk_below_host_limit_violation_status'] = self.build_xcp_dict('active_gfx_clk_below_host_limit_total', violation_status, num_partition)
+                    throttle_status['low_utilization_violation_status'] = self.build_xcp_dict('active_low_utilization', violation_status, num_partition)
                     throttle_status['prochot_violation_activity'] = violation_status['per_prochot_thrm']
                     throttle_status['ppt_violation_activity'] = violation_status['per_ppt_pwr']
                     throttle_status['socket_thermal_violation_activity'] = violation_status['per_socket_thrm']
                     throttle_status['vr_thermal_violation_activity'] = violation_status['per_vr_thrm']
                     throttle_status['hbm_thermal_violation_activity'] = violation_status['per_hbm_thrm']
-                    throttle_status['gfx_clk_below_host_limit_violation_activity'] = violation_status['per_gfx_clk_below_host_limit']
+                    throttle_status['gfx_clk_below_host_limit_violation_activity'] = violation_status['per_gfx_clk_below_host_limit'] # deprecated
+                    throttle_status['gfx_clk_below_host_limit_power_violation_activity'] = self.build_xcp_dict('per_gfx_clk_below_host_limit_pwr', violation_status, num_partition)
+                    throttle_status['gfx_clk_below_host_limit_thermal_violation_activity'] = self.build_xcp_dict('per_gfx_clk_below_host_limit_thm', violation_status, num_partition)
+                    throttle_status['gfx_clk_below_host_limit_violation_activity'] = self.build_xcp_dict('per_low_utilization', violation_status, num_partition)
+                    throttle_status['low_utilization_violation_activity'] = self.build_xcp_dict('per_gfx_clk_below_host_limit_total', violation_status, num_partition)
 
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     values_dict['throttle'] = throttle_status
@@ -2532,19 +2560,18 @@ class AMDSMICommands():
                             throttle_status[key] = "ACTIVE"
                         elif value is False:
                             throttle_status[key] = "NOT ACTIVE"
-                        continue
 
-                    if "_activity" not in key:
-                        continue
+                    activity_unit = ''
+                    if "_activity" in key:
+                        activity_unit = '%'
 
-                    activity_unit = '%'
                     if self.logger.is_human_readable_format():
-                        if isinstance(value, list):
-                            for index, activity in enumerate(value):
-                                if activity != "N/A":
-                                    throttle_status[key][index] = f"{activity} {activity_unit}"
-                            # Convert list to a string for human readable format
-                            throttle_status[key] = '[' + ", ".join(throttle_status[key]) + ']'
+                        if isinstance(value, (list, dict)):
+                            for k, v in value.items():
+                                    for index, activity in enumerate(v):
+                                        if activity != "N/A":
+                                            value[k][index] = f"{activity} {activity_unit}"
+                                    value[k] = '[' + ", ".join(value[k]) + ']'
                         elif value != "N/A":
                             throttle_status[key] = f"{value} {activity_unit}"
                     if self.logger.is_json_format():

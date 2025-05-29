@@ -178,4 +178,11 @@ constexpr T translate_umax_or_assign_value(U source_value, V target_value)
     return result;
 }
 
+template<typename A, typename T>
+void fill_2d_array(A& arr, T value) {
+    for (auto& row : arr) {
+        std::fill(std::begin(row), std::end(row), value);
+    }
+}
+
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_
