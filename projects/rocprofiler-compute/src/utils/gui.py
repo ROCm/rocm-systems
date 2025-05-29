@@ -131,7 +131,7 @@ def build_bar_chart(display_df, table_config, barchart_elements, norm_filt):
         display_df["Avg"] = [
             x.astype(int) if x != "" else int(0) for x in display_df["Avg"]
         ]
-        df_unit = display_df["Unit"][0]
+        df_unit = display_df["Unit"].iloc[0]
         d_figs.append(
             px.bar(
                 display_df,
@@ -149,7 +149,7 @@ def build_bar_chart(display_df, table_config, barchart_elements, norm_filt):
         display_df["Avg"] = [
             x.astype(int) if x != "" else int(0) for x in display_df["Avg"]
         ]
-        df_unit = display_df["Unit"][0]
+        df_unit = display_df["Unit"].iloc[0]
         nested_bar = multi_bar_chart(table_config["id"], display_df)
         # generate chart for each coherency
         for group, metric in nested_bar.items():

@@ -60,6 +60,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Update definition of following metrics for MI 350:
   * VGPR Writes
   * Total FLOPs (consider fp6 and fp4 ops)
+* Update Dash to >=3.0.0 (for web UI)
 
 ### Resolved issues
 
