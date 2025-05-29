@@ -61,7 +61,7 @@ class AMDSmiSystem {
 
     amdsmi_status_t get_cpu_model_name(uint32_t socket_id, std::string *model_name);
 
-    std::map<uint32_t, uint32_t> get_sys_cpu_cores_per_socket() ;
+    amdsmi_status_t get_sys_cpu_cores_per_socket(uint32_t *core_num) ;
 
     amdsmi_status_t get_sys_num_of_cpu_sockets(uint32_t *sock_num);
 

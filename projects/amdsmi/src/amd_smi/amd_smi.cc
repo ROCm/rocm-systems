@@ -42,6 +42,7 @@
 #include <memory>
 #include <limits>
 #include <functional>
+#include <exception>
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/fdinfo.h"
@@ -5953,16 +5954,13 @@ amdsmi_status_t amdsmi_get_cpu_model_name(amdsmi_processor_handle processor_hand
 
 amdsmi_status_t amdsmi_get_cpu_cores_per_socket(uint32_t sock_count, amdsmi_sock_info_t *sock_info)
 {
-    std::map<uint32_t, uint32_t> socket_core_count = amd::smi::AMDSmiSystem::getInstance().get_sys_cpu_cores_per_socket();
+    amdsmi_status_t status;
+    uint32_t core_num;
+    status = amd::smi::AMDSmiSystem::getInstance().get_sys_cpu_cores_per_socket(&core_num);
+    if (status != AMDSMI_STATUS_SUCCESS)
+        return status;
 
-    for (uint32_t i = 0; i < sock_count; ++i) {
-        auto it = socket_core_count.find(sock_info[i].socket_id);
-        if (it != socket_core_count.end()) {
-            sock_info[i].cores_per_socket = it->second;
-        } else {
-            sock_info[i].cores_per_socket = 0;
-        }
-    }
+    sock_info->cores_per_socket = core_num;
 
     return AMDSMI_STATUS_SUCCESS;
 }
