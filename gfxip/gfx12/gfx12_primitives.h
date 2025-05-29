@@ -32,23 +32,6 @@
 #define COPY_DATA_SEL_SRC_SYS_PERF_COUNTER 4  ///< Privileged memory performance counter
 #define COPY_DATA_SEL_COUNT_1DW 0             ///< Copy 1 word (32 bits)
 
-// Counter Select Register value lambdas
-#define select_value(reg_name)                                                \
-  [](const counter_des_t& counter_des) {                                      \
-    uint32_t select = SET_REG_FIELD_BITS(reg_name, PERF_SEL, counter_des.id); \
-    return select;                                                            \
-  }
-#define select_value_t2(reg_name)                                                       \
-  [](const counter_des_t& counter_des) {                                                \
-    uint32_t select = SET_REG_FIELD_BITS(reg_name, PERFCOUNTER_SELECT, counter_des.id); \
-    return select;                                                                      \
-  }
-#define select_value_blank()             \
-  [](const counter_des_t& counter_des) { \
-    uint32_t select = 0;                 \
-    return select;                       \
-  }
-
 namespace gfxip {
 namespace gfx12 {
 
@@ -156,7 +139,7 @@ class gfx12_cntx_prim {
     } gfx;
   };
 
-  static const uint32_t SQ_BLOCK_ID = __BLOCK_ID(SQ);
+  static const uint32_t SQ_BLOCK_ID = __BLOCK_ID_HSA(SQ);
   static const uint32_t SQ_BLOCK_SPM_ID = SPM_SE_BLOCK_NAME_SQG;
 
   static const uint32_t COPY_DATA_SEL_REG_PRM = COPY_DATA_SEL_REG;
@@ -254,7 +237,7 @@ class gfx12_cntx_prim {
     uint32_t grbm_gfx_index =
         SET_REG_FIELD_BITS(GRBM_GFX_INDEX, SE_INDEX, se_index) |
         SET_REG_FIELD_BITS(GRBM_GFX_INDEX, SA_INDEX, sa_index) |
-        SET_REG_FIELD_BITS(GRBM_GFX_INDEX, INSTANCE_INDEX, ((wgp_side<<6) | (wgp_index << 2) | (instance_index << 1)));
+        SET_REG_FIELD_BITS(GRBM_GFX_INDEX, INSTANCE_INDEX, ((wgp_side<<6) | (wgp_index << 2) | instance_index));
     return grbm_gfx_index;
   }
 
@@ -365,34 +348,22 @@ class gfx12_cntx_prim {
   static uint32_t mc_config_value(const counter_des_t& counter_des) { return counter_des.index; }
 
   // MC registers values
+  static uint32_t mc_select_value(const counter_des_t& counter_des) {
+    uint32_t perfcounter0_cfg =
+        SET_REG_FIELD_BITS(GCUTCL2_PERFCOUNTER0_CFG, PERF_SEL, counter_des.id) |
+        SET_REG_FIELD_BITS(GCUTCL2_PERFCOUNTER0_CFG, PERF_MODE, PERFMON_COUNTER_MODE_ACCUM) |
+        SET_REG_FIELD_BITS(GCUTCL2_PERFCOUNTER0_CFG, ENABLE, 1);
+    return perfcounter0_cfg;
+  }
   static uint32_t mc_reset_value() { return MC_PERFCOUNTER_RSLT_CNTL__CLEAR_ALL_MASK_PRM; }
   static uint32_t mc_start_value() { return MC_PERFCOUNTER_RSLT_CNTL__ENABLE_ANY_MASK_PRM; }
 
-  static auto constexpr select_value_Cha= select_value(CHA_PERFCOUNTER0_SELECT);
-  static auto constexpr select_value_Chc= select_value(CHC_PERFCOUNTER0_SELECT);
-  static auto constexpr select_value_Cpc= select_value(CPC_PERFCOUNTER0_SELECT);
-  static auto constexpr select_value_Cpf= select_value(CPF_PERFCOUNTER0_SELECT);
-  static auto constexpr select_value_Cpg= select_value(CPG_PERFCOUNTER0_SELECT);
-  static auto constexpr select_value_Gcea= select_value_blank();  // register not present
-  static auto constexpr select_value_Gcr= select_value(GCR_PERFCOUNTER0_SELECT);
-  static auto constexpr select_value_Gl2a= select_value(GL2A_PERFCOUNTER0_SELECT);
-  static auto constexpr select_value_Gl2c= select_value(GL2C_PERFCOUNTER0_SELECT);
-  static auto constexpr select_value_Grbm= select_value(GRBM_PERFCOUNTER0_SELECT);
-  static auto constexpr select_value_Rlc= select_value_t2(RLC_PERFCOUNTER0_SELECT); 
-  static auto constexpr select_value_SdmaPm= select_value_blank(); // register not present
-  static auto constexpr select_value_GcVml2= select_value_blank(); // register not present
-  static auto constexpr select_value_GcUtcl2= select_value_blank(); // register not present
-  static auto constexpr select_value_GceaSe= select_value_blank();   // register not present
-  static auto constexpr select_value_Grbmh= select_value(GRBMH_PERFCOUNTER0_SELECT);
-  static auto constexpr select_value_Spi= select_value(SPI_PERFCOUNTER0_SELECT);
-  static auto constexpr select_value_GcUtcl1= select_value_blank(); // register not present
-  static auto constexpr select_value_Gl1a= select_value(GL1A_PERFCOUNTER0_SELECT);
-  static auto constexpr select_value_Gl1c= select_value(GL1C_PERFCOUNTER0_SELECT);
-  static auto constexpr select_value_Ta= select_value(TA_PERFCOUNTER0_SELECT);
-  static auto constexpr select_value_Td= select_value(TD_PERFCOUNTER0_SELECT);
-  static auto constexpr select_value_Tcp= select_value(TCP_PERFCOUNTER0_SELECT);
-  static auto constexpr select_value_SX_PERFCOUNTER0_SELECT = select_value_blank();
-  
+  static uint32_t select_value(const counter_des_t& counter_des) {
+    uint32_t perfcounter0_select =
+        SET_REG_FIELD_BITS(CPC_PERFCOUNTER0_SELECT, PERF_SEL, counter_des.id);
+    return perfcounter0_select;
+  }
+
   static uint32_t spm_select_value(const counter_des_t& counter_des) {
     uint32_t tcp_perfcounter0_select =
         SET_REG_FIELD_BITS(TCP_PERFCOUNTER0_SELECT, PERF_SEL, counter_des.id) |

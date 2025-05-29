@@ -42,7 +42,7 @@ class Gfx9Factory : public Pm4Factory {
 
  protected:
   void Init(const AgentInfo* agent_info);
-  static const GpuBlockInfo* block_table_[HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER];
+  static const GpuBlockInfo* block_table_[AQLPROFILE_BLOCKS_NUMBER];
 
   static void Print(const GpuBlockInfo* block_info);
 };
@@ -53,7 +53,7 @@ class Mi100Factory : public Gfx9Factory {
   explicit Mi100Factory(const AgentInfo* agent_info);
 
  protected:
-  static const GpuBlockInfo* block_table_[HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER];
+  static const GpuBlockInfo* block_table_[AQLPROFILE_BLOCKS_NUMBER];
 };
 
 }  // namespace aql_profile
