@@ -406,7 +406,7 @@ ErrorCode GpuMemory::ExportPhysicalHandle(int* dmabuf_fd, uint32_t flags) {
   }
 
   if (IsShared())
-    return d3dthunk::ShareObjects(num_allocations_, resource_, flags, dmabuf_fd);
+    return d3dthunk::ShareObjects(1, resource_, flags, dmabuf_fd);
   else
     return ErrorCode::UnSupported;
 }
