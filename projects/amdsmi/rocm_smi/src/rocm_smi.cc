@@ -7235,7 +7235,7 @@ rsmi_event_notification_get(int timeout_ms,
         // parse message based on event received
         switch (event){
           case RSMI_EVT_NOTIF_NONE:
-            strcpy(reinterpret_cast<char *>(&data_item->message), "Event type None received");
+            strncpy(reinterpret_cast<char *>(&data_item->message), "Event type None received", MAX_EVENT_NOTIFICATION_MSG_SIZE-1);
             break;
           case RSMI_EVT_NOTIF_VMFAULT:
           {
@@ -7248,7 +7248,7 @@ rsmi_event_notification_get(int timeout_ms,
             final_message << "PID: " << std::to_string(pid).c_str()
                           << "  task name: " << task_name;
 
-            strcpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str());
+            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(), MAX_EVENT_NOTIFICATION_MSG_SIZE-1);
           }
           break;
           case RSMI_EVT_NOTIF_THERMAL_THROTTLE:
@@ -7261,7 +7261,7 @@ rsmi_event_notification_get(int timeout_ms,
             final_message << "bitmask: 0x" << std::hex << bitmask
                           << "  counter: 0x" << std::hex << counter;
 
-            strcpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str());
+            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(), MAX_EVENT_NOTIFICATION_MSG_SIZE-1);
           }
           break;
           case RSMI_EVT_NOTIF_GPU_PRE_RESET:
@@ -7275,7 +7275,7 @@ rsmi_event_notification_get(int timeout_ms,
             final_message << "reset sequence number: " << std::to_string(reset_seq_num).c_str()
                           << "  reset cause: " << reset_cause;
 
-            strcpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str());
+            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(), MAX_EVENT_NOTIFICATION_MSG_SIZE-1);
           }
           break;
           case RSMI_EVT_NOTIF_GPU_POST_RESET:
@@ -7287,7 +7287,7 @@ rsmi_event_notification_get(int timeout_ms,
             std::stringstream final_message;
             final_message << "reset sequence number: " << std::to_string(reset_seq_num).c_str();
 
-            strcpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str());
+            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(), MAX_EVENT_NOTIFICATION_MSG_SIZE-1);
           }
           break;
           case RSMI_EVT_NOTIF_EVENT_MIGRATE_START:
@@ -7314,7 +7314,7 @@ rsmi_event_notification_get(int timeout_ms,
                           << "  preferred_loc: 0x" << std::hex << preferred_loc
                           << "  migrate_trigger: " << std::to_string(migrate_trigger).c_str();
 
-            strcpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str());
+            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(), MAX_EVENT_NOTIFICATION_MSG_SIZE-1);
           }
           break;
           case RSMI_EVT_NOTIF_EVENT_MIGRATE_END:
@@ -7339,7 +7339,7 @@ rsmi_event_notification_get(int timeout_ms,
                           << "  migrate_trigger: " << std::to_string(migrate_trigger).c_str()
                           << "  error_code: " << std::to_string(error_code).c_str();
 
-            strcpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str());
+            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(), MAX_EVENT_NOTIFICATION_MSG_SIZE-1);
           }
           break;
           case RSMI_EVT_NOTIF_EVENT_PAGE_FAULT_START:
@@ -7358,7 +7358,7 @@ rsmi_event_notification_get(int timeout_ms,
                           << "  node: 0x" << std::hex << node
                           << "  rw: " << rw;
 
-            strcpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str());
+            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(), MAX_EVENT_NOTIFICATION_MSG_SIZE-1);
           }
           break;
           case RSMI_EVT_NOTIF_EVENT_PAGE_FAULT_END:
@@ -7377,7 +7377,7 @@ rsmi_event_notification_get(int timeout_ms,
                           << "  node: 0x" << std::hex << node
                           << "  migrate_udpate: " << migrate_update;
 
-            strcpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str());
+            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(), MAX_EVENT_NOTIFICATION_MSG_SIZE-1);
           }
           break;
           case RSMI_EVT_NOTIF_EVENT_QUEUE_EVICTION:
@@ -7394,7 +7394,7 @@ rsmi_event_notification_get(int timeout_ms,
                           << "  node: 0x" << std::hex << node
                           << "  evict_trigger: " << std::to_string(evict_trigger).c_str();
 
-            strcpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str());
+            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(), MAX_EVENT_NOTIFICATION_MSG_SIZE-1);
           }
           break;
           case RSMI_EVT_NOTIF_EVENT_QUEUE_RESTORE:
@@ -7411,7 +7411,7 @@ rsmi_event_notification_get(int timeout_ms,
                           << "  node: 0x" << std::hex << node
                           << "  rescheduled: " << rescheduled;
 
-            strcpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str());
+            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(), MAX_EVENT_NOTIFICATION_MSG_SIZE-1);
           }
           break;
           case RSMI_EVT_NOTIF_EVENT_UNMAP_FROM_GPU:
@@ -7432,7 +7432,7 @@ rsmi_event_notification_get(int timeout_ms,
                           << "  node: 0x" << std::hex << node
                           << "  unmap_trigger: " << std::to_string(unmap_trigger).c_str();
 
-            strcpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str());
+            strncpy(reinterpret_cast<char *>(&data_item->message), final_message.str().c_str(), MAX_EVENT_NOTIFICATION_MSG_SIZE-1);
           }
           break;
           case RSMI_EVT_NOTIF_EVENT_PROCESS_START:
@@ -7451,7 +7451,7 @@ rsmi_event_notification_get(int timeout_ms,
           }
           break;
           default:
-            strcpy(reinterpret_cast<char *>(&data_item->message), "Unknown event received");
+            strncpy(reinterpret_cast<char *>(&data_item->message), "Unknown event received", MAX_EVENT_NOTIFICATION_MSG_SIZE-1);
             break;
         }
         data_item->event = (rsmi_evt_notification_type_t)event;
