@@ -50,19 +50,19 @@ def handle_exceptions(func):
         try:
             return func(*args, **kwargs)
         except amdsmi.AmdSmiRetryException as e:
-            print("**** [ERROR] | Test: " + str(func.__name__) + " | Caught AmdSmiRetryException: {}".format(e))
+            print("**** Test: " + str(func.__name__) + " | Caught AmdSmiRetryException: {}".format(e))
             amdsmi.amdsmi_shut_down()
             pass
         except amdsmi.AmdSmiTimeoutException as e:
-            print("**** [ERROR] | Test: " + str(func.__name__) + " | Caught AmdSmiTimeoutException: {}".format(e))
+            print("**** Test: " + str(func.__name__) + " | Caught AmdSmiTimeoutException: {}".format(e))
             amdsmi.amdsmi_shut_down()
             pass
         except amdsmi.AmdSmiLibraryException as e:
-            print("**** [ERROR] | Test: " + str(func.__name__) + " | Caught AmdSmiLibraryException: {}".format(e))
+            print("**** Test: " + str(func.__name__) + " | Caught AmdSmiLibraryException: {}".format(e))
             amdsmi.amdsmi_shut_down()
             pass
         except Exception as e:
-            print("**** [ERROR] | Test: " + str(func.__name__) + " | Caught unknown exception: {}".format(e))
+            print("**** Test: " + str(func.__name__) + " | Caught unknown exception: {}".format(e))
             amdsmi.amdsmi_shut_down()
             pass
     return wrapper
@@ -610,7 +610,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
             print("\n###Test amdsmi_get_power_info \n")
-            power_info = amdsmi.amdsmi_get_power_info(processors[i], 0)
+            power_info = amdsmi.amdsmi_get_power_info(processors[i])
             print("  power_info['current_socket_power'] is: {}".format(
                 power_info['current_socket_power']))
             print("  power_info['average_socket_power'] is: {}".format(

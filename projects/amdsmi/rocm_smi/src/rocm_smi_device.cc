@@ -738,6 +738,10 @@ std::string Device::get_sys_file_path_by_type(DevInfoTypes type) const {
   sysfs_path += "/device/";
   sysfs_path += kDevAttribNameMap.at(type);
 
+  if (access(sysfs_path.c_str(), F_OK) != 0) {
+      sysfs_path.clear();
+  }
+
   return sysfs_path;
 }
 

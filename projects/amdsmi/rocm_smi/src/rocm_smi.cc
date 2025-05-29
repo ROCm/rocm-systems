@@ -2955,6 +2955,9 @@ rsmi_status_t rsmi_dev_pm_metrics_info_get(uint32_t dv_ind,
   CHK_SUPPORT_NAME_ONLY(num_of_metrics)
   std::string file_path = dev->
           get_sys_file_path_by_type(amd::smi::kDevPmMetrics);
+  if (file_path.empty()) {
+      return RSMI_STATUS_NOT_SUPPORTED;
+  }
 
   int ret = amd::smi::present_pmmetrics(
           file_path.c_str(), pm_metrics, num_of_metrics);
@@ -2973,6 +2976,9 @@ rsmi_status_t rsmi_dev_reg_table_info_get(uint32_t dv_ind,
   CHK_SUPPORT_NAME_ONLY(num_of_metrics)
   std::string file_path = dev->
           get_sys_file_path_by_type(amd::smi::kDevRegMetrics);
+  if (file_path.empty()) {
+      return RSMI_STATUS_NOT_SUPPORTED;
+  }
 
   int ret = amd::smi::present_reg_state(
           file_path.c_str(), reg_type, reg_metrics, num_of_metrics);
