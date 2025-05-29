@@ -79,31 +79,35 @@ void Gfx12Factory::ConstructBuilders(const AgentInfo* agent_info) {
 
 void Gfx12Factory::ConstructTable(const AgentInfo* agent_info) {
   // Global blocks
-  block_table_[__BLOCK_ID(CHA)]      = &ChaCounterBlockInfo;
-  block_table_[__BLOCK_ID(CHC)]      = &ChcCounterBlockInfo;
-  block_table_[__BLOCK_ID(CPC)]      = &CpcCounterBlockInfo;
-  block_table_[__BLOCK_ID(CPF)]      = &CpfCounterBlockInfo;
-  block_table_[__BLOCK_ID(CPG)]      = &CpgCounterBlockInfo;
-  block_table_[__BLOCK_ID(GCEA)]     = &GceaCounterBlockInfo;
-  block_table_[__BLOCK_ID(GCR)]      = &GcrCounterBlockInfo;
-  block_table_[__BLOCK_ID(GL2A)]     = &Gl2aCounterBlockInfo;
-  block_table_[__BLOCK_ID(GL2C)]     = &Gl2cCounterBlockInfo;
-  block_table_[__BLOCK_ID(GRBM)]     = &GrbmCounterBlockInfo;
-  block_table_[__BLOCK_ID(RLC)]      = &RlcCounterBlockInfo;
-  block_table_[__BLOCK_ID(SDMA_PM)]  = &SdmaPmCounterBlockInfo;
+  block_table_[__BLOCK_ID(CHA)]         = &ChaCounterBlockInfo;
+  block_table_[__BLOCK_ID(CHC)]         = &ChcCounterBlockInfo;
+  block_table_[__BLOCK_ID_HSA(CPC)]     = &CpcCounterBlockInfo;
+  block_table_[__BLOCK_ID_HSA(CPF)]     = &CpfCounterBlockInfo;
+  block_table_[__BLOCK_ID(CPG)]         = &CpgCounterBlockInfo;
+  block_table_[__BLOCK_ID(GC_UTCL2)]    = &GcUtcl2CounterBlockInfo;
+  block_table_[__BLOCK_ID(GC_VML2)]     = &GcVml2CounterBlockInfo;
+  block_table_[__BLOCK_ID(GC_VML2_SPM)] = &GcVml2SpmCounterBlockInfo;
+  block_table_[__BLOCK_ID_HSA(GCEA)]    = &GceaCounterBlockInfo;
+  block_table_[__BLOCK_ID_HSA(GCR)]     = &GcrCounterBlockInfo;
+  block_table_[__BLOCK_ID_HSA(GL2A)]    = &Gl2aCounterBlockInfo;
+  block_table_[__BLOCK_ID_HSA(GL2C)]    = &Gl2cCounterBlockInfo;
+  block_table_[__BLOCK_ID_HSA(GRBM)]    = &GrbmCounterBlockInfo;
+  block_table_[__BLOCK_ID(RLC)]         = &RlcCounterBlockInfo;
+  block_table_[__BLOCK_ID_HSA(SDMA)]    = &SdmaCounterBlockInfo;
   // SE blocks
-  block_table_[__BLOCK_ID(GCEA_SE)]  = &GceaSeCounterBlockInfo;
-  block_table_[__BLOCK_ID(GRBMH)]    = &GrbmhCounterBlockInfo;
-  block_table_[__BLOCK_ID(SPI)]      = &SpiCounterBlockInfo;
-  block_table_[__BLOCK_ID(SQ)]       = &SqcCounterBlockInfo;
-  block_table_[__BLOCK_ID(GC_UTCL1)] = &GcUtcl1CounterBlockInfo;
+  block_table_[__BLOCK_ID(GC_UTCL1)]    = &GcUtcl1CounterBlockInfo;
+  block_table_[__BLOCK_ID(GCEA_SE)]     = &GceaSeCounterBlockInfo;
+  block_table_[__BLOCK_ID(GRBMH)]       = &GrbmhCounterBlockInfo;
+  block_table_[__BLOCK_ID_HSA(SPI)]     = &SpiCounterBlockInfo;
+  block_table_[__BLOCK_ID(SQG)]         = &SqgCounterBlockInfo;
   // SA blocks
-  block_table_[__BLOCK_ID(GL1A)]     = &Gl1aCounterBlockInfo;
-  block_table_[__BLOCK_ID(GL1C)]     = &Gl1cCounterBlockInfo;
+  block_table_[__BLOCK_ID_HSA(GL1A)]    = &Gl1aCounterBlockInfo;
+  block_table_[__BLOCK_ID_HSA(GL1C)]    = &Gl1cCounterBlockInfo;
   // WGP blocks
-  block_table_[__BLOCK_ID(TA)]       = &TaCounterBlockInfo;
-  block_table_[__BLOCK_ID(TCP)]      = &TcpCounterBlockInfo;
-  block_table_[__BLOCK_ID(TD)]       = &TdCounterBlockInfo;
+  block_table_[__BLOCK_ID_HSA(SQ)]      = &SqcCounterBlockInfo;
+  block_table_[__BLOCK_ID_HSA(TA)]      = &TaCounterBlockInfo;
+  block_table_[__BLOCK_ID_HSA(TCP)]     = &TcpCounterBlockInfo;
+  block_table_[__BLOCK_ID_HSA(TD)]      = &TdCounterBlockInfo;
 }
 
 // Pm4Factory create mathods

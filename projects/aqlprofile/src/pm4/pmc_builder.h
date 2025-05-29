@@ -285,9 +285,14 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
       //             std::endl;
 
       // Set GRBM index to access proper block instance
-      const uint32_t grbm_value = (block_info->instance_count > 1)
+      //
+      // TODO: In order to get different event for different instance with WGP counter blocks, we
+      //       need to loop through WGP instead of blindly broadcast instance. Fortunately, this
+      //       is not a common practice
+      const uint32_t grbm_value = (block_info->instance_count > 1 && !(block_info->attr & CounterBlockWgpAttr))
                                       ? Primitives::grbm_inst_index_value(block_des.index)
                                       : Primitives::grbm_broadcast_value();
+
       builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR, grbm_value);
       // Reset counters
       if (block_info->attr & CounterBlockMcAttr) {
@@ -602,9 +607,12 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
               else
                 grbm_value = Primitives::grbm_se_sh_wgp_index_value(se_index, sarray, wgp);
               builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR, grbm_value);
+              uint32_t dw_mask = reg_info.register_addr_hi.offset ? 3 : 1;
               builder.BuildCopyCounterDataPacket(
                   cmd_buffer, reg_info.register_addr_lo, reg_info.register_addr_hi,
-                  reinterpret_cast<uint32_t*>(data_buffer) + read_counter, 1);
+                  reinterpret_cast<uint32_t*>(data_buffer) + read_counter, dw_mask);
+              if (data_buffer && (dw_mask == 1))
+                  *(reinterpret_cast<uint32_t*>(data_buffer) + read_counter + 1) = 0;
               read_counter += 2;
             }
           } else {

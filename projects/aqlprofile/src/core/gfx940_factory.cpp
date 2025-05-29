@@ -31,7 +31,7 @@ namespace aql_profile {
 class Mi300Factory : public Mi100Factory {
  public:
   explicit Mi300Factory(const AgentInfo* agent_info) : Mi100Factory(agent_info) {
-    for (unsigned blockname_id = 0; blockname_id < HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER;
+    for (unsigned blockname_id = 0; blockname_id < AQLPROFILE_BLOCKS_NUMBER;
          ++blockname_id) {
       const GpuBlockInfo* base_table_ptr = Gfx9Factory::block_table_[blockname_id];
       if (base_table_ptr == NULL) continue;

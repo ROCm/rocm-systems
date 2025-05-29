@@ -28,11 +28,11 @@
 
 namespace aql_profile {
 
-const GpuBlockInfo* Mi100Factory::block_table_[HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER] = {};
+const GpuBlockInfo* Mi100Factory::block_table_[AQLPROFILE_BLOCKS_NUMBER] = {};
 
 Mi100Factory::Mi100Factory(const AgentInfo* agent_info)
     : Gfx9Factory(block_table_, sizeof(block_table_), agent_info) {
-  for (unsigned i = 0; i < HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER; ++i) {
+  for (unsigned i = 0; i < AQLPROFILE_BLOCKS_NUMBER; ++i) {
     const GpuBlockInfo* base_table_ptr = Gfx9Factory::block_table_[i];
     if (base_table_ptr == NULL) continue;
     GpuBlockInfo* block_info = nullptr;

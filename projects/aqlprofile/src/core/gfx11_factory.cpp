@@ -48,7 +48,7 @@ class Gfx11Factory : public Pm4Factory {
   // void ConstructTable(const AgentInfo* agent_info);
   void Init(const AgentInfo* agent_info);
   // void ConstructBuilders(const AgentInfo* agent_info);
-  static const GpuBlockInfo* block_table_[HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER];
+  static const GpuBlockInfo* block_table_[AQLPROFILE_BLOCKS_NUMBER];
 };
 
 // Gfx builders init
@@ -81,7 +81,7 @@ void Gfx11Factory::Init(const AgentInfo* agent_info) {
 }
 
 // GFX11 block table
-const GpuBlockInfo* Gfx11Factory::block_table_[HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER] = {
+const GpuBlockInfo* Gfx11Factory::block_table_[AQLPROFILE_BLOCKS_NUMBER] = {
     &CpcCounterBlockInfo, &CpfCounterBlockInfo, &GdsCounterBlockInfo, &GrbmCounterBlockInfo,
     NULL /*&GrbmSeCounterBlockInfo*/, &SpiCounterBlockInfo, &SqCounterBlockInfo,
     NULL /*&SqCsCounterBlockInfo*/, NULL /*GFX8 SRBM*/, &SxCounterBlockInfo, &TaCounterBlockInfo,

@@ -51,6 +51,49 @@ typedef enum {
 } aqlprofile_agent_version_t;
 
 /**
+ * @brief Enums for counter blocks.
+ * AQLPROFILE_BLOCK_NAME_RESERVED_X are blocks reserved for npi. Reserving them here can maintain
+ * enum consistency between mainline and npi.
+ * TODO: Move all counter blocks here from hsa_ven_amd_aqlprofile.h
+ */
+typedef enum {
+  // Blocks reserved for NPI support
+  AQLPROFILE_BLOCK_NAME_RESERVED_0 = HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER,
+  AQLPROFILE_BLOCK_NAME_RESERVED_1,
+  AQLPROFILE_BLOCK_NAME_RESERVED_2,
+  AQLPROFILE_BLOCK_NAME_RESERVED_3,
+  AQLPROFILE_BLOCK_NAME_RESERVED_4,
+  AQLPROFILE_BLOCK_NAME_RESERVED_5,
+
+  // Blocks available for most ASICs, but not currently in use
+  AQLPROFILE_BLOCK_NAME_CPG,
+  AQLPROFILE_BLOCK_NAME_RLC,
+
+  // New blocks for gc_12_0_x
+  AQLPROFILE_BLOCK_NAME_CHA,
+  AQLPROFILE_BLOCK_NAME_CHC,
+  AQLPROFILE_BLOCK_NAME_GC_CANE,
+  AQLPROFILE_BLOCK_NAME_GC_FFBM,
+  AQLPROFILE_BLOCK_NAME_GC_L2TLB,
+  AQLPROFILE_BLOCK_NAME_GC_UTCL1,
+  AQLPROFILE_BLOCK_NAME_GC_UTCL2,
+  AQLPROFILE_BLOCK_NAME_GC_VML2,
+  AQLPROFILE_BLOCK_NAME_GC_VML2_SPM,
+  AQLPROFILE_BLOCK_NAME_GCEA_SE,
+  AQLPROFILE_BLOCK_NAME_GRBMH,
+  AQLPROFILE_BLOCK_NAME_SQG,
+
+  // Blocks reserved for NPI support
+  AQLPROFILE_BLOCK_NAME_RESERVED_6,
+  AQLPROFILE_BLOCK_NAME_RESERVED_7,
+  AQLPROFILE_BLOCK_NAME_RESERVED_8,
+  AQLPROFILE_BLOCK_NAME_RESERVED_9,
+
+  // Add new blocks above
+  AQLPROFILE_BLOCKS_NUMBER
+} aqlprofile_block_name_t;
+
+/**
  * @brief Flags to describe which agents can access given buffer.
  */
 typedef union {
