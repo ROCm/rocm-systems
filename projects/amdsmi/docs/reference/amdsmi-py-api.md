@@ -796,19 +796,31 @@ Field | Description
 `acc_socket_thrm` |  Current Accumulated Socket Thermal Count  #TVIOL
 `acc_vr_thrm` |  Current Accumulated Voltage Regulator Count
 `acc_hbm_thrm` |  Current Accumulated High Bandwidth Memory (HBM) Thermal Count
-`acc_gfx_clk_below_host_limit` |  Current Graphic Clock Below Host Limit Count
+`acc_gfx_clk_below_host_limit` |  Current Graphic Clock Below Host Limit Count. UPDATED in new driver 1.8: use new acc_gfx_clk_below_host_limit_pwr, acc_gfx_clk_below_host_limit_thm, acc_gfx_clk_below_host_limit_total values
+`acc_gfx_clk_below_host_limit_pwr` | 2D array with Accumulated GFX Clk Below Host Limit (Power) per XCP/XCC
+`acc_gfx_clk_below_host_limit_thm` | 2D array with Accumulated GFX Clk Below Host Limit (Thermal) per XCP/XCC
+`acc_low_utilization` | 2D array with Accumulated Low Utilization per XCP/XCC
+`acc_gfx_clk_below_host_limit_total` | 2D array with Accumulated GFX Clk Below Host Limit (Total) per XCP/XCC
 `per_prochot_thrm` |  Processor hot violation % (greater than 0% is a violation)
 `per_ppt_pwr` |  PVIOL Package Power Tracking (PPT) violation % (greater than 0% is a violation)
 `per_socket_thrm` |  TVIOL; Socket thermal violation % (greater than 0% is a violation)
 `per_vr_thrm` |  Voltage regulator violation % (greater than 0% is a violation)
 `per_hbm_thrm` |  High Bandwidth Memory (HBM) thermal violation % (greater than 0% is a violation)
-`per_gfx_clk_below_host_limit` |   Graphics clock below host limit violation % (greater than 0% is a violation)
+`per_gfx_clk_below_host_limit` |   Graphics clock below host limit violation % (greater than 0% is a violation). UPDATED in new driver 1.8: use new per_gfx_clk_below_host_limit_pwr, per_gfx_clk_below_host_limit_thm, per_gfx_clk_below_host_limit_total values
+`per_gfx_clk_below_host_limit_pwr` | 2D array with GFX Clk Below Host Limit Violation % (Power) per XCP/XCC
+`per_gfx_clk_below_host_limit_thm` | 2D array with GFX Clk Below Host Limit Violation % (Thermal) per XCP/XCC
+`per_low_utilization` | 2D array with Low Utilization Violation % per XCP/XCC
+`per_gfx_clk_below_host_limit_total` | 2D array with GFX Clk Below Host Limit Violation % (Total) per XCP/XCC
 `active_prochot_thrm` |  Processor hot violation; 1 = active 0 = not active
 `active_ppt_pwr` |  Package Power Tracking (PPT) violation; 1 = active 0 = not active
 `active_socket_thrm` |  Socket thermal violation; 1 = active 0 = not active
 `active_vr_thrm` |  Voltage regulator violation; 1 = active 0 = not active
 `active_hbm_thrm` |  High Bandwidth Memory (HBM) thermal violation; 1 = active 0 = not active
-`active_gfx_clk_below_host_limit` |  Graphics Clock Below Host Limit Violation; 1 = Active 0 = Not Active
+`active_gfx_clk_below_host_limit` |  Graphics Clock Below Host Limit Violation; 1 = Active 0 = Not Active. UPDATED in new driver 1.8: use new active_gfx_clk_below_host_limit_pwr, active_gfx_clk_below_host_limit_thm, active_gfx_clk_below_host_limit_total values
+`active_gfx_clk_below_host_limit_pwr` | 2D array with GFX Clk Below Host Limit Violation Active (Power) per XCP/XCC
+`active_gfx_clk_below_host_limit_thm` | 2D array with GFX Clk Below Host Limit Violation Active (Thermal) per XCP/XCC
+`active_low_utilization` | 2D array with Low Utilization Violation Active per XCP/XCC
+`active_gfx_clk_below_host_limit_total` | 2D array with GFX Clk Below Host Limit Violation Active (Total) per XCP/XCC
 
 Exceptions that can be thrown by `amdsmi_get_violation_status` function:
 
@@ -829,6 +841,10 @@ try:
     throttle_status['vr_thermal_accumulated'] = violation_status['acc_vr_thrm']
     throttle_status['hbm_thermal_accumulated'] = violation_status['acc_hbm_thrm']
     throttle_status['gfx_clk_below_host_limit_accumulated'] = violation_status['acc_gfx_clk_below_host_limit']
+    throttle_status['gfx_clk_below_host_limit_pwr_accumulated'] = violation_status['acc_gfx_clk_below_host_limit_pwr']
+    throttle_status['gfx_clk_below_host_limit_thm_accumulated'] = violation_status['acc_gfx_clk_below_host_limit_thm']
+    throttle_status['low_utilization_accumulated'] = violation_status['acc_low_utilization']
+    throttle_status['gfx_clk_below_host_limit_total_accumulated'] = violation_status['acc_gfx_clk_below_host_limit_total']
 
     throttle_status['prochot_violation_status'] = violation_status['active_prochot_thrm']
     throttle_status['ppt_violation_status'] = violation_status['active_ppt_pwr']
@@ -836,6 +852,10 @@ try:
     throttle_status['vr_thermal_violation_status'] = violation_status['active_vr_thrm']
     throttle_status['hbm_thermal_violation_status'] = violation_status['active_hbm_thrm']
     throttle_status['gfx_clk_below_host_limit_violation_status'] = violation_status['active_gfx_clk_below_host_limit']
+    throttle_status['gfx_clk_below_host_limit_pwr_violation_status'] = violation_status['active_gfx_clk_below_host_limit_pwr']
+    throttle_status['gfx_clk_below_host_limit_thm_violation_status'] = violation_status['active_gfx_clk_below_host_limit_thm']
+    throttle_status['low_utilization_violation_status'] = violation_status['active_low_utilization']
+    throttle_status['gfx_clk_below_host_limit_total_violation_status'] = violation_status['active_gfx_clk_below_host_limit_total']
 
     throttle_status['prochot_violation_activity'] = violation_status['per_prochot_thrm']
     throttle_status['ppt_violation_activity'] = violation_status['per_ppt_pwr']
@@ -843,6 +863,10 @@ try:
     throttle_status['vr_thermal_violation_activity'] = violation_status['per_vr_thrm']
     throttle_status['hbm_thermal_violation_activity'] = violation_status['per_hbm_thrm']
     throttle_status['gfx_clk_below_host_limit_violation_activity'] = violation_status['per_gfx_clk_below_host_limit']
+    throttle_status['gfx_clk_below_host_limit_pwr_violation_activity'] = violation_status['per_gfx_clk_below_host_limit_pwr']
+    throttle_status['gfx_clk_below_host_limit_thm_violation_activity'] = violation_status['per_gfx_clk_below_host_limit_thm']
+    throttle_status['low_utilization_violation_activity'] = violation_status['per_low_utilization']
+    throttle_status['gfx_clk_below_host_limit_total_violation_activity'] = violation_status['per_gfx_clk_below_host_limit_total']
 
 except AmdSmiException as e:
     print(e)
