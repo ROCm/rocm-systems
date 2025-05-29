@@ -8,20 +8,12 @@
 HIP compilers
 ********************************************************************************
 
-ROCm provides the compiler driver ``hipcc``, that can be used on AMD ROCm and
-NVIDIA CUDA platforms.
+ROCm provides the compiler tools used to compile HIP applications for use on AMD GPUs. 
+The compilers setup the default libraries and include paths for the HIP and ROCm
+libraries, and some needed environment variables. For more information, see the
+:doc:`ROCm compiler reference <llvm-project:reference/rocmcc>`.
 
-On ROCm, ``hipcc`` takes care of the following:
-
-- Setting the default library and include paths for HIP
-- Setting some environment variables
-- Invoking the appropriate compiler - ``amdclang++``
-
-On NVIDIA CUDA platform, ``hipcc`` takes care of invoking compiler ``nvcc``.
-``amdclang++`` is based on the ``clang++`` compiler. For more
-details, see the :doc:`llvm project<llvm-project:index>`.
-
-HIP compilation workflow
+Compilation workflow
 ================================================================================
 
 HIP provides a flexible compilation workflow that supports both offline
@@ -40,22 +32,15 @@ performance overhead.
 Offline compilation
 --------------------------------------------------------------------------------
 
-The HIP code compilation is performed in two stages: host and  device code
-compilation stage.
+Offline compilation is performed in two steps: host and  device code
+compilation. 
 
-- Device-code compilation stage: The compiled device code is embedded into the
+- Host-code compilation: On the host side, ``amdclang++`` or ``hipcc`` can
+  compile the host code in one step without other C++ compilers. 
+
+- Device-code compilation: The compiled device code is embedded into the
   host object file. Depending on the platform, the device code can be compiled
-  into assembly or binary. ``nvcc`` and ``amdclang++`` target different
-  architectures and use different code object formats. ``nvcc`` uses the binary
-  ``cubin`` or the assembly PTX files, while the ``amdclang++`` path is the
-  binary ``hsaco`` format. On CUDA platforms, the driver compiles the PTX files
-  to executable code during runtime.
-
-- Host-code compilation stage: On the host side, ``hipcc`` or ``amdclang++`` can
-  compile the host code in one step without other C++ compilers. On the other
-  hand, ``nvcc`` only replaces the ``<<<...>>>`` kernel launch syntax with the
-  appropriate CUDA runtime function call and the modified host code is passed to
-  the default host compiler.
+  into assembly or binary.
 
 For an example on how to compile HIP from the command line, see :ref:`SAXPY
 tutorial<compiling_on_the_command_line>` .
@@ -67,23 +52,22 @@ HIP allows you to compile kernels at runtime using the ``hiprtc*`` API. Kernels
 are stored as a text string, which is passed to HIPRTC alongside options to
 guide the compilation.
 
-For more details, see
-:doc:`HIP runtime compiler <../how-to/hip_rtc>`.
+For more information, see :doc:`HIP runtime compiler <../how-to/hip_rtc>`.
 
 Static libraries
 ================================================================================
 
-``hipcc`` supports generating two types of static libraries.
+Both ``amdclang++`` and ``hipcc`` support generating two types of static libraries.
 
 - The first type of static library only exports and launches host functions
   within the same library and not the device functions. This library type offers
-  the ability to link with a non-hipcc compiler such as ``gcc``. Additionally,
+  the ability to link with another compiler such as ``gcc``. Additionally,
   this library type contains host objects with device code embedded as fat
   binaries. This library type is generated using the flag ``--emit-static-lib``:
 
   .. code-block:: shell
 
-    hipcc hipOptLibrary.cpp --emit-static-lib -fPIC -o libHipOptLibrary.a
+    amdclang++ hipOptLibrary.cpp --emit-static-lib -fPIC -o libHipOptLibrary.a
     gcc test.cpp -L. -lhipOptLibrary -L/path/to/hip/lib -lamdhip64 -o test.out
 
 - The second type of static library exports device functions to be linked by
@@ -96,6 +80,6 @@ Static libraries
     ar rcsD libHipDevice.a hipDevice.o
     hipcc libHipDevice.a test.cpp -fgpu-rdc -o test.out
 
-A full example for this can be found in the ROCm-examples, see the examples for
+Examples for this can be found in ROCm-examples as
 `static host libraries <https://github.com/ROCm/rocm-examples/tree/develop/HIP-Basic/static_host_library>`_
 or `static device libraries <https://github.com/ROCm/rocm-examples/tree/develop/HIP-Basic/static_device_library>`_.
