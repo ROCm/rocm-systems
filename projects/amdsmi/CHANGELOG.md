@@ -78,6 +78,91 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Removed
 
+- **Removed backwards compatibility `amdsmi_get_gpu_metrics_info()`'s `jpeg_activity` or `vcn_activity` fields: use `xcp_stats.jpeg_busy` or `xcp_stats.vcn_busy`**  
+  - Backwards compatibility is removed for `jpeg_activity` and `vcn_activity` fields, if the `jpeg_busy` or `vcn_busy` field is available.
+    - <i>Reasons for this change</i>:
+      - Providing both `vcn_activity`/`jpeg_activity` and XCP (partition) stats `vcn_busy`/`jpeg_busy` caused confusion for users about which field to use. By removing backward compatibility, it is easier to identify the relevant field.
+      - The `jpeg_busy` field increased in size (for supported ASICs), making backward compatibility unable to fully copy the structure into `jpeg_activity`.
+
+    See below for comparison of updated CLI outputs:
+
+    Original output:
+    ```shell
+    $ amd-smi metric --usage
+    GPU: 0
+        USAGE:
+            GFX_ACTIVITY: 0 %
+            UMC_ACTIVITY: 0 %
+            MM_ACTIVITY: N/A
+            VCN_ACTIVITY: [0 %, N/A, N/A, N/A]
+            JPEG_ACTIVITY: [0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+            GFX_BUSY_INST:
+                XCP_0: [0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+                XCP_1: [0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+                XCP_2: [0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+                XCP_3: [0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+                XCP_4: [0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+                XCP_5: [0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+                XCP_6: [0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+                XCP_7: [0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+            JPEG_BUSY:
+                XCP_0: [0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+                XCP_1: [0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+                XCP_2: [0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+                XCP_3: [0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+                XCP_4: [0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+                XCP_5: [0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+                XCP_6: [0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+                XCP_7: [0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+            VCN_BUSY:
+                XCP_0: [0 %, N/A, N/A, N/A]
+                XCP_1: [0 %, N/A, N/A, N/A]
+                XCP_2: [0 %, N/A, N/A, N/A]
+                XCP_3: [0 %, N/A, N/A, N/A]
+                XCP_4: [0 %, N/A, N/A, N/A]
+                XCP_5: [0 %, N/A, N/A, N/A]
+                XCP_6: [0 %, N/A, N/A, N/A]
+                XCP_7: [0 %, N/A, N/A, N/A]
+    ```
+    New output:
+    ```shell
+    $ amd-smi metric --usage
+    GPU: 0
+        USAGE:
+            GFX_ACTIVITY: 0 %
+            UMC_ACTIVITY: 0 %
+            MM_ACTIVITY: N/A
+            VCN_ACTIVITY: [N/A, N/A, N/A, N/A]
+            JPEG_ACTIVITY: [N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+            GFX_BUSY_INST:
+                XCP_0: [0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+                XCP_1: [0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+                XCP_2: [0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+                XCP_3: [0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+                XCP_4: [0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+                XCP_5: [0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+                XCP_6: [0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+                XCP_7: [0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+            JPEG_BUSY:
+                XCP_0: [0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+                XCP_1: [0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+                XCP_2: [0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+                XCP_3: [0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+                XCP_4: [0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+                XCP_5: [0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+                XCP_6: [0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+                XCP_7: [0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, 0 %, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A]
+            VCN_BUSY:
+                XCP_0: [0 %, N/A, N/A, N/A]
+                XCP_1: [0 %, N/A, N/A, N/A]
+                XCP_2: [0 %, N/A, N/A, N/A]
+                XCP_3: [0 %, N/A, N/A, N/A]
+                XCP_4: [0 %, N/A, N/A, N/A]
+                XCP_5: [0 %, N/A, N/A, N/A]
+                XCP_6: [0 %, N/A, N/A, N/A]
+                XCP_7: [0 %, N/A, N/A, N/A]
+    ```
+
 ### Optimized
 
 ### Resolved issues
