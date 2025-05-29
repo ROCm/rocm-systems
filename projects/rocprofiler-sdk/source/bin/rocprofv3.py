@@ -124,7 +124,7 @@ def check_att_capability(args):
         for root, dirs, files in os.walk(path, topdown=True):
             for itr in files:
                 if lib_att_name in itr:
-                    args.att_library_path = itr.split(lib_att_name)[0]
+                    args.att_library_path = root
                     return True
 
     return False
