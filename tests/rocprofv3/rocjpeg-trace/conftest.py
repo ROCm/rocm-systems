@@ -63,6 +63,8 @@ def pytest_addoption(parser):
 @pytest.fixture
 def json_data(request):
     filename = request.config.getoption("--json-input")
+    if not os.path.isfile(filename):
+        return pytest.skip("rocjpeg tracing unavailable")
     with open(filename, "r") as inp:
         return dotdict(collapse_dict_list(json.load(inp)))
 
@@ -71,20 +73,30 @@ def json_data(request):
 def csv_data(request):
     filename = request.config.getoption("--csv-input")
     data = []
-    with open(filename, "r") as inp:
-        reader = csv.DictReader(inp)
-        for row in reader:
-            data.append(row)
+    if not os.path.isfile(filename):
+        # The CSV file is not generated, because the dependency test
+        # responsible to generate this file was skipped or failed.
+        # Thus emit the message to skip this test as well.
+        return pytest.skip("rocjpeg tracing unavailable")
+    else:
+        with open(filename, "r") as inp:
+            reader = csv.DictReader(inp)
+            for row in reader:
+                data.append(row)
     return data
 
 
 @pytest.fixture
 def otf2_data(request):
     filename = request.config.getoption("--otf2-input")
+    if not os.path.isfile(filename):
+        return pytest.skip("rocjpeg tracing unavailable")
     return OTF2Reader(filename).read()[0]
 
 
 @pytest.fixture
 def pftrace_data(request):
     filename = request.config.getoption("--pftrace-input")
+    if not os.path.isfile(filename):
+        return pytest.skip("rocjpeg tracing unavailable")
     return PerfettoReader(filename).read()[0]
