@@ -38,13 +38,7 @@ from pathlib import Path as path
 import pandas as pd
 
 import config
-from utils.logger import (
-    console_debug,
-    console_error,
-    console_log,
-    console_warning,
-    demarcate,
-)
+from utils.logger import console_debug, console_error, console_log, console_warning
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.tty import get_table_string
 from utils.utils import get_version
@@ -158,15 +152,40 @@ def generate_machine_specs(args, sysinfo: dict = None):
     rocm_version = get_rocm_ver().strip()
     # FIXME: use device
 
+    amd_smi_output = run(["amd-smi", "static"], exit_on_error=True)
     vbios_pattern = r"PART_NUMBER:\s*(\S+)"
     compute_partition_pattern = r"COMPUTE_PARTITION:\s*(\S+)"
+    accelerator_partition_pattern = r"ACCELERATOR_PARTITION:\s*(\S+)"
     memory_partition_pattern = r"MEMORY_PARTITION:\s*(\S+)"
 
-    vbios = search(vbios_pattern, run(["amd-smi", "static"], exit_on_error=True))
-    compute_partition = search(compute_partition_pattern, run(["amd-smi", "static"]))
+    rocm_smi_compute_partition_output = run(
+        ["rocm-smi", "--showcomputepartition"], exit_on_error=True
+    )
+    rocm_smi_compute_partition_pattern = r"Compute Partition:\s*(\S+)"
+
+    vbios = search(vbios_pattern, amd_smi_output)
+    # 1. get compute partition from amd-smi
+    compute_partition = search(compute_partition_pattern, amd_smi_output)
+    console_debug(f"amd-smi compute partition: {compute_partition}")
+    # 2. get compute partition from rocm-smi
     if compute_partition is None:
-        compute_partition = "NA"
-    memory_partition = search(memory_partition_pattern, run(["amd-smi", "static"]))
+        compute_partition = search(
+            rocm_smi_compute_partition_pattern, rocm_smi_compute_partition_output
+        )
+        console_debug(f"rocm-smi compute partition: {compute_partition}")
+    # 3. get compute partition from amd-smi using keyword accelerator
+    if compute_partition is None:
+        compute_partition = search(accelerator_partition_pattern, amd_smi_output)
+        console_debug(f"amd-smi accelerator partition: {compute_partition}")
+    # 4. apply default compute partition
+    if compute_partition is None:
+        console_warning(
+            f"Can not detect compute/accelerator partition from amd-smi and rocm-smi."
+        )
+        console_warning(f"Applying default compute partition: SPX")
+        compute_partition = "SPX"
+
+    memory_partition = search(memory_partition_pattern, amd_smi_output)
     if memory_partition is None:
         memory_partition = "NA"
 
@@ -216,8 +235,12 @@ def generate_machine_specs(args, sysinfo: dict = None):
     soc_class = getattr(soc_module, specs.gpu_arch + "_soc")
     soc_obj = soc_class(args, specs)
     # Update arch specific specs
+    specs.gpu_model = mi_gpu_specs.get_gpu_model(specs.gpu_arch, specs.gpu_chip_id)
+    specs.num_xcd = mi_gpu_specs.get_num_xcds(
+        specs.gpu_arch, specs.gpu_model, specs.compute_partition
+    )
     specs.total_l2_chan: str = total_l2_banks(
-        specs.gpu_model, int(specs._l2_banks), specs.compute_partition
+        specs.gpu_arch, specs.gpu_model, specs._l2_banks, specs.compute_partition
     )
     specs.num_hbm_channels: str = str(specs.get_hbm_channels())
     return specs
@@ -673,10 +696,13 @@ def total_sqc(archname, numCUs, numSEs):
     return int(sq_per_se) * int(numSEs)
 
 
-def total_l2_banks(archname, L2Banks, compute_partition):
-    xcds = mi_gpu_specs.get_num_xcds(archname, compute_partition)
-    totalL2Banks = L2Banks * xcds
-    return totalL2Banks
+def total_l2_banks(gpu_arch, gpu_model, L2Banks, compute_partition):
+    xcd_count = mi_gpu_specs.get_num_xcds(gpu_arch, gpu_model, compute_partition)
+
+    # TODO: MachineSpecs and OmniSoC mspec should converge...
+    if L2Banks is not None and xcd_count is not None:
+        return int(L2Banks) * int(xcd_count)
+    return None
 
 
 if __name__ == "__main__":

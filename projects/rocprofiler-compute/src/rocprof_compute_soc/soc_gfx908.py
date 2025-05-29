@@ -27,6 +27,7 @@ from pathlib import Path
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import console_error, demarcate
+from utils.mi_gpu_spec import mi_gpu_specs
 
 
 class gfx908_soc(OmniSoC_Base):
@@ -37,20 +38,7 @@ class gfx908_soc(OmniSoC_Base):
             ["rocprofv1", "rocscope", "rocprofv3", "rocprofiler-sdk"]
         )
         # Per IP block max number of simultaneous counters. GFX IP Blocks
-        self.set_perfmon_config(
-            {
-                "SQ": 8,
-                "TA": 2,
-                "TD": 2,
-                "TCP": 4,
-                "TCC": 4,
-                "CPC": 2,
-                "CPF": 2,
-                "SPI": 2,
-                "GRBM": 2,
-                "GDS": 4,
-            }
-        )
+        self.set_perfmon_config(mi_gpu_specs.get_perfmon_config("gfx908"))
 
         # Set arch specific specs
         self._mspec._l2_banks = 32
