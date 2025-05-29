@@ -364,7 +364,8 @@ tool_tracing_callback_stop(
                 if(config::get_perfetto_annotations())
                 {
                     tracing::add_perfetto_annotation(ctx, "begin_ns", _beg_ts);
-
+                    tracing::add_perfetto_annotation(ctx, "corr_id",
+                                                     record.correlation_id.internal);
                     for(const auto& [key, val] : args)
                         tracing::add_perfetto_annotation(ctx, key, val);
 
