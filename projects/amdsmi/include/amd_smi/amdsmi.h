@@ -1231,9 +1231,7 @@ typedef enum {
                                                                   //!< causes include job hang, RAS error,
                                                                   //!< MES hang, HWS hang, user trigger, and unknown
     AMDSMI_EVT_NOTIF_GPU_POST_RESET = 4,                          //!< post reset
-    AMDSMI_EVT_NOTIF_RING_HANG = 5,                               //!< Ringhang now maps to AMDSMI_EVT_NOTIF_MIGRATE_START.
-                                                                  //!< Will be deprecated in ROCm 7.0
-    AMDSMI_EVT_NOTIF_MIGRATE_START = AMDSMI_EVT_NOTIF_RING_HANG,  //!< migrate start
+    AMDSMI_EVT_NOTIF_MIGRATE_START = 5,                           //!< migrate start
     AMDSMI_EVT_NOTIF_MIGRATE_END = 6,                             //!< migrate end
     AMDSMI_EVT_NOTIF_PAGE_FAULT_START = 7,                        //!< page fault start
     AMDSMI_EVT_NOTIF_PAGE_FAULT_END = 8,                          //!< page fault end

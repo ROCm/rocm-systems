@@ -1344,7 +1344,6 @@ Event Type | Description
 `THERMAL_THROTTLE` | thermal throttle
 `GPU_PRE_RESET` | gpu pre reset; this event includes a message which indicates the cause of the reset. They are as follows: `job hang`, `RAS error`, `MES hang`, `HWS hang`, `user trigger`, and `unknown`
 `GPU_POST_RESET` | gpu post reset
-`RING_HANG` | ring hang event; This event will be deprecated in ROCm 7.0
 `MIGRATE_START` | migrate start
 `MIGRATE_END` | migrate end
 `PAGE_FAULT_START` | page fault start
