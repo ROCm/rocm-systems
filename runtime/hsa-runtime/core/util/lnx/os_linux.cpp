@@ -577,7 +577,10 @@ int WaitForOsEvent(EventHandle event, unsigned int milli_seconds) {
   }
 
   int ret_code = 0;
-  pthread_mutex_lock(&eventDescrp->mutex);
+  if(milli_seconds != 0) {
+    pthread_mutex_lock(&eventDescrp->mutex);
+  }
+  
   if (!eventDescrp->state) {
     if (milli_seconds == 0) {
       ret_code = 1;
