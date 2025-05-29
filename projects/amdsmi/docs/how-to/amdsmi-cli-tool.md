@@ -313,6 +313,7 @@ Metric arguments:
   -P, --pcie                                Current PCIe speed, width, and replay count
   -e, --ecc                                 Total number of ECC errors
   -k, --ecc-blocks                          Number of ECC errors per block
+  -V, --voltage                             GPU voltage
   -f, --fan                                 Current fan speed
   -C, --voltage-curve                       Display voltage curve
   -o, --overdrive                           Current GPU clock overdrive and GPU memory clock overdrive level

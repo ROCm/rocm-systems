@@ -2112,16 +2112,17 @@ machine guest
 
 Input parameters:
 
-* `processor_handle` handle for the given device
-* `sensor_type` part of device from which voltage should be obtained
-* `metric` enum indicated which voltage value should be retrieved
+Parameters | Description
+---|---
+`processor_handle` |  Handle for the given device
+`sensor_type` | <table><thead><tr><th> Possible Values </th><th> Description </th></tr></thead><tbody><tr><td>`AmdSmiVoltageType.VDDGFX`</td><td>Represents the voltage supplied to the GPU's graphics core.</td></tr><tr><td>`AmdSmiVoltageType.VDDBOARD`</td><td>Represents the voltage supplied to the entire GPU board, including auxiliary components. Intended for Mi300+</td></tr></tbody></table>
+`metric` | <table><thead><tr><th> Possible Values </th><th> Description </th></tr></thead><tbody><tr><td>`AmdSmiVoltageMetric.CURRENT`</td><td>Represents the current voltage value measured at the specified sensor.</td></tr><tr><td>`AmdSmiVoltageMetric.MAX`</td><td>Represents the maximum voltage value recorded at the specified sensor.</td></tr><tr><td>`AmdSmiVoltageMetric.MIN`</td><td>Represents the minimum voltage value recorded at the specified sensor.</td></tr><tr><td>`AmdSmiVoltageMetric.AVERAGE`</td><td>Represents the average voltage value calculated over a period of time at the specified sensor.</td></tr><tr><td>`AmdSmiVoltageMetric.MAX_CRIT`</td><td>Represents the critical maximum voltage value that should not be exceeded.</td></tr><tr><td>`AmdSmiVoltageMetric.MIN_CRIT`</td><td>Represents the critical minimum voltage value that should not be dropped below.</td></tr><tr><td>`AmdSmiVoltageMetric.LOWEST`</td><td>Represents the lowest voltage value recorded during the monitoring period.</td></tr><tr><td>`AmdSmiVoltageMetric.HIGHEST`</td><td>Represents the highest voltage value recorded during the monitoring period.</td></tr></tbody></table>
 
 Output: Voltage as integer in millivolts
 
 Exceptions that can be thrown by `amdsmi_get_gpu_volt_metric` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
 
 Example:
@@ -2133,8 +2134,11 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            voltage =  amdsmi_get_gpu_volt_metric(device, AmdSmiVoltageType.VDDGFX,
-                        AmdSmiVoltageMetric.AVERAGE)
+            voltage = amdsmi_get_gpu_volt_metric(
+                device,
+                AmdSmiVoltageType.VDDBOARD,
+                AmdSmiVoltageMetric.AVERAGE
+            )
             print(voltage)
 except AmdSmiException as e:
     print(e)
@@ -2692,7 +2696,7 @@ except AmdSmiException as e:
 
 ### amdsmi_get_gpu_power_profile_presets
 
-Description:  Get the list of available preset power profiles and an indication of
+Description: Get the list of available preset power profiles and an indication of
 which profile is currently active. It is not supported on virtual machine guest
 
 Input parameters:

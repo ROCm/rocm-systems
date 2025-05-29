@@ -1383,7 +1383,7 @@ class AMDSMICommands():
                 usage=None, watch=None, watch_time=None, iterations=None, power=None,
                 clock=None, temperature=None, ecc=None, ecc_blocks=None, pcie=None,
                 fan=None, voltage_curve=None, overdrive=None, perf_level=None,
-                xgmi_err=None, energy=None, mem_usage=None, schedule=None,
+                xgmi_err=None, energy=None, mem_usage=None, voltage=None, schedule=None,
                 guard=None, guest_data=None, fb_usage=None, xgmi=None, throttle=None,
                 ):
         """Get Metric information for target gpu
@@ -1410,6 +1410,7 @@ class AMDSMICommands():
             xgmi_err (bool, optional): Value override for args.xgmi_err. Defaults to None.
             energy (bool, optional): Value override for args.energy. Defaults to None.
             mem_usage (bool, optional): Value override for args.mem_usage. Defaults to None.
+            voltage (bool, optional): Value override for args.voltage. Defaults to None.
             schedule (bool, optional): Value override for args.schedule. Defaults to None.
             guard (bool, optional): Value override for args.guard. Defaults to None.
             guest_data (bool, optional): Value override for args.guest_data. Defaults to None.
@@ -1458,9 +1459,9 @@ class AMDSMICommands():
                 args.ecc = ecc
             if ecc_blocks:
                 args.ecc_blocks = ecc_blocks
-            current_platform_args += ["usage", "power", "clock", "temperature", "pcie", "ecc", "ecc_blocks"]
+            current_platform_args += ["usage", "power", "clock", "temperature", "voltage", "pcie", "ecc", "ecc_blocks"]
             current_platform_values += [args.usage, args.power, args.clock,
-                                        args.temperature, args.pcie]
+                                        args.temperature, args.voltage, args.pcie]
             current_platform_values += [args.ecc, args.ecc_blocks]
 
         if self.helpers.is_baremetal() and self.helpers.is_linux():
@@ -2385,6 +2386,22 @@ class AMDSMICommands():
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     values_dict['xgmi_err'] = "N/A"
                     logging.debug("Failed to get xgmi error status for gpu %s | %s", gpu_id, e.get_error_info())
+        if "voltage" in current_platform_args:
+            if args.voltage:
+                voltage_dict = {}
+                all_voltage = {
+                    "vddboard": amdsmi_interface.AmdSmiVoltageType.VDDBOARD
+                }
+                for volt_type, volt_metric in all_voltage.items():
+                    try:
+                        voltage = amdsmi_interface.amdsmi_get_gpu_volt_metric(args.gpu, volt_metric, amdsmi_interface.AmdSmiVoltageMetric.CURRENT)
+                        if voltage == 0:
+                            voltage = "N/A"
+                        voltage_dict[volt_type] = self.helpers.unit_format(self.logger, voltage, "mV")
+                    except amdsmi_exception.AmdSmiLibraryException as e:
+                        voltage_dict[volt_type] = "N/A"
+                        logging.debug("Failed to get voltage for gpu %s | %s", gpu_id, e.get_error_info())
+                values_dict['voltage'] = voltage_dict
         if "energy" in current_platform_args:
             if args.energy:
                 try:
@@ -2991,7 +3008,7 @@ class AMDSMICommands():
                 usage=None, watch=None, watch_time=None, iterations=None, power=None,
                 clock=None, temperature=None, ecc=None, ecc_blocks=None, pcie=None,
                 fan=None, voltage_curve=None, overdrive=None, perf_level=None,
-                xgmi_err=None, energy=None, mem_usage=None, schedule=None,
+                xgmi_err=None, energy=None, mem_usage=None, voltage=None, schedule=None,
                 guard=None, guest_data=None, fb_usage=None, xgmi=None,
                 cpu=None, cpu_power_metrics=None, cpu_prochot=None, cpu_freq_metrics=None,
                 cpu_c0_res=None, cpu_lclk_dpm_level=None, cpu_pwr_svi_telemetry_rails=None,
@@ -3025,6 +3042,7 @@ class AMDSMICommands():
             xgmi_err (bool, optional): Value override for args.xgmi_err. Defaults to None.
             energy (bool, optional): Value override for args.energy. Defaults to None.
             mem_usage (bool, optional): Value override for args.mem_usage. Defaults to None.
+            voltage (bool, optional): Value override for args.voltage. Defaults to None.
             schedule (bool, optional): Value override for args.schedule. Defaults to None.
             guard (bool, optional): Value override for args.guard. Defaults to None.
             guest_data (bool, optional): Value override for args.guest_data. Defaults to None.
@@ -3073,7 +3091,7 @@ class AMDSMICommands():
         gpu_args_enabled = False
         gpu_attributes = ["usage", "watch", "watch_time", "iterations", "power", "clock",
                           "temperature", "ecc", "ecc_blocks", "pcie", "fan", "voltage_curve",
-                          "overdrive", "perf_level", "xgmi_err", "energy", "mem_usage", "schedule",
+                          "overdrive", "perf_level", "xgmi_err", "energy", "mem_usage", "voltage", "schedule",
                           "guard", "guest_data", "fb_usage", "xgmi", "throttle"]
         for attr in gpu_attributes:
             if hasattr(args, attr):
@@ -3146,7 +3164,7 @@ class AMDSMICommands():
                                 usage, watch, watch_time, iterations, power,
                                 clock, temperature, ecc, ecc_blocks, pcie,
                                 fan, voltage_curve, overdrive, perf_level,
-                                xgmi_err, energy, mem_usage, schedule,
+                                xgmi_err, energy, mem_usage, voltage, schedule,
                                 guard, guest_data, fb_usage, xgmi, throttle,
                                 )
         elif self.helpers.is_amd_hsmp_initialized(): # Only CPU is initialized
@@ -3182,7 +3200,7 @@ class AMDSMICommands():
                                 usage, watch, watch_time, iterations, power,
                                 clock, temperature, ecc, ecc_blocks, pcie,
                                 fan, voltage_curve, overdrive, perf_level,
-                                xgmi_err, energy, mem_usage, schedule, throttle,
+                                xgmi_err, energy, mem_usage, voltage, schedule, throttle,
                                 )
         if self.logger.is_json_format():
             self.logger.combine_arrays_to_json()

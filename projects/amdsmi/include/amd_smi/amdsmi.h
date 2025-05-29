@@ -1360,7 +1360,8 @@ typedef enum {
     AMDSMI_VOLT_TYPE_FIRST = 0,
 
     AMDSMI_VOLT_TYPE_VDDGFX = AMDSMI_VOLT_TYPE_FIRST,  //!< Vddgfx GPU voltage
-    AMDSMI_VOLT_TYPE_LAST = AMDSMI_VOLT_TYPE_VDDGFX,
+    AMDSMI_VOLT_TYPE_VDDBOARD,                        //!< Voltage for VDDBOARD
+    AMDSMI_VOLT_TYPE_LAST = AMDSMI_VOLT_TYPE_VDDBOARD,
     AMDSMI_VOLT_TYPE_INVALID = 0xFFFFFFFF              //!< Invalid type
 } amdsmi_voltage_type_t;
 

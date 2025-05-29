@@ -123,6 +123,7 @@ static const char* short_options = "i:v:m:fr";
 
 static const std::map<uint32_t, std::string> kVoltSensorNameMap = {
     {AMDSMI_VOLT_TYPE_VDDGFX, "Vddgfx"},
+    {AMDSMI_VOLT_TYPE_VDDBOARD, "Vddboard"},
 };
 
 static void PrintHelp(void) {

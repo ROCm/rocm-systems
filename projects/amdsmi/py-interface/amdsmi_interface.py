@@ -309,6 +309,7 @@ class AmdSmiVoltageMetric(IntEnum):
 
 class AmdSmiVoltageType(IntEnum):
     VDDGFX = amdsmi_wrapper.AMDSMI_VOLT_TYPE_VDDGFX
+    VDDBOARD = amdsmi_wrapper.AMDSMI_VOLT_TYPE_VDDBOARD
     INVALID = amdsmi_wrapper.AMDSMI_VOLT_TYPE_INVALID
 
 class AmdSmiAcceleratorPartitionResourceType(IntEnum):

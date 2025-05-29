@@ -874,6 +874,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         ecc_help = "Total number of ECC errors"
         ecc_blocks_help = "Number of ECC errors per block"
         pcie_help = "Current PCIe speed, width, and replay count"
+        voltage_help = "GPU voltage"
 
         # Help text for Arguments only on Linux Baremetal platforms
         fan_help = "Current fan speed"
@@ -939,6 +940,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 metric_parser.add_argument('-P', '--pcie', action='store_true', required=False, help=pcie_help)
                 metric_parser.add_argument('-e', '--ecc', action='store_true', required=False, help=ecc_help)
                 metric_parser.add_argument('-k', '--ecc-blocks', action='store_true', required=False, help=ecc_blocks_help)
+                metric_parser.add_argument('-V', '--voltage', action='store_true', required=False, help=voltage_help)
 
             # Options that only apply to Hypervisors and Baremetal Linux
             if self.helpers.is_hypervisor() or (self.helpers.is_baremetal() and self.helpers.is_linux()):

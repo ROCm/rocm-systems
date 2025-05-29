@@ -229,6 +229,14 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Increasing available JPEG engines to 40.  
   Current ASICs may not support all 40. These will be indicated as UINT16_MAX or N/A in CLI.
 
+- **Added support to get GPU voltage**.
+    ```shell
+        $ amd-smi metric --voltage
+            GPU: 0
+                VOLTAGE:
+                    VDDBOARD: 52536 mV
+                    ...
+    ```
 - **Added bad page threshold count**.  
   - Added `amdsmi_get_gpu_bad_page_threshold` to Python API and CLI; root/sudo permissions required to display the count.
 
