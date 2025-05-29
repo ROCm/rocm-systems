@@ -717,15 +717,15 @@ SharedMutex CreateSharedMutex() {
   }
 #endif
 
-  pthread_rwlock_t* lock = new pthread_rwlock_t;
-  err = pthread_rwlock_init(lock, &attrib);
+  std::unique_ptr<pthread_rwlock_t> lock(new pthread_rwlock_t);
+  err = pthread_rwlock_init(lock.get(), &attrib);
   if (err != 0) {
     fprintf(stderr, "rw lock init failed: %s\n", strerror(err));
     return nullptr;
   }
 
   pthread_rwlockattr_destroy(&attrib);
-  return lock;
+  return lock.release();
 }
 
 bool TryAcquireSharedMutex(SharedMutex lock) {
