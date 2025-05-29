@@ -703,8 +703,8 @@ Output: Dictionary with fields
 
 Field | Description
 ---|---
-`current_socket_power` | current socket power
-`average_socket_power` | average socket power
+`current_socket_power` | current socket power; Mi300+ Series Cards
+`average_socket_power` | average socket power; Navi + Mi 200 and earlier Series cards
 `gfx_voltage` | voltage gfx
 `soc_voltage` | voltage soc
 `mem_voltage` | voltage mem

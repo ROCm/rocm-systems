@@ -1026,8 +1026,8 @@ typedef struct {
  */
 typedef struct {
     uint64_t socket_power;          //!< Units in uW {@host}, Host only
-    uint32_t current_socket_power;  //!< Units in W {@linux_bm}, Linux only
-    uint32_t average_socket_power;  //!< Units in W {@linux_bm}, Linux only
+    uint32_t current_socket_power;  //!< Units in W {@linux_bm}, Linux only, Mi 300+ Series cards
+    uint32_t average_socket_power;  //!< Units in W {@linux_bm}, Linux only, Navi + Mi 200 and earlier Series cards
     uint32_t gfx_voltage;           //!< GFX voltage measurement in mV {@linux_bm} or V {@host}
     uint32_t soc_voltage;           //!< SOC voltage measurement in mV {@linux_bm} or V {@host}
     uint32_t mem_voltage;           //!< MEM voltage measurement in mV {@linux_bm} or V {@host}
