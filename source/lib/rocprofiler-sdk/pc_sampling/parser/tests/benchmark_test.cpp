@@ -26,6 +26,7 @@
 #include "lib/rocprofiler-sdk/pc_sampling/parser/tests/mocks.hpp"
 
 #define GFXIP_MAJOR 9
+#define GFXIP_MINOR 4
 
 /**
  * Benchmarks how fast the parser can process samples on a single threaded case
@@ -75,6 +76,7 @@ Benchmark(bool bWarmup)
     CHECK_PARSER(parse_buffer((generic_sample_t*) buffer->packets.data(),
                               buffer->packets.size(),
                               GFXIP_MAJOR,
+                              GFXIP_MINOR,
                               user_cb,
                               &userdata));
     auto  t1             = std::chrono::system_clock::now();

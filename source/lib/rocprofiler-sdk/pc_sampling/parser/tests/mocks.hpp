@@ -74,13 +74,18 @@ public:
     //! Submits a "upcoming_samples_t" packet signaling the next num_samples packets are PC samples
     void genUpcomingSamples(int num_samples);
 
-    std::vector<std::vector<PcSamplingRecordT>> get_parsed_buffer(int GFXIP_MAJOR)
+    /**
+     * @brief By default, we assume the gfx94X.
+     */
+    std::vector<std::vector<PcSamplingRecordT>> get_parsed_buffer(int GFXIP_MAJOR,
+                                                                  int GFXIP_MINOR = 4)
     {
         parsed_data = {};
 
         CHECK_PARSER(parse_buffer((generic_sample_t*) packets.data(),
                                   packets.size(),
                                   GFXIP_MAJOR,
+                                  GFXIP_MINOR,
                                   &alloc_parse_memory,
                                   this));
 
@@ -102,22 +107,6 @@ public:
 
     const uint32_t device;
 };
-
-template <>
-void
-MockRuntimeBuffer<rocprofiler_pc_sampling_record_host_trap_v0_t>::genUpcomingSamples(
-    int num_samples)
-{
-    genUpcomingSamples(num_samples, AMD_HOST_TRAP_V1);
-}
-
-template <>
-void
-MockRuntimeBuffer<rocprofiler_pc_sampling_record_stochastic_v0_t>::genUpcomingSamples(
-    int num_samples)
-{
-    this->genUpcomingSamples(num_samples, AMD_SNAPSHOT_V1);
-}
 
 /**
  * Mimics a HSA doorbell. Every live instance of this class has an unique ID (handler).

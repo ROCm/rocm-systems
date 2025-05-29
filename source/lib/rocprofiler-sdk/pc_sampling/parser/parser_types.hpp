@@ -121,6 +121,10 @@ enum PCSAMPLE_STATUS
      */
     PCSAMPLE_STATUS_INVALID_GFXIP,
     /**
+     * Invalid PC sampling method was passed to the parser.
+     */
+    PCSAMPLE_STATUS_INVALID_METHOD,
+    /**
      * Last error type
      */
     PCSAMPLE_STATUS_LAST

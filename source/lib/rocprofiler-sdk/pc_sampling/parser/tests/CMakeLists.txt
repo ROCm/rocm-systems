@@ -5,10 +5,18 @@ include(GoogleTest)
 set(PCTEST_INCLUDE_DIR
     ${PROJECT_SOURCE_DIR}/source/lib/rocprofiler-sdk/pc_sampling/parser/)
 
-set(ROCPROFILER_LIB_PC_SAMPLING_PARSER_ID_TEST_SOURCES correlation_id_test.cpp)
-set(ROCPROFILER_LIB_PC_SAMPLING_PARSER_BENCH_TEST_SOURCES benchmark_test.cpp)
-set(ROCPROFILER_LIB_PC_SAMPLING_PARSER_GFX9_TEST_SOURCES gfx9test.cpp)
 set(ROCPROFILER_LIB_PC_SAMPLING_PARSER_TEST_HEADERS mocks.hpp)
+set(ROCPROFILER_LIB_PC_SAMPLING_PARSER_TEST_SOURCES mocks.cpp)
+
+set(ROCPROFILER_LIB_PC_SAMPLING_PARSER_ID_TEST_SOURCES
+    ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_TEST_SOURCES} correlation_id_test.cpp)
+set(ROCPROFILER_LIB_PC_SAMPLING_PARSER_BENCH_TEST_SOURCES
+    ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_TEST_SOURCES} benchmark_test.cpp)
+set(ROCPROFILER_LIB_PC_SAMPLING_PARSER_GFX9_TEST_SOURCES
+    ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_TEST_SOURCES} gfx9test.hpp gfx9test.cpp
+    gfx950test.cpp)
+set(ROCPROFILER_LIB_PC_SAMPLING_PARSER_MULTIGPU_TEST_SOURCES
+    ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_TEST_SOURCES} multigpu.cpp)
 
 add_executable(pcs_gfx9_test)
 
@@ -70,7 +78,8 @@ target_link_libraries(
 add_executable(pcs_thread_test)
 target_compile_options(pcs_thread_test PRIVATE "-Ofast")
 
-target_sources(pcs_thread_test PRIVATE multigpu.cpp)
+target_sources(pcs_thread_test
+               PRIVATE ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_MULTIGPU_TEST_SOURCES})
 target_include_directories(pcs_thread_test PRIVATE ${PCTEST_INCLUDE_DIR})
 
 target_link_libraries(
@@ -81,7 +90,7 @@ target_link_libraries(
 
 gtest_add_tests(
     TARGET pcs_thread_test
-    SOURCES multigpu.cpp
+    SOURCES ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_MULTIGPU_TEST_SOURCES}
     TEST_LIST pcs_thread_test_TESTS
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 

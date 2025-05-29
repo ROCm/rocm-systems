@@ -175,9 +175,12 @@ data_ready_callback(void*                                client_callback_data,
         // TODO: how about using std::future
         std::condition_variable cv;
 
-        auto gfx_major         = ((agent_session->agent->gfx_target_version / 10000) % 100);
-        auto pcs_parser_status = agent_session->parser->parse(
-            upc, reinterpret_cast<const generic_sample_t*>(buff.get()), gfx_major, cv, false);
+        auto pcs_parser_status =
+            agent_session->parser->parse(upc,
+                                         reinterpret_cast<const generic_sample_t*>(buff.get()),
+                                         agent_session->agent->gfx_target_version,
+                                         cv,
+                                         false);
 
         if(pcs_parser_status != PCSAMPLE_STATUS_SUCCESS)
         {

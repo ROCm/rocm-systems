@@ -52,30 +52,70 @@ PCSamplingParserContext::alloc<rocprofiler_pc_sampling_record_stochastic_v0_t>(
     return size;
 }
 
+/**
+ * @brief Get the appropriate parse function based on the GFXIP and sampling method.
+ *
+ * If the inappropriate sampling method is provided, it returns nullptr.
+ */
+template <typename GFXIP>
+PCSamplingParserContext::parse_funct_ptr_t
+PCSamplingParserContext::_get_parse_func_for_method(rocprofiler_pc_sampling_method_t pcs_method)
+{
+    if(pcs_method == ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP)
+    {
+        return &PCSamplingParserContext::_parse<GFXIP,
+                                                rocprofiler_pc_sampling_record_host_trap_v0_t>;
+    }
+    else if(pcs_method == ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC)
+    {
+        return &PCSamplingParserContext::_parse<GFXIP,
+                                                rocprofiler_pc_sampling_record_stochastic_v0_t>;
+    }
+    else
+    {
+        return nullptr;
+    }
+}
+
 pcsample_status_t
 PCSamplingParserContext::parse(const upcoming_samples_t& upcoming,
                                const generic_sample_t*   data_,
-                               int                       gfxip_major,
+                               uint32_t                  gfx_target_version,
                                std::condition_variable&  midway_signal,
                                bool                      bRocrBufferFlip)
 {
-    bool bIsHostTrap = upcoming.which_sample_type == AMD_HOST_TRAP_V1;
+    auto gfxip_major = (gfx_target_version / 10000) % 100;
+    auto gfxip_minor = (gfx_target_version / 100) % 100;
+    auto pcs_method  = (upcoming.which_sample_type == AMD_HOST_TRAP_V1)
+                           ? ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP
+                           : ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC;
 
     // Template instantiation is faster!
-    auto parseSample_func =
-        bIsHostTrap
-            ? &PCSamplingParserContext::_parse<GFX9, rocprofiler_pc_sampling_record_host_trap_v0_t>
-            : &PCSamplingParserContext::_parse<GFX9,
-                                               rocprofiler_pc_sampling_record_stochastic_v0_t>;
-    if(gfxip_major == 11)
-        parseSample_func =
-            bIsHostTrap
-                ? &PCSamplingParserContext::_parse<GFX11,
-                                                   rocprofiler_pc_sampling_record_host_trap_v0_t>
-                : &PCSamplingParserContext::_parse<GFX11,
-                                                   rocprofiler_pc_sampling_record_stochastic_v0_t>;
-    else if(gfxip_major != 9)
+    parse_funct_ptr_t parseSample_func = nullptr;
+    if(gfxip_major == 9)
+    {
+        if(gfxip_minor == 5)
+        {
+            parseSample_func = _get_parse_func_for_method<GFX950>(pcs_method);
+        }
+        else
+        {
+            parseSample_func = _get_parse_func_for_method<GFX9>(pcs_method);
+        }
+    }
+    else if(gfxip_major == 11)
+    {
+        parseSample_func = _get_parse_func_for_method<GFX11>(pcs_method);
+    }
+    else
+    {
         return PCSAMPLE_STATUS_INVALID_GFXIP;
+    }
+
+    if(parseSample_func == nullptr)
+    {
+        return PCSAMPLE_STATUS_INVALID_METHOD;
+    }
 
     auto status = (this->*parseSample_func)(upcoming, data_);
     midway_signal.notify_all();

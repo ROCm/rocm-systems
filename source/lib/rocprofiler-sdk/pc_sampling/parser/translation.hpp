@@ -22,86 +22,17 @@
 
 #pragma once
 
-#include <array>
-#include <cstdint>
-#include <cstring>
-
 #include "lib/rocprofiler-sdk/pc_sampling/parser/gfx11.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/parser/gfx9.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/parser/gfx950.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/parser/parser_types.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/parser/rocr.h"
 
 #include <rocprofiler-sdk/pc_sampling.h>
 
-// TODO: refactor the commented code for stochastic sampling
-
-// template <typename gfx>
-// inline rocprofiler_pc_sampling_record_t
-// copyStochasticSample(const perf_sample_snapshot_v1& sample);
-
-// template <>
-// inline rocprofiler_pc_sampling_record_t
-// copyStochasticSample<GFX9>(const perf_sample_snapshot_v1& sample)
-// {
-//     rocprofiler_pc_sampling_record_t ret = copySampleHeader<perf_sample_snapshot_v1>(sample);
-//     ret.flags.valid = sample.perf_snapshot_data & (~sample.perf_snapshot_data >> 26) & 0x1;
-//     // Check wave_id matches snapshot_wave_id
-
-//     ret.flags.has_wave_cnt     = true;
-//     ret.flags.has_stall_reason = true;
-
-//     ret.wave_count = sample.perf_snapshot_data1 & 0x3F;
-
-//     ret.snapshot.dual_issue_valu   = sample.perf_snapshot_data >> 2;
-//     ret.snapshot.inst_type         = sample.perf_snapshot_data >> 3;
-//     ret.snapshot.reason_not_issued = (sample.perf_snapshot_data >> 7) & 0x7;
-//     ret.snapshot.arb_state_issue   = (sample.perf_snapshot_data >> 10) & 0xFF;
-//     ret.snapshot.arb_state_stall   = (sample.perf_snapshot_data >> 18) & 0xFF;
-//     ret.reserved                   = 0;
-//     return ret;
-// }
-
-// template <>
-// inline rocprofiler_pc_sampling_record_t
-// copyStochasticSample<GFX11>(const perf_sample_snapshot_v1& sample)
-// {
-//     rocprofiler_pc_sampling_record_t ret = copySampleHeader<perf_sample_snapshot_v1>(sample);
-//     ret.flags.valid = sample.perf_snapshot_data & (~sample.perf_snapshot_data >> 23) & 0x1;
-//     // Check wave_id matches snapshot_wave_id
-
-//     ret.flags.has_stall_reason = true;
-
-//     ret.wave_issued                = sample.perf_snapshot_data >> 1;
-//     ret.snapshot.inst_type         = sample.perf_snapshot_data >> 2;
-//     ret.snapshot.reason_not_issued = (sample.perf_snapshot_data >> 6) & 0x7;
-//     ret.snapshot.arb_state_issue   = (sample.perf_snapshot_data >> 9) & 0x7F;
-//     ret.snapshot.arb_state_stall   = (sample.perf_snapshot_data >> 16) & 0x7F;
-//     ret.snapshot.dual_issue_valu   = false;
-//     ret.reserved                   = 0;
-//     return ret;
-// }
-
-// #define BITSHIFT(sname) out |= ((in >> GFX::sname) & 1) << PCSAMPLE::sname
-
-// template <typename GFX>
-// inline int
-// translate_arb(int in)
-// {
-//     size_t out = 0;
-//     BITSHIFT(ISSUE_VALU);
-//     BITSHIFT(ISSUE_MATRIX);
-//     BITSHIFT(ISSUE_LDS);
-//     BITSHIFT(ISSUE_LDS_DIRECT);
-//     BITSHIFT(ISSUE_SCALAR);
-//     BITSHIFT(ISSUE_VMEM_TEX);
-//     BITSHIFT(ISSUE_FLAT);
-//     BITSHIFT(ISSUE_EXP);
-//     BITSHIFT(ISSUE_MISC);
-//     BITSHIFT(ISSUE_BRMSG);
-//     return out & 0x3FF;
-// }
-
-// #undef BITSHIFT
+#include <array>
+#include <cstdint>
+#include <cstring>
 
 #define LUTOVERLOAD(sname, rocp_prefix) this->operator[](GFX::sname) = rocp_prefix##_##sname
 #define LUTOVERLOAD_INST(sname)         LUTOVERLOAD(sname, ROCPROFILER_PC_SAMPLING_INSTRUCTION)
@@ -322,6 +253,20 @@ copySample<GFX9, rocprofiler_pc_sampling_record_stochastic_v0_t>(const void* sam
     return ret;
 }
 
+template <>
+inline rocprofiler_pc_sampling_record_host_trap_v0_t
+copySample<GFX950, rocprofiler_pc_sampling_record_host_trap_v0_t>(const void* sample)
+{
+    return copySample<GFX9, rocprofiler_pc_sampling_record_host_trap_v0_t>(sample);
+}
+
+template <>
+inline rocprofiler_pc_sampling_record_stochastic_v0_t
+copySample<GFX950, rocprofiler_pc_sampling_record_stochastic_v0_t>(const void* sample)
+{
+    return copySample<GFX9, rocprofiler_pc_sampling_record_stochastic_v0_t>(sample);
+}
+
 /**
  * @brief Host trap V0 sample for GFX11
  */
@@ -346,6 +291,36 @@ copySample<GFX11, rocprofiler_pc_sampling_record_stochastic_v0_t>(const void* sa
     // TODO: implement logic for manipulating stochastic related fields
     // ret.wave_count      = sample_.perf_snapshot_data1 & 0x3F;
     return ret;
+}
+
+/**
+ * @brief The default implementation assumes no correction is needed.
+ */
+template <typename GFX, typename PcSamplingRecordT>
+inline rocprofiler_address_t
+correct_pc_address(const perf_sample_snapshot_v1* sample)
+{
+    return rocprofiler_address_t{.value = sample->pc};
+}
+
+/**
+ * @brief GFX950 specific implementation of the PC address correction.
+ */
+template <>
+inline rocprofiler_address_t
+correct_pc_address<GFX950, rocprofiler_pc_sampling_record_stochastic_v0_t>(
+    const perf_sample_snapshot_v1* sample)
+{
+    // If mid_macro bit is 1, then reg spec says we need to subtract 2 dwords from the PC address.
+    auto mid_macro = static_cast<bool>(EXTRACT_BITS(sample->perf_snapshot_data1, 31, 31));
+    if(mid_macro)
+    {
+        return rocprofiler_address_t{.value = sample->pc - 2 * sizeof(uint32_t)};
+    }
+    else
+    {
+        return rocprofiler_address_t{.value = sample->pc};
+    }
 }
 
 #undef EXTRACT_BITS

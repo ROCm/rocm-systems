@@ -240,16 +240,19 @@ add_upcoming_samples(const device_handle     device,
         const auto* snap = reinterpret_cast<const perf_sample_snapshot_v1*>(buffer + p);
 
         auto& pc_sample = samples[p];
-        pc_sample       = copySample<GFXIP, PcSamplingRecordT>((const void*) (buffer + p));
+        pc_sample       = copySample<GFXIP, PcSamplingRecordT>(static_cast<const void*>(snap));
         // skip invalid samples
         if(pc_sample.size == 0) continue;
 
+        // Correct PC address of the original sample (if needed) prior to decoding it.
+        auto pc_address = correct_pc_address<GFXIP, PcSamplingRecordT>(snap);
+
         // Convert PC -> (loaded code object id containing PC, offset within code object)
-        if(!cache_addr_range.inrange(snap->pc))
-            cache_addr_range = table->find_codeobj_in_range(snap->pc);
+        if(!cache_addr_range.inrange(pc_address.value))
+            cache_addr_range = table->find_codeobj_in_range(pc_address.value);
 
         pc_sample.pc.code_object_id     = cache_addr_range.id;
-        pc_sample.pc.code_object_offset = snap->pc - cache_addr_range.addr;
+        pc_sample.pc.code_object_offset = pc_address.value - cache_addr_range.addr;
 
         try
         {
@@ -357,6 +360,7 @@ template <typename PcSamplingRecordT>
 pcsample_status_t inline parse_buffer(generic_sample_t*                  buffer,
                                       uint64_t                           buffer_size,
                                       int                                gfxip_major,
+                                      int                                gfxip_minor,
                                       user_callback_t<PcSamplingRecordT> callback,
                                       void*                              userdata)
 {
@@ -364,11 +368,20 @@ pcsample_status_t inline parse_buffer(generic_sample_t*                  buffer,
 
     auto parseSample_func = _parse_buffer<GFX9, PcSamplingRecordT>;
     if(gfxip_major == 9)
-        parseSample_func = _parse_buffer<GFX9, PcSamplingRecordT>;
+    {
+        if(gfxip_minor == 5)
+        {
+            parseSample_func = _parse_buffer<GFX950, PcSamplingRecordT>;
+        }
+    }
     else if(gfxip_major == 11)
+    {
         parseSample_func = _parse_buffer<GFX11, PcSamplingRecordT>;
+    }
     else
+    {
         return PCSAMPLE_STATUS_INVALID_GFXIP;
+    }
 
     return parseSample_func(buffer, buffer_size, callback, userdata, corr_map.get());
 };
