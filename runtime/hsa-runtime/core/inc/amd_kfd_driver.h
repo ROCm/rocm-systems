@@ -69,7 +69,7 @@ namespace AMD {
 /// and more.
 class KfdDriver final : public core::Driver {
 public:
-  KfdDriver(std::string& devnode_name);
+  KfdDriver(std::string devnode_name);
 
   /// @brief Determine of the KFD is present on the system and attemp to open it if found.
   ///
