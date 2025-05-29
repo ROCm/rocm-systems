@@ -7,6 +7,7 @@ set(TEST_SRC
     hipDrvGetErrorString.cc
     hipGetLastError.cc
     hipPeekAtLastError.cc
+    hipGetErrorOnCrash.cc
 )
 add_executable(hipGetLastErrorEnv_Exe EXCLUDE_FROM_ALL hipGetLastErrorEnv_Exe.cc)
 add_executable(hipPeekAtLastErrorEnv_Exe EXCLUDE_FROM_ALL hipPeekAtLastErrorEnv_Exe.cc)
