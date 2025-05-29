@@ -20,12 +20,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#include "lib/rocprofiler-sdk/pc_sampling/code_object.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/parser/tests/mocks.hpp"
+
 #include <gtest/gtest.h>
 #include <cstddef>
-
 #include <future>
-#include "lib/rocprofiler-sdk/pc_sampling/code_object.hpp"
-#include "mocks.hpp"
 
 #define GFXIP_MAJOR 9
 constexpr size_t NUM_THREADS = 8;

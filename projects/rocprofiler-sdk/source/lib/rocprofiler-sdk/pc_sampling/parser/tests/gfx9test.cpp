@@ -24,6 +24,7 @@
 #    undef NDEBUG
 #endif
 
+#include "lib/rocprofiler-sdk/pc_sampling/parser/tests/gfx9test.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/parser/pc_record_interface.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/parser/tests/mocks.hpp"
 
@@ -137,53 +138,6 @@
     EXPECT_EQ(x.snapshot.arb_state_stall_misc, y.snapshot.arb_state_stall_misc);                   \
                                                                                                    \
     NON_GFX9_ARBSTATE_IS_ZERO(x, y)
-
-template <typename PcSamplingRecordT>
-class WaveSnapTest
-{
-public:
-    WaveSnapTest()
-    {
-        buffer   = std::make_shared<MockRuntimeBuffer<PcSamplingRecordT>>();
-        queue    = std::make_shared<MockQueue<PcSamplingRecordT>>(16, buffer);
-        dispatch = std::make_shared<MockDispatch<PcSamplingRecordT>>(queue);
-    }
-
-    void Test()
-    {
-        FillBuffers();
-        CheckBuffers();
-    }
-
-    virtual void FillBuffers()  = 0;
-    virtual void CheckBuffers() = 0;
-
-    void genPCSample(int wave_cnt, int inst_type, int reason, int arb_issue, int arb_stall)
-    {
-        wave_cnt &= 0x3F;
-        inst_type &= 0xF;
-        reason &= 0x7;
-        arb_issue &= 0xFF;
-        arb_stall &= 0xFF;
-
-        perf_sample_snapshot_v1 snap;
-        ::memset(&snap, 0, sizeof(snap));
-        snap.pc             = dispatch->unique_id;
-        snap.correlation_id = dispatch->getMockId().raw;
-
-        snap.perf_snapshot_data = (inst_type << 3) | (reason << 7);
-        snap.perf_snapshot_data |= 0x1;  // sample is valid
-        snap.perf_snapshot_data |= (arb_issue << 10) | (arb_stall << 18);
-        snap.perf_snapshot_data1 = wave_cnt;
-
-        EXPECT_NE(dispatch.get(), nullptr);
-        dispatch->submit(packet_union_t{.snap = snap});
-    };
-
-    std::shared_ptr<MockRuntimeBuffer<PcSamplingRecordT>> buffer;
-    std::shared_ptr<MockQueue<PcSamplingRecordT>>         queue;
-    std::shared_ptr<MockDispatch<PcSamplingRecordT>>      dispatch;
-};
 
 template <typename PcSamplingRecordT>
 class WaveCntTest : public WaveSnapTest<PcSamplingRecordT>
@@ -611,6 +565,81 @@ class WaveOtherFieldsTest : public WaveSnapTest<PcSamplingRecordT>
     std::vector<PcSamplingRecordT> compare;
 };
 
+/**
+ * @brief This test verifies that the PC address remains unchanged for GFX9.
+ */
+template <typename PcSamplingRecordT>
+void
+MidMacroPCCorrection<PcSamplingRecordT>::FillBuffers()
+{
+    this->buffer->genUpcomingSamples(3);
+    // NOTE: mid_macro is relevant only on GFX950
+    genPCSample(0x800, true);
+    genPCSample(0x900, false);
+    genPCSample(0x1000, true);
+}
+
+template <typename PcSamplingRecordT>
+std::vector<std::vector<PcSamplingRecordT>>
+MidMacroPCCorrection<PcSamplingRecordT>::get_parsed_data()
+{
+    return this->buffer->get_parsed_buffer(9);  // GFXIP==9
+}
+
+template <typename PcSamplingRecordT>
+void
+MidMacroPCCorrection<PcSamplingRecordT>::CheckBuffers()
+{
+    auto parsed = get_parsed_data();
+    EXPECT_EQ(parsed.size(), 1);
+    EXPECT_EQ(parsed[0].size(), 3);
+    EXPECT_EQ(compare.size(), 3);
+
+    for(size_t i = 0; i < 3; i++)
+    {
+        // verifying PC address
+        EXPECT_EQ(parsed[0][i].pc.code_object_offset, compare[i].pc.code_object_offset);
+    }
+}
+
+/**
+ * @brief By default, PC address remains unchanged.
+ */
+template <typename PcSamplingRecordT>
+uint64_t
+MidMacroPCCorrection<PcSamplingRecordT>::calcaulteExpectedPC(uint64_t pc, bool /*mid_macro*/)
+{
+    return pc;
+}
+
+template <typename PcSamplingRecordT>
+void
+MidMacroPCCorrection<PcSamplingRecordT>::genPCSample(uint64_t pc, bool mid_macro)
+{
+    PcSamplingRecordT sample;
+    ::memset(&sample, 0, sizeof(sample));
+    // Calculate the expected PC address
+    sample.pc.code_object_offset = calcaulteExpectedPC(pc, mid_macro);
+    compare.push_back(sample);
+
+    // This test considers only PC address.
+    perf_sample_snapshot_v1 snap;
+    ::memset(&snap, 0, sizeof(snap));
+    snap.pc = pc;
+    // Mandatory for correlation mapping. Otherwise, parsing error occurs.
+    snap.correlation_id = this->dispatch->getMockId().raw;
+
+    // to ensure all stochastic samples are generated properly,
+    // marked them as valid
+    snap.perf_snapshot_data |= 0x1;  // set the bit indicating the sample is valid
+
+    // the mid_macro is the bit at the position 31
+    snap.perf_snapshot_data1 = (mid_macro << 31);
+
+    EXPECT_NE(this->dispatch.get(), nullptr);
+    this->dispatch->submit(snap);
+}
+
 TEST(pcs_parser, gfx9_test)
 {
     // Tests specific to stochastic sampling only
@@ -627,6 +656,9 @@ TEST(pcs_parser, gfx9_test)
     HwIdTest<rocprofiler_pc_sampling_record_stochastic_v0_t>{}.Test();
     WaveOtherFieldsTest<rocprofiler_pc_sampling_record_host_trap_v0_t>{}.Test();
     WaveOtherFieldsTest<rocprofiler_pc_sampling_record_stochastic_v0_t>{}.Test();
+
+    MidMacroPCCorrection<rocprofiler_pc_sampling_record_host_trap_v0_t>{}.Test();
+    MidMacroPCCorrection<rocprofiler_pc_sampling_record_stochastic_v0_t>{}.Test();
 
     std::cout << "GFX9 Test Done." << std::endl;
 }

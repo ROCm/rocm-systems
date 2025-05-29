@@ -85,7 +85,7 @@ public:
      */
     pcsample_status_t parse(const upcoming_samples_t& upcoming,
                             const generic_sample_t*   data,
-                            int                       gfxip_major,
+                            uint32_t                  gfx_target_version,
                             std::condition_variable&  midway_signal,
                             bool                      bFlushCorrelationIds);
 
@@ -199,5 +199,11 @@ protected:
     mutable std::shared_mutex mut;
 
 private:
+    using parse_funct_ptr_t = pcsample_status_t (
+        PCSamplingParserContext::*)(const upcoming_samples_t&, const generic_sample_t*);
+
+    template <typename GFXIP>
+    parse_funct_ptr_t _get_parse_func_for_method(rocprofiler_pc_sampling_method_t pcs_method);
+
     std::unordered_map<rocprofiler_agent_id_t, rocprofiler_buffer_id_t> _agent_buffers;
 };

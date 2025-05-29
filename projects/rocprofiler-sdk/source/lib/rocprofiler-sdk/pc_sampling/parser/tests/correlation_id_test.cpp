@@ -27,6 +27,7 @@
 #include "lib/rocprofiler-sdk/pc_sampling/parser/tests/mocks.hpp"
 
 #define GFXIP_MAJOR 9
+#define GFXIP_MINOR 4
 
 std::mt19937 rdgen(1);
 
@@ -77,6 +78,7 @@ pcs_parser_hello_world()
     CHECK_PARSER(parse_buffer((generic_sample_t*) buffer->packets.data(),
                               buffer->packets.size(),
                               GFXIP_MAJOR,
+                              GFXIP_MINOR,
                               alloc_callback<PcSamplingRecordT>,
                               (void*) &all_allocations));
 
@@ -131,6 +133,7 @@ pcs_parser_reverse_wave_order()
     CHECK_PARSER(parse_buffer((generic_sample_t*) buffer->packets.data(),
                               buffer->packets.size(),
                               GFXIP_MAJOR,
+                              GFXIP_MINOR,
                               alloc_callback<PcSamplingRecordT>,
                               (void*) &all_allocations));
 
@@ -171,6 +174,7 @@ pcs_parser_dispatch_wrapping()
     CHECK_PARSER(parse_buffer((generic_sample_t*) buffer->packets.data(),
                               buffer->packets.size(),
                               GFXIP_MAJOR,
+                              GFXIP_MINOR,
                               alloc_callback<PcSamplingRecordT>,
                               (void*) &all_allocations));
 
@@ -226,6 +230,7 @@ pcs_parser_random_samples()
     CHECK_PARSER(parse_buffer((generic_sample_t*) buffer->packets.data(),
                               buffer->packets.size(),
                               GFXIP_MAJOR,
+                              GFXIP_MINOR,
                               alloc_callback<PcSamplingRecordT>,
                               (void*) &all_allocations));
 
@@ -330,6 +335,7 @@ pcs_parser_queue_hammer()
     CHECK_PARSER(parse_buffer((generic_sample_t*) buffer->packets.data(),
                               buffer->packets.size(),
                               GFXIP_MAJOR,
+                              GFXIP_MINOR,
                               alloc_callback<PcSamplingRecordT>,
                               (void*) &all_allocations));
 
@@ -382,11 +388,13 @@ pcs_parser_multi_buffer()
     CHECK_PARSER(parse_buffer((generic_sample_t*) firstBuffer->packets.data(),
                               firstBuffer->packets.size(),
                               GFXIP_MAJOR,
+                              GFXIP_MINOR,
                               alloc_callback<PcSamplingRecordT>,
                               (void*) &all_allocations));
     CHECK_PARSER(parse_buffer((generic_sample_t*) secondBuffer->packets.data(),
                               secondBuffer->packets.size(),
                               GFXIP_MAJOR,
+                              GFXIP_MINOR,
                               alloc_callback<PcSamplingRecordT>,
                               (void*) &all_allocations));
 
