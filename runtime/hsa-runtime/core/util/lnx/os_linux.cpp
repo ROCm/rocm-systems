@@ -574,12 +574,11 @@ int WaitForOsEvent(EventHandle event, unsigned int milli_seconds) {
       // Timeout
       return 1;
     }
+  } else {
+      pthread_mutex_lock(&eventDescrp->mutex);
   }
 
   int ret_code = 0;
-  if(milli_seconds != 0) {
-    pthread_mutex_lock(&eventDescrp->mutex);
-  }
   
   if (!eventDescrp->state) {
     if (milli_seconds == 0) {
