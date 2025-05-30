@@ -20,7 +20,30 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-#
+rocprofiler_activate_clang_tidy()
 
-add_subdirectory(rocprofiler-attach)
-add_subdirectory(rocprofiler-sdk-launch-compiler)
+add_library(rocprofv3-attach SHARED)
+target_sources(rocprofv3-attach PRIVATE rocprofv3_attach.cpp ptrace_session.cpp)
+
+target_link_libraries(
+    rocprofv3-attach
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-shared-library
+            rocprofiler-sdk::rocprofiler-sdk-headers
+            rocprofiler-sdk::rocprofiler-sdk-build-flags
+            rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-cereal)
+
+set_target_properties(
+    rocprofv3-attach
+    PROPERTIES LIBRARY_OUTPUT_DIRECTORY
+               ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBEXECDIR}/rocprofiler-sdk
+               SOVERSION ${PROJECT_VERSION_MAJOR}
+               VERSION ${PROJECT_VERSION}
+               BUILD_RPATH "\$ORIGIN:\$ORIGIN/.."
+               INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
+
+install(
+    TARGETS rocprofv3-attach
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/rocprofiler-sdk
+    COMPONENT tools
+    EXPORT rocprofiler-sdk-tool-targets)

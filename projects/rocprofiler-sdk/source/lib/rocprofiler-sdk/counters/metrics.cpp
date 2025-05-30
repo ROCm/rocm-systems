@@ -236,7 +236,13 @@ findViaInstallPath(const std::string& filename)
     ROCP_INFO << filename << " is being looked up via install path";
     if(dladdr(reinterpret_cast<const void*>(rocprofiler_query_available_agents), &dl_info) != 0)
     {
-        return common::filesystem::path{dl_info.dli_fname}.parent_path().parent_path() /
+        common::filesystem::path try_path = common::filesystem::path{dl_info.dli_fname}.parent_path().parent_path() /
+               fmt::format("share/rocprofiler-sdk/{}", filename);
+        if (common::filesystem::exists(try_path))
+        {
+            return try_path;
+        }
+        return common::filesystem::path{dl_info.dli_fname}.parent_path().parent_path().parent_path().parent_path() /
                fmt::format("share/rocprofiler-sdk/{}", filename);
     }
     return filename;

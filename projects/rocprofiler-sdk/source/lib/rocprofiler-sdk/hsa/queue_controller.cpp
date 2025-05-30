@@ -67,7 +67,7 @@ create_queue(hsa_agent_t        agent,
                 serializer.add_queue(queue, *new_queue);
             });
             controller->add_queue(*queue, std::move(new_queue));
-
+            ROCP_INFO << "created queue for HSA agent handle " << agent.handle;
             return HSA_STATUS_SUCCESS;
         }
     }
