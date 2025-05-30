@@ -31,6 +31,7 @@ env:
   mi300_EXCLUDE_TESTS_REGEX: ""
   mi300a_EXCLUDE_TESTS_REGEX: ""
   mi325_EXCLUDE_TESTS_REGEX: "^(counter-collection-buffer)$"
+  mi3xx_EXCLUDE_TESTS_REGEX: "^(counter-collection-buffer)$"
   navi4_EXCLUDE_TESTS_REGEX: ""
   navi3_EXCLUDE_LABEL_REGEX: "^(pc-sampling)$"
   vega20_EXCLUDE_LABEL_REGEX: "^(pc-sampling)$"
@@ -38,6 +39,7 @@ env:
   mi300_EXCLUDE_LABEL_REGEX: "^(pc-sampling)$"
   mi300a_EXCLUDE_LABEL_REGEX: ""
   mi325_EXCLUDE_LABEL_REGEX: "^(pc-sampling)$"
+  mi3xx_EXCLUDE_LABEL_REGEX: "^(pc-sampling)$"
   navi4_EXCLUDE_LABEL_REGEX: "^(pc-sampling)$"
 
 jobs:
@@ -46,7 +48,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['vega20', 'mi300a']
+        runner: ['vega20', 'navi3', 'navi4', 'mi3xx']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
         ci-flags: ['--linter clang-tidy']
@@ -56,7 +58,7 @@ jobs:
     # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-      CORE_EXT_RUNNER: mi300a
+      CORE_EXT_RUNNER: mi3xx
 
     steps:
     - uses: actions/checkout@v4
@@ -302,7 +304,7 @@ jobs:
     strategy:
       # fail-fast: false
       matrix:
-        runner: ['mi200']
+        runner: ['mi300a']
         os: ['ubuntu-22.04']
         build-type: ['Release']
 
@@ -585,19 +587,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['vega20', 'mi300a', 'mi325']
+        runner: ['random']
         sanitizer: ['AddressSanitizer', 'ThreadSanitizer', 'LeakSanitizer', 'UndefinedBehaviorSanitizer']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
-        exclude:
-          - { runner: 'vega20', sanitizer: 'ThreadSanitizer' }
-          - { runner: 'vega20', sanitizer: 'AddressSanitizer' }
-          - { runner: 'vega20', sanitizer: 'UndefinedBehaviorSanitizer' }
-          - { runner: 'mi325', sanitizer: 'AddressSanitizer' }
-          - { runner: 'mi325', sanitizer: 'LeakSanitizer' }
-          - { runner: 'mi300a', sanitizer: 'LeakSanitizer' }
-          - { runner: 'mi300a', sanitizer: 'ThreadSanitizer' }
-          - { runner: 'mi300a', sanitizer: 'UndefinedBehaviorSanitizer' }
 
     if: ${{ contains(github.event_name, 'pull_request') }}
     runs-on: ${{ matrix.runner }}-emu-runner-set
