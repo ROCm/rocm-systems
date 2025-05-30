@@ -33,7 +33,6 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdlib>
-#include <regex>
 #include <string_view>
 #include <vector>
 

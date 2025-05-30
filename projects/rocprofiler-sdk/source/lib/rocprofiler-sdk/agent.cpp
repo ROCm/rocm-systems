@@ -46,11 +46,12 @@
 #include <iomanip>
 #include <limits>
 #include <random>
-#include <regex>
 #include <set>
 #include <shared_mutex>
 #include <sstream>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
@@ -112,6 +113,7 @@ parse_cpu_info()
                 break;
             }
 
+            line = sdk::parse::strip(std::move(line), " \t\n\v\f\r");
             if(line.empty())
             {
                 if(!current_block.empty()) blocks.emplace_back(std::move(current_block));
@@ -134,46 +136,68 @@ parse_cpu_info()
         auto info_v = cpu_info{};
         for(const auto& itr : bitr)
         {
-            auto             match = std::smatch{};
-            const std::regex re{".*: (.*)$"};
-            if(std::regex_match(itr, match, re))
+            auto match = sdk::parse::tokenize(itr, std::vector<std::string_view>{": "});
+            if(match.size() == 2)
             {
-                if(match.size() == 2)
-                {
-                    std::ssub_match value = match[1];
-
-                    if(itr.find("vendor_id") == 0)
-                        info_v.vendor_id = value.str();
-                    else if(itr.find("model name") == 0)
+                auto get_stol = [_label = std::string_view{itr}](const auto& _value) -> long {
+                    try
                     {
-                        info_v.model_name      = value.str();
-                        size_t first_colon_pos = match.str().find(':');
-                        // This handles the case where the model name has multiple colons
-                        // Example "model name : AMD EPYC : 100-000000248"
-                        if(first_colon_pos != std::string::npos)
-                        {
-                            // Extract the model name after the first colon
-                            info_v.model_name = match.str().substr(first_colon_pos + 1);
-                            // Remove leading and trailing whitespaces
-                            info_v.model_name = std::regex_replace(
-                                info_v.model_name, std::regex("^\\s+|\\s+$"), "");
-                        }
+                        return std::stol(_value);
+                    } catch(std::exception& e)
+                    {
+                        ROCP_CI_LOG(WARNING) << fmt::format("rocprofiler-sdk agent encountered "
+                                                            "error while parsing CPU info '{}': {}",
+                                                            _label,
+                                                            e.what());
                     }
-                    else if(itr.find("processor") == 0)
-                        info_v.processor = std::stol(value.str());
-                    else if(itr.find("cpu family") == 0)
-                        info_v.family = std::stol(value.str());
-                    else if(itr.find("model") == 0 && itr.find("model name") != 0)
-                        info_v.model = std::stol(value.str());
-                    else if(itr.find("physical id") == 0)
-                        info_v.physical_id = std::stol(value.str());
-                    else if(itr.find("core id") == 0)
-                        info_v.core_id = std::stol(value.str());
-                    else if(itr.find("apicid") == 0)
-                        info_v.apicid = std::stol(value.str());
+                    return 0;
+                };
+
+                auto value = match.back();
+
+                if(itr.find("vendor_id") == 0)
+                    info_v.vendor_id = value;
+                else if(itr.find("model name") == 0)
+                {
+                    info_v.model_name      = value;
+                    size_t first_colon_pos = value.find(':');
+                    // This handles the case where the model name has multiple colons
+                    // Example "model name : AMD EPYC : 100-000000248"
+                    if(first_colon_pos != std::string::npos)
+                    {
+                        // Extract the model name after the first colon
+                        info_v.model_name = value.substr(first_colon_pos + 1);
+                        // Remove leading and trailing whitespaces
+                        info_v.model_name =
+                            sdk::parse::strip(std::string{info_v.model_name}, " \t\n\v\f\r");
+                    }
                 }
+                else if(itr.find("processor") == 0)
+                    info_v.processor = get_stol(value);
+                else if(itr.find("cpu family") == 0)
+                    info_v.family = get_stol(value);
+                else if(itr.find("model") == 0 && itr.find("model name") != 0)
+                    info_v.model = get_stol(value);
+                else if(itr.find("physical id") == 0)
+                    info_v.physical_id = get_stol(value);
+                else if(itr.find("core id") == 0)
+                    info_v.core_id = get_stol(value);
+                else if(itr.find("apicid") == 0)
+                    info_v.apicid = get_stol(value);
+            }
+            else
+            {
+                // Each processor_block is grouped by the presence of an empty line in /proc/cpuinfo
+                // so no checks for empty lines are performed inside this loop. If an empty line is
+                // found, that should be considered an error. Entries like "power management:" with
+                // no info (i.e. where the ":" is the last character on the line) can be ignored
+                auto last_colon_pos = itr.find_last_of(':');
+                ROCP_CI_LOG_IF(
+                    INFO, last_colon_pos < itr.length() && (last_colon_pos + 1) != itr.length())
+                    << fmt::format("Encountered unexpected /proc/cpuinfo line format: '{}'", itr);
             }
         }
+
         if(info_v.is_valid())
             processor_info.emplace_back(info_v);
         else
@@ -633,7 +657,19 @@ read_topology()
         else
             agent_info.model_name = "";
 
-        if(!gpu_id_prop.empty()) agent_info.gpu_id = std::stoull(gpu_id_prop.front());
+        if(!gpu_id_prop.empty())
+        {
+            try
+            {
+                agent_info.gpu_id = std::stoull(gpu_id_prop.front());
+            } catch(std::exception& e)
+            {
+                ROCP_CI_LOG(WARNING) << fmt::format("rocprofiler-sdk agent encountered error while "
+                                                    "parsing gpu id property '{}': {}",
+                                                    gpu_id_prop.front(),
+                                                    e.what());
+            }
+        }
 
         read_property(properties, "cpu_cores_count", agent_info.cpu_cores_count);
         read_property(properties, "simd_count", agent_info.simd_count);
