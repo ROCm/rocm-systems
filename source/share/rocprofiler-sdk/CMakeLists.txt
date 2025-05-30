@@ -20,10 +20,28 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-configure_file(
-    convert-counters-collection-format.py
-    ${PROJECT_BINARY_DIR}/share/rocprofiler-sdk/convert-counters-collection-format.py
-    COPYONLY)
+# non-executable files
+set(share_files basic_counters.xml counter_defs.yaml derived_counters.xml)
+
+# executables
+set(share_progs convert-counters-collection-format.py)
+
+foreach(_FILE ${share_files})
+    configure_file(${_FILE} ${PROJECT_BINARY_DIR}/share/rocprofiler-sdk/${_FILE} COPYONLY)
+    install(
+        FILES ${PROJECT_BINARY_DIR}/share/rocprofiler-sdk/${_FILE}
+        DESTINATION share/rocprofiler-sdk
+        COMPONENT core)
+endforeach()
+
+foreach(_FILE ${share_progs})
+    configure_file(${_FILE} ${PROJECT_BINARY_DIR}/share/rocprofiler-sdk/${_FILE}
+                   USE_SOURCE_PERMISSIONS COPYONLY)
+    install(
+        PROGRAMS ${PROJECT_BINARY_DIR}/share/rocprofiler-sdk/${_FILE}
+        DESTINATION share/rocprofiler-sdk
+        COMPONENT core)
+endforeach()
 
 set(CONVERT_CC_FORMAT_PATH
     ${PROJECT_BINARY_DIR}/share/rocprofiler-sdk/convert-counters-collection-format.py)
@@ -31,9 +49,3 @@ set(CONVERT_CC_FORMAT_PATH
 add_executable(rocprofiler-sdk::convert-counters-collection-format IMPORTED)
 set_property(TARGET rocprofiler-sdk::convert-counters-collection-format
              PROPERTY IMPORTED_LOCATION ${CONVERT_CC_FORMAT_PATH})
-
-install(
-    FILES
-        ${PROJECT_BINARY_DIR}/share/rocprofiler-sdk/convert-counters-collection-format.py
-    DESTINATION share/rocprofiler-sdk
-    COMPONENT core)

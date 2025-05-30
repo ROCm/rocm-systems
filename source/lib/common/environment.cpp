@@ -151,5 +151,56 @@ SPECIALIZE_SET_ENV(std::string_view)
 SPECIALIZE_SET_ENV(float)
 SPECIALIZE_SET_ENV(double)
 }  // namespace impl
+
+env_store::env_store(std::initializer_list<env_config>&& _container)
+{
+    for(const auto& itr : _container)
+    {
+        m_original.emplace_back(env_config{itr.env_name, get_env(itr.env_name, ""), 1});
+        m_modified.emplace_back(env_config{itr.env_name, itr.env_value, 1});
+    }
+}
+
+env_store::~env_store() { pop(); }
+
+bool
+env_store::push()
+{
+    // not that push ignored bc already pushed
+    if(m_pushed) return false;
+
+    for(const auto& itr : m_modified)
+        itr();
+
+    m_pushed = true;
+    return true;
+}
+
+bool
+env_store::pop(bool unset_if_empty)
+{
+    if(!m_pushed) return false;
+
+    for(const auto& itr : m_original)
+    {
+        auto _current = get_env(itr.env_name, "");
+        if(!unset_if_empty && itr.env_value.empty())
+            continue;
+        else if(_current == itr.env_value)
+            continue;
+        else if(_current != itr.env_value)
+        {
+            ROCP_INFO << fmt::format("[rocprofiler][env][pop] {}=\"{}\" => {}=\"{}\"",
+                                     itr.env_name,
+                                     _current,
+                                     itr.env_name,
+                                     itr.env_value);
+        }
+        itr();
+    }
+
+    m_pushed = false;
+    return true;
+}
 }  // namespace common
 }  // namespace rocprofiler

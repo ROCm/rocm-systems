@@ -22,11 +22,24 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import argparse
 import os
-import subprocess
-import textwrap
 import sys
+import argparse
+import textwrap
+import subprocess
+
+# version info for rocprofiler-sdk / rocprofv3
+CONST_VERSION_INFO = {
+    "version": "@FULL_VERSION_STRING@",
+    "git_revision": "@ROCPROFILER_SDK_GIT_REVISION@",
+    "library_arch": "@CMAKE_LIBRARY_ARCHITECTURE@",
+    "system_name": "@CMAKE_SYSTEM_NAME@",
+    "system_processor": "@CMAKE_SYSTEM_PROCESSOR@",
+    "system_version": "@CMAKE_SYSTEM_VERSION@",
+    "compiler_id": "@CMAKE_CXX_COMPILER_ID@",
+    "compiler_version": "@CMAKE_CXX_COMPILER_VERSION@",
+    "rocm_version": "@rocm_version_FULL_VERSION@",
+}
 
 
 class dotdict(dict):
@@ -171,6 +184,13 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
             metavar="BOOL",
         )
 
+    parser.add_argument(
+        "-v",
+        "--version",
+        action="store_true",
+        help="Print the version information and exit",
+    )
+
     io_options = parser.add_argument_group("I/O options")
 
     io_options.add_argument(
@@ -196,11 +216,12 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         required=False,
     )
     io_options.add_argument(
+        "-f",
         "--output-format",
-        help="For adding output format (supported formats: csv, json, pftrace, otf2)",
+        help="For adding output format (supported formats: csv, json, pftrace, otf2, rocpd)",
         nargs="+",
         default=None,
-        choices=("csv", "json", "pftrace", "otf2"),
+        choices=("csv", "json", "pftrace", "otf2", "rocpd"),
         type=str.lower,
     )
     add_parser_bool_argument(
@@ -1018,7 +1039,7 @@ def run(app_args, args, **kwargs):
         update_env("ROCPROF_OUTPUT_LIST_AVAIL_FILE", True)
 
     if not args.output_format:
-        args.output_format = ["csv"]
+        args.output_format = ["rocpd"]
 
     update_env(
         "ROCPROF_OUTPUT_FORMAT", ",".join(args.output_format), append=True, join_char=","
@@ -1102,6 +1123,9 @@ def run(app_args, args, **kwargs):
         trace_count += 1 if val else 0
         trace_opts += ["--{}".format(opt.replace("_", "-"))]
 
+    if args.pmc_groups:
+        trace_count += 1
+
     # if marker tracing was requested, LD_PRELOAD the rocprofiler-sdk-roctx library
     # to override the roctx symbols of an app linked to the old roctracer roctx
     if args.marker_trace and not args.suppress_marker_preload:
@@ -1143,6 +1167,12 @@ def run(app_args, args, **kwargs):
                     f"{_args}",
                     "\n    ".join(trace_opts),
                 )
+
+        rocprofiler_ci_env = os.environ.get("ROCPROFILER_CI", "0")
+        if strtobool(rocprofiler_ci_env):
+            fatal_error(
+                f"rocprofv3 tracing options are required when ROCPROFILER_CI={rocprofiler_ci_env}"
+            )
 
     _summary_groups = "##@@##".join(args.summary_groups) if args.summary_groups else None
     _summary_output_fname = args.summary_output_file
@@ -1325,7 +1355,7 @@ def run(app_args, args, **kwargs):
             update_env("ROCPROF_EXTRA_COUNTERS_CONTENTS", e_file_contents, overwrite=True)
 
     if args.pmc and args.pmc_groups:
-        fatal_error("Cannot specify both --pmc and --pmc-groups")
+        fatal_error("Cannot specify both --pmc and (input file) pmc_groups")
 
     if args.pmc:
         update_env("ROCPROF_COUNTER_COLLECTION", True, overwrite=True)
@@ -1522,6 +1552,12 @@ def run(app_args, args, **kwargs):
 def main(argv=None):
 
     cmd_args, app_args = parse_arguments(argv)
+
+    if cmd_args.version:
+        for key, itr in CONST_VERSION_INFO.items():
+            print(f"    {key:>16}: {itr}")
+        return 0
+
     inp_args = (
         parse_input(cmd_args.input) if getattr(cmd_args, "input") else [dotdict({})]
     )
@@ -1531,16 +1567,22 @@ def main(argv=None):
         pass_idx = None
         if has_set_attr(args, "pmc") and len(args.pmc) > 0:
             pass_idx = 1
-        run(app_args, args, pass_id=pass_idx)
+        ec = run(app_args, args, pass_id=pass_idx)
     else:
+        ec = 0
         for idx, itr in enumerate(inp_args):
             args = get_args(cmd_args, itr)
-            run(
+            _ec = run(
                 app_args,
                 args,
                 pass_id=(idx + 1),
                 use_execv=False,
             )
+            if _ec is not None and _ec != 0:
+                ec = _ec
+
+    # return error code
+    return ec if not None else 0
 
 
 if __name__ == "__main__":

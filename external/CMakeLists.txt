@@ -272,12 +272,8 @@ if(ROCPROFILER_BUILD_SQLITE3)
         )
     add_dependencies(rocprofiler-sdk-sqlite3 rocprofiler-sdk-sqlite-build)
 else()
-    # make it optional temporarily because ROCm CI does not have SQLite3 dev installed and
-    # cannot build from source (missing tclsh)
-    find_package(SQLite3)
-    if(SQLite3_FOUND)
-        target_link_libraries(rocprofiler-sdk-sqlite3 INTERFACE SQLite::SQLite3)
-    endif()
+    find_package(SQLite3 REQUIRED)
+    target_link_libraries(rocprofiler-sdk-sqlite3 INTERFACE SQLite::SQLite3)
 endif()
 
 #

@@ -146,7 +146,8 @@ jobs:
         ls -la
         ls -la ./build
         dpkg -i ./build/rocprofiler-sdk-roctx_*.deb
-        for i in $(ls -S ./build/rocprofiler-sdk*.deb | egrep -v roctx); do dpkg -i ${i}; done;
+        dpkg -i ./build/rocprofiler-sdk-rocpd_*.deb
+        for i in $(ls -S ./build/rocprofiler-sdk*.deb | egrep -v 'roctx|rocpd'); do dpkg -i ${i}; done;
 
     - name: Test Installed Packages
       if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
@@ -271,7 +272,8 @@ jobs:
         ls -la
         ls -la ./build
         dpkg -i ./build/rocprofiler-sdk-roctx_*.deb
-        for i in $(ls -S ./build/rocprofiler-sdk*.deb | egrep -v roctx); do dpkg -i ${i}; done;
+        dpkg -i ./build/rocprofiler-sdk-rocpd_*.deb
+        for i in $(ls -S ./build/rocprofiler-sdk*.deb | egrep -v 'roctx|rocpd'); do dpkg -i ${i}; done;
 
     - name: Test Installed Packages
       if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}

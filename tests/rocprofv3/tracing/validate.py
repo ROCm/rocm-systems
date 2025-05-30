@@ -323,6 +323,14 @@ def test_perfetto_data(pftrace_data, json_data):
     )
 
 
+def test_rocpd_data(rocpd_data, json_data):
+    import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
+
+    rocprofv3.test_rocpd_data(
+        rocpd_data, json_data, ("hip", "hsa", "marker", "kernel", "memory_copy")
+    )
+
+
 if __name__ == "__main__":
     exit_code = pytest.main(["-x", __file__] + sys.argv[1:])
     sys.exit(exit_code)

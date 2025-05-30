@@ -69,8 +69,25 @@
         }                                                                                          \
     }
 
+#define ROCPD_CHECK_NESTED(VAR, RESULT, LEVEL)                                                     \
+    {                                                                                              \
+        if(rocpd_status_t ROCPROFILER_VARIABLE(CHECKSTATUS, VAR) = RESULT;                         \
+           ROCPROFILER_VARIABLE(CHECKSTATUS, VAR) != ROCPD_STATUS_SUCCESS)                         \
+        {                                                                                          \
+            ROCP_##LEVEL << fmt::format(                                                           \
+                "[{}] {} returned {} :: {}",                                                       \
+                __FUNCTION__,                                                                      \
+                #RESULT,                                                                           \
+                rocpd_get_status_name(ROCPROFILER_VARIABLE(CHECKSTATUS, VAR)),                     \
+                rocpd_get_status_string(ROCPROFILER_VARIABLE(CHECKSTATUS, VAR)));                  \
+        }                                                                                          \
+    }
+
 #define ROCPROFILER_CHECK(RESULT)         ROCPROFILER_CHECK_NESTED(__COUNTER__, RESULT, FATAL)
 #define ROCPROFILER_CHECK_WARNING(RESULT) ROCPROFILER_CHECK_NESTED(__COUNTER__, RESULT, WARNING)
+
+#define ROCPD_CHECK(RESULT)         ROCPD_CHECK_NESTED(__COUNTER__, RESULT, FATAL)
+#define ROCPD_CHECK_WARNING(RESULT) ROCPD_CHECK_NESTED(__COUNTER__, RESULT, WARNING)
 
 namespace rocprofiler
 {
@@ -118,6 +135,7 @@ struct agent_index
 struct metadata
 {
     using agent_info_ptr_vec_t = common::container::small_vector<const agent_info*, 16>;
+    using string_index_map_t   = std::unordered_map<std::string_view, size_t>;
 
     struct inprocess
     {};
@@ -146,6 +164,9 @@ struct metadata
     synced_obj<runtime_initialization_set_t> runtime_initialization_set = {};
     node_info                                node_data                  = {};
     std::vector<std::string>                 command_line               = {};
+
+    // PMC event ids start at this number
+    uint64_t pmc_event_offset = 1;
 
     metadata() = default;
     metadata(inprocess);
@@ -181,6 +202,8 @@ struct metadata
     int64_t          get_instruction_index(rocprofiler_pc_t record);
     void             add_decoder(rocprofiler_code_object_info_t* obj_data_v);
     code_object_load_info_vec_t get_code_object_load_info() const;
+
+    string_index_map_t get_string_entries() const;
 
     template <typename Tp>
     Tp get_marker_messages(Tp&&);
@@ -232,5 +255,12 @@ metadata::get_marker_messages(Tp&& _inp)
         },
         std::move(_inp));
 }
+
+agent_index
+create_agent_index(const agent_indexing   index,
+                   uint32_t               agent_abs_index,
+                   uint32_t               agent_log_index,
+                   uint32_t               agent_type_index,
+                   const std::string_view agent_type);
 }  // namespace tool
 }  // namespace rocprofiler

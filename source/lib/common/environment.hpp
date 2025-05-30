@@ -88,11 +88,49 @@ struct env_config
 
     auto operator()(bool _verbose = false) const
     {
-        if(env_name.empty()) return -1;
-        ROCP_INFO_IF(_verbose) << "[rocprofiler][set_env] setenv(\"" << env_name << "\", \""
-                               << env_value << "\", " << overwrite << ")\n";
-        return setenv(env_name.c_str(), env_value.c_str(), overwrite);
+        if(env_name.empty())
+            return -1;
+        else if(_verbose)
+        {
+            ROCP_INFO << "[rocprofiler][set_env] setenv(\"" << env_name << "\", \"" << env_value
+                      << "\", " << overwrite << ")\n";
+        }
+        return (env_value.empty() && overwrite > 0)
+                   ? unsetenv(env_name.c_str())
+                   : setenv(env_name.c_str(), env_value.c_str(), overwrite);
     }
 };
+
+struct env_store
+{
+    template <template <typename, typename...> class ContainerT, typename... TailT>
+    explicit env_store(ContainerT<env_config, TailT...>&& _container);
+    explicit env_store(std::initializer_list<env_config>&& _container);
+
+    ~env_store();
+    env_store(const env_store&)     = default;
+    env_store(env_store&&) noexcept = default;
+    env_store& operator=(const env_store&) = default;
+    env_store& operator=(env_store&&) noexcept = default;
+
+    bool push();
+    bool pop(bool unset_if_empty = true);
+    bool is_pushed() const { return m_pushed; }
+
+private:
+    bool                    m_pushed   = false;
+    std::vector<env_config> m_original = {};
+    std::vector<env_config> m_modified = {};
+};
+
+template <template <typename, typename...> class ContainerT, typename... TailT>
+env_store::env_store(ContainerT<env_config, TailT...>&& _container)
+{
+    for(const auto& itr : _container)
+    {
+        m_original.emplace_back(env_config{itr.env_name, get_env(itr.env_name, ""), 1});
+        m_modified.emplace_back(env_config{itr.env_name, itr.env_value, 1});
+    }
+}
 }  // namespace common
 }  // namespace rocprofiler

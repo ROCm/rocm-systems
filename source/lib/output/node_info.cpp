@@ -21,10 +21,13 @@
 // SOFTWARE.
 
 #include "lib/output/node_info.hpp"
+#include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/sha256.hpp"
 
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 
+#include <fmt/format.h>
 #include <sys/utsname.h>
 
 #include <fstream>
@@ -33,19 +36,121 @@ namespace rocprofiler
 {
 namespace tool
 {
+namespace
+{
 using utsname_t = struct utsname;
+
+std::string
+sha256_hex(const std::string& input)
+{
+    auto sha = common::sha256{};
+    sha.update(input);
+    return sha.hexdigest();
+}
+
+// --- Machine ID Utility ---
+std::string
+read_file_first_line(const std::string& path)
+{
+    if(auto file = std::ifstream{path}; file.is_open())
+    {
+        auto line = std::string{};
+        std::getline(file, line);
+        return line;
+    }
+    return std::string{};
+}
+
+std::string
+get_mac_address(std::string_view iface)
+{
+    if(auto mac = read_file_first_line(fmt::format("/sys/class/net/{}/address", iface));
+       !mac.empty())
+        return mac;
+
+    return {};
+}
+
+std::string
+read_file(const std::string& filePath)
+{
+    auto file = std::ifstream{filePath, std::ios::in | std::ios::binary};
+    if(file.is_open())
+    {
+        auto buffer = std::stringstream{};
+        buffer << file.rdbuf();
+        return buffer.str();
+    }
+    return std::string{};
+}
+
+std::string
+get_mac_address(const std::vector<std::string>& interfaces = {"eth0", "enp0s3", "wlan0", "eno1"})
+{
+    namespace fs = ::rocprofiler::common::filesystem;
+
+    auto remove_duplicates = [](auto _data) {
+        std::sort(_data.begin(), _data.end());
+        _data.erase(std::unique(_data.begin(), _data.end()), _data.end());
+        return _data;
+    };
+
+    for(std::string_view iface : interfaces)
+    {
+        if(auto mac = get_mac_address(iface); !mac.empty()) return mac;
+    }
+
+    for(const auto& itr : fs::directory_iterator{fs::path{"/sys/class/net"}})
+    {
+        if(auto path = fs::path{itr}; fs::exists(path / "address"))
+        {
+            if(auto mac = get_mac_address(path.filename().string()); !mac.empty())
+            {
+                // some network interfaces have generic addresses like 00:00:00:00:00:00 or
+                // ee:ee:ee:ee:ee:ee and we want to ignore these
+                if(remove_duplicates(sdk::parse::tokenize(mac, ":")).size() > 1) return mac;
+            }
+        }
+    }
+
+    return std::string{};
+}
+
+std::string
+get_machine_id()
+{
+    // not all Linux distributions have /etc/machine-id so we need to fallback on various
+    // alternatives to try to uniquely identify the system
+    if(std::string id = read_file_first_line("/etc/machine-id"); !id.empty()) return id;
+
+    if(std::string id = read_file_first_line("/var/lib/dbus/machine-id"); !id.empty()) return id;
+
+    //
+    // for all values beyond this point, encrypt the id with sha256 since this is potentially
+    // sensitive information. prefix is used for salt separation
+    //
+    if(std::string id = read_file_first_line("/sys/class/dmi/id/product_uuid"); !id.empty())
+        return sha256_hex(fmt::format("product_uuid:{}", id));
+
+    if(std::string id = read_file_first_line("/sys/class/dmi/id/board_serial"); !id.empty())
+        return sha256_hex(fmt::format("board_serial:{}", id));
+
+    if(std::string id = read_file("/proc/cpuinfo") + read_file("/proc/version") +
+                        read_file("/proc/devices") + read_file("/proc/filesystems");
+       !id.empty())
+        return sha256_hex(fmt::format("procinfo:{}", id));
+
+    if(std::string id = get_mac_address(); !id.empty())
+        return sha256_hex(fmt::format("mac_address:{}", id));
+
+    return std::string{};
+}
+}  // namespace
 
 node_info&
 read_node_info(node_info& _info)
 {
-    {
-        if(auto ifs = std::ifstream{"/etc/machine-id"})
-        {
-            auto _mach_id = std::string{};
-            if((ifs >> _mach_id) && !_mach_id.empty())
-                _info.machine_id = sdk::parse::strip(std::move(_mach_id), "\n\t\r ");
-        }
-    }
+    _info.machine_id = get_machine_id();
 
     auto _sys_info = utsname_t{};
     if(uname(&_sys_info) == 0)

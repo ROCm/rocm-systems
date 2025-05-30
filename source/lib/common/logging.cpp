@@ -53,6 +53,34 @@ struct log_level_info
     int32_t google_level  = 0;
     int32_t verbose_level = 0;
 };
+
+env_store
+get_glog_env_config(const logging_config& cfg)
+{
+    auto as_env_config = [](std::string_view _var, auto _val) {
+        return env_config{std::string{_var}, fmt::format("{}", _val), 1};
+    };
+
+    auto _data = std::vector<env_config>{
+        as_env_config("GLOG_minloglevel", cfg.loglevel),
+        as_env_config("GLOG_logtostderr", cfg.logtostderr ? 1 : 0),
+        as_env_config("GLOG_alsologtostderr", cfg.alsologtostderr ? 1 : 0),
+        as_env_config("GLOG_stderrthreshold", cfg.loglevel),
+        as_env_config("GLOG_v", cfg.vlog_level),
+    };
+
+    if(!cfg.logdir.empty())
+    {
+        _data.emplace_back(as_env_config("GOOGLE_LOG_DIR", cfg.logdir));
+        _data.emplace_back(as_env_config("GLOG_log_dir", cfg.logdir));
+    }
+    if(!cfg.vlog_modules.empty())
+    {
+        _data.emplace_back(as_env_config("GLOG_vmodule", cfg.vlog_modules));
+    }
+
+    return env_store{std::move(_data)};
+}
 }  // namespace
 
 void
@@ -139,7 +167,10 @@ init_logging(std::string_view env_prefix, logging_config cfg)
             }
         }
 
-        update_logging(cfg, !google::IsGoogleLoggingInitialized());
+        auto _env_store = get_glog_env_config(cfg);
+
+        update_logging(cfg);
+        _env_store.push();
 
         if(!google::IsGoogleLoggingInitialized())
         {
@@ -158,11 +189,13 @@ init_logging(std::string_view env_prefix, logging_config cfg)
 
         ROCP_INFO << "logging initialized via " << fmt::format("{}_LOG_LEVEL", env_prefix)
                   << ". Log Level: " << loglvl << ". Verbose Log Level: " << vlog_level;
+
+        _env_store.pop(false);
     });
 }
 
 void
-update_logging(const logging_config& cfg, bool setup_env, int env_override)
+update_logging(const logging_config& cfg)
 {
     static auto _mtx = std::mutex{};
     auto        _lk  = std::unique_lock<std::mutex>{_mtx};
@@ -191,22 +224,6 @@ update_logging(const logging_config& cfg, bool setup_env, int env_override)
                 ofs << "/**" << std::flush;
             }
         }
-    }
-
-    if(setup_env)
-    {
-        common::set_env("GLOG_minloglevel", cfg.loglevel, env_override);
-        common::set_env("GLOG_logtostderr", cfg.logtostderr ? 1 : 0, env_override);
-        common::set_env("GLOG_alsologtostderr", cfg.alsologtostderr ? 1 : 0, env_override);
-        common::set_env("GLOG_stderrthreshold", cfg.loglevel, env_override);
-        common::set_env("GLOG_v", cfg.vlog_level, env_override);
-        if(!cfg.logdir.empty())
-        {
-            common::set_env("GOOGLE_LOG_DIR", cfg.logdir, env_override);
-            common::set_env("GLOG_log_dir", cfg.logdir, env_override);
-        }
-        if(!cfg.vlog_modules.empty())
-            common::set_env("GLOG_vmodule", cfg.vlog_modules, env_override);
     }
 }
 }  // namespace common

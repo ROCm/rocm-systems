@@ -9,7 +9,8 @@
             "output_format": [
                 "csv",
                 "json",
-                "pftrace"
+                "pftrace",
+                "rocpd"
             ]
         }
     ]

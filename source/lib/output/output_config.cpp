@@ -74,10 +74,11 @@ output_config::parse_env()
     for(const auto& itr : sdk::parse::tokenize(output_format, " \t,;:"))
         entries.emplace(to_upper(itr));
 
-    csv_output     = entries.count("CSV") > 0 || entries.empty();
+    csv_output     = entries.count("CSV") > 0;
     json_output    = entries.count("JSON") > 0;
     pftrace_output = entries.count("PFTRACE") > 0;
     otf2_output    = entries.count("OTF2") > 0;
+    rocpd_output   = entries.count("ROCPD") > 0 || entries.empty();
 
     const auto supported_formats =
         std::set<std::string_view>{"CSV", "JSON", "PFTRACE", "OTF2", "ROCPD"};

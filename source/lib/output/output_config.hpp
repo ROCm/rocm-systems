@@ -67,6 +67,7 @@ struct output_config
     bool                     json_output                 = false;
     bool                     pftrace_output              = false;
     bool                     otf2_output                 = false;
+    bool                     rocpd_output                = false;
     bool                     summary_output              = false;
     bool                     kernel_rename               = false;
     bool                     group_by_queue              = false;
@@ -129,6 +130,7 @@ output_config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(pftrace_output);
     CFG_SERIALIZE_MEMBER(otf2_output);
     CFG_SERIALIZE_MEMBER(summary_output);
+    CFG_SERIALIZE_MEMBER(rocpd_output);
     CFG_SERIALIZE_MEMBER(kernel_rename);
     CFG_SERIALIZE_MEMBER(group_by_queue);
 

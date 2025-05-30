@@ -28,7 +28,8 @@ if(NOT EXISTS ${CMAKE_CURRENT_BINARY_DIR}/trace_processor_shell.linux_clang_rele
         WORLD_EXECUTE)
 endif()
 
-set(PYTEST_UTILS_PYTHON_SOURCES __init__.py dotdict.py perfetto_reader.py otf2_reader.py)
+set(PYTEST_UTILS_PYTHON_SOURCES __init__.py dotdict.py perfetto_reader.py otf2_reader.py
+                                rocpd_reader.py)
 set(TESTS_PYTHON_SOURCES __init__.py rocprofv3.py)
 
 foreach(_FILE ${PYTEST_UTILS_PYTHON_SOURCES})

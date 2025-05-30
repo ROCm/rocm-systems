@@ -9,11 +9,13 @@ set(common_sources
     environment.cpp
     logging.cpp
     md5sum.cpp
+    sha256.cpp
     simple_timer.cpp
     static_object.cpp
     static_tl_object.cpp
     string_entry.cpp
-    utility.cpp)
+    utility.cpp
+    uuid_v7.cpp)
 set(common_headers
     abi.hpp
     defines.hpp
@@ -26,6 +28,7 @@ set(common_headers
     md5sum.hpp
     mpl.hpp
     scope_destructor.hpp
+    sha256.hpp
     simple_timer.hpp
     static_object.hpp
     static_tl_object.hpp
@@ -33,7 +36,8 @@ set(common_headers
     stringize_arg.hpp
     synchronized.hpp
     units.hpp
-    utility.hpp)
+    utility.hpp
+    uuid_v7.hpp)
 
 add_library(rocprofiler-sdk-common-library STATIC)
 add_library(rocprofiler-sdk::rocprofiler-sdk-common-library ALIAS
