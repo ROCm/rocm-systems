@@ -958,25 +958,27 @@ class AMDSMILogger():
 
     def print_default_output(self, output: Dict):
         # some template lines
-        # TODO: adjust column lines to give market name more space
         default_line_1 = "+------------------------------------------------------------------------------+"
         default_line_2 = "|--------------------------------------+---------------------------------------|"
         default_line_3 = "|======================================+=======================================|"
         default_line_4 = "+--------------------------------------+---------------------------------------+"
-        # default_line_5 = "|==============================================================================|"
 
         # print the version information first
-        amd_smi_version = output['version_info']['amd-smi']
-        if len(amd_smi_version) > 16:
-            amd_smi_version = amd_smi_version[:13] + "..."
+        amd_smi_version = str(output['version_info']['amd-smi'])
+        if len(amd_smi_version) > 20:
+            amd_smi_version = amd_smi_version[:17] + "..."
         rocm_version = "N/A"
         if output['version_info']['rocm version'][0]:
-            rocm_version = output['version_info']['rocm version'][1]
-        amdgpu_version = output['version_info']['amdgpu version']['driver_version']
+            rocm_version = str(output['version_info']['rocm version'][1]).ljust(8)
+        driver_version = output['version_info']['amdgpu version']
+        if driver_version == "N/A":
+            amdgpu_version = "N/A".ljust(8)
+        else:
+            amdgpu_version = str(driver_version['driver_version']).ljust(8)
 
         # print GPU info
         print(default_line_1)
-        print("| AMD SMI {0:16s}   amdgpu version: {1:8s}   ROCm version: {2:8s} |".format(amd_smi_version, amdgpu_version, rocm_version.ljust(8)))
+        print("| AMD-SMI {0:20s} amdgpu version: {1:8s} ROCm version: {2:8s} |".format(amd_smi_version.ljust(20), amdgpu_version, rocm_version))
         print(default_line_2)
         print("| BDF                         GPU-Name | Mem-Util    Temp   UECC   Power-Usage |")
         print("| GPU  HIP-ID   OAM-ID  Partition-Mode | GFX-Util     Fan         Memory-Usage |")
@@ -1009,8 +1011,8 @@ class AMDSMILogger():
             if power_usage != "N/A":
                 power_usage = f"{gpu_info['power_usage']['current_power']}/{gpu_info['power_usage']['power_limit']} W"
             power_usage = str(power_usage).rjust(12)
-
-            print("| {0:12s}  {1:22s} | {2:8s}  {3:6s}  {4:5s}  {5:12s} |".format(bdf, market_name, mem_util, temp, u_ecc, power_usage))
+            print("| {0:12.12s}  {1:22.22s} | {2:8.8s}  {3:6.6s}  {4:5.5s}  {5:12.12s} |".format(bdf, market_name, mem_util, temp, u_ecc, power_usage))
+            
             gpu_id = str(gpu_info['gpu_id']).rjust(3)
             hip_id = str(gpu_info['hip_id']).rjust(6)
             oam_id = str(gpu_info['oam_id']).rjust(7)
@@ -1030,7 +1032,7 @@ class AMDSMILogger():
             if mem_usage != "N/A":
                 mem_usage = f"{gpu_info['mem_usage']['used_vram']}/{gpu_info['mem_usage']['total_vram']} MB"
             mem_usage = mem_usage.rjust(19)
-            print("| {0:3s}  {1:6s}  {2:7s}  {3:14s} | {4:8s} {5:7s}  {6:19s} |".format(gpu_id, hip_id, oam_id, partition_modes, gfx_util, fan, mem_usage))
+            print("| {0:3.3s}  {1:6.6s}  {2:7.7s}  {3:14.14s} | {4:8.8s} {5:7.7s}  {6:19.19s} |".format(gpu_id, hip_id, oam_id, partition_modes, gfx_util, fan, mem_usage))
 
             if line_count < end:
                 print(default_line_2)

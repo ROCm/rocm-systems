@@ -6508,19 +6508,30 @@ class AMDSMICommands():
 
     def default(self, args):
         """Display the default amdsmi view when no args are given."""
+
+        # check groups first
+        if not self.group_check_printed:
+            self.helpers.check_required_groups()
+            self.group_check_printed = True
+
         processors = amdsmi_interface.amdsmi_get_processor_handles()
         version_info = {"amd-smi": "N/A",
                         "amdgpu version": "N/A",
                         "rocm version": "N/A"}
         version_info['rocm version'] = amdsmi_interface.amdsmi_get_rocm_version()
-        version_info["amdgpu version"] = amdsmi_interface.amdsmi_get_gpu_driver_info(processors[0])
+        try:
+            version_info["amdgpu version"] = amdsmi_interface.amdsmi_get_gpu_driver_info(processors[0])
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            version_info["amdgpu version"] = "N/A"
+            logging.debug("Failed to get driver info for gpu: %s", e.get_error_info())
+
         version_info["amd-smi"] = f'{__version__}'
 
         default_table_info_dict = {}
         default_table_info_dict.update({"version_info": version_info})
 
         gpu_info_list = []
-        all_process_list = []
+        # all_process_list = []
 
         # TODO: create new logger function to display table? or modify table?
         # get info for each processor to display in default output
@@ -6564,6 +6575,9 @@ class AMDSMICommands():
             # bdf
             try:
                 bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(processor)
+                # if the len of the bdf is not 12, then invalid values are being populated.
+                if len(bdf) != 12:
+                    bdf = "N/A"
             except amdsmi_exception.AmdSmiLibraryException as e:
                 bdf = "N/A"
             gpu_info_dict.update({"bdf": bdf})
