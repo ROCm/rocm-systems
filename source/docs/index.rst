@@ -44,6 +44,7 @@ The documentation is structured as follows:
     * :doc:`Callback services <api-reference/callback_services>`
     * :doc:`Counter collection services <api-reference/counter_collection_services>`
     * :doc:`PC sampling <api-reference/pc_sampling>`
+    * :doc:`ROCprof Trace Decoder <api-reference/thread_trace>`
     * :doc:`ROCprofiler-SDK API <api-reference/rocprofiler-sdk_api_reference>`
     * :doc:`ROCTx API <api-reference/rocprofiler-sdk-roctx_api_reference>`
 
