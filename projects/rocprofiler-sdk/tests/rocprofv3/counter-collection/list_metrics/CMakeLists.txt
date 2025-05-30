@@ -30,12 +30,12 @@ add_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d
         ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_2 -o metrics --list-avail
-        --sys-trace -- $<TARGET_FILE:transpose>)
+        --sys-trace --log-level warning -- $<TARGET_FILE:transpose>)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-set(cc-env-list-metrics "${PRELOAD_ENV}")
+set(cc-env-list-metrics "${PRELOAD_ENV}" "ROCPD_LOG_LEVEL=trace")
 
 set_tests_properties(
     rocprofv3-test-list-avail-execute

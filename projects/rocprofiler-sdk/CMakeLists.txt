@@ -87,7 +87,7 @@ mark_as_advanced(CMAKE_INSTALL_RPATH_USE_LINK_PATH CMAKE_DEBUG_POSTFIX)
 
 set(ROCPROFILER_INTERNAL_BUILD_DOCS
     OFF
-    CACHE INTERNAL "Generates rocprofiler/version.h and exits (no build targets)")
+    CACHE INTERNAL "Generates rocprofiler-sdk/version.h and exits (no build targets)")
 if(ROCPROFILER_INTERNAL_BUILD_DOCS)
     add_subdirectory(source/include)
     return()
@@ -114,6 +114,7 @@ add_subdirectory(source)
 
 include(rocprofiler_config_install)
 include(rocprofiler_config_install_roctx)
+include(rocprofiler_config_install_rocpd)
 
 if(ROCPROFILER_BUILD_TESTS)
     add_subdirectory(tests)

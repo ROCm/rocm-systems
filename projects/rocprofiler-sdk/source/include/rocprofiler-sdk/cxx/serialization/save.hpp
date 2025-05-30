@@ -41,7 +41,6 @@
 #include <rocprofiler-sdk/marker.h>
 #include <rocprofiler-sdk/pc_sampling.h>
 #include <rocprofiler-sdk/cxx/name_info.hpp>
-#include <rocprofiler-sdk/cxx/perfetto.hpp>
 #include <rocprofiler-sdk/cxx/utility.hpp>
 
 #include <cereal/archives/binary.hpp>

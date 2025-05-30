@@ -41,14 +41,14 @@ add_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
         ${CMAKE_CURRENT_BINARY_DIR}/input.json -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-cc
-        -o out_json -- $<TARGET_FILE:simple-transpose>)
+        -o out_json -f csv -- $<TARGET_FILE:simple-transpose>)
 
 add_test(
     NAME rocprofv3-test-counter-collection-multiple-yaml-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
         ${CMAKE_CURRENT_BINARY_DIR}/input.yml -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-cc -o
-        out_yaml -- $<TARGET_FILE:simple-transpose>)
+        out_yaml -f csv -- $<TARGET_FILE:simple-transpose>)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")

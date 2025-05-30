@@ -425,6 +425,25 @@ metadata::get_counter_dimension_info() const
     return _ret;
 }
 
+metadata::string_index_map_t
+metadata::get_string_entries() const
+{
+    return string_entries.rlock([](const auto& _inp) {
+        auto _sorted = std::vector<std::string_view>{};
+        _sorted.reserve(_inp.size());
+        for(const auto& itr : _inp)
+            _sorted.emplace_back(std::string_view{*itr.second});
+        std::sort(_sorted.begin(), _sorted.end());
+
+        auto   _ret = string_index_map_t{};
+        size_t _idx = 1;
+        for(const auto& itr : _sorted)
+            _ret.emplace(itr, _idx++);
+
+        return _ret;
+    });
+}
+
 bool
 metadata::add_marker_message(uint64_t corr_id, std::string&& msg)
 {
@@ -607,17 +626,12 @@ metadata::get_agent_index(rocprofiler_agent_id_t id, agent_indexing index) const
         return "UNK";
     };
 
-    switch(index)
-    {
-        case agent_indexing::node: return agent_index{"Agent", _agent->node_id, get_type()};
-        case agent_indexing::logical_node_type:
-            return agent_index{
-                get_type(), static_cast<uint32_t>(_agent->logical_node_type_id), get_type()};
-
-        case agent_indexing::logical_node:
-        default:
-            return agent_index{"Agent", static_cast<uint32_t>(_agent->logical_node_id), get_type()};
-    }
+    return create_agent_index(
+        index,
+        _agent->node_id,                                      // absolute index
+        static_cast<uint32_t>(_agent->logical_node_id),       // relative index
+        static_cast<uint32_t>(_agent->logical_node_type_id),  // type-relative index
+        get_type());
 }
 
 const std::string*
@@ -691,5 +705,32 @@ metadata::decode_instruction(rocprofiler_pc_t pc)
         pc.code_object_offset);
 }
 
+agent_index
+create_agent_index(const rocprofiler::tool::agent_indexing index,
+                   uint32_t                                agent_abs_index,
+                   uint32_t                                agent_log_index,
+                   uint32_t                                agent_type_index,
+                   const std::string_view                  agent_type)
+{
+    switch(index)
+    {
+        case rocprofiler::tool::agent_indexing::node:  // absolute
+        {
+            return agent_index{"Agent", agent_abs_index, agent_type};
+        }
+        case rocprofiler::tool::agent_indexing::logical_node:  // relative (default)
+        {
+            return agent_index{"Agent", agent_log_index, agent_type};
+        }
+        case rocprofiler::tool::agent_indexing::logical_node_type:  // type-relative
+        {
+            return agent_index{agent_type, agent_type_index, agent_type};
+        }
+    }
+
+    ROCP_CI_LOG(WARNING) << fmt::format(
+        "Unsupported agent indexing {} for agent-{}", static_cast<int>(index), agent_abs_index);
+    return agent_index{};
+}
 }  // namespace tool
 }  // namespace rocprofiler

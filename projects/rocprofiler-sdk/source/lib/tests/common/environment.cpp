@@ -22,7 +22,13 @@
 
 #include "lib/common/environment.hpp"
 
+#include <fmt/format.h>
 #include <gtest/gtest.h>
+
+namespace
+{
+bool _common_environment_test_init_logging = (rocprofiler::common::init_logging("TEST"), true);
+}
 
 TEST(common, environment)
 {
@@ -111,5 +117,44 @@ TEST(common, environment)
     {
         env_config{"ROCPROFILER_ENV_TEST_BOOL", std::to_string(n), 1}();
         EXPECT_TRUE(get_env("ROCPROFILER_ENV_TEST_BOOL", false));
+    }
+}
+
+TEST(common, environment_push_pop)
+{
+    using rocprofiler::common::env_config;
+    using rocprofiler::common::env_store;
+    using rocprofiler::common::get_env;
+
+    namespace common = ::rocprofiler::common;
+
+    common::set_env("ROCPROFILER_ENV_TEST_A", "0", 1);
+    common::set_env("ROCPROFILER_ENV_TEST_B", "2", 1);
+
+    auto _store = env_store{{env_config{"ROCPROFILER_ENV_TEST_A", "1"},
+                             env_config{"ROCPROFILER_ENV_TEST_B", "2", 1},
+                             env_config{"ROCPROFILER_ENV_TEST_C", "3", 0}}};
+
+    for(size_t i = 0; i < 5; ++i)
+    {
+        EXPECT_EQ(get_env("ROCPROFILER_ENV_TEST_A", 3), 0) << fmt::format("iteration={}", i);
+        EXPECT_EQ(get_env("ROCPROFILER_ENV_TEST_B", 0), 2) << fmt::format("iteration={}", i);
+        EXPECT_EQ(get_env("ROCPROFILER_ENV_TEST_C", 1), 1) << fmt::format("iteration={}", i);
+
+        EXPECT_FALSE(_store.is_pushed()) << fmt::format("iteration={}", i);
+        EXPECT_TRUE(_store.push()) << fmt::format("iteration={}", i);
+        EXPECT_FALSE(_store.push()) << fmt::format("iteration={}", i);
+
+        EXPECT_EQ(get_env("ROCPROFILER_ENV_TEST_A", 3), 1) << fmt::format("iteration={}", i);
+        EXPECT_EQ(get_env("ROCPROFILER_ENV_TEST_B", 0), 2) << fmt::format("iteration={}", i);
+        EXPECT_EQ(get_env("ROCPROFILER_ENV_TEST_C", 1), 3) << fmt::format("iteration={}", i);
+
+        EXPECT_TRUE(_store.is_pushed()) << fmt::format("iteration={}", i);
+        EXPECT_TRUE(_store.pop()) << fmt::format("iteration={}", i);
+        EXPECT_FALSE(_store.pop()) << fmt::format("iteration={}", i);
+
+        EXPECT_EQ(get_env("ROCPROFILER_ENV_TEST_A", 3), 0) << fmt::format("iteration={}", i);
+        EXPECT_EQ(get_env("ROCPROFILER_ENV_TEST_B", 0), 2) << fmt::format("iteration={}", i);
+        EXPECT_EQ(get_env("ROCPROFILER_ENV_TEST_C", 0), 0) << fmt::format("iteration={}", i);
     }
 }

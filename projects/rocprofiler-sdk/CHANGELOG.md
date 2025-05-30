@@ -176,12 +176,20 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
   - type-relative == logical_node_type_id
 - Added MI300 stochastic (hardware-based) PC sampling support in ROCProfiler-SDK and ROCProfV3
 - Python bindings for rocprofiler-sdk-roctx
+- SQLite3 output support for rocprofv3 (`--output-format rocpd`)
+- Added `rocprofiler-sdk-rocpd` package
+  - public API in `include/rocprofiler-sdk-rocpd/rocpd.h`
+  - library implementation in `librocprofiler-sdk-rocpd.so`
+  - support for `find_package(rocprofiler-sdk-rocpd)`
+  - `rocprofiler-sdk-rocpd` DEB and RPM packages
+- Support `--version` option for `rocprofv3`
 
 ### Changed
 
 - SDK no longer creates a background thread when every tool returns a nullptr from `rocprofiler_configure`.
 - Updated disassembly.hpp's vaddr-to-file-offset mapping to use the dedicated comgr API.
 - rocprofv3 shorthand argument for `--collection-period` is now `-P` (upper-case) as `-p` (lower-case) is reserved for later use
+- default output format for rocprofv3 is now `rocpd` (SQLite3 database)
 
 ### Resolved issues
 

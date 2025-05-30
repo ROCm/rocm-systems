@@ -17,6 +17,7 @@ set(TOOL_OUTPUT_HEADERS
     generateOTF2.hpp
     generatePerfetto.hpp
     generateStats.hpp
+    generateRocpd.hpp
     generator.hpp
     kernel_symbol_info.hpp
     host_symbol_info.hpp
@@ -41,6 +42,7 @@ set(TOOL_OUTPUT_SOURCES
     generateOTF2.cpp
     generatePerfetto.cpp
     generateStats.cpp
+    generateRocpd.cpp
     metadata.cpp
     node_info.cpp
     output_config.cpp
@@ -57,6 +59,7 @@ target_sources(rocprofiler-sdk-output-library PRIVATE ${TOOL_OUTPUT_SOURCES}
                                                       ${TOOL_OUTPUT_HEADERS})
 target_link_libraries(
     rocprofiler-sdk-output-library
+    PUBLIC rocprofiler-sdk::rocprofiler-sdk-rocpd-library
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers
             rocprofiler-sdk::rocprofiler-sdk-build-flags
             rocprofiler-sdk::rocprofiler-sdk-memcheck
@@ -68,3 +71,8 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-dw
             rocprofiler-sdk::rocprofiler-sdk-elf
             rocprofiler-sdk::rocprofiler-sdk-sqlite3)
+
+target_compile_definitions(rocprofiler-sdk-output-library
+                           PRIVATE PROJECT_BINARY_DIR="${PROJECT_BINARY_DIR}")
+
+add_subdirectory(sql)

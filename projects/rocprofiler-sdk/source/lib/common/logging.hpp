@@ -79,6 +79,6 @@ void
 init_logging(std::string_view env_prefix, logging_config cfg = logging_config{});
 
 void
-update_logging(const logging_config& cfg, bool setup_env = false, int env_override = 0);
+update_logging(const logging_config& cfg);
 }  // namespace common
 }  // namespace rocprofiler

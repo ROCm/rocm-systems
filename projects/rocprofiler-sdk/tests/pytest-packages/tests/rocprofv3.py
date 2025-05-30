@@ -146,3 +146,80 @@ def test_otf2_data(
         assert len(_otf2_data) == len(
             _json_data
         ), f"{otf2_category} ({len(_otf2_data)}):\n\t{_otf2_data}\n{json_category} ({len(_json_data)}):\n\t{_json_data}"
+
+
+def test_rocpd_data(
+    rocpd_data,
+    json_data,
+    categories=(
+        "hip",
+        "hsa",
+        "marker",
+        "kernel",
+        "memory_copy",
+        "memory_allocation",
+        "rocdecode_api",
+        "rocjpeg_api",
+    ),
+):
+
+    mapping = {
+        "hip": (
+            "hip_api",
+            (
+                "HIP_COMPILER_API",
+                "HIP_COMPILER_API_EXT",
+                "HIP_RUNTIME_API",
+                "HIP_RUNTIME_API_EXT",
+            ),
+        ),
+        "hsa": (
+            "hsa_api",
+            (
+                "HSA_CORE_API",
+                "HSA_AMD_EXT_API",
+                "HSA_IMAGE_EXT_API",
+                "HSA_FINALIZE_EXT_API",
+            ),
+        ),
+        "marker": (
+            "marker_api",
+            ("MARKER_CORE_API", "MARKER_CONTROL_API", "MARKER_NAME_API"),
+        ),
+        "kernel": ("kernel_dispatch", ("KERNEL_DISPATCH")),
+        "memory_copy": ("memory_copy", ("MEMORY_COPY")),
+        "memory_allocation": ("memory_allocation", ("MEMORY_ALLOCATION")),
+        "rocdecode_api": ("rocdecode_api", ("ROCDECODE_API")),
+        "rocjpeg_api": ("rocjpeg_api", ("ROCJPEG_API")),
+    }
+
+    view_mapping = {
+        "hip_api": "regions",
+        "hsa_api": "regions",
+        "marker_api": "markers",
+        "rccl_api": "regions",
+        "rocdecode_api": "regions",
+        "rocjpeg_api": "regions",
+        "kernel_dispatch": "kernels",
+        "memory_copy": "memory_copies",
+        "memory_allocation": "memory_allocations",
+    }
+
+    # make sure they specified valid categories
+    for itr in categories:
+        assert itr in mapping.keys()
+
+    for js_category, rpd_category in [
+        itr for key, itr in mapping.items() if key in categories
+    ]:
+        _js_data = json_data["rocprofiler-sdk-tool"]["buffer_records"][js_category]
+        _rpd_cats = (
+            rpd_category if isinstance(rpd_category, (list, tuple)) else [rpd_category]
+        )
+        _rpd_cond = " OR ".join([f"category = '{itr}'" for itr in _rpd_cats])
+        _rpd_query = f"SELECT * FROM {view_mapping[js_category]} WHERE {_rpd_cond}"
+        _rpd_data = rocpd_data.execute(_rpd_query).fetchall()
+
+        assert len(_rpd_data) == len(
+            _js_data
+        ), f"query: {_rpd_query}\n{rpd_category} ({len(_rpd_data)}):\n\t{_rpd_data}\n{js_category} ({len(_js_data)}):\n\t{_js_data}"

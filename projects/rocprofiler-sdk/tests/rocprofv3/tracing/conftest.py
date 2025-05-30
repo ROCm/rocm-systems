@@ -29,6 +29,7 @@ import json
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict
 from rocprofiler_sdk.pytest_utils import collapse_dict_list
 from rocprofiler_sdk.pytest_utils.perfetto_reader import PerfettoReader
+from rocprofiler_sdk.pytest_utils.rocpd_reader import RocpdReader
 
 
 def pytest_addoption(parser):
@@ -71,6 +72,11 @@ def pytest_addoption(parser):
         "--pftrace-input",
         action="store",
         help="Path to Perfetto trace file.",
+    )
+    parser.addoption(
+        "--rocpd-input",
+        action="store",
+        help="Path to rocpd SQLite3 database file.",
     )
 
 
@@ -157,3 +163,9 @@ def json_data(request):
 def pftrace_data(request):
     filename = request.config.getoption("--pftrace-input")
     return PerfettoReader(filename).read()[0]
+
+
+@pytest.fixture
+def rocpd_data(request):
+    filename = request.config.getoption("--rocpd-input")
+    return RocpdReader(filename).read()[0]

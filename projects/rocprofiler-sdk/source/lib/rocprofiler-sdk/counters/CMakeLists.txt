@@ -23,9 +23,7 @@ set(ROCPROFILER_LIB_COUNTERS_HEADERS
     ioctl.hpp)
 target_sources(rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_COUNTERS_SOURCES}
                                                       ${ROCPROFILER_LIB_COUNTERS_HEADERS})
-add_subdirectory(xml)
 add_subdirectory(parser)
-add_subdirectory(yaml)
 
 if(ROCPROFILER_BUILD_TESTS)
     add_subdirectory(tests)

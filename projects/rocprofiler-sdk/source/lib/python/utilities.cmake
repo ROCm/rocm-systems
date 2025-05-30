@@ -101,7 +101,7 @@ function(rocprofiler_roctx_python_bindings _VERSION)
         install(
             FILES ${roctx_PYTHON_OUTPUT_DIRECTORY}/${_SOURCE}
             DESTINATION ${roctx_PYTHON_INSTALL_DIRECTORY}
-            COMPONENT core)
+            COMPONENT roctx)
     endforeach()
 
     add_library(rocprofiler-sdk-roctx-python-bindings-${_VERSION} MODULE)
@@ -129,7 +129,7 @@ function(rocprofiler_roctx_python_bindings _VERSION)
     install(
         TARGETS rocprofiler-sdk-roctx-python-bindings-${_VERSION}
         DESTINATION ${roctx_PYTHON_INSTALL_DIRECTORY}
-        COMPONENT core)
+        COMPONENT roctx)
 endfunction()
 
 function(rocprofiler_rocpd_python_bindings_target_sources _VERSION)

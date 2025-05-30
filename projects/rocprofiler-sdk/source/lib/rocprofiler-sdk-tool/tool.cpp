@@ -49,6 +49,7 @@
 #include "lib/output/generateJSON.hpp"
 #include "lib/output/generateOTF2.hpp"
 #include "lib/output/generatePerfetto.hpp"
+#include "lib/output/generateRocpd.hpp"
 #include "lib/output/generateStats.hpp"
 #include "lib/output/metadata.hpp"
 #include "lib/output/output_stream.hpp"
@@ -2442,6 +2443,24 @@ tool_fini(void* /*tool_data*/)
                              memory_allocation_output.get_generator(),
                              rocdecode_output.get_generator(),
                              rocjpeg_output.get_generator());
+    }
+
+    if(tool::get_config().rocpd_output && outdata.num_output > 0 &&
+       outdata.num_bytes >= tool::get_config().minimum_output_bytes)
+    {
+        tool::write_rocpd(tool::get_config(),
+                          *tool_metadata,
+                          agents_output,
+                          hip_output.get_generator(),
+                          hsa_output.get_generator(),
+                          kernel_dispatch_output.get_generator(),
+                          memory_copy_output.get_generator(),
+                          marker_output.get_generator(),
+                          memory_allocation_output.get_generator(),
+                          scratch_memory_output.get_generator(),
+                          rccl_output.get_generator(),
+                          rocdecode_output.get_generator(),
+                          counters_output.get_generator());
     }
 
     if(tool::get_config().otf2_output && outdata.num_output > 0 &&

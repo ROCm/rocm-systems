@@ -29,7 +29,7 @@ add_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -M --hsa-trace --kernel-trace
         --memory-copy-trace --marker-trace -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace -o
-        cmdl-input/out --output-format pftrace csv json --log-level ${LOG_LEVEL} --
+        cmdl-input/out --output-format pftrace csv json rocpd --log-level ${LOG_LEVEL} --
         $<TARGET_FILE:simple-transpose>)
 
 set_tests_properties(
@@ -82,7 +82,9 @@ add_test(
         --json-input
         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_results.json
         --pftrace-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_results.pftrace)
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_results.pftrace
+        --rocpd-input
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_results.db)
 
 add_test(
     NAME rocprofv3-test-trace-input-json-validate
@@ -100,9 +102,12 @@ add_test(
         --json-input
         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_results.json
         --pftrace-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_results.pftrace)
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_results.pftrace
+        --rocpd-input
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_results.db)
 
 set(VALIDATION_FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_results.db
     ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_results.pftrace
     ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_results.json
     ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_memory_copy_trace.csv
@@ -152,7 +157,7 @@ add_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --sys-trace -d
         ${CMAKE_CURRENT_BINARY_DIR}/%argt%-systrace -o cmdl-input/out --output-format
-        pftrace csv json -- $<TARGET_FILE:simple-transpose>)
+        pftrace csv json rocpd -- $<TARGET_FILE:simple-transpose>)
 
 set_tests_properties(
     rocprofv3-test-systrace-execute
@@ -204,7 +209,8 @@ add_test(
         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_results.json
         --pftrace-input
         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_results.pftrace
-    )
+        --rocpd-input
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_results.db)
 
 add_test(
     NAME rocprofv3-test-systrace-input-json-validate
@@ -224,9 +230,11 @@ add_test(
         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_results.json
         --pftrace-input
         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_results.pftrace
-    )
+        --rocpd-input
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_results.db)
 
 set(SYS_VALIDATION_FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_results.db
     ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_results.pftrace
     ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_results.json
     ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_memory_copy_trace.csv
