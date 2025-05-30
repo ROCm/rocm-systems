@@ -890,8 +890,6 @@ amdsmi_status_t amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_hand
         return r;
     }
 
-    struct drm_amdgpu_info_vram_gtt gtt;
-    uint64_t vram_used = 0;
     std::ostringstream ss;
 
     SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
@@ -948,35 +946,21 @@ amdsmi_status_t amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_hand
        << " | drmCommandWrite symbol loaded successfully";
     LOG_INFO(ss);
 
-    // Get the device info
-    memset(&gtt, 0, sizeof(struct drm_amdgpu_info_vram_gtt));
-    struct drm_amdgpu_info request = {};
-    memset(&request, 0, sizeof(request));
-    request.return_pointer = reinterpret_cast<unsigned long long>(&gtt);
-    request.return_size = sizeof(struct drm_amdgpu_memory_info);
-    request.query = AMDGPU_INFO_VRAM_GTT;
-    auto drm_write = drmCommandWrite(drm_fd, DRM_AMDGPU_INFO, &request,
-                                     sizeof(struct drm_amdgpu_info));
-    if (drm_write != 0) {
-        close(drm_fd);
-        libdrm.unload();
-        ss << __PRETTY_FUNCTION__
-           << " | Issue - drm_write failed, drm_write (AMDGPU_INFO_VRAM_GTT): "
-           << std::dec << drm_write << "\n"
-           << "; Returning: " << smi_amdgpu_get_status_string(AMDSMI_STATUS_DRM_ERROR, false);
-        LOG_ERROR(ss);
-        return AMDSMI_STATUS_DRM_ERROR;
+
+    uint64_t total = 0;
+    r = rsmi_wrapper(rsmi_dev_memory_total_get, processor_handle, 0,
+                    RSMI_MEM_TYPE_VRAM, &total);
+    if (r == AMDSMI_STATUS_SUCCESS) {
+        vram_info->vram_total = static_cast<uint32_t>(total / (1024 * 1024));
     }
 
-    vram_info->vram_total = static_cast<uint32_t>(
-        gtt.vram_size / (1024 * 1024));
-
-
+    uint64_t vram_used = 0;
+    struct drm_amdgpu_info request = {};
     memset(&request, 0, sizeof(request));
     request.return_pointer = reinterpret_cast<unsigned long long>(&vram_used);
     request.return_size = sizeof(vram_used);
     request.query = AMDGPU_INFO_VRAM_USAGE;
-    drm_write = drmCommandWrite(drm_fd, DRM_AMDGPU_INFO, &request,
+    auto drm_write = drmCommandWrite(drm_fd, DRM_AMDGPU_INFO, &request,
                                 sizeof(struct drm_amdgpu_info));
     if (drm_write != 0) {
         close(drm_fd);
