@@ -100,6 +100,35 @@ uint32_t AMDSmiGPUDevice::get_drm_render_minor() {
     return this->drm_render_minor_;
 }
 
+uint64_t AMDSmiGPUDevice::get_kfd_gpu_id() {
+    std::ostringstream ss;
+    // Should never return not_supported, but just in case
+    rsmi_status_t ret = rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED;
+    uint32_t gpu_index = this->get_gpu_id();
+    rsmi_device_identifiers_t identifiers = rsmi_device_identifiers_t{};
+    ret = rsmi_dev_device_identifiers_get(gpu_index, &identifiers);
+    if (ret != rsmi_status_t::RSMI_STATUS_SUCCESS) {
+        this->kfd_gpu_id_ = std::numeric_limits<uint64_t>::max();
+    } else {
+        this->kfd_gpu_id_ = identifiers.kfd_gpu_id;
+    }
+
+    ss << __PRETTY_FUNCTION__
+       << " | rsmi_dev_identifiers_get status: " << getRSMIStatusString(ret, false) << "\n"
+       << " | gpu_id_: " << gpu_id_ << "\n"
+       << " | identifiers.card_index: " << identifiers.card_index  << "\n"
+       << " | identifiers.drm_render_minor: " << identifiers.drm_render_minor  << "\n"
+       << " | identifiers.bdfid: " << std::hex << "0x" << identifiers.bdfid  << "\n"
+       << " | identifiers.kfd_gpu_id: " << std::dec << identifiers.kfd_gpu_id  << "\n"
+       << " | identifiers.partition_id: " << identifiers.partition_id  << "\n"
+       << " | identifiers.smi_device_id: " << identifiers.smi_device_id  << "\n"
+       << " | returning kfd_gpu_id_: "
+       << this->kfd_gpu_id_ << std::endl;
+    // std::cout << ss.str();
+    LOG_DEBUG(ss);
+    return this->kfd_gpu_id_;
+}
+
 uint32_t AMDSmiGPUDevice::get_gpu_fd() const {
     return fd_;
 }
@@ -158,7 +187,6 @@ amdsmi_status_t AMDSmiGPUDevice::get_drm_data() {
 pthread_mutex_t* AMDSmiGPUDevice::get_mutex() {
     return amd::smi::GetMutex(gpu_id_);
 }
-
 
 int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& compute_process_list,
                                                        ComputeProcessListType_t list_type)
@@ -230,6 +258,41 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& 
 
         // Copy the cu occupancy from rsmi_process_info_t to amdsmi_proc_info_t
         asmi_proc_info.cu_occupancy = rsmi_proc_info.cu_occupancy;
+
+        // Safely handle KFD file access
+        uint64_t kfd_gpu_id = get_kfd_gpu_id();
+        std::string kfd_path = "/sys/class/kfd/kfd/proc/" + 
+                            std::to_string(rsmi_proc_info.process_id) + 
+                            "/vram_" + std::to_string(kfd_gpu_id);
+
+        // Check if the file exists before attempting to open it
+        if (access(kfd_path.c_str(), R_OK) == 0) {
+            std::ifstream kfd_file(kfd_path.c_str());
+            if (kfd_file.is_open()) {
+                std::string line;
+                if (std::getline(kfd_file, line)) {
+                    try {
+                        uint64_t vram_bytes = std::stoull(line);
+                        asmi_proc_info.mem = vram_bytes; // Already in bytes
+                        asmi_proc_info.memory_usage.vram_mem = vram_bytes; // Already in bytes
+                    } catch (const std::exception& e) {
+                        // Handle conversion error gracefully
+                        std::ostringstream ss;
+                        ss << __PRETTY_FUNCTION__ << " | Failed to parse VRAM value from KFD: " << e.what();
+                        LOG_DEBUG(ss);
+                    }
+                }
+                kfd_file.close();
+            } else {
+                std::ostringstream ss;
+                ss << __PRETTY_FUNCTION__ << " | Failed to open KFD file: " << kfd_path;
+                LOG_DEBUG(ss);
+            }
+        } else {
+            std::ostringstream ss;
+            ss << __PRETTY_FUNCTION__ << " | KFD file not accessible: " << kfd_path;
+            LOG_DEBUG(ss);
+        }
 
         return status_code;
     };

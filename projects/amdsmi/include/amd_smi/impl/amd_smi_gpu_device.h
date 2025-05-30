@@ -62,6 +62,7 @@ class AMDSmiGPUDevice: public AMDSmiProcessor {
     uint32_t get_gpu_fd() const;
     uint32_t get_card_id();            // -e feature + we can get card_id for our internal functions
     uint32_t get_drm_render_minor();   // -e feature + we can get card_id for our internal functions
+    uint64_t get_kfd_gpu_id();  // Used to decode vram usage for KFD processes
     std::string& get_gpu_path();
     amdsmi_bdf_t  get_bdf();
     bool check_if_drm_is_supported() { return drm_.check_if_drm_is_supported(); }
@@ -84,6 +85,7 @@ class AMDSmiGPUDevice: public AMDSmiProcessor {
     AMDSmiDrm& drm_;
     uint32_t card_index_;
     uint32_t drm_render_minor_;
+    uint64_t kfd_gpu_id_;  // Used to decode vram usage for KFD processes
     GPUComputeProcessList_t compute_process_list_;
     int32_t get_compute_process_list_impl(GPUComputeProcessList_t& compute_process_list,
                                           ComputeProcessListType_t list_type);

@@ -1080,18 +1080,18 @@ typedef uint32_t amdsmi_process_handle_t;
 typedef struct {
     char name[AMDSMI_MAX_STRING_LENGTH];
     amdsmi_process_handle_t pid;
-    uint64_t mem;  //!< In bytes
+    uint64_t mem;  //!< In Bytes
     struct engine_usage_ {
         uint64_t gfx;  //!< In nano-secs
         uint64_t enc;  //!< In nano-secs
         uint32_t reserved[12];
     } engine_usage; //!< time the process spends using these engines in ns
     struct memory_usage_ {
-        uint64_t gtt_mem;   //!< In MB
-        uint64_t cpu_mem;   //!< In MB
-        uint64_t vram_mem;  //!< In MB
+        uint64_t gtt_mem;   //!< In Bytes
+        uint64_t cpu_mem;   //!< In Bytes
+        uint64_t vram_mem;  //!< In Bytes
         uint32_t reserved[10];
-    } memory_usage;  //!< in bytes
+    } memory_usage;  //!< In Bytes
     char container_name[AMDSMI_MAX_STRING_LENGTH];
     uint32_t cu_occupancy;  //!< Num CUs utilized
     uint32_t reserved[11];
