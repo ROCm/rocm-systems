@@ -3119,4 +3119,19 @@ rocprofv3_main(int argc, char** argv, char** envp)
     ROCP_INFO << "rocprofv3 finished. exit code: " << ret;
     return ret;
 }
+
+void rocprofv3_attach() __attribute__((visibility("default")));;
+
+void rocprofv3_attach()
+{
+    initialize_logging();
+    initialize_rocprofv3();
+}
+
+void rocprofv3_detach() __attribute__((visibility("default")));;
+
+void rocprofv3_detach()
+{
+    finalize_rocprofv3(__FUNCTION__);
+}
 }

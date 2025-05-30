@@ -715,13 +715,11 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         metavar="KB",
     )
 
-    reserved_options = parser.add_argument_group("Reserved options")
-    reserved_options.add_argument(
+    advanced_options.add_argument(
         "-p",
         "--pid",
-        help=argparse.SUPPRESS,
-        type=str,
-        nargs="+",
+        help="""Attach to a target process by pid and execute as a tool from within said process.""",
+        type=int,
         default=None,
     )
 
@@ -972,13 +970,6 @@ def run(app_args, args, **kwargs):
     use_execv = kwargs.get("use_execv", True)
     app_pass = kwargs.get("pass_id", None)
 
-    if args.pid is not None:
-        fatal_error(
-            """The -p shorthand option for --collection-period is now an upper-case -P
-                    In the future, rocprofv3 plans to support debugger-like process attachment and -p
-                    is de-facto standard shorthand option for this feature"""
-        )
-
     def setattrifnone(obj, attr, value):
         if getattr(obj, f"{attr}") is None:
             setattr(obj, f"{attr}", value)
@@ -1065,6 +1056,9 @@ def run(app_args, args, **kwargs):
     ROCPROF_LIST_AVAIL_TOOL_LIBRARY = (
         f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofv3-list-avail.so"
     )
+    ROCPROF_ATTACH_TOOL_LIBRARY = (
+        f"{ROCM_DIR}/libexec/rocprofiler-sdk/librocprofv3-attach.so"
+    )
 
     ROCPROF_TOOL_LIBRARY = resolve_library_path(ROCPROF_TOOL_LIBRARY, args)
     ROCPROF_SDK_LIBRARY = resolve_library_path(ROCPROF_SDK_LIBRARY, args)
@@ -1073,6 +1067,7 @@ def run(app_args, args, **kwargs):
     ROCPROF_LIST_AVAIL_TOOL_LIBRARY = resolve_library_path(
         ROCPROF_LIST_AVAIL_TOOL_LIBRARY, args
     )
+    ROCPROF_ATTACH_TOOL_LIBRARY = resolve_library_path(ROCPROF_ATTACH_TOOL_LIBRARY, args)
 
     prepend_preload = [itr for itr in args.preload if itr]
     append_preload = [
@@ -1288,6 +1283,13 @@ def run(app_args, args, **kwargs):
             overwrite_if_true=True,
         )
 
+    if args.pid:
+        update_env(
+            "ROCPROF_ATTACH_TOOL_LIBRARY",
+            ROCPROF_ATTACH_TOOL_LIBRARY,
+            overwrite_if_true=True,
+        )
+
     if args.collection_period:
         factors = {
             "hour": 60 * 60 * 1e9,
@@ -1419,6 +1421,14 @@ def run(app_args, args, **kwargs):
                 [sys.executable, path, "info", "--pc-sampling"],
                 env=app_env,
             )
+    
+    elif args.pid:
+        update_env("ROCPROF_ATTACH_PID", args.pid)
+        path = os.path.join(f"{ROCM_DIR}", "bin/rocprofv3_attach")
+        if app_args:
+            exit_code = subprocess.check_call([sys.executable, path], env=app_env)
+        else:
+            app_args = [sys.executable, path]
 
     elif not app_args and not args.echo:
         log_config(app_env)

@@ -26,6 +26,16 @@ install(
                 WORLD_EXECUTE
     COMPONENT tools)
 
+configure_file(rocprofv3_attach.py
+               ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprofv3_attach COPYONLY)
+
+install(
+    FILES ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprofv3_attach
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
+    PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ
+                WORLD_EXECUTE
+    COMPONENT tools)
+
 # for each entry here there must be a ROCPD_BIN_<entry> list
 set(ROCPD_EXECUTABLES "all" "csv" "otf2" "pftrace" "summary")
 
@@ -61,3 +71,4 @@ foreach(_EXE IN LISTS ROCPD_EXECUTABLES)
                     WORLD_READ WORLD_EXECUTE
         COMPONENT rocpd)
 endforeach()
+
