@@ -12,6 +12,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
+- **Added Compute Unit Occupancy information per process**  
+  Measuring compute units are the best way currently to determine gfx usage on a per process basis  
+  - Added `CU_OCCUPANCY` to `amd-smi process` output.
+  - Added `CU%` to `amd-smi monitor -q`
+
 - **Expanded Violation Status tracking for GPU metrics 1.8.**
   - The driver will no longer be supporting existing single-value GFX Clk Below Host Limit fields (`acc_gfx_clk_below_host_limit`, `per_gfx_clk_below_host_limit`, `active_gfx_clk_below_host_limit`), they are now changed in favor of new per-XCP/XCC arrays.
   - Added new fields to `amdsmi_violation_status_t` and related interfaces for enhanced violation breakdown:
@@ -54,11 +59,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved issues
 
-- N/A
-
-### Upcoming changes
-
-- N/A
+- **Corrected VRAM memory calculation in `amdsmi_get_gpu_process_list`.**  
+  - Previously, the VRAM memory usage reported by `amdsmi_get_gpu_process_list` was inaccurate and calculated using KB vs KiB.
 
 ### Known issues
 

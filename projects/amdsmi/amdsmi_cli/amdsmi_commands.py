@@ -3300,8 +3300,21 @@ class AMDSMICommands():
 
         filtered_process_values = []
         for process_info in process_list:
-            process_info['mem_usage'] = process_info.pop('mem')
-            process_info['usage'] = process_info.pop('engine_usage')
+            process_info = {
+                "name": process_info["name"],
+                "pid": process_info["pid"],
+                "memory_usage": {
+                    "gtt_mem": process_info["memory_usage"]["gtt_mem"],
+                    "cpu_mem": process_info["memory_usage"]["cpu_mem"],
+                    "vram_mem": process_info["memory_usage"]["vram_mem"],
+                },
+                "mem_usage": process_info["mem"],
+                "usage": {
+                    "gfx": process_info["engine_usage"]["gfx"],
+                    "enc": process_info["engine_usage"]["enc"],
+                },
+                "cu_occupancy": process_info["cu_occupancy"]
+            }
 
             engine_usage_unit = "ns"
             memory_usage_unit = "B"
@@ -5714,34 +5727,42 @@ class AMDSMICommands():
                 logging.debug("Failed to get process list for gpu %s | %s", gpu_id, e.get_error_info())
                 raise e
 
+            try:
+                num_compute_units = amdsmi_interface.amdsmi_get_gpu_asic_info(args.gpu)['num_compute_units']
+            except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
+                num_compute_units = "N/A"
+                logging.debug("Failed to get num compute units for gpu %s | %s", gpu_id, e.get_error_info())
+
             # Clean processes dictionary
             filtered_process_values = []
             for process_info in process_list:
-                process_info['mem_usage'] = process_info.pop('mem')
-                process_info['usage'] = process_info.pop('engine_usage')
+                process_info.pop('mem')  # Remove 'mem' value
+                process_info.pop('engine_usage')  # Remove 'engine_usage' value
 
-                engine_usage_unit = "ns"
                 memory_usage_unit = "B"
-
                 if self.logger.is_human_readable_format():
-                    process_info['mem_usage'] = self.helpers.convert_bytes_to_readable(process_info['mem_usage'])
                     for usage_metric in process_info['memory_usage']:
                         process_info["memory_usage"][usage_metric] = self.helpers.convert_bytes_to_readable(process_info["memory_usage"][usage_metric])
                     memory_usage_unit = ""
-
-                process_info['mem_usage'] = self.helpers.unit_format(self.logger,
-                                                                     process_info['mem_usage'],
-                                                                     memory_usage_unit)
-
-                for usage_metric in process_info['usage']:
-                    process_info['usage'][usage_metric] = self.helpers.unit_format(self.logger,
-                                                                                   process_info['usage'][usage_metric],
-                                                                                   engine_usage_unit)
 
                 for usage_metric in process_info['memory_usage']:
                     process_info['memory_usage'][usage_metric] = self.helpers.unit_format(self.logger,
                                                                                           process_info['memory_usage'][usage_metric],
                                                                                           memory_usage_unit)
+
+                if 'cu_occupancy' in process_info:
+                    try:
+                        cu_occupancy = process_info['cu_occupancy']
+                        if num_compute_units != "N/A" and num_compute_units > 0:
+                            cu_percentage = round((cu_occupancy / num_compute_units) * 100, 1)
+                            process_info['cu_occupancy'] = self.helpers.unit_format(self.logger,
+                                                                                    cu_percentage,
+                                                                                    '%')
+                        else:
+                            process_info['cu_occupancy'] = "N/A"
+                    except Exception as e:
+                        process_info['cu_occupancy'] = "N/A"
+                        logging.debug("Failed to calculate cu_occupancy percentage for GPU %s | %s", gpu_id, str(e))
 
                 filtered_process_values.append({'process_info': process_info})
 
@@ -5757,8 +5778,7 @@ class AMDSMICommands():
             # Build the process table's title and header
             self.logger.secondary_table_title = "PROCESS INFO"
             self.logger.secondary_table_header = 'GPU'.rjust(3) + "NAME".rjust(22) + "PID".rjust(9) + "GTT_MEM".rjust(10) + \
-                                                "CPU_MEM".rjust(10) + "VRAM_MEM".rjust(10) + "MEM_USAGE".rjust(11) + \
-                                                "GFX".rjust(8) + "ENC".rjust(8)
+                                                "CPU_MEM".rjust(10) + "VRAM_MEM".rjust(10) + "CU%".rjust(9)
 
             if watching_output:
                 self.logger.secondary_table_header = 'TIMESTAMP'.rjust(10) + '  ' + self.logger.secondary_table_header

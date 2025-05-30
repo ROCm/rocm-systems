@@ -456,7 +456,6 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
   proc->sdma_usage = 0;
   proc->cu_occupancy = 0;
 
-  uint32_t cu_count = 0;
   static amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
   static std::map<uint64_t, std::shared_ptr<KFDNode>>& kfd_node_map =
                                                            smi.kfd_node_map();
@@ -510,21 +509,13 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
     }
     else if(sysfs_data_errcode==0){
       // Update CU usage by the process
-      proc->cu_occupancy += std::stoi(tmp);
-      // Collect count of compute units
-      cu_count += kfd_node_map[gpu_id]->cu_count();
+      proc->cu_occupancy = std::stoi(tmp);
     }
     else {
       // Some GFX revisions do not provide cu_occupancy debugfs method
       // which may cause ENOENT
       proc->cu_occupancy = CU_OCCUPANCY_INVALID;
-      cu_count = 0;
     }
-  }
-
-  // Adjust CU occupancy to percent.
-  if (cu_count > 0) {
-    proc->cu_occupancy = ((proc->cu_occupancy * 100) / cu_count);
   }
 
   return 0;

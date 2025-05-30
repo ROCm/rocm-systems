@@ -1093,7 +1093,6 @@ except AmdSmiException as e:
     print(e)
 ```
 
-
 ### amdsmi_get_gpu_process_list
 
 Description: Returns the list of processes running on the target GPU; Requires root level access to display root process names; otherwise will return "N/A"
@@ -1111,6 +1110,7 @@ Field | Description
 `mem` | Process memory usage
 `engine_usage` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`gfx`</td><td>GFX engine usage in ns</td></tr><tr><td>`enc`</td><td>Encode engine usage in ns</td></tr></tbody></table>
 `memory_usage` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`gtt_mem`</td><td>GTT memory usage</td></tr><tr><td>`cpu_mem`</td><td>CPU memory usage</td></tr><tr><td>`vram_mem`</td><td>VRAM memory usage</td></tr> </tbody></table>
+`cu_occupancy` | Number of Compute Units utilized
 
 Exceptions that can be thrown by `amdsmi_get_gpu_process_list` function:
 

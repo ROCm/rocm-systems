@@ -817,6 +817,7 @@ int main() {
                 amdsmi_proc_info_t process = {};
                 uint64_t mem = 0, gtt_mem = 0, cpu_mem = 0, vram_mem = 0;
                 uint64_t gfx = 0, enc = 0;
+                uint32_t cu_occupancy = 0;
                 char bdf_str[20];
                 sprintf(bdf_str, "%04" PRIx64 ":%02" PRIx32 ":%02" PRIx32 ".%" PRIu32,
                    static_cast<uint64_t>(bdf.domain_number),
@@ -837,7 +838,7 @@ int main() {
                 printf(
                     "| pid   | name             | user       | gpu bdf      | "
                     "fb usage    | gtt memory  | cpu memory  | vram memory  | "
-                    "engine usage (ns)                       |\n");
+                    "engine usage (ns)  | cu occupancy       |\n");
                 printf("|       |                  |            |              "
                        "|             |             |             |            "
                        "  | gfx     enc     |\n");
@@ -855,30 +856,34 @@ int main() {
                     pwd = getpwuid(st.st_uid);
                     if (!pwd)
                         printf("| %5d | %16s | %10d | %s | %7ld KiB | %7ld KiB "
-                               "| %7ld KiB | %7ld KiB  | %lu  %lu |\n",
+                               "| %7ld KiB | %7ld KiB  | %lu  %lu  | %u |\n",
                                process_info_list[it].pid, process_info_list[it].name, st.st_uid,
                                bdf_str, process_info_list[it].mem / 1024,
                                process_info_list[it].memory_usage.gtt_mem / 1024,
                                process_info_list[it].memory_usage.cpu_mem / 1024,
                                process_info_list[it].memory_usage.vram_mem / 1024,
                                process_info_list[it].engine_usage.gfx,
-                               process_info_list[it].engine_usage.enc);
+                               process_info_list[it].engine_usage.enc,
+                               process_info_list[it].cu_occupancy);
                     else
                         printf("| %5d | %16s | %10s | %s | %7ld KiB | %7ld KiB "
-                               "| %7ld KiB | %7ld KiB  | %lu  %lu |\n",
+                               "| %7ld KiB | %7ld KiB  | %lu  %lu  | %u |\n",
                                process_info_list[it].pid, process_info_list[it].name,
                                pwd->pw_name, bdf_str, process_info_list[it].mem / 1024,
                                process_info_list[it].memory_usage.gtt_mem / 1024,
                                process_info_list[it].memory_usage.cpu_mem / 1024,
                                process_info_list[it].memory_usage.vram_mem / 1024,
                                process_info_list[it].engine_usage.gfx,
-                               process_info_list[it].engine_usage.enc);
+                               process_info_list[it].engine_usage.enc,
+                               process_info_list[it].cu_occupancy);
+
                     mem += process_info_list[it].mem / 1024;
                     gtt_mem += process_info_list[it].memory_usage.gtt_mem / 1024;
                     cpu_mem += process_info_list[it].memory_usage.cpu_mem / 1024;
                     vram_mem += process_info_list[it].memory_usage.vram_mem / 1024;
                     gfx = process_info_list[it].engine_usage.gfx;
                     enc = process_info_list[it].engine_usage.enc;
+                    cu_occupancy = process_info_list[it].cu_occupancy;
                     printf(
                         "+-------+------------------+------------+-------------"
                         "-+-------------+-------------+-------------+----------"
@@ -887,10 +892,9 @@ int main() {
                 // TODO: To remove compiler warning, the last 3 values in this printf were
                 //       set to 0L.  Need to find out what these values need to be.
                 printf("|                                 TOTAL:| %s | %7ld "
-                       "KiB | %7ld KiB | %7ld KiB | %7ld KiB | %lu  %lu  "
-                       "%lu  %lu  %lu   |\n",
+                       "KiB | %7ld KiB | %7ld KiB | %7ld KiB | %lu  %lu | %u |\n",
                        bdf_str, mem, gtt_mem, cpu_mem, vram_mem, gfx,
-                       enc, 0L, 0L, 0L);
+                       enc, cu_occupancy, 0L);
                 printf("+=======+==================+============+=============="
                        "+=============+=============+=============+============"
                        "=+==========================================+\n");

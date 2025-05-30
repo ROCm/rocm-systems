@@ -44,13 +44,10 @@ try:
     from amdsmi_logger import AMDSMILogger
     from amdsmi_parser import AMDSMIParser
     import amdsmi_cli_exceptions
+    helpers = AMDSMIHelpers()
 except ImportError as e:
     print(f"Failed to import amdsmi cli libs: {e}")
     print("Ensure that you have installed amdsmi's package.")
-
-
-helpers = AMDSMIHelpers()
-
 
 
 # Make exit & quit work without parens because it's annoying

@@ -216,6 +216,9 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& 
 
     /**
      * Complete the process information
+     * This is where we copy rsmi_process_info_t into the larger amdsmi_proc_info_t
+     * Then populate the remaining fields with the gpuvsmi_get_pid_info()
+     * TODO FIX HERE TO GRAB KFD VRAM if /proc is inconsistent
      */
     auto get_process_info = [&](const rsmi_process_info_t& rsmi_proc_info, amdsmi_proc_info_t& asmi_proc_info) {
         auto status_code = gpuvsmi_get_pid_info(get_bdf(), rsmi_proc_info.process_id, asmi_proc_info);
@@ -224,6 +227,9 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& 
             asmi_proc_info.pid = rsmi_proc_info.process_id;
             asmi_proc_info.memory_usage.vram_mem = rsmi_proc_info.vram_usage;
         }
+
+        // Copy the cu occupancy from rsmi_process_info_t to amdsmi_proc_info_t
+        asmi_proc_info.cu_occupancy = rsmi_proc_info.cu_occupancy;
 
         return status_code;
     };

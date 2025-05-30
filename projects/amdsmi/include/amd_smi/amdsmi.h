@@ -1093,7 +1093,8 @@ typedef struct {
         uint32_t reserved[10];
     } memory_usage;  //!< in bytes
     char container_name[AMDSMI_MAX_STRING_LENGTH];
-    uint32_t reserved[12];
+    uint32_t cu_occupancy;  //!< Num CUs utilized
+    uint32_t reserved[11];
 } amdsmi_proc_info_t;
 
 /**

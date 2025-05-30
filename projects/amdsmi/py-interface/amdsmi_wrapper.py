@@ -1289,7 +1289,8 @@ struct_amdsmi_proc_info_t._fields_ = [
     ('engine_usage', struct_engine_usage_),
     ('memory_usage', struct_memory_usage_),
     ('container_name', ctypes.c_char * 256),
-    ('reserved', ctypes.c_uint32 * 12),
+    ('cu_occupancy', ctypes.c_uint32),
+    ('PADDING_1', ctypes.c_ubyte * 4),
 ]
 
 amdsmi_proc_info_t = struct_amdsmi_proc_info_t

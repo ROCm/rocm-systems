@@ -2691,6 +2691,7 @@ def amdsmi_get_gpu_process_list(
                 "cpu_mem": process_list[index].memory_usage.cpu_mem,
                 "vram_mem": process_list[index].memory_usage.vram_mem,
             },
+            "cu_occupancy": process_list[index].cu_occupancy
         })
 
     return result
