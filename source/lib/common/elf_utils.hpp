@@ -25,9 +25,9 @@
 #include <elfio/elfio.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <ostream>
-#include <regex>
 #include <set>
 #include <sstream>
 #include <string>
@@ -94,7 +94,7 @@ struct ElfInfo
     std::vector<DynamicEntry>    dynamic_entries        = {};
     std::vector<RelocationEntry> reloc_entries          = {};
 
-    bool has_symbol(std::regex&&) const;
+    bool has_symbol(const std::function<bool(std::string_view)>&) const;
 
     friend bool operator==(const ElfInfo& lhs, const ElfInfo& rhs)
     {

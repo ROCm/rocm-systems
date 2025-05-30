@@ -310,7 +310,9 @@ find_clients()
             if(fs::exists(itr) && resolved_exists(itr))
             {
                 auto elfinfo = common::elf_utils::read(itr);
-                if(!elfinfo.has_symbol(std::regex{"^rocprofiler_configure$"}))
+                if(!elfinfo.has_symbol([](std::string_view symname) {
+                       return (symname == "rocprofiler_configure");
+                   }))
                 {
                     ROCP_CI_LOG(WARNING) << fmt::format(
                         "[ROCP_TOOL_LIBRARIES] rocprofiler-sdk tool library '{}' did not "
@@ -379,7 +381,9 @@ find_clients()
             if(fs::exists(itr) && resolved_exists(itr))
             {
                 auto elfinfo = common::elf_utils::read(itr);
-                if(!elfinfo.has_symbol(std::regex{"^rocprofiler_configure$"}))
+                if(!elfinfo.has_symbol([](std::string_view symname) {
+                       return (symname == "rocprofiler_configure");
+                   }))
                 {
                     ROCP_INFO << fmt::format(
                         "Shared library '{}' did not contain the 'rocprofiler_configure' symbol "

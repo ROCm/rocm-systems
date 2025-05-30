@@ -8,6 +8,8 @@ on:
       - '.github/workflows/pull_*.yml'
       - '.github/workflows/linting.yml'
       - '.github/workflows/markdown_lint.yml'
+      - '*.md'
+      - '**/README.md'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

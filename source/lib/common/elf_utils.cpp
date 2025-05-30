@@ -34,7 +34,6 @@
 #include <iomanip>
 #include <iostream>
 #include <map>
-#include <regex>
 #include <set>
 #include <string>
 #include <vector>
@@ -78,16 +77,16 @@ ElfInfo::ElfInfo(std::string _fname)
 {}
 
 bool
-ElfInfo::has_symbol(std::regex&& _re) const
+ElfInfo::has_symbol(const std::function<bool(std::string_view)>& _checker) const
 {
     for(const auto& itr : symbol_entries)
     {
-        if(!itr.name.empty() && std::regex_search(itr.name, _re)) return true;
+        if(!itr.name.empty() && _checker(itr.name)) return true;
     }
     // For stripped binaries
     for(const auto& itr : dynamic_symbol_entries)
     {
-        if(!itr.name.empty() && std::regex_search(itr.name, _re)) return true;
+        if(!itr.name.empty() && _checker(itr.name)) return true;
     }
 
     return false;

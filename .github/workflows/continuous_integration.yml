@@ -6,11 +6,13 @@ on:
     branches: [ amd-staging, amd-mainline ]
     paths-ignore:
       - '*.md'
+      - '**/README.md'
       - 'source/docs/**'
       - 'CODEOWNERS'
   pull_request:
     paths-ignore:
       - '*.md'
+      - '**/README.md'
       - 'source/docs/**'
       - 'CODEOWNERS'
 
