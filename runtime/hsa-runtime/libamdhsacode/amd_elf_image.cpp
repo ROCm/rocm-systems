@@ -1738,7 +1738,7 @@ namespace elf {
       }
 
       uint64_t max_offset = ehdr->e_shoff;
-      uint64_t total_size = max_offset + ehdr->e_shentsize * ehdr->e_shnum;
+      uint64_t total_size = max_offset + static_cast<uint64_t>(ehdr->e_shentsize) * static_cast<uint64_t>(ehdr->e_shnum);
 
       for (uint16_t i = 0; i < ehdr->e_shnum; ++i) {
         uint64_t cur_offset = static_cast<uint64_t>(shdr[i].sh_offset);
