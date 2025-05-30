@@ -221,6 +221,7 @@ from .amdsmi_interface import amdsmi_get_gpu_subsystem_name
 from .amdsmi_interface import amdsmi_topo_get_numa_node_number
 from .amdsmi_interface import amdsmi_topo_get_link_weight
 from .amdsmi_interface import amdsmi_get_minmax_bandwidth_between_processors
+from .amdsmi_interface import amdsmi_get_link_metrics
 from .amdsmi_interface import amdsmi_topo_get_link_type
 from .amdsmi_interface import amdsmi_topo_get_p2p_status
 from .amdsmi_interface import amdsmi_is_P2P_accessible

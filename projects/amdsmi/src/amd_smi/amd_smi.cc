@@ -2119,16 +2119,22 @@ amdsmi_status_t amdsmi_get_link_metrics(amdsmi_processor_handle processor_handle
     if (link_metrics == nullptr)  return AMDSMI_STATUS_INVAL;
 
     amdsmi_gpu_metrics_t metric_info = {};
+    link_metrics->max_bandwidth = std::numeric_limits<uint32_t>::max();
+
     amdsmi_status_t status =  amdsmi_get_gpu_metrics_info(
             processor_handle, &metric_info);
     if (status != AMDSMI_STATUS_SUCCESS)
         return status;
     link_metrics->num_links = AMDSMI_MAX_NUM_XGMI_LINKS;
-    for (unsigned int i = 0; i < link_metrics->num_links; i++) {
+
+    link_metrics->bit_rate = metric_info.xgmi_link_speed;
+    if ((metric_info.xgmi_link_speed != std::numeric_limits<uint16_t>::max()) &&
+        (metric_info.xgmi_link_width != std::numeric_limits<uint16_t>::max()))
+        link_metrics->max_bandwidth = metric_info.xgmi_link_speed * metric_info.xgmi_link_width;
+
+    for (unsigned int i = 0; i < AMDSMI_MAX_NUM_XGMI_LINKS; i++) {
         link_metrics->links[i].read = metric_info.xgmi_read_data_acc[i];
         link_metrics->links[i].write = metric_info.xgmi_write_data_acc[i];
-        link_metrics->links[i].bit_rate = metric_info.xgmi_link_speed;
-        link_metrics->links[i].max_bandwidth = metric_info.xgmi_link_width;
         link_metrics->links[i].link_type = AMDSMI_LINK_TYPE_XGMI;
     }
 

@@ -40,7 +40,7 @@ class AMDSMICommands():
     Each command function will interact with AMDSMILogger to handle
     displaying the output to the specified format and destination.
     """
-    
+
     def __init__(self, format='human_readable', destination='stdout') -> None:
         self.helpers = AMDSMIHelpers()
         self.logger = AMDSMILogger(format=format, destination=destination)
@@ -2024,7 +2024,7 @@ class AMDSMICommands():
                 except KeyError as e:
                     logging.debug("Failed to get current_socclk for gpu %s | %s", gpu_id, e)
 
-                
+
                 # Populate the max and min clock values from sysfs.
                 # Min and Max values are per clock type, not per clock engine.
                 # Populate the deep sleep value from amdsmi_get_clock_info
@@ -2075,7 +2075,7 @@ class AMDSMICommands():
                     # Iterate through the maximum number of VCLK clocks supported
                     for index in range(amdsmi_interface.AMDSMI_MAX_NUM_CLKS):
                         vclk_index = f"vclk_{index}"  # Construct the index key for the clock
-                        
+
                         # Check if the current clock value is not "N/A"
                         if clocks[vclk_index]["clk"] != "N/A":
                             # Format and assign the minimum clock value for the current VCLK
@@ -4480,7 +4480,7 @@ class AMDSMICommands():
                     future_set_count = self.helpers.get_set_count()
                     if current_set_count == future_set_count-1:
                         self.logger.store_output(args.gpu, 'accelerator_partition', f"Successfully set accelerator partition to {user_requested_partition_args}")
-                        
+
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError('Command requires elevation') from e
@@ -5454,7 +5454,7 @@ class AMDSMICommands():
 
             self.logger.table_header += 'MEM%'.rjust(7)
 
-            # don't populate mem clock on default output 
+            # don't populate mem clock on default output
             if not args.default_output:
                 try:
                     mem_clock = gpu_metrics_info['current_uclk']
@@ -5875,6 +5875,17 @@ class AMDSMICommands():
         # Populate the possible gpus and their bdfs
         xgmi_values = []
         for gpu in args.gpu:
+            partition_id = -1
+            try:
+                kfd_info = amdsmi_interface.amdsmi_get_gpu_kfd_info(gpu)
+                partition_id = kfd_info['current_partition_id']
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                logging.debug("Failed to get kfd info for gpu %s | %s", gpu, e.get_error_info())
+
+            if partition_id != 0:
+                logging.debug(f"Skipping xgmi command due to non zero partition {gpu} - {partition_id}")
+                continue
+
             logging.debug("check1 device_handle: %s", gpu)
             gpu_id = self.helpers.get_gpu_id_from_device_handle(gpu)
             gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(gpu)
@@ -5906,14 +5917,9 @@ class AMDSMICommands():
                 }
 
                 try:
-                    pcie_static = amdsmi_interface.amdsmi_get_pcie_info(src_gpu)['pcie_static']
-                    if pcie_static['max_pcie_speed'] % 1000 != 0:
-                        pcie_speed_GTs_value = round(pcie_static['max_pcie_speed'] / 1000, 1)
-                    else:
-                        pcie_speed_GTs_value = round(pcie_static['max_pcie_speed'] / 1000)
-
-                    bitrate = pcie_speed_GTs_value
-                    max_bandwidth = bitrate * pcie_static['max_pcie_width']
+                    xgmi_metrics_info = amdsmi_interface.amdsmi_get_link_metrics(src_gpu)
+                    bitrate = xgmi_metrics_info['bit_rate']
+                    max_bandwidth = xgmi_metrics_info['max_bandwidth']
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     bitrate = "N/A"
                     max_bandwidth = "N/A"
@@ -5935,7 +5941,18 @@ class AMDSMICommands():
                     xgmi_dict['link_metrics']['max_bandwidth'] = max_bandwidth
 
                 # Populate link metrics
+                link_num = 0
                 for dest_gpu in args.gpu:
+                    partition_id = -1
+                    try:
+                        kfd_info = amdsmi_interface.amdsmi_get_gpu_kfd_info(dest_gpu)
+                        partition_id = kfd_info['current_partition_id']
+                    except amdsmi_exception.AmdSmiLibraryException as e:
+                        logging.debug("Failed to get kfd info for gpu %s | %s", dest_gpu, e.get_error_info())
+
+                    if partition_id != 0:
+                        continue
+
                     dest_gpu_id = self.helpers.get_gpu_id_from_device_handle(dest_gpu)
                     dest_gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(dest_gpu)
                     dest_link_dict = {
@@ -5954,10 +5971,10 @@ class AMDSMICommands():
 
                     try:
                         # Get the read write relative to the source gpu
-                        metrics_info = amdsmi_interface.amdsmi_get_gpu_metrics_info(src_gpu)
-                        read = metrics_info['xgmi_read_data_acc'][dest_gpu_id]
-                        write = metrics_info['xgmi_write_data_acc'][dest_gpu_id]
-                    except amdsmi_exception.AmdSmiLibraryException as e:
+                        read = xgmi_metrics_info['links'][link_num]['read']
+                        write = xgmi_metrics_info['links'][link_num]['write']
+                        link_num += 1
+                    except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
                         read = "N/A"
                         write = "N/A"
                         logging.debug("Failed to get read data for %s to %s | %s",
@@ -6087,7 +6104,21 @@ class AMDSMICommands():
             self.logger.print_output(multiple_device_enabled=True, tabular=True)
             self.logger.clear_multiple_devices_output()
             if self.logger.is_human_readable_format():
-                print("\n* U:Up D:Down X:Disabled".ljust(13))
+            # Populate the legend output
+                legend_parts = [
+                    "\n\nLegend:",
+                    "  SELF = Current GPU",
+                    "  N/A = Not supported",
+                    "  U / D / X = Link is Up / Down / Disabled",
+                    "  Read / Write = GPU Metric Accumulated Read / Write"
+                ]
+                legend_output = "\n".join(legend_parts)
+
+                if self.logger.destination == 'stdout':
+                    print(legend_output)
+                else:
+                    with self.logger.destination.open('a', encoding="utf-8") as output_file:
+                        output_file.write(legend_output + '\n')
 
 
     def partition(self, args, multiple_devices=False, gpu=None, current=None, memory=None, accelerator=None):
@@ -6385,7 +6416,7 @@ class AMDSMICommands():
                         continue
 
                     resource_index = 0
-                    for p in range(0, num_profiles):   
+                    for p in range(0, num_profiles):
                         for r in range(0, num_resource_profiles):
                             resource_type = partition_config_dict['profiles'][p]['resources'][r]['resource_type']
                             resource_instances = partition_config_dict['profiles'][p]['resources'][r]['partition_resource']

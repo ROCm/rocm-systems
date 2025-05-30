@@ -3819,6 +3819,49 @@ except AmdSmiException as e:
     print(e)
 ```
 
+### amdsmi_get_link_metrics
+
+Description: Returns XGMI link metrics information for the given GPU.
+
+Input parameters:
+
+* `processor_handle` — The device handle for which to query link metrics.
+
+Output: Dictionary with fields
+
+Field | Description
+---|---
+`num_links` | Number of XGMI links reported
+`bit_rate` | XGMI link bit rate (in appropriate units, e.g., Gbps)
+`max_bandwidth` | Maximum XGMI bandwidth (in appropriate units, e.g., GB/s)
+`links` | List of dictionaries, one per XGMI link, each with:
+`bdf` | BDF string for the destination
+`link_type` | Link type
+`read` | Accumulated read data for this link (e.g., KB)
+`write` | Accumulated write data for this link (e.g., KB)
+
+Exceptions that can be thrown by `amdsmi_get_link_metrics` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+Example:
+
+```python
+try:
+    devices = amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            link_metrics = amdsmi_get_link_metrics(device)
+            print(link_metrics['bit_rate'])
+            print(link_metrics['max_bandwidth'])
+            for idx, link in enumerate(link_metrics['links']):
+                print(f"{idx}: {link['bdf']}, {link['link_type']}, {link['read']} KB, {link['write']} KB")
+except AmdSmiException as e:
+    print(e)
+
 ### amdsmi_topo_get_link_type
 
 Description: Retrieve the hops and the connection type between 2 GPUs

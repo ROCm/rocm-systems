@@ -3099,6 +3099,41 @@ def amdsmi_get_minmax_bandwidth_between_processors(
     return {"min_bandwidth": min_bandwidth.value, "max_bandwidth": max_bandwidth.value}
 
 
+def amdsmi_get_link_metrics(processor_handle: amdsmi_wrapper.amdsmi_processor_handle):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    link_metrics = amdsmi_wrapper.amdsmi_link_metrics_t()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_link_metrics(
+            processor_handle, ctypes.byref(link_metrics)
+        )
+    )
+
+    bdf = amdsmi_wrapper.amdsmi_bdf_t()
+    # TODO: Dummy BDF - to be replaced with destination BDF from xgmi_port_num when available
+    bdf.struct_amdsmi_bdf_t = amdsmi_wrapper.struct_amdsmi_bdf_t(0xFFFF, 0xFF, 0xFF, 0xF)
+
+    links = []
+    for i in range(AMDSMI_MAX_NUM_XGMI_LINKS):
+        link = link_metrics.links[i]
+        links.append({
+            "bdf": _format_bdf(bdf),
+            "link_type": link.link_type,
+            "read": link.read,
+            "write": link.write,
+        })
+
+    return {
+        "num_links": AMDSMI_MAX_NUM_XGMI_LINKS,
+        "bit_rate": link_metrics.bit_rate,
+        "max_bandwidth": link_metrics.max_bandwidth,
+        "links": links
+    }
+
+
 def amdsmi_topo_get_link_type(
     processor_handle_src: amdsmi_wrapper.amdsmi_processor_handle,
     processor_handle_dst: amdsmi_wrapper.amdsmi_processor_handle,
