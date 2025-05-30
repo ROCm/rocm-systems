@@ -32,6 +32,8 @@ subtrees:
       title: Counter collection services
     - file: api-reference/pc_sampling
       title: PC sampling
+    - file: api-reference/thread_trace
+      title: Thread trace and ROCprof Trace Decoder
     - file: api-reference/rocprofiler-sdk_api_reference
       subtrees:
       - entries:
