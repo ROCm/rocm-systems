@@ -39,7 +39,7 @@ Prerequisites
 
   * Otherwise, ``rocprofv3`` throws error "INVALID_SHADER_DATA" or "Agent not supported".
   
-- Installation of ROCprof Trace Decoder component
+- Installation of ROCprof Trace Decoder component. For binary files, see `ROCprof trace decoder release page <https://github.com/ROCm/rocprof-trace-decoder/releases>`_.
 
   * Default location is ``/opt/rocm/lib``
    
