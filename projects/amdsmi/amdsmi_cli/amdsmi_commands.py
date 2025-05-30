@@ -2150,19 +2150,38 @@ class AMDSMICommands():
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     logging.debug("Failed to get socclk info for gpu %s | %s", gpu_id, e.get_error_info())
 
-                # Populate the deep sleep status for each clock
-                for clock in clocks:
-                    # Check if the clk value is not "N/A"
-                    if clocks[clock]["clk"] != "N/A":
-                        try:
-                            clk = int(clocks[clock]["clk"].rstrip(clock_unit))
-                            min_clk = int(clocks[clock]["min_clk"].rstrip(clock_unit))
-                            if clk < min_clk:
-                                clocks[clock]["deep_sleep"] = "ENABLED"
+                # Iterate over each clock and its data to determine if deep sleep is enabled
+                # based on the comparison between the current clock value and the minimum clock value.
+                for clock, clock_data in clocks.items():
+                    clk_value = 0
+                    min_clk_value = 0
+                    try:
+                        clk = clock_data["clk"]
+                        min_clk = clock_data["min_clk"]
+                        if clk == "N/A" or min_clk == "N/A":
+                            continue
+                        # Extract numeric value if clk/min_clk is a dict, else use as is
+                        if isinstance(clk, dict):
+                            clk_value = int(clk.get("value", 0))
+                        else:
+                            if isinstance(clk, str):
+                                clk_value = int(str(clk).split()[0])  
                             else:
-                                clocks[clock]["deep_sleep"] = "DISABLED"
-                        except Exception as e:
-                            logging.debug("Failed to get deep sleep status for gpu %s | %s", gpu_id, e)
+                                clk_value = int(clk)
+                        if isinstance(min_clk, dict):
+                            min_clk_value = int(min_clk.get("value", 0))
+                        else:
+                            if isinstance(min_clk, str):
+                                min_clk_value = int(str(min_clk).split()[0])  
+                            else:
+                                min_clk_value = int(min_clk)
+                        # If the clk value is less than the min_clk value, then deep sleep is enabled
+                        if clk_value < min_clk_value:
+                            clock_data["deep_sleep"] = "ENABLED"
+                        else:
+                            clock_data["deep_sleep"] = "DISABLED"
+                    except Exception as e:
+                        logging.debug("Failed to get deep sleep status for gpu %s | %s", gpu_id, e)
 
                 values_dict['clock'] = clocks
         if "temperature" in current_platform_args:
