@@ -393,6 +393,17 @@ void MultipleDeviceMultipleKernelTest(const unsigned int num_devices,
 
   if (kernel_count > 1) {
     for (auto i = 0u; i < num_devices; ++i) {
+      int canAccess  = 0;
+      for (auto j = 0u; j < num_devices; ++j) {
+        if (i != j) {
+          HIP_CHECK(hipDeviceCanAccessPeer(&canAccess, i, j));
+          if(canAccess == 0) {
+            std::string msg = "P2P access check failed between dev1:" + std::to_string(i) + ",dev2:" + std::to_string(j);
+            HipTest::HIP_SKIP_TEST(msg.c_str());
+            return;
+          }
+        }
+      }
       int concurrent_kernels = 0;
       HIP_CHECK(hipDeviceGetAttribute(&concurrent_kernels, hipDeviceAttributeConcurrentKernels, i));
       if (!concurrent_kernels) {

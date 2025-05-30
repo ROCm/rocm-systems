@@ -137,6 +137,8 @@ __global__ void kernel500ms_gfx11(float* hostRes, int clkRate) {
 
 TEST_CASE("Unit_hipMemPoolApi_BasicAlloc") {
   int mem_pool_support = 0;
+  HIP_CHECK(hipSetDevice(0));
+
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
     SUCCEED("Runtime doesn't support Memory Pool. Skip the test case.");

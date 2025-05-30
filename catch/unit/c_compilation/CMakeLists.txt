@@ -33,6 +33,7 @@ add_custom_target(devprop_c_custom
             -c ${CMAKE_CURRENT_SOURCE_DIR}/hipGetDeviceProp.c
             -I${HIP_PATH}/include
             -D${PLATFORM_DEFINE}
+            --rocm-path=${ROCM_PATH}
             -o hipGetDeviceProp.o
     BYPRODUCTS hipGetDeviceProp.o
 )

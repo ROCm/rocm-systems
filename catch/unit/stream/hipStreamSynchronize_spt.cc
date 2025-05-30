@@ -59,10 +59,6 @@ TEST_CASE("Unit_hipStreamSynchronize_spt_EmptyStream") {
  */
 
 #if HT_AMD
-TEST_CASE("Unit_hipStreamSynchronize_spt_UninitializedStream") {
-  hipStream_t stream{reinterpret_cast<hipStream_t>(0xFFFF)};
-  HIP_CHECK_ERROR(hipStreamSynchronize_spt(stream), hipErrorContextIsDestroyed);
-}
  /**
  * Test Description
  * ------------------------

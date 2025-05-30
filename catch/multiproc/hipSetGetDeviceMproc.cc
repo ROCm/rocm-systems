@@ -168,7 +168,7 @@ static void testValidDevices(int numDevices, bool useRocrEnv, int *deviceList,
   int getDeviceErrorCheck = 0;
   int getDeviceCountErrorCheck = 0;
   int *deviceListPtr = deviceList;
-  char visibleDeviceString[MAX_SIZE] = {};
+  std::string visibleDeviceString;
 
   if ((NULL == deviceList) || ((deviceListLength < 1) ||
         deviceListLength > numDevices)) {
@@ -177,11 +177,8 @@ static void testValidDevices(int numDevices, bool useRocrEnv, int *deviceList,
   }
 
   for (int i = 0; i < deviceListLength; i++) {
-    snprintf(visibleDeviceString + strlen(visibleDeviceString), MAX_SIZE, "%d,",
-        *deviceListPtr++);
+    visibleDeviceString.append(std::to_string(*deviceListPtr++) + ",");
   }
-
-  visibleDeviceString[strlen(visibleDeviceString)-1] = 0;
 
   int fd[2];
   pipe(fd);
@@ -192,14 +189,14 @@ static void testValidDevices(int numDevices, bool useRocrEnv, int *deviceList,
   if (cPid == 0) {
 #ifdef __HIP_PLATFORM_NVIDIA__
     unsetenv("CUDA_VISIBLE_DEVICES");
-    setenv("CUDA_VISIBLE_DEVICES", visibleDeviceString, 1);
+    setenv("CUDA_VISIBLE_DEVICES", visibleDeviceString.c_str(), 1);
 #else
     unsetenv("ROCR_VISIBLE_DEVICES");
     unsetenv("HIP_VISIBLE_DEVICES");
     if (true == useRocrEnv) {
-      setenv("ROCR_VISIBLE_DEVICES", visibleDeviceString, 1);
+      setenv("ROCR_VISIBLE_DEVICES", visibleDeviceString.c_str(), 1);
     } else {
-      setenv("HIP_VISIBLE_DEVICES", visibleDeviceString, 1);
+      setenv("HIP_VISIBLE_DEVICES", visibleDeviceString.c_str(), 1);
     }
 #endif
 
@@ -255,24 +252,21 @@ static void testValidDevices(int numDevices, bool useRocrEnv, int *deviceList,
 
 
 static void Initialize(int *deviceList, int numDevices, int count,
-    char min_visibleDeviceString[], char max_visibleDeviceString[]) {
+    std::string& min_visibleDeviceString, std::string& max_visibleDeviceString) {
   int *deviceListPtr = deviceList;
   for (int i =0; i < count; i++) {
     if (i == count-1) {
-      snprintf(min_visibleDeviceString + strlen(min_visibleDeviceString),
-              MAX_SIZE, "%d", *deviceListPtr++);
+      min_visibleDeviceString.append(std::to_string(*deviceListPtr++));
     } else {
-      snprintf(min_visibleDeviceString + strlen(min_visibleDeviceString),
-              MAX_SIZE, "%d,", *deviceListPtr++);
+      min_visibleDeviceString.append(std::to_string(*deviceListPtr++) + ",");
     }
   }
+
   for (int i =0; i < numDevices; i++) {
     if (i == numDevices-1) {
-      snprintf(max_visibleDeviceString + strlen(max_visibleDeviceString),
-               MAX_SIZE, "%d", i);
+      max_visibleDeviceString.append(std::to_string(i));
     } else {
-      snprintf(max_visibleDeviceString + strlen(max_visibleDeviceString),
-               MAX_SIZE, "%d,", i);
+      max_visibleDeviceString.append(std::to_string(i) + ",");
     }
   }
 }
@@ -281,8 +275,8 @@ static void testMaxRvdMinHvd(int numDevices, int *deviceList, int count) {
   bool testResult = true;
   int device;
   int validateCount = 0;
-  char min_visibleDeviceString[MAX_SIZE] = {0};
-  char max_visibleDeviceString[MAX_SIZE] = {0};
+  std::string min_visibleDeviceString;
+  std::string max_visibleDeviceString;
   int fd[2];
   pipe(fd);
   pid_t cPid;
@@ -292,8 +286,8 @@ static void testMaxRvdMinHvd(int numDevices, int *deviceList, int count) {
         count, min_visibleDeviceString, max_visibleDeviceString);
     unsetenv("ROCR_VISIBLE_DEVICES");
     unsetenv("HIP_VISIBLE_DEVICES");
-    setenv("ROCR_VISIBLE_DEVICES", max_visibleDeviceString, 1);
-    setenv("HIP_VISIBLE_DEVICES", min_visibleDeviceString, 1);
+    setenv("ROCR_VISIBLE_DEVICES", max_visibleDeviceString.c_str(), 1);
+    setenv("HIP_VISIBLE_DEVICES", min_visibleDeviceString.c_str(), 1);
     HIP_CHECK(hipGetDeviceCount(&numDevices));
     for (int i = 0; i < numDevices; i++) {
       HIP_CHECK(hipSetDevice(i));
@@ -322,19 +316,19 @@ static void testRvdCvd(int numDevices, int *deviceList, int count) {
   bool testResult = true;
   int device;
   int validateCount = 0;
-  char min_visibleDeviceString[MAX_SIZE] = {0};
-  char max_visibleDeviceString[MAX_SIZE] = {0};
+  std::string min_visibleDeviceString;
+  std::string max_visibleDeviceString;;
   int fd[2];
   pipe(fd);
   pid_t cPid;
   cPid = fork();
   if (cPid == 0) {  // child
     Initialize(deviceList, numDevices, count,
-             min_visibleDeviceString, max_visibleDeviceString);
+              min_visibleDeviceString, max_visibleDeviceString);
     unsetenv("ROCR_VISIBLE_DEVICES");
     unsetenv("HIP_VISIBLE_DEVICES");
-    setenv("ROCR_VISIBLE_DEVICES", max_visibleDeviceString, 1);
-    setenv("CUDA_VISIBLE_DEVICES", min_visibleDeviceString, 1);
+    setenv("ROCR_VISIBLE_DEVICES", max_visibleDeviceString.c_str(), 1);
+    setenv("CUDA_VISIBLE_DEVICES", min_visibleDeviceString.c_str(), 1);
     HIP_CHECK(hipGetDeviceCount(&numDevices));
     for (int i = 0; i < numDevices; i++) {
       HIP_CHECK(hipSetDevice(i));
@@ -363,8 +357,8 @@ static void testMinRvdMaxHvd(int numDevices, int *deviceList, int count) {
   bool testResult = true;
   int device;
   int validateCount = 0;
-  char min_visibleDeviceString[MAX_SIZE] = {0};
-  char max_visibleDeviceString[MAX_SIZE] = {0};
+  std::string min_visibleDeviceString;
+  std::string max_visibleDeviceString;
   int fd[2];
   pipe(fd);
   pid_t cPid;
@@ -374,8 +368,8 @@ static void testMinRvdMaxHvd(int numDevices, int *deviceList, int count) {
               min_visibleDeviceString, max_visibleDeviceString);
     unsetenv("ROCR_VISIBLE_DEVICES");
     unsetenv("HIP_VISIBLE_DEVICES");
-    setenv("ROCR_VISIBLE_DEVICES", min_visibleDeviceString, 1);
-    setenv("HIP_VISIBLE_DEVICES", max_visibleDeviceString, 1);
+    setenv("ROCR_VISIBLE_DEVICES", min_visibleDeviceString.c_str(), 1);
+    setenv("HIP_VISIBLE_DEVICES", max_visibleDeviceString.c_str(), 1);
     HIP_CHECK(hipGetDeviceCount(&numDevices));
     for (int i = 0; i < numDevices; i++) {
       HIP_CHECK(hipSetDevice(i));
@@ -436,22 +430,22 @@ TEST_CASE("Unit_hipSetDevice_InvalidVisibleDeviceList") {
  */
 TEST_CASE("Unit_hipSetDevice_ValidVisibleDeviceList") {
   int numDevices = 0;
-  int deviceList[MAX_SIZE];
+  std::vector<int> deviceList;
 
   getDeviceCount(&numDevices);
   REQUIRE(numDevices != 0);
 
   // Test for all available devices
   for (int i = 0; i < numDevices; i++) {
-    deviceList[i] = i;
+    deviceList.push_back(i);
   }
 
   SECTION("Test setting valid hip visible device list") {
-    testValidDevices(numDevices, false, deviceList, numDevices);
+    testValidDevices(numDevices, false, deviceList.data(), numDevices);
   }
 #ifndef __HIP_PLATFORM_NVIDIA__
   SECTION("Test setting valid rocr visible device list") {
-    testValidDevices(numDevices, true, deviceList, numDevices);
+    testValidDevices(numDevices, true, deviceList.data(), numDevices);
   }
 #endif
 }
@@ -489,7 +483,7 @@ TEST_CASE("Unit_hipSetDevice_SubsetOfAvailableDevices") {
  */
 TEST_CASE("Unit_hipSetDevice_MinRvdMaxHvdDevicesList") {
   int numDevices = 0;
-  int deviceList[MAX_SIZE];
+  std::vector<int> deviceList;
   int count = 0;
 
   getDeviceCount(&numDevices);
@@ -497,18 +491,18 @@ TEST_CASE("Unit_hipSetDevice_MinRvdMaxHvdDevicesList") {
   REQUIRE(numDevices != 0);
 
   if (numDevices == 1) {
-    deviceList[0] = 0;
+    deviceList.push_back(0);
     count = 1;
   } else {
     for (int i=0; i < numDevices; i++) {
       if (i%2 == 0) {
-        deviceList[count] = i;
+        deviceList.push_back(i);
         count++;
       }
     }
   }
 
-  testMinRvdMaxHvd(numDevices, deviceList, count);
+  testMinRvdMaxHvd(numDevices, deviceList.data(), count);
 }
 
 /**
@@ -517,26 +511,23 @@ TEST_CASE("Unit_hipSetDevice_MinRvdMaxHvdDevicesList") {
  */
 TEST_CASE("Unit_hipSetDevice_MaxRvdMinHvdDevicesList") {
   int numDevices = 0;
-  int deviceList[MAX_SIZE];
-  int count = 0;
+  std::vector<int> deviceList;
 
   getDeviceCount(&numDevices);
 
   REQUIRE(numDevices != 0);
 
   if (numDevices == 1) {
-    deviceList[0] = 0;
-    count = 1;
+    deviceList.push_back(0);
   } else {
     for (int i=0; i < numDevices; i++) {
       if (i%2 == 0) {
-        deviceList[count] = i;
-        count++;
+        deviceList.push_back(i);
       }
     }
   }
 
-  testMaxRvdMinHvd(numDevices, deviceList, count);
+  testMaxRvdMinHvd(numDevices, deviceList.data(), deviceList.size());
 }
 
 /**

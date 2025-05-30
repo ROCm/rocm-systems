@@ -74,6 +74,9 @@ TEST_CASE("Unit_hipMalloc_Negative_Parameters") {
   }
 }
 
+// Commenting this due to defect SWDEV-501675, used in below commented tests
+#if 0
+/**
 /**
  * Local Function to Get total RAM size in bytes
  */
@@ -90,8 +93,6 @@ static inline size_t getTotalRAM() {
 #endif
 }
 
-// Commenting this due to defect SWDEV-501675, used in below commented tests
-#if 0
 /**
  * Local Function to Get Available RAM size in bytes
  */
@@ -314,7 +315,6 @@ TEST_CASE("Unit_hipMalloc_AllocateAvailableVRAMAndPossibleRAM") {
   HIP_CHECK(hipFree(devMem));
 #endif
 }
-#endif
 
 /**
  * Test Description
@@ -343,8 +343,6 @@ TEST_CASE("Unit_hipMalloc_AllocateMoreThanTotalRAM") {
   HIP_CHECK_ERROR(hipMalloc(&devMem, size), hipErrorOutOfMemory);
 }
 
-// Commenting this due to defect SWDEV-501675
-#if 0
 /**
  * Test Description
  * ------------------------

@@ -39,6 +39,9 @@ THE SOFTWARE.
 #endif
 #define COMMAND_LEN 256
 #define BUFFER_LEN 512
+
+std::atomic<int> tState { 1 }; // 0:fail, 1:pass, 2:skip
+
 /**
  * @addtogroup hipDeviceGetUuid hipDeviceGetUuid
  * @{
@@ -445,9 +448,15 @@ TEST_CASE("Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES") {
 }
 
 void ChkUUID() {
+  if (tState == 2) {
+    return;
+  }
   int devCount = 0;
   HIP_CHECK(hipGetDeviceCount(&devCount));
-  REQUIRE(devCount == 1);
+  if (devCount != 1) {
+    tState = 0;
+    return;
+  }
   hipDevice_t device;
   HIP_CHECK(hipSetDevice(0));
   HIP_CHECK(hipDeviceGet(&device, 0));
@@ -463,7 +472,7 @@ void ChkUUID() {
     std::string uuid = uuid_map[0].data();
     std::string t_uuid = uuid.substr(4, 19);
     if (memcmp(d_uuid.bytes, t_uuid.c_str(), 16) == 0) {
-      REQUIRE(true);
+      tState = 1;
     }
   }
 }
@@ -481,28 +490,9 @@ void setEnv() {
     unsetenv("HIP_VISIBLE_DEVICES");
     setenv("HIP_VISIBLE_DEVICES", uuidEnv.c_str(), 1);
   } else {
-      HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");  // NOLINT
+    tState = 2;
+    HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");  // NOLINT
   }
-}
-
-std::mutex setLock;
-void setEnvLock() {
-  setLock.lock();
-  std::map<int, std::vector<char>> uuid_map;
-  #ifdef __linux__
-    uuid_map = getUUIDlistFromRocmInfo();
-  #else
-    uuid_map = getUUIDlistWithoutRocmInfo();
-  #endif
-  if (uuid_map.size() >= 2) {
-    std::string uuid = uuid_map[1].data();
-    std::string uuidEnv = uuid.substr(0, 20);
-    unsetenv("HIP_VISIBLE_DEVICES");
-    setenv("HIP_VISIBLE_DEVICES", uuidEnv.c_str(), 1);
-  } else {
-      HipTest::HIP_SKIP_TEST("Skipping because this machine has total GPUs < 2");  // NOLINT
-  }
-  setLock.unlock();
 }
 /**
  * Test Description
@@ -525,34 +515,7 @@ TEST_CASE("Unit_UUID_setEnv_Thread") {
   // Create Thread two
   std::thread t2(ChkUUID);
   t2.join();
-}
-/**
- * Test Description
- * ------------------------
- *  - Multi thread scenario.
- *  - Set Env var HIP_VISIBLE_DEVICES in one thread
- *  - Meanwhile hold the second thread. Release the 2nd thread.
- *  - Verify the followed by functionality in another thread
- * Test source
- * ------------------------
- *  - unit/device/hipDeviceGetUuid.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 6.2
- */
-
-TEST_CASE("Unit_UUID_setEnv_Thread_Lock") {
-  // Create Thread one
-  std::thread t1(setEnvLock);
-#ifdef __linux__
-  sleep(2);
-#else
-  _sleep(2);
-#endif
-  // Create Thread two
-  std::thread t2(ChkUUID);
-  t2.join();
-  t1.join();
+  REQUIRE(tState != 0);
 }
 #endif
 /**

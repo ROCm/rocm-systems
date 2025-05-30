@@ -135,13 +135,8 @@ static void get_multi_grid_dims(dim3& grid_dim, dim3& block_dim, unsigned int de
                                        dim3(1, sm, 2),
                                        dim3(3, 3, 3)};
 
-  if (test_case < 10) {
-    grid_dim = grid_dim_values[test_case % grid_dim_values.size()];
-    block_dim = block_dim_values[test_case % block_dim_values.size()];
-  } else {
-    grid_dim = grid_dim_values[(test_case + device) % grid_dim_values.size()];
-    block_dim = block_dim_values[(test_case + device) % block_dim_values.size()];
-  }
+  grid_dim = grid_dim_values[test_case % grid_dim_values.size()];
+  block_dim = block_dim_values[test_case % block_dim_values.size()];
 }
 
 /**

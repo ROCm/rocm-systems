@@ -28,11 +28,12 @@ THE SOFTWARE.
 struct CmdOptions {
   int iterations = 10;
   int warmups = 100;
-  int cg_extended_run = 5;
   int cg_iterations = 5;
   bool no_display = false;
   bool progress = false;
   uint64_t accuracy_iterations = std::numeric_limits<uint32_t>::max() + 1ull;
+  uint64_t reduce_iterations = 1;
+  uint64_t reduce_input_size = 50;
   int accuracy_max_memory = 80;
 };
 

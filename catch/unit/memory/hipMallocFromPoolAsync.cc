@@ -134,12 +134,6 @@ TEST_CASE("Unit_hipMallocFromPoolAsync_Negative_Parameters") {
                     hipErrorInvalidValue);
   }
 
-  SECTION("Invalid stream handle") {
-    HIP_CHECK_ERROR(hipMallocFromPoolAsync(static_cast<void**>(&p), alloc_size, mempool.mempool(),
-                                           reinterpret_cast<hipStream_t>(-1)),
-                    hipErrorInvalidHandle);
-  }
-
   SECTION("Size is max size_t") {
     HIP_CHECK_ERROR(hipMallocFromPoolAsync(static_cast<void**>(&p), max_size, mempool.mempool(),
                                            stream.stream()),

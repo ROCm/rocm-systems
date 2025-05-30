@@ -241,7 +241,7 @@ TEST_CASE("Unit_hipGetSetDeviceFlags_InvalidFlag") {
                                             0b101,     // schedule flags should not overlap
                                             0b110,     // schedule flags should not overlap
                                             0b111,     // schedule flags should not overlap
-                                            0b100000,  // out of bounds
+                                            //0b100000,  // out of bounds is no longer invalid
                                             0xFFFF);
   CAPTURE(invalidFlag);
   HIP_CHECK_ERROR(hipSetDeviceFlags(invalidFlag), hipErrorInvalidValue);

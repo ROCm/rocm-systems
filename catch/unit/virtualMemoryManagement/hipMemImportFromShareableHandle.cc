@@ -58,7 +58,7 @@ static __global__ void square_kernel(int* Buff) {
  *    - HIP_VERSION >= 6.1
  */
 TEST_CASE("Unit_hipMemImportFromShareableHandle_Positive_Basic") {
-  HIP_CHECK(hipFree(0));
+  CTX_DESTROY();
 
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0));
@@ -66,7 +66,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_Positive_Basic") {
 
   hipMemAllocationProp prop = {};
   prop.type = hipMemAllocationTypePinned;
-  prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+  prop.requestedHandleTypes = hipMemHandleTypePosixFileDescriptor;
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;
 
@@ -83,6 +83,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_Positive_Basic") {
   HIP_CHECK(hipMemImportFromShareableHandle(&imported_handle, &shareable_handle,
                                             hipMemHandleTypePosixFileDescriptor));
   HIP_CHECK(hipMemRelease(handle));
+  CTX_DESTROY();
 }
 
 /**
@@ -97,7 +98,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_Positive_Basic") {
  *    - HIP_VERSION >= 6.1
  */
 TEST_CASE("Unit_hipMemImportFromShareableHandle_Negative_Parameters") {
-  HIP_CHECK(hipFree(0));
+  CTX_CREATE();
 
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0));
@@ -105,7 +106,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_Negative_Parameters") {
 
   hipMemAllocationProp prop = {};
   prop.type = hipMemAllocationTypePinned;
-  prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+  prop.requestedHandleTypes = hipMemHandleTypePosixFileDescriptor;
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;
 
@@ -122,13 +123,11 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_Negative_Parameters") {
 
   hipMemGenericAllocationHandle_t imported_handle;
 
-#if HT_AMD
   SECTION("handle == nullptr") {
     HIP_CHECK_ERROR(hipMemImportFromShareableHandle(nullptr, shareable_handle,
                                                     hipMemHandleTypePosixFileDescriptor),
                     hipErrorInvalidValue);
   }
-#endif
 
   SECTION("shareableHandle == nullptr") {
     HIP_CHECK_ERROR(hipMemImportFromShareableHandle(&imported_handle, nullptr,
@@ -137,6 +136,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_Negative_Parameters") {
   }
 
   HIP_CHECK(hipMemRelease(handle));
+  CTX_DESTROY();
 }
 
 /**
@@ -201,7 +201,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl") {
     HIP_CHECK(hipMemcpyHtoD(ptrA, A_h.data(), buffer_size));
     // Invoke kernel
     hipLaunchKernelGGL(square_kernel, dim3(N / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0,
-                     static_cast<int*>(ptrA));
+                     reinterpret_cast<int*>(ptrA));
     HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA, buffer_size));
     HIP_CHECK(hipDeviceSynchronize());
     // validate
@@ -224,7 +224,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl") {
     // Set property
     hipMemAllocationProp prop = {};
     prop.type = hipMemAllocationTypePinned;
-    prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+    prop.requestedHandleTypes = hipMemHandleTypePosixFileDescriptor;
     prop.location.type = hipMemLocationTypeDevice;
     prop.location.id = device;
     // Set Granularity of the VMM memory
@@ -329,7 +329,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl") {
     HIP_CHECK(hipMemcpyHtoD(ptrA, A_h.data(), buffer_size));
     // Invoke kernel
     hipLaunchKernelGGL(square_kernel, dim3(N / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0,
-                     static_cast<int*>(ptrA));
+                     reinterpret_cast<int*>(ptrA));
     HIP_CHECK(hipDeviceSynchronize());
 
     // free resources
@@ -342,14 +342,13 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl") {
   } else {  // parent
     REQUIRE(close(fd[0]) == 0);
     REQUIRE(close(fdSig[1]) == 0);
-
     hipDevice_t device;
     HIP_CHECK(hipDeviceGet(&device, 0));
     checkVMMSupported(device);
     // Set property
     hipMemAllocationProp prop = {};
     prop.type = hipMemAllocationTypePinned;
-    prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+    prop.requestedHandleTypes = hipMemHandleTypePosixFileDescriptor;
     prop.location.type = hipMemLocationTypeDevice;
     prop.location.id = device;
     // Set Granularity of the VMM memory
@@ -453,7 +452,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl") {
 
       // import the sareable handle
       HIP_CHECK(hipMemImportFromShareableHandle(&imported_handle, &shHandle,
-                                              hipMemHandleTypePosixFileDescriptor));
+                                                hipMemHandleTypePosixFileDescriptor));
       // Allocate virtual address range
       hipDeviceptr_t ptrA;
       HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
@@ -474,7 +473,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl") {
       HIP_CHECK(hipMemcpyHtoD(ptrA, A_h.data(), buffer_size));
       // Invoke kernel
       hipLaunchKernelGGL(square_kernel, dim3(N / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0,
-                         static_cast<int*>(ptrA));
+                         reinterpret_cast<int*>(ptrA));
       HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA, buffer_size));
       HIP_CHECK(hipDeviceSynchronize());
       // validate
@@ -502,13 +501,14 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl") {
     REQUIRE(close(fdpid[1]) == 0);
     int pid_grChld = 0;
     REQUIRE(read(fdpid[0], &pid_grChld, sizeof(pid_grChld)) >= 0);
+
     hipDevice_t device;
     HIP_CHECK(hipDeviceGet(&device, 0));
     checkVMMSupported(device);
     // Set property
     hipMemAllocationProp prop = {};
     prop.type = hipMemAllocationTypePinned;
-    prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+    prop.requestedHandleTypes = hipMemHandleTypePosixFileDescriptor;
     prop.location.type = hipMemLocationTypeDevice;
     prop.location.id = device;
     // Set Granularity of the VMM memory

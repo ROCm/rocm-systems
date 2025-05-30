@@ -20,7 +20,6 @@ THE SOFTWARE.
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
- 
 #include <cstdint>
 
 #pragma clang diagnostic ignored "-Wunused-variable"
@@ -229,42 +228,6 @@ typedef struct hipLaunchKernelStruct18 {
   __device__ void setChar(char c) { c1 = c; }
   __device__ int getChar() { return c1; }
 } hipLaunchKernelStruct_t18;
-
-// This test is to verity user defined STL, simple stack implementation
-typedef struct stackNode {
-    int data;
-    stackNode* nextNode = NULL;
-} stackNode_t;
-typedef struct hipLaunchKernelStruct19 {
-  stackNode_t* stack = NULL;
-  unsigned int size_ = 0;
-  void pushMe(int value) {  // not a device function, setting from host
-    stackNode_t* newNode;
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&newNode),
-                         sizeof(stackNode_t)));
-    HIP_CHECK(hipMemset(&newNode->data, value, sizeof(stackNode_t)));
-    // newNode->data = value;
-    ++size_;
-    if (stack == NULL) {
-      stack = newNode;
-      return;
-    }
-    stackNode_t* currentHead = stack;
-    stack = newNode;
-    stack->nextNode = currentHead;
-    return;
-  }
-  __device__ void popMe() {
-    stackNode_t* currentHead = stack;
-    stack = stack->nextNode;
-    --size_;
-    // delete currentHead;  // no idea why delete not working
-    return;
-  }
-  int stackSize() {
-    return size_;
-  }
-} hipLaunchKernelStruct_t19;
 
 // This test is to verify out of order initalizer of struct elements
 // and access in-order, from device.
@@ -525,14 +488,6 @@ __global__ void hipLaunchKernelStructFunc18(
   result_d18[x] =  (hipLaunchKernelStruct_.getChar() == 'c');
 }
 
-// Passing simple user defined stack implemenration,  using __device__ func()
-__global__ void hipLaunchKernelStructFunc19(
-                    hipLaunchKernelStruct_t19 hipLaunchKernelStruct_) {
-  int x = blockIdx.x * blockDim.x + threadIdx.x;
-  // stack should be empty after the kernel execustion, verify on host side
-  hipLaunchKernelStruct_.popMe();
-}
-
 // Passing out of order initalized struct, access in-order
 __global__ void hipLaunchKernelStructFunc20(
                     hipLaunchKernelStruct_t20 hipLaunchKernelStruct_,
@@ -714,6 +669,7 @@ TEST_CASE("Unit_hipLaunchParm") {
                     dim3(1), 0, 0, hipLaunchKernelStruct_h5,
                     result_d);
     ResultValidation();
+    HIP_CHECK(hipFree(reinterpret_cast<void*>(cp_d5)));
   }
 
   SECTION("Passing struct with aligned(8)") {
@@ -805,6 +761,7 @@ TEST_CASE("Unit_hipLaunchParm") {
     #if ENABLE_DECLARE_INITIALIZATION_POINTER
     ResultValidation();
     #endif
+    HIP_CHECK(hipFree(reinterpret_cast<void*>(ip_d9)));
   }
 
   SECTION("Passing struct with uintN_t") {
@@ -884,7 +841,8 @@ TEST_CASE("Unit_hipLaunchParm") {
                     dim3(1), 0, 0, hipLaunchKernelStruct_h15,
                     result_d);
     ResultValidation();
-    #endif
+    HIP_CHECK(hipFree(reinterpret_cast<void*>(hipLaunchKernelStruct_h15.heapmem)));
+#endif
   }
 
   SECTION("Passing simple template struct") {
@@ -919,20 +877,8 @@ TEST_CASE("Unit_hipLaunchParm") {
     ResultValidation();
   }
 
-  SECTION("Passing user defined stack") {
-    ResetValidationMem();
-    hipLaunchKernelStruct_t19 hipLaunchKernelStruct_h19;
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc19),
-                    dim3(BLOCK_DIM_SIZE),
-                    dim3(1), 0, 0, hipLaunchKernelStruct_h19);
-    #if ENABLE_USER_STL
-    // Validation part of the struct, hipLaunchKernelStructFunc19
-    HIPASSERT(hipLaunchKernelStruct_h19.stackSize() == 0);
-    #endif
-  }
-
-    // Test: Passing struct which is initiazed out of order
-    // accessing same elements in order from device
+  // Test: Passing struct which is initiazed out of order
+  // accessing same elements in order from device
   SECTION("Passing struct which is initiazed out of order") {
     ResetValidationMem();
     hipLaunchKernelStruct_t20 hipLaunchKernelStruct_h20;
@@ -1008,6 +954,8 @@ TEST_CASE("Unit_hipLaunchParm") {
     MY_LAUNCH_WITH_PAREN(hipLaunchKernelGGL(vAdd, dim3(1024),
                          dim3(1), 0, 0, Ad), true, "firstCall");
 #endif
+    HIP_CHECK(hipFree(reinterpret_cast<void*>(A)));
+    HIP_CHECK(hipFree(reinterpret_cast<void*>(Ad)));
   }
   HIP_CHECK(hipHostFree(result_h));
   HIP_CHECK(hipFree(result_d));

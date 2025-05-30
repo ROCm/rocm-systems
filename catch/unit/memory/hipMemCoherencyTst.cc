@@ -49,30 +49,40 @@ __global__  void SquareKrnl(int *ptr) {
 // The variable below will work as signal to decide pass/fail
 static bool YES_COHERENT = false;
 
+enum class MemoryType {
+  kHostMalloc,
+  kManaged,
+  kDeviceFineGrained
+};
 // The function tests the coherency of allocated memory
 // If this test hangs, means there is issue in coherency
-static void TstCoherency(int* ptr, bool hmmMem) {
+static void TstCoherency(int* ptr, MemoryType type) {
   int* dptr = nullptr;
   hipStream_t stream{};
   HIP_CHECK(hipStreamCreate(&stream));
-
+  int apu = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&apu, hipDeviceAttributeIntegrated, 0));
+  fprintf(stderr, "Device 0 is %s\n", apu ? "apu" : "dgpu");
+  // Host builtin atomcs cannot work on device fine grained mem on dgpu
+  // Note: hipDeviceAttributeHostNativeAtomicSupported should return 1 for kHostMalloc here
+  bool supportHostAtomic = type != MemoryType::kDeviceFineGrained || apu;
   // storing value 1 in the memory created above
   *ptr = 1;
 
-  if (!hmmMem) {
+  if (type == MemoryType::kHostMalloc) {
     HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&dptr), ptr, 0));
     CoherentTst<<<1, 1, 0, stream>>>(dptr);
   } else {
     CoherentTst<<<1, 1, 0, stream>>>(ptr);
   }
   // To prevent Windows batch dispatching issue, run inspecting code in thread
-  std::thread my_thread([ptr] {
+  std::thread my_thread([ptr, supportHostAtomic] {
     int d = 0;
     std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
     while (
         std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start)
             .count() <= 3) {
-      d = __sync_fetch_and_add(ptr, 0);  // Retrieve *ptr
+      d = supportHostAtomic ? __sync_fetch_and_add(ptr, 0) : *ptr;  // Retrieve *ptr
       if (d == 2) break; // If kernel has updated *ptr to 2, exit
     }  // wait till ptr is updated to 2 from kernel or 3 seconds
     if (d != 2) {
@@ -81,7 +91,11 @@ static void TstCoherency(int* ptr, bool hmmMem) {
       return;
     }
     // increment it to 3
-    __sync_fetch_and_add(ptr, 1);
+    if (supportHostAtomic) {
+      __sync_fetch_and_add(ptr, 1);
+    } else {
+      *ptr += 1;
+    }
   });
 
   HIP_CHECK(hipStreamSynchronize(stream));
@@ -95,6 +109,7 @@ static void TstCoherency(int* ptr, bool hmmMem) {
 /* Test case description: The following test validates if fine grain
    behavior is observed or not with memory allocated using hipHostMalloc()*/
 TEST_CASE("Unit_hipHostMalloc_CoherentTst") {
+  HIP_CHECK(hipSetDevice(0));
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
@@ -104,7 +119,6 @@ TEST_CASE("Unit_hipHostMalloc_CoherentTst") {
   }
 
   int *Ptr = nullptr, SIZE = sizeof(int);
-  bool HmmMem = false;
   YES_COHERENT = false;
 
   // Allocating hipHostMalloc() memory with hipHostMallocCoherent flag
@@ -118,7 +132,7 @@ TEST_CASE("Unit_hipHostMalloc_CoherentTst") {
     HIP_CHECK(hipHostMalloc(&Ptr, SIZE, hipHostMallocMapped));
   }
 
-  TstCoherency(Ptr, HmmMem);
+  TstCoherency(Ptr, MemoryType::kHostMalloc);
   HIP_CHECK(hipHostFree(Ptr));
   REQUIRE(YES_COHERENT);
 }
@@ -129,8 +143,8 @@ TEST_CASE("Unit_hipHostMalloc_CoherentTst") {
 // passing
 #if HT_AMD
 TEST_CASE("Unit_hipMallocManaged_CoherentTst") {
+  HIP_CHECK(hipSetDevice(0));
   int *Ptr = nullptr, SIZE = sizeof(int), managed = 0;
-  bool HmmMem = true;
   YES_COHERENT = false;
 
   HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory,
@@ -144,7 +158,7 @@ TEST_CASE("Unit_hipMallocManaged_CoherentTst") {
     SECTION("hipMallocManaged with hipMemAttachHost flag") {
       HIP_CHECK(hipMallocManaged(&Ptr, SIZE, hipMemAttachHost));
     }
-    TstCoherency(Ptr, HmmMem);
+    TstCoherency(Ptr, MemoryType::kManaged);
     HIP_CHECK(hipFree(Ptr));
     REQUIRE(YES_COHERENT);
   } else {
@@ -157,6 +171,7 @@ TEST_CASE("Unit_hipMallocManaged_CoherentTst") {
 /* Test case description: The following test validates if memory access is fine
    with memory allocated using hipMallocManaged() and CoarseGrain Advise*/
 TEST_CASE("Unit_hipMallocManaged_CoherentTstWthAdvise") {
+  HIP_CHECK(hipSetDevice(0));
   int *Ptr = nullptr, SIZE = sizeof(int), managed = 0;
   YES_COHERENT = false;
 
@@ -199,6 +214,7 @@ TEST_CASE("Unit_hipMallocManaged_CoherentTstWthAdvise") {
 // The following tests are disabled for Nvidia as they are not applicable
 #if HT_AMD
 TEST_CASE("Unit_hipMalloc_CoherentTst") {
+  HIP_CHECK(hipSetDevice(0));
   int *Ptr = nullptr, SIZE = sizeof(int);
   uint32_t svm_attrib = 0;
   bool IfTstPassed = false;
@@ -218,6 +234,7 @@ TEST_CASE("Unit_hipMalloc_CoherentTst") {
    hipExtMallocWithFlags()*/
 #if HT_AMD
 TEST_CASE("Unit_hipExtMallocWithFlags_CoherentTst") {
+  HIP_CHECK(hipSetDevice(0));
   int *Ptr = nullptr, SIZE = sizeof(int), InitVal = 9, Pageable = 0, managed = 0, finegrain = 0;
   bool FineGrain = true;
   YES_COHERENT = false;
@@ -250,7 +267,7 @@ TEST_CASE("Unit_hipExtMallocWithFlags_CoherentTst") {
                                       hipDeviceMallocDefault));
     }
     if (FineGrain) {
-      TstCoherency(Ptr, FineGrain);
+      TstCoherency(Ptr, MemoryType::kDeviceFineGrained);
     } else {
       *Ptr = InitVal;
       hipStream_t strm;
@@ -269,4 +286,3 @@ TEST_CASE("Unit_hipExtMallocWithFlags_CoherentTst") {
   }
 }
 #endif
-

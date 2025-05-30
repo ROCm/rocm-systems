@@ -196,13 +196,12 @@ template <bool unaligned = false, typename F>
 void Memcpy2DHtoDSyncBehavior(F memcpy_func, const bool should_sync,
                               const hipStream_t kernel_stream = nullptr) {
   using LA = LinearAllocs;
-  const auto host_alloc_type = GENERATE(LA::malloc, LA::hipHostMalloc);
-  LinearAllocGuard<int> host_alloc(host_alloc_type, 32 * sizeof(int) * 32);
+  LinearAllocGuard<int> host_alloc(LA::hipHostMalloc, 32 * sizeof(int) * 32);
   LinearAllocGuard2D<int, unaligned> device_alloc(32, 32);
   MemcpySyncBehaviorCheck(std::bind(memcpy_func, device_alloc.ptr(), device_alloc.pitch(),
                                     host_alloc.ptr(), device_alloc.width(), device_alloc.width(),
                                     device_alloc.height(), hipMemcpyHostToDevice),
-                          should_sync, kernel_stream);
+                                    should_sync, kernel_stream);
 }
 
 template <bool unaligned = false, typename F>

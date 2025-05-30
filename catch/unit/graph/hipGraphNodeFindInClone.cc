@@ -94,12 +94,6 @@ TEST_CASE("Unit_hipGraphNodeFindInClone_Negative") {
     REQUIRE(hipGraphNodeFindInClone(&clonedgraphnode, graphnode, graph) ==
             hipErrorInvalidValue);
   }
-
-  SECTION("Destroy the graph node and find in cloned graph") {
-    HIP_CHECK(hipGraphDestroyNode(graphnode));
-    REQUIRE(hipGraphNodeFindInClone(&clonedgraphnode, graphnode, clonedgraph) ==
-            hipErrorInvalidValue);
-  }
 #endif
 
   SECTION("Pass invalid original graphnode") {

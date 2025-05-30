@@ -22,7 +22,7 @@
 AtomicAdd on CoarseGrainMemory
 1. The following test scenario verifies
 unsafeAtomicAdd on CoarseGrain memory with -mno-unsafe-fp-atomics flag
-This testcase works only on gfx90a, gfx940, gfx941, gfx942.
+This testcase works only on gfx90a, gfx942, gfx950.
 */
 
 #include<hip_test_checkers.hh>
@@ -93,7 +93,7 @@ TEMPLATE_TEST_CASE("Unit_unsafeAtomicAdd_NonCoherentnounsafeatomicsflag", "",
       HIP_CHECK(hipHostFree(result));
     }
   } else {
-    SUCCEED("Memory model feature is only supported for gfx90a, gfx940, gfx941, gfx942, Hence"
-             "skipping the testcase for this GPU " << device);
+    SUCCEED("Memory model feature is only supported for gfx90a, gfx942, gfx950, "
+        "Hence skipping the testcase for this GPU " << device);
   }
 }

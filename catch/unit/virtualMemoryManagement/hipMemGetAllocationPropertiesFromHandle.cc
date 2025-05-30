@@ -47,6 +47,7 @@ THE SOFTWARE.
  */
 TEST_CASE("Unit_hipMemGetAllocationPropertiesFromHandle_functional") {
   hipDevice_t device;
+  CTX_CREATE();
   HIP_CHECK(hipDeviceGet(&device, 0));
   checkVMMSupported(device);
   hipMemGenericAllocationHandle_t handle;
@@ -71,6 +72,7 @@ TEST_CASE("Unit_hipMemGetAllocationPropertiesFromHandle_functional") {
   REQUIRE(prop_temp.location.type == prop.location.type);
   REQUIRE(prop_temp.location.id == prop.location.id);
   HIP_CHECK(hipMemRelease(handle));
+  CTX_DESTROY();
 }
 
 /**
@@ -84,6 +86,7 @@ TEST_CASE("Unit_hipMemGetAllocationPropertiesFromHandle_functional") {
  *    - HIP_VERSION >= 6.1
  */
 TEST_CASE("Unit_hipMemGetAllocationPropertiesFromHandle_Negative") {
+  CTX_CREATE();
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0));
   checkVMMSupported(device);
@@ -110,10 +113,12 @@ TEST_CASE("Unit_hipMemGetAllocationPropertiesFromHandle_Negative") {
 
   SECTION("null handle") {
     prop.location.type = hipMemLocationTypeInvalid;
-    REQUIRE(hipMemGetAllocationPropertiesFromHandle(&prop_temp, nullptr) == hipErrorInvalidValue);
+    REQUIRE(hipMemGetAllocationPropertiesFromHandle(
+                &prop_temp, (hipMemGenericAllocationHandle_t) nullptr) == hipErrorInvalidValue);
   }
 
   HIP_CHECK(hipMemRelease(handle));
+  CTX_DESTROY();
 }
 
 /**

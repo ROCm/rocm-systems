@@ -42,7 +42,11 @@ THE SOFTWARE.
  *    - HIP_VERSION >= 6.1
  */
 TEST_CASE("Unit_hipMemRelease_negative") {
-  SECTION("Nullptr to handle") { REQUIRE(hipMemRelease(nullptr) == hipErrorInvalidValue); }
+  CTX_CREATE();
+  SECTION("Nullptr to handle") {
+    REQUIRE(hipMemRelease((hipMemGenericAllocationHandle_t) nullptr) == hipErrorInvalidValue);
+  }
+  CTX_DESTROY();
 }
 
 /**

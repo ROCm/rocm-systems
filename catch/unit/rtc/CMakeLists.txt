@@ -16,6 +16,7 @@ set(AMD_TEST_SRC
     linker.cc
     shfl.cc
     shfl_sync.cc
+    rtc_reduce.cc
     stdheaders.cc
     hiprtc_MathConstants_HeaderTst.cc
     hiprtc_VectorTypes_HeaderTst.cc

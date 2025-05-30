@@ -18,6 +18,7 @@ if(HIP_PLATFORM MATCHES "amd")
     warp_shfl_xor.cc
     warp_shfl_up.cc
     warp_shfl_down.cc
+    warp_reduce.cc
     hipShflUpDownTest.cc
     hipShflTests.cc
   )

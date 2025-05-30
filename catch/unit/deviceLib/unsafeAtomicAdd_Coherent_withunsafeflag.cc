@@ -101,7 +101,7 @@ TEMPLATE_TEST_CASE("Unit_unsafeAtomicAdd_CoherentwithUnsafeflag", "",
       HIP_CHECK(hipHostFree(result));
     }
   } else {
-    SUCCEED("Memory model feature is only supported for gfx90a, gfx940, gfx941, gfx942, Hence"
+    SUCCEED("Memory model feature is only supported for gfx90a, gfx942, Hence"
              "skipping the testcase for this GPU " << device);
   }
 }

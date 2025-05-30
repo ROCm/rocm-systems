@@ -84,7 +84,7 @@ template<class T>
 class hipPerfMemFill {
  private:
   static constexpr int NUM_START = 27;
-  static constexpr int NUM_SIZE = 5;
+  static constexpr int NUM_SIZE = 4;
   static constexpr int NUM_ITER = 10;
   static constexpr double NUM_1GB = 1024.0 * 1024.0 * 1024.0;
   size_t totalSizes_[NUM_SIZE];
@@ -96,7 +96,7 @@ class hipPerfMemFill {
  public:
   hipPerfMemFill() {
     for (int i = 0; i < NUM_SIZE; i++) {
-       // 128M, 256M, 512M, 1024M, 2048M
+       // 128M, 256M, 512M, 1024M
       totalSizes_[i] = 1ull << (i + NUM_START);
     }
   }

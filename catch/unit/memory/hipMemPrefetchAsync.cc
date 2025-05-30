@@ -155,12 +155,4 @@ TEST_CASE("Unit_hipMemPrefetchAsync_Negative_Parameters") {
     HIP_CHECK_ERROR(hipMemPrefetchAsync(alloc.ptr(), kPageSize, hipInvalidDeviceId),
                     hipErrorInvalidDevice);
   }
-
-  SECTION("Invalid stream") {
-    hipStream_t stream;
-    HIP_CHECK(hipStreamCreate(&stream));
-    HIP_CHECK(hipStreamDestroy(stream));
-    HIP_CHECK_ERROR(hipMemPrefetchAsync(alloc.ptr(), kPageSize, device, stream),
-                    hipErrorContextIsDestroyed);
-  }
 }

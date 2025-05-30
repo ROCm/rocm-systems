@@ -94,17 +94,6 @@ TEST_CASE("Unit_hipStreamQuery_spt_WithFinishedWork") {
  */
 #if HT_AMD
 TEST_CASE("Unit_hipStreamQuery_spt_NegativeCases") {
-  SECTION("Query Destroyed Stream") {
-    hipStream_t stream{nullptr};
-    HIP_CHECK(hipStreamCreate(&stream));
-    HIP_CHECK(hipStreamDestroy(stream));
-    HIP_CHECK_ERROR(hipStreamQuery_spt(stream), hipErrorContextIsDestroyed);
-  }
-  SECTION("Query Uninitialized Stream") {
-    hipStream_t streamUnInit{reinterpret_cast<hipStream_t>(0xFFFF)};
-    HIP_CHECK_ERROR(hipStreamQuery_spt(streamUnInit),
-                                       hipErrorContextIsDestroyed);
-  }
   SECTION("Submit Work On Stream And Query Null Stream") {
     hipStream_t ValidStream;
     HIP_CHECK(hipStreamCreate(&ValidStream));

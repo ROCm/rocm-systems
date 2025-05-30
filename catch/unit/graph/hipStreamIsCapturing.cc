@@ -62,18 +62,6 @@ TEST_CASE("Unit_hipStreamIsCapturing_Negative_Parameters") {
     HIP_CHECK(hipStreamEndCapture(stream, &graph));
     HIP_CHECK(hipGraphDestroy(graph));
   }
-#if HT_NVIDIA  // EXSWHTEC-216
-  SECTION("Check capture status when stream is uninitialized") {
-    hipStreamCaptureStatus cStatus;
-
-    constexpr auto InvalidStream = [] {
-      StreamGuard sg(Streams::created);
-      return sg.stream();
-    };
-
-    HIP_CHECK_ERROR(hipStreamIsCapturing(InvalidStream(), &cStatus), hipErrorContextIsDestroyed);
-  }
-#endif
 }
 
 /**

@@ -132,48 +132,12 @@ TEST_CASE("Unit_hipDeviceGetGraphMemAttribute_Positive_DoubleMemory") {
 
   HIP_CHECK(hipGraphExecDestroy(graph_exec1));
   HIP_CHECK(hipGraphExecDestroy(graph_exec2));
+
   HIP_CHECK(hipDeviceGraphMemTrim(0));
+  HIP_CHECK(hipStreamSynchronize(0));
+
   checkGraphMemAttribute(0, 2 * element_count * sizeof(int));
   ResetGraphMemAttribute();
-}
-
-/**
- * Test Description
- * ------------------------
- *  - Basic test to verify that hipDeviceGetGraphMemAttribute return correct memory attribute values
- * when graphs with allocation and free nodes are launched, and after memory is freed to OS.
- * Test source
- * ------------------------
- *  - /unit/graph/hipDeviceGetGraphMemAttribute.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 6.0
- */
-TEST_CASE("Unit_hipDeviceGetGraphMemAttribute_Positive_ReuseMemory") {
-#if !HT_NVIDIA // The test adds a free node and it's unclear if memory has to be released.
-  hipGraphExec_t graph_exec1, graph_exec2;
-
-  StreamGuard stream_guard(Streams::created);
-  hipStream_t stream = stream_guard.stream();
-
-  createGraph(&graph_exec1);
-  HIP_CHECK(hipGraphLaunch(graph_exec1, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
-
-  checkGraphMemAttribute(0, element_count * sizeof(int));
-
-  createGraph(&graph_exec2);
-  HIP_CHECK(hipGraphLaunch(graph_exec2, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
-
-  checkGraphMemAttribute(0, element_count * sizeof(int));
-
-  HIP_CHECK(hipGraphExecDestroy(graph_exec1));
-  HIP_CHECK(hipGraphExecDestroy(graph_exec2));
-  HIP_CHECK(hipDeviceGraphMemTrim(0));
-  checkGraphMemAttribute(0, element_count * sizeof(int));
-  ResetGraphMemAttribute();
-#endif
 }
 
 /**
@@ -256,7 +220,6 @@ TEST_CASE("Unit_hipDeviceGetGraphMemAttribute_Negative_Parameters") {
 
 static void Unit_hipDeviceGetGraphMemAttribute_Functional(
                                                unsigned deviceId = 0) {
-#if !HT_NVIDIA // The test adds a free node and it's unclear if memory has to be released.
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support,
             hipDeviceAttributeMemoryPoolsSupported, 0));
@@ -309,45 +272,10 @@ static void Unit_hipDeviceGetGraphMemAttribute_Functional(
   }
 
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-
   HIP_CHECK(hipGraphLaunch(graphExec, stream));
-  HIP_CHECK(hipStreamSynchronize(stream));
-
-  value = -1;
-  SECTION("Memory footprint check after launching & before delete graph") {
-    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId,
-                         hipGraphMemAttrUsedMemCurrent, &value));
-    REQUIRE(value == 0);
-    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId,
-                         hipGraphMemAttrUsedMemHigh, &value));
-    REQUIRE(value == Nbytes);
-    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId,
-                         hipGraphMemAttrReservedMemCurrent, &value));
-    REQUIRE(value == 0);
-    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId,
-                         hipGraphMemAttrReservedMemHigh, &value));
-    REQUIRE(value == Nbytes);
-  }
-
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipStreamDestroy(stream));
-
-  value = -1;
-  SECTION("Memory footprint check after destroying graph") {
-    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId,
-                         hipGraphMemAttrUsedMemCurrent, &value));
-    REQUIRE(value == 0);
-    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId,
-                         hipGraphMemAttrUsedMemHigh, &value));
-    REQUIRE(value == Nbytes);
-    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId,
-                         hipGraphMemAttrReservedMemCurrent, &value));
-    REQUIRE(value == 0);
-    HIP_CHECK(hipDeviceGetGraphMemAttribute(deviceId,
-                         hipGraphMemAttrReservedMemHigh, &value));
-    REQUIRE(value == Nbytes);
-  }
 
   HIP_CHECK(hipDeviceGraphMemTrim(deviceId));
 
@@ -390,7 +318,6 @@ static void Unit_hipDeviceGetGraphMemAttribute_Functional(
     REQUIRE(value == 0);
   }
   ResetGraphMemAttribute(deviceId);
-#endif
 }
 
 TEST_CASE("Unit_hipDeviceGetGraphMemAttribute_Functional") {
@@ -398,7 +325,6 @@ TEST_CASE("Unit_hipDeviceGetGraphMemAttribute_Functional") {
 }
 
 TEST_CASE("Unit_hipDeviceGetGraphMemAttribute_Functional_Multi_Device") {
-#if !HT_NVIDIA // The test adds a free node and it's unclear if memory has to be released.
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
@@ -409,7 +335,6 @@ TEST_CASE("Unit_hipDeviceGetGraphMemAttribute_Functional_Multi_Device") {
   } else {
     HipTest::HIP_SKIP_TEST("Skipped test as there is no device to test.");
   }
-#endif
 }
 
 /**

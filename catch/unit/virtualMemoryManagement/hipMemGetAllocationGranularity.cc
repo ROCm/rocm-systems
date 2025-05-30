@@ -139,20 +139,18 @@ TEST_CASE("Unit_hipMemGetAllocationGranularity_NegativeTests") {
     REQUIRE(hipErrorInvalidValue ==
             hipMemGetAllocationGranularity(nullptr, &prop, hipMemAllocationGranularityMinimum));
   }
-#if HT_AMD  // segfaults on NVIDIA
   SECTION("Prop is nullptr") {
     REQUIRE(
         hipErrorInvalidValue ==
         hipMemGetAllocationGranularity(&granularity, nullptr, hipMemAllocationGranularityMinimum));
   }
-#endif
-#if HT_NVIDIA
+
   SECTION("flag is invalid") {
     REQUIRE(hipErrorInvalidValue ==
             hipMemGetAllocationGranularity(&granularity, &prop,
                                            (hipMemAllocationGranularity_flags)0xff));
   }
-#endif
+
 #if HT_AMD  // succeeds on NVIDIA
   SECTION("device id > highest device id") {
     int numDevices = 0;

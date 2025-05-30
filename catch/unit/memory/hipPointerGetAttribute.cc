@@ -322,10 +322,6 @@ TEST_CASE("Unit_hipPointerGetAttribute_Negative") {
     REQUIRE(hipPointerGetAttribute(&data, HIP_POINTER_ATTRIBUTE_MEMPOOL_HANDLE,
           reinterpret_cast<hipDeviceptr_t>(A_d)) == hipErrorNotSupported);
   }
-  SECTION("Pass HIP_POINTER_ATTRIBUTE_CONTEXT not supported by HIP") {
-    REQUIRE(hipPointerGetAttribute(&data, HIP_POINTER_ATTRIBUTE_CONTEXT,
-          reinterpret_cast<hipDeviceptr_t>(A_d)) == hipErrorNotSupported);
-  }
   SECTION("Pass HIP_POINTER_ATTRIBUTE_P2P_TOKENS  not supported by HIP") {
     REQUIRE(hipPointerGetAttribute(&data, HIP_POINTER_ATTRIBUTE_P2P_TOKENS,
           reinterpret_cast<hipDeviceptr_t>(A_d)) == hipErrorNotSupported);

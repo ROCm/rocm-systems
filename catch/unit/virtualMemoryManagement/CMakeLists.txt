@@ -32,25 +32,31 @@ if(UNIX)
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC
       ${TEST_SRC}
-      hipMemExportToShareableHandle.cc
       hipMemImportFromShareableHandle.cc)
 endif()
+
+set(TEST_SRC
+    ${TEST_SRC}
+    hipMemExportToShareableHandle.cc)
 endif()
 
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC
       ${TEST_SRC}
-      hipMemAddressFree.cc
-      hipMemAddressReserve.cc
-      hipMemCreate.cc
-      hipMemSetGetAccess.cc
-      hipMemGetAllocationPropertiesFromHandle.cc
-      hipMemMap.cc
-      hipMemRelease.cc
-      hipMemUnmap.cc
-      hipMemVmm_old.cc
       hipGetProcAddressVmmApis.cc)
 endif()
+
+set(TEST_SRC
+    ${TEST_SRC}
+    hipMemAddressFree.cc
+    hipMemAddressReserve.cc
+    hipMemCreate.cc
+    hipMemSetGetAccess.cc
+    hipMemGetAllocationPropertiesFromHandle.cc
+    hipMemMap.cc
+    hipMemRelease.cc
+    hipMemUnmap.cc
+    hipMemVmm_old.cc)
 
 hip_add_exe_to_target(NAME VirtualMemoryManagementTest
   TEST_SRC ${TEST_SRC}

@@ -413,11 +413,7 @@ TEST_CASE("Unit_hipGraphExecUpdate_Negative_Functional_CountDiffer_1") {
   ret = hipGraphExecUpdate(graphExec1, graph2, &hErrorNode_out, &updateResult_out);
 
   REQUIRE(hipErrorGraphExecUpdateFailure == ret);
-#if HT_NVIDIA
-  REQUIRE(hipGraphExecUpdateErrorNotSupported == updateResult_out);
-#else
   REQUIRE(hipGraphExecUpdateErrorTopologyChanged == updateResult_out);
-#endif
   REQUIRE(NULL == hErrorNode_out);
 
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
@@ -480,13 +476,7 @@ TEST_CASE("Unit_hipGraphExecUpdate_Negative_Functional_CountDiffer_2") {
                                       hipMemcpyHostToDevice));
     HIP_CHECK(hipGraphInstantiate(&graphExec2, graph2, nullptr, nullptr, 0));
     ret = hipGraphExecUpdate(graphExec2, graph1, &hErrorNode_out, &updateResult_out);
-#if HT_NVIDIA
-    REQUIRE(hipErrorGraphExecUpdateFailure == ret);
-    REQUIRE(hipGraphExecUpdateErrorNotSupported == updateResult_out);
-    REQUIRE(NULL == hErrorNode_out);
-#else
     REQUIRE(hipSuccess == ret);
-#endif
     HIP_CHECK(hipGraphExecDestroy(graphExec2));
     HIP_CHECK(hipGraphDestroy(graph2));
   }
@@ -499,11 +489,7 @@ TEST_CASE("Unit_hipGraphExecUpdate_Negative_Functional_CountDiffer_2") {
                                       hipMemcpyHostToDevice));
     ret = hipGraphExecUpdate(graphExec3, graph3, &hErrorNode_out, &updateResult_out);
     REQUIRE(hipErrorGraphExecUpdateFailure == ret);
-#if HT_NVIDIA
-    REQUIRE(hipGraphExecUpdateErrorNotSupported == updateResult_out);
-#else
     REQUIRE(hipGraphExecUpdateErrorTopologyChanged == updateResult_out);
-#endif
     REQUIRE(NULL == hErrorNode_out);
 
     HIP_CHECK(hipGraphExecDestroy(graphExec3));
@@ -626,11 +612,7 @@ TEST_CASE("Unit_hipGraphExecUpdate_Negative_NodeType_Changed") {
   HIP_CHECK(hipGraphAddDependencies(graph2, &memcpy_A, &memsetNode, 1));
   ret = hipGraphExecUpdate(graphExec, graph2, &hErrorNode_out, &updateResult_out);
   REQUIRE(hipErrorGraphExecUpdateFailure == ret);
-#if HT_NVIDIA
-  REQUIRE(hipGraphExecUpdateErrorTopologyChanged == updateResult_out);
-#else
   REQUIRE(hipGraphExecUpdateErrorNodeTypeChanged == updateResult_out);
-#endif
   REQUIRE(memsetNode == hErrorNode_out);
 
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);

@@ -26,11 +26,6 @@ THE SOFTWARE.
 */
 
 #include <cstdio>
-#include <cstdint>
-#include <algorithm>
-#include <thread>
-#include <chrono>
-#include <vector>
 
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
@@ -39,8 +34,8 @@ THE SOFTWARE.
 /*
     This testcase verifies HIP Mem VMM API basic scenario - supported on all devices
  */
-
 TEST_CASE("Unit_hipMemVmm_Basic") {
+  CTX_CREATE();
   int vmm = 0;
   HIP_CHECK(hipDeviceGetAttribute(&vmm, hipDeviceAttributeVirtualMemoryManagementSupported, 0));
   INFO("hipDeviceAttributeVirtualMemoryManagementSupported: " << vmm);
@@ -54,7 +49,7 @@ TEST_CASE("Unit_hipMemVmm_Basic") {
 
   size_t granularity = 0;
 
-  hipMemAllocationProp memAllocationProp;
+  hipMemAllocationProp memAllocationProp{};
   memAllocationProp.type = hipMemAllocationTypePinned;
   memAllocationProp.location.id = 0;
   memAllocationProp.location.type = hipMemLocationTypeDevice;
@@ -62,14 +57,15 @@ TEST_CASE("Unit_hipMemVmm_Basic") {
   HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &memAllocationProp,
                                            hipMemAllocationGranularityRecommended));
 
-  size_t size = 4 * 1024;
+  size_t size = granularity;
   void* reservedAddress{nullptr};
-  HIP_CHECK(hipMemAddressReserve(&reservedAddress, size, granularity, nullptr, 0));
+  HIP_CHECK(hipMemAddressReserve(reinterpret_cast<hipDeviceptr_t*>(&reservedAddress), size, 0,
+                                 (hipDeviceptr_t) nullptr, 0));
 
-  hipMemGenericAllocationHandle_t gaHandle{nullptr};
+  hipMemGenericAllocationHandle_t gaHandle;
   HIP_CHECK(hipMemCreate(&gaHandle, size, &memAllocationProp, 0));
 
-  HIP_CHECK(hipMemMap(reservedAddress, size, 0, gaHandle, 0));
+  HIP_CHECK(hipMemMap(reinterpret_cast<hipDeviceptr_t>(reservedAddress), size, 0, gaHandle, 0));
 
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0));
@@ -80,7 +76,7 @@ TEST_CASE("Unit_hipMemVmm_Basic") {
   std::vector<char> values(size);
   const char value = 1;
 
-  HIP_CHECK(hipMemSetAccess(reservedAddress, size, &desc, 1));
+  HIP_CHECK(hipMemSetAccess(reinterpret_cast<hipDeviceptr_t>(reservedAddress), size, &desc, 1));
   HIP_CHECK(hipMemset(reservedAddress, value, size));
   HIP_CHECK(hipMemcpy(&values[0], reservedAddress, size, hipMemcpyDeviceToHost));
 
@@ -88,8 +84,9 @@ TEST_CASE("Unit_hipMemVmm_Basic") {
     REQUIRE(values[i] == value);
   }
 
-  HIP_CHECK(hipMemUnmap(reservedAddress, size));
+  HIP_CHECK(hipMemUnmap(reinterpret_cast<hipDeviceptr_t>(reservedAddress), size));
 
   HIP_CHECK(hipMemRelease(gaHandle));
-  HIP_CHECK(hipMemAddressFree(reservedAddress, size));
+  HIP_CHECK(hipMemAddressFree(reinterpret_cast<hipDeviceptr_t>(reservedAddress), size));
+  CTX_DESTROY();
 }

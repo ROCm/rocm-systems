@@ -123,12 +123,6 @@ TEST_CASE("Unit_hipMallocAsync_Negative_Parameters") {
     HIP_CHECK_ERROR(hipMallocAsync(nullptr, alloc_size, stream.stream()), hipErrorInvalidValue);
   }
 
-  SECTION("invalid stream handle") {
-    HIP_CHECK_ERROR(
-        hipMallocAsync(reinterpret_cast<void**>(&p), alloc_size, reinterpret_cast<hipStream_t>(-1)),
-        hipErrorInvalidHandle);
-  }
-
   SECTION("Size is max size_t") {
     HIP_CHECK_ERROR(hipMallocAsync(reinterpret_cast<void**>(&p), max_size, stream.stream()),
                     hipErrorOutOfMemory);

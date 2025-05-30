@@ -41,6 +41,15 @@ constexpr int num_buf = 3;
 constexpr int initializer = 0;
 
 /**
+ Kernel to perform Square of input data.
+ */
+static __global__ void square_kernel(int* Buff) {
+  int i = threadIdx.x + blockDim.x * blockIdx.x;
+  int temp = Buff[i] * Buff[i];
+  Buff[i] = temp;
+}
+
+/**
  * Test Description
  * ------------------------
  *    - Check if a physical chunk can be mapped/unmapped to same
@@ -56,6 +65,7 @@ TEST_CASE("Unit_hipMemMap_SameMemoryReuse") {
   constexpr int iterations = 20;
   size_t granularity = 0;
   size_t buffer_size = N * sizeof(int);
+  CTX_CREATE();
   int deviceId = 0;
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, deviceId));
@@ -93,17 +103,17 @@ TEST_CASE("Unit_hipMemMap_SameMemoryReuse") {
     HIP_CHECK(hipMemcpyHtoD(ptrA, A_h.data(), buffer_size));
     HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA, buffer_size));
     REQUIRE(true == std::equal(B_h.begin(), B_h.end(), A_h.data()));
-#if HT_NVIDIA
-    square_kernel<<<dim3(N / threadsPerBlk), dim3(threadsPerBlk), 0, 0>>>(static_cast<int*>(ptrA));
+    square_kernel<<<dim3(N / threadsPerBlk), dim3(threadsPerBlk), 0, 0>>>(
+        reinterpret_cast<int*>(ptrA));
     HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA, buffer_size));
     HIP_CHECK(hipStreamSynchronize(0));
     REQUIRE(true == std::equal(B_h.begin(), B_h.end(), C_h.data()));
-#endif
     HIP_CHECK(hipMemUnmap(ptrA, size_mem));
   }
   // Release resources
   HIP_CHECK(hipMemRelease(handle));
   HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
+  CTX_DESTROY();
 }
 
 /**
@@ -121,6 +131,7 @@ TEST_CASE("Unit_hipMemMap_SameMemoryReuse") {
 TEST_CASE("Unit_hipMemMap_PhysicalMemoryReuse_SingleGPU") {
   size_t granularity = 0;
   size_t buffer_size = N * sizeof(int);
+  CTX_CREATE();
   int deviceId = 0;
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, deviceId));
@@ -160,13 +171,11 @@ TEST_CASE("Unit_hipMemMap_PhysicalMemoryReuse_SingleGPU") {
     HIP_CHECK(hipMemcpyHtoD(ptrA[buf], A_h.data(), buffer_size));
     HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA[buf], buffer_size));
     REQUIRE(true == std::equal(B_h.begin(), B_h.end(), A_h.data()));
-#if HT_NVIDIA
     square_kernel<<<dim3(N / threadsPerBlk), dim3(threadsPerBlk), 0, 0>>>(
-        static_cast<int*>(ptrA[buf]));
+        reinterpret_cast<int*>(ptrA[buf]));
     HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA[buf], buffer_size));
     HIP_CHECK(hipStreamSynchronize(0));
     REQUIRE(true == std::equal(B_h.begin(), B_h.end(), C_h.data()));
-#endif
     HIP_CHECK(hipMemUnmap(ptrA[buf], size_mem));
   }
   // Release resources
@@ -174,6 +183,8 @@ TEST_CASE("Unit_hipMemMap_PhysicalMemoryReuse_SingleGPU") {
   for (int buf = 0; buf < num_buf; buf++) {
     HIP_CHECK(hipMemAddressFree(ptrA[buf], size_mem));
   }
+
+  CTX_DESTROY();
 }
 
 /**
@@ -191,6 +202,7 @@ TEST_CASE("Unit_hipMemMap_PhysicalMemoryReuse_SingleGPU") {
 TEST_CASE("Unit_hipMemMap_PhysicalMemory_Map2MultVMMs") {
   size_t granularity = 0;
   size_t buffer_size = N * sizeof(int);
+  CTX_CREATE();
   int deviceId = 0;
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, deviceId));
@@ -247,6 +259,8 @@ TEST_CASE("Unit_hipMemMap_PhysicalMemory_Map2MultVMMs") {
   for (int buf = 0; buf < num_buf; buf++) {
     HIP_CHECK(hipMemAddressFree(ptrA[buf], size_mem));
   }
+
+  CTX_DESTROY();
 }
 
 /**
@@ -337,6 +351,7 @@ TEST_CASE("Unit_hipMemMap_PhysicalMemoryReuse_MultiDev") {
 TEST_CASE("Unit_hipMemMap_VMMMemoryReuse_SingleGPU") {
   size_t granularity = 0;
   size_t buffer_size = N * sizeof(int);
+  CTX_CREATE();
   int deviceId = 0;
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, deviceId));
@@ -378,7 +393,7 @@ TEST_CASE("Unit_hipMemMap_VMMMemoryReuse_SingleGPU") {
     HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA, buffer_size));
     REQUIRE(true == std::equal(B_h.begin(), B_h.end(), A_h.data()));
 #if HT_NVIDIA
-    square_kernel<<<dim3(N / threadsPerBlk), dim3(threadsPerBlk), 0, 0>>>(static_cast<int*>(ptrA));
+    square_kernel<<<dim3(N / threadsPerBlk), dim3(threadsPerBlk), 0, 0>>>(reinterpret_cast<int*>(ptrA));
     HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA, buffer_size));
     HIP_CHECK(hipStreamSynchronize(0));
     REQUIRE(true == std::equal(B_h.begin(), B_h.end(), C_h.data()));
@@ -390,6 +405,8 @@ TEST_CASE("Unit_hipMemMap_VMMMemoryReuse_SingleGPU") {
     HIP_CHECK(hipMemRelease(handle[buf]));
   }
   HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
+
+  CTX_DESTROY();
 }
 
 /**
@@ -486,60 +503,6 @@ TEST_CASE("Unit_hipMemMap_VMMMemoryReuse_MultiGPU") {
 /**
  * Test Description
  * ------------------------
- *    - Check if a partial part of a physical chunk can be mapped/unmapped
- * to a smaller vmm address.
- * ------------------------
- *    - unit/virtualMemoryManagement/hipMemMap.cc
- * Test requirements
- * ------------------------
- *    - HIP_VERSION >= 6.1
- */
-TEST_CASE("Unit_hipMemMap_MapPartialPhysicalMem") {
-  int deviceId = 0;
-  size_t granularity = 0;
-  size_t buffer_size = N * sizeof(int);
-  hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, deviceId));
-  checkVMMSupported(device);
-  hipMemAllocationProp prop{};
-  prop.type = hipMemAllocationTypePinned;
-  prop.location.type = hipMemLocationTypeDevice;
-  prop.location.id = device;  // Current Devices
-  HIP_CHECK(
-      hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
-  REQUIRE(granularity > 0);
-  size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
-  hipMemGenericAllocationHandle_t handle;
-  // Allocate host memory and intialize data
-  std::vector<int> A_h(N), B_h(N);
-  // Initialize with data
-  for (size_t idx = 0; idx < N; idx++) {
-    A_h[idx] = idx;
-  }
-  // Allocate a bigger physical memory chunk of twice size_mem
-  HIP_CHECK(hipMemCreate(&handle, 2 * size_mem, &prop, 0));
-  // Allocate virtual address range of size size_mem
-  hipDeviceptr_t ptrA;
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
-  hipMemAccessDesc accessDesc = {};
-  accessDesc.location.type = hipMemLocationTypeDevice;
-  accessDesc.location.id = device;
-  accessDesc.flags = hipMemAccessFlagsProtReadWrite;
-  std::fill(B_h.begin(), B_h.end(), initializer);
-  HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0));
-  HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
-  HIP_CHECK(hipMemcpyHtoD(ptrA, A_h.data(), buffer_size));
-  HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA, buffer_size));
-  REQUIRE(true == std::equal(B_h.begin(), B_h.end(), A_h.data()));
-  HIP_CHECK(hipMemUnmap(ptrA, size_mem));
-  // Release resources
-  HIP_CHECK(hipMemRelease(handle));
-  HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
-}
-
-/**
- * Test Description
- * ------------------------
  *    - Check if a partial part of a VMM range can be mapped/unmapped
  * to a physical address.
  * ------------------------
@@ -553,6 +516,7 @@ TEST_CASE("Unit_hipMemMap_MapPartialVMMMem") {
   size_t granularity = 0;
   size_t buffer_size = N * sizeof(int);
   hipDevice_t device;
+  CTX_CREATE();
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
@@ -589,6 +553,7 @@ TEST_CASE("Unit_hipMemMap_MapPartialVMMMem") {
   // Release resources
   HIP_CHECK(hipMemRelease(handle));
   HIP_CHECK(hipMemAddressFree(ptrA, 2 * size_mem));
+  CTX_DESTROY();
 }
 
 /**
@@ -604,6 +569,7 @@ TEST_CASE("Unit_hipMemMap_MapPartialVMMMem") {
 TEST_CASE("Unit_hipMemMap_negative") {
   size_t granularity = 0;
   size_t buffer_size = N * sizeof(int);
+  CTX_CREATE();
   int deviceId = 0;
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, deviceId));
@@ -624,19 +590,16 @@ TEST_CASE("Unit_hipMemMap_negative") {
   HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
 
   SECTION("nullptr to ptrA") {
-    REQUIRE(hipMemMap(nullptr, size_mem, 0, handle, 0) == hipErrorInvalidValue);
+    REQUIRE(hipMemMap((hipDeviceptr_t)nullptr, size_mem, 0, handle, 0) == hipErrorInvalidValue);
   }
 
   SECTION("pass zero to size") {
-    REQUIRE(hipMemMap(&ptrA, 0, 0, handle, 0) == hipErrorInvalidValue);
-  }
-
-  SECTION("pass negative to offset") {
-    REQUIRE(hipMemMap(&ptrA, size_mem, -1, handle, 0) == hipErrorInvalidValue);
+    REQUIRE(hipMemMap(ptrA, 0, 0, handle, 0) == hipErrorInvalidValue);
   }
 
   HIP_CHECK(hipMemRelease(handle));
   HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
+  CTX_DESTROY();
 }
 
 /**

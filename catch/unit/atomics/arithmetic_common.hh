@@ -446,6 +446,7 @@ void TestCore(const TestParams& p) {
 
   // Copy results back to Host
   for (auto i = 0u; i < p.num_devices; ++i) {
+    HIP_CHECK(hipSetDevice(i));
     const auto device_offset = i * p.kernel_count * p.ThreadCount();
     HIP_CHECK(hipMemcpy(old_vals.data() + device_offset, old_vals_devs[i].ptr(),
                         old_vals_alloc_size, hipMemcpyDeviceToHost));

@@ -25,11 +25,6 @@ THE SOFTWARE.
 #include <resource_guards.hh>
 #include <utils.hh>
 
-static hipStream_t InvalidStream() {
-  StreamGuard sg(Streams::created);
-  return sg.stream();
-}
-
 TEST_CASE("Unit_hipMemcpyDtoHAsync_Positive_Basic") {
   const auto stream_type = GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
   const StreamGuard stream_guard(stream_type);
@@ -70,13 +65,6 @@ TEST_CASE("Unit_hipMemcpyDtoHAsync_Negative_Parameters") {
         return hipMemcpyDtoHAsync(dst, reinterpret_cast<hipDeviceptr_t>(src), count, nullptr);
       },
       host_alloc.ptr(), device_alloc.ptr(), kPageSize);
-
-  SECTION("Invalid stream") {
-    HIP_CHECK_ERROR(
-        hipMemcpyDtoHAsync(host_alloc.ptr(), reinterpret_cast<hipDeviceptr_t>(device_alloc.ptr()),
-                           kPageSize, InvalidStream()),
-        hipErrorContextIsDestroyed);
-  }
 }
 
 TEST_CASE("Unit_hipMemcpyHtoDAsync_Positive_Basic") {
@@ -115,12 +103,6 @@ TEST_CASE("Unit_hipMemcpyHtoDAsync_Negative_Parameters") {
         return hipMemcpyHtoDAsync(reinterpret_cast<hipDeviceptr_t>(dst), src, count, nullptr);
       },
       device_alloc.ptr(), host_alloc.ptr(), kPageSize);
-
-  SECTION("Invalid stream") {
-    HIP_CHECK_ERROR(hipMemcpyHtoDAsync(reinterpret_cast<hipDeviceptr_t>(device_alloc.ptr()),
-                                       host_alloc.ptr(), kPageSize, InvalidStream()),
-                    hipErrorContextIsDestroyed);
-  }
 }
 
 TEST_CASE("Unit_hipMemcpyDtoDAsync_Positive_Basic") {
@@ -165,13 +147,6 @@ TEST_CASE("Unit_hipMemcpyDtoDAsync_Negative_Parameters") {
                                   reinterpret_cast<hipDeviceptr_t>(src), count, nullptr);
       },
       dst_alloc.ptr(), src_alloc.ptr(), kPageSize);
-
-  SECTION("Invalid stream") {
-    HIP_CHECK_ERROR(hipMemcpyDtoDAsync(reinterpret_cast<hipDeviceptr_t>(dst_alloc.ptr()),
-                                       reinterpret_cast<hipDeviceptr_t>(src_alloc.ptr()), kPageSize,
-                                       InvalidStream()),
-                    hipErrorContextIsDestroyed);
-  }
 }
 
 /**

@@ -46,17 +46,6 @@ THE SOFTWARE.
     }                                                                                              \
   }
 
-#define checkVMMSupportedRetVal(device)                                                            \
-  {                                                                                                \
-    int value = 0;                                                                                 \
-    hipDeviceAttribute_t attr = hipDeviceAttributeVirtualMemoryManagementSupported;                \
-    HIP_CHECK(hipDeviceGetAttribute(&value, attr, device));                                        \
-    if (value == 0) {                                                                              \
-      HipTest::HIP_SKIP_TEST("Machine does not support VMM. Skipping Test..");                     \
-      return true;                                                                                 \
-    }                                                                                              \
-  }
-
 #ifdef __linux__
 #define checkSysCallErrors(result)                                                                 \
   if (result == -1) {                                                                              \

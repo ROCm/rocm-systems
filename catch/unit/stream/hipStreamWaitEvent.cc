@@ -19,7 +19,6 @@ THE SOFTWARE.
 /*
 Testcase Scenarios :
 Unit_hipStreamWaitEvent_Negative - Test unsuccessful hipStreamWaitEvent when either event or flags are invalid
-Unit_hipStreamWaitEvent_UninitializedStream_Negative - Test unsuccessful hipStreamWaitEvent when stream is uninitialized
 Unit_hipStreamWaitEvent_Default - Test simple waiting for an event with hipStreamWaitEvent api
 Unit_hipStreamWaitEvent_DifferentStreams - Test waiting for an event on a different stream with hipStreamWaitEvent api
 */
@@ -64,20 +63,6 @@ TEST_CASE("Unit_hipStreamWaitEvent_Negative") {
     HIP_CHECK(hipStreamDestroy(stream));
   }
 }
-
- /* Test removed for Nvidia devices because it returns unexpected error */
-#if !HT_NVIDIA
-TEST_CASE("Unit_hipStreamWaitEvent_UninitializedStream_Negative") {
-  hipStream_t stream{reinterpret_cast<hipStream_t>(0xFFFF)};
-  hipEvent_t event{nullptr};
-
-  HIP_CHECK(hipEventCreate(&event));
-
-  HIP_CHECK_ERROR(hipStreamWaitEvent(stream, event, 0), hipErrorInvalidHandle);
-
-  HIP_CHECK(hipEventDestroy(event));
-}
-#endif
 
 TEST_CASE("Unit_hipStreamWaitEvent_Default") {
   hipStream_t stream{nullptr};

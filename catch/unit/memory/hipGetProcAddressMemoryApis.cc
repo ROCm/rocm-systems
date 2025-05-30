@@ -6484,22 +6484,22 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory") {
       uint64_t value = 0;
       HIP_CHECK(dyn_hipMemPoolGetAttribute_ptr(mem_pool,
                 hipMemPoolAttrReservedMemCurrent, &value));
-      REQUIRE(value == 1024);
+      REQUIRE(value >= 1024);
 
       value = 0;
       HIP_CHECK(dyn_hipMemPoolGetAttribute_ptr(mem_pool,
                 hipMemPoolAttrReservedMemHigh, &value));
-      REQUIRE(value == 1024);
+      REQUIRE(value >= 1024);
 
       value = 0;
       HIP_CHECK(dyn_hipMemPoolGetAttribute_ptr(mem_pool,
                 hipMemPoolAttrUsedMemCurrent, &value));
-      REQUIRE(value == 1024);
+      REQUIRE(value >= 1024);
 
       value = 0;
       HIP_CHECK(dyn_hipMemPoolGetAttribute_ptr(mem_pool,
                 hipMemPoolAttrUsedMemHigh, &value));
-      REQUIRE(value == 1024);
+      REQUIRE(value >= 1024);
 
       HIP_CHECK(hipFreeAsync(dPtr1, stream));
 

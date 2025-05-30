@@ -51,6 +51,7 @@ TEST_CASE("Unit_hipMemUnmap_negative") {
   int deviceId = 0;
   hipDevice_t device;
 
+  CTX_CREATE();
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
 
@@ -72,7 +73,9 @@ TEST_CASE("Unit_hipMemUnmap_negative") {
   HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
   HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0));
 
-  SECTION("nullptr to ptrA") { REQUIRE(hipMemUnmap(nullptr, size_mem) == hipErrorInvalidValue); }
+  SECTION("nullptr to ptrA") {
+    REQUIRE(hipMemUnmap((hipDeviceptr_t) nullptr, size_mem) == hipErrorInvalidValue);
+  }
 
   SECTION("pass zero to size") { REQUIRE(hipMemUnmap(ptrA, 0) == hipErrorInvalidValue); }
 
@@ -85,6 +88,7 @@ TEST_CASE("Unit_hipMemUnmap_negative") {
   HIP_CHECK(hipMemRelease(handle));
   HIP_CHECK(hipMemUnmap(ptrA, size_mem));
   HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
+  CTX_DESTROY();
 }
 
 /**

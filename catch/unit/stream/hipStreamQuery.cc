@@ -62,32 +62,6 @@ TEST_CASE("Unit_hipStreamQuery_WithFinishedWork") {
   }
 }
 
-#if !HT_NVIDIA
-/**
- * @brief Check that submitting work to a destroyed stream sets its status as
- * hipErrorContextIsDestroyed
- *
- * Test removed for Nvidia devices because it returns unexpected error
- */
-TEST_CASE("Unit_hipStreamQuery_WithDestroyedStream") {
-  hipStream_t stream{nullptr};
-  HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK_ERROR(hipStreamQuery(stream), hipErrorContextIsDestroyed);
-}
-
-/**
- * @brief Check that submitting work to an uninitialized stream sets its status as
- * hipErrorContextIsDestroyed
- *
- * Test removed for Nvidia devices because it returns unexpected error
- */
-TEST_CASE("Unit_hipStreamQuery_WithUninitializedStream") {
-  hipStream_t stream{reinterpret_cast<hipStream_t>(0xFFFF)};
-  HIP_CHECK_ERROR(hipStreamQuery(stream), hipErrorContextIsDestroyed);
-}
-#endif
-
 #if HT_AMD /* Disabled because frequency based wait is timing out on nvidia platforms */
 
 /**

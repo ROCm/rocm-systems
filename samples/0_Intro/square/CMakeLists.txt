@@ -33,7 +33,7 @@ if(UNIX)
 endif()
 
 # create square.cpp
-execute_process(COMMAND sh -c "${CMAKE_PREFIX_PATH}/bin/hipify-perl \
+execute_process(COMMAND sh -c "${ROCM_PATH}/bin/hipify-perl \
          ${CMAKE_CURRENT_SOURCE_DIR}/square.cu > ${CMAKE_CURRENT_BINARY_DIR}/square.cpp")
 
 # Find hip

@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
@@ -21,7 +21,6 @@ THE SOFTWARE.
 #include <hip_test_defgroups.hh>
 #include <condition_variable>
 #include "user_object_common.hh"
-
 bool setVar = false;
 void* globalPtr = nullptr;
 std::mutex m;
@@ -52,7 +51,6 @@ __global__ void KernelFn(T *Ad, int clockrate, int WaitSecs) {
     *Ad = 0;
   }
 }
-
 void threadFunc_dltMemory() {
   std::unique_lock lk(m);
   cv.wait(lk, []{ return setVar; });
@@ -60,13 +58,11 @@ void threadFunc_dltMemory() {
   HIP_CHECK(hipHostFree(globalPtr));
   setVar = false;
 }
-
 void destroyPinnedObj(void* ptr) {
   globalPtr = ptr;
   setVar = true;
   cv.notify_one();
 }
-
 template <typename T>
 void hipUserObjectCreate_int_float_Objects(T* hostArr,
                         T* devArr, void destroyObj(void*)) {
@@ -97,7 +93,6 @@ void hipUserObjectCreate_int_float_Objects(T* hostArr,
   SECTION("graph_instance is destroyed before async launch completes") {
     HIP_CHECK(hipGraphLaunch(graph_instance, stream));
     HIP_CHECK(hipGraphExecDestroy(graph_instance));
-    HIP_CHECK(hipUserObjectRelease(Uobj, 1));
     HIP_CHECK(hipStreamSynchronize(stream));
     if ((std::is_same<float, T>::value) == true) {
       REQUIRE(*hostArr == 9999.0);
@@ -106,6 +101,7 @@ void hipUserObjectCreate_int_float_Objects(T* hostArr,
     } else {
       REQUIRE(false);
     }
+    HIP_CHECK(hipUserObjectRelease(Uobj, 1));
   }
   HIP_CHECK(hipStreamDestroy(stream));
 }
@@ -153,12 +149,10 @@ TEST_CASE("Unit_hipGraphUserObj_Int_float_Objects") {
     t1.join();
   }
 }
-
 void destroyHostRegObj(void* ptr) {
   int* ptr2 = reinterpret_cast<int*>(ptr);
   delete ptr2;
 }
-
 /**
  * Test Description
  * ------------------------
@@ -202,7 +196,6 @@ TEST_CASE("Unit_hipGraphUserObj_HostRegister") {
   hipGraphExec_t graph_instance;
   HIP_CHECK(hipGraphInstantiate(&graph_instance, graph,
                                 nullptr, nullptr, 0));
-
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipGraphLaunch(graph_instance, stream));
   HIP_CHECK(hipGraphExecDestroy(graph_instance));
@@ -212,7 +205,6 @@ TEST_CASE("Unit_hipGraphUserObj_HostRegister") {
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipHostUnregister(A_h));
 }
-
 template <typename T>
 __global__ void StructClassKernelFn(T *Obj,
                                  int clockrate, int WaitSecs) {
@@ -224,7 +216,6 @@ __global__ void StructClassKernelFn(T *Obj,
   }
   Obj->count = 9999;
 }
-
 template <typename T>
 void hipUserObjectCreate_Struct_Class_Objects(T* Obj_h, T* Obj_d) {
   int clockrate = 0;
@@ -250,17 +241,15 @@ void hipUserObjectCreate_Struct_Class_Objects(T* Obj_h, T* Obj_d) {
   hipGraphExec_t graph_instance;
   HIP_CHECK(hipGraphInstantiate(&graph_instance, graph,
                                 nullptr, nullptr, 0));
-
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipGraphLaunch(graph_instance, stream));
   HIP_CHECK(hipGraphExecDestroy(graph_instance));
-  HIP_CHECK(hipUserObjectRelease(Uobj, 1));
   HIP_CHECK(hipStreamSynchronize(stream));
   REQUIRE(Obj_h->count == 9999);
+  HIP_CHECK(hipUserObjectRelease(Uobj, 1));
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(Obj_d));
 }
-
 /**
  * Test Description
  * ------------------------
@@ -351,7 +340,6 @@ TEST_CASE("Unit_hipGraphUserObj_ClonedGraph") {
   HIP_CHECK(hipUserObjectCreate(&Uobj, hostArr, destroyPinnedObj, refCount,
             hipUserObjectNoDestructorSync));
   HIP_CHECK(hipGraphRetainUserObject(graph, Uobj, refCount, 0));
-
   hipGraphExec_t originalGraphInstance, clonedGraphInstance;
   // Instantiate and launch the original graph
   HIP_CHECK(hipGraphInstantiate(&originalGraphInstance, graph,
@@ -359,7 +347,6 @@ TEST_CASE("Unit_hipGraphUserObj_ClonedGraph") {
   HIP_CHECK(hipGraphLaunch(originalGraphInstance, stream));
   HIP_CHECK(hipGraphExecDestroy(originalGraphInstance));
   REQUIRE(*hostArr == 1111);
-
   HIP_CHECK(hipGraphClone(&clonedgraph, graph));
   REQUIRE(clonedgraph != nullptr);
   // Instantiate and launch the cloned graph
@@ -369,14 +356,13 @@ TEST_CASE("Unit_hipGraphUserObj_ClonedGraph") {
   HIP_CHECK(hipGraphDestroy(clonedgraph));
   HIP_CHECK(hipGraphLaunch(clonedGraphInstance, stream));
   HIP_CHECK(hipGraphExecDestroy(clonedGraphInstance));
-  HIP_CHECK(hipUserObjectRelease(Uobj, 2));
   HIP_CHECK(hipStreamSynchronize(stream));
   REQUIRE(*hostArr == 9999);
+  HIP_CHECK(hipUserObjectRelease(Uobj, 2));
   t1.join();
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(devArr));
 }
-
 __global__ void ManualGraphKernelFn(int *Ad, int clockrate, int WaitSecs) {
   uint64_t num_cycles = (uint64_t)clockrate;
   num_cycles = num_cycles * 1000 * WaitSecs;
@@ -419,9 +405,7 @@ TEST_CASE("Unit_hipGraphUserObj_ManualGraph") {
   HIP_CHECK(hipMalloc(&devArr, sizeof(int)));
   REQUIRE(devArr != nullptr);
   std::vector<hipGraphNode_t> dependencies;
-
   HIP_CHECK(hipStreamCreate(&stream));
-
   HIP_CHECK(hipGraphCreate(&graph, 0));
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, nullptr, 0, devArr,
                                     hostArr, sizeof(int),
@@ -435,7 +419,6 @@ TEST_CASE("Unit_hipGraphUserObj_ManualGraph") {
   kNodeParams.kernelParams = kernelArgs;
   HIP_CHECK(hipGraphAddKernelNode(&kNode, graph, dependencies.data(),
                                   dependencies.size(), &kNodeParams));
-
   dependencies.clear();
   dependencies.push_back(kNode);
   HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, dependencies.data(),
@@ -454,15 +437,15 @@ TEST_CASE("Unit_hipGraphUserObj_ManualGraph") {
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipGraphLaunch(graph_instance, stream));
   HIP_CHECK(hipGraphExecDestroy(graph_instance));
-  HIP_CHECK(hipUserObjectRelease(Uobj, 1));
   HIP_CHECK(hipStreamSynchronize(stream));
   REQUIRE(*hostArr == 9999);
+  HIP_CHECK(hipUserObjectRelease(Uobj, 1));
   t1.join();
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(devArr));
 }
-
 /**
 * End doxygen group GraphTest.
 * @}
 */
+

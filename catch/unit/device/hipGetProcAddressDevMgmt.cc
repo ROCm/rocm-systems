@@ -29,7 +29,7 @@ THE SOFTWARE.
                       hipDriverProcAddressQueryResult* symbolStatus);` -
  * Gets the symbol's function address.
  */
-constexpr int size = 13;
+constexpr int size = 20;
 constexpr size_t len = 256;
 void CreateMemPool(int device, hipMemPool_t &mem_pool) {
   hipMemPoolProps kPoolProps;

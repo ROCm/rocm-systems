@@ -55,7 +55,8 @@ template <typename T> class LinearAllocGuard {
 
   LinearAllocGuard(const LinearAllocs allocation_type, const size_t size,
                    const unsigned int flags = 0u)
-      : allocation_type_{allocation_type} {
+    : allocation_type_{allocation_type},
+      size_{size} {
     switch (allocation_type_) {
       case LinearAllocs::malloc:
         ptr_ = host_ptr_ = reinterpret_cast<T*>(malloc(size));
@@ -92,10 +93,12 @@ template <typename T> class LinearAllocGuard {
       allocation_type_ = o.allocation_type_;
       ptr_ = o.ptr_;
       host_ptr_ = o.host_ptr_;
+      size_ = o.size_;
 
       o.allocation_type_ = LinearAllocs::noAlloc;
       o.ptr_ = nullptr;
       o.host_ptr_ = nullptr;
+      o.size_ = 0;
     }
 
     return *this;
@@ -105,11 +108,13 @@ template <typename T> class LinearAllocGuard {
 
   T* ptr() const { return ptr_; };
   T* host_ptr() const { return host_ptr_; }
+  size_t size_bytes() const { return size_; }
 
  private:
   LinearAllocs allocation_type_ = LinearAllocs::noAlloc;
   T* ptr_ = nullptr;
   T* host_ptr_ = nullptr;
+  size_t size_ = 0;
 
   void dealloc() {
     if (ptr_ == nullptr) {

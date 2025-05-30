@@ -63,6 +63,7 @@ static __global__ void square_kernel(int* Buff) {
 TEST_CASE("Unit_hipMemCreate_BasicAllocateDeAlloc_MultGranularity") {
   size_t granularity = 0;
   int deviceId = 0;
+  CTX_CREATE();
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
@@ -79,6 +80,8 @@ TEST_CASE("Unit_hipMemCreate_BasicAllocateDeAlloc_MultGranularity") {
     HIP_CHECK(hipMemCreate(&handle, granularity * mul, &prop, 0));
     HIP_CHECK(hipMemRelease(handle));
   }
+
+  CTX_DESTROY();
 }
 
 /**
@@ -98,6 +101,7 @@ TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPostUnmap") {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
+  CTX_CREATE();
   int deviceId = 0;
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, deviceId));
@@ -136,6 +140,7 @@ TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPostUnmap") {
   HIP_CHECK(hipMemUnmap(ptrA, size_mem));
   HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
   HIP_CHECK(hipMemRelease(handle));
+  CTX_DESTROY();
 }
 
 /**
@@ -155,6 +160,7 @@ TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPreUse") {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
+  CTX_CREATE();
   int deviceId = 0;
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, deviceId));
@@ -193,6 +199,7 @@ TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPreUse") {
   REQUIRE(true == std::equal(B_h.begin(), B_h.end(), A_h.data()));
   HIP_CHECK(hipMemUnmap(ptrA, size_mem));
   HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
+  CTX_DESTROY();
 }
 
 /**
@@ -212,6 +219,7 @@ TEST_CASE("Unit_hipMemCreate_ChkWithKerLaunch") {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
+  CTX_CREATE();
   int deviceId = 0;
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, deviceId));
@@ -248,12 +256,13 @@ TEST_CASE("Unit_hipMemCreate_ChkWithKerLaunch") {
   HIP_CHECK(hipMemcpyHtoD(ptrA, A_h.data(), buffer_size));
   // Invoke kernel
   hipLaunchKernelGGL(square_kernel, dim3(N / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0,
-                     static_cast<int*>(ptrA));
+                     reinterpret_cast<int*>(ptrA));
   HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA, buffer_size));
   HIP_CHECK(hipDeviceSynchronize());
   REQUIRE(true == std::equal(B_h.begin(), B_h.end(), C_h.data()));
   HIP_CHECK(hipMemUnmap(ptrA, size_mem));
   HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
+  CTX_DESTROY();
 }
 
 /**
@@ -274,6 +283,7 @@ TEST_CASE("Unit_hipMemCreate_MapNonContiguousChunks") {
   constexpr int numOfBuffers = NUM_OF_BUFFERS;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
+  CTX_CREATE();
   int deviceId = 0;
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, deviceId));
@@ -295,9 +305,9 @@ TEST_CASE("Unit_hipMemCreate_MapNonContiguousChunks") {
   hipDeviceptr_t ptrA;
   HIP_CHECK(hipMemAddressReserve(&ptrA, (numOfBuffers * size_mem), 0, 0, 0));
   for (int idx = 0; idx < numOfBuffers; idx++) {
-    uint64_t uiptr = reinterpret_cast<uint64_t>(ptrA);
+    unsigned long long uiptr = reinterpret_cast<unsigned long long>(ptrA);
     uiptr = uiptr + idx * size_mem;
-    HIP_CHECK(hipMemMap(reinterpret_cast<void*>(uiptr), size_mem, 0, handle[idx], 0));
+    HIP_CHECK(hipMemMap(reinterpret_cast<hipDeviceptr_t>(uiptr), size_mem, 0, handle[idx], 0));
     HIP_CHECK(hipMemRelease(handle[idx]));
   }
   hipMemAccessDesc accessDesc = {};
@@ -315,18 +325,19 @@ TEST_CASE("Unit_hipMemCreate_MapNonContiguousChunks") {
   }
   HIP_CHECK(hipMemcpyHtoD(ptrA, A_h.data(), numOfBuffers * buffer_size));
   // Launch square kernel
-  hipLaunchKernelGGL(square_kernel, dim3(N / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0,
-                     static_cast<int*>(ptrA));
+  hipLaunchKernelGGL(square_kernel, dim3((N * numOfBuffers) / THREADS_PER_BLOCK),
+                     dim3(THREADS_PER_BLOCK), 0, 0, reinterpret_cast<int*>(ptrA));
   HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA, numOfBuffers * buffer_size));
   HIP_CHECK(hipDeviceSynchronize());
   // Validate Results
   REQUIRE(true == std::equal(B_h.begin(), B_h.end(), C_h.data()));
   for (int idx = 0; idx < numOfBuffers; idx++) {
-    uint64_t uiptr = reinterpret_cast<uint64_t>(ptrA);
+    unsigned long long uiptr = reinterpret_cast<unsigned long long>(ptrA);
     uiptr = uiptr + idx * size_mem;
-    HIP_CHECK(hipMemUnmap(reinterpret_cast<void*>(uiptr), size_mem));
+    HIP_CHECK(hipMemUnmap(reinterpret_cast<hipDeviceptr_t>(uiptr), size_mem));
   }
   HIP_CHECK(hipMemAddressFree(ptrA, (numOfBuffers * size_mem)));
+  CTX_DESTROY();
 }
 
 /**
@@ -346,6 +357,7 @@ TEST_CASE("Unit_hipMemCreate_ChkWithMemset") {
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
   constexpr int init_val = 0;
+  CTX_CREATE();
   int deviceId = 0;
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, deviceId));
@@ -373,7 +385,7 @@ TEST_CASE("Unit_hipMemCreate_ChkWithMemset") {
   // Make the address accessible to GPU 0
   HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
   std::vector<int> A_h(N);
-  HIP_CHECK(hipMemset(ptrA, init_val, buffer_size));
+  HIP_CHECK(hipMemset(reinterpret_cast<void*>(ptrA), init_val, buffer_size));
   HIP_CHECK(hipMemcpyDtoH(A_h.data(), ptrA, buffer_size));
   for (int idx = 0; idx < N; idx++) {
     REQUIRE(A_h[idx] == init_val);
@@ -381,6 +393,7 @@ TEST_CASE("Unit_hipMemCreate_ChkWithMemset") {
   HIP_CHECK(hipMemUnmap(ptrA, size_mem));
   HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
   HIP_CHECK(hipMemRelease(handle));
+  CTX_DESTROY();
 }
 
 /**
@@ -397,6 +410,7 @@ TEST_CASE("Unit_hipMemCreate_Negative") {
   size_t granularity = 0;
   int deviceId = 0;
   hipDevice_t device;
+  CTX_CREATE();
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
   hipMemGenericAllocationHandle_t handle;
@@ -433,15 +447,25 @@ TEST_CASE("Unit_hipMemCreate_Negative") {
 
   SECTION("pass location id as -1") {
     prop.location.id = -1;  // set to non existing device
+#if HT_AMD
     REQUIRE(hipMemCreate(&handle, granularity, &prop, 0) == hipErrorInvalidValue);
+#else
+    REQUIRE(hipMemCreate(&handle, granularity, &prop, 0) == hipErrorInvalidDevice);
+#endif
   }
 
   SECTION("pass location id as > highest device number") {
     int numDevices = 0;
     HIP_CHECK(hipGetDeviceCount(&numDevices));
     prop.location.id = numDevices;  // set to non existing device
+#if HT_AMD
     REQUIRE(hipMemCreate(&handle, granularity, &prop, 0) == hipErrorInvalidValue);
+#else
+    REQUIRE(hipMemCreate(&handle, granularity, &prop, 0) == hipErrorInvalidDevice);
+#endif
   }
+
+  CTX_DESTROY();
 }
 
 /**

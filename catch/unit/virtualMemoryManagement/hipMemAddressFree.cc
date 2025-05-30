@@ -50,6 +50,7 @@ TEST_CASE("Unit_hipMemAddressFree_negative") {
   size_t buffer_size = N * sizeof(int);
   int deviceId = 0;
   hipDevice_t device;
+  CTX_CREATE();
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
@@ -65,12 +66,13 @@ TEST_CASE("Unit_hipMemAddressFree_negative") {
   HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
 
   SECTION("nullptr to devptr") {
-    REQUIRE(hipMemAddressFree(nullptr, size_mem) == hipErrorInvalidValue);
+    REQUIRE(hipMemAddressFree((hipDeviceptr_t)nullptr, size_mem) == hipErrorInvalidValue);
   }
 
   SECTION("pass zero to size") { REQUIRE(hipMemAddressFree(ptrA, 0) == hipErrorInvalidValue); }
 
   HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
+  CTX_DESTROY();
 }
 
 /**

@@ -56,6 +56,7 @@ TEST_CASE("Unit_hipMemAddressReserve_AlignmentTest") {
   constexpr int initializer = 0;
   int deviceId = 0;
   hipDevice_t device;
+  CTX_CREATE();
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
@@ -82,7 +83,7 @@ TEST_CASE("Unit_hipMemAddressReserve_AlignmentTest") {
   for (int iter = 0; iter < 12; iter++) {
     alignmnt = alignmnt * 2;
     HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, alignmnt, 0, 0));
-    REQUIRE((reinterpret_cast<size_t>(ptrA) % alignmnt) == 0);
+    REQUIRE((reinterpret_cast<unsigned long long>(ptrA) % alignmnt) == 0);
     std::fill(B_h.begin(), B_h.end(), initializer);
     HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0));
     // Set access
@@ -99,6 +100,7 @@ TEST_CASE("Unit_hipMemAddressReserve_AlignmentTest") {
     HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
   }
   HIP_CHECK(hipMemRelease(handle));
+  CTX_DESTROY();
 }
 
 /**
@@ -117,6 +119,7 @@ TEST_CASE("Unit_hipMemAddressReserve_Negative") {
   size_t buffer_size = N * sizeof(int);
   int deviceId = 0;
   hipDevice_t device;
+  CTX_CREATE();
   HIP_CHECK(hipDeviceGet(&device, deviceId));
   checkVMMSupported(device);
   hipMemAllocationProp prop{};
@@ -135,18 +138,28 @@ TEST_CASE("Unit_hipMemAddressReserve_Negative") {
   }
 
   SECTION("pass size as 0") {
+#if HT_AMD
     REQUIRE(hipMemAddressReserve(&ptrA, 0, 0, 0, 0) == hipErrorMemoryAllocation);
+#else
+    REQUIRE(hipMemAddressReserve(&ptrA, 0, 0, 0, 0) == hipErrorInvalidValue);
+#endif
   }
 
 #if HT_NVIDIA
   SECTION("pass non power of two for alignment") {
-    REQUIRE(hipMemAddressReserve(&ptrA, size_mem, 3, 0, 0) == hipErrorMemoryAllocation);
+    REQUIRE(hipMemAddressReserve(&ptrA, size_mem, 3, 0, 0) == hipErrorInvalidValue);
   }
 #endif
 
   SECTION("pass size as non multiple of host page size") {
+#if HT_AMD
     REQUIRE(hipMemAddressReserve(&ptrA, (size_mem - 1), 0, 0, 0) == hipErrorMemoryAllocation);
+#else
+    REQUIRE(hipMemAddressReserve(&ptrA, (size_mem - 1), 0, 0, 0) == hipErrorInvalidValue);
+#endif
   }
+
+  CTX_DESTROY();
 }
 
 /**

@@ -23,33 +23,35 @@ THE SOFTWARE.
 
 int main() {
   hipDevice_t device;
-  int devCount;
+  int devCount = 0;
   hipError_t localError;
   localError = hipGetDeviceCount(&devCount);
-  if (localError == hipSuccess) {
-    printf("HIP Api returned hipSuccess");
+  if (localError != hipSuccess) {
+    printf("hipGetDeviceCount is failed.");
+    return 1;
   }
-  std::string uuid;
+  std::string uuid = "";
   for (int i = 0; i < devCount; i++) {
     localError = hipSetDevice(i);
-    if (localError == hipSuccess) {
-      printf("HIP Api returned hipSuccess");
+    if (localError != hipSuccess) {
+      printf("hipSetDevice is failed.");
+      return 1;
     }
     localError = hipDeviceGet(&device, i);
-    if (localError == hipSuccess) {
-      printf("HIP Api returned hipSuccess");
+    if (localError != hipSuccess) {
+      printf("hipDeviceGet is failed.");
+      return 1;
     }
     hipUUID d_uuid{0};
     localError = hipDeviceGetUuid(&d_uuid, device);
-    if (localError == hipSuccess) {
-      printf("HIP Api returned hipSuccess");
+    if (localError != hipSuccess) {
+      printf("hipDeviceGetUuid is failed.");
+      return 1;
     }
-    char preStr[16] = "GPU-";
-    strcat(preStr, d_uuid.bytes);
     if (i == devCount - 1) {
-      uuid = uuid + preStr;
+      uuid = uuid + "GPU-" + d_uuid.bytes;
     } else {
-      uuid = uuid + preStr + ",";
+      uuid = uuid + "GPU-" + d_uuid.bytes + ",";
     }
   }
   std::cout<< uuid;

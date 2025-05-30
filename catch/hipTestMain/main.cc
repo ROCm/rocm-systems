@@ -30,9 +30,6 @@ int main(int argc, char** argv) {
     | Opt(cmd_options.progress)
         ["-P"]["--progress"]
         ("Show progress bar when running performance tests")
-    | Opt(cmd_options.cg_extended_run, "cg_extened_run")
-        ["-E"]["--cg-extended-run"]
-        ("TODO: Description goes here")
     | Opt(cmd_options.cg_iterations, "cg_iterations")
         ["-C"]["--cg-iterations"]
         ("Number of iterations used for cooperative groups sync tests (default: 5)")
@@ -42,6 +39,12 @@ int main(int argc, char** argv) {
     | Opt(cmd_options.accuracy_max_memory, "accuracy_max_memory")
         ["-M"]["--accuracy-max-memory"]
         ("Percentage of global device memory allowed for math accuracy tests (default: 80%)")
+    | Opt(cmd_options.reduce_iterations, "reduce_iterations")
+        ["-R"]["--reduce-iterations"]
+        ("Number of iterations for fuzzing reduce operations (default: 1)")
+    | Opt(cmd_options.reduce_input_size, "reduce_input_size")
+        ["-Z"]["--reduce-input-size"]
+        ("Size of the input for the reduce sync operations performance test (megabytes) (default: 50)")
   ;
   // clang-format on
 

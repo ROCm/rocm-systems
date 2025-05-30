@@ -30,6 +30,7 @@ set(TEST_SRC
     hipMemcpyDtoHAsync.cc
     hipMemcpyHtoD.cc
     hipMemcpyHtoDAsync.cc
+    hipMemcpyWithKernel.cc
     hipMemcpyToSymbol.cc
     hipMemcpyToSymbolAsync.cc
     hipMemcpyFromSymbol.cc

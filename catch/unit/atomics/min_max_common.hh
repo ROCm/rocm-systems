@@ -29,6 +29,12 @@ THE SOFTWARE.
 
 namespace cg = cooperative_groups;
 
+#if defined(__has_extension) && __has_extension(clang_atomic_attributes)
+#define HIP_TEST_FINE_GRAINED_MEMORY [[clang::atomic(fine_grained_memory)]]
+#else
+#define HIP_TEST_FINE_GRAINED_MEMORY
+#endif
+
 namespace MinMax {
 enum class AtomicOperation {
   kMin = 0,
@@ -61,7 +67,7 @@ __host__ __device__ TestType GetTestValue() {
 }
 
 template <typename TestType, AtomicOperation operation, int memory_scope = __HIP_MEMORY_SCOPE_AGENT>
-__device__ TestType PerformAtomicOperation(TestType* const mem) {
+__device__ TestType PerformAtomicOperation(TestType* const mem, const LinearAllocs allocType) {
   const auto val = GetTestValue<TestType, operation>();
 
   if constexpr (operation == AtomicOperation::kMin) {
@@ -81,15 +87,26 @@ __device__ TestType PerformAtomicOperation(TestType* const mem) {
   } else if constexpr (operation == AtomicOperation::kSafeMax) {
     return safeAtomicMax(mem, val);
   } else if constexpr (operation == AtomicOperation::kBuiltinMin) {
-    return __hip_atomic_fetch_min(mem, val, __ATOMIC_RELAXED, memory_scope);
+    if (std::is_floating_point_v<TestType> && allocType == LinearAllocs::hipHostMalloc)
+      HIP_TEST_FINE_GRAINED_MEMORY {
+      return __hip_atomic_fetch_min(mem, val, __ATOMIC_RELAXED, memory_scope);
+    } else {
+      return __hip_atomic_fetch_min(mem, val, __ATOMIC_RELAXED, memory_scope);
+    }
   } else if constexpr (operation == AtomicOperation::kBuiltinMax) {
-    return __hip_atomic_fetch_max(mem, val, __ATOMIC_RELAXED, memory_scope);
+    if (std::is_floating_point_v<TestType> && allocType == LinearAllocs::hipHostMalloc)
+      HIP_TEST_FINE_GRAINED_MEMORY {
+      return __hip_atomic_fetch_max(mem, val, __ATOMIC_RELAXED, memory_scope);
+    } else {
+      return __hip_atomic_fetch_max(mem, val, __ATOMIC_RELAXED, memory_scope);
+    }
   }
 }
 
 template <typename TestType, AtomicOperation operation, bool use_shared_mem,
           int memory_scope = __HIP_MEMORY_SCOPE_AGENT>
-__global__ void TestKernel(TestType* const global_mem, TestType* const old_vals) {
+__global__ void TestKernel(TestType* const global_mem, TestType* const old_vals,
+                           const LinearAllocs allocType) {
   __shared__ TestType shared_mem;
 
   const auto tid = cg::this_grid().thread_rank();
@@ -101,7 +118,7 @@ __global__ void TestKernel(TestType* const global_mem, TestType* const old_vals)
     __syncthreads();
   }
 
-  old_vals[tid] = PerformAtomicOperation<TestType, operation, memory_scope>(mem);
+  old_vals[tid] = PerformAtomicOperation<TestType, operation, memory_scope>(mem, allocType);
 
   if constexpr (use_shared_mem) {
     __syncthreads();
@@ -127,7 +144,8 @@ __device__ void GenerateMemoryTraffic(uint8_t* const begin_addr, uint8_t* const 
 template <typename TestType, AtomicOperation operation, bool use_shared_mem,
           int memory_scope = __HIP_MEMORY_SCOPE_AGENT>
 __global__ void TestKernel(TestType* const global_mem, TestType* const old_vals,
-                           const unsigned int width, const unsigned pitch) {
+                           const unsigned int width, const unsigned pitch,
+                           const LinearAllocs allocType) {
   extern __shared__ uint8_t shared_mem[];
 
   const auto tid = cg::this_grid().thread_rank();
@@ -148,7 +166,7 @@ __global__ void TestKernel(TestType* const global_mem, TestType* const old_vals,
 
   if (tid < n) {
     old_vals[tid] = PerformAtomicOperation<TestType, operation, memory_scope>(
-        PitchedOffset(mem, pitch, tid % width));
+        PitchedOffset(mem, pitch, tid % width), allocType);
   } else {
     uint8_t* const begin_addr = reinterpret_cast<uint8_t*>(atomic_addr + 1);
     uint8_t* const end_addr = reinterpret_cast<uint8_t*>(atomic_addr) + pitch;
@@ -240,10 +258,11 @@ void LaunchKernel(const TestParams& p, hipStream_t stream, TestType* const mem_p
   const auto shared_mem_size = use_shared_mem ? p.width * p.pitch : 0u;
   if (p.width == 1 && p.pitch == sizeof(TestType))
     TestKernel<TestType, operation, use_shared_mem, memory_scope>
-        <<<p.blocks, p.threads, shared_mem_size, stream>>>(mem_ptr, old_vals);
+        <<<p.blocks, p.threads, shared_mem_size, stream>>>(mem_ptr, old_vals, p.alloc_type);
   else
     TestKernel<TestType, operation, use_shared_mem, memory_scope>
-        <<<p.blocks, p.threads, shared_mem_size, stream>>>(mem_ptr, old_vals, p.width, p.pitch);
+        <<<p.blocks, p.threads, shared_mem_size, stream>>>(mem_ptr, old_vals, p.width, p.pitch,
+            p.alloc_type);
 }
 
 template <typename TestType, AtomicOperation operation, bool use_shared_mem,
@@ -420,6 +439,7 @@ void MultipleDeviceMultipleKernelTest(const unsigned int num_devices,
   params.pitch = pitch;
 
   using LA = LinearAllocs;
+  // Here LA::hipHostMalloc means to allocate coherent host pined buffer
   for (const auto alloc_type : {LA::hipHostMalloc}) {
     params.alloc_type = alloc_type;
     DYNAMIC_SECTION("Allocation type: " << to_string(alloc_type)) {

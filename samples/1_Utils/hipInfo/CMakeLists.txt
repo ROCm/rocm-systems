@@ -37,10 +37,10 @@ endif()
 # flag is set to ON in compute build for windows
 option(HIPINFO_INTERNAL_BUILD "Enable building hipInfo from compute" OFF)
 
-# need to set rocm_path for windows
+# need to set hip-path for windows
 # since clang and hip are two different folders during build/install step
 if (WIN32 AND HIPINFO_INTERNAL_BUILD)
-     set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --rocm-path=${CMAKE_PREFIX_PATH}")
+     set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --hip-path=${CMAKE_PREFIX_PATH}")
 endif()
 
 # Find hip
