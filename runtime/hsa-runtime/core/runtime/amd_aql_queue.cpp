@@ -1181,7 +1181,7 @@ bool AqlQueue::ExceptionHandler(hsa_signal_value_t error_code, void* arg) {
   }
 
   for (auto& error : QueueErrors) {
-    if (error_code & (1 << (error.code - 1))) {
+    if (error_code & (1UL << (error.code - 1))) {
       errorCode = error.status;
       break;
     }
