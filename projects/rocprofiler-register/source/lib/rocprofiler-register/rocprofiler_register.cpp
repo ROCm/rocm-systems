@@ -83,6 +83,12 @@ rocprofiler_configure(uint32_t, const char*, uint32_t, rocprofiler_client_id_t*)
 extern int
 rocprofiler_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t);
 
+extern void
+rocprofv3_attach(void);
+
+extern void
+rocprofv3_detach(void);
+
 extern uint32_t
 rocprofiler_register_import_hip(void);
 
@@ -113,6 +119,8 @@ namespace
 using namespace rocprofiler_register;
 using rocprofiler_set_api_table_t = decltype(::rocprofiler_set_api_table)*;
 using rocp_set_api_table_data_t   = std::tuple<void*, rocprofiler_set_api_table_t>;
+using rocprofv3_attach_t = decltype(::rocprofv3_attach)*;
+using rocprofv3_detach_t = decltype(::rocprofv3_detach)*;
 using bitset_t = std::bitset<sizeof(rocprofiler_register_library_indentifier_t::handle)>;
 
 static_assert(sizeof(bitset_t) ==
@@ -121,6 +129,8 @@ static_assert(sizeof(bitset_t) ==
 
 constexpr auto rocprofiler_lib_name                = "librocprofiler-sdk.so";
 constexpr auto rocprofiler_lib_register_entrypoint = "rocprofiler_set_api_table";
+constexpr auto rocprofiler_lib_register_attach_entrypoint = "rocprofv3_attach";
+constexpr auto rocprofiler_lib_register_detach_entrypoint = "rocprofv3_detach";
 constexpr auto rocprofiler_register_lib_name =
     "librocprofiler-register.so." ROCPROFILER_REGISTER_SOVERSION;
 
@@ -286,6 +296,7 @@ rocp_reg_scan_for_tools()
     bool  _force_tool =
         common::get_env("ROCPROFILER_REGISTER_FORCE_LOAD",
                         !_rocp_reg_lib.empty() || !_rocp_tool_libs.empty());
+
     bool _found_tool =
         (rocprofiler_configure != nullptr || _configure_func != nullptr || _force_tool);
 
@@ -640,24 +651,111 @@ rocprofiler_register_iterate_registration_info(
 }
 
 rocprofiler_register_error_code_t
-rocprofiler_register_invoke_nonpropagated_registrations() ROCPROFILER_REGISTER_PUBLIC_API;
-
-//
-//  This function can be invoked by ptrace
-rocprofiler_register_error_code_t
 rocprofiler_register_invoke_nonpropagated_registrations()
 {
     return rocp_invoke_registrations(false);
 }
 
 rocprofiler_register_error_code_t
-rocprofiler_register_invoke_all_registrations() ROCPROFILER_REGISTER_PUBLIC_API;
-
-//
-//  This function can be invoked by ptrace
-rocprofiler_register_error_code_t
 rocprofiler_register_invoke_all_registrations()
 {
     return rocp_invoke_registrations(true);
 }
+
+void load_environment_buffer(const char* environment_buffer)
+{
+    // Environment_buffer is a null-character delimited list of name value pairs.
+    // Each name and value is delimited separately.
+    // The first 4 bytes contain an uint32_t count of pairs
+
+    if (!environment_buffer)
+    {
+        LOG(WARNING) << "Attachment was invoked with no environment variables provided for what to trace.";
+        return;
+    }
+
+    const uint32_t pair_count = *reinterpret_cast<const uint32_t*>(environment_buffer);
+    const char* position = environment_buffer + sizeof(uint32_t);
+    for (uint32_t pair_idx = 0; pair_idx < pair_count; ++pair_idx)
+    {
+        const char* name = position;
+        position += strlen(name) + 1;
+        const char* value = position;
+        position += strlen(value) + 1;
+
+        LOG(INFO) << "Attachment adding environment variable: " << name << "=" << value;
+        setenv(name, value, 1);        
+    }
+}
+
+rocprofiler_register_error_code_t
+rocprofiler_register_attach(const char* environment_buffer) ROCPROFILER_REGISTER_PUBLIC_API;
+
+//
+//  This function can be invoked by ptrace
+rocprofiler_register_error_code_t
+rocprofiler_register_attach(const char* environment_buffer)
+{
+    LOG(INFO) << "rocprofiler_register_attach started";
+    // TODO: Engineering demo: hard coded library path
+    void* toollibrary = dlopen("/opt/rocm-6.5.0/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so", RTLD_LAZY);
+
+    if (!toollibrary)
+    {
+        LOG(ERROR) << "couldn't dlopen tool library. reason: " << dlerror();
+    }
+
+    // TODO: should save old environment variables if they get overwritten and restore them on detach
+    load_environment_buffer(environment_buffer);
+
+    rocprofv3_attach_t rocprofv3_attach_fn;
+    *(void**) (&rocprofv3_attach_fn) =
+        dlsym(toollibrary, rocprofiler_lib_register_attach_entrypoint);
+    
+    if (rocprofv3_attach_fn)
+    {
+        LOG(INFO) << "attachment starting";
+        rocprofv3_attach_fn();
+        rocprofiler_register_invoke_all_registrations();
+    } else {
+        LOG(ERROR) << "attach entry point is NULL";
+    }
+
+    dlclose(toollibrary);
+    return ROCP_REG_SUCCESS;
+}
+
+rocprofiler_register_error_code_t
+rocprofiler_register_detach() ROCPROFILER_REGISTER_PUBLIC_API;
+
+//
+//  This function can be invoked by ptrace
+rocprofiler_register_error_code_t
+rocprofiler_register_detach()
+{
+    LOG(INFO) << "rocprofiler_register_detach started";                                
+    // TODO: Engineering demo: hard coded library path
+    void* toollibrary = dlopen("/opt/rocm-6.5.0/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so", RTLD_LAZY);
+
+    if (!toollibrary)
+    {
+        LOG(ERROR) << "couldn't dlopen tool library. reason: " << dlerror();
+    }
+
+    rocprofv3_detach_t rocprofv3_detach_fn;
+    *(void**) (&rocprofv3_detach_fn) =
+        dlsym(toollibrary, rocprofiler_lib_register_detach_entrypoint);
+    
+    if (rocprofv3_detach_fn)
+    {
+        LOG(INFO) << "detachment starting";
+        rocprofv3_detach_fn();
+    } else {
+        LOG(ERROR) << "detach entry point is NULL";
+    }
+
+    dlclose(toollibrary);
+    return ROCP_REG_SUCCESS;
+}
+
 }
