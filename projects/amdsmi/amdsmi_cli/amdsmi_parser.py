@@ -640,8 +640,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
     def _add_default_parser(self, subparsers: argparse._SubParsersAction, func):
         # there should be no args to parse here so let this be a dummy function to preserve later logic
-        default_help = "Display the default information panel?"
-        default_parser = subparsers.add_parser('default', help=default_help, description=None)
+        default_parser = subparsers.add_parser('default', description=None)
         default_parser._optionals.title = None
         default_parser.formatter_class=lambda prog: AMDSMISubparserHelpFormatter(prog)
         default_parser.set_defaults(func=func)
