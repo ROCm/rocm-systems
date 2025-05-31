@@ -2165,14 +2165,14 @@ class AMDSMICommands():
                             clk_value = int(clk.get("value", 0))
                         else:
                             if isinstance(clk, str):
-                                clk_value = int(str(clk).split()[0])  
+                                clk_value = int(str(clk).split()[0])
                             else:
                                 clk_value = int(clk)
                         if isinstance(min_clk, dict):
                             min_clk_value = int(min_clk.get("value", 0))
                         else:
                             if isinstance(min_clk, str):
-                                min_clk_value = int(str(min_clk).split()[0])  
+                                min_clk_value = int(str(min_clk).split()[0])
                             else:
                                 min_clk_value = int(min_clk)
                         # If the clk value is less than the min_clk value, then deep sleep is enabled
@@ -5755,14 +5755,21 @@ class AMDSMICommands():
             # Clean processes dictionary
             filtered_process_values = []
             for process_info in process_list:
-                process_info.pop('mem')  # Remove 'mem' value
                 process_info.pop('engine_usage')  # Remove 'engine_usage' value
+                process_info['mem_usage'] = process_info.pop('mem')
+                process_info['cu_occupancy'] = process_info.pop('cu_occupancy')
 
                 memory_usage_unit = "B"
+
                 if self.logger.is_human_readable_format():
+                    process_info['mem_usage'] = self.helpers.convert_bytes_to_readable(process_info['mem_usage'])
                     for usage_metric in process_info['memory_usage']:
                         process_info["memory_usage"][usage_metric] = self.helpers.convert_bytes_to_readable(process_info["memory_usage"][usage_metric])
                     memory_usage_unit = ""
+
+                process_info['mem_usage'] = self.helpers.unit_format(self.logger,
+                                                                     process_info['mem_usage'],
+                                                                     memory_usage_unit)
 
                 for usage_metric in process_info['memory_usage']:
                     process_info['memory_usage'][usage_metric] = self.helpers.unit_format(self.logger,
@@ -5796,8 +5803,8 @@ class AMDSMICommands():
 
             # Build the process table's title and header
             self.logger.secondary_table_title = "PROCESS INFO"
-            self.logger.secondary_table_header = 'GPU'.rjust(3) + "NAME".rjust(22) + "PID".rjust(9) + "GTT_MEM".rjust(10) + \
-                                                "CPU_MEM".rjust(10) + "VRAM_MEM".rjust(10) + "CU%".rjust(9)
+            self.logger.secondary_table_header = 'GPU'.rjust(3) + "NAME".rjust(19) + "PID".rjust(9) + "GTT_MEM".rjust(10) + \
+                                                "CPU_MEM".rjust(10) + "VRAM_MEM".rjust(10) + "MEM_USG".rjust(10) + "CU%".rjust(9)
 
             if watching_output:
                 self.logger.secondary_table_header = 'TIMESTAMP'.rjust(10) + '  ' + self.logger.secondary_table_header
@@ -6446,7 +6453,7 @@ class AMDSMICommands():
             else:
                 with self.logger.destination.open('a', encoding="utf-8") as output_file:
                     output_file.write(legend_output + '\n')
-    
+
 
     def ras(self, args, multiple_devices=False, gpu=None, cper=None, afid=None,
             severity=None, folder=None, file_limit=None, cper_file=None, follow=None):
@@ -6494,7 +6501,7 @@ class AMDSMICommands():
 
         if not args.gpu:
             return
-        
+
         if not isinstance(args.gpu, list):
             args.gpu = [args.gpu]
 
@@ -6505,6 +6512,7 @@ class AMDSMICommands():
             if not args.follow:
                 break
             time.sleep(1)
+
 
     def default(self, args):
         """Display the default amdsmi view when no args are given."""
@@ -6560,7 +6568,7 @@ class AMDSMICommands():
             else:
                 partition_mode = f"{current_comp}/{current_mem}"
             gpu_info_dict.update({"partition_mode": partition_mode})
-            
+
             # GPU name market name and OAM ID
             try:
                 asic_info = amdsmi_interface.amdsmi_get_gpu_asic_info(processor)

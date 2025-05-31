@@ -68,9 +68,7 @@ class AMDSmiGPUDevice: public AMDSmiProcessor {
     bool check_if_drm_is_supported() { return drm_.check_if_drm_is_supported(); }
     uint32_t get_vendor_id();
     const GPUComputeProcessList_t& amdgpu_get_compute_process_list(ComputeProcessListType_t list_type = ComputeProcessListType_t::kAllProcessesOnDevice);
-    const GPUComputeProcessList_t& amdgpu_get_all_compute_process_list() {
-        return amdgpu_get_compute_process_list(ComputeProcessListType_t::kAllProcesses);
-    }
+
 
 // New methods for -e feature
     std::string bdf_to_string() const;     // -e feature

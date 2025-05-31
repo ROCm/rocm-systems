@@ -198,71 +198,69 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& 
     compute_process_list.clear();
 
     /**
-     *  The first call to GetProcessInfo() helps to find the size it needs,
-     *  so we can create a tailored size list.
+     *  The first call to rsmi_compute_process_info_get() to find the number of
+     *  rsmi_process_info_t currently running on the system.
      */
     auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
-    auto list_process_running_size = uint32_t(0);
+    auto num_running_processes = uint32_t(0);
     auto list_process_allocation_size = uint32_t(0);
 
-    status_code = rsmi_compute_process_info_get(nullptr, &list_process_running_size);
-    if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) || (list_process_running_size <= 0)) {
+    status_code = rsmi_compute_process_info_get(nullptr, &num_running_processes);
+    if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) || (num_running_processes <= 0)) {
         return status_code;
     }
 
     /**
-     *  The second call to GetProcessInfo() helps to set proper sizes for both,
-     *  the raw array of processes (amdsmi_process_info_t) and list of processes (amdsmi_proc_info_t).
+     *  Make a type safe pointer, then
+     *
+     * second call to rsmi_compute_process_info_get() g
+     *  the allocated rsmi_process_info_t array.
      */
     using RsmiDeviceList_t = uint32_t[];
     using RsmiProcessList_t = rsmi_process_info_t[];
-    std::unique_ptr<RsmiProcessList_t> list_all_processes_ptr = std::make_unique<RsmiProcessList_t>(list_process_running_size);
+    std::unique_ptr<RsmiProcessList_t> list_all_processes_ptr = std::make_unique<RsmiProcessList_t>(num_running_processes);
 
-    list_process_allocation_size = list_process_running_size;
-    status_code = rsmi_compute_process_info_get(list_all_processes_ptr.get(), &list_process_allocation_size);
-    if (status_code) {
+    status_code = rsmi_compute_process_info_get(list_all_processes_ptr.get(), &num_running_processes);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
         return status_code;
     }
 
-    // Restore the original size to read
-    list_process_running_size = list_process_allocation_size;
-    if (list_process_running_size <= 0) {
-        return rsmi_status_t::RSMI_STATUS_NOT_FOUND;
+    if (num_running_processes <= 0) {
+        return rsmi_status_t::RSMI_STATUS_SUCCESS; // No processes running
     }
 
-
     /**
-     *  Setup for the cases where the process list is by device.
+     *  Check that you have devices that are able to be monitored, ie excluding CPUs
      */
-    auto list_device_running_size = uint32_t(0);
+    auto num_running_devices = uint32_t(0);
     auto list_device_allocation_size = uint32_t(0);
-    status_code = rsmi_num_monitor_devices(&list_device_running_size);
-    if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) || (list_device_running_size <= 0)) {
+    status_code = rsmi_num_monitor_devices(&num_running_devices);
+    if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) || (num_running_devices <= 0)) {
         return status_code;
     }
 
-
     /**
-     * Complete the process information
-     * This is where we copy rsmi_process_info_t into the larger amdsmi_proc_info_t
-     * Then populate the remaining fields with the gpuvsmi_get_pid_info()
-     * TODO FIX HERE TO GRAB KFD VRAM if /proc is inconsistent
+     * Populate process information for the given AMDSmiGPUDevice reference.
+     * This function retrieves the process information given in rsmi_proc_info_t
+     * and populates the amdsmi_proc_info_t structure.
      */
-    auto get_process_info = [&](const rsmi_process_info_t& rsmi_proc_info, amdsmi_proc_info_t& asmi_proc_info) {
-        auto status_code = gpuvsmi_get_pid_info(get_bdf(), rsmi_proc_info.process_id, asmi_proc_info);
+    auto get_process_info = [&](const rsmi_process_info_t& rsmi_proc_info, amdsmi_proc_info_t& amdsmi_proc_info) {
+        // amdsmi_proc_info_t gets populated with /proc information from gpuvsmi_get_pid_info()
+
+        auto status_code = gpuvsmi_get_pid_info(get_bdf(), rsmi_proc_info.process_id, amdsmi_proc_info);
         // If we cannot get the info from sysfs, save the minimum info
         if (status_code != amdsmi_status_t::AMDSMI_STATUS_SUCCESS) {
-            asmi_proc_info.pid = rsmi_proc_info.process_id;
-            asmi_proc_info.memory_usage.vram_mem = rsmi_proc_info.vram_usage;
+            amdsmi_proc_info.pid = rsmi_proc_info.process_id;
+            amdsmi_proc_info.memory_usage.vram_mem = rsmi_proc_info.vram_usage;
         }
 
         // Copy the cu occupancy from rsmi_process_info_t to amdsmi_proc_info_t
-        asmi_proc_info.cu_occupancy = rsmi_proc_info.cu_occupancy;
+        amdsmi_proc_info.cu_occupancy = rsmi_proc_info.cu_occupancy;
 
-        // Safely handle KFD file access
+        // Safely handle KFD processes to get total memory_usage of the process
         uint64_t kfd_gpu_id = get_kfd_gpu_id();
-        std::string kfd_path = "/sys/class/kfd/kfd/proc/" + 
-                            std::to_string(rsmi_proc_info.process_id) + 
+        std::string kfd_path = "/sys/class/kfd/kfd/proc/" +
+                            std::to_string(rsmi_proc_info.process_id) +
                             "/vram_" + std::to_string(kfd_gpu_id);
 
         // Check if the file exists before attempting to open it
@@ -273,8 +271,7 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& 
                 if (std::getline(kfd_file, line)) {
                     try {
                         uint64_t vram_bytes = std::stoull(line);
-                        asmi_proc_info.mem = vram_bytes; // Already in bytes
-                        asmi_proc_info.memory_usage.vram_mem = vram_bytes; // Already in bytes
+                        amdsmi_proc_info.mem = vram_bytes; // Already in bytes
                     } catch (const std::exception& e) {
                         // Handle conversion error gracefully
                         std::ostringstream ss;
@@ -298,35 +295,14 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& 
     };
 
     /**
-     * Get process information
-     */
-    auto update_list_by_running_process = [&](const uint32_t process_id) {
-        auto status_result(true);
-        rsmi_process_info_t rsmi_proc_info{};
-        auto status_code = rsmi_compute_process_info_by_pid_get(process_id, &rsmi_proc_info);
-        if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
-            status_result = false;
-            return status_result;
-        }
-
-        amdsmi_proc_info_t tmp_asmi_proc_info{};
-        get_process_info(rsmi_proc_info, tmp_asmi_proc_info);
-        compute_process_list.emplace(process_id, tmp_asmi_proc_info);
-
-        return status_result;
-    };
-
-
-    /**
      *  Devices used by a process.
      */
-    auto update_list_by_running_device = [&](const uint32_t process_id,
-                                             const uint32_t proc_addr_id) {
-        // Get all devices running this process
+    auto update_list_by_running_device = [&](rsmi_process_info_t rsmi_proc_info) {
+        // Get all devices running this process into list_device_ptr
         auto status_result(true);
-        std::unique_ptr<RsmiDeviceList_t> list_device_ptr = std::make_unique<RsmiDeviceList_t>(list_device_running_size);
-        list_device_allocation_size = list_device_running_size;
-        auto status_code = rsmi_compute_process_gpus_get(process_id, list_device_ptr.get(), &list_device_allocation_size);
+        std::unique_ptr<RsmiDeviceList_t> list_device_ptr = std::make_unique<RsmiDeviceList_t>(num_running_devices);
+        list_device_allocation_size = num_running_devices;
+        auto status_code = rsmi_compute_process_gpus_get(rsmi_proc_info.process_id, list_device_ptr.get(), &list_device_allocation_size);
         if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
             status_result = false;
             return status_result;
@@ -335,16 +311,13 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& 
         for (auto device_idx = uint32_t(0); device_idx < list_device_allocation_size; ++device_idx) {
             // Is this device running this process?
             if (list_device_ptr[device_idx] == get_gpu_id()) {
-                rsmi_process_info_t rsmi_dev_proc_info{};
-                // TODO remove pasid Not working in ROCm 6.4+, deprecating in 7.0
-                auto status_code = rsmi_compute_process_info_by_device_get(process_id, list_device_ptr[device_idx], &rsmi_dev_proc_info);
-                if ((status_code == rsmi_status_t::RSMI_STATUS_SUCCESS) &&
-                    ((rsmi_dev_proc_info.process_id == process_id) && (rsmi_dev_proc_info.pasid == proc_addr_id))) {
-                    amdsmi_proc_info_t tmp_asmi_proc_info{};
-                    get_process_info(rsmi_dev_proc_info, tmp_asmi_proc_info);
-                    compute_process_list.emplace(process_id, tmp_asmi_proc_info);
-                }
-            }
+                std::unordered_set<uint64_t> gpu_set;
+                gpu_set.insert(get_kfd_gpu_id());
+                GetProcessInfoForPID(rsmi_proc_info.process_id, &rsmi_proc_info, &gpu_set);
+                amdsmi_proc_info_t tmp_amdsmi_proc_info{};
+                get_process_info(rsmi_proc_info, tmp_amdsmi_proc_info);
+                compute_process_list.emplace(rsmi_proc_info.process_id, tmp_amdsmi_proc_info);
+           }
         }
 
         return status_result;
@@ -355,15 +328,10 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& 
      *  Transfer/Save the ones linked to this device.
      */
     compute_process_list.clear();
-    for (auto process_idx = uint32_t(0); process_idx < list_process_running_size; ++process_idx) {
-        if (list_type == ComputeProcessListType_t::kAllProcesses) {
-            if (update_list_by_running_process(list_all_processes_ptr[process_idx].process_id)) {
-            }
-        }
-
-        if (list_type == ComputeProcessListType_t::kAllProcessesOnDevice) {
-            if (update_list_by_running_device(list_all_processes_ptr[process_idx].process_id,
-                                              list_all_processes_ptr[process_idx].pasid)) {
+    for (auto process_idx = uint32_t(0); process_idx < num_running_processes; ++process_idx) {
+        if (list_type == ComputeProcessListType_t::kAllProcesses ||
+            list_type == ComputeProcessListType_t::kAllProcessesOnDevice) {
+            if (update_list_by_running_device(list_all_processes_ptr[process_idx])) {
             }
         }
     }

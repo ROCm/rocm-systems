@@ -166,26 +166,26 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t &bdf, long int pid,
               if (it == pasids.end()) pasids.push_back(pasid);
             } else if (line.find("drm-memory-gtt:") != std::string::npos) {
               unsigned long mem;
-              if (sscanf(line.c_str(), "drm-memory-gtt:  %" PRIu32, &mem) != 1) continue;
+              if (sscanf(line.c_str(), "drm-memory-gtt:  %" PRIu64, &mem) != 1) continue;
               info.mem += mem * 1000;
               info.memory_usage.gtt_mem += mem * 1000;
             } else if (line.find("drm-memory-cpu:") != std::string::npos) {
               unsigned long mem;
-              if (sscanf(line.c_str(), "drm-memory-cpu:  %" PRIu32, &mem) != 1) continue;
+              if (sscanf(line.c_str(), "drm-memory-cpu:  %" PRIu64, &mem) != 1) continue;
               info.mem += mem * 1000;
               info.memory_usage.cpu_mem += mem * 1000;
             } else if (line.find("drm-memory-vram:") != std::string::npos) {
               unsigned long mem;
-              if (sscanf(line.c_str(), "drm-memory-vram:  %" PRIu32, &mem) != 1) continue;
+              if (sscanf(line.c_str(), "drm-memory-vram:  %" PRIu64, &mem) != 1) continue;
               info.mem += mem * 1000;
               info.memory_usage.vram_mem += mem * 1000;
             } else if (line.find("drm-engine-gfx") != std::string::npos) {
               uint64_t engine_gfx;
-              if (sscanf(line.c_str(), "drm-engine-gfx:  %" PRIu32, &engine_gfx) != 1) continue;
+              if (sscanf(line.c_str(), "drm-engine-gfx:  %" PRIu64, &engine_gfx) != 1) continue;
               info.engine_usage.gfx = engine_gfx;
             } else if (line.find("drm-engine-enc") != std::string::npos) {
               uint64_t engine_enc;
-              if (sscanf(line.c_str(), "drm-engine-enc:  %" PRIu32, &engine_enc) != 1) continue;
+              if (sscanf(line.c_str(), "drm-engine-enc:  %" PRIu64, &engine_enc) != 1) continue;
               info.engine_usage.enc = engine_enc;
             }
           }

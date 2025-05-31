@@ -855,8 +855,8 @@ int main() {
                         continue;
                     pwd = getpwuid(st.st_uid);
                     if (!pwd)
-                        printf("| %5d | %16s | %10d | %s | %7ld KiB | %7ld KiB "
-                               "| %7ld KiB | %7ld KiB  | %lu  %lu  | %u |\n",
+                        printf("| %5d | %16s | %10d | %s | %7ld KB | %7ld KB "
+                               "| %7ld KB | %7ld KB  | %lu  %lu  | %u |\n",
                                process_info_list[it].pid, process_info_list[it].name, st.st_uid,
                                bdf_str, process_info_list[it].mem / 1024,
                                process_info_list[it].memory_usage.gtt_mem / 1024,
@@ -866,8 +866,8 @@ int main() {
                                process_info_list[it].engine_usage.enc,
                                process_info_list[it].cu_occupancy);
                     else
-                        printf("| %5d | %16s | %10s | %s | %7ld KiB | %7ld KiB "
-                               "| %7ld KiB | %7ld KiB  | %lu  %lu  | %u |\n",
+                        printf("| %5d | %16s | %10s | %s | %7ld KB | %7ld KB "
+                               "| %7ld KB | %7ld KB  | %lu  %lu  | %u |\n",
                                process_info_list[it].pid, process_info_list[it].name,
                                pwd->pw_name, bdf_str, process_info_list[it].mem / 1024,
                                process_info_list[it].memory_usage.gtt_mem / 1024,
@@ -892,9 +892,9 @@ int main() {
                 // TODO: To remove compiler warning, the last 3 values in this printf were
                 //       set to 0L.  Need to find out what these values need to be.
                 printf("|                                 TOTAL:| %s | %7ld "
-                       "KiB | %7ld KiB | %7ld KiB | %7ld KiB | %lu  %lu | %u |\n",
+                       "KB | %7ld KB | %7ld KB | %7ld KB | %lu  %lu | %u |\n",
                        bdf_str, mem, gtt_mem, cpu_mem, vram_mem, gfx,
-                       enc, cu_occupancy, 0L);
+                       enc, cu_occupancy);
                 printf("+=======+==================+============+=============="
                        "+=============+=============+=============+============"
                        "=+==========================================+\n");

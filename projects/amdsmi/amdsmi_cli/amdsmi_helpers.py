@@ -1102,7 +1102,6 @@ class AMDSMIHelpers():
 
         # Loop through all entries in the dictionary.
         for entry_index, entry in enumerate(entries.values()):
-            
             # Assume 'entry' is a dictionary with keys: "error_severity" and "notify_type".
             error_severity = entry.get("error_severity", "Unknown")
             notify_type = entry.get("notify_type", "Unknown")

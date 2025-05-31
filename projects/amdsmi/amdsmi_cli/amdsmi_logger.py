@@ -213,23 +213,26 @@ class AMDSMILogger():
                 for process_dict in value:
                     if process_dict['process_info'] == "No running processes detected":
                         # Add N/A for empty process_info
-                        table_values += "N/A".rjust(20) + "N/A".rjust(9) + "N/A".rjust(10) + \
-                                        "N/A".rjust(10) + "N/A".rjust(10) + "N/A".rjust(9) + '\n'
+                        table_values += "N/A".rjust(17) + "N/A".rjust(9) + "N/A".rjust(10) + \
+                                        "N/A".rjust(10) + "N/A".rjust(10) + "N/A".rjust(10) + \
+                                        "N/A".rjust(9) + '\n'
                     else:
                         #Fix this herre
                         for process_key, process_value in process_dict['process_info'].items():
                             string_process_value = str(process_value)
                             if process_key == "name":
                                 # Truncate name if too long
-                                process_name = string_process_value[:20]
+                                process_name = string_process_value[:17]
                                 if process_name == "":
                                     process_name = "N/A"
-                                table_values += process_name.rjust(20)
+                                table_values += process_name.rjust(17)
                             elif process_key == "pid":
                                 table_values += string_process_value.rjust(9)
                             elif process_key == "memory_usage":
                                 for memory_key, memory_value in process_value.items():
                                     table_values += str(memory_value).rjust(10)
+                            elif process_key == "mem_usage":
+                                table_values += string_process_value.rjust(10)
                             elif process_key == "cu_occupancy":
                                 table_values += string_process_value.rjust(9)
                                 # Add the stored gpu and stored timestamp to the next line

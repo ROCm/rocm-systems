@@ -4122,46 +4122,56 @@ amdsmi_status_t amdsmi_get_afids_from_cper(
 amdsmi_status_t
 amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_handle, uint32_t *max_processes, amdsmi_proc_info_t *list) {
     AMDSMI_CHECK_INIT();
+
+    // Validate the max_processes pointer
     if (!max_processes) {
         return AMDSMI_STATUS_INVAL;
     }
 
+    // Retrieve the GPU device associated with the processor handle
     amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
     amdsmi_status_t status_code = get_gpu_device_from_handle(processor_handle, &gpu_device);
-    if (status_code != amdsmi_status_t::AMDSMI_STATUS_SUCCESS) {
+    if (status_code != AMDSMI_STATUS_SUCCESS) {
         return status_code;
     }
 
+    // Get the list of compute processes running on the GPU
     auto compute_process_list = gpu_device->amdgpu_get_compute_process_list();
+
+    // If max_processes is 0, return the number of processes currently running
+    // If compute_process_list is empty, return success with max_processes set to 0
     if ((*max_processes == 0) || compute_process_list.empty()) {
         *max_processes = static_cast<uint32_t>(compute_process_list.size());
-        return amdsmi_status_t::AMDSMI_STATUS_SUCCESS;
-    }
-    if (!list) {
-        return amdsmi_status_t::AMDSMI_STATUS_INVAL;
+        return AMDSMI_STATUS_SUCCESS;
     }
 
+    // Validate the list pointer
+    if (!list) {
+        return AMDSMI_STATUS_INVAL;
+    }
+
+    // Store the original size of max_processes
     const auto max_processes_original_size(*max_processes);
     auto idx = uint32_t(0);
+
+    // Populate the list with process information
     for (auto& process : compute_process_list) {
         if (idx < *max_processes) {
+            // Iterate over the map of processes and store the amdsmi_proc_info_t in the list
             list[idx++] = static_cast<amdsmi_proc_info_t>(process.second);
         } else {
             break;
         }
     }
 
-    //  Note: If the reserved size for processes is smaller than the number of
-    //        actual processes running. The AMDSMI_STATUS_OUT_OF_RESOURCES is
-    //        an indication the caller should handle the situation (resize).
-    //        The max_processes is always changed to reflect the actual size of
-    //        list of processes running, so the caller knows where it is at.
-    //        Holding a copy of max_process before it is passed in will be helpful
-    //        for the caller.
+    // Update max_processes to reflect the actual number of running processes
     *max_processes = static_cast<uint32_t>(compute_process_list.size());
+
+    // Check if the caller-provided size for processes is sufficient to store all running processes
     return (max_processes_original_size >= static_cast<uint32_t>(compute_process_list.size()))
-            ? AMDSMI_STATUS_SUCCESS : amdsmi_status_t::AMDSMI_STATUS_OUT_OF_RESOURCES;
+            ? AMDSMI_STATUS_SUCCESS : AMDSMI_STATUS_OUT_OF_RESOURCES;
 }
+
 amdsmi_status_t
 amdsmi_get_power_info(amdsmi_processor_handle processor_handle, amdsmi_power_info_t *info) {
     AMDSMI_CHECK_INIT();
