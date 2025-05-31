@@ -2085,11 +2085,11 @@ class struct_amdsmi_process_info_t(Structure):
 struct_amdsmi_process_info_t._pack_ = 1 # source:False
 struct_amdsmi_process_info_t._fields_ = [
     ('process_id', ctypes.c_uint32),
-    ('pasid', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
     ('vram_usage', ctypes.c_uint64),
     ('sdma_usage', ctypes.c_uint64),
     ('cu_occupancy', ctypes.c_uint32),
-    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('PADDING_1', ctypes.c_ubyte * 4),
 ]
 
 amdsmi_process_info_t = struct_amdsmi_process_info_t

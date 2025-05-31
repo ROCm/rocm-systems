@@ -136,10 +136,6 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t &bdf, long int pid,
   d = opendir(path.c_str());
   if (!d) return AMDSMI_STATUS_NO_PERM;
 
-  /* Vectors to check if repated fd pasid */
-  // TODO remove pasid Not working in ROCm 6.4+, deprecating in 7.0
-  std::vector<int> pasids;
-
   memset(&info, 0, sizeof(info));
   /* Iterate through all fdinfos */
   while ((dir = readdir(d)) != NULL) {
@@ -159,12 +155,7 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t &bdf, long int pid,
           std::ifstream fdinfo(file.c_str());
 
           for (std::string line; getline(fdinfo, line);) {
-            if (line.find("pasid:") != std::string::npos) {
-              int pasid;
-              if (sscanf(line.c_str(), "pasid:  %d", &pasid) != 1) continue;
-              auto it = std::find(pasids.begin(), pasids.end(), pasid);
-              if (it == pasids.end()) pasids.push_back(pasid);
-            } else if (line.find("drm-memory-gtt:") != std::string::npos) {
+            if (line.find("drm-memory-gtt:") != std::string::npos) {
               unsigned long mem;
               if (sscanf(line.c_str(), "drm-memory-gtt:  %" PRIu64, &mem) != 1) continue;
               info.mem += mem * 1000;
@@ -222,10 +213,6 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t &bdf, long int pid,
     if (strlen(info.container_name) > 0) break;
   }
   info.pid = (uint32_t)pid;
-
-  if (!pasids.size()) {
-    return AMDSMI_STATUS_NOT_FOUND;
-  }
 
   return AMDSMI_STATUS_SUCCESS;
 }

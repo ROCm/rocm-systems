@@ -2280,7 +2280,6 @@ const _: () = {
 #[derive(Debug, Copy, Clone)]
 pub struct AmdsmiProcessInfoT {
     pub process_id: u32,
-    pub pasid: u32,
     pub vram_usage: u64,
     pub sdma_usage: u64,
     pub cu_occupancy: u32,
@@ -2291,14 +2290,12 @@ const _: () = {
     ["Alignment of AmdsmiProcessInfoT"][::std::mem::align_of::<AmdsmiProcessInfoT>() - 8usize];
     ["Offset of field: AmdsmiProcessInfoT::process_id"]
         [::std::mem::offset_of!(AmdsmiProcessInfoT, process_id) - 0usize];
-    ["Offset of field: AmdsmiProcessInfoT::pasid"]
-        [::std::mem::offset_of!(AmdsmiProcessInfoT, pasid) - 4usize];
     ["Offset of field: AmdsmiProcessInfoT::vram_usage"]
-        [::std::mem::offset_of!(AmdsmiProcessInfoT, vram_usage) - 8usize];
+        [::std::mem::offset_of!(AmdsmiProcessInfoT, vram_usage) - 4usize];
     ["Offset of field: AmdsmiProcessInfoT::sdma_usage"]
-        [::std::mem::offset_of!(AmdsmiProcessInfoT, sdma_usage) - 16usize];
+        [::std::mem::offset_of!(AmdsmiProcessInfoT, sdma_usage) - 12usize];
     ["Offset of field: AmdsmiProcessInfoT::cu_occupancy"]
-        [::std::mem::offset_of!(AmdsmiProcessInfoT, cu_occupancy) - 24usize];
+        [::std::mem::offset_of!(AmdsmiProcessInfoT, cu_occupancy) - 20usize];
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]

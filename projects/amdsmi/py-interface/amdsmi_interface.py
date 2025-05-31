@@ -4836,7 +4836,6 @@ def amdsmi_get_gpu_compute_process_info() -> List[Dict[str, int]]:
     return [
         {
             "process_id": proc.process_id,
-            "pasid": proc.pasid, # Not working in ROCm 6.4+, deprecating in 7.0
             "vram_usage": proc.vram_usage,
             "sdma_usage": proc.sdma_usage,
             "cu_occupancy": proc.cu_occupancy,
@@ -4858,7 +4857,6 @@ def amdsmi_get_gpu_compute_process_info_by_pid(pid: int) -> Dict[str, int]:
 
     return {
         "process_id": proc.process_id,
-        "pasid": proc.pasid, # Not working in ROCm 6.4+, deprecating in 7.0
         "vram_usage": proc.vram_usage,
         "sdma_usage": proc.sdma_usage,
         "cu_occupancy": proc.cu_occupancy,

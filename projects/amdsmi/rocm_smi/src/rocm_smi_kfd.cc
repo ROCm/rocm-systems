@@ -50,8 +50,6 @@ namespace smi {
 
 static const char *kKFDProcPathRoot = "/sys/class/kfd/kfd/proc";
 static const char *kKFDNodesPathRoot = "/sys/class/kfd/kfd/topology/nodes";
-// Sysfs file names
-static const char *kKFDPasidFName = "pasid";
 
 
 
@@ -302,29 +300,8 @@ int GetProcessInfo(rsmi_process_info_t *procs, uint32_t num_allocated,
       continue;
     }
     if (procs && *num_procs_found < num_allocated) {
-      int err;
-      std::string tmp;
-
       procs[*num_procs_found].process_id =
                                 static_cast<uint32_t>(std::stoi(proc_id_str));
-
-      std::string pasid_str_path = kKFDProcPathRoot;
-      pasid_str_path += "/";
-      pasid_str_path += proc_id_str;
-      pasid_str_path += "/";
-      pasid_str_path += kKFDPasidFName;
-
-      err = ReadSysfsStr(pasid_str_path, &tmp);
-      if (err) {
-        dentry = readdir(proc_dir);
-        continue;
-      }
-      assert(is_number(tmp) && "Unexpected value in pasid file");
-      if (!is_number(tmp)) {
-        closedir(proc_dir);
-        return EINVAL;
-      }
-      procs[*num_procs_found].pasid = static_cast<uint32_t>(std::stoi(tmp));
     }
     ++(*num_procs_found);
 
@@ -436,21 +413,6 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
     return ESRCH;
   }
   proc->process_id = pid;
-
-  std::string pasid_str_path = proc_str_path;
-  pasid_str_path += "/";
-  pasid_str_path += kKFDPasidFName;
-
-  err = ReadSysfsStr(pasid_str_path, &tmp);
-  if (err) {
-    return err;
-  }
-  assert(is_number(tmp) && "Unexpected value in pasid file");
-
-  if (!is_number(tmp)) {
-    return EINVAL;
-  }
-  proc->pasid = static_cast<uint32_t>(std::stoi(tmp));
 
   proc->vram_usage = 0;
   proc->sdma_usage = 0;
