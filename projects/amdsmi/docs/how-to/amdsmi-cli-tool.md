@@ -35,7 +35,7 @@ detected:
 ~$ amd-smi
 usage: amd-smi [-h]  ...
 
-AMD System Management Interface | Version: 25.5.0 | ROCm version: 6.4.1 | Platform: Linux Baremetal
+AMD System Management Interface | Version: 25.5.0 | ROCm version: 7.0.0 | Platform: Linux Baremetal
 
 options:
   -h, --help          show this help message and exit
@@ -56,7 +56,7 @@ AMD-SMI Commands:
     monitor (dmon)    Monitor metrics for target devices
     xgmi              Displays xgmi information of the devices
     partition         Displays partition information of the devices
-    ras               Retrieve CPER (RAS) entries from the driver
+    ras               Retrieve RAS (CPER) entries from the driver
 ```
 
 Example commands:
@@ -91,19 +91,23 @@ Lists GPU information.
 usage: amd-smi list [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
                     [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]]
 
-Lists all the devices on the system and the links between devices.
-Lists the BDF, UUID, KFD_ID, and NODE_ID for each GPU and/or CPUs.
+Lists all detected devices on the system.
+Lists the BDF, UUID, KFD_ID, NODE_ID, and Partition ID for each GPU and/or CPUs.
 In virtualization environments, it can also list VFs associated to each
 GPU with some basic information for each VF.
 
-options:
-  -h, --help                  show this help message and exit
-  -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, or UUID from the possible choices:
-                              ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                                all | Selects all devices
+List Arguments:
+  -h, --help               show this help message and exit
+  -e                       Enumeration mapping to other features.
+                               Includes CARD, RENDER, HSA_ID, HIP_ID, and HIP_UUID.
+
+Device Arguments:
+  -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, or UUID from the possible choices:
+                           ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                             all | Selects all devices
   -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
                               ID: 0
                               ID: 1
@@ -115,10 +119,10 @@ options:
                                 all  | Selects all devices
 
 Command Modifiers:
-  --json                      Displays output in JSON format (human readable by default).
-  --csv                       Displays output in CSV format (human readable by default).
-  --file FILE                 Saves output into a file on the provided path (stdout by default).
-  --loglevel LEVEL            Set the logging level from the possible choices:
+  --json                       Displays output in JSON format (human readable by default).
+  --csv                        Displays output in CSV format (human readable by default).
+  --file FILE                  Saves output into a file on the provided path (stdout by default).
+  --loglevel LEVEL             Set the logging level from the possible choices:
                                 DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
@@ -139,18 +143,6 @@ If no static argument is provided, all static information will be displayed.
 
 Static Arguments:
   -h, --help               show this help message and exit
-  -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, or UUID from the possible choices:
-                           ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                             all | Selects all devices
-  -U, --cpu CPU [CPU ...]  Select a CPU ID from the possible choices:
-                           ID: 0
-                           ID: 1
-                           ID: 2
-                           ID: 3
-                             all | Selects all devices
   -a, --asic               All asic information
   -b, --bus                All bus information
   -V, --vbios              All video bios information (if available)
@@ -159,7 +151,8 @@ Static Arguments:
   -c, --cache              All cache information
   -B, --board              All board information
   -R, --process-isolation  The process isolation status
-  -r, --ras                Displays RAS features information
+  -r, --ras                Displays RAS features information;
+                                Sudo may be required for some features
   -C, --clock [CLOCK ...]  Show one or more valid clock frequency levels. Available options:
                                 SYS, DF, DCEF, SOC, MEM, VCLK0, VCLK1, DCLK0, DCLK1, ALL
   -p, --partition          Partition information
@@ -172,11 +165,25 @@ CPU Arguments:
   -s, --smu                All SMU FW information
   -i, --interface-ver      Displays hsmp interface version
 
+Device Arguments:
+  -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, or UUID from the possible choices:
+                           ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                             all | Selects all devices
+  -U, --cpu CPU [CPU ...]  Select a CPU ID from the possible choices:
+                           ID: 0
+                           ID: 1
+                           ID: 2
+                           ID: 3
+                             all | Selects all devices
+
 Command Modifiers:
-  --json                   Displays output in JSON format (human readable by default).
-  --csv                    Displays output in CSV format (human readable by default).
-  --file FILE              Saves output into a file on the provided path (stdout by default).
-  --loglevel LEVEL         Set the logging level from the possible choices:
+  --json                       Displays output in JSON format (human readable by default).
+  --csv                        Displays output in CSV format (human readable by default).
+  --file FILE                  Saves output into a file on the provided path (stdout by default).
+  --loglevel LEVEL             Set the logging level from the possible choices:
                                 DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
@@ -194,22 +201,24 @@ If no GPU is specified, return firmware information for all GPUs on the system.
 
 Firmware Arguments:
   -h, --help                   show this help message and exit
+  -f, --ucode-list, --fw-list  All FW list information
+
+Device Arguments:
   -g, --gpu GPU [GPU ...]      Select a GPU ID, BDF, or UUID from the possible choices:
                                ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
                                ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
                                ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
                                ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
                                  all | Selects all devices
-  -U, --cpu CPU [CPU ...]      Select a CPU ID from the possible choices:
-                               ID: 0
-                               ID: 1
-                               ID: 2
-                               ID: 3
-                                 all | Selects all devices
-  -O, --core CORE [CORE ...]   Select a Core ID from the possible choices:
-                               ID: 0 - 95
-                                 all  | Selects all devices
-  -f, --ucode-list, --fw-list  All FW list information
+  -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
+                              ID: 0
+                              ID: 1
+                              ID: 2
+                              ID: 3
+                                all | Selects all devices
+  -O, --core CORE [CORE ...]  Select a Core ID from the possible choices:
+                              ID: 0 - 95
+                                all  | Selects all devices
 
 Command Modifiers:
   --json                       Displays output in JSON format (human readable by default).
@@ -233,13 +242,18 @@ usage: amd-smi bad-pages [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
 If no GPU is specified, return bad page information for all GPUs on the system.
 
 Bad Pages Arguments:
-  -h, --help                  show this help message and exit
-  -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, or UUID from the possible choices:
-                              ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                                all | Selects all devices
+  -h, --help               show this help message and exit
+  -p, --pending            Displays all pending retired pages
+  -r, --retired            Displays retired pages
+  -u, --un-res             Displays unreservable pages
+
+Device Arguments:
+  -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, or UUID from the possible choices:
+                           ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                             all | Selects all devices
   -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
                               ID: 0
                               ID: 1
@@ -249,9 +263,6 @@ Bad Pages Arguments:
   -O, --core CORE [CORE ...]  Select a Core ID from the possible choices:
                               ID: 0 - 95
                                 all  | Selects all devices
-  -p, --pending               Displays all pending retired pages
-  -r, --retired               Displays retired pages
-  -u, --un-res                Displays unreservable pages
 
 Command Modifiers:
   --json                      Displays output in JSON format (human readable by default).
@@ -286,41 +297,29 @@ If no GPU is specified, returns metric information for all GPUs on the system.
 If no metric argument is provided, all metric information will be displayed.
 
 Metric arguments:
-  -h, --help                                show this help message and exit
-  -g, --gpu GPU [GPU ...]                   Select a GPU ID, BDF, or UUID from the possible choices:
-                                            ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                                            ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                                            ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                                            ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                                              all | Selects all devices
-  -U, --cpu CPU [CPU ...]                   Select a CPU ID from the possible choices:
-                                            ID: 0
-                                            ID: 1
-                                            ID: 2
-                                            ID: 3
-                                              all | Selects all devices
-  -O, --core CORE [CORE ...]                Select a Core ID from the possible choices:
-                                            ID: 0 - 95
-                                              all  | Selects all devices
-  -w, --watch INTERVAL                      Reprint the command in a loop of INTERVAL seconds
-  -W, --watch_time TIME                     The total TIME to watch the given command
-  -i, --iterations ITERATIONS               Total number of ITERATIONS to loop on the given command
-  -m, --mem-usage                           Memory usage per block
-  -u, --usage                               Displays engine usage information
-  -p, --power                               Current power usage
-  -c, --clock                               Average, max, and current clock frequencies
-  -t, --temperature                         Current temperatures
-  -P, --pcie                                Current PCIe speed, width, and replay count
-  -e, --ecc                                 Total number of ECC errors
-  -k, --ecc-blocks                          Number of ECC errors per block
-  -V, --voltage                             GPU voltage
-  -f, --fan                                 Current fan speed
-  -C, --voltage-curve                       Display voltage curve
-  -o, --overdrive                           Current GPU clock overdrive and GPU memory clock overdrive level
-  -l, --perf-level                          Current DPM performance level
-  -x, --xgmi-err                            XGMI error information since last read
-  -E, --energy                              Amount of energy consumed
-  -T, --throttle                            Displays throttle accumulators; Only available for MI300 or newer ASICs
+  -h, --help                   show this help message and exit
+  -m, --mem-usage              Memory usage per block
+  -u, --usage                  Displays engine usage information
+  -p, --power                  Current power usage
+  -c, --clock                  Average, max, and current clock frequencies
+  -t, --temperature            Current temperatures
+  -P, --pcie                   Current PCIe speed, width, and replay count
+  -e, --ecc                    Total number of ECC errors
+  -k, --ecc-blocks             Number of ECC errors per block
+  -V, --voltage                GPU voltage
+  -f, --fan                    Current fan speed
+  -C, --voltage-curve          Display voltage curve
+  -o, --overdrive              Current GFX and MEM clock overdrive level
+  -l, --perf-level             Current DPM performance level
+  -x, --xgmi-err               XGMI error information since last read
+  -E, --energy                 Amount of energy consumed
+  -T, --throttle               Displays throttle accumulators;
+                                   Only available for MI300 or newer ASICs
+
+Watch Arguments:
+  -w, --watch INTERVAL         Reprint the command in a loop of INTERVAL seconds
+  -W, --watch_time TIME        The total duration of TIME to watch the command
+  -i, --iterations ITERATIONS  The total number of ITERATIONS to repeat the command
 
 CPU Arguments:
   --cpu-power-metrics                       CPU power metrics
@@ -350,6 +349,23 @@ CPU Core Arguments:
   --core-curr-active-freq-core-limit        Get Current CCLK limit set per Core
   --core-energy                             Displays core energy for the selected core
 
+Device Arguments:
+  -g, --gpu GPU [GPU ...]      Select a GPU ID, BDF, or UUID from the possible choices:
+                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                               ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                               ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                                 all | Selects all devices
+  -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
+                              ID: 0
+                              ID: 1
+                              ID: 2
+                              ID: 3
+                                all | Selects all devices
+  -O, --core CORE [CORE ...]  Select a Core ID from the possible choices:
+                              ID: 0 - 95
+                                all  | Selects all devices
+
 Command Modifiers:
   --json                                    Displays output in JSON format (human readable by default).
   --csv                                     Displays output in CSV format (human readable by default).
@@ -374,7 +390,20 @@ If no GPU is specified, returns information for all GPUs on the system.
 If no process argument is provided, all process information will be displayed.
 
 Process arguments:
+Process arguments:
   -h, --help                   show this help message and exit
+  -G, --general                pid, process name, memory usage
+  -e, --engine                 All engine usages
+  -p, --pid PID                Gets all process information about the specified process based on Process ID
+  -n, --name NAME              Gets all process information about the specified process based on Process Name.
+                               If multiple processes have the same name, information is returned for all of them.
+
+Watch Arguments:
+  -w, --watch INTERVAL         Reprint the command in a loop of INTERVAL seconds
+  -W, --watch_time TIME        The total duration of TIME to watch the command
+  -i, --iterations ITERATIONS  The total number of ITERATIONS to repeat the command
+
+Device Arguments:
   -g, --gpu GPU [GPU ...]      Select a GPU ID, BDF, or UUID from the possible choices:
                                ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
                                ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
@@ -390,14 +419,6 @@ Process arguments:
   -O, --core CORE [CORE ...]   Select a Core ID from the possible choices:
                                ID: 0 - 95
                                  all  | Selects all devices
-  -w, --watch INTERVAL         Reprint the command in a loop of INTERVAL seconds
-  -W, --watch_time TIME        The total TIME to watch the given command
-  -i, --iterations ITERATIONS  Total number of ITERATIONS to loop on the given command
-  -G, --general                pid, process name, memory usage
-  -e, --engine                 All engine usages
-  -p, --pid PID                Gets all process information about the specified process based on Process ID
-  -n, --name NAME              Gets all process information about the specified process based on Process Name.                    
-                               If multiple processes have the same name, information is returned for all of them.
 
 Command Modifiers:
   --json                       Displays output in JSON format (human readable by default).
@@ -421,6 +442,8 @@ If no GPU is specified, returns event information for all GPUs on the system.
 
 Event Arguments:
   -h, --help                  show this help message and exit
+
+Device Arguments:
   -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, or UUID from the possible choices:
                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
@@ -460,7 +483,18 @@ If no GPU is specified, returns information for all GPUs on the system.
 If no topology argument is provided, all topology information will be displayed.
 
 Topology arguments:
-  -h, --help                  show this help message and exit
+  -h, --help               show this help message and exit
+  -a, --access             Displays link accessibility between GPUs
+  -w, --weight             Displays relative weight between GPUs
+  -o, --hops               Displays the number of hops between GPUs
+  -t, --link-type          Displays the link type between GPUs
+  -b, --numa-bw            Display max and min bandwidth between nodes
+  -c, --coherent           Display cache coherant (or non-coherant) link capability between nodes
+  -n, --atomics            Display 32 and 64-bit atomic io link capability between nodes
+  -d, --dma                Display P2P direct memory access (DMA) link capability between nodes
+  -z, --bi-dir             Display P2P bi-directional link capability between nodes
+
+Device Arguments:
   -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, or UUID from the possible choices:
                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
@@ -476,15 +510,6 @@ Topology arguments:
   -O, --core CORE [CORE ...]  Select a Core ID from the possible choices:
                               ID: 0 - 95
                                 all  | Selects all devices
-  -a, --access                Displays link accessibility between GPUs
-  -w, --weight                Displays relative weight between GPUs
-  -o, --hops                  Displays the number of hops between GPUs
-  -t, --link-type             Displays the link type between GPUs
-  -b, --numa-bw               Display max and min bandwidth between nodes
-  -c, --coherent              Display cache coherant (or non-coherant) link capability between nodes
-  -n, --atomics               Display 32 and 64-bit atomic io link capability between nodes
-  -d, --dma                   Display P2P direct memory access (DMA) link capability between nodes
-  -z, --bi-dir                Display P2P bi-directional link capability between nodes
 
 Command Modifiers:
   --json                      Displays output in JSON format (human readable by default).
@@ -517,45 +542,30 @@ A set argument must be provided; Multiple set arguments are accepted.
 Requires 'sudo' privileges.
 
 Set Arguments:
-  -h, --help                                   show this help message and exit
-  -g, --gpu GPU [GPU ...]                      Select a GPU ID, BDF, or UUID from the possible choices:
-                                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                                               ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                                               ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                                                 all | Selects all devices
-  -U, --cpu CPU [CPU ...]                                        Select a CPU ID from the possible choices:
-                                                                 ID: 0
-                                                                 ID: 1
-                                                                 ID: 2
-                                                                 ID: 3
-                                                                   all | Selects all devices
-  -O, --core CORE [CORE ...]                                     Select a Core ID from the possible choices:
-                                                                 ID: 0 - 95
-                                                                   all  | Selects all devices
-  -f, --fan %                                                    Set GPU fan speed (0-255 or 0-100%)
-  -l, --perf-level LEVEL                                         Set one of the following performance levels:
-                                                                        AUTO, LOW, HIGH, MANUAL, STABLE_STD, STABLE_PEAK, STABLE_MIN_MCLK, STABLE_MIN_SCLK, DETERMINISM
-  -P, --profile SETPROFILE                                       Set power profile level (#) or choose one of available profiles:
-                                                                        CUSTOM_MASK, VIDEO_MASK, POWER_SAVING_MASK, COMPUTE_MASK, VR_MASK, THREE_D_FULL_SCR_MASK, BOOTUP_DEFAULT
-  -d, --perf-determinism SCLKMAX                                 Set performance determinism and select one of the corresponding performance levels:
-                                                                        AUTO, LOW, HIGH, MANUAL, STABLE_STD, STABLE_PEAK, STABLE_MIN_MCLK, STABLE_MIN_SCLK, DETERMINISM
-  -C, --compute-partition <ACCELERATOR_TYPE> or <PROFILE_INDEX>  Set one of the following the accelerator type or profile index:
-                                                                        SPX, TPX, CPX, 0, 1, 2.
-                                                                        Use `sudo amd-smi partition --accelerator` to find acceptable values.
-  -M, --memory-partition PARTITION                               Set one of the following the memory partition modes:
-                                                                        NPS1, NPS2, NPS4, NPS8
-  -o, --power-cap WATTS                                          Set power capacity limit:
-                                                                        min cap: 0 W, max cap: 550 W
-  -p, --soc-pstate POLICY_ID                                     Set the GPU soc pstate policy using policy id, an integer. Valid id's include:
-                                                                        N/A
-  -x, --xgmi-plpd POLICY_ID                                      Set the GPU XGMI per-link power down policy using policy id, an integer. Valid id's include:
-                                                                        N/A
-  -c, --clk-level CLK_TYPE [PERF_LEVELS ...]                     Set a number of sclk (aka gfxclk), mclk, fclk, pcie, or socclk frequency performance levels.
-                                                                        Use `amd-smi static --clock` to find acceptable levels.
-  -L, --clk-limit CLK_TYPE LIM_TYPE VALUE                        Sets the sclk (aka gfxclk) or mclk minimum and maximum frequencies. 
-                                                                        ex: amd-smi set -L (sclk | mclk) (min | max) value
-  -R, --process-isolation STATUS                                 Enable or disable the GPU process isolation on a per partition basis: 0 for disable and 1 for enable.
+  -h, --help                                  show this help message and exit
+  -f, --fan %                                 Set GPU fan speed (0-255 or 0-100%)
+  -l, --perf-level LEVEL                      Set one of the following performance levels:
+                                                AUTO, LOW, HIGH, MANUAL, STABLE_STD, STABLE_PEAK, STABLE_MIN_MCLK, STABLE_MIN_SCLK, DETERMINISM
+  -P, --profile PROFILE_LEVEL                 Set power profile level (#) or choose one of available profiles:
+                                                CUSTOM_MASK, VIDEO_MASK, POWER_SAVING_MASK, COMPUTE_MASK, VR_MASK, THREE_D_FULL_SCR_MASK, BOOTUP_DEFAULT
+  -d, --perf-determinism SCLKMAX              Set performance determinism and select one of the corresponding performance levels:
+                                                AUTO, LOW, HIGH, MANUAL, STABLE_STD, STABLE_PEAK, STABLE_MIN_MCLK, STABLE_MIN_SCLK, DETERMINISM
+  -C, --compute-partition TYPE/INDEX          Set one of the following the accelerator TYPE or profile INDEX:
+                                                N/A.
+                                                Use `sudo amd-smi partition --accelerator` to find acceptable values.
+  -M, --memory-partition PARTITION            Set one of the following the memory partition modes:
+                                                NPS1, NPS2, NPS4, NPS8
+  -o, --power-cap WATTS                       Set power capacity limit:
+                                                min cap: 0 W, max cap: 550 W
+  -p, --soc-pstate POLICY_ID                  Set the GPU soc pstate policy using policy id, an integer. Valid id's include:
+                                                N/A
+  -x, --xgmi-plpd POLICY_ID                   Set the GPU XGMI per-link power down policy using policy id, an integer. Valid id's include:
+                                                N/A
+  -c, --clk-level CLK_TYPE [FREQ_LEVELS ...]  Set one or more sclk (aka gfxclk), mclk, fclk, pcie, or socclk frequency levels.
+                                                Use `amd-smi static --clock` to find acceptable levels.
+  -L, --clk-limit CLK_TYPE LIM_TYPE VALUE     Sets the sclk (aka gfxclk) or mclk minimum and maximum frequencies.
+                                                ex: amd-smi set -L (sclk | mclk) (min | max) value
+  -R, --process-isolation STATUS              Enable or disable the GPU process isolation on a per partition basis: 0 for disable and 1 for enable.
 
 CPU Arguments:
   --cpu-pwr-limit PWR_LIMIT                                      Set power limit for the given socket. Input parameter is power limit value.
@@ -572,6 +582,23 @@ CPU Arguments:
 
 CPU Core Arguments:
   --core-boost-limit BOOST_LIMIT                                 Sets the boost limit for the given core. Input parameter is core BOOST_LIMIT value
+
+Device Arguments:
+  -g, --gpu GPU [GPU ...]                      Select a GPU ID, BDF, or UUID from the possible choices:
+                                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                                               ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                                               ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                                                 all | Selects all devices
+  -U, --cpu CPU [CPU ...]                                        Select a CPU ID from the possible choices:
+                                                                 ID: 0
+                                                                 ID: 1
+                                                                 ID: 2
+                                                                 ID: 3
+                                                                   all | Selects all devices
+  -O, --core CORE [CORE ...]                                     Select a Core ID from the possible choices:
+                                                                 ID: 0 - 95
+                                                                   all  | Selects all devices
 
 Command Modifiers:
   --json                                                         Displays output in JSON format (human readable by default).
@@ -597,7 +624,17 @@ A reset argument must be provided; Multiple reset arguments are accepted.
 Requires 'sudo' privileges.
 
 Reset Arguments:
-  -h, --help                  show this help message and exit
+  -h, --help               show this help message and exit
+  -G, --gpureset           Reset the specified GPU
+  -c, --clocks             Reset clocks and overdrive to default
+  -f, --fans               Reset fans to automatic (driver) control
+  -p, --profile            Reset power profile back to default
+  -x, --xgmierr            Reset XGMI error counts
+  -d, --perf-determinism   Disable performance determinism
+  -o, --power-cap          Reset power capacity limit to max capable
+  -l, --clean-local-data   Clean up local data in LDS/GPRs on a per partition basis
+
+Device Arguments:
   -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, or UUID from the possible choices:
                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
@@ -613,14 +650,6 @@ Reset Arguments:
   -O, --core CORE [CORE ...]  Select a Core ID from the possible choices:
                               ID: 0 - 95
                                 all  | Selects all devices
-  -G, --gpureset              Reset the specified GPU
-  -c, --clocks                Reset clocks and overdrive to default
-  -f, --fans                  Reset fans to automatic (driver) control
-  -p, --profile               Reset power profile back to default
-  -x, --xgmierr               Reset XGMI error counts
-  -d, --perf-determinism      Disable performance determinism
-  -o, --power-cap             Reset power capacity limit to max capable
-  -l, --clean-local-data      Clean up local data in LDS/GPRs on a per partition basis
 
 Command Modifiers:
   --json                      Displays output in JSON format (human readable by default).
@@ -648,6 +677,25 @@ Use the watch arguments to run continuously.
 
 Monitor Arguments:
   -h, --help                   show this help message and exit
+  -p, --power-usage            Monitor power usage and power cap in Watts
+  -t, --temperature            Monitor temperature in Celsius
+  -u, --gfx                    Monitor graphics utilization (%) and clock (MHz)
+  -m, --mem                    Monitor memory utilization (%) and clock (MHz)
+  -n, --encoder                Monitor encoder utilization (%) and clock (MHz)
+  -d, --decoder                Monitor decoder utilization (%) and clock (MHz)
+  -e, --ecc                    Monitor ECC single bit, ECC double bit, and PCIe replay error counts
+  -v, --vram-usage             Monitor memory usage in MB
+  -r, --pcie                   Monitor PCIe bandwidth in Mb/s
+  -q, --process                Enable Process information table below monitor output
+  -V, --violation              Monitor power and thermal violation status (%);
+                                   Only available for MI300 or newer ASICs
+
+Watch Arguments:
+  -w, --watch INTERVAL         Reprint the command in a loop of INTERVAL seconds
+  -W, --watch_time TIME        The total duration of TIME to watch the command
+  -i, --iterations ITERATIONS  The total number of ITERATIONS to repeat the command
+
+Device Arguments:
   -g, --gpu GPU [GPU ...]      Select a GPU ID, BDF, or UUID from the possible choices:
                                ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
                                ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
@@ -663,20 +711,6 @@ Monitor Arguments:
   -O, --core CORE [CORE ...]   Select a Core ID from the possible choices:
                                ID: 0 - 95
                                  all  | Selects all devices
-  -w, --watch INTERVAL         Reprint the command in a loop of INTERVAL seconds
-  -W, --watch_time TIME        The total TIME to watch the given command
-  -i, --iterations ITERATIONS  Total number of ITERATIONS to loop on the given command
-  -p, --power-usage            Monitor power usage in Watts
-  -t, --temperature            Monitor temperature in Celsius
-  -u, --gfx                    Monitor graphics utilization (%) and clock (MHz)
-  -m, --mem                    Monitor memory utilization (%) and clock (MHz)
-  -n, --encoder                Monitor encoder utilization (%) and clock (MHz)
-  -d, --decoder                Monitor decoder utilization (%) and clock (MHz)
-  -e, --ecc                    Monitor ECC single bit, ECC double bit, and PCIe replay error counts
-  -v, --vram-usage             Monitor memory usage in MB
-  -r, --pcie                   Monitor PCIe bandwidth in Mb/s
-  -q, --process                Enable Process information table below monitor output
-  -V, --violation              Monitor power and thermal violation status (%); Only available for MI300 or newer ASICs
 
 Command Modifiers:
   --json                       Displays output in JSON format (human readable by default).
@@ -700,7 +734,11 @@ If no GPU is specified, returns information for all GPUs on the system.
 If no xgmi argument is provided, all xgmi information will be displayed.
 
 XGMI arguments:
-  -h, --help                  show this help message and exit
+  -h, --help               show this help message and exit
+  -m, --metric             Metric XGMI information
+  -l, --link-status        XGMI Link Status information
+
+Device Arguments:
   -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, or UUID from the possible choices:
                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
@@ -716,8 +754,6 @@ XGMI arguments:
   -O, --core CORE [CORE ...]  Select a Core ID from the possible choices:
                               ID: 0 - 95
                                 all  | Selects all devices
-  -m, --metric                Metric XGMI information
-  -l, --link-status           XGMI Link Status information
 
 Command Modifiers:
   --json                      Displays output in JSON format (human readable by default).
@@ -742,15 +778,17 @@ If no partition argument is provided, all partition information will be displaye
 
 Partition arguments:
   -h, --help               show this help message and exit
+  -c, --current            display the current partition information
+  -m, --memory             display the current memory partition mode and capabilities
+  -a, --accelerator        display accelerator partition information
+
+Device Arguments:
   -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, or UUID from the possible choices:
                            ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
                            ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
                            ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
                            ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
                              all | Selects all devices
-  -c, --current            display the current partition information
-  -m, --memory             display the current memory partition mode and capabilities
-  -a, --accelerator        display accelerator partition information
 
 Command Modifiers:
   --json                   Displays output in JSON format (human readable by default).
@@ -772,20 +810,22 @@ usage: amd-smi ras [-h] --cper [--severity SEVERITY [SEVERITY ...]] [--folder FO
                    [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]]
                    [--json | --csv] [--file FILE] [--loglevel LEVEL]
 
-Retrieve and decode CPER (RAS) entries from the kernel driver.
+Retrieve and decode RAS (CPER) entries from the kernel driver.
 Supports filtering by severity, exporting to different formats, and continuous monitoring.
 This command accepts options only; no positional arguments are required.
 
 RAS arguments:
   -h, --help                          show this help message and exit
   --cper                              Trigger CPER data retrieval
+  --afid                              Generate an AFID (AMD Field ID) using CPER record, which is similar to XID.
   --severity SEVERITY [SEVERITY ...]  Set the SEVERITY filters from the following:
                                           nonfatal-uncorrected, fatal, nonfatal-corrected, all
   --folder FOLDER                     Folder to dump CPER report files
   --file-limit FILE_LIMIT             Maximum number of entries per output file
+  --cper-file CPER_FILE               Full path of the cper record file to generate the AFID
   --follow                            Continuously monitor for new entries
 
-Device arguments:
+Device Arguments:
   -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, or UUID from the possible choices:
                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
@@ -851,7 +891,7 @@ GPU: 0
         DEVICE_ID: 0x74a0
         SUBSYSTEM_ID: 0x74a0
         REV_ID: 0x00
-        ASIC_SERIAL: 0xXXXXXXXXXXXXXX
+        ASIC_SERIAL: 0xXXXXXXXXXXXXXXXX
         OAM_ID: 0
         NUM_COMPUTE_UNITS: 228
         TARGET_GRAPHICS_VERSION: gfx942
@@ -878,7 +918,7 @@ GPU: 0
         SHUTDOWN_VRAM_TEMPERATURE: 115 °C
     DRIVER:
         NAME: amdgpu
-        VERSION: 6.10.10
+        VERSION: 6.14.4
     BOARD:
         MODEL_NUMBER: N/A
         PRODUCT_SERIAL: N/A
@@ -886,7 +926,8 @@ GPU: 0
         PRODUCT_NAME: Aqua Vanjaram [Instinct MI300A]
         MANUFACTURER_NAME: Advanced Micro Devices, Inc. [AMD/ATI]
     RAS:
-        EEPROM_VERSION: 0x21000
+        EEPROM_VERSION: 0x30000
+        BAD_PAGE_THRESHOLD: N/A
         PARITY_SCHEMA: DISABLED
         SINGLE_BIT_SCHEMA: DISABLED
         DOUBLE_BIT_SCHEMA: DISABLED
@@ -912,7 +953,7 @@ GPU: 0
             IH: DISABLED
             MPIO: DISABLED
     PARTITION:
-        COMPUTE_PARTITION: SPX
+        ACCELERATOR_PARTITION: SPX
         MEMORY_PARTITION: NPS1
         PARTITION_ID: 0
     SOC_PSTATE: N/A
@@ -921,32 +962,56 @@ GPU: 0
     NUMA:
         NODE: 0
         AFFINITY: 0
+        CPU AFFINITY:
+                0xffffff
+                0xffffff00000000
+                0x0
+        SOCKET AFFINITY:
+                0
     VRAM:
         TYPE: HBM
         VENDOR: UNKNOWN
-        SIZE: 96434 MB
+        SIZE: 96432 MB
         BIT_WIDTH: 8192
-        MAX_BANDWIDTH: N/A 
+        MAX_BANDWIDTH: 5325 GB/s
     CACHE_INFO:
         CACHE_0:
             CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
             CACHE_SIZE: 32 KB
             CACHE_LEVEL: 1
-            MAX_NUM_CU_SHARED: 2
-            NUM_CACHE_INSTANCE: 348
+            MAX_NUM_CU_SHARED: 1
+            NUM_CACHE_INSTANCE: 228
         CACHE_1:
             CACHE_PROPERTIES: INST_CACHE, SIMD_CACHE
             CACHE_SIZE: 64 KB
             CACHE_LEVEL: 1
             MAX_NUM_CU_SHARED: 2
-            NUM_CACHE_INSTANCE: 120
+            NUM_CACHE_INSTANCE: 108
         CACHE_2:
+            CACHE_PROPERTIES: INST_CACHE, SIMD_CACHE
+            CACHE_SIZE: 64 KB
+            CACHE_LEVEL: 1
+            MAX_NUM_CU_SHARED: 1
+            NUM_CACHE_INSTANCE: 12
+        CACHE_3:
+            CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
+            CACHE_SIZE: 16 KB
+            CACHE_LEVEL: 1
+            MAX_NUM_CU_SHARED: 2
+            NUM_CACHE_INSTANCE: 108
+        CACHE_4:
+            CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
+            CACHE_SIZE: 16 KB
+            CACHE_LEVEL: 1
+            MAX_NUM_CU_SHARED: 1
+            NUM_CACHE_INSTANCE: 12
+        CACHE_5:
             CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
             CACHE_SIZE: 4096 KB
             CACHE_LEVEL: 2
             MAX_NUM_CU_SHARED: 228
             NUM_CACHE_INSTANCE: 1
-        CACHE_3:
+        CACHE_6:
             CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
             CACHE_SIZE: 262144 KB
             CACHE_LEVEL: 3
@@ -956,18 +1021,18 @@ GPU: 0
         SYS:
             CURRENT LEVEL: 1
             FREQUENCY_LEVELS:
-                LEVEL 0: 700 MHz
-                LEVEL 1: 903 MHz
-                LEVEL 2: 900 MHz
+                LEVEL 0: 500 MHz
+                LEVEL 1: 207 MHz
+                LEVEL 2: 2100 MHz
         MEM:
-            CURRENT LEVEL: 0
+            CURRENT LEVEL: 3
             FREQUENCY_LEVELS:
                 LEVEL 0: 900 MHz
                 LEVEL 1: 1100 MHz
                 LEVEL 2: 1200 MHz
                 LEVEL 3: 1300 MHz
         DF:
-            CURRENT LEVEL: 0
+            CURRENT LEVEL: 3
             FREQUENCY_LEVELS:
                 LEVEL 0: 1200 MHz
                 LEVEL 1: 1600 MHz
@@ -976,7 +1041,7 @@ GPU: 0
         SOC:
             CURRENT LEVEL: 0
             FREQUENCY_LEVELS:
-                LEVEL 0: 26 MHz
+                LEVEL 0: 43 MHz
                 LEVEL 1: 800 MHz
                 LEVEL 2: 1000 MHz
                 LEVEL 3: 1143 MHz
@@ -984,18 +1049,18 @@ GPU: 0
         VCLK0:
             CURRENT LEVEL: 0
             FREQUENCY_LEVELS:
-                LEVEL 0: 29 MHz
+                LEVEL 0: 54 MHz
         VCLK1:
             CURRENT LEVEL: 0
             FREQUENCY_LEVELS:
-                LEVEL 0: 29 MHz
+                LEVEL 0: 54 MHz
         DCLK0:
             CURRENT LEVEL: 0
             FREQUENCY_LEVELS:
-                LEVEL 0: 22 MHz
+                LEVEL 0: 45 MHz
         DCLK1:
             CURRENT LEVEL: 0
             FREQUENCY_LEVELS:
-                LEVEL 0: 22 MHz
+                LEVEL 0: 45 MHz
 ...
 ```
