@@ -129,39 +129,60 @@ amdsmi_status_t AMDSmiSystem::get_cpu_model_name(uint32_t socket_id, std::string
 }
 
 #endif
-std::map<uint32_t, uint32_t> AMDSmiSystem::get_sys_cpu_cores_per_socket() {
+
+amdsmi_status_t  AMDSmiSystem::get_sys_cpu_cores_per_socket(uint32_t *core_num) {
     std::map<uint32_t, uint32_t> socket_core_count;
     std::string base_path = "/sys/devices/system/cpu/";
 
-    iterate_directory(base_path, [&socket_core_count](const std::string &path) {
-        std::string filename(basename(path.c_str()));
-        if (filename.find("cpu") != std::string::npos) {
-            std::string cpuPath = path;
-            std::ifstream package_id_file(cpuPath + "/topology/physical_package_id");
-            std::ifstream core_id_file(cpuPath + "/topology/core_id");
+    DIR* dir = opendir(base_path.c_str());
+    if (dir == nullptr) {
+        return AMDSMI_STATUS_FILE_ERROR;
+    }
+
+    uint32_t physical_id, core_id;
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != nullptr) {
+        std::string file_name = entry->d_name;
+        if (file_name.find("cpu") == 0) {
+            std::string cpu_path = base_path + file_name;
+            std::ifstream package_id_file(cpu_path + "/topology/physical_package_id");
+            std::ifstream core_id_file(cpu_path + "/topology/core_id");
 
             if (package_id_file.is_open() && core_id_file.is_open()) {
-                uint32_t physical_id, core_id;
                 package_id_file >> physical_id;
                 core_id_file >> core_id;
 
                 socket_core_count[physical_id]++;
             }
         }
-    });
+    }
 
-    return socket_core_count;
+    closedir(dir);
+
+    if (socket_core_count.find(physical_id) != socket_core_count.end()) {
+      *core_num = socket_core_count[physical_id];
+    } else {
+      return AMDSMI_STATUS_NO_DATA;
+    }
+
+    return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t AMDSmiSystem::get_sys_num_of_cpu_sockets(uint32_t *sock_num) {
     std::map<uint32_t, uint32_t> socket_count_map;
     std::string base_path = "/sys/devices/system/cpu/";
 
-    iterate_directory(base_path, [&socket_count_map](std::string path) {
-        std::string filename(basename(path.c_str()));
-        if (filename.find("cpu") != std::string::npos) {
-            std::string cpu_path = path;
-            std::ifstream package_id_file(cpu_path + "/topology/physical_package_id");
+    DIR* dir = opendir(base_path.c_str());
+    if (dir == nullptr) {
+        return AMDSMI_STATUS_API_FAILED;
+    }
+
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != nullptr) {
+        std::string file_name = entry->d_name;
+        if (file_name.find("cpu") == 0) {
+            std::string path = base_path + file_name;
+            std::ifstream package_id_file(path + "/topology/physical_package_id");
 
             if (package_id_file.is_open()) {
                 uint32_t physical_id;
@@ -170,7 +191,9 @@ amdsmi_status_t AMDSmiSystem::get_sys_num_of_cpu_sockets(uint32_t *sock_num) {
                 socket_count_map[physical_id]++;
             }
         }
-    });
+    }
+
+    closedir(dir);
 
     *sock_num = static_cast<uint32_t>(socket_count_map.size());
 

@@ -50,19 +50,19 @@ def handle_exceptions(func):
         try:
             return func(*args, **kwargs)
         except amdsmi.AmdSmiRetryException as e:
-            print("**** [ERROR] | Test: " + str(func.__name__) + " | Caught AmdSmiRetryException: {}".format(e))
+            print("**** Test: " + str(func.__name__) + " | Caught AmdSmiRetryException: {}".format(e))
             amdsmi.amdsmi_shut_down()
             pass
         except amdsmi.AmdSmiTimeoutException as e:
-            print("**** [ERROR] | Test: " + str(func.__name__) + " | Caught AmdSmiTimeoutException: {}".format(e))
+            print("**** Test: " + str(func.__name__) + " | Caught AmdSmiTimeoutException: {}".format(e))
             amdsmi.amdsmi_shut_down()
             pass
         except amdsmi.AmdSmiLibraryException as e:
-            print("**** [ERROR] | Test: " + str(func.__name__) + " | Caught AmdSmiLibraryException: {}".format(e))
+            print("**** Test: " + str(func.__name__) + " | Caught AmdSmiLibraryException: {}".format(e))
             amdsmi.amdsmi_shut_down()
             pass
         except Exception as e:
-            print("**** [ERROR] | Test: " + str(func.__name__) + " | Caught unknown exception: {}".format(e))
+            print("**** Test: " + str(func.__name__) + " | Caught unknown exception: {}".format(e))
             amdsmi.amdsmi_shut_down()
             pass
     return wrapper
@@ -102,6 +102,8 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
                 asic_info['device_id']))
             print("  asic_info['rev_id'] is: {}".format(
                 asic_info['rev_id']))
+            print("  asic_info['subsystem_id'] is: {}".format(
+                asic_info['subsystem_id']))
             print("  asic_info['asic_serial'] is: {}".format(
                 asic_info['asic_serial']))
             print("  asic_info['oam_id'] is: {}".format(
@@ -152,25 +154,11 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
                 amdsmi.AmdSmiVramType.MAX:     "MAX"
             }
 
-            vram_vendors = {
-                amdsmi.AmdSmiVramVendor.SAMSUNG:  "SAMSUNG",
-                amdsmi.AmdSmiVramVendor.INFINEON: "INFINEON",
-                amdsmi.AmdSmiVramVendor.ELPIDA:   "ELPIDA",
-                amdsmi.AmdSmiVramVendor.ETRON:    "ETRON",
-                amdsmi.AmdSmiVramVendor.NANYA:    "NANYA",
-                amdsmi.AmdSmiVramVendor.HYNIX:    "HYNIX",
-                amdsmi.AmdSmiVramVendor.MOSEL:    "MOSEL",
-                amdsmi.AmdSmiVramVendor.WINBOND:  "WINBOND",
-                amdsmi.AmdSmiVramVendor.ESMT:     "ESMT",
-                amdsmi.AmdSmiVramVendor.MICRON:   "MICRON",
-                amdsmi.AmdSmiVramVendor.UNKNOWN:  "UNKNOWN"
-            }
-
             vram_info = amdsmi.amdsmi_get_gpu_vram_info(processors[i])
             print("  vram_info['vram_type'] is: {}".format(
                 vram_types[vram_info['vram_type']]))
             print("  vram_info['vram_vendor'] is: {}".format(
-                vram_vendors[vram_info['vram_vendor']]))
+                vram_info['vram_vendor']))
             print("  vram_info['vram_size'] is: {} MB".format(
                 vram_info['vram_size']))
             print("  vram_info['vram_bit_width'] is: {}".format(
@@ -622,7 +610,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
             print("\n###Test amdsmi_get_power_info \n")
-            power_info = amdsmi.amdsmi_get_power_info(processors[i], 0)
+            power_info = amdsmi.amdsmi_get_power_info(processors[i])
             print("  power_info['current_socket_power'] is: {}".format(
                 power_info['current_socket_power']))
             print("  power_info['average_socket_power'] is: {}".format(

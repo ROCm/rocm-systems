@@ -34,7 +34,7 @@
 TestProcInfoRead::TestProcInfoRead() : TestBase() {
   set_title("AMDSMI Process Info Read Test");
   set_description("This test verifies that process information such as the "
-                             "process ID, PASID, etc. can be read properly.");
+                             "process ID, etc. can be read properly.");
 }
 
 TestProcInfoRead::~TestProcInfoRead(void) {
@@ -64,10 +64,9 @@ void TestProcInfoRead::Close() {
 static void dumpProcess(amdsmi_process_info_t *p) {
   assert(p != nullptr);
   std::cout << "\t** ProcessID: " << p->process_id << " ";
-  // TODO remove pasid Not working in ROCm 6.4+, deprecating in 7.0
-  std::cout << "PASID: " << p->pasid << " ";
   std::cout << std::endl;
 }
+
 void TestProcInfoRead::Run(void) {
   amdsmi_status_t err;
   uint32_t num_proc_found;
@@ -180,7 +179,6 @@ void TestProcInfoRead::Run(void) {
       } else {
         CHK_ERR_ASRT(err)
         ASSERT_EQ(proc_info.process_id, procs[j].process_id);
-        ASSERT_EQ(proc_info.pasid, procs[j].pasid);
         std::cout << "\t** Process ID: " <<
             procs[j].process_id << " VRAM Usage: " <<
                                    proc_info.vram_usage <<

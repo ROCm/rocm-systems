@@ -574,9 +574,10 @@ typedef enum {
 typedef enum {
   RSMI_VOLT_TYPE_FIRST = 0,
 
-  RSMI_VOLT_TYPE_VDDGFX = RSMI_VOLT_TYPE_FIRST,  //!< Vddgfx GPU
-                                                 //!< voltage
-  RSMI_VOLT_TYPE_LAST = RSMI_VOLT_TYPE_VDDGFX,
+  RSMI_VOLT_TYPE_VDDGFX = RSMI_VOLT_TYPE_FIRST,  //!< Vddgfx GPU voltage
+  RSMI_VOLT_TYPE_VDDBOARD,                       //!< Voltage for VDDBOARD
+
+  RSMI_VOLT_TYPE_LAST = RSMI_VOLT_TYPE_VDDBOARD,
   RSMI_VOLT_TYPE_INVALID = 0xFFFFFFFF            //!< Invalid type
 } rsmi_voltage_type_t;
 
@@ -1405,7 +1406,6 @@ typedef struct {
  */
 typedef struct {
     uint32_t process_id;      //!< Process ID
-    uint32_t pasid;           //!< PASID: (Process Address Space ID) (Not working in ROCm 6.4+, deprecating in 7.0)
     uint64_t vram_usage;      //!< VRAM usage
     uint64_t sdma_usage;      //!< SDMA usage in microseconds
     uint32_t cu_occupancy;    //!< Compute Unit usage in percent
@@ -4608,7 +4608,7 @@ rsmi_is_P2P_accessible(uint32_t dv_ind_src, uint32_t dv_ind_dst,
  *  @platform{gpu_bm_linux} @platform{host} @platform{guest_1vf}  @platform{guest_mvf}
  *
  *  @details Given a source processor handle @p processor_handle_src and
- *  a destination processor handle @p processor_handle_dst, a pointer to an amdsmi_io_link_type_t @p type,
+ *  a destination processor handle @p processor_handle_dst, a pointer to an amdsmi_link_type_t @p type,
  *  and a pointer to rsmi_p2p_capability_t @p cap. This function will write the connection type,
  *  and io link capabilities between the device
  *  @p processor_handle_src and @p processor_handle_dst to the memory

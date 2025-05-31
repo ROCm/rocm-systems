@@ -42,6 +42,7 @@
 #include <memory>
 #include <limits>
 #include <functional>
+#include <exception>
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/fdinfo.h"
@@ -710,17 +711,17 @@ amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_handle, amdsmi_board
     }
     if (board_info->product_name[0] == '\0') {
         status = rsmi_wrapper(rsmi_dev_name_get, processor_handle, 0,
-                              board_info->product_name, AMDSMI_256_LENGTH);
+                              board_info->product_name, AMDSMI_MAX_STRING_LENGTH);
         // Check if the value is in hex format
         if (status == AMDSMI_STATUS_SUCCESS) {
             if (board_info->product_name[0] == '0' && board_info->product_name[1] == 'x') {
                 memset(board_info->product_name, 0,
-                        AMDSMI_256_LENGTH * sizeof(board_info->product_name[0]));
+                        AMDSMI_MAX_STRING_LENGTH * sizeof(board_info->product_name[0]));
             }
         }
         if (status != AMDSMI_STATUS_SUCCESS) {
             memset(board_info->product_name, 0,
-                    AMDSMI_256_LENGTH * sizeof(board_info->product_name[0]));
+                    AMDSMI_MAX_STRING_LENGTH * sizeof(board_info->product_name[0]));
         }
     }
 
@@ -749,17 +750,17 @@ amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_handle, amdsmi_board
     if (board_info->product_name[0] == '\0') {
         status = rsmi_wrapper(rsmi_dev_name_get, processor_handle, 0,
                               board_info->product_name,
-                              AMDSMI_256_LENGTH);
+                              AMDSMI_MAX_STRING_LENGTH);
         // Check if the value is in hex format
         if (status == AMDSMI_STATUS_SUCCESS) {
             if (board_info->product_name[0] == '0' && board_info->product_name[1] == 'x') {
                 memset(board_info->product_name, 0,
-                        AMDSMI_256_LENGTH * sizeof(board_info->product_name[0]));
+                        AMDSMI_MAX_STRING_LENGTH * sizeof(board_info->product_name[0]));
             }
         }
         if (status != AMDSMI_STATUS_SUCCESS) {
             memset(board_info->product_name, 0,
-                    AMDSMI_256_LENGTH * sizeof(board_info->product_name[0]));
+                    AMDSMI_MAX_STRING_LENGTH * sizeof(board_info->product_name[0]));
         }
         ss << __PRETTY_FUNCTION__ << " | [rsmi_correction] board_info->product_name= |"
         << board_info->product_name << "|";
@@ -889,8 +890,6 @@ amdsmi_status_t amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_hand
         return r;
     }
 
-    struct drm_amdgpu_info_vram_gtt gtt;
-    uint64_t vram_used = 0;
     std::ostringstream ss;
 
     SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
@@ -947,35 +946,21 @@ amdsmi_status_t amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_hand
        << " | drmCommandWrite symbol loaded successfully";
     LOG_INFO(ss);
 
-    // Get the device info
-    memset(&gtt, 0, sizeof(struct drm_amdgpu_info_vram_gtt));
-    struct drm_amdgpu_info request = {};
-    memset(&request, 0, sizeof(request));
-    request.return_pointer = reinterpret_cast<unsigned long long>(&gtt);
-    request.return_size = sizeof(struct drm_amdgpu_memory_info);
-    request.query = AMDGPU_INFO_VRAM_GTT;
-    auto drm_write = drmCommandWrite(drm_fd, DRM_AMDGPU_INFO, &request,
-                                     sizeof(struct drm_amdgpu_info));
-    if (drm_write != 0) {
-        close(drm_fd);
-        libdrm.unload();
-        ss << __PRETTY_FUNCTION__
-           << " | Issue - drm_write failed, drm_write (AMDGPU_INFO_VRAM_GTT): "
-           << std::dec << drm_write << "\n"
-           << "; Returning: " << smi_amdgpu_get_status_string(AMDSMI_STATUS_DRM_ERROR, false);
-        LOG_ERROR(ss);
-        return AMDSMI_STATUS_DRM_ERROR;
+
+    uint64_t total = 0;
+    r = rsmi_wrapper(rsmi_dev_memory_total_get, processor_handle, 0,
+                    RSMI_MEM_TYPE_VRAM, &total);
+    if (r == AMDSMI_STATUS_SUCCESS) {
+        vram_info->vram_total = static_cast<uint32_t>(total / (1024 * 1024));
     }
 
-    vram_info->vram_total = static_cast<uint32_t>(
-        gtt.vram_size / (1024 * 1024));
-
-
+    uint64_t vram_used = 0;
+    struct drm_amdgpu_info request = {};
     memset(&request, 0, sizeof(request));
     request.return_pointer = reinterpret_cast<unsigned long long>(&vram_used);
     request.return_size = sizeof(vram_used);
     request.query = AMDGPU_INFO_VRAM_USAGE;
-    drm_write = drmCommandWrite(drm_fd, DRM_AMDGPU_INFO, &request,
+    auto drm_write = drmCommandWrite(drm_fd, DRM_AMDGPU_INFO, &request,
                                 sizeof(struct drm_amdgpu_info));
     if (drm_write != 0) {
         close(drm_fd);
@@ -1057,6 +1042,21 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
     violation_status->active_hbm_thrm = std::numeric_limits<uint8_t>::max();
     violation_status->active_gfx_clk_below_host_limit = std::numeric_limits<uint8_t>::max();
 
+    fill_2d_array(violation_status->acc_gfx_clk_below_host_limit_pwr, std::numeric_limits<uint64_t>::max());
+    fill_2d_array(violation_status->acc_gfx_clk_below_host_limit_thm, std::numeric_limits<uint64_t>::max());
+    fill_2d_array(violation_status->acc_low_utilization, std::numeric_limits<uint64_t>::max());
+    fill_2d_array(violation_status->acc_gfx_clk_below_host_limit_total, std::numeric_limits<uint64_t>::max());
+
+    fill_2d_array(violation_status->per_gfx_clk_below_host_limit_pwr, std::numeric_limits<uint64_t>::max());
+    fill_2d_array(violation_status->per_gfx_clk_below_host_limit_thm, std::numeric_limits<uint64_t>::max());
+    fill_2d_array(violation_status->per_low_utilization, std::numeric_limits<uint64_t>::max());
+    fill_2d_array(violation_status->per_gfx_clk_below_host_limit_total, std::numeric_limits<uint64_t>::max());
+
+    fill_2d_array(violation_status->active_gfx_clk_below_host_limit_pwr, std::numeric_limits<uint8_t>::max());
+    fill_2d_array(violation_status->active_gfx_clk_below_host_limit_thm, std::numeric_limits<uint8_t>::max());
+    fill_2d_array(violation_status->active_low_utilization, std::numeric_limits<uint8_t>::max());
+    fill_2d_array(violation_status->active_gfx_clk_below_host_limit_total, std::numeric_limits<uint8_t>::max());
+
     const auto p1 = std::chrono::system_clock::now();
     auto current_time = std::chrono::duration_cast<std::chrono::microseconds>(
                                                 p1.time_since_epoch()).count();
@@ -1135,7 +1135,7 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
     violation_status->acc_socket_thrm = metric_info_b.socket_thm_residency_acc;
     violation_status->acc_vr_thrm = metric_info_b.vr_thm_residency_acc;
     violation_status->acc_hbm_thrm = metric_info_b.hbm_thm_residency_acc;
-    violation_status->acc_gfx_clk_below_host_limit
+    violation_status->acc_gfx_clk_below_host_limit //deprecated
         = metric_info_b.xcp_stats->gfx_below_host_limit_acc[partitition_id];
 
     ss << __PRETTY_FUNCTION__ << " | "
@@ -1165,9 +1165,45 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
        << metric_info_b.vr_thm_residency_acc << "\n"
        << "; metric_info_b.hbm_thm_residency_acc: " << std::dec
        << metric_info_b.hbm_thm_residency_acc << "\n"
-       << "; metric_info_b.xcp_stats->gfx_below_host_limit_acc[" << partitition_id << "]: "
+       << "; metric_info_b.xcp_stats->gfx_below_host_limit_acc[" << partitition_id << "]: " //deprecated
        << std::dec << metric_info_b.xcp_stats->gfx_below_host_limit_acc[partitition_id] << "\n";
     LOG_DEBUG(ss);
+
+    auto copy_gfx_acc = [](auto priv_it, auto priv_end, auto pub_it, auto gfx_acc_ptr) {
+        for (; priv_it != priv_end; ++priv_it, ++pub_it) {
+            std::copy(std::begin((*priv_it).*gfx_acc_ptr),
+                      std::end((*priv_it).*gfx_acc_ptr),
+                      std::begin(*pub_it));
+        }
+    };
+
+    copy_gfx_acc(
+        std::begin(metric_info_b.xcp_stats),
+        std::end(metric_info_b.xcp_stats),
+        std::begin(violation_status->acc_gfx_clk_below_host_limit_pwr),
+        &amdsmi_gpu_xcp_metrics_t::gfx_below_host_limit_ppt_acc
+    );
+
+    copy_gfx_acc(
+        std::begin(metric_info_b.xcp_stats),
+        std::end(metric_info_b.xcp_stats),
+        std::begin(violation_status->acc_gfx_clk_below_host_limit_thm),
+        &amdsmi_gpu_xcp_metrics_t::gfx_below_host_limit_thm_acc
+    );
+
+    copy_gfx_acc(
+        std::begin(metric_info_b.xcp_stats),
+        std::end(metric_info_b.xcp_stats),
+        std::begin(violation_status->acc_low_utilization),
+        &amdsmi_gpu_xcp_metrics_t::gfx_low_utilization_acc
+    );
+
+    copy_gfx_acc(
+        std::begin(metric_info_b.xcp_stats),
+        std::end(metric_info_b.xcp_stats),
+        std::begin(violation_status->acc_gfx_clk_below_host_limit_total),
+        &amdsmi_gpu_xcp_metrics_t::gfx_below_host_limit_total_acc
+    );
 
     if ( (metric_info_b.prochot_residency_acc != std::numeric_limits<uint64_t>::max()
         || metric_info_a.prochot_residency_acc != std::numeric_limits<uint64_t>::max())
@@ -1272,10 +1308,11 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
            << violation_status->active_hbm_thrm << "\n";
         LOG_DEBUG(ss);
     }
-    if ( (metric_info_b.xcp_stats->gfx_below_host_limit_acc[partitition_id] != std::numeric_limits<uint64_t>::max()
-        || metric_info_a.xcp_stats->gfx_below_host_limit_acc[partitition_id] != std::numeric_limits<uint64_t>::max())
-        && (metric_info_b.xcp_stats->gfx_below_host_limit_acc[partitition_id] >= metric_info_a.xcp_stats->gfx_below_host_limit_acc[partitition_id])
-        && ((metric_info_b.accumulation_counter - metric_info_a.accumulation_counter) > 0) ) {
+    /* //deprecated
+    if ((metric_info_b.xcp_stats->gfx_below_host_limit_acc[partitition_id] != std::numeric_limits<uint64_t>::max() ||
+         metric_info_a.xcp_stats->gfx_below_host_limit_acc[partitition_id] != std::numeric_limits<uint64_t>::max()) &&
+        (metric_info_b.xcp_stats->gfx_below_host_limit_acc[partitition_id] >= metric_info_a.xcp_stats->gfx_below_host_limit_acc[partitition_id]) &&
+        ((metric_info_b.accumulation_counter - metric_info_a.accumulation_counter) > 0)) {
         violation_status->per_gfx_clk_below_host_limit =
             (((metric_info_b.xcp_stats->gfx_below_host_limit_acc[partitition_id] -
                 metric_info_a.xcp_stats->gfx_below_host_limit_acc[partitition_id]) * 100) /
@@ -1293,6 +1330,64 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
            << violation_status->active_gfx_clk_below_host_limit << "\n";
         LOG_DEBUG(ss);
     }
+    */
+    uint64_t counter_delta = metric_info_b.accumulation_counter - metric_info_a.accumulation_counter;
+    auto calc_viol_actv_percent = [](auto priv_it1, auto end1, auto priv_it2, auto pub_it, auto act_it, auto viol_ptr, uint64_t counter_delta) {
+        for (; priv_it1 != end1; ++priv_it1, ++priv_it2, ++pub_it, ++act_it) {
+            auto& priv_it_arr2 = (*priv_it2).*viol_ptr;
+            auto& priv_it_arr1 = (*priv_it1).*viol_ptr;
+            for (size_t i = 0; i < AMDSMI_MAX_NUM_XCC; ++i) {
+                uint64_t value2 = priv_it_arr2[i];
+                uint64_t value1 = priv_it_arr1[i];
+                if ((value2 != std::numeric_limits<uint64_t>::max() ||
+                     value1 != std::numeric_limits<uint64_t>::max()) &&
+                    (value2 > value1) && (counter_delta > 0)) {
+                    (*pub_it)[i] = ((value2 - value1) * 100) / counter_delta;
+                    (*act_it)[i] = (((*pub_it)[i]) > 0) ? 1 : 0;
+                }
+            }
+        }
+    };
+
+    calc_viol_actv_percent(
+        std::begin(metric_info_a.xcp_stats),
+        std::end(metric_info_a.xcp_stats),
+        std::begin(metric_info_b.xcp_stats),
+        std::begin(violation_status->per_gfx_clk_below_host_limit_pwr),
+        std::begin(violation_status->active_gfx_clk_below_host_limit_pwr),
+        &amdsmi_gpu_xcp_metrics_t::gfx_below_host_limit_ppt_acc,
+        counter_delta
+    );
+
+    calc_viol_actv_percent(
+        std::begin(metric_info_a.xcp_stats),
+        std::end(metric_info_a.xcp_stats),
+        std::begin(metric_info_b.xcp_stats),
+        std::begin(violation_status->per_gfx_clk_below_host_limit_thm),
+        std::begin(violation_status->active_gfx_clk_below_host_limit_thm),
+        &amdsmi_gpu_xcp_metrics_t::gfx_below_host_limit_thm_acc,
+        counter_delta
+    );
+
+    calc_viol_actv_percent(
+        std::begin(metric_info_a.xcp_stats),
+        std::end(metric_info_a.xcp_stats),
+        std::begin(metric_info_b.xcp_stats),
+        std::begin(violation_status->per_low_utilization),
+        std::begin(violation_status->active_low_utilization),
+        &amdsmi_gpu_xcp_metrics_t::gfx_low_utilization_acc,
+        counter_delta
+    );
+
+    calc_viol_actv_percent(
+        std::begin(metric_info_a.xcp_stats),
+        std::end(metric_info_a.xcp_stats),
+        std::begin(metric_info_b.xcp_stats),
+        std::begin(violation_status->per_gfx_clk_below_host_limit_total),
+        std::begin(violation_status->active_gfx_clk_below_host_limit_total),
+        &amdsmi_gpu_xcp_metrics_t::gfx_below_host_limit_total_acc,
+        counter_delta
+    );
 
     ss << __PRETTY_FUNCTION__ << " | "
        << "RETURNING AMDSMI_STATUS_SUCCESS | "
@@ -1310,7 +1405,7 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
        << violation_status->per_vr_thrm
        << "; violation_status->per_hbm_thrm (%): " << std::dec
        << violation_status->per_hbm_thrm
-       << "; violation_status->per_gfx_clk_below_host_limit (%): " << std::dec
+       << "; violation_status->per_gfx_clk_below_host_limit (%): " << std::dec //deprecated
        << violation_status->per_gfx_clk_below_host_limit
        << "; violation_status->active_prochot_thrm (bool): " << std::dec
        << static_cast<int>(violation_status->active_prochot_thrm)
@@ -1322,7 +1417,7 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
        << static_cast<int>(violation_status->active_vr_thrm)
        << "; violation_status->active_hbm_thrm (bool): " << std::dec
        << static_cast<int>(violation_status->active_hbm_thrm)
-       << "; violation_status->active_gfx_clk_below_host_limit (bool): " << std::dec
+       << "; violation_status->active_gfx_clk_below_host_limit (bool): " << std::dec //deprecated
        << static_cast<int>(violation_status->active_gfx_clk_below_host_limit)
        << "\n";
     LOG_INFO(ss);
@@ -1431,6 +1526,7 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
     uint16_t vendor_id = 0;
     uint16_t subvendor_id = 0;
     uint16_t device_id = 0;
+    uint16_t subsystem_id = 0;
 
     std::ostringstream ss;
     amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
@@ -1442,7 +1538,7 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
     amdsmi_status_t status = smi_amdgpu_get_market_name_from_dev_id(gpu_device, info->market_name);
     if (status != AMDSMI_STATUS_SUCCESS) {
         rsmi_wrapper(rsmi_dev_brand_get, processor_handle, 0,
-                     info->market_name, AMDSMI_256_LENGTH);
+                     info->market_name, AMDSMI_MAX_STRING_LENGTH);
     }
 
     std::string render_name = gpu_device->get_gpu_path();
@@ -1542,6 +1638,10 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
     status = rsmi_wrapper(rsmi_dev_subsystem_vendor_id_get, processor_handle, 0,
                           &subvendor_id);
     if (status == AMDSMI_STATUS_SUCCESS) info->subvendor_id = subvendor_id;
+
+    status = rsmi_wrapper(rsmi_dev_subsystem_id_get, processor_handle, 0,
+                          &subsystem_id);
+    if (status == AMDSMI_STATUS_SUCCESS) info->subsystem_id = subsystem_id;
 
     status =  rsmi_wrapper(rsmi_dev_pcie_vendor_name_get, processor_handle, 0,
                            info->vendor_name, AMDSMI_MAX_STRING_LENGTH);
@@ -1755,7 +1855,7 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(
     // init the info structure with default value
     info->vram_type = AMDSMI_VRAM_TYPE_UNKNOWN;
     info->vram_size = 0;
-    info->vram_vendor = AMDSMI_VRAM_VENDOR_UNKNOWN;
+    strncpy(info->vram_vendor, "UNKNOWN", AMDSMI_MAX_STRING_LENGTH);
     info->vram_bit_width = std::numeric_limits<decltype(info->vram_bit_width)>::max();
     info->vram_max_bandwidth = std::numeric_limits<decltype(info->vram_max_bandwidth)>::max();
 
@@ -1849,30 +1949,12 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(
         info->vram_type = AMDSMI_VRAM_TYPE_UNKNOWN;
 
     // map the vendor name to enum
-    char brand[256];
-    r = rsmi_wrapper(rsmi_dev_vram_vendor_get, processor_handle, 0,
-                     brand, 255);
+    char brand[256] = {'\0'};
+    r = rsmi_wrapper(rsmi_dev_vram_vendor_get, processor_handle, 0, brand, 255);
     if (r == AMDSMI_STATUS_SUCCESS) {
-        if (strcasecmp(brand, "SAMSUNG") == 0)
-            info->vram_vendor = AMDSMI_VRAM_VENDOR_SAMSUNG;
-        if (strcasecmp(brand, "INFINEON") == 0)
-            info->vram_vendor = AMDSMI_VRAM_VENDOR_INFINEON;
-        if (strcasecmp(brand, "ELPIDA") == 0)
-            info->vram_vendor = AMDSMI_VRAM_VENDOR_ELPIDA;
-        if (strcasecmp(brand, "ETRON") == 0)
-            info->vram_vendor = AMDSMI_VRAM_VENDOR_ETRON;
-        if (strcasecmp(brand, "NANYA") == 0)
-            info->vram_vendor = AMDSMI_VRAM_VENDOR_NANYA;
-        if (strcasecmp(brand, "HYNIX") == 0)
-            info->vram_vendor = AMDSMI_VRAM_VENDOR_HYNIX;
-        if (strcasecmp(brand, "MOSEL") == 0)
-            info->vram_vendor = AMDSMI_VRAM_VENDOR_MOSEL;
-        if (strcasecmp(brand, "WINBOND") == 0)
-            info->vram_vendor = AMDSMI_VRAM_VENDOR_WINBOND;
-        if (strcasecmp(brand, "ESMT") == 0)
-            info->vram_vendor = AMDSMI_VRAM_VENDOR_ESMT;
-        if (strcasecmp(brand, "MICRON") == 0)
-            info->vram_vendor = AMDSMI_VRAM_VENDOR_MICRON;
+        for (auto &x : brand)
+            x = static_cast<char>(toupper(x));
+        strncpy(info->vram_vendor, brand, AMDSMI_MAX_STRING_LENGTH);
     }
     uint64_t total = 0;
     r = rsmi_wrapper(rsmi_dev_memory_total_get, processor_handle, 0,
@@ -1927,8 +2009,9 @@ amdsmi_get_gpu_event_notification(int timeout_ms,
         rsmi_evt_notification_data_t rsmi_data = r_data[i];
         data[i].event = static_cast<amdsmi_evt_notification_type_t>(
                 rsmi_data.event);
+        // Size is tied max event notification size
         snprintf(data[i].message, 
-                MAX_EVENT_NOTIFICATION_MSG_SIZE,
+                AMDSMI_MAX_STRING_LENGTH,
                 "%s", 
                 rsmi_data.message);
         amdsmi_status_t r = amd::smi::AMDSmiSystem::getInstance()
@@ -2036,25 +2119,40 @@ amdsmi_status_t amdsmi_get_link_metrics(amdsmi_processor_handle processor_handle
     if (link_metrics == nullptr)  return AMDSMI_STATUS_INVAL;
 
     amdsmi_gpu_metrics_t metric_info = {};
+    link_metrics->max_bandwidth = std::numeric_limits<uint32_t>::max();
+
     amdsmi_status_t status =  amdsmi_get_gpu_metrics_info(
             processor_handle, &metric_info);
     if (status != AMDSMI_STATUS_SUCCESS)
         return status;
     link_metrics->num_links = AMDSMI_MAX_NUM_XGMI_LINKS;
-    for (unsigned int i = 0; i < link_metrics->num_links; i++) {
+
+    link_metrics->bit_rate = metric_info.xgmi_link_speed;
+    if ((metric_info.xgmi_link_speed != std::numeric_limits<uint16_t>::max()) &&
+        (metric_info.xgmi_link_width != std::numeric_limits<uint16_t>::max()))
+        link_metrics->max_bandwidth = metric_info.xgmi_link_speed * metric_info.xgmi_link_width;
+
+    for (unsigned int i = 0; i < AMDSMI_MAX_NUM_XGMI_LINKS; i++) {
         link_metrics->links[i].read = metric_info.xgmi_read_data_acc[i];
         link_metrics->links[i].write = metric_info.xgmi_write_data_acc[i];
-        link_metrics->links[i].bit_rate = metric_info.xgmi_link_speed;
-        link_metrics->links[i].max_bandwidth = metric_info.xgmi_link_width;
         link_metrics->links[i].link_type = AMDSMI_LINK_TYPE_XGMI;
     }
 
     return AMDSMI_STATUS_SUCCESS;
 }
 
+static void translated_link_type(amdsmi_link_type_t *type) {
+    // Convert type to match rocm-smi or amd-smi
+    if (*type == AMDSMI_LINK_TYPE_PCIE)
+        *type = AMDSMI_LINK_TYPE_XGMI;
+    else if (*type == AMDSMI_LINK_TYPE_XGMI)
+        *type = AMDSMI_LINK_TYPE_PCIE;
+    return;
+}
+
 amdsmi_status_t
 amdsmi_topo_get_link_type(amdsmi_processor_handle processor_handle_src, amdsmi_processor_handle processor_handle_dst,
-                        uint64_t *hops, amdsmi_io_link_type_t *type) {
+                        uint64_t *hops, amdsmi_link_type_t *type) {
     AMDSMI_CHECK_INIT();
 
     amd::smi::AMDSmiGPUDevice* src_device = nullptr;
@@ -2065,8 +2163,12 @@ amdsmi_topo_get_link_type(amdsmi_processor_handle processor_handle_src, amdsmi_p
     r = get_gpu_device_from_handle(processor_handle_dst, &dst_device);
     if (r != AMDSMI_STATUS_SUCCESS)
         return r;
+    // Convert type to match rocm-smi
+    translated_link_type(type);
     auto rstatus = rsmi_topo_get_link_type(src_device->get_gpu_id(), dst_device->get_gpu_id(),
                 hops, reinterpret_cast<RSMI_IO_LINK_TYPE*>(type));
+    // Convert type to match amd-smi
+    translated_link_type(type);
     return amd::smi::rsmi_to_amdsmi_status(rstatus);
 }
 
@@ -2092,7 +2194,7 @@ amdsmi_is_P2P_accessible(amdsmi_processor_handle processor_handle_src,
 amdsmi_status_t
 amdsmi_topo_get_p2p_status(amdsmi_processor_handle processor_handle_src,
                            amdsmi_processor_handle processor_handle_dst,
-                           amdsmi_io_link_type_t *type, amdsmi_p2p_capability_t *cap) {
+                           amdsmi_link_type_t *type, amdsmi_p2p_capability_t *cap) {
     AMDSMI_CHECK_INIT();
 
     amd::smi::AMDSmiGPUDevice* src_device = nullptr;
@@ -2103,9 +2205,13 @@ amdsmi_topo_get_p2p_status(amdsmi_processor_handle processor_handle_src,
     r = get_gpu_device_from_handle(processor_handle_dst, &dst_device);
     if (r != AMDSMI_STATUS_SUCCESS)
         return r;
+    // Convert type to match rocm-smi
+    translated_link_type(type);
     auto rstatus = rsmi_topo_get_p2p_status(src_device->get_gpu_id(), dst_device->get_gpu_id(),
                 reinterpret_cast<RSMI_IO_LINK_TYPE*>(type),
                 reinterpret_cast<rsmi_p2p_capability_t*>(cap));
+    // Convert type to match amd-smi
+    translated_link_type(type);
     return amd::smi::rsmi_to_amdsmi_status(rstatus);
 }
 
@@ -3541,7 +3647,6 @@ amdsmi_status_t amdsmi_get_lib_version(amdsmi_version_t *version) {
     if (version == nullptr)
         return AMDSMI_STATUS_INVAL;
 
-    version->year = AMDSMI_LIB_VERSION_YEAR;
     version->major = AMDSMI_LIB_VERSION_MAJOR;
     version->minor = AMDSMI_LIB_VERSION_MINOR;
     version->release = AMDSMI_LIB_VERSION_RELEASE;
@@ -3633,7 +3738,8 @@ amdsmi_get_gpu_vbios_info(amdsmi_processor_handle processor_handle, amdsmi_vbios
 
     if (drm_write == 0) {
         strncpy(info->name, reinterpret_cast<char *>(vbios.name), AMDSMI_MAX_STRING_LENGTH);
-        strncpy(info->build_date, reinterpret_cast<char *>(vbios.date), AMDSMI_MAX_DATE_LENGTH);
+        strncpy(info->build_date, reinterpret_cast<char *>(vbios.date), AMDSMI_MAX_STRING_LENGTH - 1);
+        info->build_date[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
         strncpy(info->part_number, reinterpret_cast<char *>(vbios.vbios_pn),
                 AMDSMI_MAX_STRING_LENGTH);
         strncpy(info->version, reinterpret_cast<char *>(vbios.vbios_ver_str),
@@ -4016,50 +4122,58 @@ amdsmi_status_t amdsmi_get_afids_from_cper(
 amdsmi_status_t
 amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_handle, uint32_t *max_processes, amdsmi_proc_info_t *list) {
     AMDSMI_CHECK_INIT();
+
+    // Validate the max_processes pointer
     if (!max_processes) {
         return AMDSMI_STATUS_INVAL;
     }
 
+    // Retrieve the GPU device associated with the processor handle
     amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
     amdsmi_status_t status_code = get_gpu_device_from_handle(processor_handle, &gpu_device);
-    if (status_code != amdsmi_status_t::AMDSMI_STATUS_SUCCESS) {
+    if (status_code != AMDSMI_STATUS_SUCCESS) {
         return status_code;
     }
 
+    // Get the list of compute processes running on the GPU
     auto compute_process_list = gpu_device->amdgpu_get_compute_process_list();
+
+    // If max_processes is 0, return the number of processes currently running
+    // If compute_process_list is empty, return success with max_processes set to 0
     if ((*max_processes == 0) || compute_process_list.empty()) {
         *max_processes = static_cast<uint32_t>(compute_process_list.size());
-        return amdsmi_status_t::AMDSMI_STATUS_SUCCESS;
-    }
-    if (!list) {
-        return amdsmi_status_t::AMDSMI_STATUS_INVAL;
+        return AMDSMI_STATUS_SUCCESS;
     }
 
+    // Validate the list pointer
+    if (!list) {
+        return AMDSMI_STATUS_INVAL;
+    }
+
+    // Store the original size of max_processes
     const auto max_processes_original_size(*max_processes);
     auto idx = uint32_t(0);
+
+    // Populate the list with process information
     for (auto& process : compute_process_list) {
         if (idx < *max_processes) {
+            // Iterate over the map of processes and store the amdsmi_proc_info_t in the list
             list[idx++] = static_cast<amdsmi_proc_info_t>(process.second);
         } else {
             break;
         }
     }
 
-    //  Note: If the reserved size for processes is smaller than the number of
-    //        actual processes running. The AMDSMI_STATUS_OUT_OF_RESOURCES is
-    //        an indication the caller should handle the situation (resize).
-    //        The max_processes is always changed to reflect the actual size of
-    //        list of processes running, so the caller knows where it is at.
-    //        Holding a copy of max_process before it is passed in will be helpful
-    //        for the caller.
+    // Update max_processes to reflect the actual number of running processes
     *max_processes = static_cast<uint32_t>(compute_process_list.size());
+
+    // Check if the caller-provided size for processes is sufficient to store all running processes
     return (max_processes_original_size >= static_cast<uint32_t>(compute_process_list.size()))
-            ? AMDSMI_STATUS_SUCCESS : amdsmi_status_t::AMDSMI_STATUS_OUT_OF_RESOURCES;
+            ? AMDSMI_STATUS_SUCCESS : AMDSMI_STATUS_OUT_OF_RESOURCES;
 }
 
 amdsmi_status_t
-amdsmi_get_power_info_v2(amdsmi_processor_handle processor_handle, __attribute__((unused)) uint32_t sensor_ind, amdsmi_power_info_t *info) {
-
+amdsmi_get_power_info(amdsmi_processor_handle processor_handle, amdsmi_power_info_t *info) {
     AMDSMI_CHECK_INIT();
 
     if (info == nullptr) {
@@ -4096,11 +4210,6 @@ amdsmi_get_power_info_v2(amdsmi_processor_handle processor_handle, __attribute__
     }
 
     return status;
-}
-
-amdsmi_status_t
-amdsmi_get_power_info(amdsmi_processor_handle processor_handle, amdsmi_power_info_t *info) {
-  return amdsmi_get_power_info_v2(processor_handle, 0, info);
 }
 
 amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_handle,
@@ -4461,38 +4570,6 @@ amdsmi_get_link_topology_nearest(amdsmi_processor_handle processor_handle,
 
     auto status(amdsmi_status_t::AMDSMI_STATUS_SUCCESS);
 
-    /*
-     *  Note: This will need to be eventually consolidated within a unique link type.
-     */
-    static const std::map<amdsmi_link_type_t, amdsmi_io_link_type_t> kLinkToIoLinkTypeTranslationTable =
-    {
-        {amdsmi_link_type_t::AMDSMI_LINK_TYPE_INTERNAL,       amdsmi_io_link_type_t::AMDSMI_IOLINK_TYPE_UNDEFINED},
-        {amdsmi_link_type_t::AMDSMI_LINK_TYPE_XGMI,           amdsmi_io_link_type_t::AMDSMI_IOLINK_TYPE_XGMI},
-        {amdsmi_link_type_t::AMDSMI_LINK_TYPE_PCIE,           amdsmi_io_link_type_t::AMDSMI_IOLINK_TYPE_PCIEXPRESS},
-        {amdsmi_link_type_t::AMDSMI_LINK_TYPE_NOT_APPLICABLE, amdsmi_io_link_type_t::AMDSMI_IOLINK_TYPE_UNDEFINED},
-        {amdsmi_link_type_t::AMDSMI_LINK_TYPE_UNKNOWN,        amdsmi_io_link_type_t::AMDSMI_IOLINK_TYPE_UNDEFINED}
-    };
-
-    auto translated_link_type = [&](amdsmi_link_type_t link_type) {
-        auto io_link_type(amdsmi_io_link_type_t::AMDSMI_IOLINK_TYPE_UNDEFINED);
-        if (kLinkToIoLinkTypeTranslationTable.find(link_type) != kLinkToIoLinkTypeTranslationTable.end()) {
-            io_link_type = kLinkToIoLinkTypeTranslationTable.at(link_type);
-        }
-        return io_link_type;
-    };
-
-    auto translated_io_link_type = [&](amdsmi_io_link_type_t io_link_type) {
-        auto link_type(amdsmi_link_type_t::AMDSMI_LINK_TYPE_UNKNOWN);
-        for (const auto& [key, value] : kLinkToIoLinkTypeTranslationTable) {
-            if (value == io_link_type) {
-                link_type = key;
-                break;
-            }
-        }
-        return link_type;
-    };
-    //
-
     struct LinkTopolyInfo_t
     {
         amdsmi_processor_handle target_processor_handle;
@@ -4556,10 +4633,10 @@ amdsmi_get_link_topology_nearest(amdsmi_processor_handle processor_handle,
                 }
 
                 // Link type matches what we are searching for?
-                auto io_link_type = translated_link_type(link_type);
+                auto link_type_new = link_type;
                 auto num_hops = uint64_t(0);
-                if (auto api_status = amdsmi_topo_get_link_type(processor_handle, device_list[device_idx], &num_hops, &io_link_type);
-                    (api_status != amdsmi_status_t::AMDSMI_STATUS_SUCCESS) || (translated_io_link_type(io_link_type) != link_type)) {
+                if (auto api_status = amdsmi_topo_get_link_type(processor_handle, device_list[device_idx], &num_hops, &link_type_new);
+                    (api_status != amdsmi_status_t::AMDSMI_STATUS_SUCCESS) || (link_type_new != link_type)) {
                     continue;
                 }
 
@@ -4573,7 +4650,7 @@ amdsmi_get_link_topology_nearest(amdsmi_processor_handle processor_handle,
                 // Topology nearest info
                 LinkTopolyInfo_t link_info = {
                     .target_processor_handle = device_list[device_idx],
-                    .link_type = translated_io_link_type(io_link_type),
+                    .link_type = link_type,
                     .is_accessible = is_accessible,
                     .num_hops = num_hops,
                     .link_weight = link_weight
@@ -5987,16 +6064,13 @@ amdsmi_status_t amdsmi_get_cpu_model_name(amdsmi_processor_handle processor_hand
 
 amdsmi_status_t amdsmi_get_cpu_cores_per_socket(uint32_t sock_count, amdsmi_sock_info_t *sock_info)
 {
-    std::map<uint32_t, uint32_t> socket_core_count = amd::smi::AMDSmiSystem::getInstance().get_sys_cpu_cores_per_socket();
+    amdsmi_status_t status;
+    uint32_t core_num;
+    status = amd::smi::AMDSmiSystem::getInstance().get_sys_cpu_cores_per_socket(&core_num);
+    if (status != AMDSMI_STATUS_SUCCESS)
+        return status;
 
-    for (uint32_t i = 0; i < sock_count; ++i) {
-        auto it = socket_core_count.find(sock_info[i].socket_id);
-        if (it != socket_core_count.end()) {
-            sock_info[i].cores_per_socket = it->second;
-        } else {
-            sock_info[i].cores_per_socket = 0;
-        }
-    }
+    sock_info->cores_per_socket = core_num;
 
     return AMDSMI_STATUS_SUCCESS;
 }

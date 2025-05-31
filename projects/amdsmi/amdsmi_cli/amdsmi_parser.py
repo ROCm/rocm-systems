@@ -69,7 +69,7 @@ class AMDSMIParser(argparse.ArgumentParser):
     """
     def __init__(self, version, list, static, firmware, bad_pages, metric,
                  process, profile, event, topology, set_value, reset, monitor,
-                 xgmi, partition, ras):
+                 xgmi, partition, ras, default):
 
         # Helper variables
         self.helpers = AMDSMIHelpers()
@@ -115,7 +115,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Store possible subcommands & aliases for later errors
         self.possible_commands = ['version', 'list', 'static', 'firmware', 'ucode', 'bad-pages',
                                   'metric', 'process', 'profile', 'event', 'topology', 'set',
-                                  'reset', 'monitor', 'dmon', 'xgmi', 'partition', 'ras']
+                                  'reset', 'monitor', 'dmon', 'xgmi', 'partition', 'ras', 'default']
 
         # Add all subparsers
         self._add_version_parser(self.subparsers, version)
@@ -135,8 +135,9 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_partition_parser(self.subparsers, partition)
         self._add_ras_parser(self.subparsers, ras)
 
+        # the default command
+        self._add_default_parser(self.subparsers, default)
 
-### Parser Validators and Helpers###
     def _not_negative_int(self, int_value, sub_arg=None):
         # Argument type validator
         if int_value.isdigit():  # Is digit doesn't work on negative numbers
@@ -637,6 +638,16 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         return watch_arguments_group
 
+    def _add_default_parser(self, subparsers: argparse._SubParsersAction, func):
+        # there should be no args to parse here so let this be a dummy function to preserve later logic
+        default_parser = subparsers.add_parser('default', description=None)
+        default_parser._optionals.title = None
+        default_parser.formatter_class=lambda prog: AMDSMISubparserHelpFormatter(prog)
+        default_parser.set_defaults(func=func)
+
+        # Add Universal Arguments
+        self._add_command_modifiers(default_parser)
+
 
     def _add_version_parser(self, subparsers: argparse._SubParsersAction, func):
         # Subparser help text
@@ -862,6 +873,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         ecc_help = "Total number of ECC errors"
         ecc_blocks_help = "Number of ECC errors per block"
         pcie_help = "Current PCIe speed, width, and replay count"
+        voltage_help = "GPU voltage"
 
         # Help text for Arguments only on Linux Baremetal platforms
         fan_help = "Current fan speed"
@@ -927,6 +939,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 metric_parser.add_argument('-P', '--pcie', action='store_true', required=False, help=pcie_help)
                 metric_parser.add_argument('-e', '--ecc', action='store_true', required=False, help=ecc_help)
                 metric_parser.add_argument('-k', '--ecc-blocks', action='store_true', required=False, help=ecc_blocks_help)
+                metric_parser.add_argument('-V', '--voltage', action='store_true', required=False, help=voltage_help)
 
             # Options that only apply to Hypervisors and Baremetal Linux
             if self.helpers.is_hypervisor() or (self.helpers.is_baremetal() and self.helpers.is_linux()):
@@ -1397,7 +1410,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         Adds the 'ras' subcommand.
 
         Expected command:
-            amd-smi ras --cper --severity=nonfatal-uncorrected,fatal --folder <folder_name> --file_limit=1000 --follow
+            amd-smi ras --cper --severity=nonfatal-uncorrected,fatal --folder <folder_name> --file-limit=1000 --follow
 
         All parameters are provided via options; no positional arguments or optional --file/--gpu are used.
         """
@@ -1431,8 +1444,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         ras_parser.add_argument("--afid", action="store_true", required=False, help=afid_help)
         ras_parser.add_argument("--severity", type=str.lower, nargs='+', default=['all'], help=severity_help, choices=severity_choices, metavar='SEVERITY')
         ras_parser.add_argument("--folder", type=str, action=self._check_folder_path(), default=False, help=folder_help)
-        ras_parser.add_argument("--file_limit", type=self._positive_int, action='store', default=1000, help=file_limit_help)
-        ras_parser.add_argument("--cper_file", action=self._check_cper_file_path(), metavar="CPER_FILE", help=cper_file_help)
+        ras_parser.add_argument("--file-limit", type=self._positive_int, action='store', default=1000, help=file_limit_help)
+        ras_parser.add_argument("--cper-file", action=self._check_cper_file_path(), metavar="CPER_FILE", help=cper_file_help)
         ras_parser.add_argument("--follow", action="store_true", default=False, help=follow_help)
 
         # Add common modifiers and device selection arguments.

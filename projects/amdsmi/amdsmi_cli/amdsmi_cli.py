@@ -95,7 +95,8 @@ if __name__ == "__main__":
                                     amd_smi_commands.monitor,
                                     amd_smi_commands.xgmi,
                                     amd_smi_commands.partition,
-                                    amd_smi_commands.ras)
+                                    amd_smi_commands.ras,
+                                    amd_smi_commands.default)
     try:
         try:
             argcomplete.autocomplete(amd_smi_parser)
@@ -109,7 +110,7 @@ if __name__ == "__main__":
         sys.argv = [arg.lower() if arg.startswith('--') or not arg.startswith('-')
                     else arg for arg in sys.argv]
         if len(sys.argv) == 1:
-            args = amd_smi_parser.parse_args(args=['--help'])
+            args = amd_smi_parser.parse_args(args=['default'])
         elif sys.argv[1] in valid_commands:
             args = amd_smi_parser.parse_args(args=None)
         else:
