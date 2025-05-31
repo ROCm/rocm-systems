@@ -8,16 +8,76 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
-- N/A
+- **Added the Default command**.  
+  - A default view has been added. The default view provides a snapshot of commonly requested information such as bdf, current partition mode, version information, and more. Users can access that information by simply typing `amd-smi` with no additional commands or arguments. Users may also obtain this information through laternate output formats such as json or csv by using the default command with the respective output format: `amd-smi default --json` or `amd-smi default --csv`.
+
+    ```console
+    $ amd-smi
+    +------------------------------------------------------------------------------+
+    | AMD-SMI 26.10.10+42441c78   amdgpu version: 6.15.5     ROCm version: 7.0.0   |
+    |--------------------------------------+---------------------------------------|
+    | BDF                         GPU-Name | Mem-Util    Temp   UECC   Power-Usage |
+    | GPU  HIP-ID   OAM-ID  Partition-Mode | GFX-Util     Fan         Memory-Usage |
+    |======================================+=======================================|
+    | 0000:0c:00.0     AMD Instinct MI300X |      0 %   37 °C      0     141/750 W |
+    |   0       0        2        SPX/NPS1 |      0 %     N/A        283/196592 MB |
+    |--------------------------------------+---------------------------------------|
+    | 0000:22:00.0     AMD Instinct MI300X |      0 %   40 °C      0     155/750 W |
+    |   1       1        1        SPX/NPS1 |      0 %     N/A        284/196592 MB |
+    |--------------------------------------+---------------------------------------|
+    | 0000:38:00.0     AMD Instinct MI300X |      0 %   37 °C      0     141/750 W |
+    |   2       2        0        SPX/NPS1 |      0 %     N/A        283/196592 MB |
+    |--------------------------------------+---------------------------------------|
+    | 0000:5c:00.0     AMD Instinct MI300X |      0 %   37 °C      0     139/750 W |
+    |   3       3        3        SPX/NPS1 |      0 %     N/A        283/196592 MB |
+    |--------------------------------------+---------------------------------------|
+    | 0000:9f:00.0     AMD Instinct MI300X |      0 %   37 °C      0     140/750 W |
+    |   4       4        7        SPX/NPS1 |      0 %     N/A        283/196592 MB |
+    |--------------------------------------+---------------------------------------|
+    | 0000:af:00.0     AMD Instinct MI300X |      0 %   37 °C      0     142/750 W |
+    |   5       5        5        SPX/NPS1 |      0 %     N/A        283/196592 MB |
+    |--------------------------------------+---------------------------------------|
+    | 0000:bf:00.0     AMD Instinct MI300X |      0 %   36 °C      0     138/750 W |
+    |   6       6        4        SPX/NPS1 |      0 %     N/A        283/196592 MB |
+    |--------------------------------------+---------------------------------------|
+    | 0000:df:00.0     AMD Instinct MI300X |      0 %   40 °C      0     138/750 W |
+    |   7       7        6        SPX/NPS1 |      0 %     N/A        283/196592 MB |
+    +--------------------------------------+---------------------------------------+
+    ```
+
+- **Added support for GPU metrics 1.8**.  
+  - Added new fields for `amdsmi_gpu_xcp_metrics_t` including:  
+    - Adding the following metrics to allow new calculations for violation status:
+    - Per XCP metrics `gfx_below_host_limit_ppt_acc[XCP][MAX_XCC]` - GFX Clock Host limit Package Power Tracking violation counts
+    - Per XCP metrics `gfx_below_host_limit_thm_acc[XCP][MAX_XCC]` - GFX Clock Host limit Thermal (TVIOL) violation counts
+    - Per XCP metrics `gfx_low_utilization_acc[XCP][MAX_XCC]` - violation counts for how did low utilization caused the GPU to be below application clocks.
+    - Per XCP metrics `gfx_below_host_limit_total_acc[XCP][MAX_XCC]`- violation counts for how long GPU was held below application clocks any limiter (see above new violation metrics).
+  - Increasing available JPEG engines to 40.  
+  Current ASICs may not support all 40. These will be indicated as `UINT16_MAX` or `N/A` in CLI.
+
+- **Added bad page threshold count**.  
+  - Added `amdsmi_get_gpu_bad_page_threshold` to Python API and CLI; root/sudo permissions required to display the count.
+
+- **Updated `amdsmi_get_gpu_asic_info` in `amdsmi.h`**.  
+  - Added `subsystem_id` structure member.
+
+- **Added cpu model name for RDC**.  
+  - Added new C and Python API `amdsmi_get_cpu_model_name`
+  - Not sourced from esmi library.
+
+- **Added `amdsmi_get_cpu_affinity_with_scope()`**.  
 
 ### Changed
 
-- **Added Compute Unit Occupancy information per process**  
-  Measuring compute units are the best way currently to determine gfx usage on a per process basis  
-  - Added `CU_OCCUPANCY` to `amd-smi process` output.
-  - Added `CU%` to `amd-smi monitor -q`
+- **Padded `asic_serial` in `amdsmi_get_asic_info` with 0s**.  
 
-- **Expanded Violation Status tracking for GPU metrics 1.8.**
+- **Updated `amdsmi_get_clock_info` in `amdsmi_interface.py`**.  
+  - The `clk_deep_sleep` field now returns the sleep integer value.  
+
+- **The `amd-smi topology` command has been enabled for Guest environments**.  
+  - `amd-smi topology` is now available in Guest environments. This includes full functionality so users can use the command just as they would in Bare Metal environments.
+
+- **Expanded Violation Status tracking for GPU metrics 1.8**.  
   - The driver will no longer be supporting existing single-value GFX Clk Below Host Limit fields (`acc_gfx_clk_below_host_limit`, `per_gfx_clk_below_host_limit`, `active_gfx_clk_below_host_limit`), they are now changed in favor of new per-XCP/XCC arrays.
   - Added new fields to `amdsmi_violation_status_t` and related interfaces for enhanced violation breakdown:
     - Per-XCP/XCC accumulators and status for:
@@ -30,106 +90,79 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
       - `acc_low_utilization`, `per_low_utilization`, `active_low_utilization`
   - Python API and CLI now report these expanded fields.
 
-### Removed
+- **The char arrays in the following structures have been changed**.  
+  - `amdsmi_vbios_info_t` member `build_date` changed from `AMDSMI_MAX_DATE_LENGTH` to `AMDSMI_MAX_STRING_LENGTH`.
+  - `amdsmi_dpm_policy_entry_t` member `policy_description` changed from `AMDSMI_MAX_NAME` to `AMDSMI_MAX_STRING_LENGTH`.
+  - `amdsmi_name_value_t` member `name` changed from `AMDSMI_MAX_NAME` to `AMDSMI_MAX_STRING_LENGTH`.
 
-- **Removed unused definition `AMDSMI_MAX_NAME`**
-- **Removed unused definition `AMDSMI_256_LENGTH`**
-- **Removed unused definition `AMDSMI_MAX_DATE_LENGTH`**
-- **Removed unused definition `MAX_AMDSMI_NAME_LENGTH`**
-- **Removed unused definition `AMDSMI_LIB_VERSION_YEAR`**
-- **Removed unused definition `AMDSMI_DEFAULT_VARIANT`**
-- **Removed unused definition `AMDSMI_MAX_NUM_POWER_PROFILES`**
-- **Removed unused definition `AMDSMI_MAX_DRIVER_VERSION_LENGTH`**
-- **Removed unused member `year` in struct `amdsmi_version_t`**
-- **Updated `amdsmi_get_gpu_asic_info` in `amdsmi.h`.**
-  - Added `subsystem_id` structure member.
-- **Removed `amdsmi_io_link_type_t` and replaced with amdsmi_link_type_t**.
-  - The IO Link type is no longer needed as the link type is sufficient.
-- **Removed `amdsmi_get_power_info_v2()` **.
-  - The amdsmi_get_power_info() has been unified and the v2 function is no longer needed/used.
-- **Updated `amdsmi_bdf_t` in `amdsmi.h`.**
-  - The `amdsmi_bdf_t` union was changed to have an identical unnamed struct for backwards compatiblity
-- **The `amdsmi_get_gpu_vram_info` command gets the vendor name from the driver instead of using an emun to identify vendor.**  
-  - `amdsmi_vram_info_t` member named `amdsmi_vram_vendor_type_t` was changed to a character string
-  - `amdsmi_vram_vendor_type_t` enum structure was removed
-
-### Optimized
-
-- N/A
-
-### Resolved issues
-
-- **Corrected VRAM memory calculation in `amdsmi_get_gpu_process_list`.**  
-  - Previously, the VRAM memory usage reported by `amdsmi_get_gpu_process_list` was inaccurate and calculated using KB vs KiB.
-
-### Known issues
-
-- N/A
-
-
-## amd_smi_lib for ROCm 6.5.0
-
-### Added
-
-- **Added bad page threshold count**.  
-  - Added `amdsmi_get_gpu_bad_page_threshold` to Python API and CLI; root/sudo permissions required to display the count.
-
-- **Added the Default command**.  
-  - A default view has been added. The default view provides a snapshot of commonly requested information such as bdf, current partition mode, version information, and more. Users can access that information by simply typing `amd-smi` with no additional commands or arguments. Users may also obtain this information through laternate output formats such as json or csv by using the default command with the respective output format: `amd-smi default --json` or `amd-smi default --csv`.
-
-```shell
-+------------------------------------------------------------------------------+
-| AMD SMI 25.4.1+a0ac51...   amdgpu version: 6.14.5     ROCm version: 7.0.0    |
-|--------------------------------------+---------------------------------------|
-| BDF                         GPU-Name | Mem-Util    Temp   UECC   Power-Usage |
-| GPU  HIP-ID   OAM-ID  Partition-Mode | GFX-Util     Fan         Memory-Usage |
-|======================================+=======================================|
-| 0000:0c:00.0     AMD Instinct MI300X |      0 %   37 °C      0     141/750 W |
-|   0       0        2        SPX/NPS1 |      0 %     N/A        283/196592 MB |
-|--------------------------------------+---------------------------------------|
-| 0000:22:00.0     AMD Instinct MI300X |      0 %   40 °C      0     155/750 W |
-|   1       1        1        SPX/NPS1 |      0 %     N/A        284/196592 MB |
-|--------------------------------------+---------------------------------------|
-| 0000:38:00.0     AMD Instinct MI300X |      0 %   37 °C      0     141/750 W |
-|   2       2        0        SPX/NPS1 |      0 %     N/A        283/196592 MB |
-|--------------------------------------+---------------------------------------|
-| 0000:5c:00.0     AMD Instinct MI300X |      0 %   37 °C      0     139/750 W |
-|   3       3        3        SPX/NPS1 |      0 %     N/A        283/196592 MB |
-|--------------------------------------+---------------------------------------|
-| 0000:9f:00.0     AMD Instinct MI300X |      0 %   37 °C      0     140/750 W |
-|   4       4        7        SPX/NPS1 |      0 %     N/A        283/196592 MB |
-|--------------------------------------+---------------------------------------|
-| 0000:af:00.0     AMD Instinct MI300X |      0 %   37 °C      0     142/750 W |
-|   5       5        5        SPX/NPS1 |      0 %     N/A        283/196592 MB |
-|--------------------------------------+---------------------------------------|
-| 0000:bf:00.0     AMD Instinct MI300X |      0 %   36 °C      0     138/750 W |
-|   6       6        4        SPX/NPS1 |      0 %     N/A        283/196592 MB |
-|--------------------------------------+---------------------------------------|
-| 0000:df:00.0     AMD Instinct MI300X |      0 %   40 °C      0     138/750 W |
-|   7       7        6        SPX/NPS1 |      0 %     N/A        283/196592 MB |
-+--------------------------------------+---------------------------------------+
-```
-
-### Changed
-
-- **The `amd-smi topology` command has been enabled for Guest environments**.  
-  - `amd-smi topology` is now availabe in Guest environments. This includes full functionality so users can use the command just as they would in Bare Metal environments.
+- **Added new event notification types to `amdsmi_evt_notification_type_t`**.  
+  The following values were added to the `amdsmi_evt_notification_type_t` enum:
+  - `AMDSMI_EVT_NOTIF_EVENT_MIGRATE_START`
+  - `AMDSMI_EVT_NOTIF_EVENT_MIGRATE_END`
+  - `AMDSMI_EVT_NOTIF_EVENT_PAGE_FAULT_START`
+  - `AMDSMI_EVT_NOTIF_EVENT_PAGE_FAULT_END`
+  - `AMDSMI_EVT_NOTIF_EVENT_QUEUE_EVICTION`
+  - `AMDSMI_EVT_NOTIF_EVENT_QUEUE_RESTORE`
+  - `AMDSMI_EVT_NOTIF_EVENT_UNMAP_FROM_GPU`
+  - `AMDSMI_EVT_NOTIF_PROCESS_START`
+  - `AMDSMI_EVT_NOTIF_PROCESS_END`
 
 - **Updated `amdsmi_get_clock_info` in `amdsmi_interface.py`**.  
   - The `clk_deep_sleep` field now returns the sleep integer value.  
 
+- **Added Power Cap to amd-smi monitor**.  
+  - `amd-smi monitor -p` will display the power cap along with power.
+
+    ```console
+    $ amd-smi monitor -p
+    GPU  POWER  PWR_CAP
+      0  148 W    750 W
+      1  156 W    750 W
+      2  153 W    750 W
+    ...
+    ```
+
+- **Updated `amdsmi_bdf_t` in `amdsmi.h`**.  
+  - The `amdsmi_bdf_t` union was changed to have an identical unnamed struct for backwards compatiblity
+
 ### Removed
+
+- **Removed unused definitions**  
+  - `AMDSMI_MAX_NAME`
+  - `AMDSMI_256_LENGTH`
+  - `AMDSMI_MAX_DATE_LENGTH`
+  - `MAX_AMDSMI_NAME_LENGTH`
+  - `AMDSMI_LIB_VERSION_YEAR`
+  - `AMDSMI_DEFAULT_VARIANT`
+  - `AMDSMI_MAX_NUM_POWER_PROFILES`
+  - `AMDSMI_MAX_DRIVER_VERSION_LENGTH`
+
+- **Removed unused member `year` in struct `amdsmi_version_t`**  
+
+- **Removed `amdsmi_io_link_type_t` and replaced with amdsmi_link_type_t**.  
+  - The IO Link type is no longer needed as the link type is sufficient.
+
+- **Removed `amdsmi_get_power_info_v2()`**.  
+  - The amdsmi_get_power_info() has been unified and the v2 function is no longer needed/used.
+
+- **Removed `AMDSMI_EVT_NOTIF_RING_HANG` event notification type in `amdsmi_evt_notification_type_t`**.  
+
+- **The `amdsmi_get_gpu_vram_info` now provides vendor names as a string**.  
+  - `amdsmi_vram_vendor_type_t` enum structure was removed
+  - `amdsmi_vram_info_t` member named `amdsmi_vram_vendor_type_t` was changed to a character string
+  - `amdsmi_get_gpu_vram_info` now no longer requires decoding the vendor name as an enum
 
 - **Removed backwards compatibility `amdsmi_get_gpu_metrics_info()`'s `jpeg_activity` or `vcn_activity` fields: use `xcp_stats.jpeg_busy` or `xcp_stats.vcn_busy`**  
   - Backwards compatibility is removed for `jpeg_activity` and `vcn_activity` fields, if the `jpeg_busy` or `vcn_busy` field is available.
-    - <i>Reasons for this change</i>:
+    - *Reasons for this change:*
       - Providing both `vcn_activity`/`jpeg_activity` and XCP (partition) stats `vcn_busy`/`jpeg_busy` caused confusion for users about which field to use. By removing backward compatibility, it is easier to identify the relevant field.
       - The `jpeg_busy` field increased in size (for supported ASICs), making backward compatibility unable to fully copy the structure into `jpeg_activity`.
 
     See below for comparison of updated CLI outputs:
 
     Original output:
-    ```shell
+
+    ```console
     $ amd-smi metric --usage
     GPU: 0
         USAGE:
@@ -166,8 +199,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
                 XCP_6: [0 %, N/A, N/A, N/A]
                 XCP_7: [0 %, N/A, N/A, N/A]
     ```
+
     New output:
-    ```shell
+
+    ```console
     $ amd-smi metric --usage
     GPU: 0
         USAGE:
@@ -207,91 +242,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Optimized
 
-### Resolved issues
-
-### Upcoming changes
-
-### Known issues
-
-- **Added cpu model name for RDC**.  
-  - Added new C and Python API `amdsmi_get_cpu_model_name`
-  - Not sourced from esmi library.
-
-- **Added `amdsmi_get_cpu_affinity_with_scope()`**.
-
-### Added
-
-- **Added support for GPU metrics 1.8**.  
-  - Added new fields for `amdsmi_gpu_xcp_metrics_t` including:  
-    - Adding the following metrics to allow new calculations for violation status:
-    - Per XCP metrics `gfx_below_host_limit_ppt_acc[XCP][MAX_XCC]` - GFX Clock Host limit Package Power Tracking violation counts
-    - Per XCP metrics `gfx_below_host_limit_thm_acc[XCP][MAX_XCC]` - GFX Clock Host limit Thermal (TVIOL) violation counts
-    - Per XCP metrics `gfx_low_utilization_acc[XCP][MAX_XCC]` - violation counts for how did low utilization caused the GPU to be below application clocks.
-    - Per XCP metrics `gfx_below_host_limit_total_acc[XCP][MAX_XCC]`- violation counts for how long GPU was held below application clocks any limiter (see above new violation metrics).
-  - Increasing available JPEG engines to 40.  
-  Current ASICs may not support all 40. These will be indicated as UINT16_MAX or N/A in CLI.
-
-- **Added support to get GPU voltage**.
-    ```shell
-        $ amd-smi metric --voltage
-            GPU: 0
-                VOLTAGE:
-                    VDDBOARD: 52536 mV
-                    ...
-    ```
-- **Added bad page threshold count**.  
-  - Added `amdsmi_get_gpu_bad_page_threshold` to Python API and CLI; root/sudo permissions required to display the count.
-
-- **Added new firmware PLDM**.  
-
-### Changed
-
-- **The char arrays in the following structures have been changed**.  
-  - `amdsmi_vbios_info_t` member `build_date` changed from AMDSMI_MAX_DATE_LENGTH to AMDSMI_MAX_STRING_LENGTH.
-  - `amdsmi_dpm_policy_entry_t` member `policy_description` changed from AMDSMI_MAX_NAME to AMDSMI_MAX_STRING_LENGTH.
-  - `amdsmi_name_value_t` member `name` changed from AMDSMI_MAX_NAME to AMDSMI_MAX_STRING_LENGTH.
-
-- **The `amd-smi topology` command has been enabled for Guest environments**.  
-  - `amd-smi topology` is now available in Guest environments. This includes full functionality so users can use the command just as they would in Bare Metal environments.
-
-- **Updated `amdsmi_get_clock_info` in `amdsmi_interface.py`**.  
-  - The `clk_deep_sleep` field now returns the sleep integer value.  
-
-- **Added Power Cap to amd-smi monitor**.  
-  - `amd-smi monitor -p` will display the power cap along with power.
-
-    ```shell
-    $ amd-smi monitor -p
-    GPU  POWER  PWR_CAP
-      0  148 W    750 W
-      1  156 W    750 W
-      2  153 W    750 W
-      ...
-    ```
-
-- **Modified VRAM display for `amd-smi monitor -v`**.  
-  - Added free VRAM and VRAM percentage.
-
-    ```shell
-    $ amd-smi monitor -v
-    GPU  VRAM_USED   VRAM_FREE  VRAM_TOTAL    VRAM%
-      0     174 MB    16011 MB    16185 MB   0.01 %
-      1      78 MB      347 MB      425 MB   0.18 %
-      ...
-    ```
-
-
-### Removed
-
-- N/A
-
-### Optimized
-
 - N/A
 
 ### Resolved issues
 
-- **Removed duplicate GPU IDs when receiving events using the `amd-smi event` command**.  
+- **Removed duplicated GPU IDs when receiving events using the `amd-smi event` command**.  
 
 ### Upcoming changes
 
@@ -300,13 +255,27 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ### Known issues
 
 - N/A
-
 
 ## amd_smi_lib for ROCm 6.4.2
 
 ### Added
 
-- N/A
+- **Added Compute Unit Occupancy information per process**  
+  Measuring compute units are the best way currently to determine gfx usage on a per process basis  
+  - Added `CU_OCCUPANCY` to `amd-smi process` output.
+  - Added `CU%` to `amd-smi monitor -q`
+
+- **Added support to get GPU Board voltage**.  
+
+  ```console
+      $ amd-smi metric --voltage
+          GPU: 0
+              VOLTAGE:
+                  VDDBOARD: 52536 mV
+                  ...
+  ```
+
+- **Added new firmware PLDM**.  
 
 ### Changed
 
@@ -328,8 +297,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Align with host AMD SMI's `static --partition` field naming
   - Align with naming seen in `amd-smi partition`  
 
-  <i>Previous Output</i>:  
-  ```shell
+  *Previous Output:*  
+
+  ```console
   $ amd-smi static --partition
     GPU: 0
         PARTITION:
@@ -337,8 +307,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
             MEMORY_PARTITION: NPS1
             PARTITION_ID: 0
   ```
-  <i>New Output</i>:  
-  ```shell
+
+  *New Output:*  
+
+  ```console
   $ amd-smi static --partition
     GPU: 0
         PARTITION:
@@ -353,7 +325,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved issues
 
-- N/A
+- **Corrected VRAM memory calculation in `amdsmi_get_gpu_process_list`**.  
+  - Previously, the VRAM memory usage reported by `amdsmi_get_gpu_process_list` was inaccurate and calculated using KB vs KiB.
 
 ### Upcoming changes
 
@@ -363,15 +336,14 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - N/A
 
-
 ## amd_smi_lib for ROCm 6.4.1
 
 ### Added
 
-- **Added dumping CPER entries from RAS tool `amdsmi_get_gpu_cper_entries()` to Python & C APIs.**  
+- **Added dumping CPER entries from RAS tool `amdsmi_get_gpu_cper_entries()` to Python & C APIs**.  
   - CPER entries consist of `amdsmi_cper_hdr_t`
 
-    ```shell
+    ```C
     typedef struct {
         char                   signature[4];       /* "CPER" */
         uint16_t               revision;
@@ -379,8 +351,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
         uint16_t               sec_cnt;
         amdsmi_cper_sev_t      error_severity;
         //valid_bits_t          valid_bits;
-        //uint32_t              valid_mask;    
-        amdsmi_cper_valid_bits_t cper_valid_bits; 
+        //uint32_t              valid_mask;
+        amdsmi_cper_valid_bits_t cper_valid_bits;
         uint32_t                record_length;     /* Total size of CPER Entry */
         amdsmi_cper_timestamp_t timestamp;
         char                    platform_id[16];
@@ -396,7 +368,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
   - Dumping CPER entires is also enabled in the CLI interface via `sudo amd-smi ras --cper`
 
-    ```shell
+    ```console
     $ sudo amd-smi ras --cper
     Dumping CPER file header entries for GPU 0:
     "0": {
@@ -415,95 +387,21 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
        "persistence_info": 0
        }
     ```
+
+- **Added `amdsmi_get_gpu_busy_percent` to the C API**.  
+  - This function retrieves the GPU busy percentage from the `gpu_busy_percent` sysfs file.
+
 ### Changed
 
-- **Changed amd-smi partition --accelerator & `amdsmi_get_gpu_accelerator_partition_profile_config()` detect users running without root/sudo privledges**
-     - Updated  `amdsmi_get_gpu_accelerator_partition_profile_config()` to return `AMDSMI_STATUS_NO_PERM` immediately
-       if users run without root/sudo permissions.
-     - Updated `amd-smi partition --accelerator` to provide a warning for users without root/sudo permissions (see example below, ***output subject to change***).
+- **Modified VRAM display for `amd-smi monitor -v`**.  
+  - Added free VRAM and VRAM percentage.
 
-    ```shell
-    $ amd-smi partition --accelerator
-
-    ACCELERATOR_PARTITION_PROFILES:
-
-    ***************************************************************************
-    ** WARNING:                                                              **
-    ** ACCELERATOR_PARTITION_PROFILES requires sudo/root permissions to run. **
-    ** Please run the command with sudo permissions to get accurate results. **
-    ***************************************************************************
-
-    GPU_ID  PROFILE_INDEX  MEMORY_PARTITION_CAPS  ACCELERATOR_TYPE  PARTITION_ID     NUM_PARTITIONS  NUM_RESOURCES  RESOURCE_INDEX  RESOURCE_TYPE  RESOURCE_INSTANCES  RESOURCES_SHARED
-    N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
-    N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
-    N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
-    N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
-    N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
-    N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
-    N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
-    N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
-
-    ACCELERATOR_PARTITION_RESOURCES:
-    RESOURCE_INDEX  RESOURCE_TYPE  RESOURCE_INSTANCES  RESOURCES_SHARED
-    N/A             N/A            N/A                 N/A
-    N/A             N/A            N/A                 N/A
-    N/A             N/A            N/A                 N/A
-    N/A             N/A            N/A                 N/A
-    N/A             N/A            N/A                 N/A
-    N/A             N/A            N/A                 N/A
-    N/A             N/A            N/A                 N/A
-    N/A             N/A            N/A                 N/A
-
-
-    Legend:
-    * = Current mode
-    ```
-
-- **Changed `amd-smi partition --current`, `amd-smi partition --accelerator`, and `amdsmi_get_gpu_accelerator_partition_profile()` to display partition ID for each individual partition**
-    - Host will continue to display in the full array format, they do not display the individual partitions as Baremetal/Guest setups.
-    - Baremetal and Guest MI3x setups will change to
-reflect each individual partition ID, now provided in `partition_id[0]` location (as seen in other amd-smi CLI commands).  
-This change was needed for BM/Guest setups due to other related partition outputs seen in (`amd-smi list` and `amd-smi static --partition`) and individual logical partition devices displayed. ***See examples below for reference.***  
-
-    Previous output:
-
-    ```shell
-    $ amd-smi partition --current
-
-    CURRENT_PARTITION:
-    GPU_ID  MEMORY  ACCELERATOR_TYPE  ACCELERATOR_PROFILE_INDEX  PARTITION_ID
-    0       NPS1    CPX               3                          0,1,2,3,4,5,6,7
-    1       NPS1    CPX               3                          N/A
-    2       NPS1    CPX               3                          N/A
-    3       NPS1    CPX               3                          N/A
-    4       NPS1    CPX               3                          N/A
-    5       NPS1    CPX               3                          N/A
-    6       NPS1    CPX               3                          N/A
-    7       NPS1    CPX               3                          N/A
-    8       NPS1    CPX               3                          0,1,2,3,4,5,6,7
-    9       NPS1    CPX               3                          N/A
-    10      NPS1    CPX               3                          N/A
-    ...
-    ```
-
-    New output:
-
-    ```shell
-    amd-smi partition --current
-    CURRENT_PARTITION:
-    GPU_ID  MEMORY  ACCELERATOR_TYPE  ACCELERATOR_PROFILE_INDEX  PARTITION_ID
-    0       NPS1    CPX               3                          0
-    1       NPS1    CPX               3                          1
-    2       NPS1    CPX               3                          2
-    3       NPS1    CPX               3                          3
-    4       NPS1    CPX               3                          4
-    5       NPS1    CPX               3                          5
-    6       NPS1    CPX               3                          6
-    7       NPS1    CPX               3                          7
-    8       NPS1    CPX               3                          0
-    9       NPS1    CPX               3                          1
-    10      NPS1    CPX               3                          2
-    ...
+    ```console
+    $ amd-smi monitor -v
+    GPU  VRAM_USED   VRAM_FREE  VRAM_TOTAL    VRAM%
+      0     174 MB    16011 MB    16185 MB   0.01 %
+      1      78 MB      347 MB      425 MB   0.18 %
+      ...
     ```
 
 ### Removed
@@ -512,19 +410,20 @@ This change was needed for BM/Guest setups due to other related partition output
 
 ### Optimized
 
-- N/A
+- **Improved load times for CLI commands when the GPU has multiple partitions**.  
 
 ### Resolved issues
 
-- **Fixed partition enumeration - `amd-smi list -e`, `amdsmi_get_gpu_enumeration_info()`'s  `amdsmi_enumeration_info_t` `drm_card` and `drm_render` fields**  
-    Previously, partitions incorrectly reflected the primary node (1st GPU) and showed the DRM Render Minor as renderD128. Partition nodes mirrored renderD128's information, which was incorrect. See the "<i>Previous Outputs in CPX</i>" example below.
+- **Fixed partition enumeration - `amd-smi list -e`, `amdsmi_get_gpu_enumeration_info()`'s `amdsmi_enumeration_info_t` `drm_card` and `drm_render` fields**  
+    Previously, partitions incorrectly reflected the primary node (1st GPU) and showed the DRM Render Minor as renderD128. Partition nodes mirrored renderD128's information, which was incorrect. See the "*Previous Outputs in CPX*" example below.
 
-    Device enumeration was updated to correctly map DRM Render Minor paths. See the "<i>Corrected Outputs in CPX</i>" example below.
+    Device enumeration was updated to correctly map DRM Render Minor paths. See the "*Corrected Outputs in CPX*" example below.
 
     These changes impact what information is readable/writable for the partition nodes.
 
-    <b><i>Example: Previous Outputs in CPX</b></i>  
-    ```shell
+    ***Example: Previous Outputs in CPX***  
+
+    ```console
     $ amd-smi list -e                                                                    
     GPU: 0
         BDF: 0000:0c:00.0
@@ -551,7 +450,8 @@ This change was needed for BM/Guest setups due to other related partition output
         HIP_UUID: GPU-<Redacted>
     ...
     ```
-    ```shell
+
+    ```console
     $ amd-smi monitor
     GPU  POWER   GPU_T   MEM_T   GFX_CLK   GFX%   MEM%   ENC%   DEC%      VRAM_USAGE
       0  201 W   46 °C   42 °C  2107 MHz    0 %    0 %    N/A    0 %    0.3/192.0 GB
@@ -565,8 +465,10 @@ This change was needed for BM/Guest setups due to other related partition output
       8  210 W   46 °C   42 °C  2104 MHz    0 %    0 %    N/A    0 %    0.3/192.0 GB
     ...
     ```
-    <b><i>Example: Corrected outputs in CPX</i></b>
-    ```shell
+
+    ***Example: Corrected outputs in CPX***  
+
+    ```console
     $ amd-smi list -e
     GPU: 0
         BDF: 0000:0c:00.0
@@ -592,8 +494,9 @@ This change was needed for BM/Guest setups due to other related partition output
         HIP_ID: 1
         HIP_UUID: GPU-<Redacted>
     ...
-    ```  
-    ```shell
+    ```
+
+    ```console
     $ amd-smi monitor
     GPU  POWER   GPU_T   MEM_T   GFX_CLK   GFX%   MEM%   ENC%   DEC%      VRAM_USAGE
       0  202 W   46 °C   42 °C  2107 MHz    0 %    0 %    N/A    0 %    0.3/192.0 GB
@@ -616,15 +519,14 @@ This change was needed for BM/Guest setups due to other related partition output
 
 - N/A
 
-
 ## amd_smi_lib for ROCm 6.4.0
 
 ### Added
 
-- **Added enumeration mapping `amdsmi_get_gpu_enumeration_info()` to Python & C APIs.**  
+- **Added enumeration mapping `amdsmi_get_gpu_enumeration_info()` to Python & C APIs**.  
   - Enumeration mapping consists of `amdsmi_enumeration_info_t`
 
-    ```shell
+    ```C
     typedef struct {
         uint32_t drm_render; // the render node under /sys/class/drm/renderD*
         uint32_t drm_card;   // the graphic card device under /sys/class/drm/card*
@@ -636,7 +538,7 @@ This change was needed for BM/Guest setups due to other related partition output
 
   - The mapping is also enabled in the CLI interface via `amd-smi list -e`
 
-    ```shell
+    ```console
     $ amd-smi list -e
     GPU: 0
         BDF: 0000:23:00.0
@@ -656,14 +558,14 @@ This change was needed for BM/Guest setups due to other related partition output
   - Added new C and Python enum `amdsmi_virtualization_mode_t`
 
 - **Added TVIOL_ACTIVE to `amd-smi monitor`**.  
-Added temperature violation active or not status to `amd-smi monitor`. TVIOL_ACTIVE will be displayed as below:
-  - True if active
-  - False if not active
-  - N/A if not supported.
+  - Added temperature violation active or not status to `amd-smi monitor`. TVIOL_ACTIVE will be displayed as below:
+    - True if active
+    - False if not active
+    - N/A if not supported.
 
   Example CLI output:
 
-    ```shell
+    ```console
     $ amd-smi monitor --viol
     GPU  PVIOL  TVIOL  TVIOL_ACTIVE  PHOT_TVIOL  VR_TVIOL  HBM_TVIOL
     0  100 %    1 %          True         0 %       0 %        0 %
@@ -688,15 +590,15 @@ Updated `amdsmi_get_gpu_metrics_info()` and structure `amdsmi_gpu_metrics_t` to 
 
     ```C
     typedef enum {
-    AMDSMI_XGMI_LINK_DOWN,     //!< The XGMI Link is down
-    AMDSMI_XGMI_LINK_UP,       //!< The XGMI Link is up
-    AMDSMI_XGMI_LINK_DISABLE,  //!< The XGMI Link is disabled
+        AMDSMI_XGMI_LINK_DOWN,     //!< The XGMI Link is down
+        AMDSMI_XGMI_LINK_UP,       //!< The XGMI Link is up
+        AMDSMI_XGMI_LINK_DISABLE,  //!< The XGMI Link is disabled
     } amdsmi_xgmi_link_status_type_t;
 
     typedef struct {
-    uint32_t total_links;     //!< The total links in the status array
-    amdsmi_xgmi_link_status_type_t status[AMDSMI_MAX_NUM_XGMI_LINKS];
-    uint64_t reserved[7];
+        uint32_t total_links;     //!< The total links in the status array
+        amdsmi_xgmi_link_status_type_t status[AMDSMI_MAX_NUM_XGMI_LINKS];
+        uint64_t reserved[7];
     } amdsmi_xgmi_link_status_t;
 
     amdsmi_status_t amdsmi_get_gpu_xgmi_link_status(amdsmi_processor_handle processor_handle, amdsmi_xgmi_link_status_t *link_status)
@@ -704,7 +606,7 @@ Updated `amdsmi_get_gpu_metrics_info()` and structure `amdsmi_gpu_metrics_t` to 
 
     Example CLI output:
 
-    ```shell
+    ```console
     $ amd-smi xgmi --link-status
 
     XGMI LINK STATUS:
@@ -717,10 +619,10 @@ Updated `amdsmi_get_gpu_metrics_info()` and structure `amdsmi_gpu_metrics_t` to 
     ```
 
 - **Added fclk and socclk info to `amd-smi metric -c/--clock`**.  
-  fclk and socclk information such as min and max clock have been added to the metric command, in line with all the other clocks.  
+  - fclk and socclk information such as min and max clock have been added to the metric command, in line with all the other clocks.  
 
   ```shell
-  amd-smi metric -c -g 1
+  $ amd-smi metric -c -g 1
   ...
           FCLK_0:
             CLK: 2301 MHz
@@ -737,10 +639,11 @@ Updated `amdsmi_get_gpu_metrics_info()` and structure `amdsmi_gpu_metrics_t` to 
   ```
 
 - **Added new command `amd-smi set -c/--clock-level`**.  
-  This new command sets the performance level of the selected clock on the desired GPUs. The command can accept a range of acceptable levels, but will not set the level when a level is beyond the number of frequency levels as show in `amd-smi static -C/--clock`.  
+  - This new command sets the performance level of the selected clock on the desired GPUs.
+  - The command can accept a range of acceptable levels, but will not set the level when a level is beyond the number of frequency levels as show in `amd-smi static -C/--clock`.  
 
-    ```shell
-    sudo amd-smi set -c sclk 5 6
+    ```console
+    $ sudo amd-smi set -c sclk 5 6
     GPU: 0
         CLK_LEVEL: Successfully changed sclk perf level(s) to 5, 6
 
@@ -749,10 +652,10 @@ Updated `amdsmi_get_gpu_metrics_info()` and structure `amdsmi_gpu_metrics_t` to 
     ```
 
 - **Added new command `amd-smi static -C/--clock`**.  
-  This new command displays the clock frequency performance levels for the selected GPUs and clocks.
+  - This new command displays the clock frequency performance levels for the selected GPUs and clocks.
 
-    ```shell
-    amd-smi static --clock all -g 0
+    ```console
+    $ amd-smi static --clock all -g 0
     GPU: 0
         CLOCK:
             SYS:
@@ -795,8 +698,8 @@ Updated `amdsmi_get_gpu_metrics_info()` and structure `amdsmi_gpu_metrics_t` to 
 
 - **Removed initialization requirements for `amdsmi_get_lib_version()` and added `amdsmi_get_rocm_version()` to the python API & CLI**.  
 
-- **Added `amdsmi_get_power_info_v2()` with `sensor_ind`**.
-  - Python API now accepts `sensor_ind` as an optional argument, does not impact previous usage
+- **Added `amdsmi_get_power_info_v2()` with `sensor_ind`**.  
+  - Python API now accepts sensor_ind as an optional argument, does not impact previous usage
 
 - **Deprecated enum `AMDSMI_NORMAL_STRING_LENGTH` in favor of `AMDSMI_MAX_STRING_LENGTH`**.  
 
@@ -821,14 +724,14 @@ Functions affected by struct change are:
   - The amd_hsmp driver version can also be displayed using the `-c` flag.
   - The new default for the `version` command is to display all the version information, including both amdgpu and amd_hsmp driver versions.
 
-    ```shell
-    amd-smi version
+    ```console
+    $ amd-smi version
     AMDSMI Tool: 24.7.1+b446d6c-dirty | AMDSMI Library version: 24.7.2.0 | ROCm version: N/A | amdgpu version: 6.10.10 | amd_hsmp version: 2.2
 
-    amd-smi version -g
+    $ amd-smi version -g
     AMDSMI Tool: 24.7.1+b446d6c-dirty | AMDSMI Library version: 24.7.2.0 | ROCm version: N/A | amdgpu version: 6.10.10
 
-    amd-smi version -c
+    $ amd-smi version -c
     AMDSMI Tool: 24.7.1+b446d6c-dirty | AMDSMI Library version: 24.7.2.0 | ROCm version: N/A | amd_hsmp version: 2.2
     ```
 
@@ -837,13 +740,13 @@ Functions affected by struct change are:
 
 - **Python API for `amdsmi_get_energy_count()` will change the name for the `power` field to `energy_accumulator`**.  
 
-- **Added violation status output for Graphics Clock Below Host Limit to our CLI: `amdsmi_get_violation_status()`, `amd-smi metric  --throttle`, and `amd-smi monitor --violation`.**  
+- **Added violation status output for Graphics Clock Below Host Limit to our CLI: `amdsmi_get_violation_status()`, `amd-smi metric  --throttle`, and `amd-smi monitor --violation`**.  
   ***Only available for MI300+ ASICs.***  
   Users can retrieve violation status' through either our Python or C++ APIs.  
   Additionally, we have added capability to view these outputs conviently through `amd-smi metric --throttle` and `amd-smi monitor --violation`.  
   Example outputs are listed below (below is for reference, output is subject to change):
 
-    ```shell
+    ```console
     $ amd-smi monitor --violation
     GPU  PVIOL  TVIOL  TVIOL_ACTIVE PHOT_TVIOL  VR_TVIOL  HBM_TVIOL  GFX_CLKVIOL
     0    0 %    0 %           False        0 %       0 %        0 %          0 %
@@ -851,7 +754,7 @@ Functions affected by struct change are:
     ...
     ```
 
-    ```shell
+    ```console
     $ amd-smi metric --throttle
     GPU: 0
         THROTTLE:
@@ -900,7 +803,7 @@ Functions affected by struct change are:
     ```
 
 - **Updated API `amdsmi_get_violation_status()` structure and CLI `amdsmi_violation_status_t` to include GFX Clk below host limit**  
-Updated structure `amdsmi_violation_status_t`:  
+    Updated structure `amdsmi_violation_status_t`:  
 
     ```C
     typedef struct {
@@ -915,24 +818,24 @@ Updated structure `amdsmi_violation_status_t`:
     ```
 
 - **Updated API `amdsmi_get_gpu_vram_info()` structure and CLI `amd-smi static --vram`**  
-Updated structure `amdsmi_vram_info_t`:  
+    Updated structure `amdsmi_vram_info_t`:  
 
     ```C
     typedef struct {
-    amdsmi_vram_type_t vram_type;
-    amdsmi_vram_vendor_type_t vram_vendor;
-    uint64_t vram_size;
-    uint32_t vram_bit_width;
-    uint64_t vram_max_bandwidth;   //!< The VRAM max bandwidth at current memory clock (GB/s)
-    uint64_t reserved[4];
+        amdsmi_vram_type_t vram_type;
+        amdsmi_vram_vendor_type_t vram_vendor;
+        uint64_t vram_size;
+        uint32_t vram_bit_width;
+        uint64_t vram_max_bandwidth;   //!< The VRAM max bandwidth at current memory clock (GB/s)
+        uint64_t reserved[4];
     } amdsmi_vram_info_t;
 
     amdsmi_status_t amdsmi_get_gpu_vram_info(amdsmi_processor_handle processor_handle, amdsmi_vram_info_t *info)
     ```
 
-  Example CLI output:
+    Example CLI output:
 
-    ```shell
+    ```console
     $ amd-smi static --vram
     GPU: 0
         VRAM:
@@ -951,14 +854,101 @@ Updated structure `amdsmi_vram_info_t`:
     ...
     ```
 
+- **Changed amd-smi partition --accelerator & `amdsmi_get_gpu_accelerator_partition_profile_config()` detect users running without root/sudo privledges**  
+  - Updated `amdsmi_get_gpu_accelerator_partition_profile_config()` to return `AMDSMI_STATUS_NO_PERM` immediately if users run without root/sudo permissions.
+  - Updated `amd-smi partition --accelerator` to provide a warning for users without root/sudo permissions (see example below, ***output subject to change***).
+
+    ```console
+    $ amd-smi partition --accelerator
+
+    ACCELERATOR_PARTITION_PROFILES:
+
+    ***************************************************************************
+    ** WARNING:                                                              **
+    ** ACCELERATOR_PARTITION_PROFILES requires sudo/root permissions to run. **
+    ** Please run the command with sudo permissions to get accurate results. **
+    ***************************************************************************
+
+    GPU_ID  PROFILE_INDEX  MEMORY_PARTITION_CAPS  ACCELERATOR_TYPE  PARTITION_ID     NUM_PARTITIONS  NUM_RESOURCES  RESOURCE_INDEX  RESOURCE_TYPE  RESOURCE_INSTANCES  RESOURCES_SHARED
+    N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
+    N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
+    N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
+    N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
+    N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
+    N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
+    N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
+    N/A     N/A            N/A                    N/A               0                N/A             N/A            N/A             N/A            N/A                 N/A
+
+    ACCELERATOR_PARTITION_RESOURCES:
+    RESOURCE_INDEX  RESOURCE_TYPE  RESOURCE_INSTANCES  RESOURCES_SHARED
+    N/A             N/A            N/A                 N/A
+    N/A             N/A            N/A                 N/A
+    N/A             N/A            N/A                 N/A
+    N/A             N/A            N/A                 N/A
+    N/A             N/A            N/A                 N/A
+    N/A             N/A            N/A                 N/A
+    N/A             N/A            N/A                 N/A
+    N/A             N/A            N/A                 N/A
+
+
+    Legend:
+    * = Current mode
+    ```
+
+- **Changed `amd-smi partition --current`, `amd-smi partition --accelerator`, and `amdsmi_get_gpu_accelerator_partition_profile()` to display partition ID for each individual partition**  
+  - Host will continue to display in the full array format, they do not display the individual partitions as Baremetal/Guest setups.
+  - Baremetal and Guest MI3x setups will change to reflect each individual partition ID, now provided in `partition_id[0]` location (as seen in other amd-smi CLI commands).  
+  - This change was needed for BM/Guest setups due to other related partition outputs seen in (`amd-smi list` and `amd-smi static --partition`) and individual logical partition devices displayed.
+
+    Previous output:
+
+    ```console
+    $ amd-smi partition --current
+
+    CURRENT_PARTITION:
+    GPU_ID  MEMORY  ACCELERATOR_TYPE  ACCELERATOR_PROFILE_INDEX  PARTITION_ID
+    0       NPS1    CPX               3                          0,1,2,3,4,5,6,7
+    1       NPS1    CPX               3                          N/A
+    2       NPS1    CPX               3                          N/A
+    3       NPS1    CPX               3                          N/A
+    4       NPS1    CPX               3                          N/A
+    5       NPS1    CPX               3                          N/A
+    6       NPS1    CPX               3                          N/A
+    7       NPS1    CPX               3                          N/A
+    8       NPS1    CPX               3                          0,1,2,3,4,5,6,7
+    9       NPS1    CPX               3                          N/A
+    10      NPS1    CPX               3                          N/A
+    ...
+    ```
+
+    New output:
+
+    ```console
+    amd-smi partition --current
+    CURRENT_PARTITION:
+    GPU_ID  MEMORY  ACCELERATOR_TYPE  ACCELERATOR_PROFILE_INDEX  PARTITION_ID
+    0       NPS1    CPX               3                          0
+    1       NPS1    CPX               3                          1
+    2       NPS1    CPX               3                          2
+    3       NPS1    CPX               3                          3
+    4       NPS1    CPX               3                          4
+    5       NPS1    CPX               3                          5
+    6       NPS1    CPX               3                          6
+    7       NPS1    CPX               3                          7
+    8       NPS1    CPX               3                          0
+    9       NPS1    CPX               3                          1
+    10      NPS1    CPX               3                          2
+    ...
+    ```
+
 ### Removed
 
 - **Removed `GFX_BUSY_ACC` from `amd-smi metric --usage`**.  
-  Displaying `GFX_BUSY_ACC` does not provide helpful outputs for users.  
+  - Displaying `GFX_BUSY_ACC` does not provide helpful outputs for users.  
 
   Old output:
-  
-  ```shell
+
+  ```console
   $ amd-smi metric --usage
     GPU: 0
         USAGE:
@@ -980,7 +970,7 @@ Updated structure `amdsmi_vram_info_t`:
 
   New Output:
 
-  ```shell
+  ```console
   $ amd-smi metric --usage
   GPU: 0
       USAGE:
@@ -1018,7 +1008,7 @@ Updated structure `amdsmi_vram_info_t`:
   - With this change `amd-smi xgmi` will now display the statistics in dynamically selected readable units.
   - Example output CLI output:
 
-    ```shell
+    ```console
     $ amd-smi xgmi
     LINK METRIC TABLE:
         bdf          bit_rate max_bandwidth link_type 0000:05:00.0 0000:26:00.0 0000:46:00.0 0000:65:00.0 0000:85:00.0 0000:a6:00.0 0000:c6:00.0 0000:e5:00.0
@@ -1038,11 +1028,11 @@ Updated structure `amdsmi_vram_info_t`:
 
 - **Fixed `amd-smi static --partition` for guest systems with MIx ASICs being unable to run**
 
-- **Fixed `amdsmi_get_gpu_asic_info` and `amd-smi static --asic` not displaying graphics version properly for MI2x, MI1x or Navi 3x ASICs.**  
+- **Fixed `amdsmi_get_gpu_asic_info` and `amd-smi static --asic` not displaying graphics version properly for MI2x, MI1x or Navi 3x ASICs**.  
 
   Before on MI100:
 
-  ```shell
+  ```console
   $ amd-smi static --asic | grep TARGET_GRAPHICS_VERSION
         TARGET_GRAPHICS_VERSION: gfx9008
         TARGET_GRAPHICS_VERSION: gfx9008
@@ -1050,15 +1040,17 @@ Updated structure `amdsmi_vram_info_t`:
 
   After on MI100:
 
-  ```shell
+  ```console
   $ amd-smi static --asic | grep TARGET_GRAPHICS_VERSION
         TARGET_GRAPHICS_VERSION: gfx908
         TARGET_GRAPHICS_VERSION: gfx908
   ```
 
+- **Fixed `amd-smi static --partition` for guest systems with MIx ASICs being unable to run**  
+
 ### Upcoming changes
 
-- **Deprication in ROCm 7.0 of the `AMDSMI_LIB_VERSION_YEAR` enum and API fields.**  
+- **Deprication in ROCm 7.0 of the `AMDSMI_LIB_VERSION_YEAR` enum and API fields**.  
 
 - **Deprication in ROCm 7.0 of the `pasid` field within struct `amdsmi_process_info_t`**  
 
@@ -1085,9 +1077,6 @@ Updated structure `amdsmi_vram_info_t`:
     2) ***Update your OS' kernel***  
     3) ***Building and installing your own kernel***  
 
-- **ModuleNotFoundError: No module named 'more_itertools' issue on Azure Linux 3 and Mariner2.0**  
- With the reintroduction of python3-wheel and python3-setuptools dependencies in the CMake of amdsmi, Azure Linux 3 and Mariner2.0 now require more_itertools to build the Python library successfully. 
-  - **Workaround:** Execute `sudo python3 -m pip install more_itertools` before installation to resolve this issue.
 ## amd_smi_lib for ROCm 6.3.1
 
 ### Added
@@ -1098,7 +1087,8 @@ Updated structure `amdsmi_vram_info_t`:
   Due to fix mentioned in `Resolved Issues`, this change was needed.  
   Reason: Navi products use vclk and dclk for both encode and decode. On MI products, only decode is supported.  
   Before:
-  ```shell
+
+  ```console
   $ amd-smi monitor -n -d
   GPU  ENC_UTIL  ENC_CLOCK  DEC_UTIL  DEC_CLOCK
     0     0.0 %     29 MHz       N/A     22 MHz
@@ -1110,8 +1100,10 @@ Updated structure `amdsmi_vram_info_t`:
     6     0.0 %     29 MHz       N/A     22 MHz
     7     0.0 %     29 MHz       N/A     22 MHz
   ```
+
   After:
-  ```shell
+
+  ```console
   $ amd-smi monitor -n -d
   GPU  ENC_UTIL  DEC_UTIL  VCLOCK  DCLOCK
     0       N/A     0.0 %  29 MHz  22 MHz
@@ -1136,7 +1128,7 @@ Updated structure `amdsmi_vram_info_t`:
   Navi products cannot support displaying ENC_UTIL % at this time.  
 
   Before:
-  ```shell
+  ```console
   $ amd-smi monitor -n -d
   GPU  ENC_UTIL  ENC_CLOCK  DEC_UTIL  DEC_CLOCK
     0     0.0 %     29 MHz       N/A     22 MHz
@@ -1148,8 +1140,9 @@ Updated structure `amdsmi_vram_info_t`:
     6     0.0 %     29 MHz       N/A     22 MHz
     7     0.0 %     29 MHz       N/A     22 MHz
   ```
+
   After:
-  ```shell
+  ```console
   $ amd-smi monitor -n -d
   GPU  ENC_UTIL  DEC_UTIL  VCLOCK  DCLOCK
     0       N/A     0.0 %  29 MHz  22 MHz
@@ -1701,10 +1694,10 @@ memory partition modes upon an invalid argument return from memory partition mod
 This change also updates `amd-smi partition`, `amd-smi partition --memory`, and `amd-smi partition --accelerator` (*see note below)   
 ***Note: *Subject to change for ROCm 6.4***
 
-- **Updated `amdsmi_set_gpu_memory_partition` to not return until a successful restart of AMD GPU Driver.**  
+- **Updated `amdsmi_set_gpu_memory_partition` to not return until a successful restart of AMD GPU Driver**.  
 This change keeps checking for ~ up to 40 seconds for a successful restart of the AMD GPU driver. Additionally, the API call continues to check if memory partition (NPS) SYSFS files are successfully updated to reflect the user's requested memory partition (NPS) mode change. Otherwise, reports an error back to the user. Due to these changes, we have updated AMD SMI's CLI to reflect the maximum wait of 40 seconds, while a memory partition change is in progress.
 
-- **All APIs now have the ability to catch driver reporting invalid arguments.**  
+- **All APIs now have the ability to catch driver reporting invalid arguments**.  
 Now AMD SMI APIs can show AMDSMI_STATUS_INVAL when driver returns EINVAL.  
 For example, if user tries to set to NPS8, but the memory partition mode is not an available mode to set to. Commonly referred to as `CAPS` (see `amd-smi partition --memory`), provided by `amdsmi_get_gpu_accelerator_partition_profile`(*see note below).  
 ***Note: *Subject to change for ROCm 6.4***
@@ -2970,4 +2963,3 @@ Now the information is displayed as a table by each GPU's BDF, which closer rese
 
 - **Fix for driver not initialized**.  
 If driver module is not loaded, user retrieve error reponse indicating amdgpu module is not loaded.
-
