@@ -221,6 +221,7 @@ from .amdsmi_interface import amdsmi_get_gpu_subsystem_name
 from .amdsmi_interface import amdsmi_topo_get_numa_node_number
 from .amdsmi_interface import amdsmi_topo_get_link_weight
 from .amdsmi_interface import amdsmi_get_minmax_bandwidth_between_processors
+from .amdsmi_interface import amdsmi_get_link_metrics
 from .amdsmi_interface import amdsmi_topo_get_link_type
 from .amdsmi_interface import amdsmi_topo_get_p2p_status
 from .amdsmi_interface import amdsmi_is_P2P_accessible
@@ -276,13 +277,11 @@ from .amdsmi_interface import AmdSmiMemoryType
 from .amdsmi_interface import AmdSmiFreqInd
 from .amdsmi_interface import AmdSmiXgmiStatus
 from .amdsmi_interface import AmdSmiMemoryPageStatus
-from .amdsmi_interface import AmdSmiIoLinkType
 from .amdsmi_interface import AmdSmiLinkType
 from .amdsmi_interface import AmdSmiUtilizationCounterType
 from .amdsmi_interface import AmdSmiProcessorType
 from .amdsmi_interface import AmdSmiVirtualizationMode
 from .amdsmi_interface import AmdSmiVramType
-from .amdsmi_interface import AmdSmiVramVendor
 from .amdsmi_interface import AmdSmiAffinityScope
 
 # Exceptions

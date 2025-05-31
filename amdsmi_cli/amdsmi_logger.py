@@ -213,28 +213,28 @@ class AMDSMILogger():
                 for process_dict in value:
                     if process_dict['process_info'] == "No running processes detected":
                         # Add N/A for empty process_info
-                        table_values += "N/A".rjust(20) + "N/A".rjust(9) + "N/A".rjust(10) + \
-                                        "N/A".rjust(10) + "N/A".rjust(10) + "N/A".rjust(11) + \
-                                        "N/A".rjust(8) + "N/A".rjust(8) + '\n'
+                        table_values += "N/A".rjust(17) + "N/A".rjust(9) + "N/A".rjust(10) + \
+                                        "N/A".rjust(10) + "N/A".rjust(10) + "N/A".rjust(10) + \
+                                        "N/A".rjust(9) + '\n'
                     else:
+                        #Fix this herre
                         for process_key, process_value in process_dict['process_info'].items():
                             string_process_value = str(process_value)
                             if process_key == "name":
                                 # Truncate name if too long
-                                process_name = string_process_value[:20]
+                                process_name = string_process_value[:17]
                                 if process_name == "":
                                     process_name = "N/A"
-                                table_values += process_name.rjust(20)
+                                table_values += process_name.rjust(17)
                             elif process_key == "pid":
                                 table_values += string_process_value.rjust(9)
                             elif process_key == "memory_usage":
                                 for memory_key, memory_value in process_value.items():
                                     table_values += str(memory_value).rjust(10)
                             elif process_key == "mem_usage":
-                                table_values += string_process_value.rjust(11)
-                            elif process_key == "usage":
-                                for usage_key, usage_value in process_value.items():
-                                    table_values += str(usage_value).rjust(8)
+                                table_values += string_process_value.rjust(10)
+                            elif process_key == "cu_occupancy":
+                                table_values += string_process_value.rjust(9)
                                 # Add the stored gpu and stored timestamp to the next line
                                 table_values += '\n'
                                 if stored_timestamp:
@@ -482,20 +482,6 @@ class AMDSMILogger():
                 self.output.update(flat_dict)
             else:
                 self.output[argument] = data
-        else:
-            raise amdsmi_cli_exceptions(self, "Invalid output format given, only json, csv, and human_readable supported")
-
-
-    def _store_output_rocmsmi(self, gpu_id, argument, data):
-        if self.is_json_format():
-            # put output into self.json_output
-            pass
-        elif self.is_csv_format():
-            # put output into self.csv_output
-            pass
-        elif self.is_human_readable_format():
-            # put output into self.human_readable_output
-            pass
         else:
             raise amdsmi_cli_exceptions(self, "Invalid output format given, only json, csv, and human_readable supported")
 
@@ -971,3 +957,104 @@ class AMDSMILogger():
                 with self.destination.open('a', encoding="utf-8") as output_file:
                     output_file.write(primary_table + '\n')
                     output_file.write(secondary_table)
+
+
+    def print_default_output(self, output: Dict):
+        # some template lines
+        default_line_1 = "+------------------------------------------------------------------------------+"
+        default_line_2 = "|--------------------------------------+---------------------------------------|"
+        default_line_3 = "|======================================+=======================================|"
+        default_line_4 = "+--------------------------------------+---------------------------------------+"
+
+        # print the version information first
+        amd_smi_version = str(output['version_info']['amd-smi'])
+        if len(amd_smi_version) > 20:
+            amd_smi_version = amd_smi_version[:17] + "..."
+        rocm_version = "N/A"
+        if output['version_info']['rocm version'][0]:
+            rocm_version = str(output['version_info']['rocm version'][1]).ljust(8)
+        driver_version = output['version_info']['amdgpu version']
+        if driver_version == "N/A":
+            amdgpu_version = "N/A".ljust(8)
+        else:
+            amdgpu_version = str(driver_version['driver_version']).ljust(8)
+
+        # print GPU info
+        print(default_line_1)
+        print("| AMD-SMI {0:20s} amdgpu version: {1:8s} ROCm version: {2:8s} |".format(amd_smi_version.ljust(20), amdgpu_version, rocm_version))
+        print(default_line_2)
+        print("| BDF                         GPU-Name | Mem-Util    Temp   UECC   Power-Usage |")
+        print("| GPU  HIP-ID   OAM-ID  Partition-Mode | GFX-Util     Fan         Memory-Usage |")
+        print(default_line_3)
+
+        line_count = 0
+        end = len(output['gpu_info_list']) - 1
+
+        for gpu_info in output['gpu_info_list']:
+            bdf = str(gpu_info['bdf']).ljust(12)
+
+            market_name = str(gpu_info['market_name'])
+            if len(market_name) > 22:
+                market_name = ("..." + market_name[-19:])
+            market_name = market_name.rjust(22)
+
+            mem_util = gpu_info['mem_util']
+            if mem_util != "N/A":
+                mem_util = str(mem_util) + " %"
+            mem_util = mem_util.rjust(8)
+
+            temp = gpu_info['temp']
+            if temp != "N/A":
+                temp = str(temp) + " \u00b0C"
+            temp = temp.rjust(6)
+
+            u_ecc = str(gpu_info['uncorr_ecc']).rjust(5)
+
+            power_usage = gpu_info['power_usage']
+            if power_usage != "N/A":
+                power_usage = f"{gpu_info['power_usage']['current_power']}/{gpu_info['power_usage']['power_limit']} W"
+            power_usage = str(power_usage).rjust(12)
+            print("| {0:12.12s}  {1:22.22s} | {2:8.8s}  {3:6.6s}  {4:5.5s}  {5:12.12s} |".format(bdf, market_name, mem_util, temp, u_ecc, power_usage))
+            
+            gpu_id = str(gpu_info['gpu_id']).rjust(3)
+            hip_id = str(gpu_info['hip_id']).rjust(6)
+            oam_id = str(gpu_info['oam_id']).rjust(7)
+            partition_modes = str(gpu_info['partition_mode']).rjust(14)
+
+            gfx_util = gpu_info['gfx_util']
+            if gfx_util != "N/A":
+                gfx_util = str(gfx_util) + " %"
+            gfx_util = gfx_util.rjust(8)
+
+            fan = gpu_info['fan']
+            if fan != "N/A":
+                fan = str(fan) + " %"
+            fan = fan.rjust(7)
+
+            mem_usage = gpu_info['mem_usage']
+            if mem_usage != "N/A":
+                mem_usage = f"{gpu_info['mem_usage']['used_vram']}/{gpu_info['mem_usage']['total_vram']} MB"
+            mem_usage = mem_usage.rjust(19)
+            print("| {0:3.3s}  {1:6.6s}  {2:7.7s}  {3:14.14s} | {4:8.8s} {5:7.7s}  {6:19.19s} |".format(gpu_id, hip_id, oam_id, partition_modes, gfx_util, fan, mem_usage))
+
+            if line_count < end:
+                print(default_line_2)
+            line_count += 1
+
+        print(default_line_4)
+
+        # # print process list of all GPUs last
+        # print(default_line_1)
+        # print("| Processes:                                                                  |")
+        # print("|  GPU     PID      Process name                                    VRAM_MEM  |")
+        # print(default_line_5)
+        # if len(output['processes']) != 0:
+        #     for process in output['processes']:
+        #         gpu_id = str(process['gpu']).rjust(4)
+        #         pid = str(process['pid']).ljust(7)
+        #         process_name = str(process['name']).ljust(25)
+        #         vram_mem = str(process['vram']).rjust(18)
+        #         print("| {0:4s}     {1:7s}  {2:25s}    {3:18s} |".format(gpu_id, pid, process_name, vram_mem))
+        # else:
+        #     print("|  No running processes found                                                 |")
+        # print(default_line_1)

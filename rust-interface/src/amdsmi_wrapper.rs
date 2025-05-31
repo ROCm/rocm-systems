@@ -102,12 +102,8 @@ where
     }
 }
 pub const AMDSMI_MAX_MM_IP_COUNT: u32 = 8;
-pub const AMDSMI_MAX_DATE_LENGTH: u32 = 32;
 pub const AMDSMI_MAX_STRING_LENGTH: u32 = 256;
-pub const AMDSMI_256_LENGTH: u32 = 256;
 pub const AMDSMI_MAX_DEVICES: u32 = 32;
-pub const AMDSMI_MAX_NAME: u32 = 32;
-pub const AMDSMI_MAX_DRIVER_VERSION_LENGTH: u32 = 80;
 pub const AMDSMI_MAX_CONTAINER_TYPE: u32 = 2;
 pub const AMDSMI_MAX_CACHE_TYPES: u32 = 10;
 pub const AMDSMI_MAX_NUM_XGMI_PHYSICAL_LINK: u32 = 64;
@@ -127,16 +123,14 @@ pub const AMDSMI_MAX_NUM_XCC: u32 = 8;
 pub const AMDSMI_MAX_NUM_XCP: u32 = 8;
 pub const AMDSMI_TIME_FORMAT: &[u8; 20] = b"%02d:%02d:%02d.%03d\0";
 pub const AMDSMI_DATE_FORMAT: &[u8; 35] = b"%04d-%02d-%02d:%02d:%02d:%02d.%03d\0";
-pub const AMDSMI_LIB_VERSION_YEAR: u32 = 25;
-pub const AMDSMI_LIB_VERSION_MAJOR: u32 = 25;
-pub const AMDSMI_LIB_VERSION_MINOR: u32 = 4;
-pub const AMDSMI_LIB_VERSION_RELEASE: u32 = 2;
+pub const AMDSMI_LIB_VERSION_MAJOR: u32 = 26;
+pub const AMDSMI_LIB_VERSION_MINOR: u32 = 0;
+pub const AMDSMI_LIB_VERSION_RELEASE: u32 = 0;
 pub const AMDSMI_MAX_NUM_FREQUENCIES: u32 = 33;
 pub const AMDSMI_MAX_FAN_SPEED: u32 = 255;
 pub const AMDSMI_NUM_VOLTAGE_CURVE_POINTS: u32 = 3;
 pub const AMDSMI_MAX_UTILIZATION_VALUES: u32 = 4;
 pub const AMDSMI_MAX_NUM_PM_POLICIES: u32 = 32;
-pub const AMDSMI_DEFAULT_VARIANT: i32 = -1;
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub enum AmdsmiInitFlagsT {
@@ -793,7 +787,7 @@ const _: () = {
 #[derive(Debug, Copy, Clone)]
 pub struct AmdsmiVbiosInfoT {
     pub name: [::std::os::raw::c_char; 256usize],
-    pub build_date: [::std::os::raw::c_char; 32usize],
+    pub build_date: [::std::os::raw::c_char; 256usize],
     pub part_number: [::std::os::raw::c_char; 256usize],
     pub version: [::std::os::raw::c_char; 256usize],
     pub reserved: [u64; 32usize],
@@ -807,11 +801,11 @@ const _: () = {
     ["Offset of field: AmdsmiVbiosInfoT::build_date"]
         [::std::mem::offset_of!(AmdsmiVbiosInfoT, build_date) - 256usize];
     ["Offset of field: AmdsmiVbiosInfoT::part_number"]
-        [::std::mem::offset_of!(AmdsmiVbiosInfoT, part_number) - 288usize];
+        [::std::mem::offset_of!(AmdsmiVbiosInfoT, part_number) - 512usize];
     ["Offset of field: AmdsmiVbiosInfoT::version"]
-        [::std::mem::offset_of!(AmdsmiVbiosInfoT, version) - 544usize];
+        [::std::mem::offset_of!(AmdsmiVbiosInfoT, version) - 768usize];
     ["Offset of field: AmdsmiVbiosInfoT::reserved"]
-        [::std::mem::offset_of!(AmdsmiVbiosInfoT, reserved) - 800usize];
+        [::std::mem::offset_of!(AmdsmiVbiosInfoT, reserved) - 1024usize];
 };
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
@@ -919,7 +913,8 @@ pub struct AmdsmiAsicInfoT {
     pub oam_id: u32,
     pub num_of_compute_units: u32,
     pub target_graphics_version: u64,
-    pub reserved: [u32; 22usize],
+    pub subsystem_id: u32,
+    pub reserved: [u32; 21usize],
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
@@ -945,8 +940,10 @@ const _: () = {
         [::std::mem::offset_of!(AmdsmiAsicInfoT, num_of_compute_units) - 792usize];
     ["Offset of field: AmdsmiAsicInfoT::target_graphics_version"]
         [::std::mem::offset_of!(AmdsmiAsicInfoT, target_graphics_version) - 800usize];
+    ["Offset of field: AmdsmiAsicInfoT::subsystem_id"]
+        [::std::mem::offset_of!(AmdsmiAsicInfoT, subsystem_id) - 808usize];
     ["Offset of field: AmdsmiAsicInfoT::reserved"]
-        [::std::mem::offset_of!(AmdsmiAsicInfoT, reserved) - 808usize];
+        [::std::mem::offset_of!(AmdsmiAsicInfoT, reserved) - 812usize];
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -1830,7 +1827,7 @@ const _: () = {
 #[derive(Debug, Copy, Clone)]
 pub struct AmdsmiDpmPolicyEntryT {
     pub policy_id: u32,
-    pub policy_description: [::std::os::raw::c_char; 32usize],
+    pub policy_description: [::std::os::raw::c_char; 256usize],
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
@@ -2283,7 +2280,6 @@ const _: () = {
 #[derive(Debug, Copy, Clone)]
 pub struct AmdsmiProcessInfoT {
     pub process_id: u32,
-    pub pasid: u32,
     pub vram_usage: u64,
     pub sdma_usage: u64,
     pub cu_occupancy: u32,
@@ -2294,14 +2290,12 @@ const _: () = {
     ["Alignment of AmdsmiProcessInfoT"][::std::mem::align_of::<AmdsmiProcessInfoT>() - 8usize];
     ["Offset of field: AmdsmiProcessInfoT::process_id"]
         [::std::mem::offset_of!(AmdsmiProcessInfoT, process_id) - 0usize];
-    ["Offset of field: AmdsmiProcessInfoT::pasid"]
-        [::std::mem::offset_of!(AmdsmiProcessInfoT, pasid) - 4usize];
     ["Offset of field: AmdsmiProcessInfoT::vram_usage"]
-        [::std::mem::offset_of!(AmdsmiProcessInfoT, vram_usage) - 8usize];
+        [::std::mem::offset_of!(AmdsmiProcessInfoT, vram_usage) - 4usize];
     ["Offset of field: AmdsmiProcessInfoT::sdma_usage"]
-        [::std::mem::offset_of!(AmdsmiProcessInfoT, sdma_usage) - 16usize];
+        [::std::mem::offset_of!(AmdsmiProcessInfoT, sdma_usage) - 12usize];
     ["Offset of field: AmdsmiProcessInfoT::cu_occupancy"]
-        [::std::mem::offset_of!(AmdsmiProcessInfoT, cu_occupancy) - 24usize];
+        [::std::mem::offset_of!(AmdsmiProcessInfoT, cu_occupancy) - 20usize];
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -3021,13 +3015,6 @@ extern "C" {
     pub fn amdsmi_get_gpu_activity(
         processor_handle: AmdsmiProcessorHandle,
         info: *mut AmdsmiEngineUsageT,
-    ) -> AmdsmiStatusT;
-}
-extern "C" {
-    pub fn amdsmi_get_power_info_v2(
-        processor_handle: AmdsmiProcessorHandle,
-        sensor_ind: u32,
-        info: *mut AmdsmiPowerInfoT,
     ) -> AmdsmiStatusT;
 }
 extern "C" {

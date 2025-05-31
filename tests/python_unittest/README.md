@@ -501,6 +501,7 @@ test_walkthrough (__main__.TestAmdSmiPythonInterface) ...
   asic_info['vendor_name'] is: Advanced Micro Devices Inc. [AMD/ATI]
   asic_info['device_id'] is: 0x73bf
   asic_info['rev_id'] is: 0xc1
+  asic_info['subsystem_id'] is: 0xc34
   asic_info['asic_serial'] is: 0xF8FFEB47A027DE4D
   asic_info['oam_id'] is: N/A
   asic_info['target_graphics_version'] is: gfx1030
