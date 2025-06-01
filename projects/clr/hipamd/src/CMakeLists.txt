@@ -157,6 +157,13 @@ target_include_directories(amdhip64
 target_compile_definitions(amdhip64 PRIVATE __HIP_PLATFORM_AMD__)
 target_link_libraries(amdhip64 PRIVATE ${OPENGL_LIBRARIES})
 target_link_libraries(amdhip64 PRIVATE ${CMAKE_DL_LIBS})
+
+# Link against SIMDe pseudo-target, even though it is header-only, to ensure
+# <> inclusion.
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(simde REQUIRED IMPORTED_TARGET simde)
+target_link_libraries(amdhip64 PRIVATE PkgConfig::simde)
+
 # Add link to comgr, hsa-runtime and other required libraries in target files
 # This is required for static libraries
 if(NOT BUILD_SHARED_LIBS)
