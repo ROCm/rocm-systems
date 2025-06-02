@@ -37,6 +37,8 @@ subtrees:
           title: Profiling Python scripts
         - file: how-to/nic-profiling.rst
           title: Network performance profiling
+        - file: how-to/vcn-jpeg-sampling.rst
+          title: VCN and JPEG sampling and tracing
     - file: how-to/understanding-rocprof-sys-output.rst
       title: Understanding the output
     - file: how-to/using-rocprof-sys-api.rst

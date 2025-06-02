@@ -31,19 +31,20 @@ profiling, how it supports performance analysis, and how to leverage its capabil
   .. grid-item-card:: How to
 
     * :doc:`Configuring the environment <./how-to/configuring-validating-environment>`
-  
+
       * :doc:`Configuring runtime options <./how-to/configuring-runtime-options>`
- 
+
     * :doc:`Profiling <./how-to/general-tips-using-rocprof-sys>`
-    
+
       * :doc:`Sampling the call stack <./how-to/sampling-call-stack>`
       * :doc:`Instrumenting and rewriting a binary application <./how-to/instrumenting-rewriting-binary-application>`
       * :doc:`Performing causal profiling <./how-to/performing-causal-profiling>`
       * :doc:`Profiling Python scripts <./how-to/profiling-python-scripts>`
       * :doc:`Network performance profiling <./how-to/nic-profiling>`
-     
+      * :doc:`VCN and JPEG sampling and tracing <./how-to/vcn-jpeg-sampling>`
+
     * :doc:`Understanding the output <./how-to/understanding-rocprof-sys-output>`
-    * :doc:`Using the ROCm Systems Profiler API <./how-to/using-rocprof-sys-api>`    
+    * :doc:`Using the ROCm Systems Profiler API <./how-to/using-rocprof-sys-api>`
 
   .. grid-item-card:: Conceptual
 
