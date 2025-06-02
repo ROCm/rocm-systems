@@ -343,7 +343,7 @@ void RdciStatsSubSystem::process() {
   }
 
   if (stats_ops_ == STATS_DISPLAY) {
-    rdc_job_info_t job_info;
+    rdc_job_info_t job_info{};
     result = rdc_job_get_stats(rdc_handle_, const_cast<char*>(job_id_.c_str()), &job_info);
     if (result != RDC_ST_OK) {
       throw RdcException(result, rdc_status_string(result));
@@ -369,6 +369,30 @@ void RdciStatsSubSystem::process() {
         show_job_stats_json(job_info.gpus[i]);
         std::cout << "}";
       }
+    }
+    if (!is_json_output()) {
+      std::cout << "| Processes Tracked                | " << job_info.num_processes << "\n";
+      for (uint32_t p = 0; p < job_info.num_processes; ++p) {
+        auto& pr = job_info.processes[p];
+        std::ostringstream oss;
+        oss << "PID: " << pr.pid << ", Start: " << pr.start_time / 1000
+            << ", End: " << pr.stop_time / 1000;
+        std::cout << "| " << std::setw(33) << std::left << pr.process_name << "| " << oss.str()
+                  << "\n";
+      }
+      std::cout << "+----------------------------------+------------------------------------\n";
+    } else {
+      std::cout << ", \"processes_tracked\": " << job_info.num_processes;
+      std::cout << ", \"processes\": [";
+      for (uint32_t p = 0; p < job_info.num_processes; ++p) {
+        auto& pr = job_info.processes[p];
+        std::cout << (p ? "," : "") << "{"
+                  << "\"pid\":" << pr.pid << ","
+                  << "\"process_name\":\"" << pr.process_name << "\","
+                  << "\"start_time\":" << pr.start_time / 1000 << ","
+                  << "\"stop_time\":" << pr.stop_time / 1000 << "}";
+      }
+      std::cout << "]";
     }
     return;
   }
