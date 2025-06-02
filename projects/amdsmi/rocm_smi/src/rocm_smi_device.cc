@@ -69,6 +69,7 @@ static const char *kDevDevProdNameFName = "product_name";
 static const char *kDevDevProdNumFName = "product_number";
 static const char *kDevDevIDFName = "device";
 static const char* kDevXGMIPhysicalIDFName = "xgmi_physical_id";
+static const char *kDevXGMIPortNumFName = "xgmi_port_num";
 static const char *kDevDevRevIDFName = "revision";
 static const char *kDevVendorIDFName = "vendor";
 static const char *kDevBoardInfoFName = "board_info";
@@ -249,6 +250,7 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevDevProdNum, kDevDevProdNumFName},
     {kDevDevID, kDevDevIDFName},
     {kDevXGMIPhysicalID, kDevXGMIPhysicalIDFName},
+    {kDevXGMIPortNum, kDevXGMIPortNumFName},
     {kDevDevRevID, kDevDevRevIDFName},
     {kDevVendorID, kDevVendorIDFName},
     {kDevPCieVendorID, kDevPCieVendorIDFName},
@@ -420,6 +422,7 @@ Device::devInfoTypesStrings = {
   {kDevMemOverDriveLevel, "kDevMemOverDriveLevel"},
   {kDevDevID, "kDevDevID"},
   {kDevXGMIPhysicalID, "kDevXGMIPhysicalID"},
+  {kDevXGMIPortNum, "kDevXGMIPortNum"},
   {kDevDevRevID, "kDevDevRevID"},
   {kDevDevProdName, "kDevDevProdName"},
   {kDevBoardInfo, "kDevBoardInfo"},
@@ -521,6 +524,7 @@ static const std::map<const char *, dev_depends_t> kDevFuncDependsMap = {
   {"rsmi_dev_vram_vendor_get",           {{kDevVramVendorFName}, {}}},
   {"rsmi_dev_id_get",                    {{kDevDevIDFName}, {}}},
   {"rsmi_dev_xgmi_physical_id_get",      {{kDevXGMIPhysicalIDFName}, {}}},
+  {"rsmi_dev_xgmi_port_num_get",         {{kDevXGMIPortNumFName}, {}}},
   {"rsmi_dev_revision_get",              {{kDevDevRevIDFName}, {}}},
   {"rsmi_dev_vendor_id_get",             {{kDevVendorIDFName}, {}}},
   {"rsmi_dev_name_get",                  {{kDevVendorIDFName,
@@ -1198,6 +1202,7 @@ int Device::readDevInfo(DevInfoTypes type, uint64_t *val) {
     case kDevPCieVendorID:
     case kDevErrCntFeatures:
     case kDevXGMIPhysicalID:
+    case kDevXGMIPortNum:
     case kDevErrRASSchema:
     case kDevErrTableVersion:
       ret = readDevInfoStr(type, &tempStr);
@@ -1380,6 +1385,7 @@ int Device::readDevInfo(DevInfoTypes type, std::string *val) {
     case kDevMemoryPartition:
     case kDevNumaNode:
     case kDevXGMIPhysicalID:
+    case kDevXGMIPortNum:
     case kDevAvailableMemoryPartition:
     case kDevProcessIsolation:
     case kDevSupportedXcpConfigs:

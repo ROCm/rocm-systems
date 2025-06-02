@@ -3112,22 +3112,18 @@ def amdsmi_get_link_metrics(processor_handle: amdsmi_wrapper.amdsmi_processor_ha
         )
     )
 
-    bdf = amdsmi_wrapper.amdsmi_bdf_t()
-    # TODO: Dummy BDF - to be replaced with destination BDF from xgmi_port_num when available
-    bdf.struct_amdsmi_bdf_t = amdsmi_wrapper.struct_amdsmi_bdf_t(0xFFFF, 0xFF, 0xFF, 0xF)
-
     links = []
     for i in range(AMDSMI_MAX_NUM_XGMI_LINKS):
         link = link_metrics.links[i]
         links.append({
-            "bdf": _format_bdf(bdf),
+            "bdf": _format_bdf(link.bdf),
             "link_type": link.link_type,
             "read": link.read,
             "write": link.write,
         })
 
     return {
-        "num_links": AMDSMI_MAX_NUM_XGMI_LINKS,
+        "num_links": link_metrics.num_links,
         "bit_rate": link_metrics.bit_rate,
         "max_bandwidth": link_metrics.max_bandwidth,
         "links": links
