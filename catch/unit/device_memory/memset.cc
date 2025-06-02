@@ -41,7 +41,7 @@ __global__ void memset_at_once_kernel(T* dst, int value, const size_t alloc_size
 
 template <typename T> __global__ void memset_one_by_one_kernel(T* dst, int value, const size_t N) {
   const auto tid = cooperative_groups::this_grid().thread_rank();
-  const auto stride = cooperative_groups::this_grid().size();
+  const auto stride = cooperative_groups::this_grid().num_threads();
 
   for (auto i = tid; i < N; i += stride) {
     memset(dst + tid, value, sizeof(T));

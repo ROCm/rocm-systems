@@ -43,7 +43,7 @@ static __global__ void coalesced_group_size_getter(unsigned int* sizes, uint64_t
       cg::tiled_partition<ksize>(cg::this_thread_block());
   if (active_mask & (static_cast<uint64_t>(1) << tile.thread_rank())) {
     BaseType active = cg::coalesced_threads();
-    sizes[thread_rank_in_grid()] = active.size();
+    sizes[thread_rank_in_grid()] = active.num_threads();
   }
 }
 
@@ -699,12 +699,12 @@ __global__ void coalesced_group_sync_check(T* global_data, unsigned int* wait_mo
   const auto block = cg::this_thread_block();
   const cg::thread_block_tile<ksize> partition = cg::tiled_partition<ksize>(block);
 
-  const auto data_idx = [&block](unsigned int i) { return use_global ? i : (i % block.size()); };
+  const auto data_idx = [&block](unsigned int i) { return use_global ? i : (i % block.num_threads()); };
 
-  const auto partition_rank = block.thread_rank() / partition.size();
+  const auto partition_rank = block.thread_rank() / partition.num_threads();
 
-  const auto block_base_idx = tid / block.size() * block.size();
-  const auto tile_base_idx = block_base_idx + partition_rank * partition.size();
+  const auto block_base_idx = tid / block.num_threads() * block.num_threads();
+  const auto tile_base_idx = block_base_idx + partition_rank * partition.num_threads();
   const auto wait_modifier = wait_modifiers[tid];
 
   if (active_mask & (static_cast<uint64_t>(1) << partition.thread_rank())) {
@@ -713,8 +713,8 @@ __global__ void coalesced_group_sync_check(T* global_data, unsigned int* wait_mo
     data[data_idx(tid)] = active.thread_rank();
     active.sync();
     bool valid = true;
-    for (auto i = 0; i < active.size(); ++i) {
-      const auto expected = (active.thread_rank() + i) % active.size();
+    for (auto i = 0; i < active.num_threads(); ++i) {
+      const auto expected = (active.thread_rank() + i) % active.num_threads();
       unsigned int active_count = 0;
       int offset = -1;
       while (active_count <= expected) {

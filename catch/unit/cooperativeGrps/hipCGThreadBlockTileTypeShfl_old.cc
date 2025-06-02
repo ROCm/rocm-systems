@@ -31,7 +31,7 @@ enum class TiledGroupShflTests { shflDown, shflXor, shflUp };
 template <unsigned int tileSz>
 __device__ int reduction_kernel_shfl_down(cg::thread_block_tile<tileSz> const& g,
                                           volatile int val) {
-  int sz = g.size();
+  int sz = g.num_threads();
 
   for (int i = sz / 2; i > 0; i >>= 1) {
     val += g.shfl_down(val, i);
@@ -49,7 +49,7 @@ __device__ int reduction_kernel_shfl_down(cg::thread_block_tile<tileSz> const& g
 
 template <unsigned int tileSz>
 __device__ int reduction_kernel_shfl_xor(cg::thread_block_tile<tileSz> const& g, int val) {
-  int sz = g.size();
+  int sz = g.num_threads();
 
   for (int i = sz / 2; i > 0; i >>= 1) {
     val += g.shfl_xor(val, i);
@@ -67,7 +67,7 @@ __device__ int reduction_kernel_shfl_xor(cg::thread_block_tile<tileSz> const& g,
 
 template <unsigned int tileSz>
 __device__ int prefix_sum_kernel(cg::thread_block_tile<tileSz> const& g, volatile int val) {
-  int sz = g.size();
+  int sz = g.num_threads();
 #pragma unroll
   for (int i = 1; i < sz; i <<= 1) {
     int temp = g.shfl_up(val, i);
@@ -88,7 +88,7 @@ static __global__ void kernel_cg_group_partition_static(int* result,
   // Choose a leader thread to print the results
   if (thread_block_CG_ty.thread_rank() == 0) {
     printf(" Creating %d groups, of tile size %d threads:\n\n",
-           (int)thread_block_CG_ty.size() / tile_size, tile_size);
+           (int)thread_block_CG_ty.num_threads() / tile_size, tile_size);
   }
 
   thread_block_CG_ty.sync();
@@ -110,7 +110,7 @@ static __global__ void kernel_cg_group_partition_static(int* result,
   }
 
   if (tiled_part.thread_rank() == 0 && shfl_test != TiledGroupShflTests::shflUp) {
-    printf("   Sum of all ranks 0..%d in this tiled_part group is %d\n", tiled_part.size() - 1,
+    printf("   Sum of all ranks 0..%d in this tiled_part group is %d\n", tiled_part.num_threads() - 1,
            output_sum);
     result[thread_block_CG_ty.thread_rank() / (tile_size)] = output_sum;
   }

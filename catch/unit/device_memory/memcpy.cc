@@ -41,7 +41,7 @@ __global__ void memcpy_at_once_kernel(T* dst, T* src, const size_t alloc_size) {
 
 template <typename T> __global__ void memcpy_one_by_one_kernel(T* dst, T* src, const size_t N) {
   const auto tid = cooperative_groups::this_grid().thread_rank();
-  const auto stride = cooperative_groups::this_grid().size();
+  const auto stride = cooperative_groups::this_grid().num_threads();
 
   for (auto i = tid; i < N; i += stride) {
     memcpy(dst + tid, src + tid, sizeof(T));

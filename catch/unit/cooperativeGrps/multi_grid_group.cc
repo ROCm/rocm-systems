@@ -35,7 +35,7 @@ namespace cg = cooperative_groups;
 template <typename BaseType = cg::multi_grid_group>
 static __global__ void multi_grid_group_size_getter(unsigned int* sizes) {
   const BaseType group = cg::this_multi_grid();
-  sizes[thread_rank_in_grid()] = group.size();
+  sizes[thread_rank_in_grid()] = group.num_threads();
 }
 
 template <typename BaseType = cg::multi_grid_group>
@@ -79,7 +79,7 @@ static __global__ void sync_kernel(unsigned int* atomic_val, unsigned int* globa
     // If the sync below fails, then the other threads may hit the
     // atomicInc instruction many times before the last thread ever gets to it.
     // If the sync works, then it will likely contain "total number of blocks"*i
-    if (rank == (grid.size() - 1)) {
+    if (rank == (grid.num_threads() - 1)) {
       busy_wait(100000);
     }
     if (threadIdx.x == blockDim.x - 1 && threadIdx.y == blockDim.y - 1 &&
@@ -90,14 +90,14 @@ static __global__ void sync_kernel(unsigned int* atomic_val, unsigned int* globa
 
     // Make the last thread in the entire multi-grid run way behind
     // everyone else.
-    if (global_rank == (mgrid.size() - 1)) {
+    if (global_rank == (mgrid.num_threads() - 1)) {
       busy_wait(100000);
     }
     // During even iterations, add into your own array entry
     // During odd iterations, add into next array entry
     unsigned grid_rank = mgrid.grid_rank();
     unsigned inter_gpu_offset = (grid_rank + 1) % mgrid.num_grids();
-    if (rank == (grid.size() - 1)) {
+    if (rank == (grid.num_threads() - 1)) {
       if (i % 2 == 0) {
         global_array[grid_rank] += 2;
       } else {

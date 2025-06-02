@@ -34,7 +34,7 @@ static __global__ void kernel_cg_grid_group_type(int* size_dev, int* thd_rank_de
   int gIdx = (blockIdx.x * blockDim.x) + threadIdx.x;
 
   // Test size
-  size_dev[gIdx] = gg.size();
+  size_dev[gIdx] = gg.num_threads();
 
   // Test thread_rank
   thd_rank_dev[gIdx] = gg.thread_rank();
@@ -57,7 +57,7 @@ static __global__ void kernel_cg_grid_group_type_via_base_type(int* size_dev, in
   int gIdx = (blockIdx.x * blockDim.x) + threadIdx.x;
 
   // Test size
-  size_dev[gIdx] = tg.size();
+  size_dev[gIdx] = tg.num_threads();
 
   // Test thread_rank
   thd_rank_dev[gIdx] = tg.thread_rank();
@@ -106,7 +106,7 @@ static __global__ void coop_kernel(unsigned int* first_array, unsigned int* seco
                                    unsigned int loops, unsigned int array_len) {
   cg::grid_group grid = cg::this_grid();
   unsigned int rank = grid.thread_rank();
-  unsigned int grid_size = grid.size();
+  unsigned int grid_size = grid.num_threads();
 
   for (int i = 0; i < loops; i++) {
     // The goal of this loop is to directly add in values from
@@ -145,7 +145,7 @@ static __global__ void test_kernel(unsigned int* atomic_val, unsigned int* array
     // If the barrier works, then it will likely contain some number
     // near "total number of blocks". It will be the last wavefront to
     // reach the atomicInc, but everyone will have only hit the atomic once.
-    if (rank == (grid.size() - 1)) {
+    if (rank == (grid.num_threads() - 1)) {
       long long time_diff = 0;
       long long last_clock = clock64();
       do {
@@ -185,7 +185,7 @@ __global__ void test_kernel_gfx11(unsigned int* atomic_val, unsigned int* array,
     // If the barrier works, then it will likely contain some number
     // near "total number of blocks". It will be the last wavefront to
     // reach the atomicInc, but everyone will have only hit the atomic once.
-    if (rank == (grid.size() - 1)) {
+    if (rank == (grid.num_threads() - 1)) {
       long long time_diff = 0;
       long long last_clock = clock_function();
       do {

@@ -83,7 +83,7 @@ static auto coalesce_threads(const uint64_t mask, unsigned int warp_size) {
 __device__ bool deactivate_thread(uint64_t* active_masks, unsigned int warp_size) {
   const auto warp = cg::tiled_partition(cg::this_thread_block(), warp_size);
   const auto block = cg::this_thread_block();
-  const auto warps_per_block = (block.size() + warp_size - 1) / warp_size;
+  const auto warps_per_block = (block.num_threads() + warp_size - 1) / warp_size;
   const auto block_rank = (blockIdx.z * gridDim.y + blockIdx.y) * gridDim.x + blockIdx.x;
   const auto idx = block_rank * warps_per_block + block.thread_rank() / warp_size;
   return !(active_masks[idx] & (1u << warp.thread_rank()));
@@ -96,7 +96,7 @@ __global__ void coalesced_group_tiled_partition_size_getter(uint64_t* active_mas
   if (deactivate_thread(active_masks, warp_size)) {
     return;
   }
-  sizes[thread_rank_in_grid()] = cg::tiled_partition(cg::coalesced_threads(), tile_size).size();
+  sizes[thread_rank_in_grid()] = cg::tiled_partition(cg::coalesced_threads(), tile_size).num_threads();
 }
 
 __global__ void coalesced_group_tiled_partition_thread_rank_getter(uint64_t* active_masks,
@@ -548,13 +548,13 @@ __global__ void coalesced_group_tiled_partition_sync_check(uint64_t* active_mask
   const auto block = cg::this_thread_block();
   const auto coalesced = cg::coalesced_threads();
   const auto partition = cg::tiled_partition(coalesced, tile_size);
-  const auto data_idx = [&block](unsigned int i) { return use_global ? i : (i % block.size()); };
+  const auto data_idx = [&block](unsigned int i) { return use_global ? i : (i % block.num_threads()); };
 
   const auto wait_modifier = wait_modifiers[tid];
 
-  const auto block_rank = tid / block.size();
+  const auto block_rank = tid / block.num_threads();
   const auto warp_rank = block.thread_rank() / warp_size;
-  const auto warp_base = block_rank * block.size() + warp_rank * warp_size;
+  const auto warp_base = block_rank * block.num_threads() + warp_rank * warp_size;
   const auto global_idx = warp_base + coalesced.thread_rank();
 
   busy_wait(wait_modifier);
@@ -566,7 +566,7 @@ __global__ void coalesced_group_tiled_partition_sync_check(uint64_t* active_mask
   for (auto i = 0u; i < tile_size; ++i) {
     const auto target_rank_in_tile = (coalesced.thread_rank() + i) % tile_size;
     const auto target_rank_in_warp = tile_rank * tile_size + target_rank_in_tile;
-    if (target_rank_in_warp >= coalesced.size()) {
+    if (target_rank_in_warp >= coalesced.num_threads()) {
       continue;
     }
     if (!(valid &= (data[data_idx(warp_base + target_rank_in_warp)] == target_rank_in_tile))) {

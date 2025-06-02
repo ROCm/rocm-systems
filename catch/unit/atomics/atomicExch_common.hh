@@ -97,7 +97,7 @@ __global__ void atomic_exch_kernel(T* const global_mem, T* const old_vals, const
     __syncthreads();
   }
 
-  const auto n = cooperative_groups::this_grid().size();
+  const auto n = cooperative_groups::this_grid().num_threads();
 
   T* atomic_addr = pitched_offset(mem, pitch, tid % width);
 

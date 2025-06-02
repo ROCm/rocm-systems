@@ -44,10 +44,10 @@ template <bool dynamic, unsigned int tile_size>
 __global__ void thread_block_partition_size_getter(unsigned int* sizes) {
   const auto group = cg::this_thread_block();
   if constexpr (dynamic) {
-    sizes[thread_rank_in_grid()] = cg::tiled_partition(group, tile_size).size();
+    sizes[thread_rank_in_grid()] = cg::tiled_partition(group, tile_size).num_threads();
   } else {
     cg::thread_block_tile<tile_size> tiled_partition = cg::tiled_partition<tile_size>(group);
-    sizes[thread_rank_in_grid()] = tiled_partition.size();
+    sizes[thread_rank_in_grid()] = tiled_partition.num_threads();
   }
 }
 
@@ -421,15 +421,15 @@ __global__ void block_tile_sync_check(T* global_data, unsigned int* wait_modifie
   const cg::thread_block_tile<tile_size> partition =
       cg::tiled_partition<tile_size>(cg::this_thread_block());
 
-  const auto data_idx = [&block](unsigned int i) { return use_global ? i : (i % block.size()); };
+  const auto data_idx = [&block](unsigned int i) { return use_global ? i : (i % block.num_threads()); };
 
-  const auto partitions_in_block = (block.size() + partition.size() - 1) / partition.size();
-  const auto partition_rank = block.thread_rank() / partition.size();
-  const auto tail = partitions_in_block * partition.size() - block.size();
-  const auto window_size = partition.size() - tail * (partition_rank == partitions_in_block - 1);
+  const auto partitions_in_block = (block.num_threads() + partition.num_threads() - 1) / partition.num_threads();
+  const auto partition_rank = block.thread_rank() / partition.num_threads();
+  const auto tail = partitions_in_block * partition.num_threads() - block.num_threads();
+  const auto window_size = partition.num_threads() - tail * (partition_rank == partitions_in_block - 1);
 
-  const auto block_base_idx = tid / block.size() * block.size();
-  const auto tile_base_idx = block_base_idx + partition_rank * partition.size();
+  const auto block_base_idx = tid / block.num_threads() * block.num_threads();
+  const auto tile_base_idx = block_base_idx + partition_rank * partition.num_threads();
 
   const auto wait_modifier = wait_modifiers[tid];
   busy_wait(wait_modifier);

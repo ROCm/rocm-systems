@@ -44,7 +44,7 @@ inline __device__ bool deactivate_thread(const uint64_t* const active_masks) {
   const auto warp =
       cooperative_groups::tiled_partition(cooperative_groups::this_thread_block(), warpSize);
   const auto block = cooperative_groups::this_thread_block();
-  const auto warps_per_block = (block.size() + warpSize - 1) / warpSize;
+  const auto warps_per_block = (block.num_threads() + warpSize - 1) / warpSize;
   const auto block_rank = (blockIdx.z * gridDim.y + blockIdx.y) * gridDim.x + blockIdx.x;
   const auto idx = block_rank * warps_per_block + block.thread_rank() / warpSize;
   return !(active_masks[idx] & (static_cast<uint64_t>(1) << warp.thread_rank()));

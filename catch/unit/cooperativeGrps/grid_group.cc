@@ -32,7 +32,7 @@ THE SOFTWARE.
 namespace cg = cooperative_groups;
 
 static __global__ void grid_group_size_getter(unsigned int* sizes) {
-  sizes[thread_rank_in_grid()] = cg::this_grid().size();
+  sizes[thread_rank_in_grid()] = cg::this_grid().num_threads();
 }
 
 static __global__ void grid_group_thread_rank_getter(unsigned int* thread_ranks) {
@@ -64,7 +64,7 @@ static __global__ void sync_kernel(unsigned int* atomic_val, unsigned int *per_l
     // If the sync below fails, then the other threads may hit the
     // atomicInc instruction many times before the last thread ever gets to it.
     // If the sync works, then it will likely contain "total number of blocks"*iter
-    if (rank == (grid.size() - 1)) {
+    if (rank == (grid.num_threads() - 1)) {
       // The last wavefront should spin on this loop's atomic value
       // until all of the other wavefronts have incremented the
       // per-loop atomic and hit the grid.sync()

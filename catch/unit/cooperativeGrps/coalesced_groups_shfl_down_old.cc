@@ -38,7 +38,7 @@ using namespace cooperative_groups;
 #define WAVE_SIZE 32
 
 __device__ int reduction_kernel_shfl_down(coalesced_group const& g, int val) {
-  int sz = g.size();
+  int sz = g.num_threads();
 
   for (int i = sz / 2; i > 0; i >>= 1) {
     val += g.shfl_down(val, i);
@@ -76,7 +76,7 @@ __global__ void kernel_cg_group_partition_shfl_down(int* result, unsigned int ti
     // Choose a leader thread to print the results
     if (threadBlockCGTy.thread_rank() == 0) {
       printf(" Creating %d groups, of tile size %d threads:\n\n",
-             (int)threadBlockCGTy.size() / tileSz, tileSz);
+             (int)threadBlockCGTy.num_threads() / tileSz, tileSz);
     }
 
     threadBlockCGTy.sync();
@@ -94,7 +94,7 @@ __global__ void kernel_cg_group_partition_shfl_down(int* result, unsigned int ti
       printf(
           "   Sum of all ranks 0..%d in this tiledPartition group using shfl_down is %d (expected "
           "%d)\n",
-          tiledPartition.size() - 1, outputSum, expectedSum);
+          tiledPartition.num_threads() - 1, outputSum, expectedSum);
       result[threadBlockCGTy.thread_rank() / (tileSz)] = outputSum;
     }
     return;
