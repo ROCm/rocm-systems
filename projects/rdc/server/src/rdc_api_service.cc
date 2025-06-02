@@ -470,6 +470,15 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
     copy_gpu_usage_info(job_info.gpus[i], ginfo);
   }
 
+  reply->set_num_processes(job_info.num_processes);
+  for (uint32_t i = 0; i < job_info.num_processes; i++) {
+    ::rdc::RdcProcessStatsInfo* pinfo = reply->add_processes();
+    pinfo->set_pid(job_info.processes[i].pid);
+    pinfo->set_process_name(job_info.processes[i].process_name);
+    pinfo->set_start_time(job_info.processes[i].start_time);
+    pinfo->set_stop_time(job_info.processes[i].stop_time);
+  }
+
   return ::grpc::Status::OK;
 }
 

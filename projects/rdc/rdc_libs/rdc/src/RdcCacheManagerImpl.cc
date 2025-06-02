@@ -196,6 +196,40 @@ rdc_status_t RdcCacheManagerImpl::rdc_update_job_stats(uint32_t gpu_index,
     return RDC_ST_NOT_FOUND;
   }
 
+  auto& je = cache_jobs_.at(job_id);
+
+  // handle process‐start/stop
+  if (value.field_id == RDC_EVNT_NOTIF_PROCESS_START ||
+      value.field_id == RDC_EVNT_NOTIF_PROCESS_END) {
+    rdc_process_status_info_t info{};
+    sscanf(value.value.str, "PID: %u  task: %255s", &info.pid, info.process_name);
+
+    uint64_t ts_us = value.ts * 1000;
+    if (value.field_id == RDC_EVNT_NOTIF_PROCESS_START) {
+      info.start_time = ts_us;
+    } else {
+      info.stop_time = ts_us;
+    }
+
+    auto pit = je.pid_to_index.find(info.pid);
+    if (pit == je.pid_to_index.end()) {
+      uint32_t slot = je.num_processes;
+      if (slot < RDC_MAX_NUM_PROCESSES_STATUS) {
+        je.processes[slot] = info;
+        je.pid_to_index[info.pid] = slot;
+        je.num_processes = slot + 1;
+      }
+    } else {
+      auto& entry = je.processes[pit->second];
+      if (value.field_id == RDC_EVNT_NOTIF_PROCESS_START) {
+        entry.start_time = info.start_time;
+      } else {
+        entry.stop_time = info.stop_time;
+      }
+    }
+    return RDC_ST_OK;
+  }
+
   auto gpu_iter = job_iter->second.gpu_stats.find(gpu_index);
   if (gpu_iter == job_iter->second.gpu_stats.end()) {
     return RDC_ST_NOT_FOUND;
@@ -380,6 +414,13 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_get_stats(const char jobId[64],
   set_average_summary(summary_info.gpu_temperature, p_job_info->num_gpus);
   set_average_summary(summary_info.memory_clock, p_job_info->num_gpus);
 
+  // Set process start/stop info
+  auto& je = cache_jobs_[jobId];
+  p_job_info->num_processes = je.num_processes;
+  for (uint32_t i = 0; i < je.num_processes; ++i) {
+    p_job_info->processes[i] = je.processes[i];
+  }
+
   return RDC_ST_OK;
 }
 
@@ -392,9 +433,12 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_start_stats(const char job_id[64],
                                                       const rdc_group_info_t& ginfo,
                                                       const rdc_field_group_info_t& finfo,
                                                       const rdc_gpu_gauges_t& gpu_gauges) {
-  RdcJobStatsCacheEntry cacheEntry;
+  RdcJobStatsCacheEntry cacheEntry{};
   cacheEntry.start_time = std::time(nullptr);
   cacheEntry.end_time = 0;
+  cacheEntry.num_processes = 0;
+  cacheEntry.pid_to_index.clear();
+  for (auto& p : cacheEntry.processes) p = {};
   for (unsigned int i = 0; i < ginfo.count; i++) {  // GPUs
     GpuSummaryStats gstats;
     gstats.energy_consumed = 0;

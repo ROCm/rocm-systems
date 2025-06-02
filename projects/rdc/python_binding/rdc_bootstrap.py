@@ -232,7 +232,15 @@ class rdc_field_t(c_int):
      RDC_EVNT_NOTIF_THERMAL_THROTTLE = 2001
      RDC_EVNT_NOTIF_PRE_RESET = 2002
      RDC_EVNT_NOTIF_POST_RESET = 2003
-     RDC_EVNT_NOTIF_RING_HANG = 2004
+     RDC_EVNT_NOTIF_MIGRATE_START = 2004
+     RDC_EVNT_NOTIF_MIGRATE_END = 2005
+     RDC_EVNT_NOTIF_PAGE_FAULT_START = 2006
+     RDC_EVNT_NOTIF_PAGE_FAULT_END = 2007
+     RDC_EVNT_NOTIF_QUEUE_EVICTION = 2008
+     RDC_EVNT_NOTIF_QUEUE_RESTORE = 2009
+     RDC_EVNT_NOTIF_UNMAP_FROM_GPU = 2010
+     RDC_EVNT_NOTIF_PROCESS_START = 2011
+     RDC_EVNT_NOTIF_PROCESS_END = 2012
      RDC_HEALTH_XGMI_ERROR = 3000
      RDC_HEALTH_PCIE_REPLAY_COUNT = 3001
      RDC_HEALTH_RETIRED_PAGE_NUM = 3002
@@ -254,7 +262,15 @@ class rdc_field_t(c_int):
         RDC_EVNT_NOTIF_THERMAL_THROTTLE: rdc_metric_type_t.COUNTER,
         RDC_EVNT_NOTIF_PRE_RESET: rdc_metric_type_t.COUNTER,
         RDC_EVNT_NOTIF_POST_RESET: rdc_metric_type_t.COUNTER,
-        RDC_EVNT_NOTIF_RING_HANG: rdc_metric_type_t.COUNTER,
+        RDC_EVNT_NOTIF_MIGRATE_START: rdc_metric_type_t.COUNTER,
+        RDC_EVNT_NOTIF_MIGRATE_END: rdc_metric_type_t.COUNTER,
+        RDC_EVNT_NOTIF_PAGE_FAULT_START: rdc_metric_type_t.COUNTER,
+        RDC_EVNT_NOTIF_PAGE_FAULT_END: rdc_metric_type_t.COUNTER,
+        RDC_EVNT_NOTIF_QUEUE_EVICTION: rdc_metric_type_t.COUNTER,
+        RDC_EVNT_NOTIF_QUEUE_RESTORE: rdc_metric_type_t.COUNTER,
+        RDC_EVNT_NOTIF_UNMAP_FROM_GPU: rdc_metric_type_t.COUNTER,
+        RDC_EVNT_NOTIF_PROCESS_START: rdc_metric_type_t.COUNTER,
+        RDC_EVNT_NOTIF_PROCESS_END: rdc_metric_type_t.COUNTER,
      }
 
      @classmethod
@@ -317,11 +333,21 @@ class rdc_gpu_usage_info_t(Structure):
             ,("memory_utilization", rdc_stats_summary_t)
             ]
 
+class rdc_process_status_info_t(Structure):
+    _fields_ = [
+            ("pid", c_uint32)
+            ,("process_name", c_char*256)
+            ,("start_time", c_uint64)
+            ,("stop_time", c_uint64)
+            ]
+
 class rdc_job_info_t(Structure):
     _fields_ = [
             ("num_gpus", c_uint32)
             ,("summary", rdc_gpu_usage_info_t)
             ,("gpus", rdc_gpu_usage_info_t*16)
+            ,("num_processes", c_uint32)
+            ,("processes", rdc_process_status_info_t*64)
             ]
 
 class rdc_anonymous_0(ctypes.Union):
