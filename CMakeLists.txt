@@ -201,7 +201,7 @@ endif()
 
 find_package(
     amd_smi
-    25.4.2
+    26.0.0
     NAMES
     amd_smi
     HINTS
