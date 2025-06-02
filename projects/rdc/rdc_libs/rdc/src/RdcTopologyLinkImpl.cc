@@ -114,7 +114,7 @@ rdc_status_t RdcTopologyLinkImpl::rdc_device_topology_get(uint32_t gpu_index,
       }
 
       uint64_t hops = std::numeric_limits<uint64_t>::max();
-      amdsmi_io_link_type_t type = AMDSMI_IOLINK_TYPE_UNDEFINED;
+      amdsmi_link_type_t type = AMDSMI_LINK_TYPE_UNKNOWN;
       err = amdsmi_topo_get_link_type(ph.first, ph.second, &hops, &type);
       if (err != AMDSMI_STATUS_SUCCESS) {
         RDC_LOG(RDC_INFO, "Fail to get process GPUs hops and type information: " << err);

@@ -81,7 +81,6 @@ rdc_status_t RdcSmiDiagnosticImpl::check_smi_process_info(uint32_t gpu_index[RDC
     // will not clear /proc sys file until the process is terminated.
     if (procs[i].cu_occupancy == 0) continue;
     info += " Process: " + std::to_string(procs[i].process_id) +=
-        ", pasid: " + std::to_string(procs[i].pasid) +=
         ", vram_usage: " + std::to_string(procs[i].vram_usage) +=
         ", sdma_usage: " + std::to_string(procs[i].sdma_usage) +=
         ", cu_occupancy: " + std::to_string(procs[i].cu_occupancy) += ".";
@@ -183,11 +182,10 @@ rdc_status_t RdcSmiDiagnosticImpl::check_smi_topo_info(uint32_t gpu_index[RDC_MA
   *result = {};
   result->test_case = RDC_DIAG_NODE_TOPOLOGY;
 
-  const std::map<amdsmi_io_link_type_t, std::string> link_to_string = {
-      {AMDSMI_IOLINK_TYPE_UNDEFINED, "Undefined"},
-      {AMDSMI_IOLINK_TYPE_PCIEXPRESS, "PCI Express"},
-      {AMDSMI_IOLINK_TYPE_XGMI, "XGMI"},
-      {AMDSMI_IOLINK_TYPE_NUMIOLINKTYPES, "IO Link"}};
+  const std::map<amdsmi_link_type_t, std::string> link_to_string = {
+      {AMDSMI_LINK_TYPE_UNKNOWN, "Undefined"},
+      {AMDSMI_LINK_TYPE_PCIE, "PCI Express"},
+      {AMDSMI_LINK_TYPE_XGMI, "XGMI"}};
 
   result->status = RDC_DIAG_RESULT_SKIP;
   result->per_gpu_result_count = 0;
