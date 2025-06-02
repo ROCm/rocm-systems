@@ -304,26 +304,25 @@ class AMDSMIParser(argparse.ArgumentParser):
     def _check_cper_file_path(self):
         """ Argument action validator:
             Returns a path to a file from the input file path provided.
-            If the file doesn't exist or is empty raise error
+            If the file doesn't exist, is empty, or is invalid, raise an error.
         """
         class _CheckInputFilePath(argparse.Action):
             # Checks the values
             def __call__(self, parser, args, values, option_string=None):
                 path = Path(values)
-                if not path.exists():
-                    raise FileNotFoundError(f"CPER file could not be read. Make sure the path '{path}' is correct. ")
-
-                if path.is_dir():
-                    raise argparse.ArgumentTypeError(
-                        f"Invalid Path: {path} is directory when it needs to be a specific file")
-
-                if path.is_file():
-                    if os.stat(values).st_size == 0:
-                        raise argparse.ArgumentTypeError(f"Invalid Path: {path} Input file is empty")
-                    setattr(args, self.dest, path)
-                else:
-                    raise argparse.ArgumentTypeError(
-                        f"Invalid path:{path} Could not determine if value given is a valid path")
+                try:
+                    if not path.exists():
+                        raise FileNotFoundError(f"CPER file could not be read. Make sure the path '{path}' is correct.")
+                    if path.is_dir():
+                        raise IsADirectoryError(f"Invalid Path: {path} is a directory when it needs to be a specific file.")
+                    if path.is_file():
+                        if os.stat(values).st_size == 0:
+                            raise ValueError(f"Invalid Path: {path} Input file is empty.")
+                        setattr(args, self.dest, path)
+                    else:
+                        raise FileNotFoundError(f"Invalid Path: {path} Could not determine if the value given is a valid path.")
+                except Exception as root_cause:
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidFilePathException(path, _CheckInputFilePath.outputformat) from root_cause
         return _CheckInputFilePath
 
 

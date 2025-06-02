@@ -6476,7 +6476,10 @@ class AMDSMICommands():
             args.gpu = self.device_handles
 
         if args.afid and args.cper_file:
-            self.helpers.pvtDumpAfids(args.cper_file)
+            afids = self.helpers.pvtDumpAfids(args.cper_file)
+            for afid in afids:
+                print(afid, end=" ")
+            print("")
             return
 
         if not self.group_check_printed:

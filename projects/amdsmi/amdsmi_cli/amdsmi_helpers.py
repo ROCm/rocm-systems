@@ -1096,7 +1096,7 @@ class AMDSMIHelpers():
             # Header
             print(f"{'timestamp':<20} {'gpu_id':<7} {'severity':<12}", end="")
             if folder:
-                print(f" {'file_name':<17}", end="")
+                print(f" {'file_name':<17} {'afid'}", end="")
             print("")
             self._cper_display_initialized = True
 
@@ -1122,13 +1122,19 @@ class AMDSMIHelpers():
             print(f"{timestamp:<20} {gpu_id:<7} {prefix:<12}", end="")
             if folder:
                 print(f" {cper_data_file:<17}", end="")
+                afids = self.pvtDumpAfids(cper_data_file)
+                for afid in afids:
+                    print(afid, end=" ")
             print("")
             self.increment_cper_count()
 
     def dump_cper_entries(self, folder, entries, cper_data, device_handle, file_limit=None):
         # One‐time header
         if not getattr(self, "_cper_display_initialized", False):
-            print(f"{'timestamp':<20} {'gpu_id':<7} {'severity':<12} {'file_name':<17}")
+            print(f"{'timestamp':<20} {'gpu_id':<7} {'severity':<12} ", end="")
+            if folder:
+                print(f"{'file_name':<17} {'afid'}", end="")
+            print("")
             self._cper_display_initialized = True
 
         if folder:
@@ -1201,7 +1207,9 @@ class AMDSMIHelpers():
                 to_print = printed_rows
 
             for ts, gid, prefix, fname in to_print:
-                print(f"{ts:<20} {gid:<7} {prefix:<12} {fname:<17}")
+                cper_path  = folder / cper_name
+                afids = self.pvtDumpAfids(cper_path)
+                print(f"{ts:<20} {gid:<7} {prefix:<12} {fname:<17} {afids}")
 
         else:
             print(json.dumps(
@@ -1278,13 +1286,9 @@ class AMDSMIHelpers():
         else:
             # assume it's already bytes
             raw = raw_data
-        size = len(raw)
         self.hexdump_to_string(raw)
         afids, num_afids = amdsmi_interface.amdsmi_get_afids_from_cper(raw)
-        print(f"AFIDS: ", end="")
-        for afid in afids:
-            print(afid, end=" ")
-        print("")
+        return afids
 
     def ras_cper(self, args, device_handle, logger, gpu_idx):
         # Parse severity mask dynamically from the --severity option.
@@ -1351,16 +1355,7 @@ class AMDSMIHelpers():
             if len(entries) == 0:
                 break
             if args.folder:
-                if args.follow:
-                    if device_handle:
-                        self.dump_cper_entries(args.folder, entries, cper_data, device_handle, args.file_limit)
-                    else:
-                        self.dump_cper_entries(args.folder, entries, cper_data, device_handle, args.file_limit)
-                else:
-                    if device_handle:
-                        self.dump_cper_entries(args.folder, entries, cper_data, device_handle, args.file_limit)
-                    else:
-                        self.dump_cper_entries(args.folder, entries, cper_data, device_handle, args.file_limit)
+                self.dump_cper_entries(args.folder, entries, cper_data, device_handle, args.file_limit)
                 break
             else:
                 self.display_cper_files_generated(entries, device_handle, args.folder, args.follow)

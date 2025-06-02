@@ -511,6 +511,45 @@ except AmdSmiException as e:
     print(e)
 ```
 
+### amdsmi_get_gpu_board_info
+
+Description: Returns board info for the given GPU
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output:  Dictionary with fields correctable and uncorrectable
+
+Field | Description
+---|---
+`model_number` | Board serial number
+`product_serial` | Product serial
+`fru_id` | FRU ID
+`product_name` | Product name
+`manufacturer_name` | Manufacturer name
+
+Exceptions that can be thrown by `amdsmi_get_gpu_board_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiRetryException`
+* `AmdSmiParameterException`
+
+Example:
+
+```python
+try:
+    device = amdsmi_get_processor_handle_from_bdf("0000:23.00.0")
+    board_info = amdsmi_get_gpu_board_info(device)
+    print(board_info["model_number"])
+    print(board_info["product_serial"])
+    print(board_info["fru_id"])
+    print(board_info["product_name"])
+    print(board_info["manufacturer_name"])
+except AmdSmiException as e:
+    print(e)
+```
+
 ### amdsmi_get_gpu_cache_info
 
 Description: Returns a list of dictionaries containing cache information for the given GPU.
@@ -1185,6 +1224,7 @@ except AmdSmiException as e:
 Description: Dump CPER entries for a given GPU in a file using from CPER header file from RAS tool.
 
 Input parameters:
+
 * `processor_handle` device which to query
 * `severity_mask`    the severity mask of the entries to be retrieved
 * `buffer_size`      pointer to a variable that specifies the size of the cper_data
@@ -1218,53 +1258,65 @@ Example:
 ```python
 for device in devices:
     entries, new_cursor, cper_data = amdsmi_get_gpu_cper_entries(device, severity_mask, buffer_size, initial_cursor)
-    print("CPER entries for device", device)        
+    print("CPER entries for device", device)
     for key, entry in entries.items():
         print("Entry", key)
         print("  Error Severity:", entry.get("error_severity", "Unknown"))
         print("  Notify Type:", entry.get("notify_type", "Unknown"))
         print("  Timestamp:", entry.get("timestamp", ""))
-        print()       
+        print()
     print("New Cursor Position:", new_cursor)
 except AmdSmiException as e:
     print(e)
 ```
 
-### amdsmi_get_gpu_board_info
+### amdsmi_get_afids_from_cper
 
-Description: Returns board info for the given GPU
+Description: Get the AFIDs from CPER buffer
 
 Input parameters:
 
 * `processor_handle` device which to query
+* `severity_mask`    the severity mask of the entries to be retrieved
+* `buffer_size`      pointer to a variable that specifies the size of the cper_data
+* `cursor`           pointer to a variable that will contain the  cursor  for the next call
 
-Output:  Dictionary with fields correctable and uncorrectable
+Output: Dictionary with fields, updated cursor, and a dictionary of the cper_data
 
 Field | Description
 ---|---
-`model_number` | Board serial number
-`product_serial` | Product serial
-`fru_id` | FRU ID
-`product_name` | Product name
-`manufacturer_name` | Manufacturer name
+`error_severity`   | The severity of the CPER error ex: `non_fatal_uncorrected`, `fatal`, `non_fatal_corrected`. |
+`notify_type`      | The notification type associated with the CPER entry. |
+`timestamp`        | The time when the CPER entry was recorded, formatted as `YYYY/MM/DD HH:MM:SS`. |
+`signature`        | A 4-byte signature identifying the entry, typically `CPER`. |
+`revision`         | The revision number of the CPER record format. |
+`signature_end`    | A marker value (typically `0xFFFFFFFF`) confirming the integrity of the signature. |
+`sec_cnt`          | The count of sections included in the CPER entry. |
+`record_length`    | The total length in bytes of the CPER entry. |
+`platform_id`      | A character array identifying the GPU or platform. |
+`creator_id`       | A character array indicating the creator of the CPER entry. |
+`record_id`        | A unique identifier for the CPER entry. |
+`flags`            | Reserved flags related to the CPER entry. |
+`persistence_info` | Reserved information related to persistence. |
 
-Exceptions that can be thrown by `amdsmi_get_gpu_board_info` function:
+Exceptions that can be thrown by `amdsmi_get_gpu_cper_entries` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
 
 Example:
 
 ```python
-try:
-    device = amdsmi_get_processor_handle_from_bdf("0000:23.00.0")
-    board_info = amdsmi_get_gpu_board_info(device)
-    print(board_info["model_number"])
-    print(board_info["product_serial"])
-    print(board_info["fru_id"])
-    print(board_info["product_name"])
-    print(board_info["manufacturer_name"])
+for device in devices:
+    entries, new_cursor, cper_data = amdsmi_get_gpu_cper_entries(device, severity_mask, buffer_size, initial_cursor)
+    print("CPER entries for device", device)
+    for key, entry in entries.items():
+        print("Entry", key)
+        print("  Error Severity:", entry.get("error_severity", "Unknown"))
+        print("  Notify Type:", entry.get("notify_type", "Unknown"))
+        print("  Timestamp:", entry.get("timestamp", ""))
+        print()
+    print("New Cursor Position:", new_cursor)
 except AmdSmiException as e:
     print(e)
 ```
@@ -5387,56 +5439,6 @@ try:
     rocm_load_status, version_message = amdsmi_get_rocm_version()
     print(f"ROCm load status: {rocm_load_status}")
     print(f"ROCm version msg: {version_message}")
-except AmdSmiException as e:
-    print(e)
-```
-
-### amdsmi_get_afids_from_cper
-
-Description: Get the AFIDs from CPER buffer
-
-Input parameters:
-* `processor_handle` device which to query
-* `severity_mask`    the severity mask of the entries to be retrieved
-* `buffer_size`      pointer to a variable that specifies the size of the cper_data
-* `cursor`           pointer to a variable that will contain the  cursor  for the next call
-
-Output: Dictionary with fields, updated cursor, and a dictionary of the cper_data
-
-Field | Description
----|---
-`error_severity`   | The severity of the CPER error ex: `non_fatal_uncorrected`, `fatal`, `non_fatal_corrected`. |
-`notify_type`      | The notification type associated with the CPER entry. |
-`timestamp`        | The time when the CPER entry was recorded, formatted as `YYYY/MM/DD HH:MM:SS`. |
-`signature`        | A 4-byte signature identifying the entry, typically `CPER`. |
-`revision`         | The revision number of the CPER record format. |
-`signature_end`    | A marker value (typically `0xFFFFFFFF`) confirming the integrity of the signature. |
-`sec_cnt`          | The count of sections included in the CPER entry. |
-`record_length`    | The total length in bytes of the CPER entry. |
-`platform_id`      | A character array identifying the GPU or platform. |
-`creator_id`       | A character array indicating the creator of the CPER entry. |
-`record_id`        | A unique identifier for the CPER entry. |
-`flags`            | Reserved flags related to the CPER entry. |
-`persistence_info` | Reserved information related to persistence. |
-
-Exceptions that can be thrown by `amdsmi_get_gpu_cper_entries` function:
-
-* `AmdSmiLibraryException`
-* `AmdSmiParameterException`
-
-Example:
-
-```python
-for device in devices:
-    entries, new_cursor, cper_data = amdsmi_get_gpu_cper_entries(device, severity_mask, buffer_size, initial_cursor)
-    print("CPER entries for device", device)        
-    for key, entry in entries.items():
-        print("Entry", key)
-        print("  Error Severity:", entry.get("error_severity", "Unknown"))
-        print("  Notify Type:", entry.get("notify_type", "Unknown"))
-        print("  Timestamp:", entry.get("timestamp", ""))
-        print()       
-    print("New Cursor Position:", new_cursor)
 except AmdSmiException as e:
     print(e)
 ```

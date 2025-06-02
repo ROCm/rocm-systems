@@ -4145,7 +4145,7 @@ amdsmi_status_t amdsmi_get_afids_from_cper(
         return AMDSMI_STATUS_INVAL;
     }
 
-    int i = 0;
+    uint32_t i = 0;
     for(int afid: cper_decode(cper)) {
         if(i < *num_afids) {
             afids[i] = afid;
