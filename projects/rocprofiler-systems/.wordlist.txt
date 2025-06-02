@@ -31,9 +31,11 @@ proc
 proto
 Pthreads
 rocDecode
+rocdecode
 ROCprofiler
 ROCPROFSYS
 rocJPEG
+rocjpeg
 ROCTX
 roctx
 rpath
