@@ -463,9 +463,8 @@ setup()
     }
 
     amdsmi_version_t _version = get_version();
-    ROCPROFSYS_VERBOSE_F(0, "AMD SMI version: %u.%u.%u.%u - str: %s.\n", _version.year,
-                         _version.major, _version.minor, _version.release,
-                         _version.build);
+    ROCPROFSYS_VERBOSE_F(0, "AMD SMI version: %u.%u.%u - str: %s.\n", _version.major,
+                         _version.minor, _version.release, _version.build);
 
     data::device_count = gpu::get_processor_count();
 
