@@ -88,7 +88,6 @@ template <class R, class... Args> class callback_t<R (*)(Args...)> {
       return function(args...);
     } catch (...) {
       throw std::nested_exception();
-      return R();
     }
   }
 
