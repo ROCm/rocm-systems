@@ -43,7 +43,6 @@
 #ifndef HSA_RUNTIME_CORE_INC_SCRATCH_CACHE_H_
 #define HSA_RUNTIME_CORE_INC_SCRATCH_CACHE_H_
 
-#include "core/inc/amd_gpu_agent.h"
 #include "core/util/locks.h"
 #include "core/util/utils.h"
 
