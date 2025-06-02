@@ -6526,9 +6526,9 @@ class AMDSMICommands():
         default_table_info_dict.update({"version_info": version_info})
 
         gpu_info_list = []
-        # all_process_list = []
+        all_process_list = []
+        all_process_list = []
 
-        # TODO: create new logger function to display table? or modify table?
         # get info for each processor to display in default output
         for processor in processors:
             gpu_info_dict = {}
@@ -6651,20 +6651,22 @@ class AMDSMICommands():
             gpu_info_list.append(gpu_info_dict)
 
             # Running Processes
-            # try:
-            #     raw_process_list = amdsmi_interface.amdsmi_get_gpu_process_list(processor)
-            #     proc_info_dict = {"gpu": "N/A", "pid": "N/A", "name": "N/A", "vram": "N/A"}
-            #     for proc in raw_process_list:
-            #         proc_info_dict['gpu'] = gpu_id
-            #         proc_info_dict['pid'] = proc['pid']
-            #         proc_info_dict['name'] = proc['container_name']
-            #         proc_info_dict['vram'] = str(proc['memory_usage']['vram_mem']) + " MB"
-            #         all_process_list.append(proc_info_dict)
-            # except amdsmi_exception.AmdSmiLibraryException as e:
-            #     logging.debug("Failed to get process list for gpu %s | %s", gpu_id, e.get_error_info())
+            try:
+                raw_process_list = amdsmi_interface.amdsmi_get_gpu_process_list(processor)
+                for proc in raw_process_list:
+                    proc_info_dict = {"gpu": "N/A", "pid": "N/A", "name": "N/A", "vram": "N/A", "mem_usage": "N/A", "cu_occupancy": "N/A"}
+                    proc_info_dict['gpu'] = gpu_id
+                    proc_info_dict['pid'] = proc['pid']
+                    proc_info_dict['name'] = proc['name']
+                    proc_info_dict['vram'] = self.helpers.convert_bytes_to_readable(proc['memory_usage']['vram_mem'])
+                    proc_info_dict['mem_usage'] = self.helpers.convert_bytes_to_readable(proc['mem'])
+                    proc_info_dict['cu_occupancy'] = str(proc['cu_occupancy'])
+                    all_process_list.append(proc_info_dict)
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                logging.debug("Failed to get process list for gpu %s | %s", gpu_id, e.get_error_info())
 
         default_table_info_dict.update({f"gpu_info_list": gpu_info_list})
-        # default_table_info_dict.update({"processes": all_process_list})
+        default_table_info_dict.update({"processes": all_process_list})
 
         if self.logger.is_json_format():
             self.logger.output = default_table_info_dict
