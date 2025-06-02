@@ -49,7 +49,6 @@
 #define HSA_RUNTIME_CORE_UTIL_ATOMIC_HELPERS_H_
 
 #include <atomic>
-#include "utils.h"
 
 //ALWAYS_CONSERVATIVE will very likely overfence your code.
 //For use as a debugging aid only.
