@@ -106,6 +106,17 @@ rdc_status_t RdcWatchTableImpl::rdc_job_start_stats(rdc_gpu_group_t group_id, co
 
   // At last, when every thing sets up, starts to watch the fields.
   result = rdc_field_watch(group_id, JOB_FIELD_ID, update_freq, 0, 0);
+  if (result != RDC_ST_OK) {
+    return result;
+  }
+
+  std::vector<RdcFieldKey> proc_events;
+  for (uint32_t ix = 0; ix < ginfo.count; ++ix) {
+    uint32_t gpu = ginfo.entity_ids[ix];
+    proc_events.emplace_back(gpu, RDC_EVNT_NOTIF_PROCESS_START);
+    proc_events.emplace_back(gpu, RDC_EVNT_NOTIF_PROCESS_END);
+  }
+  result = notifications_->set_listen_events(proc_events);
   return result;
 }
 
