@@ -1844,22 +1844,16 @@ class AMDSMICommands():
                     power_unit = "W"
                     power_info = amdsmi_interface.amdsmi_get_power_info(args.gpu)
                     for key, value in power_info.items():
-                        if value == 0xFFFF:
-                            power_info[key] = "N/A"
-                        elif "voltage" in key:
+                        if "voltage" in key:
                             power_info[key] = self.helpers.unit_format(self.logger,
-                                                                       value,
-                                                                       voltage_unit)
-                        elif "power" in key:
-                            if ((key == "current_socket_power" or key == "average_socket_power")
-                                and value != "N/A"):
-                                power_dict['socket_power'] = self.helpers.unit_format(self.logger,
-                                                                       value,
-                                                                       power_unit)
+                                                                        value,
+                                                                        voltage_unit)
+                        elif key == "socket_power":
                             power_info[key] = self.helpers.unit_format(self.logger,
-                                                                       value,
-                                                                       power_unit)
+                                                                        value,
+                                                                        power_unit)
 
+                    power_dict['socket_power'] = power_info['socket_power']
                     power_dict['gfx_voltage'] = power_info['gfx_voltage']
                     power_dict['soc_voltage'] = power_info['soc_voltage']
                     power_dict['mem_voltage'] = power_info['mem_voltage']
@@ -5948,7 +5942,6 @@ class AMDSMICommands():
                     xgmi_dict['link_metrics']['max_bandwidth'] = max_bandwidth
 
                 # Populate link metrics
-                link_num = 0
                 for dest_gpu in args.gpu:
                     partition_id = -1
                     try:
@@ -5965,57 +5958,45 @@ class AMDSMICommands():
                     dest_link_dict = {
                         "gpu" : dest_gpu_id,
                         "bdf" : dest_gpu_bdf,
-                        "read" : "N/A",
-                        "write" : "N/A"
+                        "read" : 0,
+                        "write" : 0,
                     }
 
-                    # Don't make a call to check link status for the same gpu
-                    if dest_gpu_bdf == src_gpu_bdf:
+                    found = False
+                    for link in xgmi_metrics_info['links']:
+                        if link['bdf'] == dest_gpu_bdf:
+                            # Accumulate read/write if multiple links have the same bdf
+                            dest_link_dict['read'] += link['read']
+                            dest_link_dict['write'] += link['write']
+                            found = True
+                    if not found:
                         dest_link_dict['read'] = "N/A"
                         dest_link_dict['write'] = "N/A"
-                        xgmi_dict['link_metrics']['links'].append(dest_link_dict)
-                        continue
+                    else:
+                        data_unit = 'KB'
+                        if self.logger.is_human_readable_format():
+                            dest_link_dict['read'] = self.helpers.convert_bytes_to_readable(dest_link_dict['read'] * 1024, True)
+                            dest_link_dict['write'] = self.helpers.convert_bytes_to_readable(dest_link_dict['write'] * 1024, True)
+                        elif self.logger.is_json_format():
+                            dest_link_dict['read'] = {"value" : dest_link_dict['read'],
+                                                    "unit" : data_unit}
+                            dest_link_dict['write'] = {"value" : dest_link_dict['write'],
+                                                    "unit" : data_unit}
 
-                    try:
-                        # Get the read write relative to the source gpu
-                        read = xgmi_metrics_info['links'][link_num]['read']
-                        write = xgmi_metrics_info['links'][link_num]['write']
-                        link_num += 1
-                    except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
-                        read = "N/A"
-                        write = "N/A"
-                        logging.debug("Failed to get read data for %s to %s | %s",
-                                        self.helpers.get_gpu_id_from_device_handle(src_gpu),
-                                        self.helpers.get_gpu_id_from_device_handle(dest_gpu),
-                                        e.get_error_info())
-
-                    data_unit = 'KB'
-                    if self.logger.is_human_readable_format():
-                        dest_link_dict['read'] = self.helpers.convert_bytes_to_readable(read * 1024, True)
-                        dest_link_dict['write'] = self.helpers.convert_bytes_to_readable(write * 1024, True)
-                    elif self.logger.is_json_format():
-                        dest_link_dict['read'] = {"value" : read,
-                                                 "unit" : data_unit}
-                        dest_link_dict['write'] = {"value" : write,
-                                                  "unit" : data_unit}
-                    elif self.logger.is_csv_format():
-                        dest_link_dict['read'] = read
-                        dest_link_dict['write'] = write
-
-                    try:
-                        link_type = amdsmi_interface.amdsmi_topo_get_link_type(src_gpu, dest_gpu)['type']
-                        if xgmi_dict['link_metrics']['link_type'] != "XGMI" and isinstance(link_type, int):
-                            if link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_LINK_TYPE_INTERNAL:
-                                xgmi_dict['link_metrics']['link_type'] = "UNKNOWN"
-                            elif link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_LINK_TYPE_PCIE:
-                                xgmi_dict['link_metrics']['link_type'] = "PCIE"
-                            elif link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_LINK_TYPE_XGMI:
-                                xgmi_dict['link_metrics']['link_type'] = "XGMI"
-                    except amdsmi_exception.AmdSmiLibraryException as e:
-                        logging.debug("Failed to get link type for %s to %s | %s",
-                                        self.helpers.get_gpu_id_from_device_handle(src_gpu),
-                                        self.helpers.get_gpu_id_from_device_handle(dest_gpu),
-                                        e.get_error_info())
+                        try:
+                            link_type = amdsmi_interface.amdsmi_topo_get_link_type(src_gpu, dest_gpu)['type']
+                            if xgmi_dict['link_metrics']['link_type'] != "XGMI" and isinstance(link_type, int):
+                                if link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_LINK_TYPE_INTERNAL:
+                                    xgmi_dict['link_metrics']['link_type'] = "UNKNOWN"
+                                elif link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_LINK_TYPE_PCIE:
+                                    xgmi_dict['link_metrics']['link_type'] = "PCIE"
+                                elif link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_LINK_TYPE_XGMI:
+                                    xgmi_dict['link_metrics']['link_type'] = "XGMI"
+                        except amdsmi_exception.AmdSmiLibraryException as e:
+                            logging.debug("Failed to get link type for %s to %s | %s",
+                                            self.helpers.get_gpu_id_from_device_handle(src_gpu),
+                                            self.helpers.get_gpu_id_from_device_handle(dest_gpu),
+                                            e.get_error_info())
 
                     xgmi_dict['link_metrics']['links'].append(dest_link_dict)
 
@@ -6068,7 +6049,11 @@ class AMDSMICommands():
                 new_output.append(self.logger.flatten_dict(elem, topology_override=True))
             self.logger.multiple_device_output = new_output
 
-        if not self.logger.is_human_readable_format():
+        if self.logger.is_json_format():
+            self.logger.store_xgmi_metric_json_output.append(xgmi_values)
+            if not args.link_status:
+                self.logger.combine_arrays_to_json()
+        elif not self.logger.is_human_readable_format():
             self.logger.print_output(multiple_device_enabled=True)
 
         if args.link_status:
@@ -6099,6 +6084,8 @@ class AMDSMICommands():
                     else:
                         del tabular_output_dict['gpu#']
                     tabular_output.append(tabular_output_dict)
+                    if self.logger.is_json_format():
+                        self.logger.store_xgmi_link_status_json_output.append(tabular_output_dict)
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     xgmi_dict['link_metrics']['link_status']={"status": "failed"}
                     logging.debug("Failed to get XGMI link status for GPU %s | %s", src_gpu_id, e.get_error_info())
@@ -6108,8 +6095,11 @@ class AMDSMICommands():
                     xgmi_dict['link_status'] = tabular_output
             self.logger.multiple_device_output= tabular_output
             self.logger.table_title = "\nXGMI LINK STATUS"
-            self.logger.print_output(multiple_device_enabled=True, tabular=True)
+            if not self.logger.is_json_format():
+                self.logger.print_output(multiple_device_enabled=True, tabular=True)
             self.logger.clear_multiple_devices_output()
+            if self.logger.is_json_format():
+                self.logger.combine_arrays_to_json()
             if self.logger.is_human_readable_format():
             # Populate the legend output
                 legend_parts = [
@@ -6489,7 +6479,10 @@ class AMDSMICommands():
             args.gpu = self.device_handles
 
         if args.afid and args.cper_file:
-            self.helpers.pvtDumpAfids(args.cper_file)
+            afids = self.helpers.pvtDumpAfids(args.cper_file)
+            for afid in afids:
+                print(afid, end=" ")
+            print("")
             return
 
         if not self.group_check_printed:
@@ -6539,9 +6532,9 @@ class AMDSMICommands():
         default_table_info_dict.update({"version_info": version_info})
 
         gpu_info_list = []
-        # all_process_list = []
+        all_process_list = []
+        all_process_list = []
 
-        # TODO: create new logger function to display table? or modify table?
         # get info for each processor to display in default output
         for processor in processors:
             gpu_info_dict = {}
@@ -6664,20 +6657,22 @@ class AMDSMICommands():
             gpu_info_list.append(gpu_info_dict)
 
             # Running Processes
-            # try:
-            #     raw_process_list = amdsmi_interface.amdsmi_get_gpu_process_list(processor)
-            #     proc_info_dict = {"gpu": "N/A", "pid": "N/A", "name": "N/A", "vram": "N/A"}
-            #     for proc in raw_process_list:
-            #         proc_info_dict['gpu'] = gpu_id
-            #         proc_info_dict['pid'] = proc['pid']
-            #         proc_info_dict['name'] = proc['container_name']
-            #         proc_info_dict['vram'] = str(proc['memory_usage']['vram_mem']) + " MB"
-            #         all_process_list.append(proc_info_dict)
-            # except amdsmi_exception.AmdSmiLibraryException as e:
-            #     logging.debug("Failed to get process list for gpu %s | %s", gpu_id, e.get_error_info())
+            try:
+                raw_process_list = amdsmi_interface.amdsmi_get_gpu_process_list(processor)
+                for proc in raw_process_list:
+                    proc_info_dict = {"gpu": "N/A", "pid": "N/A", "name": "N/A", "vram": "N/A", "mem_usage": "N/A", "cu_occupancy": "N/A"}
+                    proc_info_dict['gpu'] = gpu_id
+                    proc_info_dict['pid'] = proc['pid']
+                    proc_info_dict['name'] = proc['name']
+                    proc_info_dict['vram'] = self.helpers.convert_bytes_to_readable(proc['memory_usage']['vram_mem'])
+                    proc_info_dict['mem_usage'] = self.helpers.convert_bytes_to_readable(proc['mem'])
+                    proc_info_dict['cu_occupancy'] = str(proc['cu_occupancy'])
+                    all_process_list.append(proc_info_dict)
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                logging.debug("Failed to get process list for gpu %s | %s", gpu_id, e.get_error_info())
 
         default_table_info_dict.update({f"gpu_info_list": gpu_info_list})
-        # default_table_info_dict.update({"processes": all_process_list})
+        default_table_info_dict.update({"processes": all_process_list})
 
         if self.logger.is_json_format():
             self.logger.output = default_table_info_dict

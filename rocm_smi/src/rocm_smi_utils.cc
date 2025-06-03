@@ -327,18 +327,19 @@ GetDevBinaryBlob(amd::smi::DevInfoTypes type,
 
 rsmi_status_t ErrnoToRsmiStatus(int err) {
   switch (err) {
-    case 0:      return RSMI_STATUS_SUCCESS;
-    case ESRCH:  return RSMI_STATUS_NOT_FOUND;
-    case EACCES: return RSMI_STATUS_PERMISSION;
+    case 0:       return RSMI_STATUS_SUCCESS;
+    case ESRCH:   return RSMI_STATUS_NOT_FOUND;
+    case EACCES:  return RSMI_STATUS_PERMISSION;
     case EPERM:
-    case ENOENT: return RSMI_STATUS_NOT_SUPPORTED;
+    case ENOENT:  return RSMI_STATUS_NOT_SUPPORTED;
     case EBADF:
-    case EISDIR: return RSMI_STATUS_FILE_ERROR;
-    case EINTR:  return RSMI_STATUS_INTERRUPT;
-    case EIO:    return RSMI_STATUS_UNEXPECTED_SIZE;
-    case ENXIO:  return RSMI_STATUS_UNEXPECTED_DATA;
-    case EBUSY:  return RSMI_STATUS_BUSY;
-    case EINVAL: return RSMI_STATUS_INVALID_ARGS;
+    case EISDIR:  return RSMI_STATUS_FILE_ERROR;
+    case EINTR:   return RSMI_STATUS_INTERRUPT;
+    case EIO:     return RSMI_STATUS_UNEXPECTED_SIZE;
+    case ENXIO:   return RSMI_STATUS_UNEXPECTED_DATA;
+    case EBUSY:   return RSMI_STATUS_BUSY;
+    case EINVAL:  return RSMI_STATUS_INVALID_ARGS;
+    case ENOTDIR: return RSMI_STATUS_DIRECTORY_NOT_FOUND;
     default:     return RSMI_STATUS_UNKNOWN_ERROR;
   }
 }

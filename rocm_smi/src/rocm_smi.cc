@@ -274,6 +274,25 @@ static rsmi_status_t get_dev_value_str(amd::smi::DevInfoTypes type,
 
   return amd::smi::ErrnoToRsmiStatus(ret);
 }
+static rsmi_status_t read_dev_port_map_file(amd::smi::DevInfoTypes type, uint32_t dv_ind, std::string *val_str) {
+    assert(val_str != nullptr);
+    if (val_str == nullptr) {
+        return RSMI_STATUS_INVALID_ARGS;
+    }
+    GET_DEV_FROM_INDX
+    std::string file_path = dev->get_sys_file_path_by_type(type);
+    if (file_path.empty()) {
+        return RSMI_STATUS_FILE_ERROR;
+    }
+    std::ifstream infile(file_path);
+    if (!infile) {
+        return RSMI_STATUS_FILE_ERROR;
+    }
+    std::ostringstream ss;
+    ss << infile.rdbuf();
+    *val_str = ss.str();
+    return RSMI_STATUS_SUCCESS;
+}
 static rsmi_status_t get_dev_value_int(amd::smi::DevInfoTypes type,
                                          uint32_t dv_ind, uint64_t *val_int) {
   assert(val_int != nullptr);
@@ -687,13 +706,6 @@ rsmi_dev_ecc_count_get(uint32_t dv_ind, rsmi_gpu_block_t block,
   ret = GetDevValueVec(type, dv_ind, &val_vec);
   if (val_vec.size() < 2 ) ret = RSMI_STATUS_FILE_ERROR;
 
-  if (ret == RSMI_STATUS_FILE_ERROR) {
-    ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-       << ", GetDevValueVec() ret was RSMI_STATUS_FILE_ERROR "
-       << "-> reporting RSMI_STATUS_NOT_SUPPORTED";
-    LOG_ERROR(ss);
-    return RSMI_STATUS_NOT_SUPPORTED;
-  }
   if (ret != RSMI_STATUS_SUCCESS) {
     ss << __PRETTY_FUNCTION__ << " | ======= end ======="
        << ", GetDevValueVec() ret was not RSMI_STATUS_SUCCESS"
@@ -968,6 +980,43 @@ rsmi_dev_xgmi_physical_id_get(uint32_t dv_ind, uint16_t *id) {
   *id = std::numeric_limits<uint16_t>::max();
 
   ret = get_id(dv_ind, amd::smi::kDevXGMIPhysicalID, id);
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======="
+     << ", reporting " << amd::smi::getRSMIStatusString(ret);
+  LOG_TRACE(ss);
+  return ret;
+}
+
+rsmi_status_t
+rsmi_dev_xgmi_port_num_get(uint32_t dv_ind, uint32_t *count, uint16_t *link_to_dst_node) {
+  std::ostringstream ss;
+  rsmi_status_t ret;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
+  LOG_TRACE(ss);
+  CHK_SUPPORT_NAME_ONLY(link_to_dst_node)
+  *link_to_dst_node = std::numeric_limits<uint16_t>::max();
+
+  std::string s;
+  ret = read_dev_port_map_file(amd::smi::kDevXGMIPortNum, dv_ind, &s);
+
+  std::istringstream iss(s);
+  std::string line;
+  *count = 0;
+  while (std::getline(iss, line)) {
+      if (line.empty()) continue;
+      std::istringstream f(line);
+      std::string src_token, arrow, dst_token;
+      if (f >> src_token >> arrow >> dst_token) {
+          size_t src_colon = src_token.find(':');
+          size_t dst_colon = dst_token.find(':');
+          if (src_colon != std::string::npos && dst_colon != std::string::npos) {
+              uint16_t src_link = static_cast<uint16_t>(std::stoi(src_token.substr(src_colon + 1)));
+              uint16_t dst_node = static_cast<uint16_t>(std::stoi(dst_token.substr(0, dst_colon)));
+              link_to_dst_node[src_link] = dst_node;
+              (*count)++;
+          }
+      }
+  }
+
   ss << __PRETTY_FUNCTION__ << " | ======= end ======="
      << ", reporting " << amd::smi::getRSMIStatusString(ret);
   LOG_TRACE(ss);
@@ -4190,6 +4239,11 @@ rsmi_status_string(rsmi_status_t status, const char **status_string) {
     case RSMI_STATUS_REFCOUNT_OVERFLOW:
       *status_string = "RSMI_STATUS_REFCOUNT_OVERFLOW: An internal reference "
                        "counter exceeded INT32_MAX";
+      break;
+
+    case RSMI_STATUS_DIRECTORY_NOT_FOUND:
+      *status_string = "RSMI_STATUS_DIRECTORY_NOT_FOUND: Error when a "
+                       "directory is not found, maps to ENOTDIR";
       break;
 
     case RSMI_STATUS_SETTING_UNAVAILABLE:

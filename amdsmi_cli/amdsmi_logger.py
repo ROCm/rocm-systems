@@ -46,6 +46,8 @@ class AMDSMILogger():
         self.store_cpu_json_output = []
         self.store_core_json_output = []
         self.store_gpu_json_output = []
+        self.store_xgmi_metric_json_output = []
+        self.store_xgmi_link_status_json_output = []
 
 
     class LoggerFormat(Enum):
@@ -576,11 +578,18 @@ class AMDSMILogger():
 
 
     def combine_arrays_to_json(self):
-        combined_json = {
-            "cpu_data": self.store_cpu_json_output,
-            "core_data": self.store_core_json_output,
-            "gpu_data": self.store_gpu_json_output
-        }
+        combined_json = {}
+        if self.store_cpu_json_output:
+            combined_json["cpu_data"] = self.store_cpu_json_output
+        if self.store_core_json_output:
+            combined_json["core_data"] = self.store_core_json_output
+        if self.store_gpu_json_output:
+            combined_json["gpu_data"] = self.store_gpu_json_output
+        if self.store_xgmi_metric_json_output:
+            combined_json["xgmi_metric"] = self.store_xgmi_metric_json_output
+        if self.store_xgmi_link_status_json_output:
+            combined_json["link_status"] = self.store_xgmi_link_status_json_output
+
         self.destination == 'stdout'
         json_std_output = json.dumps(combined_json, indent=4)
         print(json_std_output)
@@ -965,6 +974,7 @@ class AMDSMILogger():
         default_line_2 = "|--------------------------------------+---------------------------------------|"
         default_line_3 = "|======================================+=======================================|"
         default_line_4 = "+--------------------------------------+---------------------------------------+"
+        default_line_5 = "|==============================================================================|"
 
         # print the version information first
         amd_smi_version = str(output['version_info']['amd-smi'])
@@ -1043,18 +1053,21 @@ class AMDSMILogger():
 
         print(default_line_4)
 
-        # # print process list of all GPUs last
-        # print(default_line_1)
-        # print("| Processes:                                                                  |")
-        # print("|  GPU     PID      Process name                                    VRAM_MEM  |")
-        # print(default_line_5)
-        # if len(output['processes']) != 0:
-        #     for process in output['processes']:
-        #         gpu_id = str(process['gpu']).rjust(4)
-        #         pid = str(process['pid']).ljust(7)
-        #         process_name = str(process['name']).ljust(25)
-        #         vram_mem = str(process['vram']).rjust(18)
-        #         print("| {0:4s}     {1:7s}  {2:25s}    {3:18s} |".format(gpu_id, pid, process_name, vram_mem))
-        # else:
-        #     print("|  No running processes found                                                 |")
-        # print(default_line_1)
+        # print process list of all GPUs last
+        print(default_line_1)
+        print("| Processes:                                                                   |")
+        print("|  GPU        PID  Process Name                    VRAM_MEM  MEM_USAGE  NUM_CU |")
+        print(default_line_5)
+        if len(output['processes']) != 0:
+            for process in output['processes']:
+                gpu_id = str(process['gpu']).rjust(4)
+                pid = str(process['pid']).rjust(9)
+                process_name = str(process['name']).ljust(29)
+                vram_mem = str(process['vram']).rjust(9)
+                mem_usage = str(process['mem_usage']).rjust(9)
+                cu_occupancy = str(process['cu_occupancy']).rjust(6)
+                print("| {0:4s}  {1:9s}  {2:29s}  {3:9s}  {4:9s}  {5:6s} |".format(
+                         gpu_id, pid, process_name, vram_mem, mem_usage, cu_occupancy))
+        else:
+            print("|  No running processes found                                                  |")
+        print(default_line_1)

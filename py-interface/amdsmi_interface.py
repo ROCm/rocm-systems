@@ -1958,18 +1958,18 @@ def amdsmi_get_power_cap_info(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
 
-    power_info = amdsmi_wrapper.amdsmi_power_cap_info_t()
+    power_cap_info = amdsmi_wrapper.amdsmi_power_cap_info_t()
     _check_res(
         amdsmi_wrapper.amdsmi_get_power_cap_info(
-            processor_handle, ctypes.c_uint32(0), ctypes.byref(power_info)
+            processor_handle, ctypes.c_uint32(0), ctypes.byref(power_cap_info)
         )
     )
 
-    return {"power_cap": power_info.power_cap,
-            "default_power_cap": power_info.default_power_cap,
-            "dpm_cap": power_info.dpm_cap,
-            "min_power_cap": power_info.min_power_cap,
-            "max_power_cap": power_info.max_power_cap}
+    return {"power_cap": power_cap_info.power_cap,
+            "default_power_cap": power_cap_info.default_power_cap,
+            "dpm_cap": power_cap_info.dpm_cap,
+            "min_power_cap": power_cap_info.min_power_cap,
+            "max_power_cap": power_cap_info.max_power_cap}
 
 
 def amdsmi_get_gpu_pm_metrics_info(
@@ -2733,20 +2733,21 @@ def amdsmi_get_power_info(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
 
-    power_measure = amdsmi_wrapper.amdsmi_power_info_t()
+    power_info = amdsmi_wrapper.amdsmi_power_info_t()
     _check_res(
         amdsmi_wrapper.amdsmi_get_power_info(
-            processor_handle, ctypes.byref(power_measure)
+            processor_handle, ctypes.byref(power_info)
         )
     )
 
     power_info_dict = {
-        "current_socket_power": power_measure.current_socket_power,
-        "average_socket_power": power_measure.average_socket_power,
-        "gfx_voltage": power_measure.gfx_voltage,
-        "soc_voltage": power_measure.soc_voltage,
-        "mem_voltage": power_measure.mem_voltage,
-        "power_limit" : power_measure.power_limit,
+        "socket_power": power_info.socket_power,
+        "current_socket_power": power_info.current_socket_power,
+        "average_socket_power": power_info.average_socket_power,
+        "gfx_voltage": power_info.gfx_voltage,
+        "soc_voltage": power_info.soc_voltage,
+        "mem_voltage": power_info.mem_voltage,
+        "power_limit" : power_info.power_limit,
     }
 
     for key, value in power_info_dict.items():
@@ -3112,22 +3113,18 @@ def amdsmi_get_link_metrics(processor_handle: amdsmi_wrapper.amdsmi_processor_ha
         )
     )
 
-    bdf = amdsmi_wrapper.amdsmi_bdf_t()
-    # TODO: Dummy BDF - to be replaced with destination BDF from xgmi_port_num when available
-    bdf.struct_amdsmi_bdf_t = amdsmi_wrapper.struct_amdsmi_bdf_t(0xFFFF, 0xFF, 0xFF, 0xF)
-
     links = []
     for i in range(AMDSMI_MAX_NUM_XGMI_LINKS):
         link = link_metrics.links[i]
         links.append({
-            "bdf": _format_bdf(bdf),
+            "bdf": _format_bdf(link.bdf),
             "link_type": link.link_type,
             "read": link.read,
             "write": link.write,
         })
 
     return {
-        "num_links": AMDSMI_MAX_NUM_XGMI_LINKS,
+        "num_links": link_metrics.num_links,
         "bit_rate": link_metrics.bit_rate,
         "max_bandwidth": link_metrics.max_bandwidth,
         "links": links

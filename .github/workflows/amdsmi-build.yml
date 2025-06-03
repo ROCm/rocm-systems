@@ -760,7 +760,7 @@ jobs:
     name: Generate Documentation
     runs-on:
       - self-hosted
-      - ${{ vars.RUNNER_TYPE }}
+      - ${{ vars.RUNNER_TYPE2 }}
     needs: [debian-test, rpm-test]
     container:
       image: ${{ vars.UBUNTU22_DOCKER_IMAGE }}

@@ -213,7 +213,6 @@ static void* cper_get_sec_desc_offset(const amdsmi_cper_hdr_t *hdr, int idx)
 static void* cper_get_sec_offset(const amdsmi_cper_hdr_t *hdr, int idx)
 {
     struct cper_sec_desc *tmp_desc;
-    char *offset;
 
     if (idx >= hdr->sec_cnt)
         return 0;
@@ -313,14 +312,13 @@ static int cper_dump_nonstd_err(const struct cper_sec_nonstd_err *nonstd_err)
     std::ostringstream ss;
 
     struct cper_sec_nonstd_err_body *body;
-    char *offset;
 
     ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS]\n~~~~NON STANDARD SECTION~~~\n";
 
     ss << "[NonSTD SEC] Err Info Count    = 0x" << std::hex << nonstd_err->hdr.valid_bits.err_info_cnt << "\n";
     ss << "[NonSTD SEC] Err Context Count = 0x" << std::hex << nonstd_err->hdr.valid_bits.err_context_cnt << "\n";
 
-    if (nonstd_err->hdr.valid_bits.err_context_cnt != nonstd_err->hdr.valid_bits.err_context_cnt) {
+    if (nonstd_err->hdr.valid_bits.err_info_cnt != nonstd_err->hdr.valid_bits.err_context_cnt) {
         ss << "~~~~Malformed Non Standard Section!~~~~\n\n";
         goto exit;
     }
@@ -554,8 +552,8 @@ std::vector<int> cper_decode(const amdsmi_cper_hdr_t *cper) {
         } 
         else {
             ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] Unknown error type!!\n";
-            for(int i = 0; i < sizeof(sec_guid->b); ++i) {
-                ss << std::hex << static_cast<int>(sec_guid->b[i]) << ":";
+            for(size_t j = 0; j < sizeof(sec_guid->b); ++j) {
+                ss << std::hex << static_cast<int>(sec_guid->b[j]) << ":";
             }
             ss << "\n";
             LOG_ERROR(ss);

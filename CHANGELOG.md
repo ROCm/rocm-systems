@@ -43,6 +43,27 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
     | 0000:df:00.0     AMD Instinct MI300X |      0 %   40 °C      0     138/750 W |
     |   7       7        6        SPX/NPS1 |      0 %     N/A        283/196592 MB |
     +--------------------------------------+---------------------------------------+
+    +------------------------------------------------------------------------------+
+    | Processes:                                                                   |
+    |  GPU      PID   Process Name                 VRAM_MEM    MEM_USAGE   NUM_CU  |
+    |==============================================================================|
+    |    0   269867    rvs                          17.9 GB      19.2 GB       38  |
+    |    0   269888    rvs                          17.9 GB      19.2 GB       38  |
+    |    1   269867    rvs                          17.9 GB      19.2 GB       38  |
+    |    1   269888    rvs                          17.9 GB      19.2 GB       38  |
+    |    2   269867    rvs                          17.9 GB      19.2 GB       38  |
+    |    2   269888    rvs                          17.9 GB      19.2 GB       38  |
+    |    3   269867    rvs                          17.9 GB      19.2 GB       76  |
+    |    3   269888    rvs                          17.9 GB      19.2 GB        0  |
+    |    4   269867    rvs                          17.9 GB      19.0 GB       37  |
+    |    4   269888    rvs                          17.9 GB      19.2 GB       36  |
+    |    5   269867    rvs                          17.9 GB      19.0 GB       76  |
+    |    5   269888    rvs                          17.9 GB      19.2 GB        0  |
+    |    6   269867    rvs                          17.9 GB      19.0 GB       76  |
+    |    6   269888    rvs                          17.9 GB      19.2 GB        0  |
+    |    7   269867    rvs                          17.9 GB      19.2 GB       34  |
+    |    7   269888    rvs                          17.9 GB      19.2 GB       38  |
+    +------------------------------------------------------------------------------+
     ```
 
 - **Added support for GPU metrics 1.8**.  
@@ -66,6 +87,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Not sourced from esmi library.
 
 - **Added `amdsmi_get_cpu_affinity_with_scope()`**.  
+
+- **Added `socket power` to `amdsmi_get_power_info`**  
+  - Previously the C API had the value in the `amdsmi_power_info` structure, but was unused
+  - Now we populate the value in both C & Python APIs
+  - The value is representative of the socket's power agnostic of the the GPU version.
 
 ### Changed
 
@@ -141,6 +167,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Removed `amdsmi_io_link_type_t` and replaced with amdsmi_link_type_t**.  
   - The IO Link type is no longer needed as the link type is sufficient.
+  - Mapping from amdsmi_io_link_type_t to amdsmi_link_type_t is as follows:
+  ```shell
+  AMDSMI_IOLINK_TYPE_UNDEFINED  == AMDSMI_LINK_TYPE_INTERNAL
+  AMDSMI_IOLINK_TYPE_PCIEXPRESS == AMDSMI_LINK_TYPE_PCIE
+  AMDSMI_IOLINK_TYPE_XGMI       == AMDSMI_LINK_TYPE_XGMI
+  ```
 
 - **Removed `amdsmi_get_power_info_v2()`**.  
   - The amdsmi_get_power_info() has been unified and the v2 function is no longer needed/used.
