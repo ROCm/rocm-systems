@@ -460,12 +460,12 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            power_info = amdsmi_get_power_cap_info(device)
-            print(power_info['power_cap'])
-            print(power_info['dpm_cap'])
-            print(power_info['default_power_cap'])
-            print(power_info['min_power_cap'])
-            print(power_info['max_power_cap'])
+            power_cap_info = amdsmi_get_power_cap_info(device)
+            print(power_cap_info['power_cap'])
+            print(power_cap_info['dpm_cap'])
+            print(power_cap_info['default_power_cap'])
+            print(power_cap_info['min_power_cap'])
+            print(power_cap_info['max_power_cap'])
 except AmdSmiException as e:
     print(e)
 ```
@@ -736,18 +736,18 @@ It is not supported on virtual machine guest
 Input parameters:
 
 * `processor_handle` device which to query
-* `sensor_ind` optional argument that defaults to 0
 
 Output: Dictionary with fields
 
-Field | Description
----|---
-`current_socket_power` | current socket power; Mi300+ Series Cards
-`average_socket_power` | average socket power; Navi + Mi 200 and earlier Series cards
-`gfx_voltage` | voltage gfx
-`soc_voltage` | voltage soc
-`mem_voltage` | voltage mem
-`power_limit` | power limit
+Field | Description | Units
+---|---|---
+`socket_power` | socket power; matches current or average socket power | W
+`current_socket_power` | current socket power; Mi300+ Series Cards | W
+`average_socket_power` | average socket power; Navi + Mi 200 and earlier Series cards | W
+`gfx_voltage` | voltage gfx | mV
+`soc_voltage` | voltage soc | mV
+`mem_voltage` | voltage mem | mV
+`power_limit` | power limit | W
 
 Exceptions that can be thrown by `amdsmi_get_power_info` function:
 
@@ -764,15 +764,13 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            power_measure = amdsmi_get_power_info(device)
-            # Example with using sensor_ind
-            #   power_measure = amdsmi_get_power_info(device, 0)
-            print(power_measure['current_socket_power'])
-            print(power_measure['average_socket_power'])
-            print(power_measure['gfx_voltage'])
-            print(power_measure['soc_voltage'])
-            print(power_measure['mem_voltage'])
-            print(power_measure['power_limit'])
+            power_info = amdsmi_get_power_info(device)
+            print(power_info['current_socket_power'])
+            print(power_info['average_socket_power'])
+            print(power_info['gfx_voltage'])
+            print(power_info['soc_voltage'])
+            print(power_info['mem_voltage'])
+            print(power_info['power_limit'])
 except AmdSmiException as e:
     print(e)
 ```

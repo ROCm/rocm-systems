@@ -1844,22 +1844,16 @@ class AMDSMICommands():
                     power_unit = "W"
                     power_info = amdsmi_interface.amdsmi_get_power_info(args.gpu)
                     for key, value in power_info.items():
-                        if value == 0xFFFF:
-                            power_info[key] = "N/A"
-                        elif "voltage" in key:
+                        if "voltage" in key:
                             power_info[key] = self.helpers.unit_format(self.logger,
-                                                                       value,
-                                                                       voltage_unit)
-                        elif "power" in key:
-                            if ((key == "current_socket_power" or key == "average_socket_power")
-                                and value != "N/A"):
-                                power_dict['socket_power'] = self.helpers.unit_format(self.logger,
-                                                                       value,
-                                                                       power_unit)
+                                                                        value,
+                                                                        voltage_unit)
+                        elif key == "socket_power":
                             power_info[key] = self.helpers.unit_format(self.logger,
-                                                                       value,
-                                                                       power_unit)
+                                                                        value,
+                                                                        power_unit)
 
+                    power_dict['socket_power'] = power_info['socket_power']
                     power_dict['gfx_voltage'] = power_info['gfx_voltage']
                     power_dict['soc_voltage'] = power_info['soc_voltage']
                     power_dict['mem_voltage'] = power_info['mem_voltage']

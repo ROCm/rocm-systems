@@ -4224,6 +4224,7 @@ amdsmi_get_power_info(amdsmi_processor_handle processor_handle, amdsmi_power_inf
     if (status != AMDSMI_STATUS_SUCCESS)
         return status;
 
+    info->socket_power = 0xFFFF;
     info->current_socket_power = 0xFFFF;
     info->average_socket_power = 0xFFFF;
     info->gfx_voltage = 0xFFFF;
@@ -4239,6 +4240,12 @@ amdsmi_get_power_info(amdsmi_processor_handle processor_handle, amdsmi_power_inf
         info->gfx_voltage = metrics.voltage_gfx;
         info->soc_voltage = metrics.voltage_soc;
         info->mem_voltage = metrics.voltage_mem;
+    }
+
+    if (metrics.current_socket_power != 0xFFFF) {
+        info->socket_power = metrics.current_socket_power;
+    } else if (metrics.average_socket_power != 0xFFFF) {
+        info->socket_power = metrics.average_socket_power;
     }
 
     int power_limit = 0;

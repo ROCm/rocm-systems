@@ -352,19 +352,20 @@ typedef enum {
  * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
  */
 typedef enum {
-    AMDSMI_CLK_TYPE_SYS = 0x0,   //!< System clock
+    AMDSMI_CLK_TYPE_SYS = 0x0,  //!< Graphics clock
     AMDSMI_CLK_TYPE_FIRST = AMDSMI_CLK_TYPE_SYS,
-    AMDSMI_CLK_TYPE_GFX = AMDSMI_CLK_TYPE_SYS,
-    AMDSMI_CLK_TYPE_DF,    //!< Data Fabric clock (for ASICs
-                           //!< running on a separate clock)
-    AMDSMI_CLK_TYPE_DCEF,  //!< Display Controller Engine clock
-    AMDSMI_CLK_TYPE_SOC,
-    AMDSMI_CLK_TYPE_MEM,
-    AMDSMI_CLK_TYPE_PCIE,
-    AMDSMI_CLK_TYPE_VCLK0,
-    AMDSMI_CLK_TYPE_VCLK1,
-    AMDSMI_CLK_TYPE_DCLK0,
-    AMDSMI_CLK_TYPE_DCLK1,
+    AMDSMI_CLK_TYPE_GFX = AMDSMI_CLK_TYPE_SYS,  //!< Graphics clock
+    AMDSMI_CLK_TYPE_DF,         /**< Data Fabric clock (for ASICs
+                                     running on a separate clock) */
+    AMDSMI_CLK_TYPE_DCEF,       /**< Display Controller Engine Front clock,
+                                     timing/bandwidth signals to display */
+    AMDSMI_CLK_TYPE_SOC,        //!< System On Chip clock, integrated circuit frequency
+    AMDSMI_CLK_TYPE_MEM,        //!< Memory clock speed, system operating frequency
+    AMDSMI_CLK_TYPE_PCIE,       //!< PCI Express clock, high bandwidth peripherals
+    AMDSMI_CLK_TYPE_VCLK0,      //!< Video 0 clock, video processing units
+    AMDSMI_CLK_TYPE_VCLK1,      //!< Video 1 clock, video processing units
+    AMDSMI_CLK_TYPE_DCLK0,      //!< Display 1 clock, timing signals for display output
+    AMDSMI_CLK_TYPE_DCLK1,      //!< Display 2 clock, timing signals for display output
     AMDSMI_CLK_TYPE__MAX = AMDSMI_CLK_TYPE_DCLK1
 } amdsmi_clk_type_t;
 
@@ -1027,9 +1028,9 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef struct {
-    uint64_t socket_power;          //!< Units in uW {@host}, Host only
-    uint32_t current_socket_power;  //!< Units in W {@linux_bm}, Linux only, Mi 300+ Series cards
-    uint32_t average_socket_power;  //!< Units in W {@linux_bm}, Linux only, Navi + Mi 200 and earlier Series cards
+    uint64_t socket_power;          //!< Socket power in W {@linux_bm}, uW {@host}
+    uint32_t current_socket_power;  //!< Current socket power in W {@linux_bm}, Linux only, Mi 300+ Series cards
+    uint32_t average_socket_power;  //!< Average socket power in W {@linux_bm}, Linux only, Navi + Mi 200 and earlier Series cards
     uint64_t gfx_voltage;           //!< GFX voltage measurement in mV {@linux_bm} or V {@host}
     uint64_t soc_voltage;           //!< SOC voltage measurement in mV {@linux_bm} or V {@host}
     uint64_t mem_voltage;           //!< MEM voltage measurement in mV {@linux_bm} or V {@host}

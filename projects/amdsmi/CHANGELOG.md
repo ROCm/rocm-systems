@@ -88,6 +88,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Added `amdsmi_get_cpu_affinity_with_scope()`**.  
 
+- **Added `socket power` to `amdsmi_get_power_info`**  
+  - Previously the C API had the value in the `amdsmi_power_info` structure, but was unused
+  - Now we populate the value in both C & Python APIs
+  - The value is representative of the socket's power agnostic of the the GPU version.
+
 ### Changed
 
 - **Padded `asic_serial` in `amdsmi_get_asic_info` with 0s**.  
@@ -162,6 +167,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Removed `amdsmi_io_link_type_t` and replaced with amdsmi_link_type_t**.  
   - The IO Link type is no longer needed as the link type is sufficient.
+  - Mapping from amdsmi_io_link_type_t to amdsmi_link_type_t is as follows:
+  ```shell
+  AMDSMI_IOLINK_TYPE_UNDEFINED  == AMDSMI_LINK_TYPE_INTERNAL
+  AMDSMI_IOLINK_TYPE_PCIEXPRESS == AMDSMI_LINK_TYPE_PCIE
+  AMDSMI_IOLINK_TYPE_XGMI       == AMDSMI_LINK_TYPE_XGMI
+  ```
 
 - **Removed `amdsmi_get_power_info_v2()`**.  
   - The amdsmi_get_power_info() has been unified and the v2 function is no longer needed/used.
