@@ -51,7 +51,8 @@ hsaKmtGetVersionCapInfo(HsaVersionCapability *VersionCapInfo) {
   VersionCapInfo->ui64.EventAge = 0;
   VersionCapInfo->ui64.Scratch = 0;
   VersionCapInfo->ui64.XNack = 0;
-  VersionCapInfo->ui64.FineGrainPcie = 0;*/
+  VersionCapInfo->ui64.FineGrainPcie = 0;
+  VersionCapInfo->ui64.Devmemqueuebuf = 0;*/
 
   VersionCapInfo->ui64.VendorPacket = dxg_runtime->enable_vendor_packet;
 

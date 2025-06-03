@@ -153,7 +153,8 @@ typedef struct _HsaVersionCapability
             HSAuint64 VendorPacket       :1; // Enable vendor packet in hsa-runtime
             HSAuint64 FineGrainPcie      :1; // uncached/fine grained VRAM
             HSAuint64 IPCLegacyMode      :1; // 0 - socket in runtime; 1 - socket in libkmt;
-            HSAuint64 Reserved           :51;
+            HSAuint64 Devmemqueuebuf     :1; // Dont't alloc queue buf/struct in dev mem
+            HSAuint64 Reserved           :50;
         }ui64;
     };
 } HsaVersionCapability;
