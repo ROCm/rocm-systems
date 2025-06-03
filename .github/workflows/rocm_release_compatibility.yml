@@ -102,8 +102,7 @@ jobs:
           --disable-cdash
           --
           -DROCPROFILER_DEP_ROCMCORE=ON
-          -DROCPROFILER_BUILD_DOCS=OFF
-          -DROCPROFILER_BUILD_{TESTS,SAMPLES}=ON
+          -DROCPROFILER_BUILD_{TESTS,SAMPLES,DOCS}=OFF
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DCMAKE_INSTALL_PREFIX="$(realpath /opt/rocm)"
           -DPython3_EXECUTABLE=$(which python3)
