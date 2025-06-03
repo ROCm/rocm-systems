@@ -706,13 +706,6 @@ rsmi_dev_ecc_count_get(uint32_t dv_ind, rsmi_gpu_block_t block,
   ret = GetDevValueVec(type, dv_ind, &val_vec);
   if (val_vec.size() < 2 ) ret = RSMI_STATUS_FILE_ERROR;
 
-  if (ret == RSMI_STATUS_FILE_ERROR) {
-    ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-       << ", GetDevValueVec() ret was RSMI_STATUS_FILE_ERROR "
-       << "-> reporting RSMI_STATUS_NOT_SUPPORTED";
-    LOG_ERROR(ss);
-    return RSMI_STATUS_NOT_SUPPORTED;
-  }
   if (ret != RSMI_STATUS_SUCCESS) {
     ss << __PRETTY_FUNCTION__ << " | ======= end ======="
        << ", GetDevValueVec() ret was not RSMI_STATUS_SUCCESS"
@@ -4246,6 +4239,11 @@ rsmi_status_string(rsmi_status_t status, const char **status_string) {
     case RSMI_STATUS_REFCOUNT_OVERFLOW:
       *status_string = "RSMI_STATUS_REFCOUNT_OVERFLOW: An internal reference "
                        "counter exceeded INT32_MAX";
+      break;
+
+    case RSMI_STATUS_DIRECTORY_NOT_FOUND:
+      *status_string = "RSMI_STATUS_DIRECTORY_NOT_FOUND: Error when a "
+                       "directory is not found, maps to ENOTDIR";
       break;
 
     case RSMI_STATUS_SETTING_UNAVAILABLE:

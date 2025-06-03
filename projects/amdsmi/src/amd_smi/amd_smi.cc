@@ -262,6 +262,10 @@ amdsmi_status_code_to_string(amdsmi_status_t status, const char **status_string)
             *status_string = "AMDSMI_STATUS_REFCOUNT_OVERFLOW: An internal reference"
                 " counter exceeded INT32_MAX.";
             break;
+        case AMDSMI_STATUS_DIRECTORY_NOT_FOUND:
+            *status_string = "AMDSMI_STATUS_DIRECTORY_NOT_FOUND: Error when a"
+                " directory is not found, maps to ENOTDIR.";
+            break;
         case AMDSMI_STATUS_BUSY:
             *status_string = "AMDSMI_STATUS_BUSY: Processor busy.";
             break;
