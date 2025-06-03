@@ -87,7 +87,7 @@ def test_rocjpeg(json_data):
 
 
 def test_csv_data(csv_data):
-     # If rocJPEG tracing is not supported, end early
+    # If rocJPEG tracing is not supported, end early
     if len(csv_data) <= 2:
         return pytest.skip("rocjpeg tracing unavailable")
 
@@ -137,10 +137,9 @@ def test_csv_data(csv_data):
 
 def test_perfetto_data(pftrace_data, json_data):
     import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
+
     # If rocJPEG tracing is not supported, end early
-    if (
-        len(json_data["rocprofiler-sdk-tool"]["buffer_records"]["rocjpeg_api"]) == 0
-    ):
+    if len(json_data["rocprofiler-sdk-tool"]["buffer_records"]["rocjpeg_api"]) == 0:
         return pytest.skip("rocjpeg tracing unavailable")
 
     rocprofv3.test_perfetto_data(
@@ -152,10 +151,9 @@ def test_perfetto_data(pftrace_data, json_data):
 
 def test_otf2_data(otf2_data, json_data):
     import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
+
     # If rocJPEG tracing is not supported, end early
-    if (
-        len(json_data["rocprofiler-sdk-tool"]["buffer_records"]["rocjpeg_api"]) == 0
-    ):
+    if len(json_data["rocprofiler-sdk-tool"]["buffer_records"]["rocjpeg_api"]) == 0:
         return pytest.skip("rocjpeg tracing unavailable")
 
     rocprofv3.test_otf2_data(
