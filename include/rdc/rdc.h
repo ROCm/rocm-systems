@@ -399,9 +399,17 @@ typedef enum {
                                     //!< due to temperature rise
   RDC_EVNT_NOTIF_PRE_RESET,         //!< GPU reset is about to occur
   RDC_EVNT_NOTIF_POST_RESET,        //!< GPU reset just occurred
-  RDC_EVNT_NOTIF_RING_HANG,         //!< GPU ring hang just occurred
+  RDC_EVNT_NOTIF_MIGRATE_START,
+  RDC_EVNT_NOTIF_MIGRATE_END,
+  RDC_EVNT_NOTIF_PAGE_FAULT_START,
+  RDC_EVNT_NOTIF_PAGE_FAULT_END,
+  RDC_EVNT_NOTIF_QUEUE_EVICTION,
+  RDC_EVNT_NOTIF_QUEUE_RESTORE,
+  RDC_EVNT_NOTIF_UNMAP_FROM_GPU,
+  RDC_EVNT_NOTIF_PROCESS_START,
+  RDC_EVNT_NOTIF_PROCESS_END,
 
-  RDC_EVNT_NOTIF_LAST = RDC_EVNT_NOTIF_RING_HANG,
+  RDC_EVNT_NOTIF_LAST = RDC_EVNT_NOTIF_PROCESS_END,
 
   /**
    * @brief RDC health related fields
@@ -496,6 +504,18 @@ typedef struct {
   rdc_stats_summary_t memory_utilization;  //!< Memory Utilization statistics
 } rdc_gpu_usage_info_t;                    //!< GPU usage statistics
 
+#define MAX_PROCESS_NAME 256
+/**
+ * @brief The structure to track process start/stop times during a job running
+ */
+typedef struct {
+  uint32_t pid;  //!< Process ID
+  char process_name[MAX_PROCESS_NAME];
+  uint64_t start_time;  //!< Process start time in microseconds since 1970
+  uint64_t stop_time;   //!< Process stop time in microseconds since 1970
+} rdc_process_status_info_t;
+#define RDC_MAX_NUM_PROCESSES_STATUS 64
+
 /**
  * @brief The structure to hold the job stats
  */
@@ -504,6 +524,9 @@ typedef struct {
   rdc_gpu_usage_info_t summary;   //!< Job usage summary statistics
                                   //!< (overall)
   rdc_gpu_usage_info_t gpus[16];  //!< Job usage summary statistics by GPU
+  uint32_t num_processes;         //!< Number of processes tracked
+  rdc_process_status_info_t
+      processes[RDC_MAX_NUM_PROCESSES_STATUS];  //!< Array to track process start/stop times
 } rdc_job_info_t;
 
 /**

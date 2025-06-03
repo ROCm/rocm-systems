@@ -170,6 +170,18 @@ rdc_status_t RdcStandaloneHandler::rdc_job_get_stats(const char job_id[64],
     copy_gpu_usage_info(reply.gpus(i), &(p_job_info->gpus[i]));
   }
 
+  p_job_info->num_processes = reply.num_processes();
+  for (int i = 0; i < reply.num_processes(); i++) {
+    const auto& proc_msg = reply.processes(i);
+    p_job_info->processes[i].pid = proc_msg.pid();
+
+    strncpy_with_null(p_job_info->processes[i].process_name, proc_msg.process_name().c_str(),
+                      MAX_PROCESS_NAME - 1);
+
+    p_job_info->processes[i].start_time = proc_msg.start_time();
+    p_job_info->processes[i].stop_time = proc_msg.stop_time();
+  }
+
   return RDC_ST_OK;
 }
 

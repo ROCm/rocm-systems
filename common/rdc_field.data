@@ -218,7 +218,15 @@ FLD_DESC_ENT(RDC_EVNT_NOTIF_VMFAULT,     "VM page fault",                       
 FLD_DESC_ENT(RDC_EVNT_NOTIF_THERMAL_THROTTLE, "Clk freq decrease due to temp",          "THERMAL_THROT",    false)
 FLD_DESC_ENT(RDC_EVNT_NOTIF_PRE_RESET,   "GPU reset is about to occur",                 "GPU_PRE_RESET",    false)
 FLD_DESC_ENT(RDC_EVNT_NOTIF_POST_RESET,  "GPU reset just occurred",                     "GPU_POST_RESET",   false)
-FLD_DESC_ENT(RDC_EVNT_NOTIF_RING_HANG,   "GPU ring hang just occured",                  "RING_HANG",        false)
+FLD_DESC_ENT(RDC_EVNT_NOTIF_MIGRATE_START, "GPU migrate has started",                   "MIGRATE_START",    false)
+FLD_DESC_ENT(RDC_EVNT_NOTIF_MIGRATE_END, "GPU migrate has ended",                       "MIGRATE_END",      false)
+FLD_DESC_ENT(RDC_EVNT_NOTIF_PAGE_FAULT_START, "GPU page fault started",                 "PAGE_FAULT_START", false)
+FLD_DESC_ENT(RDC_EVNT_NOTIF_PAGE_FAULT_END, "GPU page fault ended",                     "PAGE_FAULT_END",   false)
+FLD_DESC_ENT(RDC_EVNT_NOTIF_QUEUE_EVICTION, "GPU queue eviction occured",               "QUEUE_EVICITION",  false)
+FLD_DESC_ENT(RDC_EVNT_NOTIF_QUEUE_RESTORE, "GPU queue restore occured",                 "QUEUE_RESTORE",    false)
+FLD_DESC_ENT(RDC_EVNT_NOTIF_UNMAP_FROM_GPU, "GPU unmap occured",                        "UNMAP_FROM_GPU",   false)
+FLD_DESC_ENT(RDC_EVNT_NOTIF_PROCESS_START, "GPU process started",                       "PROCESS_START",    false)
+FLD_DESC_ENT(RDC_EVNT_NOTIF_PROCESS_END, "GPU process ended",                           "PROCESS_END",      false)
 
 // RDC health related fields
 FLD_DESC_ENT(RDC_HEALTH_XGMI_ERROR,               "XGMI one or more errors detected",           "XGMI_ERROR",               true)

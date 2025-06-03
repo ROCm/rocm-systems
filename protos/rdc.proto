@@ -456,11 +456,21 @@ message GpuUsageInfo {
   JobStatsSummary gpu_temperature = 15;
   JobStatsSummary pcie_total = 16;
 }
+
+message RdcProcessStatsInfo {
+  uint32 pid = 1;
+  string process_name = 2;
+  uint64 start_time = 3;
+  uint64 stop_time = 4;
+}
+
 message GetJobStatsResponse {
   uint32 status = 1;
   uint32 num_gpus = 2;
   GpuUsageInfo summary = 3;
   repeated GpuUsageInfo gpus = 4;
+  uint32 num_processes = 5;
+  repeated RdcProcessStatsInfo processes = 6;
 }
 
 message StopJobStatsRequest {
@@ -725,7 +735,6 @@ message TopologyLinkInfo{
     RDC_IOLINK_TYPE_UNDEFINED = 0;
     RDC_IOLINK_TYPE_PCIEXPRESS = 1;
     RDC_IOLINK_TYPE_XGMI = 2;
-    RDCI_IOLINK_TYPE_NUMIOLINKTYPES = 3;
   };
   LinkType link_type = 6;
   bool p2p_accessible = 7;
@@ -752,7 +761,6 @@ message GpuLinkStatus{
     RDC_IOLINK_TYPE_UNDEFINED = 0;
     RDC_IOLINK_TYPE_PCIEXPRESS = 1;
     RDC_IOLINK_TYPE_XGMI = 2;
-    RDCI_IOLINK_TYPE_NUMIOLINKTYPES = 3;
   };
   LinkTypes link_types = 3;
   enum LinkState{
