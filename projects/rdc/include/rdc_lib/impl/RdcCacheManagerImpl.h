@@ -78,6 +78,10 @@ struct RdcJobStatsCacheEntry {
   uint64_t start_time;
   uint64_t end_time;
   std::map<uint32_t, GpuSummaryStats> gpu_stats;
+
+  uint32_t num_processes = 0;
+  std::array<rdc_process_status_info_t, RDC_MAX_NUM_PROCESSES_STATUS> processes{};
+  std::map<uint32_t, uint32_t> pid_to_index;
 };
 
 // <job_id, job_stats>
@@ -110,19 +114,14 @@ class RdcCacheManagerImpl : public RdcCacheManager {
   rdc_status_t rdc_job_remove(const char job_id[64]) override;
   rdc_status_t rdc_job_remove_all() override;
 
-  rdc_status_t rdc_health_set(rdc_gpu_group_t group_id,
-                              uint32_t gpu_index,
+  rdc_status_t rdc_health_set(rdc_gpu_group_t group_id, uint32_t gpu_index,
                               const rdc_field_value& value) override;
-  rdc_status_t rdc_health_get_values(rdc_gpu_group_t group_id,
-                                     uint32_t gpu_index,
-                                     rdc_field_t field_id,
-                                     uint64_t start_timestamp,
-                                     uint64_t end_timestamp,
-                                     rdc_field_value* start_value,
+  rdc_status_t rdc_health_get_values(rdc_gpu_group_t group_id, uint32_t gpu_index,
+                                     rdc_field_t field_id, uint64_t start_timestamp,
+                                     uint64_t end_timestamp, rdc_field_value* start_value,
                                      rdc_field_value* end_value) override;
   rdc_status_t rdc_health_clear(rdc_gpu_group_t group_id) override;
-  rdc_status_t rdc_update_health_stats(rdc_gpu_group_t group_id,
-                                       uint32_t gpu_index,
+  rdc_status_t rdc_update_health_stats(rdc_gpu_group_t group_id, uint32_t gpu_index,
                                        const rdc_field_value& value) override;
 
  private:

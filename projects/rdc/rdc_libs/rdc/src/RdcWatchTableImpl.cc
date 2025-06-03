@@ -73,6 +73,19 @@ rdc_status_t RdcWatchTableImpl::rdc_job_start_stats(rdc_gpu_group_t group_id, co
     return RDC_ST_NOT_FOUND;
   }
 
+  // Add process start/stop for all jobs
+  rdc_group_info_t ginfo;
+  result = group_settings_->rdc_group_gpu_get_info(group_id, &ginfo);
+  if (result != RDC_ST_OK) {
+    return result;
+  }
+
+  for (uint32_t ix = 0; ix < ginfo.count; ++ix) {
+    uint32_t gpu = ginfo.entity_ids[ix];
+    fields_in_watch.emplace_back(gpu, RDC_EVNT_NOTIF_PROCESS_START);
+    fields_in_watch.emplace_back(gpu, RDC_EVNT_NOTIF_PROCESS_END);
+  }
+
   JobWatchTableEntry jentry{group_id, fields_in_watch};
   do {  //< lock guard for thread safe
     std::lock_guard<std::mutex> guard(watch_mutex_);
@@ -80,11 +93,6 @@ rdc_status_t RdcWatchTableImpl::rdc_job_start_stats(rdc_gpu_group_t group_id, co
   } while (0);
 
   rdc_field_group_info_t finfo;
-  rdc_group_info_t ginfo;
-  result = group_settings_->rdc_group_gpu_get_info(group_id, &ginfo);
-  if (result != RDC_ST_OK) {
-    return result;
-  }
 
   result = group_settings_->rdc_group_field_get_info(JOB_FIELD_ID, &finfo);
   if (result != RDC_ST_OK) {

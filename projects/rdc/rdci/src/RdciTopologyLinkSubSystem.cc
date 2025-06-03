@@ -85,7 +85,6 @@ void RdciTopologyLinkSubSystem::show_help() const {
 static const char* topology_link_type_to_str(rdc_topology_link_type_t type) {
   if (type == RDC_IOLINK_TYPE_PCIEXPRESS) return "Connected via PCIe \t";
   if (type == RDC_IOLINK_TYPE_XGMI) return "Connected via XGMI \t";
-  if (type == RDCI_IOLINK_TYPE_NUMIOLINKTYPES) return "Number of IO Link types";
   return "N/A \t\t\t";
 }
 
@@ -98,8 +97,8 @@ void RdciTopologyLinkSubSystem::process() {
     throw RdcException(result, "Error to find devices on the system.");
   }
   if (group_index_ >= count) {
-    throw RdcException(result,
-                       "Fail to get " + std::to_string(group_index_) + " to the topology gpu index");
+    throw RdcException(
+        result, "Fail to get " + std::to_string(group_index_) + " to the topology gpu index");
   }
   switch (topology_ops_) {
     case TOPOLOGY_INDEX: {

@@ -136,6 +136,37 @@ amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,
   return AMDSMI_STATUS_SUCCESS;
 }
 
+amdsmi_status_t get_gpu_id_from_processor_handle(amdsmi_processor_handle processor_handle,
+                                                 uint32_t* gpu_index) {
+  if (!gpu_index) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  std::vector<amdsmi_socket_handle> sockets;
+  auto ret = get_socket_handles(sockets);
+  if (ret != AMDSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  uint32_t idx = 0;
+  for (auto const& sock : sockets) {
+    std::vector<amdsmi_processor_handle> procs;
+    ret = get_processor_handles(sock, procs);
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+      return ret;
+    }
+    for (auto const& h : procs) {
+      if (h == processor_handle) {
+        *gpu_index = idx;
+        return AMDSMI_STATUS_SUCCESS;
+      }
+      ++idx;
+    }
+  }
+
+  return AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS;
+}
+
 amdsmi_status_t get_processor_count(uint32_t& all_processor_count) {
   uint32_t total_processor_count = 0;
   uint32_t socket_count;
