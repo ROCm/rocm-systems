@@ -46,6 +46,8 @@ class AMDSMILogger():
         self.store_cpu_json_output = []
         self.store_core_json_output = []
         self.store_gpu_json_output = []
+        self.store_xgmi_metric_json_output = []
+        self.store_xgmi_link_status_json_output = []
 
 
     class LoggerFormat(Enum):
@@ -576,11 +578,18 @@ class AMDSMILogger():
 
 
     def combine_arrays_to_json(self):
-        combined_json = {
-            "cpu_data": self.store_cpu_json_output,
-            "core_data": self.store_core_json_output,
-            "gpu_data": self.store_gpu_json_output
-        }
+        combined_json = {}
+        if self.store_cpu_json_output:
+            combined_json["cpu_data"] = self.store_cpu_json_output
+        if self.store_core_json_output:
+            combined_json["core_data"] = self.store_core_json_output
+        if self.store_gpu_json_output:
+            combined_json["gpu_data"] = self.store_gpu_json_output
+        if self.store_xgmi_metric_json_output:
+            combined_json["xgmi_metric"] = self.store_xgmi_metric_json_output
+        if self.store_xgmi_link_status_json_output:
+            combined_json["link_status"] = self.store_xgmi_link_status_json_output
+
         self.destination == 'stdout'
         json_std_output = json.dumps(combined_json, indent=4)
         print(json_std_output)

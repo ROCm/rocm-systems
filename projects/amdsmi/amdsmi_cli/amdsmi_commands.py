@@ -6055,7 +6055,11 @@ class AMDSMICommands():
                 new_output.append(self.logger.flatten_dict(elem, topology_override=True))
             self.logger.multiple_device_output = new_output
 
-        if not self.logger.is_human_readable_format():
+        if self.logger.is_json_format():
+            self.logger.store_xgmi_metric_json_output.append(xgmi_values)
+            if not args.link_status:
+                self.logger.combine_arrays_to_json()
+        elif not self.logger.is_human_readable_format():
             self.logger.print_output(multiple_device_enabled=True)
 
         if args.link_status:
@@ -6086,6 +6090,8 @@ class AMDSMICommands():
                     else:
                         del tabular_output_dict['gpu#']
                     tabular_output.append(tabular_output_dict)
+                    if self.logger.is_json_format():
+                        self.logger.store_xgmi_link_status_json_output.append(tabular_output_dict)
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     xgmi_dict['link_metrics']['link_status']={"status": "failed"}
                     logging.debug("Failed to get XGMI link status for GPU %s | %s", src_gpu_id, e.get_error_info())
@@ -6095,8 +6101,11 @@ class AMDSMICommands():
                     xgmi_dict['link_status'] = tabular_output
             self.logger.multiple_device_output= tabular_output
             self.logger.table_title = "\nXGMI LINK STATUS"
-            self.logger.print_output(multiple_device_enabled=True, tabular=True)
+            if not self.logger.is_json_format():
+                self.logger.print_output(multiple_device_enabled=True, tabular=True)
             self.logger.clear_multiple_devices_output()
+            if self.logger.is_json_format():
+                self.logger.combine_arrays_to_json()
             if self.logger.is_human_readable_format():
             # Populate the legend output
                 legend_parts = [
