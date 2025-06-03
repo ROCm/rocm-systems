@@ -28,7 +28,6 @@ THE SOFTWARE.
 static const char* topology_link_type_to_str(rdc_topology_link_type_t type) {
   if (type == RDC_IOLINK_TYPE_PCIEXPRESS) return "RDC_IOLINK_TYPE_PCIEXPRESS";
   if (type == RDC_IOLINK_TYPE_XGMI) return "RDC_IOLINK_TYPE_XGMI";
-  if (type == RDCI_IOLINK_TYPE_NUMIOLINKTYPES) return "RDCI_IOLINK_TYPE_NUMIOLINKTYPES";
   return "Unknown_Type";
 }
 int main() {

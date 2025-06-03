@@ -709,7 +709,6 @@ typedef enum {
   RDC_IOLINK_TYPE_UNDEFINED = 0,     //!< unknown type.
   RDC_IOLINK_TYPE_PCIEXPRESS = 1,    //!< PCI Express
   RDC_IOLINK_TYPE_XGMI = 2,          //!< XGMI
-  RDCI_IOLINK_TYPE_NUMIOLINKTYPES,   //!< Number of IO Link types
   RDC_IOLINK_TYPE_SIZE = 0xFFFFFFFF  //!< Max of IO Link types
 } rdc_topology_link_type_t;
 
