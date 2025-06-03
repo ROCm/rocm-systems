@@ -262,6 +262,10 @@ amdsmi_status_code_to_string(amdsmi_status_t status, const char **status_string)
             *status_string = "AMDSMI_STATUS_REFCOUNT_OVERFLOW: An internal reference"
                 " counter exceeded INT32_MAX.";
             break;
+        case AMDSMI_STATUS_DIRECTORY_NOT_FOUND:
+            *status_string = "AMDSMI_STATUS_DIRECTORY_NOT_FOUND: Error when a"
+                " directory is not found, maps to ENOTDIR.";
+            break;
         case AMDSMI_STATUS_BUSY:
             *status_string = "AMDSMI_STATUS_BUSY: Processor busy.";
             break;
@@ -1747,9 +1751,6 @@ amdsmi_get_gpu_xgmi_link_status(amdsmi_processor_handle processor_handle,
     uint32_t dev_num = 0;
     rsmi_num_monitor_devices(&dev_num);
     link_status->total_links = AMDSMI_MAX_NUM_XGMI_LINKS;
-    if (dev_num <= link_status->total_links) {
-        link_status->total_links = dev_num;
-    }
     // get the status values from the metric info
     for (unsigned int i = 0; i < link_status->total_links; i++) {
         if (metric_info.xgmi_link_status[i] == std::numeric_limits<uint16_t>::max()) {
@@ -2132,12 +2133,53 @@ amdsmi_status_t amdsmi_get_link_metrics(amdsmi_processor_handle processor_handle
         (metric_info.xgmi_link_width != std::numeric_limits<uint16_t>::max()))
         link_metrics->max_bandwidth = metric_info.xgmi_link_speed * metric_info.xgmi_link_width;
 
+    uint16_t link_to_dst_node[AMDSMI_MAX_NUM_XGMI_LINKS];
+    std::fill_n(link_to_dst_node, AMDSMI_MAX_NUM_XGMI_LINKS, std::numeric_limits<uint16_t>::max());
+    status =  rsmi_wrapper(rsmi_dev_xgmi_port_num_get, processor_handle, 0,
+        &link_metrics->num_links, link_to_dst_node);
+
     for (unsigned int i = 0; i < AMDSMI_MAX_NUM_XGMI_LINKS; i++) {
+        memset(&link_metrics->links[i].bdf, 0xFF, sizeof(amdsmi_bdf_t));
+        if (link_to_dst_node[i] != std::numeric_limits<uint16_t>::max()) {
+            uint32_t node_id = link_to_dst_node[i];
+            std::string node_symlink = "node" + std::to_string(node_id);
+            std::string sysfs_base = "/sys/bus/pci/devices/";
+            DIR *dir = opendir(sysfs_base.c_str());
+            if (dir) {
+                struct dirent *entry;
+                while ((entry = readdir(dir)) != nullptr) {
+                    if (entry->d_type != DT_DIR && entry->d_type != DT_LNK)
+                        continue;
+                    std::string bdf = entry->d_name;
+                    if (bdf == "." || bdf == "..") continue;
+                    std::string symlink_path = sysfs_base + bdf + "/xgmi_hive_info/" + node_symlink;
+                    char buf[PATH_MAX] = {0};
+                    ssize_t len = readlink(symlink_path.c_str(), buf, sizeof(buf)-1);
+                    if (len > 0) {
+                        buf[len] = '\0';
+                        std::string target(buf);
+                        size_t last_slash = target.find_last_of('/');
+                        std::string bdf_str = (last_slash != std::string::npos) ? target.substr(last_slash + 1) : target;
+                        // Parse BDF string: "dddd:bb:dd.f"
+                        unsigned domain = 0, bus = 0, device = 0, function = 0;
+                        if (sscanf(bdf_str.c_str(), "%4x:%2x:%2x.%1x", &domain, &bus, &device, &function) == 4) {
+                            amdsmi_bdf_t dst_bdf = {};
+                            dst_bdf.domain_number = static_cast<uint16_t>(domain);
+                            dst_bdf.bus_number = static_cast<uint8_t>(bus);
+                            dst_bdf.device_number = static_cast<uint8_t>(device);
+                            dst_bdf.function_number = static_cast<uint8_t>(function);
+                            link_metrics->links[i].bdf = dst_bdf;
+                        }
+                        break; // Found, stop searching
+                    }
+                }
+                closedir(dir);
+            }
+        }
         link_metrics->links[i].read = metric_info.xgmi_read_data_acc[i];
         link_metrics->links[i].write = metric_info.xgmi_write_data_acc[i];
         link_metrics->links[i].link_type = AMDSMI_LINK_TYPE_XGMI;
     }
-
     return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -4107,7 +4149,7 @@ amdsmi_status_t amdsmi_get_afids_from_cper(
         return AMDSMI_STATUS_INVAL;
     }
 
-    int i = 0;
+    uint32_t i = 0;
     for(int afid: cper_decode(cper)) {
         if(i < *num_afids) {
             afids[i] = afid;
@@ -4186,6 +4228,7 @@ amdsmi_get_power_info(amdsmi_processor_handle processor_handle, amdsmi_power_inf
     if (status != AMDSMI_STATUS_SUCCESS)
         return status;
 
+    info->socket_power = 0xFFFF;
     info->current_socket_power = 0xFFFF;
     info->average_socket_power = 0xFFFF;
     info->gfx_voltage = 0xFFFF;
@@ -4201,6 +4244,12 @@ amdsmi_get_power_info(amdsmi_processor_handle processor_handle, amdsmi_power_inf
         info->gfx_voltage = metrics.voltage_gfx;
         info->soc_voltage = metrics.voltage_soc;
         info->mem_voltage = metrics.voltage_mem;
+    }
+
+    if (metrics.current_socket_power != 0xFFFF) {
+        info->socket_power = metrics.current_socket_power;
+    } else if (metrics.average_socket_power != 0xFFFF) {
+        info->socket_power = metrics.average_socket_power;
     }
 
     int power_limit = 0;

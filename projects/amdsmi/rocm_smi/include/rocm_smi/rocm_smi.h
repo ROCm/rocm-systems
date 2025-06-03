@@ -108,6 +108,8 @@ typedef enum {
                                          //!< being used
   RSMI_STATUS_REFCOUNT_OVERFLOW,         //!< An internal reference counter
                                          //!< exceeded INT32_MAX
+  RSMI_STATUS_DIRECTORY_NOT_FOUND,       //!< Error when a directory is not 
+                                         //!< found, maps to ENOTDIR
   RSMI_STATUS_SETTING_UNAVAILABLE,       //!< Requested setting is unavailable
                                          //!< for the current device
   RSMI_STATUS_AMDGPU_RESTART_ERR,        //!< Could not successfully restart
@@ -1993,6 +1995,26 @@ rsmi_status_t rsmi_dev_unique_id_get(uint32_t dv_ind, uint64_t *id);
  *
  */
 rsmi_status_t rsmi_dev_xgmi_physical_id_get(uint32_t dv_ind, uint16_t *id);
+
+/**
+ *  @brief Get the XGMI src_gpu to dest_gpu link_num based mapping for the device
+ *
+ *  @details Given a device index @p dv_ind, a pointer to a uint16_t to get the
+ *  count of XGMI links, and a pointer to a uint16_t array to which the dest_gpu's
+ *  order will be written
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] count a pointer to uint16_t to which the count of XGMI links
+ *  will be written
+ *
+ *  @param[inout] xgmi_dst_gpu_order a pointer to uint16_t array to which the
+ *  dest_gpu's order will be written
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t rsmi_dev_xgmi_port_num_get(uint32_t dv_ind, uint32_t *count, uint16_t *link_to_dst_gpu);
 
 /**
  *  @brief Get the GUID, also known as the GPU device id,
