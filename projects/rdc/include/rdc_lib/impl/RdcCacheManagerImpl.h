@@ -22,6 +22,7 @@ THE SOFTWARE.
 #ifndef INCLUDE_RDC_LIB_IMPL_RDCCACHEMANAGERIMPL_H_
 #define INCLUDE_RDC_LIB_IMPL_RDCCACHEMANAGERIMPL_H_
 
+#include <array>
 #include <map>
 #include <memory>
 #include <mutex>  // NOLINT(build/c++11)
