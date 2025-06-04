@@ -28,6 +28,7 @@
 #include <unistd.h>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <shared_mutex>

@@ -43,7 +43,7 @@ namespace hsa
 #define HSA_AMD_INTERFACE_VERSION                                                                  \
     ROCPROFILER_COMPUTE_VERSION(HSA_AMD_INTERFACE_VERSION_MAJOR, HSA_AMD_INTERFACE_VERSION_MINOR, 0)
 
-#if HSA_AMD_INTERFACE_VERSION >= 10700
+#if HSA_AMD_INTERFACE_VERSION >= ROCPROFILER_COMPUTE_VERSION(1, 7, 0)
 constexpr auto hsa_amd_memory_pool_executable_flag = HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
 #else
 constexpr auto hsa_amd_memory_pool_executable_flag = (1 << 2);

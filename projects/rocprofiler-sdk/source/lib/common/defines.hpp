@@ -65,7 +65,8 @@
 #    endif
 #endif
 
-#define ROCPROFILER_COMPUTE_VERSION(MAJOR, MINOR, PATCH) ((10000 * MAJOR) + (100 * MINOR) + (PATCH))
+#define ROCPROFILER_COMPUTE_VERSION(MAJOR, MINOR, PATCH)                                           \
+    ROCPROFILER_SDK_COMPUTE_VERSION(MAJOR, MINOR, PATCH)
 
 // Below are used in HSA, HIP, and Marker API tracing
 #define IMPL_DETAIL_EXPAND(X) X

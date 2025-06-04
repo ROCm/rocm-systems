@@ -261,8 +261,17 @@ typedef union rocprofiler_hip_api_args_t
     } hipCtxEnablePeerAccess;
     struct
     {
+        // In HIP v7.0, apiVersion was changed from int* to unsigned int* to match CUDA signature.
+        // If rocprofiler-sdk is compiled with HIP >= 7.0 and HIP is < 7.0 at runtime, there is
+        // expectation that this will NOT cause issues: apiVersion should never be negative and
+        // should never be >= INT_MAX
         hipCtx_t ctx;
-        int*     apiVersion;
+#if ROCPROFILER_SDK_COMPUTE_VERSION(HIP_VERSION_MAJOR, HIP_VERSION_MINOR, 0) >=                    \
+    ROCPROFILER_SDK_COMPUTE_VERSION(7, 0, 0)
+        unsigned int* apiVersion;
+#else
+        int* apiVersion;  // HIP version < 7.0
+#endif
     } hipCtxGetApiVersion;
     struct
     {
@@ -1787,13 +1796,13 @@ typedef union rocprofiler_hip_api_args_t
     struct
     {
         hipDeviceptr_t dst;
-        void*          src;
+        const void*    src;
         size_t         sizeBytes;
     } hipMemcpyHtoD;
     struct
     {
         hipDeviceptr_t dst;
-        void*          src;
+        const void*    src;
         size_t         sizeBytes;
         hipStream_t    stream;
     } hipMemcpyHtoDAsync;

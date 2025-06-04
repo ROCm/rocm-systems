@@ -29,6 +29,7 @@
 #include <mutex>
 #include <random>
 #include <stdexcept>
+#include <thread>
 
 #define HIP_API_CALL(CALL)                                                                         \
     {                                                                                              \

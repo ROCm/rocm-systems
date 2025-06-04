@@ -25,6 +25,7 @@
 #    undef NDEBUG
 #endif
 
+#include <cassert>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
