@@ -107,11 +107,6 @@ static HSAKMT_STATUS init_vars_from_env(void) {
   if (envvar)
     dxg_runtime->vendor_packet_process = atoi(envvar);
 
-  /* Decide whether hsa-runtime dispatch vendor packet */
-  envvar = getenv("WSL_ENABLE_VENDOR_PACKET");
-  if (envvar)
-    dxg_runtime->enable_vendor_packet = atoi(envvar);
-
   /* Decide whether to check available system memory before allocation */
   envvar = getenv("WSL_CHECK_AVAIL_SYSRAM");
   if (envvar)

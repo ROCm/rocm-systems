@@ -84,17 +84,6 @@ hsaKmtGetVersion(
     );
 
 /**
-  Returns the user-kernel interface capability.
-  The calling software should validate that disable the not supported capability.
-*/
-
-HSAKMT_STATUS
-HSAKMTAPI
-hsaKmtGetVersionCapInfo(
-    HsaVersionCapability*  VersionCapInfo    //OUT
-    );
-
-/**
   The function takes a "snapshot" of the topology information within the KFD
   to avoid any changes during the enumeration process.
 */

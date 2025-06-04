@@ -35,26 +35,3 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetVersion(HsaVersionInfo *VersionInfo) {
 
   return HSAKMT_STATUS_SUCCESS;
 }
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtGetVersionCapInfo(HsaVersionCapability *VersionCapInfo) {
-  CHECK_DXG_OPEN();
-
-  VersionCapInfo->Value = 0;
-  VersionCapInfo->ui64.Sdma = 1;
-  VersionCapInfo->ui64.IPCLegacyMode = 0; // Force to 0 to support IPC mem
-  /*VersionCapInfo->ui64.InterruptSignal = 0;
-  VersionCapInfo->ui64.SdmaUserQueue = 0;
-  VersionCapInfo->ui64.SdmaPeer = 0;
-  VersionCapInfo->ui64.SdmaGang = 0;
-  VersionCapInfo->ui64.Image = 0;
-  VersionCapInfo->ui64.EventAge = 0;
-  VersionCapInfo->ui64.Scratch = 0;
-  VersionCapInfo->ui64.XNack = 0;
-  VersionCapInfo->ui64.FineGrainPcie = 0;
-  VersionCapInfo->ui64.Devmemqueuebuf = 0;*/
-
-  VersionCapInfo->ui64.VendorPacket = dxg_runtime->enable_vendor_packet;
-
-  return HSAKMT_STATUS_SUCCESS;
-}

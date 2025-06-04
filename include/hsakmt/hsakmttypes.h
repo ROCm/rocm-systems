@@ -135,30 +135,6 @@ typedef struct _HsaVersionInfo
     HSAuint32    KernelInterfaceMinorVersion;    // supported kernel interface minor version
 } HsaVersionInfo;
 
-typedef struct _HsaVersionCapability
-{
-    union {
-        HSAuint64 Value;
-        struct {
-            HSAuint64 InterruptSignal    :1; // HSA_ENABLE_INTERRUPT
-            HSAuint64 Sdma               :1; // HSA_ENABLE_SDMA
-            HSAuint64 SdmaUserQueue      :1;
-            HSAuint64 SdmaPeer           :1; // HSA_ENABLE_PEER_SDMA
-            HSAuint64 SdmaGang           :1; // HSA_ENABLE_SDMA_GANG
-            HSAuint64 SdmaXgmi           :1;
-            HSAuint64 Image              :1; // image ext supported
-            HSAuint64 EventAge           :1;
-            HSAuint64 Scratch            :1; // HSA_SCRATCH_SINGLE_LIMIT, HSA_SCRATCH_SINGLE_LIMIT_ASYNC
-            HSAuint64 XNack              :1; // HSA_XNACK
-            HSAuint64 VendorPacket       :1; // Enable vendor packet in hsa-runtime
-            HSAuint64 FineGrainPcie      :1; // uncached/fine grained VRAM
-            HSAuint64 IPCLegacyMode      :1; // 0 - socket in runtime; 1 - socket in libkmt;
-            HSAuint64 Devmemqueuebuf     :1; // Dont't alloc queue buf/struct in dev mem
-            HSAuint64 Reserved           :50;
-        }ui64;
-    };
-} HsaVersionCapability;
-
 //
 // HSA Topology Discovery Infrastructure structure definitions.
 // The infrastructure implementation is based on design specified in the Kernel HSA Driver ADD

@@ -56,7 +56,6 @@ struct hsakmtRuntime {
     is_svm_api_supported(false),
     zfb_support(0),
     vendor_packet_process(0),
-    enable_vendor_packet(0),
     check_avail_sysram(false),
     max_single_alloc_size(0),
     enable_thunk_sub_allocator(0) {}
@@ -74,7 +73,6 @@ struct hsakmtRuntime {
   bool is_svm_api_supported;
   int zfb_support;
   int vendor_packet_process;
-  int enable_vendor_packet;
   bool check_avail_sysram;
   size_t max_single_alloc_size;
   int enable_thunk_sub_allocator;
