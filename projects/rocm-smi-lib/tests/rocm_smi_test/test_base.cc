@@ -131,9 +131,17 @@ void TestBase::PrintDeviceHeader(uint32_t dv_ind) {
     std::cout << "\t**Device ID: 0x" << std::hex << val_ui16 << std::endl;
   }
   err = rsmi_dev_revision_get(dv_ind, &val_ui16);
-  CHK_ERR_ASRT(err)
-  IF_VERB(STANDARD) {
-    std::cout << "\t**Dev.Rev.ID: 0x" << std::hex << val_ui16 << std::endl;
+  if (err == RSMI_STATUS_NOT_SUPPORTED) {
+    IF_VERB(STANDARD) {
+      std::cout << "\t**Device Revision ID: N/A" << std::endl;
+    }
+    ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
+  } else {
+    CHK_ERR_ASRT(err)
+    IF_VERB(STANDARD) {
+      std::cout << "\t**Device Revision ID: 0x" << std::hex << std::setfill('0') << std::setw(2)
+                << val_ui16 << std::endl;
+    }
   }
 
   char name[128];
@@ -149,15 +157,16 @@ void TestBase::PrintDeviceHeader(uint32_t dv_ind) {
                                                                      std::endl;
   }
   err = rsmi_dev_subsystem_id_get(dv_ind, &val_ui16);
-  CHK_ERR_ASRT(err)
-  IF_VERB(STANDARD) {
-    std::cout << "\t**Subsystem ID: 0x" << std::hex << val_ui16 << std::endl;
-  }
-  err = rsmi_dev_subsystem_vendor_id_get(dv_ind, &val_ui16);
-  CHK_ERR_ASRT(err)
-  IF_VERB(STANDARD) {
-    std::cout << "\t**Subsystem Vendor ID: 0x" << std::hex << val_ui16 <<
-                                                                     std::endl;
+  if (err == RSMI_STATUS_NOT_SUPPORTED) {
+    IF_VERB(STANDARD) {
+      std::cout << "\t**Subsystem ID: N/A" << std::endl;
+    }
+  } else {
+    CHK_ERR_ASRT(err)
+    IF_VERB(STANDARD) {
+      std::cout << "\t**Subsystem ID: 0x" << std::hex << std::setfill('0') << std::setw(4)
+                << val_ui16 << std::endl;
+    }
   }
   std::cout << std::setbase(10);
 }

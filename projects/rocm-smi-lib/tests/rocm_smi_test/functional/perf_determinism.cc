@@ -111,6 +111,14 @@ void TestPerfDeterminism::Run(void) {
                 << amd::smi::getRSMIStatusString(err, false)
                 << "\n";
     }
+    if (err == RSMI_STATUS_NOT_SUPPORTED) {
+      IF_VERB(STANDARD) {
+        std::cout << "\t**rsmi_dev_perf_level_set(i, RSMI_DEV_PERF_LEVEL_AUTO): "
+                  << "Not supported on this machine" << std::endl;
+      }
+      ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
+      continue;
+    }
     CHK_ERR_ASRT(err)
     ret = rsmi_dev_perf_level_get(i, &pfl);
     IF_VERB(STANDARD) {

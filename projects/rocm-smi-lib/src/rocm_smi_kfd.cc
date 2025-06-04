@@ -517,7 +517,7 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
       cu_count += kfd_node_map[gpu_id]->cu_count();
     }
     else {
-      // Some GFX revisions do not provide cu_occupancy debugfs method 
+      // Some GFX revisions do not provide cu_occupancy debugfs method
       // which may cause ENOENT
       proc->cu_occupancy = CU_OCCUPANCY_INVALID;
       cu_count = 0;
@@ -881,7 +881,7 @@ int KFDNode::get_used_memory(uint64_t* used) {
       return 1;
   }
   struct kfd_ioctl_get_available_memory_args mem = {0, 0, 0};
-  mem.gpu_id = gpu_id_;
+  mem.gpu_id = static_cast<uint32_t>(gpu_id_);
   if (ioctl(kfd_fd, AMDKFD_IOC_AVAILABLE_MEMORY , &mem) != 0) {
     close(kfd_fd);
     return 1;

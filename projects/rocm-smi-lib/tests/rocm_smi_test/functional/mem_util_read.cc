@@ -52,6 +52,7 @@
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi_test/functional/mem_util_read.h"
 #include "rocm_smi_test/test_common.h"
+#include "rocm_smi/rocm_smi_utils.h"
 
 TestMemUtilRead::TestMemUtilRead() : TestBase() {
   set_title("Memory Utilization Read Test");
@@ -102,12 +103,14 @@ void TestMemUtilRead::Run(void) {
   }
 
   auto err_chk = [&](const char *str) {
+    IF_VERB(STANDARD) {
+      std::cout << "\t** " << str << std::endl;
+    }
     if (err != RSMI_STATUS_SUCCESS) {
-      if (err == RSMI_STATUS_FILE_ERROR) {
-        IF_VERB(STANDARD) {
-          std::cout << "\t** " << str << ": Not supported on this machine"
-                                                                << std::endl;
-        }
+      if (err == RSMI_STATUS_FILE_ERROR ||
+          err == RSMI_STATUS_NOT_SUPPORTED) {
+        ASSERT_TRUE(err == RSMI_STATUS_NOT_SUPPORTED
+                    || err == RSMI_STATUS_FILE_ERROR);
       } else {
         CHK_ERR_ASRT(err)
       }
@@ -133,23 +136,32 @@ void TestMemUtilRead::Run(void) {
                                    mem_type <= RSMI_MEM_TYPE_LAST; ++mem_type) {
         err = rsmi_dev_memory_total_get(i,
                              static_cast<rsmi_memory_type_t>(mem_type), &total);
-        err_chk("rsmi_dev_memory_total_get()");
+        amd::smi::getRSMIStatusString(err, false);
+        std::string mem_type_str =
+          kDevMemoryTypeNameMap.at(static_cast<rsmi_memory_type_t>(mem_type));
+        std::string input_str =
+          "rsmi_dev_memory_total_get(" + mem_type_str + "): "
+          + amd::smi::getRSMIStatusString(err, false);
+        err_chk(input_str.c_str());
         if (err != RSMI_STATUS_SUCCESS) {
-          return;
+          continue;
         }
 
         err = rsmi_dev_memory_usage_get(i,
                              static_cast<rsmi_memory_type_t>(mem_type), &usage);
-        err_chk("rsmi_dev_memory_usage_get()");
+        input_str =
+          "rsmi_dev_memory_usage_get(" + mem_type_str + "): "
+          + amd::smi::getRSMIStatusString(err, false);
+        err_chk(input_str.c_str());
         if (err != RSMI_STATUS_SUCCESS) {
-          return;
+          continue;
         }
 
         IF_VERB(STANDARD) {
           std::cout << "\t**" <<
            kDevMemoryTypeNameMap.at(static_cast<rsmi_memory_type_t>(mem_type))
             << " Calculated Utilization: " <<
-              (static_cast<float>(usage)*100)/total << "% ("<< usage <<
+              (static_cast<float>(usage)*100)/static_cast<float>(total) << "% (" << usage <<
                                               "/" << total << ")" << std::endl;
         }
       }

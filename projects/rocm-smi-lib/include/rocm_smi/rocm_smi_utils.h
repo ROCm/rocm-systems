@@ -136,6 +136,8 @@ rsmi_status_t rsmi_get_gfx_target_version(uint32_t dv_ind,
 std::string leftTrim(const std::string &s);
 std::string rightTrim(const std::string &s);
 std::string trim(const std::string &s);
+std::string trimAllWhiteSpace(const std::string &s);
+std::string removeWhitespace(const std::string &s);
 std::string removeNewLines(const std::string &s);
 
 std::string removeString(const std::string origStr,
@@ -144,6 +146,7 @@ void system_wait(int milli_seconds);
 int countDigit(uint64_t n);
 std::string find_file_in_folder(const std::string& folder,
                const std::string& regex);
+uint64_t get_multiplier_from_char(char units_char);
 template <typename T>
   std::string print_int_as_hex(T i, bool showHexNotation = true,
   int overloadBitSize = 0) {

@@ -139,10 +139,16 @@ void TestSysInfoRead::Run(void) {
     ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
 
     err = rsmi_topo_numa_affinity_get(i, &val_i32);
-    CHK_ERR_ASRT(err)
-    IF_VERB(STANDARD) {
-      std::cout << "\t**NUMA NODE: 0x" << std::hex << val_i32;
-      std::cout << " (" << std::dec << val_i32 << ")" << std::endl;
+    if (err == RSMI_STATUS_NOT_SUPPORTED) {
+      std::cout << "\t**rsmi_topo_numa_affinity_get(): Not supported on this machine"
+                << std::endl;
+      ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
+    } else  {
+      CHK_ERR_ASRT(err)
+      IF_VERB(STANDARD) {
+        std::cout << "\t**NUMA NODE: 0x" << std::hex << val_i32;
+        std::cout << " (" << std::dec << val_i32 << ")" << std::endl;
+      }
     }
     // Verify api support checking functionality is working
     err = rsmi_topo_numa_affinity_get(i, nullptr);

@@ -136,9 +136,16 @@ class TestBase {
 
 // Macros to be used within TestBase classes
 #define CHK_ERR_ASRT(RET) { \
-    if (dont_fail() && ((RET) != RSMI_STATUS_SUCCESS)) { \
+    if ((RET) != RSMI_STATUS_SUCCESS) { \
         std::cout << std::endl << "\t===> TEST FAILURE." << std::endl; \
-        DISPLAY_RSMI_ERR(RET); \
+        const char *err_str; \
+        std::cout << "\t===> ERROR: RSMI call returned " << (RET) << std::endl; \
+        rsmi_status_string((RET), &err_str); \
+        std::cout << "\t===> (" << err_str << ")" << std::endl; \
+        std::cout << "\t===> at " << __FILE__ << ":" << std::dec << __LINE__ << \
+                                                                      std::endl; \
+    } \
+    if (dont_fail() && ((RET) != RSMI_STATUS_SUCCESS)) { \
         std::cout << \
          "\t===> Abort is over-ridden due to dont_fail command line option." \
                                                                << std::endl; \

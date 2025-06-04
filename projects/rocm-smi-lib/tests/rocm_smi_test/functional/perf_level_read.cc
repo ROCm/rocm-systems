@@ -99,10 +99,15 @@ void TestPerfLevelRead::Run(void) {
     PrintDeviceHeader(i);
 
     err = rsmi_dev_perf_level_get(i, &pfl);
-    CHK_ERR_ASRT(err)
-    IF_VERB(STANDARD) {
-      std::cout << "\t**Performance Level:" << std::dec << (uint32_t)pfl <<
-                                                                    std::endl;
+    if (err == RSMI_STATUS_NOT_SUPPORTED) {
+      std::cout << "\t**Performance Level: Not Supported" << std::endl;
+      ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
+    } else {
+      CHK_ERR_ASRT(err)
+      IF_VERB(STANDARD) {
+        std::cout << "\t**Performance Level:" << std::dec << (uint32_t)pfl
+                  << std::endl;
+      }
     }
     // Verify api support checking functionality is working
     err = rsmi_dev_perf_level_get(i, nullptr);

@@ -31,6 +31,7 @@
 
 #include <dirent.h>
 #include <pthread.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <array>
@@ -515,6 +516,8 @@ rsmi_status_t GpuMetricsBase_v18_t::populate_metrics_dynamic_tbl() {
     m_gpu_metrics_tbl.m_firmware_timestamp = (m_gpu_metrics_tbl.m_firmware_timestamp * 10);
     LOG_DEBUG(ss);
   };
+
+  run_metric_adjustments_v18();
 
   // Temperature Info
   m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricTemperature]
@@ -4535,8 +4538,24 @@ rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind, rsmi_gpu_metrics_t* smu) {
     dev->set_smi_partition_id(0);
   }
 
-  dev->dev_log_gpu_metrics(ostrstream);
+  // check if file exists, report not supported if it does not exist
+  std::string file_name = "/sys/class/drm/card"
+                          + std::to_string(dev->index())
+                          + "/device/gpu_metrics";
+  if (access(file_name.c_str(), F_OK | R_OK) != 0) {
+    status_code = RSMI_STATUS_NOT_SUPPORTED;
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Fail "
+       << " | Device #: " << dv_ind
+       << " | Returning = "
+       << getRSMIStatusString(status_code, false)
+       << " |";
+    LOG_ERROR(ss);
+    return status_code;
+  }
 
+  dev->dev_log_gpu_metrics(ostrstream);
   const auto [error_code, external_metrics] = dev->dev_copy_internal_to_external_metrics();
   if (error_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
     ss << __PRETTY_FUNCTION__

@@ -101,11 +101,12 @@ void TestGPUBusyRead::Run(void) {
 
       err = rsmi_dev_busy_percent_get(i, &val_ui32);
       if (err != RSMI_STATUS_SUCCESS) {
-        if (err == RSMI_STATUS_FILE_ERROR) {
+        if (err == RSMI_STATUS_FILE_ERROR || err == RSMI_STATUS_NOT_SUPPORTED) {
           IF_VERB(STANDARD) {
             std::cout << "\t**GPU Busy Percent: Not supported on this machine"
                                                                  << std::endl;
           }
+          ASSERT_TRUE(err == RSMI_STATUS_FILE_ERROR || err == RSMI_STATUS_NOT_SUPPORTED);
         } else {
           CHK_ERR_ASRT(err)
         }
