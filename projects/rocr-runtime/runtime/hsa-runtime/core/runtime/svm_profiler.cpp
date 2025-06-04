@@ -356,7 +356,7 @@ SvmProfileControl::SvmProfileControl() : event(-1), exit(false) {
 }
 
 SvmProfileControl::~SvmProfileControl() {
-  if (event != -1){
+  if (event != -1) {
     eventfd_write(event, 1);
     close(event);
   }
