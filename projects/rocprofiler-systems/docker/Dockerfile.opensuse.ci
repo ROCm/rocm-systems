@@ -29,7 +29,7 @@ RUN zypper --non-interactive update -y && \
     zypper --non-interactive install -y -t pattern devel_basis && \
     zypper --non-interactive install -y binutils-gold chrpath cmake curl dpkg-devel \
         gcc-c++ git libnuma-devel openmpi3-devel papi-devel python3-pip \
-        rpm-build vim wget && \
+        rpm-build vim wget iproute2 && \
     zypper --non-interactive clean --all && \
     python3 -m pip install 'cmake==3.21' perfetto
 
