@@ -74,3 +74,10 @@ void aca_synd_init(aca_synd_fields_t *fields, uint64_t synd_reg)
     fields->syndrome = EXTRACT_BITS(synd_reg, 32, 7, uint16_t);
     fields->reserved39 = EXTRACT_BITS(synd_reg, 39, 25, uint32_t);
 }
+
+void aca_addr_init(aca_addr_fields_t *fields, uint64_t addr_reg)
+{
+    fields->base.raw_value = addr_reg;
+    fields->error_addr = EXTRACT_BITS(addr_reg, 0, 56, uint64_t);
+    fields->reserved = EXTRACT_BITS(addr_reg, 56, 8, uint8_t);
+}

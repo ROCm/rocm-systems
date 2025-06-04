@@ -40,6 +40,25 @@ typedef struct
     const char *type;    /**< Error type string */
 } aca_error_entry_t;
 
+/**
+ * @brief Structure mapping instance_id_hi to OAM and AID values
+ */
+typedef struct
+{
+    uint8_t oam; /**< OAM value */
+    uint8_t aid; /**< AID value */
+} oam_aid_map_t;
+
+/**
+ * @brief Structure for mapping bank and instance ID LO to instance name
+ */
+typedef struct
+{
+    const char *bank;      /**< Bank name */
+    uint32_t instance_id_lo;  /**< Instance ID Lo (masked with 0xFFFFFFFC) */
+    const char *name;      /**< Instance name */
+} aca_instance_entry_t;
+
 // External table declarations
 extern const aca_bank_entry_t bank_table[];
 extern const aca_error_type_t error_table[];
@@ -80,5 +99,22 @@ int find_error_type_by_bank(const char *bank, uint32_t error_code, const char **
  */
 int find_error_in_table(const aca_error_entry_t *table, size_t table_size,
                         uint32_t error_code, const char **error_type);
+
+/**
+ * @brief Find OAM and AID values based on instance_id_hi
+ * @param[in] instance_id_hi Instance ID low value (0x00-0x0F)
+ * @param[out] oam_aid Pointer to store OAM and AID values
+ * @return 0 on success, 1 if not found, -1 on parameter error
+ */
+int find_oam_aid(uint8_t instance_id_hi, oam_aid_map_t *oam_aid);
+
+/**
+ * @brief Find instance name based on bank and instance ID
+ * @param[in] bank Bank name string
+ * @param[in] instance_id_lo Instance ID (will be masked with 0xFFFFFFFC)
+ * @param[out] instance_name Pointer to store result string
+ * @return 0 on success, 1 if not found, -1 on parameter error
+ */
+int find_instance_name(const char *bank, uint32_t instance_id_lo, const char **instance_name);
 
 #endif
