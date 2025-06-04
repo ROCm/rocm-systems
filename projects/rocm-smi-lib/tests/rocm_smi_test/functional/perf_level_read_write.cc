@@ -102,11 +102,17 @@ void TestPerfLevelReadWrite::Run(void) {
     PrintDeviceHeader(dv_ind);
 
     ret = rsmi_dev_perf_level_get(dv_ind, &orig_pfl);
-    CHK_ERR_ASRT(ret)
+    if (ret == RSMI_STATUS_NOT_SUPPORTED) {
+      IF_VERB(STANDARD) {
+        std::cout << "\t**rsmi_dev_perf_level_get(): Not supported on this machine" << std::endl;
+      }
+      ASSERT_EQ(ret, RSMI_STATUS_NOT_SUPPORTED);
+      continue;
+    }
 
     IF_VERB(STANDARD) {
-      std::cout << "\t**Original Perf Level:" <<
-                                       GetPerfLevelStr(orig_pfl) << std::endl;
+      std::cout << "\t**Original Perf Level:"
+                << GetPerfLevelStr(orig_pfl) << std::endl;
     }
 
     uint32_t pfl_i = static_cast<uint32_t>(RSMI_DEV_PERF_LEVEL_FIRST);

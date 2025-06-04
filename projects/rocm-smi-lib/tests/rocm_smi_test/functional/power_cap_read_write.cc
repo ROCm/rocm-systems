@@ -103,17 +103,23 @@ void TestPowerCapReadWrite::Run(void) {
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
     PrintDeviceHeader(dv_ind);
 
-    ret = rsmi_dev_power_cap_range_get(dv_ind, 0, &max, &min);
-    CHK_ERR_ASRT(ret)
     // Verify api support checking functionality is working
     ret = rsmi_dev_power_cap_range_get(dv_ind, 0, nullptr, nullptr);
     ASSERT_EQ(ret, RSMI_STATUS_INVALID_ARGS);
 
-    ret = rsmi_dev_power_cap_get(dv_ind, 0, &orig);
-    CHK_ERR_ASRT(ret)
     // Verify api support checking functionality is working
     ret = rsmi_dev_power_cap_get(dv_ind, 0, nullptr);
     ASSERT_EQ(ret, RSMI_STATUS_INVALID_ARGS);
+
+    ret = rsmi_dev_power_cap_range_get(dv_ind, 0, &max, &min);
+    if (ret == RSMI_STATUS_NOT_SUPPORTED) {
+      std::cout << "\t**rsmi_dev_power_cap_range_get(): Not supported on this machine" << std::endl;
+      ASSERT_EQ(ret, RSMI_STATUS_NOT_SUPPORTED);
+      continue;
+    }
+
+    ret = rsmi_dev_power_cap_get(dv_ind, 0, &orig);
+    CHK_ERR_ASRT(ret)
 
     // Check if power cap is within the range
     // skip the test otherwise
@@ -123,7 +129,8 @@ void TestPowerCapReadWrite::Run(void) {
     }
 
     if (amd::smi::is_vm_guest()) {
-      std::cout << "VM guest is not supported for power cap test. Skipping test for " << dv_ind << std::endl;
+      std::cout << "VM guest is not supported for power cap test. Skipping test for "
+                << dv_ind << std::endl;
       continue;
     }
 
@@ -138,7 +145,7 @@ void TestPowerCapReadWrite::Run(void) {
     start = clock();
     ret = rsmi_dev_power_cap_set(dv_ind, 0, new_cap);
     end = clock();
-    cpu_time_used = ((double) (end - start)) * 1000000UL / CLOCKS_PER_SEC;
+    cpu_time_used = (static_cast<double>(end - start)) * 1000000UL / CLOCKS_PER_SEC;
 
     CHK_ERR_ASRT(ret)
 

@@ -102,20 +102,35 @@ void TestPowerRead::Run(void) {
       PrintDeviceHeader(i);
 
       err = rsmi_dev_power_cap_get(i, 0, &val_ui64);
-      CHK_ERR_ASRT(err)
-      IF_VERB(STANDARD) {
-        std::cout << "\t**Current Power Cap: " << val_ui64 << "uW" <<std::endl;
+      if (err == RSMI_STATUS_NOT_SUPPORTED) {
+        std::cout << "\t**Power Cap not supported on this device." << std::endl;
+        ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
+      } else {
+        CHK_ERR_ASRT(err)
+        IF_VERB(STANDARD) {
+          std::cout << "\t**Current Power Cap: " << val_ui64 << "uW" <<std::endl;
+        }
       }
       err = rsmi_dev_power_cap_default_get(i, &val_ui64);
-      CHK_ERR_ASRT(err)
-      IF_VERB(STANDARD) {
-        std::cout << "\t**Default Power Cap: " << val_ui64 << "uW" <<std::endl;
+      if (err == RSMI_STATUS_NOT_SUPPORTED) {
+        std::cout << "\t**Default Power Cap not supported on this device." << std::endl;
+        ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
+      } else {
+        CHK_ERR_ASRT(err)
+        IF_VERB(STANDARD) {
+          std::cout << "\t**Default Power Cap: " << val_ui64 << "uW" <<std::endl;
+        }
       }
       err = rsmi_dev_power_cap_range_get(i, 0, &val_ui64, &val2_ui64);
-      CHK_ERR_ASRT(err)
-      IF_VERB(STANDARD) {
-        std::cout << "\t**Power Cap Range: " << val2_ui64 << " to " <<
-                                                 val_ui64 << " uW" << std::endl;
+      if (err == RSMI_STATUS_NOT_SUPPORTED) {
+        std::cout << "\t**Power Cap Range not supported on this device." << std::endl;
+        ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
+      } else {
+        CHK_ERR_ASRT(err)
+        IF_VERB(STANDARD) {
+          std::cout << "\t**Power Cap Range: " << val2_ui64 << " to " <<
+                                                   val_ui64 << " uW" << std::endl;
+        }
       }
 
       /* Average Power */

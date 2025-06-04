@@ -763,8 +763,8 @@ int Device::readDebugInfoStr(DevInfoTypes type, std::string *retStr) {
   ret = openDebugFileStream(type, &fs);
   if (ret != 0) {
     ss << "Could not read debugInfoStr for DevInfoType ("
-     << get_type_string(type) << "), returning "
-     << std::to_string(ret);
+       << get_type_string(type) << "), returning "
+       << std::to_string(ret);
     LOG_ERROR(ss);
     return ret;
   }
@@ -960,7 +960,7 @@ int Device::readDevInfoLine(DevInfoTypes type, std::string *line) {
      << get_type_string(type) << "), returning *line = "
      << *line;
   LOG_INFO(ss);
-
+  fs.close();
   return 0;
 }
 
@@ -1042,6 +1042,7 @@ int Device::readDevInfoMultiLineStr(DevInfoTypes type,
   while (std::getline(fs, line)) {
     retVec->push_back(line);
   }
+  fs.close();
 
   if (retVec->empty()) {
     ss << "Read devInfoMultiLineStr for DevInfoType ("
@@ -1422,7 +1423,6 @@ rsmi_status_t Device::restartAMDGpuDriver(void) {
   bool success = false;
   std::string out;
   bool wasGdmServiceActive = false;
-  bool restartInProgress = true;
   bool isRestartInProgress = true;
   bool isAMDGPUModuleLive = false;
   bool restartGDM = false;
@@ -1508,7 +1508,6 @@ rsmi_status_t Device::isRestartInProgress(bool *isRestartInProgress,
                                           bool *isAMDGPUModuleLive) {
   REQUIRE_ROOT_ACCESS
   std::ostringstream ss;
-  bool restartSuccessful = true;
   bool success = false;
   std::string out;
   bool deviceRestartInProgress = true;    // Assume in progress, we intend to disprove
@@ -1718,3 +1717,4 @@ rsmi_status_t Device::get_smi_device_identifiers(uint32_t device_id,
 #undef RET_IF_NONZERO
 }  // namespace smi
 }  // namespace amd
+

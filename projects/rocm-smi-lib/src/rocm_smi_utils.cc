@@ -72,7 +72,6 @@
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_logger.h"
 
-
 namespace amd {
 namespace smi {
 const std::string kTmpFilePrefix = "rocmsmi_";
@@ -216,6 +215,9 @@ int WriteSysfsStr(std::string path, std::string val) {
 
   fs << val;
   fs.close();
+  if (!fs) {
+    return ENOENT;  // Map to NOT_SUPPORT if errors
+  }
   ss << "Successfully wrote to SYSFS file (" << path << ") string = " << val;
   LOG_INFO(ss);
   return ret;
@@ -389,11 +391,29 @@ std::string removeNewLines(const std::string &s) {
   return s;
 }
 
+// Trims white space from both ends of string
 std::string trim(const std::string &s) {
   if (!s.empty()) {
     // remove new lines -> trim white space at ends
     std::string noNewLines = removeNewLines(s);
     return leftTrim(rightTrim(noNewLines));
+  }
+  return s;
+}
+
+// Trims white space from both ends of string and removes all white space
+std::string trimAllWhiteSpace(const std::string &s) {
+  if (!s.empty()) {
+    // remove new lines -> trim white space at ends
+    std::string noNewLines = trim(s);
+    return removeWhitespace(noNewLines);
+  }
+  return s;
+}
+
+std::string removeWhitespace(const std::string &s) {
+  if (!s.empty()) {
+    return std::regex_replace(s, std::regex("\\s+"), "");
   }
   return s;
 }
@@ -891,12 +911,12 @@ std::string getBuildType() {
 }
 
 const char *my_fname(void) {
-std::string emptyRet="";
 #ifdef _GNU_SOURCE
   Dl_info dl_info;
-  dladdr((void *)my_fname, &dl_info);
+  dladdr(reinterpret_cast<void *>(my_fname), &dl_info);
   return (dl_info.dli_fname);
 #else
+  std::string emptyRet = "";
   return emptyRet.c_str();
 #endif
 }
@@ -1073,6 +1093,7 @@ std::string splitString(std::string str, char delim) {
     tokens.push_back(token);
     return token;  // return 1st match
   }
+    return "";
 }
 
 static std::string pt_rng_Mhz(std::string title, rsmi_range *r) {
@@ -1098,26 +1119,6 @@ static std::string pt_rng_mV(std::string title, rsmi_range *r) {
   ss << title;
   ss << r->lower_bound << " to " << r->upper_bound
      << " mV" << "\n";
-  return ss.str();
-}
-
-static std::string print_pnt(rsmi_od_vddc_point_t *pt) {
-  std::ostringstream ss;
-  ss << "\t\t** Frequency: " << pt->frequency/1000000 << " MHz\n";
-  ss << "\t\t** Voltage: " << pt->voltage << " mV\n";
-  return ss.str();
-}
-
-static std::string pt_vddc_curve(rsmi_od_volt_curve *c) {
-  std::ostringstream ss;
-  if (c == nullptr) {
-    ss << "pt_vddc_curve | rsmi_od_volt_curve c = nullptr\n";
-    return ss.str();
-  }
-
-  for (uint32_t i = 0; i < RSMI_NUM_VOLTAGE_CURVE_POINTS; ++i) {
-    ss << print_pnt(&c->vc_points[i]);
-  }
   return ss.str();
 }
 
@@ -1262,7 +1263,7 @@ void system_wait(int milli_seconds) {
 }
 
 int countDigit(uint64_t n) {
-  return static_cast<int>(std::floor(log10(n) + 1));
+  return static_cast<int>(std::floor(log10(static_cast<double>(n)) + 1));
 }
 
 std::string find_file_in_folder(const std::string& folder,
@@ -1284,6 +1285,36 @@ std::string find_file_in_folder(const std::string& folder,
     }
   }
   return file_name;
+}
+
+uint64_t get_multiplier_from_char(char units_char) {
+  uint32_t multiplier = 0;
+
+  switch (units_char) {
+    case 'G':   // GT or GHz
+      multiplier = 1000000000;
+      break;
+
+    case 'M':   // MT or MHz
+      multiplier = 1000000;
+      break;
+
+    case 'K':   // KT or KHz
+    case 'V':   // default unit for voltage is mV
+      multiplier = 1000;
+      break;
+
+    case 'T':   // Transactions
+    case 'H':   // Hertz
+    case 'm':   // mV (we will make mV the default unit for voltage)
+      multiplier = 1;
+      break;
+
+    default:
+      assert(false);  // Unexpected units for frequency
+      throw amd::smi::rsmi_exception(RSMI_STATUS_UNEXPECTED_DATA, __FUNCTION__);
+  }
+  return multiplier;
 }
 
 }  // namespace smi
