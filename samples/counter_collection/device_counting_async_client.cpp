@@ -35,6 +35,7 @@
 #include <shared_mutex>
 #include <sstream>
 #include <stdexcept>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
