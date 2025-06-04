@@ -1046,7 +1046,7 @@ configure_settings(bool _init)
     settings::use_output_suffix() = _config->get<bool>("ROCPROFSYS_USE_PID");
     if(settings::use_output_suffix())
         settings::default_process_suffix() = process::get_id();
-#if !defined(TIMEMORY_USE_MPI) && defined(TIMEMORY_USE_MPI_HEADERS)
+#if !defined(ROCPROFSYS_USE_MPI) && defined(ROCPROFSYS_USE_MPI_HEADERS)
     if(tim::dmp::is_initialized()) settings::default_process_suffix() = tim::dmp::rank();
 #endif
 
@@ -1367,7 +1367,7 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
         _config->find(itr)->second->set_hidden(true);
 #endif
 
-#if !defined(TIMEMORY_USE_MPI) || TIMEMORY_USE_MPI == 0
+#if !defined(ROCPROFSYS_USE_MPI) || ROCPROFSYS_USE_MPI == 0
     _config->disable("ROCPROFSYS_PERFETTO_COMBINE_TRACES");
     _config->disable("ROCPROFSYS_COLLAPSE_PROCESSES");
     _config->find("ROCPROFSYS_PERFETTO_COMBINE_TRACES")->second->set_hidden(true);
@@ -1991,7 +1991,7 @@ get_perfetto_buffer_size()
 bool
 get_perfetto_combined_traces()
 {
-#if defined(TIMEMORY_USE_MPI) && TIMEMORY_USE_MPI > 0
+#if defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0
     static auto _v = get_config()->find("ROCPROFSYS_PERFETTO_COMBINE_TRACES");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 #else

@@ -159,9 +159,9 @@ as_hex<void*>(void*, size_t);
 #endif
 
 #if !defined(ROCPROFSYS_DEBUG_PROCESS_IDENTIFIER)
-#    if defined(TIMEMORY_USE_MPI)
+#    if defined(ROCPROFSYS_USE_MPI)
 #        define ROCPROFSYS_DEBUG_PROCESS_IDENTIFIER static_cast<int>(::tim::dmp::rank())
-#    elif defined(TIMEMORY_USE_MPI_HEADERS)
+#    elif defined(ROCPROFSYS_USE_MPI_HEADERS)
 #        define ROCPROFSYS_DEBUG_PROCESS_IDENTIFIER                                      \
             (::tim::dmp::is_initialized()) ? static_cast<int>(::tim::dmp::rank())        \
                                            : static_cast<int>(::tim::process::get_id())

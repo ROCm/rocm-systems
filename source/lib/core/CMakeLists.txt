@@ -31,6 +31,7 @@ set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/exception.hpp
     ${CMAKE_CURRENT_LIST_DIR}/gpu.hpp
     ${CMAKE_CURRENT_LIST_DIR}/locking.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/mpi.hpp
     ${CMAKE_CURRENT_LIST_DIR}/mproc.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perf.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto.hpp

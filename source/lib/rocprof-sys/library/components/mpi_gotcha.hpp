@@ -24,6 +24,7 @@
 
 #include "core/common.hpp"
 #include "core/defines.hpp"
+#include "core/mpi.hpp"
 #include "core/timemory.hpp"
 
 #include <cstdint>
@@ -35,7 +36,7 @@ namespace component
 // this is used to wrap MPI_Init and MPI_Init_thread
 struct mpi_gotcha : comp::base<mpi_gotcha, void>
 {
-    using comm_t        = tim::mpi::comm_t;
+    using comm_t        = rocprofsys::mpi::comm_t;
     using gotcha_data_t = comp::gotcha_data;
 
     ROCPROFSYS_DEFAULT_OBJECT(mpi_gotcha)
@@ -81,5 +82,5 @@ private:
 }  // namespace component
 
 using mpi_gotcha_t =
-    comp::gotcha<5, tim::component_tuple<component::mpi_gotcha>, project::rocprofsys>;
+    comp::gotcha<10, tim::component_tuple<component::mpi_gotcha>, project::rocprofsys>;
 }  // namespace rocprofsys
