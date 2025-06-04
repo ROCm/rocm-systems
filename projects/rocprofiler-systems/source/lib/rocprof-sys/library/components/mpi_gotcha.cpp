@@ -25,11 +25,12 @@
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
 #include "core/debug.hpp"
+#include "core/mpi.hpp"
 #include "core/mproc.hpp"
 #include "library/components/category_region.hpp"
 #include "library/components/comm_data.hpp"
+#include "mpip.hpp"
 
-#include <timemory/backends/mpi.hpp>
 #include <timemory/backends/process.hpp>
 #include <timemory/mpl/types.hpp>
 #include <timemory/signals/signal_mask.hpp>
@@ -46,8 +47,7 @@ namespace component
 {
 namespace
 {
-using mpip_bundle_t =
-    tim::component_tuple<category_region<category::mpi>, comp::comm_data>;
+using mpip_bundle_t = tim::component_tuple<category_region<category::mpi>, comm_data>;
 
 struct comm_rank_data
 {
@@ -102,7 +102,7 @@ auto     mpi_comm_records  = std::map<uintptr_t, comm_rank_data>{};
 using tim::auto_lock_t;
 using tim::type_mutex;
 
-#if defined(TIMEMORY_USE_MPI)
+#if defined(ROCPROFSYS_USE_MPI)
 int
 rocprofsys_mpi_copy(MPI_Comm, int, void*, void*, void*, int*)
 {
@@ -117,7 +117,7 @@ rocprofsys_mpi_fini(MPI_Comm, int, void*, void*)
     if(!_blocked.empty())
         tim::signals::block_signals(_blocked, tim::signals::sigmask_scope::process);
     if(mpip_index != std::numeric_limits<uint64_t>::max())
-        comp::deactivate_mpip<mpip_bundle_t, project::rocprofsys>(mpip_index);
+        deactivate_mpip<mpip_bundle_t, project::rocprofsys>(mpip_index);
     if(is_root_process()) rocprofsys_finalize_hidden();
     return MPI_SUCCESS;
 }
@@ -127,7 +127,7 @@ rocprofsys_mpi_fini(MPI_Comm, int, void*, void*)
 void
 rocprofsys_mpi_set_attr()
 {
-#if defined(TIMEMORY_USE_MPI)
+#if defined(ROCPROFSYS_USE_MPI)
     auto _blocked = get_sampling_signals();
     if(!_blocked.empty())
         tim::signals::block_signals(_blocked, tim::signals::sigmask_scope::process);
@@ -162,17 +162,28 @@ mpi_gotcha::configure()
 
     mpi_gotcha_t::get_initializer() = []() {
         mpi_gotcha_t::template configure<0, int, int*, char***>("MPI_Init");
-        mpi_gotcha_t::template configure<1, int, int*, char***, int, int*>(
+        mpi_gotcha_t::template configure<1, int, int*, char***>("PMPI_Init");
+        mpi_gotcha_t::template configure<2, int, int*, char***, int, int*>(
             "MPI_Init_thread");
-        mpi_gotcha_t::template configure<2, int>("MPI_Finalize");
+        mpi_gotcha_t::template configure<3, int, int*, char***, int, int*>(
+            "PMPI_Init_thread");
+        mpi_gotcha_t::template configure<4, int>("MPI_Finalize");
+        mpi_gotcha_t::template configure<5, int>("PMPI_Finalize");
         reject_bindings.emplace("MPI_Init");
+        reject_bindings.emplace("PMPI_Init");
         reject_bindings.emplace("MPI_Init_thread");
+        reject_bindings.emplace("PMPI_Init_thread");
         reject_bindings.emplace("MPI_Finalize");
+        reject_bindings.emplace("PMPI_Finalize");
 #if defined(ROCPROFSYS_USE_MPI_HEADERS) && ROCPROFSYS_USE_MPI_HEADERS > 0
-        mpi_gotcha_t::template configure<3, int, comm_t, int*>("MPI_Comm_rank");
-        mpi_gotcha_t::template configure<4, int, comm_t, int*>("MPI_Comm_size");
+        mpi_gotcha_t::template configure<6, int, comm_t, int*>("MPI_Comm_rank");
+        mpi_gotcha_t::template configure<7, int, comm_t, int*>("PMPI_Comm_rank");
+        mpi_gotcha_t::template configure<8, int, comm_t, int*>("MPI_Comm_size");
+        mpi_gotcha_t::template configure<9, int, comm_t, int*>("PMPI_Comm_size");
         reject_bindings.emplace("MPI_Comm_rank");
+        reject_bindings.emplace("PMPI_Comm_rank");
         reject_bindings.emplace("MPI_Comm_size");
+        reject_bindings.emplace("PMPI_Comm_size");
 #endif
     };
 }
@@ -207,13 +218,13 @@ mpi_gotcha::update()
         auto _rank = _rank_data.rank;
         auto _size = _rank_data.size;
 
-        tim::mpi::set_rank(_rank);
-        tim::mpi::set_size(_size);
-        tim::settings::default_process_suffix() = _rank;
+        rocprofsys::mpi::set_rank(_rank);
+        rocprofsys::mpi::set_size(_size);
+        rocprofsys::settings::default_process_suffix() = _rank;
 
         ROCPROFSYS_BASIC_VERBOSE(0, "[pid=%i] MPI rank: %i (%i), MPI size: %i (%i)\n",
-                                 process::get_id(), tim::mpi::rank(), _rank,
-                                 tim::mpi::size(), _size);
+                                 process::get_id(), rocprofsys::mpi::rank(), _rank,
+                                 rocprofsys::mpi::size(), _size);
         last_comm_record      = _rank_data;
         config::get_use_pid() = true;
         return true;
@@ -236,9 +247,9 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***)
     ROCPROFSYS_BASIC_DEBUG_F("%s(int*, char***)\n", _data.tool_id.c_str());
 
     rocprofsys_push_trace_hidden(_data.tool_id.c_str());
-#if !defined(TIMEMORY_USE_MPI) && defined(TIMEMORY_USE_MPI_HEADERS)
-    tim::mpi::is_initialized_callback() = []() { return true; };
-    tim::mpi::is_finalized()            = false;
+#if !defined(ROCPROFSYS_USE_MPI) && defined(ROCPROFSYS_USE_MPI_HEADERS)
+    rocprofsys::mpi::is_initialized_callback() = []() { return true; };
+    rocprofsys::mpi::is_finalized()            = false;
 #endif
 }
 
@@ -248,9 +259,9 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***, in
     ROCPROFSYS_BASIC_DEBUG_F("%s(int*, char***, int, int*)\n", _data.tool_id.c_str());
 
     rocprofsys_push_trace_hidden(_data.tool_id.c_str());
-#if !defined(TIMEMORY_USE_MPI) && defined(TIMEMORY_USE_MPI_HEADERS)
-    tim::mpi::is_initialized_callback() = []() { return true; };
-    tim::mpi::is_finalized()            = false;
+#if !defined(ROCPROFSYS_USE_MPI) && defined(ROCPROFSYS_USE_MPI_HEADERS)
+    rocprofsys::mpi::is_initialized_callback() = []() { return true; };
+    rocprofsys::mpi::is_finalized()            = false;
 #endif
 }
 
@@ -264,11 +275,11 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming)
         tim::signals::block_signals(_blocked, tim::signals::sigmask_scope::process);
 
     if(mpip_index != std::numeric_limits<uint64_t>::max())
-        comp::deactivate_mpip<mpip_bundle_t, project::rocprofsys>(mpip_index);
+        deactivate_mpip<mpip_bundle_t, project::rocprofsys>(mpip_index);
 
-#if !defined(TIMEMORY_USE_MPI) && defined(TIMEMORY_USE_MPI_HEADERS)
-    tim::mpi::is_initialized_callback() = []() { return false; };
-    tim::mpi::is_finalized()            = true;
+#if !defined(ROCPROFSYS_USE_MPI) && defined(ROCPROFSYS_USE_MPI_HEADERS)
+    rocprofsys::mpi::is_initialized_callback() = []() { return false; };
+    rocprofsys::mpi::is_finalized()            = true;
 #else
     if(is_root_process() && rocprofsys::get_state() < rocprofsys::State::Finalized)
         rocprofsys_finalize_hidden();
@@ -278,15 +289,17 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming)
 void
 mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, comm_t _comm, int* _val)
 {
-    ROCPROFSYS_BASIC_DEBUG_F("%s()\n", _data.tool_id.c_str());
+    ROCPROFSYS_BASIC_DEBUG_F("%s(comm_t _comm, int* _val)\n", _data.tool_id.c_str());
 
     rocprofsys_push_trace_hidden(_data.tool_id.c_str());
-    if(_data.tool_id == "MPI_Comm_rank")
+    if(_data.tool_id.find("MPI_Comm_rank") == 0 ||
+       _data.tool_id.find("PMPI_Comm_rank") == 0)
     {
         m_comm_val = (uintptr_t) _comm;  // NOLINT
         m_rank_ptr = _val;
     }
-    else if(_data.tool_id == "MPI_Comm_size")
+    else if(_data.tool_id.find("MPI_Comm_size") == 0 ||
+            _data.tool_id.find("PMPI_Comm_size") == 0)
     {
         m_comm_val = (uintptr_t) _comm;  // NOLINT
         m_size_ptr = _val;
@@ -305,7 +318,8 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
 
     if(!settings::use_output_suffix()) settings::use_output_suffix() = true;
 
-    if(_retval == tim::mpi::success_v && _data.tool_id.find("MPI_Init") == 0)
+    if(_retval == rocprofsys::mpi::success_v &&
+       (_data.tool_id.find("MPI_Init") == 0 || _data.tool_id.find("PMPI_Init") == 0))
     {
         rocprofsys_mpi_set_attr();
         // rocprof-sys will set this environement variable to true in binary rewrite mode
@@ -319,9 +333,9 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
 
             // use env vars ROCPROFSYS_MPIP_PERMIT_LIST and ROCPROFSYS_MPIP_REJECT_LIST
             // to control the gotcha bindings at runtime
-            comp::configure_mpip<mpip_bundle_t, project::rocprofsys>(permit_bindings,
-                                                                     reject_bindings);
-            mpip_index = comp::activate_mpip<mpip_bundle_t, project::rocprofsys>();
+            configure_mpip<mpip_bundle_t, project::rocprofsys>(permit_bindings,
+                                                               reject_bindings);
+            mpip_index = activate_mpip<mpip_bundle_t, project::rocprofsys>();
         }
 
         auto_lock_t _lk{ type_mutex<mpi_gotcha>() };
@@ -339,7 +353,9 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
             }
         }
     }
-    else if(_retval == tim::mpi::success_v && _data.tool_id.find("MPI_Comm_") == 0)
+    else if(_retval == rocprofsys::mpi::success_v &&
+            (_data.tool_id.find("MPI_Comm_") == 0 ||
+             _data.tool_id.find("PMPI_Comm_") == 0))
     {
         auto_lock_t _lk{ type_mutex<mpi_gotcha>() };
         if(m_comm_val != null_comm())
@@ -356,7 +372,8 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
                                     : std::max<int>(m_size, _get_rank() + 1);
             };
 
-            if(_data.tool_id == "MPI_Comm_rank" || _data.tool_id == "MPI_Comm_size")
+            if(_data.tool_id == "MPI_Comm_rank" || _data.tool_id == "MPI_Comm_size" ||
+               _data.tool_id == "PMPI_Comm_rank" || _data.tool_id == "PMPI_Comm_size")
             {
                 _comm_entry.rank = m_rank = std::max<int>(_comm_entry.rank, _get_rank());
                 _comm_entry.size = m_size = std::max<int>(_comm_entry.size, _get_size());

@@ -210,13 +210,12 @@ set(_ROCPROFSYS_MPI_HEADERS_ALLOW_MPICH ${MPI_HEADERS_ALLOW_MPICH})
 if(ROCPROFSYS_USE_MPI)
     find_package(MPI ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
     target_link_libraries(rocprofiler-systems-mpi INTERFACE MPI::MPI_C MPI::MPI_CXX)
-    rocprofiler_systems_target_compile_definitions(
-        rocprofiler-systems-mpi INTERFACE TIMEMORY_USE_MPI=1 ROCPROFSYS_USE_MPI)
+    rocprofiler_systems_target_compile_definitions(rocprofiler-systems-mpi
+                                                   INTERFACE ROCPROFSYS_USE_MPI)
 elseif(ROCPROFSYS_USE_MPI_HEADERS)
     find_package(MPI-Headers ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
-    rocprofiler_systems_target_compile_definitions(
-        rocprofiler-systems-mpi INTERFACE TIMEMORY_USE_MPI_HEADERS=1
-                                          ROCPROFSYS_USE_MPI_HEADERS)
+    rocprofiler_systems_target_compile_definitions(rocprofiler-systems-mpi
+                                                   INTERFACE ROCPROFSYS_USE_MPI_HEADERS)
     target_link_libraries(rocprofiler-systems-mpi INTERFACE MPI::MPI_HEADERS)
 endif()
 
@@ -543,9 +542,6 @@ set(TIMEMORY_QUIET_CONFIG
     CACHE BOOL "Make timemory configuration quieter")
 
 # timemory feature settings
-set(TIMEMORY_USE_MPI
-    ${ROCPROFSYS_USE_MPI}
-    CACHE BOOL "Enable MPI support in timemory" FORCE)
 set(TIMEMORY_USE_GOTCHA
     ON
     CACHE BOOL "Enable GOTCHA support in timemory")

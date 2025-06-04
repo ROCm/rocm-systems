@@ -209,7 +209,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
     };
 
     auto trace_data = char_vec_t{};
-#if defined(TIMEMORY_USE_MPI) && TIMEMORY_USE_MPI > 0
+#if defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0
     if(get_perfetto_combined_traces())
     {
         using perfetto_mpi_get_t = tim::operation::finalize::mpi_get<char_vec_t, true>;

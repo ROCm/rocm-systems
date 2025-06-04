@@ -41,7 +41,7 @@ if((NOT CMAKE_CXX_COMPILER_IS_HIPCC OR (NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang
     return()
 endif()
 
-option(TRANSPOSE_USE_MPI "Enable MPI support in transpose exe" ${TIMEMORY_USE_MPI})
+option(TRANSPOSE_USE_MPI "Enable MPI support in transpose exe" ${ROCPROFSYS_USE_MPI})
 
 find_package(Threads REQUIRED)
 if(TRANSPOSE_USE_MPI)

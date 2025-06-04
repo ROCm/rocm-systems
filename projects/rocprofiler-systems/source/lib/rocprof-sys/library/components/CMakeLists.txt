@@ -26,6 +26,7 @@ set(component_headers
     ${CMAKE_CURRENT_LIST_DIR}/ensure_storage.hpp
     ${CMAKE_CURRENT_LIST_DIR}/exit_gotcha.hpp
     ${CMAKE_CURRENT_LIST_DIR}/fork_gotcha.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/mpip.hpp
     ${CMAKE_CURRENT_LIST_DIR}/mpi_gotcha.hpp
     ${CMAKE_CURRENT_LIST_DIR}/numa_gotcha.hpp
     ${CMAKE_CURRENT_LIST_DIR}/vaapi_gotcha.hpp
