@@ -171,7 +171,7 @@ rdc_status_t RdcStandaloneHandler::rdc_job_get_stats(const char job_id[64],
   }
 
   p_job_info->num_processes = reply.num_processes();
-  for (int i = 0; i < reply.num_processes(); i++) {
+  for (uint32_t i = 0; i < reply.num_processes(); i++) {
     const auto& proc_msg = reply.processes(i);
     p_job_info->processes[i].pid = proc_msg.pid();
 

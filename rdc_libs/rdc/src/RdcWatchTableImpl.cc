@@ -106,6 +106,17 @@ rdc_status_t RdcWatchTableImpl::rdc_job_start_stats(rdc_gpu_group_t group_id, co
 
   // At last, when every thing sets up, starts to watch the fields.
   result = rdc_field_watch(group_id, JOB_FIELD_ID, update_freq, 0, 0);
+  if (result != RDC_ST_OK) {
+    return result;
+  }
+
+  std::vector<RdcFieldKey> proc_events;
+  for (uint32_t ix = 0; ix < ginfo.count; ++ix) {
+    uint32_t gpu = ginfo.entity_ids[ix];
+    proc_events.emplace_back(gpu, RDC_EVNT_NOTIF_PROCESS_START);
+    proc_events.emplace_back(gpu, RDC_EVNT_NOTIF_PROCESS_END);
+  }
+  result = notifications_->set_listen_events(proc_events);
   return result;
 }
 
@@ -215,42 +226,6 @@ rdc_status_t RdcWatchTableImpl::rdc_field_watch(rdc_gpu_group_t group_id,
   rdc_status_t result = get_fields_from_group(group_id, field_group_id, fields_in_watch);
   if (result != RDC_ST_OK) {
     return result;
-  }
-
-  // Check for rocprof fields in partitions
-  rdc_group_info_t ginfo;
-  result = group_settings_->rdc_group_gpu_get_info(group_id, &ginfo);
-  if (result != RDC_ST_OK) {
-    return result;
-  }
-  bool groupHasPartition = false;
-  for (unsigned int i = 0; i < ginfo.count; i++) {
-    uint32_t entityId = ginfo.entity_ids[i];
-    rdc_entity_info_t info = rdc_get_info_from_entity_index(entityId);
-    if (info.entity_role == RDC_DEVICE_ROLE_PARTITION_INSTANCE) {
-      groupHasPartition = true;
-      break;
-    }
-  }
-
-  rdc_field_group_info_t field_info;
-  result = group_settings_->rdc_group_field_get_info(field_group_id, &field_info);
-  if (result != RDC_ST_OK) {
-    return result;
-  }
-  bool groupHasRocprof = false;
-  if (result == RDC_ST_OK) {
-    for (unsigned int i = 0; i < field_info.count; i++) {
-      rdc_field_t fid = field_info.field_ids[i];
-      if (fid >= 800 && fid < 900) {  // Rocprof fields in the 800's
-        groupHasRocprof = true;
-        break;
-      }
-    }
-  }
-
-  if (groupHasPartition && groupHasRocprof) {
-    return RDC_ST_NOT_SUPPORTED;
   }
 
   // See if any of the fields are notification fields, and

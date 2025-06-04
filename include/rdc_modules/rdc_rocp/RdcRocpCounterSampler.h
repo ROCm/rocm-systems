@@ -67,13 +67,13 @@ class CounterSampler {
  private:
   rocprofiler_agent_id_t agent_ = {};
   rocprofiler_context_id_t ctx_ = {};
-  rocprofiler_profile_config_id_t profile_ = {.handle = 0};
+  rocprofiler_counter_config_id_t counter_ = {.handle = 0};
 
-  std::map<std::vector<std::string>, rocprofiler_profile_config_id_t> cached_profiles_;
-  std::map<uint64_t, uint64_t> profile_sizes_;
+  std::map<std::vector<std::string>, rocprofiler_counter_config_id_t> cached_counter_;
+  std::map<uint64_t, uint64_t> counter_sizes_;
 
   // Internal function used to set the profile for the agent when start_context is called
-  void set_profile(rocprofiler_context_id_t ctx, rocprofiler_agent_set_profile_callback_t cb) const;
+  void set_profile(rocprofiler_context_id_t ctx, rocprofiler_device_counting_agent_cb_t cb) const;
 
   // Get the size of a counter in number of records
   size_t get_counter_size(rocprofiler_counter_id_t counter);

@@ -71,10 +71,10 @@ CounterSampler::CounterSampler(rocprofiler_agent_id_t agent) : agent_(agent) {
         return rocprofiler_configure_device_counting_service(
             ctx_, {.handle = 0}, agent,
             [](rocprofiler_context_id_t context_id, rocprofiler_agent_id_t,
-               rocprofiler_agent_set_profile_callback_t set_config, void* user_data) {
+               rocprofiler_device_counting_agent_cb_t cb, void* user_data) {
               if (user_data) {
                 auto* sampler = static_cast<CounterSampler*>(user_data);
-                sampler->set_profile(context_id, set_config);
+                sampler->set_profile(context_id, cb);
               }
             },
             this);
@@ -125,10 +125,10 @@ std::unordered_map<std::string, size_t> CounterSampler::get_record_dimensions(
 void CounterSampler::sample_counter_values(const std::vector<std::string>& counters,
                                            std::vector<rocprofiler_record_counter_t>& out,
                                            uint64_t duration) {
-  auto profile_cached = cached_profiles_.find(counters);
-  if (profile_cached == cached_profiles_.end()) {
+  auto counter_cached = cached_counter_.find(counters);
+  if (counter_cached == cached_counter_.end()) {
     size_t expected_size = 0;
-    rocprofiler_profile_config_id_t profile = {};
+    rocprofiler_counter_config_id_t counter = {};
     std::vector<rocprofiler_counter_id_t> gpu_counters;
     auto roc_counters = get_supported_counters(agent_);
     for (const auto& counter : counters) {
@@ -142,22 +142,22 @@ void CounterSampler::sample_counter_values(const std::vector<std::string>& count
     }
     RocprofilerCall(
         [&]() {
-          return rocprofiler_create_profile_config(agent_, gpu_counters.data(), gpu_counters.size(),
-                                                   &profile);
+          return rocprofiler_create_counter_config(agent_, gpu_counters.data(), gpu_counters.size(),
+                                                   &counter);
         },
-        "Could not create profile", __FILE__, __LINE__);
-    cached_profiles_.emplace(counters, profile);
-    profile_sizes_.emplace(profile.handle, expected_size);
-    profile_cached = cached_profiles_.find(counters);
+        "Could not create counter", __FILE__, __LINE__);
+    cached_counter_.emplace(counters, counter);
+    counter_sizes_.emplace(counter.handle, expected_size);
+    counter_cached = cached_counter_.find(counters);
   }
 
-  if (profile_sizes_.find(profile_cached->second.handle) == profile_sizes_.end()) {
-    RDC_LOG(RDC_ERROR, "Error: Profile handle " << profile_cached->second.handle
-                                                << " not found in profile_sizes_." << std::endl);
-    throw std::runtime_error("Profile handle not found in profile_sizes_");
+  if (counter_sizes_.find(counter_cached->second.handle) == counter_sizes_.end()) {
+    RDC_LOG(RDC_ERROR, "Error: Profile handle " << counter_cached->second.handle
+                                                << " not found in counter_sizes_." << std::endl);
+    throw std::runtime_error("Profile handle not found in counter_sizes_");
   }
-  out.resize(profile_sizes_.at(profile_cached->second.handle));
-  profile_ = profile_cached->second;
+  out.resize(counter_sizes_.at(counter_cached->second.handle));
+  counter_ = counter_cached->second;
   rocprofiler_start_context(ctx_);
   size_t out_size = out.size();
   // Wait for sampling window to collect metrics
@@ -194,26 +194,17 @@ std::vector<rocprofiler_agent_v0_t> CounterSampler::get_available_agents() {
 }
 
 void CounterSampler::set_profile(rocprofiler_context_id_t ctx,
-                                 rocprofiler_agent_set_profile_callback_t cb) const {
-  if (profile_.handle != 0) {
-    cb(ctx, profile_);
+                                 rocprofiler_device_counting_agent_cb_t cb) const {
+  if (counter_.handle != 0) {
+    cb(ctx, counter_);
   }
 }
 
 size_t CounterSampler::get_counter_size(rocprofiler_counter_id_t counter) {
-  size_t size = 1;
-  rocprofiler_iterate_counter_dimensions(
-      counter,
-      [](rocprofiler_counter_id_t, const rocprofiler_record_dimension_info_t* dim_info,
-         size_t num_dims, void* user_data) {
-        size_t* s = static_cast<size_t*>(user_data);
-        for (size_t i = 0; i < num_dims; i++) {
-          *s *= dim_info[i].instance_size;
-        }
-        return ROCPROFILER_STATUS_SUCCESS;
-      },
-      static_cast<void*>(&size));
-  return size;
+  rocprofiler_counter_info_v1_t info;
+  rocprofiler_query_counter_info(counter, ROCPROFILER_COUNTER_INFO_VERSION_1,
+                                 static_cast<void*>(&info));
+  return info.instance_ids_count;
 }
 
 std::unordered_map<std::string, rocprofiler_counter_id_t> CounterSampler::get_supported_counters(
@@ -252,20 +243,15 @@ std::unordered_map<std::string, rocprofiler_counter_id_t> CounterSampler::get_su
 
 std::vector<rocprofiler_record_dimension_info_t> CounterSampler::get_counter_dimensions(
     rocprofiler_counter_id_t counter) {
-  std::vector<rocprofiler_record_dimension_info_t> dims;
-  rocprofiler_available_dimensions_cb_t cb = [](rocprofiler_counter_id_t,
-                                                const rocprofiler_record_dimension_info_t* dim_info,
-                                                size_t num_dims, void* user_data) {
-    std::vector<rocprofiler_record_dimension_info_t>* vec =
-        static_cast<std::vector<rocprofiler_record_dimension_info_t>*>(user_data);
-    for (size_t i = 0; i < num_dims; i++) {
-      vec->push_back(dim_info[i]);
-    }
-    return ROCPROFILER_STATUS_SUCCESS;
-  };
-  RocprofilerCall([&]() { return rocprofiler_iterate_counter_dimensions(counter, cb, &dims); },
-                  "Could not iterate counter dimensions", __FILE__, __LINE__);
-  return dims;
+  rocprofiler_counter_info_v1_t info;
+  RocprofilerCall(
+      [&]() {
+        return rocprofiler_query_counter_info(counter, ROCPROFILER_COUNTER_INFO_VERSION_1,
+                                              static_cast<void*>(&info));
+      },
+      "Could not query info for counter", __FILE__, __LINE__);
+  return std::vector<rocprofiler_record_dimension_info_t>{info.dimensions,
+                                                          info.dimensions + info.dimensions_count};
 }
 
 int tool_init(rocprofiler_client_finalize_t, void*) {
