@@ -45,6 +45,7 @@ FLD_DESC_ENT(RDC_FI_REV_ID,              "Revision ID of the device",           
 FLD_DESC_ENT(RDC_FI_TARGET_GRAPHICS_VERSION, "GFX version of the device",               "GFX",              true)
 FLD_DESC_ENT(RDC_FI_NUM_OF_COMPUTE_UNITS, "Number of Compute Units",                    "COMPUTE_UNITS",    true)
 FLD_DESC_ENT(RDC_FI_UUID,                "Unique ID of the device AKA asic_serial",     "UUID",             true)
+FLD_DESC_ENT(RDC_FI_GPU_PARTITION_COUNT, "GPU partition count",                         "PARTITION_COUNT",  true)
 
 FLD_DESC_ENT(RDC_FI_GPU_CLOCK,           "Current GPU clock frequencies",               "GPU_CLOCK",        true)
 FLD_DESC_ENT(RDC_FI_MEM_CLOCK,           "Current Memory clock frequencies",            "MEM_CLOCK",        true)
@@ -136,25 +137,25 @@ FLD_DESC_ENT(RDC_FI_XGMI_TOTAL_WRITE_KB,    "XGMI accumlated data write size acr
 // This doesn't map to rocprofiler counters directly
 // See counter_map in rdc/include/rdc_libs/rdc_modules/rdc_rocp/RdcRocpBase.h
 // See metrics.xml in rocprofiler
-FLD_DESC_ENT(RDC_FI_PROF_OCCUPANCY_PERCENT,     "Percent of GPU occupancy",              "OCCUPANCY_PERCENT", false)
-FLD_DESC_ENT(RDC_FI_PROF_ACTIVE_CYCLES,         "Number of Active Cycles",               "ACTIVE_CYCLES",     false)
-FLD_DESC_ENT(RDC_FI_PROF_ACTIVE_WAVES,          "Number of Active Waves",                "ACTIVE_WAVES",      false)
-FLD_DESC_ENT(RDC_FI_PROF_ELAPSED_CYCLES,        "Number of Elapsed Cycles over all SMs", "ELAPSED_CYCLES",    false)
-FLD_DESC_ENT(RDC_FI_PROF_TENSOR_ACTIVE_PERCENT, "Percent of Active Pipe Tensors",        "TENSOR_PERCENT",    false)
-FLD_DESC_ENT(RDC_FI_PROF_GPU_UTIL_PERCENT,      "Percent of GPU Utilization",            "GPU_UTIL_PERCENT",  false)
+FLD_DESC_ENT(RDC_FI_PROF_OCCUPANCY_PERCENT,     "Percent of GPU occupancy",              "OCCUPANCY_PERCENT", true)
+FLD_DESC_ENT(RDC_FI_PROF_ACTIVE_CYCLES,         "Number of Active Cycles",               "ACTIVE_CYCLES",     true)
+FLD_DESC_ENT(RDC_FI_PROF_ACTIVE_WAVES,          "Number of Active Waves",                "ACTIVE_WAVES",      true)
+FLD_DESC_ENT(RDC_FI_PROF_ELAPSED_CYCLES,        "Number of Elapsed Cycles over all SMs", "ELAPSED_CYCLES",    true)
+FLD_DESC_ENT(RDC_FI_PROF_TENSOR_ACTIVE_PERCENT, "Percent of Active Pipe Tensors",        "TENSOR_PERCENT",    true)
+FLD_DESC_ENT(RDC_FI_PROF_GPU_UTIL_PERCENT,      "Percent of GPU Utilization",            "GPU_UTIL_PERCENT",  true)
 // metrics with EVAL are divided by time passed
-FLD_DESC_ENT(RDC_FI_PROF_EVAL_MEM_R_BW,         "Fetched from video memory kb / ms",     "MEM_R_BW",          false)
-FLD_DESC_ENT(RDC_FI_PROF_EVAL_MEM_W_BW,         "Written to video memory kb / ms",       "MEM_W_BW",          false)
-FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_16,         "Number of fp16 OPS / ms",               "FLOPS_16",          false)
-FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_32,         "Number of fp32 OPS / ms",               "FLOPS_32",          false)
-FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_64,         "Number of fp64 OPS / ms",               "FLOPS_64",          false)
-FLD_DESC_ENT(RDC_FI_PROF_VALU_PIPE_ISSUE_UTIL,  "Percent of Active Pipe VALU",           "VALU_UTILIZATION",  false)
-FLD_DESC_ENT(RDC_FI_PROF_SM_ACTIVE,             "Ratio of Cycles with active warp on SM","VALUBusy",          false)
-FLD_DESC_ENT(RDC_FI_PROF_OCC_PER_ACTIVE_CU,     "Mean occ per active compute unit",      "OCC_CU",            false)
-FLD_DESC_ENT(RDC_FI_PROF_OCC_ELAPSED,           "Mean occ per active cu over elapsed",   "OCC_CU_ELAPSED",    false)
-FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_16_PERCENT, "Number of fp16 OPS percent of max",     "FLOPS_16_PERCENT",  false)
-FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_32_PERCENT, "Number of fp32 OPS percent of max",     "FLOPS_32_PERCENT",  false)
-FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_64_PERCENT, "Number of fp64 OPS percent of max",     "FLOPS_64_PERCENT",  false)
+FLD_DESC_ENT(RDC_FI_PROF_EVAL_MEM_R_BW,         "Fetched from video memory kb / ms",     "MEM_R_BW",          true)
+FLD_DESC_ENT(RDC_FI_PROF_EVAL_MEM_W_BW,         "Written to video memory kb / ms",       "MEM_W_BW",          true)
+FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_16,         "Number of fp16 OPS / ms",               "FLOPS_16",          true)
+FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_32,         "Number of fp32 OPS / ms",               "FLOPS_32",          true)
+FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_64,         "Number of fp64 OPS / ms",               "FLOPS_64",          true)
+FLD_DESC_ENT(RDC_FI_PROF_VALU_PIPE_ISSUE_UTIL,  "Percent of Active Pipe VALU",           "VALU_UTILIZATION",  true)
+FLD_DESC_ENT(RDC_FI_PROF_SM_ACTIVE,             "Ratio of Cycles with active warp on SM","VALUBusy",          true)
+FLD_DESC_ENT(RDC_FI_PROF_OCC_PER_ACTIVE_CU,     "Mean occ per active compute unit",      "OCC_CU",            true)
+FLD_DESC_ENT(RDC_FI_PROF_OCC_ELAPSED,           "Mean occ per active cu over elapsed",   "OCC_CU_ELAPSED",    true)
+FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_16_PERCENT, "Number of fp16 OPS percent of max",     "FLOPS_16_PERCENT",  true)
+FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_32_PERCENT, "Number of fp32 OPS percent of max",     "FLOPS_32_PERCENT",  true)
+FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_64_PERCENT, "Number of fp64 OPS percent of max",     "FLOPS_64_PERCENT",  true)
 // CPC
 FLD_DESC_ENT(RDC_FI_PROF_CPC_CPC_STAT_BUSY,                  "", "CPC_CPC_STAT_BUSY",                  false)
 FLD_DESC_ENT(RDC_FI_PROF_CPC_CPC_STAT_IDLE,                  "", "CPC_CPC_STAT_IDLE",                  false)
@@ -194,7 +195,8 @@ FLD_DESC_ENT(RDC_FI_PROF_CPF_CPF_TCIU_IDLE,                  "", "CPF_CPF_TCIU_I
 FLD_DESC_ENT(RDC_FI_PROF_CPF_CPF_TCIU_STALL,                 "", "CPF_CPF_TCIU_STALL",                 false)
 // Misc
 FLD_DESC_ENT(RDC_FI_PROF_SIMD_UTILIZATION, "Fraction of time the SIMDs are being utilized", "SIMD_UTILIZATION", false)
-FLD_DESC_ENT(RDC_FI_PROF_UUID,             "UUID from rocprofiler",                         "PROF_UUID",        false)
+FLD_DESC_ENT(RDC_FI_PROF_UUID,             "UUID from rocprofiler",                         "PROF_UUID",        true)
+FLD_DESC_ENT(RDC_FI_PROF_KFD_ID,           "GPU_ID from rocprofiler, same as KFD_ID",       "PROF_KFD_ID",      true)
 
 // Events
 FLD_DESC_ENT(RDC_EVNT_XGMI_0_NOP_TX,     "NOPs sent to neighbor 0",                     "XGMI_NOP_0",       false)

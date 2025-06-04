@@ -178,6 +178,7 @@ rdc_status_t RdcEmbeddedHandler::rdc_device_get_all(uint32_t gpu_index_list[RDC_
   if (!count) {
     return RDC_ST_BAD_PARAMETER;
   }
+
   rdc_field_value device_count;
   rdc_status_t status = metric_fetcher_->fetch_smi_field(0, RDC_FI_GPU_COUNT, &device_count);
   if (status != RDC_ST_OK) {
