@@ -23,7 +23,7 @@ RUN apt-get update && \
     apt-get install -y apt-utils autoconf autotools-dev bash-completion bison \
         build-essential chrpath cmake curl flex gettext git-core gnupg2 libnuma1 libopenmpi-dev \
         libpapi-dev libpfm4-dev librpm-dev libtool libudev1 lsb-release m4 \
-        python3-pip rpm texinfo wget && \
+        python3-pip rpm texinfo wget iproute2 && \
     OS_VERSION=$(cat /etc/os-release | grep VERSION_ID | sed 's/=/ /'1 | awk '{print $NF}' | sed 's/"//g') && \
     if [ "${OS_VERSION}" == "24.04" ]; then \
         python3 -m pip install --break-system-packages 'cmake==3.21'; \
