@@ -20,6 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+#include <libgen.h>
 #include <future>
 #include <iomanip>
 #include <iostream>
@@ -171,7 +172,7 @@ run(uint64_t                        devid,
 int
 main(int argc, char* argv[])
 {
-    std::cout << "[" << ::basename(argv[0]) << "] executing..." << std::endl;
+    std::cout << "[" << basename(argv[0]) << "] executing..." << std::endl;
 
     int ndevice_real = 0;
     checkHipErrors(hipGetDeviceCount(&ndevice_real));
@@ -214,6 +215,6 @@ main(int argc, char* argv[])
         checkHipErrors(hipDeviceSynchronize());
     }
 
-    std::cout << "[" << ::basename(argv[0]) << "] complete" << std::endl;
+    std::cout << "[" << basename(argv[0]) << "] complete" << std::endl;
     return 0;
 }

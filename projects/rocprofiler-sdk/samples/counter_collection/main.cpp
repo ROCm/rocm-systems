@@ -22,6 +22,7 @@
 
 #include <hip/hip_runtime.h>
 
+#include <libgen.h>
 #include "client.hpp"
 
 #define HIP_CALL(call)                                                                             \
@@ -112,7 +113,7 @@ launchKernels(const long NUM_LAUNCH, const long SYNC_INTERVAL, const int DEV_ID)
 int
 main(int argc, char** argv)
 {
-    auto* exe_name = ::basename(argv[0]);
+    auto* exe_name = basename(argv[0]);
 
     int ntotdevice = 0;
     HIP_CALL(hipGetDeviceCount(&ntotdevice));
