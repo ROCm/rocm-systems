@@ -3995,8 +3995,8 @@ rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
   DEVICE_MUTEX
   ret = get_dev_value_int(mem_type_file, dv_ind, total);
 
-  // Fallback to KFD reported memory if VRAM total is 0
-  if (mem_type == RSMI_MEM_TYPE_VRAM && *total == 0) {
+  // Fallback to KFD reported memory if VRAM total is 0 or sysfs read fails
+  if (mem_type == RSMI_MEM_TYPE_VRAM && (*total == 0 || ret != RSMI_STATUS_SUCCESS)) {
     GET_DEV_AND_KFDNODE_FROM_INDX
     if (kfd_node->get_total_memory(total) == 0 && *total > 0) {
       ss << __PRETTY_FUNCTION__
@@ -4072,8 +4072,9 @@ rsmi_dev_memory_usage_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
   DEVICE_MUTEX
   ret = get_dev_value_int(mem_type_file, dv_ind, used);
 
-  // Fallback to KFD reported memory if no VRAM
-  if (mem_type == RSMI_MEM_TYPE_VRAM && *used == 0) {
+  // Fallback to KFD reported memory if no VRAM or sysfs read fails
+  if (mem_type == RSMI_MEM_TYPE_VRAM && (*used == 0 || ret != RSMI_STATUS_SUCCESS)) {
+    std::cout << "fell back to KFD node" << std::endl;
     GET_DEV_AND_KFDNODE_FROM_INDX
     uint64_t total = 0;
     ret = get_dev_value_int(amd::smi::kDevMemTotVRAM, dv_ind, &total);
