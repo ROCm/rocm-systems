@@ -41,6 +41,7 @@ Panel Config:
             tips:
         comparable: false # for now
         cli_style: simple_bar
+        tui_style: simple_bar
 
     - metric_table:
         id: 1602
@@ -96,6 +97,7 @@ Panel Config:
               if (TCP_GATE_EN1_sum != 0) else None)
             tips:
         cli_style: simple_box
+        tui_style: simple_box
 
     - metric_table:
         id: 1603

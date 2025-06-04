@@ -313,3 +313,4 @@ Panel Config:
 
         comparable: false # for now
         cli_style: mem_chart
+        tui_style: mem_chart

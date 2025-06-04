@@ -1,0 +1,49 @@
+sections:
+  - title: "📊 Summaries"
+    collapsed: true
+    class: "summary-section"
+    subsections:
+      - title: "Top Kernels"
+        data_path: ["0. Top Stats", "0.1 Top Kernels"]
+        collapsed: true
+        header_label: "Top Kernels by Duration (ns):"
+        header_class: "section-header"
+      - title: "Dispatch List"
+        data_path: ["0. Top Stats", "0.2 Dispatch List"]
+        collapsed: true
+      - title: "System Info"
+        data_path: ["1. System Info", "1.1"]
+        collapsed: true
+
+  - title: "⚡ High Level Analysis"
+    collapsed: true
+    class: "sysinfo-section"
+    subsections:
+      - title: "System Speed-of-Light"
+        data_path: ["2. System Speed-of-Light", "2.1 Speed-of-Light"]
+        collapsed: true
+      - title: "Roofline"
+        collapsed: true
+        tui_style: "roofline"
+        widget_id: "roofline-plot"
+      - title: "Memory Chart"
+        data_path: ["3. Memory Chart", "3.1 Memory Chart"]
+        collapsed: true
+        tui_style: "mem_chart"
+
+  - title: "🔍 Detailed Block Analysis"
+    collapsed: true
+    class: "kernels-section"
+    dynamic_sections: true
+    skip_sections:
+      - "0. Top Stats"
+      - "1. System Info"
+      - "2. System Speed-of-Light"
+      - "3. Memory Chart"
+
+  - title: "🚧 Source Level Analysis/PC Sampling"
+    collapsed: true
+    class: "source-section"
+    under_construction: true
+    construction_label: "🚧 Under Construction"
+    construction_class: "section-header"

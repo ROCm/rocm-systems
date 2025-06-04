@@ -37,6 +37,7 @@ Panel Config:
             tips:
         comparable: false # for now
         cli_style: simple_bar
+        tui_style: simple_bar
 
     - metric_table:
         id: 1202
@@ -55,42 +56,42 @@ Panel Config:
             max: MAX((SQ_INSTS_LDS / $denom))
             unit: (Instr  + $normUnit)
             tips:
-          # TODO: Fix baseline comparision logic to handle non existent metrics, then 
+          # TODO: Fix baseline comparision logic to handle non existent metrics, then
           LDS LOAD:
             avg: None
             min: None
             max: None
             unit: (instr + $normUnit)
             tips:
-          # TODO: Fix baseline comparision logic to handle non existent metrics, then 
+          # TODO: Fix baseline comparision logic to handle non existent metrics, then
           LDS STORE:
             avg: None
             min: None
             max: None
             unit: (instr + $normUnit)
             tips:
-          # TODO: Fix baseline comparision logic to handle non existent metrics, then 
+          # TODO: Fix baseline comparision logic to handle non existent metrics, then
           LDS ATOMIC:
             avg: None
             min: None
             max: None
             unit: (instr + $normUnit)
             tips:
-          # TODO: Fix baseline comparision logic to handle non existent metrics, then 
+          # TODO: Fix baseline comparision logic to handle non existent metrics, then
           LDS LOAD Bandwidth:
             avg: None
             min: None
             max: None
             units: Gbps
             tips:
-          # TODO: Fix baseline comparision logic to handle non existent metrics, then 
+          # TODO: Fix baseline comparision logic to handle non existent metrics, then
           LDS STORE Bandwidth:
             avg: None
             min: None
             max: None
             units: Gbps
             tips:
-          # TODO: Fix baseline comparision logic to handle non existent metrics, then 
+          # TODO: Fix baseline comparision logic to handle non existent metrics, then
           LDS ATOMIC Bandwidth:
             avg: None
             min: None
@@ -158,14 +159,14 @@ Panel Config:
             max: MAX((SQ_LDS_MEM_VIOLATIONS / $denom))
             unit: (Accesses + $normUnit)
             tips:
-          # TODO: Fix baseline comparision logic to handle non existent metrics, then 
+          # TODO: Fix baseline comparision logic to handle non existent metrics, then
           LDS Command FIFO Full Rate:
             avg: None
             min: None
             max: None
             unit: (Cycles  + $normUnit)
             tips:
-          # TODO: Fix baseline comparision logic to handle non existent metrics, then 
+          # TODO: Fix baseline comparision logic to handle non existent metrics, then
           LDS Data FIFO Full Rate:
             avg: None
             min: None

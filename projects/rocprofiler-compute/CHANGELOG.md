@@ -6,6 +6,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* Add rocprof-compute Text User Interface (TUI) support for analyze mode
+  * A command line based user interface to support interactive single-run analysis
+  * launch with `--tui` option in analyze mode. i.e., `rocprof-compute analyze --tui`
+
 * Add support to be able to acquire from rocprofv3 every single channle on each XCD of TCC counters
 
 * Add Docker files to package the application and dependencies into a single portable and executable standalone binary file

@@ -31,7 +31,6 @@ import sys
 import time
 from pathlib import Path
 
-import pandas as pd
 import yaml
 
 import config
@@ -145,6 +144,8 @@ class RocProfCompute:
     def detect_analyze(self):
         if self.__args.gui:
             self.__analyze_mode = "web_ui"
+        elif self.__args.tui:
+            self.__analyze_mode = "tui"
         else:
             self.__analyze_mode = "cli"
         return
@@ -392,6 +393,11 @@ class RocProfCompute:
             from rocprof_compute_analyze.analysis_webui import webui_analysis
 
             analyzer = webui_analysis(self.__args, self.__supported_archs)
+        elif self.__analyze_mode == "tui":
+            from rocprof_compute_tui.tui_app import run_tui
+
+            run_tui(self.__args, self.__supported_archs)
+            return
         else:
             console_error("Unsupported analysis mode -> %s" % self.__analyze_mode)
 

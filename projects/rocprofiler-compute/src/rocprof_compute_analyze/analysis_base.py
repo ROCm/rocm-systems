@@ -185,6 +185,8 @@ class OmniAnalyze_Base:
     @demarcate
     def sanitize(self):
         """Perform sanitization of inputs"""
+        if self.__args.tui:
+            return
         if not self.__args.path:
             console_error("The following arguments are required: -p/--path")
         # verify not accessing parent directories

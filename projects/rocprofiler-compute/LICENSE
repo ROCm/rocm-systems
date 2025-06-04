@@ -22,19 +22,23 @@ SOFTWARE.
 
 This application uses the following dependencies and their usage is governed by their respective licenses
 Python 3 standard library: PSFL
-Nuitka specific runtime code: Apache 2.0 license
 astunparse python library: PSFL
 colorlover python library: MIT
 dash python library: MIT
+dash-bootstrap-components python library: MIT
+dash-svg python library: MIT
+kaleido python library: MIT
 matplotlib python library: PSFL
+Nuitka specific runtime code: Apache 2.0 license
 numpy python library: BSD
 pandas python library: BSD
+plotext python library: MIT
+plotille python library: MIT
 pymongo python library: Apache 2.0 license
 pyyaml python library: MIT
-tabulate python library: MIT
-tqdm python library: MIT
-dash-svg python library: MIT
-dash-bootstrap-components python library: MIT
-kaleido python library: MIT
 setuptools python library: MIT
-plotille python library: MIT
+tabulate python library: MIT
+textual python library: MIT
+textual_plotext python library: MIT
+textual-fspicker python library: MIT
+tqdm python library: MIT

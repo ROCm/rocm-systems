@@ -1,0 +1,315 @@
+/*
+ * Performance Analysis TUI Stylesheet
+ * ----------------------------------
+ */
+
+/* Base app styling */
+Screen {
+    background: $surface;
+    color: $text;
+}
+
+/* Main layout containers */
+#main-container {
+    layout: grid;
+    grid-size: 1 2;
+    /* 1 column, 2 rows */
+    grid-columns: 1fr;
+    grid-rows: auto 1fr;
+}
+
+#center-container {
+    layout: grid;
+    grid-size: 2 1;
+    /* 2 column, 1 rows */
+    grid-columns: 8fr 1fr;
+}
+
+#activity-container {
+    layout: grid;
+    grid-size: 1 2;
+    /* 1 column, 2 rows */
+    grid-rows: 4fr 1fr;
+}
+
+/* Panel styling */
+#left-panel,
+#right-panel,
+#center-panel,
+#bottom-panel {
+    border: solid $primary;
+    background: $surface-darken-1;
+}
+
+/* Collapsible sections */
+Collapsible {
+    width: 100%;
+}
+
+Collapsible>.collapsible--title {
+    background: $surface-darken-2;
+    text-style: bold;
+}
+
+Collapsible>.collapsible--content {
+    background: $surface;
+}
+
+/* Summary section */
+.summary-section {
+    height: auto;
+    margin: 0;
+}
+
+.header-cell {
+    text-style: bold;
+    color: $accent;
+    padding: 0 1;
+    height: 1;
+    margin: 0;
+}
+
+.data-cell {
+    color: $text-muted;
+    padding: 0 1;
+    height: 1;
+    margin: 0;
+}
+
+.row {
+    width: 1fr;
+    height: 1;
+    margin: 0;
+}
+
+/* DataTables */
+DataTable {
+    height: auto;
+}
+
+DataTable>.datatable--header {
+    background: $surface-darken-2;
+    text-style: bold;
+}
+
+DataTable>.datatable--row {
+    background: $surface;
+}
+
+DataTable>.datatable--row-odd {
+    background: $surface-darken-1;
+}
+
+/* TabbedContent styling */
+#bottom-panel {
+    min-height: 8;
+}
+
+/* Visualizations */
+.roofline-plot {
+    padding: 1;
+    width: auto;
+    height: auto;
+    background: $surface;
+    color: $text;
+}
+
+.mem-chart {
+    border: solid $accent;
+    padding: 0;
+    width: auto;
+    height: auto;
+    overflow: auto auto;
+    background: $surface;
+    color: $text;
+}
+
+/* Debug view styling */
+.debug-view {
+    border: solid $error;
+    padding: 1;
+    width: 100%;
+}
+
+/* Status classes */
+.error {
+    color: $error;
+    text-style: bold;
+}
+
+.warning {
+    color: $warning;
+}
+
+.success {
+    color: $success;
+}
+
+/* Splitter */
+#splitter {
+    height: 1;
+    background: $primary-background-lighten-1;
+}
+
+/* Placeholder text */
+.placeholder {
+    color: $text-muted;
+    text-align: center;
+    padding: 2;
+}
+
+/* Section headers */
+.section-header {
+    background: $primary-background;
+    color: $text;
+    text-style: bold;
+    border-bottom: solid $primary;
+}
+
+.section {
+    border: round $accent 40%;
+    border-title-color: $text-accent 50%;
+    border-title-align: right;
+
+    &:focus-within {
+        border: round $accent 100%;
+        border-title-color: $foreground;
+        border-title-style: b;
+    }
+
+}
+
+RocprofTUIApp {
+    & TabbedContent:focus-within Tabs {
+        &:focus {
+            & .-active {
+                text-style: $block-cursor-text-style;
+                color: $block-cursor-foreground;
+                background: $block-cursor-background;
+            }
+        }
+
+        &:blur Tab:enabled {
+            &.-active {
+                background: $panel;
+            }
+        }
+    }
+}
+
+Button {
+    background: $surface;
+    color: $text;
+    min-width: 10;
+    height: 1;
+    margin: 0;
+    padding: 0 1;
+    border: none;
+    width: auto;
+}
+
+Button:hover {
+    background: $primary-background-lighten-1;
+    color: $text-accent;
+}
+
+Button.selected {
+    background: $primary-background;
+    color: $text-accent;
+    text-style: bold;
+}
+
+MenuBar {
+    width: 100%;
+    height: auto;
+    background: $surface;
+    grid-rows: 1;
+}
+
+#menu-buttons {
+    width: 100%;
+    height: auto;
+    background: $surface;
+}
+
+MenuButton {
+    background: $surface;
+    color: $text;
+    min-width: 10;
+    height: 1;
+    border: none;
+    width: auto;
+}
+
+MenuButton:hover {
+    background: $primary-background-lighten-1;
+    color: $text-accent;
+}
+
+MenuButton.selected {
+    background: $primary-background;
+    color: $text-accent;
+}
+
+#dropdown-container {
+    width: 100%;
+    height: auto;
+}
+
+DropdownMenu {
+    background: $accent;
+    width: auto;
+    min-width: 20;
+    padding-top: 1;
+    height: auto;
+}
+
+#file-dropdown {
+    margin-left: 0;
+}
+
+.menu-item {
+    background: $accent;
+}
+
+.menu-item:hover {
+    background: $primary-background-lighten-1;
+    color: $text-accent;
+}
+
+.hidden {
+    display: none;
+}
+
+Terimnal {
+    layout: vertical;
+    width: 100%;
+    height: 100%;
+    min-height: 10;
+    background: $surface;
+}
+
+#term-output-scroll {
+    width: 100%;
+    height: 2fr;
+    min-height: 10;
+    max-height: 75%;
+    background: $surface;
+    overflow-y: scroll;
+}
+
+#term-output {
+    width: 100%;
+    background: $surface;
+    color: $text;
+}
+
+#terminal-input {
+    padding: 0;
+
+    &:focus-within {
+        border: round $accent 100%;
+        border-title-color: $foreground;
+        border-title-style: b;
+    }
+}

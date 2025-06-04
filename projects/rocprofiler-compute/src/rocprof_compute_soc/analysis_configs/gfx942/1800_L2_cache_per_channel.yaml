@@ -119,6 +119,7 @@ Panel Config:
           placeholder_range:
             "::_1": $total_l2_chan
         cli_style: simple_box
+        tui_style: simple_box
 
     - metric_table:
         id: 1803
@@ -132,6 +133,7 @@ Panel Config:
           placeholder_range:
             "::_1": $total_l2_chan
         cli_style: simple_box
+        tui_style: simple_box
 
     - metric_table:
         id: 1804
@@ -149,6 +151,7 @@ Panel Config:
           placeholder_range:
             "::_1": $total_l2_chan
         cli_style: simple_multiple_bar
+        tui_style: simple_multiple_bar
 
     - metric_table:
         id: 1805
@@ -166,6 +169,7 @@ Panel Config:
           placeholder_range:
             "::_1": $total_l2_chan
         cli_style: simple_multiple_bar
+        tui_style: simple_multiple_bar
 
     # - metric_table:
     #     id: 1806
@@ -204,6 +208,7 @@ Panel Config:
           placeholder_range:
             "::_1": $total_l2_chan
         cli_style: simple_box
+        tui_style: simple_box
 
     - metric_table:
         id: 1807
@@ -219,6 +224,7 @@ Panel Config:
           placeholder_range:
             "::_1": $total_l2_chan
         cli_style: simple_box
+        tui_style: simple_box
 
     - metric_table:
         id: 1808
@@ -233,6 +239,7 @@ Panel Config:
           placeholder_range:
             "::_1": $total_l2_chan
         cli_style: simple_box
+        tui_style: simple_box
 
     - metric_table:
         id: 1809
@@ -250,6 +257,7 @@ Panel Config:
           placeholder_range:
             "::_1": $total_l2_chan
         cli_style: simple_multiple_bar
+        tui_style: simple_multiple_bar
 
     - metric_table:
         id: 1810
@@ -269,6 +277,7 @@ Panel Config:
           placeholder_range:
             "::_1": $total_l2_chan
         cli_style: simple_multiple_bar
+        tui_style: simple_multiple_bar
 
     # - metric_table:
     #     id: 1811
@@ -296,3 +305,4 @@ Panel Config:
             "::_1": $total_l2_chan
           # tips: Number of 128-byte read requests sent to EA
         cli_style: simple_box
+        tui_style: simple_box
