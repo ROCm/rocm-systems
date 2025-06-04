@@ -25,6 +25,7 @@
 #include "common/defines.hpp"
 #include "hip/hip_runtime.h"
 
+#include <libgen.h>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -88,7 +89,7 @@ main(int argc, char** argv)
     client::start();  // starts context before any API tables are available
     client::identify(1);
 
-    auto* exe_name = ::basename(argv[0]);
+    auto* exe_name = basename(argv[0]);
 
     int rank = 0;
     for(int i = 1; i < argc; ++i)
@@ -225,7 +226,7 @@ run(int rank, int tid, int devid, int argc, char** argv)
 void
 run_transpose(int rank, int tid, hipStream_t stream, int argc, char** argv)
 {
-    auto* exe_name = ::basename(argv[0]);
+    auto* exe_name = basename(argv[0]);
 
     unsigned int M = 4960 * 2;
     unsigned int N = 4960 * 2;
@@ -314,7 +315,7 @@ run_scratch(int rank, int tid, hipStream_t stream, int, char** argv)
 
     HIP_API_CALL(hipStreamSynchronize(stream));
 
-    const auto* exe_name = ::basename(argv[0]);
+    const auto* exe_name = basename(argv[0]);
 
     uint64_t* data_ptr = nullptr;
     HIP_API_CALL(HIP_HOST_ALLOC_FUNC(&data_ptr, sizeof(uint64_t), 0));
@@ -358,7 +359,7 @@ run_migrate(int rank, int tid, hipStream_t stream, int, char** argv)
 
     HIP_API_CALL(hipStreamSynchronize(stream));
 
-    const auto* exe_name  = ::basename(argv[0]);
+    const auto* exe_name  = basename(argv[0]);
     auto        page_data = std::vector<data_type>(1024, 0);
 
     HIP_API_CALL(hipHostRegister(
