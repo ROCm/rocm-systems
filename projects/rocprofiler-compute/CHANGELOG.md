@@ -67,6 +67,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed option specs-correction
 * Fixed kernel name and kernel dispatch filtering when using rocprof v3
 * Fixed not collecting TCC channel counters in rocprof v3
+* Fixed peak FLOPS of F8 I8 F16 and BF16 on MI300
 
 ### Known issues
 

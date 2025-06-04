@@ -44,23 +44,23 @@ Panel Config:
           MFMA FLOPs (F8):
             value: AVG(((SQ_INSTS_VALU_MFMA_MOPS_F8 * 512) / (End_Timestamp - Start_Timestamp)))
             unit: GFLOP
-            peak: ((($max_sclk * $cu_per_gpu) * 8192) / 1000)
+            peak: ((($max_sclk * $cu_per_gpu) * 4096) / 1000)
             pop: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F8 * 512) / (End_Timestamp - Start_Timestamp))))
-              / ((($max_sclk * $cu_per_gpu) * 8192) / 1000))
+              / ((($max_sclk * $cu_per_gpu) * 4096) / 1000))
             tips:
           MFMA FLOPs (BF16):
             value: AVG(((SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) / (End_Timestamp - Start_Timestamp)))
             unit: GFLOP
-            peak: ((($max_sclk * $cu_per_gpu) * 4096) / 1000)
+            peak: ((($max_sclk * $cu_per_gpu) * 2048) / 1000)
             pop: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) / (End_Timestamp - Start_Timestamp))))
-              / ((($max_sclk * $cu_per_gpu) * 4096) / 1000))
+              / ((($max_sclk * $cu_per_gpu) * 2048) / 1000))
             tips:
           MFMA FLOPs (F16):
             value: AVG(((SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) / (End_Timestamp - Start_Timestamp)))
             unit: GFLOP
-            peak: ((($max_sclk * $cu_per_gpu) * 4096) / 1000)
+            peak: ((($max_sclk * $cu_per_gpu) * 2048) / 1000)
             pop: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) / (End_Timestamp - Start_Timestamp))))
-              / ((($max_sclk * $cu_per_gpu) * 4096) / 1000))
+              / ((($max_sclk * $cu_per_gpu) * 2048) / 1000))
             tips:
           MFMA FLOPs (F32):
             value: AVG(((SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) / (End_Timestamp - Start_Timestamp)))
@@ -86,9 +86,9 @@ Panel Config:
           MFMA IOPs (INT8):
             value: AVG(((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / (End_Timestamp - Start_Timestamp)))
             unit: GIOP
-            peak: ((($max_sclk * $cu_per_gpu) * 8192) / 1000)
+            peak: ((($max_sclk * $cu_per_gpu) * 4096) / 1000)
             pop: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / (End_Timestamp - Start_Timestamp))))
-              / ((($max_sclk * $cu_per_gpu) * 8192) / 1000))
+              / ((($max_sclk * $cu_per_gpu) * 4096) / 1000))
             tips:
 
     - metric_table:
