@@ -3155,9 +3155,9 @@ hsa_status_t hsa_amd_spm_set_dest_buffer(hsa_agent_t preferred_agent, size_t siz
  */
 
 /**
- * @brief Older version of hsa_amd_portable_export_dmabuf_v2
+ * @brief Older version of export dmabuf
  *
- * This is the same as calling hsa_amd_portable_export_dmabuf_v2() with the
+ * This is the same as calling the v2 version of export dmabuf with the
  * flags argument set to HSA_AMD_DMABUF_MAPPING_TYPE_NONE.
  *
  * @param[in] ptr Pointer to the allocation being exported.

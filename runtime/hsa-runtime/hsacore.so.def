@@ -234,7 +234,6 @@ global:
 	hsa_amd_spm_release;
 	hsa_amd_spm_set_dest_buffer;
 	hsa_amd_portable_export_dmabuf;
-	hsa_amd_portable_export_dmabuf_v2;
 	hsa_amd_portable_close_dmabuf;
 	hsa_amd_vmem_address_reserve;
 	hsa_amd_vmem_address_reserve_align;
@@ -260,6 +259,7 @@ global:
 	hsa_amd_queue_get_info;
 	hsa_amd_enable_logging;
 	hsa_amd_signal_wait_all;
+	hsa_amd_portable_export_dmabuf_v2;
 local:
     *;
 };
