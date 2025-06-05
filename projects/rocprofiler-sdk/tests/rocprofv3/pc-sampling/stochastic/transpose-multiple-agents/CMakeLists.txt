@@ -172,7 +172,7 @@ add_test(
         --input-samples-csv
         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input/out_pc_sampling_stochastic.csv
         --input-samples-json
-        ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_json_input/out_results.json
+        ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input/out_results.json
         --input-kernel-trace-csv
         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_yaml_input/out_kernel_trace.csv
         --input-agent-info-csv
