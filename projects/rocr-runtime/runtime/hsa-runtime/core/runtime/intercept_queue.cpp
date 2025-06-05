@@ -266,10 +266,10 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
       // Submit barrier which will wake async queue processing.
       ring[barrier & mask].packet.body = {};
       ring[barrier & mask].barrier_and.completion_signal = Signal::Convert(async_doorbell_);
-      if (wrapped->IsDeviceMemRingBuf() && needsPcieOrdering()) {
-        // Ensure the packet body is written as header may get reordered when writing over PCIE
-        _mm_sfence();
-      }
+      // Ensure the packet body is written as header may get reordered when
+      // writing over PCIE by doing absolutely nothing since the atomic::Store
+      // helper already takes care of inserting the SFENCE when ORDER_WC is
+      // defined.
       atomic::Store(&ring[barrier & mask].barrier_and.header, kBarrierHeader,
                     std::memory_order_release);
       // Update the wrapped queue's doorbell so it knows there is a new packet in the queue.
@@ -313,10 +313,10 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
         ++packets_index;
       }
       if (write_index != 0) {
-        if (wrapped->IsDeviceMemRingBuf() && needsPcieOrdering()) {
-          // Ensure the packet body is written as header may get reordered when writing over PCIE
-          _mm_sfence();
-        }
+        // Ensure the packet body is written as header may get reordered when
+        // writing over PCIE by doing absolutely nothing since the atomic::Store
+        // helper already takes care of inserting the SFENCE when ORDER_WC is
+        // defined.
         atomic::Store(&ring[write & mask].packet.header, packets[first_written_packet_index].packet.header,
                       std::memory_order_release);
         HSA::hsa_signal_store_screlease(wrapped->amd_queue_.hsa_queue.doorbell_signal,

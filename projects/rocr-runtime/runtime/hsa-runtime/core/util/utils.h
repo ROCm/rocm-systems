@@ -52,6 +52,9 @@
 #if defined(__linux__)
 #include "unistd.h"
 #endif
+
+#include <simde/x86/sse2.h>
+
 #include <assert.h>
 #include <iostream>
 #include <string>
@@ -76,9 +79,6 @@ typedef uint64_t uint64;
 void log_printf(const char* file, int line, const char* format, ...);
 
 #if defined(__GNUC__)
-#if defined(__i386__) || defined(__x86_64__)
-#include <x86intrin.h>
-#endif
 
 #define __forceinline __inline__ __attribute__((always_inline))
 #define __declspec(x) __attribute__((x))
@@ -409,7 +409,7 @@ inline void FlushCpuCache(const void* base, size_t offset, size_t len) {
   cur += offset;
   uintptr_t lastline = (uintptr_t)(cur + len - 1) | (cacheline_size - 1);
   do {
-    _mm_clflush((const void*)cur);
+    simde_mm_clflush((const void*)cur);
     cur += cacheline_size;
   } while (cur <= (const char*)lastline);
 }
