@@ -302,6 +302,9 @@ hsa_status_t HSA_API hsa_amd_spm_set_dest_buffer(hsa_agent_t agent, size_t size,
                                                  uint32_t* size_copied, void* dest,
                                                  bool* is_data_loss);
 
+hsa_status_t HSA_API hsa_amd_portable_export_dmabuf_v2(const void* ptr,
+                  size_t size, int* dmabuf, uint64_t* offset, uint64_t flags);
+
 // Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_portable_export_dmabuf(const void* ptr, size_t size, int* dmabuf,
                                                     uint64_t* offset);

@@ -3078,7 +3078,8 @@ Agent* Runtime::GetSVMPrefetchAgent(void* ptr, size_t size) {
   return agents_by_node_[prefetch_node][0];
 }
 
-hsa_status_t Runtime::DmaBufExport(const void* ptr, size_t size, int* dmabuf, uint64_t* offset) {
+hsa_status_t Runtime::DmaBufExport(const void* ptr, size_t size, int* dmabuf,
+                                           uint64_t* offset, uint64_t flags) {
 #ifdef __linux__
   ScopedAcquire<KernelSharedMutex::Shared> lock(memory_lock_.shared());
   // Lookup containing allocation.
@@ -3093,6 +3094,14 @@ hsa_status_t Runtime::DmaBufExport(const void* ptr, size_t size, int* dmabuf, ui
         if (mem->second.region->owner()->device_type() != Agent::kAmdGpuDevice)
           return HSA_STATUS_ERROR_INVALID_AGENT;
 
+        rocr::AMD::GpuAgent* owner =
+                    static_cast<AMD::GpuAgent*>(mem->second.region->owner());
+
+        if (flags & HSA_AMD_DMABUF_MAPPING_TYPE_PCIE &&
+            !owner->is_xgmi_cpu_gpu() &&
+            !owner->LargeBarEnabled()) {
+            return (hsa_status_t)HSA_STATUS_ERROR_NOT_SUPPORTED;
+        }
         int fd;
         uint64_t off;
         HSAKMT_STATUS err = HSAKMT_CALL(hsaKmtExportDMABufHandle(const_cast<void*>(ptr), size, &fd, &off));
@@ -3319,7 +3328,6 @@ hsa_status_t Runtime::VMemoryHandleUnmap(void* va, size_t size) {
   if (va_chunk != va_ptr + size) {
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
-  hsa_status_t status;
 
   for (auto mappedHandleIt : mappedHandles) {
     // Remove access from all agents that were allowed access

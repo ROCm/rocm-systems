@@ -1307,14 +1307,28 @@ hsa_status_t hsa_amd_spm_set_dest_buffer(hsa_agent_t preferred_agent, size_t siz
 }
 
 hsa_status_t hsa_amd_portable_export_dmabuf(const void* ptr, size_t size, int* dmabuf,
-                                            uint64_t* offset) {
+  uint64_t* offset) {
+TRY;
+IS_OPEN();
+IS_BAD_PTR(ptr);
+IS_BAD_PTR(dmabuf);
+IS_BAD_PTR(offset);
+IS_ZERO(size);
+return core::Runtime::runtime_singleton_->DmaBufExport(ptr, size, dmabuf,
+                                    offset, HSA_AMD_DMABUF_MAPPING_TYPE_NONE);
+CATCH;
+}
+
+hsa_status_t hsa_amd_portable_export_dmabuf_v2(const void* ptr, size_t size,
+                              int* dmabuf, uint64_t* offset, uint64_t flags) {
   TRY;
   IS_OPEN();
   IS_BAD_PTR(ptr);
   IS_BAD_PTR(dmabuf);
   IS_BAD_PTR(offset);
   IS_ZERO(size);
-  return core::Runtime::runtime_singleton_->DmaBufExport(ptr, size, dmabuf, offset);
+  return core::Runtime::runtime_singleton_->DmaBufExport(ptr, size,
+                                                      dmabuf, offset, flags);
   CATCH;
 }
 

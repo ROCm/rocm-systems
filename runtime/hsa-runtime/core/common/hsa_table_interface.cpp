@@ -1247,6 +1247,12 @@ hsa_status_t HSA_API hsa_amd_portable_export_dmabuf(const void* ptr, size_t size
 }
 
 // Mirrors Amd Extension Apis
+hsa_status_t HSA_API hsa_amd_portable_export_dmabuf_v2(const void* ptr, size_t size, int* dmabuf,
+                                                    uint64_t* offset, uint64_t flags) {
+  return amdExtTable->hsa_amd_portable_export_dmabuf_v2_fn(ptr, size, dmabuf, offset, flags);
+}
+
+// Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_portable_close_dmabuf(int dmabuf) {
   return amdExtTable->hsa_amd_portable_close_dmabuf_fn(dmabuf);
 }

@@ -59,9 +59,10 @@
  * - 1.6 - Virtual Memory API: hsa_amd_vmem_address_reserve_align
  * - 1.7 - hsa_amd_signal_wait_all
  * - 1.8 - hsa_amd_memory_get_preferred_copy_engine
+ * - 1.9 - hsa_amd_portable_export_dmabuf_v2
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 8
+#define HSA_AMD_INTERFACE_VERSION_MINOR 9
 
 #ifdef __cplusplus
 extern "C" {
@@ -446,6 +447,11 @@ enum {
    * Resource is busy or temporarily unavailable
    */
   HSA_STATUS_ERROR_RESOURCE_BUSY = 46,
+
+  /**
+   * Request is not supported by this system
+   */
+  HSA_STATUS_ERROR_NOT_SUPPORTED = 47,
 };
 
 /** @} */
@@ -759,6 +765,17 @@ typedef enum hsa_amd_coherency_type_s {
 } hsa_amd_coherency_type_t;
 
 
+/**
+ * @brief dmabuf attributes
+ */
+#ifdef __cplusplus
+typedef enum hsa_amd_dma_buf_mapping_type_s : int {
+#else
+typedef enum hsa_amd_dma_buf_mapping_type_s {
+#endif
+  HSA_AMD_DMABUF_MAPPING_TYPE_NONE = 0,
+  HSA_AMD_DMABUF_MAPPING_TYPE_PCIE = 1
+} hsa_amd_dma_buf_mapping_type_t;
 /**
  * @brief Get the coherency type of the fine grain region of an agent.
  *
@@ -3138,21 +3155,10 @@ hsa_status_t hsa_amd_spm_set_dest_buffer(hsa_agent_t preferred_agent, size_t siz
  */
 
 /**
- * @brief Obtains an OS specific, vendor neutral, handle to a memory allocation.
+ * @brief Older version of hsa_amd_portable_export_dmabuf_v2
  *
- * Obtains an OS specific handle to GPU agent memory.  The memory must be part
- * of a single allocation from an hsa_amd_memory_pool_t exposed by a GPU Agent.
- * The handle may be used with other APIs (e.g. Vulkan) to obtain shared access
- * to the allocation.
- *
- * Shared access to the memory is not guaranteed to be fine grain coherent even
- * if the allocation exported is from a fine grain pool.  The shared memory
- * consistency model will be no stronger than the model exported from, consult
- * the importing API to determine the final consistency model.
- *
- * The allocation's memory remains valid as long as the handle and any mapping
- * of the handle remains valid.  When the handle and all mappings are closed
- * the backing memory will be released for reuse.
+ * This is the same as calling hsa_amd_portable_export_dmabuf_v2() with the
+ * flags argument set to HSA_AMD_DMABUF_MAPPING_TYPE_NONE.
  *
  * @param[in] ptr Pointer to the allocation being exported.
  *
@@ -3184,6 +3190,56 @@ hsa_status_t hsa_amd_spm_set_dest_buffer(hsa_agent_t preferred_agent, size_t siz
  */
 hsa_status_t hsa_amd_portable_export_dmabuf(const void* ptr, size_t size, int* dmabuf,
                                             uint64_t* offset);
+
+                                            /**
+ * @brief Obtains an OS specific, vendor neutral, handle to a memory allocation.
+ *
+ * Obtains an OS specific handle to GPU agent memory.  The memory must be part
+ * of a single allocation from an hsa_amd_memory_pool_t exposed by a GPU Agent.
+ * The handle may be used with other APIs (e.g. Vulkan) to obtain shared access
+ * to the allocation.
+ *
+ * Shared access to the memory is not guaranteed to be fine grain coherent even
+ * if the allocation exported is from a fine grain pool.  The shared memory
+ * consistency model will be no stronger than the model exported from, consult
+ * the importing API to determine the final consistency model.
+ *
+ * The allocation's memory remains valid as long as the handle and any mapping
+ * of the handle remains valid.  When the handle and all mappings are closed
+ * the backing memory will be released for reuse.
+ *
+ * @param[in] ptr Pointer to the allocation being exported.
+ *
+ * @param[in] size Size in bytes to export following @p ptr.  The entire range
+ * being exported must be contained within a single allocation.
+ *
+ * @param[out] dmabuf Pointer to a dma-buf file descriptor holding a reference to the
+ * allocation.  Contents will not be altered in the event of failure.
+ *
+ * @param[out] offset Offset in bytes into the memory referenced by the dma-buf
+ * object at which @p ptr resides.  Contents will not be altered in the event
+ * of failure.
+ *
+ * @param[in] flags Bitmask of hsa_amd_dma_buf_mapping_type_t flags.
+ *
+ * @retval ::HSA_STATUS_SUCCESS Export completed successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been
+ * initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT One or more arguments is NULL.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ALLOCATION The address range described by
+ * @p ptr and @p size are not contained within a single allocation.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_AGENT The allocation described by @p ptr
+ * and @p size was allocated on a device which can not export memory.
+ *
+ * @retval ::HSA_STATUS_ERROR_OUT_OF_RESOURCES The return file descriptor,
+ * @p dmabuf, could not be created.
+ */
+hsa_status_t hsa_amd_portable_export_dmabuf_v2(const void* ptr, size_t size,
+                               int* dmabuf, uint64_t* offset, uint64_t flags);
 
 /**
  * @brief Closes an OS specific, vendor neutral, handle to a memory allocation.
