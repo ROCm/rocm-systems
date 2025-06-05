@@ -42,6 +42,8 @@
 
 #include "core/inc/amd_blit_kernel.h"
 
+#include <simde/x86/sse2.h>
+
 #include <algorithm>
 #include <sstream>
 #include <string>
@@ -901,7 +903,7 @@ void BlitKernel::PopulateQueue(uint64_t index, uint64_t code_handle, void* args,
   std::atomic_thread_fence(std::memory_order_release);
   if (queue_->IsDeviceMemRingBuf() && queue_->needsPcieOrdering()) {
     // Ensure the packet body is written as header may get reordered when writing over PCIE
-    _mm_sfence();
+    simde_mm_sfence();
   }
 #if defined(__linux__)
   __atomic_store_n(&(queue_buffer[index & queue_bitmask_].full_header),

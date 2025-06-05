@@ -48,6 +48,9 @@
 #include <chrono>
 #include <time.h>
 #include <type_traits>
+#if defined(__i386__) || defined(__x86_64__)
+#include <x86intrin.h>
+#endif
 
 namespace rocr {
 namespace timer {

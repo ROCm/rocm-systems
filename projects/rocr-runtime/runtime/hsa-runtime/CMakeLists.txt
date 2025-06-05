@@ -92,6 +92,8 @@ find_package(LibElf CONFIG)
 if(NOT LibElf_FOUND)
   find_package(LibElf REQUIRED)
 endif()
+pkg_check_modules(drm REQUIRED IMPORTED_TARGET libdrm)
+find_package(SIMDe REQUIRED)
 
 ## Create the rocr target.
 add_library( ${CORE_RUNTIME_TARGET} "" )
@@ -340,6 +342,9 @@ else()
   target_link_directories(${CORE_RUNTIME_TARGET} PRIVATE ${DXCORE_LIB_PATH})
   target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE dxcore)
 endif()
+
+target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE PkgConfig::simde)
+target_link_libraries (${SIMDE_TARGET})
 
 # For static package rocprofiler-register dependency is not required
 # Link to hsakmt target for shared library builds
