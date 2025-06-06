@@ -49,3 +49,80 @@ function(rocprofiler_sdk_get_gfx_architectures _VAR)
         endif()
     endif()
 endfunction()
+
+# In case the underlying architecture does not support PC sampling, this function will
+# tell us whether the PC sampling is disabled
+function(rocprofiler_sdk_pc_sampling_disabled _VAR)
+    cmake_parse_arguments(ARG "ECHO" "PREFIX" "" ${ARGN})
+
+    if(NOT DEFINED ARG_PREFIX)
+        set(ARG_PREFIX "[${PROJECT_NAME}] ")
+    endif()
+
+    rocprofiler_sdk_get_gfx_architectures(rocprofiler-sdk-tests-gfx-info ECHO)
+    list(GET rocprofiler-sdk-tests-gfx-info 0 pc-sampling-gpu-0-gfx-info)
+
+    if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx90a$"
+       OR "${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx94[0-9]$"
+       OR "${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx95[0-9]$")
+        # PC sampling is enabled on this architecture.
+        set(${_VAR}
+            FALSE
+            PARENT_SCOPE)
+        if(ARG_ECHO)
+            message(
+                STATUS
+                    "${ARG_PREFIX}PC Sampling is enabled for ${pc-sampling-gpu-0-gfx-info}"
+                )
+        endif()
+    else()
+        # PC sampling is disabled on this architecture.
+        set(${_VAR}
+            TRUE
+            PARENT_SCOPE)
+        if(ARG_ECHO)
+            message(
+                STATUS
+                    "${ARG_PREFIX}PC Sampling is disabled for ${pc-sampling-gpu-0-gfx-info}"
+                )
+        endif()
+    endif()
+endfunction()
+
+# In case the underlying architecture does not support stochastic PC sampling, this
+# function will tell us whether the PC sampling is disabled
+function(rocprofiler_sdk_pc_sampling_stochastic_disabled _VAR)
+    cmake_parse_arguments(ARG "ECHO" "PREFIX" "" ${ARGN})
+
+    if(NOT DEFINED ARG_PREFIX)
+        set(ARG_PREFIX "[${PROJECT_NAME}] ")
+    endif()
+
+    rocprofiler_sdk_get_gfx_architectures(rocprofiler-sdk-tests-gfx-info ECHO)
+    list(GET rocprofiler-sdk-tests-gfx-info 0 pc-sampling-gpu-0-gfx-info)
+
+    if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx94[0-9]$"
+       OR "${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx95[0-9]$")
+        # PC sampling is enabled on this architecture.
+        set(${_VAR}
+            FALSE
+            PARENT_SCOPE)
+        if(ARG_ECHO)
+            message(
+                STATUS
+                    "${ARG_PREFIX}PC Sampling is enabled for ${pc-sampling-gpu-0-gfx-info}"
+                )
+        endif()
+    else()
+        # PC sampling is disabled on this architecture.
+        set(${_VAR}
+            TRUE
+            PARENT_SCOPE)
+        if(ARG_ECHO)
+            message(
+                STATUS
+                    "${ARG_PREFIX}PC Sampling is disabled for ${pc-sampling-gpu-0-gfx-info}"
+                )
+        endif()
+    endif()
+endfunction()

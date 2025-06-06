@@ -47,6 +47,9 @@ target_link_libraries(
 rocprofiler_samples_get_preload_env(PRELOAD_ENV pc-sampling-client)
 rocprofiler_samples_get_ld_library_path_env(LIBRARY_PATH_ENV)
 
+# Check if PC sampling is disabled and whether we should disable the test
+rocprofiler_sdk_pc_sampling_disabled(IS_PC_SAMPLING_DISABLED)
+
 set(pc-sampling-env ${PRELOAD_ENV} ${LIBRARY_PATH_ENV})
 
 add_test(NAME pc-sampling COMMAND $<TARGET_FILE:pc-sampling>)
@@ -62,4 +65,6 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                SKIP_REGULAR_EXPRESSION
-               "PC sampling unavailable")
+               "PC sampling unavailable"
+               DISABLED
+               "${IS_PC_SAMPLING_DISABLED}")

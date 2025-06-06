@@ -32,6 +32,9 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
+# Checking whether stochastic PC sampling is disabled. If so, skip the tests.
+rocprofiler_sdk_pc_sampling_stochastic_disabled(IS_PC_SAMPLING_STOCHASTIC_DISABLED)
+
 rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py
                                                           input.json input.yml)
 
@@ -65,7 +68,9 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                SKIP_REGULAR_EXPRESSION
-               "PC sampling unavailable")
+               "PC sampling unavailable"
+               DISABLED
+               "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
 
 add_test(
     NAME rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-json-execute
@@ -86,7 +91,9 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                SKIP_REGULAR_EXPRESSION
-               "PC sampling unavailable")
+               "PC sampling unavailable"
+               DISABLED
+               "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
 
 add_test(
     NAME rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-yaml-execute
@@ -107,7 +114,9 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                SKIP_REGULAR_EXPRESSION
-               "PC sampling unavailable")
+               "PC sampling unavailable"
+               DISABLED
+               "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
 
 # ========================= Validation tests
 
@@ -136,7 +145,9 @@ set_tests_properties(
         FAIL_REGULAR_EXPRESSION
         "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
         SKIP_REGULAR_EXPRESSION
-        "PC sampling unavailable")
+        "PC sampling unavailable"
+        DISABLED
+        "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
 
 add_test(
     NAME rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-json-validate
@@ -163,7 +174,9 @@ set_tests_properties(
         FAIL_REGULAR_EXPRESSION
         "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
         SKIP_REGULAR_EXPRESSION
-        "PC sampling unavailable")
+        "PC sampling unavailable"
+        DISABLED
+        "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
 
 add_test(
     NAME rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-yaml-validate
@@ -190,4 +203,6 @@ set_tests_properties(
         FAIL_REGULAR_EXPRESSION
         "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
         SKIP_REGULAR_EXPRESSION
-        "PC sampling unavailable")
+        "PC sampling unavailable"
+        DISABLED
+        "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
