@@ -2204,7 +2204,7 @@ hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttra
   if (pcs_hosttrap_buffers || pcs_stochastic_buffers) {
     // ON non-large BAR systems, we cannot access device memory so we create a host copy
     // and then do a DmaCopy to device memory
-    void* tma_region_host = (uint64_t*)system_allocator()(2 * sizeof(void*), 0x1000, 0);
+    void* tma_region_host = (uint64_t*)system_allocator()(2 * sizeof(uint64_t), 0x1000, 0);
     if (tma_region_host == nullptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
     MAKE_SCOPE_GUARD([&]() { system_deallocator()(tma_region_host); });
@@ -2213,7 +2213,7 @@ hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttra
     ((uint64_t*)tma_region_host)[1] = (uint64_t)pcs_stochastic_buffers;
 
     if (!trap_handler_tma_region_) {
-      trap_handler_tma_region_ = (uint64_t*)finegrain_allocator()(2 * sizeof(void*), 0);
+      trap_handler_tma_region_ = (uint64_t*)finegrain_allocator()(2 * sizeof(uint64_t), 0);
       if (trap_handler_tma_region_ == nullptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
       // NearestCpuAgent owns pool returned system_allocator()
@@ -2225,10 +2225,10 @@ hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttra
     }
 
     /* On non-large BAR systems, we may not be able to access device memory, so do a DmaCopy */
-    if (DmaCopy(trap_handler_tma_region_, tma_region_host, 2 * sizeof(void*)) != HSA_STATUS_SUCCESS)
+    if (DmaCopy(trap_handler_tma_region_, tma_region_host, 2 * sizeof(uint64_t)) != HSA_STATUS_SUCCESS)
       return HSA_STATUS_ERROR;
 
-    tma_size = 2 * sizeof(void*);
+    tma_size = 2 * sizeof(uint64_t);
     tma_addr = trap_handler_tma_region_;
   } else if (trap_handler_tma_region_) {
     finegrain_deallocator()(trap_handler_tma_region_);
