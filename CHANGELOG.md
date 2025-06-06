@@ -191,6 +191,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Updated disassembly.hpp's vaddr-to-file-offset mapping to use the dedicated comgr API.
 - rocprofv3 shorthand argument for `--collection-period` is now `-P` (upper-case) as `-p` (lower-case) is reserved for later use
 - default output format for rocprofv3 is now `rocpd` (SQLite3 database)
+- rocprofv3 avail tool renamed from rocprofv3_avail to rocprofv3-avail tool
+- rocprofv3 avail tool has support for command line arguments.
 
 ### Resolved issues
 

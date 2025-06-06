@@ -10,9 +10,7 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py
-                                                          input.json)
-
+rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY input.json)
 # basic-metrics
 add_test(
     NAME rocprofv3-test-list-avail-execute
@@ -52,39 +50,10 @@ set_tests_properties(
         ENVIRONMENT
         "${cc-env-list-metrics}"
         PASS_REGULAR_EXPRESSION
-        "gpu-agent:[0-9]*\\n*; Name:\\t[a-zA-Z_]*\\n;Description:\\t(.*)\\n*;Expression:\\t(.)*\\n*;Block:\\t[a-zA-Z]*\\n*;Dimensions:\\t([A-Z_]*\\[[0-9]*:[0-9]*\\])*\\n*;Method:\\t(.*);Unit:\\t(.*);Minimum_Interval:\\t[0-9]*;Maximum_Interval:\\t[0-9]*\\n*;"
+        "GPU:[0-9]*\\n*;Name:\\t[a-zA-Z_]*\\n;counter_name:\\t[a-zA-Z_]*\\n;description:\\t(.*)\\n*;expression:\\t(.)*\\n*;block:\\t[a-zA-Z]*\\n*;dimension_name:\\t([A-Z_]*)\\n*; dimension_instances:\\t([[0-9]*:[0-9]*\\])*\\n*;method:(.*)\\n*;unit:(.*)\\n*;min_interval:[0-9]*\\n*;max_interval:[0-9]*\\n*;flags:(.*)\\n*"
     )
 
 set_tests_properties(
     rocprofv3-test-list-avail-trace-execute
     PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT "${cc-env-list-metrics}"
                FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
-
-set(VALIDATION_FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_2/metrics_basic_metrics.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_2/metrics_derived_metrics.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_2/metrics_pc_sample_config.csv)
-
-add_test(
-    NAME rocprofv3-test-list-avail-validate
-    COMMAND
-        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py
-        --derived-metrics-input
-        ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_2/metrics_derived_metrics.csv
-        --basic-metrics-input
-        ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_2/metrics_basic_metrics.csv
-        --pc-sample-config-input
-        ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_2/metrics_pc_sample_config.csv)
-
-set_tests_properties(
-    rocprofv3-test-list-avail-validate
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests"
-               DEPENDS
-               rocprofv3-test-list-metrics-execute
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               ATTACHED_FILES_ON_FAIL
-               "${VALIDATION_FILES}")

@@ -185,8 +185,10 @@ void metadata::init(inprocess)
                         &static_cast<rocprofiler_counter_info_v1_t&>(_info)));
 
                     for(uint64_t j = 0; j < _info.dimensions_count; ++j)
+                    {
                         _dim_ids.emplace_back(_info.dimensions[j].id);
-
+                        _dim_info.emplace_back(_info.dimensions[j]);
+                    }
                     data_v->at(id).emplace_back(
                         id, _info, std::move(_dim_ids), std::move(_dim_info));
                 }
@@ -379,11 +381,13 @@ metadata::get_gpu_agents() const
 pc_sample_config_vec_t
 metadata::get_pc_sample_config_info(rocprofiler_agent_id_t _val) const
 {
-    auto _ret             = pc_sample_config_vec_t{};
+    auto _ret = pc_sample_config_vec_t{};
+    if(agent_pc_sample_config_info.find(_val) == agent_pc_sample_config_info.end()) return _ret;
     auto pc_sample_config = agent_pc_sample_config_info.at(_val);
     for(const auto& itr : pc_sample_config)
+    {
         _ret.emplace_back(itr);
-
+    }
     return _ret;
 }
 

@@ -150,6 +150,11 @@ set_property(
     PROPERTY IMPORTED_LOCATION
              ${@PACKAGE_NAME@_ROOT_DIR}/@CMAKE_INSTALL_BINDIR@/rocprofv3)
 
+add_executable(@PACKAGE_NAME@::rocprofv3-avail IMPORTED)
+set_property(
+    TARGET @PACKAGE_NAME@::rocprofv3-avail
+    PROPERTY IMPORTED_LOCATION ${@PACKAGE_NAME@_ROOT_DIR}/@CMAKE_INSTALL_BINDIR@/rocprofv3-avail)
+
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(
     @PACKAGE_NAME@
