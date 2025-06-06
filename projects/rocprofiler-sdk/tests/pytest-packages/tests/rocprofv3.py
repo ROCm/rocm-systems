@@ -196,7 +196,7 @@ def test_rocpd_data(
     view_mapping = {
         "hip_api": "regions",
         "hsa_api": "regions",
-        "marker_api": "markers",
+        "marker_api": "regions_and_samples",
         "rccl_api": "regions",
         "rocdecode_api": "regions",
         "rocjpeg_api": "regions",

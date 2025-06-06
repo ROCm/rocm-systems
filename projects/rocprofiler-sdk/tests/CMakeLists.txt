@@ -78,6 +78,9 @@ add_subdirectory(openmp-tools)
 add_subdirectory(rocdecode)
 add_subdirectory(rocjpeg)
 
+# rocpd validation tests
+add_subdirectory(rocpd)
+
 # rocprofv3 validation tests
 add_subdirectory(rocprofv3)
 

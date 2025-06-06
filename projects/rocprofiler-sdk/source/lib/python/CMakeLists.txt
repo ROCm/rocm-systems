@@ -14,3 +14,4 @@ if(NOT DEFINED ROCPROFILER_PYTHON_VERSIONS)
 endif()
 
 add_subdirectory(roctx)
+add_subdirectory(rocpd)
