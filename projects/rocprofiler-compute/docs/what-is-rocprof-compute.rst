@@ -15,7 +15,7 @@ ROCm Compute Profiler primarily targets use with
 :doc:`accelerators in the MI300, MI200, and MI100 families <rocm:conceptual/gpu-arch>`.
 Development is in progress to support Radeon™ (RDNA) GPUs.
 
-ROCm Compute Profiler is built on top of :doc:`ROCProfiler <rocprofiler:rocprofv1>` to
+ROCm Compute Profiler is built on top of :doc:`ROCProfiler <rocprofiler:index>` to
 monitor hardware performance counters.
 
 .. _high-level-design:
@@ -88,8 +88,7 @@ high level.
 
   * :ref:`Memory Chart Analysis panel <grafana-panel-memory-chart-analysis>`
 
-  * :ref:`Roofline Analysis panel <grafana-panel-roofline-analysis>`
-    (*Supported on MI200 and above architectures only)
+  * :ref:`Roofline Analysis panel <grafana-panel-roofline-analysis>` (Supported on MI200 and above architectures only)
 
   * :ref:`Command Processor (CP) panel <grafana-panel-cp>`
 

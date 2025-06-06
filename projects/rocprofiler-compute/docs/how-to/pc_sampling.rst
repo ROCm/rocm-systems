@@ -19,30 +19,31 @@ particularly useful for understanding stalls during the kernel execution. The PC
 Profiling options
 ---------------------
 For using profiling options for PC sampling the configuration needed are:
-- ``--pc-sampling-method``: Should be either ``stochastic`` or ``host_trap``
-- ``--pc-sampling-interval``: For stochastic sampling, the interval is in cycles. The finest granularity is 1 cycle. For host_trap sampling, the interval is in microsecond (DEFAULT: 1048576). The interval should be the power of 2. You are recommended to try to starting from 1048576, and lowering until reaching 65536.
+
+* ``--pc-sampling-method``: Should be either ``stochastic`` or ``host_trap``
+* ``--pc-sampling-interval``: For stochastic sampling, the interval is in cycles. The finest granularity is 1 cycle. For host_trap sampling, the interval is in microsecond (DEFAULT: 1048576). The interval should be the power of 2. You are recommended to try to starting from 1048576, and lowering until reaching 65536.
 
 **Sample command:** 
-.. code-block:: bash
 
-        rocprof-compute profile -n pc_test -b 21 --no-roof --pc-sampling-method stochastic --pc-sampling-interval 1048576 -VVV -- target_app
+.. code-block:: shell
+
+   $ rocprof-compute profile -n pc_test -b 21 --no-roof --pc-sampling-method stochastic --pc-sampling-interval 1048576 -VVV -- target_app
 
 -----------------------
 Analysis options
 -----------------------
 For using analysis options for PC sampling the configuration needed are:
 
-- ``--pc-sampling-sorting-type``: ``offset`` or ``count``. The default option is ``offset``. ``offset`` is an assembly instruction offset in the code object.
+* ``--pc-sampling-sorting-type``: ``offset`` or ``count``. The default option is ``offset``. ``offset`` is an assembly instruction offset in the code object.
 
 **Sample command:**
-.. code-block:: bash
 
-        rocprof-compute analyze -p workloads/pc_test/MI300A_A1/ -b 21 -k 0 --pc-sampling-sorting-type offset 
+.. code-block:: shell
 
+   $ rocprof-compute analyze -p workloads/pc_test/MI300A_A1/ -b 21 -k 0 --pc-sampling-sorting-type offset
 
 .. note::
 
-        - PC sampling feature is currently in BETA version. To enable PC sampling,
-        you have to explicitly enable it with block index 21.
-        - To associate PC sampling info back to HIP source code, you need to build the profiling target app with ``-g`` to keep the symbols. Otherwise, PC sampling info would be only associated with assembly lines.
+  * PC sampling feature is currently in BETA version. To enable PC sampling, you have to explicitly enable it with block index 21.
+  * To associate PC sampling info back to HIP source code, you need to build the profiling target app with ``-g`` to keep the symbols. Otherwise, PC sampling info would be only associated with assembly lines.
 

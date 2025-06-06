@@ -252,7 +252,7 @@ Filtering options
 .. _profiling-hw-component-filtering:
 
 Hardware report block filtering
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 You can profile specific hardware report blocks to speed up the profiling process.
 In ROCm Compute Profiler, the term hardware report block refers to a section of the

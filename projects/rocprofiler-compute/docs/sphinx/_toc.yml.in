@@ -19,8 +19,8 @@ subtrees:
     entries:
     - file: how-to/use.rst
     - file: how-to/pc_sampling.rst
-    - file: how-to/profile/mode.rst
       title: Use PC sampling
+    - file: how-to/profile/mode.rst
     - file: how-to/analyze/mode.rst
       entries:
       - file: how-to/analyze/cli.rst
