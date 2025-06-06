@@ -53,7 +53,6 @@
 #include "library/ompt.hpp"
 #include "library/process_sampler.hpp"
 #include "library/ptl.hpp"
-#include "library/rcclp.hpp"
 #include "library/rocprofiler-sdk.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
@@ -404,42 +403,16 @@ rocprofsys_init_library_hidden()
     ROCPROFSYS_CONDITIONAL_BASIC_PRINT_F(_debug_init, "\n");
 }
 
-// Initialize RCCL if:
-// - postinit=true - so the code doesn't hang at the initialization stage
-// - get_state() >= State::Init - so the code doesn't throw an exception
-// - rccl_initialized=false - so we don't try to initialize RCCL twice
-// - get_use_rcclp()=true - only if the environment is configured to use RCCL
-static void
-rccl_setup(bool postinit)
-{
-    // Flag used to avoid initializing RCCL twice
-    static bool rccl_initialized = false;
-
-    if(postinit && (get_state() >= State::Init) && !rccl_initialized && get_use_rcclp())
-    {
-        ROCPROFSYS_VERBOSE_F(1, "Setting up RCCLP...\n");
-        rcclp::setup();
-        rccl_initialized = true;
-    }
-}
-
-static void
-rocprofsys_init_library_hidden_with_rccl(bool postinit)
-{
-    rocprofsys_init_library_hidden();
-    rccl_setup(postinit);
-}
-
 //======================================================================================//
 
 extern "C" bool
-rocprofsys_init_tooling_hidden(bool postinit)
+rocprofsys_init_tooling_hidden(void)
 {
     if(get_env("ROCPROFSYS_MONOCHROME", false, false)) tim::log::monochrome() = true;
 
     if(!tim::get_env("ROCPROFSYS_INIT_TOOLING", true))
     {
-        rocprofsys_init_library_hidden_with_rccl(postinit);
+        rocprofsys_init_library_hidden();
         return false;
     }
 
@@ -458,7 +431,6 @@ rocprofsys_init_tooling_hidden(bool postinit)
 
     if(get_state() != State::PreInit || get_state() == State::Init || _once)
     {
-        rccl_setup(postinit);
         return false;
     }
     _once = true;
@@ -481,7 +453,7 @@ rocprofsys_init_tooling_hidden(bool postinit)
     ROCPROFSYS_CONDITIONAL_BASIC_PRINT_F(_debug_init,
                                          "Calling rocprofsys_init_library()...\n");
 
-    rocprofsys_init_library_hidden_with_rccl(postinit);
+    rocprofsys_init_library_hidden();
 
     ROCPROFSYS_DEBUG_F("\n");
 
@@ -805,12 +777,6 @@ rocprofsys_finalize_hidden(void)
     {
         ROCPROFSYS_VERBOSE_F(1, "Shutting down VA-API tracing...\n");
         component::vaapi_gotcha::shutdown();
-    }
-
-    if(get_use_rcclp())
-    {
-        ROCPROFSYS_VERBOSE_F(1, "Shutting down RCCLP...\n");
-        rcclp::shutdown();
     }
 
     if(get_use_ompt())

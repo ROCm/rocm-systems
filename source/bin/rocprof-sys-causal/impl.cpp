@@ -834,10 +834,6 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
     (defined(ROCPROFSYS_USE_MPI_HEADERS) && ROCPROFSYS_USE_MPI_HEADERS > 0)
         add_default_env(_env, "ROCPROFSYS_USE_MPIP", true);
 #endif
-
-#if defined(ROCPROFSYS_USE_RCCL) && ROCPROFSYS_USE_RCCL > 0
-        add_default_env(_env, "ROCPROFSYS_USE_RCCLP", true);
-#endif
     }
 
     _fill("ROCPROFSYS_CAUSAL_BINARY_EXCLUDE", _binary_excludes, _generate_configs);
