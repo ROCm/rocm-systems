@@ -583,31 +583,40 @@ amdsmi_status_t smi_amdgpu_get_pcie_speed_from_pcie_type(uint16_t pcie_type, uin
 
 amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice* device,
                                                         char *market_name) {
+    SMIGPUDEVICE_MUTEX(device->get_mutex())
     if (market_name == nullptr || device == nullptr) {
         return AMDSMI_STATUS_ARG_PTR_NULL;
     }
+    // initialize the market_name to empty string
+    std::string empty = "";
+    std::strncpy(market_name, empty.c_str(), AMDSMI_MAX_STRING_LENGTH - 1);
 
     std::ostringstream ss;
     std::string render_name = device->get_gpu_path();
-    int fd = -1;
     std::string path = "/dev/dri/" + render_name;
-
-    if (render_name != "") {
-        fd = open(path.c_str(), O_RDWR | O_CLOEXEC);
-    } else {
-        market_name[0] = '\0';
-        close(fd);
+    if (render_name.empty()) {
         return AMDSMI_STATUS_NOT_SUPPORTED;
     }
+
+    auto fd = amdsmi_RAII_FD_handler(path.c_str(), O_RDWR | O_CLOEXEC);
     ss << __PRETTY_FUNCTION__ << " | Render Name: "
-    << render_name << "; path: " << path << "; fd: " << fd;
+       << render_name << "; path: " << path << "; fd: "
+       << (fd == nullptr ? "nullptr" : std::to_string(*fd)) << "\n";
     LOG_DEBUG(ss);
+    if (!fd) {
+        ss << __PRETTY_FUNCTION__ << " | Render Name: "
+           << render_name << "; path: " << path << "; fd: "
+           << (fd == nullptr ? "nullptr" : std::to_string(*fd)) << "\n"
+           << "; Returning: "
+           << smi_amdgpu_get_status_string(AMDSMI_STATUS_FILE_ERROR, false) << "\n";
+        LOG_INFO(ss);
+        return AMDSMI_STATUS_FILE_ERROR;
+    }
 
     amd::smi::AMDSmiLibraryLoader libdrm_amdgpu_;
     amdsmi_status_t status = libdrm_amdgpu_.load("libdrm_amdgpu.so");
     if (status != AMDSMI_STATUS_SUCCESS) {
-      close(fd);
-      libdrm_amdgpu_.AMDSmiLibraryLoader::unload();
+      libdrm_amdgpu_.unload();
       return status;
     }
 
@@ -621,48 +630,35 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice
     amdgpu_device_deinitialize_t amdgpu_device_deinitialize = nullptr;
     amdgpu_get_marketing_name_t amdgpu_get_marketing_name = nullptr;
 
-    status = libdrm_amdgpu_.load_symbol(
-                          reinterpret_cast<amdgpu_device_initialize_t *>(&amdgpu_device_initialize),
-                          "amdgpu_device_initialize");
+    status = libdrm_amdgpu_.load_symbol(reinterpret_cast<void**>(&amdgpu_device_deinitialize),
+                                        "amdgpu_device_deinitialize");
     if (status != AMDSMI_STATUS_SUCCESS) {
-      close(fd);
-      libdrm_amdgpu_.AMDSmiLibraryLoader::unload();
+      libdrm_amdgpu_.unload();
+      return status;
+    }
+
+    status = libdrm_amdgpu_.load_symbol(reinterpret_cast<void**>(&amdgpu_device_initialize),
+                                        "amdgpu_device_initialize");
+    if (status != AMDSMI_STATUS_SUCCESS) {
+      libdrm_amdgpu_.unload();
       return status;
     }
 
     amdgpu_device_handle device_handle = nullptr;
     uint32_t major_version, minor_version;
-    int ret = amdgpu_device_initialize(fd, &major_version, &minor_version, &device_handle);
+    int ret = amdgpu_device_initialize(*fd, &major_version, &minor_version, &device_handle);
     if (ret != 0) {
-      close(fd);
-      libdrm_amdgpu_.AMDSmiLibraryLoader::unload();
+      amdgpu_device_deinitialize(device_handle);
+      libdrm_amdgpu_.unload();
       return AMDSMI_STATUS_DRM_ERROR;
     }
 
-    status = libdrm_amdgpu_.load_symbol(
-                            reinterpret_cast<amdgpu_get_marketing_name_t *>(
-                              &amdgpu_get_marketing_name), "amdgpu_get_marketing_name");
+    status = libdrm_amdgpu_.load_symbol(reinterpret_cast<void**>(&amdgpu_get_marketing_name),
+                                        "amdgpu_get_marketing_name");
     if (status != AMDSMI_STATUS_SUCCESS) {
-      close(fd);
-      libdrm_amdgpu_.AMDSmiLibraryLoader::unload();
+      amdgpu_device_deinitialize(device_handle);
+      libdrm_amdgpu_.unload();
       return status;
-    }
-
-    status = libdrm_amdgpu_.load_symbol(reinterpret_cast<amdgpu_device_deinitialize_t *>(
-                                        &amdgpu_device_deinitialize), "amdgpu_device_deinitialize");
-    if (status != AMDSMI_STATUS_SUCCESS) {
-      close(fd);
-      libdrm_amdgpu_.AMDSmiLibraryLoader::unload();
-      return status;
-    }
-
-    ret = amdgpu_device_initialize(fd, &major_version, &minor_version, &device_handle);
-    if (ret != 0) {
-        std::string empty = "";
-        std::strncpy(market_name, empty.c_str(), AMDSMI_MAX_STRING_LENGTH - 1);
-        amdgpu_device_deinitialize(device_handle);
-        close(fd);
-        return AMDSMI_STATUS_DRM_ERROR;
     }
 
     // Get the marketing name using libdrm's API
@@ -671,10 +667,9 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice
         std::strncpy(market_name, name, AMDSMI_MAX_STRING_LENGTH - 1);
         market_name[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
         amdgpu_device_deinitialize(device_handle);
-        close(fd);
-        libdrm_amdgpu_.AMDSmiLibraryLoader::unload();
+        libdrm_amdgpu_.unload();
         ss << __PRETTY_FUNCTION__ << " | path: " << path << "\n"
-           << " | fd: "<< std::dec << fd << "\n"
+           << " | fd: "<< std::dec << *fd << "\n"
            << " | Marketing Name: " << market_name << "\n"
            << " | Returning: "
            << smi_amdgpu_get_status_string(AMDSMI_STATUS_SUCCESS, false) << "\n";
@@ -683,10 +678,9 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice
     }
 
     amdgpu_device_deinitialize(device_handle);
-    close(fd);
-    libdrm_amdgpu_.AMDSmiLibraryLoader::unload();
+    libdrm_amdgpu_.unload();
     ss << __PRETTY_FUNCTION__ << " | path: " << path << "\n"
-       << " | fd: "<< std::dec << fd << "\n"
+       << " | fd: "<< std::dec << *fd << "\n"
        << " | Marketing Name: " << market_name << "\n"
        << " | Returning: "
        << smi_amdgpu_get_status_string(AMDSMI_STATUS_DRM_ERROR, false) << "\n";
@@ -804,7 +798,6 @@ amdsmi_status_t smi_amdgpu_get_device_index(amdsmi_processor_handle processor_ha
            << "Returning device_index: " << *device_index << "\nSocket #: " << i
            << "; Device #: " << j << "; current_device_index #: " << current_device_index
            << "\n";
-        // std::cout << ss.str();
         LOG_DEBUG(ss);
         return AMDSMI_STATUS_SUCCESS;
       }
@@ -913,8 +906,6 @@ amdsmi_status_t smi_amdgpu_get_processor_handle_by_index(
     LOG_DEBUG(ss);
 
     for (uint32_t j = 0; j < device_count; j++) {
-    //   std::cout << "current_device_index: " << current_device_index
-    //   << " device_index: " << device_index << std::endl;
       if (current_device_index == device_index) {
         *processor_handle = processor_handles[j];
         ss << __PRETTY_FUNCTION__ << " | AMDSMI_STATUS_SUCCESS"
@@ -924,7 +915,6 @@ amdsmi_status_t smi_amdgpu_get_processor_handle_by_index(
            << "; processor_handle: " << *processor_handle
            << "; processor_handles[j]: " << processor_handles[j]
            << "\n";
-        // std::cout << ss.str();
         LOG_DEBUG(ss);
         return AMDSMI_STATUS_SUCCESS;
       }
@@ -958,4 +948,59 @@ void amdsmi_wait_for_user_input(void) {
       return;
     }
   }
+}
+
+std::shared_ptr<int> amdsmi_RAII_FD_handler(const std::string& path, int flags) {
+    static std::mutex fd_mutex;
+    static std::map<std::string, std::weak_ptr<int>> open_files;
+    static std::ostringstream ss;
+
+    std::lock_guard<std::mutex> lock(fd_mutex);
+
+    // Clean up expired entries from the cache
+    for (auto it = open_files.begin(); it != open_files.end();) {
+        if (it->second.expired()) {
+            it = open_files.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // Try to reuse an existing open FD
+    auto it = open_files.find(path);
+    if (it != open_files.end()) {
+        if (auto existing_fd = it->second.lock()) {
+            ss <<__PRETTY_FUNCTION__ << " | Reusing FD for path: " << path;
+            LOG_INFO(ss);
+            return existing_fd;
+        }
+    }
+
+    // Open a new file descriptor
+    int fd = open(path.c_str(), flags);
+    if (fd < 0) {
+        ss << __PRETTY_FUNCTION__ << " | Failed to open file: " << path
+           << " | Error: " << strerror(errno);
+        LOG_INFO(ss);
+        return nullptr;
+    }
+
+    ss << __PRETTY_FUNCTION__ << " | Opened FD: " << std::to_string(fd)
+       << " for path: " << path;
+    LOG_INFO(ss);
+
+    // Create a shared_ptr with a custom deleter to close the FD
+    auto fd_ptr = std::shared_ptr<int>(new int(fd), [path](int* fd) {
+        if (fd && *fd >= 0) {
+            ss << __PRETTY_FUNCTION__  << " | Closing FD: " << std::to_string(*fd)
+               << " | Path: " << path << std::endl;
+            LOG_INFO(ss);
+            close(*fd);
+            delete fd;
+        }
+    });
+
+    // Store weak_ptr in cache for reuse
+    open_files[path] = fd_ptr;
+    return fd_ptr;
 }

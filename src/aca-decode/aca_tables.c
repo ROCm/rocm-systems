@@ -299,10 +299,144 @@ const aca_error_entry_t aid_error_table[] = {
     {0x2a, "Reserved"},
     {0x2b, "Reserved"}};
 
+/**
+ * @brief Table mapping instance_id_hi to OAM and AID values
+ */
+static const oam_aid_map_t oam_aid_table[] = {
+    {0, 0}, /* 0x00 */
+    {1, 0}, /* 0x01 */
+    {2, 0}, /* 0x02 */
+    {3, 0}, /* 0x03 */
+    {0, 1}, /* 0x04 */
+    {1, 1}, /* 0x05 */
+    {2, 1}, /* 0x06 */
+    {3, 1}, /* 0x07 */
+    {0, 2}, /* 0x08 */
+    {1, 2}, /* 0x09 */
+    {2, 2}, /* 0x0A */
+    {3, 2}, /* 0x0B */
+    {0, 3}, /* 0x0C */
+    {1, 3}, /* 0x0D */
+    {2, 3}, /* 0x0E */
+    {3, 3}  /* 0x0F */
+};
+
+// Constants are now defined as global variables
+
+/**
+ * @brief Table mapping bank and instance ID to instance names
+ */
+static const aca_instance_entry_t instance_table[] = {
+    {"cs", 0x1F002000, "cmp0"},
+    {"cs", 0x1F000000, "cs0"},
+    {"cs", 0x1F000A00, "cs10"},
+    {"cs", 0x1F000B00, "cs11"},
+    {"cs", 0x1F000C00, "cs12"},
+    {"cs", 0x1F000D00, "cs13"},
+    {"cs", 0x1F000E00, "cs14"},
+    {"cs", 0x1F000F00, "cs15"},
+    {"cs", 0x1F001000, "cs16"},
+    {"cs", 0x1F001100, "cs17"},
+    {"cs", 0x1F001200, "cs18"},
+    {"cs", 0x1F001300, "cs19"},
+    {"cs", 0x1F000100, "cs1"},
+    {"cs", 0x1F001400, "cs20"},
+    {"cs", 0x1F001500, "cs21"},
+    {"cs", 0x1F001600, "cs22"},
+    {"cs", 0x1F001700, "cs23"},
+    {"cs", 0x1F001800, "cs24"},
+    {"cs", 0x1F001900, "cs25"},
+    {"cs", 0x1F001A00, "cs26"},
+    {"cs", 0x1F001B00, "cs27"},
+    {"cs", 0x1F001C00, "cs28"},
+    {"cs", 0x1F001D00, "cs29"},
+    {"cs", 0x1F000200, "cs2"},
+    {"cs", 0x1F001E00, "cs30"},
+    {"cs", 0x1F001F00, "cs31"},
+    {"cs", 0x1F000300, "cs3"},
+    {"cs", 0x1F000400, "cs4"},
+    {"cs", 0x1F000500, "cs5"},
+    {"cs", 0x1F000600, "cs6"},
+    {"cs", 0x1F000700, "cs7"},
+    {"cs", 0x1F000800, "cs8"},
+    {"cs", 0x1F000900, "cs9"},
+    {"mall", 0x1F005900, "mall0"},
+    {"mall", 0x1F006300, "mall10"},
+    {"mall", 0x1F006400, "mall11"},
+    {"mall", 0x1F006500, "mall12"},
+    {"mall", 0x1F006600, "mall13"},
+    {"mall", 0x1F006700, "mall14"},
+    {"mall", 0x1F006800, "mall15"},
+    {"mall", 0x1F006900, "mall16"},
+    {"mall", 0x1F006A00, "mall17"},
+    {"mall", 0x1F006B00, "mall18"},
+    {"mall", 0x1F006C00, "mall19"},
+    {"mall", 0x1F005A00, "mall1"},
+    {"mall", 0x1F006D00, "mall20"},
+    {"mall", 0x1F006E00, "mall21"},
+    {"mall", 0x1F006F00, "mall22"},
+    {"mall", 0x1F007000, "mall23"},
+    {"mall", 0x1F007100, "mall24"},
+    {"mall", 0x1F007200, "mall25"},
+    {"mall", 0x1F007300, "mall26"},
+    {"mall", 0x1F007400, "mall27"},
+    {"mall", 0x1F007500, "mall28"},
+    {"mall", 0x1F007600, "mall29"},
+    {"mall", 0x1F005B00, "mall2"},
+    {"mall", 0x1F007700, "mall30"},
+    {"mall", 0x1F007800, "mall31"},
+    {"mall", 0x1F005C00, "mall3"},
+    {"mall", 0x1F005D00, "mall4"},
+    {"mall", 0x1F005E00, "mall5"},
+    {"mall", 0x1F005F00, "mall6"},
+    {"mall", 0x1F006000, "mall7"},
+    {"mall", 0x1F006100, "mall8"},
+    {"mall", 0x1F006200, "mall9"},
+    {"pb", 0x5EA00, "pb"},
+    {"pb", 0x30082900, "ccd0 pbccd"},
+    {"pb", 0x32082900, "ccd1 pbccd"},
+    {"pb", 0x34082900, "ccd2 pbccd"},
+    {"pb", 0x36082900, "xcd0 pbccd"},
+    {"pb", 0x38082900, "xcd1 pbccd"},
+    {"umc", 0x90F00, "ch0 umc0"},
+    {"umc", 0x290F00, "ch0 umc1"},
+    {"umc", 0x490F00, "ch0 umc2"},
+    {"umc", 0x690F00, "ch0 umc3"},
+    {"umc", 0x91F00, "ch1 umc0"},
+    {"umc", 0x291F00, "ch1 umc1"},
+    {"umc", 0x491F00, "ch1 umc2"},
+    {"umc", 0x691F00, "ch1 umc3"},
+    {"umc", 0x92F00, "ch2 umc0"},
+    {"umc", 0x292F00, "ch2 umc1"},
+    {"umc", 0x492F00, "ch2 umc2"},
+    {"umc", 0x692F00, "ch2 umc3"},
+    {"umc", 0x93F00, "ch3 umc0"},
+    {"umc", 0x293F00, "ch3 umc1"},
+    {"umc", 0x493F00, "ch3 umc2"},
+    {"umc", 0x693F00, "ch3 umc3"},
+    {"umc", 0x190F00, "ch4 umc0"},
+    {"umc", 0x390F00, "ch4 umc1"},
+    {"umc", 0x590F00, "ch4 umc2"},
+    {"umc", 0x790F00, "ch4 umc3"},
+    {"umc", 0x191F00, "ch5 umc0"},
+    {"umc", 0x391F00, "ch5 umc1"},
+    {"umc", 0x591F00, "ch5 umc2"},
+    {"umc", 0x791F00, "ch5 umc3"},
+    {"umc", 0x192F00, "ch6 umc0"},
+    {"umc", 0x392F00, "ch6 umc1"},
+    {"umc", 0x592F00, "ch6 umc2"},
+    {"umc", 0x792F00, "ch6 umc3"},
+    {"umc", 0x193F00, "ch7 umc0"},
+    {"umc", 0x393F00, "ch7 umc1"},
+    {"umc", 0x593F00, "ch7 umc2"},
+    {"umc", 0x793F00, "ch7 umc3"}};
+
+const size_t NUM_OAM_AID_ENTRIES = sizeof(oam_aid_table) / sizeof(oam_aid_table[0]);
 const size_t NUM_BANKS = sizeof(bank_table) / sizeof(bank_table[0]);
 const size_t NUM_ERRORS = sizeof(error_table) / sizeof(error_table[0]);
 const size_t NUM_XCD_ERRORS = sizeof(xcd_error_table) / sizeof(xcd_error_table[0]);
 const size_t NUM_AID_ERRORS = sizeof(aid_error_table) / sizeof(aid_error_table[0]);
+const size_t NUM_INSTANCES = sizeof(instance_table) / sizeof(instance_table[0]);
 
 int find_bank_name(uint16_t hw_id, uint16_t aca_type, const char **bank_name)
 {
@@ -364,5 +498,41 @@ int find_error_in_table(const aca_error_entry_t *table, size_t table_size,
     }
 
     *error_type = "UNKNOWN";
+    return 1;
+}
+
+int find_oam_aid(uint8_t instance_id_hi, oam_aid_map_t *oam_aid)
+{
+    if (!oam_aid || instance_id_hi >= NUM_OAM_AID_ENTRIES)
+    {
+        return -1;
+    }
+
+    oam_aid->oam = oam_aid_table[instance_id_hi].oam;
+    oam_aid->aid = oam_aid_table[instance_id_hi].aid;
+    return 0;
+}
+
+int find_instance_name(const char *bank, uint32_t instance_id_lo, const char **instance_name)
+{
+    if (!bank || !instance_name)
+    {
+        return -1;
+    }
+
+    // Mask off the lower 2 bits as specified
+    uint32_t masked_id = instance_id_lo & 0xFFFFFFFC;
+
+    for (size_t i = 0; i < NUM_INSTANCES; i++)
+    {
+        if (instance_table[i].instance_id_lo == masked_id &&
+            strcmp(bank, instance_table[i].bank) == 0)
+        {
+            *instance_name = instance_table[i].name;
+            return 0;
+        }
+    }
+
+    *instance_name = "UNKNOWN";
     return 1;
 }

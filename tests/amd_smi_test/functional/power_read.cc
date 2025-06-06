@@ -22,11 +22,11 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <gtest/gtest.h>
 
 #include <iostream>
 #include <string>
 
-#include <gtest/gtest.h>
 #include "amd_smi/amdsmi.h"
 #include "power_read.h"
 #include "../test_common.h"
@@ -77,6 +77,11 @@ void TestPowerRead::Run(void) {
 
       amdsmi_power_cap_info_t info;
       err = amdsmi_get_power_cap_info(processor_handles_[i], 0, &info);
+      if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
+        std::cout << "\t**Power Cap not supported on this device." << std::endl;
+        ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
+        continue;
+      }
       CHK_ERR_ASRT(err)
       IF_VERB(STANDARD) {
         std::cout << "\t**Current Power Cap: " << info.power_cap << "uW" <<std::endl;
@@ -87,7 +92,7 @@ void TestPowerRead::Run(void) {
         std::cout << "\t**Power Cap Range: " << info.min_power_cap << " to " <<
                                                  info.max_power_cap << " uW" << std::endl;
       }
-      // TODO: Add current_socket_power tests
+      // TODO(amdsmi_team): Add current_socket_power tests
     }
   }
 }

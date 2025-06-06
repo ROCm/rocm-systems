@@ -806,7 +806,7 @@ int Device::openSysfsFileStream(DevInfoTypes type, T *fs, const char *str) {
       if (ret != 0 || !reg_file) {
         ss << __PRETTY_FUNCTION__
            << " | Adjusted file path also does not exist - SYSFS file ("
-           << sysfs_path 
+           << sysfs_path
            << ") for DevInfoInfoType (" << get_type_string(type)
            << "), returning " << std::to_string(ret);
         LOG_ERROR(ss);
@@ -865,8 +865,8 @@ int Device::readDebugInfoStr(DevInfoTypes type, std::string *retStr) {
   ret = openDebugFileStream(type, &fs);
   if (ret != 0) {
     ss << "Could not read debugInfoStr for DevInfoType ("
-     << get_type_string(type)<< "), returning "
-     << std::to_string(ret);
+       << get_type_string(type) << "), returning "
+       << std::to_string(ret);
     LOG_ERROR(ss);
     return ret;
   }
@@ -879,7 +879,7 @@ int Device::readDebugInfoStr(DevInfoTypes type, std::string *retStr) {
   fs.close();
 
   ss << "Successfully read debugInfoStr for DevInfoType ("
-     << get_type_string(type)<< "), retString= " << *retStr;
+     << get_type_string(type) << "), retString= " << *retStr;
   LOG_INFO(ss);
 
   return 0;
@@ -904,8 +904,8 @@ int Device::readDevInfoStr(DevInfoTypes type, std::string *retStr) {
   fs >> *retStr;
   fs.close();
   ss << __PRETTY_FUNCTION__
-     << "Successfully read device info string for DevInfoType (" <<
-            get_type_string(type) << "): " + *retStr
+     << "Successfully read device info string for DevInfoType ("
+     << get_type_string(type) << "): " + *retStr
      << " | "
      << (fs.is_open() ? " File stream is opened" : " File stream is closed")
      << " | " << (fs.bad() ? "[ERROR] Bad read operation" :
@@ -1078,7 +1078,6 @@ const char* Device::get_type_string(DevInfoTypes type) {
   }
 
   return "Unknown";
-
 }
 
 int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size,

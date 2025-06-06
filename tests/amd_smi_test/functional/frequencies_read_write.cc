@@ -31,6 +31,7 @@
 
 #include <gtest/gtest.h>
 #include "amd_smi/amdsmi.h"
+#include "amd_smi/impl/amd_smi_utils.h"
 #include "frequencies_read_write.h"
 #include "../test_common.h"
 
@@ -71,6 +72,19 @@ void TestFrequenciesReadWrite::Run(void) {
   amdsmi_frequencies_t f;
   uint32_t freq_bitmask;
   amdsmi_clk_type_t amdsmi_clk;
+  const std::map<amdsmi_clk_type_t, std::string> clk_type_map = {
+      {AMDSMI_CLK_TYPE_SYS, "SYS"},
+      {AMDSMI_CLK_TYPE_GFX, "GFX"},
+      {AMDSMI_CLK_TYPE_DF, "DF"},
+      {AMDSMI_CLK_TYPE_DCEF, "DCEF"},
+      {AMDSMI_CLK_TYPE_SOC, "SOC"},
+      {AMDSMI_CLK_TYPE_MEM, "MEM"},
+      {AMDSMI_CLK_TYPE_PCIE, "PCIE"},
+      {AMDSMI_CLK_TYPE_VCLK0, "VCLK0"},
+      {AMDSMI_CLK_TYPE_VCLK1, "VCLK1"},
+      {AMDSMI_CLK_TYPE_DCLK0, "DCLK0"},
+      {AMDSMI_CLK_TYPE_DCLK1, "DCLK1"},
+  };
 
   TestBase::Run();
   if (setup_failed_) {
@@ -86,11 +100,18 @@ void TestFrequenciesReadWrite::Run(void) {
 
       auto freq_read = [&]() -> bool {
         // Skip AMDSMI_CLK_TYPE_PCIE, which does not supported in rocm-smi.
-        std::cout << amdsmi_clk << std::endl;
-        if (amdsmi_clk == AMDSMI_CLK_TYPE_PCIE)
-          return false;
+        if (auto it = clk_type_map.find(amdsmi_clk); it != clk_type_map.end()) {
+          if (amdsmi_clk == AMDSMI_CLK_TYPE_PCIE) {
+            return false;  // Quietly skip PCIE clock
+                           // Cannot read/write to PCIE clock in driver
+          }
+          std::cout << "amdsmi_get_clk_freq(" << it->second << ", f)";
+        }
+
         ret =  amdsmi_get_clk_freq(processor_handles_[dv_ind], amdsmi_clk, &f);
-        std::cout << ret << std::endl;
+        if (auto it = clk_type_map.find(amdsmi_clk); it != clk_type_map.end()) {
+          std::cout << ": " << smi_amdgpu_get_status_string(ret, false) << std::endl;
+        }
 
         if (ret == AMDSMI_STATUS_NOT_SUPPORTED ||
             ret == AMDSMI_STATUS_NOT_YET_IMPLEMENTED) {

@@ -22,13 +22,13 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <gtest/gtest.h>
 
 #include <iostream>
 #include <bitset>
 #include <string>
 #include <algorithm>
 
-#include <gtest/gtest.h>
 #include "amd_smi/amdsmi.h"
 #include "power_cap_read_write.h"
 #include "../test_common.h"
@@ -83,18 +83,18 @@ void TestPowerCapReadWrite::SetCheckPowerCap(std::string msg, uint32_t dv_ind, u
     start = clock();
     ret =  amdsmi_set_power_cap(processor_handles_[dv_ind], 0, new_cap);
     end = clock();
-    cpu_time_used = ((double) (end - start)) * 1000000UL / CLOCKS_PER_SEC;
+    cpu_time_used = (static_cast<double>(end - start)) * 1000000UL / CLOCKS_PER_SEC;
 
     if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) {
-        std::cout << "\t** Not supported on this machine" << std::endl;
+        std::cout << "\t**amdsmi_set_power_cap(): Not supported on this machine" << std::endl;
       }
       return;
     }
     ASSERT_EQ(ret, ret_expected);
     if (ret == AMDSMI_STATUS_INVAL) {
         new_cap = curr_cap;
-        std::cout << "\t** Expected invalid result" << std::endl;
+        std::cout << "\t**amdsmi_set_power_cap(): Expected invalid result" << std::endl;
         return;
     }
 
@@ -134,11 +134,16 @@ void TestPowerCapReadWrite::Run(void) {
     PrintDeviceHeader(processor_handles_[dv_ind]);
 
     amdsmi_power_cap_info_t info;
-    ret = amdsmi_get_power_cap_info(processor_handles_[dv_ind], 0, &info);
-    CHK_ERR_ASRT(ret)
     // Verify api support checking functionality is working
     ret = amdsmi_get_power_cap_info(processor_handles_[dv_ind], 0, nullptr);
     ASSERT_EQ(ret, AMDSMI_STATUS_INVAL);
+
+    ret = amdsmi_get_power_cap_info(processor_handles_[dv_ind], 0, &info);
+    if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
+      std::cout << "\t**amdsmi_get_power_cap_info(): Not supported on this machine" << std::endl;
+      ASSERT_EQ(ret, AMDSMI_STATUS_NOT_SUPPORTED);
+      continue;
+    }
     min_cap = info.min_power_cap;
     max_cap = info.max_power_cap;
     default_cap = info.default_power_cap;
@@ -148,15 +153,16 @@ void TestPowerCapReadWrite::Run(void) {
     IF_VERB(STANDARD) {
       std::cout << "[Before Set]  Default Power Cap: " << default_cap << " uW" << std::endl;
       std::cout << "[Before Set]  Current Power Cap: " << curr_cap << " uW" << std::endl;
-      std::cout << "[Before Set]  Power Cap Range [max to min]: " << max_cap << " uW to " << min_cap <<
-                                                            " uW" << std::endl;
+      std::cout << "[Before Set]  Power Cap Range [max to min]: "
+                << max_cap << " uW to " << min_cap << " uW" << std::endl;
       std::cout << "[Before Set]  Setting new cap to " << new_cap << "..." << std::endl;
     }
 
     // Check if power cap is within the range
     // skip the test otherwise
     if (new_cap < min_cap || new_cap > max_cap) {
-      std::cout << "\t** Power cap requested (" << new_cap << " uW) is failed to set for " << dv_ind << std::endl;
+      std::cout << "\t** Power cap requested (" << new_cap
+                << " uW) is failed to set for " << dv_ind << std::endl;
       continue;
     }
     ret = AMDSMI_STATUS_SUCCESS;
@@ -166,17 +172,18 @@ void TestPowerCapReadWrite::Run(void) {
     }
     IF_VERB(STANDARD) {
       if (!new_cap)
-        std::cout << "\t** Power cap requested (" << new_cap << " uW) is failed to set for " << dv_ind << std::endl;
+        std::cout << "\t** Power cap requested (" << new_cap
+                  << " uW) is failed to set for " << dv_ind << std::endl;
     }
 
-    if (min_cap > 0)
-    {
+    if (min_cap > 0) {
       new_cap = min_cap;
       ret = AMDSMI_STATUS_SUCCESS;
       SetCheckPowerCap("Setting to Min Power Cap", dv_ind, curr_cap, new_cap, ret);
       IF_VERB(STANDARD) {
         if (!new_cap)
-          std::cout << "\t** Power cap requested (" << new_cap << " uW) is failed to set for " << dv_ind << std::endl;
+          std::cout << "\t** Power cap requested (" << new_cap
+                    << " uW) is failed to set for " << dv_ind << std::endl;
       }
 
       new_cap = uint64_t(min_cap - 1);
@@ -185,7 +192,8 @@ void TestPowerCapReadWrite::Run(void) {
       if (ret != AMDSMI_STATUS_INVAL) {
         IF_VERB(STANDARD) {
           if (!new_cap)
-            std::cout << "\t** Power cap requested (" << new_cap << " uW) is failed to set for " << dv_ind << std::endl;
+            std::cout << "\t** Power cap requested (" << new_cap
+                      << " uW) is failed to set for " << dv_ind << std::endl;
         }
       }
 
@@ -195,13 +203,13 @@ void TestPowerCapReadWrite::Run(void) {
       if (ret != AMDSMI_STATUS_INVAL) {
         IF_VERB(STANDARD) {
           if (!new_cap)
-            std::cout << "\t** Power cap requested (" << new_cap << " uW) is failed to set for " << dv_ind << std::endl;
+            std::cout << "\t** Power cap requested (" << new_cap << " uW) is failed to set for "
+                      << dv_ind << std::endl;
         }
       }
-    }
-    else
-    {
-      std::cout << "\tPower cap requested is less than or equal to 0, skipping test for " << dv_ind << std::endl;
+    } else {
+      std::cout << "\tPower cap requested is less than or equal to 0, skipping test for device #"
+                << dv_ind << std::endl;
     }
 
     new_cap = max_cap;
@@ -209,7 +217,8 @@ void TestPowerCapReadWrite::Run(void) {
     SetCheckPowerCap("Setting to Max Power Cap", dv_ind, curr_cap, new_cap, ret);
     IF_VERB(STANDARD) {
       if (!new_cap)
-        std::cout << "\t** Power cap requested (" << new_cap << " uW) is failed to set for " << dv_ind << std::endl;
+        std::cout << "\t** Power cap requested (" << new_cap
+                  << " uW) is failed to set for " << dv_ind << std::endl;
     }
 
     new_cap = uint64_t(max_cap + 1);
@@ -218,7 +227,8 @@ void TestPowerCapReadWrite::Run(void) {
     if (ret != AMDSMI_STATUS_INVAL) {
       IF_VERB(STANDARD) {
         if (!new_cap)
-          std::cout << "\t** Power cap requested (" << new_cap << " uW) failed to set for " << dv_ind << std::endl;
+          std::cout << "\t** Power cap requested (" << new_cap
+                    << " uW) failed to set for " << dv_ind << std::endl;
       }
     }
 
@@ -228,7 +238,8 @@ void TestPowerCapReadWrite::Run(void) {
     if (ret != AMDSMI_STATUS_INVAL) {
       IF_VERB(STANDARD) {
         if (!new_cap)
-          std::cout << "\t** Power cap requested (" << new_cap << " uW) is failed to set for " << dv_ind << std::endl;
+          std::cout << "\t** Power cap requested (" << new_cap
+                    << " uW) is failed to set for " << dv_ind << std::endl;
       }
     }
 

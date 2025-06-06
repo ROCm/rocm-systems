@@ -27,6 +27,7 @@
 #include <string.h>
 #include <memory>
 #include <regex>
+#include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/amd_smi_drm.h"
 #include "amd_smi/impl/amd_smi_common.h"
 #include "rocm_smi/rocm_smi.h"
@@ -59,8 +60,6 @@ std::string AMDSmiDrm::find_file_in_folder(const std::string& folder,
 
 amdsmi_status_t AMDSmiDrm::init() {
     std::ostringstream ss;
-    int fd = -1;
-
 
     amdsmi_status_t status = lib_loader_.load("libdrm.so.2");
     if (status != AMDSMI_STATUS_SUCCESS) {
@@ -131,27 +130,18 @@ amdsmi_status_t AMDSmiDrm::init() {
 
         // looking for /sys/class/drm/card0/../renderD*
         std::string render_name = find_file_in_folder(renderD_folder, regex);
-        fd = -1;
         std::string name = "/dev/dri/" + render_name;
-        if (render_name != "") {
-            fd = open(name.c_str(), O_RDWR | O_CLOEXEC);
-        }
+        auto fd = amdsmi_RAII_FD_handler(name.c_str(), O_RDWR | O_CLOEXEC);
 
         amdsmi_bdf_t bdf;
-        if (fd >= 0) {
-            auto version = drm_get_version(fd);
-            if (strcmp("amdgpu", version->name)) {  // only amdgpu
-                close(fd);
-                fd = -1;
-            }
-            if (fd  >= 0 && drm_get_device(fd, &device) != 0) {
+        if (*fd >= 0) {
+            auto version = drm_get_version(*fd);
+            if (*fd  >= 0 && drm_get_device(*fd, &device) != 0) {
                 drm_free_device(&device);
-                close(fd);
-                fd = -1;
             }
             ss << __PRETTY_FUNCTION__ << " | "
                << " render file name: " << name << "\n"
-               << "; fd: " << std::dec << fd << "\n"
+               << "; fd: " << std::dec << *fd << "\n"
                << "; drm version->name: " << version->name << "\n"
                << "; drm version->date: " << version->date << "\n"
                << "; drm version_major.version_minor.version_patchlevel: "
@@ -174,11 +164,12 @@ amdsmi_status_t AMDSmiDrm::init() {
             drm_free_version(version);
         }
 
-        drm_fds_.push_back(fd);
+        drm_fds_.push_back(*fd);
         drm_paths_.push_back(render_name);
         // even if fail, still add to prevent mismatch the index
-        if (fd < 0) {
+        if (*fd < 0) {
             drm_bdfs_.push_back(bdf);
+            drm_free_device(&device);
             continue;
         }
 
@@ -215,7 +206,6 @@ amdsmi_status_t AMDSmiDrm::init() {
 
         drm_bdfs_.push_back(bdf);
         drm_free_device(&device);
-        close(fd);
     }
 
     // cannot find any valid fds.
@@ -223,7 +213,6 @@ amdsmi_status_t AMDSmiDrm::init() {
         drm_bdfs_.clear();
         return AMDSMI_STATUS_INIT_ERROR;
     }
-
     return AMDSMI_STATUS_SUCCESS;
 }
 

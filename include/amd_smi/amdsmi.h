@@ -845,7 +845,7 @@ typedef struct {
     uint64_t device_id;    //!< The device ID of a GPU
     uint32_t rev_id;       //!< The revision ID of a GPU
     char asic_serial[AMDSMI_MAX_STRING_LENGTH];
-    uint32_t oam_id;       //!< 0xFFFF if not supported
+    uint32_t oam_id;       //!< 0xFFFFFFFF if not supported
     uint32_t num_of_compute_units;     //!< 0xFFFFFFFF if not supported
     uint64_t target_graphics_version;  //!< 0xFFFFFFFFFFFFFFFF if not supported
     uint32_t subsystem_id; //!> The subsystem ID

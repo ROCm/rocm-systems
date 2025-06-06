@@ -1879,18 +1879,24 @@ def amdsmi_get_gpu_asic_info(
 
     market_name = _pad_hex_value(asic_info_struct.market_name.decode("utf-8"), 4)
     target_graphics_version = hex(asic_info_struct.target_graphics_version)[2:]
+    subsystem_id = _validate_if_max_uint(asic_info_struct.subsystem_id, MaxUIntegerTypes.UINT32_T)
+    subvendor_id = _validate_if_max_uint(asic_info_struct.subvendor_id, MaxUIntegerTypes.UINT32_T)
+    if subsystem_id is not "N/A":
+        subsystem_id = _pad_hex_value(hex(subsystem_id), 4)
+    if subvendor_id is not "N/A":
+        subvendor_id = _pad_hex_value(hex(subvendor_id), 4)
     asic_info = {
         "market_name": market_name,
         "vendor_id": asic_info_struct.vendor_id,
         "vendor_name": asic_info_struct.vendor_name.decode("utf-8"),
-        "subvendor_id": asic_info_struct.subvendor_id,
+        "subvendor_id": subvendor_id,
         "device_id": asic_info_struct.device_id,
         "rev_id": _pad_hex_value(hex(asic_info_struct.rev_id), 2),
         "asic_serial": asic_info_struct.asic_serial.decode("utf-8"),
-        "oam_id": asic_info_struct.oam_id,
-        "num_compute_units": asic_info_struct.num_of_compute_units,
+        "oam_id": _validate_if_max_uint(asic_info_struct.oam_id, MaxUIntegerTypes.UINT32_T),
+        "num_compute_units": _validate_if_max_uint(asic_info_struct.num_of_compute_units, MaxUIntegerTypes.UINT32_T),
         "target_graphics_version": "gfx" + target_graphics_version,
-        "subsystem_id": asic_info_struct.subsystem_id
+        "subsystem_id": subsystem_id
     }
 
     string_values = ["market_name", "vendor_name"]
@@ -1898,7 +1904,7 @@ def amdsmi_get_gpu_asic_info(
         if not asic_info[value]:
             asic_info[value] = "N/A"
 
-    hex_values = ["vendor_id", "subvendor_id", "device_id", "subsystem_id"]
+    hex_values = ["vendor_id", "device_id"]
     for value in hex_values:
         if asic_info[value]:
             asic_info[value] = hex(asic_info[value])
@@ -1912,14 +1918,6 @@ def amdsmi_get_gpu_asic_info(
         asic_info["asic_serial"] = str.format("0x{:016X}", asic_serial_hex)
     else:
         asic_info["asic_serial"] = "N/A"
-
-    # Check for max value as a sign for not applicable
-    if asic_info["oam_id"] == 0xFFFF: # uint 16 max
-        asic_info["oam_id"] = "N/A"
-
-    # Check for max value as a sign for not applicable
-    if asic_info["num_compute_units"] == 0xFFFFFFFF: # uint 32 max
-        asic_info["num_compute_units"] = "N/A"
 
     # Remove commas from vendor name for clean output
     asic_info["vendor_name"] = asic_info["vendor_name"].replace(',', '')
@@ -2834,9 +2832,9 @@ def amdsmi_get_fw_info(
             'fw_name': fw_name,
             'fw_version': fw_version_string.upper(),
         })
-    return {
-        'fw_list': firmwares
-    }
+    return_dict = {'fw_list': firmwares}
+    # logging.debug("amdsmi_interface.py | amdsmi_get_fw_info | return_dictionary = \n" + str(json.dumps(return_dict, indent=4)))
+    return return_dict
 
 
 def amdsmi_get_gpu_vram_usage(
@@ -3314,6 +3312,11 @@ def amdsmi_get_gpu_memory_partition_config(processor_handle: amdsmi_wrapper.amds
         mem_caps_list.append("NPS4")
     if config.partition_caps.nps_flags.nps8_cap == 1:
         mem_caps_list.append("NPS8")
+    if (config.partition_caps.nps_flags.nps1_cap == 0 and
+        config.partition_caps.nps_flags.nps2_cap == 0 and 
+        config.partition_caps.nps_flags.nps4_cap == 0 and 
+        config.partition_caps.nps_flags.nps8_cap == 0):
+        mem_caps_list.append("N/A")
 
     return_dict = {
         "partition_caps": mem_caps_list,
@@ -3421,6 +3424,11 @@ def amdsmi_get_gpu_accelerator_partition_profile(
                 mem_caps_list.append("NPS4")
             if profile.memory_caps.nps_flags.nps8_cap == 1:
                 mem_caps_list.append("NPS8")
+            if (profile.memory_caps.nps_flags.nps1_cap == 0 and
+                profile.memory_caps.nps_flags.nps2_cap == 0 and 
+                profile.memory_caps.nps_flags.nps4_cap == 0 and 
+                profile.memory_caps.nps_flags.nps8_cap == 0):
+                mem_caps_list.append("N/A")
             partition_profile_dict = {
                 "profile_type" : profile_type_ret,
                 "num_partitions" : profile.num_partitions,
@@ -3473,6 +3481,11 @@ def amdsmi_get_gpu_accelerator_partition_profile_config(processor_handle: amdsmi
             mem_caps_list.append("NPS4")
         if profile.memory_caps.nps_flags.nps8_cap == 1:
             mem_caps_list.append("NPS8")
+        if (profile.memory_caps.nps_flags.nps1_cap == 0 and
+            profile.memory_caps.nps_flags.nps2_cap == 0 and 
+            profile.memory_caps.nps_flags.nps4_cap == 0 and 
+            profile.memory_caps.nps_flags.nps8_cap == 0):
+            mem_caps_list.append("N/A")
 
         for r in range(config.num_resource_profiles):
             # logging.debug("\namdsmi_interface.py | amdsmi_get_gpu_accelerator_partition_profile_config | i = " + str(i) + "; r = " + str(r) + "; resource_idx = " + str(resource_idx))

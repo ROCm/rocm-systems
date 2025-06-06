@@ -19,6 +19,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include <gtest/gtest.h>
 
 #include <string>
 #include <vector>
@@ -27,7 +28,7 @@
 
 #include "amd_smi/amdsmi.h"
 #include "rocm_smi/rocm_smi_utils.h"
-#include <gtest/gtest.h>
+#include "amd_smi/impl/amd_smi_utils.h"
 #include "test_common.h"
 #include "test_base.h"
 
@@ -114,6 +115,7 @@ static void RunGenericTest(TestBase *test) {
 //  RunGenericTest(&<test_obj>);
 // }
 TEST(amdsmitstReadOnly, TestVersionRead) {
+  // amdsmi_wait_for_user_input();
   TestVersionRead tst;
   RunGenericTest(&tst);
 }
