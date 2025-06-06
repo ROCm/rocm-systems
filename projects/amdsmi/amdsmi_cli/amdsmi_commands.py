@@ -6498,9 +6498,7 @@ class AMDSMICommands():
 
         if args.afid and args.cper_file:
             afids = self.helpers.pvtDumpAfids(args.cper_file)
-            for afid in afids:
-                print(afid, end=" ")
-            print("")
+            print(' '.join(map(str, afids)))
             return
 
         if not self.group_check_printed:
