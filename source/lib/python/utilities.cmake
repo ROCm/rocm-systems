@@ -147,19 +147,15 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
     set(rocpd_PYTHON_OUTPUT_DIRECTORY
         ${PROJECT_BINARY_DIR}/${rocpd_PYTHON_INSTALL_DIRECTORY})
     set(rocpd_PYTHON_SOURCES
-        chrome_tracing.py
         csv.py
         importer.py
         __init__.py
         __main__.py
         output_config.py
+        otf2.py
         pftrace.py
         schema.py
         time_window.py)
-    set(rocpd_SCHEMA_SOURCES
-        schema_data/data_views.sql schema_data/marker_views.sql
-        schema_data/rocpd_indexes.sql schema_data/rocpd_tables.sql
-        schema_data/rocpd_views.sql schema_data/summary_views.sql)
 
     foreach(_SOURCE ${rocpd_PYTHON_SOURCES})
         configure_file(${CMAKE_CURRENT_LIST_DIR}/${_SOURCE}
@@ -167,16 +163,7 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
         install(
             FILES ${rocpd_PYTHON_OUTPUT_DIRECTORY}/${_SOURCE}
             DESTINATION ${rocpd_PYTHON_INSTALL_DIRECTORY}
-            COMPONENT core)
-    endforeach()
-
-    foreach(_SOURCE ${rocpd_SCHEMA_SOURCES})
-        configure_file(${CMAKE_CURRENT_LIST_DIR}/${_SOURCE}
-                       ${rocpd_PYTHON_OUTPUT_DIRECTORY}/${_SOURCE} COPYONLY)
-        install(
-            FILES ${rocpd_PYTHON_OUTPUT_DIRECTORY}/${_SOURCE}
-            DESTINATION ${rocpd_PYTHON_INSTALL_DIRECTORY}/schema_data
-            COMPONENT core)
+            COMPONENT rocpd)
     endforeach()
 
     add_library(rocprofiler-sdk-rocpd-python-bindings-${_VERSION} MODULE)
@@ -201,6 +188,7 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
                 rocprofiler-sdk::rocprofiler-sdk-gotcha
                 rocprofiler-sdk::rocprofiler-sdk-dw
                 rocprofiler-sdk::rocprofiler-sdk-static-library
+                rocprofiler-sdk::rocprofiler-sdk-rocpd-library
                 ${Python3_LIBRARIES})
 
     set_target_properties(
@@ -218,35 +206,5 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
     install(
         TARGETS rocprofiler-sdk-rocpd-python-bindings-${_VERSION}
         DESTINATION ${rocpd_PYTHON_INSTALL_DIRECTORY}
-        COMPONENT core)
-endfunction()
-
-function(rocprofiler_rocpd_python_packaging _VERSION)
-    message(
-        STATUS "Creating rocprofiler-sdk rocpd python packaging for python ${_VERSION}")
-    rocprofiler_find_python3(${_VERSION})
-
-    add_custom_target(
-        rocprofiler-sdk-rocpd-${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR} ALL
-        ${Python3_EXECUTABLE}
-        -m
-        pip
-        install
-        -q
-        -q
-        --prefix
-        ${PROJECT_BINARY_DIR}
-        -I
-        ${CMAKE_CURRENT_BINARY_DIR}
-        WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-        COMMENT
-            "Packaging rocpd for python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}..."
-        )
-
-    install(
-        DIRECTORY
-            ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        USE_SOURCE_PERMISSIONS
-        COMPONENT core)
+        COMPONENT rocpd)
 endfunction()

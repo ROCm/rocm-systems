@@ -183,6 +183,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
   - support for `find_package(rocprofiler-sdk-rocpd)`
   - `rocprofiler-sdk-rocpd` DEB and RPM packages
 - Support `--version` option for `rocprofv3`
+- Added `rocpd` Python package
 
 ### Changed
 
