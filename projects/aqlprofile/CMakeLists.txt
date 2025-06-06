@@ -65,12 +65,6 @@ set ( DEST_NAME ${AQLPROFILE_NAME} )
 install ( TARGETS ${AQLPROFILE_TARGET} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT runtime )
 install ( TARGETS ${AQLPROFILE_TARGET} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan )
 
-option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compatibility" OFF)
-
-if(FILE_REORG_BACKWARD_COMPATIBILITY)
-  include(aqlprof-backward-compat.cmake)
-endif()
-
 ## Add the packaging directives for the runtime library.
 if ( ENABLE_ASAN_PACKAGING )
   set ( CPACK_PACKAGE_NAME ${AQLPROFILE_NAME}-asan )
