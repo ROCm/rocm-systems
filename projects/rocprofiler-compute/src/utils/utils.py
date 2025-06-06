@@ -949,12 +949,17 @@ def run_prof(
     df.to_csv(workload_dir + "/" + fbase + ".csv", index=False)
 
 
-def pc_sampling_prof(interval, workload_dir, appcmd, rocprofiler_sdk_library_path):
+def pc_sampling_prof(
+    method, interval, workload_dir, appcmd, rocprofiler_sdk_library_path
+):
     """
     Run rocprof with pc sampling. Current support v3 only.
     """
     # Todo:
     #   - precheck with rocprofv3 –-list-avail
+
+    unit = "time" if method == "host_trap" else "cycles"
+
     if rocprof_cmd == "rocprofiler-sdk":
         rocm_libdir = str(pathlib.Path(rocprofiler_sdk_library_path).parent)
         rocprofiler_sdk_tool_path = str(
@@ -975,7 +980,7 @@ def pc_sampling_prof(interval, workload_dir, appcmd, rocprofiler_sdk_library_pat
             "ROCPROF_OUTPUT_PATH": workload_dir,
             "ROCPROF_OUTPUT_FILE_NAME": "ps_file",
             "ROCPROFILER_PC_SAMPLING_BETA_ENABLED": "1",
-            "ROCPROF_PC_SAMPLING_UNIT": "time",
+            "ROCPROF_PC_SAMPLING_UNIT": unit,
             "ROCPROF_PC_SAMPLING_INTERVAL": str(interval),
             "ROCPROF_PC_SAMPLING_METHOD": "host_trap",
         }
@@ -993,7 +998,7 @@ def pc_sampling_prof(interval, workload_dir, appcmd, rocprofiler_sdk_library_pat
             "--pc-sampling-method",
             "host_trap",
             "--pc-sampling-unit",
-            "time",
+            unit,
             "--output-format",
             "csv",
             "json",

@@ -1,6 +1,6 @@
 .. meta::
    :description: ROCm Compute Profiler external training resources
-   :keywords: Omniperf, examples, tutorials, videos, lesson, lessons, how
+   :keywords: ROCm Compute Profiler, examples, tutorials, videos, lesson, lessons, how
 
 ******************
 Learning resources

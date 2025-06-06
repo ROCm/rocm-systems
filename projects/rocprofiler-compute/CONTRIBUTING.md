@@ -56,4 +56,4 @@ Please see the [pre-commit documentation](https://pre-commit.com/#quick-start) f
 
 Below are some repository specific guidelines which are followed througout the repository.
 Any future contributions should adhere to these guidelines:
-* Use pathlib library functions instead of os.path for manipulating file paths
+* Use the `pathlib` library functions instead of `os.path` for manipulating the file paths.

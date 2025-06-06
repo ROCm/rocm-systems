@@ -164,8 +164,7 @@ class webui_analysis(OmniAnalyze_Base):
                 workload=base_data[base_run],
                 dir=self.dest_dir,
                 is_gui=True,
-                debug=self.get_args().debug,
-                verbose=self.get_args().verbose,
+                args=self.get_args(),
             )
 
             # ~~~~~~~~~~~~~~~~~~~~~~~

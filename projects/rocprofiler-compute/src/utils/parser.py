@@ -1043,33 +1043,83 @@ def search_pc_sampling_record(records):
     """
     Search PC sampling records, and group and sort them
     """
+
+    # NB:
+    #  The field stall_reason is vailid only for HW stochastic pc sampling.
+
+    # Todo: might save wavefront count for HW stochastic pc sampling?
+
     grouped_data = defaultdict(
-        lambda: defaultdict(lambda: {"count": 0, "inst_index": None})
+        lambda: defaultdict(
+            lambda: {
+                "count": 0,
+                "inst_index": None,
+                "stall_reason": {
+                    "NONE": 0,
+                    "NO_INSTRUCTION_AVAILABLE": 0,  # No instruction available in the instruction cache.
+                    "ALU_DEPENDENCY": 0,  # ALU dependency not resolved.
+                    "WAITCNT": 0,
+                    "INTERNAL_INSTRUCTION": 0,  # Wave executes an internal instruction.
+                    "BARRIER_WAIT": 0,
+                    "ARBITER_NOT_WIN": 0,  # The instruction did not win the arbiter.
+                    "ARBITER_WIN_EX_STALL": 0,  # Arbiter issued an instruction, but the execution pipe pushed it back from execution.
+                    "OTHER_WAIT": 0,  #  Other types of wait (e.g., wait for XNACK acknowledgment).
+                    "SLEEP_WAIT": 0,
+                    "LAST": 0,
+                },
+            }
+        )
     )
 
     # Populate grouped_data
-    for item in records:
+    for i, item in enumerate(records):
         pc_info = item["record"].get("pc", {})
         code_object_id = pc_info.get("code_object_id")
         code_object_offset = pc_info.get("code_object_offset")
+        snapshot = item["record"].get("snapshot", {})
         inst_index = item.get("inst_index")
 
+        # Todo: opt me
         if (
             code_object_id is not None
             and code_object_offset is not None
             and inst_index is not None
         ):
             grouped_data[code_object_id][code_object_offset]["count"] += 1
+            # NB: the write here could be duplicated. If there is perf issue, We might want to opt it.
             grouped_data[code_object_id][code_object_offset]["inst_index"] = inst_index
+
+            if len(snapshot):
+                # NB: 54 is the length of prefix "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_"
+                grouped_data[code_object_id][code_object_offset]["stall_reason"][
+                    snapshot.get("stall_reason")[54:]
+                ] += 1
+                # print(
+                #     inst_index,
+                #     grouped_data[code_object_id][code_object_offset]["stall_reason"],
+                # )
 
     if len(grouped_data) == 0:
         console_warning("PC sampling: no pc sampling record found!")
         return None
 
+    # print(grouped_data)
+
     # Convert to sorted list of tuples (code_object_id, inst_index, code_object_offset, count)
     sorted_counts = sorted(
         [
-            (code_object_id, info["inst_index"], offset, info["count"])
+            (
+                code_object_id,
+                info["inst_index"],
+                offset,
+                info["count"],
+                # For info["stall_reason"], remove the zero entries, sorting the remaining items by their values in descending order
+                sorted(
+                    ((k, v) for k, v in info["stall_reason"].items() if v > 0),
+                    key=lambda item: item[1],
+                    reverse=True,
+                ),
+            )
             for code_object_id, offsets in grouped_data.items()
             for offset, info in offsets.items()
         ],
@@ -1083,10 +1133,24 @@ def search_pc_sampling_record(records):
 
 
 @demarcate
-def load_pc_sampling_data_per_kernel(file_name, kernel_name):
+def load_pc_sampling_data_per_kernel(
+    method: str, file_name: Path, kernel_name: str, sorting_type: str
+) -> pd.DataFrame:
     """
-    Load PC sampling raw data from json file with given kernel name,
+    Load PC sampling raw data from json file with given method and kernel name,
+    count pc sampling and sort it in the order of compiled asm and associate with kernel source code if available,
     then return df.
+
+    :param method: "host_trap" or "stochastic".
+    :type method: str
+    :param file_name: The pc sampling json file.
+    :type file_name: Path
+    :param kernel_name: The kernel name to be filtered out.
+    :type kernel_name: str
+    :param sorting_type: "offset" or "count".
+    :type sorting_type: str
+    :return: The counted and reordering pc sampling info.
+    :rtype: pd.DataFrame:
     """
     kernel_info_list = search_key_in_json(file_name, "kernel_symbols")
 
@@ -1132,24 +1196,30 @@ def load_pc_sampling_data_per_kernel(file_name, kernel_name):
 
     # print("kernel_info", kernel_info)
 
-    pc_sample_host_trap = search_key_in_json(file_name, "pc_sample_host_trap")
+    pc_sample_key_loc = (
+        search_key_in_json(file_name, "pc_sample_host_trap")
+        if method == "host_trap"
+        else search_key_in_json(file_name, "pc_sample_stochastic")
+    )
 
-    # print(type(pc_sample_host_trap), len(pc_sample_host_trap))
-    # print(pc_sample_host_trap[0]["record"].get("pc", {}).get("code_object_offset"))
-    # print(search_pc_sampling_record(pc_sample_host_trap))
+    # print(type(pc_sample_key_loc), len(pc_sample_key_loc))
+    # print(pc_sample_key_loc[0]["record"].get("pc", {}).get("code_object_offset"))
+    # print(search_pc_sampling_record(pc_sample_key_loc))
 
     df = pd.DataFrame(
-        search_pc_sampling_record(pc_sample_host_trap),
-        columns=["code_object_id", "inst_index", "offset", "count"],
+        search_pc_sampling_record(pc_sample_key_loc),
+        columns=["code_object_id", "inst_index", "offset", "count", "stall_reason"],
     )
 
     df = df[
         (df["code_object_id"] == kernel_info["code_object_id"])
         & (df["offset"] > kernel_info["entry_byte_offset"])
         & (df["offset"] < kernel_info["potential_end_offset"])
-    ][["inst_index", "offset", "count"]]
+    ][["inst_index", "offset", "count", "stall_reason"]]
 
     df["offset"] = df["offset"].apply(lambda x: hex(x))
+
+    # df["stall_reason"] = df["stall_reason"].apply(lambda x: ', '.join(f"{k}: {v}" for k, v in x))
 
     pc_sample_instructions = search_key_in_json(file_name, "pc_sample_instructions")
     # print(pc_sample_instructions)
@@ -1166,11 +1236,29 @@ def load_pc_sampling_data_per_kernel(file_name, kernel_name):
         )
     )
 
-    return df[["source_line", "instruction", "offset", "count"]]
+    # print(df[["source_line", "instruction", "offset", "count", "stall_reason"]])
+
+    if sorting_type == "offset":
+        return (
+            df[["source_line", "instruction", "offset", "count"]]
+            if method == "host_trap"
+            else df[["source_line", "instruction", "offset", "count", "stall_reason"]]
+        )
+    else:  # sort by "count"
+        return (
+            df[["source_line", "instruction", "offset", "count"]].sort_values(
+                by="count", ascending=False
+            )
+            if method == "host_trap"
+            else df[
+                ["source_line", "instruction", "offset", "count", "stall_reason"]
+            ].sort_values(by="count", ascending=False)
+        )
+    # might support sort by stall reason in the future
 
 
 @demarcate
-def load_pc_sampling_data(workload, dir, file_prefix):
+def load_pc_sampling_data(workload, dir, file_prefix, sorting_type):
     """
     Load PC sampling raw data, filter and sort it by specified conditions,
     then return df.
@@ -1179,39 +1267,52 @@ def load_pc_sampling_data(workload, dir, file_prefix):
     if file_prefix.lower() == "none":
         return pd.DataFrame()
 
-    # No kernel filter, return grouped and sorted csv directly
-    if not workload.filter_kernel_ids:
-        # NB: the default file name is subject to changes from rocprofv3/rocprofiler_sdk
+    pc_sampling_method = None
+
+    # NB:
+    #  - The default file name is subject to changes from rocprofv3
+    #  - Prioritize stochastic
+    #  - Alternatively, we could check pc_sampling_method in json
+    csv_file_path = Path.joinpath(Path(dir), file_prefix + "_pc_sampling_stochastic.csv")
+    if csv_file_path.exists():
+        pc_sampling_method = "stochastic"
+    else:
         csv_file_path = Path.joinpath(
             Path(dir), file_prefix + "_pc_sampling_host_trap.csv"
         )
-        if not csv_file_path.exists():
-            console_error("PC sampling: can not read %s " % csv_file_path)
-            return pd.DataFrame()
-        else:
-            df = pd.read_csv(csv_file_path)
-            # Group by 'Instruction_Comment' and count occurrences
-            grouped_counts = (
-                df.groupby("Instruction_Comment")
-                .agg(
-                    count=("Instruction_Comment", "count"),
-                    instruction=("Instruction", "first"),
-                )
-                .reset_index()
-                .rename(columns={"Instruction_Comment": "source_line"})
+        if csv_file_path.exists():
+            pc_sampling_method = "host_trap"
+
+    if pc_sampling_method == None:
+        console_error("PC sampling: can not find %s " % csv_file_path)
+        return pd.DataFrame()
+
+    # No kernel filter, return grouped and sorted csv directly
+    if not workload.filter_kernel_ids:
+
+        df = pd.read_csv(csv_file_path)
+        # Group by 'Instruction_Comment' and count occurrences
+        grouped_counts = (
+            df.groupby("Instruction_Comment")
+            .agg(
+                count=("Instruction_Comment", "count"),
+                instruction=("Instruction", "first"),
             )
+            .reset_index()
+            .rename(columns={"Instruction_Comment": "source_line"})
+        )
 
-            grouped_counts = grouped_counts[["source_line", "instruction", "count"]]
+        grouped_counts = grouped_counts[["source_line", "instruction", "count"]]
 
-            grouped_counts["source_line"] = grouped_counts["source_line"].apply(
-                lambda x: (".../" + Path(x).name)
-            )
+        grouped_counts["source_line"] = grouped_counts["source_line"].apply(
+            lambda x: (".../" + Path(x).name)
+        )
 
-            # Sort by the count of occurrences
-            sorted_counts = grouped_counts.sort_values(by="count", ascending=False)
-            # print(sorted_counts.info)
+        # Sort by the count of occurrences
+        sorted_counts = grouped_counts.sort_values(by="count", ascending=False)
+        # print(sorted_counts.info)
 
-            return sorted_counts
+        return sorted_counts
 
     elif len(workload.filter_kernel_ids) > 1:
         console_error(
@@ -1234,14 +1335,16 @@ def load_pc_sampling_data(workload, dir, file_prefix):
             kernel_name = pd.read_csv(file).loc[
                 workload.filter_kernel_ids[0], "Kernel_Name"
             ]
-            return load_pc_sampling_data_per_kernel(json_file_path, kernel_name)
+            return load_pc_sampling_data_per_kernel(
+                pc_sampling_method, json_file_path, kernel_name, sorting_type
+            )
     else:
         console_warning("PC sampling: No data")
         return pd.DataFrame()
 
 
 @demarcate
-def load_kernel_top(workload, dir):
+def load_kernel_top(workload, dir, args):
     # NB:
     #   - Do pmc_kernel_top.csv loading before eval_metric because we need the kernel names.
     #   - There might be a better way/timing to load raw_csv_table.
@@ -1284,28 +1387,33 @@ def load_kernel_top(workload, dir):
                     f"Couldn't load {file.name}. This may result in missing analysis data."
                 )
         elif "from_pc_sampling" in df.columns:
-            tmp[id] = load_pc_sampling_data(workload, dir, df.loc[0, "from_pc_sampling"])
+            tmp[id] = load_pc_sampling_data(
+                workload,
+                dir,
+                df.loc[0, "from_pc_sampling"],
+                args.pc_sampling_sorting_type,
+            )
             # print("table id", id, "filter_kernel_ids", workload.filter_kernel_ids)
 
     workload.dfs.update(tmp)
 
 
 @demarcate
-def load_table_data(workload, dir, is_gui, debug, verbose, skipKernelTop=False):
+def load_table_data(workload, dir, is_gui, args, skipKernelTop=False):
     """
     - Load data for all "raw_csv_table"
     - Load dat for "pc_sampling_table"
     - Calculate mertric value for all "metric_table"
     """
     if not skipKernelTop:
-        load_kernel_top(workload, dir)
+        load_kernel_top(workload, dir, args)
 
     eval_metric(
         workload.dfs,
         workload.dfs_type,
         workload.sys_info.iloc[0],
-        apply_filters(workload, dir, is_gui, debug),
-        debug,
+        apply_filters(workload, dir, is_gui, args.debug),
+        args.debug,
     )
 
 

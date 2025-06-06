@@ -30,7 +30,7 @@ from pathlib import Path
 
 
 def print_avail_arch(avail_arch: list):
-    ret_str = "\t\t\tList all available metrics for analysis on specified arch:"
+    ret_str = "\t\tList all available metrics for analysis on specified arch:"
     for arch in avail_arch:
         ret_str += "\n\t\t\t   {}".format(arch)
     return ret_str
@@ -325,12 +325,21 @@ Examples:
     )
 
     profile_group.add_argument(
+        "--pc-sampling-method",
+        required=False,
+        metavar="",
+        dest="pc_sampling_method",
+        default="stochastic",
+        help="\t\t\tSet the method of pc sampling, stochastic or host_trap. Support stochastic only >= MI300",
+    )
+
+    profile_group.add_argument(
         "--pc-sampling-interval",
         required=False,
         metavar="",
         dest="pc_sampling_interval",
-        default=1,
-        help="\t\t\tSet the interval of pc sampling in microsecond (DEFAULT: 1).",
+        default=1048576,
+        help="\t\t\tSet the interval of pc sampling.\n\t\t\t   For stochastic sampling, the interval is in cycles.\n\t\t\t   For host_trap sampling, the interval is in microsecond (DEFAULT: 1048576).",
     )
 
     profile_group.add_argument(
@@ -395,7 +404,7 @@ Examples:
         nargs="+",
         type=str,
         default=["FP32"],
-        help="Choose datatypes to view roofline PDFs for: (DEFAULT: FP32)\n\t\t\t   FP4\n\t\t\t FP6\n\t\t\t  FP8\n\t\t\t   FP16\n\t\t\t   BF16\n\t\t\t   FP32\n\t\t\t   FP64\n\t\t\t   I8\n\t\t\t  I32\n\t\t\t I64\n\t\t\t ",
+        help="\t\t\tChoose datatypes to view roofline PDFs for: (DEFAULT: FP32)\n\t\t\t   FP4\n\t\t\t   FP6\n\t\t\t   FP8\n\t\t\t   FP16\n\t\t\t   BF16\n\t\t\t   FP32\n\t\t\t   FP64\n\t\t\t   I8\n\t\t\t   I32\n\t\t\t   I64\n\t\t\t ",
     )
 
     # roofline_group.add_argument('-w', '--workgroups', required=False, default=-1, type=int, help="\t\t\tNumber of kernel workgroups (DEFAULT: 1024)")
@@ -584,7 +593,7 @@ Examples:
         required=False,
         default=False,
         action="store_true",
-        help="\t\t\tMode of spatial multiplexing.",
+        help="\t\tMode of spatial multiplexing.",
     )
     analyze_group.add_argument(
         "-o",
@@ -614,7 +623,17 @@ Examples:
         nargs="+",
         type=str,
         default=["FP32"],
-        help="\t\t\tChoose datatypes to view roofline PDFs for: (DEFAULT: FP32)\n\t\t\t   FP4\n\t\t\t   FP6\n\t\t\t FP8\n\t\t\t   FP16\n\t\t\t   BF16\n\t\t\t   FP32\n\t\t\t   FP64\n\t\t\t   I8\n\t\t\t  I32\n\t\t\t I64\n\t\t\t ",
+        help="\t\tChoose datatypes to view roofline PDFs for: (DEFAULT: FP32)\n\t\t\t   FP4\n\t\t\t   FP6\n\t\t\t   FP8\n\t\t\t   FP16\n\t\t\t   BF16\n\t\t\t   FP32\n\t\t\t   FP64\n\t\t\t   I8\n\t\t\t   I32\n\t\t\t   I64\n\t\t\t ",
+    )
+
+    analyze_group.add_argument(
+        "--pc-sampling-sorting-type",
+        required=False,
+        metavar="",
+        dest="pc_sampling_sorting_type",
+        default="offset",
+        type=str,
+        help="\t\tSet the sorting type of pc sampling: offset or count (DEFAULT: offset).",
     )
 
     analyze_advanced_group.add_argument(
