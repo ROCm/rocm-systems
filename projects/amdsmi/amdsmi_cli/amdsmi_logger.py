@@ -325,7 +325,7 @@ class AMDSMILogger():
             elif isinstance(value, list):
                 if not value:
                     yaml_string += "  " * indent + f"{key}: N/A\n"
-                elif isinstance(value, dict):
+                else:
                     yaml_string += "  " * indent + f"{key}:\n"
                 for item in value:
                     if isinstance(item, dict):
