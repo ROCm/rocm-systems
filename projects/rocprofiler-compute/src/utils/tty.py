@@ -28,7 +28,7 @@ from pathlib import Path
 import pandas as pd
 from tabulate import tabulate
 
-from utils import parser
+from utils import mem_chart, parser
 from utils.logger import console_log, console_warning
 from utils.utils import convert_metric_id_to_panel_idx
 
@@ -292,12 +292,28 @@ def show_all(args, runs, archConfigs, output, profiling_config):
                         and table_config["columnwise"] == True
                     )
                     if not is_empty_columns_exist:
-                        ss += (
-                            get_table_string(
-                                df, transpose=transpose, decimal=args.decimal
+
+                        # enable mem_chart only with single run
+                        if (
+                            "cli_style" in table_config
+                            and table_config["cli_style"] == "mem_chart"
+                            and len(runs) == 1
+                        ):
+                            ss += mem_chart.plot_mem_chart(
+                                "",
+                                args.normal_unit,
+                                pd.DataFrame([df["Metric"], df["Value"]])
+                                .transpose()
+                                .set_index("Metric")
+                                .to_dict()["Value"],
                             )
-                            + "\n"
-                        )
+                        else:
+                            ss += (
+                                get_table_string(
+                                    df, transpose=transpose, decimal=args.decimal
+                                )
+                                + "\n"
+                            )
 
         if ss:
             print("\n" + "-" * 80, file=output)

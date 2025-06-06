@@ -58,6 +58,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Setting ROCPROF=rocprofiler-sdk environment variable will use rocprofiler-sdk C++ library instead of rocprofv3 python script
   * Add --rocprofiler-sdk-library-path runtime option to choose the path to rocprofiler-sdk library to be used
 
+* Support MEM chart on CLI(single run)
+
 ### Changed
 
 * Change the default rocprof version to v3 when environment variable "ROCPROF" is not set
