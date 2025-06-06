@@ -61,6 +61,9 @@ target_link_libraries(
     PRIVATE pc-sampling-integration-test-client Threads::Threads
             rocprofiler-sdk::tests-build-flags)
 
+# Check if PC sampling is disabled and whether we should disable the test
+rocprofiler_sdk_pc_sampling_disabled(IS_PC_SAMPLING_DISABLED)
+
 add_test(NAME pc-sampling-integration-test
          COMMAND $<TARGET_FILE:pc-sampling-integration-test>)
 
@@ -77,4 +80,6 @@ set_tests_properties(
                ENVIRONMENT
                "${pc-sampling-integration-test-env}"
                FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               "${IS_PC_SAMPLING_DISABLED}")
