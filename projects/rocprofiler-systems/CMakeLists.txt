@@ -179,7 +179,6 @@ rocprofiler_systems_add_option(ROCPROFSYS_USE_MPI "Enable MPI support" OFF)
 rocprofiler_systems_add_option(ROCPROFSYS_USE_ROCM "Enable ROCm support" ON)
 rocprofiler_systems_add_option(ROCPROFSYS_USE_PAPI "Enable HW counter support via PAPI"
                                ON)
-rocprofiler_systems_add_option(ROCPROFSYS_USE_RCCL "Enable RCCL support" OFF)
 rocprofiler_systems_add_option(
     ROCPROFSYS_USE_MPI_HEADERS
     "Enable wrapping MPI functions w/o enabling MPI dependency" ON)
@@ -207,12 +206,6 @@ elseif("$ENV{ROCPROFSYS_CI}")
             STATUS
             "Ignoring values of ROCPROFSYS_PYTHON_ENVS and/or ROCPROFSYS_PYTHON_PREFIX")
     endif()
-endif()
-
-if(NOT ROCPROFSYS_USE_ROCM)
-    set(ROCPROFSYS_USE_RCCL
-        OFF
-        CACHE BOOL "Disabled via ROCPROFSYS_USE_ROCM=OFF" FORCE)
 endif()
 
 if(ROCPROFSYS_BUILD_TESTING)

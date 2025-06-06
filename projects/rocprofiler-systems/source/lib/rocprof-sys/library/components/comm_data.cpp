@@ -298,6 +298,8 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
 #endif
 
 #if defined(ROCPROFSYS_USE_RCCL)
+// Kept for reference, but now gathered throught the SDK callbacks.
+
 // ncclReduce
 void
 comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, const void*,
@@ -403,6 +405,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, const v
 }
 
 // ncclAllGather
+// ncclAllToAll
 void
 comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, const void*,
                  size_t count, ncclDataType_t datatype, ncclComm_t, hipStream_t)

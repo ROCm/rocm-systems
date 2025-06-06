@@ -1,8 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020, The Regents of the University of California,
-// through Lawrence Berkeley National Laboratory (subject to receipt of any
-// required approvals from the U.S. Dept. of Energy).  All rights reserved.
+// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,34 +22,22 @@
 
 #pragma once
 
-#include "core/defines.hpp"
+#include <rocprofiler-sdk/buffer_tracing.h>
+#include <rocprofiler-sdk/callback_tracing.h>
+// #include <rocprofiler-sdk/cxx/hash.hpp>
+// #include <rocprofiler-sdk/cxx/name_info.hpp>
+// #include <rocprofiler-sdk/cxx/operators.hpp>
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/registration.h>
 
 namespace rocprofsys
 {
-namespace rcclp
+namespace rocprofiler_sdk
 {
 void
-configure();
+tool_tracing_callback_rccl(rocprofiler_callback_tracing_record_t record,
+                           uint64_t begin_ts, uint64_t end_ts);
 
-void
-setup();
+}  // namespace rocprofiler_sdk
 
-void
-shutdown();
-
-#if !defined(ROCPROFSYS_USE_RCCL) ||                                                     \
-    (defined(ROCPROFSYS_USE_RCCL) && ROCPROFSYS_USE_RCCL == 0)
-inline void
-configure()
-{}
-
-inline void
-setup()
-{}
-
-inline void
-shutdown()
-{}
-#endif
-}  // namespace rcclp
 }  // namespace rocprofsys

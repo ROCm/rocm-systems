@@ -730,11 +730,10 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             }
         });
 
-    std::set<std::string> _backend_choices = {
-        "all",      "kokkosp",         "mpip",        "ompt",
-        "rcclp",    "amd-smi",         "mutex-locks", "spin-locks",
-        "rw-locks", "rocprofiler-sdk", "rocm"
-    };
+    std::set<std::string> _backend_choices = { "all",         "kokkosp",    "mpip",
+                                               "ompt",        "rcclp",      "amd-smi",
+                                               "mutex-locks", "spin-locks", "rw-locks",
+                                               "rocm" };
 
 #if !defined(ROCPROFSYS_USE_MPI) && !defined(ROCPROFSYS_USE_MPI_HEADERS)
     _backend_choices.erase("mpip");
@@ -744,14 +743,10 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
     _backend_choices.erase("ompt");
 #endif
 
-#if !defined(ROCPROFSYS_USE_RCCL)
-    _backend_choices.erase("rcclp");
-#endif
-
 #if !defined(ROCPROFSYS_USE_ROCM)
     _backend_choices.erase("rocm");
     _backend_choices.erase("amd-smi");
-    _backend_choices.erase("rocprofiler-sdk");
+    _backend_choices.erase("rcclp");
 #endif
 
     parser.start_group("BACKEND OPTIONS",

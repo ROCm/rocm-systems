@@ -1359,6 +1359,14 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
     _config->find("ROCPROFSYS_USE_AMD_SMI")->second->set_hidden(true);
     for(const auto& itr : _config->disable_category("amd_smi"))
         _config->find(itr)->second->set_hidden(true);
+
+    _config->find("ROCPROFSYS_USE_RCCLP")->second->set_hidden(true);
+    for(const auto& itr : _config->disable_category("rcclp"))
+        _config->find(itr)->second->set_hidden(true);
+
+    _config->find("ROCPROFSYS_USE_ROCM")->second->set_hidden(true);
+    for(const auto& itr : _config->disable_category("rocm"))
+        _config->find(itr)->second->set_hidden(true);
 #endif
 
 #if defined(ROCPROFSYS_USE_OMPT) || ROCPROFSYS_USE_OMPT == 0

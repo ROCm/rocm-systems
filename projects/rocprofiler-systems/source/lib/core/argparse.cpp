@@ -562,10 +562,9 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _data.processed_environs.emplace("periods");
     }
 
-    strset_t _backend_choices = {
-        "all",     "kokkosp",         "mpip",        "ompt",       "rcclp",
-        "amd-smi", "rocprofiler-sdk", "mutex-locks", "spin-locks", "rw-locks"
-    };
+    strset_t _backend_choices = { "all",        "kokkosp", "mpip", "ompt",
+                                  "rcclp",      "amd-smi", "rocm", "mutex-locks",
+                                  "spin-locks", "rw-locks" };
 
 #if !defined(ROCPROFSYS_USE_MPI) && !defined(ROCPROFSYS_USE_MPI_HEADERS)
     _backend_choices.erase("mpip");
@@ -575,14 +574,10 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
     _backend_choices.erase("ompt");
 #endif
 
-#if !defined(ROCPROFSYS_USE_RCCL)
-    _backend_choices.erase("rcclp");
-#endif
-
 #if !defined(ROCPROFSYS_USE_ROCM)
     _backend_choices.erase("amd-smi");
-    _backend_choices.erase("rocprofiler-sdk");
     _backend_choices.erase("rocm");
+    _backend_choices.erase("rcclp");
 #endif
 
     if(gpu::device_count() == 0)
@@ -590,12 +585,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         // remove GPU-specific backends
         _backend_choices.erase("rcclp");
         _backend_choices.erase("amd-smi");
-        _backend_choices.erase("rocprofiler-sdk");
         _backend_choices.erase("rocm");
-
-#if defined(ROCPROFSYS_USE_RCCL)
-        update_env(_data, "ROCPROFSYS_USE_RCCLP", false);
-#endif
 
 #if defined(ROCPROFSYS_USE_ROCM)
         update_env(_data, "ROCPROFSYS_USE_AMD_SMI", false);

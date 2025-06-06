@@ -17,9 +17,6 @@ rocprofiler_systems_add_interface_library(
     "Provides flags and libraries for Dyninst (dynamic instrumentation)")
 rocprofiler_systems_add_interface_library(rocprofiler-systems-rocm
                                           "Provides flags and libraries for ROCm")
-rocprofiler_systems_add_interface_library(
-    rocprofiler-systems-rccl
-    "Provides flags for ROCm Communication Collectives Library (RCCL)")
 rocprofiler_systems_add_interface_library(rocprofiler-systems-mpi
                                           "Provides MPI or MPI headers")
 rocprofiler_systems_add_interface_library(rocprofiler-systems-libva
@@ -47,7 +44,6 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-compile-definition
 # libraries with relevant compile definitions
 set(ROCPROFSYS_EXTENSION_LIBRARIES
     rocprofiler-systems::rocprofiler-systems-rocm
-    rocprofiler-systems::rocprofiler-systems-rccl
     rocprofiler-systems::rocprofiler-systems-bfd
     rocprofiler-systems::rocprofiler-systems-mpi
     rocprofiler-systems::rocprofiler-systems-ptl
@@ -183,19 +179,6 @@ if(ROCPROFSYS_USE_ROCM)
 
     find_package(amd-smi ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
     target_link_libraries(rocprofiler-systems-rocm INTERFACE amd-smi::amd-smi)
-endif()
-
-# ----------------------------------------------------------------------------------------#
-#
-# RCCL
-#
-# ----------------------------------------------------------------------------------------#
-
-if(ROCPROFSYS_USE_RCCL)
-    find_package(RCCL-Headers ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
-    target_link_libraries(rocprofiler-systems-rccl INTERFACE roc::rccl-headers)
-    rocprofiler_systems_target_compile_definitions(rocprofiler-systems-rccl
-                                                   INTERFACE ROCPROFSYS_USE_RCCL)
 endif()
 
 # ----------------------------------------------------------------------------------------#
