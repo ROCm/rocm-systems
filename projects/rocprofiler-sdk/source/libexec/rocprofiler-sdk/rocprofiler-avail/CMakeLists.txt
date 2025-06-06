@@ -23,6 +23,7 @@
 rocprofiler_activate_clang_tidy()
 
 add_library(rocprofv3-list-avail SHARED)
+add_library(rocprofiler-sdk::rocprofv3-list-avail ALIAS rocprofv3-list-avail)
 target_sources(rocprofv3-list-avail PRIVATE rocprofv3_avail.cpp)
 
 target_link_libraries(
@@ -30,8 +31,15 @@ target_link_libraries(
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-shared-library
             rocprofiler-sdk::rocprofiler-sdk-headers
             rocprofiler-sdk::rocprofiler-sdk-build-flags
+            rocprofiler-sdk::rocprofiler-sdk-memcheck
             rocprofiler-sdk::rocprofiler-sdk-common-library
-            rocprofiler-sdk::rocprofiler-sdk-cereal)
+            rocprofiler-sdk::rocprofiler-sdk-cereal
+            rocprofiler-sdk::rocprofiler-sdk-perfetto
+            rocprofiler-sdk::rocprofiler-sdk-output-library
+            rocprofiler-sdk::rocprofiler-sdk-drm
+            rocprofiler-sdk::rocprofiler-sdk-dl
+            rocprofiler-sdk::rocprofiler-sdk-dw
+            rocprofiler-sdk::rocprofiler-sdk-amd-comgr)
 
 set_target_properties(
     rocprofv3-list-avail

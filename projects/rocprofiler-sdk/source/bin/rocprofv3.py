@@ -1321,11 +1321,25 @@ def run(app_args, args, **kwargs):
 
     if args.list_avail:
         update_env("ROCPROFILER_PC_SAMPLING_BETA_ENABLED", "on")
-        path = os.path.join(f"{ROCM_DIR}", "bin/rocprofv3_avail")
+        path = os.path.join(f"{ROCM_DIR}", "bin/rocprofv3-avail")
         if app_args:
-            exit_code = subprocess.check_call([sys.executable, path], env=app_env)
+            exit_code = subprocess.check_call(
+                [sys.executable, path, "info"],
+                env=app_env,
+            )
+            if exit_code != 0:
+                fatal_error("rocprofv3-avail exit with error")
+
+            exit_code = subprocess.check_call(
+                [sys.executable, path, "info", "--pc-sampling"],
+                env=app_env,
+            )
         else:
-            app_args = [sys.executable, path]
+            app_args = [sys.executable, path, "info"]
+            exit_code = subprocess.check_call(
+                [sys.executable, path, "info", "--pc-sampling"],
+                env=app_env,
+            )
 
     elif not app_args and not args.echo:
         log_config(app_env)

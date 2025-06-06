@@ -278,23 +278,23 @@ read_map(const std::string& fname)
         return data;
     }
 
-    auto ifs = std::ifstream{fname};
+    auto ifs = std::ifstream(fname);
+
     if(!ifs || !ifs.good())
     {
         ROCP_CI_LOG(WARNING) << fmt::format("file '{}' cannot be read", fname);
         return data;
     }
-
     auto last_label = std::string{};
-    while(true)
+    while(ifs && ifs.good())
     {
         auto label = std::string{};
         ifs >> label;
-        if(ifs.eof() || label.empty()) break;
+        if(ifs.fail() || ifs.eof() || label.empty()) break;
 
         auto entry = std::string{};
         ifs >> entry;
-        if(ifs.eof())
+        if(ifs.fail() || ifs.eof())
         {
             ROCP_CI_LOG(WARNING) << fmt::format(
                 "unexpected file format in '{}' at {}", fname, label);

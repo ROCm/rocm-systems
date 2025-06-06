@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "rocprofv3_avail.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
@@ -28,13 +29,16 @@
 #include "lib/common/synchronized.hpp"
 #include "lib/common/units.hpp"
 #include "lib/common/utility.hpp"
+#include "lib/output/agent_info.hpp"
+#include "lib/output/counter_info.hpp"
+#include "lib/output/metadata.hpp"
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/defines.h>
-#include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
+#include <rocprofiler-sdk/cxx/serialization.hpp>
 
 #include <fmt/core.h>
 #include <unistd.h>
@@ -46,43 +50,10 @@
 #include <unordered_set>
 #include <vector>
 
-auto destructors = new std::vector<std::function<void()>>{};
-
 namespace common = ::rocprofiler::common;
+namespace tool   = ::rocprofiler::tool;
 
-namespace
-{
-auto pc_sampling_method = std::deque<std::string>{
-    "ROCPROFILER_PC_SAMPLING_METHOD_NONE",
-    "ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC",
-    "ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP",
-    "ROCPROFILER_PC_SAMPLING_METHOD_LAST",
-};
-
-auto pc_sampling_unit = std::deque<std::string>{
-    "ROCPROFILER_PC_SAMPLING_UNIT_NONE",
-    "ROCPROFILER_PC_SAMPLING_UNIT_INSTRUCTIONS",
-    "ROCPROFILER_PC_SAMPLING_UNIT_CYCLES",
-    "ROCPROFILER_PC_SAMPLING_UNIT_TIME",
-    "ROCPROFILER_PC_SAMPLING_UNIT_LAST",
-};
-}  // namespace
-
-using counter_info_t      = std::vector<std::vector<std::string>>;
-using pc_sample_info_t    = std::vector<std::vector<std::string>>;
-auto agent_counter_info   = std::unordered_map<uint64_t, counter_info_t>{};
-auto agent_pc_sample_info = std::unordered_map<uint64_t, pc_sample_info_t>{};
-// auto agent_configs_info = std::unordered_map<uint64_t, config_info_t>{};
-using counter_dimension_info_t =
-    std::unordered_map<uint64_t, std::vector<std::vector<std::string>>>;
-auto                  counter_dim_info = counter_dimension_info_t{};
-std::vector<uint64_t> agent_node_ids;
-
-constexpr size_t pc_config_fields = 4, method_idx = 0, unit_idx = 1, min_interval_idx = 2,
-                 max_interval_idx  = 3;
-constexpr size_t dimensions_fields = 3, dim_id_idx = 0, dim_name_idx = 1, size_idx = 2;
-constexpr size_t counter_fields = 5, counter_id_idx = 0, name_idx = 1, description_idx = 2,
-                 is_derived_idx = 3, block_idx = 4, expression_idx = 4;
+using JSONOutputArchive = cereal::MinimalJSONOutputArchive;
 
 #define ROCPROFILER_CALL(result, msg)                                                              \
     {                                                                                              \
@@ -98,55 +69,9 @@ constexpr size_t counter_fields = 5, counter_id_idx = 0, name_idx = 1, descripti
             std::stringstream errmsg{};                                                            \
             errmsg << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] " << msg " failure ("  \
                    << status_msg << ")";                                                           \
-            throw std::runtime_error(errmsg.str());                                                \
+            ROCP_FATAL << errmsg.str()                                                             \
         }                                                                                          \
     }
-
-using counter_vec_t = std::vector<rocprofiler_counter_id_t>;
-
-ROCPROFILER_EXTERN_C_INIT
-void
-avail_tool_init() ROCPROFILER_EXPORT;
-size_t
-get_number_of_agents() ROCPROFILER_EXPORT;
-uint64_t
-get_agent_node_id(int idx) ROCPROFILER_EXPORT;
-int
-get_number_of_counters(uint64_t node_id) ROCPROFILER_EXPORT;
-void
-get_counters_info(uint64_t     node_id,
-                  int          idx,
-                  uint64_t*    counter_id,
-                  const char** counter_name,
-                  const char** counter_description,
-                  uint8_t*     is_derived) ROCPROFILER_EXPORT;
-void
-get_counter_expression(uint64_t node_id, int idx, const char** counter_expr) ROCPROFILER_EXPORT;
-
-void
-get_counter_block(uint64_t node_id, int idx, const char** counter_block) ROCPROFILER_EXPORT;
-
-int
-get_number_of_dimensions(int counter_id) ROCPROFILER_EXPORT;
-
-void
-get_counter_dimension(uint64_t     counter_id,
-                      uint64_t     dimension_idx,
-                      uint64_t*    dimension_id,
-                      const char** dimension_name,
-                      uint64_t*    dimension_instance) ROCPROFILER_EXPORT;
-
-int
-get_number_of_pc_sample_configs(uint64_t node_id) ROCPROFILER_EXPORT;
-
-void
-get_pc_sample_config(uint64_t     node_id,
-                     int          idx,
-                     const char** method,
-                     const char** unit,
-                     uint64_t*    min_interval,
-                     uint64_t*    max_interval) ROCPROFILER_EXPORT;
-ROCPROFILER_EXTERN_C_FINI
 
 void
 initialize_logging()
@@ -156,243 +81,223 @@ initialize_logging()
     FLAGS_colorlogtostderr = true;
 }
 
-rocprofiler_status_t
-pc_configuration_callback(const rocprofiler_pc_sampling_configuration_t* configs,
-                          long unsigned int                              num_config,
-                          void*                                          user_data)
+tool::metadata&
+get_metadata()
 {
-    auto* avail_configs = static_cast<std::vector<std::vector<std::string>>*>(user_data);
-
-    for(size_t i = 0; i < num_config; i++)
-    {
-        auto config = std::vector<std::string>{};
-        config.reserve(pc_config_fields);
-        auto it = config.begin();
-        config.insert(it + method_idx, pc_sampling_method.at(configs[i].method));
-        config.insert(it + unit_idx, pc_sampling_unit.at(configs[i].unit));
-        config.insert(it + min_interval_idx, std::to_string(configs[i].min_interval));
-        config.insert(it + max_interval_idx, std::to_string(configs[i].max_interval));
-        avail_configs->push_back(config);
-    }
-
-    return ROCPROFILER_STATUS_SUCCESS;
+    static auto tool_metadata = std::make_unique<tool::metadata>(tool::metadata::inprocess{});
+    auto        _once         = std::once_flag{};
+    std::call_once(_once, [&]() {
+        initialize_logging();
+        tool_metadata->init(tool::metadata::inprocess{});
+    });
+    return *tool_metadata;
 }
 
-rocprofiler_status_t
-dimensions_info_callback(rocprofiler_counter_id_t /*id*/,
-                         const rocprofiler_counter_record_dimension_info_t* dim_info,
-                         long unsigned int                                  num_dims,
-                         void*                                              user_data)
+tool::agent_info_map_t
+get_agents()
 {
-    auto* dimensions_info =
-        static_cast<std::vector<rocprofiler_counter_record_dimension_info_t>*>(user_data);
-    dimensions_info->reserve(num_dims);
-    for(size_t j = 0; j < num_dims; j++)
-        dimensions_info->emplace_back(dim_info[j]);
-    return ROCPROFILER_STATUS_SUCCESS;
+    return get_metadata().agents_map;
 }
 
-rocprofiler_status_t
-iterate_agent_counters_callback(rocprofiler_agent_id_t,
-                                rocprofiler_counter_id_t* counters,
-                                size_t                    num_counters,
-                                void*                     user_data)
+tool::agent_counter_info_map_t
+get_agent_counters()
 {
-    auto* _counters_info = static_cast<std::vector<std::vector<std::string>>*>(user_data);
-    for(size_t i = 0; i < num_counters; i++)
-    {
-        auto _info           = rocprofiler_counter_info_v1_t{};
-        auto dimensions_data = std::vector<rocprofiler_counter_record_dimension_info_t>{};
-        ROCPROFILER_CALL(
-            rocprofiler_query_counter_info(
-                counters[i], ROCPROFILER_COUNTER_INFO_VERSION_1, static_cast<void*>(&_info)),
-            "Could not query counter_id");
-
-        dimensions_data = std::vector<rocprofiler_counter_record_dimension_info_t>{
-            _info.dimensions, _info.dimensions + _info.dimensions_count};
-        auto dimensions_info = std::vector<std::vector<std::string>>{};
-        dimensions_info.reserve(dimensions_data.size());
-        for(auto& dim : dimensions_data)
-        {
-            auto dimensions = std::vector<std::string>{};
-            dimensions.reserve(dimensions_fields);
-            auto it = dimensions.begin();
-            dimensions.insert(it + dim_id_idx, std::to_string(dim.id));
-            dimensions.insert(it + dim_name_idx, std::string(dim.name));
-            dimensions.insert(it + size_idx, std::to_string(dim.instance_size - 1));
-            dimensions_info.emplace_back(dimensions);
-        }
-        counter_dim_info.emplace(counters[i].handle, dimensions_info);
-
-        auto counter = std::vector<std::string>{};
-
-        if(_info.is_derived)
-        {
-            counter.reserve(counter_fields);
-            auto it = counter.begin();
-            counter.insert(it + counter_id_idx, std::to_string(_info.id.handle));
-            counter.insert(it + name_idx, std::string(_info.name));
-            counter.insert(it + description_idx, std::string(_info.description));
-            counter.insert(it + is_derived_idx, std::to_string(_info.is_derived));
-            counter.insert(it + expression_idx, std::string(_info.expression));
-        }
-        else
-        {
-            counter.reserve(counter_fields);
-            auto it = counter.begin();
-            counter.insert(it + counter_id_idx, std::to_string(_info.id.handle));
-            counter.insert(it + name_idx, std::string(_info.name));
-            counter.insert(it + description_idx, std::string(_info.description));
-            counter.insert(it + is_derived_idx, std::to_string(_info.is_derived));
-            counter.insert(it + block_idx, std::string(_info.block));
-        }
-
-        _counters_info->emplace_back(counter);
-    }
-    return ROCPROFILER_STATUS_SUCCESS;
+    return get_metadata().agent_counter_info;
 }
 
-rocprofiler_status_t
-list_avail_configs(rocprofiler_agent_version_t, const void** agents, size_t num_agents, void*)
+const tool::tool_counter_info*
+get_counter_info(rocprofiler_counter_id_t counter_id)
 {
-    for(size_t idx = 0; idx < num_agents; idx++)
-    {
-        const auto* agent = static_cast<const rocprofiler_agent_v0_t*>(agents[idx]);
-        if(agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-        {
-            auto counters_v = counter_vec_t{};
-
-            // TODO(aelwazir): To be changed back to use node id once ROCR fixes
-            // the hsa_agents to use the real node id
-            uint32_t                              node_id           = agent->node_id;
-            std::vector<std::vector<std::string>> configs           = {};
-            std::vector<std::vector<std::string>> _counter_dim_info = {};
-            agent_node_ids.emplace_back(node_id);
-            rocprofiler_query_pc_sampling_agent_configurations(
-                agent->id, pc_configuration_callback, &configs);
-            ROCPROFILER_CALL(
-                rocprofiler_iterate_agent_supported_counters(
-                    agent->id, iterate_agent_counters_callback, (void*) (&_counter_dim_info)),
-                "Iterate rocprofiler counters");
-            if(!_counter_dim_info.empty()) agent_counter_info.emplace(node_id, _counter_dim_info);
-            if(!configs.empty())
-
-            {
-                agent_pc_sample_info.emplace(node_id, configs);
-            }
-        }
-    }
-
-    return ROCPROFILER_STATUS_SUCCESS;
+    const auto* counter_info = get_metadata().get_counter_info(counter_id);
+    if(!counter_info) ROCP_FATAL << "Invalid counter handle";
+    return counter_info;
 }
+
+auto agent_json = std::map<rocprofiler_agent_id_t, std::string>{};
 
 ROCPROFILER_EXTERN_C_INIT
-
-void
-avail_tool_init()
-{
-    initialize_logging();
-    ROCPROFILER_CALL(rocprofiler_query_available_agents(ROCPROFILER_AGENT_INFO_VERSION_0,
-                                                        list_avail_configs,
-                                                        sizeof(rocprofiler_agent_t),
-                                                        nullptr),
-                     "Iterate rocporfiler agents");
-}
 
 size_t
 get_number_of_agents()
 {
-    return agent_node_ids.size();
-}
-
-uint64_t
-get_agent_node_id(int idx)
-{
-    return agent_node_ids.at(idx);
-}
-
-int
-get_number_of_counters(uint64_t node_id)
-{
-    if(agent_counter_info.find(node_id) != agent_counter_info.end())
-        return agent_counter_info.at(node_id).size();
-    else
-        return 0;
+    return get_agents().size();
 }
 
 void
-get_counters_info(uint64_t     node_id,
-                  int          counter_idx,
-                  uint64_t*    counter_id,
-                  const char** counter_name,
-                  const char** counter_description,
-                  uint8_t*     is_derived)
+agent_handles(uint64_t* agent_handles, size_t num_agents)
 {
-    if(agent_counter_info.find(node_id) == agent_counter_info.end()) return;
-    *counter_id =
-        std::stoull(agent_counter_info.at(node_id).at(counter_idx).at(0).c_str(), nullptr, 10);
-    *counter_name        = agent_counter_info.at(node_id).at(counter_idx).at(1).c_str();
-    *counter_description = agent_counter_info.at(node_id).at(counter_idx).at(2).c_str();
-    *is_derived          = std::stoi(agent_counter_info.at(node_id).at(counter_idx).at(3).c_str());
+    auto agent_info = get_agents();
+    if(num_agents != agent_info.size()) ROCP_FATAL << "Incorrect number of agents";
+    auto agent_ids = std::vector<uint64_t>{};
+    std::for_each(agent_info.begin(), agent_info.end(), [&agent_ids](auto& agent) {
+        agent_ids.emplace_back(agent.first.handle);
+    });
+    std::copy(agent_ids.begin(), agent_ids.end(), agent_handles);
+}
+
+size_t
+get_number_of_agent_counters(uint64_t agent_handle)
+{
+    auto agent_id           = rocprofiler_agent_id_t{agent_handle};
+    auto agent_counter_info = get_agent_counters();
+    if(agent_counter_info.find(agent_id) != agent_counter_info.end())
+        return agent_counter_info.at(agent_id).size();
+    return 0;
 }
 
 void
-get_counter_block(uint64_t node_id, int counter_idx, const char** counter_block)
+agent_counter_handles(uint64_t* counter_handles,
+                      uint64_t  agent_handle,
+                      size_t    number_of_agent_counters)
 {
-    if(agent_counter_info.find(node_id) == agent_counter_info.end()) return;
-    *counter_block = agent_counter_info.at(node_id).at(counter_idx).at(4).c_str();
+    auto agent_counter_info = get_agent_counters();
+    auto itr                = agent_counter_info.find(rocprofiler_agent_id_t{agent_handle});
+
+    if(itr == agent_counter_info.end()) return;
+
+    if(number_of_agent_counters != itr->second.size()) ROCP_FATAL << "Incorrect number of agents";
+    auto counter_ids = std::vector<uint64_t>{};
+
+    std::for_each(itr->second.begin(), itr->second.end(), [&counter_ids](auto& counter) {
+        counter_ids.emplace_back(counter.id.handle);
+    });
+    std::copy(counter_ids.begin(), counter_ids.end(), counter_handles);
 }
 
 void
-get_counter_expression(uint64_t node_id, int idx, const char** counter_expr)
+counter_info(uint64_t     counter_handle,
+             const char** counter_name,
+             const char** counter_description,
+             uint8_t*     is_derived,
+             uint8_t*     is_hw_constant)
 {
-    if(agent_counter_info.find(node_id) == agent_counter_info.end()) return;
-    *counter_expr = agent_counter_info.at(node_id).at(idx).at(4).c_str();
-}
+    const auto* counter_info = get_counter_info(rocprofiler_counter_id_t{counter_handle});
 
-int
-get_number_of_dimensions(int counter_id)
-{
-    if(counter_dim_info.find(counter_id) == counter_dim_info.end()) return 0;
-    return counter_dim_info.at(counter_id).size();
-}
-void
-get_counter_dimension(uint64_t     counter_id,
-                      uint64_t     dimension_idx,
-                      uint64_t*    dimension_id,
-                      const char** dimension_name,
-                      uint64_t*    dimension_instance)
-{
-    if(counter_dim_info.find(counter_id) == counter_dim_info.end()) return;
-    *dimension_id =
-        std::stoull(counter_dim_info.at(counter_id).at(dimension_idx).at(0).c_str(), nullptr, 10);
-    *dimension_name = counter_dim_info.at(counter_id).at(dimension_idx).at(1).c_str();
-    *dimension_instance =
-        std::stoull(counter_dim_info.at(counter_id).at(dimension_idx).at(2).c_str(), nullptr, 10);
-}
-
-int
-get_number_of_pc_sample_configs(uint64_t node_id)
-{
-    if(agent_pc_sample_info.find(node_id) == agent_pc_sample_info.end()) return 0;
-    return agent_pc_sample_info.at(node_id).size();
+    *counter_name        = counter_info->name;
+    *counter_description = counter_info->description;
+    *is_derived          = counter_info->is_derived;
+    *is_hw_constant      = counter_info->is_constant;
 }
 
 void
-get_pc_sample_config(uint64_t     node_id,
-                     int          config_idx,
-                     const char** method,
-                     const char** unit,
-                     uint64_t*    min_interval,
-                     uint64_t*    max_interval)
+counter_block(uint64_t counter_handle, const char** counter_block)
 {
-    if(agent_pc_sample_info.find(node_id) == agent_pc_sample_info.end()) return;
-    *method = agent_pc_sample_info.at(node_id).at(config_idx).at(0).c_str();
-    *unit   = agent_pc_sample_info.at(node_id).at(config_idx).at(1).c_str();
-    *min_interval =
-        std::stoull(agent_pc_sample_info.at(node_id).at(config_idx).at(2).c_str(), nullptr, 10);
-    *max_interval =
-        std::stoull(agent_pc_sample_info.at(node_id).at(config_idx).at(3).c_str(), nullptr, 10);
+    const auto* counter_info = get_counter_info(rocprofiler_counter_id_t{counter_handle});
+    *counter_block           = counter_info->block;
+}
+
+void
+counter_expression(uint64_t counter_handle, const char** counter_expr)
+{
+    const auto* counter_info = get_counter_info(rocprofiler_counter_id_t{counter_handle});
+    *counter_expr            = counter_info->expression;
+}
+
+size_t
+get_number_of_dimensions(uint64_t counter_handle)
+{
+    const auto* counter_info = get_counter_info(rocprofiler_counter_id_t{counter_handle});
+    return counter_info->dimensions_count;
+}
+
+void
+counter_dimension_ids(uint64_t counter_handle, uint64_t* dimension_ids, size_t num_dimensions)
+{
+    const auto* counter_info = get_counter_info(rocprofiler_counter_id_t{counter_handle});
+    if(num_dimensions != counter_info->dimension_ids.size()) ROCP_FATAL << "Invalid counter handle";
+    auto dimensions = std::vector<uint64_t>{};
+    std::for_each(counter_info->dimension_ids.begin(),
+                  counter_info->dimension_ids.end(),
+                  [&dimensions](auto& dimension) { dimensions.emplace_back(dimension); });
+    std::copy(dimensions.begin(), dimensions.end(), dimension_ids);
+}
+
+void
+counter_dimension(uint64_t     counter_handle,
+                  uint64_t     dimension_handle,
+                  const char** dimension_name,
+                  uint64_t*    dimension_instance)
+{
+    const auto* counter_info = get_counter_info(rocprofiler_counter_id_t{counter_handle});
+
+    rocprofiler::tool::counter_dimension_info_vec_t dimensions = counter_info->dimensions;
+
+    for(auto dim : dimensions)
+    {
+        if(dim.id == dimension_handle)
+        {
+            *dimension_name     = dim.name;
+            *dimension_instance = dim.instance_size;
+            return;
+        }
+    }
+}
+
+size_t
+get_number_of_pc_sample_configs(uint64_t agent_handle)
+{
+    auto pc_sampling_config =
+        get_metadata().get_pc_sample_config_info(rocprofiler_agent_id_t{agent_handle});
+
+    return pc_sampling_config.size();
+}
+
+void
+pc_sample_config(uint64_t  agent_handle,
+                 uint64_t  config_idx,
+                 uint64_t* method,
+                 uint64_t* unit,
+                 uint64_t* min_interval,
+                 uint64_t* max_interval,
+                 uint64_t* flags)
+{
+    auto pc_sampling_config =
+        get_metadata().get_pc_sample_config_info(rocprofiler_agent_id_t{agent_handle});
+    if(config_idx >= pc_sampling_config.size()) ROCP_FATAL << "Invalid config idx";
+    *method       = pc_sampling_config.at(config_idx).method;
+    *unit         = pc_sampling_config.at(config_idx).unit;
+    *min_interval = pc_sampling_config.at(config_idx).min_interval;
+    *max_interval = pc_sampling_config.at(config_idx).max_interval;
+    *flags        = pc_sampling_config.at(config_idx).flags;
+}
+
+bool
+is_counter_set(uint64_t* counter_handles, uint64_t agent_handle, size_t num_counters)
+{
+    rocprofiler_profile_config_id_t cfg_id = {.handle = 0};
+    for(size_t itr = 0; itr < num_counters; itr++)
+    {
+        auto counter_id = rocprofiler_counter_id_t{counter_handles[itr]};
+        if(rocprofiler_create_profile_config(
+               rocprofiler_agent_id_t{agent_handle}, &counter_id, 1, &cfg_id) !=
+           ROCPROFILER_STATUS_SUCCESS)
+            return false;
+    }
+    rocprofiler_destroy_profile_config(cfg_id);
+    return true;
+}
+
+void
+agent_info(uint64_t agent_handle, const char** agent_info_str)
+{
+    auto agents = get_agents();
+
+    if(agent_json.empty())
+    {
+        for(auto& [agent_id, value] : agents)
+        {
+            auto ss = std::stringstream{};
+            {
+                constexpr auto json_prec   = 16;
+                constexpr auto json_indent = JSONOutputArchive::Options::IndentChar::space;
+                auto           json_opts   = JSONOutputArchive::Options{json_prec, json_indent, 0};
+                auto           json_ar     = JSONOutputArchive{ss, json_opts};
+                cereal::save(json_ar, value);
+            }
+            agent_json.emplace(agent_id, ss.str());
+        }
+    }
+    *agent_info_str = agent_json.at(rocprofiler_agent_id_t{agent_handle}).c_str();
 }
 
 ROCPROFILER_EXTERN_C_FINI

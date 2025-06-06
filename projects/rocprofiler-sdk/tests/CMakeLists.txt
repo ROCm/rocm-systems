@@ -86,3 +86,4 @@ add_subdirectory(rocprofv3)
 
 # python bindings
 add_subdirectory(python-bindings)
+add_subdirectory(rocprofv3-avail)
