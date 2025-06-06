@@ -74,7 +74,19 @@ rocprofiler_systems_add_validation_test(
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "openmp;openmp-target"
-    ARGS --label-substrings Z4vmulIiEvPT_S1_S1_i_l51.kd -c 12 -d 0 -p)
+    ARGS --label-substrings
+         Z4vmulIiEvPT_S1_S1_i_l51.kd
+         Z4vmulIfEvPT_S1_S1_i_l51.kd
+         Z4vmulIdEvPT_S1_S1_i_l51.kd
+         -c
+         4
+         4
+         4
+         -d
+         0
+         0
+         0
+         -p)
 
 set(_ompt_sampling_environ
     "${_ompt_environment}"
