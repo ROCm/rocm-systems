@@ -163,10 +163,7 @@ struct ompt : comp::base<ompt, void>
 
         auto _track = tracing::get_perfetto_track(
             category::ompt{},
-            [](uint64_t _targ_id_v) {
-                return ::timemory::join::join("", "OMP Target ", _targ_id_v);
-            },
-            targ_id);
+            [](auto) -> std::string { return "OpenMP Target Offloads"; }, 0);
 
         category_region<category::ompt>::start<tim::quirk::perfetto>(
             name, _track, beg_time, ::perfetto::Flow::ProcessScoped(id),
