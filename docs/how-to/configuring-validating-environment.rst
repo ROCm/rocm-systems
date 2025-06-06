@@ -40,8 +40,8 @@ using ``module load rocprofiler-systems/<VERSION>`` and unloaded using ``module 
 
 .. code-block:: shell
 
-   module load rocprofiler-systems/1.0.0
-   module unload rocprofiler-systems/1.0.0
+   module load rocprofiler-systems/1.0.1
+   module unload rocprofiler-systems/1.0.1
 
 .. note::
 
