@@ -308,6 +308,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         """
         class _CheckInputFilePath(argparse.Action):
             # Checks the values
+            outputformat=self.helpers.get_output_format()
             def __call__(self, parser, args, values, option_string=None):
                 path = Path(values)
                 try:

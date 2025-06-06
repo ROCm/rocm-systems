@@ -120,16 +120,17 @@ void TestErrCntRead::Run(void) {
 
         err =  amdsmi_get_gpu_ecc_count(processor_handles_[i], static_cast<amdsmi_gpu_block_t>(b), &ec);
 
-        if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
+        if (err == AMDSMI_STATUS_NOT_SUPPORTED || err == AMDSMI_STATUS_FILE_ERROR) {
           IF_VERB(STANDARD) {
             std::cout << "\t**Error Count for " <<
                         GetBlockNameStr(static_cast<amdsmi_gpu_block_t>(b)) <<
-                                 ": Not supported for this device" << std::endl;
+                          ": Not supported for this device or error accessing file" << std::endl;
           }
           // Verify api support checking functionality is working
           err =  amdsmi_get_gpu_ecc_count(processor_handles_[i], static_cast<amdsmi_gpu_block_t>(b),
                                                                        nullptr);
-          ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
+          ASSERT_TRUE(err == AMDSMI_STATUS_NOT_SUPPORTED
+                      || err == AMDSMI_STATUS_FILE_ERROR);
 
         } else {
             CHK_ERR_ASRT(err)

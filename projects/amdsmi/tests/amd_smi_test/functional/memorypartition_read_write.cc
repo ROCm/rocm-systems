@@ -124,6 +124,8 @@ void TestMemoryPartitionReadWrite::Run(void) {
     std::cout << "\t**=========================================================\n";
   }
   auto initial_num_devices = num_monitor_devs();
+  amdsmi_accelerator_partition_type_t primary_partition_type = AMDSMI_ACCELERATOR_PARTITION_INVALID;
+  uint32_t primary_index = 0;
   for (uint32_t dv_ind = 0; dv_ind < initial_num_devices; ++dv_ind) {
     if (dv_ind != 0) {
       std::cout << "\n";
@@ -168,6 +170,12 @@ void TestMemoryPartitionReadWrite::Run(void) {
       profile_type_str = "CPX";
     }
 
+    // save the primary partition type
+    if (profile.profile_type != AMDSMI_ACCELERATOR_PARTITION_INVALID) {
+      primary_partition_type = profile.profile_type;
+      primary_index = dv_ind;
+    }
+
     std::string partition_id_str = "";
     for (int i = 0; i < 8; i++) {
       partition_id_str += std::to_string(partition_id[i]);
@@ -175,7 +183,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
         partition_id_str += ", ";
       }
 
-      switch (profile.profile_type) {
+      switch (primary_partition_type) {
         case AMDSMI_ACCELERATOR_PARTITION_SPX:
           EXPECT_LT(partition_id[i], MAX_SPX_PARTITIONS);
           break;
@@ -191,7 +199,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
         case AMDSMI_ACCELERATOR_PARTITION_CPX: {
           uint16_t num_xcd;
           uint32_t max_xcps = 0;
-          ret = amdsmi_get_gpu_xcd_counter(processor_handles_[dv_ind], &num_xcd);
+          ret = amdsmi_get_gpu_xcd_counter(processor_handles_[primary_index], &num_xcd);
           if (ret == AMDSMI_STATUS_SUCCESS) {
             max_xcps = static_cast<uint32_t>(num_xcd);
           }
@@ -245,7 +253,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
     AcceleratorProfileConfig original_profile_config =
       getAvailableProfileConfigs(dv_ind, profile, profile_config, isVerbose);
     orig_dev_config[dv_ind] = original_profile_config;
-    // waitForUserInput();  // watch for any errors
+    // amdsmi_wait_for_user_input();  // watch for any errors
 
     IF_VERB(STANDARD) {
       std::cout << "\t**=========================================================\n";
@@ -321,7 +329,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
                 || ret == AMDSMI_STATUS_NOT_SUPPORTED);
     if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) {
-        std::cout << "\t**" <<  "amdsmi_get_gpu_accelerator_partition_profile_config: "
+        std::cout << "\t**" <<  "amdsmi_get_gpu_accelerator_partition_profile_config(): "
                   << "Not supported on this machine" << std::endl;
       }
       continue;
@@ -329,6 +337,11 @@ void TestMemoryPartitionReadWrite::Run(void) {
   }
 
   // Run memory partition tests
+  IF_VERB(STANDARD) {
+    std::cout << "\t**=========================================================\n";
+    std::cout << "\t**Test: Memory Partition Sets =============================\n";
+    std::cout << "\t**=========================================================\n";
+  }
   uint32_t current_num_devices = 0;
   smi_amdgpu_get_device_count(&current_num_devices);
 
@@ -352,7 +365,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
             processor_handles_[dv_ind], orig_memory_partition, k255Len);
     if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
        IF_VERB(STANDARD) {
-          std::cout << "\t**" <<  ": "
+          std::cout << "\t**" <<  "amdsmi_get_gpu_memory_partition(): "
                     << "Not supported on this machine" << std::endl;
         }
         continue;
@@ -563,7 +576,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
       }
       if (ret_set == AMDSMI_STATUS_NOT_SUPPORTED) {
         IF_VERB(STANDARD) {
-          std::cout << "\t**" <<  ": "
+          std::cout << "\t**" <<  "amdsmi_set_gpu_memory_partition_mode(): "
                     << "Not supported on this machine" << std::endl;
         }
         break;
@@ -618,7 +631,8 @@ void TestMemoryPartitionReadWrite::Run(void) {
 
     ret = amdsmi_get_gpu_memory_partition_config(processor_handles_[dv_ind],
                                                  &current_memory_config);
-    CHK_ERR_ASRT(ret)
+    ASSERT_TRUE((ret == AMDSMI_STATUS_NOT_SUPPORTED) ||
+                  (ret == AMDSMI_STATUS_SUCCESS));
     IF_VERB(STANDARD) {
       std::cout << "\t**"
                 << "amdsmi_get_gpu_memory_partition_config(processor_handles_[" << dv_ind
@@ -628,6 +642,13 @@ void TestMemoryPartitionReadWrite::Run(void) {
                 << "Current memory partition: "
                 << memoryPartitionString(current_memory_config.mp_mode)
                 << std::endl;
+    }
+    if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
+      IF_VERB(STANDARD) {
+        std::cout << "\t**" <<  "amdsmi_get_gpu_memory_partition_config(): "
+                  << "Not supported on this machine... trying on other devices" << std::endl;
+      }
+      continue;
     }
 
     new_memory_partition

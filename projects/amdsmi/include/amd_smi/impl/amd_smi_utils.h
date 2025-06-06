@@ -29,6 +29,7 @@
 #include <string>
 #include <utility>
 #include <functional>
+#include <memory>
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_gpu_device.h"
@@ -58,6 +59,24 @@ std::string smi_split_string(std::string str, char delim);
 std::string smi_amdgpu_get_status_string(amdsmi_status_t ret, bool fullStatus);
 amdsmi_status_t smi_clear_char_and_reinitialize(char buffer[], uint32_t len,
                                                     std::string newString);
+
+/**
+ * @brief Opens a file descriptor for the specified path with RAII semantics and caching.
+ *
+ * This function attempts to open a file descriptor (FD) for the given file path and flags.
+ * It maintains a cache of weak pointers to previously opened FDs, allowing for reuse of
+ * file descriptors if they are still valid. If a valid FD for the path exists in the cache,
+ * it is reused; otherwise, a new FD is opened. The returned FD is managed by a std::shared_ptr
+ * with a custom deleter that ensures the FD is properly closed when no longer in use.
+ *
+ * Thread safety is ensured via a static mutex.
+ *
+ * @param path The file system path to open.
+ * @param flags Flags to use when opening the file (as per open(2)).
+ * @return std::shared_ptr<int> Shared pointer managing the file descriptor, or nullptr on failure.
+ */
+std::shared_ptr<int> amdsmi_RAII_FD_handler(const std::string& path, int flags);
+
 /**
  * @brief Wait for user input, a debugging function to pause the program
  * 

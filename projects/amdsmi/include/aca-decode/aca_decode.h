@@ -2,13 +2,15 @@
  * @file aca_decode.h
  * @brief Internal decoder interface and data structures
  */
-#ifndef ACA_DECODE_H
-#define ACA_DECODE_H
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+#ifndef ACA_DECODE_H
+#define ACA_DECODE_H
+
+#include "aca_api.h"
 #include "aca_fields.h"
 
 /**
@@ -17,6 +19,7 @@ extern "C" {
 typedef struct
 {
     uint64_t aca_status;  /**< Raw status register value */
+    uint64_t aca_addr;    /**< Raw address register value */
     uint64_t aca_ipid;    /**< Raw IPID register value */
     uint64_t aca_synd;    /**< Raw syndrome register value */
     uint32_t flags;       /**< Decoder flags */
@@ -33,23 +36,12 @@ typedef struct
 typedef struct
 {
     uint64_t aca_status;  /**< Raw status register value */
+    uint64_t aca_addr;    /**< Raw address register value */
     uint64_t aca_ipid;    /**< Raw IPID register value */
     uint64_t aca_synd;    /**< Raw syndrome register value */
     uint32_t flags;       /**< Flags from descriptor */
     uint16_t hw_revision; /**< Hardware hw_revision number */
 } aca_raw_data_t;
-
-/**
- * @brief Structure containing decoded error information
- */
-typedef struct
-{
-    const char *bank_ref;       /**< Reference to bank name string */
-    const char *error_type_ref; /**< Reference to error type string */
-    const char *severity_ref;   /**< Reference to error severity string */
-    const char *category_ref;   /**< Reference to error category string */
-    int afid;                   /**< AFID value (AMD Field ID) */
-} aca_error_info_t;
 
 /**
  * @brief Main decode function that processes raw ACA error data

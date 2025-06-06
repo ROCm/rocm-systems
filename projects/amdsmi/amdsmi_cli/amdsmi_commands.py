@@ -6200,7 +6200,12 @@ class AMDSMICommands():
 
             self.logger.multiple_device_output = tabular_output
             self.logger.table_title = "CURRENT_PARTITION"
-            self.logger.print_output(multiple_device_enabled=True, tabular=True, dynamic=True)
+            if self.logger.is_json_format():
+                self.logger.store_current_partition_json_output.extend(tabular_output)
+                if not (args.memory or args.accelerator):
+                    self.logger.combine_arrays_to_json()
+            else:
+                self.logger.print_output(multiple_device_enabled=True, tabular=True, dynamic=True)
             self.logger.clear_multiple_devices_output()
 
         ###########################################
@@ -6232,7 +6237,12 @@ class AMDSMICommands():
 
             self.logger.multiple_device_output = tabular_output
             self.logger.table_title = "\nMEMORY_PARTITION"
-            self.logger.print_output(multiple_device_enabled=True, tabular=True, dynamic=True)
+            if self.logger.is_json_format():
+                self.logger.store_memory_partition_json_output.extend(tabular_output)
+                if not args.accelerator:
+                    self.logger.combine_arrays_to_json()
+            else:
+                self.logger.print_output(multiple_device_enabled=True, tabular=True, dynamic=True)
             self.logger.clear_multiple_devices_output()
 
         ###########################################
@@ -6381,7 +6391,10 @@ class AMDSMICommands():
 ** Please run the command with sudo permissions to get accurate results. **
 ***************************************************************************
 """
-            self.logger.print_output(multiple_device_enabled=True, tabular=True, dynamic=True)
+            if self.logger.is_json_format():
+                self.logger.store_partition_profiles_json_output.extend(tabular_output)
+            else:
+                self.logger.print_output(multiple_device_enabled=True, tabular=True, dynamic=True)
             self.logger.clear_multiple_devices_output()
             self.logger.warning_message = "" # clear the warning message
 
@@ -6430,19 +6443,25 @@ class AMDSMICommands():
 
             self.logger.multiple_device_output = tabular_output
             self.logger.table_title = "\nACCELERATOR_PARTITION_RESOURCES"
-            self.logger.print_output(multiple_device_enabled=True, tabular=True, dynamic=True)
+            if self.logger.is_json_format():
+                self.logger.store_partition_resources_json_output.extend(tabular_output)
+            else:
+                self.logger.print_output(multiple_device_enabled=True, tabular=True, dynamic=True)
+            if self.logger.is_json_format():
+                self.logger.combine_arrays_to_json()
             self.logger.clear_multiple_devices_output()
 
-            # print legend
-            legend_parts = [
-                "\n\nLegend:",
-                "  * = Current mode"]
-            legend_output = "\n".join(legend_parts)
-            if self.logger.destination == 'stdout':
-                print(legend_output)
-            else:
-                with self.logger.destination.open('a', encoding="utf-8") as output_file:
-                    output_file.write(legend_output + '\n')
+            if not self.logger.is_json_format():
+                # print legend
+                legend_parts = [
+                    "\n\nLegend:",
+                    "  * = Current mode"]
+                legend_output = "\n".join(legend_parts)
+                if self.logger.destination == 'stdout':
+                    print(legend_output)
+                else:
+                    with self.logger.destination.open('a', encoding="utf-8") as output_file:
+                        output_file.write(legend_output + '\n')
 
 
     def ras(self, args, multiple_devices=False, gpu=None, cper=None, afid=None,

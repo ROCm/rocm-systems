@@ -48,6 +48,10 @@ class AMDSMILogger():
         self.store_gpu_json_output = []
         self.store_xgmi_metric_json_output = []
         self.store_xgmi_link_status_json_output = []
+        self.store_current_partition_json_output = []
+        self.store_memory_partition_json_output = []
+        self.store_partition_profiles_json_output = []
+        self.store_partition_resources_json_output = []
 
 
     class LoggerFormat(Enum):
@@ -319,7 +323,10 @@ class AMDSMILogger():
             if isinstance(value, dict):
                 yaml_string += "  " * indent + f"{key}:\n" + self.custom_dump(value, indent + 1)
             elif isinstance(value, list):
-                yaml_string += "  " * indent + f"{key}:\n"
+                if not value:
+                    yaml_string += "  " * indent + f"{key}: N/A\n"
+                elif isinstance(value, dict):
+                    yaml_string += "  " * indent + f"{key}:\n"
                 for item in value:
                     if isinstance(item, dict):
                         yaml_string += self.custom_dump(item, indent + 1)
@@ -589,6 +596,14 @@ class AMDSMILogger():
             combined_json["xgmi_metric"] = self.store_xgmi_metric_json_output
         if self.store_xgmi_link_status_json_output:
             combined_json["link_status"] = self.store_xgmi_link_status_json_output
+        if self.store_current_partition_json_output:
+            combined_json["current_partition"] = self.store_current_partition_json_output
+        if self.store_memory_partition_json_output:
+            combined_json["memory_partition"] = self.store_memory_partition_json_output
+        if self.store_partition_profiles_json_output:
+            combined_json["partition_profiles"] = self.store_partition_profiles_json_output
+        if self.store_partition_resources_json_output:
+            combined_json["partition_resources"] = self.store_partition_resources_json_output
 
         self.destination == 'stdout'
         json_std_output = json.dumps(combined_json, indent=4)

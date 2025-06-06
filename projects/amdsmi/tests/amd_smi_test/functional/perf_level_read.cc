@@ -22,11 +22,11 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <gtest/gtest.h>
 
 #include <iostream>
 #include <string>
 
-#include <gtest/gtest.h>
 #include "amd_smi/amdsmi.h"
 #include "perf_level_read.h"
 #include "../test_common.h"
@@ -76,10 +76,15 @@ void TestPerfLevelRead::Run(void) {
     PrintDeviceHeader(processor_handles_[i]);
 
     err = amdsmi_get_gpu_perf_level(processor_handles_[i], &pfl);
-    CHK_ERR_ASRT(err)
-    IF_VERB(STANDARD) {
-      std::cout << "\t**Performance Level:" << std::dec << (uint32_t)pfl <<
-                                                                    std::endl;
+    if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
+      std::cout << "\t**Performance Level: Not Supported" << std::endl;
+      ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
+    } else {
+      CHK_ERR_ASRT(err)
+      IF_VERB(STANDARD) {
+        std::cout << "\t**Performance Level:" << std::dec << (uint32_t)pfl
+                  << std::endl;
+      }
     }
     // Verify api support checking functionality is working
     err = amdsmi_get_gpu_perf_level(processor_handles_[i], nullptr);

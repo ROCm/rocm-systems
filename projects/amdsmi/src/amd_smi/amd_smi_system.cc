@@ -404,6 +404,7 @@ amdsmi_status_t AMDSmiSystem::cleanup() {
         // we do not need to delete the sockets/processors, clear takes care of this
         if (!processors_.empty()) {processors_.clear();}
         if (!sockets_.empty()) {sockets_.clear();}
+        drm_.cleanup();
         init_flag_ &= ~AMDSMI_INIT_AMD_GPUS;
         rsmi_status_t ret = rsmi_shut_down();
         if (ret != RSMI_STATUS_SUCCESS) {

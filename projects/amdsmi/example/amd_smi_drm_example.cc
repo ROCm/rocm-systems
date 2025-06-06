@@ -49,6 +49,17 @@
         }                                                                      \
     }
 
+#define PRINT_AMDSMI_RET(RET)                                                  \
+    {                                                                          \
+        if (RET != AMDSMI_STATUS_SUCCESS) {                                    \
+            const char *err_str;                                               \
+            std::cout << "AMDSMI call returned " << RET << " at line "         \
+                      << __LINE__ << std::endl;                                \
+            amdsmi_status_code_to_string(RET, &err_str);                       \
+            std::cout << err_str << std::endl;                                 \
+        }                                                                      \
+    }
+
 
 void getFWNameFromId(int id, char *name)
 {
@@ -260,11 +271,11 @@ mapStringToSMIMemoryPartitionTypes {
 
 static const std::map<amdsmi_virtualization_mode_t, std::string>
   virtualization_mode_map = {
-  {AMDSMI_VIRTUALIZATION_MODE_UNKNOWN,      "UNKNOWN"},
-  {AMDSMI_VIRTUALIZATION_MODE_BAREMETAL,    "BAREMETAL"},
-  { AMDSMI_VIRTUALIZATION_MODE_HOST,        "HOST"},
-  { AMDSMI_VIRTUALIZATION_MODE_GUEST,       "GUEST"},
-  {AMDSMI_VIRTUALIZATION_MODE_PASSTHROUGH,  "PASSTHROUGH"}
+  {AMDSMI_VIRTUALIZATION_MODE_UNKNOWN, "UNKNOWN"},
+  {AMDSMI_VIRTUALIZATION_MODE_BAREMETAL, "BAREMETAL"},
+  {AMDSMI_VIRTUALIZATION_MODE_HOST, "HOST"},
+  {AMDSMI_VIRTUALIZATION_MODE_GUEST, "GUEST"},
+  {AMDSMI_VIRTUALIZATION_MODE_PASSTHROUGH, "PASSTHROUGH"}
 };
 
 static const std::map<processor_type_t, std::string>
@@ -278,9 +289,20 @@ static const std::map<processor_type_t, std::string>
   {AMDSMI_PROCESSOR_TYPE_AMD_APU, "AMD_APU"}
 };
 
+static const std::map<amdsmi_link_type_t, std::string>
+  link_type_map = {
+  {AMDSMI_LINK_TYPE_INTERNAL, "INTERNAL"},
+  {AMDSMI_LINK_TYPE_XGMI, "XGMI"},
+  {AMDSMI_LINK_TYPE_PCIE, "PCIE"},
+  {AMDSMI_LINK_TYPE_NOT_APPLICABLE, "NOT_APPLICABLE"},
+  {AMDSMI_LINK_TYPE_UNKNOWN, "UNKNOWN"}
+};
+
 int main() {
-    amdsmi_status_t ret, ret_set;
-    const char *err_str;
+    amdsmi_status_t ret;
+    std::vector<amdsmi_compute_partition_type_t> orig_accelerator_partitions;
+    std::vector<amdsmi_memory_partition_type_t> orig_memory_partitions;
+    uint32_t gpu_number = 0;
 
     // Init amdsmi for sockets and devices.
     // Here we are only interested in AMD_GPUS.
@@ -302,13 +324,496 @@ int main() {
 
     std::cout << "Total Socket: " << socket_count << std::endl;
 
+    // WARNING: Do not put any other settings before/inside/or between these lambda functions
+    //           Required to save/change/reset the compute/accelerator & memory partition settings
+    // Reason: Modifies total number of gpu count, which will affect other API calls.
+    //         Requires amdsmi_shut_down()/amdsmi_init(AMDSMI_INIT_AMD_GPUS) to re-enumerate
+    //         total number of GPUs (AKA "processors per socket").
+    //         Changing back to original settings (compute/accelerator & memory partition)
+    //         will not modify the GPU count.
+    // Save all original partition settings for later
+    auto save_original_partitions = [socket_count, &ret, sockets](
+                std::vector<amdsmi_compute_partition_type_t>& orig_partitions,
+                std::vector<amdsmi_memory_partition_type_t>& orig_memory_partitions,
+                uint32_t& gpu_number) -> void {
+        std::cout << "    **Saving Original Compute/Accelerator & Memory Partition Settings**\n";
+
+        // For each socket, get identifier and devices
+        for (uint32_t i = 0; i < socket_count; i++) {
+            // Get Socket info
+            char socket_info[128];
+            ret = amdsmi_get_socket_info(sockets[i], 128, socket_info);
+            PRINT_AMDSMI_RET(ret)
+            std::cout << "\t**Socket Info: " << socket_info << std::endl;
+
+            // Get the device count available for the socket.
+            uint32_t device_count = 0;
+            ret = amdsmi_get_processor_handles(sockets[i], &device_count, nullptr);
+            PRINT_AMDSMI_RET(ret)
+
+            // Allocate the memory for the device handlers on the socket
+            std::vector<amdsmi_processor_handle> processor_handles(device_count);
+            // Get all devices of the socket
+            ret = amdsmi_get_processor_handles(sockets[i],
+                                            &device_count, &processor_handles[0]);
+            PRINT_AMDSMI_RET(ret)
+
+            std::cout << "\t**Processor Count: " << device_count << std::endl;
+
+            // For each device of the socket, get name and temperature.
+            for (uint32_t device_index = 0; device_index < device_count; device_index++) {
+                std::cout << "\t**Device Index: " << device_index << std::endl;
+                std::cout << "\t**Device Handle: " << processor_handles[device_index] << std::endl;
+                std::cout << "\t**GPU Number: " << gpu_number << std::endl;
+
+                // Get the original compute partition
+                char original_compute_partition[AMDSMI_MAX_STRING_LENGTH];
+                ret = amdsmi_get_gpu_compute_partition(processor_handles[device_index],
+                                original_compute_partition,
+                                static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
+
+                const char* err_str;
+                amdsmi_status_code_to_string(ret, &err_str);
+                if (ret == AMDSMI_STATUS_SUCCESS) {
+                    PRINT_AMDSMI_RET(ret)
+                    std::cout << "    Output of amdsmi_get_gpu_compute_partition:\n";
+                    std::cout << "\tamdsmi_get_gpu_compute_partition(" << gpu_number << ", "
+                              << mapStringToSMIComputePartitionTypes.at(original_compute_partition)
+                              << "): " << err_str << "\n\n";
+                    std::cout << "\tCompute Partition (original): "
+                              << original_compute_partition << "\n\n";
+                } else {
+                    std::cout << "\tamdsmi_get_gpu_compute_partition(" << gpu_number << ", "
+                              << computePartitionString(AMDSMI_COMPUTE_PARTITION_INVALID) << "): "
+                              << err_str << "\n\n";
+                }
+
+                // Save the original compute/accelerator partition
+                if (ret == AMDSMI_STATUS_SUCCESS) {
+                    orig_partitions.push_back(
+                        mapStringToSMIComputePartitionTypes.at(original_compute_partition));
+                } else {
+                    orig_partitions.push_back(AMDSMI_COMPUTE_PARTITION_INVALID);
+                }
+
+                // Get the original memory partition
+                char original_memory_partition[AMDSMI_MAX_STRING_LENGTH];
+                ret = amdsmi_get_gpu_memory_partition(processor_handles[device_index],
+                                    original_memory_partition,
+                                    static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
+                amdsmi_status_code_to_string(ret, &err_str);
+                if (ret == AMDSMI_STATUS_SUCCESS) {
+                    PRINT_AMDSMI_RET(ret)
+                    std::cout << "    Output of amdsmi_get_gpu_memory_partition:\n";
+                    std::cout << "\tamdsmi_get_gpu_memory_partition(" << gpu_number << ", "
+                              << mapStringToSMIMemoryPartitionTypes.at(original_memory_partition)
+                              << "): " << err_str << "\n\n";
+                    std::cout << "\tMemory Partition (original): "
+                              << original_memory_partition << "\n\n";
+                } else {
+                    std::cout << "\tamdsmi_get_gpu_memory_partition(" << gpu_number << ", "
+                            << memoryPartitionString(AMDSMI_MEMORY_PARTITION_UNKNOWN) << "): "
+                            << err_str << "\n\n";
+                }
+
+                // Save the original memory partition
+                if (ret == AMDSMI_STATUS_SUCCESS) {
+                    orig_memory_partitions.push_back(
+                        mapStringToSMIMemoryPartitionTypes.at(original_memory_partition));
+                } else {
+                    orig_memory_partitions.push_back(AMDSMI_MEMORY_PARTITION_UNKNOWN);
+                }
+                gpu_number++;
+            }
+        }
+        // Reset GPU number for the next loop
+        gpu_number = 0;
+    };
+    // Save the original compute/accelerator & memory partition settings
+    save_original_partitions(orig_accelerator_partitions, orig_memory_partitions, gpu_number);
+
+    std::cout << "    **Version 1: Accelerator/Compute Partition & memory API Examples**\n";
+    auto process_accelerator_partitions = [socket_count, &ret, sockets](
+                                              uint32_t& gpu_number) -> void {
+        std::cout << "    **Process Compute/Accelerator & Memory Partition Settings**\n";
+
+        // For each socket, get identifier and devices
+        for (uint32_t i = 0; i < socket_count; i++) {
+            // Get Socket info
+            char socket_info[128];
+            ret = amdsmi_get_socket_info(sockets[i], 128, socket_info);
+            PRINT_AMDSMI_RET(ret)
+            std::cout << "\t**Socket Info: " << socket_info << std::endl;
+
+            // Get the device count available for the socket.
+            uint32_t device_count = 0;
+            ret = amdsmi_get_processor_handles(sockets[i], &device_count, nullptr);
+            PRINT_AMDSMI_RET(ret)
+
+            // Allocate the memory for the device handlers on the socket
+            std::vector<amdsmi_processor_handle> processor_handles(device_count);
+            // Get all devices of the socket
+            ret = amdsmi_get_processor_handles(sockets[i],
+                                            &device_count, &processor_handles[0]);
+            PRINT_AMDSMI_RET(ret)
+
+            std::cout << "\t**Processor Count: " << device_count << std::endl;
+
+            // For each device of the socket, get name and temperature.
+            for (uint32_t device_index = 0; device_index < device_count; device_index++) {
+                std::cout << "\t**Device Index: " << device_index << std::endl;
+                std::cout << "\t**Device Handle: " << processor_handles[device_index] << std::endl;
+                std::cout << "\t**GPU Number: " << gpu_number << std::endl;
+
+                // Get the original compute partition
+                char original_compute_partition[AMDSMI_MAX_STRING_LENGTH];
+                ret = amdsmi_get_gpu_compute_partition(processor_handles[device_index],
+                            original_compute_partition,
+                            static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
+
+                const char* err_str;
+                amdsmi_status_code_to_string(ret, &err_str);
+                if (ret == AMDSMI_STATUS_SUCCESS) {
+                    PRINT_AMDSMI_RET(ret)
+                    std::cout << "    Output of amdsmi_get_gpu_compute_partition:\n";
+                    std::cout << "\tamdsmi_get_gpu_compute_partition(" << gpu_number << ", "
+                            << mapStringToSMIComputePartitionTypes.at(original_compute_partition)
+                            << "): " << err_str << "\n\n";
+                    std::cout << "\tCompute Partition (original): "
+                            << original_compute_partition << "\n\n";
+                } else {
+                    std::cout << "\tamdsmi_get_gpu_compute_partition(" << gpu_number << ", "
+                            << computePartitionString(AMDSMI_COMPUTE_PARTITION_INVALID) << "): "
+                            << err_str << "\n\n";
+                }
+
+                // Iterate through all compute partitions
+                for (int partition = static_cast<int>(AMDSMI_COMPUTE_PARTITION_SPX);
+                    partition <= static_cast<int>(AMDSMI_COMPUTE_PARTITION_CPX);
+                    partition++) {
+                    amdsmi_compute_partition_type_t updatePartition =
+                        static_cast<amdsmi_compute_partition_type_t>(partition);
+                    amdsmi_status_t ret_set = amdsmi_set_gpu_compute_partition(
+                                                processor_handles[device_index],
+                                                updatePartition);
+                    amdsmi_status_code_to_string(ret_set, &err_str);
+                    if (ret_set == AMDSMI_STATUS_SUCCESS) {
+                        PRINT_AMDSMI_RET(ret_set)
+                    }
+                    std::cout << "\tamdsmi_set_gpu_compute_partition(" << gpu_number << ", "
+                            << computePartitionString(updatePartition) << "): "
+                            << err_str << "\n\n";
+
+                    // Get the current compute partition
+                    char current_compute_partition[AMDSMI_MAX_STRING_LENGTH];
+                    ret = amdsmi_get_gpu_compute_partition(processor_handles[device_index],
+                            current_compute_partition,
+                            static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
+                    amdsmi_status_code_to_string(ret, &err_str);
+                    if (ret == AMDSMI_STATUS_SUCCESS) {
+                        PRINT_AMDSMI_RET(ret)
+                        std::cout << "    Output of amdsmi_get_gpu_compute_partition:\n";
+                        std::cout << "\tamdsmi_get_gpu_compute_partition(" << gpu_number << ", "
+                                << computePartitionString(updatePartition) << "): "
+                                << err_str << "\n\n";
+                        std::cout << "\tCompute Partition (current): "
+                                << current_compute_partition << "\n\n";
+                    } else {
+                        std::cout << "\tamdsmi_get_gpu_compute_partition(" << gpu_number << ", "
+                                << computePartitionString(AMDSMI_COMPUTE_PARTITION_INVALID) << "): "
+                                << err_str << "\n\n";
+                    }
+                }
+                gpu_number++;
+            }
+        }
+        // Reset GPU number for the next loop
+        gpu_number = 0;
+    };
+    process_accelerator_partitions(gpu_number);
+
+    auto process_memory_partitions = [socket_count, &ret, sockets](
+                                            uint32_t& gpu_number) -> void {
+        std::cout << "    **Process Memory Partition Settings**\n";
+
+        // For each socket, get identifier and devices
+        for (uint32_t i = 0; i < socket_count; i++) {
+            // Get Socket info
+            char socket_info[128];
+            ret = amdsmi_get_socket_info(sockets[i], 128, socket_info);
+            PRINT_AMDSMI_RET(ret)
+            std::cout << "\t**Socket Info: " << socket_info << std::endl;
+
+            // Get the device count available for the socket.
+            uint32_t device_count = 0;
+            ret = amdsmi_get_processor_handles(sockets[i], &device_count, nullptr);
+            PRINT_AMDSMI_RET(ret)
+
+            // Allocate the memory for the device handlers on the socket
+            std::vector<amdsmi_processor_handle> processor_handles(device_count);
+            // Get all devices of the socket
+            ret = amdsmi_get_processor_handles(sockets[i],
+                                            &device_count, &processor_handles[0]);
+            PRINT_AMDSMI_RET(ret)
+
+            std::cout << "\t**Processor Count: " << device_count << std::endl;
+
+            // For each device of the socket, get name and temperature.
+            for (uint32_t device_index = 0; device_index < device_count; device_index++) {
+                std::cout << "\t**Device Index: " << device_index << std::endl;
+                std::cout << "\t**Device Handle: " << processor_handles[device_index] << std::endl;
+                std::cout << "\t**GPU Number: " << gpu_number << std::endl;
+
+                // Get the original memory partition
+                char original_memory_partition[AMDSMI_MAX_STRING_LENGTH];
+                ret = amdsmi_get_gpu_memory_partition(processor_handles[device_index],
+                                    original_memory_partition,
+                                    static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
+                const char* err_str;
+                amdsmi_status_code_to_string(ret, &err_str);
+                if (ret == AMDSMI_STATUS_SUCCESS) {
+                    PRINT_AMDSMI_RET(ret)
+                    std::cout << "    Output of amdsmi_get_gpu_memory_partition:\n";
+                    std::cout << "\tamdsmi_get_gpu_memory_partition(" << gpu_number << ", "
+                              << mapStringToSMIMemoryPartitionTypes.at(original_memory_partition)
+                              << "): " << err_str << "\n\n";
+                    std::cout << "\tMemory Partition (original): " << original_memory_partition
+                              << "\n\n";
+                } else {
+                    std::cout << "\tamdsmi_get_gpu_memory_partition(" << gpu_number << ", "
+                            << memoryPartitionString(AMDSMI_MEMORY_PARTITION_UNKNOWN) << "): "
+                            << err_str << "\n\n";
+                }
+
+                // Since memory partition effects entire GPU hive (and modifies current
+                // compute/accelerator partition), we'll default to only changing the
+                // first device for the first socket (GPU #0)
+                if (gpu_number == 0) {
+                    std::cout << "    **Changing memory partition for GPU #"
+                              << gpu_number << "...**\n";
+                    for (int partition = static_cast<int>(AMDSMI_MEMORY_PARTITION_NPS1);
+                        partition <= static_cast<int>(AMDSMI_MEMORY_PARTITION_NPS8);
+                        partition++) {
+                        if (partition != static_cast<int>(AMDSMI_MEMORY_PARTITION_NPS1) &&
+                            partition != static_cast<int>(AMDSMI_MEMORY_PARTITION_NPS2) &&
+                            partition != static_cast<int>(AMDSMI_MEMORY_PARTITION_NPS4) &&
+                            partition != static_cast<int>(AMDSMI_MEMORY_PARTITION_NPS8)) {
+                            continue;
+                        }
+                        amdsmi_memory_partition_type_t updatePartition =
+                            static_cast<amdsmi_memory_partition_type_t>(partition);
+                        auto ret_set = amdsmi_set_gpu_memory_partition(
+                                            processor_handles[device_index], updatePartition);
+                        amdsmi_status_code_to_string(ret_set, &err_str);
+                        if (ret_set == AMDSMI_STATUS_SUCCESS) {
+                            PRINT_AMDSMI_RET(ret_set)
+                            std::cout << "    Output of amdsmi_set_gpu_memory_partition:\n";
+                        }
+                        std::cout << "\tamdsmi_set_gpu_memory_partition(" << gpu_number << ", "
+                                  << memoryPartitionString(updatePartition) << "): "
+                                  << err_str << "\n\n";
+
+                        // Get the current memory partition
+                        char current_memory_partition[AMDSMI_MAX_STRING_LENGTH];
+                        ret = amdsmi_get_gpu_memory_partition(processor_handles[device_index],
+                                    current_memory_partition,
+                                    static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
+                        amdsmi_status_code_to_string(ret, &err_str);
+                        if (ret == AMDSMI_STATUS_SUCCESS) {
+                            PRINT_AMDSMI_RET(ret)
+                            std::cout << "\tamdsmi_get_gpu_memory_partition(" << gpu_number
+                                      << ", " << memoryPartitionString(updatePartition) << "): "
+                                      << err_str << "\n\n";
+                            std::cout << "\tMemory Partition (current): "
+                                      << current_memory_partition << "\n\n";
+                        } else {
+                            std::cout << "\tamdsmi_get_gpu_memory_partition("
+                                      << gpu_number << ", "
+                                      << memoryPartitionString(AMDSMI_MEMORY_PARTITION_UNKNOWN)
+                                      << "): " << err_str << "\n\n";
+                        }
+                    }
+                } else {
+                    std::cout << "    **Skipping memory partition change for GPU #" << gpu_number
+                              << "...**\n";
+                }
+                gpu_number++;
+            }
+        }
+        // Reset GPU number for the next loop
+        gpu_number = 0;
+    };
+    process_memory_partitions(gpu_number);
+
+    auto reset_memory_partitions = [socket_count, &ret, sockets](
+                const std::vector<amdsmi_memory_partition_type_t>& orig_partitions,
+                uint32_t& gpu_number) -> void {
+        std::cout << "    **Version 1: Memory Partition API Examples**\n";
+        std::cout << "    **Resetting Memory Partition Settings**\n";
+
+        // For each socket, get identifier and devices
+        for (uint32_t i = 0; i < socket_count; i++) {
+            // Get Socket info
+            char socket_info[128];
+            ret = amdsmi_get_socket_info(sockets[i], 128, socket_info);
+            PRINT_AMDSMI_RET(ret)
+            std::cout << "\t**Socket Info: " << socket_info << std::endl;
+
+            // Get the device count available for the socket.
+            uint32_t device_count = 0;
+            ret = amdsmi_get_processor_handles(sockets[i], &device_count, nullptr);
+            PRINT_AMDSMI_RET(ret)
+
+            // Allocate the memory for the device handlers on the socket
+            std::vector<amdsmi_processor_handle> processor_handles(device_count);
+            // Get all devices of the socket
+            ret = amdsmi_get_processor_handles(sockets[i],
+                                            &device_count, &processor_handles[0]);
+            PRINT_AMDSMI_RET(ret)
+
+            std::cout << "\t**Processor Count: " << device_count << std::endl;
+
+            // For each device of the socket, get name and temperature.
+            for (uint32_t device_index = 0; device_index < device_count; device_index++) {
+                std::cout << "\t**Device Index: " << device_index << std::endl;
+                std::cout << "\t**Device Handle: " << processor_handles[device_index] << std::endl;
+                std::cout << "\t**GPU Number: " << gpu_number << std::endl;
+
+                // Reset to original memory partition settings
+                amdsmi_memory_partition_type_t orig_partition =
+                    orig_partitions[gpu_number];
+                amdsmi_status_t ret_set = amdsmi_set_gpu_memory_partition(
+                                            processor_handles[device_index], orig_partition);
+                const char* err_str;
+                amdsmi_status_code_to_string(ret_set, &err_str);
+                if (ret_set == AMDSMI_STATUS_SUCCESS) {
+                    PRINT_AMDSMI_RET(ret_set)
+                    std::cout << "    Output of amdsmi_set_gpu_memory_partition:\n";
+                }
+                std::cout << "\tamdsmi_set_gpu_memory_partition(" << gpu_number << ", "
+                          << memoryPartitionString(orig_partition) << "): "
+                          << err_str << "\n\n";
+                // Get the current memory partition
+                char current_memory_partition[AMDSMI_MAX_STRING_LENGTH];
+                ret = amdsmi_get_gpu_memory_partition(processor_handles[device_index],
+                            current_memory_partition,
+                            static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
+                amdsmi_status_code_to_string(ret, &err_str);
+                if (ret == AMDSMI_STATUS_SUCCESS) {
+                    PRINT_AMDSMI_RET(ret)
+                    std::cout << "    Output of amdsmi_get_gpu_memory_partition:\n";
+                    std::cout << "\tamdsmi_get_gpu_memory_partition(" << gpu_number << ", "
+                              << memoryPartitionString(orig_partition) << "): "
+                              << err_str << "\n\n";
+                    std::cout << "\tMemory Partition (current): "
+                              << current_memory_partition << "\n\n";
+                } else {
+                    std::cout << "\tamdsmi_get_gpu_memory_partition(" << gpu_number << ", "
+                              << memoryPartitionString(AMDSMI_MEMORY_PARTITION_UNKNOWN) << "): "
+                              << err_str << "\n\n";
+                }
+                gpu_number++;
+            }
+        }
+        // Reset GPU number for the next loop
+        gpu_number = 0;
+    };
+    // Reset to original memory partition settings
+    reset_memory_partitions(orig_memory_partitions, gpu_number);
+
+    auto reset_accelerator_partitions = [socket_count, &ret, sockets](
+                const std::vector<amdsmi_compute_partition_type_t>& orig_partitions,
+                uint32_t& gpu_number) -> void {
+        std::cout << "    **Version 1: Memory Partition API Examples**\n";
+        std::cout << "    **Resetting Compute/Accelerator Partition Settings**\n";
+
+        // For each socket, get identifier and devices
+        for (uint32_t i = 0; i < socket_count; i++) {
+            // Get Socket info
+            char socket_info[128];
+            ret = amdsmi_get_socket_info(sockets[i], 128, socket_info);
+            PRINT_AMDSMI_RET(ret)
+            std::cout << "\t**Socket Info: " << socket_info << std::endl;
+
+            // Get the device count available for the socket.
+            uint32_t device_count = 0;
+            ret = amdsmi_get_processor_handles(sockets[i], &device_count, nullptr);
+            PRINT_AMDSMI_RET(ret)
+
+            // Allocate the memory for the device handlers on the socket
+            std::vector<amdsmi_processor_handle> processor_handles(device_count);
+            // Get all devices of the socket
+            ret = amdsmi_get_processor_handles(sockets[i],
+                                            &device_count, &processor_handles[0]);
+            PRINT_AMDSMI_RET(ret)
+
+            std::cout << "\t**Processor Count: " << device_count << std::endl;
+
+            // For each device of the socket, get name and temperature.
+            for (uint32_t device_index = 0; device_index < device_count; device_index++) {
+                std::cout << "\t**Device Index: " << device_index << std::endl;
+                std::cout << "\t**Device Handle: " << processor_handles[device_index] << std::endl;
+                std::cout << "\t**GPU Number: " << gpu_number << std::endl;
+
+                // Reset to original compute/accelerator partition settings
+                amdsmi_compute_partition_type_t orig_partition =
+                    orig_partitions[gpu_number];
+                amdsmi_status_t ret_set = amdsmi_set_gpu_compute_partition(
+                                            processor_handles[device_index], orig_partition);
+                const char* err_str;
+                amdsmi_status_code_to_string(ret_set, &err_str);
+                if (ret_set == AMDSMI_STATUS_SUCCESS) {
+                    PRINT_AMDSMI_RET(ret_set)
+                    std::cout << "    Output of amdsmi_set_gpu_compute_partition:\n";
+                }
+                std::cout << "\tamdsmi_set_gpu_compute_partition(" << gpu_number << ", "
+                          << computePartitionString(orig_partition) << "): "
+                          << err_str << "\n\n";
+
+                // Get the current compute/accelerator partition
+                char current_compute_partition[AMDSMI_MAX_STRING_LENGTH];
+                ret = amdsmi_get_gpu_compute_partition(processor_handles[device_index],
+                            current_compute_partition,
+                            static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
+                amdsmi_status_code_to_string(ret, &err_str);
+                if (ret == AMDSMI_STATUS_SUCCESS) {
+                    PRINT_AMDSMI_RET(ret)
+                    std::cout << "    Output of amdsmi_get_gpu_compute_partition:\n";
+                    std::cout << "\tamdsmi_get_gpu_compute_partition(" << gpu_number << ", "
+                              << computePartitionString(orig_partition) << "): "
+                              << err_str << "\n\n";
+                    std::cout << "\tCompute Partition (current): "
+                              << current_compute_partition << "\n\n";
+                } else {
+                    std::cout << "\tamdsmi_get_gpu_compute_partition(" << gpu_number << ", "
+                              << computePartitionString(AMDSMI_COMPUTE_PARTITION_INVALID) << "): "
+                              << err_str << "\n\n";
+                }
+                gpu_number++;
+            }
+        }
+        // Reset GPU number for the next loop
+        gpu_number = 0;
+    };
+    // Reset to original compute/accelerator partition settings
+    reset_accelerator_partitions(orig_accelerator_partitions, gpu_number);
+
+    // WARNING: Do not put any other settings before/inside/or between these lambda functions
+    //           Required to save/change/reset the compute/accelerator & memory partition settings
+    // Reason: Modifies total number of gpu count, which will affect other API calls.
+    //         Requires amdsmi_shut_down()/amdsmi_init(AMDSMI_INIT_AMD_GPUS) to re-enumerate
+    //         total number of GPUs (AKA "processors per socket").
+    //         Changing back to original settings (compute/accelerator & memory partition)
+    //         will not modify the GPU count.
+    //  Add new functionality below this line!
+
     // For each socket, get identifier and devices
     for (uint32_t i = 0; i < socket_count; i++) {
         // Get Socket info
         char socket_info[128];
         ret = amdsmi_get_socket_info(sockets[i], 128, socket_info);
         CHK_AMDSMI_RET(ret)
-        std::cout << "Socket " << socket_info << std::endl;
+        std::cout << "Socket Info: " << socket_info << std::endl;
 
         // Get the device count available for the socket.
         uint32_t device_count = 0;
@@ -377,20 +882,36 @@ int main() {
             CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_gpu_asic_info:\n");
             printf("\tMarket Name: %s\n", asic_info.market_name);
-            printf("\tDeviceID: 0x%lx\n", asic_info.device_id);
-            printf("\tVendorID: 0x%x\n", asic_info.vendor_id);
-            printf("\tRevisionID: 0x%x\n", asic_info.rev_id);
-            printf("\tSubSystemID: 0x%x\n", asic_info.subsystem_id);
+            printf("\tDeviceID: 0x%04lx\n", asic_info.device_id);
+            printf("\tVendorID: 0x%04x\n", asic_info.vendor_id);
+            printf("\tVendor Name: %s\n", asic_info.vendor_name);
+            printf("\tSubVendorID: 0x%04x\n", asic_info.subvendor_id);
+            printf("\tRevisionID: 0x%02x\n", asic_info.rev_id);
+            printf("\tSubSystemID: 0x%04x\n", asic_info.subsystem_id);
             printf("\tAsic serial: 0x%s\n", asic_info.asic_serial);
-            printf("\tNum of Computes: %d\n\n", asic_info.num_of_compute_units);
+            if (asic_info.oam_id != UINT32_MAX) {
+                // OAM ID is not supported on all devices
+                printf("\tOAM ID: %"PRIu32"\n", asic_info.oam_id);
+            } else {
+                // OAM ID is not supported on this device
+                printf("\tOAM ID: N/A\n");
+            }
+            printf("\tNum of Computes: %d\n", asic_info.num_of_compute_units);
+            printf("\tTarget Graphics Version: gfx%lx\n\n", asic_info.target_graphics_version);
 
             bool is_power_management_enabled = false;
             ret = amdsmi_is_gpu_power_management_enabled(processor_handles[device_index],
                                                     &is_power_management_enabled);
-            CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_is_gpu_power_management_enabled:\n");
-            printf("\tPower Management Enabled: %s\n\n",
-                    (is_power_management_enabled ? "TRUE" : "FALSE"));
+            if (ret != AMDSMI_STATUS_NOT_SUPPORTED) {
+                CHK_AMDSMI_RET(ret)
+            }
+            if (is_power_management_enabled && ret != AMDSMI_STATUS_NOT_SUPPORTED) {
+                std::cout << "\tPower Management is enabled" << std::endl;
+            } else {
+                std::cout << "\tPower Management is disabled" << std::endl;
+            }
+
 
             amdsmi_virtualization_mode_t vmode;
             ret = amdsmi_get_gpu_virtualization_mode(processor_handles[device_index], &vmode);
@@ -405,169 +926,10 @@ int main() {
               std::cout << "\t**Virtualization Mode: MAP TYPE UNKNOWN?" << std::endl;
             }
 
-            std::cout << "    **Version 1: Accelerator/Compute Partition API Examples**\n";
-            char original_compute_partition[AMDSMI_MAX_STRING_LENGTH];
-            ret = amdsmi_get_gpu_compute_partition(processor_handles[device_index], original_compute_partition,
-                                        static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
-
-            amdsmi_status_code_to_string(ret, &err_str);
-            if (ret == AMDSMI_STATUS_SUCCESS) {
-                CHK_AMDSMI_RET(ret)
-                std::cout << "    Output of amdsmi_get_gpu_compute_partition:\n";
-                std::cout << "\tamdsmi_get_gpu_compute_partition(" << device_index << ", "
-                << mapStringToSMIComputePartitionTypes.at(original_compute_partition) << "): "
-                << err_str << "\n\n";
-                std::cout << "\tCompute Partition (original): "
-                << original_compute_partition << "\n\n";
-            } else {
-                std::cout << "\tamdsmi_get_gpu_compute_partition(" << device_index << ", "
-                << computePartitionString(AMDSMI_COMPUTE_PARTITION_INVALID) << "): "
-                << err_str << "\n\n";
-            }
-
-            for (int partition = static_cast<int>(AMDSMI_COMPUTE_PARTITION_SPX);
-                    partition <= static_cast<int>(AMDSMI_COMPUTE_PARTITION_CPX);
-                    partition++) {
-                amdsmi_compute_partition_type_t updatePartition
-                    = static_cast<amdsmi_compute_partition_type_t>(partition);
-                ret_set = amdsmi_set_gpu_compute_partition(processor_handles[device_index],
-                                                                updatePartition);
-                amdsmi_status_code_to_string(ret_set, &err_str);
-                if (ret_set == AMDSMI_STATUS_SUCCESS) {
-                    CHK_AMDSMI_RET(ret_set)
-                }
-                std::cout << "\tamdsmi_set_gpu_compute_partition(" << device_index << ", "
-                << computePartitionString(updatePartition) << "): "
-                << err_str << "\n\n";
-
-                // Get the current compute partition
-                char current_compute_partition[AMDSMI_MAX_STRING_LENGTH];
-                ret = amdsmi_get_gpu_compute_partition(processor_handles[device_index],
-                                                current_compute_partition,
-                                                static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
-                amdsmi_status_code_to_string(ret, &err_str);
-                if (ret == AMDSMI_STATUS_SUCCESS) {
-                    CHK_AMDSMI_RET(ret)
-                    std::cout << "    Output of amdsmi_get_gpu_compute_partition:\n";
-                    std::cout << "\tamdsmi_get_gpu_compute_partition(" << device_index << ", "
-                              << computePartitionString(updatePartition) << "): "
-                              << err_str << "\n\n";
-                    std::cout << "\tCompute Partition (current): "
-                              << current_compute_partition << "\n\n";
-                } else {
-                    std::cout << "\tamdsmi_get_gpu_compute_partition(" << device_index << ", "
-                    << computePartitionString(AMDSMI_COMPUTE_PARTITION_INVALID) << "): "
-                    << err_str << "\n\n";
-                }
-            }
-            // return to original compute partition
-            amdsmi_compute_partition_type_t original_compute_partition_type;
-            if (ret == AMDSMI_STATUS_SUCCESS) {
-                original_compute_partition_type
-                    = mapStringToSMIComputePartitionTypes.at(original_compute_partition);
-            } else {
-                original_compute_partition_type = AMDSMI_COMPUTE_PARTITION_INVALID;
-            }
-            std::cout << "    Returning to original compute partition ("
-                      << computePartitionString(original_compute_partition_type) << ")\n";
-            auto ret_set = amdsmi_set_gpu_compute_partition(processor_handles[device_index],
-                                                original_compute_partition_type);
-            amdsmi_status_code_to_string(ret_set, &err_str);
-            if (ret_set == AMDSMI_STATUS_SUCCESS) {
-                CHK_AMDSMI_RET(ret_set)
-            }
-            std::cout << "\tamdsmi_set_gpu_compute_partition(" << device_index << ", "
-            << computePartitionString(original_compute_partition_type) << "): "
-            << err_str << "\n\n";
-
-            std::cout << "    **Version 1: Memory Partition API Examples**\n";
-            char original_memory_partition[AMDSMI_MAX_STRING_LENGTH];
-            ret = amdsmi_get_gpu_memory_partition(processor_handles[device_index], original_memory_partition,
-                                        static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
-            amdsmi_status_code_to_string(ret, &err_str);
-            if (ret == AMDSMI_STATUS_SUCCESS) {
-                CHK_AMDSMI_RET(ret)
-                std::cout << "    Output of amdsmi_get_gpu_memory_partition:\n";
-                std::cout << "\tamdsmi_get_gpu_memory_partition(" << device_index << ", "
-                << mapStringToSMIMemoryPartitionTypes.at(original_memory_partition) << "): "
-                << err_str << "\n\n";
-                std::cout << "\tMemory Partition (original): "
-                << original_memory_partition << "\n\n";
-            } else {
-                std::cout << "\tamdsmi_get_gpu_memory_partition(" << device_index << ", "
-                << memoryPartitionString(AMDSMI_MEMORY_PARTITION_UNKNOWN) << "): "
-                << err_str << "\n\n";
-            }
-
-            for (int partition = static_cast<int>(AMDSMI_MEMORY_PARTITION_NPS1);
-                    partition <= static_cast<int>(AMDSMI_MEMORY_PARTITION_NPS8);
-                    partition++) {
-                if (partition != static_cast<int>(AMDSMI_MEMORY_PARTITION_NPS1)
-                    && partition != static_cast<int>(AMDSMI_MEMORY_PARTITION_NPS2)
-                    && partition != static_cast<int>(AMDSMI_MEMORY_PARTITION_NPS4)
-                    && partition != static_cast<int>(AMDSMI_MEMORY_PARTITION_NPS8)) {
-                    continue;
-                }
-                amdsmi_memory_partition_type_t updatePartition
-                    = static_cast<amdsmi_memory_partition_type_t>(partition);
-                auto ret_set = amdsmi_set_gpu_memory_partition(processor_handles[device_index],
-                                                                updatePartition);
-                amdsmi_status_code_to_string(ret_set, &err_str);
-                if (ret_set == AMDSMI_STATUS_SUCCESS) {
-                    CHK_AMDSMI_RET(ret_set)
-                    std::cout << "    Output of amdsmi_set_gpu_memory_partition:\n";
-                }
-                std::cout << "\tamdsmi_set_gpu_memory_partition(" << device_index << ", "
-                          << memoryPartitionString(updatePartition) << "): "
-                          << err_str << "\n\n";
-
-                // Get the current memory partition
-                char current_memory_partition[AMDSMI_MAX_STRING_LENGTH];
-                ret = amdsmi_get_gpu_memory_partition(processor_handles[device_index],
-                                            current_memory_partition,
-                                            static_cast<uint32_t>(AMDSMI_MAX_STRING_LENGTH));
-
-                amdsmi_status_code_to_string(ret, &err_str);
-                if (ret == AMDSMI_STATUS_SUCCESS) {
-                    CHK_AMDSMI_RET(ret)
-                    std::cout << "\tamdsmi_get_gpu_memory_partition(" << device_index << ", "
-                    << memoryPartitionString(updatePartition) << "): "
-                    << err_str << "\n\n";
-                    std::cout << "\tMemory Partition (current): "
-                    << current_memory_partition << "\n\n";
-                } else {
-                    std::cout << "\tamdsmi_get_gpu_memory_partition(" << device_index << ", "
-                    << memoryPartitionString(AMDSMI_MEMORY_PARTITION_UNKNOWN) << "): "
-                    << err_str << "\n\n";
-                }
-            }
-            // return to original compute partition
-            amdsmi_memory_partition_type_t original_memory_partition_type;
-            if (ret == AMDSMI_STATUS_SUCCESS) {
-                original_memory_partition_type
-                    = mapStringToSMIMemoryPartitionTypes.at(original_memory_partition);
-            } else {
-                original_memory_partition_type = AMDSMI_MEMORY_PARTITION_UNKNOWN;
-            }
-            std::cout << "    Returning to original memory partition ("
-                      << memoryPartitionString(original_memory_partition_type)
-                      << ")\n";
-            ret_set = amdsmi_set_gpu_memory_partition(processor_handles[device_index],
-                                                original_memory_partition_type);
-            amdsmi_status_code_to_string(ret_set, &err_str);
-            if (ret_set == AMDSMI_STATUS_SUCCESS) {
-                CHK_AMDSMI_RET(ret_set)
-            }
-            std::cout << "\tamdsmi_set_gpu_compute_partition(" << device_index << ", "
-                      << memoryPartitionString(original_memory_partition_type) << "): "
-                      << err_str << "\n\n";
-
-            // TODO(amdsmi_team): Add V2 partiton APIs
-
             // Get VRAM info
             amdsmi_vram_info_t vram_info = {};
             ret = amdsmi_get_gpu_vram_info(processor_handles[device_index], &vram_info);
-            if (ret != amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED) {
+            if (ret != AMDSMI_STATUS_NOT_SUPPORTED) {
                 CHK_AMDSMI_RET(ret)
                 printf("    Output of amdsmi_get_gpu_vram_info:\n");
                 printf("\tVRAM Size: 0x%lx (%ld) \n", vram_info.vram_size, vram_info.vram_size);
@@ -576,9 +938,34 @@ int main() {
                 printf("\tVRAM max bandwidth: 0x%lx (%lu) \n\n", vram_info.vram_max_bandwidth,
                         vram_info.vram_max_bandwidth);
             } else {
-                printf("\t**amdsmi_get_gpu_vram_info() not supported on this system.\n");
+                printf("\t**amdsmi_get_gpu_vram_info(): not supported on this device.\n");
             }
 
+            uint32_t mem_type = AMDSMI_MEM_TYPE_VRAM;
+            uint64_t total = 0;
+            ret = amdsmi_get_gpu_memory_total(processor_handles[device_index],
+                                              static_cast<amdsmi_memory_type_t>(mem_type), &total);
+            if (ret != AMDSMI_STATUS_SUCCESS) {
+              PRINT_AMDSMI_RET(ret)
+              std::cout << "\t**amdsmi_get_gpu_memory_total(): not supported on this device."
+                        << std::endl;
+            } else {
+              CHK_AMDSMI_RET(ret)
+              std::cout << "\tGPU: " << gpu_number
+                        << "; VRAM TOTAL: " << total / (1024 * 1024) << "MB\n";
+            }
+            uint64_t usage = 0;
+            ret = amdsmi_get_gpu_memory_usage(processor_handles[device_index],
+                                              static_cast<amdsmi_memory_type_t>(mem_type), &usage);
+            if (ret != AMDSMI_STATUS_SUCCESS) {
+              PRINT_AMDSMI_RET(ret)
+              std::cout << "\t**amdsmi_get_gpu_memory_usage(): not supported on this device."
+                        << std::endl;
+            } else {
+              CHK_AMDSMI_RET(ret)
+              std::cout << "\tGPU: " << gpu_number
+                        << "; VRAM USED: " << usage / (1024 * 1024) << "MB\n";
+            }
 
             // Get VBIOS info
             amdsmi_vbios_info_t vbios_info = {};
@@ -609,13 +996,15 @@ int main() {
             // Get power measure
             amdsmi_power_info_t power_measure = {};
             ret = amdsmi_get_power_info(processor_handles[device_index], &power_measure);
-            CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_power_info:\n");
-            printf("\tCurrent GFX Voltage: %d\n",
-                   power_measure.gfx_voltage);
-            printf("\tAverage socket power: %d\n",
-                   power_measure.average_socket_power);
-            printf("\tGPU Power limit: %d\n\n", power_measure.power_limit);
+            if (ret != AMDSMI_STATUS_NOT_SUPPORTED) {
+                CHK_AMDSMI_RET(ret)
+                printf("\tCurrent GFX Voltage: %d\n", power_measure.gfx_voltage);
+                printf("\tAverage socket power: %d\n", power_measure.average_socket_power);
+                printf("\tGPU Power limit: %d\n\n", power_measure.power_limit);
+            } else {
+                printf("\tamdsmi_get_power_info(): not supported on this device.\n");
+            }
 
             // Get driver version
             amdsmi_driver_info_t driver_info;
@@ -637,14 +1026,15 @@ int main() {
             // Get engine usage info
             amdsmi_engine_usage_t engine_usage = {};
             ret = amdsmi_get_gpu_activity(processor_handles[device_index], &engine_usage);
-            CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_gpu_activity:\n");
-            printf("\tAverage GFX Activity: %d\n",
-                   engine_usage.gfx_activity);
-            printf("\tAverage MM Activity: %d\n",
-                   engine_usage.mm_activity);
-            printf("\tAverage UMC Activity: %d\n\n",
-                   engine_usage.umc_activity);
+            if (ret != AMDSMI_STATUS_NOT_SUPPORTED) {
+                CHK_AMDSMI_RET(ret)
+                printf("\tAverage GFX Activity: %d\n", engine_usage.gfx_activity);
+                printf("\tAverage MM Activity: %d\n", engine_usage.mm_activity);
+                printf("\tAverage UMC Activity: %d\n\n", engine_usage.umc_activity);
+            } else {
+              printf("\tamdsmi_get_gpu_activity(): not supported on this device.\n");
+            }
 
             // Get firmware info
             amdsmi_fw_info_t fw_information = {};
@@ -662,57 +1052,82 @@ int main() {
             amdsmi_clk_info_t gfx_clk_values = {};
             ret = amdsmi_get_clock_info(processor_handles[device_index], AMDSMI_CLK_TYPE_GFX,
                                            &gfx_clk_values);
-            CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_clock_info:\n");
-            printf("\tGPU GFX Max Clock: %d\n", gfx_clk_values.max_clk);
-            printf("\tGPU GFX Current Clock: %d\n", gfx_clk_values.clk);
+            if (ret != AMDSMI_STATUS_NOT_SUPPORTED) {
+                CHK_AMDSMI_RET(ret)
+                printf("\tGPU GFX Max Clock: %d\n", gfx_clk_values.max_clk);
+                printf("\tGPU GFX Current Clock: %d\n", gfx_clk_values.clk);
+            } else {
+                printf("\tamdsmi_get_clock_info(AMDSMI_CLK_TYPE_GFX): "
+                       "not supported on this device.\n");
+            }
 
             // Get MEM clock measurements
             amdsmi_clk_info_t mem_clk_values = {};
             ret = amdsmi_get_clock_info(processor_handles[device_index], AMDSMI_CLK_TYPE_MEM,
                                            &mem_clk_values);
-            CHK_AMDSMI_RET(ret)
-            printf("\tGPU MEM Max Clock: %d\n", mem_clk_values.max_clk);
-            printf("\tGPU MEM Current Clock: %d\n\n", mem_clk_values.clk);
+            if (ret != AMDSMI_STATUS_NOT_SUPPORTED) {
+                CHK_AMDSMI_RET(ret)
+                printf("\tGPU MEM Max Clock: %d\n", mem_clk_values.max_clk);
+                printf("\tGPU MEM Current Clock: %d\n\n", mem_clk_values.clk);
+            } else {
+                printf("\tamdsmi_get_clock_info(AMDSMI_CLK_TYPE_MEM): "
+                       "not supported on this device.\n");
+            }
 
             // Get PCIe status
             amdsmi_pcie_info_t pcie_info = {};
             ret = amdsmi_get_pcie_info(processor_handles[device_index], &pcie_info);
-            CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_pcie_info:\n");
-            printf("\tCurrent PCIe lanes: %d\n", pcie_info.pcie_metric.pcie_width);
-            printf("\tCurrent PCIe speed: %d\n", pcie_info.pcie_metric.pcie_speed);
-            printf("\tCurrent PCIe Interface Version: %d\n",
-                                    pcie_info.pcie_static.pcie_interface_version);
-            printf("\tPCIe slot type: %d\n", pcie_info.pcie_static.slot_type);
-            printf("\tPCIe max lanes: %d\n", pcie_info.pcie_static.max_pcie_width);
-            printf("\tPCIe max speed: %d\n", pcie_info.pcie_static.max_pcie_speed);
+            if (ret != AMDSMI_STATUS_NOT_SUPPORTED) {
+                CHK_AMDSMI_RET(ret)
+                printf("\tCurrent PCIe lanes: %d\n", pcie_info.pcie_metric.pcie_width);
+                printf("\tCurrent PCIe speed: %d\n", pcie_info.pcie_metric.pcie_speed);
+                printf("\tCurrent PCIe Interface Version: %d\n",
+                       pcie_info.pcie_static.pcie_interface_version);
+                printf("\tPCIe slot type: %d\n", pcie_info.pcie_static.slot_type);
+                printf("\tPCIe max lanes: %d\n", pcie_info.pcie_static.max_pcie_width);
+                printf("\tPCIe max speed: %d\n", pcie_info.pcie_static.max_pcie_speed);
 
-            // additional pcie related metrics
-            printf("\tPCIe bandwidth: %u\n", pcie_info.pcie_metric.pcie_bandwidth);
-            printf("\tPCIe replay count: %" PRIu64 "\n", pcie_info.pcie_metric.pcie_replay_count);
-            printf("\tPCIe L0 recovery count: %" PRIu64 "\n", pcie_info.pcie_metric.pcie_l0_to_recovery_count);
-            printf("\tPCIe rollover count: %" PRIu64 "\n", pcie_info.pcie_metric.pcie_replay_roll_over_count);
-            printf("\tPCIe nak received count: %" PRIu64 "\n", pcie_info.pcie_metric.pcie_nak_received_count);
-            printf("\tPCIe nak sent count: %" PRIu64 "\n", pcie_info.pcie_metric.pcie_nak_sent_count);
+                // additional pcie related metrics
+                printf("\tPCIe bandwidth: %u\n", pcie_info.pcie_metric.pcie_bandwidth);
+                printf("\tPCIe replay count: %" PRIu64 "\n",
+                      pcie_info.pcie_metric.pcie_replay_count);
+                printf("\tPCIe L0 recovery count: %" PRIu64 "\n",
+                      pcie_info.pcie_metric.pcie_l0_to_recovery_count);
+                printf("\tPCIe rollover count: %" PRIu64 "\n",
+                      pcie_info.pcie_metric.pcie_replay_roll_over_count);
+                printf("\tPCIe nak received count: %" PRIu64 "\n",
+                      pcie_info.pcie_metric.pcie_nak_received_count);
+                printf("\tPCIe nak sent count: %" PRIu64 "\n",
+                      pcie_info.pcie_metric.pcie_nak_sent_count);
+            }
 
             // Get VRAM temperature limit
             int64_t temperature = 0;
             ret = amdsmi_get_temp_metric(
                 processor_handles[device_index], AMDSMI_TEMPERATURE_TYPE_VRAM,
                 AMDSMI_TEMP_CRITICAL, &temperature);
-            CHK_AMDSMI_RET(ret)
-            printf("    Output of amdsmi_get_temp_metric:\n");
-            printf("\tGPU VRAM temp limit: %ld\n", temperature);
+            if (ret != AMDSMI_STATUS_NOT_SUPPORTED) {
+                CHK_AMDSMI_RET(ret)
+                printf("    Output of amdsmi_get_temp_metric:\n");
+                printf("\tGPU VRAM temp limit: %ld\n", temperature);
+            } else {
+                printf("\tamdsmi_get_temp_metric(AMDSMI_TEMPERATURE_TYPE_VRAM): "
+                        "not supported on this device.\n");
+            }
 
             // Get GFX temperature limit
             ret = amdsmi_get_temp_metric(
                 processor_handles[device_index], AMDSMI_TEMPERATURE_TYPE_EDGE,
                 AMDSMI_TEMP_CRITICAL, &temperature);
-            if (ret != amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED) {
+            if (ret != AMDSMI_STATUS_NOT_SUPPORTED) {
                 CHK_AMDSMI_RET(ret)
+                printf("\tGPU GFX temp limit: %ld\n\n", temperature);
+            } else {
+                printf("\tamdsmi_get_temp_metric(AMDSMI_TEMPERATURE_TYPE_EDGE): "
+                        "not supported on this device.\n");
             }
-            printf("\tGPU GFX temp limit: %ld\n\n", temperature);
 
             // Get temperature measurements
             // amdsmi_temperature_t edge_temp, hotspot_temp, vram_temp,
@@ -725,8 +1140,8 @@ int main() {
                 ret = amdsmi_get_temp_metric(
                     processor_handles[device_index], temp_type,
                     AMDSMI_TEMP_CURRENT,
-                    &temp_measurements[(int)(temp_type)]);
-                if (ret != amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED) {
+                    &temp_measurements[static_cast<int>(temp_type)]);
+                if (ret != AMDSMI_STATUS_NOT_SUPPORTED) {
                     CHK_AMDSMI_RET(ret)
                 }
             }
@@ -919,11 +1334,11 @@ int main() {
             int64_t val_i64 = 0;
             ret =  amdsmi_get_temp_metric(processor_handles[device_index], AMDSMI_TEMPERATURE_TYPE_EDGE,
                                              AMDSMI_TEMP_CURRENT, &val_i64);
-            if (ret != amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED) {
+            if (ret != AMDSMI_STATUS_NOT_SUPPORTED) {
                 CHK_AMDSMI_RET(ret)
             }
             printf("    Output of  amdsmi_get_temp_metric:\n");
-            std::cout << "\t\tTemperature: " << val_i64 << "C"
+            std::cout << "\t\tTemperature: " << std::dec << val_i64 << "C"
                       << "\n\n";
 
             // Get frame buffer
@@ -936,465 +1351,481 @@ int main() {
 
             amdsmi_power_cap_info_t cap_info = {};
             ret = amdsmi_get_power_cap_info(processor_handles[device_index], 0, &cap_info);
-            CHK_AMDSMI_RET(ret)
-            printf("    Output of amdsmi_get_power_cap_info:\n");
-            std::cout << "\t\t Power Cap: " << cap_info.power_cap
-                      << " uW\n";
-            std::cout << "\t\t Default Power Cap: " << cap_info.default_power_cap
-                      << " uW\n\n";
-            std::cout << "\t\t Dpm Cap: " << cap_info.dpm_cap
-                      << " MHz\n\n";
-            std::cout << "\t\t Min Power Cap: " << cap_info.min_power_cap
-                      << " uW\n\n";
-            std::cout << "\t\t Max Power Cap: " << cap_info.max_power_cap
-                      << " uW\n\n";
+            if (ret != AMDSMI_STATUS_NOT_SUPPORTED) {
+                CHK_AMDSMI_RET(ret)
+                printf("    Output of amdsmi_get_power_cap_info:\n");
+                std::cout << "\t\t Power Cap: " << cap_info.power_cap
+                          << " uW\n";
+                std::cout << "\t\t Default Power Cap: " << cap_info.default_power_cap
+                          << " uW\n\n";
+                std::cout << "\t\t Dpm Cap: " << cap_info.dpm_cap
+                          << " MHz\n\n";
+                std::cout << "\t\t Min Power Cap: " << cap_info.min_power_cap
+                          << " uW\n\n";
+                std::cout << "\t\t Max Power Cap: " << cap_info.max_power_cap
+                          << " uW\n\n";
+            } else {
+                std::cout << "\tamdsmi_get_power_cap_info(): not supported on this device.\n";
+            }
 
             /// Get GPU Metrics info
             std::cout << "\n\n";
             amdsmi_gpu_metrics_t smu;
             ret = amdsmi_get_gpu_metrics_info(processor_handles[device_index], &smu);
-            CHK_AMDSMI_RET(ret)
-            printf("    Output of amdsmi_get_gpu_metrics_info:\n");
-            printf("\tDevice[%d] BDF %04" PRIx64 ":%02" PRIx32 ":%02" PRIx32 ".%" PRIu32 "\n\n", i,
-                   static_cast<uint64_t>(bdf.domain_number),
-                   static_cast<uint32_t>(bdf.bus_number),
-                   static_cast<uint32_t>(bdf.device_number),
-                   static_cast<uint32_t>(bdf.function_number));
+            if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
+                std::cout << "\tamdsmi_get_gpu_metrics_info(): not supported on this device.\n";
+            } else {  // START GPU METRICS OUTPUTS
+                CHK_AMDSMI_RET(ret)
+                printf("    Output of amdsmi_get_gpu_metrics_info:\n");
+                printf("\tDevice[%d] BDF %04" PRIx64 ":%02" PRIx32 ":%02" PRIx32 ".%" PRIu32 "\n\n",
+                      i, static_cast<uint64_t>(bdf.domain_number),
+                      static_cast<uint32_t>(bdf.bus_number),
+                      static_cast<uint32_t>(bdf.device_number),
+                      static_cast<uint32_t>(bdf.function_number));
 
-            std::cout << "METRIC TABLE HEADER:\n";
-            std::cout << "structure_size=" << std::dec
-            << static_cast<uint16_t>(smu.common_header.structure_size) << "\n";
-            std::cout << "\tformat_revision=" << std::dec
-            << static_cast<uint16_t>(smu.common_header.format_revision) << "\n";
-            std::cout << "\tcontent_revision=" << std::dec
-            << static_cast<uint16_t>(smu.common_header.content_revision) << "\n";
+                std::cout << "METRIC TABLE HEADER:\n";
+                std::cout << "structure_size=" << std::dec
+                << static_cast<uint16_t>(smu.common_header.structure_size) << "\n";
+                std::cout << "\tformat_revision=" << std::dec
+                << static_cast<uint16_t>(smu.common_header.format_revision) << "\n";
+                std::cout << "\tcontent_revision=" << std::dec
+                << static_cast<uint16_t>(smu.common_header.content_revision) << "\n";
 
-            std::cout << "\n";
-            std::cout << "TIME STAMPS (ns):\n";
-            std::cout << std::dec << "\tsystem_clock_counter=" << smu.system_clock_counter << "\n";
-            std::cout << "\tfirmware_timestamp (10ns resolution)=" << std::dec << smu.firmware_timestamp
-                      << "\n";
+                std::cout << "\n";
+                std::cout << "TIME STAMPS (ns):\n";
+                std::cout << std::dec << "\tsystem_clock_counter=" << smu.system_clock_counter << "\n";
+                std::cout << "\tfirmware_timestamp (10ns resolution)=" << std::dec << smu.firmware_timestamp
+                          << "\n";
 
-            std::cout << "\n";
-            std::cout << "TEMPERATURES (C):\n";
-            std::cout << std::dec << "\ttemperature_edge= " << smu.temperature_edge << "\n";
-            std::cout << std::dec << "\ttemperature_hotspot= " << smu.temperature_hotspot << "\n";
-            std::cout << std::dec << "\ttemperature_mem= " << smu.temperature_mem << "\n";
-            std::cout << std::dec << "\ttemperature_vrgfx= " << smu.temperature_vrgfx << "\n";
-            std::cout << std::dec << "\ttemperature_vrsoc= " << smu.temperature_vrsoc << "\n";
-            std::cout << std::dec << "\ttemperature_vrmem= " << smu.temperature_vrmem << "\n";
-            std::cout << "\ttemperature_hbm = [";
-            auto idx = 0;
-            for (const auto& temp : smu.temperature_hbm) {
-              std::cout << temp;
-              if ((idx + 1) != static_cast<int>(std::size(smu.temperature_hbm))) {
-                std::cout << ", ";
-              } else {
-                std::cout << "]\n";
-              }
-              ++idx;
-            }
-
-            std::cout << "\n";
-            std::cout << "UTILIZATION (%):\n";
-            std::cout << std::dec << "\taverage_gfx_activity=" << smu.average_gfx_activity << "\n";
-            std::cout << std::dec << "\taverage_umc_activity=" << smu.average_umc_activity << "\n";
-            std::cout << std::dec << "\taverage_mm_activity=" << smu.average_mm_activity << "\n";
-            std::cout << std::dec << "\tvcn_activity= [";
-            idx = 0;
-            for (const auto& temp : smu.vcn_activity) {
-              std::cout << temp;
-              if ((idx + 1) != static_cast<int>(std::size(smu.vcn_activity))) {
-                std::cout << ", ";
-              } else {
-                std::cout << "]\n";
-              }
-              ++idx;
-            }
-
-            std::cout << "\n";
-            std::cout << std::dec << "\tjpeg_activity= [";
-            idx = 0;
-            for (const auto& temp : smu.jpeg_activity) {
-              std::cout << temp;
-              if ((idx + 1) != static_cast<int>(std::size(smu.jpeg_activity))) {
-                std::cout << ", ";
-              } else {
-                std::cout << "]\n";
-              }
-              ++idx;
-            }
-
-            std::cout << "\n";
-            std::cout << "POWER (W)/ENERGY (15.259uJ per 1ns):\n";
-            std::cout << std::dec << "\taverage_socket_power=" << smu.average_socket_power << "\n";
-            std::cout << std::dec << "\tcurrent_socket_power=" << smu.current_socket_power << "\n";
-            std::cout << std::dec << "\tenergy_accumulator=" << smu.energy_accumulator << "\n";
-
-            std::cout << "\n";
-            std::cout << "AVG CLOCKS (MHz):\n";
-            std::cout << std::dec << "\taverage_gfxclk_frequency=" << smu.average_gfxclk_frequency
-                      << "\n";
-            std::cout << std::dec << "\taverage_gfxclk_frequency=" << smu.average_gfxclk_frequency
-                      << "\n";
-            std::cout << std::dec << "\taverage_uclk_frequency=" << smu.average_uclk_frequency << "\n";
-            std::cout << std::dec << "\taverage_vclk0_frequency=" << smu.average_vclk0_frequency
-                      << "\n";
-            std::cout << std::dec << "\taverage_dclk0_frequency=" << smu.average_dclk0_frequency
-                      << "\n";
-            std::cout << std::dec << "\taverage_vclk1_frequency=" << smu.average_vclk1_frequency
-                      << "\n";
-            std::cout << std::dec << "\taverage_dclk1_frequency=" << smu.average_dclk1_frequency
-                      << "\n";
-
-            std::cout << "\n";
-            std::cout << "CURRENT CLOCKS (MHz):\n";
-            std::cout << std::dec << "\tcurrent_gfxclk=" << smu.current_gfxclk << "\n";
-            std::cout << std::dec << "\tcurrent_gfxclks= [";
-            idx = 0;
-            for (const auto& temp : smu.current_gfxclks) {
-              std::cout << temp;
-              if ((idx + 1) != static_cast<int>(std::size(smu.current_gfxclks))) {
-                std::cout << ", ";
-              } else {
-                std::cout << "]\n";
-              }
-              ++idx;
-            }
-
-            std::cout << std::dec << "\tcurrent_socclk=" << smu.current_socclk << "\n";
-            std::cout << std::dec << "\tcurrent_socclks= [";
-            idx = 0;
-            for (const auto& temp : smu.current_socclks) {
-              std::cout << temp;
-              if ((idx + 1) != static_cast<int>(std::size(smu.current_socclks))) {
-                std::cout << ", ";
-              } else {
-                std::cout << "]\n";
-              }
-              ++idx;
-            }
-
-            std::cout << std::dec << "\tcurrent_uclk=" << smu.current_uclk << "\n";
-            std::cout << std::dec << "\tcurrent_vclk0=" << smu.current_vclk0 << "\n";
-            std::cout << std::dec << "\tcurrent_vclk0s= [";
-            idx = 0;
-            for (const auto& temp : smu.current_vclk0s) {
-              std::cout << temp;
-              if ((idx + 1) != static_cast<int>(std::size(smu.current_vclk0s))) {
-                std::cout << ", ";
-              } else {
-                std::cout << "]\n";
-              }
-              ++idx;
-            }
-
-            std::cout << std::dec << "\tcurrent_dclk0=" << smu.current_dclk0 << "\n";
-            std::cout << std::dec << "\tcurrent_dclk0s= [";
-            idx = 0;
-            for (const auto& temp : smu.current_dclk0s) {
-              std::cout << temp;
-              if ((idx + 1) != static_cast<int>(std::size(smu.current_dclk0s))) {
-                std::cout << ", ";
-              } else {
-                std::cout << "]\n";
-              }
-              ++idx;
-            }
-
-            std::cout << std::dec << "\tcurrent_vclk1=" << smu.current_vclk1 << "\n";
-            std::cout << std::dec << "\tcurrent_dclk1=" << smu.current_dclk1 << "\n";
-
-            std::cout << "\n";
-            std::cout << "TROTTLE STATUS:\n";
-            std::cout << std::dec << "\tthrottle_status=" << smu.throttle_status << "\n";
-
-            std::cout << "\n";
-            std::cout << "FAN SPEED:\n";
-            std::cout << std::dec << "\tcurrent_fan_speed=" << smu.current_fan_speed << "\n";
-
-            std::cout << "\n";
-            std::cout << "LINK WIDTH (number of lanes) /SPEED (0.1 GT/s):\n";
-            std::cout << "\tpcie_link_width=" << smu.pcie_link_width << "\n";
-            std::cout << "\tpcie_link_speed=" << smu.pcie_link_speed << "\n";
-            std::cout << "\txgmi_link_width=" << smu.xgmi_link_width << "\n";
-            std::cout << "\txgmi_link_speed=" << smu.xgmi_link_speed << "\n";
-
-            std::cout << "\n";
-            std::cout << "Utilization Accumulated(%):\n";
-            std::cout << "\tgfx_activity_acc=" << std::dec << smu.gfx_activity_acc << "\n";
-            std::cout << "\tmem_activity_acc=" << std::dec << smu.mem_activity_acc  << "\n";
-
-            std::cout << "\n";
-            std::cout << "XGMI ACCUMULATED DATA TRANSFER SIZE (KB):\n";
-            std::cout << std::dec << "\txgmi_read_data_acc= [";
-            idx = 0;
-            for (const auto& temp : smu.xgmi_read_data_acc) {
-              std::cout << temp;
-              if ((idx + 1) != static_cast<int>(std::size(smu.xgmi_read_data_acc))) {
-                std::cout << ", ";
-              } else {
-                std::cout << "]\n";
-              }
-              ++idx;
-            }
-
-            std::cout << std::dec << "\txgmi_write_data_acc= [";
-            idx = 0;
-            for (const auto& temp : smu.xgmi_write_data_acc) {
-              std::cout << temp;
-              if ((idx + 1) != static_cast<int>(std::size(smu.xgmi_write_data_acc))) {
-                std::cout << ", ";
-              } else {
-                std::cout << "]\n";
-              }
-              ++idx;
-            }
-
-            std::cout << std::dec << "\txgmi_link_status= [";
-            idx = 0;
-            for (const auto& temp : smu.xgmi_link_status) {
-              std::cout << temp;
-              if ((idx + 1) != static_cast<int>(std::size(smu.xgmi_link_status))) {
-                std::cout << ", ";
-              } else {
-                std::cout << "]\n";
-              }
-              ++idx;
-            }
-
-            // Voltage (mV)
-            std::cout << "\tvoltage_soc = " << std::dec << smu.voltage_soc << "\n";
-            std::cout << "\tvoltage_gfx = " << std::dec << smu.voltage_gfx << "\n";
-            std::cout << "\tvoltage_mem = " << std::dec << smu.voltage_mem << "\n";
-
-            std::cout << "\tindep_throttle_status = " << std::dec << smu.indep_throttle_status << "\n";
-
-            // Clock Lock Status. Each bit corresponds to clock instance
-            std::cout << "\tgfxclk_lock_status (in hex) = " << std::hex
-                      << smu.gfxclk_lock_status << std::dec <<"\n";
-
-            // Bandwidth (GB/sec)
-            std::cout << "\tpcie_bandwidth_acc=" << std::dec << smu.pcie_bandwidth_acc << "\n";
-            std::cout << "\tpcie_bandwidth_inst=" << std::dec << smu.pcie_bandwidth_inst << "\n";
-
-            // VRAM max bandwidth at max memory clock
-            std::cout << "\tvram_max_bandwidth=" << std::dec << smu.vram_max_bandwidth << "\n";
-
-            // Counts
-            std::cout << "\tpcie_l0_to_recov_count_acc= " << std::dec << smu.pcie_l0_to_recov_count_acc
-                      << "\n";
-            std::cout << "\tpcie_replay_count_acc= " << std::dec << smu.pcie_replay_count_acc << "\n";
-            std::cout << "\tpcie_replay_rover_count_acc= " << std::dec
-                      << smu.pcie_replay_rover_count_acc << "\n";
-            std::cout << "\tpcie_nak_sent_count_acc= " << std::dec << smu.pcie_nak_sent_count_acc
-                      << "\n";
-            std::cout << "\tpcie_nak_rcvd_count_acc= " << std::dec << smu.pcie_nak_rcvd_count_acc
-                      << "\n";
-
-            // Accumulation cycle counter
-            // Accumulated throttler residencies
-            std::cout << "\n";
-            std::cout << "RESIDENCY ACCUMULATION / COUNTER:\n";
-            std::cout << "\taccumulation_counter = " << std::dec << smu.accumulation_counter << "\n";
-            std::cout << "\tprochot_residency_acc = " << std::dec << smu.prochot_residency_acc << "\n";
-            std::cout << "\tppt_residency_acc = " << std::dec << smu.ppt_residency_acc << "\n";
-            std::cout << "\tsocket_thm_residency_acc = " << std::dec << smu.socket_thm_residency_acc
-                      << "\n";
-            std::cout << "\tvr_thm_residency_acc = " << std::dec << smu.vr_thm_residency_acc
-                      << "\n";
-            std::cout << "\thbm_thm_residency_acc = " << std::dec << smu.hbm_thm_residency_acc << "\n";
-
-            // Number of current partitions
-            std::cout << "\tnum_partition = " << std::dec << smu.num_partition << "\n";
-
-            // PCIE other end recovery counter
-            std::cout << "\tpcie_lc_perf_other_end_recovery = "
-                      << std::dec << smu.pcie_lc_perf_other_end_recovery << "\n";
-
-            idx = 0;
-            auto idy = 0;
-            std::cout  << "\txcp_stats.gfx_busy_inst: " << "\n";
-            for (auto& row : smu.xcp_stats) {
-              std::cout << "\t XCP [" << idx << "] : [";
-              for (auto& col : row.gfx_busy_inst) {
-                if ((idy + 1) != static_cast<int>(std::size(row.gfx_busy_inst))) {
-                    std::cout << col << ", ";
-                } else {
-                    std::cout << col;
+                std::cout << "\n";
+                std::cout << "TEMPERATURES (C):\n";
+                std::cout << std::dec << "\ttemperature_edge= " << smu.temperature_edge << "\n";
+                std::cout << std::dec << "\ttemperature_hotspot= " << smu.temperature_hotspot << "\n";
+                std::cout << std::dec << "\ttemperature_mem= " << smu.temperature_mem << "\n";
+                std::cout << std::dec << "\ttemperature_vrgfx= " << smu.temperature_vrgfx << "\n";
+                std::cout << std::dec << "\ttemperature_vrsoc= " << smu.temperature_vrsoc << "\n";
+                std::cout << std::dec << "\ttemperature_vrmem= " << smu.temperature_vrmem << "\n";
+                std::cout << "\ttemperature_hbm = [";
+                auto idx = 0;
+                for (const auto& temp : smu.temperature_hbm) {
+                  std::cout << temp;
+                  if ((idx + 1) != static_cast<int>(std::size(smu.temperature_hbm))) {
+                    std::cout << ", ";
+                  } else {
+                    std::cout << "]\n";
+                  }
+                  ++idx;
                 }
-                idy++;
-              }
-              std::cout << "]\n";
-              idy = 0;
-              idx++;
-            }
 
-            idx = 0;
-            idy = 0;
-            std::cout  << "\txcp_stats.vcn_busy: " << "\n";
-            for (auto& row : smu.xcp_stats) {
-              std::cout << "\t XCP [" << idx << "] : [";
-              for (auto& col : row.vcn_busy) {
-                if ((idy + 1) != static_cast<int>(std::size(row.vcn_busy))) {
-                    std::cout << col << ", ";
-                } else {
-                    std::cout << col;
+                std::cout << "\n";
+                std::cout << "UTILIZATION (%):\n";
+                std::cout << std::dec << "\taverage_gfx_activity=" << smu.average_gfx_activity << "\n";
+                std::cout << std::dec << "\taverage_umc_activity=" << smu.average_umc_activity << "\n";
+                std::cout << std::dec << "\taverage_mm_activity=" << smu.average_mm_activity << "\n";
+                std::cout << std::dec << "\tvcn_activity= [";
+                idx = 0;
+                for (const auto& temp : smu.vcn_activity) {
+                  std::cout << temp;
+                  if ((idx + 1) != static_cast<int>(std::size(smu.vcn_activity))) {
+                    std::cout << ", ";
+                  } else {
+                    std::cout << "]\n";
+                  }
+                  ++idx;
                 }
-                idy++;
-              }
-              std::cout << "]\n";
-              idy = 0;
-              idx++;
-            }
 
-            idx = 0;
-            idy = 0;
-            std::cout  << "\txcp_stats.jpeg_busy: " << "\n";
-            for (auto& row : smu.xcp_stats) {
-              std::cout << "\t XCP [" << idx << "] : [";
-              for (auto& col : row.jpeg_busy) {
-                if ((idy + 1) != static_cast<int>(std::size(row.jpeg_busy))) {
-                    std::cout << col << ", ";
-                } else {
-                    std::cout << col;
+                std::cout << "\n";
+                std::cout << std::dec << "\tjpeg_activity= [";
+                idx = 0;
+                for (const auto& temp : smu.jpeg_activity) {
+                  std::cout << temp;
+                  if ((idx + 1) != static_cast<int>(std::size(smu.jpeg_activity))) {
+                    std::cout << ", ";
+                  } else {
+                    std::cout << "]\n";
+                  }
+                  ++idx;
                 }
-                idy++;
-              }
-              std::cout << "]\n";
-              idy = 0;
-              idx++;
-            }
 
-            idx = 0;
-            idy = 0;
-            std::cout  << "\txcp_stats.gfx_busy_acc: " << "\n";
-            for (auto& row : smu.xcp_stats) {
-              std::cout << "\t XCP [" << idx << "] : [";
-              for (auto& col : row.gfx_busy_acc) {
-                if ((idy + 1) != static_cast<int>(std::size(row.gfx_busy_acc))) {
-                    std::cout << col << ", ";
-                } else {
-                    std::cout << col;
+                std::cout << "\n";
+                std::cout << "POWER (W)/ENERGY (15.259uJ per 1ns):\n";
+                std::cout << std::dec << "\taverage_socket_power=" << smu.average_socket_power << "\n";
+                std::cout << std::dec << "\tcurrent_socket_power=" << smu.current_socket_power << "\n";
+                std::cout << std::dec << "\tenergy_accumulator=" << smu.energy_accumulator << "\n";
+
+                std::cout << "\n";
+                std::cout << "AVG CLOCKS (MHz):\n";
+                std::cout << std::dec << "\taverage_gfxclk_frequency=" << smu.average_gfxclk_frequency
+                          << "\n";
+                std::cout << std::dec << "\taverage_gfxclk_frequency=" << smu.average_gfxclk_frequency
+                          << "\n";
+                std::cout << std::dec << "\taverage_uclk_frequency=" << smu.average_uclk_frequency << "\n";
+                std::cout << std::dec << "\taverage_vclk0_frequency=" << smu.average_vclk0_frequency
+                          << "\n";
+                std::cout << std::dec << "\taverage_dclk0_frequency=" << smu.average_dclk0_frequency
+                          << "\n";
+                std::cout << std::dec << "\taverage_vclk1_frequency=" << smu.average_vclk1_frequency
+                          << "\n";
+                std::cout << std::dec << "\taverage_dclk1_frequency=" << smu.average_dclk1_frequency
+                          << "\n";
+
+                std::cout << "\n";
+                std::cout << "CURRENT CLOCKS (MHz):\n";
+                std::cout << std::dec << "\tcurrent_gfxclk=" << smu.current_gfxclk << "\n";
+                std::cout << std::dec << "\tcurrent_gfxclks= [";
+                idx = 0;
+                for (const auto& temp : smu.current_gfxclks) {
+                  std::cout << temp;
+                  if ((idx + 1) != static_cast<int>(std::size(smu.current_gfxclks))) {
+                    std::cout << ", ";
+                  } else {
+                    std::cout << "]\n";
+                  }
+                  ++idx;
                 }
-                idy++;
-              }
-              std::cout << "]\n";
-              idy = 0;
-              idx++;
-            }
 
-            idx = 0;
-            idy = 0;
-            std::cout  << "\txcp_stats.gfx_below_host_limit_acc: " << "\n";
-            for (auto& row : smu.xcp_stats) {
-              std::cout << "\t XCP [" << idx << "] : [";
-              for (auto& col : row.gfx_below_host_limit_acc) {
-                if ((idy + 1) != static_cast<int>(std::size(row.gfx_below_host_limit_acc))) {
-                    std::cout << col << ", ";
-                } else {
-                    std::cout << col;
+                std::cout << std::dec << "\tcurrent_socclk=" << smu.current_socclk << "\n";
+                std::cout << std::dec << "\tcurrent_socclks= [";
+                idx = 0;
+                for (const auto& temp : smu.current_socclks) {
+                  std::cout << temp;
+                  if ((idx + 1) != static_cast<int>(std::size(smu.current_socclks))) {
+                    std::cout << ", ";
+                  } else {
+                    std::cout << "]\n";
+                  }
+                  ++idx;
                 }
-                idy++;
-              }
-              std::cout << "]\n";
-              idy = 0;
-              idx++;
-            }
 
-            /*New scp stats v1.8*/
-            idx = 0;
-            idy = 0;
-            std::cout  << "\txcp_stats.gfx_below_host_limit_ppt_acc: " << "\n";
-            for (auto& row : smu.xcp_stats) {
-              std::cout << "\t XCP [" << idx << "] : [";
-              for (auto& col : row.gfx_below_host_limit_ppt_acc) {
-                if ((idy + 1) != static_cast<int>(std::size(row.gfx_below_host_limit_ppt_acc))) {
-                    std::cout << col << ", ";
-                } else {
-                    std::cout << col;
+                std::cout << std::dec << "\tcurrent_uclk=" << smu.current_uclk << "\n";
+                std::cout << std::dec << "\tcurrent_vclk0=" << smu.current_vclk0 << "\n";
+                std::cout << std::dec << "\tcurrent_vclk0s= [";
+                idx = 0;
+                for (const auto& temp : smu.current_vclk0s) {
+                  std::cout << temp;
+                  if ((idx + 1) != static_cast<int>(std::size(smu.current_vclk0s))) {
+                    std::cout << ", ";
+                  } else {
+                    std::cout << "]\n";
+                  }
+                  ++idx;
                 }
-                idy++;
-              }
-              std::cout << "]\n";
-              idy = 0;
-              idx++;
-            }
 
-            idx = 0;
-            idy = 0;
-            std::cout  << "\txcp_stats.gfx_below_host_limit_thm_acc: " << "\n";
-            for (auto& row : smu.xcp_stats) {
-              std::cout << "\t XCP [" << idx << "] : [";
-              for (auto& col : row.gfx_below_host_limit_thm_acc) {
-                if ((idy + 1) != static_cast<int>(std::size(row.gfx_below_host_limit_thm_acc))) {
-                    std::cout << col << ", ";
-                } else {
-                    std::cout << col;
+                std::cout << std::dec << "\tcurrent_dclk0=" << smu.current_dclk0 << "\n";
+                std::cout << std::dec << "\tcurrent_dclk0s= [";
+                idx = 0;
+                for (const auto& temp : smu.current_dclk0s) {
+                  std::cout << temp;
+                  if ((idx + 1) != static_cast<int>(std::size(smu.current_dclk0s))) {
+                    std::cout << ", ";
+                  } else {
+                    std::cout << "]\n";
+                  }
+                  ++idx;
                 }
-                idy++;
-              }
-              std::cout << "]\n";
-              idy = 0;
-              idx++;
-            }
 
-            idx = 0;
-            idy = 0;
-            std::cout  << "\txcp_stats.gfx_low_utilization_acc: " << "\n";
-            for (auto& row : smu.xcp_stats) {
-              std::cout << "\t XCP [" << idx << "] : [";
-              for (auto& col : row.gfx_low_utilization_acc) {
-                if ((idy + 1) != static_cast<int>(std::size(row.gfx_low_utilization_acc))) {
-                    std::cout << col << ", ";
-                } else {
-                    std::cout << col;
+                std::cout << std::dec << "\tcurrent_vclk1=" << smu.current_vclk1 << "\n";
+                std::cout << std::dec << "\tcurrent_dclk1=" << smu.current_dclk1 << "\n";
+
+                std::cout << "\n";
+                std::cout << "TROTTLE STATUS:\n";
+                std::cout << std::dec << "\tthrottle_status=" << smu.throttle_status << "\n";
+
+                std::cout << "\n";
+                std::cout << "FAN SPEED:\n";
+                std::cout << std::dec << "\tcurrent_fan_speed=" << smu.current_fan_speed << "\n";
+
+                std::cout << "\n";
+                std::cout << "LINK WIDTH (number of lanes) /SPEED (0.1 GT/s):\n";
+                std::cout << "\tpcie_link_width=" << smu.pcie_link_width << "\n";
+                std::cout << "\tpcie_link_speed=" << smu.pcie_link_speed << "\n";
+                std::cout << "\txgmi_link_width=" << smu.xgmi_link_width << "\n";
+                std::cout << "\txgmi_link_speed=" << smu.xgmi_link_speed << "\n";
+
+                std::cout << "\n";
+                std::cout << "Utilization Accumulated(%):\n";
+                std::cout << "\tgfx_activity_acc=" << std::dec << smu.gfx_activity_acc << "\n";
+                std::cout << "\tmem_activity_acc=" << std::dec << smu.mem_activity_acc  << "\n";
+
+                std::cout << "\n";
+                std::cout << "XGMI ACCUMULATED DATA TRANSFER SIZE (KB):\n";
+                std::cout << std::dec << "\txgmi_read_data_acc= [";
+                idx = 0;
+                for (const auto& temp : smu.xgmi_read_data_acc) {
+                  std::cout << temp;
+                  if ((idx + 1) != static_cast<int>(std::size(smu.xgmi_read_data_acc))) {
+                    std::cout << ", ";
+                  } else {
+                    std::cout << "]\n";
+                  }
+                  ++idx;
                 }
-                idy++;
-              }
-              std::cout << "]\n";
-              idy = 0;
-              idx++;
-            }
 
-            idx = 0;
-            idy = 0;
-            std::cout  << "\txcp_stats.gfx_below_host_limit_total_acc: " << "\n";
-            for (auto& row : smu.xcp_stats) {
-              std::cout << "\t XCP [" << idx << "] : [";
-              for (auto& col : row.gfx_below_host_limit_total_acc) {
-                if ((idy + 1) != static_cast<int>(std::size(row.gfx_below_host_limit_total_acc))) {
-                    std::cout << col << ", ";
-                } else {
-                    std::cout << col;
+                std::cout << std::dec << "\txgmi_write_data_acc= [";
+                idx = 0;
+                for (const auto& temp : smu.xgmi_write_data_acc) {
+                  std::cout << temp;
+                  if ((idx + 1) != static_cast<int>(std::size(smu.xgmi_write_data_acc))) {
+                    std::cout << ", ";
+                  } else {
+                    std::cout << "]\n";
+                  }
+                  ++idx;
                 }
-                idy++;
-              }
-              std::cout << "]\n";
-              idy = 0;
-              idx++;
-            }
 
-            std::cout << "\n\n";
-            std::cout << "\t ** -> Checking metrics with constant changes ** " << "\n";
-            constexpr uint16_t kMAX_ITER_TEST = 10;
-            amdsmi_gpu_metrics_t gpu_metrics_check = {};
-            for (auto idx = uint16_t(1); idx <= kMAX_ITER_TEST; ++idx) {
-                amdsmi_get_gpu_metrics_info(processor_handles[device_index], &gpu_metrics_check);
-                std::cout << "\t\t -> firmware_timestamp [" << idx << "/" << kMAX_ITER_TEST << "]: "
-                          << gpu_metrics_check.firmware_timestamp << "\n";
-            }
+                std::cout << std::dec << "\txgmi_link_status= [";
+                idx = 0;
+                for (const auto& temp : smu.xgmi_link_status) {
+                  std::cout << temp;
+                  if ((idx + 1) != static_cast<int>(std::size(smu.xgmi_link_status))) {
+                    std::cout << ", ";
+                  } else {
+                    std::cout << "]\n";
+                  }
+                  ++idx;
+                }
 
-            std::cout << "\n";
-            for (auto idx = uint16_t(1); idx <= kMAX_ITER_TEST; ++idx) {
-                amdsmi_get_gpu_metrics_info(processor_handles[device_index], &gpu_metrics_check);
-                std::cout << "\t\t -> system_clock_counter [" << idx << "/" << kMAX_ITER_TEST << "]: "
-                          << gpu_metrics_check.system_clock_counter << "\n";
-            }
+                // Voltage (mV)
+                std::cout << "\tvoltage_soc = " << std::dec << smu.voltage_soc << "\n";
+                std::cout << "\tvoltage_gfx = " << std::dec << smu.voltage_gfx << "\n";
+                std::cout << "\tvoltage_mem = " << std::dec << smu.voltage_mem << "\n";
 
-            std::cout << "\n";
-            std::cout << " ** Note: Values MAX'ed out "
-                      << "(UINTX MAX are unsupported for the version in question) ** " << "\n\n";
+                std::cout << "\tindep_throttle_status = " << std::dec << smu.indep_throttle_status << "\n";
+
+                // Clock Lock Status. Each bit corresponds to clock instance
+                std::cout << "\tgfxclk_lock_status (in hex) = " << std::hex
+                          << smu.gfxclk_lock_status << std::dec <<"\n";
+
+                // Bandwidth (GB/sec)
+                std::cout << "\tpcie_bandwidth_acc=" << std::dec << smu.pcie_bandwidth_acc << "\n";
+                std::cout << "\tpcie_bandwidth_inst=" << std::dec << smu.pcie_bandwidth_inst << "\n";
+
+                // VRAM max bandwidth at max memory clock
+                std::cout << "\tvram_max_bandwidth=" << std::dec << smu.vram_max_bandwidth << "\n";
+
+                // Counts
+                std::cout << "\tpcie_l0_to_recov_count_acc= " << std::dec << smu.pcie_l0_to_recov_count_acc
+                          << "\n";
+                std::cout << "\tpcie_replay_count_acc= " << std::dec << smu.pcie_replay_count_acc << "\n";
+                std::cout << "\tpcie_replay_rover_count_acc= " << std::dec
+                          << smu.pcie_replay_rover_count_acc << "\n";
+                std::cout << "\tpcie_nak_sent_count_acc= " << std::dec << smu.pcie_nak_sent_count_acc
+                          << "\n";
+                std::cout << "\tpcie_nak_rcvd_count_acc= " << std::dec << smu.pcie_nak_rcvd_count_acc
+                          << "\n";
+
+                // Accumulation cycle counter
+                // Accumulated throttler residencies
+                std::cout << "\n";
+                std::cout << "RESIDENCY ACCUMULATION / COUNTER:\n";
+                std::cout << "\taccumulation_counter = " << std::dec << smu.accumulation_counter << "\n";
+                std::cout << "\tprochot_residency_acc = " << std::dec << smu.prochot_residency_acc << "\n";
+                std::cout << "\tppt_residency_acc = " << std::dec << smu.ppt_residency_acc << "\n";
+                std::cout << "\tsocket_thm_residency_acc = " << std::dec << smu.socket_thm_residency_acc
+                          << "\n";
+                std::cout << "\tvr_thm_residency_acc = " << std::dec << smu.vr_thm_residency_acc
+                          << "\n";
+                std::cout << "\thbm_thm_residency_acc = " << std::dec << smu.hbm_thm_residency_acc << "\n";
+
+                // Number of current partitions
+                std::cout << "\tnum_partition = " << std::dec << smu.num_partition << "\n";
+
+                // PCIE other end recovery counter
+                std::cout << "\tpcie_lc_perf_other_end_recovery = "
+                          << std::dec << smu.pcie_lc_perf_other_end_recovery << "\n";
+
+                idx = 0;
+                auto idy = 0;
+                std::cout  << "\txcp_stats.gfx_busy_inst: " << "\n";
+                for (auto& row : smu.xcp_stats) {
+                  std::cout << "\t XCP [" << idx << "] : [";
+                  for (auto& col : row.gfx_busy_inst) {
+                    if ((idy + 1) != static_cast<int>(std::size(row.gfx_busy_inst))) {
+                        std::cout << col << ", ";
+                    } else {
+                        std::cout << col;
+                    }
+                    idy++;
+                  }
+                  std::cout << "]\n";
+                  idy = 0;
+                  idx++;
+                }
+
+                idx = 0;
+                idy = 0;
+                std::cout  << "\txcp_stats.vcn_busy: " << "\n";
+                for (auto& row : smu.xcp_stats) {
+                  std::cout << "\t XCP [" << idx << "] : [";
+                  for (auto& col : row.vcn_busy) {
+                    if ((idy + 1) != static_cast<int>(std::size(row.vcn_busy))) {
+                        std::cout << col << ", ";
+                    } else {
+                        std::cout << col;
+                    }
+                    idy++;
+                  }
+                  std::cout << "]\n";
+                  idy = 0;
+                  idx++;
+                }
+
+                idx = 0;
+                idy = 0;
+                std::cout  << "\txcp_stats.jpeg_busy: " << "\n";
+                for (auto& row : smu.xcp_stats) {
+                  std::cout << "\t XCP [" << idx << "] : [";
+                  for (auto& col : row.jpeg_busy) {
+                    if ((idy + 1) != static_cast<int>(std::size(row.jpeg_busy))) {
+                        std::cout << col << ", ";
+                    } else {
+                        std::cout << col;
+                    }
+                    idy++;
+                  }
+                  std::cout << "]\n";
+                  idy = 0;
+                  idx++;
+                }
+
+                idx = 0;
+                idy = 0;
+                std::cout  << "\txcp_stats.gfx_busy_acc: " << "\n";
+                for (auto& row : smu.xcp_stats) {
+                  std::cout << "\t XCP [" << idx << "] : [";
+                  for (auto& col : row.gfx_busy_acc) {
+                    if ((idy + 1) != static_cast<int>(std::size(row.gfx_busy_acc))) {
+                        std::cout << col << ", ";
+                    } else {
+                        std::cout << col;
+                    }
+                    idy++;
+                  }
+                  std::cout << "]\n";
+                  idy = 0;
+                  idx++;
+                }
+
+                idx = 0;
+                idy = 0;
+                std::cout  << "\txcp_stats.gfx_below_host_limit_acc: " << "\n";
+                for (auto& row : smu.xcp_stats) {
+                  std::cout << "\t XCP [" << idx << "] : [";
+                  for (auto& col : row.gfx_below_host_limit_acc) {
+                    if ((idy + 1) != static_cast<int>(std::size(row.gfx_below_host_limit_acc))) {
+                        std::cout << col << ", ";
+                    } else {
+                        std::cout << col;
+                    }
+                    idy++;
+                  }
+                  std::cout << "]\n";
+                  idy = 0;
+                  idx++;
+                }
+
+                /*New scp stats v1.8*/
+                idx = 0;
+                idy = 0;
+                std::cout  << "\txcp_stats.gfx_below_host_limit_ppt_acc: " << "\n";
+                for (auto& row : smu.xcp_stats) {
+                  std::cout << "\t XCP [" << idx << "] : [";
+                  for (auto& col : row.gfx_below_host_limit_ppt_acc) {
+                    if ((idy + 1) != static_cast<int>(
+                        std::size(row.gfx_below_host_limit_ppt_acc))) {
+                        std::cout << col << ", ";
+                    } else {
+                        std::cout << col;
+                    }
+                    idy++;
+                  }
+                  std::cout << "]\n";
+                  idy = 0;
+                  idx++;
+                }
+
+                idx = 0;
+                idy = 0;
+                std::cout  << "\txcp_stats.gfx_below_host_limit_thm_acc: " << "\n";
+                for (auto& row : smu.xcp_stats) {
+                  std::cout << "\t XCP [" << idx << "] : [";
+                  for (auto& col : row.gfx_below_host_limit_thm_acc) {
+                    if ((idy + 1) != static_cast<int>(
+                          std::size(row.gfx_below_host_limit_thm_acc))) {
+                        std::cout << col << ", ";
+                    } else {
+                        std::cout << col;
+                    }
+                    idy++;
+                  }
+                  std::cout << "]\n";
+                  idy = 0;
+                  idx++;
+                }
+
+                idx = 0;
+                idy = 0;
+                std::cout  << "\txcp_stats.gfx_low_utilization_acc: " << "\n";
+                for (auto& row : smu.xcp_stats) {
+                  std::cout << "\t XCP [" << idx << "] : [";
+                  for (auto& col : row.gfx_low_utilization_acc) {
+                    if ((idy + 1) != static_cast<int>(std::size(row.gfx_low_utilization_acc))) {
+                        std::cout << col << ", ";
+                    } else {
+                        std::cout << col;
+                    }
+                    idy++;
+                  }
+                  std::cout << "]\n";
+                  idy = 0;
+                  idx++;
+                }
+
+                idx = 0;
+                idy = 0;
+                std::cout  << "\txcp_stats.gfx_below_host_limit_total_acc: " << "\n";
+                for (auto& row : smu.xcp_stats) {
+                  std::cout << "\t XCP [" << idx << "] : [";
+                  for (auto& col : row.gfx_below_host_limit_total_acc) {
+                    if ((idy + 1) != static_cast<int>(
+                        std::size(row.gfx_below_host_limit_total_acc))) {
+                        std::cout << col << ", ";
+                    } else {
+                        std::cout << col;
+                    }
+                    idy++;
+                  }
+                  std::cout << "]\n";
+                  idy = 0;
+                  idx++;
+                }
+
+                std::cout << "\n\n";
+                std::cout << "\t ** -> Checking metrics with constant changes ** " << "\n";
+                constexpr uint16_t kMAX_ITER_TEST = 10;
+                amdsmi_gpu_metrics_t gpu_metrics_check = {};
+                for (auto idx = uint16_t(1); idx <= kMAX_ITER_TEST; ++idx) {
+                    amdsmi_get_gpu_metrics_info(processor_handles[device_index],
+                                                &gpu_metrics_check);
+                    std::cout << "\t\t -> firmware_timestamp [" << idx << "/"
+                              << kMAX_ITER_TEST << "]: "
+                              << gpu_metrics_check.firmware_timestamp << "\n";
+                }
+
+                std::cout << "\n";
+                for (auto idx = uint16_t(1); idx <= kMAX_ITER_TEST; ++idx) {
+                    amdsmi_get_gpu_metrics_info(processor_handles[device_index],
+                                                &gpu_metrics_check);
+                    std::cout << "\t\t -> system_clock_counter [" << idx << "/"
+                              << kMAX_ITER_TEST << "]: "
+                              << gpu_metrics_check.system_clock_counter << "\n";
+                }
+
+                std::cout << "\n";
+                std::cout << " ** Note: Values MAX'ed out "
+                          << "(UINTX MAX are unsupported for the version in question) ** "
+                          << "\n\n";
+            }  // END GPU METRICS OUTPUTS
 
             // Get nearest GPUs
             const char *topology_link_type_str[] = {
@@ -1405,18 +1836,18 @@ int main() {
                 "AMDSMI_LINK_TYPE_UNKNOWN",
             };
             printf("\tOutput of amdsmi_get_link_topology_nearest:\n");
-            for (uint32_t topo_link_type = AMDSMI_LINK_TYPE_INTERNAL; topo_link_type <= AMDSMI_LINK_TYPE_UNKNOWN; topo_link_type++) {
+            for (uint32_t topo_link_type = AMDSMI_LINK_TYPE_INTERNAL;
+                topo_link_type <= AMDSMI_LINK_TYPE_UNKNOWN; topo_link_type++) {
                 auto topology_nearest_info = amdsmi_topology_nearest_t();
                 ret = amdsmi_get_link_topology_nearest(processor_handles[device_index],
-                                                       static_cast<amdsmi_link_type_t>(topo_link_type),
-                                                       nullptr);
+                                      static_cast<amdsmi_link_type_t>(topo_link_type), nullptr);
                 if (ret != AMDSMI_STATUS_INVAL) {
                     CHK_AMDSMI_RET(ret);
                 }
 
                 ret = amdsmi_get_link_topology_nearest(processor_handles[device_index],
-                                                       static_cast<amdsmi_link_type_t>(topo_link_type),
-                                                       &topology_nearest_info);
+                                       static_cast<amdsmi_link_type_t>(topo_link_type),
+                                        &topology_nearest_info);
                 if (ret != AMDSMI_STATUS_INVAL) {
                     CHK_AMDSMI_RET(ret);
                 }
@@ -1426,16 +1857,19 @@ int main() {
                 for (uint32_t k = 0; k < topology_nearest_info.count; k++) {
                     amdsmi_bdf_t bdf = {};
                     ret = amdsmi_get_gpu_device_bdf(topology_nearest_info.processor_list[k], &bdf);
-                    if (ret != AMDSMI_STATUS_INVAL) {
-                      CHK_AMDSMI_RET(ret);
+                    PRINT_AMDSMI_RET(ret)
+                    if (ret == AMDSMI_STATUS_SUCCESS) {
+                        printf("\t\tGPU BDF %04" PRIx64 ":%02" PRIx32 ":%02" PRIx32 ".%" PRIu32 "\n",
+                            static_cast<uint64_t>(bdf.domain_number),
+                            static_cast<uint32_t>(bdf.bus_number),
+                            static_cast<uint32_t>(bdf.device_number),
+                            static_cast<uint32_t>(bdf.function_number));
+                    } else {
+                        printf("\t\tGPU BDF not available\n");
                     }
-                    printf("\t\tGPU BDF %04" PRIx64 ":%02" PRIx32 ":%02" PRIx32 ".%" PRIu32 "\n",
-                        static_cast<uint64_t>(bdf.domain_number),
-                        static_cast<uint32_t>(bdf.bus_number),
-                        static_cast<uint32_t>(bdf.device_number),
-                        static_cast<uint32_t>(bdf.function_number));
                 }
             }
+          gpu_number++;
       }
     }
 

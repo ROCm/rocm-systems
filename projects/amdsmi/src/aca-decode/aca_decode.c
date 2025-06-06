@@ -167,7 +167,17 @@ static void aca_decoder_get_error_info(const aca_decoder_t *decoder, aca_error_i
 {
     const char *bank;
     const char *error_type;
+    const char *instance_name;
     int result;
+    
+    info->raw_status = decoder->aca_status;
+    info->raw_addr = decoder->aca_addr;
+    info->raw_ipid = decoder->aca_ipid;
+    info->raw_synd = decoder->aca_synd;
+    
+    info->scrub = decoder->status.scrub;
+    info->error_code_ext = decoder->status.error_code_ext;
+
 
     result = aca_decoder_get_bank(decoder, &bank);
     if (result < 0)
@@ -175,6 +185,15 @@ static void aca_decoder_get_error_info(const aca_decoder_t *decoder, aca_error_i
         bank = "UNKNOWN";
     }
     info->bank_ref = bank;
+
+    if (find_instance_name(bank, decoder->ipid.instance_id_lo, &instance_name) == 0)
+    {
+        info->instance_ref = instance_name;
+    }
+    else
+    {
+        info->instance_ref = "Decode Inapplicable";
+    }
 
     // 0b1000 indicate error threshold has been exceeded, and is always fatal
     if (decoder->flags & 0x8)
@@ -184,6 +203,20 @@ static void aca_decoder_get_error_info(const aca_decoder_t *decoder, aca_error_i
     else
     {
         info->severity_ref = get_error_severity(&decoder->status);
+    }
+
+    // Decode OAM and AID from instance_id_lo
+    oam_aid_map_t oam_aid = {0};
+    uint8_t instance_id_lo = decoder->ipid.instance_id_lo & 0xFF;  // Get lower 8 bits
+    if (find_oam_aid(instance_id_lo, &oam_aid) == 0)
+    {
+        info->oam = oam_aid.oam;
+        info->aid = oam_aid.aid;
+    }
+    else
+    {
+        info->oam = -1;  // Invalid value
+        info->aid = -1;  // Invalid value
     }
 
     if (decoder->status.error_code_ext >= 0x3A && decoder->status.error_code_ext <= 0x3E)
@@ -239,7 +272,7 @@ static void aca_decoder_get_error_info(const aca_decoder_t *decoder, aca_error_i
     {
         service_error = info->error_type_ref;
     }
-
+    
     info->afid = get_error_id(info->category_ref, service_error, info->severity_ref);
 }
 

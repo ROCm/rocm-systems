@@ -22,15 +22,16 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <gtest/gtest.h>
 
 #include <iostream>
 #include <string>
 #include <map>
 
-#include <gtest/gtest.h>
 #include "amd_smi/amdsmi.h"
 #include "mem_util_read.h"
 #include "../test_common.h"
+#include "amd_smi/impl/amd_smi_utils.h"
 
 TestMemUtilRead::TestMemUtilRead() : TestBase() {
   set_title("Memory Utilization Read Test");
@@ -81,12 +82,14 @@ void TestMemUtilRead::Run(void) {
   }
 
   auto err_chk = [&](const char *str) {
+    IF_VERB(STANDARD) {
+      std::cout << "\t** " << str << std::endl;
+    }
     if (err != AMDSMI_STATUS_SUCCESS) {
-      if (err == AMDSMI_STATUS_FILE_ERROR) {
-        IF_VERB(STANDARD) {
-          std::cout << "\t** " << str << ": Not supported on this machine"
-                                                                << std::endl;
-        }
+      if (err == AMDSMI_STATUS_FILE_ERROR ||
+          err == AMDSMI_STATUS_NOT_SUPPORTED) {
+        ASSERT_TRUE(err == AMDSMI_STATUS_NOT_SUPPORTED
+                    || err == AMDSMI_STATUS_FILE_ERROR);
       } else {
         CHK_ERR_ASRT(err)
       }
@@ -101,23 +104,32 @@ void TestMemUtilRead::Run(void) {
                                    mem_type <= AMDSMI_MEM_TYPE_LAST; ++mem_type) {
         err = amdsmi_get_gpu_memory_total(processor_handles_[i],
                              static_cast<amdsmi_memory_type_t>(mem_type), &total);
-        err_chk("amdsmi_get_gpu_memory_total()");
+        smi_amdgpu_get_status_string(err, false);
+        std::string mem_type_str =
+          kDevMemoryTypeNameMap.at(static_cast<amdsmi_memory_type_t>(mem_type));
+        std::string input_str =
+          "amdsmi_get_gpu_memory_total(" + mem_type_str + "): "
+          + smi_amdgpu_get_status_string(err, false);
+        err_chk(input_str.c_str());
         if (err != AMDSMI_STATUS_SUCCESS) {
-          return;
+          continue;
         }
 
         err = amdsmi_get_gpu_memory_usage(processor_handles_[i],
                              static_cast<amdsmi_memory_type_t>(mem_type), &usage);
-        err_chk("amdsmi_get_gpu_memory_usage()");
+        input_str =
+          "amdsmi_get_gpu_memory_usage(" + mem_type_str + "): "
+          + smi_amdgpu_get_status_string(err, false);
+        err_chk(input_str.c_str());
         if (err != AMDSMI_STATUS_SUCCESS) {
-          return;
+          continue;
         }
 
         IF_VERB(STANDARD) {
           std::cout << "\t**" <<
            kDevMemoryTypeNameMap.at(static_cast<amdsmi_memory_type_t>(mem_type))
             << " Calculated Utilization: " <<
-              (static_cast<float>(usage)*100)/static_cast<float>(total) << "% ("<< usage <<
+              (static_cast<float>(usage)*100)/static_cast<float>(total) << "% (" << usage <<
                                               "/" << total << ")" << std::endl;
         }
       }
