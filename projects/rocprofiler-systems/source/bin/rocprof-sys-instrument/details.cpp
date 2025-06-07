@@ -817,7 +817,7 @@ process_modules(const std::vector<module_t*>& _app_modules)
         }
 
         symtab_data.functions.emplace(itr, std::vector<symtab_func_t*>{});
-        if(!itr->getAllFunctions(symtab_data.functions.at(itr))) continue;
+        if(itr->getAllFunctions().empty()) continue;
         _erase_nullptrs(symtab_data.functions.at(itr));
 
         for(auto* fitr : symtab_data.functions.at(itr))

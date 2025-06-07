@@ -486,8 +486,7 @@ get_internal_libs_data_impl()
             _data[itr.first].emplace(_mpath, func_set_t{});
             _data[itr.first].emplace(_mname, func_set_t{});
 
-            auto _funcs = std::vector<symtab_func_t*>{};
-            mitr->getAllFunctions(_funcs);
+            auto _funcs = mitr->getAllFunctions();
 
             for(const auto& fitr : _funcs)
             {

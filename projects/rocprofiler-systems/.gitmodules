@@ -10,6 +10,7 @@
 [submodule "external/dyninst"]
 	path = external/dyninst
 	url = https://github.com/ROCm/dyninst.git
+	branch = dyninst_13
 [submodule "external/PTL"]
 	path = external/PTL
 	url = https://github.com/jrmadsen/PTL.git

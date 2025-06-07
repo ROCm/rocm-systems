@@ -105,6 +105,11 @@ jobs:
           -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target" \
           -DROCPROFSYS_USE_ROCM=${USE_ROCM} \
           -DRCOPROFSYS_USE_PYTHON=ON \
+          -DROCPROFSYS_BUILD_DYNINST=ON \
+          -DROCPROFSYS_BUILD_BOOST=ON \
+          -DROCPROFSYS_BUILD_TBB=ON \
+          -DROCPROFSYS_BUILD_ELFUTILS=ON \
+          -DROCPROFSYS_BUILD_LIBIBERTY=ON \
           -DROCPROFSYS_STRIP_LIBRARIES=${{ matrix.strip }} \
           -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
           -DROCPROFSYS_PYTHON_ENVS="py3.8;py3.9;py3.10;py3.11;py3.12"

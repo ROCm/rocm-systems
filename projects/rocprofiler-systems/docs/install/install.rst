@@ -163,10 +163,10 @@ while Dyninst requires TBB), and the CMake option to build the package alongside
 
    "Dyninst", "12.0", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_DYNINST`` (default: OFF)"
    "Libunwind", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_LIBUNWIND`` (default: ON)"
-   "TBB", "2018.6", "Dyninst", "``DYNINST_BUILD_TBB`` (default: OFF)"
-   "ElfUtils", "0.178", "Dyninst", "``DYNINST_BUILD_ELFUTILS`` (default: OFF)"
-   "LibIberty",  "", "Dyninst", "``DYNINST_BUILD_LIBIBERTY`` (default: OFF)"
-   "Boost",  "1.67.0", "Dyninst", "``DYNINST_BUILD_BOOST`` (default: OFF)"
+   "TBB", "2018.6", "Dyninst", "``ROCPROFSYS_BUILD_TBB`` (default: OFF)"
+   "ElfUtils", "0.178", "Dyninst", "``ROCPROFSYS_BUILD_ELFUTILS`` (default: OFF)"
+   "LibIberty",  "", "Dyninst", "``ROCPROFSYS_BUILD_LIBIBERTY`` (default: OFF)"
+   "Boost",  "1.67.0", "Dyninst", "``ROCPROFSYS_BUILD_BOOST`` (default: OFF)"
    "OpenMP", "4.x", "Dyninst", ""
 
 Optional third-party packages
@@ -209,16 +209,16 @@ To install Dyninst alongside ROCm Systems Profiler, configure ROCm Systems Profi
 Depending on the version of Ubuntu, the ``apt`` package manager might have current enough
 versions of the Dyninst Boost, TBB, and LibIberty dependencies
 (use ``apt-get install libtbb-dev libiberty-dev libboost-dev``).
-However, it is possible to request Dyninst to install
-its dependencies via ``DYNINST_BUILD_<DEP>=ON``, as follows:
+However, it is possible to request Dyninst to build and install
+its dependencies via ``ROCPROFSYS_BUILD_<DEP>=ON``, as follows:
 
 .. code-block:: shell
 
    git clone https://github.com/ROCm/rocprofiler-systems.git rocprof-sys-source
-   cmake -B rocprof-sys-build -DROCPROFSYS_BUILD_DYNINST=ON -DDYNINST_BUILD_{TBB,ELFUTILS,BOOST,LIBIBERTY}=ON rocprof-sys-source
+   cmake -B rocprof-sys-build -DROCPROFSYS_BUILD_DYNINST=ON -DROCPROFSYS_BUILD_{TBB,ELFUTILS,BOOST,LIBIBERTY}=ON rocprof-sys-source
 
-where ``-DDYNINST_BUILD_{TBB,BOOST,ELFUTILS,LIBIBERTY}=ON`` is expanded by
-the shell to ``-DDYNINST_BUILD_TBB=ON -DDYNINST_BUILD_BOOST=ON ...``
+where ``-DROCPROFSYS_BUILD_{TBB,BOOST,ELFUTILS,LIBIBERTY}=ON`` is expanded by
+the shell to ``-DROCPROFSYS_BUILD_TBB=ON -DROCPROFSYS_BUILD_BOOST=ON ...``
 
 Installing Dyninst via Spack
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -266,10 +266,10 @@ in `the Perfetto UI <https://ui.perfetto.dev>`_.
        -D ROCPROFSYS_BUILD_PAPI=ON                       \
        -D ROCPROFSYS_BUILD_LIBUNWIND=ON                  \
        -D ROCPROFSYS_BUILD_DYNINST=ON                    \
-       -D DYNINST_BUILD_TBB=ON                           \
-       -D DYNINST_BUILD_BOOST=ON                         \
-       -D DYNINST_BUILD_ELFUTILS=ON                      \
-       -D DYNINST_BUILD_LIBIBERTY=ON                     \
+       -D ROCPROFSYS_BUILD_TBB=ON                        \
+       -D ROCPROFSYS_BUILD_BOOST=ON                      \
+       -D ROCPROFSYS_BUILD_ELFUTILS=ON                   \
+       -D ROCPROFSYS_BUILD_LIBIBERTY=ON                  \
        rocprof-sys-source
    cmake --build rocprof-sys-build --target all --parallel 8
    cmake --build rocprof-sys-build --target install
