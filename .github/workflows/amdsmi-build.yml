@@ -32,10 +32,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          clean: false
-          path: $GITHUB_WORKSPACE
-          fetch-depth: 0
 
       - name: Build AMDSMI
         run: |
@@ -43,13 +39,13 @@ jobs:
           echo 'Building on ${{ matrix.os }}'
           BUILD_FOLDER=$GITHUB_WORKSPACE/build
           RETRIES=3
-          
+
           for i in $(seq 1 $RETRIES); do
             echo "Build attempt $i for ${{ matrix.os }}..."
             rm -rf $BUILD_FOLDER
             mkdir -p $BUILD_FOLDER
             cd $BUILD_FOLDER
-            
+
             if cmake $GITHUB_WORKSPACE -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON && \
                make -j $(nproc) && \
                make package; then
@@ -70,14 +66,14 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/build
           apt update
-          
+
           RETRIES=3
           for i in $(seq 1 $RETRIES); do
             echo "Installation attempt $i for ${{ matrix.os }}..."
             if apt install -y ./amd-smi-lib*99999-local_amd64.deb; then
               echo "Installation successful on attempt $i"
               ln -s /opt/rocm/bin/amd-smi /usr/local/bin
-              
+
               # Verify Installation
               echo 'Verifying installation:'
               amd-smi version
@@ -125,10 +121,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          clean: false
-          path: $GITHUB_WORKSPACE
-          fetch-depth: 0
 
       - name: Build and Install for Test
         run: |
@@ -136,13 +128,13 @@ jobs:
           echo 'Building for test on ${{ matrix.os }}'
           BUILD_FOLDER=$GITHUB_WORKSPACE/build
           RETRIES=3
-          
+
           for i in $(seq 1 $RETRIES); do
             echo "Build attempt $i for ${{ matrix.os }} test..."
             rm -rf $BUILD_FOLDER
             mkdir -p $BUILD_FOLDER
             cd $BUILD_FOLDER
-            
+
             if cmake $GITHUB_WORKSPACE -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON && \
                make -j $(nproc) && \
                make package; then
@@ -160,7 +152,7 @@ jobs:
 
           echo 'Installing for test on ${{ matrix.os }}'
           apt update
-          
+
           for i in $(seq 1 $RETRIES); do
             echo "Installation attempt $i for test on ${{ matrix.os }}..."
             if apt install -y $BUILD_FOLDER/amd-smi-lib*99999-local_amd64.deb; then
@@ -211,6 +203,13 @@ jobs:
             fi
           done
           echo "AMDSMI commands done on ${{ matrix.os }}"
+
+      - name: Upload AMDSMI Command Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: amdsmi-command-tests-${{ matrix.os }}
+          path: /tmp/test-results-${{ matrix.os }}
 
       - name: Run AMDSMI, Python, and Example Tests
         shell: bash
@@ -330,10 +329,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          clean: false
-          path: $GITHUB_WORKSPACE
-          fetch-depth: 0
 
       - name: Set PkgMgr
         run: |
@@ -510,10 +505,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          clean: false
-          path: $GITHUB_WORKSPACE
-          fetch-depth: 0
 
       - name: Set PkgMgr
         run: |
@@ -660,6 +651,14 @@ jobs:
           done
           echo "AMDSMI commands done on ${{ matrix.os }}"
 
+      - name: Upload AMDSMI Command Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: amdsmi-command-tests-${{ matrix.os }}
+          path: /tmp/test-results-${{ matrix.os }}
+          retention-days: 30
+
       - name: Run AMDSMI, Python, and Example Tests
         shell: bash
         run: |
@@ -755,54 +754,3 @@ jobs:
         run: |
           echo "Displaying Example NoDRM test results for ${{ matrix.os }}"
           cat /tmp/test-results-${{ matrix.os }}/amd_smi_nodrm_ex.log || echo "No NoDRM example test results found for ${{ matrix.os }}"
-
-  generate-docs:
-    name: Generate Documentation
-    runs-on:
-      - self-hosted
-      - ${{ vars.RUNNER_TYPE2 }}
-    needs: [debian-test, rpm-test]
-    container:
-      image: ${{ vars.UBUNTU22_DOCKER_IMAGE }}
-      options: --privileged
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-        with:
-          clean: true
-          path: $GITHUB_WORKSPACE
-          fetch-depth: 0
-      - name: Set Up Python Environment
-        run: |
-          python3 -m pip install --upgrade pip
-          python3 -m pip install -r $GITHUB_WORKSPACE/docs/sphinx/requirements.txt
-      - name: Build Documentation
-        working-directory: ${{ github.workspace }}
-        run: |
-          echo "Building documentation..."
-          cd $GITHUB_WORKSPACE
-          echo "Current directory: $(pwd)"
-          echo "Git repository verification:"
-          ls -la .git/ || echo "No .git directory found"
-          git status --porcelain || echo "Git status failed, but continuing..."
-          if [ ! -e "docs/.git" ]; then
-            ln -s ../.git docs/.git
-            echo "Created symbolic link to .git in docs directory"
-          fi
-          cd docs
-          python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
-          echo "Documentation build complete."
-      - name: Verify Build Output
-        run: |
-          echo "Verifying build output..."
-          ls -la $GITHUB_WORKSPACE/docs/_build/html
-          if [ ! -f "$GITHUB_WORKSPACE/docs/_build/html/index.html" ]; then
-            echo "Error: index.html not found in the build output directory."
-            exit 1
-          fi
-          echo "Build output verification complete. index.html found."
-      - name: Upload Documentation Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: generated-docs
-          path: ${{ github.workspace }}/docs/_build/html

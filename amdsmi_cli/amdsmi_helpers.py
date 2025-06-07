@@ -1082,7 +1082,28 @@ class AMDSMIHelpers():
             print(msg)
             logging.warning(msg)
 
-    def display_cper_files_generated(self, entries, device_handle, folder, follow):
+    def _severity_as_string(self, error_severity, notify_type, for_filename):
+        if error_severity == "non_fatal_uncorrected":
+            if(for_filename):
+                return "uncorrected"
+            return "NONFATAL-UNCORRECTED"
+        elif error_severity == "non_fatal_corrected":
+            if(for_filename):
+                return "corrected"
+            return "NONFATAL-CORRECTED"
+        elif error_severity == "fatal":
+            if notify_type == "BOOT":
+                if(for_filename):
+                    return "boot"
+                return "BOOT"
+            if(for_filename):
+                return "fatal"
+            return "FATAL"
+        if(for_filename):
+            return "unknown"
+        return "UNKNOWN"
+
+    def display_cper_files_generated(self, entries, device_handle, folder):
         # One‐time initialization: print warning & header only once
         if not getattr(self, "_cper_display_initialized", False):
             # Warning if no folder was specified elsewhere
@@ -1093,11 +1114,7 @@ class AMDSMIHelpers():
                print(f"{YELLOW}WARNING:{RESET} {RED}No{RESET} cper files will be dumped unless --folder=<folder_name> is specified.")
                self._cper_warning_printed = True
 
-            # Header
-            print(f"{'timestamp':<20} {'gpu_id':<7} {'severity':<12}", end="")
-            if folder:
-                print(f" {'file_name':<17} {'afid'}", end="")
-            print("")
+            self._print_header(folder)
             self._cper_display_initialized = True
 
         # Loop through all entries in the dictionary.
@@ -1106,35 +1123,29 @@ class AMDSMIHelpers():
             error_severity = entry.get("error_severity", "Unknown")
             notify_type = entry.get("notify_type", "Unknown")
 
-            if error_severity == "non_fatal_uncorrected":
-                prefix = "uncorrected"
-            elif error_severity == "non_fatal_corrected":
-                prefix = "corrected"
-            elif error_severity == "fatal":
-                prefix = "fatal"
-                if notify_type == "BOOT":
-                    prefix = "boot"
-            
+            prefix = self._severity_as_string(error_severity, notify_type, True)
             cper_data_file = f"{prefix}_{self.get_cper_count()}.cper"
 
             timestamp = entry.get("timestamp", "unknown")
             gpu_id = self.get_gpu_id_from_device_handle(device_handle)
-            print(f"{timestamp:<20} {gpu_id:<7} {prefix:<12}", end="")
+            print(f"{timestamp:<20} {gpu_id:<7} {prefix:<20}", end="")
             if folder:
                 print(f" {cper_data_file:<17}", end="")
                 afids = self.pvtDumpAfids(cper_data_file)
-                for afid in afids:
-                    print(afid, end=" ")
+                print(' '.join(map(str, afids)), end=" ")
             print("")
             self.increment_cper_count()
+
+    def _print_header(self, folder):
+        print(f"{'timestamp':<20} {'gpu_id':<7} {'severity':<20}", end="")
+        if folder:
+            print(f" {'file_name':<17} {'list of afids'}", end="")
+        print("")
 
     def dump_cper_entries(self, folder, entries, cper_data, device_handle, file_limit=None):
         # One‐time header
         if not getattr(self, "_cper_display_initialized", False):
-            print(f"{'timestamp':<20} {'gpu_id':<7} {'severity':<12} ", end="")
-            if folder:
-                print(f"{'file_name':<17} {'afid'}", end="")
-            print("")
+            self._print_header(folder)
             self._cper_display_initialized = True
 
         if folder:
@@ -1157,23 +1168,13 @@ class AMDSMIHelpers():
                             except OSError: pass
 
                 # --- determine prefix/severity ---
-                sev = entry.get("error_severity", "").lower()
-                nt  = entry.get("notify_type", "")
-                if sev == "non_fatal_uncorrected":
-                    prefix = "uncorrected"
-                elif sev == "non_fatal_corrected":
-                    prefix = "corrected"
-                elif sev == "fatal" and nt == "BOOT":
-                    prefix = "boot"
-                elif sev == "fatal":
-                    prefix = "fatal"
-                else:
-                    prefix = "unknown"
-
+                error_severity = entry.get("error_severity", "").lower()
+                notify_type = entry.get("notify_type", "")
+                prefix = self._severity_as_string(error_severity, notify_type, True)
                 # --- new filenames ---
                 count      = self.get_cper_count()
-                cper_name  = f"{prefix}_{count}.cper"
-                json_name  = f"{prefix}_{count}.json"
+                cper_name  = f"{prefix}-{count}.cper"
+                json_name  = f"{prefix}-{count}.json"
                 cper_path  = folder / cper_name
                 json_path  = folder / json_name
 
@@ -1196,6 +1197,7 @@ class AMDSMIHelpers():
                 # --- collect for printing ---
                 ts  = entry.get("timestamp", "unknown")
                 gid = self.get_gpu_id_from_device_handle(device_handle)
+                prefix = self._severity_as_string(error_severity, notify_type, False)
                 printed_rows.append((ts, gid, prefix, cper_name))
 
                 self.increment_cper_count()
@@ -1209,7 +1211,8 @@ class AMDSMIHelpers():
             for ts, gid, prefix, fname in to_print:
                 cper_path  = folder / cper_name
                 afids = self.pvtDumpAfids(cper_path)
-                print(f"{ts:<20} {gid:<7} {prefix:<12} {fname:<17} {afids}")
+                afids = ' '.join(map(str, afids))
+                print(f"{ts:<20} {gid:<7} {prefix:<20} {fname:<17} {afids}")
 
         else:
             print(json.dumps(
@@ -1358,4 +1361,4 @@ class AMDSMIHelpers():
                 self.dump_cper_entries(args.folder, entries, cper_data, device_handle, args.file_limit)
                 break
             else:
-                self.display_cper_files_generated(entries, device_handle, args.folder, args.follow)
+                self.display_cper_files_generated(entries, device_handle, args.folder)
