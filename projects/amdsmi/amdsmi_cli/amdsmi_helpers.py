@@ -1108,10 +1108,7 @@ class AMDSMIHelpers():
         if not getattr(self, "_cper_display_initialized", False):
             # Warning if no folder was specified elsewhere
             if not getattr(self, "_cper_warning_printed", False):
-               YELLOW = "\033[33m"
-               RED    = "\033[31m"
-               RESET  = "\033[0m"
-               print(f"{YELLOW}WARNING:{RESET} {RED}No{RESET} cper files will be dumped unless --folder=<folder_name> is specified.")
+               print(f"WARNING:No cper files will be dumped unless --folder=<folder_name> is specified.")
                self._cper_warning_printed = True
 
             self._print_header(folder)
@@ -1120,20 +1117,19 @@ class AMDSMIHelpers():
         # Loop through all entries in the dictionary.
         for entry_index, entry in enumerate(entries.values()):
             # Assume 'entry' is a dictionary with keys: "error_severity" and "notify_type".
-            error_severity = entry.get("error_severity", "Unknown")
-            notify_type = entry.get("notify_type", "Unknown")
-
-            prefix = self._severity_as_string(error_severity, notify_type, True)
-            cper_data_file = f"{prefix}_{self.get_cper_count()}.cper"
-
             timestamp = entry.get("timestamp", "unknown")
             gpu_id = self.get_gpu_id_from_device_handle(device_handle)
-            print(f"{timestamp:<20} {gpu_id:<7} {prefix:<20}", end="")
+            prefix = self._severity_as_string(entry.get("error_severity", "Unknown"),
+                                              entry.get("notify_type", "Unknown"),
+                                              True)
+            output = f"{timestamp:<20} {gpu_id:<7} {prefix:<20}"
             if folder:
-                print(f" {cper_data_file:<17}", end="")
+                cper_data_file = f"{prefix}_{self.get_cper_count()}.cper"
                 afids = self.pvtDumpAfids(cper_data_file)
-                print(' '.join(map(str, afids)), end=" ")
-            print("")
+                afids_str = ' '.join(map(str, afids))
+                output += f" {cper_data_file:<17} {afids_str}"
+
+            print(output)
             self.increment_cper_count()
 
     def _print_header(self, folder):
@@ -1143,7 +1139,17 @@ class AMDSMIHelpers():
         print("")
 
     def dump_cper_entries(self, folder, entries, cper_data, device_handle, file_limit=None):
-        # One‐time header
+        """
+        Dump CPER entries to files in the specified folder. Handles batch deletion if file limit is exceeded.
+
+        Parameters:
+        folder (str): Path to the folder where CPER files will be dumped.
+        entries (dict): Dictionary containing CPER entry metadata.
+        cper_data (list): List of CPER data objects with 'bytes' and 'size' keys.
+        device_handle: Device handle for GPU identification.
+        file_limit (int, optional): Maximum number of files to retain in the folder.
+        """
+        # Initialize header display
         if not getattr(self, "_cper_display_initialized", False):
             self._print_header(folder)
             self._cper_display_initialized = True
@@ -1152,74 +1158,84 @@ class AMDSMIHelpers():
             folder = Path(folder)
             folder.mkdir(parents=True, exist_ok=True)
 
-            printed_rows = []
+            output_rows = {}
 
             for entry_index, entry in enumerate(entries.values()):
-                # --- rotate out oldest if over limit ---
+                # Batch deletion if file limit is exceeded
                 if file_limit:
-                    files = sorted(folder.glob("*.cper"), key=lambda p: p.stat().st_mtime)
-                    while len(files) >= file_limit:
-                        old = files.pop(0)
-                        try: old.unlink()
-                        except OSError: pass
-                        j = old.with_suffix('.json')
-                        if j.exists():
-                            try: j.unlink()
-                            except OSError: pass
+                    folder_files = list(sorted(folder.glob("*.cper"), key=lambda p: p.stat().st_mtime))
+                    if file_limit < len(folder_files):
+                        for old_file in folder_files[:len(folder_files) - file_limit]:
+                            try:
+                                old_file.unlink()
+                                json_file = old_file.with_suffix('.json')
+                                if json_file.exists():
+                                    json_file.unlink()
+                            except OSError as e:
+                                logging.debug(f"Failed to delete file {old_file}: {e}")
 
-                # --- determine prefix/severity ---
+                # Determine prefix/severity
                 error_severity = entry.get("error_severity", "").lower()
                 notify_type = entry.get("notify_type", "")
                 prefix = self._severity_as_string(error_severity, notify_type, True)
-                # --- new filenames ---
-                count      = self.get_cper_count()
-                cper_name  = f"{prefix}-{count}.cper"
-                json_name  = f"{prefix}-{count}.json"
-                cper_path  = folder / cper_name
-                json_path  = folder / json_name
 
-                # --- write files ---
-                self.write_binary(
-                    cper_data[entry_index]["bytes"],
-                    cper_data[entry_index]["size"],
-                    cper_path
-                )
+                # Generate filenames
+                count = self.get_cper_count()
+                cper_name = f"{prefix}-{count}.cper"
+                json_name = f"{prefix}-{count}.json"
+                cper_path = folder / cper_name
+                json_path = folder / json_name
+
+                # Write CPER binary file
                 try:
-                    with json_path.open("w") as f:
-                        f.write(json.dumps(
-                            entry,
+                    self.write_binary(
+                        cper_data[entry_index]["bytes"],
+                        cper_data[entry_index]["size"],
+                        cper_path
+                    )
+                except Exception as e:
+                    logging.debug(f"Failed to write CPER file {cper_path}: {e}")
+
+                # Write JSON metadata file
+                try:
+                    with json_path.open("w") as cper_json_file:
+                        json.dump(
+                            obj=entry,
+                            fp=cper_json_file,
                             indent=2,
                             default=lambda o: o.decode('utf-8') if isinstance(o, bytes) else o
-                        ))
+                        )
                 except Exception as e:
-                    logging.error(f"Failed to write JSON to {json_path}: {e}")
+                    logging.debug(f"Failed to write JSON file {json_path}: {e}")
 
-                # --- collect for printing ---
-                ts  = entry.get("timestamp", "unknown")
-                gid = self.get_gpu_id_from_device_handle(device_handle)
-                prefix = self._severity_as_string(error_severity, notify_type, False)
-                printed_rows.append((ts, gid, prefix, cper_name))
-
+                # Collect data for printing
+                timestamp = entry.get("timestamp", "unknown")
+                gpu_id = self.get_gpu_id_from_device_handle(device_handle)
+                severity = self._severity_as_string(error_severity, notify_type, False)
+                output_rows[cper_path] = [timestamp, gpu_id, severity, cper_name]
                 self.increment_cper_count()
 
-            # --- only now actually print: either all, or just last `file_limit` ---
-            if file_limit:
-                to_print = printed_rows[-file_limit:]
-            else:
-                to_print = printed_rows
-
-            for ts, gid, prefix, fname in to_print:
-                cper_path  = folder / cper_name
-                afids = self.pvtDumpAfids(cper_path)
-                afids = ' '.join(map(str, afids))
-                print(f"{ts:<20} {gid:<7} {prefix:<20} {fname:<17} {afids}")
+            # Print collected rows
+            for cper_path, row in output_rows.items():
+                timestamp, gpu_id, severity, fname = row
+                try:
+                    afids = self.pvtDumpAfids(cper_path)
+                    afids_str = ' '.join(map(str, afids))
+                except Exception as e:
+                    afids_str = "Error fetching AFIDs"
+                    logging.debug(f"Failed to fetch AFIDs for {cper_path}: {e}")
+                print(f"{timestamp:<20} {gpu_id:<7} {severity:<20} {fname:<17} {afids_str}")
 
         else:
-            print(json.dumps(
-                entries,
-                indent=2,
-                default=lambda o: o.decode('utf-8') if isinstance(o, bytes) else o
-            ))
+            # Print entries as JSON if no folder is specified
+            try:
+                print(json.dumps(
+                    entries,
+                    indent=2,
+                    default=lambda o: o.decode('utf-8') if isinstance(o, bytes) else o
+                ))
+            except Exception as e:
+                logging.debug(f"Failed to dump entries as JSON: {e}")
 
     def write_binary(self, data, size, filepath):
         """
@@ -1242,7 +1258,7 @@ class AMDSMIHelpers():
                  data_bytes = data[:size]
              f.write(data_bytes)
 
-    def hexdump_to_string(self, data: Union[bytes, List[int]]) -> str:
+    def binary_to_hexdump_string(self, data: Union[bytes, List[int]]) -> str:
         """
         Convert binary data to a hexdump string.
 
@@ -1253,12 +1269,18 @@ class AMDSMIHelpers():
            A multiline string, each line showing:
            offset (in hex), hex bytes (16 per line), and printable ASCII.
         """
-        # Normalize to list of ints
         if isinstance(data, bytes):
             data_ints = list(data)
         else:
-            # allow list of ints or single-character strings
-            data_ints = [b if isinstance(b, int) else ord(b) for b in data]
+            # Allow list of ints or single-character strings
+            data_ints = []
+            for b in data:
+                if isinstance(b, int):
+                    data_ints.append(b)
+                elif isinstance(b, str) and len(b) == 1:
+                    data_ints.append(ord(b))
+                else:
+                    raise ValueError(f"Invalid type in data: {type(b)}")
 
         lines: List[str] = []
         size = len(data_ints)
@@ -1266,7 +1288,7 @@ class AMDSMIHelpers():
         for offset in range(0, size, 16):
             chunk = data_ints[offset : offset + 16]
             hex_values = " ".join(f"{b:02x}" for b in chunk)
-            # pad hex_values to 16*3-1 = 47 chars (two hex digits + space)
+            # Pad hex_values to 16*3-1 = 47 chars (two hex digits + space)
             hex_values = hex_values.ljust(16 * 3 - 1)
             ascii_values = "".join(chr(b) if 32 <= b <= 126 else "." for b in chunk)
             lines.append(f"{offset:08x}  {hex_values}  |{ascii_values}|")
@@ -1289,7 +1311,7 @@ class AMDSMIHelpers():
         else:
             # assume it's already bytes
             raw = raw_data
-        self.hexdump_to_string(raw)
+        self.binary_to_hexdump_string(raw)
         afids, num_afids = amdsmi_interface.amdsmi_get_afids_from_cper(raw)
         return afids
 

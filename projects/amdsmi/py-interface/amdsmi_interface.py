@@ -33,7 +33,6 @@ from typing import Any, Dict, List, Tuple, Union
 from . import amdsmi_wrapper
 from .amdsmi_exception import *
 
-
 ### Non Library Specific Constants ###
 class MaxUIntegerTypes(IntEnum):
     UINT8_T  = 0xFF
@@ -857,7 +856,7 @@ def amdsmi_get_cpucore_handles() -> List[amdsmi_wrapper.amdsmi_processor_handle]
     return core_handles
 
 def amdsmi_get_cpu_hsmp_proto_ver(
-    processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
+    processor_handle: "amdsmi_wrapper.amdsmi_processor_handle",
 ) -> int:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(
@@ -2217,10 +2216,9 @@ def amdsmi_get_clock_info(
     # logging.debug("amdsmi_interface.py | amdsmi_get_clock_info | clk_type = " + clk_type_str + " | return_dictionary = \n" + str(json.dumps(dict_ret, indent=4)))
     return dict_ret
 
-
 def amdsmi_get_gpu_bad_page_info(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
-) -> Union[list, str]:
+) -> List[Dict[str, Any]]:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
@@ -2427,7 +2425,7 @@ def amdsmi_get_gpu_cper_entries(
     severity_mask: int,
     buffer_size: int = 4 * 1048576,
     cursor: int = 0
-) -> Tuple[List[Dict[str, Any]], int]:
+) -> Tuple[Dict[str, Any], int, List[Dict[str, Any]]]:
 
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(
@@ -2541,9 +2539,12 @@ def amdsmi_get_afids_from_cper(
     all_afids: List[int] = []
 
     for record in cper_records:
-        raw_bytes = bytes(record["bytes"])
-        record_size = record["size"]
-
+        if isinstance(record, dict) and "bytes" in record and "size" in record:
+            raw_bytes = bytes(record["bytes"])
+            record_size = record["size"]
+        else:
+            raise AmdSmiParameterException(record, 
+                                           "dict with keys 'bytes' and 'size' or bytes/bytearray")
         # Wrap as char*
         buf = ctypes.create_string_buffer(raw_bytes, record_size)
         buf_ptr = ctypes.cast(buf, ctypes.POINTER(ctypes.c_char))

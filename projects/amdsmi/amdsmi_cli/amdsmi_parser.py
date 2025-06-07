@@ -1430,7 +1430,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         severity_choices_str = ", ".join(severity_choices)
         severity_help = f"Set the SEVERITY filters from the following:\n    {severity_choices_str}"
         folder_help = "Folder to dump CPER report files"
-        file_limit_help = "Maximum number of entries per output file"
+        file_limit_help = "Maximum number of CPER files in target folder\n    Older files beyond limit will be deleted"
         cper_file_help = "Full path of the cper record file to generate the AFID"
         follow_help = "Continuously monitor for new entries"
 
