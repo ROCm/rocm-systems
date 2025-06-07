@@ -57,7 +57,7 @@ jobs:
         hidden: ['ON', 'OFF']
         build-type: ['Release']
         mpi-headers: ['ON', 'OFF']
-        build-dyninst: ['OFF']
+        build-dyninst: ['ON']
         rocm-version: ['0.0']
 
     env:
@@ -133,6 +133,10 @@ jobs:
           -DROCPROFSYS_USE_PYTHON=${{ matrix.python }}
           -DROCPROFSYS_USE_MPI_HEADERS=${{ matrix.mpi-headers }}
           -DROCPROFSYS_BUILD_DYNINST=${{ matrix.build-dyninst }}
+          -DROCPROFSYS_BUILD_BOOST=${{ matrix.build-dyninst }}
+          -DROCPROFSYS_BUILD_TBB=${{ matrix.build-dyninst }}
+          -DROCPROFSYS_BUILD_ELFUTILS=${{ matrix.build-dyninst }}
+          -DROCPROFSYS_BUILD_LIBIBERTY=${{ matrix.build-dyninst }}
           -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=${{ matrix.hidden }}
           -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
           -DROCPROFSYS_PYTHON_ENVS="py3.7;py3.8;py3.9;py3.10;py3.11"
@@ -210,7 +214,7 @@ jobs:
         hidden: ['ON']
         build-type: ['Release']
         mpi-headers: ['OFF']
-        build-dyninst: ['OFF']
+        build-dyninst: ['ON']
         rocm-version: ['6.3', '6.4']
 
     env:
@@ -310,6 +314,10 @@ jobs:
           -DROCPROFSYS_USE_PYTHON=${{ matrix.python }}
           -DROCPROFSYS_USE_MPI_HEADERS=${{ matrix.mpi-headers }}
           -DROCPROFSYS_BUILD_DYNINST=${{ matrix.build-dyninst }}
+          -DROCPROFSYS_BUILD_BOOST=${{ matrix.build-dyninst }}
+          -DROCPROFSYS_BUILD_TBB=${{ matrix.build-dyninst }}
+          -DROCPROFSYS_BUILD_ELFUTILS=${{ matrix.build-dyninst }}
+          -DROCPROFSYS_BUILD_LIBIBERTY=${{ matrix.build-dyninst }}
           -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=${{ matrix.hidden }}
           -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
           -DROCPROFSYS_PYTHON_ENVS="py3.7;py3.8;py3.9;py3.10;py3.11"

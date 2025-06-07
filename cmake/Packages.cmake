@@ -230,13 +230,13 @@ target_link_libraries(rocprofiler-systems-elfutils INTERFACE ${ElfUtils_LIBRARIE
 # Dyninst
 #
 # ----------------------------------------------------------------------------------------#
-
+include(DyninstExternals)
 if(ROCPROFSYS_BUILD_DYNINST)
     rocprofiler_systems_checkout_git_submodule(
         RELATIVE_PATH external/dyninst
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-        REPO_URL https://github.com/jrmadsen/dyninst.git
-        REPO_BRANCH omnitrace)
+        REPO_URL https://github.com/ROCm/dyninst.git
+        REPO_BRANCH dyninst_13)
 
     set(DYNINST_OPTION_PREFIX ON)
     set(DYNINST_BUILD_DOCS OFF)
@@ -279,6 +279,7 @@ if(ROCPROFSYS_BUILD_DYNINST)
     set(DYNINST_TPL_INSTALL_LIB_DIR
         "${PROJECT_NAME}"
         CACHE PATH "Third-party library install-tree install library prefix" FORCE)
+
     add_subdirectory(external/dyninst EXCLUDE_FROM_ALL)
     rocprofiler_systems_restore_variables(
         PIC VARIABLES CMAKE_POSITION_INDEPENDENT_CODE CMAKE_INSTALL_RPATH
@@ -311,17 +312,37 @@ if(ROCPROFSYS_BUILD_DYNINST)
         endif()
     endforeach()
 
-    # for packaging
-    install(
-        DIRECTORY ${DYNINST_TPL_STAGING_PREFIX}/lib/
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}
-        COMPONENT dyninst
-        FILES_MATCHING
-        PATTERN "*${CMAKE_SHARED_LIBRARY_SUFFIX}*")
+    foreach(
+        _LIB
+        common
+        dynDwarf
+        dynElf
+        dyninstAPI
+        instructionAPI
+        parseAPI
+        patchAPI
+        pcontrol
+        stackwalk
+        symtabAPI)
+        if(TARGET ${_LIB})
+            add_dependencies(${_LIB} external-prebuild)
+            if(NOT TARGET Dyninst::${_LIB})
+                add_library(Dyninst::${_LIB} ALIAS ${_LIB})
+            endif()
+        endif()
+    endforeach()
 
     target_link_libraries(rocprofiler-systems-dyninst INTERFACE Dyninst::Dyninst)
 
 else()
+    # Find Boost before finding Dyninst
+    find_package(Boost)
+    if(NOT TARGET Dyninst::Boost_headers)
+        add_library(Dyninst::Boost_headers INTERFACE IMPORTED)
+        target_include_directories(Dyninst::Boost_headers SYSTEM
+                                   INTERFACE ${Boost_INCLUDE_DIRS})
+    endif()
+
     find_package(Dyninst ${rocprofiler_systems_FIND_QUIETLY} REQUIRED
                  COMPONENTS dyninstAPI parseAPI instructionAPI symtabAPI)
 
