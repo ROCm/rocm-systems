@@ -41,7 +41,7 @@ set(INC_LIST
     "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi/rocm_smi_utils.h")
 
 set(ACA_SRC_DIR "aca-decode")
-set(SRC_LIST ${SRC_LIST} ${ACA_SRC_DIR}/aca_decode.c ${ACA_SRC_DIR}/aca_fields.c ${ACA_SRC_DIR}/aca_tables.c
+set(SRC_LIST ${SRC_LIST} ${ACA_SRC_DIR}/aca_api.c ${ACA_SRC_DIR}/aca_decode.c ${ACA_SRC_DIR}/aca_fields.c ${ACA_SRC_DIR}/aca_tables.c
              ${ACA_SRC_DIR}/error_map.c)
 set(ACA_INC_DIR "${PROJECT_SOURCE_DIR}/include/aca-decode")
 set(INC_LIST ${INC_LIST} ${ACA_INC_DIR}/aca_decode.h ${ACA_INC_DIR}/aca_fields.h ${ACA_INC_DIR}/aca_tables.h

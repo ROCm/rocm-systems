@@ -255,59 +255,19 @@ static int cper_dump_sec_desc(const struct cper_sec_desc *desc)
     return 0;
 }
 
-static int aca_decode_fatal(const cper_sec_crashdump_data &data) 
+static int aca_decode_fatal(const cper_sec_crashdump_data &data, uint32_t flag, uint16_t hw_revision) 
 {
-    std::ostringstream ss;
-
     const uint64_t *register_array = reinterpret_cast<const uint64_t *>(&data.dump.fatal_err);
-    aca_raw_data_t raw_data;
-    raw_data.aca_status = register_array[0];
-    raw_data.aca_ipid = register_array[2];
-    raw_data.aca_synd = register_array[3];
-    
-    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] aca_status: 0x" << std::hex << raw_data.aca_status << "\n";
-    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] aca_ipid: 0x" << std::hex << raw_data.aca_ipid << "\n";
-    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] aca_synd: 0x" << std::hex << raw_data.aca_synd << "\n";
-
-    raw_data.flags = 0;
-    raw_data.hw_revision = 1;
-
-    aca_error_info_t error_info = aca_decode(&raw_data);
-    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] fatal error_info.afid: " << std::dec << error_info.afid << "\n";
-    LOG_DEBUG(ss);
-
-    return error_info.afid;
+    return decode_afid(register_array, sizeof(data.dump.fatal_err)/sizeof(uint64_t), flag, hw_revision);
 }
 
-static int aca_decode_corrected_error(const uint32_t *reg_dump, size_t num_bytes)  {
-
-    std::ostringstream ss;
-    if(num_bytes != CPER_ACA_REG_COUNT * sizeof(uint32_t)) {
-        ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] Size of register array must be " << std::dec << (CPER_ACA_REG_COUNT * sizeof(uint32_t)) << " bytes\n";
-        LOG_ERROR(ss);
-        return AMDSMI_STATUS_INVAL;
-    }
+static int aca_decode_corrected_error(const uint32_t *reg_dump, size_t num_bytes, uint32_t flag, uint16_t hw_revision)  
+{
     const uint64_t *register_array = reinterpret_cast<const uint64_t *>(reg_dump);
-    aca_raw_data_t raw_data;
-    raw_data.aca_status = register_array[2];
-    raw_data.aca_ipid = register_array[5];
-    raw_data.aca_synd = register_array[6];
-    
-    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] aca_status: 0x" << std::hex << raw_data.aca_status << "\n";
-    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] aca_ipid: 0x" << std::hex << raw_data.aca_ipid << "\n";
-    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] aca_synd: 0x" << std::hex << raw_data.aca_synd << "\n";
-
-    raw_data.flags = 0;
-    raw_data.hw_revision = 1;
-
-    aca_error_info_t error_info = aca_decode(&raw_data);
-    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] non-fatal error_info.afid: " << std::dec << error_info.afid << "\n";
-    LOG_DEBUG(ss);
-
-    return error_info.afid;
+    return decode_afid(register_array, num_bytes, flag, hw_revision);
 }
 
-static int cper_dump_nonstd_err(const struct cper_sec_nonstd_err *nonstd_err)
+static int cper_dump_nonstd_err(const struct cper_sec_nonstd_err *nonstd_err, const cper_sec_desc *section)
 {
     std::ostringstream ss;
 
@@ -339,10 +299,11 @@ exit:
 
     LOG_DEBUG(ss);
 
-    return aca_decode_corrected_error(body->err_ctx.reg_dump, sizeof(body->err_ctx.reg_dump));
+    return aca_decode_corrected_error(body->err_ctx.reg_dump, sizeof(body->err_ctx.reg_dump)/sizeof(uint64_t), 
+        section->flags_mask, section->revision_major);
 }
 
-static int cper_dump_cr_fatal(const struct cper_sec_crashdump *crashdump)
+static int cper_dump_cr_fatal(const struct cper_sec_crashdump *crashdump, const cper_sec_desc *section)
 {
     std::ostringstream ss;
     ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS]\n~~~~CRASH DUMP - FATAL~~~\n";
@@ -360,10 +321,10 @@ static int cper_dump_cr_fatal(const struct cper_sec_crashdump *crashdump)
 
     LOG_DEBUG(ss);
 
-    return aca_decode_fatal(crashdump->data);
+    return aca_decode_fatal(crashdump->data, section->flags_mask, section->revision_major);
 }
 
-static int cper_dump_cr_boot(const struct cper_sec_crashdump *crashdump)
+static int cper_dump_cr_boot(const struct cper_sec_crashdump *crashdump, const cper_sec_desc *section)
 {
     std::ostringstream ss;
     ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS]\n~~~~CRASH DUMP - BOOT TIME~~~\n";
@@ -375,7 +336,7 @@ static int cper_dump_cr_boot(const struct cper_sec_crashdump *crashdump)
     ss << "~~~~CRASH DUMP - BOOT TIME~~~\n\n";
     LOG_DEBUG(ss);
 
-    return aca_decode_fatal(crashdump->data);
+    return aca_decode_fatal(crashdump->data, section->flags_mask, section->revision_major);
 }
 
 } //namespace 
@@ -526,29 +487,33 @@ std::vector<int> cper_decode(const amdsmi_cper_hdr_t *cper) {
         const amdsmi_cper_guid_t *sec_guid = get_sec_desc_type(static_cast<struct cper_sec_desc *>(sec_desc_offset));
         const amdsmi_cper_guid_t *cper_guid = get_cper_type(cper);
 
-        cper_dump_sec_desc(static_cast<struct cper_sec_desc *>(sec_desc_offset));
+        cper_sec_desc *section = static_cast<struct cper_sec_desc *>(sec_desc_offset);
+        cper_dump_sec_desc(section);
 
         if (cper_is_cr(sec_guid)) {
+            struct cper_sec_crashdump *crashdump = static_cast<struct cper_sec_crashdump *>(sec_offset);
             if (cper_is_bt(cper_guid)) {
                 ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] decoding boot crash dump\n";
                 LOG_DEBUG(ss);
-                afids.emplace_back(cper_dump_cr_boot(static_cast<struct cper_sec_crashdump *>(sec_offset)));
+                afids.emplace_back(cper_dump_cr_boot(crashdump, section));
             }
             else {
                 ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] decoding crash dump\n";
                 LOG_DEBUG(ss);
-                afids.emplace_back(cper_dump_cr_fatal(static_cast<struct cper_sec_crashdump *>(sec_offset)));
+                afids.emplace_back(cper_dump_cr_fatal(crashdump, section));
             }
         }
         else if (cper_is_nonstd(sec_guid)) {
+            struct cper_sec_nonstd_err *crashdump = static_cast<struct cper_sec_nonstd_err *>(sec_offset);
             ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] decoding non-standard error\n";
             LOG_DEBUG(ss);
-            afids.emplace_back(cper_dump_nonstd_err(static_cast<struct cper_sec_nonstd_err *>(sec_offset)));
+            afids.emplace_back(cper_dump_nonstd_err(crashdump, section));
         } 
         else if (cper_is_proc_err(sec_guid)) {
+            struct cper_sec_nonstd_err *crashdump = static_cast<struct cper_sec_nonstd_err *>(sec_offset);
             ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] decoding proc error section type\n";
             LOG_DEBUG(ss);
-            afids.emplace_back(cper_dump_nonstd_err(static_cast<struct cper_sec_nonstd_err *>(sec_offset)));
+            afids.emplace_back(cper_dump_nonstd_err(crashdump, section));
         } 
         else {
             ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] Unknown error type!!\n";
@@ -559,6 +524,7 @@ std::vector<int> cper_decode(const amdsmi_cper_hdr_t *cper) {
             LOG_ERROR(ss);
         }
     }
+
 
     return afids;
 }

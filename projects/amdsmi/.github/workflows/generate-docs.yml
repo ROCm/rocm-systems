@@ -1,0 +1,101 @@
+name: Generate Documentation
+
+on:
+  pull_request:
+    branches: [amd-staging, amd-mainline, release/rocm-rel-*]
+  push:
+    branches: [amd-staging, amd-mainline, release/rocm-rel-*]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  DEBCONF_NONINTERACTIVE_SEEN: true
+  BUILD_TYPE: Release
+
+jobs:
+  generate-docs:
+    name: Generate Documentation
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get branch name and path
+        id: get_branch_info
+        run: |
+          BRANCH_NAME=""
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            BRANCH_NAME="${{ github.head_ref }}"
+          else
+            BRANCH_NAME="${{ github.ref_name }}"
+          fi
+          SANITIZED_PATH=$(echo "$BRANCH_NAME" | sed -e 's|/|-|g' -e 's|[^a-zA-Z0-9._-]||g' | sed -e 's|^-*||' -e 's|-*$||')
+          if [[ -z "$SANITIZED_PATH" ]]; then
+            SANITIZED_PATH="docs-$(date +%s)"
+          fi
+          echo "original_branch_name=${BRANCH_NAME}" >> $GITHUB_OUTPUT
+          echo "deployment_path=${SANITIZED_PATH}" >> $GITHUB_OUTPUT
+          echo "Deploying docs for branch '${BRANCH_NAME}' to path '${SANITIZED_PATH}'"
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y doxygen graphviz
+
+      - name: Set Up Python Environment
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r docs/sphinx/requirements.txt
+
+      - name: Build Documentation
+        run: |
+          echo "Building documentation..."
+          echo "Current directory: $(pwd)"
+          echo "Git repository verification:"
+          ls -la .git/ || echo "No .git directory found"
+          git status --porcelain || echo "Git status failed, but continuing..."
+          if [ ! -e "docs/.git" ]; then
+            if [ -d ".git" ]; then
+              ln -s ../.git docs/.git
+              echo "Created symbolic link to .git in docs directory"
+            else
+              echo "Warning: Main .git directory not found. Git-based versioning in docs might not work."
+            fi
+          fi
+          cd docs
+          python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
+          echo "Documentation build complete."
+
+      - name: Verify Build Output
+        run: |
+          echo "Verifying build output..."
+          ls -la docs/_build/html
+          if [ ! -f "docs/_build/html/index.html" ]; then
+            echo "Error: index.html not found in the build output directory."
+            exit 1
+          fi
+          echo "Build output verification complete. index.html found."
+
+      - name: Create Artifact Directory with Index Only
+        run: |
+          echo "Creating artifact directory with only index.html..."
+          mkdir -p artifact-output
+          cp docs/_build/html/index.html artifact-output/
+          echo "Artifact contents:"
+          ls -la artifact-output/
+
+      - name: Upload Documentation Artifact (Index Only)
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-docs-index-${{ steps.get_branch_info.outputs.deployment_path }}
+          path: artifact-output/

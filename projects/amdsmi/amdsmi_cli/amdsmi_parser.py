@@ -1439,14 +1439,20 @@ class AMDSMIParser(argparse.ArgumentParser):
         ras_parser.formatter_class = lambda prog: AMDSMISubparserHelpFormatter(prog)
         ras_parser.set_defaults(func=func)
 
-        # Required flags and arguments:
-        ras_parser.add_argument("--cper", action="store_true", required=False, help=cper_help)
-        ras_parser.add_argument("--afid", action="store_true", required=False, help=afid_help)
+        # Group arguments into cper and afid categories and make them mutually exclusive
+        ras_exclusive_group = ras_parser.add_mutually_exclusive_group(required=True)
+        ras_exclusive_group.title = "RAS Exclusive Arguments"
+        ras_exclusive_group.add_argument("--cper", action="store_true", help=cper_help)
+        ras_exclusive_group.add_argument("--afid", action="store_true", help=afid_help)
+
+        # CPER Arguments
         ras_parser.add_argument("--severity", type=str.lower, nargs='+', default=['all'], help=severity_help, choices=severity_choices, metavar='SEVERITY')
         ras_parser.add_argument("--folder", type=str, action=self._check_folder_path(), default=False, help=folder_help)
         ras_parser.add_argument("--file-limit", type=self._positive_int, action='store', default=1000, help=file_limit_help)
-        ras_parser.add_argument("--cper-file", action=self._check_cper_file_path(), metavar="CPER_FILE", help=cper_file_help)
         ras_parser.add_argument("--follow", action="store_true", default=False, help=follow_help)
+
+        # AFID Arguments
+        ras_parser.add_argument("--cper-file", action=self._check_cper_file_path(), metavar="CPER_FILE", help=cper_file_help)
 
         # Add common modifiers and device selection arguments.
         self._add_device_arguments(ras_parser, required=False)
