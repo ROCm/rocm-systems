@@ -1396,3 +1396,36 @@ class AMDSMIHelpers():
                 break
             else:
                 self.display_cper_files_generated(entries, device_handle, args.folder)
+
+    def get_bitmask_ranges(self, bitmask_dict):
+        ranges = {}
+        #start index of the first bitmask
+        current_start = 0
+
+        for cpu, bitmask in bitmask_dict.items():
+            # Convert the bitmask to a binary string
+            binary_str = bin(int(bitmask, 16))[2:].zfill(64)
+
+            binary_str = binary_str[::-1]
+            start = 0
+            end = len(binary_str) - 1
+            # Find the range of set bits
+            start_b = binary_str.find('1')
+            end_b = binary_str.rfind('1')
+
+            start_setbit = start_b + current_start
+            end_setbit = end_b + current_start
+
+            # Calculate the actual bit positions
+            end_bit = current_start + end
+
+            # Update the start index for the next bitmask
+            current_start = end_bit + 1
+
+            # Store the range in the dictionary
+            if start_b == -1 and end_b == -1:
+                ranges[cpu] = "N/A"
+            else:
+                ranges[cpu] = f"{start_setbit}-{end_setbit}"
+
+        return ranges
