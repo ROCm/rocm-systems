@@ -289,33 +289,6 @@ install(
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/${ROCPROFILER_NAME}
     COMPONENT runtime)
 
-
-# File reorg Backward compatibility
-option(FILE_REORG_BACKWARD_COMPATIBILITY
-        "Enable File Reorg with backward compatibility" OFF)
-
-if(FILE_REORG_BACKWARD_COMPATIBILITY)
-    # To enabe/disable #error in wrapper header files
-    if(NOT DEFINED ROCM_HEADER_WRAPPER_WERROR)
-        if(DEFINED ENV{ROCM_HEADER_WRAPPER_WERROR})
-            set(ROCM_HEADER_WRAPPER_WERROR
-                "$ENV{ROCM_HEADER_WRAPPER_WERROR}"
-                CACHE STRING "Header wrapper warnings as errors.")
-        else()
-            set(ROCM_HEADER_WRAPPER_WERROR
-                "OFF"
-                CACHE STRING "Header wrapper warnings as errors.")
-        endif()
-    endif()
-
-    if(ROCM_HEADER_WRAPPER_WERROR)
-        set(deprecated_error 1)
-    else()
-        set(deprecated_error 0)
-    endif()
-    include(rocprofiler-backward-compat.cmake)
-endif() # FILE_REORG_BACKWARD_COMPATIBILITY
-
 if(${LIBRARY_TYPE} STREQUAL SHARED)
     # Packaging directives
     set(CPACK_GENERATOR "DEB" "RPM" "TGZ" CACHE STRING "CPACK GENERATOR DEB;RPM")
