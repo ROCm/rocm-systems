@@ -7,7 +7,7 @@ We are phasing out development and support for `ROCTracer, ROCprofiler, rocprof,
 
 ## Overview
 
-ROCProfiler-SDK is AMD’s new and improved tooling infrastructure, providing a hardware-specific low-level performance analysis interface for profiling and tracing GPU compute applications. To see what's changed [Click Here](source/docs/conceptual/comparing-with-legacy-tools.rst)
+ROCprofiler-SDK is AMD’s new and improved tooling infrastructure, providing a hardware-specific low-level performance analysis interface for profiling and tracing GPU compute applications. To see what's changed, [Click Here](source/docs/conceptual/comparing-with-legacy-tools.rst)
 
 > [!NOTE]
 > The published documentation is available at [ROCprofiler-SDK documentation](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/index.html) in an organized, easy-to-read format, with search and a table of contents. The documentation source files reside in the `rocprofiler-sdk/source/docs` folder of this repository. As with all ROCm projects, the documentation is open source. For more information on contributing to the documentation, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
@@ -64,25 +64,22 @@ It can be set by the user in different locations if needed.
 git clone https://github.com/ROCm/rocprofiler-sdk.git rocprofiler-sdk-source
 cmake                                         \
       -B rocprofiler-sdk-build                \
-      -D ROCPROFILER_BUILD_TESTS=ON           \
-      -D ROCPROFILER_BUILD_SAMPLES=ON         \
-      -D CMAKE_INSTALL_PREFIX=/opt/rocm       \
+      -DCMAKE_INSTALL_PREFIX=/opt/rocm        \
+      -DCMAKE_PREFIX_PATH=/opt/rocm           \
        rocprofiler-sdk-source
 
-cmake --build rocprofiler-sdk-build --target all --parallel 8
+  cmake --build rocprofiler-sdk-build --target all --parallel $(nproc)
 ```
 
 To install ROCprofiler, run:
 
-```bash
-cmake --build rocprofiler-sdk-build --target install
-```
+```cmake --build rocprofiler-sdk-build --target install```
 
-Please see the detailed section on build and installation here: [Click Here](source/docs/install/installation.md)
+Please see the detailed section on build and installation here: [Click Here](source/docs/install/installation.rst)
 
 ## Support
 
-Please report in the Github Issues OR send an email to <dl.ROCm-Profiler.support@amd.com>
+Please report issues on GitHub OR send an email to <dl.ROCm-Profiler.support@amd.com>
 
 ## Limitations
 
@@ -94,7 +91,7 @@ Please report in the Github Issues OR send an email to <dl.ROCm-Profiler.support
     - **Need for Cold Restart**: In the event of a hardware freeze, you may need to perform a cold restart (turning the hardware off and on) to restore normal operations.
     Please use this beta feature cautiously. It may affect your system's stability and performance. Proceed at your own risk.
 
-  - At this point, We do not recommend stress-testing the beta implementation.
+  - At this point, we do not recommend stress-testing the beta implementation.
 
   - Correlation IDs provided by the PC sampling service are verified only for HIP API calls.
 
