@@ -189,8 +189,12 @@ def list_basic_agent(args, list_counters):
     def print_agent_counter(counters, info):
         names = ["{:20}".format(counter.name) for counter in counters]
         print("   PMC:\n")
-        for idx in range(0, len(names), int(len(counters) / 20)):
-            print("              {}".format(" ".join(names[idx : (idx + 5)])))
+        for idx in range(0, len(names), int(len(names) / 20)):
+            print(
+                "              {}".format(
+                    " ".join(names[idx : (idx + int(len(names) / 20))])
+                )
+            )
 
     def print_basic_info(info):
         print("GPU:{}\n".format(info["logical_node_type_id"]))
@@ -244,8 +248,12 @@ def listing(args):
     def print_agent_counter(counters, info):
         names = ["{:20}".format(counter.name) for counter in counters]
         print("PMC:\n")
-        for idx in range(0, len(names), int(len(counters) / 20)):
-            print("              {}".format(" ".join(names[idx : (idx + 5)])))
+        for idx in range(0, len(names), int(len(names) / 20)):
+            print(
+                "              {}".format(
+                    " ".join(names[idx : (idx + int(len(names) / 20))])
+                )
+            )
 
     agent_counters = avail.get_counters()
     agent_info_map = avail.get_agent_info_map()
