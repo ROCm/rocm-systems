@@ -816,6 +816,8 @@ def run_prof(
 
     if rocprof_cmd == "rocprofiler-sdk":
         app_cmd = options.pop("APP_CMD")
+        if not new_env:
+            new_env = os.environ.copy()
         for key, value in options.items():
             new_env[key] = value
         console_debug("rocprof sdk env vars: {}".format(new_env))
