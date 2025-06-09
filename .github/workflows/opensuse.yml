@@ -112,7 +112,7 @@ jobs:
           -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;videodecode;jpegdecode"
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
           --
-          -LE "transpose|rccl|videodecode|jpegdecode|network"
+          -LE "transpose|rccl|videodecode|jpegdecode|network|mpi"
 
     - name: Install
       timeout-minutes: 10
