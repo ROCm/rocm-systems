@@ -646,7 +646,7 @@ BlitSdma<RingIndexTy, HwIndexMonotonic, SizeToCountOffset, useGCR>::SubmitCopyRe
     BuildCopyRectCommand(append, dst, dst_offset, src, src_offset, range);
   }
 
-  uint64_t size = range->x * range->y * range->z;
+  uint64_t size = static_cast<uint64_t>(range->x) * static_cast<uint64_t>(range->y) * range->z;
 
   std::vector<core::Signal*> gang_signals(0);
 
