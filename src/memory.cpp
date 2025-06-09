@@ -840,6 +840,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtQueryPointerInfo(const void *Pointer,
 
   memset(PointerInfo, 0, sizeof(HsaPointerInfo));
 
+  wsl::thunk::GpuMemory *gpu_mem = nullptr;
   Allocation allocation_info;
   bool found = false;
   {
@@ -850,6 +851,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtQueryPointerInfo(const void *Pointer,
       if (Pointer >= it->first &&
         (Pointer < reinterpret_cast<const uint8_t*>(it->first) + it->second.size_requested)) {
         allocation_info = it->second;
+        gpu_mem = wsl::thunk::GpuMemory::Convert(it->second.handle);
         found = true;
       }
     }
@@ -864,6 +866,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtQueryPointerInfo(const void *Pointer,
   if (allocation_info.userptr) {
     PointerInfo->Type = HSA_POINTER_REGISTERED_USER;
     PointerInfo->SizeInBytes = allocation_info.size;
+  } else if (gpu_mem->IsVirtual()) {
+    PointerInfo->Type = HSA_POINTER_RESERVED_ADDR;
   } else {
     PointerInfo->Type = HSA_POINTER_ALLOCATED;
     PointerInfo->SizeInBytes = allocation_info.size_requested;
