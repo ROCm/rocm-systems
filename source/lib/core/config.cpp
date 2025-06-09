@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "config.hpp"
+#include "amd_smi.hpp"
 #include "common/defines.h"
 #include "common/static_object.hpp"
 #include "constraint.hpp"
@@ -626,13 +627,7 @@ configure_settings(bool _init)
         ->set_choices(perf::get_config_choices());
 
     rocprofiler_sdk::config_settings(_config);
-
-    ROCPROFSYS_CONFIG_SETTING(std::string, "ROCPROFSYS_AMD_SMI_METRICS",
-                              "amd-smi metrics to collect: busy, temp, power, "
-                              "vcn_activity, jpeg_activity, mem_usage. "
-                              "An empty value implies 'all' and 'none' suppresses all.",
-                              "busy, temp, power, mem_usage", "backend", "amd_smi",
-                              "rocm", "process_sampling");
+    amd_smi::config_settings(_config);
 
     ROCPROFSYS_CONFIG_SETTING(size_t, "ROCPROFSYS_PERFETTO_SHMEM_SIZE_HINT_KB",
                               "Hint for shared-memory buffer size in perfetto (in KB)",

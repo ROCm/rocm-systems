@@ -40,15 +40,35 @@ get_processor_count();
 amdsmi_processor_handle
 get_handle_from_id(uint32_t dev_id);
 
+bool
+is_vcn_activity_supported(uint32_t dev_id);
+
+bool
+is_jpeg_activity_supported(uint32_t dev_id);
+
+bool
+is_vcn_busy_supported(uint32_t dev_id);
+
+bool
+is_jpeg_busy_supported(uint32_t dev_id);
+
 struct processors
 {
     static uint32_t                             total_processor_count;
     static std::vector<amdsmi_processor_handle> processors_list;
+    static std::vector<bool>                    vcn_activity_supported;
+    static std::vector<bool>                    jpeg_activity_supported;
+    static std::vector<bool>                    vcn_busy_supported;
+    static std::vector<bool>                    jpeg_busy_supported;
 
 private:
     friend void                    rocprofsys::gpu::get_processor_handles();
     friend uint32_t                rocprofsys::gpu::get_processor_count();
     friend amdsmi_processor_handle rocprofsys::gpu::get_handle_from_id(uint32_t dev_id);
+    friend bool rocprofsys::gpu::is_vcn_activity_supported(uint32_t dev_id);
+    friend bool rocprofsys::gpu::is_jpeg_activity_supported(uint32_t dev_id);
+    friend bool rocprofsys::gpu::is_vcn_busy_supported(uint32_t dev_id);
+    friend bool rocprofsys::gpu::is_jpeg_busy_supported(uint32_t dev_id);
 };
 #endif
 
