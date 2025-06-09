@@ -199,6 +199,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Fixed missing callbacks around internal thread creation within counter collection service
 - Fixed potential data race in rocprofiler-sdk double buffering scheme
 - Usage of std::regex in core rocprofiler-sdk library which causes segfaults/exceptions when used under dual ABI
+- Fixed perfetto counter collection by introducing per dispatch accumulation.
 
 ### Removed
 

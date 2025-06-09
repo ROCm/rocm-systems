@@ -311,11 +311,13 @@ write_perfetto(
         }
     }
 
-    // Fetch counter values
-    auto counter_id_value = std::map<rocprofiler_counter_id_t, double>{};
-
-    // Create counter_id_to_name map
     auto counter_id_to_name = std::unordered_map<rocprofiler_counter_id_t, std::string_view>{};
+    for(const auto& itr : tool_metadata.get_counter_info())
+        counter_id_to_name.emplace(itr.id, itr.name);
+
+    // Map: correlation_id -> map<counter_id, value>
+    auto dispatch_counter_id_value =
+        std::unordered_map<uint64_t, std::unordered_map<rocprofiler_counter_id_t, double>>{};
 
     // trace events
     {
@@ -584,14 +586,11 @@ write_perfetto(
         for(auto ditr : counter_collection_gen)
             for(const auto& record : counter_collection_gen.get(ditr))
             {
-                for(const auto& counter_info : tool_metadata.get_counter_info())
-                {
-                    counter_id_to_name.emplace(counter_info.id, counter_info.name);
-                }
-
+                auto& counter_id_value =
+                    dispatch_counter_id_value[record.dispatch_data.correlation_id.internal];
                 auto record_vector = record.read();
 
-                // Accumulate counters based on ID
+                // Accumulate counters based on ID for this dispatch
                 for(auto& count : record_vector)
                 {
                     counter_id_value[count.id] += count.value;
@@ -717,10 +716,19 @@ write_perfetto(
                             "grid_size",
                             info.grid_size.x * info.grid_size.y * info.grid_size.z,
                             [&](::perfetto::EventContext ctx) {
-                                for(auto& [counter_id, counter_value] : counter_id_value)
+                                auto corr_id    = current.correlation_id.internal;
+                                auto counter_it = dispatch_counter_id_value.find(corr_id);
+                                if(counter_it != dispatch_counter_id_value.end())
                                 {
-                                    sdk::add_perfetto_annotation(
-                                        ctx, counter_id_to_name.at(counter_id), counter_value);
+                                    for(auto& [counter_id, counter_value] : counter_it->second)
+                                    {
+                                        auto name_it = counter_id_to_name.find(counter_id);
+                                        if(name_it != counter_id_to_name.end())
+                                        {
+                                            sdk::add_perfetto_annotation(
+                                                ctx, name_it->second, counter_value);
+                                        }
+                                    }
                                 }
                             });
                         TRACE_EVENT_END(
@@ -1015,17 +1023,22 @@ write_perfetto(
                 uint64_t _mean_timestamp =
                     start_timestamp + (0.5 * (end_timestamp - start_timestamp));
 
-                for(auto& [counter_id, counter_value] : counter_id_value)
+                auto corr_id = record.dispatch_data.correlation_id.internal;
+                auto it      = dispatch_counter_id_value.find(corr_id);
+                if(it != dispatch_counter_id_value.end())
                 {
-                    counters_endpoints[info.agent_id][counter_id].emplace(
-                        start_timestamp - timestamp_buffer, 0);
-                    counters_endpoints[info.agent_id][counter_id].emplace(start_timestamp,
-                                                                          counter_value);
-                    counters_endpoints[info.agent_id][counter_id].emplace(_mean_timestamp,
-                                                                          counter_value);
-                    counters_endpoints[info.agent_id][counter_id].emplace(end_timestamp, 0);
-                    counters_endpoints[info.agent_id][counter_id].emplace(
-                        end_timestamp + timestamp_buffer, 0);
+                    for(auto& [counter_id, counter_value] : it->second)
+                    {
+                        counters_endpoints[info.agent_id][counter_id].emplace(
+                            start_timestamp - timestamp_buffer, 0);
+                        counters_endpoints[info.agent_id][counter_id].emplace(start_timestamp,
+                                                                              counter_value);
+                        counters_endpoints[info.agent_id][counter_id].emplace(_mean_timestamp,
+                                                                              counter_value);
+                        counters_endpoints[info.agent_id][counter_id].emplace(end_timestamp, 0);
+                        counters_endpoints[info.agent_id][counter_id].emplace(
+                            end_timestamp + timestamp_buffer, 0);
+                    }
                 }
 
                 counters_extremes = std::make_pair(
@@ -1048,33 +1061,38 @@ write_perfetto(
 
                 auto name = sym->formatted_kernel_name;
 
-                for(auto& [counter_id, counter_value] : counter_id_value)
+                auto corr_id = record.dispatch_data.correlation_id.internal;
+                auto it      = dispatch_counter_id_value.find(corr_id);
+                if(it != dispatch_counter_id_value.end())
                 {
-                    counters_endpoints[info.agent_id][counter_id].emplace(
-                        counters_extremes.first - extremes_endpoint_buffer, 0);
-                    counters_endpoints[info.agent_id][counter_id].emplace(
-                        counters_extremes.second + extremes_endpoint_buffer, 0);
-
-                    auto agent_index_info =
-                        tool_metadata.get_agent_index(info.agent_id, ocfg.agent_index_value);
-                    auto track_name_ss = std::stringstream{};
-                    track_name_ss << agent_index_info.label << " [" << agent_index_info.index
-                                  << "] "
-                                  << "PMC " << counter_id_to_name.at(counter_id);
-
-                    auto track_name = track_name_ss.str();
-
-                    counter_tracks[info.agent_id].emplace(
-                        track_name, ::perfetto::CounterTrack(track_name.c_str()));
-                    auto& endpoints = counters_endpoints[info.agent_id][counter_id];
-                    for(auto& counter_itr : endpoints)
+                    for(auto& [counter_id, counter_value] : it->second)
                     {
-                        TRACE_COUNTER(
-                            sdk::perfetto_category<sdk::category::counter_collection>::name,
-                            counter_tracks[info.agent_id].at(track_name),
-                            counter_itr.first,
-                            counter_itr.second);
-                        tracing_session->FlushBlocking();
+                        counters_endpoints[info.agent_id][counter_id].emplace(
+                            counters_extremes.first - extremes_endpoint_buffer, 0);
+                        counters_endpoints[info.agent_id][counter_id].emplace(
+                            counters_extremes.second + extremes_endpoint_buffer, 0);
+
+                        auto agent_index_info =
+                            tool_metadata.get_agent_index(info.agent_id, ocfg.agent_index_value);
+                        auto track_name_ss = std::stringstream{};
+                        track_name_ss << agent_index_info.label << " [" << agent_index_info.index
+                                      << "] "
+                                      << "PMC " << counter_id_to_name.at(counter_id);
+
+                        auto track_name = track_name_ss.str();
+
+                        counter_tracks[info.agent_id].emplace(
+                            track_name, ::perfetto::CounterTrack(track_name.c_str()));
+                        auto& endpoints = counters_endpoints[info.agent_id][counter_id];
+                        for(auto& counter_itr : endpoints)
+                        {
+                            TRACE_COUNTER(
+                                sdk::perfetto_category<sdk::category::counter_collection>::name,
+                                counter_tracks[info.agent_id].at(track_name),
+                                counter_itr.first,
+                                counter_itr.second);
+                            tracing_session->FlushBlocking();
+                        }
                     }
                 }
             }
