@@ -636,11 +636,9 @@ def build_dfs(archConfigs, filter_metrics, sys_info):
                         df = pd.DataFrame()
                 elif type == "pc_sampling_table":
                     data_source_idx = str(data_config["id"] // 100)
-                    # NB: enable pc sampling only when users specify, not enable as default
-                    if filter_metrics and (data_source_idx in filter_metrics):
-                        df = pd.DataFrame(
-                            [data_config["source"]], columns=["from_pc_sampling"]
-                        )
+                    df = pd.DataFrame(
+                        [data_config["source"]], columns=["from_pc_sampling"]
+                    )
                     metric_list[data_source_idx] = panel["title"]
                 else:
                     df = pd.DataFrame()
@@ -1284,7 +1282,9 @@ def load_pc_sampling_data(workload, dir, file_prefix, sorting_type):
             pc_sampling_method = "host_trap"
 
     if pc_sampling_method == None:
-        console_error("PC sampling: can not find %s " % csv_file_path)
+        console_warning(
+            "PC sampling: can not detect pc sampling method without %s " % csv_file_path
+        )
         return pd.DataFrame()
 
     # No kernel filter, return grouped and sorted csv directly

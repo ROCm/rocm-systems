@@ -41,9 +41,10 @@ sections:
       - "2. System Speed-of-Light"
       - "3. Memory Chart"
 
-  - title: "🚧 Source Level Analysis/PC Sampling"
+  - title: "🚧 Source Level Analysis"
     collapsed: true
     class: "source-section"
-    under_construction: true
-    construction_label: "🚧 Under Construction"
-    construction_class: "section-header"
+    subsections:
+      - title: "PC Sampling"
+        data_path: ["21. PC Sampling", "21.1 PC Sampling"]
+        collapsed: true

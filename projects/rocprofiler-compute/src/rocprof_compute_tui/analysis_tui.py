@@ -88,8 +88,7 @@ class tui_analysis(OmniAnalyze_Base):
             workload=self._runs[self.path],
             dir=self.path,
             is_gui=False,
-            debug=self.get_args().debug,
-            verbose=self.get_args().verbose,
+            args=self.get_args(),
         )
 
     def initalize_runs(self, normalization_filter=None):
