@@ -312,9 +312,18 @@ def detect_rocprof(args):
         )
         return rocprof_cmd
 
+    console_warning(
+        "rocprof v1 / v2 / v3 interfaces will be deprecated in favor of "
+        "rocprofiler-sdk interface in a future release. To use rocprofiler-sdk "
+        "interface, please set the environment variable ROCPROF to 'rocprofiler-sdk' "
+        "and optionally provide the path to librocprofiler-sdk.so library via the "
+        "--rocprofiler-sdk-library-path option."
+    )
+
     # detect rocprof
     if not "ROCPROF" in os.environ.keys():
-        rocprof_cmd = "rocprofv3"
+        # default rocprof
+        rocprof_cmd = "rocprof"
     else:
         rocprof_cmd = os.environ["ROCPROF"]
 
