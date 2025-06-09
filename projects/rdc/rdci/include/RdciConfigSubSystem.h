@@ -44,13 +44,14 @@ class RdciConfigSubSystem : public RdciSubSystem {
  private:
   void show_help() const;
   void display_config_settings(rdc_config_setting_list_t& rdc_configs_list);
+  rdc_status_t rdc_group_field_find(rdc_handle_t p_rdc_handle, const char* field_group_name,
+                                    rdc_field_grp_t* out_field_group_id);
   config_command_type_t config_cmd_;
   static constexpr rdc_field_grp_t JOB_FIELD_ID = 1;
   uint32_t group_id_;
   uint32_t power_limit_;
   uint64_t gfx_max_clock_;
   uint64_t memory_max_clock_;
-  rdc_field_grp_t fgid_;
 };
 
 }  // namespace rdc
