@@ -1324,7 +1324,7 @@ def run(app_args, args, **kwargs):
         path = os.path.join(f"{ROCM_DIR}", "bin/rocprofv3-avail")
         if app_args:
             exit_code = subprocess.check_call(
-                [sys.executable, path, "info"],
+                [sys.executable, path, "info", "--pmc"],
                 env=app_env,
             )
             if exit_code != 0:
@@ -1335,7 +1335,7 @@ def run(app_args, args, **kwargs):
                 env=app_env,
             )
         else:
-            app_args = [sys.executable, path, "info"]
+            app_args = [sys.executable, path, "info", "--pmc"]
             exit_code = subprocess.check_call(
                 [sys.executable, path, "info", "--pc-sampling"],
                 env=app_env,
