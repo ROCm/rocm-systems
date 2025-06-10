@@ -44,7 +44,7 @@ function(rocprofiler_sdk_get_gfx_architectures _VAR)
         else()
             message(
                 AUTHOR_WARNING
-                    "${rocminfo_EXECUTABLE} failed with error code ${rocminfo_RET}\nstderr:\n${rocminfo_ERR}\nstdout:\n${rocminfo_OUT}"
+                    "${rocminfo_EXECUTABLE} returned ${rocminfo_RET}\nstderr:\n${rocminfo_ERR}\nstdout:\n${rocminfo_OUT}"
                 )
         endif()
     endif()
