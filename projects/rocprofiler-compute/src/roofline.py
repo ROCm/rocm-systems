@@ -242,12 +242,83 @@ class Roofline:
         """Create graph object from ai_data (coordinate points) and ceiling_data (peak FLOP and BW) data."""
         if fig is None:
             fig = go.Figure()
+            skipAI = False
+        else:
+            skipAI = True  # Don't repeat AI plotting
+
         plot_mode = "lines+text" if self.__run_parameters["is_standalone"] else "lines"
         self.__ceiling_data = constuct_roof(
             roofline_parameters=self.__run_parameters,
             dtype=dtype,
         )
         console_debug("roofline", "Ceiling data:\n%s" % self.__ceiling_data)
+        ops_flops = "OP" if (dtype[:1] == "I") else "FLOP"  # For printing purposes
+
+        #######################
+        # Plot Application AI
+        #######################
+        # Plot the arithmetic intensity points for each cache level
+        if ops_flops == "FLOP":
+            if not skipAI:
+                fig.add_trace(
+                    go.Scatter(
+                        x=self.__ai_data["ai_l1"][0],
+                        y=self.__ai_data["ai_l1"][1],
+                        name="ai_l1",
+                        mode="markers",
+                        marker_symbol=(
+                            SYMBOLS
+                            if self.__run_parameters["include_kernel_names"]
+                            else None
+                        ),
+                    )
+                )
+                fig.add_trace(
+                    go.Scatter(
+                        x=self.__ai_data["ai_l2"][0],
+                        y=self.__ai_data["ai_l2"][1],
+                        name="ai_l2",
+                        mode="markers",
+                        marker_symbol=(
+                            SYMBOLS
+                            if self.__run_parameters["include_kernel_names"]
+                            else None
+                        ),
+                    )
+                )
+                fig.add_trace(
+                    go.Scatter(
+                        x=self.__ai_data["ai_hbm"][0],
+                        y=self.__ai_data["ai_hbm"][1],
+                        name="ai_hbm",
+                        mode="markers",
+                        marker_symbol=(
+                            SYMBOLS
+                            if self.__run_parameters["include_kernel_names"]
+                            else None
+                        ),
+                    )
+                )
+
+                # Set layout
+                fig.update_layout(
+                    xaxis_title="Arithmetic Intensity (FLOPs/Byte)",
+                    yaxis_title="Performance (GFLOP/sec)",
+                    hovermode="x unified",
+                    margin=dict(l=50, r=50, b=50, t=50, pad=4),
+                )
+        else:
+            # Set layout
+            fig.update_layout(
+                xaxis_title="Bandwidth (GB/sec)",
+                yaxis_title="Performance (GOP/sec)",
+                hovermode="x unified",
+                margin=dict(l=50, r=50, b=50, t=50, pad=4),
+            )
+            console_debug(
+                "roofline",
+                "Roofline analysis only supports AI for floating point calculations at this time",
+            )
 
         #######################
         # Plot ceilings
@@ -281,8 +352,6 @@ class Roofline:
                     textposition="top right",
                 )
             )
-
-        ops_flops = "OP" if (dtype[:1] == "I") else "FLOP"
 
         # Plot peak VALU ceiling
         if dtype in PEAK_OPS_DATATYPES:
@@ -332,81 +401,6 @@ class Roofline:
                     ],
                     textposition="top left",
                 )
-            )
-        #######################
-        # Plot Application AI
-        #######################
-        # Plot the arithmetic intensity points for each cache level
-
-        # Check for F6F4 PC which applies to both FP4 and FP6 MFMA; avoid duplicate plotting
-        skipAI = False
-        if dtype == "FP4" or dtype == "FP6":
-            if (dtype == "FP6") and (
-                "FP4" in self.__run_parameters["roofline_data_type"]
-            ):
-                skipAI = True
-            console_debug(
-                "roofline",
-                "Datatype {} is captured through the F6F4 perfmon event".format(dtype),
-            )
-            dtype = "F6F4"
-
-        if ops_flops == "FLOP":
-            if not skipAI:
-                fig.add_trace(
-                    go.Scatter(
-                        x=self.__ai_data["ai_l1"][0],
-                        y=self.__ai_data["ai_l1"][1],
-                        name=dtype + "_ai_l1",
-                        mode="markers",
-                        marker_symbol=(
-                            SYMBOLS
-                            if self.__run_parameters["include_kernel_names"]
-                            else None
-                        ),
-                    )
-                )
-                fig.add_trace(
-                    go.Scatter(
-                        x=self.__ai_data["ai_l2"][0],
-                        y=self.__ai_data["ai_l2"][1],
-                        name=dtype + "_ai_l2",
-                        mode="markers",
-                        marker_symbol=(
-                            SYMBOLS
-                            if self.__run_parameters["include_kernel_names"]
-                            else None
-                        ),
-                    )
-                )
-                fig.add_trace(
-                    go.Scatter(
-                        x=self.__ai_data["ai_hbm"][0],
-                        y=self.__ai_data["ai_hbm"][1],
-                        name=dtype + "_ai_hbm",
-                        mode="markers",
-                        marker_symbol=(
-                            SYMBOLS
-                            if self.__run_parameters["include_kernel_names"]
-                            else None
-                        ),
-                    )
-                )
-
-                # Set layout
-                fig.update_layout(
-                    xaxis_title="Arithmetic Intensity (FLOPs/Byte)",
-                    yaxis_title="Performance (GFLOP/sec)",
-                    hovermode="x unified",
-                    margin=dict(l=50, r=50, b=50, t=50, pad=4),
-                )
-        else:
-            # Set layout
-            fig.update_layout(
-                xaxis_title="Bandwidth (GB/sec)",
-                yaxis_title="Performance (GOP/sec)",
-                hovermode="x unified",
-                margin=dict(l=50, r=50, b=50, t=50, pad=4),
             )
 
         fig.update_xaxes(type="log", autorange=True)
