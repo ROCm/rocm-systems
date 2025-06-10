@@ -29,7 +29,7 @@ import threading
 import time
 
 from _version import __version__
-from amdsmi_cli_exceptions import AmdSmiInvalidParameterException, AmdSmiRequiredCommandException
+from amdsmi_cli_exceptions import AmdSmiInvalidParameterException, AmdSmiRequiredCommandException, AmdSmiInvalidCommandException
 from amdsmi_helpers import AMDSMIHelpers
 from amdsmi_logger import AMDSMILogger
 from amdsmi import amdsmi_exception, amdsmi_interface
@@ -6496,10 +6496,17 @@ class AMDSMICommands():
         if args.gpu == None:
             args.gpu = self.device_handles
 
-        if args.afid and args.cper_file:
-            afids = self.helpers.pvtDumpAfids(args.cper_file)
-            print(' '.join(map(str, afids)))
-            return
+        if args.afid:
+            if args.cper_file:
+                afids = self.helpers.pvtDumpAfids(args.cper_file)
+                print(' '.join(map(str, afids)))
+                return
+            else:
+                command = " ".join(sys.argv[1:])
+                message = f"Command '{command}' requires '--cper-file'. Run '--help' for more info."
+                raise AmdSmiInvalidCommandException(command,
+                                                    self.logger.format,
+                                                    message)
 
         if not self.group_check_printed:
             self.helpers.check_required_groups()

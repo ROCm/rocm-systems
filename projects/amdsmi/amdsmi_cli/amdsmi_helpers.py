@@ -1312,8 +1312,20 @@ class AMDSMIHelpers():
             # assume it's already bytes
             raw = raw_data
         self.binary_to_hexdump_string(raw)
-        afids, num_afids = amdsmi_interface.amdsmi_get_afids_from_cper(raw)
-        return afids
+        try:
+            afids, num_afids = amdsmi_interface.amdsmi_get_afids_from_cper(raw)
+            return afids
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL:
+                raise ValueError("Invalid CPER file inputs") from e
+            elif e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_UNEXPECTED_SIZE:
+                raise ValueError("Invalid CPER file data size") from e
+            elif e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_UNEXPECTED_DATA:
+                raise ValueError("Unexpected data in CPER file") from e
+            elif e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
+                raise NotImplementedError("AFID decoding not supported") from e
+            else:
+                raise ValueError("Unexpected Error getting afids from CPER file") from e
 
     def ras_cper(self, args, device_handle, logger, gpu_idx):
         # Parse severity mask dynamically from the --severity option.

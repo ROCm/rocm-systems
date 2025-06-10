@@ -2560,7 +2560,7 @@ def amdsmi_get_afids_from_cper(
             ctypes.byref(num_afids_ct)
         )
         if status != amdsmi_wrapper.AMDSMI_STATUS_SUCCESS:
-            raise AmdSmiLibraryException(f"get_afids failed: {status}")
+            raise AmdSmiLibraryException(status)
 
         # Collect exactly the decoded AFIDs
         count = num_afids_ct.value

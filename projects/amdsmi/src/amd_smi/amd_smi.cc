@@ -4176,12 +4176,12 @@ amdsmi_status_t amdsmi_get_afids_from_cper(
     if(cper->record_length > buf_size) {
         ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] cper buffer size " << std::dec << buf_size << " is smaller than cper record length " << std::dec << cper->record_length << "\n";
         LOG_ERROR(ss);
-        return AMDSMI_STATUS_INVAL;
+        return AMDSMI_STATUS_UNEXPECTED_SIZE;
     }
     else if(strncmp(cper->signature, "CPER", 4) != 0) {
         ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] cper buffer does not have the correct signature\n";
         LOG_ERROR(ss);
-        return AMDSMI_STATUS_INVAL;
+        return AMDSMI_STATUS_UNEXPECTED_DATA;
     }
     uint32_t i = 0;
     for(int afid: cper_decode(cper)) {
