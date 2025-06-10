@@ -4,6 +4,7 @@ on:
     branches: [amd-staging]
   pull_request:
     types: [opened, synchronize, reopened]
+    branches: [amd-staging]
   workflow_dispatch:
 jobs:
   kws:
