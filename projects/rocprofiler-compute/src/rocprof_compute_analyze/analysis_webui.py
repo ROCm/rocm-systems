@@ -315,7 +315,9 @@ class webui_analysis(OmniAnalyze_Base):
                 kernel_verbose=self.get_args().kernel_verbose,
             )
             # create the loaded kernel stats
-            parser.load_kernel_top(self._runs[self.dest_dir], self.dest_dir)
+            parser.load_kernel_top(
+                self._runs[self.dest_dir], self.dest_dir, self.get_args()
+            )
             # set architecture
             self.arch = self._runs[self.dest_dir].sys_info.iloc[0]["gpu_arch"]
 
