@@ -1,10 +1,10 @@
-"Kind","Agent_Id","Queue_Id","Stream_Id","Thread_Id","Dispatch_Id","Kernel_Id","Kernel_Name","Correlation_Id","Start_Timestamp","End_Timestamp","Private_Segment_Size","Group_Segment_Size","Workgroup_Size_X","Workgroup_Size_Y","Workgroup_Size_Z","Grid_Size_X","Grid_Size_Y","Grid_Size_Z"
-"KERNEL_DISPATCH","Agent 4",3,4,77,9,12,"void addition_kernel<float>(float*, float const*, float const*, int, int)",9,1057678125307992,1057678125319352,0,0,64,1,1,1024,1024,1
-"KERNEL_DISPATCH","Agent 4",2,3,77,8,11,"divide_kernel(float*, float const*, float const*, int, int)",8,1057678125310912,1057678125319952,0,0,64,1,1,1024,1024,1
-"KERNEL_DISPATCH","Agent 4",2,3,77,7,13,"multiply_kernel(float*, float const*, float const*, int, int)",7,1057678125298952,1057678125310912,0,0,64,1,1,1024,1024,1
-"KERNEL_DISPATCH","Agent 4",2,3,77,6,14,"subtract_kernel(float*, float const*, float const*, int, int)",6,1057678125288912,1057678125298952,0,0,64,1,1,1024,1024,1
-"KERNEL_DISPATCH","Agent 4",2,3,77,5,12,"void addition_kernel<float>(float*, float const*, float const*, int, int)",5,1057678125279112,1057678125288912,0,0,64,1,1,1024,1024,1
-"KERNEL_DISPATCH","Agent 4",3,4,77,10,14,"subtract_kernel(float*, float const*, float const*, int, int)",10,1057678125319352,1057678125328912,0,0,64,1,1,1024,1024,1
-"KERNEL_DISPATCH","Agent 4",3,4,77,12,11,"divide_kernel(float*, float const*, float const*, int, int)",12,1057678125356832,1057678125366712,0,0,64,1,1,1024,1024,1
-"KERNEL_DISPATCH","Agent 4",3,4,77,11,13,"multiply_kernel(float*, float const*, float const*, int, int)",11,1057678125344352,1057678125356832,0,0,64,1,1,1024,1024,1
-"KERNEL_DISPATCH","Agent 4",4,5,77,13,12,"void addition_kernel<float>(float*, float const*, float const*, int, int)",13,1057678125382792,1057678125394032,0,0,64,1,1,1024,1024,1
+"Kind","Agent_Id","Queue_Id","Stream_Id","Thread_Id","Dispatch_Id","Kernel_Id","Kernel_Name","Correlation_Id","Start_Timestamp","End_Timestamp","LDS_Block_Size","Scratch_Size","VGPR_Count","Accum_VGPR_Count","SGPR_Count","Workgroup_Size_X","Workgroup_Size_Y","Workgroup_Size_Z","Grid_Size_X","Grid_Size_Y","Grid_Size_Z"
+"KERNEL_DISPATCH","Agent 4",1,1,834304,1,10,"void addition_kernel<float>(float*, float const*, float const*, int, int)",1,1550151853029637,1550151853042437,0,0,8,0,16,64,1,1,1024,1024,1
+"KERNEL_DISPATCH","Agent 4",1,1,834304,4,11,"divide_kernel(float*, float const*, float const*, int, int)",4,1550151853064037,1550151853075237,0,0,12,4,16,64,1,1,1024,1024,1
+"KERNEL_DISPATCH","Agent 4",1,1,834304,3,12,"multiply_kernel(float*, float const*, float const*, int, int)",3,1550151853052877,1550151853064037,0,0,8,0,16,64,1,1,1024,1024,1
+"KERNEL_DISPATCH","Agent 4",1,1,834304,2,13,"subtract_kernel(float*, float const*, float const*, int, int)",2,1550151853042437,1550151853050677,0,0,8,0,16,64,1,1,1024,1024,1
+"KERNEL_DISPATCH","Agent 4",2,2,834304,5,10,"void addition_kernel<float>(float*, float const*, float const*, int, int)",5,1550151853082957,1550151853094357,0,0,8,0,16,64,1,1,1024,1024,1
+"KERNEL_DISPATCH","Agent 4",2,2,834304,6,13,"subtract_kernel(float*, float const*, float const*, int, int)",6,1550151853094357,1550151853103517,0,0,8,0,16,64,1,1,1024,1024,1
+"KERNEL_DISPATCH","Agent 4",4,4,834304,13,10,"void addition_kernel<float>(float*, float const*, float const*, int, int)",13,1550151853164197,1550151853174037,0,0,8,0,16,64,1,1,1024,1024,1
+"KERNEL_DISPATCH","Agent 4",3,3,834304,12,11,"divide_kernel(float*, float const*, float const*, int, int)",12,1550151853148397,1550151853160837,0,0,12,4,16,64,1,1,1024,1024,1
+"KERNEL_DISPATCH","Agent 4",3,3,834304,11,12,"multiply_kernel(float*, float const*, float const*, int, int)",11,1550151853138477,1550151853148397,0,0,8,0,16,64,1,1,1024,1024,1

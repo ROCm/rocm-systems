@@ -15,7 +15,7 @@ For MPI applications or other job launchers such as `SLURM <https://slurm.schedm
 
 .. code-block:: bash
 
-    mpirun -n 4 rocprofv3 --hip-trace -- <application_path>
+    mpirun -n 4 rocprofv3 --hip-trace --output-format csv -- <application_path>
 
 The preceding command runs the application with ``rocprofv3`` and generates the trace file for each rank. The trace files are prefixed with the process ID.
 
@@ -35,7 +35,7 @@ Collecting data outside of ``mpirun`` works but fetches agent info for the ``mpi
 
 .. code-block:: bash
 
-    rocprofv3 --hip-trace -d %h.%p.%env{OMPI_COMM_WORLD_RANK}% -- mpirun -n 2  <application_path>
+    rocprofv3 --hip-trace -d %h.%p.%env{OMPI_COMM_WORLD_RANK}% --output-format csv -- mpirun -n 2  <application_path>
 
 In the preceding example, an extra agent info file is generated for the ``mpirun`` process. The trace files are prefixed with the hostname, process ID, and the MPI rank.
 
@@ -156,7 +156,7 @@ To collect the profiles of the individual MPI processes, use ``rocprofv3`` with 
 
 .. code-block:: bash
 
-    mpirun -n 2 rocprofv3 --hip-trace -d %h.%p.%env{OMPI_COMM_WORLD_RANK}%  --  <application_path>
+    mpirun -n 2 rocprofv3 --hip-trace -d %h.%p.%env{OMPI_COMM_WORLD_RANK}% --output-format csv --  <application_path>
 
 To see the placeholders supported by the output directory option, see :ref:`output directory placeholders <output_field_format>`.
 
