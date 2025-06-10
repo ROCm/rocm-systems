@@ -1448,14 +1448,6 @@ def run(app_args, args, **kwargs):
                     f"{type(num_str)} is not supported. {num_str} should be of type integer or string."
                 )
 
-        if (
-            args.pc_sampling_beta_enabled
-            or args.pc_sampling_unit
-            or args.pc_sampling_method
-            or args.pc_sampling_interval
-        ):
-            fatal_error("Advanced thread trace cannot be enabled with pc sampling")
-
         update_env("ROCPROF_ADVANCED_THREAD_TRACE", True, overwrite=True)
 
         if args.att_target_cu is not None:
