@@ -202,7 +202,7 @@ To trace HIP runtime APIs, use:
 
 .. code-block:: bash
 
-    rocprofv3 --hip-trace -- <application_path>
+    rocprofv3 --hip-trace --output-format csv -- <application_path>
 
 The preceding command generates a ``hip_api_trace.csv`` file prefixed with the process ID.
 
@@ -224,7 +224,7 @@ To collect HIP compile time API traces, use:
 
 .. code-block:: shell
 
-    rocprofv3 --hip-compiler-trace -- <application_path>
+    rocprofv3 --hip-compiler-trace --output-format csv -- <application_path>
 
 The preceding command generates a ``hip_api_trace.csv`` file prefixed with the process ID.
 
@@ -244,7 +244,7 @@ To collect HIP runtime time API traces, use:
 
 .. code-block:: shell
 
-    rocprofv3 --hip-runtime-trace -- <application_path>
+    rocprofv3 --hip-runtime-trace --output-format csv -- <application_path>
 
 The preceding command generates a ``hip_api_trace.csv`` file prefixed with the process ID.
 
@@ -270,7 +270,7 @@ HSA trace contains the start and end time of HSA runtime API calls and their asy
 
 .. code-block:: bash
 
-    rocprofv3 --hsa-trace -- <application_path>
+    rocprofv3 --hsa-trace --output-format csv -- <application_path>
 
 The preceding command generates a ``hsa_api_trace.csv`` file prefixed with process ID. Note that the contents of this file have been truncated for demonstration purposes.
 
@@ -292,7 +292,7 @@ To collect HSA core API traces, use:
 
 .. code-block:: bash
 
-    rocprofv3 --hsa-core-trace -- <application_path>
+    rocprofv3 --hsa-core-trace --output-format csv -- <application_path>
 
 The preceding command generates a ``hsa_api_trace.csv`` file prefixed with process ID. Note that the contents of this file have been truncated for demonstration purposes.
 
@@ -329,7 +329,7 @@ To enable the inbuilt marker support, use the ``kokkos-trace`` option. Internall
 
 .. code-block:: bash
 
-    rocprofv3 --kokkos-trace -- <application_path>
+    rocprofv3 --kokkos-trace --output-format csv -- <application_path>
 
 The preceding command generates a ``marker-trace`` file prefixed with the process ID.
 
@@ -349,7 +349,7 @@ To trace kernel dispatch traces, use:
 
 .. code-block:: shell
 
-    rocprofv3 --kernel-trace -- <application_path>
+    rocprofv3 --kernel-trace --output-format csv -- <application_path>
 
 The preceding command generates a ``kernel_trace.csv`` file prefixed with the process ID.
 
@@ -361,7 +361,7 @@ Here are the contents of ``kernel_trace.csv`` file:
 
 .. csv-table:: Kernel trace
    :file: /data/kernel_trace.csv
-   :widths: 10,10,10,10,10,10,10,10,10,20,20,10,10,10,10,10,10,10,10
+   :widths: 10,10,10,10,10,10,10,10,10,20,20,10,10,10,10,10,10,10,10,10,10,10
    :header-rows: 1
 
 For the description of the fields in the output file, see :ref:`output-file-fields`.
@@ -373,7 +373,7 @@ Memory copy traces track ``hipMemcpy`` and ``hipMemcpyAsync`` functions, which u
 
 .. code-block:: shell
 
-    rocprofv3 –-memory-copy-trace -- <application_path>
+    rocprofv3 –-memory-copy-trace --output-format csv -- <application_path>
 
 The preceding command generates a ``memory_copy_trace.csv`` file prefixed with the process ID.
 
@@ -411,7 +411,7 @@ To trace memory allocations during the application run, use:
 
 .. code-block:: shell
 
-    rocprofv3 –-memory-allocation-trace -- < app_path >
+    rocprofv3 –-memory-allocation-trace --output-format csv -- <application_path>
 
 The preceding command generates a ``memory_allocation_trace.csv`` file prefixed with the process ID.
 
@@ -442,7 +442,7 @@ memory operations (copies, allocations, and scratch).
 
 .. code-block:: shell
 
-    rocprofv3 –-runtime-trace -- <application_path>
+    rocprofv3 –-runtime-trace --output-format csv -- <application_path>
 
 Running the preceding command generates ``hip_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, ``scratch_memory_trace.csv``, ``memory_allocation_trace.csv``, and ``marker_api_trace.csv`` (if ``ROCTx`` APIs are specified in the application) files prefixed with the process ID.
 
@@ -453,7 +453,7 @@ This is an all-inclusive option to collect HIP, HSA, kernel, memory copy, memory
 
 .. code-block:: shell
 
-    rocprofv3 –-sys-trace -- <application_path>
+    rocprofv3 –-sys-trace --output-format csv -- <application_path>
 
 Running the preceding command generates ``hip_api_trace.csv``, ``hsa_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, ``scratch_memory_trace.csv``, ``memory_allocation_trace.csv``, and ``marker_api_trace.csv`` if ``ROCTx`` APIs are specified in the application.
 
@@ -466,7 +466,7 @@ To trace scratch memory allocations during the application run, use:
 
 .. code-block:: shell
 
-    rocprofv3 –-scratch-memory-trace -- < app_path >
+    rocprofv3 –-scratch-memory-trace --output-format csv -- <application_path>
 
 The preceding command generates a ``scratch_memory_trace.csv`` file prefixed with the process ID.
 
@@ -490,7 +490,7 @@ RCCL trace
 
 .. code-block:: shell
 
-    rocprofv3 --rccl-trace -- <application_path>
+    rocprofv3 --rccl-trace --output-format csv -- <application_path>
 
 The preceding command generates a ``rccl_api_trace`` file prefixed with the process ID.
 
@@ -512,7 +512,7 @@ rocDecode trace
 
 .. code-block:: shell
 
-    rocprofv3 --rocdecode-trace -- <application_path>
+    rocprofv3 --rocdecode-trace --output-format csv -- <application_path>
 
 The above command generates a ``rocdecode_api_trace`` file prefixed with the process ID.
 
@@ -536,7 +536,7 @@ rocJPEG trace
 
 .. code-block:: shell
 
-    rocprofv3 --rocjpeg-trace -- <application_path>
+    rocprofv3 --rocjpeg-trace --output-format csv -- <application_path>
 
 The above command generates a ``rocjpeg_api_trace`` file prefixed with the process ID.
 
@@ -564,7 +564,7 @@ The statistics help to determine the API or function that took the most amount o
 
 .. code-block:: shell
 
-    rocprofv3 --stats --hip-trace  -- <application_path>
+    rocprofv3 --stats --hip-trace --output-format csv -- <application_path>
 
 The preceding command generates a ``hip_api_stats.csv``, ``domain_stats.csv`` and ``hip_api_trace.csv`` file prefixed with the process ID.
 
@@ -606,7 +606,7 @@ This option displays a summary of each tracing domain for the enabled tracing ty
 
 .. code-block:: shell
 
-    rocprofv3 -D --hsa-trace --hip-trace  -- <application_path>
+    rocprofv3 -D --hsa-trace --hip-trace --output-format csv  -- <application_path>
 
 The preceding command generates a ``hip_trace.csv`` and ``hsa_trace.csv`` file prefixed with the process ID along with displaying the summary of each domain.
 
@@ -938,7 +938,7 @@ in the ``extra_counters.yaml`` file, use the ``-E`` / ``--extra-counters`` optio
 
 .. code-block:: shell
 
-   rocprofv3 -E <path-to-extra_counters.yaml> --pmc GRBM_GUI_ACTIVE_SUM -- <application_path>
+   rocprofv3 -E <path-to-extra_counters.yaml> --pmc GRBM_GUI_ACTIVE_SUM --output-format csv -- <application_path>
 
 Where the option ``--pmc`` is used to specify the extra counters to be collected.
 
@@ -1102,31 +1102,31 @@ To set the agent index to relative, use:
 
 .. code-block:: shell
 
-   rocprofv3 --kernel-trace --agent-index=relative -- <application_path>
+    rocprofv3 --kernel-trace --agent-index=relative --output-format csv -- <application_path>
 
 Here is the generated ouput file with ``Agent_Id`` as "Agent 7":
 
 .. code-block:: shell
 
-   $ cat kernel_trace.csv
+    $ cat kernel_trace.csv
 
-   "Kind","Agent_Id","Queue_Id","Stream_Id","Thread_Id","Dispatch_Id","Kernel_Id","Kernel_Name","Correlation_Id","Start_Timestamp","End_Timestamp","Private_Segment_Size","Group_Segment_Size","Workgroup_Size_X","Workgroup_Size_Y","Workgroup_Size_Z","Grid_Size_X","Grid_Size_Y","Grid_Size_Z"
-   "KERNEL_DISPATCH","Agent 7",1,2,15044,1,17,"void addition_kernel<float>(float*, float const*, float const*, int, int)",1,1671247151691610,1671247151718010,0,0,64,1,1,1024,1024,1
+    "Kind","Agent_Id","Queue_Id","Stream_Id","Thread_Id","Dispatch_Id","Kernel_Id","Kernel_Name","Correlation_Id","Start_Timestamp","End_Timestamp","LDS_Block_Size","Scratch_Size","VGPR_Count","Accum_VGPR_Count","SGPR_Count","Workgroup_Size_X","Workgroup_Size_Y","Workgroup_Size_Z","Grid_Size_X","Grid_Size_Y","Grid_Size_Z"
+    "KERNEL_DISPATCH","Agent 7",17,26,847809,101,49,"void addition_kernel<float>(float*, float const*, float const*, int, int)",101,1551401624448706,1551401624459226,0,0,8,0,16,64,1,1,1024,1024,1
 
 To set the agent index to type-relative, use:
 
 .. code-block:: shell
 
-   rocprofv3 --kernel-trace --agent-index=type-relative -- <application_path>
+    rocprofv3 --kernel-trace --agent-index=type-relative --output-format csv -- <application_path>
 
 Here is the generated ouput file with ``Agent_Id`` as "GPU 3":
 
 .. code-block:: shell
 
-   $ cat kernel_trace.csv
+    $ cat kernel_trace.csv
 
-   "Kind","Agent_Id","Queue_Id","Stream_Id","Thread_Id","Dispatch_Id","Kernel_Id","Kernel_Name","Correlation_Id","Start_Timestamp","End_Timestamp","Private_Segment_Size","Group_Segment_Size","Workgroup_Size_X","Workgroup_Size_Y","Workgroup_Size_Z","Grid_Size_X","Grid_Size_Y","Grid_Size_Z"
-   "KERNEL_DISPATCH","GPU 3",1,2,15056,1,17,"void addition_kernel<float>(float*, float const*, float const*, int, int)",1,1671390884499766,1671390884525686,0,0,64,1,1,1024,1024,1
+    "Kind","Agent_Id","Queue_Id","Stream_Id","Thread_Id","Dispatch_Id","Kernel_Id","Kernel_Name","Correlation_Id","Start_Timestamp","End_Timestamp","LDS_Block_Size","Scratch_Size","VGPR_Count","Accum_VGPR_Count","SGPR_Count","Workgroup_Size_X","Workgroup_Size_Y","Workgroup_Size_Z","Grid_Size_X","Grid_Size_Y","Grid_Size_Z"
+    "KERNEL_DISPATCH","GPU 3",19,29,846827,113,49,"void addition_kernel<float>(float*, float const*, float const*, int, int)",113,1551314943082302,1551314943092222,0,0,8,0,16,64,1,1,1024,1024,1
 
 Group by queue
 ++++++++++++++++++
@@ -1137,7 +1137,7 @@ By default, ``rocprofv3`` shows the HIP streams to which the kernel and memory c
 
 .. code-block:: shell
 
-   rocprofv3 -s --group-by-queue --output-format pftrace  -- <application_path>
+    rocprofv3 -s --group-by-queue --output-format pftrace  -- <application_path>
 
 The preceding command generates a ``pftrace`` file with the kernel and memory copy operations grouped into HSA queues instead of HIP streams.
 
@@ -1161,17 +1161,17 @@ Here is an example of kernel trace by default:
 
     $ cat 123_kernel_trace.csv
 
-    "Kind","Agent_Id","Queue_Id","Stream_Id","Thread_Id","Dispatch_Id","Kernel_Id","Kernel_Name","Correlation_Id","Start_Timestamp","End_Timestamp","Private_Segment_Size","Group_Segment_Size","Workgroup_Size_X","Workgroup_Size_Y","Workgroup_Size_Z","Grid_Size_X","Grid_Size_Y","Grid_Size_Z"
-    "KERNEL_DISPATCH","Agent 4",1,2,123,1,11,"addition_kernel<float>(float*, float const*, float const*, int, int)",1,1143263119836160,1143263119848360,0,0,64,1,1,1024,1024,1
-    "KERNEL_DISPATCH","Agent 4",2,3,123,6,14,"subtract_kernel(float*, float const*, float const*, int, int)",6,1143263119886120,1143263119896040,0,0,64,1,1,1024,1024,1
-    "KERNEL_DISPATCH","Agent 4",2,3,123,5,11,"addition_kernel<float>(float*, float const*, float const*, int, int)",5,1143263119876240,1143263119886120,0,0,64,1,1,1024,1024,1
-    "KERNEL_DISPATCH","Agent 4",1,2,123,4,12,"divide_kernel(float*, float const*, float const*, int)",4,1143263119866920,1143263119878960,0,0,64,1,1,1024,1024,1
+    "Kind","Agent_Id","Queue_Id","Stream_Id","Thread_Id","Dispatch_Id","Kernel_Id","Kernel_Name","Correlation_Id","Start_Timestamp","End_Timestamp","LDS_Block_Size","Scratch_Size","VGPR_Count","Accum_VGPR_Count","SGPR_Count","Workgroup_Size_X","Workgroup_Size_Y","Workgroup_Size_Z","Grid_Size_X","Grid_Size_Y","Grid_Size_Z"
+    "KERNEL_DISPATCH","Agent 4",1,1,852831,1,10,"void addition_kernel<float>(float*, float const*, float const*, int, int)",1,1551874061244694,1551874061255734,0,0,8,0,16,64,1,1,1024,1024,1
+    "KERNEL_DISPATCH","Agent 4",1,1,852831,2,13,"subtract_kernel(float*, float const*, float const*, int, int)",2,1551874061259214,1551874061270254,0,0,8,0,16,64,1,1,1024,1024,1
+    "KERNEL_DISPATCH","Agent 4",1,1,852831,3,12,"multiply_kernel(float*, float const*, float const*, int, int)",3,1551874061270254,1551874061279974,0,0,8,0,16,64,1,1,1024,1024,1
+    "KERNEL_DISPATCH","Agent 4",2,2,852831,8,11,"divide_kernel(float*, float const*, float const*, int, int)",8,1551874061326294,1551874061335454,0,0,12,4,16,64,1,1,1024,1024,1
 
 To disable kernel name demangling, use:
 
 .. code-block:: shell
 
-    rocprofv3 --mangled-kernels --kernel-trace -- <application_path>
+   rocprofv3 --mangled-kernels --kernel-trace --output-format csv -- <application_path>
 
 The preceding command generates the following ``kernel_trace.csv`` file with mangled kernel names:
 
@@ -1179,11 +1179,12 @@ The preceding command generates the following ``kernel_trace.csv`` file with man
 
     $ cat 123_kernel_trace.csv
 
-    "Kind","Agent_Id","Queue_Id","Stream_Id","Thread_Id","Dispatch_Id","Kernel_Id","Kernel_Name","Correlation_Id","Start_Timestamp","End_Timestamp","Private_Segment_Size","Group_Segment_Size","Workgroup_Size_X","Workgroup_Size_Y","Workgroup_Size_Z","Grid_Size_X","Grid_Size_Y","Grid_Size_Z"
-    "KERNEL_DISPATCH","Agent 4",1,2,123,1,11,"_Z15addition_kernelIfEvPT_PKfS3_ii.kd",1,1143263119836160,1143263119848360,0,0,64,1,1,1024,1024,1
-    "KERNEL_DISPATCH","Agent 4",2,3,123,6,14,"_Z15subtract_kernelPfPKfS1_ii.kd",6,1143263119886120,1143263119896040,0,0,64,1,1,1024,1024,1
-    "KERNEL_DISPATCH","Agent 4",2,3,123,5,11,"_Z15addition_kernelIfEvPT_PKfS3_ii.kd",5,1143263119876240,1143263119886120,0,0,64,1,1,1024,1024,1
-    "KERNEL_DISPATCH","Agent 4",1,2,123,4,12,"_Z13divide_kernelPfPKfS1_ii.kd",4,1143263119866920,1143263119878960,0,0,64,1,1,1024,1024,1
+    "Kind","Agent_Id","Queue_Id","Stream_Id","Thread_Id","Dispatch_Id","Kernel_Id","Kernel_Name","Correlation_Id","Start_Timestamp","End_Timestamp","LDS_Block_Size","Scratch_Size","VGPR_Count","Accum_VGPR_Count","SGPR_Count","Workgroup_Size_X","Workgroup_Size_Y","Workgroup_Size_Z","Grid_Size_X","Grid_Size_Y","Grid_Size_Z"
+    "KERNEL_DISPATCH","Agent 4",1,1,850334,1,10,"_Z15addition_kernelIfEvPT_PKfS3_ii.kd",1,1551636841670446,1551636841681606,0,0,8,0,16,64,1,1,1024,1024,1
+    "KERNEL_DISPATCH","Agent 4",1,1,850334,2,13,"_Z15subtract_kernelPfPKfS1_ii.kd",2,1551636841686726,1551636841697606,0,0,8,0,16,64,1,1,1024,1024,1
+    "KERNEL_DISPATCH","Agent 4",1,1,850334,3,12,"_Z15multiply_kernelPfPKfS1_ii.kd",3,1551636841701926,1551636841712806,0,0,8,0,16,64,1,1,1024,1024,1
+    "KERNEL_DISPATCH","Agent 4",2,2,850334,8,11,"_Z13divide_kernelPfPKfS1_ii.kd",8,1551636841762926,1551636841774646,0,0,12,4,16,64,1,1,1024,1024,1
+
 
 Kernel name truncation
 +++++++++++++++++++++++
@@ -1194,13 +1195,13 @@ To enable kernel name truncation, use the ``--truncate-kernels`` option:
 
 .. code-block:: shell
 
-    rocprofv3 --truncate-kernels --kernel-trace -- <application_path>
+    rocprofv3 --truncate-kernels --kernel-trace --output-format csv -- <application_path>
 
 The preceding command generates the following ``kernel_trace.csv`` file with truncated kernel names:
 
 .. csv-table:: Kernel trace truncated
    :file: /data/kernel_trace_truncated.csv
-   :widths: 10,10,10,10,10,10,10,10,10,20,20,10,10,10,10,10,10,10,10
+   :widths: 10,10,10,10,10,10,10,10,10,20,20,10,10,10,10,10,10,10,10,10,10,10
    :header-rows: 1
 
 Kernel filtering
@@ -1223,7 +1224,7 @@ To collect counters for the kernels matching the filters specified in the preced
 
 .. code-block:: shell
 
-    rocprofv3 -i input.yml -- <application_path>
+    rocprofv3 -i input.yml --output-format csv -- <application_path>
 
     $ cat pass_1/312_counter_collection.csv
     "Correlation_Id","Dispatch_Id","Agent_Id","Queue_Id","Process_Id","Thread_Id","Grid_Size","Kernel_Id","Kernel_Name","Workgroup_Size","LDS_Block_Size","Scratch_Size","VGPR_Count","Accum_VGPR_Count","SGPR_Count","Counter_Name","Counter_Value","Start_Timestamp","End_Timestamp"
@@ -1262,7 +1263,7 @@ To rename the kernel, use:
 
 .. code-block:: bash
 
-    rocprofv3 --marker-trace --kernel-rename -- <application_path>
+    rocprofv3 --marker-trace --kernel-rename --output-format csv -- <application_path>
 
 The preceding command generates the following ``marker-trace`` file prefixed with the process ID:
 
@@ -1346,7 +1347,7 @@ To specify the output directory, use ``--output-directory`` or ``-d`` option. If
 
 .. code-block:: shell
 
-   rocprofv3 --hip-trace --output-directory output_dir -- <application_path>
+   rocprofv3 --hip-trace --output-directory output_dir --output-format csv -- <application_path>
 
 The preceding command generates an ``output_dir/%hostname%/%pid%_hip_api_trace.csv`` file.
 
@@ -1366,7 +1367,7 @@ The following example shows how to use the output directory option with placehol
 
 .. code-block:: bash
 
-   mpirun -n 2 rocprofv3 --hip-trace -d %h.%p.%env{OMPI_COMM_WORLD_RANK}%  -- <application_path>
+   mpirun -n 2 rocprofv3 --hip-trace -d %h.%p.%env{OMPI_COMM_WORLD_RANK}% --output-format csv -- <application_path>
 
 The preceding command runs the application with ``rocprofv3`` and generates the trace file for each rank. The trace files are prefixed with hostname, process ID, and MPI rank.
 
@@ -1386,7 +1387,7 @@ To specify the output file name, use ``--output-file`` or ``-o`` option. If not 
 
 .. code-block:: shell
 
-   rocprofv3 --hip-trace --output-file output -- <application_path>
+   rocprofv3 --hip-trace --output-file output --output-format csv -- <application_path>
 
 The preceding command generates an ``output_hip_api_trace.csv`` file.
 
@@ -1394,7 +1395,7 @@ The output file name can also include placeholders such as ``%hostname%`` and ``
 
 .. code-block:: shell
 
-   rocprofv3 --hip-trace --output-file %hostname%/%pid%_hip_api_trace.csv -- <application_path>
+   rocprofv3 --hip-trace --output-file %hostname%/%pid%_hip_api_trace --output-format csv -- <application_path>
 
 The preceding command generates an ``%hostname%/%pid%_hip_api_trace.csv`` file.
 
@@ -1514,7 +1515,8 @@ Output formats
 
 ``rocprofv3`` supports the following output formats:
 
-- CSV (Default)
+- SQLite3 Database (Default)
+- CSV
 - JSON (Custom format for programmatic analysis only)
 - PFTrace (Perfetto trace for visualization with Perfetto)
 - OTF2 (Open Trace Format for visualization with compatible third-party tools)

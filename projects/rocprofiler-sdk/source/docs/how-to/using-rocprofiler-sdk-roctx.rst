@@ -85,7 +85,7 @@ To trace the API calls enclosed within the range, use:
 
 .. code-block:: bash
 
-    rocprofv3 --marker-trace -- <application_path>
+    rocprofv3 --marker-trace --output-format csv -- <application_path>
 
 Running the preceding command generates a ``marker_api_trace.csv`` file prefixed with the process ID.
 
@@ -137,7 +137,7 @@ To trace the preceding code, use:
 
 .. code-block:: shell
 
-    rocprofv3 --marker-trace --hip-trace -- <application_path>
+    rocprofv3 --marker-trace --hip-trace --output-format csv -- <application_path>
 
 The preceding command generates a ``hip_api_trace.csv`` file prefixed with the process ID. The file contains two ``hipMemcpy`` calls with the in-between ``hipMemcpyDeviceToHost`` call hidden .
 
@@ -282,7 +282,7 @@ User can profile the python application which is annotated with ROCTx markers us
     
 .. code-block:: shell
 
-   rocprofv3 --marker-trace -- $(which python) <python_application_path>
+   rocprofv3 --marker-trace --output-format csv -- $(which python) <python_application_path>
 
 The preceding command generates a ``marker_api_trace.csv`` file prefixed with the process ID.
 
