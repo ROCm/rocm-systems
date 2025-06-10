@@ -184,6 +184,12 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
   - `rocprofiler-sdk-rocpd` DEB and RPM packages
 - Support `--version` option for `rocprofv3`
 - Added `rocpd` Python package
+- Added thread trace as experimental API
+- Added ROCprof Trace Decoder as experimental API
+  - Requires [ROCprof Trace Decoder plugin](https://github.com/rocm/rocprof-trace-decoder)
+- Added thread trace option to the rocprofv3 tool under the --att parameters
+  - See [using thread trace with rocprofv3](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/amd-mainline/how-to/using-thread-trace.html)
+  - Requires the ROCprof Trace Decoder plugin installed (see above)
 
 ### Changed
 
@@ -193,6 +199,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - default output format for rocprofv3 is now `rocpd` (SQLite3 database)
 - rocprofv3 avail tool renamed from rocprofv3_avail to rocprofv3-avail tool
 - rocprofv3 avail tool has support for command line arguments.
+- rocprofv3 tool now allows for Thread Trace + PC Sampling on the same agent
 
 ### Resolved issues
 

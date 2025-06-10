@@ -90,7 +90,9 @@ WaitcntList::gfx9_construct(const wave_t& wave, isa_map_t& isa_map)
     for(size_t i = 0; i < wave.instructions_size; i++)
     {
         auto& event = wave.instructions_array[i];
-        auto  it    = isa_map.find(event.pc);
+        if(event.pc.marker_id == 0 && event.pc.addr == 0) continue;
+
+        auto it = isa_map.find(event.pc);
         if(it == isa_map.end() || !it->second->code_line || it->second->code_line->inst.empty())
         {
             static thread_local std::once_flag failed_flag{};

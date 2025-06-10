@@ -35,7 +35,7 @@ namespace att_wrapper
 WaveFile::WaveFile(WaveConfig& config, const wave_t& wave)
 {
     ROCP_WARNING_IF(wave.contexts != 0u)
-        << "Wave had " << wave.contexts << " context save-restores";
+        << "Wave had " << static_cast<int>(wave.contexts) << " context save-restores";
 
     if(!GlobalDefs::get().has_format("json")) return;
     if(wave.instructions_size == 0 && wave.timeline_size < 3) return;
