@@ -10,6 +10,7 @@ services:
       - seccomp:unconfined
     volumes:
       - ../:/app
+      - ../../rocprofiler-sdk:/rocprofiler-sdk
     ports:
       - 8050:8050
     tty: true
