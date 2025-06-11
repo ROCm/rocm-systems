@@ -236,9 +236,6 @@ amdsmi_status_code_to_string(amdsmi_status_t status, const char **status_string)
         case AMDSMI_STATUS_API_FAILED:
             *status_string = "AMDSMI_STATUS_API_FAILED: API call failed.";
             break;
-        case AMDSMI_STATUS_RETRY:
-            *status_string = "AMDSMI_STATUS_RETRY: Retry operation.";
-            break;
         case AMDSMI_STATUS_NO_PERM:
             *status_string = "AMDSMI_STATUS_NO_PERM: Permission Denied.";
             break;

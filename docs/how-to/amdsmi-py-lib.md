@@ -134,12 +134,10 @@ Exceptions that can be thrown by AMD SMI are:
            print("No GPUs on machine")
    except AmdSmiException as e:
        print("Error code: {}".format(e.err_code))
-       if e.err_code == amdsmi_wrapper.AMDSMI_STATUS_RETRY:
+       if e.err_code == amdsmi_wrapper.AMDSMI_STATUS_TIMEOUT:
            print("Error info: {}".format(e.err_info))
    ```
 
-* `AmdSmiRetryException` : Derives `AmdSmiLibraryException` class and signals
-  device is busy and call should be retried.
 * `AmdSmiTimeoutException` : Derives `AmdSmiLibraryException` class and
   represents that call had timed out.
 * `AmdSmiParameterException`: Derives base `AmdSmiException` class and

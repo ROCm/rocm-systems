@@ -295,9 +295,7 @@ Field | Content
 Exceptions that can be thrown by `amdsmi_get_gpu_enumeration_info` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -371,9 +369,7 @@ Field | Content
 Exceptions that can be thrown by `amdsmi_get_gpu_asic_info` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -408,9 +404,7 @@ Field | Content
 Exceptions that can be thrown by `amdsmi_get_gpu_kfd_info` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -448,9 +442,7 @@ Field | Description | Units
 Exceptions that can be thrown by `amdsmi_get_power_cap_info` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -490,9 +482,7 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_gpu_vram_info` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -532,9 +522,7 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_gpu_board_info` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -622,9 +610,7 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_gpu_cache_info` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -666,9 +652,7 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_gpu_vbios_info` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -705,9 +689,7 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_fw_info` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -746,9 +728,7 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_gpu_activity` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -790,9 +770,7 @@ Field | Description | Units
 Exceptions that can be thrown by `amdsmi_get_power_info` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -831,9 +809,7 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_gpu_vram_usage` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -900,7 +876,6 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_violation_status` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
 * `AmdSmiTimeoutException`
 
@@ -984,9 +959,7 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_clock_info` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -1025,9 +998,7 @@ Fields | Description
 Exceptions that can be thrown by `amdsmi_get_pcie_info` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -1065,9 +1036,7 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_gpu_bad_page_info` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -1104,9 +1073,7 @@ Output: Bad page threshold value
 Exceptions that can be thrown by `amdsmi_get_gpu_bad_page_threshold` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -1143,9 +1110,7 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_gpu_memory_reserved_pages` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -1191,9 +1156,7 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_gpu_process_list` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -1237,9 +1200,7 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_gpu_total_ecc_count` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -1388,9 +1349,7 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_gpu_ras_feature_info` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -1444,9 +1403,7 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_gpu_ras_block_features_enabled` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -1557,9 +1514,7 @@ Output: None
 Exceptions that can be thrown by `amdsmi_set_gpu_pci_bandwidth` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -1591,9 +1546,7 @@ Output: None
 Exceptions that can be thrown by `amdsmi_set_power_cap` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -1625,9 +1578,7 @@ Output: None
 Exceptions that can be thrown by `amdsmi_set_gpu_power_profile` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -1660,9 +1611,7 @@ Output: None
 Exceptions that can be thrown by `amdsmi_set_gpu_clk_range` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -1702,9 +1651,7 @@ BDFID = ((DOMAIN & 0xffffffff) << 32) | ((BUS & 0xff) << 8) |
 Exceptions that can be thrown by `amdsmi_get_gpu_bdf_id` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -1747,9 +1694,7 @@ Field | Content
 Exceptions that can be thrown by `amdsmi_get_gpu_pci_bandwidth` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -1784,9 +1729,7 @@ Field | Content
 Exceptions that can be thrown by `amdsmi_get_gpu_pci_throughput` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -1816,9 +1759,7 @@ The sum of the NAK's received and generated by the GPU
 Exceptions that can be thrown by `amdsmi_get_gpu_pci_replay_counter` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -1847,9 +1788,7 @@ Output: NUMA node value
 Exceptions that can be thrown by `amdsmi_get_gpu_topo_numa_affinity` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -1887,9 +1826,7 @@ Field | Content
 Exceptions that can be thrown by `amdsmi_get_energy_count` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -1919,9 +1856,7 @@ Output: total amount of memory
 Exceptions that can be thrown by `amdsmi_get_gpu_memory_total` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -1959,9 +1894,7 @@ Output: None
 Exceptions that can be thrown by `amdsmi_set_gpu_od_clk_info` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -1995,9 +1928,7 @@ Output: the amount of memory currently being used
 Exceptions that can be thrown by `amdsmi_get_gpu_memory_usage` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -2034,9 +1965,7 @@ Output: None
 Exceptions that can be thrown by `amdsmi_set_gpu_od_volt_info` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -2067,9 +1996,7 @@ Output: Fan speed in rpms as integer
 Exceptions that can be thrown by `amdsmi_get_gpu_fan_rpms` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -2101,9 +2028,7 @@ Output: Fan speed in relative to MAX
 Exceptions that can be thrown by `amdsmi_get_gpu_fan_speed` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -2135,9 +2060,7 @@ Output: Max fan speed as integer
 Exceptions that can be thrown by `amdsmi_get_gpu_fan_speed_max` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -2166,9 +2089,7 @@ Output: Bool true if power management enabled else false
 Exceptions that can be thrown by `amdsmi_is_gpu_power_management_enabled` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -2201,9 +2122,7 @@ Output: Temperature as integer in millidegrees Celcius
 Exceptions that can be thrown by `amdsmi_get_temp_metric` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -2279,9 +2198,7 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_utilization_count` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -2324,9 +2241,7 @@ Output: Performance level as enum value of dev_perf_level_t
 Exceptions that can be thrown by `amdsmi_get_gpu_perf_level` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -2357,9 +2272,7 @@ Output: None
 Exceptions that can be thrown by `amdsmi_set_gpu_perf_determinism_mode` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -2387,9 +2300,7 @@ Output: integer corresponding to isolation_status; 0 - disabled, 1 - enabled
 Exceptions that can be thrown by `amdsmi_get_gpu_process_isolation` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -2419,9 +2330,7 @@ Output: None
 Exceptions that can be thrown by `amdsmi_set_gpu_process_isolation` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -2449,9 +2358,7 @@ Output: None
 Exceptions that can be thrown by `amdsmi_clean_gpu_local_data` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -2480,9 +2387,7 @@ Output: Overdrive percentage as integer
 Exceptions that can be thrown by `amdsmi_get_gpu_overdrive_level` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -2512,9 +2417,7 @@ Output: Overdrive percentage as integer
 Exceptions that can be thrown by `amdsmi_get_gpu_mem_overdrive_level` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -2551,9 +2454,7 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_clk_freq` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -2592,9 +2493,7 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_gpu_od_volt_info` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -2684,9 +2583,7 @@ Output: Dictionary with fields
 Exceptions that can be thrown by `amdsmi_get_gpu_metrics_info` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -2720,9 +2617,7 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_gpu_pm_metrics_info` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -2756,9 +2651,7 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_gpu_reg_table_info` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -2793,9 +2686,7 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_gpu_od_volt_curve_regions` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -2831,9 +2722,7 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_gpu_power_profile_presets` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -2863,9 +2752,7 @@ Output: None
 Exceptions that can be thrown by `amdsmi_gpu_counter_group_supported` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -2894,9 +2781,7 @@ Output: An event handle of the newly created performance counter object
 Exceptions that can be thrown by `amdsmi_gpu_create_counter` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -2924,9 +2809,7 @@ Output: None
 Exceptions that can be thrown by `amdsmi_gpu_destroy_counter` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -2957,9 +2840,7 @@ Output: None
 Exceptions that can be thrown by `amdsmi_gpu_control_counter` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -2994,9 +2875,7 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_gpu_read_counter` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -3027,9 +2906,7 @@ Output: Number of available counters for the given device of the inputted event 
 Exceptions that can be thrown by `amdsmi_get_gpu_available_counters` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -3060,9 +2937,7 @@ Output: None
 Exceptions that can be thrown by `amdsmi_set_gpu_perf_level` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -3091,9 +2966,7 @@ Output: None
 Exceptions that can be thrown by `amdsmi_reset_gpu` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -3124,9 +2997,7 @@ Output: None
 Exceptions that can be thrown by `amdsmi_set_gpu_fan_speed` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -3156,9 +3027,7 @@ Output: None
 Exceptions that can be thrown by `amdsmi_reset_gpu_fan` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -3192,9 +3061,7 @@ Output: None
 Exceptions that can be thrown by `amdsmi_set_clk_freq` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -3230,9 +3097,7 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_soc_pstate` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -3262,9 +3127,7 @@ Output: None
 Exceptions that can be thrown by `amdsmi_set_soc_pstate` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -3293,9 +3156,7 @@ Output: None
 Exceptions that can be thrown by `amdsmi_set_xgmi_plpd` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -3329,9 +3190,7 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_xgmi_plpd` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -3363,9 +3222,7 @@ Output: None
 Exceptions that can be thrown by `amdsmi_set_gpu_overdrive_level` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -3405,9 +3262,7 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_gpu_ecc_count` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -3441,9 +3296,7 @@ Output: Enabled ECC bit-mask
 Exceptions that can be thrown by `amdsmi_get_gpu_ecc_enabled` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -3478,9 +3331,7 @@ Output: ECC status for a requested GPU block
 Exceptions that can be thrown by `amdsmi_get_gpu_ecc_status` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -3540,8 +3391,6 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_gpu_compute_process_info` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
-
 Example:
 
 ```python
@@ -3575,9 +3424,7 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_gpu_compute_process_info_by_pid` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -3602,9 +3449,7 @@ Output: List of indices of devices currently being used by the process
 Exceptions that can be thrown by `amdsmi_get_gpu_compute_process_gpus` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -3630,9 +3475,7 @@ Output: XGMI error status for a requested device
 Exceptions that can be thrown by `amdsmi_gpu_xgmi_error_status` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -3662,9 +3505,7 @@ Output: None
 Exceptions that can be thrown by `amdsmi_reset_gpu_xgmi_error` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -3692,9 +3533,7 @@ Output: device vendor name
 Exceptions that can be thrown by `amdsmi_get_gpu_vendor_name` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -3723,9 +3562,7 @@ Output: device id
 Exceptions that can be thrown by `amdsmi_get_gpu_id` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -3754,9 +3591,7 @@ Output: vram vendor
 Exceptions that can be thrown by `amdsmi_get_gpu_vram_vendor` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -3785,9 +3620,7 @@ Output: subsystem device id
 Exceptions that can be thrown by `amdsmi_get_gpu_subsystem_id` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -3816,9 +3649,7 @@ Output: device subsytem
 Exceptions that can be thrown by `amdsmi_get_gpu_subsystem_name` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -3847,9 +3678,7 @@ Output: node number of NUMA CPU for the device
 Exceptions that can be thrown by `amdsmi_topo_get_numa_node_number` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -3879,9 +3708,7 @@ Output: the weight for a connection between 2 GPUs
 Exceptions that can be thrown by `amdsmi_topo_get_link_weight` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -3917,9 +3744,7 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_minmax_bandwidth_between_processors` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -4010,9 +3835,7 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_topo_get_link_type` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -4058,9 +3881,7 @@ Fields | Description
 Exceptions that can be thrown by `amdsmi_get_P2P_status` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -4101,9 +3922,7 @@ Output: P2P availability status between 2 GPUs
 Exceptions that can be thrown by `amdsmi_is_P2P_accessible` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -4133,9 +3952,7 @@ Output: String of the partition type
 Exceptions that can be thrown by `amdsmi_get_gpu_compute_partition` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -4165,9 +3982,7 @@ Output: String of the partition type
 Exceptions that can be thrown by `amdsmi_set_gpu_compute_partition` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -4197,9 +4012,7 @@ Output: String of the partition type
 Exceptions that can be thrown by `amdsmi_get_gpu_memory_partition` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -4229,9 +4042,7 @@ Output: String of the partition type
 Exceptions that can be thrown by `amdsmi_set_gpu_memory_partition` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -4267,9 +4078,7 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_gpu_accelerator_partition_profile` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -4305,9 +4114,7 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_xgmi_info` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -4425,9 +4232,7 @@ Field | Description
 Exceptions that can be thrown by `amdsmi_get_gpu_vram_info` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
@@ -5504,9 +5309,7 @@ Output: amdsmi build version
 Exceptions that can be thrown by `amdsmi_get_lib_version` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiRetryException`
 * `AmdSmiParameterException`
-
 Example:
 
 ```python
