@@ -206,7 +206,7 @@ find_package(
     amd_smi
     HINTS
     ${ROCM_DIR}/lib/cmake
-    CONFIGURE
+    CONFIG
     REQUIRED)
 
 if(NOT EXISTS "${AMD_SMI_INCLUDE_DIR}" OR NOT EXISTS "${AMD_SMI_LIB_DIR}")
