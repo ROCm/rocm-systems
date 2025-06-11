@@ -2795,13 +2795,13 @@ def amdsmi_get_fw_info(
                      AmdSmiFwBlock.AMDSMI_FW_ID_TA_XGMI,
                      AmdSmiFwBlock.AMDSMI_FW_ID_UVD,
                      AmdSmiFwBlock.AMDSMI_FW_ID_VCE,
-                     AmdSmiFwBlock.AMDSMI_FW_ID_VCN,
-                     AmdSmiFwBlock.AMDSMI_FW_ID_PLDM]
+                     AmdSmiFwBlock.AMDSMI_FW_ID_VCN]
 
     # PM(AKA: SMC) firmware's hex value looks like 0x12345678
     # However, they are parsed as: int(0x12).int(0x34).int(0x56).int(0x78)
     # Which results in the following: 12.34.56.78
-    dec_format_fw = [AmdSmiFwBlock.AMDSMI_FW_ID_PM]
+    dec_format_fw = [AmdSmiFwBlock.AMDSMI_FW_ID_PM,
+                     AmdSmiFwBlock.AMDSMI_FW_ID_PLDM]
 
     firmwares = []
     for i in range(0, fw_info.num_fw_info):
