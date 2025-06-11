@@ -27,14 +27,6 @@ default_unit_coverter = {
         rdc_field_t.RDC_FI_GPU_TEMP: 0.001, # degree
 }
 
-class rdc_entity_info_t(Structure):
-    _fields_ = [
-        ("device_type",   c_uint32),
-        ("entity_role",   c_uint32),
-        ("instance_index", c_uint32),
-        ("device_index",   c_uint32),
-    ]
-
 class RdcReader:
     # To run the RDC in embedded mode, set the ip_port = None
     def __init__(self, ip_port = "localhost:50051", field_ids = default_field_ids,
@@ -52,11 +44,6 @@ class RdcReader:
 
         self.unit_converter = unit_converter
         self.rdc_handle = c_void_p()
-
-        rdc.rdc_get_entity_index_from_info.argtypes = [rdc_entity_info_t]
-        rdc.rdc_get_entity_index_from_info.restype  = c_uint32    
-        rdc.rdc_get_info_from_entity_index.argtypes = [c_uint32]
-        rdc.rdc_get_info_from_entity_index.restype  = rdc_entity_info_t
 
         self.is_standalone = True
         if not ip_port:  # embedded

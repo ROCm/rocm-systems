@@ -6,13 +6,16 @@ set(SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(INC_DIR "${PROJECT_SOURCE_DIR}/include/rdc_modules/rdc_rocp")
 
 set(RDC_ROCP_LIB_COMPONENT "lib${RDC_ROCP_LIB}")
-set(RDC_ROCP_LIB_SRC_LIST "${BOOTSTRAP_LIB_SRC_DIR}/RdcLogger.cc" "${SRC_DIR}/RdcTelemetryLib.cc"
-                          "${SRC_DIR}/RdcRocpCounterSampler.cc" "${SRC_DIR}/RdcRocpBase.cc")
+set(RDC_ROCP_LIB_SRC_LIST
+    "${BOOTSTRAP_LIB_SRC_DIR}/RdcLogger.cc" "${BOOTSTRAP_LIB_SRC_DIR}/RdcEntityCodec.cc"
+    "${SRC_DIR}/RdcTelemetryLib.cc" "${SRC_DIR}/RdcRocpCounterSampler.cc"
+    "${SRC_DIR}/RdcRocpBase.cc")
 set(RDC_ROCP_LIB_INC_LIST
     "${PROJECT_SOURCE_DIR}/include/rdc/rdc.h"
     "${RDC_LIB_INC_DIR}/RdcDiagnosticLibInterface.h"
     "${RDC_LIB_INC_DIR}/rdc_common.h"
     "${RDC_LIB_INC_DIR}/RdcLogger.h"
+    "${RDC_LIB_INC_DIR}/RdcEntityCodec.h"
     "${SRC_DIR}/../../rdc/src/SmiUtils.cc"
     "${INC_DIR}/RdcRocpBase.h"
     "${INC_DIR}/RdcRocpCounterSampler.h")

@@ -381,6 +381,15 @@ class rdc_job_group_info_t(Structure):
             ,("stop_time", c_uint64)
             ]
 
+class rdc_entity_info_t(Structure):
+    _fields_ = [
+        ("device_index",   c_uint32),
+        ("instance_index", c_uint32),
+        ("entity_role",   c_uint32),
+        ("device_type",   c_uint32),
+    ]
+
+
 rdc.rdc_init.restype = rdc_status_t
 rdc.rdc_init.argtypes = [ c_uint64 ]
 rdc.rdc_shutdown.restype = rdc_status_t
@@ -441,3 +450,7 @@ rdc.field_id_string.restype = c_char_p
 rdc.field_id_string.argtypes = [ rdc_field_t ]
 rdc.get_field_id_from_name.restype = rdc_field_t
 rdc.get_field_id_from_name.argtypes = [ c_char_p ]
+rdc.rdc_get_entity_index_from_info.argtypes = [ rdc_entity_info_t ]
+rdc.rdc_get_entity_index_from_info.restype  = c_uint32
+rdc.rdc_get_info_from_entity_index.argtypes = [c_uint32]
+rdc.rdc_get_info_from_entity_index.restype  = rdc_entity_info_t
