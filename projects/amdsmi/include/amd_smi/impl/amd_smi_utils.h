@@ -61,31 +61,14 @@ amdsmi_status_t smi_clear_char_and_reinitialize(char buffer[], uint32_t len,
                                                     std::string newString);
 
 /**
- * @brief Opens a file descriptor for the specified path with RAII semantics and caching.
- *
- * This function attempts to open a file descriptor (FD) for the given file path and flags.
- * It maintains a cache of weak pointers to previously opened FDs, allowing for reuse of
- * file descriptors if they are still valid. If a valid FD for the path exists in the cache,
- * it is reused; otherwise, a new FD is opened. The returned FD is managed by a std::shared_ptr
- * with a custom deleter that ensures the FD is properly closed when no longer in use.
- *
- * Thread safety is ensured via a static mutex.
- *
- * @param path The file system path to open.
- * @param flags Flags to use when opening the file (as per open(2)).
- * @return std::shared_ptr<int> Shared pointer managing the file descriptor, or nullptr on failure.
- */
-std::shared_ptr<int> amdsmi_RAII_FD_handler(const std::string& path, int flags);
-
-/**
  * @brief Wait for user input, a debugging function to pause the program
- * 
+ *
  * @details This function will wait for user input before continuing.
  * It is useful for debugging purposes to allow the user to inspect the state of the program
  * before it continues. The function will print a message to the console and then wait for
  * the user to press Enter. Once Enter is pressed, the function will return and the program
  * will continue executing.
- * 
+ *
  * @note This function is intended for debugging purposes only and should not be used in production code.
  * It will block the program execution and cause it to wait indefinitely for user input.
  */
@@ -94,7 +77,7 @@ void amdsmi_wait_for_user_input(void);
 /**
  *  @brief Get the device index given the processor handle.
  *
- *  @details Given a processor handle @p processor_handle 
+ *  @details Given a processor handle @p processor_handle
  *  and a pointer to a uint32_t @p device_index will be returned.
  *
  *  @param[in] processor_handle Device which to query
@@ -205,3 +188,31 @@ void fill_2d_array(A& arr, T value) {
 }
 
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_
+
+#ifndef SCOPED_FD_H
+#define SCOPED_FD_H
+
+class ScopedFD {
+private:
+    int fd_;
+    std::string path_;
+
+public:
+    ScopedFD(const std::string& path, int flags);
+    ~ScopedFD();
+
+    // Non-copyable
+    ScopedFD(const ScopedFD&) = delete;
+    ScopedFD& operator=(const ScopedFD&) = delete;
+
+    // Movable
+    ScopedFD(ScopedFD&& other) noexcept;
+    ScopedFD& operator=(ScopedFD&& other) noexcept;
+
+    int get() const;
+    bool valid() const;
+    operator int() const;        // Allows direct use as int
+    int operator*() const;       // Allows *fd usage like your current code
+};
+
+#endif // SCOPED_FD_H

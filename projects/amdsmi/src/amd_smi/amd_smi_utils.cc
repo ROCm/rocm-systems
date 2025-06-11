@@ -407,9 +407,9 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
         } else {
             /**
              * if the first line contains '*', then
-             * we are saving that value as current_freq then checking 
+             * we are saving that value as current_freq then checking
              * for other dpm levels if none are found then we
-             * set min and max to current_freq as per Driver 
+             * set min and max to current_freq as per Driver
              * We then skip to the next line to avoid getting
              * incorrect min value.
              */
@@ -671,15 +671,11 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice
         return AMDSMI_STATUS_NOT_SUPPORTED;
     }
 
-    auto fd = amdsmi_RAII_FD_handler(path.c_str(), O_RDWR | O_CLOEXEC);
-    ss << __PRETTY_FUNCTION__ << " | Render Name: "
-       << render_name << "; path: " << path << "; fd: "
-       << (fd == nullptr ? "nullptr" : std::to_string(*fd)) << "\n";
-    LOG_DEBUG(ss);
+    ScopedFD fd(path.c_str(), O_RDWR | O_CLOEXEC);
     if (!fd) {
         ss << __PRETTY_FUNCTION__ << " | Render Name: "
            << render_name << "; path: " << path << "; fd: "
-           << (fd == nullptr ? "nullptr" : std::to_string(*fd)) << "\n"
+           << (fd < 0 ? "less than 0" : std::to_string(*fd)) << "\n"
            << "; Returning: "
            << smi_amdgpu_get_status_string(AMDSMI_STATUS_FILE_ERROR, false) << "\n";
         LOG_INFO(ss);
@@ -1023,57 +1019,57 @@ void amdsmi_wait_for_user_input(void) {
   }
 }
 
-std::shared_ptr<int> amdsmi_RAII_FD_handler(const std::string& path, int flags) {
-    static std::mutex fd_mutex;
-    static std::map<std::string, std::weak_ptr<int>> open_files;
-    static std::ostringstream ss;
-
-    std::lock_guard<std::mutex> lock(fd_mutex);
-
-    // Clean up expired entries from the cache
-    for (auto it = open_files.begin(); it != open_files.end();) {
-        if (it->second.expired()) {
-            it = open_files.erase(it);
-        } else {
-            ++it;
-        }
-    }
-
-    // Try to reuse an existing open FD
-    auto it = open_files.find(path);
-    if (it != open_files.end()) {
-        if (auto existing_fd = it->second.lock()) {
-            ss <<__PRETTY_FUNCTION__ << " | Reusing FD for path: " << path;
-            LOG_INFO(ss);
-            return existing_fd;
-        }
-    }
-
-    // Open a new file descriptor
-    int fd = open(path.c_str(), flags);
-    if (fd < 0) {
-        ss << __PRETTY_FUNCTION__ << " | Failed to open file: " << path
-           << " | Error: " << strerror(errno);
+ScopedFD::ScopedFD(const std::string& path, int flags)
+    : fd_(open(path.c_str(), flags)), path_(path) {
+    std::ostringstream ss;
+    if (fd_ >= 0) {
+        ss << __PRETTY_FUNCTION__ << " | Opened FD: " << fd_
+           << " for path: " << path_;
         LOG_INFO(ss);
-        return nullptr;
+    } else {
+        ss << __PRETTY_FUNCTION__ << " | Failed to open file: " << path_
+           << " | Error: " << strerror(errno);
+        LOG_ERROR(ss);
     }
+}
 
-    ss << __PRETTY_FUNCTION__ << " | Opened FD: " << std::to_string(fd)
-       << " for path: " << path;
-    LOG_INFO(ss);
+ScopedFD::~ScopedFD() {
+    if (fd_ >= 0) {
+        std::ostringstream ss;
+        ss << __PRETTY_FUNCTION__ << " | Closing FD: " << fd_
+           << " for path: " << path_;
+        LOG_INFO(ss);
+        close(fd_);
+    }
+}
 
-    // Create a shared_ptr with a custom deleter to close the FD
-    auto fd_ptr = std::shared_ptr<int>(new int(fd), [path](int* fd) {
-        if (fd && *fd >= 0) {
-            ss << __PRETTY_FUNCTION__  << " | Closing FD: " << std::to_string(*fd)
-               << " | Path: " << path << std::endl;
-            LOG_INFO(ss);
-            close(*fd);
-            delete fd;
-        }
-    });
+ScopedFD::ScopedFD(ScopedFD&& other) noexcept
+    : fd_(other.fd_), path_(std::move(other.path_)) {
+    other.fd_ = -1;
+}
 
-    // Store weak_ptr in cache for reuse
-    open_files[path] = fd_ptr;
-    return fd_ptr;
+ScopedFD& ScopedFD::operator=(ScopedFD&& other) noexcept {
+    if (this != &other) {
+        if (fd_ >= 0) close(fd_);
+        fd_ = other.fd_;
+        path_ = std::move(other.path_);
+        other.fd_ = -1;
+    }
+    return *this;
+}
+
+int ScopedFD::get() const {
+    return fd_;
+}
+
+bool ScopedFD::valid() const {
+    return fd_ >= 0;
+}
+
+ScopedFD::operator int() const {
+    return fd_;
+}
+
+int ScopedFD::operator*() const {
+    return fd_;
 }

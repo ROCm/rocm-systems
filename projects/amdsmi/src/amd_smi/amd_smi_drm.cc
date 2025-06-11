@@ -131,12 +131,12 @@ amdsmi_status_t AMDSmiDrm::init() {
         // looking for /sys/class/drm/card0/../renderD*
         std::string render_name = find_file_in_folder(renderD_folder, regex);
         std::string name = "/dev/dri/" + render_name;
-        auto fd = amdsmi_RAII_FD_handler(name.c_str(), O_RDWR | O_CLOEXEC);
+        ScopedFD fd(name.c_str(), O_RDWR | O_CLOEXEC);
 
         amdsmi_bdf_t bdf;
         if (*fd >= 0) {
             auto version = drm_get_version(*fd);
-            if (*fd  >= 0 && drm_get_device(*fd, &device) != 0) {
+            if (drm_get_device(*fd, &device) != 0) {
                 drm_free_device(&device);
             }
             ss << __PRETTY_FUNCTION__ << " | "

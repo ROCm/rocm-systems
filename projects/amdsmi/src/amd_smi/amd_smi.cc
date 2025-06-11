@@ -904,12 +904,7 @@ amdsmi_status_t amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_hand
     }
 
     std::string path = "/dev/dri/" + render_name;
-    auto drm_fd = amdsmi_RAII_FD_handler(path.c_str(), O_RDWR | O_CLOEXEC);
-    ss << __PRETTY_FUNCTION__
-       << " | open(" << path << ") returned: " << strerror(errno) << "\n"
-       << " | drm_fd: " << (drm_fd == nullptr ? "nullptr" : std::to_string(*drm_fd)) << "\n"
-       << " | render_name: " << render_name << "\n";
-    LOG_INFO(ss);
+    ScopedFD drm_fd(path.c_str(), O_RDWR | O_CLOEXEC);
     if (!drm_fd) {
         ss << __PRETTY_FUNCTION__
            << " | Failed to open " << path << ": " << strerror(errno)
@@ -1666,12 +1661,7 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
         return AMDSMI_STATUS_NOT_SUPPORTED;
     }
     std::string path = "/dev/dri/" + render_name;
-    auto drm_fd = amdsmi_RAII_FD_handler(path.c_str(), O_RDWR | O_CLOEXEC);
-    ss << __PRETTY_FUNCTION__
-       << " | open(" << path << ") returned: " << strerror(errno) << "\n"
-       << " | drm_fd: " << (drm_fd == nullptr ? "nullptr" : std::to_string(*drm_fd)) << "\n"
-       << " | render_name: " << render_name << "\n";
-    LOG_INFO(ss);
+    ScopedFD drm_fd(path.c_str(), O_RDWR | O_CLOEXEC);
     if (!drm_fd) {
         ss << __PRETTY_FUNCTION__
            << " | Failed to open " << path << ": " << strerror(errno)
@@ -1894,12 +1884,7 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(
         return AMDSMI_STATUS_NOT_SUPPORTED;
     }
 
-    auto drm_fd = amdsmi_RAII_FD_handler(path.c_str(), O_RDWR | O_CLOEXEC);
-    ss << __PRETTY_FUNCTION__
-       << " | open(" << path << ") returned: " << strerror(errno) << "\n"
-       << " | drm_fd: " << (drm_fd == nullptr ? "nullptr" : std::to_string(*drm_fd)) << "\n"
-       << " | render_name: " << render_name << "\n";
-    LOG_INFO(ss);
+    ScopedFD drm_fd(path.c_str(), O_RDWR | O_CLOEXEC);
     if (!drm_fd) {
         ss << __PRETTY_FUNCTION__
            << " | Failed to open " << path << ": " << strerror(errno)
@@ -3757,12 +3742,7 @@ amdsmi_get_gpu_vbios_info(amdsmi_processor_handle processor_handle, amdsmi_vbios
         return AMDSMI_STATUS_NOT_SUPPORTED;
     }
 
-    auto drm_fd = amdsmi_RAII_FD_handler(path.c_str(), O_RDWR | O_CLOEXEC);
-    ss << __PRETTY_FUNCTION__
-       << " | open(" << path << ") returned: " << strerror(errno) << "\n"
-       << " | drm_fd: " << (drm_fd == nullptr ? "nullptr" : std::to_string(*drm_fd)) << "\n"
-       << " | render_name: " << render_name << "\n";
-    LOG_INFO(ss);
+    ScopedFD drm_fd(path.c_str(), O_RDWR | O_CLOEXEC);
     if (!drm_fd) {
         ss << __PRETTY_FUNCTION__
            << " | Failed to open " << path << ": " << strerror(errno)
@@ -4325,7 +4305,7 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
         return AMDSMI_STATUS_NOT_SUPPORTED;
     }
 
-    auto drm_fd = amdsmi_RAII_FD_handler(path.c_str(), O_RDWR | O_CLOEXEC);
+    ScopedFD drm_fd(path.c_str(), O_RDWR | O_CLOEXEC);
     if (!drm_fd) {
         ss << __PRETTY_FUNCTION__
            << " | Failed to open " << path << ": " << strerror(errno)
@@ -4801,7 +4781,7 @@ amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle processor_handle,
         return AMDSMI_STATUS_NOT_SUPPORTED;
     }
 
-    auto drm_fd = amdsmi_RAII_FD_handler(path.c_str(), O_RDWR | O_CLOEXEC);
+    ScopedFD drm_fd(path.c_str(), O_RDWR | O_CLOEXEC);
     if (!drm_fd) {
         ss << __PRETTY_FUNCTION__
            << " | Failed to open " << path << ": " << strerror(errno)
