@@ -362,8 +362,20 @@ AqlQueue::~AqlQueue() {
 
   Inactivate();
 
-  if (queue_scratch_.main_queue_base) agent_->ReleaseQueueMainScratch(queue_scratch_);
-  if (queue_scratch_.alt_queue_base) agent_->ReleaseQueueAltScratch(queue_scratch_);
+  if (queue_scratch_.main_queue_base) {
+    tool::notify_event_scratch_free_start(public_handle(),
+                              HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE);
+    agent_->ReleaseQueueMainScratch(queue_scratch_);
+    tool::notify_event_scratch_free_end(public_handle(),
+                              HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE);
+  }
+  if (queue_scratch_.alt_queue_base) {
+    tool::notify_event_scratch_free_start(public_handle(),
+                              HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
+    agent_->ReleaseQueueAltScratch(queue_scratch_);
+    tool::notify_event_scratch_free_end(public_handle(),
+                              HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
+  }
 
   exception_signal_->WaitingDec();
   exception_signal_->DestroySignal();
@@ -642,7 +654,13 @@ void AqlQueue::CheckScratchLimits() {
 
 void AqlQueue::FreeMainScratchSpace() {
   auto& scratch = queue_scratch_;
-  agent_->ReleaseQueueMainScratch(scratch);
+  if (queue_scratch_.main_queue_base) {
+    tool::notify_event_scratch_free_start(public_handle(),
+                              HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE);
+    agent_->ReleaseQueueMainScratch(scratch);
+    tool::notify_event_scratch_free_end(public_handle(),
+                              HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE);
+  }
   scratch.main_size = 0;
   scratch.main_size_per_thread = 0;
   scratch.main_queue_process_offset = 0;
@@ -785,7 +803,13 @@ void AqlQueue::AsyncReclaimMainScratch() {
 
 void AqlQueue::FreeAltScratchSpace() {
   auto& scratch = queue_scratch_;
-  agent_->ReleaseQueueAltScratch(scratch);
+  if (queue_scratch_.alt_queue_base) {
+    tool::notify_event_scratch_free_start(public_handle(),
+                              HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
+    agent_->ReleaseQueueAltScratch(scratch);
+    tool::notify_event_scratch_free_end(public_handle(),
+                              HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
+  }
   scratch.alt_size = 0;
   scratch.alt_size_per_thread = 0;
   scratch.alt_queue_process_offset = 0;
@@ -987,7 +1011,13 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
   // scratch.use_alt_limit will be 0 if alt scratch is not supported or disabled
   if (dispatch_size < scratch.use_alt_limit && dispatch_slots < device_slots) {
     // Try to use ALT scratch
-    agent_->ReleaseQueueAltScratch(scratch);
+    if (scratch.alt_queue_base) {
+      tool::notify_event_scratch_free_start(public_handle(),
+                                HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
+      agent_->ReleaseQueueAltScratch(scratch);
+      tool::notify_event_scratch_free_end(public_handle(),
+                                HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
+    }
 
     scratch.alt_size = dispatch_size;
     scratch.alt_size_per_thread = size_per_thread;
@@ -1019,7 +1049,14 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
   }
 
   // Use PRIMARY scratch
-  agent_->ReleaseQueueMainScratch(scratch);
+  if (scratch.main_queue_base) {
+    tool::notify_event_scratch_free_start(public_handle(),
+                              HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE);
+    agent_->ReleaseQueueMainScratch(scratch);
+    tool::notify_event_scratch_free_end(public_handle(),
+                              HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE);
+  }
+
   scratch.main_size = device_size;
   scratch.main_size_per_thread = size_per_thread;
   scratch.main_lanes_per_wave = lanes_per_wave;

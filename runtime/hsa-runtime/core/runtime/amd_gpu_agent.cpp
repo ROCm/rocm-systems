@@ -1972,7 +1972,7 @@ void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
 
 /* Should be called with scratch_lock_ */
 void GpuAgent::ReleaseQueueMainScratch(ScratchInfo& scratch) {
-  if (scratch.main_queue_base == nullptr) return;
+  assert(scratch.main_queue_base);
 
   scratch_cache_.freeMain(scratch);
   scratch.main_queue_base = nullptr;
@@ -2047,7 +2047,7 @@ void GpuAgent::AcquireQueueAltScratch(ScratchInfo& scratch) {
 
 /* Should be called with scratch_lock_ */
 void GpuAgent::ReleaseQueueAltScratch(ScratchInfo& scratch) {
-  if (scratch.alt_queue_base == nullptr) return;
+  assert(scratch.alt_queue_base);
 
   scratch_cache_.freeAlt(scratch);
   scratch.alt_queue_base = nullptr;
