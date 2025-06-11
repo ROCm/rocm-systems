@@ -72,9 +72,6 @@ endif ()
 ## Find hsa-runtime
 find_package(hsa-runtime64 REQUIRED HINTS ${CMAKE_INSTALL_PREFIX} PATHS /opt/rocm)
 
-# find KFD thunk
-find_package(hsakmt REQUIRED HINTS ${CMAKE_INSTALL_PREFIX} PATHS /opt/rocm)
-
 ## Basic Tool Chain Information
 message ( "----------------NBIT: ${NBIT}" )
 message ( "-----------BuildType: ${CMAKE_BUILD_TYPE}" )
