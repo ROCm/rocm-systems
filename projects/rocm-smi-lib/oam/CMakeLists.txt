@@ -103,10 +103,8 @@ target_include_directories(${OAM_TARGET}
 install(TARGETS ${OAM_TARGET}
           EXPORT rocm_smiTargets
           LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+          ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
           COMPONENT dev)
-install(TARGETS ${OAM_TARGET}
-          LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-          COMPONENT asan)
 
 install(FILES ${COMMON_SRC_ROOT}/oam/include/oam/oam_mapi.h
               ${COMMON_SRC_ROOT}/oam/include/oam/amd_oam.h
