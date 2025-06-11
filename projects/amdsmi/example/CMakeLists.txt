@@ -31,13 +31,14 @@ else()
     set(ROCM_DIR "/opt/rocm" CACHE STRING "ROCm directory.")
 endif()
 
+include(GNUInstallDirs)
+
 # add package search paths
-set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} ${ROCM_DIR} ../../../)
-set(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH} ${ROCM_DIR}/lib)
-if(NOT EXISTS ${ROCM_DIR}/lib64)
-    file(MAKE_DIRECTORY ${ROCM_DIR}/lib64)
-endif()
-set(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH} ${ROCM_DIR}/lib64)
+# ../../../ should resolve to /opt/rocm or another rocm install path
+# fall back to ROCM_DIR
+list(APPEND CMAKE_PREFIX_PATH ../../../ ${ROCM_DIR})
+list(APPEND CMAKE_LIBRARY_PATH ${ROCM_DIR}/${CMAKE_INSTALL_LIBDIR})
+
 find_package(amd_smi CONFIG REQUIRED)
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
@@ -49,17 +50,14 @@ message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 set(SMI_DRM_EXAMPLE_EXE "amd_smi_drm_ex")
 add_executable(${SMI_DRM_EXAMPLE_EXE} "amd_smi_drm_example.cc")
 target_link_libraries(${SMI_DRM_EXAMPLE_EXE} amd_smi)
-add_dependencies(${SMI_DRM_EXAMPLE_EXE} amd_smi)
 
 set(SMI_NODRM_EXAMPLE_EXE "amd_smi_nodrm_ex")
 add_executable(${SMI_NODRM_EXAMPLE_EXE} "amd_smi_nodrm_example.cc")
 target_link_libraries(${SMI_NODRM_EXAMPLE_EXE} amd_smi)
-add_dependencies(${SMI_NODRM_EXAMPLE_EXE} amd_smi)
 
 if(ENABLE_ESMI_LIB)
     set(ESMI_SAMPLE_EXE "amd_smi_esmi_ex")
     add_executable(${ESMI_SAMPLE_EXE} "amdsmi_esmi_intg_example.cc")
     target_link_libraries(${ESMI_SAMPLE_EXE} amd_smi)
     target_compile_definitions(${ESMI_SAMPLE_EXE} PUBLIC ENABLE_ESMI_LIB)
-    add_dependencies(${ESMI_SAMPLE_EXE} amd_smi)
 endif()

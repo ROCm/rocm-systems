@@ -268,7 +268,13 @@ install(
 install(
     DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/example
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${AMD_SMI}
-    COMPONENT dev)
+    COMPONENT dev
+    FILES_MATCHING
+    PATTERN "*.h"
+    PATTERN "*.cc"
+    PATTERN "*.txt"
+    PATTERN "build*" EXCLUDE
+    PATTERN ".cache*" EXCLUDE)
 
 # Make for goamdsmi_shim library
 add_subdirectory(goamdsmi_shim)
