@@ -5773,7 +5773,7 @@ class AMDSMICommands():
                 if 'cu_occupancy' in process_info:
                     try:
                         cu_occupancy = process_info['cu_occupancy']
-                        if num_compute_units != "N/A" and num_compute_units > 0:
+                        if num_compute_units != "N/A" and num_compute_units > 0 and cu_occupancy != "N/A":
                             cu_percentage = round((cu_occupancy / num_compute_units) * 100, 1)
                             process_info['cu_occupancy'] = self.helpers.unit_format(self.logger,
                                                                                     cu_percentage,
