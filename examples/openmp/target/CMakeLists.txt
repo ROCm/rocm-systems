@@ -1,25 +1,4 @@
-#
-#
-#
 cmake_minimum_required(VERSION 3.18.4 FATAL_ERROR)
-
-# try to find a compatible HIP version
-if(ROCmVersion_MAJOR_VERSION AND ROCmVersion_MAJOR_VERSION GREATER_EQUAL 6)
-    find_package(hip ${ROCmVersion_MAJOR_VERSION}.0.0)
-else()
-    find_package(hip)
-endif()
-
-if(NOT hip_FOUND)
-    message(WARNING "ROCm >= 5.6 not found. Skipping OpenMP target example.")
-    return()
-elseif(hip_FOUND AND hip_VERSION VERSION_LESS 5.6.0)
-    message(
-        WARNING
-            "ROCm >= 5.6 not found (found ${hip_VERSION}). Skipping OpenMP target example."
-        )
-    return()
-endif()
 
 if(NOT OMP_TARGET_COMPILER)
     find_program(
