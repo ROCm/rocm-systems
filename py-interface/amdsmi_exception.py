@@ -62,7 +62,6 @@ class AmdSmiLibraryException(AmdSmiException):
             amdsmi_wrapper.AMDSMI_STATUS_DRM_ERROR : "AMDSMI_STATUS_DRM_ERROR - Error when called libdrm",
             amdsmi_wrapper.AMDSMI_STATUS_API_FAILED : "AMDSMI_STATUS_API_FAILED - API call failed",
             amdsmi_wrapper.AMDSMI_STATUS_TIMEOUT : "AMDSMI_STATUS_TIMEOUT - Timeout in API call",
-            amdsmi_wrapper.AMDSMI_STATUS_RETRY : "AMDSMI_STATUS_RETRY - Retry operation",
             amdsmi_wrapper.AMDSMI_STATUS_NO_PERM : "AMDSMI_STATUS_NO_PERM - Permission Denied",
             amdsmi_wrapper.AMDSMI_STATUS_INTERRUPT : "AMDSMI_STATUS_INTERRUPT - Interrupt ocurred during execution",
             amdsmi_wrapper.AMDSMI_STATUS_IO : "AMDSMI_STATUS_IO - I/O Error",
@@ -101,11 +100,6 @@ class AmdSmiLibraryException(AmdSmiException):
         }
 
         self.err_info = switch.get(self.err_code, "AMDSMI_STATUS_UNKNOWN_ERROR - An unknown error occurred")
-
-
-class AmdSmiRetryException(AmdSmiLibraryException):
-    def __init__(self):
-        super().__init__(amdsmi_wrapper.AMDSMI_STATUS_RETRY)
 
 
 class AmdSmiTimeoutException(AmdSmiLibraryException):

@@ -128,11 +128,16 @@ Exceptions that can be thrown by AMD SMI are:
    ```python
    try:
        num_of_GPUs = len(amdsmi_get_processor_handles())
-   except amdsmi_exception.AmdSmiLibraryException as e:
-       print("Unable to get processor handles, error: {} {}".format(str(e.get_error_code()), e.err_info))
+       if num_of_GPUs == 0:
+           print("No GPUs on machine")
+   except AmdSmiException as e:
+       print("Error code: {}".format(e.err_code))
+       if e.err_code == amdsmi_wrapper.AMDSMI_STATUS_TIMEOUT:
+           print("Error info: {}".format(e.err_info))
    ```
 
-
+* `AmdSmiTimeoutException` : Derives `AmdSmiLibraryException` class and
+  represents that call had timed out.
 * `AmdSmiParameterException`: Derives base `AmdSmiException` class and
   represents errors related to invaild parameters passed to functions. When this
   exception is thrown, `err_msg` is set and it explains what is the actual and

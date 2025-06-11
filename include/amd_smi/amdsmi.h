@@ -304,7 +304,6 @@ typedef enum {
     AMDSMI_STATUS_DRM_ERROR = 6,            //!< Error when call libdrm
     AMDSMI_STATUS_API_FAILED = 7,           //!< API call failed
     AMDSMI_STATUS_TIMEOUT = 8,              //!< Timeout in API call
-    AMDSMI_STATUS_RETRY = 9,                //!< Retry operation
     AMDSMI_STATUS_NO_PERM = 10,             //!< Permission Denied
     AMDSMI_STATUS_INTERRUPT = 11,           //!< An interrupt occurred during execution of function
     AMDSMI_STATUS_IO = 12,                  //!< I/O Error
