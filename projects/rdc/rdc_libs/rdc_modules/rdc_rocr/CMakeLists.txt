@@ -40,7 +40,7 @@ if(BUILD_RUNTIME)
         hsa-runtime64
         HINTS
         ${ROCM_DIR}/lib/cmake
-        CONFIGURE
+        CONFIG
         REQUIRED)
     set(RDC_LIB_MODULES
         ${RDC_LIB_MODULES} ${RDC_ROCR_LIB}
