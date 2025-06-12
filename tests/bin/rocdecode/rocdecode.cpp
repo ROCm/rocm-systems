@@ -23,8 +23,8 @@ THE SOFTWARE.
 #include <rocdecode/roc_bitstream_reader.h>
 #include <rocdecode/rocdecode.h>
 #include <rocdecode/rocparser.h>
+#include <cstring>
 #include <iostream>
-#include "roc_video_dec.h"
 
 int
 main(int argc, char** argv)
@@ -69,39 +69,64 @@ main(int argc, char** argv)
         return 1;
     }
 
-    // Set up video decoder
-    int                     device_id              = 0;
-    OutputSurfaceMemoryType mem_type               = OUT_SURFACE_MEM_DEV_INTERNAL;
-    bool                    b_force_zero_latency   = false;
-    Rect*                   p_crop_rect            = nullptr;
-    int                     disp_delay             = 1;
-    bool                    b_extract_sei_messages = false;
-    RocVideoDecoder*        viddec                 = new RocVideoDecoder(device_id,
-                                                  mem_type,
-                                                  rocdec_codec_id,
-                                                  b_force_zero_latency,
-                                                  p_crop_rect,
-                                                  b_extract_sei_messages,
-                                                  disp_delay);
-
     uint8_t* pvideo        = nullptr;
     int      n_video_bytes = 0;
     int64_t  pts           = 0;
-    int      pkg_flags     = 0;
-    int      decoded_pics  = 0;
     if(rocDecGetBitstreamPicData(bs_reader, &pvideo, &n_video_bytes, &pts) != ROCDEC_SUCCESS)
     {
         std::cerr << "Failed to get picture data." << std::endl;
         return 1;
     }
-    // Treat 0 bitstream size as end of stream indicator
-    if(n_video_bytes == 0)
-    {
-        pkg_flags |= ROCDEC_PKT_ENDOFSTREAM;
-    }
-    viddec->DecodeFrame(pvideo, n_video_bytes, pkg_flags, pts, &decoded_pics);
-    viddec->DecodeFrame(pvideo, n_video_bytes, pkg_flags, pts, &decoded_pics);
-    viddec->DecodeFrame(pvideo, n_video_bytes, pkg_flags, pts, &decoded_pics);
+
+    // The following commands were originally used via the RocVideoDecoder from the
+    // roc_video_dec.cpp file from the rocDecode repository. However, this file kept causing
+    // compiler issues, so the file was removed. The following commands will return errors, but they
+    // should should be tracked for testing purposes
+
+    // rocDecCreateVideoParser
+    RocdecVideoParser  rocdec_parser_     = nullptr;
+    RocdecParserParams parser_params      = {};
+    parser_params.codec_type              = rocdec_codec_id;
+    parser_params.max_num_decode_surfaces = 1;
+    parser_params.clock_rate              = 0;
+    parser_params.max_display_delay       = 1;
+    parser_params.pfn_sequence_callback   = nullptr;
+    parser_params.pfn_decode_picture      = nullptr;
+    rocDecCreateVideoParser(&rocdec_parser_, &parser_params);
+
+    // rocDecGetDecoderCaps
+    RocdecDecodeCaps decode_caps{};
+    decode_caps.codec_type        = rocdec_codec_id;
+    decode_caps.chroma_format     = rocDecVideoChromaFormat_420;
+    decode_caps.bit_depth_minus_8 = 0;
+    rocDecGetDecoderCaps(&decode_caps);
+
+    // rocDecCreateDecoder
+    rocDecDecoderHandle  roc_decoder_          = nullptr;
+    RocDecoderCreateInfo videoDecodeCreateInfo = {};
+    videoDecodeCreateInfo.device_id            = 0;
+    videoDecodeCreateInfo.codec_type           = rocdec_codec_id;
+    videoDecodeCreateInfo.chroma_format        = rocDecVideoChromaFormat_420;
+    videoDecodeCreateInfo.bit_depth_minus_8    = 0;
+    rocDecCreateDecoder(&roc_decoder_, &videoDecodeCreateInfo);
+
+    // rocDecDecodeFrame
+    RocdecPicParams* pPicParams = nullptr;
+    rocDecDecodeFrame(roc_decoder_, pPicParams);
+
+    // rocDecParseVideoData
+    RocdecSourceDataPacket packet = {};
+    rocDecParseVideoData(rocdec_parser_, &packet);
+
+    // rocDecGetVideoFrame
+    void*            src_dev_ptr[3]    = {0};
+    uint32_t         src_pitch[3]      = {0};
+    RocdecProcParams video_proc_params = {};
+    rocDecGetVideoFrame(roc_decoder_, 0, src_dev_ptr, src_pitch, &video_proc_params);
+
+    // rocDecGetDecodeStatus
+    RocdecDecodeStatus dec_status{};
+    rocDecGetDecodeStatus(roc_decoder_, 0, &dec_status);
     if(bs_reader)
     {
         rocDecDestroyBitstreamReader(bs_reader);

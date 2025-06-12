@@ -32,9 +32,9 @@ set(CMAKE_HIP_STANDARD 17)
 set(CMAKE_HIP_EXTENSIONS OFF)
 set(CMAKE_HIP_STANDARD_REQUIRED ON)
 
-set_source_files_properties(rocdecode.cpp roc_video_dec.cpp PROPERTIES LANGUAGE HIP)
+set_source_files_properties(rocdecode.cpp PROPERTIES LANGUAGE HIP)
 add_executable(rocdecode-demo)
-target_sources(rocdecode-demo PRIVATE rocdecode.cpp roc_video_dec.cpp)
+target_sources(rocdecode-demo PRIVATE rocdecode.cpp)
 
 find_package(Threads REQUIRED)
 find_package(rocDecode REQUIRED)
