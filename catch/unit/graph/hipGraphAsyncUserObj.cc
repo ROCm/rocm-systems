@@ -21,6 +21,8 @@ THE SOFTWARE.
 #include <hip_test_defgroups.hh>
 #include <condition_variable>
 #include "user_object_common.hh"
+#include <chrono>
+
 bool setVar = false;
 void* globalPtr = nullptr;
 std::mutex m;
@@ -85,23 +87,112 @@ void hipUserObjectCreate_int_float_Objects(T* hostArr,
   int refCount = 1;
   HIP_CHECK(hipUserObjectCreate(&Uobj, hostArr, destroyObj, refCount,
             hipUserObjectNoDestructorSync));
-  HIP_CHECK(hipGraphRetainUserObject(graph, Uobj, refCount, 0));
-  hipGraphExec_t graph_instance;
-  HIP_CHECK(hipGraphInstantiate(&graph_instance, graph,
-                                nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphDestroy(graph));
-  SECTION("graph_instance is destroyed before async launch completes") {
-    HIP_CHECK(hipGraphLaunch(graph_instance, stream));
-    HIP_CHECK(hipGraphExecDestroy(graph_instance));
-    HIP_CHECK(hipStreamSynchronize(stream));
-    if ((std::is_same<float, T>::value) == true) {
-      REQUIRE(*hostArr == 9999.0);
-    } else if ((std::is_same<int, T>::value) == true) {
-      REQUIRE(*hostArr == 9999);
-    } else {
-      REQUIRE(false);
+  SECTION("Flag as 0") {
+    HIP_CHECK(hipGraphRetainUserObject(graph, Uobj, refCount, 0));
+    hipGraphExec_t graph_instance;
+    HIP_CHECK(hipGraphInstantiate(&graph_instance, graph,
+                                  nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphDestroy(graph));
+    SECTION("graph_instance is destroyed before async launch completes") {
+      HIP_CHECK(hipGraphLaunch(graph_instance, stream));
+      HIP_CHECK(hipGraphExecDestroy(graph_instance));
+      HIP_CHECK(hipStreamSynchronize(stream));
+      if ((std::is_same<float, T>::value) == true) {
+        REQUIRE(*hostArr == 9999.0);
+      } else if ((std::is_same<int, T>::value) == true) {
+        REQUIRE(*hostArr == 9999);
+      } else {
+        REQUIRE(false);
+      }
+      HIP_CHECK(hipUserObjectRelease(Uobj, 1));
     }
-    HIP_CHECK(hipUserObjectRelease(Uobj, 1));
+    SECTION("graph_instance is destroyed after async launch completes") {
+      HIP_CHECK(hipGraphLaunch(graph_instance, stream));
+      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipGraphExecDestroy(graph_instance));
+      if ((std::is_same<float, T>::value) == true) {
+        REQUIRE(*hostArr == 9999.0);
+      } else if ((std::is_same<int, T>::value) == true) {
+        REQUIRE(*hostArr == 9999);
+      } else {
+        REQUIRE(false);
+      }
+      HIP_CHECK(hipUserObjectRelease(Uobj, 1));
+    }
+    SECTION("graph_instance is destroyed without a launch") {
+      HIP_CHECK(hipGraphExecDestroy(graph_instance));
+      if ((std::is_same<float, T>::value) == true) {
+        REQUIRE(*hostArr == 1111.0);
+      } else if ((std::is_same<int, T>::value) == true) {
+        REQUIRE(*hostArr == 1111);
+      } else {
+        REQUIRE(false);
+      }
+      HIP_CHECK(hipUserObjectRelease(Uobj, 1));
+    }
+    SECTION("streamSynchronize is not called") {
+      HIP_CHECK(hipGraphExecDestroy(graph_instance));
+      if ((std::is_same<float, T>::value) == true) {
+        REQUIRE(*hostArr == 1111.0);
+      } else if ((std::is_same<int, T>::value) == true) {
+        REQUIRE(*hostArr == 1111);
+      } else {
+        REQUIRE(false);
+      }
+      HIP_CHECK(hipUserObjectRelease(Uobj, 1));
+    }
+  }
+  SECTION("Flag as hipGraphUserObjectMove") {
+    HIP_CHECK(hipGraphRetainUserObject(graph, Uobj, refCount,
+                                       hipGraphUserObjectMove));
+    hipGraphExec_t graph_instance;
+    HIP_CHECK(hipGraphInstantiate(&graph_instance, graph,
+                                  nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphDestroy(graph));
+    SECTION("graph_instance is destroyed before async launch completes") {
+      HIP_CHECK(hipGraphLaunch(graph_instance, stream));
+      HIP_CHECK(hipGraphExecDestroy(graph_instance));
+      HIP_CHECK(hipStreamSynchronize(stream));
+      if ((std::is_same<float, T>::value) == true) {
+        REQUIRE(*hostArr == 9999.0);
+      } else if ((std::is_same<int, T>::value) == true) {
+        REQUIRE(*hostArr == 9999);
+      } else {
+        REQUIRE(false);
+      }
+    }
+    SECTION("graph_instance is destroyed after async launch completes") {
+      HIP_CHECK(hipGraphLaunch(graph_instance, stream));
+      HIP_CHECK(hipStreamSynchronize(stream));
+      HIP_CHECK(hipGraphExecDestroy(graph_instance));
+      if ((std::is_same<float, T>::value) == true) {
+        REQUIRE(*hostArr == 9999.0);
+      } else if ((std::is_same<int, T>::value) == true) {
+        REQUIRE(*hostArr == 9999);
+      } else {
+        REQUIRE(false);
+      }
+    }
+    SECTION("graph_instance is destroyed without a launch") {
+      HIP_CHECK(hipGraphExecDestroy(graph_instance));
+      if ((std::is_same<float, T>::value) == true) {
+        REQUIRE(*hostArr == 1111.0);
+      } else if ((std::is_same<int, T>::value) == true) {
+        REQUIRE(*hostArr == 1111);
+      } else {
+        REQUIRE(false);
+      }
+    }
+    SECTION("streamSynchronize is not called") {
+      HIP_CHECK(hipGraphExecDestroy(graph_instance));
+      if ((std::is_same<float, T>::value) == true) {
+        REQUIRE(*hostArr == 1111.0);
+      } else if ((std::is_same<int, T>::value) == true) {
+        REQUIRE(*hostArr == 1111);
+      } else {
+        REQUIRE(false);
+      }
+    }
   }
   HIP_CHECK(hipStreamDestroy(stream));
 }
@@ -192,16 +283,46 @@ TEST_CASE("Unit_hipGraphUserObj_HostRegister") {
   int refCount = 1;
   HIP_CHECK(hipUserObjectCreate(&Uobj, A_h, destroyHostRegObj, refCount,
             hipUserObjectNoDestructorSync));
-  HIP_CHECK(hipGraphRetainUserObject(graph, Uobj, refCount, 0));
-  hipGraphExec_t graph_instance;
-  HIP_CHECK(hipGraphInstantiate(&graph_instance, graph,
-                                nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipGraphLaunch(graph_instance, stream));
-  HIP_CHECK(hipGraphExecDestroy(graph_instance));
-  HIP_CHECK(hipStreamSynchronize(stream));
-  REQUIRE(*A_h == 9999);
-  HIP_CHECK(hipUserObjectRelease(Uobj, 1));
+  SECTION("Flag as 0") {
+    HIP_CHECK(hipGraphRetainUserObject(graph, Uobj, refCount, 0));
+    hipGraphExec_t graph_instance;
+    HIP_CHECK(hipGraphInstantiate(&graph_instance, graph,
+                                  nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipGraphLaunch(graph_instance, stream));
+    HIP_CHECK(hipGraphExecDestroy(graph_instance));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    REQUIRE(*A_h == 9999);
+    HIP_CHECK(hipUserObjectRelease(Uobj, 1));
+  }
+  SECTION("Flag as hipGraphUserObjectMove") {
+    HIP_CHECK(hipGraphRetainUserObject(graph, Uobj, refCount,
+                                       hipGraphUserObjectMove));
+    hipGraphExec_t graph_instance;
+    HIP_CHECK(hipGraphInstantiate(&graph_instance, graph,
+                                  nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipGraphLaunch(graph_instance, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    REQUIRE(*A_h == 9999);
+    HIP_CHECK(hipGraphExecDestroy(graph_instance));
+  }
+  SECTION("Flag as hipGraphUserObjectMove with reference count more than 1") {
+    hipUserObject_t Uobj_1;
+    int refCount = 2;
+    HIP_CHECK(hipUserObjectCreate(&Uobj_1, A_h, destroyHostRegObj, refCount,
+            hipUserObjectNoDestructorSync));
+    HIP_CHECK(hipGraphRetainUserObject(graph, Uobj_1, refCount,
+                                       hipGraphUserObjectMove));
+    hipGraphExec_t graph_instance;
+    HIP_CHECK(hipGraphInstantiate(&graph_instance, graph,
+                                  nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipGraphLaunch(graph_instance, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    REQUIRE(*A_h == 9999);
+    HIP_CHECK(hipGraphExecDestroy(graph_instance));
+  }
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipHostUnregister(A_h));
 }
@@ -237,16 +358,30 @@ void hipUserObjectCreate_Struct_Class_Objects(T* Obj_h, T* Obj_d) {
   int refCount = 1;
   HIP_CHECK(hipUserObjectCreate(&Uobj, Obj_h, destroyPinnedObj, refCount,
             hipUserObjectNoDestructorSync));
-  HIP_CHECK(hipGraphRetainUserObject(graph, Uobj, refCount, 0));
-  hipGraphExec_t graph_instance;
-  HIP_CHECK(hipGraphInstantiate(&graph_instance, graph,
-                                nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipGraphLaunch(graph_instance, stream));
-  HIP_CHECK(hipGraphExecDestroy(graph_instance));
-  HIP_CHECK(hipStreamSynchronize(stream));
-  REQUIRE(Obj_h->count == 9999);
-  HIP_CHECK(hipUserObjectRelease(Uobj, 1));
+  SECTION("Flag as 0") {
+    HIP_CHECK(hipGraphRetainUserObject(graph, Uobj, refCount, 0));
+    hipGraphExec_t graph_instance;
+    HIP_CHECK(hipGraphInstantiate(&graph_instance, graph,
+                                  nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipGraphLaunch(graph_instance, stream));
+    HIP_CHECK(hipGraphExecDestroy(graph_instance));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    REQUIRE(Obj_h->count == 9999);
+    HIP_CHECK(hipUserObjectRelease(Uobj, 1));
+  }
+  SECTION("Flag as hipGraphUserObjectMove") {
+    HIP_CHECK(hipGraphRetainUserObject(graph, Uobj, refCount,
+                                       hipGraphUserObjectMove));
+    hipGraphExec_t graph_instance;
+    HIP_CHECK(hipGraphInstantiate(&graph_instance, graph,
+                                  nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipGraphLaunch(graph_instance, stream));
+    HIP_CHECK(hipGraphExecDestroy(graph_instance));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    REQUIRE(Obj_h->count == 9999);
+  }
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(Obj_d));
 }
@@ -339,26 +474,50 @@ TEST_CASE("Unit_hipGraphUserObj_ClonedGraph") {
   int refCount = 1;
   HIP_CHECK(hipUserObjectCreate(&Uobj, hostArr, destroyPinnedObj, refCount,
             hipUserObjectNoDestructorSync));
-  HIP_CHECK(hipGraphRetainUserObject(graph, Uobj, refCount, 0));
-  hipGraphExec_t originalGraphInstance, clonedGraphInstance;
-  // Instantiate and launch the original graph
-  HIP_CHECK(hipGraphInstantiate(&originalGraphInstance, graph,
-                                nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(originalGraphInstance, stream));
-  HIP_CHECK(hipGraphExecDestroy(originalGraphInstance));
-  REQUIRE(*hostArr == 1111);
-  HIP_CHECK(hipGraphClone(&clonedgraph, graph));
-  REQUIRE(clonedgraph != nullptr);
-  // Instantiate and launch the cloned graph
-  HIP_CHECK(hipGraphInstantiate(&clonedGraphInstance, clonedgraph,
-                                nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipGraphDestroy(clonedgraph));
-  HIP_CHECK(hipGraphLaunch(clonedGraphInstance, stream));
-  HIP_CHECK(hipGraphExecDestroy(clonedGraphInstance));
-  HIP_CHECK(hipStreamSynchronize(stream));
-  REQUIRE(*hostArr == 9999);
-  HIP_CHECK(hipUserObjectRelease(Uobj, 1));
+  SECTION("Flag as 0") {
+    HIP_CHECK(hipGraphRetainUserObject(graph, Uobj, refCount, 0));
+    hipGraphExec_t originalGraphInstance, clonedGraphInstance;
+    // Instantiate and launch the original graph
+    HIP_CHECK(hipGraphInstantiate(&originalGraphInstance, graph,
+                                  nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphLaunch(originalGraphInstance, stream));
+    HIP_CHECK(hipGraphExecDestroy(originalGraphInstance));
+    REQUIRE(*hostArr == 1111);
+    HIP_CHECK(hipGraphClone(&clonedgraph, graph));
+    REQUIRE(clonedgraph != nullptr);
+    // Instantiate and launch the cloned graph
+    HIP_CHECK(hipGraphInstantiate(&clonedGraphInstance, clonedgraph,
+                                  nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipGraphDestroy(clonedgraph));
+    HIP_CHECK(hipGraphLaunch(clonedGraphInstance, stream));
+    HIP_CHECK(hipGraphExecDestroy(clonedGraphInstance));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    REQUIRE(*hostArr == 9999);
+    HIP_CHECK(hipUserObjectRelease(Uobj, 1));
+  }
+  SECTION("Flag as hipGraphUserObjectMove") {
+    HIP_CHECK(hipGraphRetainUserObject(graph, Uobj, refCount,
+                                       hipGraphUserObjectMove));
+    hipGraphExec_t originalGraphInstance, clonedGraphInstance;
+    // Instantiate and launch the original graph
+    HIP_CHECK(hipGraphInstantiate(&originalGraphInstance, graph,
+                                  nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphLaunch(originalGraphInstance, stream));
+    HIP_CHECK(hipGraphExecDestroy(originalGraphInstance));
+    REQUIRE(*hostArr == 1111);
+    HIP_CHECK(hipGraphClone(&clonedgraph, graph));
+    REQUIRE(clonedgraph != nullptr);
+    // Instantiate and launch the cloned graph
+    HIP_CHECK(hipGraphInstantiate(&clonedGraphInstance, clonedgraph,
+                                  nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipGraphDestroy(clonedgraph));
+    HIP_CHECK(hipGraphLaunch(clonedGraphInstance, stream));
+    HIP_CHECK(hipGraphExecDestroy(clonedGraphInstance));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    REQUIRE(*hostArr == 9999);
+  }
   t1.join();
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(devArr));
@@ -430,22 +589,130 @@ TEST_CASE("Unit_hipGraphUserObj_ManualGraph") {
   int refCount = 1;
   HIP_CHECK(hipUserObjectCreate(&Uobj, hostArr, destroyPinnedObj, refCount,
             hipUserObjectNoDestructorSync));
-  HIP_CHECK(hipGraphRetainUserObject(graph, Uobj, refCount, 0));
-  hipGraphExec_t graph_instance;
-  HIP_CHECK(hipGraphInstantiate(&graph_instance, graph,
+  SECTION("Flag as 0") {
+    HIP_CHECK(hipGraphRetainUserObject(graph, Uobj, refCount, 0));
+    hipGraphExec_t graph_instance;
+    HIP_CHECK(hipGraphInstantiate(&graph_instance, graph,
+                                nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipGraphLaunch(graph_instance, stream));
+    HIP_CHECK(hipGraphExecDestroy(graph_instance));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    REQUIRE(*hostArr == 9999);
+    HIP_CHECK(hipUserObjectRelease(Uobj, 1));
+  }
+  SECTION("Flag as hipGraphUserObjectMove") {
+    HIP_CHECK(hipGraphRetainUserObject(graph, Uobj, refCount,
+                                       hipGraphUserObjectMove));
+    hipGraphExec_t graph_instance;
+    HIP_CHECK(hipGraphInstantiate(&graph_instance, graph,
                                 nullptr, nullptr, 0));
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipGraphLaunch(graph_instance, stream));
   HIP_CHECK(hipGraphExecDestroy(graph_instance));
   HIP_CHECK(hipStreamSynchronize(stream));
   REQUIRE(*hostArr == 9999);
-  HIP_CHECK(hipUserObjectRelease(Uobj, 1));
+  }
   t1.join();
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(devArr));
 }
 /**
+ * Test Description
+ * ------------------------
+ * - Verify the release of reference and destructor execution
+ *   will be deferred until the graph is synchronized.
+ * - References are only released at hipGraphDestroy()
+ *   and hipGraphExecDestroy() calls
+ * - This test is to verify the above cases with a graph
+ *   created from stream capture and with Stack memory.
+ * Test source
+ * ------------------------
+ * - catch\unit\graph\hipGraphAsyncUserObj.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 6.3
+ */
+__global__ void stackKernelFn(int clockrate, int WaitSecs) {
+  uint64_t num_cycles = (uint64_t)clockrate;
+  num_cycles = num_cycles * 1000 * WaitSecs;
+  uint64_t start = clock64(), cycles = 0;
+  while (cycles < num_cycles) {
+    cycles = clock64() - start;
+  }
+}
+
+TEST_CASE("Unit_hipGraphUserObj_StackMemory") {
+  int clockrate = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&clockrate,
+          hipDeviceAttributeMemoryClockRate, 0));
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+  int N = 1024;
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeThreadLocal));
+  // dummy nodes to add to the graph
+  void* devmem = nullptr;
+  // Enqueue a slow kernel that takes time on the device
+  stackKernelFn<<< 1, 1, 0, stream>>>(clockrate, 3);
+  HIP_CHECK(hipMallocAsync(&devmem, sizeof(float) * N, stream));
+  HIP_CHECK(hipFreeAsync(devmem, stream));
+  hipGraph_t graph;
+  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  hipUserObject_t uo;
+  int32_t if_uo_valid = 1;
+  hipHostFn_t uo_dtor = [](void* cookie) -> void {
+    int32_t* pvalue = static_cast<int32_t*>(cookie);
+    std::cerr << "uo_dtor called on " << cookie << std::endl;
+    *pvalue = 0;
+  };
+  uint32_t initial_ref_count = 1;
+  HIP_CHECK(hipUserObjectCreate(&uo, &if_uo_valid, uo_dtor, initial_ref_count,
+            hipUserObjectNoDestructorSync));
+  SECTION("Flag as hipGraphUserObjectMove") {
+  HIP_CHECK(hipGraphRetainUserObject(graph, uo, initial_ref_count,
+                                     hipGraphUserObjectMove));
+    hipGraphExec_t graph_instance;
+    HIP_CHECK(hipGraphInstantiate(&graph_instance, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphDestroy(graph));
+    SECTION("no release without a graph/graphExecDestroy()") {
+      HIP_CHECK(hipGraphLaunch(graph_instance, stream));
+      HIP_CHECK(hipStreamSynchronize(stream));
+      REQUIRE(if_uo_valid == 1);
+    }
+    SECTION("graph_instance is destroyed without a launch") {
+      HIP_CHECK(hipGraphExecDestroy(graph_instance));
+      REQUIRE(if_uo_valid == 0);
+    }
+    SECTION("streamSynchronize is not called") {
+      HIP_CHECK(hipGraphExecDestroy(graph_instance));
+      REQUIRE(if_uo_valid == 0);
+    }
+  }
+  SECTION("Flag as 0") {
+    HIP_CHECK(hipGraphRetainUserObject(graph, uo, initial_ref_count, 0));
+    hipGraphExec_t graph_instance;
+    HIP_CHECK(hipGraphInstantiate(&graph_instance, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphDestroy(graph));
+    SECTION("no release without a graph/graphExecDestroy()") {
+      HIP_CHECK(hipGraphLaunch(graph_instance, stream));
+      HIP_CHECK(hipStreamSynchronize(stream));
+      REQUIRE(if_uo_valid == 1);
+      HIP_CHECK(hipUserObjectRelease(uo, 1));
+    }
+    SECTION("graph_instance is destroyed without a launch") {
+      HIP_CHECK(hipGraphExecDestroy(graph_instance));
+      HIP_CHECK(hipUserObjectRelease(uo, 1));
+      REQUIRE(if_uo_valid == 0);
+    }
+    SECTION("streamSynchronize is not called") {
+      HIP_CHECK(hipGraphExecDestroy(graph_instance));
+      HIP_CHECK(hipUserObjectRelease(uo, 1));
+      REQUIRE(if_uo_valid == 0);
+    }
+  }
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+/**
 * End doxygen group GraphTest.
 * @}
 */
-
