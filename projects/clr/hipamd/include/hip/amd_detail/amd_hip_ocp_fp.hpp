@@ -1476,14 +1476,23 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp6x32_storage_t __amd_cvt_floatx16_floatx16
     const __amd_floatx16_storage_t in1, const __amd_floatx16_storage_t in2,
     const __amd_fp6_interpretation_t interpret, const __amd_scale_t scale) {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
+  // The builtin expects interleaved inputs, so de-interleave the concatenated
+  // view [in1[0..15], in2[0..15]] into even/odd halves.
+  __amd_floatx16_storage_t b_in1{in1[0],  in1[2],  in1[4],  in1[6],  in1[8],  in1[10],
+                                 in1[12], in1[14], in2[0],  in2[2],  in2[4],  in2[6],
+                                 in2[8],  in2[10], in2[12], in2[14]},
+      b_in2 = {in1[1],  in1[3],  in1[5],  in1[7],  in1[9],  in1[11], in1[13], in1[15],
+               in2[1],  in2[3],  in2[5],  in2[7],  in2[9],  in2[11], in2[13], in2[15]};
   return interpret == __AMD_OCP_E2M3
-             ? __builtin_amdgcn_cvt_scalef32_2xpk16_fp6_f32(in1, in2, __amd_scale_to_float(scale))
-             : __builtin_amdgcn_cvt_scalef32_2xpk16_bf6_f32(in1, in2, __amd_scale_to_float(scale));
+             ? __builtin_amdgcn_cvt_scalef32_2xpk16_fp6_f32(b_in1, b_in2,
+                                                             __amd_scale_to_float(scale))
+             : __builtin_amdgcn_cvt_scalef32_2xpk16_bf6_f32(b_in1, b_in2,
+                                                             __amd_scale_to_float(scale));
 #else
   __amd_floatx32_storage_t tmp;
   for (size_t i = 0; i < 16; i++) {
-    tmp[i * 2] = in1[i];
-    tmp[i * 2 + 1] = in2[i];
+    tmp[i] = in1[i];
+    tmp[i + 16] = in2[i];
   }
   using namespace fcbx;
   return interpret == __AMD_OCP_E2M3
