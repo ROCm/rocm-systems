@@ -48,7 +48,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['vega20', 'navi3', 'navi4', 'mi3xx']
+        runner: ['vega20', 'navi3', 'navi4', 'rocprof-azure']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
         ci-flags: ['--linter clang-tidy']
@@ -58,7 +58,7 @@ jobs:
     # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-      CORE_EXT_RUNNER: mi3xx
+      CORE_EXT_RUNNER: rocprof-azure
 
     steps:
     - uses: actions/checkout@v4
@@ -179,11 +179,11 @@ jobs:
       fail-fast: false
       matrix:
         runner: ['mi300']
-        os: ['rhel-emu', 'sles-emu']
+        os: ['rhel', 'sles']
         build-type: ['RelWithDebInfo']
         ci-flags: ['--linter clang-tidy']
 
-    runs-on: ${{ matrix.os }}-runner-set
+    runs-on: rocprof-azure-${{ matrix.os }}-emu-runner-set
 
     # define this for containers
     env:
@@ -197,6 +197,7 @@ jobs:
       timeout-minutes: 10
       shell: bash
       run: |
+        sudo python3 -m pip install --upgrade pip
         sudo python3 -m pip install -U --user -r requirements.txt
         sudo rm -rf /opt/rocm/lib/*rocprofiler-sdk* /opt/rocm/lib/cmake/*rocprofiler-sdk* /opt/rocm/share/*rocprofiler-sdk* /opt/rocm/libexec/*rocprofiler-sdk*
 
@@ -587,7 +588,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['random']
+        runner: ['rocprof-azure']
         sanitizer: ['AddressSanitizer', 'ThreadSanitizer', 'LeakSanitizer', 'UndefinedBehaviorSanitizer']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
