@@ -554,7 +554,7 @@ typedef enum {
     AMDSMI_FW_ID_RLC_SRLS,                  //!< Rasterizier and L2 Cache - Shared Resource Local Segment
     AMDSMI_FW_ID_PM,                        //!< Power Management Firmware
     AMDSMI_FW_ID_DMCU,                      //!< Display Micro-Controller Unit
-    AMDSMI_FW_ID_PLDM,                      //!< Platform Level Data Model
+    AMDSMI_FW_ID_PLDM_BUNDLE,               //!< Platform Level Data Model Firmware Bundle
     AMDSMI_FW_ID__MAX
 } amdsmi_fw_block_t;
 

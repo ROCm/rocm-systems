@@ -191,7 +191,7 @@ class AmdSmiFwBlock(IntEnum):
     AMDSMI_FW_ID_RLC_SRLS = amdsmi_wrapper.AMDSMI_FW_ID_RLC_SRLS
     AMDSMI_FW_ID_PM = amdsmi_wrapper.AMDSMI_FW_ID_PM
     AMDSMI_FW_ID_DMCU = amdsmi_wrapper.AMDSMI_FW_ID_DMCU
-    AMDSMI_FW_ID_PLDM = amdsmi_wrapper.AMDSMI_FW_ID_PLDM
+    AMDSMI_FW_ID_PLDM_BUNDLE = amdsmi_wrapper.AMDSMI_FW_ID_PLDM_BUNDLE
 
 
 class AmdSmiClkType(IntEnum):
@@ -2808,7 +2808,7 @@ def amdsmi_get_fw_info(
     # However, they are parsed as: int(0x12).int(0x34).int(0x56).int(0x78)
     # Which results in the following: 12.34.56.78
     dec_format_fw = [AmdSmiFwBlock.AMDSMI_FW_ID_PM,
-                     AmdSmiFwBlock.AMDSMI_FW_ID_PLDM]
+                     AmdSmiFwBlock.AMDSMI_FW_ID_PLDM_BUNDLE]
 
     firmwares = []
     for i in range(0, fw_info.num_fw_info):

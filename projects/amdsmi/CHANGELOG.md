@@ -307,7 +307,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
                   ...
   ```
 
-- **Added new firmware PLDM**.  
+- **Added new firmware PLDM_BUNDLE**.  
+  - `amd-smi firmware` can now show the PLDM Bundle on supported systems.  
 
 ### Changed
 
