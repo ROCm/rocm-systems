@@ -47,8 +47,8 @@ RUN if [ "${ROCM_VERSION}" != "0.0" ]; then \
 
 ARG PYTHON_VERSIONS="6 7 8 9 10 11 12 13"
 
-RUN wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && \
-    bash miniconda.sh -b -p /opt/conda && \
+RUN wget https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O miniforge.sh && \
+    bash miniforge.sh -b -p /opt/conda && \
     export PATH="/opt/conda/bin:${PATH}" && \
     conda config --set always_yes yes --set changeps1 no && \
     conda update -c conda-forge -n base conda && \
