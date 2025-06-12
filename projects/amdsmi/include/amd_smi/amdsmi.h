@@ -1289,9 +1289,9 @@ typedef struct {
 } amdsmi_evt_notification_data_t;
 
 /**
- * @brief Temperature Metrics.  This enum is used to identify various
- * temperature metrics. Corresponding values will be in millidegress
- * Celcius {@linux_bm} or Celcius {@host}
+ * @brief Temperature Metrics.
+ *
+ * Corresponding values will be in Celcius
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
@@ -3647,12 +3647,10 @@ amdsmi_status_t amdsmi_get_gpu_fan_speed_max(amdsmi_processor_handle processor_h
  *  @param[in] metric enum indicated which temperature value should be
  *  retrieved
  *
- *  @param[in,out] temperature a pointer to int64_t to which the temperature
- *  will be written, in millidegrees Celcius.
- *  If this parameter is nullptr, this function will return
- *  ::AMDSMI_STATUS_INVAL if the function is supported with the provided,
- *  arguments and ::AMDSMI_STATUS_NOT_SUPPORTED if it is not supported with the
- *  provided arguments.
+ *  @param[in,out] temperature a pointer to int64_t to which the temperature is in Celsius.
+ *  If this parameter is nullptr, this function will return ::AMDSMI_STATUS_INVAL if the function
+ *  is supported with the provided, arguments and ::AMDSMI_STATUS_NOT_SUPPORTED if it is not
+ *  supported with the provided arguments.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
