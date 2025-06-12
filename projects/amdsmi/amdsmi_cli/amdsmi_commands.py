@@ -6660,9 +6660,14 @@ class AMDSMICommands():
                 total_vram = amdsmi_interface.amdsmi_get_gpu_memory_total(processor, amdsmi_interface.AmdSmiMemoryType.VRAM) // (1024*1024)
                 used_vram = amdsmi_interface.amdsmi_get_gpu_memory_usage(processor, amdsmi_interface.AmdSmiMemoryType.VRAM) // (1024*1024)
                 mem_usage = {"used_vram": used_vram, "total_vram": total_vram}
+                total_gtt =amdsmi_interface.amdsmi_get_gpu_memory_total(processor, amdsmi_interface.AmdSmiMemoryType.GTT) // (1024*1024)
+                used_gtt = amdsmi_interface.amdsmi_get_gpu_memory_usage(processor, amdsmi_interface.AmdSmiMemoryType.GTT) // (1024*1024)
+                gtt_usage = {"used_gtt": used_gtt, "total_gtt": total_gtt}
             except amdsmi_exception.AmdSmiLibraryException as e:
                 mem_usage = "N/A"
+                gtt_usage = "N/A"
             gpu_info_dict.update({"mem_usage": mem_usage})
+            gpu_info_dict.update({"gtt_usage": gtt_usage})
 
             # uncorrectable ECC errors
             try:
