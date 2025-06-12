@@ -299,14 +299,16 @@ def show_all(args, runs, archConfigs, output, profiling_config):
                             and table_config["cli_style"] == "mem_chart"
                             and len(runs) == 1
                         ):
-                            ss += mem_chart.plot_mem_chart(
-                                "",
-                                args.normal_unit,
-                                pd.DataFrame([df["Metric"], df["Value"]])
-                                .transpose()
-                                .set_index("Metric")
-                                .to_dict()["Value"],
-                            )
+                            # NB: to avoid broken test with arbitrary number with "--cols" option
+                            if "Metric" in df.columns and "Value" in df.columns:
+                                ss += mem_chart.plot_mem_chart(
+                                    "",
+                                    args.normal_unit,
+                                    pd.DataFrame([df["Metric"], df["Value"]])
+                                    .transpose()
+                                    .set_index("Metric")
+                                    .to_dict()["Value"],
+                                )
                         else:
                             ss += (
                                 get_table_string(
