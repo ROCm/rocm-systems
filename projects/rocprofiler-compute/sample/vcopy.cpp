@@ -25,6 +25,8 @@
 */
 
 #include "hip/hip_runtime.h"
+#include <assert.h>
+#include <thread>
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>

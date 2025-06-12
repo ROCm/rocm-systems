@@ -30,6 +30,7 @@ An example code to execute random access to explore cache hits/misses in L2 Cach
 
 
 #include <hip/hip_runtime.h>
+#include <assert.h>
 #include <iostream>
 #include <cstdlib>
 #include <ctime>

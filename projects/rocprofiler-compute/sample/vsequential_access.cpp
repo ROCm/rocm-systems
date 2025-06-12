@@ -31,6 +31,7 @@ An example code to execute sequential access to explore cache hits/misses in L2 
 
 #include <hip/hip_runtime.h>
 #include <iostream>
+#include <assert.h>
 
 #define HIP_ASSERT(x) (assert((x)==hipSuccess))
 
