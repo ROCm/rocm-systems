@@ -1289,9 +1289,8 @@ typedef struct {
 } amdsmi_evt_notification_data_t;
 
 /**
- * @brief Temperature Metrics.
- *
- * Corresponding values will be in Celcius
+ * @brief Temperature Metrics.  This enum is used to identify various
+ * temperature metrics. Corresponding values will be in Celcius
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
