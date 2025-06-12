@@ -65,6 +65,9 @@ set ( DEST_NAME ${AQLPROFILE_NAME} )
 install ( TARGETS ${AQLPROFILE_TARGET} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT runtime )
 install ( TARGETS ${AQLPROFILE_TARGET} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan )
 
+# Enable/disable test
+option(AQLPROFILE_BUILD_TESTS "Build tests for AQLProfile" OFF)
+
 ## Add the packaging directives for the runtime library.
 if ( ENABLE_ASAN_PACKAGING )
   set ( CPACK_PACKAGE_NAME ${AQLPROFILE_NAME}-asan )
