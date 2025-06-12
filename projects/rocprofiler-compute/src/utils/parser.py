@@ -689,9 +689,8 @@ def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug):
 
     # confirm no illogical counter values (only consider non-roofline runs)
     roof_only_run = sys_info.ip_blocks == "roofline"
-    rocscope_run = sys_info.ip_blocks == "rocscope"
     if (
-        (not rocscope_run and not roof_only_run)
+        (not roof_only_run)
         and hasattr(raw_pmc_df["pmc_perf"], "GRBM_GUI_ACTIVE")
         and (raw_pmc_df["pmc_perf"]["GRBM_GUI_ACTIVE"] == 0).any()
     ):

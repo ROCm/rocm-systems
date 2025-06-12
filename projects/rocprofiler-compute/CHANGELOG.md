@@ -62,6 +62,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Support MEM chart on CLI(single run)
 
+* Add deprecation warning for database update mode.
+
 ### Changed
 
 * Change normal_unit default to per_kernel

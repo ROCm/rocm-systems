@@ -1234,30 +1234,6 @@ def detect_roofline(mspec):
     return target_binary
 
 
-def run_rocscope(args, fname):
-    # profile the app
-    if args.use_rocscope == True:
-        result = shutil.which("rocscope")
-        if result:
-            rs_cmd = [
-                result.stdout.decode("ascii").strip(),
-                "metrics",
-                "-p",
-                args.path,
-                "-n",
-                args.name,
-                "-t",
-                fname,
-                "--",
-            ]
-            for i in args.remaining.split():
-                rs_cmd.append(i)
-            console_log(rs_cmd)
-            success, output = capture_subprocess_output(rs_cmd)
-            if not success:
-                console_error(result.stderr.decode("ascii"))
-
-
 def mibench(args, mspec):
     """Run roofline microbenchmark to generate peek BW and FLOP measurements."""
     console_log("roofline", "No roofline data found. Generating...")

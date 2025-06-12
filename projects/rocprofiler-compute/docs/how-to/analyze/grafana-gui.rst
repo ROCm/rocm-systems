@@ -7,6 +7,10 @@
 Grafana GUI analysis
 ********************
 
+.. warning::
+
+   Grafana and MongoDB functionality is deprecated and will be removed in a future release.
+
 Find setup instructions in :doc:`../../install/grafana-setup`.
 
 The ROCm Compute Profiler Grafana analysis dashboard GUI supports the following features to

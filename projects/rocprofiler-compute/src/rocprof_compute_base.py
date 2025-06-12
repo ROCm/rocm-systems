@@ -115,30 +115,20 @@ class RocProfCompute:
         return
 
     def detect_profiler(self):
-        if (
-            self.__args.lucky == True
-            or self.__args.summaries == True
-            or self.__args.use_rocscope
-        ):
-            if not shutil.which("rocscope"):
-                console_error("Rocscope must be in PATH")
-            else:
-                self.__profiler_mode = "rocscope"
+        profiler_mode = detect_rocprof(self.__args)
+        if str(profiler_mode).endswith("rocprof"):
+            self.__profiler_mode = "rocprofv1"
+        elif str(profiler_mode).endswith("rocprofv2"):
+            self.__profiler_mode = "rocprofv2"
+        elif str(profiler_mode).endswith("rocprofv3"):
+            self.__profiler_mode = "rocprofv3"
+        elif str(profiler_mode) == "rocprofiler-sdk":
+            self.__profiler_mode = "rocprofiler-sdk"
         else:
-            profiler_mode = detect_rocprof(self.__args)
-            if str(profiler_mode).endswith("rocprof"):
-                self.__profiler_mode = "rocprofv1"
-            elif str(profiler_mode).endswith("rocprofv2"):
-                self.__profiler_mode = "rocprofv2"
-            elif str(profiler_mode).endswith("rocprofv3"):
-                self.__profiler_mode = "rocprofv3"
-            elif str(profiler_mode) == "rocprofiler-sdk":
-                self.__profiler_mode = "rocprofiler-sdk"
-            else:
-                console_error(
-                    "Incompatible profiler: %s. Supported profilers include: %s"
-                    % (profiler_mode, get_submodules("rocprof_compute_profile"))
-                )
+            console_error(
+                "Incompatible profiler: %s. Supported profilers include: %s"
+                % (profiler_mode, get_submodules("rocprof_compute_profile"))
+            )
         return
 
     def detect_analyze(self):
@@ -302,15 +292,6 @@ class RocProfCompute:
                 self.__soc[self.__mspec.gpu_arch],
                 self.__supported_archs,
             )
-        elif self.__profiler_mode == "rocscope":
-            from rocprof_compute_profile.profiler_rocscope import rocscope_profiler
-
-            profiler = rocscope_profiler(
-                self.__args,
-                self.__profiler_mode,
-                self.__soc[self.__mspec.gpu_arch],
-                self.__supported_archs,
-            )
         elif self.__profiler_mode == "rocprofiler-sdk":
             from rocprof_compute_profile.profiler_rocprofiler_sdk import (
                 rocprofiler_sdk_profiler,
@@ -364,6 +345,12 @@ class RocProfCompute:
     @demarcate
     def update_db(self):
         self.print_graphic()
+
+        console_warning(
+            "Database update mode is deprecated and will be removed in a future release "
+            "and no fixes will be made for this mode."
+        )
+
         from utils.db_connector import DatabaseConnector
 
         db_connection = DatabaseConnector(self.__args)

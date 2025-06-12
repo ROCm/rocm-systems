@@ -7,6 +7,10 @@
 Setting up Grafana server for ROCm Compute Profiler
 ***************************************************
 
+.. warning::
+
+   Grafana and MongoDB functionality is deprecated and will be removed in a future release.
+
 A Grafana server is *not required* to profile or analyze performance data
 from the CLI. It's a supplementary mechanism to help you import performance
 data and examine it in a detailed
