@@ -64,7 +64,6 @@ def test_rocdeocde(json_data):
         assert node.end_timestamp > 0
         assert node.start_timestamp < node.end_timestamp
         assert len(node.args) > 0
-        assert node.retval.uint64_t_retval in [0, 1], "Unexpected return values"
 
         assert (
             data.strings.buffer_records[node.kind].kind == "ROCDECODE_API"

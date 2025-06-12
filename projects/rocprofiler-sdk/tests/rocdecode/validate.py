@@ -191,7 +191,6 @@ def test_rocdecode_traces(input_data):
     )
     for api_call in rocdecode_ext_bf_traces:
         assert len(api_call["args"]) > 0
-        assert (api_call.retval.uint64_t_retval in [0, 1], "Unexpected return values")
 
 
 def test_retired_correlation_ids(input_data):
