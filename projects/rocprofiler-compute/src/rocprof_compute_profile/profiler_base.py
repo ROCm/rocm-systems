@@ -428,9 +428,8 @@ class RocProfCompute_Base:
                         str((end_run_prof - start_run_prof) % 60),
                     )
                 )
-
-            # TODO: Finish logic
-            console_error("Profiler not supported")
+            else:
+                console_error("Profiler not supported")
 
         if self.__pc_sampling == True and self.__profiler in (
             "rocprofv3",
