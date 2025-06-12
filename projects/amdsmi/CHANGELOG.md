@@ -95,8 +95,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
-- **Padded `asic_serial` in `amdsmi_get_asic_info` with 0s**.  
-
 - **Updated `amdsmi_get_clock_info` in `amdsmi_interface.py`**.  
   - The `clk_deep_sleep` field now returns the sleep integer value.  
 
@@ -294,6 +292,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Added Compute Unit Occupancy information per process**  
   Measuring compute units are the best way currently to determine gfx usage on a per process basis  
+  - Added `cu_occupancy` field to `amdsmi_proc_info_t` structure in C & Python APIs, in minor version update  
   - Added `CU_OCCUPANCY` to `amd-smi process` output.
   - Added `CU%` to `amd-smi monitor -q`
 
@@ -310,25 +309,19 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Added new firmware PLDM_BUNDLE**.  
   - `amd-smi firmware` can now show the PLDM Bundle on supported systems.  
 
+- **Added `amd-smi ras --afid --cper-file <file_path>` to decode CPER records**  
+  - Python and C have added the `amdsmi_get_afids_from_cper()` to decode
+
 ### Changed
 
-- N/A
+- **Padded `asic_serial` in `amdsmi_get_asic_info` with 0s**.  
 
-### Removed
-
-- **Renamed `amd-smi --partition`'s field `COMPUTE_PARTITION` to `ACCELERATOR_PARTITION`**.  
-  We are changing the field named `COMPUTE_PARTITION` to `ACCELERATOR_PARTITION`. Refer to example outputs provided below.  
-
-  API and associated struct naming will remain the same:
-  - `amdsmi_status_t amdsmi_get_gpu_compute_partition(amdsmi_processor_handle processor_handle, char *compute_partition, uint32_t len)`
-  - `amdsmi_status_t amdsmi_set_gpu_compute_partition(amdsmi_processor_handle processor_handle, amdsmi_compute_partition_type_t compute_partition)`  
-  - `amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile_config(amdsmi_processor_handle processor_handle, amdsmi_accelerator_partition_profile_config_t *profile_config)`  
-  - `amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(amdsmi_processor_handle processor_handle, amdsmi_accelerator_partition_profile_t *profile, uint32_t *partition_id)`  
-  - `amdsmi_status_t amdsmi_set_gpu_accelerator_partition_profile(amdsmi_processor_handle processor_handle, uint32_t profile_index)`
-
-  Reason(s) for this change:
-  - Align with host AMD SMI's `static --partition` field naming
-  - Align with naming seen in `amd-smi partition`  
+- **Renamed fields `COMPUTE_PARTITION` to `ACCELERATOR_PARTITION` in CLI call `amd-smi --partition`**.  
+  - We are changing the field named `COMPUTE_PARTITION` to `ACCELERATOR_PARTITION`.  
+  - API and associated struct naming will remain the same  
+  - Reason(s) for this change:  
+    - Align with host AMD SMI's `static --partition` field naming  
+    - Align with naming seen in `amd-smi partition`  
 
   *Previous Output:*  
 
@@ -351,6 +344,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
             MEMORY_PARTITION: NPS1
             PARTITION_ID: 0
   ```
+
+### Removed
+
+- N/A
 
 ### Optimized
 
