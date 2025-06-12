@@ -66,6 +66,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* Change the default rocprof version to rocprofv3, this is used when environment variable "ROCPROF" is not set
+* Change the rocprof version for unit tests to rocprofv3 on all SoCs except MI100
 * Change normal_unit default to per_kernel
 * Change dependency from rocm-smi to amd-smi
 * Decrease profiling time by not collecting counters not used in post analysis
@@ -83,6 +85,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Known issues
 
+* Profiling on MI 100 will not work unless ROCPROF=rocprofv1 environment variable is explictly provided
 * GPU id filtering is not supported when using rocprof v3
 
 * Analysis of previously collected workload data will not work due to sysinfo.csv schema change

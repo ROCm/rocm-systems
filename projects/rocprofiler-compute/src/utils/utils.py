@@ -323,7 +323,7 @@ def detect_rocprof(args):
     # detect rocprof
     if not "ROCPROF" in os.environ.keys():
         # default rocprof
-        rocprof_cmd = "rocprof"
+        rocprof_cmd = "rocprofv3"
     else:
         rocprof_cmd = os.environ["ROCPROF"]
 

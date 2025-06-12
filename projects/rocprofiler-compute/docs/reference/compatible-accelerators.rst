@@ -23,6 +23,9 @@ GPU specifications.
    * - Platform
      - Status
 
+   * - AMD Instinct™ MI350
+     - Supported ✅
+
    * - AMD Instinct™ MI300
      - Supported ✅
 
