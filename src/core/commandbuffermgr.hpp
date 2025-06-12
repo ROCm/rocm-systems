@@ -23,6 +23,7 @@
 #pragma once
 
 #include <cstdint>
+#include <climits>
 #include <future>
 #include <map>
 #include <string>

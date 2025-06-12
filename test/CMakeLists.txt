@@ -82,3 +82,8 @@ install(FILES ${TEST_DIR}/run_install.sh RENAME run_tests.sh
 #add_subdirectory(parser)
 
 add_test(NAME legacy-tests COMMAND "${TEST_BINARY_DIR}/run.sh")
+
+if(AQLPROFILE_BUILD_TESTS)
+    add_subdirectory(integration)
+    enable_testing()
+endif()
