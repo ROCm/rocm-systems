@@ -102,8 +102,8 @@ target_include_directories(${OAM_TARGET}
 ## Add the install directives for the runtime library.
 install(TARGETS ${OAM_TARGET}
           EXPORT rocm_smiTargets
-          LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-          COMPONENT dev)
+          LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev
+          ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev)
 install(TARGETS ${OAM_TARGET}
           LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
           COMPONENT asan)
