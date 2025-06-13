@@ -36,19 +36,6 @@ RUN apt-get update && \
         python3 -m pip install 'cmake==3.21' perfetto; \
     fi
 
-COPY ./dyninst-source /tmp/dyninst
-
-RUN cd /tmp/dyninst && \
-    cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_BOOST=ON \
-        -DBUILD_TBB=ON -DBUILD_ELFUTILS=ON -DBUILD_LIBIBERTY=ON \
-        -DElfUtils_DOWNLOAD_VERSION=${ELFUTILS_DOWNLOAD_VERSION} \
-        -DBOOST_DOWNLOAD_VERSION=${BOOST_DOWNLOAD_VERSION} && \
-    cmake --build build --target all --parallel ${NJOBS} && \
-    cmake --build build --target install --parallel ${NJOBS} && \
-    cd /tmp && \
-    shopt -s dotglob extglob && \
-    rm -rf *
-
 ARG PYTHON_VERSIONS="6 7 8 9 10 11 12 13"
 
 RUN wget https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O miniforge.sh && \
