@@ -1415,6 +1415,8 @@ rocprofiler-sdk:
       - gfx906
       - gfx908
       - gfx90a
+      - gfx942
+      - gfx950
       expression: 100*reduce(SQ_LDS_BANK_CONFLICT,sum)/reduce(GRBM_GUI_ACTIVE,max)/CU_NUM
   - name: LDSInsts
     description: The average number of LDS read or LDS write instructions executed per work item (affected by flow control).  Excludes
@@ -1434,6 +1436,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx942
+      - gfx950
       expression: reduce(SQ_LDS_BANK_CONFLICT,sum)/(reduce(SQ_LDS_IDX_ACTIVE,sum)-reduce(SQ_LDS_BANK_CONFLICT,sum))
   - name: LdsLatency
     description: 'Unit: cycles'
