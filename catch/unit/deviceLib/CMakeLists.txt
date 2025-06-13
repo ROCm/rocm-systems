@@ -87,7 +87,6 @@ set(AMD_TEST_SRC
     fp8_host.cc
     fp6_ocp.cc
     fp4_ocp.cc
-    fp8_host.cc
 )
 
 set(AMD_ARCH_SPEC_TEST_SRC
