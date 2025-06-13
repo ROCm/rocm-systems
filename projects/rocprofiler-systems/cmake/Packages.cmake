@@ -15,6 +15,14 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-threading
 rocprofiler_systems_add_interface_library(
     rocprofiler-systems-dyninst
     "Provides flags and libraries for Dyninst (dynamic instrumentation)")
+rocprofiler_systems_add_interface_library(rocprofiler-systems-boost
+                                          "Boost interface library (for Dyninst)")
+rocprofiler_systems_add_interface_library(rocprofiler-systems-elfutils
+                                          "ElfUtils interface library (for Dyninst)")
+rocprofiler_systems_add_interface_library(rocprofiler-systems-libiberty
+                                          "LibIberty interface library (for Dyninst)")
+rocprofiler_systems_add_interface_library(
+    rocprofiler-systems-tbb "Threading Building Blocks interface library (for Dyninst)")
 rocprofiler_systems_add_interface_library(rocprofiler-systems-rocm
                                           "Provides flags and libraries for ROCm")
 rocprofiler_systems_add_interface_library(rocprofiler-systems-mpi
@@ -29,8 +37,6 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-papi "Enable PAPI 
 rocprofiler_systems_add_interface_library(rocprofiler-systems-ompt "Enable OMPT support")
 rocprofiler_systems_add_interface_library(rocprofiler-systems-python
                                           "Enables Python support")
-rocprofiler_systems_add_interface_library(rocprofiler-systems-elfutils
-                                          "Provides ElfUtils")
 rocprofiler_systems_add_interface_library(rocprofiler-systems-perfetto
                                           "Enables Perfetto support")
 rocprofiler_systems_add_interface_library(rocprofiler-systems-timemory
@@ -210,20 +216,6 @@ endif()
 
 rocprofiler_systems_target_compile_definitions(
     rocprofiler-systems-ompt INTERFACE ROCPROFSYS_USE_OMPT=$<BOOL:${ROCPROFSYS_USE_OMPT}>)
-
-# ----------------------------------------------------------------------------------------#
-#
-# ElfUtils
-#
-# ----------------------------------------------------------------------------------------#
-
-include(ElfUtils)
-
-target_include_directories(rocprofiler-systems-elfutils SYSTEM
-                           INTERFACE ${ElfUtils_INCLUDE_DIRS})
-target_compile_definitions(rocprofiler-systems-elfutils INTERFACE ${ElfUtils_DEFINITIONS})
-target_link_directories(rocprofiler-systems-elfutils INTERFACE ${ElfUtils_LIBRARY_DIRS})
-target_link_libraries(rocprofiler-systems-elfutils INTERFACE ${ElfUtils_LIBRARIES})
 
 # ----------------------------------------------------------------------------------------#
 #

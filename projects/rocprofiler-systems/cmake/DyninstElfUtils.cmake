@@ -28,9 +28,6 @@
 
 include_guard(GLOBAL)
 
-# always provide Dyninst::ElfUtils even if it is a dummy
-rocprofiler_systems_add_interface_library(ElfUtils "ElfUtils interface library")
-
 if(NOT BUILD_ELFUTILS)
     find_package(Elfutils)
 endif()
@@ -98,6 +95,7 @@ if(NOT BUILD_ELFUTILS)
 endif()
 
 # -------------- SOURCE BUILD -------------------------------------------------
+
 if(LibElf_FOUND
    AND LibDwarf_FOUND
    AND (NOT ENABLE_DEBUGINFOD OR LibDebuginfod_FOUND))
@@ -149,24 +147,21 @@ else()
                                     "ElfUtils will only build with the GNU compiler")
     endif()
 
-    set(_eu_root ${TPL_STAGING_PREFIX})
-    set(_eu_inc_dirs $<BUILD_INTERFACE:${_eu_root}/include>
-                     $<INSTALL_INTERFACE:${INSTALL_LIB_DIR}/${TPL_INSTALL_INCLUDE_DIR}>)
-    set(_eu_lib_dirs $<BUILD_INTERFACE:${_eu_root}/lib>
-                     $<INSTALL_INTERFACE:${INSTALL_LIB_DIR}/${TPL_INSTALL_LIB_DIR}>)
-    set(_eu_libs
-        $<BUILD_INTERFACE:${_eu_root}/lib/libdw${CMAKE_SHARED_LIBRARY_SUFFIX}>
-        $<BUILD_INTERFACE:${_eu_root}/lib/libelf${CMAKE_SHARED_LIBRARY_SUFFIX}>
-        $<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${INSTALL_LIB_DIR}/${TPL_INSTALL_LIB_DIR}/libdw${CMAKE_SHARED_LIBRARY_SUFFIX}>
-        $<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${INSTALL_LIB_DIR}/${TPL_INSTALL_LIB_DIR}/libelf${CMAKE_SHARED_LIBRARY_SUFFIX}>
-        )
+    set(_eu_root ${TPL_STAGING_PREFIX}/elfutils)
+    set(_eu_inc_dirs $<BUILD_INTERFACE:${_eu_root}/include>)
+    set(_eu_lib_dirs $<BUILD_INTERFACE:${_eu_root}/lib>)
+    set(_eu_libs $<BUILD_INTERFACE:${_eu_root}/lib/libdw${CMAKE_SHARED_LIBRARY_SUFFIX}>
+                 $<BUILD_INTERFACE:${_eu_root}/lib/libelf${CMAKE_SHARED_LIBRARY_SUFFIX}>)
     set(_eu_build_byproducts "${_eu_root}/lib/libdw${CMAKE_SHARED_LIBRARY_SUFFIX}"
                              "${_eu_root}/lib/libelf${CMAKE_SHARED_LIBRARY_SUFFIX}")
 
+    file(MAKE_DIRECTORY "${_eu_root}/lib")
+    file(MAKE_DIRECTORY "${_eu_root}/include")
+
     include(ExternalProject)
     externalproject_add(
-        ElfUtils-External
-        PREFIX ${PROJECT_BINARY_DIR}/elfutils
+        rocprofiler-systems-elfutils-build
+        PREFIX ${_eu_root}
         URL ${ElfUtils_DOWNLOAD_URL}
             "https://sourceware.org/elfutils/ftp/${ELFUTILS_DOWNLOAD_VERSION}/elfutils-${ELFUTILS_DOWNLOAD_VERSION}.tar.bz2"
             "https://mirrors.kernel.org/sourceware/elfutils/${ELFUTILS_DOWNLOAD_VERSION}/elfutils-${ELFUTILS_DOWNLOAD_VERSION}.tar.bz2"
@@ -175,19 +170,25 @@ else()
             ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} CFLAGS=-fPIC\ -O3
             CXX=${CMAKE_CXX_COMPILER} CXXFLAGS=-fPIC\ -O3
             [=[LDFLAGS=-Wl,-rpath='$$ORIGIN']=] <SOURCE_DIR>/configure
-            --enable-install-elfh --prefix=${TPL_STAGING_PREFIX} --disable-libdebuginfod
+            --enable-install-elfh --prefix=${_eu_root} --disable-libdebuginfod
             --disable-debuginfod --enable-thread-safety ${ElfUtils_CONFIG_OPTIONS}
-            --libdir=${TPL_STAGING_PREFIX}/lib
+            --libdir=${_eu_root}/lib
         BUILD_COMMAND make install
         BUILD_BYPRODUCTS ${_eu_build_byproducts}
         INSTALL_COMMAND "")
 
     # target for re-executing the installation
     add_custom_target(
-        install-elfutils-external
+        rocprofiler-systems-elfutils-install
         COMMAND make install
-        WORKING_DIRECTORY ${PROJECT_BINARY_DIR}/elfutils/src/ElfUtils-External
+        WORKING_DIRECTORY ${${_eu_root}}/src/ElfUtils-External
         COMMENT "Installing ElfUtils...")
+
+    install(
+        DIRECTORY ${_eu_root}/lib/
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}
+        FILES_MATCHING
+        PATTERN "*${CMAKE_SHARED_LIBRARY_SUFFIX}*")
 endif()
 
 # -------------- EXPORT VARIABLES ---------------------------------------------
@@ -208,10 +209,11 @@ set(ElfUtils_LIBRARIES
     ${_eu_libs}
     CACHE FILEPATH "elfutils library files" FORCE)
 
-target_include_directories(ElfUtils SYSTEM INTERFACE ${ElfUtils_INCLUDE_DIRS})
-target_compile_definitions(ElfUtils INTERFACE ${ElfUtils_DEFINITIONS})
-target_link_directories(ElfUtils INTERFACE ${ElfUtils_LIBRARY_DIRS})
-target_link_libraries(ElfUtils INTERFACE ${ElfUtils_LIBRARIES})
+target_include_directories(rocprofiler-systems-elfutils SYSTEM
+                           INTERFACE ${ElfUtils_INCLUDE_DIRS})
+target_compile_definitions(rocprofiler-systems-elfutils INTERFACE ${ElfUtils_DEFINITIONS})
+target_link_directories(rocprofiler-systems-elfutils INTERFACE ${ElfUtils_LIBRARY_DIRS})
+target_link_libraries(rocprofiler-systems-elfutils INTERFACE ${ElfUtils_LIBRARIES})
 
 rocprofiler_systems_message(STATUS "ElfUtils includes: ${ElfUtils_INCLUDE_DIRS}")
 rocprofiler_systems_message(STATUS "ElfUtils library dirs: ${ElfUtils_LIBRARY_DIRS}")
