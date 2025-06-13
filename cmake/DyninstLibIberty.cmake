@@ -21,10 +21,6 @@
 
 include_guard(GLOBAL)
 
-# always provide Dyninst::LibIberty even if it is empty
-rocprofiler_systems_add_interface_library(rocprofiler-systems-libiberty
-                                          "LibIberty interface library")
-
 if(NOT UNIX)
     return()
 endif()
@@ -48,6 +44,7 @@ if(NOT BUILD_LIBIBERTY)
 endif()
 
 # -------------- SOURCE BUILD -------------------------------------------------
+
 if(LibIberty_FOUND)
     set(_li_root ${LibIberty_ROOT_DIR})
     set(_li_inc_dirs ${LibIberty_INCLUDE_DIRS})
@@ -71,12 +68,9 @@ else()
     set(_li_project_name rocprofiler-systems-libiberty-build)
     set(_li_working_dir ${_li_root}/src/${_li_project_name})
     set(_li_inc_dirs $<BUILD_INTERFACE:${_li_root}/include>)
-    set(_li_lib_dirs $<BUILD_INTERFACE:${_li_root}/lib>
-                     $<INSTALL_INTERFACE:${INSTALL_LIB_DIR}/${TPL_INSTALL_LIB_DIR}>)
+    set(_li_lib_dirs $<BUILD_INTERFACE:${_li_root}/lib>)
     set(_li_libs
-        $<BUILD_INTERFACE:${_li_root}/lib/libiberty${CMAKE_STATIC_LIBRARY_SUFFIX}>
-        $<INSTALL_INTERFACE:$<INSTALL_PREFIX>/${INSTALL_LIB_DIR}/${TPL_INSTALL_LIB_DIR}/libiberty${CMAKE_STATIC_LIBRARY_SUFFIX}>
-        )
+        $<BUILD_INTERFACE:${_li_root}/lib/libiberty${CMAKE_STATIC_LIBRARY_SUFFIX}>)
     set(_li_build_byproducts "${_li_root}/lib/libiberty${CMAKE_STATIC_LIBRARY_SUFFIX}")
 
     file(MAKE_DIRECTORY "${_li_root}/lib")

@@ -5,7 +5,7 @@ foreach(dep BOOST TBB ELFUTILS LIBIBERTY)
     if(DYNINST_BUILD_${dep})
         message(
             WARNING
-                "DYNINST_BUILD_${dep} is deprecated. Use ROCPROFSYS_BUILD_${dep} instead."
+                "DYNINST_BUILD_${dep} is deprecated. Using ROCPROFSYS_BUILD_${dep} instead."
             )
         set(ROCPROFSYS_BUILD_${dep} ON)
     endif()
@@ -58,10 +58,11 @@ if(TARGET rocprofiler-systems-tbb-build AND TARGET external-prebuild)
 endif()
 
 include(DyninstElfUtils)
-if(TARGET ElfUtils-External AND TARGET external-prebuild)
-    set_target_properties(ElfUtils-External PROPERTIES JOB_POOL_COMPILE external_deps_pool
-                                                       JOB_POOL_LINK external_deps_pool)
-    add_dependencies(external-prebuild ElfUtils-External)
+if(TARGET rocprofiler-systems-elfutils-build AND TARGET external-prebuild)
+    set_target_properties(
+        rocprofiler-systems-elfutils-build PROPERTIES JOB_POOL_COMPILE external_deps_pool
+                                                      JOB_POOL_LINK external_deps_pool)
+    add_dependencies(external-prebuild rocprofiler-systems-elfutils-build)
 endif()
 
 include(DyninstLibIberty)
@@ -92,9 +93,10 @@ if(NOT TARGET Dyninst::Boost AND TARGET rocprofiler-systems-boost)
             "Created imported target Dyninst::Boost linked to rocprofiler-systems-boost")
 endif()
 
-if(NOT TARGET Dyninst::ElfUtils AND TARGET ElfUtils)
+if(NOT TARGET Dyninst::ElfUtils AND TARGET rocprofiler-systems-elfutils)
     add_library(Dyninst::ElfUtils INTERFACE IMPORTED)
-    set_target_properties(Dyninst::ElfUtils PROPERTIES INTERFACE_LINK_LIBRARIES ElfUtils)
+    set_target_properties(Dyninst::ElfUtils PROPERTIES INTERFACE_LINK_LIBRARIES
+                                                       rocprofiler-systems-elfutils)
     message(STATUS "Created imported target Dyninst::ElfUtils linked to ElfUtils")
 endif()
 
@@ -115,18 +117,3 @@ if(NOT TARGET Dyninst::LibIberty AND TARGET rocprofiler-systems-libiberty)
             "Created imported target Dyninst::LibIberty linked to rocprofiler-systems-libiberty"
         )
 endif()
-
-# for packaging
-install(
-    DIRECTORY ${TPL_STAGING_PREFIX}/lib/
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}
-    FILES_MATCHING
-    PATTERN "*${CMAKE_SHARED_LIBRARY_SUFFIX}*"
-    PATTERN "*${CMAKE_STATIC_LIBRARY_SUFFIX}*")
-
-install(
-    DIRECTORY ${TPL_STAGING_PREFIX}/tbb/lib/
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}
-    FILES_MATCHING
-    PATTERN "*${CMAKE_SHARED_LIBRARY_SUFFIX}*"
-    PATTERN "*${CMAKE_STATIC_LIBRARY_SUFFIX}*")

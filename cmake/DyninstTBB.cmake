@@ -33,10 +33,6 @@
 
 include_guard(GLOBAL)
 
-# always provide Dyninst::TBB even if it is a dummy
-rocprofiler_systems_add_interface_library(rocprofiler-systems-tbb
-                                          "Threading Building Blocks")
-
 if(TBB_FOUND)
     return()
 endif()
@@ -241,6 +237,12 @@ else()
             ${CMAKE_COMMAND} -DLIBDIR=${TBB_LIBRARY_DIRS} -DINCDIR=${TBB_INCLUDE_DIRS}
             -DPREFIX=${TBB_ROOT_DIR} -P ${CMAKE_CURRENT_LIST_DIR}/DyninstTBBInstall.cmake
         COMMENT "Installing TBB...")
+
+    install(
+        DIRECTORY ${TPL_STAGING_PREFIX}/tbb/lib/
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}
+        FILES_MATCHING
+        PATTERN "*${CMAKE_SHARED_LIBRARY_SUFFIX}*")
 endif()
 
 foreach(_DIR_TYPE INCLUDE LIBRARY)

@@ -44,10 +44,6 @@
 
 include_guard(GLOBAL)
 
-# always provide Dyninst::Boost even if it is empty
-rocprofiler_systems_add_interface_library(rocprofiler-systems-boost
-                                          "Boost interface library")
-
 if(NOT BUILD_BOOST)
     find_package(Boost)
 endif()
