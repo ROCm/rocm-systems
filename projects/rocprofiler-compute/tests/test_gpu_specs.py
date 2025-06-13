@@ -171,7 +171,7 @@ def test_num_xcds_cli_output():
 
     # 2. Run rocprof-compute -s and grab rocprof-compute num_xcd
     proc = subprocess.run(
-        ["rocprof-compute", "-s"],
+        ["src/rocprof-compute", "-s"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
