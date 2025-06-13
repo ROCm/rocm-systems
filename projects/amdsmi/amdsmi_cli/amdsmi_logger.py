@@ -986,9 +986,9 @@ class AMDSMILogger():
     def print_default_output(self, output: Dict):
         # some template lines
         default_line_1 = "+------------------------------------------------------------------------------+"
-        default_line_2 = "|--------------------------------------+---------------------------------------|"
-        default_line_3 = "|======================================+=======================================|"
-        default_line_4 = "+--------------------------------------+---------------------------------------+"
+        default_line_2 = "|-------------------------------------+----------------------------------------|"
+        default_line_3 = "|=====================================+========================================|"
+        default_line_4 = "+-------------------------------------+----------------------------------------+"
         default_line_5 = "|==============================================================================|"
 
         # print the version information first
@@ -1008,8 +1008,8 @@ class AMDSMILogger():
         print(default_line_1)
         print("| AMD-SMI {0:20s} amdgpu version: {1:8s} ROCm version: {2:8s} |".format(amd_smi_version.ljust(20), amdgpu_version, rocm_version))
         print(default_line_2)
-        print("| BDF                         GPU-Name | Mem-Util    Temp   UECC   Power-Usage |")
-        print("| GPU  HIP-ID   OAM-ID  Partition-Mode | GFX-Util     Fan         Memory-Usage |")
+        print("| BDF                        GPU-Name | Mem-Uti   Temp   UEC       Power-Usage |")
+        print("| GPU  HIP-ID  OAM-ID  Partition-Mode | GFX-Uti    Fan               Mem-Usage |")
         print(default_line_3)
 
         line_count = 0
@@ -1026,41 +1026,42 @@ class AMDSMILogger():
             mem_util = gpu_info['mem_util']
             if mem_util != "N/A":
                 mem_util = str(mem_util) + " %"
-            mem_util = mem_util.rjust(8)
+            mem_util = mem_util.ljust(5)
 
             temp = gpu_info['temp']
             if temp != "N/A":
                 temp = str(temp) + " \u00b0C"
             temp = temp.rjust(6)
 
-            u_ecc = str(gpu_info['uncorr_ecc']).rjust(5)
+            u_ecc = str(gpu_info['uncorr_ecc']).ljust(5)
 
             power_usage = gpu_info['power_usage']
             if power_usage != "N/A":
                 power_usage = f"{gpu_info['power_usage']['current_power']}/{gpu_info['power_usage']['power_limit']} W"
-            power_usage = str(power_usage).rjust(12)
-            print("| {0:12.12s}  {1:22.22s} | {2:8.8s}  {3:6.6s}  {4:5.5s}  {5:12.12s} |".format(bdf, market_name, mem_util, temp, u_ecc, power_usage))
-            
+            power_usage = str(power_usage).rjust(13)
+
             gpu_id = str(gpu_info['gpu_id']).rjust(3)
             hip_id = str(gpu_info['hip_id']).rjust(6)
-            oam_id = str(gpu_info['oam_id']).rjust(7)
+            oam_id = str(gpu_info['oam_id']).rjust(6)
             partition_modes = str(gpu_info['partition_mode']).rjust(14)
 
             gfx_util = gpu_info['gfx_util']
             if gfx_util != "N/A":
                 gfx_util = str(gfx_util) + " %"
-            gfx_util = gfx_util.rjust(8)
+            gfx_util = gfx_util.ljust(5)
 
             fan = gpu_info['fan']
             if fan != "N/A":
                 fan = str(fan) + " %"
-            fan = fan.rjust(7)
+            fan = fan.rjust(6)
 
             mem_usage = gpu_info['mem_usage']
             if mem_usage != "N/A":
                 mem_usage = f"{gpu_info['mem_usage']['used_vram']}/{gpu_info['mem_usage']['total_vram']} MB"
-            mem_usage = mem_usage.rjust(19)
-            print("| {0:3.3s}  {1:6.6s}  {2:7.7s}  {3:14.14s} | {4:8.8s} {5:7.7s}  {6:19.19s} |".format(gpu_id, hip_id, oam_id, partition_modes, gfx_util, fan, mem_usage))
+            mem_usage = mem_usage.rjust(21)
+
+            print("| {0:12.12s} {1:22.22s} | {2:5.5s}   {3:6.6s}   {4:5.5s}   {5:13.13s} |".format(bdf, market_name, mem_util, temp, u_ecc, power_usage))
+            print("| {0:3.3s}  {1:6.6s}  {2:6.6s}  {3:14.14s} | {4:5.5s}   {5:6.6s}   {6:21.21s} |".format(gpu_id, hip_id, oam_id, partition_modes, gfx_util, fan, mem_usage))
 
             if line_count < end:
                 print(default_line_2)
@@ -1071,18 +1072,19 @@ class AMDSMILogger():
         # print process list of all GPUs last
         print(default_line_1)
         print("| Processes:                                                                   |")
-        print("|  GPU        PID  Process Name                    VRAM_MEM  MEM_USAGE  NUM_CU |")
+        print("|  GPU        PID  Process Name           GTT_MEM  VRAM_MEM  MEM_USAGE  NUM_CU |")
         print(default_line_5)
         if len(output['processes']) != 0:
             for process in output['processes']:
                 gpu_id = str(process['gpu']).rjust(4)
                 pid = str(process['pid']).rjust(9)
-                process_name = str(process['name']).ljust(29)
-                vram_mem = str(process['vram']).rjust(9)
+                process_name = str(process['name']).ljust(20)
+                gtt_mem = str(process['gtt']).rjust(8)
+                vram_mem = str(process['vram']).rjust(8)
                 mem_usage = str(process['mem_usage']).rjust(9)
                 cu_occupancy = str(process['cu_occupancy']).rjust(6)
-                print("| {0:4s}  {1:9s}  {2:29s}  {3:9s}  {4:9s}  {5:6s} |".format(
-                         gpu_id, pid, process_name, vram_mem, mem_usage, cu_occupancy))
+                print("| {0:4s}  {1:9s}  {2:20s}  {3:8s}  {4:8s}  {5:9s}  {6:6s} |".format(
+                         gpu_id, pid, process_name, gtt_mem, vram_mem, mem_usage, cu_occupancy))
         else:
             print("|  No running processes found                                                  |")
         print(default_line_1)

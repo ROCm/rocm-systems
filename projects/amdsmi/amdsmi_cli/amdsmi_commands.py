@@ -6614,7 +6614,7 @@ class AMDSMICommands():
                 hip_id = "N/A"
             gpu_info_dict.update({"hip_id": hip_id})
 
-            # mem utilization, GPU utilization, power usage, and temperature
+            # mem utilization, GPU utilization, power usage, and temperature from gpu_metrics
             if gpu_metrics != "N/A":
                 mem_util = gpu_metrics['average_umc_activity']
                 mem_util = round(mem_util)
@@ -6683,10 +6683,11 @@ class AMDSMICommands():
             try:
                 raw_process_list = amdsmi_interface.amdsmi_get_gpu_process_list(processor)
                 for proc in raw_process_list:
-                    proc_info_dict = {"gpu": "N/A", "pid": "N/A", "name": "N/A", "vram": "N/A", "mem_usage": "N/A", "cu_occupancy": "N/A"}
+                    proc_info_dict = {"gpu": "N/A", "pid": "N/A", "name": "N/A","gtt": "N/A", "vram": "N/A", "mem_usage": "N/A", "cu_occupancy": "N/A"}
                     proc_info_dict['gpu'] = gpu_id
                     proc_info_dict['pid'] = proc['pid']
                     proc_info_dict['name'] = proc['name']
+                    proc_info_dict['gtt'] = self.helpers.convert_bytes_to_readable(proc['memory_usage']['gtt_mem'])
                     proc_info_dict['vram'] = self.helpers.convert_bytes_to_readable(proc['memory_usage']['vram_mem'])
                     proc_info_dict['mem_usage'] = self.helpers.convert_bytes_to_readable(proc['mem'])
                     proc_info_dict['cu_occupancy'] = str(proc['cu_occupancy'])
