@@ -22,6 +22,7 @@ THE SOFTWARE.
 #include "RdciConfigSubSystem.h"
 
 #include <getopt.h>
+#include <string.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -37,23 +38,17 @@ THE SOFTWARE.
 
 static constexpr uint32_t TABLE_COLUMN_WIDTH = 20;
 
+static std::string make_fg_name(rdc_gpu_group_t gid) {
+  return std::string("RdciConfigSubSystem_group") + std::to_string(gid);
+}
+
 namespace amd {
 namespace rdc {
 
 RdciConfigSubSystem::RdciConfigSubSystem()
-    : config_cmd_(CONFIG_COMMAND_NONE),
-      power_limit_(0),
-      gfx_max_clock_(0),
-      memory_max_clock_(0),
-      fgid_(0) {}
+    : config_cmd_(CONFIG_COMMAND_NONE), power_limit_(0), gfx_max_clock_(0), memory_max_clock_(0) {}
 
-RdciConfigSubSystem::~RdciConfigSubSystem() {
-  if (fgid_ != JOB_FIELD_ID) {
-    rdc_field_unwatch(rdc_handle_, group_id_, fgid_);
-    rdc_group_field_destroy(rdc_handle_, fgid_);
-    fgid_ = JOB_FIELD_ID;
-  }
-}
+RdciConfigSubSystem::~RdciConfigSubSystem() {}
 
 void RdciConfigSubSystem::parse_cmd_opts(int argc, char** argv) {
   const int JSON_OPTIONS = 1001;
@@ -148,7 +143,15 @@ void RdciConfigSubSystem::process() {
 
   switch (config_cmd_) {
     case CONFIG_COMMAND_SET: {
+      if (gfx_max_clock_ == 0 && power_limit_ == 0 && memory_max_clock_ == 0) {
+        show_help();
+        throw RdcException(
+            RDC_ST_BAD_PARAMETER,
+            "Must specify at least one of --powerlimit, --gfxmaxclk or --memclk when using --set");
+      }
+
       rdc_config_setting_t setting;
+
       if (gfx_max_clock_ != 0) {
         setting.type = RDC_CFG_GFX_CLOCK_LIMIT;
         setting.target_value = gfx_max_clock_;
@@ -166,64 +169,107 @@ void RdciConfigSubSystem::process() {
         setting.target_value = memory_max_clock_;
         result = rdc_config_set(rdc_handle_, group_id_, setting);
       }
-      if (result == RDC_ST_OK) {
-        if (is_json_output()) {
-          json_ss << "{"
-                  << "\"group_id\": \"" << group_id_ << "\", \"status\": \"ok\""
-                  << "}";
-        } else {
-          std::cout << "Successfully configured GPU Id belongs to group: " << group_id_
-                    << std::endl;
-        }
-        std::cout << json_ss.str() << std::endl;
-        return;
+
+      if (result != RDC_ST_OK) {
+        break;
       }
-      break;
-    }
-    case CONFIG_COMMAND_GET: {
-      // Add the default job stats fields
-      std::vector<rdc_field_t> job_fields = {RDC_FI_GPU_CLOCK, RDC_FI_MEM_CLOCK,
-                                             RDC_FI_POWER_USAGE};
-      static const char job_field_group[] = "RdciConfigSubSystem";
 
+      // If watch group exists, get existing watched fields, tear group down and make new one
+      std::vector<rdc_field_t> job_fields;
+      rdc_field_grp_t old_fgid;
+      std::string fg_name = make_fg_name(group_id_);
+      if (rdc_group_field_find(rdc_handle_, fg_name.c_str(), &old_fgid) == RDC_ST_OK) {
+        rdc_field_group_info_t info{};
+        result = rdc_group_field_get_info(rdc_handle_, old_fgid, &info);
+        if (result != RDC_ST_OK) {
+          std::cout << "Error unable to get group info for field group: " << old_fgid << std::endl;
+          break;
+        }
+        for (uint32_t i = 0; i < info.count; ++i) {
+          job_fields.push_back(info.field_ids[i]);
+        }
+        result = rdc_field_unwatch(rdc_handle_, group_id_, old_fgid);
+        if (result != RDC_ST_OK) {
+          std::cout << "Error unable to unwatch field group: " << old_fgid << std::endl;
+          break;
+        }
+        rdc_group_field_destroy(rdc_handle_, old_fgid);
+        if (result != RDC_ST_OK) {
+          std::cout << "Error unable to destroy field group: " << old_fgid << std::endl;
+          break;
+        }
+        std::cout << "Successfully removed field group: " << old_fgid << std::endl;
+      }
+
+      // Add new and existing fields to watch, ignoring duplicates
+      auto add_if_new = [&](rdc_field_t f) {
+        if (std::find(job_fields.begin(), job_fields.end(), f) == job_fields.end())
+          job_fields.push_back(f);
+      };
+      if (gfx_max_clock_) add_if_new(RDC_FI_GPU_CLOCK);
+      if (power_limit_) add_if_new(RDC_FI_POWER_USAGE);
+      if (memory_max_clock_) add_if_new(RDC_FI_MEM_CLOCK);
+
+      rdc_field_grp_t fgid;
       result = rdc_group_field_create(rdc_handle_, job_fields.size(), job_fields.data(),
-                                      job_field_group, &fgid_);
+                                      fg_name.c_str(), &fgid);
+      if (result != RDC_ST_OK) {
+        std::cout << "Error creating field group: " << fgid << std::endl;
+        break;
+      }
+      std::cout << "Successfully created the field group " << fgid << std::endl;
 
-      // Start watch
+      // Start watching all config values
       const double max_keep_age = 30060;  // Length of time to keep data in field in seconds
       const int max_keep_samples = 10;
       const int update_frequency = 1000000;  // Once per minute
-      result = rdc_field_watch(rdc_handle_, group_id_, fgid_, update_frequency, max_keep_age,
+      result = rdc_field_watch(rdc_handle_, group_id_, fgid, update_frequency, max_keep_age,
                                max_keep_samples);
+      if (result != RDC_ST_OK) {
+        std::cout << "Error creating field watch for group id: " + group_id_ << std::endl;
+        break;
+      }
 
+      if (is_json_output()) {
+        json_ss << "{"
+                << "\"group_id\": \"" << group_id_ << "\", \"status\": \"ok\""
+                << "}";
+      } else {
+        std::cout << "Successfully configured GPU Id belongs to group: " << group_id_ << std::endl;
+      }
+      std::cout << json_ss.str() << std::endl;
+      return;
+    }
+    case CONFIG_COMMAND_GET: {
       rdc_config_setting_list_t settings = {0, {}};
       result = rdc_config_get(rdc_handle_, group_id_, &settings);
       if (result == RDC_ST_OK) {
         display_config_settings(settings);
       } else if (result == RDC_ST_NOT_FOUND) {
-        std::cout << "Get config information failed, cache empty " << std::endl;
+        std::cout << "No configuration found for group " << group_id_ << std::endl;
       } else {
-        std::cout << "Get config information failed " << std::endl;
+        std::cout << "Error retrieving config for group " << group_id_ << std::endl;
       }
-
-      // Stop watching the field group
-      result = rdc_field_unwatch(rdc_handle_, group_id_, fgid_);
-      if (result != RDC_ST_OK) {
-        std::cout << "Error stop watch fields. Return: " << rdc_status_string(result);
-      }
-      std::cout << "Stop watch group:" << group_id_ << ", field_group:" << fgid_ << std::endl;
-
-      // Delete the field group and GPU group
-      result = rdc_group_field_destroy(rdc_handle_, fgid_);
-      if (result != RDC_ST_OK) {
-        std::cout << "Error delete field group. Return: " << rdc_status_string(result);
-      }
-      std::cout << "Deleted the field group " << fgid_ << std::endl;
 
       break;
     }
     case CONFIG_COMMAND_CLEAR: {
       result = rdc_config_clear(rdc_handle_, group_id_);
+
+      // Delete the field group and GPU group
+      std::vector<rdc_field_t> job_fields;
+      rdc_field_grp_t old_fgid;
+      std::string fg_name = make_fg_name(group_id_);
+      if (rdc_group_field_find(rdc_handle_, fg_name.c_str(), &old_fgid) == RDC_ST_OK) {
+        rdc_field_unwatch(rdc_handle_, group_id_, old_fgid);
+        rdc_group_field_destroy(rdc_handle_, old_fgid);
+      }
+      if (result != RDC_ST_OK) {
+        std::cout << "Error delete field group. Return: " << rdc_status_string(result);
+        break;
+      }
+      std::cout << "Successfully deleted the field group " << old_fgid << std::endl;
+
       if (result == RDC_ST_OK) {
         if (is_json_output()) {
           json_ss << "\"group_id\": \"" << group_id_ << "\", \"status\": \"ok\"";
@@ -249,6 +295,40 @@ void RdciConfigSubSystem::process() {
   }
 }
 
+rdc_status_t RdciConfigSubSystem::rdc_group_field_find(rdc_handle_t p_rdc_handle,
+                                                       const char* field_group_name,
+                                                       rdc_field_grp_t* out_field_group_id) {
+  if (p_rdc_handle == nullptr || field_group_name == nullptr || out_field_group_id == nullptr) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+
+  rdc_field_grp_t field_group_id_list[RDC_MAX_NUM_FIELD_GROUPS];
+  uint32_t count = 0;
+  rdc_status_t status = rdc_group_field_get_all_ids(p_rdc_handle, field_group_id_list, &count);
+  if (status != RDC_ST_OK) {
+    return status;
+  }
+
+  for (uint32_t i = 0; i < count; ++i) {
+    rdc_field_group_info_t info;
+    status = rdc_group_field_get_info(p_rdc_handle, field_group_id_list[i], &info);
+    if (status != RDC_ST_OK) {
+      continue;
+    }
+
+    if (strncmp(info.group_name, field_group_name, RDC_MAX_STR_LENGTH) == 0) {
+      *out_field_group_id = field_group_id_list[i];
+      return RDC_ST_OK;
+    }
+  }
+
+  return RDC_ST_NOT_FOUND;
+}
+
+// Our display config settings is called with rdc config get.
+// We pass in rdc_configs_list which is all our config settings for the specified group.
+// We read from the rdc cache, and display the live value of that setting.
+// Remember, rdc cache is updated with our watcher values upon config set
 void RdciConfigSubSystem::display_config_settings(rdc_config_setting_list_t& rdc_configs_list) {
   rdc_status_t result = RDC_ST_OK;
   std::stringstream ss, json_ss;
