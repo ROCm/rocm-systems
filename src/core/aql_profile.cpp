@@ -42,7 +42,6 @@
 #include "core/commandbuffermgr.hpp"
 
 #define CONSTRUCTOR_API __attribute__((constructor))
-#define DESTRUCTOR_API __attribute__((destructor))
 #define ERR_CHECK(cond, err, msg) \
   {                               \
     if (cond) {                   \
@@ -159,12 +158,8 @@ hsa_status_t DefaultTracedataCallback(hsa_ven_amd_aqlprofile_info_type_t info_ty
   return status;
 }
 
-Logger::mutex_t Logger::mutex_;
-Logger* Logger::instance_ = NULL;
 bool Pm4Factory::concurrent_create_mode_ = false;
 bool Pm4Factory::spm_kfd_mode_ = false;
-Pm4Factory::mutex_t Pm4Factory::mutex_;
-Pm4Factory::instances_t* Pm4Factory::instances_ = NULL;
 bool read_api_enabled = true;
 
 CONSTRUCTOR_API void constructor() {
@@ -172,11 +167,6 @@ CONSTRUCTOR_API void constructor() {
   if (read_api_enabled_str != NULL) {
     if (atoi(read_api_enabled_str) == 0) read_api_enabled = false;
   }
-}
-
-DESTRUCTOR_API void destructor() {
-  Logger::Destroy();
-  Pm4Factory::Destroy();
 }
 
 }  // namespace aql_profile

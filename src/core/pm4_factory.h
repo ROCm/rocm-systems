@@ -30,6 +30,7 @@
 
 #include <climits>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -119,8 +120,6 @@ class Pm4Factory {
     // First check and save the mode
     return Create(profile->agent, CheckConcurrent(profile));
   }
-  // Destroy factory
-  static void Destroy();
 
   // Return gpu id
   gpu_id_t GetGpuId() const { return gpu_id_; }
@@ -227,6 +226,7 @@ class Pm4Factory {
         concurrent_mode_(concurrent_create_mode_),
         block_map_(map) {}
 
+  friend class std::default_delete<Pm4Factory>;
   virtual ~Pm4Factory() {
     delete cmd_builder_;
     delete pmc_builder_;
@@ -257,7 +257,7 @@ class Pm4Factory {
       return a.handle < b.handle;
     }
   };
-  typedef std::map<hsa_agent_t, Pm4Factory*, instances_fncomp_t> instances_t;
+  typedef std::map<hsa_agent_t, std::unique_ptr<Pm4Factory>, instances_fncomp_t> instances_t;
 
   // Create GFX9 generic factory
   static Pm4Factory* Gfx9Create(const AgentInfo* agent_info);
@@ -280,19 +280,27 @@ class Pm4Factory {
 
   static bool CheckConcurrent(const profile_t* profile);
 
-  // Mutex for inter thread synchronization for the instances create/destroy
-  static mutex_t mutex_;
-  // Factory instances container
-  static instances_t* instances_;
+  // This struct holds all the "global" state for the factory system
+  struct Manager {
+    // Mutex for inter thread synchronization for the instances create/destroy
+    mutex_t mutex_;
+    // Factory instances container
+    instances_t instances_;
+  };
+
+  static Manager& getManager() {
+    static Manager manager_instance;
+    return manager_instance;
+  }
+
   // Block info container
   const BlockInfoMap block_map_;
 };
 
 inline Pm4Factory* Pm4Factory::Create(const AgentInfo* agent_info, gpu_id_t gpu_id,
                                       bool concurrent) {
-  // Check if we have the instance already created
-  if (instances_ == NULL) instances_ = new instances_t;
-  const auto ret = instances_->insert({agent_info->dev_id, NULL});
+  auto& manager = getManager();
+  const auto ret = manager.instances_.insert({agent_info->dev_id, nullptr});
   instances_t::iterator it = ret.first;
 
   concurrent_create_mode_ = concurrent;
@@ -301,48 +309,51 @@ inline Pm4Factory* Pm4Factory::Create(const AgentInfo* agent_info, gpu_id_t gpu_
 
   // Create a factory implementation for the GPU id
   if (ret.second) {
+    Pm4Factory *impl = nullptr;
     switch (gpu_id) {
       // Create Gfx9 generic factory
       case GFX9_GPU_ID:
-        it->second = Gfx9Create(agent_info);
+        impl = Gfx9Create(agent_info);
         break;
       // Create Gfx10 generic factory
       case GFX10_GPU_ID:
-        it->second = Gfx10Create(agent_info);
+        impl = Gfx10Create(agent_info);
         break;
       // Create Gfx11 generic factory
       case GFX11_GPU_ID:
-        it->second = Gfx11Create(agent_info);
+        impl = Gfx11Create(agent_info);
         break;
       case GFX12_GPU_ID:
-        it->second = Gfx12Create(agent_info);
+        impl = Gfx12Create(agent_info);
         break;
       // Create MI100 generic factory
       case MI100_GPU_ID:
-        it->second = Mi100Create(agent_info);
+        impl = Mi100Create(agent_info);
         break;
       case MI200_GPU_ID:
-        it->second = Mi200Create(agent_info);
+        impl = Mi200Create(agent_info);
         break;
       case MI300_GPU_ID:
-        it->second = Mi300Create(agent_info);
+        impl = Mi300Create(agent_info);
         break;
       case MI350_GPU_ID:
-        it->second = Mi350Create(agent_info);
+        impl = Mi350Create(agent_info);
         break;
       default:
         throw aql_profile_exc_val<gpu_id_t>("GPU id error", gpu_id);
     }
+    it->second.reset(impl);
   }
 
   if (it->second == NULL) throw aql_profile_exc_msg("Pm4Factory::Create() failed");
   it->second->gpu_id_ = gpu_id;
-  return it->second;
+  return it->second.get();
 }
 
 // Create PM4 factory
 inline Pm4Factory* Pm4Factory::Create(const hsa_agent_t agent, bool concurrent) {
-  std::lock_guard<mutex_t> lck(mutex_);
+  auto& manager = getManager();
+  std::lock_guard<mutex_t> lck(manager.mutex_);
   const AgentInfo* agent_info = HsaRsrcFactory::Instance().GetAgentInfo(agent);
   // Get GPU id for a given agent
 
@@ -371,17 +382,6 @@ inline Pm4Factory* Pm4Factory::Create(aqlprofile_agent_handle_t agent_info, bool
   if (info == NULL) throw aql_profile_exc_val<uint64_t>("Bad agent handle", agent_info.handle);
   const gpu_id_t gpu_id = GetGpuId(info->gfxip);
   return Pm4Factory::Create(info, gpu_id, concurrent);
-}
-
-// Destroy PM4 factory
-inline void Pm4Factory::Destroy() {
-  std::lock_guard<mutex_t> lck(mutex_);
-
-  if (instances_ != NULL) {
-    for (auto& item : *instances_) delete item.second;
-    delete instances_;
-    instances_ = NULL;
-  }
 }
 
 // Check the setting of pmc profiling mode
