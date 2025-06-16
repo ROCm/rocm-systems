@@ -1050,6 +1050,8 @@ def search_pc_sampling_record(records):
         lambda: defaultdict(
             lambda: {
                 "count": 0,
+                "count_issued": 0,
+                "count_stalled": 0,
                 "inst_index": None,
                 "stall_reason": {
                     "NONE": 0,
@@ -1068,6 +1070,10 @@ def search_pc_sampling_record(records):
         )
     )
 
+    rocp_inst_not_issued_prefix_len = len(
+        "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_"
+    )
+
     # Populate grouped_data
     for i, item in enumerate(records):
         pc_info = item["record"].get("pc", {})
@@ -1075,6 +1081,7 @@ def search_pc_sampling_record(records):
         code_object_offset = pc_info.get("code_object_offset")
         snapshot = item["record"].get("snapshot", {})
         inst_index = item.get("inst_index")
+        issued = item["record"].get("wave_issued")
 
         # Todo: opt me
         if (
@@ -1087,10 +1094,13 @@ def search_pc_sampling_record(records):
             grouped_data[code_object_id][code_object_offset]["inst_index"] = inst_index
 
             if len(snapshot):
-                # NB: 54 is the length of prefix "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_"
-                grouped_data[code_object_id][code_object_offset]["stall_reason"][
-                    snapshot.get("stall_reason")[54:]
-                ] += 1
+                if issued:
+                    grouped_data[code_object_id][code_object_offset]["count_issued"] += 1
+                else:
+                    grouped_data[code_object_id][code_object_offset]["count_stalled"] += 1
+                    grouped_data[code_object_id][code_object_offset]["stall_reason"][
+                        snapshot.get("stall_reason")[rocp_inst_not_issued_prefix_len:]
+                    ] += 1
                 # print(
                 #     inst_index,
                 #     grouped_data[code_object_id][code_object_offset]["stall_reason"],
@@ -1110,6 +1120,8 @@ def search_pc_sampling_record(records):
                 info["inst_index"],
                 offset,
                 info["count"],
+                info["count_issued"],
+                info["count_stalled"],
                 # For info["stall_reason"], remove the zero entries, sorting the remaining items by their values in descending order
                 sorted(
                     ((k, v) for k, v in info["stall_reason"].items() if v > 0),
@@ -1205,14 +1217,22 @@ def load_pc_sampling_data_per_kernel(
 
     df = pd.DataFrame(
         search_pc_sampling_record(pc_sample_key_loc),
-        columns=["code_object_id", "inst_index", "offset", "count", "stall_reason"],
+        columns=[
+            "code_object_id",
+            "inst_index",
+            "offset",
+            "count",
+            "count_issued",
+            "count_stalled",
+            "stall_reason",
+        ],
     )
 
     df = df[
         (df["code_object_id"] == kernel_info["code_object_id"])
         & (df["offset"] > kernel_info["entry_byte_offset"])
         & (df["offset"] < kernel_info["potential_end_offset"])
-    ][["inst_index", "offset", "count", "stall_reason"]]
+    ][["inst_index", "offset", "count", "count_issued", "count_stalled", "stall_reason"]]
 
     df["offset"] = df["offset"].apply(lambda x: hex(x))
 
@@ -1239,7 +1259,17 @@ def load_pc_sampling_data_per_kernel(
         return (
             df[["source_line", "instruction", "offset", "count"]]
             if method == "host_trap"
-            else df[["source_line", "instruction", "offset", "count", "stall_reason"]]
+            else df[
+                [
+                    "source_line",
+                    "instruction",
+                    "offset",
+                    "count",
+                    "count_issued",
+                    "count_stalled",
+                    "stall_reason",
+                ]
+            ]
         )
     else:  # sort by "count"
         return (
@@ -1248,7 +1278,15 @@ def load_pc_sampling_data_per_kernel(
             )
             if method == "host_trap"
             else df[
-                ["source_line", "instruction", "offset", "count", "stall_reason"]
+                [
+                    "source_line",
+                    "instruction",
+                    "offset",
+                    "count",
+                    "count_issued",
+                    "count_stalled",
+                    "stall_reason",
+                ]
             ].sort_values(by="count", ascending=False)
         )
     # might support sort by stall reason in the future

@@ -993,7 +993,7 @@ def pc_sampling_prof(
             "ROCPROFILER_PC_SAMPLING_BETA_ENABLED": "1",
             "ROCPROF_PC_SAMPLING_UNIT": unit,
             "ROCPROF_PC_SAMPLING_INTERVAL": str(interval),
-            "ROCPROF_PC_SAMPLING_METHOD": "host_trap",
+            "ROCPROF_PC_SAMPLING_METHOD": method,
         }
         new_env = os.environ.copy()
         for key, value in options.items():
@@ -1007,7 +1007,7 @@ def pc_sampling_prof(
         options = [
             "--pc-sampling-beta-enabled",
             "--pc-sampling-method",
-            "host_trap",
+            method,
             "--pc-sampling-unit",
             unit,
             "--output-format",
