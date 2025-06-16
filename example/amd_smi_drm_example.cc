@@ -199,8 +199,8 @@ void getFWNameFromId(int id, char *name)
     case AMDSMI_FW_ID_DMCU:
         strcpy(name, "ID_DMCU");
         break;
-    case AMDSMI_FW_ID_PLDM:
-        strcpy(name, "PLDM");
+    case AMDSMI_FW_ID_PLDM_BUNDLE:
+        strcpy(name, "PLDM_BUNDLE");
         break;
     default:
         strcpy(name, "");
@@ -891,7 +891,7 @@ int main() {
             printf("\tAsic serial: 0x%s\n", asic_info.asic_serial);
             if (asic_info.oam_id != UINT32_MAX) {
                 // OAM ID is not supported on all devices
-                printf("\tOAM ID: %"PRIu32"\n", asic_info.oam_id);
+                printf("\tOAM ID: %" PRIu32"\n", asic_info.oam_id);
             } else {
                 // OAM ID is not supported on this device
                 printf("\tOAM ID: N/A\n");
@@ -999,7 +999,7 @@ int main() {
             printf("    Output of amdsmi_get_power_info:\n");
             if (ret != AMDSMI_STATUS_NOT_SUPPORTED) {
                 CHK_AMDSMI_RET(ret)
-                printf("\tCurrent GFX Voltage: %d\n", power_measure.gfx_voltage);
+                printf("\tCurrent GFX Voltage: %ld\n", power_measure.gfx_voltage);
                 printf("\tAverage socket power: %d\n", power_measure.average_socket_power);
                 printf("\tGPU Power limit: %d\n\n", power_measure.power_limit);
             } else {

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /*
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
  *
@@ -1496,7 +1497,7 @@ amdsmi_status_t amdsmi_get_fw_info(amdsmi_processor_handle processor_handle,
         { AMDSMI_FW_ID_UVD, RSMI_FW_BLOCK_UVD},
         { AMDSMI_FW_ID_VCE, RSMI_FW_BLOCK_VCE},
         { AMDSMI_FW_ID_VCN, RSMI_FW_BLOCK_VCN},
-        { AMDSMI_FW_ID_PLDM, RSMI_FW_BLOCK_PLDM},
+        { AMDSMI_FW_ID_PLDM_BUNDLE, RSMI_FW_BLOCK_PLDM_BUNDLE},
     };
 
     AMDSMI_CHECK_INIT();
@@ -4176,12 +4177,12 @@ amdsmi_status_t amdsmi_get_afids_from_cper(
     if(cper->record_length > buf_size) {
         ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] cper buffer size " << std::dec << buf_size << " is smaller than cper record length " << std::dec << cper->record_length << "\n";
         LOG_ERROR(ss);
-        return AMDSMI_STATUS_INVAL;
+        return AMDSMI_STATUS_UNEXPECTED_SIZE;
     }
     else if(strncmp(cper->signature, "CPER", 4) != 0) {
         ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] cper buffer does not have the correct signature\n";
         LOG_ERROR(ss);
-        return AMDSMI_STATUS_INVAL;
+        return AMDSMI_STATUS_UNEXPECTED_DATA;
     }
     uint32_t i = 0;
     for(int afid: cper_decode(cper)) {

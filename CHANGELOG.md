@@ -13,57 +13,49 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
     ```console
     $ amd-smi
-    +------------------------------------------------------------------------------+
-    | AMD-SMI 26.10.10+42441c78   amdgpu version: 6.15.5     ROCm version: 7.0.0   |
-    |--------------------------------------+---------------------------------------|
-    | BDF                         GPU-Name | Mem-Util    Temp   UECC   Power-Usage |
-    | GPU  HIP-ID   OAM-ID  Partition-Mode | GFX-Util     Fan         Memory-Usage |
-    |======================================+=======================================|
-    | 0000:0c:00.0     AMD Instinct MI300X |      0 %   37 °C      0     141/750 W |
-    |   0       0        2        SPX/NPS1 |      0 %     N/A        283/196592 MB |
-    |--------------------------------------+---------------------------------------|
-    | 0000:22:00.0     AMD Instinct MI300X |      0 %   40 °C      0     155/750 W |
-    |   1       1        1        SPX/NPS1 |      0 %     N/A        284/196592 MB |
-    |--------------------------------------+---------------------------------------|
-    | 0000:38:00.0     AMD Instinct MI300X |      0 %   37 °C      0     141/750 W |
-    |   2       2        0        SPX/NPS1 |      0 %     N/A        283/196592 MB |
-    |--------------------------------------+---------------------------------------|
-    | 0000:5c:00.0     AMD Instinct MI300X |      0 %   37 °C      0     139/750 W |
-    |   3       3        3        SPX/NPS1 |      0 %     N/A        283/196592 MB |
-    |--------------------------------------+---------------------------------------|
-    | 0000:9f:00.0     AMD Instinct MI300X |      0 %   37 °C      0     140/750 W |
-    |   4       4        7        SPX/NPS1 |      0 %     N/A        283/196592 MB |
-    |--------------------------------------+---------------------------------------|
-    | 0000:af:00.0     AMD Instinct MI300X |      0 %   37 °C      0     142/750 W |
-    |   5       5        5        SPX/NPS1 |      0 %     N/A        283/196592 MB |
-    |--------------------------------------+---------------------------------------|
-    | 0000:bf:00.0     AMD Instinct MI300X |      0 %   36 °C      0     138/750 W |
-    |   6       6        4        SPX/NPS1 |      0 %     N/A        283/196592 MB |
-    |--------------------------------------+---------------------------------------|
-    | 0000:df:00.0     AMD Instinct MI300X |      0 %   40 °C      0     138/750 W |
-    |   7       7        6        SPX/NPS1 |      0 %     N/A        283/196592 MB |
-    +--------------------------------------+---------------------------------------+
-    +------------------------------------------------------------------------------+
-    | Processes:                                                                   |
-    |  GPU      PID   Process Name                 VRAM_MEM    MEM_USAGE   NUM_CU  |
-    |==============================================================================|
-    |    0   269867    rvs                          17.9 GB      19.2 GB       38  |
-    |    0   269888    rvs                          17.9 GB      19.2 GB       38  |
-    |    1   269867    rvs                          17.9 GB      19.2 GB       38  |
-    |    1   269888    rvs                          17.9 GB      19.2 GB       38  |
-    |    2   269867    rvs                          17.9 GB      19.2 GB       38  |
-    |    2   269888    rvs                          17.9 GB      19.2 GB       38  |
-    |    3   269867    rvs                          17.9 GB      19.2 GB       76  |
-    |    3   269888    rvs                          17.9 GB      19.2 GB        0  |
-    |    4   269867    rvs                          17.9 GB      19.0 GB       37  |
-    |    4   269888    rvs                          17.9 GB      19.2 GB       36  |
-    |    5   269867    rvs                          17.9 GB      19.0 GB       76  |
-    |    5   269888    rvs                          17.9 GB      19.2 GB        0  |
-    |    6   269867    rvs                          17.9 GB      19.0 GB       76  |
-    |    6   269888    rvs                          17.9 GB      19.2 GB        0  |
-    |    7   269867    rvs                          17.9 GB      19.2 GB       34  |
-    |    7   269888    rvs                          17.9 GB      19.2 GB       38  |
-    +------------------------------------------------------------------------------+
++------------------------------------------------------------------------------+
+| AMD-SMI 26.0.0+eaa54ecc      amdgpu version: 6.12.12  ROCm version: 7.0.0    |
+|-------------------------------------+----------------------------------------|
+| BDF                        GPU-Name | Mem-Uti   Temp   UEC       Power-Usage |
+| GPU  HIP-ID  OAM-ID  Partition-Mode | GFX-Uti    Fan               Mem-Usage |
+|=====================================+========================================|
+| 0000:0c:00.0    AMD Instinct MI300X | 13 %     60 °C   0           734/750 W |
+|   0       0       2        SPX/NPS1 | 98 %       N/A          4976/196592 MB |
+|-------------------------------------+----------------------------------------|
+| 0000:22:00.0    AMD Instinct MI300X | 10 %     60 °C   0           652/750 W |
+|   1       1       1        SPX/NPS1 | 83 %       N/A          4976/196592 MB |
+|-------------------------------------+----------------------------------------|
+| 0000:38:00.0    AMD Instinct MI300X | 5 %      55 °C   0           376/750 W |
+|   2       2       0        SPX/NPS1 | 34 %       N/A          4976/196592 MB |
+|-------------------------------------+----------------------------------------|
+| 0000:5c:00.0    AMD Instinct MI300X | 2 %      57 °C   0           234/750 W |
+|   3       3       3        SPX/NPS1 | 12 %       N/A          4976/196592 MB |
+|-------------------------------------+----------------------------------------|
+| 0000:9f:00.0    AMD Instinct MI300X | 1 %      57 °C   0           219/750 W |
+|   4       4       7        SPX/NPS1 | 11 %       N/A          4976/196592 MB |
+|-------------------------------------+----------------------------------------|
+| 0000:af:00.0    AMD Instinct MI300X | 3 %      61 °C   0           295/750 W |
+|   5       5       5        SPX/NPS1 | 23 %       N/A          4976/196592 MB |
+|-------------------------------------+----------------------------------------|
+| 0000:bf:00.0    AMD Instinct MI300X | 5 %      58 °C   0           367/750 W |
+|   6       6       4        SPX/NPS1 | 36 %       N/A          4976/196592 MB |
+|-------------------------------------+----------------------------------------|
+| 0000:df:00.0    AMD Instinct MI300X | 6 %      62 °C   0           434/750 W |
+|   7       7       6        SPX/NPS1 | 47 %       N/A          4976/196592 MB |
++-------------------------------------+----------------------------------------+
++------------------------------------------------------------------------------+
+| Processes:                                                                   |
+|  GPU        PID  Process Name           GTT_MEM  VRAM_MEM  MEM_USAGE  NUM_CU |
+|==============================================================================|
+|    0    1253994  rvs                     2.0 MB    2.4 GB     4.6 GB       0 |
+|    1    1253994  rvs                     2.0 MB    2.4 GB     4.6 GB       0 |
+|    2    1253994  rvs                     2.0 MB    2.5 GB     4.6 GB       0 |
+|    3    1253994  rvs                     2.0 MB    2.5 GB     4.6 GB       0 |
+|    4    1253994  rvs                     2.0 MB    2.4 GB     4.6 GB     114 |
+|    5    1253994  rvs                     2.0 MB    2.4 GB     4.6 GB     114 |
+|    6    1253994  rvs                     2.0 MB    2.4 GB     4.6 GB     114 |
+|    7    1253994  rvs                     2.0 MB    2.4 GB     4.6 GB       0 |
++------------------------------------------------------------------------------+
     ```
 
 - **Added support for GPU metrics 1.8**.  
@@ -94,8 +86,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - The value is representative of the socket's power agnostic of the the GPU version.
 
 ### Changed
-
-- **Padded `asic_serial` in `amdsmi_get_asic_info` with 0s**.  
 
 - **Updated `amdsmi_get_clock_info` in `amdsmi_interface.py`**.  
   - The `clk_deep_sleep` field now returns the sleep integer value.  
@@ -294,6 +284,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Added Compute Unit Occupancy information per process**  
   Measuring compute units are the best way currently to determine gfx usage on a per process basis  
+  - Added `cu_occupancy` field to `amdsmi_proc_info_t` structure in C & Python APIs, in minor version update  
   - Added `CU_OCCUPANCY` to `amd-smi process` output.
   - Added `CU%` to `amd-smi monitor -q`
 
@@ -307,27 +298,22 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
                   ...
   ```
 
-- **Added new firmware PLDM**.  
+- **Added new firmware PLDM_BUNDLE**.  
+  - `amd-smi firmware` can now show the PLDM Bundle on supported systems.  
+
+- **Added `amd-smi ras --afid --cper-file <file_path>` to decode CPER records**  
+  - Python and C have added the `amdsmi_get_afids_from_cper()` to decode
 
 ### Changed
 
-- N/A
+- **Padded `asic_serial` in `amdsmi_get_asic_info` with 0s**.  
 
-### Removed
-
-- **Renamed `amd-smi --partition`'s field `COMPUTE_PARTITION` to `ACCELERATOR_PARTITION`**.  
-  We are changing the field named `COMPUTE_PARTITION` to `ACCELERATOR_PARTITION`. Refer to example outputs provided below.  
-
-  API and associated struct naming will remain the same:
-  - `amdsmi_status_t amdsmi_get_gpu_compute_partition(amdsmi_processor_handle processor_handle, char *compute_partition, uint32_t len)`
-  - `amdsmi_status_t amdsmi_set_gpu_compute_partition(amdsmi_processor_handle processor_handle, amdsmi_compute_partition_type_t compute_partition)`  
-  - `amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile_config(amdsmi_processor_handle processor_handle, amdsmi_accelerator_partition_profile_config_t *profile_config)`  
-  - `amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(amdsmi_processor_handle processor_handle, amdsmi_accelerator_partition_profile_t *profile, uint32_t *partition_id)`  
-  - `amdsmi_status_t amdsmi_set_gpu_accelerator_partition_profile(amdsmi_processor_handle processor_handle, uint32_t profile_index)`
-
-  Reason(s) for this change:
-  - Align with host AMD SMI's `static --partition` field naming
-  - Align with naming seen in `amd-smi partition`  
+- **Renamed fields `COMPUTE_PARTITION` to `ACCELERATOR_PARTITION` in CLI call `amd-smi --partition`**.  
+  - We are changing the field named `COMPUTE_PARTITION` to `ACCELERATOR_PARTITION`.  
+  - API and associated struct naming will remain the same  
+  - Reason(s) for this change:  
+    - Align with host AMD SMI's `static --partition` field naming  
+    - Align with naming seen in `amd-smi partition`  
 
   *Previous Output:*  
 
@@ -350,6 +336,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
             MEMORY_PARTITION: NPS1
             PARTITION_ID: 0
   ```
+
+### Removed
+
+- N/A
 
 ### Optimized
 

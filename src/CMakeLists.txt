@@ -41,8 +41,8 @@ set(INC_LIST
     "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi/rocm_smi_utils.h")
 
 set(ACA_SRC_DIR "aca-decode")
-set(SRC_LIST ${SRC_LIST} ${ACA_SRC_DIR}/aca_api.c ${ACA_SRC_DIR}/aca_decode.c ${ACA_SRC_DIR}/aca_fields.c ${ACA_SRC_DIR}/aca_tables.c
-             ${ACA_SRC_DIR}/error_map.c)
+set(SRC_LIST ${SRC_LIST} ${ACA_SRC_DIR}/aca_api.c ${ACA_SRC_DIR}/aca_decode.c ${ACA_SRC_DIR}/aca_fields.c
+             ${ACA_SRC_DIR}/aca_tables.c ${ACA_SRC_DIR}/error_map.c)
 set(ACA_INC_DIR "${PROJECT_SOURCE_DIR}/include/aca-decode")
 set(INC_LIST ${INC_LIST} ${ACA_INC_DIR}/aca_decode.h ${ACA_INC_DIR}/aca_fields.h ${ACA_INC_DIR}/aca_tables.h
              ${ACA_INC_DIR}/error_map.h)
@@ -76,8 +76,6 @@ message("SOVERSION: ${SO_VERSION_STRING}")
 # Create a configure file to get version info from within library
 configure_file("amd_smiConfig.in" "${PROJECT_SOURCE_DIR}/include/amd_smi/amd_smiConfig.h")
 
-add_executable(amd_smi_ex "../example/amd_smi_drm_example.cc")
-target_link_libraries(amd_smi_ex ${AMD_SMI})
 add_library(${AMD_SMI} ${SRC_LIST} ${INC_LIST})
 target_link_libraries(${AMD_SMI} pthread rt dl ${DRM_LIBRARIES} ${AMDGPU_DRM_LIBRARIES})
 target_include_directories(${AMD_SMI} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/rocm_smi/include

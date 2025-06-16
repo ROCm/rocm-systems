@@ -34,7 +34,7 @@ It mostly follows Google C++ formatting with 100 character line limit.
 ## Pull Request Guidelines ##
 
 When you create a pull request, you should target the default branch. Our
-current default branch is the **develop** branch, which serves as our
+current default branch is the **amd-staging** branch, which serves as our
 integration branch.
 
 ### Deliverables ###
@@ -44,7 +44,7 @@ Please include the licensing header
 
     /*
      * =============================================================================
-     * Copyright (c) 2019-2024 Advanced Micro Devices, Inc.
+     * Copyright (c) 2019-2025 Advanced Micro Devices, Inc.
      *
      * Permission is hereby granted, free of charge, to any person obtaining a copy
      * of this software and associated documentation files (the "Software"), to deal

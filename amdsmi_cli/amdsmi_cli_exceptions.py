@@ -98,13 +98,16 @@ class AmdSmiException(Exception):
 
 
 class AmdSmiInvalidCommandException(AmdSmiException):
-    def __init__(self, command, outputformat: str):
+    def __init__(self, command, outputformat: str, message=None):
         super().__init__()
         self.value = -1
         self.command = command
         self.output_format = outputformat
 
         common_message = f"Command '{self.command}' is invalid. Run '--help' for more info."
+
+        if message:
+            common_message = message
 
         self.json_message["error"] = common_message
         self.json_message["code"] = self.value
@@ -152,13 +155,16 @@ class AmdSmiDeviceNotFoundException(AmdSmiException):
 
 
 class AmdSmiInvalidFilePathException(AmdSmiException):
-    def __init__(self, command, outputformat: str):
+    def __init__(self, command, outputformat: str, message=None):
         super().__init__()
         self.value = -4
         self.command = command
         self.output_format = outputformat
 
         common_message = f"Path '{self.command}' cannot be found."
+
+        if message:
+            common_message = message
 
         self.json_message["error"] = common_message
         self.json_message["code"] = self.value

@@ -29,7 +29,7 @@ import threading
 import time
 
 from _version import __version__
-from amdsmi_cli_exceptions import AmdSmiInvalidParameterException, AmdSmiRequiredCommandException
+from amdsmi_cli_exceptions import AmdSmiInvalidParameterException, AmdSmiRequiredCommandException, AmdSmiInvalidCommandException
 from amdsmi_helpers import AMDSMIHelpers
 from amdsmi_logger import AMDSMILogger
 from amdsmi import amdsmi_exception, amdsmi_interface
@@ -828,22 +828,32 @@ class AMDSMICommands():
 
                 try:
                     cpu_set = amdsmi_interface.amdsmi_get_cpu_affinity_with_scope(args.gpu, amdsmi_interface.AmdSmiAffinityScope.NUMA_SCOPE)
+                    cpu_set = [f"{cpus:016X}" for cpus in cpu_set]
+                    cpu_set = {f'cpu_list_{i}': f"{cpus}" for i, cpus in enumerate(cpu_set)}
+                    bitmask_ranges = self.helpers.get_bitmask_ranges(cpu_set)
+                    cpu_affinity = {}
+
+                    for key in cpu_set:
+                        cpu_affinity[key] = {
+                            "bitmask": cpu_set[key],
+                            "cpu_cores_affinity" : bitmask_ranges[key]
+                        }
+
                 except amdsmi_exception.AmdSmiLibraryException as e:
-                    cpu_set = []
-                    cpu_set.append(-1)
+                    cpu_affinity = "N/A"
                     logging.debug("Failed to get cpu affinity for gpu %s | %s", gpu_id, e.get_error_info())
 
                 try:
                     cpusockets = amdsmi_interface.amdsmi_get_cpu_affinity_with_scope(args.gpu, amdsmi_interface.AmdSmiAffinityScope.SOCKET_SCOPE)
+                    cpusockets = {f'socket_{i}': socket for i, socket in enumerate(set(cpusockets))}
                 except amdsmi_exception.AmdSmiLibraryException as e:
-                    cpusockets = []
-                    cpusockets.append(-1)
+                    cpusockets = {}
                     logging.debug("Failed to get socket affinity for gpu %s | %s", gpu_id, e.get_error_info())
 
-                static_dict['numa'] = {'node' : numa_node_number,
+                static_dict['numa'] = { 'node' : numa_node_number,
                                         'affinity' : numa_affinity,
-                                        'CPU affinity' : [hex(cpus) for cpus in cpu_set],
-                                        'Socket affinity' : [socket for socket in set(cpusockets)]}
+                                        'cpu_affinity' : cpu_affinity,
+                                        'socket_affinity' : cpusockets if cpusockets else "N/A"}
         if args.vram:
             vram_info_dict = {"type" : "N/A",
                               "vendor" : "N/A",
@@ -5773,7 +5783,7 @@ class AMDSMICommands():
                 if 'cu_occupancy' in process_info:
                     try:
                         cu_occupancy = process_info['cu_occupancy']
-                        if num_compute_units != "N/A" and num_compute_units > 0:
+                        if num_compute_units != "N/A" and num_compute_units > 0 and cu_occupancy != "N/A":
                             cu_percentage = round((cu_occupancy / num_compute_units) * 100, 1)
                             process_info['cu_occupancy'] = self.helpers.unit_format(self.logger,
                                                                                     cu_percentage,
@@ -6496,10 +6506,17 @@ class AMDSMICommands():
         if args.gpu == None:
             args.gpu = self.device_handles
 
-        if args.afid and args.cper_file:
-            afids = self.helpers.pvtDumpAfids(args.cper_file)
-            print(' '.join(map(str, afids)))
-            return
+        if args.afid:
+            if args.cper_file:
+                afids = self.helpers.pvtDumpAfids(args.cper_file)
+                print(' '.join(map(str, afids)))
+                return
+            else:
+                command = " ".join(sys.argv[1:])
+                message = f"Command '{command}' requires '--cper-file'. Run '--help' for more info."
+                raise AmdSmiInvalidCommandException(command,
+                                                    self.logger.format,
+                                                    message)
 
         if not self.group_check_printed:
             self.helpers.check_required_groups()
@@ -6607,7 +6624,7 @@ class AMDSMICommands():
                 hip_id = "N/A"
             gpu_info_dict.update({"hip_id": hip_id})
 
-            # mem utilization, GPU utilization, power usage, and temperature
+            # mem utilization, GPU utilization, power usage, and temperature from gpu_metrics
             if gpu_metrics != "N/A":
                 mem_util = gpu_metrics['average_umc_activity']
                 mem_util = round(mem_util)
@@ -6676,10 +6693,11 @@ class AMDSMICommands():
             try:
                 raw_process_list = amdsmi_interface.amdsmi_get_gpu_process_list(processor)
                 for proc in raw_process_list:
-                    proc_info_dict = {"gpu": "N/A", "pid": "N/A", "name": "N/A", "vram": "N/A", "mem_usage": "N/A", "cu_occupancy": "N/A"}
+                    proc_info_dict = {"gpu": "N/A", "pid": "N/A", "name": "N/A","gtt": "N/A", "vram": "N/A", "mem_usage": "N/A", "cu_occupancy": "N/A"}
                     proc_info_dict['gpu'] = gpu_id
                     proc_info_dict['pid'] = proc['pid']
                     proc_info_dict['name'] = proc['name']
+                    proc_info_dict['gtt'] = self.helpers.convert_bytes_to_readable(proc['memory_usage']['gtt_mem'])
                     proc_info_dict['vram'] = self.helpers.convert_bytes_to_readable(proc['memory_usage']['vram_mem'])
                     proc_info_dict['mem_usage'] = self.helpers.convert_bytes_to_readable(proc['mem'])
                     proc_info_dict['cu_occupancy'] = str(proc['cu_occupancy'])

@@ -46,9 +46,18 @@ jobs:
             mkdir -p $BUILD_FOLDER
             cd $BUILD_FOLDER
 
-            if cmake $GITHUB_WORKSPACE -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON && \
-               make -j $(nproc) && \
-               make package; then
+            # Capture build output to parse warnings
+            if cmake $GITHUB_WORKSPACE -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON 2>&1 | tee cmake.log && \
+               make -j $(nproc) 2>&1 | tee make.log && \
+               make package 2>&1 | tee package.log; then
+
+              # Parse and report warnings as GitHub annotations
+              echo "::group::Build Warnings"
+              grep -i "warning" cmake.log make.log package.log | while read -r line; do
+                echo "::warning::$line"
+              done
+              echo "::endgroup::"
+
               echo "Build successful on attempt $i"
               break
             else
@@ -388,12 +397,37 @@ jobs:
           set -e
           echo 'Building on ${{ matrix.os }}'
           BUILD_FOLDER=$GITHUB_WORKSPACE/build
-          rm -rf $BUILD_FOLDER
-          mkdir -p $BUILD_FOLDER
-          cd $BUILD_FOLDER
-          cmake $GITHUB_WORKSPACE -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON
-          make -j $(nproc)
-          make package
+          RETRIES=3
+
+          for i in $(seq 1 $RETRIES); do
+            echo "Build attempt $i for ${{ matrix.os }}..."
+            rm -rf $BUILD_FOLDER
+            mkdir -p $BUILD_FOLDER
+            cd $BUILD_FOLDER
+
+            # Capture build output to parse warnings
+            if cmake $GITHUB_WORKSPACE -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON 2>&1 | tee cmake.log && \
+               make -j $(nproc) 2>&1 | tee make.log && \
+               make package 2>&1 | tee package.log; then
+
+              # Parse and report warnings as GitHub annotations
+              echo "::group::Build Warnings"
+              grep -i "warning" cmake.log make.log package.log | while read -r line; do
+                echo "::warning::$line"
+              done
+              echo "::endgroup::"
+
+              echo "Build successful on attempt $i"
+              break
+            else
+              echo "Build failed on attempt $i"
+              if [ $i -eq $RETRIES ]; then
+                echo "All $RETRIES build attempts failed. Exiting."
+                exit 1
+              fi
+              sleep $((2 ** (i - 1)))
+            fi
+          done
           echo "Build completed on ${{ matrix.os }}"
 
       - name: Install AMDSMI(RHEL10 & AlmaLinux8)
@@ -657,7 +691,6 @@ jobs:
         with:
           name: amdsmi-command-tests-${{ matrix.os }}
           path: /tmp/test-results-${{ matrix.os }}
-          retention-days: 30
 
       - name: Run AMDSMI, Python, and Example Tests
         shell: bash
