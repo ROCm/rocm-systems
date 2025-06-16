@@ -1906,7 +1906,7 @@ amdsmi_set_gpu_memory_partition(amdsmi_processor_handle processor_handle,
                                   amdsmi_memory_partition_type_t memory_partition);
 ```
 
-- **amd-smi set --compute-partition "SPX/DPX/CPX..." will no longer be supported for ROCm 6.4**.  
+- **`amd-smi set --compute-partition` "SPX/DPX/CPX..." will modified to accept profile IDs in ROCm 6.4**. 
   - This is due to aligning with Host setups and providing more robust partition information through the APIs outlined above. Furthermore, new APIs which will be available on both BM/Host can set by profile ID. (functionality coming soon!)
 
 - **Added preliminary `amd-smi partition` command**.  
