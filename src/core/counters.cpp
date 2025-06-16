@@ -24,6 +24,7 @@
 #include "core/include/aql_profile_v2.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <future>
 #include <map>
@@ -129,6 +130,7 @@ hsa_status_t _internal_aqlprofile_pmc_iterate_data(aqlprofile_handle_t handle,
                                                    aqlprofile_pmc_data_callback_t callback,
                                                    void* userdata) {
   auto counter_memorymgr = MemoryManager::GetManager(handle.handle);
+  auto agent = counter_memorymgr->AgentHandle();
   CounterMemoryManager* memorymgr = dynamic_cast<CounterMemoryManager*>(counter_memorymgr.get());
   if (!memorymgr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
@@ -159,7 +161,6 @@ hsa_status_t _internal_aqlprofile_pmc_iterate_data(aqlprofile_handle_t handle,
       if (status != HSA_STATUS_SUCCESS) return status;
     }
 
-  size_t xcc_sample_count = 0;
   for (uint32_t xcc_index = 0; xcc_index < xcc_num; xcc_index++)
     for (auto& event : events) {
       if (samples >= buffer_end_location) return HSA_STATUS_ERROR;
@@ -168,12 +169,14 @@ hsa_status_t _internal_aqlprofile_pmc_iterate_data(aqlprofile_handle_t handle,
 
       // non-MI300A-AID counter event.
       uint32_t block_samples_count = pm4_factory->GetNumEvents(event.block_name);
+      const EventAttribDimension& attrib = EventAttribDimension::get(agent, event.block_name);
+      if (!attrib.get_num()) return HSA_STATUS_ERROR;
+      size_t xcc_sample_count = attrib.get_num_instances() * block_samples_count;
       for (uint32_t blk = 0; blk < block_samples_count; ++blk) {
 #if DEBUG_TRACE == 2
         printf("DATA: xcc(%u) blk(%u) bloc id(%u) index(%u) counter id(%u) res(%lu)\n", xcc_index,
                blk, event.block_name, event.block_index, event.event_id, *samples);
 #endif
-        xcc_sample_count += xcc_index == 0;
         size_t xcc_sample_id = xcc_sample_count * xcc_index +
                                static_cast<size_t>(event.block_index) * block_samples_count + blk;
 
