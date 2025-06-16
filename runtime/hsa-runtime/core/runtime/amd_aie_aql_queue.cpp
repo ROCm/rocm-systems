@@ -102,16 +102,26 @@ AieAqlQueue::AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_
   signal_.queue_ptr = &amd_queue_;
   active_ = true;
 
-  auto &drv = static_cast<XdnaDriver &>(agent_.driver());
-  drv.CreateQueue(*this);
+  HsaQueueResource queue_resource = {};
+  hsa_status_t status =
+      agent_.driver().CreateQueue(node_id, HSA_QUEUE_COMPUTE_AQL, 0, HSA_QUEUE_PRIORITY_NORMAL, 0,
+                                  nullptr, queue_size_bytes_, nullptr, queue_resource);
+  if (status != HSA_STATUS_SUCCESS) {
+    throw AMD::hsa_exception(status, "Failed to create a hardware context for an AIE queue.");
+  }
+
+  queue_id_ = queue_resource.QueueId;
+  amd_queue_.hsa_queue.id = GetQueueId();
 }
 
 AieAqlQueue::~AieAqlQueue() {
   AieAqlQueue::Inactivate();
-
-  if (ring_buf_) agent_.system_deallocator()(ring_buf_);
-
-  if (shared_queue_) core::Runtime::runtime_singleton_->system_deallocator()(shared_queue_);
+  if (ring_buf_) {
+    agent_.system_deallocator()(ring_buf_);
+  }
+  if (shared_queue_) {
+    core::Runtime::runtime_singleton_->system_deallocator()(shared_queue_);
+  }
 }
 
 hsa_status_t AieAqlQueue::Inactivate() {
@@ -119,9 +129,7 @@ hsa_status_t AieAqlQueue::Inactivate() {
   hsa_status_t status(HSA_STATUS_SUCCESS);
 
   if (active) {
-    auto &drv = static_cast<XdnaDriver &>(agent_.driver());
-    status = drv.DestroyQueue(*this);
-    hw_ctx_handle_ = std::numeric_limits<uint32_t>::max();
+    agent_.driver().DestroyQueue(queue_id_);
   }
 
   return status;
@@ -237,7 +245,8 @@ void AieAqlQueue::SubmitPackets() {
 
         // Call into the driver to submit from cur_id to write_dispatch_id.
         // Submitting the command chain might create a new hardware context.
-        hsa_status_t status = driver.SubmitCmdChain(pkt, num_cont_start_cu_pkts, *this);
+        hsa_status_t status = driver.SubmitCmdChain(pkt, num_cont_start_cu_pkts, queue_id_,
+                                                    agent_.properties().NumNeuralCores);
         if (status != HSA_STATUS_SUCCESS) {
           assert(false && "Could not submit packets");
         }

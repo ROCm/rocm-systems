@@ -55,10 +55,10 @@
 namespace rocr {
 namespace AMD {
 
-AieAgent::AieAgent(uint32_t node)
-    : core::Agent(core::Runtime::runtime_singleton_->AgentDriver(
-                      core::DriverType::XDNA),
-                  node, core::Agent::DeviceType::kAmdAieDevice) {
+AieAgent::AieAgent(uint32_t node, const HsaNodeProperties& node_props)
+    : core::Agent(core::Runtime::runtime_singleton_->AgentDriver(core::DriverType::XDNA), node,
+                  core::Agent::DeviceType::kAmdAieDevice),
+      node_props_(node_props) {
   InitRegionList();
   InitAllocators();
   GetAgentProperties();

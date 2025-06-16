@@ -95,8 +95,6 @@ class Queue;
 
 namespace AMD {
 
-class AieAqlQueue;
-
 // @brief: Used to transform an address into a device address
 constexpr uint32_t DEV_ADDR_BASE = 0x04000000;
 constexpr uint32_t DEV_ADDR_OFFSET_MASK = 0x02FFFFFF;
@@ -209,8 +207,17 @@ public:
                               void **mem, size_t size,
                               uint32_t node_id) override;
   hsa_status_t FreeMemory(void *mem, size_t size) override;
-  hsa_status_t CreateQueue(core::Queue &queue) const override;
-  hsa_status_t DestroyQueue(core::Queue &queue) const override;
+  hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
+                           HSA_QUEUE_PRIORITY priority, uint32_t sdma_engine_id, void* queue_addr,
+                           uint64_t queue_size_bytes, HsaEvent* event,
+                           HsaQueueResource& queue_resource) const override;
+  hsa_status_t UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_pct, HSA_QUEUE_PRIORITY priority,
+                           void* queue_addr, uint64_t queue_size, HsaEvent* event) const override;
+  hsa_status_t DestroyQueue(HSA_QUEUEID queue_id) const override;
+  hsa_status_t SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t cu_mask_count,
+                              uint32_t* queue_cu_mask) const override;
+  hsa_status_t AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
+                             uint32_t* first_gws) const override;
   hsa_status_t ExportDMABuf(void *mem, size_t size, int *dmabuf_fd,
                             size_t *offset) override;
   hsa_status_t ImportDMABuf(int dmabuf_fd, core::Agent &agent,
@@ -223,7 +230,7 @@ public:
 
   /// @brief Submits @p num_pkts packets in a command chain.
   hsa_status_t SubmitCmdChain(hsa_amd_aie_ert_packet_t* first_pkt, uint32_t num_pkts,
-                              AieAqlQueue& aie_queue);
+                              HSA_QUEUEID& queue_id, uint32_t num_core_tiles);
 
   hsa_status_t SPMAcquire(uint32_t preferred_node_id) const override;
   hsa_status_t SPMRelease(uint32_t preferred_node_id) const override;
@@ -243,7 +250,8 @@ public:
   BOHandle FindBOHandle(void* mem) const;
 
   /// @brief Creates a new hardware context with the given PDI BO handles.
-  hsa_status_t ConfigHwCtx(const PDICache& pdi_bo_handles, AieAqlQueue& aie_queue);
+  hsa_status_t ConfigHwCtx(const PDICache& pdi_bo_handles, HSA_QUEUEID& queue_id,
+                           uint32_t num_core_tiles);
 
   hsa_status_t QueryDriverVersion();
 
@@ -274,7 +282,7 @@ public:
   /// @param bo_handles handles associated with the command
   /// @param aie_queue queue to submit to
   hsa_status_t ExecCmdAndWait(const BOHandle& cmd_chain_bo_handle,
-                              const std::vector<uint32_t>& bo_handles, AieAqlQueue& aie_queue);
+                              const std::vector<uint32_t>& bo_handles, HSA_QUEUEID queue_id);
 
   /// TODO: Remove this in the future and rely on the core Runtime
   /// object to track handle allocations. Using the VMEM API for mapping XDNA

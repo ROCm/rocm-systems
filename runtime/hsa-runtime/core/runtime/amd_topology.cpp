@@ -173,7 +173,7 @@ GpuAgent* DiscoverGpu(HSAuint32 node_id, HsaNodeProperties& node_prop, bool xnac
 }
 
 void DiscoverAie(uint32_t node_id, HsaNodeProperties& node_prop) {
-  AieAgent* aie = new AieAgent(node_id);
+  AieAgent* aie = new AieAgent(node_id, node_prop);
   core::Runtime::runtime_singleton_->RegisterAgent(aie, true);
 }
 

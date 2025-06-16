@@ -103,14 +103,6 @@ class AieAqlQueue : public core::Queue,
   /// @brief Returns the agent associated with this queue.
   AieAgent& GetAgent() { return agent_; }
 
-  /// @brief Sets the hardware context.
-  void SetHwCtxHandle(uint32_t hw_ctx_handle) {
-    hw_ctx_handle_ = hw_ctx_handle;
-  }
-
-  /// @brief Returns the hardware context.
-  uint32_t GetHwCtxHandle() const { return hw_ctx_handle_; }
-
   // GPU-specific queue functions are unsupported.
 
   hsa_status_t GetCUMasking(uint32_t num_cu_mask_count,
@@ -140,17 +132,6 @@ class AieAqlQueue : public core::Queue,
 
   /// @brief Called when the doorbell is rung to submit all queued packets.
   void SubmitPackets();
-
-  /// @brief Handle for an application context on the AIE device.
-  ///
-  /// Each user queue will have an associated context. This handle is assigned
-  /// by the driver on context creation.
-  ///
-  /// TODO: For now we support a single context that allocates all core tiles in
-  /// the array. In the future we can make the number of tiles configurable so
-  /// that multiple workloads with different core tile configurations can
-  /// execute on the AIE agent at the same time.
-  uint32_t hw_ctx_handle_ = std::numeric_limits<uint32_t>::max();
 
   /// @brief Indicates if queue is active.
   std::atomic<bool> active_;

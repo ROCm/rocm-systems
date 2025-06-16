@@ -50,7 +50,6 @@
 #include <memory>
 #include <string>
 
-#include "core/inc/amd_aie_aql_queue.h"
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/runtime.h"
 #include "core/util/memory.h"
@@ -173,10 +172,22 @@ hsa_status_t XdnaDriver::GetSystemProperties(HsaSystemProperties& sys_props) con
 }
 
 hsa_status_t XdnaDriver::GetNodeProperties(HsaNodeProperties& node_props, uint32_t node_id) const {
+  amdxdna_drm_query_aie_metadata aie_metadata = {};
+  amdxdna_drm_get_info get_info_args = {};
+  get_info_args.param = DRM_AMDXDNA_QUERY_AIE_METADATA;
+  get_info_args.buffer_size = sizeof(aie_metadata);
+  get_info_args.buffer = reinterpret_cast<uintptr_t>(&aie_metadata);
+
+  if (ioctl(fd_, DRM_IOCTL_AMDXDNA_GET_INFO, &get_info_args) < 0) {
+    return HSA_STATUS_ERROR;
+  }
+
+  // Right now can only target N-1 columns as that is the number of shim DMAs
+  // in NPU1 devices.
+  node_props.NumNeuralCores = (aie_metadata.cols - 1) * aie_metadata.rows;
   /// @todo XDNA driver currently only supports single-node AIE
   /// devices over PCIe. Update this once we can get topology
   /// information dynamically from the sysfs.
-  node_props.NumNeuralCores = 1;
   node_props.NumIOLinks = 0;
   return HSA_STATUS_SUCCESS;
 }
@@ -303,33 +314,47 @@ hsa_status_t XdnaDriver::FreeMemory(void *mem, size_t size) {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t XdnaDriver::CreateQueue(core::Queue &queue) const {
-  if (!AieAqlQueue::IsType(&queue)) {
+hsa_status_t XdnaDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
+                                     HSA_QUEUE_PRIORITY priority, uint32_t sdma_engine_id,
+                                     void* queue_addr, uint64_t queue_size_bytes, HsaEvent* event,
+                                     HsaQueueResource& queue_resource) const {
+  queue_resource.QueueId = AMDXDNA_INVALID_CTX_HANDLE;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t XdnaDriver::DestroyQueue(HSA_QUEUEID queue_id) const {
+  if (queue_id == AMDXDNA_INVALID_CTX_HANDLE) {
     return HSA_STATUS_ERROR_INVALID_QUEUE;
   }
 
-  // Set the hw ctx handle of the queue to invalid to avoid incorrect destruction.
-  auto& aie_queue = static_cast<AieAqlQueue&>(queue);
-  aie_queue.SetHwCtxHandle(AMDXDNA_INVALID_BO_HANDLE);
+  auto hw_ctx_handle = static_cast<uint32_t>(queue_id);
+  amdxdna_drm_destroy_hwctx destroy_hwctx_args = {};
+  destroy_hwctx_args.handle = hw_ctx_handle;
+
+  if (ioctl(fd_, DRM_IOCTL_AMDXDNA_DESTROY_HWCTX, &destroy_hwctx_args) < 0) {
+    return HSA_STATUS_ERROR;
+  }
 
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t XdnaDriver::DestroyQueue(core::Queue &queue) const {
-  if (!AieAqlQueue::IsType(&queue)) {
-    return HSA_STATUS_ERROR_INVALID_QUEUE;
-  }
+hsa_status_t XdnaDriver::UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_pct,
+                                     HSA_QUEUE_PRIORITY priority, void* queue_addr,
+                                     uint64_t queue_size, HsaEvent* event) const {
+  // AIE doesn't support queue updates.
+  return HSA_STATUS_ERROR_INVALID_QUEUE;
+}
 
-  auto& aie_queue = static_cast<AieAqlQueue&>(queue);
-  if (aie_queue.GetHwCtxHandle() != AMDXDNA_INVALID_BO_HANDLE) {
-    amdxdna_drm_destroy_hwctx destroy_hwctx_args = {};
-    destroy_hwctx_args.handle = aie_queue.GetHwCtxHandle();
-    if (ioctl(fd_, DRM_IOCTL_AMDXDNA_DESTROY_HWCTX, &destroy_hwctx_args) < 0) {
-      return HSA_STATUS_ERROR;
-    }
-  }
+hsa_status_t XdnaDriver::SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t cu_mask_count,
+                                        uint32_t* queue_cu_mask) const {
+  // AIE doesn't support queue CU masks.
+  return HSA_STATUS_ERROR_INVALID_QUEUE;
+}
 
-  return HSA_STATUS_SUCCESS;
+hsa_status_t XdnaDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
+                                       uint32_t* first_gws) const {
+  // AIE doesn't support GWS.
+  return HSA_STATUS_ERROR_INVALID_QUEUE;
 }
 
 hsa_status_t XdnaDriver::ExportDMABuf(void *mem, size_t size, int *dmabuf_fd,
@@ -470,10 +495,15 @@ hsa_status_t XdnaDriver::FreeDeviceHeap() {
 
 hsa_status_t XdnaDriver::ExecCmdAndWait(const BOHandle& cmd_chain_bo_handle,
                                         const std::vector<uint32_t>& bo_handles,
-                                        AieAqlQueue& aie_queue) {
+                                        HSA_QUEUEID queue_id) {
+  if (queue_id == AMDXDNA_INVALID_CTX_HANDLE) {
+    return HSA_STATUS_ERROR_INVALID_QUEUE;
+  }
+
+  auto hw_ctx_handle = static_cast<uint32_t>(queue_id);
   // Submit command chain.
   amdxdna_drm_exec_cmd exec_cmd = {};
-  exec_cmd.hwctx = aie_queue.GetHwCtxHandle();
+  exec_cmd.hwctx = hw_ctx_handle;
   exec_cmd.type = AMDXDNA_CMD_SUBMIT_EXEC_BUF;
   exec_cmd.cmd_handles = cmd_chain_bo_handle.handle;
   exec_cmd.args = reinterpret_cast<uint64_t>(bo_handles.data());
@@ -484,7 +514,7 @@ hsa_status_t XdnaDriver::ExecCmdAndWait(const BOHandle& cmd_chain_bo_handle,
 
   // Waiting for command chain to finish.
   amdxdna_drm_wait_cmd wait_cmd = {};
-  wait_cmd.hwctx = aie_queue.GetHwCtxHandle();
+  wait_cmd.hwctx = hw_ctx_handle;
   wait_cmd.timeout = DEFAULT_TIMEOUT_VAL;
   wait_cmd.seq = exec_cmd.seq;
 
@@ -579,7 +609,7 @@ hsa_status_t XdnaDriver::CreateCmdBO(uint32_t size, BOHandle& cmd_bo_handle) {
 }
 
 hsa_status_t XdnaDriver::SubmitCmdChain(hsa_amd_aie_ert_packet_t* first_pkt, uint32_t num_pkts,
-                                        AieAqlQueue& aie_queue) {
+                                        HSA_QUEUEID& queue_id, uint32_t num_core_tiles) {
   // Stores instruction and operand BOs.
   std::vector<uint32_t> bo_handles;
 
@@ -593,8 +623,13 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_amd_aie_ert_packet_t* first_pkt, uin
     }
   });
 
+  if (queue_id == AMDXDNA_INVALID_CTX_HANDLE) {
+    return HSA_STATUS_ERROR_INVALID_QUEUE;
+  }
+
+  auto hw_ctx_handle = static_cast<uint32_t>(queue_id);
   // PDI cache. If the cache is updated, a new hardware context will be created for the queue.
-  auto pdi_cache_it = hw_ctx_pdi_cache_map.find(aie_queue.GetHwCtxHandle());
+  auto pdi_cache_it = hw_ctx_pdi_cache_map.find(hw_ctx_handle);
   auto pdi_cache = (pdi_cache_it != hw_ctx_pdi_cache_map.end()) ? pdi_cache_it->second : PDICache{};
   bool reconfigure_queue = false;
 
@@ -664,13 +699,13 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_amd_aie_ert_packet_t* first_pkt, uin
       hw_ctx_pdi_cache_map.erase(pdi_cache_it);
     }
 
-    hsa_status_t status = ConfigHwCtx(pdi_cache, aie_queue);
+    hsa_status_t status = ConfigHwCtx(pdi_cache, queue_id, num_core_tiles);
     if (status != HSA_STATUS_SUCCESS) {
       return status;
     }
 
     // Update cache mapping.
-    hw_ctx_pdi_cache_map.emplace(aie_queue.GetHwCtxHandle(), pdi_cache);
+    hw_ctx_pdi_cache_map.emplace(hw_ctx_handle, pdi_cache);
   }
 
   // Creating a packet that contains the command chain
@@ -707,7 +742,7 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_amd_aie_ert_packet_t* first_pkt, uin
   bo_handles.erase(std::unique(bo_handles.begin(), bo_handles.end()), bo_handles.end());
 
   // Executing all commands in the command chain
-  status = ExecCmdAndWait(cmd_chain_bo_handle, bo_handles, aie_queue);
+  status = ExecCmdAndWait(cmd_chain_bo_handle, bo_handles, queue_id);
   if (status != HSA_STATUS_SUCCESS) {
     return status;
   }
@@ -760,7 +795,7 @@ hsa_status_t XdnaDriver::SPMSetDestBuffer(uint32_t preferred_node_id, uint32_t s
 }
 
 hsa_status_t XdnaDriver::IsModelEnabled(bool* enable) const {
-  // AIE does not support streaming performance monitor.
+  // AIE does not support a driver model.
   *enable = false;
   return HSA_STATUS_SUCCESS;
 }
@@ -803,7 +838,8 @@ XdnaDriver::BOHandle XdnaDriver::FindBOHandle(void* mem) const {
   return it->second;
 }
 
-hsa_status_t XdnaDriver::ConfigHwCtx(const PDICache& pdi_bo_handles, AieAqlQueue& aie_queue) {
+hsa_status_t XdnaDriver::ConfigHwCtx(const PDICache& pdi_bo_handles, HSA_QUEUEID& queue_id,
+                                     uint32_t num_core_tiles) {
   const size_t config_cu_param_size =
       sizeof(amdxdna_hwctx_param_config_cu) + pdi_bo_handles.size() * sizeof(amdxdna_cu_config);
 
@@ -821,17 +857,20 @@ hsa_status_t XdnaDriver::ConfigHwCtx(const PDICache& pdi_bo_handles, AieAqlQueue
     xdna_config_cu_param->cu_configs[i].cu_func = default_cu_func;
   }
 
-  if (aie_queue.GetHwCtxHandle() != AMDXDNA_INVALID_BO_HANDLE) {
+  auto hw_ctx_handle = static_cast<uint32_t>(queue_id);
+
+  if (hw_ctx_handle != AMDXDNA_INVALID_CTX_HANDLE) {
     // Destroy the hardware context
     // Note: we can do this because we have forced synchronization between
     // command chains. If we move to a more asynchronous model, we will need to
     // figure out how hardware context destruction works while applications
     // are running
     amdxdna_drm_destroy_hwctx destroy_hwctx_args = {};
-    destroy_hwctx_args.handle = aie_queue.GetHwCtxHandle();
+    destroy_hwctx_args.handle = hw_ctx_handle;
     if (ioctl(fd_, DRM_IOCTL_AMDXDNA_DESTROY_HWCTX, &destroy_hwctx_args) < 0) {
       return HSA_STATUS_ERROR;
     }
+    queue_id = AMDXDNA_INVALID_CTX_HANDLE;
   }
 
   // Create the new hardware context
@@ -840,7 +879,7 @@ hsa_status_t XdnaDriver::ConfigHwCtx(const PDICache& pdi_bo_handles, AieAqlQueue
   amdxdna_drm_create_hwctx create_hwctx_args = {};
   create_hwctx_args.qos_p = reinterpret_cast<uintptr_t>(&qos_info);
   create_hwctx_args.max_opc = 0x800;
-  create_hwctx_args.num_tiles = aie_queue.GetAgent().GetNumCores();
+  create_hwctx_args.num_tiles = num_core_tiles;
 
   if (ioctl(fd_, DRM_IOCTL_AMDXDNA_CREATE_HWCTX, &create_hwctx_args) < 0) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -857,7 +896,7 @@ hsa_status_t XdnaDriver::ConfigHwCtx(const PDICache& pdi_bo_handles, AieAqlQueue
     return HSA_STATUS_ERROR;
   }
 
-  aie_queue.SetHwCtxHandle(create_hwctx_args.handle);
+  queue_id = create_hwctx_args.handle;
 
   return HSA_STATUS_SUCCESS;
 }

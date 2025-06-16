@@ -43,6 +43,7 @@
 #ifndef HSA_RUNTME_CORE_INC_DRIVER_H_
 #define HSA_RUNTME_CORE_INC_DRIVER_H_
 
+#include <cstdint>
 #include <limits>
 #include <string>
 
@@ -146,9 +147,53 @@ public:
 
   virtual hsa_status_t FreeMemory(void *mem, size_t size) = 0;
 
-  virtual hsa_status_t CreateQueue(Queue &queue) const = 0;
+  /// @brief Create an agent dispatch queue with user-mode access rights.
+  /// @param[in] node_id Node ID of the agent on which the queue is being created.
+  /// @param[in] type Queue's type.
+  /// @param[in] queue_pct Maximum percentage of a queue's occupancy allowed.
+  /// @param[in] priority Queue's priority for scheduling.
+  /// @param[in] sdma_engine_id ID of the SDMA engine on which the queue is being created. Only used
+  /// if @p type is one of the SDMA queue types.
+  /// @param[in] queue_addr Address of the queue's ring buffer.
+  /// @param[in] queue_size_bytes Size of the queue's ring buffer in bytes.
+  /// @param[in] event HsaEvent for event-driven callbacks.
+  /// @param[out] queue_resource Queue resource information populated by the driver.
+  virtual hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
+                                   HSA_QUEUE_PRIORITY priority, uint32_t sdma_engine_id,
+                                   void* queue_addr, uint64_t queue_size_bytes, HsaEvent* event,
+                                   HsaQueueResource& queue_resource) const = 0;
 
-  virtual hsa_status_t DestroyQueue(Queue &queue) const = 0;
+  /// @brief Destroy a queue.
+  /// @param queue_id Kernel-mode driver's assigned queue ID.
+  virtual hsa_status_t DestroyQueue(HSA_QUEUEID queue_id) const = 0;
+
+  /// @brief Update a queue's properties.
+  /// @param[in] queue_id Kernel-mode driver's assigned queue ID.
+  /// @param[in] queue_pct Maximum percentage of a queue's occupancy allowed.
+  /// @param[in] priority Queue's priority for scheduling.
+  /// @param[in] queue_addr Queue's ring buffer base address.
+  /// @param[in] queue_size_bytes Size of the queue's ring buffer in bytes.
+  /// @param[in] event HsaEvent for event-driven callbacks.
+  virtual hsa_status_t UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_pct,
+                                   HSA_QUEUE_PRIORITY priority, void* queue_addr,
+                                   uint64_t queue_size_bytes, HsaEvent* event) const = 0;
+
+  /// @brief Set the CU mask for a queue.
+  /// @details This sets the CU bitmask for a queue. The CU mask determines which CUs
+  /// a queue's dispatches can target. Currently this is only supported for GPU devices.
+  /// @param[in] queue_id Kernel-mode driver's assigned queue ID.
+  /// @param[in] cu_mask_count Number of CU bits in the mask.
+  /// @param[in] queue_cu_mask New CU mask for the queue.
+  virtual hsa_status_t SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t cu_mask_count,
+                                      uint32_t* queue_cu_mask) const = 0;
+
+  /// @brief Allocate global wave sync (GWS) resource for a queue. This is only supported for GPUs.
+  /// GWS can be used to synchronize wavefronts across the entire GPU device.
+  /// @param[in] queue_id Kernel-mode driver's assigned queue ID.
+  /// @param[in] num_gws Number of GWS slots.
+  /// @param[in] first_gws First GWS slot.
+  virtual hsa_status_t AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
+                                     uint32_t* first_gws) const = 0;
 
   /// @brief Imports memory using dma-buf.
   ///
