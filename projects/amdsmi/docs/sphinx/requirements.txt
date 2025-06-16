@@ -222,11 +222,11 @@ referencing==0.36.2
     # via
     #   jsonschema
     #   jsonschema-specifications
-requests==2.32.3
+requests==2.32.4
     # via
     #   pygithub
     #   sphinx
-rocm-docs-core[api-reference]==1.17.0
+rocm-docs-core[api-reference]==1.20.1
     # via -r requirements.in
 rpds-py==0.23.1
     # via

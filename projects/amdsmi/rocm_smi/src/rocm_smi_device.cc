@@ -161,7 +161,7 @@ static const char *kDevFwVersionTaXgmiFName = "fw_version/ta_xgmi_fw_version";
 static const char *kDevFwVersionUvdFName = "fw_version/uvd_fw_version";
 static const char *kDevFwVersionVceFName = "fw_version/vce_fw_version";
 static const char *kDevFwVersionVcnFName = "fw_version/vcn_fw_version";
-static const char *kDevFwVersionPldmFName = "fw_version/pldm_fw_version";
+static const char *kDevFwVersionPldmBundleFName = "fw_version/pldm_fw_version";
 
 static const char *kDevKFDNodePropCachesCntSName = "caches_count";
 static const char *kDevKFDNodePropIoLinksCntSName = "io_links_count";
@@ -312,7 +312,7 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevFwVersionUvd, kDevFwVersionUvdFName},
     {kDevFwVersionVce, kDevFwVersionVceFName},
     {kDevFwVersionVcn, kDevFwVersionVcnFName},
-    {kDevFwVersionPldm, kDevFwVersionPldmFName},
+    {kDevFwVersionPldmBundle, kDevFwVersionPldmBundleFName},
     {kDevSerialNumber, kDevSerialNumberFName},
     {kDevMemPageBad, kDevMemPageBadFName},
     {kDevNumaNode, kDevNumaNodeFName},
@@ -400,7 +400,7 @@ static const std::map<DevInfoTypes, uint8_t> kDevInfoVarTypeToRSMIVariant = {
     {kDevFwVersionUvd, RSMI_FW_BLOCK_UVD},
     {kDevFwVersionVce, RSMI_FW_BLOCK_VCE},
     {kDevFwVersionVcn, RSMI_FW_BLOCK_VCN},
-    {kDevFwVersionPldm, RSMI_FW_BLOCK_PLDM},
+    {kDevFwVersionPldmBundle, RSMI_FW_BLOCK_PLDM_BUNDLE},
 
     // rsmi_gpu_block_t
     {kDevErrCntUMC, RSMI_GPU_BLOCK_UMC},
@@ -486,7 +486,7 @@ Device::devInfoTypesStrings = {
   {kDevFwVersionUvd, "kDevFwVersionUvd"},
   {kDevFwVersionVce, "kDevFwVersionVce"},
   {kDevFwVersionVcn, "kDevFwVersionVcn"},
-  {kDevFwVersionPldm, "kDevFwVersionPldm"},
+  {kDevFwVersionPldmBundle, "kDevFwVersionPldmBundle"},
   {kDevSerialNumber, "kDevSerialNumber"},
   {kDevMemPageBad, "kDevMemPageBad"},
   {kDevNumaNode, "kDevNumaNode"},
@@ -656,7 +656,7 @@ static const std::map<const char *, dev_depends_t> kDevFuncDependsMap = {
                                         kDevFwVersionUvd,
                                         kDevFwVersionVce,
                                         kDevFwVersionVcn,
-                                        kDevFwVersionPldm,
+                                        kDevFwVersionPldmBundle,
                                       }
                                     }
   },
@@ -1262,7 +1262,7 @@ int Device::readDevInfo(DevInfoTypes type, uint64_t *val) {
     case kDevFwVersionUvd:
     case kDevFwVersionVce:
     case kDevFwVersionVcn:
-    case kDevFwVersionPldm:
+    case kDevFwVersionPldmBundle:
       ret = readDevInfoStr(type, &tempStr);
       RET_IF_NONZERO(ret);
       if (tempStr.empty()) {

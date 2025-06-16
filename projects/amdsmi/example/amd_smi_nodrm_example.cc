@@ -216,9 +216,9 @@ int main() {
                 fw_information.fw_info_list[amdsmi_fw_block_t::AMDSMI_FW_ID_PSP_SOSDRV]
                     .fw_version);
             printf(
-                "\tPLDM: %ld\n\n",
-                fw_information.fw_info_list[amdsmi_fw_block_t::AMDSMI_FW_ID_PLDM]
-                    .fw_version);                    
+                "\tPLDM BUNDLE: %ld\n\n",
+                fw_information.fw_info_list[amdsmi_fw_block_t::AMDSMI_FW_ID_PLDM_BUNDLE]
+                    .fw_version);
 
             // Get temperature measurements
             int64_t temp_measurements[AMDSMI_TEMPERATURE_TYPE__MAX + 1];
