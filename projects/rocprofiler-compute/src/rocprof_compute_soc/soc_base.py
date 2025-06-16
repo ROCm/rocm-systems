@@ -610,7 +610,7 @@ class OmniSoC_Base:
                 "No performance counters to collect, please check the provided profiling filters",
             )
         else:
-            console_log(f"Collecting following counters: {', '.join(counters)} ")
+            console_debug(f"Collecting following counters: {', '.join(counters)} ")
 
         output_files = []
 
