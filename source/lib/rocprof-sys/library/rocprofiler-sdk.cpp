@@ -556,6 +556,9 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION:
             case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
 #endif
+#if(ROCPROFILER_VERSION >= 700)
+            case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
+#endif
             {
                 ROCPROFSYS_CI_ABORT(true, "unhandled callback record kind: %i\n",
                                     record.kind);
@@ -652,6 +655,9 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             case ROCPROFILER_CALLBACK_TRACING_OMPT:
             case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION:
             case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
+#endif
+#if(ROCPROFILER_VERSION >= 700)
+            case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
 #endif
             {
                 ROCPROFSYS_CI_ABORT(true, "unhandled callback record kind: %i\n",
