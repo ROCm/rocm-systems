@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -w -g -DDEBUG_TRACE")
 
 # Set paths (adjust these as needed or pass as -DAQLPROFILE_ROOT=... etc.)
-set(AQLPROFILE_ROOT ${AQLPROFILE_SRC_ROOT})
+set(AQLPROFILE_ROOT ${PROJECT_SOURCE_DIR}/../..)
 set(ROCM_PATH /opt/rocm)
 
 include_directories(
@@ -36,7 +36,7 @@ set(IP_DISCOVERY_SRC_FILES
 
 add_executable(builder_dump_exe
     ${AQLPROFILE_ROOT}/src/util/hsa_rsrc_factory.cpp
-    builder_dump.cpp
+    generate_dump/builder_dump.cpp
     ${FACTORY_SRC_FILES}
     ${IP_DISCOVERY_SRC_FILES}
 )

@@ -288,8 +288,11 @@ int main(int argc, char *argv[]) {
         std::cout << std::string(100, '-') << "\n\n";
       }
     } else if (mode == "sqtt") {
+      std::cout << std::string(20, '-') << "SQTT DEBUG_TRACE"
+         << std::string(20, '-') << std::endl;
       generate_sqtt_dump(test_param_agent_info, output_dir_path +
       "/SQTT_dump.txt");
+      std::cout << std::string(100, '-') << "\n\n";
     } else {
       throw std::runtime_error("Incorrect mode specified: " + mode +
                               ". Supported modes are pmc/spm/sqtt");

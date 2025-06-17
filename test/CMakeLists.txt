@@ -80,10 +80,31 @@ install(FILES ${TEST_DIR}/run_install.sh RENAME run_tests.sh
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME} COMPONENT tests)
 
 #add_subdirectory(parser)
+add_subdirectory(pm4-packets-regression-tests)
 
+# legacy tests
 add_test(NAME legacy-tests COMMAND "${TEST_BINARY_DIR}/run.sh")
 
 if(AQLPROFILE_BUILD_TESTS)
     add_subdirectory(integration)
     enable_testing()
 endif()
+
+# new tests
+add_custom_command(
+    OUTPUT ${TEST_BINARY_DIR}/pm4-packets-regression-tests/copied.flag
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_SOURCE_DIR}/pm4-packets-regression-tests
+            ${TEST_BINARY_DIR}/pm4-packets-regression-tests
+    COMMAND ${CMAKE_COMMAND} -E touch ${TEST_BINARY_DIR}/pm4-packets-regression-tests/copied.flag
+    DEPENDS builder_dump_exe
+    COMMENT "Copying pm4-packets-regression-tests files to build directory"
+)
+
+add_custom_target(copy_regression_files ALL
+    DEPENDS ${TEST_BINARY_DIR}/pm4-packets-regression-tests/copied.flag
+)
+
+add_test(NAME regression-pmc-packets COMMAND "${TEST_BINARY_DIR}/pm4-packets-regression-tests/run_regression_test.sh" pmc)
+add_test(NAME regression-sqtt-packets COMMAND "${TEST_BINARY_DIR}/pm4-packets-regression-tests/run_regression_test.sh" sqtt)
+add_test(NAME regression-spm-packets COMMAND "${TEST_BINARY_DIR}/pm4-packets-regression-tests/run_regression_test.sh" spm)
