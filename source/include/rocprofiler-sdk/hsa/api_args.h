@@ -1434,6 +1434,16 @@ typedef union rocprofiler_hsa_api_args_t
         uint32_t*   recommended_ids_mask;
     } hsa_amd_memory_get_preferred_copy_engine;
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x07
+    struct
+    {
+        const void* ptr;
+        size_t      size;
+        int*        dmabuf;
+        uint64_t*   offset;
+        uint64_t    flags;
+    } hsa_amd_portable_export_dmabuf_v2;
+#    endif
 #endif
 } rocprofiler_hsa_api_args_t;
 
