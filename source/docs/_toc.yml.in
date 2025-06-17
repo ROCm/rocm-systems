@@ -14,6 +14,7 @@ subtrees:
     - file: how-to/samples
       title: Samples
     - file: how-to/using-rocprofv3
+    - file: how-to/using-rocpd-output-format
     - file: how-to/using-rocprofv3-avail
     - file: how-to/using-rocprofiler-sdk-roctx
     - file: how-to/using-rocprofv3-with-mpi

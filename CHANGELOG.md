@@ -189,7 +189,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
   - Requires [ROCprof Trace Decoder plugin](https://github.com/rocm/rocprof-trace-decoder)
 - Added thread trace option to the rocprofv3 tool under the --att parameters
   - See [using thread trace with rocprofv3](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/amd-mainline/how-to/using-thread-trace.html)
-  - Requires the ROCprof Trace Decoder plugin installed (see above)
+  - Requires the ROCprof Trace Decoder plugin installed (see above).
+- Added `rocpd` output format documentation
 
 ### Changed
 
