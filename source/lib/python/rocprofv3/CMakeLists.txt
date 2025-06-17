@@ -20,18 +20,12 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-set(PACKAGE_OUTPUT_DIR
-    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprofv3_avail_module)
+set(ROCPROFV3_PYTHON_VERSION_CANDIDATES
+    "3.12;3.11;3.10;3.9;3.8;3.7;3.6"
+    CACHE STRING "Python versions to search for, newest first")
 
-set(ROCPROFV3_AVAIL_SOURCES __init__.py avail.py)
-
-foreach(_FILE ${ROCPROFV3_AVAIL_SOURCES})
-    configure_file(${CMAKE_CURRENT_LIST_DIR}/${_FILE} ${PACKAGE_OUTPUT_DIR}/${_FILE}
-                   COPYONLY)
-    install(
-        FILES ${PACKAGE_OUTPUT_DIR}/${_FILE}
-        DESTINATION ${CMAKE_INSTALL_BINDIR}/rocprofv3_avail_module
-        PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
-                    WORLD_READ WORLD_EXECUTE
-        COMPONENT tools)
+foreach(_PYTHON_VERSION IN LISTS ROCPROFV3_PYTHON_VERSION_CANDIDATES)
+    rocprofiler_rocprofv3_python(${_PYTHON_VERSION})
 endforeach()
+
+rocprofiler_reset_python3_cache()

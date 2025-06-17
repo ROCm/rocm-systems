@@ -22,16 +22,17 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import pandas as pd
 import sys
 import os
 import pytest
-from rocprofv3_avail_module import avail
 import ctypes
 
 
 def test_validate_metrics(rocm_path):
     set_library(rocm_path)
+
+    from rocprofv3 import avail
+
     lib = avail.get_library()
 
     agent_counters_dict = avail.get_counters()
@@ -54,6 +55,9 @@ def test_validate_metrics(rocm_path):
 
 def test_validate_list_pc_sample_config(rocm_path):
     set_library(rocm_path)
+
+    from rocprofv3 import avail
+
     lib = avail.get_library()
 
     pc_sample_configs_dict = avail.get_pc_sample_configs()
@@ -72,6 +76,8 @@ def test_validate_list_pc_sample_config(rocm_path):
 
 def test_counter_set(capsys, rocm_path):
     set_library(rocm_path)
+
+    from rocprofv3 import avail
 
     def get_counter_names(counter_ids):
 
@@ -109,6 +115,13 @@ def test_counter_set(capsys, rocm_path):
 
 
 def set_library(rocm_path):
+    ROCPROFV3_AVAIL_PACKAGE = (
+        f"{rocm_path}/lib/python{sys.version_info[0]}.{sys.version_info[1]}/site-packages"
+    )
+    sys.path.append(ROCPROFV3_AVAIL_PACKAGE)
+
+    from rocprofv3 import avail
+
     ROCPROF_LIST_AVAIL_TOOL_LIBRARY = (
         f"{rocm_path}/lib/rocprofiler-sdk/librocprofv3-list-avail.so"
     )
