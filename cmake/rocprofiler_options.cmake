@@ -46,6 +46,11 @@ rocprofiler_add_option(ROCPROFILER_BUILD_CODECOV
                        "Enable building for code coverage analysis" OFF)
 rocprofiler_add_option(ROCPROFILER_BUILD_DOCS
                        "Enable build + install + packaging documentation" OFF)
+rocprofiler_add_option(
+    ROCPROFILER_INTERNAL_RCCL_API_TRACE
+    "Use (internal) <rocprofiler-sdk/rccl/details/api_trace.h> instead of RCCL-provided <rccl/amd_detail/api_trace.h>. Note: this should never be used in production"
+    OFF
+    ADVANCED)
 
 rocprofiler_add_option(
     ROCPROFILER_BUILD_GHC_FS

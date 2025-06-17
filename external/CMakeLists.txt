@@ -8,6 +8,8 @@ include(rocprofiler_utilities)
 cmake_policy(PUSH)
 cmake_policy(SET CMP0077 NEW) # option() honors normal variables
 
+set(CMAKE_MESSAGE_INDENT "[${PROJECT_NAME}][external] ")
+
 set(BUILD_TESTING OFF)
 set(BUILD_SHARED_LIBS OFF)
 set(BUILD_OBJECT_LIBS OFF) # Specific to PTL

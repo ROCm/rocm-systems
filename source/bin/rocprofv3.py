@@ -117,27 +117,84 @@ def strtobool(val):
         raise ValueError(f"invalid truth value {val} (type={val_type})")
 
 
-def check_att_capability(args):
+def resolve_library_path(val, args, is_sdk_lib=True):
+    from pathlib import Path
+
+    if not isinstance(args, dotdict):
+        args = dotdict(args)
+
+    ROCPROF_SDK_VERSION = ".".join(CONST_VERSION_INFO["version"].split(".")[0:3])
+    ROCPROF_SDK_SOVERSION = CONST_VERSION_INFO["version"].split(".")[0]
+
+    # set default values
+    for name, value in [
+        ["required", True],
+        ["readlink", False],
+        ["realpath", False],
+        ["sdk_version", ROCPROF_SDK_VERSION],
+        ["sdk_soversion", ROCPROF_SDK_SOVERSION],
+    ]:
+        # set the attribute if it doesn't exist or value is set to None
+        if not hasattr(args, name) or (
+            hasattr(args, name) and getattr(args, name) is None
+        ):
+            setattr(args, name, value)
+
+    if is_sdk_lib:
+        if not os.path.exists(val) and args.sdk_soversion:
+            val = f"{val}.{args.sdk_soversion}"
+
+        if not os.path.exists(val) and args.sdk_version:
+            val = f"{val}.{args.sdk_version}"
+
+    if args.required and not os.path.exists(val):
+        fatal_error(f"Failed to resolve path. '{val}' does not exist")
+
+    if os.path.islink(val):
+        if args.readlink:
+            lnk = Path(val).readlink()
+            if not lnk.is_absolute():
+                val = os.path.join(Path(val).parent.absolute(), lnk)
+            else:
+                val = f"{lnk}"
+        if args.realpath:
+            val = os.path.realpath(val)
+    else:
+        if args.realpath:
+            val = os.path.realpath(val)
+
+    return val
+
+
+def check_att_capability(args, att_lib_name="librocprof-trace-decoder.so"):
 
     ROCPROFV3_DIR = os.path.dirname(os.path.realpath(__file__))
     ROCM_DIR = os.path.dirname(ROCPROFV3_DIR)
-    ld_library_paths = []
+    if args.rocm_root is not None:
+        ROCM_DIR = os.path.abspath(args.rocm_root)
+
+    library_paths = []
 
     if args.att_library_path:
-        ld_library_paths.extend(args.att_library_path)
+        library_paths.extend(args.att_library_path)
     else:
-        for itr in os.environ.get("LD_LIBRARY_PATH", "").split(":") + [f"{ROCM_DIR}/lib"]:
+        default_lib_path_env = os.environ.get("LD_LIBRARY_PATH", "").split(":") + [
+            f"{ROCM_DIR}/lib"
+        ]
+        defined_att_path_env = os.environ.get("ROCPROF_ATT_LIBRARY_PATH", "").split(":")
+        att_paths = defined_att_path_env if defined_att_path_env else default_lib_path_env
+        for itr in att_paths:
             # don't add duplicates
-            if itr not in ld_library_paths:
-                ld_library_paths += [itr]
+            if itr not in library_paths:
+                library_paths += [itr]
 
-    lib_att_name = "librocprof-trace-decoder.so"
-
-    for path in ld_library_paths:
+    for path in library_paths:
         for root, dirs, files in os.walk(path, topdown=True):
             for itr in files:
-                if lib_att_name in itr:
-                    args.att_library_path = root
+                if att_lib_name in itr:
+                    args.att_library_path = resolve_library_path(
+                        root, args, is_sdk_lib=False
+                    )
                     return True
 
     return False
@@ -568,6 +625,18 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         metavar="PATH",
         default=None,
     )
+    advanced_options.add_argument(
+        "--sdk-soversion",
+        help="Use provided rocprofiler-sdk shared object version number when resolving library paths, e.g. `--sdk-soversion=X` for librocprofiler-sdk.so.X",
+        type=int,
+        default=None,
+    )
+    advanced_options.add_argument(
+        "--sdk-version",
+        help="Use provided rocprofiler-sdk version number when resolving library paths, e.g. `--sdk-version=X.Y.Z` for librocprofiler-sdk.so.X.Y.Z",
+        type=str,
+        default=None,
+    )
     add_parser_bool_argument(
         advanced_options,
         "--readlink",
@@ -984,21 +1053,13 @@ def run(app_args, args, **kwargs):
         f"{ROCM_DIR}/libexec/rocprofiler-sdk/librocprofv3-list-avail.so"
     )
 
-    def resolve_path(val):
-        if not os.path.exists(val):
-            fatal_error(f"{val} does not exist")
-        if os.path.islink(val):
-            if args.readlink:
-                val = os.path.abspath(os.readlink(val))
-            if args.realpath:
-                val = os.path.realpath(val)
-        return val
-
-    ROCPROF_TOOL_LIBRARY = resolve_path(ROCPROF_TOOL_LIBRARY)
-    ROCPROF_SDK_LIBRARY = resolve_path(ROCPROF_SDK_LIBRARY)
-    ROCPROF_ROCTX_LIBRARY = resolve_path(ROCPROF_ROCTX_LIBRARY)
-    ROCPROF_KOKKOSP_LIBRARY = resolve_path(ROCPROF_KOKKOSP_LIBRARY)
-    ROCPROF_LIST_AVAIL_TOOL_LIBRARY = resolve_path(ROCPROF_LIST_AVAIL_TOOL_LIBRARY)
+    ROCPROF_TOOL_LIBRARY = resolve_library_path(ROCPROF_TOOL_LIBRARY, args)
+    ROCPROF_SDK_LIBRARY = resolve_library_path(ROCPROF_SDK_LIBRARY, args)
+    ROCPROF_ROCTX_LIBRARY = resolve_library_path(ROCPROF_ROCTX_LIBRARY, args)
+    ROCPROF_KOKKOSP_LIBRARY = resolve_library_path(ROCPROF_KOKKOSP_LIBRARY, args)
+    ROCPROF_LIST_AVAIL_TOOL_LIBRARY = resolve_library_path(
+        ROCPROF_LIST_AVAIL_TOOL_LIBRARY, args
+    )
 
     prepend_preload = [itr for itr in args.preload if itr]
     append_preload = [
@@ -1489,7 +1550,7 @@ def run(app_args, args, **kwargs):
             )
         else:
             fatal_error(
-                "rocprof-trace-decoder library path not found in", args.att_library_path
+                f"rocprof-trace-decoder library path not found in {args.att_library_path}"
             )
 
         if args.att_perfcounters:
