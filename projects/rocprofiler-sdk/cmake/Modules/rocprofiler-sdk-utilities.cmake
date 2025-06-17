@@ -11,9 +11,7 @@ function(rocprofiler_sdk_get_gfx_architectures _VAR)
         set(ARG_DELIM ", ")
     endif()
 
-    if(NOT DEFINED ARG_PREFIX)
-        set(ARG_PREFIX "[${PROJECT_NAME}] ")
-    endif()
+    set(CMAKE_MESSAGE_INDENT "[${PROJECT_NAME}]${ARG_PREFIX} ")
 
     find_program(
         rocminfo_EXECUTABLE
@@ -55,9 +53,7 @@ endfunction()
 function(rocprofiler_sdk_pc_sampling_disabled _VAR)
     cmake_parse_arguments(ARG "ECHO" "PREFIX" "" ${ARGN})
 
-    if(NOT DEFINED ARG_PREFIX)
-        set(ARG_PREFIX "[${PROJECT_NAME}] ")
-    endif()
+    set(CMAKE_MESSAGE_INDENT "[${PROJECT_NAME}]${ARG_PREFIX} ")
 
     rocprofiler_sdk_get_gfx_architectures(rocprofiler-sdk-tests-gfx-info ECHO)
     list(GET rocprofiler-sdk-tests-gfx-info 0 pc-sampling-gpu-0-gfx-info)
@@ -70,10 +66,7 @@ function(rocprofiler_sdk_pc_sampling_disabled _VAR)
             FALSE
             PARENT_SCOPE)
         if(ARG_ECHO)
-            message(
-                STATUS
-                    "${ARG_PREFIX}PC Sampling is enabled for ${pc-sampling-gpu-0-gfx-info}"
-                )
+            message(STATUS "PC Sampling is enabled for ${pc-sampling-gpu-0-gfx-info}")
         endif()
     else()
         # PC sampling is disabled on this architecture.
@@ -81,10 +74,7 @@ function(rocprofiler_sdk_pc_sampling_disabled _VAR)
             TRUE
             PARENT_SCOPE)
         if(ARG_ECHO)
-            message(
-                STATUS
-                    "${ARG_PREFIX}PC Sampling is disabled for ${pc-sampling-gpu-0-gfx-info}"
-                )
+            message(STATUS "PC Sampling is disabled for ${pc-sampling-gpu-0-gfx-info}")
         endif()
     endif()
 endfunction()
@@ -94,9 +84,7 @@ endfunction()
 function(rocprofiler_sdk_pc_sampling_stochastic_disabled _VAR)
     cmake_parse_arguments(ARG "ECHO" "PREFIX" "" ${ARGN})
 
-    if(NOT DEFINED ARG_PREFIX)
-        set(ARG_PREFIX "[${PROJECT_NAME}] ")
-    endif()
+    set(CMAKE_MESSAGE_INDENT "[${PROJECT_NAME}]${ARG_PREFIX} ")
 
     rocprofiler_sdk_get_gfx_architectures(rocprofiler-sdk-tests-gfx-info ECHO)
     list(GET rocprofiler-sdk-tests-gfx-info 0 pc-sampling-gpu-0-gfx-info)
@@ -108,10 +96,7 @@ function(rocprofiler_sdk_pc_sampling_stochastic_disabled _VAR)
             FALSE
             PARENT_SCOPE)
         if(ARG_ECHO)
-            message(
-                STATUS
-                    "${ARG_PREFIX}PC Sampling is enabled for ${pc-sampling-gpu-0-gfx-info}"
-                )
+            message(STATUS "PC Sampling is enabled for ${pc-sampling-gpu-0-gfx-info}")
         endif()
     else()
         # PC sampling is disabled on this architecture.
@@ -119,10 +104,7 @@ function(rocprofiler_sdk_pc_sampling_stochastic_disabled _VAR)
             TRUE
             PARENT_SCOPE)
         if(ARG_ECHO)
-            message(
-                STATUS
-                    "${ARG_PREFIX}PC Sampling is disabled for ${pc-sampling-gpu-0-gfx-info}"
-                )
+            message(STATUS "PC Sampling is disabled for ${pc-sampling-gpu-0-gfx-info}")
         endif()
     endif()
 endfunction()

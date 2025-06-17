@@ -32,10 +32,10 @@ macro(rocprofiler_find_python3 _VERSION)
     rocprofiler_reset_python3_cache()
 
     if("${_VERSION}" MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)$")
-        find_package(Python3 ${_VERSION} EXACT ${_ARGN} REQUIRED MODULE
+        find_package(Python3 ${_VERSION} EXACT ${ARGN} REQUIRED MODULE
                      COMPONENTS Interpreter Development)
     elseif("${_VERSION}" MATCHES "^([0-9]+)\\.([0-9]+)$")
-        find_package(Python3 ${_VERSION}.0...${_VERSION}.999 ${_ARGN} REQUIRED MODULE
+        find_package(Python3 ${_VERSION}.0...${_VERSION}.999 ${ARGN} REQUIRED MODULE
                      COMPONENTS Interpreter Development)
     else()
         message(
@@ -56,7 +56,7 @@ function(get_default_python_versions _VAR)
     set(_PYTHON_FOUND_VERSIONS)
 
     foreach(_VER IN LISTS ROCPROFILER_PYTHON_VERSION_CANDIDATES)
-        find_package(Python3 ${_VER} EXACT COMPONENTS Interpreter Development)
+        find_package(Python3 ${_VER} EXACT QUIET COMPONENTS Interpreter Development)
         if(Python3_FOUND)
             list(APPEND _PYTHON_FOUND_VERSIONS
                  "${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}")
@@ -84,9 +84,9 @@ endfunction()
 
 function(rocprofiler_roctx_python_bindings _VERSION)
     message(
-        STATUS "Creating rocprofiler-sdk roctx python bindings for python ${_VERSION}")
+        STATUS "Building rocprofiler-sdk roctx python bindings for python ${_VERSION}")
 
-    rocprofiler_find_python3(${_VERSION})
+    rocprofiler_find_python3(${_VERSION} QUIET)
 
     set(roctx_PYTHON_INSTALL_DIRECTORY
         ${CMAKE_INSTALL_LIBDIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages/roctx
@@ -138,8 +138,8 @@ endfunction()
 
 function(rocprofiler_rocpd_python_bindings _VERSION)
     message(
-        STATUS "Creating rocprofiler-sdk rocpd python bindings for python ${_VERSION}")
-    rocprofiler_find_python3(${_VERSION})
+        STATUS "Building rocprofiler-sdk rocpd python bindings for python ${_VERSION}")
+    rocprofiler_find_python3(${_VERSION} QUIET)
 
     set(rocpd_PYTHON_INSTALL_DIRECTORY
         ${CMAKE_INSTALL_LIBDIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages/rocpd

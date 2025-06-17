@@ -25,10 +25,14 @@
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
+include(FindPackageHandleStandardArgs)
+
 project(
     rocprofiler-sdk-tests-rocprofv3-att
     LANGUAGES CXX
     VERSION 0.0.0)
+
+set(CMAKE_MESSAGE_INDENT "[${PROJECT_NAME}] ")
 
 string(REPLACE "LD_PRELOAD=" "--preload;" PRELOAD_ARGS
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
@@ -40,18 +44,23 @@ find_package(rocprofiler-sdk REQUIRED)
 
 set(IS_DISABLED ON)
 
-set(LIB_PATH_LOC "${ROCM_PATH}/lib")
-set(LIB_PATH_ENV "ROCPROF_ATT_LIBRARY_PATH=${LIB_PATH_LOC}")
-
 find_library(
-    attdecoder
-    HINTS ${LIB_PATH_LOC}
+    attdecoder_LIBRARY
+    NAMES rocprof-trace-decoder
+    HINTS ${ROCM_PATH}
     PATHS ${ROCM_PATH}
-    PATH_SUFFIXES lib
-    NAMES rocprof-trace-decoder)
+    PATH_SUFFIXES lib)
 
-if(attdecoder)
+if(attdecoder_LIBRARY)
+    cmake_path(GET attdecoder_LIBRARY PARENT_PATH attdecoder_LIB_DIR)
+endif()
+
+find_package_handle_standard_args(attdecoder REQUIRED_VARS attdecoder_LIB_DIR
+                                                           attdecoder_LIBRARY)
+
+if(attdecoder_FOUND)
     set(IS_DISABLED OFF)
+    set(LIB_PATH_ENV "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}")
 endif()
 
 # hsa multiqueue dependency test with lib path
@@ -62,7 +71,7 @@ add_test(
         1 --att-target-cu 1 --att-shader-engine-mask 0x11 --kernel-include-regex copyD
         --att-buffer-size 0x6000000 --att-simd-select 0x3 --att-serialize-all 1 -d
         ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace/cmd_input -o out --output-format json
-        ${PRELOAD_ARGS} --att-library-path ${LIB_PATH_LOC} --att-activity 8 --
+        ${PRELOAD_ARGS} --att-library-path ${attdecoder_LIB_DIR} --att-activity 8 --
         $<TARGET_FILE:hsa_code_object_testapp>)
 
 set_tests_properties(
@@ -74,14 +83,14 @@ add_test(
     NAME rocprofv3-test-hsa-multiqueue-att-json-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --log-level env --att-library-path
-        ${LIB_PATH_LOC} -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace/json_input -i
+        ${attdecoder_LIB_DIR} -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace/json_input -i
         ${CMAKE_CURRENT_BINARY_DIR}/att_input.json ${PRELOAD_ARGS} --
         $<TARGET_FILE:hsa_code_object_testapp>)
 
 set_tests_properties(
     rocprofv3-test-hsa-multiqueue-att-json-execute
     PROPERTIES TIMEOUT 45 LABELS "integration-tests" DISABLED ${IS_DISABLED} ENVIRONMENT
-               ${LIB_PATH_ENV})
+               "${LIB_PATH_ENV}")
 
 # validate output
 add_test(
@@ -139,7 +148,7 @@ function(configure_att_input _FILENAME _OUTDIR)
                    ${CMAKE_CURRENT_BINARY_DIR}/${_FILENAME} @ONLY)
 endfunction()
 
-configure_att_input(att_input.yml "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}")
+configure_att_input(att_input.yml "${attdecoder_LIB_DIR}")
 configure_att_input(att_input_will_fail.yml "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
 
 # test yaml input
@@ -204,7 +213,7 @@ add_test(
 set_tests_properties(
     rocprofv3-test-hsa-multiqueue-att-plus-pmc-execute
     PROPERTIES TIMEOUT 45 LABELS "integration-tests" DISABLED ${IS_DISABLED} ENVIRONMENT
-               ${LIB_PATH_ENV})
+               "${LIB_PATH_ENV}")
 
 # Check for conflict PMC + activity
 add_test(
@@ -223,7 +232,7 @@ set_tests_properties(
                DISABLED
                ${IS_DISABLED}
                ENVIRONMENT
-               ${LIB_PATH_ENV}
+               "${LIB_PATH_ENV}"
                WILL_FAIL
                ON)
 
@@ -244,6 +253,6 @@ set_tests_properties(
                DISABLED
                ${IS_DISABLED}
                ENVIRONMENT
-               ${LIB_PATH_ENV}
+               "${LIB_PATH_ENV}"
                WILL_FAIL
                ON)

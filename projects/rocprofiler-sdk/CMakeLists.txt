@@ -33,6 +33,10 @@ project(
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "core")
 set(PACKAGE_NAME ${PROJECT_NAME})
 
+if(NOT PROJECT_IS_TOP_LEVEL)
+    set(CMAKE_MESSAGE_INDENT "[${PROJECT_NAME}] ")
+endif()
+
 find_package(Git)
 
 if(Git_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")

@@ -318,7 +318,8 @@ find_package(
     PATH_SUFFIXES
     lib/cmake/rccl)
 
-if(rccl_FOUND
+if(NOT ROCPROFILER_INTERNAL_RCCL_API_TRACE
+   AND rccl_FOUND
    AND rccl_INCLUDE_DIR
    AND EXISTS "${rccl_INCLUDE_DIR}/rccl/amd_detail/api_trace.h")
     set(rccl_API_TRACE_FOUND ON)

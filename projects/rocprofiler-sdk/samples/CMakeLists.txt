@@ -12,6 +12,10 @@ if(CMAKE_BUILD_TYPE STREQUAL "")
         CACHE STRING "Build type" FORCE)
 endif()
 
+if(NOT PROJECT_IS_TOP_LEVEL)
+    set(CMAKE_MESSAGE_INDENT "[${PROJECT_NAME}] ")
+endif()
+
 include(GNUInstallDirs)
 
 # always use lib instead of lib64
