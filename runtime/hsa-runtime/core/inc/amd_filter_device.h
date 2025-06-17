@@ -44,13 +44,16 @@
 #define HSA_RUNTIME_CORE_INC_AMD_FILTER_DEVICE_H_
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <vector>
 #include <map>
 #include <string>
 #include <sstream>
 
-#include "hsakmt/hsakmt.h"
+// Forward declaration of the HsaNodeProperties.
+struct _HsaNodeProperties;
+using HsaNodeProperties = _HsaNodeProperties;
 
 namespace rocr {
 namespace AMD {
@@ -153,7 +156,7 @@ class RvdFilter {
   ///
   /// @param numNodes Number of ROCm devices present on system, includes
   /// both Cpu and Gpu's devices
-  void BuildDeviceUuidList(uint32_t numNodes);
+  void BuildDeviceUuidList(const std::vector<HsaNodeProperties>& node_props);
 
   /// @brief Build the list of Gpu devices that will be enumerated to user
   ///

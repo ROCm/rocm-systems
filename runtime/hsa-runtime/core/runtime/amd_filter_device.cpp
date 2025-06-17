@@ -52,8 +52,6 @@
 #include <iostream>
 #include <climits>
 
-#include "hsakmt/hsakmt.h"
-
 #include "core/util/utils.h"
 #include "core/inc/runtime.h"
 #include "core/inc/amd_cpu_agent.h"
@@ -90,15 +88,8 @@ void RvdFilter::BuildRvdTokenList() {
   }
 }
 
-void RvdFilter::BuildDeviceUuidList(uint32_t numNodes) {
-  HSAKMT_STATUS status;
-  HsaNodeProperties props = {0};
-  for (HSAuint32 idx = 0; idx < numNodes; idx++) {
-    // Query for node properties and ignore Cpu devices
-    status = HSAKMT_CALL(hsaKmtGetNodeProperties(idx, &props));
-    if (status != HSAKMT_STATUS_SUCCESS) {
-      continue;
-    }
+void RvdFilter::BuildDeviceUuidList(const std::vector<HsaNodeProperties>& node_props) {
+  for (const auto& props : node_props) {
     if (props.NumFComputeCores == 0) {
       continue;
     }

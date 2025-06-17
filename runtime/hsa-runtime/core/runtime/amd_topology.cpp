@@ -286,6 +286,7 @@ void SurfaceGpuList(std::vector<int32_t>& gpu_list, bool xnack_mode, bool enable
 bool BuildTopology() {
   auto rt = core::Runtime::runtime_singleton_;
   std::unordered_map<core::DriverType, HsaSystemProperties> driver_sys_props;
+  std::unordered_map<core::DriverType, std::vector<HsaNodeProperties>> driver_node_props;
   size_t link_count = 0;
   /// @todo Currently we can filter out GPU devices using the
   /// ROCR_VISIBLE_DEVICES environment variable. Eventually this
@@ -298,30 +299,45 @@ bool BuildTopology() {
   std::vector<int32_t> gpu_disabled;
   bool filter = RvdFilter::FilterDevices();
 
-  // Get the system properties (i.e., node count) from each driver
-  // then update the runtime's link count before traversing each
+  // Get the system properties from each driver, populate the node properties list
+  // for each driver, then update the runtime's link count before traversing each
   // driver's individual nodes.
   for (const auto& driver : rt->AgentDrivers()) {
-    driver->GetSystemProperties(driver_sys_props[driver->kernel_driver_type_]);
+    auto &sys_props = driver_sys_props[driver->kernel_driver_type_];
+    auto &node_props_vec = driver_node_props[driver->kernel_driver_type_];
+    if (driver->GetSystemProperties(sys_props) != HSA_STATUS_SUCCESS)
+      return false;
 
-    if (!driver_sys_props[driver->kernel_driver_type_].NumNodes) continue;
+    const auto num_nodes = sys_props.NumNodes;
 
-    link_count += driver_sys_props[driver->kernel_driver_type_].NumNodes;
+    if (!num_nodes) {
+      continue;
+    }
+
+    link_count += num_nodes;
+    node_props_vec.resize(num_nodes);
+    uint32_t node_id = 0;
+
+    for (auto& node_props : node_props_vec) {
+      if (driver->GetNodeProperties(node_props, node_id) != HSA_STATUS_SUCCESS) {
+        return false;
+      }
+      ++node_id;
+    }
   }
 
   rt->SetLinkCount(link_count);
 
   // Traverse each driver's nodes and discover their agents.
-  for (const auto& driver : core::Runtime::runtime_singleton_->AgentDrivers()) {
-    if (driver_sys_props.find(driver->kernel_driver_type_) == driver_sys_props.end()) return false;
+  for (const auto& driver : rt->AgentDrivers()) {
+    auto& node_props_vec = driver_node_props[driver->kernel_driver_type_];
 
-    const HsaSystemProperties& sys_props = driver_sys_props[driver->kernel_driver_type_];
-
+    /// @todo: Add support for AIEs.
     // Query if env ROCR_VISIBLE_DEVICES is defined. If defined
     // determine number and order of GPU devices to be surfaced.
     if (filter && driver->kernel_driver_type_ == core::DriverType::KFD) {
       rvdFilter.BuildRvdTokenList();
-      rvdFilter.BuildDeviceUuidList(sys_props.NumNodes);
+      rvdFilter.BuildDeviceUuidList(node_props_vec);
       visibleCnt = rvdFilter.BuildUsrDeviceList();
       for (int32_t idx = 0; idx < visibleCnt; idx++) {
         gpu_usr_list.push_back(invalidIdx);
@@ -330,12 +346,8 @@ bool BuildTopology() {
 
     // Discover agents on every node in the platform.
     int32_t kfdIdx = 0;
-    for (HSAuint32 node_id = 0; node_id < sys_props.NumNodes; node_id++) {
-      HsaNodeProperties node_props = {0};
-      if (driver->GetNodeProperties(node_props, node_id) != HSA_STATUS_SUCCESS) {
-        return false;
-      }
-
+    uint32_t node_id = 0;
+    for (auto& node_props : node_props_vec) {
       if (node_props.NumCPUCores) {
         // Node has CPU cores so instantiate a CPU agent.
         DiscoverCpu(node_id, node_props);
@@ -368,6 +380,7 @@ bool BuildTopology() {
       // possible to access links of nodes that are
       // not visible
       RegisterLinkInfo(driver, node_id, node_props.NumIOLinks);
+      ++node_id;
     }
   }
 
