@@ -49,13 +49,13 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
      - | ``-i`` INPUT \| ``--input`` INPUT |br| |br| |br| |br| |br| |br|
        | ``-o`` OUTPUT_FILE \| ``--output-file`` OUTPUT_FILE |br| |br| |br|
        | ``-d`` OUTPUT_DIRECTORY \| ``--output-directory`` OUTPUT_DIRECTORY |br| |br|
-       | ``--output-format {csv,json,pftrace,otf2} [{csv,json,pftrace,otf2} ...]`` |br| |br|
+       | ``--output-format {csv,json,pftrace,otf2,rocpd} [{csv,json,pftrace,otf2,rocpd} ...]`` |br| |br|
        | ``--log-level {fatal,error,warning,info,trace,env}`` |br| |br|
        | ``-E`` EXTRA_COUNTERS \| ``--extra-counters`` EXTRA_COUNTERS
      - | Specifies the path to the input file. JSON and YAML formats support configuration of all command-line options for tracing and profiling whereas the text format supports only the specification of HW counters. |br| |br|
        | Specifies output file name. If nothing is specified, the default path is ``%hostname%/%pid%``. |br| |br|
        | Specifies the output path for saving the output files. If nothing is specified, the default path is ``%hostname%/%pid%``. |br| |br|
-       | Specifies output format. Supported formats: CSV, JSON, PFTrace, and OTF2. |br| |br| |br|
+       | Specifies output format. Supported formats: CSV, JSON, PFTrace, OTF2 and rocpd. |br| |br| |br|
        | Sets the desired log level. |br| |br| |br|
        | Specifies the path to a YAML file consisting of extra counter definitions.
 
@@ -191,6 +191,14 @@ To use ``rocprofv3`` for application tracing, run:
 .. code-block:: bash
 
     rocprofv3 <tracing_option> -- <application_path>
+
+
+.. note::
+
+  All the tracing examples below use the ``--output-format csv`` option to generate output in CSV format.
+  However, the default output format is ``rocpd`` (SQLite3 database). You can simply omit the ``--output-format`` option to generate output in the default format.
+  ``rocpd`` format can be converted to other formats such as CSV, OTF2, and PFTrace using the ``rocpd`` module. 
+  To understand how to convert ``rocpd`` output to other formats, see :ref:`using-rocpd-output-format`.
 
 HIP trace
 +++++++++++
@@ -1513,21 +1521,22 @@ The following table lists the various fields or the columns in the output CSV fi
 Output formats
 ----------------
 
-``rocprofv3`` supports the following output formats:
 
-- SQLite3 Database (Default)
+- rocpd (SQLite3 Database (Default))
 - CSV
 - JSON (Custom format for programmatic analysis only)
 - PFTrace (Perfetto trace for visualization with Perfetto)
 - OTF2 (Open Trace Format for visualization with compatible third-party tools)
 
-To specify the output format, use:
+
+The default output format is ``rocpd``. To know more about the rocpd format, see :ref:`using-rocpd-output-format`. 
+To specify the particular output format, use the ``--output-format`` option followed by the desired format.
 
 .. code-block::
 
    rocprofv3 -i input.txt --output-format json -- <application_path>
 
-Format selection is case-insensitive and multiple output formats are supported. While ``--output-format json`` exclusively enables JSON output, ``--output-format csv json pftrace otf2`` enables all four output formats for the run.
+Format selection is case-insensitive and multiple output formats are supported. While ``--output-format json`` exclusively enables JSON output, ``--output-format csv json pftrace otf2, rocpd`` enables all four output formats for the run.
 
 For PFTrace trace visualization, use the PFTrace format and open the trace in `ui.perfetto.dev <https://ui.perfetto.dev/>`_.
 
