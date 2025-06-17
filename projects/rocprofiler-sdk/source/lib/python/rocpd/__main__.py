@@ -39,6 +39,7 @@ def main(argv=None, config=None):
     """
     import argparse
     from . import csv
+    from . import merge
     from . import otf2
     from . import output_config
     from . import pftrace
@@ -64,6 +65,13 @@ Example usage:
     Convert 2 databases, output CSV, OTF2, and perfetto trace formats
     $ rocpd convert -i db{3,4}.db --output-format csv otf2 pftrace
 
+"""
+
+    merge_examples = """
+
+Example usage:
+
+    TODO: Add examples for merge command
 """
 
     query_examples = """
@@ -118,6 +126,14 @@ Example usage:
         epilog=convert_examples,
     )
 
+    merger = subparsers.add_parser(
+        "merge",
+        description="Generate merged database from rocPD databases",
+        allow_abbrev=False,
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog=merge_examples,
+    )
+
     query_reporter = subparsers.add_parser(
         "query",
         description="Generate output on a query",
@@ -158,6 +174,16 @@ Example usage:
         required=True,
     )
 
+    merger_required_params = merger.add_argument_group("Required options")
+    merger_required_params.add_argument(
+        "-i",
+        "--input",
+        required=True,
+        type=output_config.check_file_exists,
+        nargs="+",
+        help="Input path and filename to one or more database(s)",
+    )
+
     query_required_params = query_reporter.add_argument_group("Required options")
     query_required_params.add_argument(
         "-i",
@@ -185,6 +211,9 @@ Example usage:
     valid_csv_args = csv.add_args(converter)
     valid_otf2_args = otf2.add_args(converter)
     valid_time_window_args = time_window.add_args(converter)
+
+    # merge: subparser args
+    valid_merge_args = merge.add_args(merger)
 
     # query: subparser args
     valid_out_config_args = output_config.add_args(query_reporter)
@@ -257,6 +286,15 @@ Example usage:
                 format_handlers[out_format](importData, config)
             else:
                 print(f"Warning: Unsupported output format '{out_format}'")
+
+    # if the user requested merge module, execute the merge
+    elif args.command == "merge":
+        # merge subparser args
+        merge_args = merge.process_args(args, valid_merge_args)
+
+        # now start processing the data.  Import the data and merge the views
+        importData = RocpdImportData(args.input)
+        merge.merge(importData, **merge_args)
 
     # if the user requested query module, execute the query
     elif args.command == "query":
