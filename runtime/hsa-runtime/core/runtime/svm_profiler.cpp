@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2022-2022, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -46,8 +46,6 @@
 #include <algorithm>
 #include <sys/eventfd.h>
 #include <poll.h>
-
-#include "hsakmt/hsakmt.h"
 
 #include "core/util/utils.h"
 #include "core/inc/runtime.h"
@@ -143,9 +141,9 @@ void SvmProfileControl::PollSmi() {
       HSA_SMI_EVENT_MASK_FROM_INDEX(HSA_SMI_EVENT_UNMAP_FROM_GPU);
 
   for (int i = 0; i < core::Runtime::runtime_singleton_->gpu_agents().size(); i++) {
-    auto err = HSAKMT_CALL(hsaKmtOpenSMI(core::Runtime::runtime_singleton_->gpu_agents()[i]->node_id(),
-                             &files[i + 1].fd));
-    assert(err == HSAKMT_STATUS_SUCCESS);
+    auto gpu_agent = core::Runtime::runtime_singleton_->gpu_agents()[i];
+    auto err = gpu_agent->driver().OpenSMI(gpu_agent->node_id(), &files[i + 1].fd);
+    assert(err == HSA_STATUS_SUCCESS);
     files[i + 1].events = POLLIN;
     files[i + 1].revents = 0;
     // Enable collecting masked events.
@@ -377,6 +375,6 @@ std::string SvmProfileControl::format(const char* format, Args... args) {
   }
   return std::string(&format_buffer[0]);
 }
- 
+
 } // namespace AMD
 } // namespace rocr

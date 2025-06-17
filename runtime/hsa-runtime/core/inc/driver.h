@@ -249,6 +249,15 @@ public:
                                         uint32_t* timeout, uint32_t* size_copied,
                                         void* dest_mem_addr, bool* is_spm_data_loss) const = 0;
 
+  /// @brief Open anonymous file descriptor to enable events and read SMI events.
+  /// @param[in] node_id Node ID to receive the SMI event from.
+  /// @param[out] fd Anonymous file descriptor.
+  /// @retval HSA_STATUS_ERROR_INVALID_AGENT if the agent's driver doesn't support
+  /// SMI events.
+  virtual hsa_status_t OpenSMI(uint32_t node_id, int* fd) const {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
   /// @brief Check if the HSA KMT Model is enabled
   /// @param[out] enable True if the model is enabled, false otherwise
   virtual hsa_status_t IsModelEnabled(bool* enable) const = 0;

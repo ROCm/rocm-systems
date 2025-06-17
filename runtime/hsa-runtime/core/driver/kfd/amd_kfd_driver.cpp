@@ -484,6 +484,13 @@ hsa_status_t KfdDriver::SPMSetDestBuffer(uint32_t preferred_node_id, uint32_t si
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t KfdDriver::OpenSMI(uint32_t node_id, int* fd) const {
+  if (HSAKMT_CALL(hsaKmtOpenSMI(node_id, fd)) != HSAKMT_STATUS_SUCCESS) {
+    return HSA_STATUS_ERROR;
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
 void *KfdDriver::AllocateKfdMemory(const HsaMemFlags &flags, uint32_t node_id,
                                    size_t size) {
   void *mem = nullptr;
