@@ -1343,7 +1343,10 @@ hsa_status_t hsa_amd_vmem_address_reserve(void** va, size_t size, uint64_t addre
   TRY;
   IS_OPEN();
   IS_ZERO(size);
-  IS_TRUE(core::Runtime::runtime_singleton_->VirtualMemApiSupported());
+
+  if (!(flags & HSA_AMD_VMEM_ADDRESS_NO_REGISTER))
+    IS_TRUE(core::Runtime::runtime_singleton_->VirtualMemApiSupported());
+
   return core::Runtime::runtime_singleton_->VMemoryAddressReserve(va, size, address, 0, flags);
   CATCH;
 }

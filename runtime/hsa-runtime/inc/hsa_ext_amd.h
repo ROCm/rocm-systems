@@ -60,9 +60,10 @@
  * - 1.7 - hsa_amd_signal_wait_all
  * - 1.8 - hsa_amd_memory_get_preferred_copy_engine
  * - 1.9 - hsa_amd_portable_export_dmabuf_v2
+ * - 1.10 - hsa_amd_vmem_address_reserve: HSA_AMD_VMEM_ADDRESS_NO_REGISTER
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 9
+#define HSA_AMD_INTERFACE_VERSION_MINOR 10
 
 #ifdef __cplusplus
 extern "C" {
@@ -3264,6 +3265,11 @@ hsa_status_t hsa_amd_portable_export_dmabuf_v2(const void* ptr, size_t size,
  */
 hsa_status_t hsa_amd_portable_close_dmabuf(int dmabuf);
 
+typedef enum hsa_amd_vmem_address_reserve_flag_s {
+  // Only reserve a VA range without registering it to the underlying driver
+  HSA_AMD_VMEM_ADDRESS_NO_REGISTER = (1UL << 0),
+} hsa_amd_vmem_address_reserve_flag_t;
+
 /**
  * @brief Allocate a reserved address range
  *
@@ -3275,7 +3281,7 @@ hsa_status_t hsa_amd_portable_close_dmabuf(int dmabuf);
  * @param[out] va virtual address allocated
  * @param[in] size of address range requested
  * @param[in] address requested
- * @param[in] flags currently unsupported
+ * @param[in] flags optional hsa_amd_vmem_address_reserve_flag_t
  *
  * @retval ::HSA_STATUS_SUCCESS Address range allocated successfully
  *
@@ -3303,7 +3309,7 @@ hsa_status_t hsa_amd_vmem_address_reserve(void** va, size_t size, uint64_t addre
  * @param[in] size of address range requested
  * @param[in] address requested
  * @param[in] alignment requested. 0 for default. Must be >= page-size and a power of 2
- * @param[in] flags currently unsupported
+ * @param[in] flags optional hsa_amd_vmem_address_reserve_flag_t
  *
  * @retval ::HSA_STATUS_SUCCESS Address range allocated successfully
  *

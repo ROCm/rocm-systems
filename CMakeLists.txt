@@ -87,7 +87,7 @@ include(utils)
 
 
 ## Get version strings
-get_version("1.17.0")
+get_version("1.18.0")
 if (${ROCM_PATCH_VERSION})
   set(VERSION_PATCH ${ROCM_PATCH_VERSION})
 endif()
