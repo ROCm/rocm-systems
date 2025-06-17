@@ -64,7 +64,7 @@ foreach(target_id ${GPU_LIST})
   generate_hsaco(${target_id} ${TEST_DIR}/${TEST_NAME}/${TEST_NAME}.cl ${target_id}_${TEST_NAME}.hsaco)
 endforeach(target_id)
 # add_custom_target(test DEPENDS ${HSACO_TARGET_LIST})
-add_custom_target(mytest DEPENDS ${TARGET_NAME} ${HSACO_TARGET_LIST})
+add_custom_target(mytest ALL DEPENDS ${TARGET_NAME} ${HSACO_TARGET_LIST})
 
 ## Deploying test run scripts
 execute_process ( COMMAND sh -xc "cp --remove-destination ${TEST_DIR}/da_16b.py ${TEST_BINARY_DIR}" )
