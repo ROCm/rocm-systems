@@ -27,9 +27,9 @@
 #include <string.h>
 #include <memory>
 #include <regex>
-#include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/amd_smi_drm.h"
 #include "amd_smi/impl/amd_smi_common.h"
+#include "impl/scoped_fd.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_utils.h"
@@ -59,8 +59,6 @@ std::string AMDSmiDrm::find_file_in_folder(const std::string& folder,
 }
 
 amdsmi_status_t AMDSmiDrm::init() {
-    std::ostringstream ss;
-
     amdsmi_status_t status = lib_loader_.load("libdrm.so.2");
     if (status != AMDSMI_STATUS_SUCCESS) {
         return status;
@@ -121,7 +119,6 @@ amdsmi_status_t AMDSmiDrm::init() {
     bool has_valid_fds = false;
     for (uint32_t i=0; i < devices.size(); i++) {
         auto rocm_smi_device = devices[i];
-        std::string render_file_name;
         drmDevicePtr device;
 
         const std::string regex("renderD([0-9]+)");
@@ -134,70 +131,27 @@ amdsmi_status_t AMDSmiDrm::init() {
         ScopedFD fd(name.c_str(), O_RDWR | O_CLOEXEC);
 
         amdsmi_bdf_t bdf;
-        if (*fd >= 0) {
-            auto version = drm_get_version(*fd);
-            if (drm_get_device(*fd, &device) != 0) {
+        if (fd.valid()) {
+            auto version = drm_get_version(fd);
+            if (drm_get_device(fd, &device) != 0) {
                 drm_free_device(&device);
             }
-            ss << __PRETTY_FUNCTION__ << " | "
-               << " render file name: " << name << "\n"
-               << "; fd: " << std::dec << *fd << "\n"
-               << "; drm version->name: " << version->name << "\n"
-               << "; drm version->date: " << version->date << "\n"
-               << "; drm version_major.version_minor.version_patchlevel: "
-               << std::dec << version->version_major << "."
-               << version->version_minor << "."
-               << version->version_patchlevel << "\n"
-               << "; device->deviceinfo.pci->vendor_id: 0x"
-               << std::hex << std::setfill('0') << std::setw(4)
-               << static_cast<uint32_t>(device->deviceinfo.pci->vendor_id) << "\n"
-               << "; device->deviceinfo.pci->device_id: 0x"
-               << std::hex << std::setfill('0') << std::setw(4)
-               << static_cast<uint32_t>(device->deviceinfo.pci->device_id) << "\n"
-               << "; device->deviceinfo.pci->revision_id: 0x"
-               << std::hex << std::setfill('0') << std::setw(4)
-               << static_cast<uint32_t>(device->deviceinfo.pci->revision_id) << "\n"
-               << "; device->deviceinfo.pci->subdevice_id: 0x"
-               << std::hex << std::setfill('0') << std::setw(4)
-               << static_cast<uint32_t>(device->deviceinfo.pci->subdevice_id) << "\n";
-            LOG_INFO(ss);
             drm_free_version(version);
+            has_valid_fds = true;
         }
 
-        drm_fds_.push_back(*fd);
         drm_paths_.push_back(render_name);
         // even if fail, still add to prevent mismatch the index
-        if (*fd < 0) {
+        if (!has_valid_fds) {
             drm_bdfs_.push_back(bdf);
             drm_free_device(&device);
             continue;
         }
 
-        has_valid_fds = true;
-        std::ostringstream ss;
         uint64_t bdf_rocm = 0;
         rsmi_dev_pci_id_get(i, &bdf_rocm);
 
         vendor_id = device->deviceinfo.pci->vendor_id;
-        std::ostringstream bdf_sstream;
-        bdf_sstream << std::hex << std::setfill('0') << std::setw(4)
-                                << ((bdf_rocm >> 32) & 0xFFFFFFFF) << ":"    // DOMAIN
-                    << std::hex << std::setfill('0') << std::setw(2)
-                    << ((bdf_rocm >> 8) & 0xFF) << ":"                       // BUS
-                    << std::hex << std::setfill('0') << std::setw(2)
-                    << ((bdf_rocm >> 3) & 0x1F) << "."                       // DEVICE
-                    << std::hex << std::setfill('0') << +(bdf_rocm & 0x7);   // FUNCTION
-        bdf_sstream << "\n[Option 1] Partition ID ((pci_id >> 28) & 0xf): " << std::dec
-        << static_cast<int>((bdf_rocm >> 28) & 0xf);
-        bdf_sstream << "\n[Option 2] Partition ID (pci_id & 0x7): " << std::dec
-        << static_cast<int>(bdf_rocm & 0x7);
-        ss  << __PRETTY_FUNCTION__ << " | "
-            << "bdf_rocm | Received bdf: "
-            << "\nWhole BDF: " << amd::smi::print_unsigned_hex_and_int(bdf_rocm)
-            << "\nBDF = "
-            << bdf_sstream.str() << "\n"
-            << "; Vendor ID: 0x" << std::hex << std::setfill('0') << std::setw(4) << vendor_id;
-        LOG_INFO(ss);
 
         bdf.domain_number = static_cast<uint64_t>(((bdf_rocm >> 32) & 0xFFFFFFFF));
         bdf.bus_number = static_cast<uint64_t>(((bdf_rocm >> 8) & 0xFF));
@@ -217,41 +171,17 @@ amdsmi_status_t AMDSmiDrm::init() {
 }
 
 amdsmi_status_t AMDSmiDrm::cleanup() {
-    for (unsigned int i=0; i < drm_fds_.size(); i++) {
-        close(drm_fds_[i]);
-    }
-
-    if (!drm_fds_.empty()) {drm_fds_.clear();}
     if (!drm_paths_.empty()) {drm_paths_.clear();}
     if (!drm_bdfs_.empty()) {drm_bdfs_.clear();}
     lib_loader_.unload();
     return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t AMDSmiDrm::get_drm_fd_by_index(uint32_t gpu_index, uint32_t *fd_info) const {
-    if (gpu_index + 1 > drm_fds_.size()) return AMDSMI_STATUS_NOT_SUPPORTED;
-    if (drm_fds_[gpu_index] < 0 ) return AMDSMI_STATUS_NOT_SUPPORTED;
-    *fd_info = drm_fds_[gpu_index];
-    return AMDSMI_STATUS_SUCCESS;
-}
-
 amdsmi_status_t AMDSmiDrm::get_bdf_by_index(uint32_t gpu_index, amdsmi_bdf_t *bdf_info) const {
-    std::ostringstream ss;
     if (gpu_index + 1 > drm_bdfs_.size()) {
-        ss << __PRETTY_FUNCTION__ << " | gpu_index = " << gpu_index
-        << "; \nReturning = AMDSMI_STATUS_NOT_SUPPORTED";
-        LOG_INFO(ss);
-        // std::cout << ss.str() << std::endl;
         return AMDSMI_STATUS_NOT_SUPPORTED;
     }
     *bdf_info = drm_bdfs_[gpu_index];
-    ss << __PRETTY_FUNCTION__ << " | gpu_index = " << gpu_index
-    << "; \nreceived bdf: Domain = " << bdf_info->domain_number
-    << "; \nBus# = " << bdf_info->bus_number
-    << "; \nDevice# = " << bdf_info->device_number
-    << "; \nFunction# = " << bdf_info->function_number
-    << "\nReturning = AMDSMI_STATUS_SUCCESS";
-    LOG_INFO(ss);
     return AMDSMI_STATUS_SUCCESS;
 }
 

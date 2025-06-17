@@ -116,7 +116,6 @@ static void RunGenericTest(TestBase *test) {
 //  RunGenericTest(&<test_obj>);
 // }
 TEST(amdsmitstReadOnly, TestVersionRead) {
-  // amdsmi_wait_for_user_input();
   TestVersionRead tst;
   RunGenericTest(&tst);
 }

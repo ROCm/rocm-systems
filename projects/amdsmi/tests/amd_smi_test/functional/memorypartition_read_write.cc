@@ -253,7 +253,6 @@ void TestMemoryPartitionReadWrite::Run(void) {
     AcceleratorProfileConfig original_profile_config =
       getAvailableProfileConfigs(dv_ind, profile, profile_config, isVerbose);
     orig_dev_config[dv_ind] = original_profile_config;
-    // amdsmi_wait_for_user_input();  // watch for any errors
 
     IF_VERB(STANDARD) {
       std::cout << "\t**=========================================================\n";

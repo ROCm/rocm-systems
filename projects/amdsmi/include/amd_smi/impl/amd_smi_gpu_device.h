@@ -46,8 +46,8 @@ enum class ComputeProcessListType_t : ComputeProcessListClassType_t
 class AMDSmiGPUDevice: public AMDSmiProcessor {
 
  public:
-    AMDSmiGPUDevice(uint32_t gpu_id, uint32_t fd, std::string path, amdsmi_bdf_t bdf, AMDSmiDrm& drm):
-            AMDSmiProcessor(AMDSMI_PROCESSOR_TYPE_AMD_GPU), gpu_id_(gpu_id), fd_(fd), path_(path), bdf_(bdf), drm_(drm) {}
+    AMDSmiGPUDevice(uint32_t gpu_id, std::string path, amdsmi_bdf_t bdf, AMDSmiDrm& drm):
+            AMDSmiProcessor(AMDSMI_PROCESSOR_TYPE_AMD_GPU), gpu_id_(gpu_id), path_(path), bdf_(bdf), drm_(drm) {}
 
     AMDSmiGPUDevice(uint32_t gpu_id, AMDSmiDrm& drm):
             AMDSmiProcessor(AMDSMI_PROCESSOR_TYPE_AMD_GPU), gpu_id_(gpu_id), drm_(drm) {
@@ -59,7 +59,6 @@ class AMDSmiGPUDevice: public AMDSmiProcessor {
     amdsmi_status_t get_drm_data();
     pthread_mutex_t* get_mutex();
     uint32_t get_gpu_id() const;
-    uint32_t get_gpu_fd() const;
     uint32_t get_card_id();            // -e feature + we can get card_id for our internal functions
     uint32_t get_drm_render_minor();   // -e feature + we can get card_id for our internal functions
     uint64_t get_kfd_gpu_id();  // Used to decode vram usage for KFD processes
@@ -76,7 +75,6 @@ class AMDSmiGPUDevice: public AMDSmiProcessor {
 
  private:
     uint32_t gpu_id_;
-    uint32_t fd_;
     std::string path_;
     amdsmi_bdf_t bdf_;
     uint32_t vendor_id_;

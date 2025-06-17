@@ -61,20 +61,6 @@ amdsmi_status_t smi_clear_char_and_reinitialize(char buffer[], uint32_t len,
                                                     std::string newString);
 
 /**
- * @brief Wait for user input, a debugging function to pause the program
- *
- * @details This function will wait for user input before continuing.
- * It is useful for debugging purposes to allow the user to inspect the state of the program
- * before it continues. The function will print a message to the console and then wait for
- * the user to press Enter. Once Enter is pressed, the function will return and the program
- * will continue executing.
- *
- * @note This function is intended for debugging purposes only and should not be used in production code.
- * It will block the program execution and cause it to wait indefinitely for user input.
- */
-void amdsmi_wait_for_user_input(void);
-
-/**
  *  @brief Get the device index given the processor handle.
  *
  *  @details Given a processor handle @p processor_handle
@@ -188,31 +174,3 @@ void fill_2d_array(A& arr, T value) {
 }
 
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_
-
-#ifndef SCOPED_FD_H
-#define SCOPED_FD_H
-
-class ScopedFD {
-private:
-    int fd_;
-    std::string path_;
-
-public:
-    ScopedFD(const std::string& path, int flags);
-    ~ScopedFD();
-
-    // Non-copyable
-    ScopedFD(const ScopedFD&) = delete;
-    ScopedFD& operator=(const ScopedFD&) = delete;
-
-    // Movable
-    ScopedFD(ScopedFD&& other) noexcept;
-    ScopedFD& operator=(ScopedFD&& other) noexcept;
-
-    int get() const;
-    bool valid() const;
-    operator int() const;        // Allows direct use as int
-    int operator*() const;       // Allows *fd usage like your current code
-};
-
-#endif // SCOPED_FD_H

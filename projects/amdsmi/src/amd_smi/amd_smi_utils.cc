@@ -672,10 +672,10 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice
     }
 
     ScopedFD fd(path.c_str(), O_RDWR | O_CLOEXEC);
-    if (!fd) {
+    if (!fd.valid()) {
         ss << __PRETTY_FUNCTION__ << " | Render Name: "
            << render_name << "; path: " << path << "; fd: "
-           << (fd < 0 ? "less than 0" : std::to_string(*fd)) << "\n"
+           << (fd < 0 ? "less than 0" : std::to_string(fd)) << "\n"
            << "; Returning: "
            << smi_amdgpu_get_status_string(AMDSMI_STATUS_FILE_ERROR, false) << "\n";
         LOG_INFO(ss);
@@ -715,7 +715,7 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice
 
     amdgpu_device_handle device_handle = nullptr;
     uint32_t major_version, minor_version;
-    int ret = amdgpu_device_initialize(*fd, &major_version, &minor_version, &device_handle);
+    int ret = amdgpu_device_initialize(fd, &major_version, &minor_version, &device_handle);
     if (ret != 0) {
       amdgpu_device_deinitialize(device_handle);
       libdrm_amdgpu_.unload();
@@ -737,19 +737,13 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice
         market_name[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
         amdgpu_device_deinitialize(device_handle);
         libdrm_amdgpu_.unload();
-        ss << __PRETTY_FUNCTION__ << " | path: " << path << "\n"
-           << " | fd: "<< std::dec << *fd << "\n"
-           << " | Marketing Name: " << market_name << "\n"
-           << " | Returning: "
-           << smi_amdgpu_get_status_string(AMDSMI_STATUS_SUCCESS, false) << "\n";
-        LOG_INFO(ss);
         return AMDSMI_STATUS_SUCCESS;
     }
 
     amdgpu_device_deinitialize(device_handle);
     libdrm_amdgpu_.unload();
     ss << __PRETTY_FUNCTION__ << " | path: " << path << "\n"
-       << " | fd: "<< std::dec << *fd << "\n"
+       << " | fd: "<< std::dec << fd << "\n"
        << " | Marketing Name: " << market_name << "\n"
        << " | Returning: "
        << smi_amdgpu_get_status_string(AMDSMI_STATUS_DRM_ERROR, false) << "\n";
@@ -1001,75 +995,3 @@ struct CperFileCtx {
     std::unique_ptr<char[]> buffer;
     long file_size = 0;
 };
-
-
-void amdsmi_wait_for_user_input(void) {
-  for (;;) {
-    std::cout << "\n\t**Press any key to continue**" << std::endl;
-    int input = std::cin.get();
-    if (input == EOF) {
-      std::cout << "EOF detected. Exiting." << std::endl;
-      return;
-    }
-    char input_char = static_cast<char>(input);
-    std::cout << "User entered: " << input_char << std::endl;
-    if (input_char == '\n') {
-      return;
-    }
-  }
-}
-
-ScopedFD::ScopedFD(const std::string& path, int flags)
-    : fd_(open(path.c_str(), flags)), path_(path) {
-    std::ostringstream ss;
-    if (fd_ >= 0) {
-        ss << __PRETTY_FUNCTION__ << " | Opened FD: " << fd_
-           << " for path: " << path_;
-        LOG_INFO(ss);
-    } else {
-        ss << __PRETTY_FUNCTION__ << " | Failed to open file: " << path_
-           << " | Error: " << strerror(errno);
-        LOG_ERROR(ss);
-    }
-}
-
-ScopedFD::~ScopedFD() {
-    if (fd_ >= 0) {
-        std::ostringstream ss;
-        ss << __PRETTY_FUNCTION__ << " | Closing FD: " << fd_
-           << " for path: " << path_;
-        LOG_INFO(ss);
-        close(fd_);
-    }
-}
-
-ScopedFD::ScopedFD(ScopedFD&& other) noexcept
-    : fd_(other.fd_), path_(std::move(other.path_)) {
-    other.fd_ = -1;
-}
-
-ScopedFD& ScopedFD::operator=(ScopedFD&& other) noexcept {
-    if (this != &other) {
-        if (fd_ >= 0) close(fd_);
-        fd_ = other.fd_;
-        path_ = std::move(other.path_);
-        other.fd_ = -1;
-    }
-    return *this;
-}
-
-int ScopedFD::get() const {
-    return fd_;
-}
-
-bool ScopedFD::valid() const {
-    return fd_ >= 0;
-}
-
-ScopedFD::operator int() const {
-    return fd_;
-}
-
-int ScopedFD::operator*() const {
-    return fd_;
-}

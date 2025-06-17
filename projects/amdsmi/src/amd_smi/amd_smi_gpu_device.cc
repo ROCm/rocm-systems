@@ -20,16 +20,12 @@
  * THE SOFTWARE.
  */
 
-#include <functional>
-#include <map>
 #include <memory>
 #include <unordered_set>
 #include <dirent.h>
 #include <sys/types.h>
 
 #include "amd_smi/impl/amd_smi_gpu_device.h"
-#include "amd_smi/impl/amd_smi_common.h"
-#include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/fdinfo.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_utils.h"
@@ -43,7 +39,6 @@ uint32_t AMDSmiGPUDevice::get_gpu_id() const {
 }
 
 uint32_t AMDSmiGPUDevice::get_card_id() {
-    std::ostringstream ss;
     // Should never return not_supported, but just in case
     rsmi_status_t ret = rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED;
     uint32_t gpu_index = this->get_gpu_id();
@@ -55,24 +50,10 @@ uint32_t AMDSmiGPUDevice::get_card_id() {
         this->card_index_ = identifiers.card_index;
     }
 
-    ss << __PRETTY_FUNCTION__
-       << " | rsmi_dev_identifiers_get status: " << getRSMIStatusString(ret, false) << "\n"
-       << " | gpu_id_: " << gpu_id_ << "\n"
-       << " | identifiers.card_index: " << identifiers.card_index  << "\n"
-       << " | identifiers.drm_render_minor: " << identifiers.drm_render_minor  << "\n"
-       << " | identifiers.bdfid: " << std::hex << "0x" << identifiers.bdfid  << "\n"
-       << " | identifiers.kfd_gpu_id: " << std::dec << identifiers.kfd_gpu_id  << "\n"
-       << " | identifiers.partition_id: " << identifiers.partition_id  << "\n"
-       << " | identifiers.smi_device_id: " << identifiers.smi_device_id  << "\n"
-       << " | returning card_index_: "
-       << this->card_index_ << std::endl;
-    // std::cout << ss.str();
-    LOG_DEBUG(ss);
     return this->card_index_;
 }
 
 uint32_t AMDSmiGPUDevice::get_drm_render_minor() {
-    std::ostringstream ss;
     // Should never return not_supported, but just in case
     rsmi_status_t ret = rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED;
     uint32_t gpu_index = this->get_gpu_id();
@@ -84,24 +65,10 @@ uint32_t AMDSmiGPUDevice::get_drm_render_minor() {
         this->drm_render_minor_ = identifiers.drm_render_minor;
     }
 
-    ss << __PRETTY_FUNCTION__
-       << " | rsmi_dev_identifiers_get status: " << getRSMIStatusString(ret, false) << "\n"
-       << " | gpu_id_: " << gpu_id_ << "\n"
-       << " | identifiers.card_index: " << identifiers.card_index  << "\n"
-       << " | identifiers.drm_render_minor: " << identifiers.drm_render_minor  << "\n"
-       << " | identifiers.bdfid: " << std::hex << "0x" << identifiers.bdfid  << "\n"
-       << " | identifiers.kfd_gpu_id: " << std::dec << identifiers.kfd_gpu_id  << "\n"
-       << " | identifiers.partition_id: " << identifiers.partition_id  << "\n"
-       << " | identifiers.smi_device_id: " << identifiers.smi_device_id  << "\n"
-       << " | returning drm_render_minor_: "
-       << this->drm_render_minor_ << std::endl;
-    // std::cout << ss.str();
-    LOG_DEBUG(ss);
     return this->drm_render_minor_;
 }
 
 uint64_t AMDSmiGPUDevice::get_kfd_gpu_id() {
-    std::ostringstream ss;
     // Should never return not_supported, but just in case
     rsmi_status_t ret = rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED;
     uint32_t gpu_index = this->get_gpu_id();
@@ -113,24 +80,7 @@ uint64_t AMDSmiGPUDevice::get_kfd_gpu_id() {
         this->kfd_gpu_id_ = identifiers.kfd_gpu_id;
     }
 
-    ss << __PRETTY_FUNCTION__
-       << " | rsmi_dev_identifiers_get status: " << getRSMIStatusString(ret, false) << "\n"
-       << " | gpu_id_: " << gpu_id_ << "\n"
-       << " | identifiers.card_index: " << identifiers.card_index  << "\n"
-       << " | identifiers.drm_render_minor: " << identifiers.drm_render_minor  << "\n"
-       << " | identifiers.bdfid: " << std::hex << "0x" << identifiers.bdfid  << "\n"
-       << " | identifiers.kfd_gpu_id: " << std::dec << identifiers.kfd_gpu_id  << "\n"
-       << " | identifiers.partition_id: " << identifiers.partition_id  << "\n"
-       << " | identifiers.smi_device_id: " << identifiers.smi_device_id  << "\n"
-       << " | returning kfd_gpu_id_: "
-       << this->kfd_gpu_id_ << std::endl;
-    // std::cout << ss.str();
-    LOG_DEBUG(ss);
     return this->kfd_gpu_id_;
-}
-
-uint32_t AMDSmiGPUDevice::get_gpu_fd() const {
-    return fd_;
 }
 
 std::string& AMDSmiGPUDevice::get_gpu_path() {
@@ -147,38 +97,14 @@ uint32_t AMDSmiGPUDevice::get_vendor_id() {
 
 amdsmi_status_t AMDSmiGPUDevice::get_drm_data() {
     amdsmi_status_t ret;
-    uint32_t fd = 0;
     std::string path;
     amdsmi_bdf_t bdf;
-    std::ostringstream ss;
-    ret = drm_.get_drm_fd_by_index(gpu_id_, &fd);
-    ss << __PRETTY_FUNCTION__ << " | gpu_id_: " << gpu_id_
-    << "; fd: " << fd
-    << "; drm_.get_drm_fd_by_index(gpu_id_, &fd): "
-    << smi_amdgpu_get_status_string(ret, false) << std::endl;
-    // std::cout << ss.str();
-    LOG_DEBUG(ss);
-    if (ret != AMDSMI_STATUS_SUCCESS) return AMDSMI_STATUS_NOT_SUPPORTED;
     ret = drm_.get_drm_path_by_index(gpu_id_, &path);
-    ss << __PRETTY_FUNCTION__ << " | gpu_id_: " << gpu_id_
-    << "; path: " << path
-    << "; drm_.get_drm_fd_by_index(gpu_id_, &path): "
-    << smi_amdgpu_get_status_string(ret, false) << std::endl;
-    // std::cout << ss.str();
-    LOG_DEBUG(ss);
     if (ret != AMDSMI_STATUS_SUCCESS) return AMDSMI_STATUS_NOT_SUPPORTED;
     ret = drm_.get_bdf_by_index(gpu_id_, &bdf);
-    ss << __PRETTY_FUNCTION__ << " | gpu_id_: " << gpu_id_
-    << "; domain: " << bdf.domain_number
-    << "; bus: " << bdf.bus_number
-    << "; device: " << bdf.device_number
-    << "; drm_.get_drm_fd_by_index(gpu_id_, &bdf): "
-    << smi_amdgpu_get_status_string(ret, false) << std::endl;
-    // std::cout << ss.str();
-    LOG_DEBUG(ss);
     if (ret != AMDSMI_STATUS_SUCCESS) return AMDSMI_STATUS_NOT_SUPPORTED;
 
-    bdf_ = bdf, path_ = path, fd_ = fd;
+    bdf_ = bdf, path_ = path;
     vendor_id_ = drm_.get_vendor_id();
 
     return AMDSMI_STATUS_SUCCESS;
@@ -280,15 +206,7 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& 
                     }
                 }
                 kfd_file.close();
-            } else {
-                std::ostringstream ss;
-                ss << __PRETTY_FUNCTION__ << " | Failed to open KFD file: " << kfd_path;
-                LOG_DEBUG(ss);
             }
-        } else {
-            std::ostringstream ss;
-            ss << __PRETTY_FUNCTION__ << " | KFD file not accessible: " << kfd_path;
-            LOG_DEBUG(ss);
         }
 
         return status_code;
