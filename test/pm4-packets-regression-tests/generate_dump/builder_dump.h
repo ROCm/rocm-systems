@@ -4,6 +4,8 @@
 #include "pm4/cmd_builder.h"
 #include "pm4/pmc_builder.h"
 
+static constexpr bool CMD_BUFFER_DUMP_ENABLED = false;
+
 using namespace std;
 
 static inline pm4_builder::counters_vector
@@ -111,6 +113,21 @@ aql_profile::gpu_id_t get_gpu_id(std::string_view gfx_ip) {
   return aql_profile::INVAL_GPU_ID;
 }
 
+void dump_cmd_buffer(ofstream &file_handle,
+                            pm4_builder::CmdBuffer &cmdBuf) {
+  uint32_t numElems = cmdBuf.Size() / sizeof(uint32_t);
+  const uint32_t *start_ptr = static_cast<const uint32_t *>(cmdBuf.Data());
+  if(CMD_BUFFER_DUMP_ENABLED){
+    for (uint32_t i = 0; i < numElems; i++) file_handle << ", " << start_ptr[i];
+    file_handle << endl;
+  }
+  cmdBuf.Clear();
+}
+
+inline void file_dump(std::ofstream& file_handle, const std::string& text) {
+    if (CMD_BUFFER_DUMP_ENABLED)
+        file_handle << text;
+}
 
 class pmc_builder_dump {
 public:
@@ -118,48 +135,41 @@ public:
                            pm4_builder::PmcBuilder *pmc_builder,
                            const pm4_builder::counters_vector &counters_vec) {
     ofstream file_handle;
-    file_handle.open(file_name, ios::out);
+    if (CMD_BUFFER_DUMP_ENABLED) file_handle.open(file_name, ios::out);
     string delim = ", ";
 
     pm4_builder::CmdBuffer cmd_buf;
     void *data_buffer = 0;
 
-    file_handle << "pmc_builder::Enable(cmd_buf)";
+    file_dump(file_handle, "pmc_builder::Enable(cmd_buf)");
     pmc_builder->Enable(&cmd_buf);
     dump_cmd_buffer(file_handle, cmd_buf);
 
-    file_handle << "pmc_builder::Disable(cmd_buf)";
+    file_dump(file_handle, "pmc_builder::Disable(cmd_buf)");
     pmc_builder->Disable(&cmd_buf);
     dump_cmd_buffer(file_handle, cmd_buf);
 
-    file_handle << "pmc_builder::WaitIdle(cmd_buf)";
+    file_dump(file_handle, "pmc_builder::WaitIdle(cmd_buf)");
     pmc_builder->WaitIdle(&cmd_buf);
     dump_cmd_buffer(file_handle, cmd_buf);
 
-    file_handle << "pmc_builder::Start(cmd_buf)";
+    file_dump(file_handle, "pmc_builder::Start(cmd_buf)");
     pmc_builder->Start(&cmd_buf, counters_vec);
     dump_cmd_buffer(file_handle, cmd_buf);
 
-    file_handle << "pmc_builder::Stop(cmd_buf)";
+    file_dump(file_handle, "pmc_builder::Stop(cmd_buf)");
     pmc_builder->Stop(&cmd_buf, counters_vec);
     dump_cmd_buffer(file_handle, cmd_buf);
 
-    file_handle << "pmc_builder::Read(cmd_buf)";
+    file_dump(file_handle, "pmc_builder::Read(cmd_buf)");
     pmc_builder->Read(&cmd_buf, counters_vec, data_buffer);
     dump_cmd_buffer(file_handle, cmd_buf);
 
-    file_handle.close();
+    if(file_handle.is_open())
+      file_handle.close();
   }
 
-  static void dump_cmd_buffer(ofstream &file_handle,
-                              pm4_builder::CmdBuffer &cmdBuf) {
-    uint32_t numElems = cmdBuf.Size() / sizeof(uint32_t);
-    const uint32_t *start_ptr = static_cast<const uint32_t *>(cmdBuf.Data());
-    for (uint32_t i = 0; i < numElems; i++)
-      file_handle << ", " << start_ptr[i];
-    file_handle << endl;
-    cmdBuf.Clear();
-  }
+
 };
 
 class spm_builder_dump {
@@ -168,7 +178,7 @@ public:
                            pm4_builder::SpmBuilder *spm_builder,
                            const pm4_builder::counters_vector &counters_vec) {
     ofstream file_handle;
-    file_handle.open(file_name, ios::out);
+    if (CMD_BUFFER_DUMP_ENABLED) file_handle.open(file_name, ios::out);
     string delim = ", ";
 
     pm4_builder::CmdBuffer cmd_buf;
@@ -178,37 +188,29 @@ public:
     config.spm_kfd_mode = false;
     config.mi100 = false;
 
-    file_handle << "spm_builder::Begin(cmd_buf,SpmConfig{.spm_kfd_mode=false,.mi100=false},counters_vec)";
+    file_dump(file_handle, "spm_builder::Begin(cmd_buf,SpmConfig{.spm_kfd_mode=false,.mi100=false},counters_vec)");
     spm_builder->Begin(&cmd_buf, &config, counters_vec);
     dump_cmd_buffer(file_handle, cmd_buf);
 
-    file_handle << "spm_builder::Stop(cmd_buf, SpmConfig{.spm_kfd_mode=false,.mi100=false})";
+    file_dump(file_handle, "spm_builder::Stop(cmd_buf, SpmConfig{.spm_kfd_mode=false,.mi100=false})");
     spm_builder->End(&cmd_buf, &config);
     dump_cmd_buffer(file_handle, cmd_buf);
 
     config.spm_kfd_mode = true;
     config.mi100 = true;
 
-    file_handle << "spm_builder::Begin(cmd_buf,SpmConfig{.spm_kfd_mode=true,.mi100=true},counters_vec)";
+    file_dump(file_handle, "spm_builder::Begin(cmd_buf,SpmConfig{.spm_kfd_mode=true,.mi100=true},counters_vec)");
     spm_builder->Begin(&cmd_buf, &config, counters_vec);
     dump_cmd_buffer(file_handle, cmd_buf);
 
-    file_handle << "spm_builder::Stop(cmd_buf,SpmConfig{.spm_kfd_mode=true,.mi100=true})";
+    file_dump(file_handle, "spm_builder::Stop(cmd_buf,SpmConfig{.spm_kfd_mode=true,.mi100=true})");
     spm_builder->End(&cmd_buf, &config);
     dump_cmd_buffer(file_handle, cmd_buf);
 
-    file_handle.close();
+    if(file_handle.is_open())
+      file_handle.close();
   }
 
-  static void dump_cmd_buffer(ofstream &file_handle,
-                              pm4_builder::CmdBuffer &cmdBuf) {
-    uint32_t numElems = cmdBuf.Size() / sizeof(uint32_t);
-    const uint32_t *start_ptr = static_cast<const uint32_t *>(cmdBuf.Data());
-    for (uint32_t i = 0; i < numElems; i++)
-      file_handle << ", " << start_ptr[i];
-    file_handle << endl;
-    cmdBuf.Clear();
-  }
 };
 
 
@@ -218,31 +220,23 @@ public:
                            pm4_builder::SqttBuilder *sqtt_builder,
                            pm4_builder::TraceConfig* config) {
     ofstream file_handle;
-    file_handle.open(file_name, ios::out);
+    if (CMD_BUFFER_DUMP_ENABLED) file_handle.open(file_name, ios::out);
     string delim = ", ";
 
     pm4_builder::CmdBuffer cmd_buf;
 
-    file_handle << "sqtt_builder->Begin(&cmd_buf, config)";
+    file_dump(file_handle, "sqtt_builder->Begin(&cmd_buf, config)");
     sqtt_builder->Begin(&cmd_buf, config);
     dump_cmd_buffer(file_handle, cmd_buf);
 
-    file_handle << "sqtt_builder->End(&cmd_buf, config)";
+    file_dump(file_handle, "sqtt_builder->End(&cmd_buf, config)");
     sqtt_builder->End(&cmd_buf, config);
     dump_cmd_buffer(file_handle, cmd_buf);
 
-    file_handle.close();
+    if(file_handle.is_open())
+      file_handle.close();
   }
 
-  static void dump_cmd_buffer(ofstream &file_handle,
-                              pm4_builder::CmdBuffer &cmdBuf) {
-    uint32_t numElems = cmdBuf.Size() / sizeof(uint32_t);
-    const uint32_t *start_ptr = static_cast<const uint32_t *>(cmdBuf.Data());
-    for (uint32_t i = 0; i < numElems; i++)
-      file_handle << ", " << start_ptr[i];
-    file_handle << endl;
-    cmdBuf.Clear();
-  }
 };
 
 #endif // PMC_BUILDER_DUMP_H
