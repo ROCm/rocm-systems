@@ -74,7 +74,7 @@ struct ompt : comp::base<ompt, void>
     ompt(const ompt&)     = default;
     ompt(ompt&&) noexcept = default;
 
-    ompt& operator=(const ompt&) = default;
+    ompt& operator=(const ompt&)     = default;
     ompt& operator=(ompt&&) noexcept = default;
 
     template <typename... Args>
@@ -97,13 +97,13 @@ struct ompt : comp::base<ompt, void>
         if(_cid > 0)
         {
             category_region<category::ompt>::start<tim::quirk::perfetto>(
-                (_ctx_info.func.empty()) ? m_prefix : _ctx_info.func, _ts,
+                (!m_prefix.empty()) ? m_prefix : _ctx_info.func, _ts,
                 ::perfetto::Flow::ProcessScoped(_cid), std::move(_annotate));
         }
         else
         {
             category_region<category::ompt>::start<tim::quirk::perfetto>(
-                (_ctx_info.func.empty()) ? m_prefix : _ctx_info.func, _ts,
+                (!m_prefix.empty()) ? m_prefix : _ctx_info.func, _ts,
                 std::move(_annotate));
         }
     }
@@ -128,13 +128,13 @@ struct ompt : comp::base<ompt, void>
         if(_cid > 0)
         {
             category_region<category::ompt>::stop<tim::quirk::perfetto>(
-                (_ctx_info.func.empty()) ? m_prefix : _ctx_info.func, _ts,
-                std::move(_annotate));
+                (!m_prefix.empty()) ? m_prefix : _ctx_info.func, _ts,
+                ::perfetto::Flow::ProcessScoped(_cid), std::move(_annotate));
         }
         else
         {
             category_region<category::ompt>::stop<tim::quirk::perfetto>(
-                (_ctx_info.func.empty()) ? m_prefix : _ctx_info.func, _ts,
+                (!m_prefix.empty()) ? m_prefix : _ctx_info.func, _ts,
                 std::move(_annotate));
         }
     }
