@@ -107,7 +107,7 @@ jobs:
           rm -rf build*
           CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-samples samples
           CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-tests tests
-          export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:/opt/rocm-$ver:${LD_LIBRARY_PATH}
+          export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:/opt/rocm-$ver/lib:${LD_LIBRARY_PATH}
           cmake --build build-samples --target all --parallel 16
           cmake --build build-tests --target all --parallel 16
           ctest --test-dir build-samples -LE "${CTEST_EXCLUDE_LABEL_REGEX}" -E "${CTEST_EXCLUDE_TESTS_REGEX}" --output-on-failure
