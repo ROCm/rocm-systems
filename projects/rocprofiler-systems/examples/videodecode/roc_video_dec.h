@@ -36,6 +36,7 @@ THE SOFTWARE.
 #include <stdint.h>
 #include <string.h>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 extern "C"
