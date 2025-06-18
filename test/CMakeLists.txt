@@ -90,21 +90,7 @@ if(AQLPROFILE_BUILD_TESTS)
     enable_testing()
 endif()
 
-# new tests
-add_custom_command(
-    OUTPUT ${TEST_BINARY_DIR}/pm4-packets-regression-tests/copied.flag
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-            ${CMAKE_CURRENT_SOURCE_DIR}/pm4-packets-regression-tests
-            ${TEST_BINARY_DIR}/pm4-packets-regression-tests
-    COMMAND ${CMAKE_COMMAND} -E touch ${TEST_BINARY_DIR}/pm4-packets-regression-tests/copied.flag
-    DEPENDS builder_dump_exe
-    COMMENT "Copying pm4-packets-regression-tests files to build directory"
-)
-
-add_custom_target(copy_regression_files ALL
-    DEPENDS ${TEST_BINARY_DIR}/pm4-packets-regression-tests/copied.flag
-)
-
-add_test(NAME regression-pmc-packets COMMAND "${TEST_BINARY_DIR}/pm4-packets-regression-tests/run_regression_test.sh" pmc)
-add_test(NAME regression-sqtt-packets COMMAND "${TEST_BINARY_DIR}/pm4-packets-regression-tests/run_regression_test.sh" sqtt)
-add_test(NAME regression-spm-packets COMMAND "${TEST_BINARY_DIR}/pm4-packets-regression-tests/run_regression_test.sh" spm)
+execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory ${TEST_BINARY_DIR}/pm4-packets-regression-tests)
+execute_process(COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/pm4-packets-regression-tests/compare_debug_trace.py ${TEST_BINARY_DIR}/pm4-packets-regression-tests/compare_debug_trace.py)
+execute_process(COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/pm4-packets-regression-tests/run_regression_test.sh ${TEST_BINARY_DIR}/pm4-packets-regression-tests/run_regression_test.sh)
+execute_process(COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/pm4-packets-regression-tests/baselines ${TEST_BINARY_DIR}/pm4-packets-regression-tests/baselines)

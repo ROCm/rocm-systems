@@ -34,13 +34,20 @@ set(IP_DISCOVERY_SRC_FILES
     ${AQLPROFILE_ROOT}/src/core/ip_offset_table_init.cpp
 )
 
-add_executable(builder_dump_exe
+add_executable(builder_dump
     ${AQLPROFILE_ROOT}/src/util/hsa_rsrc_factory.cpp
     generate_dump/builder_dump.cpp
     ${FACTORY_SRC_FILES}
     ${IP_DISCOVERY_SRC_FILES}
 )
 
-target_link_libraries(builder_dump_exe
+target_link_libraries(builder_dump
     ${ROCM_PATH}/lib/libhsa-runtime64.so
+)
+
+# Always copy builder_dump to the test binary directory after build
+add_custom_command(TARGET builder_dump POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${TEST_BINARY_DIR}/pm4-packets-regression-tests
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:builder_dump> ${TEST_BINARY_DIR}/pm4-packets-regression-tests/
+    COMMENT "Copying builder_dump to test binary directory"
 )
