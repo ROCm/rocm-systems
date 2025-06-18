@@ -15,6 +15,10 @@ ROCprofiler-SDK provides wrapper APIs for the ROCprof Trace Decoder, a library t
 
     Thread trace can generate large amounts of data, especially when profiling complex applications or longer execution runs. This might require handling potentially high volumes of trace data, so it’s recommended to implement appropriate filtering strategies to focus on the specific parts of interest in your application.
 
+.. note::
+
+    ROCprof Trace Decoder is a binary-only library and can be found `here <https://github.com/ROCm/rocprof-trace-decoder/releases>`_.
+
 Thread trace service API
 ------------------------------------
 

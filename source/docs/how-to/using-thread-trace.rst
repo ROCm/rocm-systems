@@ -35,11 +35,17 @@ Tracing and decoding is handled by ``rocprofv3`` while visualization is handled 
 Prerequisites
 =========
 
-- aqlprofile for ROCm 7.0+
+- aqlprofile:
+
+  * ROCm 7.x build, or
+
+  * Early release can be `built from source <https://github.com/rocm/aqlprofile>`_
 
   * Otherwise, ``rocprofv3`` throws error "INVALID_SHADER_DATA" or "Agent not supported".
-  
-- Installation of ROCprof Trace Decoder component. For binary files, see `ROCprof trace decoder release page <https://github.com/ROCm/rocprof-trace-decoder/releases>`_.
+
+- Installation of ROCprof Trace Decoder component:
+
+  * For binary files, see `ROCprof trace decoder release page <https://github.com/ROCm/rocprof-trace-decoder/releases>`_.
 
   * Default location is ``/opt/rocm/lib``
    
@@ -147,7 +153,7 @@ After the application finishes executing, ROCprof Trace Decoder runs automatical
   
   * Contains detailed tracing information in the form of .json files.
     
-  * This directory can be opened using ROCprof Compute Viewer.
+  * This directory can be opened using the `ROCprof Compute Viewer <https://rocm.docs.amd.com/projects/rocprof-compute-viewer/en/amd-mainline/>`_.
 
 - Raw files:
 
