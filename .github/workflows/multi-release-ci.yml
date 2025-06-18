@@ -99,6 +99,7 @@ jobs:
 
     - name: Test Install Build
       timeout-minutes: 20
+      working-directory: /opt/rocprofiler-sdk/share/rocprofiler-sdk
       shell: bash
       run: |
         for ver in 6.2.1 6.2.4 6.3.4 6.4.1; do
