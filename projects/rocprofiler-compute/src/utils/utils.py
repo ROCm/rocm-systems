@@ -1552,3 +1552,16 @@ def convert_metric_id_to_panel_idx(metric_id):
         return int(tokens[0]) * 100 + int(tokens[1])
     else:
         raise Exception(f"Invalid metric id: {metric_id}")
+
+def format_time(seconds):
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    parts = []
+    if hours > 0:
+        parts.append(f"{hours} hour{'s' if hours != 1 else ''}")
+    if minutes > 0:
+        parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
+    if secs > 0 or not parts:
+        parts.append(f"{secs} second{'s' if secs != 1 else ''}")
+    return ', '.join(parts[:-1]) + (' and ' if len(parts) > 1 else '') + parts[-1]
