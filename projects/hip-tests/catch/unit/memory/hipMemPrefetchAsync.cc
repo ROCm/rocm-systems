@@ -89,8 +89,8 @@ TEST_CASE("Unit_hipMemPrefetchAsync_Sync_Behavior") {
   const auto stream_type = GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
 
   StreamGuard sg(stream_type);
-  BEGIN_CAPTURE(sg.stream());
   LinearAllocGuard<void> alloc(LinearAllocs::hipMallocManaged, kPageSize);
+  BEGIN_CAPTURE(sg.stream());
   LaunchDelayKernel(std::chrono::milliseconds{100}, sg.stream());
   HIP_CHECK(hipMemPrefetchAsync(alloc.ptr(), kPageSize, device, sg.stream()));
   END_CAPTURE(sg.stream());
