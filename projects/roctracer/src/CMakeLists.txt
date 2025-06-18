@@ -243,23 +243,3 @@ install(TARGETS hip_stats LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_
 install(TARGETS hip_stats LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME} COMPONENT asan)
 
 endif()
-
-option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compatibility" OFF)
-
-if(FILE_REORG_BACKWARD_COMPATIBILITY)
-## To enable/disable #error in wrapper header files
-  if(NOT DEFINED ROCM_HEADER_WRAPPER_WERROR)
-    if(DEFINED ENV{ROCM_HEADER_WRAPPER_WERROR})
-      set(ROCM_HEADER_WRAPPER_WERROR "$ENV{ROCM_HEADER_WRAPPER_WERROR}"
-                CACHE STRING "Header wrapper warnings as errors.")
-    else()
-      set(ROCM_HEADER_WRAPPER_WERROR "OFF" CACHE STRING "Header wrapper warnings as errors.")
-    endif()
-  endif()
-  if(ROCM_HEADER_WRAPPER_WERROR)
-    set(deprecated_error 1)
-  else()
-    set(deprecated_error 0)
-  endif()
-  include(${PROJECT_SOURCE_DIR}/roctracer-backward-compat.cmake)
-endif()
