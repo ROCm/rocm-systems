@@ -90,29 +90,21 @@ TEST_CASE("Unit_hipMallocManaged_Advanced") {
         "GPU doesn't support managed memory so skipping test.");
     return;
   }
-  hipError_t error_capture = hipSuccess;
-  BEGIN_CAPTURE_SYNC(error_capture, true);
   float *A, *B, *C;
 
-  HIP_CHECK_ERROR((hipMallocManaged(&A, numElements * sizeof(float))),
-                  error_capture);
-  HIP_CHECK_ERROR((hipMallocManaged(&B, numElements * sizeof(float))),
-                  error_capture);
-  HIP_CHECK_ERROR((hipMallocManaged(&C, numElements * sizeof(float))),
-                  error_capture);
+  HIP_CHECK(hipMallocManaged(&A, numElements * sizeof(float)));
+  HIP_CHECK(hipMallocManaged(&B, numElements * sizeof(float)));
+  HIP_CHECK(hipMallocManaged(&C, numElements * sizeof(float)));
   HipTest::setDefaultData(numElements, A, B, C);
 
   hipDevice_t device = hipCpuDeviceId;
 
-  HIP_CHECK_ERROR((hipMemAdvise(A, numElements * sizeof(float),
-                                hipMemAdviseSetReadMostly, device)),
-                  error_capture);
-  END_CAPTURE_SYNC(error_capture);
+  HIP_CHECK(hipMemAdvise(A, numElements * sizeof(float),
+                                hipMemAdviseSetReadMostly, device));
   if (error_capture != hipErrorStreamCaptureUnsupported) {
     HIP_CHECK(hipMemPrefetchAsync(A, numElements * sizeof(float), 0));
     HIP_CHECK(hipMemPrefetchAsync(B, numElements * sizeof(float), 0));
   }
-  // END_CAPTURE_SYNC(error_capture);
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipMemRangeGetAttribute(&device, sizeof(device),
                                     hipMemRangeAttributeLastPrefetchLocation, A,
