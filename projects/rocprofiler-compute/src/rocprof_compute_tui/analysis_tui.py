@@ -37,6 +37,7 @@ class tui_analysis(OmniAnalyze_Base):
     def __init__(self, args, supported_archs, path):
         super().__init__(args, supported_archs)
         self.path = str(path)
+        self.arch = None
 
     # -----------------------
     # Required child methods
@@ -95,10 +96,10 @@ class tui_analysis(OmniAnalyze_Base):
         # load required configs
         sysinfo_path = Path(self.path)
         sys_info = file_io.load_sys_info(sysinfo_path.joinpath("sysinfo.csv"))
-        arch = sys_info.iloc[0]["gpu_arch"]
+        self.arch = sys_info.iloc[0]["gpu_arch"]
         args = self.get_args()
         self.generate_configs(
-            arch,
+            self.arch,
             args.config_dir,
             args.list_stats,
             args.filter_metrics,
@@ -112,15 +113,13 @@ class tui_analysis(OmniAnalyze_Base):
         #    For regular single node case, load sysinfo.csv directly
         #    For multi-node, either the default "all", or specified some,
         #    pick up the one in the 1st sub_dir. We could fix it properly later.
-        sysinfo_path = Path(self.path)
         w.sys_info = file_io.load_sys_info(sysinfo_path.joinpath("sysinfo.csv"))
-        arch = w.sys_info.iloc[0]["gpu_arch"]
-        mspec = self.get_socs()[arch]._mspec
+        mspec = self.get_socs()[self.arch]._mspec
         if args.specs_correction:
             w.sys_info = parser.correct_sys_info(mspec, args.specs_correction)
         w.avail_ips = w.sys_info["ip_blocks"].item().split("|")
-        w.dfs = copy.deepcopy(self._arch_configs[arch].dfs)
-        w.dfs_type = self._arch_configs[arch].dfs_type
+        w.dfs = copy.deepcopy(self._arch_configs[self.arch].dfs)
+        w.dfs_type = self._arch_configs[self.arch].dfs_type
         self._runs[self.path] = w
 
         return self._runs
@@ -130,10 +129,39 @@ class tui_analysis(OmniAnalyze_Base):
         """Run TUI analysis."""
         super().run_analysis()
 
+        roof_plot = None
+        # 1. check if not baseline && compatible soc:
+        if self.arch in [
+            # >= MI200
+            "gfx90a",
+            "gfx940",
+            "gfx941",
+            "gfx942",
+            "gfx950",
+        ]:
+            # add roofline plot to cli output
+            self.get_socs()[self.arch].analysis_setup(
+                roofline_parameters={
+                    "workload_dir": self.path,
+                    "device_id": 0,
+                    "sort_type": "kernels",
+                    "mem_level": "ALL",
+                    "include_kernel_names": False,
+                    "is_standalone": False,
+                    "roofline_data_type": "FP32",
+                }
+            )
+            roof_obj = self.get_socs()[self.arch].roofline_obj
+
+            if roof_obj:
+                # NOTE: using default data type
+                roof_plot = roof_obj.cli_generate_plot(roof_obj.get_dtype()[0])
+
         results = process_panels_to_dataframes(
             self.get_args(),
             self._runs,
-            self._arch_configs[self._runs[self.path].sys_info.iloc[0]["gpu_arch"]],
+            self._arch_configs[self.arch],
             self._profiling_config,
+            roof_plot=roof_plot,
         )
         return results

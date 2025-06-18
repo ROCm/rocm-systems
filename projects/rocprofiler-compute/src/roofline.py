@@ -109,27 +109,57 @@ class Roofline:
     def roof_setup(self):
         # Setup the workload directory for roofline profiling.
         workload_dir_val = self.__run_parameters.get("workload_dir")
-        if (
-            workload_dir_val
-            and Path(workload_dir_val).name == "workloads"
-            and Path(workload_dir_val).parent == Path(os.getcwd())
-        ):
-            app_name = getattr(self.__args, "name", "default_app_name")
-            gpu_model_name = getattr(self.__mspec, "gpu_model", "default_gpu_model")
-            self.__run_parameters["workload_dir"] = str(
-                Path(workload_dir_val).joinpath(
-                    app_name,
-                    gpu_model_name,
-                )
-            )
 
-        current_workload_dir = self.__run_parameters.get("workload_dir")
-        if current_workload_dir:
-            Path(current_workload_dir).mkdir(parents=True, exist_ok=True)
-        else:
+        if not workload_dir_val:
             console_error(
                 "Workload directory is not set. Cannot perform setup.", exit=False
             )
+            return
+
+        if isinstance(workload_dir_val, list):
+            if not workload_dir_val or not workload_dir_val[0]:
+                console_error(
+                    "Workload directory list is empty or invalid. Cannot perform setup.",
+                    exit=False,
+                )
+                return
+            # Handle nested list structure [0][0] or simple list [0]
+            base_dir = (
+                workload_dir_val[0][0]
+                if isinstance(workload_dir_val[0], (list, tuple))
+                else workload_dir_val[0]
+            )
+        else:
+            # workload_dir_val is a string
+            base_dir = workload_dir_val
+
+        base_path = Path(base_dir)
+
+        if base_path.name == "workloads" and base_path.parent == Path(os.getcwd()):
+
+            app_name = getattr(self.__args, "name", "default_app_name")
+            gpu_model_name = getattr(self.__mspec, "gpu_model", "default_gpu_model")
+
+            # Create the new path
+            new_path = base_path / app_name / gpu_model_name
+
+            # Update workload_dir with the new path, maintaining original data structure
+            if isinstance(workload_dir_val, list):
+                # Update the nested list structure
+                if isinstance(workload_dir_val[0], (list, tuple)):
+                    self.__run_parameters["workload_dir"][0][0] = str(new_path)
+                else:
+                    self.__run_parameters["workload_dir"][0] = str(new_path)
+            else:
+                # Update string value
+                self.__run_parameters["workload_dir"] = str(new_path)
+
+            final_dir = str(new_path)
+        else:
+            final_dir = base_dir
+
+        # Create the directory
+        Path(final_dir).mkdir(parents=True, exist_ok=True)
 
     @demarcate
     def empirical_roofline(
@@ -593,37 +623,56 @@ class Roofline:
             )
             return
 
+        # Normalize workload_dir to get the base directory
+        workload_dir = self.__run_parameters.get("workload_dir")
+        if workload_dir is None:
+            console_error(
+                "workload_dir is not set",
+                exit=False,
+            )
+            return
+
+        # Extract base directory path regardless of whether workload_dir is list or string
+        if isinstance(workload_dir, list):
+            if not workload_dir or not workload_dir[0]:
+                console_error(
+                    "workload_dir list is empty or contains invalid entries",
+                    exit=False,
+                )
+                return
+            # Handle nested list structure [0][0] or simple list [0]
+            base_dir = (
+                workload_dir[0][0]
+                if isinstance(workload_dir[0], (list, tuple))
+                else workload_dir[0]
+            )
+        else:
+            # workload_dir is a string
+            base_dir = workload_dir
+        self.roof_setup()
+
+        # Convert to Path object for easier manipulation
+        base_path = Path(base_dir)
+
         # Check proper datatype input - takes single str
         if not isinstance(dtype, str):
             console_error("Unsupported datatype input - must be str")
-
-        if (
-            not isinstance(self.__run_parameters["workload_dir"], list)
-            and self.__run_parameters["workload_dir"] != None
-        ):
-            self.roof_setup()
 
         # Change vL1D to a interpretable str, if required
         if "vL1D" in self.__run_parameters["mem_level"]:
             self.__run_parameters["mem_level"].remove("vL1D")
             self.__run_parameters["mem_level"].append("L1")
 
-        roofline_csv = str(
-            Path(self.__run_parameters["workload_dir"][0][0]).joinpath("roofline.csv")
-        )
-        roofline_csv_exists = Path(roofline_csv).is_file()
-        if not roofline_csv_exists:
+        roofline_csv = base_path / "roofline.csv"
+        if not roofline_csv.is_file():
             console_log("roofline", "{} does not exist".format(roofline_csv))
             return
 
-        app_path = str(
-            Path(self.__run_parameters["workload_dir"][0][0]).joinpath("pmc_perf.csv")
-        )
-        roofline_exists = Path(app_path).is_file()
-        if not roofline_exists:
-            console_error("roofline", "{} does not exist".format(app_path))
+        pmc_perf_csv = base_path / "pmc_perf.csv"
+        if not pmc_perf_csv.is_file():
+            console_error("roofline", "{} does not exist".format(pmc_perf_csv))
         t_df = OrderedDict()
-        t_df["pmc_perf"] = pd.read_csv(app_path)
+        t_df["pmc_perf"] = pd.read_csv(pmc_perf_csv)
 
         color_scheme = {
             "HBM": "blue+",

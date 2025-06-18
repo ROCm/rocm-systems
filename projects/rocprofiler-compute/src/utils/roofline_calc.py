@@ -590,9 +590,18 @@ def calc_ai(mspec, sort_type, ret_df):
 
 
 def constuct_roof(roofline_parameters, dtype):
-    benchmark_results = str(
-        Path(roofline_parameters["workload_dir"][0][0]).joinpath("roofline.csv")
-    )
+    workload_dir = roofline_parameters.get("workload_dir")
+    if isinstance(workload_dir, list):
+        base_dir = (
+            workload_dir[0][0]
+            if isinstance(workload_dir[0], (list, tuple))
+            else workload_dir[0]
+        )
+    else:
+        base_dir = workload_dir
+
+    benchmark_results = str(Path(base_dir) / "roofline.csv")
+
     # -----------------------------------------------------
     # Initialize roofline data dictionary from roofline.csv
     # -----------------------------------------------------

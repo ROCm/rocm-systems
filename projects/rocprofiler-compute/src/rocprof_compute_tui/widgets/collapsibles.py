@@ -93,10 +93,6 @@ def create_widget_from_data(df: pd.DataFrame, tui_style: Optional[str] = None) -
             case "mem_chart":
                 return MemoryChart(df)
 
-            case "roofline":
-                # TODO: implement real roofline plot
-                pass
-
             case "simple_bar":
                 return SimpleBar(df)
 
@@ -150,12 +146,12 @@ def build_subsection(
         widgets.append(widget)
 
         collapsible = Collapsible(*widgets, title=title, collapsed=collapsed)
-
-    # HACK: only because no real roofline data right now
     elif tui_style == "roofline":
-        widget = VerticalScroll(RooflinePlot())
-        collapsible = Collapsible(widget, title=title, collapsed=collapsed)
-
+        if dfs["roofline"]:
+            widget = RooflinePlot(dfs)
+            collapsible = Collapsible(widget, title=title, collapsed=collapsed)
+        else:
+            return None
     # Fallback for subsections without data or style
     else:
         collapsible = Collapsible(
@@ -228,7 +224,8 @@ def build_section_from_config(
         for subsection_config in section_config["subsections"]:
             try:
                 subsection = build_subsection(subsection_config, dfs)
-                children.append(subsection)
+                if subsection:
+                    children.append(subsection)
             except Exception as e:
                 error_msg = f"{subsection_config.get('title', 'Unknown')} error: {str(e)}"
                 children.append(Label(error_msg, classes="warning"))

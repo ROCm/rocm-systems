@@ -263,6 +263,45 @@ def px_simple_multi_bar(df, title=None, id=None):
     return dfigs
 
 
+class RooflinePlot(Static):
+    """Roofline Plot visualization widget."""
+
+    DEFAULT_CSS = """
+    RooflinePlot {
+        border: solid $accent;
+        padding: 0;
+        width: auto;
+        height: auto;
+        overflow-y: auto;
+        overflow-x: auto;
+        background: $surface;
+        color: $text;
+    }
+    """
+
+    def __init__(self, df: pd.DataFrame, **kwargs):
+        """Initialize the roofline plot"""
+        super().__init__("", classes="roofline", **kwargs)
+        self.df = df
+
+        # Disable markup rendering
+        self._render_markup = False
+
+        try:
+            plot_str = ""
+            try:
+                result = self.df["roofline"]
+                if result:
+                    plot_str = str(result)
+            except:
+                plot_str = "No roofline data generated"
+
+            self.update(plot_str)
+        except Exception as e:
+            error_message = f"Roofline plot error: {str(e)}\n{traceback.format_exc()}"
+            self.update(error_message)
+
+
 class MemoryChart(Static):
     """Memory chart visualization widget."""
 
@@ -315,95 +354,6 @@ class MemoryChart(Static):
         except Exception as e:
             error_message = f"Memory chart error: {str(e)}\n{traceback.format_exc()}"
             self.update(f"Error: {str(error_message)}")
-
-
-class RooflinePlot(PlotextPlot):
-    """
-    HACK: will be replaced with real roof line plot
-    Roofline plot visualization widget.
-    """
-
-    DEFAULT_CSS = """
-    RooflinePlot {
-        padding: 1;
-        width: auto;
-        height: auto;
-        background: $surface;
-        color: $text;
-        border: solid $accent;
-    }
-    """
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.styles.height = "75%"
-        self.styles.width = "75%"
-        self.plot_initialized = False
-        self.plt.theme("pro")
-
-    def on_mount(self):
-        self.refresh_plot()
-
-    def refresh_plot(self):
-        # Get the current size of this widget
-        plot_width, plot_height = self.size
-
-        # Configure the plot size
-        self.plt.plot_size(plot_width, plot_height)
-        self.create_roofline()
-        self.plot_initialized = True
-
-    def on_resize(self):
-        if self.plot_initialized:
-            self.refresh_plot()
-
-    def create_roofline(self):
-        """Generate the roofline plot data and visualization."""
-        # Roofline model parameters
-        peak_performance = 1000.0  # GFLOPS
-        memory_bandwidth = 100.0  # GB/s
-
-        # For memory-bound region (diagonal line)
-        x_mem = [0.1, 0.5, 1.0, 5.0, 10.0]
-        y_mem = [x * memory_bandwidth for x in x_mem]
-
-        # For compute-bound region (horizontal line)
-        x_comp = [10.0, 20.0, 50.0, 100.0]
-        y_comp = [peak_performance] * len(x_comp)
-
-        # Example workloads with safe values
-        workloads = [
-            (0.5, 45.0, "Workload A"),  # Memory bound
-            (2.0, 180.0, "Workload B"),  # Memory bound
-            (15.0, 950.0, "Workload C"),  # Compute bound
-            (30.0, 980.0, "Workload D"),  # Compute bound
-        ]
-
-        # Clear the plot and set properties
-        self.plt.clear_figure()
-        self.plt.title("Roofline Model (🚧 Under Construction)")
-        self.plt.xlabel("Arithmetic Intensity (FLOPs/Byte)")
-        self.plt.ylabel("Performance (GFLOP/sec)")
-
-        # Plot memory-bound and compute-bound lines
-        self.plt.plot(x_mem, y_mem, label="Memory Bound")
-        self.plt.plot(x_comp, y_comp, label="Compute Bound")
-
-        # Add workload points
-        workload_x = [w[0] for w in workloads]
-        workload_y = [w[1] for w in workloads]
-        workload_names = [w[2] for w in workloads]
-
-        # Plot workload points one by one to avoid errors
-        for i in range(len(workload_x)):
-            self.plt.scatter([workload_x[i]], [workload_y[i]], label=workload_names[i])
-
-        # Set a reasonable view range
-        self.plt.xlim(0, 100)
-        self.plt.ylim(0, 1100)
-
-        # Draw the plot
-        self.refresh()
 
 
 class SimpleBar(Static):

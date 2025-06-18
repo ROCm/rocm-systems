@@ -287,7 +287,9 @@ def get_table_dfs():
     return section_dfs
 
 
-def process_panels_to_dataframes(args, runs, archConfigs, profiling_config):
+def process_panels_to_dataframes(
+    args, runs, archConfigs, profiling_config, roof_plot=None
+):
     """
     Process panel data into pandas DataFrames.
     Returns a nested dictionary structure with DataFrames and tui_style information.
@@ -416,7 +418,7 @@ def process_panels_to_dataframes(args, runs, archConfigs, profiling_config):
                         # Save to CSV if requested
                         if args.df_file_dir:
                             save_dataframe_to_csv(df, table_id_str, table_config, args)
-
+    result_structure["roofline"] = roof_plot
     return dict(result_structure)
 
 
