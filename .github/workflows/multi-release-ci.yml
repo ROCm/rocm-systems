@@ -33,12 +33,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['6.2', '6.3', '6.4', 'current']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
         ci-flags: ['--linter clang-tidy']
 
-    runs-on: rocprof-azure-${{ matrix.runner }}-emu-runner-set
+    runs-on: rocprof-azure-multi-release-emu-runner-set
 
     # define this for containers
     env:
@@ -58,7 +57,7 @@ jobs:
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
         python3 -m pip install -U --user -r requirements.txt
-        rm -rf /opt/rocm/lib/*rocprofiler-sdk* /opt/rocm/lib/cmake/*rocprofiler-sdk* /opt/rocm/share/*rocprofiler-sdk* /opt/rocm/libexec/*rocprofiler-sdk*
+        rm -rf /opt/rocm*/lib/*rocprofiler-sdk* /opt/rocm*/lib/cmake/*rocprofiler-sdk* /opt/rocm*/share/*rocprofiler-sdk* /opt/rocm*/libexec/*rocprofiler-sdk*
 
     - name: List Files
       shell: bash
@@ -67,14 +66,8 @@ jobs:
         echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
-        cat /opt/rocm/.info/version
+        cat /opt/rocm*/.info/version
         ls -la
-
-    - name: Enable PC Sampling
-      if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
-      shell: bash
-      run: |
-          echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
 
     - name: Configure, Build, and Test
       timeout-minutes: 30
@@ -100,49 +93,26 @@ jobs:
           -E "${CTEST_EXCLUDE_TESTS_REGEX}"
 
     - name: Install
-      if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
       timeout-minutes: 10
       run:
         cmake --build build --target install --parallel 16
 
-    - name: Build Packaging
-      if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
-      timeout-minutes: 10
-      run:
-        cmake --build build --target package --parallel 16
-
     - name: Test Install Build
-      if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
       timeout-minutes: 20
       shell: bash
       run: |
-        CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-samples samples
-        CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-tests tests
-        export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:${LD_LIBRARY_PATH}
-        cmake --build build-samples --target all --parallel 16
-        cmake --build build-tests --target all --parallel 16
-        ctest --test-dir build-samples -LE "${CTEST_EXCLUDE_LABEL_REGEX}" -E "${CTEST_EXCLUDE_TESTS_REGEX}" --output-on-failure
-        ctest --test-dir build-tests -LE "${CTEST_EXCLUDE_LABEL_REGEX}" -E "${CTEST_EXCLUDE_TESTS_REGEX}" --output-on-failure
+        for ver in 6.2.1 6.2.4 6.3.4 6.4.1; do
+          update-alternatives --set rocm /opt/rocm-$ver
+          rm -rf build*
+          CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-samples samples
+          CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-tests tests
+          export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:${LD_LIBRARY_PATH}
+          cmake --build build-samples --target all --parallel 16
+          cmake --build build-tests --target all --parallel 16
+          ctest --test-dir build-samples -LE "${CTEST_EXCLUDE_LABEL_REGEX}" -E "${CTEST_EXCLUDE_TESTS_REGEX}" --output-on-failure
+          ctest --test-dir build-tests -LE "${CTEST_EXCLUDE_LABEL_REGEX}" -E "${CTEST_EXCLUDE_TESTS_REGEX}" --output-on-failure
+        done
 
-    - name: Install Packages
-      if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
-      timeout-minutes: 5
-      shell: bash
-      run: |
-        export PATH=${PATH}:/usr/local/sbin:/usr/sbin:/sbin
-        ls -la
-        ls -la ./build
-        dpkg -i ./build/rocprofiler-sdk-roctx_*.deb
-        dpkg -i ./build/rocprofiler-sdk-rocpd_*.deb
-        for i in $(ls -S ./build/rocprofiler-sdk*.deb | egrep -v 'roctx|rocpd'); do dpkg -i ${i}; done;
-
-    - name: Test Installed Packages
-      if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
-      timeout-minutes: 20
-      shell: bash
-      run: |
-        CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-samples-deb /opt/rocm/share/rocprofiler-sdk/samples
-        CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-tests-deb /opt/rocm/share/rocprofiler-sdk/tests
         cmake --build build-samples-deb --target all --parallel 16
         cmake --build build-tests-deb --target all --parallel 16
         ctest --test-dir build-samples-deb -LE "${CTEST_EXCLUDE_LABEL_REGEX}" -E "${CTEST_EXCLUDE_TESTS_REGEX}" --output-on-failure
