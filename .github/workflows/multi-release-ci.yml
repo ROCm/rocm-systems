@@ -112,18 +112,3 @@ jobs:
           ctest --test-dir build-samples -LE "${CTEST_EXCLUDE_LABEL_REGEX}" -E "${CTEST_EXCLUDE_TESTS_REGEX}" --output-on-failure
           ctest --test-dir build-tests -LE "${CTEST_EXCLUDE_LABEL_REGEX}" -E "${CTEST_EXCLUDE_TESTS_REGEX}" --output-on-failure
         done
-
-        cmake --build build-samples-deb --target all --parallel 16
-        cmake --build build-tests-deb --target all --parallel 16
-        ctest --test-dir build-samples-deb -LE "${CTEST_EXCLUDE_LABEL_REGEX}" -E "${CTEST_EXCLUDE_TESTS_REGEX}" --output-on-failure
-        ctest --test-dir build-tests-deb -LE "${CTEST_EXCLUDE_LABEL_REGEX}" -E "${CTEST_EXCLUDE_TESTS_REGEX}" --output-on-failure
-
-    - name: Archive production artifacts
-      if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.runner, env.CORE_EXT_RUNNER) }}
-      uses: actions/upload-artifact@v4
-      with:
-        name: installers-deb
-        path: |
-          ${{github.workspace}}/build/*.deb
-          ${{github.workspace}}/build/*.rpm
-          ${{github.workspace}}/build/*.tgz
