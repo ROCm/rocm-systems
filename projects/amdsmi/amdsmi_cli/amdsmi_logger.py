@@ -1072,18 +1072,21 @@ class AMDSMILogger():
         # print process list of all GPUs last
         print(default_line_1)
         print("| Processes:                                                                   |")
-        print("|  GPU        PID  Process Name           GTT_MEM  VRAM_MEM  MEM_USAGE  NUM_CU |")
+        print("|  GPU        PID  Process Name          GTT_MEM  VRAM_MEM  MEM_USAGE     CU % |")
         print(default_line_5)
         if len(output['processes']) != 0:
             for process in output['processes']:
                 gpu_id = str(process['gpu']).rjust(4)
                 pid = str(process['pid']).rjust(9)
-                process_name = str(process['name']).ljust(20)
+                process_name = str(process['name']).ljust(19)
                 gtt_mem = str(process['gtt']).rjust(8)
                 vram_mem = str(process['vram']).rjust(8)
                 mem_usage = str(process['mem_usage']).rjust(9)
-                cu_occupancy = str(process['cu_occupancy']).rjust(6)
-                print("| {0:4s}  {1:9s}  {2:20s}  {3:8s}  {4:8s}  {5:9s}  {6:6s} |".format(
+                if process['cu_occupancy']['max_cu'] != "N/A":
+                    cu_occupancy = (str(round(process['cu_occupancy']['current_cu'] / process['cu_occupancy']['max_cu'] * 100, 1)) + " %").rjust(7)
+                else:
+                    cu_occupancy = "N/A"
+                print("| {0:4.4s}  {1:9.9s}  {2:19.19s}  {3:8.8s}  {4:8.8s}  {5:9.9s}  {6:7.7s} |".format(
                          gpu_id, pid, process_name, gtt_mem, vram_mem, mem_usage, cu_occupancy))
         else:
             print("|  No running processes found                                                  |")

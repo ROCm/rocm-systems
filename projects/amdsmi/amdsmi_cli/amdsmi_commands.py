@@ -6601,9 +6601,12 @@ class AMDSMICommands():
                 asic_info = amdsmi_interface.amdsmi_get_gpu_asic_info(processor)
                 market_name = asic_info['market_name']
                 oam_id = asic_info['oam_id']
+                # get num_cu now for use later
+                max_cu = float(asic_info['num_compute_units'])
             except amdsmi_exception.AmdSmiLibraryException as e:
                 market_name = "N/A"
                 oam_id = "N/A"
+                max_cu = "N/A"
             gpu_info_dict.update({"market_name": market_name})
             gpu_info_dict.update({"oam_id": oam_id})
 
@@ -6701,7 +6704,8 @@ class AMDSMICommands():
                     proc_info_dict['gtt'] = self.helpers.convert_bytes_to_readable(proc['memory_usage']['gtt_mem'])
                     proc_info_dict['vram'] = self.helpers.convert_bytes_to_readable(proc['memory_usage']['vram_mem'])
                     proc_info_dict['mem_usage'] = self.helpers.convert_bytes_to_readable(proc['mem'])
-                    proc_info_dict['cu_occupancy'] = str(proc['cu_occupancy'])
+                    num_cu = float(proc['cu_occupancy'])
+                    proc_info_dict['cu_occupancy'] = {"current_cu": num_cu, "max_cu": max_cu}
                     all_process_list.append(proc_info_dict)
             except amdsmi_exception.AmdSmiLibraryException as e:
                 logging.debug("Failed to get process list for gpu %s | %s", gpu_id, e.get_error_info())
