@@ -269,12 +269,14 @@ install(
     COMPONENT dev)
 
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
+if(ENABLE_ASAN_PACKAGING)
 # install license file in share/doc/amd_smi-asan folder
 install(
     FILES ${CPACK_RESOURCE_FILE_LICENSE}
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/${AMD_SMI}-asan
     RENAME LICENSE.txt
     COMPONENT asan)
+endif()
 # docs are installed into different share directory from tests and examples
 install(
     FILES ${CPACK_RESOURCE_FILE_LICENSE}
