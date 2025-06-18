@@ -18,7 +18,7 @@ components of the video encoding and decoding workloads interact with the VCN en
 Sampling support
 =================
 
-Sampling of VCN and JPEG engine activity is supported by leveraging `AMD-SMI <https://rocm.docs.amd.com/projects/amdsmi/en/latest/>`_ which provides the interface for GPU metric collection.
+Sampling of VCN and JPEG engine activity is supported by leveraging `AMD SMI <https://rocm.docs.amd.com/projects/amdsmi/en/latest/>`_ which provides the interface for GPU metric collection.
 
 1. Set the ``ROCPROFSYS_USE_AMD_SMI`` environment variable to enable GPU metric collection:
 
@@ -47,7 +47,7 @@ Alternatively, you can use the following to collect all available GPU metrics:
 API tracing support
 =====================
 
-Tracing of rocDecode and rocJPEG APIs is supported by leveraging `ROCprofiler-SDK <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/index.html)>`_ 
+Tracing of rocDecode and rocJPEG APIs is supported by leveraging `ROCprofiler-SDK <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/index.html>`_ 
 which provides runtime-independent APIs for tracing the runtime calls and asynchronous activities associated with decoder activities and workload in VCN and JPEG engines.
 
 To enable tracing for the rocDecode and rocJPEG APIs, update the ``ROCPROFSYS_ROCM_DOMAINS`` variable. The default value is:
