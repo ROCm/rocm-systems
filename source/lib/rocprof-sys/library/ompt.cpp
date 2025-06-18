@@ -74,7 +74,7 @@ struct ompt : comp::base<ompt, void>
     ompt(const ompt&)     = default;
     ompt(ompt&&) noexcept = default;
 
-    ompt& operator=(const ompt&)     = default;
+    ompt& operator=(const ompt&) = default;
     ompt& operator=(ompt&&) noexcept = default;
 
     template <typename... Args>
