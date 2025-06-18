@@ -6,6 +6,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* Support Roofline plot on CLI (single run)
+
 * Stochastic (hardware-based) PC sampling has been enabled for AMD Instinct MI300X series and later accelerators.
 
 * Sorting of PC sampling by type: offset or count.
@@ -60,7 +62,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Add --rocprofiler-sdk-library-path runtime option to choose the path to rocprofiler-sdk library to be used
   * Using rocprof v1 / v2 / v3 interfaces will trigger a deprecation warning to use rocprofiler-sdk interface
 
-* Support MEM chart on CLI(single run)
+* Support MEM chart on CLI (single run)
 
 * Add deprecation warning for database update mode.
 

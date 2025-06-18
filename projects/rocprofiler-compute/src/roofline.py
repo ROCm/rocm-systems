@@ -573,7 +573,6 @@ class Roofline:
 
         return fig
 
-    @demarcate
     def cli_generate_plot(self, dtype):
         """
         Plot CLI mode roofline analysis in terminal using plotext
@@ -609,8 +608,16 @@ class Roofline:
             self.__run_parameters["mem_level"].remove("vL1D")
             self.__run_parameters["mem_level"].append("L1")
 
+        roofline_csv = str(
+            Path(self.__run_parameters["workload_dir"][0][0]).joinpath("roofline.csv")
+        )
+        roofline_csv_exists = Path(roofline_csv).is_file()
+        if not roofline_csv_exists:
+            console_log("roofline", "{} does not exist".format(roofline_csv))
+            return
+
         app_path = str(
-            Path(self.__run_parameters["workload_dir"]).joinpath("pmc_perf.csv")
+            Path(self.__run_parameters["workload_dir"][0][0]).joinpath("pmc_perf.csv")
         )
         roofline_exists = Path(app_path).is_file()
         if not roofline_exists:
@@ -843,6 +850,9 @@ class Roofline:
     def post_processing(self):
         if self.__run_parameters["is_standalone"]:
             self.standalone_roofline()
+
+    def get_dtype(self):
+        return self.__run_parameters["roofline_data_type"]
 
 
 def to_int(a):

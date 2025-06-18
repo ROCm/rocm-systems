@@ -28,12 +28,10 @@ from pathlib import Path
 import pandas as pd
 from tabulate import tabulate
 
+from config import HIDDEN_COLUMNS, HIDDEN_SECTIONS
 from utils import mem_chart, parser
 from utils.logger import console_log, console_warning
 from utils.utils import convert_metric_id_to_panel_idx
-
-hidden_columns = ["Tips", "coll_level"]
-hidden_sections = [1900, 2000]
 
 
 def string_multiple_lines(source, width, max_rows):
@@ -61,7 +59,7 @@ def get_table_string(df, transpose=False, decimal=2):
     )
 
 
-def show_all(args, runs, archConfigs, output, profiling_config):
+def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
     """
     Show all panels with their data in plain text mode.
     """
@@ -77,8 +75,12 @@ def show_all(args, runs, archConfigs, output, profiling_config):
     comparable_columns = parser.build_comparable_columns(args.time_unit)
 
     for panel_id, panel in archConfigs.panel_configs.items():
+        # show roofline
+        if panel_id == 400 and roof_plot:
+            show_roof_plot(roof_plot)
+
         # Skip panels that don't support baseline comparison
-        if panel_id in hidden_sections:
+        if panel_id in HIDDEN_SECTIONS:
             continue
         ss = ""  # store content of all data_source from one pannel
 
@@ -117,7 +119,7 @@ def show_all(args, runs, archConfigs, output, profiling_config):
                         or (args.cols and base_df.columns.get_loc(header) in args.cols)
                         or (type == "raw_csv_table")
                     ):
-                        if header in hidden_columns:
+                        if header in HIDDEN_COLUMNS:
                             pass
                         elif header not in comparable_columns:
                             if (
@@ -149,7 +151,7 @@ def show_all(args, runs, archConfigs, output, profiling_config):
                                 cur_df = data.dfs[table_config["id"]]
                                 if (type == "raw_csv_table") or (
                                     type == "metric_table"
-                                    and (not header in hidden_columns)
+                                    and (not header in HIDDEN_COLUMNS)
                                 ):
                                     if run != base_run:
                                         # calc percentage over the baseline
@@ -309,6 +311,7 @@ def show_all(args, runs, archConfigs, output, profiling_config):
                                     .set_index("Metric")
                                     .to_dict()["Value"],
                                 )
+                                ss += "\n"
                         else:
                             ss += (
                                 get_table_string(
@@ -321,6 +324,14 @@ def show_all(args, runs, archConfigs, output, profiling_config):
             print("\n" + "-" * 80, file=output)
             print(str(panel_id // 100) + ". " + panel["title"], file=output)
             print(ss, file=output)
+
+
+def show_roof_plot(roof_plot):
+    # TODO: short term solution to display roofline plot
+    print("\n" + "-" * 80)
+    print("4. Roofline")
+    print("4.1 Roofline")
+    print(roof_plot)
 
 
 def show_kernel_stats(args, runs, archConfigs, output):

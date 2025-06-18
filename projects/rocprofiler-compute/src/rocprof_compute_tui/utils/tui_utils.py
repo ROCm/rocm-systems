@@ -2,7 +2,6 @@ import copy
 import logging
 import os
 import re
-import sys
 from collections import defaultdict
 from datetime import datetime
 from enum import Enum
@@ -10,8 +9,7 @@ from pathlib import Path
 
 import pandas as pd
 
-HIDDEN_SECTIONS = [1900, 2000]
-HIDDEN_COLUMNS = ["Tips", "coll_level"]
+from config import HIDDEN_COLUMNS, HIDDEN_SECTIONS
 
 supported_field = [
     "Value",

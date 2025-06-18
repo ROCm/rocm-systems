@@ -26,4 +26,7 @@ from pathlib import Path
 
 # NB: Creating a new module to share global vars across modules
 rocprof_compute_home = Path(__file__).resolve().parent
-prog = "rocprofiler-compute"
+PROJECT_NAME = "rocprofiler-compute"
+
+HIDDEN_COLUMNS = ["Tips", "coll_level"]
+HIDDEN_SECTIONS = [400, 1900, 2000]

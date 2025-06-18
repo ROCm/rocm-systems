@@ -32,12 +32,11 @@ import dash_bootstrap_components as dbc
 from dash import dcc, html
 from dash.dependencies import Input, Output, State
 
+from config import HIDDEN_COLUMNS, PROJECT_NAME
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from utils import file_io, parser
 from utils.gui import build_bar_chart, build_table_chart
 from utils.logger import console_debug, console_error, demarcate
-
-PROJECT_NAME = "rocprofiler-compute"
 
 
 class webui_analysis(OmniAnalyze_Base):
@@ -50,7 +49,7 @@ class webui_analysis(OmniAnalyze_Base):
         self.arch = None
 
         self.__hidden_sections = ["Memory Chart", "Roofline"]
-        self.__hidden_columns = ["Tips", "coll_level"]
+        self.__hidden_columns = HIDDEN_COLUMNS
         # define different types of bar charts
         self.__barchart_elements = {
             "instr_mix": [1001, 1002],

@@ -322,7 +322,7 @@ class RocProfCompute:
         profiler.pre_processing()
         console_debug('starting "run_profiling" and about to start rocprof\'s workload')
         time_start_prof = time.time()
-        profiler.run_profiling(self.__version["ver"], config.prog)
+        profiler.run_profiling(self.__version["ver"], config.PROJECT_NAME)
         time_end_prof = time.time()
         console_debug(
             'finished "run_profiling" and finished rocprof\'s workload, time taken was {} m {} sec'.format(

@@ -25,9 +25,8 @@
 from dash import html
 from dash_svg import G, Path, Rect, Svg, Text
 
+from config import HIDDEN_COLUMNS
 from utils.logger import console_error
-
-hidden_columns = ["Tips", "coll_level"]
 
 
 def insert_chart_data(mem_data, base_data):
