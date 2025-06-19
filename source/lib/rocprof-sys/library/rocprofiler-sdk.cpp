@@ -37,6 +37,8 @@
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
 
+#include <optional>
+#include <rocprofiler-sdk/ompt/api_id.h>
 #include <timemory/components/timing/wall_clock.hpp>
 #include <timemory/hash/types.hpp>
 #include <timemory/unwind/processed_entry.hpp>
@@ -78,6 +80,10 @@ namespace
 {
 using tool_agent_vec_t = std::vector<tool_agent>;
 client_data* tool_data = new client_data{};
+
+std::mutex buffered_records_mutex;
+using record_with_ts_t = std::pair<rocprofiler_callback_tracing_record_t, rocprofiler_timestamp_t>;
+std::map<uint64_t, std::vector<record_with_ts_t>> buffered_records_map;
 
 void
 thread_precreate(rocprofiler_runtime_library_t /*lib*/, void* /*tool_data*/)
@@ -492,8 +498,6 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
          << ", phase=" << record.phase << ", dt_nsec=" << std::setw(8) << ts
          << ", name=" << name;
 
-    std::cout << "CALLBACK:" << info.str() << "\n";
-
     if(rocprofsys::get_state() != rocprofsys::State::Active)
     {
         ROCPROFSYS_WARNING_F(0, "Callback called when tool is not active.\n\t%s\n",
@@ -685,6 +689,12 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             get_kernel_dispatch_timestamps().emplace(
                 _data->dispatch_info.dispatch_id,
                 timing_interval{ _data->start_timestamp, _data->end_timestamp });
+        }
+        else if(record.kind == ROCPROFILER_CALLBACK_TRACING_OMPT)
+        {
+            std::lock_guard guard { buffered_records_mutex };
+            record_with_ts_t entry = {record, ts};
+            buffered_records_map[record.thread_id].emplace_back(entry);
         }
         else
         {
@@ -1276,6 +1286,7 @@ setup()
 void
 shutdown()
 {
+    post_process();
     // shutdown
     if(tool_data && tool_data->client_id && tool_data->client_fini)
         tool_data->client_fini(*tool_data->client_id);
@@ -1285,9 +1296,94 @@ void
 config()
 {}
 
+const char* ompt_thread_name = "ompt_thread";
+const char* ompt_parallel_name = "ompt_parallel";
 void
 post_process()
-{}
+{
+    std::lock_guard guard {buffered_records_mutex};
+
+    struct perfetto_record
+    {
+        const char* name;
+        rocprofiler_timestamp_t start;
+        rocprofiler_timestamp_t end;
+        rocprofiler_thread_id_t thread_id;
+        rocprofiler_correlation_id_t corr_id;
+    };
+    std::vector<perfetto_record> records;
+
+    for(auto &thread_records : buffered_records_map)
+    {
+        std::vector<record_with_ts_t> thread_list = thread_records.second;
+
+
+        auto find_record = [thread_list](const rocprofiler_ompt_operation_t &operation) -> std::optional<record_with_ts_t> {
+            auto it = std::find_if(thread_list.begin(), thread_list.end(),
+                                [operation](const record_with_ts_t &record_with_ts) {
+                                    return static_cast<int>(record_with_ts.first.operation) == static_cast<int>(operation);
+                                });
+            if(it == thread_list.end())
+            {
+                return std::nullopt;
+            }
+            return std::make_optional<record_with_ts_t>(*it);
+        };
+
+        {
+            auto thread_begin = find_record(ROCPROFILER_OMPT_ID_thread_begin);
+            auto thread_end   = find_record(ROCPROFILER_OMPT_ID_thread_end);
+            if(thread_begin.has_value() && thread_end.has_value())
+            {
+                perfetto_record entry{ .name      = ompt_thread_name,
+                                       .start     = thread_begin->second,
+                                       .end       = thread_end->second,
+                                       .thread_id = thread_records.first,
+                                       .corr_id   = thread_begin->first.correlation_id };
+
+                records.emplace_back(entry);
+            }
+        }
+        {
+            auto parallel_begin = find_record(ROCPROFILER_OMPT_ID_parallel_begin);
+            auto parallel_end   = find_record(ROCPROFILER_OMPT_ID_parallel_end);
+
+            if(parallel_begin.has_value() && parallel_end.has_value())
+            {
+                perfetto_record entry{ .name      =  ompt_parallel_name,
+                                       .start     = parallel_begin->second,
+                                       .end       = parallel_end->second,
+                                       .thread_id = thread_records.first,
+                                       .corr_id = parallel_end->first.correlation_id };
+
+                records.emplace_back(entry);
+            }
+        }
+    }
+
+    for(auto record : records)
+    {
+        auto _track_desc = [](rocprofiler_thread_id_t _tid) {
+            const auto& _tid_v = thread_info::get(_tid, SystemTID);
+            return JOIN("", "OMPT Thread ", _tid_v->index_data->sequent_value);
+        };
+
+        const auto _track = tracing::get_perfetto_track(category::rocm_ompt_api{},
+                                                        _track_desc, record.thread_id);
+
+        tracing::push_perfetto(
+            category::rocm_ompt_api{}, record.name, _track, record.start,
+            ::perfetto::Flow::ProcessScoped(record.corr_id.internal), [&](::perfetto::EventContext ctx) {
+                if(config::get_perfetto_annotations())
+                {
+                    tracing::add_perfetto_annotation(ctx, "begin_ns", record.start);
+                    tracing::add_perfetto_annotation(ctx, "end_ns", record.end);
+                    tracing::add_perfetto_annotation(ctx, "corr_id", record.corr_id.internal);
+                }
+            });
+        tracing::pop_perfetto(category::rocm_ompt_api{}, record.name, _track, record.end);
+    }
+}
 
 void
 sample()
