@@ -6461,16 +6461,17 @@ class AMDSMICommands():
                 self.logger.combine_arrays_to_json()
             self.logger.clear_multiple_devices_output()
 
-            # print legend
-            legend_parts = [
-                "\n\nLegend:",
-                "  * = Current mode"]
-            legend_output = "\n".join(legend_parts)
-            if self.logger.destination == 'stdout':
-                print(legend_output)
-            else:
-                with self.logger.destination.open('a', encoding="utf-8") as output_file:
-                    output_file.write(legend_output + '\n')
+            if self.logger.is_human_readable_format():
+                # print legend
+                legend_parts = [
+                    "\n\nLegend:",
+                    "  * = Current mode"]
+                legend_output = "\n".join(legend_parts)
+                if self.logger.destination == 'stdout':
+                    print(legend_output)
+                else:
+                    with self.logger.destination.open('a', encoding="utf-8") as output_file:
+                        output_file.write(legend_output + '\n')
 
 
     def ras(self, args, multiple_devices=False, gpu=None, cper=None, afid=None,
