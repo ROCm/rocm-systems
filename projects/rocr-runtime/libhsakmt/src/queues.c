@@ -42,9 +42,11 @@ static uint32_t get_hwreg_size_per_cu(uint32_t gfxv);
 #define DOORBELL_SIZE(gfxv)	(((gfxv) >= 0x90000) ? 8 : 4)
 #define DOORBELLS_PAGE_SIZE(ds)	(1024 * (ds))
 
-#define WG_CONTEXT_DATA_SIZE_PER_CU(gfxv, node) 		\
-	(hsakmt_get_vgpr_size_per_cu(gfxv) + SGPR_SIZE_PER_CU +	\
-	 (node.LDSSizeInKB << 10) + get_hwreg_size_per_cu(gfxv))
+#define WG_CONTEXT_DATA_SIZE_PER_CU(gfxv, node)	\
+	(hsakmt_get_vgpr_size_per_cu(gfxv) +	\
+	 hsakmt_get_sgpr_size_per_cu(gfxv) +	\
+	 (node.LDSSizeInKB << 10) +		\
+	 get_hwreg_size_per_cu(gfxv))
 
 #define CNTL_STACK_BYTES_PER_WAVE(gfxv)	\
 	((gfxv) >= GFX_VERSION_NAVI10 ? 12 : 8)
@@ -140,6 +142,33 @@ uint32_t hsakmt_get_vgpr_size_per_cu(uint32_t gfxv)
 	assert(vgpr_size);
 
 	return vgpr_size;
+}
+
+uint32_t hsakmt_get_sgpr_size_per_cu(uint32_t gfxv)
+{
+	uint32_t sgpr_size = 0;
+
+	if (gfxv < GFX_VERSION_GFX1250)
+		sgpr_size = 0x4000;
+
+	assert(sgpr_size);
+
+	return sgpr_size;
+}
+
+static uint32_t get_num_waves(HsaNodeProperties *node, uint32_t gfxv,
+			      uint32_t cu_num)
+{
+	uint32_t wave_num = 0;
+
+	if (gfxv < GFX_VERSION_NAVI10)
+		wave_num = MIN(cu_num * 40, node->NumShaderBanks / node->NumArrays * 512);
+	else if (gfxv < GFX_VERSION_GFX1250)
+		wave_num = cu_num * 32;
+
+	assert(wave_num);
+
+	return wave_num;
 }
 
 HSAKMT_STATUS hsakmt_init_process_doorbells(HsaKFDContext *ctx, unsigned int NumNodes)
@@ -343,9 +372,7 @@ static bool update_ctx_save_restore_size(HsaKFDContext *ctx, uint32_t nodeid, st
 	if (node.NumFComputeCores && node.NumSIMDPerCU) {
 		uint32_t ctl_stack_size, wg_data_size;
 		uint32_t cu_num = node.NumFComputeCores / node.NumSIMDPerCU / node.NumXcc;
-		uint32_t wave_num = (q->gfxv < GFX_VERSION_NAVI10)
-			? MIN(cu_num * 40, node.NumShaderBanks / node.NumArrays * 512)
-			: cu_num * 32;
+		uint32_t wave_num = get_num_waves(&node, q->gfxv, cu_num);
 
 		ctl_stack_size = wave_num * CNTL_STACK_BYTES_PER_WAVE(q->gfxv) + 8;
 		wg_data_size = cu_num * WG_CONTEXT_DATA_SIZE_PER_CU(q->gfxv, node);

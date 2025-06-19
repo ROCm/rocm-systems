@@ -261,5 +261,5 @@ bool hsakmt_is_forked_child(void);
 
 /* Calculate VGPR and SGPR register file size per CU */
 uint32_t hsakmt_get_vgpr_size_per_cu(uint32_t gfxv);
-#define SGPR_SIZE_PER_CU 0x4000
+uint32_t hsakmt_get_sgpr_size_per_cu(uint32_t gfxv);
 #endif
