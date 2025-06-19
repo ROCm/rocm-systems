@@ -167,7 +167,7 @@ add_executable(${ST_EXE_NAME} ${ST_TST_SRC} ${UTIL_SRC} ${KERN_SRC})
 target_include_directories(${ST_EXE_NAME} PRIVATE ${TEST_DIR} ${ROOT_DIR}
                                                   ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(${ST_EXE_NAME} ${ROCPROFILER_TARGET} hsa-runtime64::hsa-runtime64
-                      hsakmt::hsakmt Threads::Threads stdc++fs dl)
+                      Threads::Threads stdc++fs dl)
 install(
     TARGETS ${ST_EXE_NAME}
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests-v1/test
@@ -178,7 +178,7 @@ add_executable(${STIN_EXE_NAME} ${STIN_TST_SRC} ${UTIL_SRC} ${KERN_SRC})
 target_include_directories(${STIN_EXE_NAME} PRIVATE ${TEST_DIR} ${ROOT_DIR}
                                                     ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(${STIN_EXE_NAME} ${ROCPROFILER_TARGET} hsa-runtime64::hsa-runtime64
-                      hsakmt::hsakmt Threads::Threads stdc++fs dl)
+                      Threads::Threads stdc++fs dl)
 install(
     TARGETS ${STIN_EXE_NAME}
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests-v1/test
@@ -189,7 +189,7 @@ add_library(${IN_EXE_NAME} SHARED ${IN_TST_SRC} ${UTIL_SRC} ${KERN_SRC})
 target_include_directories(${IN_EXE_NAME} PRIVATE ${TEST_DIR} ${ROOT_DIR}
                                                   ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(${IN_EXE_NAME} ${ROCPROFILER_TARGET} hsa-runtime64::hsa-runtime64
-                      hsakmt::hsakmt Threads::Threads stdc++fs dl)
+                      Threads::Threads stdc++fs dl)
 install(
     TARGETS ${IN_EXE_NAME}
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests-v1/test
@@ -200,8 +200,8 @@ add_executable(${EXE_NAME} ${CTRL_SRC} ${UTIL_SRC} ${KERN_SRC})
 set_target_properties(${EXE_NAME} PROPERTIES INSTALL_RPATH "${ROCM_APPEND_PRIVLIB_RPATH}")
 target_include_directories(${EXE_NAME} PRIVATE ${TEST_DIR} ${ROOT_DIR}
                                                ${PROJECT_SOURCE_DIR}/include)
-target_link_libraries(${EXE_NAME} hsa-runtime64::hsa-runtime64 hsakmt::hsakmt
-                      Threads::Threads stdc++fs dl)
+target_link_libraries(${EXE_NAME} hsa-runtime64::hsa-runtime64
+	               Threads::Threads stdc++fs dl)
 
 file(GLOB XML_FILES "${TEST_DIR}/tool/*.xml")
 configure_file(${TEST_DIR}/run.sh ${PROJECT_BINARY_DIR}/run.sh COPYONLY)
