@@ -60,7 +60,21 @@ type.
 driver and make sure that any resources held by AMD SMI are released.
 
 1. A simple "Hello World" type program that displays the temperature of detected
-   devices looks like this:
+   devices.
+
+   ```note
+   Sample build example:
+   $ g++ -I/opt/rocm/include <file_name>.cc -L/opt/rocm/lib -lamd_smi -o <filename>
+
+   Users /opt/rocm-*/bin path may differ (depending on install), please locate the path of your libamd_smi.so.*.
+   For example:
+
+   $ sudo find /opt/ -iname libamd_smi.so*
+   /opt/rocm-6.4.1/lib/libamd_smi.so.25.0
+   /opt/rocm-6.4.1/lib/libamd_smi.so
+   ```
+
+   The code is as follows:
 
    ```cpp
    #include <iostream>
@@ -136,7 +150,16 @@ driver and make sure that any resources held by AMD SMI are released.
    }
    ```
 
-2. A sample program that displays the power of detected CPUs looks like this:
+2. A sample program that displays the power of detected CPUs.
+
+   ```note
+   Sample build example:
+   $ g++ -DENABLE_ESMI -I/opt/rocm/include <file_name>.cc -L/opt/rocm/lib -lamd_smi -o <filename>
+
+   For finding available rocm include and library path, see building example on sample program 1 above.
+   ```
+
+   The code is as follows:
 
    ```cpp
    #include <iostream>
