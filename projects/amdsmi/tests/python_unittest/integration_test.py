@@ -212,6 +212,51 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         print()
         self.tearDown()
 
+    @handle_exceptions
+    def test_gpu_cache_info(self):
+        self.setUp()
+        print("\n\n###Test amdsmi_interface.amdsmi_get_gpu_cache_info")
+        processors = amdsmi.amdsmi_get_processor_handles()
+        self.assertGreaterEqual(len(processors), 1)
+        self.assertLessEqual(len(processors), 32)
+        for i in range(0, len(processors)):
+            print("\n\n###Test Processor {}, bdf: {}".format(i, amdsmi.amdsmi_get_gpu_device_bdf(processors[i])))
+            print("\n###Test amdsmi_interface.amdsmi_get_gpu_cache_info \n")
+            try:
+                cache_info = amdsmi.amdsmi_interface.amdsmi_get_gpu_cache_info(processors[i])
+            except Exception as e:
+                print(f"  Exception in amdsmi_get_gpu_cache_info: {e}")
+                self.fail(f"Test failed due to exception: {e}")
+            if isinstance(cache_info, dict):
+                for key, value in cache_info.items():
+                    print(f"  {key}: {value}")
+                for cache_entry in cache_info.get('cache', []):
+                    self.assertIn('cache_size', cache_entry)
+                    self.assertIn('cache_level', cache_entry)
+                    self.assertIn('num_cache_instance', cache_entry)
+                    self.assertIn('max_num_cu_shared', cache_entry)
+            else:
+                print("  cache_info: {}".format(cache_info))
+        print()
+        self.tearDown()
+
+    @handle_exceptions
+    def test_get_gpu_compute_partition(self):
+        processors = amdsmi.amdsmi_get_processor_handles()
+        self.assertGreater(len(processors), 0)
+        for i in range(0, len(processors)):
+            bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
+            try:
+                result = amdsmi.amdsmi_get_gpu_compute_partition(processors[i])
+                self.assertIsInstance(result, str)
+                self.assertTrue(len(result) > 0)
+                print(f"\nCompute partition for handle {bdf}: {result}")
+            except Exception as e:
+                print(f"\nCompute partition not supported for handle {bdf}: {e}")
+                continue
+        print("All compute partitions returned as strings successfully (or not supported).")
+        self.tearDown()
+
     def test_bdf_device_id(self):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()

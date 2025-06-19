@@ -866,10 +866,10 @@ int KFDNode::get_cache_info(rsmi_gpu_cache_info_t *info) {
   info->num_cache_types = 0;
   for (unsigned int cache_id = 0; cache_id < caches_count; cache_id++) {
     const auto prop_file = f_path + std::to_string(cache_id) + "/properties";
-    std::string level = get_properties_from_file(prop_file, "level ");
     try {
+      std::string level = get_properties_from_file(prop_file, "level ");
       int cache_level = std::stoi(level);
-      if (cache_level < 0 ) continue;
+      if (cache_level < 0) continue;
 
       std::string type = get_properties_from_file(prop_file, "type ");
       int cache_type = std::stoi(type);
