@@ -1082,8 +1082,8 @@ class AMDSMILogger():
                 gtt_mem = str(process['gtt']).rjust(8)
                 vram_mem = str(process['vram']).rjust(8)
                 mem_usage = str(process['mem_usage']).rjust(9)
-                if process['cu_occupancy']['max_cu'] != "N/A":
-                    cu_occupancy = (str(round(process['cu_occupancy']['current_cu'] / process['cu_occupancy']['max_cu'] * 100, 1)) + " %").rjust(7)
+                if process['cu_occupancy']['total_num_cu'] != "N/A" and process['cu_occupancy']['current_cu'] != "N/A":
+                    cu_occupancy = (str(round(process['cu_occupancy']['current_cu'] / process['cu_occupancy']['total_num_cu'] * 100, 1)) + " %").rjust(7)
                 else:
                     cu_occupancy = "N/A"
                 print("| {0:4.4s}  {1:9.9s}  {2:19.19s}  {3:8.8s}  {4:8.8s}  {5:9.9s}  {6:7.7s} |".format(
