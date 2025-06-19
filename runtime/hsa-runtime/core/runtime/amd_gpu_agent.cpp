@@ -1674,6 +1674,19 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
     case HSA_AMD_AGENT_INFO_SCRATCH_LIMIT_CURRENT:
       *((uint64_t*)value) = scratch_limit_async_threshold_;
       break;
+    case HSA_AMD_AGENT_INFO_CLOCK_COUNTERS: {
+      HsaClockCounters hsakmt_counters = {};
+      hsa_amd_clock_counters_t* counters = static_cast<hsa_amd_clock_counters_t*>(value);
+
+      if (hsaKmtGetClockCounters(node_id(), &hsakmt_counters) == HSAKMT_STATUS_SUCCESS ) {
+        counters->cpu_clock_counter = hsakmt_counters.CPUClockCounter;
+        counters->gpu_clock_counter = hsakmt_counters.GPUClockCounter;
+        counters->system_clock_counter = hsakmt_counters.SystemClockCounter;
+        counters->system_clock_frequency = hsakmt_counters.SystemClockFrequencyHz;
+        break;
+      }
+      return HSA_STATUS_ERROR;
+    }
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       break;

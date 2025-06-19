@@ -253,6 +253,9 @@ hsa_status_t AieAgent::GetInfo(hsa_agent_info_t attribute, void *value) const {
   case HSA_AMD_AGENT_INFO_MEMORY_PROPERTIES:
     std::memset(value, 0, sizeof(uint8_t) * 8);
     break;
+  case HSA_AMD_AGENT_INFO_CLOCK_COUNTERS:
+    std::memset(value, 0, sizeof(hsa_amd_clock_counters_t));
+    break;
   default:
     *reinterpret_cast<uint32_t *>(value) = 0;
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
