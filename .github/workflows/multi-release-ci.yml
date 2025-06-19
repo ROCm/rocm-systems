@@ -89,6 +89,7 @@ jobs:
           -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm)"
           -DPython3_EXECUTABLE=$(which python3)
           --
+          -R "samples"
           -LE "${CTEST_EXCLUDE_LABEL_REGEX}"
           -E "${CTEST_EXCLUDE_TESTS_REGEX}"
 
