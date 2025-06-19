@@ -277,14 +277,21 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
         int *max_freq, int *min_freq, int *num_dpm, int *sleep_state_freq)
 {
     SMIGPUDEVICE_MUTEX(device->get_mutex())
-        std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device";
+    std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device";
+    std::string smclk_min_max_fullpath = "";
 
+    bool sclk = false;
+    bool mclk = false;
     switch (domain) {
         case AMDSMI_CLK_TYPE_GFX:
+            smclk_min_max_fullpath = fullpath + "/pp_od_clk_voltage";
             fullpath += "/pp_dpm_sclk";
+            sclk = true;
             break;
         case AMDSMI_CLK_TYPE_MEM:
+            smclk_min_max_fullpath = fullpath + "/pp_od_clk_voltage";
             fullpath += "/pp_dpm_mclk";
+            mclk = true;
             break;
         case AMDSMI_CLK_TYPE_VCLK0:
             fullpath += "/pp_dpm_vclk";
@@ -323,6 +330,71 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
     sleep_freq = UINT_MAX;
     current_freq = 0;
 
+    // if getting sclk or mclk info, read pp_od_clk_voltage for min and max info
+    if (sclk || mclk) {
+        unsigned int dpm_level;
+        std::ifstream smclk_ranges(smclk_min_max_fullpath.c_str());
+        unsigned int smax = 0;
+        unsigned int mmax = 0;
+        unsigned int smin = UINT_MAX;
+        unsigned int mmin = UINT_MAX;
+
+        // if pp_od_clk_voltage is not found, then go back to using the original pp_dpm files
+        if (!smclk_ranges.is_open()) {
+            sclk = false;
+            mclk = false;
+        }
+        else{
+            // using bool to switch between recording for s or mclk. true will be sclk, false will be mclk
+            bool s_or_m = true;
+            unsigned int dpm_level, freq;
+            for (std::string line; getline(smclk_ranges, line);)
+            {
+                if (line.compare("GFXCLK:") == 0 || line.compare("OD_SCLK:") == 0)
+                {
+                    s_or_m = true;
+                    continue;
+                }
+                else if (line.compare("MCLK:") == 0 || line.compare("OD_MCLK:") == 0)
+                {
+                    s_or_m = false;
+                    continue;
+                }
+                if (sscanf(line.c_str(), "%u: %d%s", &dpm_level, &freq, str) <= 2) {
+                    // skip lines that don't conform to the format
+                    continue;
+                }
+                if (s_or_m)
+                {
+                    if (freq > smax)
+                        smax = freq;
+                    if (freq < smin)
+                        smin = freq;
+                }
+                else
+                {
+                    if (freq > mmax)
+                        mmax = freq;
+                    if (freq < mmin)
+                        mmin = freq;
+                }
+            }
+
+            if (sclk)
+            {
+                max = smax;
+                min = smin;
+            }
+            else if (mclk)
+            {
+                max = mmax;
+                min = mmin;
+            }
+
+            smclk_ranges.close();
+        }
+    }
+    // obtain rest of info from regular pp_dpm_* files.
     for (std::string line; getline(ranges, line);) {
         unsigned int dpm_level, freq;
 
@@ -353,12 +425,13 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
                 continue;
             }
 
-            // not * was detected so check for the min max
-            max = freq > max ? freq : max;
-            min = freq < min ? freq : min;
+            // not * was detected so check for the min max if not s or mclk, which are user defined
+            if (!sclk && !mclk){
+                max = freq > max ? freq : max;
+                min = freq < min ? freq : min;
+            }
             dpm = dpm_level > dpm ? dpm_level : dpm;
         }
-    
     }
     if (dpm == 0 && current_freq > 0) {
         // if the dpm level is 0, then the current frequency is the min/max frequency
