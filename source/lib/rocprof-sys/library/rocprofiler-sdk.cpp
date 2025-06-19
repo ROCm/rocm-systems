@@ -492,6 +492,8 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
          << ", phase=" << record.phase << ", dt_nsec=" << std::setw(8) << ts
          << ", name=" << name;
 
+    std::cout << "CALLBACK:" << info.str() << "\n";
+
     if(rocprofsys::get_state() != rocprofsys::State::Active)
     {
         ROCPROFSYS_WARNING_F(0, "Callback called when tool is not active.\n\t%s\n",

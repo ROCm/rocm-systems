@@ -76,6 +76,7 @@
 #include <timemory/utility/backtrace.hpp>
 #include <timemory/utility/join.hpp>
 #include <timemory/utility/procfs/maps.hpp>
+#include <rocprofiler-sdk/registration.h>
 
 #include <atomic>
 #include <chrono>
@@ -696,6 +697,9 @@ rocprofsys_reset_preload_hidden(void)
 extern "C" void
 rocprofsys_finalize_hidden(void)
 {
+    std::cout << ":: FINALIZE HIDDEN ::\n";
+    rocprofiler_finalize_ompt();
+
     // disable thread id recycling during finalization
     threading::recycle_ids() = false;
     // disable initialization callback
