@@ -696,7 +696,7 @@ def _pad_hex_value(value, length):
     return value
 
 
-def _validate_if_max_uint(value, uint_type: MaxUIntegerTypes, isActivity=False, isBool=False):
+def _validate_if_max_uint(value, uint_type: MaxUIntegerTypes, isActivity=False, isBool=False) -> Union[str, bool, int]:
     return_val = "N/A"
     if not isinstance(value, list):
         if (value == uint_type) or (isActivity and value > 100):
@@ -1893,9 +1893,9 @@ def amdsmi_get_gpu_asic_info(
     target_graphics_version = hex(asic_info_struct.target_graphics_version)[2:]
     subsystem_id = _validate_if_max_uint(asic_info_struct.subsystem_id, MaxUIntegerTypes.UINT32_T)
     subvendor_id = _validate_if_max_uint(asic_info_struct.subvendor_id, MaxUIntegerTypes.UINT32_T)
-    if subsystem_id is not "N/A":
+    if not isinstance(subsystem_id, str):
         subsystem_id = _pad_hex_value(hex(subsystem_id), 4)
-    if subvendor_id is not "N/A":
+    if not isinstance(subvendor_id, str):
         subvendor_id = _pad_hex_value(hex(subvendor_id), 4)
     asic_info = {
         "market_name": market_name,
