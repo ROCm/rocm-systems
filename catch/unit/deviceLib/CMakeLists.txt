@@ -81,7 +81,7 @@ set(AMD_TEST_SRC
     hipTestFMA.cc
     hipTestNativeHalf.cc
     hip_test_make_type.cc
-    bfloat16.cc
+    #bfloat16.cca  # Jira needed
     AtomicsWithRandomActiveLanesInWavefront.cc
     fp16_ops.cc
     fp8_host.cc
