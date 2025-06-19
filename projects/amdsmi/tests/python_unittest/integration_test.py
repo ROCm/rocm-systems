@@ -71,7 +71,7 @@ class TestAmdSmiInit(unittest.TestCase):
 
 class TestAmdSmiPythonInterface(unittest.TestCase):
 
-    MaxNumPhysicalDevices = amdsmi.amdsmi_interface.AMDSMI_MAX_NUM_XCP * amdsmi.amdsmi_interface.AMDSMI_MAX_DEVICES
+    max_num_physical_devices = amdsmi.amdsmi_interface.AMDSMI_MAX_NUM_XCP * amdsmi.amdsmi_interface.AMDSMI_MAX_DEVICES
 
     @handle_exceptions
     def setUp(self):
@@ -85,7 +85,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
@@ -128,7 +128,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
@@ -173,7 +173,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
@@ -191,7 +191,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
@@ -216,7 +216,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
@@ -242,7 +242,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
@@ -265,7 +265,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
@@ -295,7 +295,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
@@ -315,7 +315,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
@@ -351,7 +351,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
@@ -385,7 +385,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
@@ -417,7 +417,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
@@ -433,7 +433,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         gpu_blocks = {
             "INVALID": amdsmi.AmdSmiGpuBlock.INVALID,
             "UMC": amdsmi.AmdSmiGpuBlock.UMC,
@@ -481,7 +481,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
@@ -503,7 +503,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
@@ -525,7 +525,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
@@ -544,7 +544,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
@@ -565,7 +565,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
@@ -604,7 +604,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
@@ -639,7 +639,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
@@ -653,7 +653,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
@@ -669,7 +669,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
@@ -686,7 +686,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
@@ -717,7 +717,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
@@ -757,7 +757,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
@@ -781,7 +781,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
@@ -807,7 +807,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         temp_types = {
             "HBM_0": amdsmi.AmdSmiTemperatureType.HBM_0,
             "HBM_1": amdsmi.AmdSmiTemperatureType.HBM_1,
@@ -838,7 +838,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
@@ -858,7 +858,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
                 utilization_count[2]['type'], utilization_count[2]['value']))
             print("  Utilization count for {} is: {}".format(
                 utilization_count[3]['type'], utilization_count[3]['value']))
-            self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+            self.assertLessEqual(len(processors), self.max_num_physical_devices)
             print()
             utilization_counter_types = [
                 amdsmi.AmdSmiUtilizationCounterType.FINE_GRAIN_GFX_ACTIVITY,
@@ -882,7 +882,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
@@ -903,7 +903,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
@@ -919,7 +919,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
@@ -945,7 +945,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
@@ -975,7 +975,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
@@ -1076,7 +1076,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
     #     print("\n\n========> test_walkthrough_multiprocess start <========\n")
     #     processors = amdsmi.amdsmi_get_processor_handles()
     #     self.assertGreaterEqual(len(processors), 1)
-    #     self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+    #     self.assertLessEqual(len(processors), self.max_num_physical_devices)
     #     p0 = multiprocessing.Process(target=walk_through, args=[self])
     #     p1 = multiprocessing.Process(target=walk_through, args=[self])
     #     p2 = multiprocessing.Process(target=walk_through, args=[self])
@@ -1097,7 +1097,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
     #     print("\n\n========> test_walkthrough_multithread start <========\n")
     #     processors = amdsmi.amdsmi_get_processor_handles()
     #     self.assertGreaterEqual(len(processors), 1)
-    #     self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+    #     self.assertLessEqual(len(processors), self.max_num_physical_devices)
     #     t0 = threading.Thread(target=walk_through, args=[self])
     #     t1 = threading.Thread(target=walk_through, args=[self])
     #     t2 = threading.Thread(target=walk_through, args=[self])
@@ -1139,7 +1139,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
     #     print("\n\n========> test_z_gpureset_asicinfo_multithread start <========\n")
     #     processors = amdsmi.amdsmi_get_processor_handles()
     #     self.assertGreaterEqual(len(processors), 1)
-    #     self.assertLessEqual(len(processors), self.MaxNumPhysicalDevices)
+    #     self.assertLessEqual(len(processors), self.max_num_physical_devices)
     #     for i in range(0, len(processors)):
     #         bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
     #         print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
