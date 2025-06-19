@@ -41,31 +41,19 @@ if(ROCPROFILER_LD_AQLPROFILE)
     target_compile_definitions(rocprofiler-build-flags INTERFACE ROCP_LD_AQLPROFILE=1)
 endif()
 
+if(NOT DEFINED ROCM_PATH)
+    set(ROCM_PATH "/opt/rocm"  CACHE STRING "Default ROCM installation directory")
+endif()
+
 # Find hsa-runtime
 find_package(
     hsa-runtime64 CONFIG REQUIRED
     HINTS ${CMAKE_PREFIX_PATH}
-    PATHS /opt/rocm
+    PATHS ${ROCM_PATH}
     PATH_SUFFIXES lib/cmake/hsa-runtime64)
 
-# find KFD thunk
-find_package(
-    hsakmt CONFIG REQUIRED
-    HINTS ${CMAKE_PREFIX_PATH}
-    PATHS /opt/rocm
-    PATH_SUFFIXES lib/cmake/hsakmt)
-
-# Find ROCm TODO: Need a better method to find the ROCm path
-find_path(
-    HSA_KMT_INC_PATH "hsakmt/hsakmt.h"
-    HINTS ${CMAKE_PREFIX_PATH}
-    PATHS /opt/rocm
-    PATH_SUFFIXES include)
-if("${HSA_KMT_INC_PATH}" STREQUAL "")
-    get_target_property(HSA_KMT_INC_PATH hsakmt::hsakmt INTERFACE_INCLUDE_DIRECTORIES)
-endif()
 # Include path: /opt/rocm-ver/include. Go up one level to get ROCm  path
-get_filename_component(ROCM_ROOT_DIR "${HSA_KMT_INC_PATH}" DIRECTORY)
+get_filename_component(ROCM_ROOT_DIR ${ROCM_PATH}/include DIRECTORY)
 
 # Basic Tool Chain Information
 message("----------Build-Type: ${CMAKE_BUILD_TYPE}")
