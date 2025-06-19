@@ -3303,7 +3303,9 @@ amdsmi_status_t amdsmi_get_gpu_reg_table_info(
 }
 
 void amdsmi_free_name_value_pairs(void *p) {
-    free(p);
+    if (p)
+        free(p);
+    return;
 }
 
 amdsmi_status_t

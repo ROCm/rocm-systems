@@ -259,6 +259,9 @@ from .amdsmi_interface import AmdSmiDeviceType
 from .amdsmi_interface import AmdSmiMmIp
 from .amdsmi_interface import AmdSmiFwBlock
 from .amdsmi_interface import AmdSmiClkType
+from .amdsmi_interface import AmdSmiClkLimitType
+
+from .amdsmi_interface import AmdSmiRegType
 from .amdsmi_interface import AmdSmiTemperatureType
 from .amdsmi_interface import AmdSmiDevPerfLevel
 from .amdsmi_interface import AmdSmiEventGroup

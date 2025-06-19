@@ -207,6 +207,9 @@ class AmdSmiClkType(IntEnum):
     DCLK0 = amdsmi_wrapper.AMDSMI_CLK_TYPE_DCLK0
     DCLK1 = amdsmi_wrapper.AMDSMI_CLK_TYPE_DCLK1
 
+class AmdSmiClkLimitType(IntEnum):
+    MIN = amdsmi_wrapper.CLK_LIMIT_MIN
+    MAX = amdsmi_wrapper.CLK_LIMIT_MAX
 
 class AmdSmiTemperatureType(IntEnum):
     EDGE = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_EDGE
