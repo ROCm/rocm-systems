@@ -143,6 +143,7 @@ data::sample(uint32_t _dev_id)
     auto _ts = tim::get_clock_real_now<size_t, std::nano>();
     assert(_ts < std::numeric_limits<int64_t>::max());
     amdsmi_gpu_metrics_t _gpu_metrics;
+    bool                 _vcn_or_jpeg_activity_enabled = false;
 
     auto _state = get_state().load();
 
@@ -184,18 +185,59 @@ data::sample(uint32_t _dev_id)
 #endif
     ROCPROFSYS_AMDSMI_GET(get_settings(m_dev_id).mem_usage, amdsmi_get_gpu_memory_usage,
                           sample_handle, AMDSMI_MEM_TYPE_VRAM, &m_mem_usage);
-    ROCPROFSYS_AMDSMI_GET(get_settings(m_dev_id).vcn_activity,
-                          amdsmi_get_gpu_metrics_info, sample_handle, &_gpu_metrics);
-    ROCPROFSYS_AMDSMI_GET(get_settings(m_dev_id).jpeg_activity,
-                          amdsmi_get_gpu_metrics_info, sample_handle, &_gpu_metrics);
+    _vcn_or_jpeg_activity_enabled =
+        get_settings(m_dev_id).vcn_activity || get_settings(m_dev_id).jpeg_activity;
+    ROCPROFSYS_AMDSMI_GET(_vcn_or_jpeg_activity_enabled, amdsmi_get_gpu_metrics_info,
+                          sample_handle, &_gpu_metrics);
 
-    for(const auto& v_activity : _gpu_metrics.vcn_activity)
+    // Process metrics if either VCN or JPEG activity is enabled
+    if(_vcn_or_jpeg_activity_enabled)
     {
-        if(v_activity != UINT16_MAX) m_vcn_metrics.push_back(v_activity);
-    }
-    for(const auto& j_activity : _gpu_metrics.jpeg_activity)
-    {
-        if(j_activity != UINT16_MAX) m_jpeg_metrics.push_back(j_activity);
+        // Helper lambda to fill busy metrics from a source array
+        auto fill_busy_metrics = [](auto& dest, const auto& src) {
+            for(const auto& val : src)
+            {
+                if(val != UINT16_MAX) dest.push_back(val);
+            }
+        };
+
+        if(gpu::is_vcn_activity_supported(m_dev_id) &&
+           gpu::is_jpeg_activity_supported(m_dev_id))
+        {
+            // Both VCN and JPEG are supported - create one entry with both metrics
+            xcp_metrics_t metrics;
+            fill_busy_metrics(metrics.vcn_busy, _gpu_metrics.vcn_activity);
+            fill_busy_metrics(metrics.jpeg_busy, _gpu_metrics.jpeg_activity);
+            if(!metrics.vcn_busy.empty() || !metrics.jpeg_busy.empty())
+                m_xcp_metrics.push_back(metrics);
+        }
+        else if(gpu::is_vcn_activity_supported(m_dev_id))
+        {
+            // Only VCN is supported
+            xcp_metrics_t metrics;
+            fill_busy_metrics(metrics.vcn_busy, _gpu_metrics.vcn_activity);
+            if(!metrics.vcn_busy.empty()) m_xcp_metrics.push_back(metrics);
+        }
+        else if(gpu::is_jpeg_activity_supported(m_dev_id))
+        {
+            // Only JPEG is supported
+            xcp_metrics_t metrics;
+            fill_busy_metrics(metrics.jpeg_busy, _gpu_metrics.jpeg_activity);
+            if(!metrics.jpeg_busy.empty()) m_xcp_metrics.push_back(metrics);
+        }
+        else
+        {
+            // Neither is supported - use XCP stats
+            // Each XCP gets one entry with both its VCN and JPEG metrics
+            for(const auto& xcp : _gpu_metrics.xcp_stats)
+            {
+                xcp_metrics_t metrics;
+                fill_busy_metrics(metrics.vcn_busy, xcp.vcn_busy);
+                fill_busy_metrics(metrics.jpeg_busy, xcp.jpeg_busy);
+                if(!metrics.vcn_busy.empty() || !metrics.jpeg_busy.empty())
+                    m_xcp_metrics.push_back(metrics);
+            }
+        }
     }
 
 #undef ROCPROFSYS_AMDSMI_GET
@@ -350,16 +392,19 @@ data::post_process(uint32_t _dev_id)
                 auto addendum = [&](const char* _v) {
                     return JOIN(" ", "GPU", _v, JOIN("", '[', _dev_id, ']'), "(S)");
                 };
-                auto addendum_blk = [&](std::size_t _i, const char* _metric) {
-                    if(_i < 10)
+                auto addendum_blk = [&](std::size_t _i, const char* _metric,
+                                        std::size_t xcp_idx = SIZE_MAX) {
+                    if(xcp_idx != SIZE_MAX)
                     {
                         return JOIN(" ", "GPU", JOIN("", '[', _dev_id, ']'), _metric,
-                                    JOIN("", "[0", _i, ']'), "(S)");
+                                    JOIN("", "XCP_", xcp_idx, ": [", (_i < 10 ? "0" : ""),
+                                         _i, ']'),
+                                    "(S)");
                     }
                     else
                     {
                         return JOIN(" ", "GPU", JOIN("", '[', _dev_id, ']'), _metric,
-                                    JOIN("", '[', _i, ']'), "(S)");
+                                    JOIN("", "[", (_i < 10 ? "0" : ""), _i, ']'), "(S)");
                     }
                 };
 
@@ -378,15 +423,61 @@ data::post_process(uint32_t _dev_id)
                                            "megabytes");
                 if(_settings.vcn_activity)
                 {
-                    for(std::size_t i = 0; i < std::size(itr.m_vcn_metrics); ++i)
-                        counter_track::emplace(_dev_id, addendum_blk(i, "  VCN Activity"),
-                                               "%");
+                    if(itr.m_xcp_metrics.empty())
+                    {
+                        ROCPROFSYS_VERBOSE(
+                            1, "No VCN activity data collected from device %u\n",
+                            _dev_id);
+                    }
+                    else if(gpu::is_vcn_activity_supported(_dev_id))
+                    {
+                        // For VCN activity, use simple indexing
+                        for(std::size_t i = 0;
+                            i < std::size(itr.m_xcp_metrics[0].vcn_busy); ++i)
+                            counter_track::emplace(_dev_id,
+                                                   addendum_blk(i, "VCN Activity"), "%");
+                    }
+                    else
+                    {
+                        for(std::size_t xcp = 0; xcp < std::size(itr.m_xcp_metrics);
+                            ++xcp)
+                        {
+                            for(std::size_t i = 0;
+                                i < std::size(itr.m_xcp_metrics[xcp].vcn_busy); ++i)
+                            {
+                                counter_track::emplace(
+                                    _dev_id, addendum_blk(i, "VCN Activity", xcp), "%");
+                            }
+                        }
+                    }
                 }
                 if(_settings.jpeg_activity)
                 {
-                    for(std::size_t i = 0; i < std::size(itr.m_jpeg_metrics); ++i)
-                        counter_track::emplace(_dev_id, addendum_blk(i, "JPEG Activity"),
-                                               "%");
+                    if(itr.m_xcp_metrics.empty())
+                    {
+                        ROCPROFSYS_VERBOSE(
+                            1, "No JPEG activity data collected from device %u\n",
+                            _dev_id);
+                    }
+                    else if(gpu::is_jpeg_activity_supported(_dev_id))
+                    {
+                        // For JPEG activity, use simple indexing
+                        for(std::size_t i = 0;
+                            i < std::size(itr.m_xcp_metrics[0].jpeg_busy); ++i)
+                            counter_track::emplace(_dev_id,
+                                                   addendum_blk(i, "JPEG Activity"), "%");
+                    }
+                    else
+                    {
+                        for(std::size_t xcp = 0; xcp < std::size(itr.m_xcp_metrics);
+                            ++xcp)
+                        {
+                            for(std::size_t i = 0;
+                                i < std::size(itr.m_xcp_metrics[xcp].jpeg_busy); ++i)
+                                counter_track::emplace(
+                                    _dev_id, addendum_blk(i, "JPEG Activity", xcp), "%");
+                        }
+                    }
                 }
             }
             uint64_t _ts = itr.m_ts;
@@ -417,25 +508,41 @@ data::post_process(uint32_t _dev_id)
             if(_settings.mem_usage)
                 TRACE_COUNTER("device_memory_usage",
                               counter_track::at(_dev_id, _idx.at(5)), _ts, _usage);
-            if(_settings.vcn_activity)
+            if(_settings.vcn_activity && !itr.m_xcp_metrics.empty())
             {
                 uint64_t idx = _idx.at(6);
-                for(const auto& temp : itr.m_vcn_metrics)
+                // Iterate over all XCPs and their VCN busy/activity values
+                for(const auto& metrics : itr.m_xcp_metrics)
                 {
-                    TRACE_COUNTER("device_vcn_activity", counter_track::at(_dev_id, idx),
-                                  _ts, temp);
-                    ++idx;
+                    for(const auto& vcn_val : metrics.vcn_busy)
+                    {
+                        TRACE_COUNTER("device_vcn_activity",
+                                      counter_track::at(_dev_id, idx), _ts, vcn_val);
+                        ++idx;
+                    }
                 }
             }
-            if(_settings.jpeg_activity)
+
+            if(_settings.jpeg_activity && !itr.m_xcp_metrics.empty())
             {
                 uint64_t idx = _idx.at(7);
-                if(_settings.vcn_activity) idx += (itr.m_vcn_metrics.size() - 1);
-                for(const auto& temp : itr.m_jpeg_metrics)
+                // Calculate total VCN metrics to properly offset JPEG metrics index
+                if(_settings.vcn_activity)
                 {
-                    TRACE_COUNTER("device_jpeg_activity", counter_track::at(_dev_id, idx),
-                                  _ts, temp);
-                    ++idx;
+                    size_t total_vcn_metrics = 0;
+                    for(const auto& metrics : itr.m_xcp_metrics)
+                        total_vcn_metrics += metrics.vcn_busy.size();
+                    if(total_vcn_metrics > 0) idx += (total_vcn_metrics - 1);
+                }
+                // Iterate over all XCPs and their JPEG busy/activity values
+                for(const auto& metrics : itr.m_xcp_metrics)
+                {
+                    for(const auto& jpeg_val : metrics.jpeg_busy)
+                    {
+                        TRACE_COUNTER("device_jpeg_activity",
+                                      counter_track::at(_dev_id, idx), _ts, jpeg_val);
+                        ++idx;
+                    }
                 }
             }
         }
