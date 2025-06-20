@@ -491,6 +491,20 @@ rsmi_init(uint64_t flags) {
   if (smi.ref_count() == 1) {
     try {
       smi.Initialize(flags);
+    } catch(const amd::smi::rsmi_exception& e) {
+      smi.Cleanup();
+      if (e.error_code() == RSMI_INITIALIZATION_ERROR &&
+          !strcmp(e.what(),
+               "Failed to initialize rocm_smi library (KFD node discovery).")) {
+        // This system does not actually have ROCM drivers set up
+        // We were probably just called through dependency, just report the
+        // error and log without complaining loudly.
+        std::ostringstream ss;
+        ss << "Exception caught: " << e.what() << ".";
+        LOG_INFO(ss);
+        return RSMI_STATUS_NOT_SUPPORTED;
+      }
+      throw amd::smi::rsmi_exception(RSMI_STATUS_INIT_ERROR, __FUNCTION__);
     } catch(...) {
       smi.Cleanup();
       throw amd::smi::rsmi_exception(RSMI_STATUS_INIT_ERROR, __FUNCTION__);
@@ -749,6 +763,13 @@ rsmi_dev_ecc_count_get(uint32_t dv_ind, rsmi_gpu_block_t block,
   if (val_vec.size() < 2 ) ret = RSMI_STATUS_FILE_ERROR;
 
   if (ret != RSMI_STATUS_SUCCESS) {
+    if (ret == RSMI_STATUS_FILE_ERROR) {
+      ss << __PRETTY_FUNCTION__ << " | ======= end ======="
+         << ", GetDevValueVec() ret was RSMI_STATUS_FILE_ERROR "
+         << "-> reporting RSMI_STATUS_NOT_SUPPORTED";
+      LOG_ERROR(ss);
+      return RSMI_STATUS_NOT_SUPPORTED;
+    }
     ss << __PRETTY_FUNCTION__ << " | ======= end ======="
        << ", GetDevValueVec() ret was not RSMI_STATUS_SUCCESS"
        << " -> reporting " << amd::smi::getRSMIStatusString(ret);

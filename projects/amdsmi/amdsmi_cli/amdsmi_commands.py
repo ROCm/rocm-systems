@@ -6461,16 +6461,17 @@ class AMDSMICommands():
                 self.logger.combine_arrays_to_json()
             self.logger.clear_multiple_devices_output()
 
-            # print legend
-            legend_parts = [
-                "\n\nLegend:",
-                "  * = Current mode"]
-            legend_output = "\n".join(legend_parts)
-            if self.logger.destination == 'stdout':
-                print(legend_output)
-            else:
-                with self.logger.destination.open('a', encoding="utf-8") as output_file:
-                    output_file.write(legend_output + '\n')
+            if self.logger.is_human_readable_format():
+                # print legend
+                legend_parts = [
+                    "\n\nLegend:",
+                    "  * = Current mode"]
+                legend_output = "\n".join(legend_parts)
+                if self.logger.destination == 'stdout':
+                    print(legend_output)
+                else:
+                    with self.logger.destination.open('a', encoding="utf-8") as output_file:
+                        output_file.write(legend_output + '\n')
 
 
     def ras(self, args, multiple_devices=False, gpu=None, cper=None, afid=None,
@@ -6600,9 +6601,12 @@ class AMDSMICommands():
                 asic_info = amdsmi_interface.amdsmi_get_gpu_asic_info(processor)
                 market_name = asic_info['market_name']
                 oam_id = asic_info['oam_id']
+                # get num_cu now for use later
+                total_num_cu = float(asic_info['num_compute_units'])
             except amdsmi_exception.AmdSmiLibraryException as e:
                 market_name = "N/A"
                 oam_id = "N/A"
+                total_num_cu = "N/A"
             gpu_info_dict.update({"market_name": market_name})
             gpu_info_dict.update({"oam_id": oam_id})
 
@@ -6700,7 +6704,8 @@ class AMDSMICommands():
                     proc_info_dict['gtt'] = self.helpers.convert_bytes_to_readable(proc['memory_usage']['gtt_mem'])
                     proc_info_dict['vram'] = self.helpers.convert_bytes_to_readable(proc['memory_usage']['vram_mem'])
                     proc_info_dict['mem_usage'] = self.helpers.convert_bytes_to_readable(proc['mem'])
-                    proc_info_dict['cu_occupancy'] = str(proc['cu_occupancy'])
+                    num_cu = float(proc['cu_occupancy'])
+                    proc_info_dict['cu_occupancy'] = {"current_cu": num_cu, "total_num_cu": total_num_cu}
                     all_process_list.append(proc_info_dict)
             except amdsmi_exception.AmdSmiLibraryException as e:
                 logging.debug("Failed to get process list for gpu %s | %s", gpu_id, e.get_error_info())

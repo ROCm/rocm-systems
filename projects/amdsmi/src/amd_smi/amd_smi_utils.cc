@@ -277,14 +277,21 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
         int *max_freq, int *min_freq, int *num_dpm, int *sleep_state_freq)
 {
     SMIGPUDEVICE_MUTEX(device->get_mutex())
-        std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device";
+    std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device";
+    std::string smclk_min_max_fullpath = "";
 
+    bool sclk = false;
+    bool mclk = false;
     switch (domain) {
         case AMDSMI_CLK_TYPE_GFX:
+            smclk_min_max_fullpath = fullpath + "/pp_od_clk_voltage";
             fullpath += "/pp_dpm_sclk";
+            sclk = true;
             break;
         case AMDSMI_CLK_TYPE_MEM:
+            smclk_min_max_fullpath = fullpath + "/pp_od_clk_voltage";
             fullpath += "/pp_dpm_mclk";
+            mclk = true;
             break;
         case AMDSMI_CLK_TYPE_VCLK0:
             fullpath += "/pp_dpm_vclk";
@@ -323,6 +330,71 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
     sleep_freq = UINT_MAX;
     current_freq = 0;
 
+    // if getting sclk or mclk info, read pp_od_clk_voltage for min and max info
+    if (sclk || mclk) {
+        unsigned int dpm_level;
+        std::ifstream smclk_ranges(smclk_min_max_fullpath.c_str());
+        unsigned int smax = 0;
+        unsigned int mmax = 0;
+        unsigned int smin = UINT_MAX;
+        unsigned int mmin = UINT_MAX;
+
+        // if pp_od_clk_voltage is not found, then go back to using the original pp_dpm files
+        if (!smclk_ranges.is_open()) {
+            sclk = false;
+            mclk = false;
+        }
+        else{
+            // using bool to switch between recording for s or mclk. true will be sclk, false will be mclk
+            bool s_or_m = true;
+            unsigned int dpm_level, freq;
+            for (std::string line; getline(smclk_ranges, line);)
+            {
+                if (line.compare("GFXCLK:") == 0 || line.compare("OD_SCLK:") == 0)
+                {
+                    s_or_m = true;
+                    continue;
+                }
+                else if (line.compare("MCLK:") == 0 || line.compare("OD_MCLK:") == 0)
+                {
+                    s_or_m = false;
+                    continue;
+                }
+                if (sscanf(line.c_str(), "%u: %d%s", &dpm_level, &freq, str) <= 2) {
+                    // skip lines that don't conform to the format
+                    continue;
+                }
+                if (s_or_m)
+                {
+                    if (freq > smax)
+                        smax = freq;
+                    if (freq < smin)
+                        smin = freq;
+                }
+                else
+                {
+                    if (freq > mmax)
+                        mmax = freq;
+                    if (freq < mmin)
+                        mmin = freq;
+                }
+            }
+
+            if (sclk)
+            {
+                max = smax;
+                min = smin;
+            }
+            else if (mclk)
+            {
+                max = mmax;
+                min = mmin;
+            }
+
+            smclk_ranges.close();
+        }
+    }
+    // obtain rest of info from regular pp_dpm_* files.
     for (std::string line; getline(ranges, line);) {
         unsigned int dpm_level, freq;
 
@@ -335,9 +407,9 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
         } else {
             /**
              * if the first line contains '*', then
-             * we are saving that value as current_freq then checking 
+             * we are saving that value as current_freq then checking
              * for other dpm levels if none are found then we
-             * set min and max to current_freq as per Driver 
+             * set min and max to current_freq as per Driver
              * We then skip to the next line to avoid getting
              * incorrect min value.
              */
@@ -353,12 +425,13 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
                 continue;
             }
 
-            // not * was detected so check for the min max
-            max = freq > max ? freq : max;
-            min = freq < min ? freq : min;
+            // not * was detected so check for the min max if not s or mclk, which are user defined
+            if (!sclk && !mclk){
+                max = freq > max ? freq : max;
+                min = freq < min ? freq : min;
+            }
             dpm = dpm_level > dpm ? dpm_level : dpm;
         }
-    
     }
     if (dpm == 0 && current_freq > 0) {
         // if the dpm level is 0, then the current frequency is the min/max frequency
@@ -598,15 +671,11 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice
         return AMDSMI_STATUS_NOT_SUPPORTED;
     }
 
-    auto fd = amdsmi_RAII_FD_handler(path.c_str(), O_RDWR | O_CLOEXEC);
-    ss << __PRETTY_FUNCTION__ << " | Render Name: "
-       << render_name << "; path: " << path << "; fd: "
-       << (fd == nullptr ? "nullptr" : std::to_string(*fd)) << "\n";
-    LOG_DEBUG(ss);
-    if (!fd) {
+    ScopedFD fd(path.c_str(), O_RDWR | O_CLOEXEC);
+    if (!fd.valid()) {
         ss << __PRETTY_FUNCTION__ << " | Render Name: "
            << render_name << "; path: " << path << "; fd: "
-           << (fd == nullptr ? "nullptr" : std::to_string(*fd)) << "\n"
+           << (fd < 0 ? "less than 0" : std::to_string(fd)) << "\n"
            << "; Returning: "
            << smi_amdgpu_get_status_string(AMDSMI_STATUS_FILE_ERROR, false) << "\n";
         LOG_INFO(ss);
@@ -646,7 +715,7 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice
 
     amdgpu_device_handle device_handle = nullptr;
     uint32_t major_version, minor_version;
-    int ret = amdgpu_device_initialize(*fd, &major_version, &minor_version, &device_handle);
+    int ret = amdgpu_device_initialize(fd, &major_version, &minor_version, &device_handle);
     if (ret != 0) {
       amdgpu_device_deinitialize(device_handle);
       libdrm_amdgpu_.unload();
@@ -668,19 +737,13 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice
         market_name[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
         amdgpu_device_deinitialize(device_handle);
         libdrm_amdgpu_.unload();
-        ss << __PRETTY_FUNCTION__ << " | path: " << path << "\n"
-           << " | fd: "<< std::dec << *fd << "\n"
-           << " | Marketing Name: " << market_name << "\n"
-           << " | Returning: "
-           << smi_amdgpu_get_status_string(AMDSMI_STATUS_SUCCESS, false) << "\n";
-        LOG_INFO(ss);
         return AMDSMI_STATUS_SUCCESS;
     }
 
     amdgpu_device_deinitialize(device_handle);
     libdrm_amdgpu_.unload();
     ss << __PRETTY_FUNCTION__ << " | path: " << path << "\n"
-       << " | fd: "<< std::dec << *fd << "\n"
+       << " | fd: "<< std::dec << fd << "\n"
        << " | Marketing Name: " << market_name << "\n"
        << " | Returning: "
        << smi_amdgpu_get_status_string(AMDSMI_STATUS_DRM_ERROR, false) << "\n";
@@ -932,75 +995,3 @@ struct CperFileCtx {
     std::unique_ptr<char[]> buffer;
     long file_size = 0;
 };
-
-
-void amdsmi_wait_for_user_input(void) {
-  for (;;) {
-    std::cout << "\n\t**Press any key to continue**" << std::endl;
-    int input = std::cin.get();
-    if (input == EOF) {
-      std::cout << "EOF detected. Exiting." << std::endl;
-      return;
-    }
-    char input_char = static_cast<char>(input);
-    std::cout << "User entered: " << input_char << std::endl;
-    if (input_char == '\n') {
-      return;
-    }
-  }
-}
-
-std::shared_ptr<int> amdsmi_RAII_FD_handler(const std::string& path, int flags) {
-    static std::mutex fd_mutex;
-    static std::map<std::string, std::weak_ptr<int>> open_files;
-    static std::ostringstream ss;
-
-    std::lock_guard<std::mutex> lock(fd_mutex);
-
-    // Clean up expired entries from the cache
-    for (auto it = open_files.begin(); it != open_files.end();) {
-        if (it->second.expired()) {
-            it = open_files.erase(it);
-        } else {
-            ++it;
-        }
-    }
-
-    // Try to reuse an existing open FD
-    auto it = open_files.find(path);
-    if (it != open_files.end()) {
-        if (auto existing_fd = it->second.lock()) {
-            ss <<__PRETTY_FUNCTION__ << " | Reusing FD for path: " << path;
-            LOG_INFO(ss);
-            return existing_fd;
-        }
-    }
-
-    // Open a new file descriptor
-    int fd = open(path.c_str(), flags);
-    if (fd < 0) {
-        ss << __PRETTY_FUNCTION__ << " | Failed to open file: " << path
-           << " | Error: " << strerror(errno);
-        LOG_INFO(ss);
-        return nullptr;
-    }
-
-    ss << __PRETTY_FUNCTION__ << " | Opened FD: " << std::to_string(fd)
-       << " for path: " << path;
-    LOG_INFO(ss);
-
-    // Create a shared_ptr with a custom deleter to close the FD
-    auto fd_ptr = std::shared_ptr<int>(new int(fd), [path](int* fd) {
-        if (fd && *fd >= 0) {
-            ss << __PRETTY_FUNCTION__  << " | Closing FD: " << std::to_string(*fd)
-               << " | Path: " << path << std::endl;
-            LOG_INFO(ss);
-            close(*fd);
-            delete fd;
-        }
-    });
-
-    // Store weak_ptr in cache for reuse
-    open_files[path] = fd_ptr;
-    return fd_ptr;
-}
