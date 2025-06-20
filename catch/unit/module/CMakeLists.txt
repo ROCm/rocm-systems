@@ -71,12 +71,20 @@ add_custom_target(coopKernel.code
                   -I${HIP_PATH}/include/ --rocm-path=${ROCM_PATH}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
+add_custom_target(addKernel.code
+                  COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR}
+                  ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/addKernel.code
+                  -I${HIP_PATH}/include/ --rocm-path=${ROCM_PATH}
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include --rocm-path=${ROCM_PATH})
+
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/get_function_module.code
   ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code
   ${CMAKE_CURRENT_BINARY_DIR}/get_global_test_module.code
   ${CMAKE_CURRENT_BINARY_DIR}/get_tex_ref_module.code
   ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code
+  ${CMAKE_CURRENT_BINARY_DIR}/addKernel.code
 )
 # Note to pass arch use format like -DOFFLOAD_ARCH_STR="--offload-arch=gfx900  --offload-arch=gfx906"
 # having space at the start/end of OFFLOAD_ARCH_STR can cause build failures
@@ -108,13 +116,6 @@ add_custom_target(copyKernel.s
                   -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 
-add_custom_target(addKernel.code
-                  COMMAND ${CMAKE_CXX_COMPILER} -mcode-object-version=5 --genco ${OFFLOAD_ARCH_STR}
-                  ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
-                  -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/addKernel.code
-                  -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-
 add_custom_target(copyKernelCompressed.code
                   COMMAND ${CMAKE_CXX_COMPILER} -mcode-object-version=5 --offload-compress --genco ${OFFLOAD_ARCH_STR}
                   ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
@@ -140,7 +141,6 @@ set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/empty_module.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernel.s
-  ${CMAKE_CURRENT_BINARY_DIR}/addKernel.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernelCompressed.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernelGenericTarget.code
   ${CMAKE_CURRENT_BINARY_DIR}/copyKernelGenericTargetCompressed.code
@@ -235,11 +235,11 @@ add_dependencies(ModuleTest get_function_module)
 add_dependencies(ModuleTest launch_kernel_module)
 add_dependencies(ModuleTest get_global_test_module)
 add_dependencies(ModuleTest get_tex_ref_module)
+add_dependencies(ModuleTest addKernel.code)
 
 if(HIP_PLATFORM MATCHES "amd")
 add_dependencies(build_tests empty_module.code)
 add_dependencies(build_tests copyKernel.code copyKernel.s)
-add_dependencies(build_tests addKernel.code)
 add_dependencies(build_tests copyKernelCompressed.code)
 add_dependencies(build_tests copyKernelGenericTarget.code)
 add_dependencies(build_tests copyKernelGenericTargetCompressed.code)
