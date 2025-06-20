@@ -122,6 +122,8 @@ TEST_CASE("Unit_hipExtStreamGetCUMask_verifyDefaultAndCustomMask") {
   }
 
   SECTION("Verify with custom mask set") {
+    GENERATE_CAPTURE();
+
     hipDeviceProp_t props;
     std::vector<uint32_t> customMask(defaultCUMask);
     hipStream_t stream;
@@ -146,6 +148,7 @@ TEST_CASE("Unit_hipExtStreamGetCUMask_verifyDefaultAndCustomMask") {
     }
     INFO("info: setting a custom CU mask 0x" << ss.str());
 
+    BEGIN_CAPTURE(stream);
     HIP_CHECK(hipExtStreamGetCUMask(stream, cuMask.size(), &cuMask[0]));
     ss.str("");
     for (int i = cuMask.size() - 1; i >= 0; i--) {
@@ -170,6 +173,7 @@ TEST_CASE("Unit_hipExtStreamGetCUMask_verifyDefaultAndCustomMask") {
       }
     }
 
+    END_CAPTURE(stream);
     HIP_CHECK(hipStreamDestroy(stream));
   }
 }

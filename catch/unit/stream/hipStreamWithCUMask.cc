@@ -357,3 +357,37 @@ TEST_CASE("Unit_hipExtStreamCreateWithCUMask_NegTst") {
                   nullptr) == hipSuccess);
   }
 }
+
+/**
+ * Test Description
+ * ------------------------
+ *  - This test case tests the behaviour of hipExtStreamCreateWithCUMask API
+ *  - during the the stream capture
+ * Test source
+ * ------------------------
+ *  - unit/stream/hipStreamWithCUMask.cc
+ */
+TEST_CASE("Unit_StreamAPIs_hipExtStreamCreateWithCUMask_StreamIsCapturing") {
+  GENERATE_CAPTURE();
+
+  hipStream_t captureStream;
+  HIP_CHECK(hipStreamCreate(&captureStream));
+  REQUIRE(captureStream != nullptr);
+
+  BEGIN_CAPTURE(captureStream);
+
+  hipStream_t streamWithCUmask;
+  std::vector<uint32_t> defaultCUMask;
+  hipDeviceProp_t props;
+  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+
+  createDefaultCUMask(&defaultCUMask, props.multiProcessorCount);
+
+  HIP_CHECK(
+      hipExtStreamCreateWithCUMask(&streamWithCUmask, defaultCUMask.size(), defaultCUMask.data()));
+  REQUIRE(streamWithCUmask != nullptr);
+
+  HIP_CHECK(hipStreamDestroy(streamWithCUmask));
+  END_CAPTURE(captureStream);
+  HIP_CHECK(hipStreamDestroy(captureStream));
+}
