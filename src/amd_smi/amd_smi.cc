@@ -904,13 +904,8 @@ amdsmi_status_t amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_hand
     }
 
     std::string path = "/dev/dri/" + render_name;
-    auto drm_fd = amdsmi_RAII_FD_handler(path.c_str(), O_RDWR | O_CLOEXEC);
-    ss << __PRETTY_FUNCTION__
-       << " | open(" << path << ") returned: " << strerror(errno) << "\n"
-       << " | drm_fd: " << (drm_fd == nullptr ? "nullptr" : std::to_string(*drm_fd)) << "\n"
-       << " | render_name: " << render_name << "\n";
-    LOG_INFO(ss);
-    if (!drm_fd) {
+    ScopedFD drm_fd(path.c_str(), O_RDWR | O_CLOEXEC);
+    if (!drm_fd.valid()) {
         ss << __PRETTY_FUNCTION__
            << " | Failed to open " << path << ": " << strerror(errno)
            << "; Returning: " << smi_amdgpu_get_status_string(AMDSMI_STATUS_FILE_ERROR, false);
@@ -967,7 +962,7 @@ amdsmi_status_t amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_hand
     request.return_pointer = reinterpret_cast<unsigned long long>(&vram_used);
     request.return_size = sizeof(vram_used);
     request.query = AMDGPU_INFO_VRAM_USAGE;
-    auto drm_write = drmCommandWrite(*drm_fd, DRM_AMDGPU_INFO, &request,
+    auto drm_write = drmCommandWrite(drm_fd, DRM_AMDGPU_INFO, &request,
                                      sizeof(struct drm_amdgpu_info));
     if (drm_write != 0) {
         libdrm.unload();
@@ -1666,13 +1661,8 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
         return AMDSMI_STATUS_NOT_SUPPORTED;
     }
     std::string path = "/dev/dri/" + render_name;
-    auto drm_fd = amdsmi_RAII_FD_handler(path.c_str(), O_RDWR | O_CLOEXEC);
-    ss << __PRETTY_FUNCTION__
-       << " | open(" << path << ") returned: " << strerror(errno) << "\n"
-       << " | drm_fd: " << (drm_fd == nullptr ? "nullptr" : std::to_string(*drm_fd)) << "\n"
-       << " | render_name: " << render_name << "\n";
-    LOG_INFO(ss);
-    if (!drm_fd) {
+    ScopedFD drm_fd(path.c_str(), O_RDWR | O_CLOEXEC);
+    if (!drm_fd.valid()) {
         ss << __PRETTY_FUNCTION__
            << " | Failed to open " << path << ": " << strerror(errno)
            << "; Returning: " << smi_amdgpu_get_status_string(AMDSMI_STATUS_FILE_ERROR, false);
@@ -1716,7 +1706,7 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
     request.return_pointer = reinterpret_cast<unsigned long long>(&dev_info);
     request.return_size = sizeof(struct drm_amdgpu_info_device);
     request.query = AMDGPU_INFO_DEV_INFO;
-    auto drm_write = drmCommandWrite(*drm_fd, DRM_AMDGPU_INFO, &request,
+    auto drm_write = drmCommandWrite(drm_fd, DRM_AMDGPU_INFO, &request,
                                      sizeof(struct drm_amdgpu_info));
     if (drm_write != 0) {
         libdrm.unload();
@@ -1894,13 +1884,8 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(
         return AMDSMI_STATUS_NOT_SUPPORTED;
     }
 
-    auto drm_fd = amdsmi_RAII_FD_handler(path.c_str(), O_RDWR | O_CLOEXEC);
-    ss << __PRETTY_FUNCTION__
-       << " | open(" << path << ") returned: " << strerror(errno) << "\n"
-       << " | drm_fd: " << (drm_fd == nullptr ? "nullptr" : std::to_string(*drm_fd)) << "\n"
-       << " | render_name: " << render_name << "\n";
-    LOG_INFO(ss);
-    if (!drm_fd) {
+    ScopedFD drm_fd(path.c_str(), O_RDWR | O_CLOEXEC);
+    if (!drm_fd.valid()) {
         ss << __PRETTY_FUNCTION__
            << " | Failed to open " << path << ": " << strerror(errno)
            << "; Returning: " << smi_amdgpu_get_status_string(AMDSMI_STATUS_FILE_ERROR, false);
@@ -1951,7 +1936,7 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(
     request.return_pointer = reinterpret_cast<unsigned long long>(&dev_info);
     request.return_size = sizeof(struct drm_amdgpu_info_device);
     request.query = AMDGPU_INFO_DEV_INFO;
-    auto drm_write = drmCommandWrite(*drm_fd, DRM_AMDGPU_INFO, &request,
+    auto drm_write = drmCommandWrite(drm_fd, DRM_AMDGPU_INFO, &request,
                                      sizeof(struct drm_amdgpu_info));
     if (drm_write != 0) {
         libdrm.unload();
@@ -3303,7 +3288,9 @@ amdsmi_status_t amdsmi_get_gpu_reg_table_info(
 }
 
 void amdsmi_free_name_value_pairs(void *p) {
-    free(p);
+    if (p)
+        free(p);
+    return;
 }
 
 amdsmi_status_t
@@ -3755,13 +3742,8 @@ amdsmi_get_gpu_vbios_info(amdsmi_processor_handle processor_handle, amdsmi_vbios
         return AMDSMI_STATUS_NOT_SUPPORTED;
     }
 
-    auto drm_fd = amdsmi_RAII_FD_handler(path.c_str(), O_RDWR | O_CLOEXEC);
-    ss << __PRETTY_FUNCTION__
-       << " | open(" << path << ") returned: " << strerror(errno) << "\n"
-       << " | drm_fd: " << (drm_fd == nullptr ? "nullptr" : std::to_string(*drm_fd)) << "\n"
-       << " | render_name: " << render_name << "\n";
-    LOG_INFO(ss);
-    if (!drm_fd) {
+    ScopedFD drm_fd(path.c_str(), O_RDWR | O_CLOEXEC);
+    if (!drm_fd.valid()) {
         ss << __PRETTY_FUNCTION__
            << " | Failed to open " << path << ": " << strerror(errno)
            << "; Returning: " << smi_amdgpu_get_status_string(AMDSMI_STATUS_FILE_ERROR, false);
@@ -3812,7 +3794,7 @@ amdsmi_get_gpu_vbios_info(amdsmi_processor_handle processor_handle, amdsmi_vbios
     request.return_size = sizeof(drm_amdgpu_info_vbios);
     request.query = AMDGPU_INFO_VBIOS;
     request.vbios_info.type = AMDGPU_INFO_VBIOS_INFO;
-    auto drm_write = drmCommandWrite(*drm_fd, DRM_AMDGPU_INFO, &request,
+    auto drm_write = drmCommandWrite(drm_fd, DRM_AMDGPU_INFO, &request,
                                      sizeof(struct drm_amdgpu_info));
 
     if (drm_write == 0) {
@@ -4323,8 +4305,8 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
         return AMDSMI_STATUS_NOT_SUPPORTED;
     }
 
-    auto drm_fd = amdsmi_RAII_FD_handler(path.c_str(), O_RDWR | O_CLOEXEC);
-    if (!drm_fd) {
+    ScopedFD drm_fd(path.c_str(), O_RDWR | O_CLOEXEC);
+    if (!drm_fd.valid()) {
         ss << __PRETTY_FUNCTION__
            << " | Failed to open " << path << ": " << strerror(errno)
            << "; Returning: " << smi_amdgpu_get_status_string(AMDSMI_STATUS_FILE_ERROR, false);
@@ -4371,7 +4353,7 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
 
     // Get the driver date
     std::string driver_date;
-    auto version = drm_get_version(*drm_fd);
+    auto version = drm_get_version(drm_fd);
     if (version == nullptr) {
         libdrm.unload();
         ss << __PRETTY_FUNCTION__
@@ -4799,8 +4781,8 @@ amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle processor_handle,
         return AMDSMI_STATUS_NOT_SUPPORTED;
     }
 
-    auto drm_fd = amdsmi_RAII_FD_handler(path.c_str(), O_RDWR | O_CLOEXEC);
-    if (!drm_fd) {
+    ScopedFD drm_fd(path.c_str(), O_RDWR | O_CLOEXEC);
+    if (!drm_fd.valid()) {
         ss << __PRETTY_FUNCTION__
            << " | Failed to open " << path << ": " << strerror(errno)
            << "; Returning: " << smi_amdgpu_get_status_string(AMDSMI_STATUS_FILE_ERROR, false);
@@ -4850,7 +4832,7 @@ amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle processor_handle,
     }
 
     // get drm version. If it's older than 3.62.0, then say not supported and exit.
-    auto drm_version = drm_get_version(*drm_fd);
+    auto drm_version = drm_get_version(drm_fd);
     // minimum version that supports getting of virtualization mode
     int major_version = 3;
     int minor_version = 62;
@@ -4904,10 +4886,10 @@ amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle processor_handle,
     request.return_pointer = reinterpret_cast<unsigned long long>(&dev_info);
     request.return_size = sizeof(struct drm_amdgpu_info_device);
     request.query = AMDGPU_INFO_DEV_INFO;
-    auto drm_write = drmCommandWrite(*drm_fd, DRM_AMDGPU_INFO, &request,
+    auto drm_write = drmCommandWrite(drm_fd, DRM_AMDGPU_INFO, &request,
                                      sizeof(struct drm_amdgpu_info));
     ss << __PRETTY_FUNCTION__
-       << " | drm_fd: " << std::dec << *drm_fd << "\n"
+       << " | drm_fd: " << std::dec << drm_fd << "\n"
        << " | path: " << path << "\n"
        << " | drmCommandWrite: " << drm_write << "\n"
        << " | drmCommandWrite returned: " << strerror(errno) << "\n"

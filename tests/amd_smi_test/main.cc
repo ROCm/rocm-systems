@@ -67,6 +67,7 @@
 #include "functional/init_shutdown_refcount.h"
 #include "functional/memorypartition_read_write.h"
 #include "functional/computepartition_read_write.h"
+#include "functional/gpu_cache_read.h"
 
 static AMDSMITstGlobals *sRSMIGlvalues = nullptr;
 
@@ -115,7 +116,6 @@ static void RunGenericTest(TestBase *test) {
 //  RunGenericTest(&<test_obj>);
 // }
 TEST(amdsmitstReadOnly, TestVersionRead) {
-  // amdsmi_wait_for_user_input();
   TestVersionRead tst;
   RunGenericTest(&tst);
 }
@@ -279,6 +279,11 @@ TEST(amdsmitstReadWrite, TestMemoryPartitionReadWrite) {
 TEST(amdsmitstReadWrite, TestEvtNotifReadWrite) {
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestEvtNotifReadWrite tst;
+  RunGenericTest(&tst);
+}
+
+TEST(amdsmitstReadOnly, TestGPUCacheRead) {
+  TestGPUCacheRead tst;
   RunGenericTest(&tst);
 }
 /*
