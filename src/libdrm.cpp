@@ -60,6 +60,17 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetAMDGPUDeviceHandle(
   return HSAKMT_STATUS_ERROR;
 }
 
+HSAKMTAPI int amdgpu_device_initialize(int fd,
+                                       uint32_t *major_version,
+                                       uint32_t *minor_version,
+                                       amdgpu_device_handle *device_handle) {
+  return 0;
+}
+
+HSAKMTAPI int amdgpu_device_deinitialize(amdgpu_device_handle device_handle) {
+  return 0;
+}
+
 HSAKMTAPI int amdgpu_query_gpu_info(amdgpu_device_handle dev,
                                     struct amdgpu_gpu_info *info) {
   wsl::thunk::WDDMDevice *pDevice =

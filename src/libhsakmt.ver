@@ -92,6 +92,8 @@ hsaKmtPcSamplingStop;
 hsaKmtPcSamplingSupport;
 hsaKmtGetVersionCapInfo;
 hsaKmtQueueRingDoorbell;
+amdgpu_device_initialize;
+amdgpu_device_deinitialize;
 amdgpu_query_gpu_info;
 amdgpu_bo_import;
 amdgpu_bo_va_op;
