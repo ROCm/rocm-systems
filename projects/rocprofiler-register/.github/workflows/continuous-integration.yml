@@ -19,41 +19,33 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['ubuntu-latest']
         compiler: ['clang-14', 'clang-15', 'gcc-11', 'gcc-12']
         ci-args: ['']
         ci-tag: ['']
         include:
-          - runner: 'ubuntu-latest'
-            compiler: 'gcc-12'
+          - compiler: 'gcc-12'
             ci-args: '--coverage'
             ci-tag: '-codecov'
-          - runner: 'ubuntu-latest'
-            compiler: 'clang-15'
+          - compiler: 'clang-15'
             ci-args: '--linter clang-tidy'
             ci-tag: '-clang-tidy'
-          - runner: 'ubuntu-22.04'
-            compiler: 'clang-13'
+          - compiler: 'clang-13'
             ci-args: ''
             ci-tag: ''
-          - runner: 'ubuntu-22.04'
-            compiler: 'gcc-12'
+          - compiler: 'gcc-12'
             ci-args: '--memcheck ThreadSanitizer'
             ci-tag: '-thread-sanitizer'
-          - runner: 'ubuntu-22.04'
-            compiler: 'gcc-12'
+          - compiler: 'gcc-12'
             ci-args: '--memcheck AddressSanitizer'
             ci-tag: '-address-sanitizer'
-          - runner: 'ubuntu-22.04'
-            compiler: 'gcc-12'
+          - compiler: 'gcc-12'
             ci-args: '--memcheck LeakSanitizer'
             ci-tag: '-leak-sanitizer'
-        #   - runner: 'ubuntu-latest'
-        #     compiler: 'gcc-12'
+        #   - compiler: 'gcc-12'
         #     ci-args: '--memcheck UndefinedBehaviorSanitizer'
         #     ci-tag: '-undefined-behavior-sanitizer'
 
-    runs-on: ${{ matrix.runner }}
+    runs-on: rocprof-azure-emu-runner-set
 
     env:
         BUILD_TYPE: RelWithDebInfo
@@ -68,10 +60,10 @@ jobs:
       run: |
         CC=${{ matrix.compiler }} &&
         CXX=$(echo ${{ matrix.compiler }} | sed 's/clang-/clang++-/1' | sed 's/gcc-/g++-/1') &&
-        sudo apt-get update &&
-        sudo apt-get install -y build-essential python3 environment-modules ${{ matrix.compiler }} ${CXX} &&
-        sudo update-alternatives --install /usr/bin/cc cc /usr/bin/${CC} 100 &&
-        sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/${CXX} 100 &&
+        apt-get update &&
+        apt-get install -y build-essential python3 environment-modules ${{ matrix.compiler }} ${CXX} &&
+        update-alternatives --install /usr/bin/cc cc /usr/bin/${CC} 100 &&
+        update-alternatives --install /usr/bin/c++ c++ /usr/bin/${CXX} 100 &&
         python3 -m pip install --upgrade pip &&
         python3 -m pip install 'cmake==3.22.0' &&
         python3 -m pip install -r requirements.txt
@@ -80,14 +72,14 @@ jobs:
       timeout-minutes: 25
       if: ${{ matrix.compiler == 'gcc-12' }}
       run: |
-        sudo update-alternatives --install /usr/bin/gcov gcov /usr/bin/gcov-12 100
+        update-alternatives --install /usr/bin/gcov gcov /usr/bin/gcov-12 100
 
     - name: Setup Clang-Tidy
       timeout-minutes: 25
       if: ${{ matrix.compiler == 'clang-15' }}
       run: |
-        sudo apt-get install -y clang-tidy-15
-        sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-15 100
+        apt-get install -y clang-tidy-15
+        update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-15 100
 
     - name: Configure, Build, and Test
       timeout-minutes: 115
@@ -95,7 +87,7 @@ jobs:
       run:
         cmake --version &&
         python3 ./scripts/run-ci.py -B build
-          --name ${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.runner }}-${{ matrix.compiler }}${{ matrix.ci-tag }}
+          --name ${{ github.repository_owner }}-${{ github.ref_name }}-azure-mi300x-${{ matrix.compiler }}${{ matrix.ci-tag }}
           --build-jobs 2
           --site GitHub
           ${{ matrix.ci-args }}
@@ -122,6 +114,15 @@ jobs:
         mkdir -p ${{ env.PACKAGING_INSTALL_PREFIX }}
         ./rocprofiler-register-*-Linux.sh --prefix=${{ env.PACKAGING_INSTALL_PREFIX }} --exclude-subdir --skip-license
 
+    - name: Test Installed Packages
+      if: ${{ contains(matrix.compiler, 'clang-15') }}
+      timeout-minutes: 10
+      shell: bash
+      run: |
+        CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-tests-deb /opt/rocm/share/rocprofiler-register/tests
+        cmake --build build-tests-deb --target all --parallel 16
+        ctest --test-dir build-tests-deb --output-on-failure
+        
     - name: Test Install Modulefile
       timeout-minutes: 15
       shell: bash

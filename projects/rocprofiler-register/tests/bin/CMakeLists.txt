@@ -26,6 +26,10 @@ if(hip_FOUND)
     target_compile_options(simple-hip PRIVATE -W -Wall -Wextra -Werror)
     target_link_libraries(simple-hip PRIVATE Threads::Threads hip::host)
     set(PRELOAD_TESTS_DISABLED OFF)
+    install(
+        TARGETS simple-hip
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/tests/bin
+        COMPONENT tests)
 else()
     add_executable(simple-hip EXCLUDE_FROM_ALL)
     target_sources(simple-hip PRIVATE simple-hip.cpp)
@@ -63,7 +67,7 @@ set_tests_properties(
 string(REPLACE "//" "/" TEST_INSTALL_PREFIX "${TEST_DESTDIR}/${CMAKE_INSTALL_PREFIX}")
 set(simple-hip-normal-env
     "LD_LIBRARY_PATH=${TEST_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}:${ROCM_PATH}/${CMAKE_INSTALL_LIBDIR}"
-    )
+    "LD_PRELOAD=${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_LIBRARY}")
 
 add_test(NAME test-simple-hip-normal COMMAND $<TARGET_FILE:simple-hip>)
 
@@ -87,8 +91,10 @@ set_tests_properties(
 #
 # PRELOAD
 #
-set(simple-hip-preload-env ${simple-hip-normal-env}
-                           "LD_PRELOAD=$<TARGET_FILE:generic-tool::generic-tool>")
+set(simple-hip-preload-env
+    ${simple-hip-normal-env}
+    "LD_PRELOAD=${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_LIBRARY}:$<TARGET_FILE:generic-tool::generic-tool>"
+    )
 
 add_test(NAME test-simple-hip-preload COMMAND $<TARGET_FILE:simple-hip>)
 
