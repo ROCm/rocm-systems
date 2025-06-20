@@ -90,7 +90,7 @@ hsaKmtPcSamplingDestroy;
 hsaKmtPcSamplingStart;
 hsaKmtPcSamplingStop;
 hsaKmtPcSamplingSupport;
-hsaKmtGetVersionCapInfo;
+hsaKmtModelEnabled;
 hsaKmtQueueRingDoorbell;
 amdgpu_device_initialize;
 amdgpu_device_deinitialize;
