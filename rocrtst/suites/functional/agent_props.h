@@ -77,6 +77,9 @@ class AgentPropTest : public TestBase {
   // @Brief: Query UUID property of agents of a ROCm platform
   void QueryAgentUUID();
 
+  // @Brief: Query Clock Counter property of agents of a ROCm platform
+  void QueryAgentClockCounters();
+
  private:
   // Capture value for all agents on system
   std::vector<std::string> propList_;

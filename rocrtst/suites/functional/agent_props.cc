@@ -161,9 +161,32 @@ void AgentPropTest::QueryAgentProp(hsa_agent_t agent,
     propList_.push_back(ss.str());
     break;
   }
-  default:
-      FAIL();
+  case HSA_AMD_AGENT_INFO_CLOCK_COUNTERS: {
+    std::stringstream str_s;
+
+    hsa_amd_clock_counters_t counters = {0};
+
+    err = hsa_agent_get_info(agent, prop, &counters);
+    ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+    str_s << "\n\n  Clock Counters";
+    str_s << "\n  Clock Frequency: "  << counters.system_clock_frequency << "\n";
+    str_s << "  GPU Clock counter: "  << counters.gpu_clock_counter << "\n";
+    str_s << "  System system_clock_counter: "  << counters.system_clock_counter << "\n";
+    str_s << "  CPU Clock counter: "  << counters.cpu_clock_counter << "\n";
+    propList_.push_back(str_s.str());
+
+    ASSERT_NE(0, counters.system_clock_frequency);
+    ASSERT_NE(0, counters.gpu_clock_counter);
+    ASSERT_NE(0, counters.system_clock_counter);
+    ASSERT_NE(0, counters.cpu_clock_counter);
+
+    break;
   }
+  default:
+    FAIL();
+  }
+
 }
 
 void AgentPropTest::QueryAgentUUID() {
@@ -188,6 +211,26 @@ void AgentPropTest::QueryAgentUUID() {
 
   for (uint32_t idx = 0 ; idx < gpus.size(); ++idx) {
     QueryAgentProp(gpus[idx], (hsa_agent_info_t)HSA_AMD_AGENT_INFO_UUID);
+  }
+
+  if (verbosity() > 0) {
+    std::cout << "  *** Execution completed - subtest Passed " << " ***" << std::endl;
+  }
+}
+
+void AgentPropTest::QueryAgentClockCounters() {
+  hsa_status_t err;
+  if (verbosity() > 0) {
+    PrintAgentPropsSubtestHeader("Query Agent's Clock Counters");
+  }
+
+  // find all gpu agents
+  std::vector<hsa_agent_t> gpus;
+  err = hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+  for (uint32_t idx = 0 ; idx < gpus.size(); ++idx) {
+    QueryAgentProp(gpus[idx], (hsa_agent_info_t)HSA_AMD_AGENT_INFO_CLOCK_COUNTERS);
   }
 
   if (verbosity() > 0) {

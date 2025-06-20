@@ -374,10 +374,11 @@ TEST(rocrtstFunc, Deallocation_Notifier_Test) {
   RunGenericTest(&notifier);
 }
 
-TEST(rocrtstFunc, AgentProp_UUID) {
+TEST(rocrtstFunc, AgentPropertiesTests) {
   AgentPropTest propTest;
   RunCustomTestProlog(&propTest);
   propTest.QueryAgentUUID();
+  propTest.QueryAgentClockCounters();
   RunCustomTestEpilog(&propTest);
 }
 
