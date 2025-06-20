@@ -21,15 +21,18 @@ THE SOFTWARE.
 
 __device__ int globalDevData = 10;
 
-extern "C" __global__ void addKernel(int *a, int size) {
-  int offset = blockDim.x * blockIdx.x + threadIdx.x;
-  int stride = blockDim.x * gridDim.x;
-  for (int i = offset; i < size; i+= stride) {
+extern "C" __global__ void addKernel(int* a, size_t size) {
+  size_t offset = blockDim.x * blockIdx.x + threadIdx.x;
+  size_t stride = blockDim.x * gridDim.x;
+  for (size_t i = offset; i < size; i += stride) {
     a[i] += 2;
   }
 }
 
+extern "C" __global__ void sampleModuleKernel() {}
+
+#if defined(__HIP_PLATFORM_AMD__) || CUDA_VERSION < CUDA_12000
+
 texture<float, 2> tex;
 
-extern "C" __global__ void sampleModuleKernel() {
-}
+#endif
