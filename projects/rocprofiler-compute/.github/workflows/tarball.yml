@@ -4,6 +4,11 @@ on:
   push:
     branches: [ amd-mainline, release/** ]
   pull_request:
+    paths-ignore:
+      - '*.md'
+      - '.github/**/*.md'
+      - 'docs/**'
+      - 'docker/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

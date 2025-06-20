@@ -6,8 +6,18 @@ name: RHEL 8
 on:
   push:
     branches: [ amd-mainline, amd-staging, release/**, develop ]
+    paths-ignore:
+      - '*.md'
+      - '.github/**/*.md'
+      - 'docs/**'
+      - 'docker/**'
   pull_request:
     branches: [ amd-mainline, amd-staging, release/**, develop ]
+    paths-ignore:
+      - '*.md'
+      - '.github/**/*.md'
+      - 'docs/**'
+      - 'docker/**'
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
