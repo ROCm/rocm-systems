@@ -358,18 +358,22 @@ class RocProfCompute_Base:
         input_files.sort()
 
         total_runs = len(input_files)
-        total_profiling_time_so_far = 0  
-        avg_profiling_time = 0  
+        total_profiling_time_so_far = 0
+        avg_profiling_time = 0
 
         for i, fname in enumerate(input_files):
             run_number = i + 1
-            if i > 0:  
-                avg_profiling_time = total_profiling_time_so_far / i  
-                time_left_seconds = (total_runs - run_number) * avg_profiling_time  
-                time_left = format_time(time_left_seconds)  
-                console_log(f"[Run {run_number}/{total_runs}][Approximate profiling time left: {time_left}]...")  
-            else:  
-                console_log(f"[Run {run_number}/{total_runs}][Approximate profiling time left: pending first measurement...]")  
+            if i > 0:
+                avg_profiling_time = total_profiling_time_so_far / i
+                time_left_seconds = (total_runs - run_number) * avg_profiling_time
+                time_left = format_time(time_left_seconds)
+                console_log(
+                    f"[Run {run_number}/{total_runs}][Approximate profiling time left: {time_left}]..."
+                )
+            else:
+                console_log(
+                    f"[Run {run_number}/{total_runs}][Approximate profiling time left: pending first measurement...]"
+                )
 
             # Kernel filtering (in-place replacement)
             if not self.__args.kernel == None:
@@ -439,7 +443,7 @@ class RocProfCompute_Base:
                 )
             else:
                 console_error("Profiler not supported")
-            total_profiling_time_so_far += actual_profiling_duration  
+            total_profiling_time_so_far += actual_profiling_duration
         if self.__pc_sampling == True and self.__profiler in (
             "rocprofv3",
             "rocprofiler-sdk",
@@ -454,7 +458,7 @@ class RocProfCompute_Base:
                 rocprofiler_sdk_library_path=self.get_args().rocprofiler_sdk_library_path,
             )
             end_run_prof = time.time()
-            pc_sampling_duration = end_run_prof - start_run_prof  
+            pc_sampling_duration = end_run_prof - start_run_prof
             console_debug(
                 "The time of pc sampling profiling is {} m {} sec".format(
                     int((end_run_prof - start_run_prof) / 60),

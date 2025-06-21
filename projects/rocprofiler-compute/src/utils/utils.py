@@ -34,12 +34,14 @@ import selectors
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from collections import OrderedDict
 from itertools import product
 from pathlib import Path as path
 
 import pandas as pd
+import yaml
 
 import config
 from utils.logger import (
@@ -789,7 +791,6 @@ def run_prof(
 
     console_debug("pmc file: %s" % path(fname).name)
 
-    path_counter_config_yaml = path(fname).with_suffix(".yaml")
     # standard rocprof options
     if rocprof_cmd == "rocprofiler-sdk":
         options = profiler_options
@@ -805,17 +806,57 @@ def run_prof(
         else:
             options = ["-A", "absolute"] + options
 
+    new_env = None
+
+    path_counter_config_yaml = path(fname).with_suffix(".yaml")
     if using_v3() and path_counter_config_yaml.exists():
-        if rocprof_cmd == "rocprofiler-sdk":
-            with open(path_counter_config_yaml, "r") as file:
-                options["ROCPROF_EXTRA_COUNTERS_CONTENTS"] = file.read()
-        else:
-            options = ["-E", str(path_counter_config_yaml)] + options
+        # Get extra counter definitions
+        with open(path_counter_config_yaml, "r") as file:
+            extra_counter_defs = yaml.safe_load(file)
+        if extra_counter_defs:
+            # Get default counter definitions path
+            if rocprof_cmd == "rocprofiler-sdk":
+                counter_defs_path = (
+                    path(options["ROCP_TOOL_LIBRARIES"])
+                    .resolve()
+                    .parent.parent.parent.joinpath(
+                        "share", "rocprofiler-sdk", "counter_defs.yaml"
+                    )
+                )
+            else:
+                counter_defs_path = (
+                    path(shutil.which(rocprof_cmd))
+                    .resolve()
+                    .parent.parent.joinpath(
+                        "share", "rocprofiler-sdk", "counter_defs.yaml"
+                    )
+                )
+            # Get default counter definitions
+            with open(counter_defs_path, "r") as file:
+                counter_defs = yaml.safe_load(file)
+            # Merge counter definitions
+            counter_defs["rocprofiler-sdk"]["counters"].extend(
+                extra_counter_defs["rocprofiler-sdk"]["counters"]
+            )
+            # Write merged counter definitions to a temporary file
+            tmp_dir = tempfile.mkdtemp(prefix="rocprof_counter_defs_", dir="/tmp")
+            tmpfile_path = path(tmp_dir) / "counter_defs.yaml"
+            with open(tmpfile_path, "w") as tmpfile:
+                yaml.dump(
+                    counter_defs, tmpfile, default_flow_style=False, sort_keys=False
+                )
+            # Set the environment variable to point to the temporary file
+            if not new_env:
+                new_env = os.environ.copy()
+            new_env["ROCPROFILER_METRICS_PATH"] = str(path(tmp_dir))
+            console_debug(
+                f"Adding env var for extra counters: ROCPROFILER_METRICS_PATH={new_env['ROCPROFILER_METRICS_PATH']}"
+            )
 
     # set required env var for mi300
-    new_env = None
     if mspec.gpu_model.lower() not in ("mi50", "mi60", "mi210", "mi250", "mi250x"):
-        new_env = os.environ.copy()
+        if not new_env:
+            new_env = os.environ.copy()
         new_env["ROCPROFILER_INDIVIDUAL_XCC_MODE"] = "1"
 
     is_timestamps = False
@@ -852,6 +893,10 @@ def run_prof(
             fname, int((time_2 - time_1) / 60), str((time_2 - time_1) % 60)
         )
     )
+
+    # Delete temporary files
+    if new_env and "ROCPROFILER_METRICS_PATH" in new_env:
+        shutil.rmtree(new_env["ROCPROFILER_METRICS_PATH"], ignore_errors=True)
 
     if not success:
         if loglevel > logging.INFO:
@@ -1553,6 +1598,7 @@ def convert_metric_id_to_panel_idx(metric_id):
     else:
         raise Exception(f"Invalid metric id: {metric_id}")
 
+
 def format_time(seconds):
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
@@ -1564,4 +1610,4 @@ def format_time(seconds):
         parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
     if secs > 0 or not parts:
         parts.append(f"{secs} second{'s' if secs != 1 else ''}")
-    return ', '.join(parts[:-1]) + (' and ' if len(parts) > 1 else '') + parts[-1]
+    return ", ".join(parts[:-1]) + (" and " if len(parts) > 1 else "") + parts[-1]

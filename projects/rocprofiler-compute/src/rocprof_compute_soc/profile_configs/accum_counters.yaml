@@ -10,6 +10,7 @@ rocprofiler-sdk:
           - gfx941
           - gfx940
           - gfx90a
+          - gfx950
           expression: accumulate(SQ_IFETCH_LEVEL, HIGH_RES)
     - name: SQ_INST_LEVEL_LDS_ACCUM
       description: 'SQ_INST_LEVEL_LDS accumulation'
@@ -20,6 +21,7 @@ rocprofiler-sdk:
           - gfx941
           - gfx940
           - gfx90a
+          - gfx950
           expression: accumulate(SQ_INST_LEVEL_LDS, HIGH_RES)
     - name: SQ_INST_LEVEL_SMEM_ACCUM
       description: 'SQ_INST_LEVEL_SMEM accumulation'
@@ -30,6 +32,7 @@ rocprofiler-sdk:
           - gfx941
           - gfx940
           - gfx90a
+          - gfx950
           expression: accumulate(SQ_INST_LEVEL_SMEM, HIGH_RES)
     - name: SQ_INST_LEVEL_VMEM_ACCUM
       description: 'SQ_INST_LEVEL_VMEM accumulation'
@@ -40,6 +43,7 @@ rocprofiler-sdk:
           - gfx941
           - gfx940
           - gfx90a
+          - gfx950
           expression: accumulate(SQ_INST_LEVEL_VMEM, HIGH_RES)
     - name: SQ_LEVEL_WAVES_ACCUM
       description: 'SQ_LEVEL_WAVES accumulation'
@@ -50,4 +54,5 @@ rocprofiler-sdk:
           - gfx941
           - gfx940
           - gfx90a
+          - gfx950
           expression: accumulate(SQ_LEVEL_WAVES, HIGH_RES)
