@@ -104,13 +104,16 @@ jobs:
       shell: bash
       run: |
         for ver in 6.2.1 6.2.4 6.3.4 6.4.1; do
+          echo -e "Testing on ROCm ${ver} started..."
           update-alternatives --set rocm /opt/rocm-$ver
+          ls -lah /opt/rocm-$ver/lib
           rm -rf build*
-          CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-samples samples
-          CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-tests tests
+          CMAKE_PREFIX_PATH="/opt/rocprofiler-sdk;/opt/rocm-$ver" cmake -B build-samples samples
+          CMAKE_PREFIX_PATH="/opt/rocprofiler-sdk;/opt/rocm-$ver" cmake -B build-tests tests
           export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:/opt/rocm-$ver/lib:${LD_LIBRARY_PATH}
           cmake --build build-samples --target all --parallel 16
           cmake --build build-tests --target all --parallel 16
           ctest --test-dir build-samples -LE "${CTEST_EXCLUDE_LABEL_REGEX}" -E "${CTEST_EXCLUDE_TESTS_REGEX}" --output-on-failure
           ctest --test-dir build-tests -LE "${CTEST_EXCLUDE_LABEL_REGEX}" -E "${CTEST_EXCLUDE_TESTS_REGEX}" --output-on-failure
+          echo -e "Testing on ROCm ${ver} finished...\n\n\n\n"
         done
