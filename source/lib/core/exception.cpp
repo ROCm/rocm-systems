@@ -92,7 +92,7 @@ exception<Tp>::operator=(const exception& _rhs)
     if(this != &_rhs)
     {
         Tp::operator=(_rhs);
-        m_what      = strdup(_rhs.m_what);
+        m_what = strdup(_rhs.m_what);
     }
     return *this;
 }

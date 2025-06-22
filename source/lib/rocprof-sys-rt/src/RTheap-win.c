@@ -61,7 +61,7 @@ map_region(void* addr, int len, int fd)
         FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
                           FORMAT_MESSAGE_IGNORE_INSERTS,
                       NULL, lastError, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                      (LPTSTR)(lpMessage), 0, NULL);
+                      (LPTSTR) (lpMessage), 0, NULL);
         fprintf(stderr, "VirtualAlloc failed in RTlib: %s\n", lpMessage);
         LocalFree((LPVOID) lpMessage);
     }

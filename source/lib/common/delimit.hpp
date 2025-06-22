@@ -34,16 +34,16 @@ namespace
 {
 template <typename ContainerT, typename... Args>
 inline auto
-emplace_impl(ContainerT& _c, int, Args&&... _args)
-    -> decltype(_c.emplace_back(std::forward<Args>(_args)...))
+emplace_impl(ContainerT& _c, int,
+             Args&&... _args) -> decltype(_c.emplace_back(std::forward<Args>(_args)...))
 {
     return _c.emplace_back(std::forward<Args>(_args)...);
 }
 
 template <typename ContainerT, typename... Args>
 inline auto
-emplace_impl(ContainerT& _c, long, Args&&... _args)
-    -> decltype(_c.emplace(std::forward<Args>(_args)...))
+emplace_impl(ContainerT& _c, long,
+             Args&&... _args) -> decltype(_c.emplace(std::forward<Args>(_args)...))
 {
     return _c.emplace(std::forward<Args>(_args)...);
 }

@@ -161,7 +161,8 @@ struct setting_serialization<tsettings<Tp>, custom_setting_serializer>
 }  // namespace tim
 
 template <typename... Tp>
-void push(type_list<Tp...>)
+void
+push(type_list<Tp...>)
 {
     ROCPROFSYS_FOLD_EXPRESSION(
         settings::push_serialize_map_callback<Tp, custom_setting_serializer>());
@@ -171,7 +172,8 @@ void push(type_list<Tp...>)
 }
 
 template <typename... Tp>
-void pop(type_list<Tp...>)
+void
+pop(type_list<Tp...>)
 {
     ROCPROFSYS_FOLD_EXPRESSION(
         settings::pop_serialize_map_callback<Tp, custom_setting_serializer>());

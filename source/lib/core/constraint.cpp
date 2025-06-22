@@ -262,7 +262,8 @@ spec::operator()(const stages& _stages) const
             auto _del = (_dur * units::sec);
             auto _end = _now + _del;
             while(get_clock_now(_spec.clock_id.value) < _end && (_ret = _func(_spec)))
-            {}
+            {
+            }
             return _ret;
         };
 
@@ -275,7 +276,8 @@ spec::operator()(const stages& _stages) const
         if(_stages.init(_spec) && _wait(_stages.wait, _spec.delay) &&
            _stages.start(_spec) && _wait(_stages.collect, _spec.duration) &&
            _stages.stop(_spec))
-        {}
+        {
+        }
         else
         {
             break;

@@ -122,7 +122,7 @@ int
 get_verbose()
 {
     verbose     = get_env("ROCPROFSYS_CAUSAL_VERBOSE",
-                      get_env<int>("ROCPROFSYS_VERBOSE", verbose, false));
+                          get_env<int>("ROCPROFSYS_VERBOSE", verbose, false));
     auto _debug = get_env("ROCPROFSYS_CAUSAL_DEBUG",
                           get_env<bool>("ROCPROFSYS_DEBUG", false, false));
     if(_debug) verbose += 8;

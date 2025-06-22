@@ -137,7 +137,7 @@ ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
                     ROCPROFSYS_WARNING_F(
                         0,
                         "pthread_kill(%zu, %i) failed. executing generic "
-                        "kill(%i, %i)...\n",
+                                "kill(%i, %i)...\n",
                         _handle, timeout_signal_v, process::get_id(), timeout_signal_v);
                 }
 

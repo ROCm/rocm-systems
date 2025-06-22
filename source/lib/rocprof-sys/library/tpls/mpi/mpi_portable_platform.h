@@ -73,7 +73,7 @@
  *
  */
 #ifndef _STRINGIFY
-#    define _STRINGIFY_HELPER(x) #    x
+#    define _STRINGIFY_HELPER(x) #x
 #    define _STRINGIFY(x)        _STRINGIFY_HELPER(x)
 #endif
 
@@ -94,10 +94,10 @@
 #    endif
 /* patch number is a decimal build date: YYYYMMDD */
 #    define PLATFORM_COMPILER_VERSION_INT(maj, min, pat)                                 \
-        (((((maj) *10) | (min)) << 20) |                                                 \
+        (((((maj) * 10) | (min)) << 20) |                                                \
          ((pat) < _PLATFORM_COMPILER_INTEL_MIN_BUILDDATE                                 \
               ? _PLATFORM_COMPILER_INTEL_MIN_BUILDDATE                                   \
-              : ((pat) -_PLATFORM_COMPILER_INTEL_MIN_BUILDDATE)))
+              : ((pat) - _PLATFORM_COMPILER_INTEL_MIN_BUILDDATE)))
 #    define PLATFORM_COMPILER_VERSION                                                    \
         PLATFORM_COMPILER_VERSION_INT(__INTEL_COMPILER / 10, __INTEL_COMPILER / 100,     \
                                       _PLATFORM_INTEL_COMPILER_BUILD_DATE)
@@ -207,7 +207,7 @@
 #    endif
 
 #    define PLATFORM_COMPILER_VERSION_INT(maj, min, pat)                                 \
-        (((maj) *10000000) + ((min) *100000) + (90000) + (pat))
+        (((maj) * 10000000) + ((min) * 100000) + (90000) + (pat))
 /* 90000 = official ver, 80000 = customer special ver, 60000 = field test ver */
 
 #elif defined(__SUNPRO_C) || defined(__SUNPRO_CC)

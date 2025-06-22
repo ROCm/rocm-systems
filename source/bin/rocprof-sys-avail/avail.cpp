@@ -293,8 +293,7 @@ main(int argc, char** argv)
                 {
                     _msg << "| " << std::setw(std::get<0>(_w) + 2) << "String";
                     if(_show) _msg << " | " << std::setw(std::get<1>(_w)) << "Value";
-                    _msg << " | " << std::setw(std::get<2>(_w)) << "Encoding"
-                         << " |\n";
+                    _msg << " | " << std::setw(std::get<2>(_w)) << "Encoding" << " |\n";
 
                     auto _dashes = [](int64_t _n) {
                         std::stringstream _dss{};
@@ -965,9 +964,9 @@ write_settings_info(std::ostream& os, const array_t<bool, N>& opts,
         "C++ MEMBER ACCESSOR",  "Python ACCESSOR", "DESCRIPTION", "CATEGORIES",
     };
     array_t<string_t, size> _keys   = { "environ",         "value",
-                                      "data_type",       "static_accessor",
-                                      "member_accessor", "python_accessor",
-                                      "description",     "categories" };
+                                        "data_type",       "static_accessor",
+                                        "member_accessor", "python_accessor",
+                                        "description",     "categories" };
     array_t<bool, size>     _center = {
         false, true, true, false, false, false, false, false
     };

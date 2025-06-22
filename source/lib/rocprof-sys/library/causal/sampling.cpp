@@ -462,7 +462,8 @@ sampling_signals()
 }  // namespace
 
 template <typename ScopeT>
-void pause(ScopeT)
+void
+pause(ScopeT)
 {
     static_assert(
         tim::is_one_of<ScopeT,
@@ -501,7 +502,8 @@ void pause(ScopeT)
 }
 
 template <typename ScopeT>
-void resume(ScopeT)
+void
+resume(ScopeT)
 {
     static_assert(
         tim::is_one_of<ScopeT,

@@ -82,7 +82,7 @@ struct backtrace : comp::empty_base
     backtrace(const backtrace&)     = default;
     backtrace(backtrace&&) noexcept = default;
 
-    backtrace& operator=(const backtrace&) = default;
+    backtrace& operator=(const backtrace&)     = default;
     backtrace& operator=(backtrace&&) noexcept = default;
 
     void sample(int = -1);

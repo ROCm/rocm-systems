@@ -84,16 +84,11 @@ typedef enum OutputSurfaceMemoryType_enum
 
 #if DBGINFO
 #    define INFO(X)                                                                      \
-        std::clog << "[INF] "                                                            \
-                  << " {" << __func__ << "} "                                            \
-                  << " " << X << std::endl;
+        std::clog << "[INF] " << " {" << __func__ << "} " << " " << X << std::endl;
 #else
 #    define INFO(X) ;
 #endif
-#define ERR(X)                                                                           \
-    std::cerr << "[ERR] "                                                                \
-              << " {" << __func__ << "} "                                                \
-              << " " << X << std::endl;
+#define ERR(X) std::cerr << "[ERR] " << " {" << __func__ << "} " << " " << X << std::endl;
 
 class RocVideoDecodeException : public std::exception
 {

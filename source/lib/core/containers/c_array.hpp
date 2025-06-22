@@ -44,9 +44,9 @@ struct c_array
     , m_size{ _size }
     {}
 
-    ~c_array()              = default;
-    c_array(const c_array&) = default;
-    c_array& operator=(const c_array&) = default;
+    ~c_array()                             = default;
+    c_array(const c_array&)                = default;
+    c_array& operator=(const c_array&)     = default;
     c_array& operator=(c_array&&) noexcept = default;
 
     // Get the size of the wrapped array

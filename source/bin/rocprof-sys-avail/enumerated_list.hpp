@@ -48,6 +48,6 @@ struct enumerated_list<TupT<T...>, std::index_sequence<I, Idx...>>
     using Tp                         = tim::component::enumerator_t<I>;
     static constexpr bool is_nothing = tim::concepts::is_placeholder<Tp>::value;
     using type                       = typename enumerated_list<
-        std::conditional_t<is_nothing, type_list<T...>, type_list<T..., Tp>>,
-        std::index_sequence<Idx...>>::type;
+                              std::conditional_t<is_nothing, type_list<T...>, type_list<T..., Tp>>,
+                              std::index_sequence<Idx...>>::type;
 };

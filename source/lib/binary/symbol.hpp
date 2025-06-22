@@ -57,7 +57,7 @@ struct symbol : private tim::unwind::bfd_file::symbol
     symbol(const symbol&)     = default;
     symbol(symbol&&) noexcept = default;
 
-    symbol& operator=(const symbol&) = default;
+    symbol& operator=(const symbol&)     = default;
     symbol& operator=(symbol&&) noexcept = default;
 
     bool     operator==(const symbol&) const;

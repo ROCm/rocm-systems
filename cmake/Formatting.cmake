@@ -37,8 +37,7 @@ endmacro()
 #
 # ------------------------------------------------------------------------------#
 
-find_program(ROCPROFSYS_CLANG_FORMAT_EXE NAMES clang-format-11 clang-format-mp-11
-                                               clang-format)
+find_program(ROCPROFSYS_CLANG_FORMAT_EXE NAMES clang-format-18 clang-format)
 
 find_program(ROCPROFSYS_CMAKE_FORMAT_EXE NAMES cmake-format)
 find_program(ROCPROFSYS_BLACK_FORMAT_EXE NAMES black)

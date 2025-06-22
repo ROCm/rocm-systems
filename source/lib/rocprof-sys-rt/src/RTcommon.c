@@ -273,7 +273,7 @@ DYNINST_instForkEntry()
 DLLEXPORT void
 DYNINST_instForkExit(void* arg1)
 {
-//#warning "This function is not implemented for AARCH64 yet!"
+// #warning "This function is not implemented for AARCH64 yet!"
 #if !defined(arch_aarch64)
     tc_lock_lock(&DYNINST_trace_lock);
 
@@ -306,7 +306,7 @@ DYNINST_instForkExit(void* arg1)
 DLLEXPORT void
 DYNINST_instExecEntry(void* arg1)
 {
-//#warning "This function is not implemented for AARCH64 yet!"
+// #warning "This function is not implemented for AARCH64 yet!"
 #if !defined(arch_aarch64)
     tc_lock_lock(&DYNINST_trace_lock);
 
@@ -446,7 +446,7 @@ cacheLookup(void* calculation)
  * bit 1: true if interpAsTarget
  * bit 2: true if interpAsReturnAddr
  **/
-//#define STACKDUMP
+// #define STACKDUMP
 void
 DYNINST_stopThread(void* pointAddr, void* callBackID, void* flags, void* calculation)
 {

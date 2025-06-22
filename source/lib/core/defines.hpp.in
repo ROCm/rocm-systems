@@ -28,17 +28,17 @@
 
 #if !defined(ROCPROFSYS_DEFAULT_OBJECT)
 #    define ROCPROFSYS_DEFAULT_OBJECT(NAME)                                              \
-        NAME()                = default;                                                 \
-        NAME(const NAME&)     = default;                                                 \
-        NAME(NAME&&) noexcept = default;                                                 \
-        NAME& operator=(const NAME&) = default;                                          \
+        NAME()                           = default;                                      \
+        NAME(const NAME&)                = default;                                      \
+        NAME(NAME&&) noexcept            = default;                                      \
+        NAME& operator=(const NAME&)     = default;                                      \
         NAME& operator=(NAME&&) noexcept = default;
 #endif
 
 #if !defined(ROCPROFSYS_DEFAULT_COPY_MOVE)
 #    define ROCPROFSYS_DEFAULT_COPY_MOVE(NAME)                                           \
-        NAME(const NAME&)     = default;                                                 \
-        NAME(NAME&&) noexcept = default;                                                 \
-        NAME& operator=(const NAME&) = default;                                          \
+        NAME(const NAME&)                = default;                                      \
+        NAME(NAME&&) noexcept            = default;                                      \
+        NAME& operator=(const NAME&)     = default;                                      \
         NAME& operator=(NAME&&) noexcept = default;
 #endif

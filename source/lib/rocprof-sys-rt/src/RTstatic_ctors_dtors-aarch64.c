@@ -28,7 +28,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-//#warning "This file is not implemented yet!"
+// #warning "This file is not implemented yet!"
 
 #if defined(DYNINST_RT_STATIC_LIB)
 
@@ -37,19 +37,19 @@
 void (*DYNINSTctors_addr)(void);
 void (*DYNINSTdtors_addr)(void);
 
-//#if defined(MUTATEE64)
-// static const unsigned long long CTOR_LIST_TERM = 0x0000000000000000ULL;
-// static const unsigned long long CTOR_LIST_START = 0xffffffffffffffffULL;
-// static const unsigned long long DTOR_LIST_TERM = 0x0000000000000000ULL;
-// static const unsigned long long DTOR_LIST_START = 0xffffffffffffffffULL;
-//#else
+// #if defined(MUTATEE64)
+//  static const unsigned long long CTOR_LIST_TERM = 0x0000000000000000ULL;
+//  static const unsigned long long CTOR_LIST_START = 0xffffffffffffffffULL;
+//  static const unsigned long long DTOR_LIST_TERM = 0x0000000000000000ULL;
+//  static const unsigned long long DTOR_LIST_START = 0xffffffffffffffffULL;
+// #else
 /*
 static const unsigned CTOR_LIST_TERM = 0x00000000;
 static const unsigned CTOR_LIST_START = 0xffffffff;
 static const unsigned DTOR_LIST_TERM = 0x00000000;
 static const unsigned DTOR_LIST_START = 0xffffffff;
 */
-//#endif
+// #endif
 
 extern void
 DYNINSTBaseInit();
@@ -68,14 +68,14 @@ DYNINSTBaseInit();
 void
 DYNINSTglobal_ctors_handler()
 {
-    //#warning "This function is not implemented yet!"
+    // #warning "This function is not implemented yet!"
     assert(0);
 }
 
 void
 DYNINSTglobal_dtors_handler()
 {
-    //#warning "This function is not implemented yet!"
+    // #warning "This function is not implemented yet!"
     assert(0);
 }
 

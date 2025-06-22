@@ -147,7 +147,7 @@ symtab_data_s                       symtab_data                = {};
 std::set<symbol_linkage_t>          enabled_linkage            = {};
 std::set<symbol_visibility_t>       enabled_visibility         = {};
 const std::set<symbol_linkage_t>    default_enabled_linkage    = { SL_GLOBAL, SL_LOCAL,
-                                                             SL_UNIQUE };
+                                                                   SL_UNIQUE };
 const std::set<symbol_visibility_t> default_enabled_visibility = { SV_DEFAULT, SV_HIDDEN,
                                                                    SV_INTERNAL,
                                                                    SV_PROTECTED };
@@ -272,8 +272,8 @@ activate_signal_handlers(const std::vector<sys_signal>& _signals)
         TIMEMORY_PRINTF_FATAL(
             stderr,
             "These were the last %i log entries from rocprof-sys. You can control the "
-            "number of log entries via the '--log <N>' option or ROCPROFSYS_LOG_COUNT "
-            "env variable.\n",
+                   "number of log entries via the '--log <N>' option or ROCPROFSYS_LOG_COUNT "
+                   "env variable.\n",
             num_log_entries);
 
         if(log_ofs) log_ofs->close();
@@ -1207,8 +1207,7 @@ main(int argc, char** argv)
                 std::min<size_t>(std::get<0>(tim::utility::console::get_columns()) - 20,
                                  strlen(_cmdv[0]) + 32);
             _separator.fill('=');
-            _separator << "#" << std::setw(_width - 2) << ""
-                       << "#";
+            _separator << "#" << std::setw(_width - 2) << "" << "#";
             verbprintf(0, "%s\n", _separator.str().c_str());
             verbprintf(0, "\n");
             verbprintf(0, "Warning! '%s' is not executable!\n", _cmdv[0]);
@@ -1708,7 +1707,7 @@ main(int argc, char** argv)
     auto* user_start_func = find_function(app_image, "rocprofsys_user_start_trace",
                                           { "rocprofsys_user_start_thread_trace" });
     auto* user_stop_func  = find_function(app_image, "rocprofsys_user_stop_trace",
-                                         { "rocprofsys_user_stop_thread_trace" });
+                                          { "rocprofsys_user_stop_thread_trace" });
 #if ROCPROFSYS_USE_MPI > 0 || ROCPROFSYS_USE_MPI_HEADERS > 0
     // if any of the below MPI functions are found, enable MPI support
     for(const auto* itr :

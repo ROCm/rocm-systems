@@ -61,7 +61,7 @@ enum class sample : uint64_t
 #if defined(PERF_SAMPLE_READ)
     read = PERF_SAMPLE_READ,
 #else
-    read            = 0,
+    read = 0,
 #endif
 
     callchain = PERF_SAMPLE_CALLCHAIN,
@@ -70,61 +70,61 @@ enum class sample : uint64_t
 #if defined(PERF_SAMPLE_BRANCH_STACK)
     branch_stack = PERF_SAMPLE_BRANCH_STACK,
 #else
-    branch_stack    = 0,
+    branch_stack = 0,
 #endif
 
 #if defined(PERF_SAMPLE_REGS_USER)
     regs = PERF_SAMPLE_REGS_USER,
 #else
-    regs            = 0,
+    regs = 0,
 #endif
 
 #if defined(PERF_SAMPLE_STACK_USER)
     stack = PERF_SAMPLE_STACK_USER,
 #else
-    stack           = 0,
+    stack = 0,
 #endif
 
 #if defined(PERF_SAMPLE_WEIGHT)
     weight = PERF_SAMPLE_WEIGHT,
 #else
-    weight          = 0,
+    weight = 0,
 #endif
 
 #if defined(PERF_SAMPLE_DATA_SRC)
     data_src = PERF_SAMPLE_DATA_SRC,
 #else
-    data_src        = 0,
+    data_src = 0,
 #endif
 
 #if defined(PERF_SAMPLE_IDENTIFIER)
     identifier = PERF_SAMPLE_IDENTIFIER,
 #else
-    identifier      = 0,
+    identifier = 0,
 #endif
 
 #if defined(PERF_SAMPLE_TRANSACTION)
     transaction = PERF_SAMPLE_TRANSACTION,
 #else
-    transaction     = 0,
+    transaction = 0,
 #endif
 
 #if defined(PERF_SAMPLE_REGS_INTR)
     regs_intr = PERF_SAMPLE_REGS_INTR,
 #else
-    regs_intr       = 0,
+    regs_intr = 0,
 #endif
 
 #if defined(PERF_SAMPLE_PHYS_ADDR)
     phys_addr = PERF_SAMPLE_PHYS_ADDR,
 #else
-    phys_addr       = 0,
+    phys_addr = 0,
 #endif
 
 #if defined(PERF_SAMPLE_CGROUP)
     cgroup = PERF_SAMPLE_CGROUP,
 #else
-    cgroup          = 0,
+    cgroup = 0,
 #endif
 
     last = PERF_SAMPLE_MAX
@@ -213,31 +213,31 @@ enum class record_type
 #if defined(PERF_RECORD_MMAP2)
     mmap2 = PERF_RECORD_MMAP2,
 #else
-    mmap2           = 0,
+    mmap2 = 0,
 #endif
 
 #if defined(PERF_RECORD_AUX)
     aux = PERF_RECORD_AUX,
 #else
-    aux             = 0,
+    aux = 0,
 #endif
 
 #if defined(PERF_RECORD_ITRACE_START)
     itrace_start = PERF_RECORD_ITRACE_START,
 #else
-    itrace_start    = 0,
+    itrace_start = 0,
 #endif
 
 #if defined(PERF_RECORD_LOST_SAMPLES)
     lost_samples = PERF_RECORD_LOST_SAMPLES,
 #else
-    lost_samples    = 0,
+    lost_samples = 0,
 #endif
 
 #if defined(PERF_RECORD_SWITCH)
     switch_record = PERF_RECORD_SWITCH,
 #else
-    switch_record   = 0,
+    switch_record = 0,
 #endif
 
 #if defined(PERF_RECORD_SWITCH_CPU_WIDE)
@@ -249,31 +249,31 @@ enum class record_type
 #if defined(PERF_RECORD_NAMESPACES)
     namespaces = PERF_RECORD_NAMESPACES,
 #else
-    namespaces      = 0,
+    namespaces = 0,
 #endif
 
 #if defined(PERF_RECORD_KSYMBOL)
     ksymbol = PERF_RECORD_KSYMBOL,
 #else
-    ksymbol         = 0,
+    ksymbol = 0,
 #endif
 
 #if defined(PERF_RECORD_BPF_EVENT)
     bpf_event = PERF_RECORD_BPF_EVENT,
 #else
-    bpf_event       = 0,
+    bpf_event = 0,
 #endif
 
 #if defined(PERF_RECORD_CGROUP)
     cgroup = PERF_RECORD_CGROUP,
 #else
-    cgroup          = 0,
+    cgroup = 0,
 #endif
 
 #if defined(PERF_RECORD_TEXT_POKE)
     text_poke = PERF_RECORD_TEXT_POKE,
 #else
-    text_poke       = 0,
+    text_poke = 0,
 #endif
 };
 

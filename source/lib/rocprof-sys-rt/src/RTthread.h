@@ -45,7 +45,7 @@ extern int DYNINST_multithread_capable;
 
 typedef dyninst_lock_t tc_lock_t;
 
-#define DECLARE_TC_LOCK(l) tc_lock_t l = { 0, (dyntid_t) -1 }
+#define DECLARE_TC_LOCK(l) tc_lock_t l = { 0, (dyntid_t) - 1 }
 
 int
 tc_lock_init(tc_lock_t*);

@@ -146,16 +146,12 @@ module_function::write_header(std::ostream& os)
     auto w2 = std::min<size_t>(get_width()[2], absolute_max_width);
 
     std::stringstream ss;
-    ss << std::setw(14) << "StartAddress"
-       << " " << std::setw(14) << "AddressRange"
-       << " " << std::setw(14) << "#Instructions"
-       << " " << std::setw(6) << "Ratio"
-       << " " << std::setw(7) << "Linkage"
-       << " " << std::setw(10) << "Visibility"
-       << "  " << std::setw(w0 + 8) << std::left << "Module"
-       << " " << std::setw(w1 + 8) << std::left << "Function"
-       << " " << std::setw(w2 + 8) << std::left << "FunctionSignature"
-       << "\n";
+    ss << std::setw(14) << "StartAddress" << " " << std::setw(14) << "AddressRange" << " "
+       << std::setw(14) << "#Instructions" << " " << std::setw(6) << "Ratio" << " "
+       << std::setw(7) << "Linkage" << " " << std::setw(10) << "Visibility" << "  "
+       << std::setw(w0 + 8) << std::left << "Module" << " " << std::setw(w1 + 8)
+       << std::left << "Function" << " " << std::setw(w2 + 8) << std::left
+       << "FunctionSignature" << "\n";
     os << ss.str();
 }
 
@@ -1015,7 +1011,7 @@ module_function::register_coverage(address_space_t* _addr_space,
                 auto  _start_addr = itr.second.start_address;
                 auto& _signature  = itr.second.signature;
                 auto  _trace_entr = rocprofsys_call_expr(_signature.m_file,
-                                                        _signature.m_name, _start_addr);
+                                                         _signature.m_name, _start_addr);
                 auto  _entr       = _trace_entr.get(_entr_trace);
 
                 if(insert_instr(_addr_space, _entr, BPatch_entry, itr.first))

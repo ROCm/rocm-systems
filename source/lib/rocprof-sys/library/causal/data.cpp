@@ -82,13 +82,13 @@ auto speedup_dist      = []() {
     size_t                _n = std::max<size_t>(1, 100 / speedup_divisions);
     std::vector<uint16_t> _v(_n, uint16_t{ 0 });
     std::generate(_v.begin(), _v.end(),
-                  [_value = 0]() mutable { return (_value += speedup_divisions); });
+                       [_value = 0]() mutable { return (_value += speedup_divisions); });
     // approximately 25% of bins should be zero speedup
     size_t _nzero = std::ceil(_v.size() / 4.0);
     _v.resize(_v.size() + _nzero, 0);
     std::sort(_v.begin(), _v.end());
     ROCPROFSYS_CI_THROW(_v.back() > 100, "Error! last value is too large: %i\n",
-                        (int) _v.back());
+                             (int) _v.back());
     return _v;
 }();
 
@@ -899,7 +899,7 @@ get_line_info(uintptr_t _addr, bool _include_discarded)
             // make sure the address is in the coarse grained mapped regions
             // before performing an exhaustive search
             bool _is_mapped = std::find_if(litr.mappings.begin(), litr.mappings.end(),
-                                           [_addr](const auto& mitr) {
+                                                  [_addr](const auto& mitr) {
                                                return address_range_t{ mitr.load_address,
                                                                        mitr.last_address }
                                                    .contains(_addr);
@@ -939,7 +939,7 @@ get_line_info(uintptr_t _addr, bool _include_discarded)
                         if(!_ipaddr.contains(itr.ipaddr()))
                             ROCPROFSYS_THROW(
                                 "Error! debug line info ipaddr (%s) is not contained in "
-                                "symbol ipaddr (%s)",
+                                       "symbol ipaddr (%s)",
                                 as_hex(itr.ipaddr()).c_str(), as_hex(_ipaddr).c_str());
                         if(itr.ipaddr().contains(_addr)) _debug_data.emplace_back(itr);
                     }

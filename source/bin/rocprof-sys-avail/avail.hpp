@@ -162,8 +162,8 @@ private:
     unique_set  exclude_stream = {};
     int_stack   name_counter;
     unique_set  value_keys = { "name",    "value",     "description", "count",
-                              "environ", "max_count", "cmdline",     "data_type",
-                              "initial", "categories" };
+                               "environ", "max_count", "cmdline",     "data_type",
+                               "initial", "categories" };
 };
 
 //======================================================================================//

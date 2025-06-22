@@ -48,7 +48,7 @@ template <typename T>
 void
 vmul(T* a, T* b, T* c, int N)
 {
-#pragma omp target           map(to : a [0:N], b [0:N]) map(from : c [0:N])
+#pragma omp target           map(to : a[0 : N], b[0 : N]) map(from : c[0 : N])
 #pragma omp teams distribute parallel for
     for(int i = 0; i < N; i++)
     {

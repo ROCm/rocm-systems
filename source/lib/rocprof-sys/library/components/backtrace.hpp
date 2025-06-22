@@ -65,7 +65,7 @@ struct backtrace : comp::empty_base
     backtrace(const backtrace&)     = default;
     backtrace(backtrace&&) noexcept = default;
 
-    backtrace& operator=(const backtrace&) = default;
+    backtrace& operator=(const backtrace&)     = default;
     backtrace& operator=(backtrace&&) noexcept = default;
 
     static std::vector<entry_type> filter_and_patch(const std::vector<entry_type>&);

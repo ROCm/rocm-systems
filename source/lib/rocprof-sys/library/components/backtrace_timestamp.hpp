@@ -50,7 +50,7 @@ struct backtrace_timestamp : comp::empty_base
     backtrace_timestamp(const backtrace_timestamp&)     = default;
     backtrace_timestamp(backtrace_timestamp&&) noexcept = default;
 
-    backtrace_timestamp& operator=(const backtrace_timestamp&) = default;
+    backtrace_timestamp& operator=(const backtrace_timestamp&)     = default;
     backtrace_timestamp& operator=(backtrace_timestamp&&) noexcept = default;
 
     bool operator<(const backtrace_timestamp& rhs) const;

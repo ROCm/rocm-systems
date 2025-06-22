@@ -230,8 +230,8 @@ struct annotate<perfetto_event_context_t, Tp>
 private:
     //  If the component has a annotate(...) member function
     template <typename T>
-    static auto sfinae(T& obj, int, perfetto_event_context_t& _ctx)
-        -> decltype(obj.annotate(_ctx))
+    static auto sfinae(T&                        obj, int,
+                       perfetto_event_context_t& _ctx) -> decltype(obj.annotate(_ctx))
     {
         static_assert(std::is_same<T, Tp>::value, "Error T != Tp");
         return obj.annotate(_ctx);

@@ -69,10 +69,10 @@ struct aligned_static_vector
     using size_type       = size_t;
     using difference_type = std::ptrdiff_t;
 
-    aligned_static_vector()                                 = default;
-    aligned_static_vector(const aligned_static_vector&)     = default;
-    aligned_static_vector(aligned_static_vector&&) noexcept = default;
-    aligned_static_vector& operator=(const aligned_static_vector&) = default;
+    aligned_static_vector()                                            = default;
+    aligned_static_vector(const aligned_static_vector&)                = default;
+    aligned_static_vector(aligned_static_vector&&) noexcept            = default;
+    aligned_static_vector& operator=(const aligned_static_vector&)     = default;
     aligned_static_vector& operator=(aligned_static_vector&&) noexcept = default;
 
     aligned_static_vector(size_t _n, Tp _v = {});

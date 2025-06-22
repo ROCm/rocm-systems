@@ -148,7 +148,8 @@ backtrace_metrics::stop()
 namespace
 {
 template <typename... Tp>
-auto get_enabled(tim::type_list<Tp...>)
+auto
+get_enabled(tim::type_list<Tp...>)
 {
     constexpr size_t N  = sizeof...(Tp);
     auto             _v = std::bitset<N>{};

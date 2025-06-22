@@ -31,16 +31,16 @@ namespace
 {
 template <typename ContainerT, typename Arg>
 auto
-emplace_impl(ContainerT& _targ, Arg&& _v, int)
-    -> decltype(_targ.emplace(std::forward<Arg>(_v)))
+emplace_impl(ContainerT& _targ, Arg&& _v,
+             int) -> decltype(_targ.emplace(std::forward<Arg>(_v)))
 {
     return _targ.emplace(std::forward<Arg>(_v));
 }
 
 template <typename ContainerT, typename Arg>
 auto
-emplace_impl(ContainerT& _targ, Arg&& _v, long)
-    -> decltype(_targ.emplace_back(std::forward<Arg>(_v)))
+emplace_impl(ContainerT& _targ, Arg&& _v,
+             long) -> decltype(_targ.emplace_back(std::forward<Arg>(_v)))
 {
     return _targ.emplace_back(std::forward<Arg>(_v));
 }

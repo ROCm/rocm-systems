@@ -363,10 +363,10 @@ getStaticTrapMap(unsigned long addr, unsigned long* allocBase)
 
     // see if the last section has been tagged with "DYNINST_REWRITE"
     numSections = peHdr->FileHeader.NumberOfSections;
-    curSecn     = *(PIMAGE_SECTION_HEADER)(((unsigned char*) peHdr) + sizeof(DWORD) +
-                                       sizeof(IMAGE_FILE_HEADER) +
-                                       peHdr->FileHeader.SizeOfOptionalHeader +
-                                       sizeof(IMAGE_SECTION_HEADER) * (numSections - 1));
+    curSecn     = *(PIMAGE_SECTION_HEADER) (((unsigned char*) peHdr) + sizeof(DWORD) +
+                                        sizeof(IMAGE_FILE_HEADER) +
+                                        peHdr->FileHeader.SizeOfOptionalHeader +
+                                        sizeof(IMAGE_SECTION_HEADER) * (numSections - 1));
 
     // fprintf(stderr, "RTLIB: PE section header address = %lx\n", curSecn);
     // fprintf(stderr, "curSecn.chars = %lx %s[%d]\n",curSecn.Characteristics,

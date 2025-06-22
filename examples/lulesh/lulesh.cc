@@ -2169,7 +2169,7 @@ main(int argc, char* argv[])
     MPI_Comm_rank(MPI_COMM_WORLD, &myRank);
 #else
     numRanks = 1;
-    myRank = 0;
+    myRank   = 0;
 #endif
 
     Kokkos::initialize(argc, argv);
@@ -2246,7 +2246,7 @@ main(int argc, char* argv[])
         while((locDom.time() < locDom.stoptime()) && (locDom.cycle() < opts.its))
         {
             Kokkos::Tools::startSection(_time_incrp);
-            //CAUSAL_BEGIN("Iteration")
+            // CAUSAL_BEGIN("Iteration")
             TimeIncrement(locDom);
             Kokkos::Tools::stopSection(_time_incrp);
 
@@ -2254,7 +2254,7 @@ main(int argc, char* argv[])
             LagrangeLeapFrog(locDom);
             Kokkos::Tools::stopSection(_leap_frogp);
             CAUSAL_PROGRESS_NAMED("Iteration")
-            //CAUSAL_END("Iteration")
+            // CAUSAL_END("Iteration")
 
             if((opts.showProg != 0) && (opts.quiet == 0) && (myRank == 0))
             {

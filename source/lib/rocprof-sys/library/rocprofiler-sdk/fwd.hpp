@@ -79,7 +79,7 @@ struct rocprofiler_tool_counter_info_t : rocprofiler_counter_info_v0_t
     rocprofiler_tool_counter_info_t(rocprofiler_tool_counter_info_t&&) noexcept = default;
     rocprofiler_tool_counter_info_t& operator=(const rocprofiler_tool_counter_info_t&) =
         default;
-    rocprofiler_tool_counter_info_t& operator       =(
+    rocprofiler_tool_counter_info_t& operator=(
         rocprofiler_tool_counter_info_t&&) noexcept = default;
 
     rocprofiler_agent_id_t                           agent_id       = {};

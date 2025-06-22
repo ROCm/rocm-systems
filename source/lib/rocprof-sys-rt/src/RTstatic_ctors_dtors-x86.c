@@ -119,7 +119,7 @@ DYNINSTglobal_irel_handler()
             long (*ptr)(void) = 0;
             long result       = 0;
             if(rel->info != 0x2a) continue;
-            ptr            = (funcptr)(*rel->offset);
+            ptr            = (funcptr) (*rel->offset);
             result         = ptr();
             *(rel->offset) = result;
         }

@@ -75,7 +75,8 @@ run(const char* _name, int nchildren)
     for(auto& itr : _children)
     {
         while(itr == 0)
-        {}
+        {
+        }
         printf("[%s][%i] performing waitpid(%i, ...)\n", _name, getpid(), itr);
         while((_wait_pid = waitpid(itr, &_status, WUNTRACED | WNOHANG)) <= 0)
         {

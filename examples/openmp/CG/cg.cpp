@@ -407,7 +407,7 @@ main(int /*argc*/, char** /*argv*/)
                 x[j] = norm_temp2 * z[j];
             }
         } /* end of main iter inv pow meth */
-    }     /* end parallel */
+    } /* end parallel */
     timer_stop(T_BENCH);
 
     /*

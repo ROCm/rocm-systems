@@ -81,7 +81,7 @@ typedef unsigned __int8  uint8_t;
 #        if defined(arch_x86_64) || defined(arch_64bit)
 #            define TYPE64BIT
 #        endif
-typedef long double   double128_t;
+typedef long double double128_t;
 
 #    elif defined(os_freebsd)
 #        if !defined(__STDC_CONSTANT_MACROS)
@@ -136,7 +136,7 @@ typedef int64_t time64;
 #    if defined(__cplusplus)
 #        include "h/dyntypes.h"
 using namespace Dyninst;
-static const Address ADDR_NULL = (Address)(0);
+static const Address ADDR_NULL = (Address) (0);
 #    else
 #        define ADDR_NULL (0)
 typedef unsigned long Address;
@@ -152,9 +152,9 @@ typedef long long int RegValue; /* register content 64-bit */
 /* This needs to be an int since it is sometimes used to pass offsets
    to the code generator (i.e. if-statement) - jkh 5/24/99 */
 typedef unsigned int  Register; /* a register number, e.g., [0..31]  */
-static const Register Null_Register = (Register)(-1); /* '255' */
+static const Register Null_Register = (Register) (-1); /* '255' */
 /* Easily noticeable name... */
-static const Register REG_NULL = (Register)(-1);
+static const Register REG_NULL = (Register) (-1);
 
 // Virtual Memory Map -- shared between platforms
 #    define PREMS_PRIVATE (1 << 4)

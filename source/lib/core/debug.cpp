@@ -56,7 +56,7 @@ std::atomic<FILE*>&
 get_file_pointer()
 {
     static auto _v = std::atomic<FILE*>{ []() {
-        const auto&_fname= get_file_name();
+        const auto& _fname = get_file_name();
         if(!_fname.empty()) tim::log::monochrome() = true;
         return (_fname.empty())
                    ? stderr

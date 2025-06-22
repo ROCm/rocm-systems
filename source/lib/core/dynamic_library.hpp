@@ -38,10 +38,10 @@ find_library_path(const std::string& _name, const std::vector<std::string>& _env
 
 struct dynamic_library
 {
-    dynamic_library()                           = delete;
-    dynamic_library(const dynamic_library&)     = delete;
-    dynamic_library(dynamic_library&&) noexcept = default;
-    dynamic_library& operator=(const dynamic_library&) = delete;
+    dynamic_library()                                      = delete;
+    dynamic_library(const dynamic_library&)                = delete;
+    dynamic_library(dynamic_library&&) noexcept            = default;
+    dynamic_library& operator=(const dynamic_library&)     = delete;
     dynamic_library& operator=(dynamic_library&&) noexcept = default;
 
     dynamic_library(std::string _env, std::string _fname,
