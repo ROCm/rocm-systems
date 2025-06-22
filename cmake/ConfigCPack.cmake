@@ -4,26 +4,33 @@ function(rocprofiler_systems_parse_release)
     if(EXISTS /etc/lsb-release AND NOT IS_DIRECTORY /etc/lsb-release)
         file(READ /etc/lsb-release _LSB_RELEASE)
         if(_LSB_RELEASE)
-            string(REGEX
-                   REPLACE "DISTRIB_ID=(.*)\nDISTRIB_RELEASE=(.*)\nDISTRIB_CODENAME=.*"
-                           "\\1-\\2" _SYSTEM_NAME "${_LSB_RELEASE}")
+            string(
+                REGEX REPLACE
+                "DISTRIB_ID=(.*)\nDISTRIB_RELEASE=(.*)\nDISTRIB_CODENAME=.*"
+                "\\1-\\2"
+                _SYSTEM_NAME
+                "${_LSB_RELEASE}"
+            )
         endif()
     elseif(EXISTS /etc/os-release AND NOT IS_DIRECTORY /etc/os-release)
         file(READ /etc/os-release _OS_RELEASE)
         if(_OS_RELEASE)
             string(REPLACE "\"" "" _OS_RELEASE "${_OS_RELEASE}")
             string(REPLACE "-" " " _OS_RELEASE "${_OS_RELEASE}")
-            string(REGEX REPLACE "NAME=.*\nVERSION=([0-9\.]+).*\nID=([a-z]+).*" "\\2-\\1"
-                                 _SYSTEM_NAME "${_OS_RELEASE}")
+            string(
+                REGEX REPLACE
+                "NAME=.*\nVERSION=([0-9\.]+).*\nID=([a-z]+).*"
+                "\\2-\\1"
+                _SYSTEM_NAME
+                "${_OS_RELEASE}"
+            )
         endif()
     endif()
     string(TOLOWER "${_SYSTEM_NAME}" _SYSTEM_NAME)
     if(NOT _SYSTEM_NAME)
         set(_SYSTEM_NAME "${CMAKE_SYSTEM_NAME}")
     endif()
-    set(_SYSTEM_NAME
-        "${_SYSTEM_NAME}"
-        PARENT_SCOPE)
+    set(_SYSTEM_NAME "${_SYSTEM_NAME}" PARENT_SCOPE)
 endfunction()
 
 # parse either /etc/lsb-release or /etc/os-release
@@ -37,7 +44,8 @@ endif()
 set(CPACK_PACKAGE_NAME ${PROJECT_NAME})
 set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
-    "Runtime instrumentation and binary rewriting for Perfetto via Dyninst")
+    "Runtime instrumentation and binary rewriting for Perfetto via Dyninst"
+)
 set(CPACK_PACKAGE_VERSION_MAJOR "${PROJECT_VERSION_MAJOR}")
 set(CPACK_PACKAGE_VERSION_MINOR "${PROJECT_VERSION_MINOR}")
 set(CPACK_PACKAGE_VERSION_PATCH "${PROJECT_VERSION_PATCH}")
@@ -51,12 +59,15 @@ set(OMNITRACE_PACKAGE_NAME "omnitrace")
 
 set(ROCPROFSYS_CPACK_SYSTEM_NAME
     "${_SYSTEM_NAME}"
-    CACHE STRING "System name, e.g. Linux or Ubuntu-20.04")
+    CACHE STRING
+    "System name, e.g. Linux or Ubuntu-20.04"
+)
 set(ROCPROFSYS_CPACK_PACKAGE_SUFFIX "")
 
 if(ROCPROFSYS_USE_ROCM)
     set(ROCPROFSYS_CPACK_PACKAGE_SUFFIX
-        "${ROCPROFSYS_CPACK_PACKAGE_SUFFIX}-ROCm-${ROCmVersion_NUMERIC_VERSION}")
+        "${ROCPROFSYS_CPACK_PACKAGE_SUFFIX}-ROCm-${ROCmVersion_NUMERIC_VERSION}"
+    )
 endif()
 
 if(ROCPROFSYS_USE_PAPI)
@@ -76,17 +87,18 @@ if(ROCPROFSYS_USE_MPI)
     else()
         message(
             WARNING
-                "MPI implementation could not be determined. Please set ROCPROFSYS_MPI_IMPL to one of the following for CPack: ${VALID_MPI_IMPLS}"
-            )
+            "MPI implementation could not be determined. Please set ROCPROFSYS_MPI_IMPL to one of the following for CPack: ${VALID_MPI_IMPLS}"
+        )
     endif()
     if(ROCPROFSYS_MPI_IMPL AND NOT "${ROCPROFSYS_MPI_IMPL}" IN_LIST VALID_MPI_IMPLS)
         message(
             SEND_ERROR
-                "Invalid ROCPROFSYS_MPI_IMPL (${ROCPROFSYS_MPI_IMPL}). Should be one of: ${VALID_MPI_IMPLS}"
-            )
+            "Invalid ROCPROFSYS_MPI_IMPL (${ROCPROFSYS_MPI_IMPL}). Should be one of: ${VALID_MPI_IMPLS}"
+        )
     else()
         rocprofiler_systems_add_feature(ROCPROFSYS_MPI_IMPL
-                                        "MPI implementation for CPack DEBIAN depends")
+                                        "MPI implementation for CPack DEBIAN depends"
+        )
     endif()
 
     if("${ROCPROFSYS_MPI_IMPL}" STREQUAL "openmpi")
@@ -97,7 +109,8 @@ if(ROCPROFSYS_USE_MPI)
         set(ROCPROFSYS_MPI_IMPL_UPPER "MPI")
     endif()
     set(ROCPROFSYS_CPACK_PACKAGE_SUFFIX
-        "${ROCPROFSYS_CPACK_PACKAGE_SUFFIX}-${ROCPROFSYS_MPI_IMPL_UPPER}")
+        "${ROCPROFSYS_CPACK_PACKAGE_SUFFIX}-${ROCPROFSYS_MPI_IMPL_UPPER}"
+    )
 endif()
 
 if(ROCPROFSYS_USE_PYTHON)
@@ -112,14 +125,14 @@ endif()
 
 set(CPACK_PACKAGE_FILE_NAME
     "${CPACK_PACKAGE_NAME}-${ROCPROFSYS_VERSION}-${ROCPROFSYS_CPACK_SYSTEM_NAME}${ROCPROFSYS_CPACK_PACKAGE_SUFFIX}"
-    )
+)
 if(DEFINED ENV{CPACK_PACKAGE_FILE_NAME})
     set(CPACK_PACKAGE_FILE_NAME $ENV{CPACK_PACKAGE_FILE_NAME})
 endif()
 
 set(ROCPROFSYS_PACKAGE_FILE_NAME
     ${CPACK_PACKAGE_NAME}-${ROCPROFSYS_VERSION}-${ROCPROFSYS_CPACK_SYSTEM_NAME}${ROCPROFSYS_CPACK_PACKAGE_SUFFIX}
-    )
+)
 rocprofiler_systems_add_feature(ROCPROFSYS_PACKAGE_FILE_NAME "CPack filename")
 
 if(ROCM_DEP_ROCMCORE OR ROCPROFILER_DEP_ROCMCORE)
@@ -138,9 +151,15 @@ endif()
 
 set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/ROCm/rocprofiler-systems")
 set(CPACK_DEBIAN_PACKAGE_RELEASE
-    "${ROCPROFSYS_CPACK_SYSTEM_NAME}${ROCPROFSYS_CPACK_PACKAGE_SUFFIX}")
-string(REGEX REPLACE "([a-zA-Z])-([0-9])" "\\1\\2" CPACK_DEBIAN_PACKAGE_RELEASE
-                     "${CPACK_DEBIAN_PACKAGE_RELEASE}")
+    "${ROCPROFSYS_CPACK_SYSTEM_NAME}${ROCPROFSYS_CPACK_PACKAGE_SUFFIX}"
+)
+string(
+    REGEX REPLACE
+    "([a-zA-Z])-([0-9])"
+    "\\1\\2"
+    CPACK_DEBIAN_PACKAGE_RELEASE
+    "${CPACK_DEBIAN_PACKAGE_RELEASE}"
+)
 string(REPLACE "-" "~" CPACK_DEBIAN_PACKAGE_RELEASE "${CPACK_DEBIAN_PACKAGE_RELEASE}")
 
 if(ROCPROFSYS_USE_PAPI AND NOT ROCPROFSYS_BUILD_PAPI)
@@ -148,9 +167,20 @@ if(ROCPROFSYS_USE_PAPI AND NOT ROCPROFSYS_BUILD_PAPI)
 endif()
 if(NOT ROCPROFSYS_BUILD_DYNINST)
     if(NOT ROCPROFSYS_BUILD_BOOST)
-        foreach(_BOOST_COMPONENT atomic system thread date-time filesystem timer)
-            list(APPEND _DEBIAN_PACKAGE_DEPENDS
-                 "libboost-${_BOOST_COMPONENT}-dev (>= 1.67.0)")
+        foreach(
+            _BOOST_COMPONENT
+            atomic
+            system
+            thread
+            date-time
+            filesystem
+            timer
+        )
+            list(
+                APPEND
+                _DEBIAN_PACKAGE_DEPENDS
+                "libboost-${_BOOST_COMPONENT}-dev (>= 1.67.0)"
+            )
         endforeach()
     endif()
     if(NOT ROCPROFSYS_BUILD_TBB)
@@ -162,7 +192,8 @@ if(NOT ROCPROFSYS_BUILD_DYNINST)
 endif()
 if(ROCmVersion_FOUND)
     set(_AMD_SMI_SUFFIX
-        " (>= ${ROCmVersion_MAJOR_VERSION}.0.0.${ROCmVersion_NUMERIC_VERSION})")
+        " (>= ${ROCmVersion_MAJOR_VERSION}.0.0.${ROCmVersion_NUMERIC_VERSION})"
+    )
 endif()
 if(ROCPROFSYS_USE_ROCM)
     list(APPEND _DEBIAN_PACKAGE_DEPENDS "amd-smi-lib${_AMD_SMI_SUFFIX}")
@@ -182,7 +213,10 @@ endif()
 string(REPLACE ";" ", " _DEBIAN_PACKAGE_DEPENDS "${_DEBIAN_PACKAGE_DEPENDS}")
 set(CPACK_DEBIAN_PACKAGE_DEPENDS
     "${_DEBIAN_PACKAGE_DEPENDS}"
-    CACHE STRING "Debian package dependencies" FORCE)
+    CACHE STRING
+    "Debian package dependencies"
+    FORCE
+)
 
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
@@ -203,9 +237,15 @@ if(DEFINED CPACK_PACKAGING_INSTALL_PREFIX)
 endif()
 
 set(CPACK_RPM_PACKAGE_RELEASE
-    "${ROCPROFSYS_CPACK_SYSTEM_NAME}${ROCPROFSYS_CPACK_PACKAGE_SUFFIX}")
-string(REGEX REPLACE "([a-zA-Z])-([0-9])" "\\1\\2" CPACK_RPM_PACKAGE_RELEASE
-                     "${CPACK_RPM_PACKAGE_RELEASE}")
+    "${ROCPROFSYS_CPACK_SYSTEM_NAME}${ROCPROFSYS_CPACK_PACKAGE_SUFFIX}"
+)
+string(
+    REGEX REPLACE
+    "([a-zA-Z])-([0-9])"
+    "\\1\\2"
+    CPACK_RPM_PACKAGE_RELEASE
+    "${CPACK_RPM_PACKAGE_RELEASE}"
+)
 string(REPLACE "-" "~" CPACK_RPM_PACKAGE_RELEASE "${CPACK_RPM_PACKAGE_RELEASE}")
 
 # Handle the project rebranding from "omnitrace" to "rocprofiler-systems"
@@ -223,7 +263,10 @@ endif()
 string(REPLACE ";" ", " CPACK_RPM_PACKAGE_PROVIDES "${_RPM_PACKAGE_PROVIDES}")
 set(CPACK_RPM_PACKAGE_PROVIDES
     "${CPACK_RPM_PACKAGE_PROVIDES}"
-    CACHE STRING "RPM package provides" FORCE)
+    CACHE STRING
+    "RPM package provides"
+    FORCE
+)
 
 if(ROCPROFSYS_USE_MPI)
     if("${ROCPROFSYS_MPI_IMPL}" STREQUAL "openmpi")
@@ -243,7 +286,10 @@ endif()
 string(REPLACE ";" ", " _RPM_PACKAGE_REQUIRES "${_RPM_PACKAGE_REQUIRES}")
 set(CPACK_RPM_PACKAGE_REQUIRES
     ${_RPM_PACKAGE_REQUIRES}
-    CACHE STRING "RPM package requires" FORCE)
+    CACHE STRING
+    "RPM package requires"
+    FORCE
+)
 set(CPACK_RPM_SPEC_MORE_DEFINE "%undefine __brp_mangle_shebangs")
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
@@ -259,7 +305,7 @@ set(CPACK_RPM_PACKAGE_AUTOREQ ON)
 
 set(CPACK_PACKAGE_VERSION
     "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}"
-    )
+)
 
 if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
     set(CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION}.$ENV{ROCM_LIBPATCH_VERSION}")
@@ -276,20 +322,25 @@ endif()
 rocprofiler_systems_add_feature(CPACK_PACKAGE_NAME "Package name")
 rocprofiler_systems_add_feature(CPACK_PACKAGE_VERSION "Package version")
 rocprofiler_systems_add_feature(CPACK_PACKAGING_INSTALL_PREFIX
-                                "Package installation prefix")
+                                "Package installation prefix"
+)
 
 rocprofiler_systems_add_feature(CPACK_DEBIAN_FILE_NAME "Debian file name")
 rocprofiler_systems_add_feature(CPACK_DEBIAN_PACKAGE_RELEASE
-                                "Debian package release version")
+                                "Debian package release version"
+)
 rocprofiler_systems_add_feature(CPACK_DEBIAN_PACKAGE_DEPENDS
-                                "Debian package dependencies")
+                                "Debian package dependencies"
+)
 rocprofiler_systems_add_feature(CPACK_DEBIAN_PACKAGE_SHLIBDEPS
-                                "Debian package shared library dependencies")
+                                "Debian package shared library dependencies"
+)
 
 rocprofiler_systems_add_feature(CPACK_RPM_FILE_NAME "RPM file name")
 rocprofiler_systems_add_feature(CPACK_RPM_PACKAGE_RELEASE "RPM package release version")
 rocprofiler_systems_add_feature(CPACK_RPM_PACKAGE_AUTOREQPROV
-                                "RPM package auto generate requires and provides")
+                                "RPM package auto generate requires and provides"
+)
 rocprofiler_systems_add_feature(CPACK_RPM_PACKAGE_REQUIRES "RPM package requires")
 rocprofiler_systems_add_feature(CPACK_RPM_PACKAGE_PROVIDES "RPM package provides")
 

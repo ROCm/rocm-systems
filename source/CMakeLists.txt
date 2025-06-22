@@ -19,8 +19,13 @@ endif()
 
 if(ROCPROFSYS_BUILD_DEVELOPER)
     add_custom_target(rocprofiler-systems-precommit)
-    foreach(_TARGET format-rocprofiler-systems-source format-rocprofiler-systems-cmake
-                    format-timemory-source format-timemory-cmake)
+    foreach(
+        _TARGET
+        format-rocprofiler-systems-source
+        format-rocprofiler-systems-cmake
+        format-timemory-source
+        format-timemory-cmake
+    )
         if(TARGET ${_TARGET})
             add_dependencies(rocprofiler-systems-precommit ${_TARGET})
         endif()

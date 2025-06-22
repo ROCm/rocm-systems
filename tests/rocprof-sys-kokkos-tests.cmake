@@ -50,7 +50,8 @@ rocprofiler_systems_add_test(
     ENVIRONMENT
         "${_base_environment};ROCPROFSYS_USE_KOKKOSP=ON;ROCPROFSYS_COUT_OUTPUT=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_KOKKOSP_PREFIX=[kokkos];KOKKOS_TOOLS_LIBS=librocprof-sys-dl.so"
     REWRITE_RUN_PASS_REGEX "\\|_\\[kokkos\\] [a-zA-Z]"
-    RUNTIME_PASS_REGEX "\\|_\\[kokkos\\] [a-zA-Z]")
+    RUNTIME_PASS_REGEX "\\|_\\[kokkos\\] [a-zA-Z]"
+)
 
 rocprofiler_systems_add_test(
     SKIP_RUNTIME SKIP_REWRITE
@@ -63,7 +64,8 @@ rocprofiler_systems_add_test(
     RUN_ARGS -i 10 -s 20 -p
     ENVIRONMENT
         "${_base_environment};ROCPROFSYS_USE_KOKKOSP=ON;ROCPROFSYS_COUT_OUTPUT=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_KOKKOSP_PREFIX=[kokkos];KOKKOS_TOOLS_LIBS=librocprof-sys.so"
-    BASELINE_PASS_REGEX "\\|_\\[kokkos\\] [a-zA-Z]")
+    BASELINE_PASS_REGEX "\\|_\\[kokkos\\] [a-zA-Z]"
+)
 
 rocprofiler_systems_add_test(
     SKIP_RUNTIME SKIP_REWRITE
@@ -76,7 +78,8 @@ rocprofiler_systems_add_test(
     RUN_ARGS -i 10 -s 20 -p
     ENVIRONMENT
         "${_base_environment};ROCPROFSYS_USE_KOKKOSP=ON;ROCPROFSYS_COUT_OUTPUT=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_KOKKOSP_PREFIX=[kokkos];KOKKOS_TOOLS_LIBS=librocprof-sys-dl.so"
-    BASELINE_PASS_REGEX "\\|_\\[kokkos\\] [a-zA-Z]")
+    BASELINE_PASS_REGEX "\\|_\\[kokkos\\] [a-zA-Z]"
+)
 
 rocprofiler_systems_add_test(
     SKIP_BASELINE
@@ -99,7 +102,8 @@ rocprofiler_systems_add_test(
         -ME
         [==[lib(gomp|m-)]==]
     RUN_ARGS -i 10 -s 20 -p
-    ENVIRONMENT "${_base_environment};ROCPROFSYS_USE_KOKKOSP=ON")
+    ENVIRONMENT "${_base_environment};ROCPROFSYS_USE_KOKKOSP=ON"
+)
 
 rocprofiler_systems_add_test(
     SKIP_BASELINE
@@ -121,7 +125,8 @@ rocprofiler_systems_add_test(
         -ME
         [==[libgomp]==]
     RUN_ARGS -i 10 -s 20 -p
-    ENVIRONMENT "${_perfetto_environment};ROCPROFSYS_USE_KOKKOSP=OFF")
+    ENVIRONMENT "${_perfetto_environment};ROCPROFSYS_USE_KOKKOSP=OFF"
+)
 
 rocprofiler_systems_add_test(
     NAME lulesh-timemory
@@ -143,4 +148,5 @@ rocprofiler_systems_add_test(
         ROCPROFSYS_TIMEMORY_COMPONENTS="wall_clock peak_rss"
     RUN_ARGS -i 10 -s 20 -p
     ENVIRONMENT "${_timemory_environment};ROCPROFSYS_USE_KOKKOSP=OFF"
-    REWRITE_FAIL_REGEX "0 instrumented loops in procedure")
+    REWRITE_FAIL_REGEX "0 instrumented loops in procedure"
+)

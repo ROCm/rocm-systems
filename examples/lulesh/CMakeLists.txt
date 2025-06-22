@@ -5,15 +5,22 @@ project(rocprofiler-systems-lulesh-example LANGUAGES C CXX)
 if(ROCPROFSYS_DISABLE_EXAMPLES)
     get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
 
-    if(${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES OR ${_DIR} IN_LIST
-                                                              ROCPROFSYS_DISABLE_EXAMPLES)
+    if(
+        ${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
+        OR ${_DIR} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
+    )
         return()
     endif()
 endif()
 
 set(CMAKE_BUILD_TYPE "RelWithDebInfo")
-string(REGEX REPLACE " -g(|[0-2]) " " -g3 " CMAKE_CXX_FLAGS_RELWITHDEBINFO
-                     "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
+string(
+    REGEX REPLACE
+    " -g(|[0-2]) "
+    " -g3 "
+    CMAKE_CXX_FLAGS_RELWITHDEBINFO
+    "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}"
+)
 
 list(INSERT CMAKE_MODULE_PATH 0 ${PROJECT_SOURCE_DIR}/cmake/Modules)
 
@@ -29,8 +36,13 @@ if(LULESH_BUILD_KOKKOS)
             find_program(
                 HIPCC_EXECUTABLE
                 NAMES hipcc
-                HINTS ${ROCmVersion_DIR} ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-                PATHS ${ROCmVersion_DIR} ${ROCM_PATH} ENV ROCM_PATH /opt/rocm)
+                HINTS ${ROCmVersion_DIR} ${ROCM_PATH}
+                ENV ROCM_PATH
+                /opt/rocm
+                PATHS ${ROCmVersion_DIR} ${ROCM_PATH}
+                ENV ROCM_PATH
+                /opt/rocm
+            )
             mark_as_advanced(HIPCC_EXECUTABLE)
         endif()
         kokkos_compilation(PROJECT COMPILER ${HIPCC_EXECUTABLE})
@@ -43,9 +55,7 @@ endif()
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 if("${CMAKE_BUILD_TYPE}" STREQUAL "")
-    set(CMAKE_BUILD_TYPE
-        "Release"
-        CACHE STRING "CMake build type" FORCE)
+    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "CMake build type" FORCE)
 endif()
 
 option(LULESH_USE_MPI "Enable MPI" OFF)
@@ -69,15 +79,19 @@ rocprofiler_systems_causal_example_executable(
     "lulesh"
     SOURCES ${sources} ${headers}
     LINK_LIBRARIES Kokkos::kokkos lulesh-mpi
-    INCLUDE_DIRECTORIES ${PROJECT_SOURCE_DIR}/includes)
+    INCLUDE_DIRECTORIES ${PROJECT_SOURCE_DIR}/includes
+)
 
 if(ROCPROFSYS_INSTALL_EXAMPLES)
     if(LULESH_BUILD_KOKKOS)
         install(
             TARGETS kokkoscore kokkoscontainers
             DESTINATION ${CMAKE_INSTALL_LIBDIR}
-            COMPONENT rocprofiler-systems-examples)
-        set_target_properties(lulesh PROPERTIES INSTALL_RPATH
-                                                "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
+            COMPONENT rocprofiler-systems-examples
+        )
+        set_target_properties(
+            lulesh
+            PROPERTIES INSTALL_RPATH "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
+        )
     endif()
 endif()

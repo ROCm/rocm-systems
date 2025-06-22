@@ -50,4 +50,5 @@ rocprofiler_systems_add_test(
     RUNTIME_PASS_REGEX "Pushing custom region :: run.10. x 1000"
     SAMPLING_PASS_REGEX "Pushing custom region :: run.10. x 1000"
     BASELINE_FAIL_REGEX "Pushing custom region"
-    REWRITE_FAIL_REGEX "0 instrumented loops in procedure")
+    REWRITE_FAIL_REGEX "0 instrumented loops in procedure"
+)

@@ -3,9 +3,7 @@ cmake_minimum_required(VERSION 3.18.4 FATAL_ERROR)
 project(rocprofiler-systems-examples LANGUAGES C CXX)
 
 if("${CMAKE_BUILD_TYPE}" STREQUAL "")
-    set(CMAKE_BUILD_TYPE
-        "RelWithDebInfo"
-        CACHE STRING "Build type" FORCE)
+    set(CMAKE_BUILD_TYPE "RelWithDebInfo" CACHE STRING "Build type" FORCE)
 endif()
 
 string(TOUPPER "${CMAKE_BUILD_TYPE}" BUILD_TYPE)
@@ -28,7 +26,8 @@ if(CMAKE_PROJECT_NAME STREQUAL "rocprofiler-systems")
     set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
     set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
     rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_EXAMPLES
-                                   "Install rocprofiler-systems examples" OFF)
+                                   "Install rocprofiler-systems examples" OFF
+    )
 else()
     option(ROCPROFSYS_INSTALL_EXAMPLES "Install rocprofiler-systems examples" ON)
 endif()
@@ -37,9 +36,7 @@ if(ROCPROFSYS_INSTALL_EXAMPLES)
     include(GNUInstallDirs)
 endif()
 
-set(ROCPROFSYS_EXAMPLE_ROOT_DIR
-    ${CMAKE_CURRENT_LIST_DIR}
-    CACHE INTERNAL "")
+set(ROCPROFSYS_EXAMPLE_ROOT_DIR ${CMAKE_CURRENT_LIST_DIR} CACHE INTERNAL "")
 # defines function for creating causal profiling exes
 include(${CMAKE_CURRENT_LIST_DIR}/causal-helpers.cmake)
 

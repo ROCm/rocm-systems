@@ -13,7 +13,8 @@ set(component_sources
     ${CMAKE_CURRENT_LIST_DIR}/vaapi_gotcha.cpp
     ${CMAKE_CURRENT_LIST_DIR}/pthread_gotcha.cpp
     ${CMAKE_CURRENT_LIST_DIR}/pthread_create_gotcha.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/pthread_mutex_gotcha.cpp)
+    ${CMAKE_CURRENT_LIST_DIR}/pthread_mutex_gotcha.cpp
+)
 
 set(component_headers
     ${CMAKE_CURRENT_LIST_DIR}/backtrace.hpp
@@ -32,7 +33,10 @@ set(component_headers
     ${CMAKE_CURRENT_LIST_DIR}/vaapi_gotcha.hpp
     ${CMAKE_CURRENT_LIST_DIR}/pthread_gotcha.hpp
     ${CMAKE_CURRENT_LIST_DIR}/pthread_create_gotcha.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/pthread_mutex_gotcha.hpp)
+    ${CMAKE_CURRENT_LIST_DIR}/pthread_mutex_gotcha.hpp
+)
 
-target_sources(rocprofiler-systems-object-library PRIVATE ${component_sources}
-                                                          ${component_headers})
+target_sources(
+    rocprofiler-systems-object-library
+    PRIVATE ${component_sources} ${component_headers}
+)

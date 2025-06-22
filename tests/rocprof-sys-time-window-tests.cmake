@@ -33,7 +33,8 @@ rocprofiler_systems_add_test(
     REWRITE_ARGS -e -v 2 --caller-include inner -i 4096
     RUNTIME_ARGS -e -v 1 --caller-include inner -i 4096
     LABELS "time-window"
-    ENVIRONMENT "${_window_environment};ROCPROFSYS_TRACE_DURATION=1.25")
+    ENVIRONMENT "${_window_environment};ROCPROFSYS_TRACE_DURATION=1.25"
+)
 
 rocprofiler_systems_add_validation_test(
     NAME trace-time-window-binary-rewrite
@@ -58,7 +59,8 @@ rocprofiler_systems_add_validation_test(
          1
          1
          1
-         -p)
+         -p
+)
 
 rocprofiler_systems_add_validation_test(
     NAME trace-time-window-runtime-instrument
@@ -83,7 +85,8 @@ rocprofiler_systems_add_validation_test(
          1
          1
          1
-         -p)
+         -p
+)
 
 rocprofiler_systems_add_test(
     SKIP_BASELINE SKIP_SAMPLING ${_TRACE_WINDOW_SKIP}
@@ -94,7 +97,7 @@ rocprofiler_systems_add_test(
     LABELS "time-window"
     ENVIRONMENT
         "${_window_environment};ROCPROFSYS_TRACE_DELAY=0.75;ROCPROFSYS_TRACE_DURATION=0.75"
-    )
+)
 
 rocprofiler_systems_add_validation_test(
     NAME trace-time-window-delay-binary-rewrite
@@ -112,7 +115,8 @@ rocprofiler_systems_add_validation_test(
          -d
          0
          0
-         -p)
+         -p
+)
 
 rocprofiler_systems_add_validation_test(
     NAME trace-time-window-delay-runtime-instrument
@@ -130,4 +134,5 @@ rocprofiler_systems_add_validation_test(
          -d
          0
          0
-         -p)
+         -p
+)

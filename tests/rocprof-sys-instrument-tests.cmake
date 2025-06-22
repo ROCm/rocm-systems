@@ -45,7 +45,8 @@ rocprofiler_systems_add_test(
     ENVIRONMENT "${_base_environment};ROCPROFSYS_COUT_OUTPUT=ON"
     BASELINE_PASS_REGEX "number of calls made = 17"
     REWRITE_PASS_REGEX "\\[function\\]\\[Forcing\\] caller-include-regex :: 'outer'"
-    REWRITE_RUN_PASS_REGEX ">>> ._outer ([ \\|]+) 17")
+    REWRITE_RUN_PASS_REGEX ">>> ._outer ([ \\|]+) 17"
+)
 
 rocprofiler_systems_add_test(
     NAME parallel-overhead
@@ -62,7 +63,8 @@ rocprofiler_systems_add_test(
         return
         args
     RUN_ARGS 10 ${NUM_THREADS} 1000
-    ENVIRONMENT "${_base_environment}")
+    ENVIRONMENT "${_base_environment}"
+)
 
 rocprofiler_systems_add_test(
     SKIP_BASELINE SKIP_RUNTIME
@@ -73,4 +75,4 @@ rocprofiler_systems_add_test(
     RUN_ARGS 10 4 1000
     ENVIRONMENT
         "${_lock_environment};ROCPROFSYS_FLAT_PROFILE=ON;ROCPROFSYS_PROFILE=OFF;ROCPROFSYS_TRACE=ON;ROCPROFSYS_SAMPLING_KEEP_INTERNAL=OFF"
-    )
+)

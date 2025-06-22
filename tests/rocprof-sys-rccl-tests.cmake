@@ -81,12 +81,14 @@ foreach(_TARGET ${RCCL_TEST_TARGETS})
                  -z
                  -s
                  1
-        ENVIRONMENT "${_rccl_environment}")
+        ENVIRONMENT "${_rccl_environment}"
+    )
 
     rocprofiler_systems_add_validation_test(
         NAME rccl-test-${_NAME}-sampling
         PERFETTO_METRIC "rocm_rccl_api"
         PERFETTO_FILE "perfetto-trace.proto"
         LABELS "rccl-tests;rcclp"
-        ARGS --counter-names "RCCL Comm" -p)
+        ARGS --counter-names "RCCL Comm" -p
+    )
 endforeach()

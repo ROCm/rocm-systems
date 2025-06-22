@@ -33,14 +33,16 @@ find_path(
     HINTS ${LibDwarf_ROOT_DIR}/include ${LibDwarf_ROOT_DIR} ${LibDwarf_INCLUDEDIR}
     PATHS ${DYNINST_SYSTEM_INCLUDE_PATHS}
     PATH_SUFFIXES ${_path_suffixes}
-    DOC "libdw include directories")
+    DOC "libdw include directories"
+)
 
 find_library(
     LibDwarf_LIBRARIES
     NAMES libdw.so.1 libdw.so
     HINTS ${LibDwarf_ROOT_DIR}/lib ${LibDwarf_ROOT_DIR} ${LibDwarf_LIBRARYDIR}
     PATHS ${DYNINST_SYSTEM_LIBRARY_PATHS}
-    PATH_SUFFIXES ${_path_suffixes})
+    PATH_SUFFIXES ${_path_suffixes}
+)
 
 # Find the library with the highest version
 set(_max_ver 0.0)
@@ -67,7 +69,8 @@ find_package_handle_standard_args(
     LibDwarf
     FOUND_VAR LibDwarf_FOUND
     REQUIRED_VARS LibDwarf_LIBRARIES LibDwarf_INCLUDE_DIR
-    VERSION_VAR LibDwarf_VERSION)
+    VERSION_VAR LibDwarf_VERSION
+)
 
 # Export cache variables
 if(LibDwarf_FOUND)

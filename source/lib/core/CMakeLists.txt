@@ -1,6 +1,9 @@
 #
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/defines.hpp.in
-               ${CMAKE_CURRENT_BINARY_DIR}/defines.hpp @ONLY)
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/defines.hpp.in
+    ${CMAKE_CURRENT_BINARY_DIR}/defines.hpp
+    @ONLY
+)
 
 set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/argparse.cpp
@@ -18,7 +21,8 @@ set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/amd_smi.cpp
     ${CMAKE_CURRENT_LIST_DIR}/state.cpp
     ${CMAKE_CURRENT_LIST_DIR}/timemory.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/utility.cpp)
+    ${CMAKE_CURRENT_LIST_DIR}/utility.cpp
+)
 
 set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/argparse.hpp
@@ -41,28 +45,38 @@ set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/amd_smi.hpp
     ${CMAKE_CURRENT_LIST_DIR}/state.hpp
     ${CMAKE_CURRENT_LIST_DIR}/timemory.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/utility.hpp)
+    ${CMAKE_CURRENT_LIST_DIR}/utility.hpp
+)
 
 add_library(rocprofiler-systems-core-library STATIC)
-add_library(rocprofiler-systems::rocprofiler-systems-core ALIAS
-            rocprofiler-systems-core-library)
+add_library(
+    rocprofiler-systems::rocprofiler-systems-core
+    ALIAS rocprofiler-systems-core-library
+)
 
 target_sources(
-    rocprofiler-systems-core-library PRIVATE ${core_sources} ${core_headers}
-                                             ${CMAKE_CURRENT_BINARY_DIR}/defines.hpp)
+    rocprofiler-systems-core-library
+    PRIVATE ${core_sources} ${core_headers} ${CMAKE_CURRENT_BINARY_DIR}/defines.hpp
+)
 add_subdirectory(binary)
 add_subdirectory(components)
 add_subdirectory(containers)
 
-target_include_directories(rocprofiler-systems-core-library BEFORE
-                           PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+target_include_directories(
+    rocprofiler-systems-core-library
+    BEFORE
+    PRIVATE ${CMAKE_CURRENT_LIST_DIR}
+)
 
 target_include_directories(
     rocprofiler-systems-core-library
-    PRIVATE ${PROJECT_SOURCE_DIR}/external/timemory/source/timemory/tpls/cereal)
+    PRIVATE ${PROJECT_SOURCE_DIR}/external/timemory/source/timemory/tpls/cereal
+)
 
-target_link_libraries(rocprofiler-systems-core-library
-                      PRIVATE rocprofiler-systems::rocprofiler-systems-interface-library)
+target_link_libraries(
+    rocprofiler-systems-core-library
+    PRIVATE rocprofiler-systems::rocprofiler-systems-interface-library
+)
 target_link_libraries(
     rocprofiler-systems-core-library
     PRIVATE
@@ -79,7 +93,9 @@ target_link_libraries(
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-static-libstdcxx-optional>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-sanitizer>
         $<BUILD_INTERFACE:$<IF:$<BOOL:${ROCPROFSYS_BUILD_LTO}>,rocprofiler-systems::rocprofiler-systems-lto,>>
-    )
+)
 
-set_target_properties(rocprofiler-systems-core-library
-                      PROPERTIES OUTPUT_NAME ${BINARY_NAME_PREFIX}-core)
+set_target_properties(
+    rocprofiler-systems-core-library
+    PROPERTIES OUTPUT_NAME ${BINARY_NAME_PREFIX}-core
+)

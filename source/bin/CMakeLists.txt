@@ -2,7 +2,7 @@
 
 set(ROCPROFSYS_EXE_INSTALL_RPATH
     "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}:\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}"
-    )
+)
 
 # executables
 add_subdirectory(rocprof-sys-avail)

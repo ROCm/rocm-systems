@@ -1,7 +1,9 @@
 set(ROCPROFSYS_ABORT_FAIL_REGEX
     "### ERROR ###|unknown-hash=|address of faulting memory reference|exiting with non-zero exit code|terminate called after throwing an instance|calling abort.. in |Exit code: [1-9]"
-    CACHE INTERNAL "Regex to catch abnormal exits when a PASS_REGULAR_EXPRESSION is set"
-          FORCE)
+    CACHE INTERNAL
+    "Regex to catch abnormal exits when a PASS_REGULAR_EXPRESSION is set"
+    FORCE
+)
 
 # adds a ctest for executable
 function(ROCPROFILER_SYSTEMS_ADD_BIN_TEST)
@@ -11,7 +13,8 @@ function(ROCPROFILER_SYSTEMS_ADD_BIN_TEST)
         "NAME;TARGET;TIMEOUT;WORKING_DIRECTORY" # single value args
         "ARGS;ENVIRONMENT;LABELS;PROPERTIES;PASS_REGEX;FAIL_REGEX;SKIP_REGEX;DEPENDS;COMMAND" # multiple
         # value args
-        ${ARGN})
+        ${ARGN}
+    )
 
     if(NOT TEST_WORKING_DIRECTORY)
         set(TEST_WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
@@ -24,7 +27,7 @@ function(ROCPROFILER_SYSTEMS_ADD_BIN_TEST)
             "ROCPROFSYS_USE_SAMPLING=ON"
             "ROCPROFSYS_TIME_OUTPUT=OFF"
             "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:$ENV{LD_LIBRARY_PATH}"
-            )
+        )
     endif()
 
     # common
@@ -35,7 +38,8 @@ function(ROCPROFILER_SYSTEMS_ADD_BIN_TEST)
         "ROCPROFSYS_CI_TIMEOUT=${TEST_TIMEOUT}"
         "ROCPROFSYS_CONFIG_FILE="
         "ROCPROFSYS_OUTPUT_PATH=${PROJECT_BINARY_DIR}/rocprof-sys-tests-output"
-        "TWD=${TEST_WORKING_DIRECTORY}")
+        "TWD=${TEST_WORKING_DIRECTORY}"
+    )
     # copy for inverse
     set(TEST_ENVIRONMENT_INV "${TEST_ENVIRONMENT}")
 
@@ -43,68 +47,67 @@ function(ROCPROFILER_SYSTEMS_ADD_BIN_TEST)
     list(APPEND TEST_ENVIRONMENT "ROCPROFSYS_OUTPUT_PREFIX=${TEST_NAME}/")
     list(APPEND TEST_ENVIRONMENT_INV "ROCPROFSYS_OUTPUT_PREFIX=${TEST_NAME}-inverse/")
 
-    if(NOT "${TEST_PASS_REGEX}" STREQUAL ""
-       AND NOT "${TEST_FAIL_REGEX}" STREQUAL ""
-       AND NOT "${TEST_FAIL_REGEX}" MATCHES "\\|ROCPROFSYS_ABORT_FAIL_REGEX")
+    if(
+        NOT "${TEST_PASS_REGEX}" STREQUAL ""
+        AND NOT "${TEST_FAIL_REGEX}" STREQUAL ""
+        AND NOT "${TEST_FAIL_REGEX}" MATCHES "\\|ROCPROFSYS_ABORT_FAIL_REGEX"
+    )
         rocprofiler_systems_message(
             FATAL_ERROR
             "${TEST_NAME} has set pass and fail regexes but fail regex does not include '|ROCPROFSYS_ABORT_FAIL_REGEX'"
-            )
+        )
     endif()
 
     if("${TEST_FAIL_REGEX}" STREQUAL "")
         set(TEST_FAIL_REGEX "(${ROCPROFSYS_ABORT_FAIL_REGEX})")
     else()
-        string(REPLACE "|ROCPROFSYS_ABORT_FAIL_REGEX" "|${ROCPROFSYS_ABORT_FAIL_REGEX}"
-                       TEST_FAIL_REGEX "${TEST_FAIL_REGEX}")
+        string(
+            REPLACE
+            "|ROCPROFSYS_ABORT_FAIL_REGEX"
+            "|${ROCPROFSYS_ABORT_FAIL_REGEX}"
+            TEST_FAIL_REGEX
+            "${TEST_FAIL_REGEX}"
+        )
     endif()
 
     if(TEST_COMMAND)
         add_test(
             NAME ${TEST_NAME}
             COMMAND ${TEST_COMMAND} ${TEST_ARGS}
-            WORKING_DIRECTORY ${TEST_WORKING_DIRECTORY})
+            WORKING_DIRECTORY ${TEST_WORKING_DIRECTORY}
+        )
 
         set_tests_properties(
             ${TEST_NAME}
-            PROPERTIES ENVIRONMENT
-                       "${TEST_ENVIRONMENT}"
-                       TIMEOUT
-                       ${TEST_TIMEOUT}
-                       DEPENDS
-                       "${TEST_DEPENDS}"
-                       LABELS
-                       "rocprofiler-systems-bin;${TEST_LABELS}"
-                       PASS_REGULAR_EXPRESSION
-                       "${TEST_PASS_REGEX}"
-                       FAIL_REGULAR_EXPRESSION
-                       "${TEST_FAIL_REGEX}"
-                       SKIP_REGULAR_EXPRESSION
-                       "${TEST_SKIP_REGEX}"
-                       ${TEST_PROPERTIES})
+            PROPERTIES
+                ENVIRONMENT "${TEST_ENVIRONMENT}"
+                TIMEOUT ${TEST_TIMEOUT}
+                DEPENDS "${TEST_DEPENDS}"
+                LABELS "rocprofiler-systems-bin;${TEST_LABELS}"
+                PASS_REGULAR_EXPRESSION "${TEST_PASS_REGEX}"
+                FAIL_REGULAR_EXPRESSION "${TEST_FAIL_REGEX}"
+                SKIP_REGULAR_EXPRESSION "${TEST_SKIP_REGEX}"
+                ${TEST_PROPERTIES}
+        )
     elseif(TARGET ${TEST_TARGET})
         add_test(
             NAME ${TEST_NAME}
             COMMAND $<TARGET_FILE:${TEST_TARGET}> ${TEST_ARGS}
-            WORKING_DIRECTORY ${TEST_WORKING_DIRECTORY})
+            WORKING_DIRECTORY ${TEST_WORKING_DIRECTORY}
+        )
 
         set_tests_properties(
             ${TEST_NAME}
-            PROPERTIES ENVIRONMENT
-                       "${TEST_ENVIRONMENT}"
-                       TIMEOUT
-                       ${TEST_TIMEOUT}
-                       DEPENDS
-                       "${TEST_DEPENDS}"
-                       LABELS
-                       "rocprofiler-systems-bin;${TEST_LABELS}"
-                       PASS_REGULAR_EXPRESSION
-                       "${TEST_PASS_REGEX}"
-                       FAIL_REGULAR_EXPRESSION
-                       "${TEST_FAIL_REGEX}"
-                       SKIP_REGULAR_EXPRESSION
-                       "${TEST_SKIP_REGEX}"
-                       ${TEST_PROPERTIES})
+            PROPERTIES
+                ENVIRONMENT "${TEST_ENVIRONMENT}"
+                TIMEOUT ${TEST_TIMEOUT}
+                DEPENDS "${TEST_DEPENDS}"
+                LABELS "rocprofiler-systems-bin;${TEST_LABELS}"
+                PASS_REGULAR_EXPRESSION "${TEST_PASS_REGEX}"
+                FAIL_REGULAR_EXPRESSION "${TEST_FAIL_REGEX}"
+                SKIP_REGULAR_EXPRESSION "${TEST_SKIP_REGEX}"
+                ${TEST_PROPERTIES}
+        )
     elseif(ROCPROFSYS_BUILD_TESTING)
         message(FATAL_ERROR "Error! ${TEST_TARGET} does not exist")
     endif()
@@ -118,7 +121,7 @@ rocprofiler_systems_add_bin_test(
     TIMEOUT 45
     PASS_REGEX
         ".*\\\[rocprof-sys-instrument\\\] Usage:.*\\\[DEBUG OPTIONS\\\].*\\\[MODE OPTIONS\\\].*\\\[LIBRARY OPTIONS\\\].*\\\[SYMBOL SELECTION OPTIONS\\\].*\\\[RUNTIME OPTIONS\\\].*\\\[GRANULARITY OPTIONS\\\].*\\\[DYNINST OPTIONS\\\].*"
-    )
+)
 
 # on RedHat, /usr/bin/ls is a script for `coreutils --coreutils-prog=ls`
 if(EXISTS /usr/bin/coreutils)
@@ -144,7 +147,8 @@ rocprofiler_systems_add_bin_test(
          ${LS_NAME}
          ${LS_ARGS}
     LABELS "simulate"
-    TIMEOUT 240)
+    TIMEOUT 240
+)
 
 rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-instrument-simulate-ls-check
@@ -155,7 +159,8 @@ rocprofiler_systems_add_bin_test(
     TIMEOUT 60
     PASS_REGEX
         ".*available.json.*available.txt.*available.xml.*excluded.json.*excluded.txt.*excluded.xml.*instrumented.json.*instrumented.txt.*instrumented.xml.*overlapping.json.*overlapping.txt.*overlapping.xml.*"
-    FAIL_REGEX "No such file or directory|not found|ROCPROFSYS_ABORT_FAIL_REGEX")
+    FAIL_REGEX "No such file or directory|not found|ROCPROFSYS_ABORT_FAIL_REGEX"
+)
 
 rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-instrument-simulate-lib
@@ -166,7 +171,7 @@ rocprofiler_systems_add_bin_test(
     TIMEOUT 120
     PASS_REGEX
         "\\\[rocprof-sys\\\]\\\[exe\\\] Runtime instrumentation is not possible!(.*)\n(.*)\\\[rocprof-sys\\\]\\\[exe\\\] Switching to binary rewrite mode and assuming '--simulate --all-functions'"
-    )
+)
 
 file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/tmp)
 
@@ -183,7 +188,8 @@ rocprofiler_systems_add_bin_test(
          ${CMAKE_SHARED_LIBRARY_PREFIX}$<TARGET_FILE_BASE_NAME:rocprofiler-systems-user-library>${CMAKE_SHARED_LIBRARY_SUFFIX}
     LABELS "simulate"
     TIMEOUT 120
-    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/tmp)
+    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/tmp
+)
 
 rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-instrument-write-log
@@ -199,7 +205,8 @@ rocprofiler_systems_add_bin_test(
          ${LS_ARGS}
     LABELS "log"
     TIMEOUT 120
-    PASS_REGEX "Opening .*/instrumentation/user.log")
+    PASS_REGEX "Opening .*/instrumentation/user.log"
+)
 
 rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-instrument-write-log-check
@@ -210,7 +217,8 @@ rocprofiler_systems_add_bin_test(
     LABELS "log"
     TIMEOUT 60
     PASS_REGEX "user.log"
-    FAIL_REGEX "No such file or directory|not found|ROCPROFSYS_ABORT_FAIL_REGEX")
+    FAIL_REGEX "No such file or directory|not found|ROCPROFSYS_ABORT_FAIL_REGEX"
+)
 
 rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-avail-help
@@ -220,14 +228,15 @@ rocprofiler_systems_add_bin_test(
     TIMEOUT 45
     PASS_REGEX
         ".*\\\[rocprof-sys-avail\\\] Usage:.*\\\[DEBUG OPTIONS\\\].*\\\[INFO OPTIONS\\\].*\\\[FILTER OPTIONS\\\].*\\\[COLUMN OPTIONS\\\].*\\\[DISPLAY OPTIONS\\\].*\\\[OUTPUT OPTIONS\\\].*"
-    )
+)
 
 rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-avail-all
     TARGET rocprofiler-systems-avail
     ARGS --all
     LABELS "rocprofiler-systems-avail"
-    TIMEOUT 45)
+    TIMEOUT 45
+)
 
 rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-avail-all-expand-keys
@@ -235,7 +244,8 @@ rocprofiler_systems_add_bin_test(
     ARGS --all --expand-keys
     LABELS "rocprofiler-systems-avail"
     TIMEOUT 45
-    FAIL_REGEX "%[a-zA-Z_]%|ROCPROFSYS_ABORT_FAIL_REGEX")
+    FAIL_REGEX "%[a-zA-Z_]%|ROCPROFSYS_ABORT_FAIL_REGEX"
+)
 
 rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-avail-all-only-available-alphabetical
@@ -246,7 +256,8 @@ rocprofiler_systems_add_bin_test(
     TIMEOUT 45
     PROPERTIES
         ATTACHED_FILES
-        ${CMAKE_CURRENT_BINARY_DIR}/rocprof-sys-avail-all-only-available-alphabetical.log)
+        ${CMAKE_CURRENT_BINARY_DIR}/rocprof-sys-avail-all-only-available-alphabetical.log
+)
 
 rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-avail-all-csv
@@ -256,7 +267,7 @@ rocprofiler_systems_add_bin_test(
     TIMEOUT 45
     PASS_REGEX
         "COMPONENT#AVAILABLE#VALUE_TYPE#STRING_IDS#FILENAME#DESCRIPTION#CATEGORY#.*ENVIRONMENT VARIABLE#VALUE#DATA TYPE#DESCRIPTION#CATEGORIES#.*HARDWARE COUNTER#DEVICE#AVAILABLE#DESCRIPTION#"
-    )
+)
 
 rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-avail-filter-wall-clock-available
@@ -266,7 +277,7 @@ rocprofiler_systems_add_bin_test(
     TIMEOUT 45
     PASS_REGEX
         "\\\|[-]+\\\|\n\\\|[ ]+COMPONENT[ ]+\\\|\n\\\|[-]+\\\|\n\\\| (wall_clock)[ ]+\\\|\n\\\|[-]+\\\|"
-    )
+)
 
 rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-avail-category-filter-rocprofiler-systems
@@ -277,7 +288,7 @@ rocprofiler_systems_add_bin_test(
     PASS_REGEX "ROCPROFSYS_(SETTINGS_DESC|OUTPUT_FILE|OUTPUT_PREFIX)"
     FAIL_REGEX
         "ROCPROFSYS_(ADD_SECONDARY|SCIENTIFIC|PRECISION|MEMORY_PRECISION|TIMING_PRECISION)|ROCPROFSYS_ABORT_FAIL_REGEX"
-    )
+)
 
 rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-avail-category-filter-timemory
@@ -287,7 +298,8 @@ rocprofiler_systems_add_bin_test(
     TIMEOUT 45
     PASS_REGEX
         "ROCPROFSYS_(ADD_SECONDARY|SCIENTIFIC|PRECISION|MEMORY_PRECISION|TIMING_PRECISION)"
-    FAIL_REGEX "ROCPROFSYS_(SETTINGS_DESC|OUTPUT_FILE)|ROCPROFSYS_ABORT_FAIL_REGEX")
+    FAIL_REGEX "ROCPROFSYS_(SETTINGS_DESC|OUTPUT_FILE)|ROCPROFSYS_ABORT_FAIL_REGEX"
+)
 
 rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-avail-regex-negation
@@ -307,12 +319,16 @@ rocprofiler_systems_add_bin_test(
     TIMEOUT 45
     PASS_REGEX
         "ENVIRONMENT VARIABLE,[ \n]+ROCPROFSYS_THREAD_POOL_SIZE,[ \n]+ROCPROFSYS_USE_PID,[ \n]+"
-    FAIL_REGEX "ROCPROFSYS_TRACE|ROCPROFSYS_ABORT_FAIL_REGEX")
+    FAIL_REGEX "ROCPROFSYS_TRACE|ROCPROFSYS_ABORT_FAIL_REGEX"
+)
 
 string(
     REPLACE
-        "+" "\\\+" _AVAIL_CFG_PATH
-        "${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/rocprof-sys-avail/rocprof-sys-")
+    "+"
+    "\\\+"
+    _AVAIL_CFG_PATH
+    "${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/rocprof-sys-avail/rocprof-sys-"
+)
 # use of TWD == Test Working Directory (added by function)
 rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-avail-write-config
@@ -331,7 +347,7 @@ rocprofiler_systems_add_bin_test(
     LABELS "rocprofiler-systems-avail"
     PASS_REGEX
         "Outputting JSON configuration file '${_AVAIL_CFG_PATH}test\\\.json'(.*)Outputting XML configuration file '${_AVAIL_CFG_PATH}test\\\.xml'(.*)Outputting text configuration file '${_AVAIL_CFG_PATH}test\\\.cfg'(.*)"
-    )
+)
 
 rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-avail-write-config-tweak
@@ -343,7 +359,7 @@ rocprofiler_systems_add_bin_test(
     ENVIRONMENT "ROCPROFSYS_TRACE=OFF;ROCPROFSYS_PROFILE=ON"
     PASS_REGEX
         "Outputting JSON configuration file '${_AVAIL_CFG_PATH}tweak\\\.json'(.*)Outputting XML configuration file '${_AVAIL_CFG_PATH}tweak\\\.xml'(.*)Outputting text configuration file '${_AVAIL_CFG_PATH}tweak\\\.cfg'(.*)"
-    )
+)
 
 rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-avail-list-keys
@@ -351,7 +367,8 @@ rocprofiler_systems_add_bin_test(
     ARGS --list-keys --expand-keys
     TIMEOUT 45
     LABELS "rocprofiler-systems-avail"
-    PASS_REGEX "Output Keys:\n(.*)%argv%(.*)%argv_hash%")
+    PASS_REGEX "Output Keys:\n(.*)%argv%(.*)%argv_hash%"
+)
 
 rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-avail-list-keys-markdown
@@ -359,7 +376,8 @@ rocprofiler_systems_add_bin_test(
     ARGS --list-keys --expand-keys --markdown
     TIMEOUT 45
     LABELS "rocprofiler-systems-avail;markdown"
-    PASS_REGEX "(.*)`%argv%`(.*)`%argv_hash%`")
+    PASS_REGEX "(.*)`%argv%`(.*)`%argv_hash%`"
+)
 
 rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-avail-list-categories
@@ -367,7 +385,8 @@ rocprofiler_systems_add_bin_test(
     ARGS --list-categories
     TIMEOUT 45
     LABELS "rocprofiler-systems-avail"
-    PASS_REGEX " component::(.*) hw_counters::(.*) settings::")
+    PASS_REGEX " component::(.*) hw_counters::(.*) settings::"
+)
 
 rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-avail-core-categories
@@ -377,28 +396,34 @@ rocprofiler_systems_add_bin_test(
     LABELS "rocprofiler-systems-avail"
     PASS_REGEX
         "ROCPROFSYS_CONFIG_FILE(.*)ROCPROFSYS_ENABLED(.*)ROCPROFSYS_SUPPRESS_CONFIG(.*)ROCPROFSYS_SUPPRESS_PARSING(.*)ROCPROFSYS_VERBOSE"
-    )
+)
 
 rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-run-help
     TARGET rocprofiler-systems-run
     ARGS --help
     TIMEOUT 45
-    LABELS "rocprofiler-systems-run")
+    LABELS "rocprofiler-systems-run"
+)
 
 file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/rocprof-sys-tests-config")
 file(
-    WRITE "${PROJECT_BINARY_DIR}/rocprof-sys-tests-config/empty.cfg"
+    WRITE
+    "${PROJECT_BINARY_DIR}/rocprof-sys-tests-config/empty.cfg"
     "
 #
 # empty config file
 #
-")
+"
+)
 
 add_executable(sleeper ${CMAKE_CURRENT_SOURCE_DIR}/sleeper.cpp)
 set_target_properties(
-    sleeper PROPERTIES BUILD_TYPE RelWithDebInfo RUNTIME_OUTPUT_DIRECTORY
-                                                 ${PROJECT_BINARY_DIR}/bin/testing)
+    sleeper
+    PROPERTIES
+        BUILD_TYPE RelWithDebInfo
+        RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin/testing
+)
 
 rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-run-args
@@ -494,4 +519,5 @@ rocprofiler_systems_add_bin_test(
          $<TARGET_FILE:sleeper>
          5
     TIMEOUT 45
-    LABELS "rocprofiler-systems-run")
+    LABELS "rocprofiler-systems-run"
+)

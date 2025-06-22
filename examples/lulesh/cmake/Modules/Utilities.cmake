@@ -17,9 +17,7 @@ function(CAPITALIZE str var)
     string(TOUPPER "${_first}" _first)
     string(SUBSTRING "${str}" 1 -1 _remainder)
     string(CONCAT str "${_first}" "${_remainder}")
-    set(${var}
-        "${str}"
-        PARENT_SCOPE)
+    set(${var} "${str}" PARENT_SCOPE)
 endfunction()
 
 # ----------------------------------------------------------------------------------------#
@@ -35,9 +33,12 @@ endfunction()
 function(CHECKOUT_GIT_SUBMODULE)
     # parse args
     cmake_parse_arguments(
-        CHECKOUT "RECURSIVE"
+        CHECKOUT
+        "RECURSIVE"
         "RELATIVE_PATH;WORKING_DIRECTORY;TEST_FILE;REPO_URL;REPO_BRANCH"
-        "ADDITIONAL_CMDS" ${ARGN})
+        "ADDITIONAL_CMDS"
+        ${ARGN}
+    )
 
     if(NOT CHECKOUT_WORKING_DIRECTORY)
         set(CHECKOUT_WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
@@ -97,15 +98,19 @@ function(CHECKOUT_GIT_SUBMODULE)
     if(NOT _TEST_FILE_EXISTS AND _SUBMODULE_EXISTS)
         # perform the checkout
         execute_process(
-            COMMAND ${GIT_EXECUTABLE} submodule update --init ${_RECURSE}
-                    ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_RELATIVE_PATH}
+            COMMAND
+                ${GIT_EXECUTABLE} submodule update --init ${_RECURSE}
+                ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_RELATIVE_PATH}
             WORKING_DIRECTORY ${CHECKOUT_WORKING_DIRECTORY}
-            RESULT_VARIABLE RET)
+            RESULT_VARIABLE RET
+        )
 
         # check the return code
         if(RET GREATER 0)
-            set(_CMD "${GIT_EXECUTABLE} submodule update --init ${_RECURSE}
-                ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_RELATIVE_PATH}")
+            set(_CMD
+                "${GIT_EXECUTABLE} submodule update --init ${_RECURSE}
+                ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_RELATIVE_PATH}"
+            )
             message(STATUS "function(CHECKOUT_GIT_SUBMODULE) failed.")
             message(FATAL_ERROR "Command: \"${_CMD}\"")
         else()
@@ -115,7 +120,9 @@ function(CHECKOUT_GIT_SUBMODULE)
 
     if(NOT _TEST_FILE_EXISTS AND _HAS_REPO_URL)
         message(
-            STATUS "Checking out '${CHECKOUT_REPO_URL}' @ '${CHECKOUT_REPO_BRANCH}'...")
+            STATUS
+            "Checking out '${CHECKOUT_REPO_URL}' @ '${CHECKOUT_REPO_BRANCH}'..."
+        )
 
         # remove the existing directory
         if(EXISTS "${_DIR}")
@@ -128,16 +135,16 @@ function(CHECKOUT_GIT_SUBMODULE)
                 ${GIT_EXECUTABLE} clone -b ${CHECKOUT_REPO_BRANCH}
                 ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_REPO_URL} ${CHECKOUT_RELATIVE_PATH}
             WORKING_DIRECTORY ${CHECKOUT_WORKING_DIRECTORY}
-            RESULT_VARIABLE RET)
+            RESULT_VARIABLE RET
+        )
 
         # perform the submodule update
-        if(CHECKOUT_RECURSIVE
-           AND EXISTS "${_DIR}"
-           AND IS_DIRECTORY "${_DIR}")
+        if(CHECKOUT_RECURSIVE AND EXISTS "${_DIR}" AND IS_DIRECTORY "${_DIR}")
             execute_process(
                 COMMAND ${GIT_EXECUTABLE} submodule update --init ${_RECURSE}
                 WORKING_DIRECTORY ${_DIR}
-                RESULT_VARIABLE RET)
+                RESULT_VARIABLE RET
+            )
         endif()
 
         # check the return code
@@ -145,7 +152,7 @@ function(CHECKOUT_GIT_SUBMODULE)
             set(_CMD
                 "${GIT_EXECUTABLE} clone -b ${CHECKOUT_REPO_BRANCH}
                 ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_REPO_URL} ${CHECKOUT_RELATIVE_PATH}"
-                )
+            )
             message(STATUS "function(CHECKOUT_GIT_SUBMODULE) failed.")
             message(FATAL_ERROR "Command: \"${_CMD}\"")
         else()
@@ -156,7 +163,7 @@ function(CHECKOUT_GIT_SUBMODULE)
     if(NOT EXISTS "${_TEST_FILE}" OR NOT _TEST_FILE_EXISTS)
         message(
             FATAL_ERROR
-                "Error checking out submodule: '${CHECKOUT_RELATIVE_PATH}' to '${_DIR}'")
+            "Error checking out submodule: '${CHECKOUT_RELATIVE_PATH}' to '${_DIR}'"
+        )
     endif()
-
 endfunction()

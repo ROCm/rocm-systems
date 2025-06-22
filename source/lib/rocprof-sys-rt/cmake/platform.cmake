@@ -4,8 +4,14 @@
 set(PLATFORM $ENV{PLATFORM})
 
 set(VALID_PLATFORMS
-    amd64-unknown-freebsd7.2 i386-unknown-freebsd7.2 i386-unknown-linux2.4 ppc32_linux
-    ppc64_linux x86_64-unknown-linux2.4 aarch64-unknown-linux)
+    amd64-unknown-freebsd7.2
+    i386-unknown-freebsd7.2
+    i386-unknown-linux2.4
+    ppc32_linux
+    ppc64_linux
+    x86_64-unknown-linux2.4
+    aarch64-unknown-linux
+)
 
 if(NOT PLATFORM)
     set(INVALID_PLATFORM true)
@@ -19,7 +25,8 @@ endif()
 execute_process(
     COMMAND ${CMAKE_CURRENT_LIST_DIR}/sysname
     OUTPUT_VARIABLE SYSNAME_OUT
-    OUTPUT_STRIP_TRAILING_WHITESPACE)
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
 string(REPLACE "\n" "" SYSPLATFORM ${SYSNAME_OUT})
 
 if(INVALID_PLATFORM)
@@ -27,10 +34,12 @@ if(INVALID_PLATFORM)
     execute_process(
         COMMAND ${CMAKE_CURRENT_LIST_DIR}/dynsysname ${SYSNAME_OUT}
         OUTPUT_VARIABLE DYNSYSNAME_OUT
-        OUTPUT_STRIP_TRAILING_WHITESPACE)
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
     string(REPLACE "\n" "" PLATFORM ${DYNSYSNAME_OUT})
     rocprofiler_systems_message(
-        STATUS "-- Attempting to automatically identify platform: ${PLATFORM}")
+        STATUS "-- Attempting to automatically identify platform: ${PLATFORM}"
+    )
 endif()
 
 list(FIND VALID_PLATFORMS ${PLATFORM} PLATFORM_FOUND)
@@ -39,13 +48,21 @@ if(PLATFORM_FOUND EQUAL -1)
     rocprofiler_systems_message(
         FATAL_ERROR
         "Error: unknown platform ${PLATFORM}; please set the PLATFORM environment variable to one of the following options: ${VALID_PLATFORMS}"
-        )
+    )
 endif()
 
 if(PLATFORM MATCHES i386)
     set(ARCH_DEFINES arch_x86)
-    list(APPEND CAP_DEFINES cap_fixpoint_gen cap_noaddr_gen cap_stripped_binaries
-         cap_tramp_liveness cap_virtual_registers cap_stack_mods)
+    list(
+        APPEND
+        CAP_DEFINES
+        cap_fixpoint_gen
+        cap_noaddr_gen
+        cap_stripped_binaries
+        cap_tramp_liveness
+        cap_virtual_registers
+        cap_stack_mods
+    )
 elseif(PLATFORM MATCHES x86_64 OR PLATFORM MATCHES amd64)
     set(ARCH_DEFINES arch_x86_64 arch_64bit)
     list(
@@ -57,7 +74,8 @@ elseif(PLATFORM MATCHES x86_64 OR PLATFORM MATCHES amd64)
         cap_registers
         cap_stripped_binaries
         cap_tramp_liveness
-        cap_stack_mods)
+        cap_stack_mods
+    )
 elseif(PLATFORM MATCHES ppc32)
     set(ARCH_DEFINES arch_power)
     list(APPEND CAP_DEFINES cap_registers)
@@ -78,20 +96,38 @@ endif()
 
 if(PLATFORM MATCHES linux)
     set(OS_DEFINES os_linux)
-    list(APPEND CAP_DEFINES cap_async_events cap_binary_rewriter cap_dwarf
-         cap_mutatee_traps cap_ptrace)
+    list(
+        APPEND
+        CAP_DEFINES
+        cap_async_events
+        cap_binary_rewriter
+        cap_dwarf
+        cap_mutatee_traps
+        cap_ptrace
+    )
     set(BUG_DEFINES bug_syscall_changepc_rewind bug_force_terminate_failure)
 elseif(PLATFORM MATCHES cnl)
     set(OS_DEFINES os_linux os_cnl)
-    list(APPEND CAP_DEFINES cap_async_events cap_binary_rewriter cap_dwarf
-         cap_mutatee_traps cap_ptrace)
+    list(
+        APPEND
+        CAP_DEFINES
+        cap_async_events
+        cap_binary_rewriter
+        cap_dwarf
+        cap_mutatee_traps
+        cap_ptrace
+    )
     set(BUG_DEFINES bug_syscall_changepc_rewind)
 elseif(PLATFORM MATCHES freebsd)
     set(OS_DEFINES os_freebsd)
     list(APPEND CAP_DEFINES cap_binary_rewriter cap_dwarf cap_mutatee_traps)
     set(BUG_DEFINES
-        bug_freebsd_missing_sigstop bug_freebsd_mt_suspend bug_freebsd_change_pc
-        bug_phdrs_first_page bug_syscall_changepc_rewind)
+        bug_freebsd_missing_sigstop
+        bug_freebsd_mt_suspend
+        bug_freebsd_change_pc
+        bug_phdrs_first_page
+        bug_syscall_changepc_rewind
+    )
 elseif(PLATFORM STREQUAL i386-unknown-nt4.0)
     set(OS_DEFINES os_windows)
     list(APPEND CAP_DEFINES cap_mem_emulation cap_mutatee_traps)
@@ -126,7 +162,12 @@ if(Thread_DB_FOUND)
     list(APPEND CAP_DEFINES cap_thread_db)
 endif()
 
-set(UNIFIED_DEFINES ${CAP_DEFINES} ${BUG_DEFINES} ${ARCH_DEFINES} ${OS_DEFINES}
-                    ${OLD_DEFINES})
+set(UNIFIED_DEFINES
+    ${CAP_DEFINES}
+    ${BUG_DEFINES}
+    ${ARCH_DEFINES}
+    ${OS_DEFINES}
+    ${OLD_DEFINES}
+)
 
 list(REMOVE_DUPLICATES UNIFIED_DEFINES)

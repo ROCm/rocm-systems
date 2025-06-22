@@ -28,14 +28,14 @@ endif()
 # -------------- PATHS --------------------------------------------------------
 
 # Base directory the of LibIberty installation
-set(LibIberty_ROOT_DIR
-    "/usr"
-    CACHE PATH "Base directory the of LibIberty installation")
+set(LibIberty_ROOT_DIR "/usr" CACHE PATH "Base directory the of LibIberty installation")
 
 # Hint directory that contains the LibIberty library files
 set(LibIberty_LIBRARYDIR
     "${LibIberty_ROOT_DIR}/lib"
-    CACHE PATH "Hint directory that contains the LibIberty library files")
+    CACHE PATH
+    "Hint directory that contains the LibIberty library files"
+)
 
 # -------------- PACKAGES -----------------------------------------------------
 
@@ -53,16 +53,18 @@ if(LibIberty_FOUND)
 elseif(STERILE_BUILD)
     rocprofiler_systems_message(
         FATAL_ERROR
-        "LibIberty not found and cannot be downloaded because build is sterile.")
+        "LibIberty not found and cannot be downloaded because build is sterile."
+    )
 elseif(NOT BUILD_LIBIBERTY)
     rocprofiler_systems_message(
         FATAL_ERROR
         "LibIberty was not found. Either configure cmake to find TBB properly or set BUILD_LIBIBERTY=ON to download and build"
-        )
+    )
 else()
     rocprofiler_systems_message(STATUS "${LibIberty_ERROR_REASON}")
     rocprofiler_systems_message(STATUS
-                                "Attempting to build LibIberty as external project")
+                                "Attempting to build LibIberty as external project"
+    )
 
     set(_li_root ${TPL_STAGING_PREFIX}/binutils)
     set(_li_project_name rocprofiler-systems-libiberty-build)
@@ -70,17 +72,19 @@ else()
     set(_li_inc_dirs $<BUILD_INTERFACE:${_li_root}/include>)
     set(_li_lib_dirs $<BUILD_INTERFACE:${_li_root}/lib>)
     set(_li_libs
-        $<BUILD_INTERFACE:${_li_root}/lib/libiberty${CMAKE_STATIC_LIBRARY_SUFFIX}>)
+        $<BUILD_INTERFACE:${_li_root}/lib/libiberty${CMAKE_STATIC_LIBRARY_SUFFIX}>
+    )
     set(_li_build_byproducts "${_li_root}/lib/libiberty${CMAKE_STATIC_LIBRARY_SUFFIX}")
 
     file(MAKE_DIRECTORY "${_li_root}/lib")
     file(MAKE_DIRECTORY "${_li_root}/include")
 
     include(ExternalProject)
-    externalproject_add(
+    ExternalProject_Add(
         ${_li_project_name}
         PREFIX ${_li_root}
-        URL ${DYNINST_BINUTILS_DOWNLOAD_URL}
+        URL
+            ${DYNINST_BINUTILS_DOWNLOAD_URL}
             http://ftpmirror.gnu.org/gnu/binutils/binutils-2.42.tar.gz
             http://mirrors.kernel.org/sourceware/binutils/releases/binutils-2.42.tar.gz
         BUILD_IN_SOURCE 1
@@ -90,14 +94,18 @@ else()
             --prefix=${_li_root}
         BUILD_COMMAND make
         BUILD_BYPRODUCTS ${_li_build_byproducts}
-        INSTALL_COMMAND "")
+        INSTALL_COMMAND ""
+    )
 
     add_custom_command(
         TARGET ${_li_project_name}
         POST_BUILD
-        COMMAND install ARGS -C ${_li_working_dir}/libiberty/libiberty.a ${_li_root}/lib
-        COMMAND install ARGS -C ${_li_working_dir}/include/*.h ${_li_root}/include
-        COMMENT "Installing LibIberty...")
+        COMMAND install
+        ARGS -C ${_li_working_dir}/libiberty/libiberty.a ${_li_root}/lib
+        COMMAND install
+        ARGS -C ${_li_working_dir}/include/*.h ${_li_root}/include
+        COMMENT "Installing LibIberty..."
+    )
 
     # target for re-executing the installation
     add_custom_target(
@@ -105,7 +113,8 @@ else()
         COMMAND install -C ${_li_working_dir}/libiberty/libiberty.a ${_li_root}/lib
         COMMAND install ARGS -C ${_li_working_dir}/include/*.h ${_li_root}/include
         WORKING_DIRECTORY ${_li_working_dir}
-        COMMENT "Installing LibIberty...")
+        COMMENT "Installing LibIberty..."
+    )
 
     # For backward compatibility
     set(IBERTY_FOUND TRUE)
@@ -126,16 +135,18 @@ target_link_libraries(rocprofiler-systems-libiberty INTERFACE ${_li_libs})
 
 set(LibIberty_ROOT_DIR
     ${_li_root}
-    CACHE PATH "Base directory the of LibIberty installation" FORCE)
+    CACHE PATH
+    "Base directory the of LibIberty installation"
+    FORCE
+)
 set(LibIberty_INCLUDE_DIRS
     ${_li_inc_dirs}
-    CACHE PATH "LibIberty include directories" FORCE)
-set(LibIberty_LIBRARY_DIRS
-    ${_li_lib_dirs}
-    CACHE PATH "LibIberty library directory" FORCE)
-set(LibIberty_LIBRARIES
-    ${_li_libs}
-    CACHE FILEPATH "LibIberty library files" FORCE)
+    CACHE PATH
+    "LibIberty include directories"
+    FORCE
+)
+set(LibIberty_LIBRARY_DIRS ${_li_lib_dirs} CACHE PATH "LibIberty library directory" FORCE)
+set(LibIberty_LIBRARIES ${_li_libs} CACHE FILEPATH "LibIberty library files" FORCE)
 
 # For backward compatibility only
 set(IBERTY_LIBRARIES ${LibIberty_LIBRARIES})

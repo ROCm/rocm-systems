@@ -63,7 +63,8 @@ rocprofiler_systems_add_test(
     RUN_ARGS 10 ${NUM_THREADS} 1000
     ENVIRONMENT "${_base_environment}"
     RUNTIME_PASS_REGEX "(\\\[[0-9]+\\\]) code coverage     ::  66.67%"
-    REWRITE_RUN_PASS_REGEX "(\\\[[0-9]+\\\]) code coverage     ::  66.67%")
+    REWRITE_RUN_PASS_REGEX "(\\\[[0-9]+\\\]) code coverage     ::  66.67%"
+)
 
 rocprofiler_systems_add_test(
     SKIP_BASELINE SKIP_SAMPLING
@@ -90,7 +91,8 @@ rocprofiler_systems_add_test(
     RUN_ARGS 10 ${NUM_THREADS} 1000
     ENVIRONMENT "${_base_environment}"
     RUNTIME_PASS_REGEX "(\\\[[0-9]+\\\]) code coverage     ::  66.67%"
-    REWRITE_RUN_PASS_REGEX "(\\\[[0-9]+\\\]) code coverage     ::  66.67%")
+    REWRITE_RUN_PASS_REGEX "(\\\[[0-9]+\\\]) code coverage     ::  66.67%"
+)
 
 rocprofiler_systems_add_test(
     SKIP_BASELINE SKIP_SAMPLING
@@ -129,7 +131,8 @@ rocprofiler_systems_add_test(
     RUN_ARGS 10 ${NUM_THREADS} 1000
     ENVIRONMENT "${_base_environment}"
     RUNTIME_PASS_REGEX "(\\\[[0-9]+\\\]) function coverage ::  66.67%"
-    REWRITE_RUN_PASS_REGEX "(\\\[[0-9]+\\\]) function coverage ::  66.67%")
+    REWRITE_RUN_PASS_REGEX "(\\\[[0-9]+\\\]) function coverage ::  66.67%"
+)
 
 rocprofiler_systems_add_test(
     SKIP_BASELINE SKIP_SAMPLING
@@ -156,4 +159,5 @@ rocprofiler_systems_add_test(
     RUN_ARGS 10 ${NUM_THREADS} 1000
     ENVIRONMENT "${_base_environment}"
     RUNTIME_PASS_REGEX "(\\\[[0-9]+\\\]) function coverage ::  66.67%"
-    REWRITE_RUN_PASS_REGEX "(\\\[[0-9]+\\\]) function coverage ::  66.67%")
+    REWRITE_RUN_PASS_REGEX "(\\\[[0-9]+\\\]) function coverage ::  66.67%"
+)

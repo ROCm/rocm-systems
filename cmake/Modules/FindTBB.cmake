@@ -81,8 +81,10 @@ set(TBB_SEARCH_DIR ${TBB_ROOT_DIR} $ENV{TBB_INSTALL_DIR} $ENV{TBBROOT})
 
 # Define the search directories based on the current platform
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
-    set(TBB_DEFAULT_SEARCH_DIR "C:/Program Files/Intel/TBB"
-                               "C:/Program Files (x86)/Intel/TBB")
+    set(TBB_DEFAULT_SEARCH_DIR
+        "C:/Program Files/Intel/TBB"
+        "C:/Program Files (x86)/Intel/TBB"
+    )
 
     # Set the target architecture
     if(CMAKE_SIZEOF_VOID_P EQUAL 8)
@@ -106,7 +108,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
 
     # Add the library path search suffix for the VC independent version of TBB
     list(APPEND TBB_LIB_PATH_SUFFIX "lib/${TBB_ARCHITECTURE}/vc_mt")
-
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     # OS X
     set(TBB_DEFAULT_SEARCH_DIR "/opt/intel/tbb")
@@ -136,18 +137,22 @@ endif()
 # Find the TBB include dir
 #
 find_path(
-    TBB_INCLUDE_DIRS tbb/tbb.h
+    TBB_INCLUDE_DIRS
+    tbb/tbb.h
     HINTS ${TBB_INCLUDE_DIRS} ${TBB_SEARCH_DIR}
     PATHS ${TBB_DEFAULT_SEARCH_DIR}
-    PATH_SUFFIXES include)
+    PATH_SUFFIXES include
+)
 
 #
 # Set version strings
 #
 if(TBB_INCLUDE_DIRS)
     # Starting in 2020.1.1, tbb_stddef.h is replaced by version.h
-    set(_version_files "${TBB_INCLUDE_DIRS}/tbb/tbb_stddef.h"
-                       "${TBB_INCLUDE_DIRS}/tbb/version.h")
+    set(_version_files
+        "${TBB_INCLUDE_DIRS}/tbb/tbb_stddef.h"
+        "${TBB_INCLUDE_DIRS}/tbb/version.h"
+    )
     foreach(f IN ITEMS ${_version_files})
         if(EXISTS ${f})
             set(_version_file ${f})
@@ -156,20 +161,38 @@ if(TBB_INCLUDE_DIRS)
     unset(_version_files)
 
     file(READ ${_version_file} _tbb_version_file)
-    string(REGEX REPLACE ".*#define TBB_VERSION_MAJOR ([0-9]+).*" "\\1" TBB_VERSION_MAJOR
-                         "${_tbb_version_file}")
-    string(REGEX REPLACE ".*#define TBB_VERSION_MINOR ([0-9]+).*" "\\1" TBB_VERSION_MINOR
-                         "${_tbb_version_file}")
-    string(REGEX REPLACE ".*#define TBB_INTERFACE_VERSION ([0-9]+).*" "\\1"
-                         TBB_INTERFACE_VERSION "${_tbb_version_file}")
+    string(
+        REGEX REPLACE
+        ".*#define TBB_VERSION_MAJOR ([0-9]+).*"
+        "\\1"
+        TBB_VERSION_MAJOR
+        "${_tbb_version_file}"
+    )
+    string(
+        REGEX REPLACE
+        ".*#define TBB_VERSION_MINOR ([0-9]+).*"
+        "\\1"
+        TBB_VERSION_MINOR
+        "${_tbb_version_file}"
+    )
+    string(
+        REGEX REPLACE
+        ".*#define TBB_INTERFACE_VERSION ([0-9]+).*"
+        "\\1"
+        TBB_INTERFACE_VERSION
+        "${_tbb_version_file}"
+    )
 
     # The TBB_VERSION_MINOR isn't necessarily changed for minor releases Hence, we need to
     # read the engineering versioning in TBB_INTERFACE_VERSION to get the minor version
     # correct
     if("${TBB_VERSION_MINOR}" STREQUAL "0")
         math(EXPR _tbb_iface_major_ver "${TBB_INTERFACE_VERSION} / 100")
-        math(EXPR TBB_VERSION_MINOR
-             "${TBB_INTERFACE_VERSION} - ${_tbb_iface_major_ver} * 100")
+        math(
+            EXPR
+            TBB_VERSION_MINOR
+            "${TBB_INTERFACE_VERSION} - ${_tbb_iface_major_ver} * 100"
+        )
     endif()
     set(TBB_VERSION "${TBB_VERSION_MAJOR}.${TBB_VERSION_MINOR}")
 endif()
@@ -190,19 +213,24 @@ foreach(_comp ${TBB_SEARCH_COMPOMPONENTS})
     # message(STATUS "Searching for ${_comp}...") message(STATUS "Hints: ${TBB_LIBRARY}
     # ${TBB_SEARCH_DIR}")
     if(";${TBB_FIND_COMPONENTS};tbb;" MATCHES ";${_comp};")
-
         # Search for the libraries
         find_library(
-            TBB_${_comp}_LIBRARY_RELEASE ${_comp}
+            TBB_${_comp}_LIBRARY_RELEASE
+            ${_comp}
             HINTS ${TBB_LIBRARY} ${TBB_SEARCH_DIR}
-            PATHS ${TBB_DEFAULT_SEARCH_DIR} ENV LIBRARY_PATH
-            PATH_SUFFIXES ${TBB_LIB_PATH_SUFFIX} lib_release)
+            PATHS ${TBB_DEFAULT_SEARCH_DIR}
+            ENV LIBRARY_PATH
+            PATH_SUFFIXES ${TBB_LIB_PATH_SUFFIX} lib_release
+        )
 
         find_library(
-            TBB_${_comp}_LIBRARY_DEBUG ${_comp}_debug
+            TBB_${_comp}_LIBRARY_DEBUG
+            ${_comp}_debug
             HINTS ${TBB_LIBRARY} ${TBB_SEARCH_DIR}
-            PATHS ${TBB_DEFAULT_SEARCH_DIR} ENV LIBRARY_PATH
-            PATH_SUFFIXES ${TBB_LIB_PATH_SUFFIX} lib_debug)
+            PATHS ${TBB_DEFAULT_SEARCH_DIR}
+            ENV LIBRARY_PATH
+            PATH_SUFFIXES ${TBB_LIB_PATH_SUFFIX} lib_debug
+        )
 
         if(TBB_${_comp}_LIBRARY_DEBUG)
             list(APPEND TBB_LIBRARIES_DEBUG "${TBB_${_comp}_LIBRARY_DEBUG}")
@@ -258,7 +286,8 @@ find_package_handle_standard_args(
     TBB
     REQUIRED_VARS TBB_INCLUDE_DIRS TBB_LIBRARIES
     HANDLE_COMPONENTS
-    VERSION_VAR TBB_VERSION)
+    VERSION_VAR TBB_VERSION
+)
 
 mark_as_advanced(TBB_INCLUDE_DIRS TBB_LIBRARIES TBB_LIBRARY_DIRS)
 

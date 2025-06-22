@@ -40,13 +40,10 @@ repos:
       - id: clang-format
         files: \.(c|cpp|h.*)$
 
-  - repo: local
+  - repo: https://github.com/BlankSpruce/gersemi
+    rev: 0.19.3
     hooks:
-      - id: check-cmake
-        name: cmake-format
-        entry: ./scripts/check-cmake-format.sh
-        language: script
-        files: (^|/)(CMakeLists\.txt|.*\.cmake)$
+    - id: gersemi
 
   - repo: local
     hooks:
