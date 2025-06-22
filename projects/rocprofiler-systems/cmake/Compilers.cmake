@@ -32,7 +32,8 @@ endif()
 if(NOT TARGET ${LIBNAME}-compile-options)
     rocprofiler_systems_add_interface_library(
         ${LIBNAME}-compile-options
-        "Adds the standard set of compiler flags used by timemory")
+        "Adds the standard set of compiler flags used by timemory"
+    )
 endif()
 
 # ----------------------------------------------------------------------------------------#
@@ -41,20 +42,14 @@ endif()
 macro(to_list _VAR _STR)
     string(REPLACE "  " " " ${_VAR} "${_STR}")
     string(REPLACE " " ";" ${_VAR} "${_STR}")
-endmacro(
-    to_list
-    _VAR
-    _STR)
+endmacro(to_list _VAR _STR)
 
 # ----------------------------------------------------------------------------------------#
 # macro converting string to list
 # ----------------------------------------------------------------------------------------#
 macro(to_string _VAR _STR)
     string(REPLACE ";" " " ${_VAR} "${_STR}")
-endmacro(
-    to_string
-    _VAR
-    _STR)
+endmacro(to_string _VAR _STR)
 
 # ----------------------------------------------------------------------------------------#
 # Macro to add to string
@@ -233,8 +228,11 @@ macro(ADD_TARGET_CXX_FLAG _TARG)
     list(APPEND ${_MAKE_TARG}_CXX_FLAGS ${ARGN})
     get_property(LANGUAGES GLOBAL PROPERTY ENABLED_LANGUAGES)
     if(CMAKE_CUDA_COMPILER_IS_NVIDIA)
-        target_compile_options(${_TARG} ${_SCOPE}
-                               $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=${ARGN}>)
+        target_compile_options(
+            ${_TARG}
+            ${_SCOPE}
+            $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=${ARGN}>
+        )
         list(APPEND ${_MAKE_TARG}_CUDA_FLAGS -Xcompiler=${ARGN})
     elseif(CMAKE_CUDA_COMPILER_IS_CLANG)
         target_compile_options(${_TARG} ${_SCOPE} $<$<COMPILE_LANGUAGE:CUDA>:${ARGN}>)
@@ -380,8 +378,11 @@ function(ROCPROFILER_SYSTEMS_TARGET_FLAG _TARG_TARGET)
     foreach(_FLAG ${_TARG_FLAGS})
         foreach(_LANG ${_TARG_LANGUAGES})
             if(NOT _TARG_IF_AVAIL)
-                target_compile_options(${_TARG_TARGET} ${_TARG_MODE}
-                                       $<$<COMPILE_LANGUAGE:${_LANG}>:${_FLAG}>)
+                target_compile_options(
+                    ${_TARG_TARGET}
+                    ${_TARG_MODE}
+                    $<$<COMPILE_LANGUAGE:${_LANG}>:${_FLAG}>
+                )
                 continue()
             endif()
 
@@ -400,8 +401,11 @@ function(ROCPROFILER_SYSTEMS_TARGET_FLAG _TARG_TARGET)
                 endif()
                 rocprofiler_systems_end_flag_check()
                 if(${FLAG_NAME})
-                    target_compile_options(${_TARG_TARGET} ${_TARG_MODE}
-                                           $<$<COMPILE_LANGUAGE:${_LANG}>:${_FLAG}>)
+                    target_compile_options(
+                        ${_TARG_TARGET}
+                        ${_TARG_MODE}
+                        $<$<COMPILE_LANGUAGE:${_LANG}>:${_FLAG}>
+                    )
                 endif()
             elseif("${_LANG}" STREQUAL "CXX")
                 string(REGEX REPLACE "^/" "cxx${_LTARG}_" FLAG_NAME "${_FLAG}")
@@ -418,15 +422,23 @@ function(ROCPROFILER_SYSTEMS_TARGET_FLAG _TARG_TARGET)
                 endif()
                 rocprofiler_systems_end_flag_check()
                 if(${FLAG_NAME})
-                    target_compile_options(${_TARG_TARGET} ${_TARG_MODE}
-                                           $<$<COMPILE_LANGUAGE:${_LANG}>:${_FLAG}>)
+                    target_compile_options(
+                        ${_TARG_TARGET}
+                        ${_TARG_MODE}
+                        $<$<COMPILE_LANGUAGE:${_LANG}>:${_FLAG}>
+                    )
                     if(CMAKE_CUDA_COMPILER_IS_NVIDIA)
                         target_compile_options(
-                            ${_TARG_TARGET} ${_TARG_MODE}
-                            $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=${_FLAG}>)
+                            ${_TARG_TARGET}
+                            ${_TARG_MODE}
+                            $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=${_FLAG}>
+                        )
                     elseif(CMAKE_CUDA_COMPILER_IS_CLANG)
-                        target_compile_options(${_TARG_TARGET} ${_TARG_MODE}
-                                               $<$<COMPILE_LANGUAGE:CUDA>:${_FLAG}>)
+                        target_compile_options(
+                            ${_TARG_TARGET}
+                            ${_TARG_MODE}
+                            $<$<COMPILE_LANGUAGE:CUDA>:${_FLAG}>
+                        )
                     endif()
                 endif()
             endif()
@@ -449,22 +461,31 @@ endmacro()
 # add to any language
 # ----------------------------------------------------------------------------------------#
 function(ADD_USER_FLAGS _TARGET _LANGUAGE)
-
-    set(_FLAGS ${${_LANGUAGE}FLAGS} $ENV{${_LANGUAGE}FLAGS} ${${_LANGUAGE}_FLAGS}
-               $ENV{${_LANGUAGE}_FLAGS})
+    set(_FLAGS
+        ${${_LANGUAGE}FLAGS}
+        $ENV{${_LANGUAGE}FLAGS}
+        ${${_LANGUAGE}_FLAGS}
+        $ENV{${_LANGUAGE}_FLAGS}
+    )
 
     string(REPLACE " " ";" _FLAGS "${_FLAGS}")
 
     set(${PROJECT_NAME}_${_LANGUAGE}_FLAGS
-        ${${PROJECT_NAME}_${_LANGUAGE}_FLAGS} ${_FLAGS}
-        PARENT_SCOPE)
+        ${${PROJECT_NAME}_${_LANGUAGE}_FLAGS}
+        ${_FLAGS}
+        PARENT_SCOPE
+    )
 
     set(${PROJECT_NAME}_${_LANGUAGE}_COMPILE_OPTIONS
-        ${${PROJECT_NAME}_${_LANGUAGE}_COMPILE_OPTIONS} ${_FLAGS}
-        PARENT_SCOPE)
+        ${${PROJECT_NAME}_${_LANGUAGE}_COMPILE_OPTIONS}
+        ${_FLAGS}
+        PARENT_SCOPE
+    )
 
-    target_compile_options(${_TARGET}
-                           INTERFACE $<$<COMPILE_LANGUAGE:${_LANGUAGE}>:${_FLAGS}>)
+    target_compile_options(
+        ${_TARGET}
+        INTERFACE $<$<COMPILE_LANGUAGE:${_LANGUAGE}>:${_FLAGS}>
+    )
 endfunction()
 
 # ----------------------------------------------------------------------------------------#
@@ -477,11 +498,17 @@ function(ROCPROFILER_SYSTEMS_TARGET_COMPILE_DEFINITIONS _TARG _VIS)
         endif()
         target_compile_definitions(${_TARG} ${_VIS} $<$<COMPILE_LANGUAGE:CXX>:${_DEF}>)
         if(CMAKE_CUDA_COMPILER_IS_NVIDIA)
-            target_compile_definitions(${_TARG} ${_VIS}
-                                                $<$<COMPILE_LANGUAGE:CUDA>:${_DEF}>)
+            target_compile_definitions(
+                ${_TARG}
+                ${_VIS}
+                $<$<COMPILE_LANGUAGE:CUDA>:${_DEF}>
+            )
         elseif(CMAKE_CUDA_COMPILER_IS_CLANG)
-            target_compile_definitions(${_TARG} ${_VIS}
-                                                $<$<COMPILE_LANGUAGE:CUDA>:${_DEF}>)
+            target_compile_definitions(
+                ${_TARG}
+                ${_VIS}
+                $<$<COMPILE_LANGUAGE:CUDA>:${_DEF}>
+            )
         endif()
     endforeach()
 endfunction()
@@ -491,7 +518,6 @@ endfunction()
 # ----------------------------------------------------------------------------------------#
 get_property(ENABLED_LANGUAGES GLOBAL PROPERTY ENABLED_LANGUAGES)
 foreach(LANG C CXX CUDA)
-
     if(NOT DEFINED CMAKE_${LANG}_COMPILER)
         set(CMAKE_${LANG}_COMPILER "")
     endif()
@@ -503,36 +529,32 @@ foreach(LANG C CXX CUDA)
     function(SET_COMPILER_VAR VAR _BOOL)
         set(CMAKE_${LANG}_COMPILER_IS_${VAR}
             ${_BOOL}
-            CACHE INTERNAL "CMake ${LANG} compiler identification (${VAR})" FORCE)
+            CACHE INTERNAL
+            "CMake ${LANG} compiler identification (${VAR})"
+            FORCE
+        )
         mark_as_advanced(CMAKE_${LANG}_COMPILER_IS_${VAR})
     endfunction()
 
-    if(("${LANG}" STREQUAL "C" AND CMAKE_COMPILER_IS_GNUCC)
-       OR ("${LANG}" STREQUAL "CXX" AND CMAKE_COMPILER_IS_GNUCXX))
-
+    if(
+        ("${LANG}" STREQUAL "C" AND CMAKE_COMPILER_IS_GNUCC)
+        OR ("${LANG}" STREQUAL "CXX" AND CMAKE_COMPILER_IS_GNUCXX)
+    )
         # GNU compiler
         set_compiler_var(GNU 1)
-
     elseif(CMAKE_${LANG}_COMPILER MATCHES "icc.*")
-
         # Intel icc compiler
         set_compiler_var(INTEL 1)
         set_compiler_var(INTEL_ICC 1)
-
     elseif(CMAKE_${LANG}_COMPILER MATCHES "icpc.*")
-
         # Intel icpc compiler
         set_compiler_var(INTEL 1)
         set_compiler_var(INTEL_ICPC 1)
-
     elseif(CMAKE_${LANG}_COMPILER_ID MATCHES "AppleClang")
-
         # Clang/LLVM compiler
         set_compiler_var(CLANG 1)
         set_compiler_var(APPLE_CLANG 1)
-
     elseif(CMAKE_${LANG}_COMPILER_ID MATCHES "Clang")
-
         # Clang/LLVM compiler
         set_compiler_var(CLANG 1)
 
@@ -540,32 +562,23 @@ foreach(LANG C CXX CUDA)
         if(CMAKE_${LANG}_COMPILER MATCHES "hipcc")
             set_compiler_var(HIPCC 1)
         endif()
-
     elseif(CMAKE_${LANG}_COMPILER_ID MATCHES "PGI")
-
         # PGI compiler
         set_compiler_var(PGI 1)
-
     elseif(CMAKE_${LANG}_COMPILER MATCHES "xlC" AND UNIX)
-
         # IBM xlC compiler
         set_compiler_var(XLC 1)
-
     elseif(CMAKE_${LANG}_COMPILER MATCHES "aCC" AND UNIX)
-
         # HP aC++ compiler
         set_compiler_var(HP_ACC 1)
-
     elseif(
         CMAKE_${LANG}_COMPILER MATCHES "CC"
         AND CMAKE_SYSTEM_NAME MATCHES "IRIX"
-        AND UNIX)
-
+        AND UNIX
+    )
         # IRIX MIPSpro CC Compiler
         set_compiler_var(MIPS 1)
-
     elseif(CMAKE_${LANG}_COMPILER_ID MATCHES "Intel")
-
         set_compiler_var(INTEL 1)
 
         set(CTYPE ICC)
@@ -574,17 +587,12 @@ foreach(LANG C CXX CUDA)
         endif()
 
         set_compiler_var(INTEL_${CTYPE} 1)
-
     elseif(CMAKE_${LANG}_COMPILER MATCHES "MSVC")
-
         # Windows Visual Studio compiler
         set_compiler_var(MSVC 1)
-
     elseif(CMAKE_${LANG}_COMPILER_ID MATCHES "NVIDIA")
-
         # NVCC
         set_compiler_var(NVIDIA 1)
-
     endif()
 
     # set other to no
@@ -602,10 +610,10 @@ foreach(LANG C CXX CUDA)
         MIPS
         MSVC
         NVIDIA
-        HIPCC)
+        HIPCC
+    )
         if(NOT DEFINED CMAKE_${LANG}_COMPILER_IS_${TYPE})
             set_compiler_var(${TYPE} 0)
         endif()
     endforeach()
-
 endforeach()

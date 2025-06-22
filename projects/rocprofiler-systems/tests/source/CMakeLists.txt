@@ -38,14 +38,16 @@ set(_thread_limit_environment
     "ROCPROFSYS_USE_SAMPLING=ON"
     "ROCPROFSYS_SAMPLING_FREQ=250"
     "ROCPROFSYS_VERBOSE=2"
-    "ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock,peak_rss,page_rss")
+    "ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock,peak_rss,page_rss"
+)
 
 math(EXPR THREAD_LIMIT_TEST_VALUE "${ROCPROFSYS_MAX_THREADS} + 24")
 math(EXPR THREAD_LIMIT_TEST_VALUE_PLUS_ONE "${THREAD_LIMIT_TEST_VALUE} + 1")
 
 set(_thread_limit_pass_regex "\\|${THREAD_LIMIT_TEST_VALUE}>>>")
 set(_thread_limit_fail_regex
-    "\\|${THREAD_LIMIT_TEST_VALUE_PLUS_ONE}>>>|ROCPROFSYS_ABORT_FAIL_REGEX")
+    "\\|${THREAD_LIMIT_TEST_VALUE_PLUS_ONE}>>>|ROCPROFSYS_ABORT_FAIL_REGEX"
+)
 
 rocprofiler_systems_add_test(
     SKIP_BASELINE
@@ -63,4 +65,5 @@ rocprofiler_systems_add_test(
     RUNTIME_FAIL_REGEX "${_thread_limit_fail_regex}"
     SAMPLING_FAIL_REGEX "${_thread_limit_fail_regex}"
     REWRITE_RUN_FAIL_REGEX "${_thread_limit_fail_regex}"
-    ENVIRONMENT "${_thread_limit_environment}")
+    ENVIRONMENT "${_thread_limit_environment}"
+)

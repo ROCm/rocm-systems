@@ -33,7 +33,7 @@ rocprofiler_systems_add_causal_test(
     CAUSAL_MODE "function"
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
-    )
+)
 
 rocprofiler_systems_add_causal_test(
     SKIP_BASELINE
@@ -43,7 +43,7 @@ rocprofiler_systems_add_causal_test(
     CAUSAL_MODE "function"
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
-    )
+)
 
 rocprofiler_systems_add_causal_test(
     SKIP_BASELINE
@@ -53,7 +53,7 @@ rocprofiler_systems_add_causal_test(
     CAUSAL_MODE "line"
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
-    )
+)
 
 rocprofiler_systems_add_causal_test(
     NAME both-rocprofsys-func
@@ -79,7 +79,7 @@ rocprofiler_systems_add_causal_test(
     ENVIRONMENT "ROCPROFSYS_STRICT_CONFIG=OFF"
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
-    )
+)
 
 rocprofiler_systems_add_causal_test(
     NAME lulesh-func
@@ -89,7 +89,7 @@ rocprofiler_systems_add_causal_test(
     CAUSAL_ARGS -s 0,10,25,50,75
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
-    )
+)
 
 rocprofiler_systems_add_causal_test(
     SKIP_BASELINE
@@ -100,7 +100,7 @@ rocprofiler_systems_add_causal_test(
     CAUSAL_ARGS -s 0,10,25,50,75
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
-    )
+)
 
 rocprofiler_systems_add_causal_test(
     SKIP_BASELINE
@@ -111,13 +111,14 @@ rocprofiler_systems_add_causal_test(
     CAUSAL_ARGS -s 0,10,25,50,75 -S lulesh.cc
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
-    )
+)
 
 # set(_causal_e2e_exe_args 80 100 432525 100000000) set(_causal_e2e_exe_args 80 12 432525
 # 500000000)
 set(_causal_e2e_exe_args 80 50 432525 100000000)
 set(_causal_common_args
-    "-n 5 -e -s 0 10 20 30 -B $<TARGET_FILE_BASE_NAME:causal-cpu-rocprofsys>")
+    "-n 5 -e -s 0 10 20 30 -B $<TARGET_FILE_BASE_NAME:causal-cpu-rocprofsys>"
+)
 
 macro(
     causal_e2e_args_and_validation
@@ -129,14 +130,14 @@ macro(
     _V20
     _V30
     _TOL # tolerance for virtual speedup
-    )
+)
     # arguments to rocprofiler-systems-causal
     set(${_NAME}_args "${_causal_common_args} ${_MODE} ${_EXPER}")
 
     # arguments to validate-causal-json.py
     set(${_NAME}_valid
         "-n 0 -i rocprof-sys-tests-output/causal-cpu-rocprofsys-${_TEST}-e2e/causal/experiments.json -v ${_EXPER} $<TARGET_FILE_BASE_NAME:causal-cpu-rocprofsys> 10 ${_V10} ${_TOL} ${_EXPER} $<TARGET_FILE_BASE_NAME:causal-cpu-rocprofsys> 20 ${_V20} ${_TOL} ${_EXPER} $<TARGET_FILE_BASE_NAME:causal-cpu-rocprofsys> 30 ${_V30} ${_TOL}"
-        )
+    )
 
     # patch string for command-line
     string(REPLACE " " ";" ${_NAME}_args "${${_NAME}_args}")
@@ -144,7 +145,8 @@ macro(
 endmacro()
 
 causal_e2e_args_and_validation(_causal_slow_func slow-func "-F" "cpu_slow_func" 10 20 20
-                               5)
+                               5
+)
 causal_e2e_args_and_validation(_causal_fast_func fast-func "-F" "cpu_fast_func" 0 0 0 5)
 causal_e2e_args_and_validation(_causal_line_100 line-100 "-S" "causal.cpp:100" 10 20 20 5)
 causal_e2e_args_and_validation(_causal_line_110 line-110 "-S" "causal.cpp:110" 0 0 0 5)
@@ -167,7 +169,8 @@ rocprofiler_systems_add_causal_test(
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
     ENVIRONMENT "${_causal_e2e_environment}"
-    PROPERTIES PROCESSORS 2 PROCESSOR_AFFINITY OFF)
+    PROPERTIES PROCESSORS 2 PROCESSOR_AFFINITY OFF
+)
 
 rocprofiler_systems_add_causal_test(
     SKIP_BASELINE
@@ -181,7 +184,8 @@ rocprofiler_systems_add_causal_test(
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
     ENVIRONMENT "${_causal_e2e_environment}"
-    PROPERTIES PROCESSORS 2 PROCESSOR_AFFINITY OFF)
+    PROPERTIES PROCESSORS 2 PROCESSOR_AFFINITY OFF
+)
 
 rocprofiler_systems_add_causal_test(
     SKIP_BASELINE
@@ -195,7 +199,8 @@ rocprofiler_systems_add_causal_test(
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
     ENVIRONMENT "${_causal_e2e_environment}"
-    PROPERTIES PROCESSORS 2 PROCESSOR_AFFINITY OFF)
+    PROPERTIES PROCESSORS 2 PROCESSOR_AFFINITY OFF
+)
 
 rocprofiler_systems_add_causal_test(
     SKIP_BASELINE
@@ -209,4 +214,5 @@ rocprofiler_systems_add_causal_test(
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
     ENVIRONMENT "${_causal_e2e_environment}"
-    PROPERTIES PROCESSORS 2 PROCESSOR_AFFINITY OFF)
+    PROPERTIES PROCESSORS 2 PROCESSOR_AFFINITY OFF
+)

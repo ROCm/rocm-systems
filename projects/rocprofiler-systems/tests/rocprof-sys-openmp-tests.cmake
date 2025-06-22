@@ -44,7 +44,8 @@ rocprofiler_systems_add_test(
         "${_ompt_environment};ROCPROFSYS_USE_SAMPLING=OFF;ROCPROFSYS_COUT_OUTPUT=ON"
     REWRITE_RUN_PASS_REGEX "${_OMPT_PASS_REGEX}"
     RUNTIME_PASS_REGEX "${_OMPT_PASS_REGEX}"
-    REWRITE_FAIL_REGEX "0 instrumented loops in procedure")
+    REWRITE_FAIL_REGEX "0 instrumented loops in procedure"
+)
 
 rocprofiler_systems_add_test(
     SKIP_RUNTIME
@@ -58,7 +59,8 @@ rocprofiler_systems_add_test(
     ENVIRONMENT
         "${_ompt_environment};ROCPROFSYS_USE_SAMPLING=ON;ROCPROFSYS_SAMPLING_FREQ=50;ROCPROFSYS_COUT_OUTPUT=ON"
     REWRITE_RUN_PASS_REGEX "${_OMPT_PASS_REGEX}"
-    REWRITE_FAIL_REGEX "0 instrumented loops in procedure")
+    REWRITE_FAIL_REGEX "0 instrumented loops in procedure"
+)
 
 rocprofiler_systems_add_test(
     SKIP_RUNTIME SKIP_REWRITE
@@ -67,7 +69,8 @@ rocprofiler_systems_add_test(
     GPU ON
     LABELS "openmp;openmp-target"
     ENVIRONMENT
-        "${_ompt_environment};ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch")
+        "${_ompt_environment};ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch"
+)
 
 rocprofiler_systems_add_validation_test(
     NAME openmp-target-sampling
@@ -86,7 +89,8 @@ rocprofiler_systems_add_validation_test(
          0
          0
          0
-         -p)
+         -p
+)
 
 set(_ompt_sampling_environ
     "${_ompt_environment}"
@@ -101,7 +105,8 @@ set(_ompt_sampling_environ
     "ROCPROFSYS_SAMPLING_REALTIME=ON"
     "ROCPROFSYS_SAMPLING_CPUTIME_FREQ=1000"
     "ROCPROFSYS_SAMPLING_REALTIME_FREQ=500"
-    "ROCPROFSYS_MONOCHROME=ON")
+    "ROCPROFSYS_MONOCHROME=ON"
+)
 
 set(_ompt_sample_no_tmpfiles_environ
     "${_ompt_environment}"
@@ -113,17 +118,18 @@ set(_ompt_sample_no_tmpfiles_environ
     "ROCPROFSYS_SAMPLING_REALTIME=OFF"
     "ROCPROFSYS_SAMPLING_CPUTIME_FREQ=700"
     "ROCPROFSYS_USE_TEMPORARY_FILES=OFF"
-    "ROCPROFSYS_MONOCHROME=ON")
+    "ROCPROFSYS_MONOCHROME=ON"
+)
 
 set(_ompt_sampling_samp_regex
     "Sampler for thread 0 will be triggered 1000.0x per second of CPU-time(.*)Sampler for thread 0 will be triggered 500.0x per second of wall-time(.*)Sampling will be disabled after 0.250000 seconds(.*)Sampling duration of 0.250000 seconds has elapsed. Shutting down sampling"
-    )
+)
 set(_ompt_sampling_file_regex
     "sampling-duration-sampling/sampling_percent.(json|txt)(.*)sampling-duration-sampling/sampling_cpu_clock.(json|txt)(.*)sampling-duration-sampling/sampling_wall_clock.(json|txt)"
-    )
+)
 set(_notmp_sampling_file_regex
     "sampling-no-tmp-files-sampling/sampling_percent.(json|txt)(.*)sampling-no-tmp-files-sampling/sampling_cpu_clock.(json|txt)(.*)sampling-no-tmp-files-sampling/sampling_wall_clock.(json|txt)"
-    )
+)
 
 rocprofiler_systems_add_test(
     SKIP_BASELINE SKIP_RUNTIME SKIP_REWRITE
@@ -131,7 +137,8 @@ rocprofiler_systems_add_test(
     TARGET openmp-cg
     LABELS "openmp;sampling-duration"
     ENVIRONMENT "${_ompt_sampling_environ}"
-    SAMPLING_PASS_REGEX "${_ompt_sampling_samp_regex}(.*)${_ompt_sampling_file_regex}")
+    SAMPLING_PASS_REGEX "${_ompt_sampling_samp_regex}(.*)${_ompt_sampling_file_regex}"
+)
 
 rocprofiler_systems_add_test(
     SKIP_BASELINE SKIP_RUNTIME SKIP_REWRITE
@@ -139,7 +146,8 @@ rocprofiler_systems_add_test(
     TARGET openmp-lu
     LABELS "openmp;sampling-duration"
     ENVIRONMENT "${_ompt_sampling_environ}"
-    SAMPLING_PASS_REGEX "${_ompt_sampling_samp_regex}(.*)${_ompt_sampling_file_regex}")
+    SAMPLING_PASS_REGEX "${_ompt_sampling_samp_regex}(.*)${_ompt_sampling_file_regex}"
+)
 
 rocprofiler_systems_add_test(
     SKIP_BASELINE SKIP_RUNTIME SKIP_REWRITE
@@ -147,4 +155,5 @@ rocprofiler_systems_add_test(
     TARGET openmp-cg
     LABELS "openmp;no-tmp-files"
     ENVIRONMENT "${_ompt_sample_no_tmpfiles_environ}"
-    SAMPLING_PASS_REGEX "${_notmp_sampling_file_regex}")
+    SAMPLING_PASS_REGEX "${_notmp_sampling_file_regex}"
+)

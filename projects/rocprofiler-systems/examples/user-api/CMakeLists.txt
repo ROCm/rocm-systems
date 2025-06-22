@@ -5,8 +5,10 @@ project(rocprofiler-systems-user-api-example LANGUAGES CXX)
 if(ROCPROFSYS_DISABLE_EXAMPLES)
     get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
 
-    if(${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES OR ${_DIR} IN_LIST
-                                                              ROCPROFSYS_DISABLE_EXAMPLES)
+    if(
+        ${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
+        OR ${_DIR} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
+    )
         return()
     endif()
 endif()
@@ -18,12 +20,10 @@ if(NOT TARGET rocprofiler-systems::rocprofiler-systems-user-library)
 endif()
 add_executable(user-api user-api.cpp)
 target_link_libraries(
-    user-api PRIVATE Threads::Threads
-                     rocprofiler-systems::rocprofiler-systems-user-library)
+    user-api
+    PRIVATE Threads::Threads rocprofiler-systems::rocprofiler-systems-user-library
+)
 
 if(ROCPROFSYS_INSTALL_EXAMPLES)
-    install(
-        TARGETS user-api
-        DESTINATION bin
-        COMPONENT rocprofiler-systems-examples)
+    install(TARGETS user-api DESTINATION bin COMPONENT rocprofiler-systems-examples)
 endif()

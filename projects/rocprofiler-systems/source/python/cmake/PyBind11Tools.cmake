@@ -26,34 +26,32 @@ function(ROCPROFILER_SYSTEMS_FIND_PYTHON _VAR)
     set(Python3_FIND_VIRTUALENV "FIRST")
     set(Python3_ARTIFACTS_INTERACTIVE OFF)
 
-    find_package(Python3 ${ARG_VERSION} ${_EXACT} ${_QUIET} MODULE ${_FIND_REQUIREMENT}
-                 COMPONENTS ${ARG_COMPONENTS})
+    find_package(
+        Python3
+        ${ARG_VERSION}
+        ${_EXACT}
+        ${_QUIET}
+        MODULE
+        ${_FIND_REQUIREMENT}
+        COMPONENTS ${ARG_COMPONENTS}
+    )
 
-    set(${_VAR}_FOUND
-        "${Python3_FOUND}"
-        PARENT_SCOPE)
+    set(${_VAR}_FOUND "${Python3_FOUND}" PARENT_SCOPE)
     if(NOT Python3_FOUND)
-        set(${_VAR}_EXECUTABLE
-            ""
-            PARENT_SCOPE)
-        set(${_VAR}_ROOT_DIR
-            ""
-            PARENT_SCOPE)
-        set(${_VAR}_VERSION
-            ""
-            PARENT_SCOPE)
+        set(${_VAR}_EXECUTABLE "" PARENT_SCOPE)
+        set(${_VAR}_ROOT_DIR "" PARENT_SCOPE)
+        set(${_VAR}_VERSION "" PARENT_SCOPE)
         return()
     else()
-        set(${_VAR}_EXECUTABLE
-            "${Python3_EXECUTABLE}"
-            PARENT_SCOPE)
+        set(${_VAR}_EXECUTABLE "${Python3_EXECUTABLE}" PARENT_SCOPE)
         execute_process(
             COMMAND
                 "${Python3_EXECUTABLE}" "-c"
                 "import sys; print('.'.join(str(v) for v in [sys.version_info[0], sys.version_info[1]])); print(sys.prefix);"
             RESULT_VARIABLE _PYTHON_SUCCESS
             OUTPUT_VARIABLE _PYTHON_VALUES
-            ERROR_VARIABLE _PYTHON_ERROR_VALUE)
+            ERROR_VARIABLE _PYTHON_ERROR_VALUE
+        )
 
         if(_PYTHON_SUCCESS MATCHES 0)
             # Convert the process output into a list
@@ -61,12 +59,8 @@ function(ROCPROFILER_SYSTEMS_FIND_PYTHON _VAR)
             string(REGEX REPLACE "\n" ";" _PYTHON_VALUES ${_PYTHON_VALUES})
             list(GET _PYTHON_VALUES 0 _PYTHON_VERSION_LIST)
             list(GET _PYTHON_VALUES 1 _PYTHON_PREFIX)
-            set(${_VAR}_ROOT_DIR
-                "${_PYTHON_PREFIX}"
-                PARENT_SCOPE)
-            set(${_VAR}_VERSION
-                "${_PYTHON_VERSION_LIST}"
-                PARENT_SCOPE)
+            set(${_VAR}_ROOT_DIR "${_PYTHON_PREFIX}" PARENT_SCOPE)
+            set(${_VAR}_VERSION "${_PYTHON_VERSION_LIST}" PARENT_SCOPE)
         else()
             rocprofiler_systems_message(WARNING "${_PYTHON_ERROR_VALUE}")
         endif()
@@ -80,28 +74,26 @@ function(_ROCPROFSYS_PYBIND11_ADD_LTO_FLAGS target_name prefer_thin_lto)
     # name for each set of flags: the compilation result will be cached base on the result
     # variable.  If the flags work, sets them in cxxflags_out/linkerflags_out internal
     # cache variables (in addition to ${result}).
-    function(_PYBIND11_RETURN_IF_CXX_AND_LINKER_FLAGS_WORK result cxxflags linkerflags
-             cxxflags_out linkerflags_out)
+    function(
+        _PYBIND11_RETURN_IF_CXX_AND_LINKER_FLAGS_WORK
+        result
+        cxxflags
+        linkerflags
+        cxxflags_out
+        linkerflags_out
+    )
         include(CheckCXXCompilerFlag)
         set(CMAKE_REQUIRED_LIBRARIES ${linkerflags})
         check_cxx_compiler_flag("${cxxflags}" ${result})
         if(${result})
-            set(${cxxflags_out}
-                "${cxxflags}"
-                CACHE INTERNAL "" FORCE)
-            set(${linkerflags_out}
-                "${linkerflags}"
-                CACHE INTERNAL "" FORCE)
+            set(${cxxflags_out} "${cxxflags}" CACHE INTERNAL "" FORCE)
+            set(${linkerflags_out} "${linkerflags}" CACHE INTERNAL "" FORCE)
         endif()
     endfunction()
 
     if(NOT DEFINED PYBIND11_LTO_CXX_FLAGS)
-        set(PYBIND11_LTO_CXX_FLAGS
-            ""
-            CACHE INTERNAL "")
-        set(PYBIND11_LTO_LINKER_FLAGS
-            ""
-            CACHE INTERNAL "")
+        set(PYBIND11_LTO_CXX_FLAGS "" CACHE INTERNAL "")
+        set(PYBIND11_LTO_LINKER_FLAGS "" CACHE INTERNAL "")
 
         if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
             set(cxx_append "")
@@ -117,19 +109,22 @@ function(_ROCPROFSYS_PYBIND11_ADD_LTO_FLAGS target_name prefer_thin_lto)
             if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND prefer_thin_lto)
                 _pybind11_return_if_cxx_and_linker_flags_work(
                     HAS_FLTO_THIN "-flto=thin${cxx_append}" "-flto=thin${linker_append}"
-                    PYBIND11_LTO_CXX_FLAGS PYBIND11_LTO_LINKER_FLAGS)
+                    PYBIND11_LTO_CXX_FLAGS PYBIND11_LTO_LINKER_FLAGS
+                )
             endif()
 
             if(NOT HAS_FLTO_THIN)
                 _pybind11_return_if_cxx_and_linker_flags_work(
                     HAS_FLTO "-flto${cxx_append}" "-flto${linker_append}"
-                    PYBIND11_LTO_CXX_FLAGS PYBIND11_LTO_LINKER_FLAGS)
+                    PYBIND11_LTO_CXX_FLAGS PYBIND11_LTO_LINKER_FLAGS
+                )
             endif()
         elseif(CMAKE_CXX_COMPILER_ID MATCHES "Intel")
             # Intel equivalent to LTO is called IPO
             _pybind11_return_if_cxx_and_linker_flags_work(
                 HAS_INTEL_IPO "-ipo" "-ipo" PYBIND11_LTO_CXX_FLAGS
-                PYBIND11_LTO_LINKER_FLAGS)
+                PYBIND11_LTO_LINKER_FLAGS
+            )
         elseif(MSVC)
             # cmake only interprets libraries as linker flags when they start with a -
             # (otherwise it converts /LTCG to \LTCG as if it was a Windows path).  Luckily
@@ -137,7 +132,8 @@ function(_ROCPROFSYS_PYBIND11_ADD_LTO_FLAGS target_name prefer_thin_lto)
             # non-standard:
             _pybind11_return_if_cxx_and_linker_flags_work(
                 HAS_MSVC_GL_LTCG "/GL" "-LTCG" PYBIND11_LTO_CXX_FLAGS
-                PYBIND11_LTO_LINKER_FLAGS)
+                PYBIND11_LTO_LINKER_FLAGS
+            )
         endif()
 
         if(PYBIND11_LTO_CXX_FLAGS)
@@ -146,24 +142,35 @@ function(_ROCPROFSYS_PYBIND11_ADD_LTO_FLAGS target_name prefer_thin_lto)
             rocprofiler_systems_message(
                 STATUS
                 "${target_name} :: LTO disabled (not supported by the compiler and/or linker)"
-                )
+            )
         endif()
     endif()
 
     # Enable LTO flags if found, except for Debug builds
     if(PYBIND11_LTO_CXX_FLAGS)
         target_compile_options(
-            ${target_name} PRIVATE "$<$<NOT:$<CONFIG:Debug>>:${PYBIND11_LTO_CXX_FLAGS}>")
+            ${target_name}
+            PRIVATE "$<$<NOT:$<CONFIG:Debug>>:${PYBIND11_LTO_CXX_FLAGS}>"
+        )
     endif()
     if(PYBIND11_LTO_LINKER_FLAGS)
         target_link_libraries(
             ${target_name}
-            PRIVATE "$<$<NOT:$<CONFIG:Debug>>:${PYBIND11_LTO_LINKER_FLAGS}>")
+            PRIVATE "$<$<NOT:$<CONFIG:Debug>>:${PYBIND11_LTO_LINKER_FLAGS}>"
+        )
     endif()
 endfunction()
 #
 function(ROCPROFILER_SYSTEMS_PYBIND11_ADD_MODULE target_name)
-    set(options MODULE SHARED EXCLUDE_FROM_ALL NO_EXTRAS SYSTEM THIN_LTO LTO)
+    set(options
+        MODULE
+        SHARED
+        EXCLUDE_FROM_ALL
+        NO_EXTRAS
+        SYSTEM
+        THIN_LTO
+        LTO
+    )
     set(args PYTHON_VERSION VISIBILITY CXX_STANDARD)
     set(kwargs)
     cmake_parse_arguments(ARG "${options}" "${args}" "${kwargs}" ${ARGN})
@@ -202,10 +209,14 @@ function(ROCPROFILER_SYSTEMS_PYBIND11_ADD_MODULE target_name)
     find_package(PyBind11Python ${ARG_PYTHON_VERSION})
 
     target_include_directories(
-        ${target_name} ${inc_isystem}
-        PRIVATE ${PYBIND11_INCLUDE_DIR} # from project CMakeLists.txt
-        PRIVATE ${pybind11_INCLUDE_DIR} # from pybind11Config
-        PRIVATE ${Python3_INCLUDE_DIRS})
+        ${target_name}
+        ${inc_isystem}
+        PRIVATE
+            ${PYBIND11_INCLUDE_DIR} # from project CMakeLists.txt
+        PRIVATE
+            ${pybind11_INCLUDE_DIR} # from pybind11Config
+        PRIVATE ${Python3_INCLUDE_DIRS}
+    )
 
     # Python debug libraries expose slightly different objects
     # https://docs.python.org/3.6/c-api/intro.html#debugging-builds
@@ -223,10 +234,14 @@ function(ROCPROFILER_SYSTEMS_PYBIND11_ADD_MODULE target_name)
     # force it on everything inside the `pybind11` namespace; also turning it on for a
     # pybind module compilation here avoids potential warnings or issues from having mixed
     # hidden/non-hidden types.
-    set_target_properties(${target_name} PROPERTIES CXX_VISIBILITY_PRESET
-                                                    "${ARG_VISIBILITY}")
-    set_target_properties(${target_name} PROPERTIES CUDA_VISIBILITY_PRESET
-                                                    "${ARG_VISIBILITY}")
+    set_target_properties(
+        ${target_name}
+        PROPERTIES CXX_VISIBILITY_PRESET "${ARG_VISIBILITY}"
+    )
+    set_target_properties(
+        ${target_name}
+        PROPERTIES CUDA_VISIBILITY_PRESET "${ARG_VISIBILITY}"
+    )
 
     if(WIN32 OR CYGWIN)
         # Link against the Python shared library on Windows
@@ -253,8 +268,10 @@ function(ROCPROFILER_SYSTEMS_PYBIND11_ADD_MODULE target_name)
     endif()
 
     # Make sure C++11/14 are enabled
-    set_target_properties(${target_name} PROPERTIES CXX_STANDARD ${ARG_CXX_STANDARD}
-                                                    CXX_STANDARD_REQUIRED ON)
+    set_target_properties(
+        ${target_name}
+        PROPERTIES CXX_STANDARD ${ARG_CXX_STANDARD} CXX_STANDARD_REQUIRED ON
+    )
 
     if(ARG_NO_EXTRAS)
         return()
@@ -271,12 +288,14 @@ function(ROCPROFILER_SYSTEMS_PYBIND11_ADD_MODULE target_name)
                 add_custom_command(
                     TARGET ${target_name}
                     POST_BUILD
-                    COMMAND ${CMAKE_STRIP} -x $<TARGET_FILE:${target_name}>)
+                    COMMAND ${CMAKE_STRIP} -x $<TARGET_FILE:${target_name}>
+                )
             else()
                 add_custom_command(
                     TARGET ${target_name}
                     POST_BUILD
-                    COMMAND ${CMAKE_STRIP} $<TARGET_FILE:${target_name}>)
+                    COMMAND ${CMAKE_STRIP} $<TARGET_FILE:${target_name}>
+                )
             endif()
         endif()
     endif()
@@ -295,7 +314,8 @@ function(ROCPROFILER_SYSTEMS_PYBIND11_ADD_MODULE target_name)
             # build to fail.
             target_compile_options(
                 ${target_name}
-                PRIVATE $<$<NOT:$<CONFIG:Debug>>:$<$<COMPILE_LANGUAGE:CXX>:/MP>>)
+                PRIVATE $<$<NOT:$<CONFIG:Debug>>:$<$<COMPILE_LANGUAGE:CXX>:/MP>>
+            )
         endif()
     endif()
 endfunction()

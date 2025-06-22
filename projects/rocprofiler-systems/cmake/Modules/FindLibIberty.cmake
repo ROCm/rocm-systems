@@ -44,7 +44,8 @@ find_path(
     HINTS ${LibIberty_ROOT_DIR} ${LibIberty_ROOT_DIR}/include ${LibIberty_INCLUDEDIR}
     PATHS ${DYNINST_SYSTEM_INCLUDE_PATHS}
     PATH_SUFFIXES ${_path_suffixes}
-    DOC "LibIberty include directories")
+    DOC "LibIberty include directories"
+)
 
 # iberty_pic is for Debian <= wheezy
 find_library(
@@ -52,13 +53,15 @@ find_library(
     NAMES iberty_pic iberty
     HINTS ${LibIberty_ROOT_DIR} ${LibIberty_LIBRARYDIR} ${IBERTY_LIBRARIES}
     PATHS ${DYNINST_SYSTEM_LIBRARY_PATHS}
-    PATH_SUFFIXES ${_path_suffixes})
+    PATH_SUFFIXES ${_path_suffixes}
+)
 
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(
     LibIberty
     FOUND_VAR LibIberty_FOUND
-    REQUIRED_VARS LibIberty_INCLUDE_DIRS LibIberty_LIBRARIES)
+    REQUIRED_VARS LibIberty_INCLUDE_DIRS LibIberty_LIBRARIES
+)
 
 # For backwards compatibility only
 set(IBERTY_FOUND ${LibIberty_FOUND})

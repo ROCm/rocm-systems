@@ -22,14 +22,14 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-if ! command -v cmake-format &> /dev/null; then
-    echo "cmake-format could not be found. Please install it with 'pip install cmake-format' or 'apt install cmake-format'."
+if ! command -v gersemi &> /dev/null; then
+    echo "gersemi could not be found. Please install it with 'pip install gersemi' or 'apt install gersemi'."
     exit 1
 fi
 
 for file in "$@"; do
-    # Run cmake-format in-place
-    cmake-format -i "$file"
+    # Run gersemi in-place
+    gersemi -i "$file"
     # Check if the file has changes using git diff
     if ! git diff --quiet -- "$file"; then
         echo "Formatted: $file"

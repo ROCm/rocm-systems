@@ -52,8 +52,10 @@ string(REPLACE " " ";" _FLAGS "${CMAKE_CXX_FLAGS_DEBUG}")
 if(ROCPROFSYS_DISABLE_EXAMPLES)
     get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
 
-    if(${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES OR ${_DIR} IN_LIST
-                                                              ROCPROFSYS_DISABLE_EXAMPLES)
+    if(
+        ${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
+        OR ${_DIR} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
+    )
         return()
     endif()
 endif()
@@ -76,24 +78,24 @@ function(copy_image_files_and_make_copies)
         foreach(file ${image_files})
             get_filename_component(filename ${file} NAME)
             foreach(i RANGE 1 ${NUM_COPIES})
-                file(COPY ${file}
-                     DESTINATION ${CMAKE_BINARY_DIR}/images/${filename}_copy${i}.jpg)
+                file(
+                    COPY ${file}
+                    DESTINATION ${CMAKE_BINARY_DIR}/images/${filename}_copy${i}.jpg
+                )
             endforeach()
         endforeach()
     else()
         message(
             AUTHOR_WARNING
-                "Source directory ${ROCmVersion_DIR}/share/rocjpeg/images does not exist")
+            "Source directory ${ROCmVersion_DIR}/share/rocjpeg/images does not exist"
+        )
     endif()
 endfunction()
 
 # threads
 find_package(Threads REQUIRED)
 
-if(HIP_FOUND
-   AND ROCJPEG_FOUND
-   AND Threads_FOUND
-   AND rocprofiler-register_FOUND)
+if(HIP_FOUND AND ROCJPEG_FOUND AND Threads_FOUND AND rocprofiler-register_FOUND)
     # HIP
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::host)
     # threads
@@ -116,19 +118,17 @@ if(HIP_FOUND
     copy_image_files_and_make_copies()
 
     if(ROCPROFSYS_INSTALL_EXAMPLES)
-        install(
-            TARGETS jpegdecode
-            DESTINATION bin
-            COMPONENT rocprofiler-systems-examples)
+        install(TARGETS jpegdecode DESTINATION bin COMPONENT rocprofiler-systems-examples)
         install(
             FILES ${CMAKE_BINARY_DIR}/images
             DESTINATION share/rocprofiler-systems/tests/images
-            COMPONENT rocprofiler-systems-examples)
+            COMPONENT rocprofiler-systems-examples
+        )
     endif()
 else()
     message(
         "-- ERROR!: ${PROJECT_NAME} excluded! please install all the dependencies and try again!"
-        )
+    )
     if(NOT HIP_FOUND)
         message(FATAL_ERROR "-- ERROR!: HIP Not Found! - please install ROCm and HIP!")
     endif()
@@ -141,7 +141,7 @@ else()
     if(NOT rocprofiler-register_FOUND)
         message(
             FATAL_ERROR
-                "-- ERROR!: rocprofiler-register Not Found! - please install rocprofiler-register!"
-            )
+            "-- ERROR!: rocprofiler-register Not Found! - please install rocprofiler-register!"
+        )
     endif()
 endif()

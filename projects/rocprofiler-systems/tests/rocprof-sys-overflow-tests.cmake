@@ -34,11 +34,14 @@ set(_overflow_environment
     "ROCPROFSYS_SAMPLING_OVERFLOW=ON"
     "ROCPROFSYS_SAMPLING_OVERFLOW_EVENT=PERF_COUNT_SW_CPU_CLOCK"
     "ROCPROFSYS_SAMPLING_OVERFLOW_FREQ=10000"
-    "ROCPROFSYS_DEBUG_THREADING_GET_ID=ON")
+    "ROCPROFSYS_DEBUG_THREADING_GET_ID=ON"
+)
 
-if(rocprofiler_systems_perf_event_paranoid LESS_EQUAL 3
-   OR rocprofiler_systems_cap_sys_admin EQUAL 0
-   OR rocprofiler_systems_cap_perfmon EQUAL 0)
+if(
+    rocprofiler_systems_perf_event_paranoid LESS_EQUAL 3
+    OR rocprofiler_systems_cap_sys_admin EQUAL 0
+    OR rocprofiler_systems_cap_perfmon EQUAL 0
+)
     rocprofiler_systems_add_test(
         SKIP_BASELINE
         NAME overflow
@@ -50,5 +53,6 @@ if(rocprofiler_systems_perf_event_paranoid LESS_EQUAL 3
         LABELS "perf;overflow"
         SAMPLING_PASS_REGEX "sampling_wall_clock.txt"
         RUNTIME_PASS_REGEX "sampling_wall_clock.txt"
-        REWRITE_RUN_PASS_REGEX "sampling_wall_clock.txt")
+        REWRITE_RUN_PASS_REGEX "sampling_wall_clock.txt"
+    )
 endif()

@@ -21,12 +21,15 @@ set(ROCPROFSYS_LIB_INSTALL_RPATH "\$ORIGIN:\$ORIGIN/${PROJECT_NAME}")
 # ------------------------------------------------------------------------------#
 
 add_library(rocprofiler-systems-interface-library INTERFACE)
-add_library(rocprofiler-systems::rocprofiler-systems-interface-library ALIAS
-            rocprofiler-systems-interface-library)
+add_library(
+    rocprofiler-systems::rocprofiler-systems-interface-library
+    ALIAS rocprofiler-systems-interface-library
+)
 
 target_include_directories(
     rocprofiler-systems-interface-library
-    INTERFACE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/rocprof-sys)
+    INTERFACE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/rocprof-sys
+)
 
 target_link_libraries(
     rocprofiler-systems-interface-library
@@ -48,7 +51,7 @@ target_link_libraries(
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-static-libstdcxx-optional>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-sanitizer>
         $<BUILD_INTERFACE:$<IF:$<BOOL:${ROCPROFSYS_BUILD_LTO}>,rocprofiler-systems::rocprofiler-systems-lto,>>
-    )
+)
 
 # ------------------------------------------------------------------------------#
 #

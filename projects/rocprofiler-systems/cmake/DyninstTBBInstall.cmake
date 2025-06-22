@@ -20,15 +20,18 @@ file(
     COPY ${PREFIX}/src/tbb_release/
     DESTINATION ${LIBDIR}
     FILES_MATCHING
-    PATTERN "*.so.*")
+    PATTERN "*.so.*"
+)
 file(COPY ${PREFIX}/src/rocprofiler-systems-tbb-build/include/tbb DESTINATION ${INCDIR})
 file(GLOB _tbb_libs ${LIBDIR}/libtbb*.so.*)
 
 foreach(_lib ${_tbb_libs})
     string(REGEX REPLACE "\\.2$" "" _lib_short ${_lib})
     get_filename_component(_lib "${_lib}" NAME)
-    execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${_lib} ${_lib_short}
-                    WORKING_DIRECTORY ${LIBDIR})
+    execute_process(
+        COMMAND ${CMAKE_COMMAND} -E create_symlink ${_lib} ${_lib_short}
+        WORKING_DIRECTORY ${LIBDIR}
+    )
 endforeach()
 
 foreach(_lib ${_tbb_libs})

@@ -30,16 +30,20 @@ string(REPLACE " " ";" _FLAGS "${CMAKE_CXX_FLAGS_DEBUG}")
 if(ROCPROFSYS_DISABLE_EXAMPLES)
     get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
 
-    if(${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES OR ${_DIR} IN_LIST
-                                                              ROCPROFSYS_DISABLE_EXAMPLES)
+    if(
+        ${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
+        OR ${_DIR} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
+    )
         return()
     endif()
 endif()
 
 function(videodecode_message _MSG_TYPE)
-    if("${CMAKE_PROJECT_NAME}" STREQUAL "rocprofiler-systems"
-       AND "$ENV{ROCPROFSYS_CI}"
-       AND "${_MSG_TYPE}" MATCHES "WARNING")
+    if(
+        "${CMAKE_PROJECT_NAME}" STREQUAL "rocprofiler-systems"
+        AND "$ENV{ROCPROFSYS_CI}"
+        AND "${_MSG_TYPE}" MATCHES "WARNING"
+    )
         set(_MSG_TYPE STATUS) # don't generate warnings during CI
     endif()
     if("${CMAKE_PROJECT_NAME}" STREQUAL "rocprofiler-systems")
@@ -67,7 +71,8 @@ if(EXISTS "${ROCmVersion_DIR}/share/rocdecode/video")
 else()
     videodecode_message(
         AUTHOR_WARNING
-        "Source directory ${ROCmVersion_DIR}/share/rocdecode/video does not exist")
+        "Source directory ${ROCmVersion_DIR}/share/rocdecode/video does not exist"
+    )
 endif()
 
 # Find FFMPEG
@@ -86,19 +91,11 @@ find_path(
     FFMPEG_INCLUDE_DIR
     NAMES libavcodec/avcodec.h libavformat/avformat.h libavutil/avutil.h
     PATHS ${FFMPEG_INCLUDE_DIRS}
-    PATH_SUFFIXES ffmpeg libav)
-find_library(
-    AVCODEC_LIBRARY
-    NAMES avcodec
-    PATHS ${FFMPEG_LIBRARY_DIRS})
-find_library(
-    AVFORMAT_LIBRARY
-    NAMES avformat
-    PATHS ${FFMPEG_LIBRARY_DIRS})
-find_library(
-    AVUTIL_LIBRARY
-    NAMES avutil
-    PATHS ${FFMPEG_LIBRARY_DIRS})
+    PATH_SUFFIXES ffmpeg libav
+)
+find_library(AVCODEC_LIBRARY NAMES avcodec PATHS ${FFMPEG_LIBRARY_DIRS})
+find_library(AVFORMAT_LIBRARY NAMES avformat PATHS ${FFMPEG_LIBRARY_DIRS})
+find_library(AVUTIL_LIBRARY NAMES avutil PATHS ${FFMPEG_LIBRARY_DIRS})
 
 set(FFMPEG_LIBRARIES ${AVCODEC_LIBRARY} ${AVFORMAT_LIBRARY} ${AVUTIL_LIBRARY})
 set(FFMPEG_INCLUDE_DIRS ${FFMPEG_INCLUDE_DIR})
@@ -143,16 +140,18 @@ if(FFMPEG_FOUND AND ROCDECODE_FOUND)
         install(
             TARGETS videodecode
             DESTINATION bin
-            COMPONENT rocprofiler-systems-examples)
+            COMPONENT rocprofiler-systems-examples
+        )
         install(
             FILES ${CMAKE_BINARY_DIR}/videos
             DESTINATION share/rocprofiler-systems/tests/videos
-            COMPONENT rocprofiler-systems-examples)
+            COMPONENT rocprofiler-systems-examples
+        )
     endif()
 else()
     message(
         "-- ERROR!: videodecode excluded! please install all the dependencies and try again!"
-        )
+    )
     if(NOT FFMPEG_FOUND)
         message(WARNING "-- ERROR!: FFMPEG Not Found! - please install FFMPEG!")
     endif()

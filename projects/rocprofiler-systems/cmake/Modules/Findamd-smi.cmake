@@ -23,7 +23,8 @@ find_path(
     NAMES include/amd_smi/amdsmi.h
     HINTS ${_AMD_SMI_PATHS}
     PATHS ${_AMD_SMI_PATHS}
-    PATH_SUFFIXES amd_smi)
+    PATH_SUFFIXES amd_smi
+)
 
 mark_as_advanced(amd-smi_ROOT_DIR)
 
@@ -34,7 +35,8 @@ find_path(
     NAMES amd_smi/amdsmi.h
     HINTS ${amd-smi_ROOT_DIR} ${_AMD_SMI_PATHS}
     PATHS ${amd-smi_ROOT_DIR} ${_AMD_SMI_PATHS}
-    PATH_SUFFIXES include amd_smi/include)
+    PATH_SUFFIXES include amd_smi/include
+)
 
 mark_as_advanced(amd-smi_INCLUDE_DIR)
 
@@ -45,7 +47,8 @@ find_library(
     NAMES amd_smi
     HINTS ${amd-smi_ROOT_DIR} ${_AMD_SMI_PATHS}
     PATHS ${amd-smi_ROOT_DIR} ${_AMD_SMI_PATHS}
-    PATH_SUFFIXES amd-smi/lib lib)
+    PATH_SUFFIXES amd-smi/lib lib
+)
 
 if(amd-smi_LIBRARY)
     get_filename_component(amd-smi_LIBRARY_DIR "${amd-smi_LIBRARY}" PATH CACHE)
@@ -55,8 +58,13 @@ mark_as_advanced(amd-smi_LIBRARY)
 
 # ----------------------------------------------------------------------------------------#
 
-find_package_handle_standard_args(amd-smi DEFAULT_MSG amd-smi_ROOT_DIR
-                                  amd-smi_INCLUDE_DIR amd-smi_LIBRARY)
+find_package_handle_standard_args(
+    amd-smi
+    DEFAULT_MSG
+    amd-smi_ROOT_DIR
+    amd-smi_INCLUDE_DIR
+    amd-smi_LIBRARY
+)
 
 # ------------------------------------------------------------------------------#
 
@@ -69,7 +77,6 @@ if(amd-smi_FOUND)
 
     target_include_directories(amd-smi::amd-smi INTERFACE ${amd-smi_INCLUDE_DIR})
     target_link_libraries(amd-smi::amd-smi INTERFACE ${amd-smi_LIBRARY})
-
 endif()
 
 # ------------------------------------------------------------------------------#

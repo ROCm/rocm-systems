@@ -5,8 +5,10 @@ project(rocprofiler-systems-trace-time-window-example LANGUAGES CXX)
 if(ROCPROFSYS_DISABLE_EXAMPLES)
     get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
 
-    if(${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES OR ${_DIR} IN_LIST
-                                                              ROCPROFSYS_DISABLE_EXAMPLES)
+    if(
+        ${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
+        OR ${_DIR} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
+    )
         return()
     endif()
 endif()
@@ -20,5 +22,6 @@ if(ROCPROFSYS_INSTALL_EXAMPLES)
     install(
         TARGETS trace-time-window
         DESTINATION bin
-        COMPONENT rocprofiler-systems-examples)
+        COMPONENT rocprofiler-systems-examples
+    )
 endif()

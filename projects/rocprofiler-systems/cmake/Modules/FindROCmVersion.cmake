@@ -42,7 +42,8 @@ set(ROCmVersion_VARIABLES
     TRIPLE
     NUMERIC
     CANONICAL
-    FULL)
+    FULL
+)
 
 function(ROCM_VERSION_MESSAGE _TYPE)
     if(ROCmVersion_DEBUG)
@@ -52,7 +53,6 @@ endfunction()
 
 # read a .info/version* file and propagate the variables to the calling scope
 function(ROCM_VERSION_COMPUTE FULL_VERSION_STRING _VAR_PREFIX)
-
     # remove any line endings
     string(REGEX REPLACE "(\n|\r)" "" FULL_VERSION_STRING "${FULL_VERSION_STRING}")
 
@@ -61,8 +61,13 @@ function(ROCM_VERSION_COMPUTE FULL_VERSION_STRING _VAR_PREFIX)
 
     # get number and remove from full version string
     string(REGEX REPLACE "([0-9]+)\:(.*)" "\\1" EPOCH_VERSION "${FULL_VERSION_STRING}")
-    string(REGEX REPLACE "([0-9]+)\:(.*)" "\\2" FULL_VERSION_STRING
-                         "${FULL_VERSION_STRING}")
+    string(
+        REGEX REPLACE
+        "([0-9]+)\:(.*)"
+        "\\2"
+        FULL_VERSION_STRING
+        "${FULL_VERSION_STRING}"
+    )
 
     if(EPOCH_VERSION STREQUAL FULL_VERSION)
         set(EPOCH_VERSION)
@@ -70,18 +75,33 @@ function(ROCM_VERSION_COMPUTE FULL_VERSION_STRING _VAR_PREFIX)
 
     # get number and remove from full version string
     string(REGEX REPLACE "([0-9]+)(.*)" "\\1" MAJOR_VERSION "${FULL_VERSION_STRING}")
-    string(REGEX REPLACE "([0-9]+)(.*)" "\\2" FULL_VERSION_STRING
-                         "${FULL_VERSION_STRING}")
+    string(
+        REGEX REPLACE
+        "([0-9]+)(.*)"
+        "\\2"
+        FULL_VERSION_STRING
+        "${FULL_VERSION_STRING}"
+    )
 
     # get number and remove from full version string
     string(REGEX REPLACE "\.([0-9]+)(.*)" "\\1" MINOR_VERSION "${FULL_VERSION_STRING}")
-    string(REGEX REPLACE "\.([0-9]+)(.*)" "\\2" FULL_VERSION_STRING
-                         "${FULL_VERSION_STRING}")
+    string(
+        REGEX REPLACE
+        "\.([0-9]+)(.*)"
+        "\\2"
+        FULL_VERSION_STRING
+        "${FULL_VERSION_STRING}"
+    )
 
     # get number and remove from full version string
     string(REGEX REPLACE "\.([0-9]+)(.*)" "\\1" PATCH_VERSION "${FULL_VERSION_STRING}")
-    string(REGEX REPLACE "\.([0-9]+)(.*)" "\\2" FULL_VERSION_STRING
-                         "${FULL_VERSION_STRING}")
+    string(
+        REGEX REPLACE
+        "\.([0-9]+)(.*)"
+        "\\2"
+        FULL_VERSION_STRING
+        "${FULL_VERSION_STRING}"
+    )
 
     if(NOT PATCH_VERSION LESS 100)
         set(PATCH_VERSION 0)
@@ -89,12 +109,22 @@ function(ROCM_VERSION_COMPUTE FULL_VERSION_STRING _VAR_PREFIX)
 
     # get number and remove from full version string
     string(REGEX REPLACE "\.([0-9]+)(.*)" "\\1" TWEAK_VERSION "${FULL_VERSION_STRING}")
-    string(REGEX REPLACE "\.([0-9]+)(.*)" "\\2" FULL_VERSION_STRING
-                         "${FULL_VERSION_STRING}")
+    string(
+        REGEX REPLACE
+        "\.([0-9]+)(.*)"
+        "\\2"
+        FULL_VERSION_STRING
+        "${FULL_VERSION_STRING}"
+    )
 
     # get number
-    string(REGEX REPLACE "-([0-9A-Za-z+~]+)" "\\1" REVISION_VERSION
-                         "${FULL_VERSION_STRING}")
+    string(
+        REGEX REPLACE
+        "-([0-9A-Za-z+~]+)"
+        "\\1"
+        REVISION_VERSION
+        "${FULL_VERSION_STRING}"
+    )
 
     set(CANONICAL_VERSION)
     set(_MAJOR_SEP ":")
@@ -103,7 +133,15 @@ function(ROCM_VERSION_COMPUTE FULL_VERSION_STRING _VAR_PREFIX)
     set(_TWEAK_SEP ".")
     set(_REVISION_SEP "-")
 
-    foreach(_V EPOCH MAJOR MINOR PATCH TWEAK REVISION)
+    foreach(
+        _V
+        EPOCH
+        MAJOR
+        MINOR
+        PATCH
+        TWEAK
+        REVISION
+    )
         if(${_V}_VERSION)
             set(CANONICAL_VERSION "${CANONICAL_VERSION}${_${_V}_SEP}${${_V}_VERSION}")
         else()
@@ -125,13 +163,11 @@ function(ROCM_VERSION_COMPUTE FULL_VERSION_STRING _VAR_PREFIX)
         EXPR
         NUMERIC_VERSION
         "(10000 * (${MAJOR_VERSION}+0)) + (100 * (${MINOR_VERSION}+0)) + (${PATCH_VERSION}+0)"
-        )
+    )
 
     # propagate to parent scopes
     foreach(_V ${ROCmVersion_VARIABLES})
-        set(${_VAR_PREFIX}_${_V}_VERSION
-            ${${_V}_VERSION}
-            PARENT_SCOPE)
+        set(${_VAR_PREFIX}_${_V}_VERSION ${${_V}_VERSION} PARENT_SCOPE)
     endforeach()
 endfunction()
 
@@ -147,18 +183,18 @@ function(ROCM_VERSION_WATCH_FOR_CHANGE _var)
             endif()
 
             list(REMOVE_ITEM _REMAIN_VARIABLES ${_var})
-            set(_REMAIN_VARIABLES
-                "${_REMAIN_VARIABLES}"
-                PARENT_SCOPE)
+            set(_REMAIN_VARIABLES "${_REMAIN_VARIABLES}" PARENT_SCOPE)
             return()
         else()
             rocm_version_message(
                 STATUS
-                "${_var} changed :: ${${_rocm_version_watch_var_name}} --> ${${_var}}")
+                "${_var} changed :: ${${_rocm_version_watch_var_name}} --> ${${_var}}"
+            )
 
             foreach(_V ${_REMAIN_VARIABLES})
                 rocm_version_message(
-                    STATUS "${_var} changed :: Unsetting cache variable ${_V}...")
+                    STATUS "${_var} changed :: Unsetting cache variable ${_V}..."
+                )
                 unset(${_V} CACHE)
             endforeach()
         endif()
@@ -171,12 +207,14 @@ function(ROCM_VERSION_WATCH_FOR_CHANGE _var)
     # store the value for the next run
     set(${_rocm_version_watch_var_name}
         "${${_var}}"
-        CACHE INTERNAL "Last value of ${_var}" FORCE)
+        CACHE INTERNAL
+        "Last value of ${_var}"
+        FORCE
+    )
 endfunction()
 
 # scope this to a function to avoid leaking local variables
 function(ROCM_VERSION_PARSE_VERSION_FILES)
-
     # the list of variables set by module. when one of these changes, we need to unset the
     # cache variables after it
     set(_ALL_VARIABLES)
@@ -193,23 +231,25 @@ function(ROCM_VERSION_PARSE_VERSION_FILES)
 
         # propagate to parent scopes
         foreach(_V ${ROCmVersion_VARIABLES})
-            set(${_VAR_PREFIX}_${_V}_VERSION
-                ${${_VAR_PREFIX}_${_V}_VERSION}
-                PARENT_SCOPE)
+            set(${_VAR_PREFIX}_${_V}_VERSION ${${_VAR_PREFIX}_${_V}_VERSION} PARENT_SCOPE)
         endforeach()
     endfunction()
 
     # search for HIP to set ROCM_PATH if(NOT hip_FOUND) find_package(hip) endif()
 
     function(COMPUTE_ROCM_VERSION_DIR)
-        if(EXISTS "${ROCmVersion_VERSION_FILE}" AND IS_ABSOLUTE
-                                                    "${ROCmVersion_VERSION_FILE}")
+        if(
+            EXISTS "${ROCmVersion_VERSION_FILE}"
+            AND IS_ABSOLUTE "${ROCmVersion_VERSION_FILE}"
+        )
             get_filename_component(_VERSION_DIR "${ROCmVersion_VERSION_FILE}" PATH)
             get_filename_component(_VERSION_DIR "${_VERSION_DIR}/.." REALPATH)
             set(ROCmVersion_DIR
                 "${_VERSION_DIR}"
-                CACHE PATH "Root path to ROCm's .info/${ROCmVersion_VERSION_FILE}"
-                      ${ARGN})
+                CACHE PATH
+                "Root path to ROCm's .info/${ROCmVersion_VERSION_FILE}"
+                ${ARGN}
+            )
             rocm_version_watch_for_change(ROCmVersion_DIR)
         endif()
     endfunction()
@@ -219,20 +259,36 @@ function(ROCM_VERSION_PARSE_VERSION_FILES)
         set(_VERSION_FILES ${_VERSION_FILE})
         compute_rocm_version_dir(FORCE)
     else()
-        set(_VERSION_FILES version version-dev version-hip-libraries version-hiprt
-                           version-hiprt-devel version-hip-sdk version-libs version-utils)
+        set(_VERSION_FILES
+            version
+            version-dev
+            version-hip-libraries
+            version-hiprt
+            version-hiprt-devel
+            version-hip-sdk
+            version-libs
+            version-utils
+        )
         rocm_version_message(STATUS "ROCmVersion version files: ${_VERSION_FILES}")
     endif()
 
     # convert env to cache if not defined
-    foreach(_PATH ROCmVersion_DIR ROCmVersion_ROOT ROCmVersion_ROOT_DIR
-                  ROCPROFSYS_DEFAULT_ROCM_PATH ROCM_PATH)
+    foreach(
+        _PATH
+        ROCmVersion_DIR
+        ROCmVersion_ROOT
+        ROCmVersion_ROOT_DIR
+        ROCPROFSYS_DEFAULT_ROCM_PATH
+        ROCM_PATH
+    )
         if(NOT DEFINED ${_PATH} AND DEFINED ENV{${_PATH}})
             set(_VAL "$ENV{${_PATH}}")
             get_filename_component(_VAL "${_VAL}" REALPATH)
             set(${_PATH}
                 "${_VAL}"
-                CACHE PATH "Search path for ROCm version for ROCmVersion")
+                CACHE PATH
+                "Search path for ROCm version for ROCmVersion"
+            )
         endif()
     endforeach()
 
@@ -242,9 +298,15 @@ function(ROCM_VERSION_PARSE_VERSION_FILES)
         set(_PATHS)
         foreach(
             _DIR
-            ${ROCmVersion_DIR} ${ROCmVersion_ROOT} ${ROCmVersion_ROOT_DIR}
-            $ENV{CMAKE_PREFIX_PATH} ${CMAKE_PREFIX_PATH} ${ROCPROFSYS_DEFAULT_ROCM_PATH}
-            ${ROCM_PATH} /opt/rocm)
+            ${ROCmVersion_DIR}
+            ${ROCmVersion_ROOT}
+            ${ROCmVersion_ROOT_DIR}
+            $ENV{CMAKE_PREFIX_PATH}
+            ${CMAKE_PREFIX_PATH}
+            ${ROCPROFSYS_DEFAULT_ROCM_PATH}
+            ${ROCM_PATH}
+            /opt/rocm
+        )
             if(EXISTS ${_DIR})
                 get_filename_component(_ABS_DIR "${_DIR}" REALPATH)
                 list(APPEND _PATHS ${_ABS_DIR})
@@ -261,7 +323,9 @@ function(ROCM_VERSION_PARSE_VERSION_FILES)
             if(EXISTS ${_F})
                 set(ROCmVersion_VERSION_FILE
                     "${_F}"
-                    CACHE FILEPATH "File with versioning info")
+                    CACHE FILEPATH
+                    "File with versioning info"
+                )
                 rocm_version_watch_for_change(ROCmVersion_VERSION_FILE)
                 compute_rocm_version_dir()
             else()
@@ -283,7 +347,9 @@ function(ROCM_VERSION_PARSE_VERSION_FILES)
             set(_LOCAL_VAR ${_B}_${_V}_VERSION)
             set(ROCmVersion_${_V}_VERSION
                 "${${_LOCAL_VAR}}"
-                CACHE STRING "ROCm ${_V} version")
+                CACHE STRING
+                "ROCm ${_V} version"
+            )
             rocm_version_watch_for_change(${_CACHE_VAR})
         endforeach()
     endif()
@@ -296,7 +362,11 @@ include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(
     ROCmVersion
     VERSION_VAR ROCmVersion_FULL_VERSION
-    REQUIRED_VARS ROCmVersion_FULL_VERSION ROCmVersion_TRIPLE_VERSION ROCmVersion_DIR
-                  ROCmVersion_VERSION_FILE)
+    REQUIRED_VARS
+        ROCmVersion_FULL_VERSION
+        ROCmVersion_TRIPLE_VERSION
+        ROCmVersion_DIR
+        ROCmVersion_VERSION_FILE
+)
 # don't add major/minor/patch/etc. version variables to required vars because they might
 # be zero, which will cause CMake to evaluate it as not set

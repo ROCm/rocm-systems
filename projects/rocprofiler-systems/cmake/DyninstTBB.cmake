@@ -40,9 +40,7 @@ endif()
 # -------------- RUNTIME CONFIGURATION ----------------------------------------
 
 # Use debug versions of TBB libraries
-set(TBB_USE_DEBUG_BUILD
-    OFF
-    CACHE BOOL "Use debug versions of TBB libraries")
+set(TBB_USE_DEBUG_BUILD OFF CACHE BOOL "Use debug versions of TBB libraries")
 
 # Minimum version of TBB (assumes a dotted-decimal format: YYYY.XX)
 if(${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang")
@@ -53,31 +51,27 @@ endif()
 
 set(TBB_MIN_VERSION
     ${_tbb_min_version}
-    CACHE STRING "Minimum version of TBB (assumes a dotted-decimal format: YYYY.XX)")
+    CACHE STRING
+    "Minimum version of TBB (assumes a dotted-decimal format: YYYY.XX)"
+)
 
 if(${TBB_MIN_VERSION} VERSION_LESS ${_tbb_min_version})
     dyninst_message(
         FATAL_ERROR
         "Requested TBB version ${TBB_MIN_VERSION} is less than minimum supported version ${_tbb_min_version}"
-        )
+    )
 endif()
 
 # -------------- PATHS --------------------------------------------------------
 
 # TBB root directory
-set(TBB_ROOT_DIR
-    "/usr"
-    CACHE PATH "TBB root directory")
+set(TBB_ROOT_DIR "/usr" CACHE PATH "TBB root directory")
 
 # TBB include directory hint
-set(TBB_INCLUDEDIR
-    "${TBB_ROOT_DIR}/include"
-    CACHE INTERNAL "TBB include directory")
+set(TBB_INCLUDEDIR "${TBB_ROOT_DIR}/include" CACHE INTERNAL "TBB include directory")
 
 # TBB library directory hint
-set(TBB_LIBRARYDIR
-    "${TBB_ROOT_DIR}/lib"
-    CACHE INTERNAL "TBB library directory")
+set(TBB_LIBRARYDIR "${TBB_ROOT_DIR}/lib" CACHE INTERNAL "TBB library directory")
 
 # Translate to FindTBB names
 set(TBB_LIBRARY ${TBB_LIBRARYDIR})
@@ -94,59 +88,49 @@ endif()
 if(TBB_FOUND)
     # Force the cache entries to be updated Normally, these would not be exported.
     # However, we need them in the Testsuite
-    set(TBB_INCLUDE_DIRS
-        ${TBB_INCLUDE_DIRS}
-        CACHE PATH "TBB include directory" FORCE)
-    set(TBB_LIBRARY_DIRS
-        ${TBB_LIBRARY_DIRS}
-        CACHE PATH "TBB library directory" FORCE)
-    set(TBB_DEFINITIONS
-        ${TBB_DEFINITIONS}
-        CACHE STRING "TBB compiler definitions" FORCE)
-    set(TBB_LIBRARIES
-        ${TBB_LIBRARIES}
-        CACHE FILEPATH "TBB library files" FORCE)
+    set(TBB_INCLUDE_DIRS ${TBB_INCLUDE_DIRS} CACHE PATH "TBB include directory" FORCE)
+    set(TBB_LIBRARY_DIRS ${TBB_LIBRARY_DIRS} CACHE PATH "TBB library directory" FORCE)
+    set(TBB_DEFINITIONS ${TBB_DEFINITIONS} CACHE STRING "TBB compiler definitions" FORCE)
+    set(TBB_LIBRARIES ${TBB_LIBRARIES} CACHE FILEPATH "TBB library files" FORCE)
 elseif(STERILE_BUILD)
     rocprofiler_systems_message(
-        FATAL_ERROR "TBB not found and cannot be downloaded because build is sterile.")
+        FATAL_ERROR "TBB not found and cannot be downloaded because build is sterile."
+    )
 elseif(NOT BUILD_TBB)
     rocprofiler_systems_message(
         FATAL_ERROR
         "TBB was not found. Either configure cmake to find TBB properly or set BUILD_TBB=ON to download and build"
-        )
+    )
 else()
     # If we didn't find a suitable version on the system, then download one from the web
     rocprofiler_systems_message(STATUS "${ThreadingBuildingBlocks_ERROR_REASON}")
     rocprofiler_systems_message(
-        STATUS "Attempting to build TBB(${TBB_MIN_VERSION}) as external project")
+        STATUS "Attempting to build TBB(${TBB_MIN_VERSION}) as external project"
+    )
 
     if(NOT UNIX)
         rocprofiler_systems_message(
-            FATAL_ERROR "Building TBB from source is not supported on this platform")
+            FATAL_ERROR "Building TBB from source is not supported on this platform"
+        )
     endif()
 
-    set(TBB_ROOT_DIR
-        ${TPL_STAGING_PREFIX}/tbb
-        CACHE PATH "TBB root directory" FORCE)
+    set(TBB_ROOT_DIR ${TPL_STAGING_PREFIX}/tbb CACHE PATH "TBB root directory" FORCE)
 
     set(_tbb_libraries)
     set(_tbb_components_cfg)
-    set(_tbb_library_dirs $<BUILD_INTERFACE:${TBB_ROOT_DIR}/lib>
-                          $<INSTALL_INTERFACE:${INSTALL_LIB_DIR}/${TPL_INSTALL_LIB_DIR}>)
+    set(_tbb_library_dirs
+        $<BUILD_INTERFACE:${TBB_ROOT_DIR}/lib>
+        $<INSTALL_INTERFACE:${INSTALL_LIB_DIR}/${TPL_INSTALL_LIB_DIR}>
+    )
     set(_tbb_include_dirs
         $<BUILD_INTERFACE:${TBB_ROOT_DIR}/include>
-        $<INSTALL_INTERFACE:${INSTALL_LIB_DIR}/${TPL_INSTALL_INCLUDE_DIR}>)
+        $<INSTALL_INTERFACE:${INSTALL_LIB_DIR}/${TPL_INSTALL_INCLUDE_DIR}>
+    )
 
     # Forcibly update the cache variables
-    set(TBB_INCLUDE_DIRS
-        "${_tbb_include_dirs}"
-        CACHE PATH "TBB include directory" FORCE)
-    set(TBB_LIBRARY_DIRS
-        "${_tbb_library_dirs}"
-        CACHE PATH "TBB library directory" FORCE)
-    set(TBB_DEFINITIONS
-        ""
-        CACHE STRING "TBB compiler definitions" FORCE)
+    set(TBB_INCLUDE_DIRS "${_tbb_include_dirs}" CACHE PATH "TBB include directory" FORCE)
+    set(TBB_LIBRARY_DIRS "${_tbb_library_dirs}" CACHE PATH "TBB library directory" FORCE)
+    set(TBB_DEFINITIONS "" CACHE STRING "TBB compiler definitions" FORCE)
 
     file(MAKE_DIRECTORY "${TBB_ROOT_DIR}/include")
     file(MAKE_DIRECTORY "${TBB_ROOT_DIR}/lib")
@@ -162,23 +146,23 @@ else()
 
         set(_tbb_${c}_lib
             $<BUILD_INTERFACE:${TBB_ROOT_DIR}/lib/lib${c}${CMAKE_SHARED_LIBRARY_SUFFIX}>
-            $<INSTALL_INTERFACE:${c}>)
+            $<INSTALL_INTERFACE:${c}>
+        )
 
         # Generate library filenames
         list(APPEND _tbb_libraries ${_tbb_${c}_lib})
-        list(APPEND _tbb_build_byproducts
-             "${TBB_ROOT_DIR}/lib/lib${c}${CMAKE_SHARED_LIBRARY_SUFFIX}")
+        list(
+            APPEND
+            _tbb_build_byproducts
+            "${TBB_ROOT_DIR}/lib/lib${c}${CMAKE_SHARED_LIBRARY_SUFFIX}"
+        )
 
         foreach(t RELEASE DEBUG)
-            set(TBB_${c}_LIBRARY_${t}
-                "${_tbb_${c}_lib}"
-                CACHE FILEPATH "" FORCE)
+            set(TBB_${c}_LIBRARY_${t} "${_tbb_${c}_lib}" CACHE FILEPATH "" FORCE)
         endforeach()
     endforeach()
 
-    set(TBB_LIBRARIES
-        "${_tbb_libraries}"
-        CACHE FILEPATH "TBB library files" FORCE)
+    set(TBB_LIBRARIES "${_tbb_libraries}" CACHE FILEPATH "TBB library files" FORCE)
 
     # Split the dotted decimal version into major/minor parts
     string(REGEX REPLACE "\\." ";" _tbb_download_name ${TBB_MIN_VERSION})
@@ -191,25 +175,23 @@ else()
         set(_tbb_compiler "compiler=clang")
     endif()
 
-    find_program(
-        MAKE_EXECUTABLE
-        NAMES make gmake
-        PATH_SUFFIXES bin)
+    find_program(MAKE_EXECUTABLE NAMES make gmake PATH_SUFFIXES bin)
 
     if(NOT MAKE_EXECUTABLE AND CMAKE_GENERATOR MATCHES "Ninja")
         dyninst_message(
             FATAL_ERROR
             "make/gmake executable not found. Please re-run with -DMAKE_EXECUTABLE=/path/to/make"
-            )
+        )
     elseif(NOT MAKE_EXECUTABLE AND CMAKE_GENERATOR MATCHES "Makefiles")
         set(MAKE_EXECUTABLE "$(MAKE)")
     endif()
 
     include(ExternalProject)
-    externalproject_add(
+    ExternalProject_Add(
         rocprofiler-systems-tbb-build
         PREFIX ${TBB_ROOT_DIR}
-        URL https://github.com/ajanicijamd/oneTBB/archive/refs/tags/v${_tbb_ver_major}.${_tbb_ver_minor}.01.tar.gz
+        URL
+            https://github.com/ajanicijamd/oneTBB/archive/refs/tags/v${_tbb_ver_major}.${_tbb_ver_minor}.01.tar.gz
         BUILD_IN_SOURCE 1
         CONFIGURE_COMMAND ""
         BUILD_COMMAND
@@ -218,31 +200,35 @@ else()
             ${_tbb_components_cfg} tbb_build_dir=${TBB_ROOT_DIR}/src tbb_build_prefix=tbb
             ${_tbb_compiler}
         BUILD_BYPRODUCTS ${_tbb_build_byproducts}
-        INSTALL_COMMAND "")
+        INSTALL_COMMAND ""
+    )
 
     # post-build target for installing build
     add_custom_command(
         TARGET rocprofiler-systems-tbb-build
         POST_BUILD
-        COMMAND
-            ${CMAKE_COMMAND} ARGS -DLIBDIR=${TBB_LIBRARY_DIRS}
-            -DINCDIR=${TBB_INCLUDE_DIRS} -DPREFIX=${TBB_ROOT_DIR}
-            -DCMAKE_STRIP=${CMAKE_STRIP} -P
+        COMMAND ${CMAKE_COMMAND}
+        ARGS
+            -DLIBDIR=${TBB_LIBRARY_DIRS} -DINCDIR=${TBB_INCLUDE_DIRS}
+            -DPREFIX=${TBB_ROOT_DIR} -DCMAKE_STRIP=${CMAKE_STRIP} -P
             ${CMAKE_CURRENT_LIST_DIR}/DyninstTBBInstall.cmake
-        COMMENT "Installing TBB...")
+        COMMENT "Installing TBB..."
+    )
 
     add_custom_target(
         rocprofiler-systems-tbb-install
         COMMAND
             ${CMAKE_COMMAND} -DLIBDIR=${TBB_LIBRARY_DIRS} -DINCDIR=${TBB_INCLUDE_DIRS}
             -DPREFIX=${TBB_ROOT_DIR} -P ${CMAKE_CURRENT_LIST_DIR}/DyninstTBBInstall.cmake
-        COMMENT "Installing TBB...")
+        COMMENT "Installing TBB..."
+    )
 
     install(
         DIRECTORY ${TPL_STAGING_PREFIX}/tbb/lib/
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}
         FILES_MATCHING
-        PATTERN "*${CMAKE_SHARED_LIBRARY_SUFFIX}*")
+        PATTERN "*${CMAKE_SHARED_LIBRARY_SUFFIX}*"
+    )
 endif()
 
 foreach(_DIR_TYPE INCLUDE LIBRARY)

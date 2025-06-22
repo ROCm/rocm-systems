@@ -40,7 +40,7 @@ jobs:
         black --diff --check .
 
   cmake:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
 
     steps:
     - uses: actions/checkout@v4
@@ -48,13 +48,13 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y python3-pip
-        python3 -m pip install cmake-format
-    - name: cmake-format
+        python3 -m pip install gersemi
+    - name: gersemi
       run: |
         set +e
-        cmake-format -i $(find . -type f | egrep 'CMakeLists.txt|\.cmake$')
+        gersemi -i $(find . -type f ! -path '*/external/*' | grep -E 'CMakeLists.txt|\.cmake$')
         if [ $(git diff | wc -l) -gt 0 ]; then
-          echo -e "\nError! CMake code not formatted. Run cmake-format...\n"
+          echo -e "\nError! CMake code not formatted. Run gersemi ...\n"
           echo -e "\nFiles:\n"
           git diff --name-only
           echo -e "\nFull diff:\n"

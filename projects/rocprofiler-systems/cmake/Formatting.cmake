@@ -13,7 +13,8 @@ macro(ROCPROFILER_SYSTEMS_ACTIVATE_CLANG_TIDY)
         rocprofiler_systems_add_feature(CLANG_TIDY_COMMAND "Path to clang-tidy command")
         if(NOT CLANG_TIDY_COMMAND)
             timemory_message(
-                WARNING "ROCPROFSYS_USE_CLANG_TIDY is ON but clang-tidy is not found!")
+                WARNING "ROCPROFSYS_USE_CLANG_TIDY is ON but clang-tidy is not found!"
+            )
             set(ROCPROFSYS_USE_CLANG_TIDY OFF)
         else()
             set(CMAKE_CXX_CLANG_TIDY ${CLANG_TIDY_COMMAND})
@@ -39,7 +40,7 @@ endmacro()
 
 find_program(ROCPROFSYS_CLANG_FORMAT_EXE NAMES clang-format-18 clang-format)
 
-find_program(ROCPROFSYS_CMAKE_FORMAT_EXE NAMES cmake-format)
+find_program(ROCPROFSYS_CMAKE_FORMAT_EXE NAMES gersemi)
 find_program(ROCPROFSYS_BLACK_FORMAT_EXE NAMES black)
 
 add_custom_target(format-rocprofiler-systems)
@@ -52,23 +53,38 @@ foreach(_TYPE source python cmake)
     endif()
 endforeach()
 
-if(ROCPROFSYS_CLANG_FORMAT_EXE
-   OR ROCPROFSYS_BLACK_FORMAT_EXE
-   OR ROCPROFSYS_CMAKE_FORMAT_EXE)
-    file(GLOB_RECURSE sources ${PROJECT_SOURCE_DIR}/source/*.cpp
-         ${PROJECT_SOURCE_DIR}/source/*.c)
-    file(GLOB_RECURSE headers ${PROJECT_SOURCE_DIR}/source/*.hpp
-         ${PROJECT_SOURCE_DIR}/source/*.hpp.in ${PROJECT_SOURCE_DIR}/source/*.h
-         ${PROJECT_SOURCE_DIR}/source/*.h.in)
-    file(GLOB_RECURSE examples ${PROJECT_SOURCE_DIR}/examples/*.cpp
-         ${PROJECT_SOURCE_DIR}/examples/*.c ${PROJECT_SOURCE_DIR}/examples/*.hpp
-         ${PROJECT_SOURCE_DIR}/examples/*.h)
-    file(GLOB_RECURSE tests_source ${PROJECT_SOURCE_DIR}/tests/source/*.cpp
-         ${PROJECT_SOURCE_DIR}/tests/source/*.hpp)
+if(
+    ROCPROFSYS_CLANG_FORMAT_EXE
+    OR ROCPROFSYS_BLACK_FORMAT_EXE
+    OR ROCPROFSYS_CMAKE_FORMAT_EXE
+)
+    file(
+        GLOB_RECURSE sources
+        ${PROJECT_SOURCE_DIR}/source/*.cpp
+        ${PROJECT_SOURCE_DIR}/source/*.c
+    )
+    file(
+        GLOB_RECURSE headers
+        ${PROJECT_SOURCE_DIR}/source/*.hpp
+        ${PROJECT_SOURCE_DIR}/source/*.hpp.in
+        ${PROJECT_SOURCE_DIR}/source/*.h
+        ${PROJECT_SOURCE_DIR}/source/*.h.in
+    )
+    file(
+        GLOB_RECURSE examples
+        ${PROJECT_SOURCE_DIR}/examples/*.cpp
+        ${PROJECT_SOURCE_DIR}/examples/*.c
+        ${PROJECT_SOURCE_DIR}/examples/*.hpp
+        ${PROJECT_SOURCE_DIR}/examples/*.h
+    )
+    file(
+        GLOB_RECURSE tests_source
+        ${PROJECT_SOURCE_DIR}/tests/source/*.cpp
+        ${PROJECT_SOURCE_DIR}/tests/source/*.hpp
+    )
     file(GLOB_RECURSE external ${PROJECT_SOURCE_DIR}/examples/lulesh/external/kokkos/*)
     file(
-        GLOB_RECURSE
-        cmake_files
+        GLOB_RECURSE cmake_files
         ${PROJECT_SOURCE_DIR}/source/*CMakeLists.txt
         ${PROJECT_SOURCE_DIR}/examples/*CMakeLists.txt
         ${PROJECT_SOURCE_DIR}/tests/*CMakeLists.txt
@@ -76,7 +92,8 @@ if(ROCPROFSYS_CLANG_FORMAT_EXE
         ${PROJECT_SOURCE_DIR}/examples/*.cmake
         ${PROJECT_SOURCE_DIR}/tests/*.cmake
         ${PROJECT_SOURCE_DIR}/cmake/*.cmake
-        ${PROJECT_SOURCE_DIR}/source/*.cmake)
+        ${PROJECT_SOURCE_DIR}/source/*.cmake
+    )
     list(APPEND cmake_files ${PROJECT_SOURCE_DIR}/CMakeLists.txt)
     if(external)
         list(REMOVE_ITEM examples ${external})
@@ -90,7 +107,7 @@ if(ROCPROFSYS_CLANG_FORMAT_EXE
             ${tests_source}
             COMMENT
                 "[rocprofiler-systems] Running C++ formatter ${ROCPROFSYS_CLANG_FORMAT_EXE}..."
-            )
+        )
     endif()
 
     if(ROCPROFSYS_BLACK_FORMAT_EXE)
@@ -99,7 +116,7 @@ if(ROCPROFSYS_CLANG_FORMAT_EXE
             ${ROCPROFSYS_BLACK_FORMAT_EXE} -q ${PROJECT_SOURCE_DIR}
             COMMENT
                 "[rocprofiler-systems] Running Python formatter ${ROCPROFSYS_BLACK_FORMAT_EXE}..."
-            )
+        )
         if(NOT TARGET format-python)
             add_custom_target(format-python)
         endif()
@@ -111,7 +128,7 @@ if(ROCPROFSYS_CLANG_FORMAT_EXE
             ${ROCPROFSYS_CMAKE_FORMAT_EXE} -i ${cmake_files}
             COMMENT
                 "[rocprofiler-systems] Running CMake formatter ${ROCPROFSYS_CMAKE_FORMAT_EXE}..."
-            )
+        )
         if(NOT TARGET format-cmake)
             add_custom_target(format-cmake)
         endif()
@@ -119,8 +136,10 @@ if(ROCPROFSYS_CLANG_FORMAT_EXE
 
     foreach(_TYPE source python cmake)
         if(TARGET format-rocprofiler-systems-${_TYPE})
-            add_dependencies(format-rocprofiler-systems
-                             format-rocprofiler-systems-${_TYPE})
+            add_dependencies(
+                format-rocprofiler-systems
+                format-rocprofiler-systems-${_TYPE}
+            )
             add_dependencies(format-${_TYPE} format-rocprofiler-systems-${_TYPE})
         endif()
     endforeach()

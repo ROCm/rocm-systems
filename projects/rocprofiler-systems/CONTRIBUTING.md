@@ -51,7 +51,7 @@ By creating a pull request, you agree to the statements made in the [code licens
 * Fork the repository and create your branch from `amd-staging`.
 * If you've added code that should be tested, add tests.
 * Ensure the test suite passes.
-* Make sure your code conforms to the format. Use clang-format-18 and/or cmake-format.
+* Make sure your code conforms to the format. Use clang-format-18 and/or gersemi.
 * Use clear and descriptive commit messages.
 * Submit your PR and work with the reviewer or maintainer to get your PR approved
 * Once approved, the PR is brought onto internal CI systems and may be merged into the component during our release cycle, as coordinated by the maintainer.
@@ -77,7 +77,7 @@ By creating a pull request, you agree to the statements made in the [code licens
 * Adhere to the coding style used in the project. This includes naming conventions, indentation, and commenting practices.
 * Follow the existing directory structure and organization of the codebase.
 * Group related files together and maintain a logical hierarchy.
-* Use `clang-format-18` and `cmake-format` formatters to ensure consistency.
+* Use `clang-format-18` and `gersemi` formatters to ensure consistency.
 
 ### Using pre-commit hooks ###
 

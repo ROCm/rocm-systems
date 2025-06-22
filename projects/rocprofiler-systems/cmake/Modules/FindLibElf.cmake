@@ -35,14 +35,16 @@ find_path(
     HINTS ${LibElf_ROOT_DIR}/include ${LibElf_ROOT_DIR} ${LibElf_INCLUDEDIR}
     PATHS ${DYNINST_SYSTEM_INCLUDE_PATHS}
     PATH_SUFFIXES ${_path_suffixes}
-    DOC "libelf include directories")
+    DOC "libelf include directories"
+)
 
 find_library(
     LibElf_LIBRARIES
     NAMES libelf.so.1 libelf.so
     HINTS ${LibElf_ROOT_DIR}/lib ${LibElf_ROOT_DIR} ${LibElf_LIBRARYDIR}
     PATHS ${DYNINST_SYSTEM_LIBRARY_PATHS}
-    PATH_SUFFIXES ${_path_suffixes})
+    PATH_SUFFIXES ${_path_suffixes}
+)
 
 # Find the library with the highest version
 set(_max_ver 0.0)
@@ -69,7 +71,8 @@ find_package_handle_standard_args(
     LibElf
     FOUND_VAR LibElf_FOUND
     REQUIRED_VARS LibElf_LIBRARIES LibElf_INCLUDE_DIR
-    VERSION_VAR LibElf_VERSION)
+    VERSION_VAR LibElf_VERSION
+)
 
 # Export cache variables
 if(LibElf_FOUND)

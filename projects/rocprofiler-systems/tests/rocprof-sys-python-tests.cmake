@@ -38,7 +38,8 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
     rocprofiler_systems_find_python(
         _PYTHON
         ROOT_DIR "${_PYTHON_ROOT_DIR}"
-        COMPONENTS Interpreter)
+        COMPONENTS Interpreter
+    )
 
     # ---------------------------------------------------------------------------------- #
     # python tests
@@ -50,7 +51,8 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         FILE ${CMAKE_SOURCE_DIR}/examples/python/external.py
         PROFILE_ARGS "--label" "file"
         RUN_ARGS -v 10 -n 5
-        ENVIRONMENT "${_python_environment}")
+        ENVIRONMENT "${_python_environment}"
+    )
 
     rocprofiler_systems_add_python_test(
         NAME python-external-exclude-inefficient
@@ -59,7 +61,8 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         FILE ${CMAKE_SOURCE_DIR}/examples/python/external.py
         PROFILE_ARGS -E "^inefficient$"
         RUN_ARGS -v 10 -n 5
-        ENVIRONMENT "${_python_environment}")
+        ENVIRONMENT "${_python_environment}"
+    )
 
     rocprofiler_systems_add_python_test(
         NAME python-builtin
@@ -68,7 +71,8 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         FILE ${CMAKE_SOURCE_DIR}/examples/python/builtin.py
         PROFILE_ARGS "-b" "--label" "file" "line"
         RUN_ARGS -v 10 -n 5
-        ENVIRONMENT "${_python_environment}")
+        ENVIRONMENT "${_python_environment}"
+    )
 
     rocprofiler_systems_add_python_test(
         NAME python-builtin-noprofile
@@ -77,7 +81,8 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         FILE ${CMAKE_SOURCE_DIR}/examples/python/noprofile.py
         PROFILE_ARGS "-b" "--label" "file"
         RUN_ARGS -v 15 -n 5
-        ENVIRONMENT "${_python_environment}")
+        ENVIRONMENT "${_python_environment}"
+    )
 
     rocprofiler_systems_add_python_test(
         STANDALONE
@@ -86,7 +91,8 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         PYTHON_VERSION ${_VERSION}
         FILE ${CMAKE_SOURCE_DIR}/examples/python/source.py
         RUN_ARGS -v 5 -n 5 -s 3
-        ENVIRONMENT "${_python_environment}")
+        ENVIRONMENT "${_python_environment}"
+    )
 
     rocprofiler_systems_add_python_test(
         STANDALONE
@@ -104,16 +110,14 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
                 code-coverage-basic-blocks-binary-rewrite-run
                 code-coverage-basic-blocks-hybrid-runtime-instrument
         LABELS "code-coverage"
-        ENVIRONMENT "${_python_environment}")
+        ENVIRONMENT "${_python_environment}"
+    )
 
     # ---------------------------------------------------------------------------------- #
     # python output tests
     # ---------------------------------------------------------------------------------- #
     if(CMAKE_VERSION VERSION_LESS "3.18.0")
-        find_program(
-            ROCPROFSYS_CAT_EXE
-            NAMES cat
-            PATH_SUFFIXES bin)
+        find_program(ROCPROFSYS_CAT_EXE NAMES cat PATH_SUFFIXES bin)
 
         if(ROCPROFSYS_CAT_EXE)
             set(ROCPROFSYS_CAT_COMMAND ${ROCPROFSYS_CAT_EXE})
@@ -131,7 +135,8 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
             PASS_REGEX
                 "(\\\[compile\\\]).*(\\\| \\\|0>>> \\\[run\\\]\\\[external.py\\\]).*(\\\| \\\|0>>> \\\|_\\\[fib\\\]\\\[external.py\\\]).*(\\\| \\\|0>>> \\\|_\\\[inefficient\\\]\\\[external.py\\\])"
             DEPENDS python-external-${_VERSION}
-            ENVIRONMENT "${_python_environment}")
+            ENVIRONMENT "${_python_environment}"
+        )
 
         rocprofiler_systems_add_python_test(
             NAME python-external-exclude-inefficient-check
@@ -140,7 +145,8 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
             FILE rocprof-sys-tests-output/python-external-exclude-inefficient/${_VERSION}/trip_count.txt
             FAIL_REGEX "(\\\|_inefficient).*(\\\|_sum)|ROCPROFSYS_ABORT_FAIL_REGEX"
             DEPENDS python-external-exclude-inefficient-${_VERSION}
-            ENVIRONMENT "${_python_environment}")
+            ENVIRONMENT "${_python_environment}"
+        )
 
         rocprofiler_systems_add_python_test(
             NAME python-builtin-check
@@ -149,7 +155,8 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
             FILE rocprof-sys-tests-output/python-builtin/${_VERSION}/trip_count.txt
             PASS_REGEX "\\\[inefficient\\\]\\\[builtin.py:14\\\]"
             DEPENDS python-builtin-${_VERSION}
-            ENVIRONMENT "${_python_environment}")
+            ENVIRONMENT "${_python_environment}"
+        )
 
         rocprofiler_systems_add_python_test(
             NAME python-builtin-noprofile-check
@@ -159,17 +166,23 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
             PASS_REGEX ".(run)..(noprofile.py)."
             FAIL_REGEX ".(fib|inefficient)..(noprofile.py).|ROCPROFSYS_ABORT_FAIL_REGEX"
             DEPENDS python-builtin-noprofile-${_VERSION}
-            ENVIRONMENT "${_python_environment}")
+            ENVIRONMENT "${_python_environment}"
+        )
     else()
         rocprofiler_systems_message(
             WARNING
             "Neither 'cat' nor 'cmake -E cat' are available. Python source checks are disabled"
-            )
+        )
     endif()
 
     function(ROCPROFILER_SYSTEMS_ADD_PYTHON_VALIDATION_TEST)
-        cmake_parse_arguments(TEST "" "NAME;TIMEMORY_METRIC;TIMEMORY_FILE;PERFETTO_FILE"
-                              "ARGS;PERFETTO_METRIC" ${ARGN})
+        cmake_parse_arguments(
+            TEST
+            ""
+            "NAME;TIMEMORY_METRIC;TIMEMORY_FILE;PERFETTO_FILE"
+            "ARGS;PERFETTO_METRIC"
+            ${ARGN}
+        )
 
         rocprofiler_systems_add_python_test(
             NAME ${TEST_NAME}-validate-timemory
@@ -181,7 +194,8 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
             DEPENDS ${TEST_NAME}-${_VERSION}
             PASS_REGEX
                 "rocprof-sys-tests-output/${TEST_NAME}/${_VERSION}/${TEST_TIMEMORY_FILE} validated"
-            ENVIRONMENT "${_python_environment}")
+            ENVIRONMENT "${_python_environment}"
+        )
 
         rocprofiler_systems_add_python_test(
             NAME ${TEST_NAME}-validate-perfetto
@@ -194,7 +208,8 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
             DEPENDS ${TEST_NAME}-${_VERSION}
             PASS_REGEX
                 "rocprof-sys-tests-output/${TEST_NAME}/${_VERSION}/${TEST_PERFETTO_FILE} validated"
-            ENVIRONMENT "${_python_environment}")
+            ENVIRONMENT "${_python_environment}"
+        )
     endfunction()
 
     set(python_source_labels
@@ -206,7 +221,8 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         fib
         fib
         inefficient
-        _sum)
+        _sum
+    )
     set(python_source_count
         5
         3
@@ -216,7 +232,8 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         18
         6
         3
-        3)
+        3
+    )
     set(python_source_depth
         0
         1
@@ -226,7 +243,8 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         5
         6
         2
-        3)
+        3
+    )
 
     set(python_source_categories python user)
 
@@ -237,7 +255,8 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         PERFETTO_FILE "perfetto-trace.proto"
         PERFETTO_METRIC ${python_source_categories}
         ARGS -l ${python_source_labels} -c ${python_source_count} -d
-             ${python_source_depth})
+             ${python_source_depth}
+    )
 
     set(python_builtin_labels
         [run][builtin.py:28]
@@ -251,7 +270,8 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         [fib][builtin.py:10]
         [fib][builtin.py:10]
         [fib][builtin.py:10]
-        [inefficient][builtin.py:14])
+        [inefficient][builtin.py:14]
+    )
     set(python_builtin_count
         5
         5
@@ -264,7 +284,8 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         220
         80
         10
-        5)
+        5
+    )
     set(python_builtin_depth
         0
         1
@@ -277,7 +298,8 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         8
         9
         10
-        1)
+        1
+    )
 
     rocprofiler_systems_add_python_validation_test(
         NAME python-builtin
@@ -286,6 +308,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         PERFETTO_METRIC "python"
         PERFETTO_FILE "perfetto-trace.proto"
         ARGS -l ${python_builtin_labels} -c ${python_builtin_count} -d
-             ${python_builtin_depth})
+             ${python_builtin_depth}
+    )
     math(EXPR _INDEX "${_INDEX} + 1")
 endforeach()

@@ -70,8 +70,15 @@ if(NOT PyBind11Python_COMPONENTS)
 endif()
 
 # Use the Python interpreter to find the libs.
-find_package(${PyBind11Python_PYTHON} ${PyBind11Python_FIND_VERSION} ${_find_exact} MODULE
-             ${_find_required} ${_find_quiet} COMPONENTS ${PyBind11Python_COMPONENTS})
+find_package(
+    ${PyBind11Python_PYTHON}
+    ${PyBind11Python_FIND_VERSION}
+    ${_find_exact}
+    MODULE
+    ${_find_required}
+    ${_find_quiet}
+    COMPONENTS ${PyBind11Python_COMPONENTS}
+)
 
 # According to
 # https://stackoverflow.com/questions/646518/python-how-to-detect-debug-interpreter
@@ -110,7 +117,8 @@ print(s.get_config_var('MULTIARCH') or '');
 "
     RESULT_VARIABLE _PYTHON_SUCCESS
     OUTPUT_VARIABLE _PYTHON_VALUES
-    ERROR_VARIABLE _PYTHON_ERROR_VALUE)
+    ERROR_VARIABLE _PYTHON_ERROR_VALUE
+)
 
 if(NOT _PYTHON_SUCCESS MATCHES 0)
     if(PyBind11Python_FIND_REQUIRED)
@@ -139,13 +147,18 @@ list(GET _PYTHON_VALUES 9 PYTHON_MULTIARCH)
 
 # Make sure the Python has the same pointer-size as the chosen compiler Skip if
 # CMAKE_SIZEOF_VOID_P is not defined
-if(CMAKE_SIZEOF_VOID_P AND (NOT "${PYTHON_SIZEOF_VOID_P}" STREQUAL
-                            "${CMAKE_SIZEOF_VOID_P}"))
+if(
+    CMAKE_SIZEOF_VOID_P
+    AND (NOT "${PYTHON_SIZEOF_VOID_P}" STREQUAL "${CMAKE_SIZEOF_VOID_P}")
+)
     if(PyBind11Python_FIND_REQUIRED)
         math(EXPR _PYTHON_BITS "${PYTHON_SIZEOF_VOID_P} * 8")
         math(EXPR _CMAKE_BITS "${CMAKE_SIZEOF_VOID_P} * 8")
-        message(FATAL_ERROR "Python config failure: Python is ${_PYTHON_BITS}-bit, "
-                            "chosen compiler is  ${_CMAKE_BITS}-bit")
+        message(
+            FATAL_ERROR
+            "Python config failure: Python is ${_PYTHON_BITS}-bit, "
+            "chosen compiler is  ${_CMAKE_BITS}-bit"
+        )
     endif()
     set(PyBind11Python_FOUND FALSE)
     return()
@@ -157,7 +170,8 @@ list(GET _PYTHON_VERSION_LIST 0 PYTHON_VERSION_MAJOR)
 list(GET _PYTHON_VERSION_LIST 1 PYTHON_VERSION_MINOR)
 list(GET _PYTHON_VERSION_LIST 2 PYTHON_VERSION_PATCH)
 set(PYTHON_VERSION
-    "${PYTHON_VERSION_MAJOR}.${PYTHON_VERSION_MINOR}.${PYTHON_VERSION_PATCH}")
+    "${PYTHON_VERSION_MAJOR}.${PYTHON_VERSION_MINOR}.${PYTHON_VERSION_PATCH}"
+)
 
 # Make sure all directory separators are '/'
 string(REGEX REPLACE "\\\\" "/" PYTHON_PREFIX "${PYTHON_PREFIX}")
