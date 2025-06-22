@@ -41,7 +41,7 @@
 
 #    if !defined(ROCPROFSYS_CAUSAL_LABEL)
 /** @cond ROCPROFSYS_HIDDEN_DEFINES */
-#        define ROCPROFSYS_CAUSAL_STR2(x) #        x
+#        define ROCPROFSYS_CAUSAL_STR2(x) #x
 #        define ROCPROFSYS_CAUSAL_STR(x)  ROCPROFSYS_CAUSAL_STR2(x)
 /** @endcond */
 /** Default label for a causal progress point */

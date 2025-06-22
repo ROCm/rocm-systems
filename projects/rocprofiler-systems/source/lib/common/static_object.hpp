@@ -76,11 +76,11 @@ static_buffer_size()
 template <typename Tp, typename ContextT = anonymous>
 struct static_object
 {
-    static_object()                         = delete;
-    ~static_object()                        = delete;
-    static_object(const static_object&)     = delete;
-    static_object(static_object&&) noexcept = delete;
-    static_object& operator=(const static_object&) = delete;
+    static_object()                                    = delete;
+    ~static_object()                                   = delete;
+    static_object(const static_object&)                = delete;
+    static_object(static_object&&) noexcept            = delete;
+    static_object& operator=(const static_object&)     = delete;
     static_object& operator=(static_object&&) noexcept = delete;
 
     template <typename... Args>

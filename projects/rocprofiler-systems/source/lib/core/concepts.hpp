@@ -89,8 +89,9 @@ template <typename Tp>
 struct can_stringify
 {
 private:
-    static constexpr auto sfinae(int)
-        -> decltype(std::declval<std::ostream&>() << std::declval<Tp>(), bool())
+    static constexpr auto sfinae(int) -> decltype(std::declval<std::ostream&>()
+                                                      << std::declval<Tp>(),
+                                                  bool())
     {
         return true;
     }

@@ -61,7 +61,7 @@ struct perf_event
     /// Move assignment is supported
     perf_event& operator=(perf_event&& other) noexcept;
 
-    perf_event(const perf_event&) = delete;
+    perf_event(const perf_event&)            = delete;
     perf_event& operator=(const perf_event&) = delete;
 
     /// Open a perf_event file using the given options structure
@@ -108,15 +108,15 @@ struct perf_event
     {
         friend class perf_event::iterator;
 
-        record()                  = default;
-        ~record()                 = default;
-        record(const record&)     = default;
-        record(record&&) noexcept = default;
-        record& operator=(const record&) = default;
+        record()                             = default;
+        ~record()                            = default;
+        record(const record&)                = default;
+        record(record&&) noexcept            = default;
+        record& operator=(const record&)     = default;
         record& operator=(record&&) noexcept = default;
 
         bool is_valid() const { return (m_source != nullptr && m_header != nullptr); }
-             operator bool() const { return is_valid(); }
+        operator bool() const { return is_valid(); }
 
         record_type get_type() const { return static_cast<record_type>(m_header->type); }
 

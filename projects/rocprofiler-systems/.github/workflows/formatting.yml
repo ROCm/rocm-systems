@@ -63,7 +63,7 @@ jobs:
         fi
 
   source:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v4
@@ -71,16 +71,16 @@ jobs:
       run: |
         DISTRIB_CODENAME=$(cat /etc/lsb-release | grep DISTRIB_CODENAME | awk -F '=' '{print $NF}')
         sudo apt-get update
-        sudo apt-get install -y software-properties-common wget curl clang-format-11
+        sudo apt-get install -y software-properties-common wget curl clang-format-18
     - name: clang-format
       run: |
         set +e
         FILES=$(find source examples tests -type f | egrep '\.(h|hpp|c|cpp)(|\.in)$')
-        FORMAT_OUT=$(clang-format-11 -output-replacements-xml ${FILES})
+        FORMAT_OUT=$(clang-format-18 -output-replacements-xml ${FILES})
         RET=$(echo ${FORMAT_OUT} | grep -c '<replacement ')
         if [ "${RET}" -ne 0 ]; then
           echo -e "\nError! Code not formatted. Detected ${RET} lines\n"
-          clang-format-11 -i ${FILES}
+          clang-format-18 -i ${FILES}
           git diff
           exit ${RET}
         fi

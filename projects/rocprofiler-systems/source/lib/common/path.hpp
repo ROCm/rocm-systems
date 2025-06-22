@@ -135,11 +135,11 @@ struct ROCPROFSYS_INTERNAL_API path_type
     };
 
     inline path_type(const std::string&);
-    ~path_type()                = default;
-    path_type(const path_type&) = default;
-    path_type(path_type&&)      = default;
+    ~path_type()                           = default;
+    path_type(const path_type&)            = default;
+    path_type(path_type&&)                 = default;
     path_type& operator=(const path_type&) = default;
-    path_type& operator=(path_type&&) = default;
+    path_type& operator=(path_type&&)      = default;
 
     bool     exists() const { return m_type < unknown; }
     explicit operator bool() const { return exists(); }

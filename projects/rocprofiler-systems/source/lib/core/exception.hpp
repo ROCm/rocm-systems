@@ -39,7 +39,7 @@ public:
 
     ~exception() override;
 
-    exception(exception&&) noexcept = default;
+    exception(exception&&) noexcept            = default;
     exception& operator=(exception&&) noexcept = default;
 
     exception(const exception&);

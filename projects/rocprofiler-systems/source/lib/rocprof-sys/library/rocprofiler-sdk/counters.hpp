@@ -93,11 +93,11 @@ struct counter_storage
     counter_storage(const client_data* _tool_data, uint64_t _devid, size_t _idx,
                     std::string_view _name);
 
-    ~counter_storage()                      = default;
-    counter_storage(const counter_storage&) = delete;
-    counter_storage(counter_storage&&)      = default;
+    ~counter_storage()                                 = default;
+    counter_storage(const counter_storage&)            = delete;
+    counter_storage(counter_storage&&)                 = default;
     counter_storage& operator=(const counter_storage&) = delete;
-    counter_storage& operator=(counter_storage&&) = default;
+    counter_storage& operator=(counter_storage&&)      = default;
 
     friend bool operator<(const counter_storage& lhs, const counter_storage& rhs)
     {

@@ -55,7 +55,7 @@ struct MemoryMapper RTmemoryMapper = { 0, 0, 0, 0, { { 0 } } };
 #endif
 extern FILE* stOut;
 
-//#define DEBUG_MEM_EM
+// #define DEBUG_MEM_EM
 
 unsigned long
 RTtranslateMemory(unsigned long input, unsigned long origAddr, unsigned long currAddr)

@@ -91,10 +91,10 @@ typedef DWORD  psaddr_t;  // for breakpoints; match the debug struct
 #        define NULL_THR_ID            INVALID_HANDLE_VALUE
 #        define DYNINST_SINGLETHREADED INVALID_HANDLE_VALUE
 #    else
-typedef int           PID;
-typedef int           PROC_HANDLE;
-typedef int           LWP;
-typedef long          THR_ID;
+typedef int  PID;
+typedef int  PROC_HANDLE;
+typedef int  LWP;
+typedef long THR_ID;
 
 #        define NULL_PID    -1
 #        define NULL_LWP    -1

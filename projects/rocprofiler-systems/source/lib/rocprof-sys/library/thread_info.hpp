@@ -93,7 +93,7 @@ struct thread_info
     thread_info(thread_info&&)      = default;
 
     thread_info& operator=(const thread_info&) = delete;
-    thread_info& operator=(thread_info&&) = default;
+    thread_info& operator=(thread_info&&)      = default;
 
     static void set_start(uint64_t, bool _force = false);
     static void set_stop(uint64_t);

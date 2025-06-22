@@ -100,11 +100,9 @@ PYBIND11_MODULE(libpyrocprofsys, omni)
         return _use_mpi;
     };
 
-    omni.def(
-        "is_initialized", []() { return _is_initialized; }, "Initialization state");
+    omni.def("is_initialized", []() { return _is_initialized; }, "Initialization state");
 
-    omni.def(
-        "is_finalized", []() { return _is_finalized; }, "Finalization state");
+    omni.def("is_finalized", []() { return _is_finalized; }, "Finalization state");
 
     omni.def(
         "initialize",
@@ -224,11 +222,11 @@ struct config
     strset_t                exclude_filenames  = default_exclude_filenames;
     std::vector<profiler_t> records            = {};
     annotations_t           annotations = { note_t{ "file", ROCPROFSYS_STRING, nullptr },
-                                  note_t{ "line", ROCPROFSYS_INT32, nullptr },
-                                  note_t{ "lasti", ROCPROFSYS_INT32, nullptr },
-                                  note_t{ "argcount", ROCPROFSYS_INT32, nullptr },
-                                  note_t{ "nlocals", ROCPROFSYS_INT32, nullptr },
-                                  note_t{ "stacksize", ROCPROFSYS_INT32, nullptr } };
+                                            note_t{ "line", ROCPROFSYS_INT32, nullptr },
+                                            note_t{ "lasti", ROCPROFSYS_INT32, nullptr },
+                                            note_t{ "argcount", ROCPROFSYS_INT32, nullptr },
+                                            note_t{ "nlocals", ROCPROFSYS_INT32, nullptr },
+                                            note_t{ "stacksize", ROCPROFSYS_INT32, nullptr } };
 };
 //
 inline config&
@@ -306,7 +304,7 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
     if(_disable) return;
 
     _disable = true;
-    tim::scope::destructor _dtor{ []() { _disable= false; } };
+    tim::scope::destructor _dtor{ []() { _disable = false; } };
     (void) _dtor;
 
     if(pframe.is_none() || pframe.ptr() == nullptr) return;

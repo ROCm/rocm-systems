@@ -476,14 +476,13 @@ std::unordered_set<rocprofiler_buffer_tracing_kind_t>
 get_buffered_domains()
 {
     const auto buffer_tracing_info = rocprofiler::sdk::get_buffer_tracing_names();
-    const auto supported           = std::unordered_set<rocprofiler_buffer_tracing_kind_t>
-    {
+    const auto supported = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{
         ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
-            ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
+        ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
 #    if(ROCPROFILER_VERSION < 10000)
-            ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION,
+        ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION,
 #    endif
-            ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
+        ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
     };
 
     auto _data = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{};

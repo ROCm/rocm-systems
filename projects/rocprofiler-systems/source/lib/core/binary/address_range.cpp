@@ -54,8 +54,7 @@ address_range::as_string(int _depth) const
     _ss << std::hex;
     _ss << std::setw(2 * _depth) << "";
     _ss.fill('0');
-    _ss << "0x" << std::setw(16) << low << "-"
-        << "0x" << std::setw(16) << high;
+    _ss << "0x" << std::setw(16) << low << "-" << "0x" << std::setw(16) << high;
     return _ss.str();
 }
 

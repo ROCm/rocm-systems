@@ -73,7 +73,7 @@ struct callchain : comp::empty_base
     callchain(const callchain&)     = default;
     callchain(callchain&&) noexcept = default;
 
-    callchain& operator=(const callchain&) = default;
+    callchain& operator=(const callchain&)     = default;
     callchain& operator=(callchain&&) noexcept = default;
 
     static std::vector<ts_entry_vec_t> filter_and_patch(

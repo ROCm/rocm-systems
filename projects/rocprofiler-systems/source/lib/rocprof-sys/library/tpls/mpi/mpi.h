@@ -387,7 +387,7 @@
 #        define OMPI_PREDEFINED_GLOBAL(type, global)                                     \
             (static_cast<type>(static_cast<void*>(&(global))))
 #    else
-#        define OMPI_PREDEFINED_GLOBAL(type, global) ((type)((void*) &(global)))
+#        define OMPI_PREDEFINED_GLOBAL(type, global) ((type) ((void*) &(global)))
 #    endif
 #else
 #    define OMPI_PREDEFINED_GLOBAL(type, global) ((type) & (global))
@@ -718,7 +718,7 @@ extern "C"
 #if(OMPI_ENABLE_MPI1_COMPAT || OMPI_BUILDING)
         MPI_COMBINER_HVECTOR_INTEGER,
 #else
-    OMPI_WAS_MPI_COMBINER_HVECTOR_INTEGER,  /* preserve ABI compatibility */
+    OMPI_WAS_MPI_COMBINER_HVECTOR_INTEGER, /* preserve ABI compatibility */
 #endif
         MPI_COMBINER_HVECTOR,
         MPI_COMBINER_INDEXED,
@@ -732,7 +732,7 @@ extern "C"
 #if(OMPI_ENABLE_MPI1_COMPAT || OMPI_BUILDING)
         MPI_COMBINER_STRUCT_INTEGER,
 #else
-    OMPI_WAS_MPI_COMBINER_STRUCT_INTEGER,   /* preserve ABI compatibility */
+    OMPI_WAS_MPI_COMBINER_STRUCT_INTEGER, /* preserve ABI compatibility */
 #endif
         MPI_COMBINER_STRUCT,
         MPI_COMBINER_SUBARRAY,
@@ -882,7 +882,7 @@ extern "C"
 /*
  * Special MPI_T handles
  */
-#define MPI_T_PVAR_ALL_HANDLES  ((MPI_T_pvar_handle) -1)
+#define MPI_T_PVAR_ALL_HANDLES  ((MPI_T_pvar_handle) - 1)
 #define MPI_T_PVAR_HANDLE_NULL  ((MPI_T_pvar_handle) 0)
 #define MPI_T_PVAR_SESSION_NULL ((MPI_T_pvar_session) 0)
 #define MPI_T_CVAR_HANDLE_NULL  ((MPI_T_cvar_handle) 0)
@@ -1284,8 +1284,8 @@ extern "C"
 #define MPI_TYPECLASS_COMPLEX 3
 
 /* Aint helper macros (MPI-3.1) */
-#define MPI_Aint_add(base, disp)     ((MPI_Aint)((char*) (base) + (disp)))
-#define MPI_Aint_diff(addr1, addr2)  ((MPI_Aint)((char*) (addr1) - (char*) (addr2)))
+#define MPI_Aint_add(base, disp)     ((MPI_Aint) ((char*) (base) + (disp)))
+#define MPI_Aint_diff(addr1, addr2)  ((MPI_Aint) ((char*) (addr1) - (char*) (addr2)))
 #define PMPI_Aint_add(base, disp)    MPI_Aint_add(base, disp)
 #define PMPI_Aint_diff(addr1, addr2) MPI_Aint_diff(addr1, addr2)
 

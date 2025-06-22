@@ -92,12 +92,12 @@ struct dummy_data_type
 #    if defined(MPICH) && (MPICH > 0)
 static constexpr bool is_mpich = true;
 #    else
-static constexpr bool is_mpich     = false;
+static constexpr bool is_mpich = false;
 #    endif
 #    if defined(OPEN_MPI) && (OPEN_MPI > 0)
 static constexpr bool is_openmpi = true;
 #    else
-static constexpr bool is_openmpi   = false;
+static constexpr bool is_openmpi = false;
 #    endif
 #endif
 
@@ -116,9 +116,9 @@ static const comm_t comm_world_v = nullptr;
 static const comm_t comm_self_v  = nullptr;
 static const info_t info_null_v  = nullptr;
 #    else
-static const comm_t   comm_world_v = MPI_COMM_WORLD;
-static const comm_t   comm_self_v  = MPI_COMM_SELF;
-static const info_t   info_null_v  = MPI_INFO_NULL;
+static const comm_t comm_world_v = MPI_COMM_WORLD;
+static const comm_t comm_self_v  = MPI_COMM_SELF;
+static const info_t info_null_v  = MPI_INFO_NULL;
 #    endif
 static const int success_v          = MPI_SUCCESS;
 static const int comm_type_shared_v = MPI_COMM_TYPE_SHARED;
@@ -236,7 +236,7 @@ quiet()
 //--------------------------------------------------------------------------------------//
 
 #if !defined(ROCPROFSYS_MPI_ERROR_FUNCTION)
-#    define ROCPROFSYS_MPI_ERROR_FUNCTION(FUNC, ...) #    FUNC
+#    define ROCPROFSYS_MPI_ERROR_FUNCTION(FUNC, ...) #FUNC
 #endif
 
 #if !defined(ROCPROFSYS_MPI_ERROR_CHECK)
@@ -454,8 +454,12 @@ size(comm_t comm)
     return std::max(_size, (int32_t) 1);
 }
 
-void set_rank(int32_t, comm_t) {}
-void set_size(int32_t, comm_t) {}
+void
+set_rank(int32_t, comm_t)
+{}
+void
+set_size(int32_t, comm_t)
+{}
 
 #else
 

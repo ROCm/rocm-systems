@@ -32,7 +32,8 @@
 #include <string>
 
 template <typename... Tp>
-auto get_categories(type_list<Tp...>)
+auto
+get_categories(type_list<Tp...>)
 {
     auto _cleanup = [](std::string _type, const std::string& _pattern) {
         auto _pos = std::string::npos;

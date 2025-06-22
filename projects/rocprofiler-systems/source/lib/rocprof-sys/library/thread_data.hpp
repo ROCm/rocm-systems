@@ -261,7 +261,7 @@ struct thread_data<std::optional<Tp>, Tag, MaxThreads>
     thread_data(const thread_data&)     = default;
     thread_data(thread_data&&) noexcept = default;
 
-    thread_data& operator=(const thread_data&) = default;
+    thread_data& operator=(const thread_data&)     = default;
     thread_data& operator=(thread_data&&) noexcept = default;
 
     static unique_ptr_t<this_type>& instance();
@@ -432,7 +432,7 @@ struct thread_data<identity<Tp>, Tag, MaxThreads>
     thread_data(const thread_data&)     = default;
     thread_data(thread_data&&) noexcept = default;
 
-    thread_data& operator=(const thread_data&) = default;
+    thread_data& operator=(const thread_data&)     = default;
     thread_data& operator=(thread_data&&) noexcept = default;
 
     static unique_ptr_t<this_type>& instance();

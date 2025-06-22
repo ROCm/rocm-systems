@@ -60,7 +60,8 @@ using cpu_data_tuple_t = std::tuple<size_t, int64_t, int64_t, int64_t, int64_t, 
 std::deque<cpu_data_tuple_t> data = {};
 
 template <typename... Types>
-void init_perfetto_counter_tracks(type_list<Types...>)
+void
+init_perfetto_counter_tracks(type_list<Types...>)
 {
     (perfetto_counter_track<Types>::init(), ...);
 }

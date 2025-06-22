@@ -234,7 +234,7 @@ public:
             if(pts)
             {
                 *pts =
-                    (int64_t)(packet_filtered_->pts * default_time_scale_ * time_base_);
+                    (int64_t) (packet_filtered_->pts * default_time_scale_ * time_base_);
                 pkt_duration_ = packet_filtered_->duration;
             }
         }
@@ -277,7 +277,7 @@ public:
             }
             if(pts)
             {
-                *pts = (int64_t)(packet_->pts * default_time_scale_ * time_base_);
+                *pts = (int64_t) (packet_->pts * default_time_scale_ * time_base_);
                 pkt_duration_ = packet_->duration;
             }
         }

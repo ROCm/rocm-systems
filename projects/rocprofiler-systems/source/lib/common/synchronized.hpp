@@ -67,7 +67,7 @@ public:
     : m_data{ std::move(data) }
     {}
 
-    synchronized(synchronized&& data) noexcept = default;
+    synchronized(synchronized&& data) noexcept            = default;
     synchronized& operator=(synchronized&& data) noexcept = default;
 
     // Do not allow this data structure to be copied, std::move only.

@@ -51,10 +51,10 @@ struct static_vector
     using size_type       = size_t;
     using difference_type = std::ptrdiff_t;
 
-    static_vector()                         = default;
-    static_vector(const static_vector&)     = default;
-    static_vector(static_vector&&) noexcept = default;
-    static_vector& operator=(const static_vector&) = default;
+    static_vector()                                    = default;
+    static_vector(const static_vector&)                = default;
+    static_vector(static_vector&&) noexcept            = default;
+    static_vector& operator=(const static_vector&)     = default;
     static_vector& operator=(static_vector&&) noexcept = default;
 
     static_vector(size_t _n, Tp _v = {});
