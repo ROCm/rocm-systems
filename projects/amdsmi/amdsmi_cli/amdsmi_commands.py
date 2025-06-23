@@ -3554,6 +3554,44 @@ class AMDSMICommands():
             self.helpers.check_required_groups()
             self.group_check_printed = True
 
+        p2p_status_cache = {}
+
+        def get_cached_p2p_status(src_gpu, dest_gpu):
+            #Get P2P status with caching to avoid duplicate calls
+            src_gpu_id = self.helpers.get_gpu_id_from_device_handle(src_gpu)
+            dest_gpu_id = self.helpers.get_gpu_id_from_device_handle(dest_gpu)
+            key = (src_gpu_id, dest_gpu_id)
+
+            if key not in p2p_status_cache:
+                try:
+                    if src_gpu == dest_gpu:
+                        p2p_status_cache[key] = {"cap": {
+                            "is_iolink_coherent": -1,
+                            "is_iolink_atomics_32bit": -1,
+                            "is_iolink_atomics_64bit": -1,
+                            "is_iolink_dma": -1,
+                            "is_iolink_bi_directional": -1
+                        }}
+                    else:
+                        p2p_status_cache[key] = amdsmi_interface.amdsmi_topo_get_p2p_status(src_gpu, dest_gpu)
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    logging.debug("Failed to get link status for %s to %s | %s",
+                                src_gpu_id,
+                                dest_gpu_id,
+                                e.get_error_info())
+                    p2p_status_cache[key] ={
+                        "cap":
+                        {
+                            "is_iolink_coherent": -1,
+                            "is_iolink_atomics_32bit": -1,
+                            "is_iolink_atomics_64bit": -1,
+                            "is_iolink_dma": -1,
+                            "is_iolink_bi_directional": -1
+                        }
+                    }
+
+            return p2p_status_cache[key]
+
         # Populate the possible gpus
         topo_values = []
         for src_gpu_index, src_gpu in enumerate(args.gpu):
@@ -3629,7 +3667,7 @@ class AMDSMICommands():
 
                 if src_gpu != dest_gpu:
                     try:
-                        cap = amdsmi_interface.amdsmi_topo_get_p2p_status(src_gpu, dest_gpu)['cap']
+                        cap = get_cached_p2p_status(src_gpu, dest_gpu)['cap']
                         link_coherent = (
                             "C" if cap['is_iolink_coherent'] == 1 else
                             "NC" if cap['is_iolink_coherent'] == 0 else
@@ -3924,7 +3962,7 @@ class AMDSMICommands():
                         src_gpu_coherent[dest_gpu_key] = "SELF"
                         continue
                     try:
-                        iolink_coherent = amdsmi_interface.amdsmi_topo_get_p2p_status(src_gpu, dest_gpu)['cap']['is_iolink_coherent']
+                        iolink_coherent = get_cached_p2p_status(src_gpu, dest_gpu)['cap']['is_iolink_coherent']
                         src_gpu_coherent[dest_gpu_key] = "C" if iolink_coherent == 1 else "NC" if iolink_coherent == 0 else "N/A"
                     except amdsmi_exception.AmdSmiLibraryException as e:
                         src_gpu_coherent[dest_gpu_key] = "N/A"
@@ -3960,7 +3998,7 @@ class AMDSMICommands():
                         src_gpu_atomics[dest_gpu_key] = "SELF"
                         continue
                     try:
-                        cap = amdsmi_interface.amdsmi_topo_get_p2p_status(src_gpu, dest_gpu)['cap']
+                        cap = get_cached_p2p_status(src_gpu, dest_gpu)['cap']
                         src_gpu_atomics[dest_gpu_key] = (
                             "64,32" if cap['is_iolink_atomics_32bit'] == 1 and cap['is_iolink_atomics_64bit'] == 1 else
                             "32" if cap['is_iolink_atomics_32bit'] == 1 else
@@ -4001,7 +4039,7 @@ class AMDSMICommands():
                         src_gpu_dma[dest_gpu_key] = "SELF"
                         continue
                     try:
-                        iolink_dma = amdsmi_interface.amdsmi_topo_get_p2p_status(src_gpu, dest_gpu)['cap']['is_iolink_dma']
+                        iolink_dma = get_cached_p2p_status(src_gpu, dest_gpu)['cap']['is_iolink_dma']
                         src_gpu_dma[dest_gpu_key] = "T" if iolink_dma == 1 else "F" if iolink_dma == 0 else "N/A"
                     except amdsmi_exception.AmdSmiLibraryException as e:
                         src_gpu_dma[dest_gpu_key] = "N/A"
@@ -4037,7 +4075,7 @@ class AMDSMICommands():
                         src_gpu_bi_dir[dest_gpu_key] = "SELF"
                         continue
                     try:
-                        iolink_bi_dir = amdsmi_interface.amdsmi_topo_get_p2p_status(src_gpu, dest_gpu)['cap']['is_iolink_bi_directional']
+                        iolink_bi_dir = get_cached_p2p_status(src_gpu, dest_gpu)['cap']['is_iolink_bi_directional']
                         src_gpu_bi_dir[dest_gpu_key] = "T" if iolink_bi_dir == 1 else "F" if iolink_bi_dir == 0 else "N/A"
                     except amdsmi_exception.AmdSmiLibraryException as e:
                         src_gpu_bi_dir[dest_gpu_key] = "N/A"
