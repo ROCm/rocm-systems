@@ -194,7 +194,12 @@ finalize(ompt_data_t* /*tool_data*/)
 void
 finalize_ompt()
 {
-    if(rocprofiler::ompt::tool_finalize) rocprofiler::ompt::tool_finalize();
+    // As per OMPT spec, this is no need for the tool to call finalize, it is called by the
+    // runtime when the tool is unloaded.
+    // However, we can call it here to ensure that the tool is finalized properly.
+    // But temporarily disable it to avoid issues with the race condition between the runtime
+    // and the tool unloading.
+    // if(rocprofiler::ompt::tool_finalize) rocprofiler::ompt::tool_finalize();
 }
 }  // namespace ompt
 }  // namespace rocprofiler
