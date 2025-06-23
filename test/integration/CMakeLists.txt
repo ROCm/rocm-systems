@@ -11,6 +11,8 @@ if(NOT DEFINED AQLPROFILE_TARGET)
         HINTS /opt/rocm ${CMAKE_INSTALL_PREFIX}
         PATHS /opt/rocm
         PATH_SUFFIXES lib)
+    enable_testing()
+    include(CTest)
 endif()
 
 find_package(

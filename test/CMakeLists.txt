@@ -7,8 +7,11 @@ if ( NOT DEFINED TEST_DIR )
   set ( TEST_DIR ${CMAKE_CURRENT_SOURCE_DIR} )
   set ( TEST_BINARY_DIR ${CMAKE_BINARY_DIR} )
   project ( ${EXE_NAME} )
+  list ( APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake_modules" )
   ## Set build environment
   include ( env )
+  enable_testing()
+  include(CTest)
 endif ()
 
 ## Util sources
@@ -83,7 +86,8 @@ install(FILES ${TEST_DIR}/run_install.sh RENAME run_tests.sh
 
 add_test(NAME legacy-tests COMMAND "${TEST_BINARY_DIR}/run.sh")
 
-if(AQLPROFILE_BUILD_TESTS)
+option(AQLPROFILE_BUILD_INTEGERATION_TESTS "Build integration tests" ON)
+
+if(AQLPROFILE_BUILD_INTEGERATION_TESTS)
     add_subdirectory(integration)
-    enable_testing()
 endif()

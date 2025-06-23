@@ -23,7 +23,7 @@
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 #include <hsa/hsa.h>
-#include "core/include/aql_profile_v2.h"
+#include "aqlprofile-sdk/aql_profile_v2.h"
 
 // Mocks and helpers
 namespace {
@@ -94,7 +94,7 @@ TEST(CountersTest, DeletePackets) {
 
     hsa_status_t status = aqlprofile_pmc_create_packets(
         &handle, &packets, profile, mock_alloc, mock_dealloc, mock_memcpy, &mem);
-    
+
     // Only proceed if creation succeeded
     if (status == HSA_STATUS_SUCCESS) {
         // This should not crash or throw
@@ -106,13 +106,13 @@ TEST(CountersTest, DeletePackets) {
 TEST(CountersTest, ValidateEvent) {
     aqlprofile_agent_handle_t agent = {};
     agent.handle = 0;
-    
+
     aqlprofile_pmc_event_t event = {};
     event.block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GRBM;
-    
+
     bool result = true;
     hsa_status_t status = aqlprofile_validate_pmc_event(agent, &event, &result);
-    
+
     // In a mock environment, we can't guarantee validation, but we can check that it runs
     EXPECT_TRUE(status == HSA_STATUS_SUCCESS || status == HSA_STATUS_ERROR);
 }

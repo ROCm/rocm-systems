@@ -25,7 +25,7 @@ set ( LIB_SRC
 )
 
 add_library ( ${TARGET_LIB} SHARED ${LIB_SRC} )
-target_include_directories ( ${TARGET_LIB} PRIVATE ${LIB_DIR} ${API_PATH})
+target_include_directories ( ${TARGET_LIB} PRIVATE ${LIB_DIR} ${API_PATH} ${LIB_DIR}/core/include)
 target_link_libraries( ${TARGET_LIB} PRIVATE pthread hsa-runtime64::hsa-runtime64 )
 
 ## Generating definitions

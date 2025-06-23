@@ -26,7 +26,7 @@
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
 #include <hsa/hsa_ven_amd_aqlprofile.h>
-#include "aql_profile_v2.h"
+#include "aqlprofile-sdk/aql_profile_v2.h"
 #include <stdlib.h>
 #include <unistd.h>
 #include <atomic>

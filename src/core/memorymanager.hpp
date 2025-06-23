@@ -26,7 +26,7 @@
 #include <mutex>
 #include <unordered_map>
 #include <memory>
-#include "include/aql_profile_v2.h"
+#include "aqlprofile-sdk/aql_profile_v2.h"
 #include <stdexcept>
 #include "pm4/trace_config.h"
 

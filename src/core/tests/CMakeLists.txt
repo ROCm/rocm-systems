@@ -1,3 +1,6 @@
+cmake_minimum_required(VERSION 3.16.0)
+project(aqlprofile-sdk-tests)
+
 # write a CMakeLists.txt file for the gfx9_factory_test
 # that includes the necessary libraries and sets the properties for the test
 include(GoogleTest)

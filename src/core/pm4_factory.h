@@ -34,7 +34,7 @@
 #include <sstream>
 #include <string>
 
-#include "core/include/aql_profile_v2.h"
+#include "aqlprofile-sdk/aql_profile_v2.h"
 #include "core/aql_profile.hpp"
 #include "core/aql_profile_exception.h"
 #include "def/gpu_block_info.h"

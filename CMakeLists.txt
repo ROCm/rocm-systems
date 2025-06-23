@@ -12,9 +12,9 @@ include(GNUInstallDirs)
 ## Adding default path cmake modules
 list ( APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules" )
 ## Include common cmake modules
-include ( utils )
+include (utils)
 ## Set build environment
-include ( env )
+include (env)
 
 set(CMAKE_INSTALL_LIBDIR "lib" CACHE STRING "Library install directory")
 
@@ -65,6 +65,13 @@ set ( TEST_BINARY_DIR ${PROJECT_BINARY_DIR}/test )
 add_subdirectory ( ${TEST_DIR} ${TEST_BINARY_DIR} )
 endif()
 
+if(AQLPROFILE_INSTALL_TESTS)
+    # Install Integration Tests
+    install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test/integration/
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests/integration
+            COMPONENT tests)
+endif()
+
 ## Add the install directives for the runtime library.
 set ( DEST_NAME ${AQLPROFILE_NAME} )
 install ( TARGETS ${AQLPROFILE_TARGET} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT runtime )
@@ -72,12 +79,16 @@ install ( TARGETS ${AQLPROFILE_TARGET} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDI
 
 ## Add the packaging directives for the runtime library.
 if ( ENABLE_ASAN_PACKAGING )
-  set ( CPACK_PACKAGE_NAME ${AQLPROFILE_NAME}-asan )
+  set (CPACK_PACKAGE_NAME ${AQLPROFILE_NAME}-asan)
   # ASAN Package requires only asan component with libraries and license file
-  set ( CPACK_COMPONENTS_ALL asan )
+  set (CPACK_COMPONENTS_ALL asan )
 else()
-  set ( CPACK_PACKAGE_NAME ${AQLPROFILE_NAME} )
-  set ( CPACK_COMPONENTS_ALL runtime tests )
+  set (CPACK_PACKAGE_NAME ${AQLPROFILE_NAME})
+  set (CPACK_COMPONENTS_ALL runtime)
+  # Add tests component if INSTALL_TESTS is enabled
+  if(AQLPROFILE_INSTALL_TESTS)
+    list(APPEND CPACK_COMPONENTS_ALL tests)
+  endif()
 endif()
 set ( CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc." )
 set ( CPACK_PACKAGE_VERSION_MAJOR ${BUILD_VERSION_MAJOR} )
