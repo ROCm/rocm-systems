@@ -25,7 +25,7 @@ SET(AQLPROFILE_MEMORYMANAGER_SOURCES
 )
 
 target_sources(gfx9-memory-manager-test PRIVATE ${AQLPROFILE_MEMORYMANAGER_SOURCES})
-target_include_directories(gfx9-memory-manager-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR})
+target_include_directories(gfx9-memory-manager-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR} ${LIB_DIR}/core/include)
 target_link_libraries(
     gfx9-memory-manager-test
     PRIVATE
@@ -51,7 +51,7 @@ SET(AQLPROFILE_TEST_SOURCES
 )
 
 target_sources(aqlprofile-test PRIVATE ${AQLPROFILE_TEST_SOURCES})
-target_include_directories(aqlprofile-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR})
+target_include_directories(aqlprofile-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR} ${LIB_DIR}/core/include)
 target_link_libraries(
     aqlprofile-test
     PRIVATE
@@ -79,7 +79,7 @@ SET(AQLPROFILE_COMMAND_BUFFER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/command_buffer_tests.cpp
 )
 target_sources(command-buffer-test PRIVATE ${AQLPROFILE_COMMAND_BUFFER_SOURCES})
-target_include_directories(command-buffer-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR})
+target_include_directories(command-buffer-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR} ${LIB_DIR}/core/include)
 target_link_libraries(
     command-buffer-test
     PRIVATE
@@ -104,7 +104,7 @@ SET(AQLPROFILE_COUNTERS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/counter_tests.cpp
 )
 target_sources(counters-test PRIVATE ${AQLPROFILE_COUNTERS_SOURCES})
-target_include_directories(counters-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR})
+target_include_directories(counters-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR} ${LIB_DIR}/core/include)
 target_link_libraries(
     counters-test
     PRIVATE
