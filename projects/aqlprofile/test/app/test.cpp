@@ -22,7 +22,7 @@
 
 
 #include "hsa/hsa_ext_amd.h"
-#include "aql_profile_v2.h"
+#include "aqlprofile-sdk/aql_profile_v2.h"
 #include <stdlib.h>
 
 #include <string>

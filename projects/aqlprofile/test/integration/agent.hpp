@@ -38,8 +38,7 @@
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
 #include <hsa/hsa_ven_amd_aqlprofile.h>
-//#include "/opt/rocm/include/aqlprofile-sdk/aql_profile_v2.h"
-#include "aql_profile_v2.h"
+#include "aqlprofile-sdk/aql_profile_v2.h"
 
 #define CHECK_HSA(x) if ((x) != HSA_STATUS_SUCCESS) { std::cerr << __FILE__ << " error at " << __LINE__ << std::endl; exit(-1); }
 

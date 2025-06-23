@@ -1,5 +1,5 @@
 set(AQLPROFILE_HEADER_FILES
-  aql_profile_v2.h
+  aqlprofile-sdk/aql_profile_v2.h
 )
 
 install(
