@@ -468,6 +468,8 @@ def main(argv=None):
         "ROCPROF_LIST_AVAIL_TOOL_LIBRARY", ROCPROF_LIST_AVAIL_TOOL_LIBRARY
     )
     args = parse_arguments(argv)
+    if argv is None or len(argv) == 0:
+        avail.fatal_error("No arguments provided")
     if args.command:
         args.func(args)
 
