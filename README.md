@@ -1,4 +1,4 @@
-# ROCm Systems Profiler: Application Profiling, Tracing, and Analysis
+# ROCm Systems Profiler: Application profiling, tracing, and analysis
 
 [![Ubuntu 20.04 with GCC, ROCm, and MPI](https://github.com/ROCm/rocprofiler-systems/actions/workflows/ubuntu-focal.yml/badge.svg)](https://github.com/ROCm/rocprofiler-systems/actions/workflows/ubuntu-focal.yml)
 [![Ubuntu 22.04 (GCC, Python, ROCm)](https://github.com/ROCm/rocprofiler-systems/actions/workflows/ubuntu-jammy.yml/badge.svg)](https://github.com/ROCm/rocprofiler-systems/actions/workflows/ubuntu-jammy.yml)
@@ -23,7 +23,7 @@ such as the memory usage, page-faults, and context-switches, and thread-level me
 The documentation source files reside in the [`/docs`](/docs) folder of this repository. For information on contributing to the documentation, see
 [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html)
 
-### Data Collection Modes
+### Data collection modes
 
 - Dynamic instrumentation
   - Runtime instrumentation
@@ -37,7 +37,7 @@ The documentation source files reside in the [`/docs`](/docs) folder of this rep
 - Causal profiling
   - Quantifies the potential impact of optimizations in parallel codes
 
-### Data Analysis
+### Data analysis
 
 - High-level summary profiles with mean/min/max/stddev statistics
   - Low overhead, memory efficient
@@ -46,7 +46,7 @@ The documentation source files reside in the [`/docs`](/docs) folder of this rep
   - Every individual event/measurement
 - Application speedup predictions resulting from potential optimizations in functions and lines of code (causal profiling)
 
-### Parallelism API Support
+### Parallelism API support
 
 - HIP
 - HSA
@@ -55,7 +55,7 @@ The documentation source files reside in the [`/docs`](/docs) folder of this rep
 - Kokkos-Tools (KokkosP)
 - OpenMP-Tools (OMPT)
 
-### GPU Metrics
+### GPU metrics
 
 - GPU hardware counters
 - HIP API tracing
@@ -71,10 +71,11 @@ The documentation source files reside in the [`/docs`](/docs) folder of this rep
   - Utilization
   - VCN Utilization
   - JPEG Utilization
-  
-  Note: The availability of VCN and JPEG engine utilization depends on device support for different ASICs. If unsupported, all values for VCN_ACTIVITY and JPEG_ACTIVITY will be reported as N/A in the output of `amd-smi metric --usage`.
 
-### CPU Metrics
+> [!NOTE]
+> The availability of VCN and JPEG engine utilization depends on device support for different ASICs. If unsupported, all values for VCN_ACTIVITY and JPEG_ACTIVITY will be reported as N/A in the output of `amd-smi metric --usage`.
+
+### CPU metrics
 
 - CPU hardware counters sampling and profiles
 - CPU frequency sampling
@@ -92,7 +93,7 @@ The documentation source files reside in the [`/docs`](/docs) folder of this rep
 - I/O metrics
 - ... many more
 
-## Quick Start
+## Quick start
 
 ### Installation
 
@@ -115,29 +116,94 @@ See the [ROCm Systems Profiler installation guide](https://rocm.docs.amd.com/pro
 
 ### Setup
 
-> NOTE: Replace `/opt/rocprofiler-systems` below with installation prefix as necessary.
+> [!NOTE]
+> Replace `/opt/rocprofiler-systems` below with installation prefix as necessary.
 
-- Option 1: Source `setup-env.sh` script
+- **Option 1**: Source `setup-env.sh` script
 
 ```bash
 source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
 ```
 
-- Option 2: Load modulefile
+- **Option 2**: Load modulefile
 
 ```bash
 module use /opt/rocprofiler-systems/share/modulefiles
 module load rocprofiler-systems
 ```
 
-- Option 3: Manual
+- **Option 3**: Manual
 
 ```bash
 export PATH=/opt/rocprofiler-systems/bin:${PATH}
 export LD_LIBRARY_PATH=/opt/rocprofiler-systems/lib:${LD_LIBRARY_PATH}
 ```
 
-### ROCm Systems Profiler Settings
+### Testing environment
+
+The `build-docker` script can be used to create a testing environment. To see the available options, use the following commands:
+
+```shell
+cd docker
+./build-docker.sh --help
+```
+
+**Example:** To set up an Ubuntu 24.04 + ROCm 6.4 + Python 3.12 environment for building and testing, run the following commands:
+
+```shell
+cd docker
+./build-docker.sh --distro ubuntu --versions 24.04                               \
+        --rocm-versions 6.4 --python-versions 12 --retry 1
+docker run -v "$(cd .. && pwd)":/home/development                                \
+        -it -w /home/development                                                 \
+        --device /dev/kfd --device /dev/dri                                      \
+        rocm/rocprofiler-systems:release-base-ubuntu-24.04-rocm-6.4
+```
+
+Inside the container, clean, build, and install the project with testing enabled using the following commands:
+
+```shell
+rm -rf rocprof-sys-build
+cmake -B rocprof-sys-build -S .                                                  \
+       -D CMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems                          \
+       -D ROCPROFSYS_USE_PYTHON=ON      -D ROCPROFSYS_BUILD_DYNINST=ON           \
+       -D ROCPROFSYS_BUILD_TBB=ON       -D ROCPROFSYS_BUILD_BOOST=ON             \
+       -D ROCPROFSYS_BUILD_ELFUTILS=ON  -D ROCPROFSYS_BUILD_LIBIBERTY=ON         \
+       -D ROCPROFSYS_BUILD_TESTING=ON
+cmake --build rocprof-sys-build --target all --parallel 8
+cmake --build rocprof-sys-build --target install
+source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
+```
+
+> [!NOTE]
+> If you see "dubious ownership" Git errors when working in the container, run:
+>
+> ```shell
+> git config --global --add safe.directory /home/development
+> ```
+>
+> and
+>
+> ```shell
+> git config --global --add safe.directory /home/development/external/timemory
+> ```
+
+Then, use the following command to start automated testing:
+
+```shell
+ctest --test-dir rocprof-sys-build --output-on-failure
+```
+
+To enable MPI testing inside the container, set the following environment variables:
+
+```shell
+export OMPI_ALLOW_RUN_AS_ROOT=1
+export OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
+```
+
+For manual testing, you can find the executables in `rocprof-sys-build/bin`.
+
+### ROCm Systems Profiler settings
 
 Generate a rocprofiler-systems configuration file using `rocprof-sys-avail -G rocprof-sys.cfg`. Optionally, use `rocprof-sys-avail -G rocprof-sys.cfg --all` for
 a verbose configuration file with descriptions, categories, etc. Modify the configuration file as desired, e.g. enable
@@ -160,7 +226,7 @@ Once the configuration file is adjusted to your preferences, either export the p
 or place this file in `${HOME}/.rocprof-sys.cfg` to ensure these values are always read as the default. If you wish to change any of these settings,
 you can override them via environment variables or by specifying an alternative `ROCPROFSYS_CONFIG_FILE`.
 
-### Call-Stack Sampling
+### Call-Stack sampling
 
 The `rocprof-sys-sample` executable is used to execute call-stack sampling on a target application without binary instrumentation.
 Use a double-hypen (`--`) to separate the command-line arguments for `rocprof-sys-sample` from the target application and it's arguments.
@@ -171,7 +237,7 @@ rocprof-sys-sample <rocprof-sys-options> -- <exe> <exe-options>
 rocprof-sys-sample -f 1000 -- ls -la
 ```
 
-### Binary Instrumentation
+### Binary instrumentation
 
 The `rocprof-sys-instrument` executable is used to instrument an existing binary. Call-stack sampling can be enabled alongside
 the execution an instrumented binary, to help "fill in the gaps" between the instrumentation via setting the `ROCPROFSYS_USE_SAMPLING`
@@ -183,7 +249,7 @@ rocprof-sys-instrument --help
 rocprof-sys-instrument <rocprof-sys-options> -- <exe-or-library> <exe-options>
 ```
 
-#### Binary Rewrite
+#### Binary rewrite
 
 Rewrite the text section of an executable or library with instrumentation:
 
@@ -200,8 +266,8 @@ rocprof-sys-instrument -R '^hip' -o ./lib/libamdhip64.so.4 -- /opt/rocm/lib/liba
 export LD_LIBRARY_PATH=${PWD}/lib:${LD_LIBRARY_PATH}
 ```
 
-> ***Verify via `ldd` that your executable will load the instrumented library -- if you built your executable with***
-> ***an RPATH to the original library's directory, then prefixing `LD_LIBRARY_PATH` will have no effect.***
+> [!NOTE]
+> Verify via `ldd` that your executable will load the instrumented library. If you built your executable with an RPATH to the original library's directory, then prefixing `LD_LIBRARY_PATH` will have no effect.
 
 Once you have rewritten your executable and/or libraries with instrumentation, you can just run the (instrumented) executable
 or exectuable which loads the instrumented libraries normally, e.g.:
@@ -236,7 +302,7 @@ export ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB=200000
 rocprof-sys-run -- ./app.inst
 ```
 
-#### Runtime Instrumentation
+#### Runtime instrumentation
 
 Runtime instrumentation will not only instrument the text section of the executable but also the text sections of the
 linked libraries. Thus, it may be useful to exclude those libraries via the `-ME` (module exclude) regex option
@@ -248,7 +314,7 @@ rocprof-sys-instrument -ME '^(libhsa-runtime64|libz\\.so)' -- /path/to/app
 rocprof-sys-instrument -E 'rocr::atomic|rocr::core|rocr::HSA' --  /path/to/app
 ```
 
-### Python Profiling and Tracing
+### Python profiling and tracing
 
 Use the `rocprof-sys-python` script to profile/trace Python interpreter function calls.
 Use a double-hypen (`--`) to separate the command-line arguments for `rocprof-sys-python` from the target script and it's arguments.
@@ -259,7 +325,8 @@ rocprof-sys-python <rocprof-sys-options> -- <python-script> <script-args>
 rocprof-sys-python -- ./script.py
 ```
 
-Please note, the first argument after the double-hyphen *must be a Python script*, e.g. `rocprof-sys-python -- ./script.py`.
+> [!NOTE]
+> The first argument after the double-hyphen must be a Python script, e.g. `rocprof-sys-python -- ./script.py`.
 
 If you need to specify a specific python interpreter version, use `rocprof-sys-python-X.Y` where `X.Y` is the Python
 major and minor version:
@@ -294,7 +361,7 @@ def spam():
 Each time `spam` is called during profiling, the profiling results will include 1 entry for `spam` and 1 entry
 for `foo` via the direct call within `spam`. There will be no entries for `bar` or the `foo` invocation within it.
 
-### Trace Visualization
+### Trace visualization
 
 - Visit [ui.perfetto.dev](https://ui.perfetto.dev) in the web-browser
 - Select "Open trace file" from panel on the left
@@ -308,7 +375,7 @@ for `foo` via the direct call within `spam`. There will be no entries for `bar` 
 
 ![rocprof-sys-user-api](docs/data/rocprof-sys-user-api.png)
 
-## Using Perfetto tracing with System Backend
+## Using Perfetto tracing with system backend
 
 Perfetto tracing with the system backend supports multiple processes writing to the same
 output file. Thus, it is a useful technique if rocprofiler-systems is built with partial MPI support
@@ -328,8 +395,8 @@ traced --background
 perfetto --out ./rocprof-sys-perfetto.proto --txt -c ${ROCPROFSYS_ROOT}/share/perfetto.cfg --background
 ```
 
-> ***NOTE: if the perfetto tools were installed by rocprofiler-systems, replace `traced` with `rocprof-sys-perfetto-traced` and***
-> ***`perfetto` with `rocprof-sys-perfetto`.***
+> [!NOTE]
+> If the perfetto tools were installed by rocprofiler-systems, replace `traced` with `rocprof-sys-perfetto-traced` and `perfetto` with `rocprof-sys-perfetto`.
 
 Configure rocprofiler-systems to use the perfetto system backend via the `--perfetto-backend` option of `rocprof-sys-run`:
 
