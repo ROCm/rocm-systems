@@ -4,14 +4,15 @@ include(GoogleTest)
 find_package(GTest REQUIRED)
 include_directories(${GTEST_INCLUDE_DIRS})
 
-
-find_library(
-    hsa-amd-aqlprofile64
-    REQUIRED
-    NAMES hsa-amd-aqlprofile64 hsa-amd-aqlprofile
-    HINTS /opt/rocm ${CMAKE_BINARY_DIR} ${CMAKE_INSTALL_PREFIX}
-    PATHS /opt/rocm
-    PATH_SUFFIXES lib)
+if(NOT DEFINED AQLPROFILE_TARGET)
+    find_library(
+        AQLPROFILE_TARGET
+        REQUIRED
+        NAMES hsa-amd-aqlprofile64 hsa-amd-aqlprofile
+        HINTS /opt/rocm ${CMAKE_INSTALL_PREFIX}
+        PATHS /opt/rocm
+        PATH_SUFFIXES lib)
+endif()
 
 # Add test for memory manager
 add_executable(gfx9-memory-manager-test)
@@ -105,7 +106,7 @@ target_link_libraries(
     counters-test
     PRIVATE
             hsa-runtime64::hsa-runtime64
-            ${hsa-amd-aqlprofile64}
+            ${AQLPROFILE_TARGET}
             GTest::gtest
             GTest::gtest_main
             GTest::gmock

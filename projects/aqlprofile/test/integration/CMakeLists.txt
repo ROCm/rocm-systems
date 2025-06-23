@@ -3,12 +3,15 @@ project(Aqlprofile_v2_tests LANGUAGES C CXX HIP)
 set(CMAKE_CXX_STANDARD 17)
 
 
-find_library(
-    hsa-amd-aqlprofile64
-    REQUIRED
-    NAMES hsa-amd-aqlprofile64 hsa-amd-aqlprofile64
-    HINTS /opt/rocm/lib /opt/rocm
-    PATHS /opt/rocm/lib /opt/rocm)
+if(NOT DEFINED AQLPROFILE_TARGET)
+    find_library(
+        AQLPROFILE_TARGET
+        REQUIRED
+        NAMES hsa-amd-aqlprofile64 hsa-amd-aqlprofile
+        HINTS /opt/rocm ${CMAKE_INSTALL_PREFIX}
+        PATHS /opt/rocm
+        PATH_SUFFIXES lib)
+endif()
 
 find_package(
     hsa-runtime64
@@ -51,13 +54,13 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O1" )
 add_library(intercept SHARED)
 target_include_directories(intercept PRIVATE ${HSA_RUNTIME_INC_PATH} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src/core/include/  /opt/rocm/include)
 target_sources(intercept PRIVATE intercept.cpp)
-target_link_libraries(intercept PRIVATE hsa-runtime64::hsa-runtime64 ${hsa-amd-aqlprofile64})
+target_link_libraries(intercept PRIVATE hsa-runtime64::hsa-runtime64 ${AQLPROFILE_TARGET})
 target_link_options(intercept PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exportmap -Wl,--no-undefined)
 target_compile_definitions(intercept PUBLIC AMD_INTERNAL_BUILD)
 add_executable(testv2)
 target_sources(testv2 PRIVATE main.cpp workload.cpp counter.cpp agent.cpp)
 target_include_directories(testv2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src/core/include/ ${HSA_RUNTIME_INC_PATH} /opt/rocm/include)
-target_link_libraries(testv2 PRIVATE hsa-runtime64::hsa-runtime64 ${hsa-amd-aqlprofile64})
+target_link_libraries(testv2 PRIVATE hsa-runtime64::hsa-runtime64 ${AQLPROFILE_TARGET})
 target_compile_definitions(testv2 PUBLIC AMD_INTERNAL_BUILD)
 
 # Add a PRELOAD environment with libintercept
