@@ -786,7 +786,7 @@
         "Unit_hipEventCreateWithFlags_DisableSystemFence_CohHstMem",
     #endif
     #if defined amdgcnspirv
-        "=== failed",
+        "=== (Failed)",
         "Unit_test_compressed_codeobject",
         "Unit_hipModuleLoadData_Positive_Basic",
         "Unit_hipExtModuleLaunchKernel_UniformWorkGroup",
