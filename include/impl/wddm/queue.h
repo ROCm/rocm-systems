@@ -237,8 +237,8 @@ private:
   uint64_t GetKernelObjAddr(uint64_t addr) const;
   void InitScratchSRD();
   GpuMemoryHandle amd_queue_mem_;
-  amd_queue_t *amd_queue_;
-  amd_queue_t *amd_queue_rocr_;
+  amd_queue_v2_t *amd_queue_;
+  amd_queue_v2_t *amd_queue_rocr_;
   uint64_t doorbell_signal_value_;
   volatile std::atomic<int64_t> *error_code_;
   std::thread aql_to_pm4_thread_;

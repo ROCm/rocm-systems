@@ -19,7 +19,7 @@ struct DispatchInfo {
   void                          *pEntry;
   const amd_kernel_code_t       *pKernelObject;
   uint32_t                      ldsBlks;
-  amd_queue_t                   *pAmdQueue;
+  amd_queue_v2_t                *pAmdQueue;
   bool                          wave32;
   uint32_t                      srd;
   void                          *pScratchBase;
