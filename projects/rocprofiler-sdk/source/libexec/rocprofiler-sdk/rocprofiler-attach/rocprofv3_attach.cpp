@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,25 +32,6 @@ namespace common = ::rocprofiler::common;
 
 namespace
 {
-
-#define ROCPROFILER_CALL(result, msg)                                                              \
-    {                                                                                              \
-        rocprofiler_status_t ROCPROFILER_VARIABLE(CHECKSTATUS, __LINE__) = result;                 \
-        if(ROCPROFILER_VARIABLE(CHECKSTATUS, __LINE__) != ROCPROFILER_STATUS_SUCCESS)              \
-        {                                                                                          \
-            std::string status_msg =                                                               \
-                rocprofiler_get_status_string(ROCPROFILER_VARIABLE(CHECKSTATUS, __LINE__));        \
-            std::cerr << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] " << msg            \
-                      << " failed with error code " << ROCPROFILER_VARIABLE(CHECKSTATUS, __LINE__) \
-                      << ": " << status_msg << "\n"                                                \
-                      << std::flush;                                                               \
-            std::stringstream errmsg{};                                                            \
-            errmsg << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] " << msg " failure ("  \
-                   << status_msg << ")";                                                           \
-            throw std::runtime_error(errmsg.str());                                                \
-        }                                                                                          \
-    }
-
     std::unique_ptr<rocprofiler::attach::PTraceSession> ptrace_session;
 }
 
@@ -83,6 +64,7 @@ attach(uint32_t pid)
     if (!ptrace_session->attach())
     {
         ROCP_ERROR << "Attachment failed to pid " << pid;
+        return;
     }
     ROCP_TRACE << "Attachment success to pid " << pid;
 
@@ -108,6 +90,7 @@ attach(uint32_t pid)
                 environment_buffer.emplace_back(*var++);
             }
             environment_buffer.emplace_back(0);
+
             var++;
             while(*var)
             {
@@ -120,25 +103,49 @@ attach(uint32_t pid)
         std::copy(var_count_bytes, var_count_bytes + 4, environment_buffer.data());
     }
 
-    // now, allocate a buffer to store the environment variables
+    // Now, allocate a buffer to store the environment variables
     void* environment_buffer_addr = nullptr;
-    ptrace_session->simple_mmap(environment_buffer_addr, environment_buffer.size());
+    if (!ptrace_session->simple_mmap(environment_buffer_addr, environment_buffer.size()))
+    {
+        ROCP_ERROR << "Failed to call mmap in target process";
+        return;
+    }
     ROCP_TRACE << "mmap'd in target process at " << environment_buffer_addr;
 
-    // write to that buffer
-    ptrace_session->stop();
-    ptrace_session->write(reinterpret_cast<size_t>(environment_buffer_addr), environment_buffer, environment_buffer.size());
-    ptrace_session->cont();
+    // Write to that buffer
+    if (!ptrace_session->stop())
+    {
+        ROCP_ERROR << "Failed to stop target process for environment buffer writing";
+        return;
+    }
+    if (!ptrace_session->write(reinterpret_cast<size_t>(environment_buffer_addr), environment_buffer, environment_buffer.size()))
+    {
+        ROCP_ERROR << "Failed to write environment buffer in target process";
+        return;
+    }
+    if (!ptrace_session->cont())
+    {
+        ROCP_ERROR << "Failed to continue target process for environment buffer writing";
+        return;
+    }
     ROCP_TRACE << "wrote environment buffer to target process";
 
-    // execute the attach function with the buffer addr as parameter
-    ptrace_session->call_function("librocprofiler-register.so", "rocprofiler_register_attach", environment_buffer_addr);
+    // Execute the attach function with the buffer addr as parameter
+    if (!ptrace_session->call_function("librocprofiler-register.so", "rocprofiler_register_attach", environment_buffer_addr))
+    {
+        ROCP_ERROR << "Failed to call attach function in target process " << pid;
+        return;
+    }
 }
 
 void
 detach()
 {
-    ptrace_session->call_function("librocprofiler-register.so", "rocprofiler_register_detach");
+    if (!ptrace_session->call_function("librocprofiler-register.so", "rocprofiler_register_detach"))
+    {
+        ROCP_ERROR << "Failed to call detach function in target process";
+        // don't return, try to detach anyways
+    }
     ptrace_session->stop();
     ptrace_session->detach();
     ptrace_session.reset();
