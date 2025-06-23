@@ -62,6 +62,7 @@ class AmdSmiLibraryException(AmdSmiException):
             amdsmi_wrapper.AMDSMI_STATUS_DRM_ERROR : "AMDSMI_STATUS_DRM_ERROR - Error when called libdrm",
             amdsmi_wrapper.AMDSMI_STATUS_API_FAILED : "AMDSMI_STATUS_API_FAILED - API call failed",
             amdsmi_wrapper.AMDSMI_STATUS_TIMEOUT : "AMDSMI_STATUS_TIMEOUT - Timeout in API call",
+            amdsmi_wrapper.AMDSMI_STATUS_RETRY : "AMDSMI_STATUS_RETRY - Retry operation",
             amdsmi_wrapper.AMDSMI_STATUS_NO_PERM : "AMDSMI_STATUS_NO_PERM - Permission Denied",
             amdsmi_wrapper.AMDSMI_STATUS_INTERRUPT : "AMDSMI_STATUS_INTERRUPT - Interrupt ocurred during execution",
             amdsmi_wrapper.AMDSMI_STATUS_IO : "AMDSMI_STATUS_IO - I/O Error",
@@ -102,6 +103,11 @@ class AmdSmiLibraryException(AmdSmiException):
         self.err_info = switch.get(self.err_code, "AMDSMI_STATUS_UNKNOWN_ERROR - An unknown error occurred")
 
 
+class AmdSmiRetryException(AmdSmiLibraryException):
+    def __init__(self):
+        super().__init__(amdsmi_wrapper.AMDSMI_STATUS_RETRY)
+
+
 class AmdSmiTimeoutException(AmdSmiLibraryException):
     def __init__(self):
         super().__init__(amdsmi_wrapper.AMDSMI_STATUS_TIMEOUT)
@@ -139,20 +145,3 @@ class AmdSmiKeyException(AmdSmiException):
 
     def __str__(self):
         return self.err_msg
-
-
-class AmdSmiBdfFormatException(AmdSmiException):
-    def __init__(self, bdf):
-        super().__init__()
-        self.bdf = bdf
-
-    def __str__(self):
-        return (
-            "Wrong BDF format: {}. \n"
-            + "BDF string should be: <domain>:<bus>:<device>.<function>\n"
-            + " or <bus>:<device>.<function> in hexcode format.\n"
-            + "Where:\n\t<domain> is 4 hex digits long from 0000-FFFF interval\n"
-            + "\t<bus> is 2 hex digits long from 00-FF interval\n"
-            + "\t<device> is 2 hex digits long from 00-1F interval\n"
-            + "\t<function> is 1 hex digit long from 0-7 interval"
-        ).format(self.bdf)

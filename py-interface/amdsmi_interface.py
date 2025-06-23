@@ -3193,10 +3193,18 @@ def amdsmi_get_gpu_xcd_counter(processor_handle: processor_handle_t) -> int:
 def amdsmi_get_processor_handle_from_bdf(bdf):
     if not isinstance(bdf, Any):
         raise AmdSmiParameterException(bdf, Any)
-    bdf = _parse_bdf(bdf)
-    if bdf is None:
-        raise AmdSmiBdfFormatException(bdf)
-    amdsmi_bdf = _make_amdsmi_bdf_from_list(bdf)
+    parsed_bdf = _parse_bdf(bdf)
+    if parsed_bdf is None:
+        raise AmdSmiParameterException(bdf, Any, 
+            msg="Wrong BDF format: {}. \n"
+            + "BDF string should be: <domain>:<bus>:<device>.<function>\n"
+            + " or <bus>:<device>.<function> in hexcode format.\n"
+            + "Where:\n\t<domain> is 4 hex digits long from 0000-FFFF interval\n"
+            + "\t<bus> is 2 hex digits long from 00-FF interval\n"
+            + "\t<device> is 2 hex digits long from 00-1F interval\n"
+            + "\t<function> is 1 hex digit long from 0-7 interval"
+        ).format(bdf)
+    amdsmi_bdf = _make_amdsmi_bdf_from_list(parsed_bdf)
     processor_handle = amdsmi_wrapper.amdsmi_processor_handle()
     _check_res(amdsmi_wrapper.amdsmi_get_processor_handle_from_bdf(
         amdsmi_bdf, ctypes.byref(processor_handle)))

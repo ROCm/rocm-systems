@@ -206,7 +206,7 @@ Output: device handle object
 Exceptions that can be thrown by `amdsmi_get_processor_handle_from_bdf` function:
 
 * `AmdSmiLibraryException`
-* `AmdSmiBdfFormatException`
+* `AmdSmiParameterException`
 
 Example:
 
