@@ -23,6 +23,7 @@ target_include_directories(
 target_link_libraries(
     rocprofiler-sdk-attach-shared-library
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers
+            rocprofiler-sdk::rocprofiler-sdk-hip-nolink
             rocprofiler-sdk::rocprofiler-sdk-build-flags
             rocprofiler-sdk::rocprofiler-sdk-memcheck
             rocprofiler-sdk::rocprofiler-sdk-common-library
