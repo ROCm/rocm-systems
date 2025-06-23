@@ -54,19 +54,21 @@ if ( "${CMAKE_BUILD_TYPE}" STREQUAL release )
   add_custom_command ( TARGET ${AQLPROFILE_TARGET} POST_BUILD COMMAND ${CMAKE_STRIP} *aqlprofile*.so )
 endif ()
 
+# Enable/disable test
+option(AQLPROFILE_BUILD_TESTS "Build tests for AQLProfile" OFF)
+
 ## Build tests
+if(AQLPROFILE_BUILD_TESTS)
 enable_testing()
 include(CTest)
 set ( TEST_BINARY_DIR ${PROJECT_BINARY_DIR}/test )
 add_subdirectory ( ${TEST_DIR} ${TEST_BINARY_DIR} )
+endif()
 
 ## Add the install directives for the runtime library.
 set ( DEST_NAME ${AQLPROFILE_NAME} )
 install ( TARGETS ${AQLPROFILE_TARGET} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT runtime )
 install ( TARGETS ${AQLPROFILE_TARGET} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan )
-
-# Enable/disable test
-option(AQLPROFILE_BUILD_TESTS "Build tests for AQLProfile" OFF)
 
 ## Add the packaging directives for the runtime library.
 if ( ENABLE_ASAN_PACKAGING )
@@ -178,8 +180,10 @@ cpack_add_component(
     DESCRIPTION "ASAN libraries for the AQLProfile"
     DEPENDS asan)
 
+if(AQLPROFILE_BUILD_TESTS)
 cpack_add_component(
     tests
     DISPLAY_NAME "Tests"
     DESCRIPTION "Tests for the AQLProfile"
     DEPENDS runtime)
+endif()

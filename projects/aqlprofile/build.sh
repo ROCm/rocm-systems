@@ -26,6 +26,9 @@ while [ 1 ] ; do
   elif [[ "$1" = "-cb" || "$1" = "--clean-build" ]] ; then
     TO_CLEAN=yes
     shift
+  elif [[ "$1" = "-bt" || "$1" = "--build-tests" ]] ; then
+    BUILD_TESTS=yes
+    shift
   elif [[ "$1" = "-"* || "$1" = "--"* ]] ; then
     echo -e "Wrong option \"$1\", Please use the following options:\n"
     usage
@@ -39,7 +42,7 @@ umask 022
 
 if [ -z "$AQLPROFILE_ROOT" ]; then AQLPROFILE_ROOT=$SRC_DIR; fi
 if [ -z "$BUILD_DIR" ] ; then BUILD_DIR=build; fi
-if [ -z "$BUILD_TYPE" ] ; then BUILD_TYPE="RelWithDebInfo"; fi
+if [ -z "$BUILD_TYPE" ] ; then BUILD_TYPE="release"; fi
 if [ -z "$PACKAGE_ROOT" ] ; then PACKAGE_ROOT=$ROCM_PATH; fi
 if [ -z "$PREFIX_PATH" ] ; then PREFIX_PATH=$PACKAGE_ROOT; fi
 if [ -z "$HIP_VDI" ] ; then HIP_VDI=0; fi
@@ -53,9 +56,12 @@ if [ "$TO_CLEAN" = "yes" ] ; then rm -rf $BUILD_DIR; fi
 mkdir -p $BUILD_DIR
 pushd $BUILD_DIR
 
+AQLPROFILE_BUILD_TESTS=OFF
+if [ "$BUILD_TESTS" = "yes" ] ; then AQLPROFILE_BUILD_TESTS=ON; fi
+
 cmake \
     -DCMAKE_EXPORT_COMPILE_COMMANDS=TRUE \
-    -DCMAKE_BUILD_TYPE=${BUILD_TYPE:-'RelWithDebInfo'} \
+    -DCMAKE_BUILD_TYPE=${BUILD_TYPE:-'release'} \
     -DCMAKE_PREFIX_PATH="$PREFIX_PATH" \
     -DCMAKE_INSTALL_PREFIX="$PACKAGE_ROOT" \
     -DCMAKE_SHARED_LINKER_FLAGS="$LD_RUNPATH_FLAG" \
@@ -65,7 +71,7 @@ cmake \
     -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=FALSE \
     -DCPACK_GENERATOR="STGZ" \
     -DGPU_TARGETS="$GPU_LIST" \
-    -DAQLPROFILE_BUILD_TESTS=OFF \
+    -DAQLPROFILE_BUILD_TESTS=$AQLPROFILE_BUILD_TESTS \
     -DCPACK_OBJCOPY_EXECUTABLE="${PACKAGE_ROOT}/llvm/bin/llvm-objcopy" \
     -DCPACK_READELF_EXECUTABLE="${PACKAGE_ROOT}/llvm/bin/llvm-readelf" \
     -DCPACK_STRIP_EXECUTABLE="${PACKAGE_ROOT}/llvm/bin/llvm-strip" \
@@ -76,8 +82,11 @@ popd
 
 MAKE_OPTS="-j -C $AQLPROFILE_ROOT/$BUILD_DIR"
 
-cmake --build "$BUILD_DIR" -- $MAKE_OPTS all mytest
-cmake --build "$BUILD_DIR" -- $MAKE_OPTS test
+cmake --build "$BUILD_DIR" -- $MAKE_OPTS all
+if [ "$BUILD_TESTS" = "yes" ] ; then
+  cmake --build "$BUILD_DIR" -- $MAKE_OPTS mytest
+  cmake --build "$BUILD_DIR" -- $MAKE_OPTS test
+fi
 cmake --build "$BUILD_DIR" -- $MAKE_OPTS package
 
 exit 0

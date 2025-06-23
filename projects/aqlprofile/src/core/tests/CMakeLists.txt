@@ -1,4 +1,4 @@
-# write a CMakeLists.txt file for the gfx9_factory_test 
+# write a CMakeLists.txt file for the gfx9_factory_test
 # that includes the necessary libraries and sets the properties for the test
 include(GoogleTest)
 find_package(GTest REQUIRED)
@@ -9,10 +9,11 @@ find_library(
     hsa-amd-aqlprofile64
     REQUIRED
     NAMES hsa-amd-aqlprofile64 hsa-amd-aqlprofile
-    HINTS /opt/rocm/lib /opt/rocm
-    PATHS /opt/rocm/lib /opt/rocm)
+    HINTS /opt/rocm ${CMAKE_BINARY_DIR} ${CMAKE_INSTALL_PREFIX}
+    PATHS /opt/rocm
+    PATH_SUFFIXES lib)
 
-# Add test for memory manager 
+# Add test for memory manager
 add_executable(gfx9-memory-manager-test)
 SET(AQLPROFILE_MEMORYMANAGER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/memorymanager_tests.cpp
@@ -23,7 +24,7 @@ target_sources(gfx9-memory-manager-test PRIVATE ${AQLPROFILE_MEMORYMANAGER_SOURC
 target_include_directories(gfx9-memory-manager-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR})
 target_link_libraries(
     gfx9-memory-manager-test
-    PRIVATE 
+    PRIVATE
             hsa-runtime64::hsa-runtime64
             GTest::gtest
             GTest::gtest_main)
@@ -39,7 +40,7 @@ set_tests_properties(
     ${gfx9-memory-manager_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
                                  "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
 
-# Add test for aql profile 
+# Add test for aql profile
 add_executable(aqlprofile-test)
 SET(AQLPROFILE_TEST_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/aql_profile_tests.cpp
@@ -49,7 +50,7 @@ target_sources(aqlprofile-test PRIVATE ${AQLPROFILE_TEST_SOURCES})
 target_include_directories(aqlprofile-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR})
 target_link_libraries(
     aqlprofile-test
-    PRIVATE 
+    PRIVATE
             hsa-runtime64::hsa-runtime64
             GTest::gtest
             GTest::gtest_main
@@ -77,7 +78,7 @@ target_sources(command-buffer-test PRIVATE ${AQLPROFILE_COMMAND_BUFFER_SOURCES})
 target_include_directories(command-buffer-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR})
 target_link_libraries(
     command-buffer-test
-    PRIVATE 
+    PRIVATE
             hsa-runtime64::hsa-runtime64
             GTest::gtest
             GTest::gtest_main
@@ -102,7 +103,7 @@ target_sources(counters-test PRIVATE ${AQLPROFILE_COUNTERS_SOURCES})
 target_include_directories(counters-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR})
 target_link_libraries(
     counters-test
-    PRIVATE 
+    PRIVATE
             hsa-runtime64::hsa-runtime64
             ${hsa-amd-aqlprofile64}
             GTest::gtest
