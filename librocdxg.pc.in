@@ -1,11 +1,11 @@
-prefix=${pcfiledir}/../..
+prefix=${pcfiledir}/../../..
 exec_prefix=${prefix}
 libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
 includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
 
-Name: libhsakmt
-Description: HSA Kernel Mode Thunk library for AMD KFD support
+Name: librocdxg
+Description: HSA Kernel Mode Thunk library for WSL support
 Version: @LIB_VERSION_STRING@
 
-Libs: -L${libdir} -lhsakmt
+Libs: -L${libdir} -lrocdxg
 Cflags: -I${includedir}

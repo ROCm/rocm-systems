@@ -27,15 +27,14 @@ cmake_minimum_required ( VERSION 3.15 )
 
 set(CMAKE_VERBOSE_MAKEFILE ON)
 
-set ( HSAKMT "hsakmt" )
-set ( HSAKMT_PACKAGE "hsakmt-roct" )
-set ( HSAKMT_COMPONENT "lib${HSAKMT}" )
-set ( HSAKMT_TARGET "${HSAKMT}" )
-set(HSAKMT_STATIC_DRM_TARGET "${HSAKMT_TARGET}-staticdrm")
+set ( ROCDXG "rocdxg" )
+set ( ROCDXG_PACKAGE "rocdxg-roct" )
+set ( ROCDXG_COMPONENT "lib${ROCDXG}" )
+set ( ROCDXG_TARGET "${ROCDXG}" )
 
-project ( ${HSAKMT_TARGET} VERSION 1.9.0)
+project ( ${ROCDXG_TARGET} VERSION 25.20.10)
 
-# Optionally, build HSAKMT with ccache.
+# Optionally, build ROCDXG with ccache.
 set(ROCM_CCACHE_BUILD OFF CACHE BOOL "Set to ON for a ccache enabled build")
 if (ROCM_CCACHE_BUILD)
   find_program(CCACHE_PROGRAM ccache)
@@ -72,45 +71,35 @@ endif ()
 set ( BUILD_VERSION_STRING "${BUILD_VERSION_MAJOR}.${BUILD_VERSION_MINOR}.${BUILD_VERSION_PATCH}" )
 
 ## Compiler flags
-set (HSAKMT_CXX_FLAGS -fPIC -include ${CMAKE_CURRENT_SOURCE_DIR}/src/libhsakmt.h)
+set (ROCDXG_CXX_FLAGS -fPIC -include ${CMAKE_CURRENT_SOURCE_DIR}/src/librocdxg.h)
 
 if ( CMAKE_COMPILER_IS_GNUCC )
-    set ( HSAKMT_CXX_FLAGS "${HSAKMT_CXX_FLAGS}" -Wlogical-op)
+    set ( ROCDXG_CXX_FLAGS "${ROCDXG_CXX_FLAGS}" -Wlogical-op)
 endif ()
-if ( ${HSAKMT_WERROR} )
-    set ( HSAKMT_CXX_FLAGS "${HSAKMT_CXX_FLAGS}" -Werror )
+if ( ${ROCDXG_WERROR} )
+    set ( ROCDXG_CXX_FLAGS "${ROCDXG_CXX_FLAGS}" -Werror )
 endif ()
 if ( "${CMAKE_BUILD_TYPE}" STREQUAL Release )
-    set ( HSAKMT_CXX_FLAGS "${HSAKMT_CXX_FLAGS}" -O2 )
+    set ( ROCDXG_CXX_FLAGS "${ROCDXG_CXX_FLAGS}" -O2 )
 else ()
-    set ( HSAKMT_CXX_FLAGS "${HSAKMT_CXX_FLAGS}" -g )
+    set ( ROCDXG_CXX_FLAGS "${ROCDXG_CXX_FLAGS}" -g )
 endif ()
 
-set ( HSAKMT_LINKER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/src/libhsakmt.ver" )
+set ( ROCDXG_LINKER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/src/librocdxg.ver" )
 
 ## Linker Flags
 ## Add --enable-new-dtags to generate DT_RUNPATH
-set (HSAKMT_LINK_FLAGS "${HSAKMT_LINK_FLAGS} -Wl,--enable-new-dtags -Wl,--version-script=${HSAKMT_LINKER_SCRIPT} -Wl,-soname=${HSAKMT_COMPONENT}.so.${LIB_VERSION_MAJOR} -Wl,-z,nodelete")
+set (ROCDXG_LINK_FLAGS "${ROCDXG_LINK_FLAGS} -Wl,--enable-new-dtags -Wl,--version-script=${ROCDXG_LINKER_SCRIPT} -Wl,-soname=${ROCDXG_COMPONENT}.so.${LIB_VERSION_MAJOR} -Wl,-z,nodelete")
 
-## Address Sanitize Flag
-if ( ${ADDRESS_SANITIZER} )
-    set ( HSAKMT_CXX_FLAGS "${HSAKMT_CXX_FLAGS}" -fsanitize=address )
-    set ( HSAKMT_LINK_FLAGS "${HSAKMT_LINK_FLAGS} -fsanitize=address" )
-    if ( BUILD_SHARED_LIBS )
-        set ( HSAKMT_LINK_FLAGS "${HSAKMT_LINK_FLAGS} -shared-libsan" )
-    else ()
-        set ( HSAKMT_LINK_FLAGS "${HSAKMT_LINK_FLAGS} -static-libsan" )
-    endif ()
+## Linker undefined symbol handling
+if ( CMAKE_COMPILER_IS_GNUCC )
+    set ( ROCDXG_LINK_FLAGS "${ROCDXG_LINK_FLAGS} -Wl,-no-undefined" )
 else ()
-    if ( CMAKE_COMPILER_IS_GNUCC )
-        set ( HSAKMT_LINK_FLAGS "${HSAKMT_LINK_FLAGS} -Wl,-no-undefined" )
-    else ()
-        set ( HSAKMT_LINK_FLAGS "${HSAKMT_LINK_FLAGS} -Wl,-undefined,error" )
-    endif ()
+    set ( ROCDXG_LINK_FLAGS "${ROCDXG_LINK_FLAGS} -Wl,-undefined,error" )
 endif ()
 
 ## Source files
-set ( HSAKMT_SRC "src/debug.cpp"
+set ( ROCDXG_SRC "src/debug.cpp"
                  "src/events.cpp"
                  "src/memory.cpp"
                  "src/libdrm.cpp"
@@ -132,39 +121,34 @@ set ( HSAKMT_SRC "src/debug.cpp"
                  "src/wddm/cmd_util.cpp" )
 
 ## Declare the library target name
-add_library (${HSAKMT_TARGET} STATIC "")
+add_library (${ROCDXG_TARGET} SHARED "")
 
 ## Add sources
-target_sources ( ${HSAKMT_TARGET} PRIVATE ${HSAKMT_SRC} )
+target_sources ( ${ROCDXG_TARGET} PRIVATE ${ROCDXG_SRC} )
 
 ## Add headers.  The public headers need to point at their location in both build and install
 ## directory layouts.  This declaration allows publishing library use data to downstream clients.
-target_include_directories( ${HSAKMT_TARGET}
+target_include_directories( ${ROCDXG_TARGET}
   PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   PRIVATE
   ${WIN_SDK}
-  ${CMAKE_CURRENT_SOURCE_DIR}/src
-  ${CMAKE_CURRENT_SOURCE_DIR}/../runtime )
+  ${CMAKE_CURRENT_SOURCE_DIR}/src )
 
 add_compile_definitions(LINUX __AMD64__ LITTLEENDIAN_CPU HSA_LARGE_MODEL)
-target_link_directories(${HSAKMT_TARGET} PRIVATE ${DXCORE_LIB_PATH})
-target_link_libraries(${HSAKMT_TARGET} PRIVATE dxcore)
 
-target_link_directories(${HSAKMT_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/thunk_proxy)
-target_link_libraries(${HSAKMT_TARGET} PRIVATE thunk_proxy)
+target_link_directories(${ROCDXG_TARGET} PRIVATE ${DXCORE_LIB_PATH})
+target_link_libraries(${ROCDXG_TARGET} PRIVATE dxcore)
 
-if (FALSE)
-target_link_directories(${HSAKMT_TARGET} PRIVATE /opt/rocm/lib)
-target_link_libraries(${HSAKMT_TARGET} PRIVATE hsa-runtime64)
-endif ()
+target_link_directories(${ROCDXG_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/thunk_proxy)
+target_link_libraries(${ROCDXG_TARGET} PRIVATE thunk_proxy)
 
-set_property(TARGET ${HSAKMT_TARGET} PROPERTY LINK_FLAGS ${HSAKMT_LINK_FLAGS})
+set_property(TARGET ${ROCDXG_TARGET} PROPERTY LINK_FLAGS ${ROCDXG_LINK_FLAGS})
 
 ## Set the VERSION and SOVERSION values
-set_property ( TARGET ${HSAKMT_TARGET} PROPERTY VERSION "${LIB_VERSION_STRING}" )
-set_property ( TARGET ${HSAKMT_TARGET} PROPERTY SOVERSION "${LIB_VERSION_MAJOR}" )
+set_property ( TARGET ${ROCDXG_TARGET} PROPERTY VERSION "${LIB_VERSION_STRING}" )
+set_property ( TARGET ${ROCDXG_TARGET} PROPERTY SOVERSION "${LIB_VERSION_MAJOR}" )
 
 find_package(PkgConfig)
 # get OS-info for OS-specific build dependencies
@@ -175,64 +159,63 @@ find_package(PkgConfig)
 find_library(LIBC NAMES c REQUIRED)
 message(STATUS "LIBC:" ${LIBC})
 
-target_link_libraries ( ${HSAKMT_TARGET}
+target_link_libraries ( ${ROCDXG_TARGET}
   PRIVATE pthread rt c ${CMAKE_DL_LIBS}
 )
 
-target_compile_options(${HSAKMT_TARGET} PRIVATE ${HSAKMT_CXX_FLAGS})
+target_compile_options(${ROCDXG_TARGET} PRIVATE ${ROCDXG_CXX_FLAGS})
 
 ## Define default paths and packages.
 if( CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT )
   set ( CMAKE_INSTALL_PREFIX "/opt/rocm" )
 endif()
 set ( CMAKE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX} CACHE STRING "Default installation directory." FORCE )
+set ( CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}"  CACHE STRING "Default packaging prefix." )
+set ( CPACK_GENERATOR "DEB"  CACHE STRING "Default packaging generators." )
 
-# Installs binaries and exports the library usage data to ${HSAKMT_TARGET}Targets
-install ( TARGETS ${HSAKMT_TARGET} EXPORT ${HSAKMT_TARGET}Targets
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan )
-install ( TARGETS ${HSAKMT_TARGET}
+# Installs binaries and exports the library usage data to ${ROCDXG_TARGET}Targets
+install ( TARGETS ${ROCDXG_TARGET} EXPORT ${ROCDXG_TARGET}Targets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary )
 
 # Install public headers
-install ( DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/${HSAKMT_TARGET} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-  COMPONENT dev PATTERN "linux" EXCLUDE )
+#install ( DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/${ROCDXG_TARGET} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+#  COMPONENT dev PATTERN "*drm*" EXCLUDE )
 
 # Record our usage data for clients find_package calls.
-install ( EXPORT ${HSAKMT_TARGET}Targets
-  FILE ${HSAKMT_TARGET}Targets.cmake
-  NAMESPACE ${HSAKMT_TARGET}::
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${HSAKMT_TARGET}
-  COMPONENT dev)
+install ( EXPORT ${ROCDXG_TARGET}Targets
+  FILE ${ROCDXG_TARGET}Targets.cmake
+  NAMESPACE ${ROCDXG_TARGET}::
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${ROCDXG_TARGET}
+  COMPONENT dev )
 
-# Adds the target alias hsakmt::hsakmt to the local cmake cache.
+# Adds the target alias rocdxg::rocdxg to the local cmake cache.
 # This isn't necessary today.  It's harmless preparation for some
 # hypothetical future in which the we might be included by add_subdirectory()
 # in some other project's cmake file.  It allows uniform use of find_package
 # and target_link_library() without regard to whether a target is external or
 # a subdirectory of the current build.
-add_library( ${HSAKMT_TARGET}::${HSAKMT_TARGET} ALIAS ${HSAKMT_TARGET} )
+add_library( ${ROCDXG_TARGET}::${ROCDXG_TARGET} ALIAS ${ROCDXG_TARGET} )
 
 # Create cmake configuration files
 include(CMakePackageConfigHelpers)
 
-configure_package_config_file(${HSAKMT_TARGET}-config.cmake.in
-                            ${HSAKMT_TARGET}-config.cmake
+configure_package_config_file(${ROCDXG_TARGET}-config.cmake.in
+                            ${ROCDXG_TARGET}-config.cmake
                             INSTALL_DESTINATION
-                            ${CMAKE_INSTALL_LIBDIR}/cmake/${HSAKMT_TARGET} )
+                            ${CMAKE_INSTALL_LIBDIR}/cmake/${ROCDXG_TARGET} )
 
-write_basic_package_version_file(${HSAKMT_TARGET}-config-version.cmake
+write_basic_package_version_file(${ROCDXG_TARGET}-config-version.cmake
                  VERSION ${BUILD_VERSION_STRING}
                  COMPATIBILITY
                  AnyNewerVersion)
 
 install(FILES
-        ${CMAKE_CURRENT_BINARY_DIR}/${HSAKMT_TARGET}-config.cmake
-        ${CMAKE_CURRENT_BINARY_DIR}/${HSAKMT_TARGET}-config-version.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/${ROCDXG_TARGET}-config.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/${ROCDXG_TARGET}-config-version.cmake
         DESTINATION
-        ${CMAKE_INSTALL_LIBDIR}/cmake/${HSAKMT_TARGET}
-        COMPONENT dev)
+        ${CMAKE_INSTALL_LIBDIR}/cmake/${ROCDXG_TARGET}
+        COMPONENT dev )
 
 # Optionally record the package's find module in the user's package cache.
 if ( NOT DEFINED EXPORT_TO_USER_PACKAGE_REGISTRY )
@@ -244,58 +227,92 @@ if(${EXPORT_TO_USER_PACKAGE_REGISTRY})
   # Enable writing to the registry
   set(CMAKE_EXPORT_PACKAGE_REGISTRY ON)
   # Generate a target file for the build
-  export(TARGETS ${HSAKMT_TARGET} NAMESPACE ${HSAKMT_TARGET}:: FILE ${HSAKMT_TARGET}Targets.cmake)
+  export(TARGETS ${ROCDXG_TARGET} NAMESPACE ${ROCDXG_TARGET}:: FILE ${ROCDXG_TARGET}Targets.cmake)
   # Record the package in the user's cache.
-  export(PACKAGE ${HSAKMT_TARGET})
+  export(PACKAGE ${ROCDXG_TARGET})
 endif()
 
-# CPACK_PACKAGING_INSTALL_PREFIX is needed in libhsakmt.pc.in
-# TODO: Add support for relocatable packages.
-configure_file ( libhsakmt.pc.in libhsakmt.pc @ONLY )
+# Since librocdxg.pc and libhsakmt.pc are installed to the same pkgconfig directory,
+# we can directly use libhsakmt's header file path in the includedir.
+# This allows librocdxg to reference the same header files as libhsakmt without
+# duplicating header installation.
+configure_file ( librocdxg.pc.in librocdxg.pc @ONLY )
 
-install ( FILES ${CMAKE_CURRENT_BINARY_DIR}/libhsakmt.pc DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig COMPONENT dev)
-
-if ( NOT BUILD_SHARED_LIBS)
-  ## Create separate target file for static builds
-  add_library (${HSAKMT_STATIC_DRM_TARGET}  STATIC "")
-  target_sources (${HSAKMT_STATIC_DRM_TARGET} PRIVATE ${HSAKMT_SRC})
-
-  target_include_directories( ${HSAKMT_STATIC_DRM_TARGET}
-    PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-    PRIVATE
-    ${DK_HEADER}/ms_sdk/include/shared
-    ${DK_HEADER}/inc/shared
-    ${DK_HEADER}/inc/asic_reg
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/../runtime )
-
-    ## Set the VERSION and SOVERSION values
-  set_property(TARGET ${HSAKMT_STATIC_DRM_TARGET} PROPERTY LINK_FLAGS ${HSAKMT_LINK_FLAGS}
-              PROPERTY VERSION "${LIB_VERSION_STRING}"
-              PROPERTY SOVERSION "${LIB_VERSION_MAJOR}" )
-
-  target_link_libraries ( ${HSAKMT_STATIC_DRM_TARGET}
-    PRIVATE pthread rt c ${CMAKE_DL_LIBS}
-    INTERFACE -Wl,-Bdynamic
-  )
-  target_compile_options(${HSAKMT_STATIC_DRM_TARGET} PRIVATE ${DRM_CFLAGS} ${HSAKMT_C_FLAGS})
-
-  install ( TARGETS ${HSAKMT_STATIC_DRM_TARGET} EXPORT ${HSAKMT_STATIC_DRM_TARGET}Targets
-            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary
-            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary)
-  install ( EXPORT ${HSAKMT_STATIC_DRM_TARGET}Targets
-    FILE ${HSAKMT_STATIC_DRM_TARGET}Targets.cmake
-    NAMESPACE ${HSAKMT_STATIC_DRM_TARGET}::
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${HSAKMT_TARGET}
-    COMPONENT dev)
-
-  add_library( ${HSAKMT_STATIC_DRM_TARGET}::${HSAKMT_STATIC_DRM_TARGET} ALIAS ${HSAKMT_STATIC_DRM_TARGET} )
-endif()
+install ( FILES ${CMAKE_CURRENT_BINARY_DIR}/librocdxg.pc DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig COMPONENT dev )
 
 ###########################
 # Packaging directives
 ###########################
 # Use component packaging
+set(CPACK_COMPONENTS_GROUPING IGNORE)
+set(CPACK_DEB_COMPONENT_INSTALL ON)
+set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
+set(CPACK_PACKAGE_VERSION_MAJOR ${VERSION_MAJOR})
+set(CPACK_PACKAGE_VERSION_MINOR ${VERSION_MINOR})
+set(CPACK_PACKAGE_VERSION_PATCH ${VERSION_PATCH})
+set(CPACK_PACKAGE_CONTACT "AMD GFX mailing list <amd-gfx@lists.freedesktop.org>")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
+set(CPACK_COMPONENT_DESCRIPTION "ROCDXG development package.\n This package includes the user-mode API interfaces\nused to interact with the ROCm driver.\n This package contains the libraries and cmake files for the ROCDXG package.")
 set ( ENABLE_LDCONFIG ON CACHE BOOL "Set library links and caches using ldconfig.")
+
+# Install License file
+install ( FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT binary )
+
+# Make proper version for appending
+# Default Value is 99999, setting it first
+set(ROCM_VERSION_FOR_PACKAGE "99999")
+if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
+  set(ROCM_VERSION_FOR_PACKAGE $ENV{ROCM_LIBPATCH_VERSION})
+endif()
+
+# Prepare final version for the CPACK use
+set(PACKAGE_VERSION_STR "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}.${ROCM_VERSION_FOR_PACKAGE}")
+set(CPACK_PACKAGE_VERSION "${PACKAGE_VERSION_STR}")
+
+# Debian package specific variables
+set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/ROCm/ROCT-Thunk-Interface")
+set(CPACK_DEBIAN_PACKAGE_NAME "rocdxg-roct")
+if (DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
+   set(CPACK_DEBIAN_PACKAGE_RELEASE $ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
+else()
+   set(CPACK_DEBIAN_PACKAGE_RELEASE "local")
+endif()
+
+# Debian binary package specific variables (runtime package)
+set(CPACK_DEBIAN_BINARY_PACKAGE_NAME "rocdxg-roct")
+set(CPACK_DEBIAN_BINARY_PACKAGE_DESCRIPTION "ROCDXG runtime package containing libraries")
+
+# Debian dev package specific variables
+set(CPACK_DEBIAN_DEV_PACKAGE_NAME "rocdxg-roct-dev")
+set(CPACK_DEBIAN_DEV_PACKAGE_DESCRIPTION "ROCDXG development package containing pkgconfig and cmake files")
+
+## Process the Debian install/remove scripts to update the CPACK variables
+configure_file ( ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/postinst.in DEBIAN/postinst @ONLY )
+configure_file ( ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/prerm.in DEBIAN/prerm @ONLY )
+set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "DEBIAN/postinst;DEBIAN/prerm")
+
+# Setting package dependencies
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "rocm-core")
+set(CPACK_DEBIAN_BINARY_PACKAGE_DEPENDS "rocm-core")
+set(CPACK_DEBIAN_DEV_PACKAGE_DEPENDS "rocdxg-roct (= ${PACKAGE_VERSION_STR}), rocm-core")
+
+# Set the names now using CPACK utility
+set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
+
+# Remove dependency on rocm-core if -DROCM_DEP_ROCMCORE=ON not given to cmake
+if(NOT ROCM_DEP_ROCMCORE)
+    string(REGEX REPLACE ",? ?rocm-core" "" CPACK_DEBIAN_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
+    string(REGEX REPLACE ",? ?rocm-core" "" CPACK_DEBIAN_BINARY_PACKAGE_DEPENDS ${CPACK_DEBIAN_BINARY_PACKAGE_DEPENDS})
+    string(REGEX REPLACE ",? ?rocm-core" "" CPACK_DEBIAN_DEV_PACKAGE_DEPENDS ${CPACK_DEBIAN_DEV_PACKAGE_DEPENDS})
+endif()
+
+include(CPack)
+
+# Add component descriptions
+cpack_add_component(binary
+  DISPLAY_NAME "Runtime"
+  DESCRIPTION "ROCDXG runtime libraries")
+
+cpack_add_component(dev
+  DISPLAY_NAME "Development"
+  DESCRIPTION "ROCDXG development files (pkgconfig and cmake)")
