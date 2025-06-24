@@ -7,13 +7,11 @@ on:
     paths:
       - '**/*.cmake'
       - '**/CMakeLists.txt'
-      - '**/*.cmake.in'
   pull_request:
     branches: [ amd-staging ]
     paths:
       - '**/*.cmake'
       - '**/CMakeLists.txt'
-      - '**/*.cmake.in'
   workflow_dispatch:  # Allows manual triggering
 
 defaults:
@@ -21,7 +19,7 @@ defaults:
     shell: bash
 
 jobs:
-  check-cmake-format:
+  check-gersemi:
     name: Check CMake files formatting
     runs-on: ubuntu-latest
 
@@ -37,16 +35,17 @@ jobs:
         python-version: '3.10'
         cache: 'pip'
 
-    - name: Install cmake-format
+    - name: Install gersemi
       run: |
         python -m pip install --upgrade pip
-        pip install cmake-format==0.6.13
+        pip install gersemi==0.19.3
 
     - name: Check CMake formatting
       id: check-format
       run: |
         echo "::group::Finding CMake files"
-        FILES=$(find . -type f \( -name "CMakeLists.txt" -o -name "*.cmake" -o -name "*.cmake.in" \) \
+        FILES=$(find . -type f \( -name "CMakeLists.txt" -o -name "*.cmake" \) \
+                -not -name "*.in" \
                 -not -path "*/\.*" \
                 -not -path "*/build/*")
         echo "Found $(echo "$FILES" | wc -l) CMake files to check"
@@ -58,7 +57,7 @@ jobs:
         # Check if files are formatted correctly
         for file in $FILES; do
           echo "Checking $file..."
-          if ! cmake-format --check "$file"; then
+          if ! gersemi --check "$file"; then
             failed_files+=("$file")
             echo "::error file=$file::File needs formatting"
           fi
@@ -88,10 +87,10 @@ jobs:
         ### How to fix
         Run this command locally to fix formatting issues:
         ```bash
-        # Install cmake-format
-        pip install cmake-format==0.6.13
+        # Install gersemi
+        pip install gersemi==0.19.3
 
         # Format files
-        cmake-format -i <file>
+        gersemi -i <file>
         ```
         EOF
