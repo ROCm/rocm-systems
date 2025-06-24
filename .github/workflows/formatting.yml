@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   cmake:
-    runs-on: ubuntu-22.04
+    runs-on: rocprof-azure-docker-emu-runner-set
     env:
       ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -50,7 +50,7 @@ jobs:
         fi
 
   source:
-    runs-on: ubuntu-22.04
+    runs-on: rocprof-azure-docker-emu-runner-set
     env:
       ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -84,7 +84,7 @@ jobs:
         fi
 
   python:
-    runs-on: ubuntu-22.04
+    runs-on: rocprof-azure-docker-emu-runner-set
     strategy:
       matrix:
         python-version: ['3.10']
@@ -123,7 +123,7 @@ jobs:
         fi
 
   missing-new-line:
-    runs-on: ubuntu-22.04
+    runs-on: rocprof-azure-docker-emu-runner-set
 
     steps:
     - uses: actions/checkout@v4

@@ -27,7 +27,7 @@ concurrency:
 
 jobs:
   regex:
-    runs-on: ubuntu-latest
+    runs-on: rocprof-azure-docker-emu-runner-set
     env:
       FOLDERS: "source/lib/common source/lib/rocprofiler-sdk source/lib/rocprofiler-sdk-roctx"
 

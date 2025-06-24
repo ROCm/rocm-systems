@@ -32,7 +32,7 @@ on:
 
 jobs:
   generate-packages-ubuntu-22:
-    runs-on: mi300-emu-runner-set
+    runs-on: rocprof-azure-emu-runner-set
 
     steps:
 

@@ -29,7 +29,7 @@ env:
 
 jobs:
   build-docs:
-    runs-on: ubuntu-latest
+    runs-on: rocprof-azure-docker-emu-runner-set
     container: continuumio/miniconda3
     permissions:
       contents: read

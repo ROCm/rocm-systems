@@ -6,7 +6,7 @@ on:
 
 jobs:
   git-mirror:
-    runs-on: ubuntu-latest
+    runs-on: rocprof-azure-docker-emu-runner-set
     steps:
       - name: git-sync
         uses: AMD-ROCm-Internal/rocprofiler-github-actions@git-sync-v3
