@@ -32,6 +32,18 @@ from . import output_config
 from . import libpyrocpd
 
 
+_view_names: list = []
+_schema_version_major: int = 4
+_schema_version_minor: int = 0
+_schema_version_patch: int = 0
+
+#  map schema 4 index names to schema 3 index names
+agent_index_mapping = {
+    "agent_absolute_index": "agent_abs_index",
+    "agent_logical_index": "agent_log_index",
+    "agent_type_relative_index": "agent_type_index",
+}
+
 def write_sql_query_to_csv(
     connection: RocpdImportData,
     config,
@@ -40,6 +52,15 @@ def write_sql_query_to_csv(
     postfix="trace",
 ) -> None:
     """Write the contents of a SQL query to a CSV file in the specified output path."""
+
+    # Extract the first identifier after FROM; handles both quoted ("name") and unquoted forms.
+    match = re.search(r'\bFROM\s+"?(\w+)"?', query, re.IGNORECASE | re.DOTALL)
+    if not match:
+        return
+    view_name = match.group(1)
+
+    if view_name not in _view_names:
+        return
 
     query_not_empty = f"""
         SELECT EXISTS (
@@ -200,15 +221,15 @@ def build_agent_id_string(agent_index_value, prefix=""):
     agent_prefix = prefix + "_" if prefix else ""
 
     if agent_index_value == libpyrocpd.agent_indexing.node:  # absolute
-        return f"'Agent ' || {agent_prefix}agent_abs_index"
+        return f"'Agent ' || {agent_prefix}agent_absolute_index"
     elif (
         agent_index_value == libpyrocpd.agent_indexing.logical_node
     ):  # relative (default)
-        return f"'Agent ' || {agent_prefix}agent_log_index"
+        return f"'Agent ' || {agent_prefix}agent_logical_index"
     elif (
         agent_index_value == libpyrocpd.agent_indexing.logical_node_type
     ):  # type-relative
-        return f"{agent_prefix}agent_type || ' ' || {agent_prefix}agent_type_index"
+        return f"{agent_prefix}agent_type || ' ' || {agent_prefix}agent_type_relative_index"
     else:
         return ""
 
@@ -401,7 +422,44 @@ def write_region_csv(importData, config) -> None:
     write_sql_query_to_csv(importData, config, query, "regions")
 
 
+def _populate_schema_globals(connection: RocpdImportData) -> None:
+    """Populate module-level table and view name lists from sqlite_master in one query."""
+    global _view_names
+    rows = connection.execute(
+        """
+        SELECT type, name FROM sqlite_master
+        WHERE type IN ('view')
+        UNION ALL
+        SELECT type, name FROM temp.sqlite_master
+        WHERE type IN ('view')
+        ORDER BY type, name
+        """
+    ).fetchall()
+    # _table_names = [name for obj_type, name in rows if obj_type == "table"]
+    _view_names  = [name for obj_type, name in rows if obj_type == "view"]
+
+    global _schema_version_major, _schema_version_minor, _schema_version_patch
+    rows = connection.execute(
+        """
+        SELECT value FROM rocpd_metadata WHERE tag = 'schema_version'
+        """
+    ).fetchone()
+
+    # if rows is of format "3", then only try to assign major, if of format "3.0.0", then assign major, minor, and patch
+    if len(rows[0].split('.')) == 1:
+        _schema_version_major = rows[0]
+    elif len(rows[0].split('.')) == 2:
+        _schema_version_major = rows[0].split('.')[0]
+        _schema_version_minor = rows[0].split('.')[1]
+    elif len(rows[0].split('.')) == 3:
+        _schema_version_major = rows[0].split('.')[0]
+        _schema_version_minor = rows[0].split('.')[1]
+        _schema_version_patch = rows[0].split('.')[2]
+
+
 def write_csv(importData, config):
+
+    _populate_schema_globals(importData)
 
     write_agent_info_csv(importData, config)
     write_counters_csv(importData, config)
@@ -409,7 +467,7 @@ def write_csv(importData, config):
     write_memory_allocation_csv(importData, config)
     write_memory_copy_csv(importData, config)
     write_region_csv(importData, config)
-    write_scratch_memory_csv(importData, config)
+    # write_scratch_memory_csv(importData, config)
 
 
 def execute(input, config=None, **kwargs):

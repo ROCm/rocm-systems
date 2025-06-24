@@ -64,17 +64,11 @@ def markers2timestamp(
 def get_min_max_time(connection):
     min_max_query = """
         SELECT
-            MIN(min_time) as min_time,
-            MAX(max_time) as max_time
-        FROM (
-            SELECT start as min_time, end as max_time FROM regions_and_samples
-            UNION ALL
-            SELECT start as min_time, end as max_time FROM rocpd_kernel_dispatch
-            UNION ALL
-            SELECT start as min_time, end as max_time FROM rocpd_memory_allocate
-            UNION ALL
-            SELECT start as min_time, end as max_time FROM rocpd_memory_copy
-        )"""
+            MIN(value) as min_time,
+            MAX(value) as max_time
+        FROM
+            rocpd_timestamp
+        """
 
     min_time, max_time = execute_statement(connection, min_max_query).fetchone()
     return (min_time, max_time)
@@ -114,24 +108,14 @@ def percentages2timestamp(
     return (convert_time(start_time, True), convert_time(end_time, False))
 
 
-def get_time_filter(inclusive: bool, start_time, end_time) -> str:
-    """Create SQL filter for start/end time ranges."""
-    _beg = int(start_time)
-    _end = int(end_time)
-    if inclusive:
-        return f"start >= {_beg} AND end <= {_end}"
-    else:
-        return f"start <= {_end} AND end >= {_beg}"
-
-
-def get_timestamp_filter(inclusive: bool, start_time, end_time) -> str:
+def get_time_filter(inclusive: bool, start_field, end_field, start_time, end_time) -> str:
     """Create SQL filter for timestamp columns."""
     _beg = int(start_time)
     _end = int(end_time)
     if inclusive:
-        return f"timestamp >= {_beg} AND timestamp <= {_end}"
+        return f"{start_field} >= {_beg} AND {end_field} <= {_end}"
     else:
-        return f"timestamp <= {_end} AND timestamp >= {_beg}"
+        return f"{start_field} <= {_end} AND {end_field} >= {_beg}"
 
 
 def create_view(connection: sqlite3.Connection, view_name: str, query: str) -> None:
@@ -201,8 +185,9 @@ def apply_time_window(connection: RocpdImportData, **kwargs: Any) -> None:
         )
 
     # Create views for tables with start and end times
-    start_end_timed_tables = []
-    timestamp_timed_tables = []
+    start_end_timed_tables = []  # legacy
+    timestamp_timed_tables = []  # legacy
+    timestamp_tables = ["rocpd_timestamp"]  # dedicated table for timestamps
 
     for itr in connection.table_info.keys():
         if itr.find("rocpd_info_") == 0:
@@ -213,31 +198,23 @@ def apply_time_window(connection: RocpdImportData, **kwargs: Any) -> None:
         elif "timestamp" in column_names:
             timestamp_timed_tables += [itr]
 
-    # Restrict the scope of the tables with start/end columns
-    for table_name in start_end_timed_tables:
-        dbs = [
-            f"{itr} WHERE {get_time_filter(inclusive, start_time, end_time)}"
-            for itr in connection.table_info[table_name]
-        ]
-        table_union = " UNION ALL ".join(dbs)
-        create_view_query = f"""
-            CREATE TEMPORARY VIEW {table_name} AS
-                {table_union}
-        """
-        create_view(connection, table_name, create_view_query)
-
-    # Restrict the scope of the tables with timestamp columns
-    for table_name in timestamp_timed_tables:
-        dbs = [
-            f"{itr} WHERE {get_timestamp_filter(inclusive, start_time, end_time)}"
-            for itr in connection.table_info[table_name]
-        ]
-        table_union = " UNION ALL ".join(dbs)
-        create_view_query = f"""
-            CREATE TEMPORARY VIEW {table_name} AS
-                {table_union}
-        """
-        create_view(connection, table_name, create_view_query)
+    for fields, tables in [
+        [["start", "end"], start_end_timed_tables],
+        [["timestamp", "timestamp"], timestamp_timed_tables],
+        [["value", "value"], timestamp_tables],
+    ]:
+        # Restrict the scope of the tables with start/end columns
+        for table_name in tables:
+            dbs = [
+                f"{itr} WHERE {get_time_filter(inclusive, fields[0], fields[1], start_time, end_time)}"
+                for itr in connection.table_info[table_name]
+            ]
+            table_union = " UNION ALL ".join(dbs)
+            create_view_query = f"""
+                CREATE TEMPORARY VIEW {table_name} AS
+                    {table_union}
+            """
+            create_view(connection, table_name, create_view_query)
 
     # # Create node view
     # create_view_query = """CREATE VIEW rocpd_node AS """

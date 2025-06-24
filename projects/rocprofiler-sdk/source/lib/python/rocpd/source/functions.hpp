@@ -25,7 +25,6 @@
 #include "lib/common/defines.hpp"
 #include "lib/common/logging.hpp"
 
-#include <pybind11/pybind11.h>
 #include <sqlite3.h>
 
 namespace rocpd

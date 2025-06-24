@@ -187,7 +187,7 @@ def write_otf2(importData, config):
 
                             cursor = conn.cursor()
                             cursor.execute(
-                                """SELECT tid, dst_agent_abs_index, start, end, name
+                                """SELECT tid, dst_agent_absolute_index, start, end, name
                                 FROM memory_copies WHERE guid = ? AND nid = ?
                                 AND pid = ? ORDER BY start ASC""",
                                 (guid, nid, pid),
@@ -198,7 +198,7 @@ def write_otf2(importData, config):
 
                             cursor = conn.cursor()
                             cursor.execute(
-                                """SELECT tid, agent_abs_index, start, end, level, type
+                                """SELECT tid, agent_absolute_index, start, end, level, type
                                 FROM memory_allocations WHERE guid = ? AND nid = ?
                                 AND pid = ? ORDER BY start ASC""",
                                 (guid, nid, pid),
@@ -217,7 +217,7 @@ def write_otf2(importData, config):
 
                             cursor = conn.cursor()
                             cursor.execute(
-                                """SELECT tid, agent_abs_index, queue_id,
+                                """SELECT tid, agent_absolute_index, queue_id,
                                 start, end, name, region
                                 FROM kernels WHERE guid = ? AND nid = ?
                                 AND pid = ? ORDER BY start ASC""",

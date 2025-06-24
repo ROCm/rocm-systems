@@ -6,7 +6,7 @@
 CREATE VIEW IF NOT EXISTS
     `top_kernels` AS
 SELECT
-    S.display_name AS name,
+    K.name,
     COUNT(K.kernel_id) AS total_calls,
     SUM(K.end - K.start) / 1000.0 AS total_duration,
     (SUM(K.end - K.start) / COUNT(K.kernel_id)) / 1000.0 AS average,
@@ -14,12 +14,10 @@ SELECT
         SELECT
             SUM(A.end - A.start)
         FROM
-            `rocpd_kernel_dispatch` A
+            `kernels` A
     ) AS percentage
 FROM
-    `rocpd_kernel_dispatch` K
-    INNER JOIN `rocpd_info_kernel_symbol` S ON S.id = K.kernel_id
-    AND S.guid = K.guid
+    `kernels` K
 GROUP BY
     name
 ORDER BY
@@ -39,44 +37,44 @@ FROM
     (
         SELECT
             agent_id,
-            guid,
-            SUM(END - start) AS GpuTime
+            `guid`,
+            SUM(`end` - `start`) AS GpuTime
         FROM
             (
                 SELECT
                     agent_id,
-                    guid,
-                    END,
-                    start
+                    `guid`,
+                    `end`,
+                    `start`
                 FROM
-                    `rocpd_kernel_dispatch`
+                    `kernels`
                 UNION ALL
                 SELECT
                     dst_agent_id AS agent_id,
-                    guid,
-                    END,
-                    start
+                    `guid`,
+                    `end`,
+                    `start`
                 FROM
                     `rocpd_memory_copy`
             )
         GROUP BY
             agent_id,
-            guid
+            `guid`
     ) A
     INNER JOIN (
         SELECT
-            MAX(END) - MIN(start) AS WallTime
+            MAX(`end`) - MIN(`start`) AS WallTime
         FROM
             (
                 SELECT
-                    END,
-                    start
+                    `end`,
+                    `start`
                 FROM
                     `rocpd_kernel_dispatch`
                 UNION ALL
                 SELECT
-                    END,
-                    start
+                    `end`,
+                    `start`
                 FROM
                     `rocpd_memory_copy`
             )
@@ -98,53 +96,47 @@ FROM
     (
         -- Kernel operations
         SELECT
-            ks.display_name AS name,
-            (kd.end - kd.start) AS duration
+            K.name,
+            K.duration
         FROM
-            `rocpd_kernel_dispatch` kd
-            INNER JOIN `rocpd_info_kernel_symbol` ks ON kd.kernel_id = ks.id
-            AND kd.guid = ks.guid
+            `kernels` K
         UNION ALL
         -- Memory operations
         SELECT
-            rs.string AS name,
-            (END - start) AS duration
+            MC.name,
+            MC.duration
         FROM
-            `rocpd_memory_copy` mc
-            INNER JOIN `rocpd_string` rs ON rs.id = mc.name_id
-            AND rs.guid = mc.guid
+            `memory_copies` MC
         UNION ALL
         -- Regions
         SELECT
-            rs.string AS name,
-            (END - start) AS duration
+            R.name,
+            R.duration
         FROM
-            `rocpd_region` rr
-            INNER JOIN `rocpd_string` rs ON rs.id = rr.name_id
-            AND rs.guid = rr.guid
+            `regions` R
     ) operations
     CROSS JOIN (
         SELECT
-            SUM(END - start) AS total_time
+            SUM(`end` - `start`) AS total_time
         FROM
             (
                 SELECT
-                    END,
-                    start
+                    `end`,
+                    `start`
                 FROM
-                    `rocpd_kernel_dispatch`
+                    `kernels`
                 UNION ALL
                 SELECT
-                    END,
-                    start
+                    `end`,
+                    `start`
                 FROM
-                    `rocpd_memory_copy`
+                    `memory_copies`
                 UNION ALL
                 SELECT
-                    END,
-                    start
+                    `end`,
+                    `start`
                 FROM
-                    `rocpd_region`
+                    `regions`
             )
     ) TOTAL
 GROUP BY

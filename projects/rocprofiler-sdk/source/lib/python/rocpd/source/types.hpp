@@ -104,6 +104,7 @@ struct node : public base_class<tool::node_info>
 // common base class for node info
 struct common_node_info
 {
+    int64_t     id             = 0;
     guid_t      guid           = {};
     uint64_t    nid            = 0;
     std::string machine_id     = {};
@@ -140,9 +141,12 @@ struct agent : public base_class<tool::agent_info>
 {
     guid_t      guid           = {};
     uint64_t    nid            = 0;
+    uint64_t    pid            = 0;
     uint64_t    absolute_index = 0;
-    std::string type           = {};
-    std::string user_name      = {};
+    uint64_t    logical_index  = 0;
+    uint64_t    type_index     = 0;
+    std::string type_name      = {};
+    std::string generic_name   = {};
     std::string extdata        = {};
 
     bool has_extdata() const { return (extdata.length() > 2); }
@@ -151,25 +155,25 @@ struct agent : public base_class<tool::agent_info>
 
 struct code_object
 {
-    uint64_t    id               = 0;
-    guid_t      guid             = {};
-    uint64_t    nid              = 0;
-    uint64_t    pid              = 0;
-    uint64_t    agent_abs_index  = 0;
-    std::string uri              = {};
-    uint64_t    load_base        = 0;
-    uint64_t    load_size        = 0;
-    uint64_t    load_delta       = 0;
-    std::string storage_type_str = {};
-    uint64_t    storage_type     = 0;
-    uint64_t    memory_base      = 0;
-    uint64_t    memory_size      = 0;
-    uint16_t    code_object_size = 0;
+    int64_t     id                   = 0;
+    guid_t      guid                 = {};
+    uint64_t    nid                  = 0;
+    uint64_t    pid                  = 0;
+    uint64_t    agent_absolute_index = 0;
+    std::string uri                  = {};
+    uint64_t    load_base            = 0;
+    uint64_t    load_size            = 0;
+    uint64_t    load_delta           = 0;
+    std::string storage_type_str     = {};
+    uint64_t    storage_type         = 0;
+    uint64_t    memory_base          = 0;
+    uint64_t    memory_size          = 0;
+    uint16_t    code_object_size     = 0;
 };
 
 struct kernel_symbol
 {
-    uint64_t    id                            = 0;
+    int64_t     id                            = 0;
     guid_t      guid                          = {};
     uint64_t    nid                           = 0;
     pid_t       pid                           = 0;
@@ -201,7 +205,7 @@ struct region
         std::optional<std::string> operation = {};
     };
 
-    uint64_t                id              = 0;
+    int64_t                 id              = 0;
     guid_t                  guid            = {};
     std::string             category        = {};
     std::string             name            = {};
@@ -213,7 +217,7 @@ struct region
     uint64_t                event_id        = 0;
     uint64_t                stack_id        = 0;
     uint64_t                parent_stack_id = 0;
-    uint64_t                corr_id         = 0;
+    uint64_t                correlation_id  = 0;
     std::string             extdata         = {};
 
     bool            has_extdata() const { return (extdata.length() > 2); }
@@ -228,7 +232,7 @@ struct sample
         std::optional<std::string> operation = {};
     };
 
-    uint64_t                id              = 0;
+    int64_t                 id              = 0;
     guid_t                  guid            = {};
     std::string             category        = {};
     std::string             name            = {};
@@ -239,7 +243,7 @@ struct sample
     uint64_t                event_id        = 0;
     uint64_t                stack_id        = 0;
     uint64_t                parent_stack_id = 0;
-    uint64_t                corr_id         = 0;
+    uint64_t                correlation_id  = 0;
     std::string             extdata         = {};
 
     bool            has_extdata() const { return (extdata.length() > 2); }
@@ -267,133 +271,138 @@ struct event
     decoded_extdata get_extdata() const;
 };
 
-struct region_arg
+struct argument
 {
-    uint64_t    id    = 0;
-    guid_t      guid  = {};
-    pid_t       nid   = 0;
-    pid_t       pid   = 0;
-    std::string type  = {};
-    std::string name  = {};
-    std::string value = {};
+    int64_t     id       = 0;
+    guid_t      guid     = {};
+    uint64_t    event_id = 0;
+    uint64_t    position = 0;
+    std::string type     = {};
+    std::string name     = {};
+    std::string value    = {};
 };
 
 struct kernel_dispatch
 {
-    uint64_t                id                  = 0;
-    guid_t                  guid                = {};
-    std::string             category            = {};
-    std::string             region              = {};
-    std::string             name                = {};
-    pid_t                   nid                 = 0;
-    pid_t                   pid                 = 0;
-    pid_t                   tid                 = 0;
-    uint64_t                agent_abs_index     = 0;
-    uint64_t                agent_log_index     = 0;
-    uint64_t                agent_type_index    = 0;
-    std::string             agent_type          = {};
-    uint64_t                code_object_id      = 0;
-    uint64_t                kernel_id           = 0;
-    uint64_t                dispatch_id         = 0;
-    uint64_t                stream_id           = 0;
-    uint64_t                queue_id            = 0;
-    std::string             queue               = {};
-    std::string             stream              = {};
-    rocprofiler_timestamp_t start               = 0;
-    rocprofiler_timestamp_t end                 = 0;
-    rocprofiler_dim3_t      grid_size           = {};
-    rocprofiler_dim3_t      workgroup_size      = {};
-    uint64_t                lds_size            = 0;
-    uint64_t                scratch_size        = 0;
-    uint64_t                static_lds_size     = 0;
-    uint64_t                static_scratch_size = 0;
-    uint64_t                stack_id            = 0;
-    uint64_t                parent_stack_id     = 0;
-    uint64_t                corr_id             = 0;
-    uint64_t                vgpr_count          = 0;
-    uint64_t                accum_vgpr_count    = 0;
-    uint64_t                sgpr_count          = 0;
+    int64_t                 id                   = 0;
+    guid_t                  guid                 = {};
+    std::string             category             = {};
+    std::string             region               = {};
+    std::string             name                 = {};
+    pid_t                   nid                  = 0;
+    pid_t                   pid                  = 0;
+    pid_t                   tid                  = 0;
+    uint64_t                agent_absolute_index = 0;
+    uint64_t                agent_logical_index  = 0;
+    uint64_t                agent_type_index     = 0;
+    std::string             agent_type           = {};
+    uint64_t                code_object_id       = 0;
+    uint64_t                kernel_id            = 0;
+    uint64_t                dispatch_id          = 0;
+    uint64_t                stream_id            = 0;
+    uint64_t                queue_id             = 0;
+    std::string             queue                = {};
+    std::string             stream               = {};
+    rocprofiler_timestamp_t start                = 0;
+    rocprofiler_timestamp_t end                  = 0;
+    rocprofiler_dim3_t      grid_size            = {};
+    rocprofiler_dim3_t      workgroup_size       = {};
+    uint64_t                lds_size             = 0;
+    uint64_t                scratch_size         = 0;
+    uint64_t                static_lds_size      = 0;
+    uint64_t                static_scratch_size  = 0;
+    uint64_t                stack_id             = 0;
+    uint64_t                parent_stack_id      = 0;
+    uint64_t                correlation_id       = 0;
+    uint64_t                event_id             = 0;
+    uint64_t                vgpr_count           = 0;
+    uint64_t                accum_vgpr_count     = 0;
+    uint64_t                sgpr_count           = 0;
 };
 
 struct memory_allocation
 {
-    uint64_t                id               = 0;
-    guid_t                  guid             = {};
-    pid_t                   pid              = 0;
-    pid_t                   tid              = 0;
-    rocprofiler_timestamp_t start            = 0;
-    rocprofiler_timestamp_t end              = 0;
-    std::string             type             = {};
-    std::string             level            = {};
-    std::string             agent_name       = {};
-    std::string             category         = {};
-    uint64_t                agent_abs_index  = 0;
-    uint64_t                agent_log_index  = 0;
-    uint64_t                agent_type_index = 0;
-    std::string             agent_type       = {};
-    uint64_t                address          = 0;
-    uint64_t                size             = 0;
-    uint64_t                queue_id         = 0;
-    std::string             queue_name       = {};
-    uint64_t                stream_id        = 0;
-    std::string             stream_name      = {};
-    uint64_t                stack_id         = 0;
-    uint64_t                parent_stack_id  = 0;
-    uint64_t                corr_id          = 0;
-};
-
-struct memory_copies
-{
-    uint64_t                id                   = 0;
+    int64_t                 id                   = 0;
     guid_t                  guid                 = {};
     pid_t                   pid                  = 0;
     pid_t                   tid                  = 0;
     rocprofiler_timestamp_t start                = 0;
     rocprofiler_timestamp_t end                  = 0;
-    std::string             name                 = {};
-    std::string             region_name          = {};
+    std::string             type                 = {};
+    std::string             level                = {};
+    std::string             agent_name           = {};
     std::string             category             = {};
-    uint64_t                stream_id            = 0;
-    uint64_t                queue_id             = 0;
-    std::string             stream_name          = {};
-    std::string             queue_name           = {};
+    uint64_t                agent_absolute_index = 0;
+    uint64_t                agent_logical_index  = 0;
+    uint64_t                agent_type_index     = 0;
+    std::string             agent_type           = {};
+    uint64_t                address              = 0;
     uint64_t                size                 = 0;
-    std::string             dst_device           = {};
-    uint64_t                dst_agent_abs_index  = 0;
-    uint64_t                dst_agent_log_index  = 0;
-    uint64_t                dst_agent_type_index = 0;
-    std::string             dst_agent_type       = {};
-    uint64_t                dst_address          = 0;
-    std::string             src_device           = {};
-    uint64_t                src_agent_abs_index  = 0;
-    uint64_t                src_agent_log_index  = 0;
-    uint64_t                src_agent_type_index = 0;
-    std::string             src_agent_type       = {};
-    uint64_t                src_address          = 0;
+    uint64_t                queue_id             = 0;
+    std::string             queue_name           = {};
+    uint64_t                stream_id            = 0;
+    std::string             stream_name          = {};
     uint64_t                stack_id             = 0;
     uint64_t                parent_stack_id      = 0;
-    uint64_t                corr_id              = 0;
+    uint64_t                correlation_id       = 0;
+    uint64_t                event_id             = 0;
+};
+
+struct memory_copies
+{
+    int64_t                 id                       = 0;
+    guid_t                  guid                     = {};
+    pid_t                   pid                      = 0;
+    pid_t                   tid                      = 0;
+    rocprofiler_timestamp_t start                    = 0;
+    rocprofiler_timestamp_t end                      = 0;
+    std::string             name                     = {};
+    std::string             region_name              = {};
+    std::string             category                 = {};
+    uint64_t                stream_id                = 0;
+    uint64_t                queue_id                 = 0;
+    std::string             stream_name              = {};
+    std::string             queue_name               = {};
+    uint64_t                size                     = 0;
+    std::string             dst_device               = {};
+    uint64_t                dst_agent_absolute_index = 0;
+    uint64_t                dst_agent_logical_index  = 0;
+    uint64_t                dst_agent_type_index     = 0;
+    std::string             dst_agent_type           = {};
+    uint64_t                dst_address              = 0;
+    std::string             src_device               = {};
+    uint64_t                src_agent_absolute_index = 0;
+    uint64_t                src_agent_logical_index  = 0;
+    uint64_t                src_agent_type_index     = 0;
+    std::string             src_agent_type           = {};
+    uint64_t                src_address              = 0;
+    uint64_t                stack_id                 = 0;
+    uint64_t                parent_stack_id          = 0;
+    uint64_t                correlation_id           = 0;
+    uint64_t                event_id                 = 0;
 };
 
 struct scratch_memory
 {
-    guid_t                  guid             = {};
-    std::string             operation        = {};
-    std::string             category         = {};
-    uint64_t                agent_abs_index  = 0;
-    uint64_t                agent_log_index  = 0;
-    uint64_t                agent_type_index = 0;
-    std::string             agent_type       = {};
-    uint64_t                queue_id         = 0;
-    pid_t                   pid              = 0;
-    pid_t                   tid              = 0;
-    std::string             alloc_flags      = {};
-    rocprofiler_timestamp_t start            = 0;
-    rocprofiler_timestamp_t end              = 0;
-    uint64_t                size             = 0;
-    uint64_t                stack_id         = 0;
-    uint64_t                parent_stack_id  = 0;
-    uint64_t                corr_id          = 0;
+    int64_t                 id                   = 0;
+    guid_t                  guid                 = {};
+    std::string             operation            = {};
+    std::string             category             = {};
+    uint64_t                agent_absolute_index = 0;
+    uint64_t                agent_logical_index  = 0;
+    uint64_t                agent_type_index     = 0;
+    std::string             agent_type           = {};
+    uint64_t                queue_id             = 0;
+    pid_t                   pid                  = 0;
+    pid_t                   tid                  = 0;
+    std::string             alloc_flags          = {};
+    rocprofiler_timestamp_t start                = 0;
+    rocprofiler_timestamp_t end                  = 0;
+    uint64_t                size                 = 0;
+    uint64_t                stack_id             = 0;
+    uint64_t                parent_stack_id      = 0;
+    uint64_t                correlation_id       = 0;
+    uint64_t                event_id             = 0;
 };
 
 struct stats
@@ -444,57 +453,55 @@ struct pmc_event
 
 struct counter
 {
-    uint64_t                id               = 0;
-    guid_t                  guid             = {};
-    uint64_t                dispatch_id      = 0;
-    uint64_t                kernel_id        = 0;
-    uint32_t                stack_id         = 0;
-    uint64_t                correlation_id   = 0;
-    uint64_t                event_id         = 0;
-    pid_t                   pid              = 0;
-    pid_t                   tid              = 0;
-    uint32_t                agent_id         = 0;
-    uint64_t                agent_abs_index  = 0;
-    uint64_t                agent_log_index  = 0;
-    uint64_t                agent_type_index = 0;
-    std::string             agent_type       = {};
-    uint64_t                queue_id         = 0;
-    uint32_t                grid_size_x      = 0;
-    uint32_t                grid_size_y      = 0;
-    uint32_t                grid_size_z      = 0;
-    uint64_t                grid_size        = 0;
-    std::string             kernel_name      = {};
-    std::string             kernel_region    = {};
-    uint32_t                workgroup_size_x = 0;
-    uint32_t                workgroup_size_y = 0;
-    uint32_t                workgroup_size_z = 0;
-    uint32_t                workgroup_size   = 0;
-    uint32_t                lds_block_size   = 0;
-    uint32_t                scratch_size     = 0;
-    uint32_t                vgpr_count       = 0;
-    uint32_t                accum_vgpr_count = 0;
-    uint32_t                sgpr_count       = 0;
-    std::string             counter_name     = {};
-    std::string             counter_symbol   = {};
-    std::string             component        = {};
-    std::string             description      = {};
-    std::string             block            = {};
-    std::string             expression       = {};
-    std::string             value_type       = {};
-    uint32_t                counter_id       = 0;
-    double                  value            = 0;
-    rocprofiler_timestamp_t start            = 0;
-    rocprofiler_timestamp_t end              = 0;
-    bool                    is_constant      = false;
-    bool                    is_derived       = false;
+    int64_t                 id                   = 0;
+    guid_t                  guid                 = {};
+    uint64_t                dispatch_id          = 0;
+    uint64_t                kernel_id            = 0;
+    uint32_t                stack_id             = 0;
+    uint64_t                correlation_id       = 0;
+    uint64_t                event_id             = 0;
+    pid_t                   pid                  = 0;
+    pid_t                   tid                  = 0;
+    uint32_t                agent_id             = 0;
+    uint64_t                agent_absolute_index = 0;
+    uint64_t                agent_logical_index  = 0;
+    uint64_t                agent_type_index     = 0;
+    std::string             agent_type           = {};
+    uint64_t                queue_id             = 0;
+    uint32_t                grid_size_x          = 0;
+    uint32_t                grid_size_y          = 0;
+    uint32_t                grid_size_z          = 0;
+    uint64_t                grid_size            = 0;
+    std::string             kernel_name          = {};
+    std::string             kernel_region        = {};
+    uint32_t                workgroup_size_x     = 0;
+    uint32_t                workgroup_size_y     = 0;
+    uint32_t                workgroup_size_z     = 0;
+    uint32_t                workgroup_size       = 0;
+    uint32_t                lds_block_size       = 0;
+    uint32_t                scratch_size         = 0;
+    uint32_t                vgpr_count           = 0;
+    uint32_t                accum_vgpr_count     = 0;
+    uint32_t                sgpr_count           = 0;
+    std::string             counter_name         = {};
+    std::string             counter_symbol       = {};
+    std::string             component            = {};
+    std::string             description          = {};
+    std::string             block                = {};
+    std::string             expression           = {};
+    std::string             value_type           = {};
+    uint32_t                counter_id           = 0;
+    double                  value                = 0;
+    rocprofiler_timestamp_t start                = 0;
+    rocprofiler_timestamp_t end                  = 0;
+    bool                    is_constant          = false;
+    bool                    is_derived           = false;
 };
 
 struct pmc_info
 {
     uint64_t    id               = 0;
     guid_t      guid             = {};
-    uint64_t    nid              = 0;
-    uint64_t    pid              = 0;
     uint64_t    agent_id         = 0;
     std::string target_arch      = {};
     uint64_t    event_code       = 0;
@@ -513,6 +520,80 @@ struct pmc_info
     std::string extdata          = {};
 };
 
+#define DEFINE_GROUP_BY_OPERATORS(TYPE, ...)                                                       \
+    auto        get_tie() const { return std::tie(__VA_ARGS__); }                                  \
+    static auto get_group_by() { return std::string_view{#__VA_ARGS__}; }                          \
+    friend bool operator==(const TYPE& lhs, const TYPE& rhs)                                       \
+    {                                                                                              \
+        return (lhs.get_tie() == rhs.get_tie());                                                   \
+    }                                                                                              \
+    friend bool operator!=(const TYPE& lhs, const TYPE& rhs) { return !(lhs == rhs); }             \
+    friend bool operator<(const TYPE& lhs, const TYPE& rhs)                                        \
+    {                                                                                              \
+        return (lhs.get_tie() < rhs.get_tie());                                                    \
+    }                                                                                              \
+    friend bool operator>(const TYPE& lhs, const TYPE& rhs) { return !(lhs < rhs || lhs == rhs); } \
+    friend bool operator<=(const TYPE& lhs, const TYPE& rhs) { return (lhs < rhs || lhs == rhs); } \
+    friend bool operator>=(const TYPE& lhs, const TYPE& rhs) { return !(lhs < rhs); }
+
+struct group_by_tid
+{
+    guid_t   guid = {};
+    uint64_t nid  = 0;
+    pid_t    pid  = 0;
+    uint64_t tid  = 0;
+
+    DEFINE_GROUP_BY_OPERATORS(group_by_tid, guid, nid, pid, tid);
+    static auto get_order_by() { return std::string_view{"tid"}; }
+};
+
+struct group_by_agent_tid
+{
+    guid_t   guid                 = {};
+    uint64_t nid                  = 0;
+    pid_t    pid                  = 0;
+    pid_t    tid                  = 0;
+    pid_t    agent_absolute_index = 0;
+
+    DEFINE_GROUP_BY_OPERATORS(group_by_agent_tid, guid, nid, pid, tid, agent_absolute_index);
+    static auto get_order_by() { return std::string_view{"agent_absolute_index, tid"}; }
+};
+
+struct group_by_agent_queue_id
+{
+    guid_t   guid                 = {};
+    uint64_t nid                  = 0;
+    pid_t    pid                  = 0;
+    pid_t    agent_absolute_index = 0;
+    uint64_t queue_id             = 0;
+
+    DEFINE_GROUP_BY_OPERATORS(group_by_agent_queue_id,
+                              guid,
+                              nid,
+                              pid,
+                              agent_absolute_index,
+                              queue_id);
+    static auto get_order_by() { return std::string_view{"agent_absolute_index, queue_id"}; }
+};
+
+struct group_by_agent_stream_id
+{
+    guid_t   guid                 = {};
+    uint64_t nid                  = 0;
+    pid_t    pid                  = 0;
+    pid_t    agent_absolute_index = 0;
+    uint64_t stream_id            = 0;
+
+    DEFINE_GROUP_BY_OPERATORS(group_by_agent_stream_id,
+                              guid,
+                              nid,
+                              pid,
+                              agent_absolute_index,
+                              stream_id);
+    static auto get_order_by() { return std::string_view{"agent_absolute_index, stream_id"}; }
+};
+
+#undef DEFINE_GROUP_BY_OPERATORS
 }  // namespace types
 }  // namespace rocpd
 
@@ -542,6 +623,7 @@ template <typename ArchiveT>
 void
 load(ArchiveT& ar, rocpd::types::common_node_info& data)
 {
+    LOAD_DATA_FIELD(id);
     LOAD_DATA_FIELD(guid);
     LOAD_DATA_FIELD(nid);
     LOAD_DATA_FIELD(machine_id);
@@ -590,9 +672,12 @@ load(ArchiveT& ar, rocpd::types::agent& data)
 {
     LOAD_DATA_FIELD(guid);
     LOAD_DATA_FIELD(nid);
+    LOAD_DATA_FIELD(pid);
     LOAD_DATA_FIELD(absolute_index);
-    LOAD_DATA_FIELD(type);
-    LOAD_DATA_FIELD(user_name);
+    LOAD_DATA_FIELD(logical_index);
+    LOAD_DATA_FIELD(type_index);
+    LOAD_DATA_NAMED("type", type_name);
+    LOAD_DATA_FIELD(generic_name);
     LOAD_DATA_FIELD(extdata);
 
     data.load_extdata();
@@ -606,7 +691,7 @@ load(ArchiveT& ar, rocpd::types::code_object& data)
     LOAD_DATA_FIELD(guid);
     LOAD_DATA_FIELD(nid);
     LOAD_DATA_FIELD(pid);
-    LOAD_DATA_FIELD(agent_abs_index);
+    LOAD_DATA_FIELD(agent_absolute_index);
     LOAD_DATA_FIELD(uri);
     LOAD_DATA_FIELD(load_base);
     LOAD_DATA_FIELD(load_size);
@@ -664,7 +749,7 @@ load(ArchiveT& ar, rocpd::types::region& data)
     LOAD_DATA_FIELD(event_id);
     LOAD_DATA_FIELD(stack_id);
     LOAD_DATA_FIELD(parent_stack_id);
-    LOAD_DATA_FIELD(corr_id);
+    LOAD_DATA_FIELD(correlation_id);
     LOAD_DATA_FIELD(extdata);
 }
 
@@ -691,7 +776,7 @@ load(ArchiveT& ar, rocpd::types::sample& data)
     LOAD_DATA_FIELD(event_id);
     LOAD_DATA_FIELD(stack_id);
     LOAD_DATA_FIELD(parent_stack_id);
-    LOAD_DATA_FIELD(corr_id);
+    LOAD_DATA_FIELD(correlation_id);
     LOAD_DATA_FIELD(extdata);
 }
 
@@ -728,12 +813,12 @@ load(ArchiveT& ar, rocpd::types::event::decoded_extdata& data)
 
 template <typename ArchiveT>
 void
-load(ArchiveT& ar, rocpd::types::region_arg& data)
+load(ArchiveT& ar, rocpd::types::argument& data)
 {
     LOAD_DATA_FIELD(id);
     LOAD_DATA_FIELD(guid);
-    LOAD_DATA_FIELD(nid);
-    LOAD_DATA_FIELD(pid);
+    LOAD_DATA_FIELD(event_id);
+    LOAD_DATA_FIELD(position);
     LOAD_DATA_FIELD(type);
     LOAD_DATA_FIELD(name);
     LOAD_DATA_FIELD(value);
@@ -757,8 +842,8 @@ load(ArchiveT& ar, rocpd::types::kernel_dispatch& data)
     LOAD_DATA_FIELD(nid);
     LOAD_DATA_FIELD(pid);
     LOAD_DATA_FIELD(tid);
-    LOAD_DATA_FIELD(agent_abs_index);
-    LOAD_DATA_FIELD(agent_log_index);
+    LOAD_DATA_FIELD(agent_absolute_index);
+    LOAD_DATA_FIELD(agent_logical_index);
     LOAD_DATA_FIELD(agent_type_index);
     LOAD_DATA_FIELD(agent_type);
     LOAD_DATA_FIELD(code_object_id);
@@ -781,7 +866,8 @@ load(ArchiveT& ar, rocpd::types::kernel_dispatch& data)
     LOAD_DATA_FIELD(static_scratch_size);
     LOAD_DATA_FIELD(stack_id);
     LOAD_DATA_FIELD(parent_stack_id);
-    LOAD_DATA_FIELD(corr_id);
+    LOAD_DATA_FIELD(correlation_id);
+    LOAD_DATA_FIELD(event_id);
 }
 
 template <typename ArchiveT>
@@ -797,8 +883,8 @@ load(ArchiveT& ar, rocpd::types::memory_allocation& data)
     LOAD_DATA_FIELD(type);
     LOAD_DATA_FIELD(level);
     LOAD_DATA_FIELD(agent_name);
-    LOAD_DATA_FIELD(agent_abs_index);
-    LOAD_DATA_FIELD(agent_log_index);
+    LOAD_DATA_FIELD(agent_absolute_index);
+    LOAD_DATA_FIELD(agent_logical_index);
     LOAD_DATA_FIELD(agent_type_index);
     LOAD_DATA_FIELD(agent_type);
     LOAD_DATA_FIELD(address);
@@ -810,7 +896,8 @@ load(ArchiveT& ar, rocpd::types::memory_allocation& data)
     LOAD_DATA_FIELD(category);
     LOAD_DATA_FIELD(stack_id);
     LOAD_DATA_FIELD(parent_stack_id);
-    LOAD_DATA_FIELD(corr_id);
+    LOAD_DATA_FIELD(correlation_id);
+    LOAD_DATA_FIELD(event_id);
 }
 
 template <typename ArchiveT>
@@ -831,31 +918,33 @@ load(ArchiveT& ar, rocpd::types::memory_copies& data)
     LOAD_DATA_FIELD(queue_name);
     LOAD_DATA_FIELD(size);
     LOAD_DATA_FIELD(dst_device);
-    LOAD_DATA_FIELD(dst_agent_abs_index);
-    LOAD_DATA_FIELD(dst_agent_log_index);
+    LOAD_DATA_FIELD(dst_agent_absolute_index);
+    LOAD_DATA_FIELD(dst_agent_logical_index);
     LOAD_DATA_FIELD(dst_agent_type_index);
     LOAD_DATA_FIELD(dst_agent_type);
     LOAD_DATA_FIELD(dst_address);
     LOAD_DATA_FIELD(src_device);
-    LOAD_DATA_FIELD(src_agent_abs_index);
-    LOAD_DATA_FIELD(src_agent_log_index);
+    LOAD_DATA_FIELD(src_agent_absolute_index);
+    LOAD_DATA_FIELD(src_agent_logical_index);
     LOAD_DATA_FIELD(src_agent_type_index);
     LOAD_DATA_FIELD(src_agent_type);
     LOAD_DATA_FIELD(src_address);
     LOAD_DATA_FIELD(category);
     LOAD_DATA_FIELD(stack_id);
     LOAD_DATA_FIELD(parent_stack_id);
-    LOAD_DATA_FIELD(corr_id);
+    LOAD_DATA_FIELD(correlation_id);
+    LOAD_DATA_FIELD(event_id);
 }
 
 template <typename ArchiveT>
 void
 load(ArchiveT& ar, rocpd::types::scratch_memory& data)
 {
+    LOAD_DATA_FIELD(id);
     LOAD_DATA_FIELD(guid);
     LOAD_DATA_FIELD(operation);
-    LOAD_DATA_FIELD(agent_abs_index);
-    LOAD_DATA_FIELD(agent_log_index);
+    LOAD_DATA_FIELD(agent_absolute_index);
+    LOAD_DATA_FIELD(agent_logical_index);
     LOAD_DATA_FIELD(agent_type_index);
     LOAD_DATA_FIELD(agent_type);
     LOAD_DATA_FIELD(queue_id);
@@ -868,7 +957,8 @@ load(ArchiveT& ar, rocpd::types::scratch_memory& data)
     LOAD_DATA_FIELD(category);
     LOAD_DATA_FIELD(stack_id);
     LOAD_DATA_FIELD(parent_stack_id);
-    LOAD_DATA_FIELD(corr_id);
+    LOAD_DATA_FIELD(correlation_id);
+    LOAD_DATA_FIELD(event_id);
 }
 
 template <typename ArchiveT>
@@ -934,8 +1024,8 @@ load(ArchiveT& ar, rocpd::types::counter& data)
     LOAD_DATA_FIELD(pid);
     LOAD_DATA_FIELD(tid);
     LOAD_DATA_FIELD(agent_id);
-    LOAD_DATA_FIELD(agent_abs_index);
-    LOAD_DATA_FIELD(agent_log_index);
+    LOAD_DATA_FIELD(agent_absolute_index);
+    LOAD_DATA_FIELD(agent_logical_index);
     LOAD_DATA_FIELD(agent_type_index);
     LOAD_DATA_FIELD(agent_type);
     LOAD_DATA_FIELD(queue_id);
@@ -975,13 +1065,12 @@ load(ArchiveT& ar, rocpd::types::pmc_info& data)
 {
     LOAD_DATA_FIELD(id);
     LOAD_DATA_FIELD(guid);
-    LOAD_DATA_FIELD(nid);
-    LOAD_DATA_FIELD(pid);
     LOAD_DATA_FIELD(agent_id);
     LOAD_DATA_FIELD(target_arch);
     LOAD_DATA_FIELD(event_code);
     LOAD_DATA_FIELD(instance_id);
     LOAD_DATA_FIELD(name);
+    LOAD_DATA_FIELD(symbol);
     LOAD_DATA_FIELD(description);
     LOAD_DATA_FIELD(long_description);
     LOAD_DATA_FIELD(component);
@@ -994,6 +1083,48 @@ load(ArchiveT& ar, rocpd::types::pmc_info& data)
     LOAD_DATA_FIELD(extdata);
 }
 
+template <typename ArchiveT>
+void
+load(ArchiveT& ar, rocpd::types::group_by_tid& data)
+{
+    LOAD_DATA_FIELD(guid);
+    LOAD_DATA_FIELD(nid);
+    LOAD_DATA_FIELD(pid);
+    LOAD_DATA_FIELD(tid);
+}
+
+template <typename ArchiveT>
+void
+load(ArchiveT& ar, rocpd::types::group_by_agent_tid& data)
+{
+    LOAD_DATA_FIELD(guid);
+    LOAD_DATA_FIELD(nid);
+    LOAD_DATA_FIELD(pid);
+    LOAD_DATA_FIELD(tid);
+    LOAD_DATA_FIELD(agent_absolute_index);
+}
+
+template <typename ArchiveT>
+void
+load(ArchiveT& ar, rocpd::types::group_by_agent_queue_id& data)
+{
+    LOAD_DATA_FIELD(guid);
+    LOAD_DATA_FIELD(nid);
+    LOAD_DATA_FIELD(pid);
+    LOAD_DATA_FIELD(agent_absolute_index);
+    LOAD_DATA_FIELD(queue_id);
+}
+
+template <typename ArchiveT>
+void
+load(ArchiveT& ar, rocpd::types::group_by_agent_stream_id& data)
+{
+    LOAD_DATA_FIELD(guid);
+    LOAD_DATA_FIELD(nid);
+    LOAD_DATA_FIELD(pid);
+    LOAD_DATA_FIELD(agent_absolute_index);
+    LOAD_DATA_FIELD(stream_id);
+}
 }  // namespace cereal
 
 #undef LOAD_DATA_FIELD

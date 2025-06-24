@@ -84,6 +84,7 @@ class RocpdImportData(libpyrocpd.RocpdImportData):
                 raise ValueError(
                     f"input is unsupported type. Expected sqlite3.Connection, string, or (non-empty) list of strings. type={type(input).__name__}"
                 )
+            self.table_info = _table_info
             super(RocpdImportData, self).__init__(_connection, _filenames)
 
     def __getattr__(self, name):
@@ -202,4 +203,6 @@ def _create_temp_views(connection, input):
 def _create_meta_views(connection):
     schema = RocpdSchema()
     sql_script = schema.views.replace("CREATE VIEW", "CREATE TEMPORARY VIEW")
-    execute_statement(connection, sql_script, is_script=True)
+    # for easier debugging
+    for itr in sql_script.split(";"):
+        execute_statement(connection, f"{itr};")

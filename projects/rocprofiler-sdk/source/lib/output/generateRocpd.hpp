@@ -29,8 +29,14 @@
 #include "output_config.hpp"
 #include "stream_info.hpp"
 
+#include <rocprofiler-sdk/fwd.h>
+
 #include <cstdint>
 #include <deque>
+#include <initializer_list>
+#include <optional>
+#include <string>
+#include <string_view>
 
 namespace rocprofiler
 {
@@ -62,15 +68,35 @@ struct argument_info
     std::string arg_value  = {};
 };
 
+struct sql_insert_value
+{
+    std::string_view                                                                     name  = {};
+    std::variant<std::monostate, int64_t, uint64_t, double, std::string, std::nullptr_t> value = {};
+};
+
 struct track_data
 {
-    uint64_t node_id = 0;
-    pid_t    pid     = 0;
-    pid_t    tid     = 0;
-    uint64_t name_id = 0;
+    uint64_t                   nid       = 0;
+    std::optional<pid_t>       ppid      = {};
+    std::optional<pid_t>       pid       = {};
+    std::optional<pid_t>       tid       = {};
+    std::optional<uint64_t>    agent_id  = {};
+    std::optional<uint64_t>    queue_id  = {};
+    std::optional<uint64_t>    stream_id = {};
+    std::optional<uint64_t>    name_id   = {};
+    std::optional<std::string> extdata   = {};
 
-    size_t hash() const;
+    size_t         hash() const;
+    decltype(auto) tie() const;
+
+    std::vector<sql_insert_value> get_insert_values() const;
 };
+
+inline decltype(auto)
+track_data::tie() const
+{
+    return std::tie(nid, ppid, pid, tid, agent_id, queue_id, stream_id);
+}
 
 bool
 operator==(const track_data& lhs, const track_data& rhs);

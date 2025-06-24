@@ -74,31 +74,24 @@ template <typename Tp>
 auto
 read_impl(sqlite3* conn, std::string_view conditions)
 {
-    auto query = std::string_view{};
+    auto table = std::string_view{};
 
     if constexpr(std::is_same<Tp, types::node>::value)
-        query = "rocpd_info_node";
+        table = "rocpd_info_node";
     else if constexpr(std::is_same<Tp, types::process>::value)
-        query = "processes";
+        table = "processes";
     else if constexpr(std::is_same<Tp, types::thread>::value)
-        query = "threads";
+        table = "threads";
     else if constexpr(std::is_same<Tp, types::region>::value)
-        query = "regions";
+        table = "regions";
     else if constexpr(std::is_same<Tp, types::kernel_dispatch>::value)
-        query = "kernels";
+        table = "kernels";
     else if constexpr(std::is_same<Tp, types::agent>::value)
-        query = "rocpd_info_agent";
+        table = "rocpd_info_agent";
     else
         static_assert(rocprofiler::sdk::mpl::assert_false<Tp>::value, "Unsupported read type");
 
-    auto data = std::vector<Tp>{};
-    if(conn)
-    {
-        auto ar = cereal::SQLite3InputArchive{
-            conn, fmt::format("SELECT * FROM {} {}", query, conditions)};
-        cereal::load(ar, data);
-    }
-    return data;
+    return read_sql_query<Tp>(conn, fmt::format("SELECT * FROM {} {}", table, conditions));
 }
 
 template <typename Tp>
@@ -225,12 +218,19 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
 
     // demo for creating python bindings to a class
     py::class_<rocpd::types::agent>(pyrocpd, "agent")
+        .def_readonly("id", &rocpd::types::agent::id)
+        .def_readonly("nid", &rocpd::types::agent::nid)
+        .def_readonly("pid", &rocpd::types::agent::pid)
         .def_readonly("node_id", &rocpd::types::agent::node_id)
-        .def_readonly("logical_node_id", &rocpd::types::agent::logical_node_id)
+        .def_readonly("absolute_index", &rocpd::types::agent::absolute_index)
+        .def_readonly("logical_index", &rocpd::types::agent::logical_index)
+        .def_readonly("type_index", &rocpd::types::agent::type_index)
         .def_readonly("gpu_index", &rocpd::types::agent::gpu_index)
         .def_readonly("name", &rocpd::types::agent::name)
-        .def_readonly("user_name", &rocpd::types::agent::user_name)
-        .def_readonly("product_name", &rocpd::types::agent::product_name);
+        .def_readonly("generic_name", &rocpd::types::agent::generic_name)
+        .def_readonly("model_name", &rocpd::types::agent::model_name)
+        .def_readonly("product_name", &rocpd::types::agent::product_name)
+        .def_readonly("vendor_name", &rocpd::types::agent::vendor_name);
 
     py::class_<rocpd::types::node>(pyrocpd, "node")
         .def(py::init<>())
@@ -407,12 +407,13 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                     _agent.node_id,                                      // absolute index
                     static_cast<uint32_t>(_agent.logical_node_id),       // relative index
                     static_cast<uint32_t>(_agent.logical_node_type_id),  // type-relative index
-                    std::string_view(_agent.type));
+                    std::string_view(_agent.type_name));
                 return ret_index;
             };
+
             // ORDER BY expression for kernel dispatches
             constexpr auto kernels_order_by =
-                "agent_abs_index ASC, stream_id ASC, queue_id ASC, start ASC, end DESC";
+                "agent_absolute_index ASC, stream_id ASC, queue_id ASC, start ASC, end DESC";
 
             constexpr auto region_order_by = "start ASC, end DESC";
             constexpr auto sample_order_by = "timestamp ASC";
@@ -421,12 +422,14 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
             auto  perfetto_session = rocpd::output::PerfettoSession{output_cfg, conn};
             auto  sqlgen_perf      = common::simple_timer{
                 fmt::format("Perfetto generation from {} SQL database(s)", data.size())};
+
             for(auto obj : {data.connection})
             {
-                auto nodes = rocpd::read<rocpd::types::node>(conn);
+                auto  nodes = rocpd::read<rocpd::types::node>(conn);
 
                 for(const auto& nitr : nodes)
                 {
+                
                     auto agents = rocpd::read<rocpd::types::agent>(
                         conn, fmt::format("WHERE guid = '{}' AND nid = {}", nitr.guid, nitr.id));
                     auto processes = rocpd::read<rocpd::types::process>(
@@ -436,18 +439,18 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                     {
                         ROCP_FATAL_IF(pitr.nid != nitr.id || pitr.guid != nitr.guid)
                             << fmt::format("Found process with a mismatched nid/guid. process: "
-                                           "{}/{} vs. node: {}/{}",
-                                           pitr.nid,
-                                           pitr.guid,
-                                           nitr.id,
-                                           nitr.guid);
+                                        "{}/{} vs. node: {}/{}",
+                                        pitr.nid,
+                                        pitr.guid,
+                                        nitr.id,
+                                        nitr.guid);
                         auto select_guid_nid_pid = [&nitr, &pitr](std::string_view tbl) {
                             return fmt::format("SELECT * FROM {} WHERE guid = '{}' AND nid "
-                                               "= {} AND pid = {}",
-                                               tbl,
-                                               pitr.guid,
-                                               nitr.id,
-                                               pitr.pid);
+                                            "= {} AND pid = {}",
+                                            tbl,
+                                            pitr.guid,
+                                            nitr.id,
+                                            pitr.pid);
                         };
 
                         auto _sqlgen_perft = common::simple_timer{fmt::format(
@@ -456,9 +459,8 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                         auto kernels = rocpd::sql_generator<rocpd::types::kernel_dispatch>{
                             conn, select_guid_nid_pid("kernels"), kernels_order_by};
 
-                        auto memory_allocations =
-                            rocpd::sql_generator<rocpd::types::memory_allocation>{
-                                conn, select_guid_nid_pid("memory_allocations")};
+                        auto memory_allocations = rocpd::sql_generator<rocpd::types::memory_allocation>{
+                            conn, select_guid_nid_pid("memory_allocations")};
 
                         auto memory_copies = rocpd::sql_generator<rocpd::types::memory_copies>{
                             conn, select_guid_nid_pid("memory_copies")};
@@ -489,21 +491,20 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                             agents_map.emplace(itr.absolute_index, std::make_pair(itr, new_index));
                         }
 
-                        ROCP_TRACE << "Starting Perfetto generation from SQL for process "
-                                   << pitr.pid;
+                        ROCP_TRACE << "Starting Perfetto generation from SQL for process " << pitr.pid;
                         auto _sqlgen_perfw = common::simple_timer{fmt::format(
                             "Perfetto generation from SQL for process {} (write)", pitr.pid)};
                         rocpd::output::write_perfetto(perfetto_session,
-                                                      pitr,
-                                                      agents_map,
-                                                      threads,
-                                                      regions,
-                                                      samples,
-                                                      kernels,
-                                                      memory_copies,
-                                                      scratch_memory,
-                                                      memory_allocations,
-                                                      counters);
+                                                    pitr,
+                                                    agents_map,
+                                                    threads,
+                                                    regions,
+                                                    samples,
+                                                    kernels,
+                                                    memory_copies,
+                                                    scratch_memory,
+                                                    memory_allocations,
+                                                    counters);
                     }
                 }
             }
