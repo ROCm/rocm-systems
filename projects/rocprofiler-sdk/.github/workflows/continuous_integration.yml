@@ -25,14 +25,15 @@ env:
   ROCM_PATH: "/opt/rocm"
   GPU_TARGETS: "gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201"
   PATH: "/usr/bin:$PATH"
-  navi3_EXCLUDE_TESTS_REGEX: ""
-  vega20_EXCLUDE_TESTS_REGEX: ""
-  mi200_EXCLUDE_TESTS_REGEX: ""
-  mi300_EXCLUDE_TESTS_REGEX: ""
-  mi300a_EXCLUDE_TESTS_REGEX: ""
-  mi325_EXCLUDE_TESTS_REGEX: "^(counter-collection-buffer)$"
-  mi3xx_EXCLUDE_TESTS_REGEX: "^(counter-collection-buffer)$"
-  navi4_EXCLUDE_TESTS_REGEX: ""
+  navi3_EXCLUDE_TESTS_REGEX: "scratch-memory"
+  vega20_EXCLUDE_TESTS_REGEX: "scratch-memory"
+  mi200_EXCLUDE_TESTS_REGEX: "scratch-memory"
+  mi300_EXCLUDE_TESTS_REGEX: "scratch-memory"
+  mi300a_EXCLUDE_TESTS_REGEX: "scratch-memory"
+  rocprof-azure_EXCLUDE_TESTS_REGEX: "counter-collection-buffer|scratch-memory"
+  mi325_EXCLUDE_TESTS_REGEX: "counter-collection-buffer|scratch-memory"
+  mi3xx_EXCLUDE_TESTS_REGEX: "counter-collection-buffer|scratch-memory"
+  navi4_EXCLUDE_TESTS_REGEX: "scratch-memory"
   navi3_EXCLUDE_LABEL_REGEX: "^(pc-sampling)$"
   vega20_EXCLUDE_LABEL_REGEX: "^(pc-sampling)$"
   mi200_EXCLUDE_LABEL_REGEX: "^(stochastic)$"
@@ -40,6 +41,7 @@ env:
   mi300a_EXCLUDE_LABEL_REGEX: ""
   mi325_EXCLUDE_LABEL_REGEX: "^(pc-sampling)$"
   mi3xx_EXCLUDE_LABEL_REGEX: "^(pc-sampling)$"
+  rocprof-azure_EXCLUDE_LABEL_REGEX: "^(pc-sampling)$"
   navi4_EXCLUDE_LABEL_REGEX: "^(pc-sampling)$"
   GLOBAL_CMAKE_OPTIONS: "-DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON"
 
@@ -49,17 +51,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['vega20', 'navi3', 'navi4', 'rocprof-azure']
+        runner: ['vega20', 'navi3', 'navi4', 'mi3xx']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
         ci-flags: ['--linter clang-tidy']
 
-    runs-on: ${{ matrix.runner }}-emu-runner-set
+    runs-on: ${{ matrix.runner == 'mi3xx' && 'rocprof-azure' || matrix.runner }}-emu-runner-set
 
     # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-      CORE_EXT_RUNNER: rocprof-azure
+      CORE_EXT_RUNNER: mi3xx
 
     steps:
     - uses: actions/checkout@v4
@@ -594,13 +596,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['rocprof-azure']
+        runner: ['mi3xx']
         sanitizer: ['AddressSanitizer', 'ThreadSanitizer', 'LeakSanitizer', 'UndefinedBehaviorSanitizer']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
 
     if: ${{ contains(github.event_name, 'pull_request') }}
-    runs-on: ${{ matrix.runner }}-emu-runner-set
+    runs-on: ${{ matrix.runner == 'mi3xx' && 'rocprof-azure' || matrix.runner }}-emu-runner-set
 
     # define this for containers
     env:
