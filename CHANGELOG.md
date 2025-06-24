@@ -2,22 +2,38 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
-## ROCm Systems Profiler 1.1.0 for ROCm 6.5
+## ROCm Systems Profiler 1.1.0 for ROCm 7.0
 
 ### Added
 
-- Profiling and metric collection capabilities for VCN engine activity, JPEG engine activity, and API tracing for rocDecode, rocJPEG and VA-APIs.
+- Profiling and metric collection capabilities for VCN engine activity, JPEG engine activity, and API tracing for rocDecode, rocJPEG, and VA-APIs.
 - How-to document for VCN and JPEG activity sampling and tracing.
+- Support for tracing Fortran applications.
+- Support for tracing MPI API in Fortran.
 
 ### Changed
 
 - Replaced ROCm SMI backend with AMD SMI backend for collecting GPU metrics.
+- ROCprofiler-SDK is now used to trace RCCL API and collect communication counters.
+- Updated the Dyninst submodule to v13.0.
+- Set the default value of `ROCPROFSYS_SAMPLING_CPUS` to `none`.
 
 ### Resolved issues
 
-- Fixed application hang when enabling the RCCL backend
-- Fixed GPU metric collection settings with ROCPROFSYS_AMD_SMI_METRICS.
-- Fixed an issue where enabling the RCCL backend caused the application to stop responding.
+- Fixed GPU metric collection settings with `ROCPROFSYS_AMD_SMI_METRICS`.
+- Fixed a build issue with CMake 4.
+- Fixed incorrect kernel names shown for kernel dispatch tracks in Perfetto.
+- Fixed formatting of some output logs.
+
+## ROCm Systems Profiler 1.0.2 for ROCm 6.4.2
+
+### Optimized
+
+- Improved readability of the OpenMP target offload traces by showing on a single Perfetto track.
+
+### Resolved issues
+
+- Fixed the file path to the script that merges Perfetto files from multi-process MPI runs. The script has also been renamed from `merge-multiprocess-output.sh` to `rocprof-sys-merge-output.sh`.
 
 ## ROCm Systems Profiler 1.0.1 for ROCm 6.4.1
 
