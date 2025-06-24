@@ -88,7 +88,7 @@ RdcMetricFetcherImpl::~RdcMetricFetcherImpl() {
 }
 
 uint64_t RdcMetricFetcherImpl::now() {
-  struct timeval tv {};
+  struct timeval tv{};
   gettimeofday(&tv, NULL);
   return static_cast<uint64_t>(tv.tv_sec) * 1000 + tv.tv_usec / 1000;
 }
@@ -485,7 +485,8 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
     } else {
       info_str = std::to_string(info.device_index);
     }
-    RDC_LOG(RDC_ERROR, "Failed to get processor handle for GPU " << info_str << " error: " << ret);
+    RDC_LOG(RDC_ERROR,
+            "Failed to get processor handle for device " << info_str << " error: " << ret);
     return Smi2RdcError(ret);
   }
 
@@ -502,7 +503,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
     uint16_t num_partitions = 0;
     amdsmi_status_t st = get_num_partition(info.device_index, &num_partitions);
     if (st != AMDSMI_STATUS_SUCCESS) {
-      RDC_LOG(RDC_ERROR, "Failed to get partition info for GPU " << info.device_index);
+      RDC_LOG(RDC_ERROR, "Failed to get partition info for device " << info.device_index);
       return RDC_ST_UNKNOWN_ERROR;
     }
 
@@ -620,6 +621,10 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
         value->type = INTEGER;
         value->status = RDC_ST_OK;
         return RDC_ST_OK;
+      }
+      case RDC_FI_CPU_COUNT: {
+        // CPU_COUNT is not supported in partitions
+        return RDC_ST_NO_DATA;
       }
 
       default:
@@ -1119,7 +1124,17 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
       if (value->status == AMDSMI_STATUS_SUCCESS) {
         value->value.l_int = static_cast<int64_t>(gpu_busy_percent);
       }
+      break;
     }
+
+    case RDC_FI_CPU_COUNT: {
+      uint32_t socket_count = 0;
+      value->status = amdsmi_get_cpu_socket_count(&socket_count);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(socket_count);
+      }
+    } break;
 
     default:
       break;

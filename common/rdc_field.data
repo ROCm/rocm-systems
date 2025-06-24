@@ -238,3 +238,17 @@ FLD_DESC_ENT(RDC_HEALTH_RETIRED_PAGE_LIMIT,       "Retired page limit",         
 FLD_DESC_ENT(RDC_HEALTH_EEPROM_CONFIG_VALID,      "Verify checksum of EEPROM",                  "EEPROM_CONFIG_VALID",      true)
 FLD_DESC_ENT(RDC_HEALTH_POWER_THROTTLE_TIME,      "Power throttle status counter",              "POWER_THROTTLE_TIME",      true)
 FLD_DESC_ENT(RDC_HEALTH_THERMAL_THROTTLE_TIME,    "Total time(ms) in thermal throttle status",  "THERMAL_THROTTLE_TIME",    true)
+
+// CPU-related fields description
+FLD_DESC_ENT(RDC_FI_CPU_COUNT,              "The number of CPU cores",                         "CPU_COUNT",              false)
+FLD_DESC_ENT(RDC_FI_CPU_UTIL_TOTAL,         "CPU total percentage of time in use",             "CPU_UTIL_TOTAL",         false)
+FLD_DESC_ENT(RDC_FI_CPU_UTIL_USER,          "Percent of time in use by the user",              "CPU_UTIL_USER",          false)
+FLD_DESC_ENT(RDC_FI_CPU_UTIL_NICE,          "Percent of time in use by low priority programs", "CPU_UTIL_NICE",          false)
+FLD_DESC_ENT(RDC_FI_CPU_UTIL_SYS,           "Percent of time in use by the system",            "CPU_UTIL_SYS",           false)
+FLD_DESC_ENT(RDC_FI_CPU_UTIL_IRQ,           "Percent of time in use by interrupts",            "CPU_UTIL_IRQ",           false)
+FLD_DESC_ENT(RDC_FI_CPU_TEMP_CURRENT,       "Temperature (Celsius)",                           "CPU_TEMP_CURRENT",       false)
+FLD_DESC_ENT(RDC_FI_CPU_CLOCK_CURRENT,      "Clock speed (KHz)",                               "CPU_CLOCK_CURRENT",      false)
+FLD_DESC_ENT(RDC_FI_CPU_POWER_UTIL_CURRENT, "Power usage (watts)",                             "CPU_POWER_UTIL_CURRENT", false)
+FLD_DESC_ENT(RDC_FI_CPU_POWER_LIMIT,        "Power limit (watts)",                             "CPU_POWER_LIMIT",        false)
+FLD_DESC_ENT(RDC_FI_CPU_VENDOR,             "Name of the vendor",                              "CPU_VENDOR",             false)
+FLD_DESC_ENT(RDC_FI_CPU_MODEL,              "Name of the model",                               "CPU_MODEL",              false)

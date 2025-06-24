@@ -424,6 +424,21 @@ typedef enum {
   RDC_HEALTH_EEPROM_CONFIG_VALID,    //!< Reads the EEPROM and verifies the checksums
   RDC_HEALTH_POWER_THROTTLE_TIME,    //!< Power throttle status counter
   RDC_HEALTH_THERMAL_THROTTLE_TIME,  //!< Total time in thermal throttle status (microseconds)
+  /**
+   * @brief RDC CPU related fields
+   */
+  RDC_FI_CPU_COUNT = 10001,       //!< CPU count
+  RDC_FI_CPU_UTIL_TOTAL,          //!< CPU total percentage of time in use
+  RDC_FI_CPU_UTIL_USER,           //!< Percent of time in use by the user
+  RDC_FI_CPU_UTIL_NICE,           //!< Percent of time in use by low priority programs
+  RDC_FI_CPU_UTIL_SYS,            //!< Percent of time in use by the system
+  RDC_FI_CPU_UTIL_IRQ,            //!< Percent of time in use by interrupts
+  RDC_FI_CPU_TEMP_CURRENT,        //!< Temperature (Celsius)
+  RDC_FI_CPU_CLOCK_CURRENT,       //!< Clock speed (KHz)
+  RDC_FI_CPU_POWER_UTIL_CURRENT,  //!< Power usage (watts)
+  RDC_FI_CPU_POWER_LIMIT,         //!< Power limit (watts)
+  RDC_FI_CPU_VENDOR,              //!< Name of the vendor
+  RDC_FI_CPU_MODEL,               //!< Name of the model
 } rdc_field_t;
 
 // even and odd numbers are used for correctable and uncorrectable errors
