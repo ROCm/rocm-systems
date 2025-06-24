@@ -3914,7 +3914,7 @@ class AMDSMICommands():
                     try:
                         link_type = amdsmi_interface.amdsmi_topo_get_link_type(src_gpu, dest_gpu)['type']
                         if isinstance(link_type, int):
-                            if link_type != 2:
+                            if link_type != amdsmi_interface.amdsmi_wrapper.AMDSMI_LINK_TYPE_XGMI:
                                 # non_xgmi = True
                                 src_gpu_link_type[dest_gpu_key] = "N/A"
                                 continue
