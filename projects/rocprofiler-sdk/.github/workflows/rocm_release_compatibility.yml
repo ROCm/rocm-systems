@@ -34,7 +34,7 @@ jobs:
         os: ['ubuntu-22.04']
         build-type: ['Release']
 
-    runs-on: ubuntu-latest
+    runs-on: rocprof-azure-docker-emu-runner-set
     container: rocm/dev-${{ matrix.os }}:${{ matrix.rocm-release }}
 
     # define this for containers

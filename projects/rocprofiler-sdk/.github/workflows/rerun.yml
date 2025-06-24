@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        runner: [mi200-runner-set]
+        runner: [mi200-emu-runner-set]
         os: [ubuntu-22.04]
         build-type: [RelWithDebInfo]
         ci-flags: ['--linter clang-tidy']
@@ -135,7 +135,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        runner: [mi300-runner-set]
+        runner: [rocprof-azure-emu-runner-set]
         os: [ubuntu-22.04]
         build-type: [RelWithDebInfo]
         ci-flags: ['--linter clang-tidy']
