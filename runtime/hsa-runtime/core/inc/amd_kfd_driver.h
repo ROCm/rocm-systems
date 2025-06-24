@@ -87,7 +87,6 @@ public:
   hsa_status_t GetNodeProperties(HsaNodeProperties& node_props, uint32_t node_id) const override;
   hsa_status_t GetEdgeProperties(std::vector<HsaIoLinkProperties>& io_link_props,
                                  uint32_t node_id) const override;
-  hsa_status_t GetAgentProperties(core::Agent &agent) const override;
   hsa_status_t GetMemoryProperties(uint32_t node_id,
                                    std::vector<HsaMemoryProperties>& mem_props) const override;
   hsa_status_t GetCacheProperties(uint32_t node_id, uint32_t processor_id,

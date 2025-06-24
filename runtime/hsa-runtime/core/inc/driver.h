@@ -114,13 +114,6 @@ public:
   virtual hsa_status_t GetEdgeProperties(std::vector<HsaIoLinkProperties>& io_link_props,
                                          uint32_t node_id) const = 0;
 
-  /// @brief Get the properties of a specific agent and initialize the agent
-  /// object.
-  /// @param agent Agent whose properties we're getting.
-  /// @retval HSA_STATUS_SUCCESS if the driver successfully returns the agent's
-  /// properties.
-  virtual hsa_status_t GetAgentProperties(Agent &agent) const = 0;
-
   /// @brief Get the memory properties of a specific node.
   /// @param[in] node_id Node ID of the agent.
   /// @param[out] mem_props Memory properties of the node specified by @p node_id.

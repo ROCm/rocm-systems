@@ -197,31 +197,6 @@ hsa_status_t XdnaDriver::GetEdgeProperties(std::vector<HsaIoLinkProperties>& io_
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t XdnaDriver::GetAgentProperties(core::Agent &agent) const {
-  if (agent.device_type() != core::Agent::DeviceType::kAmdAieDevice) {
-    return HSA_STATUS_ERROR_INVALID_AGENT;
-  }
-
-  auto& aie_agent = static_cast<AieAgent&>(agent);
-
-  amdxdna_drm_query_aie_metadata aie_metadata = {};
-  amdxdna_drm_get_info get_info_args = {};
-  get_info_args.param = DRM_AMDXDNA_QUERY_AIE_METADATA;
-  get_info_args.buffer_size = sizeof(aie_metadata);
-  get_info_args.buffer = reinterpret_cast<uintptr_t>(&aie_metadata);
-
-  if (ioctl(fd_, DRM_IOCTL_AMDXDNA_GET_INFO, &get_info_args) < 0) {
-    return HSA_STATUS_ERROR;
-  }
-
-  // Right now can only target N-1 columns as that is the
-  // number of shim DMAs in npu1 devices.
-  aie_agent.SetNumCols(aie_metadata.cols - 1);
-  aie_agent.SetNumCoreRows(aie_metadata.core.row_count);
-
-  return HSA_STATUS_SUCCESS;
-}
-
 hsa_status_t XdnaDriver::GetMemoryProperties(uint32_t node_id,
                                              std::vector<HsaMemoryProperties>& mem_props) const {
   return HSA_STATUS_SUCCESS;

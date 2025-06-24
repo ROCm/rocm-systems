@@ -174,10 +174,6 @@ hsa_status_t KfdDriver::GetEdgeProperties(std::vector<HsaIoLinkProperties>& io_l
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdDriver::GetAgentProperties(core::Agent &agent) const {
-  return HSA_STATUS_SUCCESS;
-}
-
 hsa_status_t KfdDriver::GetMemoryProperties(uint32_t node_id,
                                             std::vector<HsaMemoryProperties>& mem_props) const {
   if (!mem_props.data()) return HSA_STATUS_ERROR_INVALID_ARGUMENT;

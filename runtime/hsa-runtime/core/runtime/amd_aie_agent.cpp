@@ -61,7 +61,6 @@ AieAgent::AieAgent(uint32_t node, const HsaNodeProperties& node_props)
       node_props_(node_props) {
   InitRegionList();
   InitAllocators();
-  GetAgentProperties();
 }
 
 AieAgent::~AieAgent() {
@@ -332,11 +331,6 @@ void AieAgent::InitRegionList() {
       new MemoryRegion(false, false, false, false, true, this, dev_mem_props));
   regions_.push_back(new MemoryRegion(false, false, false, false, true, this,
                                       other_mem_props));
-}
-
-void AieAgent::GetAgentProperties() {
-  auto &drv = static_cast<XdnaDriver &>(driver());
-  drv.GetAgentProperties(*this);
 }
 
 void AieAgent::InitAllocators() {

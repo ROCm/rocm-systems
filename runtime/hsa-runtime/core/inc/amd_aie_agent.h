@@ -53,11 +53,11 @@ namespace AMD {
 
 class AieAgent : public core::Agent {
 public:
-  /// @brief AIE agent constructor.
-  /// @param [in] node Node id.
+ /// @brief AIE agent constructor.
+ /// @param [in] node Node id.
+ /// @param [in] node_props Node properties.
  AieAgent(uint32_t node, const HsaNodeProperties& node_props);
 
- // @brief AIE agent destructor.
  ~AieAgent();
 
  hsa_status_t VisitRegion(bool include_peer,
@@ -79,7 +79,7 @@ public:
                           uint32_t private_segment_size, uint32_t group_segment_size,
                           core::Queue** queue) override;
 
- // @brief Override from core::Agent.
+ /// @brief Override from core::Agent.
  const std::vector<const core::Isa*>& supported_isas() const override { return supported_isas_; }
 
  const std::vector<const core::MemoryRegion*>& regions() const override { return regions_; }
@@ -94,24 +94,12 @@ public:
   const std::function<void(void*)>& system_deallocator() const { return system_deallocator_; }
 
   const HsaNodeProperties& properties() const { return node_props_; }
-  // AIE agent methods.
-  /// @brief Get the number of columns on this AIE agent.
-  uint32_t GetNumCols() const { return num_cols_; }
-  void SetNumCols(uint32_t num_cols) { num_cols_ = num_cols; }
-  /// @brief Get the number of core tile rows on this AIE agent.
-  uint32_t GetNumCoreRows() const { return num_core_rows_; }
-  void SetNumCoreRows(uint32_t num_core_rows) { num_core_rows_ = num_core_rows; }
-  /// @brief Get the number of core tiles on this AIE agent.
-  uint32_t GetNumCores() const { return num_cols_ * num_core_rows_; }
 
 private:
   /// @brief Query the driver to get the region list owned by this agent.
   void InitRegionList();
   /// @brief Setup the memory allocators used by this agent.
   void InitAllocators();
-
-  /// @brief Query the driver to get properties for this AIE agent.
-  void GetAgentProperties();
 
   std::vector<const core::MemoryRegion *> regions_;
   std::function<void *(size_t size, size_t align,
@@ -127,11 +115,6 @@ private:
   const uint32_t max_queues_ = 1;
 
   const HsaNodeProperties node_props_;
-  /// @brief Number of columns in the AIE array.
-  uint32_t num_cols_ = 0;
-  /// @brief Number of rows of core tiles in the AIE array. Not all rows in a
-  /// column are cores. Some can be memory or shim tiles.
-  uint32_t num_core_rows_ = 0;
 };
 
 } // namespace AMD
