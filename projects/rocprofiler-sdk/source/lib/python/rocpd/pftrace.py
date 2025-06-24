@@ -90,12 +90,28 @@ def add_args(parser):
         default=False,
     )
 
+    pftrace_options.add_argument(
+        "--annotate-args",
+        help="Add the function arguments (when available) to the Perfetto debug annotations",
+        action="store_true",
+        default=False,
+    )
+
+    pftrace_options.add_argument(
+        "--annotate-pmc",
+        help="Add the function PMC values (when available) to the Perfetto debug annotations",
+        action="store_true",
+        default=False,
+    )
+
     return [
         "perfetto_backend",
         "perfetto_buffer_fill_policy",
         "perfetto_buffer_size",
         "perfetto_shmem_size_hint",
         "group_by_queue",
+        "annotate_args",
+        "annotate_pmc",
     ]
 
 

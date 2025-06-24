@@ -33,6 +33,7 @@
 #include <cereal/cereal.hpp>
 
 #include <cstdint>
+#include <string_view>
 
 namespace rocpd
 {
@@ -40,14 +41,13 @@ namespace functions
 {
 namespace
 {
-// Custom SQL function: rocpd_get_string(common_string_id, unique_string_id, nid, pid)
+// Custom SQL function: rocpd_get_string(string_id, guid)
 void
 rocpd_get_string(sqlite3_context* context, int argc, sqlite3_value** argv)
 {
     if(argc != 4)
     {
-        ROCP_WARNING << "rocpd_get_string requires exactly 4 arguments (common_string_id, "
-                        "unique_string_id, nid, pid)";
+        ROCP_WARNING << "rocpd_get_string requires exactly 2 arguments (string_id, guid)";
         sqlite3_result_null(context);
         return;
     }
@@ -55,13 +55,10 @@ rocpd_get_string(sqlite3_context* context, int argc, sqlite3_value** argv)
     auto* db = static_cast<sqlite3*>(sqlite3_user_data(context));
 
     // common and unique name ids passed in
-    auto c_name_id = sqlite3_value_int64(argv[0]);
-    auto u_name_id = sqlite3_value_int64(argv[1]);
+    auto        _name_id = sqlite3_value_int64(argv[0]);
+    const auto* _guid    = reinterpret_cast<const char*>(sqlite3_value_text(argv[1]));
 
-    auto execute_query = [&](std::string_view _query, std::initializer_list<int64_t>&& _args) {
-        // char query[256];
-        // snprintf(query, sizeof(query), "SELECT value FROM %s WHERE id = ?", table);
-
+    auto execute_query = [&](std::string_view _query) {
         sqlite3_stmt* stmt = nullptr;
 
         if(int rc = sqlite3_prepare_v2(db, _query.data(), -1, &stmt, nullptr); rc != SQLITE_OK)
@@ -71,9 +68,8 @@ rocpd_get_string(sqlite3_context* context, int argc, sqlite3_value** argv)
             return;
         }
 
-        int64_t idx = 1;
-        for(auto itr : _args)
-            sqlite3_bind_int64(stmt, idx++, itr);
+        sqlite3_bind_int64(stmt, 1, _name_id);
+        sqlite3_bind_text(stmt, 1, _guid, std::string_view{_guid}.length(), nullptr);
 
         if(auto rc = sqlite3_step(stmt); rc == SQLITE_ROW)
         {
@@ -95,23 +91,69 @@ rocpd_get_string(sqlite3_context* context, int argc, sqlite3_value** argv)
         sqlite3_finalize(stmt);
     };
 
-    if(c_name_id != 0)
+    if(_name_id != 0)
     {
-        execute_query("SELECT string FROM rocpd_common_string WHERE id == ?",
-                      std::initializer_list<int64_t>{c_name_id});
-    }
-    else if(u_name_id != 0)
-    {
-        auto u_nid = sqlite3_value_int64(argv[2]);
-        auto u_pid = sqlite3_value_int64(argv[3]);
-
-        execute_query(
-            "SELECT string FROM rocpd_unique_string WHERE id == ? AND nid = ? AND pid = ?",
-            std::initializer_list<int64_t>{u_name_id, u_nid, u_pid});
+        execute_query("SELECT string FROM rocpd_string WHERE id == ? AND guid = '?'");
     }
     else
     {
         sqlite3_result_null(context);
+    }
+}
+
+// --- 1) Define the aggregation context ---
+struct stddev_context
+{
+    sqlite3_int64 nsamp    = 0;    // count of values
+    double        mean     = 0.0;  // running mean
+    double        diff_sqr = 0.0;  // running sum of squares of differences
+};
+
+// --- 2) step function: called once per row ---
+void
+stddev_step(sqlite3_context* ctx, int argc, sqlite3_value** argv)
+{
+    if(argc == 0) return;
+
+    // We expect a single REAL or INT argument
+    if(sqlite3_value_type(argv[0]) == SQLITE_NULL) return;
+
+    auto val = sqlite3_value_double(argv[0]);
+
+    // Allocate or fetch our context struct
+    auto* p = static_cast<stddev_context*>(sqlite3_aggregate_context(ctx, sizeof(stddev_context)));
+    if(!p) return;  // OOM
+
+    // Initialize on first call
+    if(p->nsamp == 0)
+    {
+        p->nsamp    = 0;
+        p->mean     = 0.0;
+        p->diff_sqr = 0.0;
+    }
+
+    // Welford’s algorithm
+    ++p->nsamp;
+    auto delta = (val - p->mean);
+    p->mean += (delta / p->nsamp);
+    auto delta2 = (val - p->mean);
+    p->diff_sqr += (delta * delta2);
+}
+
+// --- 3) finalize function: called after all rows are processed ---
+void
+stddev_finalize(sqlite3_context* ctx)
+{
+    auto* p = static_cast<stddev_context*>(sqlite3_aggregate_context(ctx, 0));
+    if(!p || p->nsamp < 2)
+    {
+        // Not enough data to form a sample stddev
+        sqlite3_result_null(ctx);
+    }
+    else
+    {
+        auto variance = p->diff_sqr / (p->nsamp - 1);
+        sqlite3_result_double(ctx, std::sqrt(variance));
     }
 }
 }  // namespace
@@ -119,20 +161,28 @@ rocpd_get_string(sqlite3_context* context, int argc, sqlite3_value** argv)
 void
 define_for_database(sqlite3* conn)
 {
-    if(false)
-    {
-        sqlite3_create_function_v2(conn,
-                                   "rocpd_get_string",
-                                   4,
-                                   SQLITE_UTF8,
-                                   conn,
-                                   rocpd_get_string,
-                                   nullptr,
-                                   nullptr,
-                                   nullptr);
-    }
+    // name = "STDDEV_SAMP", 1 arg, UTF-8, no user data,
+    // no scalar function, but these aggregate callbacks:
+    sqlite3_create_function_v2(conn,
+                               "STDDEV_SAMP",  // SQL name
+                               1,              // number of args
+                               SQLITE_UTF8,
+                               nullptr,          // user data pointer
+                               nullptr,          // xFunc (for scalar) — null for aggregates
+                               stddev_step,      // xStep
+                               stddev_finalize,  // xFinal
+                               nullptr           // destructor for user data
+    );
 
-    rocprofiler::common::consume_args(conn);
+    sqlite3_create_function_v2(conn,
+                               "rocpd_get_string",
+                               2,
+                               SQLITE_UTF8,
+                               conn,
+                               rocpd_get_string,
+                               nullptr,
+                               nullptr,
+                               nullptr);
 }
 }  // namespace functions
 }  // namespace rocpd

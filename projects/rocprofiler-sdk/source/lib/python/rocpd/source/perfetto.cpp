@@ -21,6 +21,9 @@
 // SOFTWARE.
 
 #include "lib/python/rocpd/source/perfetto.hpp"
+#include "lib/common/logging.hpp"
+#include "lib/python/rocpd/source/common.hpp"
+#include "lib/python/rocpd/source/sql_generator.hpp"
 
 #include "lib/common/defines.hpp"
 #include "lib/common/hasher.hpp"
@@ -32,6 +35,7 @@
 #include "lib/output/output_stream.hpp"
 #include "lib/output/sql/common.hpp"
 #include "lib/output/stream_info.hpp"
+#include "lib/python/rocpd/source/types.hpp"
 #include "lib/rocprofiler-sdk-tool/config.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 
@@ -40,6 +44,7 @@
 #include <atomic>
 #include <future>
 #include <mutex>
+#include <string>
 #include <vector>
 
 namespace rocpd
@@ -69,8 +74,9 @@ get_hash_id(Tp&& _val)
 }
 }  // namespace
 
-PerfettoSession::PerfettoSession(const tool::output_config& output_cfg)
+PerfettoSession::PerfettoSession(const tool::output_config& output_cfg, sqlite3* conn)
 : config{output_cfg}
+, connection{conn}
 {
     auto args            = ::perfetto::TracingInitArgs{};
     auto track_event_cfg = ::perfetto::protos::gen::TrackEventConfig{};
@@ -165,19 +171,15 @@ PerfettoSession::~PerfettoSession()
 }
 
 void
-write_perfetto(
-    const PerfettoSession& perfetto_session,
-    const types::process&  process,
-    const std::unordered_map<uint64_t, std::pair<rocpd::types::agent, tool::agent_index>>&
-                                                     agent_data,
-    const tool::generator<types::thread>&            thread_gen,
-    const tool::generator<types::region>&            region_gen,
-    const tool::generator<types::sample>&            sample_gen,
-    const tool::generator<types::kernel_dispatch>&   kernel_dispatch_gen,
-    const tool::generator<types::memory_copies>&     memory_copy_gen,
-    const tool::generator<types::scratch_memory>&    scratch_memory_gen,
-    const tool::generator<types::memory_allocation>& memory_allocation_gen,
-    const tool::generator<types::counter>&           counter_collection_gen)
+write_perfetto(const PerfettoSession&                         perfetto_session,
+               const types::process&                          process,
+               const std::vector<rocpd::types::agent>&        agents,
+               const tool::generator<types::thread>&          thread_gen,
+               const tool::generator<types::region>&          region_gen,
+               const tool::generator<types::sample>&          sample_gen,
+               const tool::generator<types::kernel_dispatch>& kernel_dispatch_gen,
+               const tool::generator<types::memory_copies>&   memory_copy_gen,
+               const tool::generator<types::memory_allocation>& /*memory_allocation_gen*/)
 {
     namespace sdk    = ::rocprofiler::sdk;
     namespace common = ::rocprofiler::common;
@@ -185,6 +187,7 @@ write_perfetto(
     static auto orig_process_track = ::perfetto::ProcessTrack::Current();
     static auto orig_process_desc  = orig_process_track.Serialize();
 
+    auto*          conn             = perfetto_session.connection;
     const auto&    tracing_session  = perfetto_session.tracing_session;
     const auto&    ocfg             = perfetto_session.config;
     const uint64_t this_pid         = process.pid;
@@ -210,12 +213,106 @@ write_perfetto(
         ::perfetto::TrackEvent::SetTrackDescriptor(this_pid_track, desc);
     }
 
-    auto agent_thread_ids       = std::unordered_map<uint64_t, std::set<uint64_t>>{};
-    auto agent_thread_ids_alloc = std::unordered_map<uint64_t, std::set<uint64_t>>{};
-    auto agent_queue_ids =
-        std::unordered_map<uint64_t, std::unordered_set<rocprofiler_queue_id_t>>{};
-    auto agent_stream_ids = std::unordered_set<rocprofiler_stream_id_t>{};
-    auto thread_indexes   = std::unordered_map<uint64_t, uint64_t>{};
+    auto read_group_by_query = [&conn, &process](auto                                    type,
+                                                 std::initializer_list<std::string_view> tables) {
+        using value_type = common::mpl::unqualified_type_t<decltype(type)>;
+
+        auto get_group_by_query = [&]() {
+            auto _select = std::vector<std::string>{};
+            for(auto itr : tables)
+            {
+                auto _group_by = fmt::format("{}", value_type::get_group_by());
+                if constexpr(std::is_same<value_type, types::group_by_agent_stream_id>::value)
+                {
+                    if(itr == "memory_copies")
+                    {
+                        constexpr auto field = std::string_view{"agent_absolute_index"};
+                        auto           _pos  = _group_by.find(field);
+                        if(_pos != std::string_view::npos)
+                            _group_by = _group_by.replace(
+                                _pos,
+                                field.length(),
+                                "dst_agent_absolute_index AS agent_absolute_index");
+                    }
+                }
+
+                _select.emplace_back(
+                    fmt::format("SELECT {} FROM {} WHERE {}",
+                                _group_by,
+                                itr,
+                                fmt::format("guid = '{}' AND nid = {} AND pid = {}",
+                                            process.guid,
+                                            process.nid,
+                                            process.pid)));
+            }
+
+            return fmt::format("{} GROUP BY {} ORDER BY {}",
+                               fmt::join(_select.begin(), _select.end(), " UNION ALL "),
+                               value_type::get_group_by(),
+                               value_type::get_order_by());
+        };
+
+        return rocpd::read_sql_query<value_type>(conn, get_group_by_query());
+    };
+
+    auto read_event_args = [&conn, &process, &ocfg](uint64_t event_id) {
+        if(!ocfg.annotate_args) return std::vector<types::argument>{};
+        return rocpd::read_sql_query<types::argument>(
+            conn,
+            fmt::format(
+                "SELECT * FROM rocpd_arg WHERE guid='{}' AND event_id={}", process.guid, event_id));
+    };
+
+    auto read_pmc_events = [&conn, &process, &ocfg](uint64_t event_id) {
+        if(!ocfg.annotate_pmc) return std::vector<types::pmc_event>{};
+        return rocpd::read_sql_query<types::pmc_event>(
+            conn,
+            fmt::format("SELECT * FROM rocpd_pmc_event WHERE guid='{}' AND event_id={}",
+                        process.guid,
+                        event_id));
+    };
+
+    auto pmc_info      = std::unordered_map<uint64_t, types::pmc_info>{};
+    auto read_pmc_info = [&conn, &process, &pmc_info](uint64_t pmc_id) -> const types::pmc_info* {
+        if(pmc_info.count(pmc_id) > 0) return &pmc_info.at(pmc_id);
+
+        auto _pmc_info_query = fmt::format(
+            "SELECT * FROM rocpd_info_pmc WHERE id={} AND guid='{}'", pmc_id, process.guid);
+        auto _data = rocpd::read_sql_query<types::pmc_info>(conn, _pmc_info_query);
+
+        if(_data.empty())
+        {
+            ROCP_WARNING << fmt::format("SQL Query \"{}\" returned no results", _pmc_info_query);
+            return nullptr;
+        }
+
+        ROCP_WARNING_IF(_data.size() > 1)
+            << fmt::format("SQL Query \"{}\" returned {} results (expected one result)",
+                           _pmc_info_query,
+                           _data.size());
+
+        pmc_info[pmc_id] = _data.at(0);
+
+        return &pmc_info.at(pmc_id);
+    };
+
+    auto agent_thread_ids =
+        read_group_by_query(types::group_by_agent_tid{}, {"kernels", "memory_allocations"});
+
+    auto agent_queue_ids = read_group_by_query(types::group_by_agent_queue_id{}, {"kernels"});
+    auto agent_stream_ids =
+        read_group_by_query(types::group_by_agent_stream_id{}, {"kernels", "memory_copies"});
+    auto thread_indexes = std::unordered_map<uint64_t, uint64_t>{};
+
+    {
+        auto thread_ids = read_group_by_query(
+            types::group_by_tid{},
+            {"regions_and_samples", "kernels", "memory_copies", "memory_allocations"});
+        std::sort(thread_ids.begin(), thread_ids.end());
+
+        for(const auto& itr : thread_ids)
+            thread_indexes[itr.tid] = thread_indexes.size();
+    }
 
     auto thread_tracks = std::unordered_map<uint64_t, ::perfetto::Track>{};
     auto agent_thread_tracks =
@@ -225,41 +322,29 @@ write_perfetto(
                            std::unordered_map<rocprofiler_queue_id_t, ::perfetto::Track>>{};
     auto stream_tracks = std::unordered_map<rocprofiler_stream_id_t, ::perfetto::Track>{};
 
-    {
-        for(auto ditr : memory_copy_gen)
-            for(const auto& itr : memory_copy_gen.get(ditr))
-            {
-                auto stream_id = rocprofiler_stream_id_t{.handle = itr.stream_id};
-                agent_stream_ids.emplace(stream_id);
-                if(ocfg.group_by_queue)
-                {
-                    agent_thread_ids[itr.dst_agent_abs_index].emplace(itr.tid);
-                }
-            }
-    }
+    // absolute_index |-> (agent, agent_index)
+    auto agent_data =
+        std::unordered_map<uint64_t, std::pair<rocpd::types::agent, tool::agent_index>>{};
 
-    for(auto ditr : memory_allocation_gen)
-        for(const auto& itr : memory_allocation_gen.get(ditr))
-        {
-            agent_thread_ids_alloc[itr.agent_abs_index].emplace(itr.tid);
-        }
-
+    for(const auto& itr : agents)
     {
-        for(auto ditr : kernel_dispatch_gen)
-            for(const auto& itr : kernel_dispatch_gen.get(ditr))
-            {
-                auto stream_id = rocprofiler_stream_id_t{.handle = itr.stream_id};
-                auto queue_id  = rocprofiler_queue_id_t{.handle = itr.queue_id};
-                agent_stream_ids.emplace(stream_id);
-                if(ocfg.group_by_queue)
-                {
-                    agent_queue_ids[itr.agent_abs_index].emplace(queue_id);
-                }
-            }
+        auto _create_agent_index = [&ocfg](const rocpd::types::agent& _agent) -> tool::agent_index {
+            auto ret_index = tool::create_agent_index(
+                ocfg.agent_index_value,
+                _agent.node_id,                                      // absolute index
+                static_cast<uint32_t>(_agent.logical_node_id),       // relative index
+                static_cast<uint32_t>(_agent.logical_node_type_id),  // type-relative index
+                std::string_view(_agent.type_name));
+            return ret_index;
+        };
+
+        auto new_index = _create_agent_index(itr);
+        agent_data.emplace(itr.absolute_index, std::make_pair(itr, new_index));
     }
 
     uint64_t nthrn = 0;
     for(auto ditr : thread_gen)
+    {
         for(const auto& itr : thread_gen.get(ditr))
         {
             auto is_main_thread = (static_cast<uint64_t>(itr.tid) == this_pid);
@@ -282,83 +367,57 @@ write_perfetto(
 
             thread_tracks.emplace(itr.tid, _track);
         }
-
-    for(const auto& [abs_index, thread_ids] : agent_thread_ids)
-    {
-        const auto _agent = agent_data.at(abs_index).first;
-
-        for(auto titr : thread_ids)
-        {
-            auto _namess = std::stringstream{};
-            _namess << "COPY to AGENT [" << _agent.logical_node_id << "] THREAD ["
-                    << thread_indexes.at(titr) << "] ";
-
-            if(_agent.type == "CPU")
-                _namess << "(CPU)";
-            else if(_agent.type == "GPU")
-                _namess << "(GPU)";
-            else
-                _namess << "(UNK)";
-
-            auto _track = ::perfetto::Track{get_hash_id(_namess.str()), this_pid_track};
-            auto _desc  = _track.Serialize();
-            _desc.set_name(_namess.str());
-
-            perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
-
-            agent_thread_tracks[abs_index].emplace(titr, _track);
-        }
     }
 
-    for(const auto& [abs_index, queue_ids] : agent_queue_ids)
+    for(const auto& itr : agent_thread_ids)
     {
-        uint32_t   nqueue           = 0;
-        const auto _agent           = agent_data.at(abs_index).first;
-        auto       agent_index_info = agent_data.at(abs_index).second;
+        const auto _agent = agent_data.at(itr.agent_absolute_index).first;
+        const auto _tid   = itr.tid;
 
-        for(auto qitr : queue_ids)
-        {
-            auto _namess = std::stringstream{};
+        auto _name = fmt::format("COPY to AGENT [{}] THREAD [{}] ({})",
+                                 _agent.logical_index,
+                                 thread_indexes.at(_tid),
+                                 _agent.type_name);
 
-            _namess << "COMPUTE " << agent_index_info.label << " [" << agent_index_info.index
-                    << "] QUEUE [" << nqueue++ << "] ";
-            _namess << agent_index_info.type;
+        auto _track = ::perfetto::Track{get_hash_id(_name), this_pid_track};
+        auto _desc  = _track.Serialize();
+        _desc.set_name(_name);
 
-            auto _track = ::perfetto::Track{get_hash_id(_namess.str()), this_pid_track};
-            auto _desc  = _track.Serialize();
-            _desc.set_name(_namess.str());
+        perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
 
-            ::perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
-
-            agent_queue_tracks[abs_index].emplace(qitr, _track);
-        }
+        agent_thread_tracks[itr.agent_absolute_index].emplace(_tid, _track);
     }
 
-    for(const auto& sitr : agent_stream_ids)
+    for(const auto& itr : agent_queue_ids)
     {
-        const auto stream_id = sitr.handle;
-
-        auto _name = fmt::format("STREAM [{}]", stream_id);
-
+        const auto _agent      = agent_data.at(itr.agent_absolute_index).first;
+        auto       _index_info = agent_data.at(itr.agent_absolute_index).second;
+        auto       _name       = fmt::format(
+            "COMPUTE {} [{}] QUEUE [{}]", _index_info.label, _index_info.index, itr.queue_id);
         auto _track = ::perfetto::Track{get_hash_id(_name), this_pid_track};
         auto _desc  = _track.Serialize();
         _desc.set_name(_name);
 
         ::perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
 
-        stream_tracks.emplace(sitr, _track);
+        agent_queue_tracks[itr.agent_absolute_index].emplace(rocprofiler_queue_id_t{itr.queue_id},
+                                                             _track);
     }
 
-    // Fetch counter values
-    auto counter_id_value = std::map<uint32_t, double>{};
-    auto counter_id_name  = std::map<uint32_t, std::string>{};
-    for(auto ditr : counter_collection_gen)
-        for(const auto& record : counter_collection_gen.get(ditr))
-        {
-            // Accumulate counters based on ID
-            counter_id_value[record.counter_id] += record.value;
-            counter_id_name[record.counter_id] = std::string{record.counter_name};
-        }
+    for(const auto& itr : agent_stream_ids)
+    {
+        const auto _agent      = agent_data.at(itr.agent_absolute_index).first;
+        auto       _index_info = agent_data.at(itr.agent_absolute_index).second;
+        auto       _name       = fmt::format(
+            "COMPUTE {} [{}] STREAM [{}]", _index_info.label, _index_info.index, itr.stream_id);
+        auto _track = ::perfetto::Track{get_hash_id(_name), this_pid_track};
+        auto _desc  = _track.Serialize();
+        _desc.set_name(_name);
+
+        ::perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
+
+        stream_tracks.emplace(rocprofiler_stream_id_t{itr.stream_id}, _track);
+    }
 
     // trace events
     {
@@ -372,6 +431,7 @@ write_perfetto(
             return sdk::get_perfetto_category(_category_idx);
         };
 
+        ROCP_WARNING << "generating regions...";
         for(auto ditr : region_gen)
         {
             for(auto itr : region_gen.get(ditr))
@@ -385,7 +445,9 @@ write_perfetto(
                         _name = _extdata.message;
                 }
 
-                auto _category = ::perfetto::DynamicCategory{get_category_string(itr.category)};
+                auto _args       = read_event_args(itr.event_id);
+                auto _pmc_events = read_pmc_events(itr.event_id);
+                auto _category   = ::perfetto::DynamicCategory{get_category_string(itr.category)};
                 TRACE_EVENT_BEGIN(_category,
                                   ::perfetto::DynamicString{_name},
                                   track,
@@ -407,7 +469,19 @@ write_perfetto(
                                   itr.stack_id,
                                   "ancestor_id",
                                   itr.parent_stack_id,
-                                  [&](::perfetto::EventContext ctx) { (void) ctx; });
+                                  [&](::perfetto::EventContext ctx) {
+                                      for(const auto& arg : _args)
+                                          sdk::add_perfetto_annotation(ctx, arg.name, arg.value);
+
+                                      for(const auto& pevt : _pmc_events)
+                                      {
+                                          if(const auto* pinfo = read_pmc_info(pevt.pmc_id); pinfo)
+                                          {
+                                              sdk::add_perfetto_annotation(
+                                                  ctx, pinfo->name, pevt.value);
+                                          }
+                                      }
+                                  });
 
                 TRACE_EVENT_END(_category, track, itr.end);
 
@@ -415,6 +489,7 @@ write_perfetto(
             }
         }
 
+        ROCP_WARNING << "generating samples...";
         for(auto ditr : sample_gen)
         {
             for(auto itr : sample_gen.get(ditr))
@@ -428,34 +503,49 @@ write_perfetto(
                         _name = _extdata.message;
                 }
 
-                auto _category = ::perfetto::DynamicCategory{get_category_string(itr.category)};
-                TRACE_EVENT_INSTANT(_category,
-                                    ::perfetto::DynamicString{_name},
-                                    track,
-                                    itr.timestamp,
-                                    ::perfetto::Flow::Global(itr.stack_id ^ uuid_pid),
-                                    "begin_ns",
-                                    itr.timestamp,
-                                    "end_ns",
-                                    itr.timestamp,
-                                    "delta_ns",
-                                    0,
-                                    "tid",
-                                    itr.tid,
-                                    "kind",
-                                    itr.category,
-                                    "operation",
-                                    _name,
-                                    "corr_id",
-                                    itr.stack_id,
-                                    "ancestor_id",
-                                    itr.parent_stack_id,
-                                    [&](::perfetto::EventContext ctx) { (void) ctx; });
+                auto _args       = read_event_args(itr.event_id);
+                auto _pmc_events = read_pmc_events(itr.event_id);
+                auto _category   = ::perfetto::DynamicCategory{get_category_string(itr.category)};
+                TRACE_EVENT_INSTANT(
+                    _category,
+                    ::perfetto::DynamicString{_name},
+                    track,
+                    itr.timestamp,
+                    ::perfetto::Flow::Global(itr.stack_id ^ uuid_pid),
+                    "begin_ns",
+                    itr.timestamp,
+                    "end_ns",
+                    itr.timestamp,
+                    "delta_ns",
+                    0,
+                    "tid",
+                    itr.tid,
+                    "kind",
+                    itr.category,
+                    "operation",
+                    _name,
+                    "corr_id",
+                    itr.stack_id,
+                    "ancestor_id",
+                    itr.parent_stack_id,
+                    [&](::perfetto::EventContext ctx) {
+                        for(const auto& arg : _args)
+                            sdk::add_perfetto_annotation(ctx, arg.name, arg.value);
+
+                        for(const auto& pevt : _pmc_events)
+                        {
+                            if(const auto* pinfo = read_pmc_info(pevt.pmc_id); pinfo)
+                            {
+                                sdk::add_perfetto_annotation(ctx, pinfo->name, pevt.value);
+                            }
+                        }
+                    });
 
                 tracing_session->FlushBlocking();
             }
         }
 
+        ROCP_WARNING << "generating memory copies...";
         for(auto ditr : memory_copy_gen)
         {
             for(auto itr : memory_copy_gen.get(ditr))
@@ -463,7 +553,7 @@ write_perfetto(
                 ::perfetto::Track* _track = nullptr;
                 if(ocfg.group_by_queue)
                 {
-                    _track = &agent_thread_tracks.at(itr.dst_agent_abs_index).at(itr.tid);
+                    _track = &agent_thread_tracks.at(itr.dst_agent_absolute_index).at(itr.tid);
                 }
                 else
                 {
@@ -471,8 +561,10 @@ write_perfetto(
                     _track         = &stream_tracks.at(stream_id);
                 }
 
-                auto src_agent_index = agent_data.at(itr.src_agent_abs_index).second;
-                auto dst_agent_index = agent_data.at(itr.dst_agent_abs_index).second;
+                auto _args           = read_event_args(itr.event_id);
+                auto _pmc_events     = read_pmc_events(itr.event_id);
+                auto src_agent_index = agent_data.at(itr.src_agent_absolute_index).second;
+                auto dst_agent_index = agent_data.at(itr.dst_agent_absolute_index).second;
                 TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::memory_copy>::name,
                                   ::perfetto::DynamicString{itr.name},
                                   *_track,
@@ -498,14 +590,26 @@ write_perfetto(
                                   itr.stack_id,
                                   "tid",
                                   itr.tid,
-                                  "stream_id",
-                                  itr.stream_id);
+                                  [&](::perfetto::EventContext ctx) {
+                                      for(const auto& arg : _args)
+                                          sdk::add_perfetto_annotation(ctx, arg.name, arg.value);
+
+                                      for(const auto& pevt : _pmc_events)
+                                      {
+                                          if(const auto* pinfo = read_pmc_info(pevt.pmc_id); pinfo)
+                                          {
+                                              sdk::add_perfetto_annotation(
+                                                  ctx, pinfo->name, pevt.value);
+                                          }
+                                      }
+                                  });
                 TRACE_EVENT_END(
                     sdk::perfetto_category<sdk::category::memory_copy>::name, *_track, itr.end);
             }
             tracing_session->FlushBlocking();
         }
 
+        ROCP_WARNING << "generating kernel dispatches...";
         for(auto ditr : kernel_dispatch_gen)
         {
             auto gen = kernel_dispatch_gen.get(ditr);
@@ -514,7 +618,7 @@ write_perfetto(
                 auto& current = *it;
 
                 ::perfetto::Track* _track    = nullptr;
-                auto               agent_id  = current.agent_abs_index;
+                auto               agent_id  = current.agent_absolute_index;
                 auto               queue_id  = rocprofiler_queue_id_t{.handle = current.queue_id};
                 auto               stream_id = rocprofiler_stream_id_t{.handle = current.stream_id};
                 if(ocfg.group_by_queue)
@@ -531,7 +635,7 @@ write_perfetto(
                 // kernel dispatches. Perfetto displays slices incorrectly if overlapping
                 // slices on the same track are not completely enveloped.
                 auto next = std::next(it);
-                if(next != end(gen) && next->agent_abs_index == it->agent_abs_index &&
+                if(next != end(gen) && next->agent_absolute_index == it->agent_absolute_index &&
                    ((ocfg.group_by_queue && next->queue_id == it->queue_id) ||
                     (!ocfg.group_by_queue && next->stream_id == it->stream_id)) &&
                    next->start < it->end)
@@ -552,7 +656,9 @@ write_perfetto(
                     next->start = mid;
                 }
 
-                auto agent_index = agent_data.at(current.agent_abs_index).second;
+                auto _args       = read_event_args(current.event_id);
+                auto _pmc_events = read_pmc_events(current.event_id);
+                auto agent_index = agent_data.at(current.agent_absolute_index).second;
                 auto _name =
                     (ocfg.kernel_rename && !current.region.empty()) ? current.region : current.name;
                 TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::kernel_dispatch>::name,
@@ -589,10 +695,16 @@ write_perfetto(
                                   "stream_id",
                                   current.stream_id,
                                   [&](::perfetto::EventContext ctx) {
-                                      for(auto& [counter_id, counter_value] : counter_id_value)
+                                      for(const auto& arg : _args)
+                                          sdk::add_perfetto_annotation(ctx, arg.name, arg.value);
+
+                                      for(const auto& pevt : _pmc_events)
                                       {
-                                          rocprofiler::sdk::add_perfetto_annotation(
-                                              ctx, counter_id_name.at(counter_id), counter_value);
+                                          if(const auto* pinfo = read_pmc_info(pevt.pmc_id); pinfo)
+                                          {
+                                              sdk::add_perfetto_annotation(
+                                                  ctx, pinfo->name, pevt.value);
+                                          }
                                       }
                                   });
                 TRACE_EVENT_END(sdk::perfetto_category<sdk::category::kernel_dispatch>::name,
@@ -604,455 +716,466 @@ write_perfetto(
     }
 
     // counter tracks
-    {
-        // memory copy counter track
-        auto mem_cpy_endpoints = std::map<uint64_t, std::map<rocprofiler_timestamp_t, uint64_t>>{};
-        auto mem_cpy_extremes  = std::pair<uint64_t, uint64_t>{std::numeric_limits<uint64_t>::max(),
-                                                              std::numeric_limits<uint64_t>::min()};
-        auto constexpr timestamp_buffer = 1000;
-        for(auto ditr : memory_copy_gen)
-        {
-            for(const auto& itr : memory_copy_gen.get(ditr))
-            {
-                uint64_t _mean_timestamp = itr.start + (0.5 * (itr.end - itr.start));
+    // {
+    //     // memory copy counter track
+    //     auto mem_cpy_endpoints = std::map<uint64_t, std::map<rocprofiler_timestamp_t,
+    //     uint64_t>>{}; auto mem_cpy_extremes  = std::pair<uint64_t,
+    //     uint64_t>{std::numeric_limits<uint64_t>::max(),
+    //                                                            std::numeric_limits<uint64_t>::min()};
+    //     auto constexpr timestamp_buffer = 1000;
+    //     for(auto ditr : memory_copy_gen)
+    //     {
+    //         for(const auto& itr : memory_copy_gen.get(ditr))
+    //         {
+    //             uint64_t _mean_timestamp = itr.start + (0.5 * (itr.end - itr.start));
 
-                mem_cpy_endpoints[itr.dst_agent_abs_index].emplace(itr.start - timestamp_buffer, 0);
-                mem_cpy_endpoints[itr.dst_agent_abs_index].emplace(itr.start, 0);
-                mem_cpy_endpoints[itr.dst_agent_abs_index].emplace(_mean_timestamp, 0);
-                mem_cpy_endpoints[itr.dst_agent_abs_index].emplace(itr.end, 0);
-                mem_cpy_endpoints[itr.dst_agent_abs_index].emplace(itr.end + timestamp_buffer, 0);
+    //             mem_cpy_endpoints[itr.dst_agent_abs_index].emplace(itr.start - timestamp_buffer,
+    //             0); mem_cpy_endpoints[itr.dst_agent_abs_index].emplace(itr.start, 0);
+    //             mem_cpy_endpoints[itr.dst_agent_abs_index].emplace(_mean_timestamp, 0);
+    //             mem_cpy_endpoints[itr.dst_agent_abs_index].emplace(itr.end, 0);
+    //             mem_cpy_endpoints[itr.dst_agent_abs_index].emplace(itr.end + timestamp_buffer,
+    //             0);
 
-                mem_cpy_extremes = std::make_pair(std::min(mem_cpy_extremes.first, itr.start),
-                                                  std::max(mem_cpy_extremes.second, itr.end));
-            }
-        }
+    //             mem_cpy_extremes = std::make_pair(std::min(mem_cpy_extremes.first, itr.start),
+    //                                               std::max(mem_cpy_extremes.second, itr.end));
+    //         }
+    //     }
 
-        for(auto ditr : memory_copy_gen)
-        {
-            for(const auto& itr : memory_copy_gen.get(ditr))
-            {
-                auto mbeg = mem_cpy_endpoints.at(itr.dst_agent_abs_index).lower_bound(itr.start);
-                auto mend = mem_cpy_endpoints.at(itr.dst_agent_abs_index).upper_bound(itr.end);
+    //     for(auto ditr : memory_copy_gen)
+    //     {
+    //         for(const auto& itr : memory_copy_gen.get(ditr))
+    //         {
+    //             auto mbeg = mem_cpy_endpoints.at(itr.dst_agent_abs_index).lower_bound(itr.start);
+    //             auto mend = mem_cpy_endpoints.at(itr.dst_agent_abs_index).upper_bound(itr.end);
 
-                LOG_IF(FATAL, mbeg == mend)
-                    << "Missing range for timestamp [" << itr.start << ", " << itr.end << "]";
+    //             LOG_IF(FATAL, mbeg == mend)
+    //                 << "Missing range for timestamp [" << itr.start << ", " << itr.end << "]";
 
-                for(auto mitr = mbeg; mitr != mend; ++mitr)
-                    mitr->second += itr.size;
-            }
-        }
+    //             for(auto mitr = mbeg; mitr != mend; ++mitr)
+    //                 mitr->second += itr.size;
+    //         }
+    //     }
 
-        constexpr auto bytes_multiplier         = 1024;
-        constexpr auto extremes_endpoint_buffer = 5000;
+    //     constexpr auto bytes_multiplier         = 1024;
+    //     constexpr auto extremes_endpoint_buffer = 5000;
 
-        auto mem_cpy_tracks    = std::unordered_map<uint64_t, ::perfetto::CounterTrack>{};
-        auto mem_cpy_cnt_names = std::vector<std::string>{};
-        mem_cpy_cnt_names.reserve(mem_cpy_endpoints.size());
+    //     auto mem_cpy_tracks    = std::unordered_map<uint64_t, ::perfetto::CounterTrack>{};
+    //     auto mem_cpy_cnt_names = std::vector<std::string>{};
+    //     mem_cpy_cnt_names.reserve(mem_cpy_endpoints.size());
 
-        for(auto& [abs_index, ts_map] : mem_cpy_endpoints)
-        {
-            mem_cpy_endpoints[abs_index].emplace(mem_cpy_extremes.first - extremes_endpoint_buffer,
-                                                 0);
-            mem_cpy_endpoints[abs_index].emplace(mem_cpy_extremes.second + extremes_endpoint_buffer,
-                                                 0);
+    //     for(auto& [abs_index, ts_map] : mem_cpy_endpoints)
+    //     {
+    //         mem_cpy_endpoints[abs_index].emplace(mem_cpy_extremes.first -
+    //         extremes_endpoint_buffer,
+    //                                              0);
+    //         mem_cpy_endpoints[abs_index].emplace(mem_cpy_extremes.second +
+    //         extremes_endpoint_buffer,
+    //                                              0);
 
-            auto       _track_name      = std::stringstream{};
-            const auto _agent           = agent_data.at(abs_index).first;
-            auto       agent_index_info = agent_data.at(abs_index).second;
-            _track_name << "COPY BYTES to " << agent_index_info.label << " ["
-                        << agent_index_info.index << "] (" << agent_index_info.type << ")";
+    //         auto       _track_name      = std::stringstream{};
+    //         const auto _agent           = agent_data.at(abs_index).first;
+    //         auto       agent_index_info = agent_data.at(abs_index).second;
+    //         _track_name << "COPY BYTES to " << agent_index_info.label << " ["
+    //                     << agent_index_info.index << "] (" << agent_index_info.type << ")";
 
-            constexpr auto _unit = ::perfetto::CounterTrack::Unit::UNIT_SIZE_BYTES;
-            auto&          _name = mem_cpy_cnt_names.emplace_back(_track_name.str());
-            mem_cpy_tracks.emplace(abs_index,
-                                   ::perfetto::CounterTrack{_name.c_str(), this_pid_track}
-                                       .set_unit(_unit)
-                                       .set_unit_multiplier(bytes_multiplier)
-                                       .set_is_incremental(false));
-        }
+    //         constexpr auto _unit = ::perfetto::CounterTrack::Unit::UNIT_SIZE_BYTES;
+    //         auto&          _name = mem_cpy_cnt_names.emplace_back(_track_name.str());
+    //         mem_cpy_tracks.emplace(abs_index,
+    //                                ::perfetto::CounterTrack{_name.c_str(), this_pid_track}
+    //                                    .set_unit(_unit)
+    //                                    .set_unit_multiplier(bytes_multiplier)
+    //                                    .set_is_incremental(false));
+    //     }
 
-        for(auto& mitr : mem_cpy_endpoints)
-        {
-            for(auto itr : mitr.second)
-            {
-                TRACE_COUNTER(sdk::perfetto_category<sdk::category::memory_copy>::name,
-                              mem_cpy_tracks.at(mitr.first),
-                              itr.first,
-                              itr.second / bytes_multiplier);
-            }
-            tracing_session->FlushBlocking();
-        }
+    //     for(auto& mitr : mem_cpy_endpoints)
+    //     {
+    //         for(auto itr : mitr.second)
+    //         {
+    //             TRACE_COUNTER(sdk::perfetto_category<sdk::category::memory_copy>::name,
+    //                           mem_cpy_tracks.at(mitr.first),
+    //                           itr.first,
+    //                           itr.second / bytes_multiplier);
+    //         }
+    //         tracing_session->FlushBlocking();
+    //     }
 
-        // memory allocation counter track
-        struct free_memory_information
-        {
-            rocprofiler_timestamp_t start_timestamp = 0;
-            rocprofiler_timestamp_t end_timestamp   = 0;
-            rocprofiler_address_t   address         = {.handle = 0};
-            rocprofiler_queue_id_t  queue           = {.handle = 0};
-        };
+    //     // memory allocation counter track
+    //     struct free_memory_information
+    //     {
+    //         rocprofiler_timestamp_t start_timestamp = 0;
+    //         rocprofiler_timestamp_t end_timestamp   = 0;
+    //         rocprofiler_address_t   address         = {.handle = 0};
+    //         rocprofiler_queue_id_t  queue           = {.handle = 0};
+    //     };
 
-        struct memory_information
-        {
-            uint64_t               alloc_size  = {0};
-            rocprofiler_address_t  address     = {.handle = 0};
-            rocprofiler_queue_id_t queue       = {.handle = 0};
-            bool                   is_alloc_op = {false};
-        };
+    //     struct memory_information
+    //     {
+    //         uint64_t               alloc_size  = {0};
+    //         rocprofiler_address_t  address     = {.handle = 0};
+    //         rocprofiler_queue_id_t queue       = {.handle = 0};
+    //         bool                   is_alloc_op = {false};
+    //     };
 
-        auto mem_alloc_endpoints =
-            std::unordered_map<uint64_t, std::map<rocprofiler_timestamp_t, memory_information>>{};
-        auto mem_alloc_extremes = std::pair<uint64_t, uint64_t>{
-            std::numeric_limits<uint64_t>::max(), std::numeric_limits<uint64_t>::min()};
-        auto address_to_agent_and_size =
-            std::unordered_map<rocprofiler_address_t, rocprofiler::agent::index_and_size>{};
-        auto queue_to_agent_and_size =
-            std::unordered_map<rocprofiler_queue_id_t, rocprofiler::agent::index_and_size>{};
-        auto free_mem_info = std::vector<free_memory_information>{};
+    //     auto mem_alloc_endpoints =
+    //         std::unordered_map<uint64_t, std::map<rocprofiler_timestamp_t,
+    //         memory_information>>{};
+    //     auto mem_alloc_extremes = std::pair<uint64_t, uint64_t>{
+    //         std::numeric_limits<uint64_t>::max(), std::numeric_limits<uint64_t>::min()};
+    //     auto address_to_agent_and_size =
+    //         std::unordered_map<rocprofiler_address_t, rocprofiler::agent::index_and_size>{};
+    //     auto queue_to_agent_and_size =
+    //         std::unordered_map<rocprofiler_queue_id_t, rocprofiler::agent::index_and_size>{};
+    //     auto free_mem_info = std::vector<free_memory_information>{};
 
-        // Load memory allocation endpoints
-        for(auto ditr : memory_allocation_gen)
-        {
-            for(const auto& itr : memory_allocation_gen.get(ditr))
-            {
-                if(itr.type == "ALLOC")
-                {
-                    LOG_IF(FATAL, itr.agent_name.empty())
-                        << "Missing agent id for memory allocation trace";
+    //     // Load memory allocation endpoints
+    //     for(auto ditr : memory_allocation_gen)
+    //     {
+    //         for(const auto& itr : memory_allocation_gen.get(ditr))
+    //         {
+    //             if(itr.type == "ALLOC")
+    //             {
+    //                 LOG_IF(FATAL, itr.agent_name.empty())
+    //                     << "Missing agent id for memory allocation trace";
 
-                    if(itr.level == "REAL")
-                    {
-                        mem_alloc_endpoints[itr.agent_abs_index].emplace(
-                            itr.start,
-                            memory_information{itr.size,
-                                               rocprofiler_address_t{.handle = itr.address},
-                                               rocprofiler_queue_id_t{.handle = itr.queue_id},
-                                               true});
-                        mem_alloc_endpoints[itr.agent_abs_index].emplace(
-                            itr.end,
-                            memory_information{itr.size,
-                                               rocprofiler_address_t{.handle = itr.address},
-                                               rocprofiler_queue_id_t{.handle = itr.queue_id},
-                                               true});
+    //                 if(itr.level == "REAL")
+    //                 {
+    //                     mem_alloc_endpoints[itr.agent_abs_index].emplace(
+    //                         itr.start,
+    //                         memory_information{itr.size,
+    //                                            rocprofiler_address_t{.handle = itr.address},
+    //                                            rocprofiler_queue_id_t{.handle = itr.queue_id},
+    //                                            true});
+    //                     mem_alloc_endpoints[itr.agent_abs_index].emplace(
+    //                         itr.end,
+    //                         memory_information{itr.size,
+    //                                            rocprofiler_address_t{.handle = itr.address},
+    //                                            rocprofiler_queue_id_t{.handle = itr.queue_id},
+    //                                            true});
 
-                        address_to_agent_and_size.emplace(
-                            rocprofiler_address_t{.handle = itr.address},
-                            rocprofiler::agent::index_and_size{itr.agent_abs_index, itr.size});
-                    }
-                    // Scratch memory operations are indexed by queue id as agent
-                    // id is not available
-                    else if(itr.level == "SCRATCH")
-                    {
-                        queue_to_agent_and_size.emplace(
-                            rocprofiler_queue_id_t{.handle = itr.queue_id},
-                            rocprofiler::agent::index_and_size{itr.agent_abs_index, itr.size});
-                    }
-                }
-                else if(itr.type == "FREE")
-                {
-                    // Store free memory operations in seperate vector to pair with agent
-                    // and allocation size in following loop
-                    if(itr.level == "REAL")
-                    {
-                        free_mem_info.push_back(free_memory_information{
-                            itr.start,
-                            itr.end,
-                            rocprofiler_address_t{.handle = itr.address},
-                            rocprofiler_queue_id_t{.handle = itr.queue_id}});
-                    }
-                }
-                else
-                {
-                    ROCP_CI_LOG(WARNING) << "unhandled memory allocation type " << itr.type;
-                }
-            }
-        }
+    //                     address_to_agent_and_size.emplace(
+    //                         rocprofiler_address_t{.handle = itr.address},
+    //                         rocprofiler::agent::index_and_size{itr.agent_abs_index, itr.size});
+    //                 }
+    //                 // Scratch memory operations are indexed by queue id as agent
+    //                 // id is not available
+    //                 else if(itr.level == "SCRATCH")
+    //                 {
+    //                     queue_to_agent_and_size.emplace(
+    //                         rocprofiler_queue_id_t{.handle = itr.queue_id},
+    //                         rocprofiler::agent::index_and_size{itr.agent_abs_index, itr.size});
+    //                 }
+    //             }
+    //             else if(itr.type == "FREE")
+    //             {
+    //                 // Store free memory operations in seperate vector to pair with agent
+    //                 // and allocation size in following loop
+    //                 if(itr.level == "REAL")
+    //                 {
+    //                     free_mem_info.push_back(free_memory_information{
+    //                         itr.start,
+    //                         itr.end,
+    //                         rocprofiler_address_t{.handle = itr.address},
+    //                         rocprofiler_queue_id_t{.handle = itr.queue_id}});
+    //                 }
+    //             }
+    //             else
+    //             {
+    //                 ROCP_CI_LOG(WARNING) << "unhandled memory allocation type " << itr.type;
+    //             }
+    //         }
+    //     }
 
-        // Add free memory operations to the endpoint map
-        for(const auto& itr : free_mem_info)
-        {
-            if(address_to_agent_and_size.count(itr.address) == 0)
-            {
-                if(itr.address.handle == 0)
-                {
-                    // Freeing null pointers is expected behavior and is occurs in HSA functions
-                    // like hipStreamDestroy
-                    ROCP_INFO << "null pointer freed due to HSA operation";
-                }
-                else
-                {
-                    // Following should not occur
-                    ROCP_INFO << "Unpaired free operation occurred";
-                }
-                continue;
-            }
-            auto [agent_abs_index, size] = address_to_agent_and_size[itr.address];
-            mem_alloc_endpoints[agent_abs_index].emplace(
-                itr.start_timestamp, memory_information{size, itr.address, itr.queue, false});
-            mem_alloc_endpoints[agent_abs_index].emplace(
-                itr.end_timestamp, memory_information{size, itr.address, itr.queue, false});
-        }
-        // Create running sum of allocated memory
-        for(auto& [_, endpoint_map] : mem_alloc_endpoints)
-        {
-            if(!endpoint_map.empty())
-            {
-                auto earliest_agent_timestamp = endpoint_map.begin()->first;
-                auto latest_agent_timestamp   = (--endpoint_map.end())->first;
-                mem_alloc_extremes =
-                    std::make_pair(std::min(mem_alloc_extremes.first, earliest_agent_timestamp),
-                                   std::max(mem_alloc_extremes.second, latest_agent_timestamp));
-            }
-            if(endpoint_map.size() <= 1)
-            {
-                continue;
-            }
+    //     // Add free memory operations to the endpoint map
+    //     for(const auto& itr : free_mem_info)
+    //     {
+    //         if(address_to_agent_and_size.count(itr.address) == 0)
+    //         {
+    //             if(itr.address.handle == 0)
+    //             {
+    //                 // Freeing null pointers is expected behavior and is occurs in HSA functions
+    //                 // like hipStreamDestroy
+    //                 ROCP_INFO << "null pointer freed due to HSA operation";
+    //             }
+    //             else
+    //             {
+    //                 // Following should not occur
+    //                 ROCP_INFO << "Unpaired free operation occurred";
+    //             }
+    //             continue;
+    //         }
+    //         auto [agent_abs_index, size] = address_to_agent_and_size[itr.address];
+    //         mem_alloc_endpoints[agent_abs_index].emplace(
+    //             itr.start_timestamp, memory_information{size, itr.address, itr.queue, false});
+    //         mem_alloc_endpoints[agent_abs_index].emplace(
+    //             itr.end_timestamp, memory_information{size, itr.address, itr.queue, false});
+    //     }
+    //     // Create running sum of allocated memory
+    //     for(auto& [_, endpoint_map] : mem_alloc_endpoints)
+    //     {
+    //         if(!endpoint_map.empty())
+    //         {
+    //             auto earliest_agent_timestamp = endpoint_map.begin()->first;
+    //             auto latest_agent_timestamp   = (--endpoint_map.end())->first;
+    //             mem_alloc_extremes =
+    //                 std::make_pair(std::min(mem_alloc_extremes.first, earliest_agent_timestamp),
+    //                                std::max(mem_alloc_extremes.second, latest_agent_timestamp));
+    //         }
+    //         if(endpoint_map.size() <= 1)
+    //         {
+    //             continue;
+    //         }
 
-            auto prev = endpoint_map.begin();
-            auto itr  = std::next(prev);
-            for(; itr != endpoint_map.end(); ++itr, ++prev)
-            {
-                // If address or allocation type are different, add or subtract from running sum
-                if(prev->second.address != itr->second.address ||
-                   prev->second.is_alloc_op != itr->second.is_alloc_op)
-                {
-                    if(itr->second.is_alloc_op)
-                    {
-                        itr->second.alloc_size += prev->second.alloc_size;
-                    }
-                    else if(prev->second.alloc_size >= itr->second.alloc_size)
-                    {
-                        itr->second.alloc_size = prev->second.alloc_size - itr->second.alloc_size;
-                    }
-                }
-                else
-                {
-                    itr->second.alloc_size = prev->second.alloc_size;
-                }
-            }
-        }
+    //         auto prev = endpoint_map.begin();
+    //         auto itr  = std::next(prev);
+    //         for(; itr != endpoint_map.end(); ++itr, ++prev)
+    //         {
+    //             // If address or allocation type are different, add or subtract from running sum
+    //             if(prev->second.address != itr->second.address ||
+    //                prev->second.is_alloc_op != itr->second.is_alloc_op)
+    //             {
+    //                 if(itr->second.is_alloc_op)
+    //                 {
+    //                     itr->second.alloc_size += prev->second.alloc_size;
+    //                 }
+    //                 else if(prev->second.alloc_size >= itr->second.alloc_size)
+    //                 {
+    //                     itr->second.alloc_size = prev->second.alloc_size -
+    //                     itr->second.alloc_size;
+    //                 }
+    //             }
+    //             else
+    //             {
+    //                 itr->second.alloc_size = prev->second.alloc_size;
+    //             }
+    //         }
+    //     }
 
-        auto mem_alloc_tracks    = std::unordered_map<uint64_t, ::perfetto::CounterTrack>{};
-        auto mem_alloc_cnt_names = std::vector<std::string>{};
-        mem_alloc_cnt_names.reserve(mem_alloc_endpoints.size());
+    //     auto mem_alloc_tracks    = std::unordered_map<uint64_t, ::perfetto::CounterTrack>{};
+    //     auto mem_alloc_cnt_names = std::vector<std::string>{};
+    //     mem_alloc_cnt_names.reserve(mem_alloc_endpoints.size());
 
-        for(auto& [abs_index, ts_map] : mem_alloc_endpoints)
-        {
-            mem_alloc_endpoints[abs_index].emplace(
-                mem_alloc_extremes.first - extremes_endpoint_buffer,
-                memory_information{0, {0}, {0}, false});
-            mem_alloc_endpoints[abs_index].emplace(
-                mem_alloc_extremes.second + extremes_endpoint_buffer,
-                memory_information{0, {0}, {0}, false});
+    //     for(auto& [abs_index, ts_map] : mem_alloc_endpoints)
+    //     {
+    //         mem_alloc_endpoints[abs_index].emplace(
+    //             mem_alloc_extremes.first - extremes_endpoint_buffer,
+    //             memory_information{0, {0}, {0}, false});
+    //         mem_alloc_endpoints[abs_index].emplace(
+    //             mem_alloc_extremes.second + extremes_endpoint_buffer,
+    //             memory_information{0, {0}, {0}, false});
 
-            auto _track_name = std::stringstream{};
+    //         auto _track_name = std::stringstream{};
 
-            if(agent_data.find(abs_index) != agent_data.end())
-            {
-                const auto _agent           = agent_data.at(abs_index).first;
-                auto       agent_index_info = agent_data.at(abs_index).second;
-                _track_name << "ALLOCATE BYTES on " << agent_index_info.label << " ["
-                            << agent_index_info.index << "] (" << agent_index_info.type << ")";
-            }
-            else
-            {
-                _track_name << "FREE BYTES";
-            }
+    //         if(agent_data.find(abs_index) != agent_data.end())
+    //         {
+    //             const auto _agent           = agent_data.at(abs_index).first;
+    //             auto       agent_index_info = agent_data.at(abs_index).second;
+    //             _track_name << "ALLOCATE BYTES on " << agent_index_info.label << " ["
+    //                         << agent_index_info.index << "] (" << agent_index_info.type << ")";
+    //         }
+    //         else
+    //         {
+    //             _track_name << "FREE BYTES";
+    //         }
 
-            constexpr auto _unit = ::perfetto::CounterTrack::Unit::UNIT_SIZE_BYTES;
-            auto&          _name = mem_alloc_cnt_names.emplace_back(_track_name.str());
-            mem_alloc_tracks.emplace(abs_index,
-                                     ::perfetto::CounterTrack{_name.c_str(), this_pid_track}
-                                         .set_unit(_unit)
-                                         .set_unit_multiplier(bytes_multiplier)
-                                         .set_is_incremental(false));
-        }
+    //         constexpr auto _unit = ::perfetto::CounterTrack::Unit::UNIT_SIZE_BYTES;
+    //         auto&          _name = mem_alloc_cnt_names.emplace_back(_track_name.str());
+    //         mem_alloc_tracks.emplace(abs_index,
+    //                                  ::perfetto::CounterTrack{_name.c_str(), this_pid_track}
+    //                                      .set_unit(_unit)
+    //                                      .set_unit_multiplier(bytes_multiplier)
+    //                                      .set_is_incremental(false));
+    //     }
 
-        for(auto& alloc_itr : mem_alloc_endpoints)
-        {
-            for(auto itr : alloc_itr.second)
-            {
-                TRACE_COUNTER(sdk::perfetto_category<sdk::category::memory_allocation>::name,
-                              mem_alloc_tracks.at(alloc_itr.first),
-                              itr.first,
-                              itr.second.alloc_size / bytes_multiplier);
-                tracing_session->FlushBlocking();
-            }
-        }
+    //     for(auto& alloc_itr : mem_alloc_endpoints)
+    //     {
+    //         for(auto itr : alloc_itr.second)
+    //         {
+    //             TRACE_COUNTER(sdk::perfetto_category<sdk::category::memory_allocation>::name,
+    //                           mem_alloc_tracks.at(alloc_itr.first),
+    //                           itr.first,
+    //                           itr.second.alloc_size / bytes_multiplier);
+    //             tracing_session->FlushBlocking();
+    //         }
+    //     }
 
-        // scratch memory counter track
-        auto scratch_mem_endpoints =
-            std::unordered_map<uint64_t, std::map<rocprofiler_timestamp_t, uint64_t>>{};
+    //     // scratch memory counter track
+    //     auto scratch_mem_endpoints =
+    //         std::unordered_map<uint64_t, std::map<rocprofiler_timestamp_t, uint64_t>>{};
 
-        // Load scratch memory usage endpoints
-        for(const auto& ditr : scratch_memory_gen)
-            for(const auto& itr : scratch_memory_gen.get(ditr))
-            {
-                auto agent_abs_index = itr.agent_abs_index;
-                if(itr.operation == "FREE")
-                {
-                    auto [agent_index, size] =
-                        queue_to_agent_and_size[rocprofiler_queue_id_t{.handle = itr.queue_id}];
-                    agent_abs_index = agent_index;
-                }
+    //     // Load scratch memory usage endpoints
+    //     for(const auto& ditr : scratch_memory_gen)
+    //         for(const auto& itr : scratch_memory_gen.get(ditr))
+    //         {
+    //             auto agent_abs_index = itr.agent_abs_index;
+    //             if(itr.operation == "FREE")
+    //             {
+    //                 auto [agent_index, size] =
+    //                     queue_to_agent_and_size[rocprofiler_queue_id_t{.handle = itr.queue_id}];
+    //                 agent_abs_index = agent_index;
+    //             }
 
-                // Track start and end timestamps for this scratch memory record
-                scratch_mem_endpoints[agent_abs_index].emplace(itr.start, 0);
-                scratch_mem_endpoints[agent_abs_index].emplace(itr.end, 0);
-            }
+    //             // Track start and end timestamps for this scratch memory record
+    //             scratch_mem_endpoints[agent_abs_index].emplace(itr.start, 0);
+    //             scratch_mem_endpoints[agent_abs_index].emplace(itr.end, 0);
+    //         }
 
-        // Load values at each endpoint
-        for(const auto& ditr : scratch_memory_gen)
-            for(const auto& itr : scratch_memory_gen.get(ditr))
-            {
-                if(itr.operation == "ALLOC")
-                {
-                    auto agent_abs_index = itr.agent_abs_index;
+    //     // Load values at each endpoint
+    //     for(const auto& ditr : scratch_memory_gen)
+    //         for(const auto& itr : scratch_memory_gen.get(ditr))
+    //         {
+    //             if(itr.operation == "ALLOC")
+    //             {
+    //                 auto agent_abs_index = itr.agent_abs_index;
 
-                    // For each timestamp in the range of this record including intervening
-                    // deallocations write in allocation size
-                    auto begin = scratch_mem_endpoints.at(agent_abs_index).lower_bound(itr.start);
-                    auto end   = scratch_mem_endpoints.at(agent_abs_index).upper_bound(itr.end);
+    //                 // For each timestamp in the range of this record including intervening
+    //                 // deallocations write in allocation size
+    //                 auto begin =
+    //                 scratch_mem_endpoints.at(agent_abs_index).lower_bound(itr.start); auto end =
+    //                 scratch_mem_endpoints.at(agent_abs_index).upper_bound(itr.end);
 
-                    for(auto mitr = begin; mitr != end; ++mitr)
-                    {
-                        mitr->second = itr.size;
-                    }
-                }
-            }
+    //                 for(auto mitr = begin; mitr != end; ++mitr)
+    //                 {
+    //                     mitr->second = itr.size;
+    //                 }
+    //             }
+    //         }
 
-        // Create counter tracks for visualization
-        auto scratch_mem_tracks = std::unordered_map<uint64_t, ::perfetto::CounterTrack>{};
-        auto scratch_mem_names  = std::vector<std::string>{};
-        scratch_mem_names.reserve(scratch_mem_endpoints.size());
+    //     // Create counter tracks for visualization
+    //     auto scratch_mem_tracks = std::unordered_map<uint64_t, ::perfetto::CounterTrack>{};
+    //     auto scratch_mem_names  = std::vector<std::string>{};
+    //     scratch_mem_names.reserve(scratch_mem_endpoints.size());
 
-        for(auto& [abs_index, ts_map] : scratch_mem_endpoints)
-        {
-            // Add buffer timestamps for better visualization
-            if(!ts_map.empty())
-            {
-                auto       _track_name      = std::stringstream{};
-                const auto _agent           = agent_data.at(abs_index).first;
-                auto       agent_index_info = agent_data.at(abs_index).second;
+    //     for(auto& [abs_index, ts_map] : scratch_mem_endpoints)
+    //     {
+    //         // Add buffer timestamps for better visualization
+    //         if(!ts_map.empty())
+    //         {
+    //             auto       _track_name      = std::stringstream{};
+    //             const auto _agent           = agent_data.at(abs_index).first;
+    //             auto       agent_index_info = agent_data.at(abs_index).second;
 
-                _track_name << "SCRATCH MEMORY on " << agent_index_info.label << " ["
-                            << agent_index_info.index << "] (" << agent_index_info.type << ")";
+    //             _track_name << "SCRATCH MEMORY on " << agent_index_info.label << " ["
+    //                         << agent_index_info.index << "] (" << agent_index_info.type << ")";
 
-                constexpr auto _unit = ::perfetto::CounterTrack::Unit::UNIT_SIZE_BYTES;
-                auto&          _name = scratch_mem_names.emplace_back(_track_name.str());
-                scratch_mem_tracks.emplace(abs_index,
-                                           ::perfetto::CounterTrack{_name.c_str(), this_pid_track}
-                                               .set_unit(_unit)
-                                               .set_unit_multiplier(bytes_multiplier)
-                                               .set_is_incremental(false));
-            }
-        }
+    //             constexpr auto _unit = ::perfetto::CounterTrack::Unit::UNIT_SIZE_BYTES;
+    //             auto&          _name = scratch_mem_names.emplace_back(_track_name.str());
+    //             scratch_mem_tracks.emplace(abs_index,
+    //                                        ::perfetto::CounterTrack{_name.c_str(),
+    //                                        this_pid_track}
+    //                                            .set_unit(_unit)
+    //                                            .set_unit_multiplier(bytes_multiplier)
+    //                                            .set_is_incremental(false));
+    //         }
+    //     }
 
-        // Write counter values to perfetto trace
-        for(const auto& mitr : scratch_mem_endpoints)
-        {
-            if(scratch_mem_tracks.count(mitr.first) > 0)
-            {
-                for(const auto& itr : mitr.second)
-                {
-                    TRACE_COUNTER(sdk::perfetto_category<sdk::category::scratch_memory>::name,
-                                  scratch_mem_tracks.at(mitr.first),
-                                  itr.first,
-                                  itr.second / bytes_multiplier);
-                    tracing_session->FlushBlocking();
-                }
-            }
-        }
-    }
+    //     // Write counter values to perfetto trace
+    //     for(const auto& mitr : scratch_mem_endpoints)
+    //     {
+    //         if(scratch_mem_tracks.count(mitr.first) > 0)
+    //         {
+    //             for(const auto& itr : mitr.second)
+    //             {
+    //                 TRACE_COUNTER(sdk::perfetto_category<sdk::category::scratch_memory>::name,
+    //                               scratch_mem_tracks.at(mitr.first),
+    //                               itr.first,
+    //                               itr.second / bytes_multiplier);
+    //                 tracing_session->FlushBlocking();
+    //             }
+    //         }
+    //     }
+    // }
 
-    // Create counter tracks per agent
-    {
-        auto counters_endpoints =
-            std::unordered_map<uint64_t,
-                               std::unordered_map<uint32_t, std::map<uint64_t, uint64_t>>>{};
+    // // Create counter tracks per agent
+    // {
+    //     auto counters_endpoints =
+    //         std::unordered_map<uint64_t,
+    //                            std::unordered_map<uint32_t, std::map<uint64_t, uint64_t>>>{};
 
-        auto counters_extremes = std::pair<uint64_t, uint64_t>{
-            std::numeric_limits<uint64_t>::max(), std::numeric_limits<uint64_t>::min()};
+    //     auto counters_extremes = std::pair<uint64_t, uint64_t>{
+    //         std::numeric_limits<uint64_t>::max(), std::numeric_limits<uint64_t>::min()};
 
-        auto constexpr timestamp_buffer = 1000;
+    //     auto constexpr timestamp_buffer = 1000;
 
-        for(auto ditr : counter_collection_gen)
-            for(const auto& record : counter_collection_gen.get(ditr))
-            {
-                // const auto& info = record.;
+    //     for(auto ditr : counter_collection_gen)
+    //         for(const auto& record : counter_collection_gen.get(ditr))
+    //         {
+    //             // const auto& info = record.;
 
-                const auto& start_timestamp = record.start;
-                const auto& end_timestamp   = record.end;
+    //             const auto& start_timestamp = record.start;
+    //             const auto& end_timestamp   = record.end;
 
-                uint64_t _mean_timestamp =
-                    start_timestamp + (0.5 * (end_timestamp - start_timestamp));
+    //             uint64_t _mean_timestamp =
+    //                 start_timestamp + (0.5 * (end_timestamp - start_timestamp));
 
-                for(auto& [counter_id, counter_value] : counter_id_value)
-                {
-                    counters_endpoints[record.agent_abs_index][counter_id].emplace(
-                        start_timestamp - timestamp_buffer, 0);
-                    counters_endpoints[record.agent_abs_index][counter_id].emplace(start_timestamp,
-                                                                                   counter_value);
-                    counters_endpoints[record.agent_abs_index][counter_id].emplace(_mean_timestamp,
-                                                                                   counter_value);
-                    counters_endpoints[record.agent_abs_index][counter_id].emplace(end_timestamp,
-                                                                                   0);
-                    counters_endpoints[record.agent_abs_index][counter_id].emplace(
-                        end_timestamp + timestamp_buffer, 0);
-                }
+    //             for(auto& [counter_id, counter_value] : counter_id_value)
+    //             {
+    //                 counters_endpoints[record.agent_abs_index][counter_id].emplace(
+    //                     start_timestamp - timestamp_buffer, 0);
+    //                 counters_endpoints[record.agent_abs_index][counter_id].emplace(start_timestamp,
+    //                                                                                counter_value);
+    //                 counters_endpoints[record.agent_abs_index][counter_id].emplace(_mean_timestamp,
+    //                                                                                counter_value);
+    //                 counters_endpoints[record.agent_abs_index][counter_id].emplace(end_timestamp,
+    //                                                                                0);
+    //                 counters_endpoints[record.agent_abs_index][counter_id].emplace(
+    //                     end_timestamp + timestamp_buffer, 0);
+    //             }
 
-                counters_extremes = std::make_pair(std::min(counters_extremes.first, record.start),
-                                                   std::max(counters_extremes.second, record.end));
-            }
+    //             counters_extremes = std::make_pair(std::min(counters_extremes.first,
+    //             record.start),
+    //                                                std::max(counters_extremes.second,
+    //                                                record.end));
+    //         }
 
-        auto counter_tracks =
-            std::unordered_map<uint64_t, std::map<std::string, ::perfetto::CounterTrack>>{};
+    //     auto counter_tracks =
+    //         std::unordered_map<uint64_t, std::map<std::string, ::perfetto::CounterTrack>>{};
 
-        constexpr auto extremes_endpoint_buffer = 5000;
+    //     constexpr auto extremes_endpoint_buffer = 5000;
 
-        for(auto ditr : counter_collection_gen)
-        {
-            for(const auto& record : counter_collection_gen.get(ditr))
-            {
-                // const auto& info = record.dispatch_data.dispatch_info;
-                // const auto& sym  = tool_metadata.get_kernel_symbol(info.kernel_id);
+    //     for(auto ditr : counter_collection_gen)
+    //     {
+    //         for(const auto& record : counter_collection_gen.get(ditr))
+    //         {
+    //             // const auto& info = record.dispatch_data.dispatch_info;
+    //             // const auto& sym  = tool_metadata.get_kernel_symbol(info.kernel_id);
 
-                // CHECK(sym != nullptr);
+    //             // CHECK(sym != nullptr);
 
-                auto name = record.kernel_name;
+    //             auto name = record.kernel_name;
 
-                for(auto& [counter_id, counter_value] : counter_id_value)
-                {
-                    counters_endpoints[record.agent_id][counter_id].emplace(
-                        counters_extremes.first - extremes_endpoint_buffer, 0);
-                    counters_endpoints[record.agent_id][counter_id].emplace(
-                        counters_extremes.second + extremes_endpoint_buffer, 0);
+    //             for(auto& [counter_id, counter_value] : counter_id_value)
+    //             {
+    //                 counters_endpoints[record.agent_id][counter_id].emplace(
+    //                     counters_extremes.first - extremes_endpoint_buffer, 0);
+    //                 counters_endpoints[record.agent_id][counter_id].emplace(
+    //                     counters_extremes.second + extremes_endpoint_buffer, 0);
 
-                    const auto _agent           = agent_data.at(record.agent_abs_index).first;
-                    auto       agent_index_info = agent_data.at(record.agent_abs_index).second;
-                    auto       track_name_ss    = std::stringstream{};
-                    track_name_ss << agent_index_info.label << " [" << agent_index_info.index
-                                  << "] "
-                                  << "PMC " << record.counter_name;
+    //                 const auto _agent           = agent_data.at(record.agent_abs_index).first;
+    //                 auto       agent_index_info = agent_data.at(record.agent_abs_index).second;
+    //                 auto       track_name_ss    = std::stringstream{};
+    //                 track_name_ss << agent_index_info.label << " [" << agent_index_info.index
+    //                               << "] "
+    //                               << "PMC " << record.counter_name;
 
-                    auto track_name = track_name_ss.str();
+    //                 auto track_name = track_name_ss.str();
 
-                    counter_tracks[record.agent_abs_index].emplace(
-                        track_name, ::perfetto::CounterTrack{track_name.c_str(), this_pid_track});
-                    auto& endpoints = counters_endpoints[record.agent_id][counter_id];
-                    for(auto& counter_itr : endpoints)
-                    {
-                        TRACE_COUNTER(
-                            sdk::perfetto_category<sdk::category::counter_collection>::name,
-                            counter_tracks[record.agent_abs_index].at(track_name),
-                            counter_itr.first,
-                            counter_itr.second);
-                    }
-                }
-            }
-            tracing_session->FlushBlocking();
-        }
-    }
+    //                 counter_tracks[record.agent_abs_index].emplace(
+    //                     track_name, ::perfetto::CounterTrack{track_name.c_str(),
+    //                     this_pid_track});
+    //                 auto& endpoints = counters_endpoints[record.agent_id][counter_id];
+    //                 for(auto& counter_itr : endpoints)
+    //                 {
+    //                     TRACE_COUNTER(
+    //                         sdk::perfetto_category<sdk::category::counter_collection>::name,
+    //                         counter_tracks[record.agent_abs_index].at(track_name),
+    //                         counter_itr.first,
+    //                         counter_itr.second);
+    //                 }
+    //             }
+    //         }
+    //         tracing_session->FlushBlocking();
+    //     }
+    // }
 
     ::perfetto::TrackEvent::Flush();
     tracing_session->FlushBlocking();

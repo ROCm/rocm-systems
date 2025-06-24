@@ -76,6 +76,13 @@ FROM
     `rocpd_info_kernel_symbol{{uuid}}`;
 
 CREATE VIEW IF NOT EXISTS
+    `rocpd_timestamp` AS
+SELECT
+    *
+FROM
+    `rocpd_timestamp{{uuid}}`;
+
+CREATE VIEW IF NOT EXISTS
     `rocpd_track` AS
 SELECT
     *
