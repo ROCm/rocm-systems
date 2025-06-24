@@ -166,4 +166,6 @@ def _create_temp_views(connection, input):
 def _create_meta_views(connection):
     schema = RocpdSchema()
     sql_script = schema.views.replace("CREATE VIEW", "CREATE TEMPORARY VIEW")
-    execute_statement(connection, sql_script, is_script=True)
+    # for easier debugging
+    for itr in sql_script.split(";"):
+        execute_statement(connection, f"{itr};")

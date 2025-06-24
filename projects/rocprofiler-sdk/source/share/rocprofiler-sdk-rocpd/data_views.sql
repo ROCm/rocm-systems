@@ -383,7 +383,8 @@ FROM
     INNER JOIN `rocpd_info_process` P ON P.pid = PMC_I.pid
     AND PMC_I.guid = P.guid;
 
-
+--
+-- Join PMC records with PMC info and event info
 CREATE VIEW IF NOT EXISTS
     `pmc_events` AS
 SELECT
@@ -535,7 +536,7 @@ WHERE
     M.level = 'SCRATCH';
 
 --
---
+-- PMC events specific to kernels
 CREATE VIEW IF NOT EXISTS
     `kernel_pmc_events` AS
 SELECT
@@ -575,7 +576,7 @@ SELECT
     K.static_scratch_size,
     K.stack_id,
     K.parent_stack_id,
-    K.correlation_id
+    K.correlation_id,
     E.pmc_id,
     E.name AS `pmc_name`,
     E.symbol AS `pmc_symbol`,
