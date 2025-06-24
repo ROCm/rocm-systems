@@ -929,7 +929,7 @@ void GpuAgent::ReleaseResources() {
     scratch_cache_.free_reserve();
 
     if (scratch_pool_.base() != NULL) {
-      HSAKMT_CALL(hsaKmtFreeMemory(scratch_pool_.base(), scratch_pool_.size()));
+      driver().FreeMemory(scratch_pool_.base(), scratch_pool_.size());
     }
 
     for (int i = 0; i < QueueCount; i++)
