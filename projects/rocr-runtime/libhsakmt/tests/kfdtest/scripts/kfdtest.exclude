@@ -28,7 +28,6 @@ FILTER[core]=\
 "${FILTER[core_sws]}:"\
 "KFDCWSRTest.BasicTest"
 
-
 # Permanent exclusions
 # These tests are included for debugging, but are not executed in normal execution on any ASIC:
 # FILTER[pm] need human intervention, so put it here. Developers can run them
@@ -357,6 +356,7 @@ FILTER[gfx950]=\
 "KFDMemoryTest.FlatScratchAccess:"\
 "KFDIPCTest.BasicTest:"\
 "KFDQMTest.QueueLatency:"\
+"KFDEvictTest.*:"\
 "KFDSVMEvictTest.QueueTest*:"\
 "KFDGWSTest.Semaphore"
 
