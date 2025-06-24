@@ -276,6 +276,13 @@ public:
   virtual hsa_status_t GetDeviceHandle(uint32_t node_id, void** device_handle) const = 0;
 
 
+  /// @brief Gets clock counters for particular Node
+  /// @param[in] node_id Node ID of the agent
+  /// @param[out] clock_counter Clock counter
+  /// @return HSA_STATUS_SUCCESS if the driver successfully returns the clock
+  virtual hsa_status_t GetClockCounters(uint32_t node_id,
+                                        HsaClockCounters* clock_counter) const = 0;
+
   /// @brief Check if the HSA KMT Model is enabled
   /// @param[out] enable True if the model is enabled, false otherwise
   virtual hsa_status_t IsModelEnabled(bool* enable) const = 0;

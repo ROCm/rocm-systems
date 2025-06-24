@@ -125,6 +125,7 @@ public:
   hsa_status_t SetTrapHandler(uint32_t node_id, const void* base, uint64_t base_size,
                               const void* buffer_base, uint64_t buffer_base_size) const override;
   hsa_status_t GetDeviceHandle(uint32_t node_id, void** device_handle) const override;
+  hsa_status_t GetClockCounters(uint32_t node_id, HsaClockCounters* clock_counter) const override;
 
   hsa_status_t OpenSMI(uint32_t node_id, int* fd) const override;
 

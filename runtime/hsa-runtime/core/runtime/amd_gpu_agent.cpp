@@ -125,10 +125,10 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   if (node_props.Capability.ui32.DoorbellType != 2)
     throw AMD::hsa_exception(HSA_STATUS_ERROR, "Agent creation failed.\nThe GPU node uses a deprecated doorbell type\n");
 
-  HSAKMT_STATUS err = HSAKMT_CALL(hsaKmtGetClockCounters(node_id(), &t0_));
+  hsa_status_t err = driver().GetClockCounters(node_id(), &t0_);
   t1_ = t0_;
   historical_clock_ratio_ = 0.0;
-  assert(err == HSAKMT_STATUS_SUCCESS && "hsaGetClockCounters error");
+  assert(err == HSA_STATUS_SUCCESS && "hsaGetClockCounters error");
 
   const core::Isa *isa_base;
 
@@ -1678,7 +1678,8 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       HsaClockCounters hsakmt_counters = {};
       hsa_amd_clock_counters_t* counters = static_cast<hsa_amd_clock_counters_t*>(value);
 
-      if (hsaKmtGetClockCounters(node_id(), &hsakmt_counters) == HSAKMT_STATUS_SUCCESS ) {
+      hsa_status_t err = driver().GetClockCounters(node_id(), &hsakmt_counters);
+      if (err == HSA_STATUS_SUCCESS) {
         counters->cpu_clock_counter = hsakmt_counters.CPUClockCounter;
         counters->gpu_clock_counter = hsakmt_counters.GPUClockCounter;
         counters->system_clock_counter = hsakmt_counters.SystemClockCounter;
@@ -2199,8 +2200,8 @@ uint16_t GpuAgent::GetSdmaMicrocodeVersion() const {
 }
 
 void GpuAgent::SyncClocks() {
-  HSAKMT_STATUS err = HSAKMT_CALL(hsaKmtGetClockCounters(node_id(), &t1_));
-  assert(err == HSAKMT_STATUS_SUCCESS && "hsaGetClockCounters error");
+  hsa_status_t err = driver().GetClockCounters(node_id(), &t1_);
+  assert(err == HSA_STATUS_SUCCESS && "hsaGetClockCounters error");
 }
 
 hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttrap_buffers, pcs_sampling_data_t* pcs_stochastic_buffers) {
