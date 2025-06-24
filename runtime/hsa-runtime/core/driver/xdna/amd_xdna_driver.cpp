@@ -184,7 +184,7 @@ hsa_status_t XdnaDriver::GetNodeProperties(HsaNodeProperties& node_props, uint32
 
   // Right now can only target N-1 columns as that is the number of shim DMAs
   // in NPU1 devices.
-  node_props.NumNeuralCores = (aie_metadata.cols - 1) * aie_metadata.rows;
+  node_props.NumNeuralCores = (aie_metadata.cols - 1) * aie_metadata.core.row_count;
   /// @todo XDNA driver currently only supports single-node AIE
   /// devices over PCIe. Update this once we can get topology
   /// information dynamically from the sysfs.
@@ -622,10 +622,6 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_amd_aie_ert_packet_t* first_pkt, uin
       DestroyBOHandle(bo_handle);
     }
   });
-
-  if (queue_id == AMDXDNA_INVALID_CTX_HANDLE) {
-    return HSA_STATUS_ERROR_INVALID_QUEUE;
-  }
 
   auto hw_ctx_handle = static_cast<uint32_t>(queue_id);
   // PDI cache. If the cache is updated, a new hardware context will be created for the queue.
