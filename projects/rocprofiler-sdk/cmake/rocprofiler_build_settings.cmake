@@ -93,10 +93,12 @@ rocprofiler_target_compile_options(
     rocprofiler-sdk-debug-flags INTERFACE "-g3" "-fno-omit-frame-pointer"
                                           "-fno-optimize-sibling-calls")
 
-target_compile_options(
-    rocprofiler-sdk-debug-flags
-    INTERFACE $<$<COMPILE_LANGUAGE:C>:$<$<C_COMPILER_ID:GNU>:-rdynamic>>
-              $<$<COMPILE_LANGUAGE:CXX>:$<$<CXX_COMPILER_ID:GNU>:-rdynamic>>)
+if(NOT ROCPROFILER_ENABLE_CLANG_TIDY)
+    target_compile_options(
+        rocprofiler-sdk-debug-flags
+        INTERFACE $<$<COMPILE_LANGUAGE:C>:$<$<C_COMPILER_ID:GNU>:-rdynamic>>
+                  $<$<COMPILE_LANGUAGE:CXX>:$<$<CXX_COMPILER_ID:GNU>:-rdynamic>>)
+endif()
 
 if(NOT APPLE AND NOT ROCPROFILER_ENABLE_CLANG_TIDY)
     target_link_options(rocprofiler-sdk-debug-flags INTERFACE

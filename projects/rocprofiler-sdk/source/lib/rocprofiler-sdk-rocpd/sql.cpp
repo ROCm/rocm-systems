@@ -137,9 +137,9 @@ rocpd_sql_load_schema(rocpd_sql_engine_t                        engine,
         {ROCPD_SQL_SCHEMA_ROCPD_TABLES, "rocpd_tables.sql"},
         {ROCPD_SQL_SCHEMA_ROCPD_INDEXES, "rocpd_indexes.sql"},
         {ROCPD_SQL_SCHEMA_ROCPD_VIEWS, "rocpd_views.sql"},
+        {ROCPD_SQL_SCHEMA_ROCPD_METADATA, "rocpd_metadata.sql"},
         {ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS, "data_views.sql"},
         {ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS, "summary_views.sql"},
-        {ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS, "marker_views.sql"},
     };
 
     const auto _lib_schema_path = rocpd::sql::get_install_path();

@@ -210,9 +210,9 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
         .value("rocpd_tables", ROCPD_SQL_SCHEMA_ROCPD_TABLES)
         .value("rocpd_indexes", ROCPD_SQL_SCHEMA_ROCPD_INDEXES)
         .value("rocpd_views", ROCPD_SQL_SCHEMA_ROCPD_VIEWS)
+        .value("rocpd_metadata", ROCPD_SQL_SCHEMA_ROCPD_METADATA)
         .value("data_views", ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS)
-        .value("summary_views", ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS)
-        .value("marker_views", ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS);
+        .value("summary_views", ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS);
 
     py::enum_<rocpd_sql_options_t>(pyrocpd, "sql_option", "Load schema options")
         .value("none", ROCPD_SQL_OPTIONS_NONE)

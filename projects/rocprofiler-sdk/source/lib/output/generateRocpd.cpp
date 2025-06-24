@@ -606,10 +606,12 @@ write_rocpd(
 
         execute_raw_sql_statements(conn, table_schema);
 
-        for(auto itr : {ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
-                        ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS,
-                        ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS,
-                        ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS})
+        for(auto itr : {
+                ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
+                ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS,
+                ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS,
+                ROCPD_SQL_SCHEMA_ROCPD_METADATA,
+            })
         {
             auto views_schema = read_schema_file(itr);
             execute_raw_sql_statements(conn, views_schema);

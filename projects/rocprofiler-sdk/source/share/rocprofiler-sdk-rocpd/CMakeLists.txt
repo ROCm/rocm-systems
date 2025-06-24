@@ -2,7 +2,7 @@
 #
 #
 
-set(rocpd_schemas data_views.sql marker_views.sql rocpd_indexes.sql rocpd_tables.sql
+set(rocpd_schemas data_views.sql rocpd_indexes.sql rocpd_metadata.sql rocpd_tables.sql
                   rocpd_views.sql summary_views.sql)
 
 foreach(_FILE ${rocpd_schemas})

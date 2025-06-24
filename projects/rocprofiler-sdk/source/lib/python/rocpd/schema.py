@@ -56,8 +56,15 @@ class RocpdSchema:
             variables,
         )
 
+        self.metadata = RocpdSchema.load_schema(
+            libpyrocpd.sql_engine.sqlite3,
+            libpyrocpd.sql_schema.rocpd_metadata,
+            libpyrocpd.sql_option.none,
+            variables,
+        )
+
         _views = []
-        for itr in ["rocpd", "data", "summary", "marker"]:
+        for itr in ["rocpd", "data", "summary"]:
             _views += [
                 RocpdSchema.load_schema(
                     libpyrocpd.sql_engine.sqlite3,

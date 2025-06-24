@@ -51,11 +51,10 @@ set(ROCPROFILER_PYTHON_VERSION_CANDIDATES
     CACHE STRING "Python versions to search for, newest first")
 
 function(get_default_python_versions _VAR)
-    rocprofiler_reset_python3_cache()
-
     set(_PYTHON_FOUND_VERSIONS)
 
     foreach(_VER IN LISTS ROCPROFILER_PYTHON_VERSION_CANDIDATES)
+        rocprofiler_reset_python3_cache()
         find_package(Python3 ${_VER} EXACT QUIET COMPONENTS Interpreter Development)
         if(Python3_FOUND)
             list(APPEND _PYTHON_FOUND_VERSIONS
@@ -65,6 +64,7 @@ function(get_default_python_versions _VAR)
 
     # If none found, do one last check for 3.6 (no EXACT)
     if(NOT _PYTHON_FOUND_VERSIONS)
+        rocprofiler_reset_python3_cache()
         find_package(Python3 3.6 COMPONENTS Interpreter Development)
         if(Python3_FOUND)
             list(APPEND _PYTHON_FOUND_VERSIONS
