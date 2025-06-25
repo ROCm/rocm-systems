@@ -75,9 +75,10 @@ class WDDMDevice {
 public:
   static constexpr size_t GpuMemoryChunkSize = 2 * (1ULL << 30);   // 2 GB
 
-  WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid);
+  WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_id);
   ~WDDMDevice();
 
+  int NodeId() const { return node_id_; }
   int Major() { return device_info_.major; }
   int Minor() { return device_info_.minor; }
   int Stepping() { return device_info_.stepping; }
@@ -252,6 +253,7 @@ private:
   uint32_t cmdbuf_size_;
   uint32_t cmdbuf_aql_frame_size_;
   static const uint32_t cmdbuf_aql_frame_num_;
+  uint32_t node_id_;
   // device info
   thunk_proxy::DeviceInfo device_info_;
 

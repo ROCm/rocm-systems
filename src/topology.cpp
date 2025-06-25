@@ -379,7 +379,7 @@ HSAKMT_STATUS topology_sysfs_get_system_props(HsaSystemProperties& props) {
 
   for (uint32_t i = 0; i < num_adapters; i++) {
     wsl::thunk::WDDMDevice *device = new wsl::thunk::WDDMDevice(
-        adapters[i].hAdapter, adapters[i].AdapterLuid);
+        adapters[i].hAdapter, adapters[i].AdapterLuid, i+1);
     assert(device && "Create WDDM Device fail");
     dxg_topology->wdevices_.push_back(device);
   }

@@ -59,8 +59,8 @@ namespace thunk {
 
 const uint32_t WDDMDevice::cmdbuf_aql_frame_num_ = 0x1000;
 
-WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid)
-  : adapter_(adapter), adapter_luid_(adapter_luid) {
+WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_id)
+  : adapter_(adapter), adapter_luid_(adapter_luid), node_id_(node_id) {
   memset(&device_info_, 0, sizeof(device_info_));
 
   ParseDeviceInfo();
