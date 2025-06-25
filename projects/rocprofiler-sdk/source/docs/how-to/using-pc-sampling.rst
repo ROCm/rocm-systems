@@ -49,7 +49,24 @@ The output lists if ``rocprofv3`` supports PC sampling on the GPU and the suppor
 
 The preceding output shows that the GPU supports PC sampling with the ``ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP`` method and the ``ROCPROFILER_PC_SAMPLING_UNIT_TIME`` unit. The minimum and maximum intervals are also displayed.
 
-Based on the preceding configuration, you can use the following command to profile the application using PC sampling:
+.. note::
+   Important firmware fixes to host-trap and stochastic PC-sampling for AMD Instinct MI300X have been made in ROCm 7.0.
+   To ensure that you have the latest fixes, check if you have the correct firmware versions installed:
+
+   For host-trap PC-sampling on MI300X: PSP TOS Firmware >= version 00.36.02.59 or 0x00360259
+   For stochastic PC-sampling on MI300X  as described in the following section: MEC Firmware feature version: 50, firmware version >= 0x0000001a
+
+To check the firmware versions, use:
+
+.. code-block:: bash
+
+  # To check PSP TOS Firmware: 
+  sudo cat /sys/kernel/debug/dri/0/amdgpu_firmware_info | grep SOS
+
+  # To check MEC Firmware:
+  sudo cat /sys/kernel/debug/dri/1/amdgpu_firmware_info | grep MEC
+
+Based on the available PC-sampling configurations, use the following command to profile the application using PC-sampling:
 
 .. code-block:: bash
 
