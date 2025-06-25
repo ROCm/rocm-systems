@@ -1877,8 +1877,6 @@ void AqlQueue::InitScratchSRD() {
   amd_queue_.scratch_backing_memory_location = queue_scratch_.main_queue_process_offset;
   amd_queue_.alt_scratch_backing_memory_location = queue_scratch_.alt_queue_process_offset;
 
-  const auto& agent_props = agent_->properties();
-
   // For backwards compatibility this field records the per-lane scratch
   // for a 64 lane wavefront. If scratch was allocated for 32 lane waves
   // then the effective size for a 64 lane wave is halved.
