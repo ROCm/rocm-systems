@@ -88,22 +88,26 @@ jobs:
 
     - name: Install
       timeout-minutes: 10
-      run:
+      run: |
         cmake --build build --target install --parallel 16
+        ls -lah /opt/rocprofiler-sdk
+        ls -lah /opt/rocprofiler-sdk/lib/cmake
 
     - name: Test Install Build
       timeout-minutes: 20
       working-directory: /opt/rocprofiler-sdk/share/rocprofiler-sdk
       shell: bash
       run: |
+        set -x
         for ver in 6.4.1 6.3.4 6.2.4 6.2.1; do
           echo -e "Testing on ROCm ${ver} started..."
           update-alternatives --set rocm /opt/rocm-$ver
+          realpath /opt/rocm
           ls -lah /opt/rocm-$ver/lib
           rm -rf build*
           export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:/opt/rocm-$ver/lib:${LD_LIBRARY_PATH}
-          CMAKE_PREFIX_PATH="/opt/rocprofiler-sdk;/opt/rocm-$ver" cmake -B build-samples samples
-          CMAKE_PREFIX_PATH="/opt/rocprofiler-sdk;/opt/rocm-$ver" cmake -B build-tests tests
+          CMAKE_PREFIX_PATH="/opt/rocprofiler-sdk" cmake -B build-samples samples
+          CMAKE_PREFIX_PATH="/opt/rocprofiler-sdk" cmake -B build-tests tests
           cmake --build build-samples --target all --parallel 16
           cmake --build build-tests --target all --parallel 16
           ctest --test-dir build-samples --output-on-failure
