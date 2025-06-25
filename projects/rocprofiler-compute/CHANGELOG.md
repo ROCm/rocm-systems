@@ -77,6 +77,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * VGPR Writes
   * Total FLOPs (consider fp6 and fp4 ops)
 * Update Dash to >=3.0.0 (for web UI)
+* Change when Roofline PDFs are generated- during general profiling and --roof-only profiling (skip only when --no-roof option is present)
 
 ### Resolved issues
 

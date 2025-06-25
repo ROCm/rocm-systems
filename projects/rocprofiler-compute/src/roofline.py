@@ -89,7 +89,7 @@ class Roofline:
         # Set roofline run parameters from args
         if hasattr(self.__args, "path") and not run_parameters:
             self.__run_parameters["workload_dir"] = self.__args.path
-        if hasattr(self.__args, "roof_only") and self.__args.roof_only:
+        if hasattr(self.__args, "no_roof") and self.__args.no_roof == False:
             self.__run_parameters["is_standalone"] = True
         if hasattr(self.__args, "kernel_names") and self.__args.kernel_names:
             self.__run_parameters["include_kernel_names"] = True
@@ -104,7 +104,7 @@ class Roofline:
         if self.__run_parameters["include_kernel_names"] and (
             not self.__run_parameters["is_standalone"]
         ):
-            console_error("--roof-only is required for --kernel-names")
+            console_error("--kernel-names cannot be used with --no-roof option")
 
     def roof_setup(self):
         # Setup the workload directory for roofline profiling.

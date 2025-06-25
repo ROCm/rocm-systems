@@ -196,7 +196,9 @@ an Instinct MI210 vs an Instinct MI250.
    Additionally, you will notice a few extra files. An SoC parameters file,
    ``sysinfo.csv``, is created to reflect the target device settings. All
    profiling output is stored in ``log.txt``. Roofline-specific benchmark
-   results are stored in ``roofline.csv``.
+   results are stored in ``roofline.csv`` and roofline plots are outputted into PDFs as
+   ``empirRoof_gpu-0_[datatype1]_..._[datatypeN].pdf`` where datatypes requested through
+    --roofline-data-type option are listed in the file name.
 
 .. code-block:: shell-session
 
