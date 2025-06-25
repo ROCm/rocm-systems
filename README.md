@@ -157,7 +157,7 @@ cd docker
 docker run -v "$(cd .. && pwd)":/home/development                                \
         -it -w /home/development                                                 \
         --device /dev/kfd --device /dev/dri                                      \
-        rocm/rocprofiler-systems:release-base-ubuntu-24.04-rocm-6.4
+        $(whoami)/rocprofiler-systems:release-base-ubuntu-24.04-rocm-6.4
 ```
 
 Inside the container, clean, build, and install the project with testing enabled using the following commands:
