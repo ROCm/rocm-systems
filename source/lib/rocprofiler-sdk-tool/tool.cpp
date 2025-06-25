@@ -487,11 +487,9 @@ set_kernel_rename_and_stream_correlation_id(rocprofiler_thread_id_t  thr_id,
     // Check whether services are enabled
     const bool kernel_rename_service_enabled =
         kind == ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH &&
-        tool::get_config().kernel_rename && thread_dispatch_rename != nullptr &&
-        !thread_dispatch_rename->empty();
+        thread_dispatch_rename != nullptr && !thread_dispatch_rename->empty();
 
-    const bool hip_stream_enabled =
-        !tool::get_config().group_by_queue && rocprofiler::tool::stream::stream_stack_not_null();
+    const bool hip_stream_enabled = rocprofiler::tool::stream::stream_stack_not_null();
 
     if(!kernel_rename_service_enabled && !hip_stream_enabled) return 1;
 
@@ -565,7 +563,7 @@ kernel_rename_callback(rocprofiler_callback_tracing_record_t record,
                        rocprofiler_user_data_t*              user_data,
                        void*                                 data)
 {
-    if(!tool::get_config().kernel_rename || thread_dispatch_rename == nullptr) return;
+    if(thread_dispatch_rename == nullptr) return;
 
     if(record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API)
     {
@@ -616,8 +614,7 @@ hip_stream_display_callback(rocprofiler_callback_tracing_record_t record,
                             rocprofiler_user_data_t*              user_data,
                             void*                                 data)
 {
-    if(tool::get_config().group_by_queue || record.kind != ROCPROFILER_CALLBACK_TRACING_HIP_STREAM)
-        return;
+    if(record.kind != ROCPROFILER_CALLBACK_TRACING_HIP_STREAM) return;
     // Extract stream ID from record
     auto* stream_handle_data =
         static_cast<rocprofiler_callback_tracing_hip_stream_data_t*>(record.payload);
@@ -1998,15 +1995,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         start_context(counter_collection_ctx, "counter collection");
     }
 
-    if(tool::get_config().kernel_rename)
-    {
+
         auto rename_ctx            = rocprofiler_context_id_t{0};
         auto marker_core_api_kinds = std::array<rocprofiler_tracing_operation_t, 2>{
             ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxMarkA,
             ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxThreadRangeA,
         };
 
-        ROCPROFILER_CALL(rocprofiler_create_context(&rename_ctx), "failed to create context");
+    ROCPROFILER_CALL(rocprofiler_create_context(&rename_ctx), "failed to create context");
 
         ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
                              rename_ctx,
@@ -2017,48 +2013,43 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                              nullptr),
                          "callback tracing service failed to configure");
 
-        start_context(rename_ctx, "kernel rename");
-    }
+    start_context(rename_ctx, "kernel rename");
 
-    if(!tool::get_config().group_by_queue)
-    {
-        // Track stream ID information via callback service
-        auto hip_stream_display_ctx = rocprofiler_context_id_t{0};
+    // Track stream ID information via callback service
+    auto hip_stream_display_ctx = rocprofiler_context_id_t{0};
 
-        ROCPROFILER_CALL(rocprofiler_create_context(&hip_stream_display_ctx),
-                         "failed to create hip stream context");
+    ROCPROFILER_CALL(rocprofiler_create_context(&hip_stream_display_ctx),
+                     "failed to create hip stream context");
 
-        ROCPROFILER_CALL(
-            rocprofiler_configure_callback_tracing_service(hip_stream_display_ctx,
-                                                           ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
-                                                           nullptr,
-                                                           0,
-                                                           callbacks.hip_stream,
-                                                           nullptr),
-            "hip stream tracing configure failed");
+    ROCPROFILER_CALL(
+        rocprofiler_configure_callback_tracing_service(hip_stream_display_ctx,
+                                                       ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
+                                                       nullptr,
+                                                       0,
+                                                       callbacks.hip_stream,
+                                                       nullptr),
+        "hip stream tracing configure failed");
 
-        start_context(hip_stream_display_ctx, "hip stream");
+    start_context(hip_stream_display_ctx, "hip stream");
 
-        // Track if HIP runtime has been initialized via runtime_intialization service
-        auto runtime_initialization_ctx = rocprofiler_context_id_t{0};
+    // Track if HIP runtime has been initialized via runtime_intialization service
+    auto runtime_initialization_ctx = rocprofiler_context_id_t{0};
 
-        ROCPROFILER_CALL(rocprofiler_create_context(&runtime_initialization_ctx),
-                         "failed to create runtime initialization context");
+    ROCPROFILER_CALL(rocprofiler_create_context(&runtime_initialization_ctx),
+                     "failed to create runtime initialization context");
 
-        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
-                             runtime_initialization_ctx,
-                             ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION,
-                             nullptr,
-                             0,
-                             runtime_initialization_callback,
-                             nullptr),
-                         "runtime initialization tracing configure failed");
+    ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
+                         runtime_initialization_ctx,
+                         ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION,
+                         nullptr,
+                         0,
+                         runtime_initialization_callback,
+                         nullptr),
+                     "runtime initialization tracing configure failed");
 
-        start_context(runtime_initialization_ctx, "runtime initialization");
-    }
+    start_context(runtime_initialization_ctx, "runtime initialization");
 
-    if((tool::get_config().kernel_rename || !tool::get_config().group_by_queue) &&
-       tool::get_config().benchmark_mode != tool::config::benchmark::execution_profile)
+    if(tool::get_config().benchmark_mode != tool::config::benchmark::execution_profile)
     {
         auto external_corr_id_request_kinds =
             std::array<rocprofiler_external_correlation_id_request_kind_t, 4>{
