@@ -117,8 +117,6 @@ int CreateHwQueuePrivData(void **priv_data, D3DKMT_HANDLE context,
                         bool FwManagedGfxState, SchedLevel level = kNormal);
 int CreateContextPrivData(void **priv_data, bool FwManagedGfxState);
 int CreatePowerOptPrivData(void **priv_data, bool restore);
-int CreateCalibratedTimestampsPrivData(void **priv_data);
-void QueryCalibratedTimestamps(void* priv, uint64_t* gpu, uint64_t* cpu);
 void DestroyPrivData(void *priv_data);
 }
 #endif

@@ -851,29 +851,34 @@ void WDDMDevice::DestroyDeviceInfo() {
 }
 
 void WDDMDevice::GetClockCounters(uint64_t *gpu, uint64_t *cpu) {
-  void *priv_data;
-  int priv_size;
 
-  priv_size = thunk_proxy::CreateCalibratedTimestampsPrivData(&priv_data);
+  uint32_t engine = GetComputeEngine();
+  int ordinal = EngineOrdinal(engine, &device_info_);
 
-  D3DKMT_ESCAPE d3dkmt_escape;
-  memset(&d3dkmt_escape, 0, sizeof(d3dkmt_escape));
+  D3DKMT_QUERYCLOCKCALIBRATION args = {0};
 
-  d3dkmt_escape.hAdapter              = adapter_;
-  d3dkmt_escape.hDevice               = device_;
-  d3dkmt_escape.hContext              = 0; //KMD only use device to identify the process
-  d3dkmt_escape.Type                  = D3DKMT_ESCAPE_DRIVERPRIVATE;
-  d3dkmt_escape.pPrivateDriverData    = priv_data;
-  d3dkmt_escape.PrivateDriverDataSize = priv_size;
-  d3dkmt_escape.Flags.HardwareAccess  = true;
+ /* LDA(Linked Display Adapter)
+  * In the LDA design multiple physical GPUs are linked together to be controlled
+  * as a single object from the point of view of power manager, GPU scheduler and
+  * GPU memory manager. The physical GPUs are represented by a signal logical adapter
+  * object. There is a single DXGADAPTER objects, a single KMD adapter object.
+  *
+  * Set PhysicalAdapterIndex to 0 by default with None LDA mode.
+  */
+  args.hAdapter = adapter_;
+  args.NodeOrdinal = ordinal;
+  args.PhysicalAdapterIndex = 0;
 
-  NTSTATUS status = D3DKMTEscape(&d3dkmt_escape);
+  NTSTATUS status = D3DKMTQueryClockCalibration(&args);
   if (status) {
     pr_debug("status %d \n", status);
   } else {
-    thunk_proxy::QueryCalibratedTimestamps(priv_data, gpu, cpu);
+    if (gpu)
+      *gpu = args.ClockData.GpuClockCounter;
+
+    if (cpu)
+      *cpu = args.ClockData.CpuClockCounter;
   }
-  thunk_proxy::DestroyPrivData(priv_data);
 }
 
 bool WDDMDevice::CreateQueue(WDDMQueue *queue) {
