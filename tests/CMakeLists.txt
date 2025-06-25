@@ -47,5 +47,6 @@ include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-causal-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-python-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-decode-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-nic-perf.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-roctx-tests.cmake)
 
 add_subdirectory(source)
