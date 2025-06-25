@@ -2213,11 +2213,46 @@ tool_fini(void* tool_data)
     delete _call_stack;
 }
 
+std::string
+get_filename(std::string fname, std::string extension)
+{
+    auto ofname = fname + "." + extension;
+    if(auto* eofname = getenv("ROCPROFILER_TOOL_OUTPUT_FILE")) ofname = eofname;
+
+    if(getenv("ROCPROFILER_TOOL_OUTPUT_FILE_APPEND_PID"))
+    {
+        const auto  fpath = common::fs::path(ofname);
+        std::string filename_buf(512, '\0');
+
+        if(fpath.has_extension())
+        {
+            std::snprintf(filename_buf.data(),
+                          filename_buf.size() - 1,
+                          "%s-%d.%s",
+                          fpath.stem().c_str(),
+                          getpid(),
+                          fpath.extension().c_str());
+        }
+        else
+        {
+            std::snprintf(filename_buf.data(),
+                          filename_buf.size() - 1,
+                          "%s-%d.json",
+                          fpath.stem().c_str(),
+                          getpid());
+        }
+        return filename_buf;
+    }
+    else
+    {
+        return ofname;
+    }
+}
+
 void
 write_json(call_stack_t* _call_stack)
 {
-    auto ofname = std::string{"rocprofiler-tool-results.json"};
-    if(auto* eofname = getenv("ROCPROFILER_TOOL_OUTPUT_FILE")) ofname = eofname;
+    auto ofname = get_filename("rocprofiler-tool-results", "json");
 
     std::ostream* ofs     = nullptr;
     auto          cleanup = std::function<void(std::ostream*&)>{};
@@ -2914,8 +2949,7 @@ write_perfetto()
 
     if(!trace_data.empty())
     {
-        auto ofname = std::string{"rocprofiler-tool-results.pftrace"};
-        if(auto* eofname = getenv("ROCPROFILER_TOOL_OUTPUT_FILE")) ofname = eofname;
+        auto ofname = get_filename("rocprofiler-tool-results", "pftrace");
 
         auto jpos = ofname.find(".json");
         if(jpos != std::string::npos) ofname = ofname.substr(0, jpos) + std::string{".pftrace"};
