@@ -102,6 +102,7 @@ jobs:
   test:
     # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
     strategy:
+      fail-fast: false
       matrix:
         rocm-release: ['6.4.1', '6.3.4', '6.2.4', '6.2.1']
         os: ['ubuntu-22.04']
