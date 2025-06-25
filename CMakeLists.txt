@@ -130,7 +130,6 @@ set ( HSAKMT_SRC "src/debug.cpp"
                  "src/version.cpp"
                  "src/svm.cpp"
                  "src/pc_sampling.cpp"
-                 "src/thunk_proxy/thunk_proxy.cpp"
                  "src/wddm/device.cpp"
                  "src/wddm/gpu_memory.cpp"
                  "src/wddm/va_mgr.cpp"
@@ -151,14 +150,15 @@ target_include_directories( ${HSAKMT_TARGET}
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   PRIVATE
   ${WIN_SDK}
-  ${DK_HEADER}/inc/shared
-  ${DK_HEADER}/inc/asic_reg
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/../runtime )
 
 add_compile_definitions(LINUX __AMD64__ LITTLEENDIAN_CPU HSA_LARGE_MODEL)
 target_link_directories(${HSAKMT_TARGET} PRIVATE ${DXCORE_LIB_PATH})
 target_link_libraries(${HSAKMT_TARGET} PRIVATE dxcore)
+
+target_link_directories(${HSAKMT_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/thunk_proxy)
+target_link_libraries(${HSAKMT_TARGET} PRIVATE thunk_proxy)
 
 set_property(TARGET ${HSAKMT_TARGET} PROPERTY LINK_FLAGS ${HSAKMT_LINK_FLAGS})
 
