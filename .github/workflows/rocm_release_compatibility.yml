@@ -35,7 +35,11 @@ jobs:
         build-type: ['Release']
 
     runs-on: rocprof-azure-docker-emu-runner-set
-    container: rocm/dev-${{ matrix.os }}:${{ matrix.rocm-release }}
+    container: 
+        image: evuedsoacr.azurecr.io/ml-lang-comp-us/rocm-tools/rocm-${{ matrix.rocm-release }}-${{ matrix.os }}-public-release:latest
+        credentials:
+            username: ${{ secrets.DOCKER_USERNAME }}
+            password: ${{ secrets.DOCKER_PASSWORD }}
 
     # define this for containers
     env:
