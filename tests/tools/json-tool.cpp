@@ -906,7 +906,7 @@ auto memory_allocation_bf_records =
 auto scratch_memory_records = std::deque<rocprofiler_buffer_tracing_scratch_memory_record_t>{};
 auto corr_id_retire_records =
     std::deque<rocprofiler_buffer_tracing_correlation_id_retirement_record_t>{};
-auto rccl_api_bf_records      = std::deque<rocprofiler_buffer_tracing_rccl_api_record_t>{};
+auto rccl_api_ext_bf_records  = std::deque<rocprofiler_buffer_tracing_rccl_api_ext_record_t>{};
 auto rocdecode_api_bf_records = std::deque<rocprofiler_buffer_tracing_rocdecode_api_record_t>{};
 auto rocdecode_api_ext_bf_records =
     std::deque<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>{};
@@ -1023,12 +1023,12 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
 
                 corr_id_retire_records.emplace_back(*record);
             }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_RCCL_API)
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_RCCL_API_EXT)
             {
                 auto* record =
-                    static_cast<rocprofiler_buffer_tracing_rccl_api_record_t*>(header->payload);
+                    static_cast<rocprofiler_buffer_tracing_rccl_api_ext_record_t*>(header->payload);
 
-                rccl_api_bf_records.emplace_back(*record);
+                rccl_api_ext_bf_records.emplace_back(*record);
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_OMPT)
             {
@@ -1214,7 +1214,7 @@ rocprofiler_context_id_t memory_copy_callback_ctx       = {0};
 rocprofiler_context_id_t memory_copy_buffered_ctx       = {0};
 rocprofiler_context_id_t memory_allocation_callback_ctx = {0};
 rocprofiler_context_id_t memory_allocation_buffered_ctx = {0};
-rocprofiler_context_id_t rccl_api_buffered_ctx          = {0};
+rocprofiler_context_id_t rccl_api_ext_buffered_ctx      = {0};
 rocprofiler_context_id_t ompt_buffered_ctx              = {0};
 rocprofiler_context_id_t counter_collection_ctx         = {0};
 rocprofiler_context_id_t scratch_memory_ctx             = {0};
@@ -1248,7 +1248,7 @@ rocprofiler_buffer_id_t memory_allocation_buffer        = {};
 rocprofiler_buffer_id_t counter_collection_buffer       = {};
 rocprofiler_buffer_id_t scratch_memory_buffer           = {};
 rocprofiler_buffer_id_t corr_id_retire_buffer           = {};
-rocprofiler_buffer_id_t rccl_api_buffered_buffer        = {};
+rocprofiler_buffer_id_t rccl_api_ext_buffered_buffer    = {};
 rocprofiler_buffer_id_t rocdecode_api_buffer            = {};
 rocprofiler_buffer_id_t rocdecode_api_ext_buffer        = {};
 rocprofiler_buffer_id_t rocjpeg_api_buffer              = {};
@@ -1283,7 +1283,7 @@ auto contexts = std::unordered_map<std::string_view, rocprofiler_context_id_t*>{
     {"COUNTER_COLLECTION", &counter_collection_ctx},
     {"SCRATCH_MEMORY", &scratch_memory_ctx},
     {"CORRELATION_ID_RETIREMENT", &corr_id_retire_ctx},
-    {"RCCL_API_BUFFERED", &rccl_api_buffered_ctx},
+    {"RCCL_API_EXT_BUFFERED", &rccl_api_ext_buffered_ctx},
     {"ROCDECODE_API_CALLBACK", &rocdecode_api_callback_ctx},
     {"ROCDECODE_API_BUFFERED", &rocdecode_api_buffered_ctx},
     {"ROCDECODE_API_EXT_BUFFERED", &rocdecode_api_ext_buffered_ctx},
@@ -1310,7 +1310,7 @@ auto buffers = std::array<rocprofiler_buffer_id_t*, 22>{&runtime_init_buffered_b
                                                         &scratch_memory_buffer,
                                                         &counter_collection_buffer,
                                                         &corr_id_retire_buffer,
-                                                        &rccl_api_buffered_buffer,
+                                                        &rccl_api_ext_buffered_buffer,
                                                         &ompt_buffered_buffer,
                                                         &rocdecode_api_buffer,
                                                         &rocdecode_api_ext_buffer,
@@ -1625,13 +1625,13 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                &counter_collection_buffer),
                      "buffer creation");
 
-    ROCPROFILER_CALL(rocprofiler_create_buffer(rccl_api_buffered_ctx,
+    ROCPROFILER_CALL(rocprofiler_create_buffer(rccl_api_ext_buffered_ctx,
                                                buffer_size,
                                                watermark,
                                                ROCPROFILER_BUFFER_POLICY_LOSSLESS,
                                                tool_tracing_buffered,
                                                tool_data,
-                                               &rccl_api_buffered_buffer),
+                                               &rccl_api_ext_buffered_buffer),
                      "buffer creation");
 
     ROCPROFILER_CALL(rocprofiler_create_buffer(rocdecode_api_buffered_ctx,
@@ -1984,11 +1984,11 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                      "buffer tracing service for memory copy configure");
 
     ROCPROFILER_CALL(
-        rocprofiler_configure_buffer_tracing_service(rccl_api_buffered_ctx,
-                                                     ROCPROFILER_BUFFER_TRACING_RCCL_API,
+        rocprofiler_configure_buffer_tracing_service(rccl_api_ext_buffered_ctx,
+                                                     ROCPROFILER_BUFFER_TRACING_RCCL_API_EXT,
                                                      nullptr,
                                                      0,
-                                                     rccl_api_buffered_buffer),
+                                                     rccl_api_ext_buffered_buffer),
         "buffer tracing service for rccl api configure");
 
     ROCPROFILER_CALL(
@@ -2188,7 +2188,7 @@ tool_fini(void* tool_data)
               << ", hip_api_bf_records=" << hip_api_bf_records.size()
               << ", marker_api_bf_records=" << marker_api_bf_records.size()
               << ", corr_id_retire_records=" << corr_id_retire_records.size()
-              << ", rccl_api_bf_records=" << rccl_api_bf_records.size()
+              << ", rccl_api_ext_bf_records=" << rccl_api_ext_bf_records.size()
               << ", ompt_bf_records=" << ompt_bf_records.size()
               << ", counter_collection_value_records=" << counter_collection_bf_records.size()
               << ", rocdecode_api_callback_records=" << rocdecode_api_cb_records.size()
@@ -2358,7 +2358,7 @@ write_json(call_stack_t* _call_stack)
             json_ar(cereal::make_nvp("hsa_api_traces", hsa_api_bf_records));
             json_ar(cereal::make_nvp("hip_api_traces", hip_api_bf_records));
             json_ar(cereal::make_nvp("marker_api_traces", marker_api_bf_records));
-            json_ar(cereal::make_nvp("rccl_api_traces", rccl_api_bf_records));
+            json_ar(cereal::make_nvp("rccl_api_traces", rccl_api_ext_bf_records));
             json_ar(cereal::make_nvp("ompt_traces", ompt_bf_records));
             json_ar(cereal::make_nvp("retired_correlation_ids", corr_id_retire_records));
             json_ar(cereal::make_nvp("counter_collection", counter_collection_bf_records));
@@ -2437,7 +2437,7 @@ write_perfetto()
             tids.emplace(itr.thread_id);
         for(const auto& itr : marker_api_bf_records)
             tids.emplace(itr.thread_id);
-        for(const auto& itr : rccl_api_bf_records)
+        for(const auto& itr : rccl_api_ext_bf_records)
             tids.emplace(itr.thread_id);
         for(const auto& itr : ompt_bf_records)
             tids.emplace(itr.thread_id);
@@ -2671,7 +2671,7 @@ write_perfetto()
                             itr.end_timestamp);
         }
 
-        for(const auto& itr : rccl_api_bf_records)
+        for(const auto& itr : rccl_api_ext_bf_records)
         {
             auto  name  = buffer_names.at(itr.kind, itr.operation);
             auto& track = thread_tracks.at(itr.thread_id);
