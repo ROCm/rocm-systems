@@ -181,6 +181,13 @@ if(ROCPROFILER_BUILD_PYTHON)
             "${DEFAULT_PYTHON_VERSIONS}"
             CACHE STRING "")
     endif()
+
+    if(NOT ROCPROFILER_PYTHON_VERSIONS)
+        message(
+            FATAL_ERROR
+                "No python3 versions found for building rocprofiler-sdk Python bindings. Either install Python3 development package(s) (i.e. Python.h + python library) or set ROCPROFILER_BUILD_PYTHON=OFF"
+            )
+    endif()
 else()
     set(ROCPROFILER_PYTHON_VERSIONS "")
 endif()
