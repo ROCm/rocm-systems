@@ -262,18 +262,19 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
   // is a KFD queue. The debugger may access the aperture addresses, queue
   // scratch base, and queue type.
 
-  HSAKMT_STATUS kmt_status;
+  hsa_status_t status;
   if (core::Runtime::runtime_singleton_->KfdVersion().supports_exception_debugging) {
     queue_rsrc.ErrorReason = &exception_signal_->signal_.value;
-    kmt_status = HSAKMT_CALL(hsaKmtCreateQueueExt(node_id, HSA_QUEUE_COMPUTE_AQL, 100, priority_, 0, ring_buf_,
-                                   ring_buf_alloc_bytes_, queue_event(), &queue_rsrc));
+    status =
+        agent->driver().CreateQueue(node_id, HSA_QUEUE_COMPUTE_AQL, 100, priority_, 0, ring_buf_,
+                                    ring_buf_alloc_bytes_, queue_event(), queue_rsrc);
   } else {
-    kmt_status = HSAKMT_CALL(hsaKmtCreateQueueExt(node_id, HSA_QUEUE_COMPUTE_AQL, 100, priority_, 0, ring_buf_,
-                                   ring_buf_alloc_bytes_, NULL, &queue_rsrc));
+    status = agent->driver().CreateQueue(node_id, HSA_QUEUE_COMPUTE_AQL, 100, priority_, 0,
+                                         ring_buf_, ring_buf_alloc_bytes_, NULL, queue_rsrc);
   }
-  if (kmt_status != HSAKMT_STATUS_SUCCESS)
+  if (status != HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
-                             "Queue create failed at hsaKmtCreateQueue\n");
+                             "Queue create failed\n");
   // Complete populating the doorbell signal structure.
   signal_.hardware_doorbell_ptr = queue_rsrc.Queue_DoorBell_aql;
 
@@ -282,7 +283,7 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
   amd_queue_.hsa_queue.id = this->GetQueueId();
 
   queue_id_ = queue_rsrc.QueueId;
-  MAKE_NAMED_SCOPE_GUARD(QueueGuard, [&]() { HSAKMT_CALL(hsaKmtDestroyQueue(queue_id_)); });
+  MAKE_NAMED_SCOPE_GUARD(QueueGuard, [&]() { agent_->driver().DestroyQueue(queue_id_); });
 
   amd_queue_.scratch_max_use_index = UINT64_MAX;
   amd_queue_.alt_scratch_max_use_index = UINT64_MAX;
@@ -602,23 +603,25 @@ int AqlQueue::CreateRingBufferFD(const char* ring_buf_shm_path,
 
 void AqlQueue::Suspend() {
   suspended_ = true;
-  auto err = HSAKMT_CALL(hsaKmtUpdateQueue(queue_id_, 0, priority_, ring_buf_, ring_buf_alloc_bytes_, NULL));
-  assert(err == HSAKMT_STATUS_SUCCESS && "hsaKmtUpdateQueue failed.");
+  auto err =
+      agent_->driver().UpdateQueue(queue_id_, 0, priority_, ring_buf_, ring_buf_alloc_bytes_, NULL);
+  assert(err == HSA_STATUS_SUCCESS && "Update queue failed.");
 }
 
 void AqlQueue::Resume() {
   if (suspended_) {
     suspended_ = false;
-    auto err = HSAKMT_CALL(hsaKmtUpdateQueue(queue_id_, 100, priority_, ring_buf_, ring_buf_alloc_bytes_, NULL));
-    assert(err == HSAKMT_STATUS_SUCCESS && "hsaKmtUpdateQueue failed.");
+    auto err = agent_->driver().UpdateQueue(queue_id_, 100, priority_, ring_buf_,
+                                            ring_buf_alloc_bytes_, NULL);
+    assert(err == HSA_STATUS_SUCCESS && "Update queue failed.");
   }
 }
 
 hsa_status_t AqlQueue::Inactivate() {
   bool active = active_.exchange(false, std::memory_order_relaxed);
   if (active) {
-    auto err = HSAKMT_CALL(hsaKmtDestroyQueue(queue_id_));
-    assert(err == HSAKMT_STATUS_SUCCESS && "hsaKmtDestroyQueue failed.");
+    auto err = agent_->driver().DestroyQueue(queue_id_);
+    assert(err == HSA_STATUS_SUCCESS && "Destroy queue failed.");
     atomic::Fence(std::memory_order_acquire);
   }
   return HSA_STATUS_SUCCESS;
@@ -630,8 +633,9 @@ hsa_status_t AqlQueue::SetPriority(HSA_QUEUE_PRIORITY priority) {
   }
 
   priority_ = priority;
-  auto err = HSAKMT_CALL(hsaKmtUpdateQueue(queue_id_, 100, priority_, ring_buf_, ring_buf_alloc_bytes_, NULL));
-  return (err == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_OUT_OF_RESOURCES);
+  auto err = agent_->driver().UpdateQueue(queue_id_, 100, priority_, ring_buf_,
+                                          ring_buf_alloc_bytes_, NULL);
+  return (err == HSA_STATUS_SUCCESS ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_OUT_OF_RESOURCES);
 }
 
 void AqlQueue::CheckScratchLimits() {
@@ -1395,9 +1399,8 @@ hsa_status_t AqlQueue::SetCUMasking(uint32_t num_cu_mask_count, const uint32_t* 
       }
     }
 
-    HSAKMT_STATUS ret =
-        HSAKMT_CALL(hsaKmtSetQueueCUMask(queue_id_, mask.size() * 32, reinterpret_cast<HSAuint32*>(&mask[0])));
-    if (ret != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+    return agent_->driver().SetQueueCUMask(queue_id_, mask.size() * 32,
+                                           reinterpret_cast<HSAuint32*>(&mask[0]));
   }
 
   // update current cu masking tracking.
@@ -1895,8 +1898,8 @@ void AqlQueue::InitScratchSRD() {
 
 hsa_status_t AqlQueue::EnableGWS(int gws_slot_count) {
   uint32_t discard;
-  auto status = HSAKMT_CALL(hsaKmtAllocQueueGWS(queue_id_, gws_slot_count, &discard));
-  if (status != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  auto status = agent_->driver().AllocQueueGWS(queue_id_, gws_slot_count, &discard);
+  if (status != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   amd_queue_.hsa_queue.type = HSA_QUEUE_TYPE_COOPERATIVE;
   return HSA_STATUS_SUCCESS;
 }

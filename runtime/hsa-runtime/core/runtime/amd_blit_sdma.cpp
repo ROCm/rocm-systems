@@ -225,8 +225,8 @@ hsa_status_t BlitSdma<RingIndexTy, HwIndexMonotonic, SizeToCountOffset, useGCR>:
 
   if (queue_resource_.QueueId != 0) {
     // Release queue resources from the kernel
-    auto err = HSAKMT_CALL(hsaKmtDestroyQueue(queue_resource_.QueueId));
-    assert(err == HSAKMT_STATUS_SUCCESS);
+    auto err = agent_->driver().DestroyQueue(queue_resource_.QueueId);
+    assert(err == HSA_STATUS_SUCCESS);
     memset(&queue_resource_, 0, sizeof(queue_resource_));
   }
 
