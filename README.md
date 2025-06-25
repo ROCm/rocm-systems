@@ -97,7 +97,7 @@ Please report issues on GitHub OR send an email to <dl.ROCm-Profiler.support@amd
 
   - Timestamps in PC sampling records might not be 100% accurate.
 
-  - Using PC sampling on multi-threaded applications might fail with `HSA_STATUS_ERROR_EXCEPTION`.Furthermore, if three or more threads launch operations to the same agent, and if PC sampling is enabled, the `HSA_STATUS_ERROR_EXCEPTION` might appear.
+  - For low PC-sampling frequencies with intervals < 65k cycles, a lot of error samples might be delivered. We're working on optimizing this to allow lower sampling frequencies.
 
 - gfx10, gfx11 and gfx12 requires a stable power state for counter collection. This includes Radeon 7000 GPUs.
   ```bash
@@ -125,6 +125,9 @@ Please report issues on GitHub OR send an email to <dl.ROCm-Profiler.support@amd
           NUM_COMPUTE_UNITS: 28
           TARGET_GRAPHICS_VERSION: gfx1102
   ```
+
+
+
 
 > [!WARNING]
 > The latest mainline version of AQLprofile can be found at [https://repo.radeon.com/rocm/misc/aqlprofile/](https://repo.radeon.com/rocm/misc/aqlprofile/). However, it's important to note that updates to the public AQLProfile may not occur as frequently as updates to the rocprofiler-sdk. This discrepancy could lead to a potential mismatch between the AQLprofile binary and the rocprofiler-sdk source.
