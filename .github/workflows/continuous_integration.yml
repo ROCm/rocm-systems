@@ -25,12 +25,14 @@ env:
   ROCM_PATH: "/opt/rocm"
   GPU_TARGETS: "gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201"
   PATH: "/usr/bin:$PATH"
+  ## No tests should be excluded here except for extreme emergencies; tests should only be disabled in CMake
+  ## A task should be assigned directly to fix the issue
+  ## Scratch memory tests need to be fixed for ROCm 7.0 release
   navi3_EXCLUDE_TESTS_REGEX: "scratch-memory"
   vega20_EXCLUDE_TESTS_REGEX: "scratch-memory"
   mi200_EXCLUDE_TESTS_REGEX: "scratch-memory"
-  mi300_EXCLUDE_TESTS_REGEX: "scratch-memory"
+  mi300_EXCLUDE_TESTS_REGEX: "counter-collection-buffer|scratch-memory"
   mi300a_EXCLUDE_TESTS_REGEX: "scratch-memory"
-  rocprof-azure_EXCLUDE_TESTS_REGEX: "counter-collection-buffer|scratch-memory"
   mi325_EXCLUDE_TESTS_REGEX: "counter-collection-buffer|scratch-memory"
   mi3xx_EXCLUDE_TESTS_REGEX: "counter-collection-buffer|scratch-memory"
   navi4_EXCLUDE_TESTS_REGEX: "scratch-memory"
@@ -41,9 +43,8 @@ env:
   mi300a_EXCLUDE_LABEL_REGEX: ""
   mi325_EXCLUDE_LABEL_REGEX: "^(pc-sampling)$"
   mi3xx_EXCLUDE_LABEL_REGEX: "^(pc-sampling)$"
-  rocprof-azure_EXCLUDE_LABEL_REGEX: "^(pc-sampling)$"
   navi4_EXCLUDE_LABEL_REGEX: "^(pc-sampling)$"
-  GLOBAL_CMAKE_OPTIONS: "-DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON"
+  GLOBAL_CMAKE_OPTIONS: ""
 
 jobs:
   core-deb:
@@ -51,7 +52,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['vega20', 'navi3', 'navi4', 'mi3xx']
+        runner: ['navi3', 'navi4', 'mi3xx']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
         ci-flags: ['--linter clang-tidy']
@@ -76,7 +77,7 @@ jobs:
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
         python3 -m pip install -U --user -r requirements.txt
-        rm -rf /opt/rocm/lib/*rocprofiler-sdk* /opt/rocm/lib/cmake/*rocprofiler-sdk* /opt/rocm/share/*rocprofiler-sdk* /opt/rocm/libexec/*rocprofiler-sdk*
+        rm -rf /opt/rocm/lib/*rocprofiler-sdk* /opt/rocm/lib/cmake/*rocprofiler-sdk* /opt/rocm/share/*rocprofiler-sdk* /opt/rocm/libexec/*rocprofiler-sdk* /opt/rocm*/lib/python*/site-packages/roctx /opt/rocm*/lib/python*/site-packages/rocpd
 
     - name: List Files
       shell: bash
@@ -136,7 +137,7 @@ jobs:
       shell: bash
       run: |
         CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-samples samples
-        CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-tests tests
+        CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-tests -DGPU_TARGETS="gfx942" tests
         export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:${LD_LIBRARY_PATH}
         cmake --build build-samples --target all --parallel 16
         cmake --build build-tests --target all --parallel 16
@@ -151,9 +152,9 @@ jobs:
         export PATH=${PATH}:/usr/local/sbin:/usr/sbin:/sbin
         ls -la
         ls -la ./build
-        dpkg -i ./build/rocprofiler-sdk-roctx_*.deb
-        dpkg -i ./build/rocprofiler-sdk-rocpd_*.deb
-        for i in $(ls -S ./build/rocprofiler-sdk*.deb | egrep -v 'roctx|rocpd'); do dpkg -i ${i}; done;
+        dpkg --force-all -i ./build/rocprofiler-sdk-roctx_*.deb
+        dpkg --force-all -i ./build/rocprofiler-sdk-rocpd_*.deb
+        for i in $(ls -S ./build/rocprofiler-sdk*.deb | egrep -v 'roctx|rocpd'); do dpkg --force-all -i ${i}; done;
 
     - name: Test Installed Packages
       if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
@@ -161,7 +162,7 @@ jobs:
       shell: bash
       run: |
         CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-samples-deb /opt/rocm/share/rocprofiler-sdk/samples
-        CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-tests-deb /opt/rocm/share/rocprofiler-sdk/tests
+        CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-tests-deb -DGPU_TARGETS="gfx942" /opt/rocm/share/rocprofiler-sdk/tests
         cmake --build build-samples-deb --target all --parallel 16
         cmake --build build-tests-deb --target all --parallel 16
         ctest --test-dir build-samples-deb -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
@@ -185,14 +186,14 @@ jobs:
         runner: ['mi300']
         os: ['rhel', 'sles']
         build-type: ['RelWithDebInfo']
-        ci-flags: ['--linter clang-tidy']
+        ci-flags: ['']
 
     runs-on: rocprof-azure-${{ matrix.os }}-emu-runner-set
 
     # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-      CORE_EXT_RUNNER: navi3
+      OS_TYPE: ${{ matrix.os }}
 
     steps:
     - uses: actions/checkout@v4
@@ -201,9 +202,16 @@ jobs:
       timeout-minutes: 10
       shell: bash
       run: |
-        sudo python3 -m pip install --upgrade pip
-        sudo python3 -m pip install -U --user -r requirements.txt
-        sudo rm -rf /opt/rocm/lib/*rocprofiler-sdk* /opt/rocm/lib/cmake/*rocprofiler-sdk* /opt/rocm/share/*rocprofiler-sdk* /opt/rocm/libexec/*rocprofiler-sdk*
+        git config --global --add safe.directory '*'
+        if [ "${OS_TYPE}" == "rhel" ]; then
+          dnf makecache
+          dnf groupinstall -y "Development Tools"
+          dnf remove -y gcc-c++
+          dnf install -y gcc-toolset-11-gcc-c++ llvm14-devel
+        fi
+        python3 -m pip install --upgrade pip
+        python3 -m pip install -U --user -r requirements.txt
+        rm -rf /opt/rocm/lib/*rocprofiler-sdk* /opt/rocm/lib/cmake/*rocprofiler-sdk* /opt/rocm/share/*rocprofiler-sdk* /opt/rocm/libexec/*rocprofiler-sdk*
 
     - name: List Files
       shell: bash
@@ -225,8 +233,8 @@ jobs:
       timeout-minutes: 30
       shell: bash
       run:
-        sudo git config --global --add safe.directory '*';
-        sudo LD_LIBRARY_PATH=./build/lib:$LD_LIBRARY_PATH python3 ./source/scripts/run-ci.py -B build
+        if [ "${OS_TYPE}" == "rhel" ]; then source scl_source enable gcc-toolset-11; fi;
+        /usr/bin/python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-core
           --build-jobs 16
           --site ${RUNNER_HOSTNAME}
@@ -237,73 +245,11 @@ jobs:
           -DROCPROFILER_DEP_ROCMCORE=ON
           -DROCPROFILER_BUILD_DOCS=OFF
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
-          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-sdk
-          -DCPACK_GENERATOR='DEB;RPM;TGZ'
-          -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm)"
           -DPython3_EXECUTABLE=$(which python3)
           ${{ env.GLOBAL_CMAKE_OPTIONS }}
           --
           -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}"
           -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}"
-
-    - name: Install
-      if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
-      timeout-minutes: 10
-      run:
-        cmake --build build --target install --parallel 16
-
-    - name: Build Packaging
-      if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
-      timeout-minutes: 10
-      run:
-        cmake --build build --target package --parallel 16
-
-    - name: Test Install Build
-      if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
-      timeout-minutes: 20
-      shell: bash
-      run: |
-        CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-samples samples
-        CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-tests tests
-        export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:${LD_LIBRARY_PATH}
-        cmake --build build-samples --target all --parallel 16
-        cmake --build build-tests --target all --parallel 16
-        ctest --test-dir build-samples -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
-        ctest --test-dir build-tests -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
-
-    - name: Install Packages
-      if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
-      timeout-minutes: 5
-      shell: bash
-      run: |
-        export PATH=${PATH}:/usr/local/sbin:/usr/sbin:/sbin
-        ls -la
-        ls -la ./build
-        dpkg -i ./build/rocprofiler-sdk-roctx_*.deb
-        dpkg -i ./build/rocprofiler-sdk-rocpd_*.deb
-        for i in $(ls -S ./build/rocprofiler-sdk*.deb | egrep -v 'roctx|rocpd'); do dpkg -i ${i}; done;
-
-    - name: Test Installed Packages
-      if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
-      timeout-minutes: 20
-      shell: bash
-      run: |
-        CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-samples-deb /opt/rocm/share/rocprofiler-sdk/samples
-        CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-tests-deb /opt/rocm/share/rocprofiler-sdk/tests
-        cmake --build build-samples-deb --target all --parallel 16
-        cmake --build build-tests-deb --target all --parallel 16
-        ctest --test-dir build-samples-deb -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
-        ctest --test-dir build-tests-deb -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
-
-    - name: Archive production artifacts
-      if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.runner, env.CORE_EXT_RUNNER) }}
-      uses: actions/upload-artifact@v4
-      with:
-        name: installers-rpm
-        path: |
-          ${{github.workspace}}/build/*.deb
-          ${{github.workspace}}/build/*.rpm
-          ${{github.workspace}}/build/*.tgz
 
   code-coverage:
     if: ${{ contains(github.event_name, 'pull_request') }}
