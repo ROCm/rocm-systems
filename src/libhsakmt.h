@@ -36,6 +36,7 @@
 #include "impl/wddm/device.h"
 
 wsl::thunk::WDDMDevice* get_wddmdev(uint32_t node_id);
+uint32_t get_num_wddmdev();
 wsl::thunk::GpuMemory *get_gpu_mem(void *MemoryAddress);
 
 #define HSAKMT_DEBUG_LEVEL_ERR      -1

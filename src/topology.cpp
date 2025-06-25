@@ -1461,3 +1461,7 @@ wsl::thunk::WDDMDevice *get_wddmdev(uint32_t node_id) {
 
   return dxg_topology->wdevices_[node_id - 1];
 }
+
+uint32_t get_num_wddmdev() {
+  return dxg_topology->wdevices_.size();
+}
