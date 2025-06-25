@@ -56,7 +56,7 @@
 
 namespace gfxip {
 namespace gfx12 {
-namespace gfx1201 {
+namespace gfx1200 {
 // Counter register info - Auto-generated from chip_offset_byte.h, edit with extra caution
 static const CounterRegInfo ChaCounterRegAddr[] = {REG_INFO_4(CHA)};
 static const CounterRegInfo ChcCounterRegAddr[] = {REG_INFO_4(CHC)};
@@ -142,7 +142,15 @@ static const GpuBlockInfo SqcCounterBlockInfo = {"SQ", __BLOCK_ID_HSA(SQ), SqcCo
 static const GpuBlockInfo TaCounterBlockInfo = {"TA", __BLOCK_ID_HSA(TA), TaCounterBlockNumInstances, TaCounterBlockMaxEvent, TaCounterBlockNumCounters, TaCounterRegAddr, gfx12_cntx_prim::select_value, CounterBlockSeAttr|CounterBlockSaAttr|CounterBlockWgpAttr|CounterBlockTcAttr, NULL/*TaBlockDelayInfo*/, SPM_SE_BLOCK_NAME_TA};
 static const GpuBlockInfo TdCounterBlockInfo = {"TD", __BLOCK_ID_HSA(TD), TdCounterBlockNumInstances, TdCounterBlockMaxEvent, TdCounterBlockNumCounters, TdCounterRegAddr, gfx12_cntx_prim::select_value, CounterBlockSeAttr|CounterBlockSaAttr|CounterBlockWgpAttr|CounterBlockTcAttr, NULL/*TdBlockDelayInfo*/, SPM_SE_BLOCK_NAME_TD};
 static const GpuBlockInfo TcpCounterBlockInfo = {"TCP", __BLOCK_ID_HSA(TCP), TcpCounterBlockNumInstances, TcpCounterBlockMaxEvent, TcpCounterBlockNumCounters, TcpCounterRegAddr, gfx12_cntx_prim::select_value, CounterBlockSeAttr|CounterBlockSaAttr|CounterBlockWgpAttr|CounterBlockTcAttr, NULL/*TdBlockDelayInfo*/, SPM_SE_BLOCK_NAME_TCP};
-}  // namespace gfx12xx
+}  // namespace gfx1200
+
+namespace gfx1201 {
+static const GpuBlockInfo Gl2cCounterBlockInfo = {"GL2C", __BLOCK_ID_HSA(GL2C), gfx1201::Gl2cCounterBlockNumInstances, Gl2cCounterBlockMaxEvent, Gl2cCounterBlockNumCounters, Gl2cCounterRegAddr, gfx12_cntx_prim::select_value, CounterBlockDfltAttr|CounterBlockTcAttr};
+static const GpuBlockInfo ChcCounterBlockInfo = {"CHC", __BLOCK_ID(CHC), gfx1201::ChcCounterBlockNumInstances, ChcCounterBlockMaxEvent, ChcCounterBlockNumCounters, ChcCounterRegAddr, gfx12_cntx_prim::select_value, CounterBlockDfltAttr|CounterBlockTcAttr};
+static const GpuBlockInfo GceaCounterBlockInfo = {"GCEA", __BLOCK_ID_HSA(GCEA), gfx1201::GcEaCpwdCounterBlockNumInstances, GcEaCpwdCounterBlockMaxEvent, GcEaCpwdCounterBlockNumCounters, GcEaCpwdCounterRegAddr, gfx12_cntx_prim::select_value, CounterBlockDfltAttr};
+static const GpuBlockInfo GceaSeCounterBlockInfo = {"GCEA_SE", __BLOCK_ID(GCEA_SE), gfx1201::GcEaSeCounterBlockNumInstances, GcEaSeCounterBlockMaxEvent, GcEaSeCounterBlockNumCounters, GcEaSeCounterRegAddr, gfx12_cntx_prim::select_value, CounterBlockSeAttr};
+}  // namespace gfx1201
+
 }  // namespace gfx12
 }  // namespace gfxip
 

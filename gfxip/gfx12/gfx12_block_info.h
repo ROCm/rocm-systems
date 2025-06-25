@@ -97,15 +97,15 @@ enum SpmSeBlockId {
   SPM_SE_BLOCK_NAME_LAST = SPM_SE_BLOCK_NAME_UTCL1,
 };
 
-namespace gfx1201 {
-// IP versions for Radeon RX 9070
-// ip_block : gc_12_0_1
+namespace gfx1200 {
 // ip_block : athub_4_1_0
+// ip_block : gc_12_0_0
+// ip_block : sdma_7_0_0
 
 // Number of block instances
 // Reference: global_features.h (from gfxip header file package)
 static const uint32_t ChaCounterBlockNumInstances      = 1;
-static const uint32_t ChcCounterBlockNumInstances      = 4;
+static const uint32_t ChcCounterBlockNumInstances      = 2;
 static const uint32_t CpcCounterBlockNumInstances      = 1;
 static const uint32_t CpfCounterBlockNumInstances      = 1;
 static const uint32_t CpgCounterBlockNumInstances      = 1;
@@ -113,12 +113,12 @@ static const uint32_t GcmcVmL2CounterBlockNumInstances = 1;
 static const uint32_t GcrCounterBlockNumInstances      = 1;
 static const uint32_t Gcutcl2CounterBlockNumInstances  = 1;
 static const uint32_t Gcvml2CounterBlockNumInstances   = 1;
-static const uint32_t GcEaCpwdCounterBlockNumInstances = 36;
-static const uint32_t GcEaSeCounterBlockNumInstances   = 4;
+static const uint32_t GcEaCpwdCounterBlockNumInstances = 18;
+static const uint32_t GcEaSeCounterBlockNumInstances   = 8;
 static const uint32_t Gl1aCounterBlockNumInstances     = 1;
 static const uint32_t Gl1cCounterBlockNumInstances     = 4;
 static const uint32_t Gl2aCounterBlockNumInstances     = 4;
-static const uint32_t Gl2cCounterBlockNumInstances     = 32;
+static const uint32_t Gl2cCounterBlockNumInstances     = 16;
 static const uint32_t GrbmCounterBlockNumInstances     = 1;
 static const uint32_t GrbmhCounterBlockNumInstances    = 1;
 static const uint32_t RlcCounterBlockNumInstances      = 1;
@@ -190,6 +190,18 @@ static const uint32_t TaCounterBlockMaxEvent       = 254;
 static const uint32_t TcpCounterBlockMaxEvent      = 99;
 static const uint32_t TdCounterBlockMaxEvent       = 271;
 static const uint32_t Utcl1CounterBlockMaxEvent    = 71;
+}  // namespace gfx1200
+
+namespace gfx1201 {
+// ip_block : athub_4_1_0
+// ip_block : gc_12_0_1
+// ip_block : sdma_7_0_1
+
+// Number of block instances
+static const uint32_t ChcCounterBlockNumInstances      = 4;
+static const uint32_t GcEaCpwdCounterBlockNumInstances = 36;
+static const uint32_t GcEaSeCounterBlockNumInstances   = 4;
+static const uint32_t Gl2cCounterBlockNumInstances     = 32;
 }  // namespace gfx1201
 
 static const uint32_t SdmaCounterBlockMaxInstances     = 8;

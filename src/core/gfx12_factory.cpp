@@ -78,6 +78,7 @@ void Gfx12Factory::ConstructBuilders(const AgentInfo* agent_info) {
 }
 
 void Gfx12Factory::ConstructTable(const AgentInfo* agent_info) {
+  auto agent_name = std::string_view(agent_info->name).substr(0, 7);
   // Global blocks
   block_table_[__BLOCK_ID(CHA)]         = &ChaCounterBlockInfo;
   block_table_[__BLOCK_ID(CHC)]         = &ChcCounterBlockInfo;
@@ -108,6 +109,13 @@ void Gfx12Factory::ConstructTable(const AgentInfo* agent_info) {
   block_table_[__BLOCK_ID_HSA(TA)]      = &TaCounterBlockInfo;
   block_table_[__BLOCK_ID_HSA(TCP)]     = &TcpCounterBlockInfo;
   block_table_[__BLOCK_ID_HSA(TD)]      = &TdCounterBlockInfo;
+
+  if (agent_name == "gfx1201") {
+    block_table_[__BLOCK_ID(CHC)]       = &gfx1201::ChcCounterBlockInfo;
+    block_table_[__BLOCK_ID_HSA(GCEA)]  = &gfx1201::GceaCounterBlockInfo;
+    block_table_[__BLOCK_ID(GCEA_SE)]   = &gfx1201::GceaSeCounterBlockInfo;
+    block_table_[__BLOCK_ID_HSA(GL2C)]  = &gfx1201::Gl2cCounterBlockInfo;
+  }
 }
 
 // Pm4Factory create mathods
