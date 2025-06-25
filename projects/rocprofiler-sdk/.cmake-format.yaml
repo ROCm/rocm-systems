@@ -262,6 +262,25 @@ parse:
         DIRECTORY: '*'
         TARGET: '*'
         SOURCE: '*'
+    rocprofiler_add_test:
+      flags:
+        - WILL_FAIL
+      kwargs:
+        NAME: 1
+        TARGET: 1
+        WORKING_DIRECTORY: 1
+        DEPENDS: 1
+        TIMEOUT: 1
+        LABELS: 1
+        DISABLED: 1
+        ARGS: '*'
+        COMMAND: '*'
+        ATTACHED_FILES: '*'
+        ATTACHED_FILES_ON_FAIL: '*'
+        ENVIRONMENT: '*'
+        PASS_REGULAR_EXPRESSION: '*'
+        FAIL_REGULAR_EXPRESSION: '*'
+        SKIP_REGULAR_EXPRESSION: '*'
   override_spec: {}
   vartags: []
   proptags: []
