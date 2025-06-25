@@ -154,25 +154,6 @@ jobs:
         ls -lah /opt/rocprofiler-sdk
         ls -lah /opt/rocprofiler-sdk/lib/cmake
 
-    - name: Test Install Build - Samples
-      timeout-minutes: 20
-      working-directory: /opt/rocprofiler-sdk/share/rocprofiler-sdk
-      env:
-        ROCM_RELEASE: ${{ matrix.rocm-release }}
-      shell: bash
-      run: |
-        set -x
-        echo -e "Testing Samples on ROCm ${ROCM_RELEASE} started..."
-        update-alternatives --set rocm /opt/rocm-${ROCM_RELEASE}
-        realpath /opt/rocm
-        ls -lah /opt/rocm-${ROCM_RELEASE}/lib
-        rm -rf build*
-        export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:/opt/rocm-${ROCM_RELEASE}/lib:${LD_LIBRARY_PATH}
-        CMAKE_PREFIX_PATH="/opt/rocprofiler-sdk;/opt/rocm-${ROCM_RELEASE}" cmake -B build-samples -Drocprofiler-sdk-roctx_DIR=/opt/rocprofiler-sdk/lib/cmake/rocprofiler-sdk-roctx -Drocprofiler-sdk-rocpd_DIR=/opt/rocprofiler-sdk/lib/cmake/rocprofiler-sdk-rocpd samples
-        cmake --build build-samples --target all --parallel 16
-        ctest --test-dir build-samples --output-on-failure
-        echo -e "Testing Samples on ROCm ${ROCM_RELEASE} finished..."
-
     - name: Test Install Build - SDK Tests
       timeout-minutes: 20
       working-directory: /opt/rocprofiler-sdk/share/rocprofiler-sdk
@@ -191,3 +172,22 @@ jobs:
         cmake --build build-tests --target all --parallel 16
         ctest --test-dir build-tests --output-on-failure
         echo -e "Testing SDK Tests on ROCm ${ROCM_RELEASE} finished..."
+    
+    - name: Test Install Build - Samples
+      timeout-minutes: 20
+      working-directory: /opt/rocprofiler-sdk/share/rocprofiler-sdk
+      env:
+        ROCM_RELEASE: ${{ matrix.rocm-release }}
+      shell: bash
+      run: |
+        set -x
+        echo -e "Testing Samples on ROCm ${ROCM_RELEASE} started..."
+        rm -rf build*
+        CMAKE_PREFIX_PATH="/opt/rocprofiler-sdk;/opt/rocm" cmake -B build-samples -Drocprofiler-sdk-roctx_DIR=/opt/rocprofiler-sdk/lib/cmake/rocprofiler-sdk-roctx -Drocprofiler-sdk-rocpd_DIR=/opt/rocprofiler-sdk/lib/cmake/rocprofiler-sdk-rocpd samples
+        cmake --build build-samples --target all --parallel 16
+        update-alternatives --set rocm /opt/rocm-${ROCM_RELEASE}
+        realpath /opt/rocm
+        ls -lah /opt/rocm-${ROCM_RELEASE}/lib
+        export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:/opt/rocm-${ROCM_RELEASE}/lib:${LD_LIBRARY_PATH}
+        ctest --test-dir build-samples --output-on-failure
+        echo -e "Testing Samples on ROCm ${ROCM_RELEASE} finished..."
