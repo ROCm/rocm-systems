@@ -39,12 +39,9 @@
         if (RET != AMDSMI_STATUS_SUCCESS) {                                    \
             const char *err_str;                                               \
             amdsmi_status_code_to_string(RET, &err_str);                       \
-            if (RET == AMDSMI_STATUS_NOT_SUPPORTED || RET == AMDSMI_STATUS_INVAL) { \
-                std::cout << "AMDSMI call returned " << RET << " at line "     \
-                          << __LINE__ << ": " << err_str << std::endl;         \
-            } else {                                                           \
-                std::cout << "AMDSMI call returned " << RET << " at line "     \
-                          << __LINE__ << ": " << err_str << std::endl;         \
+            std::cout << "AMDSMI call returned " << RET << " at line "         \
+                      << __LINE__ << ": " << err_str << std::endl;             \
+            if (RET != AMDSMI_STATUS_NOT_SUPPORTED && RET != AMDSMI_STATUS_INVAL) { \
                 return RET;                                                    \
             }                                                                  \
         }                                                                      \
