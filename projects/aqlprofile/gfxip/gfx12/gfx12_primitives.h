@@ -44,7 +44,7 @@ class gfx12_cntx_prim {
       REG_32B_ADDR(GC, 0, regCOMPUTE_PERFCOUNT_ENABLE);
   static constexpr Register RLC_PERFMON_CLK_CNTL_ADDR =
       REG_32B_ADDR(GC, 0, regRLC_PERFMON_CNTL);  // REG_32B_ADDR(GC, 0, regRLC_PERFMON_CLK_CNTL);
-  static constexpr Register CP_PERFMON_CNTL_ADDR = REG_32B_ADDR(GC, 0, regCP_PERFMON_CNTL_1);
+  static constexpr Register CP_PERFMON_CNTL_ADDR = REG_32B_ADDR(GC, 0, regCP_PERFMON_CNTL);
 
   static constexpr Register COMPUTE_THREAD_TRACE_ENABLE_ADDR =
       REG_32B_ADDR(GC, 0, regCOMPUTE_THREAD_TRACE_ENABLE);
@@ -241,29 +241,29 @@ class gfx12_cntx_prim {
     return grbm_gfx_index;
   }
 
-  // CP_PERFMON_CNTL_1 value to reset counters
+  // CP_PERFMON_CNTL value to reset counters
   static uint32_t cp_perfmon_cntl_reset_value() {
     uint32_t cp_perfmon_cntl{0};
     return cp_perfmon_cntl;
   }
 
-  // CP_PERFMON_CNTL_1 value to start counters
+  // CP_PERFMON_CNTL value to start counters
   static uint32_t cp_perfmon_cntl_start_value() {
-    uint32_t cp_perfmon_cntl = SET_REG_FIELD_BITS(CP_PERFMON_CNTL_1, PERFMON_STATE, 1);
+    uint32_t cp_perfmon_cntl = SET_REG_FIELD_BITS(CP_PERFMON_CNTL, PERFMON_STATE, 1);
     return cp_perfmon_cntl;
   }
 
-  // CP_PERFMON_CNTL_1 value to stop/freeze counters
+  // CP_PERFMON_CNTL value to stop/freeze counters
   static uint32_t cp_perfmon_cntl_stop_value() {
-    uint32_t cp_perfmon_cntl = SET_REG_FIELD_BITS(CP_PERFMON_CNTL_1, PERFMON_STATE, 2) |
-                               SET_REG_FIELD_BITS(CP_PERFMON_CNTL_1, PERFMON_SAMPLE_ENABLE, 1);
+    uint32_t cp_perfmon_cntl = SET_REG_FIELD_BITS(CP_PERFMON_CNTL, PERFMON_STATE, 2) |
+                               SET_REG_FIELD_BITS(CP_PERFMON_CNTL, PERFMON_SAMPLE_ENABLE, 1);
     return cp_perfmon_cntl;
   }
 
-  // CP_PERFMON_CNTL_1 value to stop/freeze counters
+  // CP_PERFMON_CNTL value to stop/freeze counters
   static uint32_t cp_perfmon_cntl_read_value() {
-    uint32_t cp_perfmon_cntl = SET_REG_FIELD_BITS(CP_PERFMON_CNTL_1, PERFMON_STATE, 1) |
-                               SET_REG_FIELD_BITS(CP_PERFMON_CNTL_1, PERFMON_SAMPLE_ENABLE, 1);
+    uint32_t cp_perfmon_cntl = SET_REG_FIELD_BITS(CP_PERFMON_CNTL, PERFMON_STATE, 1) |
+                               SET_REG_FIELD_BITS(CP_PERFMON_CNTL, PERFMON_SAMPLE_ENABLE, 1);
     return cp_perfmon_cntl;
   }
 
@@ -421,12 +421,12 @@ class gfx12_cntx_prim {
   }
   static uint32_t cp_perfmon_cntl_spm_start_value() {
     uint32_t cp_perfmon_cntl{0};
-    cp_perfmon_cntl = SET_REG_FIELD_BITS(CP_PERFMON_CNTL_1, SPM_PERFMON_STATE, 1);
+    cp_perfmon_cntl = SET_REG_FIELD_BITS(CP_PERFMON_CNTL, SPM_PERFMON_STATE, 1);
     return cp_perfmon_cntl;
   }
   static uint32_t cp_perfmon_cntl_spm_stop_value() {
     uint32_t cp_perfmon_cntl{0};
-    cp_perfmon_cntl = SET_REG_FIELD_BITS(CP_PERFMON_CNTL_1, SPM_PERFMON_STATE, 2);
+    cp_perfmon_cntl = SET_REG_FIELD_BITS(CP_PERFMON_CNTL, SPM_PERFMON_STATE, 2);
     return cp_perfmon_cntl;
   }
   static uint32_t rlc_spm_muxsel_data(const uint32_t& value, const counter_des_t& counter_des,
