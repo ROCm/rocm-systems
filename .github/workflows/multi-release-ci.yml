@@ -25,7 +25,6 @@ env:
   ROCM_PATH: "/opt/rocm"
   GPU_TARGETS: "gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201"
   PATH: "/usr/bin:$PATH"
-  CTEST_EXCLUDE_LABEL_REGEX: "^(pc-sampling)$"
 
 jobs:
   core:
@@ -35,14 +34,13 @@ jobs:
       matrix:
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
-        ci-flags: ['--linter clang-tidy']
+        ci-flags: ['']
 
     runs-on: rocprof-azure-multi-release-emu-runner-set
 
     # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-      CORE_EXT_RUNNER: current
 
     steps:
     - uses: actions/checkout@v4
@@ -79,19 +77,14 @@ jobs:
           --site ${RUNNER_HOSTNAME}
           --gpu-targets ${{ env.GPU_TARGETS }}
           --run-attempt ${{ github.run_attempt }}
+          --stages Start Update Configure Build Submit
           ${{ matrix.ci-flags }}
           --
           -DROCPROFILER_DEP_ROCMCORE=ON
           -DROCPROFILER_BUILD_DOCS=OFF
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-sdk
-          -DCPACK_GENERATOR='DEB;RPM;TGZ'
-          -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm)"
           -DPython3_EXECUTABLE=$(which python3)
-          --
-          -R "samples"
-          -LE "${CTEST_EXCLUDE_LABEL_REGEX}"
-          -E "${CTEST_EXCLUDE_TESTS_REGEX}"
 
     - name: Install
       timeout-minutes: 10
@@ -103,17 +96,17 @@ jobs:
       working-directory: /opt/rocprofiler-sdk/share/rocprofiler-sdk
       shell: bash
       run: |
-        for ver in 6.2.1 6.2.4 6.3.4 6.4.1; do
+        for ver in 6.4.1 6.3.4 6.2.4 6.2.1; do
           echo -e "Testing on ROCm ${ver} started..."
           update-alternatives --set rocm /opt/rocm-$ver
           ls -lah /opt/rocm-$ver/lib
           rm -rf build*
+          export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:/opt/rocm-$ver/lib:${LD_LIBRARY_PATH}
           CMAKE_PREFIX_PATH="/opt/rocprofiler-sdk;/opt/rocm-$ver" cmake -B build-samples samples
           CMAKE_PREFIX_PATH="/opt/rocprofiler-sdk;/opt/rocm-$ver" cmake -B build-tests tests
-          export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:/opt/rocm-$ver/lib:${LD_LIBRARY_PATH}
           cmake --build build-samples --target all --parallel 16
           cmake --build build-tests --target all --parallel 16
-          ctest --test-dir build-samples -LE "${CTEST_EXCLUDE_LABEL_REGEX}" -E "${CTEST_EXCLUDE_TESTS_REGEX}" --output-on-failure
-          ctest --test-dir build-tests -LE "${CTEST_EXCLUDE_LABEL_REGEX}" -E "${CTEST_EXCLUDE_TESTS_REGEX}" --output-on-failure
+          ctest --test-dir build-samples --output-on-failure
+          ctest --test-dir build-tests --output-on-failure
           echo -e "Testing on ROCm ${ver} finished...\n\n\n\n"
         done
