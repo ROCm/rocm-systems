@@ -150,7 +150,7 @@ jobs:
     - name: Install
       timeout-minutes: 10
       run: |
-        tar -xvzf ./build-packages/*.tar.gz -C /opt/rocprofiler-sdk
+        tar -xvzf ./build-packages/*.tar.gz -C /
         ls -lah /opt/rocprofiler-sdk
         ls -lah /opt/rocprofiler-sdk/lib/cmake
 
