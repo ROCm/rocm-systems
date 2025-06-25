@@ -28,14 +28,10 @@ import sys
 
 ROCPROFV3_AVAIL_DIR = os.path.dirname(os.path.realpath(__file__))
 ROCM_DIR = os.path.dirname(ROCPROFV3_AVAIL_DIR)
-ROCPROF_ATTACH_TOOL_LIBRARY = (
-    f"{ROCM_DIR}/libexec/rocprofiler-sdk/librocprofv3-attach.so"
-)
+ROCPROF_ATTACH_TOOL_LIBRARY = f"{ROCM_DIR}/libexec/rocprofiler-sdk/librocprofv3-attach.so"
 
 MAX_STR = 256
-libname = os.environ.get(
-    "ROCPROF_ATTACH_TOOL_LIBRARY", ROCPROF_ATTACH_TOOL_LIBRARY
-)
+libname = os.environ.get("ROCPROF_ATTACH_TOOL_LIBRARY", ROCPROF_ATTACH_TOOL_LIBRARY)
 c_lib = ctypes.CDLL(libname)
 
 if c_lib is None:
@@ -49,7 +45,9 @@ if __name__ == "__main__":
     pid = os.environ.get("ROCPROF_ATTACH_PID", None)
 
     if pid == None:
-        raise RuntimeError("rocprofv3_attach called without PID environment variable set (ROCPROF_ATTACH_PID)")
+        raise RuntimeError(
+            "rocprofv3_attach called without PID environment variable set (ROCPROF_ATTACH_PID)"
+        )
 
     c_lib.attach(int(pid))
     input("Press Enter to detach...")
