@@ -622,9 +622,10 @@ TEST(rocprofiler_lib, agent_visibility_inverted_multigpu)
     common::set_env("GPU_DEVICE_ORDINAL", noval, 1);
     common::set_env("CUDA_VISIBLE_DEVICES", noval, 1);
 
-    auto ordinals       = std::map<rocprofiler_agent_id_t, uint32_t>{};
-    auto num_gpu_agents = size_t{0};
-    auto reversed_uuid  = std::string{};
+    auto ordinals                             = std::map<rocprofiler_agent_id_t, uint32_t>{};
+    auto num_gpu_agents                       = size_t{0};
+    auto devices_reversed_with_ordinal_0_uuid = std::string{};
+    auto ordinal_0_uuid                       = std::string{};
     {
         auto _agents   = get_gpu_agents();
         num_gpu_agents = _agents.size();
@@ -637,7 +638,11 @@ TEST(rocprofiler_lib, agent_visibility_inverted_multigpu)
         for(const auto* itr : _agents)
         {
             auto _uuid = fmt::format("GPU-{:X}", itr->uuid.value);
-            if(ordinals.empty()) reversed_uuid = fmt::format("1,{}", _uuid);
+            if(ordinals.empty())
+            {
+                devices_reversed_with_ordinal_0_uuid = fmt::format("1,{}", _uuid);
+                ordinal_0_uuid                       = _uuid;
+            }
 
             ordinals.emplace(itr->id, itr->logical_node_type_id);
         }
@@ -749,13 +754,14 @@ TEST(rocprofiler_lib, agent_visibility_inverted_multigpu)
     }
 
     // flip the first two devices
-    common::set_env("ROCR_VISIBLE_DEVICES", reversed_uuid, 1);
+    common::set_env("ROCR_VISIBLE_DEVICES", devices_reversed_with_ordinal_0_uuid, 1);
     common::set_env("HIP_VISIBLE_DEVICES", "0", 1);
     common::set_env("GPU_DEVICE_ORDINAL", noval, 1);
     common::set_env("CUDA_VISIBLE_DEVICES", noval, 1);
 
     for(const auto* itr : get_gpu_agents())
     {
+        const auto curr_uuid = fmt::format("GPU-{:X}", itr->uuid.value);
         if(ordinals.at(itr->id) == 0)
         {
             ASSERT_EQ(itr->runtime_visibility.hsa, 1) << "agent-" << itr->node_id;
@@ -769,6 +775,17 @@ TEST(rocprofiler_lib, agent_visibility_inverted_multigpu)
             ASSERT_EQ(itr->runtime_visibility.hip, 1) << "agent-" << itr->node_id;
             ASSERT_EQ(itr->runtime_visibility.rccl, 1) << "agent-" << itr->node_id;
             ASSERT_EQ(itr->runtime_visibility.rocdecode, 1) << "agent-" << itr->node_id;
+        }
+        else if(curr_uuid == ordinal_0_uuid)
+        {
+            // It's possible for multiple GPUs to have the same UUID but different ordinals in some
+            // configurations so setting visibility by UUID may make other ordinals visible. This
+            // statement handles the case where if the UUID is set for ROCR_VISIBLE_DEVICES but the
+            // ordinal is not set for HIP_VISIBLE_DEVICES, the device should only be visible in HSA.
+            ASSERT_EQ(itr->runtime_visibility.hsa, 1) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.hip, 0) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.rccl, 0) << "agent-" << itr->node_id;
+            ASSERT_EQ(itr->runtime_visibility.rocdecode, 0) << "agent-" << itr->node_id;
         }
         else
         {
