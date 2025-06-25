@@ -168,8 +168,8 @@ jobs:
         ls -lah /opt/rocm-${ROCM_RELEASE}/lib
         rm -rf build*
         export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:/opt/rocm-${ROCM_RELEASE}/lib:${LD_LIBRARY_PATH}
-        CMAKE_PREFIX_PATH="/opt/rocprofiler-sdk" cmake -B build-samples samples
-        CMAKE_PREFIX_PATH="/opt/rocprofiler-sdk" cmake -B build-tests tests
+        CMAKE_PREFIX_PATH="/opt/rocprofiler-sdk;/opt/rocm-${ROCM_RELEASE}" cmake -B build-samples -Drocprofiler-sdk-roctx_DIR=/opt/rocprofiler-sdk/lib/cmake/rocprofiler-sdk-roctx -Drocprofiler-sdk-rocpd_DIR=/opt/rocprofiler-sdk/lib/cmake/rocprofiler-sdk-rocpd samples
+        CMAKE_PREFIX_PATH="/opt/rocprofiler-sdk;/opt/rocm-${ROCM_RELEASE}" cmake -B build-tests -Drocprofiler-sdk-roctx_DIR=/opt/rocprofiler-sdk/lib/cmake/rocprofiler-sdk-roctx -Drocprofiler-sdk-rocpd_DIR=/opt/rocprofiler-sdk/lib/cmake/rocprofiler-sdk-rocpd tests
         cmake --build build-samples --target all --parallel 16
         cmake --build build-tests --target all --parallel 16
         ctest --test-dir build-samples --output-on-failure
