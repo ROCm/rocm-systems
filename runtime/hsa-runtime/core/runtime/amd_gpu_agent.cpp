@@ -435,9 +435,7 @@ void GpuAgent::InitRegionList() {
   const bool is_apu_node = (properties_.NumCPUCores > 0);
 
   std::vector<HsaMemoryProperties> mem_props(properties_.NumMemoryBanks);
-  if (HSAKMT_STATUS_SUCCESS ==
-      HSAKMT_CALL(hsaKmtGetNodeMemoryProperties(node_id(), properties_.NumMemoryBanks,
-                                    &mem_props[0]))) {
+  if (HSA_STATUS_SUCCESS == driver().GetMemoryProperties(node_id(), mem_props)) {
     for (uint32_t mem_idx = 0; mem_idx < properties_.NumMemoryBanks;
          ++mem_idx) {
       // Ignore the one(s) with unknown size.
@@ -577,9 +575,8 @@ void GpuAgent::InitCacheList() {
   // Get GPU cache information.
   // Similar to getting CPU cache but here we use FComputeIdLo.
   cache_props_.resize(properties_.NumCaches);
-  if (HSAKMT_STATUS_SUCCESS !=
-      HSAKMT_CALL(hsaKmtGetNodeCacheProperties(node_id(), properties_.FComputeIdLo,
-                                   properties_.NumCaches, &cache_props_[0]))) {
+  if (HSA_STATUS_SUCCESS !=
+      driver().GetCacheProperties(node_id(), properties_.FComputeIdLo, cache_props_)) {
     cache_props_.clear();
   } else {
     // Only store GPU D-cache.
