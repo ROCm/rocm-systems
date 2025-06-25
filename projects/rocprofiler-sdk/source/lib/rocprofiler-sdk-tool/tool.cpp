@@ -3120,17 +3120,23 @@ rocprofv3_main(int argc, char** argv, char** envp)
     return ret;
 }
 
-void rocprofv3_attach() __attribute__((visibility("default")));;
+void
+rocprofv3_attach() __attribute__((visibility("default")));
+;
 
-void rocprofv3_attach()
+void
+rocprofv3_attach()
 {
     initialize_logging();
     initialize_rocprofv3();
 }
 
-void rocprofv3_detach() __attribute__((visibility("default")));;
+void
+rocprofv3_detach() __attribute__((visibility("default")));
+;
 
-void rocprofv3_detach()
+void
+rocprofv3_detach()
 {
     finalize_rocprofv3(__FUNCTION__);
 }

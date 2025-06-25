@@ -26,15 +26,14 @@
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
 
-extern char **environ;
+extern char** environ;
 
 namespace common = ::rocprofiler::common;
 
 namespace
 {
-    std::unique_ptr<rocprofiler::attach::PTraceSession> ptrace_session;
+std::unique_ptr<rocprofiler::attach::PTraceSession> ptrace_session;
 }
-
 
 ROCPROFILER_EXTERN_C_INIT
 void
@@ -55,13 +54,13 @@ initialize_logging()
 ROCPROFILER_EXTERN_C_INIT
 
 void
-attach(uint32_t pid) 
+attach(uint32_t pid)
 {
     initialize_logging();
     ROCP_TRACE << "Attachment library called for pid " << pid;
     ptrace_session = std::make_unique<rocprofiler::attach::PTraceSession>(pid);
     ROCP_TRACE << "Attempting attachment to pid " << pid;
-    if (!ptrace_session->attach())
+    if(!ptrace_session->attach())
     {
         ROCP_ERROR << "Attachment failed to pid " << pid;
         return;
@@ -75,11 +74,11 @@ attach(uint32_t pid)
     std::vector<uint8_t> environment_buffer(4);
     {
         uint32_t var_count = 0;
-        char** invars = environ;
-        for (; *invars; invars++)
+        char**   invars    = environ;
+        for(; *invars; invars++)
         {
             const char* var = *invars;
-            if (strncmp("ROCPROF", var, 7) != 0)
+            if(strncmp("ROCPROF", var, 7) != 0)
             {
                 continue;
             }
@@ -105,7 +104,7 @@ attach(uint32_t pid)
 
     // Now, allocate a buffer to store the environment variables
     void* environment_buffer_addr = nullptr;
-    if (!ptrace_session->simple_mmap(environment_buffer_addr, environment_buffer.size()))
+    if(!ptrace_session->simple_mmap(environment_buffer_addr, environment_buffer.size()))
     {
         ROCP_ERROR << "Failed to call mmap in target process";
         return;
@@ -113,17 +112,19 @@ attach(uint32_t pid)
     ROCP_TRACE << "mmap'd in target process at " << environment_buffer_addr;
 
     // Write to that buffer
-    if (!ptrace_session->stop())
+    if(!ptrace_session->stop())
     {
         ROCP_ERROR << "Failed to stop target process for environment buffer writing";
         return;
     }
-    if (!ptrace_session->write(reinterpret_cast<size_t>(environment_buffer_addr), environment_buffer, environment_buffer.size()))
+    if(!ptrace_session->write(reinterpret_cast<size_t>(environment_buffer_addr),
+                              environment_buffer,
+                              environment_buffer.size()))
     {
         ROCP_ERROR << "Failed to write environment buffer in target process";
         return;
     }
-    if (!ptrace_session->cont())
+    if(!ptrace_session->cont())
     {
         ROCP_ERROR << "Failed to continue target process for environment buffer writing";
         return;
@@ -131,7 +132,8 @@ attach(uint32_t pid)
     ROCP_TRACE << "wrote environment buffer to target process";
 
     // Execute the attach function with the buffer addr as parameter
-    if (!ptrace_session->call_function("librocprofiler-register.so", "rocprofiler_register_attach", environment_buffer_addr))
+    if(!ptrace_session->call_function(
+           "librocprofiler-register.so", "rocprofiler_register_attach", environment_buffer_addr))
     {
         ROCP_ERROR << "Failed to call attach function in target process " << pid;
         return;
@@ -141,7 +143,7 @@ attach(uint32_t pid)
 void
 detach()
 {
-    if (!ptrace_session->call_function("librocprofiler-register.so", "rocprofiler_register_detach"))
+    if(!ptrace_session->call_function("librocprofiler-register.so", "rocprofiler_register_detach"))
     {
         ROCP_ERROR << "Failed to call detach function in target process";
         // don't return, try to detach anyways

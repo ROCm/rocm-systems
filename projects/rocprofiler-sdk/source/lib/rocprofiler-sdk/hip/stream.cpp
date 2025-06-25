@@ -108,11 +108,14 @@ add_stream(hipStream_t stream)
 auto
 get_stream_id(hipStream_t stream)
 {
+    // The check for stream is a hack to make this work. You should not use rocprofv3 attach without
+    // --group-by-queue
     return get_stream_map()->rlock(
         [](const stream_map_t& _data, hipStream_t _stream) {
             ROCP_ERROR_IF(_data.count(_stream) == 0)
                 << "failed to retrieve stream ID in " << __FILE__;
-            return _data.at(_stream);
+            return _data.count(_stream) > 0 ? _data.at(_stream)
+                                            : rocprofiler_stream_id_t{.handle = 0};
         },
         stream);
 }

@@ -22,17 +22,18 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <string>
 #include <sstream>
-#include <vector>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
-namespace rocprofiler {
-namespace attach {
-
+namespace rocprofiler
+{
+namespace attach
+{
 class PTraceSession
 {
-    public:
+public:
     explicit PTraceSession(int);
     ~PTraceSession();
 
@@ -40,10 +41,13 @@ class PTraceSession
     bool detach();
     bool simple_mmap(void*& addr, size_t length);
     bool simple_munmap(void*& addr, size_t length);
-    
+
     bool write(size_t addr, const std::vector<uint8_t>& data, size_t size);
     bool read(size_t addr, std::vector<uint8_t>& data, size_t size);
-    bool swap(size_t addr, const std::vector<uint8_t>& in_data, std::vector<uint8_t>& out_data, size_t size);
+    bool swap(size_t                      addr,
+              const std::vector<uint8_t>& in_data,
+              std::vector<uint8_t>&       out_data,
+              size_t                      size);
 
     int get_pid();
 
@@ -53,8 +57,7 @@ class PTraceSession
     bool stop();
     bool cont();
 
-    private:
-
+private:
     bool find_library(void*& addr, int inpid, const std::string& library);
     bool find_symbol(void*& addr, const std::string& library, const std::string& symbol);
 
@@ -62,10 +65,8 @@ class PTraceSession
     std::unordered_map<std::string, void*> target_symbol_addrs;
 
     const int pid;
-    bool attached;
+    bool      attached;
 };
 
-
-}
-}
-
+}  // namespace attach
+}  // namespace rocprofiler
