@@ -38,11 +38,15 @@
     {                                                                          \
         if (RET != AMDSMI_STATUS_SUCCESS) {                                    \
             const char *err_str;                                               \
-            std::cout << "AMDSMI call returned " << RET << " at line "         \
-                      << __LINE__ << std::endl;                                \
             amdsmi_status_code_to_string(RET, &err_str);                       \
-            std::cout << err_str << std::endl;                                 \
-            return RET;                                                        \
+            if (RET == AMDSMI_STATUS_NOT_SUPPORTED || RET == AMDSMI_STATUS_INVAL) { \
+                std::cout << "AMDSMI call returned " << RET << " at line "     \
+                          << __LINE__ << ": " << err_str << std::endl;         \
+            } else {                                                           \
+                std::cout << "AMDSMI call returned " << RET << " at line "     \
+                          << __LINE__ << ": " << err_str << std::endl;         \
+                return RET;                                                    \
+            }                                                                  \
         }                                                                      \
     }
 
@@ -104,10 +108,10 @@ int main() {
             amdsmi_ras_feature_t ras_feature;
             ret = amdsmi_get_gpu_ras_feature_info(
                 processor_handles[j] ,&ras_feature);
+            CHK_AMDSMI_RET(ret)
             if (ret != AMDSMI_STATUS_NOT_SUPPORTED) {
-                CHK_AMDSMI_RET(ret)
                 printf("\tras_feature: version: %x, schema: %x\n",
-                        ras_feature.ras_eeprom_version, ras_feature.ecc_correction_schema_flag);
+                       ras_feature.ras_eeprom_version, ras_feature.ecc_correction_schema_flag);
             }
 
 
