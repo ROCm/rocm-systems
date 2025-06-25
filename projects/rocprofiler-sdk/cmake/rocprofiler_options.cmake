@@ -51,6 +51,11 @@ rocprofiler_add_option(
     "Use (internal) <rocprofiler-sdk/rccl/details/api_trace.h> instead of RCCL-provided <rccl/amd_detail/api_trace.h>. Note: this should never be used in production"
     OFF
     ADVANCED)
+rocprofiler_add_option(
+    ROCPROFILER_BUILD_PYTHON
+    "Enable building the Python bindings for roctx and rocpd. Note: this should not be disabled unless absolutely necessary"
+    ON
+    ADVANCED)
 
 rocprofiler_add_option(
     ROCPROFILER_BUILD_GHC_FS
@@ -162,3 +167,23 @@ set(ROCPROFILER_DEFAULT_FAIL_REGEX
 # this should be defaulted to OFF by ROCm 7.0.1 or 7.1 this should only used to disable
 # sample tests in extreme circumstances
 option(ROCPROFILER_DISABLE_UNSTABLE_CTESTS "Disable unstable tests" ON)
+
+if(ROCPROFILER_BUILD_PYTHON)
+    # make sure we have all python version candidates
+    set(ROCPROFILER_PYTHON_VERSION_CANDIDATES
+        "3.20;3.19;3.18;3.17;3.16;3.15;3.14;3.13;3.12;3.11;3.10;3.9;3.8;3.7;3.6"
+        CACHE STRING "Python versions to search for, newest first")
+
+    if(NOT ROCPROFILER_PYTHON_VERSIONS)
+        unset(ROCPROFILER_PYTHON_VERSIONS CACHE)
+        rocprofiler_get_default_python_versions(DEFAULT_PYTHON_VERSIONS)
+        set(ROCPROFILER_PYTHON_VERSIONS
+            "${DEFAULT_PYTHON_VERSIONS}"
+            CACHE STRING "")
+    endif()
+else()
+    set(ROCPROFILER_PYTHON_VERSIONS "")
+endif()
+
+rocprofiler_add_feature(ROCPROFILER_PYTHON_VERSIONS
+                        "ROCTx and ROCpd Python bindings build versions")

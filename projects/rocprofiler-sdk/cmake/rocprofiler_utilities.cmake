@@ -1026,4 +1026,79 @@ function(rocprofiler_install_env_setup_files)
         COMPONENT ${RIEF_COMPONENT})
 endfunction()
 
+macro(rocprofiler_reset_python3_cache)
+    foreach(
+        _VAR
+        _Python3_Compiler_REASON_FAILURE
+        _Python3_Development_REASON_FAILURE
+        _Python3_EXECUTABLE
+        _Python3_INCLUDE_DIR
+        _Python3_INTERPRETER_PROPERTIES
+        _Python3_INTERPRETER_SIGNATURE
+        _Python3_LIBRARY_RELEASE
+        _Python3_NumPy_REASON_FAILURE
+        Python3_EXECUTABLE
+        Python3_INCLUDE_DIR
+        Python3_INTERPRETER_ID
+        Python3_STDLIB
+        Python3_STDARCH
+        Python3_SITELIB
+        Python3_SOABI
+        ${ARGN})
+        unset(${_VAR} CACHE)
+        unset(${_VAR})
+    endforeach()
+endmacro()
+
+macro(rocprofiler_find_python3 _VERSION)
+    rocprofiler_reset_python3_cache()
+
+    if("${_VERSION}" MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)$")
+        find_package(Python3 ${_VERSION} EXACT ${ARGN} REQUIRED MODULE
+                     COMPONENTS Interpreter Development)
+    elseif("${_VERSION}" MATCHES "^([0-9]+)\\.([0-9]+)$")
+        find_package(Python3 ${_VERSION}.0...${_VERSION}.999 ${ARGN} REQUIRED MODULE
+                     COMPONENTS Interpreter Development)
+    else()
+        message(
+            FATAL_ERROR
+                "Invalid Python3 version (${_VERSION}). Specify <MAJOR>.<MINOR> or <MAJOR>.<MINOR>.<PATCH>"
+            )
+    endif()
+endmacro()
+
+function(rocprofiler_get_default_python_versions _VAR)
+    set(_PYTHON_FOUND_VERSIONS)
+
+    foreach(_VER IN LISTS ROCPROFILER_PYTHON_VERSION_CANDIDATES)
+        rocprofiler_reset_python3_cache()
+        find_package(Python3 ${_VER} EXACT QUIET COMPONENTS Interpreter Development)
+
+        if(Python3_FOUND)
+            list(APPEND _PYTHON_FOUND_VERSIONS
+                 "${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}")
+        endif()
+    endforeach()
+
+    # If none found, do one last check for 3.6 (no EXACT)
+    if(NOT _PYTHON_FOUND_VERSIONS)
+        rocprofiler_reset_python3_cache()
+        find_package(Python3 3.6 COMPONENTS Interpreter Development)
+
+        if(Python3_FOUND)
+            list(APPEND _PYTHON_FOUND_VERSIONS
+                 "${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}")
+        endif()
+    endif()
+
+    # Set the output variable to the first found version, if any
+    if(_PYTHON_FOUND_VERSIONS)
+        set(${_VAR}
+            "${_PYTHON_FOUND_VERSIONS}"
+            PARENT_SCOPE)
+    endif()
+
+    rocprofiler_reset_python3_cache()
+endfunction()
+
 cmake_policy(POP)

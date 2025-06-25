@@ -34,7 +34,7 @@ def main(argv=None, config=None):
     """Main entry point for the rocpd command line tool.
 
     Args:
-        argv (list, optional): List of command line arguments. Defaults to None.
+        argv (list, optional): List of command line options. Defaults to None.
 
     """
     import argparse
@@ -100,6 +100,7 @@ Example usage:
         prog="rocpd",
         description="Aggregate and/or analyze ROCm Profiling Data (rocpd)",
         allow_abbrev=False,
+        exit_on_error=True,
     )
 
     parser.add_argument(
@@ -291,7 +292,7 @@ Example usage:
         all_args = {**summary_args, **io_args}
         summary.generate_all_summaries(importData, **all_args)
 
-    print("Done. Exiting...")
+        print("Done. Exiting...")
 
 
 if __name__ == "__main__":
