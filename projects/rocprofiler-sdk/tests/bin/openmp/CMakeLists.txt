@@ -23,7 +23,8 @@ project(rocprofiler-sdk-tests-bin-openmp LANGUAGES CXX)
 
 find_package(rocprofiler-sdk REQUIRED)
 
-set(DEFAULT_GPU_TARGETS "gfx906" "gfx908" "gfx90a" "gfx942" "gfx1100" "gfx1101" "gfx1102")
+set(DEFAULT_GPU_TARGETS "gfx906" "gfx908" "gfx90a" "gfx942" "gfx950" "gfx1100" "gfx1101"
+                        "gfx1102")
 
 set(OPENMP_GPU_TARGETS
     "${DEFAULT_GPU_TARGETS}"

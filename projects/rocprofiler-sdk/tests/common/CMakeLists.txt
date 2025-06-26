@@ -18,6 +18,7 @@ set(DEFAULT_GPU_TARGETS
     "gfx908"
     "gfx90a"
     "gfx942"
+    "gfx950"
     "gfx1030"
     "gfx1010"
     "gfx1100"
