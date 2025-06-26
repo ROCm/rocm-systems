@@ -29,8 +29,8 @@ jobs:
 
     - name: Install dependencies
       run: |
-        sudo apt-get update
-        sudo apt-get install -y python3-pip
+        apt-get update
+        apt-get install -y python3-pip
         python3 -m pip install -U cmake-format
 
     - name: Run cmake-format
@@ -55,8 +55,8 @@ jobs:
     - name: Install dependencies
       run: |
         DISTRIB_CODENAME=$(cat /etc/lsb-release | grep DISTRIB_CODENAME | awk -F '=' '{print $NF}')
-        sudo apt-get update
-        sudo apt-get install -y software-properties-common wget curl clang-format-11
+        apt-get update
+        apt-get install -y software-properties-common wget curl clang-format-11
 
     - name: Extract branch name
       shell: bash
