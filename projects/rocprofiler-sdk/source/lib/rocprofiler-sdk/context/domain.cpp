@@ -59,7 +59,7 @@ template <typename DomainT>
 rocprofiler_status_t
 add_domain(domain_context<DomainT>& _cfg, DomainT _domain)
 {
-    static_assert((1 << domain_info<DomainT>::last) < std::numeric_limits<uint64_t>::max(),
+    static_assert((1UL << domain_info<DomainT>::last) < std::numeric_limits<uint64_t>::max(),
                   "uint64_t cannot handle all the domains");
 
     if(_domain <= domain_info<DomainT>::none) return ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND;
