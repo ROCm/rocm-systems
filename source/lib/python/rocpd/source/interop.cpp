@@ -39,6 +39,8 @@
 #include <pybind11/pytypes.h>
 #include <sqlite3.h>
 
+#include <algorithm>
+
 namespace rocpd
 {
 namespace interop
