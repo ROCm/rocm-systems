@@ -163,7 +163,7 @@ buffered_output<Tp, DomainT>::get_num_bytes() const
 }
 
 using hip_buffered_output_t =
-    buffered_output<rocprofiler_buffer_tracing_hip_api_ext_record_t, domain_type::HIP>;
+    buffered_output<tool_buffer_tracing_hip_api_ext_record_t, domain_type::HIP>;
 using hsa_buffered_output_t =
     buffered_output<rocprofiler_buffer_tracing_hsa_api_record_t, domain_type::HSA>;
 using marker_buffered_output_t =
