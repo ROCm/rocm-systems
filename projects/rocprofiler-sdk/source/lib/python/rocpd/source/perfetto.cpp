@@ -212,9 +212,8 @@ write_perfetto(
     auto agent_thread_ids_alloc = std::unordered_map<uint64_t, std::set<uint64_t>>{};
     auto agent_queue_ids =
         std::unordered_map<uint64_t, std::unordered_set<rocprofiler_queue_id_t>>{};
-    auto agent_stream_ids =
-        std::unordered_map<uint64_t, std::unordered_set<rocprofiler_stream_id_t>>{};
-    auto thread_indexes = std::unordered_map<uint64_t, uint64_t>{};
+    auto agent_stream_ids = std::unordered_set<rocprofiler_stream_id_t>{};
+    auto thread_indexes   = std::unordered_map<uint64_t, uint64_t>{};
 
     auto thread_tracks = std::unordered_map<uint64_t, ::perfetto::Track>{};
     auto agent_thread_tracks =
@@ -222,16 +221,14 @@ write_perfetto(
     auto agent_queue_tracks =
         std::unordered_map<uint64_t,
                            std::unordered_map<rocprofiler_queue_id_t, ::perfetto::Track>>{};
-    auto agent_stream_tracks =
-        std::unordered_map<uint64_t,
-                           std::unordered_map<rocprofiler_stream_id_t, ::perfetto::Track>>{};
+    auto stream_tracks = std::unordered_map<rocprofiler_stream_id_t, ::perfetto::Track>{};
 
     {
         for(auto ditr : memory_copy_gen)
             for(const auto& itr : memory_copy_gen.get(ditr))
             {
                 auto stream_id = rocprofiler_stream_id_t{.handle = itr.stream_id};
-                agent_stream_ids[itr.dst_agent_abs_index].emplace(stream_id);
+                agent_stream_ids.emplace(stream_id);
                 if(ocfg.group_by_queue)
                 {
                     agent_thread_ids[itr.dst_agent_abs_index].emplace(itr.tid);
@@ -251,7 +248,7 @@ write_perfetto(
             {
                 auto stream_id = rocprofiler_stream_id_t{.handle = itr.stream_id};
                 auto queue_id  = rocprofiler_queue_id_t{.handle = itr.queue_id};
-                agent_stream_ids[itr.agent_abs_index].emplace(stream_id);
+                agent_stream_ids.emplace(stream_id);
                 if(ocfg.group_by_queue)
                 {
                     agent_queue_ids[itr.agent_abs_index].emplace(queue_id);
@@ -335,32 +332,19 @@ write_perfetto(
         }
     }
 
-    for(const auto& [abs_index, stream_ids] : agent_stream_ids)
+    for(const auto& sitr : agent_stream_ids)
     {
-        const auto _agent = agent_data.at(abs_index).first;
-        // auto       agent_index_info = agent_data.at(abs_index).second;
-        for(auto sitr : stream_ids)
-        {
-            const auto stream_id = sitr.handle;
+        const auto stream_id = sitr.handle;
 
-            auto _name =
-                fmt::format("COMPUTE AGENT [{}] STREAM [{}]", _agent.logical_node_id, stream_id);
+        auto _name = fmt::format("STREAM [{}]", stream_id);
 
-            if(_agent.type == "CPU")
-                _name = fmt::format("{} (CPU)", _name);
-            else if(_agent.type == "GPU")
-                _name = fmt::format("{} (GPU)", _name);
-            else
-                _name = fmt::format("{} (UNK)", _name);
+        auto _track = ::perfetto::Track{get_hash_id(_name), this_pid_track};
+        auto _desc  = _track.Serialize();
+        _desc.set_name(_name);
 
-            auto _track = ::perfetto::Track{get_hash_id(_name), this_pid_track};
-            auto _desc  = _track.Serialize();
-            _desc.set_name(_name);
+        ::perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
 
-            ::perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
-
-            agent_stream_tracks[abs_index].emplace(sitr, _track);
-        }
+        stream_tracks.emplace(sitr, _track);
     }
 
     // Fetch counter values
@@ -482,7 +466,7 @@ write_perfetto(
                 else
                 {
                     auto stream_id = rocprofiler_stream_id_t{.handle = itr.stream_id};
-                    _track         = &agent_stream_tracks.at(itr.dst_agent_abs_index).at(stream_id);
+                    _track         = &stream_tracks.at(stream_id);
                 }
 
                 auto src_agent_index = agent_data.at(itr.src_agent_abs_index).second;
@@ -511,7 +495,9 @@ write_perfetto(
                                   "corr_id",
                                   itr.stack_id,
                                   "tid",
-                                  itr.tid);
+                                  itr.tid,
+                                  "stream_id",
+                                  itr.stream_id);
                 TRACE_EVENT_END(
                     sdk::perfetto_category<sdk::category::memory_copy>::name, *_track, itr.end);
             }
@@ -535,7 +521,7 @@ write_perfetto(
                 }
                 else
                 {
-                    _track = &agent_stream_tracks.at(agent_id).at(stream_id);
+                    _track = &stream_tracks.at(stream_id);
                 }
 
                 // Temporary fix until timestamp issues are resolved: Set timestamps to be
@@ -590,14 +576,16 @@ write_perfetto(
                                   current.tid,
                                   "kernel_id",
                                   current.kernel_id,
-                                  "private_segment_size",
+                                  "Scratch_Size",
                                   current.scratch_size,
-                                  "group_segment_size",
+                                  "LDS_Block_Size",
                                   current.lds_size,
                                   "workgroup_size",
                                   to_string(current.workgroup_size),
                                   "grid_size",
                                   to_string(current.grid_size),
+                                  "stream_id",
+                                  current.stream_id,
                                   [&](::perfetto::EventContext ctx) {
                                       for(auto& [counter_id, counter_value] : counter_id_value)
                                       {
