@@ -48,6 +48,7 @@ cmake_minimum_required ( VERSION 3.7 )
 unset ( hsa-runtime64_LIB_DEPENDS CACHE )
 
 set(CMAKE_VERBOSE_MAKEFILE ON)
+set(CMAKE_CXX_STANDARD 17)
 
 ## Set core runtime module name and project name.
 set ( CORE_RUNTIME_NAME "hsa-runtime64" )

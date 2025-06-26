@@ -51,7 +51,7 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 8)
   set(ONLY64STR "64")
 endif()
 
-set(HSA_COMMON_CXX_FLAGS "-Wall" "-std=c++11")
+set(HSA_COMMON_CXX_FLAGS "-Wall")
 set(HSA_COMMON_CXX_FLAGS ${HSA_COMMON_CXX_FLAGS} "-fPIC")
 if (CMAKE_COMPILER_IS_GNUCXX)
   set(HSA_COMMON_CXX_FLAGS ${HSA_COMMON_CXX_FLAGS} "-Wl,--unresolved-symbols=ignore-in-shared-libs")

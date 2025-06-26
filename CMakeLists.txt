@@ -47,7 +47,6 @@ cmake_minimum_required(VERSION 3.7)
 project("rocr")
 
 set(CMAKE_VERBOSE_MAKEFILE ON)
-
 ## Expose static library option
 if ( NOT DEFINED BUILD_SHARED_LIBS )
   set ( BUILD_SHARED_LIBS ON )
