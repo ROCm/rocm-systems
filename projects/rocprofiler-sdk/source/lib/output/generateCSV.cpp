@@ -288,11 +288,14 @@ generate_csv(const output_config&                                               
     {
         for(auto record : data.get(ditr))
         {
-            auto        row_ss      = std::stringstream{};
-            auto        kernel_name = tool_metadata.get_kernel_name(record.dispatch_info.kernel_id,
-                                                             record.correlation_id.external.value);
+            auto        row_ss = std::stringstream{};
             const auto* kernel_info =
                 tool_metadata.get_kernel_symbol(record.dispatch_info.kernel_id);
+            auto kernel_name =
+                cfg.kernel_rename
+                    ? tool_metadata.get_kernel_name(record.dispatch_info.kernel_id,
+                                                    record.correlation_id.external.value)
+                    : CHECK_NOTNULL(kernel_info)->formatted_kernel_name;
             auto lds_block_size_v =
                 (kernel_info->group_segment_size + (lds_block_size - 1)) & ~(lds_block_size - 1);
 
