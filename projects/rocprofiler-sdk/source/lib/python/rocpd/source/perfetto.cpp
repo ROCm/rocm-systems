@@ -305,9 +305,7 @@ write_perfetto(const PerfettoSession&                         perfetto_session,
     auto thread_indexes = std::unordered_map<uint64_t, uint64_t>{};
 
     {
-        auto thread_ids = read_group_by_query(
-            types::group_by_tid{},
-            {"regions_and_samples", "kernels", "memory_copies", "memory_allocations"});
+        auto thread_ids = read_group_by_query(types::group_by_tid{}, {"threads"});
         std::sort(thread_ids.begin(), thread_ids.end());
 
         for(const auto& itr : thread_ids)
