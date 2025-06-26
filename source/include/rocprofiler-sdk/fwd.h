@@ -196,7 +196,6 @@ typedef enum rocprofiler_buffer_tracing_kind_t  // NOLINT(performance-enum-size)
     ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API,     ///< @see ::rocprofiler_marker_name_api_id_t
     ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,         ///< @see ::rocprofiler_memory_copy_operation_t
     ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,     ///< Buffer kernel dispatch info
-    ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION,      ///< Buffer page migration info
     ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,      ///< Buffer scratch memory reclaimation info
     ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT,  ///< Correlation ID in no longer in use
     ROCPROFILER_BUFFER_TRACING_RCCL_API,                   ///< RCCL tracing
@@ -212,6 +211,20 @@ typedef enum rocprofiler_buffer_tracing_kind_t  // NOLINT(performance-enum-size)
     ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT,
     ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT,
     ROCPROFILER_BUFFER_TRACING_ROCDECODE_API_EXT,
+
+    ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE,  ///< @see
+                                                        ///< rocprofiler_kfd_event_page_migrate_operation_t
+    ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT,  ///< @see
+                                                      ///< rocprofiler_kfd_event_page_fault_operation_t
+    ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE,  ///< @see rocprofiler_kfd_event_queue_operation_t
+    ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,  ///< @see
+                                                          ///< rocprofiler_kfd_event_unmap_from_gpu_operation_t
+    ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS,  ///< @see
+                                                          ///< rocprofiler_kfd_event_dropped_events_operation_t
+    ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE,  ///< @see rocprofiler_kfd_page_migrate_operation_t
+    ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT,    ///< @see rocprofiler_kfd_page_fault_operation_t
+    ROCPROFILER_BUFFER_TRACING_KFD_QUEUE,         ///< @see rocprofiler_kfd_queue_operation_t
+
     ROCPROFILER_BUFFER_TRACING_LAST,
 
     /// @var ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT
@@ -360,23 +373,6 @@ typedef enum rocprofiler_buffer_policy_t  // NOLINT(performance-enum-size)
     ROCPROFILER_BUFFER_POLICY_LOSSLESS,  ///< Block when buffer is full
     ROCPROFILER_BUFFER_POLICY_LAST,
 } rocprofiler_buffer_policy_t;
-
-/**
- * @brief Page migration event.
- */
-typedef enum rocprofiler_page_migration_operation_t  // NOLINT(performance-enum-size)
-{
-    ROCPROFILER_PAGE_MIGRATION_NONE = 0,  ///< Unknown event
-    ROCPROFILER_PAGE_MIGRATION_PAGE_MIGRATE_START,
-    ROCPROFILER_PAGE_MIGRATION_PAGE_MIGRATE_END,
-    ROCPROFILER_PAGE_MIGRATION_PAGE_FAULT_START,
-    ROCPROFILER_PAGE_MIGRATION_PAGE_FAULT_END,
-    ROCPROFILER_PAGE_MIGRATION_QUEUE_EVICTION,
-    ROCPROFILER_PAGE_MIGRATION_QUEUE_RESTORE,
-    ROCPROFILER_PAGE_MIGRATION_UNMAP_FROM_GPU,
-    ROCPROFILER_PAGE_MIGRATION_DROPPED_EVENT,
-    ROCPROFILER_PAGE_MIGRATION_LAST,
-} rocprofiler_page_migration_operation_t;
 
 /**
  * @brief Scratch event kind

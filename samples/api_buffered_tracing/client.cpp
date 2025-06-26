@@ -312,99 +312,6 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
                 source_location{__FUNCTION__, __FILE__, __LINE__, kind_name + info.str()});
         }
         else if(header->category == ROCPROFILER_BUFFER_CATEGORY_TRACING &&
-                header->kind == ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION)
-        {
-            auto* record =
-                static_cast<rocprofiler_buffer_tracing_page_migration_record_t*>(header->payload);
-
-            auto info = std::stringstream{};
-
-            info << "kind=" << record->kind << ", operation=" << record->operation
-                 << ", pid=" << record->pid << ", timestamp=" << record->timestamp
-                 << ", name=" << get_name(record) << std::boolalpha;
-
-            switch(record->operation)
-            {
-                case ROCPROFILER_PAGE_MIGRATION_PAGE_MIGRATE_START:
-                {
-                    const auto& arg = record->args;
-                    info << ", page_migrate_start=(" << as_hex(arg.page_migrate_start.start_addr)
-                         << ", " << as_hex(arg.page_migrate_start.end_addr) << ", "
-                         << arg.page_migrate_start.from_agent.handle << ", "
-                         << arg.page_migrate_start.to_agent.handle << ", "
-                         << arg.page_migrate_start.prefetch_agent.handle << ", "
-                         << arg.page_migrate_start.preferred_agent.handle << ", "
-                         << arg.page_migrate_start.trigger << ")";
-                    break;
-                }
-                case ROCPROFILER_PAGE_MIGRATION_PAGE_MIGRATE_END:
-                {
-                    const auto& arg = record->args;
-                    info << ", page_migrate_end=(" << as_hex(arg.page_migrate_end.start_addr)
-                         << ", " << as_hex(arg.page_migrate_end.end_addr) << ", "
-                         << arg.page_migrate_end.from_agent.handle << ", "
-                         << arg.page_migrate_end.to_agent.handle << ", "
-                         << arg.page_migrate_end.trigger << ", " << arg.page_migrate_end.error_code
-                         << ")";
-                    break;
-                }
-                case ROCPROFILER_PAGE_MIGRATION_PAGE_FAULT_START:
-                {
-                    const auto& arg = record->args;
-                    info << ", page_fault_start=(" << arg.page_fault_start.read_fault << ", "
-                         << arg.page_fault_start.agent_id.handle << ", "
-                         << as_hex(arg.page_fault_start.address) << ")";
-                    break;
-                }
-                case ROCPROFILER_PAGE_MIGRATION_PAGE_FAULT_END:
-                {
-                    const auto& arg = record->args;
-                    info << ", page_fault_end=(" << arg.page_fault_end.migrated << ", "
-                         << arg.page_fault_end.agent_id.handle << ", "
-                         << as_hex(arg.page_fault_end.address) << ")";
-                    break;
-                }
-                case ROCPROFILER_PAGE_MIGRATION_QUEUE_EVICTION:
-                {
-                    const auto& arg = record->args;
-                    info << ", queue_eviction=(" << arg.queue_eviction.agent_id.handle << ", "
-                         << arg.queue_eviction.trigger << ")";
-                    break;
-                }
-                case ROCPROFILER_PAGE_MIGRATION_QUEUE_RESTORE:
-                {
-                    const auto& arg = record->args;
-                    info << ", queue_restore=(" << arg.queue_restore.rescheduled << ", "
-                         << arg.queue_restore.agent_id.handle << ")";
-                    break;
-                }
-                case ROCPROFILER_PAGE_MIGRATION_UNMAP_FROM_GPU:
-                {
-                    const auto& arg = record->args;
-                    info << ", unmap_from_gpu=(" << as_hex(arg.unmap_from_gpu.start_addr) << ", "
-                         << as_hex(arg.unmap_from_gpu.end_addr) << ", "
-                         << arg.unmap_from_gpu.agent_id.handle << ", " << arg.unmap_from_gpu.trigger
-                         << ")";
-                    break;
-                }
-                case ROCPROFILER_PAGE_MIGRATION_DROPPED_EVENT:
-                {
-                    const auto& arg = record->args;
-                    info << ", dropped_event=(" << arg.dropped_event.dropped_events_count << ")";
-                    break;
-                }
-                case ROCPROFILER_PAGE_MIGRATION_NONE:
-                case ROCPROFILER_PAGE_MIGRATION_LAST:
-                {
-                    throw std::runtime_error{"unexpected page migration value"};
-                    break;
-                }
-            }
-
-            static_cast<call_stack_t*>(user_data)->emplace_back(
-                source_location{__FUNCTION__, __FILE__, __LINE__, kind_name + info.str()});
-        }
-        else if(header->category == ROCPROFILER_BUFFER_CATEGORY_TRACING &&
                 header->kind == ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY)
         {
             auto* record =
@@ -546,14 +453,10 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             client_ctx, ROCPROFILER_BUFFER_TRACING_MEMORY_COPY, nullptr, 0, client_buffer),
         "buffer tracing service for memory copy configure");
 
-    // May have incompatible kernel so only emit a warning here
-    ROCPROFILER_WARN(rocprofiler_configure_buffer_tracing_service(
-        client_ctx, ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION, nullptr, 0, client_buffer));
-
     ROCPROFILER_CALL(
         rocprofiler_configure_buffer_tracing_service(
             client_ctx, ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY, nullptr, 0, client_buffer),
-        "buffer tracing service for page migration configure");
+        "buffer tracing service for scratch memory configure");
 
     auto client_thread = rocprofiler_callback_thread_t{};
     ROCPROFILER_CALL(rocprofiler_create_callback_thread(&client_thread),

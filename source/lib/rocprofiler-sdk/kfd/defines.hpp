@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -44,16 +44,33 @@
         }                                                                                          \
     } while(0)
 
-#define SPECIALIZE_PAGE_MIGRATION_INFO(ROCPROF_NAME, KFD_NAME, FORMAT_STRING)                        \
+#define SPECIALIZE_KFD_EVENT_INFO(EVENT_NAME, KFD_NAME, BUFFER_KIND, FORMAT_STRING)                  \
     template <>                                                                                      \
-    struct page_migration_info<ROCPROFILER_PAGE_MIGRATION_##ROCPROF_NAME>                            \
+    struct kfd_event_info<KFD_EVENT_##EVENT_NAME>                                                    \
     {                                                                                                \
-        static constexpr auto             name          = "PAGE_MIGRATION_" #ROCPROF_NAME;           \
-        static constexpr size_t           operation     = ROCPROFILER_PAGE_MIGRATION_##ROCPROF_NAME; \
-        static constexpr size_t           kfd_operation = KFD_SMI_EVENT_##KFD_NAME;                  \
-        static constexpr size_t           kfd_bitmask   = bitmask(KFD_SMI_EVENT_##KFD_NAME);         \
-        static constexpr std::string_view format_str    = FORMAT_STRING;                             \
+        static constexpr size_t kind                 = KFD_EVENT_##EVENT_NAME;                       \
+        static constexpr size_t buffer_kind          = ROCPROFILER_BUFFER_TRACING_KFD_##BUFFER_KIND; \
+        static constexpr size_t kfd_id               = KFD_SMI_EVENT_##KFD_NAME;                     \
+        static constexpr size_t kfd_bitmask          = bitmask(KFD_SMI_EVENT_##KFD_NAME);            \
+        static constexpr std::string_view format_str = FORMAT_STRING;                                \
     };
+
+#define SPECIALIZE_KFD_KIND_INFO(KIND_NAME, LAST_OP)                                               \
+    template <>                                                                                    \
+    struct kfd_kind_info<ROCPROFILER_BUFFER_TRACING_KFD_##KIND_NAME>                               \
+    {                                                                                              \
+        static constexpr auto kind = ROCPROFILER_BUFFER_TRACING_KFD_##KIND_NAME;                   \
+        static constexpr auto last = ::LAST_OP;                                                    \
+    }
+
+#define SPECIALIZE_KFD_KIND_NAME(KIND_NAME_SUFFIX, OPERATION)                                      \
+    template <>                                                                                    \
+    struct kfd_operation_info<ROCPROFILER_BUFFER_TRACING_KFD_##KIND_NAME_SUFFIX, OPERATION>        \
+    {                                                                                              \
+        static constexpr auto kind      = ROCPROFILER_BUFFER_TRACING_KFD_##KIND_NAME_SUFFIX;       \
+        static constexpr auto operation = ::OPERATION;                                             \
+        static constexpr auto name      = #OPERATION;                                              \
+    }
 
 #define SPECIALIZE_KFD_IOC_IOCTL(STRUCT, ARG_IOC)                                                  \
     template <>                                                                                    \
@@ -61,3 +78,13 @@
     {                                                                                              \
         static constexpr auto value = ARG_IOC;                                                     \
     }
+
+#define ASSERT_SAME_AND_COPY(member)                                                               \
+    if(end.member == start.member)                                                                 \
+    {                                                                                              \
+        ret.member = end.member;                                                                   \
+    }                                                                                              \
+    else                                                                                           \
+        ROCP_ERROR << fmt::format("Expected member " #member " to be same in events. {} vs {}",    \
+                                  end.member,                                                      \
+                                  start.member);
