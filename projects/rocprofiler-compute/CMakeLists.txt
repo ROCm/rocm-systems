@@ -191,7 +191,7 @@ set(PYTEST_NUMPROCS
     CACHE STRING "Number of parallel threads to use with CPU-oriented tests")
 message(STATUS "Pytest CPU threadcount: ${PYTEST_NUMPROCS}")
 
-#2 CPU threads available for testing(test-analyze-commands)
+# 2 CPU threads available for testing(test-analyze-commands)
 set(PYTEST_NUMPROCS_ANALYSIS
     "4"
     CACHE STRING "Number of parallel threads to use with CPU-oriented tests")
@@ -275,8 +275,8 @@ set_tests_properties(
 add_test(
     NAME test_analyze_commands
     COMMAND
-        ${Python3_EXECUTABLE} -m pytest -n ${PYTEST_NUMPROCS_ANALYSIS}
-          --verbose --junitxml=tests/test_analyze_commands.xml ${COV_OPTION}
+        ${Python3_EXECUTABLE} -m pytest -n ${PYTEST_NUMPROCS_ANALYSIS} --verbose
+        --junitxml=tests/test_analyze_commands.xml ${COV_OPTION}
         ${PROJECT_SOURCE_DIR}/tests/test_analyze_commands.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 

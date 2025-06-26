@@ -49,6 +49,16 @@ of ROCm Compute Profiler’s profiling report.
 
      - GIOPs
 
+   * - :ref:`MFMA <desc-mfma>` FLOPs (F8)
+
+     - The total number of 8-bit floating point :ref:`MFMA <desc-mfma>`
+       operations executed per second. This does not include any 16-bit
+       brain floating point operations from :ref:`VALU <desc-valu>`
+       instructions. This is also presented as a percent of the peak theoretical
+       F8 MFMA operations achievable on the specific accelerator. It is supported on AMD Instinct MI300 series and later only.
+
+     - GFLOPs
+
    * - :ref:`MFMA <desc-mfma>` FLOPs (BF16)
 
      - The total number of 16-bit brain floating point :ref:`MFMA <desc-mfma>`
