@@ -8,8 +8,8 @@ source/docs                                 @bgopesh
 
 source/include                              @jrmadsen      @bwelton     @ammarwa
 source/include/rocprofiler-sdk/rccl         @MythreyaK
+source/include/rocprofiler-sdk/kfd          @MythreyaK
 source/include/rocprofiler-sdk/cxx/codeobj  @ApoKalipse-V
-
 source/bin                                  @SrirakshaNag  @bgopesh
 
 source/libexec                              @SrirakshaNag
@@ -17,8 +17,8 @@ source/libexec                              @SrirakshaNag
 source/lib/rocprofiler-sdk/counters         @bwelton
 source/lib/rocprofiler-sdk/pc_sampling      @vlaindic
 source/lib/rocprofiler-sdk/thread_trace     @ApoKalipse-V
-source/lib/rocprofiler-sdk/page_migration   @MythreyaK
 source/lib/rocprofiler-sdk/rccl             @MythreyaK
+source/lib/rocprofiler-sdk/kfd              @MythreyaK
 
 source/lib/rocprofiler-sdk-tool             @SrirakshaNag
 

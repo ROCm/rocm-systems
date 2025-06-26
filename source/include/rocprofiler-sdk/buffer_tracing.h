@@ -26,7 +26,7 @@
 #include <rocprofiler-sdk/defines.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hip/api_args.h>
-#include <rocprofiler-sdk/kfd/page_migration_args.h>
+#include <rocprofiler-sdk/kfd/kfd_id.h>
 #include <rocprofiler-sdk/rocdecode/api_args.h>
 #include <rocprofiler-sdk/rocdecode/api_id.h>
 
@@ -339,17 +339,160 @@ typedef struct rocprofiler_buffer_tracing_kernel_dispatch_record_t
 } rocprofiler_buffer_tracing_kernel_dispatch_record_t;
 
 /**
- * @brief ROCProfiler Buffer Page Migration Tracer Record
+ * @brief ROCProfiler Buffer Page Migration event record from KFD.
  */
-typedef struct rocprofiler_buffer_tracing_page_migration_record_t
+typedef struct rocprofiler_buffer_tracing_kfd_event_page_migrate_record_t
 {
-    uint64_t                               size;  ///< size of this struct
-    rocprofiler_buffer_tracing_kind_t      kind;  ///< ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION
-    rocprofiler_page_migration_operation_t operation;
-    rocprofiler_timestamp_t                timestamp;  ///< start time in nanoseconds
-    uint32_t                               pid;
-    rocprofiler_page_migration_args_t      args;
-} rocprofiler_buffer_tracing_page_migration_record_t;
+    uint64_t                                       size;  ///< Size of this struct
+    rocprofiler_buffer_tracing_kind_t              kind;
+    rocprofiler_kfd_event_page_migrate_operation_t operation;
+    rocprofiler_timestamp_t timestamp;      ///< Timestamp of the event as reported by KFD
+    uint32_t                pid;            ///< PID of the process as reported by KFD
+    rocprofiler_address_t   start_address;  ///< Start address of the memory range being migrated
+    rocprofiler_address_t   end_address;    ///< End address of the memory range being migrated
+    rocprofiler_agent_id_t  src_agent;      ///< Source agent from which pages were migrated
+    rocprofiler_agent_id_t  dst_agent;      ///< Destination agent to which pages were migrated
+    rocprofiler_agent_id_t  prefetch_agent;
+    rocprofiler_agent_id_t  preferred_agent;
+    int32_t                 error_code;  ///< Non-zero if there was an error at migrate-end
+
+    ///< @var kind
+    ///< @brief ::ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE
+    ///< @var operation
+    ///< @brief @see rocprofiler_kfd_page_migrate_operation_t
+    ///< @var prefetch_agent
+    ///< @brief Agent to which memory is to be prefetched.
+    /// This field should be ignored on a migrate-end event
+    ///< @var preferred_agent
+    ///< @brief Preferred location for this memory
+    /// This field should be ignored on a migrate-end event
+} rocprofiler_buffer_tracing_kfd_event_page_migrate_record_t;
+
+/**
+ * @brief ROCProfiler Buffer Page Fault event record from KFD.
+ */
+typedef struct rocprofiler_buffer_tracing_kfd_event_page_fault_record_t
+{
+    uint64_t                          size;  ///< Size of this struct
+    rocprofiler_buffer_tracing_kind_t kind;  ///< ::ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT
+    rocprofiler_kfd_event_page_fault_operation_t operation;
+    rocprofiler_timestamp_t timestamp;  ///< Timestamp of the event as reported by KFD
+    uint32_t                pid;        ///< PID of the process as reported by KFD
+    rocprofiler_agent_id_t  agent_id;   ///< Agent ID which generated the fault
+    rocprofiler_address_t   address;    ///< Memory access that generated the fault event
+
+    ///< @var operation
+    ///< @brief @see rocprofiler_kfd_page_fault_operation_t
+} rocprofiler_buffer_tracing_kfd_event_page_fault_record_t;
+
+/**
+ * @brief ROCProfiler Buffer Queue event record from KFD.
+ */
+typedef struct rocprofiler_buffer_tracing_kfd_event_queue_record_t
+{
+    uint64_t                                size;  ///< Size of this struct
+    rocprofiler_buffer_tracing_kind_t       kind;  ///< ::ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE
+    rocprofiler_kfd_event_queue_operation_t operation;  ///< @see rocprofiler_kfd_queue_operation_t
+    rocprofiler_timestamp_t timestamp;  ///< Timestamp of the event as reported by KFD
+    uint32_t                pid;        ///< PID of the process as reported by KFD
+    rocprofiler_agent_id_t  agent_id;   ///< Agent ID on which this event occurred
+} rocprofiler_buffer_tracing_kfd_event_queue_record_t;
+
+/**
+ * @brief ROCProfiler Buffer Unmap of memory from GPU event record from KFD.
+ */
+typedef struct rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t
+{
+    uint64_t                                         size;  ///< Size of this struct
+    rocprofiler_buffer_tracing_kind_t                kind;
+    rocprofiler_kfd_event_unmap_from_gpu_operation_t operation;
+    rocprofiler_timestamp_t timestamp;      ///< Timestamp of the event as reported by KFD
+    uint32_t                pid;            ///< PID of the process as reported by KFD
+    rocprofiler_agent_id_t  agent_id;       ///< Agent ID on which memory ranges were unmapped
+    rocprofiler_address_t   start_address;  ///< Start address of the memory range being unmapped
+    rocprofiler_address_t   end_address;    ///< End address of the memory range being unmapped
+
+    ///< @var kind
+    ///< @brief ::ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU
+    ///< @var operation
+    ///< @brief @see rocprofiler_kfd_unmap_from_gpu_operation_t
+} rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t;
+
+/**
+ * @brief ROCProfiler Buffer Dropped events event record, for when KFD reports
+ * that it has dropped some events.
+ */
+typedef struct rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t
+{
+    uint64_t                                         size;  ///< Size of this struct
+    rocprofiler_buffer_tracing_kind_t                kind;
+    rocprofiler_kfd_event_dropped_events_operation_t operation;
+    rocprofiler_timestamp_t timestamp;  ///< Timestamp of the event as reported by KFD
+    uint32_t                pid;        ///< PID of the process as reported by KFD
+    uint32_t                count;      ///< Number of records that KFD dropped
+
+    ///< @var kind
+    ///< @brief ::ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS
+    ///< @var operation
+    ///< @brief @see rocprofiler_kfd_event_dropped_events_operation_t
+} rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t;
+
+/**
+ * @brief ROCProfiler Buffer Page Migration (paired) record from KFD.
+ */
+typedef struct rocprofiler_buffer_tracing_kfd_page_migrate_record_t
+{
+    uint64_t                          size;  ///< Size of this struct
+    rocprofiler_buffer_tracing_kind_t kind;  ///< ::ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE
+    rocprofiler_kfd_page_migrate_operation_t operation;
+    rocprofiler_timestamp_t start_timestamp;  ///< Start timestamp as reported by KFD
+    rocprofiler_timestamp_t end_timestamp;    ///< End timestamp as reported by KFD
+    uint32_t                pid;              ///< PID of the process as reported by KFD
+    rocprofiler_address_t   start_address;    ///< Start address of the memory range being migrated
+    rocprofiler_address_t   end_address;      ///< End address of the memory range being migrated
+    rocprofiler_agent_id_t  src_agent;        ///< Source agent from which pages were migrated
+    rocprofiler_agent_id_t  dst_agent;        ///< Destination agent to which pages were migrated
+    rocprofiler_agent_id_t  prefetch_agent;
+    rocprofiler_agent_id_t  preferred_agent;
+    int32_t                 error_code;  ///< Non-zero codes are errors, as reported by KFD
+    ///< @var operation
+    ///< @brief @see rocprofiler_kfd_page_migrate_operation_t
+    ///< @var prefetch_agent
+    ///< @brief Agent to which memory is to be prefetched.
+    ///< @var preferred_agent
+    ///< @brief Preferred location for this memory
+} rocprofiler_buffer_tracing_kfd_page_migrate_record_t;
+
+/**
+ * @brief ROCProfiler Buffer Page Fault (paired) record from KFD.
+ */
+typedef struct rocprofiler_buffer_tracing_kfd_page_fault_record_t
+{
+    uint64_t                               size;  ///< Size of this struct
+    rocprofiler_buffer_tracing_kind_t      kind;  ///< ::ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT
+    rocprofiler_kfd_page_fault_operation_t operation;
+    rocprofiler_timestamp_t                start_timestamp;  ///< Start timestamp as reported by KFD
+    rocprofiler_timestamp_t                end_timestamp;    ///< End timestamp as reported by KFD
+    uint32_t                               pid;       ///< PID of the process as reported by KFD
+    rocprofiler_agent_id_t                 agent_id;  ///< Agent ID which generated the fault
+    rocprofiler_address_t address;  ///< Memory access that generated the page fault
+    ///< @var operation
+    ///< @brief @see rocprofiler_kfd_page_fault_operation_t
+} rocprofiler_buffer_tracing_kfd_page_fault_record_t;
+
+/**
+ * @brief ROCProfiler Buffer Queue suspend (paired) record from KFD.
+ */
+typedef struct rocprofiler_buffer_tracing_kfd_queue_record_t
+{
+    uint64_t                          size;             ///< Size of this struct
+    rocprofiler_buffer_tracing_kind_t kind;             ///< ::ROCPROFILER_BUFFER_TRACING_KFD_QUEUE
+    rocprofiler_kfd_queue_operation_t operation;        ///< @see rocprofiler_kfd_queue_operation_t
+    rocprofiler_timestamp_t           start_timestamp;  ///< Start timestamp as reported by KFD
+    rocprofiler_timestamp_t           end_timestamp;    ///< End timestamp as reported by KFD
+    uint32_t                          pid;              ///< PID of the process as reported by KFD
+    rocprofiler_agent_id_t            agent_id;         ///< Agent ID on which this event occurred
+} rocprofiler_buffer_tracing_kfd_queue_record_t;
 
 /**
  * @brief ROCProfiler Buffer Scratch Memory Tracer Record

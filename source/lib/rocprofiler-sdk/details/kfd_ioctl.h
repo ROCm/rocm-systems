@@ -42,9 +42,11 @@
  * - 1.14 - Update kfd_event_data
  * - 1.15 - Enable managing mappings in compute VMs with GEM_VA ioctl
  * - 1.16 - Add contiguous VRAM allocation flag
+ * - 1.17 - Add SDMA queue creation with target SDMA engine ID
+ * - 1.18 - Rename pad in set_memory_policy_args to misc_process_flag
  */
 #define KFD_IOCTL_MAJOR_VERSION 1
-#define KFD_IOCTL_MINOR_VERSION 16
+#define KFD_IOCTL_MINOR_VERSION 18
 
 struct kfd_ioctl_get_version_args
 {
@@ -53,13 +55,16 @@ struct kfd_ioctl_get_version_args
 };
 
 /* For kfd_ioctl_create_queue_args.queue_type. */
-#define KFD_IOC_QUEUE_TYPE_COMPUTE     0x0
-#define KFD_IOC_QUEUE_TYPE_SDMA        0x1
-#define KFD_IOC_QUEUE_TYPE_COMPUTE_AQL 0x2
-#define KFD_IOC_QUEUE_TYPE_SDMA_XGMI   0x3
+#define KFD_IOC_QUEUE_TYPE_COMPUTE        0x0
+#define KFD_IOC_QUEUE_TYPE_SDMA           0x1
+#define KFD_IOC_QUEUE_TYPE_COMPUTE_AQL    0x2
+#define KFD_IOC_QUEUE_TYPE_SDMA_XGMI      0x3
+#define KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID 0x4
 
 #define KFD_MAX_QUEUE_PERCENTAGE 100
 #define KFD_MAX_QUEUE_PRIORITY   15
+
+#define KFD_MIN_QUEUE_RING_SIZE 1024
 
 struct kfd_ioctl_create_queue_args
 {
@@ -80,6 +85,8 @@ struct kfd_ioctl_create_queue_args
     __u64 ctx_save_restore_address; /* to KFD */
     __u32 ctx_save_restore_size;    /* to KFD */
     __u32 ctl_stack_size;           /* to KFD */
+    __u32 sdma_engine_id;           /* to KFD */
+    __u32 pad;
 };
 
 struct kfd_ioctl_destroy_queue_args
@@ -152,15 +159,18 @@ struct kfd_dbg_device_info_entry
 #define KFD_IOC_CACHE_POLICY_COHERENT    0
 #define KFD_IOC_CACHE_POLICY_NONCOHERENT 1
 
+/* Misc. per process flags */
+#define KFD_PROC_FLAG_MFMA_HIGH_PRECISION (1 << 0)
+
 struct kfd_ioctl_set_memory_policy_args
 {
     __u64 alternate_aperture_base; /* to KFD */
     __u64 alternate_aperture_size; /* to KFD */
 
-    __u32 gpu_id;           /* to KFD */
-    __u32 default_policy;   /* to KFD */
-    __u32 alternate_policy; /* to KFD */
-    __u32 pad;
+    __u32 gpu_id;            /* to KFD */
+    __u32 default_policy;    /* to KFD */
+    __u32 alternate_policy;  /* to KFD */
+    __u32 misc_process_flag; /* to KFD */
 };
 
 /*
@@ -578,7 +588,9 @@ enum kfd_smi_event
     KFD_SMI_EVENT_QUEUE_EVICTION   = 9,
     KFD_SMI_EVENT_QUEUE_RESTORE    = 10,
     KFD_SMI_EVENT_UNMAP_FROM_GPU   = 11,
-    KFD_SMI_EVENT_DROPPED_EVENT    = 12,
+    KFD_SMI_EVENT_PROCESS_START    = 12,
+    KFD_SMI_EVENT_PROCESS_END      = 13,
+    KFD_SMI_EVENT_DROPPED_EVENT    = 14,
 
     /*
      * max event number, as a flag bit to get events from all processes,
@@ -589,14 +601,16 @@ enum kfd_smi_event
     KFD_SMI_EVENT_ALL_PROCESS = 64
 };
 
+/* The reason of the page migration event */
 enum KFD_MIGRATE_TRIGGERS
 {
-    KFD_MIGRATE_TRIGGER_PREFETCH,      /* Prefetch to GPU */
+    KFD_MIGRATE_TRIGGER_PREFETCH,      /* Prefetch to GPU VRAM or system memory */
     KFD_MIGRATE_TRIGGER_PAGEFAULT_GPU, /* GPU page fault recover */
     KFD_MIGRATE_TRIGGER_PAGEFAULT_CPU, /* CPU page fault recover */
     KFD_MIGRATE_TRIGGER_TTM_EVICTION   /* TTM eviction */
 };
 
+/* The reason of user queue evition event */
 enum KFD_QUEUE_EVICTION_TRIGGERS
 {
     KFD_QUEUE_EVICTION_TRIGGER_SVM,     /* SVM buffer migration */
@@ -607,6 +621,7 @@ enum KFD_QUEUE_EVICTION_TRIGGERS
     KFD_QUEUE_EVICTION_CRIU_RESTORE     /* CRIU restore */
 };
 
+/* The reason of unmap buffer from GPU event */
 enum KFD_SVM_UNMAP_TRIGGERS
 {
     KFD_SVM_UNMAP_TRIGGER_MMU_NOTIFY,         /* MMU notifier CPU buffer movement */
@@ -647,9 +662,8 @@ enum kfd_ioctl_spm_op
  * @buf_size[in]:      size of the destination buffer
  * @timeout[in/out]:   [in]: timeout in milliseconds, [out]: amount of time left
  *                      `in the timeout window
- * @bytes_copied[out]: amount of data that was copied to the previous dest_buf
- * @has_data_loss:     boolean indicating whether data was lost
- *                      (e.g. due to a ring-buffer overflow)
+ * @bytes_copied[out]: total amount of data that was copied to the previous dest_buf
+ * @has_data_loss:     total count for sub-block which has data loss
  *
  * This ioctl performs different functions depending on the @op parameter.
  *
@@ -698,6 +712,22 @@ struct kfd_ioctl_spm_args
     __u32 gpu_id;
     __u32 bytes_copied;
     __u32 has_data_loss;
+};
+
+/**
+ * kfd_ioctl_spm_buffer_header - SPM Buffer header for kfd_ioctl_spm_args->dest_buf
+ *
+ * @version        [out]: spm versiom
+ * @bytes_copied   [out]: amount of data for each sub-block
+ * @has_data_loss: [out]: boolean indicating whether data was lost for each sub-block
+ *                        (e.g. due to a ring-buffer overflow)
+ */
+struct kfd_ioctl_spm_buffer_header
+{
+    __u32 version; /* 0-23: minor 24-31: major */
+    __u32 bytes_copied;
+    __u32 has_data_loss;
+    __u32 reserved[5];
 };
 
 /*
@@ -760,6 +790,7 @@ struct kfd_ioctl_spm_args
     "%lld -%d %x %c\n", (ns), (pid), (node), (rescheduled)
 #define KFD_EVENT_FMT_UNMAP_FROM_GPU(ns, pid, addr, size, node, unmap_trigger)                     \
     "%lld -%d @%lx(%lx) %x %d\n", (ns), (pid), (addr), (size), (node), (unmap_trigger)
+#define KFD_EVENT_FMT_PROCESS(pid, task_name)            "%x %s\n", (pid), (task_name)
 #define KFD_EVENT_FMT_DROPPED_EVENT(ns, pid, drop_count) "%lld -%d %d\n", (ns), (pid), (drop_count)
 
 /**************************************************************************************************

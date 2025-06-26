@@ -40,8 +40,8 @@ struct tool_buffer_tracing_kernel_dispatch_ext_record_t
 {
     using base_type = rocprofiler_buffer_tracing_kernel_dispatch_record_t;
 
-    tool_buffer_tracing_kernel_dispatch_ext_record_t(const base_type&               _base,
-                                                     const rocprofiler_stream_id_t& _stream_id)
+    tool_buffer_tracing_kernel_dispatch_ext_record_t(const base_type&              _base,
+                                                     const rocprofiler_stream_id_t _stream_id)
     : base_type{_base}
     , stream_id{_stream_id}
     {}
@@ -65,8 +65,8 @@ struct tool_buffer_tracing_memory_copy_ext_record_t
 {
     using base_type = rocprofiler_buffer_tracing_memory_copy_record_t;
 
-    tool_buffer_tracing_memory_copy_ext_record_t(const base_type&               _base,
-                                                 const rocprofiler_stream_id_t& _stream_id)
+    tool_buffer_tracing_memory_copy_ext_record_t(const base_type&              _base,
+                                                 const rocprofiler_stream_id_t _stream_id)
     : base_type{_base}
     , stream_id{_stream_id}
     {}
@@ -90,8 +90,8 @@ struct tool_buffer_tracing_memory_allocation_ext_record_t
 {
     using base_type = rocprofiler_buffer_tracing_memory_allocation_record_t;
 
-    tool_buffer_tracing_memory_allocation_ext_record_t(const base_type&               _base,
-                                                       const rocprofiler_stream_id_t& _stream_id)
+    tool_buffer_tracing_memory_allocation_ext_record_t(const base_type&              _base,
+                                                       const rocprofiler_stream_id_t _stream_id)
     : base_type{_base}
     , stream_id{_stream_id}
     {}
@@ -106,6 +106,30 @@ struct tool_buffer_tracing_memory_allocation_ext_record_t
         const tool_buffer_tracing_memory_allocation_ext_record_t&) = default;
     tool_buffer_tracing_memory_allocation_ext_record_t& operator       =(
         tool_buffer_tracing_memory_allocation_ext_record_t&&) noexcept = default;
+
+    rocprofiler_stream_id_t stream_id = {};
+};
+
+struct tool_buffer_tracing_hip_api_ext_record_t : rocprofiler_buffer_tracing_hip_api_ext_record_t
+{
+    using base_type = rocprofiler_buffer_tracing_hip_api_ext_record_t;
+
+    tool_buffer_tracing_hip_api_ext_record_t(const base_type&              _base,
+                                             const rocprofiler_stream_id_t _stream_id)
+    : base_type{_base}
+    , stream_id{_stream_id}
+    {}
+
+    tool_buffer_tracing_hip_api_ext_record_t()  = delete;
+    ~tool_buffer_tracing_hip_api_ext_record_t() = default;
+    tool_buffer_tracing_hip_api_ext_record_t(const tool_buffer_tracing_hip_api_ext_record_t&) =
+        default;
+    tool_buffer_tracing_hip_api_ext_record_t(tool_buffer_tracing_hip_api_ext_record_t&&) noexcept =
+        default;
+    tool_buffer_tracing_hip_api_ext_record_t& operator       =(
+        const tool_buffer_tracing_hip_api_ext_record_t&) = default;
+    tool_buffer_tracing_hip_api_ext_record_t& operator       =(
+        tool_buffer_tracing_hip_api_ext_record_t&&) noexcept = default;
 
     rocprofiler_stream_id_t stream_id = {};
 };
@@ -141,6 +165,14 @@ save(ArchiveT&                                                                  
 {
     cereal::save(ar,
                  static_cast<const rocprofiler_buffer_tracing_memory_allocation_record_t&>(data));
+    SAVE_DATA_FIELD(stream_id);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, const ::rocprofiler::tool::tool_buffer_tracing_hip_api_ext_record_t& data)
+{
+    cereal::save(ar, static_cast<const rocprofiler_buffer_tracing_hip_api_ext_record_t&>(data));
     SAVE_DATA_FIELD(stream_id);
 }
 

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,22 +24,22 @@
 
 #include "lib/common/container/small_vector.hpp"
 
-#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/rocprofiler.h>
 
 namespace rocprofiler
 {
-namespace page_migration
+namespace kfd
 {
 const char*
-name_by_id(uint32_t id);
+name_by_id(uint32_t kind, uint32_t id);
 
 std::vector<uint32_t>
-get_ids();
+get_ids(uint32_t kind);
 
 rocprofiler_status_t
 init();
 
 void
 finalize();
-}  // namespace page_migration
+}  // namespace kfd
 }  // namespace rocprofiler

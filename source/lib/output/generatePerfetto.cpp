@@ -68,7 +68,7 @@ write_perfetto(
     const output_config&                                               ocfg,
     const metadata&                                                    tool_metadata,
     std::vector<agent_info>                                            agent_data,
-    const generator<rocprofiler_buffer_tracing_hip_api_ext_record_t>&  hip_api_gen,
+    const generator<tool_buffer_tracing_hip_api_ext_record_t>&         hip_api_gen,
     const generator<rocprofiler_buffer_tracing_hsa_api_record_t>&      hsa_api_gen,
     const generator<tool_buffer_tracing_kernel_dispatch_ext_record_t>& kernel_dispatch_gen,
     const generator<tool_buffer_tracing_memory_copy_ext_record_t>&     memory_copy_gen,
@@ -142,9 +142,8 @@ write_perfetto(
     auto agent_thread_ids_alloc = std::unordered_map<rocprofiler_agent_id_t, std::set<uint64_t>>{};
     auto agent_queue_ids =
         std::unordered_map<rocprofiler_agent_id_t, std::unordered_set<rocprofiler_queue_id_t>>{};
-    auto agent_stream_ids =
-        std::unordered_map<rocprofiler_agent_id_t, std::unordered_set<rocprofiler_stream_id_t>>{};
-    auto thread_indexes = std::unordered_map<rocprofiler_thread_id_t, uint64_t>{};
+    auto agent_stream_ids = std::unordered_set<rocprofiler_stream_id_t>{};
+    auto thread_indexes   = std::unordered_map<rocprofiler_thread_id_t, uint64_t>{};
 
     auto thread_tracks = std::unordered_map<rocprofiler_thread_id_t, ::perfetto::Track>{};
     auto agent_thread_tracks =
@@ -190,7 +189,7 @@ write_perfetto(
             for(auto itr : memory_copy_gen.get(ditr))
             {
                 tids.emplace(itr.thread_id);
-                agent_stream_ids[itr.dst_agent_id].emplace(itr.stream_id);
+                agent_stream_ids.emplace(itr.stream_id);
                 if(group_by_queue)
                 {
                     agent_thread_ids[itr.dst_agent_id].emplace(itr.thread_id);
@@ -208,7 +207,7 @@ write_perfetto(
             for(auto itr : kernel_dispatch_gen.get(ditr))
             {
                 tids.emplace(itr.thread_id);
-                agent_stream_ids[itr.dispatch_info.agent_id].emplace(itr.stream_id);
+                agent_stream_ids.emplace(itr.stream_id);
                 if(group_by_queue)
                 {
                     agent_queue_ids[itr.dispatch_info.agent_id].emplace(itr.dispatch_info.queue_id);
@@ -290,24 +289,21 @@ write_perfetto(
         }
     }
 
-    for(const auto& aitr : agent_stream_ids)
+    for(const auto& sitr : agent_stream_ids)
     {
-        for(auto sitr : aitr.second)
+        const auto stream_id = sitr.handle;
+
         {
-            const auto stream_id = sitr.handle;
+            auto _namess = std::stringstream{};
+            _namess << fmt::format("STREAM [\" {} \"] ", stream_id);
 
-            {
-                auto _namess = std::stringstream{};
-                _namess << fmt::format("STREAM [\" {} \"] ", stream_id);
+            auto _track = ::perfetto::Track{get_hash_id(_namess.str())};
+            auto _desc  = _track.Serialize();
+            _desc.set_name(_namess.str());
 
-                auto _track = ::perfetto::Track{get_hash_id(_namess.str())};
-                auto _desc  = _track.Serialize();
-                _desc.set_name(_namess.str());
+            perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
 
-                perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
-
-                stream_tracks.emplace(sitr, _track);
-            }
+            stream_tracks.emplace(sitr, _track);
         }
     }
 
@@ -383,7 +379,9 @@ write_perfetto(
                                   "corr_id",
                                   itr.correlation_id.internal,
                                   "ancestor_id",
-                                  itr.correlation_id.ancestor);
+                                  itr.correlation_id.ancestor,
+                                  "stream_ID",
+                                  itr.stream_id.handle);
 
                 TRACE_EVENT_END(
                     sdk::perfetto_category<sdk::category::hip_api>::name, track, itr.end_timestamp);
@@ -575,7 +573,9 @@ write_perfetto(
                     "corr_id",
                     itr.correlation_id.internal,
                     "tid",
-                    itr.thread_id);
+                    itr.thread_id,
+                    "stream_ID",
+                    itr.stream_id.handle);
                 TRACE_EVENT_END(sdk::perfetto_category<sdk::category::memory_copy>::name,
                                 *_track,
                                 itr.end_timestamp);
@@ -636,14 +636,15 @@ write_perfetto(
 
                         auto name = std::string_view{sym->kernel_name};
 
-                        ::perfetto::Track* _track = nullptr;
+                        ::perfetto::Track* _track    = nullptr;
+                        auto               stream_id = (*it)->stream_id;
                         if(group_by_queue)
                         {
                             _track = &agent_queue_tracks.at(info.agent_id).at(info.queue_id);
                         }
                         else
                         {
-                            _track = &stream_tracks.at((*it)->stream_id);
+                            _track = &stream_tracks.at(stream_id);
                         }
 
                         // Temporary fix until timestamp issues are resolved: Set timestamps to be
@@ -674,6 +675,8 @@ write_perfetto(
                         {
                             demangled.emplace(name, common::cxx_demangle(name));
                         }
+                        // Queue IDs are 1 higher than the track name. Subtracting 1 for consistency
+                        auto queue_id = info.queue_id.handle > 0 ? info.queue_id.handle - 1 : 0;
 
                         TRACE_EVENT_BEGIN(
                             sdk::perfetto_category<sdk::category::kernel_dispatch>::name,
@@ -702,19 +705,27 @@ write_perfetto(
                             "corr_id",
                             current.correlation_id.internal,
                             "queue",
-                            info.queue_id.handle,
+                            queue_id,
                             "tid",
                             current.thread_id,
                             "kernel_id",
                             info.kernel_id,
-                            "private_segment_size",
+                            "Scratch_Size",
                             info.private_segment_size,
-                            "group_segment_size",
+                            "LDS_Block_Size",
                             info.group_segment_size,
+                            "VGPR_Count",
+                            sym->arch_vgpr_count,
+                            "Accum_VGPR_Count",
+                            sym->accum_vgpr_count,
+                            "SGPR_Count",
+                            sym->sgpr_count,
                             "workgroup_size",
                             info.workgroup_size.x * info.workgroup_size.y * info.workgroup_size.z,
                             "grid_size",
                             info.grid_size.x * info.grid_size.y * info.grid_size.z,
+                            "stream_ID",
+                            stream_id.handle,
                             [&](::perfetto::EventContext ctx) {
                                 auto corr_id    = current.correlation_id.internal;
                                 auto counter_it = dispatch_counter_id_value.find(corr_id);

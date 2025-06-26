@@ -28,7 +28,7 @@ _DEFAULT_INSTALL_PREFIX = (
 )
 _DEFAULT_GPU_TARGETS = os.environ.get(
     "GPU_TARGETS",
-    "gfx900 gfx906 gfx908 gfx90a gfx942 gfx1030 gfx1100 gfx1101 gfx1102",
+    "gfx900 gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102",
 ).split()
 
 

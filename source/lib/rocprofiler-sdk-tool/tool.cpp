@@ -615,6 +615,7 @@ hip_stream_display_callback(rocprofiler_callback_tracing_record_t record,
     auto* stream_handle_data =
         static_cast<rocprofiler_callback_tracing_hip_stream_data_t*>(record.payload);
     auto stream_id = stream_handle_data->stream_id;
+
     // STREAM_HANDLE_CREATE and DESTROY are no-ops
     if(record.operation == ROCPROFILER_HIP_STREAM_CREATE)
     {
@@ -1067,7 +1068,10 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                 auto* record =
                     static_cast<rocprofiler_buffer_tracing_hip_api_ext_record_t*>(header->payload);
 
-                tool::write_ring_buffer(*record, domain_type::HIP);
+                auto stream_id = get_stream_id(record);
+                tool::write_ring_buffer(
+                    tool::tool_buffer_tracing_hip_api_ext_record_t{*record, stream_id},
+                    domain_type::HIP);
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_RCCL_API)
             {
@@ -2023,10 +2027,11 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
        tool::get_config().benchmark_mode != tool::config::benchmark::execution_profile)
     {
         auto external_corr_id_request_kinds =
-            std::array<rocprofiler_external_correlation_id_request_kind_t, 3>{
+            std::array<rocprofiler_external_correlation_id_request_kind_t, 4>{
                 ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH,
                 ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY,
-                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_ALLOCATION};
+                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_ALLOCATION,
+                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HIP_RUNTIME_API};
 
         ROCPROFILER_CALL(rocprofiler_configure_external_correlation_id_request_service(
                              get_client_ctx(),

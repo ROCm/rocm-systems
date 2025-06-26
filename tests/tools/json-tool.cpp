@@ -903,7 +903,6 @@ auto memory_copy_bf_records     = std::deque<rocprofiler_buffer_tracing_memory_c
 auto memory_allocation_bf_records =
     std::deque<rocprofiler_buffer_tracing_memory_allocation_record_t>{};
 auto scratch_memory_records = std::deque<rocprofiler_buffer_tracing_scratch_memory_record_t>{};
-auto page_migration_records = std::deque<rocprofiler_buffer_tracing_page_migration_record_t>{};
 auto corr_id_retire_records =
     std::deque<rocprofiler_buffer_tracing_correlation_id_retirement_record_t>{};
 auto rccl_api_bf_records      = std::deque<rocprofiler_buffer_tracing_rccl_api_record_t>{};
@@ -912,6 +911,18 @@ auto rocdecode_api_ext_bf_records =
     std::deque<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>{};
 auto rocjpeg_api_bf_records = std::deque<rocprofiler_buffer_tracing_rocjpeg_api_record_t>{};
 auto ompt_bf_records        = std::deque<rocprofiler_buffer_tracing_ompt_record_t>{};
+auto kfd_page_migrate_event_records =
+    std::deque<rocprofiler_buffer_tracing_kfd_event_page_migrate_record_t>{};
+auto kfd_page_fault_event_records =
+    std::deque<rocprofiler_buffer_tracing_kfd_event_page_fault_record_t>{};
+auto kfd_queue_event_records = std::deque<rocprofiler_buffer_tracing_kfd_event_queue_record_t>{};
+auto kfd_unmap_from_gpu_event_records =
+    std::deque<rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t>{};
+auto kfd_dropped_events_event_records =
+    std::deque<rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t>{};
+auto kfd_page_migrate_records = std::deque<rocprofiler_buffer_tracing_kfd_page_migrate_record_t>{};
+auto kfd_page_fault_records   = std::deque<rocprofiler_buffer_tracing_kfd_page_fault_record_t>{};
+auto kfd_queue_records        = std::deque<rocprofiler_buffer_tracing_kfd_queue_record_t>{};
 
 void
 tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
@@ -1002,13 +1013,6 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
 
                 scratch_memory_records.emplace_back(*record);
             }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION)
-            {
-                auto* record = static_cast<rocprofiler_buffer_tracing_page_migration_record_t*>(
-                    header->payload);
-
-                page_migration_records.emplace_back(*record);
-            }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT)
             {
                 auto* record =
@@ -1059,6 +1063,66 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     static_cast<rocprofiler_buffer_tracing_rocjpeg_api_record_t*>(header->payload);
 
                 rocjpeg_api_bf_records.emplace_back(*record);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE)
+            {
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_kfd_event_page_migrate_record_t*>(
+                        header->payload);
+
+                kfd_page_migrate_event_records.emplace_back(*record);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT)
+            {
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_kfd_event_page_fault_record_t*>(
+                        header->payload);
+
+                kfd_page_fault_event_records.emplace_back(*record);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE)
+            {
+                auto* record = static_cast<rocprofiler_buffer_tracing_kfd_event_queue_record_t*>(
+                    header->payload);
+
+                kfd_queue_event_records.emplace_back(*record);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU)
+            {
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_kfd_event_unmap_from_gpu_record_t*>(
+                        header->payload);
+
+                kfd_unmap_from_gpu_event_records.emplace_back(*record);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS)
+            {
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t*>(
+                        header->payload);
+
+                kfd_dropped_events_event_records.emplace_back(*record);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE)
+            {
+                auto* record = static_cast<rocprofiler_buffer_tracing_kfd_page_migrate_record_t*>(
+                    header->payload);
+
+                kfd_page_migrate_records.emplace_back(*record);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT)
+            {
+                auto* record = static_cast<rocprofiler_buffer_tracing_kfd_page_fault_record_t*>(
+                    header->payload);
+
+                kfd_page_fault_records.emplace_back(*record);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_QUEUE)
+            {
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_kfd_queue_record_t*>(header->payload);
+
+                kfd_queue_records.emplace_back(*record);
             }
             else
             {
@@ -1155,7 +1219,6 @@ rocprofiler_context_id_t scratch_memory_ctx             = {0};
 rocprofiler_context_id_t corr_id_retire_ctx             = {0};
 rocprofiler_context_id_t kernel_dispatch_callback_ctx   = {0};
 rocprofiler_context_id_t kernel_dispatch_buffered_ctx   = {0};
-rocprofiler_context_id_t page_migration_ctx             = {0};
 rocprofiler_context_id_t runtime_init_callback_ctx      = {};
 rocprofiler_context_id_t runtime_init_buffered_ctx      = {};
 rocprofiler_context_id_t rocdecode_api_callback_ctx     = {0};
@@ -1163,24 +1226,39 @@ rocprofiler_context_id_t rocdecode_api_buffered_ctx     = {0};
 rocprofiler_context_id_t rocdecode_api_ext_buffered_ctx = {0};
 rocprofiler_context_id_t rocjpeg_api_callback_ctx       = {0};
 rocprofiler_context_id_t rocjpeg_api_buffered_ctx       = {0};
+rocprofiler_context_id_t page_migrate_event_ctx         = {0};
+rocprofiler_context_id_t kfd_page_fault_event_ctx       = {0};
+rocprofiler_context_id_t kfd_queue_event_ctx            = {0};
+rocprofiler_context_id_t kfd_unmap_from_gpu_event_ctx   = {0};
+rocprofiler_context_id_t kfd_droped_events_event_ctx    = {0};
+rocprofiler_context_id_t kfd_page_migrate_records_ctx   = {0};
+rocprofiler_context_id_t kfd_page_fault_records_ctx     = {0};
+rocprofiler_context_id_t kfd_queue_records_ctx          = {0};
 
 // buffers
-rocprofiler_buffer_id_t runtime_init_buffered_buffer = {};
-rocprofiler_buffer_id_t hsa_api_buffered_buffer      = {};
-rocprofiler_buffer_id_t hip_api_buffered_buffer      = {};
-rocprofiler_buffer_id_t marker_api_buffered_buffer   = {};
-rocprofiler_buffer_id_t kernel_dispatch_buffer       = {};
-rocprofiler_buffer_id_t memory_copy_buffer           = {};
-rocprofiler_buffer_id_t memory_allocation_buffer     = {};
-rocprofiler_buffer_id_t page_migration_buffer        = {};
-rocprofiler_buffer_id_t counter_collection_buffer    = {};
-rocprofiler_buffer_id_t scratch_memory_buffer        = {};
-rocprofiler_buffer_id_t corr_id_retire_buffer        = {};
-rocprofiler_buffer_id_t rccl_api_buffered_buffer     = {};
-rocprofiler_buffer_id_t rocdecode_api_buffer         = {};
-rocprofiler_buffer_id_t rocdecode_api_ext_buffer     = {};
-rocprofiler_buffer_id_t rocjpeg_api_buffer           = {};
-rocprofiler_buffer_id_t ompt_buffered_buffer         = {};
+rocprofiler_buffer_id_t runtime_init_buffered_buffer    = {};
+rocprofiler_buffer_id_t hsa_api_buffered_buffer         = {};
+rocprofiler_buffer_id_t hip_api_buffered_buffer         = {};
+rocprofiler_buffer_id_t marker_api_buffered_buffer      = {};
+rocprofiler_buffer_id_t kernel_dispatch_buffer          = {};
+rocprofiler_buffer_id_t memory_copy_buffer              = {};
+rocprofiler_buffer_id_t memory_allocation_buffer        = {};
+rocprofiler_buffer_id_t counter_collection_buffer       = {};
+rocprofiler_buffer_id_t scratch_memory_buffer           = {};
+rocprofiler_buffer_id_t corr_id_retire_buffer           = {};
+rocprofiler_buffer_id_t rccl_api_buffered_buffer        = {};
+rocprofiler_buffer_id_t rocdecode_api_buffer            = {};
+rocprofiler_buffer_id_t rocdecode_api_ext_buffer        = {};
+rocprofiler_buffer_id_t rocjpeg_api_buffer              = {};
+rocprofiler_buffer_id_t ompt_buffered_buffer            = {};
+rocprofiler_buffer_id_t page_migrate_event_buffer       = {};
+rocprofiler_buffer_id_t kfd_page_fault_event_buffer     = {};
+rocprofiler_buffer_id_t kfd_queue_event_buffer          = {};
+rocprofiler_buffer_id_t kfd_unmap_from_gpu_event_buffer = {};
+rocprofiler_buffer_id_t kfd_droped_events_event_buffer  = {};
+rocprofiler_buffer_id_t kfd_page_migrate_records_buffer = {};
+rocprofiler_buffer_id_t kfd_page_fault_records_buffer   = {};
+rocprofiler_buffer_id_t kfd_queue_records_buffer        = {};
 
 auto contexts = std::unordered_map<std::string_view, rocprofiler_context_id_t*>{
     {"RUNTIME_INIT_CALLBACK", &runtime_init_callback_ctx},
@@ -1200,7 +1278,6 @@ auto contexts = std::unordered_map<std::string_view, rocprofiler_context_id_t*>{
     {"KERNEL_DISPATCH_BUFFERED", &kernel_dispatch_buffered_ctx},
     {"MEMORY_COPY_BUFFERED", &memory_copy_buffered_ctx},
     {"MEMORY_ALLOCATION_BUFFERED", &memory_allocation_buffered_ctx},
-    {"PAGE_MIGRATION", &page_migration_ctx},
     {"COUNTER_COLLECTION", &counter_collection_ctx},
     {"SCRATCH_MEMORY", &scratch_memory_ctx},
     {"CORRELATION_ID_RETIREMENT", &corr_id_retire_ctx},
@@ -1211,9 +1288,17 @@ auto contexts = std::unordered_map<std::string_view, rocprofiler_context_id_t*>{
     {"ROCJPEG_API_CALLBACK", &rocjpeg_api_callback_ctx},
     {"ROCJPEG_API_BUFFERED", &rocjpeg_api_buffered_ctx},
     {"OMPT_BUFFERED", &ompt_buffered_ctx},
+    {"KFD_EVENT_PAGE_MIGRATE", &page_migrate_event_ctx},
+    {"KFD_EVENT_PAGE_FAULT", &kfd_page_fault_event_ctx},
+    {"KFD_EVENT_QUEUE", &kfd_queue_event_ctx},
+    {"KFD_EVENT_UNMAP_FROM_GPU", &kfd_unmap_from_gpu_event_ctx},
+    {"KFD_DROPPED_EVENTS", &kfd_droped_events_event_ctx},
+    {"KFD_PAGE_MIGRATE", &kfd_page_migrate_records_ctx},
+    {"KFD_PAGE_FAULT", &kfd_page_fault_records_ctx},
+    {"KFD_QUEUE", &kfd_queue_records_ctx},
 };
 
-auto buffers = std::array<rocprofiler_buffer_id_t*, 16>{&runtime_init_buffered_buffer,
+auto buffers = std::array<rocprofiler_buffer_id_t*, 22>{&runtime_init_buffered_buffer,
                                                         &hsa_api_buffered_buffer,
                                                         &hip_api_buffered_buffer,
                                                         &marker_api_buffered_buffer,
@@ -1221,22 +1306,28 @@ auto buffers = std::array<rocprofiler_buffer_id_t*, 16>{&runtime_init_buffered_b
                                                         &memory_copy_buffer,
                                                         &memory_allocation_buffer,
                                                         &scratch_memory_buffer,
-                                                        &page_migration_buffer,
                                                         &counter_collection_buffer,
                                                         &corr_id_retire_buffer,
                                                         &rccl_api_buffered_buffer,
                                                         &ompt_buffered_buffer,
                                                         &rocdecode_api_buffer,
                                                         &rocdecode_api_ext_buffer,
-                                                        &rocjpeg_api_buffer};
+                                                        &rocjpeg_api_buffer,
+                                                        &kfd_page_fault_event_buffer,
+                                                        &kfd_queue_event_buffer,
+                                                        &kfd_unmap_from_gpu_event_buffer,
+                                                        &kfd_droped_events_event_buffer,
+                                                        &kfd_page_migrate_records_buffer,
+                                                        &kfd_page_fault_records_buffer,
+                                                        &kfd_queue_records_buffer};
 
 auto agents     = std::vector<rocprofiler_agent_t>{};
 auto agents_map = std::unordered_map<rocprofiler_agent_id_t, rocprofiler_agent_t>{};
 
-rocprofiler_timestamp_t init_time             = 0;
-rocprofiler_timestamp_t fini_time             = 0;
-rocprofiler_thread_id_t main_tid              = 0;
-auto                    page_migration_status = ROCPROFILER_STATUS_SUCCESS;
+rocprofiler_timestamp_t init_time            = 0;
+rocprofiler_timestamp_t fini_time            = 0;
+rocprofiler_thread_id_t main_tid             = 0;
+auto                    kfd_configure_status = ROCPROFILER_STATUS_SUCCESS;
 
 int
 tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
@@ -1505,15 +1596,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                &scratch_memory_buffer),
                      "buffer creation");
 
-    ROCPROFILER_CALL(rocprofiler_create_buffer(page_migration_ctx,
-                                               buffer_size,
-                                               watermark,
-                                               ROCPROFILER_BUFFER_POLICY_LOSSLESS,
-                                               tool_tracing_buffered,
-                                               tool_data,
-                                               &page_migration_buffer),
-                     "buffer creation");
-
     ROCPROFILER_CALL(rocprofiler_create_buffer(corr_id_retire_ctx,
                                                buffer_size,
                                                watermark,
@@ -1574,6 +1656,78 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                tool_tracing_buffered,
                                                tool_data,
                                                &ompt_buffered_buffer),
+                     "buffer creation");
+
+    ROCPROFILER_CALL(rocprofiler_create_buffer(page_migrate_event_ctx,
+                                               buffer_size,
+                                               watermark,
+                                               ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                               tool_tracing_buffered,
+                                               tool_data,
+                                               &page_migrate_event_buffer),
+                     "buffer creation");
+
+    ROCPROFILER_CALL(rocprofiler_create_buffer(kfd_page_fault_event_ctx,
+                                               buffer_size,
+                                               watermark,
+                                               ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                               tool_tracing_buffered,
+                                               tool_data,
+                                               &kfd_page_fault_event_buffer),
+                     "buffer creation");
+
+    ROCPROFILER_CALL(rocprofiler_create_buffer(kfd_queue_event_ctx,
+                                               buffer_size,
+                                               watermark,
+                                               ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                               tool_tracing_buffered,
+                                               tool_data,
+                                               &kfd_queue_event_buffer),
+                     "buffer creation");
+
+    ROCPROFILER_CALL(rocprofiler_create_buffer(kfd_unmap_from_gpu_event_ctx,
+                                               buffer_size,
+                                               watermark,
+                                               ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                               tool_tracing_buffered,
+                                               tool_data,
+                                               &kfd_unmap_from_gpu_event_buffer),
+                     "buffer creation");
+
+    ROCPROFILER_CALL(rocprofiler_create_buffer(kfd_droped_events_event_ctx,
+                                               buffer_size,
+                                               watermark,
+                                               ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                               tool_tracing_buffered,
+                                               tool_data,
+                                               &kfd_droped_events_event_buffer),
+                     "buffer creation");
+
+    ROCPROFILER_CALL(rocprofiler_create_buffer(kfd_page_migrate_records_ctx,
+                                               buffer_size,
+                                               watermark,
+                                               ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                               tool_tracing_buffered,
+                                               tool_data,
+                                               &kfd_page_migrate_records_buffer),
+                     "buffer creation");
+
+    ROCPROFILER_CALL(rocprofiler_create_buffer(kfd_page_fault_records_ctx,
+                                               buffer_size,
+                                               watermark,
+                                               ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                               tool_tracing_buffered,
+                                               tool_data,
+                                               &kfd_page_fault_records_buffer),
+                     "buffer creation");
+
+    ROCPROFILER_CALL(rocprofiler_create_buffer(kfd_queue_records_ctx,
+                                               buffer_size,
+                                               watermark,
+                                               ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                               tool_tracing_buffered,
+                                               tool_data,
+                                               &kfd_queue_records_buffer),
                      "buffer creation");
 
     ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
@@ -1667,20 +1821,139 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         "buffer tracing service for scratch memory configure");
 
     {
-        page_migration_status =
-            rocprofiler_configure_buffer_tracing_service(page_migration_ctx,
-                                                         ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION,
-                                                         nullptr,
-                                                         0,
-                                                         page_migration_buffer);
+        kfd_configure_status = rocprofiler_configure_buffer_tracing_service(
+            page_migrate_event_ctx,
+            ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE,
+            nullptr,
+            0,
+            page_migrate_event_buffer);
 
         constexpr auto message = "buffer tracing service for page migration configure";
-        if(page_migration_status == ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL)
+        if(kfd_configure_status == ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL)
             std::cerr << message
-                      << " failed: " << rocprofiler_get_status_string(page_migration_status)
+                      << " failed: " << rocprofiler_get_status_string(kfd_configure_status)
                       << std::endl;
         else
-            ROCPROFILER_CALL(page_migration_status, message);
+            ROCPROFILER_CALL(kfd_configure_status, message);
+    }
+
+    {
+        kfd_configure_status = rocprofiler_configure_buffer_tracing_service(
+            kfd_page_fault_event_ctx,
+            ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT,
+            nullptr,
+            0,
+            kfd_page_fault_event_buffer);
+
+        constexpr auto message = "buffer tracing service for page migration configure";
+        if(kfd_configure_status == ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL)
+            std::cerr << message
+                      << " failed: " << rocprofiler_get_status_string(kfd_configure_status)
+                      << std::endl;
+        else
+            ROCPROFILER_CALL(kfd_configure_status, message);
+    }
+
+    {
+        kfd_configure_status =
+            rocprofiler_configure_buffer_tracing_service(kfd_queue_event_ctx,
+                                                         ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE,
+                                                         nullptr,
+                                                         0,
+                                                         kfd_queue_event_buffer);
+
+        constexpr auto message = "buffer tracing service for page migration configure";
+        if(kfd_configure_status == ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL)
+            std::cerr << message
+                      << " failed: " << rocprofiler_get_status_string(kfd_configure_status)
+                      << std::endl;
+        else
+            ROCPROFILER_CALL(kfd_configure_status, message);
+    }
+
+    {
+        kfd_configure_status = rocprofiler_configure_buffer_tracing_service(
+            kfd_unmap_from_gpu_event_ctx,
+            ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
+            nullptr,
+            0,
+            kfd_unmap_from_gpu_event_buffer);
+
+        constexpr auto message = "buffer tracing service for page migration configure";
+        if(kfd_configure_status == ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL)
+            std::cerr << message
+                      << " failed: " << rocprofiler_get_status_string(kfd_configure_status)
+                      << std::endl;
+        else
+            ROCPROFILER_CALL(kfd_configure_status, message);
+    }
+
+    {
+        kfd_configure_status = rocprofiler_configure_buffer_tracing_service(
+            kfd_droped_events_event_ctx,
+            ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS,
+            nullptr,
+            0,
+            kfd_droped_events_event_buffer);
+
+        constexpr auto message = "buffer tracing service for page migration configure";
+        if(kfd_configure_status == ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL)
+            std::cerr << message
+                      << " failed: " << rocprofiler_get_status_string(kfd_configure_status)
+                      << std::endl;
+        else
+            ROCPROFILER_CALL(kfd_configure_status, message);
+    }
+
+    {
+        kfd_configure_status = rocprofiler_configure_buffer_tracing_service(
+            kfd_page_migrate_records_ctx,
+            ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE,
+            nullptr,
+            0,
+            kfd_page_migrate_records_buffer);
+
+        constexpr auto message = "buffer tracing service for page migration configure";
+        if(kfd_configure_status == ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL)
+            std::cerr << message
+                      << " failed: " << rocprofiler_get_status_string(kfd_configure_status)
+                      << std::endl;
+        else
+            ROCPROFILER_CALL(kfd_configure_status, message);
+    }
+
+    {
+        kfd_configure_status =
+            rocprofiler_configure_buffer_tracing_service(kfd_page_fault_records_ctx,
+                                                         ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT,
+                                                         nullptr,
+                                                         0,
+                                                         kfd_page_fault_records_buffer);
+
+        constexpr auto message = "buffer tracing service for page migration configure";
+        if(kfd_configure_status == ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL)
+            std::cerr << message
+                      << " failed: " << rocprofiler_get_status_string(kfd_configure_status)
+                      << std::endl;
+        else
+            ROCPROFILER_CALL(kfd_configure_status, message);
+    }
+
+    {
+        kfd_configure_status =
+            rocprofiler_configure_buffer_tracing_service(kfd_queue_records_ctx,
+                                                         ROCPROFILER_BUFFER_TRACING_KFD_QUEUE,
+                                                         nullptr,
+                                                         0,
+                                                         kfd_queue_records_buffer);
+
+        constexpr auto message = "buffer tracing service for page migration configure";
+        if(kfd_configure_status == ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL)
+            std::cerr << message
+                      << " failed: " << rocprofiler_get_status_string(kfd_configure_status)
+                      << std::endl;
+        else
+            ROCPROFILER_CALL(kfd_configure_status, message);
     }
 
     ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
@@ -1883,7 +2156,14 @@ tool_fini(void* tool_data)
               << ", memory_copy_bf_records=" << memory_copy_bf_records.size()
               << ", memory_allocation_bf_records=" << memory_allocation_bf_records.size()
               << ", scratch_memory_records=" << scratch_memory_records.size()
-              << ", page_migration=" << page_migration_records.size()
+              << ", kfd_page_migrate_event=" << kfd_page_migrate_event_records.size()
+              << ", kfd_page_fault_event=" << kfd_page_fault_event_records.size()
+              << ", kfd_queue_event=" << kfd_queue_event_records.size()
+              << ", kfd_unmap_from_gpu_event=" << kfd_unmap_from_gpu_event_records.size()
+              << ", kfd_droped_events_event=" << kfd_dropped_events_event_records.size()
+              << ", kfd_page_migrate_record=" << kfd_page_migrate_records.size()
+              << ", kfd_page_fault_record=" << kfd_page_fault_records.size()
+              << ", kfd_queue_record=" << kfd_queue_records.size()
               << ", runtime_init_bf_records=" << runtime_init_bf_records.size()
               << ", hsa_api_bf_records=" << hsa_api_bf_records.size()
               << ", hip_api_bf_records=" << hip_api_bf_records.size()
@@ -1955,8 +2235,8 @@ write_json(call_stack_t* _call_stack)
         auto           json_ar      = JSONOutputArchive{*ofs, json_opts};
         auto           buffer_names = sdk::get_buffer_tracing_names();
         auto           callbk_names = sdk::get_callback_tracing_names();
-        auto           validate_page_migration =
-            (page_migration_status != ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL);
+        auto           validate_kfd_events =
+            (kfd_configure_status != ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL);
 
         json_ar.setNextName("rocprofiler-sdk-json-tool");
         json_ar.startNode();
@@ -1967,7 +2247,7 @@ write_json(call_stack_t* _call_stack)
         json_ar(cereal::make_nvp("main_tid", main_tid));
         json_ar(cereal::make_nvp("init_time", init_time));
         json_ar(cereal::make_nvp("fini_time", fini_time));
-        json_ar(cereal::make_nvp("validate_page_migration", validate_page_migration));
+        json_ar(cereal::make_nvp("validate_kfd_events", validate_kfd_events));
         json_ar.finishNode();
 
         json_ar(cereal::make_nvp("agents", agents));
@@ -2012,7 +2292,15 @@ write_json(call_stack_t* _call_stack)
             json_ar(cereal::make_nvp("memory_copies", memory_copy_bf_records));
             json_ar(cereal::make_nvp("memory_allocations", memory_allocation_bf_records));
             json_ar(cereal::make_nvp("scratch_memory_traces", scratch_memory_records));
-            json_ar(cereal::make_nvp("page_migration", page_migration_records));
+            json_ar(cereal::make_nvp("kfd_page_migrate_events", kfd_page_migrate_event_records));
+            json_ar(cereal::make_nvp("kfd_page_fault_events", kfd_page_fault_event_records));
+            json_ar(cereal::make_nvp("kfd_queue_events", kfd_queue_event_records));
+            json_ar(
+                cereal::make_nvp("kfd_unmap_from_gpu_events", kfd_unmap_from_gpu_event_records));
+            json_ar(cereal::make_nvp("kfd_droped_events", kfd_dropped_events_event_records));
+            json_ar(cereal::make_nvp("kfd_page_migrate_records", kfd_page_migrate_records));
+            json_ar(cereal::make_nvp("kfd_page_fault_records", kfd_page_fault_records));
+            json_ar(cereal::make_nvp("kfd_queue_records", kfd_queue_records));
             json_ar(cereal::make_nvp("hsa_api_traces", hsa_api_bf_records));
             json_ar(cereal::make_nvp("hip_api_traces", hip_api_bf_records));
             json_ar(cereal::make_nvp("marker_api_traces", marker_api_bf_records));

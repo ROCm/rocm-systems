@@ -20,8 +20,7 @@ set(rocprofiler_lib_sources
     naming.cpp
     timestamp.cpp
     version.cpp
-    hsa_barrier.cpp
-    page_migration.cpp)
+    hsa_barrier.cpp)
 
 add_executable(rocprofiler-sdk-lib-tests)
 target_sources(rocprofiler-sdk-lib-tests PRIVATE ${rocprofiler_lib_sources}

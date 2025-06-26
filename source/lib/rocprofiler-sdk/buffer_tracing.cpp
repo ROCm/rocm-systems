@@ -30,9 +30,9 @@
 #include "lib/rocprofiler-sdk/hsa/memory_allocation.hpp"
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/kernel_dispatch.hpp"
+#include "lib/rocprofiler-sdk/kfd/kfd.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
 #include "lib/rocprofiler-sdk/ompt/ompt.hpp"
-#include "lib/rocprofiler-sdk/page_migration/page_migration.hpp"
 #include "lib/rocprofiler-sdk/rccl/rccl.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/rocdecode/rocdecode.hpp"
@@ -52,6 +52,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 #define RETURN_STATUS_ON_FAIL(...)                                                                 \
@@ -90,7 +91,6 @@ ROCPROFILER_BUFFER_TRACING_KIND_STRING(MARKER_NAME_API)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(MEMORY_COPY)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(MEMORY_ALLOCATION)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(KERNEL_DISPATCH)
-ROCPROFILER_BUFFER_TRACING_KIND_STRING(PAGE_MIGRATION)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(SCRATCH_MEMORY)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(CORRELATION_ID_RETIREMENT)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(RCCL_API)
@@ -102,6 +102,14 @@ ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIP_STREAM)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIP_RUNTIME_API_EXT)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIP_COMPILER_API_EXT)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(ROCDECODE_API_EXT)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(KFD_EVENT_PAGE_MIGRATE)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(KFD_EVENT_PAGE_FAULT)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(KFD_EVENT_QUEUE)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(KFD_EVENT_UNMAP_FROM_GPU)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(KFD_EVENT_DROPPED_EVENTS)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(KFD_PAGE_MIGRATE)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(KFD_PAGE_FAULT)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(KFD_QUEUE)
 
 template <size_t Idx, size_t... Tail>
 std::pair<const char*, size_t>
@@ -172,8 +180,21 @@ rocprofiler_configure_buffer_tracing_service(rocprofiler_context_id_t           
             ctx->buffered_tracer->domains, kind, operations[i]));
     }
 
-    if(kind == ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION)
-        RETURN_STATUS_ON_FAIL(rocprofiler::page_migration::init());
+    {
+        static constexpr auto kfd_events =
+            std::array{ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE,
+                       ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT,
+                       ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE,
+                       ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
+                       ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE,
+                       ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT,
+                       ROCPROFILER_BUFFER_TRACING_KFD_QUEUE};
+
+        if(std::find(kfd_events.begin(), kfd_events.end(), kind) != kfd_events.end())
+        {
+            RETURN_STATUS_ON_FAIL(rocprofiler::kfd::init());
+        }
+    }
 
     return ROCPROFILER_STATUS_SUCCESS;
 }
@@ -282,11 +303,6 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
             val = rocprofiler::kernel_dispatch::name_by_id(operation);
             break;
         }
-        case ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION:
-        {
-            val = rocprofiler::page_migration::name_by_id(operation);
-            break;
-        }
         case ROCPROFILER_BUFFER_TRACING_OMPT:
         {
             val = rocprofiler::ompt::name_by_id(operation);
@@ -316,6 +332,18 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
         case ROCPROFILER_BUFFER_TRACING_HIP_STREAM:
         {
             val = rocprofiler::hip::stream::name_by_id(operation);
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE:
+        case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT:
+        case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE:
+        case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU:
+        case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS:
+        case ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE:
+        case ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT:
+        case ROCPROFILER_BUFFER_TRACING_KFD_QUEUE:
+        {
+            val = rocprofiler::kfd::name_by_id(kind, operation);
             break;
         }
     };
@@ -432,11 +460,6 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
             ops = rocprofiler::kernel_dispatch::get_ids();
             break;
         }
-        case ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION:
-        {
-            ops = rocprofiler::page_migration::get_ids();
-            break;
-        }
         case ROCPROFILER_BUFFER_TRACING_OMPT:
         {
             ops = rocprofiler::ompt::get_ids();
@@ -465,6 +488,18 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
         case ROCPROFILER_BUFFER_TRACING_HIP_STREAM:
         {
             ops = rocprofiler::hip::stream::get_ids();
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE:
+        case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT:
+        case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE:
+        case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU:
+        case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS:
+        case ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE:
+        case ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT:
+        case ROCPROFILER_BUFFER_TRACING_KFD_QUEUE:
+        {
+            ops = rocprofiler::kfd::get_ids(kind);
             break;
         }
     }
