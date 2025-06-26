@@ -33,7 +33,6 @@ from pathlib import Path
 
 import pandas as pd
 
-import config
 from utils.logger import (
     console_debug,
     console_error,

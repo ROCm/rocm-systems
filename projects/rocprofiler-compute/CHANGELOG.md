@@ -81,6 +81,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
+* Fixed MI 100 counters not being collected when rocprofv3 is used
 * Fixed option specs-correction
 * Fixed kernel name and kernel dispatch filtering when using rocprof v3
 * Fixed not collecting TCC channel counters in rocprof v3
@@ -88,7 +89,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Known issues
 
-* Profiling on MI 100 will not work unless ROCPROF=rocprofv1 environment variable is explictly provided
+* On MI 100, accumulation counters will not be collected and the following metrics will not show up in analysis: Instruction Fetch Latency, Wavefront Occupancy, LDS Latency
+  * As a workaround, use ROCPROF=rocprof environement variable, to use rocprofv1 for profiling on MI 100
+
 * GPU id filtering is not supported when using rocprof v3
 
 * Analysis of previously collected workload data will not work due to sysinfo.csv schema change

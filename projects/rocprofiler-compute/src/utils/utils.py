@@ -62,21 +62,6 @@ def is_tcc_channel_counter(counter):
     return counter.startswith("TCC") and counter.endswith("]")
 
 
-def is_counter_existed_in_extra_input_yaml(data: dict, counter_name: str) -> bool:
-    """
-    Check if a counter with the given name exists in the rocprofiler-sdk counters.
-
-    Args:
-        data (dict): The loaded YAML dictionary.
-        counter_name (str): The name of the counter to check.
-
-    Returns:
-        bool: True if the counter exists, False otherwise.
-    """
-    counters = data.get("rocprofiler-sdk", {}).get("counters", [])
-    return any(counter.get("name") == counter_name for counter in counters)
-
-
 def add_counter_extra_config_input_yaml(
     data: dict,
     counter_name: str,
@@ -170,46 +155,6 @@ def extract_counter_info_extra_config_input_yaml(
         if counter.get("name") == counter_name:
             return counter
     return None
-
-
-def add_counter_from_source_to_target_extra_config_input_yaml(
-    source_data: dict, target_data: dict, counter_name: str
-) -> dict:
-    """
-    Check if counter_name exists in source_data, and if yes, add it to target_data.
-
-    Args:
-        source_data (dict): Source YAML dictionary to extract from.
-        target_data (dict): Target YAML dictionary to add to.
-        counter_name (str): Name of the counter to copy.
-
-    Returns:
-        dict: Updated target_data dictionary.
-    """
-    counter = extract_counter_info_extra_config_input_yaml(source_data, counter_name)
-    if not counter:
-        raise ValueError(f"Counter '{counter_name}' not found in source data")
-
-    # Extract required info
-    name = counter.get("name")
-    description = counter.get("description", "")
-    properties = counter.get("properties", [])
-    definitions = counter.get("definitions", [])
-
-    if not definitions:
-        raise ValueError(f"Counter '{counter_name}' has no definitions")
-
-    architectures = definitions[0].get("architectures", [])
-    expression = definitions[0].get("expression", "")
-
-    return add_counter_extra_config_input_yaml(
-        target_data,
-        counter_name=name,
-        description=description,
-        expression=expression,
-        architectures=architectures,
-        properties=properties,
-    )
 
 
 def is_spi_pipe_counter(counter):
@@ -806,57 +751,66 @@ def run_prof(
         else:
             options = ["-A", "absolute"] + options
 
-    new_env = None
+    new_env = os.environ.copy()
 
-    path_counter_config_yaml = path(fname).with_suffix(".yaml")
-    if using_v3() and path_counter_config_yaml.exists():
+    if using_v3():
+        # Default counter definitions
+        if rocprof_cmd == "rocprofiler-sdk":
+            counter_defs_path = (
+                path(options["ROCP_TOOL_LIBRARIES"])
+                .resolve()
+                .parent.parent.parent.joinpath(
+                    "share", "rocprofiler-sdk", "counter_defs.yaml"
+                )
+            )
+        else:
+            counter_defs_path = (
+                path(shutil.which(rocprof_cmd))
+                .resolve()
+                .parent.parent.joinpath("share", "rocprofiler-sdk", "counter_defs.yaml")
+            )
+        # Custom counter definitions for MI 100
+        if mspec.gpu_model.lower() == "mi100":
+            counter_defs_path = (
+                config.rocprof_compute_home
+                / "rocprof_compute_soc"
+                / "profile_configs"
+                / "gfx908_counter_defs.yaml"
+            )
+        # Read counter definitions
+        with open(counter_defs_path, "r") as file:
+            counter_defs = yaml.safe_load(file)
         # Get extra counter definitions
-        with open(path_counter_config_yaml, "r") as file:
-            extra_counter_defs = yaml.safe_load(file)
-        if extra_counter_defs:
-            # Get default counter definitions path
-            if rocprof_cmd == "rocprofiler-sdk":
-                counter_defs_path = (
-                    path(options["ROCP_TOOL_LIBRARIES"])
-                    .resolve()
-                    .parent.parent.parent.joinpath(
-                        "share", "rocprofiler-sdk", "counter_defs.yaml"
-                    )
-                )
-            else:
-                counter_defs_path = (
-                    path(shutil.which(rocprof_cmd))
-                    .resolve()
-                    .parent.parent.joinpath(
-                        "share", "rocprofiler-sdk", "counter_defs.yaml"
-                    )
-                )
-            # Get default counter definitions
-            with open(counter_defs_path, "r") as file:
-                counter_defs = yaml.safe_load(file)
-            # Merge counter definitions
+        path_counter_config_yaml = path(fname).with_suffix(".yaml")
+        if path_counter_config_yaml.exists():
+            with open(path_counter_config_yaml, "r") as file:
+                extra_counter_defs = yaml.safe_load(file)
+            # Merge extra counter definitions
             counter_defs["rocprofiler-sdk"]["counters"].extend(
                 extra_counter_defs["rocprofiler-sdk"]["counters"]
             )
-            # Write merged counter definitions to a temporary file
-            tmp_dir = tempfile.mkdtemp(prefix="rocprof_counter_defs_", dir="/tmp")
-            tmpfile_path = path(tmp_dir) / "counter_defs.yaml"
-            with open(tmpfile_path, "w") as tmpfile:
-                yaml.dump(
-                    counter_defs, tmpfile, default_flow_style=False, sort_keys=False
-                )
-            # Set the environment variable to point to the temporary file
-            if not new_env:
-                new_env = os.environ.copy()
-            new_env["ROCPROFILER_METRICS_PATH"] = str(path(tmp_dir))
-            console_debug(
-                f"Adding env var for extra counters: ROCPROFILER_METRICS_PATH={new_env['ROCPROFILER_METRICS_PATH']}"
-            )
+        # Write counter definitions to a temporary file
+        tmpfile_path = (
+            path(tempfile.mkdtemp(prefix="rocprof_counter_defs_", dir="/tmp"))
+            / "counter_defs.yaml"
+        )
+        with open(tmpfile_path, "w") as tmpfile:
+            yaml.dump(counter_defs, tmpfile, default_flow_style=False, sort_keys=False)
+        # Set rocprofiler sdk counter definitions
+        new_env["ROCPROFILER_METRICS_PATH"] = str(tmpfile_path.parent)
+        console_debug(
+            f"Adding env var for counter definitions: ROCPROFILER_METRICS_PATH={new_env['ROCPROFILER_METRICS_PATH']}"
+        )
 
-    # set required env var for mi300
-    if mspec.gpu_model.lower() not in ("mi50", "mi60", "mi210", "mi250", "mi250x"):
-        if not new_env:
-            new_env = os.environ.copy()
+    # set required env var for >= mi300
+    if mspec.gpu_model.lower() not in (
+        "mi50",
+        "mi60",
+        "mi100",
+        "mi210",
+        "mi250",
+        "mi250x",
+    ):
         new_env["ROCPROFILER_INDIVIDUAL_XCC_MODE"] = "1"
 
     is_timestamps = False
@@ -866,8 +820,6 @@ def run_prof(
 
     if rocprof_cmd == "rocprofiler-sdk":
         app_cmd = options.pop("APP_CMD")
-        if not new_env:
-            new_env = os.environ.copy()
         for key, value in options.items():
             new_env[key] = value
         console_debug("rocprof sdk env vars: {}".format(new_env))
@@ -878,14 +830,9 @@ def run_prof(
     else:
         console_debug("rocprof command: {}".format([rocprof_cmd] + options))
         # profile the app
-        if new_env:
-            success, output = capture_subprocess_output(
-                [rocprof_cmd] + options, new_env=new_env, profileMode=True
-            )
-        else:
-            success, output = capture_subprocess_output(
-                [rocprof_cmd] + options, profileMode=True
-            )
+        success, output = capture_subprocess_output(
+            [rocprof_cmd] + options, new_env=new_env, profileMode=True
+        )
 
     time_2 = time.time()
     console_debug(
@@ -894,8 +841,8 @@ def run_prof(
         )
     )
 
-    # Delete temporary files
-    if new_env and "ROCPROFILER_METRICS_PATH" in new_env:
+    # Delete counter definition temporary directory
+    if new_env.get("ROCPROFILER_METRICS_PATH"):
         shutil.rmtree(new_env["ROCPROFILER_METRICS_PATH"], ignore_errors=True)
 
     if not success:
@@ -959,7 +906,7 @@ def run_prof(
             workload_dir + "/out/pmc_1/results_" + fbase + ".csv", index=False
         )
 
-    if new_env and not using_v3() and not using_v1():
+    if not using_v3() and not using_v1():
         # flatten tcc for applicable mi300 input
         f = path(workload_dir + "/out/pmc_1/results_" + fbase + ".csv")
         xcds = mi_gpu_specs.get_num_xcds(
