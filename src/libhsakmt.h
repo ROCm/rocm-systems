@@ -32,6 +32,7 @@
 #include "hsakmt/hsakmt.h"
 #include "hsakmt/hsakmt_drm.h"
 
+#include "impl/wddm/va_mgr.h"
 #include "impl/wddm/types.h"
 #include "impl/wddm/device.h"
 
@@ -60,7 +61,15 @@ struct hsakmtRuntime {
     check_avail_sysram(false),
     max_single_alloc_size(0),
     enable_thunk_sub_allocator(0),
+    local_heap_space_start_(0),
+    local_heap_space_size_(0),
     default_node(1) {}
+
+  void HeapInit();
+  void HeapFini();
+  bool ReserveLocalHeapSpace();
+  bool FreeLocalHeapSpace();
+  void InitLocalHeapMgr();
 
   pthread_mutex_t hsakmt_mutex;
   const char *dxg_device_name = "/dev/dxg";
@@ -79,6 +88,13 @@ struct hsakmtRuntime {
   size_t max_single_alloc_size;
   int enable_thunk_sub_allocator;
   uint32_t default_node;
+
+  /* local heap means bo's backend is vram of all GPUs */
+  uint64_t local_heap_space_start_;
+  uint64_t local_heap_space_size_;
+
+  /* manage the reserved local heap space which shared by CPU and GPUs */
+  std::unique_ptr<wsl::thunk::VaMgr> local_heap_mgr_;
 };
 
 extern hsakmtRuntime *dxg_runtime;

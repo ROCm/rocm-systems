@@ -26,6 +26,7 @@
 #include <cstring>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/mman.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <cstdio>
@@ -33,7 +34,130 @@
 #include <cassert>
 #include "libhsakmt.h"
 
+
 hsakmtRuntime *dxg_runtime = new hsakmtRuntime();
+
+void hsakmtRuntime::HeapInit() {
+    ReserveLocalHeapSpace();
+    InitLocalHeapMgr();
+}
+
+void hsakmtRuntime::HeapFini() {
+    FreeLocalHeapSpace();
+}
+
+/*
+ * To find the avaliable same range for cpu
+ * virtual space and gpu virtual space.
+ * sys_va_size of cpu va range is larger 1G
+ * than gpu va range, otherwise ReserveGPUVirtualAddress
+ * will return error.
+ */
+bool hsakmtRuntime::ReserveLocalHeapSpace() {
+    uint64_t sys_va[16] = {0};
+    uint64_t local_va;
+    uint64_t sys_va_size;
+    int match_index = -1;
+    uint64_t align = 0x40000000; /* 1G */
+    void* ptr = NULL;
+
+    wsl::thunk::WDDMDevice* device;
+    uint64_t total_local_size = 0;
+    size_t num_adapters = get_num_wddmdev();
+    for (uint32_t j = 0; j < num_adapters; j++) {
+        device = get_wddmdev(j+1);
+        if (device == nullptr)
+            return -1;
+        total_local_size += wsl::AlignUp(device->LocalHeapSize(), align) * 4;
+    }
+
+    local_heap_space_start_ = 0;
+    local_heap_space_size_ = total_local_size;
+    sys_va_size = local_heap_space_size_ + align;
+
+    /* it will retry 16 times to find the avaliable range. */
+    for (int i = 0; i < 16; i++) {
+        local_va = 0;
+        ptr = mmap(NULL, sys_va_size , PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+        if (ptr == MAP_FAILED) {
+            pr_err("fail to reserve cpu va in %d time!\n", i);
+            break;
+        }
+
+        sys_va[i] = (uint64_t)ptr;
+
+        int match_cnt = 0;
+        for (uint32_t j = 0; j < num_adapters; j++) {
+            device = get_wddmdev(j+1);
+            uint64_t start = (local_heap_space_start_ == 0) ? (uint64_t)ptr : local_heap_space_start_;
+            uint64_t end = start + ((local_heap_space_start_ == 0) ? sys_va_size : local_heap_space_size_) + 1;
+
+            if (wsl::thunk::d3dthunk::ReserveGpuVirtualAddress(
+                        device->GetAdapter(), local_heap_space_size_,
+                        start,
+                        end, &local_va) == ErrorCode::Success) {
+
+                match_cnt++;
+                local_heap_space_start_ = local_va;
+                pr_debug("success to reserve gpu va %lx and va cpu %p in %d time\n",
+                        local_va, ptr, i);
+            } else {
+                pr_err("%s fail to reserve gpu va for cpu va %p in %d time!\n",
+                        __FUNCTION__, ptr, i);
+            }
+        }
+
+        if (match_cnt == num_adapters) {
+                match_index = i;
+                break;
+        }
+    }
+
+    if (match_index >= 0) {
+        /* release cpu unused ranges*/
+        uint64_t left_size = local_va - sys_va[match_index];
+        uint64_t right_size = align - left_size;
+        if ((left_size > 0) && munmap((void*)sys_va[match_index], left_size))
+            pr_err("fail to unmap left %lx with size %lx\n", sys_va[match_index], left_size);
+        if ((right_size > 0) && munmap((void*)(local_va + local_heap_space_size_), right_size))
+            pr_err("fail to unmap right %lx with size %lx\n", (local_va + local_heap_space_size_), right_size);
+    } else {
+        pr_err("fail to reserve Local Heap Space!\n");
+        local_heap_space_start_ = 0;
+        local_heap_space_size_ = 0;
+    }
+
+    /* free match fail address for cpu va */
+    int free = match_index >= 0 ? match_index : 16;
+    for (int j = 0; j < free; j++) {
+        if (sys_va[j] != 0 && munmap((void*)sys_va[j], sys_va_size)) {
+            pr_err("fail to unmap %d %lx\n", j, sys_va[j]);
+        }
+    }
+
+    return match_index >= 0;
+}
+
+bool hsakmtRuntime::FreeLocalHeapSpace() {
+    wsl::thunk::WDDMDevice* device;
+    size_t num_adapters = get_num_wddmdev();
+    for (uint32_t j = 0; j < num_adapters; j++) {
+        device = get_wddmdev(j+1);
+        if (device == nullptr)
+            return -1;
+        wsl::thunk::d3dthunk::FreeGpuVirtualAddress(device->GetAdapter(), local_heap_space_start_, local_heap_space_size_);
+    }
+
+    void *cpu = (void *)local_heap_space_start_;
+    return munmap(cpu, local_heap_space_size_) == 0;
+}
+
+void hsakmtRuntime::InitLocalHeapMgr() {
+  local_heap_mgr_ = std::make_unique<wsl::thunk::VaMgr>(local_heap_space_start_,
+                                          local_heap_space_size_,
+                                          DEFAULT_GPU_PAGE_SIZE);
+}
+
 /* is_forked_child detects when the process has forked since the last
  * time this function was called. We cannot rely on pthread_atfork
  * because the process can fork without calling the fork function in

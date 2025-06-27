@@ -183,6 +183,7 @@ public:
   D3DKMT_HANDLE PagingFence() const { return page_syncobj_; }
   D3DKMT_HANDLE DeviceHandle() const { return device_; }
   LUID GetLuid() const { return adapter_luid_; }
+  D3DKMT_HANDLE GetAdapter() const { return adapter_; }
 
   const thunk_proxy::DeviceInfo& DeviceInfo() const { return device_info_; }
 
@@ -225,14 +226,11 @@ private:
   void InitCmdbufInfo(void);
   bool ReserveSystemHeapSpace(void);
   bool FreeSystemHeapSpace(void);
-  bool ReserveLocalHeapSpace(void);
   bool InitHandleApertureSpace(void);
   bool CommitSystemHeapSpace(void* addr, int64_t size, bool lock=false);
   bool DecommitSystemHeapSpace(void* addr, int64_t size);
   bool CommitSystemHeapSpaceIPC(void* addr, int64_t size, int &fd, bool lock=false);
   bool DecommitSystemHeapSpaceIPC(void* addr, int64_t size, int &memfd);
-  bool FreeLocalHeapSpace(void);
-  void InitVaMgr();
   void InitHandleApertureMgr();
 
   D3DKMT_HANDLE adapter_;
@@ -246,8 +244,6 @@ private:
 
   uint64_t handle_aperture_start_;
   uint64_t handle_aperture_size_;
-  uint64_t local_heap_space_start_;
-  uint64_t local_heap_space_size_;
   uint64_t system_heap_space_start_;
   uint64_t system_heap_space_size_;
   uint32_t cmdbuf_size_;
@@ -257,7 +253,6 @@ private:
   // device info
   thunk_proxy::DeviceInfo device_info_;
 
-  std::unique_ptr<VaMgr> local_va_mgr_;
   std::unique_ptr<VaMgr> handle_aperture_mgr_;
   //CmdUtil cmd_util;
 };

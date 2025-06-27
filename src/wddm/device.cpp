@@ -67,16 +67,13 @@ WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_i
   CreateDevice();
   SetPowerOptimization(false);
   CreatePagingQueue();
-  ReserveLocalHeapSpace();
   ReserveSystemHeapSpace();
   InitHandleApertureSpace();
-  InitVaMgr();
   InitHandleApertureMgr();
   InitCmdbufInfo();
 }
 
 WDDMDevice::~WDDMDevice() {
-  FreeLocalHeapSpace();
   FreeSystemHeapSpace();
   DestroyPagingQueue();
   SetPowerOptimization(true);
@@ -308,87 +305,6 @@ bool WDDMDevice::FreeSystemHeapSpace(void) {
   return true;
 }
 
-/*
- * To find the avaliable same range for cpu
- * virtual space and gpu virtual space.
- * sys_va_size of cpu va range is larger 1G
- * than gpu va range, otherwise ReserveGPUVirtualAddress
- * will return error.
- */
-bool WDDMDevice::ReserveLocalHeapSpace(void) {
-  uint64_t sys_va[16] = {0};
-  uint64_t local_va;
-  uint64_t sys_va_size;
-  int match_index = -1;
-  uint64_t align = 0x40000000; /* 1G */
-  void* ptr = NULL;
-
-  local_heap_space_start_ = 0;
-  local_heap_space_size_ = AlignUp(LocalHeapSize(), align) * 4;
-  sys_va_size = local_heap_space_size_ + align;
-
-  /* it will retry 16 times to find the avaliable range. */
-  for (int i = 0; i < 16; i++) {
-    local_va = 0;
-    ptr = mmap(NULL, sys_va_size , PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
-    if (ptr == MAP_FAILED) {
-      pr_err("fail to reserve cpu va in %d time!\n", i);
-      break;
-    }
-
-    sys_va[i] = (uint64_t)ptr;
-
-    if (d3dthunk::ReserveGpuVirtualAddress(
-          adapter_, local_heap_space_size_,
-          (uint64_t)ptr,
-          (uint64_t)ptr + sys_va_size, &local_va) == ErrorCode::Success) {
-
-      match_index = i;
-      local_heap_space_start_ = local_va;
-      pr_debug("success to reserve gpu va %lx and va cpu %p in %d time\n",
-               local_va, ptr, i);
-      break;
-    } else {
-      pr_err("%s fail to reserve gpu va for cpu va %p in %d time!\n",
-              __FUNCTION__, ptr, i);
-    }
-  }
-
-  if (match_index >= 0) {
-    /* release cpu unused ranges*/
-    uint64_t left_size = local_va - sys_va[match_index];
-    uint64_t right_size = align - left_size;
-    if ((left_size > 0) && munmap((void*)sys_va[match_index], left_size))
-      pr_err("fail to unmap left %lx with size %lx\n", sys_va[match_index], left_size);
-    if ((right_size > 0) && munmap((void*)(local_va + local_heap_space_size_), right_size))
-      pr_err("fail to unmap right %lx with size %lx\n", (local_va + local_heap_space_size_), right_size);
-  } else {
-      pr_err("fail to reserve Local Heap Space!\n");
-  }
-
-  /* free match fail address for cpu va */
-  int free = match_index >= 0 ? match_index : 16;
-  for (int j = 0; j < free; j++) {
-    if (sys_va[j] != 0 && munmap((void*)sys_va[j], sys_va_size)) {
-      pr_err("fail to unmap %d %lx\n", j, sys_va[j]);
-    }
-  }
-
-  return match_index >= 0;
-}
-
-bool WDDMDevice::FreeLocalHeapSpace(void) {
-  d3dthunk::FreeGpuVirtualAddress(adapter_, local_heap_space_start_, local_heap_space_size_);
-  void *cpu = (void *)local_heap_space_start_;
-  return munmap(cpu, local_heap_space_size_) == 0;
-}
-
-void WDDMDevice::InitVaMgr() {
-  local_va_mgr_ = std::make_unique<VaMgr>(local_heap_space_start_,
-                                          local_heap_space_size_,
-                                          DEFAULT_GPU_PAGE_SIZE);
-}
-
 void WDDMDevice::InitHandleApertureMgr() {
   handle_aperture_mgr_ = std::make_unique<VaMgr>(handle_aperture_start_,
                                                  handle_aperture_size_,
@@ -474,7 +390,7 @@ ErrorCode WDDMDevice::ReserveGpuVirtualAddress(const thunk_proxy::AllocDomain do
     if (domain == thunk_proxy::kLocal && size >= GPU_HUGE_PAGE_SIZE)
       align = GPU_HUGE_PAGE_SIZE;
 
-    gpu_addr = local_va_mgr_->Alloc(size, align, hit_base_addr);
+    gpu_addr = dxg_runtime->local_heap_mgr_->Alloc(size, align, hit_base_addr);
     if (gpu_addr == 0)
       code = ErrorCode::OutOfGpuMemory;
 
@@ -499,7 +415,7 @@ ErrorCode WDDMDevice::FreeGpuVirtualAddress(const thunk_proxy::AllocDomain domai
 
       code = d3dthunk::FreeGpuVirtualAddress(&free_args);
   } else {
-    local_va_mgr_->Free(gpu_addr);
+      dxg_runtime->local_heap_mgr_->Free(gpu_addr);
   }
 
   return code;

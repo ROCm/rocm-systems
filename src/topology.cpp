@@ -373,6 +373,7 @@ HSAKMT_STATUS topology_sysfs_get_system_props(HsaSystemProperties& props) {
 
   dxg_topology->num_sysfs_nodes = num_adapters + 1;
 
+  dxg_runtime->HeapFini();
   for (auto device : dxg_topology->wdevices_)
     delete device;
   dxg_topology->wdevices_.clear();
@@ -383,6 +384,7 @@ HSAKMT_STATUS topology_sysfs_get_system_props(HsaSystemProperties& props) {
     assert(device && "Create WDDM Device fail");
     dxg_topology->wdevices_.push_back(device);
   }
+  dxg_runtime->HeapInit();
   props.NumNodes = dxg_topology->num_sysfs_nodes;
   if (dxg_runtime->default_node > num_adapters)
     dxg_runtime->default_node = num_adapters;
