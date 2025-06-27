@@ -406,6 +406,7 @@ namespace HSA {
                                hsa_executable_symbol_t symbol,
                                void *data),
       void *data);
+  hsa_status_t hsa_get_tile_config(hsa_agent_t agent_handle, void* config);
 
   //===--- Runtime Notifications ------------------------------------------===//
 

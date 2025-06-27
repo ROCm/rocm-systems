@@ -2590,6 +2590,19 @@ hsa_status_t hsa_executable_iterate_program_symbols(
   CATCH;
 }
 
+hsa_status_t hsa_get_tile_config(hsa_agent_t agent_handle, void* config) {
+  TRY;
+  IS_OPEN();
+  IS_BAD_PTR(config);
+
+  const core::Agent* agent_object = core::Agent::Convert(agent_handle);
+  IS_VALID(agent_object);
+
+  return agent_object->driver().GetTileConfig(agent_object->node_id(),
+                                              static_cast<HsaGpuTileConfig*>(config));
+  CATCH;
+}
+
 //===--- Runtime Notifications --------------------------------------------===//
 
 hsa_status_t hsa_status_string(

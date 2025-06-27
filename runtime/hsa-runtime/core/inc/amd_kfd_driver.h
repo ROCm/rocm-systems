@@ -126,6 +126,7 @@ public:
                               const void* buffer_base, uint64_t buffer_base_size) const override;
   hsa_status_t GetDeviceHandle(uint32_t node_id, void** device_handle) const override;
   hsa_status_t GetClockCounters(uint32_t node_id, HsaClockCounters* clock_counter) const override;
+  hsa_status_t GetTileConfig(uint32_t node_id, HsaGpuTileConfig* config) const override;
 
   hsa_status_t OpenSMI(uint32_t node_id, int* fd) const override;
 

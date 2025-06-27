@@ -885,5 +885,10 @@ hsa_status_t XdnaDriver::GetClockCounters(uint32_t node_id, HsaClockCounters* cl
   return HSA_STATUS_ERROR;
 }
 
+
+hsa_status_t XdnaDriver::GetTileConfig(uint32_t node_id, HsaGpuTileConfig* config) const {
+  return HSA_STATUS_ERROR;
+}
+
 } // namespace AMD
 } // namespace rocr

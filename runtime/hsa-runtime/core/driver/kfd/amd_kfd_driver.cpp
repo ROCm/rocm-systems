@@ -591,6 +591,16 @@ hsa_status_t KfdDriver::GetClockCounters(uint32_t node_id, HsaClockCounters* clo
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t KfdDriver::GetTileConfig(uint32_t node_id, HsaGpuTileConfig* config) const {
+  assert(config);
+
+  if (HSAKMT_CALL(hsaKmtGetTileConfig(node_id, config)) != HSAKMT_STATUS_SUCCESS) {
+    return HSA_STATUS_ERROR;
+  }
+
+  return HSA_STATUS_SUCCESS;
+}
+
 hsa_status_t KfdDriver::IsModelEnabled(bool* enable) const {
   // AIE does not support streaming performance monitor.
   HSAKMT_STATUS status = HSAKMT_STATUS_ERROR;

@@ -110,8 +110,8 @@ hsa_status_t ImageManagerKv::Initialize(hsa_agent_t agent_handle) {
   status = HSA::hsa_agent_get_info(
       agent_, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID), &node_id);
   assert(status == HSA_STATUS_SUCCESS);
-  HSAKMT_STATUS stat = HSAKMT_CALL(hsaKmtGetTileConfig(node_id, &tileConfig));
-  assert(stat == HSAKMT_STATUS_SUCCESS);
+  hsa_status_t stat = HSA::hsa_get_tile_config(agent_handle, &tileConfig);
+  assert(stat == HSA_STATUS_SUCCESS);
 
   // Initialize address library.
   // TODO(bwicakso) hard coded based on UGL parameters.

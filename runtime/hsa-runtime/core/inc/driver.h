@@ -283,6 +283,13 @@ public:
   virtual hsa_status_t GetClockCounters(uint32_t node_id,
                                         HsaClockCounters* clock_counter) const = 0;
 
+  /// @brief Get the tile configuration for a specific node.
+  ///
+  /// @param[in] node_id Node ID of the agent
+  /// @param[out] config Pointer to tile configuration
+  /// @return HSA_STATUS_SUCCESS if the driver successfully returns the tile configuration.
+  virtual hsa_status_t GetTileConfig(uint32_t node_id, HsaGpuTileConfig* config) const = 0;
+
   /// @brief Check if the HSA KMT Model is enabled
   /// @param[out] enable True if the model is enabled, false otherwise
   virtual hsa_status_t IsModelEnabled(bool* enable) const = 0;
