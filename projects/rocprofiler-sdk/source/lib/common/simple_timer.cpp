@@ -35,14 +35,16 @@ namespace rocprofiler
 {
 namespace common
 {
-simple_timer::simple_timer(std::string&& label)
+simple_timer::simple_timer(std::string&& label, int log_level)
 : m_label{std::move(label)}
+, m_os{simple_timer::get_log_stream(log_level)}
 {
     start();
 }
 
-simple_timer::simple_timer(std::string&& label, defer_start)
+simple_timer::simple_timer(std::string&& label, defer_start, int log_level)
 : m_label{std::move(label)}
+, m_os{simple_timer::get_log_stream(log_level)}
 {}
 
 simple_timer::~simple_timer()
@@ -52,7 +54,10 @@ simple_timer::~simple_timer()
     else if(m_end <= m_beg)
         stop();
 
-    ROCP_WARNING << fmt::format("{} :: {:12.6f} sec", m_label, get());
+    if(m_os)
+    {
+        (*m_os) << fmt::format("{} :: {:12.6f} sec", m_label, get());
+    }
 }
 
 void
@@ -79,6 +84,23 @@ simple_timer::get_nsec() const
 {
     if(m_end <= m_beg) return {};
     return std::chrono::duration_cast<std::chrono::nanoseconds>(m_end - m_beg).count();
+}
+
+std::ostream*
+simple_timer::get_log_stream(int log_level)
+{
+    switch(log_level)
+    {
+        case ROCP_LOG_LEVEL_NONE: return nullptr;
+        case ROCP_LOG_LEVEL_WARNING: return &ROCP_WARNING;
+        case ROCP_LOG_LEVEL_ERROR: return &ROCP_ERROR;
+        case ROCP_LOG_LEVEL_INFO: return &ROCP_INFO;
+        case ROCP_LOG_LEVEL_TRACE: return VLOG_IS_ON(log_level) ? &ROCP_INFO : nullptr;
+        default: break;
+    }
+
+    ROCP_CI_LOG(WARNING) << fmt::format("Unsupported log level for simple timer: {}", log_level);
+    return &ROCP_INFO;
 }
 
 std::ostream&

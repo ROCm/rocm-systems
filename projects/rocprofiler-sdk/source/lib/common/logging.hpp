@@ -52,10 +52,10 @@
 
 #if defined(ROCPROFILER_CI)
 #    define ROCP_CI_LOG_IF(NON_CI_LEVEL, ...) ROCP_FATAL_IF(__VA_ARGS__)
-#    define ROCP_CI_LOG(NON_CI_LEVEL, ...)    ROCP_FATAL
+#    define ROCP_CI_LOG(NON_CI_LEVEL)         ROCP_FATAL
 #else
 #    define ROCP_CI_LOG_IF(NON_CI_LEVEL, ...) ROCP_##NON_CI_LEVEL##_IF(__VA_ARGS__)
-#    define ROCP_CI_LOG(NON_CI_LEVEL, ...)    ROCP_##NON_CI_LEVEL
+#    define ROCP_CI_LOG(NON_CI_LEVEL)         ROCP_##NON_CI_LEVEL
 #endif
 
 namespace rocprofiler
