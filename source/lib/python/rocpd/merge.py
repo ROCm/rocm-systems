@@ -1,8 +1,7 @@
-#!/usr/bin/env python3
 ###############################################################################
 # MIT License
 #
-# Copyright (c) 2025 Advanced Micro Devices, Inc.
+# Copyright (c) 2023 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -23,19 +22,22 @@
 # THE SOFTWARE.
 ###############################################################################
 
+#
+# Utility classes to merge rpd files
+#
+#
 import argparse
 import os
 import sqlite3
 import time
+
 from collections import defaultdict
+from typing import List, Any, Dict
 from pathlib import Path
-from typing import List, Tuple, Any
 
-from .importer import RocpdImportData, execute_statement
-from .schema import RocpdSchema
-from .time_window import get_column_names
+# from .schema import RocpdSchema
 
-__all__ = ["RocpdMergeData", "merge"]
+__all__ = ["RocpdMerger", "execute"]
 
 
 def prepare_output_file(output: str) -> None:
@@ -51,137 +53,37 @@ def prepare_output_file(output: str) -> None:
     if output_path.is_file():
         output_path.unlink()
 
+class RocpdMerger():
 
-def get_database_list(import_data: RocpdImportData) -> List[Tuple[int, str, str]]:
-    """Get list of all attached databases with their sequence numbers, names, and file"""
-    return execute_statement(import_data, "PRAGMA database_list").fetchall()
-
-
-def get_table_names_per_alias(import_data: RocpdImportData, alias: str) -> List[str]:
-    """Get all table names from a specific database alias"""
-
-    query = f"SELECT name FROM {alias}.sqlite_master WHERE type='table';"
-    rows = execute_statement(import_data, query).fetchall()
-    return [table[0] for table in rows if not table[0].startswith("sqlite_")]
-
-
-def get_table_data(import_data: RocpdImportData, table_name: str):
-    """Get table data using execute_statement"""
-    return execute_statement(import_data, f"SELECT * FROM {table_name}").fetchall()
-
-
-def get_uuid_guid(import_data: RocpdImportData, metadata_table: str) -> Tuple[str, str]:
-    """Get UUID and GUID values from the metadata table"""
-    uuid = execute_statement(
-        import_data,
-        f"SELECT value FROM {metadata_table} WHERE tag='uuid' ORDER BY id ASC",
-    ).fetchone()[0]
-    guid = execute_statement(
-        import_data,
-        f"SELECT value FROM {metadata_table} WHERE tag='guid' ORDER BY id ASC",
-    ).fetchone()[0]
-    return uuid, guid
-
-
-class RocpdMergeData:
-    """Utility class for merging ROCProfiler databases."""
-
-    def __init__(self, import_data: RocpdImportData, output_path: str):
-        if not isinstance(import_data, RocpdImportData):
+    def __init__(self, input, output):
+ 
+        if isinstance(input, sqlite3.Connection):
             raise ValueError(
-                f"Expected RocpdImportData, got {type(import_data).__name__}"
+                "RocpdMerger does not accept existing sqlite3 connections"
+            )
+        elif isinstance(input, str):
+             raise ValueError(
+                "RocpdMerger only accepts a list of filenames to merge, not a single filename"
+            )
+        elif isinstance(input, list) and len(input) > 0 and isinstance(input[0], str):
+            self._filenames = input[:]
+            self._output = output
+            prepare_output_file(self._output)
+            self._connection = sqlite3.connect(self._output)
+            
+        else:
+            raise ValueError(
+                f"input is unsupported type. Expected list of strings. type={type(input).__name__}"
             )
 
-        if not output_path:
-            raise ValueError("output_path cannot be empty")
-
-        self.import_data = import_data
-        self.output_path = output_path
-        self._connection = None
-
     def __enter__(self):
-        """Support 'with RocpdMergeData(...) as merger:' pattern"""
-        prepare_output_file(self.output_path)
-        self._connection = sqlite3.connect(self.output_path)
+        # support "with RocpdMerge(...) as db:":
         return self
 
-    def __exit__(self, exc_type, *_):
-        """Clean up resources"""
-        if self._connection:
-            try:
-                if exc_type is None:
-                    self._connection.commit()
-                else:
-                    self._connection.rollback()
-            finally:
-                self._connection.close()
-                self._connection = None
-
-        return False
-
-    def merge(self) -> None:
-        """Execute the merge operation"""
-
-        all_tables = self._get_all_tables()
-        print(f"Merging {len(all_tables)} tables...")
-
-        # Create tables per uuid / guid
-        uuid_guuids = []
-        for table_name in all_tables:
-            if "rocpd_metadata" in table_name:
-                uuid, guid = get_uuid_guid(self.import_data, table_name)
-                self._connection.executescript(RocpdSchema(uuid=uuid, guid=guid).tables)
-                uuid_guuids.append((uuid, guid))
-
-        # Insert data in tables
-        for table_name in all_tables:
-            if "rocpd_metadata" in table_name:
-                continue
-            data = get_table_data(self.import_data, table_name)
-            if data:
-                column_names = get_column_names(self.import_data, table_name)
-                self._insert_data_into_merged(data, len(column_names), table_name)
-
-        # Create rocpd_<> views
-        views_by_base_name = defaultdict(list)  # view name -> list of table names
-        for _uuid, _ in uuid_guuids:
-            for tablename_with_uuid in all_tables:
-                if _uuid in tablename_with_uuid:
-                    table_name = tablename_with_uuid.replace(_uuid, "")
-                    views_by_base_name[table_name].append(tablename_with_uuid)
-
-        self._connection.executescript(self._create_union_views(views_by_base_name))
-
-        # Create rest of the views
-        self._connection.executescript(RocpdSchema().views)
-
-    def _get_all_tables(self) -> list:
-        """Get all tables from all attached databases and verify no duplicates exist"""
-
-        dbs = get_database_list(self.import_data)
-        if len(dbs) <= 2:  # main and temp
-            raise ValueError("No databases attached for merging")
-
-        all_tables = []
-        for db in dbs:
-            all_tables.extend(get_table_names_per_alias(self.import_data, db[1]))
-
-        # Check for duplicates
-        unique_tables = set(all_tables)
-        assert len(all_tables) == len(
-            unique_tables
-        ), f"Duplicate tables found: {set([x for x in all_tables if all_tables.count(x) > 1])}"
-
-        return all_tables
-
-    def _insert_data_into_merged(
-        self, table_data: list, columns_count: int, table_name: str
-    ) -> None:
-        """Insert data into merged database"""
-        placeholders = ", ".join(["?" for _ in range(columns_count)])
-        insert_statement = f"INSERT INTO {table_name} VALUES ({placeholders})"
-        self._connection.executemany(insert_statement, table_data)
-
+    def __exit__(self, exc_type, exc_value, traceback):
+        self._connection.close()
+        print('Closing connection to output database')
+    
     def _create_union_views(self, views_by_base_name) -> list:
         union_views = []
 
@@ -199,34 +101,101 @@ class RocpdMergeData:
                 )
         return "\n\n".join(union_views)
 
+    def merge(self):
+        """
+        Merge multiple SQLite databases into a single destination database.
+        """
+        cur_dest = self._connection.cursor()
 
-def merge(import_data: RocpdImportData, **kwargs: Any) -> None:
-    start_time = time.time()
+        views_by_base_name = defaultdict(list) 
+        
+        versions = [] # Check that all databases have the same schema version
+        
+        for orig in self._filenames:
+            
+            print(f'Adding {orig}')
+            
+            con_orig = sqlite3.connect(orig)
+            cur_orig = con_orig.cursor()
 
-    output_path = kwargs.get("output_merge_path")
-    with RocpdMergeData(import_data, output_path) as merger:
-        merger.merge()
+            cur_orig.execute("SELECT name FROM sqlite_master WHERE type='table';")
+            tables = cur_orig.fetchall()
+            print(f'Tables found: {len(tables) -1}')
+            
+            uudid_statement = "SELECT value FROM rocpd_metadata WHERE tag='uuid'"
+            _uuid = [ itr[0] for itr in cur_orig.execute(uudid_statement).fetchall()][0]
+            
+            version_statement = "SELECT value FROM rocpd_metadata WHERE tag='schema_version'"
+            versions.extend([ itr[0] for itr in cur_orig.execute(version_statement).fetchall()])
+            
+            for table in tables:
+                table_name = table[0]
+                if "sqlite_sequence" in table_name:
+                    continue
 
-    elapsed_time = time.time() - start_time
-    print(f"Merge completed successfully! Output saved to: {output_path}")
-    print(f"Time: {elapsed_time:.2f} sec")
+                view_name = table_name.replace(_uuid, "")
+                views_by_base_name[view_name].append(table_name)
 
+                cur_orig.execute(f"SELECT sql FROM sqlite_master WHERE type='table' AND name='{table_name}'")
+                create_table_stmt = cur_orig.fetchone()[0]
+
+                cur_dest.execute(create_table_stmt)
+
+                cur_orig.execute(f"SELECT * FROM {table_name}")
+                rows = cur_orig.fetchall()
+                for row in rows:
+                    placeholders = ', '.join('?' * len(row))
+                    cur_dest.execute(f"INSERT INTO {table_name} VALUES ({placeholders})", row)
+                    
+            con_orig.close()
+            
+        assert len(list(set(versions))) == 1 , f'Multiple versions found : {list(set(versions))}'
+        
+        # Create rocpd_<> views
+        self._connection.executescript(self._create_union_views(views_by_base_name))
+        
+        # Create data views
+        con_orig = sqlite3.connect(self._filenames[0])
+        orig_cursor = con_orig.cursor()
+        orig_cursor.execute("SELECT name, sql FROM sqlite_master WHERE type='view' AND name NOT LIKE 'rocpd_%';")
+        views = orig_cursor.fetchall()
+        
+        for view  in views:
+            _ , sql_view = view
+            self._connection.executescript(sql_view)
+            
+        con_orig.close()
+        # self._connection.executescript(RocpdSchema().views)
+        
+        self._connection.commit()
 
 #
 # Command-line interface functions
 #
 def add_args(parser):
     """Add arguments for merger."""
-    merge_options = parser.add_argument_group("Merge options")
-    merge_options.add_argument(
-        "--output-merge-path",
-        help="Sets the output path where the output merge files will be saved (default path: `./rocpd-output-data/db_merged.db`)",
-        default=os.environ.get("ROCPD_OUTPUT_PATH", "./rocpd-output-data/db_merged.db"),
+    
+    o_options = parser.add_argument_group("Output options")
+
+    o_options.add_argument(
+        "-o",
+        "--output-file",
+        help="Sets the base output file name",
+        default=os.environ.get("ROCPD_OUTPUT_NAME", "merged"),
+        type=str,
+        required=False,
+    )
+    o_options.add_argument(
+        "-d",
+        "--output-path",
+        help="Sets the output path where the output files will be saved (default path: `./rocpd-output-data`)",
+        default=os.environ.get("ROCPD_OUTPUT_PATH", "./rocpd-output-data"),
         type=str,
         required=False,
     )
 
-    return ["output_merge_path"]
+    return ["output_file", "output_path"]
+
 
 
 def process_args(args, valid_args):
@@ -239,13 +208,22 @@ def process_args(args, valid_args):
     return ret
 
 
-def execute(input_rpd: str, **kwargs: Any) -> RocpdImportData:
+def execute(inputs: List[str], **kwargs: Dict[str, Any]) -> None:
 
-    importData = RocpdImportData(input_rpd)
+    start_time = time.time()
 
-    merge(importData, **kwargs)
+    output_path = kwargs.get("output_path")
+    output_filename = kwargs.get("output_file") + ".db"
+    output = Path(output_path, output_filename)
+    
+    with RocpdMerger(inputs, output) as merger:
+        merger.merge()
 
-    return importData
+    elapsed_time = time.time() - start_time
+    
+    print(f"Merge completed successfully! Output saved to: {output}")
+    print(f"Time: {elapsed_time:.2f} sec")
+
 
 
 def main(argv=None) -> int:
