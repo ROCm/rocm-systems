@@ -54,22 +54,21 @@ simple_timer::~simple_timer()
     else if(m_end <= m_beg)
         stop();
 
-    if(m_os)
-    {
-        (*m_os) << fmt::format("{} :: {:12.6f} sec", m_label, get());
-    }
+    report();
 }
 
-void
+simple_timer&
 simple_timer::start()
 {
     m_beg = clock_type::now();
+    return *this;
 }
 
-void
+simple_timer&
 simple_timer::stop()
 {
     m_end = clock_type::now();
+    return *this;
 }
 
 double
@@ -84,6 +83,16 @@ simple_timer::get_nsec() const
 {
     if(m_end <= m_beg) return {};
     return std::chrono::duration_cast<std::chrono::nanoseconds>(m_end - m_beg).count();
+}
+
+simple_timer&
+simple_timer::report()
+{
+    if(m_os)
+    {
+        (*m_os) << fmt::format("{} :: {:12.6f} sec", m_label, get());
+    }
+    return *this;
 }
 
 std::ostream*
