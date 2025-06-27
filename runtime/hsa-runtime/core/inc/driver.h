@@ -258,6 +258,17 @@ public:
     return HSA_STATUS_ERROR_INVALID_AGENT;
   }
 
+  /// @brief Sets trap handler and trap buffer to be used for all queues associated
+  /// with the specified NodeId within this process context
+  /// @param[in] node_id Node ID of the agent
+  /// @param[in] base Trap handler base address
+  /// @param[in] base_size Trap handler base size
+  /// @param[in] buffer_base Trap buffer base address
+  /// @param[in] buffer_base_size Trap buffer size
+  /// @return HSA_STATUS_SUCCESS if the driver successfully sets the trap handler.
+  virtual hsa_status_t SetTrapHandler(uint32_t node_id, const void* base, uint64_t base_size,
+                                      const void* buffer_base, uint64_t buffer_base_size) const = 0;
+
   /// @brief Check if the HSA KMT Model is enabled
   /// @param[out] enable True if the model is enabled, false otherwise
   virtual hsa_status_t IsModelEnabled(bool* enable) const = 0;

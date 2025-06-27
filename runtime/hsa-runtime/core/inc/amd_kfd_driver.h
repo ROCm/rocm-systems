@@ -122,6 +122,8 @@ public:
   hsa_status_t SPMSetDestBuffer(uint32_t preferred_node_id, uint32_t size_bytes, uint32_t* timeout,
                                 uint32_t* size_copied, void* dest_mem_addr,
                                 bool* is_spm_data_loss) const override;
+  hsa_status_t SetTrapHandler(uint32_t node_id, const void* base, uint64_t base_size,
+                              const void* buffer_base, uint64_t buffer_base_size) const override;
 
   hsa_status_t OpenSMI(uint32_t node_id, int* fd) const override;
 

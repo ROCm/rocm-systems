@@ -559,6 +559,16 @@ bool KfdDriver::BindXnackMode() {
   return (mode != Flag::XNACK_DISABLE);
 }
 
+hsa_status_t KfdDriver::SetTrapHandler(uint32_t node_id, const void* base, uint64_t base_size,
+                                       const void* buffer_base, uint64_t buffer_base_size) const {
+  if (HSAKMT_CALL(hsaKmtSetTrapHandler(node_id, const_cast<void*>(base), base_size,
+                                       const_cast<void*>(buffer_base), buffer_base_size)) !=
+      HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+
+  return HSA_STATUS_SUCCESS;
+}
+
 hsa_status_t KfdDriver::IsModelEnabled(bool* enable) const {
   // AIE does not support streaming performance monitor.
   HSAKMT_STATUS status = HSAKMT_STATUS_ERROR;

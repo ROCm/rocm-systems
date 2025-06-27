@@ -872,5 +872,10 @@ hsa_status_t XdnaDriver::ConfigHwCtx(const PDICache& pdi_bo_handles, HSA_QUEUEID
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t XdnaDriver::SetTrapHandler(uint32_t node_id, const void* base, uint64_t base_size,
+                                        const void* buffer_base, uint64_t buffer_base_size) const {
+  return HSA_STATUS_ERROR;
+}
+
 } // namespace AMD
 } // namespace rocr

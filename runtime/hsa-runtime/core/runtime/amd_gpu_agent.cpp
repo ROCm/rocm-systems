@@ -2249,10 +2249,8 @@ hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttra
   }
 
   // Bind the trap handler to this node.
-  HSAKMT_STATUS retKmt =
-      HSAKMT_CALL(hsaKmtSetTrapHandler(node_id(), trap_code_buf_, trap_code_buf_size_, tma_addr, tma_size));
-
-  return (retKmt != HSAKMT_STATUS_SUCCESS) ? HSA_STATUS_ERROR : HSA_STATUS_SUCCESS;
+  return driver().SetTrapHandler(node_id(), trap_code_buf_, trap_code_buf_size_, tma_addr,
+                                 tma_size);
 }
 
 void GpuAgent::BindTrapHandler() {
@@ -2292,9 +2290,9 @@ void GpuAgent::BindTrapHandler() {
   }
 
   // Bind the trap handler to this node.
-  HSAKMT_STATUS err = HSAKMT_CALL(hsaKmtSetTrapHandler(node_id(), trap_code_buf_, trap_code_buf_size_,
-                                           tma_addr, tma_size));
-  assert(err == HSAKMT_STATUS_SUCCESS && "hsaKmtSetTrapHandler() failed");
+  hsa_status_t err =
+      driver().SetTrapHandler(node_id(), trap_code_buf_, trap_code_buf_size_, tma_addr, tma_size);
+  assert(err == HSA_STATUS_SUCCESS && "SetTrapHandler() failed");
 }
 
 void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
