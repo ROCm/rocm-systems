@@ -203,7 +203,7 @@ TEST_CASE("Unit_hipGetTexObjectResourceDesc_Negative_Parameters") {
 TEST_CASE("Unit_hipGetTexObjectResourceViewDesc_positive") {
   CHECK_IMAGE_SUPPORT;
   CTX_CREATE();
-  TexObjectTestWrapper *tex_obj_wrapper = new TexObjectTestWrapper(true);
+  TexObjectTestWrapper* tex_obj_wrapper = new TexObjectTestWrapper(true);
 
   HIP_RESOURCE_VIEW_DESC check_desc;
   memset(&check_desc, 0, sizeof(check_desc));
@@ -236,7 +236,7 @@ TEST_CASE("Unit_hipGetTexObjectResourceViewDesc_positive") {
 TEST_CASE("Unit_hipGetTexObjectResourceViewDesc_Negative_Parameters") {
   CHECK_IMAGE_SUPPORT;
   CTX_CREATE();
-  TexObjectTestWrapper *tex_obj_wrapper = new TexObjectTestWrapper(true);
+  TexObjectTestWrapper* tex_obj_wrapper = new TexObjectTestWrapper(true);
 
   HIP_RESOURCE_VIEW_DESC check_desc;
   memset(&check_desc, 0, sizeof(check_desc));
@@ -289,7 +289,7 @@ TEST_CASE("Unit_hipGetTexObjectTextureDesc_positive") {
   CHECK_IMAGE_SUPPORT;
   CTX_CREATE();
 
-  TexObjectTestWrapper *tex_obj_wrapper = new TexObjectTestWrapper(false);
+  TexObjectTestWrapper* tex_obj_wrapper = new TexObjectTestWrapper(false);
 
   HIP_TEXTURE_DESC check_desc;
   memset(&check_desc, 0, sizeof(check_desc));
@@ -323,7 +323,7 @@ TEST_CASE("Unit_hipGetTexObjectTextureDesc_Negative_Parameters") {
   CHECK_IMAGE_SUPPORT;
   CTX_CREATE();
 
-  TexObjectTestWrapper *tex_obj_wrapper = new TexObjectTestWrapper(false);
+  TexObjectTestWrapper* tex_obj_wrapper = new TexObjectTestWrapper(false);
 
   HIP_TEXTURE_DESC check_desc;
   memset(&check_desc, 0, sizeof(check_desc));
@@ -371,7 +371,7 @@ TEST_CASE("Unit_hipTexObjectDestroy_positive") {
   CHECK_IMAGE_SUPPORT;
   CTX_CREATE();
 
-  TexObjectTestWrapper *tex_obj_wrapper = new TexObjectTestWrapper(false, true);
+  TexObjectTestWrapper* tex_obj_wrapper = new TexObjectTestWrapper(false, true);
   REQUIRE(hipTexObjectDestroy(tex_obj_wrapper->texture_object) == hipSuccess);
   delete tex_obj_wrapper;
   CTX_DESTROY();
