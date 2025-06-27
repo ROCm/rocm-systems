@@ -53,16 +53,15 @@ def prepare_output_file(output: str) -> None:
     if output_path.is_file():
         output_path.unlink()
 
-class RocpdMerger():
+
+class RocpdMerger:
 
     def __init__(self, input, output):
- 
+
         if isinstance(input, sqlite3.Connection):
-            raise ValueError(
-                "RocpdMerger does not accept existing sqlite3 connections"
-            )
+            raise ValueError("RocpdMerger does not accept existing sqlite3 connections")
         elif isinstance(input, str):
-             raise ValueError(
+            raise ValueError(
                 "RocpdMerger only accepts a list of filenames to merge, not a single filename"
             )
         elif isinstance(input, list) and len(input) > 0 and isinstance(input[0], str):
@@ -70,7 +69,7 @@ class RocpdMerger():
             self._output = output
             prepare_output_file(self._output)
             self._connection = sqlite3.connect(self._output)
-            
+
         else:
             raise ValueError(
                 f"input is unsupported type. Expected list of strings. type={type(input).__name__}"
@@ -82,8 +81,7 @@ class RocpdMerger():
 
     def __exit__(self, exc_type, exc_value, traceback):
         self._connection.close()
-        print('Closing connection to output database')
-    
+
     def _create_union_views(self, views_by_base_name) -> list:
         union_views = []
 
@@ -107,27 +105,31 @@ class RocpdMerger():
         """
         cur_dest = self._connection.cursor()
 
-        views_by_base_name = defaultdict(list) 
-        
-        versions = [] # Check that all databases have the same schema version
-        
+        views_by_base_name = defaultdict(list)
+
+        versions = []  # Check that all databases have the same schema version
+
         for orig in self._filenames:
-            
-            print(f'Adding {orig}')
-            
+
+            print(f"Adding {orig}")
+
             con_orig = sqlite3.connect(orig)
             cur_orig = con_orig.cursor()
 
             cur_orig.execute("SELECT name FROM sqlite_master WHERE type='table';")
             tables = cur_orig.fetchall()
-            print(f'Tables found: {len(tables) -1}')
-            
+            print(f"Tables found: {len(tables) -1}")
+
             uudid_statement = "SELECT value FROM rocpd_metadata WHERE tag='uuid'"
-            _uuid = [ itr[0] for itr in cur_orig.execute(uudid_statement).fetchall()][0]
-            
-            version_statement = "SELECT value FROM rocpd_metadata WHERE tag='schema_version'"
-            versions.extend([ itr[0] for itr in cur_orig.execute(version_statement).fetchall()])
-            
+            _uuid = [itr[0] for itr in cur_orig.execute(uudid_statement).fetchall()][0]
+
+            version_statement = (
+                "SELECT value FROM rocpd_metadata WHERE tag='schema_version'"
+            )
+            versions.extend(
+                [itr[0] for itr in cur_orig.execute(version_statement).fetchall()]
+            )
+
             for table in tables:
                 table_name = table[0]
                 if "sqlite_sequence" in table_name:
@@ -136,7 +138,9 @@ class RocpdMerger():
                 view_name = table_name.replace(_uuid, "")
                 views_by_base_name[view_name].append(table_name)
 
-                cur_orig.execute(f"SELECT sql FROM sqlite_master WHERE type='table' AND name='{table_name}'")
+                cur_orig.execute(
+                    f"SELECT sql FROM sqlite_master WHERE type='table' AND name='{table_name}'"
+                )
                 create_table_stmt = cur_orig.fetchone()[0]
 
                 cur_dest.execute(create_table_stmt)
@@ -144,37 +148,44 @@ class RocpdMerger():
                 cur_orig.execute(f"SELECT * FROM {table_name}")
                 rows = cur_orig.fetchall()
                 for row in rows:
-                    placeholders = ', '.join('?' * len(row))
-                    cur_dest.execute(f"INSERT INTO {table_name} VALUES ({placeholders})", row)
-                    
+                    placeholders = ", ".join("?" * len(row))
+                    cur_dest.execute(
+                        f"INSERT INTO {table_name} VALUES ({placeholders})", row
+                    )
+
             con_orig.close()
-            
-        assert len(list(set(versions))) == 1 , f'Multiple versions found : {list(set(versions))}'
-        
+
+        assert (
+            len(list(set(versions))) == 1
+        ), f"Multiple versions found : {list(set(versions))}"
+
         # Create rocpd_<> views
         self._connection.executescript(self._create_union_views(views_by_base_name))
-        
+
         # Create data views
         con_orig = sqlite3.connect(self._filenames[0])
         orig_cursor = con_orig.cursor()
-        orig_cursor.execute("SELECT name, sql FROM sqlite_master WHERE type='view' AND name NOT LIKE 'rocpd_%';")
+        orig_cursor.execute(
+            "SELECT name, sql FROM sqlite_master WHERE type='view' AND name NOT LIKE 'rocpd_%';"
+        )
         views = orig_cursor.fetchall()
-        
-        for view  in views:
-            _ , sql_view = view
+
+        for view in views:
+            _, sql_view = view
             self._connection.executescript(sql_view)
-            
+
         con_orig.close()
         # self._connection.executescript(RocpdSchema().views)
-        
+
         self._connection.commit()
+
 
 #
 # Command-line interface functions
 #
 def add_args(parser):
     """Add arguments for merger."""
-    
+
     o_options = parser.add_argument_group("Output options")
 
     o_options.add_argument(
@@ -197,7 +208,6 @@ def add_args(parser):
     return ["output_file", "output_path"]
 
 
-
 def process_args(args, valid_args):
     ret = {}
     for itr in valid_args:
@@ -215,15 +225,14 @@ def execute(inputs: List[str], **kwargs: Dict[str, Any]) -> None:
     output_path = kwargs.get("output_path")
     output_filename = kwargs.get("output_file") + ".db"
     output = Path(output_path, output_filename)
-    
+
     with RocpdMerger(inputs, output) as merger:
         merger.merge()
 
     elapsed_time = time.time() - start_time
-    
+
     print(f"Merge completed successfully! Output saved to: {output}")
     print(f"Time: {elapsed_time:.2f} sec")
-
 
 
 def main(argv=None) -> int:
