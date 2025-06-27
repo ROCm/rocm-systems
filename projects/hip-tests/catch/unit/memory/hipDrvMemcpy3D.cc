@@ -66,9 +66,7 @@ TEST_CASE("Unit_hipDrvMemcpy3D_Positive_Synchronization_Behavior") {
 
   SECTION("Device to Pinned Host") { Memcpy3DDtoHPinnedSyncBehavior(DrvMemcpy3DWrapper<>, true); }
 
-  SECTION("Device to Device") {
-    Memcpy3DDtoDSyncBehavior(DrvMemcpy3DWrapper<>, false);
-  }
+  SECTION("Device to Device") { Memcpy3DDtoDSyncBehavior(DrvMemcpy3DWrapper<>, false); }
 
   SECTION("Host to Host") { Memcpy3DHtoHSyncBehavior(DrvMemcpy3DWrapper<>, true); }
 }
