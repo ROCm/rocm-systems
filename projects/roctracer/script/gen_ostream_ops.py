@@ -241,6 +241,8 @@ def gen_cppheader(infilepath, outfilepath, rank):
             continue
         if c == 'max_align_t' or c == '__fsid_t': # Skipping as it is defined in multiple domains
           continue
+        if c.startswith("_") or c.startswith("pthread_") or c.startswith("__pthread_"):
+          continue
         if len(cppHeader.classes[c]["properties"]["public"]) != 0:
           output_filename_h.write("inline static std::ostream& operator<<(std::ostream& out, const " + c + "& v)\n")
           output_filename_h.write("{\n")
