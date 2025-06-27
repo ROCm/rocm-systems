@@ -928,6 +928,26 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
   core::AqlPacket *pkt = NULL;
   uint64_t dispatch_id = UINT64_MAX;
 
+  /* These fields need to be binary compatible between hsa_kernel_dispatch_packet_t and
+     hsa_amd_ext_kernel_dispatch_packet_t.
+   */
+  static_assert(offsetof(hsa_kernel_dispatch_packet_t, header) ==
+                    offsetof(hsa_amd_ext_kernel_dispatch_packet_t, header),
+                "invalid offset for headers");
+
+  static_assert(offsetof(hsa_kernel_dispatch_packet_t, workgroup_size_x) ==
+                    offsetof(hsa_amd_ext_kernel_dispatch_packet_t, workgroup_size_x),
+                "invalid offset for workgroup_size_x");
+
+  static_assert(offsetof(hsa_kernel_dispatch_packet_t, workgroup_size_y) ==
+                    offsetof(hsa_amd_ext_kernel_dispatch_packet_t, workgroup_size_y),
+                "invalid offset for workgroup_size_y");
+
+  static_assert(offsetof(hsa_kernel_dispatch_packet_t, workgroup_size_z) ==
+                    offsetof(hsa_amd_ext_kernel_dispatch_packet_t, workgroup_size_z),
+                "invalid offset for workgroup_size_z");
+
+
   auto get_dispatch_pkt = [&]() {
     dispatch_id = amd_queue_.read_dispatch_id;
     do {
@@ -939,7 +959,9 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
 
       core::AqlPacket *dispatch_pkt =
           &((core::AqlPacket *)amd_queue_.hsa_queue.base_address)[pkt_slot_idx];
-      if (dispatch_pkt->IsDispatchAndNeedsScratch()) return dispatch_pkt;
+
+      if (dispatch_pkt->IsDispatchAndNeedsScratch())
+        return dispatch_pkt;
 
       dispatch_id++;
     } while (dispatch_id <= LoadWriteIndexRelaxed());
@@ -957,16 +979,17 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
   };
 
   auto calc_dispatch_groups = [&](core::AqlPacket& pkt) {
+    auto ceil_divide = [](uint64_t a, uint64_t b) { return (a + b - 1) / b; };
+
     const uint64_t lanes_per_group =
         (uint64_t(pkt.dispatch.workgroup_size_x) * pkt.dispatch.workgroup_size_y) *
         pkt.dispatch.workgroup_size_z;
 
-    uint64_t groups = ((uint64_t(pkt.dispatch.grid_size_x) + pkt.dispatch.workgroup_size_x - 1) /
-                       pkt.dispatch.workgroup_size_x) *
-                      ((uint64_t(pkt.dispatch.grid_size_y) + pkt.dispatch.workgroup_size_y - 1) /
-                       pkt.dispatch.workgroup_size_y) *
-                      ((uint64_t(pkt.dispatch.grid_size_z) + pkt.dispatch.workgroup_size_z - 1) /
-                       pkt.dispatch.workgroup_size_z);
+    uint64_t groups_x = ceil_divide(pkt.dispatch_grid_size_x(), pkt.dispatch.workgroup_size_x);
+    uint64_t groups_y = ceil_divide(pkt.dispatch_grid_size_y(), pkt.dispatch.workgroup_size_y);
+    uint64_t groups_z = ceil_divide(pkt.dispatch_grid_size_z(), pkt.dispatch.workgroup_size_z);
+    uint64_t groups = groups_x * groups_y * groups_z;
+
     const uint32_t cu_count = amd_queue_.max_cu_id + 1;
 
     const uint32_t engines = agent_->properties().NumShaderBanks;
@@ -1049,9 +1072,9 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
 
     agent_->AcquireQueueAltScratch(scratch);
     if (scratch.alt_queue_base) {
-      scratch.alt_dispatch_limit_x = pkt->dispatch.grid_size_x;
-      scratch.alt_dispatch_limit_y = pkt->dispatch.grid_size_y;
-      scratch.alt_dispatch_limit_z = pkt->dispatch.grid_size_z;
+      scratch.alt_dispatch_limit_x = pkt->dispatch_grid_size_x();
+      scratch.alt_dispatch_limit_y = pkt->dispatch_grid_size_y();
+      scratch.alt_dispatch_limit_z = pkt->dispatch_grid_size_z();
 
       InitScratchSRD();
       /*

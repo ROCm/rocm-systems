@@ -75,6 +75,7 @@ struct AqlPacket {
     hsa_barrier_and_packet_t barrier_and;
     hsa_barrier_or_packet_t barrier_or;
     hsa_agent_dispatch_packet_t agent;
+    hsa_amd_ext_kernel_dispatch_packet_t ext_dispatch;
   };
 
   // Access the type field from a packet header. The caller is responsible for
@@ -90,17 +91,62 @@ struct AqlPacket {
             (type(header) != HSA_PACKET_TYPE_INVALID));
   }
 
+  bool __forceinline isDispatch() const {
+    return (type(packet.header) == HSA_PACKET_TYPE_KERNEL_DISPATCH);
+  }
+
+  bool __forceinline isExtDispatch() const {
+    return (type(packet.header) == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
+            amd_vendor.format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH);
+  }
+
   bool __forceinline IsDispatchAndNeedsScratch() const {
     assert(IsValid(packet.header) && "Invalid packet in dynamic scratch handler.");
 
-    if (type(packet.header) != HSA_PACKET_TYPE_KERNEL_DISPATCH ||
-        dispatch.private_segment_size == 0)
-      return false;
+    if (isDispatch() && dispatch.private_segment_size > 0) {
+      assert((dispatch.workgroup_size_x != 0) && (dispatch.workgroup_size_y != 0) &&
+             (dispatch.workgroup_size_z != 0) && "Invalid dispatch dimension.");
+      return true;
+    } else if (isExtDispatch() && ext_dispatch.private_segment_size > 0) {
+      assert((ext_dispatch.workgroup_size_x != 0) && (ext_dispatch.workgroup_size_y != 0) &&
+             (ext_dispatch.workgroup_size_z != 0) && "Invalid ext dispatch dimension.");
+      return true;
+    }
 
-    assert((dispatch.workgroup_size_x != 0) && (dispatch.workgroup_size_y != 0) &&
-           (dispatch.workgroup_size_z != 0) && "Invalid dispatch dimension.");
+    return false;
+  }
 
-    return true;
+  uint32_t __forceinline dispatch_grid_size_x() const {
+    if (isDispatch()) {
+      return dispatch.grid_size_x;
+    } else if (isExtDispatch()) {
+      return ext_dispatch.cluster_count_x * ext_dispatch.cluster_size_x *
+          ext_dispatch.workgroup_size_x;
+    }
+    assert(false && "Invalid dispatch pkt");
+    return 0;
+  }
+
+  uint32_t __forceinline dispatch_grid_size_y() const {
+    if (isDispatch()) {
+      return dispatch.grid_size_y;
+    } else if (isExtDispatch()) {
+      return ext_dispatch.cluster_count_y * ext_dispatch.cluster_size_y *
+          ext_dispatch.workgroup_size_y;
+    }
+    assert(false && "Invalid dispatch pkt");
+    return 0;
+  }
+
+  uint32_t __forceinline dispatch_grid_size_z() const {
+    if (isDispatch()) {
+      return dispatch.grid_size_z;
+    } else if (isExtDispatch()) {
+      return ext_dispatch.cluster_count_z * ext_dispatch.cluster_size_z *
+          ext_dispatch.workgroup_size_z;
+    }
+    assert(false && "Invalid dispatch pkt");
+    return 0;
   }
 
   std::string string() const {
@@ -116,7 +162,6 @@ struct AqlPacket {
       string << "type: UNKNOWN#" << t;
       return string.str();
     }
-
     string << "type: " << type_names[t]
            << "\nbarrier: " << ((dispatch.header >> HSA_PACKET_HEADER_BARRIER) &
                                 ((1 << HSA_PACKET_HEADER_WIDTH_BARRIER) - 1))
@@ -125,26 +170,40 @@ struct AqlPacket {
            << "\nrelease: " << ((dispatch.header >> HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE) &
                                 ((1 << HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE) - 1));
 
-    if (t == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
-      string << "\nDim: " << dispatch.setup
-             << "\nworkgroup_size: " << dispatch.workgroup_size_x << ", "
-             << dispatch.workgroup_size_y << ", " << dispatch.workgroup_size_z
-             << "\ngrid_size: " << dispatch.grid_size_x << ", "
-             << dispatch.grid_size_y << ", " << dispatch.grid_size_z
-             << "\nprivate_size: " << dispatch.private_segment_size
-             << "\ngroup_size: " << dispatch.group_segment_size
-             << "\nkernel_object: " << dispatch.kernel_object
-             << "\nkern_arg: " << dispatch.kernarg_address
-             << "\nsignal: " << dispatch.completion_signal.handle;
+    switch (t) {
+      case HSA_PACKET_TYPE_KERNEL_DISPATCH:
+        string << "\nDim: " << dispatch.setup << "\nworkgroup_size: " << dispatch.workgroup_size_x
+               << ", " << dispatch.workgroup_size_y << ", " << dispatch.workgroup_size_z
+               << "\ngrid_size: " << dispatch.grid_size_x << ", " << dispatch.grid_size_y << ", "
+               << dispatch.grid_size_z << "\nprivate_size: " << dispatch.private_segment_size
+               << "\ngroup_size: " << dispatch.group_segment_size
+               << "\nkernel_object: " << dispatch.kernel_object
+               << "\nkern_arg: " << dispatch.kernarg_address
+               << "\nsignal: " << dispatch.completion_signal.handle;
+        break;
+      case HSA_PACKET_TYPE_VENDOR_SPECIFIC:
+        if (amd_vendor.format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH) {
+          string << "\nDim: " << ext_dispatch.setup
+                 << "\nworkgroup_size: " << ext_dispatch.workgroup_size_x << ", "
+                 << ext_dispatch.workgroup_size_y << ", " << ext_dispatch.workgroup_size_z
+                 << "\ncluster_count: " << ext_dispatch.cluster_count_x << ", "
+                 << ext_dispatch.cluster_count_y << ", " << ext_dispatch.cluster_count_z
+                 << "\ncluster_size: " << ext_dispatch.cluster_size_x << ", "
+                 << ext_dispatch.cluster_size_y << ", " << ext_dispatch.cluster_size_z
+                 << "\nprivate_size: " << ext_dispatch.private_segment_size
+                 << "\ngroup_size: " << ext_dispatch.group_segment_size
+                 << "\nkernel_object: " << ext_dispatch.kernel_object
+                 << "\nkern_arg: " << ext_dispatch.kernarg_address
+                 << "\nsignal: " << ext_dispatch.completion_signal.handle;
+        }
+        break;
+      case HSA_PACKET_TYPE_BARRIER_AND:
+      case HSA_PACKET_TYPE_BARRIER_OR:
+        for (int i = 0; i < 5; i++)
+          string << "\ndep[" << i << "]: " << barrier_and.dep_signal[i].handle;
+        string << "\nsignal: " << barrier_and.completion_signal.handle;
+        break;
     }
-
-    if ((t == HSA_PACKET_TYPE_BARRIER_AND) ||
-        (t == HSA_PACKET_TYPE_BARRIER_OR)) {
-      for (int i = 0; i < 5; i++)
-        string << "\ndep[" << i << "]: " << barrier_and.dep_signal[i].handle;
-      string << "\nsignal: " << barrier_and.completion_signal.handle;
-    }
-
     return string.str();
   }
 };
