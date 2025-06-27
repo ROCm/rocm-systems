@@ -22,6 +22,7 @@
 
 #include "lib/python/rocpd/source/perfetto.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/simple_timer.hpp"
 #include "lib/python/rocpd/source/common.hpp"
 #include "lib/python/rocpd/source/sql_generator.hpp"
 
@@ -417,6 +418,14 @@ write_perfetto(const PerfettoSession&                         perfetto_session,
         stream_tracks.emplace(rocprofiler_stream_id_t{itr.stream_id}, _track);
     }
 
+    static auto get_simple_timer = [](std::string_view label) {
+        return common::simple_timer{fmt::format("Perfetto generation :: {:24}", label)};
+    };
+
+    static auto report_simple_timer = [](common::simple_timer& _timer) {
+        _timer.stop().report().set_quiet(true);
+    };
+
     // trace events
     {
         auto get_category_string = [](std::string_view _category) {
@@ -429,7 +438,7 @@ write_perfetto(const PerfettoSession&                         perfetto_session,
             return sdk::get_perfetto_category(_category_idx);
         };
 
-        ROCP_WARNING << "generating regions...";
+        auto _regions_perf = get_simple_timer("regions");
         for(auto ditr : region_gen)
         {
             for(auto itr : region_gen.get(ditr))
@@ -486,8 +495,9 @@ write_perfetto(const PerfettoSession&                         perfetto_session,
                 tracing_session->FlushBlocking();
             }
         }
+        report_simple_timer(_regions_perf);
 
-        ROCP_WARNING << "generating samples...";
+        auto _samples_perf = get_simple_timer("samples");
         for(auto ditr : sample_gen)
         {
             for(auto itr : sample_gen.get(ditr))
@@ -542,8 +552,9 @@ write_perfetto(const PerfettoSession&                         perfetto_session,
                 tracing_session->FlushBlocking();
             }
         }
+        report_simple_timer(_samples_perf);
 
-        ROCP_WARNING << "generating memory copies...";
+        auto _memcpy_perf = get_simple_timer("memory copies");
         for(auto ditr : memory_copy_gen)
         {
             for(auto itr : memory_copy_gen.get(ditr))
@@ -606,8 +617,9 @@ write_perfetto(const PerfettoSession&                         perfetto_session,
             }
             tracing_session->FlushBlocking();
         }
+        report_simple_timer(_memcpy_perf);
 
-        ROCP_WARNING << "generating kernel dispatches...";
+        auto _kernels_perf = get_simple_timer("kernel dispatches");
         for(auto ditr : kernel_dispatch_gen)
         {
             auto gen = kernel_dispatch_gen.get(ditr);
@@ -711,6 +723,7 @@ write_perfetto(const PerfettoSession&                         perfetto_session,
             }
             tracing_session->FlushBlocking();
         }
+        report_simple_timer(_kernels_perf);
     }
 
     // counter tracks

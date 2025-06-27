@@ -142,8 +142,8 @@ extract_column_name(sqlite3_stmt* stmt, int32_t col)
 int64_t
 extract_row_count(sqlite3* conn, std::string_view query)
 {
-    auto _rowcnt_perf =
-        common::simple_timer{fmt::format("{} for SQL query '{}'", __FUNCTION__, query)};
+    auto _rowcnt_perf = common::simple_timer{
+        fmt::format("{} for SQL query '{}'", __FUNCTION__, query), ROCP_LOG_LEVEL_TRACE};
 
     auto _pos         = query.find(';');
     auto _query       = (_pos == std::string_view::npos) ? query : query.substr(0, _pos);
