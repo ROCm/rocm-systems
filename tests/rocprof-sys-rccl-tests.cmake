@@ -92,3 +92,13 @@ foreach(_TARGET ${RCCL_TEST_TARGETS})
         ARGS --counter-names "RCCL Comm" -p
     )
 endforeach()
+
+# Preload finalize_wrap only for this specific test
+if(TARGET finalize_wrap AND NOT DISABLE_AMDSMI_WRAP)
+    set_tests_properties(
+        rccl-test-all-gather-perf-sampling
+        PROPERTIES
+            ENVIRONMENT
+                "LD_PRELOAD=$<TARGET_FILE:finalize_wrap>;ROCPROFSYS_DEBUG_SETTINGS=1"
+    )
+endif()
