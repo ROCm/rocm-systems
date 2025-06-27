@@ -291,11 +291,9 @@ generate_csv(const output_config&                                               
             auto        row_ss = std::stringstream{};
             const auto* kernel_info =
                 tool_metadata.get_kernel_symbol(record.dispatch_info.kernel_id);
-            auto kernel_name =
-                cfg.kernel_rename
-                    ? tool_metadata.get_kernel_name(record.dispatch_info.kernel_id,
-                                                    record.correlation_id.external.value)
-                    : CHECK_NOTNULL(kernel_info)->formatted_kernel_name;
+            auto kernel_name = tool_metadata.get_kernel_name(record.dispatch_info.kernel_id,
+                                                             cfg.kernel_rename,
+                                                             record.correlation_id.external.value);
             auto lds_block_size_v =
                 (kernel_info->group_segment_size + (lds_block_size - 1)) & ~(lds_block_size - 1);
 
@@ -640,7 +638,8 @@ generate_csv(const output_config&                    cfg,
                     record.thread_id,
                     magnitude(record.dispatch_data.dispatch_info.grid_size),
                     record.dispatch_data.dispatch_info.kernel_id,
-                    tool_metadata.get_kernel_name(kernel_id, correlation_id.external.value),
+                    tool_metadata.get_kernel_name(
+                        kernel_id, cfg.kernel_rename, correlation_id.external.value),
                     magnitude(record.dispatch_data.dispatch_info.workgroup_size),
                     lds_block_size_v,
                     record.dispatch_data.dispatch_info.private_segment_size,
