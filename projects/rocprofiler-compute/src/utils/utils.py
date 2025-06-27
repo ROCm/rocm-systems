@@ -157,21 +157,6 @@ def extract_counter_info_extra_config_input_yaml(
     return None
 
 
-def is_spi_pipe_counter(counter):
-    for pattern in spi_pipe_counter_regexs:
-        if re.match(pattern, counter):
-            return True
-    return False
-
-
-def get_base_spi_pipe_counter(counter):
-    for pattern in spi_pipe_counter_regexs:
-        match = re.match(pattern, counter)
-        if match:
-            return match.group(1)
-    return ""
-
-
 def using_v1():
     return "ROCPROF" in os.environ.keys() and os.environ["ROCPROF"].endswith("rocprof")
 

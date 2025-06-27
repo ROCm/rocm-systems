@@ -50,9 +50,7 @@ from utils.utils import (
     capture_subprocess_output,
     convert_metric_id_to_panel_idx,
     detect_rocprof,
-    get_base_spi_pipe_counter,
     get_submodules,
-    is_spi_pipe_counter,
     is_tcc_channel_counter,
     using_v3,
 )
@@ -669,14 +667,6 @@ class OmniSoC_Base:
                 if output_file:
                     output_file.add(ctr)
                     continue
-            # Store all pipes for SPI pipe counters in the same file
-            if is_spi_pipe_counter(ctr):
-                output_file = spi_pipe_counter_file_map.get(
-                    get_base_spi_pipe_counter(ctr)
-                )
-                if output_file:
-                    output_file.add(ctr)
-                    continue
             # Add counter to first file that has room
             added = False
             for i in range(len(output_files)):
@@ -685,11 +675,6 @@ class OmniSoC_Base:
                     # Store all channels for a TCC channel counter in the same file
                     if is_tcc_channel_counter(ctr):
                         tcc_channel_counter_file_map[ctr.split("[")[0]] = output_files[i]
-                    # Store all pipes for SPI pipe counters in the same file
-                    if is_spi_pipe_counter(ctr):
-                        spi_pipe_counter_file_map[get_base_spi_pipe_counter(ctr)] = (
-                            output_files[i]
-                        )
                     break
 
             # All files are full, create a new file
@@ -902,18 +887,8 @@ class LimitedSet:
         if e.split("[")[0] in {element.split("[")[0] for element in self.elements}:
             self.elements.append(e)
             return True
-        # Store all pipes for SPI pipe counters in the same file
-        if is_spi_pipe_counter(e) and get_base_spi_pipe_counter(e) in {
-            get_base_spi_pipe_counter(element) for element in self.elements
-        }:
-            self.elements.append(e)
-            return True
         if self.avail > 0:
-            # SPI pipe counters take space of 2 counters
-            if is_spi_pipe_counter(e):
-                self.avail -= 2
-            else:
-                self.avail -= 1
+            self.avail -= 1
             self.elements.append(e)
             return True
         return False
