@@ -141,6 +141,14 @@ public:
                                     uint64_t* size) const override;
   hsa_status_t ReplaceAsanHeaderPage(void* mem) const override;
   hsa_status_t ReturnAsanHeaderPage(void* mem) const override;
+  hsa_status_t PcSamplingQueryCapabilities(uint32_t node_id, void* sample_info,
+                                           uint32_t sample_info_sz,
+                                           uint32_t* sz_needed) const override;
+  hsa_status_t PcSamplingCreate(uint32_t node_id, HsaPcSamplingInfo* sample_info,
+                                uint32_t* trace_id) const override;
+  hsa_status_t PcSamplingDestroy(uint32_t node_id, uint32_t trace_id) const override;
+  hsa_status_t PcSamplingStart(uint32_t node_id, uint32_t trace_id) const override;
+  hsa_status_t PcSamplingStop(uint32_t node_id, uint32_t trace_id) const override;
 
   hsa_status_t OpenSMI(uint32_t node_id, int* fd) const override;
 

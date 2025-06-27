@@ -386,6 +386,57 @@ public:
     return HSA_STATUS_ERROR_INVALID_AGENT;
   }
 
+  /// @brief Queries the PC sampling capabilities.
+  /// @param[in] node_id Node ID of the agent
+  /// @param[in] sample_info Pointer to the sample information
+  /// @param[in] sample_info_sz Size of the sample information
+  /// @param[out] sz_needed Size of the sample information needed
+  /// @return HSA_STATUS_SUCCESS if the PC sampling capabilities were successfully queried, or an
+  /// error code.
+  virtual hsa_status_t PcSamplingQueryCapabilities(uint32_t node_id, void* sample_info,
+                                                   uint32_t sample_info_sz,
+                                                   uint32_t* sz_needed) const {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  /// @brief Creates a PC sampling session.
+  /// @param[in] node_id Node ID of the agent
+  /// @param[in] sample_info Pointer to the sample information
+  /// @param[out] trace_id Pointer to the trace ID
+  /// @return HSA_STATUS_SUCCESS if the PC sampling session was successfully created, or an error
+  /// code.
+  virtual hsa_status_t PcSamplingCreate(uint32_t node_id, HsaPcSamplingInfo* sample_info,
+                                        uint32_t* trace_id) const {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  /// @brief Destroys a PC sampling session.
+  /// @param[in] node_id Node ID of the agent
+  /// @param[in] trace_id Trace ID of the PC sampling session
+  /// @return HSA_STATUS_SUCCESS if the PC sampling session was successfully destroyed, or an error
+  /// code.
+  virtual hsa_status_t PcSamplingDestroy(uint32_t node_id, uint32_t trace_id) const {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  /// @brief Starts a PC sampling session.
+  /// @param[in] node_id Node ID of the agent
+  /// @param[in] trace_id Trace ID of the PC sampling session
+  /// @return HSA_STATUS_SUCCESS if the PC sampling session was successfully started, or an error
+  /// code.
+  virtual hsa_status_t PcSamplingStart(uint32_t node_id, uint32_t trace_id) const {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  /// @brief Stops a PC sampling session.
+  /// @param[in] node_id Node ID of the agent
+  /// @param[in] trace_id Trace ID of the PC sampling session
+  /// @return HSA_STATUS_SUCCESS if the PC sampling session was successfully stopped, or an error
+  /// code.
+  virtual hsa_status_t PcSamplingStop(uint32_t node_id, uint32_t trace_id) const {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
   /// Unique identifier for supported kernel-mode drivers.
   const DriverType kernel_driver_type_;
 
