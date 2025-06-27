@@ -60,13 +60,12 @@ class RdcRocpLib : public RdcTelemetry {
   rdc_status_t (*rdc_module_init_)(uint64_t);
   rdc_status_t (*rdc_module_destroy_)();
   /**
-   * @brief Extract current ROCM_PATH from library or the environment
+   * @brief Make sure HSA_TOOLS_LIB is not set as it breaks rocprofiler-sdk
+   * @details
+   * Rocprofilerv1 needed HSA_TOOLS_LIB set to librocprofiler64.so.1.
+   * That breaks rocprofiler-sdk because it tries to load both v1 and sdk libraries.
    */
-  std::string get_rocm_path();
-  /**
-   * @brief Set ROCP_METRICS environment variable needed by rocprofiler
-   */
-  rdc_status_t set_rocprofiler_path();
+  void rdc_unset_hsa_tools_lib();
 };
 
 using RdcRocpLibPtr = std::shared_ptr<RdcRocpLib>;

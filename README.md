@@ -578,34 +578,6 @@ The RAS plugin enables monitoring and counting of ECC (Error-Correcting Code) er
 >
 >#### 🐍 dmon RocProfiler Fields Return Zeros
 >
->**Solution:**
->
->Set the `HSA_TOOLS_LIB` environment variable **before** running a compute job.
->
->```bash
->export HSA_TOOLS_LIB=/opt/rocm/lib/librocprofiler64.so.1
->```
->
->**Example:**
->
->```bash
-># Terminal 1
->rdcd -u
->
-># Terminal 2
->export HSA_TOOLS_LIB=/opt/rocm/lib/librocprofiler64.so.1
->gpu-burn
->
-># Terminal 3
->rdci dmon -u -e 800,801 -i 0 -c 1
->
-># Output:
->GPU   OCCUPANCY_PERCENT   ACTIVE_WAVES
->0     001.000             32640.000
->```
->
->#### ⚠️ `HSA_STATUS_ERROR_OUT_OF_RESOURCES`
->
 >**Error Message:**
 >
 >```
