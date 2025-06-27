@@ -111,7 +111,6 @@ public:
   uint64_t PrivateApertureSize() { return device_info_.private_aperture_size; }
   uint64_t SharedApertureBase() { return device_info_.shared_aperture_base; }
   uint64_t SharedApertureSize() { return device_info_.shared_aperture_size; }
-  uint64_t SystemHeapSize() { return system_heap_space_size_; }
   uint32_t LdsSize() { return device_info_.lds_size; }
   uint64_t GPUCounterFrequency() { return device_info_.gpu_counter_frequency; }
   uint32_t GetSwsQueueSize(void) const { return device_info_.user_queue_size; }
@@ -224,8 +223,6 @@ private:
 
   void SetPowerOptimization(bool restore);
   void InitCmdbufInfo(void);
-  bool ReserveSystemHeapSpace(void);
-  bool FreeSystemHeapSpace(void);
   bool InitHandleApertureSpace(void);
   bool CommitSystemHeapSpace(void* addr, int64_t size, bool lock=false);
   bool DecommitSystemHeapSpace(void* addr, int64_t size);
@@ -244,8 +241,6 @@ private:
 
   uint64_t handle_aperture_start_;
   uint64_t handle_aperture_size_;
-  uint64_t system_heap_space_start_;
-  uint64_t system_heap_space_size_;
   uint32_t cmdbuf_size_;
   uint32_t cmdbuf_aql_frame_size_;
   static const uint32_t cmdbuf_aql_frame_num_;

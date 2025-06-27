@@ -547,7 +547,7 @@ HSAKMT_STATUS import_dmabuf_fd(int DMABufFd,
     struct stat st;
     fstat(DMABufFd, &st);
     uint64_t sz = st.st_size;
-    if (4096 <= sz && sz < dev->SystemHeapSize() && (sz & 0xfff) == 0) {
+    if (4096 <= sz && sz < dxg_runtime->SystemHeapSize() && (sz & 0xfff) == 0) {
       pr_debug("DMABufFd %d is sys mem fd(IPC signal), get size:%ld from it\n", DMABufFd, st.st_size);
       create_info.flags.sysmem_ipc_sig_importer = 1;        // set to 1 when backend is system memory
       create_info.size = st.st_size;

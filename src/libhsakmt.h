@@ -63,13 +63,21 @@ struct hsakmtRuntime {
     enable_thunk_sub_allocator(0),
     local_heap_space_start_(0),
     local_heap_space_size_(0),
+    system_heap_space_start_(0),
+    system_heap_space_size_(0),
     default_node(1) {}
 
   void HeapInit();
   void HeapFini();
+  bool ReserveSvmSpace(uint64_t &base, uint64_t &size, uint64_t align);
+  bool FreeSvmSpace(uint64_t &base, uint64_t &size);
   bool ReserveLocalHeapSpace();
   bool FreeLocalHeapSpace();
   void InitLocalHeapMgr();
+  bool ReserveSystemHeapSpace();
+  uint64_t SystemHeapSize() { return system_heap_space_size_; }
+  bool FreeSystemHeapSpace();
+  void InitSystemHeapMgr();
 
   pthread_mutex_t hsakmt_mutex;
   const char *dxg_device_name = "/dev/dxg";
@@ -95,6 +103,13 @@ struct hsakmtRuntime {
 
   /* manage the reserved local heap space which shared by CPU and GPUs */
   std::unique_ptr<wsl::thunk::VaMgr> local_heap_mgr_;
+
+  /* system heap means bo's backend is system ram */
+  uint64_t system_heap_space_start_;
+  uint64_t system_heap_space_size_;
+
+  /* manage the reserved system heap space which shared by CPU and GPUs */
+  std::unique_ptr<wsl::thunk::VaMgr> system_heap_mgr_;
 };
 
 extern hsakmtRuntime *dxg_runtime;

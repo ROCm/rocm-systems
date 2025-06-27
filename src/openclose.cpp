@@ -27,6 +27,8 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
+#include <sys/sysinfo.h>
+#include <linux/mman.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <cstdio>
@@ -39,41 +41,28 @@ hsakmtRuntime *dxg_runtime = new hsakmtRuntime();
 
 void hsakmtRuntime::HeapInit() {
     ReserveLocalHeapSpace();
+    ReserveSystemHeapSpace();
     InitLocalHeapMgr();
+    InitSystemHeapMgr();
 }
 
 void hsakmtRuntime::HeapFini() {
+    FreeSystemHeapSpace();
     FreeLocalHeapSpace();
 }
 
-/*
- * To find the avaliable same range for cpu
- * virtual space and gpu virtual space.
- * sys_va_size of cpu va range is larger 1G
- * than gpu va range, otherwise ReserveGPUVirtualAddress
- * will return error.
- */
-bool hsakmtRuntime::ReserveLocalHeapSpace() {
+bool hsakmtRuntime::ReserveSvmSpace(uint64_t &base, uint64_t &size, uint64_t align) {
     uint64_t sys_va[16] = {0};
     uint64_t local_va;
     uint64_t sys_va_size;
     int match_index = -1;
-    uint64_t align = 0x40000000; /* 1G */
     void* ptr = NULL;
 
     wsl::thunk::WDDMDevice* device;
-    uint64_t total_local_size = 0;
     size_t num_adapters = get_num_wddmdev();
-    for (uint32_t j = 0; j < num_adapters; j++) {
-        device = get_wddmdev(j+1);
-        if (device == nullptr)
-            return -1;
-        total_local_size += wsl::AlignUp(device->LocalHeapSize(), align) * 4;
-    }
 
-    local_heap_space_start_ = 0;
-    local_heap_space_size_ = total_local_size;
-    sys_va_size = local_heap_space_size_ + align;
+    base = 0;
+    sys_va_size = size + align;
 
     /* it will retry 16 times to find the avaliable range. */
     for (int i = 0; i < 16; i++) {
@@ -89,16 +78,16 @@ bool hsakmtRuntime::ReserveLocalHeapSpace() {
         int match_cnt = 0;
         for (uint32_t j = 0; j < num_adapters; j++) {
             device = get_wddmdev(j+1);
-            uint64_t start = (local_heap_space_start_ == 0) ? (uint64_t)ptr : local_heap_space_start_;
-            uint64_t end = start + ((local_heap_space_start_ == 0) ? sys_va_size : local_heap_space_size_) + 1;
+            uint64_t start = (base == 0) ? (uint64_t)ptr : base;
+            uint64_t end = start + ((base == 0) ? sys_va_size : size) + 1;
 
             if (wsl::thunk::d3dthunk::ReserveGpuVirtualAddress(
-                        device->GetAdapter(), local_heap_space_size_,
+                        device->GetAdapter(), size,
                         start,
                         end, &local_va) == ErrorCode::Success) {
 
                 match_cnt++;
-                local_heap_space_start_ = local_va;
+                base = local_va;
                 pr_debug("success to reserve gpu va %lx and va cpu %p in %d time\n",
                         local_va, ptr, i);
             } else {
@@ -119,12 +108,12 @@ bool hsakmtRuntime::ReserveLocalHeapSpace() {
         uint64_t right_size = align - left_size;
         if ((left_size > 0) && munmap((void*)sys_va[match_index], left_size))
             pr_err("fail to unmap left %lx with size %lx\n", sys_va[match_index], left_size);
-        if ((right_size > 0) && munmap((void*)(local_va + local_heap_space_size_), right_size))
-            pr_err("fail to unmap right %lx with size %lx\n", (local_va + local_heap_space_size_), right_size);
+        if ((right_size > 0) && munmap((void*)(local_va + size), right_size))
+            pr_err("fail to unmap right %lx with size %lx\n", (local_va + size), right_size);
     } else {
         pr_err("fail to reserve Local Heap Space!\n");
-        local_heap_space_start_ = 0;
-        local_heap_space_size_ = 0;
+        base = 0;
+        size = 0;
     }
 
     /* free match fail address for cpu va */
@@ -138,23 +127,80 @@ bool hsakmtRuntime::ReserveLocalHeapSpace() {
     return match_index >= 0;
 }
 
-bool hsakmtRuntime::FreeLocalHeapSpace() {
+/*
+ * To find the avaliable same range for cpu
+ * virtual space and gpu virtual space.
+ * sys_va_size of cpu va range is larger 1G
+ * than gpu va range, otherwise ReserveGPUVirtualAddress
+ * will return error.
+ */
+bool hsakmtRuntime::ReserveLocalHeapSpace() {
+    wsl::thunk::WDDMDevice* device;
+    uint64_t total_local_size = 0;
+    uint64_t align = 0x40000000; /* 1G */
+    size_t num_adapters = get_num_wddmdev();
+
+    for (uint32_t j = 0; j < num_adapters; j++) {
+        device = get_wddmdev(j+1);
+        if (device == nullptr)
+            return -1;
+        total_local_size += wsl::AlignUp(device->LocalHeapSize(), align) * 4;
+    }
+
+    local_heap_space_start_ = 0;
+    local_heap_space_size_ = total_local_size;
+
+    return ReserveSvmSpace(local_heap_space_start_, local_heap_space_size_, align);
+}
+
+bool hsakmtRuntime::FreeSvmSpace(uint64_t &base, uint64_t &size) {
     wsl::thunk::WDDMDevice* device;
     size_t num_adapters = get_num_wddmdev();
     for (uint32_t j = 0; j < num_adapters; j++) {
         device = get_wddmdev(j+1);
         if (device == nullptr)
             return -1;
-        wsl::thunk::d3dthunk::FreeGpuVirtualAddress(device->GetAdapter(), local_heap_space_start_, local_heap_space_size_);
+        wsl::thunk::d3dthunk::FreeGpuVirtualAddress(device->GetAdapter(), base, size);
     }
 
-    void *cpu = (void *)local_heap_space_start_;
-    return munmap(cpu, local_heap_space_size_) == 0;
+    void *cpu = (void *)base;
+    auto r = (munmap(cpu, size) == 0);
+    base = 0;
+    size = 0;
+    return r;
+}
+
+bool hsakmtRuntime::FreeLocalHeapSpace() {
+    return FreeSvmSpace(local_heap_space_start_, local_heap_space_size_);
 }
 
 void hsakmtRuntime::InitLocalHeapMgr() {
   local_heap_mgr_ = std::make_unique<wsl::thunk::VaMgr>(local_heap_space_start_,
                                           local_heap_space_size_,
+                                          DEFAULT_GPU_PAGE_SIZE);
+}
+
+bool hsakmtRuntime::ReserveSystemHeapSpace() {
+    struct sysinfo info;
+    int ret = sysinfo(&info);
+    uint64_t max_ram = 0x10000000000;
+    uint64_t alignment = 0x100000000;
+    assert(!ret);
+
+    int32_t protFlags = PROT_NONE;
+    // minimum of reserve size is 8G, maximum of reserve size is 1T.
+    system_heap_space_size_ = std::min(wsl::AlignUp(info.totalram, alignment) * 2, max_ram);
+
+    return ReserveSvmSpace(system_heap_space_start_, system_heap_space_size_, alignment);
+}
+
+bool hsakmtRuntime::FreeSystemHeapSpace(void) {
+    return FreeSvmSpace(system_heap_space_start_, system_heap_space_size_);
+}
+
+void hsakmtRuntime::InitSystemHeapMgr() {
+  system_heap_mgr_ = std::make_unique<wsl::thunk::VaMgr>(system_heap_space_start_,
+                                          system_heap_space_size_,
                                           DEFAULT_GPU_PAGE_SIZE);
 }
 

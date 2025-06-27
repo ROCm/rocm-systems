@@ -67,14 +67,12 @@ WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_i
   CreateDevice();
   SetPowerOptimization(false);
   CreatePagingQueue();
-  ReserveSystemHeapSpace();
   InitHandleApertureSpace();
   InitHandleApertureMgr();
   InitCmdbufInfo();
 }
 
 WDDMDevice::~WDDMDevice() {
-  FreeSystemHeapSpace();
   DestroyPagingQueue();
   SetPowerOptimization(true);
   DestroyDevice();
@@ -275,36 +273,6 @@ bool WDDMDevice::DecommitSystemHeapSpaceIPC(void* addr, int64_t size, int &memfd
   return true;
 }
 
-bool WDDMDevice::ReserveSystemHeapSpace() {
-  struct sysinfo info;
-  int ret = sysinfo(&info);
-  uint64_t max_ram = 0x10000000000;
-  uint64_t alignment = 0x100000000;
-  assert(!ret);
-
-  int32_t protFlags = PROT_NONE;
-  // minimum of reserve size is 8G, maximum of reserve size is 1T.
-  system_heap_space_size_ = std::min(AlignUp(info.totalram, alignment) * 2, max_ram);
-  void* cpu = mmap(NULL, system_heap_space_size_, protFlags,
-              MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
-  if (cpu == MAP_FAILED) {
-    pr_err("fail to reserve system_heap_space_size_ = %lx \n", system_heap_space_size_);
-    return false;
-  }
-
-  system_heap_space_start_ = (uint64_t)cpu;
-  return true;
-}
-
-bool WDDMDevice::FreeSystemHeapSpace(void) {
-  void *cpu = (void *)system_heap_space_start_;
-  if (munmap(cpu, system_heap_space_size_) != 0) {
-    pr_err("fail to unmap = %p \n", cpu);
-    return false;
-  }
-  return true;
-}
-
 void WDDMDevice::InitHandleApertureMgr() {
   handle_aperture_mgr_ = std::make_unique<VaMgr>(handle_aperture_start_,
                                                  handle_aperture_size_,
@@ -372,28 +340,23 @@ ErrorCode WDDMDevice::ReserveGpuVirtualAddress(const thunk_proxy::AllocDomain do
   gpusize gpu_addr = 0;
   ErrorCode code = ErrorCode::Success;
 
-  if (domain == thunk_proxy::kSystem) {
+  uint64_t align = alignment == 0 ? (64 * 1024) : alignment; // default 64K alignment
+  if (size >= GPU_HUGE_PAGE_SIZE)
+      align = GPU_HUGE_PAGE_SIZE;
 
-    code = d3dthunk::ReserveGpuVirtualAddress(adapter_, size,
-                                          system_heap_space_start_,
-                                          system_heap_space_start_ + system_heap_space_size_,
-                                          &gpu_addr);
-    if (code != ErrorCode::Success)
-      return code;
+  if (domain == thunk_proxy::kSystem) {
+    gpu_addr = dxg_runtime->system_heap_mgr_->Alloc(size, align, hit_base_addr);
+    if (gpu_addr == 0)
+        code = ErrorCode::OutOfMemory;
 
     if (!CommitSystemHeapSpace((void*)gpu_addr, size, lock)) {
-      d3dthunk::FreeGpuVirtualAddress(adapter_, gpu_addr, size);
+      dxg_runtime->system_heap_mgr_->Free(gpu_addr);
       code = ErrorCode::SyscallFail;
     }
   } else {
-    uint64_t align = alignment == 0 ? (64 * 1024) : alignment; // default 64K alignment
-    if (domain == thunk_proxy::kLocal && size >= GPU_HUGE_PAGE_SIZE)
-      align = GPU_HUGE_PAGE_SIZE;
-
     gpu_addr = dxg_runtime->local_heap_mgr_->Alloc(size, align, hit_base_addr);
     if (gpu_addr == 0)
       code = ErrorCode::OutOfGpuMemory;
-
   }
 
   *out_gpu_virt_addr = (code == ErrorCode::Success) ? gpu_addr : 0;
@@ -405,15 +368,8 @@ ErrorCode WDDMDevice::FreeGpuVirtualAddress(const thunk_proxy::AllocDomain domai
   auto code = ErrorCode::Success;
 
   if (domain == thunk_proxy::kSystem) {
-
       DecommitSystemHeapSpace((void *)gpu_addr, size);
-
-      d3dthunk::FreeGpuVirtualAddressArgs free_args{};
-      free_args.hAdapter = adapter_;
-      free_args.BaseAddress = gpu_addr;
-      free_args.Size = size;
-
-      code = d3dthunk::FreeGpuVirtualAddress(&free_args);
+      dxg_runtime->system_heap_mgr_->Free(gpu_addr);
   } else {
       dxg_runtime->local_heap_mgr_->Free(gpu_addr);
   }
