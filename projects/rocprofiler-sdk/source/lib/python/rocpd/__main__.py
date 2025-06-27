@@ -291,10 +291,7 @@ Example usage:
     elif args.command == "merge":
         # merge subparser args
         merge_args = merge.process_args(args, valid_merge_args)
-
-        # now start processing the data.  Import the data and merge the views
-        importData = RocpdImportData(args.input)
-        merge.merge(importData, **merge_args)
+        merge.execute(args.input, **merge_args)
 
     # if the user requested query module, execute the query
     elif args.command == "query":
