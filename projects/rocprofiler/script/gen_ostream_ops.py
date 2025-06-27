@@ -257,6 +257,8 @@ def gen_cppheader(infilepath, outfilepath, rank):
             continue
         if c in structs_analyzed:
             continue
+        if c.startswith("_") or c.startswith("pthread_") or c.startswith("__pthread_"):
+            continue
         if (
             c == "max_align_t" or c == "__fsid_t"
         ):  # Skipping as it is defined in multiple domains
