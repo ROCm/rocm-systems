@@ -399,9 +399,14 @@ hsa_status_t KfdDriver::ExportDMABuf(void *mem, size_t size, int *dmabuf_fd,
                                      size_t *offset) {
   int dmabuf_fd_res = -1;
   size_t offset_res = 0;
-  if (HSAKMT_CALL(hsaKmtExportDMABufHandle(mem, size, &dmabuf_fd_res, &offset_res)) !=
-      HSAKMT_STATUS_SUCCESS)
+  HSAKMT_STATUS status =
+      HSAKMT_CALL(hsaKmtExportDMABufHandle(mem, size, &dmabuf_fd_res, &offset_res));
+  if (status != HSAKMT_STATUS_SUCCESS) {
+    if (status == HSAKMT_STATUS_INVALID_PARAMETER) {
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
 
   *dmabuf_fd = dmabuf_fd_res;
   *offset = offset_res;
