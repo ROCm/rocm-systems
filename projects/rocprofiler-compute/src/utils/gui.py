@@ -365,32 +365,6 @@ def build_table_chart(
         style_data_conditional=(
             [
                 {"if": {"row_index": "odd"}, "backgroundColor": "rgb(60, 60, 60)"},
-                {
-                    "if": {"column_id": "PoP", "filter_query": "{PoP} > 50"},
-                    "backgroundColor": "#ffa90a",
-                    "color": "white",
-                },
-                {
-                    "if": {"column_id": "PoP", "filter_query": "{PoP} > 80"},
-                    "backgroundColor": "#ff120a",
-                    "color": "white",
-                },
-                {
-                    "if": {
-                        "column_id": "Avg",
-                        "filter_query": "{Unit} = Pct && {Avg} > 50",
-                    },
-                    "backgroundColor": "#ffa90a",
-                    "color": "white",
-                },
-                {
-                    "if": {
-                        "column_id": "Avg",
-                        "filter_query": "{Unit} = Pct && {Avg} > 80",
-                    },
-                    "backgroundColor": "#ff120a",
-                    "color": "white",
-                },
             ]
             if IS_DARK
             else []
