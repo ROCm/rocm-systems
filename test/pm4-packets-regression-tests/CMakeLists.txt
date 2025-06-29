@@ -45,9 +45,34 @@ target_link_libraries(builder_dump
     ${ROCM_PATH}/lib/libhsa-runtime64.so
 )
 
-# Always copy builder_dump to the test binary directory after build
-add_custom_command(TARGET builder_dump POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${TEST_BINARY_DIR}/pm4-packets-regression-tests
-    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:builder_dump> ${TEST_BINARY_DIR}/pm4-packets-regression-tests/
-    COMMENT "Copying builder_dump to test binary directory"
-)
+
+find_program(PYTHON3_EXECUTABLE python3)
+find_program(PYTEST_EXECUTABLE pytest)
+
+set(CPP_EXECUTABLE builder_dump)
+
+if(PYTHON3_EXECUTABLE AND PYTEST_EXECUTABLE)
+    add_test(
+        NAME pm4-packets-regression
+        COMMAND bash -c "${PYTHON3_EXECUTABLE} -u run_regression_tests.py"
+    )
+    set_tests_properties(pm4-packets-regression PROPERTIES
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        TIMEOUT 30
+        LABELS "regression-tests"
+    )
+endif()
+
+
+file(MAKE_DIRECTORY ${TEST_BINARY_DIR}/pm4-packets-regression-tests)
+
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/test_packets.py
+               ${TEST_BINARY_DIR}/pm4-packets-regression-tests/test_packets.py COPYONLY)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/run_regression_tests.py
+               ${TEST_BINARY_DIR}/pm4-packets-regression-tests/run_regression_tests.py COPYONLY)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/conftest.py
+               ${TEST_BINARY_DIR}/pm4-packets-regression-tests/conftest.py COPYONLY)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/pytest.ini
+               ${TEST_BINARY_DIR}/pm4-packets-regression-tests/pytest.ini COPYONLY)
+file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/baselines
+     DESTINATION ${TEST_BINARY_DIR}/pm4-packets-regression-tests)

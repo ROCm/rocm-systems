@@ -4,7 +4,7 @@
 #include "pm4/cmd_builder.h"
 #include "pm4/pmc_builder.h"
 
-static constexpr bool CMD_BUFFER_DUMP_ENABLED = false;
+static constexpr bool CMD_BUFFER_DUMP_ENABLED = true;
 
 using namespace std;
 
@@ -59,8 +59,7 @@ aql_profile::Pm4Factory *get_pm4_factory(const AgentInfo *agent_info,
 }
 
 hsa_ven_amd_aqlprofile_profile_t *create_profile(const AgentInfo *agent_info, hsa_ven_amd_aqlprofile_block_name_t block_name) {
-  hsa_ven_amd_aqlprofile_parameter_t params = {};
-
+  
   int num_events = 1;
   hsa_ven_amd_aqlprofile_event_t* events =
       new hsa_ven_amd_aqlprofile_event_t[num_events];
@@ -78,7 +77,7 @@ hsa_ven_amd_aqlprofile_profile_t *create_profile(const AgentInfo *agent_info, hs
           HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_PMC,
           events,
           num_events,
-          &params,
+          NULL,
           0,
           0,
           0};
@@ -99,6 +98,7 @@ aql_profile::gpu_id_t get_gpu_id(std::string_view gfx_ip) {
     {"gfx902", aql_profile::GFX9_GPU_ID},
     {"gfx906", aql_profile::GFX9_GPU_ID},
     {"gfx94", aql_profile::MI300_GPU_ID},
+    {"gfx95", aql_profile::MI350_GPU_ID},
     {"gfx10", aql_profile::GFX10_GPU_ID},
     {"gfx11", aql_profile::GFX11_GPU_ID},
     {"gfx12", aql_profile::GFX12_GPU_ID},
@@ -165,8 +165,6 @@ public:
     pmc_builder->Read(&cmd_buf, counters_vec, data_buffer);
     dump_cmd_buffer(file_handle, cmd_buf);
 
-    if(file_handle.is_open())
-      file_handle.close();
   }
 
 
@@ -207,8 +205,6 @@ public:
     spm_builder->End(&cmd_buf, &config);
     dump_cmd_buffer(file_handle, cmd_buf);
 
-    if(file_handle.is_open())
-      file_handle.close();
   }
 
 };
@@ -233,8 +229,6 @@ public:
     sqtt_builder->End(&cmd_buf, config);
     dump_cmd_buffer(file_handle, cmd_buf);
 
-    if(file_handle.is_open())
-      file_handle.close();
   }
 
 };

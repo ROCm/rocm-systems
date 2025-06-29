@@ -80,7 +80,6 @@ install(FILES ${TEST_DIR}/run_install.sh RENAME run_tests.sh
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME} COMPONENT tests)
 
 #add_subdirectory(parser)
-add_subdirectory(pm4-packets-regression-tests)
 
 # legacy tests
 add_test(NAME legacy-tests COMMAND "${TEST_BINARY_DIR}/run.sh")
@@ -90,7 +89,7 @@ if(AQLPROFILE_BUILD_TESTS)
     enable_testing()
 endif()
 
-execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory ${TEST_BINARY_DIR}/pm4-packets-regression-tests)
-execute_process(COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/pm4-packets-regression-tests/compare_debug_trace.py ${TEST_BINARY_DIR}/pm4-packets-regression-tests/compare_debug_trace.py)
-execute_process(COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/pm4-packets-regression-tests/run_regression_test.sh ${TEST_BINARY_DIR}/pm4-packets-regression-tests/run_regression_test.sh)
-execute_process(COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/pm4-packets-regression-tests/baselines ${TEST_BINARY_DIR}/pm4-packets-regression-tests/baselines)
+if(AQLPROFILE_BUILD_TESTS)
+    add_subdirectory(pm4-packets-regression-tests)
+    enable_testing()
+endif()

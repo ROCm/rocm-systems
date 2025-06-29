@@ -1,6 +1,5 @@
 #include <iostream>
 #include <stdexcept>
-#define LITTLEENDIAN_CPU 1
 #include <bits/stdc++.h>
 #include <cstddef>
 #include <cstdint>
