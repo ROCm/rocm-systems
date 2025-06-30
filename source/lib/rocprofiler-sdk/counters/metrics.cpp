@@ -367,5 +367,35 @@ operator==(Metric const& lhs, Metric const& rhs)
     };
     return get_tie(lhs) == get_tie(rhs);
 }
+Metric::Metric(const std::string&,  // Get rid of this...
+               std::string name,
+               std::string block,
+               std::string event,
+               std::string dsc,
+               std::string expr,
+               std::string constant,
+               uint64_t    id)
+: name_(std::move(name))
+, block_(std::move(block))
+, event_(std::move(event))
+, description_(std::move(dsc))
+, expression_(std::move(expr))
+, constant_(std::move(constant))
+, id_(id)
+{
+    if(!event_.empty())
+    {
+        try
+        {
+            uint64_t event_id  = std::stoul(event_, nullptr);
+            uint32_t id_high32 = (event_id >> 32) & 0xFFFFFFFF;
+            if(id_high32 != 0u) setflags(id_high32);
+        } catch(std::exception& e)
+        {
+            ROCP_CI_LOG(INFO) << fmt::format(
+                "AQL packet construct for '{}' threw an exception: {}", event_, e.what());
+        }
+    }
+}
 }  // namespace counters
 }  // namespace rocprofiler
