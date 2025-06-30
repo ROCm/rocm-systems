@@ -396,6 +396,55 @@ rocp_load_rocprofiler_lib(std::string _rocp_reg_lib)
     return std::make_tuple(rocprofiler_lib_handle, rocprofiler_lib_config_fn);
 }
 
+void*
+rocp_load_rocprofiler_other_lib(std::string _rocp_reg_lib)
+{
+    void*                       rocprofiler_lib_handle    = nullptr;
+
+    if(_rocp_reg_lib.empty()) return nullptr;
+
+    auto _rocp_reg_lib_path       = fs::path{ _rocp_reg_lib };
+    auto _rocp_reg_lib_path_fname = _rocp_reg_lib_path.filename();
+    auto _rocp_reg_lib_path_abs =
+        (_rocp_reg_lib_path.is_absolute())
+            ? _rocp_reg_lib_path
+            : (fs::path{ get_this_library_path() } / _rocp_reg_lib_path);
+
+    // check to see if the rocprofiler library is already loaded
+    rocprofiler_lib_handle = dlopen(_rocp_reg_lib_path.c_str(), RTLD_NOLOAD | RTLD_LAZY);
+
+    // try to load with the given path
+    if(!rocprofiler_lib_handle)
+    {
+        rocprofiler_lib_handle =
+            dlopen(_rocp_reg_lib_path.c_str(), RTLD_GLOBAL | RTLD_LAZY);
+    }
+
+    // try to load with the absoulte path
+    if(!rocprofiler_lib_handle)
+    {
+        _rocp_reg_lib_path = _rocp_reg_lib_path_abs;
+        rocprofiler_lib_handle =
+            dlopen(_rocp_reg_lib_path.c_str(), RTLD_GLOBAL | RTLD_LAZY);
+    }
+
+    // try to load with the basename path
+    if(!rocprofiler_lib_handle)
+    {
+        _rocp_reg_lib_path = _rocp_reg_lib_path_fname;
+        rocprofiler_lib_handle =
+            dlopen(_rocp_reg_lib_path.c_str(), RTLD_GLOBAL | RTLD_LAZY);
+    }
+
+    LOG(INFO) << "loaded " << _rocp_reg_lib_path_fname.string() << " library at "
+              << _rocp_reg_lib_path.string();
+
+    LOG_IF(WARNING, rocprofiler_lib_handle == nullptr)
+        << _rocp_reg_lib << " failed to load\n";
+
+    return rocprofiler_lib_handle;
+}
+
 struct registered_library_api_table
 {
     bool                               propagated     = false;
@@ -651,10 +700,16 @@ rocprofiler_register_iterate_registration_info(
 }
 
 rocprofiler_register_error_code_t
+rocprofiler_register_invoke_nonpropagated_registrations() ROCPROFILER_REGISTER_PUBLIC_API;
+
+rocprofiler_register_error_code_t
 rocprofiler_register_invoke_nonpropagated_registrations()
 {
     return rocp_invoke_registrations(false);
 }
+
+rocprofiler_register_error_code_t
+rocprofiler_register_invoke_all_registrations() ROCPROFILER_REGISTER_PUBLIC_API;
 
 rocprofiler_register_error_code_t
 rocprofiler_register_invoke_all_registrations()
@@ -697,8 +752,7 @@ rocprofiler_register_error_code_t
 rocprofiler_register_attach(const char* environment_buffer)
 {
     LOG(INFO) << "rocprofiler_register_attach started";
-    // TODO: Engineering demo: hard coded library path
-    void* toollibrary = dlopen("/opt/rocm-6.5.0/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so", RTLD_LAZY);
+    void* toollibrary = rocp_load_rocprofiler_other_lib("rocprofiler-sdk/librocprofiler-sdk-tool.so");
 
     if (!toollibrary)
     {
@@ -733,9 +787,8 @@ rocprofiler_register_detach() ROCPROFILER_REGISTER_PUBLIC_API;
 rocprofiler_register_error_code_t
 rocprofiler_register_detach()
 {
-    LOG(INFO) << "rocprofiler_register_detach started";                                
-    // TODO: Engineering demo: hard coded library path
-    void* toollibrary = dlopen("/opt/rocm-6.5.0/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so", RTLD_LAZY);
+    LOG(INFO) << "rocprofiler_register_detach started";
+    void* toollibrary = rocp_load_rocprofiler_other_lib("rocprofiler-sdk/librocprofiler-sdk-tool.so");
 
     if (!toollibrary)
     {
