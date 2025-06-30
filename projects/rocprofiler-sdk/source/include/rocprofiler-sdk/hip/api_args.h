@@ -399,7 +399,8 @@ typedef union rocprofiler_hip_api_args_t
     } hipDeviceGetMemPool;
     struct
     {
-        char*       name;
+        void* name;  // changed to void* (real: char*) to avoid stringify on stack-allocated output
+                     // parameter
         int         len;
         hipDevice_t device;
     } hipDeviceGetName;
@@ -412,9 +413,10 @@ typedef union rocprofiler_hip_api_args_t
     } hipDeviceGetP2PAttribute;
     struct
     {
-        char* pciBusId;
-        int   len;
-        int   device;
+        void* pciBusId;  // changed to void* (real: char*) to avoid stringify on stack-allocated
+                         // output parameter
+        int len;
+        int device;
     } hipDeviceGetPCIBusId;
     struct
     {
@@ -1046,8 +1048,9 @@ typedef union rocprofiler_hip_api_args_t
         hipGraphExec_t* pGraphExec;
         hipGraph_t      graph;
         hipGraphNode_t* pErrorNode;
-        char*           pLogBuffer;
-        size_t          bufferSize;
+        void* pLogBuffer;  // changed to void* (real: char*) to avoid stringify on stack-allocated
+                           // output parameter
+        size_t bufferSize;
     } hipGraphInstantiate;
     struct
     {
