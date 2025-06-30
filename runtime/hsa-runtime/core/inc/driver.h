@@ -294,6 +294,13 @@ public:
   /// @param[out] enable True if the model is enabled, false otherwise
   virtual hsa_status_t IsModelEnabled(bool* enable) const = 0;
 
+  /// @brief Gets the wallclock frequency for a specific node.
+  /// @param[in] node_id Node ID of the agent
+  /// @param[out] frequency Pointer to the wallclock frequency
+  /// @return HSA_STATUS_SUCCESS if the wallclock frequency was successfully retrieved, or an error
+  /// code.
+  virtual hsa_status_t GetWallclockFrequency(uint32_t node_id, uint64_t* frequency) const = 0;
+
   /// Unique identifier for supported kernel-mode drivers.
   const DriverType kernel_driver_type_;
 

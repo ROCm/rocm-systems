@@ -611,5 +611,21 @@ hsa_status_t KfdDriver::IsModelEnabled(bool* enable) const {
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t KfdDriver::GetWallclockFrequency(uint32_t node_id, uint64_t* frequency) const {
+  assert(frequency);
+
+  amdgpu_gpu_info info;
+  amdgpu_device_handle handle;
+  if (GetDeviceHandle(node_id, reinterpret_cast<void**>(&handle)) != HSA_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+
+  if (DRM_CALL(amdgpu_query_gpu_info(handle, &info)) < 0) return HSA_STATUS_ERROR;
+
+  // Reported by libdrm in KHz.
+  *frequency = uint64_t(info.gpu_counter_freq) * 1000ull;
+
+  return HSA_STATUS_SUCCESS;
+}
+
 } // namespace AMD
 } // namespace rocr
