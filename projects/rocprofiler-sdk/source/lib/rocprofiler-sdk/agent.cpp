@@ -1000,14 +1000,6 @@ construct_agent_cache(::HsaApiTable* table)
     auto rocp_agents = agent::get_agents();
     auto hsa_agents  = std::vector<hsa_agent_t>{};
 
-    // Get HSA Agents
-    table->core_->hsa_iterate_agents_fn(
-        [](hsa_agent_t agent, void* data) {
-            CHECK_NOTNULL(static_cast<std::vector<hsa_agent_t>*>(data))->emplace_back(agent);
-            return HSA_STATUS_SUCCESS;
-        },
-        &hsa_agents);
-
     auto get_hsa_status_string = [table](hsa_status_t _status) -> std::string_view {
         const char* _status_msg = nullptr;
         return (table->core_->hsa_status_string_fn(_status, &_status_msg) == HSA_STATUS_SUCCESS &&
@@ -1015,6 +1007,45 @@ construct_agent_cache(::HsaApiTable* table)
                    ? std::string_view{_status_msg}
                    : std::string_view{"(unknown HSA error)"};
     };
+
+    {
+        auto _hsa_agents = std::vector<hsa_agent_t>{};
+
+        // Get HSA Agents
+        table->core_->hsa_iterate_agents_fn(
+            [](hsa_agent_t agent, void* data) {
+                CHECK_NOTNULL(static_cast<std::vector<hsa_agent_t>*>(data))->emplace_back(agent);
+                return HSA_STATUS_SUCCESS;
+            },
+            &_hsa_agents);
+
+        // remove agents that are not CPU or GPU
+        for(const auto& _agent : _hsa_agents)
+        {
+            hsa_device_type_t agent_type{};
+
+            auto ret = table->core_->hsa_agent_get_info_fn(
+                _agent, hsa_agent_info_t{HSA_AGENT_INFO_DEVICE}, &agent_type);
+
+            if(ret != HSA_STATUS_SUCCESS)
+            {
+                ROCP_CI_LOG(ERROR) << fmt::format(
+                    "hsa_agent_get_info(hsa_agent_t={}, "
+                    "HSA_AGENT_INFO_DEVICE, ...) returned {} :: {}, skipping this agent",
+                    _agent.handle,
+                    static_cast<std::underlying_type_t<hsa_status_t>>(ret),
+                    get_hsa_status_string(ret));
+                continue;
+            }
+
+            if(agent_type == HSA_DEVICE_TYPE_CPU || agent_type == HSA_DEVICE_TYPE_GPU)
+            {
+                hsa_agents.emplace_back(_agent);
+            }
+        }
+    }
+
+    ROCP_CI_LOG_IF(ERROR, hsa_agents.empty()) << fmt::format("Did not detect any HSA agents");
 
     auto rocp_hsa_agent_node_ids = std::set<uint32_t>{};
     if(rocp_agents.size() != hsa_agents.size())
