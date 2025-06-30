@@ -490,7 +490,8 @@ set_kernel_rename_and_stream_correlation_id(rocprofiler_thread_id_t  thr_id,
         tool::get_config().kernel_rename && thread_dispatch_rename != nullptr &&
         !thread_dispatch_rename->empty();
 
-    const bool hip_stream_enabled = !tool::get_config().group_by_queue;
+    const bool hip_stream_enabled =
+        !tool::get_config().group_by_queue && rocprofiler::tool::stream::stream_stack_not_null();
 
     if(!kernel_rename_service_enabled && !hip_stream_enabled) return 1;
 
