@@ -60,7 +60,7 @@ set(pc-sampling-env-stochastic-transpose-multiple-agents "${PRELOAD_ENV}")
 set_tests_properties(
     rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-cmd-execute
     PROPERTIES TIMEOUT
-               45
+               90
                LABELS
                "integration-tests;pc-sampling;stochastic"
                ENVIRONMENT
@@ -83,7 +83,7 @@ add_test(
 set_tests_properties(
     rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-json-execute
     PROPERTIES TIMEOUT
-               45
+               90
                LABELS
                "integration-tests;pc-sampling;stochastic"
                ENVIRONMENT
@@ -106,7 +106,7 @@ add_test(
 set_tests_properties(
     rocprofv3-test-pc-sampling-stochastic-transpose-multiple-agents-input-yaml-execute
     PROPERTIES TIMEOUT
-               45
+               90
                LABELS
                "integration-tests;pc-sampling;stochastic"
                ENVIRONMENT

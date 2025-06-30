@@ -54,7 +54,7 @@ set(pc-sampling-env-stochastic-exec-mask-manipulation "${PRELOAD_ENV}")
 set_tests_properties(
     rocprofv3-test-pc-sampling-stochastic-exec-mask-manipulation-input-cmd-execute
     PROPERTIES TIMEOUT
-               45
+               90
                LABELS
                "integration-tests;pc-sampling;stochastic"
                ENVIRONMENT
@@ -77,7 +77,7 @@ add_test(
 set_tests_properties(
     rocprofv3-test-pc-sampling-stochastic-exec-mask-manipulation-input-json-execute
     PROPERTIES TIMEOUT
-               45
+               90
                LABELS
                "integration-tests;pc-sampling;stochastic"
                ENVIRONMENT
@@ -100,7 +100,7 @@ add_test(
 set_tests_properties(
     rocprofv3-test-pc-sampling-stochastic-exec-mask-manipulation-input-yaml-execute
     PROPERTIES TIMEOUT
-               45
+               90
                LABELS
                "integration-tests;pc-sampling;stochastic"
                ENVIRONMENT

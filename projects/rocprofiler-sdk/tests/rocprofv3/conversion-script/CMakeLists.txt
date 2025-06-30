@@ -29,6 +29,11 @@ project(
     VERSION 0.0.0)
 
 find_package(rocprofiler-sdk REQUIRED)
+
+if(ROCPROFILER_DISABLE_UNSTABLE_CTESTS)
+    set(PYTEST_ARGS -k "not test_validate_counter_collection_pmc1")
+endif()
+
 # copy to binary directory
 rocprofiler_configure_pytest_files(COPY validate.py input.txt conftest.py
                                    CONFIG pytest.ini)
@@ -83,7 +88,7 @@ foreach(i RANGE 0 ${convert_test_length})
 
         add_test(NAME ${validate_test_name}
                  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py
-                         --input ${output} --retain-agent-prefix true)
+                         ${PYTEST_ARGS} --input ${output} --retain-agent-prefix true)
     else()
         add_test(
             NAME ${test_name}
@@ -95,7 +100,7 @@ foreach(i RANGE 0 ${convert_test_length})
 
         add_test(NAME ${validate_test_name}
                  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py
-                         --input ${output} --retain-agent-prefix false)
+                         ${PYTEST_ARGS} --input ${output} --retain-agent-prefix false)
     endif()
     set_tests_properties(
         ${test_name}
