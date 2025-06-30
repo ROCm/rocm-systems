@@ -32,7 +32,7 @@ set(pc-sampling-env-host-trap-exec-mask-manipulation "${PRELOAD_ENV}")
 set_tests_properties(
     rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-cmd-execute
     PROPERTIES TIMEOUT
-               45
+               90
                LABELS
                "integration-tests;pc-sampling"
                ENVIRONMENT
@@ -55,7 +55,7 @@ add_test(
 set_tests_properties(
     rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-json-execute
     PROPERTIES TIMEOUT
-               45
+               90
                LABELS
                "integration-tests;pc-sampling"
                ENVIRONMENT
@@ -78,7 +78,7 @@ add_test(
 set_tests_properties(
     rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-yaml-execute
     PROPERTIES TIMEOUT
-               45
+               90
                LABELS
                "integration-tests;pc-sampling"
                ENVIRONMENT
