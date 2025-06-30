@@ -11,7 +11,9 @@ project(
 find_package(rocprofiler-sdk REQUIRED)
 
 set(PYTEST_ARGS)
-if(ROCPROFILER_MEMCHECK MATCHES "(Address|Thread)Sanitizer" OR ROCPROFILER_BUILD_CODECOV)
+if(ROCPROFILER_MEMCHECK MATCHES "(Address|Thread|UndefinedBehavior)Sanitizer"
+   OR ROCPROFILER_BUILD_CODECOV
+   OR ROCPROFILER_DISABLE_UNSTABLE_CTESTS)
     set(PYTEST_ARGS -k "not test_total_runtime")
 endif()
 
