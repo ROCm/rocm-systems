@@ -79,7 +79,14 @@ struct hsakmtRuntime {
   bool ReserveSystemHeapSpace();
   uint64_t SystemHeapSize() { return system_heap_space_size_; }
   bool FreeSystemHeapSpace();
+  bool CommitSystemHeapSpace(void* addr, int64_t size, bool lock);
+  bool DecommitSystemHeapSpace(void* addr, int64_t size);
   void InitSystemHeapMgr();
+  ErrorCode ReserveGpuVirtualAddress(const thunk_proxy::AllocDomain domain,
+          gpusize hit_base_addr, gpusize size,
+          gpusize *out_gpu_virt_addr, gpusize alignment, bool lock);
+  ErrorCode FreeGpuVirtualAddress(const thunk_proxy::AllocDomain domain,
+          gpusize gpu_addr, gpusize size);
   bool InitHandleApertureSpace();
   void InitHandleApertureMgr();
   ErrorCode HandleApertureAlloc(gpusize size, gpusize *out_gpu_virt_addr);

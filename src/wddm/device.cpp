@@ -180,51 +180,6 @@ bool WDDMDevice::DestroyPagingQueue(void) {
   return false;
 }
 
-bool WDDMDevice::CommitSystemHeapSpace(void* addr, int64_t size, bool lock) {
-  int32_t protFlags = PROT_READ | PROT_WRITE | PROT_EXEC;
-  int32_t mapFlags = MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED|
-                     MAP_NORESERVE|MAP_UNINITIALIZED;
-  if (lock)
-    mapFlags |= MAP_LOCKED;
-  void* paddr = mmap(addr, size, protFlags, mapFlags, -1, 0);
-  if (paddr == MAP_FAILED) {
-    pr_err("fail to commit %s addr = %p, paddr = %p\n", (lock ? "locked" : ""), addr, paddr);
-    return false;
-  }
-  assert(addr == paddr);
-
-  /*if (!Runtime::runtime_singleton_->PinWARequired())
-      return true;*/
-
-  /*
-   * Do not make the pages in this range available to the child
-   * after a fork(2).  This is useful to prevent copy-on-write
-   * semantics from changing the physical location of a page if
-   * the parent writes to it after a fork(2).  (Such page
-   * relocations cause problems for hardware that DMAs into the
-   * page.)
-   *
-   * https://man7.org/linux/man-pages/man2/madvise.2.html
-   */
-  if (madvise(addr, size, MADV_DONTFORK))
-    pr_err("fail to set MADV_DONTFORK for addr = %p\n", addr);
-
-  return true;
-}
-
-bool WDDMDevice::DecommitSystemHeapSpace(void* addr, int64_t size) {
-  int32_t protFlags = PROT_NONE;
-  int32_t mapFlags = MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED|
-                     MAP_NORESERVE|MAP_UNINITIALIZED;
-  void* paddr = mmap(addr, size, protFlags, mapFlags, -1, 0);
-  if (paddr == MAP_FAILED) {
-    pr_err("fail to decommit addr = %p, paddr = %p\n", addr, paddr);
-    return false;
-  }
-  assert(addr == paddr);
-  return true;
-}
-
 bool WDDMDevice::CommitSystemHeapSpaceIPC(void* addr, int64_t size, int &memfd, bool lock) {
   int fd = -1;
 
@@ -293,48 +248,6 @@ void WDDMDevice::SetPowerOptimization(bool restore) {
   thunk_proxy::DestroyPrivData(priv_data);
 }
 
-ErrorCode WDDMDevice::ReserveGpuVirtualAddress(const thunk_proxy::AllocDomain domain,
-                                               gpusize hit_base_addr, gpusize size,
-                                               gpusize *out_gpu_virt_addr, gpusize alignment, bool lock) {
-  gpusize gpu_addr = 0;
-  ErrorCode code = ErrorCode::Success;
-
-  uint64_t align = alignment == 0 ? (64 * 1024) : alignment; // default 64K alignment
-  if (size >= GPU_HUGE_PAGE_SIZE)
-      align = GPU_HUGE_PAGE_SIZE;
-
-  if (domain == thunk_proxy::kSystem) {
-    gpu_addr = dxg_runtime->system_heap_mgr_->Alloc(size, align, hit_base_addr);
-    if (gpu_addr == 0)
-        code = ErrorCode::OutOfMemory;
-
-    if (!CommitSystemHeapSpace((void*)gpu_addr, size, lock)) {
-      dxg_runtime->system_heap_mgr_->Free(gpu_addr);
-      code = ErrorCode::SyscallFail;
-    }
-  } else {
-    gpu_addr = dxg_runtime->local_heap_mgr_->Alloc(size, align, hit_base_addr);
-    if (gpu_addr == 0)
-      code = ErrorCode::OutOfGpuMemory;
-  }
-
-  *out_gpu_virt_addr = (code == ErrorCode::Success) ? gpu_addr : 0;
-  return code;
-}
-
-ErrorCode WDDMDevice::FreeGpuVirtualAddress(const thunk_proxy::AllocDomain domain,
-                                            gpusize gpu_addr, gpusize size) {
-  auto code = ErrorCode::Success;
-
-  if (domain == thunk_proxy::kSystem) {
-      DecommitSystemHeapSpace((void *)gpu_addr, size);
-      dxg_runtime->system_heap_mgr_->Free(gpu_addr);
-  } else {
-      dxg_runtime->local_heap_mgr_->Free(gpu_addr);
-  }
-
-  return code;
-}
 
 ErrorCode WDDMDevice::ReserveIPCSysMem(gpusize size,
                                        gpusize *out_gpu_virt_addr, gpusize alignment,

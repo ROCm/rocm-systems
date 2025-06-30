@@ -257,7 +257,7 @@ ErrorCode GpuMemory::ReserveGpuVirtualAddress(gpusize base_virt_addr, gpusize si
     if (status == ErrorCode::Success)
       mem_fd_ = mfd;
   } else {
-    status = device_->ReserveGpuVirtualAddress(desc_.domain, base_virt_addr, size, &gpu_virt_addr, alignment,
+    status = dxg_runtime->ReserveGpuVirtualAddress(desc_.domain, base_virt_addr, size, &gpu_virt_addr, alignment,
         desc_.flags.is_locked);
   }
 
@@ -275,7 +275,7 @@ ErrorCode GpuMemory::FreeGpuVirtualAddress(gpusize base_addr, gpusize size) {
     return device_->FreeIPCSysMem(GpuAddress(), Size(), mem_fd_);
 
   return base_addr != 0 ?
-         device_->FreeGpuVirtualAddress(desc_.domain, base_addr, size) :
+         dxg_runtime->FreeGpuVirtualAddress(desc_.domain, base_addr, size) :
          ErrorCode::Success;
 }
 

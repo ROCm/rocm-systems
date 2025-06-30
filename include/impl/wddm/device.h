@@ -194,17 +194,6 @@ public:
 
   ErrorCode FreeIPCSysMem(gpusize gpu_addr, gpusize size, int &memfd);
 
-  ErrorCode ReserveGpuVirtualAddress(thunk_proxy::AllocDomain domain,
-                                     gpusize hit_base_addr,
-                                     gpusize size,
-                                     gpusize *out_gpu_virtual_addr,
-                                     gpusize alignment,
-                                     bool lock=false);
-
-  ErrorCode FreeGpuVirtualAddress(thunk_proxy::AllocDomain domain,
-                                  gpusize base_addr,
-                                  gpusize size);
-
   ErrorCode CreateGpuMemory(const GpuMemoryCreateInfo &create_info, GpuMemory **gpu_mem, gpusize *gpu_va = nullptr);
 
 private:
@@ -221,8 +210,6 @@ private:
 
   void SetPowerOptimization(bool restore);
   void InitCmdbufInfo(void);
-  bool CommitSystemHeapSpace(void* addr, int64_t size, bool lock=false);
-  bool DecommitSystemHeapSpace(void* addr, int64_t size);
   bool CommitSystemHeapSpaceIPC(void* addr, int64_t size, int &fd, bool lock=false);
   bool DecommitSystemHeapSpaceIPC(void* addr, int64_t size, int &memfd);
 
