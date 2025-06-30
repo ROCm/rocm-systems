@@ -1,6 +1,7 @@
 name: Sync amd-mainline to public repository
 
 on:
+  workflow_dispatch:
   push:
     branches: [ amd-mainline ]
 

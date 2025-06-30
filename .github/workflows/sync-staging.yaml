@@ -1,6 +1,7 @@
 name: Sync amd-staging to public repository
 
 on:
+  workflow_dispatch:
   push:
     branches: [ amd-staging ]
 
