@@ -44,11 +44,6 @@ add_test(
         ${CMAKE_CURRENT_BINARY_DIR}/roctracer-roctx-trace/out_results.pftrace
         --otf2-input ${CMAKE_CURRENT_BINARY_DIR}/roctracer-roctx-trace/out_results.otf2)
 
-set(VALIDATION_FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/roctracer-roctx-trace/out_results.pftrace
-    ${CMAKE_CURRENT_BINARY_DIR}/roctracer-roctx-trace/out_results.json
-    ${CMAKE_CURRENT_BINARY_DIR}/roctracer-roctx-trace/out_results.otf2)
-
 set_tests_properties(
     rocprofv3-test-roctracer-roctx-trace-validate
     PROPERTIES TIMEOUT
@@ -60,6 +55,4 @@ set_tests_properties(
                DISABLED
                "${TRANSPOSE_ROCTRACER_ROCTX_DISABLED}"
                FAIL_REGULAR_EXPRESSION
-               "AssertionError"
-               ATTACHED_FILES_ON_FAIL
-               "${VALIDATION_FILES}")
+               "AssertionError")

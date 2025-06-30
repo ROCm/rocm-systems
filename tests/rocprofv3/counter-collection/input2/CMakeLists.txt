@@ -43,21 +43,8 @@ add_test(
         --counter-input
         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_2/out_counter_collection.csv)
 
-set(SYS_VALIDATION_FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_1/out_agent_info.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_1/out_counter_collection.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_2/out_agent_info.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_2/out_counter_collection.csv)
-
 set_tests_properties(
     rocprofv3-test-counter-collection-txt-pmc2-execute-validate
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests"
-               DEPENDS
-               "rocprofv3-test-counter-collection-pmc2-execute"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               ATTACHED_FILES_ON_FAIL
-               "${VALIDATION_FILES}")
+    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
+               "rocprofv3-test-counter-collection-pmc2-execute" FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

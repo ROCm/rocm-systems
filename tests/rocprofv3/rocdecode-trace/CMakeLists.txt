@@ -48,7 +48,7 @@ set_tests_properties(
                ENVIRONMENT
                "${rocdecode-tracing-env}"
                FAIL_REGULAR_EXPRESSION
-               "threw an exception"
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                DISABLED
                "${IS_DISABLED}")
 

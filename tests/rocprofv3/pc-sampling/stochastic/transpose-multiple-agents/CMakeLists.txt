@@ -68,7 +68,7 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                SKIP_REGULAR_EXPRESSION
-               "PC sampling unavailable"
+               "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
                DISABLED
                "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
 
@@ -91,7 +91,7 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                SKIP_REGULAR_EXPRESSION
-               "PC sampling unavailable"
+               "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
                DISABLED
                "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
 
@@ -114,7 +114,7 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                SKIP_REGULAR_EXPRESSION
-               "PC sampling unavailable"
+               "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
                DISABLED
                "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
 
@@ -145,7 +145,7 @@ set_tests_properties(
         FAIL_REGULAR_EXPRESSION
         "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
         SKIP_REGULAR_EXPRESSION
-        "PC sampling unavailable"
+        "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
         DISABLED
         "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
 
@@ -174,7 +174,7 @@ set_tests_properties(
         FAIL_REGULAR_EXPRESSION
         "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
         SKIP_REGULAR_EXPRESSION
-        "PC sampling unavailable"
+        "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
         DISABLED
         "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
 
@@ -203,6 +203,6 @@ set_tests_properties(
         FAIL_REGULAR_EXPRESSION
         "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
         SKIP_REGULAR_EXPRESSION
-        "PC sampling unavailable"
+        "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
         DISABLED
         "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")

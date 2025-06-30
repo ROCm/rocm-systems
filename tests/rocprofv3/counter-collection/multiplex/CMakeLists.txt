@@ -69,22 +69,11 @@ add_test(
         --counter-input
         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/out_json_counter_collection.csv)
 
-set(JSON_VALIDATION_FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/out_json_agent_info.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/out_json_counter_collection.csv)
-
 set_tests_properties(
     rocprofv3-test-counter-collection-multiplex-validate
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests"
-               DEPENDS
+    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
                rocprofv3-test-counter-collection-multiplex-execute
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               ATTACHED_FILES_ON_FAIL
-               "${JSON_VALIDATION_FILES}")
+               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 add_test(
     NAME rocprofv3-test-counter-collection-multiple-yaml-validate
@@ -94,19 +83,8 @@ add_test(
         --counter-input
         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/out_yaml_counter_collection.csv)
 
-set(YAML_VALIDATION_FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/out_yaml_agent_info.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/out_yaml_counter_collection.csv)
-
 set_tests_properties(
     rocprofv3-test-counter-collection-multiple-yaml-validate
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests"
-               DEPENDS
+    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
                rocprofv3-test-counter-collection-multiple-yaml-execute
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               ATTACHED_FILES_ON_FAIL
-               "${YAML_VALIDATION_FILES}")
+               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

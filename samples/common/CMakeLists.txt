@@ -9,7 +9,7 @@ find_package(libdw REQUIRED)
 
 # default FAIL_REGULAR_EXPRESSION for tests
 set(ROCPROFILER_DEFAULT_FAIL_REGEX
-    "threw an exception|Permission denied|Could not create logging file|failed with error code"
+    "threw an exception|Permission denied|Could not create logging file|failed with error code|Subprocess aborted"
     CACHE INTERNAL "Default FAIL_REGULAR_EXPRESSION for tests")
 
 # build flags

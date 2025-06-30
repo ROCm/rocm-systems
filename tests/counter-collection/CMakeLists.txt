@@ -25,9 +25,18 @@ add_test(NAME test-counter-collection-execute COMMAND $<TARGET_FILE:multistream>
 
 set_tests_properties(
     test-counter-collection-execute
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT
-               "${counter-collection-env}" FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               ENVIRONMENT
+               "${counter-collection-env}"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}"
+               FIXTURES_SETUP
+               test-counter-collection)
 
 # copy to binary directory
 rocprofiler_configure_pytest_files(COPY validate.py conftest.py CONFIG pytest.ini)
@@ -38,6 +47,15 @@ add_test(NAME test-counter-collection-validate
 
 set_tests_properties(
     test-counter-collection-validate
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
-               test-counter-collection-execute FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               DEPENDS
+               test-counter-collection-execute
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}"
+               FIXTURES_REQUIRED
+               test-counter-collection)

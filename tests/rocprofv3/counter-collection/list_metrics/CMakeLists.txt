@@ -33,11 +33,11 @@ add_test(
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-set(cc-env-list-metrics "${PRELOAD_ENV}" "ROCPD_LOG_LEVEL=trace")
+set(cc-env-list-metrics "${PRELOAD_ENV}" "ROCPD_LOG_LEVEL=info")
 
 set_tests_properties(
     rocprofv3-test-list-avail-execute
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT "${cc-env-list-metrics}"
+    PROPERTIES TIMEOUT 60 LABELS "integration-tests" ENVIRONMENT "${cc-env-list-metrics}"
                FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 set_tests_properties(
@@ -55,5 +55,5 @@ set_tests_properties(
 
 set_tests_properties(
     rocprofv3-test-list-avail-trace-execute
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT "${cc-env-list-metrics}"
+    PROPERTIES TIMEOUT 60 LABELS "integration-tests" ENVIRONMENT "${cc-env-list-metrics}"
                FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

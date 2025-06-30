@@ -59,7 +59,7 @@ namespace
 using auto_lock_t   = std::unique_lock<std::mutex>;
 auto     print_lock = std::mutex{};
 double   nruntime   = 500.0;  // ms
-uint32_t nspin      = 128 * 10000;
+uint32_t nspin      = 128 * 5000;
 size_t   nthreads   = 2;
 
 void

@@ -56,22 +56,11 @@ add_test(
         --otf2-input
         ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-cmd-line/out_results.otf2)
 
-set(VALIDATION_FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-cmd-line/out_results.pftrace
-    ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-cmd-line/out_results.json)
-
 set_tests_properties(
     rocprofv3-test-kernel-rename-cmd-line-validate
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests"
-               DEPENDS
-               "rocprofv3-test-kernel-rename-execute"
-               FAIL_REGULAR_EXPRESSION
-               "AssertionError"
-               ATTACHED_FILES_ON_FAIL
-               "${VALIDATION_FILES}")
+    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
+               "rocprofv3-test-kernel-rename-execute" FAIL_REGULAR_EXPRESSION
+               "AssertionError")
 
 ##########################################################################################
 #
@@ -100,19 +89,8 @@ add_test(
         --otf2-input
         ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-inp-yaml/out_results.otf2)
 
-set(VALIDATION_FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-inp-yaml/out_results.pftrace
-    ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-inp-yaml/out_results.json)
-
 set_tests_properties(
     rocprofv3-test-kernel-rename-inp-yaml-validate
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests"
-               DEPENDS
-               "rocprofv3-test-kernel-rename-inp-yaml-execute"
-               FAIL_REGULAR_EXPRESSION
-               "AssertionError"
-               ATTACHED_FILES_ON_FAIL
-               "${VALIDATION_FILES}")
+    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
+               "rocprofv3-test-kernel-rename-inp-yaml-execute" FAIL_REGULAR_EXPRESSION
+               "AssertionError")

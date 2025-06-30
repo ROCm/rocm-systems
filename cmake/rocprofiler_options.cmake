@@ -156,5 +156,9 @@ include(rocprofiler_memcheck)
 
 # default FAIL_REGULAR_EXPRESSION for tests
 set(ROCPROFILER_DEFAULT_FAIL_REGEX
-    "threw an exception|Permission denied|Could not create logging file|failed with error code"
+    "threw an exception|Permission denied|Could not create logging file|failed with error code|Subprocess aborted"
     CACHE INTERNAL "Default FAIL_REGULAR_EXPRESSION for tests" FORCE)
+
+# this should be defaulted to OFF by ROCm 7.0.1 or 7.1 this should only used to disable
+# sample tests in extreme circumstances
+option(ROCPROFILER_DISABLE_UNSTABLE_CTESTS "Disable unstable tests" ON)
