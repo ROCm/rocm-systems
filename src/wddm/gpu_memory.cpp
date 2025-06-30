@@ -253,7 +253,7 @@ ErrorCode GpuMemory::ReserveGpuVirtualAddress(gpusize base_virt_addr, gpusize si
   if ((desc_.flags.is_sysmem_exporter || desc_.flags.is_imported_sys_memfd)
       && desc_.domain == thunk_proxy::AllocDomain::kSystem) {
     int mfd = (mem_fd_ > -1)? mem_fd_ : -1;
-    status = device_->ReserveIPCSysMem(Size(), &gpu_virt_addr, desc_.alignment, mfd, desc_.flags.is_locked);
+    status = dxg_runtime->ReserveIPCSysMem(Size(), &gpu_virt_addr, desc_.alignment, mfd, desc_.flags.is_locked);
     if (status == ErrorCode::Success)
       mem_fd_ = mfd;
   } else {
@@ -272,7 +272,7 @@ ErrorCode GpuMemory::ReserveGpuVirtualAddress(gpusize base_virt_addr, gpusize si
 
 ErrorCode GpuMemory::FreeGpuVirtualAddress(gpusize base_addr, gpusize size) {
   if (mem_fd_ > -1)
-    return device_->FreeIPCSysMem(GpuAddress(), Size(), mem_fd_);
+    return dxg_runtime->FreeIPCSysMem(GpuAddress(), Size(), mem_fd_);
 
   return base_addr != 0 ?
          dxg_runtime->FreeGpuVirtualAddress(desc_.domain, base_addr, size) :

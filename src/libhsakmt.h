@@ -87,6 +87,12 @@ struct hsakmtRuntime {
           gpusize *out_gpu_virt_addr, gpusize alignment, bool lock);
   ErrorCode FreeGpuVirtualAddress(const thunk_proxy::AllocDomain domain,
           gpusize gpu_addr, gpusize size);
+  bool CommitSystemHeapSpaceIPC(void* addr, int64_t size, int &fd, bool lock=false);
+  bool DecommitSystemHeapSpaceIPC(void* addr, int64_t size, int &memfd);
+  ErrorCode ReserveIPCSysMem(gpusize size,
+          gpusize *out_gpu_virt_addr, gpusize alignment,
+          int &memfd, bool lock);
+  ErrorCode FreeIPCSysMem(gpusize gpu_addr, gpusize size, int &memfd);
   bool InitHandleApertureSpace();
   void InitHandleApertureMgr();
   ErrorCode HandleApertureAlloc(gpusize size, gpusize *out_gpu_virt_addr);

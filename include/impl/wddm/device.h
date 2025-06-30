@@ -186,14 +186,6 @@ public:
 
   const thunk_proxy::DeviceInfo& DeviceInfo() const { return device_info_; }
 
-  ErrorCode ReserveIPCSysMem(gpusize size,
-                             gpusize *out_gpu_virtual_addr,
-                             gpusize alignment,
-                             int &memfd,
-                             bool lock=false);
-
-  ErrorCode FreeIPCSysMem(gpusize gpu_addr, gpusize size, int &memfd);
-
   ErrorCode CreateGpuMemory(const GpuMemoryCreateInfo &create_info, GpuMemory **gpu_mem, gpusize *gpu_va = nullptr);
 
 private:
@@ -210,8 +202,6 @@ private:
 
   void SetPowerOptimization(bool restore);
   void InitCmdbufInfo(void);
-  bool CommitSystemHeapSpaceIPC(void* addr, int64_t size, int &fd, bool lock=false);
-  bool DecommitSystemHeapSpaceIPC(void* addr, int64_t size, int &memfd);
 
   D3DKMT_HANDLE adapter_;
   LUID adapter_luid_;

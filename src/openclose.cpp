@@ -294,6 +294,79 @@ ErrorCode hsakmtRuntime::FreeGpuVirtualAddress(const thunk_proxy::AllocDomain do
     return code;
 }
 
+bool hsakmtRuntime::CommitSystemHeapSpaceIPC(void* addr, int64_t size, int &memfd, bool lock) {
+    int fd = -1;
+
+    if (memfd == -1) {
+        fd = memfd_create("rocr4wsl_gtt", MFD_CLOEXEC);
+        if (fd < 0) {
+            pr_err("memfd_create failed\n");
+            return false;
+        }
+
+        ftruncate(fd, size);
+    } else {
+        fd = memfd;
+    }
+
+    int32_t protFlags = PROT_READ | PROT_WRITE;
+    int32_t mapFlags = MAP_SHARED | MAP_FIXED | MAP_NORESERVE |
+        MAP_UNINITIALIZED | (lock ? MAP_LOCKED : 0);
+
+    void* paddr = mmap(addr, size, protFlags, mapFlags, fd, 0);
+    if (paddr == MAP_FAILED) {
+        pr_err("fail to commit %s addr = %p, paddr = %p\n", (lock ? "locked" : ""), addr, paddr);
+        if (memfd == -1)
+            close(fd);
+        return false;
+    }
+    assert(addr == paddr);
+
+    memfd = fd;
+
+    if (madvise(addr, size, MADV_DONTFORK))
+        pr_err("fail to set MADV_DONTFORK for addr = %p\n", addr);
+
+    return true;
+}
+
+bool hsakmtRuntime::DecommitSystemHeapSpaceIPC(void* addr, int64_t size, int &memfd) {
+    if (munmap(addr, size) != 0) {
+        pr_err("fail to unmap = %p \n", addr);
+        return false;
+    }
+    close(memfd);
+    memfd = -1;
+    return true;
+}
+
+ErrorCode hsakmtRuntime::ReserveIPCSysMem(gpusize size,
+        gpusize *out_gpu_virt_addr, gpusize alignment,
+        int &memfd, bool lock) {
+    gpusize gpu_addr = 0;
+    ErrorCode code = ErrorCode::Success;
+    gpu_addr = system_heap_mgr_->Alloc(size, alignment, 0);
+    if (gpu_addr == 0)
+        return ErrorCode::OutOfMemory;
+
+    if (!CommitSystemHeapSpaceIPC((void*)gpu_addr, size, memfd, lock)) {
+        system_heap_mgr_->Free(gpu_addr);
+        code = ErrorCode::SyscallFail;
+    }
+
+    *out_gpu_virt_addr = (code == ErrorCode::Success) ? gpu_addr : 0;
+    return code;
+}
+
+ErrorCode hsakmtRuntime::FreeIPCSysMem(gpusize gpu_addr, gpusize size, int &memfd) {
+    auto code = ErrorCode::Success;
+
+    DecommitSystemHeapSpaceIPC((void *)gpu_addr, size, memfd);
+
+    system_heap_mgr_->Free(gpu_addr);
+    return code;
+}
+
 bool hsakmtRuntime::InitHandleApertureSpace() {
 	wsl::thunk::WDDMDevice* device;
 	size_t num_adapters = get_num_wddmdev();
