@@ -359,6 +359,8 @@ class AMDSMIParser(argparse.ArgumentParser):
                 if not path.exists():
                     if path.parent.is_dir():
                         path.touch()
+                        setattr(args, self.dest, path)
+                        return
                     else:
                         raise amdsmi_cli_exceptions.AmdSmiInvalidFilePathException(path, CheckOutputFilePath.outputformat)
 
@@ -374,8 +376,35 @@ class AMDSMIParser(argparse.ArgumentParser):
                     path.touch()
                     setattr(args, self.dest, path)
                 elif path.is_file():
-                    path.touch()
-                    setattr(args, self.dest, path)
+                    # Check if --append or --overwrite flags are present in command line
+                    has_append = '--append' in sys.argv
+                    has_overwrite = '--overwrite' in sys.argv
+
+                    if has_append or getattr(args, 'append', False):
+                        setattr(args, self.dest, path)
+                        return
+                    if has_overwrite or getattr(args, 'overwrite', False):
+                        path.open('w').close()
+                        path.touch()
+                        setattr(args, self.dest, path)
+                        return
+                    # Prompt if neither --append nor --overwrite are specified
+                    try:
+                        resp = input(f"File '{path}' exists. Overwrite (o) / Append (a) / Cancel (N) ? [o/a/N]: ").strip().lower()
+                    except Exception:
+                        sys.exit('Confirmation not given. Exiting without setting value')
+                    if resp in ('a', 'append'):
+                        setattr(args, self.dest, path)
+                        return
+                    elif resp in ('o', 'yes'):
+                        path.open('w').close()
+                        setattr(args, self.dest, path)
+                        return
+                    else:
+                        # User declined to overwrite
+                        raise amdsmi_cli_exceptions.AmdSmiInvalidFilePathException(
+                            path, CheckOutputFilePath.outputformat,
+                            "User declined to overwrite or append existing file.")
                 else:
                     raise amdsmi_cli_exceptions.AmdSmiInvalidFilePathException(path, CheckOutputFilePath.outputformat)
         return CheckOutputFilePath
@@ -759,6 +788,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         logging_args.add_argument('--csv', action='store_true', required=False, help=csv_help)
 
         command_modifier_group.add_argument('--file', action=self._check_output_file_path(), type=str, required=False, help=file_help)
+        command_modifier_group.add_argument('--overwrite', action='store_true', required=False, help="Overwrite the file")
+        command_modifier_group.add_argument('--append', action='store_true', required=False, help="Append to the file")
         # Placing loglevel outside the subcommands so it can be used with any subcommand
         command_modifier_group.add_argument('--loglevel', action='store', type=str.upper, required=False, help=loglevel_help, default='ERROR', metavar='LEVEL',
                                             choices=loglevel_choices)
