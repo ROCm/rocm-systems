@@ -52,8 +52,8 @@ CounterPacketConstruct::CounterPacketConstruct(rocprofiler_agent_id_t           
     {
         auto query_info                = get_query_info(_agent, x);
         _metrics.emplace_back().metric = x;
-        uint32_t event_id              = std::atoi(x.event().c_str());
-
+        uint64_t event_id              = 0;
+        if(!x.event().empty()) event_id = std::stoul(x.event(), nullptr);
         ROCP_TRACE << fmt::format("Fetching events for counter {} (id={}, instance_count={}) on "
                                   "agent {} (node-id:{})(name:{})",
                                   x.name(),
@@ -67,13 +67,13 @@ CounterPacketConstruct::CounterPacketConstruct(rocprofiler_agent_id_t           
         {
             _metrics.back().instances.push_back(
                 {.block_index = block_index,
-                 .event_id    = event_id,
+                 .event_id    = static_cast<uint32_t>(event_id & 0xFFFFFFFF),
                  .flags       = aqlprofile_pmc_event_flags_t{x.flags()},
                  .block_name  = static_cast<hsa_ven_amd_aqlprofile_block_name_t>(query_info.id)});
 
             _metrics.back().events.push_back(
                 {.block_index = block_index,
-                 .event_id    = event_id,
+                 .event_id    = static_cast<uint32_t>(event_id & 0xFFFFFFFF),
                  .flags       = aqlprofile_pmc_event_flags_t{x.flags()},
                  .block_name  = static_cast<hsa_ven_amd_aqlprofile_block_name_t>(query_info.id)});
 

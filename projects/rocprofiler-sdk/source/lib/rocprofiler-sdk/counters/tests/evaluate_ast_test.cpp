@@ -76,8 +76,8 @@ isIdentical(const EvaluateAST& eval_ast, const RawAST& raw_ast)
 TEST(evaluate_ast, basic_copy)
 {
     std::unordered_map<std::string, Metric> metrics = {
-        {"SQ_WAVES", Metric("gfx9", "a", "a", "a", "a", "a", "", 0)},
-        {"TCC_HIT", Metric("gfx9", "b", "b", "b", "b", "b", "", 1)}};
+        {"SQ_WAVES", Metric("gfx9", "a", "a", "1", "a", "a", "", 0)},
+        {"TCC_HIT", Metric("gfx9", "b", "b", "1", "b", "b", "", 1)}};
 
     RawAST* ast = nullptr;
     auto*   buf = yy_scan_string("SQ_WAVES + TCC_HIT");
@@ -94,10 +94,10 @@ TEST(evaluate_ast, basic_copy)
 TEST(evaluate_ast, counter_expansion)
 {
     std::unordered_map<std::string, Metric> metrics = {
-        {"SQ_WAVES", Metric("gfx9", "SQ_WAVES", "a", "a", "a", "", "", 0)},
-        {"TCC_HIT", Metric("gfx9", "TCC_HIT", "b", "b", "b", "", "", 1)},
+        {"SQ_WAVES", Metric("gfx9", "SQ_WAVES", "a", "1", "a", "", "", 0)},
+        {"TCC_HIT", Metric("gfx9", "TCC_HIT", "b", "1", "b", "", "", 1)},
         {"TEST_DERRIVED",
-         Metric("gfx9", "TEST_DERRIVED", "C", "C", "C", "SQ_WAVES+TCC_HIT", "", 2)}};
+         Metric("gfx9", "TEST_DERRIVED", "C", "1", "C", "SQ_WAVES+TCC_HIT", "", 2)}};
 
     std::unordered_map<std::string, EvaluateAST> asts;
     for(auto [val, metric] : metrics)
@@ -115,8 +115,8 @@ TEST(evaluate_ast, counter_expansion)
     std::set<Metric> required_counters;
     asts.at("TEST_DERRIVED").get_required_counters(asts, required_counters);
     EXPECT_EQ(required_counters.size(), 2);
-    auto expected = std::set<Metric>{{Metric("gfx9", "TCC_HIT", "b", "b", "b", "", "", 1),
-                                      Metric("gfx9", "SQ_WAVES", "a", "a", "a", "", "", 0)}};
+    auto expected = std::set<Metric>{{Metric("gfx9", "TCC_HIT", "b", "1", "b", "", "", 1),
+                                      Metric("gfx9", "SQ_WAVES", "a", "1", "a", "", "", 0)}};
 
     for(auto& counter_found : required_counters)
     {
@@ -127,12 +127,12 @@ TEST(evaluate_ast, counter_expansion)
 TEST(evaluate_ast, counter_expansion_multi_derived)
 {
     std::unordered_map<std::string, Metric> metrics = {
-        {"SQ_WAVES", Metric("gfx9", "SQ_WAVES", "a", "a", "a", "", "", 0)},
-        {"TCC_HIT", Metric("gfx9", "TCC_HIT", "b", "b", "b", "", "", 1)},
+        {"SQ_WAVES", Metric("gfx9", "SQ_WAVES", "a", "1", "a", "", "", 0)},
+        {"TCC_HIT", Metric("gfx9", "TCC_HIT", "b", "1", "b", "", "", 1)},
         {"TEST_DERRIVED",
-         Metric("gfx9", "TEST_DERRIVED", "C", "C", "C", "SQ_WAVES+TCC_HIT", "", 2)},
+         Metric("gfx9", "TEST_DERRIVED", "C", "1", "C", "SQ_WAVES+TCC_HIT", "", 2)},
         {"TEST_DERRIVED3",
-         Metric("gfx9", "TEST_DERRIVED3", "C", "C", "C", "TEST_DERRIVED+SQ_WAVES+TCC_HIT", "", 3)}};
+         Metric("gfx9", "TEST_DERRIVED3", "C", "1", "C", "TEST_DERRIVED+SQ_WAVES+TCC_HIT", "", 3)}};
 
     std::unordered_map<std::string, EvaluateAST> asts;
     for(auto [val, metric] : metrics)
@@ -150,8 +150,8 @@ TEST(evaluate_ast, counter_expansion_multi_derived)
     std::set<Metric> required_counters;
     asts.at("TEST_DERRIVED3").get_required_counters(asts, required_counters);
     EXPECT_EQ(required_counters.size(), 2);
-    auto expected = std::set<Metric>{{Metric("gfx9", "TCC_HIT", "b", "b", "b", "", "", 1),
-                                      Metric("gfx9", "SQ_WAVES", "a", "a", "a", "", "", 0)}};
+    auto expected = std::set<Metric>{{Metric("gfx9", "TCC_HIT", "b", "1", "b", "", "", 1),
+                                      Metric("gfx9", "SQ_WAVES", "a", "1", "a", "", "", 0)}};
 
     for(auto& counter_found : required_counters)
     {
@@ -162,12 +162,12 @@ TEST(evaluate_ast, counter_expansion_multi_derived)
 TEST(evaluate_ast, counter_expansion_order)
 {
     std::unordered_map<std::string, Metric> metrics = {
-        {"SQ_WAVES", Metric("gfx9", "SQ_WAVES", "a", "a", "a", "", "", 0)},
-        {"TCC_HIT", Metric("gfx9", "TCC_HIT", "b", "b", "b", "", "", 1)},
-        {"VLL", Metric("gfx9", "VLL", "b", "b", "b", "", "", 4)},
-        {"TEST_DERRIVED", Metric("gfx9", "TEST_DERRIVED", "C", "C", "C", "SQ_WAVES+VLL", "", 2)},
+        {"SQ_WAVES", Metric("gfx9", "SQ_WAVES", "a", "1", "a", "", "", 0)},
+        {"TCC_HIT", Metric("gfx9", "TCC_HIT", "b", "1", "b", "", "", 1)},
+        {"VLL", Metric("gfx9", "VLL", "b", "1", "b", "", "", 4)},
+        {"TEST_DERRIVED", Metric("gfx9", "TEST_DERRIVED", "C", "1", "C", "SQ_WAVES+VLL", "", 2)},
         {"TEST_DERRIVED3",
-         Metric("gfx9", "TEST_DERRIVED3", "C", "C", "C", "TEST_DERRIVED+SQ_WAVES+TCC_HIT", "", 3)}};
+         Metric("gfx9", "TEST_DERRIVED3", "C", "1", "C", "TEST_DERRIVED+SQ_WAVES+TCC_HIT", "", 3)}};
 
     std::unordered_map<std::string, EvaluateAST> asts;
     for(auto [val, metric] : metrics)
@@ -185,9 +185,9 @@ TEST(evaluate_ast, counter_expansion_order)
     std::set<Metric> required_counters;
     asts.at("TEST_DERRIVED3").get_required_counters(asts, required_counters);
     EXPECT_EQ(required_counters.size(), 3);
-    auto expected = std::set<Metric>{{Metric("gfx9", "VLL", "b", "b", "b", "", "", 4),
-                                      Metric("gfx9", "TCC_HIT", "b", "b", "b", "", "", 1),
-                                      Metric("gfx9", "SQ_WAVES", "a", "a", "a", "", "", 0)}};
+    auto expected = std::set<Metric>{{Metric("gfx9", "VLL", "b", "1", "b", "", "", 4),
+                                      Metric("gfx9", "TCC_HIT", "b", "1", "b", "", "", 1),
+                                      Metric("gfx9", "SQ_WAVES", "a", "1", "a", "", "", 0)}};
 
     for(auto& counter_found : required_counters)
     {
@@ -198,10 +198,10 @@ TEST(evaluate_ast, counter_expansion_order)
 TEST(evaluate_ast, counter_expansion_function)
 {
     std::unordered_map<std::string, Metric> metrics = {
-        {"SQ_WAVES", Metric("gfx9", "SQ_WAVES", "a", "a", "a", "", "", 0)},
-        {"TCC_HIT", Metric("gfx9", "TCC_HIT", "b", "b", "b", "", "", 1)},
-        {"VLL", Metric("gfx9", "VLL", "b", "b", "b", "", "", 4)},
-        {"TEST_DERRIVED", Metric("gfx9", "TEST_DERRIVED", "C", "C", "C", "SQ_WAVES+VLL", "", 2)}};
+        {"SQ_WAVES", Metric("gfx9", "SQ_WAVES", "a", "1", "a", "", "", 0)},
+        {"TCC_HIT", Metric("gfx9", "TCC_HIT", "b", "1", "b", "", "", 1)},
+        {"VLL", Metric("gfx9", "VLL", "b", "1", "b", "", "", 4)},
+        {"TEST_DERRIVED", Metric("gfx9", "TEST_DERRIVED", "C", "1", "C", "SQ_WAVES+VLL", "", 2)}};
 
     std::unordered_map<std::string, EvaluateAST> asts;
     for(auto [val, metric] : metrics)
@@ -245,11 +245,11 @@ TEST(evaluate_ast, counter_constants)
 {
     // Test the construction of counter constants and their evaluation
     std::unordered_map<std::string, Metric> metrics = {
-        {"MAX_WAVE_SIZE", Metric("gfx9", "MAX_WAVE_SIZE", "a", "a", "a", "wave_front_size", "", 0)},
+        {"MAX_WAVE_SIZE", Metric("gfx9", "MAX_WAVE_SIZE", "a", "1", "a", "wave_front_size", "", 0)},
         {"SE_NUM",
-         Metric("gfx9", "SE_NUM", "b", "b", "b", "array_count/simd_arrays_per_engine", "", 4)},
-        {"SIMD_NUM", Metric("gfx9", "SIMD_NUM", "C", "C", "C", "simd_count", "", 2)},
-        {"CU_NUM", Metric("gfx9", "CU_NUM", "D", "D", "D", "simd_count/simd_per_cu", "", 5)}};
+         Metric("gfx9", "SE_NUM", "b", "1", "b", "array_count/simd_arrays_per_engine", "", 4)},
+        {"SIMD_NUM", Metric("gfx9", "SIMD_NUM", "C", "1", "C", "simd_count", "", 2)},
+        {"CU_NUM", Metric("gfx9", "CU_NUM", "D", "1", "D", "simd_count/simd_per_cu", "", 5)}};
     add_constants(metrics, 6);
     std::unordered_map<std::string, std::unordered_map<std::string, EvaluateAST>> asts;
 
@@ -433,14 +433,14 @@ TEST(evaluate_ast, evaluate_simple_counters)
     };
 
     std::unordered_map<std::string, Metric> metrics = {
-        {"VOORHEES", Metric("gfx9", "VOORHEES", "a", "a", "a", "", "", 0)},
-        {"KRUEGER", Metric("gfx9", "KRUEGER", "a", "a", "a", "", "", 1)},
-        {"MYERS", Metric("gfx9", "MYERS", "a", "a", "a", "", "", 2)},
-        {"BATES", Metric("gfx9", "BATES", "a", "a", "a", "VOORHEES+KRUEGER", "", 3)},
-        {"KRAMER", Metric("gfx9", "KRAMER", "a", "a", "a", "MYERS*BATES", "", 4)},
-        {"TORRANCE", Metric("gfx9", "TORRANCE", "a", "a", "a", "KRAMER/KRUEGER", "", 5)},
+        {"VOORHEES", Metric("gfx9", "VOORHEES", "a", "1", "a", "", "", 0)},
+        {"KRUEGER", Metric("gfx9", "KRUEGER", "a", "1", "a", "", "", 1)},
+        {"MYERS", Metric("gfx9", "MYERS", "a", "1", "a", "", "", 2)},
+        {"BATES", Metric("gfx9", "BATES", "a", "1", "a", "VOORHEES+KRUEGER", "", 3)},
+        {"KRAMER", Metric("gfx9", "KRAMER", "a", "1", "a", "MYERS*BATES", "", 4)},
+        {"TORRANCE", Metric("gfx9", "TORRANCE", "a", "1", "a", "KRAMER/KRUEGER", "", 5)},
         {"GHOSTFACE",
-         Metric("gfx9", "GHOSTFACE", "a", "a", "a", "VOORHEES-(KRUEGER+MYERS)", "", 6)}};
+         Metric("gfx9", "GHOSTFACE", "a", "1", "a", "VOORHEES-(KRUEGER+MYERS)", "", 6)}};
 
     std::unordered_map<std::string, std::vector<rocprofiler_record_counter_t>> base_counter_data = {
         {"VOORHEES", construct_test_data_dim(get_base_rec_id(0), {ROCPROFILER_DIMENSION_NONE}, 8)},
@@ -546,13 +546,13 @@ TEST(evaulate_ast, evaulate_hybrid_counters)
     };
 
     std::unordered_map<std::string, Metric> metrics = {
-        {"VOORHEES", Metric("gfx9", "VOORHEES", "a", "a", "a", "", "", 0)},
-        {"KRUEGER", Metric("gfx9", "KRUEGER", "SQ", "a", "a", "", "", 1)},
-        {"MYERS", Metric("gfx9", "MYERS", "SQ", "a", "a", "", "", 2)},
-        {"BATES", Metric("gfx9", "BATES", "a", "a", "a", "accumulate(VOORHEES,NONE)", "", 3)},
-        {"KRAMER", Metric("gfx9", "KRAMER", "a", "a", "a", "accumulate(KRUEGER,LOW_RES)", "", 4)},
+        {"VOORHEES", Metric("gfx9", "VOORHEES", "a", "1", "a", "", "", 0)},
+        {"KRUEGER", Metric("gfx9", "KRUEGER", "SQ", "1", "a", "", "", 1)},
+        {"MYERS", Metric("gfx9", "MYERS", "SQ", "1", "a", "", "", 2)},
+        {"BATES", Metric("gfx9", "BATES", "a", "1", "a", "accumulate(VOORHEES,NONE)", "", 3)},
+        {"KRAMER", Metric("gfx9", "KRAMER", "a", "1", "a", "accumulate(KRUEGER,LOW_RES)", "", 4)},
         {"TORRANCE",
-         Metric("gfx9", "TORRANCE", "a", "a", "a", "accumulate(MYERS,HIGH_RES)", "", 5)}};
+         Metric("gfx9", "TORRANCE", "a", "1", "a", "accumulate(MYERS,HIGH_RES)", "", 5)}};
     std::unordered_map<std::string, std::vector<rocprofiler_record_counter_t>> base_counter_data = {
         {"VOORHEES", construct_test_data_dim(get_base_rec_id(0), {ROCPROFILER_DIMENSION_NONE}, 8)},
         {"KRUEGER", construct_test_data_dim(get_base_rec_id(1), {ROCPROFILER_DIMENSION_NONE}, 8)},
@@ -680,19 +680,19 @@ TEST(evaluate_ast, counter_reduction_sum)
     };
 
     std::unordered_map<std::string, Metric> metrics = {
-        {"VOORHEES", Metric("gfx9", "VOORHEES", "a", "a", "a", "", "", 0)},
-        {"KRUEGER", Metric("gfx9", "KRUEGER", "a", "a", "a", "", "", 1)},
-        {"MYERS", Metric("gfx9", "MYERS", "a", "a", "a", "", "", 2)},
+        {"VOORHEES", Metric("gfx9", "VOORHEES", "a", "1", "a", "", "", 0)},
+        {"KRUEGER", Metric("gfx9", "KRUEGER", "a", "1", "a", "", "", 1)},
+        {"MYERS", Metric("gfx9", "MYERS", "a", "1", "a", "", "", 2)},
         {"MYERS_REDUCED",
-         Metric("gfx9", "MYERS_REDUCED", "a", "a", "a", "reduce(MYERS,sum)", "", 3)},
+         Metric("gfx9", "MYERS_REDUCED", "a", "1", "a", "reduce(MYERS,sum)", "", 3)},
         {"BATES",
          Metric(
-             "gfx9", "BATES", "a", "a", "a", "reduce(VOORHEES, sum)+reduce(KRUEGER, sum)", "", 4)},
+             "gfx9", "BATES", "a", "1", "a", "reduce(VOORHEES, sum)+reduce(KRUEGER, sum)", "", 4)},
         {"KRAMER",
          Metric("gfx9",
                 "KRAMER",
                 "a",
-                "a",
+                "1",
                 "a",
                 "5*reduce(VOORHEES, sum)+reduce(KRUEGER, sum)",
                 "",
@@ -701,7 +701,7 @@ TEST(evaluate_ast, counter_reduction_sum)
          Metric("gfx9",
                 "GHOSTFACE",
                 "a",
-                "a",
+                "1",
                 "a",
                 "reduce(VOORHEES, sum)+(reduce(KRUEGER, sum)/5)",
                 "",
@@ -768,19 +768,19 @@ TEST(evaluate_ast, counter_reduction_min)
     };
 
     std::unordered_map<std::string, Metric> metrics = {
-        {"VOORHEES", Metric("gfx9", "VOORHEES", "a", "a", "a", "", "", 0)},
-        {"KRUEGER", Metric("gfx9", "KRUEGER", "a", "a", "a", "", "", 1)},
-        {"MYERS", Metric("gfx9", "MYERS", "a", "a", "a", "", "", 2)},
+        {"VOORHEES", Metric("gfx9", "VOORHEES", "a", "1", "a", "", "", 0)},
+        {"KRUEGER", Metric("gfx9", "KRUEGER", "a", "1", "a", "", "", 1)},
+        {"MYERS", Metric("gfx9", "MYERS", "a", "1", "a", "", "", 2)},
         {"MYERS_REDUCED",
-         Metric("gfx9", "MYERS_REDUCED", "a", "a", "a", "reduce(MYERS,min)", "", 3)},
+         Metric("gfx9", "MYERS_REDUCED", "a", "1", "a", "reduce(MYERS,min)", "", 3)},
         {"BATES",
          Metric(
-             "gfx9", "BATES", "a", "a", "a", "reduce(VOORHEES, min)+reduce(KRUEGER, min)", "", 4)},
+             "gfx9", "BATES", "a", "1", "a", "reduce(VOORHEES, min)+reduce(KRUEGER, min)", "", 4)},
         {"KRAMER",
          Metric("gfx9",
                 "KRAMER",
                 "a",
-                "a",
+                "1",
                 "a",
                 "5*reduce(VOORHEES, min)+reduce(KRUEGER, min)",
                 "",
@@ -789,7 +789,7 @@ TEST(evaluate_ast, counter_reduction_min)
          Metric("gfx9",
                 "GHOSTFACE",
                 "a",
-                "a",
+                "1",
                 "a",
                 "reduce(VOORHEES, min)+(reduce(KRUEGER, min)/5)",
                 "",
@@ -856,19 +856,19 @@ TEST(evaluate_ast, counter_reduction_max)
     };
 
     std::unordered_map<std::string, Metric> metrics = {
-        {"VOORHEES", Metric("gfx9", "VOORHEES", "a", "a", "a", "", "", 0)},
-        {"KRUEGER", Metric("gfx9", "KRUEGER", "a", "a", "a", "", "", 1)},
-        {"MYERS", Metric("gfx9", "MYERS", "a", "a", "a", "", "", 2)},
+        {"VOORHEES", Metric("gfx9", "VOORHEES", "a", "1", "a", "", "", 0)},
+        {"KRUEGER", Metric("gfx9", "KRUEGER", "a", "1", "a", "", "", 1)},
+        {"MYERS", Metric("gfx9", "MYERS", "a", "1", "a", "", "", 2)},
         {"MYERS_REDUCED",
-         Metric("gfx9", "MYERS_REDUCED", "a", "a", "a", "reduce(MYERS,max)", "", 3)},
+         Metric("gfx9", "MYERS_REDUCED", "a", "1", "a", "reduce(MYERS,max)", "", 3)},
         {"BATES",
          Metric(
-             "gfx9", "BATES", "a", "a", "a", "reduce(VOORHEES, max)+reduce(KRUEGER, max)", "", 4)},
+             "gfx9", "BATES", "a", "1", "a", "reduce(VOORHEES, max)+reduce(KRUEGER, max)", "", 4)},
         {"KRAMER",
          Metric("gfx9",
                 "KRAMER",
                 "a",
-                "a",
+                "1",
                 "a",
                 "5*reduce(VOORHEES, max)+reduce(KRUEGER, max)",
                 "",
@@ -877,7 +877,7 @@ TEST(evaluate_ast, counter_reduction_max)
          Metric("gfx9",
                 "GHOSTFACE",
                 "a",
-                "a",
+                "1",
                 "a",
                 "reduce(VOORHEES, max)+(reduce(KRUEGER, max)/5)",
                 "",
@@ -946,19 +946,19 @@ TEST(evaluate_ast, counter_reduction_avg)
     };
 
     std::unordered_map<std::string, Metric> metrics = {
-        {"VOORHEES", Metric("gfx9", "VOORHEES", "a", "a", "a", "", "", 0)},
-        {"KRUEGER", Metric("gfx9", "KRUEGER", "a", "a", "a", "", "", 1)},
-        {"MYERS", Metric("gfx9", "MYERS", "a", "a", "a", "", "", 2)},
+        {"VOORHEES", Metric("gfx9", "VOORHEES", "a", "1", "a", "", "", 0)},
+        {"KRUEGER", Metric("gfx9", "KRUEGER", "a", "1", "a", "", "", 1)},
+        {"MYERS", Metric("gfx9", "MYERS", "a", "1", "a", "", "", 2)},
         {"MYERS_REDUCED",
-         Metric("gfx9", "MYERS_REDUCED", "a", "a", "a", "reduce(MYERS, avr)", "", 3)},
+         Metric("gfx9", "MYERS_REDUCED", "a", "1", "a", "reduce(MYERS, avr)", "", 3)},
         {"BATES",
          Metric(
-             "gfx9", "BATES", "a", "a", "a", "reduce(VOORHEES, avr)+reduce(KRUEGER, avr)", "", 4)},
+             "gfx9", "BATES", "a", "1", "a", "reduce(VOORHEES, avr)+reduce(KRUEGER, avr)", "", 4)},
         {"KRAMER",
          Metric("gfx9",
                 "KRAMER",
                 "a",
-                "a",
+                "1",
                 "a",
                 "5*reduce(VOORHEES, avr)+reduce(KRUEGER, avr)",
                 "",
@@ -967,7 +967,7 @@ TEST(evaluate_ast, counter_reduction_avg)
          Metric("gfx9",
                 "GHOSTFACE",
                 "a",
-                "a",
+                "1",
                 "a",
                 "reduce(VOORHEES, avr)+(reduce(KRUEGER, avr)/5)",
                 "",
@@ -1044,19 +1044,19 @@ TEST(evaluate_ast, evaluate_mixed_counters)
     test_data.simd_count             = 624;
 
     std::unordered_map<std::string, Metric> metrics = {
-        {"MAX_WAVE_SIZE", Metric("gfx9", "MAX_WAVE_SIZE", "a", "a", "a", "wave_front_size", "", 0)},
+        {"MAX_WAVE_SIZE", Metric("gfx9", "MAX_WAVE_SIZE", "a", "1", "a", "wave_front_size", "", 0)},
         {"SE_NUM",
-         Metric("gfx9", "SE_NUM", "b", "b", "b", "array_count/simd_arrays_per_engine", "", 1)},
-        {"CU_NUM", Metric("gfx9", "CU_NUM", "D", "D", "D", "simd_count/simd_per_cu", "", 2)},
-        {"SIMD_NUM", Metric("gfx9", "SIMD_NUM", "C", "C", "C", "simd_count", "", 3)},
-        {"VOORHEES", Metric("gfx9", "VOORHEES", "a", "a", "a", "", "", 4)},
-        {"KRUEGER", Metric("gfx9", "KRUEGER", "a", "a", "a", "", "", 5)},
+         Metric("gfx9", "SE_NUM", "b", "1", "b", "array_count/simd_arrays_per_engine", "", 1)},
+        {"CU_NUM", Metric("gfx9", "CU_NUM", "D", "1", "D", "simd_count/simd_per_cu", "", 2)},
+        {"SIMD_NUM", Metric("gfx9", "SIMD_NUM", "C", "1", "C", "simd_count", "", 3)},
+        {"VOORHEES", Metric("gfx9", "VOORHEES", "a", "1", "a", "", "", 4)},
+        {"KRUEGER", Metric("gfx9", "KRUEGER", "a", "1", "a", "", "", 5)},
         {"BATES",
-         Metric("gfx9", "BATES", "a", "a", "a", "MAX_WAVE_SIZE*reduce(VOORHEES,sum)", "", 6)},
-        {"KRAMER", Metric("gfx9", "KRAMER", "a", "a", "a", "reduce(KRUEGER,sum)*SE_NUM", "", 7)},
+         Metric("gfx9", "BATES", "a", "1", "a", "MAX_WAVE_SIZE*reduce(VOORHEES,sum)", "", 6)},
+        {"KRAMER", Metric("gfx9", "KRAMER", "a", "1", "a", "reduce(KRUEGER,sum)*SE_NUM", "", 7)},
         {"TORRANCE",
-         Metric("gfx9", "TORRANCE", "a", "a", "a", "reduce(KRUEGER,sum)*SIMD_NUM", "", 8)},
-        {"DODGE", Metric("gfx9", "DODGE", "a", "a", "a", "10*TORRANCE", "", 9)}};
+         Metric("gfx9", "TORRANCE", "a", "1", "a", "reduce(KRUEGER,sum)*SIMD_NUM", "", 8)},
+        {"DODGE", Metric("gfx9", "DODGE", "a", "1", "a", "10*TORRANCE", "", 9)}};
     add_constants(metrics, 10);
 
     std::unordered_map<std::string, std::vector<rocprofiler_record_counter_t>> base_counter_data = {
@@ -1194,12 +1194,12 @@ TEST(evaluate_ast, derived_counter_reduction)
     };
 
     std::unordered_map<std::string, Metric> metrics = {
-        {"VOORHEES", Metric("gfx9", "VOORHEES", "a", "a", "a", "", "", 0)},
-        {"KRUEGER", Metric("gfx9", "KRUEGER", "a", "a", "a", "", "", 1)},
+        {"VOORHEES", Metric("gfx9", "VOORHEES", "a", "1", "a", "", "", 0)},
+        {"KRUEGER", Metric("gfx9", "KRUEGER", "a", "1", "a", "", "", 1)},
         {"max_BATES",
-         Metric("gfx9", "max_BATES", "C", "C", "C", "reduce(VOORHEES+KRUEGER,max)", "", 2)},
+         Metric("gfx9", "max_BATES", "C", "1", "C", "reduce(VOORHEES+KRUEGER,max)", "", 2)},
         {"sum_BATES",
-         Metric("gfx9", "sum_BATES", "C", "C", "C", "reduce(VOORHEES+KRUEGER,sum)", "", 3)}};
+         Metric("gfx9", "sum_BATES", "C", "1", "C", "reduce(VOORHEES+KRUEGER,sum)", "", 3)}};
 
     std::unordered_map<std::string, std::vector<rocprofiler_record_counter_t>> base_counter_data = {
         {"VOORHEES", construct_test_data_dim(get_base_rec_id(0), {ROCPROFILER_DIMENSION_NONE}, 8)},
@@ -1302,14 +1302,14 @@ TEST(evatuate_ast, evaluate_select)
     };
 
     std::unordered_map<std::string, Metric> metrics = {
-        {"VOORHEES", Metric("gfx9", "VOORHEES", "a", "a", "a", "", "", 0)},
-        {"KRUEGER", Metric("gfx9", "KRUEGER", "a", "a", "a", "", "", 1)},
-        {"MYERS", Metric("gfx9", "MYERS", "a", "a", "a", "", "", 2)},
+        {"VOORHEES", Metric("gfx9", "VOORHEES", "a", "1", "a", "", "", 0)},
+        {"KRUEGER", Metric("gfx9", "KRUEGER", "a", "1", "a", "", "", 1)},
+        {"MYERS", Metric("gfx9", "MYERS", "a", "1", "a", "", "", 2)},
         {"BATES",
          Metric("gfx9",
                 "BATES",
                 "C",
-                "C",
+                "1",
                 "C",
                 "select(VOORHEES+KRUEGER,[DIMENSION_XCC=[0]])",
                 "",
@@ -1318,7 +1318,7 @@ TEST(evatuate_ast, evaluate_select)
          Metric("gfx9",
                 "KRAMER",
                 "C",
-                "C",
+                "1",
                 "C",
                 "select(MYERS,[DIMENSION_XCC=[1],DIMENSION_SHADER_ARRAY=[0]])",
                 "",
@@ -1443,13 +1443,13 @@ TEST(evaluate_ast, counter_reduction_dimension)
     };
 
     std::unordered_map<std::string, Metric> metrics = {
-        {"VOORHEES", Metric("gfx9", "VOORHEES", "a", "a", "a", "", "", 0)},
-        {"KRUEGER", Metric("gfx9", "KRUEGER", "a", "a", "a", "", "", 1)},
+        {"VOORHEES", Metric("gfx9", "VOORHEES", "a", "1", "a", "", "", 0)},
+        {"KRUEGER", Metric("gfx9", "KRUEGER", "a", "1", "a", "", "", 1)},
         {"max_BATES",
          Metric("gfx9",
                 "max_BATES",
                 "C",
-                "C",
+                "1",
                 "C",
                 "reduce(VOORHEES+KRUEGER,max, [DIMENSION_XCC])",
                 "",
@@ -1458,7 +1458,7 @@ TEST(evaluate_ast, counter_reduction_dimension)
          Metric("gfx9",
                 "sum_BATES",
                 "C",
-                "C",
+                "1",
                 "C",
                 "reduce(VOORHEES+KRUEGER,sum, [DIMENSION_XCC, DIMENSION_AID])",
                 "",
