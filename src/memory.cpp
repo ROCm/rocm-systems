@@ -164,7 +164,8 @@ HSAKMT_STATUS hsaKmtAllocMemoryAlignInternal(HSAuint32 PreferredNode,
   } else
     *MemoryAddress = nullptr;
 
-  wsl::thunk::WDDMDevice *dev = get_wddmdev(1);
+  uint32_t node = (PreferredNode == 0) ? dxg_runtime->default_node : PreferredNode;
+  wsl::thunk::WDDMDevice *dev = get_wddmdev(node);
   if (!dev)
     return HSAKMT_STATUS_ERROR;
 
@@ -451,7 +452,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterGraphicsHandleToNodesExt(HSAuint64 Graphic
 
   pr_debug("number of nodes %lu\n", NumberOfNodes);
 
-  GraphicsResourceInfo->NodeId = 1;
+  GraphicsResourceInfo->NodeId = NodeArray[0];
   return hsaKmtImportDMABufHandle(GraphicsResourceHandle,
                                   GraphicsResourceInfo,
                                   RegisterFlags);
@@ -489,7 +490,7 @@ HSAKMT_STATUS hsaKmtImportDMABufHandle(int DMABufFd,
                                        HSA_REGISTER_MEM_FLAGS RegisterFlags) {
   CHECK_DXG_OPEN();
 
-  wsl::thunk::WDDMDevice* dev = get_wddmdev(1);
+  wsl::thunk::WDDMDevice* dev = get_wddmdev(GraphicsResourceInfo->NodeId);
   wsl::thunk::GpuMemory *gpu_mem = nullptr;
   wsl::thunk::GpuMemoryCreateInfo create_info{};
   create_info.dmabuf_fd = DMABufFd;
@@ -529,7 +530,7 @@ HSAKMT_STATUS hsaKmtImportDMABufHandle(int DMABufFd,
    (*allocation_map_)[MemoryAddress] = Allocation(
       gpu_mem->GetGpuMemoryHandle(), MemoryAddress, (uint64_t)MemoryAddress,
       gpu_mem->Size(), false, nullptr, gpu_mem->ClientSize(),
-      1, gpu_mem->Flags());
+      GraphicsResourceInfo->NodeId, gpu_mem->Flags());
 
     GraphicsResourceInfo->MemoryAddress = MemoryAddress;
     GraphicsResourceInfo->SizeInBytes = gpu_mem->ClientSize();
@@ -620,10 +621,21 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDeregisterMemory(void *MemoryAddress) {
   return HSAKMT_STATUS_SUCCESS;
 }
 
-
 HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPU(void *MemoryAddress,
                                              HSAuint64 MemorySizeInBytes,
                                              HSAuint64 *AlternateVAGPU) {
+
+  HSAuint64 NumberOfNodes = 1;
+  HSAuint32 NodeArray[] = {dxg_runtime->default_node};
+  HsaMemMapFlags MemMapFlags;
+  MemMapFlags.Value = 0;
+
+  return hsaKmtMapMemoryToGPUNodes(MemoryAddress, MemorySizeInBytes, AlternateVAGPU,
+    MemMapFlags, NumberOfNodes, NodeArray);
+}
+HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPUNodes(
+    void *MemoryAddress, HSAuint64 MemorySizeInBytes, HSAuint64 *AlternateVAGPU,
+    HsaMemMapFlags MemMapFlags, HSAuint64 NumberOfNodes, HSAuint32 *NodeArray) {
   CHECK_DXG_OPEN();
 
   if (!MemoryAddress || !AlternateVAGPU) {
@@ -662,7 +674,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPU(void *MemoryAddress,
         if (code != ErrorCode::Success)
           return HSAKMT_STATUS_ERROR;
 
-        wsl::thunk::WDDMDevice *dev = get_wddmdev(1);
+        wsl::thunk::WDDMDevice *dev = gpu_mem->GetDevice();
         if (!dev->WaitOnPagingFenceFromCpu())
           return HSAKMT_STATUS_ERROR;
 
@@ -695,7 +707,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPU(void *MemoryAddress,
     }
   }
 
-  wsl::thunk::WDDMDevice *dev = get_wddmdev(1);
+  wsl::thunk::WDDMDevice *dev = get_wddmdev(NodeArray[0]);
   if (!dev)
     return HSAKMT_STATUS_ERROR;
 
@@ -728,12 +740,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPU(void *MemoryAddress,
   *AlternateVAGPU = addr + ((uintptr_t)MemoryAddress - (uintptr_t)aligned_ptr);
 
   return HSAKMT_STATUS_SUCCESS;
-}
-
-HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPUNodes(
-    void *MemoryAddress, HSAuint64 MemorySizeInBytes, HSAuint64 *AlternateVAGPU,
-    HsaMemMapFlags MemMapFlags, HSAuint64 NumberOfNodes, HSAuint32 *NodeArray) {
-  return hsaKmtMapMemoryToGPU(MemoryAddress, MemorySizeInBytes, AlternateVAGPU);
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtUnmapMemoryToGPU(void *MemoryAddress) {

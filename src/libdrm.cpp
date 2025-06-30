@@ -102,7 +102,10 @@ HSAKMTAPI int amdgpu_bo_import(amdgpu_device_handle dev,
                                enum amdgpu_bo_handle_type type,
                                uint32_t shared_handle,
                                struct amdgpu_bo_import_result *output) {
-  HsaGraphicsResourceInfo GraphicsResourceInfo;
+  wsl::thunk::WDDMDevice *pDevice = reinterpret_cast<wsl::thunk::WDDMDevice *>(dev);
+  HsaGraphicsResourceInfo GraphicsResourceInfo = {};
+  GraphicsResourceInfo.NodeId = pDevice->NodeId();
+
   HSAKMT_STATUS ret = hsaKmtImportDMABufHandle(shared_handle, &GraphicsResourceInfo);
   if (ret == HSAKMT_STATUS_SUCCESS) {
     //use GpuMemory object's address as drm buf handle
