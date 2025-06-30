@@ -1684,13 +1684,13 @@
                                         "start_timestamp",
                                         "end_timestamp",
                                         "thread_id",
-					"agent_id",
+                                        "agent_id",
                                         "address",
                                         "allocation_size"
                                     ]
-				}
-			    },
-			"rocdecoder_api": {
+                                }
+                            },
+                            "rocdecoder_api": {
                                 "type": "array",
                                 "description": "ROCDecode API records.",
                                 "items": {
@@ -1747,6 +1747,76 @@
                                         "start_timestamp",
                                         "end_timestamp",
                                         "thread_id"
+                                    ]
+                                }
+                            },
+                            "rccl_api_traces": {
+                                "type": "array",
+                                "description": "RCCL API records.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "size": {
+                                            "type": "integer",
+                                            "description": "Size of the RCCL API record."
+                                        },
+                                        "kind": {
+                                            "type": "integer",
+                                            "description": "Kind of the RCCL API."
+                                        },
+                                        "operation": {
+                                            "type": "integer",
+                                            "description": "Operation of the RCCL API."
+                                        },
+                                        "correlation_id": {
+                                            "type": "object",
+                                            "description": "Correlation ID information.",
+                                            "properties": {
+                                                "internal": {
+                                                    "type": "integer",
+                                                    "description": "Internal correlation ID."
+                                                },
+                                                "external": {
+                                                    "type": "integer",
+                                                    "description": "External correlation ID."
+                                                },
+                                                "ancestor": {
+                                                    "type": "integer",
+                                                    "description": "Ancestor correlation ID."
+                                                }
+                                            },
+                                            "required": [
+                                                "internal",
+                                                "external",
+                                                "ancestor"
+                                            ]
+                                        },
+                                        "start_timestamp": {
+                                            "type": "integer",
+                                            "description": "Start timestamp."
+                                        },
+                                        "end_timestamp": {
+                                            "type": "integer",
+                                            "description": "End timestamp."
+                                        },
+                                        "thread_id": {
+                                            "type": "integer",
+                                            "description": "Thread ID."
+                                        },
+                                        "args": {
+                                            "type": "array",
+                                            "description": "RCCL API args"
+                                        }
+                                    },
+                                    "required": [
+                                        "size",
+                                        "kind",
+                                        "operation",
+                                        "correlation_id",
+                                        "start_timestamp",
+                                        "end_timestamp",
+                                        "thread_id",
+                                        "args"
                                     ]
                                 }
                             }
