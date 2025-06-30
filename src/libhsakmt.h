@@ -59,7 +59,8 @@ struct hsakmtRuntime {
     vendor_packet_process(0),
     check_avail_sysram(false),
     max_single_alloc_size(0),
-    enable_thunk_sub_allocator(0) {}
+    enable_thunk_sub_allocator(0),
+    default_node(1) {}
 
   pthread_mutex_t hsakmt_mutex;
   const char *dxg_device_name = "/dev/dxg";
@@ -77,6 +78,7 @@ struct hsakmtRuntime {
   bool check_avail_sysram;
   size_t max_single_alloc_size;
   int enable_thunk_sub_allocator;
+  uint32_t default_node;
 };
 
 extern hsakmtRuntime *dxg_runtime;

@@ -116,6 +116,14 @@ static HSAKMT_STATUS init_vars_from_env(void) {
   if (envvar)
     dxg_runtime->enable_thunk_sub_allocator = atoi(envvar);
 
+  envvar = getenv("ROCR_VISIBLE_DEVICES");
+  if (envvar) {
+    std::string devices(envvar);
+    size_t first_num_pos = devices.find_first_of("0123456789");
+    if (first_num_pos != std::string::npos)
+      dxg_runtime->default_node = std::stoi(devices.substr(first_num_pos)) + 1;
+  }
+
   return HSAKMT_STATUS_SUCCESS;
 }
 

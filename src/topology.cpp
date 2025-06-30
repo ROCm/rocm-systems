@@ -384,6 +384,8 @@ HSAKMT_STATUS topology_sysfs_get_system_props(HsaSystemProperties& props) {
     dxg_topology->wdevices_.push_back(device);
   }
   props.NumNodes = dxg_topology->num_sysfs_nodes;
+  if (dxg_runtime->default_node > num_adapters)
+    dxg_runtime->default_node = num_adapters;
 
   delete[] adapters;
   return ret;
