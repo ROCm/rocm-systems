@@ -427,6 +427,16 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemoryWithFlags(
   return HSAKMT_STATUS_SUCCESS;
 }
 
+bool is_ipc_sysmemfd(int fd) {
+  std::string fdPath = "/proc/self/fd/" + std::to_string(fd);
+  char linkTarget[256];
+  ssize_t bytes = readlink(fdPath.c_str(), linkTarget, sizeof(linkTarget) - 1);
+  if (bytes == -1)
+    return false;
+  linkTarget[bytes] = '\0';
+  return strstr(linkTarget, "rocr4wsl_gtt") != nullptr;
+}
+
 HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterGraphicsHandleToNodes(HSAuint64 GraphicsResourceHandle,
                                                             HsaGraphicsResourceInfo *GraphicsResourceInfo,
                                                             HSAuint64 NumberOfNodes,
@@ -455,6 +465,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterGraphicsHandleToNodesExt(HSAuint64 Graphic
     RegisterFlags.ui32.requiresVAddr = 0;
     NumberOfNodes = 1;
     NodeArray = (HSAuint32*)&(dxg_runtime->default_node);
+  }
+
+  if (is_ipc_sysmemfd(GraphicsResourceHandle)) {
+    GraphicsResourceInfo->NodeId = dxg_runtime->default_node;
+    pr_info("skip register sysmemfd. It would be released in next step\n");
+    return HSAKMT_STATUS_SUCCESS;
   }
 
   GraphicsResourceInfo->NodeId = NodeArray[0];
@@ -501,13 +517,7 @@ HSAKMT_STATUS hsaKmtImportDMABufHandle(int DMABufFd,
   create_info.dmabuf_fd = DMABufFd;
   create_info.flags.imported_vram_alloc_va = RegisterFlags.ui32.requiresVAddr;
 
-  std::string fdPath = "/proc/self/fd/" + std::to_string(DMABufFd);
-  char linkTarget[256];
-  ssize_t bytes = readlink(fdPath.c_str(), linkTarget, sizeof(linkTarget) - 1);
-  if (bytes == -1)
-    pr_err("Error reading link\n");
-  linkTarget[bytes] = '\0';
-  if (strstr(linkTarget, "rocr4wsl_gtt") != nullptr) {
+  if (is_ipc_sysmemfd(DMABufFd)) {
     struct stat st;
     fstat(DMABufFd, &st);
     uint64_t sz = st.st_size;
