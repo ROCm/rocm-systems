@@ -264,7 +264,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Optimized
 
-- N/A
+- **Optimized CLI command `amd-smi topology` in partition mode**.  
+  - Reduced the number of `amdsmi_topo_get_p2p_status` API calls to one fourth.  
 
 ### Resolved issues
 
