@@ -1,12 +1,13 @@
 name: Sync amd-mainline to public repository
 
 on:
+  workflow_dispatch:
   push:
     branches: [ amd-mainline ]
 
 jobs:
   git-mirror:
-    runs-on: ubuntu-latest
+    runs-on: rocprof-azure-docker-emu-runner-set
     steps:
       - name: git-sync
         uses: AMD-ROCm-Internal/rocprofiler-github-actions@git-sync-v3
