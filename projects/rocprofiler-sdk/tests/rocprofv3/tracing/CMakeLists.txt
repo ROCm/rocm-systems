@@ -106,48 +106,16 @@ add_test(
         --rocpd-input
         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_results.db)
 
-set(VALIDATION_FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_results.db
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_results.pftrace
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_results.json
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_memory_copy_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_hsa_api_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_kernel_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_marker_api_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_agent_info.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_results.pftrace
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_results.json
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_memory_copy_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_hsa_api_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_kernel_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_marker_api_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_agent_info.csv)
-
 set_tests_properties(
     rocprofv3-test-trace-validate
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests"
-               DEPENDS
-               "rocprofv3-test-trace-execute"
-               FAIL_REGULAR_EXPRESSION
-               "AssertionError"
-               ATTACHED_FILES_ON_FAIL
-               "${VALIDATION_FILES}")
+    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
+               "rocprofv3-test-trace-execute" FAIL_REGULAR_EXPRESSION "AssertionError")
 
 set_tests_properties(
     rocprofv3-test-trace-input-json-validate
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests"
-               DEPENDS
-               "rocprofv3-test-trace-input-json-execute"
-               FAIL_REGULAR_EXPRESSION
-               "AssertionError"
-               ATTACHED_FILES_ON_FAIL
-               "${VALIDATION_FILES}")
+    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
+               "rocprofv3-test-trace-input-json-execute" FAIL_REGULAR_EXPRESSION
+               "AssertionError")
 
 # sys-trace test: tests --sys-trace command with mangled kernel names and validates
 # generated files
@@ -233,45 +201,13 @@ add_test(
         --rocpd-input
         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_results.db)
 
-set(SYS_VALIDATION_FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_results.db
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_results.pftrace
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_results.json
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_memory_copy_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_hsa_api_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_kernel_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_marker_api_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_agent_info.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_results.pftrace
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_results.json
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_memory_copy_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_hsa_api_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_kernel_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_marker_api_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_agent_info.csv)
-
 set_tests_properties(
     rocprofv3-test-systrace-validate
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests"
-               DEPENDS
-               "rocprofv3-test-systrace-execute"
-               FAIL_REGULAR_EXPRESSION
-               "AssertionError"
-               ATTACHED_FILES_ON_FAIL
-               "${SYS_VALIDATION_FILES}")
+    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
+               "rocprofv3-test-systrace-execute" FAIL_REGULAR_EXPRESSION "AssertionError")
 
 set_tests_properties(
     rocprofv3-test-systrace-input-json-validate
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests"
-               DEPENDS
-               "rocprofv3-test-systrace-input-json-execute"
-               FAIL_REGULAR_EXPRESSION
-               "AssertionError"
-               ATTACHED_FILES_ON_FAIL
-               "${SYS_VALIDATION_FILES}")
+    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
+               "rocprofv3-test-systrace-input-json-execute" FAIL_REGULAR_EXPRESSION
+               "AssertionError")

@@ -47,13 +47,13 @@ add_test(
 set_tests_properties(
     rocprofv3-test-hip-stream-display-execute
     PROPERTIES TIMEOUT
-               45
+               60
                LABELS
                "integration-tests"
                ENVIRONMENT
                "${hip-stream-display-env}"
                FAIL_REGULAR_EXPRESSION
-               "threw an exception"
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                DISABLED
                $<NOT:$<TARGET_EXISTS:hip-streams>>)
 
@@ -67,7 +67,7 @@ add_test(
 set_tests_properties(
     rocprofv3-test-hip-stream-display-validate
     PROPERTIES TIMEOUT
-               45
+               60
                LABELS
                "integration-tests"
                DEPENDS

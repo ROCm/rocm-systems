@@ -32,8 +32,16 @@ set(kernel-tracing-env
 
 set_tests_properties(
     test-kernel-tracing-execute
-    PROPERTIES TIMEOUT 100 LABELS "integration-tests" ENVIRONMENT "${kernel-tracing-env}"
-               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    PROPERTIES TIMEOUT
+               100
+               LABELS
+               "integration-tests"
+               ENVIRONMENT
+               "${kernel-tracing-env}"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               FIXTURES_SETUP
+               kernel-tracing)
 
 # copy to binary directory
 rocprofiler_configure_pytest_files(COPY validate.py conftest.py CONFIG pytest.ini)
@@ -45,5 +53,13 @@ add_test(
 
 set_tests_properties(
     test-kernel-tracing-validate
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS test-kernel-tracing-execute
-               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               DEPENDS
+               test-kernel-tracing-execute
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               FIXTURES_REQUIRED
+               kernel-tracing)

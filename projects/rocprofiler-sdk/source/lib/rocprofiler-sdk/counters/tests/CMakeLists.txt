@@ -96,6 +96,12 @@ set_tests_properties(
         "Running non-intercept test(.*)could not be locked for profiling due to lack of permissions.*"
     )
 
+# unstable counter collection test: Generates HW exception leading to GPU hang or memory
+# access fault
+set_tests_properties(
+    device_counting_service_test.sync_counters device_counting_service_test.async_counters
+    PROPERTIES DISABLED "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}")
+
 set(ROCPROFILER_LIB_CONSUMER_TEST_SOURCES consumer_test.cpp)
 
 add_executable(consumer-test)

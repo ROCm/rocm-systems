@@ -28,9 +28,18 @@ foreach(_OUTPUT_FORMAT csv json)
 
     set_tests_properties(
         rocprofv3-test-scratch-memory-tracing-${_OUTPUT_FORMAT}-execute
-        PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT
-                   "${scratch-memory-tracing-env}" FAIL_REGULAR_EXPRESSION
-                   "threw an exception")
+        PROPERTIES TIMEOUT
+                   45
+                   LABELS
+                   "integration-tests"
+                   ENVIRONMENT
+                   "${scratch-memory-tracing-env}"
+                   FAIL_REGULAR_EXPRESSION
+                   "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+                   DISABLED
+                   "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}"
+                   FIXTURES_SETUP
+                   rocprofv3-scratch-memory-tracing)
 
     list(APPEND VALIDATION_DEPENDS
          rocprofv3-test-scratch-memory-tracing-${_OUTPUT_FORMAT}-execute)
@@ -43,10 +52,6 @@ add_test(
         ${CMAKE_CURRENT_BINARY_DIR}/scratch-memory-trace/out_results.json --csv-input
         ${CMAKE_CURRENT_BINARY_DIR}/scratch-memory-trace/out_scratch_memory_trace.csv)
 
-set(VALIDATION_FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/scratch-memory-trace/out_results.json
-    ${CMAKE_CURRENT_BINARY_DIR}/scratch-memory-trace/out_scratch_memory_trace.csv)
-
 set_tests_properties(
     rocprofv3-test-scratch-memory-tracing-validate
     PROPERTIES TIMEOUT
@@ -57,5 +62,7 @@ set_tests_properties(
                "${VALIDATION_DEPENDS}"
                FAIL_REGULAR_EXPRESSION
                "AssertionError"
-               ATTACHED_FILES_ON_FAIL
-               "${VALIDATION_FILES}")
+               DISABLED
+               "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}"
+               FIXTURES_REQUIRED
+               rocprofv3-scratch-memory-tracing)

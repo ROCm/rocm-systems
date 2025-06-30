@@ -28,7 +28,7 @@ set(cc-env-kernel-filtering "${PRELOAD_ENV}")
 
 set_tests_properties(
     rocprofv3-test-counter-collection-kernel-filtering-input-json-execute
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT
+    PROPERTIES TIMEOUT 120 LABELS "integration-tests" ENVIRONMENT
                "${cc-env-kernel-filtering}" FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
@@ -42,7 +42,7 @@ add_test(
 
 set_tests_properties(
     rocprofv3-test-counter-collection-kernel-filtering-input-cmd-execute
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT
+    PROPERTIES TIMEOUT 120 LABELS "integration-tests" ENVIRONMENT
                "${cc-env-kernel-filtering}" FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
@@ -57,7 +57,7 @@ add_test(
 
 set_tests_properties(
     rocprofv3-test-counter-collection-kernel-filtering-input-yaml-execute
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT
+    PROPERTIES TIMEOUT 120 LABELS "integration-tests" ENVIRONMENT
                "${cc-env-kernel-filtering}" FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 add_test(
@@ -103,18 +103,18 @@ add_test(
 
 set_tests_properties(
     rocprofv3-test-counter-collection-kernel-filtering-input-json-validate
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
+    PROPERTIES TIMEOUT 120 LABELS "integration-tests" DEPENDS
                "rocprofv3-test-counter-collection-kernel-filtering-input-json-execute"
                FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 set_tests_properties(
     rocprofv3-test-counter-collection-kernel-filtering-input-cmd-validate
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
+    PROPERTIES TIMEOUT 120 LABELS "integration-tests" DEPENDS
                "rocprofv3-test-counter-collection-kernel-filtering-input-cmd-execute"
                FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 set_tests_properties(
     rocprofv3-test-counter-collection-kernel-filtering-input-yaml-validate
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
+    PROPERTIES TIMEOUT 120 LABELS "integration-tests" DEPENDS
                "rocprofv3-test-counter-collection-kernel-filtering-input-yaml-execute"
                FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

@@ -54,12 +54,6 @@ add_test(
         --pftrace-input
         ${CMAKE_CURRENT_BINARY_DIR}/marker-python-bindings/out_results.pftrace)
 
-set(VALIDATION_FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/marker-python-bindings/out_agent_info.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/marker-python-bindings/out_marker_api_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/marker-python-bindings/out_results.json
-    ${CMAKE_CURRENT_BINARY_DIR}/marker-python-bindings/out_results.pftrace)
-
 set_tests_properties(
     rocprofv3-trace-roctx-python-bindings-validate
     PROPERTIES TIMEOUT
@@ -71,6 +65,4 @@ set_tests_properties(
                DISABLED
                "${TRANSPOSE_ROCTRACER_ROCTX_DISABLED}"
                FAIL_REGULAR_EXPRESSION
-               "AssertionError"
-               ATTACHED_FILES_ON_FAIL
-               "${VALIDATION_FILES}")
+               "AssertionError")
