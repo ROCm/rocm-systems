@@ -723,6 +723,13 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         default=None,
     )
 
+    advanced_options.add_argument(
+        "--attach-duration-msec",
+        help="""When --pid is used, sets the amount of time in milliseconds the profiler will be attached before detaching. When unset, the profiler will wait until Enter is pressed to detach.""",
+        type=int,
+        default=None,
+    )
+
     if args is None:
         args = sys.argv[1:]
 
@@ -1424,6 +1431,8 @@ def run(app_args, args, **kwargs):
     
     elif args.pid:
         update_env("ROCPROF_ATTACH_PID", args.pid)
+        if args.attach_duration_msec is not None:
+            update_env("ROCPROF_ATTACH_DURATION", f"{args.attach_duration_msec}")
         path = os.path.join(f"{ROCM_DIR}", "bin/rocprofv3_attach")
         if app_args:
             exit_code = subprocess.check_call([sys.executable, path], env=app_env)

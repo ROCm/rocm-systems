@@ -25,6 +25,7 @@
 import ctypes
 import os
 import sys
+import time
 
 ROCPROFV3_AVAIL_DIR = os.path.dirname(os.path.realpath(__file__))
 ROCM_DIR = os.path.dirname(ROCPROFV3_AVAIL_DIR)
@@ -44,11 +45,18 @@ if __name__ == "__main__":
 
     pid = os.environ.get("ROCPROF_ATTACH_PID", None)
 
-    if pid == None:
+    if pid is None:
         raise RuntimeError(
             "rocprofv3_attach called without PID environment variable set (ROCPROF_ATTACH_PID)"
         )
 
     c_lib.attach(int(pid))
-    input("Press Enter to detach...")
+
+    duration = os.environ.get("ROCPROF_ATTACH_DURATION", None)
+
+    if duration is None:
+        input("Press Enter to detach...")
+    else:
+        time.sleep(int(duration) / 1000)
+    
     c_lib.detach()
