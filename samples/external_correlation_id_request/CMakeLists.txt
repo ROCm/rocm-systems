@@ -25,6 +25,12 @@ foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
     endif()
 endforeach()
 
+if(ROCPROFILER_DISABLE_UNSTABLE_CTESTS AND ROCPROFILER_MEMCHECK MATCHES "LeakSanitizer")
+    set(IS_DISABLED ON)
+else()
+    set(IS_DISABLED OFF)
+endif()
+
 find_package(rocprofiler-sdk REQUIRED)
 
 add_library(external-correlation-id-request-client SHARED)
@@ -54,6 +60,13 @@ add_test(NAME external-correlation-id-request
 
 set_tests_properties(
     external-correlation-id-request
-    PROPERTIES TIMEOUT 45 LABELS "samples" ENVIRONMENT
-               "${external-correlation-id-request-env}" FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "samples"
+               ENVIRONMENT
+               "${external-correlation-id-request-env}"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               "${IS_DISABLED}")
