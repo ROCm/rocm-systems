@@ -44,6 +44,12 @@ get_stream_stack()
 }
 }  // namespace
 
+bool
+stream_stack_not_null()
+{
+    return get_stream_stack() != nullptr;
+}
+
 void
 push_stream_id(rocprofiler_stream_id_t id)
 {
