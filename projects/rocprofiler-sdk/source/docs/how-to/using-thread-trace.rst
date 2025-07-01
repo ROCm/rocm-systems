@@ -47,9 +47,13 @@ Prerequisites
 
   * For binary files, see `ROCprof trace decoder release page <https://github.com/ROCm/rocprof-trace-decoder/releases>`_.
 
-  * Default location is ``/opt/rocm/lib``
+  * Default install location is ``/opt/rocm/lib``
    
-  * For custom location, use parameter ``--att-library-path``
+  * For custom location, use:
+
+      * Parameter ``--att-library-path``, or
+
+      * Environment variable ``ROCPROF_ATT_LIBRARY_PATH``
    
 
 .. _thread-trace-parameters:
