@@ -52,7 +52,7 @@ void PopulateAql(const uint32_t* ib_packet, packet_t* aql_packet) {
   const uint32_t dword_count = sizeof(*aql_packet) / sizeof(uint32_t);
   std::ostringstream oss;
   oss << "AQL 'IB' size(" << dword_count << ")";
-  std::clog << std::setw(40) << std::left << "AQL 'IB' size(16)"
+  std::clog << std::setw(40) << std::right << "AQL 'IB' size(16)"
             << ":";
   for (unsigned idx = 0; idx < dword_count; idx++) {
     std::clog << " " << std::hex << std::setw(8) << std::setfill('0') << dwords[idx];

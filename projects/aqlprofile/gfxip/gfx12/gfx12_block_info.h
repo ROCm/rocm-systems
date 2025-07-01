@@ -182,6 +182,7 @@ static const uint32_t Gl2cCounterBlockMaxEvent     = 249;
 static const uint32_t GrbmCounterBlockMaxEvent     = 51;
 static const uint32_t GrbmhCounterBlockMaxEvent    = 25;
 static const uint32_t RlcCounterBlockMaxEvent      = 6;
+static const uint32_t RpbCounterBlockMaxEvent      = 29;
 static const uint32_t SdmaCounterBlockMaxEvent     = 125;
 static const uint32_t SpiCounterBlockMaxEvent      = 318;
 static const uint32_t SqcCounterBlockMaxEvent      = 511;
