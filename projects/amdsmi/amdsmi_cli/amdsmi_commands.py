@@ -5053,7 +5053,15 @@ class AMDSMICommands():
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
 
-        if self.helpers.is_baremetal():
+        # if device is actually a partition, stop because partitions cannot reset anything
+        try:
+            kfd_info = amdsmi_interface.amdsmi_get_gpu_kfd_info(args.gpu)
+            partition_id = kfd_info['current_partition_id']
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            # assume that device is not partition on fail
+            partition_id = 0
+
+        if self.helpers.is_baremetal() and partition_id == 0:
             if args.gpureset:
                 if self.helpers.is_amd_device(args.gpu):
                     try:
@@ -5179,6 +5187,9 @@ class AMDSMICommands():
                             raise PermissionError('Command requires elevation') from e
                         raise ValueError(f"Unable to reset power cap to {default_power_cap_in_w} on GPU {gpu_id}") from e
                     self.logger.store_output(args.gpu, 'powercap', f"Successfully set power cap to {default_power_cap_in_w}")
+        else:
+            result = "Device is a partition. Cannot reset on partition."
+            self.logger.store_output(args.gpu, 'gpu_reset', result)
 
         if args.clean_local_data:
             try:
