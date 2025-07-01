@@ -62,9 +62,10 @@ union GpuMemoryCreateFlags {
     uint64_t interprocess               : 1; // physical buffer need share info between exporter and importer
     uint64_t locked                     : 1; // lock virtual address space into RAM, preventing that memory from being paged to the swap area
     uint64_t physical_contiguous        : 1; // contiguous physical pages
-    uint64_t imported_vram_alloc_va     : 1; // import buffer form dmabuf fd and allocate valid va (not from handle aperture)
-    uint64_t imported_sys_memfd         : 1; // allocate system memory for IPC signal
-    uint64_t unused                     : 57;
+    uint64_t sysmem_ipc_sig_importer         : 1; // allocate system memory for IPC signal
+    uint64_t sysmem_ipc_sig_exporter            : 1; // allocate system memory for IPC signal, prepare to export
+    uint64_t alloc_va                   : 1; // allocate va. 0 for vmem import
+    uint64_t unused                     : 56;
   };
   uint64_t reserved;
 };
@@ -78,9 +79,12 @@ union GpuMemoryDescFlags {
     uint32_t is_locked : 1;
     uint32_t is_queue_referenced : 1;
     uint32_t is_physical_contiguous : 1;
-    uint32_t is_imported_vram_alloc_va : 1; // 0 - va from handle aperture; 1 - va from local heap;
     uint32_t is_imported_sys_memfd : 1;     // 0 - ignored; 1 - va from system heap
-    uint32_t unused : 23;
+    uint32_t is_sysmem_exporter : 1; // allocate system memory for IPC signal, prepare to export
+    uint32_t is_va_required :1;
+    uint32_t is_imported_vram_vmem	:1;
+    uint32_t is_imported_vram_ipc	:1;
+    uint32_t unused : 20;
   };
 
   uint32_t reserved;
@@ -171,6 +175,7 @@ public:
   inline bool IsVirtual() const { return desc_.flags.is_virtual; }
   inline bool IsShared() const { return desc_.flags.is_shared; }
   inline bool IsExternal() const { return desc_.flags.is_external; }
+  inline bool IsVaAllocated() const { return desc_.flags.is_va_required; }
 
   inline uint32_t Flags() const { return desc_.flags.reserved; }
   inline int GetAllocInfo() const { return desc_.mem_flags; }

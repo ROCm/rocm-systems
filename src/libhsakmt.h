@@ -226,8 +226,10 @@ uint32_t get_vgpr_size_per_cu(HSA_ENGINE_ID id);
 
 bool is_ipc_sysmemfd(int fd);
 
-HSAKMT_STATUS hsaKmtImportDMABufHandle(int DMABufFd,
-				       HsaGraphicsResourceInfo *GraphicsResourceInfo,
-				       HSA_REGISTER_MEM_FLAGS RegisterFlags = {0});
+HSAKMT_STATUS import_dmabuf_fd(int DMABufFd,
+                                       uint32_t NodeId,
+                                       bool alloc_va,
+                                       bool is_ipc_memfd,
+                                       wsl::thunk::GpuMemoryHandle *GpuMemHandle);
 
 #endif

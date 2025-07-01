@@ -82,14 +82,17 @@ HSAKMTAPI int amdgpu_device_get_fd(amdgpu_device_handle dev) {
 }
 
 HSAKMTAPI int amdgpu_bo_cpu_map(amdgpu_bo_handle bo, void **cpu) {
-  wsl::thunk::GpuMemory *gpu_mem = get_gpu_mem(bo);
+  wsl::thunk::GpuMemory *gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory *>(bo);
   if (gpu_mem->IsSysMemFd())
     *cpu = gpu_mem->CpuAddress();
   return 0;
 }
 
 HSAKMTAPI int amdgpu_bo_free(amdgpu_bo_handle buf_handle) {
-  return 0;
+  wsl::thunk::GpuMemory *gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory *>(buf_handle);
+  void *MemoryAddress = gpu_mem->IsVaAllocated() ? (void*)gpu_mem->GpuAddress() : (void*)gpu_mem->HandleApeAddress();
+  auto ret = hsaKmtFreeMemory((void*)MemoryAddress, gpu_mem->Size());
+  return ret == HSAKMT_STATUS_SUCCESS ? 0 : -1;
 }
 
 HSAKMTAPI int amdgpu_bo_export(amdgpu_bo_handle bo,
@@ -102,14 +105,22 @@ HSAKMTAPI int amdgpu_bo_import(amdgpu_device_handle dev,
                                enum amdgpu_bo_handle_type type,
                                uint32_t shared_handle,
                                struct amdgpu_bo_import_result *output) {
-  wsl::thunk::WDDMDevice *pDevice = reinterpret_cast<wsl::thunk::WDDMDevice *>(dev);
-  HsaGraphicsResourceInfo GraphicsResourceInfo = {};
-  GraphicsResourceInfo.NodeId = pDevice->NodeId();
+  if (type != amdgpu_bo_handle_type_dma_buf_fd) {
+    pr_err("not implemented\n");
+    return -1;
+  }
 
-  HSAKMT_STATUS ret = hsaKmtImportDMABufHandle(shared_handle, &GraphicsResourceInfo);
+
+  wsl::thunk::WDDMDevice *pDevice = reinterpret_cast<wsl::thunk::WDDMDevice *>(dev);
+  wsl::thunk::GpuMemoryHandle mem_handle;
+  bool is_ipc_memfd = is_ipc_sysmemfd(shared_handle);
+  bool alloc_va = is_ipc_memfd;
+
+  HSAKMT_STATUS ret = import_dmabuf_fd(shared_handle, pDevice->NodeId(),
+                                        alloc_va, is_ipc_memfd, &mem_handle);
   if (ret == HSAKMT_STATUS_SUCCESS) {
-    //use GpuMemory object's address as drm buf handle
-    output->buf_handle = reinterpret_cast<amdgpu_bo_handle>(GraphicsResourceInfo.MemoryAddress);
+    //use GpuMemory object handle as drm buf handle
+    output->buf_handle = reinterpret_cast<amdgpu_bo_handle>(mem_handle);
     return 0;
   } else {
     return -1;
@@ -122,14 +133,20 @@ HSAKMTAPI int amdgpu_bo_va_op(amdgpu_bo_handle bo,
                               uint64_t addr,
                               uint64_t flags,
                               uint32_t ops) {
-  wsl::thunk::GpuMemory *gpu_mem = get_gpu_mem(bo);
+  wsl::thunk::GpuMemory *gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory *>(bo);
   assert(gpu_mem != nullptr);
-  if (gpu_mem->IsSysMemFd())
-    return 0;
 
   switch(ops) {
     case AMDGPU_VA_OP_MAP:
       {
+        if (gpu_mem->GpuAddress() == addr) {
+          pr_info("bo is mapped already\n");
+          return 0;
+        } else if (gpu_mem->GpuAddress()) {
+          pr_err("amdgpu_bo_va_op: GPU memory already mapped at %p, but requested to map at %p\n",
+                 reinterpret_cast<void *>(gpu_mem->GpuAddress()), reinterpret_cast<void *>(addr));
+          return -1;
+        }
         auto code = gpu_mem->MapGpuVirtualAddress(reinterpret_cast<gpusize>(addr), size, offset);
         if (code != ErrorCode::Success)
           return -1;
