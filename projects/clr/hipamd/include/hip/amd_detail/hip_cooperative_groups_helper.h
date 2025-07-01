@@ -196,6 +196,9 @@ __CG_STATIC_QUALIFIER__ dim3 grid_dim() {
                static_cast<__hip_uint32_t>(gridDim.z)));
 }
 
+__CG_STATIC_QUALIFIER__ unsigned int barrier_signal() { return __ockl_grid_bar_arrive(); }
+
+__CG_STATIC_QUALIFIER__ void barrier_wait(unsigned int s) { __ockl_grid_bar_wait(s); }
 }  // namespace grid
 
 /**
@@ -237,7 +240,6 @@ __CG_STATIC_QUALIFIER__ dim3 block_dim() {
   return (dim3(static_cast<__hip_uint32_t>(blockDim.x), static_cast<__hip_uint32_t>(blockDim.y),
                static_cast<__hip_uint32_t>(blockDim.z)));
 }
-
 }  // namespace workgroup
 
 namespace tiled_group {

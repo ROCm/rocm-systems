@@ -212,6 +212,19 @@ class grid_group : public thread_group {
   //! @copydoc thread_group::sync
   __CG_QUALIFIER__ void sync() const { internal::grid::sync(); }
   __CG_QUALIFIER__ dim3 group_dim() const { return internal::grid::grid_dim(); }
+  struct arrival_token {
+    unsigned int signal;
+  };
+  //! Arrive at a barrier
+  __CG_QUALIFIER__ arrival_token barrier_arrive() const {
+    arrival_token t;
+    t.signal = internal::grid::barrier_signal();
+    return t;
+  }
+  //! Arrive at a barrier
+  __CG_QUALIFIER__ void barrier_wait(arrival_token&& t) const {
+    internal::grid::barrier_wait(t.signal);
+  }
 };
 
 /** \ingroup CooperativeGConstruct
