@@ -58,16 +58,6 @@ namespace tool
 {
 namespace
 {
-const auto env_regexes =
-    new std::array<std::regex, 3>{std::regex{"(.*)%(env|ENV)\\{([A-Z0-9_]+)\\}%(.*)"},
-                                  std::regex{"(.*)\\$(env|ENV)\\{([A-Z0-9_]+)\\}(.*)"},
-                                  std::regex{"(.*)%q\\{([A-Z0-9_]+)\\}(.*)"}};
-// env regex examples:
-//  - %env{USER}%       Consistent with other output key formats (start+end with %)
-//  - $ENV{USER}        Similar to CMake
-//  - %q{USER}          Compatibility with NVIDIA
-//
-
 // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=77704
 // NOLINTBEGIN
 [[maybe_unused]] volatile bool _initLocale = []() {
@@ -113,16 +103,28 @@ format_path_impl(std::string _fpath, const std::vector<output_key>& _keys)
                 return inp;
             };
 
-        for(const auto& _re : *env_regexes)
+        if(_fpath.find("$env{") != std::string::npos)
         {
-            while(std::regex_search(_fpath, _re))
+            const auto env_regexes =
+                new std::array<std::regex, 3>{std::regex{"(.*)%(env|ENV)\\{([A-Z0-9_]+)\\}%(.*)"},
+                                              std::regex{"(.*)\\$(env|ENV)\\{([A-Z0-9_]+)\\}(.*)"},
+                                              std::regex{"(.*)%q\\{([A-Z0-9_]+)\\}(.*)"}};
+            // env regex examples:
+            //  - %env{USER}%       Consistent with other output key formats (start+end with %)
+            //  - $ENV{USER}        Similar to CMake
+            //  - %q{USER}          Compatibility with NVIDIA
+            //
+            for(const auto& _re : *env_regexes)
             {
-                auto        _var = std::regex_replace(_fpath, _re, "$3");
-                std::string _val = common::get_env<std::string>(_var, "");
-                _val             = strip_leading_and_replace(_val, {'\t', ' ', '/'}, "_");
-                auto _beg        = std::regex_replace(_fpath, _re, "$1");
-                auto _end        = std::regex_replace(_fpath, _re, "$4");
-                _fpath           = fmt::format("{}{}{}", _beg, _val, _end);
+                while(std::regex_search(_fpath, _re))
+                {
+                    auto        _var = std::regex_replace(_fpath, _re, "$3");
+                    std::string _val = common::get_env<std::string>(_var, "");
+                    _val             = strip_leading_and_replace(_val, {'\t', ' ', '/'}, "_");
+                    auto _beg        = std::regex_replace(_fpath, _re, "$1");
+                    auto _end        = std::regex_replace(_fpath, _re, "$4");
+                    _fpath           = fmt::format("{}{}{}", _beg, _val, _end);
+                }
             }
         }
     } catch(std::exception& _e)
@@ -134,9 +136,44 @@ format_path_impl(std::string _fpath, const std::vector<output_key>& _keys)
     // remove %arg<N>% where N >= argc
     try
     {
-        auto _re = std::regex{"(.*)(%|\\{)(arg[0-9]+)(%|\\})([-/_]*)(.*)"};
-        while(std::regex_search(_fpath, _re))
-            _fpath = std::regex_replace(_fpath, _re, "$1$6");
+        auto remove_arg_patterns = [](std::string& path) {
+            bool changed = true;
+            while(changed)
+            {
+                changed = false;
+
+                // Look for %argN% or {argN} patterns
+                for(size_t i = 0; i < path.length() - 4; ++i)
+                {
+                    if((path[i] == '%' || path[i] == '{') && path.substr(i + 1, 3) == "arg")
+                    {
+                        size_t j = i + 4;
+                        // Skip digits
+                        while(j < path.length() && std::isdigit(path[j]))
+                        {
+                            j++;
+                        }
+
+                        if(j < path.length() && (path[j] == '%' || path[j] == '}'))
+                        {
+                            j++;  // Include closing delimiter
+
+                            // Skip trailing separators
+                            while(j < path.length() &&
+                                  (path[j] == '-' || path[j] == '/' || path[j] == '_'))
+                            {
+                                j++;
+                            }
+
+                            path.erase(i, j - i);
+                            changed = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        };
+        remove_arg_patterns(_fpath);
     } catch(std::exception& _e)
     {
         ROCP_WARNING << "[rocprofiler] " << __FUNCTION__ << " threw an exception :: " << _e.what()
