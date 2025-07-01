@@ -601,12 +601,12 @@ void GpuAgent::InitCacheList() {
 }
 
 void GpuAgent::InitLibDrm() {
-  HSAKMT_STATUS status;
+  hsa_status_t status;
 
   HsaAMDGPUDeviceHandle device_handle;
-  status = HSAKMT_CALL(hsaKmtGetAMDGPUDeviceHandle(node_id(), &device_handle));
-  if (status != HSAKMT_STATUS_SUCCESS)
-    throw AMD::hsa_exception(HSA_STATUS_ERROR,
+  status = driver().GetDeviceHandle(node_id(), &device_handle);
+  if (status != HSA_STATUS_SUCCESS)
+    throw AMD::hsa_exception(status,
                              "Agent creation failed.\nlibdrm get device handle failed.\n");
 
   ldrm_dev_ = (amdgpu_device_handle)device_handle;

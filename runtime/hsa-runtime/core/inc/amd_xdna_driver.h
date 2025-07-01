@@ -238,6 +238,7 @@ public:
                                 bool* is_spm_data_loss) const override;
   hsa_status_t SetTrapHandler(uint32_t node_id, const void* base, uint64_t base_size,
                               const void* buffer_base, uint64_t buffer_base_size) const override;
+  hsa_status_t GetDeviceHandle(uint32_t node_id, void** device_handle) const override;
 
   hsa_status_t IsModelEnabled(bool* enable) const override;
 

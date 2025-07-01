@@ -269,6 +269,13 @@ public:
   virtual hsa_status_t SetTrapHandler(uint32_t node_id, const void* base, uint64_t base_size,
                                       const void* buffer_base, uint64_t buffer_base_size) const = 0;
 
+  /// @brief Gets the device handle for a specific node.
+  /// @param node_id Node ID of the agent
+  /// @param device_handle Device handle
+  /// @return HSA_STATUS_SUCCESS if the driver successfully returns the device
+  virtual hsa_status_t GetDeviceHandle(uint32_t node_id, void** device_handle) const = 0;
+
+
   /// @brief Check if the HSA KMT Model is enabled
   /// @param[out] enable True if the model is enabled, false otherwise
   virtual hsa_status_t IsModelEnabled(bool* enable) const = 0;
