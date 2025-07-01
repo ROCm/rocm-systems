@@ -73,4 +73,10 @@ add_custom_target( mygen
   COMMAND sh -xc "sed 's/_GPU_BLOCKINFO_H_/SRC_DEF_GPU_BLOCK_INFO_H_/' ${BINFO_DEF} >>${BINFO_HEADER}"
 )
 
+
 add_subdirectory(src/core)
+if(AQLPROFILE_BUILD_TESTS)
+  enable_testing()
+  include(CTest)
+  add_subdirectory(src/util/tests)
+endif()
