@@ -182,6 +182,21 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
     }
   }
 
+  // 'attr' is reserved for future expansion
+  void SetGrbmGfxIndex(CmdBuffer* cmd_buffer, uint32_t value, uint32_t attr = 0) {
+    builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR, value);
+  }
+
+  // 'attr' is reserved for future expansion
+  void SetGrbmBroadcast(CmdBuffer* cmd_buffer, uint32_t attr = 0) {
+    SetGrbmGfxIndex(cmd_buffer, Primitives::grbm_broadcast_value());
+  }
+
+  void SetPerfmonCntl(CmdBuffer* cmd_buffer, uint32_t value, uint32_t attr) {
+    if (attr & CounterBlockCpmonAttr)
+      builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::CP_PERFMON_CNTL_ADDR, value);
+  }
+
  public:
   explicit GpuPmcBuilder(const AgentInfo* agent_info)
       : PmcBuilder(),
@@ -224,16 +239,13 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
     // Issue barrier command
     if (!concurrent) builder.BuildWriteWaitIdlePacket(cmd_buffer);
     // Reset Grbm to its default state - broadcast
-    builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR,
-                                       Primitives::grbm_broadcast_value());
+    SetGrbmBroadcast(cmd_buffer, counters_vec.get_attr());
     // Disable RLC Perfmon Clock Gating
     // On Vega this is needed to collect Perf Cntrs
     if (Primitives::GFXIP_LEVEL == 9)
       builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::RLC_PERFMON_CLK_CNTL_ADDR, 1);
     // Reset perf counters
-    if (counters_vec.get_attr() & CounterBlockCpmonAttr)
-      builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::CP_PERFMON_CNTL_ADDR,
-                                         Primitives::cp_perfmon_cntl_reset_value());
+    SetPerfmonCntl(cmd_buffer, Primitives::cp_perfmon_cntl_reset_value(), counters_vec.get_attr());
     // Enable SQ Counter Control enable perfomance counter in graphics pipeline if implied
     Primitives::validate_counters(counters_vec.get_attr());
     if (counters_vec.get_attr() & CounterBlockTcAttr) {
@@ -292,8 +304,7 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
       const uint32_t grbm_value = (block_info->instance_count > 1 && !(block_info->attr & CounterBlockWgpAttr))
                                       ? Primitives::grbm_inst_index_value(block_des.index)
                                       : Primitives::grbm_broadcast_value();
-
-      builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR, grbm_value);
+      SetGrbmGfxIndex(cmd_buffer, grbm_value, block_info->attr);
       // Reset counters
       if (block_info->attr & CounterBlockMcAttr) {
         builder.BuildWritePConfigRegPacket(cmd_buffer, reg_info.control_addr,
@@ -465,19 +476,14 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
     if (!atcs.empty()) start_generic_mc_counters(cmd_buffer, atcs);
 
     // Reset Grbm to its default state - broadcast
-    builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR,
-                                       Primitives::grbm_broadcast_value());
+    SetGrbmBroadcast(cmd_buffer, counters_vec.get_attr());
     // Program Compute Perfcount Enable register to support perf counting
     builder.BuildWriteShRegPacket(cmd_buffer, Primitives::COMPUTE_PERFCOUNT_ENABLE_ADDR,
                                   Primitives::cp_perfcount_enable_value());
     // Reset the counter list
-    if (counters_vec.get_attr() & CounterBlockCpmonAttr)
-      builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::CP_PERFMON_CNTL_ADDR,
-                                         Primitives::cp_perfmon_cntl_reset_value());
+    SetPerfmonCntl(cmd_buffer, Primitives::cp_perfmon_cntl_reset_value(), counters_vec.get_attr());
     // Start the counter list
-    if (counters_vec.get_attr() & CounterBlockCpmonAttr)
-      builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::CP_PERFMON_CNTL_ADDR,
-                                         Primitives::cp_perfmon_cntl_start_value());
+    SetPerfmonCntl(cmd_buffer, Primitives::cp_perfmon_cntl_start_value(), counters_vec.get_attr());
     // Issue barrier command to apply the commands to configure perfcounters
     if (!concurrent) builder.BuildWriteWaitIdlePacket(cmd_buffer);
   }
@@ -486,8 +492,7 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
   uint32_t ReadXccPackets(CmdBuffer* cmd_buffer, const counters_vector& counters_vec,
                           void* data_buffer, uint32_t& read_counter) {
     // Reset Grbm to its default state - broadcast
-    builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR,
-                                       Primitives::grbm_broadcast_value());
+    SetGrbmBroadcast(cmd_buffer, counters_vec.get_attr());
 
     if (Primitives::GFXIP_LEVEL == 10) {
       for (auto& elem : counters_vec) {
@@ -527,14 +532,13 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
       }
 
       // Reset Grbm to its default state - broadcast
-      builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR,
-                                         Primitives::grbm_broadcast_value());
+      SetGrbmBroadcast(cmd_buffer, counters_vec.get_attr());
 
       if (block_info->attr & CounterBlockMcAttr) {
         const uint32_t grbm_value = (block_info->instance_count > 1)
                                         ? Primitives::grbm_inst_index_value(block_des.index)
                                         : Primitives::grbm_broadcast_value();
-        builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR, grbm_value);
+        SetGrbmGfxIndex(cmd_buffer, grbm_value);
         builder.BuildWritePConfigRegPacket(cmd_buffer, reg_info.control_addr,
                                            Primitives::mc_config_value(counter_des));
         uint32_t* data = reinterpret_cast<uint32_t*>(data_buffer) + read_counter;
@@ -594,7 +598,7 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
           if (bIsWGPcounter11) {
             for (int wgp=0; wgp<wgp_per_sa; wgp++) {
               grbm_value = Primitives::grbm_se_sh_wgp_index_value(se_index, sarray, wgp);
-              builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR, grbm_value);
+              SetGrbmGfxIndex(cmd_buffer, grbm_value);
               builder.BuildCopyCounterDataPacket(
                   cmd_buffer, reg_info.register_addr_lo, reg_info.register_addr_hi,
                   reinterpret_cast<uint32_t*>(data_buffer) + read_counter, 1);
@@ -606,7 +610,7 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
                 grbm_value = Primitives::grbm_inst_se_sh_wgp_index_value(block_des.index, se_index, sarray, wgp);
               else
                 grbm_value = Primitives::grbm_se_sh_wgp_index_value(se_index, sarray, wgp);
-              builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR, grbm_value);
+              SetGrbmGfxIndex(cmd_buffer, grbm_value);
               uint32_t dw_mask = reg_info.register_addr_hi.offset ? 3 : 1;
               builder.BuildCopyCounterDataPacket(
                   cmd_buffer, reg_info.register_addr_lo, reg_info.register_addr_hi,
@@ -616,7 +620,7 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
               read_counter += 2;
             }
           } else {
-            builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR, grbm_value);
+            SetGrbmGfxIndex(cmd_buffer, grbm_value, block_info->attr);
             builder.BuildCopyCounterDataPacket(
                 cmd_buffer, reg_info.register_addr_lo, reg_info.register_addr_hi,
                 reinterpret_cast<uint32_t*>(data_buffer) + read_counter, 3);
@@ -626,8 +630,7 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
       }
     }
     // Reset Grbm to its default state - broadcast
-    builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR,
-                                       Primitives::grbm_broadcast_value());
+    SetGrbmBroadcast(cmd_buffer, counters_vec.get_attr());
     // Return amount of data to read
     return read_counter * sizeof(uint32_t);
   }
@@ -635,8 +638,7 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
   // Build PMC stop PM4 comands
   void Stop(CmdBuffer* cmd_buffer, const counters_vector& counters_vec) override {
     // Reset Grbm to its default state - broadcast
-    builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR,
-                                       Primitives::grbm_broadcast_value());
+    SetGrbmBroadcast(cmd_buffer, counters_vec.get_attr());
 
     uint32_t sdma_mask = 0;
     if (counters_vec.get_attr() & CounterBlockAidAttr)
@@ -734,9 +736,7 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
       }
 
     // Issue barrier command to wait commands to complete
-    if (counters_vec.get_attr() & CounterBlockCpmonAttr)
-      builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::CP_PERFMON_CNTL_ADDR,
-                                         Primitives::cp_perfmon_cntl_stop_value());
+    SetPerfmonCntl(cmd_buffer, Primitives::cp_perfmon_cntl_stop_value(), counters_vec.get_attr());
 
     // Enable RLC Perfmon Clock Gating. On Vega this
     // was disabled during Perf Cntrs collection session
@@ -752,9 +752,8 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
     uint32_t read_counter = 0;
     auto counters_attr = counters_vec.get_attr();
 
-    if (counters_vec.get_attr() & CounterBlockCpmonAttr)
-      builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::CP_PERFMON_CNTL_ADDR,
-                                         Primitives::cp_perfmon_cntl_read_value());
+    SetPerfmonCntl(cmd_buffer, Primitives::cp_perfmon_cntl_read_value(), counters_vec.get_attr());
+
     // counters have UMC events: MI300 Loop over MI300 XCCs for each counter_des
     if (counters_attr & CounterBlockAidAttr)
       for (const auto& counter_des : counters_vec) {
