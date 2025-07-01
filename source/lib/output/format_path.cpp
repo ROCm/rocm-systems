@@ -103,29 +103,60 @@ format_path_impl(std::string _fpath, const std::vector<output_key>& _keys)
                 return inp;
             };
 
-        if(_fpath.find("$env{") != std::string::npos)
+        if(_fpath.find("$env{") != std::string::npos || _fpath.find("%env{") != std::string::npos ||
+           _fpath.find("$ENV{") != std::string::npos || _fpath.find("%ENV{") != std::string::npos ||
+           _fpath.find("%q{") != std::string::npos)
         {
-            const auto env_regexes =
-                new std::array<std::regex, 3>{std::regex{"(.*)%(env|ENV)\\{([A-Z0-9_]+)\\}%(.*)"},
-                                              std::regex{"(.*)\\$(env|ENV)\\{([A-Z0-9_]+)\\}(.*)"},
-                                              std::regex{"(.*)%q\\{([A-Z0-9_]+)\\}(.*)"}};
+            auto replace_env_var = [&](const std::string& pattern_start,
+                                       const std::string& pattern_end = "") {
+                size_t pos = 0;
+                while((pos = _fpath.find(pattern_start, pos)) != std::string::npos)
+                {
+                    size_t var_start = pos + pattern_start.length();
+                    size_t var_end   = _fpath.find('}', var_start);
+
+                    if(var_end != std::string::npos)
+                    {
+                        // Check for closing pattern if required
+                        size_t replace_end = var_end + 1;
+                        if(!pattern_end.empty())
+                        {
+                            if(var_end + pattern_end.length() < _fpath.length() &&
+                               _fpath.substr(var_end + 1, pattern_end.length()) == pattern_end)
+                            {
+                                replace_end = var_end + 1 + pattern_end.length();
+                            }
+                            else
+                            {
+                                pos = var_end + 1;
+                                continue;
+                            }
+                        }
+
+                        std::string var_name = _fpath.substr(var_start, var_end - var_start);
+                        std::string val      = common::get_env<std::string>(var_name, "");
+                        val = strip_leading_and_replace(val, {'\t', ' ', '/'}, "_");
+
+                        _fpath.replace(pos, replace_end - pos, val);
+                        pos += val.length();
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+            };
+
             // env regex examples:
             //  - %env{USER}%       Consistent with other output key formats (start+end with %)
             //  - $ENV{USER}        Similar to CMake
             //  - %q{USER}          Compatibility with NVIDIA
             //
-            for(const auto& _re : *env_regexes)
-            {
-                while(std::regex_search(_fpath, _re))
-                {
-                    auto        _var = std::regex_replace(_fpath, _re, "$3");
-                    std::string _val = common::get_env<std::string>(_var, "");
-                    _val             = strip_leading_and_replace(_val, {'\t', ' ', '/'}, "_");
-                    auto _beg        = std::regex_replace(_fpath, _re, "$1");
-                    auto _end        = std::regex_replace(_fpath, _re, "$4");
-                    _fpath           = fmt::format("{}{}{}", _beg, _val, _end);
-                }
-            }
+            replace_env_var("%env{", "%");
+            replace_env_var("%ENV{", "%");
+            replace_env_var("$env{");
+            replace_env_var("$ENV{");
+            replace_env_var("%q{");
         }
     } catch(std::exception& _e)
     {
