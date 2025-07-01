@@ -335,19 +335,7 @@ hsa_status_t MemoryRegion::GetPoolInfo(hsa_amd_memory_pool_info_t attribute,
       *((bool*)value) = IsSystem() ? true : false;
       break;
     case HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE:
-      switch (mem_props_.HeapType) {
-        case HSA_HEAPTYPE_FRAME_BUFFER_PRIVATE:
-        case HSA_HEAPTYPE_FRAME_BUFFER_PUBLIC:
-        case HSA_HEAPTYPE_GPU_SCRATCH:
-          return GetInfo(HSA_REGION_INFO_ALLOC_MAX_SIZE, value);
-        case HSA_HEAPTYPE_SYSTEM:
-          // Aggregate size available for allocation
-          *((size_t*)value) = max_sysmem_alloc_size_;
-          break;
-        default:
-          *((size_t*)value) = 0;
-      }
-      break;
+      return GetInfo(HSA_REGION_INFO_ALLOC_MAX_SIZE, value);
     case HSA_AMD_MEMORY_POOL_INFO_LOCATION:
       if (IsLocalMemory())
         *((hsa_amd_memory_pool_location_t*)value) = HSA_AMD_MEMORY_POOL_LOCATION_GPU;
