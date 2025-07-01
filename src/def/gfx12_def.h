@@ -28,6 +28,8 @@
 #include "util/reg_offsets.h"
 #include "linux/registers/gc/gc_12_0_0_offset.h"
 #include "linux/registers/gc/gc_12_0_0_sh_mask.h"
+#include "linux/registers/athub/athub_4_1_0_offset.h"
+#include "linux/registers/athub/athub_4_1_0_sh_mask.h"
 // Rename CP_PERFMON_CNTL_1 to CP_PERFMON_CNTL for better compatibility
 // CP_PERFMON_CNTL_1
 #define regCP_PERFMON_CNTL_BASE_IDX regCP_PERFMON_CNTL_1_BASE_IDX
@@ -48,4 +50,3 @@ using namespace gfxip::gfx12::gfx1200;
 #include "gfxip/gfx12/gfx12_block_table.h"
 
 #endif  // _GFX12_DEF_H_
-

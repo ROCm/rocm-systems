@@ -1,3 +1,4 @@
+
 // MIT License
 //
 // Copyright (c) 2017-2025 Advanced Micro Devices, Inc.
@@ -43,16 +44,16 @@
 #define REG_INFO_7(BLOCK) REG_INFO_WITH_CTRL_7(BLOCK, REG_32B_NULL)
 #define REG_INFO_8(BLOCK) REG_INFO_WITH_CTRL_8(BLOCK, REG_32B_NULL)
 
-#define REG_INFO_WITH_CFG(BLOCK, INDEX) \
- {REG_32B_ADDR(GC, 0, reg##BLOCK##_PERFCOUNTER##INDEX##_CFG), REG_32B_ADDR(GC, 0, reg##BLOCK##_PERFCOUNTER_RSLT_CNTL), REG_32B_ADDR(GC, 0, reg##BLOCK##_PERFCOUNTER_LO), REG_32B_ADDR(GC, 0, reg##BLOCK##_PERFCOUNTER_HI)}
-#define REG_INFO_WITH_CFG_1(BLOCK) REG_INFO_WITH_CFG(BLOCK, 0)
-#define REG_INFO_WITH_CFG_2(BLOCK) REG_INFO_WITH_CFG_1(BLOCK), REG_INFO_WITH_CFG(BLOCK, 1)
-#define REG_INFO_WITH_CFG_3(BLOCK) REG_INFO_WITH_CFG_2(BLOCK), REG_INFO_WITH_CFG(BLOCK, 2)
-#define REG_INFO_WITH_CFG_4(BLOCK) REG_INFO_WITH_CFG_3(BLOCK), REG_INFO_WITH_CFG(BLOCK, 3)
-#define REG_INFO_WITH_CFG_5(BLOCK) REG_INFO_WITH_CFG_4(BLOCK), REG_INFO_WITH_CFG(BLOCK, 4)
-#define REG_INFO_WITH_CFG_6(BLOCK) REG_INFO_WITH_CFG_5(BLOCK), REG_INFO_WITH_CFG(BLOCK, 5)
-#define REG_INFO_WITH_CFG_7(BLOCK) REG_INFO_WITH_CFG_6(BLOCK), REG_INFO_WITH_CFG(BLOCK, 6)
-#define REG_INFO_WITH_CFG_8(BLOCK) REG_INFO_WITH_CFG_7(BLOCK), REG_INFO_WITH_CFG(BLOCK, 7)
+#define REG_INFO_WITH_CFG(IP, BLOCK, INDEX)				\
+ {REG_32B_ADDR(IP, 0, reg##BLOCK##_PERFCOUNTER##INDEX##_CFG), REG_32B_ADDR(IP, 0, reg##BLOCK##_PERFCOUNTER_RSLT_CNTL), REG_32B_ADDR(IP, 0, reg##BLOCK##_PERFCOUNTER_LO), REG_32B_ADDR(IP, 0, reg##BLOCK##_PERFCOUNTER_HI)}
+#define REG_INFO_WITH_CFG_1(IP, BLOCK) REG_INFO_WITH_CFG(IP, BLOCK, 0)
+#define REG_INFO_WITH_CFG_2(IP, BLOCK) REG_INFO_WITH_CFG_1(IP, BLOCK), REG_INFO_WITH_CFG(IP, BLOCK, 1)
+#define REG_INFO_WITH_CFG_3(IP, BLOCK) REG_INFO_WITH_CFG_2(IP, BLOCK), REG_INFO_WITH_CFG(IP, BLOCK, 2)
+#define REG_INFO_WITH_CFG_4(IP, BLOCK) REG_INFO_WITH_CFG_3(IP, BLOCK), REG_INFO_WITH_CFG(IP, BLOCK, 3)
+#define REG_INFO_WITH_CFG_5(IP, BLOCK) REG_INFO_WITH_CFG_4(IP, BLOCK), REG_INFO_WITH_CFG(IP, BLOCK, 4)
+#define REG_INFO_WITH_CFG_6(IP, BLOCK) REG_INFO_WITH_CFG_5(IP, BLOCK), REG_INFO_WITH_CFG(IP, BLOCK, 5)
+#define REG_INFO_WITH_CFG_7(IP, BLOCK) REG_INFO_WITH_CFG_6(IP, BLOCK), REG_INFO_WITH_CFG(IP, BLOCK, 6)
+#define REG_INFO_WITH_CFG_8(IP, BLOCK) REG_INFO_WITH_CFG_7(IP, BLOCK), REG_INFO_WITH_CFG(IP, BLOCK, 7)
 
 namespace gfxip {
 namespace gfx12 {
@@ -63,9 +64,10 @@ static const CounterRegInfo ChcCounterRegAddr[] = {REG_INFO_4(CHC)};
 static const CounterRegInfo CpcCounterRegAddr[] = {REG_INFO_2(CPC)};
 static const CounterRegInfo CpfCounterRegAddr[] = {REG_INFO_2(CPF)};
 static const CounterRegInfo CpgCounterRegAddr[] = {REG_INFO_2(CPG)};
-static const CounterRegInfo GcmcVmL2CounterRegAddr[] = {REG_INFO_WITH_CFG_8(GCMC_VM_L2)};
+static const CounterRegInfo GcmcVmL2CounterRegAddr[] = {REG_INFO_WITH_CFG_8(GC, GCMC_VM_L2)};
 static const CounterRegInfo GcrCounterRegAddr[] = {REG_INFO_WITH_CTRL_2(GCR, REG_32B_ADDR(GC, 0, regGCR_GENERAL_CNTL))};
-static const CounterRegInfo Gcutcl2CounterRegAddr[] = {REG_INFO_WITH_CFG_4(GCUTCL2)};
+static const CounterRegInfo RpbCounterRegAddr[] = {REG_INFO_WITH_CFG_4(ATHUB, RPB)};
+static const CounterRegInfo Gcutcl2CounterRegAddr[] = {REG_INFO_WITH_CFG_4(GC, GCUTCL2)};
 // static const CounterRegInfo Gcvml2CounterRegAddr[] = {REG_INFO_2(GCVML2)};
 static const CounterRegInfo GcEaCpwdCounterRegAddr[] = {REG_INFO_2(GC_EA_CPWD)};
 static const CounterRegInfo GcEaSeCounterRegAddr[] = {REG_INFO_2(GC_EA_SE)};
@@ -112,6 +114,7 @@ static const GpuBlockInfo Gl2aCounterBlockInfo = {"GL2A", __BLOCK_ID_HSA(GL2A), 
 static const GpuBlockInfo Gl2cCounterBlockInfo = {"GL2C", __BLOCK_ID_HSA(GL2C), Gl2cCounterBlockNumInstances, Gl2cCounterBlockMaxEvent, Gl2cCounterBlockNumCounters, Gl2cCounterRegAddr, gfx12_cntx_prim::select_value, CounterBlockDfltAttr|CounterBlockTcAttr};
 static const GpuBlockInfo Atcl2CounterBlockInfo = {"ATCL2", __BLOCK_ID_HSA(ATCL2)}; // Placeholder now
 static const GpuBlockInfo GcFfbmCounterBlockInfo = {"GC_FFBM", __BLOCK_ID(GC_FFBM)};  // Placeholder now
+static const GpuBlockInfo RpbCounterBlockInfo = {"RPB", __BLOCK_ID_HSA(RPB), 1, RpbCounterBlockMaxEvent, RpbCounterBlockNumCounters, RpbCounterRegAddr, gfx12_cntx_prim::mc_select_value, CounterBlockRpbAttr|CounterBlockAidAttr};
 static const GpuBlockInfo GcUtcl2CounterBlockInfo = {"GC_UTCL2", __BLOCK_ID(GC_UTCL2), 1, Gcutcl2CounterBlockMaxEvent, Gcutcl2CounterBlockNumCounters, Gcutcl2CounterRegAddr, gfx12_cntx_prim::mc_select_value, CounterBlockRpbAttr|CounterBlockAidAttr};
 static const GpuBlockInfo GcVml2CounterBlockInfo = {"GC_VML2", __BLOCK_ID(GC_VML2), 1, GcmcVmL2CounterBlockMaxEvent, GcmcVmL2CounterBlockNumCounters, GcmcVmL2CounterRegAddr, gfx12_cntx_prim::mc_select_value, CounterBlockRpbAttr|CounterBlockAidAttr};
 static const GpuBlockInfo GcVml2SpmCounterBlockInfo = {"GC_VML2_SPM", __BLOCK_ID(GC_VML2_SPM), 1, Gcvml2CounterBlockMaxEvent, Gcvml2CounterBlockNumCounters, Gcvml2CounterRegAddr, gfx12_cntx_prim::select_value, CounterBlockDfltAttr};

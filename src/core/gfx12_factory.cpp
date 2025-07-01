@@ -85,6 +85,7 @@ void Gfx12Factory::ConstructTable(const AgentInfo* agent_info) {
   block_table_[__BLOCK_ID_HSA(CPC)]     = &CpcCounterBlockInfo;
   block_table_[__BLOCK_ID_HSA(CPF)]     = &CpfCounterBlockInfo;
   block_table_[__BLOCK_ID(CPG)]         = &CpgCounterBlockInfo;
+  block_table_[__BLOCK_ID_HSA(RPB)]         = &RpbCounterBlockInfo;
   block_table_[__BLOCK_ID(GC_UTCL2)]    = &GcUtcl2CounterBlockInfo;
   block_table_[__BLOCK_ID(GC_VML2)]     = &GcVml2CounterBlockInfo;
   block_table_[__BLOCK_ID(GC_VML2_SPM)] = &GcVml2SpmCounterBlockInfo;
