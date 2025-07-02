@@ -19,6 +19,8 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 #include <hip/hip_vector_types.h>
 
+#include "../vector_types/vector_types_common.hh"
+
 #include <string>
 #include <sstream>
 #include <type_traits>
@@ -37,41 +39,39 @@ bool integer_binary_tests(V&, V&, V&...) {
   return true;
 }
 
-template<typename V,
-    enable_if_t<is_integral<decltype(declval<V>().x)>{}>* = nullptr>
-bool integer_unary_tests(V f1, V f2) {
+template <typename V, enable_if_t<is_integral<decltype(declval<V>().x)>{}>* = nullptr>
+void integer_unary_tests(V f1, V f2) {
   f1 %= f2;
-  if (f1 != V{0}) return false;
+  REQUIRE(f1 == MakeVector<V>(0));
   f1 &= f2;
-  if (f1 != V{0}) return false;
+  REQUIRE(f1 == MakeVector<V>(0));
   f1 |= f2;
-  if (f1 != V{1}) return false;
+  REQUIRE(f1 == MakeVector<V>(1));
   f1 ^= f2;
-  if (f1 != V{0}) return false;
-  f1 = V{1};
+  REQUIRE(f1 == MakeVector<V>(0));
+  f1 = MakeVector<V>(1);
   f1 <<= f2;
-  if (f1 != V{2}) return false;
+  REQUIRE(f1 == MakeVector<V>(2));
   f1 >>= f2;
-  if (f1 != V{1}) return false;
+  REQUIRE(f1 == MakeVector<V>(1));
   f2 = ~f1;
-  return f2 == V{~1};
+  REQUIRE(f2 == MakeVector<V>(~1));
 }
 
-template<typename V,
-  enable_if_t<is_integral<decltype(declval<V>().x)>{}>* = nullptr>
-bool integer_binary_tests(V f1, V f2, V f3) {
+template <typename V, enable_if_t<is_integral<decltype(declval<V>().x)>{}>* = nullptr>
+void integer_binary_tests(V f1, V f2, V f3) {
   f3 = f1 % f2;
-  if (f3 != V{0}) return false;
+  REQUIRE(f3 == MakeVector<V>(0));
   f1 = f3 & f2;
-  if (f1 != V{0}) return false;
+  REQUIRE(f1 == MakeVector<V>(0));
   f2 = f1 ^ f3;
-  if (f2 != V{0}) return false;
-  f1 = V{1};
-  f2 = V{2};
+  REQUIRE(f2 == MakeVector<V>(0));
+  f1 = MakeVector<V>(1);
+  f2 = MakeVector<V>(2);
   f3 = f1 << f2;
-  if (f3 != V{4}) return false;
+  REQUIRE(f3 == MakeVector<V>(4));
   f2 = f3 >> f1;
-  return f2 == V{2};
+  REQUIRE(f2 == MakeVector<V>(2));
 }
 
 template<typename V>
@@ -94,56 +94,57 @@ bool constructor_tests() {
 
 template<typename V>
 bool TestVectorType() {
-  constexpr V v1{1};
-  constexpr V v2{2};
-  constexpr V v3{3};
-  constexpr V v4{4};
+  const V v1 = MakeVector<V>(1);
+  const V v2 = MakeVector<V>(2);
+  const V v3 = MakeVector<V>(3);
+  const V v4 = MakeVector<V>(4);
 
-  V f1{1};
-  V f2{1};
+  V f1 = MakeVector<V>(1);
+  V f2 = MakeVector<V>(1);
   V f3 = f1 + f2;
-  if (f3 != v2) return false;
+  REQUIRE(f3 == v2);
   f2 = f3 - f1;
-  if (f2 != v1) return false;
+  REQUIRE(f2 == v1);
   f1 = f2 * f3;
-  if (f1 != v2) return false;
+  REQUIRE(f1 == v2);
   f2 = f1 / f3;
-  if (f2 != v1) return false;
-  if (!integer_binary_tests(f1, f2, f3)) return false;
+  REQUIRE(f2 == v1);
+  integer_binary_tests(f1, f2, f3);
 
-  f1 = V{2};
-  f2 = V{1};
+  f1 = MakeVector<V>(2);
+  f2 = MakeVector<V>(1);
   f1 += f2;
-  if (f1 != v3) return false;
+  REQUIRE(f1 == v3);
   f1 -= f2;
-  if (f1 != v2) return false;
+  REQUIRE(f1 == v2);
   f1 *= f2;
-  if (f1 != v2) return false;
+  REQUIRE(f1 == v2);
   f1 /= f2;
-  if (f1 != v2) return false;
-  if (!integer_unary_tests(f1, f2)) return false;
+  REQUIRE(f1 == v2);
+
+  integer_unary_tests(f1, f2);
 
   f1 = v2;
   f2 = f1++;
-  if (f1 != v3) return false;
-  if (f2 != v2) return false;
+  REQUIRE(f1 == v3);
+  REQUIRE(f2 == v2);
   f2 = f1--;
-  if (f2 != v3) return false;
-  if (f1 != v2) return false;
+  REQUIRE(f2 == v3);
+  REQUIRE(f1 == v2);
   f2 = ++f1;
-  if (f1 != v3) return false;
-  if (f2 != v3) return false;
+  REQUIRE(f1 == v3);
+  REQUIRE(f2 == v3);
   f2 = --f1;
-  if (f1 != v2) return false;
-  if (f2 != v2) return false;
+  REQUIRE(f1 == v2);
+  REQUIRE(f2 == v2);
 
-  if (!constructor_tests<V>()) return false;
+  REQUIRE(constructor_tests<V>() == true);
 
   f1 = v3;
   f2 = v4;
   f3 = v3;
-  if (f1 == f2) return false;
-  if (!(f1 != f2)) return false;
+  REQUIRE(!(f1 == f2));
+  REQUIRE(f1 != f2);
 
   using T = typename V::value_type;
 
@@ -152,16 +153,16 @@ bool TestVectorType() {
   const volatile T& z = f3.x;
   volatile T& w = f2.x;
 
-  if (x != T{3}) return false;
-  if (y != T{4}) return false;
-  if (z != T{3}) return false;
-  if (w != T{4}) return false;
+  REQUIRE(x == MakeVector<V>(3));
+  REQUIRE(y == MakeVector<V>(4));
+  REQUIRE(z == MakeVector<V>(3));
+  REQUIRE(w == MakeVector<V>(4));
 
   stringstream str;
   str << f1.x;
   str >> f2.x;
 
-  if (f1.x != f2.x) return false;
+  REQUIRE(f1.x == f2.x);
 
   return true;
 }

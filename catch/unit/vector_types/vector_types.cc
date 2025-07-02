@@ -153,7 +153,8 @@ TEMPLATE_TEST_CASE("Unit_VectorAndVectorOperations_SanityCheck_Basic_Host", "", 
                                VectorOperation::kBitwiseOr,
                                VectorOperation::kBitwiseAnd,
                                VectorOperation::kRightShift,
-                               VectorOperation::kLeftShift}) {
+                               VectorOperation::kLeftShift,
+                               VectorOperation::kSubscript}) {
     DYNAMIC_SECTION("operation: " << to_string(operation)) {
       TestType vector = PerformVectorOperationHost<TestType>(operation, value1, value2);
       SanityCheck(operation, vector, value1, value2);
@@ -190,7 +191,7 @@ TEMPLATE_TEST_CASE("Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Host", "
         VectorOperation::kSubtract, VectorOperation::kMultiply, VectorOperation::kDivide,
         VectorOperation::kEqual, VectorOperation::kNotEqual, VectorOperation::kModulo,
         VectorOperation::kBitwiseXor, VectorOperation::kBitwiseOr, VectorOperation::kBitwiseAnd,
-        VectorOperation::kRightShift, VectorOperation::kLeftShift}) {
+        VectorOperation::kRightShift, VectorOperation::kLeftShift, VectorOperation::kSubscript}) {
     DYNAMIC_SECTION("operation: " << to_string(operation)) {
       TestType vector = PerformVectorOperationHost<TestType, false>(operation, value1, value2);
       SanityCheck(operation, vector, value1, value2);
@@ -248,7 +249,8 @@ TEMPLATE_TEST_CASE("Unit_VectorAndVectorOperations_SanityCheck_Basic_Device", ""
                                VectorOperation::kBitwiseOr,
                                VectorOperation::kBitwiseAnd,
                                VectorOperation::kRightShift,
-                               VectorOperation::kLeftShift}) {
+                               VectorOperation::kLeftShift,
+                               VectorOperation::kSubscript}) {
     DYNAMIC_SECTION("operation: " << to_string(operation)) {
       TestType vector = PerformVectorOperationDevice<TestType>(operation, value1, value2);
       SanityCheck(operation, vector, value1, value2);
@@ -285,12 +287,63 @@ TEMPLATE_TEST_CASE("Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Device",
         VectorOperation::kSubtract, VectorOperation::kMultiply, VectorOperation::kDivide,
         VectorOperation::kEqual, VectorOperation::kNotEqual, VectorOperation::kModulo,
         VectorOperation::kBitwiseXor, VectorOperation::kBitwiseOr, VectorOperation::kBitwiseAnd,
-        VectorOperation::kRightShift, VectorOperation::kLeftShift}) {
+        VectorOperation::kRightShift, VectorOperation::kLeftShift, VectorOperation::kSubscript}) {
     DYNAMIC_SECTION("operation: " << to_string(operation)) {
       TestType vector = PerformVectorOperationDevice<TestType, false>(operation, value1, value2);
       SanityCheck(operation, vector, value1, value2);
     }
   }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Checks that vectors can be used with structured bindigns
+ *    - Tests from the host side
+ * Test source
+ * ------------------------
+ *    - unit/vector_types/vector_types.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.2
+ */
+TEMPLATE_TEST_CASE("Unit_VectorStructuredBindings_SanityCheck_Basic_host", "", float3, double3) {
+  auto value = GetTestValue<decltype(TestType().x)>(0);
+
+  TestType vec3 = {value, value, value};
+
+  auto&& [ret1, ret2, ret3] = vec3;
+  REQUIRE(ret1 == value);
+}
+
+__host__ __device__ constexpr bool func()
+  {
+    int3 vec3 = int3{0};
+    int exp = int{0};
+    return vec3.x == exp;
+  }
+
+__global__ void generate_my_kernel()
+{
+  static_assert(func());
+}
+
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Checks that vectors can be used with structured bindigns
+ *    - Tests from the host and device side
+ * Test source
+ * ------------------------
+ *    - unit/vector_types/vector_types.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.2
+ */
+TEST_CASE("Unit_VectorConstexpr_SanityCheck_Basic_host_device", "") {
+  generate_my_kernel<<<1, 1>>>();
+  static_assert(func());
 }
 #endif  // HT_AMD
 

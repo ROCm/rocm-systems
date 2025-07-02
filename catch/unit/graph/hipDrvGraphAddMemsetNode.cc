@@ -39,7 +39,7 @@ static char memSetVal = 'a';
  * @{
  * @ingroup GraphTest
  * `hipDrvGraphAddMemsetNode(hipGraphNode_t* phGraphNode, hipGraph_t hGraph, const hipGraphNode_t*
- * dependencies, size_t numDependencies, const HIP_MEMSET_NODE_PARAMS* memsetParams, hipCtx_t ctx)`
+ * dependencies, size_t numDependencies, const hipMemsetParams* memsetParams, hipCtx_t ctx)`
  * - Creates a memset node and adds it to a graph
  */
 
@@ -66,7 +66,7 @@ TEMPLATE_TEST_CASE("Unit_hipDrvGraphAddMemsetNode_Positive_Basic", "", uint8_t, 
 
   CHECK_IMAGE_SUPPORT
 
-  const auto f = [&context](HIP_MEMSET_NODE_PARAMS* params) {
+  const auto f = [&context](hipMemsetParams* params) {
     hipGraph_t graph = nullptr;
     HIP_CHECK(hipGraphCreate(&graph, 0));
 
@@ -85,7 +85,7 @@ TEMPLATE_TEST_CASE("Unit_hipDrvGraphAddMemsetNode_Positive_Basic", "", uint8_t, 
     return hipSuccess;
   };
 
-  GraphMemsetNodeCommonPositive<TestType, HIP_MEMSET_NODE_PARAMS>(f);
+  GraphMemsetNodeCommonPositive<TestType, hipMemsetParams>(f);
 
   HIP_CHECK(hipCtxPopCurrent(&context));
   HIP_CHECK(hipCtxDestroy(context));
@@ -129,7 +129,7 @@ TEST_CASE("Unit_hipDrvGraphAddMemsetNode_Negative_Parameters") {
   HIP_CHECK(hipGraphCreate(&graph, 0));
 
   LinearAllocGuard<int> alloc(LinearAllocs::hipMalloc, 4 * sizeof(int));
-  HIP_MEMSET_NODE_PARAMS params = {};
+  hipMemsetParams params = {};
   params.dst = alloc.ptr();
   params.elementSize = sizeof(*alloc.ptr());
   params.width = 1;
@@ -189,9 +189,9 @@ TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMallocPitch_2D") {
   HIP_CHECK(hipGraphCreate(&graph, 0));
   hipGraphNode_t memsetNode, memcpyNode;
   // Add MemSet Node
-  HIP_MEMSET_NODE_PARAMS memsetParams{};
+  hipMemsetParams memsetParams{};
   memset(&memsetParams, 0, sizeof(memsetParams));
-  memsetParams.dst = reinterpret_cast<hipDeviceptr_t>(A_d);
+  memsetParams.dst = reinterpret_cast<void*>(A_d);
   memsetParams.value = memSetVal;
   memsetParams.pitch = pitch_A;
   memsetParams.elementSize = sizeof(char);
@@ -272,9 +272,9 @@ TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMallocPitch_1D") {
   HIP_CHECK(hipGraphCreate(&graph, 0));
   hipGraphNode_t memsetNode, memcpyNode;
   // Add MemSet Node
-  HIP_MEMSET_NODE_PARAMS memsetParams{};
+  hipMemsetParams memsetParams{};
   memset(&memsetParams, 0, sizeof(memsetParams));
-  memsetParams.dst = reinterpret_cast<hipDeviceptr_t>(A_d);
+  memsetParams.dst = reinterpret_cast<void*>(A_d);
   memsetParams.value = memSetVal;
   memsetParams.pitch = pitch_A;
   memsetParams.elementSize = sizeof(char);
@@ -363,9 +363,9 @@ TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMalloc3D_2D") {
   hipGraphNode_t memsetNode, memcpyNode;
 
   // Add MemSet Node
-  HIP_MEMSET_NODE_PARAMS memsetParams{};
+  hipMemsetParams memsetParams{};
   memset(&memsetParams, 0, sizeof(memsetParams));
-  memsetParams.dst = reinterpret_cast<hipDeviceptr_t>(A_d.ptr);
+  memsetParams.dst = reinterpret_cast<void*>(A_d.ptr);
   memsetParams.value = memSetVal;
   memsetParams.pitch = A_d.pitch;
   memsetParams.elementSize = sizeof(char);
@@ -453,9 +453,9 @@ TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMalloc3D_1D") {
   hipGraphNode_t memsetNode, memcpyNode;
 
   // Add MemSet Node
-  HIP_MEMSET_NODE_PARAMS memsetParams{};
+  hipMemsetParams memsetParams{};
   memset(&memsetParams, 0, sizeof(memsetParams));
-  memsetParams.dst = reinterpret_cast<hipDeviceptr_t>(A_d.ptr);
+  memsetParams.dst = reinterpret_cast<void*>(A_d.ptr);
   memsetParams.value = memSetVal;
   memsetParams.pitch = A_d.pitch;
   memsetParams.elementSize = sizeof(char);
@@ -535,9 +535,9 @@ TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMalloc_1D") {
   HIP_CHECK(hipGraphCreate(&graph, 0));
 
   // Add Memset node
-  HIP_MEMSET_NODE_PARAMS memsetParams{};
+  hipMemsetParams memsetParams{};
   memset(&memsetParams, 0, sizeof(memsetParams));
-  memsetParams.dst = reinterpret_cast<hipDeviceptr_t>(A_d);
+  memsetParams.dst = reinterpret_cast<void*>(A_d);
   memsetParams.value = memSetVal;
   memsetParams.pitch = Nbytes1D;
   memsetParams.elementSize = sizeof(char);
@@ -622,9 +622,9 @@ TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMallocManaged") {
   HIP_CHECK(hipGraphCreate(&graph, 0));
 
   // Add Memset node
-  HIP_MEMSET_NODE_PARAMS memsetParams{};
+  hipMemsetParams memsetParams{};
   memset(&memsetParams, 0, sizeof(memsetParams));
-  memsetParams.dst = reinterpret_cast<hipDeviceptr_t>(A_d);
+  memsetParams.dst = reinterpret_cast<void*>(A_d);
   memsetParams.value = memSetVal;
   memsetParams.pitch = Nbytes1D;
   memsetParams.elementSize = sizeof(char);

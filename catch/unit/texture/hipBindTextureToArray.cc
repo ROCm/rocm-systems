@@ -132,7 +132,7 @@ TEST_CASE("Unit_hipBindTextureToArray_Negative_Parameters") {
 #endif
 
   SECTION("invalid channel desc") {
-    hipChannelFormatDesc invalid_desc;
+    hipChannelFormatDesc invalid_desc{-1, -1, -1, -1, hipChannelFormatKindSigned};
 #if HT_AMD
     HIP_CHECK_ERROR(hipBindTextureToArray(tex_2D, hipArray, invalid_desc), hipErrorInvalidValue);
 #else

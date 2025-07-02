@@ -80,11 +80,7 @@ TEST_CASE("Unit_hipGetTextureAlignmentOffset_Negative") {
   }
 
   SECTION("texture is nullptr") {
-#if HT_AMD
-    HIP_CHECK_ERROR(hipGetTextureAlignmentOffset(&offset, nullptr), hipErrorInvalidValue);
-#else
-    HIP_CHECK_ERROR(hipGetTextureAlignmentOffset(&offset, nullptr), hipErrorInvalidTexture);
-#endif
+  HIP_CHECK_ERROR(hipGetTextureAlignmentOffset(&offset, nullptr), hipErrorInvalidTexture);
   }
 
   HIP_CHECK(hipFree(tex_buf));

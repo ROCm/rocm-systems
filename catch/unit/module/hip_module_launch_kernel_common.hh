@@ -121,7 +121,7 @@ template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelPositiveParamet
 template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelNegativeParameters(
                                                            bool extLaunch = false) {
   hipFunction_t f = GetKernel(mg.module(), "NOPKernel");
-  hipError_t expectedErrorZeroBlockDim = (extLaunch == true) ? hipErrorInvalidConfiguration
+  hipError_t expectedErrorLaunchParam = (extLaunch == true) ? hipErrorInvalidConfiguration
                                                              : hipErrorInvalidValue;
   hipError_t expectedErrorOverCapacityGridDim = (extLaunch == true) ? hipSuccess
                                                                     : hipErrorInvalidValue;
@@ -134,32 +134,32 @@ template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelNegativeParamet
 
   SECTION("gridDimX == 0") {
     HIP_CHECK_ERROR(func(f, 0, 1, 1, 1, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
-                    hipErrorInvalidValue);
+                    expectedErrorLaunchParam);
   }
 
   SECTION("gridDimY == 0") {
     HIP_CHECK_ERROR(func(f, 1, 0, 1, 1, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
-                    hipErrorInvalidValue);
+                    expectedErrorLaunchParam);
   }
 
   SECTION("gridDimZ == 0") {
     HIP_CHECK_ERROR(func(f, 1, 1, 0, 1, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
-                    hipErrorInvalidValue);
+                    expectedErrorLaunchParam);
   }
 
   SECTION("blockDimX == 0") {
     HIP_CHECK_ERROR(func(f, 1, 1, 1, 0, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
-                    expectedErrorZeroBlockDim);
+                    expectedErrorLaunchParam);
   }
 
   SECTION("blockDimY == 0") {
     HIP_CHECK_ERROR(func(f, 1, 1, 1, 1, 0, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
-                    expectedErrorZeroBlockDim);
+                    expectedErrorLaunchParam);
   }
 
   SECTION("blockDimZ == 0") {
     HIP_CHECK_ERROR(func(f, 1, 1, 1, 1, 1, 0, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
-                    expectedErrorZeroBlockDim);
+                    expectedErrorLaunchParam);
   }
 
   SECTION("gridDimX > maxGridDimX") {
@@ -183,19 +183,19 @@ template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelNegativeParamet
   SECTION("blockDimX > maxBlockDimX") {
     const unsigned int x = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimX, 0) + 1u;
     HIP_CHECK_ERROR(func(f, 1, 1, 1, x, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
-                    hipErrorInvalidValue);
+                    expectedErrorLaunchParam);
   }
 
   SECTION("blockDimY > maxBlockDimY") {
     const unsigned int y = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimY, 0) + 1u;
     HIP_CHECK_ERROR(func(f, 1, 1, 1, 1, y, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
-                    hipErrorInvalidValue);
+                    expectedErrorLaunchParam);
   }
 
   SECTION("blockDimZ > maxBlockDimZ") {
     const unsigned int z = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimZ, 0) + 1u;
     HIP_CHECK_ERROR(func(f, 1, 1, 1, 1, 1, z, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
-                    hipErrorInvalidValue);
+                    expectedErrorLaunchParam);
   }
 
   SECTION("blockDimX * blockDimY * blockDimZ > MaxThreadsPerBlock") {
@@ -203,7 +203,7 @@ template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelNegativeParamet
     const unsigned int dim = std::ceil(std::cbrt(max)) + 1;
     HIP_CHECK_ERROR(
         func(f, 1, 1, 1, dim, dim, dim, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u),
-        hipErrorInvalidValue);
+        expectedErrorLaunchParam);
   }
 
   SECTION("sharedMemBytes > max shared memory per block") {

@@ -39,37 +39,19 @@ const unsigned int kNumNode = 5;
  * - Launches an executable graph in the specified stream.
  */
 unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
-__device__ void Delay(uint32_t time, const uint32_t ticks_per_ms) {
-  while (time--) {
-#if HT_AMD
-    uint64_t start = wall_clock64();
-    while (wall_clock64() - start < ticks_per_ms) {
-      __builtin_amdgcn_s_sleep(10);
-    }
-#endif
-#if HT_NVIDIA
-    uint64_t start = clock64();
-    while (clock64() - start < ticks_per_ms) {
-    }
-#endif
-  }
-}
 template <typename T>
-__global__ void vectorADD(const T *A_d, const T *B_d, T *C_d, size_t NELEM,
-                          int clockrate) {
+__global__ void vectorADD(const T *A_d, const T *B_d, T *C_d, size_t NELEM) {
   size_t offset = (blockIdx.x * blockDim.x + threadIdx.x);
   size_t stride = blockDim.x * gridDim.x;
 
   for (size_t i = offset; i < NELEM; i += stride) {
     C_d[i] = A_d[i] + B_d[i];
   }
-  Delay(1, clockrate);
 }
 /**
  * Test Description
  * ------------------------
  * - Create the graph with multiple parallel branches.
- * - Introduce some delay in the kernel.
  * - Calculate the time taken to graph execution.
  * Test source
  * ------------------------
@@ -79,14 +61,6 @@ __global__ void vectorADD(const T *A_d, const T *B_d, T *C_d, size_t NELEM,
  * - HIP_VERSION >= 6.4
  */
 TEST_CASE("Unit_hipGraph_Performance_Improvement_ParallelGraph") {
-  int clkRate;
-#if HT_AMD
-  HIP_CHECK(
-      hipDeviceGetAttribute(&clkRate, hipDeviceAttributeWallClockRate, 0));
-#endif
-#if HT_NVIDIA
-  HIP_CHECK(hipDeviceGetAttribute(&clkRate, hipDeviceAttributeClockRate, 0));
-#endif
   hipGraphNode_t memCpy1, memCpy2, memCpy3;
   std::vector<hipGraphNode_t> kNode(kNumNode);
   hipGraph_t graph;
@@ -107,8 +81,7 @@ TEST_CASE("Unit_hipGraph_Performance_Improvement_ParallelGraph") {
 
   for (int i = 0; i < kNumNode; i++) {
     hipKernelNodeParams kernelNodeParams{};
-    void *kernelArgs[] = {&A_d, &B_d, &C_d, reinterpret_cast<void *>(&NElem),
-                          reinterpret_cast<void *>(&clkRate)};
+    void *kernelArgs[] = {&A_d, &B_d, &C_d, reinterpret_cast<void *>(&NElem)};
     kernelNodeParams.func = reinterpret_cast<void *>(vectorADD<int>);
     kernelNodeParams.gridDim = dim3(blocks);
     kernelNodeParams.blockDim = dim3(threadsPerBlock);
@@ -166,15 +139,6 @@ TEST_CASE("Unit_hipGraph_Performance_Improvement_ParallelGraph") {
  * - HIP_VERSION >= 6.4
  */
 TEST_CASE("Unit_hipGraph_Performance_With_Stream_Operations") {
-  int clkRate;
-#if HT_AMD
-  HIP_CHECK(
-      hipDeviceGetAttribute(&clkRate, hipDeviceAttributeWallClockRate, 0));
-#endif
-#if HT_NVIDIA
-  HIP_CHECK(hipDeviceGetAttribute(&clkRate, hipDeviceAttributeClockRate, 0));
-#endif
-
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
@@ -187,7 +151,7 @@ TEST_CASE("Unit_hipGraph_Performance_With_Stream_Operations") {
     HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyDefault, stream));
     for (int i = 0; i < kNumNode; i++) {
       hipLaunchKernelGGL(vectorADD, dim3(blocks), dim3(threadsPerBlock), 0,
-                         stream, A_d, B_d, C_d, NElem, clkRate);
+                         stream, A_d, B_d, C_d, NElem);
     }
     HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDefault, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
@@ -218,15 +182,6 @@ TEST_CASE("Unit_hipGraph_Performance_With_Stream_Operations") {
  */
 
 TEST_CASE("Unit_hipGraph_Performance_With_Stream_Capture") {
-  int clkRate;
-#if HT_AMD
-  HIP_CHECK(
-      hipDeviceGetAttribute(&clkRate, hipDeviceAttributeWallClockRate, 0));
-#endif
-#if HT_NVIDIA
-  HIP_CHECK(hipDeviceGetAttribute(&clkRate, hipDeviceAttributeClockRate, 0));
-#endif
-
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
   hipGraph_t graph;
   hipStream_t stream, streamForGraph;
@@ -239,7 +194,7 @@ TEST_CASE("Unit_hipGraph_Performance_With_Stream_Capture") {
   HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyDefault, stream));
   for (int i = 0; i < kNumNode; i++) {
     hipLaunchKernelGGL(vectorADD, dim3(blocks), dim3(threadsPerBlock), 0,
-                       stream, A_d, B_d, C_d, NElem, clkRate);
+                       stream, A_d, B_d, C_d, NElem);
   }
   HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDefault, stream));
   HIP_CHECK(hipStreamEndCapture(stream, &graph));

@@ -129,8 +129,24 @@ TEST_CASE("Unit_hipHostMalloc_Basic") {
     float *A_d, *B_d, *C_d;
     HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A_h), SIZE,
                            hipHostMallocWriteCombined | hipHostMallocMapped));
-    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&B_h), SIZE,
-                           hipHostMallocDefault));
+    SECTION("hipHostMallocDefault") {
+      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&B_h), SIZE,
+                             hipHostMallocDefault));
+    }
+#if (HT_AMD == 1) && (HT_LINUX == 1)
+    SECTION("hipHostMallocUncached") {
+      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&B_h), SIZE,
+                              hipHostMallocUncached));
+    }
+    SECTION("hipHostMallocCoherent") {
+      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&B_h), SIZE,
+                              hipHostMallocCoherent));
+    }
+    SECTION("hipHostMallocNonCoherent") {
+      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&B_h), SIZE,
+                              hipHostMallocNonCoherent));
+    }
+#endif
     HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&C_h), SIZE,
                            hipHostMallocMapped));
 

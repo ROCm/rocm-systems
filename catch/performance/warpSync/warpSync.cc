@@ -98,7 +98,8 @@ template <class T, template <typename> class Op>
 __global__ void reduceAllAtomics(T* __restrict__ output, const T* __restrict__ input, unsigned long long mask)
 {
   int idx = threadIdx.x + blockIdx.x * kBlockDim;
-  __shared__ T result[kBlockDim / warpSize]; // one per warp
+  extern __shared__ uint8_t shared_mem[];
+  T* result = reinterpret_cast<T*>(shared_mem); // one per warp
   Op<T> op;
   int numWarp = threadIdx.x / warpSize;
 
@@ -158,19 +159,24 @@ public:
     dim3 blockDim = { kBlockDim };
     dim3 gridDim = { static_cast<uint32_t>(std::ceil(numItems / static_cast<float>(blockDim.x))) };
 
+    hipDeviceProp_t props;
+    HIP_CHECK(hipGetDeviceProperties(&props, 0));
+    int warpSize = props.warpSize;
+    int numWarpsPerBlock = kBlockDim / warpSize;
+    size_t sharedSize = numWarpsPerBlock * sizeof(T);
     TIMED_SECTION(kTimerTypeEvent) {
       if constexpr (std::is_same<Op<T>, std::plus<T>>::value)
-        reduceAllAtomics<T, AtomicAddOp><<<gridDim, blockDim>>>(output, input, mask);
+        reduceAllAtomics<T, AtomicAddOp><<<gridDim, blockDim, sharedSize>>>(output, input, mask);
       else if constexpr (std::is_same<Op<T>, MinOp<T>>::value)
-        reduceAllAtomics<T, AtomicMinOp><<<gridDim, blockDim>>>(output, input, mask);
+        reduceAllAtomics<T, AtomicMinOp><<<gridDim, blockDim, sharedSize>>>(output, input, mask);
       else if constexpr (std::is_same<Op<T>, MaxOp<T>>::value)
-        reduceAllAtomics<T, AtomicMaxOp><<<gridDim, blockDim>>>(output, input, mask);
+        reduceAllAtomics<T, AtomicMaxOp><<<gridDim, blockDim, sharedSize>>>(output, input, mask);
       else if constexpr (std::is_same<Op<T>, std::logical_and<T>>::value)
-        reduceAllAtomics<T, AtomicAndOp><<<gridDim, blockDim>>>(output, input, mask);
+        reduceAllAtomics<T, AtomicAndOp><<<gridDim, blockDim, sharedSize>>>(output, input, mask);
       else if constexpr (std::is_same<Op<T>, std::logical_or<T>>::value)
-        reduceAllAtomics<T, AtomicOrOp><<<gridDim, blockDim>>>(output, input, mask);
+        reduceAllAtomics<T, AtomicOrOp><<<gridDim, blockDim, sharedSize>>>(output, input, mask);
       else if constexpr (std::is_same<Op<T>, XorOp<T>>::value)
-        reduceAllAtomics<T, AtomicXorOp><<<gridDim, blockDim>>>(output, input, mask);
+        reduceAllAtomics<T, AtomicXorOp><<<gridDim, blockDim, sharedSize>>>(output, input, mask);
       else
         static_assert(std::is_void<T>::value, "Unsupported operator");
 

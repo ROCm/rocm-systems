@@ -116,8 +116,18 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_ReferenceFromKernelandhipMemset", "", \
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   Ad = new TestType*[num_devices];
   A = reinterpret_cast<TestType*>(malloc(sizeBytes));
-  HIP_CHECK(hipHostRegister(A, sizeBytes, 0));
-
+  SECTION("hipHostRegisterDefault") {
+    HIP_CHECK(hipHostRegister(A, sizeBytes, hipHostRegisterDefault));
+  }
+#if (HT_AMD == 1) && (HT_LINUX == 1)
+  SECTION("hipExtHostRegisterUncached") {
+    HIP_CHECK(hipHostRegister(A, sizeBytes, hipExtHostRegisterUncached));
+  }
+  SECTION("hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterUncached") {
+    HIP_CHECK(hipHostRegister(A, sizeBytes,
+                     hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterUncached));
+  }
+#endif
   for (int i = 0; i < LEN; i++) {
     A[i] = static_cast<TestType>(1);
   }
@@ -926,6 +936,10 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_Flags", "", int, float, double) {
     FlagType{0x08, true},
     FlagType{hipHostRegisterPortable | hipHostRegisterMapped, true},
     FlagType{hipHostRegisterPortable | hipHostRegisterMapped | 0x08, true},
+#if (HT_AMD == 1) && (HT_LINUX == 1)
+    FlagType{hipExtHostRegisterUncached, true},
+    FlagType{hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterUncached, true},
+#endif
     FlagType{0xF0, false},
     FlagType{0xFFF2, false}, FlagType{0xFFFFFFFF, false});
 

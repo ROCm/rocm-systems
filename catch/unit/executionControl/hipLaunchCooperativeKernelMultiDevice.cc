@@ -151,7 +151,7 @@ TEST_CASE("Unit_hipLaunchCooperativeKernelMultiDevice_Negative_MultiKernelSameDe
   }
 
   HIP_CHECK_ERROR(hipLaunchCooperativeKernelMultiDevice(params_list.data(), 2, 0u),
-                  hipErrorInvalidValue);
+                  hipErrorInvalidDevice);
 
   for (const auto params : params_list) {
     HIP_CHECK(hipStreamDestroy(params.stream));

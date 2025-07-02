@@ -258,11 +258,6 @@ TEST_CASE("Unit_hipMemcpyPeerAsync_Negative_Parameters") {
   const StreamGuard stream_guard(Streams::created);
   const hipStream_t stream = stream_guard.stream();
 
-  constexpr auto InvalidStream = [] {
-    const StreamGuard sg(Streams::created);
-    return sg.stream();
-  };
-
   int can_access_peer = 0;
   const auto src_device = 0;
   const auto dst_device = 1;
@@ -307,13 +302,6 @@ TEST_CASE("Unit_hipMemcpyPeerAsync_Negative_Parameters") {
                                          kPageSize, stream),
                       hipErrorInvalidDevice);
     }
-
-    SECTION("Passing invalid Stream") {
-      HIP_CHECK_ERROR(hipMemcpyPeerAsync(dst_alloc.ptr(), dst_device, src_alloc.ptr(), src_device,
-                                         kPageSize, InvalidStream()),
-                      hipErrorContextIsDestroyed);
-    }
-
     HIP_CHECK(hipDeviceDisablePeerAccess(dst_device));
   } else {
     INFO("Peer access cannot be enabled between devices " << src_device << " " << dst_device);

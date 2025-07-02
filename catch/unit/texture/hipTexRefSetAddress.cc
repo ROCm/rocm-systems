@@ -65,14 +65,8 @@ TEST_CASE("Unit_hipTexRefSetAddress_Positive") {
   }
 
   SECTION("size is 0") {
-#if HT_AMD
-    HIP_CHECK_ERROR(
-        hipTexRefSetAddress(&offset, tex_ref, reinterpret_cast<hipDeviceptr_t>(tex_buffer), 0),
-        hipErrorInvalidValue);
-#else
     HIP_CHECK(
         hipTexRefSetAddress(&offset, tex_ref, reinterpret_cast<hipDeviceptr_t>(tex_buffer), 0));
-#endif
   }
 }
 

@@ -26,6 +26,8 @@ THE SOFTWARE.
 #include <type_traits>
 #include <utility>
 
+#include "../vector_types/vector_types_common.hh"
+
 using namespace std;
 
 template <class T> __device__ typename std::add_rvalue_reference<T>::type _declval() noexcept;
@@ -38,21 +40,21 @@ __device__ constexpr bool integer_unary_tests(const V&, const V&) {
 template <typename V, enable_if_t<is_integral<decltype(_declval<V>().x)>{}>* = nullptr>
 __device__ bool integer_unary_tests(V& f1, V& f2) {
   f1 %= f2;
-  if (f1 != V{0}) return false;
+  if (f1 != MakeVector<V>(0)) return false;
 
   f1 &= f2;
-  if (f1 != V{0}) return false;
+  if (f1 != MakeVector<V>(0)) return false;
   f1 |= f2;
-  if (f1 != V{1}) return false;
+  if (f1 != MakeVector<V>(1)) return false;
   f1 ^= f2;
-  if (f1 != V{0}) return false;
-  f1 = V{1};
+  if (f1 != MakeVector<V>(0)) return false;
+  f1 = MakeVector<V>(1);
   f1 <<= f2;
-  if (f1 != V{2}) return false;
+  if (f1 != MakeVector<V>(2)) return false;
   f1 >>= f2;
-  if (f1 != V{1}) return false;
+  if (f1 != MakeVector<V>(1)) return false;
   f2 = ~f1;
-  return f2 == V{~1};
+  return f2 == MakeVector<V>(~1);
 
   return true;
 }
@@ -65,35 +67,35 @@ __device__ constexpr bool integer_binary_tests(const V&, const V&, const V&) {
 template <typename V, enable_if_t<is_integral<decltype(_declval<V>().x)>{}>* = nullptr>
 __device__ bool integer_binary_tests(V& f1, V& f2, V& f3) {
   f3 = f1 % f2;
-  if (f3 != V{0}) return false;
+  if (f3 != MakeVector<V>(0)) return false;
   f1 = f3 & f2;
-  if (f1 != V{0}) return false;
+  if (f1 != MakeVector<V>(0)) return false;
   f2 = f1 ^ f3;
-  if (f2 != V{0}) return false;
-  f1 = V{1};
-  f2 = V{2};
+  if (f2 != MakeVector<V>(0)) return false;
+  f1 = MakeVector<V>(1);
+  f2 = MakeVector<V>(2);
   f3 = f1 << f2;
-  if (f3 != V{4}) return false;
+  if (f3 != MakeVector<V>(4)) return false;
   f2 = f3 >> f1;
-  return f2 == V{2};
+  return f2 == MakeVector<V>(2);
 }
 
 template <typename V> __device__ bool TestVectorType() {
-  constexpr V v1{1};
-  constexpr V v2{2};
-  constexpr V v3{3};
-  constexpr V v4{4};
+  const V v1 = MakeVector<V>(1);
+  const V v2 = MakeVector<V>(2);
+  const V v3 = MakeVector<V>(3);
+  const V v4 = MakeVector<V>(4);
 
-  V f1{1};
-  V f2{1};
+  V f1 = MakeVector<V>(1);
+  V f2 = MakeVector<V>(1);
   V f3 = f1 + f2;
-  if (f3 != V{2}) return false;
+  if (f3 != MakeVector<V>(2)) return false;
   f2 = f3 - f1;
-  if (f2 != V{1}) return false;
+  if (f2 != MakeVector<V>(1)) return false;
   f1 = f2 * f3;
-  if (f1 != V{2}) return false;
+  if (f1 != MakeVector<V>(2)) return false;
   f2 = f1 / f3;
-  if (f2 != V{1}) return false;
+  if (f2 != MakeVector<V>(1)) return false;
   if (!integer_binary_tests(f1, f2, f3)) return false;
 
   f1 = v2;
@@ -166,23 +168,23 @@ __global__ void CheckVectorTypes(bool* ptr) {
 
 
 template <typename V> __global__ void CheckSharedVectorType(bool* ptr) {
-  constexpr V v1{1};
-  constexpr V v2{2};
-  constexpr V v3{3};
-  constexpr V v4{4};
+  const V v1 = MakeVector<V>(1);
+  const V v2 = MakeVector<V>(2);
+  const V v3 = MakeVector<V>(3);
+  const V v4 = MakeVector<V>(4);
   __shared__ V f1, f2, f3;
 
   *ptr = true;
-  f1 = V{1};
-  f2 = V{1};
+  f1 = MakeVector<V>(1);
+  f2 = MakeVector<V>(1);
   f3 = f1 + f2;
-  *ptr = *ptr && f3 == V{2};
+  *ptr = *ptr && f3 == MakeVector<V>(2);
   f2 = f3 - f1;
-  *ptr = *ptr && f2 == V{1};
+  *ptr = *ptr && f2 == MakeVector<V>(1);
   f1 = f2 * f3;
-  *ptr = *ptr && f1 == V{2};
+  *ptr = *ptr && f1 == MakeVector<V>(2);
   f2 = f1 / f3;
-  *ptr = *ptr && f2 == V{1};
+  *ptr = *ptr && f2 == MakeVector<V>(1);
   *ptr = *ptr && integer_binary_tests(f1, f2, f3);
 
   f1 = v2;

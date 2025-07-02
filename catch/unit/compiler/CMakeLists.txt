@@ -41,7 +41,7 @@ if(HIP_PLATFORM MATCHES "amd")
                   ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/hip_test_features.cc
                   ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/main.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/${GENERIC_TARGET_ONLY_EXE}
-                  -I${HIP_PATH}/include/ --rocm-path=${ROCM_PATH}
+                  -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../external/Catch2
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../external/picojson ${LIBFS})
@@ -52,7 +52,7 @@ if(HIP_PLATFORM MATCHES "amd")
                   ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/hip_test_features.cc
                   ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/main.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/${GENERIC_TARGET_ONLY_COMPRESSED_EXE}
-                  -I${HIP_PATH}/include/ --rocm-path=${ROCM_PATH}
+                  -I${HIP_PATH}/include/ --hip-path=${HIP_PATH}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../external/Catch2
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../external/picojson ${LIBFS})

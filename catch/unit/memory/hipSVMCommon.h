@@ -17,8 +17,8 @@
  * Modifications Copyright (C)2023 Advanced
  * Micro Devices, Inc. All rights reserved.
  */
-#ifndef __COMMON_H__
-#define __COMMON_H__
+#ifndef __HIPSVMCOMMON_H__
+#define __HIPSVMCOMMON_H__
 
 #include <vector>
 #include <string>
@@ -137,5 +137,5 @@ inline void align_free(void* ptr) {
 #endif
 }
 
-#endif    // #ifndef __COMMON_H__
+#endif // #ifndef __HIPSVMCOMMON_H__
 

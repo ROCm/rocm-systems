@@ -22,7 +22,6 @@
 
 #include <resource_guards.hh>
 #include <utils.hh>
-
 /**
  * @addtogroup hipMemPoolTrimTo hipMemPoolTrimTo
  * @{
@@ -72,6 +71,9 @@ TEST_CASE("Unit_hipMemPoolTrimTo_Positive_Basic") {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
   checkMempoolSupported(device_id)
+  unsigned int *notified = nullptr;
+  HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
+  *notified = 0;
 
   const size_t allocation_size1 = kPageSize * kPageSize * 2;
   const size_t allocation_size2 = kPageSize / 2;
@@ -87,15 +89,7 @@ TEST_CASE("Unit_hipMemPoolTrimTo_Positive_Basic") {
                                    mempool.mempool(), stream.stream()));
 
   int blocks = 2;
-  int clk_rate;
-  if (IsGfx11()) {
-    HIP_CHECK(hipDeviceGetAttribute(&clk_rate, hipDeviceAttributeWallClockRate, 0));
-    kernel_500ms_gfx11<<<32, blocks, 0, stream.stream()>>>(alloc_mem1, clk_rate);
-  } else {
-    HIP_CHECK(hipDeviceGetAttribute(&clk_rate, hipDeviceAttributeClockRate, 0));
-
-    kernel_500ms<<<32, blocks, 0, stream.stream()>>>(alloc_mem1, clk_rate);
-  }
+  notifiedKernel<<<32, blocks, 0, stream.stream()>>>(alloc_mem1, notified);
 
   hipMemPoolAttr attr;
   attr = hipMemPoolAttrReleaseThreshold;
@@ -119,6 +113,8 @@ TEST_CASE("Unit_hipMemPoolTrimTo_Positive_Basic") {
   // Trim must be a nop because execution isn't done
   REQUIRE(res_before_trim == res_after_trim);
 
+  std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  *notified = 1;
   HIP_CHECK(hipStreamSynchronize(stream.stream()));
 
   std::uint64_t res_after_sync = 0;
@@ -149,6 +145,7 @@ TEST_CASE("Unit_hipMemPoolTrimTo_Positive_Basic") {
   REQUIRE((allocation_size1 + allocation_size2) == value64);
 
   HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem2), stream.stream()));
+  HIP_CHECK(hipHostFree(notified));
 }
 
 static bool thread_results[NUMBER_OF_THREADS];

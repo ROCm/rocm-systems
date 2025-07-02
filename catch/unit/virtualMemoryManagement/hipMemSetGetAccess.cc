@@ -1269,20 +1269,12 @@ TEST_CASE("Unit_hipMemSetAccess_negative") {
   }
 
   SECTION("pass a size less than reserved size") {
-#if HT_AMD
-    REQUIRE(hipMemSetAccess(ptrA, size_mem - 1, &accessDesc, 1) == hipSuccess);
-#else
     REQUIRE(hipMemSetAccess(ptrA, size_mem - 1, &accessDesc, 1) == hipErrorInvalidValue);
-#endif
   }
 
   SECTION("invalid location type") {
     accessDesc.location.type = hipMemLocationTypeInvalid;
-#if HT_AMD
-    REQUIRE(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1) == hipSuccess);
-#else
     REQUIRE(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1) == hipErrorInvalidValue);
-#endif
   }
 
   SECTION("invalid id") {
@@ -1299,11 +1291,7 @@ TEST_CASE("Unit_hipMemSetAccess_negative") {
 
   SECTION("invalid flag") {
     accessDesc.flags = static_cast<hipMemAccessFlags>(-1);
-#if HT_AMD
-    REQUIRE(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1) == hipSuccess);
-#else
     REQUIRE(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1) == hipErrorInvalidValue);
-#endif
   }
 
   SECTION(" pass zero to count") {

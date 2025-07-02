@@ -73,8 +73,8 @@ TEST_CASE("Unit_hipDrvGraphExecMemsetNodeSetParams_BasicPositive") {
   hipGraphNode_t memsetNode, memcpyNode;
 
   // Prepare memset node
-  HIP_MEMSET_NODE_PARAMS initialMemsetParams{};
-  initialMemsetParams.dst = devMemSrc;
+  hipMemsetParams initialMemsetParams{};
+  initialMemsetParams.dst = reinterpret_cast<void*>(devMemSrc);
   initialMemsetParams.pitch = pitch;
   initialMemsetParams.elementSize = sizeof(char);
   initialMemsetParams.width = width;
@@ -118,8 +118,8 @@ TEST_CASE("Unit_hipDrvGraphExecMemsetNodeSetParams_BasicPositive") {
     REQUIRE(hostMemDst[i] == value);
   }
 
-  HIP_MEMSET_NODE_PARAMS newMemsetParams{};
-  newMemsetParams.dst = devMemSrc;
+  hipMemsetParams newMemsetParams{};
+  newMemsetParams.dst = reinterpret_cast<void*>(devMemSrc);
   newMemsetParams.pitch = pitch;
   newMemsetParams.elementSize = sizeof(char);
   newMemsetParams.width = width;
@@ -177,8 +177,8 @@ TEST_CASE("Unit_hipDrvGraphExecMemsetNodeSetParams_Negative") {
                            width, height));
 
   // Prepare memset node
-  HIP_MEMSET_NODE_PARAMS memsetParams{};
-  memsetParams.dst = devMemSrc;
+  hipMemsetParams memsetParams{};
+  memsetParams.dst = reinterpret_cast<void*>(devMemSrc);
   memsetParams.pitch = pitch;
   memsetParams.elementSize = sizeof(char);
   memsetParams.width = width;
@@ -208,7 +208,7 @@ TEST_CASE("Unit_hipDrvGraphExecMemsetNodeSetParams_Negative") {
                     hipErrorInvalidValue);
   }
   SECTION("Invalid destination address in Node params") {
-    HIP_MEMSET_NODE_PARAMS memsetParams{};
+    hipMemsetParams memsetParams{};
     memsetParams.dst = 0;
     memsetParams.pitch = pitch;
     memsetParams.elementSize = sizeof(char);

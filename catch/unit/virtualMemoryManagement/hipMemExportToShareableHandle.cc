@@ -105,13 +105,11 @@ TEST_CASE("Unit_hipMemExportToShareableHandle_Negative_Parameters") {
   HIP_CHECK(hipMemCreate(&handle, granularity * 2, &prop, 0));
 
   void* shareable_handle = nullptr;
-#if HT_NVIDIA
   SECTION("shareableHandle == nullptr") {
     HIP_CHECK_ERROR(
         hipMemExportToShareableHandle(nullptr, handle, hipMemHandleTypePosixFileDescriptor, 0),
         hipErrorInvalidValue);
   }
-#endif
 
   SECTION("handle == nullptr") {
     HIP_CHECK_ERROR(

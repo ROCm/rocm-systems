@@ -92,6 +92,13 @@ template <typename T> __global__ void kernel_500ms_gfx11(T* host_res, int clk_ra
 #endif
 }
 
+template <typename T> __global__ void notifiedKernel(T* host_res, volatile unsigned int* notified) {
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  host_res[tid] = tid + 1;
+  __threadfence_system();
+  while (*notified == 0) { }
+}
+
 template <typename F> void MallocMemPoolAsync_OneAlloc(F malloc_func, const MemPools mempool_type) {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
@@ -102,7 +109,9 @@ template <typename F> void MallocMemPoolAsync_OneAlloc(F malloc_func, const MemP
     SUCCEED("Runtime doesn't support Memory Pool. Skip the test case.");
     return;
   }
-
+  unsigned int *notified = nullptr;
+  HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
+  *notified = 0;
   const auto allocation_size = GENERATE(kPageSize / 2, kPageSize, kPageSize * 2);
   LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc, allocation_size);
   MemPoolGuard mempool(mempool_type, device_id);
@@ -114,16 +123,8 @@ template <typename F> void MallocMemPoolAsync_OneAlloc(F malloc_func, const MemP
                         stream.stream()));
 
   int blocks = 16;
-  int clk_rate;
   hipMemPoolAttr attr;
-  if (IsGfx11()) {
-    HIP_CHECK(hipDeviceGetAttribute(&clk_rate, hipDeviceAttributeWallClockRate, 0));
-    kernel_500ms_gfx11<<<32, blocks, 0, stream.stream()>>>(alloc_mem, clk_rate);
-  } else {
-    HIP_CHECK(hipDeviceGetAttribute(&clk_rate, hipDeviceAttributeClockRate, 0));
-
-    kernel_500ms<<<32, blocks, 0, stream.stream()>>>(alloc_mem, clk_rate);
-  }
+  notifiedKernel<<<32, blocks, 0, stream.stream()>>>(alloc_mem, notified);
 
   const auto element_count = allocation_size / sizeof(int);
   constexpr auto thread_count = 1024;
@@ -140,6 +141,7 @@ template <typename F> void MallocMemPoolAsync_OneAlloc(F malloc_func, const MemP
   attr = hipMemPoolAttrReservedMemCurrent;
   std::uint64_t res_before_sync = 0;
   HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &res_before_sync));
+  *notified = 1;
   HIP_CHECK(hipStreamSynchronize(stream.stream()));
 
   std::uint64_t res_after_sync = 0;
@@ -153,6 +155,7 @@ template <typename F> void MallocMemPoolAsync_OneAlloc(F malloc_func, const MemP
   REQUIRE(0 == used_mem);
 
   ArrayFindIfNot(host_alloc.host_ptr(), expected_value, element_count);
+  HIP_CHECK(hipHostFree(notified));
 }
 
 template <typename F>
@@ -166,7 +169,9 @@ void MallocMemPoolAsync_TwoAllocs(F malloc_func, const MemPools mempool_type) {
     SUCCEED("Runtime doesn't support Memory Pool. Skip the test case.");
     return;
   }
-
+  unsigned int *notified = nullptr;
+  HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
+  *notified = 0;
   const auto allocation_size = GENERATE(kPageSize / 2, kPageSize, kPageSize * 2);
   LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc, allocation_size);
   MemPoolGuard mempool(mempool_type, device_id);
@@ -181,16 +186,8 @@ void MallocMemPoolAsync_TwoAllocs(F malloc_func, const MemPools mempool_type) {
                         stream.stream()));
 
   int blocks = 16;
-  int clk_rate;
   hipMemPoolAttr attr;
-  if (IsGfx11()) {
-    HIP_CHECK(hipDeviceGetAttribute(&clk_rate, hipDeviceAttributeWallClockRate, 0));
-    kernel_500ms_gfx11<<<32, blocks, 0, stream.stream()>>>(alloc_mem1, clk_rate);
-  } else {
-    HIP_CHECK(hipDeviceGetAttribute(&clk_rate, hipDeviceAttributeClockRate, 0));
-
-    kernel_500ms<<<32, blocks, 0, stream.stream()>>>(alloc_mem1, clk_rate);
-  }
+  notifiedKernel<<<32, blocks, 0, stream.stream()>>>(alloc_mem1, notified);
 
   const auto element_count = allocation_size / sizeof(int);
   constexpr auto thread_count = 1024;
@@ -211,6 +208,7 @@ void MallocMemPoolAsync_TwoAllocs(F malloc_func, const MemPools mempool_type) {
   attr = hipMemPoolAttrReservedMemCurrent;
   std::uint64_t res_before_sync = 0;
   HIP_CHECK(hipMemPoolGetAttribute(mempool.mempool(), attr, &res_before_sync));
+  *notified = 1;
   HIP_CHECK(hipStreamSynchronize(stream.stream()));
 
   std::uint64_t res_after_sync = 0;
@@ -238,6 +236,7 @@ void MallocMemPoolAsync_TwoAllocs(F malloc_func, const MemPools mempool_type) {
   REQUIRE(0 == used_mem);
 
   ArrayFindIfNot(host_alloc.host_ptr(), expected_value, element_count);
+  HIP_CHECK(hipHostFree(notified));
 }
 
 template <typename F> void MallocMemPoolAsync_Reuse(F malloc_func, const MemPools mempool_type) {
@@ -250,7 +249,9 @@ template <typename F> void MallocMemPoolAsync_Reuse(F malloc_func, const MemPool
     SUCCEED("Runtime doesn't support Memory Pool. Skip the test case.");
     return;
   }
-
+  unsigned int *notified = nullptr;
+  HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
+  *notified = 0;
   MemPoolGuard mempool(mempool_type, device_id);
 
   int *alloc_mem1, *alloc_mem2, *alloc_mem3;
@@ -265,16 +266,8 @@ template <typename F> void MallocMemPoolAsync_Reuse(F malloc_func, const MemPool
                         stream.stream()));
 
   int blocks = 2;
-  int clk_rate;
 
-  if (IsGfx11()) {
-    HIP_CHECK(hipDeviceGetAttribute(&clk_rate, hipDeviceAttributeWallClockRate, 0));
-    kernel_500ms_gfx11<<<32, blocks, 0, stream.stream()>>>(alloc_mem1, clk_rate);
-  } else {
-    HIP_CHECK(hipDeviceGetAttribute(&clk_rate, hipDeviceAttributeClockRate, 0));
-
-    kernel_500ms<<<32, blocks, 0, stream.stream()>>>(alloc_mem1, clk_rate);
-  }
+  notifiedKernel<<<32, blocks, 0, stream.stream()>>>(alloc_mem1, notified);
 
   hipMemPoolAttr attr;
   // Not a real free, since kernel isn't done
@@ -286,15 +279,12 @@ template <typename F> void MallocMemPoolAsync_Reuse(F malloc_func, const MemPool
   REQUIRE(alloc_mem1 == alloc_mem2);
 
   // Make a sync before the second kernel launch to make sure memory B isn't gone
+  *notified = 1;
   HIP_CHECK(hipStreamSynchronize(stream.stream()));
-
+  *notified = 0;
   // Second kernel launch with new memory
-  if (IsGfx11()) {
-    kernel_500ms_gfx11<<<32, blocks, 0, stream.stream()>>>(alloc_mem2, clk_rate);
-  } else {
-    kernel_500ms<<<32, blocks, 0, stream.stream()>>>(alloc_mem2, clk_rate);
-  }
-
+  notifiedKernel<<<32, blocks, 0, stream.stream()>>>(alloc_mem2, notified);
+  *notified = 1;
   HIP_CHECK(hipStreamSynchronize(stream.stream()));
 
   attr = hipMemPoolAttrUsedMemCurrent;
@@ -315,6 +305,7 @@ template <typename F> void MallocMemPoolAsync_Reuse(F malloc_func, const MemPool
   REQUIRE(allocation_size2 == value64);
 
   HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem3), stream.stream()));
+  HIP_CHECK(hipHostFree(notified));
 }
 
 // definitions

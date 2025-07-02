@@ -90,3 +90,9 @@ add_dependencies(build_tests getDeviceCount chkUUIDFrmChildProc_Exe chkUUIDInGra
 if(0)
 add_dependencies(build_tests passUUIDToGrandChild_Exe ResetUUIDInChild_Exe)
 endif()
+
+if(HIP_PLATFORM MATCHES "amd")
+  add_executable(hipDeviceSetGetScratchExe EXCLUDE_FROM_ALL hipDeviceSetGetScratchExe.cc)
+  add_dependencies(DeviceTest hipDeviceSetGetScratchExe)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipDeviceSetGetScratchExe)
+endif()

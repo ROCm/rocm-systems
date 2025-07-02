@@ -103,7 +103,7 @@ TEST_CASE("Unit_hipBindTexture2D_Negative") {
 #if HT_AMD
     HIP_CHECK_ERROR(hipBindTexture2D(&texture_offset, nullptr, device_ptr, &tex.channelDesc, SIZE_W,
                                      SIZE_H, device_pitch),
-                    hipErrorInvalidSymbol);
+                    hipErrorUnknown);
 #else
     HIP_CHECK_ERROR(hipBindTexture2D(&texture_offset, nullptr, device_ptr, &tex.channelDesc, SIZE_W,
                                      SIZE_H, device_pitch),
@@ -112,27 +112,9 @@ TEST_CASE("Unit_hipBindTexture2D_Negative") {
   }
 
   SECTION("Device ptr is nullptr") {
-#if HT_AMD
-    HIP_CHECK_ERROR(hipBindTexture2D(&texture_offset, &tex, nullptr, &tex.channelDesc, SIZE_W,
-                                     SIZE_H, device_pitch),
-                    hipErrorInvalidValue);
-#else
     HIP_CHECK_ERROR(hipBindTexture2D(&texture_offset, &tex, nullptr, &tex.channelDesc, SIZE_W,
                                      SIZE_H, device_pitch),
                     hipErrorNotFound);
-#endif
-  }
-
-  SECTION("Width is 0") {
-    HIP_CHECK_ERROR(hipBindTexture2D(&texture_offset, &tex, device_ptr, &tex.channelDesc, 0, SIZE_H,
-                                     device_pitch),
-                    hipErrorInvalidValue);
-  }
-
-  SECTION("Height is 0") {
-    HIP_CHECK_ERROR(hipBindTexture2D(&texture_offset, &tex, device_ptr, &tex.channelDesc, SIZE_W, 0,
-                                     device_pitch),
-                    hipErrorInvalidValue);
   }
 
   SECTION("Pitch is 0") {

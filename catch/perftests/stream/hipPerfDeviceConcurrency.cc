@@ -133,6 +133,10 @@ bool hipPerfDeviceConcurrency::run(unsigned int testCase, int numGpus) {
     int clkFrequency = 0;
     HIP_CHECK(hipDeviceGetAttribute(&clkFrequency,
                                     hipDeviceAttributeClockRate, i));
+    if (clkFrequency == 0) {
+      std::cout << "clkFrequency = 0, set it to 1000000\n";
+      clkFrequency = 1000000;
+    }
     clkFrequency =(unsigned int)clkFrequency/1000;
 
     // Maximum iteration count

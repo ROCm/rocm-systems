@@ -118,17 +118,17 @@ TEST_CASE("Unit_hipHccModuleLaunchKernel_NegTst") {
   SECTION("-1 to localWorkSizeX(fifth argument)") {
     HIP_CHECK_ERROR(hipHccModuleLaunchKernel(kernelFunc, width, 1, 1, -1, 1, 1,
                     0, 0, kernelArgs, nullptr, nullptr, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidConfiguration);
   }
   SECTION("-1 to localWorkSizeY(sixth argument)") {
     HIP_CHECK_ERROR(hipHccModuleLaunchKernel(kernelFunc, width, 1, 1, width,
                     -1, 1, 0, 0, kernelArgs, nullptr, nullptr, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidConfiguration);
   }
   SECTION("-1 to localWorkSizeZ(seventh argument)") {
     HIP_CHECK_ERROR(hipHccModuleLaunchKernel(kernelFunc, width, 1, 1, width, 1,
                     -1, 0, 0, kernelArgs, nullptr, nullptr, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidConfiguration);
   }
   SECTION("-1 to sharedMemBytes(eighth argument)") {
     HIP_CHECK_ERROR(hipHccModuleLaunchKernel(kernelFunc, width, 1, 1, width, 1,

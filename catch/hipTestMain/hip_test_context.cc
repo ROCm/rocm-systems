@@ -37,7 +37,9 @@ std::string TestContext::substringFound(std::vector<std::string> list, std::stri
 
 std::string TestContext::getCurrentArch() {
 #if HT_LINUX
-  const char* cmd = "/opt/rocm/bin/rocm_agent_enumerator | sort -u | xargs | sed -e 's/ /;/g'";
+  const char* cmd =
+      "/opt/rocm/bin/rocm_agent_enumerator | awk '$0 != \"gfx000\"' | xargs | sed -e 's/ /;/g' | "
+      "tr -d '\n'";
   std::array<char, 1024> buffer;
   std::string result;
   std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd, "r"), pclose);
@@ -48,12 +50,6 @@ std::string TestContext::getCurrentArch() {
   while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
     std::string res = buffer.data();
     result = res;
-  }
-
-  result.erase(std::remove(result.begin(), result.end(), '\n'), result.end());
-  size_t pos = result.find("gfx000");
-  if (pos != std::string::npos) {
-    result.erase(pos, 7);
   }
 
   std::string s_visible_devices = TestContext::getEnvVar("HIP_VISIBLE_DEVICES");

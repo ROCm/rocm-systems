@@ -32,15 +32,16 @@ THE SOFTWARE.
 #include <hip/hip_runtime.h>
 #include <hip/math_functions.h>
 #include <hip_test_common.hh>
+#include "hip_test_rtc.hh"
 
 static constexpr auto mathFuntn_string {
 R"(
 extern "C"
 __global__ void mathFuntn(float *res) {
-  res[0] = (amd_mixed_dot((short2)10, (short2)20, (int)30, 1) == 430);
-  res[1] = (amd_mixed_dot((ushort2)10, (ushort2)20, (uint)30, 1) == 430);
+  res[0] = (amd_mixed_dot(short2{10, 10}, short2{20, 20}, (int)30, 1) == 430);
+  res[1] = (amd_mixed_dot(ushort2{10, 10}, ushort2{20, 20}, (uint)30, 1) == 430);
   res[2] = (amd_mixed_dot((char)10, (char)20, (int)30, 1) == 6);
-  res[3] = (amd_mixed_dot((uchar4)'a', (uchar4)'b', (uint)30, 1) == 38054);
+  res[3] = (amd_mixed_dot(uchar4{'a', 'a', 'a', 'a'}, uchar4{'b', 'b', 'b', 'b'}, (uint)30, 1) == 38054);
   res[4] = (amd_mixed_dot(10, 20, 30, 1) == 6);
   res[5] = (amd_mixed_dot((uint)10, (uint)20, (uint)30, 1) == 70);
 }

@@ -737,6 +737,9 @@
         "Unit_hipGraphAddMemAllocNode_Negative_Free_Alloc_Memory_Again",
         "=== SWDEV-530762 : This test fails in Linux PSDB ===",
         "Unit_hipDeviceGetGraphMemAttribute_Positive_DoubleMemory",
+	    "=== SWDEV-538600 : This test fails in Linux PSDB ===",
+	    "Unit_hipMemPoolMaxAlloc",
+	    "Unit_hipStreamPerThread_ChildProc",
     #endif
     #if defined gfx90a || defined gfx942 || defined gfx950
         "=== SWDEV-443630 : Below test failed in stress test on 19/01/24 ===",

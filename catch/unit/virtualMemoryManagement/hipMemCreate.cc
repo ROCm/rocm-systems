@@ -447,22 +447,14 @@ TEST_CASE("Unit_hipMemCreate_Negative") {
 
   SECTION("pass location id as -1") {
     prop.location.id = -1;  // set to non existing device
-#if HT_AMD
-    REQUIRE(hipMemCreate(&handle, granularity, &prop, 0) == hipErrorInvalidValue);
-#else
     REQUIRE(hipMemCreate(&handle, granularity, &prop, 0) == hipErrorInvalidDevice);
-#endif
   }
 
   SECTION("pass location id as > highest device number") {
     int numDevices = 0;
     HIP_CHECK(hipGetDeviceCount(&numDevices));
     prop.location.id = numDevices;  // set to non existing device
-#if HT_AMD
-    REQUIRE(hipMemCreate(&handle, granularity, &prop, 0) == hipErrorInvalidValue);
-#else
     REQUIRE(hipMemCreate(&handle, granularity, &prop, 0) == hipErrorInvalidDevice);
-#endif
   }
 
   CTX_DESTROY();

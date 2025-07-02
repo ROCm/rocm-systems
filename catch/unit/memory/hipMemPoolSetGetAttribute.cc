@@ -19,7 +19,6 @@
 #include "mempool_common.hh"
 #include <resource_guards.hh>
 #include <utils.hh>
-
 /**
  * @addtogroup hipMemPoolSetAttribute hipMemPoolSetAttribute
  * @{
@@ -120,20 +119,18 @@ TEST_CASE("Unit_hipMemPoolSetGetAttribute_Positive_MemBasic") {
 TEST_CASE("Unit_hipMemPoolSetAttribute_Opportunistic") {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
-
   checkMempoolSupported(device_id)
+
+  unsigned int* notified1 = nullptr, *notified2 = nullptr;
+  HIP_CHECK(hipHostMalloc(&notified1, sizeof(unsigned int)));
+  HIP_CHECK(hipHostMalloc(&notified2, sizeof(unsigned int)));
+  *notified1 = 0;
+  *notified2 = 0;
 
   MemPoolGuard mempool(MemPools::created, device_id);
 
   hipMemPoolAttr attr;
   int blocks = 2;
-  int clk_rate;
-  if (IsGfx11()) {
-    HIPCHECK(hipDeviceGetAttribute(&clk_rate, hipDeviceAttributeWallClockRate, 0));
-  } else {
-    HIPCHECK(hipDeviceGetAttribute(&clk_rate, hipDeviceAttributeClockRate, 0));
-  }
-
   int *alloc_mem1, *alloc_mem2, *alloc_mem3;
 
   // Create 2 async non-blocking streams
@@ -158,16 +155,12 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_Opportunistic") {
     attr = hipMemPoolReuseAllowInternalDependencies;
     HIP_CHECK(hipMemPoolSetAttribute(mempool.mempool(), attr, &value));
 
-    // Run kernel for 500 ms in the first stream
-    if (IsGfx11()) {
-      kernel_500ms_gfx11<<<32, blocks, 0, stream1.stream()>>>(alloc_mem1, clk_rate);
-    } else {
-      kernel_500ms<<<32, blocks, 0, stream1.stream()>>>(alloc_mem1, clk_rate);
-    }
-
+    // Run kernel in the first stream
+    notifiedKernel<<<32, blocks, 0, stream1.stream()>>>(alloc_mem1, notified1);
     // Not a real free, since kernel isn't done
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem1), stream1.stream()));
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    *notified1 = 1;
     // Sleep for 1 second GPU should be idle by now
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
@@ -178,12 +171,10 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_Opportunistic") {
     REQUIRE(alloc_mem1 != alloc_mem2);
 
     // Run kernel with the new memory in the second stream
-    if (IsGfx11()) {
-      kernel_500ms_gfx11<<<32, blocks, 0, stream2.stream()>>>(alloc_mem2, clk_rate);
-    } else {
-      kernel_500ms<<<32, blocks, 0, stream2.stream()>>>(alloc_mem2, clk_rate);
-    }
+    notifiedKernel<<<32, blocks, 0, stream2.stream()>>>(alloc_mem2, notified2);
 
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    *notified2 = 1;
     HIP_CHECK(hipStreamSynchronize(stream1.stream()));
     HIP_CHECK(hipStreamSynchronize(stream2.stream()));
 
@@ -203,32 +194,27 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_Opportunistic") {
     attr = hipMemPoolReuseAllowInternalDependencies;
     HIP_CHECK(hipMemPoolSetAttribute(mempool.mempool(), attr, &value));
 
-    // Run kernel for 500 ms in the first stream
-    if (IsGfx11()) {
-      kernel_500ms_gfx11<<<32, blocks, 0, stream1.stream()>>>(alloc_mem1, clk_rate);
-    } else {
-      kernel_500ms<<<32, blocks, 0, stream1.stream()>>>(alloc_mem1, clk_rate);
-    }
+    // Run kernel in the first stream
+    notifiedKernel<<<32, blocks, 0, stream1.stream()>>>(alloc_mem1, notified1);
 
     // Not a real free, since kernel isn't done
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem1), stream1.stream()));
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    *notified1 = 1;
     // Sleep for 1 second GPU should be idle by now
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
-    // Allocate memory for the second stream
+    // Allocate memory for the first stream
     HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&alloc_mem2), allocation_size,
                                      mempool.mempool(), stream1.stream()));
-    // Without Opportunistic state runtime must allocate another buffer
+    // Without Opportunistic state runtime must reuse freed buffer
     REQUIRE(alloc_mem1 == alloc_mem2);
 
-    // Run kernel with the new memory in the second stream
-    if (IsGfx11()) {
-      kernel_500ms_gfx11<<<32, blocks, 0, stream1.stream()>>>(alloc_mem2, clk_rate);
-    } else {
-      kernel_500ms<<<32, blocks, 0, stream1.stream()>>>(alloc_mem2, clk_rate);
-    }
+    // Run kernel with the new memory in the first stream
+    notifiedKernel<<<32, blocks, 0, stream1.stream()>>>(alloc_mem2, notified2);
 
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    *notified2 = 1;
     HIP_CHECK(hipStreamSynchronize(stream1.stream()));
 
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem2), stream1.stream()));
@@ -243,18 +229,14 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_Opportunistic") {
     attr = hipMemPoolReuseAllowOpportunistic;
     // Enable Opportunistic
     HIP_CHECK(hipMemPoolSetAttribute(mempool.mempool(), attr, &value));
-
-    // Run kernel for 500 ms in the first stream
-    if (IsGfx11()) {
-      HIP_CHECK(hipDeviceGetAttribute(&clk_rate, hipDeviceAttributeWallClockRate, 0));
-      kernel_500ms_gfx11<<<32, blocks, 0, stream1.stream()>>>(alloc_mem1, clk_rate);
-    } else {
-      HIP_CHECK(hipDeviceGetAttribute(&clk_rate, hipDeviceAttributeClockRate, 0));
-      kernel_500ms<<<32, blocks, 0, stream1.stream()>>>(alloc_mem1, clk_rate);
-    }
+    // Run kernel in the first stream
+    notifiedKernel<<<32, blocks, 0, stream1.stream()>>>(alloc_mem1, notified1);
 
     // Not a real free, since kernel isn't done
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem1), stream1.stream()));
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    *notified1 = 1; // Notifiy kernel to exit after 500 ms
 
     // Sleep for 1 second GPU should be idle by now
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
@@ -266,11 +248,10 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_Opportunistic") {
     REQUIRE(alloc_mem1 == alloc_mem2);
 
     // Run kernel with the new memory in the second stream
-    if (IsGfx11()) {
-      kernel_500ms_gfx11<<<32, blocks, 0, stream2.stream()>>>(alloc_mem2, clk_rate);
-    } else {
-      kernel_500ms<<<32, blocks, 0, stream2.stream()>>>(alloc_mem2, clk_rate);
-    }
+    notifiedKernel<<<32, blocks, 0, stream2.stream()>>>(alloc_mem2, notified2);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    *notified2 = 1;  // Notifiy kernel to exit after 500 ms
 
     HIP_CHECK(hipStreamSynchronize(stream1.stream()));
     HIP_CHECK(hipStreamSynchronize(stream2.stream()));
@@ -288,13 +269,8 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_Opportunistic") {
     // Enable Opportunistic
     HIP_CHECK(hipMemPoolSetAttribute(mempool.mempool(), attr, &value));
 
-    // Run kernel for 500 ms in the first stream
-
-    if (IsGfx11()) {
-      kernel_500ms_gfx11<<<32, blocks, 0, stream1.stream()>>>(alloc_mem1, clk_rate);
-    } else {
-      kernel_500ms<<<32, blocks, 0, stream1.stream()>>>(alloc_mem1, clk_rate);
-    }
+    // Run kernel in the first stream
+    notifiedKernel<<<32, blocks, 0, stream1.stream()>>>(alloc_mem1, notified1);
 
     // Not a real free, since kernel isn't done
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem1), stream1.stream()));
@@ -307,12 +283,11 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_Opportunistic") {
     REQUIRE(alloc_mem1 != alloc_mem2);
 
     // Run kernel with the new memory in the second stream
-    if (IsGfx11()) {
-      kernel_500ms_gfx11<<<32, blocks, 0, stream2.stream()>>>(alloc_mem2, clk_rate);
-    } else {
-      kernel_500ms<<<32, blocks, 0, stream2.stream()>>>(alloc_mem2, clk_rate);
-    }
+    notifiedKernel<<<32, blocks, 0, stream2.stream()>>>(alloc_mem2, notified2);
 
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    *notified1 = 1;
+    *notified2 = 1;
     HIP_CHECK(hipStreamSynchronize(stream1.stream()));
     HIP_CHECK(hipStreamSynchronize(stream2.stream()));
 
@@ -320,6 +295,8 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_Opportunistic") {
   }
 
   HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem3), stream1.stream()));
+  HIP_CHECK(hipHostFree(notified1));
+  HIP_CHECK(hipHostFree(notified2));
 }
 
 /**
@@ -343,12 +320,12 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_EventDependencies") {
 
   hipMemPoolAttr attr;
   int blocks = 2;
-  int clk_rate;
-  if (IsGfx11()) {
-    HIPCHECK(hipDeviceGetAttribute(&clk_rate, hipDeviceAttributeWallClockRate, 0));
-  } else {
-    HIPCHECK(hipDeviceGetAttribute(&clk_rate, hipDeviceAttributeClockRate, 0));
-  }
+
+  unsigned int* notified1 = nullptr, *notified2 = nullptr;
+  HIP_CHECK(hipHostMalloc(&notified1, sizeof(unsigned int)));
+  HIP_CHECK(hipHostMalloc(&notified2, sizeof(unsigned int)));
+  *notified1 = 0;
+  *notified2 = 0;
 
   int *alloc_mem1, *alloc_mem2, *alloc_mem3;
 
@@ -371,17 +348,11 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_EventDependencies") {
 
     value = 1;
     attr = hipMemPoolReuseFollowEventDependencies;
-    // Enable Opportunistic
+    // Enable Opportunistic-
     HIP_CHECK(hipMemPoolSetAttribute(mempool.mempool(), attr, &value));
 
-    // Run kernel for 500 ms in the first stream
-    if (IsGfx11()) {
-      HIP_CHECK(hipDeviceGetAttribute(&clk_rate, hipDeviceAttributeWallClockRate, 0));
-      kernel_500ms_gfx11<<<32, blocks, 0, stream1.stream()>>>(alloc_mem1, clk_rate);
-    } else {
-      HIP_CHECK(hipDeviceGetAttribute(&clk_rate, hipDeviceAttributeClockRate, 0));
-      kernel_500ms<<<32, blocks, 0, stream1.stream()>>>(alloc_mem1, clk_rate);
-    }
+    // Run kernel in the first stream
+    notifiedKernel<<<32, blocks, 0, stream1.stream()>>>(alloc_mem1, notified1);
 
     // Not a real free, since kernel isn't done
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem1), stream1.stream()));
@@ -396,12 +367,11 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_EventDependencies") {
     REQUIRE(alloc_mem1 == alloc_mem2);
 
     // Run kernel with the new memory in the second stream
-    if (IsGfx11()) {
-      kernel_500ms_gfx11<<<32, blocks, 0, stream2.stream()>>>(alloc_mem2, clk_rate);
-    } else {
-      kernel_500ms<<<32, blocks, 0, stream2.stream()>>>(alloc_mem2, clk_rate);
-    }
+    notifiedKernel<<<32, blocks, 0, stream2.stream()>>>(alloc_mem2, notified2);
 
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    *notified1 = 1;
+    *notified2 = 1;
     HIP_CHECK(hipStreamSynchronize(stream1.stream()));
     HIP_CHECK(hipStreamSynchronize(stream2.stream()));
 
@@ -418,17 +388,10 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_EventDependencies") {
     // Enable Opportunistic
     HIP_CHECK(hipMemPoolSetAttribute(mempool.mempool(), attr, &value));
 
-    // Run kernel for 500 ms in the first stream
-
-    if (IsGfx11()) {
-      kernel_500ms_gfx11<<<32, blocks, 0, stream1.stream()>>>(alloc_mem1, clk_rate);
-    } else {
-      kernel_500ms<<<32, blocks, 0, stream1.stream()>>>(alloc_mem1, clk_rate);
-    }
-
+    // Run kernel in the first stream
+    notifiedKernel<<<32, blocks, 0, stream1.stream()>>>(alloc_mem1, notified1);
     // Not a real free, since kernel isn't done
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem1), stream1.stream()));
-
     HIP_CHECK(hipEventRecord(event, stream1.stream()));
     HIP_CHECK(hipStreamWaitEvent(stream2.stream(), event, 0));
 
@@ -440,12 +403,11 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_EventDependencies") {
     REQUIRE(alloc_mem1 != alloc_mem2);
 
     // Run kernel with the new memory in the second stream
-    if (IsGfx11()) {
-      kernel_500ms_gfx11<<<32, blocks, 0, stream2.stream()>>>(alloc_mem2, clk_rate);
-    } else {
-      kernel_500ms<<<32, blocks, 0, stream2.stream()>>>(alloc_mem2, clk_rate);
-    }
+    notifiedKernel<<<32, blocks, 0, stream2.stream()>>>(alloc_mem2, notified2);
 
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    *notified1 = 1;
+    *notified2 = 1;
     HIP_CHECK(hipStreamSynchronize(stream1.stream()));
     HIP_CHECK(hipStreamSynchronize(stream2.stream()));
 
@@ -454,6 +416,8 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_EventDependencies") {
 
   HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(alloc_mem3), stream1.stream()));
   HIP_CHECK(hipEventDestroy(event));
+  HIP_CHECK(hipHostFree(notified1));
+  HIP_CHECK(hipHostFree(notified2));
 }
 
 /**

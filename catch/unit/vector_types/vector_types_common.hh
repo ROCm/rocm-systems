@@ -165,6 +165,12 @@ __host__ __device__ void MakeVectorType(T* vector_ptr, decltype(T().x) value) {
   }
 }
 
+template <typename T> __host__ __device__ T MakeVector(decltype(T().x) value) {
+  T vector{};
+  MakeVectorType(&vector, value);
+  return vector;
+}
+
 template <typename T> T MakeVectorTypeHost(decltype(T().x) value) {
   T vector{};
   MakeVectorType(&vector, value);

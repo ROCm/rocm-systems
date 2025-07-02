@@ -130,13 +130,8 @@ TEST_CASE("Unit_hipBindTexture_Negative") {
   }
 
   SECTION("Device memory is nullptr") {
-#if HT_AMD
-    HIP_CHECK_ERROR(hipBindTexture(&offset, tex_ref, nullptr, channel_desc, N * sizeof(float)),
-                    hipErrorInvalidValue);
-#else
     HIP_CHECK_ERROR(hipBindTexture(&offset, tex_ref, nullptr, channel_desc, N * sizeof(float)),
                     hipErrorNotFound);
-#endif
   }
 
   SECTION("Invalid hipChannelFormatDesc") {

@@ -120,7 +120,10 @@ TEST_CASE("Unit_hipClock64_Positive_Basic") {
   HIP_CHECK(hipSetDevice(0));
   int clock_rate = 0;  // in kHz
   HIP_CHECK(hipDeviceGetAttribute(&clock_rate, hipDeviceAttributeClockRate, 0));
-
+  if (clock_rate == 0) {
+    HipTest::HIP_SKIP_TEST("hipDeviceAttributeClockRate returns 0");
+    return;
+  }
   if (IsGfx11()) {
     HipTest::HIP_SKIP_TEST("Issue with clock64() function on gfx11 devices!");
     return;
@@ -149,7 +152,10 @@ TEST_CASE("Unit_hipClock_Positive_Basic") {
   HIP_CHECK(hipSetDevice(0));
   int clock_rate = 0;  // in kHz
   HIP_CHECK(hipDeviceGetAttribute(&clock_rate, hipDeviceAttributeClockRate, 0));
-
+  if (clock_rate == 0) {
+    HipTest::HIP_SKIP_TEST("hipDeviceAttributeClockRate returns 0");
+    return;
+  }
   if (IsGfx11()) {
     HipTest::HIP_SKIP_TEST("Issue with clock() function on gfx11 devices!");
     return;
@@ -180,7 +186,7 @@ TEST_CASE("Unit_hipWallClock64_Positive_Basic") {
   HIP_CHECK(hipDeviceGetAttribute(&clock_rate, hipDeviceAttributeWallClockRate, 0));
 
   if (!clock_rate) {
-    HipTest::HIP_SKIP_TEST("hipDeviceAttributeWallClockRate is not supported");
+    HipTest::HIP_SKIP_TEST("hipDeviceAttributeWallClockRate returns 0");
     return;
   }
 

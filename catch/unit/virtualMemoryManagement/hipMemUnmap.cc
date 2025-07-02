@@ -79,11 +79,9 @@ TEST_CASE("Unit_hipMemUnmap_negative") {
 
   SECTION("pass zero to size") { REQUIRE(hipMemUnmap(ptrA, 0) == hipErrorInvalidValue); }
 
-#if HT_NVIDIA
   SECTION("unmap a smaller size") {
     REQUIRE(hipMemUnmap(ptrA, (size_mem - 1)) == hipErrorInvalidValue);
   }
-#endif
 
   HIP_CHECK(hipMemRelease(handle));
   HIP_CHECK(hipMemUnmap(ptrA, size_mem));

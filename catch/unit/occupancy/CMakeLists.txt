@@ -16,7 +16,7 @@ add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/simple_kernel.code
                    COMMAND ${CMAKE_CXX_COMPILER} --genco --std=c++17
                    ${CMAKE_CURRENT_SOURCE_DIR}/simple_kernel.cc
                    -I${HIP_PATH}/include/
-                   -o simple_kernel.code --rocm-path=${ROCM_PATH}
+                   -o simple_kernel.code --hip-path=${HIP_PATH}
                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/simple_kernel.cc)
 
 add_custom_target(simple_kernel ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/simple_kernel.code)

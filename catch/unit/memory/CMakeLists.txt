@@ -276,4 +276,5 @@ hip_add_exe_to_target(NAME SVMAtomicTest
 if(HIP_PLATFORM MATCHES "nvidia")
   set_target_properties(SVMAtomicTest PROPERTIES COMPILE_FLAGS -arch=sm_70)
   set_target_properties(MemoryTest1 PROPERTIES COMPILE_FLAGS -arch=sm_70)
+  set_target_properties(MemoryTest2 PROPERTIES COMPILE_FLAGS -arch=sm_70)
 endif()

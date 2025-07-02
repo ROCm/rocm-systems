@@ -205,7 +205,7 @@ TEST_CASE("Unit_hipModuleLaunchCooperativeKernel_Negative_Parameters") {
     HIP_CHECK(hipStreamCreate(&stream));
     HIP_CHECK(hipStreamDestroy(stream));
     HIP_CHECK_ERROR(hipModuleLaunchCooperativeKernel(f, 1, 1, 1, 1, 1, 1, 0, stream, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorContextIsDestroyed);
   }
 #endif
 }

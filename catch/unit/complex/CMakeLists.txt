@@ -29,7 +29,6 @@ if(HIP_PLATFORM MATCHES "nvidia")
 elseif(HIP_PLATFORM MATCHES "amd")
   set(LINKER_LIBS hiprtc)
 endif()
-add_definitions(-DHIP_PATH="${HIP_PATH}")
 
 hip_add_exe_to_target(NAME ComplexTest
                       TEST_SRC ${TEST_SRC}

@@ -21,7 +21,7 @@
    1) This testcase verifies the  basic scenario - supported on
      all devices
 */
-
+#include "mempool_common.hh"
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
@@ -105,36 +105,6 @@ TEST_CASE("Unit_hipMemPoolApi_Basic") {
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
-constexpr auto wait_ms = 500;
-
-__global__ void kernel500ms(float* hostRes, int clkRate) {
-  int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  hostRes[tid] = tid + 1;
-  __threadfence_system();
-  // expecting that the data is getting flushed to host here!
-  uint64_t start = clock64()/clkRate, cur;
-  if (clkRate > 1) {
-    do { cur = clock64()/clkRate-start;}while (cur < wait_ms);
-  } else {
-    do { cur = clock64()/start;}while (cur < wait_ms);
-  }
-}
-
-__global__ void kernel500ms_gfx11(float* hostRes, int clkRate) {
-#if HT_AMD
-  int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  hostRes[tid] = tid + 1;
-  __threadfence_system();
-  // expecting that the data is getting flushed to host here!
-  uint64_t start = clock_function()/clkRate, cur;
-  if (clkRate > 1) {
-    do { cur = clock_function()/clkRate-start;}while (cur < wait_ms);
-  } else {
-    do { cur = clock_function()/start;}while (cur < wait_ms);
-  }
-#endif
-}
-
 TEST_CASE("Unit_hipMemPoolApi_BasicAlloc") {
   int mem_pool_support = 0;
   HIP_CHECK(hipSetDevice(0));
@@ -144,6 +114,9 @@ TEST_CASE("Unit_hipMemPoolApi_BasicAlloc") {
     SUCCEED("Runtime doesn't support Memory Pool. Skip the test case.");
     return;
   }
+  unsigned int *notified = nullptr;
+  HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
+  *notified = 0;
   initMemPoolProps();
   hipMemPool_t mem_pool;
   HIP_CHECK(hipMemPoolCreate(&mem_pool, &kPoolProps));
@@ -159,22 +132,17 @@ TEST_CASE("Unit_hipMemPoolApi_BasicAlloc") {
   HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&C), numElements * sizeof(float), mem_pool, stream));
 
   int blocks = 1024;
-  int clkRate;
   hipMemPoolAttr attr;
-  if (IsGfx11()) {
-    HIP_CHECK(hipDeviceGetAttribute(&clkRate, hipDeviceAttributeWallClockRate, 0));
-    kernel500ms_gfx11<<<32, blocks, 0, stream>>>(B, clkRate);
-  } else {
-    HIP_CHECK(hipDeviceGetAttribute(&clkRate, hipDeviceAttributeClockRate, 0));
-
-    kernel500ms<<<32, blocks, 0, stream>>>(B, clkRate);
-  }
+  notifiedKernel<<<32, blocks, 0, stream>>>(B, notified);
 
   HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(B), stream));
 
   attr = hipMemPoolAttrReservedMemCurrent;
   std::uint64_t res_before_sync = 0;
   HIP_CHECK(hipMemPoolGetAttribute(mem_pool, attr, &res_before_sync));
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  *notified = 1; // Notify kernel loop to exit
 
   HIP_CHECK(hipStreamSynchronize(stream));
 
@@ -223,6 +191,7 @@ TEST_CASE("Unit_hipMemPoolApi_BasicAlloc") {
   HIP_CHECK(hipMemPoolDestroy(mem_pool));
   HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(C), stream));
   HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipHostFree(notified));
 }
 
 TEST_CASE("Unit_hipMemPoolApi_BasicTrim") {
@@ -232,6 +201,9 @@ TEST_CASE("Unit_hipMemPoolApi_BasicTrim") {
     SUCCEED("Runtime doesn't support Memory Pool. Skip the test case.");
     return;
   }
+  unsigned int *notified = nullptr;
+  HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
+  *notified = 0;
   initMemPoolProps();
   hipMemPool_t mem_pool;
   HIP_CHECK(hipMemPoolCreate(&mem_pool, &kPoolProps));
@@ -247,15 +219,7 @@ TEST_CASE("Unit_hipMemPoolApi_BasicTrim") {
   HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&C), numElements * sizeof(float), mem_pool, stream));
 
   int blocks = 2;
-  int clkRate;
-  if (IsGfx11()) {
-    HIP_CHECK(hipDeviceGetAttribute(&clkRate, hipDeviceAttributeWallClockRate, 0));
-    kernel500ms_gfx11<<<32, blocks, 0, stream>>>(B, clkRate);
-  } else {
-    HIP_CHECK(hipDeviceGetAttribute(&clkRate, hipDeviceAttributeClockRate, 0));
-
-    kernel500ms<<<32, blocks, 0, stream>>>(B, clkRate);
-  }
+  notifiedKernel<<<32, blocks, 0, stream>>>(B, notified);
 
   hipMemPoolAttr attr;
   attr = hipMemPoolAttrReleaseThreshold;
@@ -279,6 +243,8 @@ TEST_CASE("Unit_hipMemPoolApi_BasicTrim") {
   // Trim must be a nop because execution isn't done
   REQUIRE(res_before_trim == res_after_trim);
 
+  std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  *notified = 1; // Notify kernel loop to exit
   HIP_CHECK(hipStreamSynchronize(stream));
 
   std::uint64_t res_after_sync = 0;
@@ -311,6 +277,7 @@ TEST_CASE("Unit_hipMemPoolApi_BasicTrim") {
   HIP_CHECK(hipMemPoolDestroy(mem_pool));
   HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(C), stream));
   HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipHostFree(notified));
 }
 
 TEST_CASE("Unit_hipMemPoolApi_BasicReuse") {
@@ -320,6 +287,9 @@ TEST_CASE("Unit_hipMemPoolApi_BasicReuse") {
     SUCCEED("Runtime doesn't support Memory Pool. Skip the test case.");
     return;
   }
+  unsigned int *notified = nullptr;
+  HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
+  *notified = 0;
   initMemPoolProps();
   hipMemPool_t mem_pool;
   HIP_CHECK(hipMemPoolCreate(&mem_pool, &kPoolProps));
@@ -335,16 +305,7 @@ TEST_CASE("Unit_hipMemPoolApi_BasicReuse") {
   HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&C), numElements * sizeof(float), mem_pool, stream));
 
   int blocks = 2;
-  int clkRate;
-
-  if (IsGfx11()) {
-    HIP_CHECK(hipDeviceGetAttribute(&clkRate, hipDeviceAttributeWallClockRate, 0));
-    kernel500ms_gfx11<<<32, blocks, 0, stream>>>(A, clkRate);
-  } else {
-    HIP_CHECK(hipDeviceGetAttribute(&clkRate, hipDeviceAttributeClockRate, 0));
-
-    kernel500ms<<<32, blocks, 0, stream>>>(A, clkRate);
-  }
+  notifiedKernel<<<32, blocks, 0, stream>>>(A, notified);
 
   hipMemPoolAttr attr;
   // Not a real free, since kernel isn't done
@@ -355,16 +316,17 @@ TEST_CASE("Unit_hipMemPoolApi_BasicReuse") {
   // Runtime must reuse the pointer
   REQUIRE(A == B);
 
+  std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  *notified = 1; // Notify kernel loop to exit
   // Make a sync before the second kernel launch to make sure memory B isn't gone
   HIP_CHECK(hipStreamSynchronize(stream));
 
   // Second kernel launch with new memory
-  if (IsGfx11()) {
-    kernel500ms_gfx11<<<32, blocks, 0, stream>>>(B, clkRate);
-  } else {
-    kernel500ms<<<32, blocks, 0, stream>>>(B, clkRate);
-  }
+  *notified = 0;
+  notifiedKernel<<<32, blocks, 0, stream>>>(B, notified);
 
+  std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  *notified = 1; // Notify kernel loop to exit
   HIP_CHECK(hipStreamSynchronize(stream));
 
   attr = hipMemPoolAttrUsedMemCurrent;
@@ -387,6 +349,7 @@ TEST_CASE("Unit_hipMemPoolApi_BasicReuse") {
   HIP_CHECK(hipMemPoolDestroy(mem_pool));
   HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(C), stream));
   HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipHostFree(notified));
 }
 
 TEST_CASE("Unit_hipMemPoolApi_Opportunistic") {
@@ -396,33 +359,32 @@ TEST_CASE("Unit_hipMemPoolApi_Opportunistic") {
     SUCCEED("Runtime doesn't support Memory Pool. Skip the test case.");
     return;
   }
+  unsigned int *notified1 = nullptr, *notified2 = nullptr;
+  HIP_CHECK(hipHostMalloc(&notified1, sizeof(unsigned int)));
+  HIP_CHECK(hipHostMalloc(&notified2, sizeof(unsigned int)));
+  *notified1 = 0;
+  *notified2 = 0;
   initMemPoolProps();
   hipMemPool_t mem_pool;
   HIP_CHECK(hipMemPoolCreate(&mem_pool, &kPoolProps));
 
   hipMemPoolAttr attr;
   int blocks = 2;
-  int clkRate;
-   if (IsGfx11()) {
-    HIPCHECK(hipDeviceGetAttribute(&clkRate, hipDeviceAttributeWallClockRate, 0));
-  } else {
-    HIPCHECK(hipDeviceGetAttribute(&clkRate, hipDeviceAttributeClockRate, 0));
-  }
 
   float *A, *B, *C;
-  hipStream_t stream, stream2;
+  hipStream_t stream1, stream2;
 
   // Create 2 async non-blocking streams
-  HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+  HIP_CHECK(hipStreamCreateWithFlags(&stream1, hipStreamNonBlocking));
   HIP_CHECK(hipStreamCreateWithFlags(&stream2, hipStreamNonBlocking));
 
   size_t numElements = 1024;
-  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&C), numElements * sizeof(float), mem_pool, stream));
+  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&C), numElements * sizeof(float), mem_pool, stream1));
   int value = 0;
 
   SECTION("Disallow Opportunistic - No Reuse") {
     numElements = 8 * 1024 * 1024;
-    HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A), numElements * sizeof(float), mem_pool, stream));
+    HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A), numElements * sizeof(float), mem_pool, stream1));
 
     // Disable all default pool states
     attr = hipMemPoolReuseFollowEventDependencies;
@@ -432,15 +394,13 @@ TEST_CASE("Unit_hipMemPoolApi_Opportunistic") {
     attr = hipMemPoolReuseAllowInternalDependencies;
     HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value));
 
-    // Run kernel for 500 ms in the first stream
-    if (IsGfx11()) {
-      kernel500ms_gfx11<<<32, blocks, 0, stream>>>(A, clkRate);
-    } else {
-      kernel500ms<<<32, blocks, 0, stream>>>(A, clkRate);
-    }
+    // Run kernel in the first stream
+    notifiedKernel<<<32, blocks, 0, stream1>>>(A, notified1);
 
     // Not a real free, since kernel isn't done
-    HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A), stream));
+    HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A), stream1));
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    *notified1 = 1; // Notify kernel loop to exit
 
     // Sleep for 1 second GPU should be idle by now
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
@@ -451,14 +411,12 @@ TEST_CASE("Unit_hipMemPoolApi_Opportunistic") {
     // Without Opportunistic state runtime must allocate another buffer
     REQUIRE(A != B);
 
-    // Run kernel with the new memory in the second stream
-    if (IsGfx11()) {
-      kernel500ms_gfx11<<<32, blocks, 0, stream>>>(B, clkRate);
-    } else {
-      kernel500ms<<<32, blocks, 0, stream>>>(B, clkRate);
-    }
+    // Run kernel with the new memory in the second streamn
+    notifiedKernel<<<32, blocks, 0, stream2>>>(B, notified2);
 
-    HIP_CHECK(hipStreamSynchronize(stream));
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    *notified2 = 1; // Notify kernel loop to exit
+    HIP_CHECK(hipStreamSynchronize(stream1));
     HIP_CHECK(hipStreamSynchronize(stream2));
 
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(B), stream2));
@@ -466,24 +424,20 @@ TEST_CASE("Unit_hipMemPoolApi_Opportunistic") {
 
   SECTION("Allow Opportunistic - Reuse") {
     numElements = 8 * 1024 * 1024;
-    HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A), numElements * sizeof(float), mem_pool, stream));
+    HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A), numElements * sizeof(float), mem_pool, stream1));
 
     value = 1;
     attr = hipMemPoolReuseAllowOpportunistic;
     // Enable Opportunistic
     HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value));
 
-    // Run kernel for 500 ms in the first stream
-    if (IsGfx11()) {
-      HIP_CHECK(hipDeviceGetAttribute(&clkRate, hipDeviceAttributeWallClockRate, 0));
-      kernel500ms_gfx11<<<32, blocks, 0, stream>>>(A, clkRate);
-    } else {
-      HIP_CHECK(hipDeviceGetAttribute(&clkRate, hipDeviceAttributeClockRate, 0));
-      kernel500ms<<<32, blocks, 0, stream>>>(A, clkRate);
-    }
+    // Run kernel in the first stream
+    notifiedKernel<<<32, blocks, 0, stream1>>>(A, notified1);
 
     // Not a real free, since kernel isn't done
-    HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A), stream));
+    HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A), stream1));
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    *notified1 = 1; // Notify kernel loop to exit
 
     // Sleep for 1 second GPU should be idle by now
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
@@ -495,13 +449,12 @@ TEST_CASE("Unit_hipMemPoolApi_Opportunistic") {
     REQUIRE(A == B);
 
     // Run kernel with the new memory in the second stream
-    if (IsGfx11()) {
-      kernel500ms_gfx11<<<32, blocks, 0, stream>>>(B, clkRate);
-    } else {
-      kernel500ms<<<32, blocks, 0, stream>>>(B, clkRate);
-    }
+    notifiedKernel<<<32, blocks, 0, stream2>>>(B, notified2);
 
-    HIP_CHECK(hipStreamSynchronize(stream));
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    *notified2 = 1; // Notify kernel loop to exit
+
+    HIP_CHECK(hipStreamSynchronize(stream1));
     HIP_CHECK(hipStreamSynchronize(stream2));
 
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(B), stream2));
@@ -509,23 +462,18 @@ TEST_CASE("Unit_hipMemPoolApi_Opportunistic") {
 
   SECTION("Allow Opportunistic - No Reuse") {
     numElements = 8 * 1024 * 1024;
-    HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A), numElements * sizeof(float), mem_pool, stream));
+    HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&A), numElements * sizeof(float), mem_pool, stream1));
 
     value = 1;
     attr = hipMemPoolReuseAllowOpportunistic;
     // Enable Opportunistic
     HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attr, &value));
 
-    // Run kernel for 500 ms in the first stream
-      
-    if (IsGfx11()) {
-      kernel500ms_gfx11<<<32, blocks, 0, stream>>>(A, clkRate);
-    } else {
-      kernel500ms<<<32, blocks, 0, stream>>>(A, clkRate);
-    }
+    // Run kernel in the first stream
+    notifiedKernel<<<32, blocks, 0, stream1>>>(A, notified1);
 
     // Not a real free, since kernel isn't done
-    HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A), stream));
+    HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A), stream1));
 
     numElements = 8 * 1024 * 1024;
     // Allocate memory for the second stream
@@ -534,22 +482,23 @@ TEST_CASE("Unit_hipMemPoolApi_Opportunistic") {
     REQUIRE(A != B);
 
     // Run kernel with the new memory in the second stream
-    if (IsGfx11()) {
-      kernel500ms_gfx11<<<32, blocks, 0, stream>>>(B, clkRate);
-    } else {
-      kernel500ms<<<32, blocks, 0, stream>>>(B, clkRate);
-    }
+    notifiedKernel<<<32, blocks, 0, stream2>>>(B, notified2);
 
-    HIP_CHECK(hipStreamSynchronize(stream));
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    *notified1 = 1; // Notify kernel loop to exit
+    *notified2 = 1; // Notify kernel loop to exit
+    HIP_CHECK(hipStreamSynchronize(stream1));
     HIP_CHECK(hipStreamSynchronize(stream2));
 
     HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(B), stream2));
   }
 
-  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(C), stream));
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(C), stream1));
   HIP_CHECK(hipMemPoolDestroy(mem_pool));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipStreamDestroy(stream1));
   HIP_CHECK(hipStreamDestroy(stream2));
+  HIP_CHECK(hipHostFree(notified1));
+  HIP_CHECK(hipHostFree(notified2));
 }
 
 TEST_CASE("Unit_hipMemPoolApi_Default") {
@@ -559,7 +508,9 @@ TEST_CASE("Unit_hipMemPoolApi_Default") {
     SUCCEED("Runtime doesn't support Memory Pool. Skip the test case.");
     return;
   }
-
+  unsigned int *notified = nullptr;
+  HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
+  *notified = 0;
   hipMemPool_t mem_pool;
   HIP_CHECK(hipDeviceGetDefaultMemPool(&mem_pool, 0));
 
@@ -574,16 +525,7 @@ TEST_CASE("Unit_hipMemPoolApi_Default") {
   HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&C), numElements * sizeof(float), stream));
 
   int blocks = 2;
-  int clkRate;
-    
-  if (IsGfx11()) {
-    HIP_CHECK(hipDeviceGetAttribute(&clkRate, hipDeviceAttributeWallClockRate, 0));
-    kernel500ms_gfx11<<<32, blocks, 0, stream>>>(A, clkRate);
-  } else {
-    HIP_CHECK(hipDeviceGetAttribute(&clkRate, hipDeviceAttributeClockRate, 0));
-
-    kernel500ms<<<32, blocks, 0, stream>>>(A, clkRate);
-  }
+  notifiedKernel<<<32, blocks, 0, stream>>>(A, notified);
 
   hipMemPoolAttr attr;
   // Not a real free, since kernel isn't done
@@ -595,17 +537,18 @@ TEST_CASE("Unit_hipMemPoolApi_Default") {
   REQUIRE(A == B);
 
   // Make a sync before the second kernel launch to make sure memory B isn't gone
+  std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  *notified = 1; // Notify kernel loop to exit
   HIP_CHECK(hipStreamSynchronize(stream));
 
   // Second kernel launch with new memory
-  if (IsGfx11()) {
-    kernel500ms_gfx11<<<32, blocks, 0, stream>>>(B, clkRate);
-  } else {
-    kernel500ms<<<32, blocks, 0, stream>>>(B, clkRate);
-  }
+  *notified = 0;
+  notifiedKernel<<<32, blocks, 0, stream>>>(B, notified);
 
   HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(B), stream));
 
+  std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  *notified = 1; // Notify kernel loop to exit
   HIP_CHECK(hipStreamSynchronize(stream));
 
   std::uint64_t value64 = 0;
@@ -626,4 +569,5 @@ TEST_CASE("Unit_hipMemPoolApi_Default") {
 
   HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(C), stream));
   HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipHostFree(notified));
 }

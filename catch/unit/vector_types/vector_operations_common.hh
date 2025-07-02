@@ -47,7 +47,8 @@ enum class VectorOperation {
   kBitwiseOr,
   kBitwiseAnd,
   kRightShift,
-  kLeftShift
+  kLeftShift,
+  kSubscript,
 };
 
 inline std::string to_string(VectorOperation operation) {
@@ -108,6 +109,8 @@ inline std::string to_string(VectorOperation operation) {
       return "right shift";
     case VectorOperation::kLeftShift:
       return "left shift";
+    case VectorOperation::kSubscript:
+      return "subscript";
     default:
       return "Unknown";
   }
@@ -144,6 +147,8 @@ void SanityCheck(VectorOperation operation, T vector, decltype(T().x) value1,
     value1 = (value1 == value2) ? 2 * value1 : 3 * value1;
   } else if (operation == VectorOperation::kNotEqual) {
     value1 = (value1 != value2) ? 2 * value1 : 3 * value1;
+  } else if (operation == VectorOperation::kSubscript) {
+    value1 = value2;
   } else {
     if constexpr (std::is_signed_v<decltype(T().x)>) {
       if (operation == VectorOperation::kNegate) {
@@ -214,6 +219,11 @@ __device__ __host__ void PerformVectorOperation(VectorOperation operation, T* ve
     *vector1 = (*vector1 == vector2) ? 2 * *vector1 : 3 * *vector1;
   } else if (operation == VectorOperation::kNotEqual) {
     *vector1 = (*vector1 != vector2) ? 2 * *vector1 : 3 * *vector1;
+  } else if (operation == VectorOperation::kSubscript) {
+    constexpr size_t n_elements = sizeof(T) / sizeof(decltype(T().x));
+    for (int i = 0; i < n_elements; ++i) {
+      (*vector1)[i] = vector2[i];
+    }
   } else {
     if constexpr (std::is_signed_v<decltype(T().x)>) {
       if (operation == VectorOperation::kNegate) {
@@ -275,6 +285,11 @@ __device__ __host__ void PerformVectorOperation(VectorOperation operation, T* ve
     *vector = (*vector == value) ? 2 * *vector : 3 * *vector;
   } else if (operation == VectorOperation::kNotEqual) {
     *vector = (*vector != value) ? 2 * *vector : 3 * *vector;
+  } else if (operation == VectorOperation::kSubscript) {
+    constexpr size_t n_elements = sizeof(T) / sizeof(decltype(T().x));
+    for (int i = 0; i < n_elements; ++i) {
+      (*vector)[i] = value;
+    }
   } else {
     if constexpr (std::is_integral_v<decltype(T().x)>) {
       if (operation == VectorOperation::kModulo) {

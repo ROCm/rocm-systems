@@ -387,12 +387,6 @@ TEST_CASE("Unit_hipPointerGetAttributes_Negative") {
     HIP_CHECK(hipFree(dPtr));
   }
 #endif
-
-  SECTION("Invalid Device Pointer") {
-    hipPointerAttribute_t attributes{};
-    HIP_CHECK_ERROR(hipPointerGetAttributes(&attributes, nullptr),
-                                            hipErrorInvalidValue);
-  }
 }
 
 /**

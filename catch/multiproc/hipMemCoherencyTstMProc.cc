@@ -39,37 +39,15 @@
 #include <sys/mman.h>
 #include <sys/wait.h>
 #include <chrono>
+#include "../unit/memory/hipSVMCommon.h"
 
-__global__  void CoherentTst(int *ptr, int PeakClk) {
+__global__  void CoherentTst(int *ptr, volatile unsigned int *expired) {
   // Incrementing the value by 1
-  int64_t GpuFrq = int64_t(PeakClk) * 1000;
-  int64_t StrtTck = clock64();
-  #if HT_AMD
   atomicAdd_system(ptr, 1);
-  #else
-  atomicAdd(ptr, 1);
-  #endif
-  // The following while loop checks the value in ptr for around 3-4 seconds
-  while ((clock64() - StrtTck) <= (3 * GpuFrq)) {
-    #if HT_AMD
-    if (atomicCAS_system(ptr, 3, 4) == 3) break;
-    #else
-    if (atomicCAS(ptr, 3, 4) == 3) break;
-    #endif
-  }
-}
-
-__global__  void CoherentTst_gfx11(int *ptr, int PeakClk) {
-#if HT_AMD
-  // Incrementing the value by 1
-  int64_t GpuFrq = int64_t(PeakClk) * 1000;
-  int64_t StrtTck = clock_function();
-  atomicAdd_system(ptr, 1);
-  // The following while loop checks the value in ptr for around 3-4 seconds
-  while ((clock_function() - StrtTck) <= (3 * GpuFrq)) {
+  // The following while loop checks the value until expiration.
+  while (*expired == 0) {
     if (atomicCAS_system(ptr, 3, 4) == 3) break;
   }
-#endif
 }
 
 __global__  void SquareKrnl(int *ptr) {
@@ -77,40 +55,25 @@ __global__  void SquareKrnl(int *ptr) {
   *ptr = (*ptr) * (*ptr);
 }
 
-// The variable below will work as signal to decide pass/fail
-static bool YES_COHERENT = false;
-
 // The function tests the coherency of allocated memory
-static void TstCoherency(int *Ptr, bool HmmMem) {
-  int *Dptr = nullptr, peak_clk;
+// Return false on failure, true on success.
+bool static TstCoherency(int *Ptr, bool HmmMem) {
+  using namespace std::chrono_literals;
+  int *Dptr = nullptr;
   hipStream_t strm;
   HIP_CHECK(hipStreamCreate(&strm));
   // storing value 1 in the memory created above
   *Ptr = 1;
 
-  // Getting gpu frequency
-  if (IsGfx11()) {
-    HIPCHECK(hipDeviceGetAttribute(&peak_clk,
-                                   hipDeviceAttributeWallClockRate, 0));
-  } else {
-    HIPCHECK(hipDeviceGetAttribute(&peak_clk,
-                                   hipDeviceAttributeClockRate, 0));
-  }
+  unsigned int *expired = nullptr;
+  HIP_CHECK(hipHostMalloc(&expired, sizeof(unsigned int))); // hipHostMallocCoherent by defaut
+  *expired = 0;
 
   if (!HmmMem) {
-    HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void **>(&Dptr),
-                                      Ptr, 0));
-    if (IsGfx11()) {
-      CoherentTst_gfx11<<<1, 1, 0, strm>>>(Dptr, peak_clk);
-    } else {
-      CoherentTst<<<1, 1, 0, strm>>>(Dptr, peak_clk);
-    }
+    HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void **>(&Dptr), Ptr, 0));
+    CoherentTst<<<1, 1, 0, strm>>>(Dptr, expired);
   } else {
-    if (IsGfx11()) {
-      CoherentTst_gfx11<<<1, 1, 0, strm>>>(Ptr, peak_clk);
-    } else {
-      CoherentTst<<<1, 1, 0, strm>>>(Ptr, peak_clk);
-    }
+    CoherentTst<<<1, 1, 0, strm>>>(Ptr, expired);
   }
   // looping until the value is 2 for 3 seconds
   std::chrono::steady_clock::time_point start =
@@ -119,14 +82,20 @@ static void TstCoherency(int *Ptr, bool HmmMem) {
          std::chrono::steady_clock::now() - start).count() < 3) {
     if (*Ptr == 2) {
       *Ptr += 1;
+      std::this_thread::sleep_for(200ms); // Make sure kernel gets updated Dptr
       break;
     }
   }
+  *expired = 1; // Notify kernel loop to exit
   HIP_CHECK(hipStreamSynchronize(strm));
   HIP_CHECK(hipStreamDestroy(strm));
+  HIP_CHECK(hipHostFree(expired));
+
   if (*Ptr == 4) {
-    YES_COHERENT = true;
+    return true;
   }
+  fprintf(stderr, "TstCoherency: *Ptr=%u\b", *Ptr);
+  return false;
 }
 
 /* Test case description: The following test validates if fine grain
@@ -134,6 +103,7 @@ static void TstCoherency(int *Ptr, bool HmmMem) {
 // The following test is failing on Nvidia platform hence disabled it for now
 #if HT_AMD
 TEST_CASE("Unit_malloc_CoherentTst") {
+  CHECK_PCIE_ATOMICS_SUPPORT
   hipDeviceProp_t prop;
   HIPCHECK(hipGetDeviceProperties(&prop, 0));
   char *p = NULL;
@@ -146,12 +116,12 @@ TEST_CASE("Unit_malloc_CoherentTst") {
     if (managed == 1) {
       int *Ptr = nullptr, SIZE = sizeof(int);
       bool HmmMem = true;
-      YES_COHERENT = false;
+
       // Allocating hipMallocManaged() memory
       Ptr = reinterpret_cast<int*>(malloc(SIZE));
-      TstCoherency(Ptr, HmmMem);
+      auto ret = TstCoherency(Ptr, HmmMem);
       free(Ptr);
-      REQUIRE(YES_COHERENT);
+      REQUIRE(ret);
     } 
   } else {
     HipTest::HIP_SKIP_TEST("GPU is not xnack enabled hence skipping the test...\n");
@@ -175,7 +145,7 @@ TEST_CASE("Unit_malloc_CoherentTstWthAdvise") {
                                     0));
     if (managed == 1) {
       int *Ptr = nullptr, SIZE = sizeof(int);
-      YES_COHERENT = false;
+
       // Allocating hipMallocManaged() memory
       Ptr = reinterpret_cast<int*>(malloc(SIZE));
       *Ptr = 4;
@@ -197,6 +167,7 @@ TEST_CASE("Unit_malloc_CoherentTstWthAdvise") {
 // The following test is failing on Nvidia platform hence disabling it for now
 #if HT_AMD
 TEST_CASE("Unit_mmap_CoherentTst") {
+  CHECK_PCIE_ATOMICS_SUPPORT
   hipDeviceProp_t prop;
   HIPCHECK(hipGetDeviceProperties(&prop, 0));
   char *p = NULL;
@@ -214,14 +185,12 @@ TEST_CASE("Unit_mmap_CoherentTst") {
         WARN("Mapping Failed\n");
         REQUIRE(false);
       }
-      // Initializing the value with 1
-      *Ptr = 1;
-      TstCoherency(Ptr, HmmMem);
+      auto ret = TstCoherency(Ptr, HmmMem);
       int err = munmap(Ptr, sizeof(int));
       if (err != 0) {
         WARN("munmap failed\n");
       }
-      REQUIRE(YES_COHERENT);
+      REQUIRE(ret);
     } 
   } else {
     HipTest::HIP_SKIP_TEST("GPU is not xnack enabled hence skipping the test...\n");
@@ -286,7 +255,6 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv0Flg1") {
   int stat = 0;
   if (fork() == 0) {
     int *Ptr = nullptr, *PtrD = nullptr, SIZE = sizeof(int);
-    YES_COHERENT = false;
     // Allocating hipHostMalloc() memory
     HIP_CHECK(hipHostMalloc(&Ptr, SIZE, hipHostMallocPortable));
     *Ptr = 4;
@@ -327,7 +295,6 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv0Flg2") {
   int stat = 0;
   if (fork() == 0) {
     int *Ptr = nullptr, *PtrD = nullptr, SIZE = sizeof(int);
-    YES_COHERENT = false;
     // Allocating hipHostMalloc() memory
     HIP_CHECK(hipHostMalloc(&Ptr, SIZE, hipHostMallocWriteCombined));
     *Ptr = 4;
@@ -368,7 +335,6 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv0Flg3") {
   int stat = 0;
   if (fork() == 0) {
     int *Ptr = nullptr, *PtrD = nullptr, SIZE = sizeof(int);
-    YES_COHERENT = false;
     // Allocating hipHostMalloc() memory
     HIP_CHECK(hipHostMalloc(&Ptr, SIZE, hipHostMallocNumaUser));
     *Ptr = 4;
@@ -409,7 +375,6 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv0Flg4") {
   int stat = 0;
   if (fork() == 0) {
     int *Ptr = nullptr, *PtrD = nullptr, SIZE = sizeof(int);
-    YES_COHERENT = false;
     // Allocating hipHostMalloc() memory
     HIP_CHECK(hipHostMalloc(&Ptr, SIZE, hipHostMallocNonCoherent));
     *Ptr = 4;
@@ -449,28 +414,18 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv1") {
       REQUIRE(false);
   }
   int stat = 0;
-
   if (fork() == 0) {  // child process
+    CHECK_PCIE_ATOMICS_SUPPORT
     int *Ptr = nullptr, SIZE = sizeof(int);
     bool HmmMem = false;
-    YES_COHERENT = false;
     // Allocating hipHostMalloc() memory
     HIP_CHECK(hipHostMalloc(&Ptr, SIZE));
-    *Ptr = 4;
-    TstCoherency(Ptr, HmmMem);
-    if (YES_COHERENT) {
-      // exit() with code 10 which indicates pass
-      HIP_CHECK(hipHostFree(Ptr));
-      exit(10);
-    } else {
-      // exit() with code 9 which indicates fail
-      HIP_CHECK(hipHostFree(Ptr));
-      exit(9);
-    }
+    auto ret = TstCoherency(Ptr, HmmMem);
+    HIP_CHECK(hipHostFree(Ptr));
+    exit(ret ? EXIT_SUCCESS : EXIT_FAILURE);
   } else {  // parent process
     wait(&stat);
-    int Result = WEXITSTATUS(stat);
-    if (Result != 10) {
+    if (WEXITSTATUS(stat) != EXIT_SUCCESS) {
       REQUIRE(false);
     }
   }
@@ -488,28 +443,18 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv1Flg1") {
       REQUIRE(false);
   }
   int stat = 0;
-
   if (fork() == 0) {  // child process
+    CHECK_PCIE_ATOMICS_SUPPORT
     int *Ptr = nullptr, SIZE = sizeof(int);
     bool HmmMem = false;
-    YES_COHERENT = false;
     // Allocating hipHostMalloc() memory
     HIP_CHECK(hipHostMalloc(&Ptr, SIZE, hipHostMallocPortable));
-    *Ptr = 1;
-    TstCoherency(Ptr, HmmMem);
-    if (YES_COHERENT) {
-      // exit() with code 10 which indicates pass
-      HIP_CHECK(hipHostFree(Ptr));
-      exit(10);
-    } else {
-      // exit() with code 9 which indicates fail
-      HIP_CHECK(hipHostFree(Ptr));
-      exit(9);
-    }
+    auto ret = TstCoherency(Ptr, HmmMem);
+    HIP_CHECK(hipHostFree(Ptr));
+    exit(ret ? EXIT_SUCCESS : EXIT_FAILURE);
   } else {  // parent process
     wait(&stat);
-    int Result = WEXITSTATUS(stat);
-    if (Result != 10) {
+    if (WEXITSTATUS(stat) != EXIT_SUCCESS) {
       REQUIRE(false);
     }
   }
@@ -526,28 +471,18 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv1Flg2") {
       REQUIRE(false);
   }
   int stat = 0;
-
   if (fork() == 0) {  // child process
+    CHECK_PCIE_ATOMICS_SUPPORT
     int *Ptr = nullptr, SIZE = sizeof(int);
     bool HmmMem = false;
-    YES_COHERENT = false;
     // Allocating hipHostMalloc() memory
     HIP_CHECK(hipHostMalloc(&Ptr, SIZE, hipHostMallocWriteCombined));
-    *Ptr = 4;
-    TstCoherency(Ptr, HmmMem);
-    if (YES_COHERENT) {
-      // exit() with code 10 which indicates pass
-      HIP_CHECK(hipHostFree(Ptr));
-      exit(10);
-    } else {
-      // exit() with code 9 which indicates fail
-      HIP_CHECK(hipHostFree(Ptr));
-      exit(9);
-    }
+    auto ret = TstCoherency(Ptr, HmmMem);
+    HIP_CHECK(hipHostFree(Ptr));
+    exit(ret ? EXIT_SUCCESS : EXIT_FAILURE);
   } else {  // parent process
     wait(&stat);
-    int Result = WEXITSTATUS(stat);
-    if (Result != 10) {
+    if (WEXITSTATUS(stat) != EXIT_SUCCESS) {
       REQUIRE(false);
     }
   }
@@ -564,28 +499,18 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv1Flg3") {
       REQUIRE(false);
   }
   int stat = 0;
-
   if (fork() == 0) {  // child process
+    CHECK_PCIE_ATOMICS_SUPPORT
     int *Ptr = nullptr, SIZE = sizeof(int);
     bool HmmMem = false;
-    YES_COHERENT = false;
     // Allocating hipHostMalloc() memory
     HIP_CHECK(hipHostMalloc(&Ptr, SIZE, hipHostMallocNumaUser));
-    *Ptr = 1;
-    TstCoherency(Ptr, HmmMem);
-    if (YES_COHERENT) {
-      // exit() with code 10 which indicates pass
-      HIP_CHECK(hipHostFree(Ptr));
-      exit(10);
-    } else {
-      // exit() with code 9 which indicates fail
-      HIP_CHECK(hipHostFree(Ptr));
-      exit(9);
-    }
+    auto ret = TstCoherency(Ptr, HmmMem);
+    HIP_CHECK(hipHostFree(Ptr));
+    exit(ret ? EXIT_SUCCESS : EXIT_FAILURE);
   } else {  // parent process
     wait(&stat);
-    int Result = WEXITSTATUS(stat);
-    if (Result != 10) {
+    if (WEXITSTATUS(stat) != EXIT_SUCCESS) {
       REQUIRE(false);
     }
   }

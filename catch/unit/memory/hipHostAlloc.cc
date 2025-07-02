@@ -202,11 +202,19 @@ TEST_CASE("Unit_hipHostAlloc_Basic") {
     float *A_h, *B_h, *C_h;
     float *A_d, *B_d, *C_d;
     HIP_CHECK(hipHostAlloc(reinterpret_cast<void **>(&A_h), SIZE,
-                           hipHostMallocWriteCombined | hipHostMallocMapped));
-    HIP_CHECK(hipHostAlloc(reinterpret_cast<void **>(&B_h), SIZE,
-                           hipHostMallocDefault));
+                           hipHostAllocWriteCombined | hipHostAllocMapped));
+    SECTION("hipHostAllocDefault") {
+      HIP_CHECK(hipHostAlloc(reinterpret_cast<void **>(&B_h), SIZE,
+                             hipHostAllocDefault));
+    }
+#if (HT_AMD == 1) && (HT_LINUX == 1)
+    SECTION("hipHostAllocUncached") {
+      HIP_CHECK(hipHostAlloc(reinterpret_cast<void**>(&B_h), SIZE,
+                             hipHostAllocUncached));
+    }
+#endif
     HIP_CHECK(hipHostAlloc(reinterpret_cast<void **>(&C_h), SIZE,
-                           hipHostMallocMapped));
+                           hipHostAllocMapped));
 
     HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void **>(&A_d), A_h, 0));
     HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void **>(&C_d), C_h, 0));

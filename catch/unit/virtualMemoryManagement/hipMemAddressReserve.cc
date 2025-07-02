@@ -138,25 +138,15 @@ TEST_CASE("Unit_hipMemAddressReserve_Negative") {
   }
 
   SECTION("pass size as 0") {
-#if HT_AMD
-    REQUIRE(hipMemAddressReserve(&ptrA, 0, 0, 0, 0) == hipErrorMemoryAllocation);
-#else
     REQUIRE(hipMemAddressReserve(&ptrA, 0, 0, 0, 0) == hipErrorInvalidValue);
-#endif
   }
 
-#if HT_NVIDIA
   SECTION("pass non power of two for alignment") {
     REQUIRE(hipMemAddressReserve(&ptrA, size_mem, 3, 0, 0) == hipErrorInvalidValue);
   }
-#endif
 
   SECTION("pass size as non multiple of host page size") {
-#if HT_AMD
-    REQUIRE(hipMemAddressReserve(&ptrA, (size_mem - 1), 0, 0, 0) == hipErrorMemoryAllocation);
-#else
     REQUIRE(hipMemAddressReserve(&ptrA, (size_mem - 1), 0, 0, 0) == hipErrorInvalidValue);
-#endif
   }
 
   CTX_DESTROY();

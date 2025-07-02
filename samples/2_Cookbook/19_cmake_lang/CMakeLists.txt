@@ -9,7 +9,11 @@ project(cmake_lang_test CXX Fortran)
 
 if(UNIX)
   if(NOT DEFINED ROCM_PATH)
-    set(ROCM_PATH "/opt/rocm" CACHE STRING "Default ROCM installation directory.")
+    if(DEFINED ENV{ROCM_PATH})
+      set(ROCM_PATH $ENV{ROCM_PATH} CACHE STRING "ROCM Path")
+    else()
+      set(ROCM_PATH "/opt/rocm" CACHE STRING "Default ROCM installation directory.")
+    endif()
   endif()
   # Search for rocm in common locations
   list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})

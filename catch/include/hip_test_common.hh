@@ -314,6 +314,15 @@ inline bool isImageSupported() {
   return imageSupport != 0;
 }
 
+inline bool isPcieAtomicsSupported() {
+  int pcieAtomics = 1;
+  int device;
+  HIP_CHECK(hipGetDevice(&device));
+  HIPCHECK(hipDeviceGetAttribute(&pcieAtomics, hipDeviceAttributeHostNativeAtomicSupported,
+           device));
+  return pcieAtomics != 0;
+}
+
 inline bool areWarpMatchFunctionsSupported() {
   int matchFunctionsSupported = 1;
 #if HT_NVIDIA
@@ -497,6 +506,13 @@ class BlockingContext {
 #define CHECK_IMAGE_SUPPORT                                                                        \
   if (!HipTest::isImageSupported()) {                                                              \
     INFO("Texture is not support on the device. Skipped.");                                        \
+    return;                                                                                        \
+  }
+
+// This must be called in host-device memory conherency tests
+#define CHECK_PCIE_ATOMICS_SUPPORT                                                                 \
+  if (!HipTest::isPcieAtomicsSupported()) {                                                        \
+    INFO("Pcie atomics is not support on the device. Skipped.");                                   \
     return;                                                                                        \
   }
 

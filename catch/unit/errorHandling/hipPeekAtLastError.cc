@@ -355,7 +355,7 @@ TEST_CASE("Unit_hipPeekAtLastError_With_EnvVar_Kernel_Invalid_Config") {
     int *A_d;
     HIP_CHECK(hipMalloc(&A_d, 1024));
     ret = hipPeekAtLastError();
-    REQUIRE(ret == hipErrorInvalidValue);
+    REQUIRE(ret == hipErrorInvalidConfiguration);
     HIP_CHECK(hipFree(A_d));
     unsetenv("DEBUG_HIP_7_PREVIEW");
   }

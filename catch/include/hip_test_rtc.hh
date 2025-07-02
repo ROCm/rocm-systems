@@ -35,6 +35,7 @@ THE SOFTWARE.
 #include "hip/hip_runtime_api.h"
 #include "hip_test_context.hh"
 
+#define STRINGIFY(x) #x
 namespace HipTest {
 
 struct KernelArgument {
@@ -107,7 +108,7 @@ inline std::vector<char> getKernelCode(hiprtcProgram& rtcProgram) {
  */
 inline hiprtcProgram compileRTC(std::string& rtcKernel, std::string& kernelNameExpression) {
   std::string fileName = mapKernelToFileName.at(rtcKernel);
-  std::string filePath{KERNELS_PATH + fileName};
+  std::string filePath{STRINGIFY(KERNELS_PATH) + fileName};
 
   INFO("Opening Kernel File: " << filePath);
   std::ifstream kernelFile{filePath};

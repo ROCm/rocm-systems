@@ -229,7 +229,10 @@ class AtomicExchCRTP {
 
     PerformHostAtomicExchange(p.host_thread_count, host_iters_per_thread, mem_dev.host_ptr(),
                               old_vals.data(), p);
-
+    for (auto i = 0; i < p.num_devices; ++i) {
+      HIP_CHECK(hipSetDevice(i));
+      HIP_CHECK(hipDeviceSynchronize());
+    }
     for (auto i = 0u; i < p.num_devices; ++i) {
       const auto device_offset = i * p.kernel_count * thread_count;
       HIP_CHECK(hipMemcpy(old_vals.data() + device_offset, old_vals_devs[i].ptr(),

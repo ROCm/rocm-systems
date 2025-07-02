@@ -26,7 +26,7 @@ THE SOFTWARE.
 #include <ctime>
 #include <hip_test_common.hh>
 #include "hip/hip_cooperative_groups.h"
-
+#include <utils.hh>
 namespace cg = cooperative_groups;
 
 namespace DefltStrmPT {
@@ -44,7 +44,7 @@ namespace DefltStrmPT {
 }  // namespace DefltStrmPT
 
 __device__ int64_t globalInDStrmPT[1024 * 1024];
-__device__ int SigComplte = 0;
+__managed__ int SigComplte = 0;
 
 // Kernel codes
 __global__ void DefltStrmPT_Square(int64_t *C_d, int64_t N) {
@@ -68,6 +68,12 @@ __global__ void Wait_Kernel3(int clockrate, uint64_t WaitSecs,
   }
 }
 
+static __global__ void notifiedKernel(volatile unsigned int *notified, int PassSignal = 0) {
+  while (*notified == 0) {} // wait until notified to exit.
+  if (PassSignal) {
+    SigComplte = 1;
+  }
+}
 __global__ void DefltStrmPT_Test_gws(uint* buf, uint bufSize,
                                        int64_t* tmpBuf, int64_t* result) {
     extern __shared__ int64_t tmp[];
@@ -216,7 +222,7 @@ void PerThrdDefltStrm_Memset3D(int Async) {
 
   HIP_CHECK(hipMalloc3D(&devPitchedPtr, extent));
   A_h = reinterpret_cast<char *>(malloc(sizeElements));
-  REQUIRE(A_h != nullptr);
+  if (A_h == nullptr) REQUIRE(false);
 
   for (size_t i = 0; i < elements; i++) {
       A_h[i] = 1;
@@ -257,16 +263,18 @@ void PerThrdDefltStrm_Memset3D(int Async) {
 
 
 void DefaultPT2_StrmQuery() {
-  HIP_CHECK(hipDeviceGetAttribute(&(DefltStrmPT::clockrate),
-          hipDeviceAttributeMemoryClockRate, 0));
+  unsigned int *notified = nullptr;
+  HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
+  *notified = 0;
   HIP_CHECK(hipStreamCreate(&(DefltStrmPT::Strm)));
-  // StreamQuery with null stream
-  Wait_Kernel3<<<1, 1>>>(DefltStrmPT::clockrate, 3);
-  REQUIRE((hipErrorNotReady == hipStreamQuery(0)));
   // StreamQuery with user created stream
-  Wait_Kernel3<<<1, 1, 0, DefltStrmPT::Strm>>>(DefltStrmPT::clockrate, 3);
+  notifiedKernel<<<1, 1, 0, DefltStrmPT::Strm>>>(notified);
   REQUIRE((hipErrorNotReady == hipStreamQuery(DefltStrmPT::Strm)));
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  *notified = 1;
   HIP_CHECK(hipStreamDestroy(DefltStrmPT::Strm));
+  HIP_CHECK(hipHostFree(notified));
 }
 
 
@@ -285,33 +293,52 @@ void DefaultPT2_StreamSync() {
 
 
 void DefaultPT2_StrmWaitEvent() {
+  int device;
+  HIP_CHECK(hipGetDevice(&device));
+  if (!DeviceAttributesSupport(device, hipDeviceAttributeManagedMemory)) {
+    HipTest::HIP_SKIP_TEST("Managed memory is not supported");
+    return;
+  }
+
   hipEvent_t evt;
   hipStream_t Strm1;
+  unsigned int *notified = nullptr;
+  HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
+  *notified = 0;
   HIP_CHECK(hipStreamCreate(&(DefltStrmPT::Strm)));
   HIP_CHECK(hipStreamCreate(&Strm1));
   HIP_CHECK(hipEventCreate(&evt));
-  Wait_Kernel3<<<1, 1, 0, DefltStrmPT::Strm>>>(DefltStrmPT::clockrate, 3, 1);
+  notifiedKernel<<<1, 1, 0, DefltStrmPT::Strm>>>(notified, 1);
   HIP_CHECK(hipEventRecord(evt, DefltStrmPT::Strm));
   HIP_CHECK(hipStreamWaitEvent(Strm1, evt, 0));
-  Wait_Kernel3<<<1, 1, 0, Strm1>>>(DefltStrmPT::clockrate, 1);
+  notifiedKernel<<<1, 1, 0, Strm1>>>(notified);
+  std::this_thread::sleep_for(std::chrono::milliseconds(500));
   // By the time control reaches the below point SigComplte is expected
   // to be still zero
   if (SigComplte) {
     REQUIRE(false);
   }
+  *notified = 1;
   HIP_CHECK(hipStreamSynchronize(Strm1));
   HIP_CHECK(hipStreamDestroy(DefltStrmPT::Strm));
+  if (SigComplte == 0) {
+    REQUIRE(false);
+  }
   HIP_CHECK(hipStreamDestroy(Strm1));
   HIP_CHECK(hipEventDestroy(evt));
+  HIP_CHECK(hipHostFree(notified));
 }
 
 void DefaultPT2_EvtQuery() {
   hipEvent_t evt, evt1;
   hipError_t err;
+  unsigned int *notified = nullptr;
+  HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
+  *notified = 0;
   HIP_CHECK(hipStreamCreate(&(DefltStrmPT::Strm)));
   HIP_CHECK(hipEventCreate(&evt));
   HIP_CHECK(hipEventCreate(&evt1));
-  Wait_Kernel3<<<1, 1, 0, DefltStrmPT::Strm>>>(DefltStrmPT::clockrate, 3);
+  notifiedKernel<<<1, 1, 0, DefltStrmPT::Strm>>>(notified);
   HIP_CHECK(hipEventRecord(evt, DefltStrmPT::Strm));
   err = hipEventQuery(evt);
   if (err != hipErrorNotReady) {
@@ -319,8 +346,10 @@ void DefaultPT2_EvtQuery() {
   }
   // Testing for Null or default stream
   HIP_CHECK(hipEventRecord(evt1, 0));
-  std::chrono::time_point start = std::chrono::steady_clock::now();
   int Got_hipSuccess = 0;  // 0 for no, 1 for yes
+  std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  *notified = 1; // notify to exit
+  std::chrono::time_point start = std::chrono::steady_clock::now();
   while (true) {
     err = hipEventQuery(evt1);
     if (err == hipSuccess) {
@@ -337,6 +366,7 @@ void DefaultPT2_EvtQuery() {
   HIP_CHECK(hipStreamDestroy(DefltStrmPT::Strm));
   HIP_CHECK(hipEventDestroy(evt));
   HIP_CHECK(hipEventDestroy(evt1));
+  HIP_CHECK(hipHostFree(notified));
 }
 
 
@@ -632,9 +662,9 @@ float DefaultPT2_hipMemcpy2DFromArray() {
   HIP_CHECK(hipMemcpy2DToArray(Dptr, 0, 0, Hptr_A, DefltStrmPT::width,
                              DefltStrmPT::width,  DefltStrmPT::numH,
                              hipMemcpyHostToDevice));
-    Wait_Kernel3 <<< 1, 1, 0, DefltStrmPT::Strm >>> (DefltStrmPT::clockrate,
+  Wait_Kernel3 <<< 1, 1, 0, DefltStrmPT::Strm >>> (DefltStrmPT::clockrate,
                                                       1);
-    HIP_CHECK(hipMemcpy2DFromArray(Hptr_B, DefltStrmPT::width, Dptr, 0, 0,
+  HIP_CHECK(hipMemcpy2DFromArray(Hptr_B, DefltStrmPT::width, Dptr, 0, 0,
               DefltStrmPT::width, DefltStrmPT::numH, hipMemcpyDeviceToHost));
   HIP_CHECK(hipStreamDestroy(DefltStrmPT::Strm));
   HIP_CHECK(hipFreeArray(Dptr));

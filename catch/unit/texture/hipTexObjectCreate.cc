@@ -78,12 +78,7 @@ TEST_CASE("Unit_TexObjectCreate_TypeLinear") {
 
   SECTION("size_in_bytes set to 0") {
     res_desc.res.linear.sizeInBytes = 0;
-#if HT_AMD
-    HIP_CHECK_ERROR(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr),
-                    hipErrorInvalidValue);
-#else
     HIP_CHECK(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr));
-#endif
   }
 
   HIP_CHECK(hipTexObjectDestroy(tex_object));
@@ -115,25 +110,25 @@ TEST_CASE("Unit_TexObjectCreate_TypeLinear_IncompleteInit") {
   SECTION("Only devPtr initialized") {
     res_desc.res.linear.devPtr = reinterpret_cast<hipDeviceptr_t>(tex_buffer);
     HIP_CHECK_ERROR(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidChannelDescriptor);
   }
 
   SECTION("Only format initialized") {
     res_desc.res.linear.format = formats;
     HIP_CHECK_ERROR(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidChannelDescriptor);
   }
 
   SECTION("Only num channels initialized") {
     res_desc.res.linear.numChannels = num_channels;
     HIP_CHECK_ERROR(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidChannelDescriptor);
   }
 
   SECTION("Only size in bytes initialized") {
     res_desc.res.linear.sizeInBytes = array_size;
     HIP_CHECK_ERROR(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidChannelDescriptor);
   }
 
   SECTION("Missing devPtr") {
@@ -141,7 +136,7 @@ TEST_CASE("Unit_TexObjectCreate_TypeLinear_IncompleteInit") {
     res_desc.res.linear.numChannels = num_channels;
     res_desc.res.linear.sizeInBytes = array_size;
     HIP_CHECK_ERROR(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidChannelDescriptor);
   }
 
   SECTION("Missing format") {
@@ -149,7 +144,7 @@ TEST_CASE("Unit_TexObjectCreate_TypeLinear_IncompleteInit") {
     res_desc.res.linear.numChannels = num_channels;
     res_desc.res.linear.sizeInBytes = array_size;
     HIP_CHECK_ERROR(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidChannelDescriptor);
   }
 
   SECTION("Missing num channels") {
@@ -157,7 +152,7 @@ TEST_CASE("Unit_TexObjectCreate_TypeLinear_IncompleteInit") {
     res_desc.res.linear.format = formats;
     res_desc.res.linear.sizeInBytes = array_size;
     HIP_CHECK_ERROR(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidChannelDescriptor);
   }
 
   HIP_CHECK(hipFree(tex_buffer));
@@ -191,14 +186,14 @@ TEST_CASE("Unit_TexObjectCreate_TypeLinear_EdgeCases") {
   SECTION("Invalid number of channels") {
     res_desc.res.linear.numChannels = 8;
     HIP_CHECK_ERROR(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidChannelDescriptor);
   }
 
   SECTION("Providing fake device pointer") {
     char handle;
     res_desc.res.linear.devPtr = reinterpret_cast<hipDeviceptr_t>(&handle);
     HIP_CHECK_ERROR(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidChannelDescriptor);
   }
 
   HIP_CHECK(hipFree(tex_buffer));
@@ -347,22 +342,12 @@ TEST_CASE("Unit_TexObjectCreate_TypePitch2D") {
 
   SECTION("width set to 0") {
     res_desc.res.pitch2D.width = 0;
-#if HT_AMD
-    HIP_CHECK_ERROR(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr),
-                    hipErrorInvalidValue);
-#else
     HIP_CHECK(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr));
-#endif
   }
 
   SECTION("height set to 0") {
     res_desc.res.pitch2D.height = 0;
-#if HT_AMD
-    HIP_CHECK_ERROR(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr),
-                    hipErrorInvalidValue);
-#else
     HIP_CHECK(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr));
-#endif
   }
 
   HIP_CHECK(hipTexObjectDestroy(tex_object));

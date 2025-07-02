@@ -358,7 +358,7 @@ TEST_CASE("Unit_hipGraphUserObj_ClonedGraph") {
   HIP_CHECK(hipGraphExecDestroy(clonedGraphInstance));
   HIP_CHECK(hipStreamSynchronize(stream));
   REQUIRE(*hostArr == 9999);
-  HIP_CHECK(hipUserObjectRelease(Uobj, 2));
+  HIP_CHECK(hipUserObjectRelease(Uobj, 1));
   t1.join();
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(devArr));

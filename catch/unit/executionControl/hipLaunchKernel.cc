@@ -76,58 +76,58 @@ TEST_CASE("Unit_hipLaunchKernel_Negative_Parameters") {
   SECTION("gridDim.x == 0") {
     HIP_CHECK_ERROR(hipLaunchKernel(reinterpret_cast<void*>(kernel), dim3{0, 1, 1}, dim3{1, 1, 1},
                                     nullptr, 0, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidConfiguration);
   }
 
   SECTION("gridDim.y == 0") {
     HIP_CHECK_ERROR(hipLaunchKernel(reinterpret_cast<void*>(kernel), dim3{1, 0, 1}, dim3{1, 1, 1},
                                     nullptr, 0, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidConfiguration);
   }
 
   SECTION("gridDim.z == 0") {
     HIP_CHECK_ERROR(hipLaunchKernel(reinterpret_cast<void*>(kernel), dim3{1, 1, 0}, dim3{1, 1, 1},
                                     nullptr, 0, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidConfiguration);
   }
 
   SECTION("blockDim.x == 0") {
     HIP_CHECK_ERROR(hipLaunchKernel(reinterpret_cast<void*>(kernel), dim3{1, 1, 1}, dim3{0, 1, 1},
                                     nullptr, 0, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidConfiguration);
   }
 
   SECTION("blockDim.y == 0") {
     HIP_CHECK_ERROR(hipLaunchKernel(reinterpret_cast<void*>(kernel), dim3{1, 1, 1}, dim3{1, 0, 1},
                                     nullptr, 0, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidConfiguration);
   }
 
   SECTION("blockDim.z == 0") {
     HIP_CHECK_ERROR(hipLaunchKernel(reinterpret_cast<void*>(kernel), dim3{1, 1, 1}, dim3{1, 1, 0},
                                     nullptr, 0, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidConfiguration);
   }
 
   SECTION("blockDim.x > maxBlockDimX") {
     const unsigned int x = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimX, 0) + 1u;
     HIP_CHECK_ERROR(hipLaunchKernel(reinterpret_cast<void*>(kernel), dim3{1, 1, 1}, dim3{x, 1, 1},
                                     nullptr, 0, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidConfiguration);
   }
 
   SECTION("blockDim.y > maxBlockDimY") {
     const unsigned int y = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimY, 0) + 1u;
     HIP_CHECK_ERROR(hipLaunchKernel(reinterpret_cast<void*>(kernel), dim3{1, 1, 1}, dim3{1, y, 1},
                                     nullptr, 0, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidConfiguration);
   }
 
   SECTION("blockDim.z > maxBlockDimZ") {
     const unsigned int z = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimZ, 0) + 1u;
     HIP_CHECK_ERROR(hipLaunchKernel(reinterpret_cast<void*>(kernel), dim3{1, 1, 1}, dim3{1, 1, z},
                                     nullptr, 0, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidConfiguration);
   }
 
   SECTION("blockDim.x * blockDim.y * blockDim.z > maxThreadsPerBlock") {
@@ -135,7 +135,7 @@ TEST_CASE("Unit_hipLaunchKernel_Negative_Parameters") {
     const unsigned int dim = std::ceil(std::cbrt(max));
     HIP_CHECK_ERROR(hipLaunchKernel(reinterpret_cast<void*>(kernel), dim3{1, 1, 1},
                                     dim3{dim, dim, dim}, nullptr, 0, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidConfiguration);
   }
 
   SECTION("sharedMemBytes > maxSharedMemoryPerBlock") {
@@ -144,7 +144,8 @@ TEST_CASE("Unit_hipLaunchKernel_Negative_Parameters") {
                                     nullptr, max, nullptr),
                     hipErrorInvalidValue);
   }
-
+  
+  #if HT_AMD
   SECTION("Invalid stream") {
     hipStream_t stream = nullptr;
     HIP_CHECK(hipStreamCreate(&stream));
@@ -153,4 +154,5 @@ TEST_CASE("Unit_hipLaunchKernel_Negative_Parameters") {
                                     nullptr, 0, stream),
                     hipErrorInvalidValue);
   }
+  #endif
 }

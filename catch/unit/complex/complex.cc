@@ -389,6 +389,30 @@ TEMPLATE_TEST_CASE("Unit_Device_Complex_Cast_Host_Sanity_Positive", "", hipFloat
 }
 
 /**
+ * Test Description
+ * ------------------------
+ *    - Test that checks hipComplexDoubleToFloat/hipComplexFloatToDouble single value
+ *    constructor only initializes the real component.
+ *
+ * Test source
+ * ------------------------
+ *  - unit/complex/complex.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.2
+ */
+TEMPLATE_TEST_CASE("Unit_Device_Complex_Constructor_Host", "", hipFloatComplex,
+                   hipDoubleComplex) {
+  decltype(TestType().x) input_r = GENERATE(-0.25, 0.25);
+  TestType input{input_r};
+
+  CastType_t<TestType> result = CastComplexType<CastType_t<TestType>>(input);
+
+  REQUIRE(result.x == static_cast<decltype(CastType_t<TestType>().x)>(input_r));
+  REQUIRE(result.y != static_cast<decltype(CastType_t<TestType>().x)>(input_r));
+}
+
+/**
 * End doxygen group ComplexTest.
 * @}
 */
