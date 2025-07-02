@@ -324,6 +324,32 @@ add_test(
         ${PROJECT_SOURCE_DIR}/tests/test_gpu_specs.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
+# ---------------------------
+# DB Connector tests
+# ---------------------------
+
+add_test(
+    NAME test_db_connector
+    COMMAND
+        ${Python3_EXECUTABLE} -m pytest
+        --junitxml=tests/test_db_connector.xml ${COV_OPTION}
+        ${PROJECT_SOURCE_DIR}/tests/test_db_connector.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+)
+
+# ---------------------------
+# Utils tests
+# ---------------------------
+
+add_test(
+    NAME test_utils
+    COMMAND
+        ${Python3_EXECUTABLE} -m pytest
+        --junitxml=tests/test_utils.xml ${COV_OPTION}
+        ${PROJECT_SOURCE_DIR}/tests/test_utils.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+)
+
 # ---------
 # Install
 # ---------

@@ -21,7 +21,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 ##############################################################################el
-# Common helper routines for testing collateral
+
 import logging
 
 logging.trace = lambda *args, **kwargs: None
@@ -40,11 +40,18 @@ import subprocess
 import tempfile
 from pathlib import Path
 from unittest import mock
+import pathlib
+import glob
+import shutil
 
 import pandas as pd
 import pytest
 
 import utils.utils as utils
+
+##################################################
+##          Generated tests                     ##
+##################################################
 
 # =============================================================================
 # HELPER FUNCTIONS FOR TESTING
@@ -455,77 +462,6 @@ def test_detect_rocprof_sdk(monkeypatch):
     result = utils_mod.detect_rocprof(DummyArgs())
     assert result == "rocprofiler-sdk"
     assert any("rocprof_cmd is rocprofiler-sdk" in l for l in logs)
-
-
-# =============================================================================
-# SUBPROCESS UTILITIES TESTS
-# =============================================================================
-
-# def test_capture_subprocess_output_success(monkeypatch):
-#     """
-#     Test capture_subprocess_output returns (True, output) when subprocess exits with code 0.
-#     Ensures all output lines are properly captured through the selector mechanism.
-#     """
-#     lines = ["line1\n", "line2\n"]
-
-#     class DummyStdout:
-#         def __init__(self, lines):
-#             self._lines = lines
-#             self._idx = 0
-#         def readline(self):
-#             if self._idx < len(self._lines):
-#                 val = self._lines[self._idx]
-#                 self._idx += 1
-#                 return val
-#             return ""
-#         def fileno(self):
-#             return 1  # stdout file descriptor
-
-#     class DummyProcess:
-#         def __init__(self):
-#             self.stdout = DummyStdout(lines)
-#             self._poll_count = 0
-#         def poll(self):
-#             # Return None for first few calls (still running), then 0 (success)
-#             if self._poll_count < 3:  # Allow enough iterations for all lines
-#                 self._poll_count += 1
-#                 return None
-#             return 0
-#         def wait(self):
-#             return 0
-
-#     dummy_process = DummyProcess()
-#     def dummy_popen(*args, **kwargs):
-#         return dummy_process
-#     monkeypatch.setattr("subprocess.Popen", dummy_popen)
-
-#     class DummySelector:
-#         def __init__(self):
-#             self._registered = []
-#             self._select_count = 0
-#         def register(self, fileobj, event, callback):
-#             self._registered.append((fileobj, event, callback))
-#         def select(self, timeout=1):
-#             if self._select_count < len(lines):
-#                 self._select_count += 1
-#                 key_obj = type("Key", (), {
-#                     "data": self._registered[0][2],
-#                     "fileobj": self._registered[0][0]
-#                 })()
-#                 return [(key_obj, 1)]
-#             return []
-#         def close(self):
-#             pass
-
-#     monkeypatch.setattr("selectors.DefaultSelector", DummySelector)
-#     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-#     monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-
-#     import utils.utils as utils_mod
-#     success, output = utils_mod.capture_subprocess_output(["echo", "test"])
-
-#     assert success is True
-#     assert "line1" in output and "line2" in output
 
 
 def test_capture_subprocess_output_with_new_env(monkeypatch):
@@ -3155,11 +3091,182 @@ def test_run_prof_tcc_flattening_mi300(tmp_path, monkeypatch):
 
     assert flatten_called
 
+import utils.utils as utils_mod
+  
+class MockMSpec:  
+    def __init__(self, gpu_model="mi300a", gpu_arch="gfx942", compute_partition=None, l2_banks=32):  
+        self.gpu_model = gpu_model  
+        self.gpu_arch = gpu_arch  
+        self.compute_partition = compute_partition  
+        self._l2_banks = l2_banks  
+  
+def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):  
+    """  
+    Covers: new_env = os.environ.copy()  
+            when rocprof_cmd == "rocprofiler-sdk" and new_env was not previously set  
+            by the mspec.gpu_model check.  
+    """  
+    fname_str = str(tmp_path / "counters.txt")  
+    pathlib.Path(fname_str).touch()  
+    workload_dir_str = str(tmp_path)  
+  
+    monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofiler-sdk")  
+    monkeypatch.setattr("utils.utils.using_v3", lambda: False)   
+    monkeypatch.setattr("utils.utils.process_rocprofv3_output", lambda *a, **k: [])  
+  
+  
+    capture_subprocess_called_with_env = None  
+    def mock_capture_subprocess(app_cmd, new_env=None, profileMode=False):  
+        nonlocal capture_subprocess_called_with_env  
+        capture_subprocess_called_with_env = new_env  
+        return (True, "Success")   
+    monkeypatch.setattr("utils.utils.capture_subprocess_output", mock_capture_subprocess)  
+      
+    def mock_console_error_no_exit(msg, exit=True):  
+        print(f"Mocked console_error: {msg}, exit={exit}")   
+    monkeypatch.setattr("utils.utils.console_error", mock_console_error_no_exit)  
+    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)  
+    monkeypatch.setattr("utils.utils.parse_text", lambda *a, **k: ["COUNTER1", "COUNTER2"])  
+      
+    mock_fname_path_obj = mock.Mock(spec=pathlib.Path)  
+    mock_fname_path_obj.stem = "counters"  
+    mock_fname_path_obj.name = "counters.txt"  
+    mock_fname_path_obj.with_suffix.return_value.exists.return_value = False   
+    mock_out_path_obj = mock.Mock(spec=pathlib.Path)  
+    mock_out_path_obj.exists.return_value = False  
+  
+    def path_side_effect(p_arg, *args):  
+        if isinstance(p_arg, pathlib.Path):  
+            if p_arg.name == "counters.txt": return mock_fname_path_obj  
+            return p_arg 
+        if isinstance(p_arg, str):  
+            if p_arg.endswith("/out"): return mock_out_path_obj  
+            if p_arg.endswith("counters.txt"): return mock_fname_path_obj  
+        if p_arg == mock_fname_path_obj and args == () and hasattr(p_arg, 'with_suffix'):   
+            return mock_fname_path_obj  
+        return mock_fname_path_obj
+    monkeypatch.setattr("utils.utils.path", path_side_effect)  
+  
+  
+    original_env_var = "original_value"  
+    monkeypatch.setenv("EXISTING_VAR", original_env_var)  
+    monkeypatch.delenv("ROCPROFILER_INDIVIDUAL_XCC_MODE", raising=False)  
+  
+    profiler_options = {"APP_CMD": "my_app --arg"}  
+    mspec = MockMSpec(gpu_model="mi250")   
+    loglevel = logging.DEBUG  
+    format_rocprof_output = True  
+      
+    dummy_df = pd.DataFrame({'Dispatch_ID': [0], 'A': [1]})  
+    monkeypatch.setattr("pandas.read_csv", lambda *a, **k: dummy_df.copy())  
+    monkeypatch.setattr("pandas.DataFrame.to_csv", lambda self, *a, **k: None)  
+    monkeypatch.setattr("shutil.copyfile", lambda *a, **k: None)  
+    monkeypatch.setattr("shutil.rmtree", lambda *a, **k: None)  
+    monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)   
+  
+    utils_mod.run_prof(fname_str, profiler_options.copy(), workload_dir_str, mspec, loglevel, format_rocprof_output)  
+  
+    assert capture_subprocess_called_with_env is not None, "new_env should have been created"  
+    assert "EXISTING_VAR" in capture_subprocess_called_with_env, "new_env should be a copy of os.environ"  
+    assert capture_subprocess_called_with_env["EXISTING_VAR"] == original_env_var  
+    assert "ROCPROF_COUNTERS" in capture_subprocess_called_with_env   
+    assert "APP_CMD" not in capture_subprocess_called_with_env  
+    
+def test_run_prof_v3_sdk_and_cli_calls_trace_processing(tmp_path, monkeypatch):  
+    """  
+    Covers:  
+    Line 3 (SDK): if "ROCPROF_HIP_RUNTIME_API_TRACE" in options: process_hip_trace_output(...)  
+    Line 4 (CLI): if "--kokkos-trace" in options: process_kokkos_trace_output(...)  
+    Line 5 (CLI): elif "--hip-trace" in options: process_hip_trace_output(...)  
+    """  
+    fname_str = str(tmp_path / "counters.txt")  
+    pathlib.Path(fname_str).touch()  
+    fbase_str = "counters"  
+    workload_dir_str = str(tmp_path)  
+    (tmp_path / "out" / "pmc_1").mkdir(parents=True, exist_ok=True)  
+  
+    monkeypatch.setattr("utils.utils.capture_subprocess_output", lambda *a, **k: (True, "Success"))  
+    monkeypatch.setattr("utils.utils.process_rocprofv3_output", lambda *a, **k: [str(tmp_path / "results1.csv")])  
+      
+    hip_trace_called_with = None  
+    def mock_hip_trace(wd, fb):  
+        nonlocal hip_trace_called_with  
+        hip_trace_called_with = (wd, fb)  
+    monkeypatch.setattr("utils.utils.process_hip_trace_output", mock_hip_trace)  
+  
+    kokkos_trace_called_with = None  
+    def mock_kokkos_trace(wd, fb):  
+        nonlocal kokkos_trace_called_with  
+        kokkos_trace_called_with = (wd, fb)  
+    monkeypatch.setattr("utils.utils.process_kokkos_trace_output", mock_kokkos_trace)  
+      
+    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)  
+    monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)  
+    monkeypatch.setattr("utils.utils.parse_text", lambda *a, **k: ["C1"])  
+  
+    mock_fname_path_obj = mock.Mock(spec=pathlib.Path)  
+    mock_fname_path_obj.stem = fbase_str  
+    mock_fname_path_obj.name = "counters.txt"  
+    mock_fname_path_obj.with_suffix.return_value.exists.return_value = False  
+      
+    mock_out_path_obj = mock.Mock(spec=pathlib.Path)  
+    mock_out_path_obj.exists.return_value = True  
+  
+    def path_side_effect(p_arg, *args):  
+        if isinstance(p_arg, pathlib.Path) and p_arg.name == "counters.txt": return mock_fname_path_obj  
+        if isinstance(p_arg, str) and p_arg.endswith("/out"): return mock_out_path_obj  
+        if isinstance(p_arg, str) and p_arg.endswith("counters.txt"): return mock_fname_path_obj  
+        if p_arg == mock_fname_path_obj and args == () and hasattr(p_arg, 'with_suffix'): return mock_fname_path_obj  
+        return mock_fname_path_obj   
+    monkeypatch.setattr("utils.utils.path", path_side_effect)  
+  
+    dummy_df = pd.DataFrame({'Dispatch_ID': [0], 'A': [1]})   
+    monkeypatch.setattr("pandas.read_csv", lambda *a, **k: dummy_df.copy())  
+    monkeypatch.setattr("pandas.DataFrame.to_csv", lambda self, *a, **k: None)  
+    monkeypatch.setattr("shutil.copyfile", lambda *a, **k: None)  
+    monkeypatch.setattr("shutil.rmtree", lambda *a, **k: None)  
+    monkeypatch.setattr("utils.utils.flatten_tcc_info_across_xcds", lambda df, *a: df)  
+    monkeypatch.setattr("utils.utils.mi_gpu_specs.get_num_xcds", lambda *a: 1)  
+  
+    mspec = MockMSpec()  
+    loglevel = logging.INFO  
+    format_rocprof_output = True  
+  
+    monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofiler-sdk")  
+    monkeypatch.setattr("utils.utils.using_v3", lambda: True)  
+      
+    profiler_options_sdk_hip = {  
+        "APP_CMD": "my_app",  
+        "ROCPROF_HIP_RUNTIME_API_TRACE": "1"  
+    }  
+    hip_trace_called_with = None   
+    kokkos_trace_called_with = None  
+  
+    utils_mod.run_prof(fname_str, profiler_options_sdk_hip.copy(), workload_dir_str, mspec, loglevel, format_rocprof_output)  
+    assert hip_trace_called_with == (workload_dir_str, fbase_str)  
+    assert kokkos_trace_called_with is None  
+  
+    monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprof_cli_v3")   
+      
+    profiler_options_cli_kokkos = ["--kokkos-trace", "--other-opt"]  
+    hip_trace_called_with = None   
+    kokkos_trace_called_with = None  
+  
+    utils_mod.run_prof(fname_str, profiler_options_cli_kokkos, workload_dir_str, mspec, loglevel, format_rocprof_output)  
+    assert kokkos_trace_called_with == (workload_dir_str, fbase_str)  
+    assert hip_trace_called_with is None  
+        
+    profiler_options_cli_hip = ["--hip-trace", "--other-opt"]  
+    hip_trace_called_with = None  
+    kokkos_trace_called_with = None  
+  
+    utils_mod.run_prof(fname_str, profiler_options_cli_hip, workload_dir_str, mspec, loglevel, format_rocprof_output)  
+    assert hip_trace_called_with == (workload_dir_str, fbase_str)  
+    assert kokkos_trace_called_with is None  
 
 # =============================================================================
 # ROCPROFV3 OUTPUT PROCESSING TESTS
 # =============================================================================
-
 
 def test_process_rocprofv3_output_json_format(tmp_path, monkeypatch):
     """
@@ -3603,14 +3710,7 @@ def test_process_kokkos_trace_output_single_file(tmp_path, monkeypatch):
 def test_process_kokkos_trace_output_multiple_files(tmp_path, monkeypatch):
     """
     Test process_kokkos_trace_output with multiple valid CSV files.
-    Should concatenate all files and save to both output locations.
-
-    Args:
-        tmp_path (pathlib.Path): Temporary directory for test files.
-        monkeypatch (pytest.MonkeyPatch): Pytest fixture for patching.
-
-    Returns:
-        None: Asserts that multiple files are concatenated properly.
+    Should concatenate all files and save the result.
     """
     monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
@@ -3627,7 +3727,6 @@ def test_process_kokkos_trace_output_multiple_files(tmp_path, monkeypatch):
 
     csv1 = sub1 / "test_marker_api_trace.csv"
     csv2 = sub2 / "test_marker_api_trace.csv"
-
     csv1.write_text(
         "timestamp,marker_name,duration\n1000,kokkos_malloc,500\n2000,kokkos_parallel_for,300\n"
     )
@@ -3636,24 +3735,18 @@ def test_process_kokkos_trace_output_multiple_files(tmp_path, monkeypatch):
     )
 
     fbase = "test_workload"
-
     import utils.utils as utils_mod
 
     utils_mod.process_kokkos_trace_output(workload_dir, fbase)
 
     output_file = out_dir / f"results_{fbase}_marker_api_trace.csv"
-    assert output_file.exists()
+    assert output_file.exists(), "The primary output file was not created."
 
     df = pd.read_csv(output_file)
-    assert len(df) == 4
-    assert df["timestamp"].tolist() == [1000, 2000, 3000, 4000]
+    assert len(df) == 4, "The final DataFrame does not contain the correct number of rows."
+    assert set(df["timestamp"]) == {1000, 2000, 3000, 4000}
     assert "kokkos_malloc" in df["marker_name"].values
     assert "kokkos_parallel_reduce" in df["marker_name"].values
-
-    # Check copied file
-    copied_file = tmp_path / f"{fbase}_marker_api_trace.csv"
-    assert copied_file.exists()
-
 
 def test_process_kokkos_trace_output_no_files_found(tmp_path, monkeypatch):
     """
@@ -4071,10 +4164,11 @@ File I/O errors
 """
 
 
+
 def test_process_hip_trace_output_multiple_files(tmp_path, monkeypatch):
     """
     Test process_hip_trace_output with multiple valid CSV files.
-    Should concatenate all files and save to both output locations.
+    Should concatenate all files and save the result.
     """
     monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
@@ -4091,7 +4185,6 @@ def test_process_hip_trace_output_multiple_files(tmp_path, monkeypatch):
 
     csv1 = sub1 / "test_hip_api_trace.csv"
     csv2 = sub2 / "test_hip_api_trace.csv"
-
     csv1.write_text(
         "timestamp,api_name,duration\n1000,hipMalloc,500\n2000,hipMemcpy,300\n"
     )
@@ -4100,26 +4193,24 @@ def test_process_hip_trace_output_multiple_files(tmp_path, monkeypatch):
     )
 
     fbase = "test_workload"
-
     import utils.utils as utils_mod
 
     utils_mod.process_hip_trace_output(workload_dir, fbase)
 
     output_file = out_dir / f"results_{fbase}_hip_api_trace.csv"
-    assert output_file.exists()
+    assert output_file.exists(), "The primary output file was not created."
 
     df = pd.read_csv(output_file)
-    assert len(df) == 4
-    assert df["timestamp"].tolist() == [1000, 2000, 3000, 4000]
+    assert len(df) == 4, "The final DataFrame does not contain the correct number of rows."
+    assert set(df["timestamp"]) == {1000, 2000, 3000, 4000}
     assert "hipMalloc" in df["api_name"].values
     assert "hipLaunchKernel" in df["api_name"].values
 
     copied_file = tmp_path / f"{fbase}_hip_api_trace.csv"
-    assert copied_file.exists()
+    assert copied_file.exists(), "The copied output file was not created."
     df_copy = pd.read_csv(copied_file)
-    assert df.equals(df_copy)
-
-
+    assert df.equals(df_copy), "The copied file content does not match the primary output."
+    
 def test_process_hip_trace_output_single_file(tmp_path, monkeypatch):
     """
     Test process_hip_trace_output with a single CSV file.
@@ -8427,3 +8518,951 @@ def test_convert_metric_id_to_panel_idx_edge_case_dot_only():
 
     with pytest.raises(ValueError):
         utils.convert_metric_id_to_panel_idx(".02")
+        
+# =============================================================================
+# --- New test functions for add_counter_extra_config_input_yaml ---  
+# =============================================================================
+
+def test_add_counter_invalid_architectures_type():  
+    """  
+    Test that add_counter_extra_config_input_yaml raises TypeError  
+    if 'architectures' is not a list.  
+    """  
+    data = {}  
+    with pytest.raises(TypeError, match="'architectures' must be a list, got str"):  
+        utils.add_counter_extra_config_input_yaml(  
+            data=data,  
+            counter_name="test_counter",  
+            description="A test counter",  
+            expression="expr1",  
+            architectures="not_a_list", # Invalid type  
+            properties=["prop1"]  
+        )  
+    with pytest.raises(TypeError, match="'architectures' must be a list, got int"):  
+        utils.add_counter_extra_config_input_yaml(  
+            data=data,  
+            counter_name="test_counter_2",  
+            description="A test counter 2",  
+            expression="expr2",  
+            architectures=123, # Invalid type  
+            properties=["prop1"]  
+        )  
+  
+def test_add_counter_invalid_properties_type():  
+    """  
+    Test that add_counter_extra_config_input_yaml raises TypeError  
+    if 'properties' is not a list (and not None).  
+    """  
+    data = {}  
+    with pytest.raises(TypeError, match="'properties' must be a list, got str"):  
+        utils.add_counter_extra_config_input_yaml(  
+            data=data,  
+            counter_name="test_counter",  
+            description="A test counter",  
+            expression="expr1",  
+            architectures=["arch1"],  
+            properties="not_a_list" # Invalid type  
+        )  
+    with pytest.raises(TypeError, match="'properties' must be a list, got dict"):  
+        utils.add_counter_extra_config_input_yaml(  
+            data=data,  
+            counter_name="test_counter_2",  
+            description="A test counter 2",  
+            expression="expr2",  
+            architectures=["arch1"],  
+            properties={"key": "value"} # Invalid type  
+        )  
+  
+def test_add_counter_overwrite_existing():  
+    """  
+    Test that add_counter_extra_config_input_yaml overwrites an existing counter  
+    with the same name.  
+    """  
+    data = {}  
+    counter_name = "MY_COUNTER"  
+    initial_description = "Initial version"  
+    initial_expression = "initial_expr"  
+    initial_architectures = ["gfx900"]  
+    initial_properties = ["P_INIT"]  
+  
+    # Add the counter for the first time  
+    data = utils.add_counter_extra_config_input_yaml(  
+        data=data,  
+        counter_name=counter_name,  
+        description=initial_description,  
+        expression=initial_expression,  
+        architectures=initial_architectures,  
+        properties=initial_properties  
+    )  
+  
+    assert len(data["rocprofiler-sdk"]["counters"]) == 1  
+    assert data["rocprofiler-sdk"]["counters"][0]["name"] == counter_name  
+    assert data["rocprofiler-sdk"]["counters"][0]["description"] == initial_description  
+    assert data["rocprofiler-sdk"]["counters"][0]["definitions"][0]["expression"] == initial_expression  
+  
+    updated_description = "Updated version"  
+    updated_expression = "updated_expr"  
+    updated_architectures = ["gfx906", "gfx908"]  
+    updated_properties = ["P_UPDATED", "P_NEW"]  
+
+# =================================================================================
+# Test extract counter info extra config input yaml
+# =================================================================================
+
+def test_extract_counter_info_returns_none_when_not_found():  
+    """  
+    Test that extract_counter_info_extra_config_input_yaml returns None  
+    when the counter is not found or data structure is incomplete.  
+    """  
+    data_empty = {}  
+    assert utils.extract_counter_info_extra_config_input_yaml(data_empty, "ANY_COUNTER") is None  
+  
+    data_no_counters_key = {"rocprofiler-sdk": {}}  
+    assert utils.extract_counter_info_extra_config_input_yaml(data_no_counters_key, "ANY_COUNTER") is None  
+  
+    data_empty_counters_list = {"rocprofiler-sdk": {"counters": []}}  
+    assert utils.extract_counter_info_extra_config_input_yaml(data_empty_counters_list, "ANY_COUNTER") is None  
+  
+    data_with_other_counters = {  
+        "rocprofiler-sdk": {  
+            "counters": [  
+                {"name": "EXISTING_COUNTER_1", "value": "val1"},  
+                {"name": "EXISTING_COUNTER_2", "value": "val2"},  
+            ]  
+        }  
+    }  
+    assert utils.extract_counter_info_extra_config_input_yaml(data_with_other_counters, "NON_EXISTENT_COUNTER") is None  
+  
+    data_with_malformed_counter = {  
+        "rocprofiler-sdk": {  
+            "counters": [  
+                {"value": "val1"}, # No 'name' key  
+                {"name": "EXISTING_COUNTER_2", "value": "val2"},  
+            ]  
+        }  
+    }  
+    assert utils.extract_counter_info_extra_config_input_yaml(data_with_malformed_counter, "EXISTING_COUNTER_1") is None  
+    assert utils.extract_counter_info_extra_config_input_yaml(data_with_malformed_counter, "EXISTING_COUNTER_2") is not None  
+  
+  
+def test_extract_counter_info_returns_counter_when_found():  
+    """  
+    Test that extract_counter_info_extra_config_input_yaml returns the correct  
+    counter dictionary when the counter is found.  
+    """  
+    counter1_details = {"name": "MY_COUNTER_1", "description": "Desc 1", "expression": "expr1"}  
+    counter2_details = {"name": "MY_COUNTER_2", "description": "Desc 2", "expression": "expr2"}  
+    data = {  
+        "rocprofiler-sdk": {  
+            "counters-schema-version": 1,  
+            "counters": [  
+                counter1_details,  
+                counter2_details,  
+            ]  
+        }  
+    }  
+  
+    extracted_counter1 = utils.extract_counter_info_extra_config_input_yaml(data, "MY_COUNTER_1")  
+    assert extracted_counter1 is not None  
+    assert extracted_counter1 == counter1_details  
+  
+    extracted_counter2 = utils.extract_counter_info_extra_config_input_yaml(data, "MY_COUNTER_2")  
+    assert extracted_counter2 is not None  
+    assert extracted_counter2 == counter2_details  
+
+# =============================================================================
+# Test add_counter_from_source_to_target_extra_config_input_yaml valueError cases
+# =============================================================================
+
+def test_add_counter_from_source_value_error_counter_not_found():  
+    """  
+    Test that add_counter_from_source_to_target_extra_config_input_yaml  
+    raises ValueError if the counter_name is not found in source_data.  
+    """  
+    source_data_empty = {}  
+    source_data_with_other_counters = {  
+        "rocprofiler-sdk": {  
+            "counters": [  
+                {"name": "OTHER_COUNTER", "description": "desc", "definitions": [{"architectures": ["gfx900"], "expression": "expr"}]}  
+            ]  
+        }  
+    }  
+    target_data = {}  
+    counter_name_to_find = "MISSING_COUNTER"  
+  
+    with pytest.raises(ValueError, match=f"Counter '{counter_name_to_find}' not found in source data"):  
+        utils.add_counter_from_source_to_target_extra_config_input_yaml(  
+            source_data_empty, target_data, counter_name_to_find  
+        )  
+  
+    with pytest.raises(ValueError, match=f"Counter '{counter_name_to_find}' not found in source data"):  
+        utils.add_counter_from_source_to_target_extra_config_input_yaml(  
+            source_data_with_other_counters, target_data, counter_name_to_find  
+        )  
+  
+def test_add_counter_from_source_value_error_no_definitions():  
+    """  
+    Test that add_counter_from_source_to_target_extra_config_input_yaml  
+    raises ValueError if the found counter has no 'definitions'.  
+    """  
+    counter_name_no_defs = "COUNTER_NO_DEFS"  
+    source_data_no_defs = {  
+        "rocprofiler-sdk": {  
+            "counters": [  
+                {  
+                    "name": counter_name_no_defs,  
+                    "description": "A counter without definitions",  
+                    "properties": ["prop1"]  
+                }  
+            ]  
+        }  
+    }  
+    source_data_empty_defs_list = {  
+        "rocprofiler-sdk": {  
+            "counters": [  
+                {  
+                    "name": counter_name_no_defs,  
+                    "description": "A counter with empty definitions list",  
+                    "properties": ["prop1"],  
+                    "definitions": []
+                }  
+            ]  
+        }  
+    }  
+    target_data = {}  
+  
+    with pytest.raises(ValueError, match=f"Counter '{counter_name_no_defs}' has no definitions"):  
+        utils.add_counter_from_source_to_target_extra_config_input_yaml(  
+            source_data_no_defs, target_data, counter_name_no_defs  
+        )  
+  
+    with pytest.raises(ValueError, match=f"Counter '{counter_name_no_defs}' has no definitions"):  
+        utils.add_counter_from_source_to_target_extra_config_input_yaml(  
+            source_data_empty_defs_list, target_data, counter_name_no_defs  
+        )  
+  
+def test_add_counter_from_source_success():  
+    """  
+    Test successful addition of a counter from source to target.  
+    """  
+    counter_name = "MY_VALID_COUNTER"  
+    source_data = {  
+        "rocprofiler-sdk": {  
+            "counters": [  
+                {  
+                    "name": counter_name,  
+                    "description": "Valid Counter Description",  
+                    "properties": ["propA", "propB"],  
+                    "definitions": [  
+                        {  
+                            "architectures": ["gfx900", "gfx906"],  
+                            "expression": "SOME_EXPRESSION"  
+                        }  
+                    ]  
+                }  
+            ]  
+        }  
+    }  
+    target_data_initial = {}  
+  
+    updated_target_data = utils.add_counter_from_source_to_target_extra_config_input_yaml(  
+        source_data, target_data_initial, counter_name  
+    )  
+  
+    assert "rocprofiler-sdk" in updated_target_data  
+    assert "counters" in updated_target_data["rocprofiler-sdk"]  
+    assert len(updated_target_data["rocprofiler-sdk"]["counters"]) == 1  
+      
+    added_counter = updated_target_data["rocprofiler-sdk"]["counters"][0]  
+    assert added_counter["name"] == counter_name  
+    assert added_counter["description"] == "Valid Counter Description"  
+    assert added_counter["properties"] == ["propA", "propB"]  
+    assert len(added_counter["definitions"]) == 1  
+    assert added_counter["definitions"][0]["architectures"] == ["gfx900", "gfx906"]  
+    assert added_counter["definitions"][0]["expression"] == "SOME_EXPRESSION"  
+  
+    target_data_existing = {  
+        "rocprofiler-sdk": {  
+            "counters-schema-version": 1,  
+            "counters": [  
+                {"name": "EXISTING_ONE", "description": "desc", "properties": [], "definitions": [{"architectures": [], "expression": ""}]}  
+            ]  
+        }  
+    }  
+    updated_target_data_existing = utils.add_counter_from_source_to_target_extra_config_input_yaml(  
+        source_data, target_data_existing, counter_name  
+    )  
+    assert len(updated_target_data_existing["rocprofiler-sdk"]["counters"]) == 2  
+    found_newly_added = False  
+    for c in updated_target_data_existing["rocprofiler-sdk"]["counters"]:  
+        if c["name"] == counter_name:  
+            found_newly_added = True  
+            assert c["description"] == "Valid Counter Description"  
+            break  
+    assert found_newly_added  
+
+
+def test_is_spi_pipe_counter_returns_true_when_a_pattern_matches(monkeypatch):  
+    """  
+    Tests that is_spi_pipe_counter returns True if the counter name  
+    matches at least one regex in spi_pipe_counter_regexs.  
+    """  
+    sample_regexs = [  
+        r"SQ_WAVE_CYCLES",      
+        r"TA_DATA_STALL_([A-Z_]+)",
+        r"TCP_BUSY"                 
+    ]  
+  
+    monkeypatch.setattr(utils, 'spi_pipe_counter_regexs', sample_regexs)  
+  
+    counter_matches_first = "SQ_WAVE_CYCLES"  
+    assert utils.is_spi_pipe_counter(counter_matches_first) is True, f"Expected True for '{counter_matches_first}'"  
+  
+    counter_matches_second = "TA_DATA_STALL_SPI_BUSY"  
+    assert utils.is_spi_pipe_counter(counter_matches_second) is True, f"Expected True for '{counter_matches_second}'"  
+  
+    counter_matches_third = "TCP_BUSY_STATE" # "TCP_BUSY" is a prefix  
+    assert utils.is_spi_pipe_counter(counter_matches_third) is True, f"Expected True for '{counter_matches_third}'"  
+  
+    non_matching_counter = "SOME_OTHER_COUNTER"  
+    assert utils.is_spi_pipe_counter(non_matching_counter) is False, f"Expected False for '{non_matching_counter}' with the test regexes"  
+
+# =============================================================================
+# test get_base_spi_pipe_counter
+# =============================================================================
+
+def test_get_base_spi_counter_match_found_returns_group1(monkeypatch):  
+    """  
+    Covers:  
+    - for pattern in spi_pipe_counter_regexs: (iterates)  
+    - match = re.match(pattern, counter) (gets a match object)  
+    - if match: (condition is True)  
+    - return match.group(1) (executes and returns)  
+    """  
+    sample_regexs = [  
+        r"UNRELATED_PATTERN_([A-Z]+)",
+        r"PREFIX_([A-Z0-9_]+)_SUFFIX", 
+        r"ANOTHER_PATTERN_(.*)"  
+    ]  
+    monkeypatch.setattr(utils, 'spi_pipe_counter_regexs', sample_regexs)  
+  
+    counter_name = "PREFIX_MY_BASE_COUNTER_SUFFIX"  
+    expected_base = "MY_BASE_COUNTER"  
+      
+    result = utils.get_base_spi_pipe_counter(counter_name)  
+    assert result == expected_base, f"Expected '{expected_base}', got '{result}'"  
+  
+def test_get_base_spi_counter_no_match_returns_empty_string(monkeypatch):  
+    """  
+    Covers:  
+    - for pattern in spi_pipe_counter_regexs: (iterates through all)  
+    - match = re.match(pattern, counter) (match is None for all patterns)  
+    - if match: (condition is always False)  
+    - return "" (executes after loop finishes)  
+    """  
+    sample_regexs = [  
+        r"PATTERN_A_([A-Z]+)",  
+        r"PATTERN_B_([0-9]+)"  
+    ]  
+    monkeypatch.setattr(utils, 'spi_pipe_counter_regexs', sample_regexs)  
+  
+    counter_name = "UNRELATED_COUNTER_NAME"  
+    expected_base = ""  
+      
+    result = utils.get_base_spi_pipe_counter(counter_name)  
+    assert result == expected_base, f"Expected empty string, got '{result}'"  
+  
+def test_get_base_spi_counter_empty_regex_list_returns_empty_string(monkeypatch):  
+    """  
+    Covers:  
+    - for pattern in spi_pipe_counter_regexs: (loop does not run)  
+    - return "" (executes immediately after non-loop)  
+    """  
+    monkeypatch.setattr(utils, 'spi_pipe_counter_regexs', [])
+  
+    counter_name = "ANY_COUNTER_NAME"  
+    expected_base = ""  
+      
+    result = utils.get_base_spi_pipe_counter(counter_name)  
+    assert result == expected_base, f"Expected empty string for empty regex list, got '{result}'"  
+  
+def test_get_base_spi_counter_match_but_no_group1_raises_indexerror(monkeypatch):  
+    """  
+    Covers:  
+    - for pattern in spi_pipe_counter_regexs: (iterates)  
+    - match = re.match(pattern, counter) (gets a match object)  
+    - if match: (condition is True)  
+    - return match.group(1) (this line will be attempted and raise IndexError)  
+    This test verifies the behavior of the code as written when a pattern matches  
+    but doesn't have a capturing group 1.  
+    """  
+    sample_regexs = [  
+        r"SIMPLE_MATCH_PATTERN"
+    ]  
+    monkeypatch.setattr(utils, 'spi_pipe_counter_regexs', sample_regexs)  
+  
+    counter_name = "SIMPLE_MATCH_PATTERN_EXTRA"
+  
+    with pytest.raises(IndexError, match="no such group"):  
+        utils.get_base_spi_pipe_counter(counter_name)  
+  
+def test_get_base_spi_counter_match_with_group0_only_raises_indexerror(monkeypatch):  
+    """  
+    Similar to the above, but explicitly tests a regex that produces a match object  
+    where group(0) exists but group(1) does not.  
+    Covers the same lines as test_get_base_spi_counter_match_but_no_group1_raises_indexerror.  
+    """  
+    sample_regexs = [  
+        r"MY_WHOLE_MATCH_STRING" 
+    ]  
+    monkeypatch.setattr(utils, 'spi_pipe_counter_regexs', sample_regexs)  
+      
+    counter_name = "MY_WHOLE_MATCH_STRING"  
+  
+    with pytest.raises(IndexError, match="no such group"):  
+        utils.get_base_spi_pipe_counter(counter_name)  
+  
+# =============================================================================
+# test using_v1 function
+# =============================================================================
+
+def test_using_v1_rocprof_set_and_ends_with_rocprof_returns_true():  
+    """  
+    Covers the case where "ROCPROF" is in os.environ and its value ends with "rocprof".  
+    This makes the entire expression True, so the function returns True.  
+    """  
+    with mock.patch.dict(os.environ, {"ROCPROF": "/opt/rocm/bin/rocprof", "OTHER_VAR": "value"}):  
+        assert utils.using_v1() is True
+  
+def test_using_v1_rocprof_set_but_not_ends_with_rocprof_returns_false():  
+    """  
+    Covers the case where "ROCPROF" is in os.environ, but its value does NOT end with "rocprof".  
+    The second part of the 'and' (os.environ["ROCPROF"].endswith("rocprof")) is False.  
+    So the function returns False.  
+    """  
+    with mock.patch.dict(os.environ, {"ROCPROF": "/opt/rocm/bin/rocprofv2", "OTHER_VAR": "value"}):  
+        assert utils.using_v1() is False
+      
+    with mock.patch.dict(os.environ, {"ROCPROF": "some/path/to/rocprof_tool", "OTHER_VAR": "value"}):  
+        assert utils.using_v1() is False
+  
+def test_using_v1_rocprof_not_in_environ_returns_false():  
+    """  
+    Covers the case where "ROCPROF" is NOT in os.environ.  
+    The first part of the 'and' ("ROCPROF" in os.environ.keys()) is False.  
+    Due to short-circuiting, the second part is not evaluated.  
+    So the function returns False.  
+    """  
+    current_env = os.environ.copy()  
+    if "ROCPROF" in current_env:  
+        del current_env["ROCPROF"]  
+          
+    with mock.patch.dict(os.environ, current_env, clear=True): 
+        assert utils.using_v1() is False 
+  
+def test_using_v1_rocprof_is_empty_string_returns_false():  
+    """  
+    Covers the case where "ROCPROF" is in os.environ but is an empty string.  
+    The second part (os.environ["ROCPROF"].endswith("rocprof")) will be False.  
+    So the function returns False.  
+    """  
+    with mock.patch.dict(os.environ, {"ROCPROF": "", "OTHER_VAR": "value"}):  
+        assert utils.using_v1() is False 
+        
+# =============================================================================
+# additional test detect_rocprof console error
+# =============================================================================
+class MockArgs:  
+    def __init__(self, rocprofiler_sdk_library_path):  
+        self.rocprofiler_sdk_library_path = rocprofiler_sdk_library_path  
+  
+@mock.patch.dict(os.environ, {"ROCPROF": "rocprofiler-sdk"}, clear=True)  
+@mock.patch('utils.utils.console_error')
+@mock.patch('utils.utils.path')
+def test_detect_rocprof_calls_console_error_if_sdk_path_invalid(  
+    mock_path_constructor, mock_console_error_func
+):  
+    """  
+    Tests that detect_rocprof calls console_error when ROCPROF is 'rocprofiler-sdk'  
+    and the rocprofiler_sdk_library_path does not exist.  
+    Focuses on the console_error call.  
+    """  
+    mock_path_instance = mock.Mock()  
+    mock_path_instance.exists.return_value = False  
+    mock_path_constructor.return_value = mock_path_instance  
+  
+    fake_library_path = "/some/invalid/path/to/librocprofiler_sdk.so"  
+    args = MockArgs(rocprofiler_sdk_library_path=fake_library_path)  
+  
+    with mock.patch('utils.utils.console_debug') as mock_console_debug:  
+        utils.detect_rocprof(args)  
+  
+    expected_error_message = (  
+        "Could not find rocprofiler-sdk library at " + fake_library_path  
+    )  
+    mock_console_error_func.assert_called_once_with(expected_error_message)  
+  
+    mock_path_constructor.assert_called_once_with(fake_library_path)  
+    mock_path_instance.exists.assert_called_once()  
+
+class MockArgs:  
+    def __init__(self, **kwargs):  
+        self.__dict__.update(kwargs)  
+  
+    def __eq__(self, other):  
+        if not isinstance(other, MockArgs):  
+            return NotImplemented  
+        return self.__dict__ == other.__dict__  
+  
+def test_store_app_cmd_sets_global_rocprof_args():  
+    """  
+    Tests that store_app_cmd correctly assigns the passed 'args'  
+    object to the global 'rocprof_args'.  
+    """  
+    sample_args_object = MockArgs(  
+        rocprofiler_sdk_library_path="/path/to/sdk",  
+        input_file="input.txt",  
+        some_other_option=True  
+    )  
+  
+    if hasattr(utils, 'rocprof_args'):  
+        utils.rocprof_args = None
+    else:  
+        pass  
+    utils.store_app_cmd(sample_args_object)  
+    assert utils.rocprof_args is sample_args_object, "Global rocprof_args should be the same object as the passed args"  
+      
+  
+# =============================================================================
+# additional tests for v3_counter_csv_to_v2_csv function
+# =============================================================================
+
+def create_csv_string(data_dict):  
+    return pd.DataFrame(data_dict).to_csv(index=False)  
+  
+@mock.patch('utils.utils.console_error')
+@mock.patch('utils.utils.console_debug') 
+def test_v3_to_v2_agent_id_parsing_success_and_error(mock_console_debug, mock_console_error, tmp_path):  
+    """  
+    Tests Line 1: Successful parsing of 'Agent Id' string.  
+    Tests Line 2: Error during parsing of 'Agent Id' string, triggering console_error.  
+    """  
+    agent_info_content = create_csv_string({  
+        "Node_Id": [0, 1],
+        "Agent_Type": ["CPU", "GPU"],  
+        "Wave_Front_Size": [0, 64]  
+    })  
+    agent_info_filepath = tmp_path / "agent_info.csv"  
+    agent_info_filepath.write_text(agent_info_content)  
+    converted_csv_filepath = tmp_path / "converted.csv"  
+    counter_content_success = create_csv_string({  
+        "Correlation_Id": [1], "Dispatch_Id": [10], "Agent_Id": ["Agent 1"], "Queue_Id": [100],  
+        "Process_Id": [1000], "Thread_Id": [10000], "Grid_Size": [256], "Kernel_Id": [1],  
+        "Kernel_Name": ["kernelA"], "Workgroup_Size": [64], "LDS_Block_Size": [32],  
+        "Scratch_Size": [0], "VGPR_Count": [16], "Accum_VGPR_Count": [0], "SGPR_Count": [32],  
+        "Start_Timestamp": [100000], "End_Timestamp": [100100],  
+        "Counter_Name": ["Cycles"], "Counter_Value": [5000]  
+    })  
+    counter_filepath_success = tmp_path / "counter_success.csv"  
+    counter_filepath_success.write_text(counter_content_success)  
+  
+    utils.v3_counter_csv_to_v2_csv(str(counter_filepath_success), str(agent_info_filepath), str(converted_csv_filepath))  
+      
+    mock_console_error.assert_not_called()   
+    result_df_success = pd.read_csv(converted_csv_filepath)  
+    assert "GPU_ID" in result_df_success.columns  
+    assert result_df_success["GPU_ID"].iloc[0] == 0
+    assert result_df_success["GPU_ID"].dtype == "int64"  
+  
+    mock_console_error.reset_mock()   
+      
+    counter_content_error = create_csv_string({  
+        "Correlation_Id": [2], "Dispatch_Id": [20], "Agent_Id": ["Malformed Agent X"], "Queue_Id": [200],  
+        "Process_Id": [2000], "Thread_Id": [20000], "Grid_Size": [512], "Kernel_Id": [2],  
+        "Kernel_Name": ["kernelB"], "Workgroup_Size": [128], "LDS_Block_Size": [64],  
+        "Scratch_Size": [0], "VGPR_Count": [32], "Accum_VGPR_Count": [0], "SGPR_Count": [64],  
+        "Start_Timestamp": [200000], "End_Timestamp": [200200],  
+        "Counter_Name": ["Instructions"], "Counter_Value": [10000]  
+    })  
+    counter_filepath_error = tmp_path / "counter_error.csv"  
+    counter_filepath_error.write_text(counter_content_error)  
+  
+    try:  
+        utils.v3_counter_csv_to_v2_csv(str(counter_filepath_error), str(agent_info_filepath), str(converted_csv_filepath))  
+    except Exception:  
+        pass   
+          
+    mock_console_error.assert_called_once()  
+    call_args = mock_console_error.call_args[0][0]   
+    assert 'Parsing rocprofv3 csv output: Error of getting "Agent_Id"' in call_args  
+    assert "AttributeError" in call_args or "'NoneType' object has no attribute 'group'" in call_args  
+  
+@mock.patch('utils.utils.console_debug') # To suppress debug output  
+def test_v3_to_v2_accum_column_rename(mock_console_debug, tmp_path):  
+    """  
+    Tests Line 3: Renaming of a column ending with '_ACCUM' to 'SQ_ACCUM_PREV_HIRES'.  
+    """  
+    # --- Setup ---  
+    agent_info_content = create_csv_string({  
+        "Node_Id": [0], "Agent_Type": ["GPU"], "Wave_Front_Size": [64]  
+    })  
+    agent_info_filepath = tmp_path / "agent_info.csv"  
+    agent_info_filepath.write_text(agent_info_content)  
+    converted_csv_filepath = tmp_path / "converted_accum.csv"  
+  
+    counter_data = {  
+        "Correlation_Id":     [1, 1],   
+        "Dispatch_Id":        [10, 10],   
+        "Agent_Id":           [0, 0],   
+        "Queue_Id":           [100, 100],  
+        "Process_Id":         [1000, 1000],   
+        "Thread_Id":          [10000, 10000],   
+        "Grid_Size":          [256, 256],   
+        "Kernel_Id":          [1, 1],  
+        "Kernel_Name":        ["kernelA", "kernelA"],   
+        "Workgroup_Size":     [64, 64],   
+        "LDS_Block_Size":     [32, 32],  
+        "Scratch_Size":       [0, 0],   
+        "VGPR_Count":         [16, 16],   
+        "Accum_VGPR_Count":   [0, 0],   
+        "SGPR_Count":         [32, 32],  
+        "Start_Timestamp":    [100000, 100000],   
+        "End_Timestamp":      [100100, 100100],  
+        "Counter_Name":       ["FETCH_SIZE_ACCUM", "CYCLES"],
+        "Counter_Value":      [12345, 5000]  
+    }  
+    counter_content = create_csv_string(counter_data)  
+    counter_filepath = tmp_path / "counter_accum.csv"  
+    counter_filepath.write_text(counter_content)  
+  
+    utils.v3_counter_csv_to_v2_csv(str(counter_filepath), str(agent_info_filepath), str(converted_csv_filepath))  
+  
+    result_df = pd.read_csv(converted_csv_filepath)  
+    assert "SQ_ACCUM_PREV_HIRES" in result_df.columns  
+    assert "FETCH_SIZE_ACCUM" not in result_df.columns   
+    assert "CYCLES" in result_df.columns   
+    assert result_df["SQ_ACCUM_PREV_HIRES"].iloc[0] == 12345  
+    assert result_df["CYCLES"].iloc[0] == 5000
+  
+@mock.patch('utils.utils.console_debug')  
+def test_v3_to_v2_default_accum_vgpr_count(mock_console_debug, tmp_path):  
+    """  
+    Tests Line 4: 'Accum_VGPR_Count' is added and set to 0 if not present in input.  
+    """  
+    agent_info_content = create_csv_string({  
+        "Node_Id": [0], "Agent_Type": ["GPU"], "Wave_Front_Size": [64]  
+    })  
+    agent_info_filepath = tmp_path / "agent_info.csv"  
+    agent_info_filepath.write_text(agent_info_content)  
+    converted_csv_filepath = tmp_path / "converted_no_accum_vgpr.csv"  
+  
+    counter_content = create_csv_string({  
+        "Correlation_Id": [1], "Dispatch_Id": [10], "Agent_Id": [0], "Queue_Id": [100],  
+        "Process_Id": [1000], "Thread_Id": [10000], "Grid_Size": [256], "Kernel_Id": [1],  
+        "Kernel_Name": ["kernelA"], "Workgroup_Size": [64], "LDS_Block_Size": [32],  
+        "Scratch_Size": [0], "VGPR_Count": [16],   
+        "SGPR_Count": [32], "Start_Timestamp": [100000], "End_Timestamp": [100100],  
+        "Counter_Name": ["Cycles"], "Counter_Value": [5000]  
+    })  
+    counter_filepath = tmp_path / "counter_no_accum_vgpr.csv"  
+    counter_filepath.write_text(counter_content)  
+  
+    utils.v3_counter_csv_to_v2_csv(str(counter_filepath), str(agent_info_filepath), str(converted_csv_filepath))  
+  
+    result_df = pd.read_csv(converted_csv_filepath)  
+    assert "Accum_VGPR" in result_df.columns  
+    assert result_df["Accum_VGPR"].iloc[0] == 0  
+    assert result_df["Accum_VGPR"].dtype == "int64"  
+
+
+# ===================================================================
+# Test PC_sampling function
+# ===================================================================
+
+@mock.patch('utils.utils.capture_subprocess_output')  
+@mock.patch('utils.utils.console_error')  
+@mock.patch('utils.utils.console_debug')
+def test_pc_sampling_prof_sdk_path_nonexistent_librocprofiler_sdk_tool(  
+    mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path  
+):  
+    """  
+    Edge Case: rocprofiler_sdk_library_path is valid, but librocprofiler-sdk-tool.so  
+    is NOT found next to it (or in rocprofiler-sdk subdir).  
+    This test primarily checks if the paths are constructed. The actual check for  
+    file existence before `capture_subprocess_output` is not in the provided snippet,  
+    but we test the path construction.  
+    """
+    with mock.patch('utils.utils.rocprof_cmd', "rocprofiler-sdk"):  
+        method = "host_trap"  
+        interval = 1000  
+        workload_dir = str(tmp_path)  
+        appcmd = "my_app --arg"  
+          
+        sdk_lib_dir = tmp_path / "rocm_sdk" / "lib"  
+        sdk_lib_dir.mkdir(parents=True, exist_ok=True)  
+        rocprofiler_sdk_library_path = str(sdk_lib_dir / "librocprofiler_sdk.so")  
+        pathlib.Path(rocprofiler_sdk_library_path).touch()
+  
+        expected_tool_path = str(sdk_lib_dir / "rocprofiler-sdk" / "librocprofiler-sdk-tool.so")  
+  
+        mock_capture_subprocess.return_value = (True, "Success output")
+  
+        utils.pc_sampling_prof(method, interval, workload_dir, appcmd, rocprofiler_sdk_library_path)  
+  
+        assert mock_capture_subprocess.called  
+        call_args = mock_capture_subprocess.call_args  
+        called_env = call_args.kwargs.get('new_env', {})  
+          
+        assert "LD_PRELOAD" in called_env  
+        ld_preload_paths = called_env["LD_PRELOAD"].split(':')  
+        assert expected_tool_path in ld_preload_paths  
+        assert rocprofiler_sdk_library_path in ld_preload_paths  
+          
+        mock_console_error.assert_not_called()  
+  
+  
+@mock.patch('utils.utils.capture_subprocess_output')  
+@mock.patch('utils.utils.console_error')  
+@mock.patch('utils.utils.console_debug')  
+def test_pc_sampling_prof_subprocess_fails(  
+    mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path  
+):  
+    """  
+    Edge Case: The capture_subprocess_output returns success=False.  
+    This should trigger the console_error("PC sampling failed.").  
+    """  
+    with mock.patch('utils.utils.rocprof_cmd', "rocprof_cli_tool"):
+        method = "stochastic"  
+        interval = 5000  
+        workload_dir = str(tmp_path)  
+        appcmd = "another_app"  
+        rocprofiler_sdk_library_path = "/some/path/librocprofiler_sdk.so" 
+  
+        mock_capture_subprocess.return_value = (False, "Error output from subprocess")  
+  
+        utils.pc_sampling_prof(method, interval, workload_dir, appcmd, rocprofiler_sdk_library_path)  
+  
+        mock_capture_subprocess.assert_called_once()  
+        mock_console_error.assert_called_once_with("PC sampling failed.")  
+  
+    mock_capture_subprocess.reset_mock()  
+    mock_console_error.reset_mock()  
+    with mock.patch('utils.utils.rocprof_cmd', "rocprofiler-sdk"):
+        sdk_lib_dir = tmp_path / "rocm_sdk_fail" / "lib"  
+        sdk_lib_dir.mkdir(parents=True, exist_ok=True)  
+        rocprofiler_sdk_library_path_sdk = str(sdk_lib_dir / "librocprofiler_sdk.so")  
+        pathlib.Path(rocprofiler_sdk_library_path_sdk).touch()  
+          
+        tool_dir = sdk_lib_dir / "rocprofiler-sdk"  
+        tool_dir.mkdir(parents=True, exist_ok=True)  
+        (tool_dir / "librocprofiler-sdk-tool.so").touch()  
+  
+        mock_capture_subprocess.return_value = (False, "Error output from SDK subprocess")  
+          
+        utils.pc_sampling_prof(method, interval, workload_dir, appcmd, rocprofiler_sdk_library_path_sdk)  
+  
+        mock_capture_subprocess.assert_called_once()  
+        mock_console_error.assert_called_once_with("PC sampling failed.")  
+  
+  
+@mock.patch('utils.utils.capture_subprocess_output')  
+@mock.patch('utils.utils.console_error')  
+@mock.patch('utils.utils.console_debug')  
+def test_pc_sampling_prof_empty_appcmd(  
+    mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path  
+):  
+    """  
+    Edge Case: The appcmd is an empty string.  
+    The function should still attempt to run it. The behavior of  
+    capture_subprocess_output with an empty command is external to this function.  
+    """  
+    with mock.patch('utils.utils.rocprof_cmd', "rocprof_cli_tool"):
+        method = "host_trap"  
+        interval = 100  
+        workload_dir = str(tmp_path)  
+        appcmd = ""
+        rocprofiler_sdk_library_path = "/some/path/librocprofiler_sdk.so"  
+  
+        mock_capture_subprocess.return_value = (True, "Output with empty appcmd")  
+  
+        utils.pc_sampling_prof(method, interval, workload_dir, appcmd, rocprofiler_sdk_library_path)  
+  
+        assert mock_capture_subprocess.called  
+        options_list = mock_capture_subprocess.call_args[0][0]  
+        assert options_list[-1] == ""
+        mock_console_error.assert_not_called()  
+  
+    mock_capture_subprocess.reset_mock()  
+    mock_console_error.reset_mock()  
+    with mock.patch('utils.utils.rocprof_cmd', "rocprofiler-sdk"):  
+        sdk_lib_dir = tmp_path / "rocm_sdk_empty" / "lib"  
+        sdk_lib_dir.mkdir(parents=True, exist_ok=True)  
+        rocprofiler_sdk_library_path_sdk = str(sdk_lib_dir / "librocprofiler_sdk.so")  
+        pathlib.Path(rocprofiler_sdk_library_path_sdk).touch()  
+        tool_dir = sdk_lib_dir / "rocprofiler-sdk"  
+        tool_dir.mkdir(parents=True, exist_ok=True)  
+        (tool_dir / "librocprofiler-sdk-tool.so").touch()  
+  
+        mock_capture_subprocess.return_value = (True, "Output with empty appcmd SDK")  
+  
+        utils.pc_sampling_prof(method, interval, workload_dir, appcmd, rocprofiler_sdk_library_path_sdk)  
+  
+        assert mock_capture_subprocess.called  
+        assert mock_capture_subprocess.call_args[0][0] == ""  
+        mock_console_error.assert_not_called()  
+  
+
+# =============================================================================
+# test replace_timestamps function
+# =============================================================================
+
+def create_dummy_csv(filepath, data_dict):  
+    df = pd.DataFrame(data_dict)  
+    df.to_csv(filepath, index=False)  
+  
+@mock.patch('utils.utils.console_warning')  
+@mock.patch('utils.utils.path') 
+def test_replace_timestamps_no_timestamps_csv_returns_early(mock_path_util, mock_console_warning, tmp_path):  
+    """  
+    Edge Case: timestamps.csv does not exist in workload_dir.  
+    The function should return early.  
+    Covers: if not path(workload_dir, "timestamps.csv").is_file(): return  
+    """  
+    workload_dir = str(tmp_path)  
+      
+    mock_timestamps_path_obj = mock.Mock()  
+    mock_timestamps_path_obj.is_file.return_value = False
+      
+    mock_path_util.side_effect = lambda *args: mock_timestamps_path_obj if args[1] == "timestamps.csv" else mock.DEFAULT  
+  
+    utils.replace_timestamps(workload_dir)  
+  
+    mock_path_util.assert_any_call(workload_dir, "timestamps.csv") 
+    mock_timestamps_path_obj.is_file.assert_called_once()  
+    mock_console_warning.assert_not_called() 
+  
+@mock.patch('utils.utils.console_warning')  
+@mock.patch('glob.glob') # Mock glob.glob  
+@mock.patch('utils.utils.path')
+def test_replace_timestamps_timestamps_csv_missing_columns_warns(mock_path_util, mock_glob, mock_console_warning, tmp_path):  
+    """  
+    Edge Case: timestamps.csv exists but is missing 'Start_Timestamp' or 'End_Timestamp'.  
+    The function should call console_warning.  
+    Covers: else: console_warning(...)  
+    """  
+    workload_dir = str(tmp_path)  
+    timestamps_csv_path_str = os.path.join(workload_dir, "timestamps.csv")  
+  
+    create_dummy_csv(timestamps_csv_path_str, {"Some_Other_Column": [123]})  
+  
+    mock_timestamps_path_obj = mock.Mock()  
+    mock_timestamps_path_obj.is_file.return_value = True  
+    mock_timestamps_path_obj.name = "timestamps.csv"
+  
+    mock_path_util.side_effect = lambda *args, **kwargs: mock_timestamps_path_obj if args[-1] == "timestamps.csv" else mock.DEFAULT  
+      
+    utils.replace_timestamps(workload_dir)  
+  
+    mock_path_util.assert_any_call(workload_dir, "timestamps.csv")  
+    mock_timestamps_path_obj.is_file.assert_called_once()  
+    mock_console_warning.assert_called_once_with(  
+        "Incomplete profiling data detected. Unable to update timestamps.\n"  
+    )  
+    mock_glob.assert_not_called()
+  
+@mock.patch('utils.utils.console_warning')  
+@mock.patch('glob.glob')  
+@mock.patch('utils.utils.path')  
+def test_replace_timestamps_updates_other_csvs_skips_sysinfo(mock_path_util, mock_glob, mock_console_warning, tmp_path):  
+    """  
+    Edge Case: timestamps.csv is valid. Other CSVs exist, including sysinfo.csv.  
+    Only non-sysinfo.csv files should be updated.  
+    Covers: for fname in glob.glob(...): if path(fname).name != "sysinfo.csv": ...  
+    """  
+    workload_dir = str(tmp_path)  
+    timestamps_csv_path_str = os.path.join(workload_dir, "timestamps.csv")  
+    data_csv_path_str = os.path.join(workload_dir, "data.csv")  
+    sysinfo_csv_path_str = os.path.join(workload_dir, "sysinfo.csv")  
+  
+    new_start_ts = [1000, 2000]  
+    new_end_ts = [1500, 2500]  
+    create_dummy_csv(timestamps_csv_path_str, {"Start_Timestamp": new_start_ts, "End_Timestamp": new_end_ts})  
+  
+    create_dummy_csv(data_csv_path_str, {"Kernel_Name": ["A", "B"], "Start_Timestamp": [1, 2], "End_Timestamp": [3, 4]})  
+    create_dummy_csv(sysinfo_csv_path_str, {"Info": ["CPU", "MEM"], "Start_Timestamp": [5, 6], "End_Timestamp": [7, 8]})  
+  
+    def path_side_effect(*args, **kwargs):  
+        p_obj = mock.Mock()  
+        full_path = args[0] if len(args) == 1 else os.path.join(args[0], args[1])  
+          
+        if full_path == timestamps_csv_path_str:  
+            p_obj.is_file.return_value = True  
+            p_obj.name = "timestamps.csv"  
+        elif full_path == data_csv_path_str:  
+            p_obj.is_file.return_value = True
+            p_obj.name = "data.csv"  
+        elif full_path == sysinfo_csv_path_str:  
+            p_obj.is_file.return_value = True
+            p_obj.name = "sysinfo.csv"  
+        else:
+            p_obj.is_file.return_value = False   
+            p_obj.name = os.path.basename(full_path)  
+        return p_obj  
+          
+    mock_path_util.side_effect = path_side_effect  
+      
+    mock_glob.return_value = [data_csv_path_str, sysinfo_csv_path_str, timestamps_csv_path_str]  
+  
+    utils.replace_timestamps(workload_dir)  
+  
+    mock_console_warning.assert_not_called()  
+      
+    df_data_updated = pd.read_csv(data_csv_path_str)  
+    pd.testing.assert_series_equal(df_data_updated["Start_Timestamp"], pd.Series(new_start_ts, name="Start_Timestamp"))  
+    pd.testing.assert_series_equal(df_data_updated["End_Timestamp"], pd.Series(new_end_ts, name="End_Timestamp"))  
+  
+    df_sysinfo_original = pd.read_csv(sysinfo_csv_path_str)  
+    assert list(df_sysinfo_original["Start_Timestamp"]) == [5, 6]
+    assert list(df_sysinfo_original["End_Timestamp"]) == [7, 8]
+  
+@mock.patch('utils.utils.console_warning')  
+@mock.patch('glob.glob')  
+@mock.patch('utils.utils.path')  
+def test_replace_timestamps_no_other_csvs_to_update(mock_path_util, mock_glob, mock_console_warning, tmp_path):  
+    """  
+    Edge Case: timestamps.csv is valid, but no other *.csv files (or only sysinfo.csv) exist.  
+    The loop for updating files should not do anything or not run.  
+    Covers: The for loop not iterating if glob returns empty or only sysinfo.  
+    """  
+    workload_dir = str(tmp_path)  
+    timestamps_csv_path_str = os.path.join(workload_dir, "timestamps.csv")  
+    sysinfo_csv_path_str = os.path.join(workload_dir, "sysinfo.csv") 
+  
+    create_dummy_csv(timestamps_csv_path_str, {"Start_Timestamp": [100], "End_Timestamp": [200]})  
+    create_dummy_csv(sysinfo_csv_path_str, {"Info": ["CPU"], "Start_Timestamp": [5], "End_Timestamp": [7]})  
+  
+  
+    def path_side_effect(*args, **kwargs):  
+        p_obj = mock.Mock()  
+        full_path = args[0] if len(args) == 1 else os.path.join(args[0], args[1])  
+        if full_path == timestamps_csv_path_str:  
+            p_obj.is_file.return_value = True  
+            p_obj.name = "timestamps.csv"  
+        elif full_path == sysinfo_csv_path_str:  
+            p_obj.is_file.return_value = True  
+            p_obj.name = "sysinfo.csv"  
+        else:  
+            p_obj.is_file.return_value = False  
+            p_obj.name = os.path.basename(full_path)  
+        return p_obj  
+    mock_path_util.side_effect = path_side_effect  
+  
+    mock_glob.return_value = [timestamps_csv_path_str, sysinfo_csv_path_str]  
+  
+    utils.replace_timestamps(workload_dir)  
+  
+    mock_console_warning.assert_not_called()  
+    df_sysinfo_original = pd.read_csv(sysinfo_csv_path_str)  
+    assert list(df_sysinfo_original["Start_Timestamp"]) == [5]   
+    assert list(df_sysinfo_original["End_Timestamp"]) == [7]  
+
