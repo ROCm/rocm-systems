@@ -26,6 +26,9 @@
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
 
+#include <atomic>
+#include <thread>
+
 extern char** environ;
 
 namespace common = ::rocprofiler::common;
@@ -33,7 +36,9 @@ namespace common = ::rocprofiler::common;
 namespace
 {
 std::unique_ptr<rocprofiler::attach::PTraceSession> ptrace_session;
-}
+std::thread                                         ptrace_thread;
+std::atomic<bool>                                   finished_setup(false);
+}  // namespace
 
 ROCPROFILER_EXTERN_C_INIT
 void
@@ -54,9 +59,9 @@ initialize_logging()
 ROCPROFILER_EXTERN_C_INIT
 
 void
-attach(uint32_t pid)
+handle_ptrace_operations(uint32_t pid)
 {
-    initialize_logging();
+    // Setup attachement for rocprofiler
     ROCP_TRACE << "Attachment library called for pid " << pid;
     ptrace_session = std::make_unique<rocprofiler::attach::PTraceSession>(pid);
     ROCP_TRACE << "Attempting attachment to pid " << pid;
@@ -138,11 +143,15 @@ attach(uint32_t pid)
         ROCP_ERROR << "Failed to call attach function in target process " << pid;
         return;
     }
-}
-
-void
-detach()
-{
+    // Allow main thread to continue
+    finished_setup.store(true);
+    if(!ptrace_session->handle_signals())
+    {
+        ROCP_ERROR << "Signal handling loop terminated unexepectedly for pid " << pid;
+        return;
+    }
+    // Detach rocprofiler
+    ROCP_TRACE << "Detaching rocprofiler from pid " << pid;
     if(!ptrace_session->call_function("librocprofiler-register.so", "rocprofiler_register_detach"))
     {
         ROCP_ERROR << "Failed to call detach function in target process";
@@ -151,6 +160,24 @@ detach()
     ptrace_session->stop();
     ptrace_session->detach();
     ptrace_session.reset();
+}
+
+void
+attach(uint32_t pid)
+{
+    initialize_logging();
+    ptrace_thread = std::thread(handle_ptrace_operations, pid);
+    // Wait for ptrace thread to finish setting up
+    while(!finished_setup.load())
+        std::this_thread::yield();
+}
+
+void
+detach()
+{
+    ptrace_session->detach_ptrace_session();
+    ptrace_thread.join();
+    finished_setup.store(false);
 }
 
 ROCPROFILER_EXTERN_C_FINI

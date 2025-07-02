@@ -144,6 +144,7 @@ namespace attach
 PTraceSession::PTraceSession(int _pid)
 : pid(_pid)
 , attached(false)
+, detaching_ptrace_session(false)
 {}
 
 PTraceSession::~PTraceSession()
@@ -646,6 +647,44 @@ PTraceSession::cont()
     PTRACE_CALL(PTRACE_CONT, pid, NULL, NULL);
     ROCP_TRACE << "ptrace resumed pid " << pid;
     return true;
+}
+
+bool
+PTraceSession::handle_signals()
+{
+    while(!detaching_ptrace_session.load())
+    {
+        int status{0};
+        if(waitpid(pid, &status, WNOHANG) == -1)
+        {
+            ROCP_ERROR << "waitpid failed in handle_signal for pid " << pid;
+            return false;
+        }
+        if(status != 0 && WIFEXITED(status))
+        {
+            ROCP_ERROR << "process " << pid << " exited, status=" << WEXITSTATUS(status);
+            return false;
+        }
+        else if(status != 0 && WIFSIGNALED(status))
+        {
+            ROCP_ERROR << "process " << pid << " killed by signal " << WTERMSIG(status);
+            return false;
+        }
+        else if(status != 0 && WIFSTOPPED(status))
+        {
+            auto sig = WSTOPSIG(status);
+            ROCP_TRACE << "process " << pid << "stopped by signal " << sig;
+            PTRACE_CALL(PTRACE_CONT, pid, NULL, sig);
+        }
+        std::this_thread::yield();
+    }
+    return true;
+}
+
+void
+PTraceSession::detach_ptrace_session()
+{
+    detaching_ptrace_session.store(true);
 }
 
 }  // namespace attach
