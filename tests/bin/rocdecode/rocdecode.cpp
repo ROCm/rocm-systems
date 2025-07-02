@@ -40,7 +40,11 @@ test_rocdecode_decoder()
         std::cerr << "Expected ROCDEC_INVALID_PARAMETER\n";
         return 1;
     }
-    rocDecGetErrorName(rocdecode_status);
+    if(rocDecGetErrorName(rocdecode_status) == nullptr)
+    {
+        std::cerr << "Expected error name to not be null\n";
+        return 1;
+    }
     if(rocDecCreateVideoParser(nullptr, nullptr) != ROCDEC_INVALID_PARAMETER)
     {
         std::cerr << "Expected ROCDEC_INVALID_PARAMETER\n";
