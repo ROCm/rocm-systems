@@ -927,7 +927,6 @@ typedef struct cudaTextureDesc hipTextureDesc;
 typedef struct cudaResourceViewDesc hipResourceViewDesc;
 typedef CUDA_TEXTURE_DESC HIP_TEXTURE_DESC;
 typedef CUDA_RESOURCE_VIEW_DESC HIP_RESOURCE_VIEW_DESC;
-typedef CUDA_MEMSET_NODE_PARAMS HIP_MEMSET_NODE_PARAMS;
 // adding code for hipmemSharedConfig
 #define hipSharedMemBankSizeDefault cudaSharedMemBankSizeDefault
 #define hipSharedMemBankSizeFourByte cudaSharedMemBankSizeFourByte
@@ -4697,11 +4696,24 @@ inline static hipError_t hipGraphNodeGetEnabled(hipGraphExec_t hGraphExec, hipGr
     return hipCUDAErrorTohipError(cudaGraphNodeGetEnabled(hGraphExec, hNode, isEnabled));
 }
 
+inline static void hipMemsetParamsToCUDAMemsetNodeParams(CUDA_MEMSET_NODE_PARAMS *cuMemsetParams,
+                                                         const hipMemsetParams *memsetParams)
+{
+    cuMemsetParams->dst = reinterpret_cast<CUdeviceptr>(memsetParams->dst);
+    cuMemsetParams->elementSize = memsetParams->elementSize;
+    cuMemsetParams->height = memsetParams->height;
+    cuMemsetParams->pitch = memsetParams->pitch;
+    cuMemsetParams->value = memsetParams->value;
+    cuMemsetParams->width = memsetParams->width;
+}
+
 inline static hipError_t hipDrvGraphAddMemsetNode(hipGraphNode_t* phGraphNode, hipGraph_t hGraph,
-                                 const hipGraphNode_t* dependencies, size_t numDependencies,
-                                 const HIP_MEMSET_NODE_PARAMS* memsetParams, hipCtx_t ctx) {
+                                const hipGraphNode_t* dependencies, size_t numDependencies,
+                                const hipMemsetParams* memsetParams, hipCtx_t ctx) {
+    CUDA_MEMSET_NODE_PARAMS cuMemsetParams;
+    hipMemsetParamsToCUDAMemsetNodeParams(&cuMemsetParams, memsetParams);
     return hipCUResultTohipError(cuGraphAddMemsetNode(phGraphNode, hGraph, dependencies, numDependencies,
-                                    memsetParams, ctx));
+                                                      &cuMemsetParams, ctx));
 }
 
 inline static hipError_t hipDrvGraphAddMemcpyNode(hipGraphNode_t* phGraphNode, hipGraph_t hGraph,
@@ -4760,11 +4772,13 @@ inline static hipError_t hipDrvGraphExecMemcpyNodeSetParams(hipGraphExec_t hGrap
 }
 
 inline static hipError_t hipDrvGraphExecMemsetNodeSetParams(
-    hipGraphExec_t hGraphExec, hipGraphNode_t hNode, const HIP_MEMSET_NODE_PARAMS* memsetParams,
+    hipGraphExec_t hGraphExec, hipGraphNode_t hNode, const hipMemsetParams* memsetParams,
     hipCtx_t ctx) {
-  return hipCUResultTohipError(
-      cuGraphExecMemsetNodeSetParams(hGraphExec, hNode, memsetParams, ctx));
-}
+    CUDA_MEMSET_NODE_PARAMS cuMemsetParams;
+    hipMemsetParamsToCUDAMemsetNodeParams(&cuMemsetParams, memsetParams);
+    return hipCUResultTohipError(
+        cuGraphExecMemsetNodeSetParams(hGraphExec, hNode, &cuMemsetParams, ctx));
+  }
 #endif
 
 #if CUDA_VERSION >= CUDA_11040
