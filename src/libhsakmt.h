@@ -65,6 +65,8 @@ struct hsakmtRuntime {
     local_heap_space_size_(0),
     system_heap_space_start_(0),
     system_heap_space_size_(0),
+    handle_aperture_start_(0),
+    handle_aperture_size_(0),
     default_node(1) {}
 
   void HeapInit();
@@ -78,6 +80,10 @@ struct hsakmtRuntime {
   uint64_t SystemHeapSize() { return system_heap_space_size_; }
   bool FreeSystemHeapSpace();
   void InitSystemHeapMgr();
+  bool InitHandleApertureSpace();
+  void InitHandleApertureMgr();
+  ErrorCode HandleApertureAlloc(gpusize size, gpusize *out_gpu_virt_addr);
+  void HandleApertureFree(gpusize gpu_addr);
 
   pthread_mutex_t hsakmt_mutex;
   const char *dxg_device_name = "/dev/dxg";
@@ -110,6 +116,10 @@ struct hsakmtRuntime {
 
   /* manage the reserved system heap space which shared by CPU and GPUs */
   std::unique_ptr<wsl::thunk::VaMgr> system_heap_mgr_;
+
+  uint64_t handle_aperture_start_;
+  uint64_t handle_aperture_size_;
+  std::unique_ptr<wsl::thunk::VaMgr> handle_aperture_mgr_;
 };
 
 extern hsakmtRuntime *dxg_runtime;

@@ -67,8 +67,6 @@ WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_i
   CreateDevice();
   SetPowerOptimization(false);
   CreatePagingQueue();
-  InitHandleApertureSpace();
-  InitHandleApertureMgr();
   InitCmdbufInfo();
 }
 
@@ -273,45 +271,6 @@ bool WDDMDevice::DecommitSystemHeapSpaceIPC(void* addr, int64_t size, int &memfd
   return true;
 }
 
-void WDDMDevice::InitHandleApertureMgr() {
-  handle_aperture_mgr_ = std::make_unique<VaMgr>(handle_aperture_start_,
-                                                 handle_aperture_size_,
-                                                 DEFAULT_GPU_PAGE_SIZE);
-}
-
-bool WDDMDevice::InitHandleApertureSpace(void) {
-  handle_aperture_start_ = START_NON_CANONICAL_ADDR;
-  handle_aperture_size_ = 1ULL << 47;
-
-  while (handle_aperture_start_ < END_NON_CANONICAL_ADDR - 1) {
-    if (device_info_.private_aperture_base &&
-      IS_OVERLAPPING(device_info_.private_aperture_base,
-                     device_info_.private_aperture_size,
-                     handle_aperture_start_,
-                     handle_aperture_size_)) {
-      handle_aperture_start_ += (1ULL << 47);
-      continue;
-    }
-
-    if (device_info_.shared_aperture_base &&
-      IS_OVERLAPPING(device_info_.shared_aperture_base,
-                     device_info_.shared_aperture_size,
-                     handle_aperture_start_,
-                     handle_aperture_size_)) {
-      handle_aperture_start_ += (1ULL << 47);
-      continue;
-    }
-
-    pr_debug("handle aperture start %lx, size %lx\n", handle_aperture_start_, handle_aperture_size_);
-    return true;
-  }
-
-  handle_aperture_start_ = 0;
-  pr_err("fail\n");
-
-  return false;
-}
-
 void WDDMDevice::SetPowerOptimization(bool restore) {
   void *priv_data;
   int priv_size;
@@ -414,22 +373,6 @@ ErrorCode WDDMDevice::FreeIPCSysMem(gpusize gpu_addr, gpusize size, int &memfd) 
   return code;
 }
 
-ErrorCode WDDMDevice::HandleApertureAlloc(gpusize size, gpusize *out_gpu_virt_addr) {
-  uint64_t align = DEFAULT_GPU_PAGE_SIZE;
-
-  if (size >= GPU_HUGE_PAGE_SIZE)
-    align = GPU_HUGE_PAGE_SIZE;
-
-  *out_gpu_virt_addr = handle_aperture_mgr_->Alloc(size, align);
-  if (*out_gpu_virt_addr == 0)
-    return ErrorCode::OutOfHandleApeMemory;
-
-  return ErrorCode::Success;
-}
-
-void WDDMDevice::HandleApertureFree(gpusize gpu_addr) {
-  handle_aperture_mgr_->Free(gpu_addr);
-}
 
 void WDDMDevice::UpdatePageFence(uint64_t fence_value) {
   uint64_t current = page_fence_value_.load();

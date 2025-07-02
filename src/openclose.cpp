@@ -42,8 +42,10 @@ hsakmtRuntime *dxg_runtime = new hsakmtRuntime();
 void hsakmtRuntime::HeapInit() {
     ReserveLocalHeapSpace();
     ReserveSystemHeapSpace();
+    InitHandleApertureSpace();
     InitLocalHeapMgr();
     InitSystemHeapMgr();
+    InitHandleApertureMgr();
 }
 
 void hsakmtRuntime::HeapFini() {
@@ -202,6 +204,72 @@ void hsakmtRuntime::InitSystemHeapMgr() {
   system_heap_mgr_ = std::make_unique<wsl::thunk::VaMgr>(system_heap_space_start_,
                                           system_heap_space_size_,
                                           DEFAULT_GPU_PAGE_SIZE);
+}
+
+
+bool hsakmtRuntime::InitHandleApertureSpace() {
+	wsl::thunk::WDDMDevice* device;
+	size_t num_adapters = get_num_wddmdev();
+    handle_aperture_start_ = START_NON_CANONICAL_ADDR;
+    handle_aperture_size_ = 1ULL << 47;
+
+    while (handle_aperture_start_ < END_NON_CANONICAL_ADDR - 1) {
+		for (uint32_t j = 0; j < num_adapters;) {
+	        device = get_wddmdev(j+1);
+	        if (device == nullptr)
+	            return -1;
+
+            if (device->PrivateApertureBase() &&
+                    IS_OVERLAPPING(device->PrivateApertureBase(),
+                        device->PrivateApertureSize(),
+                        handle_aperture_start_,
+                        handle_aperture_size_)) {
+                handle_aperture_start_ += (1ULL << 47);
+                continue;
+            }
+
+            if (device->SharedApertureBase() &&
+                    IS_OVERLAPPING(device->SharedApertureBase(),
+                        device->SharedApertureSize(),
+                        handle_aperture_start_,
+                        handle_aperture_size_)) {
+                handle_aperture_start_ += (1ULL << 47);
+                continue;
+            }
+
+            j++;
+        }
+        pr_debug("handle aperture start %lx, size %lx\n", handle_aperture_start_, handle_aperture_size_);
+        return true;
+    }
+
+    handle_aperture_start_ = 0;
+    pr_err("fail\n");
+
+    return false;
+}
+
+void hsakmtRuntime::InitHandleApertureMgr() {
+  handle_aperture_mgr_ = std::make_unique<wsl::thunk::VaMgr>(handle_aperture_start_,
+                                                 handle_aperture_size_,
+                                                 DEFAULT_GPU_PAGE_SIZE);
+}
+
+ErrorCode hsakmtRuntime::HandleApertureAlloc(gpusize size, gpusize *out_gpu_virt_addr) {
+    uint64_t align = DEFAULT_GPU_PAGE_SIZE;
+
+    if (size >= GPU_HUGE_PAGE_SIZE)
+        align = GPU_HUGE_PAGE_SIZE;
+
+    *out_gpu_virt_addr = handle_aperture_mgr_->Alloc(size, align);
+    if (*out_gpu_virt_addr == 0)
+        return ErrorCode::OutOfHandleApeMemory;
+
+    return ErrorCode::Success;
+}
+
+void hsakmtRuntime::HandleApertureFree(gpusize gpu_addr) {
+    handle_aperture_mgr_->Free(gpu_addr);
 }
 
 /* is_forked_child detects when the process has forked since the last

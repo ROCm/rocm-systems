@@ -206,8 +206,6 @@ public:
                                   gpusize size);
 
   ErrorCode CreateGpuMemory(const GpuMemoryCreateInfo &create_info, GpuMemory **gpu_mem, gpusize *gpu_va = nullptr);
-  ErrorCode HandleApertureAlloc(gpusize size, gpusize *out_gpu_virt_addr);
-  void HandleApertureFree(gpusize gpu_addr);
 
 private:
   bool ParseDeviceInfo(void);
@@ -223,12 +221,10 @@ private:
 
   void SetPowerOptimization(bool restore);
   void InitCmdbufInfo(void);
-  bool InitHandleApertureSpace(void);
   bool CommitSystemHeapSpace(void* addr, int64_t size, bool lock=false);
   bool DecommitSystemHeapSpace(void* addr, int64_t size);
   bool CommitSystemHeapSpaceIPC(void* addr, int64_t size, int &fd, bool lock=false);
   bool DecommitSystemHeapSpaceIPC(void* addr, int64_t size, int &memfd);
-  void InitHandleApertureMgr();
 
   D3DKMT_HANDLE adapter_;
   LUID adapter_luid_;
@@ -239,8 +235,6 @@ private:
   uint64_t *page_fence_addr_;
   std::atomic<uint64_t> page_fence_value_;
 
-  uint64_t handle_aperture_start_;
-  uint64_t handle_aperture_size_;
   uint32_t cmdbuf_size_;
   uint32_t cmdbuf_aql_frame_size_;
   static const uint32_t cmdbuf_aql_frame_num_;
@@ -248,7 +242,6 @@ private:
   // device info
   thunk_proxy::DeviceInfo device_info_;
 
-  std::unique_ptr<VaMgr> handle_aperture_mgr_;
   //CmdUtil cmd_util;
 };
 

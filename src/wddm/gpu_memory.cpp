@@ -49,7 +49,7 @@ GpuMemory::~GpuMemory() {
   FreeGpuVirtualAddress(GpuAddress(), Size());
   FreePhysicalMemory();
   if (desc_.handle_ape_addr > 0)
-    device_->HandleApertureFree(desc_.handle_ape_addr);
+    dxg_runtime->HandleApertureFree(desc_.handle_ape_addr);
 }
 
 ErrorCode GpuMemory::Init(const GpuMemoryCreateInfo &create_info) {
@@ -92,7 +92,7 @@ ErrorCode GpuMemory::Init(const GpuMemoryCreateInfo &create_info) {
   if (IsPhysicalOnly()) {
     code = CreatePhysicalMemory();
     if (code == ErrorCode::Success)
-      code = device_->HandleApertureAlloc(desc_.size, &desc_.handle_ape_addr);
+      code = dxg_runtime->HandleApertureAlloc(desc_.size, &desc_.handle_ape_addr);
     return code;
   }
 
@@ -576,7 +576,7 @@ ErrorCode GpuMemory::ImportPhysicalHandle(const GpuMemoryCreateInfo &create_info
       return ret;
     } else {
       desc_.flags.is_imported_vram_vmem = 1;
-      return device_->HandleApertureAlloc(desc_.size, &desc_.handle_ape_addr);
+      return dxg_runtime->HandleApertureAlloc(desc_.size, &desc_.handle_ape_addr);
     }
   }
 }
