@@ -39,6 +39,7 @@ import time
 from collections import OrderedDict
 from itertools import product
 from pathlib import Path as path
+from typing import Optional
 
 import pandas as pd
 import yaml
@@ -139,7 +140,7 @@ def add_counter_extra_config_input_yaml(
 
 def extract_counter_info_extra_config_input_yaml(
     data: dict, counter_name: str
-) -> dict | None:
+) -> Optional[dict]:
     """
     Extract the full counter dictionary from 'data' for the given counter_name.
 
@@ -148,7 +149,7 @@ def extract_counter_info_extra_config_input_yaml(
         counter_name (str): The counter to find.
 
     Returns:
-        dict | None: The full counter dict if found, else None.
+        Optional[dict]: The full counter dict if found, else None.
     """
     counters = data.get("rocprofiler-sdk", {}).get("counters", [])
     for counter in counters:
