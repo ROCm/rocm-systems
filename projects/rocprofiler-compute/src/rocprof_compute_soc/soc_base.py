@@ -28,6 +28,7 @@ import math
 import os
 import re
 import shutil
+import sys
 import threading
 from abc import abstractmethod
 from pathlib import Path
@@ -505,65 +506,25 @@ class OmniSoC_Base:
                 rocprof_counters.update(counters)
 
         elif str(rocprof_cmd) == "rocprofiler-sdk":
-            MAX_STR = 256
-
-            # rocprofiler sdk list avail library
-            libname = str(
-                Path(self.get_args().rocprofiler_sdk_library_path).parent.parent.joinpath(
-                    "libexec/rocprofiler-sdk/librocprofv3-list-avail.so"
+            sys.path.append(
+                str(
+                    Path(self.get_args().rocprofiler_sdk_library_path).parent.parent
+                    / "bin"
                 )
             )
-            c_lib = ctypes.CDLL(libname)
-            if c_lib is None:
-                console_error(f"Error opening {libname}")
-
-            # Intialize the library and set data types for arguments and variables
-            c_lib.avail_tool_init()
-            c_lib.get_number_of_agents.restype = ctypes.c_size_t
-            c_lib.get_agent_node_id.restype = ctypes.c_ulong
-            c_lib.get_agent_node_id.argtypes = [ctypes.c_int]
-            c_lib.get_number_of_counters.restype = ctypes.c_ulong
-            c_lib.get_number_of_counters.argtypes = [ctypes.c_int]
-            c_lib.get_counters_info.argtypes = [
-                ctypes.c_ulong,
-                ctypes.c_int,
-                ctypes.POINTER(ctypes.c_ulong),
-                ctypes.POINTER(ctypes.POINTER(ctypes.c_char * MAX_STR)),
-                ctypes.POINTER(ctypes.POINTER(ctypes.c_char * MAX_STR)),
-                ctypes.POINTER(ctypes.c_int),
-            ]
-            c_lib.get_counter_block.argtypes = [
-                ctypes.c_ulong,
-                ctypes.c_ulong,
-                ctypes.POINTER(ctypes.POINTER(ctypes.c_char * MAX_STR)),
-            ]
-
-            # Iterate through each counter index and get its information
-            for idx in range(c_lib.get_number_of_agents()):
-                node_id = c_lib.get_agent_node_id(idx)
-                for counter_idx in range(c_lib.get_number_of_counters(node_id)):
-                    # Counter information will be stored in these variables
-                    name_args = ctypes.POINTER(ctypes.c_char * MAX_STR)()
-                    description_args = ctypes.POINTER(ctypes.c_char * MAX_STR)()
-                    is_derived_args = ctypes.c_int()
-                    counter_id_args = ctypes.c_ulong()
-                    block_args = ctypes.POINTER(ctypes.c_char * MAX_STR)()
-                    # Get the counter information
-                    c_lib.get_counters_info(
-                        node_id,
-                        counter_idx,
-                        ctypes.byref(counter_id_args),
-                        name_args,
-                        description_args,
-                        ctypes.byref(is_derived_args),
-                    )
-                    c_lib.get_counter_block(node_id, counter_idx, block_args)
-                    block = ctypes.cast(block_args, ctypes.c_char_p).value.decode("utf-8")
-                    if not is_derived_args.value and block:
-                        # Only consider raw hardware counters from IP blocks
-                        rocprof_counters.add(
-                            ctypes.cast(name_args, ctypes.c_char_p).value.decode("utf-8")
-                        )
+            from rocprofv3_avail_module import avail
+            avail.loadLibrary.libname = str(
+                Path(self.get_args().rocprofiler_sdk_library_path).parent.parent
+                / "libexec"
+                / "rocprofiler-sdk"
+                / "librocprofv3-list-avail.so"
+            )
+            counters = avail.get_counters()
+            rocprof_counters = {
+                counter.name
+                for counter in counters[list(counters.keys())[0]]
+                if hasattr(counter, "block") or hasattr(counter, "expression")
+            }
             # Custom counter support for mi100 for rocprofiler-sdk
             if self._mspec.gpu_model.lower() == "mi100":
                 counter_defs_path = (
